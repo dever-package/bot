@@ -1,0 +1,117 @@
+{
+  "page": {
+    "parent": "bot/energon/power/list",
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-select",
+        "value": "form.cate_id",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "能力分类不能为空。"
+          }
+        ]
+      },
+      {
+        "type": "form-input",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "能力名称不能为空。"
+          }
+        ]
+      },
+      {
+        "type": "form-input",
+        "value": "form.key",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "能力标识不能为空。"
+          },
+          {
+            "type": "model",
+            "except": "$form.id",
+            "message": "该能力标识已存在。"
+          }
+        ]
+      },
+      {
+        "type": "form-radio",
+        "value": "form.kind",
+        "mode": "form"
+      },
+      {
+        "type": "form-radio",
+        "value": "form.source_rule",
+        "mode": "form",
+        "info": "调用第一个可用来源：只展示第一个来源的参数，调用失败后继续尝试下一个来源；可以选择来源：先选来源，再按所选来源展示参数。"
+      },
+      {
+        "type": "form-array",
+        "value": "form.targets",
+        "mode": "form",
+        "info": "定义这个能力优先走哪些来源服务，调用时按排序从小到大选择开启目标。",
+        "meta": {
+          "pageRoute": "/bot/energon/power_target/update",
+          "addText": "添加能力来源",
+          "drag": "sort"
+        }
+      },
+      
+      {
+        "type": "form-array",
+        "value": "form.params",
+        "mode": "form",
+        "info": "定义这个能力需要哪些内部参数，参数按排序从小到大展示。",
+        "meta": {
+          "pageRoute": "/bot/energon/power_param/update",
+          "addText": "添加能力参数",
+          "drag": "sort"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "cate_id": 1,
+      "kind": "text",
+      "source_rule": 1,
+      "params": [],
+      "targets": []
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.energon.PowerHook.BeforeSavePower"
+      }
+    }
+  }
+}

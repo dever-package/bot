@@ -1,0 +1,295 @@
+{
+  "page": {
+    "parent": "bot/energon/service/list",
+    "type": 2,
+    "sort": 11
+  },
+  "layout": {
+    "type": "container",
+    "className": "rounded-md border bg-background",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4 border-b px-4 py-3",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "table-row": {
+        "type": "container",
+        "className": "overflow-hidden"
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "添加服务参数",
+        "meta": {
+          "variant": "outline",
+          "size": "sm"
+        },
+        "action": {
+          "click": [
+            {
+              "type": "state",
+              "key": "serviceParamIndex",
+              "value": -1
+            },
+            {
+              "type": "state",
+              "key": "serviceParamForm",
+              "value": {
+                "param_rule": 1,
+                "mapping": "",
+                "status": 1,
+                "sort": 100
+              }
+            },
+            {
+              "type": "modal",
+              "key": "dialog.serviceParam",
+              "value": true
+            }
+          ]
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "parent.data.form.params",
+        "meta": {
+          "rowKey": "id",
+          "columns": [
+            {
+              "name": "内部参数",
+              "value": "param_id",
+              "type": "show-base"
+            },
+            {
+              "name": "映射规则",
+              "value": "param_rule",
+              "type": "show-tag"
+            },
+            {
+              "name": "字段标识",
+              "value": "key",
+              "type": "show-base"
+            },
+            {
+              "name": "字段名",
+              "value": "name",
+              "type": "show-base"
+            },
+            {
+              "name": "启用",
+              "value": "status",
+              "type": "form-switch",
+              "action": {
+                "change": {
+                  "type": "array",
+                  "key": "parent.data.form.params",
+                  "op": "patch",
+                  "index": "$rowIndex",
+                  "value": {
+                    "status": "$value"
+                  }
+                }
+              },
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "name": "排序",
+              "value": "sort",
+              "type": "show-base",
+              "editor": "form-number",
+              "trigger": "doubleClick",
+              "action": {
+                "change": {
+                  "type": "array",
+                  "key": "parent.data.form.params",
+                  "op": "patch",
+                  "index": "$rowIndex",
+                  "value": {
+                    "sort": "$value"
+                  }
+                }
+              },
+              "meta": {
+                "controlClassName": "w-24"
+              }
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑服务参数",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "state",
+                          "key": "serviceParamIndex",
+                          "value": "$rowIndex"
+                        },
+                        {
+                          "type": "state",
+                          "key": "serviceParamForm",
+                          "value": "$row"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.serviceParam",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "trash-2",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "删除服务参数",
+                    "className": "text-destructive hover:text-destructive",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "state",
+                          "key": "deleteParamIndex",
+                          "value": "$rowIndex"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.deleteParam",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.serviceParam",
+          "pageRoute": "/bot/energon/service_param/update",
+          "title": "服务参数",
+          "description": "配置内部参数与来源服务参数的映射关系。",
+          "size": "lg",
+          "footer": {
+            "confirm": true,
+            "confirmText": "确定"
+          },
+          "pageDataPatches": {
+            "form": "state.serviceParamForm"
+          }
+        },
+        "action": {
+          "submit": {
+            "type": "array",
+            "key": "parent.data.form.params",
+            "op": "upsert",
+            "index": "state.serviceParamIndex",
+            "value": "$modalForm"
+          }
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "删除服务参数",
+        "info": "确认删除这一条服务参数吗？删除后当前行内容将被移除。",
+        "meta": {
+          "stateKey": "dialog.deleteParam",
+          "successMessage": "服务参数已删除"
+        },
+        "action": {
+          "confirm": {
+            "type": "array",
+            "key": "parent.data.form.params",
+            "op": "remove",
+            "index": "state.deleteParamIndex"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "description": "定义当前服务需要的参数映射。OpenAI协议已做自动映射，无需定义参数映射"
+    },
+    "option": {
+      "param": "{{bot.energon.ParamOptionService.LoadParamOptions}}",
+      "param_rule": [
+        {
+          "id": 1,
+          "value": "直接映射"
+        },
+        {
+          "id": 2,
+          "value": "选项映射"
+        },
+        {
+          "id": 3,
+          "value": "附件映射"
+        },
+        {
+          "id": 4,
+          "value": "组合映射"
+        },
+        {
+          "id": 5,
+          "value": "固定值映射"
+        }
+      ],
+      "status": [
+        {
+          "id": 1,
+          "value": "开启"
+        },
+        {
+          "id": 2,
+          "value": "停用"
+        }
+      ]
+    }
+  },
+  "state": {
+    "serviceParamIndex": -1,
+    "deleteParamIndex": -1,
+    "serviceParamForm": {
+      "param_rule": 1,
+      "mapping": "",
+      "status": 1,
+      "sort": 100
+    },
+    "dialog": {
+      "serviceParam": false,
+      "deleteParam": false
+    }
+  },
+  "action": {}
+}

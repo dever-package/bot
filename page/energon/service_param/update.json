@@ -1,0 +1,86 @@
+{
+  "page": {
+    "parent": "bot/energon/service_param/list",
+    "type": 2,
+    "sort": 11
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-param-picker",
+        "value": "form.param_id",
+        "mode": "form",
+        "info": "固定值映射可不选内部参数；其他映射规则必须选择内部参数。",
+        "meta": {
+          "controlClassName": "min-w-[22rem]"
+        }
+      },
+      {
+        "type": "form-radio",
+        "value": "form.param_rule",
+        "mode": "form",
+        "info": "直接映射：把内部参数值直接写入字段标识；选项映射：把内部参数选项转换成来源需要的字段值；附件映射：从上传文件里按序号取文件地址；组合映射：用多个参数选项组合生成一个字段值；固定值映射：不读取内部参数，直接写后台填写的固定常量。",
+        "meta": {
+          "controlClassName": "min-w-[8rem]"
+        }
+      },
+      {
+        "type": "form-service-param-mapping",
+        "name": "字段值",
+        "value": "form.mapping",
+        "mode": "form",
+        "meta": {
+          "controlClassName": "min-w-[16rem]"
+        }
+      },
+      {
+        "type": "form-input",
+        "value": "form.key",
+        "mode": "form",
+        "info": "不填则使用内部参数的标识。支持对象/数组路径，例如 content[1].image_url.url。模型或者工作流里需要自定义字段标识时再填写；ComfyUI 工作流需要加上节点ID，比如 10.text，就是映射为节点ID为 10 的 text 字段。",
+        "meta": {
+          "controlClassName": "min-w-[10rem]"
+        }
+      },
+      {
+        "type": "form-input",
+        "name": "字段名",
+        "value": "form.name",
+        "mode": "form",
+        "placeholder": "例如：超级提示词",
+        "info": "不填则直接使用参数名；填写会在展示时替代参数名，不影响字段标识和实际请求字段。",
+        "meta": {
+          "controlClassName": "min-w-[10rem]"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "param_rule": 1,
+      "mapping": ""
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}

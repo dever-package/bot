@@ -1,0 +1,61 @@
+{
+  "page": {
+    "parent": "bot/energon/power/list",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-service-picker",
+        "value": "form.service_id",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "来源服务不能为空。"
+          }
+        ],
+        "meta": {
+          "controlClassName": "min-w-[22rem]"
+        }
+      },
+      {
+        "type": "form-switch",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "status": 1
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}

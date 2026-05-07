@@ -1,0 +1,46 @@
+{
+  "page": {
+    "parent": "bot/energon/service_endpoint/list",
+    "type": 2,
+    "sort": 12
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-param-picker",
+        "name": "参数",
+        "value": "form.param_id",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "关联参数不能为空。"
+          }
+        ],
+        "meta": {
+          "controlClassName": "min-w-[22rem]"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {}
+  },
+  "state": {},
+  "action": {}
+}

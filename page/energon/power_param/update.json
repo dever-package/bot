@@ -1,0 +1,75 @@
+{
+  "page": {
+    "parent": "bot/energon/power/list",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-param-picker",
+        "value": "form.param_id",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "内部参数不能为空。"
+          }
+        ],
+        "meta": {
+          "controlClassName": "min-w-[22rem]"
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "展示",
+        "value": "form.show",
+        "mode": "form",
+        "info": "开启：不管当前选择哪个来源，都展示这个能力参数；关闭：只有当前来源服务配置了这个参数，才展示。",
+        "meta": {
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "必填",
+        "value": "form.status",
+        "mode": "form",
+        "info": "开启：测试能力时必须填写或选择；关闭：作为选填参数。",
+        "meta": {
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "show": 1,
+      "status": 1
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}

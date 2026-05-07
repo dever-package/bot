@@ -1,0 +1,272 @@
+{
+  "page": {
+    "parent": "bot/energon/service/list",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "className": "rounded-md border bg-background",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4 border-b px-4 py-3",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "table-row": {
+        "type": "container",
+        "className": "overflow-hidden"
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "添加服务接口",
+        "meta": {
+          "variant": "outline",
+          "size": "sm"
+        },
+        "action": {
+          "click": [
+            {
+              "type": "state",
+              "key": "serviceEndpointIndex",
+              "value": -1
+            },
+            {
+              "type": "state",
+              "key": "serviceEndpointForm",
+              "value": {
+                "param_mode": "all",
+                "param_ids": [],
+                "status": 1,
+                "sort": 100
+              }
+            },
+            {
+              "type": "modal",
+              "key": "dialog.serviceEndpoint",
+              "value": true
+            }
+          ]
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "parent.data.form.endpoints",
+        "meta": {
+          "rowKey": "id",
+          "columns": [
+            {
+              "name": "接口标识",
+              "value": "api",
+              "type": "show-base"
+            },
+            {
+              "name": "参数要求",
+              "value": "param_mode",
+              "type": "show-tag"
+            },
+            {
+              "name": "启用",
+              "value": "status",
+              "type": "form-switch",
+              "action": {
+                "change": {
+                  "type": "array",
+                  "key": "parent.data.form.endpoints",
+                  "op": "patch",
+                  "index": "$rowIndex",
+                  "value": {
+                    "status": "$value"
+                  }
+                }
+              },
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "name": "排序",
+              "value": "sort",
+              "type": "show-base",
+              "editor": "form-number",
+              "trigger": "doubleClick",
+              "action": {
+                "change": {
+                  "type": "array",
+                  "key": "parent.data.form.endpoints",
+                  "op": "patch",
+                  "index": "$rowIndex",
+                  "value": {
+                    "sort": "$value"
+                  }
+                }
+              },
+              "meta": {
+                "controlClassName": "w-24"
+              }
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑服务接口",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "state",
+                          "key": "serviceEndpointIndex",
+                          "value": "$rowIndex"
+                        },
+                        {
+                          "type": "state",
+                          "key": "serviceEndpointForm",
+                          "value": "$row"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.serviceEndpoint",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "trash-2",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "删除服务接口",
+                    "className": "text-destructive hover:text-destructive",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "state",
+                          "key": "deleteEndpointIndex",
+                          "value": "$rowIndex"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.deleteEndpoint",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.serviceEndpoint",
+          "pageRoute": "/bot/energon/service_endpoint/update",
+          "title": "服务接口",
+          "description": "配置当前服务内部可选择的模型名、工作流 ID 或接口标识。关联参数为空时作为默认接口。",
+          "size": "lg",
+          "footer": {
+            "confirm": true,
+            "confirmText": "确定"
+          },
+          "pageDataPatches": {
+            "form": "state.serviceEndpointForm"
+          }
+        },
+        "action": {
+          "submit": {
+            "type": "array",
+            "key": "parent.data.form.endpoints",
+            "op": "upsert",
+            "index": "state.serviceEndpointIndex",
+            "value": "$modalForm"
+          }
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "删除服务接口",
+        "info": "确认删除这一条服务接口吗？删除后当前行内容将被移除。",
+        "meta": {
+          "stateKey": "dialog.deleteEndpoint",
+          "successMessage": "服务接口已删除"
+        },
+        "action": {
+          "confirm": {
+            "type": "array",
+            "key": "parent.data.form.endpoints",
+            "op": "remove",
+            "index": "state.deleteEndpointIndex"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "description": "定义同一个来源服务下不同参数场景对应的接口地址。"
+    },
+    "option": {
+      "param_mode": [
+        {
+          "id": "all",
+          "value": "全部参数满足"
+        },
+        {
+          "id": "any",
+          "value": "任一参数满足"
+        }
+      ],
+      "status": [
+        {
+          "id": 1,
+          "value": "开启"
+        },
+        {
+          "id": 2,
+          "value": "停用"
+        }
+      ]
+    }
+  },
+  "state": {
+    "serviceEndpointIndex": -1,
+    "deleteEndpointIndex": -1,
+    "serviceEndpointForm": {
+      "param_mode": "all",
+      "param_ids": [],
+      "status": 1,
+      "sort": 100
+    },
+    "dialog": {
+      "serviceEndpoint": false,
+      "deleteEndpoint": false
+    }
+  },
+  "action": {}
+}

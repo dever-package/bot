@@ -1,0 +1,314 @@
+{
+  "page": {
+    "parent": "bot/energon/log/list",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-col gap-4 p-0",
+        "children": {
+          "basic-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "target-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "attempt-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "param-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "channel-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "result-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "basic-card": [
+      {
+        "type": "show-rich",
+        "value": "page.basicTitleHtml"
+      },
+      {
+        "type": "show-base",
+        "value": "form.request_id",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.mode",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.protocol",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.latency",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-date",
+        "value": "form.created_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "format": "datetime-second"
+        }
+      }
+    ],
+    "target-card": [
+      {
+        "type": "show-rich",
+        "value": "page.targetTitleHtml"
+      },
+      {
+        "type": "show-base",
+        "value": "form.power_name",
+        "name": "能力",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.power_name}（ID：{form.power_id}）"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.power_key",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.provider_name",
+        "name": "来源",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.provider_name}（ID：{form.provider_id}）"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.service_name",
+        "name": "能力来源",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.service_name}（ID：{form.power_target_id}）"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.account_name",
+        "name": "账号",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.account_name}（ID：{form.account_id}）"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.service_api",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      }
+    ],
+    "attempt-card": [
+      {
+        "type": "show-rich",
+        "value": "page.attemptTitleHtml"
+      },
+      {
+        "type": "show-table",
+        "value": "attempts",
+        "meta": {
+          "rowKey": "id",
+          "columns": [
+            {
+              "name": "顺序",
+              "value": "attempt_no",
+              "type": "show-base"
+            },
+            {
+              "name": "来源",
+              "value": "provider_name",
+              "type": "show-base"
+            },
+            {
+              "name": "能力来源",
+              "value": "service_name",
+              "type": "show-base"
+            },
+            {
+              "name": "账号",
+              "value": "account_name",
+              "type": "show-base"
+            },
+            {
+              "value": "status",
+              "type": "show-tag"
+            },
+            {
+              "value": "latency",
+              "type": "show-base"
+            },
+            {
+              "name": "错误详情",
+              "type": "show-button",
+              "meta": {
+                "variant": "outline",
+                "size": "xs",
+                "label": "查看详情",
+                "description": "查看本次尝试的错误详情"
+              },
+              "action": {
+                "click": [
+                  {
+                    "type": "data",
+                    "key": "actionTarget.attemptError",
+                    "value": "$row.error_detail"
+                  },
+                  {
+                    "type": "modal",
+                    "key": "dialog.attemptError",
+                    "value": true
+                  }
+                ]
+              }
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            }
+          ]
+        }
+      }
+    ],
+    "param-card": [
+      {
+        "type": "show-rich",
+        "value": "page.paramTitleHtml"
+      },
+      {
+        "type": "show-base",
+        "value": "requestParams",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "channel-card": [
+      {
+        "type": "show-rich",
+        "value": "page.channelTitleHtml"
+      },
+      {
+        "type": "show-base",
+        "value": "channelRequest",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "result-card": [
+      {
+        "type": "show-rich",
+        "value": "page.resultTitleHtml"
+      },
+      {
+        "type": "show-base",
+        "value": "form.result",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.attemptError",
+          "title": "错误详情",
+          "size": "lg",
+          "formSection": "attempt-error-content",
+          "bodyClassName": "max-h-[55vh] overflow-y-auto px-6 py-2",
+          "footer": {
+            "close": true,
+            "confirm": false
+          }
+        }
+      }
+    ],
+    "attempt-error-content": [
+      {
+        "type": "show-base",
+        "value": "actionTarget.attemptError",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "basicTitleHtml": "<div class='mb-4'><h3 class='text-base font-semibold text-foreground'>调用信息</h3><p class='mt-1 text-sm text-muted-foreground'>展示本次请求的协议、状态与耗时。</p></div>",
+      "targetTitleHtml": "<div class='mb-4'><h3 class='text-base font-semibold text-foreground'>能力与来源</h3><p class='mt-1 text-sm text-muted-foreground'>展示本次调用命中的能力、来源、能力来源与账号。</p></div>",
+      "attemptTitleHtml": "<div class='mb-4'><h3 class='text-base font-semibold text-foreground'>调用尝试</h3><p class='mt-1 text-sm text-muted-foreground'>同一个 RequestID 下按实际调用顺序展示所有能力来源，前一个失败后才会尝试后一个。</p></div>",
+      "paramTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>本次能力请求参数</h3><p class='mt-1 text-sm text-muted-foreground'>这里记录调用 Energon 时传入的 set、input、history、options。</p></div>",
+      "channelTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>渠道请求参数</h3><p class='mt-1 text-sm text-muted-foreground'>这里记录转换后实际发给来源渠道的 url、method、headers、body。</p></div>",
+      "resultTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>响应数据</h3><p class='mt-1 text-sm text-muted-foreground'>成功时展示响应，失败时展示失败环节和错误信息。</p></div>"
+    },
+    "attempts": "{{bot.energon.LogViewService.LoadAttempts}}",
+    "requestParams": "{{bot.energon.LogViewService.LoadRequestParams}}",
+    "channelRequest": "{{bot.energon.LogViewService.LoadChannelRequest}}",
+    "form": {},
+    "actionTarget": {
+      "attemptError": ""
+    }
+  },
+  "state": {
+    "dialog": {
+      "attemptError": false
+    }
+  },
+  "action": {}
+}

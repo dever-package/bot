@@ -1,0 +1,115 @@
+{
+  "page": {
+    "parent": "bot/energon/service/list",
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full",
+            "children": {
+              "service-endpoint-page": {
+                "type": "container",
+                "path": "/bot/energon/service_endpoint/list",
+                "className": "mt-5"
+              },
+              "service-param-page": {
+                "type": "container",
+                "path": "/bot/energon/service_param/list",
+                "className": "mt-5"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-select",
+        "value": "form.provider_id",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "来源不能为空。"
+          }
+        ],
+        "meta": {
+          "controlClassName": "max-w-[260px]"
+        }
+      },
+      {
+        "type": "form-input",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "服务名称不能为空。"
+          }
+        ]
+      },
+      {
+        "type": "form-radio",
+        "value": "form.type",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "服务类型不能为空。"
+          }
+        ],
+        "meta": {
+          "controlClassName": "max-w-[220px]"
+        }
+      },
+      {
+        "type": "form-input",
+        "value": "form.path",
+        "mode": "form",
+        "placeholder": "例如：/chat/completions、images/generations；留空使用协议默认路径",
+        "info": "来源服务的接口路径。留空时按协议默认路径调用；填写后会用 来源 host + 当前路径 + 服务接口标识 组装请求。"
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "_fields": [
+        "provider_id",
+        "name",
+        "type",
+        "path",
+        "sort",
+        "status",
+        "endpoints",
+        "params"
+      ],
+      "provider_id": "",
+      "type": "text",
+      "path": "",
+      "sort": 100,
+      "status": 1,
+      "endpoints": [],
+      "params": []
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.energon.ServiceHook.BeforeSaveService"
+      }
+    }
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "page": {
+    "parent": "bot/energon/service_endpoint/list",
+    "type": 2,
+    "sort": 11
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "value": "form.api",
+        "mode": "form",
+        "placeholder": "例如：gpt-image-2-all、gpt-4o、workflow ID 或 /openapi/v2/xxx",
+        "info": "这里填写模型名、工作流 ID 或协议需要的接口标识；服务路径在来源服务中配置。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "接口标识不能为空。"
+          }
+        ]
+      },
+      {
+        "type": "form-radio",
+        "value": "form.param_mode",
+        "mode": "form",
+        "info": "关联参数为空时作为默认接口；有关联参数时按这里选择全部满足或任一满足。",
+        "meta": {
+          "controlClassName": "min-w-[12rem]"
+        }
+      },
+      {
+        "type": "form-array",
+        "name": "关联参数",
+        "value": "form.param_ids",
+        "mode": "form",
+        "info": "参数直接来自内部参数表。每行先选参数分类，再选参数。",
+        "meta": {
+          "pageRoute": "/bot/energon/service_endpoint/param",
+          "addText": "添加关联参数",
+          "drag": "sort",
+          "itemName": "关联参数",
+          "valueFormat": "json"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "param_mode": "all",
+      "param_ids": [],
+      "status": 1,
+      "sort": 100
+    },
+    "option": {
+      "param_mode": [
+        {
+          "id": "all",
+          "value": "全部参数满足"
+        },
+        {
+          "id": "any",
+          "value": "任一参数满足"
+        }
+      ]
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}
