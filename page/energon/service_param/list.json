@@ -74,23 +74,32 @@
           "rowKey": "id",
           "columns": [
             {
-              "name": "内部参数",
-              "value": "param_id",
-              "type": "show-base"
-            },
-            {
               "name": "映射规则",
               "value": "param_rule",
               "type": "show-tag"
             },
             {
-              "name": "字段标识",
-              "value": "key",
-              "type": "show-base"
+              "name": "参数",
+              "value": "param_id",
+              "type": "show-base",
+              "meta": {
+                "cases": [
+                  {
+                    "field": "param_id",
+                    "value": 0,
+                    "text": "-"
+                  },
+                  {
+                    "field": "param_id",
+                    "value": "",
+                    "text": "-"
+                  }
+                ]
+              }
             },
             {
-              "name": "字段名",
-              "value": "name",
+              "name": "字段标识",
+              "value": "key",
               "type": "show-base"
             },
             {
@@ -199,7 +208,8 @@
           "pageRoute": "/bot/energon/service_param/update",
           "title": "服务参数",
           "description": "配置内部参数与来源服务参数的映射关系。",
-          "size": "lg",
+          "size": "xl",
+          "width": "52rem",
           "footer": {
             "confirm": true,
             "confirmText": "确定"

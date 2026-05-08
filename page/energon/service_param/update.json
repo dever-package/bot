@@ -22,37 +22,206 @@
   "nodes": {
     "dialog-shell": [
       {
-        "type": "form-param-picker",
-        "value": "form.param_id",
-        "mode": "form",
-        "info": "固定值映射可不选内部参数；其他映射规则必须选择内部参数。",
-        "meta": {
-          "controlClassName": "min-w-[22rem]"
-        }
-      },
-      {
+        "id": "service-param-rule",
         "type": "form-radio",
         "value": "form.param_rule",
         "mode": "form",
-        "info": "直接映射：把内部参数值直接写入字段标识；选项映射：把内部参数选项转换成来源需要的字段值；附件映射：从上传文件里按序号取文件地址；组合映射：用多个参数选项组合生成一个字段值；固定值映射：不读取内部参数，直接写后台填写的固定常量。",
+        "option": "option.param_rule",
+        "info": "直接映射：内部参数值直接写入字段标识；选项映射：参数选项转成来源字段值；附件映射：按序号取上传文件；组合映射：多个选项组合转字段值；固定值映射：直接写固定常量。",
         "meta": {
-          "controlClassName": "min-w-[8rem]"
+          "controlClassName": "min-w-[8rem]",
+          "clearOnChange": [
+            "form.param_id",
+            "form.combo_param_ids",
+            "form.mapping"
+          ]
         }
       },
       {
-        "type": "form-service-param-mapping",
+        "id": "service-param-id",
+        "type": "form-cascader",
+        "value": "form.param_id",
+        "mode": "form",
+        "placeholder": "请选择参数",
+        "info": "会按映射规则过滤：选项/组合只显示单选或多选参数，附件只显示文件参数，固定值不需要内部参数。",
+        "meta": {
+          "api": "/front/route/option",
+          "use": "bot.energon.NewParamCateModel",
+          "childUse": "bot.energon.NewParamModel",
+          "childParentField": "cate_id",
+          "valueMode": "leaf",
+          "placeholder": [
+            "选择参数分类",
+            "选择参数"
+          ],
+          "childExtraFields": "type,key,max_files",
+          "clearOnChange": [
+            "form.combo_param_ids",
+            "form.combo_params",
+            "form.mapping"
+          ],
+          "hiddenWhen": [
+            {
+              "path": "form.param_rule",
+              "operator": "equals",
+              "value": 5
+            }
+          ],
+          "optionFilter": [
+            {
+              "field": "type",
+              "path": "form.param_rule",
+              "map": {
+                "2": [
+                  "option",
+                  "multi_option"
+                ],
+                "3": [
+                  "file",
+                  "files"
+                ],
+                "4": [
+                  "option",
+                  "multi_option"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "mapping-option",
+        "type": "form-array",
         "name": "字段值",
         "value": "form.mapping",
         "mode": "form",
+        "info": "不填来源字段值时，保存时会保留空值；调用时会回退使用内部选项值。",
         "meta": {
-          "controlClassName": "min-w-[16rem]"
+          "pageRoute": "/bot/energon/service_param/option_mapping",
+          "addText": "添加字段值",
+          "addAllText": "添加全部字段值",
+          "clearText": "清空",
+          "itemName": "字段值",
+          "valueFormat": "json",
+          "fillFromOption": {
+            "source": "/front/route/option?type=model&use=bot.energon.NewParamOptionModel&parentField=param_id&valueField=id&labelField=name&order=sort asc,id asc&pageSize=200",
+            "targetField": "option_id",
+            "params": {
+              "parentId": "form.param_id"
+            },
+            "defaultRow": {
+              "native_value": ""
+            }
+          },
+          "hiddenWhen": [
+            {
+              "path": "form.param_rule",
+              "operator": "notEquals",
+              "value": 2
+            }
+          ]
+        }
+      },
+      {
+        "id": "mapping-file",
+        "type": "form-checkbox",
+        "name": "字段值",
+        "value": "form.mapping",
+        "mode": "form",
+        "option": "/front/route/option?type=service&use=bot.energon.ParamOptionService.LoadFileIndexOptions&valueField=id&labelField=value",
+        "info": "选择要映射的文件序号。单文件参数只会使用第 1 个文件；多文件参数保存时会校验最大数量。",
+        "meta": {
+          "orientation": "horizontal",
+          "optionParams": {
+            "parentId": "form.param_id"
+          },
+          "hiddenCondition": "any",
+          "hiddenWhen": [
+            {
+              "path": "form.param_rule",
+              "operator": "notEquals",
+              "value": 3
+            },
+            {
+              "path": "form.param_id",
+              "operator": "empty"
+            }
+          ]
+        }
+      },
+      {
+        "id": "mapping-combo-params",
+        "type": "form-array",
+        "name": "参与参数",
+        "value": "form.combo_params",
+        "mode": "form",
+        "info": "组合映射的主参数是上方内部参数；这里添加额外参与参数。下方会按参与参数生成字段值表格。",
+        "meta": {
+          "pageRoute": "/bot/energon/service_param/combo_param",
+          "addText": "添加参与参数",
+          "clearText": "清空",
+          "itemName": "参与参数",
+          "clearOnChange": [
+            "form.mapping"
+          ],
+          "hiddenWhen": [
+            {
+              "path": "form.param_rule",
+              "operator": "notEquals",
+              "value": 4
+            }
+          ],
+          "valueFormat": "json"
+        }
+      },
+      {
+        "id": "mapping-combo",
+        "type": "form-combo-mapping",
+        "name": "字段值",
+        "value": "form.mapping",
+        "mode": "form",
+        "info": "按参与参数逐行选择参数选项，并填写组合后的来源字段值。",
+        "meta": {
+          "mainParamPath": "form.param_id",
+          "extraParamsPath": "form.combo_params",
+          "optionSource": "/front/route/option?type=model&use=bot.energon.NewParamOptionModel&parentField=param_id&valueField=id&labelField=name&order=sort asc,id asc&pageSize=200",
+          "paramSource": "/front/route/option?type=model&use=bot.energon.NewParamModel&valueField=id&labelField=name&pageSize=200",
+          "addText": "添加字段值",
+          "addAllText": "添加全部字段值",
+          "clearText": "清空",
+          "hiddenWhen": [
+            {
+              "path": "form.param_rule",
+              "operator": "notEquals",
+              "value": 4
+            }
+          ]
+        }
+      },
+      {
+        "id": "mapping-fixed",
+        "type": "form-input",
+        "name": "字段值",
+        "value": "form.mapping",
+        "mode": "form",
+        "placeholder": "例如：text、image_url、first_frame",
+        "info": "固定值不读取内部参数，会原样写入字段标识对应的来源字段。",
+        "meta": {
+          "controlClassName": "min-w-[16rem]",
+          "hiddenWhen": [
+            {
+              "path": "form.param_rule",
+              "operator": "notEquals",
+              "value": 5
+            }
+          ]
         }
       },
       {
         "type": "form-input",
         "value": "form.key",
         "mode": "form",
-        "info": "不填则使用内部参数的标识。支持对象/数组路径，例如 content[1].image_url.url。模型或者工作流里需要自定义字段标识时再填写；ComfyUI 工作流需要加上节点ID，比如 10.text，就是映射为节点ID为 10 的 text 字段。",
+        "info": "不填则使用内部参数的标识。支持对象/数组路径，例如 content[1].image_url.url。ComfyUI 工作流需要加上节点ID，比如 10.text。",
         "meta": {
           "controlClassName": "min-w-[10rem]"
         }
@@ -63,7 +232,7 @@
         "value": "form.name",
         "mode": "form",
         "placeholder": "例如：超级提示词",
-        "info": "不填则直接使用参数名；填写会在展示时替代参数名，不影响字段标识和实际请求字段。",
+        "info": "可选展示名。普通映射不填时展示内部参数名；固定值映射没有内部参数，不填则留空。填写后只影响后台展示。",
         "meta": {
           "controlClassName": "min-w-[10rem]"
         }
@@ -74,6 +243,30 @@
     "form": {
       "param_rule": 1,
       "mapping": ""
+    },
+    "option": {
+      "param_rule": [
+        {
+          "id": 1,
+          "value": "直接映射"
+        },
+        {
+          "id": 2,
+          "value": "选项映射"
+        },
+        {
+          "id": 3,
+          "value": "附件映射"
+        },
+        {
+          "id": 4,
+          "value": "组合映射"
+        },
+        {
+          "id": 5,
+          "value": "固定值映射"
+        }
+      ]
     }
   },
   "state": {},

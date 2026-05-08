@@ -1,8 +1,8 @@
 {
   "page": {
-    "parent": "bot/energon/service_endpoint/list",
+    "parent": "bot/energon/service_param/list",
     "type": 2,
-    "sort": 12
+    "sort": 13
   },
   "layout": {
     "type": "container",
@@ -22,17 +22,10 @@
   "nodes": {
     "dialog-shell": [
       {
+        "id": "combo-param-id",
         "type": "form-cascader",
-        "name": "参数",
         "value": "form.param_id",
-        "mode": "form",
-        "placeholder": "请选择参数",
-        "validate": [
-          {
-            "type": "required",
-            "message": "关联参数不能为空。"
-          }
-        ],
+        "placeholder": "请选择参与参数",
         "meta": {
           "api": "/front/route/option",
           "use": "bot.energon.NewParamCateModel",
@@ -41,15 +34,35 @@
           "valueMode": "leaf",
           "placeholder": [
             "选择参数分类",
-            "选择参数"
+            "选择参与参数"
           ],
-          "childExtraFields": "type,key"
+          "controlClassName": "w-[14rem]",
+          "childExtraFields": "type,key",
+          "optionFilter": [
+            {
+              "field": "type",
+              "path": "form.param_rule",
+              "map": {
+                "4": [
+                  "option",
+                  "multi_option"
+                ]
+              }
+            },
+            {
+              "field": "id",
+              "path": "form.param_id",
+              "operator": "notEquals"
+            }
+          ]
         }
       }
     ]
   },
   "data": {
-    "form": {}
+    "form": {
+      "param_id": ""
+    }
   },
   "state": {},
   "action": {}

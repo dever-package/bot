@@ -418,16 +418,15 @@ func normalizeServiceParamRows(c *server.Context, serviceID uint64, value any) [
 		if util.ToStringTrimmed(next["key"]) == "" {
 			panicServiceParamField("服务参数必须填写字段标识")
 		}
-		if rule == paramRuleFixedMap && util.ToStringTrimmed(next["name"]) == "" {
-			next["name"] = util.ToStringTrimmed(next["key"])
-		}
 		naturalKey := serviceParamNaturalKey(paramID, util.ToStringTrimmed(next["key"]))
 		if _, exists := seen[naturalKey]; exists {
 			panicServiceParamField("服务参数不能重复配置同一个内部参数和字段标识")
 		}
 		seen[naturalKey] = struct{}{}
 
-		next["mapping"] = normalizeServiceParamMapping(c, paramRow, rule, next["mapping"])
+		next["mapping"] = normalizeServiceParamMapping(c, paramRow, rule, serviceParamMappingInput(paramID, rule, next))
+		delete(next, "combo_param_ids")
+		delete(next, "combo_params")
 
 		items = append(items, next)
 		naturalRows = append(naturalRows, naturalKeyedChildRow{
@@ -690,6 +689,51 @@ func normalizeServiceParamMapping(c *server.Context, paramRow map[string]any, ru
 		panicServiceParamField("未知的服务参数映射规则")
 	}
 	return ""
+}
+
+func serviceParamMappingInput(paramID uint64, rule int16, row map[string]any) any {
+	value := row["mapping"]
+	if rule != paramRuleComboMap {
+		return value
+	}
+
+	extraParamIDs := normalizeComboParamIDs(row)
+	if len(extraParamIDs) == 0 {
+		return value
+	}
+
+	mapping := decodeMappingObject(value)
+	mapping["params"] = append([]uint64{paramID}, extraParamIDs...)
+	return mapping
+}
+
+func normalizeComboParamIDs(row map[string]any) []uint64 {
+	if ids := normalizeUint64List(row["combo_param_ids"]); len(ids) > 0 {
+		return ids
+	}
+
+	rows := decodeMappingArray(row["combo_params"])
+	result := make([]uint64, 0, len(rows))
+	seen := map[uint64]struct{}{}
+	for _, item := range rows {
+		paramID := serviceParamComboParamID(item)
+		if paramID == 0 {
+			continue
+		}
+		if _, exists := seen[paramID]; exists {
+			continue
+		}
+		seen[paramID] = struct{}{}
+		result = append(result, paramID)
+	}
+	return result
+}
+
+func serviceParamComboParamID(value any) uint64 {
+	if row, ok := value.(map[string]any); ok {
+		return util.ToUint64(row["param_id"])
+	}
+	return util.ToUint64(value)
 }
 
 func normalizeFixedServiceParamMapping(value any) string {

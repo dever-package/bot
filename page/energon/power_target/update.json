@@ -22,9 +22,10 @@
   "nodes": {
     "dialog-shell": [
       {
-        "type": "form-service-picker",
+        "type": "form-cascader",
         "value": "form.service_id",
         "mode": "form",
+        "placeholder": "请选择服务",
         "validate": [
           {
             "type": "required",
@@ -32,7 +33,16 @@
           }
         ],
         "meta": {
-          "controlClassName": "min-w-[22rem]"
+          "api": "/front/route/option",
+          "use": "bot.energon.NewProviderModel",
+          "childUse": "bot.energon.NewServiceModel",
+          "childParentField": "provider_id",
+          "valueMode": "leaf",
+          "placeholder": [
+            "选择来源",
+            "选择服务"
+          ],
+          "childExtraFields": "type"
         }
       },
       {

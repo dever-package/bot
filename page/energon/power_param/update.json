@@ -22,9 +22,10 @@
   "nodes": {
     "dialog-shell": [
       {
-        "type": "form-param-picker",
+        "type": "form-cascader",
         "value": "form.param_id",
         "mode": "form",
+        "placeholder": "请选择参数",
         "validate": [
           {
             "type": "required",
@@ -32,7 +33,16 @@
           }
         ],
         "meta": {
-          "controlClassName": "min-w-[22rem]"
+          "api": "/front/route/option",
+          "use": "bot.energon.NewParamCateModel",
+          "childUse": "bot.energon.NewParamModel",
+          "childParentField": "cate_id",
+          "valueMode": "leaf",
+          "placeholder": [
+            "选择参数分类",
+            "选择参数"
+          ],
+          "childExtraFields": "type,key"
         }
       },
       {

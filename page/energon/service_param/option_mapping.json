@@ -1,0 +1,53 @@
+{
+  "page": {
+    "parent": "bot/energon/service_param/list",
+    "type": 2,
+    "sort": 12
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "id": "option-id",
+        "type": "form-select",
+        "value": "form.option_id",
+        "option": "/front/route/option?type=model&use=bot.energon.NewParamOptionModel&parentField=param_id&valueField=id&labelField=name&order=sort asc,id asc&pageSize=200",
+        "placeholder": "选择参数选项",
+        "meta": {
+          "optionParams": {
+            "parentId": "form.param_id"
+          },
+          "controlClassName": "min-w-[11rem]"
+        }
+      },
+      {
+        "id": "native-value",
+        "type": "form-input",
+        "value": "form.native_value",
+        "placeholder": "来源字段值"
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "option_id": "",
+      "native_value": ""
+    }
+  },
+  "state": {},
+  "action": {}
+}
