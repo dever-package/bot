@@ -1,0 +1,168 @@
+{
+  "page": {
+    "name": "运行步骤",
+    "icon": "list-tree",
+    "parent": "bot/agent/run/list",
+    "type": 2,
+    "sort": 20
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "table-row": {
+            "type": "container",
+            "className": "overflow-hidden rounded-md border bg-background"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "返回上一页",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "back": true,
+          "fallback": "/bot/agent/run/list"
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "seq",
+              "type": "show-base"
+            },
+            {
+              "value": "type",
+              "type": "show-tag"
+            },
+            {
+              "value": "title",
+              "type": "show-base"
+            },
+            {
+              "value": "status",
+              "type": "show-tag"
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "eye",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看步骤详情",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.viewStepId",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.view",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.view",
+          "pageRoute": "/bot/agent/step/view",
+          "description": "查看单个步骤的内容和原始数据。",
+          "size": "lg",
+          "bodyClassName": "max-h-[65vh] overflow-y-auto px-6 py-2",
+          "pageRouteQuery": {
+            "id": "data.actionTarget.viewStepId"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "运行步骤",
+      "description": "按执行顺序查看一次 Agent 运行产生的思考、动作、观察和结果。"
+    },
+    "search": {
+      "run_id": ""
+    },
+    "table": {
+      "list": "<<bot.agent.NewStepModel>>",
+      "page": 1,
+      "pageSize": 10,
+      "total": 0,
+      "filterFields": [
+        "run_id"
+      ]
+    },
+    "actionTarget": {
+      "viewStepId": ""
+    }
+  },
+  "state": {
+    "dialog": {
+      "view": false
+    }
+  },
+  "action": {}
+}

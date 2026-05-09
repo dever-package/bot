@@ -164,6 +164,12 @@
           "clearOnChange": [
             "form.mapping"
           ],
+          "fallbackRows": {
+            "source": "form.mapping",
+            "path": "params",
+            "skipFirst": true,
+            "targetField": "param_id"
+          },
           "hiddenWhen": [
             {
               "path": "form.param_rule",

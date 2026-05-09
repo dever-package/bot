@@ -1,0 +1,250 @@
+{
+  "page": {
+    "name": "智能体管理",
+    "icon": "bot",
+    "parent": "bot-agent",
+    "sort": 1
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "table-row": {
+            "type": "container",
+            "className": "overflow-hidden rounded-md border bg-background"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "新增智能体",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "default",
+          "size": "sm"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.create",
+            "value": true
+          }
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "savePath": "bot/agent/update",
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "name",
+              "type": "show-base"
+            },
+            {
+              "value": "key",
+              "type": "show-base"
+            },
+            {
+              "value": "mode",
+              "type": "show-tag"
+            },
+            {
+              "value": "llm_power.name",
+              "name": "LLM能力",
+              "type": "show-base"
+            },
+            {
+              "value": "status",
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "value": "sort",
+              "type": "show-base",
+              "editor": "form-number",
+              "trigger": "doubleClick",
+              "tip": "正序排序，数值越大越靠后。双击可修改。"
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑智能体",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.editAgentId",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.edit",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "list-checks",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看运行记录",
+                    "to": "/bot/agent/run/list",
+                    "searchParam": "agent_id",
+                    "searchField": "id",
+                    "withBack": true
+                  },
+                  {
+                    "icon": "trash-2",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "删除智能体",
+                    "className": "text-destructive hover:text-destructive",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.deleteAgent",
+                          "value": "$row"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "confirm.delete",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.edit",
+          "pageRoute": "/bot/agent/update",
+          "description": "配置智能体提示词、运行模式与默认调用的 LLM 能力。",
+          "size": "xl",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.editAgentId"
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.create",
+          "pageRoute": "/bot/agent/update",
+          "description": "创建智能体后，后续运行时会基于提示词、模式和 Energon 能力执行。",
+          "size": "xl",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          }
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "删除智能体",
+        "info": "确认删除当前智能体吗？已产生的运行记录不会自动删除。",
+        "meta": {
+          "stateKey": "confirm.delete"
+        },
+        "action": {
+          "confirm": {
+            "type": "delete",
+            "params": "actionTarget.deleteAgent"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "智能体管理",
+      "description": "维护智能体基础设定。第一阶段只配置 Prompt、运行模式和 Energon LLM 能力，不保存 provider、model、apikey 等来源配置。"
+    },
+    "table": {
+      "list": "<<bot.agent.NewAgentModel>>",
+      "page": 1,
+      "pageSize": 10,
+      "total": 0
+    },
+    "actionTarget": {
+      "editAgentId": "",
+      "deleteAgent": {}
+    }
+  },
+  "state": {
+    "dialog": {
+      "edit": false,
+      "create": false
+    },
+    "confirm": {
+      "delete": false
+    }
+  },
+  "action": {}
+}

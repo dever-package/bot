@@ -1,0 +1,122 @@
+{
+  "page": {
+    "name": "步骤详情",
+    "parent": "bot/agent/step/list",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-col gap-4 p-0",
+        "children": {
+          "basic-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "content-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "payload-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "basic-card": [
+      {
+        "type": "show-rich",
+        "value": "page.basicTitleHtml"
+      },
+      {
+        "type": "show-base",
+        "value": "form.request_id",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.seq",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.type",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.title",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-date",
+        "value": "form.created_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "format": "datetime-second"
+        }
+      }
+    ],
+    "content-card": [
+      {
+        "type": "show-rich",
+        "value": "page.contentTitleHtml"
+      },
+      {
+        "type": "show-base",
+        "value": "form.content",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "payload-card": [
+      {
+        "type": "show-rich",
+        "value": "page.payloadTitleHtml"
+      },
+      {
+        "type": "show-base",
+        "value": "form.payload",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "basicTitleHtml": "<div class='mb-4'><h3 class='text-base font-semibold text-foreground'>步骤信息</h3><p class='mt-1 text-sm text-muted-foreground'>展示步骤序号、类型、状态与标题。</p></div>",
+      "contentTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>内容</h3><p class='mt-1 text-sm text-muted-foreground'>步骤产生的可读内容。</p></div>",
+      "payloadTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>原始数据</h3><p class='mt-1 text-sm text-muted-foreground'>步骤执行时保留的结构化数据文本。</p></div>"
+    },
+    "form": {
+      "_model": "bot.agent.NewStepModel"
+    }
+  },
+  "state": {},
+  "action": {}
+}

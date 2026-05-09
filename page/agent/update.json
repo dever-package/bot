@@ -1,0 +1,219 @@
+{
+  "page": {
+    "name": "智能体编辑",
+    "parent": "bot/agent/list",
+    "type": 2,
+    "sort": 10,
+    "auth": [
+      {
+        "key": "bot/agent/create",
+        "name": "智能体新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/agent/update",
+        "name": "智能体编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "placeholder": "例如：图生图智能体",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "智能体名称不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "例如：image-to-image-agent",
+        "value": "form.key",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "智能体标识不能为空。"
+          },
+          {
+            "type": "model",
+            "except": "$form.id",
+            "message": "该智能体标识已存在。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "描述这个智能体负责什么事情。",
+        "value": "form.description",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 3
+        }
+      },
+      {
+        "type": "form-radio",
+        "value": "form.mode",
+        "mode": "form",
+        "info": "direct：一次性执行；react：思考-行动-观察循环；plan：先规划再逐步执行。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "运行模式不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-select",
+        "placeholder": "请选择 Energon 中的 LLM 能力",
+        "value": "form.llm_power_id",
+        "mode": "form",
+        "info": "第一阶段 Agent 直接通过这个 LLM 能力调用 Energon。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "LLM能力不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[360px]"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "智能体的稳定身份、边界和行为规则。",
+        "value": "form.system_prompt",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 5
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "开发侧补充规则，可用于覆盖项目内置策略。",
+        "value": "form.developer_prompt",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 4
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "默认任务说明。运行时用户输入会追加到这里之后。",
+        "value": "form.instruction",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 4
+        }
+      },
+      {
+        "type": "form-number",
+        "value": "form.temperature",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "value": "form.max_steps",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "value": "form.timeout_seconds",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "type": "form-radio",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-number",
+        "value": "form.sort",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[160px]"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "_model": "bot.agent.NewAgentModel",
+      "name": "",
+      "key": "",
+      "description": "",
+      "mode": "direct",
+      "llm_power_id": "",
+      "system_prompt": "",
+      "developer_prompt": "",
+      "instruction": "",
+      "temperature": 0.7,
+      "max_steps": 6,
+      "timeout_seconds": 300,
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}

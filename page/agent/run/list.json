@@ -1,0 +1,186 @@
+{
+  "page": {
+    "name": "运行记录",
+    "icon": "list-checks",
+    "parent": "bot-agent",
+    "sort": 2
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "table-row": {
+            "type": "container",
+            "className": "overflow-hidden rounded-md border bg-background"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "返回上一页",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "back": true,
+          "fallback": "/bot/agent/list"
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "request_id",
+              "type": "show-base"
+            },
+            {
+              "value": "agent.name",
+              "name": "智能体",
+              "type": "show-base"
+            },
+            {
+              "value": "mode",
+              "type": "show-tag"
+            },
+            {
+              "value": "status",
+              "type": "show-tag"
+            },
+            {
+              "value": "step_count",
+              "type": "show-base"
+            },
+            {
+              "value": "latency",
+              "type": "show-base"
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "eye",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看运行详情",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.viewRunId",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.view",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "list-tree",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看运行步骤",
+                    "to": "/bot/agent/step/list",
+                    "searchParam": "run_id",
+                    "searchField": "id",
+                    "withBack": true
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.view",
+          "pageRoute": "/bot/agent/run/view",
+          "description": "查看本次智能体运行输入、提示词、输出与错误信息。",
+          "size": "xl",
+          "bodyClassName": "max-h-[65vh] overflow-y-auto px-6 py-2",
+          "pageRouteQuery": {
+            "id": "data.actionTarget.viewRunId"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "运行记录",
+      "description": "记录 Agent 每次执行的输入、状态、步骤数、耗时和输出。"
+    },
+    "search": {
+      "agent_id": ""
+    },
+    "table": {
+      "list": "<<bot.agent.NewRunModel>>",
+      "page": 1,
+      "pageSize": 10,
+      "total": 0,
+      "filterFields": [
+        "agent_id"
+      ]
+    },
+    "actionTarget": {
+      "viewRunId": ""
+    }
+  },
+  "state": {
+    "dialog": {
+      "view": false
+    }
+  },
+  "action": {}
+}

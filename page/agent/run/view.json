@@ -1,0 +1,239 @@
+{
+  "page": {
+    "name": "运行详情",
+    "parent": "bot/agent/run/list",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-col gap-4 p-0",
+        "children": {
+          "basic-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "input-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "skills-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "prompt-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "output-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "steps-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "error-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "basic-card": [
+      {
+        "type": "show-rich",
+        "value": "page.basicTitleHtml"
+      },
+      {
+        "type": "show-base",
+        "value": "form.request_id",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.agent.name",
+        "name": "智能体",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.agent.name}（{form.agent_key}）"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.mode",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.step_count",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.latency",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-date",
+        "value": "form.started_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "format": "datetime-second"
+        }
+      },
+      {
+        "type": "show-date",
+        "value": "form.finished_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "format": "datetime-second"
+        }
+      },
+      {
+        "type": "show-date",
+        "value": "form.created_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "format": "datetime-second"
+        }
+      }
+    ],
+    "input-card": [
+      {
+        "type": "show-rich",
+        "value": "page.inputTitleHtml"
+      },
+      {
+        "type": "show-base",
+        "value": "form.input",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "skills-card": [
+      {
+        "type": "show-rich",
+        "value": "page.skillsTitleHtml"
+      },
+      {
+        "type": "show-base",
+        "value": "form.skills",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "prompt-card": [
+      {
+        "type": "show-rich",
+        "value": "page.promptTitleHtml"
+      },
+      {
+        "type": "show-base",
+        "value": "form.prompt",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "output-card": [
+      {
+        "type": "show-rich",
+        "value": "page.outputTitleHtml"
+      },
+      {
+        "type": "show-base",
+        "value": "form.output",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "steps-card": [
+      {
+        "type": "show-rich",
+        "value": "page.stepsTitleHtml"
+      },
+      {
+        "type": "show-table",
+        "value": "form.steps",
+        "meta": {
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "seq",
+              "type": "show-base"
+            },
+            {
+              "value": "type",
+              "type": "show-tag"
+            },
+            {
+              "value": "title",
+              "type": "show-base"
+            },
+            {
+              "value": "status",
+              "type": "show-tag"
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            }
+          ]
+        }
+      }
+    ],
+    "error-card": [
+      {
+        "type": "show-rich",
+        "value": "page.errorTitleHtml"
+      },
+      {
+        "type": "show-base",
+        "value": "form.error",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "basicTitleHtml": "<div class='mb-4'><h3 class='text-base font-semibold text-foreground'>运行信息</h3><p class='mt-1 text-sm text-muted-foreground'>展示本次运行的智能体、状态、步骤数与耗时。</p></div>",
+      "inputTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>输入内容</h3><p class='mt-1 text-sm text-muted-foreground'>运行时传给 Agent 的原始输入。</p></div>",
+      "skillsTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>已加载 Skills</h3><p class='mt-1 text-sm text-muted-foreground'>本次运行选择并注入的本地 skill 列表。</p></div>",
+      "promptTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>最终提示词</h3><p class='mt-1 text-sm text-muted-foreground'>运行时组装后发给 Energon LLM 能力的提示词。</p></div>",
+      "outputTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>输出内容</h3><p class='mt-1 text-sm text-muted-foreground'>Agent 完成本次运行后生成的内容。</p></div>",
+      "stepsTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>执行步骤</h3><p class='mt-1 text-sm text-muted-foreground'>按执行顺序展示本次运行产生的 input、skill、prompt、delta、final、warning 或 error。</p></div>",
+      "errorTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>错误信息</h3><p class='mt-1 text-sm text-muted-foreground'>失败时记录的错误详情。</p></div>"
+    },
+    "form": {
+      "_model": "bot.agent.NewRunModel",
+      "steps": []
+    }
+  },
+  "state": {},
+  "action": {}
+}
