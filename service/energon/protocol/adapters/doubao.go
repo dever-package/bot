@@ -188,7 +188,7 @@ func (adapter DoubaoAdapter) buildImageRequest(input botprotocol.NativeInput) (b
 	}
 
 	mapped := doubaoMappedInput(input)
-	promptInput := mapped.PromptInput(mappedInputKeys(mapped))
+	promptInput := mapped.PromptInput(mapped.InputKeySet())
 	prompt := botprotocol.BuildPromptContent(promptInput, mapped.PromptOptions("用户输入"))
 	if strings.TrimSpace(botprotocol.AsText(body["prompt"])) == "" {
 		if text := strings.TrimSpace(botprotocol.AsText(body["text"])); text != "" {
@@ -292,22 +292,9 @@ func doubaoMappedInput(input botprotocol.NativeInput) botprotocol.MappedInput {
 	return input.Mapped
 }
 
-func mappedInputKeys(mapped botprotocol.MappedInput) map[string]bool {
-	if len(mapped.Params) == 0 {
-		return nil
-	}
-	keys := make(map[string]bool, len(mapped.Params))
-	for _, param := range mapped.Params {
-		if key := strings.TrimSpace(param.InputKey); key != "" {
-			keys[key] = true
-		}
-	}
-	return keys
-}
-
 func doubaoVideoContent(input botprotocol.NativeInput, body map[string]any) []any {
 	mapped := doubaoMappedInput(input)
-	prompt := botprotocol.BuildPromptContent(mapped.PromptInput(mappedInputKeys(mapped)), mapped.PromptOptions("用户输入"))
+	prompt := botprotocol.BuildPromptContent(mapped.PromptInput(mapped.InputKeySet()), mapped.PromptOptions("用户输入"))
 	text := strings.TrimSpace(botprotocol.AsText(body["prompt"]))
 	if text != "" {
 		delete(body, "prompt")

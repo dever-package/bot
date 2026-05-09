@@ -95,8 +95,8 @@ func buildOpenAIChatRequest(input botprotocol.NativeInput, path string) botprovi
 			continue
 		}
 		body[param.NativeKey] = param.Value
-		if param.InputKey != "" {
-			excludedPromptKeys[param.InputKey] = true
+		for _, key := range param.InputKeys() {
+			excludedPromptKeys[key] = true
 		}
 	}
 	for key, value := range mapped.NativeBody() {

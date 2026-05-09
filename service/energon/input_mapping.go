@@ -35,6 +35,7 @@ func (s GatewayService) buildMappedInput(
 	}
 
 	requiredServiceParamIDs := s.requiredServiceParamIDs(ctx, selected.Power.ID, selected.Service.ID, params)
+	comboConsumedParamIDs := collectComboConsumedParamIDs(serviceParams)
 	for _, serviceParam := range serviceParams {
 		if !isActive(serviceParam.Status) {
 			continue
@@ -75,13 +76,17 @@ func (s GatewayService) buildMappedInput(
 			mapped.Params = append(mapped.Params, botprotocol.MappedParam{
 				ParamID:   param.ID,
 				ParamKey:  strings.TrimSpace(param.Key),
-				InputKey:  comboInputKey(serviceParam.Mapping, params),
+				InputKey:  comboInputKey(serviceParam.Mapping, params, serviceParams),
 				ParamName: serviceParamDisplayName(serviceParam, param),
 				ParamType: normalizeParamControlType(param.Type),
 				NativeKey: serviceParam.Key,
 				ParamRule: serviceParam.ParamRule,
 				Value:     nativeValue,
 			})
+			continue
+		}
+
+		if comboConsumedParamIDs[serviceParam.ParamID] {
 			continue
 		}
 
@@ -229,7 +234,37 @@ func serviceParamInputKey(serviceParam botmodel.ServiceParam) string {
 	if serviceParam.ID == 0 {
 		return ""
 	}
-	return fmt.Sprintf("__service_param_%d", serviceParam.ID)
+	return fmt.Sprintf("%s%d", botprotocol.InternalServiceParamInputPrefix, serviceParam.ID)
+}
+
+func serviceParamInputKeys(serviceParam botmodel.ServiceParam, param botmodel.Param) []string {
+	return inputLookupKeys(
+		serviceParamInputKey(serviceParam),
+		serviceParam.Name,
+		param.Key,
+		param.Name,
+	)
+}
+
+func paramInputKeys(param botmodel.Param) []string {
+	return inputLookupKeys(param.Key, param.Name)
+}
+
+func inputLookupKeys(values ...string) []string {
+	keys := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		key := strings.TrimSpace(value)
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func serviceParamDisplayName(serviceParam botmodel.ServiceParam, param botmodel.Param) string {
@@ -240,15 +275,7 @@ func serviceParamDisplayName(serviceParam botmodel.ServiceParam, param botmodel.
 }
 
 func resolveServiceParamInputValue(input map[string]any, serviceParam botmodel.ServiceParam, param botmodel.Param) (string, any, bool) {
-	for _, key := range []string{
-		serviceParamInputKey(serviceParam),
-		strings.TrimSpace(serviceParam.Name),
-		strings.TrimSpace(param.Key),
-		strings.TrimSpace(param.Name),
-	} {
-		if key == "" {
-			continue
-		}
+	for _, key := range serviceParamInputKeys(serviceParam, param) {
 		value, exists := input[key]
 		if exists && !isMissingInputValue(value) {
 			return key, value, true
@@ -270,10 +297,7 @@ func resolveServiceParamInputValue(input map[string]any, serviceParam botmodel.S
 }
 
 func resolveInputParamValue(input map[string]any, param botmodel.Param) (string, any, bool) {
-	for _, key := range []string{strings.TrimSpace(param.Key), strings.TrimSpace(param.Name)} {
-		if key == "" {
-			continue
-		}
+	for _, key := range paramInputKeys(param) {
 		value, exists := input[key]
 		if exists && !isMissingInputValue(value) {
 			return key, value, true
@@ -347,15 +371,7 @@ func (s GatewayService) normalizeParamInput(
 }
 
 func (s GatewayService) normalizeServiceParamInputKeys(ctx context.Context, input map[string]any, serviceParam botmodel.ServiceParam, param botmodel.Param) {
-	for _, key := range []string{
-		serviceParamInputKey(serviceParam),
-		strings.TrimSpace(serviceParam.Name),
-		strings.TrimSpace(param.Key),
-		strings.TrimSpace(param.Name),
-	} {
-		if key == "" {
-			continue
-		}
+	for _, key := range serviceParamInputKeys(serviceParam, param) {
 		if value, exists := input[key]; exists && !isMissingInputValue(value) {
 			input[key] = s.normalizeParamInputValue(ctx, param, value)
 		}
@@ -363,10 +379,7 @@ func (s GatewayService) normalizeServiceParamInputKeys(ctx context.Context, inpu
 }
 
 func (s GatewayService) normalizeParamInputKeys(ctx context.Context, input map[string]any, param botmodel.Param) {
-	for _, key := range []string{strings.TrimSpace(param.Key), strings.TrimSpace(param.Name)} {
-		if key == "" {
-			continue
-		}
+	for _, key := range paramInputKeys(param) {
 		if value, exists := input[key]; exists && !isMissingInputValue(value) {
 			input[key] = s.normalizeParamInputValue(ctx, param, value)
 		}
@@ -662,23 +675,54 @@ func comboMappingRowMatches(
 	return true
 }
 
-func comboInputKey(mappingValue string, params map[uint64]botmodel.Param) string {
+func collectComboConsumedParamIDs(serviceParams []botmodel.ServiceParam) map[uint64]bool {
+	result := map[uint64]bool{}
+	for _, serviceParam := range serviceParams {
+		if !isActive(serviceParam.Status) || serviceParam.ParamRule != paramRuleComboMap {
+			continue
+		}
+		for _, paramID := range decodeServiceParamComboMapping(serviceParam.Mapping).ParamIDs {
+			if paramID > 0 {
+				result[paramID] = true
+			}
+		}
+	}
+	return result
+}
+
+func comboInputKey(mappingValue string, params map[uint64]botmodel.Param, serviceParams []botmodel.ServiceParam) string {
 	mapping := decodeServiceParamComboMapping(mappingValue)
 	keys := make([]string, 0, len(mapping.ParamIDs))
+	seen := map[string]struct{}{}
 	for _, paramID := range mapping.ParamIDs {
+		for _, serviceParam := range serviceParams {
+			if !isActive(serviceParam.Status) || serviceParam.ParamID != paramID {
+				continue
+			}
+			keys = appendUniqueInputKey(keys, seen, serviceParamInputKey(serviceParam))
+			keys = appendUniqueInputKey(keys, seen, serviceParam.Name)
+		}
+
 		param, ok := params[paramID]
 		if !ok {
 			continue
 		}
-		if key := strings.TrimSpace(param.Key); key != "" {
-			keys = append(keys, key)
-			continue
-		}
-		if name := strings.TrimSpace(param.Name); name != "" {
-			keys = append(keys, name)
-		}
+		keys = appendUniqueInputKey(keys, seen, param.Key)
+		keys = appendUniqueInputKey(keys, seen, param.Name)
 	}
 	return strings.Join(keys, ",")
+}
+
+func appendUniqueInputKey(keys []string, seen map[string]struct{}, value string) []string {
+	key := strings.TrimSpace(value)
+	if key == "" {
+		return keys
+	}
+	if _, exists := seen[key]; exists {
+		return keys
+	}
+	seen[key] = struct{}{}
+	return append(keys, key)
 }
 
 func mapFileParamValue(serviceParam botmodel.ServiceParam, param botmodel.Param, value any) (any, bool, error) {
@@ -883,8 +927,8 @@ func applyPromptMappedParams(mapped *botprotocol.MappedInput) {
 		if isPromptMappedParam(param) {
 			continue
 		}
-		if param.InputKey != "" {
-			excluded[param.InputKey] = true
+		for _, key := range param.InputKeys() {
+			excluded[key] = true
 		}
 	}
 
@@ -893,7 +937,7 @@ func applyPromptMappedParams(mapped *botprotocol.MappedInput) {
 			continue
 		}
 		prompt := botprotocol.BuildPromptContent(
-			mapped.PromptInput(excluded),
+			promptMappedParamInput(*mapped, param, excluded),
 			mapped.PromptOptions("用户输入"),
 		)
 		mapped.Params[index].Value = prompt.TextWithMediaReferences(botprotocol.MediaReferenceOptions{
@@ -905,8 +949,34 @@ func applyPromptMappedParams(mapped *botprotocol.MappedInput) {
 	}
 }
 
+func promptMappedParamInput(mapped botprotocol.MappedInput, param botprotocol.MappedParam, excluded map[string]bool) map[string]any {
+	input := mapped.PromptInput(excluded)
+	if !isMissingInputValue(input["text"]) {
+		return input
+	}
+
+	if value, ok := mappedParamOriginalValue(mapped, param); ok {
+		input["text"] = value
+		return input
+	}
+	if !isMissingInputValue(param.Value) {
+		input["text"] = param.Value
+	}
+	return input
+}
+
+func mappedParamOriginalValue(mapped botprotocol.MappedInput, param botprotocol.MappedParam) (any, bool) {
+	for _, key := range param.InputKeys() {
+		value, exists := mapped.Original[key]
+		if exists && !isMissingInputValue(value) {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
 func isPromptMappedParam(param botprotocol.MappedParam) bool {
-	if strings.TrimSpace(param.ParamKey) != "text" && strings.TrimSpace(param.InputKey) != "text" {
+	if strings.TrimSpace(param.ParamKey) != "text" && !param.HasInputKey("text") {
 		return false
 	}
 	switch lastNativeKeySegment(param.NativeKey) {

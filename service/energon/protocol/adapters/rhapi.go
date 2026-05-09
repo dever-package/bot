@@ -178,7 +178,7 @@ func rhapiPromptExcludedKeys(mapped botprotocol.MappedInput) map[string]bool {
 		if rhapiIsPromptNativeKey(param.NativeKey) {
 			continue
 		}
-		if key := strings.TrimSpace(param.InputKey); key != "" {
+		for _, key := range param.InputKeys() {
 			keys[key] = true
 		}
 	}
@@ -198,7 +198,7 @@ func rhapiPromptInput(mapped botprotocol.MappedInput, excludedKeys map[string]bo
 		if !rhapiIsPromptNativeKey(param.NativeKey) {
 			continue
 		}
-		key := strings.TrimSpace(param.InputKey)
+		key := param.FirstInputKey()
 		if key == "" {
 			continue
 		}

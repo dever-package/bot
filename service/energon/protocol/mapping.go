@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const InternalServiceParamInputPrefix = "__service_param_"
+
 type MappedParam struct {
 	ParamID   uint64
 	ParamKey  string
@@ -14,6 +16,31 @@ type MappedParam struct {
 	NativeKey string
 	ParamRule int16
 	Value     any
+}
+
+func (p MappedParam) InputKeys() []string {
+	return splitMappedInputKeys(p.InputKey)
+}
+
+func (p MappedParam) FirstInputKey() string {
+	keys := p.InputKeys()
+	if len(keys) == 0 {
+		return ""
+	}
+	return keys[0]
+}
+
+func (p MappedParam) HasInputKey(target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	for _, key := range p.InputKeys() {
+		if key == target {
+			return true
+		}
+	}
+	return false
 }
 
 type MappedInput struct {
@@ -34,13 +61,26 @@ func (m MappedInput) IsZero() bool {
 	return m.Original == nil && m.Labels == nil && m.Params == nil
 }
 
+func (m MappedInput) InputKeySet() map[string]bool {
+	if len(m.Params) == 0 {
+		return nil
+	}
+	keys := make(map[string]bool, len(m.Params))
+	for _, param := range m.Params {
+		for _, key := range param.InputKeys() {
+			keys[key] = true
+		}
+	}
+	return keys
+}
+
 func (m MappedInput) NativeBody() map[string]any {
 	body := map[string]any{}
 	mappedKeys := map[string]bool{}
 	mappedNativeKeys := map[string]bool{}
 	for _, param := range m.Params {
 		assignNativeValue(body, param.NativeKey, param.Value)
-		if key := strings.TrimSpace(param.InputKey); key != "" {
+		for _, key := range param.InputKeys() {
 			mappedKeys[key] = true
 		}
 		if key := strings.TrimSpace(param.NativeKey); key != "" {
@@ -52,7 +92,7 @@ func (m MappedInput) NativeBody() map[string]any {
 	}
 	for key, value := range m.Original {
 		key = strings.TrimSpace(key)
-		if key == "" || mappedKeys[key] || mappedNativeKeys[key] || isEmptyNativeValue(value) {
+		if key == "" || IsInternalInputKey(key) || mappedKeys[key] || mappedNativeKeys[key] || isEmptyNativeValue(value) {
 			continue
 		}
 		assignNativeValue(body, key, value)
@@ -63,6 +103,10 @@ func (m MappedInput) NativeBody() map[string]any {
 func (m MappedInput) PromptInput(excludedKeys map[string]bool) map[string]any {
 	input := map[string]any{}
 	for key, value := range m.Original {
+		key = strings.TrimSpace(key)
+		if key == "" || IsInternalInputKey(key) {
+			continue
+		}
 		if excludedKeys != nil && excludedKeys[key] {
 			continue
 		}
@@ -230,6 +274,32 @@ func isEmptyNativeValue(value any) bool {
 	default:
 		return false
 	}
+}
+
+func splitMappedInputKeys(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+
+	result := make([]string, 0, 1)
+	seen := map[string]struct{}{}
+	for _, item := range strings.Split(value, ",") {
+		key := strings.TrimSpace(item)
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, key)
+	}
+	return result
+}
+
+func IsInternalInputKey(key string) bool {
+	return strings.HasPrefix(strings.TrimSpace(key), InternalServiceParamInputPrefix)
 }
 
 func cloneAnyMap(source map[string]any) map[string]any {

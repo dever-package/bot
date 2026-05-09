@@ -137,10 +137,10 @@ func collectMediaMap(output Output, mapped map[string]any, defaultType string, e
 
 func collectKnownMediaFields(output Output, mapped map[string]any, currentType string) {
 	appendOutputText(output, mapped["text"])
-	appendOutputList(output, "images", mapped["images"], mapped["image"])
-	appendOutputList(output, "videos", mapped["videos"], mapped["video"])
-	appendOutputList(output, "audios", mapped["audios"], mapped["audio"])
-	appendOutputList(output, "files", mapped["files"], mapped["file"])
+	appendMediaFieldValues(output, MediaTypeImage, mapped["images"], mapped["image"])
+	appendMediaFieldValues(output, MediaTypeVideo, mapped["videos"], mapped["video"])
+	appendMediaFieldValues(output, MediaTypeAudio, mapped["audios"], mapped["audio"])
+	appendMediaFieldValues(output, MediaTypeFile, mapped["files"], mapped["file"])
 
 	appendMediaByType(output, MediaTypeImage, collectURLValues(mapped["image_url"]))
 	appendMediaByType(output, MediaTypeVideo, collectURLValues(mapped["video_url"]))
@@ -156,6 +156,49 @@ func collectKnownMediaFields(output Output, mapped map[string]any, currentType s
 	if urls := collectURLValues(mapped["url"]); len(urls) > 0 {
 		appendMediaByType(output, currentType, urls)
 	}
+}
+
+func appendMediaFieldValues(output Output, mediaType string, values ...any) {
+	for _, value := range values {
+		appendMediaFieldValue(output, mediaType, value)
+	}
+}
+
+func appendMediaFieldValue(output Output, mediaType string, value any) {
+	switch current := value.(type) {
+	case nil:
+		return
+	case string:
+		appendMediaFieldString(output, mediaType, current)
+	case []string:
+		appendMediaByType(output, mediaType, current)
+	case []any:
+		for _, item := range current {
+			appendMediaFieldValue(output, mediaType, item)
+		}
+	case map[string]any:
+		if urls := collectURLValues(current); len(urls) > 0 {
+			appendMediaByType(output, mediaType, urls)
+			return
+		}
+		collectMediaOutput(output, current, mediaType, mediaType)
+	default:
+		appendMediaByType(output, mediaType, normalizeStringList(current))
+	}
+}
+
+func appendMediaFieldString(output Output, mediaType string, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+
+	var parsed any
+	if err := json.Unmarshal([]byte(value), &parsed); err == nil {
+		collectMediaOutput(output, parsed, mediaType, mediaType)
+		return
+	}
+	appendMediaByType(output, mediaType, []string{value})
 }
 
 func appendOutputText(output Output, values ...any) {
