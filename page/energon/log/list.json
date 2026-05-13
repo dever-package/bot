@@ -14,6 +14,10 @@
         "type": "main",
         "className": "flex flex-1 flex-col gap-5 sm:gap-6",
         "children": {
+          "toolbar-row": {
+            "type": "row",
+            "className": "flex-wrap items-center gap-3"
+          },
           "table-row": {
             "type": "container",
             "className": "overflow-hidden rounded-md border bg-background"
@@ -31,6 +35,73 @@
         "type": "show-title",
         "value": "page",
         "className": "min-w-0 flex-1"
+      }
+    ],
+    "toolbar-row": [
+      {
+        "type": "form-input",
+        "placeholder": "搜索 RequestID、能力、服务或来源...",
+        "value": "search.keyword",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "能力",
+        "value": "search.power_id",
+        "mode": "search",
+        "option": "/front/route/option?type=model&use=bot.energon.NewPowerModel&labelField=name&searchFields=name,key&pageSize=20",
+        "meta": {
+          "searchPlaceholder": "输入能力名称或标识搜索..."
+        }
+      },
+      {
+        "type": "form-select",
+        "placeholder": "调用方式",
+        "value": "search.mode",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "协议",
+        "value": "search.protocol",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "状态",
+        "value": "search.status",
+        "mode": "search"
+      },
+      {
+        "type": "form-date",
+        "placeholder": "创建时间",
+        "value": "search.created_at_start",
+        "mode": "search",
+        "className": "w-[320px]",
+        "meta": {
+          "range": true,
+          "endValue": "search.created_at_end",
+          "inputType": "datetime-local"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "重置",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/energon/log/list"
+        }
       }
     ],
     "table-row": [
@@ -128,10 +199,40 @@
     "page": {
       "description": "记录每次能力调用实际命中的来源、账号、能力来源、参数与耗时。"
     },
+    "search": {
+      "keyword": "",
+      "power_id": "",
+      "mode": "",
+      "protocol": "",
+      "status": "",
+      "created_at_start": "",
+      "created_at_end": ""
+    },
     "table": {
       "page": 1,
       "pageSize": 10,
-      "total": 0
+      "total": 0,
+      "searchFields": [
+        "request_id",
+        "power_key",
+        "power_name",
+        "provider_name",
+        "account_name",
+        "service_name"
+      ],
+      "filterFields": [
+        "power_id",
+        "mode",
+        "protocol",
+        "status",
+        {
+          "field": "created_at",
+          "type": "date-range",
+          "startKey": "created_at_start",
+          "endKey": "created_at_end",
+          "valueType": "datetime"
+        }
+      ]
     },
     "actionTarget": {
       "viewLogId": ""

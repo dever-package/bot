@@ -113,9 +113,7 @@
       "contentTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>内容</h3><p class='mt-1 text-sm text-muted-foreground'>步骤产生的可读内容。</p></div>",
       "payloadTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>原始数据</h3><p class='mt-1 text-sm text-muted-foreground'>步骤执行时保留的结构化数据文本。</p></div>"
     },
-    "form": {
-      "_model": "bot.agent.NewStepModel"
-    }
+    "form": {}
   },
   "state": {},
   "action": {}

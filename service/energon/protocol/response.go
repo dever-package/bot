@@ -24,6 +24,17 @@ type Response struct {
 
 type Output map[string]any
 
+func StripOutputProgress(output Output) {
+	if output == nil {
+		return
+	}
+	delete(output, "progress")
+	if meta := normalizeMap(output["meta"]); meta != nil {
+		delete(meta, "progress")
+		delete(meta, "percent")
+	}
+}
+
 var (
 	scalarOutputKeys  = []string{"event", "title", "text", "reasoning", "progress", "error", "json"}
 	mediaOutputFields = []struct {
@@ -180,20 +191,6 @@ func BuildStreamResponse(requestID string, output Output) Response {
 	)
 }
 
-func BuildProgressResponse(requestID string, message string, percent int) Response {
-	output := Output{
-		"event": "progress",
-		"text":  strings.TrimSpace(message),
-	}
-	if percent >= 0 {
-		if percent > 100 {
-			percent = 100
-		}
-		output["progress"] = percent
-	}
-	return BuildStreamResponse(requestID, output)
-}
-
 func BuildStreamErrorResponse(requestID string, err error) Response {
 	message := ""
 	if err != nil {
@@ -203,10 +200,9 @@ func BuildStreamErrorResponse(requestID string, err error) Response {
 		requestID,
 		ResponseTypeStream,
 		Output{
-			"event":    "progress",
-			"text":     message,
-			"progress": 100,
-			"error":    message,
+			"event": "status",
+			"text":  message,
+			"error": message,
 		},
 		message,
 		ResponseStatusFail,
@@ -264,7 +260,7 @@ func MergeStreamResult(outputs []Output) Output {
 			switch event {
 			case "reasoning":
 				reasoningParts = append(reasoningParts, text)
-			case "start", "progress", "end":
+			case "start", "progress", "status", "control", "warning", "end":
 			default:
 				textParts = append(textParts, text)
 			}

@@ -3,7 +3,7 @@
     "name": "运行记录",
     "icon": "list-checks",
     "parent": "bot-agent",
-    "sort": 2
+    "sort": 3
   },
   "layout": {
     "type": "container",
@@ -22,6 +22,10 @@
         "type": "main",
         "className": "flex flex-1 flex-col gap-5 sm:gap-6",
         "children": {
+          "toolbar-row": {
+            "type": "row",
+            "className": "flex-wrap items-center gap-3"
+          },
           "table-row": {
             "type": "container",
             "className": "overflow-hidden rounded-md border bg-background"
@@ -41,15 +45,59 @@
         "className": "min-w-0 flex-1"
       }
     ],
-    "header-actions": [
+    "header-actions": [],
+    "toolbar-row": [
+      {
+        "type": "form-input",
+        "placeholder": "搜索 RequestID 或智能体标识...",
+        "value": "search.keyword",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "智能体",
+        "value": "search.agent_id",
+        "mode": "search",
+        "option": "/front/route/option?type=model&use=bot.agent.NewAgentModel&labelField=name&searchFields=name,key&pageSize=20",
+        "meta": {
+          "searchPlaceholder": "输入智能体名称或标识搜索..."
+        }
+      },
+      {
+        "type": "form-select",
+        "placeholder": "状态",
+        "value": "search.status",
+        "mode": "search"
+      },
+      {
+        "type": "form-date",
+        "placeholder": "创建时间",
+        "value": "search.created_at_start",
+        "mode": "search",
+        "className": "w-[320px]",
+        "meta": {
+          "range": true,
+          "endValue": "search.created_at_end",
+          "inputType": "datetime-local"
+        }
+      },
       {
         "type": "show-button",
-        "name": "返回上一页",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "重置",
         "meta": {
           "variant": "outline",
           "size": "sm",
-          "back": true,
-          "fallback": "/bot/agent/list"
+          "to": "/bot/agent/run/list"
         }
       }
     ],
@@ -73,10 +121,6 @@
               "value": "agent.name",
               "name": "智能体",
               "type": "show-base"
-            },
-            {
-              "value": "mode",
-              "type": "show-tag"
             },
             {
               "value": "status",
@@ -146,7 +190,7 @@
         "meta": {
           "stateKey": "dialog.view",
           "pageRoute": "/bot/agent/run/view",
-          "description": "查看本次智能体运行输入、提示词、输出与错误信息。",
+          "description": "查看本次智能体运行输入、设定、输出与错误信息。",
           "size": "xl",
           "bodyClassName": "max-h-[65vh] overflow-y-auto px-6 py-2",
           "pageRouteQuery": {
@@ -162,15 +206,30 @@
       "description": "记录 Agent 每次执行的输入、状态、步骤数、耗时和输出。"
     },
     "search": {
-      "agent_id": ""
+      "keyword": "",
+      "agent_id": "",
+      "status": "",
+      "created_at_start": "",
+      "created_at_end": ""
     },
     "table": {
-      "list": "<<bot.agent.NewRunModel>>",
       "page": 1,
       "pageSize": 10,
       "total": 0,
+      "searchFields": [
+        "request_id",
+        "agent_key"
+      ],
       "filterFields": [
-        "agent_id"
+        "agent_id",
+        "status",
+        {
+          "field": "created_at",
+          "type": "date-range",
+          "startKey": "created_at_start",
+          "endKey": "created_at_end",
+          "valueType": "datetime"
+        }
       ]
     },
     "actionTarget": {

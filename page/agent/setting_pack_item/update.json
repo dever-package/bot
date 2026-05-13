@@ -1,0 +1,93 @@
+{
+  "page": {
+    "name": "设定列表编辑",
+    "parent": "bot/agent/setting_pack/list",
+    "type": 2,
+    "sort": 11,
+    "auth": [
+      {
+        "key": "bot/agent/setting_pack_item/create",
+        "name": "设定列表新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/agent/setting_pack_item/update",
+        "name": "设定列表编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-cascader",
+        "value": "form.setting_id",
+        "mode": "form",
+        "placeholder": "请选择通用设定",
+        "validate": [
+          {
+            "type": "required",
+            "message": "通用设定不能为空。"
+          }
+        ],
+        "meta": {
+          "api": "/front/route/option",
+          "use": "bot.agent.NewSettingCateModel",
+          "childUse": "bot.agent.NewSettingModel",
+          "childParentField": "cate_id",
+          "valueMode": "leaf",
+          "placeholder": [
+            "选择分类",
+            "选择设定"
+          ],
+          "searchPlaceholder": [
+            "搜索分类",
+            "搜索设定"
+          ],
+          "childExtraFields": "name",
+          "order": "sort asc,id asc",
+          "wrap": false,
+          "formLayout": "horizontal"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "pack_id": "",
+      "setting_id": "",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.agent.AgentHook.BeforeSaveSettingPackItem"
+      }
+    }
+  }
+}

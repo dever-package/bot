@@ -92,28 +92,16 @@ func (DoubaoAdapter) StreamTaskSpec(input botprotocol.NativeInput) (bottask.Stre
 	switch strings.TrimSpace(input.Request.Kind) {
 	case doubaoKindImage:
 		return bottask.StreamTaskSpec{
-			Kind:             bottask.StreamKindRequest,
-			OutputType:       botprotocol.MediaTypeImage,
-			StartText:        "正在请求图片生成",
-			RunningText:      "图片生成中，请稍候",
-			DoneText:         "图片生成完成",
-			StartProgress:    5,
-			EstimateProgress: true,
-			EstimateMax:      90,
+			Kind:         bottask.StreamKindRequest,
+			OutputType:   botprotocol.MediaTypeImage,
+			PlainRequest: true,
 		}, true
 	case doubaoKindVideo:
 		return bottask.StreamTaskSpec{
-			Kind:          bottask.StreamKindPolling,
-			OutputType:    botprotocol.MediaTypeVideo,
-			StartText:     "正在请求视频生成",
-			CreatedText:   "已创建视频生成任务: %s",
-			RunningText:   "视频生成中，请稍候",
-			DoneText:      "视频生成完成",
-			StartProgress: 5,
-			DoneProgress:  100,
-			EstimateMax:   90,
-			MaxAttempts:   doubaoVideoPollMax,
-			PollInterval:  doubaoVideoPollDelayMS * time.Millisecond,
+			Kind:         bottask.StreamKindPolling,
+			OutputType:   botprotocol.MediaTypeVideo,
+			MaxAttempts:  doubaoVideoPollMax,
+			PollInterval: doubaoVideoPollDelayMS * time.Millisecond,
 		}, true
 	default:
 		return bottask.StreamTaskSpec{}, false
@@ -169,16 +157,29 @@ func (DoubaoAdapter) CancelTask(ctx context.Context, input botprotocol.NativeInp
 		return fmt.Errorf("取消豆包视频任务失败: %w", err)
 	}
 	if resp != nil && resp.StatusCode >= http.StatusBadRequest {
+		if isDoubaoRunningTaskDeletionConflict(resp) {
+			return nil
+		}
 		return fmt.Errorf("取消豆包视频任务失败: status=%d body=%s", resp.StatusCode, botprotocol.AsText(resp.Body))
 	}
 	return nil
 }
 
-func (adapter DoubaoAdapter) buildImageRequest(input botprotocol.NativeInput) (botprovider.Request, error) {
-	if doubaoUsesConfiguredBody(input) {
-		return doubaoJSONRequest(input, resolveConfiguredPath(input, doubaoImagePath), doubaoConfiguredBody(input)), nil
+func isDoubaoRunningTaskDeletionConflict(resp *botprovider.Response) bool {
+	if resp == nil || resp.StatusCode != http.StatusConflict {
+		return false
 	}
 
+	code := strings.TrimSpace(botprotocol.AsText(valueFromMap(valueFromMap(resp.Body, "error"), "code")))
+	if code == "InvalidAction.RunningTaskDeletion" {
+		return true
+	}
+
+	bodyText := botprotocol.AsText(resp.Body)
+	return strings.Contains(bodyText, "InvalidAction.RunningTaskDeletion")
+}
+
+func (adapter DoubaoAdapter) buildImageRequest(input botprotocol.NativeInput) (botprovider.Request, error) {
 	body := doubaoBody(input)
 	if model := strings.TrimSpace(input.ServiceAPI); model != "" {
 		setBodyDefault(body, "model", model)
@@ -220,10 +221,6 @@ func (adapter DoubaoAdapter) buildImageRequest(input botprotocol.NativeInput) (b
 }
 
 func (adapter DoubaoAdapter) buildVideoRequest(input botprotocol.NativeInput) (botprovider.Request, error) {
-	if doubaoUsesConfiguredBody(input) {
-		return doubaoJSONRequest(input, resolveConfiguredPath(input, doubaoVideoTaskPath), doubaoConfiguredBody(input)), nil
-	}
-
 	body := doubaoBody(input)
 	if model := strings.TrimSpace(input.ServiceAPI); model != "" {
 		setBodyDefault(body, "model", model)
@@ -253,18 +250,6 @@ func doubaoServiceType(input botprotocol.NativeInput) string {
 	return strings.ToLower(strings.TrimSpace(input.Power.Kind))
 }
 
-func doubaoUsesConfiguredBody(input botprotocol.NativeInput) bool {
-	return strings.TrimSpace(input.Service.Path) != ""
-}
-
-func doubaoConfiguredBody(input botprotocol.NativeInput) map[string]any {
-	body := doubaoBody(input)
-	if model := strings.TrimSpace(input.ServiceAPI); model != "" {
-		setBodyDefault(body, "model", model)
-	}
-	return body
-}
-
 func doubaoTaskItemPath(input botprotocol.NativeInput, taskID string) string {
 	basePath := strings.TrimRight(resolveConfiguredPath(input, doubaoVideoTaskPath), "/")
 	taskID = strings.TrimSpace(taskID)
@@ -277,6 +262,9 @@ func doubaoTaskItemPath(input botprotocol.NativeInput, taskID string) string {
 func doubaoBody(input botprotocol.NativeInput) map[string]any {
 	body := map[string]any{}
 	for key, value := range input.Request.Options {
+		if isGatewayStreamOption(key) {
+			continue
+		}
 		body[key] = value
 	}
 	for key, value := range doubaoMappedInput(input).NativeBody() {
@@ -365,19 +353,113 @@ func normalizeDoubaoVideoBodyContent(body map[string]any) {
 	if !exists {
 		return
 	}
+	items := make([]any, 0)
 	switch current := value.(type) {
 	case string:
 		text := strings.TrimSpace(current)
-		if text == "" {
-			delete(body, "content")
-			return
+		if text != "" {
+			items = append(items, map[string]any{
+				"type": "text",
+				"text": text,
+			})
 		}
-		body["content"] = []any{map[string]any{
-			"type": "text",
-			"text": text,
-		}}
 	case map[string]any:
-		body["content"] = []any{current}
+		items = appendValidDoubaoVideoContentItem(items, current)
+	default:
+		for _, item := range botprotocol.NormalizeAnyList(value) {
+			switch currentItem := item.(type) {
+			case string:
+				text := strings.TrimSpace(currentItem)
+				if text != "" {
+					items = append(items, map[string]any{
+						"type": "text",
+						"text": text,
+					})
+				}
+			case map[string]any:
+				items = appendValidDoubaoVideoContentItem(items, currentItem)
+			default:
+				if text := strings.TrimSpace(botprotocol.AsText(currentItem)); text != "" {
+					items = append(items, map[string]any{
+						"type": "text",
+						"text": text,
+					})
+				}
+			}
+		}
+	}
+	if len(items) == 0 {
+		delete(body, "content")
+		return
+	}
+	body["content"] = items
+}
+
+func appendValidDoubaoVideoContentItem(items []any, item map[string]any) []any {
+	normalized, ok := normalizeDoubaoVideoContentItem(item)
+	if !ok {
+		return items
+	}
+	return append(items, normalized)
+}
+
+func normalizeDoubaoVideoContentItem(item map[string]any) (map[string]any, bool) {
+	contentType := strings.ToLower(strings.TrimSpace(botprotocol.AsText(item["type"])))
+	if contentType == "" {
+		contentType = inferDoubaoVideoContentType(item)
+	}
+	if contentType == "" {
+		return item, true
+	}
+
+	next := cloneBody(item)
+	next["type"] = contentType
+	switch contentType {
+	case "text":
+		text := strings.TrimSpace(botprotocol.AsText(next["text"]))
+		if text == "" {
+			return nil, false
+		}
+		next["text"] = text
+	case "image_url":
+		url := doubaoContentMediaURL(next["image_url"])
+		if url == "" {
+			return nil, false
+		}
+		next["image_url"] = map[string]any{"url": url}
+	case "video_url":
+		url := doubaoContentMediaURL(next["video_url"])
+		if url == "" {
+			return nil, false
+		}
+		next["video_url"] = map[string]any{"url": url}
+	case "audio_url":
+		url := doubaoContentMediaURL(next["audio_url"])
+		if url == "" {
+			return nil, false
+		}
+		next["audio_url"] = map[string]any{"url": url}
+	}
+	return next, true
+}
+
+func inferDoubaoVideoContentType(item map[string]any) string {
+	for _, candidate := range []string{"text", "image_url", "video_url", "audio_url"} {
+		if _, exists := item[candidate]; exists {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func doubaoContentMediaURL(value any) string {
+	switch current := value.(type) {
+	case string:
+		return strings.TrimSpace(current)
+	case map[string]any:
+		return strings.TrimSpace(botprotocol.AsText(current["url"]))
+	default:
+		return strings.TrimSpace(botprotocol.AsText(value))
 	}
 }
 

@@ -166,7 +166,13 @@ func (s GatewayService) StopStream(ctx context.Context, requestID string) botpro
 
 func supportsStreamCancel(adapter botprotocol.Adapter, input botprotocol.NativeInput) bool {
 	if cancelSupport, ok := adapter.(bottask.CancelSupportAdapter); ok {
-		return cancelSupport.SupportsCancel(input)
+		if cancelSupport.SupportsCancel(input) {
+			return true
+		}
+	}
+	if taskAdapter, ok := adapter.(bottask.StreamTaskAdapter); ok {
+		_, ok := taskAdapter.StreamTaskSpec(input)
+		return ok
 	}
 	return false
 }

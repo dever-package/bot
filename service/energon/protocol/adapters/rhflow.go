@@ -26,7 +26,6 @@ const (
 	rhflowPollDelayMS     = 3000
 	rhflowKindPrefix      = "rhflow."
 	rhflowDefaultKind     = "rhflow.workflow"
-	rhflowDefaultMessage  = "RunningHub 工作流任务运行中，请稍候"
 )
 
 var rhflowTaskCache sync.Map
@@ -136,17 +135,10 @@ func (RhFlowAdapter) CancelTask(ctx context.Context, input botprotocol.NativeInp
 func (RhFlowAdapter) StreamTaskSpec(input botprotocol.NativeInput) (bottask.StreamTaskSpec, bool) {
 	outputType := rhflowOutputType(input)
 	return bottask.StreamTaskSpec{
-		Kind:          bottask.StreamKindPolling,
-		OutputType:    outputType,
-		StartText:     "正在请求 RunningHub 工作流任务",
-		CreatedText:   "已创建 RunningHub 工作流任务: %s",
-		RunningText:   rhflowDefaultMessage,
-		DoneText:      "RunningHub 工作流任务完成",
-		StartProgress: 5,
-		DoneProgress:  100,
-		EstimateMax:   90,
-		MaxAttempts:   rhflowPollMax,
-		PollInterval:  rhflowPollDelayMS * time.Millisecond,
+		Kind:         bottask.StreamKindPolling,
+		OutputType:   outputType,
+		MaxAttempts:  rhflowPollMax,
+		PollInterval: rhflowPollDelayMS * time.Millisecond,
 	}, true
 }
 
@@ -286,7 +278,7 @@ func (RhFlowAdapter) ParseTaskStatus(input botprotocol.NativeInput, resp *botpro
 		rhflowClearTaskID(input)
 		return bottask.TaskStatus{State: bottask.TaskStateFailed, Label: status, Message: firstNonEmptyText(message, status)}, nil
 	default:
-		return bottask.TaskStatus{State: bottask.TaskStateRunning, Label: firstNonEmptyText(status, "RUNNING"), Message: firstNonEmptyText(message, rhflowDefaultMessage)}, nil
+		return bottask.TaskStatus{State: bottask.TaskStateRunning, Label: firstNonEmptyText(status, "RUNNING"), Message: message}, nil
 	}
 }
 

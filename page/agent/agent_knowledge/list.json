@@ -1,0 +1,322 @@
+{
+  "page": {
+    "name": "智能体资料",
+    "parent": "bot/agent/agent/list",
+    "type": 2,
+    "sort": 30
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "toolbar-row": {
+            "type": "row",
+            "className": "flex-wrap items-center gap-3"
+          },
+          "table-row": {
+            "type": "container",
+            "className": "overflow-hidden rounded-md border bg-background"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "返回上一页",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "back": true,
+          "fallback": "/bot/agent/agent/list"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "新增资料",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "default",
+          "size": "sm"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.create",
+            "value": true
+          }
+        }
+      }
+    ],
+    "toolbar-row": [
+      {
+        "type": "form-input",
+        "placeholder": "搜索资料名称...",
+        "value": "search.keyword",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "类型",
+        "value": "search.type",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "加载方式",
+        "value": "search.load_mode",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "状态",
+        "value": "search.status",
+        "mode": "search"
+      },
+      {
+        "type": "show-button",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "重置",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/agent/agent_knowledge/list"
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "savePath": "bot/agent/agent_knowledge/update",
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "name",
+              "type": "show-base"
+            },
+            {
+              "value": "type",
+              "type": "show-tag"
+            },
+            {
+              "value": "load_mode",
+              "name": "加载方式",
+              "type": "show-tag"
+            },
+            {
+              "value": "description",
+              "name": "使用说明",
+              "type": "show-base"
+            },
+            {
+              "value": "status",
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "value": "sort",
+              "type": "show-base",
+              "editor": "form-number",
+              "trigger": "doubleClick",
+              "tip": "正序排序，数值越大越靠后。双击可修改。"
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑资料",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.id",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.edit",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "trash-2",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "删除资料",
+                    "className": "text-destructive hover:text-destructive",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.deleteKnowledge",
+                          "value": "$row"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "confirm.delete",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.create",
+          "pageRoute": "/bot/agent/agent_knowledge/update",
+          "description": "资料会作为智能体运行时可参考的文档、背景、术语、样例或状态记录。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "agent_id": "state.route.query.agent_id"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.edit",
+          "pageRoute": "/bot/agent/agent_knowledge/update",
+          "description": "维护当前资料的类型、加载方式和正文内容。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.id"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "删除资料",
+        "info": "确认删除当前资料吗？删除后智能体运行时不会再读取它。",
+        "meta": {
+          "stateKey": "confirm.delete"
+        },
+        "action": {
+          "confirm": {
+            "type": "delete",
+            "params": "actionTarget.deleteKnowledge"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "智能体资料",
+      "description": "维护当前智能体可参考的文档、背景、术语、样例和状态记录。常驻资料会随智能体运行加载。"
+    },
+    "search": {
+      "agent_id": "",
+      "keyword": "",
+      "type": "",
+      "load_mode": "",
+      "status": ""
+    },
+    "table": {
+      "list": "<<bot.agent.NewAgentKnowledgeModel>>",
+      "page": 1,
+      "pageSize": 10,
+      "total": 0,
+      "searchFields": [
+        "name",
+        "description"
+      ],
+      "filterFields": [
+        "agent_id",
+        "type",
+        "load_mode",
+        "status"
+      ]
+    },
+    "actionTarget": {
+      "id": "",
+      "deleteKnowledge": {}
+    }
+  },
+  "state": {
+    "dialog": {
+      "create": false,
+      "edit": false
+    },
+    "confirm": {
+      "delete": false
+    }
+  },
+  "action": {}
+}

@@ -115,6 +115,18 @@ func (m MappedInput) PromptInput(excludedKeys map[string]bool) map[string]any {
 	return input
 }
 
+func (m MappedInput) PrimaryPrompt() string {
+	if len(m.Original) == 0 {
+		return ""
+	}
+	return firstText(
+		m.Original["text"],
+		m.Original["prompt"],
+		m.Original["content"],
+		m.Original["input"],
+	)
+}
+
 func (m MappedInput) PromptOptions(textTitle string) PromptOptions {
 	return PromptOptions{
 		TextTitle: textTitle,

@@ -27,7 +27,7 @@ func (fn HandlerFunc) HandleTask(ctx context.Context, job Job) error {
 	return fn(ctx, job)
 }
 
-type ProgressWriter func(output botprotocol.Output) error
+type StreamWriter func(output botprotocol.Output) error
 
 type StreamKind string
 
@@ -37,19 +37,11 @@ const (
 )
 
 type StreamTaskSpec struct {
-	Kind             StreamKind
-	OutputType       string
-	StartText        string
-	DoneText         string
-	CreatedText      string
-	RunningText      string
-	StartProgress    int
-	DoneProgress     int
-	EstimateProgress bool
-	PlainRequest     bool
-	EstimateMax      int
-	MaxAttempts      int
-	PollInterval     time.Duration
+	Kind         StreamKind
+	OutputType   string
+	PlainRequest bool
+	MaxAttempts  int
+	PollInterval time.Duration
 }
 
 type TaskState string
@@ -90,7 +82,7 @@ type StreamJob struct {
 	Adapter        botprotocol.Adapter
 	Client         botprovider.Client
 	Request        botprovider.Request
-	Write          ProgressWriter
+	Write          StreamWriter
 	RegisterCancel func(func(context.Context) error)
 }
 

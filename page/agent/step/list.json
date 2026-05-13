@@ -147,7 +147,6 @@
       "run_id": ""
     },
     "table": {
-      "list": "<<bot.agent.NewStepModel>>",
       "page": 1,
       "pageSize": 10,
       "total": 0,

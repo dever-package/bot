@@ -1,19 +1,19 @@
 {
   "page": {
     "name": "智能体编辑",
-    "parent": "bot/agent/list",
+    "parent": "bot/agent/agent/list",
     "type": 2,
     "sort": 10,
     "auth": [
       {
-        "key": "bot/agent/create",
+        "key": "bot/agent/agent/create",
         "name": "智能体新增",
         "query": {
           "id": "empty"
         }
       },
       {
-        "key": "bot/agent/update",
+        "key": "bot/agent/agent/update",
         "name": "智能体编辑",
         "query": {
           "id": "required"
@@ -38,6 +38,21 @@
   },
   "nodes": {
     "dialog-shell": [
+      {
+        "type": "form-select",
+        "value": "form.cate_id",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "智能体分类不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[260px]"
+        }
+      },
       {
         "type": "form-input",
         "placeholder": "例如：图生图智能体",
@@ -84,25 +99,11 @@
         }
       },
       {
-        "type": "form-radio",
-        "value": "form.mode",
-        "mode": "form",
-        "info": "direct：一次性执行；react：思考-行动-观察循环；plan：先规划再逐步执行。",
-        "validate": [
-          {
-            "type": "required",
-            "message": "运行模式不能为空。"
-          }
-        ],
-        "meta": {
-          "formLayout": "horizontal"
-        }
-      },
-      {
         "type": "form-select",
         "placeholder": "请选择 Energon 中的 LLM 能力",
         "value": "form.llm_power_id",
         "mode": "form",
+        "option": "/front/route/option?type=service&use=bot.agent.OptionService.LoadTextPowers",
         "info": "第一阶段 Agent 直接通过这个 LLM 能力调用 Energon。",
         "validate": [
           {
@@ -116,39 +117,42 @@
         }
       },
       {
-        "type": "form-textarea",
-        "placeholder": "智能体的稳定身份、边界和行为规则。",
-        "value": "form.system_prompt",
+        "type": "form-select",
+        "name": "执行方案",
+        "placeholder": "请选择执行方案",
+        "value": "form.setting_pack_id",
         "mode": "form",
+        "option": "/front/route/option?type=model&use=bot.agent.NewSettingPackModel&filterField=status&filterValue=1&order=sort asc,id asc",
+        "info": "运行和测试时加载这个方案下的通用设定，再加载智能体设定。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "执行方案不能为空。"
+          }
+        ],
         "meta": {
           "formLayout": "horizontal",
-          "rows": 5
-        }
-      },
-      {
-        "type": "form-textarea",
-        "placeholder": "开发侧补充规则，可用于覆盖项目内置策略。",
-        "value": "form.developer_prompt",
-        "mode": "form",
-        "meta": {
-          "formLayout": "horizontal",
-          "rows": 4
-        }
-      },
-      {
-        "type": "form-textarea",
-        "placeholder": "默认任务说明。运行时用户输入会追加到这里之后。",
-        "value": "form.instruction",
-        "mode": "form",
-        "meta": {
-          "formLayout": "horizontal",
-          "rows": 4
+          "controlClassName": "max-w-[260px]"
         }
       },
       {
         "type": "form-number",
+        "placeholder": "0-2，建议 0.2-1.0",
         "value": "form.temperature",
         "mode": "form",
+        "info": "控制 LLM 输出随机性。0 更稳定、2 更发散；默认 0.7，通常不要超过 1。",
+        "validate": [
+          {
+            "type": "min",
+            "min": 0,
+            "message": "温度不能小于 0。"
+          },
+          {
+            "type": "max",
+            "max": 2,
+            "message": "温度不能大于 2。"
+          }
+        ],
         "meta": {
           "formLayout": "horizontal",
           "controlClassName": "max-w-[160px]"
@@ -156,34 +160,22 @@
       },
       {
         "type": "form-number",
-        "value": "form.max_steps",
-        "mode": "form",
-        "meta": {
-          "formLayout": "horizontal",
-          "controlClassName": "max-w-[160px]"
-        }
-      },
-      {
-        "type": "form-number",
+        "placeholder": "单位：秒，10-3600",
         "value": "form.timeout_seconds",
         "mode": "form",
-        "meta": {
-          "formLayout": "horizontal",
-          "controlClassName": "max-w-[160px]"
-        }
-      },
-      {
-        "type": "form-radio",
-        "value": "form.status",
-        "mode": "form",
-        "meta": {
-          "formLayout": "horizontal"
-        }
-      },
-      {
-        "type": "form-number",
-        "value": "form.sort",
-        "mode": "form",
+        "info": "单次运行的总超时时间，单位是秒。超过后运行应停止并记录失败/超时，默认 300 秒。",
+        "validate": [
+          {
+            "type": "min",
+            "min": 10,
+            "message": "超时时间不能小于 10 秒。"
+          },
+          {
+            "type": "max",
+            "max": 3600,
+            "message": "超时时间不能大于 3600 秒。"
+          }
+        ],
         "meta": {
           "formLayout": "horizontal",
           "controlClassName": "max-w-[160px]"
@@ -193,27 +185,25 @@
   },
   "data": {
     "form": {
-      "_model": "bot.agent.NewAgentModel",
+      "cate_id": 1,
       "name": "",
       "key": "",
       "description": "",
-      "mode": "direct",
       "llm_power_id": "",
-      "system_prompt": "",
-      "developer_prompt": "",
-      "instruction": "",
+      "setting_pack_id": 1,
       "temperature": 0.7,
-      "max_steps": 6,
-      "timeout_seconds": 300,
-      "status": 1,
-      "sort": 100
+      "timeout_seconds": 300
     }
   },
   "state": {},
   "action": {
     "submit": {
       "type": "save",
-      "params": "form"
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.agent.AgentHook.BeforeSaveAgent"
+      }
     }
   }
 }

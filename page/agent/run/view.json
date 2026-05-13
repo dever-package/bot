@@ -24,7 +24,7 @@
             "type": "container",
             "className": "rounded-lg border bg-background p-4"
           },
-          "prompt-card": {
+          "context-card": {
             "type": "container",
             "className": "rounded-lg border bg-background p-4"
           },
@@ -66,14 +66,6 @@
         "meta": {
           "formLayout": "horizontal",
           "template": "{form.agent.name}（{form.agent_key}）"
-        }
-      },
-      {
-        "type": "show-tag",
-        "value": "form.mode",
-        "mode": "form",
-        "meta": {
-          "formLayout": "horizontal"
         }
       },
       {
@@ -150,14 +142,14 @@
         "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
       }
     ],
-    "prompt-card": [
+    "context-card": [
       {
         "type": "show-rich",
-        "value": "page.promptTitleHtml"
+        "value": "page.contextTitleHtml"
       },
       {
         "type": "show-base",
-        "value": "form.prompt",
+        "value": "form.runtime_context",
         "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
       }
     ],
@@ -224,13 +216,12 @@
       "basicTitleHtml": "<div class='mb-4'><h3 class='text-base font-semibold text-foreground'>运行信息</h3><p class='mt-1 text-sm text-muted-foreground'>展示本次运行的智能体、状态、步骤数与耗时。</p></div>",
       "inputTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>输入内容</h3><p class='mt-1 text-sm text-muted-foreground'>运行时传给 Agent 的原始输入。</p></div>",
       "skillsTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>已加载 Skills</h3><p class='mt-1 text-sm text-muted-foreground'>本次运行选择并注入的本地 skill 列表。</p></div>",
-      "promptTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>最终提示词</h3><p class='mt-1 text-sm text-muted-foreground'>运行时组装后发给 Energon LLM 能力的提示词。</p></div>",
+      "contextTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>运行上下文</h3><p class='mt-1 text-sm text-muted-foreground'>运行时组装后发给 Energon LLM 能力的设定、资料、能力和临时上下文。</p></div>",
       "outputTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>输出内容</h3><p class='mt-1 text-sm text-muted-foreground'>Agent 完成本次运行后生成的内容。</p></div>",
-      "stepsTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>执行步骤</h3><p class='mt-1 text-sm text-muted-foreground'>按执行顺序展示本次运行产生的 input、skill、prompt、delta、final、warning 或 error。</p></div>",
+      "stepsTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>执行步骤</h3><p class='mt-1 text-sm text-muted-foreground'>按执行顺序展示本次运行产生的输入、技能目录、运行上下文、输出、警告或错误。</p></div>",
       "errorTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>错误信息</h3><p class='mt-1 text-sm text-muted-foreground'>失败时记录的错误详情。</p></div>"
     },
     "form": {
-      "_model": "bot.agent.NewRunModel",
       "steps": []
     }
   },

@@ -94,8 +94,12 @@
               "type": "show-tag"
             },
             {
-              "value": "path",
-              "type": "show-base"
+              "name": "平均响应时间",
+              "value": "runtime_stats.0.avg",
+              "type": "show-base",
+              "meta": {
+                "format": "duration-ms"
+              }
             },
             {
               "value": "sort",

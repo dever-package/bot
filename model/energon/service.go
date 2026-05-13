@@ -42,6 +42,13 @@ var (
 		OwnerField: "service_id",
 		Order:      "sort asc, id asc",
 	}
+
+	serviceRuntimeStatRelation = orm.Relation{
+		Field:      "runtime_stats",
+		Through:    "bot.energon.NewServiceRuntimeStatModel",
+		OwnerField: "service_id",
+		Order:      "id desc",
+	}
 )
 
 func NewServiceModel() *orm.Model[Service] {
@@ -57,6 +64,7 @@ func NewServiceModel() *orm.Model[Service] {
 			serviceProviderRelation,
 			serviceEndpointRelation,
 			serviceParamRelation,
+			serviceRuntimeStatRelation,
 		},
 	})
 }

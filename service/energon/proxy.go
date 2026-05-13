@@ -58,8 +58,9 @@ func (s GatewayService) callProxyTarget(ctx context.Context, req *botprotocol.Sh
 		return callResult{NativeRequest: nativeReq, Log: logItem}, err
 	}
 	if resp.StatusCode >= 400 {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_status", fmt.Sprintf("status=%d", resp.StatusCode)), nativeReq)
-		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem}, fmt.Errorf("供应商返回失败: %d", resp.StatusCode)
+		errorMessage := formatProviderStatusError(nativeReq.Method, nativeReq.URL, resp)
+		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_status", errorMessage), nativeReq)
+		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem}, fmt.Errorf("来源返回失败: %s", errorMessage)
 	}
 
 	logItem := s.recordCallLog(ctx, req, selected, StatusSuccess, time.Since(startedAt), encodeLogJSON(resp.Body), nativeReq)

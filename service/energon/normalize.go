@@ -219,7 +219,7 @@ func (s GatewayService) recordCallLog(
 	result string,
 	nativeRequests ...botprovider.Request,
 ) botmodel.Log {
-	return s.logs.Record(ctx, botmodel.Log{
+	record := s.logs.Record(ctx, botmodel.Log{
 		RequestID:     req.RequestID,
 		Mode:          req.Mode,
 		Protocol:      req.Protocol,
@@ -239,6 +239,10 @@ func (s GatewayService) recordCallLog(
 		Latency:       latency.Milliseconds(),
 		Result:        result,
 	})
+	if status == StatusSuccess {
+		s.runtimeStats.Record(ctx, selected.Service.ID, latency)
+	}
+	return record
 }
 
 func buildPowerParamsLog(req *botprotocol.ShemicRequest, nativeRequests ...botprovider.Request) map[string]any {

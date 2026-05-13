@@ -70,6 +70,22 @@ func HasMediaOutput(output Output) bool {
 	return false
 }
 
+func MediaOutputLabel(values ...string) string {
+	for _, value := range values {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case MediaTypeImage, "images":
+			return "图片"
+		case MediaTypeVideo, "videos":
+			return "视频"
+		case MediaTypeAudio, "audios":
+			return "音频"
+		case MediaTypeFile, "files":
+			return "文件"
+		}
+	}
+	return "内容"
+}
+
 func collectMediaOutput(output Output, value any, defaultType string, eventType string) {
 	switch current := value.(type) {
 	case nil:

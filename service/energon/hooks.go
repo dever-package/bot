@@ -9,6 +9,7 @@ import (
 	"github.com/shemic/dever/util"
 
 	botmodel "my/package/bot/model/energon"
+	botinput "my/package/bot/service/energon/input"
 	frontaction "my/package/front/service/action"
 )
 
@@ -83,9 +84,9 @@ func (ParamHook) ProviderBeforeSaveParam(_ *server.Context, params []any) any {
 	record["name"] = util.ToStringTrimmed(record["name"])
 	record["key"] = util.ToStringTrimmed(record["key"])
 	record["default_value"] = util.ToStringTrimmed(record["default_value"])
-	paramType := normalizeParamControlType(util.ToStringTrimmed(record["type"]))
+	paramType := botinput.NormalizeParamControlType(util.ToStringTrimmed(record["type"]))
 	record["type"] = paramType
-	record["value_type"] = normalizeParamValueType(util.ToStringTrimmed(record["value_type"]))
+	record["value_type"] = botinput.NormalizeParamValueType(util.ToStringTrimmed(record["value_type"]))
 	ensureDefaultCategory(record)
 
 	usage := int16(util.ToIntDefault(record["usage"], int(paramUsageMain)))
@@ -241,30 +242,6 @@ func normalizePowerParamRequired(value int) int16 {
 func ensureDefaultCategory(record map[string]any) {
 	if util.ToUint64(record["cate_id"]) == 0 {
 		record["cate_id"] = defaultCategoryID
-	}
-}
-
-func normalizeParamControlType(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "textarea", "text", "string":
-		return "textarea"
-	case "input", "number":
-		return "input"
-	case "switch", "bool", "boolean":
-		return "switch"
-	case "option", "multi_option", "file", "files", "hidden", "description":
-		return strings.ToLower(strings.TrimSpace(value))
-	default:
-		return "input"
-	}
-}
-
-func normalizeParamValueType(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "number", "int", "integer", "float", "double":
-		return "number"
-	default:
-		return "string"
 	}
 }
 
@@ -493,7 +470,7 @@ func normalizeServiceEndpointRows(c *server.Context, serviceID uint64, value any
 		}
 		seenAPI[apiKey] = struct{}{}
 
-		next["param_mode"] = normalizeEndpointParamMode(util.ToStringTrimmed(next["param_mode"]))
+		next["param_mode"] = botinput.NormalizeEndpointParamMode(util.ToStringTrimmed(next["param_mode"]))
 		next["param_ids"] = mustJSONString(normalizeEndpointParamRows(c, next["param_ids"]))
 
 		items = append(items, next)
@@ -571,21 +548,12 @@ func existingServiceEndpointIDsByAPI(c *server.Context, serviceID uint64) map[st
 	return result
 }
 
-func normalizeEndpointParamMode(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case endpointParamModeAny:
-		return endpointParamModeAny
-	default:
-		return endpointParamModeAll
-	}
-}
-
 func normalizeEndpointParamRows(c *server.Context, value any) []map[string]any {
 	raw := decodeMappingArray(value)
 	result := make([]map[string]any, 0, len(raw))
 	seen := map[uint64]struct{}{}
 	for _, item := range raw {
-		paramID := endpointParamID(item)
+		paramID := botinput.EndpointParamID(item)
 		if paramID == 0 {
 			continue
 		}
@@ -603,13 +571,6 @@ func normalizeEndpointParamRows(c *server.Context, value any) []map[string]any {
 		})
 	}
 	return result
-}
-
-func endpointParamID(value any) uint64 {
-	if row, ok := value.(map[string]any); ok {
-		return util.ToUint64(row["param_id"])
-	}
-	return util.ToUint64(value)
 }
 
 func normalizeChildRecordRows(value any) []map[string]any {
@@ -643,7 +604,7 @@ func serviceParamDefaultKey(paramRow map[string]any) string {
 }
 
 func normalizeServiceParamMapping(c *server.Context, paramRow map[string]any, rule int16, value any) string {
-	paramType := normalizeParamControlType(util.ToStringTrimmed(paramRow["type"]))
+	paramType := botinput.NormalizeParamControlType(util.ToStringTrimmed(paramRow["type"]))
 	switch rule {
 	case paramRuleDirect:
 		return ""
@@ -651,15 +612,15 @@ func normalizeServiceParamMapping(c *server.Context, paramRow map[string]any, ru
 		if paramType != "option" && paramType != "multi_option" {
 			panicServiceParamField("选项映射只支持单选或多选参数")
 		}
-		mappings := decodeServiceParamOptionMappings(value)
+		mappings := botinput.DecodeServiceParamOptionMappings(value)
 		if len(mappings) == 0 {
 			panicServiceParamField("选项映射必须选择至少一个参数选项")
 		}
-		optionIDs := serviceParamOptionMappingIDs(mappings)
+		optionIDs := botinput.ServiceParamOptionMappingIDs(mappings)
 		if !paramOptionsExist(c, util.ToUint64(paramRow["id"]), optionIDs) {
 			panicServiceParamField("选项映射包含无效的参数选项")
 		}
-		return mustJSONString(serviceParamOptionMappingRows(mappings))
+		return mustJSONString(botinput.ServiceParamOptionMappingRows(mappings))
 	case paramRuleFileMap:
 		if paramType != "file" && paramType != "files" {
 			panicServiceParamField("附件映射只支持单文件或多文件参数")
@@ -702,13 +663,13 @@ func serviceParamMappingInput(paramID uint64, rule int16, row map[string]any) an
 		return value
 	}
 
-	mapping := decodeMappingObject(value)
+	mapping := botinput.DecodeMappingObject(value)
 	mapping["params"] = append([]uint64{paramID}, extraParamIDs...)
 	return mapping
 }
 
 func normalizeComboParamIDs(row map[string]any) []uint64 {
-	if ids := normalizeUint64List(row["combo_param_ids"]); len(ids) > 0 {
+	if ids := botinput.NormalizeUint64List(row["combo_param_ids"]); len(ids) > 0 {
 		return ids
 	}
 
@@ -745,7 +706,7 @@ func normalizeFixedServiceParamMapping(value any) string {
 }
 
 func normalizeServiceParamComboMapping(c *server.Context, value any) map[string]any {
-	mapping := decodeServiceParamComboMapping(value)
+	mapping := botinput.DecodeServiceParamComboMapping(value)
 	if len(mapping.ParamIDs) < 2 {
 		panicServiceParamField("组合映射必须包含主参数和至少一个参与参数")
 	}
@@ -789,7 +750,7 @@ func normalizeServiceParamComboMapping(c *server.Context, value any) map[string]
 		}
 	}
 
-	return serviceParamComboMappingPayload(mapping)
+	return botinput.ServiceParamComboMappingPayload(mapping)
 }
 
 func validateComboMappingParams(c *server.Context, paramIDs []uint64) {
@@ -798,7 +759,7 @@ func validateComboMappingParams(c *server.Context, paramIDs []uint64) {
 		if len(paramRow) == 0 {
 			panicServiceParamField("组合映射选择的参与参数不存在")
 		}
-		if !isOptionParamType(util.ToStringTrimmed(paramRow["type"])) {
+		if !botinput.IsOptionParamType(util.ToStringTrimmed(paramRow["type"])) {
 			panicServiceParamField("组合映射的参与参数只支持单选或多选参数")
 		}
 	}
@@ -816,24 +777,6 @@ func appendUniqueUint64(items []uint64, seen map[uint64]struct{}, value uint64) 
 	}
 	seen[value] = struct{}{}
 	return append(items, value), seen
-}
-
-func normalizeUint64Array(value any) []uint64 {
-	raw := decodeMappingArray(value)
-	result := make([]uint64, 0, len(raw))
-	seen := map[uint64]struct{}{}
-	for _, item := range raw {
-		id := util.ToUint64(item)
-		if id == 0 {
-			continue
-		}
-		if _, exists := seen[id]; exists {
-			continue
-		}
-		seen[id] = struct{}{}
-		result = append(result, id)
-	}
-	return result
 }
 
 func paramOptionsExist(c *server.Context, paramID uint64, optionIDs []uint64) bool {
@@ -928,7 +871,7 @@ func deleteServiceReferences(c *server.Context, serviceIDs []uint64) {
 }
 
 func collectDeleteIDs(record map[string]any) []uint64 {
-	return normalizeUint64Array(record["id"])
+	return botinput.NormalizeUint64List(record["id"])
 }
 
 func collectRowIDs(rows []map[string]any, field string) []uint64 {

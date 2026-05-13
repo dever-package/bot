@@ -1,0 +1,151 @@
+{
+  "page": {
+    "parent": "bot/agent/setting/list",
+    "sort": 10,
+    "auth": [
+      {
+        "key": "bot/agent/setting/create",
+        "name": "设定新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/agent/setting/update",
+        "name": "设定编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-select",
+        "id": "agent-setting-cate-select",
+        "value": "form.cate_id",
+        "mode": "form",
+        "option": "/front/route/option?type=model&use=bot.agent.NewSettingCateModel&filterField=status&filterValue=1&order=sort asc,id asc",
+        "validate": [
+          {
+            "type": "required",
+            "message": "设定分类不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[260px]",
+          "createOption": {
+            "name": "新增分类",
+            "pageRoute": "/bot/agent/setting_cate/update",
+            "description": "新增后可直接作为当前通用设定的分类。",
+            "size": "sm",
+            "bodyClassName": "py-2",
+            "selectCreated": true
+          }
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "例如：输出与交互协议",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "设定名称不能为空。"
+          },
+          {
+            "type": "model",
+            "except": "$form.id",
+            "message": "该分类下设定名称已存在。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-radio",
+        "value": "form.load_mode",
+        "mode": "form",
+        "info": "常驻：随方案直接加载正文；按需读取：先进入可读取目录，需要时再读取正文；手动读取：默认不参与自动运行。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "加载方式不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[520px]"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "例如：当需要生成图片、补全图片参数或处理参考图时读取。",
+        "value": "form.description",
+        "mode": "form",
+        "info": "按需读取时建议填写，用来告诉智能体这条设定什么时候该被读取。",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 3
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "填写通用设定正文。这里适合放所有智能体都可能复用的协议、规则、输出格式或能力调用规范。",
+        "value": "form.content",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+          "message": "设定正文不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 12
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "cate_id": 1,
+      "name": "",
+      "load_mode": "always",
+      "description": "",
+      "content": "",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "after": {
+        "type": "service",
+        "use": "bot.agent.AgentHook.AfterSaveSetting"
+      }
+    }
+  }
+}

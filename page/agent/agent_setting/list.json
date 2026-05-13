@@ -1,0 +1,148 @@
+{
+  "page": {
+    "name": "智能体设定",
+    "parent": "bot/agent/agent/list",
+    "type": 2,
+    "sort": 20
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "editor-shell": {
+            "type": "container",
+            "className": "min-w-0"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "返回上一页",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "back": true,
+          "fallback": "/bot/agent/agent/list"
+        }
+      }
+    ],
+    "editor-shell": [
+      {
+        "id": "agent-setting-type-editor",
+        "type": "type-editor",
+        "value": "state.selected_type",
+        "option": "option.setting_type",
+        "meta": {
+          "typeTitle": "设定类型",
+          "typeDescription": "核心设定优先维护；高级设定用于流程、输出、能力和样例补充。",
+          "typeField": "type",
+          "primaryKey": "id",
+          "loadApi": "/front/route/option?type=service&use=bot.agent.OptionService.LoadAgentSettings",
+          "loadParams": {
+            "parentId": "state.route.query.id"
+          },
+          "savePath": "bot/agent/agent_setting/update",
+          "saveBefore": {
+            "type": "service",
+            "use": "bot.agent.AgentHook.BeforeSaveAgentSetting"
+          },
+          "context": {
+            "agent_id": "state.route.query.id"
+          },
+          "defaultRecord": {
+            "load_mode": "always",
+            "status": 1
+          },
+          "fields": [
+            {
+              "id": "agent-setting-load-mode",
+              "type": "form-radio",
+              "name": "加载方式",
+              "placeholder": "请选择加载方式",
+              "value": "load_mode",
+              "option": "option.setting_load_mode",
+              "info": "常驻会随智能体运行加载；按需读取和手动读取用于后续上下文发现能力。",
+              "validate": [
+                {
+                  "type": "required",
+                  "message": "加载方式不能为空。"
+                }
+              ],
+              "meta": {
+                "control": [
+                  {
+                    "value": "always",
+                    "hide": ["agent-setting-description"]
+                  }
+                ]
+              }
+            },
+            {
+              "id": "agent-setting-description",
+              "type": "form-textarea",
+              "name": "使用说明",
+              "placeholder": "说明这个设定适合什么时候使用，或它约束了哪些行为。",
+              "value": "description",
+              "meta": {
+                "rows": 3
+              }
+            },
+            {
+              "type": "form-textarea",
+              "name": "设定正文",
+              "placeholder": "填写这个类型下的智能体专属设定。",
+              "value": "content",
+              "validate": [
+                {
+                  "type": "required",
+                  "message": "设定正文不能为空。"
+                }
+              ],
+              "meta": {
+                "rows": 14
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "智能体设定",
+    "description": "维护当前智能体的专属设定。左侧选择设定类型，右侧编辑该类型唯一设定。"
+    },
+    "option": {
+      "setting_type": "{{bot.agent.OptionService.LoadAgentSettingTypes}}",
+      "setting_load_mode": "{{bot.agent.OptionService.LoadSettingLoadModes}}"
+    }
+  },
+  "state": {
+    "selected_type": "identity"
+  },
+  "action": {}
+}

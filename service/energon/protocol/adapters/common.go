@@ -66,6 +66,10 @@ func deleteGatewayKeys(body map[string]any) {
 	delete(body, "power")
 }
 
+func isGatewayStreamOption(key string) bool {
+	return strings.EqualFold(strings.TrimSpace(key), "stream")
+}
+
 func isOpenAINativeBodyKey(key string) bool {
 	switch strings.ToLower(strings.TrimSpace(key)) {
 	case "temperature",

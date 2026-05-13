@@ -1,0 +1,151 @@
+{
+  "page": {
+    "parent": "bot/agent/agent_knowledge/list",
+    "type": 2,
+    "sort": 10,
+    "auth": [
+      {
+        "key": "bot/agent/agent_knowledge/create",
+        "name": "资料新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/agent/agent_knowledge/update",
+        "name": "资料编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "placeholder": "例如：主角设定集",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "资料名称不能为空。"
+          },
+          {
+            "type": "model",
+            "except": "$form.id",
+            "message": "该智能体下资料名称已存在。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-radio",
+        "value": "form.type",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "资料类型不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[640px]"
+        }
+      },
+      {
+        "id": "agent-knowledge-load-mode",
+        "type": "form-radio",
+        "value": "form.load_mode",
+        "mode": "form",
+        "info": "常驻：运行时直接加载正文；按需读取：后续用于上下文发现；手动读取：默认不参与自动运行。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "加载方式不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[520px]",
+          "control": [
+            {
+              "value": "always",
+              "hide": ["agent-knowledge-description"]
+            }
+          ]
+        }
+      },
+      {
+        "id": "agent-knowledge-description",
+        "type": "form-textarea",
+        "placeholder": "说明这份资料适合什么时候参考。",
+        "value": "form.description",
+        "mode": "form",
+        "info": "按需读取时建议填写清楚，后续可作为发现资料的摘要说明。",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 3
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "填写资料正文。适合放参考文档、背景资料、术语词表、示例样本或状态记录。",
+        "value": "form.content",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "资料正文不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 14
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "agent_id": "",
+      "name": "",
+      "type": "document",
+      "load_mode": "always",
+      "description": "",
+      "content": "",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.agent.AgentHook.BeforeSaveAgentKnowledge"
+      }
+    }
+  }
+}

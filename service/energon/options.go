@@ -5,6 +5,7 @@ import (
 	"github.com/shemic/dever/util"
 
 	botmodel "my/package/bot/model/energon"
+	botinput "my/package/bot/service/energon/input"
 )
 
 type ParamOptionService struct{}
@@ -35,7 +36,7 @@ func (ParamOptionService) ProviderLoadFileIndexOptions(c *server.Context, params
 		return []map[string]any{}
 	}
 
-	paramType := normalizeParamControlType(util.ToStringTrimmed(row["type"]))
+	paramType := botinput.NormalizeParamControlType(util.ToStringTrimmed(row["type"]))
 	maxFiles := 0
 	switch paramType {
 	case "file":

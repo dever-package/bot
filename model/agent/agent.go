@@ -7,45 +7,49 @@ import (
 )
 
 type Agent struct {
-	ID              uint64    `dorm:"primaryKey;autoIncrement;comment:智能体ID"`
-	Name            string    `dorm:"type:varchar(128);not null;comment:名称"`
-	Key             string    `dorm:"type:varchar(128);not null;comment:标识"`
-	Description     string    `dorm:"type:text;not null;default:'';comment:描述"`
-	Mode            string    `dorm:"type:varchar(32);not null;default:direct;comment:运行模式"`
-	LLMPowerID      uint64    `dorm:"type:bigint;not null;default:0;comment:LLM能力"`
-	SystemPrompt    string    `dorm:"type:text;not null;default:'';comment:系统提示词"`
-	DeveloperPrompt string    `dorm:"type:text;not null;default:'';comment:开发者提示词"`
-	Instruction     string    `dorm:"type:text;not null;default:'';comment:任务说明"`
-	Temperature     float64   `dorm:"type:double;not null;default:0.7;comment:温度"`
-	MaxSteps        int       `dorm:"type:int;not null;default:6;comment:最大步骤数"`
-	TimeoutSeconds  int       `dorm:"type:int;not null;default:300;comment:超时时间"`
-	Status          int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	Sort            int       `dorm:"type:int;not null;default:100;comment:排序"`
-	CreatedAt       time.Time `dorm:"comment:创建时间"`
+	ID             uint64    `dorm:"primaryKey;autoIncrement;comment:智能体ID"`
+	CateID         uint64    `dorm:"type:bigint;not null;default:1;comment:智能体分类"`
+	Name           string    `dorm:"type:varchar(128);not null;comment:名称"`
+	Key            string    `dorm:"type:varchar(128);not null;comment:标识"`
+	Description    string    `dorm:"type:text;not null;default:'';comment:描述"`
+	LLMPowerID     uint64    `dorm:"type:bigint;not null;default:0;comment:LLM能力"`
+	SettingPackID  uint64    `dorm:"type:bigint;not null;default:1;comment:执行方案"`
+	Temperature    float64   `dorm:"type:double precision;not null;default:0.7;comment:温度"`
+	TimeoutSeconds int       `dorm:"type:int;not null;default:300;comment:超时时间(秒)"`
+	Status         int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	Sort           int       `dorm:"type:int;not null;default:100;comment:排序"`
+	CreatedAt      time.Time `dorm:"comment:创建时间"`
 }
 
 type AgentIndex struct {
-	Key        struct{} `unique:"key"`
-	ModeStatus struct{} `index:"mode,status"`
-	StatusSort struct{} `index:"status,sort"`
+	Key               struct{} `unique:"key"`
+	CateStatusSort    struct{} `index:"cate_id,status,sort"`
+	SettingPackStatus struct{} `index:"setting_pack_id,status"`
+	StatusSort        struct{} `index:"status,sort"`
 }
 
 var (
-	agentModeOptions = []map[string]any{
-		{"id": "direct", "value": "直接执行"},
-		{"id": "react", "value": "ReAct"},
-		{"id": "plan", "value": "计划执行"},
-	}
-
 	statusOptions = []map[string]any{
 		{"id": 1, "value": "开启"},
 		{"id": 2, "value": "停用"},
+	}
+
+	agentCateRelation = orm.Relation{
+		Field:      "cate_id",
+		Option:     "bot.agent.NewAgentCateModel",
+		OptionKeys: []string{"name"},
 	}
 
 	agentLLMPowerRelation = orm.Relation{
 		Field:      "llm_power_id",
 		Option:     "bot.energon.NewPowerModel",
 		OptionKeys: []string{"name", "key", "kind"},
+	}
+
+	agentSettingPackRelation = orm.Relation{
+		Field:      "setting_pack_id",
+		Option:     "bot.agent.NewSettingPackModel",
+		OptionKeys: []string{"name"},
 	}
 )
 
@@ -55,11 +59,12 @@ func NewAgentModel() *orm.Model[Agent] {
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{
-			"mode":   agentModeOptions,
 			"status": statusOptions,
 		},
 		Relations: []orm.Relation{
+			agentCateRelation,
 			agentLLMPowerRelation,
+			agentSettingPackRelation,
 		},
 	})
 }

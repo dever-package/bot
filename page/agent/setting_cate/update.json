@@ -1,0 +1,57 @@
+{
+  "page": {
+    "parent": "bot/agent/setting/list",
+    "type": 2,
+    "sort": 9
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "placeholder": "例如：默认",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "分类名称不能为空。"
+          },
+          {
+            "type": "model",
+            "except": "$form.id",
+            "message": "该分类名称已存在，请更换。"
+          }
+        ]
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "name": "",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}

@@ -1,0 +1,332 @@
+{
+  "page": {
+    "name": "通用设定",
+    "icon": "file-text",
+    "parent": "bot/agent/setting_pack/list",
+    "type": 2,
+    "sort": 2
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "content-shell": {
+            "type": "container",
+            "className": "front-two-pane-layout",
+            "children": {
+              "category-column": {
+                "type": "container",
+                "className": "min-w-0",
+                "path": "/bot/agent/setting_cate/list",
+                "meta": {
+                  "updateDocumentTitle": false
+                }
+              },
+              "list-column": {
+                "type": "container",
+                "className": "flex min-w-0 flex-col gap-4",
+                "children": {
+                  "content-toolbar": {
+                    "type": "row",
+                    "className": "flex-wrap items-center gap-3"
+                  },
+                  "table-row": {
+                    "type": "container",
+                    "className": "overflow-hidden rounded-md border bg-background"
+                  }
+                }
+              }
+            }
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "返回方案",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/agent/setting_pack/list"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "新增设定",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "default",
+          "size": "sm"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.create",
+            "value": true
+          }
+        }
+      }
+    ],
+    "content-toolbar": [
+      {
+        "type": "form-input",
+        "placeholder": "筛选设定名称...",
+        "value": "search.keyword",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "状态",
+        "value": "search.status",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "加载方式",
+        "value": "search.load_mode",
+        "mode": "search"
+      },
+      {
+        "type": "show-button",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "重置",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/agent/setting/list"
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "savePath": "bot/agent/setting/update",
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "name",
+              "type": "show-base"
+            },
+            {
+              "value": "cate.name",
+              "name": "分类",
+              "type": "show-base"
+            },
+            {
+              "value": "load_mode",
+              "name": "加载方式",
+              "type": "show-tag"
+            },
+            {
+              "value": "status",
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "value": "sort",
+              "type": "show-base",
+              "editor": "form-number",
+              "trigger": "doubleClick",
+              "tip": "正序排序，数值越大越靠后。双击可修改。",
+              "meta": {
+                "controlClassName": "w-24"
+              }
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑设定",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.id",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.edit",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "trash-2",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "删除设定",
+                    "className": "text-destructive hover:text-destructive",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.deleteSetting",
+                          "value": "$row"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "confirm.delete",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.create",
+          "pageRoute": "/bot/agent/setting/update",
+          "description": "新增设定会默认带入当前左侧分类。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "cate_id": "data.search.cate_id"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.edit",
+          "pageRoute": "/bot/agent/setting/update",
+          "description": "通用设定正文在这里维护；加入方案后才会参与智能体运行。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.id"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "删除设定",
+        "info": "确认删除当前设定吗？删除后引用它的方案将不再加载它。",
+        "meta": {
+          "stateKey": "confirm.delete"
+        },
+        "action": {
+          "confirm": {
+            "type": "delete",
+            "params": "actionTarget.deleteSetting"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "通用设定",
+      "description": "维护所有智能体可复用的通用设定。分类只用于管理通用设定；运行时由方案决定加载哪些设定。"
+    },
+    "search": {
+      "keyword": "",
+      "cate_id": 1,
+      "status": "",
+      "load_mode": ""
+    },
+    "table": {
+      "page": 1,
+      "pageSize": 10,
+      "total": 0,
+      "searchFields": [
+        "name"
+      ],
+      "filterFields": [
+        "cate_id",
+        "status",
+        "load_mode"
+      ]
+    },
+    "actionTarget": {
+      "id": "",
+      "deleteSetting": {}
+    }
+  },
+  "state": {
+    "dialog": {
+      "create": false,
+      "edit": false
+    },
+    "confirm": {
+      "delete": false
+    }
+  },
+  "action": {}
+}

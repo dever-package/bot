@@ -1,0 +1,432 @@
+{
+  "page": {
+    "name": "通用设定",
+    "icon": "file-text",
+    "parent": "bot-agent",
+    "sort": 2
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "content-shell": {
+            "type": "container",
+            "className": "front-two-pane-layout",
+            "children": {
+              "pack-column": {
+                "type": "container",
+                "className": "min-w-0"
+              },
+              "list-column": {
+                "type": "container",
+                "className": "flex min-w-0 flex-col gap-4",
+                "children": {
+                  "content-toolbar": {
+                    "type": "row",
+                    "className": "flex-wrap items-center gap-3"
+                  },
+                  "table-row": {
+                    "type": "container",
+                    "className": "overflow-hidden rounded-md border bg-background"
+                  }
+                }
+              }
+            }
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "通用设定管理",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/agent/setting/list"
+        }
+      }
+    ],
+    "pack-column": [
+      {
+        "type": "show-category-list",
+        "id": "agent-setting-pack-category",
+        "value": "search.pack_id",
+        "option": "/front/route/option?type=model&use=bot.agent.NewSettingPackModel&order=sort asc,id asc&extraFields=status,sort",
+        "meta": {
+          "title": "方案",
+          "description": "设置通用设定方案",
+          "remote": true,
+          "defaultFirst": true,
+          "queryKey": "pack_id",
+          "createButton": {
+            "name": "新增方案",
+            "icon": "plus",
+            "variant": "outline",
+            "size": "sm",
+            "action": {
+              "click": {
+                "type": "modal",
+                "key": "dialog.createPack",
+                "value": true
+              }
+            }
+          },
+          "statusField": "status",
+          "statusDisplay": "select",
+          "statusChangeAction": {
+            "type": "save",
+            "path": "bot/agent/setting_pack/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "status": "$value"
+            }
+          },
+          "statusCases": [
+            {
+              "value": 1,
+              "text": "启用",
+              "tone": "success"
+            },
+            {
+              "value": 2,
+              "text": "停用",
+              "tone": "muted"
+            }
+          ],
+          "buttons": [
+            {
+              "icon": "square-pen",
+              "variant": "ghost",
+              "size": "sm",
+              "description": "编辑当前方案",
+              "action": {
+                "click": [
+                  {
+                    "type": "data",
+                    "key": "actionTarget.packId",
+                    "value": "$row.id"
+                  },
+                  {
+                    "type": "modal",
+                    "key": "dialog.editPack",
+                    "value": true
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "content-toolbar": [
+      {
+        "type": "show-button",
+        "name": "新增通用设定",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "icon": "plus"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.createSetting",
+            "value": true
+          }
+        }
+      },
+      {
+        "type": "form-select",
+        "placeholder": "状态",
+        "value": "search.status",
+        "mode": "search"
+      },
+      {
+        "type": "show-button",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "重置",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/agent/setting_pack/list"
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "savePath": "bot/agent/setting_pack_item/update",
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "setting.name",
+              "name": "设定",
+              "type": "show-base"
+            },
+            {
+              "value": "setting.cate_id",
+              "name": "分类",
+              "type": "show-tag",
+              "meta": {
+                "option": "option.setting_cate"
+              }
+            },
+            {
+              "value": "setting.load_mode",
+              "name": "加载方式",
+              "type": "show-tag",
+              "meta": {
+                "option": "option.setting_load_mode"
+              }
+            },
+            {
+              "value": "status",
+              "type": "show-tag"
+            },
+            {
+              "value": "sort",
+              "type": "show-base"
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑设定",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.editSettingId",
+                          "value": "$row.setting_id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.editSetting",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "eye",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看设定详情",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.viewSettingId",
+                          "value": "$row.setting_id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.viewSetting",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.createPack",
+          "pageRoute": "/bot/agent/setting_pack/update",
+          "description": "方案用于组合多个通用设定，智能体运行时选择一个方案加载。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "name": "新增通用设定",
+        "meta": {
+          "stateKey": "dialog.createSetting",
+          "pageRoute": "/bot/agent/setting/update",
+          "title": "新增通用设定",
+          "description": "新增通用设定同时会自动加入当前方案。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageDataPatches": {
+            "form.pack_id": "data.search.pack_id"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "name": "编辑通用设定",
+        "meta": {
+          "stateKey": "dialog.editSetting",
+          "pageRoute": "/bot/agent/setting/update",
+          "title": "编辑通用设定",
+          "description": "编辑当前方案里的通用设定。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.editSettingId"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.editPack",
+          "pageRoute": "/bot/agent/setting_pack/update",
+          "description": "维护当前方案，以及方案内设定顺序。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.packId"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.viewSetting",
+          "pageRoute": "/bot/agent/setting/view",
+          "description": "查看当前方案引用的通用设定正文。",
+          "pageRouteQuery": {
+            "id": "data.actionTarget.viewSettingId"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "通用设定方案",
+      "description": "维护智能体运行时使用的通用设定方案。左侧选择方案，右侧维护这个方案下启用的通用设定。"
+    },
+    "search": {
+      "pack_id": 1,
+      "status": ""
+    },
+    "option": {
+      "setting_cate": "{{bot.agent.OptionService.LoadSettingCates}}",
+      "setting_load_mode": [
+        {
+          "id": "always",
+          "value": "常驻"
+        },
+        {
+          "id": "discover",
+          "value": "按需读取"
+        },
+        {
+          "id": "manual",
+          "value": "手动读取"
+        }
+      ]
+    },
+    "table": {
+      "list": "<<bot.agent.NewSettingPackItemModel>>",
+      "page": 1,
+      "pageSize": 10,
+      "total": 0,
+      "filterFields": [
+        "pack_id",
+        "status"
+      ]
+    },
+    "actionTarget": {
+      "packId": "",
+      "editSettingId": "",
+      "viewSettingId": ""
+    }
+  },
+  "state": {
+    "dialog": {
+      "createPack": false,
+      "editPack": false,
+      "createSetting": false,
+      "editSetting": false,
+      "viewSetting": false
+    }
+  },
+  "action": {}
+}

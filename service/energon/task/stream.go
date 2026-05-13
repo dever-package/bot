@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	botprotocol "my/package/bot/service/energon/protocol"
@@ -15,7 +14,6 @@ import (
 const (
 	defaultPollMaxAttempts   = 60
 	defaultPollInterval      = 3 * time.Second
-	defaultPollEstimateMax   = 100
 	plainMediaRequestTimeout = 9 * time.Minute
 )
 
@@ -54,9 +52,6 @@ func (s Service) ResolveResponse(ctx context.Context, job ResponseJob) (any, boo
 }
 
 func (s Service) runRequest(ctx context.Context, spec StreamTaskSpec, job StreamJob) (StreamResult, error) {
-	if err := writeProgress(job.Write, taskStartText(spec, job), spec.StartProgress); err != nil {
-		return StreamResult{Handled: true}, err
-	}
 	if !spec.PlainRequest && canStreamRequest(job) {
 		return s.runStreamRequest(ctx, spec, job)
 	}
@@ -69,9 +64,6 @@ func (s Service) runStreamRequest(ctx context.Context, spec StreamTaskSpec, job 
 		return s.runPlainRequest(ctx, spec, job)
 	}
 
-	stopEstimate := startEstimatedProgress(ctx, spec, job)
-	defer stopEstimate()
-
 	rawChunks := make([]string, 0)
 	resp, err := streamClient.Stream(ctx, job.Request, func(chunk botprovider.StreamChunk) error {
 		rawChunks = append(rawChunks, encodeSSEChunk(chunk))
@@ -82,23 +74,10 @@ func (s Service) runStreamRequest(ctx context.Context, spec StreamTaskSpec, job 
 		if fmt.Sprint(output["event"]) == "end" {
 			return nil
 		}
-		if botprotocol.HasMediaOutput(output) {
-			output["event"] = "progress"
+		if botprotocol.HasMediaOutput(output) || output["meta"] != nil {
+			output["event"] = "status"
 			if _, exists := output["text"]; !exists {
 				output["text"] = taskPartialText(spec, job)
-			}
-			if _, exists := output["progress"]; !exists {
-				output["progress"] = estimateMax(spec)
-			}
-			return writeTaskOutput(job.Write, output)
-		}
-		if _, ok := output["meta"]; ok {
-			output["event"] = "progress"
-			if _, exists := output["text"]; !exists {
-				output["text"] = taskAlmostDoneText(spec, job)
-			}
-			if _, exists := output["progress"]; !exists {
-				output["progress"] = estimateMax(spec)
 			}
 			return writeTaskOutput(job.Write, output)
 		}
@@ -113,7 +92,7 @@ func (s Service) runStreamRequest(ctx context.Context, spec StreamTaskSpec, job 
 	if len(rawChunks) > 0 {
 		resp.Body = strings.Join(rawChunks, "")
 	}
-	if err := ensureProviderOK(spec.StartText, resp); err != nil {
+	if err := ensureProviderOK(taskActionText(spec, job), resp); err != nil {
 		return StreamResult{Response: resp, Handled: true}, err
 	}
 
@@ -122,24 +101,17 @@ func (s Service) runStreamRequest(ctx context.Context, spec StreamTaskSpec, job 
 		return StreamResult{Response: resp, Handled: true}, err
 	}
 	data = normalizeRequestTaskData(spec, data)
-	stopEstimate()
-	stopEstimate = func() {}
-	if err := writeProgress(job.Write, taskDoneText(spec, job), spec.DoneProgress); err != nil {
-		return StreamResult{Response: resp, Data: data, Handled: true}, err
-	}
 	return StreamResult{Response: resp, Data: data, Handled: true}, nil
 }
 
 func (s Service) runPlainRequest(ctx context.Context, spec StreamTaskSpec, job StreamJob) (StreamResult, error) {
-	stopEstimate := startEstimatedProgress(ctx, spec, job)
-	defer stopEstimate()
-
 	job.Request = withPlainRequestTimeout(spec, job.Request)
+
 	resp, err := job.Client.Do(ctx, job.Request)
 	if err != nil {
 		return StreamResult{Response: resp, Handled: true}, err
 	}
-	if err := ensureProviderOK(spec.StartText, resp); err != nil {
+	if err := ensureProviderOK(taskActionText(spec, job), resp); err != nil {
 		return StreamResult{Response: resp, Handled: true}, err
 	}
 
@@ -148,11 +120,6 @@ func (s Service) runPlainRequest(ctx context.Context, spec StreamTaskSpec, job S
 		return StreamResult{Response: resp, Handled: true}, err
 	}
 	data = normalizeRequestTaskData(spec, data)
-	stopEstimate()
-	stopEstimate = func() {}
-	if err := writeProgress(job.Write, taskDoneText(spec, job), spec.DoneProgress); err != nil {
-		return StreamResult{Response: resp, Data: data, Handled: true}, err
-	}
 	return StreamResult{Response: resp, Data: data, Handled: true}, nil
 }
 
@@ -166,7 +133,7 @@ func (s Service) runPollingCreate(ctx context.Context, spec StreamTaskSpec, job 
 	if err != nil {
 		return StreamResult{Response: resp, Handled: true}, err
 	}
-	if err := ensureProviderOK(spec.StartText, resp); err != nil {
+	if err := ensureProviderOK(taskActionText(spec, job), resp); err != nil {
 		return StreamResult{Response: resp, Handled: true}, err
 	}
 
@@ -180,7 +147,7 @@ func (s Service) pollResult(
 	adapter PollingAdapter,
 	job StreamJob,
 	initialResp *botprovider.Response,
-	write ProgressWriter,
+	write StreamWriter,
 ) (any, error) {
 	taskID, err := adapter.ParseTaskID(job.Input, initialResp)
 	if err != nil {
@@ -190,9 +157,6 @@ func (s Service) pollResult(
 		return job.Adapter.BuildClientResponse(job.Input.Request, initialResp)
 	}
 	registerRemoteCancel(adapter, job, taskID)
-	if err := writeProgress(write, taskMessage(spec.CreatedText, taskID), estimateStart(spec)+5); err != nil {
-		return nil, err
-	}
 
 	maxAttempts := pollMaxAttempts(job.Input.Request.Options, spec.MaxAttempts)
 	interval := pollInterval(job.Input.Request.Options, spec.PollInterval)
@@ -224,17 +188,9 @@ func (s Service) pollResult(
 		status = normalizeTerminalTaskStatus(status)
 		switch status.State {
 		case TaskStateSucceeded:
-			if err := writeProgress(write, firstText(spec.DoneText, status.Message), spec.DoneProgress); err != nil {
-				return nil, err
-			}
 			return job.Adapter.BuildClientResponse(job.Input.Request, resp)
 		case TaskStateFailed:
 			return nil, fmt.Errorf("%s", firstText(taskStatusText(status.Message), taskStatusText(status.Label), "长任务失败"))
-		default:
-			progress := estimatePollingProgress(spec, attempt, maxAttempts)
-			if err := writeProgress(write, taskMessage(firstText(status.Message, spec.RunningText), status.Label), progress); err != nil {
-				return nil, err
-			}
 		}
 	}
 
@@ -264,18 +220,6 @@ func streamTaskSpec(adapter botprotocol.Adapter, input botprotocol.NativeInput) 
 }
 
 func normalizeStreamTaskSpec(spec StreamTaskSpec) StreamTaskSpec {
-	if spec.StartProgress == 0 {
-		spec.StartProgress = 20
-	}
-	if spec.DoneProgress <= 0 {
-		spec.DoneProgress = 100
-	}
-	if spec.EstimateMax <= 0 {
-		spec.EstimateMax = 90
-	}
-	if spec.EstimateMax > 99 {
-		spec.EstimateMax = 99
-	}
 	if spec.MaxAttempts <= 0 {
 		spec.MaxAttempts = defaultPollMaxAttempts
 	}
@@ -285,123 +229,11 @@ func normalizeStreamTaskSpec(spec StreamTaskSpec) StreamTaskSpec {
 	return spec
 }
 
-func startEstimatedProgress(ctx context.Context, spec StreamTaskSpec, job StreamJob) func() {
-	if !spec.EstimateProgress || job.Write == nil {
-		return func() {}
-	}
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	var once sync.Once
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(1500 * time.Millisecond)
-		defer ticker.Stop()
-
-		progress := estimateStart(spec)
-		maxProgress := estimateMax(spec)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-stop:
-				return
-			case <-ticker.C:
-				next := nextEstimatedProgress(progress, maxProgress)
-				if next == progress {
-					continue
-				}
-				progress = next
-				_ = writeProgress(job.Write, taskPartialText(spec, job), progress)
-			}
-		}
-	}()
-	return func() {
-		once.Do(func() {
-			close(stop)
-			<-done
-		})
-	}
-}
-
-func estimatePollingProgress(spec StreamTaskSpec, attempt int, maxAttempts int) int {
-	if maxAttempts <= 0 {
-		return estimateMax(spec)
-	}
-	start := estimateStart(spec)
-	maxProgress := estimateMax(spec)
-	estimateAttempts := maxAttempts
-	if estimateAttempts > defaultPollEstimateMax {
-		estimateAttempts = defaultPollEstimateMax
-	}
-	progress := start + (attempt+1)*(maxProgress-start)/estimateAttempts
-	if progress < start {
-		return start
-	}
-	if progress > maxProgress {
-		return maxProgress
-	}
-	return progress
-}
-
-func nextEstimatedProgress(current int, maxProgress int) int {
-	if current < 0 {
-		current = 0
-	}
-	if maxProgress <= 0 || current >= maxProgress {
-		return current
-	}
-	step := (maxProgress - current) / 6
-	if step < 1 {
-		step = 1
-	}
-	next := current + step
-	if next > maxProgress {
-		return maxProgress
-	}
-	return next
-}
-
-func estimateStart(spec StreamTaskSpec) int {
-	if spec.StartProgress < 0 {
-		return 0
-	}
-	if spec.StartProgress > 100 {
-		return 100
-	}
-	return spec.StartProgress
-}
-
-func estimateMax(spec StreamTaskSpec) int {
-	if spec.EstimateMax <= 0 {
-		return 90
-	}
-	if spec.EstimateMax > 99 {
-		return 99
-	}
-	return spec.EstimateMax
-}
-
-func writeProgress(write ProgressWriter, text string, progress int) error {
-	if write == nil {
-		return nil
-	}
-	output := botprotocol.Output{
-		"event": "progress",
-		"text":  strings.TrimSpace(text),
-	}
-	if progress >= 0 {
-		if progress > 100 {
-			progress = 100
-		}
-		output["progress"] = progress
-	}
-	return write(output)
-}
-
-func writeTaskOutput(write ProgressWriter, output botprotocol.Output) error {
+func writeTaskOutput(write StreamWriter, output botprotocol.Output) error {
 	if write == nil || len(output) == 0 {
 		return nil
 	}
+	botprotocol.StripOutputProgress(output)
 	return write(output)
 }
 
@@ -413,21 +245,6 @@ func ensureProviderOK(label string, resp *botprovider.Response) error {
 		return nil
 	}
 	return fmt.Errorf("%s失败: status=%d body=%s", firstText(label, "请求来源"), resp.StatusCode, botprotocol.AsText(resp.Body))
-}
-
-func taskMessage(format string, value string) string {
-	format = strings.TrimSpace(format)
-	value = taskStatusText(value)
-	if format == "" {
-		return value
-	}
-	if value == "" {
-		return format
-	}
-	if strings.Contains(format, "%s") {
-		return fmt.Sprintf(format, value)
-	}
-	return format + ": " + value
 }
 
 func taskStatusText(value string) string {
@@ -576,51 +393,14 @@ func encodeSSEChunk(chunk botprovider.StreamChunk) string {
 	return builder.String()
 }
 
-func taskStartText(spec StreamTaskSpec, job StreamJob) string {
-	if text := strings.TrimSpace(spec.StartText); text != "" {
-		return text
-	}
-	return "正在生成" + taskOutputLabel(spec, job)
-}
-
 func taskPartialText(spec StreamTaskSpec, job StreamJob) string {
-	if text := strings.TrimSpace(spec.RunningText); text != "" {
-		return text
-	}
-	return taskOutputLabel(spec, job) + "生成中"
+	return taskOutputLabel(spec, job) + "生成中，请稍后"
 }
 
-func taskAlmostDoneText(spec StreamTaskSpec, job StreamJob) string {
-	return taskOutputLabel(spec, job) + "生成即将完成"
-}
-
-func taskDoneText(spec StreamTaskSpec, job StreamJob) string {
-	if text := strings.TrimSpace(spec.DoneText); text != "" {
-		return text
-	}
-	return taskOutputLabel(spec, job) + "生成完成"
+func taskActionText(spec StreamTaskSpec, job StreamJob) string {
+	return taskOutputLabel(spec, job) + "生成"
 }
 
 func taskOutputLabel(spec StreamTaskSpec, job StreamJob) string {
-	switch strings.ToLower(strings.TrimSpace(spec.OutputType)) {
-	case botprotocol.MediaTypeImage, "images":
-		return "图片"
-	case botprotocol.MediaTypeVideo, "videos":
-		return "视频"
-	case botprotocol.MediaTypeAudio, "audios":
-		return "音频"
-	case botprotocol.MediaTypeFile, "files":
-		return "文件"
-	}
-
-	switch strings.ToLower(strings.TrimSpace(firstText(job.Input.Service.Type, job.Input.Power.Kind))) {
-	case "image", "images":
-		return "图片"
-	case "video", "videos":
-		return "视频"
-	case "audio", "audios":
-		return "音频"
-	default:
-		return "内容"
-	}
+	return botprotocol.MediaOutputLabel(spec.OutputType, job.Input.Service.Type, job.Input.Power.Kind)
 }

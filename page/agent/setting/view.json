@@ -1,0 +1,37 @@
+{
+  "page": {
+    "name": "设定详情",
+    "parent": "bot/agent/setting/list",
+    "type": 2,
+    "sort": 11
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "content-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "content-card": [
+      {
+        "type": "show-base",
+        "value": "form.content",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words"
+      }
+    ]
+  },
+  "data": {
+    "form": {}
+  },
+  "state": {},
+  "action": {}
+}

@@ -82,17 +82,10 @@ func (RhApiAdapter) BuildClientResponse(req *botprotocol.ShemicRequest, resp *bo
 func (RhApiAdapter) StreamTaskSpec(input botprotocol.NativeInput) (bottask.StreamTaskSpec, bool) {
 	outputType := rhapiOutputType(input)
 	return bottask.StreamTaskSpec{
-		Kind:          bottask.StreamKindPolling,
-		OutputType:    outputType,
-		StartText:     "正在请求 RunningHub 任务生成",
-		CreatedText:   "已创建 RunningHub 任务: %s",
-		RunningText:   "RunningHub 任务生成中，请稍候",
-		DoneText:      "RunningHub 任务生成完成",
-		StartProgress: 5,
-		DoneProgress:  100,
-		EstimateMax:   90,
-		MaxAttempts:   rhapiPollMax,
-		PollInterval:  rhapiPollDelayMS * time.Millisecond,
+		Kind:         bottask.StreamKindPolling,
+		OutputType:   outputType,
+		MaxAttempts:  rhapiPollMax,
+		PollInterval: rhapiPollDelayMS * time.Millisecond,
 	}, true
 }
 

@@ -9,9 +9,11 @@ import (
 	"github.com/google/uuid"
 
 	botmodel "my/package/bot/model/energon"
+	botlog "my/package/bot/service/energon/log"
 	botprotocol "my/package/bot/service/energon/protocol"
 	botadapters "my/package/bot/service/energon/protocol/adapters"
 	botprovider "my/package/bot/service/energon/provider"
+	botruntime "my/package/bot/service/energon/runtime"
 	bottask "my/package/bot/service/energon/task"
 )
 
@@ -19,7 +21,8 @@ type GatewayService struct {
 	repo          Repo
 	dispatcher    Dispatcher
 	accounts      AccountSelector
-	logs          LogService
+	logs          botlog.Service
+	runtimeStats  botruntime.StatService
 	streams       StreamService
 	streamCancels *streamCancelRegistry
 	tasks         bottask.Service
@@ -40,7 +43,8 @@ func NewGatewayServiceWithClient(client botprovider.Client) GatewayService {
 		repo:          repo,
 		dispatcher:    NewDispatcher(),
 		accounts:      NewAccountSelector(repo),
-		logs:          NewLogService(),
+		logs:          botlog.NewService(),
+		runtimeStats:  botruntime.NewStatService(),
 		streams:       NewStreamService(),
 		streamCancels: newStreamCancelRegistry(),
 		client:        client,

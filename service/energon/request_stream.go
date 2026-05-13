@@ -15,12 +15,15 @@ func (s GatewayService) StartStream(ctx context.Context, raw GatewayRequest) bot
 	raw.Body = botprotocol.NormalizeRequestBody(raw.Body)
 	s.streamCancels.Init(raw.RequestID)
 
+	now := time.Now()
 	start := botprotocol.BuildStreamResponse(raw.RequestID, botprotocol.Output{
 		"event": "start",
-		"text":  "流式调用已开始",
+		"text":  "等待生成结果",
 		"meta": map[string]any{
-			"stream_key": StreamKey(raw.RequestID),
-			"cancelable": false,
+			"stream_key":    StreamKey(raw.RequestID),
+			"cancelable":    false,
+			"started_at":    now.Format(time.RFC3339Nano),
+			"started_at_ms": now.UnixMilli(),
 		},
 	})
 

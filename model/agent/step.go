@@ -33,7 +33,7 @@ var (
 		{"id": "skill_catalog", "value": "技能目录"},
 		{"id": "skill_select", "value": "技能选择"},
 		{"id": "skill_load", "value": "技能加载"},
-		{"id": "prompt", "value": "提示词"},
+		{"id": "context", "value": "运行上下文"},
 		{"id": "llm_delta", "value": "LLM片段"},
 		{"id": "final", "value": "最终输出"},
 		{"id": "error", "value": "错误"},
@@ -48,9 +48,10 @@ var (
 	}
 
 	stepRunRelation = orm.Relation{
-		Field:      "run_id",
-		Option:     "bot.agent.NewRunModel",
-		OptionKeys: []string{"request_id", "agent_id", "status"},
+		Field:            "run_id",
+		Option:           "bot.agent.NewRunModel",
+		OptionKeys:       []string{"request_id", "agent_id", "status"},
+		OptionLabelField: "request_id",
 	}
 )
 

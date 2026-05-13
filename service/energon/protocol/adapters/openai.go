@@ -67,15 +67,9 @@ func (OpenAIAdapter) StreamTaskSpec(input botprotocol.NativeInput) (bottask.Stre
 	}
 
 	return bottask.StreamTaskSpec{
-		Kind:             bottask.StreamKindRequest,
-		OutputType:       outputType,
-		StartText:        "正在调用来源服务: " + strings.TrimSpace(input.Service.Name),
-		RunningText:      "来源服务处理中",
-		DoneText:         "生成完成",
-		StartProgress:    5,
-		EstimateProgress: true,
-		EstimateMax:      90,
-		PlainRequest:     true,
+		Kind:         bottask.StreamKindRequest,
+		OutputType:   outputType,
+		PlainRequest: true,
 	}, true
 }
 
@@ -168,7 +162,7 @@ func skipOpenAIConfiguredOption(input botprotocol.NativeInput, key string) bool 
 	if openAIConfiguredOutputType(input) == "" {
 		return false
 	}
-	return strings.EqualFold(strings.TrimSpace(key), "stream")
+	return isGatewayStreamOption(key)
 }
 
 func openAIConfiguredOutputType(input botprotocol.NativeInput) string {

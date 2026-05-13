@@ -1,6 +1,6 @@
 {
   "page": {
-    "name": "智能体管理",
+    "name": "智能体",
     "icon": "bot",
     "parent": "bot-agent",
     "sort": 1
@@ -22,9 +22,29 @@
         "type": "main",
         "className": "flex flex-1 flex-col gap-5 sm:gap-6",
         "children": {
-          "table-row": {
+          "content-shell": {
             "type": "container",
-            "className": "overflow-hidden rounded-md border bg-background"
+            "className": "front-two-pane-layout",
+            "children": {
+              "category-column": {
+                "type": "container",
+                "className": "min-w-0",
+                "path": "/bot/agent/agent_cate/list",
+                "meta": {
+                  "updateDocumentTitle": false
+                }
+              },
+              "list-column": {
+                "type": "container",
+                "className": "flex min-w-0 flex-col gap-4",
+                "children": {
+                  "table-row": {
+                    "type": "container",
+                    "className": "overflow-hidden rounded-md border bg-background"
+                  }
+                }
+              }
+            }
           },
           "feedback-shell": {
             "type": "container"
@@ -69,7 +89,7 @@
           "totalPath": "data.table.total",
           "remote": true,
           "externalPagination": true,
-          "savePath": "bot/agent/update",
+          "savePath": "bot/agent/agent/update",
           "rowKey": "id",
           "columns": [
             {
@@ -81,12 +101,13 @@
               "type": "show-base"
             },
             {
-              "value": "mode",
-              "type": "show-tag"
-            },
-            {
               "value": "llm_power.name",
               "name": "LLM能力",
+              "type": "show-base"
+            },
+            {
+              "value": "setting_pack.name",
+              "name": "执行方案",
               "type": "show-base"
             },
             {
@@ -135,14 +156,44 @@
                     }
                   },
                   {
-                    "icon": "list-checks",
+                    "icon": "file-text",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "查看运行记录",
-                    "to": "/bot/agent/run/list",
+                    "description": "设定",
+                    "to": "/bot/agent/agent_setting/list",
+                    "searchParam": "id",
+                    "searchField": "id",
+                    "withBack": true
+                  },
+                  {
+                    "icon": "book-open",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "资料",
+                    "to": "/bot/agent/agent_knowledge/list",
                     "searchParam": "agent_id",
                     "searchField": "id",
                     "withBack": true
+                  },
+                  {
+                    "icon": "message-circle",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "测试智能体",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.testAgent",
+                          "value": "$row"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.test",
+                          "value": true
+                        }
+                      ]
+                    }
                   },
                   {
                     "icon": "trash-2",
@@ -180,8 +231,8 @@
         "type": "feedback-modal",
         "meta": {
           "stateKey": "dialog.edit",
-          "pageRoute": "/bot/agent/update",
-          "description": "配置智能体提示词、运行模式与默认调用的 LLM 能力。",
+          "pageRoute": "/bot/agent/agent/update",
+          "description": "配置智能体 LLM 能力和通用设定方案。",
           "size": "xl",
           "footer": {
             "confirm": true,
@@ -196,12 +247,32 @@
         "type": "feedback-modal",
         "meta": {
           "stateKey": "dialog.create",
-          "pageRoute": "/bot/agent/update",
-          "description": "创建智能体后，后续运行时会基于提示词、模式和 Energon 能力执行。",
+          "pageRoute": "/bot/agent/agent/update",
+          "description": "创建智能体后，运行时会基于方案、智能体设定和 Energon 能力执行。",
           "size": "xl",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "cate_id": "data.search.cate_id"
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "name": "测试智能体",
+        "info": "当前弹窗内保留临时上下文，关闭后会重新开始新对话。",
+        "meta": {
+          "stateKey": "dialog.test",
+          "formSection": "agent-panel",
+          "titleNamePath": "data.actionTarget.testAgent.name",
+          "titleKeyPath": "data.actionTarget.testAgent.key",
+          "size": "3xl",
+          "bodyScroll": false,
+          "footer": {
+            "close": false,
+            "confirm": false
           }
         }
       },
@@ -219,28 +290,51 @@
           }
         }
       }
+    ],
+    "agent-panel": [
+      {
+        "id": "agent-stream",
+        "type": "show-agent",
+        "meta": {
+          "agentPath": "data.actionTarget.testAgent.key",
+          "agentNamePath": "data.actionTarget.testAgent.name",
+          "openPath": "state.dialog.test",
+          "requestApi": "/bot/agent/run",
+          "streamApi": "/bot/agent/stream",
+          "stopApi": "/bot/agent/stop",
+          "paramApi": "/bot/energon/power_params",
+          "blockMs": 1000
+        }
+      }
     ]
   },
   "data": {
     "page": {
-      "title": "智能体管理",
-      "description": "维护智能体基础设定。第一阶段只配置 Prompt、运行模式和 Energon LLM 能力，不保存 provider、model、apikey 等来源配置。"
+      "title": "智能体",
+      "description": "维护智能体基础设定。运行时会追加智能体设定、能力、skills 和临时上下文。"
     },
     "table": {
-      "list": "<<bot.agent.NewAgentModel>>",
       "page": 1,
       "pageSize": 10,
-      "total": 0
+      "total": 0,
+      "filterFields": [
+        "cate_id"
+      ]
+    },
+    "search": {
+      "cate_id": ""
     },
     "actionTarget": {
       "editAgentId": "",
-      "deleteAgent": {}
+      "deleteAgent": {},
+      "testAgent": {}
     }
   },
   "state": {
     "dialog": {
       "edit": false,
-      "create": false
+      "create": false,
+      "test": false
     },
     "confirm": {
       "delete": false

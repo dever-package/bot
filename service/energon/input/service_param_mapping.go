@@ -1,4 +1,4 @@
-package energon
+package input
 
 import (
 	"encoding/json"
@@ -7,28 +7,28 @@ import (
 	"github.com/shemic/dever/util"
 )
 
-type serviceParamOptionMapping struct {
+type ServiceParamOptionMapping struct {
 	OptionID    uint64
 	NativeValue string
 }
 
-type serviceParamComboMapping struct {
+type ServiceParamComboMapping struct {
 	ParamIDs []uint64
-	Rows     []serviceParamComboRow
+	Rows     []ServiceParamComboRow
 }
 
-type serviceParamComboRow struct {
+type ServiceParamComboRow struct {
 	Values      map[uint64]uint64
 	NativeValue string
 }
 
-func decodeServiceParamOptionMappings(value any) []serviceParamOptionMapping {
+func DecodeServiceParamOptionMappings(value any) []ServiceParamOptionMapping {
 	raw := decodeMappingArray(value)
 	if len(raw) == 0 {
 		return nil
 	}
 
-	items := make([]serviceParamOptionMapping, 0, len(raw))
+	items := make([]ServiceParamOptionMapping, 0, len(raw))
 	seen := map[uint64]struct{}{}
 	for _, item := range raw {
 		optionID := serviceParamOptionID(item)
@@ -39,7 +39,7 @@ func decodeServiceParamOptionMappings(value any) []serviceParamOptionMapping {
 			continue
 		}
 		seen[optionID] = struct{}{}
-		items = append(items, serviceParamOptionMapping{
+		items = append(items, ServiceParamOptionMapping{
 			OptionID:    optionID,
 			NativeValue: serviceParamOptionNativeValue(item),
 		})
@@ -73,7 +73,7 @@ func serviceParamOptionNativeValue(value any) string {
 	return ""
 }
 
-func serviceParamOptionMappingIDs(items []serviceParamOptionMapping) []uint64 {
+func ServiceParamOptionMappingIDs(items []ServiceParamOptionMapping) []uint64 {
 	ids := make([]uint64, 0, len(items))
 	for _, item := range items {
 		if item.OptionID > 0 {
@@ -83,7 +83,7 @@ func serviceParamOptionMappingIDs(items []serviceParamOptionMapping) []uint64 {
 	return ids
 }
 
-func serviceParamOptionMappingRows(items []serviceParamOptionMapping) []map[string]any {
+func ServiceParamOptionMappingRows(items []ServiceParamOptionMapping) []map[string]any {
 	rows := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		if item.OptionID == 0 {
@@ -97,12 +97,12 @@ func serviceParamOptionMappingRows(items []serviceParamOptionMapping) []map[stri
 	return rows
 }
 
-func decodeServiceParamComboMapping(value any) serviceParamComboMapping {
-	raw := decodeMappingObject(value)
-	params := normalizeUint64List(raw["params"])
+func DecodeServiceParamComboMapping(value any) ServiceParamComboMapping {
+	raw := DecodeMappingObject(value)
+	params := NormalizeUint64List(raw["params"])
 	rawRows := decodeMappingArray(raw["rows"])
 
-	rows := make([]serviceParamComboRow, 0, len(rawRows))
+	rows := make([]ServiceParamComboRow, 0, len(rawRows))
 	for _, item := range rawRows {
 		row := serviceParamComboMappingRow(item)
 		if len(row.Values) > 0 {
@@ -110,16 +110,16 @@ func decodeServiceParamComboMapping(value any) serviceParamComboMapping {
 		}
 	}
 
-	return serviceParamComboMapping{
+	return ServiceParamComboMapping{
 		ParamIDs: params,
 		Rows:     rows,
 	}
 }
 
-func serviceParamComboMappingRow(value any) serviceParamComboRow {
+func serviceParamComboMappingRow(value any) ServiceParamComboRow {
 	raw, _ := value.(map[string]any)
 	if raw == nil {
-		return serviceParamComboRow{}
+		return ServiceParamComboRow{}
 	}
 
 	values := map[uint64]uint64{}
@@ -138,13 +138,13 @@ func serviceParamComboMappingRow(value any) serviceParamComboRow {
 		}
 	}
 
-	return serviceParamComboRow{
+	return ServiceParamComboRow{
 		Values:      values,
 		NativeValue: serviceParamOptionNativeValue(raw),
 	}
 }
 
-func serviceParamComboMappingPayload(mapping serviceParamComboMapping) map[string]any {
+func ServiceParamComboMappingPayload(mapping ServiceParamComboMapping) map[string]any {
 	rows := make([]map[string]any, 0, len(mapping.Rows))
 	for _, row := range mapping.Rows {
 		values := map[string]any{}
@@ -165,7 +165,49 @@ func serviceParamComboMappingPayload(mapping serviceParamComboMapping) map[strin
 	}
 }
 
-func decodeMappingObject(value any) map[string]any {
+func decodeMappingArray(value any) []any {
+	switch current := value.(type) {
+	case []any:
+		return current
+	case []map[string]any:
+		result := make([]any, 0, len(current))
+		for _, item := range current {
+			if item != nil {
+				result = append(result, item)
+			}
+		}
+		return result
+	case []uint64:
+		result := make([]any, 0, len(current))
+		for _, item := range current {
+			result = append(result, item)
+		}
+		return result
+	case []int:
+		result := make([]any, 0, len(current))
+		for _, item := range current {
+			result = append(result, item)
+		}
+		return result
+	case string:
+		trimmed := strings.TrimSpace(current)
+		if trimmed == "" {
+			return nil
+		}
+		var result []any
+		if err := json.Unmarshal([]byte(trimmed), &result); err == nil {
+			return result
+		}
+		return []any{trimmed}
+	default:
+		if current == nil {
+			return nil
+		}
+		return []any{current}
+	}
+}
+
+func DecodeMappingObject(value any) map[string]any {
 	switch current := value.(type) {
 	case map[string]any:
 		return current
@@ -182,7 +224,7 @@ func decodeMappingObject(value any) map[string]any {
 	return map[string]any{}
 }
 
-func normalizeUint64List(value any) []uint64 {
+func NormalizeUint64List(value any) []uint64 {
 	raw := decodeMappingArray(value)
 	result := make([]uint64, 0, len(raw))
 	seen := map[uint64]struct{}{}

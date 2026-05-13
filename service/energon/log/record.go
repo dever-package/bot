@@ -1,4 +1,4 @@
-package energon
+package log
 
 import (
 	"context"
@@ -7,13 +7,13 @@ import (
 	botmodel "my/package/bot/model/energon"
 )
 
-type LogService struct{}
+type Service struct{}
 
-func NewLogService() LogService {
-	return LogService{}
+func NewService() Service {
+	return Service{}
 }
 
-func (LogService) Record(ctx context.Context, item botmodel.Log) (record botmodel.Log) {
+func (Service) Record(ctx context.Context, item botmodel.Log) (record botmodel.Log) {
 	if item.CreatedAt.IsZero() {
 		item.CreatedAt = time.Now()
 	}

@@ -1,0 +1,106 @@
+{
+  "page": {
+    "parent": "bot/agent/agent/update",
+    "type": 2,
+    "sort": 20
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-radio",
+        "value": "form.type",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "设定类型不能为空。"
+          }
+        ],
+        "meta": {
+          "controlClassName": "max-w-[520px]"
+        }
+      },
+      {
+        "id": "agent-setting-load-mode",
+        "type": "form-radio",
+        "placeholder": "请选择加载方式",
+        "value": "form.load_mode",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "加载方式不能为空。"
+          }
+        ],
+        "meta": {
+          "control": [
+            {
+              "value": "always",
+              "hide": ["agent-setting-description"]
+            }
+          ]
+        }
+      },
+      {
+        "id": "agent-setting-description",
+        "type": "form-textarea",
+        "placeholder": "说明这个设定适合什么时候使用，或它约束了哪些行为。",
+        "value": "form.description",
+        "mode": "form",
+        "meta": {
+          "rows": 3
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "例如：你是一个小说创作智能体，负责把用户的题材、人物和风格要求整理成可继续创作的大纲、设定和正文。始终使用中文，缺少关键设定时先发起交互收集。",
+        "value": "form.content",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "智能体设定不能为空。"
+          }
+        ],
+        "meta": {
+          "rows": 6
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "type": "identity",
+      "load_mode": "always",
+      "description": "",
+      "content": "",
+      "status": 1
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.agent.AgentHook.BeforeSaveAgentSetting"
+      }
+    }
+  }
+}
