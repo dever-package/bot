@@ -8,12 +8,12 @@ import (
 )
 
 type Setting struct {
-	ID          uint64    `dorm:"primaryKey;autoIncrement;comment:设定ID"`
-	CateID      uint64    `dorm:"type:bigint;not null;default:1;comment:设定分类"`
+	ID          uint64    `dorm:"primaryKey;autoIncrement;comment:规则ID"`
+	CateID      uint64    `dorm:"type:bigint;not null;default:1;comment:规则分类"`
 	Name        string    `dorm:"type:varchar(128);not null;comment:展示名称"`
 	LoadMode    string    `dorm:"type:varchar(32);not null;default:'always';comment:加载方式"`
 	Description string    `dorm:"type:varchar(512);not null;default:'';comment:使用说明"`
-	Content     string    `dorm:"type:text;not null;comment:设定正文"`
+	Content     string    `dorm:"type:text;not null;comment:规则正文"`
 	Status      int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	Sort        int       `dorm:"type:int;not null;default:100;comment:排序"`
 	CreatedAt   time.Time `dorm:"comment:创建时间"`
@@ -24,6 +24,13 @@ type SettingIndex struct {
 	CateStatusSort struct{} `index:"cate_id,status,sort"`
 	CateLoadMode   struct{} `index:"cate_id,load_mode,status,sort"`
 }
+
+const (
+	AssistantPageContextSettingID  uint64 = 101
+	AssistantFormGenerateSettingID uint64 = 102
+	AssistantFrontActionSettingID  uint64 = 103
+	AssistantSafetySettingID       uint64 = 104
+)
 
 var (
 	settingLoadModeOptions = []map[string]any{
@@ -186,11 +193,99 @@ var (
 			"status": 1,
 			"sort":   40,
 		},
+		{
+			"id":          AssistantPageContextSettingID,
+			"cate_id":     AssistantSettingCateID,
+			"name":        "后台页面上下文规则",
+			"description": "规定后台助理如何理解当前页面、弹窗、表单和用户输入。",
+			"content": settingText(
+				"后台页面上下文规则:",
+				"- 你会收到当前 package/front 后台页面的精简上下文，包括页面标题、路由、节点字段、表单值、当前弹窗或抽屉信息。",
+				"- 回答必须基于这些上下文和用户最新输入，不要编造页面中不存在的字段、按钮、接口、数据或操作结果。",
+				"- 如果当前上下文不足以完成用户请求，先说明缺少什么，并给出可以继续补充的信息。",
+				"- 当前弹窗、抽屉或最近激活的页面优先级最高；不要误把背景列表页当成当前编辑目标。",
+				"- 不要复述完整页面 JSON，只提取和当前任务有关的字段、已有值和约束。",
+			),
+			"status": 1,
+			"sort":   10,
+		},
+		{
+			"id":          AssistantFormGenerateSettingID,
+			"cate_id":     AssistantSettingCateID,
+			"name":        "表单内容生成规则",
+			"description": "规定后台助理如何生成可填入当前字段或表单的内容。",
+			"content": settingText(
+				"表单内容生成规则:",
+				"- 当用户要求生成、优化、补全、改写内容时，优先产出可以直接填入当前字段或当前表单的内容。",
+				"- 生成前先参考字段名称、字段类型、placeholder、使用说明、必填约束和已有表单值。",
+				"- 不要主动改写用户已经明确填写且没有要求修改的字段。",
+				"- 对规则、说明、提示词、文案等长文本，内容应结构清晰、可直接使用，避免解释性废话占据主体。",
+				"- 如果用户只要求建议，不要返回填表动作；如果用户要求填入或生成到字段，再返回前端动作。",
+			),
+			"status": 1,
+			"sort":   20,
+		},
+		{
+			"id":          AssistantFrontActionSettingID,
+			"cate_id":     AssistantSettingCateID,
+			"name":        "前端动作协议",
+			"description": "规定后台助理如何返回由前端确认执行的页面动作。",
+			"content": settingText(
+				"前端动作协议:",
+				"- 需要填充页面字段时，先用自然语言简短说明，再输出一个 fenced JSON 代码块，语言名必须是 front-action。",
+				"- front-action 只允许 type 为 fill_form 或 patch_form。",
+				"- fill_form 必须包含 target、value、summary；target 必须是当前页面上下文中存在的表单字段路径。",
+				"- patch_form 必须包含 values、summary；values 的 key 必须都是当前页面上下文中存在的表单字段路径。",
+				"- 不要声称你已经完成填入、保存或提交；前端会展示动作卡片，等待用户点击应用后才执行。",
+				"- JSON 必须合法，不要在 JSON 字符串外混入多余注释。",
+				"",
+				"填充单字段示例:",
+				"```front-action",
+				"{",
+				`  "type": "fill_form",`,
+				`  "target": "form.content",`,
+				`  "value": "这里是要填入当前字段的正文。",`,
+				`  "summary": "填入规则正文"`,
+				"}",
+				"```",
+				"",
+				"批量填充示例:",
+				"```front-action",
+				"{",
+				`  "type": "patch_form",`,
+				`  "values": {`,
+				`    "form.name": "能力调用协议",`,
+				`    "form.description": "约束智能体如何判断、调用和解释能力结果。",`,
+				`    "form.content": "这里是完整正文。"`,
+				"  },",
+				`  "summary": "填入通用规则信息"`,
+				"}",
+				"```",
+			),
+			"status": 1,
+			"sort":   30,
+		},
+		{
+			"id":          AssistantSafetySettingID,
+			"cate_id":     AssistantSettingCateID,
+			"name":        "后台助理安全边界",
+			"description": "限制后台助理不能直接执行高风险页面操作或处理敏感字段。",
+			"content": settingText(
+				"后台助理安全边界:",
+				"- 不直接保存、提交、删除、批量修改、启停状态或调用高风险操作；只能解释、建议或返回等待用户确认的填表动作。",
+				"- 不读取、生成、输出或要求用户提供密码、token、secret、api key、私钥、验证码等敏感内容。",
+				"- 不操作隐藏敏感字段、权限字段、系统内部字段或页面上下文没有明确暴露给你的字段。",
+				"- 如果用户要求越权、绕过校验、伪造权限或直接修改后台数据，应拒绝并给出安全替代方案。",
+				"- 对可能造成数据变更的建议，必须提醒用户在页面中自行确认后再执行。",
+			),
+			"status": 1,
+			"sort":   40,
+		},
 	}
 )
 
 func NewSettingModel() *orm.Model[Setting] {
-	return orm.LoadModel[Setting]("设定", "bot_setting", orm.ModelConfig{
+	return orm.LoadModel[Setting]("通用规则", "bot_setting", orm.ModelConfig{
 		Index:    SettingIndex{},
 		Seeds:    settingSeed,
 		Order:    "sort asc,id asc",

@@ -18,8 +18,14 @@ type AgentCateIndex struct {
 	Sort struct{} `index:"sort"`
 }
 
+const (
+	DefaultAgentCateID   uint64 = 1
+	AssistantAgentCateID uint64 = 2
+)
+
 var agentCateSeed = []map[string]any{
-	{"id": 1, "name": "默认分类", "sort": 100},
+	{"id": DefaultAgentCateID, "name": "默认分类", "sort": 100},
+	{"id": AssistantAgentCateID, "name": "助理", "sort": 110},
 }
 
 func NewAgentCateModel() *orm.Model[AgentCate] {

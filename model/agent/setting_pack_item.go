@@ -7,9 +7,9 @@ import (
 )
 
 type SettingPackItem struct {
-	ID        uint64    `dorm:"primaryKey;autoIncrement;comment:设定列表ID"`
+	ID        uint64    `dorm:"primaryKey;autoIncrement;comment:规则列表ID"`
 	PackID    uint64    `dorm:"type:bigint;not null;default:0;comment:方案"`
-	SettingID uint64    `dorm:"type:bigint;not null;default:0;comment:设定"`
+	SettingID uint64    `dorm:"type:bigint;not null;default:0;comment:规则"`
 	Status    int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	Sort      int       `dorm:"type:int;not null;default:100;comment:排序"`
 	CreatedAt time.Time `dorm:"comment:创建时间"`
@@ -26,6 +26,10 @@ var (
 		{"id": 2, "pack_id": DefaultSettingPackID, "setting_id": 7, "status": 1, "sort": 20},
 		{"id": 3, "pack_id": DefaultSettingPackID, "setting_id": 2, "status": 1, "sort": 30},
 		{"id": 4, "pack_id": DefaultSettingPackID, "setting_id": 4, "status": 1, "sort": 40},
+		{"id": 101, "pack_id": AssistantSettingPackID, "setting_id": AssistantPageContextSettingID, "status": 1, "sort": 10},
+		{"id": 102, "pack_id": AssistantSettingPackID, "setting_id": AssistantFormGenerateSettingID, "status": 1, "sort": 20},
+		{"id": 103, "pack_id": AssistantSettingPackID, "setting_id": AssistantFrontActionSettingID, "status": 1, "sort": 30},
+		{"id": 104, "pack_id": AssistantSettingPackID, "setting_id": AssistantSafetySettingID, "status": 1, "sort": 40},
 	}
 
 	settingPackRelation = orm.Relation{
@@ -42,7 +46,7 @@ var (
 )
 
 func NewSettingPackItemModel() *orm.Model[SettingPackItem] {
-	return orm.LoadModel[SettingPackItem]("设定列表", "bot_setting_pack_item", orm.ModelConfig{
+	return orm.LoadModel[SettingPackItem]("规则列表", "bot_setting_pack_item", orm.ModelConfig{
 		Index:    SettingPackItemIndex{},
 		Seeds:    settingPackItemSeed,
 		Order:    "sort asc,id asc",

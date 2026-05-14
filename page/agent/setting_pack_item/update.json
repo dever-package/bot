@@ -1,20 +1,20 @@
 {
   "page": {
-    "name": "设定列表编辑",
+    "name": "规则列表编辑",
     "parent": "bot/agent/setting_pack/list",
     "type": 2,
     "sort": 11,
     "auth": [
       {
         "key": "bot/agent/setting_pack_item/create",
-        "name": "设定列表新增",
+        "name": "规则列表新增",
         "query": {
           "id": "empty"
         }
       },
       {
         "key": "bot/agent/setting_pack_item/update",
-        "name": "设定列表编辑",
+        "name": "规则列表编辑",
         "query": {
           "id": "required"
         }
@@ -42,11 +42,11 @@
         "type": "form-cascader",
         "value": "form.setting_id",
         "mode": "form",
-        "placeholder": "请选择通用设定",
+        "placeholder": "请选择通用规则",
         "validate": [
           {
             "type": "required",
-            "message": "通用设定不能为空。"
+            "message": "通用规则不能为空。"
           }
         ],
         "meta": {
@@ -57,11 +57,11 @@
           "valueMode": "leaf",
           "placeholder": [
             "选择分类",
-            "选择设定"
+            "选择规则"
           ],
           "searchPlaceholder": [
             "搜索分类",
-            "搜索设定"
+            "搜索规则"
           ],
           "childExtraFields": "name",
           "order": "sort asc,id asc",

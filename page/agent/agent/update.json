@@ -118,12 +118,12 @@
       },
       {
         "type": "form-select",
-        "name": "执行方案",
+        "name": "通用规则方案",
         "placeholder": "请选择执行方案",
         "value": "form.setting_pack_id",
         "mode": "form",
         "option": "/front/route/option?type=model&use=bot.agent.NewSettingPackModel&filterField=status&filterValue=1&order=sort asc,id asc",
-        "info": "运行和测试时加载这个方案下的通用设定，再加载智能体设定。",
+        "info": "运行和测试时加载这个方案下的通用规则，再加载智能体设定。",
         "validate": [
           {
             "type": "required",

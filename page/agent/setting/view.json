@@ -1,6 +1,6 @@
 {
   "page": {
-    "name": "设定详情",
+    "name": "规则详情",
     "parent": "bot/agent/setting/list",
     "type": 2,
     "sort": 11

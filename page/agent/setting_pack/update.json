@@ -40,7 +40,7 @@
     "dialog-shell": [
       {
         "type": "form-input",
-        "placeholder": "例如：默认通用协议",
+        "placeholder": "例如：默认通用规则",
         "value": "form.name",
         "mode": "form",
         "validate": [
@@ -73,11 +73,11 @@
         "name": "设定",
         "value": "form.items",
         "mode": "form",
-        "info": "设定列表：选择通用设定组成当前方案；运行时会按这里的排序加载。",
+        "info": "规则列表：选择通用规则组成当前方案；运行时会按这里的排序加载。",
         "meta": {
           "formLayout": "horizontal",
           "pageRoute": "/bot/agent/setting_pack_item/update",
-          "addText": "添加设定",
+          "addText": "添加规则",
           "drag": "sort"
         }
       }

@@ -1,6 +1,6 @@
 {
   "page": {
-    "name": "通用设定",
+    "name": "通用规则",
     "icon": "file-text",
     "parent": "bot/agent/setting_pack/list",
     "type": 2,
@@ -79,7 +79,7 @@
       },
       {
         "type": "show-button",
-        "name": "新增设定",
+        "name": "新增规则",
         "className": "shrink-0",
         "meta": {
           "variant": "default",
@@ -97,7 +97,7 @@
     "content-toolbar": [
       {
         "type": "form-input",
-        "placeholder": "筛选设定名称...",
+        "placeholder": "筛选规则名称...",
         "value": "search.keyword",
         "mode": "search"
       },
@@ -192,7 +192,7 @@
                     "icon": "square-pen",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "编辑设定",
+                    "description": "编辑规则",
                     "action": {
                       "click": [
                         {
@@ -212,7 +212,7 @@
                     "icon": "trash-2",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "删除设定",
+                    "description": "删除规则",
                     "className": "text-destructive hover:text-destructive",
                     "action": {
                       "click": [
@@ -245,7 +245,7 @@
         "meta": {
           "stateKey": "dialog.create",
           "pageRoute": "/bot/agent/setting/update",
-          "description": "新增设定会默认带入当前左侧分类。",
+          "description": "新增规则会默认带入当前左侧分类。",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
@@ -262,7 +262,7 @@
         "meta": {
           "stateKey": "dialog.edit",
           "pageRoute": "/bot/agent/setting/update",
-          "description": "通用设定正文在这里维护；加入方案后才会参与智能体运行。",
+          "description": "通用规则正文在这里维护；加入方案后才会参与智能体运行。",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
@@ -276,8 +276,8 @@
       },
       {
         "type": "feedback-confirm",
-        "name": "删除设定",
-        "info": "确认删除当前设定吗？删除后引用它的方案将不再加载它。",
+        "name": "删除规则",
+        "info": "确认删除当前规则吗？删除后引用它的方案将不再加载它。",
         "meta": {
           "stateKey": "confirm.delete"
         },
@@ -292,8 +292,8 @@
   },
   "data": {
     "page": {
-      "title": "通用设定",
-      "description": "维护所有智能体可复用的通用设定。分类只用于管理通用设定；运行时由方案决定加载哪些设定。"
+      "title": "通用规则",
+      "description": "维护所有智能体可复用的通用规则。分类只用于管理通用规则；运行时由方案决定加载哪些规则。"
     },
     "search": {
       "keyword": "",

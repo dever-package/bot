@@ -7,11 +7,12 @@ import (
 )
 
 const (
-	DefaultSettingCateID uint64 = 1
+	DefaultSettingCateID   uint64 = 1
+	AssistantSettingCateID uint64 = 2
 )
 
 type SettingCate struct {
-	ID        uint64    `dorm:"primaryKey;autoIncrement;comment:设定分类ID"`
+	ID        uint64    `dorm:"primaryKey;autoIncrement;comment:规则分类ID"`
 	Name      string    `dorm:"type:varchar(128);not null;comment:名称"`
 	Status    int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	Sort      int       `dorm:"type:int;not null;default:100;comment:排序"`
@@ -25,10 +26,11 @@ type SettingCateIndex struct {
 
 var settingCateSeed = []map[string]any{
 	{"id": DefaultSettingCateID, "name": "默认", "status": 1, "sort": 1},
+	{"id": AssistantSettingCateID, "name": "后台助理", "status": 1, "sort": 10},
 }
 
 func NewSettingCateModel() *orm.Model[SettingCate] {
-	return orm.LoadModel[SettingCate]("设定分类", "bot_setting_cate", orm.ModelConfig{
+	return orm.LoadModel[SettingCate]("规则分类", "bot_setting_cate", orm.ModelConfig{
 		Index:    SettingCateIndex{},
 		Seeds:    settingCateSeed,
 		Order:    "sort asc,id asc",

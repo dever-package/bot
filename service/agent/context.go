@@ -56,7 +56,7 @@ func buildAgentContext(
 	history []any,
 ) string {
 	sections := make([]string, 0, 8)
-	if text := instructionSection("通用设定", publicSettingSnippets(publicSettings)); text != "" {
+	if text := instructionSection("通用规则", publicSettingSnippets(publicSettings)); text != "" {
 		sections = append(sections, text)
 	}
 	if text := instructionSection("智能体设定", agentSettingSnippets(agentSettings)); text != "" {
@@ -86,7 +86,7 @@ func publicSettingSnippets(settings []agentmodel.Setting) []instructionSnippet {
 		}
 		title := strings.TrimSpace(setting.Name)
 		if title == "" {
-			title = fmt.Sprintf("通用设定 #%d", setting.ID)
+			title = fmt.Sprintf("通用规则 #%d", setting.ID)
 		}
 		items = append(items, instructionSnippet{Title: title, Content: content})
 	}

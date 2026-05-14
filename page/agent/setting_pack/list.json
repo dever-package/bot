@@ -1,6 +1,6 @@
 {
   "page": {
-    "name": "通用设定",
+    "name": "通用规则",
     "icon": "file-text",
     "parent": "bot-agent",
     "sort": 2
@@ -64,7 +64,7 @@
     "header-actions": [
       {
         "type": "show-button",
-        "name": "通用设定管理",
+        "name": "通用规则管理",
         "className": "shrink-0",
         "meta": {
           "variant": "outline",
@@ -81,7 +81,7 @@
         "option": "/front/route/option?type=model&use=bot.agent.NewSettingPackModel&order=sort asc,id asc&extraFields=status,sort",
         "meta": {
           "title": "方案",
-          "description": "设置通用设定方案",
+          "description": "设置通用规则方案",
           "remote": true,
           "defaultFirst": true,
           "queryKey": "pack_id",
@@ -149,7 +149,7 @@
     "content-toolbar": [
       {
         "type": "show-button",
-        "name": "新增通用设定",
+        "name": "新增通用规则",
         "className": "shrink-0",
         "meta": {
           "variant": "default",
@@ -205,7 +205,7 @@
           "columns": [
             {
               "value": "setting.name",
-              "name": "设定",
+              "name": "规则",
               "type": "show-base"
             },
             {
@@ -246,7 +246,7 @@
                     "icon": "square-pen",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "编辑设定",
+                    "description": "编辑规则",
                     "action": {
                       "click": [
                         {
@@ -266,7 +266,7 @@
                     "icon": "eye",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "查看设定详情",
+                    "description": "查看规则详情",
                     "action": {
                       "click": [
                         {
@@ -298,7 +298,7 @@
         "meta": {
           "stateKey": "dialog.createPack",
           "pageRoute": "/bot/agent/setting_pack/update",
-          "description": "方案用于组合多个通用设定，智能体运行时选择一个方案加载。",
+          "description": "方案用于组合多个通用规则，智能体运行时选择一个方案加载。",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
@@ -309,12 +309,12 @@
       },
       {
         "type": "feedback-modal",
-        "name": "新增通用设定",
+        "name": "新增通用规则",
         "meta": {
           "stateKey": "dialog.createSetting",
           "pageRoute": "/bot/agent/setting/update",
-          "title": "新增通用设定",
-          "description": "新增通用设定同时会自动加入当前方案。",
+          "title": "新增通用规则",
+          "description": "新增通用规则同时会自动加入当前方案。",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
@@ -328,12 +328,12 @@
       },
       {
         "type": "feedback-modal",
-        "name": "编辑通用设定",
+        "name": "编辑通用规则",
         "meta": {
           "stateKey": "dialog.editSetting",
           "pageRoute": "/bot/agent/setting/update",
-          "title": "编辑通用设定",
-          "description": "编辑当前方案里的通用设定。",
+          "title": "编辑通用规则",
+          "description": "编辑当前方案里的通用规则。",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
@@ -350,7 +350,7 @@
         "meta": {
           "stateKey": "dialog.editPack",
           "pageRoute": "/bot/agent/setting_pack/update",
-          "description": "维护当前方案，以及方案内设定顺序。",
+          "description": "维护当前方案，以及方案内规则顺序。",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
@@ -367,7 +367,7 @@
         "meta": {
           "stateKey": "dialog.viewSetting",
           "pageRoute": "/bot/agent/setting/view",
-          "description": "查看当前方案引用的通用设定正文。",
+          "description": "查看当前方案引用的通用规则正文。",
           "pageRouteQuery": {
             "id": "data.actionTarget.viewSettingId"
           },
@@ -379,8 +379,8 @@
   },
   "data": {
     "page": {
-      "title": "通用设定方案",
-      "description": "维护智能体运行时使用的通用设定方案。左侧选择方案，右侧维护这个方案下启用的通用设定。"
+      "title": "通用规则方案",
+      "description": "维护智能体运行时使用的通用规则方案。左侧选择方案，右侧维护这个方案下启用的通用规则。"
     },
     "search": {
       "pack_id": 1,

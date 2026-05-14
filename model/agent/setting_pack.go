@@ -7,7 +7,8 @@ import (
 )
 
 const (
-	DefaultSettingPackID uint64 = 1
+	DefaultSettingPackID   uint64 = 1
+	AssistantSettingPackID uint64 = 2
 )
 
 type SettingPack struct {
@@ -28,10 +29,17 @@ var (
 	settingPackSeed = []map[string]any{
 		{
 			"id":          DefaultSettingPackID,
-			"name":        "默认通用协议",
-			"description": "默认加载的智能体通用设定方案。",
+			"name":        "默认通用规则",
+			"description": "默认加载的智能体通用规则方案。",
 			"status":      1,
 			"sort":        1,
+		},
+		{
+			"id":          AssistantSettingPackID,
+			"name":        "后台助理规则方案",
+			"description": "后台 AI 助理专用规则方案，用于理解当前后台页面并返回受控前端动作。",
+			"status":      1,
+			"sort":        2,
 		},
 	}
 

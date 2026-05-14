@@ -232,7 +232,7 @@
         "meta": {
           "stateKey": "dialog.edit",
           "pageRoute": "/bot/agent/agent/update",
-          "description": "配置智能体 LLM 能力和通用设定方案。",
+          "description": "配置智能体 LLM 能力和通用规则方案。",
           "size": "xl",
           "footer": {
             "confirm": true,

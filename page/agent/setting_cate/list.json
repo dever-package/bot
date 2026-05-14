@@ -23,8 +23,8 @@
         "id": "agent-setting-cate-category",
         "value": "parent.data.search.cate_id",
         "meta": {
-          "title": "设定分类",
-          "description": "左侧维护通用设定分类",
+          "title": "规则分类",
+          "description": "左侧维护通用规则分类",
           "remote": true,
           "defaultFirst": true,
           "createButton": {
@@ -71,7 +71,7 @@
         "meta": {
           "stateKey": "dialog.create",
           "pageRoute": "/bot/agent/setting_cate/update",
-          "description": "新增后可用于管理通用设定。",
+          "description": "新增后可用于管理通用规则。",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
@@ -85,7 +85,7 @@
         "meta": {
           "stateKey": "dialog.edit",
           "pageRoute": "/bot/agent/setting_cate/update",
-          "description": "修改分类名称后，通用设定列表和设定编辑表单会同步显示新名称。",
+          "description": "修改分类名称后，通用规则列表和规则编辑表单会同步显示新名称。",
           "footer": {
             "confirm": true,
             "confirmText": "保存"

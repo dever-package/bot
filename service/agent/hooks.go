@@ -105,7 +105,7 @@ func (AgentHook) ProviderBeforeSaveSettingPackItem(c *server.Context, params []a
 		panicAgentField("form.pack_id", "方案不能为空。")
 	}
 	if !partial && util.ToUint64(record["setting_id"]) == 0 {
-		panicAgentField("form.setting_id", "通用设定不能为空。")
+		panicAgentField("form.setting_id", "通用规则不能为空。")
 	}
 	defaultInt16Field(record, "status", defaultAgentStatus, partial)
 	defaultIntField(record, "sort", defaultAgentSort, partial)

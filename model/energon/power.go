@@ -23,7 +23,21 @@ type PowerIndex struct {
 	KindStatus struct{} `index:"kind,status"`
 }
 
+const DefaultLLMPowerID uint64 = 1
+
 var (
+	powerSeed = []map[string]any{
+		{
+			"id":          DefaultLLMPowerID,
+			"cate_id":     1,
+			"key":         "llm",
+			"name":        "LLM",
+			"kind":        "text",
+			"source_rule": 1,
+			"status":      1,
+		},
+	}
+
 	kindOptions = []map[string]any{
 		{"id": "text", "value": "文本"},
 		{"id": "image", "value": "图片"},
@@ -64,6 +78,7 @@ var (
 func NewPowerModel() *orm.Model[Power] {
 	return orm.LoadModel[Power]("能力", "bot_energon_power", orm.ModelConfig{
 		Index:    PowerIndex{},
+		Seeds:    powerSeed,
 		Order:    "id asc",
 		Database: "default",
 		Options: map[string]any{

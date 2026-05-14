@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/shemic/dever/orm"
+
+	energonmodel "my/package/bot/model/energon"
 )
 
 type Agent struct {
@@ -28,10 +30,44 @@ type AgentIndex struct {
 	StatusSort        struct{} `index:"status,sort"`
 }
 
+const (
+	DefaultAgentID        uint64 = 1
+	FrontAssistantAgentID uint64 = 2
+)
+
 var (
 	statusOptions = []map[string]any{
 		{"id": 1, "value": "开启"},
 		{"id": 2, "value": "停用"},
+	}
+
+	agentSeed = []map[string]any{
+		{
+			"id":              DefaultAgentID,
+			"cate_id":         DefaultAgentCateID,
+			"name":            "默认智能体",
+			"key":             "default",
+			"description":     "默认通用智能体，适合普通文本任务和能力调用。",
+			"llm_power_id":    energonmodel.DefaultLLMPowerID,
+			"setting_pack_id": DefaultSettingPackID,
+			"temperature":     0.7,
+			"timeout_seconds": 300,
+			"status":          1,
+			"sort":            10,
+		},
+		{
+			"id":              FrontAssistantAgentID,
+			"cate_id":         AssistantAgentCateID,
+			"name":            "AI助理",
+			"key":             "front-assistant",
+			"description":     "后台页面 AI 助理，用于理解当前页面、生成内容、补全表单和返回受控前端动作。",
+			"llm_power_id":    energonmodel.DefaultLLMPowerID,
+			"setting_pack_id": AssistantSettingPackID,
+			"temperature":     0.4,
+			"timeout_seconds": 300,
+			"status":          1,
+			"sort":            10,
+		},
 	}
 
 	agentCateRelation = orm.Relation{
@@ -56,6 +92,7 @@ var (
 func NewAgentModel() *orm.Model[Agent] {
 	return orm.LoadModel[Agent]("智能体", "bot_agent", orm.ModelConfig{
 		Index:    AgentIndex{},
+		Seeds:    agentSeed,
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{

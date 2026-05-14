@@ -5,14 +5,14 @@
     "auth": [
       {
         "key": "bot/agent/setting/create",
-        "name": "设定新增",
+        "name": "规则新增",
         "query": {
           "id": "empty"
         }
       },
       {
         "key": "bot/agent/setting/update",
-        "name": "设定编辑",
+        "name": "规则编辑",
         "query": {
           "id": "required"
         }
@@ -45,7 +45,7 @@
         "validate": [
           {
             "type": "required",
-            "message": "设定分类不能为空。"
+            "message": "规则分类不能为空。"
           }
         ],
         "meta": {
@@ -54,7 +54,7 @@
           "createOption": {
             "name": "新增分类",
             "pageRoute": "/bot/agent/setting_cate/update",
-            "description": "新增后可直接作为当前通用设定的分类。",
+            "description": "新增后可直接作为当前通用规则的分类。",
             "size": "sm",
             "bodyClassName": "py-2",
             "selectCreated": true
@@ -69,12 +69,12 @@
         "validate": [
           {
             "type": "required",
-            "message": "设定名称不能为空。"
+            "message": "规则名称不能为空。"
           },
           {
             "type": "model",
             "except": "$form.id",
-            "message": "该分类下设定名称已存在。"
+            "message": "该分类下规则名称已存在。"
           }
         ],
         "meta": {
@@ -102,7 +102,7 @@
         "placeholder": "例如：当需要生成图片、补全图片参数或处理参考图时读取。",
         "value": "form.description",
         "mode": "form",
-        "info": "按需读取时建议填写，用来告诉智能体这条设定什么时候该被读取。",
+        "info": "按需读取时建议填写，用来告诉智能体这条规则什么时候该被读取。",
         "meta": {
           "formLayout": "horizontal",
           "rows": 3
@@ -110,13 +110,13 @@
       },
       {
         "type": "form-textarea",
-        "placeholder": "填写通用设定正文。这里适合放所有智能体都可能复用的协议、规则、输出格式或能力调用规范。",
+        "placeholder": "填写通用规则正文。这里适合放所有智能体都可能复用的协议、规则、输出格式或能力调用规范。",
         "value": "form.content",
         "mode": "form",
         "validate": [
           {
             "type": "required",
-          "message": "设定正文不能为空。"
+          "message": "规则正文不能为空。"
           }
         ],
         "meta": {
