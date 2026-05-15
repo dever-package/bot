@@ -85,7 +85,8 @@
         "value": "form.latency",
         "mode": "form",
         "meta": {
-          "formLayout": "horizontal"
+          "formLayout": "horizontal",
+          "format": "duration-ms"
         }
       },
       {
@@ -197,7 +198,10 @@
             },
             {
               "value": "latency",
-              "type": "show-base"
+              "type": "show-base",
+              "meta": {
+                "format": "duration-ms"
+              }
             },
             {
               "name": "错误详情",

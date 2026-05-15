@@ -26,10 +26,11 @@ type SettingIndex struct {
 }
 
 const (
-	AssistantPageContextSettingID  uint64 = 101
-	AssistantFormGenerateSettingID uint64 = 102
-	AssistantFrontActionSettingID  uint64 = 103
-	AssistantSafetySettingID       uint64 = 104
+	AssistantPageContextSettingID   uint64 = 101
+	AssistantFormGenerateSettingID  uint64 = 102
+	AssistantFrontActionSettingID   uint64 = 103
+	AssistantSafetySettingID        uint64 = 104
+	AssistantMediaGenerateSettingID uint64 = 105
 )
 
 var (
@@ -201,7 +202,11 @@ var (
 			"content": settingText(
 				"后台页面上下文规则:",
 				"- 你会收到当前 package/front 后台页面的精简上下文，包括页面标题、路由、节点字段、表单值、当前弹窗或抽屉信息。",
+				"- 输入里的 permission_context 是当前登录用户已授权的后台权限上下文；items 中包含 key、name、path、parent_key、type 和 query。",
+				"- 输入里的 task 是前端快捷入口传入的本轮意图，例如 generate_form_field、fill_current_form、parse_and_fill_current_form；task 只用于当前轮次，不代表长期记忆。",
+				"- task.instruction 是用户在小型 AI 填写弹层中输入的补充要求；task.reference_files 是用户临时选择的参考文件或图片，只用于本轮生成。",
 				"- 回答必须基于这些上下文和用户最新输入，不要编造页面中不存在的字段、按钮、接口、数据或操作结果。",
+				"- 打开页面、打开表单或判断可访问入口时，只能基于 permission_context.items 中存在的权限，不要编造不存在的页面或权限。",
 				"- 如果当前上下文不足以完成用户请求，先说明缺少什么，并给出可以继续补充的信息。",
 				"- 当前弹窗、抽屉或最近激活的页面优先级最高；不要误把背景列表页当成当前编辑目标。",
 				"- 不要复述完整页面 JSON，只提取和当前任务有关的字段、已有值和约束。",
@@ -221,9 +226,31 @@ var (
 				"- 不要主动改写用户已经明确填写且没有要求修改的字段。",
 				"- 对规则、说明、提示词、文案等长文本，内容应结构清晰、可直接使用，避免解释性废话占据主体。",
 				"- 如果用户只要求建议，不要返回填表动作；如果用户要求填入或生成到字段，再返回前端动作。",
+				"- task.type 为 generate_form_field 时，只生成并填入 task.target_field 指定的字段，不要顺手修改其他字段。",
+				"- task.type 为 fill_current_form 时，只返回当前表单的 fill_form 或 patch_form；fill_mode 为 empty_only 时不要覆盖已有值，fill_mode 为 overwrite 时可以按任务重写字段。",
+				"- task.type 为 parse_and_fill_current_form 时，从 task.source_text 和用户输入中抽取字段并填入当前表单；无法确认的字段留空，不要臆测。",
+				"- 如果 task.reference_files 中包含 text，优先把文本内容作为参考；如果只包含图片或文件元信息，只能基于可见元信息和用户说明谨慎生成，不要假装看到了无法识别的内容。",
 			),
 			"status": 1,
 			"sort":   20,
+		},
+		{
+			"id":          AssistantMediaGenerateSettingID,
+			"cate_id":     AssistantSettingCateID,
+			"name":        "媒体内容生成规则",
+			"description": "规定后台助理如何为上传组件和编辑器组件生成图片、视频、音频等资源。",
+			"content": settingText(
+				"媒体内容生成规则:",
+				"- task.type 为 generate_upload_media 或 generate_editor_media 时，目标是为当前上传字段或编辑器正文生成 task.media_kind 指定类型的资源。",
+				"- media_kind 为 image、video、audio 时，优先基于可调用能力输出 call_power；不要只返回普通文字描述。",
+				"- 调用能力时只选择和 media_kind 匹配的图片、视频或音频能力；如果缺少能力参数，按能力调用协议输出 power_params 交互请求。",
+				"- task.target_field、当前页面上下文、task.instruction 和 task.reference_files 都是本轮生成依据；不要编造页面没有提供的业务信息。",
+				"- task.upload_rules 只用于理解资源用途、类型和来源，不代表可以自动保存表单；最终保存仍由用户在页面中手动确认。",
+				"- 能力调用完成后，后端会把工具结果中的 images、videos、audios 或 files 返回给前端，前端先预览结果；用户确认使用后再保存到资源库并插入当前控件。",
+				"- 如果当前可调用能力无法生成指定媒体类型，应明确说明缺少对应能力，不要伪造资源地址。",
+			),
+			"status": 1,
+			"sort":   25,
 		},
 		{
 			"id":          AssistantFrontActionSettingID,
@@ -233,10 +260,15 @@ var (
 			"content": settingText(
 				"前端动作协议:",
 				"- 需要填充页面字段时，先用自然语言简短说明，再输出一个 fenced JSON 代码块，语言名必须是 front-action。",
-				"- front-action 只允许 type 为 fill_form 或 patch_form。",
+				"- front-action 的 type 支持 fill_form、patch_form、open_page、open_form。",
 				"- fill_form 必须包含 target、value、summary；target 必须是当前页面上下文中存在的表单字段路径。",
 				"- patch_form 必须包含 values、summary；values 的 key 必须都是当前页面上下文中存在的表单字段路径。",
-				"- 不要声称你已经完成填入、保存或提交；前端会展示动作卡片，等待用户点击应用后才执行。",
+				"- open_page 用于打开当前用户有权限访问的页面，必须包含 path 或 permission_key。",
+				"- open_form 用于从入口页打开新增/编辑表单，必须包含 path 或 permission_key；可选 parent_path 和 values。",
+				"- open_page/open_form 的 path 或 permission_key 必须能在 permission_context.items 中找到；优先填写 permission_key，同时填写 path。",
+				"- open_form 可以携带 values；values 的 key 必须是目标表单上下文中可能出现的 form.* 字段。",
+				"- 前端会自动执行 open_page/open_form/fill_form/patch_form 这类安全页面动作；动作卡片仅用于展示状态或失败后重试。",
+				"- 不要声称你已经保存或提交；最终保存按钮必须由用户自己手动点击确认。",
 				"- JSON 必须合法，不要在 JSON 字符串外混入多余注释。",
 				"",
 				"填充单字段示例:",
@@ -259,6 +291,33 @@ var (
 				`    "form.content": "这里是完整正文。"`,
 				"  },",
 				`  "summary": "填入通用规则信息"`,
+				"}",
+				"```",
+				"",
+				"打开页面示例:",
+				"```front-action",
+				"{",
+				`  "type": "open_page",`,
+				`  "permission_key": "bot/agent/setting_pack/list",`,
+				`  "path": "bot/agent/setting_pack/list",`,
+				`  "summary": "打开通用规则页面"`,
+				"}",
+				"```",
+				"",
+				"打开新增表单示例:",
+				"```front-action",
+				"{",
+				`  "type": "open_form",`,
+				`  "permission_key": "bot/agent/agent/create",`,
+				`  "parent_path": "bot/agent/agent/list",`,
+				`  "path": "bot/agent/agent/update",`,
+				`  "values": {`,
+				`    "form.name": "内容创作智能体",`,
+				`    "form.key": "content-writer-agent",`,
+				`    "form.description": "负责生成、优化和检查内容创作任务。",`,
+				`    "form.temperature": 0.7`,
+				"  },",
+				`  "summary": "打开新增智能体并填入基础信息"`,
 				"}",
 				"```",
 			),

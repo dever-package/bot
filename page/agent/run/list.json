@@ -132,7 +132,10 @@
             },
             {
               "value": "latency",
-              "type": "show-base"
+              "type": "show-base",
+              "meta": {
+                "format": "duration-ms"
+              }
             },
             {
               "value": "created_at",

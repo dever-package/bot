@@ -65,7 +65,7 @@
         "mode": "form",
         "meta": {
           "formLayout": "horizontal",
-          "template": "{form.agent.name}（{form.agent_key}）"
+          "template": "{form.agent.name}（ID：{form.agent_id}）"
         }
       },
       {
@@ -89,7 +89,8 @@
         "value": "form.latency",
         "mode": "form",
         "meta": {
-          "formLayout": "horizontal"
+          "formLayout": "horizontal",
+          "format": "duration-ms"
         }
       },
       {
