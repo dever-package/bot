@@ -141,6 +141,27 @@ func (s Service) execute(exec runExecution) {
 		"history": exec.Parsed.History,
 	}, stepStatusSuccess)
 
+	if action, ok := powerActionFromInteractionResult(exec.Parsed); ok {
+		tracker.Step(ctx, "power_resume", "交互续跑能力", action.Power, map[string]any{
+			"power":            action.Power,
+			"input":            action.Input,
+			"source_target_id": action.SourceTargetID,
+		}, stepStatusSuccess)
+		output, status, message := s.executePowerAction(ctx, exec, action, "", "0-0")
+		if status == runStatusSuccess {
+			tracker.Step(ctx, "final", "最终输出", output, map[string]any{"output": output}, stepStatusSuccess)
+			s.finishRun(ctx, exec, runStatusSuccess, output, "", tracker.seq)
+			return
+		}
+		stepStatus := stepStatusFail
+		if status == runStatusCanceled {
+			stepStatus = stepStatusWarning
+		}
+		tracker.Step(context.Background(), "error", "运行结束", message, map[string]any{"status": status}, stepStatus)
+		s.finishRun(context.Background(), exec, status, output, message, tracker.seq)
+		return
+	}
+
 	catalog := loadSkillCatalog()
 	if catalog.Warning != "" {
 		tracker.Step(ctx, "warning", "技能目录", catalog.Warning, catalog, stepStatusWarning)
@@ -205,43 +226,20 @@ func (s Service) proxyEnergon(ctx context.Context, exec runExecution, runtimeCon
 
 	_ = s.writeStreamStatus(ctx, exec.RequestID, "已开始调用 LLM 能力", nil)
 
-	lastID := "0-0"
-	var text strings.Builder
-	for {
-		select {
-		case <-ctx.Done():
-			_ = s.gateway.StopStream(context.Background(), exec.RequestID)
-			message := "智能体运行超时"
-			_ = s.writeErrorResult(context.Background(), exec.RequestID, message)
-			return text.String(), runStatusFail, message
-		default:
-		}
-
-		entries, err := s.gateway.ReadStream(ctx, exec.RequestID, lastID, 1, time.Duration(defaultAgentStreamBlockMs)*time.Millisecond)
-		if err != nil {
-			message := err.Error()
-			_ = s.writeErrorResult(context.Background(), exec.RequestID, message)
-			return text.String(), runStatusFail, message
-		}
-		if len(entries) == 0 {
-			continue
-		}
-
-		for _, entry := range entries {
-			lastID = entry.ID
-			frame := entry.Payload
-			output := frameOutput(frame)
-			if outputEvent(output) == "delta" {
-				text.WriteString(frontstream.InputText(output["text"]))
+	return s.collectGatewayStream(ctx, exec, gatewayStreamOptions{
+		TimeoutMessage:   "智能体运行超时",
+		CollectDeltaText: true,
+		OnOutput: func(ctx context.Context, output map[string]any) error {
+			next := normalizeProxyOutput(output)
+			if len(next) == 0 {
+				return nil
 			}
-			if frameType(frame) == "result" {
-				return s.finishStreamResult(ctx, exec, text.String(), frame, lastID)
-			}
-			if len(output) > 0 {
-				_ = s.writeStreamOutput(ctx, exec.RequestID, normalizeProxyOutput(output))
-			}
-		}
-	}
+			return s.writeStreamOutput(ctx, exec.RequestID, next)
+		},
+		OnResult: func(ctx context.Context, frame map[string]any, state gatewayStreamState) (string, string, string) {
+			return s.finishStreamResult(ctx, exec, state.Text, frame, state.LastID)
+		},
+	})
 }
 
 func (s Service) finishStreamResult(ctx context.Context, exec runExecution, aggregateText string, frame map[string]any, gatewayLastID string) (string, string, string) {
@@ -428,27 +426,15 @@ func normalizeProxyOutput(output map[string]any) map[string]any {
 }
 
 func frameType(frame map[string]any) string {
-	return strings.ToLower(strings.TrimSpace(frontstream.InputText(frame["type"])))
+	return energonservice.StreamFrameType(frame)
 }
 
 func frameOutput(frame map[string]any) map[string]any {
-	if frame == nil {
-		return map[string]any{}
-	}
-	if output, ok := frame["output"].(map[string]any); ok {
-		return output
-	}
-	if output, ok := frame["output"].(botprotocol.Output); ok {
-		return map[string]any(output)
-	}
-	return map[string]any{}
+	return map[string]any(energonservice.StreamFrameOutput(frame))
 }
 
 func outputEvent(output map[string]any) string {
-	if output == nil {
-		return ""
-	}
-	return strings.ToLower(strings.TrimSpace(frontstream.InputText(output["event"])))
+	return energonservice.StreamOutputEvent(botprotocol.Output(output))
 }
 
 func payloadStatus(payload map[string]any) int {

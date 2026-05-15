@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"strings"
-	"time"
 
 	energonservice "my/package/bot/service/energon"
 	botprotocol "my/package/bot/service/energon/protocol"
@@ -128,6 +127,61 @@ func normalizePowerActionWithInteraction(parsed parsedRunRequest, action agentAc
 	}
 	action.Input = stripPowerActionControlInput(mergedInput)
 	return action
+}
+
+func powerActionFromInteractionResult(parsed parsedRunRequest) (agentAction, bool) {
+	if !isInteractionResult(parsed.Input) {
+		return agentAction{}, false
+	}
+	interactionType := strings.ToLower(strings.TrimSpace(firstText(parsed.Input["interaction_type"], parsed.Input["interactionType"])))
+	if interactionType != "" && interactionType != "power_params" {
+		return agentAction{}, false
+	}
+	interaction := latestPowerParamsInteraction(parsed)
+	power := strings.TrimSpace(firstText(interaction["power"]))
+	if power == "" {
+		return agentAction{}, false
+	}
+
+	submittedData := latestInteractionData(parsed)
+	interactionValues := normalizeMap(interaction["values"])
+	input := mergePowerActionInput(interactionValues, submittedData)
+	return agentAction{
+		Type:           "call_power",
+		Power:          power,
+		Input:          input,
+		SourceTargetID: sourceTargetIDFromInput(input),
+	}, true
+}
+
+func latestPowerParamsInteraction(parsed parsedRunRequest) map[string]any {
+	if interaction := normalizeMap(parsed.Input["interaction"]); isPowerParamsInteraction(interaction) {
+		return interaction
+	}
+
+	interactionID := strings.TrimSpace(firstText(parsed.Input["interaction_id"], parsed.Input["interactionId"]))
+	for index := len(parsed.History) - 1; index >= 0; index-- {
+		row := normalizeMap(parsed.History[index])
+		if len(row) == 0 {
+			continue
+		}
+		interaction := normalizeMap(row["interaction"])
+		if !isPowerParamsInteraction(interaction) {
+			continue
+		}
+		if interactionID == "" || strings.TrimSpace(firstText(interaction["id"])) == interactionID {
+			return interaction
+		}
+	}
+	return map[string]any{}
+}
+
+func isPowerParamsInteraction(interaction map[string]any) bool {
+	if len(interaction) == 0 {
+		return false
+	}
+	interactionType := strings.ToLower(strings.TrimSpace(firstText(interaction["type"])))
+	return interactionType == "power_params" && strings.TrimSpace(firstText(interaction["power"])) != ""
 }
 
 func latestInteractionData(parsed parsedRunRequest) map[string]any {
@@ -311,58 +365,33 @@ func powerParamNames(params []energonservice.TestParam) string {
 }
 
 func (s Service) collectPowerActionStream(ctx context.Context, exec runExecution, action agentAction, intro string, gatewayLastID string) (string, string, string) {
-	lastID := strings.TrimSpace(gatewayLastID)
-	if lastID == "" {
-		lastID = "0-0"
-	}
-	outputs := make([]botprotocol.Output, 0)
-
-	for {
-		select {
-		case <-ctx.Done():
-			_ = s.gateway.StopStream(context.Background(), exec.RequestID)
-			message := "能力调用超时"
-			_ = s.writeErrorResult(context.Background(), exec.RequestID, message)
-			return "", runStatusFail, message
-		default:
-		}
-
-		entries, err := s.gateway.ReadStream(ctx, exec.RequestID, lastID, 1, time.Duration(defaultAgentStreamBlockMs)*time.Millisecond)
-		if err != nil {
-			message := err.Error()
-			_ = s.writeErrorResult(context.Background(), exec.RequestID, message)
-			return "", runStatusFail, message
-		}
-		if len(entries) == 0 {
-			continue
-		}
-
-		for _, entry := range entries {
-			lastID = entry.ID
-			frame := entry.Payload
+	return s.collectGatewayStream(ctx, exec, gatewayStreamOptions{
+		InitialLastID:  gatewayLastID,
+		TimeoutMessage: "能力调用超时",
+		CollectOutputs: true,
+		OnOutput: func(ctx context.Context, output map[string]any) error {
+			return s.writeStreamOutput(ctx, exec.RequestID, normalizePowerActionStreamOutput(output, action))
+		},
+		OnResult: func(ctx context.Context, frame map[string]any, state gatewayStreamState) (string, string, string) {
 			output := frameOutput(frame)
-			if len(output) > 0 {
-				outputs = append(outputs, botprotocol.Output(output))
+			if outputEvent(output) == "cancel" {
+				_ = s.writeCancelResult(ctx, exec.RequestID)
+				return "", runStatusCanceled, "任务已取消"
 			}
-			if frameType(frame) == "result" {
-				if payloadStatus(frame) == 2 {
-					message := responseErrorMessage(frame, output, "能力调用失败: "+action.Power)
-					_ = s.writeErrorResult(ctx, exec.RequestID, message)
-					return "", runStatusFail, message
-				}
-				finalOutput := frameOutput(frame)
-				if len(finalOutput) == 0 {
-					finalOutput = map[string]any(botprotocol.MergeStreamResult(outputs))
-				}
-				finalOutput = normalizePowerActionFinal(finalOutput, action, intro)
-				_ = s.writeSuccessResult(ctx, exec.RequestID, finalOutput)
-				return outputSummaryText(finalOutput), runStatusSuccess, ""
+			if payloadStatus(frame) == 2 {
+				message := responseErrorMessage(frame, output, "能力调用失败: "+action.Power)
+				_ = s.writeErrorResult(ctx, exec.RequestID, message)
+				return "", runStatusFail, message
 			}
-			if len(output) > 0 {
-				_ = s.writeStreamOutput(ctx, exec.RequestID, normalizePowerActionStreamOutput(output, action))
+			finalOutput := frameOutput(frame)
+			if len(finalOutput) == 0 {
+				finalOutput = map[string]any(botprotocol.MergeStreamResult(state.Outputs))
 			}
-		}
-	}
+			finalOutput = normalizePowerActionFinal(finalOutput, action, intro)
+			_ = s.writeSuccessResult(ctx, exec.RequestID, finalOutput)
+			return outputSummaryText(finalOutput), runStatusSuccess, ""
+		},
+	})
 }
 
 func normalizePowerActionStreamOutput(output map[string]any, action agentAction) map[string]any {
