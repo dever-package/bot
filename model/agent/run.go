@@ -15,7 +15,7 @@ type Run struct {
 	Input          string `dorm:"type:text;not null;default:'';comment:输入内容"`
 	Skills         string `dorm:"type:text;not null;default:'[]';comment:技能列表"`
 	RuntimeContext string `dorm:"type:text;not null;default:'';comment:运行上下文"`
-	Output         string `dorm:"type:text;not null;default:'';comment:输出内容"`
+	Output         string `dorm:"type:longtext;not null;default:'';comment:输出内容"`
 	Error          string `dorm:"type:text;not null;default:'';comment:错误信息"`
 
 	Status     string     `dorm:"type:varchar(32);not null;default:running;comment:状态"`

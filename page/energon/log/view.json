@@ -45,8 +45,11 @@
   "nodes": {
     "basic-card": [
       {
-        "type": "show-rich",
-        "value": "page.basicTitleHtml"
+        "type": "show-title",
+        "value": "page.basicTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-base",
@@ -101,8 +104,11 @@
     ],
     "target-card": [
       {
-        "type": "show-rich",
-        "value": "page.targetTitleHtml"
+        "type": "show-title",
+        "value": "page.targetTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-base",
@@ -163,8 +169,11 @@
     ],
     "attempt-card": [
       {
-        "type": "show-rich",
-        "value": "page.attemptTitleHtml"
+        "type": "show-title",
+        "value": "page.attemptTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-table",
@@ -237,8 +246,11 @@
     ],
     "param-card": [
       {
-        "type": "show-rich",
-        "value": "page.paramTitleHtml"
+        "type": "show-title",
+        "value": "page.paramTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-base",
@@ -248,8 +260,11 @@
     ],
     "channel-card": [
       {
-        "type": "show-rich",
-        "value": "page.channelTitleHtml"
+        "type": "show-title",
+        "value": "page.channelTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-base",
@@ -259,8 +274,11 @@
     ],
     "result-card": [
       {
-        "type": "show-rich",
-        "value": "page.resultTitleHtml"
+        "type": "show-title",
+        "value": "page.resultTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-base",
@@ -294,12 +312,30 @@
   },
   "data": {
     "page": {
-      "basicTitleHtml": "<div class='mb-4'><h3 class='text-base font-semibold text-foreground'>调用信息</h3><p class='mt-1 text-sm text-muted-foreground'>展示本次请求的协议、状态与耗时。</p></div>",
-      "targetTitleHtml": "<div class='mb-4'><h3 class='text-base font-semibold text-foreground'>能力与来源</h3><p class='mt-1 text-sm text-muted-foreground'>展示本次调用命中的能力、来源、能力来源与账号。</p></div>",
-      "attemptTitleHtml": "<div class='mb-4'><h3 class='text-base font-semibold text-foreground'>调用尝试</h3><p class='mt-1 text-sm text-muted-foreground'>同一个 RequestID 下按实际调用顺序展示所有能力来源，前一个失败后才会尝试后一个。</p></div>",
-      "paramTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>本次能力请求参数</h3><p class='mt-1 text-sm text-muted-foreground'>这里记录调用 Energon 时传入的 set、input、history、options。</p></div>",
-      "channelTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>渠道请求参数</h3><p class='mt-1 text-sm text-muted-foreground'>这里记录转换后实际发给来源渠道的 url、method、headers、body。</p></div>",
-      "resultTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>响应数据</h3><p class='mt-1 text-sm text-muted-foreground'>成功时展示响应，失败时展示失败环节和错误信息。</p></div>"
+      "basicTitle": {
+        "title": "调用信息",
+        "description": "展示本次请求的协议、状态与耗时。"
+      },
+      "targetTitle": {
+        "title": "能力与来源",
+        "description": "展示本次调用命中的能力、来源、能力来源与账号。"
+      },
+      "attemptTitle": {
+        "title": "调用尝试",
+        "description": "同一个 RequestID 下按实际调用顺序展示所有能力来源，前一个失败后才会尝试后一个。"
+      },
+      "paramTitle": {
+        "title": "本次能力请求参数",
+        "description": "这里记录调用 Energon 时传入的 set、input、history、options。"
+      },
+      "channelTitle": {
+        "title": "渠道请求参数",
+        "description": "这里记录转换后实际发给来源渠道的 url、method、headers、body。"
+      },
+      "resultTitle": {
+        "title": "响应数据",
+        "description": "成功时展示响应，失败时展示失败环节和错误信息。"
+      }
     },
     "attempts": "{{bot.energon.log.LogViewService.LoadAttempts}}",
     "requestParams": "{{bot.energon.log.LogViewService.LoadRequestParams}}",

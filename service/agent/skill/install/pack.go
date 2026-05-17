@@ -2,6 +2,7 @@ package install
 
 import (
 	"context"
+	"time"
 
 	agentmodel "my/package/bot/model/agent"
 )
@@ -24,10 +25,11 @@ func ensureSkillInPack(ctx context.Context, packID uint64, skillID uint64) {
 		return
 	}
 	model.Insert(ctx, map[string]any{
-		"pack_id":  packID,
-		"skill_id": skillID,
-		"status":   defaultStatus,
-		"sort":     nextSkillPackItemSort(ctx, packID),
+		"pack_id":    packID,
+		"skill_id":   skillID,
+		"status":     defaultStatus,
+		"sort":       nextSkillPackItemSort(ctx, packID),
+		"created_at": time.Now(),
 	})
 }
 

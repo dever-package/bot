@@ -18,7 +18,7 @@ type Action struct {
 }
 
 func ExtractAgentAction(text string) (string, Action, bool) {
-	clean, raw, ok := extractJSONFence(text, []string{"agent-action", "json"}, validAgentAction)
+	clean, raw, ok := extractJSONFence(text, []string{"agent-action"}, validAgentAction)
 	if !ok {
 		return text, Action{}, false
 	}

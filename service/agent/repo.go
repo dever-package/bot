@@ -118,6 +118,9 @@ func (Repo) ListActivePublicSettings(ctx context.Context, packID uint64) []agent
 			continue
 		}
 		if setting, ok := settingByID[item.SettingID]; ok {
+			if !isAlwaysLoadMode(setting.LoadMode) {
+				continue
+			}
 			result = append(result, setting)
 		}
 	}
@@ -133,7 +136,8 @@ func listAgentSettings(ctx context.Context, agentID uint64, activeOnly bool) []a
 		return nil
 	}
 	filter := map[string]any{
-		"agent_id": agentID,
+		"agent_id":  agentID,
+		"load_mode": "always",
 	}
 	if activeOnly {
 		filter["status"] = 1
@@ -149,6 +153,11 @@ func listAgentSettings(ctx context.Context, agentID uint64, activeOnly bool) []a
 		return agentsetting.LessAgentSettingOrder(result[i].Type, result[i].ID, result[j].Type, result[j].ID)
 	})
 	return result
+}
+
+func isAlwaysLoadMode(loadMode string) bool {
+	loadMode = strings.ToLower(strings.TrimSpace(loadMode))
+	return loadMode == "" || loadMode == "always"
 }
 
 func (Repo) ListActiveAgentKnowledge(ctx context.Context, agentID uint64) []agentmodel.AgentKnowledge {
@@ -236,6 +245,21 @@ func (Repo) ListActivePowers(ctx context.Context) []energonmodel.Power {
 	return result
 }
 
+func (repo Repo) ListActiveCallablePowers(ctx context.Context, excludedID uint64) []energonmodel.Power {
+	powers := repo.ListActivePowers(ctx)
+	if excludedID == 0 {
+		return powers
+	}
+
+	result := make([]energonmodel.Power, 0, len(powers))
+	for _, power := range powers {
+		if power.ID != excludedID {
+			result = append(result, power)
+		}
+	}
+	return result
+}
+
 func (Repo) FindRuntimeConfig(ctx context.Context) agentmodel.RuntimeConfig {
 	row := agentmodel.NewRuntimeConfigModel().Find(ctx, map[string]any{
 		"id": agentmodel.DefaultRuntimeConfigID,
@@ -255,12 +279,20 @@ func (Repo) FindRuntimeConfig(ctx context.Context) agentmodel.RuntimeConfig {
 }
 
 func (repo Repo) ResolvePowerKey(ctx context.Context, identity string) (string, error) {
+	return repo.resolvePowerKey(ctx, identity, 0)
+}
+
+func (repo Repo) ResolveCallablePowerKey(ctx context.Context, identity string, excludedID uint64) (string, error) {
+	return repo.resolvePowerKey(ctx, identity, excludedID)
+}
+
+func (repo Repo) resolvePowerKey(ctx context.Context, identity string, excludedID uint64) (string, error) {
 	identity = strings.TrimSpace(identity)
 	if identity == "" {
 		return "", fmt.Errorf("能力不能为空")
 	}
 
-	powers := repo.ListActivePowers(ctx)
+	powers := repo.ListActiveCallablePowers(ctx, excludedID)
 	for _, row := range powers {
 		if row.Key == identity || row.Name == identity {
 			return row.Key, nil

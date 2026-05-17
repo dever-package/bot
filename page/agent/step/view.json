@@ -31,8 +31,11 @@
   "nodes": {
     "basic-card": [
       {
-        "type": "show-rich",
-        "value": "page.basicTitleHtml"
+        "type": "show-title",
+        "value": "page.basicTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-base",
@@ -86,8 +89,11 @@
     ],
     "content-card": [
       {
-        "type": "show-rich",
-        "value": "page.contentTitleHtml"
+        "type": "show-title",
+        "value": "page.contentTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-base",
@@ -97,8 +103,11 @@
     ],
     "payload-card": [
       {
-        "type": "show-rich",
-        "value": "page.payloadTitleHtml"
+        "type": "show-title",
+        "value": "page.payloadTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-base",
@@ -109,9 +118,18 @@
   },
   "data": {
     "page": {
-      "basicTitleHtml": "<div class='mb-4'><h3 class='text-base font-semibold text-foreground'>步骤信息</h3><p class='mt-1 text-sm text-muted-foreground'>展示步骤序号、类型、状态与标题。</p></div>",
-      "contentTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>内容</h3><p class='mt-1 text-sm text-muted-foreground'>步骤产生的可读内容。</p></div>",
-      "payloadTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>原始数据</h3><p class='mt-1 text-sm text-muted-foreground'>步骤执行时保留的结构化数据文本。</p></div>"
+      "basicTitle": {
+        "title": "步骤信息",
+        "description": "展示步骤序号、类型、状态与标题。"
+      },
+      "contentTitle": {
+        "title": "内容",
+        "description": "步骤产生的可读内容。"
+      },
+      "payloadTitle": {
+        "title": "原始数据",
+        "description": "步骤执行时保留的结构化数据文本。"
+      }
     },
     "form": {}
   },

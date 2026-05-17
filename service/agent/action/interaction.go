@@ -7,7 +7,7 @@ import (
 const InteractionFenceLang = "agent-interaction"
 
 func ExtractInteraction(text string) (string, map[string]any, bool) {
-	return extractJSONFence(text, []string{InteractionFenceLang, "json"}, validInteraction)
+	return extractJSONFence(text, []string{InteractionFenceLang}, validInteraction)
 }
 
 func validInteraction(interaction map[string]any) bool {

@@ -47,8 +47,11 @@
   "nodes": {
     "basic-card": [
       {
-        "type": "show-rich",
-        "value": "page.basicTitleHtml"
+        "type": "show-title",
+        "value": "page.basicTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-base",
@@ -123,8 +126,11 @@
     ],
     "input-card": [
       {
-        "type": "show-rich",
-        "value": "page.inputTitleHtml"
+        "type": "show-title",
+        "value": "page.inputTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-base",
@@ -134,8 +140,11 @@
     ],
     "skills-card": [
       {
-        "type": "show-rich",
-        "value": "page.skillsTitleHtml"
+        "type": "show-title",
+        "value": "page.skillsTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-base",
@@ -145,8 +154,11 @@
     ],
     "context-card": [
       {
-        "type": "show-rich",
-        "value": "page.contextTitleHtml"
+        "type": "show-title",
+        "value": "page.contextTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-base",
@@ -156,8 +168,11 @@
     ],
     "output-card": [
       {
-        "type": "show-rich",
-        "value": "page.outputTitleHtml"
+        "type": "show-title",
+        "value": "page.outputTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-base",
@@ -167,8 +182,11 @@
     ],
     "steps-card": [
       {
-        "type": "show-rich",
-        "value": "page.stepsTitleHtml"
+        "type": "show-title",
+        "value": "page.stepsTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-table",
@@ -202,8 +220,11 @@
     ],
     "error-card": [
       {
-        "type": "show-rich",
-        "value": "page.errorTitleHtml"
+        "type": "show-title",
+        "value": "page.errorTitle",
+        "meta": {
+          "variant": "section"
+        }
       },
       {
         "type": "show-base",
@@ -214,13 +235,34 @@
   },
   "data": {
     "page": {
-      "basicTitleHtml": "<div class='mb-4'><h3 class='text-base font-semibold text-foreground'>运行信息</h3><p class='mt-1 text-sm text-muted-foreground'>展示本次运行的智能体、状态、步骤数与耗时。</p></div>",
-      "inputTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>输入内容</h3><p class='mt-1 text-sm text-muted-foreground'>运行时传给 Agent 的原始输入。</p></div>",
-      "skillsTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>已加载技能</h3><p class='mt-1 text-sm text-muted-foreground'>本次运行从技能方案中选择并读取正文的技能列表。</p></div>",
-      "contextTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>运行上下文</h3><p class='mt-1 text-sm text-muted-foreground'>运行时组装后发给 Energon LLM 能力的设定、资料、能力和临时上下文。</p></div>",
-      "outputTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>输出内容</h3><p class='mt-1 text-sm text-muted-foreground'>Agent 完成本次运行后生成的内容。</p></div>",
-      "stepsTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>执行步骤</h3><p class='mt-1 text-sm text-muted-foreground'>按执行顺序展示本次运行产生的输入、技能目录、运行上下文、输出、警告或错误。</p></div>",
-      "errorTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>错误信息</h3><p class='mt-1 text-sm text-muted-foreground'>失败时记录的错误详情。</p></div>"
+      "basicTitle": {
+        "title": "运行信息",
+        "description": "展示本次运行的智能体、状态、步骤数与耗时。"
+      },
+      "inputTitle": {
+        "title": "输入内容",
+        "description": "运行时传给 Agent 的原始输入。"
+      },
+      "skillsTitle": {
+        "title": "已加载技能",
+        "description": "本次运行从技能方案中选择并读取正文的技能列表。"
+      },
+      "contextTitle": {
+        "title": "运行上下文",
+        "description": "运行时组装后发给 Energon LLM 能力的设定、资料、能力和临时上下文。"
+      },
+      "outputTitle": {
+        "title": "输出内容",
+        "description": "Agent 完成本次运行后生成的内容。"
+      },
+      "stepsTitle": {
+        "title": "执行步骤",
+        "description": "按执行顺序展示本次运行产生的输入、技能目录、运行上下文、输出、警告或错误。"
+      },
+      "errorTitle": {
+        "title": "错误信息",
+        "description": "失败时记录的错误详情。"
+      }
     },
     "form": {
       "steps": []

@@ -18,7 +18,7 @@ func StripOutputProgress(output Output) {
 }
 
 var (
-	scalarOutputKeys  = []string{"event", "title", "text", "reasoning", "progress", "error", "json"}
+	scalarOutputKeys  = []string{"event", "title", "text", "reasoning", "progress", "error", "json", "rich"}
 	mediaOutputFields = []struct {
 		Target  string
 		Sources []string

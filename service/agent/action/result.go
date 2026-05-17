@@ -2,6 +2,8 @@ package action
 
 import (
 	"strings"
+
+	botprotocol "my/package/bot/service/energon/protocol"
 )
 
 const (
@@ -10,7 +12,7 @@ const (
 )
 
 func ExtractAgentResult(text string) (string, map[string]any, bool) {
-	return extractJSONFence(text, []string{"agent-result", "agent-output", "json"}, validAgentResult)
+	return extractJSONFence(text, []string{"agent-result", "agent-output"}, validAgentResult)
 }
 
 func validAgentResult(result map[string]any) bool {
@@ -25,6 +27,9 @@ func validAgentResult(result map[string]any) bool {
 		return true
 	}
 	if _, ok := result["content"]; ok {
+		return true
+	}
+	if hasResultOutputField(result) || hasResultOutputField(normalizeMap(result["content"])) {
 		return true
 	}
 	return strings.TrimSpace(firstText(result["text"])) != ""
@@ -42,6 +47,9 @@ func ApplyAgentResult(output map[string]any, result map[string]any, fallbackText
 	if content, exists := result["content"]; exists {
 		next["content"] = content
 	}
+	contentMap := normalizeMap(result["content"])
+	copyResultOutputFields(next, contentMap)
+	copyResultOutputFields(next, result)
 	if text := agentResultText(result); text != "" {
 		next["text"] = text
 	} else if strings.TrimSpace(fallbackText) != "" {
@@ -52,6 +60,76 @@ func ApplyAgentResult(output map[string]any, result map[string]any, fallbackText
 	}
 	delete(next, "reasoning")
 	return next
+}
+
+var resultMediaKeys = []string{"images", "videos", "audios", "files"}
+
+func hasResultOutputField(source map[string]any) bool {
+	if len(source) == 0 {
+		return false
+	}
+	for _, key := range []string{"title", "rich", "json", "value"} {
+		if resultFieldHasValue(source[key]) {
+			return true
+		}
+	}
+	for _, key := range resultMediaKeys {
+		if len(botprotocol.NormalizeStringList(source[key])) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func copyResultOutputFields(target map[string]any, source map[string]any) {
+	if len(source) == 0 {
+		return
+	}
+	for _, key := range []string{"title", "rich", "json"} {
+		copyResultValue(target, source, key)
+	}
+	if !resultFieldHasValue(target["rich"]) {
+		if rich := normalizeMap(source["value"]); len(rich) > 0 {
+			target["rich"] = rich
+		}
+	}
+	for _, key := range resultMediaKeys {
+		copyResultMedia(target, source, key)
+	}
+}
+
+func copyResultValue(target map[string]any, source map[string]any, key string) {
+	value, exists := source[key]
+	if !exists || !resultFieldHasValue(value) || resultFieldHasValue(target[key]) {
+		return
+	}
+	target[key] = value
+}
+
+func copyResultMedia(target map[string]any, source map[string]any, key string) {
+	if len(botprotocol.NormalizeStringList(target[key])) > 0 {
+		return
+	}
+	if values := botprotocol.NormalizeStringList(source[key]); len(values) > 0 {
+		target[key] = values
+	}
+}
+
+func resultFieldHasValue(value any) bool {
+	switch current := value.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(current) != ""
+	case []any:
+		return len(current) > 0
+	case []string:
+		return len(current) > 0
+	case map[string]any:
+		return len(current) > 0
+	default:
+		return true
+	}
 }
 
 func NormalizeAgentFinalOutput(output map[string]any, fallbackText string) map[string]any {
@@ -99,7 +177,7 @@ func agentResultText(result map[string]any) string {
 	if len(contentMap) == 0 {
 		return strings.TrimSpace(firstText(content))
 	}
-	return strings.TrimSpace(firstText(contentMap["text"], contentMap["markdown"], contentMap["html"]))
+	return strings.TrimSpace(firstText(contentMap["text"]))
 }
 
 func NormalizeSuggestions(value any) []map[string]any {

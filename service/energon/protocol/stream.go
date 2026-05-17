@@ -44,6 +44,7 @@ func MergeStreamResult(outputs []Output) Output {
 			reasoningParts = append(reasoningParts, text)
 		}
 		copyFirstOutputValue(result, output, "title")
+		copyFirstOutputValue(result, output, "rich")
 		appendOutputList(result, "images", output["images"], output["image"])
 		appendOutputList(result, "videos", output["videos"], output["video"])
 		appendOutputList(result, "audios", output["audios"], output["audio"])

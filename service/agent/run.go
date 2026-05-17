@@ -18,6 +18,13 @@ type runtimeOptions struct {
 	MaxSteps int
 }
 
+type agentLoopResult struct {
+	Output  map[string]any
+	Summary string
+	Status  string
+	Message string
+}
+
 type runExecution struct {
 	Request   RunRequest
 	Parsed    parsedRunRequest
@@ -45,7 +52,7 @@ func (s Service) execute(exec runExecution) {
 		if recovered := recover(); recovered != nil {
 			err := fmt.Errorf("%v", recovered)
 			tracker.Step(context.Background(), "error", "运行异常", err.Error(), map[string]any{"error": err.Error()}, stepStatusFail)
-			s.finishRun(context.Background(), exec, runStatusFail, "", err.Error(), tracker.seq)
+			s.finishRun(context.Background(), exec, runStatusFail, nil, "", err.Error(), tracker.seq)
 			_ = s.writeErrorResult(context.Background(), exec.RequestID, err.Error())
 		}
 	}()
@@ -55,7 +62,7 @@ func (s Service) execute(exec runExecution) {
 		"history": exec.Parsed.History,
 	}, stepStatusSuccess)
 
-	powers := s.repo.ListActivePowers(ctx)
+	powers := s.repo.ListActiveCallablePowers(ctx, exec.Power.ID)
 	runtimeConfig := s.repo.FindRuntimeConfig(ctx)
 	skillLimits := agentskill.LimitsFromRuntimeConfig(runtimeConfig)
 	catalog := agentskill.BuildCatalog(exec.Agent.SkillPackID, s.repo.ListActiveSkillPackEntries(ctx, exec.Agent.SkillPackID), skillLimits)
@@ -78,7 +85,7 @@ func (s Service) execute(exec runExecution) {
 	if catalog.Warning != "" {
 		_ = s.writeStreamStatus(ctx, exec.RequestID, catalog.Warning, nil)
 	} else {
-		_ = s.writeStreamStatus(ctx, exec.RequestID, "已加载技能方案 metadata", nil)
+		_ = s.writeStreamStatus(ctx, exec.RequestID, "已加载技能方案", nil)
 	}
 
 	selection := agentskill.SelectRuntime(ctx, agentskill.SelectionRequest{
@@ -160,26 +167,37 @@ func (s Service) execute(exec runExecution) {
 		"request_options": exec.Parsed.Options,
 	}, stepStatusSuccess)
 
-	output, status, message := s.runAgentLoop(ctx, exec, runtimePrompt, &tracker, runtimeOptions)
-	if status == runStatusSuccess {
-		tracker.Step(ctx, "final", "最终输出", output, map[string]any{"output": output}, stepStatusSuccess)
-		s.finishRun(ctx, exec, runStatusSuccess, output, "", tracker.seq)
+	result := s.runAgentLoop(ctx, exec, runtimePrompt, &tracker, runtimeOptions)
+	if result.Status == runStatusSuccess {
+		tracker.Step(ctx, "final", "最终输出", result.Summary, map[string]any{"output": result.Output}, stepStatusSuccess)
+		s.finishRun(ctx, exec, runStatusSuccess, result.Output, result.Summary, "", tracker.seq)
 		return
 	}
 
 	stepStatus := stepStatusFail
-	if status == runStatusCanceled {
+	if result.Status == runStatusCanceled {
 		stepStatus = stepStatusWarning
 	}
-	tracker.Step(context.Background(), "error", "运行结束", message, map[string]any{"status": status}, stepStatus)
-	s.finishRun(context.Background(), exec, status, output, message, tracker.seq)
+	tracker.Step(context.Background(), "error", "运行结束", result.Message, map[string]any{
+		"status": result.Status,
+		"output": result.Output,
+	}, stepStatus)
+	s.finishRun(context.Background(), exec, result.Status, result.Output, result.Summary, result.Message, tracker.seq)
 }
 
-func (s Service) finishRun(ctx context.Context, exec runExecution, status string, output string, message string, stepCount int) {
+func (s Service) finishRun(
+	ctx context.Context,
+	exec runExecution,
+	status string,
+	output map[string]any,
+	summary string,
+	message string,
+	stepCount int,
+) {
 	finishedAt := time.Now()
 	s.repo.UpdateRun(ctx, exec.RunID, map[string]any{
 		"status":      status,
-		"output":      output,
+		"output":      runOutputText(output, summary),
 		"error":       message,
 		"step_count":  stepCount,
 		"latency":     finishedAt.Sub(exec.StartedAt).Milliseconds(),
@@ -187,7 +205,7 @@ func (s Service) finishRun(ctx context.Context, exec runExecution, status string
 	})
 }
 
-func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePrompt string, tracker *runTracker, options runtimeOptions) (string, string, string) {
+func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePrompt string, tracker *runTracker, options runtimeOptions) agentLoopResult {
 	history := append([]any{}, exec.Parsed.History...)
 	artifacts := agentaction.NewArtifactAccumulator()
 	lastOutput := ""
@@ -203,8 +221,8 @@ func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePro
 		if result.LastID != "" {
 			gatewayLastID = result.LastID
 		}
-		if done, status, message := s.handlePowerActionResult(ctx, exec, tracker, result, &artifacts, &history, &lastOutput); status != "" {
-			return done, status, message
+		if loopResult, done := s.handlePowerActionResult(ctx, exec, tracker, result, &artifacts, &history, &lastOutput); done {
+			return loopResult
 		}
 	}
 
@@ -225,11 +243,11 @@ func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePro
 		case agentTurnFinal:
 			output := artifacts.MergeInto(turn.Output)
 			_ = s.writeSuccessResult(ctx, exec.RequestID, output)
-			return agentaction.SummaryText(output), runStatusSuccess, ""
+			return newAgentLoopResult(output, runStatusSuccess, "")
 		case agentTurnInteraction:
 			_ = s.writeStreamOutput(ctx, exec.RequestID, turn.Output)
 			_ = s.writeSuccessResult(ctx, exec.RequestID, turn.Output)
-			return agentaction.SummaryText(turn.Output), runStatusSuccess, ""
+			return newAgentLoopResult(turn.Output, runStatusSuccess, "")
 		case agentTurnAction:
 			tracker.Step(ctx, "agent_action", "准备调用能力", turn.Action.Power, map[string]any{
 				"text":   turn.Text,
@@ -239,22 +257,22 @@ func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePro
 			if result.LastID != "" {
 				gatewayLastID = result.LastID
 			}
-			if done, status, message := s.handlePowerActionResult(ctx, exec, tracker, result, &artifacts, &history, &lastOutput); status != "" {
-				return done, status, message
+			if loopResult, done := s.handlePowerActionResult(ctx, exec, tracker, result, &artifacts, &history, &lastOutput); done {
+				return loopResult
 			}
 		case agentTurnCanceled:
 			_ = s.writeCancelResult(ctx, exec.RequestID)
-			return turn.Text, runStatusCanceled, "任务已取消"
+			return newAgentLoopTextResult(turn.Text, runStatusCanceled, "任务已取消")
 		default:
 			message := firstText(turn.Message, "智能体运行失败")
 			_ = s.writeErrorResult(ctx, exec.RequestID, message)
-			return turn.Text, runStatusFail, message
+			return newAgentLoopTextResult(turn.Text, runStatusFail, message)
 		}
 	}
 
 	output := stepLimitOutput(options.MaxSteps, lastOutput, artifacts)
 	_ = s.writeSuccessResult(ctx, exec.RequestID, output)
-	return agentaction.SummaryText(output), runStatusSuccess, ""
+	return newAgentLoopResult(output, runStatusSuccess, "")
 }
 
 func (s Service) executePowerAction(ctx context.Context, exec runExecution, action agentaction.Action, intro string, gatewayLastID string) agentaction.Result {
@@ -268,7 +286,9 @@ func (s Service) executePowerAction(ctx context.Context, exec runExecution, acti
 		History:        exec.Parsed.History,
 		SourceTargetID: exec.Parsed.SourceTargetID,
 		Gateway:        s.gateway,
-		ResolvePower:   s.repo.ResolvePowerKey,
+		ResolvePower: func(ctx context.Context, identity string) (string, error) {
+			return s.repo.ResolveCallablePowerKey(ctx, identity, exec.Power.ID)
+		},
 		WriteStatus: func(ctx context.Context, text string, meta map[string]any) error {
 			return s.writeStreamStatus(ctx, exec.RequestID, text, meta)
 		},
@@ -287,7 +307,7 @@ func (s Service) handlePowerActionResult(
 	artifacts *agentaction.ArtifactAccumulator,
 	history *[]any,
 	lastOutput *string,
-) (string, string, string) {
+) (agentLoopResult, bool) {
 	switch result.Kind {
 	case agentaction.ResultDone:
 		artifacts.Add(result.Output)
@@ -297,19 +317,46 @@ func (s Service) handlePowerActionResult(
 			"output": result.Output,
 		}, stepStatusSuccess)
 		*history = agentaction.AppendHistoryObservation(*history, result)
-		return "", "", ""
+		return agentLoopResult{}, false
 	case agentaction.ResultInteraction:
 		_ = s.writeStreamOutput(ctx, exec.RequestID, result.Output)
 		_ = s.writeSuccessResult(ctx, exec.RequestID, result.Output)
-		return agentaction.SummaryText(result.Output), runStatusSuccess, ""
+		return newAgentLoopResult(result.Output, runStatusSuccess, ""), true
 	case agentaction.ResultCanceled:
 		_ = s.writeCancelResult(ctx, exec.RequestID)
-		return result.Text, runStatusCanceled, firstText(result.Message, "任务已取消")
+		return newAgentLoopTextResult(result.Text, runStatusCanceled, firstText(result.Message, "任务已取消")), true
 	default:
 		message := firstText(result.Message, "能力调用失败")
 		_ = s.writeErrorResult(ctx, exec.RequestID, message)
-		return result.Text, runStatusFail, message
+		return newAgentLoopTextResult(result.Text, runStatusFail, message), true
 	}
+}
+
+func newAgentLoopResult(output map[string]any, status string, message string) agentLoopResult {
+	return agentLoopResult{
+		Output:  output,
+		Summary: agentaction.SummaryText(output),
+		Status:  status,
+		Message: message,
+	}
+}
+
+func newAgentLoopTextResult(text string, status string, message string) agentLoopResult {
+	return agentLoopResult{
+		Summary: strings.TrimSpace(firstText(text, message)),
+		Status:  status,
+		Message: message,
+	}
+}
+
+func runOutputText(output map[string]any, summary string) string {
+	if len(output) > 0 {
+		text := strings.TrimSpace(jsonText(output))
+		if text != "" && text != "null" {
+			return text
+		}
+	}
+	return strings.TrimSpace(summary)
 }
 
 func turnStepStatus(turn agentTurnResult) string {

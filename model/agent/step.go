@@ -14,7 +14,7 @@ type Step struct {
 	Type      string    `dorm:"type:varchar(32);not null;default:input;comment:步骤类型"`
 	Title     string    `dorm:"type:varchar(128);not null;default:'';comment:标题"`
 	Content   string    `dorm:"type:text;not null;default:'';comment:内容"`
-	Payload   string    `dorm:"type:text;not null;default:'{}';comment:原始数据"`
+	Payload   string    `dorm:"type:longtext;not null;default:'{}';comment:原始数据"`
 	Status    string    `dorm:"type:varchar(32);not null;default:success;comment:状态"`
 	CreatedAt time.Time `dorm:"comment:创建时间"`
 }
