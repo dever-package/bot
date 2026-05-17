@@ -1,0 +1,51 @@
+{
+  "page": {
+    "name": "技能详情",
+    "parent": "bot/agent/skill/list",
+    "type": 2,
+    "sort": 11
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "detail-shell": {
+            "type": "container",
+            "className": "space-y-4 rounded-lg border bg-background p-4"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "detail-shell": [
+      {
+        "type": "show-title",
+        "value": "form.name"
+      },
+      {
+        "type": "show-base",
+        "value": "form.description",
+        "className": "text-sm text-muted-foreground whitespace-pre-wrap break-words"
+      },
+      {
+        "type": "show-base",
+        "value": "form.install_path",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm font-mono break-all"
+      },
+      {
+        "type": "show-base",
+        "value": "form.manifest",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words"
+      }
+    ]
+  },
+  "data": {
+    "form": {}
+  },
+  "state": {},
+  "action": {}
+}

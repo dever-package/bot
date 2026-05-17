@@ -8,23 +8,23 @@ import (
 	botmodel "my/package/bot/model/energon"
 )
 
-type TestParam struct {
-	ID           uint64            `json:"id"`
-	PowerParamID uint64            `json:"power_param_id"`
-	Name         string            `json:"name"`
-	Key          string            `json:"key"`
-	Type         string            `json:"type"`
-	Usage        int16             `json:"usage"`
-	ValueType    string            `json:"value_type"`
-	DefaultValue string            `json:"default_value"`
-	Required     bool              `json:"required"`
-	UploadRuleID uint64            `json:"upload_rule_id,omitempty"`
-	MaxFiles     int               `json:"max_files,omitempty"`
-	Sort         int               `json:"sort"`
-	Options      []TestParamOption `json:"options,omitempty"`
+type PowerParam struct {
+	ID           uint64             `json:"id"`
+	PowerParamID uint64             `json:"power_param_id"`
+	Name         string             `json:"name"`
+	Key          string             `json:"key"`
+	Type         string             `json:"type"`
+	Usage        int16              `json:"usage"`
+	ValueType    string             `json:"value_type"`
+	DefaultValue string             `json:"default_value"`
+	Required     bool               `json:"required"`
+	UploadRuleID uint64             `json:"upload_rule_id,omitempty"`
+	MaxFiles     int                `json:"max_files,omitempty"`
+	Sort         int                `json:"sort"`
+	Options      []PowerParamOption `json:"options,omitempty"`
 }
 
-type TestParamOption struct {
+type PowerParamOption struct {
 	ID          uint64 `json:"id"`
 	Name        string `json:"name"`
 	Value       string `json:"value"`
@@ -32,14 +32,14 @@ type TestParamOption struct {
 	Sort        int    `json:"sort"`
 }
 
-type TestParamConfig struct {
-	SourceRule       int16        `json:"source_rule"`
-	SelectedTargetID uint64       `json:"selected_target_id"`
-	Sources          []TestSource `json:"sources"`
-	Params           []TestParam  `json:"params"`
+type PowerParamConfig struct {
+	SourceRule       int16         `json:"source_rule"`
+	SelectedTargetID uint64        `json:"selected_target_id"`
+	Sources          []PowerSource `json:"sources"`
+	Params           []PowerParam  `json:"params"`
 }
 
-type TestSource struct {
+type PowerSource struct {
 	ID           uint64 `json:"id"`
 	TargetID     uint64 `json:"target_id"`
 	ServiceID    uint64 `json:"service_id"`
@@ -50,24 +50,24 @@ type TestSource struct {
 	Sort         int    `json:"sort"`
 }
 
-type testParamOptionFilter struct {
+type powerParamOptionFilter struct {
 	restricted   bool
 	unrestricted bool
 	allowedIDs   map[uint64]struct{}
 }
 
-type testParamRowConfig struct {
+type powerParamRow struct {
 	ID     uint64
 	Name   string
 	Key    string
 	Sort   int
-	Filter testParamOptionFilter
+	Filter powerParamOptionFilter
 }
 
-func BuildTestParams(ctx context.Context, repo Repository, powerID uint64, serviceID uint64) []TestParam {
+func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serviceID uint64) []PowerParam {
 	params := repo.ParamMap(ctx)
 	serviceParamIDs := ActiveServiceParamIDs(ctx, repo, serviceID)
-	optionFilters := testParamOptionFilters(ctx, repo, serviceID, params)
+	optionFilters := powerParamOptionFilters(ctx, repo, serviceID, params)
 	powerParamsByParamID := map[uint64][]botmodel.PowerParam{}
 	for _, powerParam := range repo.PowerParamsByPower(ctx, powerID) {
 		param, ok := params[powerParam.ParamID]
@@ -77,7 +77,7 @@ func BuildTestParams(ctx context.Context, repo Repository, powerID uint64, servi
 		powerParamsByParamID[param.ID] = append(powerParamsByParamID[param.ID], powerParam)
 	}
 
-	rows := make([]TestParam, 0)
+	rows := make([]PowerParam, 0)
 	usedPowerParams := map[uint64]struct{}{}
 	serviceCoveredParams := map[uint64]struct{}{}
 	if serviceID > 0 {
@@ -94,11 +94,11 @@ func BuildTestParams(ctx context.Context, repo Repository, powerID uint64, servi
 				continue
 			}
 			serviceCoveredParams[param.ID] = struct{}{}
-			rows = append(rows, buildTestParamRow(ctx, repo, param, powerParam, testParamRowConfig{
+			rows = append(rows, buildPowerParamRow(ctx, repo, param, powerParam, powerParamRow{
 				ID:     serviceParam.ID,
 				Name:   ServiceParamDisplayName(serviceParam, param),
-				Key:    testParamInputKey(serviceParam, param),
-				Sort:   testParamSort(powerParam.Sort, serviceParam.Sort),
+				Key:    powerParamInputKey(serviceParam, param),
+				Sort:   powerParamSort(powerParam.Sort, serviceParam.Sort),
 				Filter: optionFilters[param.ID],
 			}))
 		}
@@ -125,7 +125,7 @@ func BuildTestParams(ctx context.Context, repo Repository, powerID uint64, servi
 			}
 			seenDefaultParams[param.ID] = struct{}{}
 
-			rows = append(rows, buildTestParamRow(ctx, repo, param, powerParam, testParamRowConfig{
+			rows = append(rows, buildPowerParamRow(ctx, repo, param, powerParam, powerParamRow{
 				ID:     param.ID,
 				Name:   param.Name,
 				Key:    param.Key,
@@ -144,17 +144,17 @@ func BuildTestParams(ctx context.Context, repo Repository, powerID uint64, servi
 	return rows
 }
 
-func buildTestParamRow(
+func buildPowerParamRow(
 	ctx context.Context,
 	repo Repository,
 	param botmodel.Param,
 	powerParam botmodel.PowerParam,
-	config testParamRowConfig,
-) TestParam {
-	row := TestParam{
+	config powerParamRow,
+) PowerParam {
+	row := PowerParam{
 		ID:           config.ID,
 		PowerParamID: powerParam.ID,
-		Name:         testParamName(param, config.Name),
+		Name:         powerParamName(param, config.Name),
 		Key:          strings.TrimSpace(config.Key),
 		Type:         NormalizeParamControlType(param.Type),
 		Usage:        normalizeParamUsage(param.Usage),
@@ -166,18 +166,18 @@ func buildTestParamRow(
 		Sort:         config.Sort,
 	}
 	if IsOptionParamType(row.Type) {
-		row.Options = testParamOptions(ctx, repo, param.ID, config.Filter)
+		row.Options = powerParamOptions(ctx, repo, param.ID, config.Filter)
 	}
 	return row
 }
 
-func testParamOptionFilters(
+func powerParamOptionFilters(
 	ctx context.Context,
 	repo Repository,
 	serviceID uint64,
 	params map[uint64]botmodel.Param,
-) map[uint64]testParamOptionFilter {
-	result := map[uint64]testParamOptionFilter{}
+) map[uint64]powerParamOptionFilter {
+	result := map[uint64]powerParamOptionFilter{}
 	if serviceID == 0 {
 		return result
 	}
@@ -227,25 +227,25 @@ func testParamOptionFilters(
 	return result
 }
 
-func testParamOptions(
+func powerParamOptions(
 	ctx context.Context,
 	repo Repository,
 	paramID uint64,
-	filter testParamOptionFilter,
-) []TestParamOption {
+	filter powerParamOptionFilter,
+) []PowerParamOption {
 	options := repo.ParamOptionsByParam(ctx, paramID)
 	if len(options) == 0 {
 		return nil
 	}
 
-	rows := make([]TestParamOption, 0, len(options))
+	rows := make([]PowerParamOption, 0, len(options))
 	for _, option := range options {
 		if filter.restricted && !filter.unrestricted {
 			if _, ok := filter.allowedIDs[option.ID]; !ok {
 				continue
 			}
 		}
-		rows = append(rows, TestParamOption{
+		rows = append(rows, PowerParamOption{
 			ID:          option.ID,
 			Name:        option.Name,
 			Value:       optionLabel(option),
@@ -262,7 +262,7 @@ func testParamOptions(
 	return rows
 }
 
-func testParamSort(powerSort int, serviceSort int) int {
+func powerParamSort(powerSort int, serviceSort int) int {
 	if serviceSort > 0 {
 		return serviceSort
 	}
@@ -276,14 +276,14 @@ func normalizeParamUsage(value int16) int16 {
 	return paramUsageMain
 }
 
-func testParamName(param botmodel.Param, serviceParamName string) string {
+func powerParamName(param botmodel.Param, serviceParamName string) string {
 	if name := strings.TrimSpace(serviceParamName); name != "" {
 		return name
 	}
 	return param.Name
 }
 
-func testParamInputKey(serviceParam botmodel.ServiceParam, param botmodel.Param) string {
+func powerParamInputKey(serviceParam botmodel.ServiceParam, param botmodel.Param) string {
 	if serviceParam.ParamRule == paramRuleComboMap {
 		return strings.TrimSpace(param.Key)
 	}

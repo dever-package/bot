@@ -108,7 +108,7 @@
       "params": "form",
       "before": {
         "type": "service",
-        "use": "bot.energon.ServiceHook.BeforeSaveService"
+        "use": "bot.energon.hook.ServiceHook.BeforeSaveService"
       }
     }
   }

@@ -1,6 +1,6 @@
 {
   "page": {
-    "name": "通用规则",
+    "name": "规则",
     "icon": "file-text",
     "parent": "bot/agent/setting_pack/list",
     "type": 2,
@@ -262,7 +262,7 @@
         "meta": {
           "stateKey": "dialog.edit",
           "pageRoute": "/bot/agent/setting/update",
-          "description": "通用规则正文在这里维护；加入方案后才会参与智能体运行。",
+          "description": "规则正文在这里维护；加入方案后才会参与智能体运行。",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
@@ -292,8 +292,8 @@
   },
   "data": {
     "page": {
-      "title": "通用规则",
-      "description": "维护所有智能体可复用的通用规则。分类只用于管理通用规则；运行时由方案决定加载哪些规则。"
+      "title": "规则",
+      "description": "维护所有智能体可复用的规则。分类只用于管理规则；运行时由方案决定加载哪些规则。"
     },
     "search": {
       "keyword": "",

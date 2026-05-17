@@ -64,6 +64,23 @@
     "header-actions": [
       {
         "type": "show-button",
+        "name": "运行配置",
+        "className": "shrink-0",
+        "meta": {
+          "icon": "settings",
+          "variant": "outline",
+          "size": "sm"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.runtimeConfig",
+            "value": true
+          }
+        }
+      },
+      {
+        "type": "show-button",
         "name": "新增智能体",
         "className": "shrink-0",
         "meta": {
@@ -107,7 +124,12 @@
             },
             {
               "value": "setting_pack.name",
-              "name": "执行方案",
+              "name": "规则方案",
+              "type": "show-base"
+            },
+            {
+              "value": "skill_pack.name",
+              "name": "技能方案",
               "type": "show-base"
             },
             {
@@ -179,17 +201,17 @@
                     "icon": "message-circle",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "测试智能体",
+                    "description": "运行智能体",
                     "action": {
                       "click": [
                         {
                           "type": "data",
-                          "key": "actionTarget.testAgent",
+                          "key": "actionTarget.runAgent",
                           "value": "$row"
                         },
                         {
                           "type": "modal",
-                          "key": "dialog.test",
+                          "key": "dialog.run",
                           "value": true
                         }
                       ]
@@ -229,10 +251,28 @@
     "feedback-shell": [
       {
         "type": "feedback-modal",
+        "name": "智能体运行配置",
+        "info": "配置所有智能体自动执行的默认步数和全局强制上限。",
+        "meta": {
+          "stateKey": "dialog.runtimeConfig",
+          "pageRoute": "/bot/agent/runtime_config/set",
+          "description": "这些配置会影响所有调用通用智能体运行时的智能体。",
+          "size": "lg",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存配置"
+          },
+          "pageRouteQuery": {
+            "id": 1
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
         "meta": {
           "stateKey": "dialog.edit",
           "pageRoute": "/bot/agent/agent/update",
-          "description": "配置智能体 LLM 能力和通用规则方案。",
+          "description": "配置智能体 LLM 能力、规则方案和技能方案。",
           "size": "xl",
           "footer": {
             "confirm": true,
@@ -261,13 +301,13 @@
       },
       {
         "type": "feedback-modal",
-        "name": "测试智能体",
+        "name": "运行智能体",
         "info": "当前弹窗内保留临时上下文，关闭后会重新开始新对话。",
         "meta": {
-          "stateKey": "dialog.test",
+          "stateKey": "dialog.run",
           "formSection": "agent-panel",
-          "titleNamePath": "data.actionTarget.testAgent.name",
-          "titleKeyPath": "data.actionTarget.testAgent.key",
+          "titleNamePath": "data.actionTarget.runAgent.name",
+          "titleKeyPath": "data.actionTarget.runAgent.key",
           "size": "3xl",
           "bodyScroll": false,
           "footer": {
@@ -296,9 +336,9 @@
         "id": "agent-stream",
         "type": "show-agent",
         "meta": {
-          "agentPath": "data.actionTarget.testAgent.key",
-          "agentNamePath": "data.actionTarget.testAgent.name",
-          "openPath": "state.dialog.test",
+          "agentPath": "data.actionTarget.runAgent.key",
+          "agentNamePath": "data.actionTarget.runAgent.name",
+          "openPath": "state.dialog.run",
           "requestApi": "/bot/agent/run",
           "streamApi": "/bot/agent/stream",
           "stopApi": "/bot/agent/stop",
@@ -311,7 +351,7 @@
   "data": {
     "page": {
       "title": "智能体",
-      "description": "维护智能体基础设定。运行时会追加智能体设定、能力、skills 和临时上下文。"
+      "description": "维护智能体基础设定。运行时会追加智能体设定、能力、技能和临时上下文。"
     },
     "table": {
       "page": 1,
@@ -327,14 +367,14 @@
     "actionTarget": {
       "editAgentId": "",
       "deleteAgent": {},
-      "testAgent": {}
+      "runAgent": {}
     }
   },
   "state": {
     "dialog": {
       "edit": false,
       "create": false,
-      "test": false
+      "run": false
     },
     "confirm": {
       "delete": false

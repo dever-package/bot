@@ -99,7 +99,7 @@
       "params": "form",
       "before": {
         "type": "service",
-        "use": "bot.agent.AgentHook.BeforeSaveAgentSetting"
+        "use": "bot.agent.setting.AgentHook.BeforeSaveAgentSetting"
       }
     }
   }

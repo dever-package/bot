@@ -301,9 +301,9 @@
       "channelTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>渠道请求参数</h3><p class='mt-1 text-sm text-muted-foreground'>这里记录转换后实际发给来源渠道的 url、method、headers、body。</p></div>",
       "resultTitleHtml": "<div class='mb-3'><h3 class='text-base font-semibold text-foreground'>响应数据</h3><p class='mt-1 text-sm text-muted-foreground'>成功时展示响应，失败时展示失败环节和错误信息。</p></div>"
     },
-    "attempts": "{{bot.energon.LogViewService.LoadAttempts}}",
-    "requestParams": "{{bot.energon.LogViewService.LoadRequestParams}}",
-    "channelRequest": "{{bot.energon.LogViewService.LoadChannelRequest}}",
+    "attempts": "{{bot.energon.log.LogViewService.LoadAttempts}}",
+    "requestParams": "{{bot.energon.log.LogViewService.LoadRequestParams}}",
+    "channelRequest": "{{bot.energon.log.LogViewService.LoadChannelRequest}}",
     "form": {},
     "actionTarget": {
       "attemptError": ""

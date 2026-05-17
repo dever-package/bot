@@ -1,0 +1,106 @@
+{
+  "page": {
+    "name": "技能方案编辑",
+    "parent": "bot/agent/skill_pack/list",
+    "type": 2,
+    "sort": 10,
+    "auth": [
+      {
+        "key": "bot/agent/skill_pack/create",
+        "name": "技能方案新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/agent/skill_pack/update",
+        "name": "技能方案编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "placeholder": "例如：默认技能方案",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "技能方案名称不能为空。"
+          },
+          {
+            "type": "model",
+            "except": "$form.id",
+            "message": "该技能方案名称已存在。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "描述这个技能方案适合哪些智能体或场景。",
+        "value": "form.description",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 3
+        }
+      },
+      {
+        "type": "form-array",
+        "name": "技能",
+        "value": "form.items",
+        "mode": "form",
+        "info": "技能列表：选择已安装技能组成当前方案；运行时先注入 metadata，命中后再读取正文。",
+        "meta": {
+          "formLayout": "horizontal",
+          "pageRoute": "/bot/agent/skill_pack_item/update",
+          "addText": "添加技能",
+          "drag": "sort"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "name": "",
+      "description": "",
+      "items": [],
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.agent.setting.AgentHook.BeforeSaveSkillPack"
+      }
+    }
+  }
+}

@@ -41,12 +41,12 @@ func mapDirectOptionParamValue(
 	}
 
 	if NormalizeParamControlType(param.Type) == "multi_option" {
-		items := normalizeInputList(value)
+		items := List(value)
 		result := make([]any, 0, len(items))
 		for _, item := range items {
 			option, ok := matchParamOption(ctx, repo, param.ID, item)
 			if !ok {
-				return nil, false, fmt.Errorf("参数“%s”的选项“%s”不存在", ServiceParamDisplayName(serviceParam, param), inputValueText(item))
+				return nil, false, fmt.Errorf("参数“%s”的选项“%s”不存在", ServiceParamDisplayName(serviceParam, param), ValueText(item))
 			}
 			result = append(result, option.Value)
 		}
@@ -55,7 +55,7 @@ func mapDirectOptionParamValue(
 
 	option, ok := matchParamOption(ctx, repo, param.ID, value)
 	if !ok {
-		return nil, false, fmt.Errorf("参数“%s”的选项“%s”不存在", ServiceParamDisplayName(serviceParam, param), inputValueText(value))
+		return nil, false, fmt.Errorf("参数“%s”的选项“%s”不存在", ServiceParamDisplayName(serviceParam, param), ValueText(value))
 	}
 	return option.Value, true, nil
 }
@@ -164,7 +164,7 @@ func resolveComboParamInputValue(
 }
 
 func selectedParamOptionIDs(ctx context.Context, repo Repository, param botmodel.Param, value any) ([]uint64, error) {
-	values := normalizeInputList(value)
+	values := List(value)
 	if len(values) == 0 {
 		return nil, nil
 	}
@@ -173,7 +173,7 @@ func selectedParamOptionIDs(ctx context.Context, repo Repository, param botmodel
 	for _, item := range values {
 		option, ok := matchParamOption(ctx, repo, param.ID, item)
 		if !ok {
-			return nil, fmt.Errorf("参数“%s”的选项“%s”不存在", param.Name, inputValueText(item))
+			return nil, fmt.Errorf("参数“%s”的选项“%s”不存在", param.Name, ValueText(item))
 		}
 		ids = append(ids, option.ID)
 	}
@@ -237,7 +237,7 @@ func appendUniqueInputKey(keys []string, key string) []string {
 }
 
 func mapFileParamValue(value any) any {
-	items := normalizeStringInputList(value)
+	items := StringList(value)
 	if len(items) == 0 {
 		return value
 	}
@@ -248,11 +248,11 @@ func mapFileParamValue(value any) any {
 }
 
 func matchParamOption(ctx context.Context, repo Repository, paramID uint64, value any) (botmodel.ParamOption, bool) {
-	if paramID == 0 || isMissingInputValue(value) {
+	if paramID == 0 || IsMissing(value) {
 		return botmodel.ParamOption{}, false
 	}
 	targetID := util.ToUint64(value)
-	targetText := strings.TrimSpace(inputValueText(value))
+	targetText := strings.TrimSpace(ValueText(value))
 	for _, option := range repo.ParamOptionsByParam(ctx, paramID) {
 		if targetID > 0 && option.ID == targetID {
 			return option, true

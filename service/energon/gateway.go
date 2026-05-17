@@ -9,22 +9,18 @@ import (
 	"github.com/google/uuid"
 
 	botmodel "my/package/bot/model/energon"
-	botlog "my/package/bot/service/energon/log"
 	botprotocol "my/package/bot/service/energon/protocol"
 	botadapters "my/package/bot/service/energon/protocol/adapters"
 	botprovider "my/package/bot/service/energon/provider"
-	botruntime "my/package/bot/service/energon/runtime"
+	botstream "my/package/bot/service/energon/stream"
 	bottask "my/package/bot/service/energon/task"
+	frontstream "my/package/front/service/stream"
 )
 
 type GatewayService struct {
 	repo          Repo
-	dispatcher    Dispatcher
-	accounts      AccountSelector
-	logs          botlog.Service
-	runtimeStats  botruntime.StatService
-	streams       StreamService
-	streamCancels *streamCancelRegistry
+	streams       frontstream.Service
+	streamCancels *botstream.CancelRegistry
 	tasks         bottask.Service
 	client        botprovider.Client
 	registry      *botprotocol.Registry
@@ -41,18 +37,14 @@ func NewGatewayServiceWithClient(client botprovider.Client) GatewayService {
 	}
 	service := GatewayService{
 		repo:          repo,
-		dispatcher:    NewDispatcher(),
-		accounts:      NewAccountSelector(repo),
-		logs:          botlog.NewService(),
-		runtimeStats:  botruntime.NewStatService(),
-		streams:       NewStreamService(),
-		streamCancels: newStreamCancelRegistry(),
+		streams:       frontstream.New(botstream.Namespace),
+		streamCancels: botstream.NewCancelRegistry(),
 		client:        client,
 		registry:      botadapters.DefaultRegistry(),
 	}
 	service.tasks = bottask.NewService(bottask.NewInlineQueue(bottask.HandlerFunc(func(ctx context.Context, job bottask.Job) error {
 		return service.handleStreamJob(ctx, job)
-	}), streamWorkerTimeout))
+	}), botstream.WorkerTimeout))
 	return service
 }
 
@@ -122,7 +114,7 @@ func (s GatewayService) selectTarget(ctx context.Context, power botmodel.Power, 
 	if !ok || !isActive(provider.Status) {
 		return selectedTarget{}, fmt.Errorf("来源不可用")
 	}
-	account, err := s.accounts.Select(ctx, provider)
+	account, err := selectProviderAccount(ctx, s.repo, provider)
 	if err != nil {
 		return selectedTarget{}, err
 	}

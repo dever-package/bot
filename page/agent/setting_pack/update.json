@@ -40,7 +40,7 @@
     "dialog-shell": [
       {
         "type": "form-input",
-        "placeholder": "例如：默认通用规则",
+        "placeholder": "例如：默认规则方案",
         "value": "form.name",
         "mode": "form",
         "validate": [
@@ -73,7 +73,7 @@
         "name": "设定",
         "value": "form.items",
         "mode": "form",
-        "info": "规则列表：选择通用规则组成当前方案；运行时会按这里的排序加载。",
+        "info": "规则列表：选择规则组成当前方案；运行时会按这里的排序加载。",
         "meta": {
           "formLayout": "horizontal",
           "pageRoute": "/bot/agent/setting_pack_item/update",
@@ -99,7 +99,7 @@
       "params": "form",
       "before": {
         "type": "service",
-        "use": "bot.agent.AgentHook.BeforeSaveSettingPack"
+        "use": "bot.agent.setting.AgentHook.BeforeSaveSettingPack"
       }
     }
   }

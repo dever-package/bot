@@ -1,0 +1,205 @@
+{
+  "page": {
+    "name": "智能体运行配置",
+    "parent": "bot/agent/agent/list",
+    "type": 2,
+    "sort": 20,
+    "auth": [
+      {
+        "key": "bot/agent/runtime_config/set",
+        "name": "智能体运行配置",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "tabs-row": {
+            "type": "container",
+            "className": "mb-4"
+          },
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "tabs-row": [
+      {
+        "type": "nav-tab",
+        "meta": {
+          "target": "state.currentTab",
+          "variant": "line",
+          "tabs": [
+            {
+              "label": "基础配置",
+              "value": "basic"
+            },
+            {
+              "label": "技能配置",
+              "value": "skill"
+            }
+          ]
+        }
+      }
+    ],
+    "dialog-shell": [
+      {
+        "type": "form-number",
+        "name": "默认最大自动步骤数",
+        "placeholder": "例如：5",
+        "value": "form.default_max_auto_steps",
+        "mode": "form",
+        "info": "智能体未单独设置最大自动步骤数时使用这个值。",
+        "validate": [
+          {
+            "type": "min",
+            "min": 1,
+            "message": "默认最大自动步骤数不能小于 1。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "basic",
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "name": "强制最大自动步骤数",
+        "placeholder": "例如：8",
+        "value": "form.hard_max_auto_steps",
+        "mode": "form",
+        "info": "所有智能体实际自动执行步骤都不会超过这个值。",
+        "validate": [
+          {
+            "type": "min",
+            "min": 1,
+            "message": "全局强制最大自动步骤数不能小于 1。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "basic",
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "name": "技能 metadata 最大技能数",
+        "placeholder": "例如：80",
+        "value": "form.skill_metadata_max_skills",
+        "mode": "form",
+        "info": "运行时最多向模型注入多少个技能 metadata；超过后只注入前 N 个。",
+        "validate": [
+          {
+            "type": "min",
+            "min": 1,
+            "message": "技能 metadata 最大技能数不能小于 1。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "skill",
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "name": "metadata 单字段最大长度",
+        "placeholder": "例如：240",
+        "value": "form.skill_metadata_field_max_length",
+        "mode": "form",
+        "info": "技能名称、描述、触发词等 metadata 单字段的最大字符数。",
+        "validate": [
+          {
+            "type": "min",
+            "min": 1,
+            "message": "metadata 单字段最大长度不能小于 1。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "skill",
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "name": "SKILL.md 最大读取字节数",
+        "placeholder": "例如：262144",
+        "value": "form.skill_file_max_bytes",
+        "mode": "form",
+        "info": "单个 SKILL.md 运行时最多读取的字节数；256KB = 262144 字节。",
+        "validate": [
+          {
+            "type": "min",
+            "min": 1,
+            "message": "SKILL.md 最大读取字节数不能小于 1。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "skill",
+          "controlClassName": "max-w-[180px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "name": "本轮技能正文最大总长度",
+        "placeholder": "例如：30000",
+        "value": "form.skill_loaded_content_max_length",
+        "mode": "form",
+        "info": "本轮按需加载的多个技能正文合计最大字符数。",
+        "validate": [
+          {
+            "type": "min",
+            "min": 1,
+            "message": "本轮技能正文最大总长度不能小于 1。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "skill",
+          "controlClassName": "max-w-[160px]"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "_model": "bot.agent.NewRuntimeConfigModel",
+      "id": 1,
+      "default_max_auto_steps": 5,
+      "hard_max_auto_steps": 8,
+      "skill_metadata_max_skills": 80,
+      "skill_metadata_field_max_length": 240,
+      "skill_file_max_bytes": 262144,
+      "skill_loaded_content_max_length": 30000
+    }
+  },
+  "state": {
+    "currentTab": "basic"
+  },
+  "action": {
+    "submit": {
+      "type": "save",
+      "use": "bot.agent.NewRuntimeConfigModel",
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.agent.setting.AgentHook.BeforeSaveRuntimeConfig"
+      }
+    }
+  }
+}

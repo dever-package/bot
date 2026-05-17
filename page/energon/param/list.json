@@ -290,7 +290,7 @@
             "params": "actionTarget.deleteParam",
             "before": {
               "type": "service",
-              "use": "bot.energon.ParamHook.BeforeDeleteParam"
+              "use": "bot.energon.hook.ParamHook.BeforeDeleteParam"
             }
           }
         }

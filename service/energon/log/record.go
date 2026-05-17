@@ -7,13 +7,7 @@ import (
 	botmodel "my/package/bot/model/energon"
 )
 
-type Service struct{}
-
-func NewService() Service {
-	return Service{}
-}
-
-func (Service) Record(ctx context.Context, item botmodel.Log) (record botmodel.Log) {
+func Record(ctx context.Context, item botmodel.Log) (record botmodel.Log) {
 	if item.CreatedAt.IsZero() {
 		item.CreatedAt = time.Now()
 	}

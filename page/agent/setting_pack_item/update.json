@@ -42,11 +42,11 @@
         "type": "form-cascader",
         "value": "form.setting_id",
         "mode": "form",
-        "placeholder": "请选择通用规则",
+        "placeholder": "请选择规则",
         "validate": [
           {
             "type": "required",
-            "message": "通用规则不能为空。"
+            "message": "规则不能为空。"
           }
         ],
         "meta": {
@@ -86,7 +86,7 @@
       "params": "form",
       "before": {
         "type": "service",
-        "use": "bot.agent.AgentHook.BeforeSaveSettingPackItem"
+        "use": "bot.agent.setting.AgentHook.BeforeSaveSettingPackItem"
       }
     }
   }

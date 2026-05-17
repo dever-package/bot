@@ -8,6 +8,8 @@ import (
 	botinput "my/package/bot/service/energon/input"
 )
 
+const defaultMaxFiles = 5
+
 type ParamOptionService struct{}
 
 func (ParamOptionService) ProviderLoadParamOptions(c *server.Context, _ []any) any {

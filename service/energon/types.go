@@ -14,11 +14,21 @@ const (
 	StatusSuccess        = "success"
 	StatusFail           = "fail"
 
+	powerSourceRuleFirst int16 = 1
+	powerSourceRulePick  int16 = 2
+
 	DefaultProxyPower = "shemic.proxy.openai"
 )
 
 func isActive(status int16) bool {
 	return status == StatusActive
+}
+
+func normalizePowerSourceRule(value int) int16 {
+	if int16(value) == powerSourceRulePick {
+		return powerSourceRulePick
+	}
+	return powerSourceRuleFirst
 }
 
 type GatewayRequest struct {

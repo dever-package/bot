@@ -1,0 +1,158 @@
+{
+  "page": {
+    "name": "技能编辑",
+    "parent": "bot/agent/skill/list",
+    "type": 2,
+    "sort": 10,
+    "auth": [
+      {
+        "key": "bot/agent/skill/update",
+        "name": "技能编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-select",
+        "value": "form.cate_id",
+        "mode": "form",
+        "option": "/front/route/option?type=model&use=bot.agent.NewSkillCateModel&filterField=status&filterValue=1&order=sort asc,id asc",
+        "validate": [
+          {
+            "type": "required",
+            "message": "技能分类不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[260px]"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "例如：weather",
+        "value": "form.key",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "技能标识不能为空。"
+          },
+          {
+            "type": "model",
+            "except": "$form.id",
+            "message": "该技能标识已存在。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "例如：天气查询",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "技能名称不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "描述这个技能适合什么任务。",
+        "value": "form.description",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 3
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "data/skills/weather",
+        "value": "form.install_path",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "安装目录不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "SKILL.md",
+        "value": "form.entry_file",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[220px]"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "技能元信息 JSON。",
+        "value": "form.manifest",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 6
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "cate_id": 1,
+      "key": "",
+      "name": "",
+      "description": "",
+      "source_url": "",
+      "install_path": "",
+      "entry_file": "SKILL.md",
+      "manifest": "",
+      "content_hash": "",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.agent.setting.AgentHook.BeforeSaveSkill"
+      }
+    }
+  }
+}

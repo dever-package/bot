@@ -223,7 +223,7 @@
             "params": "actionTarget.deleteProvider",
             "before": {
               "type": "service",
-              "use": "bot.energon.ProviderHook.BeforeDeleteProvider"
+              "use": "bot.energon.hook.ProviderHook.BeforeDeleteProvider"
             }
           }
         }

@@ -54,7 +54,7 @@
           "createOption": {
             "name": "新增分类",
             "pageRoute": "/bot/agent/setting_cate/update",
-            "description": "新增后可直接作为当前通用规则的分类。",
+            "description": "新增后可直接作为当前规则的分类。",
             "size": "sm",
             "bodyClassName": "py-2",
             "selectCreated": true
@@ -82,6 +82,7 @@
         }
       },
       {
+        "id": "setting-load-mode",
         "type": "form-radio",
         "value": "form.load_mode",
         "mode": "form",
@@ -94,10 +95,17 @@
         ],
         "meta": {
           "formLayout": "horizontal",
-          "controlClassName": "max-w-[520px]"
+          "controlClassName": "max-w-[520px]",
+          "control": [
+            {
+              "value": "always",
+              "hide": ["setting-description"]
+            }
+          ]
         }
       },
       {
+        "id": "setting-description",
         "type": "form-textarea",
         "placeholder": "例如：当需要生成图片、补全图片参数或处理参考图时读取。",
         "value": "form.description",
@@ -110,7 +118,7 @@
       },
       {
         "type": "form-textarea",
-        "placeholder": "填写通用规则正文。这里适合放所有智能体都可能复用的协议、规则、输出格式或能力调用规范。",
+        "placeholder": "填写规则正文。这里适合放所有智能体都可能复用的协议、规则、输出格式或能力调用规范。",
         "value": "form.content",
         "mode": "form",
         "validate": [
@@ -144,7 +152,7 @@
       "params": "form",
       "after": {
         "type": "service",
-        "use": "bot.agent.AgentHook.AfterSaveSetting"
+        "use": "bot.agent.setting.AgentHook.AfterSaveSetting"
       }
     }
   }

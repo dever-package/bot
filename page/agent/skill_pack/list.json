@@ -1,0 +1,492 @@
+{
+  "page": {
+    "name": "技能方案",
+    "icon": "sparkles",
+    "parent": "bot-agent",
+    "sort": 3
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "content-shell": {
+            "type": "container",
+            "className": "front-two-pane-layout",
+            "children": {
+              "pack-column": {
+                "type": "container",
+                "className": "min-w-0"
+              },
+              "list-column": {
+                "type": "container",
+                "className": "flex min-w-0 flex-col gap-4",
+                "children": {
+                  "content-toolbar": {
+                    "type": "row",
+                    "className": "flex-wrap items-center gap-3"
+                  },
+                  "table-row": {
+                    "type": "container",
+                    "className": "overflow-hidden rounded-md border bg-background"
+                  }
+                }
+              }
+            }
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "技能管理",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "icon": "list",
+          "to": "/bot/agent/skill/list"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "安装记录",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "icon": "history",
+          "to": "/bot/agent/skill_install/list"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "新增技能",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "icon": "plus"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.installSkill",
+            "value": true
+          }
+        }
+      }
+    ],
+    "pack-column": [
+      {
+        "type": "show-category-list",
+        "id": "agent-skill-pack-category",
+        "value": "search.pack_id",
+        "option": "/front/route/option?type=model&use=bot.agent.NewSkillPackModel&order=sort asc,id asc&extraFields=status,sort",
+        "meta": {
+          "title": "方案",
+          "description": "设置技能方案",
+          "remote": true,
+          "defaultFirst": true,
+          "queryKey": "pack_id",
+          "createButton": {
+            "name": "新增方案",
+            "icon": "plus",
+            "variant": "outline",
+            "size": "sm",
+            "action": {
+              "click": {
+                "type": "modal",
+                "key": "dialog.createPack",
+                "value": true
+              }
+            }
+          },
+          "statusField": "status",
+          "statusDisplay": "select",
+          "statusChangeAction": {
+            "type": "save",
+            "path": "bot/agent/skill_pack/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "status": "$value"
+            }
+          },
+          "statusCases": [
+            {
+              "value": 1,
+              "text": "启用",
+              "tone": "success"
+            },
+            {
+              "value": 2,
+              "text": "停用",
+              "tone": "muted"
+            }
+          ],
+          "buttons": [
+            {
+              "icon": "square-pen",
+              "variant": "ghost",
+              "size": "sm",
+              "description": "编辑当前方案",
+              "action": {
+                "click": [
+                  {
+                    "type": "data",
+                    "key": "actionTarget.packId",
+                    "value": "$row.id"
+                  },
+                  {
+                    "type": "modal",
+                    "key": "dialog.editPack",
+                    "value": true
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "content-toolbar": [
+      {
+        "type": "show-button",
+        "name": "新增方案技能",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "icon": "plus"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.createPackSkill",
+            "value": true
+          }
+        }
+      },
+      {
+        "type": "form-select",
+        "placeholder": "状态",
+        "value": "search.status",
+        "mode": "search"
+      },
+      {
+        "type": "show-button",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "重置",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/agent/skill_pack/list"
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "savePath": "bot/agent/skill_pack_item/update",
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "skill.name",
+              "name": "技能",
+              "type": "show-base"
+            },
+            {
+              "value": "skill.key",
+              "name": "标识",
+              "type": "show-base"
+            },
+            {
+              "value": "skill.cate_id",
+              "name": "分类",
+              "type": "show-tag",
+              "meta": {
+                "option": "option.skill_cate"
+              }
+            },
+            {
+              "value": "status",
+              "type": "show-tag"
+            },
+            {
+              "value": "sort",
+              "type": "show-base"
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑技能",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.editSkillId",
+                          "value": "$row.skill_id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.editSkill",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "eye",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看技能详情",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.viewSkillId",
+                          "value": "$row.skill_id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.viewSkill",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.createPack",
+          "pageRoute": "/bot/agent/skill_pack/update",
+          "description": "技能方案用于组合多个已安装技能，智能体运行时会先读取 metadata。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "name": "新增方案技能",
+        "meta": {
+          "stateKey": "dialog.createPackSkill",
+          "pageRoute": "/bot/agent/skill_pack_item/update",
+          "title": "新增方案技能",
+          "description": "从已安装技能中选择一个加入当前方案。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageDataPatches": {
+            "form.pack_id": "data.search.pack_id"
+          },
+          "size": "lg",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.editPack",
+          "pageRoute": "/bot/agent/skill_pack/update",
+          "description": "维护当前技能方案，以及方案内技能顺序。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.packId"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "name": "编辑技能",
+        "meta": {
+          "stateKey": "dialog.editSkill",
+          "pageRoute": "/bot/agent/skill/update",
+          "title": "编辑技能",
+          "description": "编辑已安装技能的分类、名称和状态。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.editSkillId"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.viewSkill",
+          "pageRoute": "/bot/agent/skill/view",
+          "description": "查看当前方案引用的技能信息。",
+          "pageRouteQuery": {
+            "id": "data.actionTarget.viewSkillId"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "name": "新增技能",
+        "info": "输入安装命令、技能链接或技能说明。保存后会先进入安装记录，安装成功后自动加入当前方案。",
+        "meta": {
+          "stateKey": "dialog.installSkill",
+          "formSection": "skill-install-panel",
+          "titleNamePath": "data.actionTarget.installAgent.name",
+          "titleKeyPath": "data.actionTarget.installAgent.key",
+          "size": "3xl",
+          "bodyScroll": false,
+          "footer": {
+            "close": false,
+            "confirm": false
+          }
+        }
+      }
+    ],
+    "skill-install-panel": [
+      {
+        "id": "skill-install-agent",
+        "type": "show-agent",
+        "meta": {
+          "agentPath": "data.actionTarget.installAgent.key",
+          "agentNamePath": "data.actionTarget.installAgent.name",
+          "openPath": "state.dialog.installSkill",
+          "requestApi": "/bot/skill_install/run",
+          "streamApi": "/bot/skill_install/stream",
+          "stopApi": "/bot/skill_install/stop",
+          "blockMs": 1000,
+          "placeholder": "输入 npx skills add ...、技能链接，或直接描述要安装的技能。",
+          "emptyText": "输入安装命令、链接或提示词后开始安装。成功后技能会进入技能管理，并自动加入当前方案。",
+          "inputContext": {
+            "pack_id": "data.search.pack_id",
+            "cate_id": "data.installContext.cate_id",
+            "auto_add_to_pack": "data.installContext.auto_add_to_pack"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "技能方案",
+      "description": "维护智能体运行时可用的技能方案。运行时先注入 metadata，命中后再读取技能正文。"
+    },
+    "search": {
+      "pack_id": 1,
+      "status": ""
+    },
+    "installContext": {
+      "cate_id": 1,
+      "auto_add_to_pack": true
+    },
+    "option": {
+      "skill_cate": "{{bot.agent.setting.OptionService.LoadSkillCates}}"
+    },
+    "table": {
+      "list": "<<bot.agent.NewSkillPackItemModel>>",
+      "page": 1,
+      "pageSize": 10,
+      "total": 0,
+      "filterFields": [
+        "pack_id",
+        "status"
+      ]
+    },
+    "actionTarget": {
+      "packId": "",
+      "editSkillId": "",
+      "viewSkillId": "",
+      "installAgent": {
+        "key": "skill-installer",
+        "name": "技能安装助手"
+      }
+    }
+  },
+  "state": {
+    "dialog": {
+      "createPack": false,
+      "editPack": false,
+      "createPackSkill": false,
+      "editSkill": false,
+      "viewSkill": false,
+      "installSkill": false
+    }
+  },
+  "action": {}
+}

@@ -10,6 +10,8 @@ import (
 
 	agentmodel "my/package/bot/model/agent"
 	energonmodel "my/package/bot/model/energon"
+	agentsetting "my/package/bot/service/agent/setting"
+	agentskill "my/package/bot/service/agent/skill"
 )
 
 type Repo struct{}
@@ -144,43 +146,9 @@ func listAgentSettings(ctx context.Context, agentID uint64, activeOnly bool) []a
 		}
 	}
 	sort.SliceStable(result, func(i, j int) bool {
-		return lessAgentSettingOrder(result[i].Type, result[i].ID, result[j].Type, result[j].ID)
+		return agentsetting.LessAgentSettingOrder(result[i].Type, result[i].ID, result[j].Type, result[j].ID)
 	})
 	return result
-}
-
-func lessAgentSettingOrder(leftType string, leftID uint64, rightType string, rightID uint64) bool {
-	leftRank := agentSettingTypeRank(leftType)
-	rightRank := agentSettingTypeRank(rightType)
-	if leftRank != rightRank {
-		return leftRank < rightRank
-	}
-	return leftID < rightID
-}
-
-func agentSettingTypeRank(settingType string) int {
-	switch strings.ToLower(strings.TrimSpace(settingType)) {
-	case "identity":
-		return 10
-	case "responsibility", "duty":
-		return 20
-	case "behavior", "style":
-		return 30
-	case "guardrail", "boundary":
-		return 40
-	case "workflow":
-		return 50
-	case "output":
-		return 60
-	case "tool":
-		return 70
-	case "example":
-		return 80
-	case "other":
-		return 90
-	default:
-		return 100
-	}
 }
 
 func (Repo) ListActiveAgentKnowledge(ctx context.Context, agentID uint64) []agentmodel.AgentKnowledge {
@@ -201,6 +169,62 @@ func (Repo) ListActiveAgentKnowledge(ctx context.Context, agentID uint64) []agen
 	return result
 }
 
+func (Repo) ListActiveSkillPackEntries(ctx context.Context, packID uint64) []agentskill.Entry {
+	if packID == 0 {
+		packID = agentmodel.DefaultSkillPackID
+	}
+	items := agentmodel.NewSkillPackItemModel().Select(ctx, map[string]any{
+		"pack_id": packID,
+		"status":  1,
+	})
+	if len(items) == 0 {
+		return nil
+	}
+
+	skillIDs := make([]any, 0, len(items))
+	for _, item := range items {
+		if item == nil || item.SkillID == 0 {
+			continue
+		}
+		skillIDs = append(skillIDs, item.SkillID)
+	}
+	if len(skillIDs) == 0 {
+		return nil
+	}
+
+	skillRows := agentmodel.NewSkillModel().Select(ctx, map[string]any{
+		"id":     skillIDs,
+		"status": 1,
+	})
+	skillByID := make(map[uint64]agentmodel.Skill, len(skillRows))
+	for _, row := range skillRows {
+		if row != nil {
+			skillByID[row.ID] = *row
+		}
+	}
+
+	result := make([]agentskill.Entry, 0, len(skillByID))
+	for _, item := range items {
+		if item == nil || item.SkillID == 0 {
+			continue
+		}
+		skill, ok := skillByID[item.SkillID]
+		if !ok {
+			continue
+		}
+		result = append(result, agentskill.Entry{
+			ID:          skill.ID,
+			Key:         strings.TrimSpace(skill.Key),
+			Name:        strings.TrimSpace(skill.Name),
+			Description: strings.TrimSpace(skill.Description),
+			Triggers:    agentskill.ManifestTriggers(skill.Manifest),
+			InstallPath: strings.TrimSpace(skill.InstallPath),
+			EntryFile:   strings.TrimSpace(skill.EntryFile),
+		})
+	}
+	return result
+}
+
 func (Repo) ListActivePowers(ctx context.Context) []energonmodel.Power {
 	rows := energonmodel.NewPowerModel().Select(ctx, map[string]any{"status": 1})
 	result := make([]energonmodel.Power, 0, len(rows))
@@ -210,6 +234,24 @@ func (Repo) ListActivePowers(ctx context.Context) []energonmodel.Power {
 		}
 	}
 	return result
+}
+
+func (Repo) FindRuntimeConfig(ctx context.Context) agentmodel.RuntimeConfig {
+	row := agentmodel.NewRuntimeConfigModel().Find(ctx, map[string]any{
+		"id": agentmodel.DefaultRuntimeConfigID,
+	})
+	if row != nil {
+		return *row
+	}
+	return agentmodel.RuntimeConfig{
+		ID:                          agentmodel.DefaultRuntimeConfigID,
+		DefaultMaxAutoSteps:         agentmodel.DefaultRuntimeMaxAutoSteps,
+		HardMaxAutoSteps:            agentmodel.DefaultRuntimeHardMaxAutoSteps,
+		SkillMetadataMaxSkills:      agentmodel.DefaultRuntimeSkillMetadataMaxSkills,
+		SkillMetadataFieldMaxLength: agentmodel.DefaultRuntimeSkillMetadataFieldMaxLength,
+		SkillFileMaxBytes:           agentmodel.DefaultRuntimeSkillFileMaxBytes,
+		SkillLoadedContentMaxLength: agentmodel.DefaultRuntimeSkillLoadedContentMaxLength,
+	}
 }
 
 func (repo Repo) ResolvePowerKey(ctx context.Context, identity string) (string, error) {

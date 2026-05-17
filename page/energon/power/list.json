@@ -139,17 +139,17 @@
                     "icon": "message-circle",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "测试能力",
+                    "description": "调用能力",
                     "action": {
                       "click": [
                         {
                           "type": "data",
-                          "key": "actionTarget.testPower",
+                          "key": "actionTarget.runPower",
                           "value": "$row"
                         },
                         {
                           "type": "modal",
-                          "key": "dialog.test",
+                          "key": "dialog.run",
                           "value": true
                         }
                       ]
@@ -219,13 +219,13 @@
       },
       {
         "type": "feedback-modal",
-        "name": "测试能力",
+        "name": "调用能力",
         "info": "配置参数后，将通过当前能力的流式调用实时返回内容。",
         "meta": {
-          "stateKey": "dialog.test",
-          "formSection": "power-test-panel",
-          "titleNamePath": "data.actionTarget.testPower.name",
-          "titleKeyPath": "data.actionTarget.testPower.key",
+          "stateKey": "dialog.run",
+          "formSection": "power-run-panel",
+          "titleNamePath": "data.actionTarget.runPower.name",
+          "titleKeyPath": "data.actionTarget.runPower.key",
           "size": "2xl",
           "bodyScroll": false,
           "footer": {
@@ -249,12 +249,12 @@
         }
       }
     ],
-    "power-test-panel": [
+    "power-run-panel": [
       {
-        "id": "power-stream-test",
+        "id": "power-stream-run",
         "type": "show-stream-request",
         "meta": {
-          "powerPath": "data.actionTarget.testPower.key",
+          "powerPath": "data.actionTarget.runPower.key",
           "paramApi": "/bot/energon/power_params",
           "requestApi": "/bot/energon/request",
           "streamApi": "/bot/energon/stream",
@@ -307,14 +307,14 @@
     "actionTarget": {
       "id": "",
       "deletePower": {},
-      "testPower": {}
+      "runPower": {}
     }
   },
   "state": {
     "dialog": {
       "edit": false,
       "create": false,
-      "test": false
+      "run": false
     },
     "confirm": {
       "delete": false

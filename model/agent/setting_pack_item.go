@@ -26,11 +26,8 @@ var (
 		{"id": 2, "pack_id": DefaultSettingPackID, "setting_id": 7, "status": 1, "sort": 20},
 		{"id": 3, "pack_id": DefaultSettingPackID, "setting_id": 2, "status": 1, "sort": 30},
 		{"id": 4, "pack_id": DefaultSettingPackID, "setting_id": 4, "status": 1, "sort": 40},
-		{"id": 101, "pack_id": AssistantSettingPackID, "setting_id": AssistantPageContextSettingID, "status": 1, "sort": 10},
-		{"id": 102, "pack_id": AssistantSettingPackID, "setting_id": AssistantFormGenerateSettingID, "status": 1, "sort": 20},
-		{"id": 103, "pack_id": AssistantSettingPackID, "setting_id": AssistantFrontActionSettingID, "status": 1, "sort": 30},
-		{"id": 104, "pack_id": AssistantSettingPackID, "setting_id": AssistantSafetySettingID, "status": 1, "sort": 40},
-		{"id": 105, "pack_id": AssistantSettingPackID, "setting_id": AssistantMediaGenerateSettingID, "status": 1, "sort": 25},
+		{"id": 102, "pack_id": AssistantSettingPackID, "setting_id": 4, "status": 1, "sort": 5},
+		{"id": 101, "pack_id": AssistantSettingPackID, "setting_id": AssistantWorkSettingID, "status": 1, "sort": 10},
 	}
 
 	settingPackRelation = orm.Relation{

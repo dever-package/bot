@@ -1,0 +1,93 @@
+{
+  "page": {
+    "name": "方案技能编辑",
+    "parent": "bot/agent/skill_pack/list",
+    "type": 2,
+    "sort": 11,
+    "auth": [
+      {
+        "key": "bot/agent/skill_pack_item/create",
+        "name": "方案技能新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/agent/skill_pack_item/update",
+        "name": "方案技能编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-cascader",
+        "value": "form.skill_id",
+        "mode": "form",
+        "placeholder": "请选择已安装技能",
+        "validate": [
+          {
+            "type": "required",
+            "message": "技能不能为空。"
+          }
+        ],
+        "meta": {
+          "api": "/front/route/option",
+          "use": "bot.agent.NewSkillCateModel",
+          "childUse": "bot.agent.NewSkillModel",
+          "childParentField": "cate_id",
+          "valueMode": "leaf",
+          "placeholder": [
+            "选择分类",
+            "选择技能"
+          ],
+          "searchPlaceholder": [
+            "搜索分类",
+            "搜索技能"
+          ],
+          "childExtraFields": "name,key,description",
+          "order": "sort asc,id asc",
+          "wrap": false,
+          "formLayout": "horizontal"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "pack_id": "",
+      "skill_id": "",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.agent.setting.AgentHook.BeforeSaveSkillPackItem"
+      }
+    }
+  }
+}

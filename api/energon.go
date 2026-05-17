@@ -21,7 +21,7 @@ func (Energon) PostRequest(c *server.Context) error {
 	return handlePowerRequest(c, body)
 }
 
-func (Energon) GetTest(c *server.Context) error {
+func (Energon) GetDemo(c *server.Context) error {
 	return handlePowerRequest(c, map[string]any{
 		"power": "llm",
 		"input": map[string]any{
@@ -41,13 +41,13 @@ func (Energon) GetPowerParams(c *server.Context) error {
 		targetID = uint64(frontstream.InputInt64(c.Input("sourceTargetId"), 0))
 	}
 	if isRequestTruthy(c.Input("include_sources")) || isRequestTruthy(c.Input("includeSources")) {
-		config, err := gateway.TestParamConfig(c.Context(), powerKey, targetID)
+		config, err := gateway.PowerParamConfig(c.Context(), powerKey, targetID)
 		if err != nil {
 			return c.Error(err)
 		}
 		return c.JSON(config)
 	}
-	rows, err := gateway.TestParams(c.Context(), powerKey)
+	rows, err := gateway.PowerParams(c.Context(), powerKey)
 	if err != nil {
 		return c.Error(err)
 	}

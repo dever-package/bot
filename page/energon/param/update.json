@@ -222,7 +222,7 @@
       "params": "form",
       "before": {
         "type": "service",
-        "use": "bot.energon.ParamHook.BeforeSaveParam"
+        "use": "bot.energon.hook.ParamHook.BeforeSaveParam"
       }
     }
   }

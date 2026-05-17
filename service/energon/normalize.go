@@ -10,9 +10,10 @@ import (
 	"github.com/shemic/dever/util"
 
 	botmodel "my/package/bot/model/energon"
+	botlog "my/package/bot/service/energon/log"
 	botprotocol "my/package/bot/service/energon/protocol"
 	botprovider "my/package/bot/service/energon/provider"
-	bottask "my/package/bot/service/energon/task"
+	botruntime "my/package/bot/service/energon/runtime"
 )
 
 func (s GatewayService) handleNormalize(ctx context.Context, req *botprotocol.ShemicRequest) (*GatewayResponse, error) {
@@ -57,7 +58,7 @@ func (s GatewayService) resolveNormalizePlan(ctx context.Context, req *botprotoc
 		return normalizePlan{}, fmt.Errorf("未匹配到 Energon 能力: %s", req.Name)
 	}
 
-	targets := s.dispatcher.OrderPowerTargets(s.repo.ListTargetsByPower(ctx, power.ID))
+	targets := orderActivePowerTargets(s.repo.ListTargetsByPower(ctx, power.ID))
 	if targetID := requestedSourceTargetID(req); targetID > 0 && normalizePowerSourceRule(int(power.SourceRule)) == powerSourceRulePick {
 		targets = filterRequestedPowerTarget(targets, targetID)
 		if len(targets) == 0 {
@@ -100,85 +101,6 @@ func filterRequestedPowerTarget(targets []botmodel.PowerTarget, targetID uint64)
 	return nil
 }
 
-func (s GatewayService) callNormalizeTarget(
-	ctx context.Context,
-	req *botprotocol.ShemicRequest,
-	selected selectedTarget,
-) (callResult, error) {
-	startedAt := time.Now()
-	adapter, err := s.adapterForSelected(req, selected)
-	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("select_protocol", err.Error()))
-		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
-	}
-	req.Protocol = adapter.Name()
-
-	mappedInput, err := s.buildMappedInput(ctx, req, selected)
-	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("map_input", err.Error()))
-		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
-	}
-	selected, err = s.applyServiceEndpoint(ctx, selected, mappedInput)
-	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("select_service_endpoint", err.Error()))
-		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
-	}
-
-	nativeInput := botprotocol.NativeInput{
-		Request:     req,
-		Provider:    selected.Provider,
-		Account:     selected.Account,
-		Power:       selected.Power,
-		PowerTarget: selected.PowerTarget,
-		Service:     selected.Service,
-		ServiceAPI:  selected.ServiceAPI,
-		Mapped:      mappedInput,
-	}
-	nativeReq, err := adapter.BuildNativeRequest(nativeInput)
-	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("build_request", err.Error()))
-		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
-	}
-
-	resp, err := s.client.Do(ctx, nativeReq)
-	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_error", err.Error()), nativeReq)
-		return callResult{NativeRequest: nativeReq, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
-	}
-	if resp.StatusCode >= 400 {
-		errorMessage := formatProviderStatusError(nativeReq.Method, nativeReq.URL, resp)
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_status", errorMessage), nativeReq)
-		err := fmt.Errorf("来源返回失败: %s", errorMessage)
-		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
-	}
-
-	var data any
-	if taskData, handled, taskErr := s.tasks.ResolveResponse(ctx, bottask.ResponseJob{
-		Input:    nativeInput,
-		Adapter:  adapter,
-		Client:   s.client,
-		Response: resp,
-	}); handled {
-		data, err = taskData, taskErr
-	} else {
-		data, err = adapter.BuildClientResponse(req, resp)
-	}
-	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("parse_response", err.Error()), nativeReq)
-		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
-	}
-
-	logItem := s.recordCallLog(ctx, req, selected, StatusSuccess, time.Since(startedAt), encodeLogJSON(data), nativeReq)
-	return callResult{
-		NativeRequest: nativeReq,
-		Response:      resp,
-		ServiceAPI:    selected.ServiceAPI,
-		Data:          data,
-		Log:           logItem,
-		Attempt:       buildCallAttempt(selected, StatusSuccess, logItem, nil),
-	}, nil
-}
-
 func buildTargetSelectAttempt(target botmodel.PowerTarget, err error) GatewayAttempt {
 	attempt := GatewayAttempt{
 		PowerTargetID: target.ID,
@@ -219,7 +141,7 @@ func (s GatewayService) recordCallLog(
 	result string,
 	nativeRequests ...botprovider.Request,
 ) botmodel.Log {
-	record := s.logs.Record(ctx, botmodel.Log{
+	record := botlog.Record(ctx, botmodel.Log{
 		RequestID:     req.RequestID,
 		Mode:          req.Mode,
 		Protocol:      req.Protocol,
@@ -240,7 +162,7 @@ func (s GatewayService) recordCallLog(
 		Result:        result,
 	})
 	if status == StatusSuccess {
-		s.runtimeStats.Record(ctx, selected.Service.ID, latency)
+		botruntime.Record(ctx, selected.Service.ID, latency)
 	}
 	return record
 }

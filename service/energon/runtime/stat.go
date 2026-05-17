@@ -7,13 +7,7 @@ import (
 	botmodel "my/package/bot/model/energon"
 )
 
-type StatService struct{}
-
-func NewStatService() StatService {
-	return StatService{}
-}
-
-func (StatService) Average(ctx context.Context, serviceID uint64) (avg int64) {
+func Average(ctx context.Context, serviceID uint64) (avg int64) {
 	if serviceID == 0 {
 		return 0
 	}
@@ -29,7 +23,7 @@ func (StatService) Average(ctx context.Context, serviceID uint64) (avg int64) {
 	return row.Avg
 }
 
-func (StatService) Record(ctx context.Context, serviceID uint64, duration time.Duration) {
+func Record(ctx context.Context, serviceID uint64, duration time.Duration) {
 	if serviceID == 0 || duration <= 0 {
 		return
 	}

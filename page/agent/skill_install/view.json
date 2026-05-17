@@ -1,0 +1,58 @@
+{
+  "page": {
+    "name": "安装记录详情",
+    "parent": "bot/agent/skill_install/list",
+    "type": 2,
+    "sort": 11
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "detail-shell": {
+            "type": "container",
+            "className": "space-y-4 rounded-lg border bg-background p-4"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "detail-shell": [
+      {
+        "type": "show-title",
+        "value": "page"
+      },
+      {
+        "type": "show-base",
+        "name": "安装输入",
+        "value": "form.install_input",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words"
+      },
+      {
+        "type": "show-base",
+        "name": "安装日志",
+        "value": "form.log",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words"
+      },
+      {
+        "type": "show-base",
+        "name": "错误信息",
+        "value": "form.error",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words"
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "安装记录详情",
+      "description": "查看技能安装输入、过程日志和错误信息。"
+    },
+    "form": {}
+  },
+  "state": {},
+  "action": {}
+}

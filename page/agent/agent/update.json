@@ -103,7 +103,7 @@
         "placeholder": "请选择 Energon 中的 LLM 能力",
         "value": "form.llm_power_id",
         "mode": "form",
-        "option": "/front/route/option?type=service&use=bot.agent.OptionService.LoadTextPowers",
+        "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadTextPowers",
         "info": "第一阶段 Agent 直接通过这个 LLM 能力调用 Energon。",
         "validate": [
           {
@@ -118,16 +118,35 @@
       },
       {
         "type": "form-select",
-        "name": "通用规则方案",
-        "placeholder": "请选择执行方案",
+        "name": "规则方案",
+        "placeholder": "请选择规则方案",
         "value": "form.setting_pack_id",
         "mode": "form",
         "option": "/front/route/option?type=model&use=bot.agent.NewSettingPackModel&filterField=status&filterValue=1&order=sort asc,id asc",
-        "info": "运行和测试时加载这个方案下的通用规则，再加载智能体设定。",
+        "info": "运行时加载这个方案下的规则，再加载智能体设定。",
         "validate": [
           {
             "type": "required",
-            "message": "执行方案不能为空。"
+            "message": "规则方案不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[260px]"
+        }
+      },
+      {
+        "type": "form-select",
+        "name": "技能方案",
+        "placeholder": "请选择技能方案",
+        "value": "form.skill_pack_id",
+        "mode": "form",
+        "option": "/front/route/option?type=model&use=bot.agent.NewSkillPackModel&filterField=status&filterValue=1&order=sort asc,id asc",
+        "info": "运行时先注入这个方案下的技能 metadata，命中后再读取技能正文。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "技能方案不能为空。"
           }
         ],
         "meta": {
@@ -180,6 +199,24 @@
           "formLayout": "horizontal",
           "controlClassName": "max-w-[160px]"
         }
+      },
+      {
+        "type": "form-number",
+        "placeholder": "0 表示继承全局默认",
+        "value": "form.max_auto_steps",
+        "mode": "form",
+        "info": "控制本智能体单次运行最多自动决策多少步；0 表示继承全局默认，实际不会超过全局强制最大步骤数。",
+        "validate": [
+          {
+            "type": "min",
+            "min": 0,
+            "message": "最大自动步骤数不能小于 0。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[180px]"
+        }
       }
     ]
   },
@@ -191,8 +228,10 @@
       "description": "",
       "llm_power_id": "",
       "setting_pack_id": 1,
+      "skill_pack_id": 1,
       "temperature": 0.7,
-      "timeout_seconds": 300
+      "timeout_seconds": 300,
+      "max_auto_steps": 0
     }
   },
   "state": {},
@@ -202,7 +241,7 @@
       "params": "form",
       "before": {
         "type": "service",
-        "use": "bot.agent.AgentHook.BeforeSaveAgent"
+        "use": "bot.agent.setting.AgentHook.BeforeSaveAgent"
       }
     }
   }

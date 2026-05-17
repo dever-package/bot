@@ -32,7 +32,6 @@ type ProgressTracker struct {
 
 func StartProgress(
 	ctx context.Context,
-	stats StatService,
 	service botmodel.Service,
 	power botmodel.Power,
 	write func(botprotocol.Output) error,
@@ -47,7 +46,7 @@ func StartProgress(
 		cancel:     cancel,
 		done:       make(chan struct{}),
 		stopped:    make(chan struct{}),
-		avg:        stats.Average(ctx, service.ID),
+		avg:        Average(ctx, service.ID),
 		startedAt:  startedAt,
 		running:    runtimeProgressText(service, power, false),
 		completed:  runtimeProgressText(service, power, true),

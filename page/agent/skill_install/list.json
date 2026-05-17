@@ -1,0 +1,219 @@
+{
+  "page": {
+    "name": "技能安装记录",
+    "icon": "history",
+    "parent": "bot/agent/skill_pack/list",
+    "type": 2,
+    "sort": 21
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "content-toolbar": {
+            "type": "row",
+            "className": "flex-wrap items-center gap-3"
+          },
+          "table-row": {
+            "type": "container",
+            "className": "overflow-hidden rounded-md border bg-background"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "返回技能方案",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/agent/skill_pack/list"
+        }
+      }
+    ],
+    "content-toolbar": [
+      {
+        "type": "form-select",
+        "placeholder": "安装状态",
+        "value": "search.status",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "安装类型",
+        "value": "search.install_type",
+        "mode": "search"
+      },
+      {
+        "type": "show-button",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "重置",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/agent/skill_install/list"
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "id",
+              "type": "show-base"
+            },
+            {
+              "value": "install_type",
+              "name": "安装类型",
+              "type": "show-tag"
+            },
+            {
+              "value": "status",
+              "name": "状态",
+              "type": "show-tag"
+            },
+            {
+              "value": "skill.name",
+              "name": "技能",
+              "type": "show-base"
+            },
+            {
+              "value": "target_pack.name",
+              "name": "目标方案",
+              "type": "show-base"
+            },
+            {
+              "value": "target_path",
+              "name": "目录",
+              "type": "show-base"
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "eye",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看安装记录",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.id",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.view",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.view",
+          "pageRoute": "/bot/agent/skill_install/view",
+          "description": "查看本次技能安装的输入、日志和错误信息。",
+          "pageRouteQuery": {
+            "id": "data.actionTarget.id"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "技能安装记录",
+      "description": "查看通过新增技能入口创建的安装任务状态。安装成功后才会进入技能管理。"
+    },
+    "search": {
+      "status": "",
+      "install_type": ""
+    },
+    "table": {
+      "page": 1,
+      "pageSize": 10,
+      "total": 0,
+      "filterFields": [
+        "status",
+        "install_type"
+      ]
+    },
+    "actionTarget": {
+      "id": ""
+    }
+  },
+  "state": {
+    "dialog": {
+      "view": false
+    }
+  },
+  "action": {}
+}

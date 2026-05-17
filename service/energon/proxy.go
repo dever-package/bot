@@ -17,7 +17,7 @@ func (s GatewayService) handleProxy(ctx context.Context, req *botprotocol.Shemic
 		return nil, fmt.Errorf("未匹配到 Energon 能力: %s", req.Name)
 	}
 
-	targets := s.dispatcher.OrderPowerTargets(s.repo.ListTargetsByPower(ctx, power.ID))
+	targets := orderActivePowerTargets(s.repo.ListTargetsByPower(ctx, power.ID))
 	if len(targets) == 0 {
 		return nil, fmt.Errorf("能力没有可用实现: %s", req.Name)
 	}

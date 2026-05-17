@@ -15,9 +15,11 @@ type Agent struct {
 	Key            string    `dorm:"type:varchar(128);not null;comment:标识"`
 	Description    string    `dorm:"type:text;not null;default:'';comment:描述"`
 	LLMPowerID     uint64    `dorm:"type:bigint;not null;default:0;comment:LLM能力"`
-	SettingPackID  uint64    `dorm:"type:bigint;not null;default:1;comment:执行方案"`
+	SettingPackID  uint64    `dorm:"type:bigint;not null;default:1;comment:规则方案"`
+	SkillPackID    uint64    `dorm:"type:bigint;not null;default:1;comment:技能方案"`
 	Temperature    float64   `dorm:"type:double precision;not null;default:0.7;comment:温度"`
 	TimeoutSeconds int       `dorm:"type:int;not null;default:300;comment:超时时间(秒)"`
+	MaxAutoSteps   int       `dorm:"type:int;not null;default:0;comment:最大自动步骤数"`
 	Status         int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	Sort           int       `dorm:"type:int;not null;default:100;comment:排序"`
 	CreatedAt      time.Time `dorm:"comment:创建时间"`
@@ -27,6 +29,7 @@ type AgentIndex struct {
 	Key               struct{} `unique:"key"`
 	CateStatusSort    struct{} `index:"cate_id,status,sort"`
 	SettingPackStatus struct{} `index:"setting_pack_id,status"`
+	SkillPackStatus   struct{} `index:"skill_pack_id,status"`
 	StatusSort        struct{} `index:"status,sort"`
 }
 
@@ -50,8 +53,10 @@ var (
 			"description":     "默认通用智能体，适合普通文本任务和能力调用。",
 			"llm_power_id":    energonmodel.DefaultLLMPowerID,
 			"setting_pack_id": DefaultSettingPackID,
+			"skill_pack_id":   DefaultSkillPackID,
 			"temperature":     0.7,
 			"timeout_seconds": 300,
+			"max_auto_steps":  0,
 			"status":          1,
 			"sort":            10,
 		},
@@ -63,8 +68,10 @@ var (
 			"description":     "后台页面 AI 助理，用于理解当前页面、生成内容、补全表单和返回受控前端动作。",
 			"llm_power_id":    energonmodel.DefaultLLMPowerID,
 			"setting_pack_id": AssistantSettingPackID,
+			"skill_pack_id":   DefaultSkillPackID,
 			"temperature":     0.4,
 			"timeout_seconds": 300,
+			"max_auto_steps":  0,
 			"status":          1,
 			"sort":            10,
 		},
@@ -87,6 +94,12 @@ var (
 		Option:     "bot.agent.NewSettingPackModel",
 		OptionKeys: []string{"name"},
 	}
+
+	agentSkillPackRelation = orm.Relation{
+		Field:      "skill_pack_id",
+		Option:     "bot.agent.NewSkillPackModel",
+		OptionKeys: []string{"name"},
+	}
 )
 
 func NewAgentModel() *orm.Model[Agent] {
@@ -102,6 +115,7 @@ func NewAgentModel() *orm.Model[Agent] {
 			agentCateRelation,
 			agentLLMPowerRelation,
 			agentSettingPackRelation,
+			agentSkillPackRelation,
 		},
 	})
 }

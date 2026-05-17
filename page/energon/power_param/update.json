@@ -61,7 +61,7 @@
         "name": "必填",
         "value": "form.status",
         "mode": "form",
-        "info": "开启：测试能力时必须填写或选择；关闭：作为选填参数。",
+        "info": "开启：调用能力时必须填写或选择；关闭：作为选填参数。",
         "meta": {
           "trueValue": 1,
           "falseValue": 2

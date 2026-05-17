@@ -144,7 +144,7 @@
       "params": "form",
       "before": {
         "type": "service",
-        "use": "bot.agent.AgentHook.BeforeSaveAgentKnowledge"
+        "use": "bot.agent.setting.AgentHook.BeforeSaveAgentKnowledge"
       }
     }
   }

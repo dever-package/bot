@@ -29,8 +29,8 @@ var (
 	settingPackSeed = []map[string]any{
 		{
 			"id":          DefaultSettingPackID,
-			"name":        "默认通用规则",
-			"description": "默认加载的智能体通用规则方案。",
+			"name":        "默认规则方案",
+			"description": "默认加载的智能体规则方案。",
 			"status":      1,
 			"sort":        1,
 		},

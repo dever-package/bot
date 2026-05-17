@@ -41,7 +41,7 @@ func promptMappedParamInput(prompt string, value any) (any, bool) {
 			next[key] = item
 		}
 		for _, key := range []string{"prompt", "text", "content", "input"} {
-			if existing, ok := next[key]; ok && !isMissingInputValue(existing) {
+			if existing, ok := next[key]; ok && !IsMissing(existing) {
 				return current, false
 			}
 			if _, ok := next[key]; ok {
@@ -52,7 +52,7 @@ func promptMappedParamInput(prompt string, value any) (any, bool) {
 		next["prompt"] = prompt
 		return next, true
 	default:
-		if isMissingInputValue(current) {
+		if IsMissing(current) {
 			return prompt, true
 		}
 		return current, false
