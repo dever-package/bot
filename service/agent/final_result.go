@@ -463,8 +463,9 @@ func finalTaskMediaNodes(state finalTaskState) []any {
 		return finalTaskMediaNodeList("editorMediaImage", finalTaskMediaURLs(state.Output, "images"), state.Title)
 	case "video", "videos":
 		return finalTaskMediaNodeList("editorMediaVideo", finalTaskMediaURLs(state.Output, "videos"), state.Title)
-	case "audio", "audios":
-		return finalTaskMediaNodeList("editorMediaAudio", finalTaskMediaURLs(state.Output, "audios"), state.Title)
+	case "audio", "audios", "song", "music":
+		nodes := finalTaskMediaNodeList("editorMediaAudio", finalTaskMediaURLs(state.Output, "audios"), state.Title)
+		return append(nodes, finalTaskTextNodes(state.Output)...)
 	default:
 		if nodes := finalTaskMediaNodeList("editorMediaImage", finalTaskMediaURLs(state.Output, "images"), state.Title); len(nodes) > 0 {
 			return nodes
@@ -475,6 +476,85 @@ func finalTaskMediaNodes(state finalTaskState) []any {
 		if nodes := finalTaskMediaNodeList("editorMediaAudio", finalTaskMediaURLs(state.Output, "audios"), state.Title); len(nodes) > 0 {
 			return nodes
 		}
+		return nil
+	}
+}
+
+func finalTaskTextNodes(output map[string]any) []any {
+	if nodes := finalTaskRichNodes(output); len(nodes) > 0 {
+		return nodes
+	}
+	text := strings.TrimSpace(finalTaskOutputText(output))
+	if text == "" {
+		return nil
+	}
+	nodes := make([]any, 0)
+	for _, paragraph := range strings.Split(text, "\n\n") {
+		paragraph = strings.TrimSpace(paragraph)
+		if paragraph == "" {
+			continue
+		}
+		nodes = append(nodes, map[string]any{
+			"type":    "paragraph",
+			"content": finalTaskInlineTextNodes(paragraph),
+		})
+	}
+	return nodes
+}
+
+func finalTaskInlineTextNodes(text string) []any {
+	lines := strings.Split(text, "\n")
+	nodes := make([]any, 0, len(lines)*2)
+	for index, line := range lines {
+		if index > 0 {
+			nodes = append(nodes, map[string]any{"type": "hardBreak"})
+		}
+		if line != "" {
+			nodes = append(nodes, map[string]any{"type": "text", "text": line})
+		}
+	}
+	return nodes
+}
+
+func finalTaskRichNodes(output map[string]any) []any {
+	rich := normalizeMap(output["rich"])
+	if len(rich) == 0 {
+		rich = normalizeMap(normalizeMap(output["content"])["rich"])
+	}
+	if len(rich) == 0 || strings.TrimSpace(firstText(rich["type"])) != "doc" {
+		return nil
+	}
+	return normalizeAnySlice(rich["content"])
+}
+
+func finalTaskOutputText(output map[string]any) string {
+	content := normalizeMap(output["content"])
+	for _, value := range []any{
+		output["text"], content["text"],
+		output["lyrics"], content["lyrics"],
+		output["lyric"], content["lyric"],
+		output["lrc"], content["lrc"],
+		output["song_lyrics"], content["song_lyrics"],
+		output["songLyrics"], content["songLyrics"],
+	} {
+		if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
+			return strings.TrimSpace(text)
+		}
+	}
+	return ""
+}
+
+func normalizeAnySlice(value any) []any {
+	switch current := value.(type) {
+	case []any:
+		return append([]any{}, current...)
+	case []map[string]any:
+		values := make([]any, 0, len(current))
+		for _, item := range current {
+			values = append(values, item)
+		}
+		return values
+	default:
 		return nil
 	}
 }

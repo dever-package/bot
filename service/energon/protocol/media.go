@@ -161,7 +161,7 @@ func collectMediaMap(output Output, mapped map[string]any, defaultType string, e
 }
 
 func collectKnownMediaFields(output Output, mapped map[string]any, currentType string) {
-	appendOutputText(output, mapped["text"])
+	appendOutputText(output, mapped["text"], mapped["lyrics"], mapped["lyric"], mapped["lrc"], mapped["song_lyrics"], mapped["songLyrics"])
 	appendMediaFieldValues(output, MediaTypeImage, mapped["images"], mapped["image"])
 	appendMediaFieldValues(output, MediaTypeVideo, mapped["videos"], mapped["video"])
 	appendMediaFieldValues(output, MediaTypeAudio, mapped["audios"], mapped["audio"])
