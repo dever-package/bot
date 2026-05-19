@@ -19,6 +19,9 @@ func ParseFile(path string) (ParsedFile, error) {
 	metadata, body := SplitFrontMatter(content)
 	entry := ParseMetadata(metadata)
 	if entry.Key == "" {
+		entry.Key = NormalizeKey(entry.Name)
+	}
+	if entry.Key == "" {
 		entry.Key = NormalizeKey(filepath.Base(filepath.Dir(path)))
 	}
 	if entry.Name == "" {
@@ -62,8 +65,24 @@ func SplitFrontMatter(content string) (string, string) {
 func ParseMetadata(metadata string) Entry {
 	entry := Entry{}
 	currentKey := ""
+	blockKey := ""
+	blockLines := make([]string, 0)
+	flushBlock := func() {
+		if blockKey == "description" {
+			entry.Description = strings.TrimSpace(strings.Join(blockLines, "\n"))
+		}
+		blockKey = ""
+		blockLines = blockLines[:0]
+	}
 	for _, rawLine := range strings.Split(metadata, "\n") {
 		line := strings.TrimSpace(rawLine)
+		if blockKey != "" {
+			if line == "" || strings.HasPrefix(rawLine, " ") || strings.HasPrefix(rawLine, "\t") {
+				blockLines = append(blockLines, line)
+				continue
+			}
+			flushBlock()
+		}
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -83,11 +102,16 @@ func ParseMetadata(metadata string) Entry {
 		case "name":
 			entry.Name = value
 		case "description":
+			if value == "|" || value == ">" {
+				blockKey = currentKey
+				continue
+			}
 			entry.Description = value
 		case "triggers":
 			entry.Triggers = append(entry.Triggers, splitTriggerList(value)...)
 		}
 	}
+	flushBlock()
 	return entry
 }
 

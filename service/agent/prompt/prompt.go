@@ -14,7 +14,14 @@ type RuntimeInput struct {
 	Knowledge      []agentmodel.AgentKnowledge
 	Powers         []energonmodel.Power
 	SkillCatalog   agentskill.Catalog
+	Tools          ToolRuntime
 	History        []any
+}
+
+type ToolRuntime struct {
+	RunSkillScriptEnabled bool
+	ScriptSandboxDriver   string
+	ScriptNetworkMode     string
 }
 
 type EnergonBodyInput struct {
@@ -37,7 +44,7 @@ func BuildRuntimePrompt(input RuntimeInput) string {
 	sections = appendNonEmpty(sections, settingPrompt(input.PublicSettings, input.AgentSettings))
 	sections = appendNonEmpty(sections, knowledgePrompt(input.Knowledge))
 	sections = appendNonEmpty(sections, powerPrompt(input.Powers))
-	sections = appendNonEmpty(sections, skillPrompt(input.SkillCatalog))
+	sections = appendNonEmpty(sections, skillPrompt(input.SkillCatalog, input.Tools))
 	sections = appendNonEmpty(sections, historyPrompt(input.History))
 	return strings.Join(sections, "\n\n")
 }

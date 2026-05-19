@@ -34,6 +34,18 @@
       },
       {
         "type": "show-base",
+        "name": "安装计划",
+        "value": "form.plan",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words"
+      },
+      {
+        "type": "show-base",
+        "name": "安装结果",
+        "value": "form.result",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words"
+      },
+      {
+        "type": "show-base",
         "name": "安装日志",
         "value": "form.log",
         "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words"

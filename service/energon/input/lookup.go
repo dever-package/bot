@@ -46,6 +46,11 @@ func ServiceParamInputKey(serviceParam botmodel.ServiceParam) string {
 
 func serviceParamInputKeys(serviceParam botmodel.ServiceParam, param botmodel.Param) []string {
 	keys := []string{}
+	if isPromptParam(serviceParam, param) {
+		for _, key := range promptInputAliases() {
+			keys = appendUniqueInputKey(keys, key)
+		}
+	}
 	keys = appendUniqueInputKey(keys, ServiceParamInputKey(serviceParam))
 	keys = appendUniqueInputKey(keys, strings.TrimSpace(serviceParam.Name))
 	for _, key := range paramInputKeys(param) {
@@ -61,7 +66,46 @@ func paramInputKeys(param botmodel.Param) []string {
 	if param.ID > 0 {
 		keys = appendUniqueInputKey(keys, fmt.Sprintf("param_%d", param.ID))
 	}
+	for _, key := range paramInputAliases(param) {
+		keys = appendUniqueInputKey(keys, key)
+	}
 	return keys
+}
+
+func paramInputAliases(param botmodel.Param) []string {
+	if isPromptParam(botmodel.ServiceParam{}, param) {
+		return promptInputAliases()
+	}
+	switch strings.TrimSpace(param.Key) {
+	case "aspectRatio":
+		return []string{"ratio", "aspect_ratio"}
+	}
+	switch strings.TrimSpace(param.Name) {
+	case "比例":
+		return []string{"ratio", "aspect_ratio"}
+	case "分辨率":
+		return []string{"resolution"}
+	default:
+		return nil
+	}
+}
+
+func isPromptParam(serviceParam botmodel.ServiceParam, param botmodel.Param) bool {
+	for _, value := range []string{param.Key, param.Name, serviceParam.Name} {
+		text := strings.ToLower(strings.TrimSpace(value))
+		switch text {
+		case "prompt", "text", "content", "input":
+			return true
+		}
+		if strings.Contains(text, "prompt") || strings.Contains(text, "提示词") || strings.Contains(text, "提示语") {
+			return true
+		}
+	}
+	return false
+}
+
+func promptInputAliases() []string {
+	return []string{"prompt", "text", "message", "content", "input"}
 }
 
 func resolveServiceParamInputValue(

@@ -86,14 +86,15 @@ func Collect(ctx context.Context, reader Reader, stop Stopper, options CollectOp
 			lastID = entry.ID
 			frame := entry.Payload
 			output := FrameOutput(frame)
+			frameType := FrameType(frame)
 
-			if options.CollectDeltaText && OutputEvent(output) == "delta" {
+			if options.CollectDeltaText && frameType != "result" && shouldCollectText(output) {
 				text.WriteString(frontstream.InputText(output["text"]))
 			}
 			if options.CollectOutputs && len(output) > 0 {
 				outputs = append(outputs, output)
 			}
-			if FrameType(frame) == "result" {
+			if frameType == "result" {
 				return CollectResult{Frame: frame, State: state()}
 			}
 			if options.OnOutput != nil && len(output) > 0 {
@@ -102,5 +103,17 @@ func Collect(ctx context.Context, reader Reader, stop Stopper, options CollectOp
 				}
 			}
 		}
+	}
+}
+
+func shouldCollectText(output botprotocol.Output) bool {
+	if strings.TrimSpace(frontstream.InputText(output["text"])) == "" {
+		return false
+	}
+	switch OutputEvent(output) {
+	case "", "delta":
+		return true
+	default:
+		return false
 	}
 }

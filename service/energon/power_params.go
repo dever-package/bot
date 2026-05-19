@@ -22,6 +22,10 @@ func (s GatewayService) PowerParams(ctx context.Context, powerKey string) ([]Pow
 	return config.Params, nil
 }
 
+func NormalizePowerParamInput(input map[string]any, params []PowerParam) map[string]any {
+	return botinput.NormalizePowerParamInput(input, params)
+}
+
 func (s GatewayService) PowerParamConfig(ctx context.Context, powerKey string, targetID uint64) (PowerParamConfig, error) {
 	powerKey = strings.TrimSpace(powerKey)
 	if powerKey == "" {

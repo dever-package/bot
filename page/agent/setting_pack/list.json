@@ -65,11 +65,28 @@
       {
         "type": "show-button",
         "name": "规则管理",
-        "className": "shrink-0",
+        "className": "hidden",
         "meta": {
           "variant": "outline",
           "size": "sm",
           "to": "/bot/agent/setting/list"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "规则分类",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "icon": "tags"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.settingCate",
+            "value": true
+          }
         }
       }
     ],
@@ -374,6 +391,18 @@
           "size": "xl",
           "bodyClassName": "py-2"
         }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.settingCate",
+          "pageRoute": "/bot/agent/setting_cate/list",
+          "title": "规则分类",
+          "description": "新增或编辑规则分类，保存后规则列表和规则编辑表单会同步显示新名称。",
+          "assistant": false,
+          "size": "sm",
+          "bodyClassName": "py-2"
+        }
       }
     ]
   },
@@ -425,7 +454,8 @@
       "editPack": false,
       "createSetting": false,
       "editSetting": false,
-      "viewSetting": false
+      "viewSetting": false,
+      "settingCate": false
     }
   },
   "action": {}

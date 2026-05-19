@@ -1,6 +1,6 @@
 {
   "page": {
-    "parent": "bot/agent/skill/list",
+    "parent": "bot/agent/skill_pack/list",
     "type": 2,
     "sort": 1
   },
@@ -21,7 +21,7 @@
       {
         "type": "show-category-list",
         "id": "agent-skill-cate-category",
-        "value": "parent.data.search.cate_id",
+        "value": "search.cate_id",
         "meta": {
           "title": "技能分类",
           "description": "左侧维护技能分类",
@@ -72,6 +72,7 @@
           "stateKey": "dialog.create",
           "pageRoute": "/bot/agent/skill_cate/update",
           "description": "新增后可用于管理已安装技能。",
+          "assistant": false,
           "footer": {
             "confirm": true,
             "confirmText": "保存"
@@ -86,6 +87,7 @@
           "stateKey": "dialog.edit",
           "pageRoute": "/bot/agent/skill_cate/update",
           "description": "修改分类名称后，技能列表和技能编辑表单会同步显示新名称。",
+          "assistant": false,
           "footer": {
             "confirm": true,
             "confirmText": "保存"
@@ -100,6 +102,9 @@
     ]
   },
   "data": {
+    "search": {
+      "cate_id": ""
+    },
     "actionTarget": {
       "id": ""
     }

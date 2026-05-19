@@ -8,7 +8,6 @@ import (
 
 const (
 	Root       = "data/skills"
-	TmpRoot    = "data/skills/.tmp"
 	EntryFile  = "SKILL.md"
 	TimeoutSec = 120
 	HTTPMaxLen = 256 * 1024
@@ -145,8 +144,8 @@ func metadataEntries(entries []Entry, limits Limits) ([]Entry, []string) {
 func renderMetadata(entries []Entry) string {
 	rows := []string{
 		"可用技能:",
-		"以下技能来自当前智能体绑定的技能方案，只提供流程规范、领域知识、工具使用说明或格式约束。",
-		"如需使用某个技能，先在内部选择对应 key，再参考已加载技能正文；技能不是 Energon 能力，不能作为 call_power.power。",
+		"以下技能来自当前智能体绑定的技能方案，可提供流程规范、领域知识、工具使用说明、格式约束或附属脚本资源。",
+		"如需使用某个技能，先在内部选择对应 key，再参考已加载技能正文；技能不是 Energon 能力，不能作为 call_power.power，可按运行时工具协议使用 call_tool。",
 	}
 	if len(entries) == 0 {
 		return strings.Join(append(rows, "- 暂无可用技能。"), "\n")

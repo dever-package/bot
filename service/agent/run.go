@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -11,11 +13,13 @@ import (
 	agentaction "my/package/bot/service/agent/action"
 	agentprompt "my/package/bot/service/agent/prompt"
 	agentskill "my/package/bot/service/agent/skill"
+	agenttool "my/package/bot/service/agent/tool"
 	frontstream "my/package/front/service/stream"
 )
 
 type runtimeOptions struct {
 	MaxSteps int
+	Tool     agenttool.Options
 }
 
 type agentLoopResult struct {
@@ -64,6 +68,7 @@ func (s Service) execute(exec runExecution) {
 
 	powers := s.repo.ListActiveCallablePowers(ctx, exec.Power.ID)
 	runtimeConfig := s.repo.FindRuntimeConfig(ctx)
+	runtimeOptions := resolveRuntimeOptions(runtimeConfig, exec.Agent, exec.Parsed.Options)
 	skillLimits := agentskill.LimitsFromRuntimeConfig(runtimeConfig)
 	catalog := agentskill.BuildCatalog(exec.Agent.SkillPackID, s.repo.ListActiveSkillPackEntries(ctx, exec.Agent.SkillPackID), skillLimits)
 	skillCatalogStatus := stepStatusSuccess
@@ -140,6 +145,7 @@ func (s Service) execute(exec runExecution) {
 		Knowledge:      agentKnowledge,
 		Powers:         powers,
 		SkillCatalog:   catalog,
+		Tools:          runtimePromptTools(runtimeOptions.Tool),
 		History:        exec.Parsed.History,
 	})
 	tracker.Step(ctx, "knowledge", "运行资料", runtimePrompt, map[string]any{
@@ -160,14 +166,17 @@ func (s Service) execute(exec runExecution) {
 		"runtime_context": runtimePrompt,
 	})
 
-	runtimeOptions := resolveRuntimeOptions(runtimeConfig, exec.Agent, exec.Parsed.Options)
 	tracker.Step(ctx, "runtime_config", "运行配置", fmt.Sprintf("最大自动步骤: %d", runtimeOptions.MaxSteps), map[string]any{
-		"max_steps":       runtimeOptions.MaxSteps,
-		"agent_max_steps": exec.Agent.MaxAutoSteps,
-		"request_options": exec.Parsed.Options,
+		"max_steps":         runtimeOptions.MaxSteps,
+		"agent_max_steps":   exec.Agent.MaxAutoSteps,
+		"request_options":   exec.Parsed.Options,
+		"script_sandbox":    runtimeOptions.Tool.ScriptSandbox.Driver,
+		"script_bwrap_path": runtimeOptions.Tool.ScriptSandbox.BwrapPath,
+		"script_network":    runtimeOptions.Tool.ScriptSandbox.NetworkMode,
+		"script_timeout_ms": runtimeOptions.Tool.ScriptSandbox.Timeout.Milliseconds(),
 	}, stepStatusSuccess)
 
-	result := s.runAgentLoop(ctx, exec, runtimePrompt, &tracker, runtimeOptions)
+	result := s.runAgentLoop(ctx, exec, runtimePrompt, catalog, &tracker, runtimeOptions)
 	if result.Status == runStatusSuccess {
 		tracker.Step(ctx, "final", "最终输出", result.Summary, map[string]any{"output": result.Output}, stepStatusSuccess)
 		s.finishRun(ctx, exec, runStatusSuccess, result.Output, result.Summary, "", tracker.seq)
@@ -205,29 +214,20 @@ func (s Service) finishRun(
 	})
 }
 
-func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePrompt string, tracker *runTracker, options runtimeOptions) agentLoopResult {
+func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePrompt string, catalog agentskill.Catalog, tracker *runTracker, options runtimeOptions) agentLoopResult {
 	history := append([]any{}, exec.Parsed.History...)
 	artifacts := agentaction.NewArtifactAccumulator()
 	lastOutput := ""
 	gatewayLastID := ""
-
-	if action, ok := agentaction.ActionFromInteractionResult(exec.Parsed.Input, exec.Parsed.History, exec.Parsed.SourceTargetID); ok {
-		tracker.Step(ctx, "power_resume", "交互续跑能力", action.Power, map[string]any{
-			"power":            action.Power,
-			"input":            action.Input,
-			"source_target_id": action.SourceTargetID,
-		}, stepStatusSuccess)
-		result := s.executePowerAction(ctx, exec, action, "", gatewayLastID)
-		if result.LastID != "" {
-			gatewayLastID = result.LastID
-		}
-		if loopResult, done := s.handlePowerActionResult(ctx, exec, tracker, result, &artifacts, &history, &lastOutput); done {
-			return loopResult
-		}
-	}
+	executedActions := map[string]struct{}{}
+	tempRoot := agentToolTempRoot(exec.RequestID)
+	_ = os.RemoveAll(tempRoot)
+	_ = os.MkdirAll(tempRoot, 0o700)
+	defer os.RemoveAll(tempRoot)
 
 	for step := 1; step <= options.MaxSteps; step++ {
-		turn := s.collectAgentTurn(ctx, exec, runtimePrompt, history, step, options.MaxSteps, gatewayLastID)
+		assets := agentaction.CollectAssets(exec.Parsed.Input, history)
+		turn := s.collectAgentTurn(ctx, exec, runtimePromptWithAssets(runtimePrompt, assets), history, step, options.MaxSteps, gatewayLastID)
 		if turn.LastID != "" {
 			gatewayLastID = turn.LastID
 		}
@@ -241,7 +241,7 @@ func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePro
 
 		switch turn.Kind {
 		case agentTurnFinal:
-			output := artifacts.MergeInto(turn.Output)
+			output := agentaction.EnsureAgentRichOutput(artifacts.MergeInto(turn.Output))
 			_ = s.writeSuccessResult(ctx, exec.RequestID, output)
 			return newAgentLoopResult(output, runStatusSuccess, "")
 		case agentTurnInteraction:
@@ -249,15 +249,19 @@ func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePro
 			_ = s.writeSuccessResult(ctx, exec.RequestID, turn.Output)
 			return newAgentLoopResult(turn.Output, runStatusSuccess, "")
 		case agentTurnAction:
-			tracker.Step(ctx, "agent_action", "准备调用能力", turn.Action.Power, map[string]any{
+			if output, duplicate := duplicateActionOutput(turn.Action, executedActions, artifacts); duplicate {
+				_ = s.writeSuccessResult(ctx, exec.RequestID, output)
+				return newAgentLoopResult(output, runStatusSuccess, "")
+			}
+			tracker.Step(ctx, "agent_action", actionStepTitle(turn.Action), actionStepContent(turn.Action), map[string]any{
 				"text":   turn.Text,
 				"action": turn.Action,
 			}, stepStatusSuccess)
-			result := s.executePowerAction(ctx, exec, turn.Action, turn.Text, gatewayLastID)
+			result := s.executeAgentAction(ctx, exec, turn.Action, turn.Text, gatewayLastID, history, assets, catalog, tempRoot, options.Tool)
 			if result.LastID != "" {
 				gatewayLastID = result.LastID
 			}
-			if loopResult, done := s.handlePowerActionResult(ctx, exec, tracker, result, &artifacts, &history, &lastOutput); done {
+			if loopResult, done := s.handleActionResult(ctx, exec, tracker, result, &artifacts, &history, &lastOutput); done {
 				return loopResult
 			}
 		case agentTurnCanceled:
@@ -270,12 +274,40 @@ func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePro
 		}
 	}
 
-	output := stepLimitOutput(options.MaxSteps, lastOutput, artifacts)
+	output := agentaction.EnsureAgentRichOutput(stepLimitOutput(options.MaxSteps, lastOutput, artifacts))
 	_ = s.writeSuccessResult(ctx, exec.RequestID, output)
 	return newAgentLoopResult(output, runStatusSuccess, "")
 }
 
-func (s Service) executePowerAction(ctx context.Context, exec runExecution, action agentaction.Action, intro string, gatewayLastID string) agentaction.Result {
+func duplicateActionOutput(action agentaction.Action, executed map[string]struct{}, artifacts agentaction.ArtifactAccumulator) (map[string]any, bool) {
+	signature := agentaction.ActionSignature(action)
+	if signature == "" {
+		return nil, false
+	}
+	if _, exists := executed[signature]; !exists {
+		executed[signature] = struct{}{}
+		return nil, false
+	}
+	if !artifacts.HasAny() {
+		return nil, false
+	}
+	return agentaction.EnsureAgentRichOutput(artifacts.MergeInto(map[string]any{
+		"event": "final",
+		"kind":  agentaction.KindFinal,
+		"text":  "已完成当前能力生成，避免重复调用同一能力。",
+	})), true
+}
+
+func (s Service) executeAgentAction(ctx context.Context, exec runExecution, action agentaction.Action, intro string, gatewayLastID string, history []any, assets []agentaction.Asset, catalog agentskill.Catalog, tempRoot string, toolOptions agenttool.Options) agentaction.Result {
+	switch strings.TrimSpace(action.Type) {
+	case "call_tool":
+		return s.executeToolAction(ctx, exec, action, catalog, tempRoot, toolOptions)
+	default:
+		return s.executePowerAction(ctx, exec, action, intro, gatewayLastID, history, assets)
+	}
+}
+
+func (s Service) executePowerAction(ctx context.Context, exec runExecution, action agentaction.Action, intro string, gatewayLastID string, history []any, assets []agentaction.Asset) agentaction.Result {
 	return agentaction.ExecutePower(ctx, agentaction.ExecuteRequest{
 		RequestID:      exec.RequestID,
 		Method:         exec.Request.Method,
@@ -283,7 +315,8 @@ func (s Service) executePowerAction(ctx context.Context, exec runExecution, acti
 		Path:           exec.Request.Path,
 		Headers:        exec.Request.Headers,
 		Input:          exec.Parsed.Input,
-		History:        exec.Parsed.History,
+		History:        history,
+		Assets:         assets,
 		SourceTargetID: exec.Parsed.SourceTargetID,
 		Gateway:        s.gateway,
 		ResolvePower: func(ctx context.Context, identity string) (string, error) {
@@ -299,7 +332,31 @@ func (s Service) executePowerAction(ctx context.Context, exec runExecution, acti
 	}, action, intro, gatewayLastID)
 }
 
-func (s Service) handlePowerActionResult(
+func (s Service) executeToolAction(ctx context.Context, exec runExecution, action agentaction.Action, catalog agentskill.Catalog, tempRoot string, toolOptions agenttool.Options) agentaction.Result {
+	return agenttool.Execute(ctx, agenttool.Request{
+		RequestID: exec.RequestID,
+		Action:    action,
+		Loaded:    catalog.Loaded,
+		TempRoot:  tempRoot,
+		Options:   toolOptions,
+		WriteStatus: func(ctx context.Context, text string, meta map[string]any) error {
+			return s.writeStreamStatus(ctx, exec.RequestID, text, meta)
+		},
+	})
+}
+
+func runtimePromptWithAssets(runtimePrompt string, assets []agentaction.Asset) string {
+	assetPrompt := agentaction.AssetPrompt(assets)
+	if strings.TrimSpace(assetPrompt) == "" {
+		return runtimePrompt
+	}
+	if strings.TrimSpace(runtimePrompt) == "" {
+		return assetPrompt
+	}
+	return runtimePrompt + "\n\n" + assetPrompt
+}
+
+func (s Service) handleActionResult(
 	ctx context.Context,
 	exec runExecution,
 	tracker *runTracker,
@@ -312,10 +369,7 @@ func (s Service) handlePowerActionResult(
 	case agentaction.ResultDone:
 		artifacts.Add(result.Output)
 		*lastOutput = agentaction.SummaryText(result.Output)
-		tracker.Step(ctx, "tool_result", "能力调用结果", *lastOutput, map[string]any{
-			"power":  result.Action.Power,
-			"output": result.Output,
-		}, stepStatusSuccess)
+		tracker.Step(ctx, "tool_result", actionResultTitle(result.Action), *lastOutput, actionResultPayload(result), stepStatusSuccess)
 		*history = agentaction.AppendHistoryObservation(*history, result)
 		return agentLoopResult{}, false
 	case agentaction.ResultInteraction:
@@ -326,10 +380,52 @@ func (s Service) handlePowerActionResult(
 		_ = s.writeCancelResult(ctx, exec.RequestID)
 		return newAgentLoopTextResult(result.Text, runStatusCanceled, firstText(result.Message, "任务已取消")), true
 	default:
-		message := firstText(result.Message, "能力调用失败")
+		message := firstText(result.Message, actionFailureMessage(result.Action))
 		_ = s.writeErrorResult(ctx, exec.RequestID, message)
 		return newAgentLoopTextResult(result.Text, runStatusFail, message), true
 	}
+}
+
+func actionStepTitle(action agentaction.Action) string {
+	if strings.TrimSpace(action.Type) == "call_tool" {
+		return "准备调用工具"
+	}
+	return "准备调用能力"
+}
+
+func actionStepContent(action agentaction.Action) string {
+	if strings.TrimSpace(action.Type) == "call_tool" {
+		return strings.TrimSpace(action.Tool)
+	}
+	return strings.TrimSpace(action.Power)
+}
+
+func actionResultTitle(action agentaction.Action) string {
+	if strings.TrimSpace(action.Type) == "call_tool" {
+		return "工具调用结果"
+	}
+	return "能力调用结果"
+}
+
+func actionFailureMessage(action agentaction.Action) string {
+	if strings.TrimSpace(action.Type) == "call_tool" {
+		return "工具调用失败"
+	}
+	return "能力调用失败"
+}
+
+func actionResultPayload(result agentaction.Result) map[string]any {
+	payload := map[string]any{"output": result.Output}
+	if strings.TrimSpace(result.Action.Power) != "" {
+		payload["power"] = result.Action.Power
+	}
+	if strings.TrimSpace(result.Action.Tool) != "" {
+		payload["tool"] = result.Action.Tool
+	}
+	if strings.TrimSpace(result.Action.Skill) != "" {
+		payload["skill"] = result.Action.Skill
+	}
+	return payload
 }
 
 func newAgentLoopResult(output map[string]any, status string, message string) agentLoopResult {
@@ -405,7 +501,19 @@ func resolveRuntimeOptions(config agentmodel.RuntimeConfig, agent agentmodel.Age
 	if maxSteps > hardMax {
 		maxSteps = hardMax
 	}
-	return runtimeOptions{MaxSteps: maxSteps}
+	return runtimeOptions{
+		MaxSteps: maxSteps,
+		Tool:     agenttool.OptionsFromRuntimeConfig(config),
+	}
+}
+
+func runtimePromptTools(options agenttool.Options) agentprompt.ToolRuntime {
+	sandboxConfig := options.ScriptSandbox
+	return agentprompt.ToolRuntime{
+		RunSkillScriptEnabled: sandboxConfig.Driver != agentmodel.RuntimeScriptSandboxDriverDisabled,
+		ScriptSandboxDriver:   sandboxConfig.Driver,
+		ScriptNetworkMode:     sandboxConfig.NetworkMode,
+	}
 }
 
 func requestMaxSteps(options map[string]any) int {
@@ -426,4 +534,26 @@ func positiveInt(value int, fallback int) int {
 		return value
 	}
 	return fallback
+}
+
+func agentToolTempRoot(requestID string) string {
+	requestID = strings.TrimSpace(requestID)
+	var builder strings.Builder
+	for _, char := range requestID {
+		switch {
+		case char >= 'a' && char <= 'z':
+			builder.WriteRune(char)
+		case char >= 'A' && char <= 'Z':
+			builder.WriteRune(char)
+		case char >= '0' && char <= '9':
+			builder.WriteRune(char)
+		case char == '-' || char == '_':
+			builder.WriteRune(char)
+		}
+	}
+	name := builder.String()
+	if name == "" {
+		name = fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return filepath.Join(os.TempDir(), "shemic-agent-tool-"+name)
 }

@@ -54,7 +54,11 @@
   "action": {
     "submit": {
       "type": "save",
-      "params": "form"
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.agent.setting.AgentHook.BeforeSaveAgentCate"
+      }
     }
   }
 }

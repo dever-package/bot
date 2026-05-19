@@ -12,7 +12,14 @@ const (
 )
 
 func ExtractAgentResult(text string) (string, map[string]any, bool) {
-	return extractJSONFence(text, []string{"agent-result", "agent-output"}, validAgentResult)
+	clean, payload, ok := extractJSONFence(text, []string{"agent-result", "agent-output"}, validAgentResult)
+	if ok {
+		return clean, payload, true
+	}
+	if payload, ok := extractJSONObject(text, validAgentResult); ok {
+		return "", payload, true
+	}
+	return text, nil, false
 }
 
 func validAgentResult(result map[string]any) bool {
@@ -44,6 +51,7 @@ func ApplyAgentResult(output map[string]any, result map[string]any, fallbackText
 	next["kind"] = kind
 	next["event"] = "final"
 
+	clearResultOutputFields(next)
 	if content, exists := result["content"]; exists {
 		next["content"] = content
 	}
@@ -54,15 +62,26 @@ func ApplyAgentResult(output map[string]any, result map[string]any, fallbackText
 		next["text"] = text
 	} else if strings.TrimSpace(fallbackText) != "" {
 		next["text"] = strings.TrimSpace(fallbackText)
+	} else {
+		delete(next, "text")
 	}
 	if suggestions := NormalizeSuggestions(result["suggestions"]); len(suggestions) > 0 {
 		next["suggestions"] = suggestions
 	}
 	delete(next, "reasoning")
-	return next
+	return EnsureAgentRichOutput(next)
 }
 
 var resultMediaKeys = []string{"images", "videos", "audios", "files"}
+
+func clearResultOutputFields(target map[string]any) {
+	for _, key := range []string{"title", "rich", "json", "value", "content"} {
+		delete(target, key)
+	}
+	for _, key := range resultMediaKeys {
+		delete(target, key)
+	}
+}
 
 func hasResultOutputField(source map[string]any) bool {
 	if len(source) == 0 {
@@ -74,7 +93,7 @@ func hasResultOutputField(source map[string]any) bool {
 		}
 	}
 	for _, key := range resultMediaKeys {
-		if len(botprotocol.NormalizeStringList(source[key])) > 0 {
+		if len(normalizeActionMediaList(source[key], key)) > 0 {
 			return true
 		}
 	}
@@ -107,10 +126,10 @@ func copyResultValue(target map[string]any, source map[string]any, key string) {
 }
 
 func copyResultMedia(target map[string]any, source map[string]any, key string) {
-	if len(botprotocol.NormalizeStringList(target[key])) > 0 {
+	if len(normalizeActionMediaList(target[key], key)) > 0 {
 		return
 	}
-	if values := botprotocol.NormalizeStringList(source[key]); len(values) > 0 {
+	if values := normalizeActionMediaList(source[key], key); len(values) > 0 {
 		target[key] = values
 	}
 }
@@ -143,6 +162,7 @@ func NormalizeAgentFinalOutput(output map[string]any, fallbackText string) map[s
 	if strings.TrimSpace(firstText(next["text"])) == "" && strings.TrimSpace(fallbackText) != "" {
 		next["text"] = strings.TrimSpace(fallbackText)
 	}
+	normalizeOutputMediaFields(next)
 	delete(next, "reasoning")
 	return next
 }
@@ -153,8 +173,59 @@ func NormalizeToolResultOutput(output map[string]any, _ string) map[string]any {
 	if strings.TrimSpace(firstText(next["event"])) == "" {
 		next["event"] = "final"
 	}
+	normalizeOutputMediaFields(next)
 	delete(next, "reasoning")
 	return next
+}
+
+func EnsureAgentRichOutput(output map[string]any) map[string]any {
+	next := cloneMap(output)
+	normalizeOutputMediaFields(next)
+	ensureAgentRichContent(next)
+	return next
+}
+
+func HasDisplayOutput(output map[string]any) bool {
+	if len(output) == 0 {
+		return false
+	}
+	content := normalizeMap(output["content"])
+	for _, source := range []map[string]any{output, content} {
+		if len(source) == 0 {
+			continue
+		}
+		if strings.TrimSpace(firstText(source["text"], source["title"], source["error"])) != "" {
+			return true
+		}
+		for _, key := range []string{"rich", "json", "value"} {
+			if resultFieldHasValue(source[key]) {
+				return true
+			}
+		}
+		for _, key := range resultMediaKeys {
+			if len(normalizeActionMediaList(source[key], key)) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizeOutputMediaFields(output map[string]any) {
+	for _, key := range resultMediaKeys {
+		if values := normalizeActionMediaList(output[key], key); len(values) > 0 {
+			output[key] = values
+		}
+	}
+}
+
+func normalizeActionMediaList(value any, key string) []string {
+	mediaType := strings.TrimSuffix(key, "s")
+	values := botprotocol.NormalizeMediaList(value, mediaType)
+	if len(values) > 0 {
+		return values
+	}
+	return botprotocol.NormalizeStringList(value)
 }
 
 func normalizeResultKind(value string) string {

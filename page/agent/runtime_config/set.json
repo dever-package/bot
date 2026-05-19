@@ -48,6 +48,10 @@
             {
               "label": "技能配置",
               "value": "skill"
+            },
+            {
+              "label": "运行沙箱",
+              "value": "sandbox"
             }
           ]
         }
@@ -173,6 +177,160 @@
           "tab": "skill",
           "controlClassName": "max-w-[160px]"
         }
+      },
+      {
+        "id": "runtime-script-sandbox-driver",
+        "type": "form-radio",
+        "name": "脚本沙箱模式",
+        "placeholder": "请选择脚本沙箱模式",
+        "value": "form.script_sandbox_driver",
+        "mode": "form",
+        "option": [
+          {
+            "id": "disabled",
+            "value": "禁用脚本"
+          },
+          {
+            "id": "local",
+            "value": "本地受控执行"
+          },
+          {
+            "id": "bwrap",
+            "value": "bubblewrap 沙箱"
+          }
+        ],
+        "info": "控制 run_skill_script 如何执行技能 scripts/ 下的脚本。生产环境建议使用 bubblewrap 沙箱；不会自动降级到本地执行。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "脚本沙箱模式不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "sandbox",
+          "controlClassName": "max-w-[520px]",
+          "control": [
+            {
+              "value": "disabled",
+              "hide": [
+                "runtime-script-sandbox-bwrap-path",
+                "runtime-script-sandbox-network-mode",
+                "runtime-script-sandbox-timeout",
+                "runtime-script-sandbox-output"
+              ]
+            },
+            {
+              "value": "local",
+              "hide": [
+                "runtime-script-sandbox-bwrap-path",
+                "runtime-script-sandbox-network-mode"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "runtime-script-sandbox-bwrap-path",
+        "type": "form-input",
+        "name": "bwrap 路径",
+        "placeholder": "例如：bwrap 或 /usr/bin/bwrap",
+        "value": "form.script_sandbox_bwrap_path",
+        "mode": "form",
+        "info": "调用时会检测该命令是否存在且可执行；检测失败会返回安装指引，不会自动安装。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "sandbox",
+          "controlClassName": "max-w-[320px]"
+        }
+      },
+      {
+        "id": "runtime-script-sandbox-network-mode",
+        "type": "form-radio",
+        "name": "脚本网络",
+        "placeholder": "请选择脚本网络模式",
+        "value": "form.script_sandbox_network_mode",
+        "mode": "form",
+        "option": [
+          {
+            "id": "none",
+            "value": "断网"
+          },
+          {
+            "id": "host",
+            "value": "使用宿主网络"
+          }
+        ],
+        "info": "默认断网。外部 API 请求建议让模型调用 http_request 或 curl_request，由后端统一做域名和响应限制。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "脚本网络模式不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "sandbox",
+          "controlClassName": "max-w-[360px]"
+        }
+      },
+      {
+        "id": "runtime-script-sandbox-timeout",
+        "type": "form-number",
+        "name": "脚本超时时间",
+        "placeholder": "单位：秒，1-60",
+        "value": "form.script_sandbox_timeout_seconds",
+        "mode": "form",
+        "info": "run_skill_script 的默认超时时间；模型单次调用可传 timeout_seconds，但不会超过这里和系统上限。",
+        "validate": [
+          {
+            "type": "min",
+            "min": 1,
+            "message": "脚本超时时间不能小于 1 秒。"
+          },
+          {
+            "type": "max",
+            "max": 60,
+            "message": "脚本超时时间不能超过 60 秒。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "sandbox",
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "id": "runtime-script-sandbox-output",
+        "type": "form-number",
+        "name": "脚本输出最大字节数",
+        "placeholder": "例如：262144",
+        "value": "form.script_sandbox_output_max_bytes",
+        "mode": "form",
+        "info": "stdout 和 stderr 各自最多保留的字节数；超出会截断，避免大输出撑爆上下文。",
+        "validate": [
+          {
+            "type": "min",
+            "min": 1,
+            "message": "脚本输出最大字节数不能小于 1。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "sandbox",
+          "controlClassName": "max-w-[180px]"
+        }
+      },
+      {
+        "type": "show-text",
+        "name": "安装指引",
+        "value": "sandbox_install_guide",
+        "mode": "form",
+        "className": "whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-3 font-mono text-xs text-foreground",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "sandbox"
+        }
       }
     ]
   },
@@ -185,8 +343,14 @@
       "skill_metadata_max_skills": 80,
       "skill_metadata_field_max_length": 240,
       "skill_file_max_bytes": 262144,
-      "skill_loaded_content_max_length": 30000
-    }
+      "skill_loaded_content_max_length": 30000,
+      "script_sandbox_driver": "bwrap",
+      "script_sandbox_bwrap_path": "bwrap",
+      "script_sandbox_network_mode": "none",
+      "script_sandbox_timeout_seconds": 15,
+      "script_sandbox_output_max_bytes": 262144
+    },
+    "sandbox_install_guide": "bubblewrap 不是 Linux 自带命令，需要部署时安装。\\nDebian / Ubuntu：apt-get update && apt-get install -y bubblewrap\\nCentOS / RHEL / Fedora：dnf install -y bubblewrap 或 yum install -y bubblewrap\\nAlpine：apk add --no-cache bubblewrap\\n检测命令：which bwrap && bwrap --version"
   },
   "state": {
     "currentTab": "basic"

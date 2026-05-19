@@ -1,12 +1,12 @@
 package agent
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
 
+	agentskill "my/package/bot/service/agent/skill"
 	frontstream "my/package/front/service/stream"
 )
 
@@ -50,66 +50,27 @@ func resolveRequestID(req RunRequest) string {
 }
 
 func normalizeInput(raw any) map[string]any {
-	if mapped := normalizeMap(raw); len(mapped) > 0 {
-		return mapped
-	}
-	text := strings.TrimSpace(frontstream.InputText(raw))
-	if text == "" {
-		return map[string]any{}
-	}
-	return map[string]any{"text": text}
+	return agentskill.NormalizeInput(raw)
 }
 
 func normalizeMap(raw any) map[string]any {
-	mapped, ok := raw.(map[string]any)
-	if !ok || mapped == nil {
-		return map[string]any{}
-	}
-	return mapped
+	return agentskill.NormalizeMap(raw)
 }
 
 func firstText(values ...any) string {
-	for _, value := range values {
-		if text := strings.TrimSpace(frontstream.InputText(value)); text != "" {
-			return text
-		}
-	}
-	return ""
+	return agentskill.FirstText(values...)
 }
 
 func primaryInputText(input map[string]any) string {
-	if input == nil {
-		return ""
-	}
-	if text := strings.TrimSpace(frontstream.InputText(input["text"])); text != "" {
-		return text
-	}
-	if text := strings.TrimSpace(frontstream.InputText(input["prompt"])); text != "" {
-		return text
-	}
-	if text := strings.TrimSpace(frontstream.InputText(input["message"])); text != "" {
-		return text
-	}
-	return strings.TrimSpace(jsonText(input))
+	return agentskill.PrimaryInputText(input)
 }
 
 func cloneMap(source map[string]any) map[string]any {
-	if source == nil {
-		return map[string]any{}
-	}
-	cloned := make(map[string]any, len(source))
-	for key, item := range source {
-		cloned[key] = item
-	}
-	return cloned
+	return agentskill.CloneMap(source)
 }
 
 func jsonText(raw any) string {
-	content, err := json.Marshal(raw)
-	if err != nil {
-		return ""
-	}
-	return string(content)
+	return agentskill.JSONText(raw)
 }
 
 func normalizeHistory(raw any) []any {
@@ -120,16 +81,5 @@ func normalizeHistory(raw any) []any {
 }
 
 func headerValue(headers map[string]string, key string) string {
-	if headers == nil {
-		return ""
-	}
-	if value := strings.TrimSpace(headers[key]); value != "" {
-		return value
-	}
-	for currentKey, value := range headers {
-		if strings.EqualFold(currentKey, key) {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
+	return agentskill.HeaderValue(headers, key)
 }

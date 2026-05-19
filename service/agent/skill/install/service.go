@@ -3,6 +3,7 @@ package install
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,22 +32,22 @@ type RunRequest struct {
 
 type skillInstallRequest struct {
 	Input         string
-	InstallType   string
 	CateID        uint64
 	TargetPackID  uint64
 	AutoAddToPack bool
 }
 
 type skillInstallExecution struct {
+	Request       RunRequest
 	ID            uint64
 	RequestID     string
 	Input         string
-	InstallType   string
 	CateID        uint64
 	TargetPackID  uint64
 	AutoAddToPack bool
 	StartedAt     time.Time
 	Log           strings.Builder
+	LogMu         sync.Mutex
 }
 
 type installedSkillSource struct {
@@ -55,12 +56,19 @@ type installedSkillSource struct {
 	SourceURL string
 }
 
+type parsedSkillSource struct {
+	Source    installedSkillSource
+	Parsed    agentskill.ParsedFile
+	FinalDir  string
+	EntryFile string
+}
+
 func NewService() Service {
 	return Service{streams: frontstream.New("skill_install")}
 }
 
 func (s Service) Run(ctx context.Context, req RunRequest) map[string]any {
-	parsed, err := parseSkillInstallRequest(req.Body)
+	parsed, err := parseSkillInstallRequest(ctx, req.Body)
 	if err != nil {
 		return frontstream.ResponsePayload("", "result", map[string]any{}, err.Error(), 2)
 	}
@@ -71,8 +79,6 @@ func (s Service) Run(ctx context.Context, req RunRequest) map[string]any {
 		"cate_id":          parsed.CateID,
 		"target_pack_id":   parsed.TargetPackID,
 		"auto_add_to_pack": agentskill.BoolInt16(parsed.AutoAddToPack),
-		"action":           agentmodel.SkillInstallActionInstall,
-		"install_type":     parsed.InstallType,
 		"install_input":    parsed.Input,
 		"status":           agentmodel.SkillInstallStatusPending,
 		"request_id":       requestID,
@@ -90,13 +96,13 @@ func (s Service) Run(ctx context.Context, req RunRequest) map[string]any {
 			"install_id": installID,
 		},
 	}, "", 1)
-	_ = s.writePayload(ctx, requestID, startPayload)
+	_, _ = s.streams.WritePayload(ctx, requestID, startPayload)
 
 	go s.execute(skillInstallExecution{
+		Request:       req,
 		ID:            installID,
 		RequestID:     requestID,
 		Input:         parsed.Input,
-		InstallType:   parsed.InstallType,
 		CateID:        parsed.CateID,
 		TargetPackID:  parsed.TargetPackID,
 		AutoAddToPack: parsed.AutoAddToPack,
@@ -104,10 +110,6 @@ func (s Service) Run(ctx context.Context, req RunRequest) map[string]any {
 	})
 
 	return startPayload
-}
-
-func (s Service) ReadStream(ctx context.Context, requestID string, lastID string, count int64, block time.Duration) ([]frontstream.Entry, error) {
-	return s.streams.Read(ctx, requestID, lastID, count, block)
 }
 
 func (s Service) Stop(_ context.Context, requestID string) map[string]any {
@@ -127,13 +129,4 @@ func resolveRequestID(req RunRequest) string {
 		}
 	}
 	return uuid.NewString()
-}
-
-func NormalizeInstallType(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "command", "url", "prompt":
-		return strings.ToLower(strings.TrimSpace(value))
-	default:
-		return "prompt"
-	}
 }

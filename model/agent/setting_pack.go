@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	DefaultSettingPackID   uint64 = 1
-	AssistantSettingPackID uint64 = 2
+	DefaultSettingPackID      uint64 = 1
+	AssistantSettingPackID    uint64 = 2
+	SkillInstallSettingPackID uint64 = 3
 )
 
 type SettingPack struct {
@@ -40,6 +41,13 @@ var (
 			"description": "后台 AI 助理专用规则方案，用于理解当前后台页面并返回受控前端动作。",
 			"status":      1,
 			"sort":        2,
+		},
+		{
+			"id":          SkillInstallSettingPackID,
+			"name":        "技能安装规则方案",
+			"description": "系统内置技能安装规划器专用规则方案，只生成受控安装计划。",
+			"status":      1,
+			"sort":        3,
 		},
 	}
 

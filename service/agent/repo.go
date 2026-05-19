@@ -121,26 +121,34 @@ func (Repo) ListActivePublicSettings(ctx context.Context, packID uint64) []agent
 			if !isAlwaysLoadMode(setting.LoadMode) {
 				continue
 			}
+			setting = runtimeDefaultSetting(packID, setting)
 			result = append(result, setting)
 		}
 	}
 	return result
 }
 
-func (Repo) ListActiveAgentSettings(ctx context.Context, agentID uint64) []agentmodel.AgentSetting {
-	return listAgentSettings(ctx, agentID, true)
+func runtimeDefaultSetting(packID uint64, setting agentmodel.Setting) agentmodel.Setting {
+	if packID != agentmodel.DefaultSettingPackID {
+		return setting
+	}
+	defaultSetting, ok := agentmodel.DefaultSettings.Find(setting.ID)
+	if !ok {
+		return setting
+	}
+	defaultSetting.LoadMode = setting.LoadMode
+	defaultSetting.Status = setting.Status
+	return defaultSetting
 }
 
-func listAgentSettings(ctx context.Context, agentID uint64, activeOnly bool) []agentmodel.AgentSetting {
+func (Repo) ListActiveAgentSettings(ctx context.Context, agentID uint64) []agentmodel.AgentSetting {
 	if agentID == 0 {
 		return nil
 	}
 	filter := map[string]any{
 		"agent_id":  agentID,
 		"load_mode": "always",
-	}
-	if activeOnly {
-		filter["status"] = 1
+		"status":    1,
 	}
 	rows := agentmodel.NewAgentSettingModel().Select(ctx, filter)
 	result := make([]agentmodel.AgentSetting, 0, len(rows))
@@ -265,21 +273,9 @@ func (Repo) FindRuntimeConfig(ctx context.Context) agentmodel.RuntimeConfig {
 		"id": agentmodel.DefaultRuntimeConfigID,
 	})
 	if row != nil {
-		return *row
+		return agentmodel.RuntimeConfigWithDefaults(*row)
 	}
-	return agentmodel.RuntimeConfig{
-		ID:                          agentmodel.DefaultRuntimeConfigID,
-		DefaultMaxAutoSteps:         agentmodel.DefaultRuntimeMaxAutoSteps,
-		HardMaxAutoSteps:            agentmodel.DefaultRuntimeHardMaxAutoSteps,
-		SkillMetadataMaxSkills:      agentmodel.DefaultRuntimeSkillMetadataMaxSkills,
-		SkillMetadataFieldMaxLength: agentmodel.DefaultRuntimeSkillMetadataFieldMaxLength,
-		SkillFileMaxBytes:           agentmodel.DefaultRuntimeSkillFileMaxBytes,
-		SkillLoadedContentMaxLength: agentmodel.DefaultRuntimeSkillLoadedContentMaxLength,
-	}
-}
-
-func (repo Repo) ResolvePowerKey(ctx context.Context, identity string) (string, error) {
-	return repo.resolvePowerKey(ctx, identity, 0)
+	return agentmodel.DefaultRuntimeConfig()
 }
 
 func (repo Repo) ResolveCallablePowerKey(ctx context.Context, identity string, excludedID uint64) (string, error) {

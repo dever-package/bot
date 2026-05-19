@@ -1,6 +1,6 @@
 {
   "page": {
-    "parent": "bot/agent/skill/list",
+    "parent": "bot/agent/skill_pack/list",
     "type": 2,
     "sort": 9
   },
@@ -36,7 +36,10 @@
             "except": "$form.id",
             "message": "该技能分类名称已存在，请更换。"
           }
-        ]
+        ],
+        "meta": {
+          "assistant": false
+        }
       }
     ]
   },

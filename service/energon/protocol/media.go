@@ -70,6 +70,13 @@ func HasMediaOutput(output Output) bool {
 	return false
 }
 
+func NormalizeMediaList(value any, mediaType string) []string {
+	output := Output{}
+	mediaType = normalizeMediaType(mediaType)
+	collectMediaOutput(output, value, mediaType, mediaType)
+	return normalizeStringList(output[mediaOutputKey(mediaType)])
+}
+
 func MediaOutputLabel(values ...string) string {
 	for _, value := range values {
 		switch strings.ToLower(strings.TrimSpace(value)) {
@@ -97,7 +104,9 @@ func collectMediaOutput(output Output, value any, defaultType string, eventType 
 			collectMediaOutput(output, item, defaultType, eventType)
 		}
 	case []string:
-		appendMediaByType(output, defaultType, current)
+		for _, item := range current {
+			collectMediaOutput(output, item, defaultType, eventType)
+		}
 	case map[string]any:
 		collectMediaMap(output, current, defaultType, eventType)
 	default:
@@ -237,7 +246,11 @@ func collectURLValues(value any) []string {
 	case nil:
 		return nil
 	case map[string]any:
-		return normalizeStringList(current["url"])
+		result := make([]string, 0, 1)
+		for _, key := range []string{"url", "src", "download", "open_url", "thumbnail", "path"} {
+			result = appendStringValues(result, normalizeStringList(current[key])...)
+		}
+		return result
 	case []any:
 		result := make([]string, 0, len(current))
 		for _, item := range current {
@@ -247,6 +260,26 @@ func collectURLValues(value any) []string {
 	default:
 		return normalizeStringList(current)
 	}
+}
+
+func appendStringValues(base []string, values ...string) []string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		exists := false
+		for _, item := range base {
+			if item == value {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			base = append(base, value)
+		}
+	}
+	return base
 }
 
 func collectMetaFields(output Output, mapped map[string]any) {

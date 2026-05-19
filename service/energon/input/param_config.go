@@ -2,6 +2,7 @@ package input
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -260,6 +261,77 @@ func powerParamOptions(
 		return rows[i].ID < rows[j].ID
 	})
 	return rows
+}
+
+func NormalizePowerParamInput(input map[string]any, params []PowerParam) map[string]any {
+	result := map[string]any{}
+	for _, param := range params {
+		key := strings.TrimSpace(param.Key)
+		if key == "" {
+			continue
+		}
+		value, ok := powerParamInputValue(input, param)
+		if ok {
+			result[key] = value
+		}
+	}
+	return result
+}
+
+func powerParamInputValue(input map[string]any, param PowerParam) (any, bool) {
+	for _, key := range powerParamLookupKeys(param) {
+		if value, exists := input[key]; exists && !IsMissing(value) {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+func powerParamLookupKeys(param PowerParam) []string {
+	keys := []string{}
+	if isPromptPowerParam(param) {
+		for _, key := range promptInputAliases() {
+			keys = appendUniqueInputKey(keys, key)
+		}
+	}
+	keys = appendUniqueInputKey(keys, strings.TrimSpace(param.Key))
+	keys = appendUniqueInputKey(keys, strings.TrimSpace(param.Name))
+	if param.ID > 0 {
+		keys = appendUniqueInputKey(keys, fmt.Sprintf("param_%d", param.ID))
+	}
+	for _, key := range powerParamInputAliases(param) {
+		keys = appendUniqueInputKey(keys, key)
+	}
+	return keys
+}
+
+func powerParamInputAliases(param PowerParam) []string {
+	switch strings.TrimSpace(param.Key) {
+	case "aspectRatio":
+		return []string{"ratio", "aspect_ratio"}
+	}
+	switch strings.TrimSpace(param.Name) {
+	case "比例":
+		return []string{"ratio", "aspect_ratio"}
+	case "分辨率":
+		return []string{"resolution"}
+	default:
+		return nil
+	}
+}
+
+func isPromptPowerParam(param PowerParam) bool {
+	for _, value := range []string{param.Key, param.Name} {
+		text := strings.ToLower(strings.TrimSpace(value))
+		switch text {
+		case "prompt", "text", "content", "input":
+			return true
+		}
+		if strings.Contains(text, "prompt") || strings.Contains(text, "提示词") || strings.Contains(text, "提示语") {
+			return true
+		}
+	}
+	return false
 }
 
 func powerParamSort(powerSort int, serviceSort int) int {

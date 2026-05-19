@@ -19,13 +19,13 @@ type AgentCateIndex struct {
 }
 
 const (
-	DefaultAgentCateID   uint64 = 1
-	AssistantAgentCateID uint64 = 2
+	DefaultAgentCateID uint64 = 1
+	SystemAgentCateID  uint64 = 2
 )
 
 var agentCateSeed = []map[string]any{
 	{"id": DefaultAgentCateID, "name": "默认分类", "sort": 100},
-	{"id": AssistantAgentCateID, "name": "助理", "sort": 110},
+	{"id": SystemAgentCateID, "name": "系统内置", "sort": 110},
 }
 
 func NewAgentCateModel() *orm.Model[AgentCate] {

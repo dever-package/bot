@@ -140,9 +140,28 @@ func appendOutputList(target Output, key string, values ...any) {
 	for _, value := range values {
 		result = append(result, normalizeStringList(value)...)
 	}
-	if len(result) > 0 {
-		target[key] = result
+	result = uniqueOutputStrings(result)
+	if len(result) == 0 {
+		return
 	}
+	target[key] = result
+}
+
+func uniqueOutputStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		text := strings.TrimSpace(value)
+		if text == "" {
+			continue
+		}
+		if _, exists := seen[text]; exists {
+			continue
+		}
+		seen[text] = struct{}{}
+		result = append(result, text)
+	}
+	return result
 }
 
 func isEmptyProtocolValue(value any) bool {

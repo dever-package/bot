@@ -53,7 +53,7 @@ func (s Service) collectAgentTurn(ctx context.Context, exec runExecution, runtim
 		return agentTurnErrorResult(responseErrorMessage(startPayload, nil, "调用 LLM 能力失败"))
 	}
 	if botstream.FrameType(startPayload) == "result" {
-		return resolveAgentTurn("", startPayload, gatewayLastID)
+		return resolveAgentTurn("", startPayload, gatewayLastID, nil)
 	}
 
 	var turn agentTurnResult
@@ -61,6 +61,7 @@ func (s Service) collectAgentTurn(ctx context.Context, exec runExecution, runtim
 		TimeoutMessage:      "智能体运行超时",
 		InitialLastID:       gatewayLastID,
 		CollectDeltaText:    true,
+		CollectOutputs:      true,
 		SuppressErrorResult: true,
 		OnOutput: func(ctx context.Context, output map[string]any) error {
 			if !isGatewayTimingOutput(output) {
@@ -69,7 +70,7 @@ func (s Service) collectAgentTurn(ctx context.Context, exec runExecution, runtim
 			return s.writeStreamOutput(ctx, exec.RequestID, normalizeGatewayStreamOutput(output))
 		},
 		OnResult: func(ctx context.Context, frame map[string]any, state gatewayStreamState) (string, string, string) {
-			turn = resolveAgentTurn(state.Text, frame, state.LastID)
+			turn = resolveAgentTurn(mergedGatewayText(state), frame, state.LastID, mergedGatewayOutput(state))
 			switch turn.Kind {
 			case agentTurnCanceled:
 				return turn.Text, runStatusCanceled, "任务已取消"
@@ -92,8 +93,33 @@ func (s Service) collectAgentTurn(ctx context.Context, exec runExecution, runtim
 	return agentTurnResult{Kind: agentTurnFinal, Text: text, Output: map[string]any{"event": "final", "text": text}}
 }
 
-func resolveAgentTurn(aggregateText string, frame map[string]any, gatewayLastID string) agentTurnResult {
+func mergedGatewayText(state gatewayStreamState) string {
+	text := strings.TrimSpace(state.Text)
+	merged := botprotocol.MergeStreamResult(state.Outputs)
+	if mergedText := strings.TrimSpace(frontstream.InputText(merged["text"])); mergedText != "" {
+		text = mergedText
+	}
+	return text
+}
+
+func mergedGatewayOutput(state gatewayStreamState) map[string]any {
+	output := map[string]any(botprotocol.MergeStreamResult(state.Outputs))
+	if strings.TrimSpace(frontstream.InputText(output["text"])) == "" {
+		if text := strings.TrimSpace(state.Text); text != "" {
+			output["text"] = text
+		}
+	}
+	if len(output) == 0 {
+		return nil
+	}
+	return output
+}
+
+func resolveAgentTurn(aggregateText string, frame map[string]any, gatewayLastID string, fallbackOutput map[string]any) agentTurnResult {
 	output := map[string]any(botstream.FrameOutput(frame))
+	if shouldUseGatewayFallback(output, fallbackOutput) {
+		output = fallbackOutput
+	}
 	if botstream.OutputEvent(botprotocol.Output(output)) == "cancel" {
 		return agentTurnResult{Kind: agentTurnCanceled, Text: aggregateText, Message: "任务已取消"}
 	}
@@ -103,6 +129,11 @@ func resolveAgentTurn(aggregateText string, frame map[string]any, gatewayLastID 
 
 	finalOutput := agentaction.NormalizeAgentFinalOutput(output, aggregateText)
 	outputText := strings.TrimSpace(frontstream.InputText(finalOutput["text"]))
+	if isGatewayTimingOutput(finalOutput) && strings.TrimSpace(aggregateText) != "" {
+		outputText = strings.TrimSpace(aggregateText)
+		finalOutput["event"] = "final"
+		finalOutput["text"] = outputText
+	}
 	if outputText == "" {
 		outputText = strings.TrimSpace(aggregateText)
 	}
@@ -127,12 +158,32 @@ func resolveAgentTurn(aggregateText string, frame map[string]any, gatewayLastID 
 		finalOutput = agentaction.ApplyAgentResult(finalOutput, result, cleanText)
 		outputText = strings.TrimSpace(frontstream.InputText(finalOutput["text"]))
 	}
+	finalOutput = agentaction.EnsureAgentRichOutput(finalOutput)
+	if !agentaction.HasDisplayOutput(finalOutput) && outputText != "" {
+		finalOutput["text"] = outputText
+		finalOutput = agentaction.EnsureAgentRichOutput(finalOutput)
+	}
+	if !agentaction.HasDisplayOutput(finalOutput) {
+		outputText = "内容生成完成，但没有收到可展示内容。请调整输入后重试。"
+		finalOutput["event"] = "final"
+		finalOutput["text"] = outputText
+	}
 	return agentTurnResult{
 		Kind:   agentTurnFinal,
 		Text:   outputText,
 		Output: finalOutput,
 		LastID: gatewayLastID,
 	}
+}
+
+func shouldUseGatewayFallback(output map[string]any, fallback map[string]any) bool {
+	if len(fallback) == 0 || !agentaction.HasDisplayOutput(fallback) {
+		return false
+	}
+	if len(output) == 0 || !agentaction.HasDisplayOutput(output) {
+		return true
+	}
+	return isGatewayTimingOutput(output)
 }
 
 func agentInteractionOutput(text string, interaction map[string]any) map[string]any {

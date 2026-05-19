@@ -2,6 +2,7 @@ package action
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ type ExecuteRequest struct {
 	Headers        map[string]string
 	Input          map[string]any
 	History        []any
+	Assets         []Asset
 	SourceTargetID uint64
 	Gateway        energonservice.GatewayService
 	ResolvePower   func(ctx context.Context, identity string) (string, error)
@@ -57,7 +59,11 @@ func ExecutePower(ctx context.Context, req ExecuteRequest, action Action, intro 
 	action = normalizeWithInteraction(req, action)
 
 	var missingParams []energonservice.PowerParam
-	action, missingParams, err = prepare(ctx, req.Gateway, action)
+	assets := req.Assets
+	if len(assets) == 0 {
+		assets = CollectAssets(req.Input, req.History)
+	}
+	action, missingParams, err = prepare(ctx, req.Gateway, action, assets)
 	if err != nil {
 		return actionError(action, err.Error())
 	}
@@ -93,42 +99,22 @@ func ExecutePower(ctx context.Context, req ExecuteRequest, action Action, intro 
 	return collectStream(ctx, req, action, intro, gatewayLastID)
 }
 
-func ActionFromInteractionResult(input map[string]any, history []any, sourceTargetID uint64) (Action, bool) {
-	if !isInteractionResult(input) {
-		return Action{}, false
-	}
-	interactionType := strings.ToLower(strings.TrimSpace(firstText(input["interaction_type"], input["interactionType"])))
-	if interactionType != "" && interactionType != "power_params" {
-		return Action{}, false
-	}
-	interaction := currentPowerParamsInteraction(input, history)
-	power := strings.TrimSpace(firstText(interaction["power"]))
-	if power == "" {
-		return Action{}, false
-	}
-
-	submittedData := latestInteractionData(input)
-	interactionValues := normalizeMap(interaction["values"])
-	mergedInput := mergeInput(interactionValues, submittedData)
-	targetID := sourceTargetIDFromInput(mergedInput)
-	if targetID == 0 {
-		targetID = sourceTargetID
-	}
-	return Action{
-		Type:           "call_power",
-		Power:          power,
-		Input:          stripControlInput(mergedInput),
-		SourceTargetID: targetID,
-	}, true
-}
-
 func AppendHistoryObservation(history []any, result Result) []any {
 	observation := map[string]any{
 		"role":   "user",
 		"type":   "tool_observation",
-		"power":  result.Action.Power,
+		"action": strings.TrimSpace(result.Action.Type),
 		"text":   observationText(result),
 		"output": result.Output,
+	}
+	if strings.TrimSpace(result.Action.Power) != "" {
+		observation["power"] = result.Action.Power
+	}
+	if strings.TrimSpace(result.Action.Tool) != "" {
+		observation["tool"] = result.Action.Tool
+	}
+	if strings.TrimSpace(result.Action.Skill) != "" {
+		observation["skill"] = result.Action.Skill
 	}
 	if result.Action.SourceTargetID > 0 {
 		observation["source_target_id"] = result.Action.SourceTargetID
@@ -141,14 +127,14 @@ func SummaryText(output map[string]any) string {
 		return text
 	}
 	for _, key := range []string{"images", "videos", "audios", "files"} {
-		if values := botprotocol.NormalizeStringList(output[key]); len(values) > 0 {
+		if values := normalizeActionMediaList(output[key], key); len(values) > 0 {
 			return jsonText(map[string]any{key: values})
 		}
 	}
 	return jsonText(output)
 }
 
-func prepare(ctx context.Context, gateway energonservice.GatewayService, action Action) (Action, []energonservice.PowerParam, error) {
+func prepare(ctx context.Context, gateway energonservice.GatewayService, action Action, assets []Asset) (Action, []energonservice.PowerParam, error) {
 	config, err := gateway.PowerParamConfig(ctx, action.Power, action.SourceTargetID)
 	if err != nil {
 		return action, nil, err
@@ -156,7 +142,9 @@ func prepare(ctx context.Context, gateway energonservice.GatewayService, action 
 	if action.SourceTargetID == 0 {
 		action.SourceTargetID = config.SelectedTargetID
 	}
-	action.Input = normalizeInputAliases(action.Input, config.Params)
+	action.Input = energonservice.NormalizePowerParamInput(action.Input, config.Params)
+	action.Input = fillDefaultInput(action.Input, config.Params)
+	action.Input = fillRequiredAssetInput(action.Input, config.Params, assets)
 	return action, missingParams(config.Params, action.Input), nil
 }
 
@@ -209,7 +197,8 @@ func buildBody(action Action) map[string]any {
 }
 
 func normalizeWithInteraction(req ExecuteRequest, action Action) Action {
-	mergedInput := mergeInput(latestInteractionData(req.Input), action.Input)
+	interactionInput := mergeInput(latestInteractionValues(req.Input), latestInteractionData(req.Input))
+	mergedInput := mergeInput(interactionInput, action.Input)
 	if action.SourceTargetID == 0 {
 		action.SourceTargetID = sourceTargetIDFromInput(mergedInput)
 	}
@@ -220,34 +209,17 @@ func normalizeWithInteraction(req ExecuteRequest, action Action) Action {
 	return action
 }
 
-func currentPowerParamsInteraction(input map[string]any, history []any) map[string]any {
-	if interaction := normalizeMap(input["interaction"]); isPowerParamsInteraction(interaction) {
-		return interaction
+func latestInteractionValues(input map[string]any) map[string]any {
+	if !isInteractionResult(input) {
+		return map[string]any{}
 	}
-
-	interactionID := strings.TrimSpace(firstText(input["interaction_id"], input["interactionId"]))
-	for index := len(history) - 1; index >= 0; index-- {
-		row := normalizeMap(history[index])
-		if len(row) == 0 {
-			continue
-		}
-		interaction := normalizeMap(row["interaction"])
-		if !isPowerParamsInteraction(interaction) {
-			continue
-		}
-		if interactionID == "" || strings.TrimSpace(firstText(interaction["id"])) == interactionID {
-			return interaction
+	interaction := normalizeMap(input["interaction"])
+	for _, key := range []string{"values", "input", "params", "arguments", "data"} {
+		if values := normalizeMap(interaction[key]); len(values) > 0 {
+			return values
 		}
 	}
 	return map[string]any{}
-}
-
-func isPowerParamsInteraction(interaction map[string]any) bool {
-	if len(interaction) == 0 {
-		return false
-	}
-	interactionType := strings.ToLower(strings.TrimSpace(firstText(interaction["type"])))
-	return interactionType == "power_params" && strings.TrimSpace(firstText(interaction["power"])) != ""
 }
 
 func latestInteractionData(input map[string]any) map[string]any {
@@ -315,19 +287,18 @@ func stripControlInput(input map[string]any) map[string]any {
 	return result
 }
 
-func normalizeInputAliases(input map[string]any, params []energonservice.PowerParam) map[string]any {
+func fillDefaultInput(input map[string]any, params []energonservice.PowerParam) map[string]any {
 	result := cloneMap(input)
 	for _, param := range params {
-		key := strings.TrimSpace(param.Key)
-		if key == "" || hasParamValue(result, param) {
+		if hasParamValue(result, param) {
 			continue
 		}
-		for _, alias := range paramAliases(param) {
-			value, exists := result[alias]
-			if exists && !inputValueMissing(value) {
-				result[key] = value
-				break
-			}
+		key := paramInputKey(param)
+		if key == "" {
+			continue
+		}
+		if value, ok := defaultParamValue(param); ok {
+			result[key] = value
 		}
 	}
 	return result
@@ -337,9 +308,6 @@ func missingParams(params []energonservice.PowerParam, input map[string]any) []e
 	missing := make([]energonservice.PowerParam, 0)
 	for _, param := range params {
 		if !param.Required {
-			continue
-		}
-		if strings.TrimSpace(param.DefaultValue) != "" {
 			continue
 		}
 		if hasParamValue(input, param) {
@@ -360,33 +328,105 @@ func hasParamValue(input map[string]any, param energonservice.PowerParam) bool {
 	return false
 }
 
+func defaultParamValue(param energonservice.PowerParam) (any, bool) {
+	value := strings.TrimSpace(param.DefaultValue)
+	switch strings.ToLower(strings.TrimSpace(param.Type)) {
+	case "option":
+		return optionDefaultValue(param, value)
+	case "multi_option":
+		if value == "" {
+			return nil, false
+		}
+		values := []any{}
+		if err := json.Unmarshal([]byte(value), &values); err != nil {
+			values = []any{value}
+		}
+		result := make([]any, 0, len(values))
+		for _, item := range values {
+			if optionValue, ok := optionDefaultValue(param, strings.TrimSpace(firstText(item))); ok {
+				result = append(result, optionValue)
+			}
+		}
+		return result, len(result) > 0
+	case "switch":
+		if value == "" {
+			return false, true
+		}
+		return value, true
+	default:
+		if value == "" {
+			return nil, false
+		}
+		return value, true
+	}
+}
+
+func optionDefaultValue(param energonservice.PowerParam, value string) (any, bool) {
+	if len(param.Options) == 0 {
+		return value, value != ""
+	}
+	for _, option := range param.Options {
+		if optionMatches(option, value) {
+			return nonEmptyOptionValue(option)
+		}
+	}
+	return nonEmptyOptionValue(param.Options[0])
+}
+
+func nonEmptyOptionValue(option energonservice.PowerParamOption) (string, bool) {
+	value := optionRequestValue(option)
+	return value, strings.TrimSpace(value) != ""
+}
+
+func optionMatches(option energonservice.PowerParamOption, value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, candidate := range []string{
+		frontstream.InputText(option.ID),
+		option.NativeValue,
+		option.Value,
+		option.Name,
+	} {
+		if strings.TrimSpace(candidate) == value {
+			return true
+		}
+	}
+	return false
+}
+
+func optionRequestValue(option energonservice.PowerParamOption) string {
+	for _, value := range []string{
+		option.NativeValue,
+		option.Value,
+		option.Name,
+		frontstream.InputText(option.ID),
+	} {
+		if text := strings.TrimSpace(value); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
 func paramLookupKeys(param energonservice.PowerParam) []string {
 	keys := make([]string, 0, 6)
 	keys = appendNonEmptyKey(keys, param.Key)
 	keys = appendNonEmptyKey(keys, param.Name)
-	keys = append(keys, paramAliases(param)...)
+	if param.ID > 0 {
+		keys = appendNonEmptyKey(keys, frontstream.InputText(param.ID))
+	}
 	return keys
 }
 
-func paramAliases(param energonservice.PowerParam) []string {
-	key := strings.TrimSpace(param.Key)
-	name := strings.TrimSpace(param.Name)
-	aliases := make([]string, 0, 4)
-	switch key {
-	case "text":
-		aliases = append(aliases, "prompt", "message")
-	case "aspectRatio":
-		aliases = append(aliases, "ratio", "aspect_ratio")
+func paramInputKey(param energonservice.PowerParam) string {
+	for _, key := range []string{param.Key, param.Name, frontstream.InputText(param.ID)} {
+		if text := strings.TrimSpace(key); text != "" {
+			return text
+		}
 	}
-	switch name {
-	case "提示词":
-		aliases = append(aliases, "prompt", "message")
-	case "比例":
-		aliases = append(aliases, "ratio", "aspect_ratio")
-	case "分辨率":
-		aliases = append(aliases, "resolution")
-	}
-	return aliases
+	return ""
 }
 
 func appendNonEmptyKey(keys []string, value string) []string {

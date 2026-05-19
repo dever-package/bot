@@ -64,13 +64,19 @@
     "header-actions": [
       {
         "type": "show-button",
-        "name": "技能管理",
+        "name": "技能分类",
         "className": "shrink-0",
         "meta": {
           "variant": "outline",
           "size": "sm",
-          "icon": "list",
-          "to": "/bot/agent/skill/list"
+          "icon": "tags"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.skillCate",
+            "value": true
+          }
         }
       },
       {
@@ -269,10 +275,30 @@
               "meta": {
                 "buttons": [
                   {
+                    "icon": "eye",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看技能详情",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.viewSkillId",
+                          "value": "$row.skill_id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.viewSkill",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
                     "icon": "square-pen",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "编辑技能",
+                    "description": "编辑技能分类",
                     "action": {
                       "click": [
                         {
@@ -289,20 +315,56 @@
                     }
                   },
                   {
-                    "icon": "eye",
+                    "icon": "refresh-cw",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "查看技能详情",
+                    "description": "重新安装该技能",
                     "action": {
                       "click": [
                         {
                           "type": "data",
-                          "key": "actionTarget.viewSkillId",
+                          "key": "actionTarget.refreshRequest.input.context.skill_id",
                           "value": "$row.skill_id"
                         },
                         {
+                          "type": "data",
+                          "key": "actionTarget.refreshRequest.input.context.pack_id",
+                          "value": "$row.pack_id"
+                        },
+                        {
+                          "type": "data",
+                          "key": "actionTarget.refreshRequest.input.context.cate_id",
+                          "value": "$row.skill.cate_id"
+                        },
+                        {
+                          "type": "data",
+                          "key": "actionTarget.refreshRequest.input.context.auto_add_to_pack",
+                          "value": true
+                        },
+                        {
                           "type": "modal",
-                          "key": "dialog.viewSkill",
+                          "key": "confirm.refreshSkill",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "trash-2",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "删除技能",
+                    "className": "text-destructive hover:text-destructive",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.deleteSkill",
+                          "value": "$row.skill"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "confirm.deleteSkill",
                           "value": true
                         }
                       ]
@@ -371,12 +433,11 @@
       },
       {
         "type": "feedback-modal",
-        "name": "编辑技能",
         "meta": {
           "stateKey": "dialog.editSkill",
           "pageRoute": "/bot/agent/skill/update",
-          "title": "编辑技能",
-          "description": "编辑已安装技能的分类、名称和状态。",
+          "description": "仅修改技能所属分类，不修改技能正文、标识或安装目录。",
+          "assistant": false,
           "footer": {
             "confirm": true,
             "confirmText": "保存"
@@ -384,7 +445,7 @@
           "pageRouteQuery": {
             "id": "data.actionTarget.editSkillId"
           },
-          "size": "xl",
+          "size": "sm",
           "bodyClassName": "py-2"
         }
       },
@@ -403,13 +464,64 @@
       },
       {
         "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.skillCate",
+          "pageRoute": "/bot/agent/skill_cate/list",
+          "title": "技能分类",
+          "description": "新增或编辑技能分类，保存后技能列表会同步显示新名称。",
+          "assistant": false,
+          "size": "sm",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "更新技能",
+        "info": "确认重新安装该技能吗？系统会使用最近一次安装输入重新执行安装，成功后覆盖当前技能目录，并保留在当前方案中。",
+        "meta": {
+          "stateKey": "confirm.refreshSkill",
+          "successMessage": "已开始更新技能，可在安装记录查看进度。",
+          "errorMessage": "更新技能失败。"
+        },
+        "action": {
+          "confirm": {
+            "type": "request",
+            "api": "/bot/skill_install/run",
+            "method": "post",
+            "params": "actionTarget.refreshRequest"
+          }
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "删除技能",
+        "info": "确认删除该技能吗？删除后会从所有技能方案中移除，并同步删除 data/skills 下的安装目录，此操作不可恢复。",
+        "meta": {
+          "stateKey": "confirm.deleteSkill"
+        },
+        "action": {
+          "confirm": {
+            "type": "delete",
+            "use": "bot.agent.NewSkillModel",
+            "params": "actionTarget.deleteSkill",
+            "before": {
+              "type": "service",
+              "use": "bot.agent.setting.AgentHook.BeforeDeleteSkill"
+            },
+            "after": {
+              "type": "service",
+              "use": "bot.agent.setting.AgentHook.AfterDeleteSkill"
+            }
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
         "name": "新增技能",
-        "info": "输入安装命令、技能链接或技能说明。保存后会先进入安装记录，安装成功后自动加入当前方案。",
+        "info": "输入安装命令、GitHub 仓库、安装任务说明或技能说明。保存后会先进入安装记录，安装成功后自动加入当前方案。",
         "meta": {
           "stateKey": "dialog.installSkill",
           "formSection": "skill-install-panel",
-          "titleNamePath": "data.actionTarget.installAgent.name",
-          "titleKeyPath": "data.actionTarget.installAgent.key",
           "size": "3xl",
           "bodyScroll": false,
           "footer": {
@@ -431,8 +543,13 @@
           "streamApi": "/bot/skill_install/stream",
           "stopApi": "/bot/skill_install/stop",
           "blockMs": 1000,
-          "placeholder": "输入 npx skills add ...、技能链接，或直接描述要安装的技能。",
-          "emptyText": "输入安装命令、链接或提示词后开始安装。成功后技能会进入技能管理，并自动加入当前方案。",
+          "reloadPageOnFinal": true,
+          "reloadPageOnFinalKinds": [
+            "skill_install"
+          ],
+          "reloadPageOnFinalDelayMs": 800,
+          "placeholder": "输入 npx skills add ...、GitHub 仓库、安装任务说明，或直接描述要安装的技能。",
+          "emptyText": "输入安装命令、链接或提示词后开始安装。成功后技能会自动加入当前方案。",
           "inputContext": {
             "pack_id": "data.search.pack_id",
             "cate_id": "data.installContext.cate_id",
@@ -470,11 +587,22 @@
     },
     "actionTarget": {
       "packId": "",
-      "editSkillId": "",
       "viewSkillId": "",
+      "editSkillId": "",
+      "refreshRequest": {
+        "input": {
+          "context": {
+            "skill_id": "",
+            "pack_id": "",
+            "cate_id": "",
+            "auto_add_to_pack": true
+          }
+        }
+      },
+      "deleteSkill": {},
       "installAgent": {
         "key": "skill-installer",
-        "name": "技能安装助手"
+        "name": "技能安装规划器"
       }
     }
   },
@@ -482,10 +610,15 @@
     "dialog": {
       "createPack": false,
       "editPack": false,
-      "createPackSkill": false,
       "editSkill": false,
+      "createPackSkill": false,
       "viewSkill": false,
+      "skillCate": false,
       "installSkill": false
+    },
+    "confirm": {
+      "refreshSkill": false,
+      "deleteSkill": false
     }
   },
   "action": {}

@@ -72,24 +72,17 @@ func (OptionService) ProviderLoadSettingLoadModes(_ *server.Context, _ []any) an
 	return agentmodel.SettingLoadModeOptions()
 }
 
+func (OptionService) ProviderLoadAgentCates(c *server.Context, _ []any) any {
+	ensureFixedAgentCates(c.Context())
+	return fixedAgentCateOptions()
+}
+
 func (OptionService) ProviderLoadSettingCates(c *server.Context, _ []any) any {
 	return loadCateOptions(agentmodel.NewSettingCateModel().SelectMap(c.Context(), map[string]any{}, cateSelectOptions()))
 }
 
 func (OptionService) ProviderLoadSkillCates(c *server.Context, _ []any) any {
 	return loadCateOptions(agentmodel.NewSkillCateModel().SelectMap(c.Context(), map[string]any{}, cateSelectOptions()))
-}
-
-func (OptionService) ProviderLoadSkillInstallActions(_ *server.Context, _ []any) any {
-	return agentmodel.SkillInstallActionOptions()
-}
-
-func (OptionService) ProviderLoadSkillInstallTypes(_ *server.Context, _ []any) any {
-	return agentmodel.SkillInstallTypeOptions()
-}
-
-func (OptionService) ProviderLoadSkillInstallStatuses(_ *server.Context, _ []any) any {
-	return agentmodel.SkillInstallStatusOptions()
 }
 
 func (OptionService) ProviderLoadAgentKnowledgeTypes(_ *server.Context, _ []any) any {

@@ -326,7 +326,11 @@
         "action": {
           "confirm": {
             "type": "delete",
-            "params": "actionTarget.deleteAgent"
+            "params": "actionTarget.deleteAgent",
+            "before": {
+              "type": "service",
+              "use": "bot.agent.setting.AgentHook.BeforeDeleteAgent"
+            }
           }
         }
       }

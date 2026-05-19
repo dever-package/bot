@@ -2,6 +2,7 @@ package setting
 
 import (
 	"github.com/shemic/dever/server"
+	"github.com/shemic/dever/util"
 
 	agentmodel "my/package/bot/model/agent"
 )
@@ -24,5 +25,26 @@ func (AgentHook) ProviderBeforeSaveRuntimeConfig(_ *server.Context, params []any
 	record["skill_metadata_field_max_length"] = normalizePositiveInt(record["skill_metadata_field_max_length"], agentmodel.DefaultRuntimeSkillMetadataFieldMaxLength)
 	record["skill_file_max_bytes"] = normalizePositiveInt(record["skill_file_max_bytes"], agentmodel.DefaultRuntimeSkillFileMaxBytes)
 	record["skill_loaded_content_max_length"] = normalizePositiveInt(record["skill_loaded_content_max_length"], agentmodel.DefaultRuntimeSkillLoadedContentMaxLength)
+	record["script_sandbox_driver"] = agentmodel.NormalizeRuntimeScriptSandboxDriver(util.ToStringTrimmed(record["script_sandbox_driver"]))
+	record["script_sandbox_bwrap_path"] = normalizeRuntimeText(record["script_sandbox_bwrap_path"], agentmodel.DefaultRuntimeScriptSandboxBwrapPath)
+	record["script_sandbox_network_mode"] = agentmodel.NormalizeRuntimeScriptSandboxNetworkMode(util.ToStringTrimmed(record["script_sandbox_network_mode"]))
+	record["script_sandbox_timeout_seconds"] = normalizeRuntimeSandboxTimeout(record["script_sandbox_timeout_seconds"])
+	record["script_sandbox_output_max_bytes"] = normalizePositiveInt(record["script_sandbox_output_max_bytes"], agentmodel.DefaultRuntimeScriptSandboxOutputMaxBytes)
 	return record
+}
+
+func normalizeRuntimeText(value any, fallback string) string {
+	text := util.ToStringTrimmed(value)
+	if text != "" {
+		return text
+	}
+	return fallback
+}
+
+func normalizeRuntimeSandboxTimeout(value any) int {
+	timeout := normalizePositiveInt(value, agentmodel.DefaultRuntimeScriptSandboxTimeoutSeconds)
+	if timeout > agentmodel.DefaultRuntimeScriptSandboxMaxTimeoutSeconds {
+		panicAgentField("form.script_sandbox_timeout_seconds", "脚本沙箱超时时间不能超过 60 秒。")
+	}
+	return timeout
 }

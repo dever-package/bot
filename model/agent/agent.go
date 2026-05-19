@@ -13,6 +13,7 @@ type Agent struct {
 	CateID         uint64    `dorm:"type:bigint;not null;default:1;comment:智能体分类"`
 	Name           string    `dorm:"type:varchar(128);not null;comment:名称"`
 	Key            string    `dorm:"type:varchar(128);not null;comment:标识"`
+	Kind           string    `dorm:"type:varchar(32);not null;default:'normal';comment:类型"`
 	Description    string    `dorm:"type:text;not null;default:'';comment:描述"`
 	LLMPowerID     uint64    `dorm:"type:bigint;not null;default:0;comment:LLM能力"`
 	SettingPackID  uint64    `dorm:"type:bigint;not null;default:1;comment:规则方案"`
@@ -27,6 +28,7 @@ type Agent struct {
 
 type AgentIndex struct {
 	Key               struct{} `unique:"key"`
+	KindStatusSort    struct{} `index:"kind,status,sort"`
 	CateStatusSort    struct{} `index:"cate_id,status,sort"`
 	SettingPackStatus struct{} `index:"setting_pack_id,status"`
 	SkillPackStatus   struct{} `index:"skill_pack_id,status"`
@@ -36,9 +38,20 @@ type AgentIndex struct {
 const (
 	DefaultAgentID        uint64 = 1
 	FrontAssistantAgentID uint64 = 2
+	SkillInstallerAgentID uint64 = 3
+
+	AgentKindNormal   = "normal"
+	AgentKindInternal = "internal"
+
+	SkillInstallerAgentKey = "skill-installer"
 )
 
 var (
+	agentKindOptions = []map[string]any{
+		{"id": AgentKindNormal, "value": "普通智能体"},
+		{"id": AgentKindInternal, "value": "内置智能体"},
+	}
+
 	statusOptions = []map[string]any{
 		{"id": 1, "value": "开启"},
 		{"id": 2, "value": "停用"},
@@ -50,6 +63,7 @@ var (
 			"cate_id":         DefaultAgentCateID,
 			"name":            "默认智能体",
 			"key":             "default",
+			"kind":            AgentKindNormal,
 			"description":     "默认通用智能体，适合普通文本任务和能力调用。",
 			"llm_power_id":    energonmodel.DefaultLLMPowerID,
 			"setting_pack_id": DefaultSettingPackID,
@@ -62,9 +76,10 @@ var (
 		},
 		{
 			"id":              FrontAssistantAgentID,
-			"cate_id":         AssistantAgentCateID,
+			"cate_id":         SystemAgentCateID,
 			"name":            "AI助理",
 			"key":             "front-assistant",
+			"kind":            AgentKindInternal,
 			"description":     "后台页面 AI 助理，用于理解当前页面、生成内容、补全表单和返回受控前端动作。",
 			"llm_power_id":    energonmodel.DefaultLLMPowerID,
 			"setting_pack_id": AssistantSettingPackID,
@@ -74,6 +89,22 @@ var (
 			"max_auto_steps":  0,
 			"status":          1,
 			"sort":            10,
+		},
+		{
+			"id":              SkillInstallerAgentID,
+			"cate_id":         SystemAgentCateID,
+			"name":            "技能安装规划器",
+			"key":             SkillInstallerAgentKey,
+			"kind":            AgentKindInternal,
+			"description":     "系统内置技能安装规划器，只负责把安装输入转换成受控安装计划。",
+			"llm_power_id":    energonmodel.DefaultLLMPowerID,
+			"setting_pack_id": SkillInstallSettingPackID,
+			"skill_pack_id":   DefaultSkillPackID,
+			"temperature":     0.2,
+			"timeout_seconds": 180,
+			"max_auto_steps":  1,
+			"status":          1,
+			"sort":            1,
 		},
 	}
 
@@ -110,6 +141,7 @@ func NewAgentModel() *orm.Model[Agent] {
 		Database: "default",
 		Options: map[string]any{
 			"status": statusOptions,
+			"kind":   agentKindOptions,
 		},
 		Relations: []orm.Relation{
 			agentCateRelation,
