@@ -82,9 +82,10 @@ func (s Service) Stop(ctx context.Context, requestID string) map[string]any {
 	if requestID == "" {
 		return frontstream.ResponsePayload(requestID, "result", map[string]any{}, "request_id 不能为空", 2)
 	}
+	stoppedChildren := s.stopFinalTaskStreams(ctx, requestID)
 	resp := s.gateway.StopStream(ctx, requestID)
 	payload := resp.Payload()
-	if int(frontstream.InputInt64(payload["status"], 0)) != 2 {
+	if stoppedChildren || int(frontstream.InputInt64(payload["status"], 0)) != 2 {
 		now := time.Now()
 		s.repo.UpdateRunByRequestID(ctx, requestID, map[string]any{
 			"status":      runStatusCanceled,

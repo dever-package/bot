@@ -4,11 +4,12 @@ import (
 	"time"
 
 	agentmodel "my/package/bot/model/agent"
+	agentruntime "my/package/bot/service/agent/runtime"
 	"my/package/bot/service/agent/tool/sandbox"
 )
 
 func OptionsFromRuntimeConfig(config agentmodel.RuntimeConfig) Options {
-	config = agentmodel.RuntimeConfigWithDefaults(config)
+	config = agentruntime.WithDefaults(config)
 	return Options{
 		ScriptSandbox: sandbox.NormalizeConfig(sandbox.Config{
 			Driver:         config.ScriptSandboxDriver,

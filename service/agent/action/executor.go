@@ -20,20 +20,21 @@ const (
 )
 
 type ExecuteRequest struct {
-	RequestID      string
-	Method         string
-	Host           string
-	Path           string
-	Headers        map[string]string
-	Input          map[string]any
-	History        []any
-	Assets         []Asset
-	SourceTargetID uint64
-	Gateway        energonservice.GatewayService
-	ResolvePower   func(ctx context.Context, identity string) (string, error)
-	WriteStatus    func(ctx context.Context, text string, meta map[string]any) error
-	WriteOutput    func(ctx context.Context, output map[string]any) error
-	StreamBlock    time.Duration
+	RequestID        string
+	GatewayRequestID string
+	Method           string
+	Host             string
+	Path             string
+	Headers          map[string]string
+	Input            map[string]any
+	History          []any
+	Assets           []Asset
+	SourceTargetID   uint64
+	Gateway          energonservice.GatewayService
+	ResolvePower     func(ctx context.Context, identity string) (string, error)
+	WriteStatus      func(ctx context.Context, text string, meta map[string]any) error
+	WriteOutput      func(ctx context.Context, output map[string]any) error
+	StreamBlock      time.Duration
 }
 
 type Result struct {
@@ -78,8 +79,9 @@ func ExecutePower(ctx context.Context, req ExecuteRequest, action Action, intro 
 		},
 	})
 
+	gatewayRequestID := req.gatewayRequestID()
 	start := req.Gateway.Request(ctx, energonservice.GatewayRequest{
-		RequestID: req.RequestID,
+		RequestID: gatewayRequestID,
 		Method:    req.Method,
 		Host:      req.Host,
 		Path:      req.Path,
@@ -463,7 +465,7 @@ func collectStream(ctx context.Context, req ExecuteRequest, action Action, intro
 	}
 
 	result := req.Gateway.CollectStream(ctx, botstream.CollectOptions{
-		RequestID:      req.RequestID,
+		RequestID:      req.gatewayRequestID(),
 		InitialLastID:  gatewayLastID,
 		Block:          block,
 		CollectOutputs: true,
@@ -492,6 +494,13 @@ func collectStream(ctx context.Context, req ExecuteRequest, action Action, intro
 	}
 	finalOutput = normalizeFinal(finalOutput, action, intro)
 	return actionDone(action, finalOutput, result.State.LastID)
+}
+
+func (req ExecuteRequest) gatewayRequestID() string {
+	if strings.TrimSpace(req.GatewayRequestID) != "" {
+		return strings.TrimSpace(req.GatewayRequestID)
+	}
+	return strings.TrimSpace(req.RequestID)
 }
 
 func normalizeFinal(output map[string]any, action Action, intro string) map[string]any {

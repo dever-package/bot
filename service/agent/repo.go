@@ -10,6 +10,7 @@ import (
 
 	agentmodel "my/package/bot/model/agent"
 	energonmodel "my/package/bot/model/energon"
+	agentruntime "my/package/bot/service/agent/runtime"
 	agentsetting "my/package/bot/service/agent/setting"
 	agentskill "my/package/bot/service/agent/skill"
 )
@@ -273,7 +274,7 @@ func (Repo) FindRuntimeConfig(ctx context.Context) agentmodel.RuntimeConfig {
 		"id": agentmodel.DefaultRuntimeConfigID,
 	})
 	if row != nil {
-		return agentmodel.RuntimeConfigWithDefaults(*row)
+		return agentruntime.WithDefaults(*row)
 	}
 	return agentmodel.DefaultRuntimeConfig()
 }

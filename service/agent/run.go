@@ -18,8 +18,9 @@ import (
 )
 
 type runtimeOptions struct {
-	MaxSteps int
-	Tool     agenttool.Options
+	MaxSteps            int
+	AsyncMaxConcurrency int
+	Tool                agenttool.Options
 }
 
 type agentLoopResult struct {
@@ -146,7 +147,10 @@ func (s Service) execute(exec runExecution) {
 		Powers:         powers,
 		SkillCatalog:   catalog,
 		Tools:          runtimePromptTools(runtimeOptions.Tool),
-		History:        exec.Parsed.History,
+		Result: agentprompt.ResultRuntime{
+			AsyncMaxConcurrency: runtimeOptions.AsyncMaxConcurrency,
+		},
+		History: exec.Parsed.History,
 	})
 	tracker.Step(ctx, "knowledge", "运行资料", runtimePrompt, map[string]any{
 		"setting_pack_id":  exec.Agent.SettingPackID,
@@ -167,13 +171,14 @@ func (s Service) execute(exec runExecution) {
 	})
 
 	tracker.Step(ctx, "runtime_config", "运行配置", fmt.Sprintf("最大自动步骤: %d", runtimeOptions.MaxSteps), map[string]any{
-		"max_steps":         runtimeOptions.MaxSteps,
-		"agent_max_steps":   exec.Agent.MaxAutoSteps,
-		"request_options":   exec.Parsed.Options,
-		"script_sandbox":    runtimeOptions.Tool.ScriptSandbox.Driver,
-		"script_bwrap_path": runtimeOptions.Tool.ScriptSandbox.BwrapPath,
-		"script_network":    runtimeOptions.Tool.ScriptSandbox.NetworkMode,
-		"script_timeout_ms": runtimeOptions.Tool.ScriptSandbox.Timeout.Milliseconds(),
+		"max_steps":             runtimeOptions.MaxSteps,
+		"agent_max_steps":       exec.Agent.MaxAutoSteps,
+		"request_options":       exec.Parsed.Options,
+		"script_sandbox":        runtimeOptions.Tool.ScriptSandbox.Driver,
+		"script_bwrap_path":     runtimeOptions.Tool.ScriptSandbox.BwrapPath,
+		"script_network":        runtimeOptions.Tool.ScriptSandbox.NetworkMode,
+		"script_timeout_ms":     runtimeOptions.Tool.ScriptSandbox.Timeout.Milliseconds(),
+		"async_max_concurrency": runtimeOptions.AsyncMaxConcurrency,
 	}, stepStatusSuccess)
 
 	result := s.runAgentLoop(ctx, exec, runtimePrompt, catalog, &tracker, runtimeOptions)
@@ -242,16 +247,14 @@ func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePro
 		switch turn.Kind {
 		case agentTurnFinal:
 			output := agentaction.EnsureAgentRichOutput(artifacts.MergeInto(turn.Output))
-			_ = s.writeSuccessResult(ctx, exec.RequestID, output)
-			return newAgentLoopResult(output, runStatusSuccess, "")
+			return s.handleFinalResult(ctx, exec, tracker, output, history, options)
 		case agentTurnInteraction:
 			_ = s.writeStreamOutput(ctx, exec.RequestID, turn.Output)
 			_ = s.writeSuccessResult(ctx, exec.RequestID, turn.Output)
 			return newAgentLoopResult(turn.Output, runStatusSuccess, "")
 		case agentTurnAction:
 			if output, duplicate := duplicateActionOutput(turn.Action, executedActions, artifacts); duplicate {
-				_ = s.writeSuccessResult(ctx, exec.RequestID, output)
-				return newAgentLoopResult(output, runStatusSuccess, "")
+				return s.handleFinalResult(ctx, exec, tracker, output, history, options)
 			}
 			tracker.Step(ctx, "agent_action", actionStepTitle(turn.Action), actionStepContent(turn.Action), map[string]any{
 				"text":   turn.Text,
@@ -275,8 +278,7 @@ func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePro
 	}
 
 	output := agentaction.EnsureAgentRichOutput(stepLimitOutput(options.MaxSteps, lastOutput, artifacts))
-	_ = s.writeSuccessResult(ctx, exec.RequestID, output)
-	return newAgentLoopResult(output, runStatusSuccess, "")
+	return s.handleFinalResult(ctx, exec, tracker, output, history, options)
 }
 
 func duplicateActionOutput(action agentaction.Action, executed map[string]struct{}, artifacts agentaction.ArtifactAccumulator) (map[string]any, bool) {
@@ -502,8 +504,9 @@ func resolveRuntimeOptions(config agentmodel.RuntimeConfig, agent agentmodel.Age
 		maxSteps = hardMax
 	}
 	return runtimeOptions{
-		MaxSteps: maxSteps,
-		Tool:     agenttool.OptionsFromRuntimeConfig(config),
+		MaxSteps:            maxSteps,
+		AsyncMaxConcurrency: 10,
+		Tool:                agenttool.OptionsFromRuntimeConfig(config),
 	}
 }
 

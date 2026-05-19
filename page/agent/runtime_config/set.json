@@ -214,7 +214,6 @@
             {
               "value": "disabled",
               "hide": [
-                "runtime-script-sandbox-bwrap-path",
                 "runtime-script-sandbox-network-mode",
                 "runtime-script-sandbox-timeout",
                 "runtime-script-sandbox-output"
@@ -223,25 +222,10 @@
             {
               "value": "local",
               "hide": [
-                "runtime-script-sandbox-bwrap-path",
                 "runtime-script-sandbox-network-mode"
               ]
             }
           ]
-        }
-      },
-      {
-        "id": "runtime-script-sandbox-bwrap-path",
-        "type": "form-input",
-        "name": "bwrap 路径",
-        "placeholder": "例如：bwrap 或 /usr/bin/bwrap",
-        "value": "form.script_sandbox_bwrap_path",
-        "mode": "form",
-        "info": "调用时会检测该命令是否存在且可执行；检测失败会返回安装指引，不会自动安装。",
-        "meta": {
-          "formLayout": "horizontal",
-          "tab": "sandbox",
-          "controlClassName": "max-w-[320px]"
         }
       },
       {
@@ -341,7 +325,7 @@
       "default_max_auto_steps": 5,
       "hard_max_auto_steps": 8,
       "skill_metadata_max_skills": 80,
-      "skill_metadata_field_max_length": 240,
+      "skill_metadata_field_max_length": 1000,
       "skill_file_max_bytes": 262144,
       "skill_loaded_content_max_length": 30000,
       "script_sandbox_driver": "bwrap",
@@ -350,7 +334,7 @@
       "script_sandbox_timeout_seconds": 15,
       "script_sandbox_output_max_bytes": 262144
     },
-    "sandbox_install_guide": "bubblewrap 不是 Linux 自带命令，需要部署时安装。\\nDebian / Ubuntu：apt-get update && apt-get install -y bubblewrap\\nCentOS / RHEL / Fedora：dnf install -y bubblewrap 或 yum install -y bubblewrap\\nAlpine：apk add --no-cache bubblewrap\\n检测命令：which bwrap && bwrap --version"
+    "sandbox_install_guide": "bubblewrap 不是 Linux 自带命令，需要部署时安装。\nDebian / Ubuntu：apt-get update && apt-get install -y bubblewrap\nCentOS / RHEL / Fedora：dnf install -y bubblewrap 或 yum install -y bubblewrap\nAlpine：apk add --no-cache bubblewrap\n检测命令：which bwrap && bwrap --version"
   },
   "state": {
     "currentTab": "basic"

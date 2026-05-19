@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"strings"
 	"time"
 
 	"github.com/shemic/dever/orm"
@@ -12,7 +11,7 @@ const (
 	DefaultRuntimeMaxAutoSteps                       = 5
 	DefaultRuntimeHardMaxAutoSteps                   = 8
 	DefaultRuntimeSkillMetadataMaxSkills             = 80
-	DefaultRuntimeSkillMetadataFieldMaxLength        = 240
+	DefaultRuntimeSkillMetadataFieldMaxLength        = 1000
 	DefaultRuntimeSkillFileMaxBytes                  = 256 * 1024
 	DefaultRuntimeSkillLoadedContentMaxLength        = 30000
 
@@ -36,7 +35,7 @@ type RuntimeConfig struct {
 	DefaultMaxAutoSteps         int       `dorm:"type:int;not null;default:5;comment:默认最大自动步骤数"`
 	HardMaxAutoSteps            int       `dorm:"type:int;not null;default:8;comment:强制最大自动步骤数"`
 	SkillMetadataMaxSkills      int       `dorm:"type:int;not null;default:80;comment:技能 metadata 最大技能数"`
-	SkillMetadataFieldMaxLength int       `dorm:"type:int;not null;default:240;comment:技能 metadata 单字段最大长度"`
+	SkillMetadataFieldMaxLength int       `dorm:"type:int;not null;default:1000;comment:技能 metadata 单字段最大长度"`
 	SkillFileMaxBytes           int       `dorm:"type:int;not null;default:262144;comment:SKILL.md 最大读取字节数"`
 	SkillLoadedContentMaxLength int       `dorm:"type:int;not null;default:30000;comment:本轮技能正文最大总长度"`
 	ScriptSandboxDriver         string    `dorm:"type:varchar(32);not null;default:'bwrap';comment:脚本沙箱模式"`
@@ -105,66 +104,10 @@ func DefaultRuntimeConfig() RuntimeConfig {
 	}
 }
 
-func RuntimeConfigWithDefaults(config RuntimeConfig) RuntimeConfig {
-	defaults := DefaultRuntimeConfig()
-	if config.ID == 0 {
-		config.ID = defaults.ID
-	}
-	config.DefaultMaxAutoSteps = runtimePositiveInt(config.DefaultMaxAutoSteps, defaults.DefaultMaxAutoSteps)
-	config.HardMaxAutoSteps = runtimePositiveInt(config.HardMaxAutoSteps, defaults.HardMaxAutoSteps)
-	config.SkillMetadataMaxSkills = runtimePositiveInt(config.SkillMetadataMaxSkills, defaults.SkillMetadataMaxSkills)
-	config.SkillMetadataFieldMaxLength = runtimePositiveInt(config.SkillMetadataFieldMaxLength, defaults.SkillMetadataFieldMaxLength)
-	config.SkillFileMaxBytes = runtimePositiveInt(config.SkillFileMaxBytes, defaults.SkillFileMaxBytes)
-	config.SkillLoadedContentMaxLength = runtimePositiveInt(config.SkillLoadedContentMaxLength, defaults.SkillLoadedContentMaxLength)
-	config.ScriptSandboxDriver = NormalizeRuntimeScriptSandboxDriver(config.ScriptSandboxDriver)
-	config.ScriptSandboxBwrapPath = runtimeDefaultString(config.ScriptSandboxBwrapPath, defaults.ScriptSandboxBwrapPath)
-	config.ScriptSandboxNetworkMode = NormalizeRuntimeScriptSandboxNetworkMode(config.ScriptSandboxNetworkMode)
-	config.ScriptSandboxTimeoutSeconds = runtimePositiveInt(config.ScriptSandboxTimeoutSeconds, defaults.ScriptSandboxTimeoutSeconds)
-	config.ScriptSandboxOutputMaxBytes = runtimePositiveInt(config.ScriptSandboxOutputMaxBytes, defaults.ScriptSandboxOutputMaxBytes)
-	return config
-}
-
-func NormalizeRuntimeScriptSandboxDriver(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case RuntimeScriptSandboxDriverDisabled:
-		return RuntimeScriptSandboxDriverDisabled
-	case RuntimeScriptSandboxDriverLocal:
-		return RuntimeScriptSandboxDriverLocal
-	case RuntimeScriptSandboxDriverBwrap:
-		return RuntimeScriptSandboxDriverBwrap
-	default:
-		return DefaultRuntimeScriptSandboxDriver
-	}
-}
-
-func NormalizeRuntimeScriptSandboxNetworkMode(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case RuntimeScriptSandboxNetworkHost:
-		return RuntimeScriptSandboxNetworkHost
-	default:
-		return RuntimeScriptSandboxNetworkNone
-	}
-}
-
 func RuntimeScriptSandboxDriverOptions() []map[string]any {
 	return cloneOptionRows(runtimeScriptSandboxDriverOptions)
 }
 
 func RuntimeScriptSandboxNetworkModeOptions() []map[string]any {
 	return cloneOptionRows(runtimeScriptSandboxNetworkModeOptions)
-}
-
-func runtimePositiveInt(value int, fallback int) int {
-	if value > 0 {
-		return value
-	}
-	return fallback
-}
-
-func runtimeDefaultString(value string, fallback string) string {
-	value = strings.TrimSpace(value)
-	if value != "" {
-		return value
-	}
-	return fallback
 }

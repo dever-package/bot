@@ -52,10 +52,15 @@ func ApplyAgentResult(output map[string]any, result map[string]any, fallbackText
 	next["event"] = "final"
 
 	clearResultOutputFields(next)
+	contentMap := map[string]any{}
 	if content, exists := result["content"]; exists {
+		contentMap = normalizeAgentResultContent(content)
+	}
+	if len(contentMap) > 0 {
+		next["content"] = contentMap
+	} else if content, exists := result["content"]; exists {
 		next["content"] = content
 	}
-	contentMap := normalizeMap(result["content"])
 	copyResultOutputFields(next, contentMap)
 	copyResultOutputFields(next, result)
 	if text := agentResultText(result); text != "" {
@@ -68,6 +73,7 @@ func ApplyAgentResult(output map[string]any, result map[string]any, fallbackText
 	if suggestions := NormalizeSuggestions(result["suggestions"]); len(suggestions) > 0 {
 		next["suggestions"] = suggestions
 	}
+	copyResultTaskFields(next, result, contentMap)
 	delete(next, "reasoning")
 	return EnsureAgentRichOutput(next)
 }
@@ -114,6 +120,22 @@ func copyResultOutputFields(target map[string]any, source map[string]any) {
 	}
 	for _, key := range resultMediaKeys {
 		copyResultMedia(target, source, key)
+	}
+}
+
+func copyResultTaskFields(target map[string]any, sources ...map[string]any) {
+	for _, source := range sources {
+		if len(source) == 0 {
+			continue
+		}
+		for _, key := range []string{"tasks", "ability_tasks", "abilityTasks"} {
+			value, exists := source[key]
+			if !exists || !resultFieldHasValue(value) {
+				continue
+			}
+			target["tasks"] = value
+			return
+		}
 	}
 }
 
@@ -240,15 +262,117 @@ func normalizeResultKind(value string) string {
 }
 
 func agentResultText(result map[string]any) string {
-	if text := strings.TrimSpace(firstText(result["text"])); text != "" {
+	if text := scalarText(result["text"]); text != "" {
 		return text
 	}
-	content := result["content"]
-	contentMap := normalizeMap(content)
+	contentMap := normalizeAgentResultContent(result["content"])
 	if len(contentMap) == 0 {
-		return strings.TrimSpace(firstText(content))
+		return ""
 	}
-	return strings.TrimSpace(firstText(contentMap["text"]))
+	return scalarText(contentMap["text"])
+}
+
+func normalizeAgentResultContent(value any) map[string]any {
+	if content := cloneMap(normalizeMap(value)); len(content) > 0 {
+		return content
+	}
+	if text := scalarText(value); text != "" {
+		return map[string]any{
+			"format": "markdown",
+			"text":   text,
+		}
+	}
+	nodes := normalizeAgentResultRichNodes(value)
+	if len(nodes) == 0 {
+		return map[string]any{}
+	}
+	content := map[string]any{
+		"format": "rich_json",
+		"rich": map[string]any{
+			"type":    "doc",
+			"content": nodes,
+		},
+	}
+	if text := strings.TrimSpace(richNodesText(nodes)); text != "" {
+		content["text"] = text
+	}
+	return content
+}
+
+func normalizeAgentResultRichNodes(value any) []any {
+	switch current := value.(type) {
+	case []any:
+		nodes := make([]any, 0, len(current))
+		for _, item := range current {
+			nodes = appendAgentResultRichNode(nodes, item)
+		}
+		return nodes
+	case []map[string]any:
+		nodes := make([]any, 0, len(current))
+		for _, item := range current {
+			nodes = appendAgentResultRichNode(nodes, item)
+		}
+		return nodes
+	default:
+		return nil
+	}
+}
+
+func appendAgentResultRichNode(nodes []any, value any) []any {
+	if text := scalarText(value); text != "" {
+		return append(nodes, richTextNode("paragraph", nil, text))
+	}
+	node := cloneMap(normalizeMap(value))
+	if len(node) == 0 {
+		return nodes
+	}
+	if strings.TrimSpace(firstText(node["type"])) == "text" {
+		if text := strings.TrimSpace(firstText(node["text"])); text != "" {
+			return append(nodes, richTextNode("paragraph", nil, text))
+		}
+		return nodes
+	}
+	return append(nodes, normalizeRichNode(node))
+}
+
+func scalarText(value any) string {
+	switch current := value.(type) {
+	case string:
+		return strings.TrimSpace(current)
+	case []byte:
+		return strings.TrimSpace(string(current))
+	default:
+		return ""
+	}
+}
+
+func richNodesText(nodes []any) string {
+	parts := make([]string, 0)
+	for _, node := range nodes {
+		collectRichNodeText(node, &parts)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func collectRichNodeText(value any, parts *[]string) {
+	switch current := value.(type) {
+	case map[string]any:
+		if strings.TrimSpace(firstText(current["type"])) == "text" {
+			if text := strings.TrimSpace(firstText(current["text"])); text != "" {
+				*parts = append(*parts, text)
+			}
+			return
+		}
+		collectRichNodeText(current["content"], parts)
+	case []any:
+		for _, item := range current {
+			collectRichNodeText(item, parts)
+		}
+	case []map[string]any:
+		for _, item := range current {
+			collectRichNodeText(item, parts)
+		}
+	}
 }
 
 func NormalizeSuggestions(value any) []map[string]any {

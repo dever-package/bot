@@ -32,38 +32,133 @@ func extractJSONObject(text string, accept func(map[string]any) bool) (map[strin
 }
 
 func extractJSONFenceByLang(text string, lang string, accept func(map[string]any) bool) (string, map[string]any, bool) {
-	open := "```" + lang
-	start := strings.Index(text, open)
-	if start < 0 {
-		return text, nil, false
-	}
-
-	bodyStart := start + len(open)
-	for bodyStart < len(text) && isFenceWhitespace(text[bodyStart]) {
-		bodyStart++
-	}
-
-	searchStart := bodyStart
+	searchStart := 0
 	for {
-		endOffset := strings.Index(text[searchStart:], "```")
-		if endOffset < 0 {
+		start, bodyStart, ok := findFenceStart(text, lang, searchStart)
+		if !ok {
 			return text, nil, false
 		}
-		end := searchStart + endOffset
 
-		var payload map[string]any
-		if err := unmarshalJSONPayload(strings.TrimSpace(text[bodyStart:end]), &payload); err != nil {
-			searchStart = end + 3
-			continue
-		}
-		if !accept(payload) {
-			searchStart = end + 3
-			continue
+		endOffset := strings.Index(text[bodyStart:], "```")
+		if endOffset < 0 {
+			if payload, ok := parseJSONPayload(strings.TrimSpace(text[bodyStart:]), accept); ok {
+				return strings.TrimSpace(text[:start]), payload, true
+			}
+			if payload, ok := extractJSONObjectInText(text[bodyStart:], accept); ok {
+				return strings.TrimSpace(text[:start]), payload, true
+			}
+			return text, nil, false
 		}
 
-		clean := strings.TrimSpace(text[:start] + text[end+3:])
-		return clean, payload, true
+		end := bodyStart + endOffset
+		body := strings.TrimSpace(text[bodyStart:end])
+		if payload, ok := parseJSONPayload(body, accept); ok {
+			clean := strings.TrimSpace(text[:start] + text[end+3:])
+			return clean, payload, true
+		}
+		if payload, ok := extractJSONObjectInText(body, accept); ok {
+			clean := strings.TrimSpace(text[:start] + text[end+3:])
+			return clean, payload, true
+		}
+		searchStart = end + 3
 	}
+}
+
+func findFenceStart(text string, lang string, offset int) (int, int, bool) {
+	for offset < len(text) {
+		startOffset := strings.Index(text[offset:], "```")
+		if startOffset < 0 {
+			return 0, 0, false
+		}
+		start := offset + startOffset
+		headerStart := start + 3
+		headerEnd := lineEnd(text, headerStart)
+		header := strings.TrimSpace(text[headerStart:headerEnd])
+		if fenceLangMatches(header, lang) {
+			bodyStart := headerEnd
+			for bodyStart < len(text) && (text[bodyStart] == '\r' || text[bodyStart] == '\n') {
+				bodyStart++
+			}
+			return start, bodyStart, true
+		}
+		offset = headerStart
+	}
+	return 0, 0, false
+}
+
+func lineEnd(text string, offset int) int {
+	for offset < len(text) && text[offset] != '\n' && text[offset] != '\r' {
+		offset++
+	}
+	return offset
+}
+
+func fenceLangMatches(header string, lang string) bool {
+	fields := strings.Fields(header)
+	return len(fields) > 0 && fields[0] == lang
+}
+
+func parseJSONPayload(text string, accept func(map[string]any) bool) (map[string]any, bool) {
+	var payload map[string]any
+	if err := unmarshalJSONPayload(text, &payload); err != nil {
+		return nil, false
+	}
+	if !accept(payload) {
+		return nil, false
+	}
+	return payload, true
+}
+
+func extractJSONObjectInText(text string, accept func(map[string]any) bool) (map[string]any, bool) {
+	for offset := 0; offset < len(text); {
+		startOffset := strings.Index(text[offset:], "{")
+		if startOffset < 0 {
+			return nil, false
+		}
+		start := offset + startOffset
+		raw, ok := balancedJSONObject(text[start:])
+		if ok {
+			if payload, ok := parseJSONPayload(raw, accept); ok {
+				return payload, true
+			}
+		}
+		offset = start + 1
+	}
+	return nil, false
+}
+
+func balancedJSONObject(text string) (string, bool) {
+	depth := 0
+	inString := false
+	escaped := false
+	for index, value := range text {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inString {
+			if value == '\\' {
+				escaped = true
+				continue
+			}
+			if value == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch value {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return text[:index+1], true
+			}
+		}
+	}
+	return "", false
 }
 
 func unmarshalJSONPayload(text string, target any) error {
@@ -119,8 +214,4 @@ func hexDigit(value byte) byte {
 		return '0' + value
 	}
 	return 'a' + value - 10
-}
-
-func isFenceWhitespace(value byte) bool {
-	return value == ' ' || value == '\t' || value == '\r' || value == '\n'
 }
