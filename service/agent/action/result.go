@@ -74,6 +74,7 @@ func ApplyAgentResult(output map[string]any, result map[string]any, fallbackText
 		next["suggestions"] = suggestions
 	}
 	copyResultTaskFields(next, result, contentMap)
+	next["result_mode"] = inferAgentResultMode(result, contentMap)
 	delete(next, "reasoning")
 	return EnsureAgentRichOutput(next)
 }
@@ -137,6 +138,68 @@ func copyResultTaskFields(target map[string]any, sources ...map[string]any) {
 			return
 		}
 	}
+}
+
+func inferAgentResultMode(result map[string]any, content map[string]any) string {
+	if mode := normalizeAgentResultMode(firstText(
+		result["result_mode"],
+		result["display_mode"],
+		content["result_mode"],
+		content["display_mode"],
+	)); mode != "" {
+		return mode
+	}
+
+	if hasAbilityTaskField(result) || hasAbilityTaskField(content) {
+		return "artifact"
+	}
+	if strings.EqualFold(strings.TrimSpace(firstText(content["format"])), "rich_json") {
+		return "artifact"
+	}
+	if hasArtifactOutputField(result) || hasArtifactOutputField(content) {
+		return "artifact"
+	}
+	return "inline"
+}
+
+func normalizeAgentResultMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "artifact", "detail", "drawer":
+		return "artifact"
+	case "inline":
+		return "inline"
+	default:
+		return ""
+	}
+}
+
+func hasAbilityTaskField(source map[string]any) bool {
+	if len(source) == 0 {
+		return false
+	}
+	for _, key := range []string{"tasks", "ability_tasks", "abilityTasks"} {
+		if resultFieldHasValue(source[key]) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasArtifactOutputField(source map[string]any) bool {
+	if len(source) == 0 {
+		return false
+	}
+	for _, key := range []string{"rich", "json", "value"} {
+		if resultFieldHasValue(source[key]) {
+			return true
+		}
+	}
+	for _, key := range resultMediaKeys {
+		if len(normalizeActionMediaList(source[key], key)) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func copyResultValue(target map[string]any, source map[string]any, key string) {

@@ -223,6 +223,13 @@
                     "size": "sm",
                     "description": "删除智能体",
                     "className": "text-destructive hover:text-destructive",
+                    "hiddenWhen": [
+                      {
+                        "path": "kind",
+                        "operator": "equals",
+                        "value": "internal"
+                      }
+                    ],
                     "action": {
                       "click": [
                         {

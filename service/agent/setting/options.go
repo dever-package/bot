@@ -73,8 +73,8 @@ func (OptionService) ProviderLoadSettingLoadModes(_ *server.Context, _ []any) an
 }
 
 func (OptionService) ProviderLoadAgentCates(c *server.Context, _ []any) any {
-	ensureFixedAgentCates(c.Context())
-	return fixedAgentCateOptions()
+	ensureBaseAgentCates(c.Context())
+	return loadCateOptions(agentmodel.NewAgentCateModel().SelectMap(c.Context(), map[string]any{}, agentCateSelectOptions()))
 }
 
 func (OptionService) ProviderLoadSettingCates(c *server.Context, _ []any) any {
@@ -92,6 +92,13 @@ func (OptionService) ProviderLoadAgentKnowledgeTypes(_ *server.Context, _ []any)
 func cateSelectOptions() map[string]any {
 	return map[string]any{
 		"field": "main.id, main.name, main.status, main.sort",
+		"order": "main.sort asc, main.id asc",
+	}
+}
+
+func agentCateSelectOptions() map[string]any {
+	return map[string]any{
+		"field": "main.id, main.name, main.sort",
 		"order": "main.sort asc, main.id asc",
 	}
 }

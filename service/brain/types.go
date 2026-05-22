@@ -1,0 +1,278 @@
+package brain
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/google/uuid"
+
+	frontstream "my/package/front/service/stream"
+)
+
+type GraphThink struct {
+	ID           uint64         `json:"id"`
+	Name         string         `json:"name"`
+	Key          string         `json:"key"`
+	Type         string         `json:"type"`
+	Goal         string         `json:"goal"`
+	InputSchema  map[string]any `json:"input_schema"`
+	OutputSchema map[string]any `json:"output_schema"`
+	Position     map[string]any `json:"position"`
+	Config       map[string]any `json:"config"`
+	Status       int16          `json:"status"`
+	Sort         int            `json:"sort"`
+}
+
+type GraphThinkEdge struct {
+	ID           uint64         `json:"id"`
+	FromThinkID  uint64         `json:"from_think_id"`
+	ToThinkID    uint64         `json:"to_think_id"`
+	FromKey      string         `json:"from_key"`
+	ToKey        string         `json:"to_key"`
+	Condition    string         `json:"condition"`
+	InputMapping map[string]any `json:"input_mapping"`
+	Config       map[string]any `json:"config"`
+	Status       int16          `json:"status"`
+	Sort         int            `json:"sort"`
+}
+
+type GraphFlowNode struct {
+	ID       uint64         `json:"id"`
+	NodeKey  string         `json:"node_key"`
+	Name     string         `json:"name"`
+	Type     string         `json:"type"`
+	AgentID  uint64         `json:"agent_id"`
+	Config   map[string]any `json:"config"`
+	Position map[string]any `json:"position"`
+	Status   int16          `json:"status"`
+	Sort     int            `json:"sort"`
+}
+
+type GraphFlowNodeEdge struct {
+	ID           uint64         `json:"id"`
+	FromNodeID   uint64         `json:"from_node_id"`
+	ToNodeID     uint64         `json:"to_node_id"`
+	FromKey      string         `json:"from_key"`
+	ToKey        string         `json:"to_key"`
+	Condition    string         `json:"condition"`
+	InputMapping map[string]any `json:"input_mapping"`
+	Config       map[string]any `json:"config"`
+	Status       int16          `json:"status"`
+	Sort         int            `json:"sort"`
+}
+
+type GraphThinkCreatePower struct {
+	ID      uint64 `json:"id"`
+	Kind    string `json:"kind"`
+	PowerID uint64 `json:"power_id"`
+	Status  int16  `json:"status"`
+	Sort    int    `json:"sort"`
+}
+
+type GraphBrain struct {
+	ID          uint64         `json:"id"`
+	Name        string         `json:"name"`
+	Key         string         `json:"key"`
+	Description string         `json:"description"`
+	Persona     string         `json:"persona"`
+	Goal        string         `json:"goal"`
+	Config      map[string]any `json:"config"`
+	Status      int16          `json:"status"`
+	Sort        int            `json:"sort"`
+}
+
+type BrainReleaseSnapshot struct {
+	Brain               GraphBrain                         `json:"brain"`
+	Thinks              []GraphThink                       `json:"thinks"`
+	ThinkEdges          []GraphThinkEdge                   `json:"think_edges"`
+	FlowNodesByThink    map[string][]GraphFlowNode         `json:"flow_nodes_by_think"`
+	FlowEdgesByThink    map[string][]GraphFlowNodeEdge     `json:"flow_edges_by_think"`
+	CreatePowersByThink map[string][]GraphThinkCreatePower `json:"create_powers_by_think"`
+}
+
+type AgentOption struct {
+	ID     uint64 `json:"id"`
+	CateID uint64 `json:"cate_id"`
+	Name   string `json:"name"`
+	Key    string `json:"key"`
+}
+
+type PowerOption struct {
+	ID     uint64 `json:"id"`
+	CateID uint64 `json:"cate_id"`
+	Name   string `json:"name"`
+	Key    string `json:"key"`
+	Kind   string `json:"kind"`
+}
+
+type PowerKindOption struct {
+	ID    string `json:"id"`
+	Value string `json:"value"`
+}
+
+type AgentCateOption struct {
+	ID    uint64 `json:"id"`
+	Value string `json:"value"`
+}
+
+type RunRequest struct {
+	BrainID   uint64
+	ThinkID   uint64
+	RequestID string
+	Input     map[string]any
+	Mode      string
+}
+
+type runWaitError struct {
+	message string
+}
+
+func (err runWaitError) Error() string {
+	return err.message
+}
+
+func newRequestID() string {
+	return uuid.NewString()
+}
+
+func jsonText(raw any) string {
+	if raw == nil {
+		raw = map[string]any{}
+	}
+	content, err := json.Marshal(raw)
+	if err != nil {
+		return "{}"
+	}
+	return string(content)
+}
+
+func jsonMap(text string) map[string]any {
+	result := map[string]any{}
+	if strings.TrimSpace(text) == "" {
+		return result
+	}
+	_ = json.Unmarshal([]byte(text), &result)
+	return result
+}
+
+func jsonValue(text string) any {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	var result any
+	if err := json.Unmarshal([]byte(text), &result); err != nil {
+		return text
+	}
+	return result
+}
+
+func textValue(raw any) string {
+	return strings.TrimSpace(frontstream.InputText(raw))
+}
+
+func uint64Value(raw any) uint64 {
+	return uint64(frontstream.InputInt64(raw, 0))
+}
+
+func intValue(raw any, fallback int) int {
+	value := int(frontstream.InputInt64(raw, int64(fallback)))
+	return value
+}
+
+func int16Value(raw any, fallback int16) int16 {
+	value := int16(frontstream.InputInt64(raw, int64(fallback)))
+	if value == 0 {
+		return fallback
+	}
+	return value
+}
+
+func mapValue(raw any) map[string]any {
+	if row, ok := raw.(map[string]any); ok && row != nil {
+		return row
+	}
+	return map[string]any{}
+}
+
+func sliceMapValue(raw any) []map[string]any {
+	rows, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]map[string]any, 0, len(rows))
+	for _, item := range rows {
+		if row := mapValue(item); len(row) > 0 {
+			result = append(result, row)
+		}
+	}
+	return result
+}
+
+func stringSlice(raw any) []string {
+	values, ok := raw.([]any)
+	if !ok {
+		if text := textValue(raw); text != "" {
+			return []string{text}
+		}
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for _, item := range values {
+		if text := textValue(item); text != "" {
+			result = append(result, text)
+		}
+	}
+	return result
+}
+
+func normalizeKey(prefix string, configured any) string {
+	key := strings.TrimSpace(textValue(configured))
+	if key != "" {
+		return key
+	}
+	return fmt.Sprintf("%s_%s", prefix, strings.ReplaceAll(uuid.NewString(), "-", ""))
+}
+
+func firstText(values ...any) string {
+	for _, value := range values {
+		if text := textValue(value); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func boolValue(raw any) bool {
+	switch strings.ToLower(textValue(raw)) {
+	case "1", "true", "yes", "y", "on", "是", "通过", "approved", "success":
+		return true
+	default:
+		return false
+	}
+}
+
+func outputField(output map[string]any, key string) any {
+	value, _ := outputFieldExists(output, key)
+	return value
+}
+
+func outputFieldExists(output map[string]any, key string) (any, bool) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil, false
+	}
+	if value, exists := output[key]; exists {
+		return value, true
+	}
+	for _, value := range output {
+		nested := mapValue(value)
+		if len(nested) == 0 {
+			continue
+		}
+		if nestedValue, exists := nested[key]; exists {
+			return nestedValue, true
+		}
+	}
+	return nil, false
+}

@@ -246,7 +246,7 @@ func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePro
 
 		switch turn.Kind {
 		case agentTurnFinal:
-			output := agentaction.EnsureAgentRichOutput(artifacts.MergeInto(turn.Output))
+			output := artifacts.MergeInto(turn.Output)
 			return s.handleFinalResult(ctx, exec, tracker, output, history, options)
 		case agentTurnInteraction:
 			_ = s.writeStreamOutput(ctx, exec.RequestID, turn.Output)
@@ -277,7 +277,7 @@ func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePro
 		}
 	}
 
-	output := agentaction.EnsureAgentRichOutput(stepLimitOutput(options.MaxSteps, lastOutput, artifacts))
+	output := stepLimitOutput(options.MaxSteps, lastOutput, artifacts)
 	return s.handleFinalResult(ctx, exec, tracker, output, history, options)
 }
 

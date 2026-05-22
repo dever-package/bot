@@ -130,15 +130,13 @@ func (Repo) ListActivePublicSettings(ctx context.Context, packID uint64) []agent
 }
 
 func runtimeDefaultSetting(packID uint64, setting agentmodel.Setting) agentmodel.Setting {
-	if packID != agentmodel.DefaultSettingPackID {
-		return setting
-	}
 	defaultSetting, ok := agentmodel.DefaultSettings.Find(setting.ID)
 	if !ok {
 		return setting
 	}
 	defaultSetting.LoadMode = setting.LoadMode
 	defaultSetting.Status = setting.Status
+	defaultSetting.Sort = setting.Sort
 	return defaultSetting
 }
 

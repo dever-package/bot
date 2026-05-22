@@ -18,6 +18,9 @@ const (
 	finalResultEventProgress = "result_progress"
 	finalResultEventCard     = "result_card"
 
+	finalResultModeInline   = "inline"
+	finalResultModeArtifact = "artifact"
+
 	finalTaskStatusPending   = "pending"
 	finalTaskStatusRunning   = "running"
 	finalTaskStatusSucceeded = "succeeded"
@@ -60,8 +63,12 @@ func (s Service) handleFinalResult(
 	})
 
 	states := initialFinalTaskStates(tasks)
+	resultMode := resolveFinalResultMode(output, states)
 	detailOutput := agentaction.EnsureAgentRichOutput(output)
-	_ = s.writeFinalResultDetail(streamCtx, exec.RequestID, resultID, detailOutput, states)
+	attachFinalResultMode(detailOutput, resultMode)
+	if resultMode == finalResultModeArtifact {
+		_ = s.writeFinalResultDetail(streamCtx, exec.RequestID, resultID, resultMode, detailOutput, states)
+	}
 
 	if len(tasks) > 0 {
 		tracker.Step(ctx, "final_tasks", "最终结果素材任务", fmt.Sprintf("共 %d 个任务", len(tasks)), map[string]any{
@@ -70,24 +77,32 @@ func (s Service) handleFinalResult(
 		}, stepStatusSuccess)
 		taskCtx, cancelTasks := context.WithTimeout(context.Background(), finalTaskTimeout(exec, len(tasks)))
 		unregisterTaskCancel := registerFinalTaskCancel(exec.RequestID, cancelTasks)
-		runs := s.executeFinalTasks(taskCtx, exec, resultID, tasks, states, history, options)
+		runs := s.executeFinalTasks(taskCtx, exec, resultID, resultMode, tasks, states, history, options)
 		unregisterTaskCancel()
 		cancelTasks()
 		states = mergeFinalTaskRunStates(states, runs)
 		if finalTaskRunsCanceled(runs) {
 			attachFinalTaskStates(detailOutput, states)
-			_ = s.writeFinalResultDetail(streamCtx, exec.RequestID, resultID, detailOutput, states)
+			attachFinalResultMode(detailOutput, resultMode)
+			_ = s.writeFinalResultDetail(streamCtx, exec.RequestID, resultID, resultMode, detailOutput, states)
 			_ = s.writeCancelResult(streamCtx, exec.RequestID)
 			return newAgentLoopResult(detailOutput, runStatusCanceled, "任务已取消")
 		}
 		detailOutput = mergeFinalTaskOutputs(agentaction.EnsureAgentRichOutput(output), states)
 		attachFinalTaskStates(detailOutput, states)
-		_ = s.writeFinalResultDetail(streamCtx, exec.RequestID, resultID, detailOutput, states)
+		attachFinalResultMode(detailOutput, resultMode)
+		_ = s.writeFinalResultDetail(streamCtx, exec.RequestID, resultID, resultMode, detailOutput, states)
 	} else {
 		attachFinalTaskStates(detailOutput, states)
+		attachFinalResultMode(detailOutput, resultMode)
 	}
 
-	card := finalResultCard(resultID, detailOutput, states)
+	if resultMode == finalResultModeInline {
+		_ = s.writeSuccessResult(streamCtx, exec.RequestID, detailOutput)
+		return newAgentLoopResult(detailOutput, runStatusSuccess, "")
+	}
+
+	card := finalResultCard(resultID, resultMode, detailOutput, states)
 	_ = s.writeSuccessResult(streamCtx, exec.RequestID, card)
 	return newAgentLoopResult(detailOutput, runStatusSuccess, "")
 }
@@ -96,6 +111,7 @@ func (s Service) executeFinalTasks(
 	ctx context.Context,
 	exec runExecution,
 	resultID string,
+	resultMode string,
 	tasks []agentaction.AbilityTask,
 	states []finalTaskState,
 	history []any,
@@ -105,15 +121,16 @@ func (s Service) executeFinalTasks(
 		return nil
 	}
 	if finalTaskExecutionMode(tasks) == agentaction.TaskExecutionSync {
-		return s.executeFinalTasksSync(ctx, exec, resultID, tasks, states, history)
+		return s.executeFinalTasksSync(ctx, exec, resultID, resultMode, tasks, states, history)
 	}
-	return s.executeFinalTasksAsync(ctx, exec, resultID, tasks, states, history, options.AsyncMaxConcurrency)
+	return s.executeFinalTasksAsync(ctx, exec, resultID, resultMode, tasks, states, history, options.AsyncMaxConcurrency)
 }
 
 func (s Service) executeFinalTasksSync(
 	ctx context.Context,
 	exec runExecution,
 	resultID string,
+	resultMode string,
 	tasks []agentaction.AbilityTask,
 	states []finalTaskState,
 	history []any,
@@ -126,7 +143,7 @@ func (s Service) executeFinalTasksSync(
 		run := s.executeFinalTask(ctx, exec, resultID, task, history)
 		runs = append(runs, run)
 		states = mergeFinalTaskRunStates(states, []finalTaskRunResult{run})
-		_ = s.writeFinalResultDetail(streamCtx, exec.RequestID, resultID, nil, states)
+		_ = s.writeFinalResultDetail(streamCtx, exec.RequestID, resultID, resultMode, nil, states)
 	}
 	_ = s.writeFinalResultProgress(streamCtx, exec.RequestID, resultID, "素材生成完成", 100)
 	return runs
@@ -136,6 +153,7 @@ func (s Service) executeFinalTasksAsync(
 	ctx context.Context,
 	exec runExecution,
 	resultID string,
+	resultMode string,
 	tasks []agentaction.AbilityTask,
 	states []finalTaskState,
 	history []any,
@@ -169,7 +187,7 @@ func (s Service) executeFinalTasksAsync(
 				currentStates := append([]finalTaskState{}, states...)
 				mu.Unlock()
 				_ = s.writeFinalResultTask(streamCtx, exec.RequestID, resultID, run.State, nil)
-				_ = s.writeFinalResultDetail(streamCtx, exec.RequestID, resultID, nil, currentStates)
+				_ = s.writeFinalResultDetail(streamCtx, exec.RequestID, resultID, resultMode, nil, currentStates)
 				return
 			}
 
@@ -179,7 +197,7 @@ func (s Service) executeFinalTasksAsync(
 			states = mergeFinalTaskRunStates(states, []finalTaskRunResult{run})
 			currentStates := append([]finalTaskState{}, states...)
 			mu.Unlock()
-			_ = s.writeFinalResultDetail(streamCtx, exec.RequestID, resultID, nil, currentStates)
+			_ = s.writeFinalResultDetail(streamCtx, exec.RequestID, resultID, resultMode, nil, currentStates)
 		}()
 	}
 	wg.Wait()
@@ -364,6 +382,90 @@ func attachFinalTaskStates(output map[string]any, states []finalTaskState) {
 	if len(content) > 0 {
 		content["tasks"] = finalTaskStateMaps(states)
 		output["content"] = content
+	}
+}
+
+func resolveFinalResultMode(output map[string]any, states []finalTaskState) string {
+	if mode := explicitFinalResultMode(output); mode != "" {
+		return mode
+	}
+	if len(states) > 0 || hasArtifactResultOutput(output) {
+		return finalResultModeArtifact
+	}
+	return finalResultModeInline
+}
+
+func explicitFinalResultMode(output map[string]any) string {
+	if len(output) == 0 {
+		return ""
+	}
+	content := normalizeMap(output["content"])
+	for _, value := range []any{
+		output["result_mode"],
+		output["display_mode"],
+		content["result_mode"],
+		content["display_mode"],
+	} {
+		switch strings.ToLower(strings.TrimSpace(firstText(value))) {
+		case finalResultModeInline:
+			return finalResultModeInline
+		case finalResultModeArtifact, "detail", "drawer":
+			return finalResultModeArtifact
+		}
+	}
+	return ""
+}
+
+func attachFinalResultMode(output map[string]any, mode string) {
+	if len(output) == 0 {
+		return
+	}
+	output["result_mode"] = mode
+	content := cloneMap(normalizeMap(output["content"]))
+	if len(content) > 0 {
+		content["result_mode"] = mode
+		output["content"] = content
+	}
+}
+
+func hasArtifactResultOutput(output map[string]any) bool {
+	if len(output) == 0 {
+		return false
+	}
+	for _, key := range []string{"rich", "images", "videos", "audios", "files", "json", "tasks"} {
+		if hasResultValue(output[key]) {
+			return true
+		}
+	}
+	content := normalizeMap(output["content"])
+	if len(content) == 0 {
+		return false
+	}
+	if strings.ToLower(strings.TrimSpace(firstText(content["format"]))) == "rich_json" {
+		return true
+	}
+	for _, key := range []string{"rich", "images", "videos", "audios", "files", "json", "tasks"} {
+		if hasResultValue(content[key]) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasResultValue(value any) bool {
+	switch current := value.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(current) != ""
+	case []any:
+		return len(current) > 0
+	case []string:
+		return len(current) > 0
+	case map[string]any:
+		return len(current) > 0
+	default:
+		return true
 	}
 }
 
@@ -630,18 +732,29 @@ func uniqueStrings(values []string) []string {
 	return result
 }
 
-func (s Service) writeFinalResultDetail(ctx context.Context, requestID string, resultID string, output map[string]any, states []finalTaskState) error {
+func (s Service) writeFinalResultDetail(ctx context.Context, requestID string, resultID string, resultMode string, output map[string]any, states []finalTaskState) error {
 	payload := map[string]any{
-		"event":     finalResultEventDetail,
-		"result_id": resultID,
-		"text":      "内容已生成，点击查看结果。",
-		"tasks":     finalTaskStateMaps(states),
+		"event":       finalResultEventDetail,
+		"result_id":   resultID,
+		"result_mode": resultMode,
+		"text":        finalResultDetailText(resultMode, output),
+		"tasks":       finalTaskStateMaps(states),
 	}
 	if len(output) > 0 {
 		payload["result"] = output
 		payload["title"] = firstText(output["title"], "最终结果")
 	}
 	return s.writeStreamOutput(ctx, requestID, payload)
+}
+
+func finalResultDetailText(resultMode string, output map[string]any) string {
+	if resultMode == finalResultModeInline && len(output) > 0 {
+		content := normalizeMap(output["content"])
+		if text := firstText(output["text"], content["text"], output["title"], content["title"]); text != "" {
+			return text
+		}
+	}
+	return "内容已生成，点击查看结果。"
 }
 
 func (s Service) writeFinalResultTask(ctx context.Context, requestID string, resultID string, state finalTaskState, meta map[string]any) error {
@@ -669,13 +782,14 @@ func (s Service) writeFinalResultProgress(ctx context.Context, requestID string,
 	})
 }
 
-func finalResultCard(resultID string, output map[string]any, states []finalTaskState) map[string]any {
+func finalResultCard(resultID string, resultMode string, output map[string]any, states []finalTaskState) map[string]any {
 	cardText := "内容已生成，点击查看结果。"
 	card := map[string]any{
-		"event":     finalResultEventCard,
-		"kind":      agentaction.KindFinal,
-		"result_id": resultID,
-		"text":      cardText,
+		"event":       finalResultEventCard,
+		"kind":        agentaction.KindFinal,
+		"result_id":   resultID,
+		"result_mode": resultMode,
+		"text":        cardText,
 		"content": map[string]any{
 			"format": "markdown",
 			"text":   cardText,

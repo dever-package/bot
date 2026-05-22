@@ -158,10 +158,8 @@ func resolveAgentTurn(aggregateText string, frame map[string]any, gatewayLastID 
 		finalOutput = agentaction.ApplyAgentResult(finalOutput, result, cleanText)
 		outputText = strings.TrimSpace(frontstream.InputText(finalOutput["text"]))
 	}
-	finalOutput = agentaction.EnsureAgentRichOutput(finalOutput)
 	if !agentaction.HasDisplayOutput(finalOutput) && outputText != "" {
 		finalOutput["text"] = outputText
-		finalOutput = agentaction.EnsureAgentRichOutput(finalOutput)
 	}
 	if !agentaction.HasDisplayOutput(finalOutput) {
 		outputText = "内容生成完成，但没有收到可展示内容。请调整输入后重试。"

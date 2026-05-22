@@ -55,19 +55,17 @@ func (AgentHook) ProviderBeforeSaveAgent(c *server.Context, params []any) any {
 
 func (AgentHook) ProviderBeforeSaveAgentCate(_ *server.Context, params []any) any {
 	record := cloneAgentRecord(params)
-	id := util.ToUint64(record["id"])
-	switch id {
-	case agentmodel.DefaultAgentCateID:
-		return map[string]any{"id": id, "name": "默认分类", "sort": 100}
-	case agentmodel.SystemAgentCateID:
-		return map[string]any{"id": id, "name": "系统内置", "sort": 110}
-	default:
-		panic("智能体分类为系统固定项，不能新增或修改。")
+	if len(record) == 0 {
+		return record
 	}
+	partial := isPartialAgentRecord(record)
+	trimStringField(record, "name", partial)
+	defaultIntField(record, "sort", defaultAgentSort, partial)
+	return record
 }
 
-func ensureFixedAgentCates(ctx context.Context) {
-	// Seeds 只在建表时写入；这里兼容已存在的旧“助理/系统内置”分类。
+func ensureBaseAgentCates(ctx context.Context) {
+	// Seeds 只在建表时写入；这里保证内置分类 ID 存在，但不限制用户维护自定义分类。
 	agentModel := agentmodel.NewAgentModel()
 	agentModel.Update(ctx, map[string]any{"id": []any{agentmodel.FrontAssistantAgentID, agentmodel.SkillInstallerAgentID}}, map[string]any{
 		"kind":    agentmodel.AgentKindInternal,
@@ -76,22 +74,20 @@ func ensureFixedAgentCates(ctx context.Context) {
 	agentModel.Update(ctx, map[string]any{"kind": agentmodel.AgentKindInternal}, map[string]any{
 		"cate_id": agentmodel.SystemAgentCateID,
 	})
-	agentModel.Update(ctx, map[string]any{"cate_id": map[string]any{"not in": fixedAgentCateIDs()}}, map[string]any{
-		"cate_id": agentmodel.DefaultAgentCateID,
-	})
-	agentmodel.NewAgentCateModel().Delete(ctx, map[string]any{"id": map[string]any{"not in": fixedAgentCateIDs()}})
-	saveFixedAgentCate(ctx, agentmodel.DefaultAgentCateID, "默认分类", 100)
-	saveFixedAgentCate(ctx, agentmodel.SystemAgentCateID, "系统内置", 110)
+	ensureBaseAgentCate(ctx, agentmodel.DefaultAgentCateID, "默认分类", 100)
+	ensureBaseAgentCate(ctx, agentmodel.SystemAgentCateID, "系统内置", 110)
 }
 
-func saveFixedAgentCate(ctx context.Context, id uint64, name string, sort int) {
+func ensureBaseAgentCate(ctx context.Context, id uint64, name string, sort int) {
 	model := agentmodel.NewAgentCateModel()
-	row := map[string]any{"name": name, "sort": sort}
-	if model.Update(ctx, map[string]any{"id": id}, row) > 0 {
+	if model.Find(ctx, map[string]any{"id": id}) != nil {
 		return
 	}
-	row["id"] = id
-	model.Insert(ctx, row)
+	model.Insert(ctx, map[string]any{
+		"id":   id,
+		"name": name,
+		"sort": sort,
+	})
 }
 
 func (AgentHook) ProviderBeforeDeleteAgent(c *server.Context, params []any) any {
@@ -139,17 +135,6 @@ func normalizeAgentCate(ctx context.Context, record map[string]any, partial bool
 
 func isBuiltinAgent(id uint64) bool {
 	return id == agentmodel.FrontAssistantAgentID || id == agentmodel.SkillInstallerAgentID
-}
-
-func fixedAgentCateIDs() []any {
-	return []any{agentmodel.DefaultAgentCateID, agentmodel.SystemAgentCateID}
-}
-
-func fixedAgentCateOptions() []map[string]any {
-	return []map[string]any{
-		{"id": agentmodel.DefaultAgentCateID, "value": "默认分类", "name": "默认分类", "sort": 100},
-		{"id": agentmodel.SystemAgentCateID, "value": "系统内置", "name": "系统内置", "sort": 110},
-	}
 }
 
 func normalizeAgentKind(kind string) string {
