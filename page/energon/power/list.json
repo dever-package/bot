@@ -98,6 +98,10 @@
               "type": "show-base"
             },
             {
+              "value": "icon",
+              "type": "show-icon"
+            },
+            {
               "value": "kind",
               "type": "show-tag"
             },

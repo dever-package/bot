@@ -10,6 +10,7 @@ type ThinkRun struct {
 	ID        uint64 `dorm:"primaryKey;autoIncrement;comment:思维运行ID"`
 	RunID     uint64 `dorm:"type:bigint;not null;default:0;comment:大脑运行"`
 	RequestID string `dorm:"type:varchar(64);not null;comment:请求ID"`
+	ProjectID uint64 `dorm:"type:bigint;not null;default:0;comment:项目"`
 	BrainID   uint64 `dorm:"type:bigint;not null;default:0;comment:大脑"`
 	ThinkID   uint64 `dorm:"type:bigint;not null;default:0;comment:思维"`
 	Input     string `dorm:"type:text;not null;default:'{}';comment:输入"`
@@ -25,6 +26,7 @@ type ThinkRun struct {
 
 type ThinkRunIndex struct {
 	RunThink      struct{} `unique:"run_id,think_id"`
+	ProjectStatus struct{} `index:"project_id,status"`
 	RunStatus     struct{} `index:"run_id,status"`
 	BrainThink    struct{} `index:"brain_id,think_id,status"`
 	RequestStatus struct{} `index:"request_id,status"`

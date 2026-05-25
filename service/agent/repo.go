@@ -331,6 +331,37 @@ func (Repo) UpdateRunByRequestID(ctx context.Context, requestID string, record m
 	agentmodel.NewRunModel().Update(ctx, map[string]any{"request_id": requestID}, record)
 }
 
+func (Repo) ListRuns(ctx context.Context, ids []uint64) []agentmodel.Run {
+	values := uint64FilterValues(ids)
+	if len(values) == 0 {
+		return []agentmodel.Run{}
+	}
+	rows := agentmodel.NewRunModel().Select(ctx, map[string]any{"id": values})
+	result := make([]agentmodel.Run, 0, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			result = append(result, *row)
+		}
+	}
+	return result
+}
+
+func (Repo) ListStepsByRun(ctx context.Context, runIDs []uint64) map[uint64][]agentmodel.Step {
+	values := uint64FilterValues(runIDs)
+	result := map[uint64][]agentmodel.Step{}
+	if len(values) == 0 {
+		return result
+	}
+	rows := agentmodel.NewStepModel().Select(ctx, map[string]any{"run_id": values})
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		result[row.RunID] = append(result[row.RunID], *row)
+	}
+	return result
+}
+
 func (Repo) InsertStep(ctx context.Context, record stepRecord) {
 	defer func() {
 		_ = recover()
@@ -346,4 +377,20 @@ func (Repo) InsertStep(ctx context.Context, record stepRecord) {
 		"status":     record.Status,
 		"created_at": time.Now(),
 	})
+}
+
+func uint64FilterValues(ids []uint64) []any {
+	seen := map[uint64]struct{}{}
+	values := make([]any, 0, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		values = append(values, id)
+	}
+	return values
 }

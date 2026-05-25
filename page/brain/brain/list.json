@@ -1,6 +1,6 @@
 {
   "page": {
-    "name": "大脑",
+    "name": "大脑配置",
     "icon": "brain",
     "parent": "bot-brain",
     "sort": 1
@@ -22,9 +22,29 @@
         "type": "main",
         "className": "flex flex-1 flex-col gap-5 sm:gap-6",
         "children": {
-          "table-row": {
+          "content-shell": {
             "type": "container",
-            "className": "overflow-hidden rounded-md border bg-background"
+            "className": "front-two-pane-layout",
+            "children": {
+              "category-column": {
+                "type": "container",
+                "className": "min-w-0",
+                "path": "/bot/brain/brain_cate/list",
+                "meta": {
+                  "updateDocumentTitle": false
+                }
+              },
+              "list-column": {
+                "type": "container",
+                "className": "flex min-w-0 flex-col gap-4",
+                "children": {
+                  "table-row": {
+                    "type": "container",
+                    "className": "overflow-hidden rounded-md border bg-background"
+                  }
+                }
+              }
+            }
           },
           "feedback-shell": {
             "type": "container"
@@ -71,6 +91,11 @@
           "savePath": "bot/brain/brain/update",
           "rowKey": "id",
           "columns": [
+            {
+              "value": "cate.name",
+              "name": "分类",
+              "type": "show-base"
+            },
             {
               "value": "name",
               "type": "show-base"
@@ -160,6 +185,9 @@
             "confirm": true,
             "confirmText": "保存"
           },
+          "pageRouteQuery": {
+            "cate_id": "data.search.cate_id"
+          },
           "bodyClassName": "px-6 py-2"
         }
       },
@@ -184,14 +212,20 @@
     ]
   },
   "data": {
-      "page": {
-      "title": "大脑",
+    "page": {
+      "title": "大脑配置",
       "description": "维护大脑基础设定、人格和目标。"
     },
     "table": {
       "page": 1,
       "pageSize": 10,
-      "total": 0
+      "total": 0,
+      "filterFields": [
+        "cate_id"
+      ]
+    },
+    "search": {
+      "cate_id": ""
     },
     "actionTarget": {
       "editBrainId": ""

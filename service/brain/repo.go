@@ -3,6 +3,7 @@ package brain
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"sort"
 	"strings"
 	"time"
@@ -74,6 +75,56 @@ func (Repo) ListThinks(ctx context.Context, brainID uint64, enabledOnly bool) []
 	return result
 }
 
+func (Repo) ListThinksByIDs(ctx context.Context, ids []uint64) []brainmodel.Think {
+	values := uint64FilterValues(ids)
+	if len(values) == 0 {
+		return []brainmodel.Think{}
+	}
+	rows := brainmodel.NewThinkModel().Select(ctx, map[string]any{"id": values})
+	result := make([]brainmodel.Think, 0, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			result = append(result, *row)
+		}
+	}
+	return result
+}
+
+func (Repo) ListThinkNodesByIDs(ctx context.Context, ids []uint64) []brainmodel.ThinkNode {
+	values := uint64FilterValues(ids)
+	if len(values) == 0 {
+		return []brainmodel.ThinkNode{}
+	}
+	rows := brainmodel.NewThinkNodeModel().Select(ctx, map[string]any{"id": values})
+	result := make([]brainmodel.ThinkNode, 0, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			result = append(result, *row)
+		}
+	}
+	return result
+}
+
+func (Repo) ListEnabledBrains(ctx context.Context) []brainmodel.Brain {
+	rows := brainmodel.NewBrainModel().Select(ctx, map[string]any{
+		"status": brainmodel.StatusEnabled,
+	})
+	result := make([]brainmodel.Brain, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		result = append(result, *row)
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Sort == result[j].Sort {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].Sort < result[j].Sort
+	})
+	return result
+}
+
 func (Repo) ListThinkEdges(ctx context.Context, brainID uint64, enabledOnly bool) []brainmodel.ThinkEdge {
 	filter := map[string]any{"brain_id": brainID}
 	if enabledOnly {
@@ -95,13 +146,13 @@ func (Repo) ListThinkEdges(ctx context.Context, brainID uint64, enabledOnly bool
 	return result
 }
 
-func (Repo) ListFlowNodes(ctx context.Context, thinkID uint64, enabledOnly bool) []brainmodel.ThinkFlowNode {
+func (Repo) ListThinkNodes(ctx context.Context, thinkID uint64, enabledOnly bool) []brainmodel.ThinkNode {
 	filter := map[string]any{"think_id": thinkID}
 	if enabledOnly {
 		filter["status"] = brainmodel.StatusEnabled
 	}
-	rows := brainmodel.NewThinkFlowNodeModel().Select(ctx, filter)
-	result := make([]brainmodel.ThinkFlowNode, 0, len(rows))
+	rows := brainmodel.NewThinkNodeModel().Select(ctx, filter)
+	result := make([]brainmodel.ThinkNode, 0, len(rows))
 	for _, row := range rows {
 		if row != nil {
 			result = append(result, *row)
@@ -116,13 +167,13 @@ func (Repo) ListFlowNodes(ctx context.Context, thinkID uint64, enabledOnly bool)
 	return result
 }
 
-func (Repo) ListFlowNodeEdges(ctx context.Context, thinkID uint64, enabledOnly bool) []brainmodel.ThinkFlowNodeEdge {
+func (Repo) ListThinkNodeEdges(ctx context.Context, thinkID uint64, enabledOnly bool) []brainmodel.ThinkNodeEdge {
 	filter := map[string]any{"think_id": thinkID}
 	if enabledOnly {
 		filter["status"] = brainmodel.StatusEnabled
 	}
-	rows := brainmodel.NewThinkFlowNodeEdgeModel().Select(ctx, filter)
-	result := make([]brainmodel.ThinkFlowNodeEdge, 0, len(rows))
+	rows := brainmodel.NewThinkNodeEdgeModel().Select(ctx, filter)
+	result := make([]brainmodel.ThinkNodeEdge, 0, len(rows))
 	for _, row := range rows {
 		if row != nil {
 			result = append(result, *row)
@@ -194,6 +245,7 @@ func (Repo) ListPowers(ctx context.Context) []PowerOption {
 			CateID: row.CateID,
 			Name:   strings.TrimSpace(row.Name),
 			Key:    strings.TrimSpace(row.Key),
+			Icon:   strings.TrimSpace(row.Icon),
 			Kind:   strings.TrimSpace(row.Kind),
 		})
 	}
@@ -206,25 +258,17 @@ func (Repo) ListPowers(ctx context.Context) []PowerOption {
 	return result
 }
 
-func (Repo) ListThinkCreatePowers(ctx context.Context, thinkID uint64, enabledOnly bool) []brainmodel.ThinkCreatePower {
-	filter := map[string]any{"think_id": thinkID}
-	if enabledOnly {
-		filter["status"] = brainmodel.StatusEnabled
-	}
-	rows := brainmodel.NewThinkCreatePowerModel().Select(ctx, filter)
-	result := make([]brainmodel.ThinkCreatePower, 0, len(rows))
-	for _, row := range rows {
-		if row != nil {
-			result = append(result, *row)
+func (r Repo) FindPowerOption(ctx context.Context, powerID uint64, powerKey string) (PowerOption, bool) {
+	powerKey = strings.TrimSpace(powerKey)
+	for _, row := range r.ListPowers(ctx) {
+		if powerID > 0 && row.ID == powerID {
+			return row, true
+		}
+		if powerKey != "" && row.Key == powerKey {
+			return row, true
 		}
 	}
-	sort.SliceStable(result, func(i, j int) bool {
-		if result[i].Sort == result[j].Sort {
-			return result[i].ID < result[j].ID
-		}
-		return result[i].Sort < result[j].Sort
-	})
-	return result
+	return PowerOption{}, false
 }
 
 func (Repo) UpdateThinkConfig(ctx context.Context, thinkID uint64, config map[string]any) {
@@ -246,17 +290,14 @@ func (Repo) UpsertThink(ctx context.Context, brainID uint64, payload GraphThink)
 	row := model.Find(ctx, map[string]any{"brain_id": brainID, "key": key})
 	now := time.Now()
 	record := map[string]any{
-		"brain_id":      brainID,
-		"name":          name,
-		"key":           key,
-		"type":          normalizeThinkType(payload.Type),
-		"goal":          strings.TrimSpace(payload.Goal),
-		"input_schema":  jsonText(payload.InputSchema),
-		"output_schema": jsonText(payload.OutputSchema),
-		"position":      jsonText(payload.Position),
-		"config":        jsonText(payload.Config),
-		"status":        normalizedStatus(payload.Status),
-		"sort":          payload.Sort,
+		"brain_id": brainID,
+		"name":     name,
+		"key":      key,
+		"goal":     strings.TrimSpace(payload.Goal),
+		"position": jsonText(payload.Position),
+		"config":   jsonText(payload.Config),
+		"status":   normalizedStatus(payload.Status),
+		"sort":     payload.Sort,
 	}
 	if row == nil && payload.ID > 0 {
 		row = model.Find(ctx, map[string]any{"id": payload.ID, "brain_id": brainID})
@@ -281,59 +322,6 @@ func (Repo) UpsertThink(ctx context.Context, brainID uint64, payload GraphThink)
 	return *updated, nil
 }
 
-func (Repo) ReplaceThinkCreatePowers(ctx context.Context, brainID uint64, thinkID uint64, payloads []GraphThinkCreatePower) error {
-	model := brainmodel.NewThinkCreatePowerModel()
-	keep := map[string]bool{}
-	seen := map[string]bool{}
-	for index, payload := range payloads {
-		kind := strings.TrimSpace(payload.Kind)
-		if kind == "" || payload.PowerID == 0 {
-			continue
-		}
-		key := createPowerKey(kind, payload.PowerID)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		sortValue := payload.Sort
-		if sortValue == 0 {
-			sortValue = (index + 1) * 10
-		}
-		row := model.Find(ctx, map[string]any{
-			"think_id": thinkID,
-			"kind":     kind,
-			"power_id": payload.PowerID,
-		})
-		record := map[string]any{
-			"brain_id":   brainID,
-			"think_id":   thinkID,
-			"kind":       kind,
-			"power_id":   payload.PowerID,
-			"status":     normalizedStatus(payload.Status),
-			"sort":       sortValue,
-			"created_at": time.Now(),
-		}
-		if row == nil {
-			if uint64(model.Insert(ctx, record)) == 0 {
-				return fmt.Errorf("创建创作能力失败")
-			}
-		} else {
-			delete(record, "created_at")
-			model.Update(ctx, map[string]any{"id": row.ID}, record)
-		}
-		keep[key] = true
-	}
-	for _, row := range model.Select(ctx, map[string]any{"think_id": thinkID}) {
-		if row == nil || keep[createPowerKey(row.Kind, row.PowerID)] {
-			continue
-		}
-		model.Update(ctx, map[string]any{"id": row.ID}, map[string]any{
-			"status": brainmodel.StatusDisabled,
-		})
-	}
-	return nil
-}
-
 func (Repo) UpsertThinkEdge(ctx context.Context, brainID uint64, fromID uint64, toID uint64, payload GraphThinkEdge) error {
 	if fromID == 0 || toID == 0 || fromID == toID {
 		return nil
@@ -354,8 +342,6 @@ func (Repo) UpsertThinkEdge(ctx context.Context, brainID uint64, fromID uint64, 
 		"from_think_id": fromID,
 		"to_think_id":   toID,
 		"condition":     condition,
-		"input_mapping": jsonText(payload.InputMapping),
-		"config":        jsonText(payload.Config),
 		"status":        normalizedStatus(payload.Status),
 		"sort":          payload.Sort,
 	}
@@ -370,7 +356,7 @@ func (Repo) UpsertThinkEdge(ctx context.Context, brainID uint64, fromID uint64, 
 	return nil
 }
 
-func (Repo) UpsertFlowNode(ctx context.Context, brainID uint64, thinkID uint64, payload GraphFlowNode) (brainmodel.ThinkFlowNode, error) {
+func (Repo) UpsertThinkNode(ctx context.Context, brainID uint64, thinkID uint64, payload GraphThinkNode) (brainmodel.ThinkNode, error) {
 	key := normalizeKey("node", payload.NodeKey)
 	name := strings.TrimSpace(payload.Name)
 	if name == "" {
@@ -380,20 +366,22 @@ func (Repo) UpsertFlowNode(ctx context.Context, brainID uint64, thinkID uint64, 
 	if nodeType == "" {
 		nodeType = brainmodel.NodeTypeAgent
 	}
-	model := brainmodel.NewThinkFlowNodeModel()
+	model := brainmodel.NewThinkNodeModel()
 	row := model.Find(ctx, map[string]any{"think_id": thinkID, "node_key": key})
 	now := time.Now()
 	record := map[string]any{
-		"brain_id": brainID,
-		"think_id": thinkID,
-		"node_key": key,
-		"name":     name,
-		"type":     nodeType,
-		"agent_id": payload.AgentID,
-		"config":   jsonText(payload.Config),
-		"position": jsonText(payload.Position),
-		"status":   normalizedStatus(payload.Status),
-		"sort":     payload.Sort,
+		"brain_id":     brainID,
+		"think_id":     thinkID,
+		"node_key":     key,
+		"name":         name,
+		"type":         nodeType,
+		"agent_id":     payload.AgentID,
+		"power_id":     payload.PowerID,
+		"sub_brain_id": payload.SubBrainID,
+		"config":       jsonText(payload.Config),
+		"position":     jsonText(payload.Position),
+		"status":       normalizedStatus(payload.Status),
+		"sort":         payload.Sort,
 	}
 	if row == nil && payload.ID > 0 {
 		row = model.Find(ctx, map[string]any{"id": payload.ID, "think_id": thinkID})
@@ -402,27 +390,27 @@ func (Repo) UpsertFlowNode(ctx context.Context, brainID uint64, thinkID uint64, 
 		record["created_at"] = now
 		id := uint64(model.Insert(ctx, record))
 		if id == 0 {
-			return brainmodel.ThinkFlowNode{}, fmt.Errorf("创建节点失败")
+			return brainmodel.ThinkNode{}, fmt.Errorf("创建节点失败")
 		}
 		created := model.Find(ctx, map[string]any{"id": id})
 		if created == nil {
-			return brainmodel.ThinkFlowNode{}, fmt.Errorf("读取新节点失败")
+			return brainmodel.ThinkNode{}, fmt.Errorf("读取新节点失败")
 		}
 		return *created, nil
 	}
 	model.Update(ctx, map[string]any{"id": row.ID}, record)
 	updated := model.Find(ctx, map[string]any{"id": row.ID})
 	if updated == nil {
-		return brainmodel.ThinkFlowNode{}, fmt.Errorf("读取节点失败")
+		return brainmodel.ThinkNode{}, fmt.Errorf("读取节点失败")
 	}
 	return *updated, nil
 }
 
-func (Repo) UpsertFlowNodeEdge(ctx context.Context, brainID uint64, thinkID uint64, fromID uint64, toID uint64, payload GraphFlowNodeEdge) error {
+func (Repo) UpsertThinkNodeEdge(ctx context.Context, brainID uint64, thinkID uint64, fromID uint64, toID uint64, payload GraphThinkNodeEdge) error {
 	if fromID == 0 || toID == 0 || fromID == toID {
 		return nil
 	}
-	model := brainmodel.NewThinkFlowNodeEdgeModel()
+	model := brainmodel.NewThinkNodeEdgeModel()
 	row := model.Find(ctx, map[string]any{
 		"think_id":     thinkID,
 		"from_node_id": fromID,
@@ -434,15 +422,13 @@ func (Repo) UpsertFlowNodeEdge(ctx context.Context, brainID uint64, thinkID uint
 		condition = "always"
 	}
 	record := map[string]any{
-		"brain_id":      brainID,
-		"think_id":      thinkID,
-		"from_node_id":  fromID,
-		"to_node_id":    toID,
-		"condition":     condition,
-		"input_mapping": jsonText(payload.InputMapping),
-		"config":        jsonText(payload.Config),
-		"status":        normalizedStatus(payload.Status),
-		"sort":          payload.Sort,
+		"brain_id":     brainID,
+		"think_id":     thinkID,
+		"from_node_id": fromID,
+		"to_node_id":   toID,
+		"condition":    condition,
+		"status":       normalizedStatus(payload.Status),
+		"sort":         payload.Sort,
 	}
 	if row == nil {
 		record["created_at"] = now
@@ -483,8 +469,8 @@ func (Repo) DisableMissingThinkEdges(ctx context.Context, brainID uint64, keep m
 	}
 }
 
-func (Repo) DisableMissingFlowNodes(ctx context.Context, thinkID uint64, keepKeys map[string]bool) {
-	model := brainmodel.NewThinkFlowNodeModel()
+func (Repo) DisableMissingThinkNodes(ctx context.Context, thinkID uint64, keepKeys map[string]bool) {
+	model := brainmodel.NewThinkNodeModel()
 	for _, row := range model.Select(ctx, map[string]any{"think_id": thinkID}) {
 		if row == nil || keepKeys[row.NodeKey] {
 			continue
@@ -495,8 +481,8 @@ func (Repo) DisableMissingFlowNodes(ctx context.Context, thinkID uint64, keepKey
 	}
 }
 
-func (Repo) DisableMissingFlowNodeEdges(ctx context.Context, thinkID uint64, keep map[string]bool) {
-	model := brainmodel.NewThinkFlowNodeEdgeModel()
+func (Repo) DisableMissingThinkNodeEdges(ctx context.Context, thinkID uint64, keep map[string]bool) {
+	model := brainmodel.NewThinkNodeEdgeModel()
 	for _, row := range model.Select(ctx, map[string]any{"think_id": thinkID}) {
 		if row == nil {
 			continue
@@ -522,8 +508,18 @@ func edgeKey(fromID uint64, toID uint64) string {
 	return fmt.Sprintf("%d:%d", fromID, toID)
 }
 
-func createPowerKey(kind string, powerID uint64) string {
-	return fmt.Sprintf("%s:%d", strings.TrimSpace(kind), powerID)
+func stableNodeID(key string) uint64 {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return uint64(time.Now().UnixNano())
+	}
+	hash := fnv.New64a()
+	_, _ = hash.Write([]byte(key))
+	value := hash.Sum64() & ((uint64(1) << 63) - 1)
+	if value == 0 {
+		return 1
+	}
+	return value
 }
 
 func (Repo) InsertRun(ctx context.Context, record map[string]any) uint64 {
@@ -578,12 +574,33 @@ func (Repo) FindRun(ctx context.Context, id uint64) *brainmodel.Run {
 	return brainmodel.NewRunModel().Find(ctx, map[string]any{"id": id})
 }
 
+func (Repo) FindRunInProject(ctx context.Context, id uint64, projectID uint64) *brainmodel.Run {
+	if id == 0 || projectID == 0 {
+		return nil
+	}
+	return brainmodel.NewRunModel().Find(ctx, map[string]any{
+		"id":         id,
+		"project_id": projectID,
+	})
+}
+
 func (Repo) FindRunByRequestID(ctx context.Context, requestID string) *brainmodel.Run {
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
 		return nil
 	}
 	return brainmodel.NewRunModel().Find(ctx, map[string]any{"request_id": requestID})
+}
+
+func (Repo) FindRunByRequestIDInProject(ctx context.Context, requestID string, projectID uint64) *brainmodel.Run {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" || projectID == 0 {
+		return nil
+	}
+	return brainmodel.NewRunModel().Find(ctx, map[string]any{
+		"request_id": requestID,
+		"project_id": projectID,
+	})
 }
 
 func (Repo) UpdateRun(ctx context.Context, id uint64, record map[string]any) {
@@ -604,6 +621,7 @@ func (Repo) FindOrCreateThinkRun(ctx context.Context, run brainmodel.Run, think 
 	return uint64(model.Insert(ctx, map[string]any{
 		"run_id":     run.ID,
 		"request_id": run.RequestID,
+		"project_id": run.ProjectID,
 		"brain_id":   run.BrainID,
 		"think_id":   think.ID,
 		"input":      jsonText(input),
@@ -641,7 +659,7 @@ func (Repo) UpdateThinkRun(ctx context.Context, id uint64, record map[string]any
 	brainmodel.NewThinkRunModel().Update(ctx, map[string]any{"id": id}, record)
 }
 
-func (Repo) FindOrCreateNodeRun(ctx context.Context, run brainmodel.Run, thinkRun brainmodel.ThinkRun, node brainmodel.ThinkFlowNode, input map[string]any) uint64 {
+func (Repo) FindOrCreateNodeRun(ctx context.Context, run brainmodel.Run, thinkRun brainmodel.ThinkRun, node brainmodel.ThinkNode, input map[string]any) uint64 {
 	model := brainmodel.NewNodeRunModel()
 	row := model.Find(ctx, map[string]any{"think_run_id": thinkRun.ID, "node_id": node.ID})
 	if row != nil {
@@ -652,11 +670,42 @@ func (Repo) FindOrCreateNodeRun(ctx context.Context, run brainmodel.Run, thinkRu
 		"run_id":       run.ID,
 		"think_run_id": thinkRun.ID,
 		"request_id":   run.RequestID,
+		"project_id":   run.ProjectID,
 		"brain_id":     run.BrainID,
 		"think_id":     node.ThinkID,
 		"node_id":      node.ID,
 		"node_key":     node.NodeKey,
 		"node_type":    node.Type,
+		"input":        jsonText(input),
+		"output":       "{}",
+		"error":        "",
+		"status":       brainmodel.RunStatusPending,
+		"agent_run_id": 0,
+		"created_at":   now,
+		"updated_at":   now,
+	}))
+}
+
+func (Repo) FindOrCreateDynamicNodeRun(ctx context.Context, run brainmodel.Run, thinkRun brainmodel.ThinkRun, think brainmodel.Think, nodeID uint64, nodeKey string, nodeName string, nodeType string, input map[string]any) uint64 {
+	if nodeID == 0 {
+		nodeID = stableNodeID(nodeKey)
+	}
+	model := brainmodel.NewNodeRunModel()
+	row := model.Find(ctx, map[string]any{"think_run_id": thinkRun.ID, "node_id": nodeID})
+	if row != nil {
+		return row.ID
+	}
+	now := time.Now()
+	return uint64(model.Insert(ctx, map[string]any{
+		"run_id":       run.ID,
+		"think_run_id": thinkRun.ID,
+		"request_id":   run.RequestID,
+		"project_id":   run.ProjectID,
+		"brain_id":     run.BrainID,
+		"think_id":     think.ID,
+		"node_id":      nodeID,
+		"node_key":     strings.TrimSpace(nodeKey),
+		"node_type":    strings.TrimSpace(nodeType),
 		"input":        jsonText(input),
 		"output":       "{}",
 		"error":        "",
@@ -801,75 +850,23 @@ func (Repo) UpdateApproval(ctx context.Context, id uint64, record map[string]any
 	brainmodel.NewApprovalModel().Update(ctx, map[string]any{"id": id}, record)
 }
 
-func (Repo) SaveContentVersion(ctx context.Context, record map[string]any) (uint64, uint64, error) {
-	brainID := uint64Value(record["brain_id"])
-	thinkID := uint64Value(record["think_id"])
-	contentKey := strings.TrimSpace(textValue(record["content_key"]))
-	if brainID == 0 || contentKey == "" {
-		return 0, 0, fmt.Errorf("内容缺少 brain_id 或 content_key")
-	}
-	contentModel := brainmodel.NewContentModel()
-	content := contentModel.Find(ctx, map[string]any{"brain_id": brainID, "key": contentKey})
-	now := time.Now()
-	if content == nil {
-		contentID := uint64(contentModel.Insert(ctx, map[string]any{
-			"brain_id":           brainID,
-			"think_id":           thinkID,
-			"name":               firstText(record["content_name"], contentKey),
-			"key":                contentKey,
-			"type":               firstText(record["content_type"], "text"),
-			"current_version_id": 0,
-			"status":             brainmodel.ContentStatusDraft,
-			"created_at":         now,
-		}))
-		content = contentModel.Find(ctx, map[string]any{"id": contentID})
-	}
-	if content == nil {
-		return 0, 0, fmt.Errorf("创建内容失败")
-	}
-	version := nextContentVersion(ctx, content.ID)
-	brainmodel.NewContentVersionModel().Update(ctx, map[string]any{
-		"content_id": content.ID,
-		"status":     brainmodel.ContentStatusCurrent,
-	}, map[string]any{
-		"status": brainmodel.ContentStatusArchive,
-	})
-	versionID := uint64(brainmodel.NewContentVersionModel().Insert(ctx, map[string]any{
-		"content_id":  content.ID,
-		"brain_id":    brainID,
-		"think_id":    thinkID,
-		"run_id":      uint64Value(record["run_id"]),
-		"node_run_id": uint64Value(record["node_run_id"]),
-		"release_id":  uint64Value(record["release_id"]),
-		"version":     version,
-		"title":       firstText(record["title"], content.Name),
-		"body":        jsonText(record["body"]),
-		"note":        textValue(record["note"]),
-		"status":      brainmodel.ContentStatusCurrent,
-		"created_at":  now,
-	}))
-	if versionID == 0 {
-		return 0, 0, fmt.Errorf("创建内容版本失败")
-	}
-	contentModel.Update(ctx, map[string]any{"id": content.ID}, map[string]any{
-		"current_version_id": versionID,
-		"status":             brainmodel.ContentStatusCurrent,
-	})
-	return content.ID, versionID, nil
-}
-
-func nextContentVersion(ctx context.Context, contentID uint64) int {
-	rows := brainmodel.NewContentVersionModel().Select(ctx, map[string]any{"content_id": contentID})
-	maxVersion := 0
-	for _, row := range rows {
-		if row != nil && row.Version > maxVersion {
-			maxVersion = row.Version
-		}
-	}
-	return maxVersion + 1
-}
-
 func (Repo) InsertMemory(ctx context.Context, record map[string]any) uint64 {
 	record["created_at"] = time.Now()
 	return uint64(brainmodel.NewMemoryModel().Insert(ctx, record))
+}
+
+func uint64FilterValues(ids []uint64) []any {
+	seen := map[uint64]struct{}{}
+	values := make([]any, 0, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		values = append(values, id)
+	}
+	return values
 }

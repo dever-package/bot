@@ -30,6 +30,7 @@ var brainPublishStatusOptions = []map[string]any{
 
 type Brain struct {
 	ID               uint64    `dorm:"primaryKey;autoIncrement;comment:大脑ID"`
+	CateID           uint64    `dorm:"type:bigint;not null;default:1;comment:大脑分类"`
 	Name             string    `dorm:"type:varchar(128);not null;comment:名称"`
 	Key              string    `dorm:"type:varchar(128);not null;comment:标识"`
 	Description      string    `dorm:"type:text;not null;default:'';comment:描述"`
@@ -46,6 +47,7 @@ type Brain struct {
 
 type BrainIndex struct {
 	Key           struct{} `unique:"key"`
+	CateStatus    struct{} `index:"cate_id,status,sort,id"`
 	StatusSort    struct{} `index:"status,sort,id"`
 	PublishStatus struct{} `index:"publish_status,current_release_id"`
 }
@@ -58,6 +60,9 @@ func NewBrainModel() *orm.Model[Brain] {
 		Options: map[string]any{
 			"status":         statusOptions,
 			"publish_status": brainPublishStatusOptions,
+		},
+		Relations: []orm.Relation{
+			brainCateRelation,
 		},
 	})
 }

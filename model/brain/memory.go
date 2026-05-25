@@ -17,12 +17,13 @@ var memoryKindOptions = []map[string]any{
 
 type Memory struct {
 	ID         uint64    `dorm:"primaryKey;autoIncrement;comment:记忆ID"`
+	ProjectID  uint64    `dorm:"type:bigint;not null;default:0;comment:项目"`
 	BrainID    uint64    `dorm:"type:bigint;not null;default:0;comment:大脑"`
 	ThinkID    uint64    `dorm:"type:bigint;not null;default:0;comment:思维"`
 	RunID      uint64    `dorm:"type:bigint;not null;default:0;comment:大脑运行"`
 	NodeRunID  uint64    `dorm:"type:bigint;not null;default:0;comment:节点运行"`
-	ContentID  uint64    `dorm:"type:bigint;not null;default:0;comment:内容"`
-	VersionID  uint64    `dorm:"type:bigint;not null;default:0;comment:内容版本"`
+	AssetID    uint64    `dorm:"type:bigint;not null;default:0;comment:资产"`
+	VersionID  uint64    `dorm:"type:bigint;not null;default:0;comment:资产版本"`
 	Kind       string    `dorm:"type:varchar(32);not null;default:'episodic';comment:类型"`
 	Title      string    `dorm:"type:varchar(255);not null;default:'';comment:标题"`
 	Content    string    `dorm:"type:text;not null;default:'{}';comment:内容"`
@@ -33,11 +34,12 @@ type Memory struct {
 }
 
 type MemoryIndex struct {
-	BrainKind  struct{} `index:"brain_id,kind,status,created_at"`
-	ThinkKind  struct{} `index:"think_id,kind,status,created_at"`
-	RunStatus  struct{} `index:"run_id,status"`
-	Content    struct{} `index:"content_id,version_id"`
-	Importance struct{} `index:"importance,status"`
+	ProjectKind struct{} `index:"project_id,kind,status,created_at"`
+	BrainKind   struct{} `index:"brain_id,kind,status,created_at"`
+	ThinkKind   struct{} `index:"think_id,kind,status,created_at"`
+	RunStatus   struct{} `index:"run_id,status"`
+	Asset       struct{} `index:"asset_id,version_id"`
+	Importance  struct{} `index:"importance,status"`
 }
 
 func NewMemoryModel() *orm.Model[Memory] {
@@ -54,7 +56,7 @@ func NewMemoryModel() *orm.Model[Memory] {
 			thinkRelation,
 			runRelation,
 			nodeRunRelation,
-			contentRelation,
+			assetRelation,
 			versionRelation,
 		},
 	})

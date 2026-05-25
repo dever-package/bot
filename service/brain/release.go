@@ -12,22 +12,46 @@ type runtimeGraph struct {
 	Brain              brainmodel.Brain
 	Thinks             []brainmodel.Think
 	ThinkEdges         []brainmodel.ThinkEdge
-	FlowNodesByThinkID map[uint64][]brainmodel.ThinkFlowNode
-	FlowEdgesByThinkID map[uint64][]brainmodel.ThinkFlowNodeEdge
+	NodesByThinkID     map[uint64][]brainmodel.ThinkNode
+	NodeEdgesByThinkID map[uint64][]brainmodel.ThinkNodeEdge
 }
 
 func (s Service) runnableBrainRelease(ctx context.Context, brain brainmodel.Brain) (*brainmodel.BrainRelease, error) {
+	if release := s.currentBrainRelease(ctx, brain); release != nil {
+		return release, nil
+	}
+	return nil, fmt.Errorf("大脑尚未发布，不能运行")
+}
+
+func (s Service) currentBrainRelease(ctx context.Context, brain brainmodel.Brain) *brainmodel.BrainRelease {
 	if brain.CurrentReleaseID > 0 {
 		if release := s.repo.FindBrainRelease(ctx, brain.CurrentReleaseID); release != nil {
 			if release.Status == brainmodel.BrainReleaseStatusCurrent {
-				return release, nil
+				return release
 			}
 		}
 	}
 	if release := s.repo.FindCurrentBrainRelease(ctx, brain.ID); release != nil {
-		return release, nil
+		return release
 	}
-	return nil, fmt.Errorf("大脑尚未发布，不能运行")
+	return nil
+}
+
+func (s Service) runnableRelease(ctx context.Context, brain brainmodel.Brain, releaseID uint64) (*brainmodel.BrainRelease, error) {
+	if releaseID == 0 {
+		return s.runnableBrainRelease(ctx, brain)
+	}
+	release := s.repo.FindBrainRelease(ctx, releaseID)
+	if release == nil {
+		return nil, fmt.Errorf("发布版本不存在")
+	}
+	if release.BrainID != brain.ID {
+		return nil, fmt.Errorf("发布版本不属于当前类型")
+	}
+	if release.Status != brainmodel.BrainReleaseStatusCurrent && release.Status != brainmodel.BrainReleaseStatusArchive {
+		return nil, fmt.Errorf("发布版本不可运行")
+	}
+	return release, nil
 }
 
 func (s Service) runtimeGraphForRun(ctx context.Context, run brainmodel.Run) (runtimeGraph, error) {
@@ -51,12 +75,12 @@ func (s Service) currentRuntimeGraph(ctx context.Context, brain brainmodel.Brain
 		Brain:              brain,
 		Thinks:             thinks,
 		ThinkEdges:         s.repo.ListThinkEdges(ctx, brain.ID, true),
-		FlowNodesByThinkID: map[uint64][]brainmodel.ThinkFlowNode{},
-		FlowEdgesByThinkID: map[uint64][]brainmodel.ThinkFlowNodeEdge{},
+		NodesByThinkID:     map[uint64][]brainmodel.ThinkNode{},
+		NodeEdgesByThinkID: map[uint64][]brainmodel.ThinkNodeEdge{},
 	}
 	for _, think := range thinks {
-		graph.FlowNodesByThinkID[think.ID] = s.repo.ListFlowNodes(ctx, think.ID, true)
-		graph.FlowEdgesByThinkID[think.ID] = s.repo.ListFlowNodeEdges(ctx, think.ID, true)
+		graph.NodesByThinkID[think.ID] = s.repo.ListThinkNodes(ctx, think.ID, true)
+		graph.NodeEdgesByThinkID[think.ID] = s.repo.ListThinkNodeEdges(ctx, think.ID, true)
 	}
 	return graph
 }
@@ -70,8 +94,8 @@ func runtimeGraphFromRelease(release brainmodel.BrainRelease) (runtimeGraph, err
 		Brain:              graphBrainToModel(snapshot.Brain),
 		Thinks:             make([]brainmodel.Think, 0, len(snapshot.Thinks)),
 		ThinkEdges:         make([]brainmodel.ThinkEdge, 0, len(snapshot.ThinkEdges)),
-		FlowNodesByThinkID: map[uint64][]brainmodel.ThinkFlowNode{},
-		FlowEdgesByThinkID: map[uint64][]brainmodel.ThinkFlowNodeEdge{},
+		NodesByThinkID:     map[uint64][]brainmodel.ThinkNode{},
+		NodeEdgesByThinkID: map[uint64][]brainmodel.ThinkNodeEdge{},
 	}
 	for _, payload := range snapshot.Thinks {
 		graph.Thinks = append(graph.Thinks, graphThinkToModel(graph.Brain.ID, payload))
@@ -83,27 +107,27 @@ func runtimeGraphFromRelease(release brainmodel.BrainRelease) (runtimeGraph, err
 	for _, payload := range snapshot.ThinkEdges {
 		graph.ThinkEdges = append(graph.ThinkEdges, graphThinkEdgeToModel(graph.Brain.ID, payload))
 	}
-	for thinkKey, payloads := range snapshot.FlowNodesByThink {
+	for thinkKey, payloads := range snapshot.NodesByThink {
 		think := thinkByKey[thinkKey]
 		if think.ID == 0 {
 			continue
 		}
-		nodes := make([]brainmodel.ThinkFlowNode, 0, len(payloads))
+		nodes := make([]brainmodel.ThinkNode, 0, len(payloads))
 		for _, payload := range payloads {
-			nodes = append(nodes, graphFlowNodeToModel(graph.Brain.ID, think.ID, payload))
+			nodes = append(nodes, graphThinkNodeToModel(graph.Brain.ID, think.ID, payload))
 		}
-		graph.FlowNodesByThinkID[think.ID] = nodes
+		graph.NodesByThinkID[think.ID] = nodes
 	}
-	for thinkKey, payloads := range snapshot.FlowEdgesByThink {
+	for thinkKey, payloads := range snapshot.NodeEdgesByThink {
 		think := thinkByKey[thinkKey]
 		if think.ID == 0 {
 			continue
 		}
-		edges := make([]brainmodel.ThinkFlowNodeEdge, 0, len(payloads))
+		edges := make([]brainmodel.ThinkNodeEdge, 0, len(payloads))
 		for _, payload := range payloads {
-			edges = append(edges, graphFlowNodeEdgeToModel(graph.Brain.ID, think.ID, payload))
+			edges = append(edges, graphThinkNodeEdgeToModel(graph.Brain.ID, think.ID, payload))
 		}
-		graph.FlowEdgesByThinkID[think.ID] = edges
+		graph.NodeEdgesByThinkID[think.ID] = edges
 	}
 	return graph, nil
 }
@@ -135,63 +159,58 @@ func graphBrainToModel(payload GraphBrain) brainmodel.Brain {
 
 func graphThinkToModel(brainID uint64, payload GraphThink) brainmodel.Think {
 	return brainmodel.Think{
-		ID:           payload.ID,
-		BrainID:      brainID,
-		Name:         payload.Name,
-		Key:          payload.Key,
-		Type:         normalizeThinkType(payload.Type),
-		Goal:         payload.Goal,
-		InputSchema:  jsonText(payload.InputSchema),
-		OutputSchema: jsonText(payload.OutputSchema),
-		Position:     jsonText(payload.Position),
-		Config:       jsonText(payload.Config),
-		Status:       payload.Status,
-		Sort:         payload.Sort,
-	}
-}
-
-func graphThinkEdgeToModel(brainID uint64, payload GraphThinkEdge) brainmodel.ThinkEdge {
-	return brainmodel.ThinkEdge{
-		ID:           payload.ID,
-		BrainID:      brainID,
-		FromThinkID:  payload.FromThinkID,
-		ToThinkID:    payload.ToThinkID,
-		Condition:    payload.Condition,
-		InputMapping: jsonText(payload.InputMapping),
-		Config:       jsonText(payload.Config),
-		Status:       payload.Status,
-		Sort:         payload.Sort,
-	}
-}
-
-func graphFlowNodeToModel(brainID uint64, thinkID uint64, payload GraphFlowNode) brainmodel.ThinkFlowNode {
-	return brainmodel.ThinkFlowNode{
 		ID:       payload.ID,
 		BrainID:  brainID,
-		ThinkID:  thinkID,
-		NodeKey:  payload.NodeKey,
 		Name:     payload.Name,
-		Type:     payload.Type,
-		AgentID:  payload.AgentID,
-		Config:   jsonText(payload.Config),
+		Key:      payload.Key,
+		Goal:     payload.Goal,
 		Position: jsonText(payload.Position),
+		Config:   jsonText(payload.Config),
 		Status:   payload.Status,
 		Sort:     payload.Sort,
 	}
 }
 
-func graphFlowNodeEdgeToModel(brainID uint64, thinkID uint64, payload GraphFlowNodeEdge) brainmodel.ThinkFlowNodeEdge {
-	return brainmodel.ThinkFlowNodeEdge{
-		ID:           payload.ID,
-		BrainID:      brainID,
-		ThinkID:      thinkID,
-		FromNodeID:   payload.FromNodeID,
-		ToNodeID:     payload.ToNodeID,
-		Condition:    payload.Condition,
-		InputMapping: jsonText(payload.InputMapping),
-		Config:       jsonText(payload.Config),
-		Status:       payload.Status,
-		Sort:         payload.Sort,
+func graphThinkEdgeToModel(brainID uint64, payload GraphThinkEdge) brainmodel.ThinkEdge {
+	return brainmodel.ThinkEdge{
+		ID:          payload.ID,
+		BrainID:     brainID,
+		FromThinkID: payload.FromThinkID,
+		ToThinkID:   payload.ToThinkID,
+		Condition:   payload.Condition,
+		Status:      payload.Status,
+		Sort:        payload.Sort,
+	}
+}
+
+func graphThinkNodeToModel(brainID uint64, thinkID uint64, payload GraphThinkNode) brainmodel.ThinkNode {
+	return brainmodel.ThinkNode{
+		ID:         payload.ID,
+		BrainID:    brainID,
+		ThinkID:    thinkID,
+		NodeKey:    payload.NodeKey,
+		Name:       payload.Name,
+		Type:       payload.Type,
+		AgentID:    payload.AgentID,
+		PowerID:    payload.PowerID,
+		SubBrainID: payload.SubBrainID,
+		Config:     jsonText(payload.Config),
+		Position:   jsonText(payload.Position),
+		Status:     payload.Status,
+		Sort:       payload.Sort,
+	}
+}
+
+func graphThinkNodeEdgeToModel(brainID uint64, thinkID uint64, payload GraphThinkNodeEdge) brainmodel.ThinkNodeEdge {
+	return brainmodel.ThinkNodeEdge{
+		ID:         payload.ID,
+		BrainID:    brainID,
+		ThinkID:    thinkID,
+		FromNodeID: payload.FromNodeID,
+		ToNodeID:   payload.ToNodeID,
+		Condition:  payload.Condition,
+		Status:     payload.Status,
+		Sort:       payload.Sort,
 	}
 }
 

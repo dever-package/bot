@@ -38,6 +38,23 @@
   "nodes": {
     "dialog-shell": [
       {
+        "type": "form-select",
+        "name": "大脑分类",
+        "value": "form.cate_id",
+        "mode": "form",
+        "option": "/front/route/option?type=model&use=bot.brain.NewBrainCateModel&order=sort asc,id asc",
+        "validate": [
+          {
+            "type": "required",
+            "message": "大脑分类不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[260px]"
+        }
+      },
+      {
         "type": "form-input",
         "placeholder": "例如：内容运营大脑",
         "value": "form.name",
@@ -107,6 +124,7 @@
   "data": {
     "form": {
       "id": 0,
+      "cate_id": 1,
       "name": "",
       "key": "",
       "description": "",
@@ -118,7 +136,11 @@
   "action": {
     "submit": {
       "type": "save",
-      "params": "form"
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.brain.BrainHook.BeforeSaveBrain"
+      }
     }
   }
 }

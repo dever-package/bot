@@ -11,67 +11,55 @@ import (
 )
 
 type GraphThink struct {
-	ID           uint64         `json:"id"`
-	Name         string         `json:"name"`
-	Key          string         `json:"key"`
-	Type         string         `json:"type"`
-	Goal         string         `json:"goal"`
-	InputSchema  map[string]any `json:"input_schema"`
-	OutputSchema map[string]any `json:"output_schema"`
-	Position     map[string]any `json:"position"`
-	Config       map[string]any `json:"config"`
-	Status       int16          `json:"status"`
-	Sort         int            `json:"sort"`
-}
-
-type GraphThinkEdge struct {
-	ID           uint64         `json:"id"`
-	FromThinkID  uint64         `json:"from_think_id"`
-	ToThinkID    uint64         `json:"to_think_id"`
-	FromKey      string         `json:"from_key"`
-	ToKey        string         `json:"to_key"`
-	Condition    string         `json:"condition"`
-	InputMapping map[string]any `json:"input_mapping"`
-	Config       map[string]any `json:"config"`
-	Status       int16          `json:"status"`
-	Sort         int            `json:"sort"`
-}
-
-type GraphFlowNode struct {
 	ID       uint64         `json:"id"`
-	NodeKey  string         `json:"node_key"`
 	Name     string         `json:"name"`
-	Type     string         `json:"type"`
-	AgentID  uint64         `json:"agent_id"`
-	Config   map[string]any `json:"config"`
+	Key      string         `json:"key"`
+	Goal     string         `json:"goal"`
 	Position map[string]any `json:"position"`
+	Config   map[string]any `json:"config"`
 	Status   int16          `json:"status"`
 	Sort     int            `json:"sort"`
 }
 
-type GraphFlowNodeEdge struct {
-	ID           uint64         `json:"id"`
-	FromNodeID   uint64         `json:"from_node_id"`
-	ToNodeID     uint64         `json:"to_node_id"`
-	FromKey      string         `json:"from_key"`
-	ToKey        string         `json:"to_key"`
-	Condition    string         `json:"condition"`
-	InputMapping map[string]any `json:"input_mapping"`
-	Config       map[string]any `json:"config"`
-	Status       int16          `json:"status"`
-	Sort         int            `json:"sort"`
+type GraphThinkEdge struct {
+	ID          uint64 `json:"id"`
+	FromThinkID uint64 `json:"from_think_id"`
+	ToThinkID   uint64 `json:"to_think_id"`
+	FromKey     string `json:"from_key"`
+	ToKey       string `json:"to_key"`
+	Condition   string `json:"condition"`
+	Status      int16  `json:"status"`
+	Sort        int    `json:"sort"`
 }
 
-type GraphThinkCreatePower struct {
-	ID      uint64 `json:"id"`
-	Kind    string `json:"kind"`
-	PowerID uint64 `json:"power_id"`
-	Status  int16  `json:"status"`
-	Sort    int    `json:"sort"`
+type GraphThinkNode struct {
+	ID         uint64         `json:"id"`
+	NodeKey    string         `json:"node_key"`
+	Name       string         `json:"name"`
+	Type       string         `json:"type"`
+	AgentID    uint64         `json:"agent_id"`
+	PowerID    uint64         `json:"power_id"`
+	SubBrainID uint64         `json:"sub_brain_id"`
+	Config     map[string]any `json:"config"`
+	Position   map[string]any `json:"position"`
+	Status     int16          `json:"status"`
+	Sort       int            `json:"sort"`
+}
+
+type GraphThinkNodeEdge struct {
+	ID         uint64 `json:"id"`
+	FromNodeID uint64 `json:"from_node_id"`
+	ToNodeID   uint64 `json:"to_node_id"`
+	FromKey    string `json:"from_key"`
+	ToKey      string `json:"to_key"`
+	Condition  string `json:"condition"`
+	Status     int16  `json:"status"`
+	Sort       int    `json:"sort"`
 }
 
 type GraphBrain struct {
 	ID          uint64         `json:"id"`
+	CateID      uint64         `json:"cate_id"`
 	Name        string         `json:"name"`
 	Key         string         `json:"key"`
 	Description string         `json:"description"`
@@ -83,12 +71,11 @@ type GraphBrain struct {
 }
 
 type BrainReleaseSnapshot struct {
-	Brain               GraphBrain                         `json:"brain"`
-	Thinks              []GraphThink                       `json:"thinks"`
-	ThinkEdges          []GraphThinkEdge                   `json:"think_edges"`
-	FlowNodesByThink    map[string][]GraphFlowNode         `json:"flow_nodes_by_think"`
-	FlowEdgesByThink    map[string][]GraphFlowNodeEdge     `json:"flow_edges_by_think"`
-	CreatePowersByThink map[string][]GraphThinkCreatePower `json:"create_powers_by_think"`
+	Brain            GraphBrain                      `json:"brain"`
+	Thinks           []GraphThink                    `json:"thinks"`
+	ThinkEdges       []GraphThinkEdge                `json:"think_edges"`
+	NodesByThink     map[string][]GraphThinkNode     `json:"nodes_by_think"`
+	NodeEdgesByThink map[string][]GraphThinkNodeEdge `json:"node_edges_by_think"`
 }
 
 type AgentOption struct {
@@ -98,11 +85,20 @@ type AgentOption struct {
 	Key    string `json:"key"`
 }
 
+type BrainOption struct {
+	ID        uint64 `json:"id"`
+	CateID    uint64 `json:"cate_id"`
+	ReleaseID uint64 `json:"release_id"`
+	Name      string `json:"name"`
+	Key       string `json:"key"`
+}
+
 type PowerOption struct {
 	ID     uint64 `json:"id"`
 	CateID uint64 `json:"cate_id"`
 	Name   string `json:"name"`
 	Key    string `json:"key"`
+	Icon   string `json:"icon"`
 	Kind   string `json:"kind"`
 }
 
@@ -119,9 +115,27 @@ type AgentCateOption struct {
 type RunRequest struct {
 	BrainID   uint64
 	ThinkID   uint64
+	ReleaseID uint64
+	ProjectID uint64
 	RequestID string
 	Input     map[string]any
 	Mode      string
+}
+
+type CanvasPowerRunRequest struct {
+	ProjectID      uint64
+	BodyID         uint64
+	BrainID        uint64
+	ReleaseID      uint64
+	ThinkID        uint64
+	NodeKey        string
+	NodeName       string
+	Kind           string
+	PowerID        uint64
+	PowerKey       string
+	SourceTargetID uint64
+	Input          map[string]any
+	Params         map[string]any
 }
 
 type runWaitError struct {
@@ -191,6 +205,13 @@ func int16Value(raw any, fallback int16) int16 {
 func mapValue(raw any) map[string]any {
 	if row, ok := raw.(map[string]any); ok && row != nil {
 		return row
+	}
+	content, err := json.Marshal(raw)
+	if err == nil {
+		result := map[string]any{}
+		if json.Unmarshal(content, &result) == nil {
+			return result
+		}
 	}
 	return map[string]any{}
 }

@@ -7,16 +7,14 @@ import (
 )
 
 type ThinkEdge struct {
-	ID           uint64    `dorm:"primaryKey;autoIncrement;comment:思维连线ID"`
-	BrainID      uint64    `dorm:"type:bigint;not null;default:0;comment:大脑"`
-	FromThinkID  uint64    `dorm:"type:bigint;not null;default:0;comment:上游思维"`
-	ToThinkID    uint64    `dorm:"type:bigint;not null;default:0;comment:下游思维"`
-	Condition    string    `dorm:"type:varchar(64);not null;default:'completed';comment:条件"`
-	InputMapping string    `dorm:"type:text;not null;default:'{}';comment:输入映射"`
-	Config       string    `dorm:"type:text;not null;default:'{}';comment:配置"`
-	Status       int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	Sort         int       `dorm:"type:int;not null;default:100;comment:排序"`
-	CreatedAt    time.Time `dorm:"comment:创建时间"`
+	ID          uint64    `dorm:"primaryKey;autoIncrement;comment:思维连线ID"`
+	BrainID     uint64    `dorm:"type:bigint;not null;default:0;comment:大脑"`
+	FromThinkID uint64    `dorm:"type:bigint;not null;default:0;comment:上游思维"`
+	ToThinkID   uint64    `dorm:"type:bigint;not null;default:0;comment:下游思维"`
+	Condition   string    `dorm:"type:varchar(64);not null;default:'completed';comment:条件"`
+	Status      int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	Sort        int       `dorm:"type:int;not null;default:100;comment:排序"`
+	CreatedAt   time.Time `dorm:"comment:创建时间"`
 }
 
 type ThinkEdgeIndex struct {

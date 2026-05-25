@@ -8,6 +8,12 @@ var brainRelation = orm.Relation{
 	OptionKeys: []string{"name", "key"},
 }
 
+var brainCateRelation = orm.Relation{
+	Field:      "cate_id",
+	Option:     "bot.brain.NewBrainCateModel",
+	OptionKeys: []string{"name"},
+}
+
 var thinkRelation = orm.Relation{
 	Field:      "think_id",
 	Option:     "bot.brain.NewThinkModel",
@@ -26,21 +32,33 @@ var toThinkRelation = orm.Relation{
 	OptionKeys: []string{"name", "key"},
 }
 
-var flowNodeAgentRelation = orm.Relation{
+var nodeAgentRelation = orm.Relation{
 	Field:      "agent_id",
 	Option:     "bot.agent.NewAgentModel",
 	OptionKeys: []string{"name", "key"},
 }
 
-var flowFromNodeRelation = orm.Relation{
+var nodePowerRelation = orm.Relation{
+	Field:      "power_id",
+	Option:     "bot.energon.NewPowerModel",
+	OptionKeys: []string{"name", "key", "kind"},
+}
+
+var nodeSubBrainRelation = orm.Relation{
+	Field:      "sub_brain_id",
+	Option:     "bot.brain.NewBrainModel",
+	OptionKeys: []string{"name", "key"},
+}
+
+var nodeFromRelation = orm.Relation{
 	Field:      "from_node_id",
-	Option:     "bot.brain.NewThinkFlowNodeModel",
+	Option:     "bot.brain.NewThinkNodeModel",
 	OptionKeys: []string{"name", "node_key", "type"},
 }
 
-var flowToNodeRelation = orm.Relation{
+var nodeToRelation = orm.Relation{
 	Field:      "to_node_id",
-	Option:     "bot.brain.NewThinkFlowNodeModel",
+	Option:     "bot.brain.NewThinkNodeModel",
 	OptionKeys: []string{"name", "node_key", "type"},
 }
 
@@ -64,30 +82,18 @@ var nodeRunRelation = orm.Relation{
 
 var runNodeRelation = orm.Relation{
 	Field:      "node_id",
-	Option:     "bot.brain.NewThinkFlowNodeModel",
+	Option:     "bot.brain.NewThinkNodeModel",
 	OptionKeys: []string{"name", "node_key", "type"},
 }
 
-var createPowerRelation = orm.Relation{
-	Field:      "power_id",
-	Option:     "bot.energon.NewPowerModel",
-	OptionKeys: []string{"name", "key", "kind"},
-}
-
-var contentRelation = orm.Relation{
-	Field:      "content_id",
-	Option:     "bot.brain.NewContentModel",
-	OptionKeys: []string{"name", "key", "type"},
-}
-
-var currentVersionRelation = orm.Relation{
-	Field:      "current_version_id",
-	Option:     "bot.brain.NewContentVersionModel",
-	OptionKeys: []string{"title", "version", "status"},
+var assetRelation = orm.Relation{
+	Field:      "asset_id",
+	Option:     "bot.asset.NewAssetModel",
+	OptionKeys: []string{"name", "kind", "status"},
 }
 
 var versionRelation = orm.Relation{
 	Field:      "version_id",
-	Option:     "bot.brain.NewContentVersionModel",
-	OptionKeys: []string{"title", "version", "status"},
+	Option:     "bot.asset.NewVersionModel",
+	OptionKeys: []string{"version", "created_at"},
 }

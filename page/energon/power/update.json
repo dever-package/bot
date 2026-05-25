@@ -59,6 +59,12 @@
         ]
       },
       {
+        "type": "form-icon",
+        "placeholder": "请选择图标，可留空",
+        "value": "form.icon",
+        "mode": "form"
+      },
+      {
         "type": "form-radio",
         "value": "form.kind",
         "mode": "form"
@@ -97,6 +103,7 @@
   "data": {
     "form": {
       "cate_id": 1,
+      "icon": "zap",
       "kind": "text",
       "source_rule": 1,
       "params": [],

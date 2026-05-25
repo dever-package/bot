@@ -1,0 +1,129 @@
+{
+  "page": {
+    "name": "画布编辑",
+    "parent": "bot/body/canvas/list",
+    "type": 2,
+    "auth": [
+      {
+        "key": "bot/body/canvas/create",
+        "name": "画布新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/body/canvas/update",
+        "name": "画布编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "name": "名称",
+        "placeholder": "例如：默认自由画布",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "名称不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-array",
+        "name": "能力",
+        "value": "form.powers",
+        "mode": "form",
+        "info": "限制这个画布中可以创建和调用的能力。未添加时表示不限制能力。",
+        "meta": {
+          "formLayout": "horizontal",
+          "pageRoute": "/bot/body/canvas_power/update",
+          "addText": "添加能力",
+          "drag": "sort"
+        }
+      },
+      {
+        "type": "form-array",
+        "name": "智能体",
+        "value": "form.agents",
+        "mode": "form",
+        "info": "限制这个画布中可以调用的智能体。未添加时表示不限制智能体。",
+        "meta": {
+          "formLayout": "horizontal",
+          "pageRoute": "/bot/body/canvas_agent/update",
+          "addText": "添加智能体",
+          "drag": "sort"
+        }
+      },
+      {
+        "type": "form-array",
+        "name": "大脑",
+        "value": "form.brains",
+        "mode": "form",
+        "info": "限制这个画布中可以引用的大脑。未添加时表示不限制大脑。",
+        "meta": {
+          "formLayout": "horizontal",
+          "pageRoute": "/bot/body/canvas_brain/update",
+          "addText": "添加大脑",
+          "drag": "sort"
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "状态",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "trueValue": 1,
+          "falseValue": 2,
+          "formLayout": "horizontal"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "name": "",
+      "config": "{}",
+      "powers": [],
+      "agents": [],
+      "brains": [],
+      "status": 1
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.body.CanvasHook.BeforeSaveCanvas"
+      }
+    }
+  }
+}

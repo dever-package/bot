@@ -51,9 +51,7 @@
         "meta": {
           "workspaceApi": "/bot/brain/workspace_data",
           "saveThinkApi": "/bot/brain/save_think_graph",
-          "saveFlowApi": "/bot/brain/save_flow_graph",
           "saveNodeApi": "/bot/brain/save_node_graph",
-          "saveCreateApi": "/bot/brain/save_create_config",
           "validateThinkApi": "/bot/brain/validate_think",
           "validateNodeApi": "/bot/brain/validate_node",
           "runBrainApi": "/bot/brain/run_brain",

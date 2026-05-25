@@ -6,6 +6,7 @@ func runToMap(run brainmodel.Run) map[string]any {
 	return map[string]any{
 		"id":          run.ID,
 		"request_id":  run.RequestID,
+		"project_id":  run.ProjectID,
 		"brain_id":    run.BrainID,
 		"release_id":  run.ReleaseID,
 		"input":       jsonMap(run.Input),
@@ -18,15 +19,17 @@ func runToMap(run brainmodel.Run) map[string]any {
 	}
 }
 
-func thinkRunsToMaps(rows []brainmodel.ThinkRun) []map[string]any {
+func thinkRunsToMaps(rows []brainmodel.ThinkRun, thinkNames map[uint64]string) []map[string]any {
 	result := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, map[string]any{
 			"id":          row.ID,
 			"run_id":      row.RunID,
 			"request_id":  row.RequestID,
+			"project_id":  row.ProjectID,
 			"brain_id":    row.BrainID,
 			"think_id":    row.ThinkID,
+			"think_name":  thinkNames[row.ThinkID],
 			"input":       jsonMap(row.Input),
 			"output":      jsonMap(row.Output),
 			"error":       row.Error,
@@ -39,7 +42,7 @@ func thinkRunsToMaps(rows []brainmodel.ThinkRun) []map[string]any {
 	return result
 }
 
-func nodeRunsToMaps(rows []brainmodel.NodeRun) []map[string]any {
+func nodeRunsToMaps(rows []brainmodel.NodeRun, thinkNames map[uint64]string, nodeNames map[uint64]string) []map[string]any {
 	result := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, map[string]any{
@@ -47,10 +50,13 @@ func nodeRunsToMaps(rows []brainmodel.NodeRun) []map[string]any {
 			"run_id":       row.RunID,
 			"think_run_id": row.ThinkRunID,
 			"request_id":   row.RequestID,
+			"project_id":   row.ProjectID,
 			"brain_id":     row.BrainID,
 			"think_id":     row.ThinkID,
+			"think_name":   thinkNames[row.ThinkID],
 			"node_id":      row.NodeID,
 			"node_key":     row.NodeKey,
+			"node_name":    nodeNames[row.NodeID],
 			"node_type":    row.NodeType,
 			"input":        jsonMap(row.Input),
 			"output":       jsonMap(row.Output),

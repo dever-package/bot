@@ -19,6 +19,7 @@ func (PowerHook) ProviderBeforeSavePower(c *server.Context, params []any) any {
 
 	record["name"] = util.ToStringTrimmed(record["name"])
 	record["key"] = util.ToStringTrimmed(record["key"])
+	record["icon"] = util.ToStringTrimmed(record["icon"])
 	record["kind"] = strings.TrimSpace(util.ToString(record["kind"]))
 	record["source_rule"] = normalizePowerSourceRule(util.ToIntDefault(record["source_rule"], int(powerSourceRuleFirst)))
 	ensureDefaultCategory(record)

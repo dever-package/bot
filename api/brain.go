@@ -41,31 +41,17 @@ func (Brain) PostSaveThinkGraph(c *server.Context) error {
 	return brainJSON(c, data, err)
 }
 
-func (Brain) PostSaveFlowGraph(c *server.Context) error {
-	return saveFlowGraph(c)
-}
-
 func (Brain) PostSaveNodeGraph(c *server.Context) error {
-	return saveFlowGraph(c)
+	return saveNodeGraph(c)
 }
 
-func saveFlowGraph(c *server.Context) error {
+func saveNodeGraph(c *server.Context) error {
 	body, err := bindBrainBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
 	thinkID := uint64ValueFromBody(body, "think_id", "thinkId", "id")
-	data, err := brainRunner.SaveFlowGraph(c.Context(), thinkID, body)
-	return brainJSON(c, data, err)
-}
-
-func (Brain) PostSaveCreateConfig(c *server.Context) error {
-	body, err := bindBrainBody(c)
-	if err != nil {
-		return c.Error(err)
-	}
-	thinkID := uint64ValueFromBody(body, "think_id", "thinkId", "id")
-	data, err := brainRunner.SaveCreateConfig(c.Context(), thinkID, body)
+	data, err := brainRunner.SaveThinkNodeGraph(c.Context(), thinkID, body)
 	return brainJSON(c, data, err)
 }
 
@@ -77,7 +63,7 @@ func (Brain) GetValidateThink(c *server.Context) error {
 
 func (Brain) GetValidateNode(c *server.Context) error {
 	thinkID := uint64(frontstream.InputInt64(c.Input("think_id"), 0))
-	data, err := brainRunner.ValidateFlowGraph(c.Context(), thinkID)
+	data, err := brainRunner.ValidateThinkNodeGraph(c.Context(), thinkID)
 	return brainJSON(c, data, err)
 }
 
@@ -86,11 +72,19 @@ func (Brain) PostRunBrain(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
+	mode := "brain"
+	releaseID := uint64ValueFromBody(body, "release_id", "releaseId")
+	if boolFromBody(body, "debug_current_graph", "debugCurrentGraph") {
+		mode = "debug_brain"
+		releaseID = 0
+	}
 	data, err := brainRunner.RunBrain(c.Context(), brainservice.RunRequest{
 		BrainID:   uint64ValueFromBody(body, "brain_id", "brainId", "id"),
+		ReleaseID: releaseID,
+		ProjectID: uint64ValueFromBody(body, "project_id", "projectId"),
 		RequestID: textFromBody(body, "request_id", "requestId"),
 		Input:     mapFromBody(body, "input"),
-		Mode:      "brain",
+		Mode:      mode,
 	})
 	return brainJSON(c, data, err)
 }
@@ -100,9 +94,86 @@ func (Brain) PostRunThink(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
+	mode := "think"
+	releaseID := uint64ValueFromBody(body, "release_id", "releaseId")
+	if boolFromBody(body, "debug_current_graph", "debugCurrentGraph") {
+		mode = "debug_think"
+		releaseID = 0
+	}
 	data, err := brainRunner.RunThink(c.Context(), brainservice.RunRequest{
 		BrainID:   uint64ValueFromBody(body, "brain_id", "brainId"),
 		ThinkID:   uint64ValueFromBody(body, "think_id", "thinkId", "id"),
+		ReleaseID: releaseID,
+		ProjectID: uint64ValueFromBody(body, "project_id", "projectId"),
+		RequestID: textFromBody(body, "request_id", "requestId"),
+		Input:     mapFromBody(body, "input"),
+		Mode:      mode,
+	})
+	return brainJSON(c, data, err)
+}
+
+func (Brain) GetTypeList(c *server.Context) error {
+	data, err := brainRunner.TypeList(c.Context())
+	return brainJSON(c, data, err)
+}
+
+func (Brain) GetTypeDetail(c *server.Context) error {
+	brainID := uint64(frontstream.InputInt64(c.Input("brain_id"), 0))
+	if brainID == 0 {
+		brainID = uint64(frontstream.InputInt64(c.Input("id"), 0))
+	}
+	releaseID := uint64(frontstream.InputInt64(c.Input("release_id"), 0))
+	data, err := brainRunner.TypeDetail(c.Context(), brainID, releaseID)
+	return brainJSON(c, data, err)
+}
+
+func (Brain) GetRuntimeGraph(c *server.Context) error {
+	brainID := uint64(frontstream.InputInt64(c.Input("brain_id"), 0))
+	releaseID := uint64(frontstream.InputInt64(c.Input("release_id"), 0))
+	data, err := brainRunner.RuntimeGraph(c.Context(), brainID, releaseID)
+	return brainJSON(c, data, err)
+}
+
+func (Brain) GetCanvasConfig(c *server.Context) error {
+	releaseID := uint64(frontstream.InputInt64(c.Input("release_id"), 0))
+	thinkID := uint64(frontstream.InputInt64(c.Input("think_id"), 0))
+	data, err := brainRunner.CanvasConfig(c.Context(), releaseID, thinkID)
+	return brainJSON(c, data, err)
+}
+
+func (Brain) PostRunCanvasPower(c *server.Context) error {
+	body, err := bindBrainBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := brainRunner.RunCanvasPower(c.Context(), brainservice.CanvasPowerRunRequest{
+		ProjectID:      uint64ValueFromBody(body, "project_id", "projectId"),
+		BodyID:         uint64ValueFromBody(body, "body_id", "bodyId"),
+		BrainID:        uint64ValueFromBody(body, "brain_id", "brainId"),
+		ReleaseID:      uint64ValueFromBody(body, "release_id", "releaseId"),
+		ThinkID:        uint64ValueFromBody(body, "think_id", "thinkId"),
+		NodeKey:        textFromBody(body, "node_key", "nodeKey"),
+		NodeName:       textFromBody(body, "node_name", "nodeName", "name"),
+		Kind:           textFromBody(body, "kind"),
+		PowerID:        uint64ValueFromBody(body, "power_id", "powerId"),
+		PowerKey:       textFromBody(body, "power_key", "powerKey", "power"),
+		SourceTargetID: uint64ValueFromBody(body, "source_target_id", "sourceTargetId", "power_target_id", "powerTargetId"),
+		Input:          mapFromBody(body, "input"),
+		Params:         mapFromBody(body, "params"),
+	})
+	return brainJSON(c, data, err)
+}
+
+func (Brain) PostRunProjectThink(c *server.Context) error {
+	body, err := bindBrainBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := brainRunner.RunThink(c.Context(), brainservice.RunRequest{
+		BrainID:   uint64ValueFromBody(body, "brain_id", "brainId"),
+		ThinkID:   uint64ValueFromBody(body, "think_id", "thinkId", "id"),
+		ReleaseID: uint64ValueFromBody(body, "release_id", "releaseId"),
+		ProjectID: uint64ValueFromBody(body, "project_id", "projectId"),
 		RequestID: textFromBody(body, "request_id", "requestId"),
 		Input:     mapFromBody(body, "input"),
 		Mode:      "think",
@@ -191,4 +262,14 @@ func mapFromBody(body map[string]any, key string) map[string]any {
 		return row
 	}
 	return map[string]any{}
+}
+
+func boolFromBody(body map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		switch strings.ToLower(strings.TrimSpace(frontstream.InputText(body[key]))) {
+		case "1", "true", "yes", "y", "on":
+			return true
+		}
+	}
+	return false
 }

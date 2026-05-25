@@ -1,0 +1,92 @@
+{
+  "page": {
+    "name": "画布智能体",
+    "parent": "bot/body/canvas_agent/list",
+    "type": 2,
+    "auth": [
+      {
+        "key": "bot/body/canvas_agent/create",
+        "name": "画布智能体新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/body/canvas_agent/update",
+        "name": "画布智能体编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-cascader",
+        "name": "智能体",
+        "value": "form.agent_id",
+        "mode": "form",
+        "placeholder": "请选择智能体",
+        "validate": [
+          {
+            "type": "required",
+            "message": "智能体不能为空。"
+          }
+        ],
+        "meta": {
+          "api": "/front/route/option",
+          "use": "bot.agent.NewAgentCateModel",
+          "childUse": "bot.agent.NewAgentModel",
+          "childParentField": "cate_id",
+          "valueMode": "leaf",
+          "placeholder": [
+            "选择智能体分类",
+            "选择智能体"
+          ],
+          "childExtraFields": "key,cate_id,kind,status"
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "状态",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "canvas_id": 0,
+      "agent_id": 0,
+      "config": "{}",
+      "status": 1
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}

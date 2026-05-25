@@ -11,6 +11,7 @@ type NodeRun struct {
 	RunID      uint64 `dorm:"type:bigint;not null;default:0;comment:大脑运行"`
 	ThinkRunID uint64 `dorm:"type:bigint;not null;default:0;comment:思维运行"`
 	RequestID  string `dorm:"type:varchar(64);not null;comment:请求ID"`
+	ProjectID  uint64 `dorm:"type:bigint;not null;default:0;comment:项目"`
 	BrainID    uint64 `dorm:"type:bigint;not null;default:0;comment:大脑"`
 	ThinkID    uint64 `dorm:"type:bigint;not null;default:0;comment:思维"`
 	NodeID     uint64 `dorm:"type:bigint;not null;default:0;comment:节点"`
@@ -30,6 +31,7 @@ type NodeRun struct {
 
 type NodeRunIndex struct {
 	ThinkRunNode  struct{} `unique:"think_run_id,node_id"`
+	ProjectStatus struct{} `index:"project_id,status"`
 	RunStatus     struct{} `index:"run_id,status"`
 	ThinkStatus   struct{} `index:"think_id,status"`
 	NodeStatus    struct{} `index:"node_id,status"`

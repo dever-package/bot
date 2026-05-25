@@ -1,0 +1,93 @@
+{
+  "page": {
+    "name": "画布大脑",
+    "parent": "bot/body/canvas_brain/list",
+    "type": 2,
+    "auth": [
+      {
+        "key": "bot/body/canvas_brain/create",
+        "name": "画布大脑新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/body/canvas_brain/update",
+        "name": "画布大脑编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-cascader",
+        "name": "大脑",
+        "value": "form.brain_id",
+        "mode": "form",
+        "placeholder": "请选择大脑",
+        "validate": [
+          {
+            "type": "required",
+            "message": "大脑不能为空。"
+          }
+        ],
+        "meta": {
+          "api": "/front/route/option",
+          "use": "bot.brain.NewBrainCateModel",
+          "childUse": "bot.brain.NewBrainModel",
+          "childParentField": "cate_id",
+          "valueMode": "leaf",
+          "placeholder": [
+            "选择大脑分类",
+            "选择大脑"
+          ],
+          "childExtraFields": "key,cate_id,status,publish_status,current_release_id"
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "状态",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "canvas_id": 0,
+      "brain_id": 0,
+      "release_id": 0,
+      "config": "{}",
+      "status": 1
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}

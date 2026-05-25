@@ -17,17 +17,13 @@ func (s Service) ValidateThinkGraph(ctx context.Context, brainID uint64) (map[st
 	return validationResult(issues), nil
 }
 
-func (s Service) ValidateFlowGraph(ctx context.Context, thinkID uint64) (map[string]any, error) {
-	think, err := s.repo.FindThink(ctx, thinkID)
-	if err != nil {
+func (s Service) ValidateThinkNodeGraph(ctx context.Context, thinkID uint64) (map[string]any, error) {
+	if _, err := s.repo.FindThink(ctx, thinkID); err != nil {
 		return nil, err
 	}
-	if normalizeThinkType(think.Type) != brainmodel.ThinkTypeFlow {
-		return nil, fmt.Errorf("创作没有流程节点可校验")
-	}
-	nodes := s.repo.ListFlowNodes(ctx, thinkID, true)
-	edges := s.repo.ListFlowNodeEdges(ctx, thinkID, true)
-	issues := validateFlowGraph(nodes, edges)
+	nodes := s.repo.ListThinkNodes(ctx, thinkID, true)
+	edges := s.repo.ListThinkNodeEdges(ctx, thinkID, true)
+	issues := validateThinkNodeGraph(nodes, edges)
 	return validationResult(issues), nil
 }
 
@@ -65,12 +61,12 @@ func validateThinkGraph(thinks []brainmodel.Think, edges []brainmodel.ThinkEdge)
 	return issues
 }
 
-func validateFlowGraph(nodes []brainmodel.ThinkFlowNode, edges []brainmodel.ThinkFlowNodeEdge) []string {
+func validateThinkNodeGraph(nodes []brainmodel.ThinkNode, edges []brainmodel.ThinkNodeEdge) []string {
 	issues := []string{}
 	if len(nodes) == 0 {
 		return []string{"至少需要创建一个节点"}
 	}
-	nodeByID := map[uint64]brainmodel.ThinkFlowNode{}
+	nodeByID := map[uint64]brainmodel.ThinkNode{}
 	incomingCount := map[uint64]int{}
 	keySeen := map[string]bool{}
 	for _, node := range nodes {
@@ -88,9 +84,12 @@ func validateFlowGraph(nodes []brainmodel.ThinkFlowNode, edges []brainmodel.Thin
 				issues = append(issues, fmt.Sprintf("智能体节点 %s 未绑定智能体", node.Name))
 			}
 		case brainmodel.NodeTypePower:
-			config := jsonMap(node.Config)
-			if textValue(config["power_key"]) == "" && uint64Value(config["power_id"]) == 0 {
+			if node.PowerID == 0 {
 				issues = append(issues, fmt.Sprintf("能力节点 %s 未绑定能力", node.Name))
+			}
+		case brainmodel.NodeTypeBrain:
+			if node.SubBrainID == 0 {
+				issues = append(issues, fmt.Sprintf("大脑节点 %s 未绑定大脑", node.Name))
 			}
 		}
 	}
@@ -143,7 +142,7 @@ func thinkEdgePairs(edges []brainmodel.ThinkEdge) [][2]uint64 {
 	return result
 }
 
-func nodeIDs(nodes []brainmodel.ThinkFlowNode) []uint64 {
+func nodeIDs(nodes []brainmodel.ThinkNode) []uint64 {
 	result := make([]uint64, 0, len(nodes))
 	for _, node := range nodes {
 		result = append(result, node.ID)
@@ -151,7 +150,7 @@ func nodeIDs(nodes []brainmodel.ThinkFlowNode) []uint64 {
 	return result
 }
 
-func nodeEdgePairs(edges []brainmodel.ThinkFlowNodeEdge) [][2]uint64 {
+func nodeEdgePairs(edges []brainmodel.ThinkNodeEdge) [][2]uint64 {
 	result := make([][2]uint64, 0, len(edges))
 	for _, edge := range edges {
 		result = append(result, [2]uint64{edge.FromNodeID, edge.ToNodeID})

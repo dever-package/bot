@@ -14,6 +14,22 @@ func (s Service) SubmitApproval(ctx context.Context, approvalID uint64, decision
 	if approval == nil {
 		return nil, fmt.Errorf("人工确认不存在")
 	}
+	return s.submitResolvedApproval(ctx, *approval, decision, comment, data)
+}
+
+func (s Service) SubmitProjectApproval(ctx context.Context, projectID uint64, approvalID uint64, decision string, comment string, data map[string]any) (map[string]any, error) {
+	approval := s.repo.FindApproval(ctx, approvalID)
+	if approval == nil {
+		return nil, fmt.Errorf("人工确认不存在")
+	}
+	run := s.repo.FindRunInProject(ctx, approval.RunID, projectID)
+	if run == nil {
+		return nil, fmt.Errorf("人工确认不属于当前项目")
+	}
+	return s.submitResolvedApproval(ctx, *approval, decision, comment, data)
+}
+
+func (s Service) submitResolvedApproval(ctx context.Context, approval brainmodel.Approval, decision string, comment string, data map[string]any) (map[string]any, error) {
 	if approval.Status != brainmodel.RunStatusPending {
 		return nil, fmt.Errorf("人工确认已处理")
 	}

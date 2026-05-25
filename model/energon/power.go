@@ -11,6 +11,7 @@ type Power struct {
 	CateID     uint64    `dorm:"type:bigint;not null;default:1;comment:能力分类"`
 	Key        string    `dorm:"type:varchar(128);not null;comment:标识"`
 	Name       string    `dorm:"type:varchar(128);not null;comment:名称"`
+	Icon       string    `dorm:"type:varchar(64);not null;default:'';comment:图标"`
 	Kind       string    `dorm:"type:varchar(64);not null;comment:类型"`
 	SourceRule int16     `dorm:"type:smallint;not null;default:1;comment:来源规则"`
 	Status     int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
@@ -32,6 +33,7 @@ var (
 			"cate_id":     1,
 			"key":         "llm",
 			"name":        "LLM",
+			"icon":        "file-text",
 			"kind":        "text",
 			"source_rule": 1,
 			"status":      1,

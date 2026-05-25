@@ -1,0 +1,195 @@
+{
+  "page": {
+    "name": "画布智能体",
+    "icon": "bot",
+    "parent": "bot/body/canvas/list",
+    "type": 2
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "table-row": {
+            "type": "container",
+            "className": "overflow-hidden rounded-md border bg-background"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "新增画布智能体",
+        "meta": {
+          "variant": "default",
+          "size": "sm"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.create",
+            "value": true
+          }
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "savePath": "bot/body/canvas_agent/update",
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "canvas.name",
+              "name": "画布",
+              "type": "show-base"
+            },
+            {
+              "value": "agent.name",
+              "name": "智能体",
+              "type": "show-base"
+            },
+            {
+              "value": "status",
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.id",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.edit",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.create",
+          "pageRoute": "/bot/body/canvas_agent/update",
+          "title": "新增画布智能体",
+          "description": "选择当前画布可用的智能体。未配置时自由画布默认不限制智能体。",
+          "size": "lg",
+          "pageDataPatches": {
+            "form.canvas_id": "data.search.canvas_id"
+          },
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.edit",
+          "pageRoute": "/bot/body/canvas_agent/update",
+          "pageRouteQuery": {
+            "id": "data.actionTarget.id"
+          },
+          "title": "编辑画布智能体",
+          "size": "lg",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "画布智能体",
+      "description": "限制自由画布里允许调用的智能体。"
+    },
+    "search": {
+      "canvas_id": ""
+    },
+    "table": {
+      "page": 1,
+      "pageSize": 10,
+      "total": 0,
+      "filterFields": [
+        "canvas_id"
+      ]
+    },
+    "actionTarget": {
+      "id": ""
+    }
+  },
+  "state": {
+    "dialog": {
+      "create": false,
+      "edit": false
+    }
+  },
+  "action": {}
+}

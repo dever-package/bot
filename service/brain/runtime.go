@@ -8,6 +8,7 @@ import (
 	"time"
 
 	brainmodel "my/package/bot/model/brain"
+	assetservice "my/package/bot/service/asset"
 )
 
 func (s Service) RunBrain(ctx context.Context, req RunRequest) (map[string]any, error) {
@@ -15,20 +16,36 @@ func (s Service) RunBrain(ctx context.Context, req RunRequest) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	release, err := s.runnableBrainRelease(ctx, brain)
-	if err != nil {
-		return nil, err
+	mode := strings.TrimSpace(req.Mode)
+	if mode == "" {
+		mode = "brain"
+	}
+	var release *brainmodel.BrainRelease
+	if mode != "debug_brain" {
+		release, err = s.runnableRelease(ctx, brain, req.ReleaseID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	requestID := strings.TrimSpace(req.RequestID)
 	if requestID == "" {
 		requestID = newRequestID()
 	}
+	runInput := cloneInput(req.Input)
+	runInput["_mode"] = mode
+	releaseID := uint64(0)
+	version := 0
+	if release != nil {
+		releaseID = release.ID
+		version = release.Version
+	}
 	now := time.Now()
 	runID := s.repo.InsertRun(ctx, map[string]any{
 		"request_id": requestID,
+		"project_id": req.ProjectID,
 		"brain_id":   brain.ID,
-		"release_id": release.ID,
-		"input":      jsonText(req.Input),
+		"release_id": releaseID,
+		"input":      jsonText(runInput),
 		"output":     "{}",
 		"error":      "",
 		"status":     brainmodel.RunStatusRunning,
@@ -44,8 +61,8 @@ func (s Service) RunBrain(ctx context.Context, req RunRequest) (map[string]any, 
 		"request_id": requestID,
 		"run_id":     runID,
 		"status":     brainmodel.RunStatusRunning,
-		"release_id": release.ID,
-		"version":    release.Version,
+		"release_id": releaseID,
+		"version":    version,
 		"brain": map[string]any{
 			"id":   brain.ID,
 			"name": brain.Name,
@@ -69,33 +86,50 @@ func (s Service) RunThink(ctx context.Context, req RunRequest) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	release, err := s.runnableBrainRelease(ctx, brain)
-	if err != nil {
-		return nil, err
+	mode := strings.TrimSpace(req.Mode)
+	if mode == "" {
+		mode = "think"
 	}
-	graph, err := runtimeGraphFromRelease(*release)
-	if err != nil {
-		return nil, err
-	}
-	think := graph.findThink(req.ThinkID)
-	if think.ID == 0 {
-		return nil, fmt.Errorf("当前思维还没有发布，不能运行")
+	releaseID := uint64(0)
+	version := 0
+	var think brainmodel.Think
+	if mode == "debug_think" {
+		think, err = s.repo.FindThink(ctx, req.ThinkID)
+		if err != nil {
+			return nil, err
+		}
+		if think.BrainID != brain.ID {
+			return nil, fmt.Errorf("思维不属于当前大脑")
+		}
+	} else {
+		release, releaseErr := s.runnableRelease(ctx, brain, req.ReleaseID)
+		if releaseErr != nil {
+			return nil, releaseErr
+		}
+		graph, graphErr := runtimeGraphFromRelease(*release)
+		if graphErr != nil {
+			return nil, graphErr
+		}
+		think = graph.findThink(req.ThinkID)
+		if think.ID == 0 {
+			return nil, fmt.Errorf("当前思维还没有发布，不能运行")
+		}
+		releaseID = release.ID
+		version = release.Version
 	}
 	requestID := strings.TrimSpace(req.RequestID)
 	if requestID == "" {
 		requestID = newRequestID()
 	}
-	runInput := map[string]any{}
-	for key, value := range req.Input {
-		runInput[key] = value
-	}
-	runInput["_mode"] = "think"
+	runInput := cloneInput(req.Input)
+	runInput["_mode"] = mode
 	runInput["_think_id"] = think.ID
 	now := time.Now()
 	runID := s.repo.InsertRun(ctx, map[string]any{
 		"request_id": requestID,
+		"project_id": req.ProjectID,
 		"brain_id":   brain.ID,
-		"release_id": release.ID,
+		"release_id": releaseID,
 		"input":      jsonText(runInput),
 		"output":     "{}",
 		"error":      "",
@@ -113,8 +147,8 @@ func (s Service) RunThink(ctx context.Context, req RunRequest) (map[string]any, 
 		"run_id":     runID,
 		"think_id":   think.ID,
 		"status":     brainmodel.RunStatusRunning,
-		"release_id": release.ID,
-		"version":    release.Version,
+		"release_id": releaseID,
+		"version":    version,
 	}, nil
 }
 
@@ -136,6 +170,15 @@ func (s Service) ResumeRun(ctx context.Context, runID uint64) (map[string]any, e
 
 func (s Service) StopRun(ctx context.Context, runID uint64, requestID string) (map[string]any, error) {
 	run := s.resolveRun(ctx, runID, requestID)
+	return s.stopResolvedRun(ctx, run)
+}
+
+func (s Service) StopProjectRun(ctx context.Context, projectID uint64, runID uint64, requestID string) (map[string]any, error) {
+	run := s.resolveProjectRun(ctx, projectID, runID, requestID)
+	return s.stopResolvedRun(ctx, run)
+}
+
+func (s Service) stopResolvedRun(ctx context.Context, run *brainmodel.Run) (map[string]any, error) {
 	if run == nil {
 		return nil, fmt.Errorf("运行不存在")
 	}
@@ -153,17 +196,68 @@ func (s Service) StopRun(ctx context.Context, runID uint64, requestID string) (m
 
 func (s Service) RunStatus(ctx context.Context, runID uint64, requestID string) (map[string]any, error) {
 	run := s.resolveRun(ctx, runID, requestID)
+	return s.resolvedRunStatus(ctx, run)
+}
+
+func (s Service) ProjectRunStatus(ctx context.Context, projectID uint64, runID uint64, requestID string) (map[string]any, error) {
+	run := s.resolveProjectRun(ctx, projectID, runID, requestID)
+	return s.resolvedRunStatus(ctx, run)
+}
+
+func (s Service) resolvedRunStatus(ctx context.Context, run *brainmodel.Run) (map[string]any, error) {
 	if run == nil {
 		return nil, fmt.Errorf("运行不存在")
 	}
+	thinkRuns := s.repo.ListThinkRuns(ctx, run.ID)
+	nodeRuns := s.repo.ListNodeRuns(ctx, run.ID)
+	thinkNames := s.thinkNameMap(ctx, thinkRuns, nodeRuns)
+	nodeNames := s.nodeNameMap(ctx, nodeRuns)
 	return map[string]any{
 		"run":        runToMap(*run),
-		"think_runs": thinkRunsToMaps(s.repo.ListThinkRuns(ctx, run.ID)),
-		"node_runs":  nodeRunsToMaps(s.repo.ListNodeRuns(ctx, run.ID)),
+		"think_runs": thinkRunsToMaps(thinkRuns, thinkNames),
+		"node_runs":  nodeRunsToMaps(nodeRuns, thinkNames, nodeNames),
+		"agent_runs": s.agent.RunTraces(ctx, agentRunIDsFromNodeRuns(nodeRuns)),
 		"blackboard": blackboardRowsToMaps(s.repo.ListBlackboardRows(ctx, run.ID)),
 		"messages":   messagesToMaps(s.repo.ListMessages(ctx, run.ID)),
 		"approvals":  approvalsToMaps(s.repo.ListApprovals(ctx, run.ID)),
 	}, nil
+}
+
+func (s Service) thinkNameMap(ctx context.Context, thinkRuns []brainmodel.ThinkRun, nodeRuns []brainmodel.NodeRun) map[uint64]string {
+	ids := make([]uint64, 0, len(thinkRuns)+len(nodeRuns))
+	for _, row := range thinkRuns {
+		ids = append(ids, row.ThinkID)
+	}
+	for _, row := range nodeRuns {
+		ids = append(ids, row.ThinkID)
+	}
+	result := map[uint64]string{}
+	for _, think := range s.repo.ListThinksByIDs(ctx, ids) {
+		result[think.ID] = think.Name
+	}
+	return result
+}
+
+func (s Service) nodeNameMap(ctx context.Context, nodeRuns []brainmodel.NodeRun) map[uint64]string {
+	ids := make([]uint64, 0, len(nodeRuns))
+	for _, row := range nodeRuns {
+		ids = append(ids, row.NodeID)
+	}
+	result := map[uint64]string{}
+	for _, node := range s.repo.ListThinkNodesByIDs(ctx, ids) {
+		result[node.ID] = node.Name
+	}
+	return result
+}
+
+func agentRunIDsFromNodeRuns(rows []brainmodel.NodeRun) []uint64 {
+	result := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		if row.AgentRunID > 0 {
+			result = append(result, row.AgentRunID)
+		}
+	}
+	return result
 }
 
 func (s Service) resolveRun(ctx context.Context, runID uint64, requestID string) *brainmodel.Run {
@@ -171,6 +265,16 @@ func (s Service) resolveRun(ctx context.Context, runID uint64, requestID string)
 		return s.repo.FindRun(ctx, runID)
 	}
 	return s.repo.FindRunByRequestID(ctx, requestID)
+}
+
+func (s Service) resolveProjectRun(ctx context.Context, projectID uint64, runID uint64, requestID string) *brainmodel.Run {
+	if projectID == 0 {
+		return nil
+	}
+	if runID > 0 {
+		return s.repo.FindRunInProject(ctx, runID, projectID)
+	}
+	return s.repo.FindRunByRequestIDInProject(ctx, requestID, projectID)
 }
 
 func (s Service) executeBrainRun(ctx context.Context, runID uint64) {
@@ -190,7 +294,7 @@ func (s Service) executeBrainRun(ctx context.Context, runID uint64) {
 		s.finishRun(ctx, run.ID, brainmodel.RunStatusFail, nil, errors.New(strings.Join(issues, "；")))
 		return
 	}
-	input := jsonMap(run.Input)
+	input := executionInput(jsonMap(run.Input))
 	status, output, err := s.executeThinkDAG(ctx, *run, graph, input)
 	if err != nil {
 		s.finishRun(ctx, run.ID, status, output, err)
@@ -223,8 +327,8 @@ func (s Service) executeSingleThinkRun(ctx context.Context, runID uint64, thinkI
 		graph.Brain,
 		think,
 		input,
-		graph.FlowNodesByThinkID[think.ID],
-		graph.FlowEdgesByThinkID[think.ID],
+		graph.NodesByThinkID[think.ID],
+		graph.NodeEdgesByThinkID[think.ID],
 	)
 	if err != nil {
 		s.finishRun(ctx, run.ID, status, output, err)
@@ -283,8 +387,8 @@ func (s Service) executeThinkDAG(ctx context.Context, run brainmodel.Run, graph 
 				graph.Brain,
 				think,
 				thinkInput,
-				graph.FlowNodesByThinkID[think.ID],
-				graph.FlowEdgesByThinkID[think.ID],
+				graph.NodesByThinkID[think.ID],
+				graph.NodeEdgesByThinkID[think.ID],
 			)
 			if status == brainmodel.RunStatusWaiting {
 				return status, completedOutput(completed), err
@@ -304,7 +408,7 @@ func (s Service) runCanceled(ctx context.Context, runID uint64) bool {
 	return run != nil && run.Status == brainmodel.RunStatusCanceled
 }
 
-func (s Service) executeThinkWithGraph(ctx context.Context, run brainmodel.Run, brain brainmodel.Brain, think brainmodel.Think, input map[string]any, nodes []brainmodel.ThinkFlowNode, edges []brainmodel.ThinkFlowNodeEdge) (string, map[string]any, error) {
+func (s Service) executeThinkWithGraph(ctx context.Context, run brainmodel.Run, brain brainmodel.Brain, think brainmodel.Think, input map[string]any, nodes []brainmodel.ThinkNode, edges []brainmodel.ThinkNodeEdge) (string, map[string]any, error) {
 	thinkRunID := s.repo.FindOrCreateThinkRun(ctx, run, think, input)
 	thinkRun := s.repo.FindThinkRun(ctx, thinkRunID)
 	if thinkRun == nil {
@@ -319,17 +423,7 @@ func (s Service) executeThinkWithGraph(ctx context.Context, run brainmodel.Run, 
 		s.writeBlackboard(ctx, run, *thinkRun, key, value, "input", 0)
 	}
 
-	if normalizeThinkType(think.Type) != brainmodel.ThinkTypeFlow {
-		err := fmt.Errorf("创作需要由前端画布运行，不能作为流程直接运行: %s", think.Name)
-		s.repo.UpdateThinkRun(ctx, thinkRun.ID, map[string]any{
-			"status":      brainmodel.RunStatusFail,
-			"error":       err.Error(),
-			"finished_at": time.Now(),
-		})
-		return brainmodel.RunStatusFail, nil, err
-	}
-
-	if issues := validateFlowGraph(nodes, edges); len(issues) > 0 {
+	if issues := validateThinkNodeGraph(nodes, edges); len(issues) > 0 {
 		err := errors.New(strings.Join(issues, "；"))
 		s.repo.UpdateThinkRun(ctx, thinkRun.ID, map[string]any{
 			"status":      brainmodel.RunStatusFail,
@@ -362,6 +456,10 @@ func (s Service) executeThinkWithGraph(ctx context.Context, run brainmodel.Run, 
 }
 
 func (s Service) finishRun(ctx context.Context, runID uint64, status string, output map[string]any, err error) {
+	var assetErr error
+	if status == brainmodel.RunStatusSuccess {
+		assetErr = s.saveFinalRunAsset(ctx, runID, output)
+	}
 	record := map[string]any{
 		"status": status,
 		"output": jsonText(output),
@@ -371,8 +469,94 @@ func (s Service) finishRun(ctx context.Context, runID uint64, status string, out
 	}
 	if err != nil {
 		record["error"] = err.Error()
+	} else if assetErr != nil {
+		record["error"] = assetErr.Error()
 	}
 	s.repo.UpdateRun(ctx, runID, record)
+}
+
+func cloneInput(input map[string]any) map[string]any {
+	result := map[string]any{}
+	for key, value := range input {
+		result[key] = value
+	}
+	return result
+}
+
+func executionInput(input map[string]any) map[string]any {
+	result := map[string]any{}
+	for key, value := range input {
+		if strings.HasPrefix(key, "_") {
+			continue
+		}
+		result[key] = value
+	}
+	return result
+}
+
+func (s Service) saveFinalRunAsset(ctx context.Context, runID uint64, output map[string]any) error {
+	if len(output) == 0 {
+		return nil
+	}
+	run := s.repo.FindRun(ctx, runID)
+	if run == nil || run.ProjectID == 0 {
+		return nil
+	}
+	input := jsonMap(run.Input)
+	mode := firstText(input["_mode"])
+	if mode != "brain" && mode != "think" {
+		return nil
+	}
+	thinkID := uint64(0)
+	name := "大脑运行结果"
+	if mode == "think" {
+		thinkID = uint64Value(input["_think_id"])
+		name = "思维运行结果"
+		if thinkID > 0 {
+			if think, err := s.repo.FindThink(ctx, thinkID); err == nil {
+				name = fmt.Sprintf("%s 运行结果", think.Name)
+			}
+		}
+	}
+	_, _, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
+		ProjectID: run.ProjectID,
+		BrainID:   run.BrainID,
+		ThinkID:   thinkID,
+		RunID:     run.ID,
+		ReleaseID: run.ReleaseID,
+		Name:      name,
+		Kind:      finalAssetKind(output),
+		Content:   output,
+	})
+	return err
+}
+
+func finalAssetKind(output map[string]any) string {
+	if kind := firstText(output["kind"], output["content_type"], output["type"]); kind != "" {
+		return kind
+	}
+	if _, ok := output["image"]; ok {
+		return "image"
+	}
+	if _, ok := output["images"]; ok {
+		return "image"
+	}
+	if _, ok := output["video"]; ok {
+		return "video"
+	}
+	if _, ok := output["videos"]; ok {
+		return "video"
+	}
+	if _, ok := output["audio"]; ok {
+		return "audio"
+	}
+	if _, ok := output["audios"]; ok {
+		return "audio"
+	}
+	if len(output) > 1 {
+		return "mixed"
+	}
+	return "text"
 }
 
 func thinkReady(thinkID uint64, incoming map[uint64][]brainmodel.ThinkEdge, completed map[uint64]map[string]any, skipped map[uint64]bool) bool {
@@ -459,13 +643,6 @@ func buildThinkInput(root map[string]any, incoming []brainmodel.ThinkEdge, compl
 			continue
 		}
 		result[fmt.Sprintf("think_%d", edge.FromThinkID)] = output
-		for fromKey, toKeyRaw := range jsonMap(edge.InputMapping) {
-			toKey := textValue(toKeyRaw)
-			if toKey == "" {
-				continue
-			}
-			result[toKey] = output[fromKey]
-		}
 	}
 	return result
 }

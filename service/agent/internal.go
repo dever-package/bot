@@ -9,18 +9,20 @@ import (
 	"github.com/google/uuid"
 
 	agentprompt "my/package/bot/service/agent/prompt"
+	frontstream "my/package/front/service/stream"
 )
 
 type InternalRunRequest struct {
-	AgentKey  string
-	RequestID string
-	Method    string
-	Host      string
-	Path      string
-	Headers   map[string]string
-	Input     map[string]any
-	History   []any
-	Options   map[string]any
+	AgentKey     string
+	RequestID    string
+	Method       string
+	Host         string
+	Path         string
+	Headers      map[string]string
+	Input        map[string]any
+	History      []any
+	Options      map[string]any
+	OnRunCreated func(runID uint64, requestID string)
 }
 
 type InternalRunResult struct {
@@ -70,6 +72,19 @@ func (s Service) RunInternal(ctx context.Context, req InternalRunRequest) (Inter
 	if runID == 0 {
 		return InternalRunResult{}, fmt.Errorf("创建内部智能体运行记录失败")
 	}
+	if req.OnRunCreated != nil {
+		req.OnRunCreated(runID, requestID)
+	}
+	_ = s.writePayload(ctx, requestID, frontstream.ResponsePayload(requestID, "stream", map[string]any{
+		"event": "start",
+		"text":  "智能体运行已开始",
+		"meta": map[string]any{
+			"agent":      agent.Key,
+			"run_id":     runID,
+			"internal":   true,
+			"started_at": now.Format(time.RFC3339Nano),
+		},
+	}, "", 1))
 
 	exec := runExecution{
 		Request: RunRequest{
@@ -112,12 +127,14 @@ func (s Service) RunInternal(ctx context.Context, req InternalRunRequest) (Inter
 	if turn.Kind != agentTurnFinal {
 		message := firstText(turn.Message, "内部智能体未返回最终结果")
 		s.finishRun(ctx, exec, runStatusFail, turn.Output, turn.Text, message, tracker.seq)
+		_ = s.writeErrorResult(ctx, requestID, message)
 		return InternalRunResult{}, fmt.Errorf("%s", message)
 	}
 
 	output := turn.Output
 	summary := strings.TrimSpace(firstText(turn.Text, runOutputText(output, "")))
 	s.finishRun(ctx, exec, runStatusSuccess, output, summary, "", tracker.seq)
+	_ = s.writeSuccessResult(ctx, requestID, output)
 	return InternalRunResult{
 		Output:    output,
 		Summary:   summary,
