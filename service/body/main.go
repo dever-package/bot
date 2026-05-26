@@ -86,19 +86,19 @@ func (Service) AllowedAgentIDs(ctx context.Context, bodyID uint64) (map[uint64]b
 	return allowed, true
 }
 
-func (Service) AllowedBrainIDs(ctx context.Context, bodyID uint64) (map[uint64]bool, bool) {
+func (Service) AllowedTeamIDs(ctx context.Context, bodyID uint64) (map[uint64]bool, bool) {
 	canvasID := canvasIDForBody(ctx, bodyID)
 	if canvasID == 0 {
 		return nil, false
 	}
-	rows := bodymodel.NewCanvasBrainModel().Select(ctx, map[string]any{
+	rows := bodymodel.NewCanvasTeamModel().Select(ctx, map[string]any{
 		"canvas_id": canvasID,
 		"status":    bodymodel.StatusEnabled,
 	})
 	allowed := map[uint64]bool{}
 	for _, row := range rows {
-		if row != nil && row.BrainID > 0 {
-			allowed[row.BrainID] = true
+		if row != nil && row.TeamID > 0 {
+			allowed[row.TeamID] = true
 		}
 	}
 	if len(allowed) == 0 {

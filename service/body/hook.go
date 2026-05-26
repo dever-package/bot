@@ -8,8 +8,8 @@ import (
 
 	agentmodel "my/package/bot/model/agent"
 	bodymodel "my/package/bot/model/body"
-	brainmodel "my/package/bot/model/brain"
 	energonmodel "my/package/bot/model/energon"
+	teammodel "my/package/bot/model/team"
 	frontaction "my/package/front/service/action"
 )
 
@@ -45,8 +45,8 @@ func (CanvasHook) ProviderBeforeSaveCanvas(c *server.Context, params []any) any 
 	if rawRows, exists := record["agents"]; exists {
 		record["agents"] = normalizeCanvasAgentRows(c, canvasID, rawRows)
 	}
-	if rawRows, exists := record["brains"]; exists {
-		record["brains"] = normalizeCanvasBrainRows(c, canvasID, rawRows)
+	if rawRows, exists := record["teams"]; exists {
+		record["teams"] = normalizeCanvasTeamRows(c, canvasID, rawRows)
 	}
 
 	return record
@@ -120,40 +120,67 @@ func normalizeCanvasAgentRows(c *server.Context, canvasID uint64, value any) []a
 	return result
 }
 
-func normalizeCanvasBrainRows(c *server.Context, canvasID uint64, value any) []any {
+func normalizeCanvasTeamRows(c *server.Context, canvasID uint64, value any) []any {
 	rows := normalizeBodyChildRows(value)
 	if len(rows) == 0 {
 		return []any{}
 	}
 
-	existingIDs := existingCanvasBrainIDs(c, canvasID)
+	existingIDs := existingCanvasTeamIDs(c, canvasID)
 	seen := map[uint64]struct{}{}
 	result := make([]any, 0, len(rows))
 	for index, row := range rows {
 		next := util.CloneMap(row)
-		brainID := canvasChildRelationID(next, "brain_id")
-		if brainID == 0 {
-			panicBodyField("form.brains", "画布大脑必须选择大脑。")
+		teamID := canvasChildRelationID(next, "team_id")
+		if teamID == 0 {
+			panicBodyField("form.teams", "画布团队必须选择团队。")
 		}
-		next["brain_id"] = brainID
-		if _, exists := seen[brainID]; exists {
-			panicBodyField("form.brains", "画布大脑不能重复选择同一个大脑。")
+		next["team_id"] = teamID
+		if _, exists := seen[teamID]; exists {
+			panicBodyField("form.teams", "画布团队不能重复选择同一个团队。")
 		}
-		seen[brainID] = struct{}{}
+		seen[teamID] = struct{}{}
 
-		brain := brainmodel.NewBrainModel().Find(c.Context(), map[string]any{"id": brainID})
-		if brain == nil || brain.Status != brainmodel.StatusEnabled ||
-			brain.PublishStatus != brainmodel.BrainPublishStatusPublished || brain.CurrentReleaseID == 0 {
-			panicBodyField("form.brains", "画布大脑必须选择已发布且开启的大脑。")
+		team := teammodel.NewTeamModel().Find(c.Context(), map[string]any{"id": teamID})
+		releaseID := canvasTeamReleaseID(c, team)
+		if team == nil || team.Status != teammodel.StatusEnabled ||
+			!canvasTeamPublished(team.PublishStatus) || releaseID == 0 {
+			panicBodyField("form.teams", "画布团队必须选择已发布且开启的团队。")
 		}
-		next["release_id"] = brain.CurrentReleaseID
-		if id := existingIDs[brainID]; id > 0 && util.ToUint64(next["id"]) == 0 {
+		next["release_id"] = releaseID
+		if id := existingIDs[teamID]; id > 0 && util.ToUint64(next["id"]) == 0 {
 			next["id"] = id
 		}
 		normalizeCanvasChildRow(next, index)
 		result = append(result, next)
 	}
 	return result
+}
+
+func canvasTeamPublished(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case teammodel.TeamPublishStatusPublished, "已发布", "发布":
+		return true
+	default:
+		return false
+	}
+}
+
+func canvasTeamReleaseID(c *server.Context, team *teammodel.Team) uint64 {
+	if team == nil {
+		return 0
+	}
+	if team.CurrentReleaseID > 0 {
+		return team.CurrentReleaseID
+	}
+	release := teammodel.NewTeamReleaseModel().Find(c.Context(), map[string]any{
+		"team_id": team.ID,
+		"status":  teammodel.TeamReleaseStatusCurrent,
+	})
+	if release == nil {
+		return 0
+	}
+	return release.ID
 }
 
 func normalizeCanvasChildRow(row map[string]any, index int) {
@@ -251,15 +278,15 @@ func existingCanvasAgentIDs(c *server.Context, canvasID uint64) map[uint64]uint6
 	return result
 }
 
-func existingCanvasBrainIDs(c *server.Context, canvasID uint64) map[uint64]uint64 {
+func existingCanvasTeamIDs(c *server.Context, canvasID uint64) map[uint64]uint64 {
 	result := map[uint64]uint64{}
 	if canvasID == 0 {
 		return result
 	}
-	rows := bodymodel.NewCanvasBrainModel().Select(c.Context(), map[string]any{"canvas_id": canvasID})
+	rows := bodymodel.NewCanvasTeamModel().Select(c.Context(), map[string]any{"canvas_id": canvasID})
 	for _, row := range rows {
-		if row != nil && row.BrainID > 0 {
-			result[row.BrainID] = row.ID
+		if row != nil && row.TeamID > 0 {
+			result[row.TeamID] = row.ID
 		}
 	}
 	return result

@@ -26,7 +26,19 @@
           "title": "规则分类",
           "description": "左侧维护规则分类",
           "remote": false,
-          "defaultFirst": true,
+          "defaultFirst": false,
+          "selectable": false,
+          "sortable": true,
+          "sortField": "sort",
+          "sortChangeAction": {
+            "type": "save",
+            "path": "bot/agent/setting_cate/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "sort": "$value"
+            }
+          },
           "createButton": {
             "name": "新增分类",
             "icon": "plus",

@@ -15,8 +15,8 @@ type Service struct{}
 type SaveVersionRequest struct {
 	ProjectID uint64
 	BodyID    uint64
-	BrainID   uint64
-	ThinkID   uint64
+	TeamID    uint64
+	FlowID    uint64
 	RunID     uint64
 	NodeRunID uint64
 	ReleaseID uint64
@@ -54,8 +54,8 @@ func (Service) FindVersion(ctx context.Context, id uint64) *assetmodel.Version {
 	return assetmodel.NewVersionModel().Find(ctx, map[string]any{"id": id})
 }
 
-func (Service) ListProject(ctx context.Context, projectID uint64, thinkID uint64, kind string) (map[string]any, error) {
-	assets := listProjectAssets(ctx, projectID, thinkID, NormalizeKindFilter(kind))
+func (Service) ListProject(ctx context.Context, projectID uint64, flowID uint64, kind string) (map[string]any, error) {
+	assets := listProjectAssets(ctx, projectID, flowID, NormalizeKindFilter(kind))
 	items := make([]map[string]any, 0, len(assets))
 	service := Service{}
 	for _, asset := range assets {
@@ -92,8 +92,8 @@ func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetm
 	asset := assetModel.Find(ctx, map[string]any{
 		"project_id": req.ProjectID,
 		"body_id":    req.BodyID,
-		"brain_id":   req.BrainID,
-		"think_id":   req.ThinkID,
+		"team_id":    req.TeamID,
+		"flow_id":    req.FlowID,
 		"name":       req.Name,
 	})
 	now := time.Now()
@@ -105,8 +105,8 @@ func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetm
 		assetID := uint64(assetModel.Insert(ctx, map[string]any{
 			"project_id": req.ProjectID,
 			"body_id":    req.BodyID,
-			"brain_id":   req.BrainID,
-			"think_id":   req.ThinkID,
+			"team_id":    req.TeamID,
+			"flow_id":    req.FlowID,
 			"name":       req.Name,
 			"kind":       req.Kind,
 			"version_id": 0,
@@ -149,8 +149,8 @@ func AssetToMap(row assetmodel.Asset) map[string]any {
 		"id":         row.ID,
 		"project_id": row.ProjectID,
 		"body_id":    row.BodyID,
-		"brain_id":   row.BrainID,
-		"think_id":   row.ThinkID,
+		"team_id":    row.TeamID,
+		"flow_id":    row.FlowID,
 		"name":       row.Name,
 		"kind":       row.Kind,
 		"version_id": row.VersionID,
@@ -234,13 +234,13 @@ func EnsureDocument(raw any, kind string) map[string]any {
 	}
 }
 
-func listProjectAssets(ctx context.Context, projectID uint64, thinkID uint64, kind string) []assetmodel.Asset {
+func listProjectAssets(ctx context.Context, projectID uint64, flowID uint64, kind string) []assetmodel.Asset {
 	if projectID == 0 {
 		return nil
 	}
 	filter := map[string]any{"project_id": projectID}
-	if thinkID > 0 {
-		filter["think_id"] = thinkID
+	if flowID > 0 {
+		filter["flow_id"] = flowID
 	}
 	if kind != "" {
 		filter["kind"] = kind

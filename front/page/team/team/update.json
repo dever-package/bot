@@ -1,0 +1,103 @@
+{
+  "page": {
+    "name": "团队编辑",
+    "parent": "bot/team/team/list",
+    "type": 2,
+    "auth": [
+      {
+        "key": "bot/team/team/create",
+        "name": "团队新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/team/team/update",
+        "name": "团队编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-select",
+        "name": "团队分类",
+        "value": "form.cate_id",
+        "mode": "form",
+        "option": "/front/route/option?type=model&use=bot.team.NewTeamCateModel&order=sort asc,id asc",
+        "validate": [
+          {
+            "type": "required",
+            "message": "团队分类不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[260px]"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "例如：内容运营团队",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "团队名称不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "写这个团队的完整提示词：职责、目标、口吻、边界和工作方式都放在这里。",
+        "value": "form.description",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 8
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "id": 0,
+      "cate_id": 1,
+      "name": "",
+      "description": ""
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.team.TeamHook.BeforeSaveTeam"
+      }
+    }
+  }
+}

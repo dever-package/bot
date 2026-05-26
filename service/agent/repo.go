@@ -47,6 +47,11 @@ func (Repo) FindAgent(ctx context.Context, identity string) (agentmodel.Agent, e
 		row = model.Find(ctx, map[string]any{"key": identity})
 	}
 	if row == nil {
+		if builtinID := builtinAgentID(identity); builtinID > 0 {
+			row = model.Find(ctx, map[string]any{"id": builtinID})
+		}
+	}
+	if row == nil {
 		row = model.Find(ctx, map[string]any{"name": identity})
 	}
 	if row == nil {
@@ -59,6 +64,17 @@ func (Repo) FindAgent(ctx context.Context, identity string) (agentmodel.Agent, e
 		return agentmodel.Agent{}, fmt.Errorf("智能体未配置 LLM 能力")
 	}
 	return *row, nil
+}
+
+func builtinAgentID(identity string) uint64 {
+	switch strings.TrimSpace(identity) {
+	case agentmodel.FrontAssistantAgentKey:
+		return agentmodel.FrontAssistantAgentID
+	case agentmodel.SkillInstallerAgentKey:
+		return agentmodel.SkillInstallerAgentID
+	default:
+		return 0
+	}
 }
 
 func (Repo) FindPower(ctx context.Context, id uint64) (energonmodel.Power, error) {

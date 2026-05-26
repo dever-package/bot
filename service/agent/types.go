@@ -2,7 +2,10 @@ package agent
 
 import (
 	"context"
+	"strconv"
+	"strings"
 
+	agentmodel "my/package/bot/model/agent"
 	energonservice "my/package/bot/service/energon"
 	frontstream "my/package/front/service/stream"
 )
@@ -32,6 +35,16 @@ func NewService() Service {
 		gateway: energonservice.NewGatewayService(),
 		streams: frontstream.New("agent"),
 	}
+}
+
+func agentIdentity(agent agentmodel.Agent) string {
+	if key := strings.TrimSpace(agent.Key); key != "" {
+		return key
+	}
+	if agent.ID > 0 {
+		return strconv.FormatUint(agent.ID, 10)
+	}
+	return strings.TrimSpace(agent.Name)
 }
 
 type RunRequest struct {

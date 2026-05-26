@@ -1,0 +1,94 @@
+{
+  "page": {
+    "name": "画布团队",
+    "parent": "bot/body/canvas_team/list",
+    "type": 2,
+    "auth": [
+      {
+        "key": "bot/body/canvas_team/create",
+        "name": "画布团队新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/body/canvas_team/update",
+        "name": "画布团队编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-cascader",
+        "name": "团队",
+        "value": "form.team_id",
+        "mode": "form",
+        "placeholder": "请选择团队",
+        "info": "画布团队必须选择已发布且开启的团队。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "团队不能为空。"
+          }
+        ],
+        "meta": {
+          "api": "/front/route/option",
+          "use": "bot.team.NewTeamCateModel",
+          "childUse": "bot.team.NewTeamModel",
+          "childParentField": "cate_id",
+          "valueMode": "leaf",
+          "placeholder": [
+            "选择团队分类",
+            "选择团队"
+          ],
+          "childExtraFields": "key,cate_id,status,publish_status,current_release_id"
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "状态",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "canvas_id": 0,
+      "team_id": 0,
+      "release_id": 0,
+      "config": "{}",
+      "status": 1
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}

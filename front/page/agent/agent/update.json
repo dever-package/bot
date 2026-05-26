@@ -70,23 +70,41 @@
         }
       },
       {
+        "id": "agent-key-editable",
         "type": "form-input",
-        "placeholder": "例如：image-to-image-agent",
+        "name": "标识",
+        "placeholder": "可留空，保存时自动生成",
         "value": "form.key",
         "mode": "form",
-        "validate": [
-          {
-            "type": "required",
-            "message": "智能体标识不能为空。"
-          },
-          {
-            "type": "model",
-            "except": "$form.id",
-            "message": "该智能体标识已存在。"
-          }
-        ],
+        "info": "用于系统调用和跨环境稳定定位，建议使用小写字母、数字和中划线。",
         "meta": {
-          "formLayout": "horizontal"
+          "formLayout": "horizontal",
+          "hiddenWhen": [
+            {
+              "path": "form.kind",
+              "operator": "equals",
+              "value": "internal"
+            }
+          ]
+        }
+      },
+      {
+        "id": "agent-key-internal",
+        "type": "form-input",
+        "name": "标识",
+        "value": "form.key",
+        "mode": "form",
+        "info": "系统内置智能体的标识不可修改。",
+        "meta": {
+          "formLayout": "horizontal",
+          "disabled": true,
+          "showWhen": [
+            {
+              "path": "form.kind",
+              "operator": "equals",
+              "value": "internal"
+            }
+          ]
         }
       },
       {

@@ -7,6 +7,7 @@ import (
 
 	botprotocol "my/package/bot/service/energon/protocol"
 	botstream "my/package/bot/service/energon/stream"
+	"my/package/bot/service/stream"
 	frontstream "my/package/front/service/stream"
 )
 
@@ -32,7 +33,7 @@ func (s Service) writePayload(ctx context.Context, requestID string, payload map
 }
 
 func (s Service) writeStreamOutput(ctx context.Context, requestID string, output map[string]any) error {
-	return s.writePayload(ctx, requestID, frontstream.ResponsePayload(requestID, "stream", output, "", 1))
+	return s.writePayload(ctx, requestID, frontstream.ResponsePayload(requestID, "stream", stream.NormalizeOutput(stream.FeatureAgent, output), "", 1))
 }
 
 func (s Service) writeStreamStatus(ctx context.Context, requestID string, text string, meta map[string]any) error {
@@ -51,7 +52,7 @@ func (s Service) writeErrorResult(ctx context.Context, requestID string, message
 }
 
 func (s Service) writeSuccessResult(ctx context.Context, requestID string, output map[string]any) error {
-	return s.writePayload(ctx, requestID, frontstream.ResponsePayload(requestID, "result", output, "", 1))
+	return s.writePayload(ctx, requestID, frontstream.ResponsePayload(requestID, "result", stream.NormalizeOutput(stream.FeatureAgent, output), "", 1))
 }
 
 func (s Service) writeCancelResult(ctx context.Context, requestID string) error {

@@ -100,7 +100,7 @@ func (s Service) execute(exec runExecution) {
 		Host:           exec.Request.Host,
 		Path:           exec.Request.Path,
 		Headers:        exec.Request.Headers,
-		AgentKey:       exec.Agent.Key,
+		AgentIdentity:  agentIdentity(exec.Agent),
 		PowerKey:       exec.Power.Key,
 		Input:          exec.Parsed.Input,
 		History:        exec.Parsed.History,

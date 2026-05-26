@@ -40,10 +40,12 @@ const (
 	FrontAssistantAgentID uint64 = 2
 	SkillInstallerAgentID uint64 = 3
 
+	DefaultAgentKey        = "default-agent"
+	FrontAssistantAgentKey = "front-assistant"
+	SkillInstallerAgentKey = "skill-installer"
+
 	AgentKindNormal   = "normal"
 	AgentKindInternal = "internal"
-
-	SkillInstallerAgentKey = "skill-installer"
 )
 
 var (
@@ -62,7 +64,7 @@ var (
 			"id":              DefaultAgentID,
 			"cate_id":         DefaultAgentCateID,
 			"name":            "默认智能体",
-			"key":             "default",
+			"key":             DefaultAgentKey,
 			"kind":            AgentKindNormal,
 			"description":     "默认通用智能体，适合普通文本任务和能力调用。",
 			"llm_power_id":    energonmodel.DefaultLLMPowerID,
@@ -78,7 +80,7 @@ var (
 			"id":              FrontAssistantAgentID,
 			"cate_id":         SystemAgentCateID,
 			"name":            "AI助理",
-			"key":             "front-assistant",
+			"key":             FrontAssistantAgentKey,
 			"kind":            AgentKindInternal,
 			"description":     "后台页面 AI 助理，用于理解当前页面、生成内容、补全表单和返回受控前端动作。",
 			"llm_power_id":    energonmodel.DefaultLLMPowerID,

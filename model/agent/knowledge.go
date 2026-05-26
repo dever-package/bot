@@ -38,7 +38,7 @@ var (
 	agentKnowledgeAgentRelation = orm.Relation{
 		Field:      "agent_id",
 		Option:     "bot.agent.NewAgentModel",
-		OptionKeys: []string{"name", "key"},
+		OptionKeys: []string{"name"},
 	}
 )
 

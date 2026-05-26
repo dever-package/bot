@@ -20,7 +20,7 @@ type SelectionRequest struct {
 	Host           string
 	Path           string
 	Headers        map[string]string
-	AgentKey       string
+	AgentIdentity  string
 	PowerKey       string
 	Input          map[string]any
 	History        []any
@@ -61,7 +61,7 @@ func SelectRuntime(ctx context.Context, req SelectionRequest) SelectionResult {
 	body := map[string]any{
 		"power": req.PowerKey,
 		"set": map[string]any{
-			"id":   req.AgentKey + "-skill-selector",
+			"id":   req.AgentIdentity + "-skill-selector",
 			"role": selectionRole(selectorCatalog.Metadata),
 		},
 		"input": map[string]any{

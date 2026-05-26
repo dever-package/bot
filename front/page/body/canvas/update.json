@@ -81,26 +81,15 @@
       },
       {
         "type": "form-array",
-        "name": "大脑",
-        "value": "form.brains",
+        "name": "团队",
+        "value": "form.teams",
         "mode": "form",
-        "info": "限制这个画布中可以引用的大脑。未添加时表示不限制大脑。",
+        "info": "限制这个画布中可以引用的团队。画布团队必须选择已发布且开启的团队。未添加时表示不限制团队。",
         "meta": {
           "formLayout": "horizontal",
-          "pageRoute": "/bot/body/canvas_brain/update",
-          "addText": "添加大脑",
+          "pageRoute": "/bot/body/canvas_team/update",
+          "addText": "添加团队",
           "drag": "sort"
-        }
-      },
-      {
-        "type": "form-switch",
-        "name": "状态",
-        "value": "form.status",
-        "mode": "form",
-        "meta": {
-          "trueValue": 1,
-          "falseValue": 2,
-          "formLayout": "horizontal"
         }
       }
     ]
@@ -111,7 +100,7 @@
       "config": "{}",
       "powers": [],
       "agents": [],
-      "brains": [],
+      "teams": [],
       "status": 1
     }
   },

@@ -43,7 +43,7 @@ func ExtractAbilityTasks(output map[string]any) []AbilityTask {
 			tasks = append(tasks, task)
 		}
 	}
-	return tasks
+	return ensureUniqueAbilityTaskIDs(tasks)
 }
 
 func StripAbilityTasks(output map[string]any) map[string]any {
@@ -127,5 +127,39 @@ func normalizeTaskExecution(value string) string {
 		return TaskExecutionSync
 	default:
 		return TaskExecutionAsync
+	}
+}
+
+func ensureUniqueAbilityTaskIDs(tasks []AbilityTask) []AbilityTask {
+	if len(tasks) == 0 {
+		return tasks
+	}
+	used := map[string]struct{}{}
+	next := append([]AbilityTask{}, tasks...)
+	for index, task := range next {
+		next[index].ID = nextUniqueAbilityTaskID(defaultAbilityTaskID(task.ID, index), used)
+	}
+	return next
+}
+
+func defaultAbilityTaskID(value string, index int) string {
+	if id := strings.TrimSpace(value); id != "" {
+		return id
+	}
+	return fmt.Sprintf("task-%d", index+1)
+}
+
+func nextUniqueAbilityTaskID(baseID string, used map[string]struct{}) string {
+	if _, exists := used[baseID]; !exists {
+		used[baseID] = struct{}{}
+		return baseID
+	}
+	for suffix := 2; ; suffix++ {
+		candidate := fmt.Sprintf("%s-%d", baseID, suffix)
+		if _, exists := used[candidate]; exists {
+			continue
+		}
+		used[candidate] = struct{}{}
+		return candidate
 	}
 }

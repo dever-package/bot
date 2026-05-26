@@ -9,9 +9,9 @@ import (
 type Version struct {
 	ID        uint64    `dorm:"primaryKey;autoIncrement;comment:版本ID"`
 	AssetID   uint64    `dorm:"type:bigint;not null;default:0;comment:资产"`
-	RunID     uint64    `dorm:"type:bigint;not null;default:0;comment:大脑运行"`
+	RunID     uint64    `dorm:"type:bigint;not null;default:0;comment:团队运行"`
 	NodeRunID uint64    `dorm:"type:bigint;not null;default:0;comment:节点运行"`
-	ReleaseID uint64    `dorm:"type:bigint;not null;default:0;comment:大脑发布版本"`
+	ReleaseID uint64    `dorm:"type:bigint;not null;default:0;comment:团队发布版本"`
 	Version   int       `dorm:"type:int;not null;default:1;comment:版本号"`
 	Content   string    `dorm:"type:text;not null;default:'{}';comment:内容"`
 	CreatedAt time.Time `dorm:"comment:创建时间"`

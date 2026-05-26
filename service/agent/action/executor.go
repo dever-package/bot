@@ -493,6 +493,7 @@ func collectStream(ctx context.Context, req ExecuteRequest, action Action, intro
 		finalOutput = map[string]any(botprotocol.MergeStreamResult(result.State.Outputs))
 	}
 	finalOutput = normalizeFinal(finalOutput, action, intro)
+	_ = writeOutput(req, ctx, finalOutput)
 	return actionDone(action, finalOutput, result.State.LastID)
 }
 

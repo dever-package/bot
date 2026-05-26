@@ -58,15 +58,15 @@ var agentRelation = orm.Relation{
 	OptionKeys: []string{"name", "key", "cate_id"},
 }
 
-var brainRelation = orm.Relation{
-	Field:      "brain_id",
-	Option:     "bot.brain.NewBrainModel",
+var teamRelation = orm.Relation{
+	Field:      "team_id",
+	Option:     "bot.team.NewTeamModel",
 	OptionKeys: []string{"name", "key", "cate_id"},
 }
 
 var releaseRelation = orm.Relation{
 	Field:      "release_id",
-	Option:     "bot.brain.NewBrainReleaseModel",
+	Option:     "bot.team.NewTeamReleaseModel",
 	OptionKeys: []string{"version", "status"},
 }
 

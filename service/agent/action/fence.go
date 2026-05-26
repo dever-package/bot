@@ -73,12 +73,7 @@ func findFenceStart(text string, lang string, offset int) (int, int, bool) {
 		start := offset + startOffset
 		headerStart := start + 3
 		headerEnd := lineEnd(text, headerStart)
-		header := strings.TrimSpace(text[headerStart:headerEnd])
-		if fenceLangMatches(header, lang) {
-			bodyStart := headerEnd
-			for bodyStart < len(text) && (text[bodyStart] == '\r' || text[bodyStart] == '\n') {
-				bodyStart++
-			}
+		if bodyStart, matched := fenceBodyStart(text, headerStart, headerEnd, lang); matched {
 			return start, bodyStart, true
 		}
 		offset = headerStart
@@ -93,9 +88,39 @@ func lineEnd(text string, offset int) int {
 	return offset
 }
 
-func fenceLangMatches(header string, lang string) bool {
-	fields := strings.Fields(header)
-	return len(fields) > 0 && fields[0] == lang
+func fenceBodyStart(text string, headerStart int, headerEnd int, lang string) (int, bool) {
+	cursor := headerStart
+	for cursor < headerEnd && isFenceHeaderWhitespace(text[cursor]) {
+		cursor++
+	}
+	if !strings.HasPrefix(text[cursor:headerEnd], lang) {
+		return 0, false
+	}
+
+	afterLang := cursor + len(lang)
+	if afterLang < headerEnd {
+		next := text[afterLang]
+		if !isFenceHeaderWhitespace(next) && next != '{' && next != '[' && next != '\\' {
+			return 0, false
+		}
+		if strings.TrimSpace(text[afterLang:headerEnd]) != "" {
+			bodyStart := afterLang
+			for bodyStart < headerEnd && isFenceHeaderWhitespace(text[bodyStart]) {
+				bodyStart++
+			}
+			return bodyStart, true
+		}
+	}
+
+	bodyStart := headerEnd
+	for bodyStart < len(text) && (text[bodyStart] == '\r' || text[bodyStart] == '\n') {
+		bodyStart++
+	}
+	return bodyStart, true
+}
+
+func isFenceHeaderWhitespace(value byte) bool {
+	return value == ' ' || value == '\t'
 }
 
 func parseJSONPayload(text string, accept func(map[string]any) bool) (map[string]any, bool) {
@@ -162,10 +187,42 @@ func balancedJSONObject(text string) (string, bool) {
 }
 
 func unmarshalJSONPayload(text string, target any) error {
-	if err := json.Unmarshal([]byte(text), target); err == nil {
-		return nil
+	candidates := []string{text}
+	if repaired := unescapeEscapedJSONQuotes(text); repaired != text {
+		candidates = append(candidates, repaired)
 	}
-	return json.Unmarshal([]byte(escapeJSONControlChars(text)), target)
+	for _, candidate := range append([]string{}, candidates...) {
+		escaped := escapeJSONControlChars(candidate)
+		if escaped != candidate {
+			candidates = append(candidates, escaped)
+		}
+	}
+
+	var lastErr error
+	seen := map[string]struct{}{}
+	for _, candidate := range candidates {
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		if err := json.Unmarshal([]byte(candidate), target); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+	}
+	return lastErr
+}
+
+func unescapeEscapedJSONQuotes(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if !strings.Contains(trimmed, `\"`) {
+		return text
+	}
+	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
+		return text
+	}
+	return strings.ReplaceAll(text, `\"`, `"`)
 }
 
 func escapeJSONControlChars(text string) string {

@@ -115,22 +115,16 @@
             },
             {
               "value": "key",
-              "type": "show-base"
-            },
-            {
-              "value": "llm_power.name",
-              "name": "LLM能力",
+              "name": "标识",
               "type": "show-base"
             },
             {
               "value": "setting_pack.name",
-              "name": "规则方案",
-              "type": "show-base"
-            },
-            {
-              "value": "skill_pack.name",
-              "name": "技能方案",
-              "type": "show-base"
+              "name": "方案",
+              "type": "show-base",
+              "meta": {
+                "template": "{row.setting_pack.name} / {row.skill_pack.name}"
+              }
             },
             {
               "value": "status",
@@ -279,7 +273,7 @@
         "meta": {
           "stateKey": "dialog.edit",
           "pageRoute": "/bot/agent/agent/update",
-          "description": "配置智能体 LLM 能力、规则方案和技能方案。",
+          "description": "配置智能体标识、LLM 能力和方案。",
           "size": "xl",
           "footer": {
             "confirm": true,
@@ -295,7 +289,7 @@
         "meta": {
           "stateKey": "dialog.create",
           "pageRoute": "/bot/agent/agent/update",
-          "description": "创建智能体后，运行时会基于方案、智能体设定和 Energon 能力执行。",
+          "description": "创建智能体后，运行时会基于标识、方案、智能体设定和 Energon 能力执行。",
           "size": "xl",
           "footer": {
             "confirm": true,
@@ -368,9 +362,7 @@
       "page": 1,
       "pageSize": 10,
       "total": 0,
-      "filterFields": [
-        "cate_id"
-      ]
+      "filterFields": ["cate_id"]
     },
     "search": {
       "cate_id": ""

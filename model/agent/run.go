@@ -10,7 +10,6 @@ type Run struct {
 	ID        uint64 `dorm:"primaryKey;autoIncrement;comment:运行ID"`
 	RequestID string `dorm:"type:varchar(64);not null;comment:请求ID"`
 	AgentID   uint64 `dorm:"type:bigint;not null;default:0;comment:智能体"`
-	AgentKey  string `dorm:"type:varchar(128);not null;default:'';comment:智能体标识"`
 
 	Input          string `dorm:"type:text;not null;default:'';comment:输入内容"`
 	Skills         string `dorm:"type:text;not null;default:'[]';comment:技能列表"`
@@ -43,7 +42,7 @@ var (
 	runAgentRelation = orm.Relation{
 		Field:      "agent_id",
 		Option:     "bot.agent.NewAgentModel",
-		OptionKeys: []string{"name", "key"},
+		OptionKeys: []string{"name"},
 	}
 
 	runStepRelation = orm.Relation{

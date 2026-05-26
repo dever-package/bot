@@ -62,7 +62,7 @@ import {
   updateStreamTimingFromOutput,
   useStreamClock,
   type StreamTiming,
-} from '@/page/nodes/show/shared/stream-timing'
+} from '@/components/stream-timing'
 
 type StreamFrame = RuntimeStreamFrame<EnergonOutput>
 
@@ -434,10 +434,10 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
 
   return (
     <div
-      className="grid min-h-0 gap-4 md:grid-cols-[minmax(340px,420px)_1px_minmax(0,1fr)]"
+      className="flex h-full min-h-0 flex-col gap-4 md:flex-row"
       style={{ height: 'min(60vh, 600px)' }}
     >
-      <div className="flex min-h-0 flex-col gap-3">
+      <div className="flex h-full min-h-0 w-full max-w-md shrink-0 flex-col gap-3">
         <div className="min-h-0 flex-1 overflow-y-auto rounded-xl bg-background/70 p-3">
           {paramsLoading ? (
             <span className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
@@ -543,9 +543,9 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
         ) : null}
       </div>
 
-      <div className="hidden bg-border md:block" aria-hidden="true" />
+      <div className="hidden w-px shrink-0 bg-border md:block" aria-hidden="true" />
 
-      <div className="flex min-h-0 flex-col overflow-hidden rounded-xl bg-background">
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-background">
         <div className="flex shrink-0 items-center justify-between gap-3 border-b px-3 py-2">
           <span className="text-sm font-medium text-foreground">测试结果</span>
           {requestID ? (
@@ -571,7 +571,7 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
           ref={outputScrollRef}
           onScroll={handleOutputScroll}
           style={{ scrollbarGutter: 'stable' }}
-          className="min-h-0 flex-1 overflow-y-scroll p-3"
+          className="h-0 min-h-0 flex-1 overflow-y-auto p-3"
         >
           {timing ? (
             <div className="mb-3">

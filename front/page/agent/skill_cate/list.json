@@ -26,7 +26,19 @@
           "title": "技能分类",
           "description": "左侧维护技能分类",
           "remote": true,
-          "defaultFirst": true,
+          "defaultFirst": false,
+          "selectable": false,
+          "sortable": true,
+          "sortField": "sort",
+          "sortChangeAction": {
+            "type": "save",
+            "path": "bot/agent/skill_cate/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "sort": "$value"
+            }
+          },
           "createButton": {
             "name": "新增分类",
             "icon": "plus",

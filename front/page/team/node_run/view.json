@@ -1,0 +1,189 @@
+{
+  "page": {
+    "name": "步骤详情",
+    "parent": "bot/team/node_run/list",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-col gap-4 p-0",
+        "children": {
+          "basic-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "input-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "output-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "error-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "basic-card": [
+      {
+        "type": "show-title",
+        "value": "page.basicTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.request_id",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.flow.name",
+        "name": "工作流",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.node.name",
+        "name": "节点",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.node_type",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.agent_run_id",
+        "name": "智能体运行",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-date",
+        "value": "form.started_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "format": "datetime-second"
+        }
+      },
+      {
+        "type": "show-date",
+        "value": "form.finished_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "format": "datetime-second"
+        }
+      },
+      {
+        "type": "show-date",
+        "value": "form.created_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "format": "datetime-second"
+        }
+      }
+    ],
+    "input-card": [
+      {
+        "type": "show-title",
+        "value": "page.inputTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.input",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "output-card": [
+      {
+        "type": "show-title",
+        "value": "page.outputTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.output",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "error-card": [
+      {
+        "type": "show-title",
+        "value": "page.errorTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.error",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "basicTitle": {
+        "title": "步骤信息",
+        "description": "展示节点类型、状态、时间和关联运行信息。"
+      },
+      "inputTitle": {
+        "title": "输入内容",
+        "description": "该节点执行时收到的输入。"
+      },
+      "outputTitle": {
+        "title": "输出内容",
+        "description": "该节点执行后写入的输出。"
+      },
+      "errorTitle": {
+        "title": "错误信息",
+        "description": "失败时记录的错误详情。"
+      }
+    },
+    "form": {}
+  },
+  "state": {},
+  "action": {}
+}

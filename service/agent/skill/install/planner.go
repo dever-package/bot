@@ -18,7 +18,7 @@ func (s Service) buildInstallPlan(ctx context.Context, execInfo *skillInstallExe
 	s.status(ctx, execInfo, "正在调用技能安装规划器")
 	stopHeartbeat := s.heartbeat(ctx, execInfo, "仍在生成技能安装计划，请稍后")
 	result, err := agentruntime.NewService().RunInternal(ctx, agentruntime.InternalRunRequest{
-		AgentKey:  agentmodel.SkillInstallerAgentKey,
+		AgentID:   agentmodel.SkillInstallerAgentID,
 		RequestID: execInfo.RequestID + "-planner",
 		Method:    execInfo.Request.Method,
 		Host:      execInfo.Request.Host,

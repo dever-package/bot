@@ -1,6 +1,7 @@
 package prompt
 
 import (
+	"strconv"
 	"strings"
 
 	agentmodel "my/package/bot/model/agent"
@@ -68,7 +69,7 @@ func BuildEnergonBody(input EnergonBodyInput) map[string]any {
 	body := map[string]any{
 		"power": input.Power.Key,
 		"set": map[string]any{
-			"id":   input.Agent.Key,
+			"id":   strconv.FormatUint(input.Agent.ID, 10),
 			"role": input.RuntimePrompt,
 		},
 		"input":   input.Input,

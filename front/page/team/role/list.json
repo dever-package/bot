@@ -1,0 +1,277 @@
+{
+  "page": {
+    "name": "团队角色",
+    "parent": "bot/team/team/list",
+    "type": 2
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "content-shell": {
+            "type": "container",
+            "className": "front-two-pane-layout",
+            "children": {
+              "role-type-column": {
+                "type": "container",
+                "className": "min-w-0"
+              },
+              "list-column": {
+                "type": "container",
+                "className": "flex min-w-0 flex-col gap-4",
+                "children": {
+                  "table-row": {
+                    "type": "container",
+                    "className": "overflow-hidden rounded-md border bg-background"
+                  }
+                }
+              }
+            }
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "返回团队列表",
+        "className": "shrink-0",
+        "meta": {
+          "icon": "arrow-left",
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/team/team/list"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "新增角色",
+        "meta": {
+          "variant": "default",
+          "size": "sm"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.create",
+            "value": true
+          }
+        }
+      }
+    ],
+    "role-type-column": [
+      {
+        "type": "show-category-list",
+        "id": "team-role-type-category",
+        "value": "search.role_type",
+        "option": "option.role_type",
+        "meta": {
+          "title": "角色类型",
+          "description": "左侧选择角色类型，右侧维护该类型下的团队角色。",
+          "remote": true,
+          "defaultFirst": true
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "savePath": "bot/team/role/update",
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "name",
+              "type": "show-base"
+            },
+            {
+              "value": "agent.name",
+              "name": "智能体",
+              "type": "show-base"
+            },
+            {
+              "value": "status",
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "value": "sort",
+              "type": "show-base",
+              "editor": "form-number",
+              "trigger": "doubleClick"
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.editRoleId",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "data",
+                          "key": "actionTarget.editRoleTeamId",
+                          "value": "$row.team_id"
+                        },
+                        {
+                          "type": "data",
+                          "key": "actionTarget.editRoleType",
+                          "value": "$row.role_type"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.edit",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.create",
+          "pageRoute": "/bot/team/role/update",
+          "title": "新增角色",
+          "description": "为团队配置沟通、规划、执行或审核角色，并绑定具体智能体。",
+          "size": "lg",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "team_id": "data.search.team_id",
+            "role_type": "data.search.role_type"
+          },
+          "bodyClassName": "px-6 py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.edit",
+          "pageRoute": "/bot/team/role/update",
+          "title": "编辑角色",
+          "description": "更新角色类型、绑定智能体和职责说明。",
+          "size": "lg",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.editRoleId",
+            "team_id": "data.actionTarget.editRoleTeamId",
+            "role_type": "data.actionTarget.editRoleType"
+          },
+          "bodyClassName": "px-6 py-2"
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "团队角色",
+      "description": "维护团队内的角色岗位，工作流节点可以直接选择角色。"
+    },
+    "search": {
+      "team_id": "",
+      "role_type": "chat"
+    },
+    "option": {
+      "role_type": [
+        {
+          "id": "chat",
+          "value": "沟通"
+        },
+        {
+          "id": "planner",
+          "value": "规划"
+        },
+        {
+          "id": "worker",
+          "value": "执行"
+        },
+        {
+          "id": "reviewer",
+          "value": "审核"
+        }
+      ]
+    },
+    "table": {
+      "page": 1,
+      "pageSize": 10,
+      "total": 0,
+      "filterFields": ["team_id", "role_type"]
+    },
+    "actionTarget": {
+      "editRoleId": "",
+      "editRoleTeamId": "",
+      "editRoleType": ""
+    }
+  },
+  "state": {
+    "dialog": {
+      "create": false,
+      "edit": false
+    }
+  },
+  "action": {}
+}

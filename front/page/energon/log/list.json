@@ -77,8 +77,8 @@
         "placeholder": "创建时间",
         "value": "search.created_at_start",
         "mode": "search",
-        "className": "w-[320px]",
         "meta": {
+          "searchWidth": "select",
           "range": true,
           "endValue": "search.created_at_end",
           "inputType": "datetime-local"

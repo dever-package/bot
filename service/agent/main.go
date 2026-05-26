@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"my/package/bot/service/stream"
 	frontstream "my/package/front/service/stream"
 )
 
@@ -25,10 +26,10 @@ func (s Service) Run(ctx context.Context, req RunRequest) map[string]any {
 
 	requestID := resolveRequestID(req)
 	now := time.Now()
+	identity := agentIdentity(agent)
 	runID := s.repo.InsertRun(ctx, map[string]any{
 		"request_id": requestID,
 		"agent_id":   agent.ID,
-		"agent_key":  agent.Key,
 		"input": jsonText(map[string]any{
 			"input":   parsed.Input,
 			"history": parsed.History,
@@ -47,17 +48,16 @@ func (s Service) Run(ctx context.Context, req RunRequest) map[string]any {
 		return frontstream.ResponsePayload(requestID, "result", map[string]any{}, "创建智能体运行记录失败", 2)
 	}
 
-	startPayload := frontstream.ResponsePayload(requestID, "stream", map[string]any{
-		"event": "start",
-		"text":  "智能体运行已开始",
+	startPayload := frontstream.ResponsePayload(requestID, "stream", stream.Output(stream.FeatureAgent, stream.EventStart, map[string]any{
+		"text": "智能体运行已开始",
 		"meta": map[string]any{
 			"cancelable":    true,
-			"agent":         agent.Key,
+			"agent":         identity,
 			"run_id":        runID,
 			"started_at":    now.Format(time.RFC3339Nano),
 			"started_at_ms": now.UnixMilli(),
 		},
-	}, "", 1)
+	}), "", 1)
 	_ = s.writePayload(ctx, requestID, startPayload)
 
 	go s.execute(runExecution{

@@ -40,15 +40,15 @@ var bodyRelation = orm.Relation{
 	OptionKeys: []string{"name", "type"},
 }
 
-var brainRelation = orm.Relation{
-	Field:      "brain_id",
-	Option:     "bot.brain.NewBrainModel",
+var teamRelation = orm.Relation{
+	Field:      "team_id",
+	Option:     "bot.team.NewTeamModel",
 	OptionKeys: []string{"name", "key"},
 }
 
-var thinkRelation = orm.Relation{
-	Field:      "think_id",
-	Option:     "bot.brain.NewThinkModel",
+var flowRelation = orm.Relation{
+	Field:      "flow_id",
+	Option:     "bot.team.NewFlowModel",
 	OptionKeys: []string{"name", "key"},
 }
 
@@ -66,19 +66,19 @@ var assetRelation = orm.Relation{
 
 var runRelation = orm.Relation{
 	Field:      "run_id",
-	Option:     "bot.brain.NewRunModel",
+	Option:     "bot.team.NewRunModel",
 	OptionKeys: []string{"request_id", "status"},
 }
 
 var nodeRunRelation = orm.Relation{
 	Field:      "node_run_id",
-	Option:     "bot.brain.NewNodeRunModel",
+	Option:     "bot.team.NewNodeRunModel",
 	OptionKeys: []string{"request_id", "status"},
 }
 
 var releaseRelation = orm.Relation{
 	Field:      "release_id",
-	Option:     "bot.brain.NewBrainReleaseModel",
+	Option:     "bot.team.NewTeamReleaseModel",
 	OptionKeys: []string{"version", "status"},
 }
 
@@ -86,8 +86,8 @@ type Asset struct {
 	ID        uint64    `dorm:"primaryKey;autoIncrement;comment:资产ID"`
 	ProjectID uint64    `dorm:"type:bigint;not null;default:0;comment:项目"`
 	BodyID    uint64    `dorm:"type:bigint;not null;default:0;comment:载体"`
-	BrainID   uint64    `dorm:"type:bigint;not null;default:0;comment:大脑"`
-	ThinkID   uint64    `dorm:"type:bigint;not null;default:0;comment:思维"`
+	TeamID    uint64    `dorm:"type:bigint;not null;default:0;comment:团队"`
+	FlowID    uint64    `dorm:"type:bigint;not null;default:0;comment:工作流"`
 	Name      string    `dorm:"type:varchar(128);not null;comment:名称"`
 	Kind      string    `dorm:"type:varchar(32);not null;default:'text';comment:产物类型"`
 	VersionID uint64    `dorm:"type:bigint;not null;default:0;comment:当前版本"`
@@ -98,10 +98,10 @@ type Asset struct {
 
 type AssetIndex struct {
 	ProjectStatus struct{} `index:"project_id,status,sort,id"`
-	ProjectThink  struct{} `index:"project_id,think_id,status,sort,id"`
+	ProjectFlow   struct{} `index:"project_id,flow_id,status,sort,id"`
 	BodyStatus    struct{} `index:"body_id,status,sort,id"`
-	BrainStatus   struct{} `index:"brain_id,status,sort,id"`
-	ThinkStatus   struct{} `index:"think_id,status,sort,id"`
+	TeamStatus    struct{} `index:"team_id,status,sort,id"`
+	FlowStatus    struct{} `index:"flow_id,status,sort,id"`
 	Version       struct{} `index:"version_id"`
 }
 
@@ -116,8 +116,8 @@ func NewAssetModel() *orm.Model[Asset] {
 		},
 		Relations: []orm.Relation{
 			bodyRelation,
-			brainRelation,
-			thinkRelation,
+			teamRelation,
+			flowRelation,
 			versionRelation,
 		},
 	})

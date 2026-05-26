@@ -53,12 +53,12 @@ func (s Service) ResolveResponse(ctx context.Context, job ResponseJob) (any, boo
 
 func (s Service) runRequest(ctx context.Context, spec StreamTaskSpec, job StreamJob) (StreamResult, error) {
 	if !spec.PlainRequest && canStreamRequest(job) {
-		return s.runStreamRequest(ctx, spec, job)
+		return s.startStreamRequest(ctx, spec, job)
 	}
 	return s.runPlainRequest(ctx, spec, job)
 }
 
-func (s Service) runStreamRequest(ctx context.Context, spec StreamTaskSpec, job StreamJob) (StreamResult, error) {
+func (s Service) startStreamRequest(ctx context.Context, spec StreamTaskSpec, job StreamJob) (StreamResult, error) {
 	streamClient, ok := job.Client.(botprovider.StreamClient)
 	if !ok {
 		return s.runPlainRequest(ctx, spec, job)

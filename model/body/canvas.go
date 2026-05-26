@@ -34,9 +34,9 @@ var (
 		Order:      "sort asc, id asc",
 	}
 
-	canvasBrainRelation = orm.Relation{
-		Field:      "brains",
-		Through:    "bot.body.NewCanvasBrainModel",
+	canvasTeamRelation = orm.Relation{
+		Field:      "teams",
+		Through:    "bot.body.NewCanvasTeamModel",
 		OwnerField: "canvas_id",
 		Order:      "sort asc, id asc",
 	}
@@ -53,7 +53,7 @@ func NewCanvasModel() *orm.Model[Canvas] {
 		Relations: []orm.Relation{
 			canvasPowerRelation,
 			canvasAgentRelation,
-			canvasBrainRelation,
+			canvasTeamRelation,
 		},
 	})
 }

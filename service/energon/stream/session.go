@@ -8,6 +8,7 @@ import (
 
 	botprotocol "my/package/bot/service/energon/protocol"
 	bottask "my/package/bot/service/energon/task"
+	botstream "my/package/bot/service/stream"
 	frontstream "my/package/front/service/stream"
 )
 
@@ -27,16 +28,15 @@ func Start(
 	cancels.Init(requestID)
 
 	now := time.Now()
-	start := botprotocol.BuildStreamResponse(requestID, botprotocol.Output{
-		"event": "start",
-		"text":  "等待生成结果",
+	start := botprotocol.BuildStreamResponse(requestID, botprotocol.Output(botstream.Output(botstream.FeaturePower, botstream.EventStart, map[string]any{
+		"text": "等待生成结果",
 		"meta": map[string]any{
 			"stream_key":    Key(requestID),
 			"cancelable":    false,
 			"started_at":    now.Format(time.RFC3339Nano),
 			"started_at_ms": now.UnixMilli(),
 		},
-	})
+	})))
 
 	writeCtx, cancel := context.WithTimeout(ctx, startWriteTimeout)
 	defer cancel()
@@ -86,19 +86,24 @@ func Stop(
 	}
 
 	resp := botprotocol.BuildStreamResponse(requestID, botprotocol.Output{
-		"event": "cancel",
-		"text":  "任务已取消",
+		"event":      "cancel",
+		"feature":    botstream.FeaturePower,
+		"event_type": botstream.EventTypeLifecycle,
+		"text":       "任务已取消",
 	})
 	_ = Write(ctx, store, requestID, resp)
 	result := botprotocol.BuildSuccessResponse(requestID, botprotocol.Output{
-		"event": "cancel",
-		"text":  "任务已取消",
+		"event":      "cancel",
+		"feature":    botstream.FeaturePower,
+		"event_type": botstream.EventTypeLifecycle,
+		"text":       "任务已取消",
 	})
 	_ = Write(ctx, store, requestID, result)
 	return result
 }
 
 func Write(ctx context.Context, store frontstream.Service, requestID string, resp botprotocol.Response) error {
-	_, err := store.WritePayload(ctx, requestID, resp.Payload())
+	payload := botstream.NormalizePayload(botstream.FeaturePower, resp.Payload())
+	_, err := store.WritePayload(ctx, requestID, payload)
 	return err
 }

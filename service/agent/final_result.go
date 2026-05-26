@@ -211,15 +211,23 @@ func (s Service) executeFinalTask(
 	task agentaction.AbilityTask,
 	history []any,
 ) finalTaskRunResult {
+	if err := ctx.Err(); err != nil {
+		return finalTaskContextResult(task, err)
+	}
+
+	childRequestID := finalTaskRequestID(exec.RequestID, task.ID)
+	unregister := registerFinalTaskStream(exec.RequestID, childRequestID)
+	defer unregister()
+	if err := ctx.Err(); err != nil {
+		return finalTaskContextResult(task, err)
+	}
+
 	streamCtx := context.Background()
 	state := initialFinalTaskState(task)
 	state.Status = finalTaskStatusRunning
 	state.Text = "正在调用能力"
 	_ = s.writeFinalResultTask(streamCtx, exec.RequestID, resultID, state, nil)
 
-	childRequestID := finalTaskRequestID(exec.RequestID, task.ID)
-	unregister := registerFinalTaskStream(exec.RequestID, childRequestID)
-	defer unregister()
 	assets := agentaction.CollectAssets(exec.Parsed.Input, history)
 	result := agentaction.ExecutePower(ctx, agentaction.ExecuteRequest{
 		RequestID:        exec.RequestID,

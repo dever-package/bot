@@ -47,7 +47,6 @@ func agentRunTraceToMap(run agentmodel.Run, steps []agentmodel.Step) map[string]
 		"id":              run.ID,
 		"request_id":      run.RequestID,
 		"agent_id":        run.AgentID,
-		"agent_key":       run.AgentKey,
 		"input":           jsonAny(run.Input),
 		"skills":          jsonAny(run.Skills),
 		"runtime_context": run.RuntimeContext,

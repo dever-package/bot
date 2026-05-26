@@ -1,0 +1,133 @@
+{
+  "page": {
+    "name": "角色编辑",
+    "parent": "bot/team/role/list",
+    "type": 2,
+    "auth": [
+      {
+        "key": "bot/team/role/create",
+        "name": "角色新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/team/role/update",
+        "name": "角色编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "placeholder": "例如：编剧角色",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "角色名称不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-radio",
+        "name": "角色类型",
+        "value": "form.role_type",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "角色类型不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "gap-x-5"
+        }
+      },
+      {
+        "type": "form-cascader",
+        "name": "智能体",
+        "value": "form.agent_id",
+        "mode": "form",
+        "placeholder": "请选择智能体",
+        "meta": {
+          "api": "/front/route/option",
+          "use": "bot.agent.NewAgentCateModel",
+          "childUse": "bot.agent.NewAgentModel",
+          "childParentField": "cate_id",
+          "valueMode": "leaf",
+          "defaultParentValue": 1,
+          "placeholder": ["选择智能体分类", "选择智能体"],
+          "childExtraFields": "cate_id,kind,status",
+          "formLayout": "horizontal",
+          "searchPlaceholder": "输入智能体名称搜索..."
+        },
+        "validate": [
+          {
+            "type": "required",
+            "message": "智能体不能为空。"
+          }
+        ]
+      },
+      {
+        "type": "form-textarea",
+        "name": "职责说明",
+        "placeholder": "描述这个角色在团队中负责什么、边界是什么、产出什么。",
+        "value": "form.assignment",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 4
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "id": 0,
+      "team_id": 0,
+      "role_type": "chat",
+      "name": "",
+      "agent_id": 0,
+      "assignment": "",
+      "config": "{}",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.team.TeamHook.BeforeSaveRole"
+      }
+    }
+  }
+}

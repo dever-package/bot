@@ -1,0 +1,173 @@
+{
+  "page": {
+    "name": "运行步骤",
+    "icon": "list-tree",
+    "parent": "bot/team/run/list",
+    "type": 2,
+    "sort": 20
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "table-row": {
+            "type": "container",
+            "className": "overflow-hidden rounded-md border bg-background"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "返回上一页",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "back": true,
+          "fallback": "/bot/team/run/list"
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "flow.name",
+              "name": "工作流",
+              "type": "show-base"
+            },
+            {
+              "value": "node.name",
+              "name": "节点",
+              "type": "show-base"
+            },
+            {
+              "value": "node_type",
+              "type": "show-tag"
+            },
+            {
+              "value": "status",
+              "type": "show-tag"
+            },
+            {
+              "value": "started_at",
+              "type": "show-date"
+            },
+            {
+              "value": "finished_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "eye",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看步骤详情",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.viewNodeRunId",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.view",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.view",
+          "pageRoute": "/bot/team/node_run/view",
+          "description": "查看单个团队节点步骤的输入、输出和错误信息。",
+          "size": "lg",
+          "bodyClassName": "max-h-[65vh] overflow-y-auto px-6 py-2",
+          "pageRouteQuery": {
+            "id": "data.actionTarget.viewNodeRunId"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "运行步骤",
+      "description": "按执行顺序查看一次团队运行产生的工作流节点步骤。"
+    },
+    "search": {
+      "run_id": ""
+    },
+    "table": {
+      "page": 1,
+      "pageSize": 10,
+      "total": 0,
+      "filterFields": [
+        "run_id"
+      ]
+    },
+    "actionTarget": {
+      "viewNodeRunId": ""
+    }
+  },
+  "state": {
+    "dialog": {
+      "view": false
+    }
+  },
+  "action": {}
+}

@@ -183,23 +183,6 @@
     ],
     "content-toolbar": [
       {
-        "type": "show-button",
-        "name": "新增方案技能",
-        "className": "shrink-0",
-        "meta": {
-          "variant": "default",
-          "size": "sm",
-          "icon": "plus"
-        },
-        "action": {
-          "click": {
-            "type": "modal",
-            "key": "dialog.createPackSkill",
-            "value": true
-          }
-        }
-      },
-      {
         "type": "form-select",
         "placeholder": "状态",
         "value": "search.status",
@@ -392,25 +375,6 @@
             "confirmText": "保存"
           },
           "size": "xl",
-          "bodyClassName": "py-2"
-        }
-      },
-      {
-        "type": "feedback-modal",
-        "name": "新增方案技能",
-        "meta": {
-          "stateKey": "dialog.createPackSkill",
-          "pageRoute": "/bot/agent/skill_pack_item/update",
-          "title": "新增方案技能",
-          "description": "从已安装技能中选择一个加入当前方案。",
-          "footer": {
-            "confirm": true,
-            "confirmText": "保存"
-          },
-          "pageDataPatches": {
-            "form.pack_id": "data.search.pack_id"
-          },
-          "size": "lg",
           "bodyClassName": "py-2"
         }
       },
@@ -611,7 +575,6 @@
       "createPack": false,
       "editPack": false,
       "editSkill": false,
-      "createPackSkill": false,
       "viewSkill": false,
       "skillCate": false,
       "installSkill": false

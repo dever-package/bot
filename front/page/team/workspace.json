@@ -1,0 +1,70 @@
+{
+  "page": {
+    "name": "团队工作流",
+    "icon": "network",
+    "parent": "bot/team/team/list",
+    "type": 2
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "min-h-0"
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "返回团队列表",
+        "className": "shrink-0",
+        "meta": {
+          "icon": "arrow-left",
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/team/team/list"
+        }
+      }
+    ],
+    "page-main": [
+      {
+        "type": "show-team-workspace",
+        "meta": {
+          "workspaceApi": "/bot/team/workspace_data",
+          "saveFlowApi": "/bot/team/save_flow_graph",
+          "saveNodeApi": "/bot/team/save_node_graph",
+          "validateFlowApi": "/bot/team/validate_flow",
+          "validateNodeApi": "/bot/team/validate_node",
+          "runTeamApi": "/bot/team/run_team",
+          "runFlowApi": "/bot/team/run_flow",
+          "runStatusApi": "/bot/team/run_status",
+          "streamApi": "/bot/team/stream",
+          "approvalApi": "/bot/team/submit_approval",
+          "stopRunApi": "/bot/team/stop_run"
+        }
+      }
+    ]
+  },
+  "data": {},
+  "state": {},
+  "action": {}
+}

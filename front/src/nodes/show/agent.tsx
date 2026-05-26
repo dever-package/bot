@@ -7,6 +7,7 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react'
+import type { NodeItemProps } from '@/page/nodes'
 import {
   ExternalLink,
   Loader2,
@@ -16,11 +17,13 @@ import {
   Square,
 } from 'lucide-react'
 import { useStore } from 'zustand'
-import { getStoreValueByPath } from '@/lib/store'
+import { runAgentStream, stopAgentStream } from '@/lib/agent/runner'
 import {
-  streamValueText as valueText,
-  type RuntimeStreamFrame,
-} from '@/lib/stream'
+  assistantReferencePayload,
+  buildAssistantReferenceMessage,
+  type AssistantReferenceFile,
+} from '@/lib/assistant/reference'
+import { reloadStorePageSchema } from '@/lib/page-schema-reload'
 import {
   isEmptyRuntimeOutput,
   isPlainRecord as isPlainObject,
@@ -28,8 +31,11 @@ import {
   resolveRuntimeFrameCancelable,
   runtimeErrorMessage,
 } from '@/lib/runtime-stream-output'
-import { runAgentStream, stopAgentStream } from '@/lib/agent/runner'
-import { reloadStorePageSchema } from '@/lib/page-schema-reload'
+import { getStoreValueByPath } from '@/lib/store'
+import {
+  streamValueText as valueText,
+  type RuntimeStreamFrame,
+} from '@/lib/stream'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -41,23 +47,18 @@ import {
 } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import {
-  EnergonContentView,
-  type EnergonOutput,
-} from '@/components/energon/content-view'
-import type { NodeItemProps } from '@/page/nodes'
-import {
-  AgentResultCard,
-  AgentResultDrawer,
-  applyResultTaskPlaceholders,
-  type AgentResultDetail,
-  type AgentResultOutput,
-  type AgentResultTask,
-} from './agent-result'
-import {
   AgentInteractionPanel,
   type AgentInteraction,
   type AgentInteractionSubmitResult,
 } from '@/components/agent/interaction-panel'
+import {
+  AssistantReferenceList,
+  AssistantReferencePicker,
+} from '@/components/assistant/reference-picker'
+import {
+  EnergonContentView,
+  type EnergonOutput,
+} from '@/components/energon/content-view'
 import {
   cancelStreamTiming,
   StreamTimingBadge,
@@ -68,7 +69,15 @@ import {
   updateStreamTimingFromOutput,
   useStreamClock,
   type StreamTiming,
-} from '@/page/nodes/show/shared/stream-timing'
+} from '@/components/stream-timing'
+import {
+  AgentResultCard,
+  AgentResultDrawer,
+  applyResultTaskPlaceholders,
+  type AgentResultDetail,
+  type AgentResultOutput,
+  type AgentResultTask,
+} from './agent-result'
 
 type AgentRole = 'user' | 'assistant'
 
@@ -123,6 +132,8 @@ const EMPTY_OUTPUT: AgentStreamOutput = {
 export function ShowAgent({ item, store }: NodeItemProps) {
   const [messages, setMessages] = useState<AgentMessage[]>([])
   const [input, setInput] = useState('')
+  const [references, setReferences] = useState<AssistantReferenceFile[]>([])
+  const [referenceMessage, setReferenceMessage] = useState('')
   const [requestID, setRequestID] = useState('')
   const [running, setRunning] = useState(false)
   const [cancelable, setCancelable] = useState(false)
@@ -207,20 +218,27 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     )
   }, [messages, resultDrawerMessageID])
   const resultDrawerDetail = useMemo(
-    () => (resultDrawerMessage ? buildAgentResultDetail(resultDrawerMessage) : null),
+    () =>
+      resultDrawerMessage ? buildAgentResultDetail(resultDrawerMessage) : null,
     [resultDrawerMessage]
   )
   const resultDrawerSuggestions = useMemo(
     () =>
       resultDrawerMessage
-        ? buildMessageSuggestions(resultDrawerMessage, Boolean(resultDrawerDetail))
+        ? buildMessageSuggestions(
+            resultDrawerMessage,
+            Boolean(resultDrawerDetail)
+          )
         : [],
     [resultDrawerDetail, resultDrawerMessage]
   )
 
   const canSend = useMemo(
-    () => input.trim().length > 0 && agentKey.length > 0 && !running,
-    [agentKey, input, running]
+    () =>
+      (input.trim().length > 0 || references.length > 0) &&
+      agentKey.length > 0 &&
+      !running,
+    [agentKey, input, references.length, running]
   )
   const hasRunningActionTiming = useMemo(
     () =>
@@ -258,6 +276,8 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     lastAutoScrollResultKeyRef.current = ''
     setMessages([])
     setInput(initialInput)
+    setReferences([])
+    setReferenceMessage('')
     setRequestID('')
     setRunning(false)
     setCancelable(false)
@@ -306,16 +326,30 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   }
 
   const send = async () => {
-    const text = input.trim()
+    const runReferences = references
+    const text =
+      input.trim() ||
+      (runReferences.length > 0 ? '请根据参考资料和当前任务进行分析。' : '')
     if (!text || running) {
       return
     }
+    const referencePayload = assistantReferencePayload(runReferences)
+    if (runReferences.length > 0) {
+      setReferences([])
+      setReferenceMessage('')
+    }
     await runAgent(
-      { text },
+      {
+        text,
+        ...(referencePayload ? { reference_files: referencePayload } : {}),
+      },
       {
         role: 'user',
-        text,
+        text: buildAssistantReferenceMessage(text, runReferences),
         kind: 'chat',
+        data: referencePayload
+          ? { reference_files: referencePayload }
+          : undefined,
       },
       messages
     )
@@ -510,13 +544,18 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       return
     }
 
-    const key = [frame.request_id, frame.stream_id, kind].map(valueText).join(':')
+    const key = [frame.request_id, frame.stream_id, kind]
+      .map(valueText)
+      .join(':')
     if (finalSideEffectKeyRef.current === key) {
       return
     }
     finalSideEffectKeyRef.current = key
 
-    const delayMs = Math.max(0, Number(item.meta?.reloadPageOnFinalDelayMs || 0))
+    const delayMs = Math.max(
+      0,
+      Number(item.meta?.reloadPageOnFinalDelayMs || 0)
+    )
     window.setTimeout(() => {
       void reloadStorePageSchema(store)
     }, delayMs)
@@ -556,6 +595,11 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       if (isStreamTimingStatusOutput(frameOutput)) {
         actionTiming = updateStreamTimingFromOutput(actionTiming, frameOutput)
       }
+      const actionResultDetail = mergeActionResultDetail(
+        message.resultDetail,
+        frameOutput,
+        frame
+      )
       if (frame?.type === 'result') {
         let finalOutput = isEmptyRuntimeOutput(frameOutput)
           ? normalizeAgentDisplayOutput({
@@ -572,7 +616,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         nextOutput.finalOutput = finalOutput
         const finalText = valueText(finalOutput.text) || nextOutput.text
         const resultDetail = mergeMessageResultDetail(
-          message.resultDetail,
+          actionResultDetail,
           resultDetailFromFinalOutput(finalOutput)
         )
         return {
@@ -598,6 +642,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
           text: nextOutput.text,
           interaction: frameInteraction || message.interaction,
           output: nextOutput,
+          resultDetail: actionResultDetail,
           requestID: valueText(frame?.request_id) || message.requestID,
           actionTiming,
         }
@@ -610,6 +655,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         text: nextOutput.text,
         interaction: frameInteraction || message.interaction,
         output: nextOutput,
+        resultDetail: actionResultDetail,
         requestID: valueText(frame?.request_id) || message.requestID,
         actionTiming,
       }
@@ -706,7 +752,9 @@ export function ShowAgent({ item, store }: NodeItemProps) {
               )}
             >
               {message.role === 'user' ? (
-                <div className='whitespace-pre-wrap'>{message.text}</div>
+                <div className='whitespace-pre-wrap break-all'>
+                  {message.text}
+                </div>
               ) : (
                 <AgentAssistantMessage
                   message={message}
@@ -764,14 +812,42 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         </div>
       ) : null}
 
-      <div className='shrink-0 rounded-md border bg-background p-2.5'>
-        <div className='mb-2 flex items-center justify-between gap-2'>
+      <div className='shrink-0 overflow-hidden rounded-md border bg-background shadow-xs transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20'>
+        {references.length > 0 ? (
+          <div className='border-b px-3 py-2'>
+            <AssistantReferenceList
+              references={references}
+              disabled={running}
+              onRemove={(index) =>
+                setReferences((current) =>
+                  current.filter((_, currentIndex) => currentIndex !== index)
+                )
+              }
+            />
+          </div>
+        ) : null}
+        <Textarea
+          value={input}
+          disabled={running}
+          placeholder={inputPlaceholder}
+          className='min-h-20 resize-none border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0'
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+        <div className='flex items-center justify-between gap-3 border-t px-3 py-2'>
           <div className='min-w-0 truncate text-xs text-muted-foreground'>
             {requestID
               ? `RequestID: ${requestID}${lastStreamID !== '0-0' ? ` / ${lastStreamID}` : ''}`
-              : '关闭弹窗后会清空本次测试上下文。'}
+              : referenceMessage || '关闭弹窗后会清空本次测试上下文。'}
           </div>
           <div className='flex shrink-0 items-center gap-2'>
+            <AssistantReferencePicker
+              references={references}
+              disabled={running}
+              buttonLabel='素材'
+              onReferencesChange={setReferences}
+              onMessage={setReferenceMessage}
+            />
             <Button
               type='button'
               variant='outline'
@@ -813,14 +889,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
             </Button>
           </div>
         </div>
-        <Textarea
-          value={input}
-          disabled={running}
-          placeholder={inputPlaceholder}
-          className='min-h-20 resize-none'
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={handleKeyDown}
-        />
       </div>
     </div>
   )
@@ -1111,7 +1179,11 @@ function historyResultOutput(message: AgentMessage) {
 }
 
 function isAgentResultRuntimeEvent(event: string) {
-  return event === 'result_detail' || event === 'result_task' || event === 'result_progress'
+  return (
+    event === 'result_detail' ||
+    event === 'result_task' ||
+    event === 'result_progress'
+  )
 }
 
 function applyResultRuntimeEvent(
@@ -1148,7 +1220,9 @@ function applyResultRuntimeEvent(
   }
 }
 
-function buildAgentResultDetail(message: AgentMessage): AgentResultDetail | null {
+function buildAgentResultDetail(
+  message: AgentMessage
+): AgentResultDetail | null {
   const detail = mergeMessageResultDetail(
     message.resultDetail,
     resultDetailFromFinalOutput(message.output?.finalOutput)
@@ -1159,7 +1233,9 @@ function buildAgentResultDetail(message: AgentMessage): AgentResultDetail | null
   return detail.result || detail.tasks.length ? detail : null
 }
 
-function resultDetailFromRuntimeOutput(output?: AgentOutput): AgentResultDetail | undefined {
+function resultDetailFromRuntimeOutput(
+  output?: AgentOutput
+): AgentResultDetail | undefined {
   if (!output) {
     return undefined
   }
@@ -1180,7 +1256,9 @@ function resultDetailFromRuntimeOutput(output?: AgentOutput): AgentResultDetail 
   }
 }
 
-function resultDetailFromFinalOutput(output?: AgentOutput | null): AgentResultDetail | undefined {
+function resultDetailFromFinalOutput(
+  output?: AgentOutput | null
+): AgentResultDetail | undefined {
   if (!output) {
     return undefined
   }
@@ -1215,6 +1293,88 @@ function resultDetailFromFinalOutput(output?: AgentOutput | null): AgentResultDe
     progress: normalizeProgressValue(output.progress),
     progressText: valueText(output.progress_text),
   }
+}
+
+function mergeActionResultDetail(
+  current: AgentResultDetail | undefined,
+  output: AgentOutput,
+  frame: AgentFrame
+): AgentResultDetail | undefined {
+  const task = actionResultTaskFromOutput(output, frame)
+  if (!task) {
+    return current
+  }
+  const resultID = actionResultID(output, frame)
+  const base = current || {
+    ...emptyAgentResultDetail(resultID),
+    title: '能力生成结果',
+  }
+  const next = updateResultDetailTask(base, task, resultID)
+  return {
+    ...next,
+    title: base.title || '能力生成结果',
+    progress: task.progress ?? next.progress,
+    progressText: task.text || next.progressText,
+  }
+}
+
+function actionResultTaskFromOutput(
+  output: AgentOutput,
+  frame: AgentFrame
+): AgentResultTask | null {
+  const meta = isPlainObject(output.meta) ? output.meta : {}
+  const action = valueText(meta.action).toLowerCase()
+  if (action !== 'call_power') {
+    return null
+  }
+  const power = valueText(meta.power || output.meta?.power).trim()
+  const event = valueText(output.event).toLowerCase()
+  const error = valueText(output.error).trim()
+  const taskOutput = actionTaskOutput(output)
+  const status = error
+    ? 'failed'
+    : taskOutput || event === 'final'
+      ? 'succeeded'
+      : 'running'
+  return {
+    id: actionResultID(output, frame),
+    placeholderID: actionResultID(output, frame),
+    title: power ? `生成 ${power}` : '能力生成',
+    kind: valueText(power || output.kind).trim(),
+    power,
+    execution: 'async',
+    status,
+    text: valueText(output.text || output.progress_text).trim(),
+    error,
+    progress: normalizeProgressValue(
+      output.progress ?? meta.progress ?? meta.percent
+    ),
+    output: taskOutput,
+    sort: 0,
+  }
+}
+
+function actionTaskOutput(output: AgentOutput): AgentOutput | undefined {
+  const event = valueText(output.event).toLowerCase()
+  if (!hasAgentDisplayPayload(output) && event !== 'final') {
+    return undefined
+  }
+  const normalized = normalizeAgentDisplayOutput({
+    ...output,
+    event: 'final',
+  })
+  return isNonResultOutput(normalized) ? undefined : normalized
+}
+
+function actionResultID(output: AgentOutput, frame: AgentFrame) {
+  const meta = isPlainObject(output.meta) ? output.meta : {}
+  const power = valueText(
+    meta.power || (output as Record<string, unknown>).power
+  ).trim()
+  const requestID = valueText(frame?.request_id).trim()
+  return (
+    [requestID, power || 'power'].filter(Boolean).join(':') || 'power-action'
+  )
 }
 
 function mergeMessageResultDetail(
@@ -1332,15 +1492,18 @@ function normalizeAgentResultTask(value: unknown): AgentResultTask | null {
     id: normalizedID,
     placeholderID,
     title:
-      valueText(value.title || value.name || value.label || value.power).trim() ||
-      '素材任务',
+      valueText(
+        value.title || value.name || value.label || value.power
+      ).trim() || '素材任务',
     kind: valueText(value.kind || value.media_type || value.mediaType).trim(),
     power: valueText(value.power).trim(),
     execution: valueText(value.execution || value.mode).trim() || 'async',
     status: valueText(value.status || value.state).trim() || 'pending',
     text: valueText(value.text || value.message).trim(),
     error: valueText(value.error).trim(),
-    progress: normalizeProgressValue(value.progress ?? meta.progress ?? meta.percent),
+    progress: normalizeProgressValue(
+      value.progress ?? meta.progress ?? meta.percent
+    ),
     output,
     sort: Number(value.sort || 0),
   }
@@ -1466,6 +1629,17 @@ function normalizeAgentDisplayOutput(
   const next: AgentOutput = { ...output }
   delete next.reasoning
 
+  const actionProtocol = extractAgentActionPayload(
+    valueText(next.text) || fallbackText
+  )
+  if (actionProtocol) {
+    return normalizeAgentActionDisplayOutput(
+      next,
+      actionProtocol.payload,
+      actionProtocol.cleanText
+    )
+  }
+
   const protocol = extractAgentResultPayload(
     valueText(next.text) || fallbackText
   )
@@ -1515,6 +1689,65 @@ function normalizeAgentDisplayOutput(
     }
   }
   return next
+}
+
+function normalizeAgentActionDisplayOutput(
+  target: AgentOutput,
+  payload: Record<string, unknown>,
+  cleanText: string
+): AgentOutput {
+  clearAgentResultOutputFields(target)
+  const action = normalizeAgentActionType(payload)
+  const power = valueText(payload.power || payload.name).trim()
+  const tool = valueText(payload.tool || payload.name).trim()
+  const title =
+    action === 'call_power'
+      ? `能力调用：${power || '未指定能力'}`
+      : `工具调用：${tool || '未指定工具'}`
+  const text =
+    cleanText ||
+    '智能体返回了调用指令，但本轮没有收到执行结果。请重新发送或重试。'
+  target.event = 'result_card'
+  target.kind = 'tool_result'
+  target.title = title
+  target.text = text
+  target.result_mode = 'artifact'
+  target.result = {
+    title,
+    text,
+  }
+  target.meta = {
+    ...(isPlainObject(target.meta) ? target.meta : {}),
+    action,
+    power,
+    tool,
+    input: payload.input || payload.params || payload.arguments,
+  }
+  if (action === 'call_power') {
+    target.tasks = [
+      {
+        id: actionTaskID(payload),
+        title,
+        kind: valueText(payload.kind || power).trim(),
+        power,
+        status: 'pending',
+        text: '等待能力执行结果',
+        input: payload.input || payload.params || payload.arguments,
+      },
+    ]
+  }
+  return target
+}
+
+function actionTaskID(payload: Record<string, unknown>) {
+  const raw = valueText(
+    payload.id || payload.task_id || payload.power || payload.name
+  )
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return raw ? `action-${raw}` : 'action-call-power'
 }
 
 function clearAgentResultOutputFields(target: AgentOutput) {
@@ -1572,6 +1805,88 @@ function extractAgentResultPayload(text: string):
     }
   }
   return undefined
+}
+
+function extractAgentActionPayload(text: string):
+  | {
+      cleanText: string
+      payload: Record<string, unknown>
+    }
+  | undefined {
+  const result = extractAgentActionPayloadByLang(text, 'agent-action')
+  if (result) {
+    return result
+  }
+  const payload = parseAgentActionPayload(text)
+  return payload ? { cleanText: '', payload } : undefined
+}
+
+function extractAgentActionPayloadByLang(
+  text: string,
+  lang: string
+):
+  | {
+      cleanText: string
+      payload: Record<string, unknown>
+    }
+  | undefined {
+  const open = `\`\`\`${lang}`
+  const start = text.indexOf(open)
+  if (start < 0) {
+    return undefined
+  }
+
+  let bodyStart = start + open.length
+  while (bodyStart < text.length && isFenceWhitespace(text[bodyStart])) {
+    bodyStart += 1
+  }
+
+  const end = text.indexOf('```', bodyStart)
+  const body = end < 0 ? text.slice(bodyStart) : text.slice(bodyStart, end)
+  const payload = parseAgentActionPayload(body)
+  if (!payload) {
+    return undefined
+  }
+  const cleanText =
+    end < 0
+      ? text.slice(0, start).trim()
+      : `${text.slice(0, start)}${text.slice(end + 3)}`.trim()
+  return {
+    cleanText,
+    payload,
+  }
+}
+
+function parseAgentActionPayload(value: string) {
+  const text = value.trim()
+  const repaired = repairJSONControlChars(text)
+  const unescaped = unescapeEscapedProtocolJSONQuotes(repaired)
+  const sources = [text, repaired, unescaped]
+  for (const source of sources) {
+    if (!source.trim()) {
+      continue
+    }
+    try {
+      const parsed = JSON.parse(source)
+      if (isAgentActionPayload(parsed)) {
+        return parsed
+      }
+    } catch {
+      // Try the next repaired variant.
+    }
+  }
+  return undefined
+}
+
+function unescapeEscapedProtocolJSONQuotes(value: string) {
+  const text = value.trim()
+  if (!text.includes('\\"')) {
+    return value
+  }
+  if (!text.startsWith('{') && !text.startsWith('[')) {
+    return value
+  }
+  return value.replace(/\\"/g, '"')
 }
 
 function extractAgentResultPayloadByLang(
@@ -1692,6 +2007,9 @@ function isAgentResultPayload(
   if (!isPlainObject(value)) {
     return false
   }
+  if (isAgentActionPayload(value)) {
+    return false
+  }
   const kind = normalizeAgentOutputKind(
     valueText(value.kind || value.type || value.event)
   )
@@ -1704,6 +2022,38 @@ function isAgentResultPayload(
     hasAgentResultOutputField(value) ||
     (isPlainObject(value.content) && hasAgentResultOutputField(value.content))
   )
+}
+
+function isAgentActionPayload(
+  value: unknown
+): value is Record<string, unknown> {
+  if (!isPlainObject(value)) {
+    return false
+  }
+  const action = normalizeAgentActionType(value)
+  if (!action) {
+    return false
+  }
+  if (action === 'call_power') {
+    return Boolean(valueText(value.power || value.name).trim())
+  }
+  return Boolean(valueText(value.tool || value.name).trim())
+}
+
+function normalizeAgentActionType(value: Record<string, unknown>) {
+  const action = valueText(value.type || value.action)
+    .toLowerCase()
+    .trim()
+  if (action === 'power') {
+    return 'call_power'
+  }
+  if (action === 'tool') {
+    return 'call_tool'
+  }
+  if (action === 'call_power' || action === 'call_tool') {
+    return action
+  }
+  return ''
 }
 
 function normalizeAgentOutputKind(value: string) {
@@ -1819,7 +2169,9 @@ function isGoMapTextDump(value: unknown) {
 
 function readableGoMapTextDump(value: unknown) {
   const text = valueText(value).trim()
-  const matches = [...text.matchAll(/map\[[^\]]*?text:([^\]]*?)(?:\s+type:text|\])/g)]
+  const matches = [
+    ...text.matchAll(/map\[[^\]]*?text:([^\]]*?)(?:\s+type:text|\])/g),
+  ]
   return matches
     .map((match) => match[1]?.trim() || '')
     .filter(Boolean)

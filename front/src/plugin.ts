@@ -8,9 +8,9 @@ export default defineFrontPlugin({
         default: mod.ShowAgent,
       }))
     ),
-    'show-brain-workspace': lazyNode(() =>
-      import('./nodes/show/brain-workspace').then((mod) => ({
-        default: mod.ShowBrainWorkspace,
+    'show-team-workspace': lazyNode(() =>
+      import('./nodes/show/team-workspace').then((mod) => ({
+        default: mod.ShowTeamWorkspace,
       }))
     ),
     'show-stream-request': lazyNode(() =>

@@ -1,0 +1,164 @@
+{
+  "page": {
+    "name": "运行详情",
+    "parent": "bot/team/run/list",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-col gap-4 p-0",
+        "children": {
+          "basic-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "input-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "output-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "error-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "basic-card": [
+      {
+        "type": "show-title",
+        "value": "page.basicTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.request_id",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.team.name",
+        "name": "团队",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.team.name}（ID：{form.team_id}）"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-date",
+        "value": "form.started_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "format": "datetime-second"
+        }
+      },
+      {
+        "type": "show-date",
+        "value": "form.finished_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "format": "datetime-second"
+        }
+      },
+      {
+        "type": "show-date",
+        "value": "form.created_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "format": "datetime-second"
+        }
+      }
+    ],
+    "input-card": [
+      {
+        "type": "show-title",
+        "value": "page.inputTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.input",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "output-card": [
+      {
+        "type": "show-title",
+        "value": "page.outputTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.output",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "error-card": [
+      {
+        "type": "show-title",
+        "value": "page.errorTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.error",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "basicTitle": {
+        "title": "运行信息",
+        "description": "展示本次团队运行的团队、状态和时间。"
+      },
+      "inputTitle": {
+        "title": "输入内容",
+        "description": "运行时传给团队的原始输入。"
+      },
+      "outputTitle": {
+        "title": "输出内容",
+        "description": "团队完成本次运行后生成的内容。"
+      },
+      "errorTitle": {
+        "title": "错误信息",
+        "description": "失败时记录的错误详情。"
+      }
+    },
+    "form": {}
+  },
+  "state": {},
+  "action": {}
+}

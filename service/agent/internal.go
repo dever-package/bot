@@ -8,12 +8,13 @@ import (
 
 	"github.com/google/uuid"
 
+	agentaction "my/package/bot/service/agent/action"
 	agentprompt "my/package/bot/service/agent/prompt"
 	frontstream "my/package/front/service/stream"
 )
 
 type InternalRunRequest struct {
-	AgentKey     string
+	AgentID      uint64
 	RequestID    string
 	Method       string
 	Host         string
@@ -23,6 +24,7 @@ type InternalRunRequest struct {
 	History      []any
 	Options      map[string]any
 	OnRunCreated func(runID uint64, requestID string)
+	OnStream     func(payload map[string]any)
 }
 
 type InternalRunResult struct {
@@ -33,7 +35,7 @@ type InternalRunResult struct {
 }
 
 func (s Service) RunInternal(ctx context.Context, req InternalRunRequest) (InternalRunResult, error) {
-	agent, err := s.repo.FindAgent(ctx, req.AgentKey)
+	agent, err := s.repo.FindAgent(ctx, fmt.Sprintf("%d", req.AgentID))
 	if err != nil {
 		return InternalRunResult{}, err
 	}
@@ -51,10 +53,10 @@ func (s Service) RunInternal(ctx context.Context, req InternalRunRequest) (Inter
 		requestID = uuid.NewString()
 	}
 	now := time.Now()
+	identity := agentIdentity(agent)
 	runID := s.repo.InsertRun(ctx, map[string]any{
 		"request_id": requestID,
 		"agent_id":   agent.ID,
-		"agent_key":  agent.Key,
 		"input": jsonText(map[string]any{
 			"input":   input,
 			"history": req.History,
@@ -75,11 +77,13 @@ func (s Service) RunInternal(ctx context.Context, req InternalRunRequest) (Inter
 	if req.OnRunCreated != nil {
 		req.OnRunCreated(runID, requestID)
 	}
+	fullRuntime := internalFullRuntimeEnabled(req.Options)
+	runtimeOptions := internalRuntimeOptions(req.Options)
 	_ = s.writePayload(ctx, requestID, frontstream.ResponsePayload(requestID, "stream", map[string]any{
 		"event": "start",
 		"text":  "智能体运行已开始",
 		"meta": map[string]any{
-			"agent":      agent.Key,
+			"agent":      identity,
 			"run_id":     runID,
 			"internal":   true,
 			"started_at": now.Format(time.RFC3339Nano),
@@ -95,16 +99,22 @@ func (s Service) RunInternal(ctx context.Context, req InternalRunRequest) (Inter
 			Body:    map[string]any{"input": input},
 		},
 		Parsed: parsedRunRequest{
-			AgentIdentity: req.AgentKey,
+			AgentIdentity: identity,
 			Input:         input,
 			History:       req.History,
-			Options:       req.Options,
+			Options:       runtimeOptions,
 		},
 		Agent:     agent,
 		Power:     power,
 		RunID:     runID,
 		RequestID: requestID,
 		StartedAt: now,
+	}
+	stopForward := s.forwardInternalStream(ctx, requestID, req.OnStream)
+	defer stopForward()
+	if fullRuntime {
+		s.execute(exec)
+		return s.internalRunResult(ctx, runID, requestID)
 	}
 	tracker := runTracker{repo: s.repo, runID: runID, requestID: requestID}
 	tracker.Step(ctx, "input", "内部输入", primaryInputText(input), map[string]any{"input": input}, stepStatusSuccess)
@@ -141,4 +151,130 @@ func (s Service) RunInternal(ctx context.Context, req InternalRunRequest) (Inter
 		RequestID: requestID,
 		RunID:     runID,
 	}, nil
+}
+
+func (s Service) forwardInternalStream(ctx context.Context, requestID string, forward func(map[string]any)) func() {
+	if forward == nil || strings.TrimSpace(requestID) == "" {
+		return func() {}
+	}
+	streamCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		lastID := "0-0"
+		for {
+			entries, err := s.ReadStream(streamCtx, requestID, lastID, 100, time.Duration(defaultAgentStreamBlockMs)*time.Millisecond)
+			for _, entry := range entries {
+				if strings.TrimSpace(entry.ID) != "" {
+					lastID = entry.ID
+				}
+				if entry.Payload != nil {
+					forward(entry.Payload)
+				}
+			}
+			if err != nil {
+				if streamCtx.Err() != nil {
+					return
+				}
+				continue
+			}
+			select {
+			case <-streamCtx.Done():
+				return
+			default:
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		case <-ctx.Done():
+		}
+	}
+}
+
+func internalFullRuntimeEnabled(options map[string]any) bool {
+	if options == nil {
+		return false
+	}
+	for _, key := range []string{"full_runtime", "fullRuntime", "runtime"} {
+		if enabled, ok := boolOption(options[key]); ok {
+			return enabled
+		}
+	}
+	return false
+}
+
+func internalRuntimeOptions(options map[string]any) map[string]any {
+	if len(options) == 0 {
+		return map[string]any{}
+	}
+	result := make(map[string]any, len(options))
+	for key, value := range options {
+		switch key {
+		case "full_runtime", "fullRuntime", "runtime":
+			continue
+		default:
+			result[key] = value
+		}
+	}
+	return result
+}
+
+func boolOption(value any) (bool, bool) {
+	switch current := value.(type) {
+	case bool:
+		return current, true
+	case int:
+		return current != 0, true
+	case int64:
+		return current != 0, true
+	case float64:
+		return current != 0, true
+	case string:
+		text := strings.ToLower(strings.TrimSpace(current))
+		switch text {
+		case "1", "true", "yes", "on":
+			return true, true
+		case "0", "false", "no", "off":
+			return false, true
+		}
+	}
+	return false, false
+}
+
+func (s Service) internalRunResult(ctx context.Context, runID uint64, requestID string) (InternalRunResult, error) {
+	rows := s.repo.ListRuns(ctx, []uint64{runID})
+	if len(rows) == 0 {
+		return InternalRunResult{}, fmt.Errorf("内部智能体运行记录不存在")
+	}
+	run := rows[0]
+	output := internalRunOutput(run.Output)
+	summary := strings.TrimSpace(agentaction.SummaryText(output))
+	if run.Status != runStatusSuccess {
+		message := strings.TrimSpace(firstText(run.Error, summary, "内部智能体运行失败"))
+		return InternalRunResult{}, fmt.Errorf("%s", message)
+	}
+	return InternalRunResult{
+		Output:    output,
+		Summary:   summary,
+		RequestID: requestID,
+		RunID:     runID,
+	}, nil
+}
+
+func internalRunOutput(raw string) map[string]any {
+	value := jsonAny(raw)
+	if row, ok := value.(map[string]any); ok {
+		return row
+	}
+	if text := strings.TrimSpace(frontstream.InputText(value)); text != "" {
+		return map[string]any{"text": text}
+	}
+	if value != nil {
+		return map[string]any{"value": value}
+	}
+	return map[string]any{}
 }

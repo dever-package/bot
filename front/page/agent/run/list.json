@@ -49,7 +49,7 @@
     "toolbar-row": [
       {
         "type": "form-input",
-        "placeholder": "搜索 RequestID 或智能体标识...",
+        "placeholder": "搜索 RequestID...",
         "value": "search.keyword",
         "mode": "search"
       },
@@ -58,9 +58,9 @@
         "placeholder": "智能体",
         "value": "search.agent_id",
         "mode": "search",
-        "option": "/front/route/option?type=model&use=bot.agent.NewAgentModel&labelField=name&searchFields=name,key&pageSize=20&filterField=kind&filterValue=normal",
+        "option": "/front/route/option?type=model&use=bot.agent.NewAgentModel&labelField=name&searchFields=name&pageSize=20&filterField=kind&filterValue=normal",
         "meta": {
-          "searchPlaceholder": "输入智能体名称或标识搜索..."
+          "searchPlaceholder": "输入智能体名称搜索..."
         }
       },
       {
@@ -74,8 +74,8 @@
         "placeholder": "创建时间",
         "value": "search.created_at_start",
         "mode": "search",
-        "className": "w-[320px]",
         "meta": {
+          "searchWidth": "select",
           "range": true,
           "endValue": "search.created_at_end",
           "inputType": "datetime-local"
@@ -219,10 +219,7 @@
       "page": 1,
       "pageSize": 10,
       "total": 0,
-      "searchFields": [
-        "request_id",
-        "agent_key"
-      ],
+      "searchFields": ["request_id"],
       "filterFields": [
         "agent_id",
         "status",
