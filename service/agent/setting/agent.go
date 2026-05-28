@@ -36,8 +36,8 @@ func (AgentHook) ProviderBeforeSaveAgent(c *server.Context, params []any) any {
 	if shouldNormalizeField(record, "skill_pack_id", partial) && util.ToUint64(record["skill_pack_id"]) == 0 {
 		record["skill_pack_id"] = defaultAgentSkillPackID
 	}
-	defaultInt16Field(record, "status", defaultAgentStatus, partial)
-	defaultIntField(record, "sort", defaultAgentSort, partial)
+	defaultInt16FieldOnCreateOrPresent(record, "status", defaultAgentStatus, partial)
+	defaultIntFieldOnCreateOrPresent(record, "sort", defaultAgentSort, partial)
 	if shouldNormalizeField(record, "temperature", partial) {
 		record["temperature"] = normalizeAgentTemperature(record["temperature"])
 	}

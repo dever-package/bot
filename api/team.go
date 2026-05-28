@@ -74,6 +74,9 @@ func (Team) PostRunTeam(c *server.Context) error {
 	}
 	mode := "team"
 	releaseID := uint64ValueFromBody(body, "release_id", "releaseId")
+	if requestedMode := strings.TrimSpace(textFromBody(body, "mode")); requestedMode == "conversation" {
+		mode = requestedMode
+	}
 	if boolFromBody(body, "debug_current_graph", "debugCurrentGraph") {
 		mode = "debug_team"
 		releaseID = 0

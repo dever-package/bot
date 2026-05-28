@@ -43,10 +43,20 @@ func (s Service) submitResolvedApproval(ctx context.Context, approval teammodel.
 	nodeRun := s.repo.FindNodeRun(ctx, approval.NodeRunID)
 	flowRun := s.repo.FindFlowRun(ctx, approval.FlowRunID)
 	run := s.repo.FindRun(ctx, approval.RunID)
+	content := jsonMap(approval.Content)
+	if textValue(content["kind"]) == "role_interaction" {
+		if run == nil {
+			return nil, fmt.Errorf("人工确认运行记录不完整")
+		}
+		if len(data) > 0 {
+			content["data"] = data
+		}
+		output := approvalOutput(approval.ID, decision, comment, content, data)
+		return s.submitRoleInteractionApproval(ctx, approval, *run, decision, comment, output, time.Now())
+	}
 	if nodeRun == nil || flowRun == nil || run == nil {
 		return nil, fmt.Errorf("人工确认运行记录不完整")
 	}
-	content := jsonMap(approval.Content)
 	if len(data) > 0 {
 		content["data"] = data
 	}
@@ -71,15 +81,17 @@ func (s Service) submitResolvedApproval(ctx context.Context, approval teammodel.
 		"status": teammodel.RunStatusRunning,
 		"error":  "",
 	})
-	s.repo.UpdateRun(ctx, run.ID, map[string]any{
+	runRecord := map[string]any{
 		"status": teammodel.RunStatusRunning,
 		"error":  "",
-	})
+	}
+	requestID := renewRunRequestID(runRecord, run)
+	s.repo.UpdateRun(ctx, run.ID, runRecord)
 	s.continueWaitingRun(context.Background(), *run, flowRun)
 	return map[string]any{
 		"approval_id": approval.ID,
 		"run_id":      run.ID,
-		"request_id":  run.RequestID,
+		"request_id":  requestID,
 		"decision":    decision,
 		"status":      teammodel.RunStatusRunning,
 	}, nil
@@ -104,15 +116,58 @@ func (s Service) submitAgentInteractionApproval(ctx context.Context, approval te
 		"status": teammodel.RunStatusRunning,
 		"error":  "",
 	})
-	s.repo.UpdateRun(ctx, run.ID, map[string]any{
+	runRecord := map[string]any{
 		"status": teammodel.RunStatusRunning,
 		"error":  "",
-	})
+	}
+	requestID := renewRunRequestID(runRecord, &run)
+	s.repo.UpdateRun(ctx, run.ID, runRecord)
 	s.continueWaitingRun(context.Background(), run, &flowRun)
 	return map[string]any{
 		"approval_id":  approval.ID,
 		"run_id":       run.ID,
-		"request_id":   run.RequestID,
+		"request_id":   requestID,
+		"decision":     decision,
+		"status":       teammodel.RunStatusRunning,
+		"submitted_at": now.Format(time.RFC3339Nano),
+	}, nil
+}
+
+func (s Service) submitRoleInteractionApproval(ctx context.Context, approval teammodel.Approval, run teammodel.Run, decision string, comment string, output map[string]any, now time.Time) (map[string]any, error) {
+	s.repo.UpdateApproval(ctx, approval.ID, map[string]any{
+		"decision": decision,
+		"comment":  strings.TrimSpace(comment),
+		"status":   teammodel.RunStatusSuccess,
+	})
+	input := jsonMap(run.Input)
+	previousOutput := jsonMap(run.Output)
+	if outputs := mapValue(previousOutput["conversation_outputs"]); len(outputs) > 0 {
+		input["_conversation_outputs"] = outputs
+	}
+	content := jsonMap(approval.Content)
+	if role := mapValue(content["role"]); len(role) > 0 {
+		input["_resume_role_id"] = uint64Value(role["id"])
+		input["_resume_role_type"] = firstText(role["type"])
+	}
+	input["user_feedback"] = output
+	runRecord := map[string]any{
+		"input":      jsonText(input),
+		"output":     jsonText(map[string]any{"approval_id": approval.ID, "feedback": output}),
+		"status":     teammodel.RunStatusRunning,
+		"error":      "",
+		"updated_at": now,
+	}
+	requestID := renewRunRequestID(runRecord, &run)
+	s.repo.UpdateRun(ctx, run.ID, runRecord)
+	if textValue(input["_mode"]) == "conversation" {
+		go s.executeTeamRun(context.Background(), run.ID)
+	} else {
+		go s.executeRoleRun(context.Background(), run.ID)
+	}
+	return map[string]any{
+		"approval_id":  approval.ID,
+		"run_id":       run.ID,
+		"request_id":   requestID,
 		"decision":     decision,
 		"status":       teammodel.RunStatusRunning,
 		"submitted_at": now.Format(time.RFC3339Nano),
@@ -136,7 +191,7 @@ func approvalOutput(approvalID uint64, decision string, comment string, content 
 			"request_id": textValue(data["request_id"]),
 		}
 	}
-	if textValue(content["kind"]) == "agent_interaction" {
+	if textValue(content["kind"]) == "agent_interaction" || textValue(content["kind"]) == "role_interaction" {
 		return agentInteractionApprovalOutput(approvalID, decision, comment, content, data)
 	}
 	return map[string]any{

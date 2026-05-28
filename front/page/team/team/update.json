@@ -70,6 +70,19 @@
         }
       },
       {
+        "type": "form-array",
+        "name": "资产分类",
+        "value": "form.asset_cates",
+        "mode": "form",
+        "info": "资产分类是这个团队产出结果的目录。工作流保存节点和团队角色可以选择分类，运行结果会沉淀到对应目录下。",
+        "meta": {
+          "pageRoute": "/bot/team/asset_cate/update",
+          "addText": "添加资产分类",
+          "drag": "sort",
+          "formLayout": "horizontal"
+        }
+      },
+      {
         "type": "form-textarea",
         "placeholder": "写这个团队的完整提示词：职责、目标、口吻、边界和工作方式都放在这里。",
         "value": "form.description",
@@ -86,6 +99,7 @@
       "id": 0,
       "cate_id": 1,
       "name": "",
+      "asset_cates": [],
       "description": ""
     }
   },

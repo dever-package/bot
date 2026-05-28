@@ -1,0 +1,67 @@
+{
+  "page": {
+    "parent": "bot/team/team/list",
+    "type": 2,
+    "sort": 8
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "placeholder": "例如：人物小传",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "资产分类名称不能为空。"
+          }
+        ]
+      },
+      {
+        "type": "form-switch",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "id": 0,
+      "team_id": 0,
+      "name": "",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.team.TeamHook.BeforeSaveAssetCate"
+      }
+    }
+  }
+}

@@ -168,6 +168,15 @@
                         "params": {
                           "team_id": "$row.id",
                           "action": "publish"
+                        },
+                        "then": {
+                          "type": "array",
+                          "key": "table.list",
+                          "op": "patch",
+                          "index": "$rowIndex",
+                          "value": {
+                            "publish_status": "published"
+                          }
                         }
                       }
                     }

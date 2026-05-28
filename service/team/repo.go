@@ -149,6 +149,27 @@ func (Repo) ListRoles(ctx context.Context, teamID uint64, enabledOnly bool) []te
 	return result
 }
 
+func (Repo) ListAssetCates(ctx context.Context, teamID uint64, enabledOnly bool) []teammodel.AssetCate {
+	filter := map[string]any{"team_id": teamID}
+	if enabledOnly {
+		filter["status"] = teammodel.StatusEnabled
+	}
+	rows := teammodel.NewAssetCateModel().Select(ctx, filter)
+	result := make([]teammodel.AssetCate, 0, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			result = append(result, *row)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Sort == result[j].Sort {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].Sort < result[j].Sort
+	})
+	return result
+}
+
 func (Repo) FindRole(ctx context.Context, teamID uint64, roleID uint64, roleKey string) (*teammodel.Role, bool) {
 	if teamID == 0 {
 		return nil, false
@@ -275,6 +296,7 @@ func (Repo) ListAgents(ctx context.Context) []AgentOption {
 			ID:     row.ID,
 			CateID: row.CateID,
 			Name:   strings.TrimSpace(row.Name),
+			Key:    strings.TrimSpace(row.Key),
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {
@@ -443,20 +465,21 @@ func (Repo) UpsertFlowNode(ctx context.Context, teamID uint64, flowID uint64, pa
 	row := model.Find(ctx, map[string]any{"flow_id": flowID, "node_key": key})
 	now := time.Now()
 	record := map[string]any{
-		"team_id":     teamID,
-		"flow_id":     flowID,
-		"node_key":    key,
-		"name":        name,
-		"type":        nodeType,
-		"role_id":     payload.RoleID,
-		"role_key":    strings.TrimSpace(payload.RoleKey),
-		"agent_id":    payload.AgentID,
-		"power_id":    payload.PowerID,
-		"sub_team_id": payload.SubTeamID,
-		"config":      jsonText(payload.Config),
-		"position":    jsonText(payload.Position),
-		"status":      normalizedStatus(payload.Status),
-		"sort":        payload.Sort,
+		"team_id":       teamID,
+		"flow_id":       flowID,
+		"node_key":      key,
+		"name":          name,
+		"type":          nodeType,
+		"role_id":       payload.RoleID,
+		"role_key":      strings.TrimSpace(payload.RoleKey),
+		"agent_id":      payload.AgentID,
+		"power_id":      payload.PowerID,
+		"sub_team_id":   payload.SubTeamID,
+		"asset_cate_id": payload.AssetCateID,
+		"config":        jsonText(payload.Config),
+		"position":      jsonText(payload.Position),
+		"status":        normalizedStatus(payload.Status),
+		"sort":          payload.Sort,
 	}
 	if row == nil && payload.ID > 0 {
 		row = model.Find(ctx, map[string]any{"id": payload.ID, "flow_id": flowID})

@@ -121,6 +121,11 @@
               "type": "show-base"
             },
             {
+              "value": "asset_cate.name",
+              "name": "资产分类",
+              "type": "show-base"
+            },
+            {
               "value": "status",
               "type": "form-switch",
               "meta": {
@@ -201,6 +206,10 @@
             "team_id": "data.search.team_id",
             "role_type": "data.search.role_type"
           },
+          "pageDataPatches": {
+            "form.team_id": "data.search.team_id",
+            "form.role_type": "data.search.role_type"
+          },
           "bodyClassName": "px-6 py-2"
         }
       },
@@ -220,6 +229,10 @@
             "id": "data.actionTarget.editRoleId",
             "team_id": "data.actionTarget.editRoleTeamId",
             "role_type": "data.actionTarget.editRoleType"
+          },
+          "pageDataPatches": {
+            "form.team_id": "data.actionTarget.editRoleTeamId",
+            "form.role_type": "data.actionTarget.editRoleType"
           },
           "bodyClassName": "px-6 py-2"
         }

@@ -43,7 +43,7 @@
         "value": "form.team_id",
         "mode": "form",
         "placeholder": "请选择团队",
-        "info": "画布团队必须选择已发布且开启的团队。",
+        "info": "画布团队必须选择已发布过且开启的团队，团队处于编辑草稿时仍可使用当前发布版本。",
         "validate": [
           {
             "type": "required",

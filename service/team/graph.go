@@ -26,9 +26,11 @@ func (s Service) Workspace(ctx context.Context, teamID uint64) (map[string]any, 
 		nodeEdgesByFlow[flow.Key] = flowNodeEdgePayloads(nodes, edges)
 	}
 	roles := s.repo.ListRoles(ctx, teamID, true)
+	assetCates := s.repo.ListAssetCates(ctx, teamID, true)
 	powers := s.repo.ListPowers(ctx)
 	return map[string]any{
 		"team":               teamWorkspacePayload(team),
+		"asset_cates":        assetCatePayloads(assetCates),
 		"roles":              rolePayloads(roles),
 		"flows":              flowPayloads(flows),
 		"flow_edges":         flowEdgePayloads(flows, flowEdges),
@@ -97,10 +99,12 @@ func (s Service) SaveFlowNodeGraph(ctx context.Context, flowID uint64, body map[
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.ensureTeamEditable(ctx, flow.TeamID); err != nil {
+	team, err := s.ensureTeamEditable(ctx, flow.TeamID)
+	if err != nil {
 		return nil, err
 	}
 	payloads := parseGraphFlowNodes(body["nodes"])
+	payloads = s.normalizeGraphFlowNodeNames(ctx, team, payloads)
 	keepNodeKeys := map[string]bool{}
 	nodeByKey := map[string]teammodel.FlowNode{}
 	for index, payload := range payloads {
@@ -147,9 +151,6 @@ func (s Service) PublishTeam(ctx context.Context, teamID uint64) (map[string]any
 	team, err := s.repo.FindTeam(ctx, teamID)
 	if err != nil {
 		return nil, err
-	}
-	if normalizeTeamPublishStatus(team.PublishStatus) == teammodel.TeamPublishStatusPublished {
-		return nil, fmt.Errorf("团队已发布，请先进入编辑草稿后再重新发布")
 	}
 	snapshot, err := s.buildTeamReleaseSnapshot(ctx, team)
 	if err != nil {
@@ -203,6 +204,7 @@ func (s Service) ensureTeamEditable(ctx context.Context, teamID uint64) (teammod
 }
 
 func (s Service) buildTeamReleaseSnapshot(ctx context.Context, team teammodel.Team) (TeamReleaseSnapshot, error) {
+	assetCates := s.repo.ListAssetCates(ctx, team.ID, true)
 	roles := s.repo.ListRoles(ctx, team.ID, true)
 	if issues := validateTeamRoles(roles); len(issues) > 0 {
 		return TeamReleaseSnapshot{}, fmt.Errorf("发布前请先修正团队角色: %s", strings.Join(issues, "；"))
@@ -225,6 +227,7 @@ func (s Service) buildTeamReleaseSnapshot(ctx context.Context, team teammodel.Te
 	}
 	return TeamReleaseSnapshot{
 		Team:            teamReleasePayload(team),
+		AssetCates:      assetCatePayloads(assetCates),
 		Roles:           rolePayloads(roles),
 		Flows:           flowPayloads(flows),
 		FlowEdges:       flowEdgePayloads(flows, flowEdges),
@@ -266,16 +269,31 @@ func rolePayloads(roles []teammodel.Role) []GraphRole {
 	result := make([]GraphRole, 0, len(roles))
 	for _, role := range roles {
 		result = append(result, GraphRole{
-			ID:         role.ID,
-			TeamID:     role.TeamID,
-			RoleType:   role.RoleType,
-			RoleKey:    role.RoleKey,
-			Name:       role.Name,
-			AgentID:    role.AgentID,
-			Assignment: role.Assignment,
-			Config:     jsonMap(role.Config),
-			Status:     role.Status,
-			Sort:       role.Sort,
+			ID:          role.ID,
+			TeamID:      role.TeamID,
+			RoleType:    role.RoleType,
+			RoleKey:     role.RoleKey,
+			Name:        role.Name,
+			AgentID:     role.AgentID,
+			AssetCateID: role.AssetCateID,
+			Assignment:  role.Assignment,
+			Config:      jsonMap(role.Config),
+			Status:      role.Status,
+			Sort:        role.Sort,
+		})
+	}
+	return result
+}
+
+func assetCatePayloads(rows []teammodel.AssetCate) []GraphAssetCate {
+	result := make([]GraphAssetCate, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, GraphAssetCate{
+			ID:     row.ID,
+			TeamID: row.TeamID,
+			Name:   row.Name,
+			Status: row.Status,
+			Sort:   row.Sort,
 		})
 	}
 	return result
@@ -325,19 +343,20 @@ func flowNodePayloads(nodes []teammodel.FlowNode) []GraphFlowNode {
 	result := make([]GraphFlowNode, 0, len(nodes))
 	for _, node := range nodes {
 		result = append(result, GraphFlowNode{
-			ID:        node.ID,
-			NodeKey:   node.NodeKey,
-			Name:      node.Name,
-			Type:      node.Type,
-			RoleID:    node.RoleID,
-			RoleKey:   node.RoleKey,
-			AgentID:   node.AgentID,
-			PowerID:   node.PowerID,
-			SubTeamID: node.SubTeamID,
-			Config:    jsonMap(node.Config),
-			Position:  jsonMap(node.Position),
-			Status:    node.Status,
-			Sort:      node.Sort,
+			ID:          node.ID,
+			NodeKey:     node.NodeKey,
+			Name:        node.Name,
+			Type:        node.Type,
+			RoleID:      node.RoleID,
+			RoleKey:     node.RoleKey,
+			AgentID:     node.AgentID,
+			PowerID:     node.PowerID,
+			SubTeamID:   node.SubTeamID,
+			AssetCateID: node.AssetCateID,
+			Config:      jsonMap(node.Config),
+			Position:    jsonMap(node.Position),
+			Status:      node.Status,
+			Sort:        node.Sort,
 		})
 	}
 	return result
@@ -372,6 +391,7 @@ func nodeTypes() []map[string]any {
 		{"id": teammodel.NodeTypeRole, "value": "团队角色"},
 		{"id": teammodel.NodeTypePower, "value": "能力"},
 		{"id": teammodel.NodeTypeTeam, "value": "团队工作流"},
+		{"id": teammodel.NodeTypeContext, "value": "上下文"},
 		{"id": teammodel.NodeTypeCondition, "value": "条件"},
 		{"id": teammodel.NodeTypeMerge, "value": "合并"},
 		{"id": teammodel.NodeTypeHumanApproval, "value": "人工确认"},
@@ -451,22 +471,216 @@ func parseGraphFlowNodes(raw any) []GraphFlowNode {
 	result := make([]GraphFlowNode, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, GraphFlowNode{
-			ID:        uint64Value(row["id"]),
-			NodeKey:   normalizeKey("node", row["node_key"]),
-			Name:      textValue(row["name"]),
-			Type:      firstText(row["type"], teammodel.NodeTypeAgent),
-			RoleID:    uint64Value(firstPresent(row, "role_id", "roleId")),
-			RoleKey:   textValue(firstPresent(row, "role_key", "roleKey")),
-			AgentID:   uint64Value(firstPresent(row, "agent_id", "agentId")),
-			PowerID:   uint64Value(firstPresent(row, "power_id", "powerId")),
-			SubTeamID: uint64Value(firstPresent(row, "sub_team_id", "subTeamId")),
-			Config:    mapValue(row["config"]),
-			Position:  mapValue(row["position"]),
-			Status:    int16Value(row["status"], teammodel.StatusEnabled),
-			Sort:      intValue(row["sort"], 100),
+			ID:          uint64Value(row["id"]),
+			NodeKey:     normalizeKey("node", row["node_key"]),
+			Name:        textValue(row["name"]),
+			Type:        firstText(row["type"], teammodel.NodeTypeAgent),
+			RoleID:      uint64Value(firstPresent(row, "role_id", "roleId")),
+			RoleKey:     textValue(firstPresent(row, "role_key", "roleKey")),
+			AgentID:     uint64Value(firstPresent(row, "agent_id", "agentId")),
+			PowerID:     uint64Value(firstPresent(row, "power_id", "powerId")),
+			SubTeamID:   uint64Value(firstPresent(row, "sub_team_id", "subTeamId")),
+			AssetCateID: uint64Value(firstPresent(row, "asset_cate_id", "assetCateId")),
+			Config:      mapValue(row["config"]),
+			Position:    mapValue(row["position"]),
+			Status:      int16Value(row["status"], teammodel.StatusEnabled),
+			Sort:        intValue(row["sort"], 100),
 		})
 	}
 	return result
+}
+
+type graphFlowNodeNameLookup struct {
+	currentTeamID uint64
+	assetCates    map[uint64]string
+	agents        map[uint64]string
+	roles         map[uint64]string
+	powers        map[uint64]string
+	teams         map[uint64]graphTeamNameLookup
+}
+
+type graphTeamNameLookup struct {
+	name  string
+	flows map[uint64]string
+}
+
+func (s Service) normalizeGraphFlowNodeNames(ctx context.Context, team teammodel.Team, nodes []GraphFlowNode) []GraphFlowNode {
+	if len(nodes) == 0 {
+		return nodes
+	}
+	lookup := s.graphFlowNodeNameLookup(ctx, team, nodes)
+	result := make([]GraphFlowNode, 0, len(nodes))
+	for _, node := range nodes {
+		if isDefaultGraphFlowNodeName(node.Name) {
+			if name := deriveGraphFlowNodeName(node, lookup); name != "" {
+				node.Name = name
+			}
+		}
+		result = append(result, node)
+	}
+	return result
+}
+
+func (s Service) graphFlowNodeNameLookup(ctx context.Context, team teammodel.Team, nodes []GraphFlowNode) graphFlowNodeNameLookup {
+	lookup := graphFlowNodeNameLookup{
+		currentTeamID: team.ID,
+		assetCates:    map[uint64]string{},
+		agents:        map[uint64]string{},
+		roles:         map[uint64]string{},
+		powers:        map[uint64]string{},
+		teams:         map[uint64]graphTeamNameLookup{},
+	}
+	for _, cate := range s.repo.ListAssetCates(ctx, team.ID, true) {
+		lookup.assetCates[cate.ID] = strings.TrimSpace(cate.Name)
+	}
+	for _, agent := range s.repo.ListAgents(ctx) {
+		lookup.agents[agent.ID] = strings.TrimSpace(agent.Name)
+	}
+	for _, power := range s.repo.ListPowers(ctx) {
+		lookup.powers[power.ID] = strings.TrimSpace(power.Name)
+	}
+	currentTeam := graphTeamNameLookup{
+		name:  strings.TrimSpace(team.Name),
+		flows: map[uint64]string{},
+	}
+	for _, flow := range s.repo.ListFlows(ctx, team.ID, true) {
+		currentTeam.flows[flow.ID] = strings.TrimSpace(flow.Name)
+	}
+	lookup.teams[team.ID] = currentTeam
+	for _, role := range s.repo.ListRoles(ctx, team.ID, true) {
+		lookup.roles[role.ID] = strings.TrimSpace(role.Name)
+	}
+	if !needsPublishedTeamNameLookup(nodes, team.ID) {
+		return lookup
+	}
+	for _, option := range s.publishedTeamOptions(ctx) {
+		teamLookup := graphTeamNameLookup{
+			name:  strings.TrimSpace(option.Name),
+			flows: map[uint64]string{},
+		}
+		if existing, ok := lookup.teams[option.ID]; ok {
+			if existing.name != "" {
+				teamLookup.name = existing.name
+			}
+			for flowID, flowName := range existing.flows {
+				teamLookup.flows[flowID] = flowName
+			}
+		}
+		for _, flow := range option.Flows {
+			if _, exists := teamLookup.flows[flow.ID]; !exists {
+				teamLookup.flows[flow.ID] = strings.TrimSpace(flow.Name)
+			}
+		}
+		lookup.teams[option.ID] = teamLookup
+		for _, role := range option.Roles {
+			if _, exists := lookup.roles[role.ID]; !exists {
+				lookup.roles[role.ID] = strings.TrimSpace(role.Name)
+			}
+		}
+	}
+	return lookup
+}
+
+func needsPublishedTeamNameLookup(nodes []GraphFlowNode, currentTeamID uint64) bool {
+	for _, node := range nodes {
+		switch strings.TrimSpace(node.Type) {
+		case teammodel.NodeTypeRole:
+			teamID := uint64Value(node.Config["role_team_id"])
+			if teamID > 0 && teamID != currentTeamID {
+				return true
+			}
+		case teammodel.NodeTypeTeam:
+			teamID := firstUint64(node.SubTeamID, uint64Value(node.Config["sub_team_id"]))
+			if teamID > 0 && teamID != currentTeamID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func deriveGraphFlowNodeName(node GraphFlowNode, lookup graphFlowNodeNameLookup) string {
+	config := node.Config
+	switch strings.TrimSpace(node.Type) {
+	case teammodel.NodeTypeContext:
+		if name := lookup.assetCates[nodeAssetCateID(node)]; name != "" {
+			return "读取：" + name
+		}
+		return "读取上下文"
+	case teammodel.NodeTypeSave:
+		if name := lookup.assetCates[nodeAssetCateID(node)]; name != "" {
+			return "保存：" + name
+		}
+		return "保存结果"
+	case teammodel.NodeTypeAgent:
+		if name := lookup.agents[firstUint64(node.AgentID, uint64Value(config["agent_id"]))]; name != "" {
+			return name
+		}
+		return "智能体"
+	case teammodel.NodeTypeRole:
+		if name := lookup.roles[firstUint64(node.RoleID, uint64Value(config["role_id"]))]; name != "" {
+			return name
+		}
+		return "团队角色"
+	case teammodel.NodeTypePower:
+		if name := lookup.powers[firstUint64(node.PowerID, uint64Value(config["power_id"]))]; name != "" {
+			return name
+		}
+		return "能力"
+	case teammodel.NodeTypeTeam:
+		teamID := firstUint64(node.SubTeamID, uint64Value(config["sub_team_id"]), lookup.currentTeamID)
+		flowID := firstUint64(uint64Value(config["sub_flow_id"]), uint64Value(config["flow_id"]))
+		teamLookup := lookup.teams[teamID]
+		flowName := strings.TrimSpace(teamLookup.flows[flowID])
+		if teamLookup.name != "" && flowName != "" {
+			return teamLookup.name + " / " + flowName
+		}
+		if teamLookup.name != "" {
+			return teamLookup.name
+		}
+		return "团队工作流"
+	case teammodel.NodeTypeCondition:
+		return "条件判断"
+	case teammodel.NodeTypeMerge:
+		return "合并结果"
+	case teammodel.NodeTypeHumanApproval:
+		return "人工确认"
+	default:
+		return strings.TrimSpace(node.Type)
+	}
+}
+
+func nodeAssetCateID(node GraphFlowNode) uint64 {
+	return firstUint64(node.AssetCateID, uint64Value(node.Config["asset_cate_id"]))
+}
+
+func firstUint64(values ...uint64) uint64 {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func isDefaultGraphFlowNodeName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" || name == "节点" {
+		return true
+	}
+	if !strings.HasPrefix(name, "节点") {
+		return false
+	}
+	suffix := strings.TrimPrefix(name, "节点")
+	if suffix == "" {
+		return false
+	}
+	for _, char := range suffix {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func parseGraphFlowNodeEdges(raw any) []GraphFlowNodeEdge {

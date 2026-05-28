@@ -33,19 +33,20 @@ type GraphFlowEdge struct {
 }
 
 type GraphFlowNode struct {
-	ID        uint64         `json:"id"`
-	NodeKey   string         `json:"node_key"`
-	Name      string         `json:"name"`
-	Type      string         `json:"type"`
-	RoleID    uint64         `json:"role_id"`
-	RoleKey   string         `json:"role_key"`
-	AgentID   uint64         `json:"agent_id"`
-	PowerID   uint64         `json:"power_id"`
-	SubTeamID uint64         `json:"sub_team_id"`
-	Config    map[string]any `json:"config"`
-	Position  map[string]any `json:"position"`
-	Status    int16          `json:"status"`
-	Sort      int            `json:"sort"`
+	ID          uint64         `json:"id"`
+	NodeKey     string         `json:"node_key"`
+	Name        string         `json:"name"`
+	Type        string         `json:"type"`
+	RoleID      uint64         `json:"role_id"`
+	RoleKey     string         `json:"role_key"`
+	AgentID     uint64         `json:"agent_id"`
+	PowerID     uint64         `json:"power_id"`
+	SubTeamID   uint64         `json:"sub_team_id"`
+	AssetCateID uint64         `json:"asset_cate_id"`
+	Config      map[string]any `json:"config"`
+	Position    map[string]any `json:"position"`
+	Status      int16          `json:"status"`
+	Sort        int            `json:"sort"`
 }
 
 type GraphFlowNodeEdge struct {
@@ -71,6 +72,7 @@ type GraphTeam struct {
 
 type TeamReleaseSnapshot struct {
 	Team            GraphTeam                      `json:"team"`
+	AssetCates      []GraphAssetCate               `json:"asset_cates"`
 	Roles           []GraphRole                    `json:"roles"`
 	Flows           []GraphFlow                    `json:"flows"`
 	FlowEdges       []GraphFlowEdge                `json:"flow_edges"`
@@ -78,32 +80,43 @@ type TeamReleaseSnapshot struct {
 	NodeEdgesByFlow map[string][]GraphFlowNodeEdge `json:"node_edges_by_flow"`
 }
 
+type GraphAssetCate struct {
+	ID     uint64 `json:"id"`
+	TeamID uint64 `json:"team_id"`
+	Name   string `json:"name"`
+	Status int16  `json:"status"`
+	Sort   int    `json:"sort"`
+}
+
 type GraphRole struct {
-	ID         uint64         `json:"id"`
-	TeamID     uint64         `json:"team_id"`
-	RoleType   string         `json:"role_type"`
-	RoleKey    string         `json:"role_key"`
-	Name       string         `json:"name"`
-	AgentID    uint64         `json:"agent_id"`
-	Assignment string         `json:"assignment"`
-	Config     map[string]any `json:"config"`
-	Status     int16          `json:"status"`
-	Sort       int            `json:"sort"`
+	ID          uint64         `json:"id"`
+	TeamID      uint64         `json:"team_id"`
+	RoleType    string         `json:"role_type"`
+	RoleKey     string         `json:"role_key"`
+	Name        string         `json:"name"`
+	AgentID     uint64         `json:"agent_id"`
+	AssetCateID uint64         `json:"asset_cate_id"`
+	Assignment  string         `json:"assignment"`
+	Config      map[string]any `json:"config"`
+	Status      int16          `json:"status"`
+	Sort        int            `json:"sort"`
 }
 
 type AgentOption struct {
 	ID     uint64 `json:"id"`
 	CateID uint64 `json:"cate_id"`
 	Name   string `json:"name"`
+	Key    string `json:"key"`
 }
 
 type RoleOption struct {
-	ID       uint64 `json:"id"`
-	TeamID   uint64 `json:"team_id"`
-	RoleType string `json:"role_type"`
-	RoleKey  string `json:"role_key"`
-	Name     string `json:"name"`
-	AgentID  uint64 `json:"agent_id"`
+	ID          uint64 `json:"id"`
+	TeamID      uint64 `json:"team_id"`
+	RoleType    string `json:"role_type"`
+	RoleKey     string `json:"role_key"`
+	Name        string `json:"name"`
+	AgentID     uint64 `json:"agent_id"`
+	AssetCateID uint64 `json:"asset_cate_id"`
 }
 
 type TeamOption struct {
@@ -137,6 +150,7 @@ type AgentCateOption struct {
 type RunRequest struct {
 	TeamID    uint64
 	FlowID    uint64
+	RoleID    uint64
 	ReleaseID uint64
 	ProjectID uint64
 	RequestID string

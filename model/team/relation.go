@@ -14,6 +14,19 @@ var teamCateRelation = orm.Relation{
 	OptionKeys: []string{"name"},
 }
 
+var assetCateRelation = orm.Relation{
+	Field:      "asset_cate_id",
+	Option:     "bot.team.NewAssetCateModel",
+	OptionKeys: []string{"name"},
+}
+
+var teamAssetCateRelation = orm.Relation{
+	Field:      "asset_cates",
+	Through:    "bot.team.NewAssetCateModel",
+	OwnerField: "team_id",
+	Order:      "sort asc, id asc",
+}
+
 var flowRelation = orm.Relation{
 	Field:      "flow_id",
 	Option:     "bot.team.NewFlowModel",

@@ -97,6 +97,10 @@ func validateFlowNodeGraph(nodes []teammodel.FlowNode, edges []teammodel.FlowNod
 			if node.PowerID == 0 {
 				issues = append(issues, fmt.Sprintf("能力节点 %s 未绑定能力", node.Name))
 			}
+		case teammodel.NodeTypeContext:
+			if node.AssetCateID == 0 {
+				issues = append(issues, fmt.Sprintf("上下文节点 %s 未选择资产分类", node.Name))
+			}
 		}
 	}
 	for _, edge := range edges {

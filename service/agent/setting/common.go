@@ -50,8 +50,26 @@ func defaultInt16Field(record map[string]any, field string, fallback int16, part
 	}
 }
 
+func defaultInt16FieldOnCreateOrPresent(record map[string]any, field string, fallback int16, partial bool) {
+	if !shouldDefaultOnCreateOrPresent(record, field, partial) {
+		return
+	}
+	if util.ToIntDefault(record[field], 0) <= 0 {
+		record[field] = fallback
+	}
+}
+
 func defaultIntField(record map[string]any, field string, fallback int, partial bool) {
 	if !shouldNormalizeField(record, field, partial) {
+		return
+	}
+	if util.ToIntDefault(record[field], 0) <= 0 {
+		record[field] = fallback
+	}
+}
+
+func defaultIntFieldOnCreateOrPresent(record map[string]any, field string, fallback int, partial bool) {
+	if !shouldDefaultOnCreateOrPresent(record, field, partial) {
 		return
 	}
 	if util.ToIntDefault(record[field], 0) <= 0 {
@@ -65,6 +83,17 @@ func shouldNormalizeField(record map[string]any, field string, partial bool) boo
 	}
 	_, exists := record[field]
 	return exists
+}
+
+func shouldDefaultOnCreateOrPresent(record map[string]any, field string, partial bool) bool {
+	if partial {
+		_, exists := record[field]
+		return exists
+	}
+	if _, exists := record[field]; exists {
+		return true
+	}
+	return util.ToUint64(record["id"]) == 0
 }
 
 func isPartialAgentRecord(record map[string]any) bool {

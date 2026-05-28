@@ -67,8 +67,8 @@
         }
       },
       {
-        "type": "form-textarea",
-        "placeholder": "例如：你是一个小说创作智能体，负责把用户的题材、人物和风格要求整理成可继续创作的大纲、设定和正文。始终使用中文，缺少关键设定时先发起交互收集。",
+        "type": "form-editor",
+        "placeholder": "例如：你是一个小说创作智能体，负责把用户的题材、人物和风格要求整理成可继续创作的大纲、设定和正文。可从 Excel / Word 粘贴格式化内容，也可直接粘贴截图。",
         "value": "form.content",
         "mode": "form",
         "validate": [
@@ -78,7 +78,16 @@
           }
         ],
         "meta": {
-          "rows": 6
+          "minHeight": 360,
+          "maxHeight": 680,
+          "uploadRules": [
+            {
+              "ruleId": 1,
+              "kind": "image",
+              "bizKey": "bot.agent.setting",
+              "bizName": "智能体设定"
+            }
+          ]
         }
       }
     ]

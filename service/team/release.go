@@ -10,6 +10,7 @@ import (
 
 type runtimeGraph struct {
 	Team              teammodel.Team
+	AssetCates        []teammodel.AssetCate
 	Roles             []teammodel.Role
 	Flows             []teammodel.Flow
 	FlowEdges         []teammodel.FlowEdge
@@ -74,6 +75,7 @@ func (s Service) currentRuntimeGraph(ctx context.Context, team teammodel.Team) r
 	flows := s.repo.ListFlows(ctx, team.ID, true)
 	graph := runtimeGraph{
 		Team:              team,
+		AssetCates:        s.repo.ListAssetCates(ctx, team.ID, true),
 		Roles:             s.repo.ListRoles(ctx, team.ID, true),
 		Flows:             flows,
 		FlowEdges:         s.repo.ListFlowEdges(ctx, team.ID, true),
@@ -94,11 +96,15 @@ func runtimeGraphFromRelease(release teammodel.TeamRelease) (runtimeGraph, error
 	}
 	graph := runtimeGraph{
 		Team:              graphTeamToModel(snapshot.Team),
+		AssetCates:        make([]teammodel.AssetCate, 0, len(snapshot.AssetCates)),
 		Roles:             make([]teammodel.Role, 0, len(snapshot.Roles)),
 		Flows:             make([]teammodel.Flow, 0, len(snapshot.Flows)),
 		FlowEdges:         make([]teammodel.FlowEdge, 0, len(snapshot.FlowEdges)),
 		NodesByFlowID:     map[uint64][]teammodel.FlowNode{},
 		NodeEdgesByFlowID: map[uint64][]teammodel.FlowNodeEdge{},
+	}
+	for _, payload := range snapshot.AssetCates {
+		graph.AssetCates = append(graph.AssetCates, graphAssetCateToModel(graph.Team.ID, payload))
 	}
 	for _, payload := range snapshot.Roles {
 		graph.Roles = append(graph.Roles, graphRoleToModel(graph.Team.ID, payload))
@@ -163,16 +169,27 @@ func graphTeamToModel(payload GraphTeam) teammodel.Team {
 
 func graphRoleToModel(teamID uint64, payload GraphRole) teammodel.Role {
 	return teammodel.Role{
-		ID:         payload.ID,
-		TeamID:     teamID,
-		RoleType:   payload.RoleType,
-		RoleKey:    payload.RoleKey,
-		Name:       payload.Name,
-		AgentID:    payload.AgentID,
-		Assignment: payload.Assignment,
-		Config:     jsonText(payload.Config),
-		Status:     payload.Status,
-		Sort:       payload.Sort,
+		ID:          payload.ID,
+		TeamID:      teamID,
+		RoleType:    payload.RoleType,
+		RoleKey:     payload.RoleKey,
+		Name:        payload.Name,
+		AgentID:     payload.AgentID,
+		AssetCateID: payload.AssetCateID,
+		Assignment:  payload.Assignment,
+		Config:      jsonText(payload.Config),
+		Status:      payload.Status,
+		Sort:        payload.Sort,
+	}
+}
+
+func graphAssetCateToModel(teamID uint64, payload GraphAssetCate) teammodel.AssetCate {
+	return teammodel.AssetCate{
+		ID:     payload.ID,
+		TeamID: teamID,
+		Name:   payload.Name,
+		Status: payload.Status,
+		Sort:   payload.Sort,
 	}
 }
 
@@ -204,21 +221,22 @@ func graphFlowEdgeToModel(teamID uint64, payload GraphFlowEdge) teammodel.FlowEd
 
 func graphFlowNodeToModel(teamID uint64, flowID uint64, payload GraphFlowNode) teammodel.FlowNode {
 	return teammodel.FlowNode{
-		ID:        payload.ID,
-		TeamID:    teamID,
-		FlowID:    flowID,
-		NodeKey:   payload.NodeKey,
-		Name:      payload.Name,
-		Type:      payload.Type,
-		RoleID:    payload.RoleID,
-		RoleKey:   payload.RoleKey,
-		AgentID:   payload.AgentID,
-		PowerID:   payload.PowerID,
-		SubTeamID: payload.SubTeamID,
-		Config:    jsonText(payload.Config),
-		Position:  jsonText(payload.Position),
-		Status:    payload.Status,
-		Sort:      payload.Sort,
+		ID:          payload.ID,
+		TeamID:      teamID,
+		FlowID:      flowID,
+		NodeKey:     payload.NodeKey,
+		Name:        payload.Name,
+		Type:        payload.Type,
+		RoleID:      payload.RoleID,
+		RoleKey:     payload.RoleKey,
+		AgentID:     payload.AgentID,
+		PowerID:     payload.PowerID,
+		SubTeamID:   payload.SubTeamID,
+		AssetCateID: payload.AssetCateID,
+		Config:      jsonText(payload.Config),
+		Position:    jsonText(payload.Position),
+		Status:      payload.Status,
+		Sort:        payload.Sort,
 	}
 }
 

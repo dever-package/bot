@@ -3,7 +3,9 @@ package team
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -58,19 +60,55 @@ func (s Service) executeNodeDAG(ctx context.Context, run teammodel.Run, flowRun 
 			}
 			return teammodel.RunStatusFail, blackboard, fmt.Errorf("节点 DAG 无可执行节点")
 		}
-		for _, node := range ready {
-			s.writeEdgeActiveEvents(ctx, run, flowRun, flow, node, incoming[node.ID], nodeByID)
-			status, err := s.executeNode(ctx, run, flowRun, team, roles, flow, node, incoming[node.ID], nodeByID)
-			if status == teammodel.RunStatusWaiting {
-				return status, s.repo.ListBlackboard(ctx, flowRun.ID), err
+		results := s.executeReadyNodes(ctx, run, flowRun, team, roles, flow, ready, incoming, nodeByID)
+		for _, result := range results {
+			if result.status == teammodel.RunStatusSuccess {
+				completed[result.nodeID] = true
 			}
-			if err != nil {
-				return status, s.repo.ListBlackboard(ctx, flowRun.ID), err
+		}
+		for _, result := range results {
+			if result.status == teammodel.RunStatusWaiting {
+				return result.status, s.repo.ListBlackboard(ctx, flowRun.ID), result.err
 			}
-			completed[node.ID] = true
+			if result.err != nil {
+				return result.status, s.repo.ListBlackboard(ctx, flowRun.ID), result.err
+			}
+			if result.status != teammodel.RunStatusSuccess {
+				return result.status, s.repo.ListBlackboard(ctx, flowRun.ID), fmt.Errorf("节点执行失败: %s", result.nodeName)
+			}
 		}
 	}
 	return teammodel.RunStatusSuccess, s.repo.ListBlackboard(ctx, flowRun.ID), nil
+}
+
+type nodeExecutionResult struct {
+	nodeID   uint64
+	nodeName string
+	status   string
+	err      error
+}
+
+func (s Service) executeReadyNodes(ctx context.Context, run teammodel.Run, flowRun teammodel.FlowRun, team teammodel.Team, roles []teammodel.Role, flow teammodel.Flow, ready []teammodel.FlowNode, incoming map[uint64][]teammodel.FlowNodeEdge, nodeByID map[uint64]teammodel.FlowNode) []nodeExecutionResult {
+	results := make([]nodeExecutionResult, len(ready))
+	var wg sync.WaitGroup
+	for index, node := range ready {
+		s.writeEdgeActiveEvents(ctx, run, flowRun, flow, node, incoming[node.ID], nodeByID)
+		index := index
+		node := node
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			status, err := s.executeNode(ctx, run, flowRun, team, roles, flow, node, incoming[node.ID], nodeByID)
+			results[index] = nodeExecutionResult{
+				nodeID:   node.ID,
+				nodeName: node.Name,
+				status:   status,
+				err:      err,
+			}
+		}()
+	}
+	wg.Wait()
+	return results
 }
 
 func (s Service) completedNodes(ctx context.Context, flowRunID uint64) map[uint64]bool {
@@ -300,10 +338,12 @@ func (s Service) runNodeByType(ctx context.Context, run teammodel.Run, flowRun t
 		return s.waitPowerNode(ctx, run, flowRun, team, flow, node, config, input)
 	case teammodel.NodeTypeTeam:
 		return s.runSubTeamNode(ctx, run, flowRun, team, flow, node, config, input)
+	case teammodel.NodeTypeContext:
+		return s.runContextNode(ctx, run, node, config)
 	case teammodel.NodeTypeCondition:
 		return runConditionNode(config, input), teammodel.RunStatusSuccess, 0, nil
 	case teammodel.NodeTypeMerge:
-		return map[string]any{"merged": input}, teammodel.RunStatusSuccess, 0, nil
+		return runMergeNode(node, config, input, blackboard, incoming, nodeByID), teammodel.RunStatusSuccess, 0, nil
 	case teammodel.NodeTypeHumanApproval:
 		return s.waitHumanNode(ctx, run, flowRun, team, flow, node, config, input)
 	case teammodel.NodeTypeSave:
@@ -537,7 +577,7 @@ func buildAgentPrompt(team teammodel.Team, flow teammodel.Flow, node teammodel.F
 	parts = append(
 		parts,
 		"请严格基于输入黑板执行当前节点任务，输出清晰、可被下游节点继续使用的结果。",
-		"用户交互规则：如果节点目标或输入要求用户选择、确认、补充信息、补充素材或给出反馈，或者当前信息不足以可靠执行，必须按 agent-interaction 协议发起表单交互，不能替用户做决定；用户提交后会以 user_feedback 写回输入黑板，你必须基于 user_feedback 继续完成当前节点。能枚举选项时优先使用 option 或 multi_option，缺少图片、视频、音频、文件等素材时使用 file 或 files。只有信息足够且不需要用户决策时，才输出最终结果。",
+		"用户交互规则：如果节点目标或输入要求用户选择、确认、补充信息、补充素材或给出反馈，或者当前信息不足以可靠执行，必须按 agent-interaction 协议发起表单交互，不能替用户做决定；用户提交后会以 user_feedback 写回输入黑板，你必须基于 user_feedback 继续完成当前节点，不能再次要求用户填写同一批信息。能枚举选项时优先使用 option 或 multi_option，缺少图片、视频、音频、文件等素材时使用 file 或 files。只有信息足够且不需要用户决策时，才输出最终结果。",
 		fmt.Sprintf("输入黑板：%s", jsonText(input)),
 	)
 	return strings.Join(parts, "\n\n")
@@ -548,12 +588,13 @@ func roleInputPayload(role *teammodel.Role) map[string]any {
 		return map[string]any{}
 	}
 	return map[string]any{
-		"id":         role.ID,
-		"type":       role.RoleType,
-		"key":        role.RoleKey,
-		"name":       role.Name,
-		"agent_id":   role.AgentID,
-		"assignment": role.Assignment,
+		"id":            role.ID,
+		"type":          role.RoleType,
+		"key":           role.RoleKey,
+		"name":          role.Name,
+		"agent_id":      role.AgentID,
+		"asset_cate_id": role.AssetCateID,
+		"assignment":    role.Assignment,
 	}
 }
 
@@ -599,6 +640,211 @@ func runConditionNode(config map[string]any, input map[string]any) map[string]an
 		"operator": operator,
 		"actual":   actual,
 		"expected": expected,
+	}
+}
+
+type mergeNodeSource struct {
+	Key   string
+	Title string
+	Value any
+}
+
+func runMergeNode(node teammodel.FlowNode, config map[string]any, input map[string]any, blackboard map[string]any, incoming []teammodel.FlowNodeEdge, nodeByID map[uint64]teammodel.FlowNode) map[string]any {
+	sources := collectMergeNodeSources(node, config, input, blackboard, incoming, nodeByID)
+	merged := map[string]any{}
+	sourcePayloads := make([]map[string]any, 0, len(sources))
+	for _, source := range sources {
+		text := mergeNodeReadableText(source.Value)
+		merged[source.Key] = source.Value
+		sourcePayload := map[string]any{
+			"key":     source.Key,
+			"title":   source.Title,
+			"content": source.Value,
+		}
+		if text != "" {
+			sourcePayload["text"] = text
+		}
+		sourcePayloads = append(sourcePayloads, sourcePayload)
+	}
+	return map[string]any{
+		"title":   firstText(config["title"], node.Name, "合并上下文"),
+		"kind":    "merged_context",
+		"text":    mergeNodeMarkdown(sources),
+		"sources": sourcePayloads,
+		"merged":  merged,
+	}
+}
+
+func collectMergeNodeSources(node teammodel.FlowNode, config map[string]any, input map[string]any, blackboard map[string]any, incoming []teammodel.FlowNodeEdge, nodeByID map[uint64]teammodel.FlowNode) []mergeNodeSource {
+	ownKey := firstText(config["output_key"], node.NodeKey)
+	incomingKeys := map[string]bool{}
+	incomingSources := make([]mergeNodeSource, 0, len(incoming))
+	for _, edge := range incoming {
+		fromNode := nodeByID[edge.FromNodeID]
+		if fromNode.ID == 0 {
+			continue
+		}
+		fromConfig := jsonMap(fromNode.Config)
+		key := firstText(fromConfig["output_key"], fromNode.NodeKey, fmt.Sprintf("node_%d", edge.FromNodeID))
+		incomingKeys[key] = true
+		incomingKeys[fromNode.NodeKey] = true
+		incomingKeys[fmt.Sprintf("node_%d", edge.FromNodeID)] = true
+		output := nodeOutput(fromNode, blackboard)
+		if mergeNodeValueEmpty(output) {
+			continue
+		}
+		incomingSources = append(incomingSources, mergeNodeSource{
+			Key:   key,
+			Title: firstText(fromNode.Name, key),
+			Value: output,
+		})
+	}
+
+	result := make([]mergeNodeSource, 0, len(input)+len(incomingSources))
+	added := map[string]bool{}
+	addSource := func(source mergeNodeSource) {
+		source.Key = strings.TrimSpace(source.Key)
+		if source.Key == "" || source.Key == ownKey || added[source.Key] || mergeNodeValueEmpty(source.Value) {
+			return
+		}
+		source.Title = firstText(source.Title, source.Key)
+		result = append(result, source)
+		added[source.Key] = true
+	}
+
+	inputKeys := stringSlice(config["input_keys"])
+	if len(inputKeys) > 0 {
+		for _, key := range inputKeys {
+			value, exists := input[key]
+			if !exists {
+				value = blackboard[key]
+			}
+			addSource(mergeNodeSource{Key: key, Title: key, Value: value})
+		}
+	} else {
+		for _, key := range sortedAnyMapKeys(input) {
+			if incomingKeys[key] || isMergeNodeControlKey(key) {
+				continue
+			}
+			addSource(mergeNodeSource{Key: key, Title: key, Value: input[key]})
+		}
+	}
+	for _, source := range incomingSources {
+		addSource(source)
+	}
+	return result
+}
+
+func mergeNodeMarkdown(sources []mergeNodeSource) string {
+	parts := make([]string, 0, len(sources))
+	for _, source := range sources {
+		text := mergeNodeReadableText(source.Value)
+		if text == "" {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("## %s\n\n%s", source.Title, text))
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func mergeNodeReadableText(value any) string {
+	return strings.TrimSpace(mergeNodeReadableTextDepth(value, 0))
+}
+
+func mergeNodeReadableTextDepth(value any, depth int) string {
+	if depth > 6 || value == nil {
+		return ""
+	}
+	switch current := value.(type) {
+	case string:
+		return strings.TrimSpace(current)
+	case []any:
+		parts := make([]string, 0, len(current))
+		for _, item := range current {
+			if text := mergeNodeReadableTextDepth(item, depth+1); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "\n\n")
+	case map[string]any:
+		if len(current) == 0 {
+			return ""
+		}
+		for _, key := range []string{"text", "markdown", "goal", "summary", "description"} {
+			if text := mergeNodeScalarText(current[key]); text != "" {
+				return text
+			}
+		}
+		for _, key := range []string{"content", "result", "output", "data", "value", "merged"} {
+			if text := mergeNodeReadableTextDepth(current[key], depth+1); text != "" {
+				return text
+			}
+		}
+		parts := make([]string, 0, len(current))
+		for _, key := range sortedAnyMapKeys(current) {
+			if isMergeNodeStructuralKey(key) {
+				continue
+			}
+			if text := mergeNodeReadableTextDepth(current[key], depth+1); text != "" {
+				parts = append(parts, fmt.Sprintf("%s：%s", key, text))
+			}
+		}
+		return strings.Join(parts, "\n\n")
+	default:
+		return mergeNodeScalarText(current)
+	}
+}
+
+func mergeNodeScalarText(value any) string {
+	switch current := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(current)
+	case bool:
+		return fmt.Sprint(current)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return fmt.Sprint(current)
+	default:
+		return ""
+	}
+}
+
+func mergeNodeValueEmpty(value any) bool {
+	switch current := value.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(current) == ""
+	case map[string]any:
+		return len(current) == 0
+	case []any:
+		return len(current) == 0
+	default:
+		return false
+	}
+}
+
+func sortedAnyMapKeys(row map[string]any) []string {
+	keys := make([]string, 0, len(row))
+	for key := range row {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func isMergeNodeControlKey(key string) bool {
+	key = strings.TrimSpace(key)
+	return key == "" || key == "user_feedback" || strings.HasSuffix(key, "_feedback")
+}
+
+func isMergeNodeStructuralKey(key string) bool {
+	switch strings.TrimSpace(key) {
+	case "_debug_asset", "agent_run_id", "asset", "version", "id", "kind", "status", "created_at", "updated_at":
+		return true
+	default:
+		return isMergeNodeControlKey(key)
 	}
 }
 
@@ -805,6 +1051,48 @@ func subTeamWorkflowOutput(teamID uint64, flowID uint64, flowName string, output
 	}
 }
 
+func (s Service) runContextNode(ctx context.Context, run teammodel.Run, node teammodel.FlowNode, config map[string]any) (map[string]any, string, uint64, error) {
+	assetCateID := firstUint64(node.AssetCateID, uint64Value(config["asset_cate_id"]))
+	if assetCateID == 0 {
+		return nil, teammodel.RunStatusFail, 0, fmt.Errorf("上下文节点未选择资产分类: %s", node.Name)
+	}
+	if isDebugRun(run) {
+		return map[string]any{
+			"asset_cate_id": assetCateID,
+			"debug":         true,
+			"content":       fmt.Sprintf("调试模式上下文：资产分类 %d", assetCateID),
+		}, teammodel.RunStatusSuccess, 0, nil
+	}
+	if run.ProjectID == 0 {
+		return nil, teammodel.RunStatusFail, 0, fmt.Errorf("上下文节点需要项目运行环境: %s", node.Name)
+	}
+	asset, version := s.asset.LatestProjectAssetByCate(ctx, run.ProjectID, assetCateID)
+	if asset == nil || version == nil {
+		if !contextNodeRequired(config) {
+			return map[string]any{
+				"asset_cate_id": assetCateID,
+				"missing":       true,
+			}, teammodel.RunStatusSuccess, 0, nil
+		}
+		return nil, teammodel.RunStatusFail, 0, fmt.Errorf("上下文节点未找到该资产分类下的产物: %s", node.Name)
+	}
+	return map[string]any{
+		"asset":   assetservice.AssetToMap(*asset),
+		"version": assetservice.VersionToMap(*version),
+		"content": jsonValue(version.Content),
+	}, teammodel.RunStatusSuccess, 0, nil
+}
+
+func contextNodeRequired(config map[string]any) bool {
+	if value, exists := config["required"]; exists {
+		return boolValue(value)
+	}
+	if value, exists := config["optional"]; exists {
+		return !boolValue(value)
+	}
+	return true
+}
+
 func (s Service) runSaveNode(ctx context.Context, run teammodel.Run, flowRun teammodel.FlowRun, team teammodel.Team, flow teammodel.Flow, node teammodel.FlowNode, blackboard map[string]any, incoming []teammodel.FlowNodeEdge, nodeByID map[uint64]teammodel.FlowNode) (map[string]any, string, uint64, error) {
 	body, err := singleIncomingNodeOutput("保存", incoming, nodeByID, blackboard)
 	if err != nil {
@@ -813,18 +1101,19 @@ func (s Service) runSaveNode(ctx context.Context, run teammodel.Run, flowRun tea
 	assetName := firstText(valueAtPath(body, "title"), flow.Name)
 	nodeRunID := s.currentNodeRunID(ctx, flowRun.ID, node.ID)
 	if isDebugRun(run) {
-		return debugSaveOutput(assetName, firstText(valueAtPath(body, "kind"), "mixed"), body), teammodel.RunStatusSuccess, 0, nil
+		return debugSaveOutput(assetName, firstText(valueAtPath(body, "kind"), "mixed"), node.AssetCateID, body), teammodel.RunStatusSuccess, 0, nil
 	}
 	asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
-		ProjectID: run.ProjectID,
-		TeamID:    team.ID,
-		FlowID:    flow.ID,
-		RunID:     run.ID,
-		NodeRunID: nodeRunID,
-		ReleaseID: run.ReleaseID,
-		Name:      assetName,
-		Kind:      firstText(valueAtPath(body, "kind"), "mixed"),
-		Content:   body,
+		ProjectID:   run.ProjectID,
+		TeamID:      team.ID,
+		FlowID:      flow.ID,
+		AssetCateID: node.AssetCateID,
+		RunID:       run.ID,
+		NodeRunID:   nodeRunID,
+		ReleaseID:   run.ReleaseID,
+		Name:        assetName,
+		Kind:        firstText(valueAtPath(body, "kind"), "mixed"),
+		Content:     body,
 	})
 	if err != nil {
 		return nil, teammodel.RunStatusFail, 0, err
@@ -858,14 +1147,15 @@ func isDebugRun(run teammodel.Run) bool {
 	return strings.HasPrefix(mode, "debug_")
 }
 
-func debugSaveOutput(name string, kind string, body map[string]any) map[string]any {
+func debugSaveOutput(name string, kind string, assetCateID uint64, body map[string]any) map[string]any {
 	output := make(map[string]any, len(body)+1)
 	for key, value := range body {
 		output[key] = value
 	}
 	output["_debug_asset"] = map[string]any{
-		"name": name,
-		"kind": kind,
+		"name":          name,
+		"kind":          kind,
+		"asset_cate_id": assetCateID,
 	}
 	return output
 }
@@ -911,13 +1201,4 @@ func valueAtPath(raw any, key string) any {
 		return nil
 	}
 	return row[key]
-}
-
-func firstUint64(values ...uint64) uint64 {
-	for _, value := range values {
-		if value > 0 {
-			return value
-		}
-	}
-	return 0
 }

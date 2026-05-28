@@ -52,6 +52,12 @@ var flowRelation = orm.Relation{
 	OptionKeys: []string{"name", "key"},
 }
 
+var assetCateRelation = orm.Relation{
+	Field:      "asset_cate_id",
+	Option:     "bot.team.NewAssetCateModel",
+	OptionKeys: []string{"name"},
+}
+
 var versionRelation = orm.Relation{
 	Field:      "version_id",
 	Option:     "bot.asset.NewVersionModel",
@@ -83,26 +89,28 @@ var releaseRelation = orm.Relation{
 }
 
 type Asset struct {
-	ID        uint64    `dorm:"primaryKey;autoIncrement;comment:资产ID"`
-	ProjectID uint64    `dorm:"type:bigint;not null;default:0;comment:项目"`
-	BodyID    uint64    `dorm:"type:bigint;not null;default:0;comment:载体"`
-	TeamID    uint64    `dorm:"type:bigint;not null;default:0;comment:团队"`
-	FlowID    uint64    `dorm:"type:bigint;not null;default:0;comment:工作流"`
-	Name      string    `dorm:"type:varchar(128);not null;comment:名称"`
-	Kind      string    `dorm:"type:varchar(32);not null;default:'text';comment:产物类型"`
-	VersionID uint64    `dorm:"type:bigint;not null;default:0;comment:当前版本"`
-	Status    string    `dorm:"type:varchar(32);not null;default:'draft';comment:状态"`
-	Sort      int       `dorm:"type:int;not null;default:100;comment:排序"`
-	CreatedAt time.Time `dorm:"comment:创建时间"`
+	ID          uint64    `dorm:"primaryKey;autoIncrement;comment:资产ID"`
+	ProjectID   uint64    `dorm:"type:bigint;not null;default:0;comment:项目"`
+	BodyID      uint64    `dorm:"type:bigint;not null;default:0;comment:载体"`
+	TeamID      uint64    `dorm:"type:bigint;not null;default:0;comment:团队"`
+	FlowID      uint64    `dorm:"type:bigint;not null;default:0;comment:工作流"`
+	AssetCateID uint64    `dorm:"type:bigint;not null;default:0;comment:资产分类"`
+	Name        string    `dorm:"type:varchar(128);not null;comment:名称"`
+	Kind        string    `dorm:"type:varchar(32);not null;default:'text';comment:产物类型"`
+	VersionID   uint64    `dorm:"type:bigint;not null;default:0;comment:当前版本"`
+	Status      string    `dorm:"type:varchar(32);not null;default:'draft';comment:状态"`
+	Sort        int       `dorm:"type:int;not null;default:100;comment:排序"`
+	CreatedAt   time.Time `dorm:"comment:创建时间"`
 }
 
 type AssetIndex struct {
-	ProjectStatus struct{} `index:"project_id,status,sort,id"`
-	ProjectFlow   struct{} `index:"project_id,flow_id,status,sort,id"`
-	BodyStatus    struct{} `index:"body_id,status,sort,id"`
-	TeamStatus    struct{} `index:"team_id,status,sort,id"`
-	FlowStatus    struct{} `index:"flow_id,status,sort,id"`
-	Version       struct{} `index:"version_id"`
+	ProjectStatus   struct{} `index:"project_id,status,sort,id"`
+	ProjectFlow     struct{} `index:"project_id,flow_id,status,sort,id"`
+	BodyStatus      struct{} `index:"body_id,status,sort,id"`
+	TeamStatus      struct{} `index:"team_id,status,sort,id"`
+	FlowStatus      struct{} `index:"flow_id,status,sort,id"`
+	AssetCateStatus struct{} `index:"asset_cate_id,status,sort,id"`
+	Version         struct{} `index:"version_id"`
 }
 
 func NewAssetModel() *orm.Model[Asset] {
@@ -118,6 +126,7 @@ func NewAssetModel() *orm.Model[Asset] {
 			bodyRelation,
 			teamRelation,
 			flowRelation,
+			assetCateRelation,
 			versionRelation,
 		},
 	})

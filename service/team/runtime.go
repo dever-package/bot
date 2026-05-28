@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	teammodel "my/package/bot/model/team"
@@ -201,10 +202,18 @@ func (s Service) ResumeRun(ctx context.Context, runID uint64) (map[string]any, e
 	if run.Status != teammodel.RunStatusWaiting {
 		return nil, fmt.Errorf("只有等待人工的运行可以恢复")
 	}
+	now := time.Now()
+	record := map[string]any{
+		"status":     teammodel.RunStatusRunning,
+		"error":      "",
+		"updated_at": now,
+	}
+	requestID := renewRunRequestID(record, run)
+	s.repo.UpdateRun(ctx, run.ID, record)
 	s.continueWaitingRun(context.Background(), *run, nil)
 	return map[string]any{
 		"run_id":     run.ID,
-		"request_id": run.RequestID,
+		"request_id": requestID,
 		"status":     teammodel.RunStatusRunning,
 	}, nil
 }
@@ -227,6 +236,13 @@ func (s Service) continueWaitingRun(ctx context.Context, run teammodel.Run, flow
 func isSingleFlowRunMode(input map[string]any) bool {
 	mode := strings.ToLower(strings.TrimSpace(textValue(input["_mode"])))
 	return mode == "flow" || mode == "debug_flow" || mode == "sub_flow"
+}
+
+func renewRunRequestID(record map[string]any, run *teammodel.Run) string {
+	requestID := newRequestID()
+	record["request_id"] = requestID
+	run.RequestID = requestID
+	return requestID
 }
 
 func (s Service) StopRun(ctx context.Context, runID uint64, requestID string) (map[string]any, error) {
@@ -357,11 +373,17 @@ func (s Service) executeTeamRun(ctx context.Context, runID uint64) {
 		s.finishRun(ctx, run.ID, teammodel.RunStatusFail, nil, err)
 		return
 	}
+	runInput := jsonMap(run.Input)
+	input := executionInput(runInput)
+	if textValue(runInput["_mode"]) == "conversation" {
+		status, output, err := s.executeConversationRun(ctx, *run, graph, runInput)
+		s.finishRun(ctx, run.ID, status, output, err)
+		return
+	}
 	if issues := validateFlowGraph(graph.Flows, graph.FlowEdges); len(issues) > 0 {
 		s.finishRun(ctx, run.ID, teammodel.RunStatusFail, nil, errors.New(strings.Join(issues, "；")))
 		return
 	}
-	input := executionInput(jsonMap(run.Input))
 	status, output, err := s.executeFlowDAG(ctx, *run, graph, input)
 	if err != nil {
 		s.finishRun(ctx, run.ID, status, output, err)
@@ -447,8 +469,47 @@ func (s Service) executeFlowDAG(ctx context.Context, run teammodel.Run, graph ru
 			}
 			return teammodel.RunStatusFail, completedOutput(completed), fmt.Errorf("工作流 DAG 无可执行节点")
 		}
-		for _, flow := range ready {
-			flowInput := buildFlowInput(input, incoming[flow.ID], completed)
+		results := s.executeReadyFlows(ctx, run, graph, input, ready, incoming, completed)
+		for _, result := range results {
+			if result.status == teammodel.RunStatusSuccess {
+				completed[result.flowID] = result.output
+			}
+		}
+		for _, result := range results {
+			if result.status == teammodel.RunStatusWaiting {
+				return result.status, completedOutput(completed), result.err
+			}
+			if result.err != nil {
+				failed[result.flowID] = true
+				return result.status, completedOutput(completed), result.err
+			}
+			if result.status != teammodel.RunStatusSuccess {
+				failed[result.flowID] = true
+				return result.status, completedOutput(completed), fmt.Errorf("工作流执行失败: %s", result.flowName)
+			}
+		}
+	}
+	return teammodel.RunStatusSuccess, completedOutput(completed), nil
+}
+
+type flowExecutionResult struct {
+	flowID   uint64
+	flowName string
+	status   string
+	output   map[string]any
+	err      error
+}
+
+func (s Service) executeReadyFlows(ctx context.Context, run teammodel.Run, graph runtimeGraph, input map[string]any, ready []teammodel.Flow, incoming map[uint64][]teammodel.FlowEdge, completed map[uint64]map[string]any) []flowExecutionResult {
+	results := make([]flowExecutionResult, len(ready))
+	var wg sync.WaitGroup
+	for index, flow := range ready {
+		index := index
+		flow := flow
+		flowInput := buildFlowInput(input, incoming[flow.ID], completed)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			status, output, err := s.executeFlowWithGraph(
 				ctx,
 				run,
@@ -459,17 +520,17 @@ func (s Service) executeFlowDAG(ctx context.Context, run teammodel.Run, graph ru
 				graph.NodesByFlowID[flow.ID],
 				graph.NodeEdgesByFlowID[flow.ID],
 			)
-			if status == teammodel.RunStatusWaiting {
-				return status, completedOutput(completed), err
+			results[index] = flowExecutionResult{
+				flowID:   flow.ID,
+				flowName: flow.Name,
+				status:   status,
+				output:   output,
+				err:      err,
 			}
-			if err != nil {
-				failed[flow.ID] = true
-				return status, completedOutput(completed), err
-			}
-			completed[flow.ID] = output
-		}
+		}()
 	}
-	return teammodel.RunStatusSuccess, completedOutput(completed), nil
+	wg.Wait()
+	return results
 }
 
 func (s Service) runCanceled(ctx context.Context, runID uint64) bool {
@@ -574,9 +635,7 @@ func (s Service) finishRun(ctx context.Context, runID uint64, status string, out
 			"output": output,
 			"error":  firstText(errorText(err), errorText(assetErr)),
 		})
-		if status != teammodel.RunStatusWaiting {
-			s.writeRunResult(ctx, *run)
-		}
+		s.writeRunResult(ctx, *run)
 	}
 }
 
@@ -627,10 +686,11 @@ func (s Service) saveFinalRunAsset(ctx context.Context, runID uint64, output map
 	}
 	input := jsonMap(run.Input)
 	mode := firstText(input["_mode"])
-	if mode != "team" && mode != "flow" {
+	if mode != "team" && mode != "flow" && mode != "role" && mode != "conversation" {
 		return nil
 	}
 	flowID := uint64(0)
+	assetCateID := uint64(0)
 	name := "团队运行结果"
 	if mode == "flow" {
 		flowID = uint64Value(input["_flow_id"])
@@ -640,18 +700,59 @@ func (s Service) saveFinalRunAsset(ctx context.Context, runID uint64, output map
 				name = fmt.Sprintf("%s 运行结果", flow.Name)
 			}
 		}
+	} else if mode == "role" {
+		name = "角色运行结果"
+		if role, ok := s.findRunRole(ctx, run.TeamID, uint64Value(input["_role_id"])); ok {
+			name = fmt.Sprintf("%s 运行结果", role.Name)
+			assetCateID = role.AssetCateID
+		}
+		if assetCateID == 0 {
+			return nil
+		}
+	} else if mode == "conversation" {
+		name = "团队对话运行结果"
+		rolePayload := mapValue(output["role"])
+		roleID := uint64Value(rolePayload["id"])
+		if role, ok := s.findRunRole(ctx, run.TeamID, roleID); ok {
+			name = fmt.Sprintf("%s 运行结果", role.Name)
+			assetCateID = role.AssetCateID
+		} else {
+			assetCateID = uint64Value(rolePayload["asset_cate_id"])
+			if roleName := firstText(rolePayload["name"]); roleName != "" {
+				name = fmt.Sprintf("%s 运行结果", roleName)
+			}
+		}
+		if assetCateID == 0 {
+			return nil
+		}
 	}
 	_, _, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
-		ProjectID: run.ProjectID,
-		TeamID:    run.TeamID,
-		FlowID:    flowID,
-		RunID:     run.ID,
-		ReleaseID: run.ReleaseID,
-		Name:      name,
-		Kind:      finalAssetKind(output),
-		Content:   output,
+		ProjectID:   run.ProjectID,
+		TeamID:      run.TeamID,
+		FlowID:      flowID,
+		AssetCateID: assetCateID,
+		RunID:       run.ID,
+		ReleaseID:   run.ReleaseID,
+		Name:        name,
+		Kind:        finalAssetKind(output),
+		Content:     output,
 	})
 	return err
+}
+
+func (s Service) findRunRole(ctx context.Context, teamID uint64, roleID uint64) (teammodel.Role, bool) {
+	if roleID == 0 {
+		return teammodel.Role{}, false
+	}
+	role := teammodel.NewRoleModel().Find(ctx, map[string]any{
+		"id":      roleID,
+		"team_id": teamID,
+		"status":  teammodel.StatusEnabled,
+	})
+	if role == nil {
+		return teammodel.Role{}, false
+	}
+	return *role, true
 }
 
 func finalAssetKind(output map[string]any) string {
@@ -675,6 +776,9 @@ func finalAssetKind(output map[string]any) string {
 	}
 	if _, ok := output["audios"]; ok {
 		return "audio"
+	}
+	if firstText(output["summary"], output["text"], output["content"], output["result"]) != "" {
+		return "text"
 	}
 	if len(output) > 1 {
 		return "mixed"

@@ -13,17 +13,18 @@ import (
 type Service struct{}
 
 type SaveVersionRequest struct {
-	ProjectID uint64
-	BodyID    uint64
-	TeamID    uint64
-	FlowID    uint64
-	RunID     uint64
-	NodeRunID uint64
-	ReleaseID uint64
-	Name      string
-	Kind      string
-	Content   any
-	Sort      int
+	ProjectID   uint64
+	BodyID      uint64
+	TeamID      uint64
+	FlowID      uint64
+	AssetCateID uint64
+	RunID       uint64
+	NodeRunID   uint64
+	ReleaseID   uint64
+	Name        string
+	Kind        string
+	Content     any
+	Sort        int
 }
 
 func NewService() Service {
@@ -45,6 +46,31 @@ func (Service) FindProjectAsset(ctx context.Context, projectID uint64, id uint64
 		"id":         id,
 		"project_id": projectID,
 	})
+}
+
+func (Service) LatestProjectAssetByCate(ctx context.Context, projectID uint64, assetCateID uint64) (*assetmodel.Asset, *assetmodel.Version) {
+	if projectID == 0 || assetCateID == 0 {
+		return nil, nil
+	}
+	rows := assetmodel.NewAssetModel().Select(ctx, map[string]any{
+		"project_id":    projectID,
+		"asset_cate_id": assetCateID,
+		"status":        assetmodel.StatusCurrent,
+	})
+	var latest *assetmodel.Asset
+	for _, row := range rows {
+		if row == nil || row.VersionID == 0 {
+			continue
+		}
+		if latest == nil || row.VersionID > latest.VersionID {
+			value := *row
+			latest = &value
+		}
+	}
+	if latest == nil {
+		return nil, nil
+	}
+	return latest, Service{}.FindVersion(ctx, latest.VersionID)
 }
 
 func (Service) FindVersion(ctx context.Context, id uint64) *assetmodel.Version {
@@ -90,11 +116,12 @@ func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetm
 	}
 	assetModel := assetmodel.NewAssetModel()
 	asset := assetModel.Find(ctx, map[string]any{
-		"project_id": req.ProjectID,
-		"body_id":    req.BodyID,
-		"team_id":    req.TeamID,
-		"flow_id":    req.FlowID,
-		"name":       req.Name,
+		"project_id":    req.ProjectID,
+		"body_id":       req.BodyID,
+		"team_id":       req.TeamID,
+		"flow_id":       req.FlowID,
+		"asset_cate_id": req.AssetCateID,
+		"name":          req.Name,
 	})
 	now := time.Now()
 	if asset == nil {
@@ -103,16 +130,17 @@ func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetm
 			sort = 100
 		}
 		assetID := uint64(assetModel.Insert(ctx, map[string]any{
-			"project_id": req.ProjectID,
-			"body_id":    req.BodyID,
-			"team_id":    req.TeamID,
-			"flow_id":    req.FlowID,
-			"name":       req.Name,
-			"kind":       req.Kind,
-			"version_id": 0,
-			"status":     assetmodel.StatusDraft,
-			"sort":       sort,
-			"created_at": now,
+			"project_id":    req.ProjectID,
+			"body_id":       req.BodyID,
+			"team_id":       req.TeamID,
+			"flow_id":       req.FlowID,
+			"asset_cate_id": req.AssetCateID,
+			"name":          req.Name,
+			"kind":          req.Kind,
+			"version_id":    0,
+			"status":        assetmodel.StatusDraft,
+			"sort":          sort,
+			"created_at":    now,
 		}))
 		asset = assetModel.Find(ctx, map[string]any{"id": assetID})
 	}
@@ -146,17 +174,18 @@ func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetm
 
 func AssetToMap(row assetmodel.Asset) map[string]any {
 	return map[string]any{
-		"id":         row.ID,
-		"project_id": row.ProjectID,
-		"body_id":    row.BodyID,
-		"team_id":    row.TeamID,
-		"flow_id":    row.FlowID,
-		"name":       row.Name,
-		"kind":       row.Kind,
-		"version_id": row.VersionID,
-		"status":     row.Status,
-		"sort":       row.Sort,
-		"created_at": row.CreatedAt,
+		"id":            row.ID,
+		"project_id":    row.ProjectID,
+		"body_id":       row.BodyID,
+		"team_id":       row.TeamID,
+		"flow_id":       row.FlowID,
+		"asset_cate_id": row.AssetCateID,
+		"name":          row.Name,
+		"kind":          row.Kind,
+		"version_id":    row.VersionID,
+		"status":        row.Status,
+		"sort":          row.Sort,
+		"created_at":    row.CreatedAt,
 	}
 }
 

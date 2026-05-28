@@ -112,9 +112,9 @@
               }
             },
             {
-              "type": "form-textarea",
+              "type": "form-editor",
               "name": "设定正文",
-              "placeholder": "填写这个类型下的智能体专属设定。",
+              "placeholder": "填写这个类型下的智能体专属设定。可从 Excel / Word 粘贴格式化内容，也可直接粘贴截图。",
               "value": "content",
               "validate": [
                 {
@@ -123,7 +123,16 @@
                 }
               ],
               "meta": {
-                "rows": 14
+                "minHeight": 420,
+                "maxHeight": 720,
+                "uploadRules": [
+                  {
+                    "ruleId": 1,
+                    "kind": "image",
+                    "bizKey": "bot.agent.setting",
+                    "bizName": "智能体设定"
+                  }
+                ]
               }
             }
           ]

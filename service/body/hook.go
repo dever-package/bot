@@ -143,9 +143,8 @@ func normalizeCanvasTeamRows(c *server.Context, canvasID uint64, value any) []an
 
 		team := teammodel.NewTeamModel().Find(c.Context(), map[string]any{"id": teamID})
 		releaseID := canvasTeamReleaseID(c, team)
-		if team == nil || team.Status != teammodel.StatusEnabled ||
-			!canvasTeamPublished(team.PublishStatus) || releaseID == 0 {
-			panicBodyField("form.teams", "画布团队必须选择已发布且开启的团队。")
+		if team == nil || team.Status != teammodel.StatusEnabled || releaseID == 0 {
+			panicBodyField("form.teams", "画布团队必须选择已发布过且开启的团队。")
 		}
 		next["release_id"] = releaseID
 		if id := existingIDs[teamID]; id > 0 && util.ToUint64(next["id"]) == 0 {
@@ -157,21 +156,15 @@ func normalizeCanvasTeamRows(c *server.Context, canvasID uint64, value any) []an
 	return result
 }
 
-func canvasTeamPublished(status string) bool {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case teammodel.TeamPublishStatusPublished, "已发布", "发布":
-		return true
-	default:
-		return false
-	}
-}
-
 func canvasTeamReleaseID(c *server.Context, team *teammodel.Team) uint64 {
 	if team == nil {
 		return 0
 	}
 	if team.CurrentReleaseID > 0 {
-		return team.CurrentReleaseID
+		release := teammodel.NewTeamReleaseModel().Find(c.Context(), map[string]any{"id": team.CurrentReleaseID})
+		if release != nil && release.TeamID == team.ID && release.Status == teammodel.TeamReleaseStatusCurrent {
+			return release.ID
+		}
 	}
 	release := teammodel.NewTeamReleaseModel().Find(c.Context(), map[string]any{
 		"team_id": team.ID,

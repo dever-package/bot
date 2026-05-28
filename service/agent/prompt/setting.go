@@ -17,7 +17,7 @@ func settingPrompt(publicSettings []agentmodel.Setting, agentSettings []agentmod
 func publicSettingSnippets(settings []agentmodel.Setting) []snippet {
 	items := make([]snippet, 0, len(settings))
 	for _, setting := range settings {
-		content := strings.TrimSpace(setting.Content)
+		content := promptTextFromRichText(setting.Content)
 		if content == "" {
 			continue
 		}
@@ -33,7 +33,7 @@ func publicSettingSnippets(settings []agentmodel.Setting) []snippet {
 func agentSettingSnippets(settings []agentmodel.AgentSetting) []snippet {
 	items := make([]snippet, 0, len(settings))
 	for _, setting := range settings {
-		content := strings.TrimSpace(setting.Content)
+		content := promptTextFromRichText(setting.Content)
 		if content == "" {
 			continue
 		}

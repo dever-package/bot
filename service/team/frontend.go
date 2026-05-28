@@ -67,6 +67,7 @@ func (s Service) TeamDetail(ctx context.Context, teamID uint64, releaseID uint64
 			"status":     release.Status,
 			"created_at": release.CreatedAt,
 		},
+		"asset_cates":        assetCatePayloads(graph.AssetCates),
 		"roles":              rolePayloads(graph.Roles),
 		"flows":              flowPayloads(graph.Flows),
 		"flow_edges":         flowEdgePayloads(graph.Flows, graph.FlowEdges),

@@ -30,22 +30,24 @@ var roleSeed = []map[string]any{
 }
 
 type Role struct {
-	ID         uint64    `dorm:"primaryKey;autoIncrement;comment:角色ID"`
-	TeamID     uint64    `dorm:"type:bigint;not null;default:0;comment:团队"`
-	RoleType   string    `dorm:"type:varchar(32);not null;default:'worker';comment:类型"`
-	RoleKey    string    `dorm:"type:varchar(128);not null;default:'';comment:标识"`
-	Name       string    `dorm:"type:varchar(128);not null;comment:名称"`
-	AgentID    uint64    `dorm:"type:bigint;not null;default:0;comment:智能体"`
-	Assignment string    `dorm:"type:text;not null;default:'';comment:职责说明"`
-	Config     string    `dorm:"type:text;not null;default:'{}';comment:配置"`
-	Status     int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	Sort       int       `dorm:"type:int;not null;default:100;comment:排序"`
-	CreatedAt  time.Time `dorm:"comment:创建时间"`
+	ID          uint64    `dorm:"primaryKey;autoIncrement;comment:角色ID"`
+	TeamID      uint64    `dorm:"type:bigint;not null;default:0;comment:团队"`
+	RoleType    string    `dorm:"type:varchar(32);not null;default:'worker';comment:类型"`
+	RoleKey     string    `dorm:"type:varchar(128);not null;default:'';comment:标识"`
+	Name        string    `dorm:"type:varchar(128);not null;comment:名称"`
+	AgentID     uint64    `dorm:"type:bigint;not null;default:0;comment:智能体"`
+	AssetCateID uint64    `dorm:"type:bigint;not null;default:0;comment:资产分类"`
+	Assignment  string    `dorm:"type:text;not null;default:'';comment:职责说明"`
+	Config      string    `dorm:"type:text;not null;default:'{}';comment:配置"`
+	Status      int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	Sort        int       `dorm:"type:int;not null;default:100;comment:排序"`
+	CreatedAt   time.Time `dorm:"comment:创建时间"`
 }
 
 type RoleIndex struct {
-	TeamType    struct{} `index:"team_id,role_type,status,sort,id"`
-	AgentStatus struct{} `index:"agent_id,status"`
+	TeamType        struct{} `index:"team_id,role_type,status,sort,id"`
+	AgentStatus     struct{} `index:"agent_id,status"`
+	AssetCateStatus struct{} `index:"asset_cate_id,status"`
 }
 
 func NewRoleModel() *orm.Model[Role] {
@@ -61,21 +63,23 @@ func NewRoleModel() *orm.Model[Role] {
 		Relations: []orm.Relation{
 			teamRelation,
 			roleAgentRelation,
+			assetCateRelation,
 		},
 	})
 }
 
 func defaultRoleSeed(id uint64, roleType string, roleKey string, name string, assignment string, sort int) map[string]any {
 	return map[string]any{
-		"id":         id,
-		"team_id":    DefaultTeamID,
-		"role_type":  roleType,
-		"role_key":   roleKey,
-		"name":       name,
-		"agent_id":   agentmodel.DefaultAgentID,
-		"assignment": assignment,
-		"config":     "{}",
-		"status":     StatusEnabled,
-		"sort":       sort,
+		"id":            id,
+		"team_id":       DefaultTeamID,
+		"role_type":     roleType,
+		"role_key":      roleKey,
+		"name":          name,
+		"agent_id":      agentmodel.DefaultAgentID,
+		"asset_cate_id": 0,
+		"assignment":    assignment,
+		"config":        "{}",
+		"status":        StatusEnabled,
+		"sort":          sort,
 	}
 }

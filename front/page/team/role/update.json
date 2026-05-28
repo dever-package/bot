@@ -94,6 +94,21 @@
         ]
       },
       {
+        "type": "form-select",
+        "name": "资产分类",
+        "value": "form.asset_cate_id",
+        "mode": "form",
+        "placeholder": "不指定资产分类",
+        "option": "/front/route/option?type=model&use=bot.team.NewAssetCateModel&parentField=team_id&valueField=id&labelField=name&order=sort asc,id asc",
+        "info": "如果这个角色直接产出结果，结果会优先沉淀到所选资产分类下；不选时由任务或保存节点决定。",
+        "meta": {
+          "formLayout": "horizontal",
+          "optionParams": {
+            "parentId": "form.team_id"
+          }
+        }
+      },
+      {
         "type": "form-textarea",
         "name": "职责说明",
         "placeholder": "描述这个角色在团队中负责什么、边界是什么、产出什么。",
@@ -113,6 +128,7 @@
       "role_type": "chat",
       "name": "",
       "agent_id": 0,
+      "asset_cate_id": 0,
       "assignment": "",
       "config": "{}",
       "status": 1,

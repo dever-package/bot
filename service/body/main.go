@@ -45,6 +45,11 @@ func (Service) CreateCanvasBody(ctx context.Context, projectID uint64, name stri
 }
 
 func (Service) AllowedPowerIDs(ctx context.Context, bodyID uint64) (map[uint64]bool, bool) {
+	ids, restricted := Service{}.AllowedPowerOrder(ctx, bodyID)
+	return idSet(ids), restricted
+}
+
+func (Service) AllowedPowerOrder(ctx context.Context, bodyID uint64) ([]uint64, bool) {
 	canvasID := canvasIDForBody(ctx, bodyID)
 	if canvasID == 0 {
 		return nil, false
@@ -53,19 +58,24 @@ func (Service) AllowedPowerIDs(ctx context.Context, bodyID uint64) (map[uint64]b
 		"canvas_id": canvasID,
 		"status":    bodymodel.StatusEnabled,
 	})
-	allowed := map[uint64]bool{}
+	ids := make([]uint64, 0, len(rows))
 	for _, row := range rows {
 		if row != nil && row.PowerID > 0 {
-			allowed[row.PowerID] = true
+			ids = append(ids, row.PowerID)
 		}
 	}
-	if len(allowed) == 0 {
+	if len(ids) == 0 {
 		return nil, false
 	}
-	return allowed, true
+	return ids, true
 }
 
 func (Service) AllowedAgentIDs(ctx context.Context, bodyID uint64) (map[uint64]bool, bool) {
+	ids, restricted := Service{}.AllowedAgentOrder(ctx, bodyID)
+	return idSet(ids), restricted
+}
+
+func (Service) AllowedAgentOrder(ctx context.Context, bodyID uint64) ([]uint64, bool) {
 	canvasID := canvasIDForBody(ctx, bodyID)
 	if canvasID == 0 {
 		return nil, false
@@ -74,19 +84,24 @@ func (Service) AllowedAgentIDs(ctx context.Context, bodyID uint64) (map[uint64]b
 		"canvas_id": canvasID,
 		"status":    bodymodel.StatusEnabled,
 	})
-	allowed := map[uint64]bool{}
+	ids := make([]uint64, 0, len(rows))
 	for _, row := range rows {
 		if row != nil && row.AgentID > 0 {
-			allowed[row.AgentID] = true
+			ids = append(ids, row.AgentID)
 		}
 	}
-	if len(allowed) == 0 {
+	if len(ids) == 0 {
 		return nil, false
 	}
-	return allowed, true
+	return ids, true
 }
 
 func (Service) AllowedTeamIDs(ctx context.Context, bodyID uint64) (map[uint64]bool, bool) {
+	ids, restricted := Service{}.AllowedTeamOrder(ctx, bodyID)
+	return idSet(ids), restricted
+}
+
+func (Service) AllowedTeamOrder(ctx context.Context, bodyID uint64) ([]uint64, bool) {
 	canvasID := canvasIDForBody(ctx, bodyID)
 	if canvasID == 0 {
 		return nil, false
@@ -95,16 +110,16 @@ func (Service) AllowedTeamIDs(ctx context.Context, bodyID uint64) (map[uint64]bo
 		"canvas_id": canvasID,
 		"status":    bodymodel.StatusEnabled,
 	})
-	allowed := map[uint64]bool{}
+	ids := make([]uint64, 0, len(rows))
 	for _, row := range rows {
 		if row != nil && row.TeamID > 0 {
-			allowed[row.TeamID] = true
+			ids = append(ids, row.TeamID)
 		}
 	}
-	if len(allowed) == 0 {
+	if len(ids) == 0 {
 		return nil, false
 	}
-	return allowed, true
+	return ids, true
 }
 
 func DefaultCanvasID(ctx context.Context) uint64 {
@@ -142,4 +157,14 @@ func canvasConfigText(ctx context.Context) string {
 		return "{}"
 	}
 	return string(content)
+}
+
+func idSet(ids []uint64) map[uint64]bool {
+	result := make(map[uint64]bool, len(ids))
+	for _, id := range ids {
+		if id > 0 {
+			result[id] = true
+		}
+	}
+	return result
 }
