@@ -205,12 +205,10 @@ func edgeConditionPassed(condition string, fromNode teammodel.FlowNode, blackboa
 
 func nodeOutput(node teammodel.FlowNode, blackboard map[string]any) map[string]any {
 	config := jsonMap(node.Config)
-	key := firstText(config["output_key"], node.NodeKey)
-	if value, ok := blackboard[key]; ok {
-		return mapValue(value)
-	}
-	if value, ok := blackboard[node.NodeKey]; ok {
-		return mapValue(value)
+	for _, key := range nodeOutputKeys(node, config) {
+		if value, ok := blackboard[key]; ok {
+			return mapValue(value)
+		}
 	}
 	return map[string]any{}
 }
@@ -218,7 +216,7 @@ func nodeOutput(node teammodel.FlowNode, blackboard map[string]any) map[string]a
 func (s Service) executeNode(ctx context.Context, run teammodel.Run, flowRun teammodel.FlowRun, team teammodel.Team, roles []teammodel.Role, flow teammodel.Flow, node teammodel.FlowNode, incoming []teammodel.FlowNodeEdge, nodeByID map[uint64]teammodel.FlowNode) (string, error) {
 	blackboard := s.repo.ListBlackboard(ctx, flowRun.ID)
 	config := jsonMap(node.Config)
-	input := nodeInput(config, blackboard, incoming, nodeByID)
+	input := s.nodeInput(ctx, flowRun.ID, config, blackboard, incoming, nodeByID)
 	attachNodeInteractionFeedback(input, blackboard, node)
 	nodeRunID := s.repo.FindOrCreateNodeRun(ctx, run, flowRun, node, input)
 	nodeRun := s.repo.FindNodeRun(ctx, nodeRunID)
@@ -272,8 +270,9 @@ func (s Service) executeNode(ctx context.Context, run teammodel.Run, flowRun tea
 	}
 	s.writeNodeEvent(ctx, run, flowRun, flow, node, *nodeRun, event, fields)
 	if status == teammodel.RunStatusSuccess {
-		key := firstText(config["output_key"], node.NodeKey)
-		s.writeBlackboard(ctx, run, flowRun, key, output, "node", nodeRun.ID)
+		for _, key := range nodeOutputKeys(node, config) {
+			s.writeBlackboard(ctx, run, flowRun, key, output, "node", nodeRun.ID)
+		}
 		s.repo.InsertMessage(ctx, map[string]any{
 			"run_id":      run.ID,
 			"flow_run_id": flowRun.ID,
@@ -289,7 +288,7 @@ func (s Service) executeNode(ctx context.Context, run teammodel.Run, flowRun tea
 	return status, err
 }
 
-func nodeInput(config map[string]any, blackboard map[string]any, incoming []teammodel.FlowNodeEdge, nodeByID map[uint64]teammodel.FlowNode) map[string]any {
+func (s Service) nodeInput(ctx context.Context, flowRunID uint64, config map[string]any, blackboard map[string]any, incoming []teammodel.FlowNodeEdge, nodeByID map[uint64]teammodel.FlowNode) map[string]any {
 	keys := stringSlice(config["input_keys"])
 	result := map[string]any{}
 	if len(keys) == 0 {
@@ -304,8 +303,11 @@ func nodeInput(config map[string]any, blackboard map[string]any, incoming []team
 		}
 	}
 	for _, edge := range incoming {
-		output := nodeOutput(nodeByID[edge.FromNodeID], blackboard)
 		fromNode := nodeByID[edge.FromNodeID]
+		output := s.resolvedNodeOutput(ctx, flowRunID, fromNode, blackboard)
+		if fromNode.ID == 0 || len(output) == 0 {
+			continue
+		}
 		if fromNode.NodeKey != "" {
 			result[fromNode.NodeKey] = output
 		}
@@ -343,7 +345,7 @@ func (s Service) runNodeByType(ctx context.Context, run teammodel.Run, flowRun t
 	case teammodel.NodeTypeCondition:
 		return runConditionNode(config, input), teammodel.RunStatusSuccess, 0, nil
 	case teammodel.NodeTypeMerge:
-		return runMergeNode(node, config, input, blackboard, incoming, nodeByID), teammodel.RunStatusSuccess, 0, nil
+		return s.runMergeNode(ctx, flowRun.ID, node, config, input, blackboard, incoming, nodeByID), teammodel.RunStatusSuccess, 0, nil
 	case teammodel.NodeTypeHumanApproval:
 		return s.waitHumanNode(ctx, run, flowRun, team, flow, node, config, input)
 	case teammodel.NodeTypeSave:
@@ -649,8 +651,9 @@ type mergeNodeSource struct {
 	Value any
 }
 
-func runMergeNode(node teammodel.FlowNode, config map[string]any, input map[string]any, blackboard map[string]any, incoming []teammodel.FlowNodeEdge, nodeByID map[uint64]teammodel.FlowNode) map[string]any {
-	sources := collectMergeNodeSources(node, config, input, blackboard, incoming, nodeByID)
+func (s Service) runMergeNode(ctx context.Context, flowRunID uint64, node teammodel.FlowNode, config map[string]any, input map[string]any, blackboard map[string]any, incoming []teammodel.FlowNodeEdge, nodeByID map[uint64]teammodel.FlowNode) map[string]any {
+	sources, missingSources := s.collectMergeNodeSources(ctx, flowRunID, node, config, input, blackboard, incoming, nodeByID)
+	incomingSourceCount := len(incoming) - len(missingSources)
 	merged := map[string]any{}
 	sourcePayloads := make([]map[string]any, 0, len(sources))
 	for _, source := range sources {
@@ -672,25 +675,43 @@ func runMergeNode(node teammodel.FlowNode, config map[string]any, input map[stri
 		"text":    mergeNodeMarkdown(sources),
 		"sources": sourcePayloads,
 		"merged":  merged,
+		"meta": map[string]any{
+			"incoming_count":        len(incoming),
+			"incoming_source_count": incomingSourceCount,
+			"source_count":          len(sourcePayloads),
+			"missing_source_count":  len(missingSources),
+			"missing_sources":       missingSources,
+		},
 	}
 }
 
-func collectMergeNodeSources(node teammodel.FlowNode, config map[string]any, input map[string]any, blackboard map[string]any, incoming []teammodel.FlowNodeEdge, nodeByID map[uint64]teammodel.FlowNode) []mergeNodeSource {
+func (s Service) collectMergeNodeSources(ctx context.Context, flowRunID uint64, node teammodel.FlowNode, config map[string]any, input map[string]any, blackboard map[string]any, incoming []teammodel.FlowNodeEdge, nodeByID map[uint64]teammodel.FlowNode) ([]mergeNodeSource, []map[string]any) {
 	ownKey := firstText(config["output_key"], node.NodeKey)
 	incomingKeys := map[string]bool{}
 	incomingSources := make([]mergeNodeSource, 0, len(incoming))
+	missingSources := make([]map[string]any, 0)
 	for _, edge := range incoming {
 		fromNode := nodeByID[edge.FromNodeID]
 		if fromNode.ID == 0 {
+			missingSources = append(missingSources, map[string]any{
+				"node_id": edge.FromNodeID,
+				"reason":  "上游节点不存在",
+			})
 			continue
 		}
 		fromConfig := jsonMap(fromNode.Config)
-		key := firstText(fromConfig["output_key"], fromNode.NodeKey, fmt.Sprintf("node_%d", edge.FromNodeID))
-		incomingKeys[key] = true
-		incomingKeys[fromNode.NodeKey] = true
-		incomingKeys[fmt.Sprintf("node_%d", edge.FromNodeID)] = true
-		output := nodeOutput(fromNode, blackboard)
+		key := nodeMergeSourceKey(fromNode)
+		for _, outputKey := range nodeOutputKeys(fromNode, fromConfig) {
+			incomingKeys[outputKey] = true
+		}
+		output := s.resolvedNodeOutput(ctx, flowRunID, fromNode, blackboard)
 		if mergeNodeValueEmpty(output) {
+			missingSources = append(missingSources, map[string]any{
+				"node_id":   fromNode.ID,
+				"node_key":  fromNode.NodeKey,
+				"node_name": fromNode.Name,
+				"reason":    "上游节点没有输出",
+			})
 			continue
 		}
 		incomingSources = append(incomingSources, mergeNodeSource{
@@ -732,7 +753,45 @@ func collectMergeNodeSources(node teammodel.FlowNode, config map[string]any, inp
 	for _, source := range incomingSources {
 		addSource(source)
 	}
-	return result
+	return result, missingSources
+}
+
+func (s Service) resolvedNodeOutput(ctx context.Context, flowRunID uint64, node teammodel.FlowNode, blackboard map[string]any) map[string]any {
+	if node.ID == 0 {
+		return map[string]any{}
+	}
+	if nodeRun := s.repo.FindNodeRunByNode(ctx, flowRunID, node.ID); nodeRun != nil && nodeRun.Status == teammodel.RunStatusSuccess {
+		if output := mapValue(jsonValue(nodeRun.Output)); len(output) > 0 {
+			return output
+		}
+	}
+	return nodeOutput(node, blackboard)
+}
+
+func nodeOutputKeys(node teammodel.FlowNode, config map[string]any) []string {
+	keys := []string{}
+	appendKey := func(key string) {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return
+		}
+		for _, exists := range keys {
+			if exists == key {
+				return
+			}
+		}
+		keys = append(keys, key)
+	}
+	appendKey(node.NodeKey)
+	if node.ID > 0 {
+		appendKey(fmt.Sprintf("node_%d", node.ID))
+	}
+	appendKey(textValue(config["output_key"]))
+	return keys
+}
+
+func nodeMergeSourceKey(node teammodel.FlowNode) string {
+	return firstText(node.NodeKey, fmt.Sprintf("node_%d", node.ID))
 }
 
 func mergeNodeMarkdown(sources []mergeNodeSource) string {

@@ -260,6 +260,7 @@ const NODE_TYPES = [
   { id: "role", value: "团队角色" },
   { id: "power", value: "能力" },
   { id: "team", value: "团队工作流" },
+  { id: "context", value: "上下文" },
   { id: "condition", value: "条件" },
   { id: "merge", value: "合并" },
   { id: "human_approval", value: "人工确认" },
@@ -4847,6 +4848,10 @@ function debugNodeDisplayOutput(row: any, agentTrace: any) {
     );
   }
 
+  if (nodeType === "merge") {
+    return debugMergeNodeDisplayOutput(rowOutput);
+  }
+
   if (nodeType === "team") {
     return firstDebugOutputValue(
       isPlainDebugRecord(rowOutput)
@@ -4863,6 +4868,91 @@ function debugNodeDisplayOutput(row: any, agentTrace: any) {
     isPlainDebugRecord(rowOutput) ? rowOutput.result : undefined,
     rowOutput,
   );
+}
+
+function debugMergeNodeDisplayOutput(value: any) {
+  const record = debugRecord(value);
+  if (!Object.keys(record).length) {
+    return firstDebugOutputValue(value);
+  }
+
+  const sourceOutputs = arrayValue(record.sources)
+    .map(debugMergeSourceDisplayOutput)
+    .filter(hasDebugDisplayOutput);
+  if (sourceOutputs.length > 0) {
+    const metaText = debugMergeMetaText(record.meta);
+    return metaText ? [{ text: metaText }, ...sourceOutputs] : sourceOutputs;
+  }
+
+  const mergedOutputs = Object.entries(debugRecord(record.merged))
+    .map(([key, item]) => debugMergeSectionOutput(key, key, item))
+    .filter(hasDebugDisplayOutput);
+  if (mergedOutputs.length > 0) {
+    return mergedOutputs;
+  }
+
+  return firstDebugOutputValue(
+    record.text ? { text: record.text } : undefined,
+    record.output,
+    record.result,
+    record.content,
+    record.data,
+    value,
+  );
+}
+
+function debugMergeSourceDisplayOutput(source: any) {
+  const record = debugRecord(source);
+  if (!Object.keys(record).length) {
+    return firstDebugOutputValue(source);
+  }
+  return debugMergeSectionOutput(
+    firstDebugText(record.title, record.key, "上游节点"),
+    firstDebugText(record.key),
+    record.text || record.content,
+  );
+}
+
+function debugMergeSectionOutput(title: string, key: string, value: any) {
+  const output = firstDebugOutputValue(
+    value,
+    isPlainDebugRecord(value) ? value.output : undefined,
+    isPlainDebugRecord(value) ? value.result : undefined,
+    isPlainDebugRecord(value) ? value.content : undefined,
+    isPlainDebugRecord(value) && value.text ? { text: value.text } : undefined,
+  );
+  if (!hasDebugDisplayOutput(output)) {
+    return undefined;
+  }
+  const heading = firstDebugText(title, key, "上游节点");
+  if (typeof output === "string") {
+    return { title: heading, text: output };
+  }
+  if (isPlainDebugRecord(output)) {
+    return { ...output, title: heading };
+  }
+  return { title: heading, json: output };
+}
+
+function debugMergeMetaText(meta: any) {
+  const record = debugRecord(meta);
+  const incomingCount = Number(record.incoming_count || 0);
+  const incomingSourceCount = Number(
+    record.incoming_source_count || record.source_count || 0,
+  );
+  const sourceCount = Number(record.source_count || 0);
+  const missingCount = Number(record.missing_source_count || 0);
+  if (!incomingCount && !sourceCount && !missingCount) {
+    return "";
+  }
+  const lines = [`合并上游：${incomingSourceCount}/${incomingCount}`];
+  if (sourceCount > incomingSourceCount) {
+    lines.push(`展示条目：${sourceCount}`);
+  }
+  if (missingCount > 0) {
+    lines.push(`缺少输出：${missingCount}`);
+  }
+  return lines.join("，");
 }
 
 function debugWorkflowDisplayOutput(value: any) {
@@ -5372,6 +5462,7 @@ function debugNodeTypeLabel(type: any) {
     role: "团队角色",
     power: "能力节点",
     team: "团队工作流",
+    context: "上下文节点",
     condition: "条件节点",
     merge: "合并节点",
     human_approval: "人工确认",
