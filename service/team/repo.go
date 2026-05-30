@@ -297,13 +297,14 @@ func (Repo) ListAgents(ctx context.Context) []AgentOption {
 			CateID: row.CateID,
 			Name:   strings.TrimSpace(row.Name),
 			Key:    strings.TrimSpace(row.Key),
+			Sort:   row.Sort,
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {
-		if result[i].CateID == result[j].CateID {
+		if result[i].Sort == result[j].Sort {
 			return result[i].ID < result[j].ID
 		}
-		return result[i].CateID < result[j].CateID
+		return result[i].Sort < result[j].Sort
 	})
 	return result
 }
@@ -318,10 +319,14 @@ func (Repo) ListAgentCates(ctx context.Context) []AgentCateOption {
 		result = append(result, AgentCateOption{
 			ID:    row.ID,
 			Value: strings.TrimSpace(row.Name),
+			Sort:  row.Sort,
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {
-		return result[i].ID < result[j].ID
+		if result[i].Sort == result[j].Sort {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].Sort < result[j].Sort
 	})
 	return result
 }

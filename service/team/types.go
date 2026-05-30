@@ -107,6 +107,7 @@ type AgentOption struct {
 	CateID uint64 `json:"cate_id"`
 	Name   string `json:"name"`
 	Key    string `json:"key"`
+	Sort   int    `json:"sort"`
 }
 
 type RoleOption struct {
@@ -145,6 +146,7 @@ type PowerKindOption struct {
 type AgentCateOption struct {
 	ID    uint64 `json:"id"`
 	Value string `json:"value"`
+	Sort  int    `json:"sort"`
 }
 
 type RunRequest struct {
