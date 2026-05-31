@@ -1,22 +1,22 @@
-import { defineFrontPlugin, lazyNode } from '@/lib/plugin/types'
+import { defineFrontPlugin, lazyNode } from "@dever/front-plugin";
 
 export default defineFrontPlugin({
-  name: 'bot',
+  name: "bot",
   nodes: {
-    'show-agent': lazyNode(() =>
-      import('./nodes/show/agent').then((mod) => ({
+    "show-agent": lazyNode(() =>
+      import("./nodes/show/agent").then((mod) => ({
         default: mod.ShowAgent,
-      }))
+      })),
     ),
-    'show-team-workspace': lazyNode(() =>
-      import('./nodes/show/team-workspace').then((mod) => ({
+    "show-team-workspace": lazyNode(() =>
+      import("./nodes/show/team-workspace").then((mod) => ({
         default: mod.ShowTeamWorkspace,
-      }))
+      })),
     ),
-    'show-stream-request': lazyNode(() =>
-      import('./nodes/show/stream-request').then((mod) => ({
+    "show-stream-request": lazyNode(() =>
+      import("./nodes/show/stream-request").then((mod) => ({
         default: mod.ShowStreamRequest,
-      }))
+      })),
     ),
   },
-})
+});
