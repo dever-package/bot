@@ -25,7 +25,7 @@ var kindOptions = []map[string]any{
 	{"id": KindVideo, "value": "视频"},
 	{"id": KindAudio, "value": "音频"},
 	{"id": KindFile, "value": "文件"},
-	{"id": KindMixed, "value": "混合"},
+	{"id": KindMixed, "value": "富文本"},
 }
 
 var statusOptions = []map[string]any{
@@ -55,7 +55,7 @@ var flowRelation = orm.Relation{
 var assetCateRelation = orm.Relation{
 	Field:      "asset_cate_id",
 	Option:     "bot.team.NewAssetCateModel",
-	OptionKeys: []string{"name"},
+	OptionKeys: []string{"name", "kind", "cardinality"},
 }
 
 var versionRelation = orm.Relation{

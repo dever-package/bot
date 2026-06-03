@@ -34,6 +34,36 @@
         ]
       },
       {
+        "type": "form-select",
+        "value": "form.kind",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "产物类型不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[260px]"
+        }
+      },
+      {
+        "type": "form-select",
+        "value": "form.cardinality",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "数量规则不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[260px]"
+        }
+      },
+      {
         "type": "form-switch",
         "value": "form.status",
         "mode": "form",
@@ -49,6 +79,8 @@
       "id": 0,
       "team_id": 0,
       "name": "",
+      "kind": "text",
+      "cardinality": "single",
       "status": 1,
       "sort": 100
     }

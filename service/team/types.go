@@ -81,11 +81,13 @@ type TeamReleaseSnapshot struct {
 }
 
 type GraphAssetCate struct {
-	ID     uint64 `json:"id"`
-	TeamID uint64 `json:"team_id"`
-	Name   string `json:"name"`
-	Status int16  `json:"status"`
-	Sort   int    `json:"sort"`
+	ID          uint64 `json:"id"`
+	TeamID      uint64 `json:"team_id"`
+	Name        string `json:"name"`
+	Kind        string `json:"kind"`
+	Cardinality string `json:"cardinality"`
+	Status      int16  `json:"status"`
+	Sort        int    `json:"sort"`
 }
 
 type GraphRole struct {

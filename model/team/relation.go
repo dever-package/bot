@@ -17,7 +17,7 @@ var teamCateRelation = orm.Relation{
 var assetCateRelation = orm.Relation{
 	Field:      "asset_cate_id",
 	Option:     "bot.team.NewAssetCateModel",
-	OptionKeys: []string{"name"},
+	OptionKeys: []string{"name", "kind", "cardinality"},
 }
 
 var teamAssetCateRelation = orm.Relation{

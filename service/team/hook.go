@@ -76,6 +76,12 @@ func (TeamHook) ProviderBeforeSaveAssetCate(c *server.Context, params []any) any
 	if shouldNormalizeTeamField(record, "name", partial) || shouldNormalizeTeamField(record, "team_id", partial) {
 		validateAssetCateNameUnique(c.Context(), record, partial)
 	}
+	if shouldNormalizeTeamField(record, "kind", partial) {
+		record["kind"] = teammodel.NormalizeAssetCateKind(util.ToStringTrimmed(record["kind"]))
+	}
+	if shouldNormalizeTeamField(record, "cardinality", partial) {
+		record["cardinality"] = teammodel.NormalizeAssetCateCardinality(util.ToStringTrimmed(record["cardinality"]))
+	}
 	defaultTeamInt16Field(record, "status", defaultTeamStatus, partial)
 	defaultTeamIntField(record, "sort", defaultTeamSort, partial)
 	return record
@@ -185,6 +191,8 @@ func normalizeTeamAssetCateRows(ctx context.Context, teamID uint64, value any) [
 		seenNames[name] = struct{}{}
 
 		next["name"] = name
+		next["kind"] = teammodel.NormalizeAssetCateKind(util.ToStringTrimmed(next["kind"]))
+		next["cardinality"] = teammodel.NormalizeAssetCateCardinality(util.ToStringTrimmed(next["cardinality"]))
 		if teamID > 0 {
 			next["team_id"] = teamID
 			rowID := util.ToUint64(next["id"])

@@ -185,11 +185,13 @@ func graphRoleToModel(teamID uint64, payload GraphRole) teammodel.Role {
 
 func graphAssetCateToModel(teamID uint64, payload GraphAssetCate) teammodel.AssetCate {
 	return teammodel.AssetCate{
-		ID:     payload.ID,
-		TeamID: teamID,
-		Name:   payload.Name,
-		Status: payload.Status,
-		Sort:   payload.Sort,
+		ID:          payload.ID,
+		TeamID:      teamID,
+		Name:        payload.Name,
+		Kind:        teammodel.NormalizeAssetCateKind(payload.Kind),
+		Cardinality: teammodel.NormalizeAssetCateCardinality(payload.Cardinality),
+		Status:      payload.Status,
+		Sort:        payload.Sort,
 	}
 }
 

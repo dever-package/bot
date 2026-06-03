@@ -289,11 +289,13 @@ func assetCatePayloads(rows []teammodel.AssetCate) []GraphAssetCate {
 	result := make([]GraphAssetCate, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, GraphAssetCate{
-			ID:     row.ID,
-			TeamID: row.TeamID,
-			Name:   row.Name,
-			Status: row.Status,
-			Sort:   row.Sort,
+			ID:          row.ID,
+			TeamID:      row.TeamID,
+			Name:        row.Name,
+			Kind:        teammodel.NormalizeAssetCateKind(row.Kind),
+			Cardinality: teammodel.NormalizeAssetCateCardinality(row.Cardinality),
+			Status:      row.Status,
+			Sort:        row.Sort,
 		})
 	}
 	return result

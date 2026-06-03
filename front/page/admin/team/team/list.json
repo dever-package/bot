@@ -219,7 +219,7 @@
           "pageRoute": "/bot/team/team/update",
           "title": "新增团队",
           "description": "配置团队基础信息和团队提示词。",
-          "size": "lg",
+          "size": "xl",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
@@ -237,7 +237,7 @@
           "pageRoute": "/bot/team/team/update",
           "title": "编辑团队",
           "description": "更新团队基础信息和团队提示词。",
-          "size": "lg",
+          "size": "xl",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
