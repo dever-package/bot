@@ -7,6 +7,7 @@ import (
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
+	energonmodel "my/package/bot/model/energon"
 	teammodel "my/package/bot/model/team"
 	frontaction "my/package/front/service/action"
 )
@@ -42,6 +43,9 @@ func (TeamHook) ProviderBeforeSaveTeam(c *server.Context, params []any) any {
 	defaultTeamIntField(record, "sort", defaultTeamSort, partial)
 	if rawRows, exists := record["asset_cates"]; exists {
 		record["asset_cates"] = normalizeTeamAssetCateRows(c.Context(), util.ToUint64(record["id"]), rawRows)
+	}
+	if rawRows, exists := record["team_powers"]; exists {
+		record["team_powers"] = normalizeTeamPowerRows(c.Context(), util.ToUint64(record["id"]), rawRows)
 	}
 	return record
 }
@@ -81,6 +85,40 @@ func (TeamHook) ProviderBeforeSaveAssetCate(c *server.Context, params []any) any
 	}
 	if shouldNormalizeTeamField(record, "cardinality", partial) {
 		record["cardinality"] = teammodel.NormalizeAssetCateCardinality(util.ToStringTrimmed(record["cardinality"]))
+	}
+	defaultTeamInt16Field(record, "status", defaultTeamStatus, partial)
+	defaultTeamIntField(record, "sort", defaultTeamSort, partial)
+	return record
+}
+
+func (TeamHook) ProviderBeforeSaveTeamPower(c *server.Context, params []any) any {
+	record := cloneTeamRecord(params)
+	if len(record) == 0 {
+		return record
+	}
+	partial := isPartialTeamRecord(record)
+	trimTeamStringField(record, "config", partial)
+	hydrateExistingTeamPowerContext(c.Context(), record, partial)
+	if shouldNormalizeTeamField(record, "power_id", partial) {
+		record["power_id"] = teamChildRelationID(record, "power_id")
+	}
+	if !partial && util.ToUint64(record["team_id"]) == 0 {
+		panicTeamField("form.team_id", "团队不能为空。")
+	}
+	if !partial && util.ToUint64(record["power_id"]) == 0 {
+		panicTeamField("form.power_id", "能力不能为空。")
+	}
+	if shouldNormalizeTeamField(record, "team_id", partial) {
+		validateTeamPowerTeam(c.Context(), record)
+	}
+	if shouldNormalizeTeamField(record, "power_id", partial) {
+		validateTeamPowerPower(c.Context(), record)
+	}
+	if shouldNormalizeTeamField(record, "team_id", partial) || shouldNormalizeTeamField(record, "power_id", partial) {
+		validateTeamPowerUnique(c.Context(), record)
+	}
+	if shouldNormalizeTeamField(record, "config", partial) && record["config"] == "" {
+		record["config"] = "{}"
 	}
 	defaultTeamInt16Field(record, "status", defaultTeamStatus, partial)
 	defaultTeamIntField(record, "sort", defaultTeamSort, partial)
@@ -230,6 +268,74 @@ func existingTeamAssetCates(ctx context.Context, teamID uint64) (map[uint64]team
 	return byID, byName
 }
 
+func normalizeTeamPowerRows(ctx context.Context, teamID uint64, value any) []any {
+	rows := normalizeTeamChildRows(value)
+	if len(rows) == 0 {
+		return []any{}
+	}
+
+	existingByID, existingIDByPower := existingTeamPowers(ctx, teamID)
+	seenPowers := map[uint64]struct{}{}
+	result := make([]any, 0, len(rows))
+	for index, row := range rows {
+		next := util.CloneMap(row)
+		powerID := teamChildRelationID(next, "power_id")
+		if powerID == 0 {
+			panicTeamField("form.team_powers", "能力不能为空。")
+		}
+		if _, exists := seenPowers[powerID]; exists {
+			panicTeamField("form.team_powers", "同一个能力不能重复添加。")
+		}
+		seenPowers[powerID] = struct{}{}
+
+		next["power_id"] = powerID
+		if teamID > 0 {
+			next["team_id"] = teamID
+			rowID := util.ToUint64(next["id"])
+			if rowID > 0 {
+				if _, exists := existingByID[rowID]; !exists {
+					panicTeamField("form.team_powers", "团队能力不属于当前团队。")
+				}
+			} else if existingID := existingIDByPower[powerID]; existingID > 0 {
+				next["id"] = existingID
+			}
+		}
+
+		power := energonmodel.NewPowerModel().Find(ctx, map[string]any{"id": powerID})
+		if power == nil || power.Status != teammodel.StatusEnabled {
+			panicTeamField("form.team_powers", "所选能力不存在或已停用。")
+		}
+
+		if util.ToStringTrimmed(next["config"]) == "" {
+			next["config"] = "{}"
+		}
+		defaultTeamInt16Field(next, "status", defaultTeamStatus, false)
+		if util.ToIntDefault(next["sort"], 0) <= 0 {
+			next["sort"] = index + 1
+		}
+		result = append(result, next)
+	}
+	return result
+}
+
+func existingTeamPowers(ctx context.Context, teamID uint64) (map[uint64]teammodel.TeamPower, map[uint64]uint64) {
+	byID := map[uint64]teammodel.TeamPower{}
+	byPower := map[uint64]uint64{}
+	if teamID == 0 {
+		return byID, byPower
+	}
+	rows := teammodel.NewTeamPowerModel().Select(ctx, map[string]any{"team_id": teamID})
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		byID[row.ID] = *row
+		byPower[row.PowerID] = row.ID
+	}
+	return byID, byPower
+}
+
+
 func normalizeTeamChildRows(value any) []map[string]any {
 	if rows, ok := value.([]map[string]any); ok {
 		return rows
@@ -247,6 +353,124 @@ func normalizeTeamChildRows(value any) []map[string]any {
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+func hydrateExistingTeamPowerContext(ctx context.Context, record map[string]any, partial bool) {
+	if !partial {
+		return
+	}
+	rowID := util.ToUint64(record["id"])
+	if rowID == 0 {
+		return
+	}
+	if util.ToUint64(record["team_id"]) > 0 && teamChildRelationID(record, "power_id") > 0 {
+		return
+	}
+	current := teammodel.NewTeamPowerModel().Find(ctx, map[string]any{"id": rowID})
+	if current == nil {
+		return
+	}
+	if util.ToUint64(record["team_id"]) == 0 {
+		record["team_id"] = current.TeamID
+	}
+	if teamChildRelationID(record, "power_id") == 0 {
+		record["power_id"] = current.PowerID
+	}
+}
+
+func validateTeamPowerTeam(ctx context.Context, record map[string]any) {
+	teamID := util.ToUint64(record["team_id"])
+	if teamID == 0 {
+		return
+	}
+	team := teammodel.NewTeamModel().Find(ctx, map[string]any{"id": teamID})
+	if team == nil || team.Status != teammodel.StatusEnabled {
+		panicTeamField("form.team_id", "团队不存在或已停用。")
+	}
+}
+
+func validateTeamPowerPower(ctx context.Context, record map[string]any) {
+	powerID := util.ToUint64(record["power_id"])
+	if powerID == 0 {
+		return
+	}
+	power := energonmodel.NewPowerModel().Find(ctx, map[string]any{"id": powerID})
+	if power == nil || power.Status != teammodel.StatusEnabled {
+		panicTeamField("form.power_id", "能力不存在或未开启。")
+	}
+}
+
+func validateTeamPowerUnique(ctx context.Context, record map[string]any) {
+	teamID := util.ToUint64(record["team_id"])
+	powerID := util.ToUint64(record["power_id"])
+	if teamID == 0 || powerID == 0 {
+		return
+	}
+	existing := teammodel.NewTeamPowerModel().Find(ctx, map[string]any{
+		"team_id":  teamID,
+		"power_id": powerID,
+	})
+	if existing == nil || existing.ID == util.ToUint64(record["id"]) {
+		return
+	}
+	panicTeamField("form.power_id", "该团队已添加过这个能力。")
+}
+
+func teamChildRelationID(row map[string]any, field string) uint64 {
+	if id := util.ToUint64(row[field]); id > 0 {
+		return id
+	}
+	if id := lastTeamUint64FromSlice(row[field]); id > 0 {
+		return id
+	}
+
+	relationField := strings.TrimSuffix(field, "_id")
+	if relationField == field {
+		return 0
+	}
+	if relation, ok := row[relationField].(map[string]any); ok {
+		if id := util.ToUint64(relation["id"]); id > 0 {
+			return id
+		}
+		return lastTeamUint64FromSlice(relation["id"])
+	}
+	return 0
+}
+
+func lastTeamUint64FromSlice(value any) uint64 {
+	switch rows := value.(type) {
+	case []any:
+		for index := len(rows) - 1; index >= 0; index-- {
+			if id := util.ToUint64(rows[index]); id > 0 {
+				return id
+			}
+		}
+	case []string:
+		for index := len(rows) - 1; index >= 0; index-- {
+			if id := util.ToUint64(rows[index]); id > 0 {
+				return id
+			}
+		}
+	case []uint64:
+		for index := len(rows) - 1; index >= 0; index-- {
+			if rows[index] > 0 {
+				return rows[index]
+			}
+		}
+	case []int:
+		for index := len(rows) - 1; index >= 0; index-- {
+			if rows[index] > 0 {
+				return uint64(rows[index])
+			}
+		}
+	case []float64:
+		for index := len(rows) - 1; index >= 0; index-- {
+			if rows[index] > 0 {
+				return uint64(rows[index])
+			}
+		}
+	}
+	return 0
 }
 
 func hydrateExistingRoleContext(ctx context.Context, record map[string]any, partial bool) {
