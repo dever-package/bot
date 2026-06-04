@@ -83,6 +83,19 @@
         }
       },
       {
+        "type": "form-array",
+        "name": "团队能力",
+        "value": "form.team_powers",
+        "mode": "form",
+        "info": "配置团队拥有的专业能力，例如文本生成、图像生成、视频生成等，供工作流和团队角色调用。",
+        "meta": {
+          "pageRoute": "/bot/team/team_power/update",
+          "addText": "添加能力",
+          "drag": "sort",
+          "formLayout": "horizontal"
+        }
+      },
+      {
         "type": "form-textarea",
         "placeholder": "写这个团队的完整提示词：职责、目标、口吻、边界和工作方式都放在这里。",
         "value": "form.description",
@@ -100,6 +113,7 @@
       "cate_id": 1,
       "name": "",
       "asset_cates": [],
+      "team_powers": [],
       "description": ""
     }
   },
