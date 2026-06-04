@@ -27,6 +27,13 @@ var teamAssetCateRelation = orm.Relation{
 	Order:      "sort asc, id asc",
 }
 
+var teamPowerRelation = orm.Relation{
+	Field:      "team_powers",
+	Through:    "bot.team.NewTeamPowerModel",
+	OwnerField: "team_id",
+	Order:      "sort asc, id asc",
+}
+
 var flowRelation = orm.Relation{
 	Field:      "flow_id",
 	Option:     "bot.team.NewFlowModel",
@@ -57,17 +64,19 @@ var roleAgentRelation = orm.Relation{
 	OptionKeys: []string{"name"},
 }
 
+var powerRelation = orm.Relation{
+	Field:      "power_id",
+	Option:     "bot.energon.NewPowerModel",
+	OptionKeys: []string{"name", "key", "kind"},
+}
+
 var nodeRoleRelation = orm.Relation{
 	Field:      "role_id",
 	Option:     "bot.team.NewRoleModel",
 	OptionKeys: []string{"name", "role_key", "role_type"},
 }
 
-var nodePowerRelation = orm.Relation{
-	Field:      "power_id",
-	Option:     "bot.energon.NewPowerModel",
-	OptionKeys: []string{"name", "key", "kind"},
-}
+var nodePowerRelation = powerRelation
 
 var nodeSubTeamRelation = orm.Relation{
 	Field:      "sub_team_id",

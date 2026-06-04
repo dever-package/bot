@@ -76,6 +76,7 @@ func NewTeamModel() *orm.Model[Team] {
 		Relations: []orm.Relation{
 			teamCateRelation,
 			teamAssetCateRelation,
+			teamPowerRelation,
 		},
 	})
 }
