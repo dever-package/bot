@@ -123,6 +123,7 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
   const roles = workspace.roles ?? [];
   const agents = workspace.agents ?? [];
   const agentCates = workspace.agent_cates ?? [];
+  const assetCates = workspace.asset_cates ?? [];
   const teams = workspace.teams ?? [];
   const roleTypes = workspace.role_types?.length
     ? workspace.role_types
@@ -408,7 +409,9 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
       setDebugResult(status);
     } catch (error) {
       const message = error instanceof Error ? error.message : "调试失败";
-      setDebugResult({ error: message });
+      setDebugResult((current: any) =>
+        current ? { ...current, error: message } : { error: message },
+      );
       toast.error(message);
     } finally {
       setDebugRunning(false);
@@ -918,6 +921,7 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
         nodes={activeNodes}
         agents={agents}
         agentCates={agentCates}
+        assetCates={assetCates}
         currentTeamID={teamID}
         currentTeamName={String(workspace.team?.name || "当前团队")}
         roles={roles}

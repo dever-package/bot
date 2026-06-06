@@ -42,6 +42,38 @@ import {
   RUN_STATUS_WAITING,
 } from "./constants";
 
+const DEBUG_RUNNING_STATUSES = new Set([
+  "running",
+  "run",
+  "started",
+  "starting",
+  "processing",
+  "active",
+  "executing",
+  "execute",
+  "in_progress",
+  "in-progress",
+]);
+
+const DEBUG_SUCCESS_STATUSES = new Set([
+  "success",
+  "succeeded",
+  "done",
+  "completed",
+  "complete",
+]);
+
+const DEBUG_FAIL_STATUSES = new Set([
+  "fail",
+  "failed",
+  "error",
+  "canceled",
+  "cancelled",
+]);
+
+const DEBUG_WAITING_STATUSES = new Set(["waiting", "wait"]);
+const DEBUG_PENDING_STATUSES = new Set(["pending", "queued", "queue"]);
+
 export function buildDebugInput(
   prompt: string,
   references: AssistantReferenceFile[] = [],
@@ -260,7 +292,7 @@ export function mergeDebugRunFromEvent(
   assignDebugValue(run, "id", event.run_id);
   assignDebugValue(run, "team_id", event.team_id);
   assignDebugValue(run, "release_id", event.release_id);
-  assignDebugValue(run, "status", event.status || event.run_status);
+  assignDebugValue(run, "status", debugStatusFromEvent(event, event.status || event.run_status));
   assignDebugValue(run, "input", event.input);
   assignDebugValue(run, "output", event.output);
   assignDebugValue(run, "error", event.error);
@@ -277,7 +309,7 @@ export function debugFlowRunFromEvent(event: Record<string, any>) {
     flow_key: event.flow_key,
     flow_name: event.flow_name,
     name: event.flow_name,
-    status: event.status,
+    status: debugStatusFromEvent(event, event.status),
     input: event.input,
     output: event.output,
     error: event.error,
@@ -299,7 +331,7 @@ export function debugNodeRunFromEvent(event: Record<string, any>) {
     node_name: event.node_name,
     name: event.node_name,
     node_type: event.node_type,
-    status: event.status,
+    status: debugStatusFromEvent(event, event.status || event.node_status),
     input: event.input,
     output: event.output,
     agent_run_id: event.agent_run_id,
@@ -309,6 +341,35 @@ export function debugNodeRunFromEvent(event: Record<string, any>) {
     started_at: event.started_at,
     finished_at: event.finished_at,
   });
+}
+
+function debugStatusFromEvent(event: Record<string, any>, value: any) {
+  const normalized = normalizeDebugRunStatus(value);
+  if (normalized !== RUN_STATUS_PENDING || hasDebugStreamValue(value)) {
+    return normalized;
+  }
+  const eventName = String(event.event || event.type || "").trim().toLowerCase();
+  if (
+    eventName.includes("start") ||
+    eventName.includes("progress") ||
+    eventName.includes("running")
+  ) {
+    return RUN_STATUS_RUNNING;
+  }
+  if (
+    eventName.includes("finish") ||
+    eventName.includes("success") ||
+    eventName.includes("complete")
+  ) {
+    return RUN_STATUS_SUCCESS;
+  }
+  if (eventName.includes("fail") || eventName.includes("error") || eventName.includes("cancel")) {
+    return RUN_STATUS_FAIL;
+  }
+  if (eventName.includes("wait")) {
+    return RUN_STATUS_WAITING;
+  }
+  return normalized;
 }
 
 export function compactDebugRow(row: Record<string, any>) {
@@ -380,7 +441,7 @@ export function ensureDebugClientStartedAt(row: Record<string, any>) {
 }
 
 export function shouldTrackDebugClientStartedAt(row: Record<string, any>) {
-  const status = String(row?.status || "");
+  const status = normalizeDebugRunStatus(row?.status);
   return (
     status === RUN_STATUS_RUNNING ||
     status === RUN_STATUS_WAITING ||
@@ -690,7 +751,7 @@ export function buildGraphExecutionState(
     if (!key) {
       return;
     }
-    const status = String(row?.status || RUN_STATUS_PENDING);
+    const status = normalizeDebugRunStatus(row?.status || row?.state || row?.run_status);
     nodeRunsByKey[key] = { status, run: row };
     if (status === RUN_STATUS_SUCCESS) {
       successKeys.add(key);
@@ -826,7 +887,27 @@ export function debugSortDate(value: any) {
 }
 
 export function isDebugActiveStatus(status: any) {
-  return String(status || "") === RUN_STATUS_RUNNING;
+  return normalizeDebugRunStatus(status) === RUN_STATUS_RUNNING;
+}
+
+export function normalizeDebugRunStatus(status: any) {
+  const value = String(status || "").trim().toLowerCase();
+  if (DEBUG_RUNNING_STATUSES.has(value)) {
+    return RUN_STATUS_RUNNING;
+  }
+  if (DEBUG_SUCCESS_STATUSES.has(value)) {
+    return RUN_STATUS_SUCCESS;
+  }
+  if (DEBUG_FAIL_STATUSES.has(value)) {
+    return RUN_STATUS_FAIL;
+  }
+  if (DEBUG_WAITING_STATUSES.has(value)) {
+    return RUN_STATUS_WAITING;
+  }
+  if (DEBUG_PENDING_STATUSES.has(value)) {
+    return RUN_STATUS_PENDING;
+  }
+  return value || RUN_STATUS_PENDING;
 }
 
 export function shouldShowRuntimeTiming(nodeType: string) {
@@ -851,7 +932,7 @@ export function debugNodeTiming(
   context?: DebugNodeTimingContext,
 ): StreamTiming | undefined {
   const source = agentTrace || row;
-  const status = row?.status || source?.status;
+  const status = normalizeDebugRunStatus(row?.status || source?.status);
   const startedAt =
     row?.[DEBUG_CLIENT_STARTED_AT] ||
     row?.started_at ||
@@ -905,7 +986,7 @@ export function debugTeamWorkflowTimingLabel(
       if (Number(item?.flow_id || 0) !== flowID) {
         return false;
       }
-      const status = String(item?.status || "");
+      const status = normalizeDebugRunStatus(item?.status);
       return status === RUN_STATUS_RUNNING || status === RUN_STATUS_WAITING;
     })
     .slice(0, 2)

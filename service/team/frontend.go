@@ -68,6 +68,7 @@ func (s Service) TeamDetail(ctx context.Context, teamID uint64, releaseID uint64
 			"created_at": release.CreatedAt,
 		},
 		"asset_cates":        assetCatePayloads(graph.AssetCates),
+		"team_powers":        teamPowerPayloads(graph.TeamPowers),
 		"roles":              rolePayloads(graph.Roles),
 		"flows":              flowPayloads(graph.Flows),
 		"flow_edges":         flowEdgePayloads(graph.Flows, graph.FlowEdges),
@@ -102,11 +103,14 @@ func (s Service) CanvasConfig(ctx context.Context, releaseID uint64, flowID uint
 	if err != nil {
 		return nil, err
 	}
-	flow := graph.findFlow(flowID)
-	if flow.ID == 0 {
-		return nil, fmt.Errorf("发布版本中不存在当前工作流")
+	flow := teammodel.Flow{}
+	if flowID > 0 {
+		flow = graph.findFlow(flowID)
+		if flow.ID == 0 {
+			return nil, fmt.Errorf("发布版本中不存在当前工作流")
+		}
 	}
-	powers := s.repo.ListPowers(ctx)
+	powers := scopedPowerOptions(s.repo.ListPowers(ctx), graph.TeamPowers)
 	return map[string]any{
 		"release_id":       release.ID,
 		"flow":             singleFlowPayload(flow),
@@ -131,9 +135,14 @@ func (s Service) CanvasPowerForm(ctx context.Context, releaseID uint64, flowID u
 		if err != nil {
 			return nil, err
 		}
-		flow = graph.findFlow(flowID)
-		if flow.ID == 0 {
-			return nil, fmt.Errorf("发布版本中不存在当前工作流")
+		if !powerAllowedByScope(graph.TeamPowers, power.ID) {
+			return nil, fmt.Errorf("当前团队不允许使用该能力")
+		}
+		if flowID > 0 {
+			flow = graph.findFlow(flowID)
+			if flow.ID == 0 {
+				return nil, fmt.Errorf("发布版本中不存在当前工作流")
+			}
 		}
 	}
 	form, err := s.gateway.PowerParamConfig(ctx, power.Key, targetID)
@@ -159,6 +168,7 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	var releaseID uint64
 	var teamID uint64
 	flow := teammodel.Flow{}
+	teamPowers := []teammodel.TeamPower{}
 	if req.TeamID > 0 || req.ReleaseID > 0 {
 		release, graph, err := s.runtimeGraphByRelease(ctx, req.TeamID, req.ReleaseID)
 		if err != nil {
@@ -166,14 +176,20 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		}
 		releaseID = release.ID
 		teamID = graph.Team.ID
-		flow = graph.findFlow(req.FlowID)
-		if flow.ID == 0 {
-			return nil, fmt.Errorf("发布版本中不存在当前工作流")
+		teamPowers = graph.TeamPowers
+		if req.FlowID > 0 {
+			flow = graph.findFlow(req.FlowID)
+			if flow.ID == 0 {
+				return nil, fmt.Errorf("发布版本中不存在当前工作流")
+			}
 		}
 	}
 	power, ok := s.repo.FindPowerOption(ctx, req.PowerID, req.PowerKey)
 	if !ok {
 		return nil, fmt.Errorf("能力不存在")
+	}
+	if !powerAllowedByScope(teamPowers, power.ID) {
+		return nil, fmt.Errorf("当前团队不允许使用该能力")
 	}
 
 	requestID := newRequestID()
@@ -485,6 +501,9 @@ func resolveSourceTargetID(explicit uint64, input map[string]any) uint64 {
 }
 
 func singleFlowPayload(flow teammodel.Flow) GraphFlow {
+	if flow.ID == 0 {
+		return GraphFlow{}
+	}
 	rows := flowPayloads([]teammodel.Flow{flow})
 	if len(rows) == 0 {
 		return GraphFlow{}

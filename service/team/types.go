@@ -73,6 +73,7 @@ type GraphTeam struct {
 type TeamReleaseSnapshot struct {
 	Team            GraphTeam                      `json:"team"`
 	AssetCates      []GraphAssetCate               `json:"asset_cates"`
+	TeamPowers      []GraphTeamPower               `json:"team_powers"`
 	Roles           []GraphRole                    `json:"roles"`
 	Flows           []GraphFlow                    `json:"flows"`
 	FlowEdges       []GraphFlowEdge                `json:"flow_edges"`
@@ -88,6 +89,15 @@ type GraphAssetCate struct {
 	Cardinality string `json:"cardinality"`
 	Status      int16  `json:"status"`
 	Sort        int    `json:"sort"`
+}
+
+type GraphTeamPower struct {
+	ID      uint64         `json:"id"`
+	TeamID  uint64         `json:"team_id"`
+	PowerID uint64         `json:"power_id"`
+	Config  map[string]any `json:"config"`
+	Status  int16          `json:"status"`
+	Sort    int            `json:"sort"`
 }
 
 type GraphRole struct {

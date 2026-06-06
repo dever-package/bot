@@ -88,6 +88,7 @@ import {
 import {
   debugNodeTiming,
   graphExecutionCardStyle,
+  normalizeDebugRunStatus,
   graphExecutionEdgeKey,
   shouldShowRuntimeTiming,
 } from "./debug-state";
@@ -963,7 +964,7 @@ function TeamGraphNodeCard({ data, selected }: NodeProps<TeamGraphNode>) {
           nodeRuns: data.executionState?.nodeRuns || [],
         })
       : undefined;
-  const executionStatus = executionNode?.status || "";
+  const executionStatus = normalizeDebugRunStatus(executionNode?.status);
   const executionCardStyle = graphExecutionCardStyle(executionStatus);
   const pendingApproval =
     data.kind === "node"

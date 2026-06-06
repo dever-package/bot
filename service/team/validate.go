@@ -129,6 +129,22 @@ func validateFlowNodeGraph(nodes []teammodel.FlowNode, edges []teammodel.FlowNod
 	return issues
 }
 
+func validatePowerNodeScope(nodes []teammodel.FlowNode, teamPowers []teammodel.TeamPower) []string {
+	if len(teamPowers) == 0 {
+		return nil
+	}
+	issues := []string{}
+	for _, node := range nodes {
+		if node.Type != teammodel.NodeTypePower {
+			continue
+		}
+		if !powerAllowedByScope(teamPowers, node.PowerID) {
+			issues = append(issues, fmt.Sprintf("能力节点 %s 不在团队能力范围内", node.Name))
+		}
+	}
+	return issues
+}
+
 func validationResult(issues []string) map[string]any {
 	return map[string]any{
 		"valid":  len(issues) == 0,

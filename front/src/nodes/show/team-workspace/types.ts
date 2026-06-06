@@ -33,6 +33,7 @@ export type TeamNode = {
   agent_id?: number;
   power_id?: number;
   sub_team_id?: number;
+  asset_cate_id?: number;
   config?: Record<string, any>;
   position?: Record<string, any>;
   status?: number;
@@ -98,8 +99,19 @@ export type AgentCateOption = {
   sort?: number;
 };
 
+export type AssetCateOption = {
+  id: number;
+  team_id?: number;
+  name: string;
+  kind?: string;
+  cardinality?: string;
+  status?: number;
+  sort?: number;
+};
+
 export type WorkspaceData = {
   team?: Record<string, any>;
+  asset_cates?: AssetCateOption[];
   flows?: FlowItem[];
   flow_edges?: FlowEdge[];
   nodes_by_flow?: Record<string, TeamNode[]>;

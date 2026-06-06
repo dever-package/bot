@@ -170,6 +170,27 @@ func (Repo) ListAssetCates(ctx context.Context, teamID uint64, enabledOnly bool)
 	return result
 }
 
+func (Repo) ListTeamPowers(ctx context.Context, teamID uint64, enabledOnly bool) []teammodel.TeamPower {
+	filter := map[string]any{"team_id": teamID}
+	if enabledOnly {
+		filter["status"] = teammodel.StatusEnabled
+	}
+	rows := teammodel.NewTeamPowerModel().Select(ctx, filter)
+	result := make([]teammodel.TeamPower, 0, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			result = append(result, *row)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Sort == result[j].Sort {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].Sort < result[j].Sort
+	})
+	return result
+}
+
 func (Repo) FindRole(ctx context.Context, teamID uint64, roleID uint64, roleKey string) (*teammodel.Role, bool) {
 	if teamID == 0 {
 		return nil, false

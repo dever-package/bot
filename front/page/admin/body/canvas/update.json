@@ -52,45 +52,6 @@
         "meta": {
           "formLayout": "horizontal"
         }
-      },
-      {
-        "type": "form-array",
-        "name": "能力",
-        "value": "form.powers",
-        "mode": "form",
-        "info": "限制这个画布中可以创建和调用的能力。未添加时表示不限制能力。",
-        "meta": {
-          "formLayout": "horizontal",
-          "pageRoute": "/bot/body/canvas_power/update",
-          "addText": "添加能力",
-          "drag": "sort"
-        }
-      },
-      {
-        "type": "form-array",
-        "name": "智能体",
-        "value": "form.agents",
-        "mode": "form",
-        "info": "限制这个画布中可以调用的智能体。未添加时表示不限制智能体。",
-        "meta": {
-          "formLayout": "horizontal",
-          "pageRoute": "/bot/body/canvas_agent/update",
-          "addText": "添加智能体",
-          "drag": "sort"
-        }
-      },
-      {
-        "type": "form-array",
-        "name": "团队",
-        "value": "form.teams",
-        "mode": "form",
-        "info": "限制这个画布中可以引用的团队。画布团队必须选择已发布过且开启的团队；团队处于编辑草稿时仍使用当前发布版本。未添加时表示不限制团队。",
-        "meta": {
-          "formLayout": "horizontal",
-          "pageRoute": "/bot/body/canvas_team/update",
-          "addText": "添加团队",
-          "drag": "sort"
-        }
       }
     ]
   },
@@ -98,9 +59,6 @@
     "form": {
       "name": "",
       "config": "{}",
-      "powers": [],
-      "agents": [],
-      "teams": [],
       "status": 1
     }
   },

@@ -11,6 +11,7 @@ import (
 type runtimeGraph struct {
 	Team              teammodel.Team
 	AssetCates        []teammodel.AssetCate
+	TeamPowers        []teammodel.TeamPower
 	Roles             []teammodel.Role
 	Flows             []teammodel.Flow
 	FlowEdges         []teammodel.FlowEdge
@@ -76,6 +77,7 @@ func (s Service) currentRuntimeGraph(ctx context.Context, team teammodel.Team) r
 	graph := runtimeGraph{
 		Team:              team,
 		AssetCates:        s.repo.ListAssetCates(ctx, team.ID, true),
+		TeamPowers:        s.repo.ListTeamPowers(ctx, team.ID, true),
 		Roles:             s.repo.ListRoles(ctx, team.ID, true),
 		Flows:             flows,
 		FlowEdges:         s.repo.ListFlowEdges(ctx, team.ID, true),
@@ -97,6 +99,7 @@ func runtimeGraphFromRelease(release teammodel.TeamRelease) (runtimeGraph, error
 	graph := runtimeGraph{
 		Team:              graphTeamToModel(snapshot.Team),
 		AssetCates:        make([]teammodel.AssetCate, 0, len(snapshot.AssetCates)),
+		TeamPowers:        make([]teammodel.TeamPower, 0, len(snapshot.TeamPowers)),
 		Roles:             make([]teammodel.Role, 0, len(snapshot.Roles)),
 		Flows:             make([]teammodel.Flow, 0, len(snapshot.Flows)),
 		FlowEdges:         make([]teammodel.FlowEdge, 0, len(snapshot.FlowEdges)),
@@ -105,6 +108,9 @@ func runtimeGraphFromRelease(release teammodel.TeamRelease) (runtimeGraph, error
 	}
 	for _, payload := range snapshot.AssetCates {
 		graph.AssetCates = append(graph.AssetCates, graphAssetCateToModel(graph.Team.ID, payload))
+	}
+	for _, payload := range snapshot.TeamPowers {
+		graph.TeamPowers = append(graph.TeamPowers, graphTeamPowerToModel(graph.Team.ID, payload))
 	}
 	for _, payload := range snapshot.Roles {
 		graph.Roles = append(graph.Roles, graphRoleToModel(graph.Team.ID, payload))
@@ -192,6 +198,17 @@ func graphAssetCateToModel(teamID uint64, payload GraphAssetCate) teammodel.Asse
 		Cardinality: teammodel.NormalizeAssetCateCardinality(payload.Cardinality),
 		Status:      payload.Status,
 		Sort:        payload.Sort,
+	}
+}
+
+func graphTeamPowerToModel(teamID uint64, payload GraphTeamPower) teammodel.TeamPower {
+	return teammodel.TeamPower{
+		ID:      payload.ID,
+		TeamID:  teamID,
+		PowerID: payload.PowerID,
+		Config:  jsonText(payload.Config),
+		Status:  payload.Status,
+		Sort:    payload.Sort,
 	}
 }
 

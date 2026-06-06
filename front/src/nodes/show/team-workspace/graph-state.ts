@@ -168,6 +168,7 @@ export function pickEdgeConditions(
 export function normalizeWorkspace(data: any): WorkspaceData {
   return {
     team: normalizeTeamData(data?.team),
+    asset_cates: Array.isArray(data?.asset_cates) ? data.asset_cates : [],
     flows: Array.isArray(data?.flows) ? data.flows.map(normalizeFlowItem) : [],
     flow_edges: Array.isArray(data?.flow_edges) ? data.flow_edges : [],
     nodes_by_flow: data?.nodes_by_flow ?? {},
@@ -315,6 +316,10 @@ export function normalizeNodesForSave(nodes: TeamNode[]) {
       node.type === "team"
         ? Number(node.sub_team_id || node.config?.sub_team_id || 0)
         : 0,
+    asset_cate_id:
+      node.type === "context" || node.type === "save"
+        ? Number(node.asset_cate_id || node.config?.asset_cate_id || 0)
+        : 0,
     config: normalizeNodeConfigForSave(node),
   }));
 }
@@ -338,6 +343,7 @@ export function normalizeNodeConfigForSave(node: TeamNode) {
       "sub_flow_id",
       "sub_flow_key",
       "release_id",
+      "asset_cate_id",
       "operator",
       "source_key",
       "input_key",
@@ -356,6 +362,7 @@ export function normalizeNodeConfigForSave(node: TeamNode) {
       "sub_flow_id",
       "sub_flow_key",
       "release_id",
+      "asset_cate_id",
       "operator",
       "source_key",
       "input_key",
@@ -376,6 +383,7 @@ export function normalizeNodeConfigForSave(node: TeamNode) {
       "sub_flow_id",
       "sub_flow_key",
       "release_id",
+      "asset_cate_id",
       "operator",
       "source_key",
       "input_key",
@@ -395,6 +403,7 @@ export function normalizeNodeConfigForSave(node: TeamNode) {
       "power_id",
       "power_key",
       "power_kind",
+      "asset_cate_id",
       "operator",
       "source_key",
       "input_key",
@@ -419,6 +428,7 @@ export function normalizeNodeConfigForSave(node: TeamNode) {
         "sub_flow_id",
         "sub_flow_key",
         "release_id",
+        "asset_cate_id",
         "body_key",
         "content_key",
       ]),
@@ -426,6 +436,29 @@ export function normalizeNodeConfigForSave(node: TeamNode) {
     };
   }
   if (node.type === "save") {
+    return omitConfigKeys(config, [
+      "goal",
+      "agent_cate_id",
+      "role_id",
+      "role_key",
+      "role_team_id",
+      "role_type",
+      "power_id",
+      "power_key",
+      "power_kind",
+      "sub_team_id",
+      "sub_flow_id",
+      "sub_flow_key",
+      "release_id",
+      "operator",
+      "source_key",
+      "input_key",
+      "value",
+      "body_key",
+      "content_key",
+    ]);
+  }
+  if (node.type === "context") {
     return omitConfigKeys(config, [
       "goal",
       "agent_cate_id",
@@ -462,6 +495,7 @@ export function normalizeNodeConfigForSave(node: TeamNode) {
     "sub_flow_id",
     "sub_flow_key",
     "release_id",
+    "asset_cate_id",
     "operator",
     "source_key",
     "input_key",
@@ -535,6 +569,7 @@ export function createNodeItem(
     agent_id: 0,
     power_id: 0,
     sub_team_id: 0,
+    asset_cate_id: 0,
     config: {},
     position: position ?? defaultGraphPosition(nodes.length),
     status: 1,

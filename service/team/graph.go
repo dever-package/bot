@@ -27,10 +27,12 @@ func (s Service) Workspace(ctx context.Context, teamID uint64) (map[string]any, 
 	}
 	roles := s.repo.ListRoles(ctx, teamID, true)
 	assetCates := s.repo.ListAssetCates(ctx, teamID, true)
-	powers := s.repo.ListPowers(ctx)
+	teamPowers := s.repo.ListTeamPowers(ctx, teamID, true)
+	powers := scopedPowerOptions(s.repo.ListPowers(ctx), teamPowers)
 	return map[string]any{
 		"team":               teamWorkspacePayload(team),
 		"asset_cates":        assetCatePayloads(assetCates),
+		"team_powers":        teamPowerPayloads(teamPowers),
 		"roles":              rolePayloads(roles),
 		"flows":              flowPayloads(flows),
 		"flow_edges":         flowEdgePayloads(flows, flowEdges),
@@ -205,6 +207,7 @@ func (s Service) ensureTeamEditable(ctx context.Context, teamID uint64) (teammod
 
 func (s Service) buildTeamReleaseSnapshot(ctx context.Context, team teammodel.Team) (TeamReleaseSnapshot, error) {
 	assetCates := s.repo.ListAssetCates(ctx, team.ID, true)
+	teamPowers := s.repo.ListTeamPowers(ctx, team.ID, true)
 	roles := s.repo.ListRoles(ctx, team.ID, true)
 	if issues := validateTeamRoles(roles); len(issues) > 0 {
 		return TeamReleaseSnapshot{}, fmt.Errorf("发布前请先修正团队角色: %s", strings.Join(issues, "；"))
@@ -222,12 +225,16 @@ func (s Service) buildTeamReleaseSnapshot(ctx context.Context, team teammodel.Te
 		if issues := validateFlowNodeGraph(nodes, edges); len(issues) > 0 {
 			return TeamReleaseSnapshot{}, fmt.Errorf("发布前请先修正工作流「%s」的节点图: %s", flow.Name, strings.Join(issues, "；"))
 		}
+		if issues := validatePowerNodeScope(nodes, teamPowers); len(issues) > 0 {
+			return TeamReleaseSnapshot{}, fmt.Errorf("发布前请先修正工作流「%s」的能力节点: %s", flow.Name, strings.Join(issues, "；"))
+		}
 		nodesByFlow[flow.Key] = flowNodePayloads(nodes)
 		nodeEdgesByFlow[flow.Key] = flowNodeEdgePayloads(nodes, edges)
 	}
 	return TeamReleaseSnapshot{
 		Team:            teamReleasePayload(team),
 		AssetCates:      assetCatePayloads(assetCates),
+		TeamPowers:      teamPowerPayloads(teamPowers),
 		Roles:           rolePayloads(roles),
 		Flows:           flowPayloads(flows),
 		FlowEdges:       flowEdgePayloads(flows, flowEdges),
@@ -299,6 +306,53 @@ func assetCatePayloads(rows []teammodel.AssetCate) []GraphAssetCate {
 		})
 	}
 	return result
+}
+
+func teamPowerPayloads(rows []teammodel.TeamPower) []GraphTeamPower {
+	result := make([]GraphTeamPower, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, GraphTeamPower{
+			ID:      row.ID,
+			TeamID:  row.TeamID,
+			PowerID: row.PowerID,
+			Config:  jsonMap(row.Config),
+			Status:  row.Status,
+			Sort:    row.Sort,
+		})
+	}
+	return result
+}
+
+func scopedPowerOptions(powers []PowerOption, teamPowers []teammodel.TeamPower) []PowerOption {
+	if len(teamPowers) == 0 {
+		return powers
+	}
+	byID := make(map[uint64]PowerOption, len(powers))
+	for _, power := range powers {
+		byID[power.ID] = power
+	}
+	result := make([]PowerOption, 0, len(teamPowers))
+	for _, teamPower := range teamPowers {
+		if power, exists := byID[teamPower.PowerID]; exists {
+			result = append(result, power)
+		}
+	}
+	return result
+}
+
+func powerAllowedByScope(teamPowers []teammodel.TeamPower, powerID uint64) bool {
+	if len(teamPowers) == 0 {
+		return true
+	}
+	if powerID == 0 {
+		return false
+	}
+	for _, teamPower := range teamPowers {
+		if teamPower.PowerID == powerID {
+			return true
+		}
+	}
+	return false
 }
 
 func flowPayloads(flows []teammodel.Flow) []GraphFlow {

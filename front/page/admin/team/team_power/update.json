@@ -1,19 +1,19 @@
 {
   "page": {
-    "name": "画布团队",
-    "parent": "bot/body/canvas_team/list",
+    "name": "团队能力",
+    "parent": "bot/team/team_power/list",
     "type": 2,
     "auth": [
       {
-        "key": "bot/body/canvas_team/create",
-        "name": "画布团队新增",
+        "key": "bot/team/team_power/create",
+        "name": "团队能力新增",
         "query": {
           "id": "empty"
         }
       },
       {
-        "key": "bot/body/canvas_team/update",
-        "name": "画布团队编辑",
+        "key": "bot/team/team_power/update",
+        "name": "团队能力编辑",
         "query": {
           "id": "required"
         }
@@ -39,28 +39,29 @@
     "dialog-shell": [
       {
         "type": "form-cascader",
-        "name": "团队",
-        "value": "form.team_id",
+        "name": "能力",
+        "value": "form.power_id",
         "mode": "form",
-        "placeholder": "请选择团队",
-        "info": "画布团队必须选择已发布过且开启的团队，团队处于编辑草稿时仍可使用当前发布版本。",
+        "placeholder": "请选择能力",
         "validate": [
           {
             "type": "required",
-            "message": "团队不能为空。"
+            "message": "能力不能为空。"
           }
         ],
         "meta": {
           "api": "/front/route/option",
-          "use": "bot.team.NewTeamCateModel",
-          "childUse": "bot.team.NewTeamModel",
+          "use": "bot.energon.NewPowerCateModel",
+          "childUse": "bot.energon.NewPowerModel",
           "childParentField": "cate_id",
           "valueMode": "leaf",
           "placeholder": [
-            "选择团队分类",
-            "选择团队"
+            "选择能力分类",
+            "选择能力"
           ],
-          "childExtraFields": "key,cate_id,status,publish_status,current_release_id"
+          "childExtraFields": "key,kind,cate_id,status",
+          "formLayout": "horizontal",
+          "searchPlaceholder": "输入能力名称搜索..."
         }
       },
       {
@@ -70,25 +71,31 @@
         "mode": "form",
         "meta": {
           "trueValue": 1,
-          "falseValue": 2
+          "falseValue": 2,
+          "formLayout": "horizontal"
         }
       }
     ]
   },
   "data": {
     "form": {
-      "canvas_id": 0,
+      "id": 0,
       "team_id": 0,
-      "release_id": 0,
+      "power_id": 0,
       "config": "{}",
-      "status": 1
+      "status": 1,
+      "sort": 100
     }
   },
   "state": {},
   "action": {
     "submit": {
       "type": "save",
-      "params": "form"
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.team.TeamHook.BeforeSaveTeamPower"
+      }
     }
   }
 }

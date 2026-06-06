@@ -1,8 +1,8 @@
 {
   "page": {
-    "name": "画布能力",
+    "name": "团队能力",
     "icon": "sparkles",
-    "parent": "bot/body/canvas/list",
+    "parent": "bot/team/team/list",
     "type": 2
   },
   "layout": {
@@ -44,7 +44,18 @@
     "header-actions": [
       {
         "type": "show-button",
-        "name": "新增画布能力",
+        "name": "返回团队列表",
+        "className": "shrink-0",
+        "meta": {
+          "icon": "arrow-left",
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/team/team/list"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "新增能力",
         "meta": {
           "variant": "default",
           "size": "sm"
@@ -68,12 +79,12 @@
           "totalPath": "data.table.total",
           "remote": true,
           "externalPagination": true,
-          "savePath": "bot/body/canvas_power/update",
+          "savePath": "bot/team/team_power/update",
           "rowKey": "id",
           "columns": [
             {
-              "value": "canvas.name",
-              "name": "画布",
+              "value": "team.name",
+              "name": "团队",
               "type": "show-base"
             },
             {
@@ -95,6 +106,12 @@
               }
             },
             {
+              "value": "sort",
+              "type": "show-base",
+              "editor": "form-number",
+              "trigger": "doubleClick"
+            },
+            {
               "value": "created_at",
               "type": "show-date"
             },
@@ -113,8 +130,13 @@
                       "click": [
                         {
                           "type": "data",
-                          "key": "actionTarget.id",
+                          "key": "actionTarget.editTeamPowerId",
                           "value": "$row.id"
+                        },
+                        {
+                          "type": "data",
+                          "key": "actionTarget.editTeamId",
+                          "value": "$row.team_id"
                         },
                         {
                           "type": "modal",
@@ -139,55 +161,63 @@
         "type": "feedback-modal",
         "meta": {
           "stateKey": "dialog.create",
-          "pageRoute": "/bot/body/canvas_power/update",
-          "title": "新增画布能力",
-          "description": "选择当前画布可用的能力。未配置时自由画布默认不限制能力。",
+          "pageRoute": "/bot/team/team_power/update",
+          "title": "新增团队能力",
+          "description": "选择当前团队可在流程和作品画布中使用的能力。未配置任何能力时表示不限制能力。",
           "size": "lg",
-          "pageDataPatches": {
-            "form.canvas_id": "data.search.canvas_id"
-          },
           "footer": {
             "confirm": true,
             "confirmText": "保存"
-          }
+          },
+          "pageRouteQuery": {
+            "team_id": "data.search.team_id"
+          },
+          "pageDataPatches": {
+            "form.team_id": "data.search.team_id"
+          },
+          "bodyClassName": "px-6 py-2"
         }
       },
       {
         "type": "feedback-modal",
         "meta": {
           "stateKey": "dialog.edit",
-          "pageRoute": "/bot/body/canvas_power/update",
-          "pageRouteQuery": {
-            "id": "data.actionTarget.id"
-          },
-          "title": "编辑画布能力",
+          "pageRoute": "/bot/team/team_power/update",
+          "title": "编辑团队能力",
           "size": "lg",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
-          }
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.editTeamPowerId",
+            "team_id": "data.actionTarget.editTeamId"
+          },
+          "pageDataPatches": {
+            "form.team_id": "data.actionTarget.editTeamId"
+          },
+          "bodyClassName": "px-6 py-2"
         }
       }
     ]
   },
   "data": {
     "page": {
-      "title": "画布能力",
-      "description": "限制自由画布里允许创建和调用的能力节点。"
+      "title": "团队能力",
+      "description": "维护团队允许使用的能力。为空时表示该团队不限制能力。"
     },
     "search": {
-      "canvas_id": ""
+      "team_id": ""
     },
     "table": {
       "page": 1,
       "pageSize": 10,
       "total": 0,
-      "filterFields": [
-        "canvas_id"
-      ]
+      "filterFields": ["team_id"]
     },
     "actionTarget": {
-      "id": ""
+      "editTeamPowerId": "",
+      "editTeamId": ""
     }
   },
   "state": {

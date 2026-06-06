@@ -17,6 +17,7 @@ import { SearchableOptionPicker } from "@/components/searchable-option-picker";
 import type {
   AgentCateOption,
   AgentOption,
+  AssetCateOption,
   FlowItem,
   PowerKindOption,
   PowerOption,
@@ -55,6 +56,7 @@ export function EditorDialog({
   roleTypes,
   agents,
   agentCates,
+  assetCates,
   teamBindingOptions,
   powers,
   powerKinds,
@@ -74,6 +76,7 @@ export function EditorDialog({
   roleTypes: RoleTypeOption[];
   agents: AgentOption[];
   agentCates: AgentCateOption[];
+  assetCates: AssetCateOption[];
   teamBindingOptions: TeamOption[];
   powers: PowerOption[];
   powerKinds: PowerKindOption[];
@@ -146,7 +149,10 @@ export function EditorDialog({
             options={nodeTypes}
             value={node.type || "agent"}
             onValueChange={(value) =>
-              onChangeNode(node.node_key, normalizeNodeTypePatch(node, value))
+              onChangeNode(
+                node.node_key,
+                normalizeNodeTypePatch(node, value, assetCates),
+              )
             }
             disabled={readonly}
           />
@@ -194,6 +200,14 @@ export function EditorDialog({
         {node.type === "condition" ? (
           <ConditionFields
             node={node}
+            readonly={readonly}
+            onChangeNode={onChangeNode}
+          />
+        ) : null}
+        {node.type === "context" || node.type === "save" ? (
+          <AssetCateBindingField
+            node={node}
+            assetCates={assetCates}
             readonly={readonly}
             onChangeNode={onChangeNode}
           />
@@ -336,6 +350,7 @@ function RoleBindingFields({
   const roleValue = filteredRoles.some((role) => role.id === selectedRoleID)
     ? String(selectedRoleID)
     : undefined;
+  const selectedRoleName = selectedRole?.name || "";
 
   return (
     <Field label="绑定角色">
@@ -359,17 +374,25 @@ function RoleBindingFields({
             const nextTeam = findTeamOption(roleTeams, nextTeamID);
             const nextRoleType =
               nextTeam?.roles?.[0]?.role_type || selectedRoleType;
-            onChangeNode(node.node_key, {
-              role_id: 0,
-              role_key: "",
-              config: {
-                ...(node.config ?? {}),
-                role_team_id: nextTeamID,
-                role_id: 0,
-                role_key: "",
-                role_type: nextRoleType,
-              },
-            });
+            onChangeNode(
+              node.node_key,
+              withAutoNodeName(
+                node,
+                {
+                  role_id: 0,
+                  role_key: "",
+                  config: {
+                    ...(node.config ?? {}),
+                    role_team_id: nextTeamID,
+                    role_id: 0,
+                    role_key: "",
+                    role_type: nextRoleType,
+                  },
+                },
+                "团队角色",
+                [selectedRoleName],
+              ),
+            );
           }}
         />
         <SearchableOptionPicker
@@ -383,17 +406,25 @@ function RoleBindingFields({
             const value = Array.isArray(nextValue)
               ? (nextValue[0] ?? "")
               : nextValue;
-            onChangeNode(node.node_key, {
-              role_id: 0,
-              role_key: "",
-              config: {
-                ...(node.config ?? {}),
-                role_team_id: selectedTeamID,
-                role_id: 0,
-                role_key: "",
-                role_type: value,
-              },
-            });
+            onChangeNode(
+              node.node_key,
+              withAutoNodeName(
+                node,
+                {
+                  role_id: 0,
+                  role_key: "",
+                  config: {
+                    ...(node.config ?? {}),
+                    role_team_id: selectedTeamID,
+                    role_id: 0,
+                    role_key: "",
+                    role_type: value,
+                  },
+                },
+                "团队角色",
+                [selectedRoleName],
+              ),
+            );
           }}
         />
         <SearchableOptionPicker
@@ -407,17 +438,25 @@ function RoleBindingFields({
           searchPlaceholder="输入角色筛选..."
           emptyText="未找到团队角色"
           onClear={() =>
-            onChangeNode(node.node_key, {
-              role_id: 0,
-              role_key: "",
-              config: {
-                ...(node.config ?? {}),
-                role_team_id: selectedTeamID,
-                role_id: 0,
-                role_key: "",
-                role_type: selectedRoleType,
-              },
-            })
+            onChangeNode(
+              node.node_key,
+              withAutoNodeName(
+                node,
+                {
+                  role_id: 0,
+                  role_key: "",
+                  config: {
+                    ...(node.config ?? {}),
+                    role_team_id: selectedTeamID,
+                    role_id: 0,
+                    role_key: "",
+                    role_type: selectedRoleType,
+                  },
+                },
+                "团队角色",
+                [selectedRoleName],
+              ),
+            )
           }
           onChange={(nextValue) => {
             const value = Array.isArray(nextValue)
@@ -426,17 +465,25 @@ function RoleBindingFields({
             const nextRole = filteredRoles.find(
               (role) => String(role.id) === String(value),
             );
-            onChangeNode(node.node_key, {
-              role_id: nextRole?.id || 0,
-              role_key: nextRole?.role_key || "",
-              config: {
-                ...(node.config ?? {}),
-                role_team_id: selectedTeamID,
-                role_id: nextRole?.id || 0,
-                role_key: nextRole?.role_key || "",
-                role_type: nextRole?.role_type || selectedRoleType,
-              },
-            });
+            onChangeNode(
+              node.node_key,
+              withAutoNodeName(
+                node,
+                {
+                  role_id: nextRole?.id || 0,
+                  role_key: nextRole?.role_key || "",
+                  config: {
+                    ...(node.config ?? {}),
+                    role_team_id: selectedTeamID,
+                    role_id: nextRole?.id || 0,
+                    role_key: nextRole?.role_key || "",
+                    role_type: nextRole?.role_type || selectedRoleType,
+                  },
+                },
+                nextRole?.name || "团队角色",
+                [selectedRoleName],
+              ),
+            );
           }}
         />
       </div>
@@ -457,23 +504,35 @@ function AgentBindingFields({
   readonly: boolean;
   onChangeNode: (key: string, patch: Partial<TeamNode>) => void;
 }) {
+  const selectedAgentID = Number(node.agent_id || node.config?.agent_id || 0);
+  const selectedAgent = agents.find((agent) => agent.id === selectedAgentID);
+
   return (
     <Field label="绑定智能体">
       <AgentSelector
-        agentID={node.agent_id}
+        agentID={selectedAgentID}
         cateID={Number(node.config?.agent_cate_id || 0)}
         agents={agents}
         agentCates={agentCates}
         disabled={readonly}
-        onChange={({ agentID, cateID }) =>
-          onChangeNode(node.node_key, {
-            agent_id: agentID,
-            config: {
-              ...(node.config ?? {}),
-              agent_cate_id: cateID,
-            },
-          })
-        }
+        onChange={({ agentID, cateID }) => {
+          const nextAgent = agents.find((agent) => agent.id === agentID);
+          onChangeNode(
+            node.node_key,
+            withAutoNodeName(
+              node,
+              {
+                agent_id: agentID,
+                config: {
+                  ...(node.config ?? {}),
+                  agent_cate_id: cateID,
+                },
+              },
+              nextAgent?.name || "智能体",
+              [selectedAgent?.name],
+            ),
+          );
+        }}
       />
     </Field>
   );
@@ -521,15 +580,23 @@ function PowerBindingFields({
               ? (nextValue[0] ?? "")
               : nextValue;
             const nextPower = powers.find((power) => power.kind === value);
-            onChangeNode(node.node_key, {
-              power_id: nextPower?.id || 0,
-              config: {
-                ...(node.config ?? {}),
-                power_kind: value,
-                power_id: nextPower?.id || 0,
-                power_key: nextPower?.key || "",
-              },
-            });
+            onChangeNode(
+              node.node_key,
+              withAutoNodeName(
+                node,
+                {
+                  power_id: nextPower?.id || 0,
+                  config: {
+                    ...(node.config ?? {}),
+                    power_kind: value,
+                    power_id: nextPower?.id || 0,
+                    power_key: nextPower?.key || "",
+                  },
+                },
+                nextPower?.name || "能力",
+                [selectedPower?.name],
+              ),
+            );
           }}
         />
         <SearchableOptionPicker
@@ -543,14 +610,22 @@ function PowerBindingFields({
           searchPlaceholder="输入能力筛选..."
           emptyText="未找到匹配能力"
           onClear={() =>
-            onChangeNode(node.node_key, {
-              power_id: 0,
-              config: {
-                ...(node.config ?? {}),
-                power_id: 0,
-                power_key: "",
-              },
-            })
+            onChangeNode(
+              node.node_key,
+              withAutoNodeName(
+                node,
+                {
+                  power_id: 0,
+                  config: {
+                    ...(node.config ?? {}),
+                    power_id: 0,
+                    power_key: "",
+                  },
+                },
+                "能力",
+                [selectedPower?.name],
+              ),
+            )
           }
           onChange={(nextValue) => {
             const value = Array.isArray(nextValue)
@@ -559,15 +634,23 @@ function PowerBindingFields({
             const nextPower = powers.find(
               (power) => String(power.id) === String(value),
             );
-            onChangeNode(node.node_key, {
-              power_id: nextPower?.id || 0,
-              config: {
-                ...(node.config ?? {}),
-                power_kind: nextPower?.kind || selectedKind,
-                power_id: nextPower?.id || 0,
-                power_key: nextPower?.key || "",
-              },
-            });
+            onChangeNode(
+              node.node_key,
+              withAutoNodeName(
+                node,
+                {
+                  power_id: nextPower?.id || 0,
+                  config: {
+                    ...(node.config ?? {}),
+                    power_kind: nextPower?.kind || selectedKind,
+                    power_id: nextPower?.id || 0,
+                    power_key: nextPower?.key || "",
+                  },
+                },
+                nextPower?.name || "能力",
+                [selectedPower?.name],
+              ),
+            );
           }}
         />
       </div>
@@ -613,6 +696,10 @@ function TeamBindingFields({
   const selectedFlowID = Number(
     node.config?.sub_flow_id || node.config?.flow_id || 0,
   );
+  const selectedFlow = teamFlows.find(
+    (flow) => Number(flow.id || 0) === selectedFlowID,
+  );
+  const selectedTeamNodeName = teamNodeName(selectedTeam, selectedFlow);
 
   return (
     <Field label="工作流">
@@ -634,16 +721,24 @@ function TeamBindingFields({
               : nextValue;
             const nextTeam = findTeamOption(workflowTeams, Number(value));
             const nextTeamID = nextTeam?.id || currentTeamID || 0;
-            onChangeNode(node.node_key, {
-              sub_team_id: nextTeamID,
-              config: {
-                ...(node.config ?? {}),
-                sub_team_id: nextTeamID,
-                release_id: nextTeam?.release_id || 0,
-                sub_flow_id: 0,
-                sub_flow_key: "",
-              },
-            });
+            onChangeNode(
+              node.node_key,
+              withAutoNodeName(
+                node,
+                {
+                  sub_team_id: nextTeamID,
+                  config: {
+                    ...(node.config ?? {}),
+                    sub_team_id: nextTeamID,
+                    release_id: nextTeam?.release_id || 0,
+                    sub_flow_id: 0,
+                    sub_flow_key: "",
+                  },
+                },
+                teamNodeName(nextTeam),
+                [selectedTeamNodeName],
+              ),
+            );
           }}
         />
         <SearchableOptionPicker
@@ -657,15 +752,23 @@ function TeamBindingFields({
           searchPlaceholder="输入工作流筛选..."
           emptyText="未找到工作流"
           onClear={() =>
-            onChangeNode(node.node_key, {
-              config: {
-                ...(node.config ?? {}),
-                sub_team_id: selectedTeamID,
-                release_id: selectedTeam?.release_id || 0,
-                sub_flow_id: 0,
-                sub_flow_key: "",
-              },
-            })
+            onChangeNode(
+              node.node_key,
+              withAutoNodeName(
+                node,
+                {
+                  config: {
+                    ...(node.config ?? {}),
+                    sub_team_id: selectedTeamID,
+                    release_id: selectedTeam?.release_id || 0,
+                    sub_flow_id: 0,
+                    sub_flow_key: "",
+                  },
+                },
+                teamNodeName(selectedTeam),
+                [selectedTeamNodeName],
+              ),
+            )
           }
           onChange={(nextValue) => {
             const value = Array.isArray(nextValue)
@@ -674,16 +777,24 @@ function TeamBindingFields({
             const nextFlow = teamFlows.find(
               (flow) => String(flow.id || "") === String(value),
             );
-            onChangeNode(node.node_key, {
-              sub_team_id: selectedTeamID,
-              config: {
-                ...(node.config ?? {}),
-                sub_team_id: selectedTeamID,
-                release_id: selectedTeam?.release_id || 0,
-                sub_flow_id: nextFlow?.id || 0,
-                sub_flow_key: nextFlow?.key || "",
-              },
-            });
+            onChangeNode(
+              node.node_key,
+              withAutoNodeName(
+                node,
+                {
+                  sub_team_id: selectedTeamID,
+                  config: {
+                    ...(node.config ?? {}),
+                    sub_team_id: selectedTeamID,
+                    release_id: selectedTeam?.release_id || 0,
+                    sub_flow_id: nextFlow?.id || 0,
+                    sub_flow_key: nextFlow?.key || "",
+                  },
+                },
+                teamNodeName(selectedTeam, nextFlow),
+                [selectedTeamNodeName],
+              ),
+            );
           }}
         />
       </div>
@@ -735,6 +846,78 @@ function ConditionFields({
         </Field>
       ) : null}
     </>
+  );
+}
+
+function AssetCateBindingField({
+  node,
+  assetCates,
+  readonly,
+  onChangeNode,
+}: {
+  node: TeamNode;
+  assetCates: AssetCateOption[];
+  readonly: boolean;
+  onChangeNode: (key: string, patch: Partial<TeamNode>) => void;
+}) {
+  const selectedCateID = Number(
+    node.asset_cate_id || node.config?.asset_cate_id || 0,
+  );
+  const selectedCate = findAssetCate(assetCates, selectedCateID);
+
+  return (
+    <Field label="资产类型">
+      <SearchableOptionPicker
+        value={selectedCateID ? String(selectedCateID) : undefined}
+        options={assetCates.map((cate) => ({
+          id: cate.id,
+          value: assetCateLabel(cate),
+        }))}
+        disabled={readonly}
+        placeholder="选择资产类型"
+        searchPlaceholder="输入资产类型筛选..."
+        emptyText="未找到资产类型"
+        onClear={() =>
+          onChangeNode(
+            node.node_key,
+            withAutoNodeName(
+              node,
+              {
+                asset_cate_id: 0,
+                config: {
+                  ...(node.config ?? {}),
+                  asset_cate_id: 0,
+                },
+              },
+              assetNodeName(node.type),
+              [assetNodeName(node.type, selectedCate)],
+            ),
+          )
+        }
+        onChange={(nextValue) => {
+          const value = Array.isArray(nextValue)
+            ? (nextValue[0] ?? "")
+            : nextValue;
+          const assetCateID = Number(value || 0);
+          const nextCate = findAssetCate(assetCates, assetCateID);
+          onChangeNode(
+            node.node_key,
+            withAutoNodeName(
+              node,
+              {
+                asset_cate_id: assetCateID,
+                config: {
+                  ...(node.config ?? {}),
+                  asset_cate_id: assetCateID,
+                },
+              },
+              assetNodeName(node.type, nextCate),
+              [assetNodeName(node.type, selectedCate)],
+            ),
+          );
+        }}
+      />
+    </Field>
   );
 }
 
@@ -855,6 +1038,7 @@ export function deleteDialogDescription(selection: Selection) {
 function normalizeNodeTypePatch(
   node: TeamNode,
   type: string,
+  assetCates: AssetCateOption[] = [],
 ): Partial<TeamNode> {
   const baseConfig = omitConfigKeys(node.config, [
     "goal",
@@ -870,6 +1054,7 @@ function normalizeNodeTypePatch(
     "sub_flow_id",
     "sub_flow_key",
     "release_id",
+    "asset_cate_id",
     "operator",
     "source_key",
     "input_key",
@@ -877,13 +1062,27 @@ function normalizeNodeTypePatch(
     "body_key",
     "content_key",
   ]);
+  const basePatch = {
+    role_id: 0,
+    role_key: "",
+    agent_id: 0,
+    power_id: 0,
+    sub_team_id: 0,
+  };
+  const assetCateID = Number(
+    node.asset_cate_id || node.config?.asset_cate_id || 0,
+  );
+  const assetCate = findAssetCate(assetCates, assetCateID);
+  const applyAutoName = (
+    patch: Partial<TeamNode>,
+    name = defaultNodeName(type, assetCate),
+  ) => withAutoNodeName(node, patch, name);
+
   if (type === "agent") {
-    return {
+    return applyAutoName({
       type,
-      role_id: 0,
-      role_key: "",
-      power_id: 0,
-      sub_team_id: 0,
+      ...basePatch,
+      asset_cate_id: 0,
       config: omitConfigKeys(node.config, [
         "role_id",
         "role_key",
@@ -896,6 +1095,7 @@ function normalizeNodeTypePatch(
         "sub_flow_id",
         "sub_flow_key",
         "release_id",
+        "asset_cate_id",
         "operator",
         "source_key",
         "input_key",
@@ -903,14 +1103,13 @@ function normalizeNodeTypePatch(
         "body_key",
         "content_key",
       ]),
-    };
+    });
   }
   if (type === "role") {
-    return {
+    return applyAutoName({
       type,
-      agent_id: 0,
-      power_id: 0,
-      sub_team_id: 0,
+      ...basePatch,
+      asset_cate_id: 0,
       config: omitConfigKeys(node.config, [
         "agent_cate_id",
         "power_id",
@@ -920,6 +1119,7 @@ function normalizeNodeTypePatch(
         "sub_flow_id",
         "sub_flow_key",
         "release_id",
+        "asset_cate_id",
         "operator",
         "source_key",
         "input_key",
@@ -927,15 +1127,13 @@ function normalizeNodeTypePatch(
         "body_key",
         "content_key",
       ]),
-    };
+    });
   }
   if (type === "power") {
-    return {
+    return applyAutoName({
       type,
-      role_id: 0,
-      role_key: "",
-      agent_id: 0,
-      sub_team_id: 0,
+      ...basePatch,
+      asset_cate_id: 0,
       config: omitConfigKeys(node.config, [
         "goal",
         "agent_cate_id",
@@ -947,6 +1145,7 @@ function normalizeNodeTypePatch(
         "sub_flow_id",
         "sub_flow_key",
         "release_id",
+        "asset_cate_id",
         "operator",
         "source_key",
         "input_key",
@@ -954,15 +1153,13 @@ function normalizeNodeTypePatch(
         "body_key",
         "content_key",
       ]),
-    };
+    });
   }
   if (type === "team") {
-    return {
+    return applyAutoName({
       type,
-      role_id: 0,
-      role_key: "",
-      agent_id: 0,
-      power_id: 0,
+      ...basePatch,
+      asset_cate_id: 0,
       config: omitConfigKeys(node.config, [
         "goal",
         "agent_cate_id",
@@ -973,6 +1170,7 @@ function normalizeNodeTypePatch(
         "power_id",
         "power_key",
         "power_kind",
+        "asset_cate_id",
         "operator",
         "source_key",
         "input_key",
@@ -980,16 +1178,13 @@ function normalizeNodeTypePatch(
         "body_key",
         "content_key",
       ]),
-    };
+    });
   }
   if (type === "condition") {
-    return {
+    return applyAutoName({
       type,
-      role_id: 0,
-      role_key: "",
-      agent_id: 0,
-      power_id: 0,
-      sub_team_id: 0,
+      ...basePatch,
+      asset_cate_id: 0,
       config: {
         ...omitConfigKeys(node.config, [
           "goal",
@@ -1005,37 +1200,151 @@ function normalizeNodeTypePatch(
           "sub_flow_id",
           "sub_flow_key",
           "release_id",
+          "asset_cate_id",
           "body_key",
           "content_key",
         ]),
         operator: normalizeConditionOperator(node.config?.operator),
       },
-    };
+    });
   }
   if (type === "save") {
-    return {
+    return applyAutoName({
       type,
-      role_id: 0,
-      role_key: "",
-      agent_id: 0,
-      power_id: 0,
-      sub_team_id: 0,
+      ...basePatch,
+      asset_cate_id: assetCateID,
       config: baseConfig,
-    };
+    });
   }
-  return {
+  if (type === "context") {
+    return applyAutoName({
+      type,
+      ...basePatch,
+      asset_cate_id: assetCateID,
+      config: baseConfig,
+    });
+  }
+  return applyAutoName({
     type,
-    role_id: 0,
-    role_key: "",
-    agent_id: 0,
-    power_id: 0,
-    sub_team_id: 0,
+    ...basePatch,
+    asset_cate_id: 0,
     config: baseConfig,
-  };
+  });
+}
+
+const AUTO_NODE_NAMES = new Set([
+  "智能体",
+  "团队角色",
+  "能力",
+  "团队工作流",
+  "读取上下文",
+  "保存结果",
+  "条件判断",
+  "合并结果",
+  "人工确认",
+]);
+
+function withAutoNodeName(
+  node: TeamNode,
+  patch: Partial<TeamNode>,
+  name?: string,
+  previousNames: Array<string | undefined> = [],
+): Partial<TeamNode> {
+  const nextName = String(name || "").trim();
+  if (!nextName) {
+    return patch;
+  }
+  if (!canReplaceNodeName(node.name, previousNames)) {
+    return patch;
+  }
+  return { ...patch, name: nextName };
+}
+
+function canReplaceNodeName(
+  name: string,
+  previousNames: Array<string | undefined> = [],
+) {
+  const currentName = String(name || "").trim();
+  if (isDefaultNodeName(currentName) || AUTO_NODE_NAMES.has(currentName)) {
+    return true;
+  }
+  if (currentName.startsWith("读取：") || currentName.startsWith("保存：")) {
+    return true;
+  }
+  return previousNames.some(
+    (previousName) =>
+      String(previousName || "").trim() !== "" &&
+      String(previousName || "").trim() === currentName,
+  );
+}
+
+function isDefaultNodeName(name: string) {
+  const value = String(name || "").trim();
+  if (!value || value === "节点") {
+    return true;
+  }
+  if (!value.startsWith("节点")) {
+    return false;
+  }
+  const suffix = value.slice("节点".length);
+  return suffix !== "" && /^\d+$/.test(suffix);
+}
+
+function defaultNodeName(type: string, assetCate?: AssetCateOption) {
+  if (type === "context" || type === "save") {
+    return assetNodeName(type, assetCate);
+  }
+  if (type === "agent") {
+    return "智能体";
+  }
+  if (type === "role") {
+    return "团队角色";
+  }
+  if (type === "power") {
+    return "能力";
+  }
+  if (type === "team") {
+    return "团队工作流";
+  }
+  if (type === "condition") {
+    return "条件判断";
+  }
+  if (type === "merge") {
+    return "合并结果";
+  }
+  if (type === "human_approval") {
+    return "人工确认";
+  }
+  return String(type || "").trim();
+}
+
+function assetNodeName(type: string, assetCate?: AssetCateOption) {
+  const name = String(assetCate?.name || "").trim();
+  if (type === "context") {
+    return name ? `读取：${name}` : "读取上下文";
+  }
+  return name ? `保存：${name}` : "保存结果";
+}
+
+function findAssetCate(assetCates: AssetCateOption[], assetCateID: number) {
+  return assetCates.find((cate) => Number(cate.id) === Number(assetCateID));
+}
+
+function teamNodeName(team?: TeamOption, flow?: FlowItem) {
+  const teamName = String(team?.name || "").trim();
+  const flowName = String(flow?.name || flow?.key || "").trim();
+  if (teamName && flowName) {
+    return `${teamName} / ${flowName}`;
+  }
+  return teamName || "团队工作流";
 }
 
 function agentCateLabel(cate: AgentCateOption) {
   return String(cate.value || cate.name || cate.id);
+}
+
+function assetCateLabel(cate: AssetCateOption) {
+  return String(cate.name || cate.id);
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

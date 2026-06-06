@@ -19,29 +19,6 @@ type CanvasIndex struct {
 	Status struct{} `index:"status,sort,id"`
 }
 
-var (
-	canvasPowerRelation = orm.Relation{
-		Field:      "powers",
-		Through:    "bot.body.NewCanvasPowerModel",
-		OwnerField: "canvas_id",
-		Order:      "sort asc, id asc",
-	}
-
-	canvasAgentRelation = orm.Relation{
-		Field:      "agents",
-		Through:    "bot.body.NewCanvasAgentModel",
-		OwnerField: "canvas_id",
-		Order:      "sort asc, id asc",
-	}
-
-	canvasTeamRelation = orm.Relation{
-		Field:      "teams",
-		Through:    "bot.body.NewCanvasTeamModel",
-		OwnerField: "canvas_id",
-		Order:      "sort asc, id asc",
-	}
-)
-
 func NewCanvasModel() *orm.Model[Canvas] {
 	return orm.LoadModel[Canvas]("画布", "bot_body_canvas", orm.ModelConfig{
 		Index:    CanvasIndex{},
@@ -49,11 +26,6 @@ func NewCanvasModel() *orm.Model[Canvas] {
 		Database: "default",
 		Options: map[string]any{
 			"status": statusOptions,
-		},
-		Relations: []orm.Relation{
-			canvasPowerRelation,
-			canvasAgentRelation,
-			canvasTeamRelation,
 		},
 	})
 }
