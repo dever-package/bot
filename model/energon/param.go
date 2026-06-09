@@ -28,6 +28,22 @@ type ParamIndex struct {
 }
 
 var (
+	paramSeed = []map[string]any{
+		{
+			"name":           "提示词",
+			"key":            "text",
+			"type":           "textarea",
+			"usage":          1,
+			"value_type":     "string",
+			"cate_id":        1,
+			"upload_rule_id": 0,
+			"max_files":      0,
+			"default_value":  "提示词的默认值",
+			"status":         1,
+			"sort":           100,
+		},
+	}
+
 	paramTypeOptions = []map[string]any{
 		{"id": "input", "value": "单行输入"},
 		{"id": "textarea", "value": "多行输入"},
@@ -73,6 +89,7 @@ var (
 func NewParamModel() *orm.Model[Param] {
 	return orm.LoadModel[Param]("参数", "bot_energon_param", orm.ModelConfig{
 		Index:    ParamIndex{},
+		Seeds:    paramSeed,
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{

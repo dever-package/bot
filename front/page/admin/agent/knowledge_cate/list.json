@@ -1,0 +1,118 @@
+{
+  "page": {
+    "name": "知识库分类",
+    "parent": "bot/agent/knowledge_base/list",
+    "type": 2,
+    "sort": 1
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "category-shell": {
+            "type": "container"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "category-shell": [
+      {
+        "type": "show-category-list",
+        "id": "knowledge-cate-list",
+        "value": "parent.data.search.cate_id",
+        "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadKnowledgeCates",
+        "meta": {
+          "title": "知识库分类",
+          "remote": true,
+          "defaultFirst": true,
+          "createButton": {
+            "name": "新增分类",
+            "icon": "plus",
+            "variant": "outline",
+            "size": "sm",
+            "action": {
+              "click": {
+                "type": "modal",
+                "key": "dialog.create",
+                "value": true
+              }
+            }
+          },
+          "buttons": [
+            {
+              "icon": "square-pen",
+              "variant": "ghost",
+              "size": "sm",
+              "description": "编辑当前分类",
+              "action": {
+                "click": [
+                  {
+                    "type": "data",
+                    "key": "actionTarget.id",
+                    "value": "$row.id"
+                  },
+                  {
+                    "type": "modal",
+                    "key": "dialog.edit",
+                    "value": true
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "name": "分类编辑",
+        "meta": {
+          "stateKey": "dialog.edit",
+          "pageRoute": "/bot/agent/knowledge_cate/update",
+          "size": "md",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.id"
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "name": "新增分类",
+        "meta": {
+          "stateKey": "dialog.create",
+          "pageRoute": "/bot/agent/knowledge_cate/update",
+          "size": "md",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "actionTarget": {
+      "id": ""
+    }
+  },
+  "state": {
+    "dialog": {
+      "edit": false,
+      "create": false
+    }
+  },
+  "action": {}
+}

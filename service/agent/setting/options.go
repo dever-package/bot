@@ -26,6 +26,20 @@ func (OptionService) ProviderLoadTextPowers(c *server.Context, _ []any) any {
 	return rows
 }
 
+func (OptionService) ProviderLoadEmbeddingPowers(c *server.Context, _ []any) any {
+	rows := energonmodel.NewPowerModel().SelectMap(c.Context(), map[string]any{
+		"kind":   "embeddings",
+		"status": 1,
+	}, map[string]any{
+		"field": "main.id, main.name, main.key, main.kind",
+		"order": "main.id asc",
+	})
+	if len(rows) == 0 {
+		return []map[string]any{}
+	}
+	return rows
+}
+
 func (OptionService) ProviderLoadAgentSettings(c *server.Context, params []any) any {
 	agentID := optionParentID(params)
 	if agentID == 0 {
@@ -77,16 +91,16 @@ func (OptionService) ProviderLoadAgentCates(c *server.Context, _ []any) any {
 	return loadCateOptions(agentmodel.NewAgentCateModel().SelectMap(c.Context(), map[string]any{}, agentCateSelectOptions()))
 }
 
+func (OptionService) ProviderLoadKnowledgeCates(c *server.Context, _ []any) any {
+	return loadCateOptions(agentmodel.NewKnowledgeCateModel().SelectMap(c.Context(), map[string]any{}, agentCateSelectOptions()))
+}
+
 func (OptionService) ProviderLoadSettingCates(c *server.Context, _ []any) any {
 	return loadCateOptions(agentmodel.NewSettingCateModel().SelectMap(c.Context(), map[string]any{}, cateSelectOptions()))
 }
 
 func (OptionService) ProviderLoadSkillCates(c *server.Context, _ []any) any {
 	return loadCateOptions(agentmodel.NewSkillCateModel().SelectMap(c.Context(), map[string]any{}, cateSelectOptions()))
-}
-
-func (OptionService) ProviderLoadAgentKnowledgeTypes(_ *server.Context, _ []any) any {
-	return agentmodel.AgentKnowledgeTypeOptions()
 }
 
 func cateSelectOptions() map[string]any {

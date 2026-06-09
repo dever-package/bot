@@ -7,6 +7,10 @@ import (
 )
 
 func promptTextFromRichText(raw string) string {
+	return TextFromRichText(raw)
+}
+
+func TextFromRichText(raw string) string {
 	text := strings.TrimSpace(raw)
 	if text == "" || !strings.HasPrefix(text, "{") {
 		return text

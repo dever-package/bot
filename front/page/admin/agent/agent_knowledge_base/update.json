@@ -1,0 +1,120 @@
+{
+  "page": {
+    "name": "智能体知识库编辑",
+    "parent": "bot/agent/agent_knowledge_base/list",
+    "type": 2,
+    "sort": 10,
+    "auth": [
+      {
+        "key": "bot/agent/agent_knowledge_base/create",
+        "name": "智能体知识库新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/agent/agent_knowledge_base/update",
+        "name": "智能体知识库编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-select",
+        "name": "知识库",
+        "value": "form.knowledge_base_id",
+        "mode": "form",
+        "option": "/front/route/option?type=model&use=bot.agent.NewKnowledgeBaseModel&filterField=status&filterValue=1&order=sort asc,id asc",
+        "validate": [
+          {
+            "type": "required",
+            "message": "知识库不能为空。"
+          },
+          {
+            "type": "model",
+            "except": "$form.id",
+            "message": "该智能体已绑定这个知识库。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[360px]"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "name": "使用提示词",
+        "placeholder": "说明智能体什么时候使用这个知识库、如何引用资料、未命中时如何处理。",
+        "value": "form.prompt",
+        "mode": "form",
+        "info": "命中该知识库时会随知识片段一起注入运行时 prompt，用来约束智能体和这个知识库的交互方式。",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 4,
+          "controlClassName": "max-w-[560px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "value": "form.retrieve_limit",
+        "mode": "form",
+        "info": "填写 0 表示使用知识库默认召回数量。",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "value": "form.score_threshold",
+        "mode": "form",
+        "info": "填写 0 表示使用知识库默认相似度阈值。",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[160px]"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "agent_id": "",
+      "knowledge_base_id": "",
+      "prompt": "",
+      "retrieve_limit": 0,
+      "score_threshold": 0,
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.agent.knowledge.KnowledgeHook.BeforeSaveAgentKnowledgeBase"
+      }
+    }
+  }
+}

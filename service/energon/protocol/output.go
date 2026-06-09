@@ -182,3 +182,7 @@ func isEmptyProtocolValue(value any) bool {
 func IsEmptyProtocolValue(value any) bool {
 	return isEmptyProtocolValue(value)
 }
+
+func EmbeddingVectorKeys() []string {
+	return []string{"embedding", "vector", "dense_embedding", "dense_vector"}
+}

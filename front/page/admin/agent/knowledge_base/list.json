@@ -1,9 +1,9 @@
 {
   "page": {
-    "name": "智能体",
-    "icon": "bot",
+    "name": "知识库",
+    "icon": "book-open",
     "parent": "bot-agent",
-    "sort": 1
+    "sort": 2
   },
   "layout": {
     "type": "container",
@@ -29,7 +29,7 @@
               "category-column": {
                 "type": "container",
                 "className": "min-w-0",
-                "path": "/bot/agent/agent_cate/list",
+                "path": "/bot/agent/knowledge_cate/list",
                 "meta": {
                   "updateDocumentTitle": false
                 }
@@ -38,6 +38,10 @@
                 "type": "container",
                 "className": "flex min-w-0 flex-col gap-4",
                 "children": {
+                  "content-toolbar": {
+                    "type": "row",
+                    "className": "flex-wrap items-center gap-3"
+                  },
                   "table-row": {
                     "type": "container",
                     "className": "overflow-hidden rounded-md border bg-background"
@@ -64,24 +68,7 @@
     "header-actions": [
       {
         "type": "show-button",
-        "name": "运行配置",
-        "className": "shrink-0",
-        "meta": {
-          "icon": "settings",
-          "variant": "outline",
-          "size": "sm"
-        },
-        "action": {
-          "click": {
-            "type": "modal",
-            "key": "dialog.runtimeConfig",
-            "value": true
-          }
-        }
-      },
-      {
-        "type": "show-button",
-        "name": "新增智能体",
+        "name": "新增知识库",
         "className": "shrink-0",
         "meta": {
           "variant": "default",
@@ -96,6 +83,45 @@
         }
       }
     ],
+    "content-toolbar": [
+      {
+        "type": "form-input",
+        "placeholder": "筛选知识库名称...",
+        "value": "search.keyword",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "索引状态",
+        "value": "search.index_status",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "状态",
+        "value": "search.status",
+        "mode": "search"
+      },
+      {
+        "type": "show-button",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "重置",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/agent/knowledge_base/list"
+        }
+      }
+    ],
     "table-row": [
       {
         "type": "show-table",
@@ -106,7 +132,7 @@
           "totalPath": "data.table.total",
           "remote": true,
           "externalPagination": true,
-          "savePath": "bot/agent/agent/update",
+          "savePath": "bot/agent/knowledge_base/update",
           "rowKey": "id",
           "columns": [
             {
@@ -114,17 +140,29 @@
               "type": "show-base"
             },
             {
-              "value": "key",
-              "name": "标识",
+              "value": "vector_enabled",
+              "name": "向量能力",
+              "type": "show-tag"
+            },
+            {
+              "value": "embedding_power.name",
+              "name": "向量模型",
               "type": "show-base"
             },
             {
-              "value": "setting_pack.name",
-              "name": "方案",
-              "type": "show-base",
-              "meta": {
-                "template": "{row.setting_pack.name} / {row.skill_pack.name}"
-              }
+              "value": "doc_count",
+              "name": "文档数",
+              "type": "show-base"
+            },
+            {
+              "value": "chunk_count",
+              "name": "分段数",
+              "type": "show-base"
+            },
+            {
+              "value": "index_status",
+              "name": "索引状态",
+              "type": "show-tag"
             },
             {
               "value": "status",
@@ -138,12 +176,7 @@
               "value": "sort",
               "type": "show-base",
               "editor": "form-number",
-              "trigger": "doubleClick",
-              "tip": "正序排序，数值越大越靠后。双击可修改。"
-            },
-            {
-              "value": "created_at",
-              "type": "show-date"
+              "trigger": "doubleClick"
             },
             {
               "name": "操作",
@@ -155,12 +188,12 @@
                     "icon": "square-pen",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "编辑智能体",
+                    "description": "编辑知识库",
                     "action": {
                       "click": [
                         {
                           "type": "data",
-                          "key": "actionTarget.editAgentId",
+                          "key": "actionTarget.id",
                           "value": "$row.id"
                         },
                         {
@@ -175,60 +208,23 @@
                     "icon": "file-text",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "设定",
-                    "to": "/bot/agent/agent_setting/list",
-                    "searchParam": "id",
+                    "description": "文档管理",
+                    "to": "/bot/agent/knowledge_doc/manager",
+                    "searchParam": "knowledge_base_id",
                     "searchField": "id",
                     "withBack": true
-                  },
-                  {
-                    "icon": "book-open-check",
-                    "variant": "outline",
-                    "size": "sm",
-                    "description": "知识库",
-                    "to": "/bot/agent/agent_knowledge_base/list",
-                    "searchParam": "agent_id",
-                    "searchField": "id",
-                    "withBack": true
-                  },
-                  {
-                    "icon": "message-circle",
-                    "variant": "outline",
-                    "size": "sm",
-                    "description": "运行智能体",
-                    "action": {
-                      "click": [
-                        {
-                          "type": "data",
-                          "key": "actionTarget.runAgent",
-                          "value": "$row"
-                        },
-                        {
-                          "type": "modal",
-                          "key": "dialog.run",
-                          "value": true
-                        }
-                      ]
-                    }
                   },
                   {
                     "icon": "trash-2",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "删除智能体",
+                    "description": "删除知识库",
                     "className": "text-destructive hover:text-destructive",
-                    "hiddenWhen": [
-                      {
-                        "path": "kind",
-                        "operator": "equals",
-                        "value": "internal"
-                      }
-                    ],
                     "action": {
                       "click": [
                         {
                           "type": "data",
-                          "key": "actionTarget.deleteAgent",
+                          "key": "actionTarget.deleteBase",
                           "value": "$row"
                         },
                         {
@@ -252,44 +248,10 @@
     "feedback-shell": [
       {
         "type": "feedback-modal",
-        "name": "智能体运行配置",
-        "info": "配置所有智能体自动执行的默认步数和全局强制上限。",
-        "meta": {
-          "stateKey": "dialog.runtimeConfig",
-          "pageRoute": "/bot/agent/runtime_config/set",
-          "description": "这些配置会影响所有调用通用智能体运行时的智能体。",
-          "size": "lg",
-          "footer": {
-            "confirm": true,
-            "confirmText": "保存配置"
-          },
-          "pageRouteQuery": {
-            "id": 1
-          }
-        }
-      },
-      {
-        "type": "feedback-modal",
-        "meta": {
-          "stateKey": "dialog.edit",
-          "pageRoute": "/bot/agent/agent/update",
-          "description": "配置智能体标识、LLM 能力和方案。",
-          "size": "xl",
-          "footer": {
-            "confirm": true,
-            "confirmText": "保存"
-          },
-          "pageRouteQuery": {
-            "id": "data.actionTarget.editAgentId"
-          }
-        }
-      },
-      {
-        "type": "feedback-modal",
         "meta": {
           "stateKey": "dialog.create",
-          "pageRoute": "/bot/agent/agent/update",
-          "description": "创建智能体后，运行时会基于标识、方案、智能体设定和 Energon 能力执行。",
+          "pageRoute": "/bot/agent/knowledge_base/update",
+          "description": "创建知识库后，在文档管理中上传或编辑文件，再手动触发索引；开启向量能力后会写入向量数据库。",
           "size": "xl",
           "footer": {
             "confirm": true,
@@ -302,61 +264,40 @@
       },
       {
         "type": "feedback-modal",
-        "name": "运行智能体",
-        "info": "当前弹窗内保留临时上下文，关闭后会重新开始新对话。",
         "meta": {
-          "stateKey": "dialog.run",
-          "formSection": "agent-panel",
-          "titleNamePath": "data.actionTarget.runAgent.name",
-          "titleKeyPath": "data.actionTarget.runAgent.key",
-          "size": "3xl",
-          "bodyScroll": false,
+          "stateKey": "dialog.edit",
+          "pageRoute": "/bot/agent/knowledge_base/update",
+          "description": "配置知识库的向量能力、分段和默认召回策略。",
+          "size": "xl",
           "footer": {
-            "close": false,
-            "confirm": false
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.id"
           }
         }
       },
       {
         "type": "feedback-confirm",
-        "name": "删除智能体",
-        "info": "确认删除当前智能体吗？已产生的运行记录不会自动删除。",
+        "name": "删除知识库",
+        "info": "确认删除当前知识库吗？关联文档和向量数据需要重建时重新录入。",
         "meta": {
           "stateKey": "confirm.delete"
         },
         "action": {
           "confirm": {
             "type": "delete",
-            "params": "actionTarget.deleteAgent",
-            "before": {
-              "type": "service",
-              "use": "bot.agent.setting.AgentHook.BeforeDeleteAgent"
-            }
+            "params": "actionTarget.deleteBase"
           }
-        }
-      }
-    ],
-    "agent-panel": [
-      {
-        "id": "agent-stream",
-        "type": "show-agent",
-        "meta": {
-          "agentPath": "data.actionTarget.runAgent.key",
-          "agentNamePath": "data.actionTarget.runAgent.name",
-          "openPath": "state.dialog.run",
-          "requestApi": "/bot/agent/run",
-          "streamApi": "/bot/agent/stream",
-          "stopApi": "/bot/agent/stop",
-          "paramApi": "/bot/energon/power_params",
-          "blockMs": 1000
         }
       }
     ]
   },
   "data": {
     "page": {
-      "title": "智能体",
-      "description": "维护智能体基础设定。运行时会追加智能体设定、能力、技能和临时上下文。"
+      "title": "知识库",
+      "description": "维护智能体可引用的向量知识库。"
     },
     "table": {
       "page": 1,
@@ -365,19 +306,20 @@
       "filterFields": ["cate_id"]
     },
     "search": {
-      "cate_id": ""
+      "cate_id": "",
+      "keyword": "",
+      "index_status": "",
+      "status": ""
     },
     "actionTarget": {
-      "editAgentId": "",
-      "deleteAgent": {},
-      "runAgent": {}
+      "id": "",
+      "deleteBase": {}
     }
   },
   "state": {
     "dialog": {
-      "edit": false,
       "create": false,
-      "run": false
+      "edit": false
     },
     "confirm": {
       "delete": false

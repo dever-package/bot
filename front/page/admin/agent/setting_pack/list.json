@@ -3,7 +3,7 @@
     "name": "规则方案",
     "icon": "file-text",
     "parent": "bot-agent",
-    "sort": 2
+    "sort": 3
   },
   "layout": {
     "type": "container",

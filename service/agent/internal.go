@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	agentaction "my/package/bot/service/agent/action"
+	agentknowledge "my/package/bot/service/agent/knowledge"
 	agentprompt "my/package/bot/service/agent/prompt"
 	frontstream "my/package/front/service/stream"
 )
@@ -119,13 +120,26 @@ func (s Service) RunInternal(ctx context.Context, req InternalRunRequest) (Inter
 	tracker := runTracker{repo: s.repo, runID: runID, requestID: requestID}
 	tracker.Step(ctx, "input", "内部输入", primaryInputText(input), map[string]any{"input": input}, stepStatusSuccess)
 
+	knowledgeResult, knowledgeErr := agentknowledge.NewService().Retrieve(ctx, agentknowledge.RetrieveRequest{
+		AgentID: agent.ID,
+		Query:   primaryInputText(input),
+	})
+	knowledgeStatus := stepStatusSuccess
+	if knowledgeErr != nil {
+		knowledgeStatus = stepStatusWarning
+	}
 	runtimePrompt := agentprompt.BuildRuntimePrompt(agentprompt.RuntimeInput{
 		PublicSettings: s.repo.ListActivePublicSettings(ctx, agent.SettingPackID),
 		AgentSettings:  s.repo.ListActiveAgentSettings(ctx, agent.ID),
-		Knowledge:      s.repo.ListActiveAgentKnowledge(ctx, agent.ID),
+		Knowledge:      knowledgeResult.Snippets,
 		History:        req.History,
 	})
 	s.repo.UpdateRun(ctx, runID, map[string]any{"runtime_context": runtimePrompt})
+	tracker.Step(ctx, "knowledge", "知识库检索", runtimePrompt, map[string]any{
+		"knowledge_hits":    len(knowledgeResult.Snippets),
+		"knowledge_error":   errorText(knowledgeErr),
+		"knowledge_matches": knowledgeResult.Matches,
+	}, knowledgeStatus)
 
 	turn := s.collectAgentTurn(ctx, exec, runtimePrompt, req.History, 1, 1, "")
 	tracker.Step(ctx, "llm_turn", "内部规划", turn.Text, map[string]any{

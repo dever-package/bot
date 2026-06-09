@@ -1,0 +1,33 @@
+{
+  "page": {
+    "name": "知识库文档管理",
+    "icon": "folder-tree",
+    "parent": "bot/agent/knowledge_base/list",
+    "type": 2,
+    "sort": 21
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "manager-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "manager-shell": [
+      {
+        "type": "show-knowledge-file-manager"
+      }
+    ]
+  },
+  "data": {},
+  "state": {},
+  "action": {}
+}

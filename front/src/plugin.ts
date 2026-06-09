@@ -18,5 +18,10 @@ export default defineFrontPlugin({
         default: mod.ShowStreamRequest,
       })),
     ),
+    "show-knowledge-file-manager": lazyNode(() =>
+      import("./nodes/show/knowledge-file-manager").then((mod) => ({
+        default: mod.ShowKnowledgeFileManager,
+      })),
+    ),
   },
 });

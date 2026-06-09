@@ -61,6 +61,13 @@ func firstText(values ...any) string {
 	return agentskill.FirstText(values...)
 }
 
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return strings.TrimSpace(err.Error())
+}
+
 func primaryInputText(input map[string]any) string {
 	return agentskill.PrimaryInputText(input)
 }

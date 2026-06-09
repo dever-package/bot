@@ -16,6 +16,7 @@ const (
 	doubaoImagePath        = "/images/generations"
 	doubaoVideoTaskPath    = "/contents/generations/tasks"
 	doubaoKindText         = "doubao.text"
+	doubaoKindEmbedding    = "doubao.embeddings"
 	doubaoKindImage        = "doubao.image"
 	doubaoKindVideo        = "doubao.video"
 	doubaoVideoPollMax     = 60
@@ -57,6 +58,9 @@ func (adapter DoubaoAdapter) BuildNativeRequest(input botprotocol.NativeInput) (
 	case "text", "llm", "chat", "llm.chat":
 		input.Request.Kind = doubaoKindText
 		return OpenAIAdapter{}.BuildNativeRequest(input)
+	case "embeddings", "embedding":
+		input.Request.Kind = doubaoKindEmbedding
+		return doubaoEmbeddingRequest(input), nil
 	case "image":
 		input.Request.Kind = doubaoKindImage
 		return adapter.buildImageRequest(input)
@@ -68,8 +72,215 @@ func (adapter DoubaoAdapter) BuildNativeRequest(input botprotocol.NativeInput) (
 	}
 }
 
+func doubaoEmbeddingRequest(input botprotocol.NativeInput) botprovider.Request {
+	path := resolveNativePath(input, "/embeddings")
+	body := doubaoBody(input)
+	if doubaoIsMultimodalEmbeddingPath(path) {
+		if items := doubaoMultimodalEmbeddingInput(input, body); len(items) > 0 {
+			body["input"] = items
+		}
+	} else if _, exists := body["input"]; !exists {
+		if value := doubaoEmbeddingInput(input); value != "" {
+			body["input"] = value
+		}
+	}
+	if nativeName := nativeModelName(input.ServiceAPI); nativeName != "" {
+		setBodyDefault(body, "model", nativeName)
+	}
+	return doubaoJSONRequest(input, path, body)
+}
+
+func doubaoIsMultimodalEmbeddingPath(path string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(path)), "multimodal")
+}
+
+func doubaoEmbeddingInput(input botprotocol.NativeInput) string {
+	for _, value := range []any{
+		input.Request.Input["input"],
+		input.Request.Input["text"],
+		input.Request.Input["prompt"],
+		input.Request.Input["content"],
+	} {
+		if text := strings.TrimSpace(botprotocol.AsText(value)); text != "" {
+			return text
+		}
+	}
+	return strings.TrimSpace(doubaoMappedInput(input).PrimaryPrompt())
+}
+
+func doubaoMultimodalEmbeddingInput(input botprotocol.NativeInput, body map[string]any) []any {
+	mapped := doubaoMappedInput(input)
+	prompt := botprotocol.BuildPromptContent(mapped.PromptInput(mapped.InputKeySet()), mapped.PromptOptions("用户输入"))
+	images := collectDoubaoEmbeddingImages(body, prompt)
+	videos := collectDoubaoEmbeddingVideos(body, prompt)
+
+	if items := normalizeDoubaoEmbeddingContentItems(body["input"]); len(items) > 0 {
+		items = appendDoubaoEmbeddingImageItems(items, images)
+		items = appendDoubaoEmbeddingVideoItems(items, videos)
+		deleteDoubaoEmbeddingSourceFields(body)
+		return items
+	}
+	if items := normalizeDoubaoEmbeddingContentItems(body["content"]); len(items) > 0 {
+		items = appendDoubaoEmbeddingImageItems(items, images)
+		items = appendDoubaoEmbeddingVideoItems(items, videos)
+		deleteDoubaoEmbeddingSourceFields(body)
+		return items
+	}
+
+	text := firstDoubaoEmbeddingText(body, prompt, input)
+	deleteDoubaoEmbeddingSourceFields(body)
+
+	items := make([]any, 0, 1+len(images)+len(videos))
+	if text != "" {
+		items = append(items, map[string]any{
+			"type": "text",
+			"text": text,
+		})
+	}
+	items = appendDoubaoEmbeddingImageItems(items, images)
+	return appendDoubaoEmbeddingVideoItems(items, videos)
+}
+
+func appendDoubaoEmbeddingImageItems(items []any, images []string) []any {
+	for _, url := range images {
+		url = strings.TrimSpace(url)
+		if url == "" {
+			continue
+		}
+		items = append(items, map[string]any{
+			"type": "image_url",
+			"image_url": map[string]any{
+				"url": url,
+			},
+		})
+	}
+	return items
+}
+
+func appendDoubaoEmbeddingVideoItems(items []any, videos []string) []any {
+	for _, url := range videos {
+		url = strings.TrimSpace(url)
+		if url == "" {
+			continue
+		}
+		items = append(items, map[string]any{
+			"type": "video_url",
+			"video_url": map[string]any{
+				"url": url,
+			},
+		})
+	}
+	return items
+}
+
+func normalizeDoubaoEmbeddingContentItems(value any) []any {
+	items := make([]any, 0)
+	for _, item := range botprotocol.NormalizeAnyList(value) {
+		items = appendDoubaoEmbeddingContentItem(items, item)
+	}
+	return items
+}
+
+func appendDoubaoEmbeddingContentItem(items []any, item any) []any {
+	switch current := item.(type) {
+	case string:
+		text := strings.TrimSpace(current)
+		if text != "" {
+			return append(items, map[string]any{
+				"type": "text",
+				"text": text,
+			})
+		}
+	case map[string]any:
+		normalized, ok := normalizeDoubaoContentItem(current)
+		if ok && isDoubaoEmbeddingContentType(normalized["type"]) {
+			return append(items, normalized)
+		}
+	default:
+		if text := strings.TrimSpace(botprotocol.AsText(current)); text != "" {
+			return append(items, map[string]any{
+				"type": "text",
+				"text": text,
+			})
+		}
+	}
+	return items
+}
+
+func isDoubaoEmbeddingContentType(value any) bool {
+	switch strings.ToLower(strings.TrimSpace(botprotocol.AsText(value))) {
+	case "text", "image_url", "video_url":
+		return true
+	default:
+		return false
+	}
+}
+
+func firstDoubaoEmbeddingText(body map[string]any, prompt botprotocol.PromptContent, input botprotocol.NativeInput) string {
+	for _, value := range []any{
+		body["text"],
+		body["prompt"],
+		body["content"],
+		prompt.Text,
+		doubaoEmbeddingInput(input),
+	} {
+		if text := strings.TrimSpace(botprotocol.AsText(value)); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func collectDoubaoEmbeddingImages(body map[string]any, prompt botprotocol.PromptContent) []string {
+	images := make([]string, 0)
+	for _, key := range []string{"image", "images", "image_url", "image_urls"} {
+		images = append(images, normalizeDoubaoEmbeddingMediaURLs(body[key])...)
+	}
+	images = append(images, prompt.Images...)
+	return images
+}
+
+func collectDoubaoEmbeddingVideos(body map[string]any, prompt botprotocol.PromptContent) []string {
+	videos := make([]string, 0)
+	for _, key := range []string{"video", "videos", "video_url", "video_urls"} {
+		videos = append(videos, normalizeDoubaoEmbeddingMediaURLs(body[key])...)
+	}
+	videos = append(videos, prompt.Videos...)
+	return videos
+}
+
+func normalizeDoubaoEmbeddingMediaURLs(value any) []string {
+	urls := make([]string, 0)
+	for _, item := range botprotocol.NormalizeAnyList(value) {
+		if url := doubaoContentMediaURL(item); url != "" {
+			urls = append(urls, url)
+		}
+	}
+	return urls
+}
+
+func deleteDoubaoEmbeddingSourceFields(body map[string]any) {
+	for _, key := range []string{
+		"text",
+		"prompt",
+		"content",
+		"image",
+		"images",
+		"image_url",
+		"image_urls",
+		"video",
+		"videos",
+		"video_url",
+		"video_urls",
+	} {
+		delete(body, key)
+	}
+}
+
 func (adapter DoubaoAdapter) BuildClientResponse(req *botprotocol.ShemicRequest, resp *botprovider.Response) (any, error) {
 	switch strings.TrimSpace(req.Kind) {
+	case doubaoKindEmbedding:
+		return doubaoEmbeddingOutput(resp.Body), nil
 	case doubaoKindImage:
 		return doubaoImageOutput(resp.Body), nil
 	case doubaoKindVideo:
@@ -81,7 +292,7 @@ func (adapter DoubaoAdapter) BuildClientResponse(req *botprotocol.ShemicRequest,
 
 func (adapter DoubaoAdapter) SupportsCancel(input botprotocol.NativeInput) bool {
 	switch doubaoServiceType(input) {
-	case "text", "llm", "chat", "llm.chat", "image", "video":
+	case "text", "llm", "chat", "llm.chat", "embeddings", "embedding", "image", "video":
 		return true
 	default:
 		return false
@@ -90,6 +301,11 @@ func (adapter DoubaoAdapter) SupportsCancel(input botprotocol.NativeInput) bool 
 
 func (DoubaoAdapter) StreamTaskSpec(input botprotocol.NativeInput) (bottask.StreamTaskSpec, bool) {
 	switch strings.TrimSpace(input.Request.Kind) {
+	case doubaoKindEmbedding:
+		return bottask.StreamTaskSpec{
+			Kind:         bottask.StreamKindRequest,
+			PlainRequest: true,
+		}, true
 	case doubaoKindImage:
 		return bottask.StreamTaskSpec{
 			Kind:         bottask.StreamKindRequest,
@@ -396,17 +612,17 @@ func normalizeDoubaoVideoBodyContent(body map[string]any) {
 }
 
 func appendValidDoubaoVideoContentItem(items []any, item map[string]any) []any {
-	normalized, ok := normalizeDoubaoVideoContentItem(item)
+	normalized, ok := normalizeDoubaoContentItem(item)
 	if !ok {
 		return items
 	}
 	return append(items, normalized)
 }
 
-func normalizeDoubaoVideoContentItem(item map[string]any) (map[string]any, bool) {
+func normalizeDoubaoContentItem(item map[string]any) (map[string]any, bool) {
 	contentType := strings.ToLower(strings.TrimSpace(botprotocol.AsText(item["type"])))
 	if contentType == "" {
-		contentType = inferDoubaoVideoContentType(item)
+		contentType = inferDoubaoContentType(item)
 	}
 	if contentType == "" {
 		return item, true
@@ -443,7 +659,7 @@ func normalizeDoubaoVideoContentItem(item map[string]any) (map[string]any, bool)
 	return next, true
 }
 
-func inferDoubaoVideoContentType(item map[string]any) string {
+func inferDoubaoContentType(item map[string]any) string {
 	for _, candidate := range []string{"text", "image_url", "video_url", "audio_url"} {
 		if _, exists := item[candidate]; exists {
 			return candidate
@@ -542,6 +758,63 @@ func doubaoJSONRequest(input botprotocol.NativeInput, path string, body map[stri
 
 func doubaoImageOutput(body any) any {
 	return map[string]any{"output": botprotocol.ExtractMediaOutput(body, botprotocol.MediaTypeImage)}
+}
+
+func doubaoEmbeddingOutput(body any) any {
+	output := botprotocol.Output{
+		"json": body,
+	}
+	if size := doubaoEmbeddingSize(body); size > 0 {
+		output["text"] = fmt.Sprintf("已生成 %d 维向量", size)
+	} else {
+		output["text"] = "已生成向量"
+	}
+	return map[string]any{"output": output}
+}
+
+func doubaoEmbeddingSize(value any) int {
+	mapped := botprotocol.NormalizeMap(value)
+	if len(mapped) == 0 {
+		return vectorValueLength(value)
+	}
+	for _, key := range botprotocol.EmbeddingVectorKeys() {
+		if size := vectorValueLength(mapped[key]); size > 0 {
+			return size
+		}
+	}
+	if size := doubaoEmbeddingDataSize(mapped["data"]); size > 0 {
+		return size
+	}
+	return 0
+}
+
+func doubaoEmbeddingDataSize(value any) int {
+	if mapped := botprotocol.NormalizeMap(value); len(mapped) > 0 {
+		return doubaoEmbeddingSize(mapped)
+	}
+	for _, item := range botprotocol.NormalizeAnyList(value) {
+		if size := doubaoEmbeddingSize(item); size > 0 {
+			return size
+		}
+	}
+	return vectorValueLength(value)
+}
+
+func vectorValueLength(value any) int {
+	switch current := value.(type) {
+	case []float64:
+		return len(current)
+	case []float32:
+		return len(current)
+	case []int:
+		return len(current)
+	case []int64:
+		return len(current)
+	case []any:
+		return len(current)
+	default:
+		return 0
+	}
 }
 
 func doubaoVideoOutput(body any) any {

@@ -1,0 +1,234 @@
+{
+  "page": {
+    "name": "知识库编辑",
+    "parent": "bot/agent/knowledge_base/list",
+    "type": 2,
+    "sort": 10,
+    "auth": [
+      {
+        "key": "bot/agent/knowledge_base/create",
+        "name": "知识库新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/agent/knowledge_base/update",
+        "name": "知识库编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "tabs-row": {
+            "type": "container",
+            "className": "mb-4"
+          },
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "tabs-row": [
+      {
+        "type": "nav-tab",
+        "meta": {
+          "target": "state.currentTab",
+          "variant": "line",
+          "tabs": [
+            {
+              "label": "基础配置",
+              "value": "basic"
+            },
+            {
+              "label": "向量能力",
+              "value": "vector"
+            }
+          ]
+        }
+      }
+    ],
+    "dialog-shell": [
+      {
+        "type": "form-select",
+        "value": "form.cate_id",
+        "mode": "form",
+        "option": "/front/route/option?type=model&use=bot.agent.NewKnowledgeCateModel&filterField=status&filterValue=1&order=sort asc,id asc",
+        "validate": [
+          {
+            "type": "required",
+            "message": "知识库分类不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "basic",
+          "controlClassName": "max-w-[260px]"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "例如：房源业务知识库",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "知识库名称不能为空。"
+          },
+          {
+            "type": "model",
+            "except": "$form.id",
+            "message": "该分类下知识库名称已存在。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "basic"
+        }
+      },
+      {
+        "type": "form-number",
+        "value": "form.chunk_size",
+        "mode": "form",
+        "info": "每个分段的大致字符数，默认 800。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "basic",
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "value": "form.chunk_overlap",
+        "mode": "form",
+        "info": "相邻分段重叠字符数，默认 120。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "basic",
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "value": "form.retrieve_limit",
+        "mode": "form",
+        "info": "智能体默认从该知识库召回多少个片段。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "basic",
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "value": "form.max_context_chars",
+        "mode": "form",
+        "info": "最多注入到智能体 prompt 的知识库字符数。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "basic",
+          "controlClassName": "max-w-[180px]"
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "开启向量能力",
+        "value": "form.vector_enabled",
+        "mode": "form",
+        "info": "关闭时仅保存到数据库，运行时使用数据库模糊检索；开启后会写入向量数据库并使用向量召回。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "vector",
+          "trueValue": 1,
+          "falseValue": 2,
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "type": "form-select",
+        "name": "向量能力",
+        "placeholder": "请选择 embeddings 类型能力",
+        "value": "form.embedding_power_id",
+        "mode": "form",
+        "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadEmbeddingPowers",
+        "info": "入库和检索都会使用这个向量能力，必须选择 embeddings 类型。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "vector",
+          "controlClassName": "max-w-[360px]",
+          "showWhen": [
+            {
+              "path": "form.vector_enabled",
+              "operator": "equals",
+              "value": 1
+            }
+          ]
+        }
+      },
+      {
+        "type": "form-number",
+        "value": "form.score_threshold",
+        "mode": "form",
+        "info": "开启向量能力时，低于该相似度的片段不会注入，默认 0.35。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "vector",
+          "controlClassName": "max-w-[160px]",
+          "showWhen": [
+            {
+              "path": "form.vector_enabled",
+              "operator": "equals",
+              "value": 1
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "cate_id": 1,
+      "name": "",
+      "vector_enabled": 2,
+      "embedding_power_id": "",
+      "chunk_size": 800,
+      "chunk_overlap": 120,
+      "retrieve_limit": 5,
+      "score_threshold": 0.35,
+      "max_context_chars": 6000,
+      "index_status": "pending",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {
+    "currentTab": "basic"
+  },
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "type": "service",
+        "use": "bot.agent.knowledge.KnowledgeHook.BeforeSaveKnowledgeBase"
+      },
+      "after": {
+        "type": "service",
+        "use": "bot.agent.knowledge.KnowledgeHook.AfterSaveKnowledgeBase"
+      }
+    }
+  }
+}

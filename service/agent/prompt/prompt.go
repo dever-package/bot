@@ -12,7 +12,7 @@ import (
 type RuntimeInput struct {
 	PublicSettings []agentmodel.Setting
 	AgentSettings  []agentmodel.AgentSetting
-	Knowledge      []agentmodel.AgentKnowledge
+	Knowledge      []KnowledgeSnippet
 	Powers         []energonmodel.Power
 	SkillCatalog   agentskill.Catalog
 	Tools          ToolRuntime
@@ -43,6 +43,21 @@ type EnergonBodyInput struct {
 type snippet struct {
 	Title   string
 	Content string
+}
+
+type KnowledgeSnippet struct {
+	BaseID   uint64
+	BaseName string
+	Prompt   string
+	DirID    uint64
+	DirPath  string
+	DocID    uint64
+	ChunkID  uint64
+	Title    string
+	Content  string
+	Score    float64
+	Source   string
+	SortRank int
 }
 
 func BuildRuntimePrompt(input RuntimeInput) string {

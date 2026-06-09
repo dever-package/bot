@@ -1,6 +1,7 @@
 {
   "page": {
-    "name": "智能体资料",
+    "name": "智能体知识库",
+    "icon": "book-open-check",
     "parent": "bot/agent/agent/list",
     "type": 2,
     "sort": 30
@@ -58,7 +59,7 @@
       },
       {
         "type": "show-button",
-        "name": "新增资料",
+        "name": "绑定知识库",
         "className": "shrink-0",
         "meta": {
           "variant": "default",
@@ -76,20 +77,8 @@
     "toolbar-row": [
       {
         "type": "form-input",
-        "placeholder": "搜索资料名称...",
+        "placeholder": "搜索知识库名称...",
         "value": "search.keyword",
-        "mode": "search"
-      },
-      {
-        "type": "form-select",
-        "placeholder": "类型",
-        "value": "search.type",
-        "mode": "search"
-      },
-      {
-        "type": "form-select",
-        "placeholder": "加载方式",
-        "value": "search.load_mode",
         "mode": "search"
       },
       {
@@ -114,7 +103,7 @@
         "meta": {
           "variant": "outline",
           "size": "sm",
-          "to": "/bot/agent/agent_knowledge/list"
+          "to": "/bot/agent/agent_knowledge_base/list"
         }
       }
     ],
@@ -128,25 +117,27 @@
           "totalPath": "data.table.total",
           "remote": true,
           "externalPagination": true,
-          "savePath": "bot/agent/agent_knowledge/update",
+          "savePath": "bot/agent/agent_knowledge_base/update",
           "rowKey": "id",
           "columns": [
             {
-              "value": "name",
+              "value": "knowledge_base.name",
+              "name": "知识库",
               "type": "show-base"
             },
             {
-              "value": "type",
+              "value": "knowledge_base.index_status",
+              "name": "索引状态",
               "type": "show-tag"
             },
             {
-              "value": "load_mode",
-              "name": "加载方式",
-              "type": "show-tag"
+              "value": "retrieve_limit",
+              "name": "召回数量",
+              "type": "show-base"
             },
             {
-              "value": "description",
-              "name": "使用说明",
+              "value": "score_threshold",
+              "name": "相似度阈值",
               "type": "show-base"
             },
             {
@@ -161,12 +152,7 @@
               "value": "sort",
               "type": "show-base",
               "editor": "form-number",
-              "trigger": "doubleClick",
-              "tip": "正序排序，数值越大越靠后。双击可修改。"
-            },
-            {
-              "value": "created_at",
-              "type": "show-date"
+              "trigger": "doubleClick"
             },
             {
               "name": "操作",
@@ -178,7 +164,7 @@
                     "icon": "square-pen",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "编辑资料",
+                    "description": "编辑绑定",
                     "action": {
                       "click": [
                         {
@@ -198,13 +184,13 @@
                     "icon": "trash-2",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "删除资料",
+                    "description": "移除绑定",
                     "className": "text-destructive hover:text-destructive",
                     "action": {
                       "click": [
                         {
                           "type": "data",
-                          "key": "actionTarget.deleteKnowledge",
+                          "key": "actionTarget.deleteBinding",
                           "value": "$row"
                         },
                         {
@@ -230,83 +216,68 @@
         "type": "feedback-modal",
         "meta": {
           "stateKey": "dialog.create",
-          "pageRoute": "/bot/agent/agent_knowledge/update",
-          "description": "资料会作为智能体运行时可参考的文档、背景、术语、样例或状态记录。",
+          "pageRoute": "/bot/agent/agent_knowledge_base/update",
+          "description": "智能体运行时会从绑定知识库检索相关片段。",
+          "size": "lg",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
           },
           "pageRouteQuery": {
-            "agent_id": "state.route.query.agent_id"
+            "agent_id": "data.search.agent_id"
           },
-          "size": "xl",
-          "bodyClassName": "py-2"
+          "pageDataPatches": {
+            "form.agent_id": "data.search.agent_id"
+          }
         }
       },
       {
         "type": "feedback-modal",
         "meta": {
           "stateKey": "dialog.edit",
-          "pageRoute": "/bot/agent/agent_knowledge/update",
-          "description": "维护当前资料的类型、加载方式和正文内容。",
+          "pageRoute": "/bot/agent/agent_knowledge_base/update",
+          "description": "可覆盖知识库默认召回数量和相似度阈值。",
+          "size": "lg",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
           },
           "pageRouteQuery": {
             "id": "data.actionTarget.id"
-          },
-          "size": "xl",
-          "bodyClassName": "py-2"
+          }
         }
       },
       {
         "type": "feedback-confirm",
-        "name": "删除资料",
-        "info": "确认删除当前资料吗？删除后智能体运行时不会再读取它。",
+        "name": "移除知识库",
+        "info": "确认移除当前智能体的知识库绑定吗？",
         "meta": {
           "stateKey": "confirm.delete"
         },
         "action": {
           "confirm": {
             "type": "delete",
-            "params": "actionTarget.deleteKnowledge"
+            "params": "actionTarget.deleteBinding"
           }
         }
       }
     ]
   },
   "data": {
-    "page": {
-      "title": "智能体资料",
-      "description": "维护当前智能体可参考的文档、背景、术语、样例和状态记录。常驻资料会随智能体运行加载。"
+    "table": {
+      "page": 1,
+      "pageSize": 10,
+      "total": 0,
+      "filterFields": ["agent_id"]
     },
     "search": {
       "agent_id": "",
       "keyword": "",
-      "type": "",
-      "load_mode": "",
       "status": ""
-    },
-    "table": {
-      "list": "<<bot.agent.NewAgentKnowledgeModel>>",
-      "page": 1,
-      "pageSize": 10,
-      "total": 0,
-      "searchFields": [
-        "name",
-        "description"
-      ],
-      "filterFields": [
-        "agent_id",
-        "type",
-        "load_mode",
-        "status"
-      ]
     },
     "actionTarget": {
       "id": "",
-      "deleteKnowledge": {}
+      "deleteBinding": {}
     }
   },
   "state": {

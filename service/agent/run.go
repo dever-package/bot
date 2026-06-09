@@ -11,6 +11,7 @@ import (
 	agentmodel "my/package/bot/model/agent"
 	energonmodel "my/package/bot/model/energon"
 	agentaction "my/package/bot/service/agent/action"
+	agentknowledge "my/package/bot/service/agent/knowledge"
 	agentprompt "my/package/bot/service/agent/prompt"
 	agentskill "my/package/bot/service/agent/skill"
 	agenttool "my/package/bot/service/agent/tool"
@@ -139,11 +140,19 @@ func (s Service) execute(exec runExecution) {
 
 	publicSettings := s.repo.ListActivePublicSettings(ctx, exec.Agent.SettingPackID)
 	agentSettings := s.repo.ListActiveAgentSettings(ctx, exec.Agent.ID)
-	agentKnowledge := s.repo.ListActiveAgentKnowledge(ctx, exec.Agent.ID)
+	knowledgeResult, knowledgeErr := agentknowledge.NewService().Retrieve(ctx, agentknowledge.RetrieveRequest{
+		AgentID: exec.Agent.ID,
+		Query:   primaryInputText(exec.Parsed.Input),
+	})
+	knowledgeStatus := stepStatusSuccess
+	if knowledgeErr != nil {
+		knowledgeStatus = stepStatusWarning
+		_ = s.writeStreamStatus(ctx, exec.RequestID, knowledgeErr.Error(), nil)
+	}
 	runtimePrompt := agentprompt.BuildRuntimePrompt(agentprompt.RuntimeInput{
 		PublicSettings: publicSettings,
 		AgentSettings:  agentSettings,
-		Knowledge:      agentKnowledge,
+		Knowledge:      knowledgeResult.Snippets,
 		Powers:         powers,
 		SkillCatalog:   catalog,
 		Tools:          runtimePromptTools(runtimeOptions.Tool),
@@ -153,12 +162,14 @@ func (s Service) execute(exec runExecution) {
 		History: exec.Parsed.History,
 	})
 	tracker.Step(ctx, "knowledge", "运行资料", runtimePrompt, map[string]any{
-		"setting_pack_id":  exec.Agent.SettingPackID,
-		"public_settings":  len(publicSettings),
-		"agent_settings":   len(agentSettings),
-		"agent_knowledge":  len(agentKnowledge),
-		"history_messages": len(exec.Parsed.History),
-	}, stepStatusSuccess)
+		"setting_pack_id":   exec.Agent.SettingPackID,
+		"public_settings":   len(publicSettings),
+		"agent_settings":    len(agentSettings),
+		"knowledge_hits":    len(knowledgeResult.Snippets),
+		"knowledge_error":   errorText(knowledgeErr),
+		"knowledge_matches": knowledgeResult.Matches,
+		"history_messages":  len(exec.Parsed.History),
+	}, knowledgeStatus)
 	s.repo.UpdateRun(ctx, exec.RunID, map[string]any{
 		"skills": jsonText(map[string]any{
 			"skill_pack_id": catalog.PackID,

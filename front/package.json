@@ -1,0 +1,8 @@
+{
+  "name": "@zufang/bot-front",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "react-complex-tree": "^2.6.1"
+  }
+}

@@ -183,24 +183,6 @@ func isAlwaysLoadMode(loadMode string) bool {
 	return loadMode == "" || loadMode == "always"
 }
 
-func (Repo) ListActiveAgentKnowledge(ctx context.Context, agentID uint64) []agentmodel.AgentKnowledge {
-	if agentID == 0 {
-		return nil
-	}
-	rows := agentmodel.NewAgentKnowledgeModel().Select(ctx, map[string]any{
-		"agent_id":  agentID,
-		"status":    1,
-		"load_mode": "always",
-	})
-	result := make([]agentmodel.AgentKnowledge, 0, len(rows))
-	for _, row := range rows {
-		if row != nil {
-			result = append(result, *row)
-		}
-	}
-	return result
-}
-
 func (Repo) ListActiveSkillPackEntries(ctx context.Context, packID uint64) []agentskill.Entry {
 	if packID == 0 {
 		packID = agentmodel.DefaultSkillPackID

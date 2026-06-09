@@ -3,7 +3,7 @@
     "name": "技能方案",
     "icon": "sparkles",
     "parent": "bot-agent",
-    "sort": 3
+    "sort": 4
   },
   "layout": {
     "type": "container",
