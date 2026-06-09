@@ -104,6 +104,45 @@ func SwitchByType(valueType string, value any) any {
 	return checked
 }
 
+func NormalizeFixedValueType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "bool", "boolean":
+		return "boolean"
+	case "number", "int", "integer", "float", "double":
+		return "number"
+	case "json", "object", "array":
+		return "json"
+	default:
+		return "string"
+	}
+}
+
+func FixedValueByType(valueType string, value any) (any, error) {
+	text := strings.TrimSpace(ValueText(value))
+	switch NormalizeFixedValueType(valueType) {
+	case "boolean":
+		parsed, ok := ParseBoolValue(text)
+		if !ok {
+			return nil, fmt.Errorf("布尔固定值必须是 true/false")
+		}
+		return parsed, nil
+	case "number":
+		number, err := strconv.ParseFloat(text, 64)
+		if err != nil {
+			return nil, fmt.Errorf("数字固定值格式不正确")
+		}
+		return number, nil
+	case "json":
+		var result any
+		if err := json.Unmarshal([]byte(text), &result); err != nil {
+			return nil, fmt.Errorf("JSON 固定值格式不正确")
+		}
+		return result, nil
+	default:
+		return text, nil
+	}
+}
+
 func BoolValue(value any) bool {
 	switch current := value.(type) {
 	case bool:
@@ -136,6 +175,17 @@ func BoolValue(value any) bool {
 		return current != 0
 	default:
 		return IsTruthyText(util.ToString(value))
+	}
+}
+
+func ParseBoolValue(value string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on", "enable", "enabled", "开启", "启用":
+		return true, true
+	case "0", "false", "no", "off", "disable", "disabled", "关闭", "停用", "禁用":
+		return false, true
+	default:
+		return false, false
 	}
 }
 

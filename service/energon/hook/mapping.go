@@ -114,6 +114,12 @@ func normalizeFixedServiceParamMapping(value any) string {
 	return text
 }
 
+func validateFixedServiceParamMapping(valueType string, value any) {
+	if _, err := botinput.FixedValueByType(valueType, value); err != nil {
+		panicServiceParamField(err.Error())
+	}
+}
+
 func normalizeServiceParamComboMapping(c *server.Context, value any) map[string]any {
 	mapping := botinput.DecodeServiceParamComboMapping(value)
 	if len(mapping.ParamIDs) < 2 {

@@ -23,6 +23,7 @@ type SaveVersionRequest struct {
 	ReleaseID   uint64
 	Name        string
 	Kind        string
+	Role        string
 	Content     any
 	Sort        int
 }
@@ -55,6 +56,7 @@ func (Service) LatestProjectAssetByCate(ctx context.Context, projectID uint64, a
 	rows := assetmodel.NewAssetModel().Select(ctx, map[string]any{
 		"project_id":    projectID,
 		"asset_cate_id": assetCateID,
+		"role":          assetmodel.RoleContent,
 		"status":        assetmodel.StatusCurrent,
 	})
 	var latest *assetmodel.Asset
@@ -108,6 +110,7 @@ func (Service) ProjectDetail(ctx context.Context, projectID uint64, assetID uint
 func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset, *assetmodel.Version, error) {
 	req.Name = strings.TrimSpace(req.Name)
 	req.Kind = NormalizeKind(req.Kind)
+	req.Role = NormalizeRole(req.Role)
 	if req.ProjectID == 0 && req.BodyID == 0 {
 		return nil, nil, fmt.Errorf("资产缺少项目或身体")
 	}
@@ -121,8 +124,22 @@ func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetm
 		"team_id":       req.TeamID,
 		"flow_id":       req.FlowID,
 		"asset_cate_id": req.AssetCateID,
+		"role":          req.Role,
 		"name":          req.Name,
 	})
+	if asset == nil && req.Role == assetmodel.RoleContent {
+		asset = assetModel.Find(ctx, map[string]any{
+			"project_id":    req.ProjectID,
+			"body_id":       req.BodyID,
+			"team_id":       req.TeamID,
+			"flow_id":       req.FlowID,
+			"asset_cate_id": req.AssetCateID,
+			"name":          req.Name,
+		})
+		if asset != nil && NormalizeRole(asset.Role) != assetmodel.RoleContent {
+			asset = nil
+		}
+	}
 	now := time.Now()
 	if asset == nil {
 		sort := req.Sort
@@ -137,6 +154,7 @@ func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetm
 			"asset_cate_id": req.AssetCateID,
 			"name":          req.Name,
 			"kind":          req.Kind,
+			"role":          req.Role,
 			"version_id":    0,
 			"status":        assetmodel.StatusDraft,
 			"sort":          sort,
@@ -161,6 +179,7 @@ func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetm
 	}
 	assetModel.Update(ctx, map[string]any{"id": asset.ID}, map[string]any{
 		"kind":       req.Kind,
+		"role":       req.Role,
 		"version_id": versionID,
 		"status":     assetmodel.StatusCurrent,
 	})
@@ -182,10 +201,22 @@ func AssetToMap(row assetmodel.Asset) map[string]any {
 		"asset_cate_id": row.AssetCateID,
 		"name":          row.Name,
 		"kind":          row.Kind,
+		"role":          NormalizeRole(row.Role),
 		"version_id":    row.VersionID,
 		"status":        row.Status,
 		"sort":          row.Sort,
 		"created_at":    row.CreatedAt,
+	}
+}
+
+func NormalizeRole(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case assetmodel.RoleMaterial, "source", "file", "media":
+		return assetmodel.RoleMaterial
+	case assetmodel.RoleContent, "":
+		return assetmodel.RoleContent
+	default:
+		return assetmodel.RoleContent
 	}
 }
 

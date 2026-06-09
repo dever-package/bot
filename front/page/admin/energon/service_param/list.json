@@ -52,6 +52,7 @@
               "key": "serviceParamForm",
               "value": {
                 "param_rule": 1,
+                "fixed_value_type": "string",
                 "mapping": "",
                 "status": 1,
                 "sort": 100

@@ -205,13 +205,32 @@
         }
       },
       {
+        "id": "mapping-fixed-type",
+        "type": "form-radio",
+        "name": "值类型",
+        "value": "form.fixed_value_type",
+        "mode": "form",
+        "option": "option.fixed_value_type",
+        "info": "固定值写入来源字段时使用的真实类型。布尔会写入 true/false，数字会写入 number，JSON 会写入对象或数组。",
+        "meta": {
+          "controlClassName": "min-w-[6rem]",
+          "hiddenWhen": [
+            {
+              "path": "form.param_rule",
+              "operator": "notEquals",
+              "value": 5
+            }
+          ]
+        }
+      },
+      {
         "id": "mapping-fixed",
         "type": "form-input",
         "name": "字段值",
         "value": "form.mapping",
         "mode": "form",
-        "placeholder": "例如：text、image_url、first_frame",
-        "info": "固定值不读取内部参数，会原样写入字段标识对应的来源字段。",
+        "placeholder": "例如：false、123、{\"enabled\":true}",
+        "info": "固定值不读取内部参数，会按值类型写入字段标识对应的来源字段。",
         "meta": {
           "controlClassName": "min-w-[16rem]",
           "hiddenWhen": [
@@ -248,6 +267,7 @@
   "data": {
     "form": {
       "param_rule": 1,
+      "fixed_value_type": "string",
       "mapping": ""
     },
     "option": {
@@ -271,6 +291,24 @@
         {
           "id": 5,
           "value": "固定值映射"
+        }
+      ],
+      "fixed_value_type": [
+        {
+          "id": "string",
+          "value": "字符串"
+        },
+        {
+          "id": "boolean",
+          "value": "布尔"
+        },
+        {
+          "id": "number",
+          "value": "数字"
+        },
+        {
+          "id": "json",
+          "value": "JSON"
         }
       ]
     }

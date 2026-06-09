@@ -14,6 +14,9 @@ const (
 	KindFile  = "file"
 	KindMixed = "mixed"
 
+	RoleContent  = "content"
+	RoleMaterial = "material"
+
 	StatusDraft   = "draft"
 	StatusCurrent = "current"
 	StatusArchive = "archived"
@@ -32,6 +35,11 @@ var statusOptions = []map[string]any{
 	{"id": StatusDraft, "value": "草稿"},
 	{"id": StatusCurrent, "value": "当前"},
 	{"id": StatusArchive, "value": "归档"},
+}
+
+var roleOptions = []map[string]any{
+	{"id": RoleContent, "value": "内容"},
+	{"id": RoleMaterial, "value": "素材"},
 }
 
 var bodyRelation = orm.Relation{
@@ -97,6 +105,7 @@ type Asset struct {
 	AssetCateID uint64    `dorm:"type:bigint;not null;default:0;comment:资产分类"`
 	Name        string    `dorm:"type:varchar(128);not null;comment:名称"`
 	Kind        string    `dorm:"type:varchar(32);not null;default:'text';comment:产物类型"`
+	Role        string    `dorm:"type:varchar(32);not null;default:'content';comment:资产角色"`
 	VersionID   uint64    `dorm:"type:bigint;not null;default:0;comment:当前版本"`
 	Status      string    `dorm:"type:varchar(32);not null;default:'draft';comment:状态"`
 	Sort        int       `dorm:"type:int;not null;default:100;comment:排序"`
@@ -110,6 +119,8 @@ type AssetIndex struct {
 	TeamStatus      struct{} `index:"team_id,status,sort,id"`
 	FlowStatus      struct{} `index:"flow_id,status,sort,id"`
 	AssetCateStatus struct{} `index:"asset_cate_id,status,sort,id"`
+	ProjectRole     struct{} `index:"project_id,role,status,sort,id"`
+	AssetCateRole   struct{} `index:"asset_cate_id,role,status,sort,id"`
 	Version         struct{} `index:"version_id"`
 }
 
@@ -120,6 +131,7 @@ func NewAssetModel() *orm.Model[Asset] {
 		Database: "default",
 		Options: map[string]any{
 			"kind":   kindOptions,
+			"role":   roleOptions,
 			"status": statusOptions,
 		},
 		Relations: []orm.Relation{

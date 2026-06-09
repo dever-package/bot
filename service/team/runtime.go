@@ -735,6 +735,7 @@ func (s Service) saveFinalRunAsset(ctx context.Context, runID uint64, output map
 		ReleaseID:   run.ReleaseID,
 		Name:        name,
 		Kind:        finalAssetKind(output),
+		Role:        "content",
 		Content:     output,
 	})
 	return err

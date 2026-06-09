@@ -7,16 +7,17 @@ import (
 )
 
 type ServiceParam struct {
-	ID        uint64    `dorm:"primaryKey;autoIncrement;comment:服务参数ID"`
-	ServiceID uint64    `dorm:"type:bigint;not null;default:0;comment:服务"`
-	ParamID   uint64    `dorm:"type:bigint;not null;default:0;comment:参数"`
-	ParamRule int16     `dorm:"type:smallint;not null;default:1;comment:映射规则"`
-	Key       string    `dorm:"type:varchar(128);not null;comment:字段标识"`
-	Name      string    `dorm:"type:varchar(128);not null;comment:字段名"`
-	Mapping   string    `dorm:"type:text;not null;comment:映射配置"`
-	Status    int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	Sort      int       `dorm:"type:int;not null;default:100;comment:排序"`
-	CreatedAt time.Time `dorm:"comment:创建时间"`
+	ID             uint64    `dorm:"primaryKey;autoIncrement;comment:服务参数ID"`
+	ServiceID      uint64    `dorm:"type:bigint;not null;default:0;comment:服务"`
+	ParamID        uint64    `dorm:"type:bigint;not null;default:0;comment:参数"`
+	ParamRule      int16     `dorm:"type:smallint;not null;default:1;comment:映射规则"`
+	Key            string    `dorm:"type:varchar(128);not null;comment:字段标识"`
+	Name           string    `dorm:"type:varchar(128);not null;comment:字段名"`
+	Mapping        string    `dorm:"type:text;not null;comment:映射配置"`
+	FixedValueType string    `dorm:"type:varchar(32);not null;default:string;comment:固定值类型"`
+	Status         int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	Sort           int       `dorm:"type:int;not null;default:100;comment:排序"`
+	CreatedAt      time.Time `dorm:"comment:创建时间"`
 }
 
 type ServiceParamIndex struct {
@@ -31,6 +32,13 @@ var (
 		{"id": 3, "value": "附件映射"},
 		{"id": 4, "value": "组合映射"},
 		{"id": 5, "value": "固定值映射"},
+	}
+
+	fixedValueTypeOptions = []map[string]any{
+		{"id": "string", "value": "字符串"},
+		{"id": "boolean", "value": "布尔"},
+		{"id": "number", "value": "数字"},
+		{"id": "json", "value": "JSON"},
 	}
 
 	serviceParamServiceRelation = orm.Relation{
@@ -52,8 +60,9 @@ func NewServiceParamModel() *orm.Model[ServiceParam] {
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{
-			"param_rule": paramRuleOptions,
-			"status":     statusOptions,
+			"param_rule":       paramRuleOptions,
+			"fixed_value_type": fixedValueTypeOptions,
+			"status":           statusOptions,
 		},
 		Relations: []orm.Relation{
 			serviceParamServiceRelation,

@@ -36,6 +36,10 @@ func BuildMapped(
 			continue
 		}
 		if serviceParam.ParamRule == paramRuleFixedMap {
+			fixedValue, err := fixedServiceParamValue(serviceParam)
+			if err != nil {
+				return mapped, err
+			}
 			mapped.Params = append(mapped.Params, botprotocol.MappedParam{
 				ParamID:   0,
 				ParamKey:  "",
@@ -44,7 +48,7 @@ func BuildMapped(
 				ParamType: "fixed",
 				NativeKey: serviceParam.Key,
 				ParamRule: serviceParam.ParamRule,
-				Value:     serviceParam.Mapping,
+				Value:     fixedValue,
 			})
 			continue
 		}
@@ -115,6 +119,14 @@ func BuildMapped(
 	applyPromptMappedParams(&mapped)
 
 	return mapped, nil
+}
+
+func fixedServiceParamValue(serviceParam botmodel.ServiceParam) (any, error) {
+	value, err := FixedValueByType(serviceParam.FixedValueType, serviceParam.Mapping)
+	if err != nil {
+		return nil, fmt.Errorf("服务参数“%s”的%s", serviceParam.Key, err.Error())
+	}
+	return value, nil
 }
 
 func validatePowerMainParams(

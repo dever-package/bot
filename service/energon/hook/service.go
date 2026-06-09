@@ -81,6 +81,9 @@ func normalizeServiceParamRows(c *server.Context, serviceID uint64, value any) [
 		if rule == paramRuleFixedMap {
 			paramID = 0
 			next["param_id"] = 0
+			next["fixed_value_type"] = botinput.NormalizeFixedValueType(util.ToStringTrimmed(next["fixed_value_type"]))
+		} else {
+			next["fixed_value_type"] = "string"
 		}
 		if rule != paramRuleFixedMap && paramID == 0 {
 			panicServiceParamField("服务参数必须选择内部参数")
@@ -106,6 +109,9 @@ func normalizeServiceParamRows(c *server.Context, serviceID uint64, value any) [
 		seen[naturalKey] = struct{}{}
 
 		next["mapping"] = normalizeServiceParamMapping(c, paramRow, rule, serviceParamMappingInput(paramID, rule, next))
+		if rule == paramRuleFixedMap {
+			validateFixedServiceParamMapping(util.ToStringTrimmed(next["fixed_value_type"]), next["mapping"])
+		}
 		delete(next, "combo_param_ids")
 		delete(next, "combo_params")
 

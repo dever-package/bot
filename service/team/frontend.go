@@ -334,6 +334,7 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		ReleaseID: releaseID,
 		Name:      nodeName,
 		Kind:      power.Kind,
+		Role:      "content",
 		Content:   output,
 	})
 	if err != nil {

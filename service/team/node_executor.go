@@ -1172,6 +1172,7 @@ func (s Service) runSaveNode(ctx context.Context, run teammodel.Run, flowRun tea
 		ReleaseID:   run.ReleaseID,
 		Name:        assetName,
 		Kind:        firstText(valueAtPath(body, "kind"), "mixed"),
+		Role:        "content",
 		Content:     body,
 	})
 	if err != nil {
