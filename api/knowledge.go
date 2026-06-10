@@ -244,10 +244,11 @@ func (Knowledge) GetDownloadFile(c *server.Context) error {
 	if !ok {
 		return c.Error("当前环境不支持文件下载")
 	}
+	raw.Status(fiber.StatusOK)
+	if file.MimeType != "" {
+		raw.Set(fiber.HeaderContentType, file.MimeType)
+	}
 	if strings.TrimSpace(c.Input("preview")) == "1" {
-		if file.MimeType != "" {
-			raw.Set(fiber.HeaderContentType, file.MimeType)
-		}
 		raw.Set(fiber.HeaderContentDisposition, "inline")
 		return raw.SendFile(file.Path)
 	}
