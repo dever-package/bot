@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,9 +22,38 @@ import (
 )
 
 const (
-	knowledgeStorageRoot = "data/knowledge"
-	maxEditableFileBytes = 5 * 1024 * 1024
+	knowledgeStorageRoot       = "data/knowledge"
+	maxEditableFileBytes       = 5 * 1024 * 1024
+	knowledgeUploadTempDirName = ".upload"
 )
+
+var editableKnowledgeFileExts = map[string]bool{
+	"conf":     true,
+	"css":      true,
+	"csv":      true,
+	"env":      true,
+	"go":       true,
+	"htm":      true,
+	"html":     true,
+	"ini":      true,
+	"java":     true,
+	"js":       true,
+	"json":     true,
+	"jsx":      true,
+	"log":      true,
+	"markdown": true,
+	"md":       true,
+	"php":      true,
+	"py":       true,
+	"sh":       true,
+	"sql":      true,
+	"tsx":      true,
+	"ts":       true,
+	"txt":      true,
+	"xml":      true,
+	"yaml":     true,
+	"yml":      true,
+}
 
 type KnowledgeFileData struct {
 	Base  map[string]any      `json:"base"`
@@ -60,12 +90,36 @@ type KnowledgeFileContent struct {
 	IndexStatus string `json:"index_status,omitempty"`
 }
 
+type KnowledgeResolvedFile struct {
+	Path     string
+	Name     string
+	MimeType string
+}
+
 type KnowledgeCreateInput struct {
 	BaseID        uint64
 	ParentID      string
 	Name          string
 	Type          string
 	ContentBase64 string
+}
+
+type KnowledgeUploadPartInput struct {
+	BaseID     uint64
+	ParentID   string
+	Name       string
+	UploadID   string
+	PartNumber int
+	TotalParts int
+	Source     io.Reader
+}
+
+type KnowledgeUploadPartResult struct {
+	KnowledgeFileOperationResult
+	Complete   bool   `json:"complete"`
+	UploadID   string `json:"upload_id"`
+	PartNumber int    `json:"part_number"`
+	TotalParts int    `json:"total_parts"`
 }
 
 type KnowledgeRenameInput struct {
@@ -207,6 +261,54 @@ func (s Service) CreateKnowledgeFileNode(ctx context.Context, input KnowledgeCre
 		return KnowledgeFileOperationResult{}, err
 	}
 	return KnowledgeFileOperationResult{KnowledgeFileData: data, NewID: newID}, nil
+}
+
+func (s Service) SaveKnowledgeUploadPart(ctx context.Context, input KnowledgeUploadPartInput) (KnowledgeUploadPartResult, error) {
+	if input.Source == nil {
+		return KnowledgeUploadPartResult{}, fmt.Errorf("上传分片不能为空")
+	}
+	base, root, err := knowledgeStorageBase(ctx, input.BaseID)
+	if err != nil {
+		return KnowledgeUploadPartResult{}, err
+	}
+	parentPath, parentRel, err := knowledgeIDPath(root, input.ParentID)
+	if err != nil {
+		return KnowledgeUploadPartResult{}, err
+	}
+	if err := ensureInsideKnowledgeRoot(root, parentPath); err != nil {
+		return KnowledgeUploadPartResult{}, err
+	}
+	if input.PartNumber <= 0 || input.TotalParts <= 0 || input.PartNumber > input.TotalParts {
+		return KnowledgeUploadPartResult{}, fmt.Errorf("上传分片序号无效")
+	}
+	uploadID, err := normalizeKnowledgeUploadID(input.UploadID)
+	if err != nil {
+		return KnowledgeUploadPartResult{}, err
+	}
+	name, err := normalizeFileName(input.Name)
+	if err != nil {
+		return KnowledgeUploadPartResult{}, err
+	}
+	if err := saveKnowledgeUploadPart(root, uploadID, input.PartNumber, input.Source); err != nil {
+		return KnowledgeUploadPartResult{}, err
+	}
+	result := KnowledgeUploadPartResult{
+		UploadID:   uploadID,
+		PartNumber: input.PartNumber,
+		TotalParts: input.TotalParts,
+		Complete:   false,
+	}
+	if input.PartNumber != input.TotalParts || !knowledgeUploadPartsComplete(root, uploadID, input.TotalParts) {
+		return result, nil
+	}
+
+	data, newID, err := s.completeKnowledgeUploadParts(ctx, base, root, parentPath, parentRel, name, uploadID, input.TotalParts)
+	if err != nil {
+		return KnowledgeUploadPartResult{}, err
+	}
+	result.KnowledgeFileOperationResult = KnowledgeFileOperationResult{KnowledgeFileData: data, NewID: newID}
+	result.Complete = true
+	return result, nil
 }
 
 func (s Service) RenameKnowledgeFileNode(ctx context.Context, input KnowledgeRenameInput) (KnowledgeFileOperationResult, error) {
@@ -379,7 +481,10 @@ func (s Service) SaveKnowledgeFileNode(ctx context.Context, input KnowledgeSaveI
 	if info.IsDir() {
 		return KnowledgeFileContent{}, fmt.Errorf("请选择文件")
 	}
-	if !isEditableKnowledgeFile(filePath, detectMimeType(filePath, nil), int64(len(input.Content))) {
+	if !isEditableKnowledgeFile(filePath, detectMimeType(filePath, nil), info.Size()) {
+		return KnowledgeFileContent{}, fmt.Errorf("该文件不支持在线编辑")
+	}
+	if int64(len(input.Content)) > maxEditableFileBytes || !isUTF8TextContent([]byte(input.Content)) {
 		return KnowledgeFileContent{}, fmt.Errorf("该文件不支持在线编辑")
 	}
 	if err := os.WriteFile(filePath, []byte(input.Content), 0o644); err != nil {
@@ -402,19 +507,31 @@ func (s Service) SaveKnowledgeFileNode(ctx context.Context, input KnowledgeSaveI
 }
 
 func (s Service) ResolveKnowledgeFileNode(ctx context.Context, baseID uint64, id string) (string, string, error) {
-	_, root, err := knowledgeStorageBase(ctx, baseID)
+	file, err := s.ResolveKnowledgeFileContent(ctx, baseID, id)
 	if err != nil {
 		return "", "", err
+	}
+	return file.Path, file.Name, nil
+}
+
+func (s Service) ResolveKnowledgeFileContent(ctx context.Context, baseID uint64, id string) (KnowledgeResolvedFile, error) {
+	_, root, err := knowledgeStorageBase(ctx, baseID)
+	if err != nil {
+		return KnowledgeResolvedFile{}, err
 	}
 	filePath, _, err := knowledgeIDPath(root, id)
 	if err != nil {
-		return "", "", err
+		return KnowledgeResolvedFile{}, err
 	}
 	info, err := os.Stat(filePath)
 	if err != nil || info.IsDir() {
-		return "", "", fmt.Errorf("文件不存在")
+		return KnowledgeResolvedFile{}, fmt.Errorf("文件不存在")
 	}
-	return filePath, filepath.Base(filePath), nil
+	return KnowledgeResolvedFile{
+		Path:     filePath,
+		Name:     filepath.Base(filePath),
+		MimeType: detectMimeType(filePath, nil),
+	}, nil
 }
 
 func (s Service) StartKnowledgeFileIndex(ctx context.Context, baseID uint64, id string) error {
@@ -489,6 +606,9 @@ func syncKnowledgeFilesystem(ctx context.Context, base *agentmodel.KnowledgeBase
 		}
 		if sameCleanPath(path, root) {
 			return nil
+		}
+		if entry.IsDir() && sameCleanPath(path, filepath.Join(root, knowledgeUploadTempDirName)) {
+			return filepath.SkipDir
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
 			return nil
@@ -696,6 +816,9 @@ func walkKnowledgeFileNodes(ctx context.Context, baseID uint64, root string) ([]
 		}
 		if sameCleanPath(path, root) {
 			return nil
+		}
+		if entry.IsDir() && sameCleanPath(path, filepath.Join(root, knowledgeUploadTempDirName)) {
+			return filepath.SkipDir
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
 			return nil
@@ -1046,13 +1169,179 @@ func writeKnowledgeZipFile(target string, source io.Reader) error {
 	return nil
 }
 
+func (s Service) completeKnowledgeUploadParts(
+	ctx context.Context,
+	base *agentmodel.KnowledgeBase,
+	root string,
+	parentPath string,
+	parentRel string,
+	name string,
+	uploadID string,
+	totalParts int,
+) (KnowledgeFileData, string, error) {
+	uploadDir := knowledgeUploadDir(root, uploadID)
+	defer os.RemoveAll(uploadDir)
+
+	if err := os.MkdirAll(parentPath, 0o755); err != nil {
+		return KnowledgeFileData{}, "", fmt.Errorf("创建父目录失败: %w", err)
+	}
+	target := filepath.Join(parentPath, name)
+	if err := ensureInsideKnowledgeRoot(root, target); err != nil {
+		return KnowledgeFileData{}, "", err
+	}
+	if _, err := os.Stat(target); err == nil {
+		return KnowledgeFileData{}, "", fmt.Errorf("同名文件或文件夹已存在")
+	}
+
+	merged, err := mergeKnowledgeUploadParts(root, uploadID, totalParts)
+	if err != nil {
+		return KnowledgeFileData{}, "", err
+	}
+
+	newID := knowledgeFileID(joinDirPath(parentRel, name))
+	if isKnowledgeUploadZip(name, merged) {
+		raw, err := os.ReadFile(merged)
+		if err != nil {
+			return KnowledgeFileData{}, "", fmt.Errorf("读取上传 zip 失败: %w", err)
+		}
+		if err := extractKnowledgeZip(root, parentPath, raw); err != nil {
+			return KnowledgeFileData{}, "", err
+		}
+		newID = knowledgeFileID(parentRel)
+	} else if err := moveKnowledgeUploadFile(merged, target); err != nil {
+		return KnowledgeFileData{}, "", err
+	}
+	if err := os.RemoveAll(uploadDir); err != nil {
+		return KnowledgeFileData{}, "", fmt.Errorf("清理上传临时文件失败: %w", err)
+	}
+
+	if err := syncKnowledgeFilesystem(ctx, base, root); err != nil {
+		return KnowledgeFileData{}, "", err
+	}
+	data, err := s.KnowledgeFileData(ctx, base.ID)
+	if err != nil {
+		return KnowledgeFileData{}, "", err
+	}
+	return data, newID, nil
+}
+
+func normalizeKnowledgeUploadID(uploadID string) (string, error) {
+	uploadID = strings.TrimSpace(uploadID)
+	if uploadID == "" {
+		return "", fmt.Errorf("上传会话不能为空")
+	}
+	for _, r := range uploadID {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			continue
+		}
+		return "", fmt.Errorf("上传会话无效")
+	}
+	return uploadID, nil
+}
+
+func knowledgeUploadDir(root string, uploadID string) string {
+	return filepath.Join(root, knowledgeUploadTempDirName, uploadID)
+}
+
+func knowledgeUploadPartPath(root string, uploadID string, partNumber int) string {
+	return filepath.Join(knowledgeUploadDir(root, uploadID), fmt.Sprintf("part-%06d.tmp", partNumber))
+}
+
+func knowledgeUploadMergedPath(root string, uploadID string) string {
+	return filepath.Join(knowledgeUploadDir(root, uploadID), "merged.bin")
+}
+
+func saveKnowledgeUploadPart(root string, uploadID string, partNumber int, source io.Reader) error {
+	partPath := knowledgeUploadPartPath(root, uploadID, partNumber)
+	if err := os.MkdirAll(filepath.Dir(partPath), 0o755); err != nil {
+		return fmt.Errorf("创建上传分片目录失败: %w", err)
+	}
+	out, err := os.Create(partPath)
+	if err != nil {
+		return fmt.Errorf("写入上传分片失败: %w", err)
+	}
+	if _, err := io.Copy(out, source); err != nil {
+		out.Close()
+		return fmt.Errorf("保存上传分片失败: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("保存上传分片失败: %w", err)
+	}
+	return nil
+}
+
+func knowledgeUploadPartsComplete(root string, uploadID string, totalParts int) bool {
+	for partNumber := 1; partNumber <= totalParts; partNumber++ {
+		if _, err := os.Stat(knowledgeUploadPartPath(root, uploadID, partNumber)); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func mergeKnowledgeUploadParts(root string, uploadID string, totalParts int) (string, error) {
+	mergedPath := knowledgeUploadMergedPath(root, uploadID)
+	if err := os.MkdirAll(filepath.Dir(mergedPath), 0o755); err != nil {
+		return "", fmt.Errorf("创建上传合并目录失败: %w", err)
+	}
+	out, err := os.Create(mergedPath)
+	if err != nil {
+		return "", fmt.Errorf("创建上传合并文件失败: %w", err)
+	}
+	defer out.Close()
+	for partNumber := 1; partNumber <= totalParts; partNumber++ {
+		partPath := knowledgeUploadPartPath(root, uploadID, partNumber)
+		in, err := os.Open(partPath)
+		if err != nil {
+			return "", fmt.Errorf("上传分片缺失")
+		}
+		_, copyErr := io.Copy(out, in)
+		_ = in.Close()
+		if copyErr != nil {
+			return "", fmt.Errorf("合并上传分片失败: %w", copyErr)
+		}
+	}
+	return mergedPath, nil
+}
+
+func isKnowledgeUploadZip(name string, path string) bool {
+	if !strings.EqualFold(filepath.Ext(name), ".zip") {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.Size() > 0
+}
+
+func moveKnowledgeUploadFile(source string, target string) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return fmt.Errorf("创建目标目录失败: %w", err)
+	}
+	if err := os.Rename(source, target); err == nil {
+		return nil
+	}
+	return copyKnowledgeFile(source, target)
+}
+
 func detectMimeType(path string, content []byte) string {
 	ext := strings.ToLower(filepath.Ext(path))
 	if mimeType := mime.TypeByExtension(ext); mimeType != "" {
 		return strings.Split(mimeType, ";")[0]
 	}
 	if len(content) > 0 {
-		return ""
+		return http.DetectContentType(content)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "application/octet-stream"
+	}
+	defer file.Close()
+	buffer := make([]byte, 512)
+	read, err := file.Read(buffer)
+	if err != nil && err != io.EOF {
+		return "application/octet-stream"
+	}
+	if read > 0 {
+		return http.DetectContentType(buffer[:read])
 	}
 	return "application/octet-stream"
 }
@@ -1061,12 +1350,47 @@ func isEditableKnowledgeFile(path string, mimeType string, size int64) bool {
 	if size > maxEditableFileBytes {
 		return false
 	}
-	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))
-	switch ext {
-	case "txt", "md", "markdown", "json", "yaml", "yml", "csv", "xml", "html", "htm", "css", "js", "ts", "tsx", "jsx", "go", "py", "java", "php", "sql", "sh", "conf", "ini", "env", "log":
+	if editableKnowledgeFileExts[strings.ToLower(strings.TrimPrefix(filepath.Ext(path), "."))] {
 		return true
 	}
-	return strings.HasPrefix(strings.ToLower(mimeType), "text/")
+	normalizedMimeType := strings.ToLower(strings.TrimSpace(mimeType))
+	if strings.HasPrefix(normalizedMimeType, "text/") {
+		return true
+	}
+	if normalizedMimeType != "" && normalizedMimeType != "application/octet-stream" {
+		return false
+	}
+	return isUTF8TextFile(path, size)
+}
+
+func isUTF8TextFile(path string, size int64) bool {
+	if size > maxEditableFileBytes {
+		return false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return isUTF8TextContent(raw)
+}
+
+func isUTF8TextContent(raw []byte) bool {
+	if len(raw) == 0 {
+		return true
+	}
+	if bytes.Contains(raw, []byte{0}) {
+		return false
+	}
+	if !utf8.Valid(raw) {
+		return false
+	}
+	var controlCount int
+	for _, value := range raw {
+		if value < 0x20 && value != '\n' && value != '\r' && value != '\t' && value != '\f' {
+			controlCount += 1
+		}
+	}
+	return controlCount == 0
 }
 
 func fileExtension(path string) string {

@@ -4,9 +4,20 @@ import type {
   KnowledgeFileContent,
   KnowledgeFileManagerData,
   KnowledgeFileOperationData,
+  KnowledgeFileUploadPartData,
 } from "./types"
 
 type RequestMethod = "get" | "post"
+
+type UploadFilePartParams = {
+  knowledgeBaseID: number
+  parent: string
+  name: string
+  uploadID: string
+  partNumber: number
+  totalParts: number
+  chunk: Blob
+}
 
 async function knowledgeRequest<T>(
   path: string,
@@ -17,6 +28,10 @@ async function knowledgeRequest<T>(
   if (!isKnowledgeApiResult(result)) {
     return result
   }
+  return unwrapKnowledgeResult(result)
+}
+
+function unwrapKnowledgeResult<T>(result: KnowledgeApiResult<T>) {
   if (typeof result.code === "number" && result.code !== 0) {
     throw new Error(result.msg || result.message || "请求失败")
   }
@@ -72,6 +87,32 @@ export function createFile(params: {
     type: params.type,
     content_base64: params.contentBase64 || "",
   })
+}
+
+export async function uploadFilePart(params: UploadFilePartParams) {
+  const form = new FormData()
+  form.set("knowledge_base_id", String(params.knowledgeBaseID))
+  form.set("parent", params.parent)
+  form.set("parent_id", params.parent)
+  form.set("name", params.name)
+  form.set("type", "file")
+  form.set("upload_id", params.uploadID)
+  form.set("part_number", String(params.partNumber))
+  form.set("total_parts", String(params.totalParts))
+  form.set("file", params.chunk, params.name)
+
+  const response = await fetch("/bot/knowledge/create_file", {
+    method: "POST",
+    body: form,
+  })
+  const result = (await response.json().catch(() => null)) as KnowledgeApiResult<KnowledgeFileUploadPartData> | null
+  if (!response.ok) {
+    throw new Error(result?.msg || result?.message || `请求失败(${response.status})`)
+  }
+  if (!result) {
+    throw new Error("请求失败")
+  }
+  return unwrapKnowledgeResult(result)
 }
 
 export function renameFile(params: {
@@ -137,4 +178,20 @@ export function downloadFileURL(knowledgeBaseID: number, id: string) {
     id,
   })
   return `/bot/knowledge/download_file?${params.toString()}`
+}
+
+export function previewFileURL(knowledgeBaseID: number, id: string) {
+  const params = new URLSearchParams({
+    knowledge_base_id: String(knowledgeBaseID),
+    id,
+    preview: "1",
+  })
+  return `/bot/knowledge/download_file?${params.toString()}`
+}
+
+export function downloadFileBaseURL(knowledgeBaseID: number, directoryID: string) {
+  const idPrefix = directoryID && directoryID !== "/" ? `${directoryID}/` : ""
+  return `/bot/knowledge/download_file?knowledge_base_id=${encodeURIComponent(
+    String(knowledgeBaseID),
+  )}&id=${encodeURIComponent(idPrefix)}`
 }

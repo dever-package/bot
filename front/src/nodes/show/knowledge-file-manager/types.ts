@@ -17,6 +17,13 @@ export type KnowledgeFileOperationData = KnowledgeFileManagerData & {
   new_ids?: string[]
 }
 
+export type KnowledgeFileUploadPartData = KnowledgeFileOperationData & {
+  complete?: boolean
+  upload_id?: string
+  part_number?: number
+  total_parts?: number
+}
+
 export type KnowledgeFileItem = {
   id: string
   name?: string
@@ -45,6 +52,10 @@ export type KnowledgeFileContent = {
   size: number
   doc_id?: number
   index_status?: string
+}
+
+export type KnowledgeFileViewerStatus = {
+  label: string
 }
 
 export type KnowledgeApiResult<T> = {

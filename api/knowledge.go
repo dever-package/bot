@@ -2,7 +2,9 @@ package api
 
 import (
 	"encoding/base64"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -74,6 +76,9 @@ func (Knowledge) PostCreateFile(c *server.Context) error {
 }
 
 func createKnowledgeFile(c *server.Context, fallbackType string) error {
+	if isKnowledgeMultipartRequest(c) {
+		return createKnowledgeFileFromMultipart(c)
+	}
 	body, err := bindKnowledgeBody(c)
 	if err != nil {
 		return c.Error(err)
@@ -90,6 +95,44 @@ func createKnowledgeFile(c *server.Context, fallbackType string) error {
 			Name:          textFromBody(body, "name", "title", "file_name", "dir_name"),
 			Type:          fileType,
 			ContentBase64: knowledgeContentBase64FromBody(body),
+		},
+	)
+	return knowledgeJSON(c, data, err)
+}
+
+func createKnowledgeFileFromMultipart(c *server.Context) error {
+	raw, ok := c.Raw.(*fiber.Ctx)
+	if !ok {
+		return c.Error("当前环境不支持文件上传")
+	}
+	fileHeader, err := raw.FormFile("file")
+	if err != nil {
+		return c.Error("上传文件不能为空")
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		return c.Error("读取上传文件失败")
+	}
+	defer file.Close()
+
+	partNumber, err := positiveIntFormValue(c, "part_number", 1)
+	if err != nil {
+		return c.Error(err)
+	}
+	totalParts, err := positiveIntFormValue(c, "total_parts", 1)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := knowledgeRunner.SaveKnowledgeUploadPart(
+		c.Context(),
+		knowledgeservice.KnowledgeUploadPartInput{
+			BaseID:     inputBaseID(c),
+			ParentID:   c.Input("parent"),
+			Name:       c.Input("name"),
+			UploadID:   c.Input("upload_id"),
+			PartNumber: partNumber,
+			TotalParts: totalParts,
+			Source:     file,
 		},
 	)
 	return knowledgeJSON(c, data, err)
@@ -193,7 +236,7 @@ func knowledgeMoveInputFromBody(body map[string]any) knowledgeservice.KnowledgeM
 }
 
 func (Knowledge) GetDownloadFile(c *server.Context) error {
-	filePath, filename, err := knowledgeRunner.ResolveKnowledgeFileNode(c.Context(), inputBaseID(c), c.Input("id"))
+	file, err := knowledgeRunner.ResolveKnowledgeFileContent(c.Context(), inputBaseID(c), c.Input("id"))
 	if err != nil {
 		return c.Error(err, http.StatusNotFound)
 	}
@@ -201,7 +244,14 @@ func (Knowledge) GetDownloadFile(c *server.Context) error {
 	if !ok {
 		return c.Error("当前环境不支持文件下载")
 	}
-	return raw.Download(filePath, filename)
+	if strings.TrimSpace(c.Input("preview")) == "1" {
+		if file.MimeType != "" {
+			raw.Set(fiber.HeaderContentType, file.MimeType)
+		}
+		raw.Set(fiber.HeaderContentDisposition, "inline")
+		return raw.SendFile(file.Path)
+	}
+	return raw.Download(file.Path, file.Name)
 }
 
 func (Knowledge) PostIndexFile(c *server.Context) error {
@@ -254,6 +304,30 @@ func bindKnowledgeBody(c *server.Context) (map[string]any, error) {
 		return nil, err
 	}
 	return body, nil
+}
+
+func isKnowledgeMultipartRequest(c *server.Context) bool {
+	raw, ok := c.Raw.(*fiber.Ctx)
+	if !ok {
+		return false
+	}
+	return strings.Contains(strings.ToLower(raw.Get(fiber.HeaderContentType)), "multipart/form-data")
+}
+
+func positiveIntFormValue(c *server.Context, key string, fallback int) (int, error) {
+	value := strings.TrimSpace(c.Input(key))
+	if value == "" {
+		return fallback, nil
+	}
+	number, err := strconv.Atoi(value)
+	if err != nil || number <= 0 {
+		return 0, errInvalidPositiveInt(key)
+	}
+	return number, nil
+}
+
+func errInvalidPositiveInt(key string) error {
+	return fmt.Errorf("%s 无效", key)
 }
 
 func inputBaseID(c *server.Context) uint64 {

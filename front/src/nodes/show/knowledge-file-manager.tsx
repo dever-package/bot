@@ -1,11 +1,13 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type MouseEvent,
   type ReactNode,
+  type CSSProperties,
 } from "react"
 import {
   ControlledTreeEnvironment,
@@ -15,8 +17,10 @@ import {
   type TreeItemIndex,
   type TreeItemRenderContext,
 } from "react-complex-tree"
-import "react-complex-tree/lib/style-modern.css"
 import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronRight,
   Download,
   FileText,
   Folder,
@@ -32,23 +36,35 @@ import {
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import type { NodeItemProps } from "@/page/nodes"
 import {
   createFile,
   deleteFiles,
+  downloadFileBaseURL,
   downloadFileURL,
   loadFileContent,
   loadFileManagerData,
   moveFiles,
+  previewFileURL,
   renameFile,
   saveFile,
+  uploadFilePart,
 } from "./knowledge-file-manager/api"
+import {
+  currentFileDirectoryID,
+  uniqueAttachmentName,
+} from "./knowledge-file-manager/attachment"
+import { KnowledgeFileViewer } from "./knowledge-file-manager/file-viewer"
+import {
+  preloadMarkdownLiveEditorRuntime,
+  type UploadedAttachment,
+} from "./knowledge-file-manager/markdown-live-editor"
 import "./knowledge-file-manager/styles.css"
 import type {
   KnowledgeFileContent,
   KnowledgeFileItem,
   KnowledgeFileManagerData,
+  KnowledgeFileViewerStatus,
   KnowledgeTreeNode,
 } from "./knowledge-file-manager/types"
 
@@ -65,30 +81,57 @@ type DraftState = {
   dirty: boolean
 }
 
+type OpeningFileState = {
+  name: string
+}
+
+type UploadProgressState = {
+  active: boolean
+  currentFile: string
+  currentIndex: number
+  total: number
+  percent: number
+  status: "reading" | "uploading" | "done" | "error"
+}
+
 const rootNodeID = "/"
 const treeID = "knowledge-files"
 const defaultFileName = "未命名文档.md"
 const defaultFolderName = "新建文件夹"
+const expandedStoragePrefix = "dever:bot:knowledge-file-manager:expanded:"
+const lastOpenedStoragePrefix = "dever:bot:knowledge-file-manager:last-opened:"
+const contextMenuViewportMargin = 8
+const contextMenuFallbackWidth = 168
+const contextMenuFallbackHeight = 184
+const uploadChunkSize = 512 * 1024
 
 export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
   const meta = item.meta ?? {}
   const knowledgeBaseID = useMemo(() => resolveKnowledgeBaseID(meta), [meta])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const uploadParentRef = useRef(rootNodeID)
+  const restoredKnowledgeBaseRef = useRef(0)
+  const openFileRequestRef = useRef(0)
   const [data, setData] = useState<KnowledgeFileManagerData>({})
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set([rootNodeID]))
+  const [expanded, setExpanded] = useState<Set<string>>(() =>
+    loadExpandedFolderIDs(knowledgeBaseID),
+  )
   const [selectedID, setSelectedID] = useState("")
   const [focusedID, setFocusedID] = useState("")
   const [currentFile, setCurrentFile] = useState<KnowledgeFileContent | null>(null)
+  const [openingFile, setOpeningFile] = useState<OpeningFileState | null>(null)
   const [draft, setDraft] = useState<DraftState | null>(null)
+  const [viewerStatus, setViewerStatus] = useState<KnowledgeFileViewerStatus | null>(null)
   const [query, setQuery] = useState("")
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null)
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null)
 
   const baseName = data.base?.name || "知识库"
   const tree = useMemo(() => buildTree(data.files || []), [data.files])
   const visibleTree = useMemo(() => filterTree(tree, query), [query, tree])
+  const flatTree = useMemo(() => flattenTree(tree), [tree])
   const treeItems = useMemo(
     () => buildComplexTreeItems(visibleTree, baseName),
     [baseName, visibleTree],
@@ -96,6 +139,10 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
   const selectedNode = useMemo(
     () => (selectedID ? findNode(tree, selectedID) : null),
     [selectedID, tree],
+  )
+  const focusedNode = useMemo(
+    () => (focusedID ? findNode(tree, focusedID) : null),
+    [focusedID, tree],
   )
   const reloadFiles = useCallback(async () => {
     if (!knowledgeBaseID) {
@@ -116,24 +163,83 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
   }, [reloadFiles])
 
   useEffect(() => {
+    void preloadMarkdownLiveEditorRuntime()
+  }, [])
+
+  useEffect(() => {
+    setExpanded(loadExpandedFolderIDs(knowledgeBaseID))
+    setSelectedID("")
+    setFocusedID("")
+    setCurrentFile(null)
+    setOpeningFile(null)
+    setDraft(null)
+    setViewerStatus(null)
+    openFileRequestRef.current += 1
+    restoredKnowledgeBaseRef.current = 0
+  }, [knowledgeBaseID])
+
+  useEffect(() => {
     const close = () => setContextMenu(null)
     window.addEventListener("click", close)
     window.addEventListener("resize", close)
+    window.addEventListener("scroll", close, true)
     return () => {
       window.removeEventListener("click", close)
       window.removeEventListener("resize", close)
+      window.removeEventListener("scroll", close, true)
     }
   }, [])
+
+  const backToList = useCallback(() => {
+    if (draft?.dirty && !window.confirm("当前文件尚未保存，确定返回上一页吗？")) {
+      return
+    }
+    if (window.history.length > 1) {
+      window.history.back()
+      return
+    }
+    window.location.href = "/bot/agent/knowledge_base/list"
+  }, [draft?.dirty])
+
+  const updateExpandedFolders = useCallback(
+    (updater: (current: Set<string>) => Set<string>) => {
+      setExpanded((current) => {
+        const next = updater(current)
+        saveExpandedFolderIDs(knowledgeBaseID, next)
+        return next
+      })
+    },
+    [knowledgeBaseID],
+  )
 
   const openFile = useCallback(
     async (node: KnowledgeTreeNode) => {
       if (!knowledgeBaseID || node.type !== "file") {
         return
       }
+      const previousSelectedID = selectedID
+      const previousFocusedID = focusedID
+      const previousFile = currentFile
+      const previousDraft = draft
+      const requestID = openFileRequestRef.current + 1
+      openFileRequestRef.current = requestID
+      setSelectedID(node.id)
+      setFocusedID(node.id)
+      setCurrentFile(null)
+      setDraft(null)
+      setViewerStatus(null)
+      setOpeningFile({ name: node.name || basename(node.id) })
+      updateExpandedFolders((current) => expandParentFolders(current, node.id))
       try {
         const detail = await loadFileContent({ knowledgeBaseID, id: node.id })
+        if (openFileRequestRef.current !== requestID) {
+          return
+        }
         setSelectedID(node.id)
+        setFocusedID(node.id)
+        saveLastOpenedFileID(knowledgeBaseID, node.id)
         setCurrentFile(detail)
+        setOpeningFile(null)
         setDraft({
           id: detail.id,
           name: detail.name,
@@ -141,10 +247,17 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           dirty: false,
         })
       } catch (error) {
-        toast.error(errorMessage(error, "打开文件失败"))
+        if (openFileRequestRef.current === requestID) {
+          setSelectedID(previousSelectedID)
+          setFocusedID(previousFocusedID)
+          setCurrentFile(previousFile)
+          setDraft(previousDraft)
+          setOpeningFile(null)
+          toast.error(errorMessage(error, "打开文件失败"))
+        }
       }
     },
-    [knowledgeBaseID],
+    [currentFile, draft, focusedID, knowledgeBaseID, selectedID, updateExpandedFolders],
   )
 
   const createNode = useCallback(
@@ -168,7 +281,7 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           type,
         })
         setData(result)
-        setExpanded((current) => new Set(current).add(parent))
+        updateExpandedFolders((current) => new Set(current).add(parent))
         if (type === "file" && result.new_id) {
           const created = findNode(buildTree(result.files || []), result.new_id)
           if (created) {
@@ -180,7 +293,7 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
         toast.error(errorMessage(error, "创建失败"))
       }
     },
-    [knowledgeBaseID, openFile],
+    [knowledgeBaseID, openFile, updateExpandedFolders],
   )
 
   const renameNode = useCallback(
@@ -198,6 +311,7 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
         const nextID = result.new_id || node.id
         if (selectedID === node.id) {
           setSelectedID(normalizeID(nextID))
+          saveLastOpenedFileID(knowledgeBaseID, nextID)
           if (node.type === "file" && currentFile) {
             setCurrentFile({ ...currentFile, id: nextID, name: name.trim() })
             setDraft((value) =>
@@ -223,7 +337,13 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
         if (selectedID === node.id || isNodeAncestor(node, selectedID)) {
           setSelectedID("")
           setCurrentFile(null)
+          setOpeningFile(null)
           setDraft(null)
+          setViewerStatus(null)
+        }
+        const lastOpenedID = loadLastOpenedFileID(knowledgeBaseID)
+        if (lastOpenedID && (lastOpenedID === node.id || isNodeAncestor(node, lastOpenedID))) {
+          clearLastOpenedFileID(knowledgeBaseID)
         }
         toast.success("已删除")
       } catch (error) {
@@ -258,6 +378,7 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           })
         : await loadFileContent({ knowledgeBaseID, id: nextID })
       setSelectedID(normalizeID(saved.id))
+      saveLastOpenedFileID(knowledgeBaseID, saved.id)
       setCurrentFile(saved)
       setDraft({
         id: saved.id,
@@ -291,30 +412,39 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
       }
       try {
         setData(await moveFiles({ knowledgeBaseID, ids: [source.id], target: targetFolderID }))
-        setExpanded((current) => new Set(current).add(targetFolderID))
+        updateExpandedFolders((current) => new Set(current).add(targetFolderID))
+        const lastOpenedID = loadLastOpenedFileID(knowledgeBaseID)
+        if (lastOpenedID && (lastOpenedID === source.id || isNodeAncestor(source, lastOpenedID))) {
+          clearLastOpenedFileID(knowledgeBaseID)
+        }
         if (selectedID === source.id || selectedID.startsWith(`${source.id}/`)) {
           setSelectedID("")
           setCurrentFile(null)
+          setOpeningFile(null)
           setDraft(null)
+          setViewerStatus(null)
+          clearLastOpenedFileID(knowledgeBaseID)
         }
         toast.success("已移动")
       } catch (error) {
         toast.error(errorMessage(error, "移动失败"))
-      } finally {
-        setDraggingID("")
       }
     },
-    [knowledgeBaseID, selectedID, tree],
+    [knowledgeBaseID, selectedID, tree, updateExpandedFolders],
   )
 
   const openUploadDialog = useCallback(
     (parentID?: string) => {
       const fallbackParent =
-        selectedNode?.type === "folder" ? selectedNode.id : parentIDOf(selectedID)
+        focusedNode?.type === "folder"
+          ? focusedNode.id
+          : selectedNode?.type === "folder"
+            ? selectedNode.id
+            : parentIDOf(selectedID)
       uploadParentRef.current = parentID || fallbackParent || rootNodeID
       fileInputRef.current?.click()
     },
-    [selectedID, selectedNode],
+    [focusedNode, selectedID, selectedNode],
   )
 
   const uploadFiles = useCallback(
@@ -323,35 +453,87 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
         return
       }
       const parent = uploadParentRef.current || rootNodeID
+      const fileList = Array.from(files)
       try {
         let latest: KnowledgeFileManagerData | null = null
-        for (const file of Array.from(files)) {
-          latest = await createFile({
+        for (let index = 0; index < fileList.length; index += 1) {
+          const file = fileList[index]
+          if (!file) {
+            continue
+          }
+          setUploadProgress({
+            active: true,
+            currentFile: file.name,
+            currentIndex: index + 1,
+            total: fileList.length,
+            percent: fileUploadPercent(index, fileList.length, 0),
+            status: "uploading",
+          })
+          latest = await uploadKnowledgeFile({
             knowledgeBaseID,
             parent,
+            file,
             name: file.name,
-            type: "file",
-            contentBase64: await fileToBase64(file),
+            onProgress: (fileRatio) => {
+              setUploadProgress({
+                active: true,
+                currentFile: file.name,
+                currentIndex: index + 1,
+                total: fileList.length,
+                percent: fileUploadPercent(index, fileList.length, fileRatio),
+                status: "uploading",
+              })
+            },
+          })
+          setUploadProgress({
+            active: true,
+            currentFile: file.name,
+            currentIndex: index + 1,
+            total: fileList.length,
+            percent: fileUploadPercent(index, fileList.length, 1),
+            status: "uploading",
           })
         }
         if (latest) {
           setData(latest)
         }
-        setExpanded((current) => new Set(current).add(parent))
+        updateExpandedFolders((current) => new Set(current).add(parent))
+        setUploadProgress({
+          active: false,
+          currentFile: fileList[fileList.length - 1]?.name || "",
+          currentIndex: fileList.length,
+          total: fileList.length,
+          percent: 100,
+          status: "done",
+        })
         toast.success("上传完成")
       } catch (error) {
+        setUploadProgress((current) =>
+          current
+            ? {
+                ...current,
+                active: false,
+                status: "error",
+              }
+            : null,
+        )
         toast.error(errorMessage(error, "上传失败"))
       } finally {
         if (fileInputRef.current) {
           fileInputRef.current.value = ""
         }
+        window.setTimeout(() => {
+          setUploadProgress((current) =>
+            current && !current.active ? null : current,
+          )
+        }, 1800)
       }
     },
-    [knowledgeBaseID],
+    [knowledgeBaseID, updateExpandedFolders],
   )
 
   const toggleFolder = useCallback((id: string) => {
-    setExpanded((current) => {
+    updateExpandedFolders((current) => {
       const next = new Set(current)
       if (next.has(id)) {
         next.delete(id)
@@ -360,16 +542,16 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
       }
       return next
     })
-  }, [])
+  }, [updateExpandedFolders])
 
   const selectNode = useCallback(
     (node: KnowledgeTreeNode) => {
-      setSelectedID(node.id)
       setFocusedID(node.id)
       if (node.type === "folder") {
         toggleFolder(node.id)
         return
       }
+      setSelectedID(node.id)
       void openFile(node)
     },
     [openFile, toggleFolder],
@@ -380,16 +562,82 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
     setFocusedID(node.id)
   }, [])
 
+  useEffect(() => {
+    if (
+      !knowledgeBaseID ||
+      selectedID ||
+      restoredKnowledgeBaseRef.current === knowledgeBaseID ||
+      !data.files ||
+      data.base?.id !== knowledgeBaseID
+    ) {
+      return
+    }
+
+    const lastOpenedID = loadLastOpenedFileID(knowledgeBaseID)
+    if (!lastOpenedID) {
+      restoredKnowledgeBaseRef.current = knowledgeBaseID
+      return
+    }
+
+    const node = findNode(tree, lastOpenedID)
+    restoredKnowledgeBaseRef.current = knowledgeBaseID
+    if (!node || node.type !== "file") {
+      clearLastOpenedFileID(knowledgeBaseID)
+      return
+    }
+
+    updateExpandedFolders((current) => expandParentFolders(current, node.id))
+    void openFile(node)
+  }, [data.files, knowledgeBaseID, openFile, selectedID, tree, updateExpandedFolders])
+
   const expandedIDs = useMemo(() => {
     if (!query.trim()) {
-      return Array.from(expanded)
+      return expandedIDsInTreeItems(expanded, treeItems)
     }
     return Array.from(folderIDsInTree(visibleTree))
-  }, [expanded, query, visibleTree])
+  }, [expanded, query, treeItems, visibleTree])
 
-  const selectedIDs = selectedID && treeItems[selectedID] ? [selectedID] : []
+  const selectedIDs =
+    selectedID && selectedNode?.type === "file" && treeItems[selectedID] ? [selectedID] : []
   const rawFocusedID = focusedID || selectedID
   const focusedItemID = rawFocusedID && treeItems[rawFocusedID] ? rawFocusedID : rootNodeID
+  const currentFileDownloadURL = currentFile
+    ? downloadFileURL(knowledgeBaseID, currentFile.id)
+    : ""
+  const currentFilePreviewURL = currentFile
+    ? previewFileURL(knowledgeBaseID, currentFile.id)
+    : ""
+  const currentFileLinkBaseURL = currentFile
+    ? downloadFileBaseURL(knowledgeBaseID, currentFileDirectoryID(currentFile.id))
+    : ""
+  const uploadEditorAttachments = useCallback(
+    async (files: File[]): Promise<UploadedAttachment[]> => {
+      if (!knowledgeBaseID || !currentFile) {
+        throw new Error("请先打开一个文档")
+      }
+      const parent = currentFileDirectoryID(currentFile.id)
+      const reservedNames = new Set<string>()
+      const uploaded: UploadedAttachment[] = []
+      let latest: KnowledgeFileManagerData | null = null
+      for (const file of files) {
+        const name = uniqueAttachmentName(flatTree, parent, file.name, reservedNames)
+        reservedNames.add(name)
+        latest = await uploadKnowledgeFile({
+          knowledgeBaseID,
+          parent,
+          file,
+          name,
+        })
+        uploaded.push({ name })
+      }
+      if (latest) {
+        setData(latest)
+      }
+      updateExpandedFolders((current) => new Set(current).add(parent))
+      return uploaded
+    },
+    [currentFile, flatTree, knowledgeBaseID, updateExpandedFolders],
+  )
 
   const handleContextMenu = useCallback((event: MouseEvent, node: KnowledgeTreeNode | null) => {
     event.preventDefault()
@@ -408,15 +656,16 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           <span>{baseName}</span>
           <small>{data.files?.length || 0} 个节点</small>
         </div>
-        <div className="knowledge-toolbar__search">
-          <Search size={16} />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索文件"
-          />
-        </div>
         <div className="knowledge-toolbar__actions">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="knowledge-toolbar__back"
+            onClick={backToList}
+          >
+            <ArrowLeft size={16} />
+            返回上一页
+          </Button>
           <Button variant="outline" size="sm" onClick={() => void createNode("folder")}>
             <FolderPlus size={16} />
             文件夹
@@ -447,6 +696,20 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           className="knowledge-sidebar"
           onContextMenu={(event) => handleContextMenu(event, null)}
         >
+          <div
+            className="knowledge-sidebar__search"
+            onContextMenu={(event) => event.stopPropagation()}
+          >
+            <div className="knowledge-toolbar__search">
+              <Search size={16} />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜索文件"
+              />
+            </div>
+            <UploadProgressPanel progress={uploadProgress} />
+          </div>
           {loading && !data.files?.length ? (
             <div className="knowledge-sidebar__state">加载中...</div>
           ) : null}
@@ -477,12 +740,14 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
                 }
                 onExpandItem={(treeItem) => {
                   if (treeItem.index !== rootNodeID) {
-                    setExpanded((current) => new Set(current).add(String(treeItem.index)))
+                    updateExpandedFolders((current) =>
+                      new Set(current).add(String(treeItem.index)),
+                    )
                   }
                 }}
                 onCollapseItem={(treeItem) => {
                   if (treeItem.index !== rootNodeID) {
-                    setExpanded((current) => {
+                    updateExpandedFolders((current) => {
                       const next = new Set(current)
                       next.delete(String(treeItem.index))
                       return next
@@ -495,7 +760,7 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
                     return
                   }
                   const node = findNode(tree, nextID)
-                  if (node) {
+                  if (node?.type === "file") {
                     markSelectedNode(node)
                   }
                 }}
@@ -522,9 +787,15 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
                 renderItemArrow={({ item, context }) => (
                   <span
                     {...context.arrowProps}
-                    className="knowledge-tree-row__arrow"
+                    className={`knowledge-tree-row__arrow${item.isFolder ? "" : " is-empty"}`}
                   >
-                    {item.isFolder ? (context.isExpanded ? "▾" : "▸") : ""}
+                    {item.isFolder ? (
+                      context.isExpanded ? (
+                        <ChevronDown size={17} />
+                      ) : (
+                        <ChevronRight size={17} />
+                      )
+                    ) : null}
                   </span>
                 )}
                 renderItemTitle={({ title, item }) => (
@@ -557,12 +828,15 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
         </aside>
 
         <section className="knowledge-editor">
-          {draft && currentFile ? (
+          {openingFile ? (
+            <FileOpeningPanel fileName={openingFile.name} />
+          ) : draft && currentFile ? (
             <>
               <div className="knowledge-editor__header">
                 <div className="knowledge-editor__title">
                   <Input
                     value={draft.name}
+                    title={draft.name}
                     onChange={(event) =>
                       setDraft((value) =>
                         value ? { ...value, name: event.target.value, dirty: true } : value,
@@ -571,12 +845,11 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
                   />
                 </div>
                 <div className="knowledge-editor__actions">
+                  <EditorHeaderStatus status={viewerStatus} />
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() =>
-                      window.open(downloadFileURL(knowledgeBaseID, currentFile.id), "_blank")
-                    }
+                    onClick={() => window.open(currentFileDownloadURL, "_blank")}
                   >
                     <Download size={16} />
                     下载
@@ -591,24 +864,23 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
                   </Button>
                 </div>
               </div>
-              {currentFile.editable ? (
-                <Textarea
-                  value={draft.content}
-                  onChange={(event) =>
-                    setDraft((value) =>
-                      value ? { ...value, content: event.target.value, dirty: true } : value,
-                    )
+              <div className="knowledge-editor__body">
+                <KnowledgeFileViewer
+                  file={currentFile}
+                  content={draft.content}
+                  downloadURL={currentFileDownloadURL}
+                  previewURL={currentFilePreviewURL}
+                  linkBaseURL={currentFileLinkBaseURL}
+                  onUploadAttachments={uploadEditorAttachments}
+                  onAttachmentError={(error) =>
+                    toast.error(errorMessage(error, "附件上传失败"))
                   }
-                  className="knowledge-editor__textarea"
-                  placeholder="输入知识内容"
+                  onStatusChange={setViewerStatus}
+                  onChange={(content) =>
+                    setDraft((value) => (value ? { ...value, content, dirty: true } : value))
+                  }
                 />
-              ) : (
-                <div className="knowledge-editor__readonly">
-                  <FileText size={38} />
-                  <strong>该文件不支持在线编辑</strong>
-                  <span>可以下载原文件，或修改标题后保存重命名。</span>
-                </div>
-              )}
+              </div>
             </>
           ) : (
             <div className="knowledge-editor__placeholder">
@@ -661,6 +933,57 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
   )
 }
 
+function FileOpeningPanel({ fileName }: { fileName: string }) {
+  return (
+    <>
+      <div className="knowledge-editor__header">
+        <div className="knowledge-editor__title">
+          <span className="knowledge-editor__title-text">{fileName || "文件"}</span>
+        </div>
+        <div className="knowledge-editor__actions">
+          <EditorHeaderStatus status={{ label: "文件加载中" }} />
+        </div>
+      </div>
+      <div className="knowledge-editor__body" aria-busy="true" />
+    </>
+  )
+}
+
+function EditorHeaderStatus({ status }: { status: KnowledgeFileViewerStatus | null }) {
+  if (!status) {
+    return null
+  }
+  return (
+    <span className="knowledge-editor__status" role="status" aria-label={status.label}>
+      <RefreshCw size={15} />
+    </span>
+  )
+}
+
+function UploadProgressPanel({ progress }: { progress: UploadProgressState | null }) {
+  if (!progress) {
+    return null
+  }
+  const percent = clamp(Math.round(progress.percent), 0, 100)
+  return (
+    <div className={`knowledge-upload-progress is-${progress.status}`} role="status">
+      <div className="knowledge-upload-progress__row">
+        <span>{uploadStatusText(progress.status)}</span>
+        <strong>{percent}%</strong>
+      </div>
+      <div className="knowledge-upload-progress__track">
+        <span style={{ width: `${percent}%` }} />
+      </div>
+      <div className="knowledge-upload-progress__meta">
+        <span>{progress.currentFile || "准备上传"}</span>
+        <em>
+          {progress.currentIndex}/{progress.total}
+        </em>
+      </div>
+    </div>
+  )
+}
+
 function TreeRow({
   item,
   depth,
@@ -679,6 +1002,12 @@ function TreeRow({
   children: ReactNode
 }) {
   const node = item.index === rootNodeID ? null : item.data
+  const isFile = node?.type === "file"
+  const visualDepth = node ? Math.max(0, node.level) : Math.max(0, depth - 1)
+  const rowStyle = {
+    "--knowledge-tree-guide-left": `${12 + Math.max(0, visualDepth - 1) * 28 + 9}px`,
+    paddingLeft: 12 + visualDepth * 28,
+  } as CSSProperties
   return (
     <li
       {...context.itemContainerWithChildrenProps}
@@ -686,10 +1015,12 @@ function TreeRow({
     >
       <div
         {...context.interactiveElementProps}
-        className={`knowledge-tree-row${context.isSelected ? " is-selected" : ""}${
-          context.isFocused ? " is-focused" : ""
-        }${context.isDraggingOver ? " can-drop" : ""}`}
-        style={{ paddingLeft: 8 + Math.max(0, depth - 1) * 16 }}
+        className={`knowledge-tree-row${context.isSelected && isFile ? " is-selected" : ""}${
+          context.isFocused && isFile ? " is-focused" : ""
+        }${context.isDraggingOver ? " can-drop" : ""}${
+          visualDepth === 0 ? " is-root-level" : " is-nested"
+        }`}
+        style={rowStyle}
         onContextMenu={(event) => onContextMenu(event, node)}
       >
         {arrow}
@@ -717,10 +1048,33 @@ function ContextMenu({
   onDelete: (node: KnowledgeTreeNode | null) => void
 }) {
   const node = state.node
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const [position, setPosition] = useState(() =>
+    resolveContextMenuPosition(
+      state.x,
+      state.y,
+      contextMenuFallbackWidth,
+      contextMenuFallbackHeight,
+    ),
+  )
+
+  useLayoutEffect(() => {
+    const rect = menuRef.current?.getBoundingClientRect()
+    setPosition(
+      resolveContextMenuPosition(
+        state.x,
+        state.y,
+        rect?.width || contextMenuFallbackWidth,
+        rect?.height || contextMenuFallbackHeight,
+      ),
+    )
+  }, [state.x, state.y, node])
+
   return (
     <div
+      ref={menuRef}
       className="knowledge-context-menu"
-      style={{ left: state.x, top: state.y }}
+      style={{ left: position.left, top: position.top }}
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
     >
@@ -751,6 +1105,29 @@ function ContextMenu({
       ) : null}
     </div>
   )
+}
+
+function resolveContextMenuPosition(
+  x: number,
+  y: number,
+  menuWidth: number,
+  menuHeight: number,
+) {
+  if (typeof window === "undefined") {
+    return { left: x, top: y }
+  }
+  const maxLeft = Math.max(
+    contextMenuViewportMargin,
+    window.innerWidth - menuWidth - contextMenuViewportMargin,
+  )
+  const maxTop = Math.max(
+    contextMenuViewportMargin,
+    window.innerHeight - menuHeight - contextMenuViewportMargin,
+  )
+  return {
+    left: clamp(x, contextMenuViewportMargin, maxLeft),
+    top: clamp(y, contextMenuViewportMargin, maxTop),
+  }
 }
 
 function buildComplexTreeItems(nodes: KnowledgeTreeNode[], baseName: string) {
@@ -799,6 +1176,87 @@ function folderIDsInTree(nodes: KnowledgeTreeNode[]) {
   }
   nodes.forEach(visitNode)
   return ids
+}
+
+function expandedIDsInTreeItems(
+  expanded: Set<string>,
+  treeItems: Record<TreeItemIndex, TreeItem<KnowledgeTreeNode>>,
+) {
+  return Array.from(expanded).filter((id) => id === rootNodeID || Boolean(treeItems[id]))
+}
+
+function loadExpandedFolderIDs(knowledgeBaseID: number) {
+  if (!knowledgeBaseID || typeof window === "undefined") {
+    return new Set<string>([rootNodeID])
+  }
+  try {
+    const value = window.localStorage.getItem(expandedStorageKey(knowledgeBaseID))
+    const ids = JSON.parse(value || "[]")
+    if (!Array.isArray(ids)) {
+      return new Set<string>([rootNodeID])
+    }
+    return new Set([rootNodeID, ...ids.map(normalizeID).filter((id) => id !== rootNodeID)])
+  } catch {
+    return new Set<string>([rootNodeID])
+  }
+}
+
+function saveExpandedFolderIDs(knowledgeBaseID: number, expanded: Set<string>) {
+  if (!knowledgeBaseID || typeof window === "undefined") {
+    return
+  }
+  const ids = Array.from(expanded).filter((id) => id && id !== rootNodeID)
+  window.localStorage.setItem(expandedStorageKey(knowledgeBaseID), JSON.stringify(ids))
+}
+
+function expandedStorageKey(knowledgeBaseID: number) {
+  return `${expandedStoragePrefix}${knowledgeBaseID}`
+}
+
+function loadLastOpenedFileID(knowledgeBaseID: number) {
+  if (!knowledgeBaseID || typeof window === "undefined") {
+    return ""
+  }
+  const value = window.localStorage.getItem(lastOpenedStorageKey(knowledgeBaseID))
+  if (!value) {
+    return ""
+  }
+  const id = normalizeID(value)
+  return id === rootNodeID ? "" : id
+}
+
+function saveLastOpenedFileID(knowledgeBaseID: number, fileID: string) {
+  if (!knowledgeBaseID || typeof window === "undefined") {
+    return
+  }
+  const id = normalizeID(fileID)
+  if (!id || id === rootNodeID) {
+    clearLastOpenedFileID(knowledgeBaseID)
+    return
+  }
+  window.localStorage.setItem(lastOpenedStorageKey(knowledgeBaseID), id)
+}
+
+function clearLastOpenedFileID(knowledgeBaseID: number) {
+  if (!knowledgeBaseID || typeof window === "undefined") {
+    return
+  }
+  window.localStorage.removeItem(lastOpenedStorageKey(knowledgeBaseID))
+}
+
+function lastOpenedStorageKey(knowledgeBaseID: number) {
+  return `${lastOpenedStoragePrefix}${knowledgeBaseID}`
+}
+
+function expandParentFolders(expanded: Set<string>, fileID: string) {
+  const next = new Set(expanded)
+  let parentID = parentIDOf(fileID)
+  while (parentID && parentID !== rootNodeID) {
+    next.add(parentID)
+    parentID = parentIDOf(parentID)
+  }
+  next.add(rootNodeID)
+  return next
 }
 
 function canDropTreeItems(
@@ -864,6 +1322,16 @@ function buildTree(files: KnowledgeFileItem[]) {
   return roots
 }
 
+function flattenTree(nodes: KnowledgeTreeNode[]) {
+  const result: KnowledgeTreeNode[] = []
+  const visit = (node: KnowledgeTreeNode) => {
+    result.push(node)
+    node.children.forEach(visit)
+  }
+  nodes.forEach(visit)
+  return result
+}
+
 function toTreeNode(file: KnowledgeFileItem): KnowledgeTreeNode {
   const id = normalizeID(file.id)
   return {
@@ -923,9 +1391,25 @@ function isNodeAncestor(node: KnowledgeTreeNode, id: string) {
 }
 
 function resolveKnowledgeBaseID(meta: Record<string, unknown>) {
-  const value = meta.knowledge_base_id || meta.knowledgeBaseID || meta.id
+  const value =
+    meta.knowledge_base_id ||
+    meta.knowledgeBaseID ||
+    meta.base_id ||
+    meta.baseID ||
+    meta.id ||
+    queryValue("knowledge_base_id") ||
+    queryValue("knowledgeBaseID") ||
+    queryValue("base_id") ||
+    queryValue("id")
   const id = Number(value)
   return Number.isFinite(id) && id > 0 ? id : 0
+}
+
+function queryValue(name: string) {
+  if (typeof window === "undefined") {
+    return ""
+  }
+  return new URLSearchParams(window.location.search).get(name) || ""
 }
 
 function normalizeID(value: unknown) {
@@ -960,16 +1444,70 @@ function levelOf(id: string) {
   return normalized.split("/").length - 1
 }
 
-function fileToBase64(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(new Error("读取文件失败"))
-    reader.onload = () => {
-      const result = String(reader.result || "")
-      resolve(result.includes(",") ? result.slice(result.indexOf(",") + 1) : result)
+async function uploadKnowledgeFile({
+  knowledgeBaseID,
+  parent,
+  file,
+  name,
+  onProgress,
+}: {
+  knowledgeBaseID: number
+  parent: string
+  file: File
+  name: string
+  onProgress?: (percent: number) => void
+}) {
+  const totalParts = Math.max(1, Math.ceil(file.size / uploadChunkSize))
+  const uploadID = createUploadID()
+  let latest: KnowledgeFileManagerData | null = null
+  for (let partIndex = 0; partIndex < totalParts; partIndex += 1) {
+    const start = partIndex * uploadChunkSize
+    const chunk = file.slice(start, Math.min(file.size, start + uploadChunkSize))
+    const partResult = await uploadFilePart({
+      knowledgeBaseID,
+      parent,
+      name,
+      uploadID,
+      partNumber: partIndex + 1,
+      totalParts,
+      chunk,
+    })
+    if (partResult.complete) {
+      latest = partResult
     }
-    reader.readAsDataURL(file)
-  })
+    onProgress?.((partIndex + 1) / totalParts)
+  }
+  if (!latest) {
+    throw new Error("上传失败")
+  }
+  return latest
+}
+
+function createUploadID() {
+  const random = Math.random().toString(36).slice(2)
+  return `${Date.now().toString(36)}_${random}`
+}
+
+function fileUploadPercent(completedIndex: number, total: number, currentFileRatio: number) {
+  const safeTotal = Math.max(total, 1)
+  return Math.round(((completedIndex + clamp(currentFileRatio, 0, 1)) / safeTotal) * 100)
+}
+
+function uploadStatusText(status: UploadProgressState["status"]) {
+  if (status === "reading") {
+    return "读取文件中"
+  }
+  if (status === "uploading") {
+    return "上传中"
+  }
+  if (status === "done") {
+    return "上传完成"
+  }
+  return "上传失败"
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
 }
 
 function errorMessage(error: unknown, fallback: string) {

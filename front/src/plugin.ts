@@ -1,7 +1,19 @@
 import { defineFrontPlugin, lazyNode } from "@dever/front-plugin";
 
-export default defineFrontPlugin({
+const botPlugin = {
   name: "bot",
+  depends: [
+    "react-complex-tree",
+    "@uiw/react-codemirror",
+    "@codemirror/lang-json",
+    "@codemirror/lang-html",
+    "@codemirror/lang-css",
+    "@codemirror/lang-javascript",
+    "@codemirror/lang-sql",
+    "@codemirror/lang-yaml",
+    "@codemirror/lang-xml",
+    "vditor",
+  ],
   nodes: {
     "show-agent": lazyNode(() =>
       import("./nodes/show/agent").then((mod) => ({
@@ -24,4 +36,6 @@ export default defineFrontPlugin({
       })),
     ),
   },
-});
+};
+
+export default defineFrontPlugin(botPlugin);
