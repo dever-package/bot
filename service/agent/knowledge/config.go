@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	defaultChunkSize       = agentmodel.DefaultKnowledgeChunkSize
-	defaultChunkOverlap    = agentmodel.DefaultKnowledgeChunkOverlap
+	defaultNodeMaxLength   = agentmodel.DefaultKnowledgeNodeMaxLength
+	defaultNodeOverlap     = agentmodel.DefaultKnowledgeNodeSplitOverlap
 	defaultRetrieveLimit   = agentmodel.DefaultKnowledgeRetrieveLimit
 	defaultScoreThreshold  = agentmodel.DefaultKnowledgeScoreThreshold
 	defaultMaxContextChars = agentmodel.DefaultKnowledgeMaxContextChars

@@ -2,11 +2,14 @@ package knowledge
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
 	agentmodel "my/package/bot/model/agent"
+	energonmodel "my/package/bot/model/energon"
 	frontaction "my/package/front/service/action"
 )
 
@@ -14,6 +17,7 @@ type KnowledgeHook struct{}
 
 func (KnowledgeHook) ProviderBeforeSaveKnowledgeCate(_ *server.Context, params []any) any {
 	record := cloneRecord(params)
+	keepRecordFields(record, knowledgeCateSaveFields)
 	partial := isPartialRecord(record)
 	trimField(record, "name", partial)
 	if !partial && trimText(record["name"]) == "" {
@@ -24,8 +28,67 @@ func (KnowledgeHook) ProviderBeforeSaveKnowledgeCate(_ *server.Context, params [
 	return record
 }
 
+func (KnowledgeHook) ProviderBeforeSaveKnowledgeParserService(c *server.Context, params []any) any {
+	record := cloneRecord(params)
+	keepRecordFields(record, knowledgeParserServiceSaveFields)
+	partial := isPartialRecord(record)
+
+	trimField(record, "name", partial)
+	if !partial && trimText(record["name"]) == "" {
+		panic(frontaction.NewFieldError("form.name", "服务名称不能为空。"))
+	}
+	if shouldNormalize(record, "provider", partial) {
+		record["provider"] = normalizeParserProvider(record["provider"])
+	}
+	if shouldNormalize(record, "host", partial) {
+		record["host"] = normalizeParserHost(record["host"])
+	}
+	if !partial && trimText(record["host"]) == "" {
+		panic(frontaction.NewFieldError("form.host", "服务地址不能为空。"))
+	}
+	keepExistingParserAPIKey(c.Context(), record, partial)
+	if !partial && trimText(record["api_key"]) == "" {
+		panic(frontaction.NewFieldError("form.api_key", "APIKey 不能为空。"))
+	}
+	defaultInt16(record, "status", 1, partial)
+	defaultInt(record, "sort", 100, partial)
+	return record
+}
+
+func (KnowledgeHook) ProviderAttachKnowledgeParserServiceList(c *server.Context, params []any) any {
+	payload := cloneRecord(params)
+	rows := mapRows(payload["rows"])
+	if len(rows) == 0 {
+		return rows
+	}
+
+	serviceIDs := rowIDs(rows)
+	if len(serviceIDs) == 0 {
+		return rows
+	}
+
+	services := agentmodel.NewKnowledgeParserServiceModel().Select(c.Context(), map[string]any{
+		"id": serviceIDs,
+	})
+	apiKeyStatus := map[uint64]bool{}
+	for _, service := range services {
+		if strings.TrimSpace(service.APIKey) != "" {
+			apiKeyStatus[service.ID] = true
+		}
+	}
+	for _, row := range rows {
+		if apiKeyStatus[util.ToUint64(row["id"])] {
+			row["api_key_status"] = "已配置"
+		} else {
+			row["api_key_status"] = "未配置"
+		}
+	}
+	return rows
+}
+
 func (KnowledgeHook) ProviderBeforeSaveKnowledgeBase(c *server.Context, params []any) any {
 	record := cloneRecord(params)
+	keepRecordFields(record, knowledgeBaseSaveFields)
 	partial := isPartialRecord(record)
 
 	trimField(record, "name", partial)
@@ -40,27 +103,48 @@ func (KnowledgeHook) ProviderBeforeSaveKnowledgeBase(c *server.Context, params [
 	if !partial || shouldNormalize(record, "cate_id", partial) || shouldNormalize(record, "collection", partial) {
 		record["collection"] = knowledgeCollectionName(cateID)
 	}
-	if shouldNormalize(record, "vector_enabled", partial) {
-		record["vector_enabled"] = normalizeVectorEnabled(record["vector_enabled"])
-	}
-	vectorEnabled := knowledgeBaseVectorEnabled(record, existingBase)
-	embeddingChanged := !partial || shouldNormalize(record, "embedding_power_id", partial) || shouldNormalize(record, "vector_enabled", partial)
-	if !vectorEnabled {
-		if embeddingChanged {
-			record["embedding_power_id"] = 0
+	if shouldNormalize(record, "parser_service_id", partial) {
+		parserServiceID, err := normalizeKnowledgeParserServiceID(c.Context(), record["parser_service_id"])
+		if err != nil {
+			panic(frontaction.NewFieldError("form.parser_service_id", err.Error()))
 		}
-	} else if embeddingChanged {
-		ensureKnowledgeBaseEmbeddingWithFallback(c.Context(), record, existingBase)
-		if err := validateKnowledgeBaseEmbedding(c.Context(), record); err != nil {
-			panic(frontaction.NewFieldError("form.embedding_power_id", err.Error()))
+		record["parser_service_id"] = parserServiceID
+		if err := validateKnowledgeParserService(c.Context(), parserServiceID); err != nil {
+			panic(frontaction.NewFieldError("form.parser_service_id", err.Error()))
 		}
 	}
-	if shouldNormalize(record, "chunk_size", partial) {
-		record["chunk_size"] = normalizeChunkSize(record["chunk_size"])
+	if shouldNormalize(record, "index_power_id", partial) {
+		ensureKnowledgeIndexPowerWithFallback(record, existingBase)
+		if err := validateKnowledgePower(c.Context(), util.ToUint64(record["index_power_id"]), "text", "索引模型"); err != nil {
+			panic(frontaction.NewFieldError("form.index_power_id", err.Error()))
+		}
 	}
-	chunkSize := util.ToIntDefault(record["chunk_size"], agentmodel.DefaultKnowledgeChunkSize)
-	if shouldNormalize(record, "chunk_overlap", partial) {
-		record["chunk_overlap"] = normalizeChunkOverlap(record["chunk_overlap"], chunkSize)
+	if shouldNormalize(record, "embedding_power_id", partial) {
+		embeddingPowerID := util.ToUint64(record["embedding_power_id"])
+		record["embedding_power_id"] = embeddingPowerID
+		if embeddingPowerID > 0 {
+			if err := validateKnowledgePower(c.Context(), embeddingPowerID, "embeddings", "向量能力"); err != nil {
+				panic(frontaction.NewFieldError("form.embedding_power_id", err.Error()))
+			}
+			record["vector_enabled"] = 1
+		} else {
+			record["vector_enabled"] = 2
+		}
+	} else if !partial {
+		record["vector_enabled"] = 2
+	}
+	if shouldNormalize(record, "node_max_length", partial) {
+		record["node_max_length"] = normalizeNodeMaxLength(record["node_max_length"])
+	}
+	nodeMaxLength := util.ToIntDefault(record["node_max_length"], 0)
+	if nodeMaxLength <= 0 && existingBase != nil {
+		nodeMaxLength = existingBase.NodeMaxLength
+	}
+	if nodeMaxLength <= 0 {
+		nodeMaxLength = agentmodel.DefaultKnowledgeNodeMaxLength
+	}
+	if shouldNormalize(record, "node_split_overlap", partial) {
+		record["node_split_overlap"] = normalizeNodeSplitOverlap(record["node_split_overlap"], nodeMaxLength)
 	}
 	if shouldNormalize(record, "retrieve_limit", partial) {
 		record["retrieve_limit"] = normalizeRetrieveLimit(record["retrieve_limit"])
@@ -71,12 +155,120 @@ func (KnowledgeHook) ProviderBeforeSaveKnowledgeBase(c *server.Context, params [
 	if shouldNormalize(record, "max_context_chars", partial) {
 		record["max_context_chars"] = normalizeMaxContextChars(record["max_context_chars"])
 	}
-	if shouldNormalize(record, "index_status", partial) {
-		record["index_status"] = normalizeIndexStatus(record["index_status"])
+	if shouldNormalize(record, "graph_depth", partial) {
+		record["graph_depth"] = normalizeGraphDepth(record["graph_depth"])
 	}
 	defaultInt16(record, "status", 1, partial)
 	defaultInt(record, "sort", 100, partial)
 	return record
+}
+
+func normalizeParserProvider(value any) string {
+	provider := strings.ToLower(strings.TrimSpace(util.ToString(value)))
+	if provider == "" {
+		return agentmodel.KnowledgeParserProviderMinerU
+	}
+	if provider != agentmodel.KnowledgeParserProviderMinerU {
+		panic(frontaction.NewFieldError("form.provider", "当前仅支持 MinerU 服务。"))
+	}
+	return provider
+}
+
+func normalizeKnowledgeParserServiceID(ctx context.Context, value any) (uint64, error) {
+	if emptyRelationValue(value) {
+		return 0, nil
+	}
+	if id := relationValueID(value); id > 0 {
+		return id, nil
+	}
+	if name := relationValueLabel(value); name != "" {
+		row := agentmodel.NewKnowledgeParserServiceModel().Find(ctx, map[string]any{"name": name})
+		if row != nil {
+			return row.ID, nil
+		}
+	}
+	return 0, fmt.Errorf("文档解析服务不存在。")
+}
+
+func emptyRelationValue(value any) bool {
+	switch current := value.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(current) == ""
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return util.ToUint64(current) == 0
+	case map[string]any:
+		return relationValueID(current) == 0 && relationValueLabel(current) == ""
+	default:
+		return false
+	}
+}
+
+func relationValueID(value any) uint64 {
+	if id := util.ToUint64(value); id > 0 {
+		return id
+	}
+	row, ok := value.(map[string]any)
+	if !ok {
+		return 0
+	}
+	for _, key := range []string{"id", "value", "raw_id"} {
+		if id := util.ToUint64(row[key]); id > 0 {
+			return id
+		}
+	}
+	return 0
+}
+
+func relationValueLabel(value any) string {
+	row, ok := value.(map[string]any)
+	if !ok {
+		return strings.TrimSpace(util.ToString(value))
+	}
+	for _, key := range []string{"name", "label", "value"} {
+		label := strings.TrimSpace(util.ToString(row[key]))
+		if label != "" {
+			return label
+		}
+	}
+	return ""
+}
+
+func validateKnowledgeParserService(ctx context.Context, serviceID uint64) error {
+	if serviceID == 0 {
+		return nil
+	}
+	row := agentmodel.NewKnowledgeParserServiceModel().Find(ctx, map[string]any{"id": serviceID})
+	if row == nil {
+		return fmt.Errorf("文档解析服务不存在。")
+	}
+	if row.Status != 1 {
+		return fmt.Errorf("文档解析服务已停用。")
+	}
+	return nil
+}
+
+func normalizeParserHost(value any) string {
+	return strings.TrimRight(strings.TrimSpace(util.ToString(value)), "/")
+}
+
+func keepExistingParserAPIKey(ctx context.Context, record map[string]any, partial bool) {
+	if !shouldNormalize(record, "api_key", partial) {
+		return
+	}
+	record["api_key"] = strings.TrimSpace(util.ToString(record["api_key"]))
+	if record["api_key"] != "" {
+		return
+	}
+	serviceID := util.ToUint64(record["id"])
+	if serviceID == 0 {
+		return
+	}
+	existing := agentmodel.NewKnowledgeParserServiceModel().Find(ctx, map[string]any{"id": serviceID})
+	if existing != nil {
+		record["api_key"] = existing.APIKey
+	}
 }
 
 func existingKnowledgeBase(ctx context.Context, baseID uint64) *agentmodel.KnowledgeBase {
@@ -97,21 +289,43 @@ func knowledgeBaseCateID(record map[string]any, existing *agentmodel.KnowledgeBa
 	return cateID
 }
 
-func knowledgeBaseVectorEnabled(record map[string]any, existing *agentmodel.KnowledgeBase) bool {
-	if _, exists := record["vector_enabled"]; exists {
-		return isVectorEnabled(normalizeVectorEnabled(record["vector_enabled"]))
+func ensureKnowledgeIndexPowerWithFallback(record map[string]any, existing *agentmodel.KnowledgeBase) {
+	if util.ToUint64(record["index_power_id"]) > 0 {
+		return
 	}
-	if existing != nil {
-		return isVectorEnabled(existing.VectorEnabled)
+	if existing != nil && existing.IndexPowerID > 0 {
+		record["index_power_id"] = existing.IndexPowerID
+		return
 	}
-	return false
+	record["index_power_id"] = agentmodel.DefaultKnowledgeIndexPowerID
 }
 
-func ensureKnowledgeBaseEmbeddingWithFallback(ctx context.Context, record map[string]any, existing *agentmodel.KnowledgeBase) {
-	if util.ToUint64(record["embedding_power_id"]) == 0 && existing != nil && existing.EmbeddingPowerID > 0 {
-		record["embedding_power_id"] = existing.EmbeddingPowerID
+func validateKnowledgePower(ctx context.Context, powerID uint64, kind string, label string) error {
+	if powerID == 0 {
+		return fmt.Errorf("%s不能为空。", label)
 	}
-	ensureKnowledgeBaseEmbedding(ctx, record)
+	row := energonmodel.NewPowerModel().Find(ctx, map[string]any{"id": powerID})
+	if row == nil {
+		return fmt.Errorf("%s不存在。", label)
+	}
+	if row.Status != 1 {
+		return fmt.Errorf("%s已停用。", label)
+	}
+	if strings.ToLower(strings.TrimSpace(row.Kind)) != kind {
+		return fmt.Errorf("%s必须选择%s类型能力。", label, knowledgePowerKindLabel(kind))
+	}
+	return nil
+}
+
+func knowledgePowerKindLabel(kind string) string {
+	switch kind {
+	case "text":
+		return "文本"
+	case "embeddings":
+		return "向量"
+	default:
+		return kind
+	}
 }
 
 func (KnowledgeHook) ProviderAfterSaveKnowledgeBase(c *server.Context, params []any) any {
@@ -131,11 +345,10 @@ func syncKnowledgeBaseVectorConfig(ctx context.Context, baseID uint64, payload m
 	}
 
 	update := map[string]any{}
-	if value, exists := record["vector_enabled"]; exists {
-		update["vector_enabled"] = normalizeVectorEnabled(value)
-	}
 	if value, exists := record["embedding_power_id"]; exists {
-		update["embedding_power_id"] = util.ToUint64(value)
+		embeddingPowerID := util.ToUint64(value)
+		update["embedding_power_id"] = embeddingPowerID
+		update["vector_enabled"] = normalizeVectorEnabledFromEmbedding(embeddingPowerID)
 	}
 	cateID := util.ToUint64(record["cate_id"])
 	if cateID == 0 {
@@ -163,6 +376,7 @@ func firstPayloadRecord(payload map[string]any) (map[string]any, bool) {
 
 func (KnowledgeHook) ProviderBeforeSaveAgentKnowledgeBase(_ *server.Context, params []any) any {
 	record := cloneRecord(params)
+	keepRecordFields(record, agentKnowledgeBaseSaveFields)
 	partial := isPartialRecord(record)
 	if !partial && util.ToUint64(record["agent_id"]) == 0 {
 		panic(frontaction.NewFieldError("form.agent_id", "智能体不能为空。"))
@@ -204,6 +418,24 @@ func normalizeOptionalScoreThreshold(value any) float64 {
 	return score
 }
 
+func normalizeGraphDepth(value any) int {
+	depth := util.ToIntDefault(value, agentmodel.DefaultKnowledgeGraphDepth)
+	if depth < 0 {
+		return 0
+	}
+	if depth > 3 {
+		return 3
+	}
+	return depth
+}
+
+func normalizeVectorEnabledFromEmbedding(embeddingPowerID uint64) int16 {
+	if embeddingPowerID > 0 {
+		return 1
+	}
+	return 2
+}
+
 func cloneRecord(params []any) map[string]any {
 	if len(params) == 0 || params[0] == nil {
 		return map[string]any{}
@@ -212,6 +444,105 @@ func cloneRecord(params []any) map[string]any {
 		return util.CloneMap(row)
 	}
 	return map[string]any{}
+}
+
+func mapRows(value any) []map[string]any {
+	switch rows := value.(type) {
+	case []map[string]any:
+		return rows
+	case []any:
+		result := make([]map[string]any, 0, len(rows))
+		for _, item := range rows {
+			row, ok := item.(map[string]any)
+			if ok {
+				result = append(result, row)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
+}
+
+func rowIDs(rows []map[string]any) []uint64 {
+	seen := map[uint64]struct{}{}
+	result := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		id := util.ToUint64(row["id"])
+		if id == 0 {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	return result
+}
+
+var (
+	knowledgeCateSaveFields = fieldSet(
+		"id",
+		"_partial",
+		"name",
+		"status",
+		"sort",
+	)
+	knowledgeParserServiceSaveFields = fieldSet(
+		"id",
+		"_partial",
+		"name",
+		"provider",
+		"host",
+		"api_key",
+		"status",
+		"sort",
+	)
+	knowledgeBaseSaveFields = fieldSet(
+		"id",
+		"_partial",
+		"cate_id",
+		"name",
+		"parser_service_id",
+		"index_power_id",
+		"embedding_power_id",
+		"node_max_length",
+		"node_split_overlap",
+		"retrieve_limit",
+		"score_threshold",
+		"max_context_chars",
+		"graph_depth",
+		"status",
+		"sort",
+	)
+	agentKnowledgeBaseSaveFields = fieldSet(
+		"id",
+		"_partial",
+		"agent_id",
+		"knowledge_base_id",
+		"prompt",
+		"retrieve_limit",
+		"score_threshold",
+		"status",
+		"sort",
+	)
+)
+
+func fieldSet(fields ...string) map[string]struct{} {
+	result := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		result[field] = struct{}{}
+	}
+	return result
+}
+
+func keepRecordFields(record map[string]any, allowed map[string]struct{}) {
+	for field := range record {
+		if _, ok := allowed[field]; !ok {
+			delete(record, field)
+		}
+	}
 }
 
 func isPartialRecord(record map[string]any) bool {
@@ -269,21 +600,4 @@ func savedRecordID(payload map[string]any) uint64 {
 		}
 	}
 	return 0
-}
-
-func startAsyncDocumentIndex(ctx context.Context, docID uint64) {
-	agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": docID}, map[string]any{
-		"index_status":  agentmodel.KnowledgeIndexStatusRunning,
-		"error_message": "",
-	})
-	go func() {
-		runCtx := context.Background()
-		result, err := NewService().IndexDocument(runCtx, docID)
-		if err != nil && result.DocID == 0 {
-			agentmodel.NewKnowledgeDocModel().Update(runCtx, map[string]any{"id": docID}, map[string]any{
-				"index_status":  agentmodel.KnowledgeIndexStatusFailed,
-				"error_message": err.Error(),
-			})
-		}
-	}()
 }

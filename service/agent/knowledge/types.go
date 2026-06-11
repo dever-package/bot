@@ -11,7 +11,7 @@ type RetrievedSnippet = agentprompt.KnowledgeSnippet
 type IndexResult struct {
 	BaseID     uint64    `json:"base_id"`
 	DocID      uint64    `json:"doc_id"`
-	ChunkCount int       `json:"chunk_count"`
+	NodeCount  int       `json:"node_count"`
 	Indexed    int       `json:"indexed"`
 	Failed     int       `json:"failed"`
 	Error      string    `json:"error,omitempty"`
@@ -29,6 +29,35 @@ type RetrieveResult struct {
 	Matches  []map[string]any   `json:"matches"`
 }
 
+type RetrieveDebugRequest struct {
+	AgentID uint64
+	BaseID  uint64
+	Query   string
+	Limit   int
+}
+
+type RetrieveDebugResult struct {
+	Query         string                     `json:"query"`
+	KnowledgeBase KnowledgeRetrieveDebugBase `json:"knowledge_base"`
+	Snippets      []RetrievedSnippet         `json:"snippets"`
+	Matches       []map[string]any           `json:"matches"`
+	SourceCounts  map[string]int             `json:"source_counts"`
+	Plans         []map[string]any           `json:"plans"`
+}
+
+type KnowledgeRetrieveDebugBase struct {
+	ID            uint64 `json:"id"`
+	Name          string `json:"name"`
+	VectorEnabled bool   `json:"vector_enabled"`
+	GraphDepth    int    `json:"graph_depth"`
+}
+
+type AgentKnowledgeBaseRuntime struct {
+	ID     uint64
+	Name   string
+	Prompt string
+}
+
 type agentKnowledgeBinding struct {
 	ID             uint64
 	AgentID        uint64
@@ -44,28 +73,25 @@ type knowledgeBaseConfig struct {
 	ID               uint64
 	CateID           uint64
 	Name             string
+	IndexPowerID     uint64
 	Collection       string
 	VectorEnabled    bool
 	EmbeddingPowerID uint64
-	ChunkSize        int
-	ChunkOverlap     int
 	RetrieveLimit    int
 	ScoreThreshold   float64
 	MaxContextChars  int
+	GraphDepth       int
 	Status           int16
 }
 
-type chunkRecord struct {
-	ID        uint64
-	DocID     uint64
-	BaseID    uint64
-	DirID     uint64
-	DirPath   string
-	Title     string
-	Content   string
-	EmbedText string
-	PointID   uint64
-	SortRank  int
+type retrievalPlan struct {
+	Queries  []string
+	DirIDs   []uint64
+	DocIDs   []uint64
+	DirPaths []string
+	Reason   string
+	Raw      string
+	Error    string
 }
 
 type searchHit struct {

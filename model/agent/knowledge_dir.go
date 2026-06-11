@@ -14,6 +14,8 @@ type KnowledgeDir struct {
 	Path            string    `dorm:"type:varchar(512);not null;default:'';comment:目录路径"`
 	Depth           int       `dorm:"type:int;not null;default:0;comment:层级"`
 	DocCount        int       `dorm:"type:int;not null;default:0;comment:文档数"`
+	Summary         string    `dorm:"type:text;not null;default:'';comment:摘要"`
+	Keywords        string    `dorm:"type:text;not null;default:'';comment:关键词"`
 	Status          int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	Sort            int       `dorm:"type:int;not null;default:100;comment:排序"`
 	CreatedAt       time.Time `dorm:"comment:创建时间"`

@@ -12,18 +12,24 @@ import (
 )
 
 const (
-	NameHTTPRequest   = "http_request"
-	NameCurlRequest   = "curl_request"
-	NameListSkill     = "list_skill_files"
-	NameReadSkill     = "read_skill_file"
-	NameWriteTemp     = "write_temp_file"
-	NameReadTemp      = "read_temp_file"
-	NameRunScript     = "run_skill_script"
-	NameInternalAPI   = "internal_api"
-	NameMCPCall       = "mcp_call"
-	defaultTimeoutSec = 10
-	maxTimeoutSec     = 60
-	maxBodyBytes      = agentskill.HTTPMaxLen
+	NameHTTPRequest      = "http_request"
+	NameCurlRequest      = "curl_request"
+	NameListSkill        = "list_skill_files"
+	NameReadSkill        = "read_skill_file"
+	NameWriteTemp        = "write_temp_file"
+	NameReadTemp         = "read_temp_file"
+	NameRunScript        = "run_skill_script"
+	NameInternalAPI      = "internal_api"
+	NameMCPCall          = "mcp_call"
+	NameKnowledgeTree    = "list_knowledge_tree"
+	NameKnowledgeSearch  = "search_knowledge_nodes"
+	NameKnowledgeOpen    = "open_knowledge_node"
+	NameKnowledgeExpand  = "expand_knowledge_node"
+	NameKnowledgeRelated = "find_related_knowledge"
+	NameKnowledgeDebug   = "debug_knowledge_retrieval"
+	defaultTimeoutSec    = 10
+	maxTimeoutSec        = 60
+	maxBodyBytes         = agentskill.HTTPMaxLen
 )
 
 type Request struct {
@@ -93,21 +99,28 @@ func Execute(ctx context.Context, req Request) agentaction.Result {
 
 func registry() map[string]handler {
 	return map[string]handler{
-		NameHTTPRequest: executeHTTPRequest,
-		NameCurlRequest: executeCurlRequest,
-		NameListSkill:   executeListSkillFiles,
-		NameReadSkill:   executeReadSkillFile,
-		NameWriteTemp:   executeWriteTempFile,
-		NameReadTemp:    executeReadTempFile,
-		NameRunScript:   executeRunSkillScript,
-		NameInternalAPI: executeInternalAPI,
-		NameMCPCall:     executeMCPCall,
+		NameHTTPRequest:      executeHTTPRequest,
+		NameCurlRequest:      executeCurlRequest,
+		NameListSkill:        executeListSkillFiles,
+		NameReadSkill:        executeReadSkillFile,
+		NameWriteTemp:        executeWriteTempFile,
+		NameReadTemp:         executeReadTempFile,
+		NameRunScript:        executeRunSkillScript,
+		NameInternalAPI:      executeInternalAPI,
+		NameMCPCall:          executeMCPCall,
+		NameKnowledgeTree:    executeKnowledgeTree,
+		NameKnowledgeSearch:  executeKnowledgeSearch,
+		NameKnowledgeOpen:    executeKnowledgeOpen,
+		NameKnowledgeExpand:  executeKnowledgeExpand,
+		NameKnowledgeRelated: executeKnowledgeRelated,
+		NameKnowledgeDebug:   executeKnowledgeDebug,
 	}
 }
 
 func toolRequiresSkill(name string) bool {
 	switch normalizeTool(name) {
-	case NameInternalAPI, NameMCPCall:
+	case NameInternalAPI, NameMCPCall,
+		NameKnowledgeTree, NameKnowledgeSearch, NameKnowledgeOpen, NameKnowledgeExpand, NameKnowledgeRelated, NameKnowledgeDebug:
 		return false
 	default:
 		return true

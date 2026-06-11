@@ -40,6 +40,19 @@ func (OptionService) ProviderLoadEmbeddingPowers(c *server.Context, _ []any) any
 	return rows
 }
 
+func (OptionService) ProviderLoadKnowledgeParserServices(c *server.Context, _ []any) any {
+	rows := agentmodel.NewKnowledgeParserServiceModel().SelectMap(c.Context(), map[string]any{
+		"status": 1,
+	}, map[string]any{
+		"field": "main.id, main.name, main.provider, main.host",
+		"order": "main.sort asc, main.id asc",
+	})
+	if len(rows) == 0 {
+		return []map[string]any{}
+	}
+	return rows
+}
+
 func (OptionService) ProviderLoadAgentSettings(c *server.Context, params []any) any {
 	agentID := optionParentID(params)
 	if agentID == 0 {

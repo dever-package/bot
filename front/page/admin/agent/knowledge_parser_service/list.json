@@ -1,9 +1,10 @@
 {
   "page": {
-    "name": "知识库",
-    "icon": "book-open",
-    "parent": "bot-agent",
-    "sort": 2
+    "name": "文档解析服务",
+    "icon": "file-cog",
+    "parent": "bot/agent/knowledge_base/list",
+    "type": 2,
+    "sort": 3
   },
   "layout": {
     "type": "container",
@@ -22,33 +23,13 @@
         "type": "main",
         "className": "flex flex-1 flex-col gap-5 sm:gap-6",
         "children": {
-          "content-shell": {
+          "content-toolbar": {
+            "type": "row",
+            "className": "flex-wrap items-center gap-3"
+          },
+          "table-row": {
             "type": "container",
-            "className": "front-two-pane-layout",
-            "children": {
-              "category-column": {
-                "type": "container",
-                "className": "min-w-0",
-                "path": "/bot/agent/knowledge_cate/list",
-                "meta": {
-                  "updateDocumentTitle": false
-                }
-              },
-              "list-column": {
-                "type": "container",
-                "className": "flex min-w-0 flex-col gap-4",
-                "children": {
-                  "content-toolbar": {
-                    "type": "row",
-                    "className": "flex-wrap items-center gap-3"
-                  },
-                  "table-row": {
-                    "type": "container",
-                    "className": "overflow-hidden rounded-md border bg-background"
-                  }
-                }
-              }
-            }
+            "className": "overflow-hidden rounded-md border bg-background"
           },
           "feedback-shell": {
             "type": "container"
@@ -68,18 +49,17 @@
     "header-actions": [
       {
         "type": "show-button",
-        "name": "文档解析服务",
+        "name": "返回知识库",
         "className": "shrink-0",
         "meta": {
           "variant": "outline",
           "size": "sm",
-          "icon": "file-cog",
-          "to": "/bot/agent/knowledge_parser_service/list"
+          "to": "/bot/agent/knowledge_base/list"
         }
       },
       {
         "type": "show-button",
-        "name": "新增知识库",
+        "name": "新增服务",
         "className": "shrink-0",
         "meta": {
           "variant": "default",
@@ -97,14 +77,14 @@
     "content-toolbar": [
       {
         "type": "form-input",
-        "placeholder": "筛选知识库名称...",
+        "placeholder": "筛选服务名称...",
         "value": "search.keyword",
         "mode": "search"
       },
       {
         "type": "form-select",
-        "placeholder": "索引状态",
-        "value": "search.index_status",
+        "placeholder": "服务",
+        "value": "search.provider",
         "mode": "search"
       },
       {
@@ -129,7 +109,7 @@
         "meta": {
           "variant": "outline",
           "size": "sm",
-          "to": "/bot/agent/knowledge_base/list"
+          "to": "/bot/agent/knowledge_parser_service/list"
         }
       }
     ],
@@ -143,7 +123,7 @@
           "totalPath": "data.table.total",
           "remote": true,
           "externalPagination": true,
-          "savePath": "bot/agent/knowledge_base/update",
+          "savePath": "bot/agent/knowledge_parser_service/update",
           "rowKey": "id",
           "columns": [
             {
@@ -151,23 +131,17 @@
               "type": "show-base"
             },
             {
-              "value": "index_power.name",
-              "name": "索引模型",
+              "value": "provider",
+              "name": "服务",
+              "type": "show-tag"
+            },
+            {
+              "value": "host",
               "type": "show-base"
             },
             {
-              "value": "doc_count",
-              "name": "文档数",
-              "type": "show-base"
-            },
-            {
-              "value": "node_count",
-              "name": "节点数",
-              "type": "show-base"
-            },
-            {
-              "value": "index_status",
-              "name": "索引状态",
+              "value": "api_key_status",
+              "name": "APIKey",
               "type": "show-tag"
             },
             {
@@ -182,7 +156,15 @@
               "value": "sort",
               "type": "show-base",
               "editor": "form-number",
-              "trigger": "doubleClick"
+              "trigger": "doubleClick",
+              "tip": "正序排序，数值越大越靠后。双击可修改。",
+              "meta": {
+                "controlClassName": "w-24"
+              }
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
             },
             {
               "name": "操作",
@@ -194,7 +176,7 @@
                     "icon": "square-pen",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "编辑知识库",
+                    "description": "编辑文档解析服务",
                     "action": {
                       "click": [
                         {
@@ -211,26 +193,16 @@
                     }
                   },
                   {
-                    "icon": "file-text",
-                    "variant": "outline",
-                    "size": "sm",
-                    "description": "文档管理",
-                    "to": "/bot/agent/knowledge_doc/manager",
-                    "searchParam": "knowledge_base_id",
-                    "searchField": "id",
-                    "withBack": true
-                  },
-                  {
                     "icon": "trash-2",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "删除知识库",
+                    "description": "删除文档解析服务",
                     "className": "text-destructive hover:text-destructive",
                     "action": {
                       "click": [
                         {
                           "type": "data",
-                          "key": "actionTarget.deleteBase",
+                          "key": "actionTarget.deleteService",
                           "value": "$row"
                         },
                         {
@@ -256,45 +228,46 @@
         "type": "feedback-modal",
         "meta": {
           "stateKey": "dialog.create",
-          "pageRoute": "/bot/agent/knowledge_base/update",
-          "description": "创建知识库后，在文档管理中上传或编辑文件，再手动触发智能索引。",
-          "size": "xl",
+          "pageRoute": "/bot/agent/knowledge_parser_service/update",
+          "title": "新增文档解析服务",
+          "description": "配置 MinerU 服务后，后续知识库可以选择它解析 PDF、Office、图片等复杂文件。",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
           },
-          "pageRouteQuery": {
-            "cate_id": "data.search.cate_id"
-          }
+          "size": "lg",
+          "bodyClassName": "px-6 py-2"
         }
       },
       {
         "type": "feedback-modal",
         "meta": {
           "stateKey": "dialog.edit",
-          "pageRoute": "/bot/agent/knowledge_base/update",
-          "description": "配置知识库的索引模型、知识分段和智能体检索策略。",
-          "size": "xl",
+          "pageRoute": "/bot/agent/knowledge_parser_service/update",
+          "title": "编辑文档解析服务",
+          "description": "APIKey 留空时会保留原值，不会清空已有配置。",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
           },
           "pageRouteQuery": {
             "id": "data.actionTarget.id"
-          }
+          },
+          "size": "lg",
+          "bodyClassName": "px-6 py-2"
         }
       },
       {
         "type": "feedback-confirm",
-        "name": "删除知识库",
-        "info": "确认删除当前知识库吗？关联文档和向量数据需要重建时重新录入。",
+        "name": "删除文档解析服务",
+        "info": "确认删除当前文档解析服务吗？已经绑定的知识库后续需要重新选择解析服务。",
         "meta": {
           "stateKey": "confirm.delete"
         },
         "action": {
           "confirm": {
             "type": "delete",
-            "params": "actionTarget.deleteBase"
+            "params": "actionTarget.deleteService"
           }
         }
       }
@@ -302,24 +275,31 @@
   },
   "data": {
     "page": {
-      "title": "知识库",
-      "description": "维护智能体可引用的企业知识库。"
+      "title": "文档解析服务",
+      "description": "维护 MinerU 等文档解析服务，供知识库索引 PDF、Office、图片等复杂文件时选择。"
+    },
+    "search": {
+      "keyword": "",
+      "provider": "",
+      "status": ""
     },
     "table": {
       "page": 1,
       "pageSize": 10,
       "total": 0,
-      "filterFields": ["cate_id"]
-    },
-    "search": {
-      "cate_id": "",
-      "keyword": "",
-      "index_status": "",
-      "status": ""
+      "searchFields": [
+        "name",
+        "host"
+      ],
+      "filterFields": [
+        "provider",
+        "status"
+      ],
+      "service": "bot.agent.knowledge.KnowledgeHook.AttachKnowledgeParserServiceList"
     },
     "actionTarget": {
       "id": "",
-      "deleteBase": {}
+      "deleteService": {}
     }
   },
   "state": {

@@ -157,10 +157,11 @@ func (s Service) KnowledgeFileData(ctx context.Context, baseID uint64) (Knowledg
 	}
 	return KnowledgeFileData{
 		Base: map[string]any{
-			"id":     base.ID,
-			"name":   strings.TrimSpace(base.Name),
-			"status": base.Status,
-			"root":   filepath.ToSlash(root),
+			"id":           base.ID,
+			"name":         strings.TrimSpace(base.Name),
+			"status":       base.Status,
+			"index_status": base.IndexStatus,
+			"root":         filepath.ToSlash(root),
 		},
 		Files: files,
 		Drive: map[string]any{
@@ -495,12 +496,12 @@ func (s Service) SaveKnowledgeFileNode(ctx context.Context, input KnowledgeSaveI
 	}
 	doc := findDocByStoragePath(ctx, base.ID, relPath)
 	if doc != nil {
-		agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": doc.ID}, map[string]any{
-			"content":       input.Content,
-			"content_hash":  contentHash(input.Content),
-			"index_status":  agentmodel.KnowledgeIndexStatusPending,
-			"error_message": "",
-			"chunk_count":   0,
+		clearKnowledgeDocumentIndex(ctx, base.ID, doc.ID)
+		markKnowledgeDocPending(ctx, doc.ID, map[string]any{
+			"content":      input.Content,
+			"summary":      "",
+			"keywords":     "",
+			"content_hash": contentHash(input.Content),
 		})
 	}
 	return s.ReadKnowledgeFileNode(ctx, base.ID, knowledgeFileID(relPath))
@@ -532,42 +533,6 @@ func (s Service) ResolveKnowledgeFileContent(ctx context.Context, baseID uint64,
 		Name:     filepath.Base(filePath),
 		MimeType: detectMimeType(filePath, nil),
 	}, nil
-}
-
-func (s Service) StartKnowledgeFileIndex(ctx context.Context, baseID uint64, id string) error {
-	base, root, err := knowledgeStorageBase(ctx, baseID)
-	if err != nil {
-		return err
-	}
-	if err := syncKnowledgeFilesystem(ctx, base, root); err != nil {
-		return err
-	}
-	filePath, relPath, err := knowledgeIDPath(root, id)
-	if err != nil {
-		return err
-	}
-	if sameCleanPath(filePath, root) {
-		return StartBaseIndex(ctx, base.ID)
-	}
-	info, err := os.Stat(filePath)
-	if err != nil {
-		return fmt.Errorf("文件或文件夹不存在")
-	}
-	if info.IsDir() {
-		dir := agentmodel.NewKnowledgeDirModel().Find(ctx, map[string]any{
-			"knowledge_base_id": base.ID,
-			"path":              NormalizeDirPath(relPath),
-		})
-		if dir == nil {
-			return fmt.Errorf("知识目录不存在")
-		}
-		return StartDirectoryIndex(ctx, base.ID, dir.ID)
-	}
-	doc := findDocByStoragePath(ctx, base.ID, relPath)
-	if doc == nil {
-		return fmt.Errorf("知识文档不存在")
-	}
-	return StartDocumentIndex(ctx, doc.ID)
 }
 
 func knowledgeStorageBase(ctx context.Context, baseID uint64) (*agentmodel.KnowledgeBase, string, error) {
@@ -735,17 +700,22 @@ func ensureKnowledgeFileDoc(ctx context.Context, baseID uint64, root string, rel
 	}
 	mimeType := detectMimeType(filePath, nil)
 	values := map[string]any{
-		"knowledge_base_id": baseID,
-		"dir_id":            dirID,
-		"title":             name,
-		"file_name":         name,
-		"storage_path":      relPath,
-		"mime_type":         mimeType,
-		"size":              info.Size(),
-		"index_status":      agentmodel.KnowledgeIndexStatusPending,
-		"error_message":     "",
-		"chunk_count":       0,
-		"status":            1,
+		"knowledge_base_id":  baseID,
+		"dir_id":             dirID,
+		"title":              name,
+		"file_name":          name,
+		"storage_path":       relPath,
+		"mime_type":          mimeType,
+		"size":               info.Size(),
+		"summary":            "",
+		"keywords":           "",
+		"index_status":       agentmodel.KnowledgeIndexStatusPending,
+		"index_stage":        agentmodel.KnowledgeIndexStagePending,
+		"index_stage_detail": "",
+		"index_version":      1,
+		"error_message":      "",
+		"node_count":         0,
+		"status":             1,
 	}
 	if editable {
 		values["content"] = content
@@ -777,8 +747,16 @@ func ensureKnowledgeFileDoc(ctx context.Context, baseID uint64, root string, rel
 	}
 	if !needsIndex {
 		delete(values, "index_status")
+		delete(values, "index_stage")
+		delete(values, "index_stage_detail")
+		delete(values, "index_version")
 		delete(values, "error_message")
-		delete(values, "chunk_count")
+		delete(values, "node_count")
+		delete(values, "summary")
+		delete(values, "keywords")
+	} else {
+		clearKnowledgeDocumentIndex(ctx, baseID, doc.ID)
+		values["index_version"] = doc.IndexVersion + 1
 	}
 	values["status"] = 1
 	agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": doc.ID}, values)
@@ -892,7 +870,7 @@ func deleteMissingDocs(ctx context.Context, baseID uint64, activeDocs map[string
 				continue
 			}
 		}
-		agentmodel.NewKnowledgeChunkModel().Delete(ctx, map[string]any{"doc_id": row.ID})
+		clearKnowledgeDocumentIndex(ctx, baseID, row.ID)
 		agentmodel.NewKnowledgeDocModel().Delete(ctx, map[string]any{"id": row.ID})
 	}
 }
@@ -929,13 +907,13 @@ func refreshBaseDocCount(ctx context.Context, baseID uint64) {
 		"knowledge_base_id": baseID,
 		"status":            1,
 	})
-	chunkCount := agentmodel.NewKnowledgeChunkModel().Count(ctx, map[string]any{
+	nodeCount := agentmodel.NewKnowledgeNodeModel().Count(ctx, map[string]any{
 		"knowledge_base_id": baseID,
 		"status":            1,
 	})
 	agentmodel.NewKnowledgeBaseModel().Update(ctx, map[string]any{"id": baseID}, map[string]any{
-		"doc_count":   docCount,
-		"chunk_count": chunkCount,
+		"doc_count":  docCount,
+		"node_count": nodeCount,
 	})
 }
 

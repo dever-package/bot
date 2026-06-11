@@ -53,8 +53,12 @@
               "value": "basic"
             },
             {
-              "label": "向量能力",
-              "value": "vector"
+              "label": "索引配置",
+              "value": "index"
+            },
+            {
+              "label": "检索配置",
+              "value": "retrieval"
             }
           ]
         }
@@ -80,7 +84,7 @@
       },
       {
         "type": "form-input",
-        "placeholder": "例如：房源业务知识库",
+        "placeholder": "例如：企业业务知识库",
         "value": "form.name",
         "mode": "form",
         "validate": [
@@ -100,100 +104,123 @@
         }
       },
       {
-        "type": "form-number",
-        "value": "form.chunk_size",
+        "type": "form-select",
+        "name": "文档解析服务",
+        "placeholder": "可选，选择 MinerU 服务",
+        "value": "form.parser_service_id",
         "mode": "form",
-        "info": "每个分段的大致字符数，默认 800。",
+        "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadKnowledgeParserServices",
+        "info": "可选。选择后，后续 PDF、Office、图片等复杂文件可以使用该服务解析；不选择则只使用本地文本解析和已有兜底能力。",
         "meta": {
           "formLayout": "horizontal",
-          "tab": "basic",
+          "tab": "index",
+          "controlClassName": "max-w-[360px]"
+        }
+      },
+      {
+        "type": "form-select",
+        "name": "索引模型",
+        "placeholder": "请选择文本类型能力",
+        "value": "form.index_power_id",
+        "mode": "form",
+        "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadTextPowers",
+        "info": "用于生成文档摘要、目录摘要、检索规划和事实线索的 LLM 能力。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "索引模型不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "index",
+          "controlClassName": "max-w-[360px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "name": "节点最大长度",
+        "value": "form.node_max_length",
+        "mode": "form",
+        "info": "单个知识节点的大致最大字符数。系统会优先按文档目录、标题、页面、段落、表格等结构生成节点；如果某个节点过长，再按这个长度做保底拆分，默认 800。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "index",
           "controlClassName": "max-w-[160px]"
         }
       },
       {
         "type": "form-number",
-        "value": "form.chunk_overlap",
+        "name": "长节点重叠",
+        "value": "form.node_split_overlap",
         "mode": "form",
-        "info": "相邻分段重叠字符数，默认 120。",
+        "info": "长节点被保底拆分时，相邻节点重复保留的字符数，用于避免关键信息落在切分边界导致检索不到，默认 120。",
         "meta": {
           "formLayout": "horizontal",
-          "tab": "basic",
-          "controlClassName": "max-w-[160px]"
-        }
-      },
-      {
-        "type": "form-number",
-        "value": "form.retrieve_limit",
-        "mode": "form",
-        "info": "智能体默认从该知识库召回多少个片段。",
-        "meta": {
-          "formLayout": "horizontal",
-          "tab": "basic",
-          "controlClassName": "max-w-[160px]"
-        }
-      },
-      {
-        "type": "form-number",
-        "value": "form.max_context_chars",
-        "mode": "form",
-        "info": "最多注入到智能体 prompt 的知识库字符数。",
-        "meta": {
-          "formLayout": "horizontal",
-          "tab": "basic",
-          "controlClassName": "max-w-[180px]"
-        }
-      },
-      {
-        "type": "form-switch",
-        "name": "开启向量能力",
-        "value": "form.vector_enabled",
-        "mode": "form",
-        "info": "关闭时仅保存到数据库，运行时使用数据库模糊检索；开启后会写入向量数据库并使用向量召回。",
-        "meta": {
-          "formLayout": "horizontal",
-          "tab": "vector",
-          "trueValue": 1,
-          "falseValue": 2,
+          "tab": "index",
           "controlClassName": "max-w-[160px]"
         }
       },
       {
         "type": "form-select",
         "name": "向量能力",
-        "placeholder": "请选择 embeddings 类型能力",
+        "placeholder": "可选，选择 embeddings 类型能力",
         "value": "form.embedding_power_id",
         "mode": "form",
         "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadEmbeddingPowers",
-        "info": "入库和检索都会使用这个向量能力，必须选择 embeddings 类型。",
+        "info": "可选。选择 embeddings 类型能力后，会额外生成语义向量，用于相似内容检索；不选择则使用全文检索、目录图谱和智能规划检索。",
         "meta": {
           "formLayout": "horizontal",
-          "tab": "vector",
-          "controlClassName": "max-w-[360px]",
-          "showWhen": [
-            {
-              "path": "form.vector_enabled",
-              "operator": "equals",
-              "value": 1
-            }
-          ]
+          "tab": "index",
+          "controlClassName": "max-w-[360px]"
         }
       },
       {
         "type": "form-number",
-        "value": "form.score_threshold",
+        "name": "检索数量",
+        "value": "form.retrieve_limit",
         "mode": "form",
-        "info": "开启向量能力时，低于该相似度的片段不会注入，默认 0.35。",
+        "info": "智能体每次从该知识库最多取多少条候选知识。数量越多覆盖面越大，但更容易混入弱相关内容，默认 5。",
         "meta": {
           "formLayout": "horizontal",
-          "tab": "vector",
-          "controlClassName": "max-w-[160px]",
-          "showWhen": [
-            {
-              "path": "form.vector_enabled",
-              "operator": "equals",
-              "value": 1
-            }
-          ]
+          "tab": "retrieval",
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "name": "最大字数",
+        "value": "form.max_context_chars",
+        "mode": "form",
+        "info": "最多注入到智能体上下文里的知识内容总字数。太小可能信息不足，太大可能增加成本并干扰重点，默认 6000。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "retrieval",
+          "controlClassName": "max-w-[180px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "name": "匹配阈值",
+        "value": "form.score_threshold",
+        "mode": "form",
+        "info": "用于过滤低相关知识的最低匹配要求。阈值越高结果越严格；阈值越低覆盖更多但可能混入噪声，默认 0.35。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "retrieval",
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "type": "form-number",
+        "name": "扩展层数",
+        "value": "form.graph_depth",
+        "mode": "form",
+        "info": "命中某个目录或知识点后，继续向父级和子级目录扩展几层关联内容。默认 1 层；2 层适合复杂关联问题，但可能带入更多噪声。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "retrieval",
+          "controlClassName": "max-w-[160px]"
         }
       }
     ]
@@ -202,14 +229,15 @@
     "form": {
       "cate_id": 1,
       "name": "",
-      "vector_enabled": 2,
+      "parser_service_id": "",
+      "index_power_id": 1,
       "embedding_power_id": "",
-      "chunk_size": 800,
-      "chunk_overlap": 120,
+      "node_max_length": 800,
+      "node_split_overlap": 120,
       "retrieve_limit": 5,
       "score_threshold": 0.35,
       "max_context_chars": 6000,
-      "index_status": "pending",
+      "graph_depth": 1,
       "status": 1,
       "sort": 100
     }

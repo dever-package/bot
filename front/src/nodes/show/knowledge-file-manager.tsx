@@ -19,6 +19,7 @@ import {
 } from "react-complex-tree"
 import {
   ArrowLeft,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Download,
@@ -26,15 +27,19 @@ import {
   Folder,
   FolderPlus,
   MoreVertical,
+  Network,
   Plus,
   RefreshCw,
   Save,
   Search,
+  Timer,
   Trash2,
   Upload,
+  XCircle,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/confirm-dialog"
 import { Input } from "@/components/ui/input"
 import type { NodeItemProps } from "@/page/nodes"
 import {
@@ -42,7 +47,9 @@ import {
   deleteFiles,
   downloadFileBaseURL,
   downloadFileURL,
+  indexKnowledgeBase,
   loadFileContent,
+  loadFileIndexDetail,
   loadFileManagerData,
   moveFiles,
   previewFileURL,
@@ -59,9 +66,11 @@ import {
   preloadMarkdownLiveEditorRuntime,
   type UploadedAttachment,
 } from "./knowledge-file-manager/markdown-live-editor"
+import { KnowledgeIndexMap } from "./knowledge-file-manager/index-map"
 import "./knowledge-file-manager/styles.css"
 import type {
   KnowledgeFileContent,
+  KnowledgeFileIndexDetail,
   KnowledgeFileItem,
   KnowledgeFileManagerData,
   KnowledgeFileViewerStatus,
@@ -73,6 +82,8 @@ type ContextMenuState = {
   y: number
   node: KnowledgeTreeNode | null
 } | null
+
+type IndexStatus = "pending" | "running" | "success" | "failed" | ""
 
 type DraftState = {
   id: string
@@ -104,6 +115,7 @@ const contextMenuViewportMargin = 8
 const contextMenuFallbackWidth = 168
 const contextMenuFallbackHeight = 184
 const uploadChunkSize = 512 * 1024
+const indexPollInterval = 2400
 
 export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
   const meta = item.meta ?? {}
@@ -125,10 +137,17 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
   const [query, setQuery] = useState("")
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [indexing, setIndexing] = useState(false)
+  const [indexDetail, setIndexDetail] = useState<KnowledgeFileIndexDetail | null>(null)
+  const [indexDetailOpen, setIndexDetailOpen] = useState(false)
+  const [indexDetailLoading, setIndexDetailLoading] = useState(false)
+  const [indexMapOpen, setIndexMapOpen] = useState(false)
+  const [indexConfirmOpen, setIndexConfirmOpen] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null)
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null)
 
   const baseName = data.base?.name || "知识库"
+  const baseIndexStatus = normalizeFrontendIndexStatus(data.base?.index_status)
   const tree = useMemo(() => buildTree(data.files || []), [data.files])
   const visibleTree = useMemo(() => filterTree(tree, query), [query, tree])
   const flatTree = useMemo(() => flattenTree(tree), [tree])
@@ -144,6 +163,15 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
     () => (focusedID ? findNode(tree, focusedID) : null),
     [focusedID, tree],
   )
+  const hasRunningIndex = baseIndexStatus === "running"
+  const indexBusy = indexing || hasRunningIndex
+  const canReindex = baseIndexStatus === "success" || baseIndexStatus === "failed"
+  const currentIndexStatus = normalizeFrontendIndexStatus(currentFile?.index_status)
+  const indexButtonText = indexBusy
+    ? "索引中"
+    : canReindex
+      ? "重新索引"
+      : "智能索引"
   const reloadFiles = useCallback(async () => {
     if (!knowledgeBaseID) {
       return
@@ -163,6 +191,27 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
   }, [reloadFiles])
 
   useEffect(() => {
+    if (!knowledgeBaseID || !hasRunningIndex) {
+      return
+    }
+    const timer = window.setInterval(() => {
+      void reloadFiles()
+    }, indexPollInterval)
+    return () => window.clearInterval(timer)
+  }, [hasRunningIndex, knowledgeBaseID, reloadFiles])
+
+  useEffect(() => {
+    if (!currentFile) {
+      return
+    }
+    const node = findNode(tree, currentFile.id)
+    if (!node || node.type !== "file" || node.index_status === currentFile.index_status) {
+      return
+    }
+    setCurrentFile({ ...currentFile, index_status: node.index_status })
+  }, [currentFile, tree])
+
+  useEffect(() => {
     void preloadMarkdownLiveEditorRuntime()
   }, [])
 
@@ -174,6 +223,10 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
     setOpeningFile(null)
     setDraft(null)
     setViewerStatus(null)
+    setIndexDetail(null)
+    setIndexDetailOpen(false)
+    setIndexMapOpen(false)
+    setIndexConfirmOpen(false)
     openFileRequestRef.current += 1
     restoredKnowledgeBaseRef.current = 0
   }, [knowledgeBaseID])
@@ -228,6 +281,8 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
       setCurrentFile(null)
       setDraft(null)
       setViewerStatus(null)
+      setIndexDetail(null)
+      setIndexDetailOpen(false)
       setOpeningFile({ name: node.name || basename(node.id) })
       updateExpandedFolders((current) => expandParentFolders(current, node.id))
       try {
@@ -340,6 +395,8 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           setOpeningFile(null)
           setDraft(null)
           setViewerStatus(null)
+          setIndexDetail(null)
+          setIndexDetailOpen(false)
         }
         const lastOpenedID = loadLastOpenedFileID(knowledgeBaseID)
         if (lastOpenedID && (lastOpenedID === node.id || isNodeAncestor(node, lastOpenedID))) {
@@ -380,6 +437,8 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
       setSelectedID(normalizeID(saved.id))
       saveLastOpenedFileID(knowledgeBaseID, saved.id)
       setCurrentFile(saved)
+      setIndexDetail(null)
+      setIndexDetailOpen(false)
       setDraft({
         id: saved.id,
         name: saved.name,
@@ -394,6 +453,43 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
       setSaving(false)
     }
   }, [currentFile, draft, knowledgeBaseID, reloadFiles])
+
+  const runSmartIndex = useCallback(
+    async () => {
+      if (!knowledgeBaseID || indexBusy) {
+        return
+      }
+      setIndexConfirmOpen(false)
+      setIndexing(true)
+      try {
+        await indexKnowledgeBase({ knowledgeBaseID })
+        setData(markKnowledgeIndexRunning)
+        toast.success(canReindex ? "已开始重新索引知识库" : "已开始索引整个知识库")
+        await reloadFiles()
+      } catch (error) {
+        toast.error(errorMessage(error, "智能索引启动失败"))
+      } finally {
+        setIndexing(false)
+      }
+    },
+    [canReindex, indexBusy, knowledgeBaseID, reloadFiles],
+  )
+
+  const openFileIndexDetail = useCallback(async () => {
+    if (!knowledgeBaseID || !currentFile) {
+      return
+    }
+    setIndexDetailOpen(true)
+    setIndexDetailLoading(true)
+    setIndexDetail(null)
+    try {
+      setIndexDetail(await loadFileIndexDetail({ knowledgeBaseID, id: currentFile.id }))
+    } catch (error) {
+      toast.error(errorMessage(error, "加载索引详情失败"))
+    } finally {
+      setIndexDetailLoading(false)
+    }
+  }, [currentFile, knowledgeBaseID])
 
   const moveNode = useCallback(
     async (sourceID: string, targetID: string) => {
@@ -423,6 +519,8 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           setOpeningFile(null)
           setDraft(null)
           setViewerStatus(null)
+          setIndexDetail(null)
+          setIndexDetailOpen(false)
           clearLastOpenedFileID(knowledgeBaseID)
         }
         toast.success("已移动")
@@ -642,6 +740,7 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
   const handleContextMenu = useCallback((event: MouseEvent, node: KnowledgeTreeNode | null) => {
     event.preventDefault()
     event.stopPropagation()
+    setIndexConfirmOpen(false)
     setContextMenu({ x: event.clientX, y: event.clientY, node })
   }, [])
 
@@ -665,6 +764,26 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           >
             <ArrowLeft size={16} />
             返回上一页
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIndexMapOpen(true)}
+          >
+            <Network size={16} />
+            知识地图
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setContextMenu(null)
+              setIndexConfirmOpen(true)
+            }}
+            disabled={indexBusy}
+          >
+            <Network size={16} />
+            {indexButtonText}
           </Button>
           <Button variant="outline" size="sm" onClick={() => void createNode("folder")}>
             <FolderPlus size={16} />
@@ -802,6 +921,9 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
                   <span className="knowledge-tree-row__label">
                     {item.data.type === "folder" ? <Folder size={16} /> : <FileText size={16} />}
                     <span className="knowledge-tree-row__name">{title}</span>
+                    {item.data.type === "file" ? (
+                      <IndexStatusBadge status={item.data.index_status} compact />
+                    ) : null}
                   </span>
                 )}
                 renderItem={({ item, depth, children, title, arrow, context }) => (
@@ -843,9 +965,18 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
                       )
                     }
                   />
+                  <IndexStatusBadge status={currentIndexStatus} />
                 </div>
                 <div className="knowledge-editor__actions">
                   <EditorHeaderStatus status={viewerStatus} />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void openFileIndexDetail()}
+                  >
+                    <Network size={16} />
+                    索引详情
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -929,6 +1060,30 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           }}
         />
       ) : null}
+      {indexDetailOpen ? (
+        <IndexDetailDialog
+          detail={indexDetail}
+          loading={indexDetailLoading}
+          fileName={currentFile?.name || ""}
+          onClose={() => setIndexDetailOpen(false)}
+        />
+      ) : null}
+      <KnowledgeIndexMap
+        knowledgeBaseID={knowledgeBaseID}
+        open={indexMapOpen}
+        onClose={() => setIndexMapOpen(false)}
+        onRefreshFiles={() => void reloadFiles()}
+      />
+      <ConfirmDialog
+        open={indexConfirmOpen}
+        onOpenChange={setIndexConfirmOpen}
+        title={canReindex ? "重新索引知识库" : "智能索引"}
+        desc="确定要索引整个知识库吗？系统会清空旧索引并重新解析全部文档，索引过程中不能重复触发。"
+        confirmText={canReindex ? "重新索引" : "开始索引"}
+        disabled={indexBusy}
+        isLoading={indexBusy}
+        handleConfirm={() => void runSmartIndex()}
+      />
     </div>
   )
 }
@@ -956,6 +1111,30 @@ function EditorHeaderStatus({ status }: { status: KnowledgeFileViewerStatus | nu
   return (
     <span className="knowledge-editor__status" role="status" aria-label={status.label}>
       <RefreshCw size={15} />
+    </span>
+  )
+}
+
+function IndexStatusBadge({
+  status,
+  compact,
+}: {
+  status?: string
+  compact?: boolean
+}) {
+  const item = indexStatusView(status)
+  if (!item || (compact && item.status === "success")) {
+    return null
+  }
+  const Icon = item.icon
+  return (
+    <span
+      className={`knowledge-index-status is-${item.status}${compact ? " is-compact" : ""}`}
+      title={item.label}
+      aria-label={item.label}
+    >
+      <Icon size={compact ? 13 : 14} />
+      {compact ? null : <span>{item.label}</span>}
     </span>
   )
 }
@@ -1103,6 +1282,132 @@ function ContextMenu({
           </button>
         </>
       ) : null}
+    </div>
+  )
+}
+
+function IndexDetailDialog({
+  detail,
+  loading,
+  fileName,
+  onClose,
+}: {
+  detail: KnowledgeFileIndexDetail | null
+  loading: boolean
+  fileName: string
+  onClose: () => void
+}) {
+  const nodes = detail?.nodes || []
+  const edges = detail?.edges || []
+  return (
+    <div
+      className="knowledge-index-detail"
+      role="dialog"
+      aria-modal="true"
+      aria-label="索引详情"
+      onClick={onClose}
+    >
+      <div className="knowledge-index-detail__panel" onClick={(event) => event.stopPropagation()}>
+        <div className="knowledge-index-detail__header">
+          <div>
+            <strong>索引详情</strong>
+            <span>{detail?.name || fileName || "当前文件"}</span>
+          </div>
+          <button type="button" onClick={onClose} aria-label="关闭">
+            ×
+          </button>
+        </div>
+        {loading ? (
+          <div className="knowledge-index-detail__loading">
+            <RefreshCw size={18} />
+            加载索引详情中
+          </div>
+        ) : detail ? (
+          <div className="knowledge-index-detail__body">
+            <div className="knowledge-index-detail__meta">
+              <IndexStatusBadge status={detail.index_status} />
+              <span>文档ID：{detail.doc_id || "-"}</span>
+              <span>节点：{detail.node_count || nodes.length}</span>
+              <span>目录：{detail.dir_path || "/"}</span>
+            </div>
+            {detail.error_message ? (
+              <div className="knowledge-index-detail__error">{detail.error_message}</div>
+            ) : null}
+            <IndexDetailSection title="文章摘要" count={detail.summary ? 1 : 0}>
+              <p className="knowledge-index-detail__summary">
+                {detail.summary || "暂无摘要。"}
+              </p>
+              <KeywordChips values={detail.keywords || []} />
+            </IndexDetailSection>
+            <IndexDetailSection title="节点" count={nodes.length}>
+              {nodes.map((node) => (
+                <article className="knowledge-index-detail__card" key={node.id}>
+                  <div className="knowledge-index-detail__card-title">
+                    <strong>{node.path || node.title || `#${node.sort}`}</strong>
+                    <IndexStatusBadge status={node.index_status} compact />
+                  </div>
+                  <p>{node.content_preview || "暂无内容。"}</p>
+                  <KeywordChips values={node.keywords || []} compact />
+                </article>
+              ))}
+            </IndexDetailSection>
+            <IndexDetailSection title="关系" count={edges.length}>
+              <div className="knowledge-index-detail__grid">
+                {edges.map((edge) => (
+                  <article className="knowledge-index-detail__card" key={edge.id}>
+                    <div className="knowledge-index-detail__triple">
+                      <span>{edge.subject}</span>
+                      <em>{edge.label || edge.predicate || edge.edge_type || "关联"}</em>
+                      <span>{edge.object}</span>
+                    </div>
+                    <p>{edge.description || edge.evidence || "暂无说明。"}</p>
+                  </article>
+                ))}
+              </div>
+            </IndexDetailSection>
+          </div>
+        ) : (
+          <div className="knowledge-index-detail__empty">暂无索引详情。</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function IndexDetailSection({
+  title,
+  count,
+  children,
+}: {
+  title: string
+  count: number
+  children: ReactNode
+}) {
+  return (
+    <section className="knowledge-index-detail__section">
+      <h3>
+        {title}
+        <span>{count}</span>
+      </h3>
+      {count > 0 || title === "文章摘要" ? (
+        children
+      ) : (
+        <div className="knowledge-index-detail__empty">暂无{title}。</div>
+      )}
+    </section>
+  )
+}
+
+function KeywordChips({ values, compact }: { values: string[]; compact?: boolean }) {
+  const list = values.map((value) => value.trim()).filter(Boolean)
+  if (!list.length) {
+    return null
+  }
+  return (
+    <div className={`knowledge-index-detail__tags${compact ? " is-compact" : ""}`}>
+      {list.map((value) => (
+        <span key={value}>{value}</span>
+      ))}
     </div>
   )
 }
@@ -1383,6 +1688,50 @@ function findNode(nodes: KnowledgeTreeNode[], id: string): KnowledgeTreeNode | n
     }
   }
   return null
+}
+
+function normalizeFrontendIndexStatus(value: unknown): IndexStatus {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "pending":
+      return "pending"
+    case "running":
+      return "running"
+    case "success":
+      return "success"
+    case "failed":
+    case "fail":
+      return "failed"
+    default:
+      return ""
+  }
+}
+
+function indexStatusView(status: unknown) {
+  const value = normalizeFrontendIndexStatus(status)
+  if (value === "running") {
+    return { status: value, label: "索引中", icon: RefreshCw }
+  }
+  if (value === "pending") {
+    return { status: value, label: "待索引", icon: Timer }
+  }
+  if (value === "failed") {
+    return { status: value, label: "索引失败", icon: XCircle }
+  }
+  if (value === "success") {
+    return { status: value, label: "已索引", icon: CheckCircle2 }
+  }
+  return null
+}
+
+function markKnowledgeIndexRunning(current: KnowledgeFileManagerData): KnowledgeFileManagerData {
+  const files = (current.files || []).map((file) => {
+    return { ...file, index_status: file.type === "file" ? "running" : file.index_status }
+  })
+  return {
+    ...current,
+    base: current.base ? { ...current.base, index_status: "running" } : current.base,
+    files,
+  }
 }
 
 function isNodeAncestor(node: KnowledgeTreeNode, id: string) {

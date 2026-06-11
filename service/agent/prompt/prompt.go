@@ -13,6 +13,7 @@ type RuntimeInput struct {
 	PublicSettings []agentmodel.Setting
 	AgentSettings  []agentmodel.AgentSetting
 	Knowledge      []KnowledgeSnippet
+	KnowledgeBases []KnowledgeBaseRuntime
 	Powers         []energonmodel.Power
 	SkillCatalog   agentskill.Catalog
 	Tools          ToolRuntime
@@ -28,6 +29,12 @@ type ToolRuntime struct {
 
 type ResultRuntime struct {
 	AsyncMaxConcurrency int
+}
+
+type KnowledgeBaseRuntime struct {
+	ID     uint64
+	Name   string
+	Prompt string
 }
 
 type EnergonBodyInput struct {
@@ -46,24 +53,24 @@ type snippet struct {
 }
 
 type KnowledgeSnippet struct {
-	BaseID   uint64
-	BaseName string
-	Prompt   string
-	DirID    uint64
-	DirPath  string
-	DocID    uint64
-	ChunkID  uint64
-	Title    string
-	Content  string
-	Score    float64
-	Source   string
-	SortRank int
+	BaseID   uint64  `json:"base_id"`
+	BaseName string  `json:"base_name"`
+	Prompt   string  `json:"prompt"`
+	DirID    uint64  `json:"dir_id"`
+	DirPath  string  `json:"dir_path"`
+	DocID    uint64  `json:"doc_id"`
+	NodeID   uint64  `json:"node_id"`
+	Title    string  `json:"title"`
+	Content  string  `json:"content"`
+	Score    float64 `json:"score"`
+	Source   string  `json:"source"`
+	SortRank int     `json:"sort_rank"`
 }
 
 func BuildRuntimePrompt(input RuntimeInput) string {
 	sections := make([]string, 0, 8)
 	sections = appendNonEmpty(sections, settingPrompt(input.PublicSettings, input.AgentSettings))
-	sections = appendNonEmpty(sections, knowledgePrompt(input.Knowledge))
+	sections = appendNonEmpty(sections, knowledgeToolPrompt(input.KnowledgeBases))
 	sections = appendNonEmpty(sections, powerPrompt(input.Powers))
 	sections = appendNonEmpty(sections, skillPrompt(input.SkillCatalog, input.Tools))
 	sections = appendNonEmpty(sections, resultPrompt(input.Result))

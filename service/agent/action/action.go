@@ -95,6 +95,11 @@ func mergeTopLevelToolInput(input map[string]any, raw map[string]any) map[string
 		"url", "uri", "endpoint", "method", "headers", "query", "body", "data", "payload", "json",
 		"script", "path", "file", "dir", "directory", "args", "arguments",
 		"route", "api", "server", "timeout_seconds", "timeoutSeconds",
+		"knowledge_base_id", "knowledgeBaseId", "base_id", "baseId",
+		"agent_id", "agentId",
+		"node_id", "nodeId", "parent_id", "parentId",
+		"edge_types", "edgeTypes", "edge_type", "edgeType",
+		"limit", "depth",
 	} {
 		if _, exists := result[key]; exists {
 			continue

@@ -38,6 +38,90 @@ func (Knowledge) GetDocDetail(c *server.Context) error {
 	return readKnowledgeFile(c)
 }
 
+func (Knowledge) GetFileIndexDetail(c *server.Context) error {
+	data, err := knowledgeRunner.ReadKnowledgeFileIndexDetail(
+		c.Context(),
+		inputBaseID(c),
+		c.Input("id"),
+	)
+	return knowledgeJSON(c, data, err)
+}
+
+func (Knowledge) GetIndexOverview(c *server.Context) error {
+	data, err := knowledgeRunner.ReadKnowledgeIndexOverview(c.Context(), inputBaseID(c))
+	return knowledgeJSON(c, data, err)
+}
+
+func (Knowledge) GetGraph(c *server.Context) error {
+	data, err := knowledgeRunner.ReadKnowledgeGraph(
+		c.Context(),
+		inputBaseID(c),
+		int(frontstream.InputInt64(c.Input("limit"), 0)),
+	)
+	return knowledgeJSON(c, data, err)
+}
+
+func (Knowledge) GetNodeSearch(c *server.Context) error {
+	limit := frontstream.InputInt64(c.Input("limit"), 0)
+	data, err := knowledgeRunner.SearchKnowledgeNodes(
+		c.Context(),
+		inputBaseID(c),
+		c.Input("query"),
+		int(limit),
+	)
+	return knowledgeJSON(c, data, err)
+}
+
+func (Knowledge) GetTree(c *server.Context) error {
+	data, err := knowledgeRunner.ListKnowledgeTree(
+		c.Context(),
+		inputBaseID(c),
+		uint64(frontstream.InputInt64(c.Input("parent_id"), 0)),
+		int(frontstream.InputInt64(c.Input("depth"), 2)),
+		int(frontstream.InputInt64(c.Input("limit"), 120)),
+	)
+	return knowledgeJSON(c, data, err)
+}
+
+func (Knowledge) GetNodeOpen(c *server.Context) error {
+	nodeID := uint64(frontstream.InputInt64(c.Input("node_id"), 0))
+	if nodeID == 0 {
+		nodeID = uint64(frontstream.InputInt64(c.Input("id"), 0))
+	}
+	data, err := knowledgeRunner.OpenKnowledgeNode(c.Context(), nodeID)
+	return knowledgeJSON(c, data, err)
+}
+
+func (Knowledge) GetNodeExpand(c *server.Context) error {
+	nodeID := uint64(frontstream.InputInt64(c.Input("node_id"), 0))
+	if nodeID == 0 {
+		nodeID = uint64(frontstream.InputInt64(c.Input("id"), 0))
+	}
+	depth := int(frontstream.InputInt64(c.Input("depth"), 1))
+	data, err := knowledgeRunner.ExpandKnowledgeNode(c.Context(), nodeID, depth)
+	return knowledgeJSON(c, data, err)
+}
+
+func (Knowledge) GetNodeRelated(c *server.Context) error {
+	nodeID := uint64(frontstream.InputInt64(c.Input("node_id"), 0))
+	if nodeID == 0 {
+		nodeID = uint64(frontstream.InputInt64(c.Input("id"), 0))
+	}
+	limit := int(frontstream.InputInt64(c.Input("limit"), 10))
+	data, err := knowledgeRunner.FindRelatedKnowledge(c.Context(), nodeID, inputEdgeTypes(c), limit)
+	return knowledgeJSON(c, data, err)
+}
+
+func (Knowledge) GetRetrieveDebug(c *server.Context) error {
+	data, err := knowledgeRunner.DebugRetrieve(c.Context(), knowledgeservice.RetrieveDebugRequest{
+		AgentID: uint64(frontstream.InputInt64(c.Input("agent_id"), 0)),
+		BaseID:  inputBaseID(c),
+		Query:   c.Input("query"),
+		Limit:   int(frontstream.InputInt64(c.Input("limit"), 0)),
+	})
+	return knowledgeJSON(c, data, err)
+}
+
 func (Knowledge) PostCreateDir(c *server.Context) error {
 	return createKnowledgeFile(c, "folder")
 }
@@ -255,41 +339,6 @@ func (Knowledge) GetDownloadFile(c *server.Context) error {
 	return raw.Download(file.Path, file.Name)
 }
 
-func (Knowledge) PostIndexFile(c *server.Context) error {
-	body, err := bindKnowledgeBody(c)
-	if err != nil {
-		return c.Error(err)
-	}
-	err = knowledgeRunner.StartKnowledgeFileIndex(
-		c.Context(),
-		uint64ValueFromBody(body, "knowledge_base_id", "base_id"),
-		textFromBody(body, "id"),
-	)
-	return knowledgeJSON(c, map[string]any{"index_status": "running"}, err)
-}
-
-func (Knowledge) PostIndexDirectory(c *server.Context) error {
-	body, err := bindKnowledgeBody(c)
-	if err != nil {
-		return c.Error(err)
-	}
-	err = knowledgeservice.StartDirectoryIndex(
-		c.Context(),
-		uint64ValueFromBody(body, "knowledge_base_id", "base_id"),
-		uint64ValueFromBody(body, "dir_id", "id"),
-	)
-	return knowledgeJSON(c, map[string]any{"index_status": "running"}, err)
-}
-
-func (Knowledge) PostIndexDocument(c *server.Context) error {
-	body, err := bindKnowledgeBody(c)
-	if err != nil {
-		return c.Error(err)
-	}
-	err = knowledgeservice.StartDocumentIndex(c.Context(), uint64ValueFromBody(body, "doc_id", "id"))
-	return knowledgeJSON(c, map[string]any{"index_status": "running"}, err)
-}
-
 func (Knowledge) PostIndexBase(c *server.Context) error {
 	body, err := bindKnowledgeBody(c)
 	if err != nil {
@@ -337,6 +386,24 @@ func inputBaseID(c *server.Context) uint64 {
 		baseID = uint64(frontstream.InputInt64(c.Input("base_id"), 0))
 	}
 	return baseID
+}
+
+func inputEdgeTypes(c *server.Context) []string {
+	raw := strings.TrimSpace(c.Input("edge_types"))
+	if raw == "" {
+		raw = strings.TrimSpace(c.Input("edge_type"))
+	}
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func stringSliceFromBody(body map[string]any, key string) []string {

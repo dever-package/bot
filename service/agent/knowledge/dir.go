@@ -98,21 +98,6 @@ func KnowledgeDirPath(ctx context.Context, dirID uint64) string {
 	return strings.TrimSpace(dir.Path)
 }
 
-func validateDocDir(ctx context.Context, baseID uint64, dirID uint64) error {
-	if dirID == 0 {
-		return nil
-	}
-	dir := agentmodel.NewKnowledgeDirModel().Find(ctx, map[string]any{
-		"id":                dirID,
-		"knowledge_base_id": baseID,
-		"status":            1,
-	})
-	if dir == nil {
-		return fmt.Errorf("目录不存在")
-	}
-	return nil
-}
-
 func docCountsByDir(ctx context.Context, baseID uint64) map[uint64]int {
 	counts := map[uint64]int{}
 	rows := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{

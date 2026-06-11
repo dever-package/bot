@@ -140,19 +140,12 @@ func (s Service) execute(exec runExecution) {
 
 	publicSettings := s.repo.ListActivePublicSettings(ctx, exec.Agent.SettingPackID)
 	agentSettings := s.repo.ListActiveAgentSettings(ctx, exec.Agent.ID)
-	knowledgeResult, knowledgeErr := agentknowledge.NewService().Retrieve(ctx, agentknowledge.RetrieveRequest{
-		AgentID: exec.Agent.ID,
-		Query:   primaryInputText(exec.Parsed.Input),
-	})
-	knowledgeStatus := stepStatusSuccess
-	if knowledgeErr != nil {
-		knowledgeStatus = stepStatusWarning
-		_ = s.writeStreamStatus(ctx, exec.RequestID, knowledgeErr.Error(), nil)
-	}
+	knowledgeService := agentknowledge.NewService()
+	knowledgeBases := knowledgeService.AgentKnowledgeBases(ctx, exec.Agent.ID)
 	runtimePrompt := agentprompt.BuildRuntimePrompt(agentprompt.RuntimeInput{
 		PublicSettings: publicSettings,
 		AgentSettings:  agentSettings,
-		Knowledge:      knowledgeResult.Snippets,
+		KnowledgeBases: promptKnowledgeBases(knowledgeBases),
 		Powers:         powers,
 		SkillCatalog:   catalog,
 		Tools:          runtimePromptTools(runtimeOptions.Tool),
@@ -162,14 +155,13 @@ func (s Service) execute(exec runExecution) {
 		History: exec.Parsed.History,
 	})
 	tracker.Step(ctx, "knowledge", "运行资料", runtimePrompt, map[string]any{
-		"setting_pack_id":   exec.Agent.SettingPackID,
-		"public_settings":   len(publicSettings),
-		"agent_settings":    len(agentSettings),
-		"knowledge_hits":    len(knowledgeResult.Snippets),
-		"knowledge_error":   errorText(knowledgeErr),
-		"knowledge_matches": knowledgeResult.Matches,
-		"history_messages":  len(exec.Parsed.History),
-	}, knowledgeStatus)
+		"setting_pack_id":  exec.Agent.SettingPackID,
+		"public_settings":  len(publicSettings),
+		"agent_settings":   len(agentSettings),
+		"knowledge_bases":  len(knowledgeBases),
+		"knowledge_mode":   "agentic_tools",
+		"history_messages": len(exec.Parsed.History),
+	}, stepStatusSuccess)
 	s.repo.UpdateRun(ctx, exec.RunID, map[string]any{
 		"skills": jsonText(map[string]any{
 			"skill_pack_id": catalog.PackID,
@@ -528,6 +520,18 @@ func runtimePromptTools(options agenttool.Options) agentprompt.ToolRuntime {
 		ScriptSandboxDriver:   sandboxConfig.Driver,
 		ScriptNetworkMode:     sandboxConfig.NetworkMode,
 	}
+}
+
+func promptKnowledgeBases(rows []agentknowledge.AgentKnowledgeBaseRuntime) []agentprompt.KnowledgeBaseRuntime {
+	result := make([]agentprompt.KnowledgeBaseRuntime, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, agentprompt.KnowledgeBaseRuntime{
+			ID:     row.ID,
+			Name:   row.Name,
+			Prompt: row.Prompt,
+		})
+	}
+	return result
 }
 
 func requestMaxSteps(options map[string]any) int {

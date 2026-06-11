@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/shemic/dever/util"
@@ -41,6 +42,13 @@ func isVectorEnabled(value int16) bool {
 	return value == 1
 }
 
+func countInt(value int64) int {
+	if value <= 0 {
+		return 0
+	}
+	return int(value)
+}
+
 func normalizeVectorEnabled(value any) int16 {
 	switch current := value.(type) {
 	case bool:
@@ -62,8 +70,8 @@ func normalizeVectorEnabled(value any) int16 {
 	return 2
 }
 
-func normalizeChunkSize(value any) int {
-	size := util.ToIntDefault(value, defaultChunkSize)
+func normalizeNodeMaxLength(value any) int {
+	size := util.ToIntDefault(value, defaultNodeMaxLength)
 	if size < 200 {
 		return 200
 	}
@@ -73,12 +81,12 @@ func normalizeChunkSize(value any) int {
 	return size
 }
 
-func normalizeChunkOverlap(value any, chunkSize int) int {
-	overlap := util.ToIntDefault(value, defaultChunkOverlap)
+func normalizeNodeSplitOverlap(value any, maxLength int) int {
+	overlap := util.ToIntDefault(value, defaultNodeOverlap)
 	if overlap < 0 {
 		return 0
 	}
-	limit := chunkSize / 2
+	limit := maxLength / 2
 	if overlap > limit {
 		return limit
 	}
@@ -157,23 +165,18 @@ func pointID(chunkID uint64) uint64 {
 	return chunkID
 }
 
-func normalizeIndexContent(content string) string {
-	return strings.TrimSpace(agentprompt.TextFromRichText(content))
+func keywordText(value string) string {
+	tokens := queryTerms(value)
+	if len(tokens) == 0 {
+		return ""
+	}
+	if len(tokens) > 80 {
+		tokens = tokens[:80]
+	}
+	return strings.Join(tokens, " ")
 }
 
-func searchableChunkText(dirPath string, title string, content string) string {
-	parts := make([]string, 0, 3)
-	if strings.TrimSpace(dirPath) != "" {
-		parts = append(parts, "目录："+strings.ReplaceAll(strings.TrimSpace(dirPath), "/", " / "))
-	}
-	if strings.TrimSpace(title) != "" {
-		parts = append(parts, "文档："+strings.TrimSpace(title))
-	}
-	parts = append(parts, "内容：\n"+strings.TrimSpace(content))
-	return strings.TrimSpace(strings.Join(parts, "\n"))
-}
-
-func keywordChunkFilters(baseID uint64, keyword string, dirIDs ...uint64) any {
+func keywordNodeFilters(baseID uint64, keyword string, dirIDs ...uint64) any {
 	keyword = strings.TrimSpace(keyword)
 	filter := map[string]any{"knowledge_base_id": baseID, "index_status": "success", "status": 1}
 	if len(dirIDs) > 0 {
@@ -190,13 +193,124 @@ func keywordChunkFilters(baseID uint64, keyword string, dirIDs ...uint64) any {
 	if baseID == 0 || keyword == "" {
 		return filter
 	}
-	pattern := "%" + keyword + "%"
-	filter["or"] = []any{
-		map[string]any{"main.title": map[string]any{"like": pattern}},
-		map[string]any{"main.dir_path": map[string]any{"like": pattern}},
-		map[string]any{"main.content": map[string]any{"like": pattern}},
+	terms := queryTerms(keyword)
+	if len(terms) == 0 {
+		terms = []string{keyword}
 	}
+	conditions := make([]any, 0, len(terms)*6+4)
+	for _, term := range terms {
+		pattern := "%" + term + "%"
+		conditions = append(conditions,
+			map[string]any{"main.title": map[string]any{"like": pattern}},
+			map[string]any{"main.path": map[string]any{"like": pattern}},
+			map[string]any{"main.summary": map[string]any{"like": pattern}},
+			map[string]any{"main.content": map[string]any{"like": pattern}},
+			map[string]any{"main.plain_text": map[string]any{"like": pattern}},
+			map[string]any{"main.search_text": map[string]any{"like": pattern}},
+			map[string]any{"main.keywords": map[string]any{"like": pattern}},
+		)
+	}
+	pattern := "%" + keyword + "%"
+	conditions = append(conditions,
+		map[string]any{"main.title": map[string]any{"like": pattern}},
+		map[string]any{"main.path": map[string]any{"like": pattern}},
+		map[string]any{"main.search_text": map[string]any{"like": pattern}},
+	)
+	filter["or"] = conditions
 	return filter
+}
+
+func keywordCandidateLimit(limit int, focused bool, query string) int {
+	candidateLimit := focusedRetrieveLimit(limit, focused)
+	if len(queryTerms(query)) > 1 {
+		candidateLimit *= 3
+	} else {
+		candidateLimit *= 2
+	}
+	if candidateLimit < defaultRetrieveLimit {
+		candidateLimit = defaultRetrieveLimit
+	}
+	if candidateLimit > 120 {
+		return 120
+	}
+	return candidateLimit
+}
+
+func keywordNodeScore(row *agentmodel.KnowledgeNode, query string) float64 {
+	terms := queryTerms(query)
+	if len(terms) == 0 {
+		return 0
+	}
+	title := strings.ToLower(strings.TrimSpace(row.Title))
+	path := strings.ToLower(strings.TrimSpace(row.Path))
+	summary := strings.ToLower(strings.TrimSpace(row.Summary))
+	content := strings.ToLower(strings.TrimSpace(firstNonEmpty(row.PlainText, row.Content)))
+	searchText := strings.ToLower(strings.TrimSpace(row.SearchText))
+	keywords := strings.ToLower(strings.TrimSpace(row.Keywords))
+	score := 0.0
+	for _, term := range terms {
+		term = strings.ToLower(term)
+		if term == "" {
+			continue
+		}
+		if title == term {
+			score += 0.3
+		} else if strings.Contains(title, term) {
+			score += 0.22
+		}
+		if pathSegmentMatched(term, path) || strings.Contains(path, term) {
+			score += 0.18
+		}
+		if strings.Contains(keywords, term) {
+			score += 0.14
+		}
+		if strings.Contains(summary, term) {
+			score += 0.1
+		}
+		if strings.Contains(searchText, term) {
+			score += 0.07
+		}
+		if strings.Contains(content, term) {
+			score += 0.05
+		}
+	}
+	if strings.Contains(searchText, strings.ToLower(strings.TrimSpace(query))) {
+		score += 0.12
+	}
+	switch row.NodeType {
+	case agentmodel.KnowledgeNodeTypeDoc, agentmodel.KnowledgeNodeTypeHeading, agentmodel.KnowledgeNodeTypePage:
+		score += 0.04
+	}
+	return score
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func firstPositive(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func nonEmptyStrings(values ...string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.Trim(strings.TrimSpace(value), "/")
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func jsonText(value any) string {
@@ -284,6 +398,160 @@ func candidateKnowledgeDirs(ctx context.Context, baseID uint64, query string) []
 	return result
 }
 
+func expandedCandidateDirs(ctx context.Context, baseID uint64, query string, depth int) []candidateDir {
+	roots := candidateKnowledgeDirs(ctx, baseID, query)
+	return expandCandidateDirs(ctx, baseID, roots, depth)
+}
+
+func candidateKnowledgeDirsByIDs(ctx context.Context, baseID uint64, ids []uint64) []candidateDir {
+	if baseID == 0 || len(ids) == 0 {
+		return nil
+	}
+	rows := agentmodel.NewKnowledgeDirModel().Select(ctx, map[string]any{
+		"id":                ids,
+		"knowledge_base_id": baseID,
+		"status":            1,
+	}, map[string]any{
+		"field": "main.id, main.name, main.path",
+		"order": "main.depth desc, main.id asc",
+	})
+	result := make([]candidateDir, 0, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			result = append(result, candidateDirFromDir(row))
+		}
+	}
+	return result
+}
+
+func candidateKnowledgeDirsByDocIDs(ctx context.Context, baseID uint64, docIDs []uint64) []candidateDir {
+	if baseID == 0 || len(docIDs) == 0 {
+		return nil
+	}
+	rows := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
+		"id":                docIDs,
+		"knowledge_base_id": baseID,
+		"status":            1,
+	}, map[string]any{
+		"field": "main.id, main.dir_id",
+	})
+	dirIDs := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		if row != nil && row.DirID > 0 {
+			dirIDs = append(dirIDs, row.DirID)
+		}
+	}
+	return candidateKnowledgeDirsByIDs(ctx, baseID, uniqueUint64s(dirIDs, 0))
+}
+
+func knowledgeDocTitlesByIDs(ctx context.Context, baseID uint64, docIDs []uint64) []string {
+	if baseID == 0 || len(docIDs) == 0 {
+		return nil
+	}
+	rows := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
+		"id":                docIDs,
+		"knowledge_base_id": baseID,
+		"status":            1,
+	}, map[string]any{
+		"field":    "main.id, main.title",
+		"page":     1,
+		"pageSize": 30,
+	})
+	titles := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row != nil && strings.TrimSpace(row.Title) != "" {
+			titles = append(titles, strings.TrimSpace(row.Title))
+		}
+	}
+	return titles
+}
+
+func expandCandidateDirs(ctx context.Context, baseID uint64, roots []candidateDir, depth int) []candidateDir {
+	if len(roots) == 0 || depth <= 0 {
+		return roots
+	}
+	result := append([]candidateDir{}, roots...)
+	seen := map[uint64]struct{}{}
+	for _, dir := range roots {
+		if dir.ID > 0 {
+			seen[dir.ID] = struct{}{}
+		}
+	}
+	for _, dir := range roots {
+		for _, expanded := range relatedKnowledgeDirs(ctx, baseID, dir.ID, depth) {
+			if expanded.ID == 0 {
+				continue
+			}
+			if _, exists := seen[expanded.ID]; exists {
+				continue
+			}
+			seen[expanded.ID] = struct{}{}
+			result = append(result, expanded)
+		}
+	}
+	return result
+}
+
+func relatedKnowledgeDirs(ctx context.Context, baseID uint64, rootID uint64, depth int) []candidateDir {
+	if baseID == 0 || rootID == 0 || depth <= 0 {
+		return nil
+	}
+	result := make([]candidateDir, 0)
+	current := agentmodel.NewKnowledgeDirModel().Find(ctx, map[string]any{
+		"id":                rootID,
+		"knowledge_base_id": baseID,
+		"status":            1,
+	})
+	for i := 0; i < depth && current != nil && current.ParentID > 0; i++ {
+		parent := agentmodel.NewKnowledgeDirModel().Find(ctx, map[string]any{
+			"id":                current.ParentID,
+			"knowledge_base_id": baseID,
+			"status":            1,
+		})
+		if parent == nil {
+			break
+		}
+		result = append(result, candidateDirFromDir(parent))
+		current = parent
+	}
+	result = append(result, childCandidateDirs(ctx, baseID, rootID, depth)...)
+	return result
+}
+
+func childCandidateDirs(ctx context.Context, baseID uint64, parentID uint64, depth int) []candidateDir {
+	if baseID == 0 || parentID == 0 || depth <= 0 {
+		return nil
+	}
+	rows := agentmodel.NewKnowledgeDirModel().Select(ctx, map[string]any{
+		"knowledge_base_id": baseID,
+		"parent_id":         parentID,
+		"status":            1,
+	}, map[string]any{
+		"field": "main.id, main.name, main.path",
+		"order": "main.sort asc, main.id asc",
+	})
+	result := make([]candidateDir, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		result = append(result, candidateDirFromDir(row))
+		result = append(result, childCandidateDirs(ctx, baseID, row.ID, depth-1)...)
+	}
+	return result
+}
+
+func candidateDirFromDir(dir *agentmodel.KnowledgeDir) candidateDir {
+	if dir == nil {
+		return candidateDir{}
+	}
+	return candidateDir{
+		ID:   dir.ID,
+		Name: strings.TrimSpace(dir.Name),
+		Path: strings.TrimSpace(dir.Path),
+	}
+}
+
 func candidateDirIDs(rows []candidateDir) []uint64 {
 	ids := make([]uint64, 0, len(rows))
 	seen := map[uint64]struct{}{}
@@ -300,10 +568,111 @@ func candidateDirIDs(rows []candidateDir) []uint64 {
 	return ids
 }
 
+func mergeCandidateDirs(groups ...[]candidateDir) []candidateDir {
+	result := make([]candidateDir, 0)
+	seen := map[uint64]struct{}{}
+	for _, group := range groups {
+		for _, dir := range group {
+			if dir.ID == 0 {
+				continue
+			}
+			if _, exists := seen[dir.ID]; exists {
+				continue
+			}
+			seen[dir.ID] = struct{}{}
+			result = append(result, dir)
+		}
+	}
+	return result
+}
+
+func uniqueUint64s(values []uint64, limit int) []uint64 {
+	seen := map[uint64]struct{}{}
+	result := make([]uint64, 0, len(values))
+	for _, value := range values {
+		if value == 0 {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+		if limit > 0 && len(result) >= limit {
+			break
+		}
+	}
+	return result
+}
+
+func plannedQueries(query string, plan retrievalPlan) []string {
+	values := append([]string{query}, plan.Queries...)
+	result := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, value)
+		if len(result) >= 5 {
+			break
+		}
+	}
+	return result
+}
+
 func pathSegmentMatched(query string, path string) bool {
+	query = strings.ToLower(strings.TrimSpace(query))
+	path = strings.ToLower(strings.TrimSpace(path))
 	for _, segment := range strings.Split(path, "/") {
 		segment = strings.TrimSpace(segment)
 		if segment != "" && strings.Contains(query, segment) {
+			return true
+		}
+	}
+	return false
+}
+
+func queryTerms(query string) []string {
+	query = strings.ToLower(strings.TrimSpace(query))
+	if query == "" {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	terms := make([]string, 0, 8)
+	addTerm := func(term string) {
+		term = strings.Trim(term, " \t\r\n-_./\\|:：,，;；!！?？()（）[]【】{}<>《》\"'`")
+		if textLength(term) < 2 && !containsCJK(term) {
+			return
+		}
+		if _, exists := seen[term]; exists {
+			return
+		}
+		seen[term] = struct{}{}
+		terms = append(terms, term)
+	}
+	for _, term := range strings.FieldsFunc(query, isQuerySeparator) {
+		addTerm(term)
+	}
+	if len([]rune(query)) <= 32 {
+		addTerm(query)
+	}
+	return terms
+}
+
+func isQuerySeparator(r rune) bool {
+	return unicode.IsSpace(r) || strings.ContainsRune("/\\|,，;；:：!！?？()（）[]【】{}<>《》\"'`", r)
+}
+
+func containsCJK(value string) bool {
+	for _, r := range value {
+		if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r) || unicode.Is(unicode.Hangul, r) {
 			return true
 		}
 	}
@@ -327,17 +696,17 @@ func mergeKnowledgeSnippets(rows []agentprompt.KnowledgeSnippet) []agentprompt.K
 	seen := make(map[uint64]int, len(rows))
 	result := make([]agentprompt.KnowledgeSnippet, 0, len(rows))
 	for _, row := range rows {
-		if row.ChunkID == 0 {
+		if row.NodeID == 0 {
 			result = append(result, row)
 			continue
 		}
-		if index, exists := seen[row.ChunkID]; exists {
+		if index, exists := seen[row.NodeID]; exists {
 			if row.Score > result[index].Score {
 				result[index] = row
 			}
 			continue
 		}
-		seen[row.ChunkID] = len(result)
+		seen[row.NodeID] = len(result)
 		result = append(result, row)
 	}
 	return result

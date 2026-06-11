@@ -1,0 +1,135 @@
+{
+  "page": {
+    "parent": "bot/agent/knowledge_parser_service/list",
+    "type": 2,
+    "sort": 1,
+    "auth": [
+      {
+        "key": "bot/agent/knowledge_parser_service/create",
+        "name": "文档解析服务新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/agent/knowledge_parser_service/update",
+        "name": "文档解析服务编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "placeholder": "例如：默认 MinerU 服务",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "服务名称不能为空。"
+          },
+          {
+            "type": "model",
+            "except": "$form.id",
+            "message": "服务名称已存在。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-radio",
+        "name": "服务",
+        "value": "form.provider",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "服务不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "例如：http://127.0.0.1:8000",
+        "value": "form.host",
+        "mode": "form",
+        "info": "MinerU 服务地址。保存时会自动去掉末尾的 /。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "服务地址不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "编辑时留空表示不修改已有 APIKey",
+        "value": "form.api_key",
+        "mode": "form",
+        "info": "用于调用 MinerU 服务的 APIKey。JWT 这类长 token 可以直接粘贴；编辑已有服务时不填写会保留旧值。",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 4
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "name": "",
+      "provider": "mineru",
+      "host": "",
+      "api_key": "",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "use": "bot.agent.NewKnowledgeParserServiceModel",
+      "data": {
+        "id": "$form.id",
+        "name": "$form.name",
+        "provider": "$form.provider",
+        "host": "$form.host",
+        "api_key": "$form.api_key",
+        "status": "$form.status",
+        "sort": "$form.sort"
+      },
+      "before": {
+        "type": "service",
+        "use": "bot.agent.knowledge.KnowledgeHook.BeforeSaveKnowledgeParserService"
+      }
+    }
+  }
+}

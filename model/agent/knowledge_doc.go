@@ -7,21 +7,26 @@ import (
 )
 
 type KnowledgeDoc struct {
-	ID              uint64    `dorm:"primaryKey;autoIncrement;comment:文档ID"`
-	KnowledgeBaseID uint64    `dorm:"type:bigint;not null;default:0;comment:知识库"`
-	DirID           uint64    `dorm:"type:bigint;not null;default:0;comment:目录"`
-	Title           string    `dorm:"type:varchar(255);not null;comment:标题"`
-	FileName        string    `dorm:"type:varchar(255);not null;default:'';comment:文件名"`
-	StoragePath     string    `dorm:"type:varchar(1024);not null;default:'';comment:存储路径"`
-	MimeType        string    `dorm:"type:varchar(128);not null;default:'';comment:MIME类型"`
-	Size            int64     `dorm:"type:bigint;not null;default:0;comment:文件大小"`
-	Content         string    `dorm:"type:text;not null;default:'';comment:内容"`
-	ContentHash     string    `dorm:"type:varchar(64);not null;default:'';comment:内容哈希"`
-	ChunkCount      int       `dorm:"type:int;not null;default:0;comment:分段数"`
-	IndexStatus     string    `dorm:"type:varchar(32);not null;default:'pending';comment:索引状态"`
-	ErrorMessage    string    `dorm:"type:text;not null;default:'';comment:错误信息"`
-	Status          int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	CreatedAt       time.Time `dorm:"comment:创建时间"`
+	ID               uint64    `dorm:"primaryKey;autoIncrement;comment:文档ID"`
+	KnowledgeBaseID  uint64    `dorm:"type:bigint;not null;default:0;comment:知识库"`
+	DirID            uint64    `dorm:"type:bigint;not null;default:0;comment:目录"`
+	Title            string    `dorm:"type:varchar(255);not null;comment:标题"`
+	FileName         string    `dorm:"type:varchar(255);not null;default:'';comment:文件名"`
+	StoragePath      string    `dorm:"type:varchar(1024);not null;default:'';comment:存储路径"`
+	MimeType         string    `dorm:"type:varchar(128);not null;default:'';comment:MIME类型"`
+	Size             int64     `dorm:"type:bigint;not null;default:0;comment:文件大小"`
+	Content          string    `dorm:"type:text;not null;default:'';comment:内容"`
+	Summary          string    `dorm:"type:text;not null;default:'';comment:摘要"`
+	Keywords         string    `dorm:"type:text;not null;default:'';comment:关键词"`
+	ContentHash      string    `dorm:"type:varchar(64);not null;default:'';comment:内容哈希"`
+	NodeCount        int       `dorm:"type:int;not null;default:0;comment:节点数"`
+	IndexStatus      string    `dorm:"type:varchar(32);not null;default:'pending';comment:索引状态"`
+	IndexStage       string    `dorm:"type:varchar(64);not null;default:'';comment:索引阶段"`
+	IndexStageDetail string    `dorm:"type:text;not null;default:'';comment:索引阶段详情JSON"`
+	IndexVersion     int       `dorm:"type:int;not null;default:1;comment:索引版本"`
+	ErrorMessage     string    `dorm:"type:text;not null;default:'';comment:错误信息"`
+	Status           int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	CreatedAt        time.Time `dorm:"comment:创建时间"`
 }
 
 type KnowledgeDocIndex struct {
@@ -29,6 +34,7 @@ type KnowledgeDocIndex struct {
 	BaseStatus   struct{} `index:"knowledge_base_id,status,id"`
 	BaseDir      struct{} `index:"knowledge_base_id,dir_id,status,id"`
 	BaseIndex    struct{} `index:"knowledge_base_id,index_status,id"`
+	BaseStage    struct{} `index:"knowledge_base_id,index_stage,status"`
 	StoragePath  struct{} `index:"knowledge_base_id,storage_path"`
 	ContentHash  struct{} `index:"knowledge_base_id,content_hash"`
 }
@@ -45,6 +51,12 @@ var knowledgeDirRelation = orm.Relation{
 	OptionKeys: []string{"name", "path"},
 }
 
+var knowledgeDocModelRelation = orm.Relation{
+	Field:      "doc_id",
+	Option:     "bot.agent.NewKnowledgeDocModel",
+	OptionKeys: []string{"title", "knowledge_base_id"},
+}
+
 func NewKnowledgeDocModel() *orm.Model[KnowledgeDoc] {
 	return orm.LoadModel[KnowledgeDoc]("知识文档", "bot_knowledge_doc", orm.ModelConfig{
 		Index:    KnowledgeDocIndex{},
@@ -53,6 +65,7 @@ func NewKnowledgeDocModel() *orm.Model[KnowledgeDoc] {
 		Options: map[string]any{
 			"status":       statusOptions,
 			"index_status": knowledgeIndexStatusOptions,
+			"index_stage":  knowledgeIndexStageOptions,
 		},
 		Relations: []orm.Relation{
 			knowledgeBaseRelation,

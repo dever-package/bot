@@ -2,9 +2,16 @@ import { request } from "@/lib/request"
 import type {
   KnowledgeApiResult,
   KnowledgeFileContent,
+  KnowledgeFileIndexDetail,
   KnowledgeFileManagerData,
   KnowledgeFileOperationData,
   KnowledgeFileUploadPartData,
+  KnowledgeGraphResult,
+  KnowledgeIndexOverview,
+  KnowledgeNodeOpenResult,
+  KnowledgeRelatedResult,
+  KnowledgeRetrieveDebugResult,
+  KnowledgeTreeResult,
 } from "./types"
 
 type RequestMethod = "get" | "post"
@@ -72,6 +79,78 @@ export function loadFileContent(params: { knowledgeBaseID: number; id: string })
   )
 }
 
+export function loadFileIndexDetail(params: { knowledgeBaseID: number; id: string }) {
+  return knowledgeRequest<KnowledgeFileIndexDetail>(
+    "/bot/knowledge/file_index_detail",
+    "get",
+    {
+      knowledge_base_id: params.knowledgeBaseID,
+      id: params.id,
+    },
+  )
+}
+
+export function loadIndexOverview(params: { knowledgeBaseID: number }) {
+  return knowledgeRequest<KnowledgeIndexOverview>(
+    "/bot/knowledge/index_overview",
+    "get",
+    {
+      knowledge_base_id: params.knowledgeBaseID,
+    },
+  )
+}
+
+export function loadKnowledgeIndexTree(params: {
+  knowledgeBaseID: number
+  parentID?: number
+  depth?: number
+  limit?: number
+}) {
+  return knowledgeRequest<KnowledgeTreeResult>("/bot/knowledge/tree", "get", {
+    knowledge_base_id: params.knowledgeBaseID,
+    parent_id: params.parentID || 0,
+    depth: params.depth || 4,
+    limit: params.limit || 120,
+  })
+}
+
+export function loadKnowledgeGraph(params: {
+  knowledgeBaseID: number
+  limit?: number
+}) {
+  return knowledgeRequest<KnowledgeGraphResult>("/bot/knowledge/graph", "get", {
+    knowledge_base_id: params.knowledgeBaseID,
+    limit: params.limit || 180,
+  })
+}
+
+export function openKnowledgeNode(params: { nodeID: number }) {
+  return knowledgeRequest<KnowledgeNodeOpenResult>("/bot/knowledge/node_open", "get", {
+    node_id: params.nodeID,
+  })
+}
+
+export function loadRelatedKnowledgeNodes(params: { nodeID: number; limit?: number }) {
+  return knowledgeRequest<KnowledgeRelatedResult>("/bot/knowledge/node_related", "get", {
+    node_id: params.nodeID,
+    limit: params.limit || 12,
+  })
+}
+
+export function loadKnowledgeRetrieveDebug(params: {
+  knowledgeBaseID: number
+  agentID?: number
+  query: string
+  limit?: number
+}) {
+  return knowledgeRequest<KnowledgeRetrieveDebugResult>("/bot/knowledge/retrieve_debug", "get", {
+    knowledge_base_id: params.knowledgeBaseID,
+    agent_id: params.agentID || 0,
+    query: params.query,
+    limit: params.limit || 8,
+  })
+}
+
 export function createFile(params: {
   knowledgeBaseID: number
   parent: string
@@ -136,6 +215,12 @@ export function saveFile(params: {
     knowledge_base_id: params.knowledgeBaseID,
     id: params.id,
     content: params.content,
+  })
+}
+
+export function indexKnowledgeBase(params: { knowledgeBaseID: number }) {
+  return knowledgeRequest<{ index_status: string }>("/bot/knowledge/index_base", "post", {
+    knowledge_base_id: params.knowledgeBaseID,
   })
 }
 
