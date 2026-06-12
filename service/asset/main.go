@@ -146,7 +146,7 @@ func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetm
 		if sort == 0 {
 			sort = 100
 		}
-		assetID := uint64(assetModel.Insert(ctx, map[string]any{
+		assetID := safeInsertAsset(ctx, map[string]any{
 			"project_id":    req.ProjectID,
 			"body_id":       req.BodyID,
 			"team_id":       req.TeamID,
@@ -159,21 +159,24 @@ func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetm
 			"status":        assetmodel.StatusDraft,
 			"sort":          sort,
 			"created_at":    now,
-		}))
+		})
 		asset = assetModel.Find(ctx, map[string]any{"id": assetID})
+		if asset == nil {
+			asset = assetModel.Find(ctx, map[string]any{
+				"project_id":    req.ProjectID,
+				"body_id":       req.BodyID,
+				"team_id":       req.TeamID,
+				"flow_id":       req.FlowID,
+				"asset_cate_id": req.AssetCateID,
+				"role":          req.Role,
+				"name":          req.Name,
+			})
+		}
 	}
 	if asset == nil {
 		return nil, nil, fmt.Errorf("创建资产失败")
 	}
-	versionID := uint64(assetmodel.NewVersionModel().Insert(ctx, map[string]any{
-		"asset_id":    asset.ID,
-		"run_id":      req.RunID,
-		"node_run_id": req.NodeRunID,
-		"release_id":  req.ReleaseID,
-		"version":     nextVersion(ctx, asset.ID),
-		"content":     jsonText(EnsureDocument(req.Content, req.Kind)),
-		"created_at":  now,
-	}))
+	versionID := insertAssetVersionWithRetry(ctx, asset.ID, req, now)
 	if versionID == 0 {
 		return nil, nil, fmt.Errorf("创建资产版本失败")
 	}
@@ -398,6 +401,43 @@ func nextVersion(ctx context.Context, assetID uint64) int {
 		}
 	}
 	return maxVersion + 1
+}
+
+func safeInsertAsset(ctx context.Context, record map[string]any) (id uint64) {
+	defer func() {
+		if recover() != nil {
+			id = 0
+		}
+	}()
+	return uint64(assetmodel.NewAssetModel().Insert(ctx, record))
+}
+
+func insertAssetVersionWithRetry(ctx context.Context, assetID uint64, req SaveVersionRequest, now time.Time) uint64 {
+	for attempt := 0; attempt < 5; attempt++ {
+		versionID := safeInsertAssetVersion(ctx, map[string]any{
+			"asset_id":    assetID,
+			"run_id":      req.RunID,
+			"node_run_id": req.NodeRunID,
+			"release_id":  req.ReleaseID,
+			"version":     nextVersion(ctx, assetID),
+			"content":     jsonText(EnsureDocument(req.Content, req.Kind)),
+			"created_at":  now,
+		})
+		if versionID > 0 {
+			return versionID
+		}
+		time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
+	}
+	return 0
+}
+
+func safeInsertAssetVersion(ctx context.Context, record map[string]any) (id uint64) {
+	defer func() {
+		if recover() != nil {
+			id = 0
+		}
+	}()
+	return uint64(assetmodel.NewVersionModel().Insert(ctx, record))
 }
 
 func contentText(raw any) string {
