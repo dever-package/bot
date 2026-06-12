@@ -325,17 +325,18 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	}
 
 	asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
-		ProjectID: req.ProjectID,
-		BodyID:    req.BodyID,
-		TeamID:    teamID,
-		FlowID:    flow.ID,
-		RunID:     run.ID,
-		NodeRunID: nodeRunID,
-		ReleaseID: releaseID,
-		Name:      nodeName,
-		Kind:      power.Kind,
-		Role:      "content",
-		Content:   output,
+		ProjectID:   req.ProjectID,
+		BodyID:      req.BodyID,
+		TeamID:      teamID,
+		FlowID:      flow.ID,
+		AssetCateID: req.AssetCateID,
+		RunID:       run.ID,
+		NodeRunID:   nodeRunID,
+		ReleaseID:   releaseID,
+		Name:        nodeName,
+		Kind:        power.Kind,
+		Role:        "material",
+		Content:     output,
 	})
 	if err != nil {
 		return nil, err
@@ -347,7 +348,7 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		"node_run_id": nodeRunID,
 		"status":      status,
 		"output":      output,
-		"asset":       assetservice.AssetToMap(*asset),
+		"asset":       s.asset.AssetDetailMap(ctx, *asset, version),
 		"version":     assetservice.VersionToMap(*version),
 	}, nil
 }

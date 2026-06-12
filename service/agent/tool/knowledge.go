@@ -35,9 +35,22 @@ func executeKnowledgeSearch(ctx context.Context, req Request) (map[string]any, e
 		return nil, err
 	}
 	return map[string]any{
-		"nodes": result.Nodes,
-		"text":  fmt.Sprintf("知识库搜索完成，命中 %d 个节点。", len(result.Nodes)),
+		"nodes":            result.Nodes,
+		"hit_node_ids":     knowledgeSearchNodeIDs(result.Nodes),
+		"query":            query,
+		"knowledge_base_id": baseID,
+		"text":             fmt.Sprintf("知识库搜索完成，命中 %d 个节点。", len(result.Nodes)),
 	}, nil
+}
+
+func knowledgeSearchNodeIDs(nodes []knowledgeservice.KnowledgeNodeResult) []uint64 {
+	ids := make([]uint64, 0, len(nodes))
+	for _, node := range nodes {
+		if node.ID > 0 {
+			ids = append(ids, node.ID)
+		}
+	}
+	return ids
 }
 
 func executeKnowledgeOpen(ctx context.Context, req Request) (map[string]any, error) {

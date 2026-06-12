@@ -74,8 +74,12 @@ func graphRetrievalPlan(ctx context.Context, baseID uint64, query string, depth 
 	if baseID == 0 || len(terms) == 0 {
 		return retrievalPlan{}
 	}
+	if cached, ok := graphCacheGet(baseID, query); ok {
+		return cached
+	}
+	// Edge entry: search edge table for query terms in label/summary/evidence
 	rows := agentmodel.NewKnowledgeEdgeModel().Select(ctx, graphEdgeFilter(baseID, terms), map[string]any{
-		"field":    "main.id, main.doc_id, main.from_node_id, main.to_node_id, main.label, main.summary, main.evidence",
+		"field":    "main.id, main.doc_id, main.from_node_id, main.to_node_id, main.label, main.summary, main.evidence, main.confidence",
 		"order":    "main.confidence desc, main.id desc",
 		"page":     1,
 		"pageSize": 20,
@@ -92,13 +96,183 @@ func graphRetrievalPlan(ctx context.Context, baseID uint64, query string, depth 
 		plan.Queries = append(plan.Queries, splitSummaryKeywords(row.Evidence)...)
 		frontier = append(frontier, row.FromNodeID, row.ToNodeID)
 	}
+	// Node entry: search node table for matching concept/entity nodes
+	if nodeMatches := nodeGraphMatches(ctx, baseID, terms); nodeMatches != nil {
+		plan.DocIDs = append(plan.DocIDs, nodeMatches.DocIDs...)
+		plan.Queries = append(plan.Queries, nodeMatches.Queries...)
+		frontier = append(frontier, nodeMatches.NodeIDs...)
+	}
+	// Inference rules: derive implicit relations from matched edges
+	if inferred := inferGraphRelations(ctx, baseID, rows); inferred != nil {
+		plan.DocIDs = append(plan.DocIDs, inferred.DocIDs...)
+		plan.Queries = append(plan.Queries, inferred.Queries...)
+		frontier = append(frontier, inferred.NodeIDs...)
+	}
 	expanded := expandGraphRetrieval(ctx, baseID, frontier, normalizeGraphDepth(depth))
 	plan.DocIDs = append(plan.DocIDs, expanded.DocIDs...)
 	plan.Queries = append(plan.Queries, expanded.Queries...)
 	if len(plan.Queries) > 0 || len(plan.DocIDs) > 0 {
-		plan.Reason = "命中知识关系边"
+		plan.Reason = "命中知识关系边或节点"
 	}
-	return normalizeRetrievalPlan(plan)
+	normalized := normalizeRetrievalPlan(plan)
+	graphCacheSet(baseID, query, normalized)
+	return normalized
+}
+
+// inferGraphRelations derives implicit node relationships from matched edges.
+// Two inference rules:
+//   - Transitive: A→B and B→C ⇒ A→C (with confidence multiplier)
+//   - Co-citation: A→C and B→C ⇒ A↔B (shared target similarity)
+func inferGraphRelations(ctx context.Context, baseID uint64, edges []*agentmodel.KnowledgeEdge) *nodeGraphMatchResult {
+	if len(edges) < 2 || baseID == 0 {
+		return nil
+	}
+	// Forward adjacency: node → set of outgoing target nodes
+	forward := map[uint64]map[uint64]struct{}{}
+	// Reverse adjacency: node → set of incoming source nodes
+	reverse := map[uint64]map[uint64]struct{}{}
+	for _, e := range edges {
+		if e == nil || e.FromNodeID == 0 || e.ToNodeID == 0 {
+			continue
+		}
+		// Transitive: skip same-node edges and unresolved references (low confidence)
+		if e.FromNodeID == e.ToNodeID || e.Confidence < 0.3 {
+			continue
+		}
+		if forward[e.FromNodeID] == nil {
+			forward[e.FromNodeID] = map[uint64]struct{}{}
+		}
+		forward[e.FromNodeID][e.ToNodeID] = struct{}{}
+		if reverse[e.ToNodeID] == nil {
+			reverse[e.ToNodeID] = map[uint64]struct{}{}
+		}
+		reverse[e.ToNodeID][e.FromNodeID] = struct{}{}
+	}
+	inferred := map[uint64]struct{}{}
+	// Rule 1: Transitive. For each A→B and B→C, infer A→C
+	for a, targets := range forward {
+		for b := range targets {
+			if grandchildren, exists := forward[b]; exists {
+				for c := range grandchildren {
+					if c == a {
+						continue
+					}
+					inferred[c] = struct{}{}
+				}
+			}
+		}
+	}
+	// Rule 2: Co-citation. For each A→C and B→C (shared target), infer A↔B
+	for _, sources := range reverse {
+		for a := range sources {
+			for b := range sources {
+				if a != b {
+					inferred[a] = struct{}{}
+					inferred[b] = struct{}{}
+				}
+			}
+		}
+	}
+	if len(inferred) == 0 {
+		return nil
+	}
+	nodeIDs := make([]uint64, 0, len(inferred))
+	for id := range inferred {
+		if id > 0 {
+			nodeIDs = append(nodeIDs, id)
+		}
+	}
+	nodeIDs = uniqueUint64s(nodeIDs, 40)
+	if len(nodeIDs) == 0 {
+		return nil
+	}
+	// Fetch doc IDs and titles for inferred nodes
+	nodes := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
+		"id":     nodeIDs,
+		"status": 1,
+	}, map[string]any{
+		"field":    "main.id, main.doc_id, main.title",
+		"page":     1,
+		"pageSize": len(nodeIDs),
+	})
+	if len(nodes) == 0 {
+		return nil
+	}
+	result := &nodeGraphMatchResult{
+		DocIDs:  make([]uint64, 0, len(nodes)),
+		Queries: make([]string, 0, len(nodes)),
+		NodeIDs: make([]uint64, 0, len(nodes)),
+	}
+	for _, n := range nodes {
+		if n == nil || n.ID == 0 {
+			continue
+		}
+		result.NodeIDs = append(result.NodeIDs, n.ID)
+		if n.DocID > 0 {
+			result.DocIDs = append(result.DocIDs, n.DocID)
+		}
+		if title := strings.TrimSpace(n.Title); title != "" {
+			result.Queries = append(result.Queries, title)
+		}
+	}
+	return result
+}
+
+type nodeGraphMatchResult struct {
+	DocIDs  []uint64
+	Queries []string
+	NodeIDs []uint64
+}
+
+func nodeGraphMatches(ctx context.Context, baseID uint64, terms []string) *nodeGraphMatchResult {
+	// search_text concatenates title+summary+plain_text, single field suffices
+	conditions := make([]any, 0, len(terms))
+	for _, term := range terms {
+		pattern := "%" + term + "%"
+		conditions = append(conditions,
+			map[string]any{"main.search_text": map[string]any{"like": pattern}},
+		)
+	}
+	if len(conditions) == 0 {
+		return nil
+	}
+	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
+		"knowledge_base_id": baseID,
+		"node_type": []string{
+			agentmodel.KnowledgeNodeTypeConcept,
+			agentmodel.KnowledgeNodeTypeDoc,
+			agentmodel.KnowledgeNodeTypeHeading,
+		},
+		"index_status": agentmodel.KnowledgeIndexStatusSuccess,
+		"status":       1,
+		"or":           conditions,
+	}, map[string]any{
+		"field":    "main.id, main.doc_id, main.title",
+		"order":    "main.id desc",
+		"page":     1,
+		"pageSize": 15,
+	})
+	if len(rows) == 0 {
+		return nil
+	}
+	result := &nodeGraphMatchResult{
+		DocIDs:  make([]uint64, 0, len(rows)),
+		Queries: make([]string, 0, len(rows)),
+		NodeIDs: make([]uint64, 0, len(rows)),
+	}
+	for _, row := range rows {
+		if row == nil || row.ID == 0 {
+			continue
+		}
+		result.NodeIDs = append(result.NodeIDs, row.ID)
+		if row.DocID > 0 {
+			result.DocIDs = append(result.DocIDs, row.DocID)
+		}
+		if title := strings.TrimSpace(row.Title); title != "" {
+			result.Queries = append(result.Queries, title)
+		}
+	}
+	return result
 }
 
 func graphEdgeFilter(baseID uint64, terms []string) map[string]any {
@@ -106,7 +280,8 @@ func graphEdgeFilter(baseID uint64, terms []string) map[string]any {
 		"knowledge_base_id": baseID,
 		"status":            1,
 	}
-	conditions := make([]any, 0, len(terms)*4)
+	// label+summary+evidence cover edge content; metadata is JSON, not user-facing text
+	conditions := make([]any, 0, len(terms)*3)
 	for _, term := range terms {
 		term = strings.TrimSpace(term)
 		if term == "" {
@@ -117,7 +292,6 @@ func graphEdgeFilter(baseID uint64, terms []string) map[string]any {
 			map[string]any{"main.label": map[string]any{"like": pattern}},
 			map[string]any{"main.summary": map[string]any{"like": pattern}},
 			map[string]any{"main.evidence": map[string]any{"like": pattern}},
-			map[string]any{"main.metadata": map[string]any{"like": pattern}},
 		)
 	}
 	if len(conditions) > 0 {
@@ -125,6 +299,8 @@ func graphEdgeFilter(baseID uint64, terms []string) map[string]any {
 	}
 	return filter
 }
+
+const maxGraphTotalEdges = 200
 
 func expandGraphRetrieval(ctx context.Context, baseID uint64, startNodeIDs []uint64, depth int) retrievalPlan {
 	startNodeIDs = uniqueUint64s(startNodeIDs, 80)
@@ -137,12 +313,17 @@ func expandGraphRetrieval(ctx context.Context, baseID uint64, startNodeIDs []uin
 	}
 	frontier := startNodeIDs
 	plan := retrievalPlan{}
-	for level := 0; level < depth && len(frontier) > 0; level++ {
+	totalEdges := 0
+	for level := 0; level < depth && len(frontier) > 0 && totalEdges < maxGraphTotalEdges; level++ {
 		edges := graphEdgesAroundNodes(ctx, baseID, frontier)
 		next := make([]uint64, 0)
 		for _, edge := range edges {
 			if edge == nil {
 				continue
+			}
+			totalEdges++
+			if totalEdges > maxGraphTotalEdges {
+				break
 			}
 			plan.DocIDs = append(plan.DocIDs, edge.DocID)
 			plan.Queries = append(plan.Queries, edge.Label)

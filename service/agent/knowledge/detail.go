@@ -23,6 +23,7 @@ type KnowledgeFileIndexDetail struct {
 	DocID        uint64                   `json:"doc_id"`
 	DirID        uint64                   `json:"dir_id"`
 	DirPath      string                   `json:"dir_path"`
+	SourceType   string                   `json:"source_type"`
 	IndexStatus  string                   `json:"index_status"`
 	IndexStage   string                   `json:"index_stage"`
 	IndexVersion int                      `json:"index_version"`
@@ -98,6 +99,7 @@ func knowledgeFileIndexDetail(ctx context.Context, id string, name string, doc *
 		DocID:        doc.ID,
 		DirID:        doc.DirID,
 		DirPath:      KnowledgeDirPath(ctx, doc.DirID),
+		SourceType:   strings.TrimSpace(doc.SourceType),
 		IndexStatus:  strings.TrimSpace(doc.IndexStatus),
 		IndexStage:   strings.TrimSpace(doc.IndexStage),
 		IndexVersion: doc.IndexVersion,

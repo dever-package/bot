@@ -26,7 +26,7 @@ func clearKnowledgeDocumentIndexWithBase(ctx context.Context, base agentmodel.Kn
 	if docID == 0 {
 		return
 	}
-	if isVectorEnabled(base.VectorEnabled) {
+	if base.EmbeddingPowerID > 0 {
 		_ = newQdrantClient().deleteByDoc(ctx, baseCollection(base), base.ID, docID)
 	}
 	agentmodel.NewKnowledgeVectorModel().Delete(ctx, map[string]any{"doc_id": docID})
@@ -39,7 +39,7 @@ func clearKnowledgeBaseIndex(ctx context.Context, base agentmodel.KnowledgeBase)
 	if base.ID == 0 {
 		return
 	}
-	if isVectorEnabled(base.VectorEnabled) {
+	if base.EmbeddingPowerID > 0 {
 		_ = newQdrantClient().deleteByBase(ctx, baseCollection(base), base.ID)
 	}
 	filter := map[string]any{"knowledge_base_id": base.ID}

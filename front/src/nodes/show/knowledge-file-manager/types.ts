@@ -35,6 +35,7 @@ export type KnowledgeFileItem = {
   doc_id?: number
   dir_id?: number
   index_status?: string
+  source_type?: string
 }
 
 export type KnowledgeTreeNode = KnowledgeFileItem & {
@@ -53,6 +54,7 @@ export type KnowledgeFileContent = {
   size: number
   doc_id?: number
   index_status?: string
+  source_type?: string
 }
 
 export type KnowledgeFileIndexDetail = {
@@ -69,6 +71,7 @@ export type KnowledgeFileIndexDetail = {
   node_count: number
   summary: string
   keywords?: string[]
+  source_type?: string
   nodes?: KnowledgeFileIndexNode[]
   edges?: KnowledgeFileIndexEdge[]
 }

@@ -14,33 +14,11 @@ import (
 	frontstream "my/package/front/service/stream"
 )
 
-const maxSummarySourceChars = 12000
-
-type knowledgeSummary struct {
-	Summary  string   `json:"summary"`
-	Keywords []string `json:"keywords"`
-}
-
-func (s Service) refreshDocumentSummary(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc) error {
-	content := strings.TrimSpace(doc.Content)
-	if content == "" {
-		content = documentNodeSource(ctx, doc.ID)
-	}
-	if content == "" {
-		return nil
-	}
-	summary, err := s.generateKnowledgeSummary(ctx, base, doc.Title, content)
-	if err != nil {
-		return err
-	}
-	agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": doc.ID}, map[string]any{
-		"summary":  summary.Summary,
-		"keywords": strings.Join(summary.Keywords, ", "),
-	})
-	return nil
-}
-
 func (s Service) refreshDirectorySummaries(ctx context.Context, baseID uint64, dirID uint64) {
+	base := agentmodel.NewKnowledgeBaseModel().Find(ctx, map[string]any{"id": baseID, "status": 1})
+	if base == nil {
+		return
+	}
 	dirIDs := []uint64{dirID}
 	if dirID > 0 {
 		dirIDs = descendantDirIDs(ctx, baseID, dirID)
@@ -48,7 +26,7 @@ func (s Service) refreshDirectorySummaries(ctx context.Context, baseID uint64, d
 		dirIDs = allDirectoryIDs(ctx, baseID)
 	}
 	for i := len(dirIDs) - 1; i >= 0; i-- {
-		refreshDirectorySummary(ctx, baseID, dirIDs[i])
+		refreshDirectorySummary(ctx, base, dirIDs[i])
 	}
 }
 
@@ -69,12 +47,12 @@ func allDirectoryIDs(ctx context.Context, baseID uint64) []uint64 {
 	return ids
 }
 
-func refreshDirectorySummary(ctx context.Context, baseID uint64, dirID uint64) {
+func refreshDirectorySummary(ctx context.Context, base *agentmodel.KnowledgeBase, dirID uint64) {
 	if dirID == 0 {
 		return
 	}
 	childDirs := agentmodel.NewKnowledgeDirModel().Select(ctx, map[string]any{
-		"knowledge_base_id": baseID,
+		"knowledge_base_id": base.ID,
 		"parent_id":         dirID,
 		"status":            1,
 	}, map[string]any{
@@ -82,7 +60,7 @@ func refreshDirectorySummary(ctx context.Context, baseID uint64, dirID uint64) {
 		"order": "main.sort asc, main.id asc",
 	})
 	docs := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
-		"knowledge_base_id": baseID,
+		"knowledge_base_id": base.ID,
 		"dir_id":            dirID,
 		"status":            1,
 	}, map[string]any{
@@ -91,7 +69,10 @@ func refreshDirectorySummary(ctx context.Context, baseID uint64, dirID uint64) {
 		"page":     1,
 		"pageSize": 40,
 	})
-	parts := make([]string, 0, len(childDirs)+len(docs))
+	if base.IndexPowerID > 0 && len(docs) >= 3 {
+		go generateLLMDirectorySummary(context.Background(), base, dirID, childDirs, docs)
+	}
+	parts := make([]string, 0, len(childDirs)+len(docs)+1)
 	keywords := make([]string, 0)
 	for _, dir := range childDirs {
 		if dir == nil {
@@ -117,21 +98,27 @@ func refreshDirectorySummary(ctx context.Context, baseID uint64, dirID uint64) {
 	})
 }
 
-func (s Service) generateKnowledgeSummary(ctx context.Context, base agentmodel.KnowledgeBase, title string, content string) (knowledgeSummary, error) {
+func generateLLMDirectorySummary(ctx context.Context, base *agentmodel.KnowledgeBase, dirID uint64, childDirs []*agentmodel.KnowledgeDir, docs []*agentmodel.KnowledgeDoc) {
 	powerKey, err := knowledgeIndexPowerKey(ctx, base.IndexPowerID)
 	if err != nil {
-		return knowledgeSummary{}, err
+		return
 	}
-	source := truncateText(strings.TrimSpace(content), maxSummarySourceChars)
+	dir := agentmodel.NewKnowledgeDirModel().Find(ctx, map[string]any{"id": dirID})
+	if dir == nil {
+		return
+	}
+	source := buildDirectorySummarySource(dir, childDirs, docs)
+	if strings.TrimSpace(source) == "" {
+		return
+	}
 	prompt := strings.Join([]string{
-		"请为知识库文档生成可用于检索规划的结构化摘要。",
-		"要求：",
-		"1. 只基于原文，不要编造。",
-		"2. summary 用 120-300 字中文概括核心内容、结论、事实和可复用信息。",
-		"3. keywords 返回 5-12 个关键词或实体名。",
-		"4. 只输出 JSON，不要 Markdown 代码块。",
+		"你是企业知识库的目录摘要生成器。",
+		"基于该目录下的子目录和文档信息，生成一段简洁的目录摘要（200字以内）。",
+		"要求：概括该目录的核心内容和用途，语言简洁，便于检索时快速判断是否相关。",
+		"只基于输入内容生成，不要编造。",
 	}, "\n")
-	resp := s.gateway().Request(ctx, energonservice.GatewayRequest{
+	srv := NewService()
+	resp := srv.gateway().Request(ctx, energonservice.GatewayRequest{
 		Body: map[string]any{
 			"mode":  "normalize",
 			"power": powerKey,
@@ -139,23 +126,62 @@ func (s Service) generateKnowledgeSummary(ctx context.Context, base agentmodel.K
 				"role": prompt,
 			},
 			"input": map[string]any{
-				"text": fmt.Sprintf("标题：%s\n\n原文：\n%s", strings.TrimSpace(title), source),
+				"text": source,
 			},
 			"options": map[string]any{
-				"temperature": 0.2,
+				"temperature": 0.1,
 				"stream":      false,
 			},
 		},
 	})
 	payload := resp.Payload()
 	if util.ToIntDefault(payload["status"], 0) == 2 {
-		message := strings.TrimSpace(frontstream.InputText(payload["msg"]))
-		if message == "" {
-			message = "生成知识摘要失败"
-		}
-		return knowledgeSummary{}, fmt.Errorf("%s", message)
+		return
 	}
-	return parseKnowledgeSummary(gatewayOutputText(payload)), nil
+	llmSummary := strings.TrimSpace(gatewayOutputText(payload))
+	if llmSummary == "" {
+		return
+	}
+	agentmodel.NewKnowledgeDirModel().Update(ctx, map[string]any{"id": dirID}, map[string]any{
+		"summary": truncateText(llmSummary, 2000),
+	})
+}
+
+func buildDirectorySummarySource(dir *agentmodel.KnowledgeDir, childDirs []*agentmodel.KnowledgeDir, docs []*agentmodel.KnowledgeDoc) string {
+	lines := []string{"目录：" + strings.TrimSpace(dir.Name)}
+	if len(childDirs) > 0 {
+		dirLines := make([]string, 0, len(childDirs))
+		for _, d := range childDirs {
+			if d == nil || strings.TrimSpace(d.Name) == "" {
+				continue
+			}
+			line := strings.TrimSpace(d.Name)
+			if strings.TrimSpace(d.Summary) != "" {
+				line += "： " + strings.TrimSpace(d.Summary)
+			}
+			dirLines = append(dirLines, line)
+		}
+		if len(dirLines) > 0 {
+			lines = append(lines, "子目录：\n"+strings.Join(dirLines, "\n"))
+		}
+	}
+	if len(docs) > 0 {
+		docLines := make([]string, 0, len(docs))
+		for _, doc := range docs {
+			if doc == nil || strings.TrimSpace(doc.Title) == "" {
+				continue
+			}
+			line := strings.TrimSpace(doc.Title)
+			if strings.TrimSpace(doc.Summary) != "" {
+				line += "： " + strings.TrimSpace(doc.Summary)
+			}
+			docLines = append(docLines, line)
+		}
+		if len(docLines) > 0 {
+			lines = append(lines, "文档：\n"+strings.Join(docLines, "\n"))
+		}
+	}
+	return strings.Join(lines, "\n\n")
 }
 
 func (s Service) gateway() energonservice.GatewayService {
@@ -175,43 +201,6 @@ func knowledgeIndexPowerKey(ctx context.Context, powerID uint64) (string, error)
 		return "", fmt.Errorf("索引模型标识为空")
 	}
 	return key, nil
-}
-
-func parseKnowledgeSummary(text string) knowledgeSummary {
-	text = trimJSONFence(strings.TrimSpace(text))
-	result := knowledgeSummary{}
-	if text != "" {
-		if err := json.Unmarshal([]byte(text), &result); err != nil {
-			result = parseLooseKnowledgeSummary(text)
-		}
-	}
-	result.Summary = strings.TrimSpace(result.Summary)
-	if result.Summary == "" {
-		result.Summary = truncateText(text, 800)
-	}
-	result.Keywords = uniqueSummaryKeywords(result.Keywords, 20)
-	return result
-}
-
-func parseLooseKnowledgeSummary(text string) knowledgeSummary {
-	raw := map[string]any{}
-	if err := json.Unmarshal([]byte(text), &raw); err != nil {
-		return knowledgeSummary{}
-	}
-	result := knowledgeSummary{
-		Summary: strings.TrimSpace(frontstream.InputText(raw["summary"])),
-	}
-	switch keywords := raw["keywords"].(type) {
-	case []any:
-		for _, keyword := range keywords {
-			result.Keywords = append(result.Keywords, frontstream.InputText(keyword))
-		}
-	case []string:
-		result.Keywords = append(result.Keywords, keywords...)
-	default:
-		result.Keywords = splitSummaryKeywords(frontstream.InputText(keywords))
-	}
-	return result
 }
 
 func gatewayOutputText(payload map[string]any) string {
@@ -257,29 +246,6 @@ func mapFromAny(value any) map[string]any {
 		}
 		return result
 	}
-}
-
-func documentNodeSource(ctx context.Context, docID uint64) string {
-	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
-		"doc_id":       docID,
-		"status":       1,
-		"index_status": agentmodel.KnowledgeIndexStatusSuccess,
-	}, map[string]any{
-		"field":    "main.plain_text, main.content, main.summary",
-		"order":    "main.depth asc, main.sort asc, main.id asc",
-		"page":     1,
-		"pageSize": 8,
-	})
-	parts := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if row == nil {
-			continue
-		}
-		if text := firstNonEmpty(row.Summary, row.PlainText, row.Content); text != "" {
-			parts = append(parts, text)
-		}
-	}
-	return strings.Join(parts, "\n\n")
 }
 
 func trimJSONFence(value string) string {

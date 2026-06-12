@@ -65,6 +65,8 @@ type KnowledgeSnippet struct {
 	Score    float64 `json:"score"`
 	Source   string  `json:"source"`
 	SortRank int     `json:"sort_rank"`
+	HitCount int     `json:"-"`
+	Weight   float64 `json:"-"`
 }
 
 func BuildRuntimePrompt(input RuntimeInput) string {

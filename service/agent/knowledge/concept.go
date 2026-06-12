@@ -65,6 +65,16 @@ func (s Service) extractDocumentConceptGraph(ctx context.Context, base agentmode
 	return nil
 }
 
+func (s Service) extractDocumentConceptGraphAsync(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc) {
+	markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageGraph, agentmodel.KnowledgeIndexStatusRunning, "")
+	err := s.extractDocumentConceptGraph(ctx, base, doc)
+	if err != nil {
+		markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageGraph, agentmodel.KnowledgeIndexStatusFailed, err.Error())
+	} else {
+		markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageGraph, agentmodel.KnowledgeIndexStatusSuccess, "")
+	}
+}
+
 func conceptSourceNodes(ctx context.Context, docID uint64) []*agentmodel.KnowledgeNode {
 	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
 		"doc_id":       docID,
@@ -332,7 +342,7 @@ func mergeRelationConcepts(concepts []extractedConcept, relations []extractedRel
 func upsertConceptNodes(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, concepts []extractedConcept, sourceNodeByKey map[string]*agentmodel.KnowledgeNode) map[string]uint64 {
 	result := map[string]uint64{}
 	for _, concept := range concepts {
-		nodeID := upsertConceptNode(ctx, base, concept)
+		nodeID := upsertConceptNode(ctx, base, concept, doc.ID)
 		if nodeID == 0 {
 			continue
 		}
@@ -364,7 +374,7 @@ func upsertConceptNodes(ctx context.Context, base agentmodel.KnowledgeBase, doc 
 	return result
 }
 
-func upsertConceptNode(ctx context.Context, base agentmodel.KnowledgeBase, concept extractedConcept) uint64 {
+func upsertConceptNode(ctx context.Context, base agentmodel.KnowledgeBase, concept extractedConcept, docID uint64) uint64 {
 	nodeKey := conceptNodeKey(concept.Name)
 	if nodeKey == "" {
 		return 0
@@ -375,34 +385,116 @@ func upsertConceptNode(ctx context.Context, base agentmodel.KnowledgeBase, conce
 		"node_key":          nodeKey,
 		"status":            1,
 	})
+	aliases := uniqueSummaryKeywords(append([]string{concept.Name}, concept.Keywords...), 10)
+	nowHash := contentHash(concept.Name + concept.Description + concept.Evidence)
+
+	if existing != nil {
+		existingMeta := parseMetadataMap(existing.Metadata)
+		sources := uint64SliceFromMeta(existingMeta, "sources")
+		if docID > 0 {
+			hasDoc := false
+			for _, sid := range sources {
+				if sid == docID {
+					hasDoc = true
+					break
+				}
+			}
+			if !hasDoc {
+				sources = append(sources, docID)
+			}
+		}
+		allKeywords := uniqueSummaryKeywords(append(concept.Keywords, concept.Name, concept.Type), 20)
+		allKeywords = uniqueSummaryKeywords(append(allKeywords, aliases...), 20)
+		existingMeta["aliases"] = aliases
+		existingMeta["concept_type"] = concept.Type
+		existingMeta["sources"] = sources
+		if existingMeta["description"] == nil {
+			existingMeta["description"] = concept.Description
+		}
+
+		aliasText := ""
+		if len(aliases) > 0 {
+			aliasText = "别名：" + strings.Join(aliases, "、")
+		}
+		values := map[string]any{
+			"node_type":    agentmodel.KnowledgeNodeTypeConcept,
+			"title":        truncateText(concept.Name, 255),
+			"search_text":  searchableNodeText("", "", "概念/"+concept.Name, concept.Name, concept.Description, concept.Evidence) + "\n" + aliasText,
+			"keywords":     strings.Join(allKeywords, " "),
+			"path":         truncateText("概念/"+concept.Name, 1024),
+			"metadata":     jsonText(existingMeta),
+			"content_hash": nowHash,
+			"index_status": agentmodel.KnowledgeIndexStatusSuccess,
+			"status":       1,
+		}
+		agentmodel.NewKnowledgeNodeModel().Update(ctx, map[string]any{"id": existing.ID}, values)
+		return existing.ID
+	}
+	allKeywords := uniqueSummaryKeywords(append(concept.Keywords, concept.Name, concept.Type), 20)
+	allKeywords = uniqueSummaryKeywords(append(allKeywords, aliases...), 20)
+	aliasText := ""
+	if len(aliases) > 0 {
+		aliasText = "别名：" + strings.Join(aliases, "、")
+	}
 	values := map[string]any{
 		"node_type":     agentmodel.KnowledgeNodeTypeConcept,
 		"title":         truncateText(concept.Name, 255),
 		"summary":       concept.Description,
 		"content":       concept.Evidence,
 		"plain_text":    concept.Evidence,
-		"search_text":   searchableNodeText("", "", "概念/"+concept.Name, concept.Name, concept.Description, concept.Evidence),
-		"keywords":      strings.Join(uniqueSummaryKeywords(append(concept.Keywords, concept.Name, concept.Type), 20), " "),
+		"search_text":   searchableNodeText("", "", "概念/"+concept.Name, concept.Name, concept.Description, concept.Evidence) + "\n" + aliasText,
+		"keywords":      strings.Join(allKeywords, " "),
 		"path":          truncateText("概念/"+concept.Name, 1024),
-		"metadata":      jsonText(map[string]any{"concept_type": concept.Type, "source": "llm_concept"}),
-		"content_hash":  contentHash(concept.Name + concept.Description + concept.Evidence),
+		"metadata":      jsonText(map[string]any{"aliases": aliases, "concept_type": concept.Type, "description": concept.Description, "sources": []uint64{docID}}),
+		"content_hash":  nowHash,
 		"index_status":  agentmodel.KnowledgeIndexStatusSuccess,
 		"error_message": "",
 		"status":        1,
 	}
-	if existing != nil {
-		agentmodel.NewKnowledgeNodeModel().Update(ctx, map[string]any{"id": existing.ID}, values)
-		return existing.ID
+	if docID > 0 {
+		values["doc_id"] = docID
 	}
 	values["knowledge_base_id"] = base.ID
 	values["dir_id"] = 0
-	values["doc_id"] = 0
 	values["parse_id"] = 0
 	values["parent_id"] = 0
 	values["node_key"] = nodeKey
 	values["depth"] = 0
 	values["sort"] = 9000
 	return util.ToUint64(agentmodel.NewKnowledgeNodeModel().Insert(ctx, withCreatedAt(values)))
+}
+
+func parseMetadataMap(metadata string) map[string]any {
+	if strings.TrimSpace(metadata) == "" {
+		return map[string]any{}
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(metadata), &result); err != nil {
+		return map[string]any{}
+	}
+	if result == nil {
+		return map[string]any{}
+	}
+	return result
+}
+
+func uint64SliceFromMeta(meta map[string]any, key string) []uint64 {
+	raw, ok := meta[key]
+	if !ok {
+		return nil
+	}
+	switch values := raw.(type) {
+	case []any:
+		ids := make([]uint64, 0, len(values))
+		for _, v := range values {
+			ids = append(ids, uint64(frontstream.InputInt64(v, 0)))
+		}
+		return ids
+	case []uint64:
+		return values
+	default:
+		return nil
+	}
 }
 
 func insertConceptEdges(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, result conceptExtractionResult, conceptIDs map[string]uint64, sourceNodeByKey map[string]*agentmodel.KnowledgeNode) {

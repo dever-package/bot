@@ -197,6 +197,67 @@ func referenceTargetCandidates(sourceDoc agentmodel.KnowledgeDoc, target string)
 	return result
 }
 
+func loadConceptNodeIDs(ctx context.Context, baseID uint64) map[string]uint64 {
+	if baseID == 0 {
+		return nil
+	}
+	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
+		"knowledge_base_id": baseID,
+		"node_type":         agentmodel.KnowledgeNodeTypeConcept,
+		"status":            1,
+	}, map[string]any{
+		"field": "main.id, main.title",
+		"page":  1,
+		"pageSize": 200,
+	})
+	if len(rows) == 0 {
+		return nil
+	}
+	result := make(map[string]uint64, len(rows))
+	for _, row := range rows {
+		if row == nil || row.ID == 0 {
+			continue
+		}
+		name := strings.TrimSpace(row.Title)
+		if name == "" {
+			continue
+		}
+		if _, exists := result[name]; !exists {
+			result[name] = row.ID
+		}
+	}
+	return result
+}
+
+func insertNodeMentionEdges(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, fromNodeID uint64, plainText string, conceptNodes map[string]uint64) {
+	if fromNodeID == 0 || len(conceptNodes) == 0 || strings.TrimSpace(plainText) == "" {
+		return
+	}
+	for name, toNodeID := range conceptNodes {
+		if toNodeID == 0 || toNodeID == fromNodeID {
+			continue
+		}
+		if !strings.Contains(plainText, name) {
+			continue
+		}
+		insertKnowledgeEdge(ctx, knowledgeEdgeInput{
+			BaseID:     base.ID,
+			DocID:      doc.ID,
+			FromNodeID: fromNodeID,
+			ToNodeID:   toNodeID,
+			EdgeType:   agentmodel.KnowledgeEdgeTypeMentions,
+			Label:      name,
+			Summary:    fmt.Sprintf("提及概念：%s", name),
+			Evidence:   truncateText(plainText, 200),
+			Weight:     0.6,
+			Confidence: 0.8,
+			Metadata: map[string]any{
+				"source": "mention_scan",
+			},
+		})
+	}
+}
+
 func docRootNodeID(ctx context.Context, docID uint64) uint64 {
 	if docID == 0 {
 		return 0

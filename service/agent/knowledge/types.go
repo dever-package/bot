@@ -46,10 +46,9 @@ type RetrieveDebugResult struct {
 }
 
 type KnowledgeRetrieveDebugBase struct {
-	ID            uint64 `json:"id"`
-	Name          string `json:"name"`
-	VectorEnabled bool   `json:"vector_enabled"`
-	GraphDepth    int    `json:"graph_depth"`
+	ID         uint64 `json:"id"`
+	Name       string `json:"name"`
+	GraphDepth int    `json:"graph_depth"`
 }
 
 type AgentKnowledgeBaseRuntime struct {
@@ -75,7 +74,6 @@ type knowledgeBaseConfig struct {
 	Name             string
 	IndexPowerID     uint64
 	Collection       string
-	VectorEnabled    bool
 	EmbeddingPowerID uint64
 	RetrieveLimit    int
 	ScoreThreshold   float64

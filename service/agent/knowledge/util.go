@@ -38,7 +38,7 @@ func knowledgeCollectionName(cateID uint64) string {
 	return fmt.Sprintf("%s_%d", agentmodel.DefaultKnowledgeCollectionPrefix, cateID)
 }
 
-func isVectorEnabled(value int16) bool {
+func isConceptGraphEnabled(value int16) bool {
 	return value == 1
 }
 
@@ -47,27 +47,6 @@ func countInt(value int64) int {
 		return 0
 	}
 	return int(value)
-}
-
-func normalizeVectorEnabled(value any) int16 {
-	switch current := value.(type) {
-	case bool:
-		if current {
-			return 1
-		}
-		return 2
-	case string:
-		switch strings.ToLower(strings.TrimSpace(current)) {
-		case "1", "true", "yes", "on":
-			return 1
-		case "2", "false", "no", "off", "":
-			return 2
-		}
-	}
-	if util.ToIntDefault(value, 0) == 1 {
-		return 1
-	}
-	return 2
 }
 
 func normalizeNodeMaxLength(value any) int {
@@ -197,23 +176,18 @@ func keywordNodeFilters(baseID uint64, keyword string, dirIDs ...uint64) any {
 	if len(terms) == 0 {
 		terms = []string{keyword}
 	}
-	conditions := make([]any, 0, len(terms)*6+4)
+	// search_text concatenates title+path+summary+content+plain_text.
+	// Only keywords is separate. Two LIKE fields suffice.
+	conditions := make([]any, 0, len(terms)*2+1)
 	for _, term := range terms {
 		pattern := "%" + term + "%"
 		conditions = append(conditions,
-			map[string]any{"main.title": map[string]any{"like": pattern}},
-			map[string]any{"main.path": map[string]any{"like": pattern}},
-			map[string]any{"main.summary": map[string]any{"like": pattern}},
-			map[string]any{"main.content": map[string]any{"like": pattern}},
-			map[string]any{"main.plain_text": map[string]any{"like": pattern}},
 			map[string]any{"main.search_text": map[string]any{"like": pattern}},
 			map[string]any{"main.keywords": map[string]any{"like": pattern}},
 		)
 	}
 	pattern := "%" + keyword + "%"
 	conditions = append(conditions,
-		map[string]any{"main.title": map[string]any{"like": pattern}},
-		map[string]any{"main.path": map[string]any{"like": pattern}},
 		map[string]any{"main.search_text": map[string]any{"like": pattern}},
 	)
 	filter["or"] = conditions
@@ -712,7 +686,111 @@ func mergeKnowledgeSnippets(rows []agentprompt.KnowledgeSnippet) []agentprompt.K
 	return result
 }
 
-func rankKnowledgeSnippets(rows []agentprompt.KnowledgeSnippet, query string, dirs []candidateDir) []agentprompt.KnowledgeSnippet {
+const rrfK = 60.0
+
+// rrfScoreSnippets replaces per-source absolute scores with Reciprocal Rank Fusion scores.
+// Each source (keyword, vector, planned_doc) independently ranks results, then RRF combines
+// ranks across sources: score = Σ(1/(k + rank_i)) where k=60.
+// This eliminates the problem of incompatible score ranges across different retrieval methods.
+func rrfScoreSnippets(snippets []RetrievedSnippet) []RetrievedSnippet {
+	if len(snippets) == 0 {
+		return snippets
+	}
+	type sourceList struct {
+		items []RetrievedSnippet
+		ranks map[uint64]int
+	}
+	sources := map[string]*sourceList{}
+	for _, s := range snippets {
+		src := s.Source
+		if sources[src] == nil {
+			sources[src] = &sourceList{}
+		}
+		sources[src].items = append(sources[src].items, s)
+	}
+	for _, list := range sources {
+		// Dedup within source by (base_id, node_id), keep highest score
+		seen := map[string]struct{}{}
+		unique := make([]RetrievedSnippet, 0, len(list.items))
+		for _, item := range list.items {
+			key := fmt.Sprintf("%d:%d", item.BaseID, item.NodeID)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			unique = append(unique, item)
+		}
+		list.items = unique
+		sort.SliceStable(list.items, func(i, j int) bool {
+			return list.items[i].Score > list.items[j].Score
+		})
+		list.ranks = make(map[uint64]int, len(list.items))
+		for i, item := range list.items {
+			if item.NodeID > 0 {
+				list.ranks[item.NodeID] = i + 1
+			}
+		}
+	}
+	for i := range snippets {
+		if snippets[i].NodeID == 0 {
+			continue
+		}
+		score := 0.0
+		for _, list := range sources {
+			if rank, ok := list.ranks[snippets[i].NodeID]; ok {
+				score += 1.0 / (rrfK + float64(rank))
+			}
+		}
+		snippets[i].Score = score
+	}
+	// Scale RRF scores so that a single #1-ranked source contributes ~1.0.
+	// This keeps scores in a 0-3 range compatible with rankKnowledgeSnippets boosts.
+	scale := rrfK + 1
+	for i := range snippets {
+		if snippets[i].NodeID > 0 {
+			snippets[i].Score *= scale
+		}
+	}
+	return snippets
+}
+
+func incomingEdgeCounts(ctx context.Context, baseID uint64, nodeIDs []uint64) map[uint64]int {
+	nodeIDs = uniqueUint64s(nodeIDs, 0)
+	if baseID == 0 || len(nodeIDs) == 0 {
+		return nil
+	}
+	edges := agentmodel.NewKnowledgeEdgeModel().Select(ctx, map[string]any{
+		"knowledge_base_id": baseID,
+		"to_node_id":        nodeIDs,
+		"status":            1,
+	}, map[string]any{
+		"field": "main.id, main.to_node_id",
+	})
+	if len(edges) == 0 {
+		return nil
+	}
+	result := make(map[uint64]int, len(nodeIDs))
+	for _, edge := range edges {
+		if edge == nil || edge.ToNodeID == 0 {
+			continue
+		}
+		result[edge.ToNodeID]++
+	}
+	return result
+}
+
+func backlinkBoost(edgeCount int) float64 {
+	if edgeCount <= 0 {
+		return 0
+	}
+	boost := math.Log(float64(edgeCount+1)) / math.Log(11)
+	if boost > 1 {
+		return 1
+	}
+	return boost * 0.15
+}
+
+func rankKnowledgeSnippets(ctx context.Context, rows []agentprompt.KnowledgeSnippet, query string, dirs []candidateDir, baseID uint64) []agentprompt.KnowledgeSnippet {
 	if len(rows) == 0 {
 		return rows
 	}
@@ -723,6 +801,13 @@ func rankKnowledgeSnippets(rows []agentprompt.KnowledgeSnippet, query string, di
 			dirMatches[dir.ID] = struct{}{}
 		}
 	}
+	nodeIDs := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		if row.NodeID > 0 {
+			nodeIDs = append(nodeIDs, row.NodeID)
+		}
+	}
+	backlinks := incomingEdgeCounts(ctx, baseID, nodeIDs)
 	for index := range rows {
 		score := rows[index].Score
 		if _, matched := dirMatches[rows[index].DirID]; matched {
@@ -735,6 +820,20 @@ func rankKnowledgeSnippets(rows []agentprompt.KnowledgeSnippet, query string, di
 		dirPath := strings.TrimSpace(rows[index].DirPath)
 		if query != "" && dirPath != "" && pathSegmentMatched(query, dirPath) {
 			score += 0.05
+		}
+		if backlinks != nil {
+			score += backlinkBoost(backlinks[rows[index].NodeID])
+		}
+		hitCount := rows[index].HitCount
+		if hitCount > 0 {
+			boost := 1.0 + math.Log(1.0+float64(hitCount))*0.05
+			if boost > 1.2 {
+				boost = 1.2
+			}
+			score *= boost
+		}
+		if rows[index].Weight != 0 {
+			score += rows[index].Weight * 0.2
 		}
 		rows[index].Score = score
 	}

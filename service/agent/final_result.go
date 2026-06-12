@@ -9,6 +9,8 @@ import (
 	"time"
 
 	agentaction "my/package/bot/service/agent/action"
+	agentknowledge "my/package/bot/service/agent/knowledge"
+	agenttool "my/package/bot/service/agent/tool"
 	frontstream "my/package/front/service/stream"
 )
 
@@ -96,6 +98,8 @@ func (s Service) handleFinalResult(
 		attachFinalTaskStates(detailOutput, states)
 		attachFinalResultMode(detailOutput, resultMode)
 	}
+
+	s.triggerRefluxIfNeeded(context.Background(), exec, history, detailOutput)
 
 	if resultMode == finalResultModeInline {
 		_ = s.writeSuccessResult(streamCtx, exec.RequestID, detailOutput)
@@ -849,6 +853,77 @@ func (state finalTaskState) Map() map[string]any {
 		row["output"] = state.Output
 	}
 	return row
+}
+
+type knowledgeSearchCall struct {
+	baseID  uint64
+	query   string
+	nodeIDs []uint64
+}
+
+func (s Service) triggerRefluxIfNeeded(ctx context.Context, exec runExecution, history []any, output map[string]any) {
+	answer := strings.TrimSpace(frontstream.InputText(output["text"]))
+	if answer == "" {
+		return
+	}
+	calls := extractKnowledgeSearchCalls(history)
+	if len(calls) == 0 {
+		return
+	}
+	ks := agentknowledge.NewService()
+	for _, call := range calls {
+		if call.query == "" || len(call.nodeIDs) == 0 || call.baseID == 0 {
+			continue
+		}
+		_, _, err := ks.RefluxQA(ctx, call.baseID, 0, call.query, answer, call.nodeIDs)
+		if err != nil {
+			continue
+		}
+	}
+}
+
+func extractKnowledgeSearchCalls(history []any) []knowledgeSearchCall {
+	var calls []knowledgeSearchCall
+	for _, item := range history {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(frontstream.InputText(entry["type"])) != "tool_observation" {
+			continue
+		}
+		if strings.TrimSpace(frontstream.InputText(entry["tool"])) != agenttool.NameKnowledgeSearch {
+			continue
+		}
+		output, ok := entry["output"].(map[string]any)
+		if !ok {
+			continue
+		}
+		result, ok := output["result"].(map[string]any)
+		if !ok {
+			continue
+		}
+		query := strings.TrimSpace(frontstream.InputText(result["query"]))
+		baseID := uint64(frontstream.InputInt64(result["knowledge_base_id"], 0))
+		if query == "" || baseID == 0 {
+			continue
+		}
+		var nodeIDs []uint64
+		if raw, ok := result["hit_node_ids"].([]any); ok {
+			for _, id := range raw {
+				nodeIDs = append(nodeIDs, uint64(frontstream.InputInt64(id, 0)))
+			}
+		}
+		if len(nodeIDs) == 0 {
+			continue
+		}
+		calls = append(calls, knowledgeSearchCall{
+			baseID:  baseID,
+			query:   query,
+			nodeIDs: nodeIDs,
+		})
+	}
+	return calls
 }
 
 func finalTaskTitle(task agentaction.AbilityTask) string {

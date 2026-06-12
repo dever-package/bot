@@ -18,6 +18,7 @@ const (
 	KnowledgeNodeTypeCode       = "code"
 	KnowledgeNodeTypeAttachment = "attachment"
 	KnowledgeNodeTypeConcept    = "concept"
+	KnowledgeNodeTypeQA         = "qa"
 )
 
 type KnowledgeNode struct {
@@ -46,6 +47,8 @@ type KnowledgeNode struct {
 	ContentHash     string    `dorm:"type:varchar(64);not null;default:'';comment:内容哈希"`
 	IndexStatus     string    `dorm:"type:varchar(32);not null;default:'pending';comment:索引状态"`
 	ErrorMessage    string    `dorm:"type:text;not null;default:'';comment:错误信息"`
+	HitCount        int       `dorm:"type:int;not null;default:0;comment:命中次数"`
+	Weight          float64   `dorm:"type:double precision;not null;default:0;comment:反馈权重"`
 	Status          int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	CreatedAt       time.Time `dorm:"comment:创建时间"`
 }

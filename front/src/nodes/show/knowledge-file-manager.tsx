@@ -922,7 +922,10 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
                     {item.data.type === "folder" ? <Folder size={16} /> : <FileText size={16} />}
                     <span className="knowledge-tree-row__name">{title}</span>
                     {item.data.type === "file" ? (
-                      <IndexStatusBadge status={item.data.index_status} compact />
+                      <span className="knowledge-tree-row__badges">
+                        <SourceTypeBadge sourceType={item.data.source_type} />
+                        <IndexStatusBadge status={item.data.index_status} compact />
+                      </span>
                     ) : null}
                   </span>
                 )}
@@ -965,6 +968,7 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
                       )
                     }
                   />
+                  <SourceTypeBadge sourceType={currentFile?.source_type} />
                   <IndexStatusBadge status={currentIndexStatus} />
                 </div>
                 <div className="knowledge-editor__actions">
@@ -1137,6 +1141,16 @@ function IndexStatusBadge({
       {compact ? null : <span>{item.label}</span>}
     </span>
   )
+}
+
+function SourceTypeBadge({ sourceType }: { sourceType?: string }) {
+  if (!sourceType || sourceType === "upload") {
+    return null
+  }
+  if (sourceType === "qa") {
+    return <span className="knowledge-source-tag is-qa">QA 积累</span>
+  }
+  return <span className="knowledge-source-tag">{sourceType}</span>
 }
 
 function UploadProgressPanel({ progress }: { progress: UploadProgressState | null }) {
@@ -1326,6 +1340,7 @@ function IndexDetailDialog({
           <div className="knowledge-index-detail__body">
             <div className="knowledge-index-detail__meta">
               <IndexStatusBadge status={detail.index_status} />
+              <SourceTypeBadge sourceType={detail.source_type} />
               <span>文档ID：{detail.doc_id || "-"}</span>
               <span>节点：{detail.node_count || nodes.length}</span>
               <span>目录：{detail.dir_path || "/"}</span>

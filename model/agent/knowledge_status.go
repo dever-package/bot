@@ -8,6 +8,13 @@ const (
 )
 
 const (
+	KnowledgeReviewStatusPending  = "pending"
+	KnowledgeReviewStatusApproved = "approved"
+	KnowledgeReviewStatusRejected = "rejected"
+	KnowledgeReviewStatusExpired  = "expired"
+)
+
+const (
 	KnowledgeIndexStagePending  = "pending"
 	KnowledgeIndexStageParse    = "parse"
 	KnowledgeIndexStageNodes    = "nodes"
@@ -64,6 +71,19 @@ var knowledgeNodeTypeOptions = []map[string]any{
 	{"id": KnowledgeNodeTypeCode, "value": "代码"},
 	{"id": KnowledgeNodeTypeAttachment, "value": "附件"},
 	{"id": KnowledgeNodeTypeConcept, "value": "概念"},
+	{"id": KnowledgeNodeTypeQA, "value": "QA 积累"},
+}
+
+var knowledgeReviewStatusOptions = []map[string]any{
+	{"id": KnowledgeReviewStatusPending, "value": "待审核"},
+	{"id": KnowledgeReviewStatusApproved, "value": "已通过"},
+	{"id": KnowledgeReviewStatusRejected, "value": "已驳回"},
+	{"id": KnowledgeReviewStatusExpired, "value": "已过期"},
+}
+
+var knowledgeSourceTypeOptions = []map[string]any{
+	{"id": "upload", "value": "上传文档"},
+	{"id": "qa", "value": "QA 积累"},
 }
 
 var knowledgeEdgeTypeOptions = []map[string]any{

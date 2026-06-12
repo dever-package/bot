@@ -74,9 +74,10 @@ type KnowledgeFileNode struct {
 	Size   int64     `json:"size,omitempty"`
 	Date   time.Time `json:"date"`
 	Ext    string    `json:"ext,omitempty"`
-	DocID  uint64    `json:"doc_id,omitempty"`
-	DirID  uint64    `json:"dir_id,omitempty"`
-	Status string    `json:"index_status,omitempty"`
+	DocID      uint64    `json:"doc_id,omitempty"`
+	DirID      uint64    `json:"dir_id,omitempty"`
+	Status     string    `json:"index_status,omitempty"`
+	SourceType string    `json:"source_type,omitempty"`
 }
 
 type KnowledgeFileContent struct {
@@ -88,6 +89,7 @@ type KnowledgeFileContent struct {
 	Size        int64  `json:"size"`
 	DocID       uint64 `json:"doc_id,omitempty"`
 	IndexStatus string `json:"index_status,omitempty"`
+	SourceType  string `json:"source_type,omitempty"`
 }
 
 type KnowledgeResolvedFile struct {
@@ -206,6 +208,7 @@ func (s Service) ReadKnowledgeFileNode(ctx context.Context, baseID uint64, id st
 		Size:        info.Size(),
 		DocID:       docID(doc),
 		IndexStatus: docIndexStatus(doc),
+		SourceType:  docSourceType(doc),
 	}, nil
 }
 
@@ -834,6 +837,7 @@ func walkKnowledgeFileNodes(ctx context.Context, baseID uint64, root string) ([]
 			if doc := docs[rel]; doc != nil {
 				item.DocID = doc.ID
 				item.Status = strings.TrimSpace(doc.IndexStatus)
+				item.SourceType = strings.TrimSpace(doc.SourceType)
 			}
 		}
 		files = append(files, item)
@@ -1463,4 +1467,15 @@ func docIndexStatus(doc *agentmodel.KnowledgeDoc) string {
 		return ""
 	}
 	return strings.TrimSpace(doc.IndexStatus)
+}
+
+func docSourceType(doc *agentmodel.KnowledgeDoc) string {
+	if doc == nil {
+		return "upload"
+	}
+	sourceType := strings.TrimSpace(doc.SourceType)
+	if sourceType == "" {
+		return "upload"
+	}
+	return sourceType
 }

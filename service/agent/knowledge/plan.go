@@ -19,6 +19,63 @@ const (
 	maxPlanCatalogChars  = 12000
 )
 
+func (s Service) queryRewrite(ctx context.Context, binding agentKnowledgeBinding, query string) []string {
+	query = strings.TrimSpace(query)
+	if query == "" || binding.Base.IndexPowerID == 0 {
+		return nil
+	}
+	powerKey, err := knowledgeIndexPowerKey(ctx, binding.Base.IndexPowerID)
+	if err != nil {
+		return nil
+	}
+	resp := s.gateway().Request(ctx, energonservice.GatewayRequest{
+		RequestID: uuid.NewString(),
+		Body: map[string]any{
+			"power": powerKey,
+			"set": map[string]any{
+				"role": queryRewriteRole(),
+			},
+			"input": map[string]any{
+				"text": query,
+			},
+			"options": map[string]any{
+				"stream":      false,
+				"temperature": 0,
+			},
+		},
+	})
+	payload := resp.Payload()
+	output := mapFromAny(payload["output"])
+	raw := strings.TrimSpace(firstPlannerText(output["text"], outputJSONText(output["json"])))
+	if util.ToIntDefault(payload["status"], 0) == 2 || raw == "" {
+		return nil
+	}
+	return parseQueryRewriteResult(raw)
+}
+
+func queryRewriteRole() string {
+	return "你是知识库检索的查询改写器。将用户自然语言问题转写成3-5个适合关键词检索的短查询词。只输出JSON数组，不要Markdown。格式: [\"查询词1\", \"查询词2\", \"查询词3\"]"
+}
+
+func parseQueryRewriteResult(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	raw = trimJSONFence(raw)
+	var result []string
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		return nil
+	}
+	cleaned := make([]string, 0, len(result))
+	for _, q := range result {
+		if strings.TrimSpace(q) != "" {
+			cleaned = append(cleaned, strings.TrimSpace(q))
+		}
+	}
+	if len(cleaned) == 0 {
+		return nil
+	}
+	return cleaned
+}
+
 func (s Service) planRetrieval(ctx context.Context, binding agentKnowledgeBinding, query string) retrievalPlan {
 	query = strings.TrimSpace(query)
 	if query == "" || binding.Base.IndexPowerID == 0 {

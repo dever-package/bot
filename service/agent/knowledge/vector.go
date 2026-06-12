@@ -4,13 +4,24 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
+	"github.com/shemic/dever/orm"
 	"github.com/shemic/dever/util"
 
 	agentmodel "my/package/bot/model/agent"
 )
 
-const maxVectorIndexNodes = 80
+const (
+	maxVectorIndexNodes   = 80
+	maxConcurrentEmbedding = 5
+)
+
+type embeddingResult struct {
+	node   *agentmodel.KnowledgeNode
+	vector []float64
+	err    error
+}
 
 func (s Service) indexDocumentVectors(ctx context.Context, base agentmodel.KnowledgeBase, docID uint64) error {
 	if !knowledgeBaseVectorReady(base) {
@@ -20,41 +31,71 @@ func (s Service) indexDocumentVectors(ctx context.Context, base agentmodel.Knowl
 	if len(nodes) == 0 {
 		return nil
 	}
-	collection := baseCollection(base)
-	points := make([]qdrantPoint, 0, len(nodes))
-	records := make([]map[string]any, 0, len(nodes))
+	// Collect embeddable nodes with their text
+	type nodeText struct {
+		node *agentmodel.KnowledgeNode
+		text string
+	}
+	entries := make([]nodeText, 0, len(nodes))
 	for _, node := range nodes {
 		text := vectorNodeText(ctx, node)
 		if strings.TrimSpace(text) == "" {
 			continue
 		}
-		vector, err := s.embedder.embed(ctx, base.EmbeddingPowerID, text)
-		if err != nil {
-			return err
+		entries = append(entries, nodeText{node: node, text: text})
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	// Concurrent embedding with semaphore
+	sem := make(chan struct{}, maxConcurrentEmbedding)
+	results := make([]embeddingResult, len(entries))
+	var wg sync.WaitGroup
+	for i, entry := range entries {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, nt nodeText) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			vector, err := s.embedder.embed(ctx, base.EmbeddingPowerID, nt.text)
+			results[idx] = embeddingResult{node: nt.node, vector: vector, err: err}
+		}(i, entry)
+	}
+	wg.Wait()
+	collection := baseCollection(base)
+	points := make([]qdrantPoint, 0, len(entries))
+	records := make([]map[string]any, 0, len(entries))
+	collectionEnsured := false
+	for _, res := range results {
+		if res.err != nil || len(res.vector) == 0 {
+			continue
 		}
-		if err := s.qdrant.ensureCollection(ctx, collection, len(vector)); err != nil {
-			return err
+		if !collectionEnsured {
+			if err := s.qdrant.ensureCollection(ctx, collection, len(res.vector)); err != nil {
+				return err
+			}
+			collectionEnsured = true
 		}
 		points = append(points, qdrantPoint{
-			ID:     pointID(node.ID),
-			Vector: vector,
+			ID:     pointID(res.node.ID),
+			Vector: res.vector,
 			Payload: map[string]any{
 				"knowledge_base_id": base.ID,
-				"doc_id":            node.DocID,
-				"node_id":           node.ID,
-				"node_type":         strings.TrimSpace(node.NodeType),
-				"path":              strings.TrimSpace(node.Path),
-				"title":             strings.TrimSpace(node.Title),
+				"doc_id":            res.node.DocID,
+				"node_id":           res.node.ID,
+				"node_type":         strings.TrimSpace(res.node.NodeType),
+				"path":              strings.TrimSpace(res.node.Path),
+				"title":             strings.TrimSpace(res.node.Title),
 				"status":            1,
 			},
 		})
 		records = append(records, withCreatedAt(map[string]any{
 			"knowledge_base_id": base.ID,
-			"doc_id":            node.DocID,
-			"node_id":           node.ID,
+			"doc_id":            res.node.DocID,
+			"node_id":           res.node.ID,
 			"collection":        collection,
-			"point_id":          fmt.Sprintf("%d", pointID(node.ID)),
-			"content_hash":      node.ContentHash,
+			"point_id":          fmt.Sprintf("%d", pointID(res.node.ID)),
+			"content_hash":      res.node.ContentHash,
 			"status":            1,
 			"error_message":     "",
 		}))
@@ -65,14 +106,17 @@ func (s Service) indexDocumentVectors(ctx context.Context, base agentmodel.Knowl
 	if err := s.qdrant.upsertPoints(ctx, collection, points); err != nil {
 		return err
 	}
-	for _, record := range records {
-		agentmodel.NewKnowledgeVectorModel().Insert(ctx, record)
-	}
+	_ = orm.Transaction(ctx, func(txCtx context.Context) error {
+		for _, record := range records {
+			agentmodel.NewKnowledgeVectorModel().Insert(txCtx, record)
+		}
+		return nil
+	})
 	return nil
 }
 
 func (s Service) retrieveVectorBinding(ctx context.Context, binding agentKnowledgeBinding, query string) []RetrievedSnippet {
-	if !binding.Base.VectorEnabled || binding.Base.EmbeddingPowerID == 0 || strings.TrimSpace(query) == "" {
+	if binding.Base.EmbeddingPowerID == 0 || strings.TrimSpace(query) == "" {
 		return nil
 	}
 	vector, err := s.embedder.embed(ctx, binding.Base.EmbeddingPowerID, query)
@@ -124,7 +168,7 @@ func (s Service) retrieveVectorBinding(ctx context.Context, binding agentKnowled
 }
 
 func knowledgeBaseVectorReady(base agentmodel.KnowledgeBase) bool {
-	return isVectorEnabled(base.VectorEnabled) && base.EmbeddingPowerID > 0
+	return base.EmbeddingPowerID > 0
 }
 
 func vectorIndexNodes(ctx context.Context, baseID uint64, docID uint64) []*agentmodel.KnowledgeNode {

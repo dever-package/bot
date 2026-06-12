@@ -118,26 +118,6 @@
         }
       },
       {
-        "type": "form-select",
-        "name": "索引模型",
-        "placeholder": "请选择文本类型能力",
-        "value": "form.index_power_id",
-        "mode": "form",
-        "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadTextPowers",
-        "info": "用于生成文档摘要、目录摘要、检索规划和事实线索的 LLM 能力。",
-        "validate": [
-          {
-            "type": "required",
-            "message": "索引模型不能为空。"
-          }
-        ],
-        "meta": {
-          "formLayout": "horizontal",
-          "tab": "index",
-          "controlClassName": "max-w-[360px]"
-        }
-      },
-      {
         "type": "form-number",
         "name": "节点最大长度",
         "value": "form.node_max_length",
@@ -169,6 +149,45 @@
         "mode": "form",
         "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadEmbeddingPowers",
         "info": "可选。选择 embeddings 类型能力后，会额外生成语义向量，用于相似内容检索；不选择则使用全文检索、目录图谱和智能规划检索。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "index",
+          "controlClassName": "max-w-[360px]"
+        }
+      },
+      {
+        "type": "form-html",
+        "value": "<div class=\"border-t pt-4 mt-2 mb-1 text-sm font-medium text-muted-foreground\">概念图谱</div>",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "index",
+          "labelClassName": "hidden"
+        }
+      },
+      {
+        "type": "form-radio",
+        "name": "概念图谱",
+        "value": "form.concept_graph_enabled",
+        "mode": "form",
+        "option": [
+          {"id": 1, "value": "启用"},
+          {"id": 2, "value": "禁用"}
+        ],
+        "info": "启用后，索引阶段每篇文档会由 LLM 抽取概念和关系（includes、depends_on 等语义边），形成语义关系网络。检索时可通过图谱扩展找到更相关的文档，适合需要深度语义理解的场景。如只做关键词/语义检索，不需要关联发现，可关闭。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "index",
+          "controlClassName": "max-w-[240px]"
+        }
+      },
+      {
+        "type": "form-select",
+        "name": "索引模型",
+        "placeholder": "可选，选择文本类型能力",
+        "value": "form.index_power_id",
+        "mode": "form",
+        "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadTextPowers",
+        "info": "启用概念图谱时需要选择索引模型，用于文档摘要、目录摘要、检索规划和概念关系抽取。如不启用概念图谱且仅做关键词/语义检索，则无需选择。",
         "meta": {
           "formLayout": "horizontal",
           "tab": "index",
@@ -230,8 +249,9 @@
       "cate_id": 1,
       "name": "",
       "parser_service_id": "",
-      "index_power_id": 1,
+      "index_power_id": "",
       "embedding_power_id": "",
+      "concept_graph_enabled": 2,
       "node_max_length": 800,
       "node_split_overlap": 120,
       "retrieve_limit": 5,

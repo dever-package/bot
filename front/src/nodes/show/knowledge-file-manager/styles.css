@@ -379,6 +379,32 @@
   color: #d97706;
 }
 
+.knowledge-source-tag {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.knowledge-source-tag.is-qa {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.knowledge-tree-row__badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
 .knowledge-index-status.is-success {
   color: #16a34a;
 }

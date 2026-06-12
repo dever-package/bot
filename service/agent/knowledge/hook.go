@@ -114,9 +114,12 @@ func (KnowledgeHook) ProviderBeforeSaveKnowledgeBase(c *server.Context, params [
 		}
 	}
 	if shouldNormalize(record, "index_power_id", partial) {
-		ensureKnowledgeIndexPowerWithFallback(record, existingBase)
-		if err := validateKnowledgePower(c.Context(), util.ToUint64(record["index_power_id"]), "text", "索引模型"); err != nil {
-			panic(frontaction.NewFieldError("form.index_power_id", err.Error()))
+		indexPowerID := util.ToUint64(record["index_power_id"])
+		record["index_power_id"] = indexPowerID
+		if indexPowerID > 0 {
+			if err := validateKnowledgePower(c.Context(), indexPowerID, "text", "索引模型"); err != nil {
+				panic(frontaction.NewFieldError("form.index_power_id", err.Error()))
+			}
 		}
 	}
 	if shouldNormalize(record, "embedding_power_id", partial) {
@@ -126,12 +129,7 @@ func (KnowledgeHook) ProviderBeforeSaveKnowledgeBase(c *server.Context, params [
 			if err := validateKnowledgePower(c.Context(), embeddingPowerID, "embeddings", "向量能力"); err != nil {
 				panic(frontaction.NewFieldError("form.embedding_power_id", err.Error()))
 			}
-			record["vector_enabled"] = 1
-		} else {
-			record["vector_enabled"] = 2
 		}
-	} else if !partial {
-		record["vector_enabled"] = 2
 	}
 	if shouldNormalize(record, "node_max_length", partial) {
 		record["node_max_length"] = normalizeNodeMaxLength(record["node_max_length"])
@@ -289,17 +287,6 @@ func knowledgeBaseCateID(record map[string]any, existing *agentmodel.KnowledgeBa
 	return cateID
 }
 
-func ensureKnowledgeIndexPowerWithFallback(record map[string]any, existing *agentmodel.KnowledgeBase) {
-	if util.ToUint64(record["index_power_id"]) > 0 {
-		return
-	}
-	if existing != nil && existing.IndexPowerID > 0 {
-		record["index_power_id"] = existing.IndexPowerID
-		return
-	}
-	record["index_power_id"] = agentmodel.DefaultKnowledgeIndexPowerID
-}
-
 func validateKnowledgePower(ctx context.Context, powerID uint64, kind string, label string) error {
 	if powerID == 0 {
 		return fmt.Errorf("%s不能为空。", label)
@@ -346,9 +333,7 @@ func syncKnowledgeBaseVectorConfig(ctx context.Context, baseID uint64, payload m
 
 	update := map[string]any{}
 	if value, exists := record["embedding_power_id"]; exists {
-		embeddingPowerID := util.ToUint64(value)
-		update["embedding_power_id"] = embeddingPowerID
-		update["vector_enabled"] = normalizeVectorEnabledFromEmbedding(embeddingPowerID)
+		update["embedding_power_id"] = util.ToUint64(value)
 	}
 	cateID := util.ToUint64(record["cate_id"])
 	if cateID == 0 {
@@ -429,13 +414,6 @@ func normalizeGraphDepth(value any) int {
 	return depth
 }
 
-func normalizeVectorEnabledFromEmbedding(embeddingPowerID uint64) int16 {
-	if embeddingPowerID > 0 {
-		return 1
-	}
-	return 2
-}
-
 func cloneRecord(params []any) map[string]any {
 	if len(params) == 0 || params[0] == nil {
 		return map[string]any{}
@@ -506,6 +484,7 @@ var (
 		"name",
 		"parser_service_id",
 		"index_power_id",
+		"concept_graph_enabled",
 		"embedding_power_id",
 		"node_max_length",
 		"node_split_overlap",

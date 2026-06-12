@@ -178,6 +178,7 @@ type CanvasPowerRunRequest struct {
 	TeamID         uint64
 	ReleaseID      uint64
 	FlowID         uint64
+	AssetCateID    uint64
 	NodeKey        string
 	NodeName       string
 	Kind           string

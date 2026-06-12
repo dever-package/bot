@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/shemic/dever/server"
@@ -339,6 +340,48 @@ func (Knowledge) GetDownloadFile(c *server.Context) error {
 	return raw.Download(file.Path, file.Name)
 }
 
+func (Knowledge) PostFeedback(c *server.Context) error {
+	body, err := bindKnowledgeBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	err = knowledgeRunner.FeedbackNode(
+		c.Context(),
+		uint64ValueFromBody(body, "knowledge_base_id", "base_id"),
+		uint64ValueFromBody(body, "node_id", "id"),
+		frontstream.InputText(body["feedback"]),
+	)
+	return knowledgeJSON(c, map[string]any{"success": true}, err)
+}
+
+func (Knowledge) GetRetrieveLogs(c *server.Context) error {
+	data, err := knowledgeRunner.ListRetrieveLogs(
+		c.Context(),
+		inputBaseID(c),
+		int(frontstream.InputInt64(c.Input("limit"), 50)),
+	)
+	return knowledgeJSON(c, data, err)
+}
+
+func (Knowledge) PostRefluxQA(c *server.Context) error {
+	body, err := bindKnowledgeBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	docID, nodeID, err := knowledgeRunner.RefluxQA(
+		c.Context(),
+		uint64ValueFromBody(body, "knowledge_base_id", "base_id"),
+		uint64(frontstream.InputInt64(body["dir_id"], 0)),
+		frontstream.InputText(body["query"]),
+		frontstream.InputText(body["answer"]),
+		uint64SliceFromBody(body, "source_node_ids"),
+	)
+	return knowledgeJSON(c, map[string]any{
+		"doc_id":  docID,
+		"node_id": nodeID,
+	}, err)
+}
+
 func (Knowledge) PostIndexBase(c *server.Context) error {
 	body, err := bindKnowledgeBody(c)
 	if err != nil {
@@ -346,6 +389,109 @@ func (Knowledge) PostIndexBase(c *server.Context) error {
 	}
 	err = knowledgeservice.StartBaseIndex(c.Context(), uint64ValueFromBody(body, "knowledge_base_id", "base_id", "id"))
 	return knowledgeJSON(c, map[string]any{"index_status": "running"}, err)
+}
+
+func (Knowledge) PostBatchReindex(c *server.Context) error {
+	body, err := bindKnowledgeBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	docIDs := uint64SliceFromBody(body, "doc_ids")
+	if len(docIDs) == 0 {
+		docIDs = uint64SliceFromBody(body, "ids")
+	}
+	if len(docIDs) == 0 {
+		docIDs = uint64SliceFromBody(body, "id")
+	}
+	err = knowledgeRunner.BatchReindex(
+		c.Context(),
+		uint64ValueFromBody(body, "knowledge_base_id", "base_id"),
+		docIDs,
+	)
+	return knowledgeJSON(c, map[string]any{"success": err == nil}, err)
+}
+
+func (Knowledge) PostSetExpiration(c *server.Context) error {
+	body, err := bindKnowledgeBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	docIDs := uint64SliceFromBody(body, "doc_ids")
+	if len(docIDs) == 0 {
+		docIDs = uint64SliceFromBody(body, "ids")
+	}
+	if len(docIDs) == 0 {
+		docIDs = uint64SliceFromBody(body, "id")
+	}
+	if len(docIDs) == 0 {
+		return c.Error("文档ID不能为空")
+	}
+	expiresAtStr := textFromBody(body, "expires_at")
+	var expiresAt *time.Time
+	if expiresAtStr != "" {
+		t, err := time.Parse(time.RFC3339, expiresAtStr)
+		if err != nil {
+			t, err = time.Parse("2006-01-02 15:04:05", expiresAtStr)
+			if err != nil {
+				return c.Error("过期时间格式无效，请使用 RFC3339 或 YYYY-MM-DD HH:MM:SS")
+			}
+		}
+		expiresAt = &t
+	}
+	if len(docIDs) == 1 {
+		err = knowledgeRunner.SetDocExpiration(c.Context(), docIDs[0], expiresAt)
+	} else {
+		err = knowledgeRunner.BatchSetDocExpiration(c.Context(), docIDs, expiresAt)
+	}
+	return knowledgeJSON(c, map[string]any{"success": err == nil}, err)
+}
+
+func (Knowledge) PostReviewDoc(c *server.Context) error {
+	body, err := bindKnowledgeBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	docIDs := uint64SliceFromBody(body, "doc_ids")
+	if len(docIDs) == 0 {
+		docIDs = uint64SliceFromBody(body, "ids")
+	}
+	if len(docIDs) == 0 {
+		docIDs = uint64SliceFromBody(body, "id")
+	}
+	if len(docIDs) == 0 {
+		return c.Error("文档ID不能为空")
+	}
+	status := textFromBody(body, "review_status", "status")
+	if status == "" {
+		return c.Error("审核状态不能为空")
+	}
+	reviewerID := uint64(frontstream.InputInt64(body["reviewer_id"], 0))
+	if reviewerID == 0 {
+		reviewerID = uint64(frontstream.InputInt64(body["user_id"], 0))
+	}
+	if len(docIDs) == 1 {
+		err = knowledgeRunner.ReviewDoc(c.Context(), docIDs[0], status, reviewerID)
+	} else {
+		err = knowledgeRunner.BatchReviewDocs(c.Context(), docIDs, status, reviewerID)
+	}
+	return knowledgeJSON(c, map[string]any{"success": err == nil}, err)
+}
+
+func (Knowledge) GetExpiredDocs(c *server.Context) error {
+	baseID := uint64(frontstream.InputInt64(c.Input("knowledge_base_id"), 0))
+	if baseID == 0 {
+		baseID = uint64(frontstream.InputInt64(c.Input("base_id"), 0))
+	}
+	docs, total, err := knowledgeRunner.ListExpiredDocs(
+		c.Context(),
+		baseID,
+		int(frontstream.InputInt64(c.Input("page"), 1)),
+		int(frontstream.InputInt64(c.Input("pageSize"), 20)),
+	)
+	return knowledgeJSON(c, map[string]any{
+		"list":  docs,
+		"total": total,
+	}, err)
 }
 
 func bindKnowledgeBody(c *server.Context) (map[string]any, error) {
@@ -431,6 +577,25 @@ func stringSliceFromBody(body map[string]any, key string) []string {
 		}
 	}
 	return result
+}
+
+func uint64SliceFromBody(body map[string]any, key string) []uint64 {
+	raw, ok := body[key]
+	if !ok {
+		return nil
+	}
+	switch values := raw.(type) {
+	case []any:
+		result := make([]uint64, 0, len(values))
+		for _, value := range values {
+			result = append(result, uint64(frontstream.InputInt64(value, 0)))
+		}
+		return result
+	case []uint64:
+		return values
+	default:
+		return nil
+	}
 }
 
 func stringSliceFromBodyKeys(body map[string]any, keys ...string) []string {

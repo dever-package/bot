@@ -23,13 +23,12 @@ type KnowledgeIndexOverview struct {
 }
 
 type KnowledgeIndexOverviewBase struct {
-	ID            uint64 `json:"id"`
-	Name          string `json:"name"`
-	IndexStatus   string `json:"index_status"`
-	ErrorMessage  string `json:"error_message,omitempty"`
-	DocCount      int    `json:"doc_count"`
-	NodeCount     int    `json:"node_count"`
-	VectorEnabled bool   `json:"vector_enabled"`
+	ID           uint64 `json:"id"`
+	Name         string `json:"name"`
+	IndexStatus  string `json:"index_status"`
+	ErrorMessage string `json:"error_message,omitempty"`
+	DocCount     int    `json:"doc_count"`
+	NodeCount    int    `json:"node_count"`
 }
 
 type KnowledgeIndexOverviewStatus struct {
@@ -64,13 +63,12 @@ func (s Service) ReadKnowledgeIndexOverview(ctx context.Context, baseID uint64) 
 	nodeStatus := knowledgeNodeStatusCounts(ctx, base.ID)
 	return KnowledgeIndexOverview{
 		Base: KnowledgeIndexOverviewBase{
-			ID:            base.ID,
-			Name:          strings.TrimSpace(base.Name),
-			IndexStatus:   strings.TrimSpace(base.IndexStatus),
-			ErrorMessage:  strings.TrimSpace(base.ErrorMessage),
-			DocCount:      docStatus.Total,
-			NodeCount:     nodeStatus.Total,
-			VectorEnabled: base.VectorEnabled == 1 && base.EmbeddingPowerID > 0,
+			ID:           base.ID,
+			Name:         strings.TrimSpace(base.Name),
+			IndexStatus:  strings.TrimSpace(base.IndexStatus),
+			ErrorMessage: strings.TrimSpace(base.ErrorMessage),
+			DocCount:     docStatus.Total,
+			NodeCount:    nodeStatus.Total,
 		},
 		Docs:         docStatus,
 		Nodes:        nodeStatus,

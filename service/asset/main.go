@@ -102,7 +102,7 @@ func (Service) ProjectDetail(ctx context.Context, projectID uint64, assetID uint
 		return nil, fmt.Errorf("资产不存在")
 	}
 	return map[string]any{
-		"asset":    AssetToMap(*asset),
+		"asset":    Service{}.AssetDetailMap(ctx, *asset, nil),
 		"versions": VersionsToMaps(listVersions(ctx, asset.ID)),
 	}, nil
 }
@@ -189,6 +189,67 @@ func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetm
 		return nil, nil, fmt.Errorf("读取资产版本失败")
 	}
 	return asset, version, nil
+}
+
+func (s Service) UpdateVersionContent(ctx context.Context, projectID uint64, assetID uint64, versionID uint64, content any) (*assetmodel.Asset, *assetmodel.Version, error) {
+	asset := s.FindProjectAsset(ctx, projectID, assetID)
+	if asset == nil {
+		return nil, nil, fmt.Errorf("资产不存在")
+	}
+	if versionID == 0 {
+		versionID = asset.VersionID
+	}
+	version := s.FindVersion(ctx, versionID)
+	if version == nil || version.AssetID != asset.ID {
+		return nil, nil, fmt.Errorf("资产版本不存在")
+	}
+	now := time.Now()
+	assetmodel.NewVersionModel().Update(ctx, map[string]any{"id": version.ID}, map[string]any{
+		"content":    jsonText(EnsureDocument(content, asset.Kind)),
+		"created_at": now,
+	})
+	assetmodel.NewAssetModel().Update(ctx, map[string]any{"id": asset.ID}, map[string]any{
+		"version_id": version.ID,
+		"status":     assetmodel.StatusCurrent,
+	})
+	asset = s.FindProjectAsset(ctx, projectID, assetID)
+	version = s.FindVersion(ctx, versionID)
+	if asset == nil || version == nil {
+		return nil, nil, fmt.Errorf("读取资产版本失败")
+	}
+	return asset, version, nil
+}
+
+func (s Service) UseVersion(ctx context.Context, projectID uint64, assetID uint64, versionID uint64) (*assetmodel.Asset, *assetmodel.Version, error) {
+	asset := s.FindProjectAsset(ctx, projectID, assetID)
+	if asset == nil {
+		return nil, nil, fmt.Errorf("资产不存在")
+	}
+	version := s.FindVersion(ctx, versionID)
+	if version == nil || version.AssetID != asset.ID {
+		return nil, nil, fmt.Errorf("资产版本不存在")
+	}
+	assetmodel.NewAssetModel().Update(ctx, map[string]any{"id": asset.ID}, map[string]any{
+		"version_id": version.ID,
+		"status":     assetmodel.StatusCurrent,
+	})
+	asset = s.FindProjectAsset(ctx, projectID, assetID)
+	if asset == nil {
+		return nil, nil, fmt.Errorf("读取资产失败")
+	}
+	return asset, version, nil
+}
+
+func (s Service) AssetDetailMap(ctx context.Context, row assetmodel.Asset, current *assetmodel.Version) map[string]any {
+	item := AssetToMap(row)
+	if current == nil && row.VersionID > 0 {
+		current = s.FindVersion(ctx, row.VersionID)
+	}
+	if current != nil {
+		item["version"] = VersionToMap(*current)
+	}
+	item["versions"] = VersionsToMaps(listVersions(ctx, row.ID))
+	return item
 }
 
 func AssetToMap(row assetmodel.Asset) map[string]any {

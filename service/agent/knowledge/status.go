@@ -107,9 +107,9 @@ func firstFailedIndexStage(ctx context.Context, docID uint64) string {
 	for _, stage := range []string{
 		agentmodel.KnowledgeIndexStageParse,
 		agentmodel.KnowledgeIndexStageNodes,
-		agentmodel.KnowledgeIndexStageSummary,
-		agentmodel.KnowledgeIndexStageGraph,
 		agentmodel.KnowledgeIndexStageVector,
+		agentmodel.KnowledgeIndexStageGraph,
+		agentmodel.KnowledgeIndexStageSummary,
 	} {
 		if detail[stage].Status == agentmodel.KnowledgeIndexStatusFailed {
 			return stage
