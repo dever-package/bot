@@ -131,6 +131,7 @@ func (KnowledgeHook) ProviderBeforeSaveKnowledgeBase(c *server.Context, params [
 			}
 		}
 	}
+	defaultInt16(record, "concept_graph_enabled", 1, partial)
 	if shouldNormalize(record, "node_max_length", partial) {
 		record["node_max_length"] = normalizeNodeMaxLength(record["node_max_length"])
 	}

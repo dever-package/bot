@@ -7,16 +7,16 @@ import (
 )
 
 type KnowledgeBaseSnapshot struct {
-	ID              uint64    `dorm:"primaryKey;autoIncrement;comment:快照ID"`
-	KnowledgeBaseID uint64    `dorm:"type:bigint;not null;default:0;comment:知识库"`
-	Version         int       `dorm:"type:int;not null;default:1;comment:快照版本"`
-	Name            string    `dorm:"type:varchar(255);not null;default:'';comment:快照名称"`
-	Description     string    `dorm:"type:text;not null;default:'';comment:快照描述"`
-	DocSnapshot     string    `dorm:"type:text;not null;default:'';comment:文档快照JSON"`
-	BaseConfig      string    `dorm:"type:text;not null;default:'';comment:知识库配置快照JSON"`
-	PublishedAt     *time.Time `dorm:"type:timestamp;default:null;comment:发布时间"`
-	Status          int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	CreatedAt       time.Time `dorm:"comment:创建时间"`
+	ID              uint64     `dorm:"primaryKey;autoIncrement;comment:快照ID"`
+	KnowledgeBaseID uint64     `dorm:"type:bigint;not null;default:0;comment:知识库"`
+	Version         int        `dorm:"type:int;not null;default:1;comment:快照版本"`
+	Name            string     `dorm:"type:varchar(255);not null;default:'';comment:快照名称"`
+	Description     string     `dorm:"type:text;not null;default:'';comment:快照描述"`
+	DocSnapshot     string     `dorm:"type:text;not null;default:'';comment:文档快照JSON"`
+	BaseConfig      string     `dorm:"type:text;not null;default:'';comment:知识库配置快照JSON"`
+	PublishedAt     *time.Time `dorm:"type:timestamp;null;comment:发布时间"`
+	Status          int16      `dorm:"type:smallint;not null;default:1;comment:状态"`
+	CreatedAt       time.Time  `dorm:"comment:创建时间"`
 }
 
 type KnowledgeBaseSnapshotIndex struct {

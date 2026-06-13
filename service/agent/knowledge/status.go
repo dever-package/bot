@@ -64,6 +64,28 @@ func resetDocumentIndexProgress(ctx context.Context, docID uint64) {
 	})
 }
 
+func beginKnowledgeDocIndex(ctx context.Context, doc *agentmodel.KnowledgeDoc) (int, bool) {
+	if doc == nil || doc.ID == 0 {
+		return 1, false
+	}
+	indexVersion := normalizedDocIndexVersion(doc.IndexVersion)
+	if doc.IndexStatus != agentmodel.KnowledgeIndexStatusPending {
+		indexVersion = nextDocIndexVersion(doc.IndexVersion)
+	}
+	doc.IndexVersion = indexVersion
+	updated := agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{
+		"id":           doc.ID,
+		"index_status": map[string]any{"neq": agentmodel.KnowledgeIndexStatusRunning},
+	}, map[string]any{
+		"index_version":      indexVersion,
+		"index_status":       agentmodel.KnowledgeIndexStatusRunning,
+		"index_stage":        agentmodel.KnowledgeIndexStagePending,
+		"index_stage_detail": "",
+		"error_message":      "",
+	})
+	return indexVersion, updated > 0
+}
+
 func markKnowledgeDocPending(ctx context.Context, docID uint64, values map[string]any) {
 	if docID == 0 {
 		return
@@ -84,10 +106,27 @@ func markKnowledgeDocPending(ctx context.Context, docID uint64, values map[strin
 
 func incrementDocIndexVersion(ctx context.Context, docID uint64) int {
 	doc := agentmodel.NewKnowledgeDocModel().Find(ctx, map[string]any{"id": docID})
-	if doc == nil || doc.IndexVersion <= 0 {
+	if doc == nil {
 		return 1
 	}
-	return doc.IndexVersion + 1
+	if doc.IndexStatus == agentmodel.KnowledgeIndexStatusPending {
+		return normalizedDocIndexVersion(doc.IndexVersion)
+	}
+	return nextDocIndexVersion(doc.IndexVersion)
+}
+
+func normalizedDocIndexVersion(current int) int {
+	if current <= 0 {
+		return 1
+	}
+	return current
+}
+
+func nextDocIndexVersion(current int) int {
+	if current <= 0 {
+		return 1
+	}
+	return current + 1
 }
 
 func appendIndexWarning(current string, message string) string {

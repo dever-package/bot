@@ -251,7 +251,7 @@
       "parser_service_id": "",
       "index_power_id": "",
       "embedding_power_id": "",
-      "concept_graph_enabled": 2,
+      "concept_graph_enabled": 1,
       "node_max_length": 800,
       "node_split_overlap": 120,
       "retrieve_limit": 5,

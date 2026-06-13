@@ -764,8 +764,9 @@ func incomingEdgeCounts(ctx context.Context, baseID uint64, nodeIDs []uint64) ma
 		"to_node_id":        nodeIDs,
 		"status":            1,
 	}, map[string]any{
-		"field": "main.id, main.to_node_id",
+		"field": "main.id, main.doc_id, main.from_node_id, main.to_node_id",
 	})
+	edges = filterAvailableKnowledgeEdges(ctx, edges)
 	if len(edges) == 0 {
 		return nil
 	}

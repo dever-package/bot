@@ -7,17 +7,19 @@ import (
 	"math"
 	"strings"
 
+	dlog "github.com/shemic/dever/log"
+
 	agentmodel "my/package/bot/model/agent"
 )
 
 const (
-	minKeywordSimilarity  = 0.3
-	maxAutoRelations      = 100
-	maxRelationDocs       = 50
-	cooccurrenceMinCount  = 2
-	cooccurrenceMinRate   = 0.3
-	maxCooccurrenceNodes  = 30
-	maxCooccurrenceLogs   = 200
+	minKeywordSimilarity = 0.3
+	maxAutoRelations     = 100
+	maxRelationDocs      = 50
+	cooccurrenceMinCount = 2
+	cooccurrenceMinRate  = 0.3
+	maxCooccurrenceNodes = 30
+	maxCooccurrenceLogs  = 200
 )
 
 // autoDiscoverRelations discovers implicit relations across the knowledge base.
@@ -26,6 +28,14 @@ func (s Service) autoDiscoverRelations(ctx context.Context, base agentmodel.Know
 	if base.ID == 0 || base.Status != 1 {
 		return
 	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			dlog.ErrorFields("knowledge_auto_discover_relations", "知识库自动关系发现失败", dlog.Fields{
+				"knowledge_base_id": base.ID,
+				"error":             fmt.Sprintf("%v", recovered),
+			})
+		}
+	}()
 	discoverKeywordSimilarDocs(ctx, base)
 	discoverCooccurrenceRelations(ctx, base)
 }
@@ -209,8 +219,8 @@ func discoverCooccurrenceRelations(ctx context.Context, base agentmodel.Knowledg
 			Weight:     math.Round(rate*10) / 10,
 			Confidence: math.Round(rate*10) / 10,
 			Metadata: map[string]any{
-				"source":       "cooccurrence",
-				"occurrences":  count,
+				"source":            "cooccurrence",
+				"occurrences":       count,
 				"cooccurrence_rate": rate,
 			},
 		})

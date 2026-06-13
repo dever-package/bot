@@ -84,6 +84,7 @@ func graphRetrievalPlan(ctx context.Context, baseID uint64, query string, depth 
 		"page":     1,
 		"pageSize": 20,
 	})
+	rows = filterAvailableKnowledgeEdges(ctx, rows)
 	plan := retrievalPlan{}
 	frontier := make([]uint64, 0, len(rows)*2)
 	for _, row := range rows {
@@ -188,13 +189,15 @@ func inferGraphRelations(ctx context.Context, baseID uint64, edges []*agentmodel
 	}
 	// Fetch doc IDs and titles for inferred nodes
 	nodes := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
-		"id":     nodeIDs,
-		"status": 1,
+		"id":           nodeIDs,
+		"index_status": agentmodel.KnowledgeIndexStatusSuccess,
+		"status":       1,
 	}, map[string]any{
-		"field":    "main.id, main.doc_id, main.title",
+		"field":    "main.id, main.doc_id, main.title, main.index_status, main.status",
 		"page":     1,
 		"pageSize": len(nodeIDs),
 	})
+	nodes = filterAvailableKnowledgeNodes(ctx, nodes)
 	if len(nodes) == 0 {
 		return nil
 	}
@@ -247,11 +250,12 @@ func nodeGraphMatches(ctx context.Context, baseID uint64, terms []string) *nodeG
 		"status":       1,
 		"or":           conditions,
 	}, map[string]any{
-		"field":    "main.id, main.doc_id, main.title",
+		"field":    "main.id, main.doc_id, main.title, main.index_status, main.status",
 		"order":    "main.id desc",
 		"page":     1,
 		"pageSize": 15,
 	})
+	rows = filterAvailableKnowledgeNodes(ctx, rows)
 	if len(rows) == 0 {
 		return nil
 	}
@@ -349,7 +353,7 @@ func graphEdgesAroundNodes(ctx context.Context, baseID uint64, nodeIDs []uint64)
 	if baseID == 0 || len(nodeIDs) == 0 {
 		return nil
 	}
-	return agentmodel.NewKnowledgeEdgeModel().Select(ctx, map[string]any{
+	rows := agentmodel.NewKnowledgeEdgeModel().Select(ctx, map[string]any{
 		"knowledge_base_id": baseID,
 		"status":            1,
 		"or": []any{
@@ -362,6 +366,7 @@ func graphEdgesAroundNodes(ctx context.Context, baseID uint64, nodeIDs []uint64)
 		"page":     1,
 		"pageSize": 80,
 	})
+	return filterAvailableKnowledgeEdges(ctx, rows)
 }
 
 func normalizeKnowledgeGraphLimit(limit int) int {
@@ -375,7 +380,7 @@ func normalizeKnowledgeGraphLimit(limit int) int {
 }
 
 func knowledgeGraphEdges(ctx context.Context, baseID uint64, limit int) []*agentmodel.KnowledgeEdge {
-	return agentmodel.NewKnowledgeEdgeModel().Select(ctx, map[string]any{
+	rows := agentmodel.NewKnowledgeEdgeModel().Select(ctx, map[string]any{
 		"knowledge_base_id": baseID,
 		"edge_type": []string{
 			agentmodel.KnowledgeEdgeTypeReferences,
@@ -392,6 +397,7 @@ func knowledgeGraphEdges(ctx context.Context, baseID uint64, limit int) []*agent
 		"page":     1,
 		"pageSize": limit,
 	})
+	return filterAvailableKnowledgeEdges(ctx, rows)
 }
 
 func graphEdgeNodeIDs(edges []*agentmodel.KnowledgeEdge) []uint64 {
@@ -410,12 +416,14 @@ func knowledgeGraphNodeMap(ctx context.Context, nodeIDs []uint64) map[uint64]*ag
 		return nil
 	}
 	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
-		"id":     nodeIDs,
-		"status": 1,
+		"id":           nodeIDs,
+		"index_status": agentmodel.KnowledgeIndexStatusSuccess,
+		"status":       1,
 	}, map[string]any{
 		"page":     1,
 		"pageSize": len(nodeIDs),
 	})
+	rows = filterAvailableKnowledgeNodes(ctx, rows)
 	result := make(map[uint64]*agentmodel.KnowledgeNode, len(rows))
 	for _, row := range rows {
 		if row != nil && row.ID > 0 {

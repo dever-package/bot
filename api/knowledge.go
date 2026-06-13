@@ -426,7 +426,7 @@ func (Knowledge) PostSetExpiration(c *server.Context) error {
 	if len(docIDs) == 0 {
 		return c.Error("文档ID不能为空")
 	}
-	expiresAtStr := textFromBody(body, "expires_at")
+	expiresAtStr := nullableTextFromBody(body, "expires_at")
 	var expiresAt *time.Time
 	if expiresAtStr != "" {
 		t, err := time.Parse(time.RFC3339, expiresAtStr)
@@ -627,6 +627,16 @@ func rawTextFromBody(body map[string]any, key string) string {
 		return text
 	}
 	return frontstream.InputText(value)
+}
+
+func nullableTextFromBody(body map[string]any, keys ...string) string {
+	text := strings.TrimSpace(textFromBody(body, keys...))
+	switch strings.ToLower(text) {
+	case "", "null", "undefined":
+		return ""
+	default:
+		return text
+	}
 }
 
 func knowledgeJSON(c *server.Context, data any, err error) error {

@@ -372,7 +372,9 @@ func (s Service) handleActionResult(
 ) (agentLoopResult, bool) {
 	switch result.Kind {
 	case agentaction.ResultDone:
-		artifacts.Add(result.Output)
+		if !isKnowledgeAction(result.Action) {
+			artifacts.Add(result.Output)
+		}
 		*lastOutput = agentaction.SummaryText(result.Output)
 		tracker.Step(ctx, "tool_result", actionResultTitle(result.Action), *lastOutput, actionResultPayload(result), stepStatusSuccess)
 		*history = agentaction.AppendHistoryObservation(*history, result)
@@ -393,6 +395,9 @@ func (s Service) handleActionResult(
 
 func actionStepTitle(action agentaction.Action) string {
 	if strings.TrimSpace(action.Type) == "call_tool" {
+		if isKnowledgeAction(action) {
+			return "正在调用知识库"
+		}
 		return "准备调用工具"
 	}
 	return "准备调用能力"
@@ -400,6 +405,9 @@ func actionStepTitle(action agentaction.Action) string {
 
 func actionStepContent(action agentaction.Action) string {
 	if strings.TrimSpace(action.Type) == "call_tool" {
+		if isKnowledgeAction(action) {
+			return ""
+		}
 		return strings.TrimSpace(action.Tool)
 	}
 	return strings.TrimSpace(action.Power)
@@ -407,6 +415,9 @@ func actionStepContent(action agentaction.Action) string {
 
 func actionResultTitle(action agentaction.Action) string {
 	if strings.TrimSpace(action.Type) == "call_tool" {
+		if isKnowledgeAction(action) {
+			return "内容整理完成"
+		}
 		return "工具调用结果"
 	}
 	return "能力调用结果"
@@ -414,9 +425,21 @@ func actionResultTitle(action agentaction.Action) string {
 
 func actionFailureMessage(action agentaction.Action) string {
 	if strings.TrimSpace(action.Type) == "call_tool" {
+		if isKnowledgeAction(action) {
+			return "知识库调用失败"
+		}
 		return "工具调用失败"
 	}
 	return "能力调用失败"
+}
+
+func isKnowledgeAction(action agentaction.Action) bool {
+	switch strings.TrimSpace(action.Tool) {
+	case "list_knowledge_tree", "search_knowledge_nodes", "open_knowledge_node", "expand_knowledge_node", "find_related_knowledge", "debug_knowledge_retrieval":
+		return true
+	default:
+		return false
+	}
 }
 
 func actionResultPayload(result agentaction.Result) map[string]any {

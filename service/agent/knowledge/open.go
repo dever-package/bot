@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	agentmodel "my/package/bot/model/agent"
 )
@@ -58,28 +59,108 @@ type KnowledgeTreeNode struct {
 }
 
 func (s Service) SearchKnowledgeNodes(ctx context.Context, baseID uint64, query string, limit int) (KnowledgeNodeSearchResult, error) {
-	base := agentmodel.NewKnowledgeBaseModel().Find(ctx, map[string]any{"id": baseID})
+	base := agentmodel.NewKnowledgeBaseModel().Find(ctx, map[string]any{"id": baseID, "status": 1})
 	if base == nil {
 		return KnowledgeNodeSearchResult{}, fmt.Errorf("知识库不存在")
 	}
-	if limit <= 0 {
-		limit = normalizeRetrieveLimit(base.RetrieveLimit)
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return KnowledgeNodeSearchResult{}, nil
 	}
-	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, keywordNodeFilters(baseID, query), map[string]any{
-		"order":    "main.depth asc, main.sort asc, main.id asc",
+	limit = normalizeKnowledgeSearchLimit(limit, base.RetrieveLimit)
+	binding := knowledgeBaseDebugBinding(*base)
+	binding.RetrieveLimit = limit
+	binding.Base.RetrieveLimit = limit
+
+	startedAt := time.Now()
+	retrieved := s.retrieveAgenticBinding(ctx, binding, query)
+	snippets := s.filterPublishedSnapshot(ctx, retrieved.Snippets, base.ID)
+	snippets = filterUnavailableDocSnippets(ctx, snippets)
+	snippets = limitRetrievedSnippets(snippets, limit)
+	s.recordKnowledgeSearchLog(ctx, base.ID, query, snippets, retrieved.Matches, time.Since(startedAt))
+	s.incrementHitCounts(ctx, snippets)
+	nodes := knowledgeNodeResultsFromSnippets(ctx, base.ID, snippets, limit)
+	return KnowledgeNodeSearchResult{Nodes: nodes}, nil
+}
+
+func normalizeKnowledgeSearchLimit(limit int, fallback int) int {
+	if limit <= 0 {
+		return normalizeRetrieveLimit(fallback)
+	}
+	return normalizeRetrieveLimit(limit)
+}
+
+func limitRetrievedSnippets(snippets []RetrievedSnippet, limit int) []RetrievedSnippet {
+	if limit <= 0 || len(snippets) <= limit {
+		return snippets
+	}
+	return snippets[:limit]
+}
+
+func knowledgeNodeResultsFromSnippets(ctx context.Context, baseID uint64, snippets []RetrievedSnippet, limit int) []KnowledgeNodeResult {
+	if len(snippets) == 0 {
+		return nil
+	}
+	if limit <= 0 {
+		limit = defaultRetrieveLimit
+	}
+	ids := make([]uint64, 0, len(snippets))
+	scoreByID := make(map[uint64]float64, len(snippets))
+	seen := make(map[uint64]struct{}, len(snippets))
+	for _, snippet := range snippets {
+		if snippet.NodeID == 0 {
+			continue
+		}
+		if _, exists := seen[snippet.NodeID]; exists {
+			continue
+		}
+		seen[snippet.NodeID] = struct{}{}
+		ids = append(ids, snippet.NodeID)
+		scoreByID[snippet.NodeID] = snippet.Score
+		if len(ids) >= limit {
+			break
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
+		"id":                ids,
+		"knowledge_base_id": baseID,
+		"index_status":      agentmodel.KnowledgeIndexStatusSuccess,
+		"status":            1,
+	}, map[string]any{
 		"page":     1,
-		"pageSize": keywordCandidateLimit(limit, false, query),
+		"pageSize": len(ids),
 	})
-	nodes := make([]KnowledgeNodeResult, 0, len(rows))
+	rows = filterAvailableKnowledgeNodes(ctx, rows)
+	nodeByID := make(map[uint64]*agentmodel.KnowledgeNode, len(rows))
 	for _, row := range rows {
+		if row != nil {
+			nodeByID[row.ID] = row
+		}
+	}
+	result := make([]KnowledgeNodeResult, 0, len(ids))
+	for _, id := range ids {
+		row := nodeByID[id]
 		if row == nil {
 			continue
 		}
 		item := knowledgeNodeResult(ctx, row)
-		item.Score = keywordNodeScore(row, query)
-		nodes = append(nodes, item)
+		item.Score = scoreByID[id]
+		result = append(result, item)
 	}
-	return KnowledgeNodeSearchResult{Nodes: nodes}, nil
+	return result
+}
+
+func (s Service) recordKnowledgeSearchLog(ctx context.Context, baseID uint64, query string, snippets []RetrievedSnippet, matches []map[string]any, latency time.Duration) {
+	insertKnowledgeRetrieveLog(ctx, knowledgeRetrieveLogInput{
+		BaseID:    baseID,
+		Query:     query,
+		Snippets:  snippets,
+		Matches:   matches,
+		LatencyMs: int(latency.Milliseconds()),
+	})
 }
 
 func (s Service) ListKnowledgeTree(ctx context.Context, baseID uint64, parentID uint64, depth int, limit int) (KnowledgeTreeResult, error) {
@@ -106,9 +187,9 @@ func (s Service) ListKnowledgeTree(ctx context.Context, baseID uint64, parentID 
 }
 
 func (s Service) OpenKnowledgeNode(ctx context.Context, nodeID uint64) (KnowledgeNodeOpenResult, error) {
-	node := agentmodel.NewKnowledgeNodeModel().Find(ctx, map[string]any{"id": nodeID, "status": 1})
+	node := availableKnowledgeNode(ctx, nodeID)
 	if node == nil {
-		return KnowledgeNodeOpenResult{}, fmt.Errorf("知识节点不存在")
+		return KnowledgeNodeOpenResult{}, fmt.Errorf("知识节点不存在或不可用")
 	}
 	result := KnowledgeNodeOpenResult{
 		Node:     knowledgeNodeResult(ctx, node),
@@ -136,9 +217,9 @@ func (s Service) ExpandKnowledgeNode(ctx context.Context, nodeID uint64, depth i
 }
 
 func (s Service) FindRelatedKnowledge(ctx context.Context, nodeID uint64, edgeTypes []string, limit int) (KnowledgeRelatedResult, error) {
-	node := agentmodel.NewKnowledgeNodeModel().Find(ctx, map[string]any{"id": nodeID, "status": 1})
+	node := availableKnowledgeNode(ctx, nodeID)
 	if node == nil {
-		return KnowledgeRelatedResult{}, fmt.Errorf("知识节点不存在")
+		return KnowledgeRelatedResult{}, fmt.Errorf("知识节点不存在或不可用")
 	}
 	if limit <= 0 {
 		limit = 10
@@ -194,12 +275,14 @@ func knowledgeTreeNodes(ctx context.Context, baseID uint64, parentID uint64, dep
 	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
 		"knowledge_base_id": baseID,
 		"parent_id":         parentID,
+		"index_status":      agentmodel.KnowledgeIndexStatusSuccess,
 		"status":            1,
 	}, map[string]any{
 		"order":    "main.depth asc, main.sort asc, main.id asc",
 		"page":     1,
 		"pageSize": limit,
 	})
+	rows = filterAvailableKnowledgeNodes(ctx, rows)
 	result := make([]KnowledgeTreeNode, 0, len(rows))
 	remaining := limit
 	for _, row := range rows {
@@ -225,17 +308,23 @@ func knowledgeChildCount(ctx context.Context, parentID uint64) int {
 	if parentID == 0 {
 		return 0
 	}
-	return countInt(agentmodel.NewKnowledgeNodeModel().Count(ctx, map[string]any{
-		"parent_id": parentID,
-		"status":    1,
-	}))
+	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
+		"parent_id":    parentID,
+		"index_status": agentmodel.KnowledgeIndexStatusSuccess,
+		"status":       1,
+	}, map[string]any{
+		"field":    "main.id, main.doc_id, main.index_status, main.status",
+		"page":     1,
+		"pageSize": 1000,
+	})
+	return len(filterAvailableKnowledgeNodes(ctx, rows))
 }
 
 func parentKnowledgeNodes(ctx context.Context, node *agentmodel.KnowledgeNode) []KnowledgeNodeResult {
 	result := make([]KnowledgeNodeResult, 0)
 	currentParentID := node.ParentID
 	for currentParentID > 0 {
-		parent := agentmodel.NewKnowledgeNodeModel().Find(ctx, map[string]any{"id": currentParentID, "status": 1})
+		parent := availableKnowledgeNode(ctx, currentParentID)
 		if parent == nil {
 			break
 		}
@@ -247,27 +336,29 @@ func parentKnowledgeNodes(ctx context.Context, node *agentmodel.KnowledgeNode) [
 
 func childKnowledgeNodes(ctx context.Context, parentID uint64, limit int) []KnowledgeNodeResult {
 	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
-		"parent_id": parentID,
-		"status":    1,
+		"parent_id":    parentID,
+		"index_status": agentmodel.KnowledgeIndexStatusSuccess,
+		"status":       1,
 	}, map[string]any{
 		"order":    "main.sort asc, main.id asc",
 		"page":     1,
 		"pageSize": limit,
 	})
-	return knowledgeNodeResults(ctx, rows)
+	return knowledgeNodeResults(ctx, filterAvailableKnowledgeNodes(ctx, rows))
 }
 
 func siblingKnowledgeNodes(ctx context.Context, node *agentmodel.KnowledgeNode, limit int) []KnowledgeNodeResult {
 	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
-		"parent_id": node.ParentID,
-		"doc_id":    node.DocID,
-		"status":    1,
+		"parent_id":    node.ParentID,
+		"doc_id":       node.DocID,
+		"index_status": agentmodel.KnowledgeIndexStatusSuccess,
+		"status":       1,
 	}, map[string]any{
 		"order":    "main.sort asc, main.id asc",
 		"page":     1,
 		"pageSize": limit,
 	})
-	return knowledgeNodeResults(ctx, rows)
+	return knowledgeNodeResults(ctx, filterAvailableKnowledgeNodes(ctx, rows))
 }
 
 func descendantKnowledgeNodes(ctx context.Context, nodeID uint64, depth int, limit int) []KnowledgeNodeResult {
@@ -307,11 +398,12 @@ func relatedKnowledgeNodesByTypes(ctx context.Context, nodeID uint64, edgeTypes 
 		filter["edge_type"] = types
 	}
 	edges := agentmodel.NewKnowledgeEdgeModel().Select(ctx, filter, map[string]any{
-		"field":    "main.from_node_id, main.to_node_id",
+		"field":    "main.doc_id, main.from_node_id, main.to_node_id",
 		"order":    "main.confidence desc, main.id desc",
 		"page":     1,
 		"pageSize": limit,
 	})
+	edges = filterAvailableKnowledgeEdges(ctx, edges)
 	ids := make([]uint64, 0, len(edges))
 	seen := map[uint64]struct{}{}
 	for _, edge := range edges {
@@ -335,14 +427,15 @@ func relatedKnowledgeNodesByTypes(ctx context.Context, nodeID uint64, edgeTypes 
 		return nil
 	}
 	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
-		"id":     ids,
-		"status": 1,
+		"id":           ids,
+		"index_status": agentmodel.KnowledgeIndexStatusSuccess,
+		"status":       1,
 	}, map[string]any{
 		"order":    "main.id asc",
 		"page":     1,
 		"pageSize": limit,
 	})
-	return knowledgeNodeResults(ctx, rows)
+	return knowledgeNodeResults(ctx, filterAvailableKnowledgeNodes(ctx, rows))
 }
 
 func normalizedEdgeTypes(values []string) []string {
