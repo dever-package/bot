@@ -178,6 +178,7 @@ type CanvasPowerRunRequest struct {
 	TeamID         uint64
 	ReleaseID      uint64
 	FlowID         uint64
+	RequestID      string
 	AssetCateID    uint64
 	NodeKey        string
 	NodeName       string
@@ -187,6 +188,7 @@ type CanvasPowerRunRequest struct {
 	SourceTargetID uint64
 	Input          map[string]any
 	Params         map[string]any
+	OnStream       func(payload map[string]any)
 }
 
 type runWaitError struct {

@@ -192,7 +192,10 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		return nil, fmt.Errorf("当前团队不允许使用该能力")
 	}
 
-	requestID := newRequestID()
+	requestID := strings.TrimSpace(req.RequestID)
+	if requestID == "" {
+		requestID = newRequestID()
+	}
 	now := time.Now()
 	input := mergeMaps(req.Input, req.Params)
 	runID := s.repo.InsertRun(ctx, map[string]any{
@@ -215,6 +218,9 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	if run == nil {
 		return nil, fmt.Errorf("画布能力运行不存在")
 	}
+	stopForward := s.forwardCanvasPowerStream(ctx, requestID, req.OnStream)
+	defer stopForward()
+
 	s.writeRunEvent(ctx, *run, stream.EventRunStarted, map[string]any{
 		"feature": stream.FeaturePower,
 		"scope":   "run",
@@ -351,6 +357,45 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		"asset":       s.asset.AssetDetailMap(ctx, *asset, version),
 		"version":     assetservice.VersionToMap(*version),
 	}, nil
+}
+
+func (s Service) forwardCanvasPowerStream(ctx context.Context, requestID string, forward func(map[string]any)) func() {
+	if forward == nil || strings.TrimSpace(requestID) == "" {
+		return func() {}
+	}
+	streamCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		lastID := "0-0"
+		for {
+			entries, err := s.ReadStream(streamCtx, requestID, lastID, 100, time.Second)
+			for _, entry := range entries {
+				if strings.TrimSpace(entry.ID) != "" {
+					lastID = entry.ID
+				}
+				if entry.Payload != nil {
+					forward(entry.Payload)
+				}
+			}
+			if err != nil && streamCtx.Err() != nil {
+				return
+			}
+			select {
+			case <-streamCtx.Done():
+				return
+			default:
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		case <-ctx.Done():
+		}
+	}
 }
 
 func (s Service) ListProjectAssets(ctx context.Context, projectID uint64, flowID uint64, kind string) (map[string]any, error) {
