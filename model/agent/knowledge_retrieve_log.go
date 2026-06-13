@@ -12,7 +12,7 @@ type KnowledgeRetrieveLog struct {
 	AgentID         uint64    `dorm:"type:bigint;not null;default:0;comment:智能体"`
 	Query           string    `dorm:"type:text;not null;default:'';comment:用户原始问题"`
 	PlannedQueries  string    `dorm:"type:text;not null;default:'';comment:规划扩展查询词JSON"`
-	NodeIDs         string    `dorm:"type:text;not null;default:'';comment:命中节点ID列表JSON"`
+	NodeIDs         string    `dorm:"column:node_ids;type:text;not null;default:'';comment:命中节点ID列表JSON"`
 	SnippetCount    int       `dorm:"type:int;not null;default:0;comment:返回片段数"`
 	LatencyMs       int       `dorm:"type:int;not null;default:0;comment:检索耗时ms"`
 	Status          int16     `dorm:"type:smallint;not null;default:1;comment:状态"`

@@ -14,16 +14,19 @@ type KnowledgeVector struct {
 	Collection      string    `dorm:"type:varchar(128);not null;default:'';comment:集合"`
 	PointID         string    `dorm:"type:varchar(128);not null;default:'';comment:向量点ID"`
 	ContentHash     string    `dorm:"type:varchar(64);not null;default:'';comment:内容哈希"`
+	IndexVersion    int       `dorm:"type:int;not null;default:1;comment:索引版本"`
 	Status          int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	ErrorMessage    string    `dorm:"type:text;not null;default:'';comment:错误信息"`
 	CreatedAt       time.Time `dorm:"comment:创建时间"`
 }
 
 type KnowledgeVectorIndex struct {
-	BaseStatus struct{} `index:"knowledge_base_id,status,id"`
-	DocStatus  struct{} `index:"doc_id,status,id"`
-	NodeStatus struct{} `index:"node_id,status,id"`
-	Point      struct{} `index:"collection,point_id"`
+	BaseStatus  struct{} `index:"knowledge_base_id,status,id"`
+	BaseVersion struct{} `index:"knowledge_base_id,index_version,status,id"`
+	DocStatus   struct{} `index:"doc_id,status,id"`
+	DocVersion  struct{} `index:"doc_id,index_version,status,id"`
+	NodeStatus  struct{} `index:"node_id,status,id"`
+	Point       struct{} `index:"collection,point_id"`
 }
 
 func NewKnowledgeVectorModel() *orm.Model[KnowledgeVector] {

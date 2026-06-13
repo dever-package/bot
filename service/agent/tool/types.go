@@ -66,7 +66,7 @@ func Execute(ctx context.Context, req Request) agentaction.Result {
 	if !ok {
 		return toolError(req.Action, "不支持的工具: "+req.Action.Tool)
 	}
-	writeStatus(req, ctx, "正在调用工具: "+req.Action.Tool, map[string]any{
+	writeStatus(req, ctx, toolStatusText(req.Action.Tool), map[string]any{
 		"meta": map[string]any{
 			"action": "call_tool",
 			"tool":   req.Action.Tool,
@@ -80,6 +80,7 @@ func Execute(ctx context.Context, req Request) agentaction.Result {
 		return toolError(req.Action, err.Error())
 	}
 	duration := time.Since(startedAt).Milliseconds()
+	summary := summaryText(req.Action.Tool, result)
 	output := map[string]any{
 		"event":       "tool_result",
 		"kind":        agentaction.KindTool,
@@ -87,12 +88,13 @@ func Execute(ctx context.Context, req Request) agentaction.Result {
 		"skill":       req.Action.Skill,
 		"duration_ms": duration,
 		"result":      result,
-		"text":        summaryText(req.Action.Tool, result),
+		"text":        summary,
 	}
+	promoteToolDisplayOutput(output, result)
 	return agentaction.Result{
 		Kind:   agentaction.ResultDone,
 		Action: req.Action,
-		Text:   summaryText(req.Action.Tool, result),
+		Text:   summary,
 		Output: output,
 	}
 }
@@ -156,6 +158,9 @@ func writeStatus(req Request, ctx context.Context, text string, meta map[string]
 }
 
 func summaryText(name string, result map[string]any) string {
+	if summary := inputText(result["summary"]); summary != "" {
+		return summary
+	}
 	if text := inputText(result["text"]); text != "" {
 		return text
 	}
@@ -166,4 +171,46 @@ func summaryText(name string, result map[string]any) string {
 		return truncateText(content, 1000)
 	}
 	return fmt.Sprintf("%s 调用完成: %s", name, agentskill.JSONText(result))
+}
+
+func promoteToolDisplayOutput(output map[string]any, result map[string]any) {
+	for _, key := range []string{"title", "rich", "content", "images", "videos", "audios", "files", "json", "result_mode", "display_mode"} {
+		value, ok := result[key]
+		if !ok || isEmptyToolDisplayValue(value) {
+			continue
+		}
+		output[key] = value
+	}
+}
+
+func isEmptyToolDisplayValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text) == ""
+	}
+	if list, ok := value.([]any); ok {
+		return len(list) == 0
+	}
+	if record, ok := value.(map[string]any); ok {
+		return len(record) == 0
+	}
+	return false
+}
+
+func toolStatusText(name string) string {
+	if isKnowledgeTool(name) {
+		return "正在调用知识库"
+	}
+	return "正在调用工具"
+}
+
+func isKnowledgeTool(name string) bool {
+	switch normalizeTool(name) {
+	case NameKnowledgeTree, NameKnowledgeSearch, NameKnowledgeOpen, NameKnowledgeExpand, NameKnowledgeRelated, NameKnowledgeDebug:
+		return true
+	default:
+		return false
+	}
 }

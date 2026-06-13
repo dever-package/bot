@@ -66,6 +66,10 @@ func (s Service) extractDocumentConceptGraph(ctx context.Context, base agentmode
 }
 
 func (s Service) extractDocumentConceptGraphAsync(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc) {
+	_ = s.extractDocumentConceptGraphWithStage(ctx, base, doc)
+}
+
+func (s Service) extractDocumentConceptGraphWithStage(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc) error {
 	markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageGraph, agentmodel.KnowledgeIndexStatusRunning, "")
 	err := s.extractDocumentConceptGraph(ctx, base, doc)
 	if err != nil {
@@ -73,6 +77,7 @@ func (s Service) extractDocumentConceptGraphAsync(ctx context.Context, base agen
 	} else {
 		markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageGraph, agentmodel.KnowledgeIndexStatusSuccess, "")
 	}
+	return err
 }
 
 func conceptSourceNodes(ctx context.Context, docID uint64) []*agentmodel.KnowledgeNode {
@@ -379,12 +384,20 @@ func upsertConceptNode(ctx context.Context, base agentmodel.KnowledgeBase, conce
 	if nodeKey == "" {
 		return 0
 	}
-	existing := agentmodel.NewKnowledgeNodeModel().Find(ctx, map[string]any{
+	model := agentmodel.NewKnowledgeNodeModel()
+	existing := model.Find(ctx, map[string]any{
 		"knowledge_base_id": base.ID,
 		"doc_id":            0,
 		"node_key":          nodeKey,
 		"status":            1,
 	})
+	if existing == nil {
+		existing = model.Find(ctx, map[string]any{
+			"knowledge_base_id": base.ID,
+			"node_key":          nodeKey,
+			"status":            1,
+		})
+	}
 	aliases := uniqueSummaryKeywords(append([]string{concept.Name}, concept.Keywords...), 10)
 	nowHash := contentHash(concept.Name + concept.Description + concept.Evidence)
 
@@ -425,9 +438,15 @@ func upsertConceptNode(ctx context.Context, base agentmodel.KnowledgeBase, conce
 			"metadata":     jsonText(existingMeta),
 			"content_hash": nowHash,
 			"index_status": agentmodel.KnowledgeIndexStatusSuccess,
+			"doc_id":       0,
+			"parent_id":    0,
+			"dir_id":       0,
+			"parse_id":     0,
+			"depth":        0,
+			"sort":         9000,
 			"status":       1,
 		}
-		agentmodel.NewKnowledgeNodeModel().Update(ctx, map[string]any{"id": existing.ID}, values)
+		model.Update(ctx, map[string]any{"id": existing.ID}, values)
 		return existing.ID
 	}
 	allKeywords := uniqueSummaryKeywords(append(concept.Keywords, concept.Name, concept.Type), 20)
@@ -451,17 +470,15 @@ func upsertConceptNode(ctx context.Context, base agentmodel.KnowledgeBase, conce
 		"error_message": "",
 		"status":        1,
 	}
-	if docID > 0 {
-		values["doc_id"] = docID
-	}
 	values["knowledge_base_id"] = base.ID
 	values["dir_id"] = 0
+	values["doc_id"] = 0
 	values["parse_id"] = 0
 	values["parent_id"] = 0
 	values["node_key"] = nodeKey
 	values["depth"] = 0
 	values["sort"] = 9000
-	return util.ToUint64(agentmodel.NewKnowledgeNodeModel().Insert(ctx, withCreatedAt(values)))
+	return util.ToUint64(model.Insert(ctx, withCreatedAt(values)))
 }
 
 func parseMetadataMap(metadata string) map[string]any {

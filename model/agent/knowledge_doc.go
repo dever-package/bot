@@ -25,9 +25,9 @@ type KnowledgeDoc struct {
 	IndexStageDetail string     `dorm:"type:text;not null;default:'';comment:索引阶段详情JSON"`
 	SourceType       string     `dorm:"type:varchar(32);not null;default:'upload';comment:来源类型"`
 	IndexVersion     int        `dorm:"type:int;not null;default:1;comment:索引版本"`
-	ExpiresAt        *time.Time `dorm:"type:timestamp;default:null;comment:过期时间"`
+	ExpiresAt        *time.Time `dorm:"type:timestamp;null;comment:过期时间"`
 	ReviewStatus     string     `dorm:"type:varchar(32);not null;default:'pending';comment:审核状态"`
-	ReviewedAt       *time.Time `dorm:"type:timestamp;default:null;comment:审核时间"`
+	ReviewedAt       *time.Time `dorm:"type:timestamp;null;comment:审核时间"`
 	ReviewerID       uint64     `dorm:"type:bigint;not null;default:0;comment:审核人"`
 	ErrorMessage     string     `dorm:"type:text;not null;default:'';comment:错误信息"`
 	Status           int16      `dorm:"type:smallint;not null;default:1;comment:状态"`

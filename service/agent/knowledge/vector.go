@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	maxVectorIndexNodes   = 80
+	maxVectorIndexNodes    = 80
 	maxConcurrentEmbedding = 5
 )
 
@@ -47,6 +47,7 @@ func (s Service) indexDocumentVectors(ctx context.Context, base agentmodel.Knowl
 	if len(entries) == 0 {
 		return nil
 	}
+	indexVersion := knowledgeDocIndexVersion(ctx, docID)
 	// Concurrent embedding with semaphore
 	sem := make(chan struct{}, maxConcurrentEmbedding)
 	results := make([]embeddingResult, len(entries))
@@ -86,6 +87,7 @@ func (s Service) indexDocumentVectors(ctx context.Context, base agentmodel.Knowl
 				"node_type":         strings.TrimSpace(res.node.NodeType),
 				"path":              strings.TrimSpace(res.node.Path),
 				"title":             strings.TrimSpace(res.node.Title),
+				"index_version":     indexVersion,
 				"status":            1,
 			},
 		})
@@ -96,6 +98,7 @@ func (s Service) indexDocumentVectors(ctx context.Context, base agentmodel.Knowl
 			"collection":        collection,
 			"point_id":          fmt.Sprintf("%d", pointID(res.node.ID)),
 			"content_hash":      res.node.ContentHash,
+			"index_version":     indexVersion,
 			"status":            1,
 			"error_message":     "",
 		}))
@@ -141,7 +144,7 @@ func (s Service) retrieveVectorBinding(ctx context.Context, binding agentKnowled
 		if nodeID == 0 {
 			nodeID = util.ToUint64(hit.ID)
 		}
-		node := agentmodel.NewKnowledgeNodeModel().Find(ctx, map[string]any{"id": nodeID, "status": 1})
+		node := availableKnowledgeNode(ctx, nodeID)
 		if node == nil {
 			continue
 		}
@@ -162,6 +165,8 @@ func (s Service) retrieveVectorBinding(ctx context.Context, binding agentKnowled
 			Score:    hit.Score,
 			Source:   "node_vector",
 			SortRank: node.Sort,
+			HitCount: node.HitCount,
+			Weight:   node.Weight,
 		})
 	}
 	return snippets
@@ -207,7 +212,8 @@ func shouldVectorizeNode(node *agentmodel.KnowledgeNode) bool {
 		agentmodel.KnowledgeNodeTypePage,
 		agentmodel.KnowledgeNodeTypeParagraph,
 		agentmodel.KnowledgeNodeTypeTable,
-		agentmodel.KnowledgeNodeTypeCode:
+		agentmodel.KnowledgeNodeTypeCode,
+		agentmodel.KnowledgeNodeTypeQA:
 		return true
 	default:
 		return false
@@ -237,4 +243,15 @@ func knowledgeDocTitle(ctx context.Context, docID uint64) string {
 		return ""
 	}
 	return strings.TrimSpace(doc.Title)
+}
+
+func knowledgeDocIndexVersion(ctx context.Context, docID uint64) int {
+	if docID == 0 {
+		return 1
+	}
+	doc := agentmodel.NewKnowledgeDocModel().Find(ctx, map[string]any{"id": docID})
+	if doc == nil || doc.IndexVersion <= 0 {
+		return 1
+	}
+	return doc.IndexVersion
 }

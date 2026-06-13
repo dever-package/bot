@@ -368,7 +368,13 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           setSelectedID(normalizeID(nextID))
           saveLastOpenedFileID(knowledgeBaseID, nextID)
           if (node.type === "file" && currentFile) {
-            setCurrentFile({ ...currentFile, id: nextID, name: name.trim() })
+            const renamed = findNode(buildTree(result.files || []), nextID)
+            setCurrentFile({
+              ...currentFile,
+              id: nextID,
+              name: name.trim(),
+              index_status: renamed?.index_status || currentFile.index_status,
+            })
             setDraft((value) =>
               value ? { ...value, id: nextID, name: name.trim(), dirty: value.dirty } : value,
             )
@@ -1127,7 +1133,7 @@ function IndexStatusBadge({
   compact?: boolean
 }) {
   const item = indexStatusView(status)
-  if (!item || (compact && item.status === "success")) {
+  if (!item) {
     return null
   }
   const Icon = item.icon
