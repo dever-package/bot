@@ -297,7 +297,7 @@ func knowledgeDebugSnippets(snippets []knowledgeservice.RetrievedSnippet) []map[
 			"doc_id":            snippet.DocID,
 			"node_id":           snippet.NodeID,
 			"title":             snippet.Title,
-			"path":              snippet.Path,
+			"path":              knowledgeSnippetPath(snippet),
 			"score":             snippet.Score,
 			"source":            snippet.Source,
 			"preview":           truncateText(snippet.Content, knowledgeDebugSnippetLimit),
@@ -305,6 +305,18 @@ func knowledgeDebugSnippets(snippets []knowledgeservice.RetrievedSnippet) []map[
 		result = append(result, row)
 	}
 	return result
+}
+
+func knowledgeSnippetPath(snippet knowledgeservice.RetrievedSnippet) string {
+	title := strings.Trim(strings.TrimSpace(snippet.Title), "/")
+	dirPath := strings.Trim(strings.TrimSpace(snippet.DirPath), "/")
+	if title == "" {
+		return dirPath
+	}
+	if dirPath == "" || title == dirPath || strings.HasPrefix(title, dirPath+"/") {
+		return title
+	}
+	return dirPath + "/" + title
 }
 
 func knowledgeBaseIDFromInput(input map[string]any) uint64 {

@@ -35,6 +35,26 @@ const botPlugin = {
         default: mod.ShowKnowledgeFileManager,
       })),
     ),
+    "work-login-page": lazyNode(() =>
+      import("./nodes/work/auth/login-page").then((mod) => ({
+        default: mod.WorkLoginPage,
+      })),
+    ),
+    "work-home-shell": lazyNode(() =>
+      import("./nodes/work/home/home-shell").then((mod) => ({
+        default: mod.WorkHomeShell,
+      })),
+    ),
+    "work-project-page": lazyNode(() =>
+      import("./nodes/work/project/project-page").then((mod) => ({
+        default: mod.WorkProjectPage,
+      })),
+    ),
+    "work-space-page": lazyNode(() =>
+      import("./nodes/work/space/space-page").then((mod) => ({
+        default: mod.WorkSpacePage,
+      })),
+    ),
   },
 };
 
