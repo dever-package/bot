@@ -46,6 +46,7 @@ func (Run) PostCanvasAgent(c *server.Context) error {
 		NodeKey:     textFromBody(body, "node_key", "nodeKey"),
 		NodeName:    textFromBody(body, "node_name", "nodeName", "name"),
 		AgentID:     uint64ValueFromBody(body, "agent_id", "agentId", "id"),
+		RequestID:   textFromBody(body, "request_id", "requestId"),
 		Input:       mapFromBody(body, "input"),
 	})
 	return teamJSON(c, data, err)

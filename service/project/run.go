@@ -21,6 +21,7 @@ type CanvasAgentRunRequest struct {
 	NodeKey     string
 	NodeName    string
 	AgentID     uint64
+	RequestID   string
 	Input       map[string]any
 }
 
@@ -59,9 +60,10 @@ func (s Service) RunCanvasAgent(ctx context.Context, projectID uint64, req Canva
 		return nil, fmt.Errorf("智能体不存在或未开启")
 	}
 	result, err := agentservice.NewService().RunInternal(ctx, agentservice.InternalRunRequest{
-		AgentID: req.AgentID,
-		Input:   cloneInput(req.Input),
-		Options: map[string]any{"full_runtime": false},
+		AgentID:   req.AgentID,
+		RequestID: req.RequestID,
+		Input:     cloneInput(req.Input),
+		Options:   map[string]any{"full_runtime": false},
 	})
 	if err != nil {
 		return map[string]any{

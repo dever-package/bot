@@ -116,7 +116,7 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 		return nil, fmt.Errorf("能力节点未配置能力")
 	}
 	input := mergeCanvasInput(req.Input, previousOutput, node.ComposerPrompt)
-	return s.project.RunCanvasPower(ctx, projectID, teamservice.CanvasPowerRunRequest{
+	result, err := s.project.RunCanvasPower(ctx, projectID, teamservice.CanvasPowerRunRequest{
 		FlowID:         node.FlowID,
 		AssetCateID:    firstUint64(node.AssetCateID, req.AssetCateID),
 		NodeKey:        node.ID,
@@ -129,6 +129,7 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 		Input:          input,
 		Params:         node.ParamValues,
 	})
+	return canvasNodeRunPayload(req, node, result), err
 }
 
 func (s WorkspaceService) runCanvasAgentNode(ctx context.Context, projectID uint64, req CanvasRunRequest, node canvasRunNode, previousOutput any) (map[string]any, error) {
@@ -139,26 +140,29 @@ func (s WorkspaceService) runCanvasAgentNode(ctx context.Context, projectID uint
 	if node.RoleID > 0 {
 		input["role_id"] = node.RoleID
 	}
-	return s.project.RunCanvasAgent(ctx, projectID, CanvasAgentRunRequest{
+	result, err := s.project.RunCanvasAgent(ctx, projectID, CanvasAgentRunRequest{
 		FlowID:      node.FlowID,
 		AssetCateID: firstUint64(node.AssetCateID, req.AssetCateID),
 		NodeKey:     node.ID,
 		NodeName:    node.Title,
 		AgentID:     node.AgentID,
+		RequestID:   req.RequestID,
 		Input:       input,
 	})
+	return canvasNodeRunPayload(req, node, result), err
 }
 
 func (s WorkspaceService) runCanvasFlowNode(ctx context.Context, projectID uint64, req CanvasRunRequest, node canvasRunNode, previousOutput any) (map[string]any, error) {
 	if node.FlowID == 0 {
 		return nil, fmt.Errorf("流程节点未配置流程")
 	}
-	return s.project.RunFlow(ctx, projectID, teamservice.RunRequest{
+	result, err := s.project.RunFlow(ctx, projectID, teamservice.RunRequest{
 		FlowID:    node.FlowID,
 		RequestID: req.RequestID,
 		Input:     mergeCanvasInput(req.Input, previousOutput, node.ComposerPrompt),
 		Mode:      "flow",
 	})
+	return canvasNodeRunPayload(req, node, result), err
 }
 
 func (s WorkspaceService) runCanvasFunctionNode(ctx context.Context, projectID uint64, req CanvasRunRequest, node canvasRunNode, previousOutput any) (map[string]any, error) {
@@ -190,10 +194,10 @@ func (s WorkspaceService) runCanvasFunctionNode(ctx context.Context, projectID u
 				"source_node_type":  node.Type,
 				"source_status":     "success",
 			},
-			Name:        name,
-			Kind:        firstText(node.Kind, "mixed"),
-			Role:        "content",
-			Content:     previousOutput,
+			Name:    name,
+			Kind:    firstText(node.Kind, "mixed"),
+			Role:    "content",
+			Content: previousOutput,
 		})
 		if err != nil {
 			return nil, err
@@ -390,6 +394,9 @@ func canvasAssetRunPayload(req CanvasRunRequest, node canvasRunNode) map[string]
 }
 
 func canvasNodeRunPayload(req CanvasRunRequest, node canvasRunNode, payload map[string]any) map[string]any {
+	if payload == nil {
+		payload = map[string]any{}
+	}
 	output := firstPresent(payload["output"], valueAtPath(payload, "result", "output"), valueAtPath(payload, "asset", "version", "content"), payload)
 	status := canvasRunStatus(payload)
 	result := map[string]any{
@@ -472,7 +479,7 @@ func canvasRunPlan(nodes []canvasRunNode, edges []canvasRunEdge) map[string]any 
 }
 
 func canvasRunStatus(payload map[string]any) string {
-	status := strings.TrimSpace(fmt.Sprint(payload["status"]))
+	status := textValue(payload["status"])
 	if status == "" {
 		return "success"
 	}
@@ -497,11 +504,18 @@ func mapValue(raw any) map[string]any {
 }
 
 func sliceValue(raw any) []any {
-	items, ok := raw.([]any)
-	if !ok || items == nil {
+	switch items := raw.(type) {
+	case []any:
+		return items
+	case []map[string]any:
+		result := make([]any, 0, len(items))
+		for _, item := range items {
+			result = append(result, item)
+		}
+		return result
+	default:
 		return nil
 	}
-	return items
 }
 
 func textValue(raw any) string {
