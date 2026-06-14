@@ -1423,7 +1423,7 @@ export function WorkSpacePage() {
         cates={cates}
         activeCate={activeCate}
         hasAssetCates={hasAssetCates}
-        onBack={() => navigate({ to: "/bot/body/work" })}
+        onBack={() => navigate({ to: "/bot/work" })}
         onSelectCate={switchCate}
         onRefresh={loadSpace}
         theme={theme}

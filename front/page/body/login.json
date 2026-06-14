@@ -9,7 +9,7 @@
   "nodes": {
     "__root__": [
       {
-        "type": "work-login-page"
+        "type": "bot-body-work-login-page"
       }
     ]
   },

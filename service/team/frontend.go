@@ -339,6 +339,8 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		RunID:       run.ID,
 		NodeRunID:   nodeRunID,
 		ReleaseID:   releaseID,
+		RequestID:   requestID,
+		NodeKey:     nodeKey,
 		Name:        nodeName,
 		Kind:        power.Kind,
 		Role:        "material",

@@ -50,6 +50,15 @@ type TeamItem = {
   can_create?: boolean;
 };
 
+const freeCanvasTeam: TeamItem = {
+  id: 0,
+  name: "自由画布",
+  description: "不绑定团队流程和资产类型，自由添加节点创作。",
+  release_id: 0,
+  version: 0,
+  can_create: true,
+};
+
 type CreateProjectPayload = {
   name: string;
   teamID: number;
@@ -73,7 +82,7 @@ export function WorkProjectPage() {
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
 
   const availableTeams = useMemo(
-    () => teams.filter((team) => team.id > 0 && team.can_create !== false),
+    () => createTeamOptions(teams),
     [teams],
   );
 
@@ -309,7 +318,7 @@ function ProjectCard({
       className="hb-project-card"
       onClick={() =>
         navigate({
-          to: "/bot/body/work/space",
+          to: "/bot/work/space",
           search: { project_id: String(project.id) },
         })
       }
@@ -320,7 +329,7 @@ function ProjectCard({
       >
         {project.cover ? null : <DocumentMark />}
         <span className="hb-card-badge">
-          {(!project.team?.name || project.team.name.toLowerCase() === "workflow") ? "团队名称" : project.team.name}
+          {projectTeamLabel(project)}
         </span>
       </div>
 
@@ -358,13 +367,13 @@ function CreateProjectModal({
   onCreated: () => Promise<void>;
 }) {
   const [name, setName] = useState(initialName.trim());
-  const [teamID, setTeamID] = useState(() => String(teams[0]?.id || ""));
+  const [teamID, setTeamID] = useState(() => String(teams[0]?.id ?? 0));
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   useEffect(() => {
-    if (!teamID && teams[0]?.id) {
+    if (!teamID && teams.length > 0) {
       setTeamID(String(teams[0].id));
     }
   }, [teamID, teams]);
@@ -443,14 +452,9 @@ function CreateProjectModal({
                 type="button"
                 className="hb-custom-select-trigger"
                 onClick={() => setDropdownOpen(!dropdownOpen)}
-                disabled={teams.length === 0}
               >
                 <span>
-                  {teams.length === 0
-                    ? "暂无已发布类型"
-                    : selectedTeam
-                      ? teamDisplayName(selectedTeam)
-                      : "选择类型"}
+                  {selectedTeam ? teamDisplayName(selectedTeam) : "自由画布"}
                 </span>
                 <ChevronDown size={16} className={`hb-select-arrow ${dropdownOpen ? 'is-open' : ''}`} />
               </button>
@@ -493,7 +497,7 @@ function CreateProjectModal({
           <button
             type="submit"
             className="hb-primary-button"
-            disabled={submitting || teams.length === 0}
+            disabled={submitting}
           >
             {submitting ? <Loader2 size={16} className="hb-spin" /> : null}
             创建作品
@@ -1435,7 +1439,23 @@ function toTeamItems(value: any): TeamItem[] {
   }));
 }
 
+function createTeamOptions(teams: TeamItem[]) {
+  const releasedTeams = teams.filter((team) => team.id > 0 && team.can_create !== false);
+  return [freeCanvasTeam, ...releasedTeams];
+}
+
+function projectTeamLabel(project: ProjectItem) {
+  const name = project.team?.name?.trim();
+  if (!project.team_id || !name || name.toLowerCase() === "workflow") {
+    return "自由画布";
+  }
+  return name;
+}
+
 function teamDisplayName(team: TeamItem) {
+  if (team.id === 0) {
+    return "自由画布";
+  }
   return team.name.trim() || "未命名团队";
 }
 

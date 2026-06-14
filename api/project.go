@@ -84,6 +84,9 @@ func (Project) PostSaveAsset(c *server.Context) error {
 			RunID:       uint64ValueFromBody(body, "run_id", "runId"),
 			NodeRunID:   uint64ValueFromBody(body, "node_run_id", "nodeRunId"),
 			ReleaseID:   uint64ValueFromBody(body, "release_id", "releaseId"),
+			RequestID:   textFromBody(body, "request_id", "requestId"),
+			NodeKey:     textFromBody(body, "node_key", "nodeKey"),
+			Source:      sourceFromBody(body),
 			Name:        textFromBody(body, "name"),
 			Kind:        textFromBody(body, "kind", "type"),
 			Role:        textFromBody(body, "role"),
@@ -161,4 +164,28 @@ func queryText(c *server.Context, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func sourceFromBody(body map[string]any) map[string]any {
+	source := map[string]any{}
+	for _, key := range []string{
+		"source_key",
+		"source_run_id",
+		"source_node_run_id",
+		"source_asset_id",
+		"source_version_id",
+		"source_release_id",
+		"source_request_id",
+		"source_node_key",
+		"source_node_type",
+		"source_status",
+	} {
+		if value, ok := body[key]; ok && value != nil {
+			source[key] = value
+		}
+	}
+	if len(source) == 0 {
+		return nil
+	}
+	return source
 }

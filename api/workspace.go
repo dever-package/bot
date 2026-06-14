@@ -28,3 +28,22 @@ func (Workspace) PostCanvas(c *server.Context) error {
 	)
 	return teamJSON(c, data, err)
 }
+
+func (Workspace) PostCanvasRun(c *server.Context) error {
+	body, err := bindTeamBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := workspaceRunner.RunCanvas(
+		c.Context(),
+		projectservice.CanvasRunRequest{
+			ProjectID:   uint64ValueFromBody(body, "project_id", "projectId"),
+			AssetCateID: uint64ValueFromBody(body, "asset_cate_id", "assetCateId"),
+			StartNodeID: textFromBody(body, "start_node_id", "startNodeId", "node_id", "nodeId"),
+			RequestID:   textFromBody(body, "request_id", "requestId"),
+			Canvas:      mapFromBody(body, "canvas"),
+			Input:       mapFromBody(body, "input"),
+		},
+	)
+	return teamJSON(c, data, err)
+}

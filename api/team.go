@@ -7,6 +7,7 @@ import (
 
 	teamservice "my/package/bot/service/team"
 	frontstream "my/package/front/service/stream"
+	userservice "my/package/user/service"
 )
 
 type Team struct{}
@@ -248,11 +249,15 @@ func bindTeamBody(c *server.Context) (map[string]any, error) {
 
 func teamJSON(c *server.Context, data any, err error) error {
 	if err != nil {
-		return c.JSONPayload(200, map[string]any{
+		payload := map[string]any{
 			"status": 2,
 			"data":   map[string]any{},
 			"msg":    err.Error(),
-		})
+		}
+		if userservice.IsAuthRequired(err) {
+			payload["code"] = 401
+		}
+		return c.JSONPayload(200, payload)
 	}
 	return c.JSONPayload(200, map[string]any{
 		"status": 1,

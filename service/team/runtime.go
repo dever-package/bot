@@ -733,6 +733,7 @@ func (s Service) saveFinalRunAsset(ctx context.Context, runID uint64, output map
 		AssetCateID: assetCateID,
 		RunID:       run.ID,
 		ReleaseID:   run.ReleaseID,
+		RequestID:   run.RequestID,
 		Name:        name,
 		Kind:        finalAssetKind(output),
 		Role:        "content",

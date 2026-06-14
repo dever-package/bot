@@ -36,6 +36,9 @@ type SaveAssetRequest struct {
 	RunID       uint64
 	NodeRunID   uint64
 	ReleaseID   uint64
+	RequestID   string
+	NodeKey     string
+	Source      map[string]any
 	Name        string
 	Kind        string
 	Role        string
@@ -194,6 +197,9 @@ func (s Service) SaveAsset(ctx context.Context, projectID uint64, req SaveAssetR
 		RunID:       req.RunID,
 		NodeRunID:   req.NodeRunID,
 		ReleaseID:   firstUint64(req.ReleaseID, project.ReleaseID),
+		RequestID:   req.RequestID,
+		NodeKey:     req.NodeKey,
+		Source:      req.Source,
 		Name:        req.Name,
 		Kind:        req.Kind,
 		Role:        req.Role,

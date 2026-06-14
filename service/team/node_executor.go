@@ -1170,6 +1170,8 @@ func (s Service) runSaveNode(ctx context.Context, run teammodel.Run, flowRun tea
 		RunID:       run.ID,
 		NodeRunID:   nodeRunID,
 		ReleaseID:   run.ReleaseID,
+		RequestID:   run.RequestID,
+		NodeKey:     node.NodeKey,
 		Name:        assetName,
 		Kind:        firstText(valueAtPath(body, "kind"), "mixed"),
 		Role:        "content",

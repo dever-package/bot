@@ -21,6 +21,9 @@ type SaveVersionRequest struct {
 	RunID       uint64
 	NodeRunID   uint64
 	ReleaseID   uint64
+	RequestID   string
+	NodeKey     string
+	Source      map[string]any
 	Name        string
 	Kind        string
 	Role        string
@@ -291,6 +294,9 @@ func VersionToMap(row assetmodel.Version) map[string]any {
 		"run_id":      row.RunID,
 		"node_run_id": row.NodeRunID,
 		"release_id":  row.ReleaseID,
+		"request_id":  strings.TrimSpace(row.RequestID),
+		"node_key":    strings.TrimSpace(row.NodeKey),
+		"source":      jsonValue(row.Source),
 		"version":     row.Version,
 		"content":     jsonValue(row.Content),
 		"created_at":  row.CreatedAt,
@@ -419,6 +425,9 @@ func insertAssetVersionWithRetry(ctx context.Context, assetID uint64, req SaveVe
 			"run_id":      req.RunID,
 			"node_run_id": req.NodeRunID,
 			"release_id":  req.ReleaseID,
+			"request_id":  strings.TrimSpace(req.RequestID),
+			"node_key":    strings.TrimSpace(req.NodeKey),
+			"source":      jsonText(req.Source),
 			"version":     nextVersion(ctx, assetID),
 			"content":     jsonText(EnsureDocument(req.Content, req.Kind)),
 			"created_at":  now,

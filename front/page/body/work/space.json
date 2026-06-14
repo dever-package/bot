@@ -9,7 +9,7 @@
   "nodes": {
     "__root__": [
       {
-        "type": "work-space-page"
+        "type": "bot-body-work-space-page"
       }
     ]
   },

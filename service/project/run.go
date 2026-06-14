@@ -86,6 +86,8 @@ func (s Service) RunCanvasAgent(ctx context.Context, projectID uint64, req Canva
 		FlowID:      req.FlowID,
 		AssetCateID: req.AssetCateID,
 		RunID:       result.RunID,
+		RequestID:   result.RequestID,
+		NodeKey:     req.NodeKey,
 		Name:        nodeName,
 		Kind:        "text",
 		Content:     result.Output,

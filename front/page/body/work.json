@@ -18,7 +18,7 @@
   "nodes": {
     "content": [
       {
-        "type": "work-home-shell",
+        "type": "bot-body-work-home-shell",
         "value": "project"
       }
     ]
