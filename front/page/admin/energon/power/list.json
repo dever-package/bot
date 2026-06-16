@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "能力",
     "icon": "zap",
     "parent": "bot-energon",
     "sort": 3

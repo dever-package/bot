@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { joinSiteApi, request, useNavigate } from "@dever/front-plugin";
+import { isSuccessResponse } from "../shared/api-response";
 
 type ProjectItem = {
   id: number;
@@ -401,8 +402,8 @@ function CreateProjectModal({
         teamID: selectedTeam.id,
         releaseID: selectedTeam.release_id,
       });
-      if (result.code !== 0) {
-        setMessage(result.message || "创建作品失败");
+      if (!isSuccessResponse(result)) {
+        setMessage(result.message || result.msg || "创建作品失败");
         return;
       }
       toast.success("作品已创建");
@@ -1465,10 +1466,6 @@ function createProject(payload: CreateProjectPayload) {
     team_id: payload.teamID,
     release_id: payload.releaseID || 0,
   });
-}
-
-function isSuccessResponse(result: any) {
-  return result?.status === 1 || result?.code === 0;
 }
 
 function formatTime(value?: string) {

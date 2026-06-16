@@ -330,6 +330,17 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		}, err
 	}
 
+	if !req.PersistResult {
+		return map[string]any{
+			"run_id":      run.ID,
+			"request_id":  requestID,
+			"flow_run_id": flowRunID,
+			"node_run_id": nodeRunID,
+			"status":      status,
+			"output":      output,
+		}, nil
+	}
+
 	asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
 		ProjectID:   req.ProjectID,
 		BodyID:      req.BodyID,

@@ -73,6 +73,7 @@
   },
   "data": {
     "form": {
+      "id": 0,
       "pack_id": "",
       "setting_id": "",
       "status": 1,

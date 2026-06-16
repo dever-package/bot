@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "参数",
     "icon": "sliders-horizontal",
     "parent": "bot-energon",
     "sort": 2

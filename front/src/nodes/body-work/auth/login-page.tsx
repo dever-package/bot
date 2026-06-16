@@ -13,8 +13,8 @@ import {
   resolvePostLoginTarget,
   useAuthStore,
   useNavigate,
-  useSearch,
 } from "@dever/front-plugin";
+import { isSuccessResponse } from "../shared/api-response";
 
 type AuthMode = "login" | "register";
 type AuthPayload = {
@@ -26,7 +26,7 @@ type AuthPayload = {
 export function WorkLoginPage() {
   const site = getSiteConfig();
   const navigate = useNavigate();
-  const { redirect } = useSearch({ from: "/(auth)/sign-in" });
+  const redirect = readRedirectParam();
   const { auth } = useAuthStore();
   const [mode, setMode] = useState<AuthMode>("login");
   const [account, setAccount] = useState("");
@@ -213,10 +213,6 @@ export function WorkLoginPage() {
   );
 }
 
-function isSuccessResponse(result: any) {
-  return result?.status === 1 || result?.code === 0;
-}
-
 function AuthField({
   label,
   children,
@@ -259,4 +255,11 @@ function buildAuthPayload(
         : {}),
     },
   };
+}
+
+function readRedirectParam() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return new URLSearchParams(window.location.search).get("redirect") || "";
 }

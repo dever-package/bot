@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "调用日志",
     "icon": "list-checks",
     "parent": "bot-energon",
     "sort": 4

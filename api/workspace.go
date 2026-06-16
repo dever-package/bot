@@ -29,7 +29,7 @@ func (Workspace) PostCanvas(c *server.Context) error {
 	return teamJSON(c, data, err)
 }
 
-func (Workspace) PostCanvasRun(c *server.Context) error {
+func (Workspace) PostCanvasExecute(c *server.Context) error {
 	body, err := bindTeamBody(c)
 	if err != nil {
 		return c.Error(err)
@@ -41,9 +41,42 @@ func (Workspace) PostCanvasRun(c *server.Context) error {
 			AssetCateID: uint64ValueFromBody(body, "asset_cate_id", "assetCateId"),
 			StartNodeID: textFromBody(body, "start_node_id", "startNodeId", "node_id", "nodeId"),
 			RequestID:   textFromBody(body, "request_id", "requestId"),
+			SingleNode:  boolFromBody(body, "single_node", "singleNode"),
 			Canvas:      mapFromBody(body, "canvas"),
 			Input:       mapFromBody(body, "input"),
 		},
+	)
+	return teamJSON(c, data, err)
+}
+
+func (Workspace) GetCanvasExecutionList(c *server.Context) error {
+	data, err := workspaceRunner.CanvasExecutionList(c.Context(), projectservice.CanvasExecutionQuery{
+		ProjectID:   queryUint64(c, "project_id", "projectId"),
+		AssetCateID: queryUint64(c, "asset_cate_id", "assetCateId"),
+		Status:      queryText(c, "status"),
+		Limit:       queryInt(c, "limit"),
+	})
+	return teamJSON(c, data, err)
+}
+
+func (Workspace) GetCanvasExecution(c *server.Context) error {
+	data, err := workspaceRunner.CanvasExecution(
+		c.Context(),
+		queryUint64(c, "project_id", "projectId"),
+		queryUint64(c, "execution_id", "executionId", "id"),
+		queryUint64(c, "run_id", "runId"),
+		queryText(c, "request_id", "requestId"),
+	)
+	return teamJSON(c, data, err)
+}
+
+func (Workspace) GetCanvasNodeResults(c *server.Context) error {
+	data, err := workspaceRunner.CanvasNodeResults(
+		c.Context(),
+		queryUint64(c, "project_id", "projectId"),
+		queryUint64(c, "execution_id", "executionId", "id"),
+		queryUint64(c, "run_id", "runId"),
+		queryText(c, "request_id", "requestId"),
 	)
 	return teamJSON(c, data, err)
 }

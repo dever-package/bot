@@ -6,6 +6,7 @@ import {
   normalizeSpaceBootstrap,
 } from "./space-model";
 import { persistedCanvasState } from "./space-canvas-state";
+import { isSuccessResponse } from "../shared/api-response";
 import type {
   CanvasResultSourceRef,
   PowerForm,
@@ -14,7 +15,6 @@ import type {
   ProjectAsset,
   SpaceBootstrap,
   SpaceCanvasState,
-  SpaceCanvasNode,
 } from "./types";
 
 export async function fetchSpaceBootstrap(
@@ -90,117 +90,16 @@ export async function runSpaceCanvas(input: {
   canvas: SpaceCanvasState;
   runInput?: Record<string, unknown>;
 }) {
-  if (input.singleNode) {
-    return runSingleCanvasNode(input);
-  }
-  const result = await request(joinSiteApi("workspace/canvas_run"), "post", {
+  const result = await request(joinSiteApi("workspace/canvas_execute"), "post", {
     project_id: input.projectId,
     asset_cate_id: input.assetCateId,
     start_node_id: input.startNodeId,
     request_id: input.requestId || "",
+    single_node: Boolean(input.singleNode),
     canvas: persistedCanvasState(input.canvas),
     input: input.runInput || {},
   });
   return normalizeRunResponse(result, "画布运行失败");
-}
-
-async function runSingleCanvasNode(input: {
-  projectId: number;
-  assetCateId: number;
-  startNodeId: string;
-  requestId?: string;
-  canvas: SpaceCanvasState;
-  runInput?: Record<string, unknown>;
-}) {
-  const node = input.canvas.nodes.find((item) => item.id === input.startNodeId);
-  if (!node) {
-    throw new Error("运行节点不存在");
-  }
-  if (node.type === "asset") {
-    return singleNodeRunRef(input, node, {
-      status: "success",
-      output: node.asset?.version?.content || node.resultOutput || node.asset,
-      asset: node.asset,
-      result: { output: node.asset?.version?.content || node.asset },
-    });
-  }
-  if (node.type === "power") {
-    if (!node.power?.id && !node.power?.key) {
-      throw new Error("能力节点未配置能力");
-    }
-    const draft = node.composerDraft as any;
-    const prompt = String(draft?.prompt || "");
-    const result = await request(joinSiteApi("run/canvas_power"), "post", {
-      project_id: input.projectId,
-      flow_id: Number(node.flow?.id || 0),
-      asset_cate_id: input.assetCateId,
-      node_key: node.id,
-      node_name: node.title,
-      kind: node.kind || node.power?.kind || "",
-      power_id: Number(node.power?.id || 0),
-      power_key: node.power?.key || "",
-      source_target_id: Number(draft?.selectedTargetId || 0),
-      request_id: input.requestId || "",
-      input: {
-        ...(input.runInput || {}),
-        prompt,
-        text: prompt,
-      },
-      params: draft?.paramValues || {},
-    });
-    return singleNodeRunRef(
-      input,
-      node,
-      normalizeRunResponse(result, "能力节点执行失败"),
-    );
-  }
-  if (node.type === "agent") {
-    if (!node.role?.agent_id) {
-      throw new Error("智能体节点未配置智能体");
-    }
-    const draft = node.composerDraft as any;
-    const prompt = String(draft?.prompt || "");
-    const result = await request(joinSiteApi("run/canvas_agent"), "post", {
-      project_id: input.projectId,
-      flow_id: Number(node.flow?.id || 0),
-      asset_cate_id: input.assetCateId,
-      node_key: node.id,
-      node_name: node.title,
-      agent_id: node.role.agent_id,
-      request_id: input.requestId || "",
-      input: {
-        ...(input.runInput || {}),
-        prompt,
-        text: prompt,
-        role_id: node.role.id,
-      },
-    });
-    return singleNodeRunRef(
-      input,
-      node,
-      normalizeRunResponse(result, "智能体节点执行失败"),
-    );
-  }
-  if (node.type === "flow") {
-    if (!node.flow?.id) {
-      throw new Error("流程节点未配置流程");
-    }
-    const result = await request(joinSiteApi("run/flow"), "post", {
-      project_id: input.projectId,
-      flow_id: node.flow.id,
-      request_id: input.requestId || "",
-      input: {
-        ...(input.runInput || {}),
-        prompt: String((node.composerDraft as any)?.prompt || ""),
-      },
-    });
-    return singleNodeRunRef(
-      input,
-      node,
-      normalizeRunResponse(result, "流程节点执行失败"),
-    );
-  }
-  throw new Error("当前节点请在画布本地执行");
 }
 
 function normalizeRunResponse(result: any, fallbackMessage: string) {
@@ -210,67 +109,6 @@ function normalizeRunResponse(result: any, fallbackMessage: string) {
   return (
     result?.data && typeof result.data === "object" ? result.data : {}
   ) as Record<string, any>;
-}
-
-function singleNodeRunRef(
-  input: {
-    requestId?: string;
-    startNodeId: string;
-  },
-  node: SpaceCanvasNode,
-  payload: Record<string, any>,
-) {
-  const output = firstDefined(
-    payload.output,
-    payload.result?.output,
-    payload.asset?.version?.content,
-    payload,
-  );
-  const status = String(payload.status || "success");
-  const nodeStatus =
-    status === "fail" ||
-    status === "running" ||
-    status === "pending" ||
-    status === "waiting"
-      ? status
-      : "success";
-  return {
-    run_id: Number(payload.run_id || 0),
-    request_id: String(payload.request_id || input.requestId || ""),
-    flow_run_id: Number(payload.flow_run_id || 0),
-    release_id: Number(payload.release_id || payload.version?.release_id || 0),
-    status,
-    executed: 1,
-    output: payload,
-    node_results: [
-      {
-        node_key: input.startNodeId,
-        node_type: node.type,
-        node_run_id: Number(
-          payload.node_run_id || payload.version?.node_run_id || 0,
-        ),
-        status: nodeStatus,
-        output,
-        asset: payload.asset,
-        version: payload.version || payload.asset?.version,
-        result: {
-          ...payload,
-          output,
-        },
-        persists_result: Boolean(payload.asset || payload.version),
-        agent_run_id: Number(payload.agent_run_id || 0),
-      },
-    ],
-  };
-}
-
-function firstDefined(...values: unknown[]) {
-  for (const value of values) {
-    if (value !== undefined && value !== null) {
-      return value;
-    }
-  }
-  return undefined;
 }
 
 export async function fetchSpaceCanvasResults(input: {
@@ -298,12 +136,21 @@ export async function fetchSpaceCanvasResults(input: {
   };
 }
 
-export async function recoverSpaceCanvasRuns(projectId: number) {
-  void projectId;
-  return { count: 0 };
+export async function fetchSpaceCanvasExecutions(projectId: number) {
+  const result = await request(joinSiteApi("workspace/canvas_execution_list"), "get", {
+    project_id: projectId,
+  });
+  if (!isSuccessResponse(result)) {
+    throw new Error(result.message || result.msg || "读取画布运行记录失败");
+  }
+  const data = result.data || {};
+  return {
+    count: Number(data.count || 0),
+    items: Array.isArray(data.items) ? data.items : [],
+  };
 }
 
-export async function resumeSpaceCanvas(input: {
+export async function submitSpaceCanvasFeedback(input: {
   projectId: number;
   runId: number;
   requestId: string;
@@ -319,7 +166,7 @@ export async function resumeSpaceCanvas(input: {
     request_id: input.requestId,
     node_key: input.nodeKey,
     approval_id: input.approvalId || 0,
-    feedback: input.feedback || {},
+    data: input.feedback || {},
     decision: input.decision || "approved",
     comment: input.comment || "",
   });
@@ -519,7 +366,7 @@ export async function saveSpaceCanvas(
     base_revision: canvas.updatedAt || "",
     canvas: persistedCanvasState(canvas),
   });
-  if (result.code !== 0 && result.status !== 1) {
+  if (!isSuccessResponse(result)) {
     throw new Error(result.message || result.msg || "保存画布失败");
   }
   return normalizeCanvasState(
@@ -597,8 +444,4 @@ function normalizePowerForm(value: any): PowerForm {
     source_rule: Number(data.source_rule || 0),
     primary_param_key: String(data.primary_param_key || ""),
   };
-}
-
-function isSuccessResponse(result: any) {
-  return result?.code === 0 || result?.status === 1;
 }

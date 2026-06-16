@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "服务编辑",
     "parent": "bot/energon/service/list",
     "sort": 10
   },

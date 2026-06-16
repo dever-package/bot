@@ -199,7 +199,7 @@
                       "click": [
                         {
                           "type": "data",
-                          "key": "actionTarget.id",
+                          "key": "actionTarget.editBaseId",
                           "value": "$row.id"
                         },
                         {
@@ -280,7 +280,7 @@
             "confirmText": "保存"
           },
           "pageRouteQuery": {
-            "id": "data.actionTarget.id"
+            "id": "data.actionTarget.editBaseId"
           }
         }
       },
@@ -319,6 +319,7 @@
     },
     "actionTarget": {
       "id": "",
+      "editBaseId": "",
       "deleteBase": {}
     }
   },

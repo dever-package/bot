@@ -179,6 +179,7 @@ func (Team) PostRunCanvasPower(c *server.Context) error {
 		SourceTargetID: uint64ValueFromBody(body, "source_target_id", "sourceTargetId", "power_target_id", "powerTargetId"),
 		Input:          mapFromBody(body, "input"),
 		Params:         mapFromBody(body, "params"),
+		PersistResult:  true,
 	})
 	return teamJSON(c, data, err)
 }

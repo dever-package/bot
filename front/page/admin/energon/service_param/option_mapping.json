@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "参数选项映射",
     "parent": "bot/energon/service_param/list",
     "type": 2,
     "sort": 12

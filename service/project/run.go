@@ -16,13 +16,14 @@ import (
 )
 
 type CanvasAgentRunRequest struct {
-	FlowID      uint64
-	AssetCateID uint64
-	NodeKey     string
-	NodeName    string
-	AgentID     uint64
-	RequestID   string
-	Input       map[string]any
+	FlowID        uint64
+	AssetCateID   uint64
+	NodeKey       string
+	NodeName      string
+	AgentID       uint64
+	RequestID     string
+	Input         map[string]any
+	PersistResult bool
 }
 
 func (s Service) RunCanvasPower(ctx context.Context, projectID uint64, req teamservice.CanvasPowerRunRequest) (map[string]any, error) {
@@ -81,6 +82,15 @@ func (s Service) RunCanvasAgent(ctx context.Context, projectID uint64, req Canva
 	if nodeName == "" {
 		nodeName = "智能体运行结果"
 	}
+	if !req.PersistResult {
+		return map[string]any{
+			"run_id":     result.RunID,
+			"request_id": result.RequestID,
+			"status":     "success",
+			"output":     result.Output,
+		}, nil
+	}
+
 	asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
 		ProjectID:   project.ID,
 		BodyID:      project.BodyID,
@@ -167,6 +177,13 @@ func (s Service) RunStatus(ctx context.Context, projectID uint64, runID uint64, 
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
+	workspace := NewWorkspaceService()
+	if run := workspace.SyncCanvasRunProgress(ctx, projectID, runID, requestID); run != nil {
+		if execution := workspaceExecutionByRunID(ctx, run.ID); execution != nil {
+			return workspaceExecutionPayload(ctx, execution), nil
+		}
+		return workspace.workspaceRunPayload(ctx, projectID, run), nil
+	}
 	return s.team.ProjectRunStatus(ctx, projectID, runID, requestID)
 }
 
@@ -174,6 +191,7 @@ func (s Service) ReadStream(ctx context.Context, projectID uint64, requestID str
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
+	NewWorkspaceService().SyncCanvasRunProgress(ctx, projectID, 0, requestID)
 	return s.team.ReadProjectStream(ctx, projectID, requestID, lastID, count, block)
 }
 
@@ -188,7 +206,12 @@ func (s Service) SubmitApproval(ctx context.Context, projectID uint64, approvalI
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	return s.team.SubmitProjectApproval(ctx, projectID, approvalID, decision, comment, data)
+	result, err := s.team.SubmitProjectApproval(ctx, projectID, approvalID, decision, comment, data)
+	if err != nil {
+		return nil, err
+	}
+	go NewWorkspaceService().watchWorkspaceApproval(detachedWorkspaceContext(ctx), projectID, approvalID)
+	return result, nil
 }
 
 func (s Service) resolveRunTeam(ctx context.Context, project *projectmodel.Project, teamID uint64, releaseID uint64) (uint64, uint64, error) {

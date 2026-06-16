@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "日志详情",
     "parent": "bot/energon/log/list",
     "type": 2,
     "sort": 10

@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "参数编辑",
     "parent": "bot/energon/param/list",
     "sort": 10
   },

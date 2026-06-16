@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "能力编辑",
     "parent": "bot/energon/power/list",
     "sort": 10
   },

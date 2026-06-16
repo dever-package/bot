@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "服务接口编辑",
     "parent": "bot/energon/service_endpoint/list",
     "type": 2,
     "sort": 11

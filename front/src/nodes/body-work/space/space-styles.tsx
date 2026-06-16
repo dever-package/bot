@@ -531,6 +531,104 @@ export function WorkSpaceStyles() {
         pointer-events: auto;
       }
 
+      .ws-run-banner {
+        position: absolute;
+        top: 76px;
+        left: 50%;
+        z-index: 19;
+        display: flex;
+        width: min(560px, calc(100vw - 48px));
+        transform: translateX(-50%);
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        border: 1px solid var(--ws-border);
+        border-radius: 14px;
+        background: var(--ws-panel);
+        box-shadow: 0 14px 34px rgba(15, 23, 42, 0.1);
+        padding: 10px 12px;
+        backdrop-filter: blur(18px);
+      }
+
+      .ws-run-banner-copy {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .ws-run-banner-copy > div {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .ws-run-banner-copy strong,
+      .ws-run-banner-copy span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .ws-run-banner-copy strong {
+        color: var(--ws-text);
+        font-size: 13px;
+        font-weight: 720;
+      }
+
+      .ws-run-banner-copy span {
+        color: var(--ws-muted);
+        font-size: 12px;
+        font-weight: 560;
+      }
+
+      .ws-run-banner-dot {
+        width: 9px;
+        height: 9px;
+        flex: 0 0 auto;
+        border-radius: 9999px;
+        background: var(--ws-green);
+        box-shadow: 0 0 0 4px rgba(35,240,165,0.12);
+      }
+
+      .ws-run-banner-dot.is-waiting {
+        background: #f59e0b;
+        box-shadow: 0 0 0 4px rgba(245,158,11,0.16);
+      }
+
+      .ws-run-banner-actions {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .ws-run-banner-actions button {
+        display: inline-flex;
+        height: 30px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--ws-border);
+        border-radius: 9999px;
+        background: rgba(255,255,255,0.52);
+        color: var(--ws-text);
+        padding: 0 12px;
+        font-size: 12px;
+        font-weight: 650;
+        cursor: pointer;
+      }
+
+      .ws-run-banner-actions button.is-primary {
+        border-color: rgba(35,240,165,0.48);
+        background: rgba(35,240,165,0.16);
+        color: var(--ws-text);
+      }
+
+      .ws-page.is-dark .ws-run-banner-actions button {
+        background: rgba(255,255,255,0.05);
+      }
+
       .ws-project-head {
         display: flex;
         min-width: 180px;

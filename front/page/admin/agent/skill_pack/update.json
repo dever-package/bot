@@ -85,6 +85,7 @@
   },
   "data": {
     "form": {
+      "id": 0,
       "name": "",
       "description": "",
       "items": [],

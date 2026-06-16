@@ -14,6 +14,7 @@ export function buildNodeResultRef(result: any): CanvasResultRef | undefined {
   const asset = result?.asset || result?.data?.asset;
   const version = result?.version || asset?.version || result?.data?.version;
   const ref: CanvasResultRef = {};
+  assignResultRefNumber(ref, "execution_id", result?.execution_id);
   assignResultRefNumber(ref, "run_id", result?.run_id || version?.run_id);
   assignResultRefText(ref, "request_id", result?.request_id);
   assignResultRefNumber(ref, "flow_run_id", result?.flow_run_id);

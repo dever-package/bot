@@ -57,6 +57,7 @@
   },
   "data": {
     "form": {
+      "id": 0,
       "name": "",
       "config": "{}",
       "status": 1

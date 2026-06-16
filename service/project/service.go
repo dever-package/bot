@@ -188,55 +188,68 @@ func (s Service) SaveAsset(ctx context.Context, projectID uint64, req SaveAssetR
 	if err != nil {
 		return nil, err
 	}
-	asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
-		ProjectID:   project.ID,
-		BodyID:      project.BodyID,
-		TeamID:      project.TeamID,
-		FlowID:      req.FlowID,
-		AssetCateID: req.AssetCateID,
-		RunID:       req.RunID,
-		NodeRunID:   req.NodeRunID,
-		ReleaseID:   firstUint64(req.ReleaseID, project.ReleaseID),
-		RequestID:   req.RequestID,
-		NodeKey:     req.NodeKey,
-		Source:      req.Source,
-		Name:        req.Name,
-		Kind:        req.Kind,
-		Role:        req.Role,
-		Content:     req.Content,
+	return withWorkspaceAssetLock(ctx, project.ID, []string{
+		"save",
+		req.RequestID,
+		req.NodeKey,
+		req.Name,
+		req.Role,
+		fmt.Sprintf("%d", req.AssetCateID),
+	}, func() (map[string]any, error) {
+		asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
+			ProjectID:   project.ID,
+			BodyID:      project.BodyID,
+			TeamID:      project.TeamID,
+			FlowID:      req.FlowID,
+			AssetCateID: req.AssetCateID,
+			RunID:       req.RunID,
+			NodeRunID:   req.NodeRunID,
+			ReleaseID:   firstUint64(req.ReleaseID, project.ReleaseID),
+			RequestID:   req.RequestID,
+			NodeKey:     req.NodeKey,
+			Source:      req.Source,
+			Name:        req.Name,
+			Kind:        req.Kind,
+			Role:        req.Role,
+			Content:     req.Content,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"asset": s.asset.AssetDetailMap(ctx, *asset, version),
+		}, nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{
-		"asset": s.asset.AssetDetailMap(ctx, *asset, version),
-	}, nil
 }
 
 func (s Service) UpdateAssetVersion(ctx context.Context, projectID uint64, req UpdateAssetVersionRequest) (map[string]any, error) {
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	asset, version, err := s.asset.UpdateVersionContent(ctx, projectID, req.AssetID, req.VersionID, req.Content)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{
-		"asset": s.asset.AssetDetailMap(ctx, *asset, version),
-	}, nil
+	return withWorkspaceAssetLock(ctx, projectID, []string{"update", fmt.Sprintf("%d", req.AssetID), fmt.Sprintf("%d", req.VersionID)}, func() (map[string]any, error) {
+		asset, version, err := s.asset.UpdateVersionContent(ctx, projectID, req.AssetID, req.VersionID, req.Content)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"asset": s.asset.AssetDetailMap(ctx, *asset, version),
+		}, nil
+	})
 }
 
 func (s Service) UseAssetVersion(ctx context.Context, projectID uint64, assetID uint64, versionID uint64) (map[string]any, error) {
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	asset, version, err := s.asset.UseVersion(ctx, projectID, assetID, versionID)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{
-		"asset": s.asset.AssetDetailMap(ctx, *asset, version),
-	}, nil
+	return withWorkspaceAssetLock(ctx, projectID, []string{"use", fmt.Sprintf("%d", assetID), fmt.Sprintf("%d", versionID)}, func() (map[string]any, error) {
+		asset, version, err := s.asset.UseVersion(ctx, projectID, assetID, versionID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"asset": s.asset.AssetDetailMap(ctx, *asset, version),
+		}, nil
+	})
 }
 
 func (s Service) CanvasConfig(ctx context.Context, projectID uint64, flowID uint64) (map[string]any, error) {

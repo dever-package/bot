@@ -200,7 +200,7 @@ func (s Service) ResumeRun(ctx context.Context, runID uint64) (map[string]any, e
 		return nil, fmt.Errorf("运行不存在")
 	}
 	if run.Status != teammodel.RunStatusWaiting {
-		return nil, fmt.Errorf("只有等待人工的运行可以恢复")
+		return nil, fmt.Errorf("只有等待人工反馈的运行可以继续")
 	}
 	now := time.Now()
 	record := map[string]any{

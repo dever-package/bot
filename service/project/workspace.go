@@ -6,14 +6,16 @@ import (
 	"time"
 
 	projectmodel "my/package/bot/model/project"
+	frontstream "my/package/front/service/stream"
 )
 
 type WorkspaceService struct {
 	project Service
+	streams frontstream.Service
 }
 
 func NewWorkspaceService() WorkspaceService {
-	return WorkspaceService{project: NewService()}
+	return WorkspaceService{project: NewService(), streams: frontstream.New("team")}
 }
 
 func (s WorkspaceService) Bootstrap(ctx context.Context, projectID uint64) (map[string]any, error) {

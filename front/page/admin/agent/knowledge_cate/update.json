@@ -60,6 +60,7 @@
   },
   "data": {
     "form": {
+      "id": 0,
       "name": "",
       "status": 1,
       "sort": 100

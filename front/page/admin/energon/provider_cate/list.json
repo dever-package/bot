@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "来源分类",
     "parent": "bot/energon/provider/list",
     "type": 2,
     "sort": 1

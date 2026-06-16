@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "服务",
     "icon": "server-cog",
     "parent": "bot/energon/provider/list",
     "type": 2,

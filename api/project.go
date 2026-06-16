@@ -157,6 +157,15 @@ func queryUint64(c *server.Context, keys ...string) uint64 {
 	return 0
 }
 
+func queryInt(c *server.Context, keys ...string) int {
+	for _, key := range keys {
+		if value := util.ToIntDefault(c.Input(key), 0); value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
 func queryText(c *server.Context, keys ...string) string {
 	for _, key := range keys {
 		if text := frontstream.InputText(c.Input(key)); text != "" {

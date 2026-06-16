@@ -73,6 +73,7 @@
   },
   "data": {
     "form": {
+      "id": 0,
       "pack_id": "",
       "skill_id": "",
       "status": 1,

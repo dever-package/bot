@@ -1,0 +1,75 @@
+{
+  "name": "bot",
+  "version": "0.1.0",
+  "description": "AI agents, powers, teams, body workspace and project canvas capabilities",
+  "depends": {
+    "front": ">=0.1.0",
+    "user": ">=0.1.0"
+  },
+  "public": [
+    "/bot/energon/request",
+    "/bot/energon/demo"
+  ],
+  "sites": {
+    "admin": {
+      "auth": [
+        {
+          "key": "bot",
+          "name": "AI核心",
+          "icon": "bot",
+          "parent": "config",
+          "type": 1,
+          "sort": 1,
+          "children": [
+            {
+              "key": "bot-energon",
+              "name": "能源",
+              "icon": "cpu",
+              "type": 1,
+              "sort": 1
+            },
+            {
+              "key": "bot-agent",
+              "name": "智能体",
+              "icon": "bot",
+              "type": 1,
+              "sort": 2
+            },
+            {
+              "key": "bot-team",
+              "name": "团队",
+              "icon": "users-round",
+              "type": 1,
+              "sort": 3
+            },
+            {
+              "key": "bot-body",
+              "name": "载体",
+              "icon": "blocks",
+              "type": 1,
+              "sort": 4
+            }
+          ]
+        }
+      ]
+    },
+    "body": {
+      "entry": "bot/work",
+      "public": [
+        "energon/request",
+        "energon/demo"
+      ],
+      "apiRoots": [
+        "agent",
+        "call",
+        "energon",
+        "knowledge",
+        "project",
+        "run",
+        "skill_install",
+        "team",
+        "workspace"
+      ]
+    }
+  }
+}

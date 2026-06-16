@@ -172,6 +172,7 @@ export type ProjectAsset = {
 };
 
 export type CanvasResultRef = {
+  execution_id?: number;
   run_id?: number;
   request_id?: string;
   flow_run_id?: number;

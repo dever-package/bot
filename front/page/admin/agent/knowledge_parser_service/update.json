@@ -103,6 +103,7 @@
   },
   "data": {
     "form": {
+      "id": 0,
       "name": "",
       "provider": "mineru",
       "host": "",
@@ -116,7 +117,6 @@
     "submit": {
       "type": "save",
       "params": "form",
-      "use": "bot.agent.NewKnowledgeParserServiceModel",
       "data": {
         "id": "$form.id",
         "name": "$form.name",

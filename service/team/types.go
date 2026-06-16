@@ -188,6 +188,7 @@ type CanvasPowerRunRequest struct {
 	SourceTargetID uint64
 	Input          map[string]any
 	Params         map[string]any
+	PersistResult  bool
 	OnStream       func(payload map[string]any)
 }
 

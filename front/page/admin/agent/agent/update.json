@@ -241,6 +241,7 @@
   },
   "data": {
     "form": {
+      "id": 0,
       "cate_id": 1,
       "name": "",
       "key": "",

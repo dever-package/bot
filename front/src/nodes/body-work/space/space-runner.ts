@@ -1,11 +1,15 @@
 export type CanvasRunRef = {
+  execution_id?: number;
   run_id?: number;
   request_id?: string;
+  asset_cate_id?: number;
+  start_node_id?: string;
   flow_run_id?: number;
   release_id?: number;
   status?: string;
   executed?: number;
   output?: unknown;
+  approvals?: any[];
   node_results?: CanvasNodeResultRef[];
   pending_node?: CanvasNodeResultRef | null;
   node_runs?: CanvasNodeRunRef[];
@@ -22,14 +26,20 @@ export type CanvasNodeRunRef = {
 };
 
 export type CanvasNodeResultRef = {
+  execution_id?: number;
   node_key: string;
   node_type?: string;
   node_run_id?: number;
+  run_id?: number;
+  request_id?: string;
+  child_run_id?: number;
+  child_request_id?: string;
   status?: string;
   output?: unknown;
   asset?: any;
   version?: any;
   result?: any;
+  approval?: any;
   persists_result?: boolean;
   agent_run_id?: number;
 };
@@ -60,14 +70,23 @@ export type CanvasExecutionPlanEdgeRef = {
 
 export function normalizeCanvasRunRef(value: any): CanvasRunRef {
   const output = value?.output && typeof value.output === "object" ? value.output : {};
+  const run = value?.run && typeof value.run === "object" ? value.run : {};
   return {
-    run_id: Number(value?.run_id || 0),
-    request_id: String(value?.request_id || ""),
-    flow_run_id: Number(value?.flow_run_id || 0),
-    release_id: Number(value?.release_id || 0),
-    status: String(value?.status || ""),
+    execution_id: Number(value?.execution_id || 0),
+    run_id: Number(value?.run_id || run.id || 0),
+    request_id: String(value?.request_id || run.request_id || ""),
+    asset_cate_id: Number(value?.asset_cate_id || 0),
+    start_node_id: String(value?.start_node_id || ""),
+    flow_run_id: Number(value?.flow_run_id || run.flow_run_id || 0),
+    release_id: Number(value?.release_id || run.release_id || 0),
+    status: String(value?.status || run.status || ""),
     executed: Number(value?.executed || value?.output?.executed || 0),
-    output: value?.output,
+    output: value?.output || run.output,
+    approvals: Array.isArray(value?.approvals)
+      ? value.approvals
+      : Array.isArray(value?.data?.approvals)
+        ? value.data.approvals
+        : [],
     node_results: Array.isArray(value?.node_results || output.node_results)
       ? (value.node_results || output.node_results)
           .map(normalizeCanvasNodeResultRef)
@@ -93,13 +112,19 @@ function normalizeCanvasNodeResultRef(value: any): CanvasNodeResultRef | null {
   }
   return {
     node_key: nodeKey,
+    execution_id: Number(value.execution_id || 0),
     node_type: String(value.node_type || ""),
     node_run_id: Number(value.node_run_id || 0),
+    run_id: Number(value.run_id || 0),
+    request_id: String(value.request_id || ""),
+    child_run_id: Number(value.child_run_id || 0),
+    child_request_id: String(value.child_request_id || ""),
     status: String(value.status || ""),
     output: value.output,
     asset: value.asset,
     version: value.version,
     result: value.result,
+    approval: value.approval,
     persists_result: Boolean(value.persists_result),
     agent_run_id: Number(value.agent_run_id || 0),
   };

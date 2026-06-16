@@ -97,6 +97,7 @@
   },
   "data": {
     "form": {
+      "id": 0,
       "agent_id": "",
       "knowledge_base_id": "",
       "prompt": "",

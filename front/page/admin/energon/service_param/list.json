@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "服务参数",
     "parent": "bot/energon/service/list",
     "type": 2,
     "sort": 11

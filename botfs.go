@@ -2,6 +2,11 @@ package bot
 
 import "embed"
 
+// ManifestFS 内嵌 bot 组件声明。
+//
+//go:embed dever.json
+var ManifestFS embed.FS
+
 // PageFS 内嵌 bot 后台页面配置。
 //
 //go:embed front/page/*/*.json front/page/*/*/*.json front/page/*/*/*/*.json

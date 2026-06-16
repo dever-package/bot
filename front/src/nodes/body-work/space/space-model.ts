@@ -605,6 +605,7 @@ function normalizeCanvasResultRef(value: unknown) {
     return undefined;
   }
   return {
+    execution_id: numberValue(row.execution_id),
     run_id: numberValue(row.run_id),
     request_id: stringValue(row.request_id),
     flow_run_id: numberValue(row.flow_run_id),

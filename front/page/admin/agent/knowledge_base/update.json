@@ -156,15 +156,6 @@
         }
       },
       {
-        "type": "form-html",
-        "value": "<div class=\"border-t pt-4 mt-2 mb-1 text-sm font-medium text-muted-foreground\">概念图谱</div>",
-        "meta": {
-          "formLayout": "horizontal",
-          "tab": "index",
-          "labelClassName": "hidden"
-        }
-      },
-      {
         "type": "form-radio",
         "name": "概念图谱",
         "value": "form.concept_graph_enabled",
@@ -246,6 +237,7 @@
   },
   "data": {
     "form": {
+      "id": 0,
       "cate_id": 1,
       "name": "",
       "parser_service_id": "",

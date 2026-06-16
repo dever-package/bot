@@ -30,6 +30,7 @@ func (Run) PostCanvasPower(c *server.Context) error {
 		SourceTargetID: uint64ValueFromBody(body, "source_target_id", "sourceTargetId", "power_target_id", "powerTargetId"),
 		Input:          mapFromBody(body, "input"),
 		Params:         mapFromBody(body, "params"),
+		PersistResult:  true,
 	})
 	return teamJSON(c, data, err)
 }
@@ -41,13 +42,14 @@ func (Run) PostCanvasAgent(c *server.Context) error {
 	}
 	projectID := uint64ValueFromBody(body, "project_id", "projectId")
 	data, err := projectRunner.RunCanvasAgent(c.Context(), projectID, projectservice.CanvasAgentRunRequest{
-		FlowID:      uint64ValueFromBody(body, "flow_id", "flowId"),
-		AssetCateID: uint64ValueFromBody(body, "asset_cate_id", "assetCateId"),
-		NodeKey:     textFromBody(body, "node_key", "nodeKey"),
-		NodeName:    textFromBody(body, "node_name", "nodeName", "name"),
-		AgentID:     uint64ValueFromBody(body, "agent_id", "agentId", "id"),
-		RequestID:   textFromBody(body, "request_id", "requestId"),
-		Input:       mapFromBody(body, "input"),
+		FlowID:        uint64ValueFromBody(body, "flow_id", "flowId"),
+		AssetCateID:   uint64ValueFromBody(body, "asset_cate_id", "assetCateId"),
+		NodeKey:       textFromBody(body, "node_key", "nodeKey"),
+		NodeName:      textFromBody(body, "node_name", "nodeName", "name"),
+		AgentID:       uint64ValueFromBody(body, "agent_id", "agentId", "id"),
+		RequestID:     textFromBody(body, "request_id", "requestId"),
+		Input:         mapFromBody(body, "input"),
+		PersistResult: true,
 	})
 	return teamJSON(c, data, err)
 }

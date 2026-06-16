@@ -12,6 +12,7 @@ const botPlugin = {
     "@codemirror/lang-sql",
     "@codemirror/lang-yaml",
     "@codemirror/lang-xml",
+    "@xyflow/react",
     "vditor",
   ],
   nodes: {
