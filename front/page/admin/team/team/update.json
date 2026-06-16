@@ -42,7 +42,10 @@
         "name": "团队分类",
         "value": "form.cate_id",
         "mode": "form",
-        "option": "/front/route/option?type=model&use=bot.team.NewTeamCateModel&order=sort asc,id asc",
+        "option": {
+          "model": "bot.team.NewTeamCateModel",
+          "order": "sort asc,id asc"
+        },
         "validate": [
           {
             "type": "required",

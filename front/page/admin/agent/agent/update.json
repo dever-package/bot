@@ -42,7 +42,10 @@
         "type": "form-select",
         "value": "form.cate_id",
         "mode": "form",
-        "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadAgentCates",
+        "option": {
+          "type": "service",
+          "service": "bot.agent.setting.OptionService.LoadAgentCates"
+        },
         "validate": [
           {
             "type": "required",
@@ -122,7 +125,10 @@
         "placeholder": "请选择 Energon 中的 LLM 能力",
         "value": "form.llm_power_id",
         "mode": "form",
-        "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadTextPowers",
+        "option": {
+          "type": "service",
+          "service": "bot.agent.setting.OptionService.LoadTextPowers"
+        },
         "info": "第一阶段 Agent 直接通过这个 LLM 能力调用 Energon。",
         "validate": [
           {
@@ -141,7 +147,13 @@
         "placeholder": "请选择规则方案",
         "value": "form.setting_pack_id",
         "mode": "form",
-        "option": "/front/route/option?type=model&use=bot.agent.NewSettingPackModel&filterField=status&filterValue=1&order=sort asc,id asc",
+        "option": {
+          "model": "bot.agent.NewSettingPackModel",
+          "filters": {
+            "status": 1
+          },
+          "order": "sort asc,id asc"
+        },
         "info": "运行时加载这个方案下的规则，再加载智能体设定。",
         "validate": [
           {
@@ -160,7 +172,13 @@
         "placeholder": "请选择技能方案",
         "value": "form.skill_pack_id",
         "mode": "form",
-        "option": "/front/route/option?type=model&use=bot.agent.NewSkillPackModel&filterField=status&filterValue=1&order=sort asc,id asc",
+        "option": {
+          "model": "bot.agent.NewSkillPackModel",
+          "filters": {
+            "status": 1
+          },
+          "order": "sort asc,id asc"
+        },
         "info": "运行时先注入这个方案下的技能 metadata，命中后再读取技能正文。",
         "validate": [
           {

@@ -69,7 +69,13 @@
         "type": "form-select",
         "value": "form.cate_id",
         "mode": "form",
-        "option": "/front/route/option?type=model&use=bot.agent.NewKnowledgeCateModel&filterField=status&filterValue=1&order=sort asc,id asc",
+        "option": {
+          "model": "bot.agent.NewKnowledgeCateModel",
+          "filters": {
+            "status": 1
+          },
+          "order": "sort asc,id asc"
+        },
         "validate": [
           {
             "type": "required",
@@ -109,7 +115,10 @@
         "placeholder": "可选，选择 MinerU 服务",
         "value": "form.parser_service_id",
         "mode": "form",
-        "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadKnowledgeParserServices",
+        "option": {
+          "type": "service",
+          "service": "bot.agent.setting.OptionService.LoadKnowledgeParserServices"
+        },
         "info": "可选。选择后，后续 PDF、Office、图片等复杂文件可以使用该服务解析；不选择则只使用本地文本解析和已有兜底能力。",
         "meta": {
           "formLayout": "horizontal",
@@ -147,7 +156,10 @@
         "placeholder": "可选，选择 embeddings 类型能力",
         "value": "form.embedding_power_id",
         "mode": "form",
-        "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadEmbeddingPowers",
+        "option": {
+          "type": "service",
+          "service": "bot.agent.setting.OptionService.LoadEmbeddingPowers"
+        },
         "info": "可选。选择 embeddings 类型能力后，会额外生成语义向量，用于相似内容检索；不选择则使用全文检索、目录图谱和智能规划检索。",
         "meta": {
           "formLayout": "horizontal",
@@ -177,7 +189,10 @@
         "placeholder": "可选，选择文本类型能力",
         "value": "form.index_power_id",
         "mode": "form",
-        "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadTextPowers",
+        "option": {
+          "type": "service",
+          "service": "bot.agent.setting.OptionService.LoadTextPowers"
+        },
         "info": "启用概念图谱时需要选择索引模型，用于文档摘要、目录摘要、检索规划和概念关系抽取。如不启用概念图谱且仅做关键词/语义检索，则无需选择。",
         "meta": {
           "formLayout": "horizontal",

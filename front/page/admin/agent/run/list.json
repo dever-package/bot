@@ -58,7 +58,15 @@
         "placeholder": "智能体",
         "value": "search.agent_id",
         "mode": "search",
-        "option": "/front/route/option?type=model&use=bot.agent.NewAgentModel&labelField=name&searchFields=name&pageSize=20&filterField=kind&filterValue=normal",
+        "option": {
+          "model": "bot.agent.NewAgentModel",
+          "labelField": "name",
+          "searchFields": ["name"],
+          "pageSize": 20,
+          "filters": {
+            "kind": "normal"
+          }
+        },
         "meta": {
           "searchPlaceholder": "输入智能体名称搜索..."
         }

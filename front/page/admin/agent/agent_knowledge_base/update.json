@@ -43,7 +43,13 @@
         "name": "知识库",
         "value": "form.knowledge_base_id",
         "mode": "form",
-        "option": "/front/route/option?type=model&use=bot.agent.NewKnowledgeBaseModel&filterField=status&filterValue=1&order=sort asc,id asc",
+        "option": {
+          "model": "bot.agent.NewKnowledgeBaseModel",
+          "filters": {
+            "status": 1
+          },
+          "order": "sort asc,id asc"
+        },
         "validate": [
           {
             "type": "required",

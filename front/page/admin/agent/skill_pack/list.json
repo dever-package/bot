@@ -113,7 +113,11 @@
         "type": "show-category-list",
         "id": "agent-skill-pack-category",
         "value": "search.pack_id",
-        "option": "/front/route/option?type=model&use=bot.agent.NewSkillPackModel&order=sort asc,id asc&extraFields=status,sort",
+        "option": {
+          "model": "bot.agent.NewSkillPackModel",
+          "order": "sort asc,id asc",
+          "extraFields": ["status", "sort"]
+        },
         "meta": {
           "title": "方案",
           "description": "设置技能方案",
@@ -137,6 +141,7 @@
           "statusDisplay": "select",
           "statusChangeAction": {
             "type": "save",
+            "key": "submit",
             "path": "bot/agent/skill_pack/update",
             "params": {
               "_partial": true,
@@ -529,7 +534,7 @@
       "description": "维护智能体运行时可用的技能方案。运行时先注入 metadata，命中后再读取技能正文。"
     },
     "search": {
-      "pack_id": 1,
+      "pack_id": "",
       "status": ""
     },
     "installContext": {

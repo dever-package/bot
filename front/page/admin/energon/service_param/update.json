@@ -105,7 +105,16 @@
           "itemName": "字段值",
           "valueFormat": "json",
           "fillFromOption": {
-            "source": "/front/route/option?type=model&use=bot.energon.NewParamOptionModel&parentField=param_id&valueField=id&labelField=name&order=sort asc,id asc&pageSize=200",
+            "source": "/front/route/option",
+            "optionKey": "mapping.option",
+            "option": {
+              "model": "bot.energon.NewParamOptionModel",
+              "parentField": "param_id",
+              "valueField": "id",
+              "labelField": "name",
+              "order": "sort asc,id asc",
+              "pageSize": 200
+            },
             "targetField": "option_id",
             "params": {
               "parentId": "form.param_id"
@@ -129,7 +138,12 @@
         "name": "字段值",
         "value": "form.mapping",
         "mode": "form",
-        "option": "/front/route/option?type=service&use=bot.energon.ParamOptionService.LoadFileIndexOptions&valueField=id&labelField=value",
+        "option": {
+          "type": "service",
+          "service": "bot.energon.ParamOptionService.LoadFileIndexOptions",
+          "valueField": "id",
+          "labelField": "value"
+        },
         "info": "选择要映射的文件序号。单文件参数只会使用第 1 个文件；多文件参数保存时会校验最大数量。",
         "meta": {
           "orientation": "horizontal",
@@ -191,8 +205,24 @@
         "meta": {
           "mainParamPath": "form.param_id",
           "extraParamsPath": "form.combo_params",
-          "optionSource": "/front/route/option?type=model&use=bot.energon.NewParamOptionModel&parentField=param_id&valueField=id&labelField=name&order=sort asc,id asc&pageSize=200",
-          "paramSource": "/front/route/option?type=model&use=bot.energon.NewParamModel&valueField=id&labelField=name&pageSize=200",
+          "optionSource": "/front/route/option",
+          "optionSourceKey": "combo.optionSource",
+          "optionSourceOption": {
+            "model": "bot.energon.NewParamOptionModel",
+            "parentField": "param_id",
+            "valueField": "id",
+            "labelField": "name",
+            "order": "sort asc,id asc",
+            "pageSize": 200
+          },
+          "paramSource": "/front/route/option",
+          "paramSourceKey": "combo.paramSource",
+          "paramSourceOption": {
+            "model": "bot.energon.NewParamModel",
+            "valueField": "id",
+            "labelField": "name",
+            "pageSize": 200
+          },
           "addText": "添加字段值",
           "addAllText": "添加全部字段值",
           "clearText": "清空",

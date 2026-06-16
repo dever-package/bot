@@ -99,7 +99,13 @@
         "value": "form.asset_cate_id",
         "mode": "form",
         "placeholder": "不指定资产分类",
-        "option": "/front/route/option?type=model&use=bot.team.NewAssetCateModel&parentField=team_id&valueField=id&labelField=name&order=sort asc,id asc",
+        "option": {
+          "model": "bot.team.NewAssetCateModel",
+          "parentField": "team_id",
+          "valueField": "id",
+          "labelField": "name",
+          "order": "sort asc,id asc"
+        },
         "info": "如果这个角色直接产出结果，结果会优先沉淀到所选资产分类下；不选时由任务或保存节点决定。",
         "meta": {
           "formLayout": "horizontal",

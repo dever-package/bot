@@ -28,7 +28,10 @@
         "type": "show-category-list",
         "id": "knowledge-cate-list",
         "value": "parent.data.search.cate_id",
-        "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadKnowledgeCates",
+        "option": {
+          "type": "service",
+          "service": "bot.agent.setting.OptionService.LoadKnowledgeCates"
+        },
         "meta": {
           "title": "知识库分类",
           "remote": true,

@@ -22,7 +22,10 @@
         "type": "show-category-list",
         "id": "agent-cate-category",
         "value": "parent.data.search.cate_id",
-        "option": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadAgentCates",
+        "option": {
+          "type": "service",
+          "service": "bot.agent.setting.OptionService.LoadAgentCates"
+        },
         "meta": {
           "title": "智能体分类",
           "description": "左侧维护智能体分类",

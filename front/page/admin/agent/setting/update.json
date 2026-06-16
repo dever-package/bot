@@ -41,7 +41,13 @@
         "id": "agent-setting-cate-select",
         "value": "form.cate_id",
         "mode": "form",
-        "option": "/front/route/option?type=model&use=bot.agent.NewSettingCateModel&filterField=status&filterValue=1&order=sort asc,id asc",
+        "option": {
+          "model": "bot.agent.NewSettingCateModel",
+          "filters": {
+            "status": 1
+          },
+          "order": "sort asc,id asc"
+        },
         "validate": [
           {
             "type": "required",

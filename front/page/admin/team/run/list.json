@@ -58,7 +58,12 @@
         "placeholder": "团队",
         "value": "search.team_id",
         "mode": "search",
-        "option": "/front/route/option?type=model&use=bot.team.NewTeamModel&labelField=name&searchFields=name&pageSize=20",
+        "option": {
+          "model": "bot.team.NewTeamModel",
+          "labelField": "name",
+          "searchFields": ["name"],
+          "pageSize": 20
+        },
         "meta": {
           "searchPlaceholder": "输入团队名称搜索..."
         }

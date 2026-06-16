@@ -35,7 +35,13 @@
         "type": "form-select",
         "value": "form.cate_id",
         "mode": "form",
-        "option": "/front/route/option?type=model&use=bot.agent.NewSkillCateModel&filterField=status&filterValue=1&order=sort asc,id asc",
+        "option": {
+          "model": "bot.agent.NewSkillCateModel",
+          "filters": {
+            "status": 1
+          },
+          "order": "sort asc,id asc"
+        },
         "validate": [
           {
             "type": "required",

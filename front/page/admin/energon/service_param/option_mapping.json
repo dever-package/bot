@@ -26,7 +26,14 @@
         "id": "option-id",
         "type": "form-select",
         "value": "form.option_id",
-        "option": "/front/route/option?type=model&use=bot.energon.NewParamOptionModel&parentField=param_id&valueField=id&labelField=name&order=sort asc,id asc&pageSize=200",
+        "option": {
+          "model": "bot.energon.NewParamOptionModel",
+          "parentField": "param_id",
+          "valueField": "id",
+          "labelField": "name",
+          "order": "sort asc,id asc",
+          "pageSize": 200
+        },
         "placeholder": "选择参数选项",
         "meta": {
           "optionParams": {

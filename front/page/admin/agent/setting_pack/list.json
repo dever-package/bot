@@ -95,7 +95,11 @@
         "type": "show-category-list",
         "id": "agent-setting-pack-category",
         "value": "search.pack_id",
-        "option": "/front/route/option?type=model&use=bot.agent.NewSettingPackModel&order=sort asc,id asc&extraFields=status,sort",
+        "option": {
+          "model": "bot.agent.NewSettingPackModel",
+          "order": "sort asc,id asc",
+          "extraFields": ["status", "sort"]
+        },
         "meta": {
           "title": "方案",
           "description": "设置规则方案",
@@ -119,6 +123,7 @@
           "statusDisplay": "select",
           "statusChangeAction": {
             "type": "save",
+            "key": "submit",
             "path": "bot/agent/setting_pack/update",
             "params": {
               "_partial": true,
@@ -412,7 +417,7 @@
       "description": "维护智能体运行时使用的规则方案。左侧选择方案，右侧维护这个方案下启用的规则。"
     },
     "search": {
-      "pack_id": 1,
+      "pack_id": "",
       "status": ""
     },
     "option": {

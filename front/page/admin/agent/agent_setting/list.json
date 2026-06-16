@@ -61,7 +61,12 @@
           "typeDescription": "核心设定优先维护；高级设定用于流程、输出、能力和样例补充。",
           "typeField": "type",
           "primaryKey": "id",
-          "loadApi": "/front/route/option?type=service&use=bot.agent.setting.OptionService.LoadAgentSettings",
+          "loadApi": "/front/route/option",
+          "loadOption": {
+            "type": "service",
+            "service": "bot.agent.setting.OptionService.LoadAgentSettings"
+          },
+          "loadKey": "agent-setting-load",
           "loadParams": {
             "parentId": "state.route.query.id"
           },

@@ -48,8 +48,8 @@ func (AgentHook) ProviderBeforeSaveSettingPack(_ *server.Context, params []any) 
 	if !partial && record["name"] == "" {
 		panicAgentField("form.name", "方案名称不能为空。")
 	}
-	defaultInt16Field(record, "status", defaultAgentStatus, partial)
-	defaultIntField(record, "sort", defaultAgentSort, partial)
+	defaultInt16FieldOnCreateOrPresent(record, "status", defaultAgentStatus, partial)
+	defaultIntFieldOnCreateOrPresent(record, "sort", defaultAgentSort, partial)
 	if rawItems, exists := record["items"]; exists {
 		record["items"] = normalizeSettingPackItemRows(rawItems)
 	}

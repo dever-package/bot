@@ -22,7 +22,10 @@
         "type": "show-category-list",
         "id": "team-cate-category",
         "value": "parent.data.search.cate_id",
-        "option": "/front/route/option?type=model&use=bot.team.NewTeamCateModel&order=sort asc,id asc",
+        "option": {
+          "model": "bot.team.NewTeamCateModel",
+          "order": "sort asc,id asc"
+        },
         "meta": {
           "title": "团队分类",
           "description": "左侧维护团队分类",

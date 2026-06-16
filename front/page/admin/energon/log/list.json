@@ -50,7 +50,12 @@
         "placeholder": "能力",
         "value": "search.power_id",
         "mode": "search",
-        "option": "/front/route/option?type=model&use=bot.energon.NewPowerModel&labelField=name&searchFields=name,key&pageSize=20",
+        "option": {
+          "model": "bot.energon.NewPowerModel",
+          "labelField": "name",
+          "searchFields": ["name", "key"],
+          "pageSize": 20
+        },
         "meta": {
           "searchPlaceholder": "输入能力名称或标识搜索..."
         }
