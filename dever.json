@@ -61,17 +61,6 @@
       "public": [
         "energon/request",
         "energon/demo"
-      ],
-      "apiRoots": [
-        "agent",
-        "call",
-        "energon",
-        "knowledge",
-        "project",
-        "run",
-        "skill_install",
-        "team",
-        "workspace"
       ]
     }
   }
