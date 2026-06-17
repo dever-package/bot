@@ -10,6 +10,9 @@
     "/bot/energon/request",
     "/bot/energon/demo"
   ],
+  "skills": [
+    "skills/bot/SKILL.md"
+  ],
   "sites": {
     "admin": {
       "auth": [

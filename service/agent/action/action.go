@@ -29,6 +29,7 @@ func ExtractAgentAction(text string) (string, Action, bool) {
 	if !ok {
 		return text, Action{}, false
 	}
+	
 	return clean, action, true
 }
 

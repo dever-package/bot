@@ -1,8 +1,25 @@
 {
   "page": {
-    "parent": "bot/agent/agent/update",
+    "name": "智能体设定编辑",
+    "parent": "bot/agent/agent_setting/list",
     "type": 2,
-    "sort": 20
+    "sort": 10,
+    "auth": [
+      {
+        "key": "bot/agent/agent_setting/create",
+        "name": "智能体设定新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/agent/agent_setting/update",
+        "name": "智能体设定编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
   },
   "layout": {
     "type": "container",
