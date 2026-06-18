@@ -77,9 +77,6 @@ func (TeamHook) ProviderBeforeSaveAssetCate(c *server.Context, params []any) any
 	if !partial && record["name"] == "" {
 		panicTeamField("form.name", "资产分类名称不能为空。")
 	}
-	if shouldNormalizeTeamField(record, "name", partial) || shouldNormalizeTeamField(record, "team_id", partial) {
-		validateAssetCateNameUnique(c.Context(), record, partial)
-	}
 	if shouldNormalizeTeamField(record, "kind", partial) {
 		record["kind"] = teammodel.NormalizeAssetCateKind(util.ToStringTrimmed(record["kind"]))
 	}
@@ -123,36 +120,6 @@ func (TeamHook) ProviderBeforeSaveTeamPower(c *server.Context, params []any) any
 	defaultTeamInt16Field(record, "status", defaultTeamStatus, partial)
 	defaultTeamIntField(record, "sort", defaultTeamSort, partial)
 	return record
-}
-
-func validateAssetCateNameUnique(ctx context.Context, record map[string]any, partial bool) {
-	teamID := util.ToUint64(record["team_id"])
-	name := util.ToStringTrimmed(record["name"])
-	if partial {
-		currentID := util.ToUint64(record["id"])
-		if currentID > 0 && (teamID == 0 || name == "") {
-			current := teammodel.NewAssetCateModel().Find(ctx, map[string]any{"id": currentID})
-			if current != nil {
-				if teamID == 0 {
-					teamID = current.TeamID
-				}
-				if name == "" {
-					name = current.Name
-				}
-			}
-		}
-	}
-	if teamID == 0 || name == "" {
-		return
-	}
-	existing := teammodel.NewAssetCateModel().Find(ctx, map[string]any{
-		"team_id": teamID,
-		"name":    name,
-	})
-	if existing == nil || existing.ID == util.ToUint64(record["id"]) {
-		return
-	}
-	panicTeamField("form.name", "该团队下已存在同名资产分类。")
 }
 
 func (TeamHook) ProviderBeforeSaveRole(c *server.Context, params []any) any {
@@ -334,7 +301,6 @@ func existingTeamPowers(ctx context.Context, teamID uint64) (map[uint64]teammode
 	}
 	return byID, byPower
 }
-
 
 func normalizeTeamChildRows(value any) []map[string]any {
 	if rows, ok := value.([]map[string]any); ok {
