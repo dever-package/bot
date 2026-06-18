@@ -7,7 +7,7 @@
     "user": ">=0.1.0"
   },
   "skills": [
-    "skills/bot/SKILL.md"
+    "skills/SKILL.md"
   ],
   "front": {
     "sites": {
