@@ -18,7 +18,6 @@ type Service struct {
 }
 
 type ServiceIndex struct {
-	ProviderName   struct{} `unique:"provider_id,name"`
 	ProviderStatus struct{} `index:"provider_id,status,sort"`
 }
 

@@ -46,11 +46,6 @@
           {
             "type": "required",
             "message": "服务名称不能为空。"
-          },
-          {
-            "type": "model",
-            "except": "$form.id",
-            "message": "服务名称已存在。"
           }
         ],
         "meta": {

@@ -20,7 +20,6 @@ type Setting struct {
 }
 
 type SettingIndex struct {
-	CateName       struct{} `unique:"cate_id,name"`
 	CateStatusSort struct{} `index:"cate_id,status,sort"`
 	CateLoadMode   struct{} `index:"cate_id,load_mode,status,sort"`
 }

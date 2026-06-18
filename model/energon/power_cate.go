@@ -13,18 +13,12 @@ type PowerCate struct {
 	CreatedAt time.Time `dorm:"comment:创建时间"`
 }
 
-type PowerCateIndex struct {
-	Name struct{} `unique:"name"`
-	Sort struct{} `index:"sort"`
-}
-
 var powerCateSeed = []map[string]any{
 	{"id": 1, "name": "默认分类", "sort": 100},
 }
 
 func NewPowerCateModel() *orm.Model[PowerCate] {
 	return orm.LoadModel[PowerCate]("能力分类", "bot_energon_power_cate", orm.ModelConfig{
-		Index:    PowerCateIndex{},
 		Seeds:    powerCateSeed,
 		Order:    "sort asc,id asc",
 		Database: "default",

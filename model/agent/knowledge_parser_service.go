@@ -24,7 +24,6 @@ type KnowledgeParserService struct {
 }
 
 type KnowledgeParserServiceIndex struct {
-	Name               struct{} `unique:"name"`
 	ProviderStatusSort struct{} `index:"provider,status,sort,id"`
 	StatusSort         struct{} `index:"status,sort,id"`
 }

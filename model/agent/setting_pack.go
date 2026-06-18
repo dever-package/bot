@@ -22,7 +22,6 @@ type SettingPack struct {
 }
 
 type SettingPackIndex struct {
-	Name       struct{} `unique:"name"`
 	StatusSort struct{} `index:"status,sort"`
 }
 

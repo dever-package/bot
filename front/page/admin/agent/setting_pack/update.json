@@ -47,11 +47,6 @@
           {
             "type": "required",
             "message": "方案名称不能为空。"
-          },
-          {
-            "type": "model",
-            "except": "$form.id",
-            "message": "该方案名称已存在。"
           }
         ],
         "meta": {

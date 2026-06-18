@@ -17,7 +17,6 @@ type SkillCate struct {
 }
 
 type SkillCateIndex struct {
-	Name       struct{} `unique:"name"`
 	StatusSort struct{} `index:"status,sort"`
 }
 

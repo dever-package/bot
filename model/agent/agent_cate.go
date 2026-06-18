@@ -13,11 +13,6 @@ type AgentCate struct {
 	CreatedAt time.Time `dorm:"comment:创建时间"`
 }
 
-type AgentCateIndex struct {
-	Name struct{} `unique:"name"`
-	Sort struct{} `index:"sort"`
-}
-
 const (
 	DefaultAgentCateID uint64 = 1
 	SystemAgentCateID  uint64 = 2
@@ -30,7 +25,6 @@ var agentCateSeed = []map[string]any{
 
 func NewAgentCateModel() *orm.Model[AgentCate] {
 	return orm.LoadModel[AgentCate]("智能体分类", "bot_agent_cate", orm.ModelConfig{
-		Index:    AgentCateIndex{},
 		Seeds:    agentCateSeed,
 		Order:    "sort asc,id asc",
 		Database: "default",

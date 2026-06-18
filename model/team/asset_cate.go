@@ -42,7 +42,6 @@ type AssetCate struct {
 }
 
 type AssetCateIndex struct {
-	TeamName   struct{} `unique:"team_id,name"`
 	TeamStatus struct{} `index:"team_id,status,sort,id"`
 }
 

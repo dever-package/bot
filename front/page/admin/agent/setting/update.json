@@ -68,6 +68,7 @@
         }
       },
       {
+        "id": "agent-setting-name-input",
         "type": "form-input",
         "placeholder": "例如：输出与交互协议",
         "value": "form.name",
@@ -76,11 +77,6 @@
           {
             "type": "required",
             "message": "规则名称不能为空。"
-          },
-          {
-            "type": "model",
-            "except": "$form.id",
-            "message": "该分类下规则名称已存在。"
           }
         ],
         "meta": {

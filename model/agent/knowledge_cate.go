@@ -15,7 +15,6 @@ type KnowledgeCate struct {
 }
 
 type KnowledgeCateIndex struct {
-	Name       struct{} `unique:"name"`
 	StatusSort struct{} `index:"status,sort,id"`
 }
 

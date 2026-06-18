@@ -15,18 +15,12 @@ type TeamCate struct {
 	CreatedAt time.Time `dorm:"comment:创建时间"`
 }
 
-type TeamCateIndex struct {
-	Name struct{} `unique:"name"`
-	Sort struct{} `index:"sort"`
-}
-
 var teamCateSeed = []map[string]any{
 	{"id": DefaultTeamCateID, "name": "默认分类", "sort": 100},
 }
 
 func NewTeamCateModel() *orm.Model[TeamCate] {
 	return orm.LoadModel[TeamCate]("团队分类", "bot_team_cate", orm.ModelConfig{
-		Index:    TeamCateIndex{},
 		Seeds:    teamCateSeed,
 		Order:    "sort asc,id asc",
 		Database: "default",

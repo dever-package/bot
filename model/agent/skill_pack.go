@@ -18,7 +18,6 @@ type SkillPack struct {
 }
 
 type SkillPackIndex struct {
-	Name       struct{} `unique:"name"`
 	StatusSort struct{} `index:"status,sort"`
 }
 

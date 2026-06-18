@@ -30,11 +30,6 @@
           {
             "type": "required",
             "message": "技能分类名称不能为空。"
-          },
-          {
-            "type": "model",
-            "except": "$form.id",
-            "message": "该技能分类名称已存在，请更换。"
           }
         ],
         "meta": {

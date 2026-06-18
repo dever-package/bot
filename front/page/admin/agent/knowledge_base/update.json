@@ -97,11 +97,6 @@
           {
             "type": "required",
             "message": "知识库名称不能为空。"
-          },
-          {
-            "type": "model",
-            "except": "$form.id",
-            "message": "该分类下知识库名称已存在。"
           }
         ],
         "meta": {
@@ -276,6 +271,7 @@
     "submit": {
       "type": "save",
       "params": "form",
+      "use": "bot.agent.NewKnowledgeBaseModel",
       "before": {
         "type": "service",
         "use": "bot.agent.knowledge.KnowledgeHook.BeforeSaveKnowledgeBase"

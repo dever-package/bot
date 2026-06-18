@@ -31,7 +31,6 @@ type KnowledgeBase struct {
 }
 
 type KnowledgeBaseIndex struct {
-	CateName       struct{} `unique:"cate_id,name"`
 	CateStatusSort struct{} `index:"cate_id,status,sort,id"`
 	ParserService  struct{} `index:"parser_service_id,status"`
 	IndexPower     struct{} `index:"index_power_id,status"`
