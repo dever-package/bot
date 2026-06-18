@@ -77,8 +77,7 @@
       "type": "save",
       "params": "form",
       "before": {
-        "type": "service",
-        "use": "bot.agent.setting.AgentHook.BeforeSaveSkillCate"
+        "service": "bot.agent.setting.AgentHook.BeforeSaveSkillCate"
       }
     }
   }

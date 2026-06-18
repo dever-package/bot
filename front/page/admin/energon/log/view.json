@@ -338,9 +338,15 @@
         "description": "成功时展示响应，失败时展示失败环节和错误信息。"
       }
     },
-    "attempts": "{{bot.energon.log.LogViewService.LoadAttempts}}",
-    "requestParams": "{{bot.energon.log.LogViewService.LoadRequestParams}}",
-    "channelRequest": "{{bot.energon.log.LogViewService.LoadChannelRequest}}",
+    "attempts": {
+      "service": "bot.energon.log.LogViewService.LoadAttempts"
+    },
+    "requestParams": {
+      "service": "bot.energon.log.LogViewService.LoadRequestParams"
+    },
+    "channelRequest": {
+      "service": "bot.energon.log.LogViewService.LoadChannelRequest"
+    },
     "form": {},
     "actionTarget": {
       "attemptError": ""

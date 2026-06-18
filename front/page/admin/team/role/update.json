@@ -75,16 +75,18 @@
         "mode": "form",
         "placeholder": "请选择智能体",
         "meta": {
-          "api": "/front/route/option",
-          "use": "bot.agent.NewAgentCateModel",
-          "childUse": "bot.agent.NewAgentModel",
           "childParentField": "cate_id",
           "valueMode": "leaf",
           "defaultParentValue": 1,
-          "placeholder": ["选择智能体分类", "选择智能体"],
+          "placeholder": [
+            "选择智能体分类",
+            "选择智能体"
+          ],
           "childExtraFields": "cate_id,kind,status",
           "formLayout": "horizontal",
-          "searchPlaceholder": "输入智能体名称搜索..."
+          "searchPlaceholder": "输入智能体名称搜索...",
+          "model": "bot.agent.NewAgentCateModel",
+          "childModel": "bot.agent.NewAgentModel"
         },
         "validate": [
           {
@@ -147,8 +149,7 @@
       "type": "save",
       "params": "form",
       "before": {
-        "type": "service",
-        "use": "bot.team.TeamHook.BeforeSaveRole"
+        "service": "bot.team.TeamHook.BeforeSaveRole"
       }
     }
   }

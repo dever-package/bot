@@ -53,7 +53,10 @@
         "option": {
           "model": "bot.energon.NewPowerModel",
           "labelField": "name",
-          "searchFields": ["name", "key"],
+          "searchFields": [
+            "name",
+            "key"
+          ],
           "pageSize": 20
         },
         "meta": {
@@ -218,9 +221,6 @@
       "created_at_end": ""
     },
     "table": {
-      "page": 1,
-      "pageSize": 10,
-      "total": 0,
       "searchFields": [
         "request_id",
         "power_key",

@@ -28,9 +28,6 @@
         "value": "form.param_id",
         "placeholder": "请选择参与参数",
         "meta": {
-          "api": "/front/route/option",
-          "use": "bot.energon.NewParamCateModel",
-          "childUse": "bot.energon.NewParamModel",
           "childParentField": "cate_id",
           "valueMode": "leaf",
           "placeholder": [
@@ -55,7 +52,9 @@
               "path": "form.param_id",
               "operator": "notEquals"
             }
-          ]
+          ],
+          "model": "bot.energon.NewParamCateModel",
+          "childModel": "bot.energon.NewParamModel"
         }
       }
     ]

@@ -92,8 +92,7 @@
       "type": "save",
       "params": "form",
       "before": {
-        "type": "service",
-        "use": "bot.agent.setting.AgentHook.BeforeSaveSkillPack"
+        "service": "bot.agent.setting.AgentHook.BeforeSaveSkillPack"
       }
     }
   }

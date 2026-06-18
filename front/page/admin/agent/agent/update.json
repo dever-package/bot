@@ -43,7 +43,6 @@
         "value": "form.cate_id",
         "mode": "form",
         "option": {
-          "type": "service",
           "service": "bot.agent.setting.OptionService.LoadAgentCates"
         },
         "validate": [
@@ -126,7 +125,6 @@
         "value": "form.llm_power_id",
         "mode": "form",
         "option": {
-          "type": "service",
           "service": "bot.agent.setting.OptionService.LoadTextPowers"
         },
         "info": "第一阶段 Agent 直接通过这个 LLM 能力调用 Energon。",
@@ -279,8 +277,7 @@
       "type": "save",
       "params": "form",
       "before": {
-        "type": "service",
-        "use": "bot.agent.setting.AgentHook.BeforeSaveAgent"
+        "service": "bot.agent.setting.AgentHook.BeforeSaveAgent"
       }
     }
   }

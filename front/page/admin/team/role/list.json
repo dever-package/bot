@@ -269,10 +269,10 @@
       ]
     },
     "table": {
-      "page": 1,
-      "pageSize": 10,
-      "total": 0,
-      "filterFields": ["team_id", "role_type"]
+      "filterFields": [
+        "team_id",
+        "role_type"
+      ]
     },
     "actionTarget": {
       "editRoleId": "",

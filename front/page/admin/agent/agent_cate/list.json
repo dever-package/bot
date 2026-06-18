@@ -23,7 +23,6 @@
         "id": "agent-cate-category",
         "value": "parent.data.search.cate_id",
         "option": {
-          "type": "service",
           "service": "bot.agent.setting.OptionService.LoadAgentCates"
         },
         "meta": {

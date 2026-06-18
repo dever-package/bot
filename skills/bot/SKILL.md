@@ -1,6 +1,6 @@
 ---
 name: dever-bot
-description: Use when 修改 Dever bot 组件，包括 agent、energon、team flow、workspace/project canvas、asset、knowledge、skill install、bot front/page JSON、front 插件、API、Service、权限、执行、流式输出和迁移行为。
+description: Use when 修改 Dever bot 组件，包括 agent、energon、team flow、workspace/project canvas、asset、knowledge、skill install、bot front/page JSON、front 插件、API、Service、权限、执行、流式输出和升级影响。
 version: 0.1.0
 ---
 

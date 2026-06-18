@@ -116,7 +116,10 @@
         "option": {
           "model": "bot.agent.NewSkillPackModel",
           "order": "sort asc,id asc",
-          "extraFields": ["status", "sort"]
+          "extraFields": [
+            "status",
+            "sort"
+          ]
         },
         "meta": {
           "title": "方案",
@@ -471,16 +474,14 @@
         "action": {
           "confirm": {
             "type": "delete",
-            "use": "bot.agent.NewSkillModel",
             "params": "actionTarget.deleteSkill",
             "before": {
-              "type": "service",
-              "use": "bot.agent.setting.AgentHook.BeforeDeleteSkill"
+              "service": "bot.agent.setting.AgentHook.BeforeDeleteSkill"
             },
             "after": {
-              "type": "service",
-              "use": "bot.agent.setting.AgentHook.AfterDeleteSkill"
-            }
+              "service": "bot.agent.setting.AgentHook.AfterDeleteSkill"
+            },
+            "model": "bot.agent.NewSkillModel"
           }
         }
       },
@@ -542,17 +543,16 @@
       "auto_add_to_pack": true
     },
     "option": {
-      "skill_cate": "{{bot.agent.setting.OptionService.LoadSkillCates}}"
+      "skill_cate": {
+        "service": "bot.agent.setting.OptionService.LoadSkillCates"
+      }
     },
     "table": {
-      "list": "<<bot.agent.NewSkillPackItemModel>>",
-      "page": 1,
-      "pageSize": 10,
-      "total": 0,
       "filterFields": [
         "pack_id",
         "status"
-      ]
+      ],
+      "model": "bot.agent.NewSkillPackItemModel"
     },
     "actionTarget": {
       "packId": "",

@@ -265,10 +265,9 @@
   },
   "data": {
     "table": {
-      "page": 1,
-      "pageSize": 10,
-      "total": 0,
-      "filterFields": ["agent_id"]
+      "filterFields": [
+        "agent_id"
+      ]
     },
     "search": {
       "agent_id": "",

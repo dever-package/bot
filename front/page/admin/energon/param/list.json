@@ -290,8 +290,7 @@
             "type": "delete",
             "params": "actionTarget.deleteParam",
             "before": {
-              "type": "service",
-              "use": "bot.energon.hook.ParamHook.BeforeDeleteParam"
+              "service": "bot.energon.hook.ParamHook.BeforeDeleteParam"
             }
           }
         }
@@ -311,9 +310,6 @@
       "status": ""
     },
     "table": {
-      "page": 1,
-      "pageSize": 10,
-      "total": 0,
       "searchFields": [
         "name",
         "key"

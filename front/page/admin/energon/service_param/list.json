@@ -254,7 +254,9 @@
       "description": "定义当前服务需要的参数映射。OpenAI协议已做自动映射，无需定义参数映射"
     },
     "option": {
-      "param": "{{bot.energon.ParamOptionService.LoadParamOptions}}",
+      "param": {
+        "service": "bot.energon.ParamOptionService.LoadParamOptions"
+      },
       "param_rule": [
         {
           "id": 1,

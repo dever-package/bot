@@ -306,10 +306,9 @@
       "description": "维护智能体可引用的企业知识库。"
     },
     "table": {
-      "page": 1,
-      "pageSize": 10,
-      "total": 0,
-      "filterFields": ["cate_id"]
+      "filterFields": [
+        "cate_id"
+      ]
     },
     "search": {
       "cate_id": "",

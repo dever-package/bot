@@ -29,7 +29,6 @@
         "id": "knowledge-cate-list",
         "value": "parent.data.search.cate_id",
         "option": {
-          "type": "service",
           "service": "bot.agent.setting.OptionService.LoadKnowledgeCates"
         },
         "meta": {

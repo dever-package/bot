@@ -101,7 +101,9 @@
           "control": [
             {
               "value": "always",
-              "hide": ["setting-description"]
+              "hide": [
+                "setting-description"
+              ]
             }
           ]
         }
@@ -126,7 +128,7 @@
         "validate": [
           {
             "type": "required",
-          "message": "规则正文不能为空。"
+            "message": "规则正文不能为空。"
           }
         ],
         "meta": {
@@ -154,8 +156,7 @@
       "type": "save",
       "params": "form",
       "after": {
-        "type": "service",
-        "use": "bot.agent.setting.AgentHook.AfterSaveSetting"
+        "service": "bot.agent.setting.AgentHook.AfterSaveSetting"
       }
     }
   }

@@ -111,7 +111,6 @@
         "value": "form.parser_service_id",
         "mode": "form",
         "option": {
-          "type": "service",
           "service": "bot.agent.setting.OptionService.LoadKnowledgeParserServices"
         },
         "info": "可选。选择后，后续 PDF、Office、图片等复杂文件可以使用该服务解析；不选择则只使用本地文本解析和已有兜底能力。",
@@ -152,7 +151,6 @@
         "value": "form.embedding_power_id",
         "mode": "form",
         "option": {
-          "type": "service",
           "service": "bot.agent.setting.OptionService.LoadEmbeddingPowers"
         },
         "info": "可选。选择 embeddings 类型能力后，会额外生成语义向量，用于相似内容检索；不选择则使用全文检索、目录图谱和智能规划检索。",
@@ -168,8 +166,14 @@
         "value": "form.concept_graph_enabled",
         "mode": "form",
         "option": [
-          {"id": 1, "value": "启用"},
-          {"id": 2, "value": "禁用"}
+          {
+            "id": 1,
+            "value": "启用"
+          },
+          {
+            "id": 2,
+            "value": "禁用"
+          }
         ],
         "info": "启用后，索引阶段每篇文档会由 LLM 抽取概念和关系（includes、depends_on 等语义边），形成语义关系网络。检索时可通过图谱扩展找到更相关的文档，适合需要深度语义理解的场景。如只做关键词/语义检索，不需要关联发现，可关闭。",
         "meta": {
@@ -185,7 +189,6 @@
         "value": "form.index_power_id",
         "mode": "form",
         "option": {
-          "type": "service",
           "service": "bot.agent.setting.OptionService.LoadTextPowers"
         },
         "info": "启用概念图谱时需要选择索引模型，用于文档摘要、目录摘要、检索规划和概念关系抽取。如不启用概念图谱且仅做关键词/语义检索，则无需选择。",
@@ -271,15 +274,13 @@
     "submit": {
       "type": "save",
       "params": "form",
-      "use": "bot.agent.NewKnowledgeBaseModel",
       "before": {
-        "type": "service",
-        "use": "bot.agent.knowledge.KnowledgeHook.BeforeSaveKnowledgeBase"
+        "service": "bot.agent.knowledge.KnowledgeHook.BeforeSaveKnowledgeBase"
       },
       "after": {
-        "type": "service",
-        "use": "bot.agent.knowledge.KnowledgeHook.AfterSaveKnowledgeBase"
-      }
+        "service": "bot.agent.knowledge.KnowledgeHook.AfterSaveKnowledgeBase"
+      },
+      "model": "bot.agent.NewKnowledgeBaseModel"
     }
   }
 }

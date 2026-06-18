@@ -34,16 +34,15 @@
           }
         ],
         "meta": {
-          "api": "/front/route/option",
-          "use": "bot.energon.NewParamCateModel",
-          "childUse": "bot.energon.NewParamModel",
           "childParentField": "cate_id",
           "valueMode": "leaf",
           "placeholder": [
             "选择参数分类",
             "选择参数"
           ],
-          "childExtraFields": "type,key"
+          "childExtraFields": "type,key",
+          "model": "bot.energon.NewParamCateModel",
+          "childModel": "bot.energon.NewParamModel"
         }
       },
       {

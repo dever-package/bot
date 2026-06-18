@@ -320,7 +320,6 @@
   },
   "data": {
     "form": {
-      "_model": "bot.agent.NewRuntimeConfigModel",
       "id": 1,
       "default_max_auto_steps": 5,
       "hard_max_auto_steps": 8,
@@ -332,7 +331,8 @@
       "script_sandbox_bwrap_path": "bwrap",
       "script_sandbox_network_mode": "none",
       "script_sandbox_timeout_seconds": 15,
-      "script_sandbox_output_max_bytes": 262144
+      "script_sandbox_output_max_bytes": 262144,
+      "model": "bot.agent.NewRuntimeConfigModel"
     },
     "sandbox_install_guide": "bubblewrap 不是 Linux 自带命令，需要部署时安装。\nDebian / Ubuntu：apt-get update && apt-get install -y bubblewrap\nCentOS / RHEL / Fedora：dnf install -y bubblewrap 或 yum install -y bubblewrap\nAlpine：apk add --no-cache bubblewrap\n检测命令：which bwrap && bwrap --version"
   },
@@ -342,12 +342,11 @@
   "action": {
     "submit": {
       "type": "save",
-      "use": "bot.agent.NewRuntimeConfigModel",
       "params": "form",
       "before": {
-        "type": "service",
-        "use": "bot.agent.setting.AgentHook.BeforeSaveRuntimeConfig"
-      }
+        "service": "bot.agent.setting.AgentHook.BeforeSaveRuntimeConfig"
+      },
+      "model": "bot.agent.NewRuntimeConfigModel"
     }
   }
 }

@@ -210,10 +210,9 @@
       "team_id": ""
     },
     "table": {
-      "page": 1,
-      "pageSize": 10,
-      "total": 0,
-      "filterFields": ["team_id"]
+      "filterFields": [
+        "team_id"
+      ]
     },
     "actionTarget": {
       "editTeamPowerId": "",

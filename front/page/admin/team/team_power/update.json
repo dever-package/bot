@@ -50,9 +50,6 @@
           }
         ],
         "meta": {
-          "api": "/front/route/option",
-          "use": "bot.energon.NewPowerCateModel",
-          "childUse": "bot.energon.NewPowerModel",
           "childParentField": "cate_id",
           "valueMode": "leaf",
           "placeholder": [
@@ -61,7 +58,9 @@
           ],
           "childExtraFields": "key,kind,cate_id,status",
           "formLayout": "horizontal",
-          "searchPlaceholder": "输入能力名称搜索..."
+          "searchPlaceholder": "输入能力名称搜索...",
+          "model": "bot.energon.NewPowerCateModel",
+          "childModel": "bot.energon.NewPowerModel"
         }
       },
       {
@@ -93,8 +92,7 @@
       "type": "save",
       "params": "form",
       "before": {
-        "type": "service",
-        "use": "bot.team.TeamHook.BeforeSaveTeamPower"
+        "service": "bot.team.TeamHook.BeforeSaveTeamPower"
       }
     }
   }

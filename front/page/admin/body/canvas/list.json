@@ -166,11 +166,7 @@
       "title": "画布",
       "description": "维护项目载体使用的画布基础信息。团队能力范围请在团队配置中维护。"
     },
-    "table": {
-      "page": 1,
-      "pageSize": 10,
-      "total": 0
-    },
+    "table": {},
     "actionTarget": {
       "id": ""
     }

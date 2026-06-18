@@ -61,9 +61,7 @@
           "typeDescription": "核心设定优先维护；高级设定用于流程、输出、能力和样例补充。",
           "typeField": "type",
           "primaryKey": "id",
-          "loadApi": "/front/route/option",
           "loadOption": {
-            "type": "service",
             "service": "bot.agent.setting.OptionService.LoadAgentSettings"
           },
           "loadKey": "agent-setting-load",
@@ -71,10 +69,6 @@
             "parentId": "state.route.query.id"
           },
           "savePath": "bot/agent/agent_setting/update",
-          "saveBefore": {
-            "type": "service",
-            "use": "bot.agent.setting.AgentHook.BeforeSaveAgentSetting"
-          },
           "context": {
             "agent_id": "state.route.query.id"
           },
@@ -101,7 +95,9 @@
                 "control": [
                   {
                     "value": "always",
-                    "hide": ["agent-setting-description"]
+                    "hide": [
+                      "agent-setting-description"
+                    ]
                   }
                 ]
               }
@@ -148,11 +144,15 @@
   "data": {
     "page": {
       "title": "智能体设定",
-    "description": "维护当前智能体的专属设定。左侧选择设定类型，右侧编辑该类型唯一设定。"
+      "description": "维护当前智能体的专属设定。左侧选择设定类型，右侧编辑该类型唯一设定。"
     },
     "option": {
-      "setting_type": "{{bot.agent.setting.OptionService.LoadAgentSettingTypes}}",
-      "setting_load_mode": "{{bot.agent.setting.OptionService.LoadSettingLoadModes}}"
+      "setting_type": {
+        "service": "bot.agent.setting.OptionService.LoadAgentSettingTypes"
+      },
+      "setting_load_mode": {
+        "service": "bot.agent.setting.OptionService.LoadSettingLoadModes"
+      }
     }
   },
   "state": {

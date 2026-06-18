@@ -46,9 +46,6 @@
         "placeholder": "请选择参数",
         "info": "会按映射规则过滤：选项/组合只显示单选或多选参数，附件只显示文件参数，固定值不需要内部参数。",
         "meta": {
-          "api": "/front/route/option",
-          "use": "bot.energon.NewParamCateModel",
-          "childUse": "bot.energon.NewParamModel",
           "childParentField": "cate_id",
           "valueMode": "leaf",
           "placeholder": [
@@ -87,7 +84,9 @@
                 ]
               }
             }
-          ]
+          ],
+          "model": "bot.energon.NewParamCateModel",
+          "childModel": "bot.energon.NewParamModel"
         }
       },
       {
@@ -105,7 +104,6 @@
           "itemName": "字段值",
           "valueFormat": "json",
           "fillFromOption": {
-            "source": "/front/route/option",
             "optionKey": "mapping.option",
             "option": {
               "model": "bot.energon.NewParamOptionModel",
@@ -139,7 +137,6 @@
         "value": "form.mapping",
         "mode": "form",
         "option": {
-          "type": "service",
           "service": "bot.energon.ParamOptionService.LoadFileIndexOptions",
           "valueField": "id",
           "labelField": "value"
@@ -205,7 +202,6 @@
         "meta": {
           "mainParamPath": "form.param_id",
           "extraParamsPath": "form.combo_params",
-          "optionSource": "/front/route/option",
           "optionSourceKey": "combo.optionSource",
           "optionSourceOption": {
             "model": "bot.energon.NewParamOptionModel",
@@ -215,7 +211,6 @@
             "order": "sort asc,id asc",
             "pageSize": 200
           },
-          "paramSource": "/front/route/option",
           "paramSourceKey": "combo.paramSource",
           "paramSourceOption": {
             "model": "bot.energon.NewParamModel",

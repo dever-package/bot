@@ -223,8 +223,7 @@
             "type": "delete",
             "params": "actionTarget.deleteProvider",
             "before": {
-              "type": "service",
-              "use": "bot.energon.hook.ProviderHook.BeforeDeleteProvider"
+              "service": "bot.energon.hook.ProviderHook.BeforeDeleteProvider"
             }
           }
         }
@@ -239,9 +238,6 @@
       "cate_id": ""
     },
     "table": {
-      "page": 1,
-      "pageSize": 10,
-      "total": 0,
       "filterFields": [
         "cate_id"
       ]

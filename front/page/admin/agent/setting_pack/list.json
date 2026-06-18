@@ -98,7 +98,10 @@
         "option": {
           "model": "bot.agent.NewSettingPackModel",
           "order": "sort asc,id asc",
-          "extraFields": ["status", "sort"]
+          "extraFields": [
+            "status",
+            "sort"
+          ]
         },
         "meta": {
           "title": "方案",
@@ -421,7 +424,9 @@
       "status": ""
     },
     "option": {
-      "setting_cate": "{{bot.agent.setting.OptionService.LoadSettingCates}}",
+      "setting_cate": {
+        "service": "bot.agent.setting.OptionService.LoadSettingCates"
+      },
       "setting_load_mode": [
         {
           "id": "always",
@@ -438,14 +443,11 @@
       ]
     },
     "table": {
-      "list": "<<bot.agent.NewSettingPackItemModel>>",
-      "page": 1,
-      "pageSize": 10,
-      "total": 0,
       "filterFields": [
         "pack_id",
         "status"
-      ]
+      ],
+      "model": "bot.agent.NewSettingPackItemModel"
     },
     "actionTarget": {
       "packId": "",

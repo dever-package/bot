@@ -91,8 +91,7 @@
       "type": "save",
       "params": "form",
       "before": {
-        "type": "service",
-        "use": "bot.team.TeamHook.BeforeSaveAssetCate"
+        "service": "bot.team.TeamHook.BeforeSaveAssetCate"
       }
     }
   }

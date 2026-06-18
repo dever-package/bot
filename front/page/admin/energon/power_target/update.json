@@ -34,16 +34,15 @@
           }
         ],
         "meta": {
-          "api": "/front/route/option",
-          "use": "bot.energon.NewProviderModel",
-          "childUse": "bot.energon.NewServiceModel",
           "childParentField": "provider_id",
           "valueMode": "leaf",
           "placeholder": [
             "选择来源",
             "选择服务"
           ],
-          "childExtraFields": "type"
+          "childExtraFields": "type",
+          "model": "bot.energon.NewProviderModel",
+          "childModel": "bot.energon.NewServiceModel"
         }
       },
       {

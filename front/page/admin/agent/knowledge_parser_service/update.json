@@ -122,8 +122,7 @@
         "sort": "$form.sort"
       },
       "before": {
-        "type": "service",
-        "use": "bot.agent.knowledge.KnowledgeHook.BeforeSaveKnowledgeParserService"
+        "service": "bot.agent.knowledge.KnowledgeHook.BeforeSaveKnowledgeParserService"
       }
     }
   }
