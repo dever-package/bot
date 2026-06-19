@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	botmodel "my/package/bot/model/energon"
-	botinput "my/package/bot/service/energon/input"
+	botmodel "github.com/dever-package/bot/model/energon"
+	botinput "github.com/dever-package/bot/service/energon/input"
 )
 
 type PowerParam = botinput.PowerParam

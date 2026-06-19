@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	frontstream "my/package/front/service/stream"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 const (

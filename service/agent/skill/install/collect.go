@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	agentskill "my/package/bot/service/agent/skill"
+	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
 func collectSkillSources(workDir string, plan installPlan, sourceURL string) ([]installedSkillSource, error) {

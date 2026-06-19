@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"my/package/bot/service/stream"
-	frontstream "my/package/front/service/stream"
+	"github.com/dever-package/bot/service/stream"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 func (s Service) Run(ctx context.Context, req RunRequest) map[string]any {

@@ -36,12 +36,12 @@ type KnowledgeEdge struct {
 }
 
 type KnowledgeEdgeIndex struct {
-	BaseStatus    struct{} `index:"knowledge_base_id,status,id"`
-	FromNode      struct{} `index:"from_node_id,status,id"`
-	ToNode        struct{} `index:"to_node_id,status,id"`
-	BaseType      struct{} `index:"knowledge_base_id,edge_type,status"`
-	DocType       struct{} `index:"doc_id,edge_type,status"`
-	BaseFromTo    struct{} `index:"knowledge_base_id,from_node_id,to_node_id,edge_type,status"`
+	BaseStatus struct{} `index:"knowledge_base_id,status,id"`
+	FromNode   struct{} `index:"from_node_id,status,id"`
+	ToNode     struct{} `index:"to_node_id,status,id"`
+	BaseType   struct{} `index:"knowledge_base_id,edge_type,status"`
+	DocType    struct{} `index:"doc_id,edge_type,status"`
+	BaseFromTo struct{} `index:"knowledge_base_id,from_node_id,to_node_id,edge_type,status"`
 }
 
 func NewKnowledgeEdgeModel() *orm.Model[KnowledgeEdge] {

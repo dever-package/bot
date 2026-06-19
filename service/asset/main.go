@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	assetmodel "my/package/bot/model/asset"
+	assetmodel "github.com/dever-package/bot/model/asset"
 )
 
 type Service struct{}

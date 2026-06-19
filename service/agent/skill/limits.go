@@ -1,6 +1,6 @@
 package skill
 
-import agentmodel "my/package/bot/model/agent"
+import agentmodel "github.com/dever-package/bot/model/agent"
 
 func LimitsFromRuntimeConfig(config agentmodel.RuntimeConfig) Limits {
 	defaults := DefaultLimits()

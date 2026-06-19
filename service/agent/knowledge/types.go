@@ -3,7 +3,7 @@ package knowledge
 import (
 	"time"
 
-	agentprompt "my/package/bot/service/agent/prompt"
+	agentprompt "github.com/dever-package/bot/service/agent/prompt"
 )
 
 type RetrievedSnippet = agentprompt.KnowledgeSnippet

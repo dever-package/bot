@@ -9,12 +9,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	memorymodel "my/package/bot/model/memory"
-	teammodel "my/package/bot/model/team"
-	agentservice "my/package/bot/service/agent"
-	assetservice "my/package/bot/service/asset"
-	memoryservice "my/package/bot/service/memory"
-	"my/package/bot/service/stream"
+	memorymodel "github.com/dever-package/bot/model/memory"
+	teammodel "github.com/dever-package/bot/model/team"
+	agentservice "github.com/dever-package/bot/service/agent"
+	assetservice "github.com/dever-package/bot/service/asset"
+	memoryservice "github.com/dever-package/bot/service/memory"
+	"github.com/dever-package/bot/service/stream"
 )
 
 type resolvedNodeAgent struct {

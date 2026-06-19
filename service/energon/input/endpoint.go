@@ -6,8 +6,8 @@ import (
 
 	"github.com/shemic/dever/util"
 
-	botmodel "my/package/bot/model/energon"
-	botprotocol "my/package/bot/service/energon/protocol"
+	botmodel "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 func SelectEndpoint(

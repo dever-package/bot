@@ -6,7 +6,7 @@ import (
 
 	"github.com/shemic/dever/orm"
 
-	assetmodel "my/package/bot/model/asset"
+	assetmodel "github.com/dever-package/bot/model/asset"
 )
 
 const (

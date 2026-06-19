@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	memorymodel "my/package/bot/model/memory"
+	memorymodel "github.com/dever-package/bot/model/memory"
 )
 
 type Service struct{}

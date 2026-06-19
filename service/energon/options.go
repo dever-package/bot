@@ -4,8 +4,8 @@ import (
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
-	botmodel "my/package/bot/model/energon"
-	botinput "my/package/bot/service/energon/input"
+	botmodel "github.com/dever-package/bot/model/energon"
+	botinput "github.com/dever-package/bot/service/energon/input"
 )
 
 const defaultMaxFiles = 5

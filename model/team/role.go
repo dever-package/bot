@@ -5,7 +5,7 @@ import (
 
 	"github.com/shemic/dever/orm"
 
-	agentmodel "my/package/bot/model/agent"
+	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
 const (

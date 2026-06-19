@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/uuid"
 
-	agentmodel "my/package/bot/model/agent"
-	agentskill "my/package/bot/service/agent/skill"
-	frontstream "my/package/front/service/stream"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	agentskill "github.com/dever-package/bot/service/agent/skill"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 const (

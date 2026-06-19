@@ -4,9 +4,9 @@ import (
 	"strconv"
 	"strings"
 
-	agentmodel "my/package/bot/model/agent"
-	energonmodel "my/package/bot/model/energon"
-	agentskill "my/package/bot/service/agent/skill"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	energonmodel "github.com/dever-package/bot/model/energon"
+	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
 type RuntimeInput struct {

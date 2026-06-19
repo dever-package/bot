@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	bodymodel "my/package/bot/model/body"
+	bodymodel "github.com/dever-package/bot/model/body"
 )
 
 type Service struct{}

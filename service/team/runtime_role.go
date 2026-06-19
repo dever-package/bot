@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	teammodel "my/package/bot/model/team"
-	agentservice "my/package/bot/service/agent"
-	"my/package/bot/service/stream"
+	teammodel "github.com/dever-package/bot/model/team"
+	agentservice "github.com/dever-package/bot/service/agent"
+	"github.com/dever-package/bot/service/stream"
 )
 
 func (s Service) RunRole(ctx context.Context, req RunRequest) (map[string]any, error) {

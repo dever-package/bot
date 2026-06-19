@@ -4,8 +4,8 @@ import (
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
-	projectservice "my/package/bot/service/project"
-	frontstream "my/package/front/service/stream"
+	projectservice "github.com/dever-package/bot/service/project"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type Project struct{}

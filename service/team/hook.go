@@ -7,9 +7,9 @@ import (
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
-	energonmodel "my/package/bot/model/energon"
-	teammodel "my/package/bot/model/team"
-	frontaction "my/package/front/service/action"
+	energonmodel "github.com/dever-package/bot/model/energon"
+	teammodel "github.com/dever-package/bot/model/team"
+	frontaction "github.com/dever-package/front/service/action"
 )
 
 const (

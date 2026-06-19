@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 
-	energonservice "my/package/bot/service/energon"
-	botstream "my/package/bot/service/energon/stream"
-	frontstream "my/package/front/service/stream"
+	energonservice "github.com/dever-package/bot/service/energon"
+	botstream "github.com/dever-package/bot/service/energon/stream"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type SelectionRequest struct {

@@ -3,7 +3,7 @@ package prompt
 import (
 	"strings"
 
-	agentskill "my/package/bot/service/agent/skill"
+	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
 func skillPrompt(catalog agentskill.Catalog, tools ToolRuntime) string {

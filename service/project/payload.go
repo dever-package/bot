@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	projectmodel "my/package/bot/model/project"
-	teammodel "my/package/bot/model/team"
+	projectmodel "github.com/dever-package/bot/model/project"
+	teammodel "github.com/dever-package/bot/model/team"
 )
 
 type payloadBuilder struct {

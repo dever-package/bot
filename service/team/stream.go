@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	teammodel "my/package/bot/model/team"
-	"my/package/bot/service/stream"
-	frontstream "my/package/front/service/stream"
+	teammodel "github.com/dever-package/bot/model/team"
+	"github.com/dever-package/bot/service/stream"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 func (s Service) ReadStream(ctx context.Context, requestID string, lastID string, count int64, block time.Duration) ([]frontstream.Entry, error) {

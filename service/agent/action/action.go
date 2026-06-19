@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	frontstream "my/package/front/service/stream"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type Action struct {
@@ -29,7 +29,7 @@ func ExtractAgentAction(text string) (string, Action, bool) {
 	if !ok {
 		return text, Action{}, false
 	}
-	
+
 	return clean, action, true
 }
 

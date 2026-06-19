@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	assetmodel "my/package/bot/model/asset"
-	teammodel "my/package/bot/model/team"
-	assetservice "my/package/bot/service/asset"
+	assetmodel "github.com/dever-package/bot/model/asset"
+	teammodel "github.com/dever-package/bot/model/team"
+	assetservice "github.com/dever-package/bot/service/asset"
 )
 
 func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammodel.Run) {

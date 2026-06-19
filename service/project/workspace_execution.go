@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	teammodel "my/package/bot/model/team"
-	workspacemodel "my/package/bot/model/workspace"
+	teammodel "github.com/dever-package/bot/model/team"
+	workspacemodel "github.com/dever-package/bot/model/workspace"
 )
 
 type workspaceExecutionCreate struct {

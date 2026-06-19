@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	teammodel "my/package/bot/model/team"
+	teammodel "github.com/dever-package/bot/model/team"
 )
 
 func (s Service) ValidateFlowGraph(ctx context.Context, teamID uint64) (map[string]any, error) {

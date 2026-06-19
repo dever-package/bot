@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	workspacemodel "my/package/bot/model/workspace"
+	workspacemodel "github.com/dever-package/bot/model/workspace"
 )
 
 const workspaceAgentMemoryLimit = 12

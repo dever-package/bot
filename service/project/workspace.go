@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	projectmodel "my/package/bot/model/project"
-	frontstream "my/package/front/service/stream"
+	projectmodel "github.com/dever-package/bot/model/project"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type WorkspaceService struct {

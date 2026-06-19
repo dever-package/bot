@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	botprotocol "my/package/bot/service/energon/protocol"
-	botprovider "my/package/bot/service/energon/provider"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
 )
 
 const (

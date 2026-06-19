@@ -5,7 +5,7 @@ import (
 
 	"github.com/shemic/dever/server"
 
-	frontstream "my/package/front/service/stream"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 func handleStreamRead(c *server.Context, reader frontstream.Reader) error {

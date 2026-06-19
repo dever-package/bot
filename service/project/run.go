@@ -6,13 +6,13 @@ import (
 	"strings"
 	"time"
 
-	agentmodel "my/package/bot/model/agent"
-	projectmodel "my/package/bot/model/project"
-	agentservice "my/package/bot/service/agent"
-	assetservice "my/package/bot/service/asset"
-	bodyservice "my/package/bot/service/body"
-	teamservice "my/package/bot/service/team"
-	frontstream "my/package/front/service/stream"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	projectmodel "github.com/dever-package/bot/model/project"
+	agentservice "github.com/dever-package/bot/service/agent"
+	assetservice "github.com/dever-package/bot/service/asset"
+	bodyservice "github.com/dever-package/bot/service/body"
+	teamservice "github.com/dever-package/bot/service/team"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type CanvasAgentRunRequest struct {

@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	agentmodel "my/package/bot/model/agent"
-	energonmodel "my/package/bot/model/energon"
-	agentruntime "my/package/bot/service/agent/runtime"
-	agentsetting "my/package/bot/service/agent/setting"
-	agentskill "my/package/bot/service/agent/skill"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	energonmodel "github.com/dever-package/bot/model/energon"
+	agentruntime "github.com/dever-package/bot/service/agent/runtime"
+	agentsetting "github.com/dever-package/bot/service/agent/setting"
+	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
 type Repo struct{}

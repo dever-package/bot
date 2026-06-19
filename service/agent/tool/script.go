@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"my/package/bot/service/agent/tool/sandbox"
+	"github.com/dever-package/bot/service/agent/tool/sandbox"
 )
 
 func executeRunSkillScript(ctx context.Context, req Request) (map[string]any, error) {

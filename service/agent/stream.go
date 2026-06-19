@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	botprotocol "my/package/bot/service/energon/protocol"
-	botstream "my/package/bot/service/energon/stream"
-	"my/package/bot/service/stream"
-	frontstream "my/package/front/service/stream"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botstream "github.com/dever-package/bot/service/energon/stream"
+	"github.com/dever-package/bot/service/stream"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type gatewayStreamState struct {

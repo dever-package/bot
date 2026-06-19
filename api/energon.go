@@ -5,8 +5,8 @@ import (
 
 	"github.com/shemic/dever/server"
 
-	energonservice "my/package/bot/service/energon"
-	frontstream "my/package/front/service/stream"
+	energonservice "github.com/dever-package/bot/service/energon"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type Energon struct{}

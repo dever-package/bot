@@ -3,7 +3,7 @@ package input
 import (
 	"strings"
 
-	botprotocol "my/package/bot/service/energon/protocol"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 func applyPromptMappedParams(mapped *botprotocol.MappedInput) {

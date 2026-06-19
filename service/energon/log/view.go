@@ -6,7 +6,7 @@ import (
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
-	botmodel "my/package/bot/model/energon"
+	botmodel "github.com/dever-package/bot/model/energon"
 )
 
 type LogViewService struct{}

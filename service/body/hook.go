@@ -6,7 +6,7 @@ import (
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
-	frontaction "my/package/front/service/action"
+	frontaction "github.com/dever-package/front/service/action"
 )
 
 const (

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	agentskill "my/package/bot/service/agent/skill"
+	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
 const maxDownloadBytes = 64 * 1024 * 1024

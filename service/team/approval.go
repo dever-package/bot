@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	teammodel "my/package/bot/model/team"
+	teammodel "github.com/dever-package/bot/model/team"
 )
 
 func (s Service) SubmitApproval(ctx context.Context, approvalID uint64, decision string, comment string, data map[string]any) (map[string]any, error) {

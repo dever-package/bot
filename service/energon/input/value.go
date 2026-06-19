@@ -10,7 +10,7 @@ import (
 
 	"github.com/shemic/dever/util"
 
-	uploadrepo "my/package/front/service/upload/repository"
+	uploadrepo "github.com/dever-package/front/service/upload/repository"
 )
 
 func FileValue(ctx context.Context, value any) any {

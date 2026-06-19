@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	teammodel "my/package/bot/model/team"
-	assetservice "my/package/bot/service/asset"
-	teamservice "my/package/bot/service/team"
+	teammodel "github.com/dever-package/bot/model/team"
+	assetservice "github.com/dever-package/bot/service/asset"
+	teamservice "github.com/dever-package/bot/service/team"
 )
 
 type CanvasRunRequest struct {

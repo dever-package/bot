@@ -8,8 +8,8 @@ import (
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
-	botmodel "my/package/bot/model/energon"
-	botinput "my/package/bot/service/energon/input"
+	botmodel "github.com/dever-package/bot/model/energon"
+	botinput "github.com/dever-package/bot/service/energon/input"
 )
 
 func normalizeServiceParamMapping(c *server.Context, paramRow map[string]any, rule int16, value any) string {

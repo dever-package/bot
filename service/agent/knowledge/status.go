@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	agentmodel "my/package/bot/model/agent"
+	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
 type indexStageResult struct {

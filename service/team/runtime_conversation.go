@@ -3,7 +3,7 @@ package team
 import (
 	"context"
 
-	teammodel "my/package/bot/model/team"
+	teammodel "github.com/dever-package/bot/model/team"
 )
 
 var conversationRoleStages = []string{

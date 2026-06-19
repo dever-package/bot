@@ -3,7 +3,7 @@ package api
 import (
 	"github.com/shemic/dever/server"
 
-	projectservice "my/package/bot/service/project"
+	projectservice "github.com/dever-package/bot/service/project"
 )
 
 type Workspace struct{}

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	knowledgeservice "my/package/bot/service/agent/knowledge"
+	knowledgeservice "github.com/dever-package/bot/service/agent/knowledge"
 )
 
 const (

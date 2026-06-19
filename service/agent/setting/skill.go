@@ -8,8 +8,8 @@ import (
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
-	agentmodel "my/package/bot/model/agent"
-	skillservice "my/package/bot/service/agent/skill"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	skillservice "github.com/dever-package/bot/service/agent/skill"
 )
 
 const skillDeletePathsKey = "_skill_delete_paths"

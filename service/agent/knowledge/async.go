@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	agentmodel "my/package/bot/model/agent"
+	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
 const (

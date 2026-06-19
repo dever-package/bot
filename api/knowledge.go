@@ -11,8 +11,8 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/shemic/dever/server"
 
-	knowledgeservice "my/package/bot/service/agent/knowledge"
-	frontstream "my/package/front/service/stream"
+	knowledgeservice "github.com/dever-package/bot/service/agent/knowledge"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type Knowledge struct{}

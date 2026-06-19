@@ -3,8 +3,8 @@ package project
 import (
 	"context"
 
-	teammodel "my/package/bot/model/team"
-	"my/package/bot/service/stream"
+	teammodel "github.com/dever-package/bot/model/team"
+	"github.com/dever-package/bot/service/stream"
 )
 
 func (s WorkspaceService) writeWorkspaceNodeEvent(ctx context.Context, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, event string, status string, output map[string]any) {

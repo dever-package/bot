@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	botmodel "my/package/bot/model/energon"
+	botmodel "github.com/dever-package/bot/model/energon"
 )
 
 func Record(ctx context.Context, item botmodel.Log) (record botmodel.Log) {

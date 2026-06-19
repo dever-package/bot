@@ -8,10 +8,10 @@ import (
 
 	"github.com/shemic/dever/util"
 
-	agentmodel "my/package/bot/model/agent"
-	energonmodel "my/package/bot/model/energon"
-	energonservice "my/package/bot/service/energon"
-	frontstream "my/package/front/service/stream"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	energonmodel "github.com/dever-package/bot/model/energon"
+	energonservice "github.com/dever-package/bot/service/energon"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 func (s Service) refreshDirectorySummaries(ctx context.Context, baseID uint64, dirID uint64) {

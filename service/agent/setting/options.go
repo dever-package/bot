@@ -6,8 +6,8 @@ import (
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
-	agentmodel "my/package/bot/model/agent"
-	energonmodel "my/package/bot/model/energon"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	energonmodel "github.com/dever-package/bot/model/energon"
 )
 
 type OptionService struct{}

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	botmodel "my/package/bot/model/energon"
+	botmodel "github.com/dever-package/bot/model/energon"
 )
 
 func addInputParamLabels(labels map[string]string, param botmodel.Param) {

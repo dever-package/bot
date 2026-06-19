@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	frontstream "my/package/front/service/stream"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 func NormalizeInput(raw any) map[string]any {

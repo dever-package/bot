@@ -3,7 +3,7 @@ package runtime
 import (
 	"strings"
 
-	agentmodel "my/package/bot/model/agent"
+	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
 const legacyMetadataFieldMaxLength = 240

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	agentmodel "my/package/bot/model/agent"
+	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
 func (s Service) RunTraces(ctx context.Context, runIDs []uint64) []map[string]any {

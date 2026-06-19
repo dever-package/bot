@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	projectmodel "my/package/bot/model/project"
-	userservice "my/package/user/service"
+	projectmodel "github.com/dever-package/bot/model/project"
+	userservice "github.com/dever-package/user/service"
 )
 
 func currentActor(ctx context.Context) (userservice.Actor, error) {

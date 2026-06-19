@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	agentaction "my/package/bot/service/agent/action"
-	agentknowledge "my/package/bot/service/agent/knowledge"
-	agenttool "my/package/bot/service/agent/tool"
-	frontstream "my/package/front/service/stream"
+	agentaction "github.com/dever-package/bot/service/agent/action"
+	agentknowledge "github.com/dever-package/bot/service/agent/knowledge"
+	agenttool "github.com/dever-package/bot/service/agent/tool"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 const (

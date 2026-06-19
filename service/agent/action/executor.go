@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	energonservice "my/package/bot/service/energon"
-	botprotocol "my/package/bot/service/energon/protocol"
-	botstream "my/package/bot/service/energon/stream"
-	frontstream "my/package/front/service/stream"
+	energonservice "github.com/dever-package/bot/service/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botstream "github.com/dever-package/bot/service/energon/stream"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 const (

@@ -3,7 +3,7 @@ package api
 import (
 	"github.com/shemic/dever/server"
 
-	skillinstall "my/package/bot/service/agent/skill/install"
+	skillinstall "github.com/dever-package/bot/service/agent/skill/install"
 )
 
 type SkillInstall struct{}

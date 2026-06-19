@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	agentmodel "my/package/bot/model/agent"
-	energonmodel "my/package/bot/model/energon"
-	agentaction "my/package/bot/service/agent/action"
-	agentknowledge "my/package/bot/service/agent/knowledge"
-	agentprompt "my/package/bot/service/agent/prompt"
-	agentskill "my/package/bot/service/agent/skill"
-	agenttool "my/package/bot/service/agent/tool"
-	frontstream "my/package/front/service/stream"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	energonmodel "github.com/dever-package/bot/model/energon"
+	agentaction "github.com/dever-package/bot/service/agent/action"
+	agentknowledge "github.com/dever-package/bot/service/agent/knowledge"
+	agentprompt "github.com/dever-package/bot/service/agent/prompt"
+	agentskill "github.com/dever-package/bot/service/agent/skill"
+	agenttool "github.com/dever-package/bot/service/agent/tool"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type runtimeOptions struct {

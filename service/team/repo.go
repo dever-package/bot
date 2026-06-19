@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	agentmodel "my/package/bot/model/agent"
-	energonmodel "my/package/bot/model/energon"
-	teammodel "my/package/bot/model/team"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	energonmodel "github.com/dever-package/bot/model/energon"
+	teammodel "github.com/dever-package/bot/model/team"
 )
 
 type Repo struct{}

@@ -11,8 +11,8 @@ import (
 
 	"github.com/shemic/dever/util"
 
-	agentmodel "my/package/bot/model/agent"
-	agentskill "my/package/bot/service/agent/skill"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
 func parseSkillSources(sources []installedSkillSource) ([]parsedSkillSource, error) {

@@ -3,7 +3,7 @@ package energon
 import (
 	"context"
 
-	botmodel "my/package/bot/model/energon"
+	botmodel "github.com/dever-package/bot/model/energon"
 )
 
 type Repo struct{}

@@ -4,12 +4,12 @@ import (
 	"context"
 	"strings"
 
-	agentaction "my/package/bot/service/agent/action"
-	agentprompt "my/package/bot/service/agent/prompt"
-	energonservice "my/package/bot/service/energon"
-	botprotocol "my/package/bot/service/energon/protocol"
-	botstream "my/package/bot/service/energon/stream"
-	frontstream "my/package/front/service/stream"
+	agentaction "github.com/dever-package/bot/service/agent/action"
+	agentprompt "github.com/dever-package/bot/service/agent/prompt"
+	energonservice "github.com/dever-package/bot/service/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botstream "github.com/dever-package/bot/service/energon/stream"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 const (

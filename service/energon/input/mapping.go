@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	botmodel "my/package/bot/model/energon"
-	botprotocol "my/package/bot/service/energon/protocol"
+	botmodel "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 func BuildMapped(

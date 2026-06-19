@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	graphCacheTTL      = 30 * time.Second
-	graphCacheMaxKeys  = 500
+	graphCacheTTL     = 30 * time.Second
+	graphCacheMaxKeys = 500
 )
 
 type graphCacheEntry struct {

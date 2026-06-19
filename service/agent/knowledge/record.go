@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	agentmodel "my/package/bot/model/agent"
+	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
 func withCreatedAt(values map[string]any) map[string]any {

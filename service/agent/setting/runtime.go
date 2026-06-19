@@ -4,8 +4,8 @@ import (
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
-	agentmodel "my/package/bot/model/agent"
-	agentruntime "my/package/bot/service/agent/runtime"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	agentruntime "github.com/dever-package/bot/service/agent/runtime"
 )
 
 func (AgentHook) ProviderBeforeSaveRuntimeConfig(_ *server.Context, params []any) any {

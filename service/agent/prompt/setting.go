@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	agentmodel "my/package/bot/model/agent"
+	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
 func settingPrompt(publicSettings []agentmodel.Setting, agentSettings []agentmodel.AgentSetting) string {

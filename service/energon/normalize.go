@@ -9,11 +9,11 @@ import (
 
 	"github.com/shemic/dever/util"
 
-	botmodel "my/package/bot/model/energon"
-	botlog "my/package/bot/service/energon/log"
-	botprotocol "my/package/bot/service/energon/protocol"
-	botprovider "my/package/bot/service/energon/provider"
-	botruntime "my/package/bot/service/energon/runtime"
+	botmodel "github.com/dever-package/bot/model/energon"
+	botlog "github.com/dever-package/bot/service/energon/log"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
+	botruntime "github.com/dever-package/bot/service/energon/runtime"
 )
 
 func (s GatewayService) handleNormalize(ctx context.Context, req *botprotocol.ShemicRequest) (*GatewayResponse, error) {

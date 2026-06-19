@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"strings"
 
+	energonmodel "github.com/dever-package/bot/model/energon"
+	energonservice "github.com/dever-package/bot/service/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	"github.com/google/uuid"
 	"github.com/shemic/dever/util"
-	energonmodel "my/package/bot/model/energon"
-	energonservice "my/package/bot/service/energon"
-	botprotocol "my/package/bot/service/energon/protocol"
 )
 
 type embeddingService struct {

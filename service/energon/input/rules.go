@@ -3,7 +3,7 @@ package input
 import (
 	"strings"
 
-	botmodel "my/package/bot/model/energon"
+	botmodel "github.com/dever-package/bot/model/energon"
 )
 
 const (

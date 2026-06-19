@@ -1,11 +1,11 @@
 package team
 
 import (
-	agentservice "my/package/bot/service/agent"
-	assetservice "my/package/bot/service/asset"
-	energonservice "my/package/bot/service/energon"
-	memoryservice "my/package/bot/service/memory"
-	frontstream "my/package/front/service/stream"
+	agentservice "github.com/dever-package/bot/service/agent"
+	assetservice "github.com/dever-package/bot/service/asset"
+	energonservice "github.com/dever-package/bot/service/energon"
+	memoryservice "github.com/dever-package/bot/service/memory"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type Service struct {

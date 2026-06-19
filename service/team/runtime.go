@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	teammodel "my/package/bot/model/team"
-	assetservice "my/package/bot/service/asset"
-	"my/package/bot/service/stream"
+	teammodel "github.com/dever-package/bot/model/team"
+	assetservice "github.com/dever-package/bot/service/asset"
+	"github.com/dever-package/bot/service/stream"
 )
 
 func (s Service) RunTeam(ctx context.Context, req RunRequest) (map[string]any, error) {

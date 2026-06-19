@@ -10,7 +10,7 @@ import (
 
 	"github.com/shemic/dever/util"
 
-	agentmodel "my/package/bot/model/agent"
+	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
 var (
@@ -206,8 +206,8 @@ func loadConceptNodeIDs(ctx context.Context, baseID uint64) map[string]uint64 {
 		"node_type":         agentmodel.KnowledgeNodeTypeConcept,
 		"status":            1,
 	}, map[string]any{
-		"field": "main.id, main.title",
-		"page":  1,
+		"field":    "main.id, main.title",
+		"page":     1,
 		"pageSize": 200,
 	})
 	if len(rows) == 0 {

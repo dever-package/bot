@@ -8,13 +8,13 @@ import (
 
 	"github.com/google/uuid"
 
-	botmodel "my/package/bot/model/energon"
-	botprotocol "my/package/bot/service/energon/protocol"
-	botadapters "my/package/bot/service/energon/protocol/adapters"
-	botprovider "my/package/bot/service/energon/provider"
-	botstream "my/package/bot/service/energon/stream"
-	bottask "my/package/bot/service/energon/task"
-	frontstream "my/package/front/service/stream"
+	botmodel "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botadapters "github.com/dever-package/bot/service/energon/protocol/adapters"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
+	botstream "github.com/dever-package/bot/service/energon/stream"
+	bottask "github.com/dever-package/bot/service/energon/task"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type GatewayService struct {

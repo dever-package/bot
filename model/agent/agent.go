@@ -5,7 +5,7 @@ import (
 
 	"github.com/shemic/dever/orm"
 
-	energonmodel "my/package/bot/model/energon"
+	energonmodel "github.com/dever-package/bot/model/energon"
 )
 
 type Agent struct {

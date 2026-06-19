@@ -3,9 +3,9 @@ package tool
 import (
 	"time"
 
-	agentmodel "my/package/bot/model/agent"
-	agentruntime "my/package/bot/service/agent/runtime"
-	"my/package/bot/service/agent/tool/sandbox"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	agentruntime "github.com/dever-package/bot/service/agent/runtime"
+	"github.com/dever-package/bot/service/agent/tool/sandbox"
 )
 
 func OptionsFromRuntimeConfig(config agentmodel.RuntimeConfig) Options {

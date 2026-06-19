@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	agentmodel "my/package/bot/model/agent"
-	frontstream "my/package/front/service/stream"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 func (s Service) ReadStream(ctx context.Context, requestID string, lastID string, count int64, block time.Duration) ([]frontstream.Entry, error) {

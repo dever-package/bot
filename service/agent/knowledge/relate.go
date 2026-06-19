@@ -9,7 +9,7 @@ import (
 
 	dlog "github.com/shemic/dever/log"
 
-	agentmodel "my/package/bot/model/agent"
+	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
 const (

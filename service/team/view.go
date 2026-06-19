@@ -1,6 +1,6 @@
 package team
 
-import teammodel "my/package/bot/model/team"
+import teammodel "github.com/dever-package/bot/model/team"
 
 func runToMap(run teammodel.Run) map[string]any {
 	return map[string]any{

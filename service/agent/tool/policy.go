@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	frontstream "my/package/front/service/stream"
+	frontstream "github.com/dever-package/front/service/stream"
 
-	agentskill "my/package/bot/service/agent/skill"
+	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
 const (

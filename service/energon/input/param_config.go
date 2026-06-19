@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	botmodel "my/package/bot/model/energon"
+	botmodel "github.com/dever-package/bot/model/energon"
 )
 
 type PowerParam struct {

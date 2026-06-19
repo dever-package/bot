@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	agentmodel "my/package/bot/model/agent"
-	energonservice "my/package/bot/service/energon"
-	frontstream "my/package/front/service/stream"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	energonservice "github.com/dever-package/bot/service/energon"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 const (

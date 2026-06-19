@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	teammodel "my/package/bot/model/team"
-	assetservice "my/package/bot/service/asset"
-	energonservice "my/package/bot/service/energon"
-	"my/package/bot/service/stream"
+	teammodel "github.com/dever-package/bot/model/team"
+	assetservice "github.com/dever-package/bot/service/asset"
+	energonservice "github.com/dever-package/bot/service/energon"
+	"github.com/dever-package/bot/service/stream"
 )
 
 func (s Service) TeamList(ctx context.Context) (map[string]any, error) {

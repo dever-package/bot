@@ -5,8 +5,8 @@ import (
 
 	"github.com/shemic/dever/util"
 
-	agentmodel "my/package/bot/model/agent"
-	frontaction "my/package/front/service/action"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	frontaction "github.com/dever-package/front/service/action"
 )
 
 const (

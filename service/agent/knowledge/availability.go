@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	agentmodel "my/package/bot/model/agent"
+	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
 func unavailableKnowledgeDocIDs(ctx context.Context, docIDs []uint64) map[uint64]struct{} {

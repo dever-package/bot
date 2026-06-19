@@ -3,7 +3,7 @@ package knowledge
 import (
 	"context"
 
-	agentmodel "my/package/bot/model/agent"
+	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
 func clearKnowledgeDocumentIndex(ctx context.Context, baseID uint64, docID uint64) {

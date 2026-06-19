@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strings"
 
-	botprotocol "my/package/bot/service/energon/protocol"
-	botprovider "my/package/bot/service/energon/provider"
-	bottask "my/package/bot/service/energon/task"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
+	bottask "github.com/dever-package/bot/service/energon/task"
 )
 
 type OpenAIAdapter struct{}

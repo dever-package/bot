@@ -5,9 +5,9 @@ import (
 
 	"github.com/shemic/dever/server"
 
-	teamservice "my/package/bot/service/team"
-	frontstream "my/package/front/service/stream"
-	userservice "my/package/user/service"
+	teamservice "github.com/dever-package/bot/service/team"
+	frontstream "github.com/dever-package/front/service/stream"
+	userservice "github.com/dever-package/user/service"
 )
 
 type Team struct{}

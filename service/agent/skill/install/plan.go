@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"strings"
 
-	agentskill "my/package/bot/service/agent/skill"
-	frontstream "my/package/front/service/stream"
+	agentskill "github.com/dever-package/bot/service/agent/skill"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 const (

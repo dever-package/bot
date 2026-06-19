@@ -3,7 +3,7 @@ package api
 import (
 	"github.com/shemic/dever/server"
 
-	agentservice "my/package/bot/service/agent"
+	agentservice "github.com/dever-package/bot/service/agent"
 )
 
 type Agent struct{}

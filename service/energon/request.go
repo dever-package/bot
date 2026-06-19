@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	botprotocol "my/package/bot/service/energon/protocol"
-	botstream "my/package/bot/service/energon/stream"
-	bottask "my/package/bot/service/energon/task"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botstream "github.com/dever-package/bot/service/energon/stream"
+	bottask "github.com/dever-package/bot/service/energon/task"
 )
 
 func (s GatewayService) Request(ctx context.Context, raw GatewayRequest) botprotocol.Response {

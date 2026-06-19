@@ -15,8 +15,8 @@ import (
 
 	"github.com/shemic/dever/util"
 
-	agentmodel "my/package/bot/model/agent"
-	agentprompt "my/package/bot/service/agent/prompt"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	agentprompt "github.com/dever-package/bot/service/agent/prompt"
 )
 
 func trimText(value any) string {

@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	energonservice "my/package/bot/service/energon"
+	energonservice "github.com/dever-package/bot/service/energon"
 )
 
 const maxPromptAssets = 24

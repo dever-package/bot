@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	energonmodel "my/package/bot/model/energon"
+	energonmodel "github.com/dever-package/bot/model/energon"
 )
 
 func powerPrompt(powers []energonmodel.Power) string {

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	botprotocol "my/package/bot/service/energon/protocol"
-	bottask "my/package/bot/service/energon/task"
-	frontstream "my/package/front/service/stream"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	bottask "github.com/dever-package/bot/service/energon/task"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 const Namespace = "energon"

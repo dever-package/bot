@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	botmodel "my/package/bot/model/energon"
-	botinput "my/package/bot/service/energon/input"
-	botprotocol "my/package/bot/service/energon/protocol"
+	botmodel "github.com/dever-package/bot/model/energon"
+	botinput "github.com/dever-package/bot/service/energon/input"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 func orderActivePowerTargets(items []botmodel.PowerTarget) []botmodel.PowerTarget {

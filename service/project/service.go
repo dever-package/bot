@@ -8,12 +8,12 @@ import (
 
 	"github.com/shemic/dever/orm"
 
-	assetservice "my/package/bot/service/asset"
-	bodyservice "my/package/bot/service/body"
-	teamservice "my/package/bot/service/team"
+	assetservice "github.com/dever-package/bot/service/asset"
+	bodyservice "github.com/dever-package/bot/service/body"
+	teamservice "github.com/dever-package/bot/service/team"
 
-	projectmodel "my/package/bot/model/project"
-	teammodel "my/package/bot/model/team"
+	projectmodel "github.com/dever-package/bot/model/project"
+	teammodel "github.com/dever-package/bot/model/team"
 )
 
 type Service struct {

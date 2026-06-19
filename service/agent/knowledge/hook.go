@@ -8,9 +8,9 @@ import (
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
-	agentmodel "my/package/bot/model/agent"
-	energonmodel "my/package/bot/model/energon"
-	frontaction "my/package/front/service/action"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	energonmodel "github.com/dever-package/bot/model/energon"
+	frontaction "github.com/dever-package/front/service/action"
 )
 
 type KnowledgeHook struct{}

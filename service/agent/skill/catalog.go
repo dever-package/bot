@@ -2,7 +2,7 @@ package skill
 
 import (
 	"fmt"
-	agentmodel "my/package/bot/model/agent"
+	agentmodel "github.com/dever-package/bot/model/agent"
 	"strings"
 )
 

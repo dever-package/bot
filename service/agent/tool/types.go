@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	agentaction "my/package/bot/service/agent/action"
-	agentskill "my/package/bot/service/agent/skill"
-	"my/package/bot/service/agent/tool/sandbox"
+	agentaction "github.com/dever-package/bot/service/agent/action"
+	agentskill "github.com/dever-package/bot/service/agent/skill"
+	"github.com/dever-package/bot/service/agent/tool/sandbox"
 )
 
 const (

@@ -7,9 +7,9 @@ import (
 	"regexp"
 	"strings"
 
-	agentmodel "my/package/bot/model/agent"
-	agentruntime "my/package/bot/service/agent"
-	agentskill "my/package/bot/service/agent/skill"
+	agentmodel "github.com/dever-package/bot/model/agent"
+	agentruntime "github.com/dever-package/bot/service/agent"
+	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
 func (s Service) buildInstallPlan(ctx context.Context, execInfo *skillInstallExecution) (installPlan, error) {

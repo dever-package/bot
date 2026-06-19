@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	teammodel "my/package/bot/model/team"
-	workspacemodel "my/package/bot/model/workspace"
+	teammodel "github.com/dever-package/bot/model/team"
+	workspacemodel "github.com/dever-package/bot/model/workspace"
 )
 
 const workspaceCanvasRunMode = "workspace_canvas"

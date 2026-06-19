@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	botinput "my/package/bot/service/energon/input"
-	botprotocol "my/package/bot/service/energon/protocol"
-	botprovider "my/package/bot/service/energon/provider"
-	botruntime "my/package/bot/service/energon/runtime"
-	botstream "my/package/bot/service/energon/stream"
-	bottask "my/package/bot/service/energon/task"
+	botinput "github.com/dever-package/bot/service/energon/input"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
+	botruntime "github.com/dever-package/bot/service/energon/runtime"
+	botstream "github.com/dever-package/bot/service/energon/stream"
+	bottask "github.com/dever-package/bot/service/energon/task"
 )
 
 func (s GatewayService) callNormalizeTarget(

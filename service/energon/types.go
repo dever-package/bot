@@ -1,8 +1,8 @@
 package energon
 
 import (
-	botmodel "my/package/bot/model/energon"
-	botprovider "my/package/bot/service/energon/provider"
+	botmodel "github.com/dever-package/bot/model/energon"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
 )
 
 const (

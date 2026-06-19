@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	botprotocol "my/package/bot/service/energon/protocol"
-	frontstream "my/package/front/service/stream"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type Reader func(ctx context.Context, requestID string, lastID string, count int64, block time.Duration) ([]Entry, error)
