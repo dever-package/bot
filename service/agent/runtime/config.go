@@ -6,8 +6,6 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
-const legacyMetadataFieldMaxLength = 240
-
 func WithDefaults(config agentmodel.RuntimeConfig) agentmodel.RuntimeConfig {
 	defaults := agentmodel.DefaultRuntimeConfig()
 	if config.ID == 0 {
@@ -57,10 +55,10 @@ func positiveInt(value int, fallback int) int {
 }
 
 func metadataFieldMaxLength(value int, fallback int) int {
-	if value <= 0 || value == legacyMetadataFieldMaxLength {
-		return fallback
+	if value > 0 {
+		return value
 	}
-	return value
+	return fallback
 }
 
 func defaultString(value string, fallback string) string {

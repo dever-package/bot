@@ -22,9 +22,14 @@ import (
 )
 
 const (
-	knowledgeStorageRoot       = "data/knowledge"
-	maxEditableFileBytes       = 5 * 1024 * 1024
-	knowledgeUploadTempDirName = ".upload"
+	knowledgeStorageRoot             = "data/knowledge"
+	maxEditableFileBytes             = 5 * 1024 * 1024
+	maxKnowledgeUploadPartBytes      = 10 * 1024 * 1024
+	maxKnowledgeUploadTotalBytes     = 100 * 1024 * 1024
+	maxKnowledgeUploadParts          = 200
+	maxKnowledgeZipEntries           = 2000
+	maxKnowledgeZipUncompressedBytes = 100 * 1024 * 1024
+	knowledgeUploadTempDirName       = ".upload"
 )
 
 var editableKnowledgeFileExts = map[string]bool{
@@ -245,6 +250,9 @@ func (s Service) CreateKnowledgeFileNode(ctx context.Context, input KnowledgeCre
 		if err != nil {
 			return KnowledgeFileOperationResult{}, err
 		}
+		if int64(len(raw)) > maxKnowledgeUploadTotalBytes {
+			return KnowledgeFileOperationResult{}, fmt.Errorf("上传文件超过 %d MB 限制", maxKnowledgeUploadTotalBytes/1024/1024)
+		}
 		if err := os.MkdirAll(parentPath, 0o755); err != nil {
 			return KnowledgeFileOperationResult{}, fmt.Errorf("创建父目录失败: %w", err)
 		}
@@ -285,6 +293,9 @@ func (s Service) SaveKnowledgeUploadPart(ctx context.Context, input KnowledgeUpl
 	if input.PartNumber <= 0 || input.TotalParts <= 0 || input.PartNumber > input.TotalParts {
 		return KnowledgeUploadPartResult{}, fmt.Errorf("上传分片序号无效")
 	}
+	if input.TotalParts > maxKnowledgeUploadParts {
+		return KnowledgeUploadPartResult{}, fmt.Errorf("上传分片数量超过 %d 个限制", maxKnowledgeUploadParts)
+	}
 	uploadID, err := normalizeKnowledgeUploadID(input.UploadID)
 	if err != nil {
 		return KnowledgeUploadPartResult{}, err
@@ -295,6 +306,12 @@ func (s Service) SaveKnowledgeUploadPart(ctx context.Context, input KnowledgeUpl
 	}
 	if err := saveKnowledgeUploadPart(root, uploadID, input.PartNumber, input.Source); err != nil {
 		return KnowledgeUploadPartResult{}, err
+	}
+	if size, err := knowledgeUploadStoredBytes(root, uploadID); err != nil {
+		return KnowledgeUploadPartResult{}, err
+	} else if size > maxKnowledgeUploadTotalBytes {
+		_ = os.RemoveAll(knowledgeUploadDir(root, uploadID))
+		return KnowledgeUploadPartResult{}, fmt.Errorf("上传文件超过 %d MB 限制", maxKnowledgeUploadTotalBytes/1024/1024)
 	}
 	result := KnowledgeUploadPartResult{
 		UploadID:   uploadID,
@@ -1570,10 +1587,18 @@ func isKnowledgeZipUpload(name string, raw []byte) bool {
 }
 
 func extractKnowledgeZip(root string, parentPath string, raw []byte) error {
+	if int64(len(raw)) > maxKnowledgeUploadTotalBytes {
+		return fmt.Errorf("zip 文件超过 %d MB 限制", maxKnowledgeUploadTotalBytes/1024/1024)
+	}
 	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
 	if err != nil {
 		return fmt.Errorf("解压 zip 失败: %w", err)
 	}
+	if len(reader.File) > maxKnowledgeZipEntries {
+		return fmt.Errorf("zip 条目超过 %d 个限制", maxKnowledgeZipEntries)
+	}
+	var extractedBytes int64
+	var extractedFiles int
 	for _, file := range reader.File {
 		relPath, ok := cleanZipEntryPath(file.Name)
 		if !ok {
@@ -1592,6 +1617,15 @@ func extractKnowledgeZip(root string, parentPath string, raw []byte) error {
 			}
 			continue
 		}
+		if !file.FileInfo().Mode().IsRegular() {
+			return fmt.Errorf("zip 不支持非普通文件: %s", relPath)
+		}
+		if extractedFiles >= maxKnowledgeZipEntries {
+			return fmt.Errorf("zip 文件条目超过 %d 个限制", maxKnowledgeZipEntries)
+		}
+		if int64(file.UncompressedSize64) > maxKnowledgeZipUncompressedBytes-extractedBytes {
+			return fmt.Errorf("zip 解压后文件超过 %d MB 限制", maxKnowledgeZipUncompressedBytes/1024/1024)
+		}
 		if _, err := os.Stat(target); err == nil {
 			return fmt.Errorf("zip 内文件已存在: %s", relPath)
 		}
@@ -1602,11 +1636,14 @@ func extractKnowledgeZip(root string, parentPath string, raw []byte) error {
 		if err != nil {
 			return fmt.Errorf("读取 zip 文件失败: %w", err)
 		}
-		if err := writeKnowledgeZipFile(target, source); err != nil {
+		written, err := writeKnowledgeZipFile(target, source, maxKnowledgeZipUncompressedBytes-extractedBytes)
+		if err != nil {
 			source.Close()
 			return err
 		}
 		source.Close()
+		extractedBytes += written
+		extractedFiles++
 	}
 	return nil
 }
@@ -1624,16 +1661,24 @@ func cleanZipEntryPath(name string) (string, bool) {
 	return cleaned, true
 }
 
-func writeKnowledgeZipFile(target string, source io.Reader) error {
+func writeKnowledgeZipFile(target string, source io.Reader, maxBytes int64) (int64, error) {
+	if maxBytes <= 0 {
+		return 0, fmt.Errorf("zip 解压后文件超过 %d MB 限制", maxKnowledgeZipUncompressedBytes/1024/1024)
+	}
 	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		return fmt.Errorf("创建 zip 文件失败: %w", err)
+		return 0, fmt.Errorf("创建 zip 文件失败: %w", err)
 	}
 	defer out.Close()
-	if _, err := io.Copy(out, source); err != nil {
-		return fmt.Errorf("写入 zip 文件失败: %w", err)
+	written, err := io.Copy(out, io.LimitReader(source, maxBytes+1))
+	if err != nil {
+		return written, fmt.Errorf("写入 zip 文件失败: %w", err)
 	}
-	return nil
+	if written > maxBytes {
+		_ = os.Remove(target)
+		return written, fmt.Errorf("zip 解压后文件超过 %d MB 限制", maxKnowledgeZipUncompressedBytes/1024/1024)
+	}
+	return written, nil
 }
 
 func (s Service) completeKnowledgeUploadParts(
@@ -1727,14 +1772,43 @@ func saveKnowledgeUploadPart(root string, uploadID string, partNumber int, sourc
 	if err != nil {
 		return fmt.Errorf("写入上传分片失败: %w", err)
 	}
-	if _, err := io.Copy(out, source); err != nil {
+	written, err := io.Copy(out, io.LimitReader(source, maxKnowledgeUploadPartBytes+1))
+	if err != nil {
 		out.Close()
 		return fmt.Errorf("保存上传分片失败: %w", err)
+	}
+	if written > maxKnowledgeUploadPartBytes {
+		out.Close()
+		_ = os.Remove(partPath)
+		return fmt.Errorf("上传分片超过 %d MB 限制", maxKnowledgeUploadPartBytes/1024/1024)
 	}
 	if err := out.Close(); err != nil {
 		return fmt.Errorf("保存上传分片失败: %w", err)
 	}
 	return nil
+}
+
+func knowledgeUploadStoredBytes(root string, uploadID string) (int64, error) {
+	uploadDir := knowledgeUploadDir(root, uploadID)
+	entries, err := os.ReadDir(uploadDir)
+	if err != nil {
+		return 0, fmt.Errorf("读取上传分片目录失败: %w", err)
+	}
+	var total int64
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "part-") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return 0, fmt.Errorf("读取上传分片失败: %w", err)
+		}
+		total += info.Size()
+		if total > maxKnowledgeUploadTotalBytes {
+			return total, nil
+		}
+	}
+	return total, nil
 }
 
 func knowledgeUploadPartsComplete(root string, uploadID string, totalParts int) bool {
@@ -1756,16 +1830,26 @@ func mergeKnowledgeUploadParts(root string, uploadID string, totalParts int) (st
 		return "", fmt.Errorf("创建上传合并文件失败: %w", err)
 	}
 	defer out.Close()
+	var mergedBytes int64
 	for partNumber := 1; partNumber <= totalParts; partNumber++ {
 		partPath := knowledgeUploadPartPath(root, uploadID, partNumber)
 		in, err := os.Open(partPath)
 		if err != nil {
 			return "", fmt.Errorf("上传分片缺失")
 		}
-		_, copyErr := io.Copy(out, in)
+		remaining := maxKnowledgeUploadTotalBytes - mergedBytes
+		if remaining <= 0 {
+			_ = in.Close()
+			return "", fmt.Errorf("上传文件超过 %d MB 限制", maxKnowledgeUploadTotalBytes/1024/1024)
+		}
+		copied, copyErr := io.Copy(out, io.LimitReader(in, remaining+1))
 		_ = in.Close()
 		if copyErr != nil {
 			return "", fmt.Errorf("合并上传分片失败: %w", copyErr)
+		}
+		mergedBytes += copied
+		if mergedBytes > maxKnowledgeUploadTotalBytes {
+			return "", fmt.Errorf("上传文件超过 %d MB 限制", maxKnowledgeUploadTotalBytes/1024/1024)
 		}
 	}
 	return mergedPath, nil

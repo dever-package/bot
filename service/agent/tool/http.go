@@ -104,14 +104,16 @@ func performHTTPRequest(ctx context.Context, spec httpSpec) (map[string]any, err
 	}
 
 	client := &http.Client{
-		Timeout: time.Duration(timeoutSec) * time.Second,
+		Timeout:   time.Duration(timeoutSec) * time.Second,
+		Transport: newExternalHTTPTransport(),
 		CheckRedirect: func(next *http.Request, via []*http.Request) error {
 			if len(via) >= 3 {
 				return fmt.Errorf("HTTP 跳转次数超过限制")
 			}
-			return validateExternalURL(context.Background(), next.URL)
+			return validateExternalURL(next.Context(), next.URL)
 		},
 	}
+	defer client.CloseIdleConnections()
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, err
@@ -201,25 +203,89 @@ func validateExternalURL(ctx context.Context, parsed *url.URL) error {
 	if host == "" {
 		return fmt.Errorf("HTTP URL 缺少主机")
 	}
+	_, err := resolveAllowedExternalIPs(ctx, host)
+	return err
+}
+
+func newExternalHTTPTransport() *http.Transport {
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport := base.Clone()
+		transport.Proxy = nil
+		transport.DialContext = dialAllowedExternalAddress
+		transport.TLSHandshakeTimeout = 10 * time.Second
+		transport.ResponseHeaderTimeout = 30 * time.Second
+		transport.ExpectContinueTimeout = time.Second
+		return transport
+	}
+	return &http.Transport{
+		Proxy:                 nil,
+		DialContext:           dialAllowedExternalAddress,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		ExpectContinueTimeout: time.Second,
+	}
+}
+
+var externalHTTPDialer = &net.Dialer{
+	Timeout:   10 * time.Second,
+	KeepAlive: 30 * time.Second,
+}
+
+func dialAllowedExternalAddress(ctx context.Context, network string, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP 地址无效")
+	}
+	ips, err := resolveAllowedExternalIPs(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	var lastErr error
+	for _, ip := range ips {
+		conn, err := externalHTTPDialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("HTTP 主机没有可用地址: %s", host)
+}
+
+func resolveAllowedExternalIPs(ctx context.Context, host string) ([]net.IP, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), ".")
+	switch host {
+	case "", "localhost", "localhost.localdomain":
+		return nil, fmt.Errorf("HTTP 请求拒绝访问内网或本机地址: %s", host)
+	}
 	if ip := net.ParseIP(host); ip != nil {
 		if rejectUnsafeHost(ip) {
-			return fmt.Errorf("HTTP 请求拒绝访问内网或本机地址: %s", host)
+			return nil, fmt.Errorf("HTTP 请求拒绝访问内网或本机地址: %s", host)
 		}
-		return nil
+		return []net.IP{ip}, nil
 	}
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	lookupCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupIPAddr(lookupCtx, host)
 	if err != nil {
-		return fmt.Errorf("解析 HTTP 主机失败: %s", err.Error())
+		return nil, fmt.Errorf("解析 HTTP 主机失败: %s", err.Error())
 	}
-	if len(ips) == 0 {
-		return fmt.Errorf("HTTP 主机没有可用地址: %s", host)
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("HTTP 主机没有可用地址: %s", host)
 	}
-	for _, item := range ips {
+	ips := make([]net.IP, 0, len(addrs))
+	for _, item := range addrs {
 		if rejectUnsafeHost(item.IP) {
-			return fmt.Errorf("HTTP 请求拒绝访问内网或本机地址: %s", host)
+			return nil, fmt.Errorf("HTTP 请求拒绝访问内网或本机地址: %s", host)
 		}
+		ips = append(ips, item.IP)
 	}
-	return nil
+	return ips, nil
 }
 
 func applyQuery(parsed *url.URL, query map[string]any) {
