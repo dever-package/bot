@@ -78,7 +78,9 @@ func (s Service) RunTeam(ctx context.Context, req RunRequest) (map[string]any, e
 			"name": team.Name,
 		},
 	})
-	go s.executeTeamRun(context.Background(), runID)
+	s.runAsync(context.Background(), runID, func(ctx context.Context) {
+		s.executeTeamRun(ctx, runID)
+	})
 	return map[string]any{
 		"request_id": requestID,
 		"run_id":     runID,
@@ -183,7 +185,9 @@ func (s Service) RunFlow(ctx context.Context, req RunRequest) (map[string]any, e
 			"key":  flow.Key,
 		},
 	})
-	go s.executeSingleFlowRun(context.Background(), runID, flow.ID, req.Input)
+	s.runAsync(context.Background(), runID, func(ctx context.Context) {
+		s.executeSingleFlowRun(ctx, runID, flow.ID, req.Input)
+	})
 	return map[string]any{
 		"request_id": requestID,
 		"run_id":     runID,
@@ -227,10 +231,14 @@ func (s Service) continueWaitingRun(ctx context.Context, run teammodel.Run, flow
 			flowID = flowRun.FlowID
 			input = jsonMap(flowRun.Input)
 		}
-		go s.executeSingleFlowRun(ctx, run.ID, flowID, input)
+		s.runAsync(ctx, run.ID, func(ctx context.Context) {
+			s.executeSingleFlowRun(ctx, run.ID, flowID, input)
+		})
 		return
 	}
-	go s.executeTeamRun(ctx, run.ID)
+	s.runAsync(ctx, run.ID, func(ctx context.Context) {
+		s.executeTeamRun(ctx, run.ID)
+	})
 }
 
 func isSingleFlowRunMode(input map[string]any) bool {
@@ -510,6 +518,16 @@ func (s Service) executeReadyFlows(ctx context.Context, run teammodel.Run, graph
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					results[index] = flowExecutionResult{
+						flowID:   flow.ID,
+						flowName: flow.Name,
+						status:   teammodel.RunStatusFail,
+						err:      runtimePanicError(recovered),
+					}
+				}
+			}()
 			status, output, err := s.executeFlowWithGraph(
 				ctx,
 				run,

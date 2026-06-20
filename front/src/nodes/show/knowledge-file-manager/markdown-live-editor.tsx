@@ -14,6 +14,7 @@ export type UploadedAttachment = {
 export type MarkdownAttachmentUploadMany = (files: File[]) => Promise<UploadedAttachment[]>
 
 type MarkdownLiveEditorProps = {
+  active: boolean
   value: string
   linkBaseURL: string
   onChange: (content: string) => void
@@ -76,6 +77,7 @@ export function preloadMarkdownLiveEditorRuntime() {
 }
 
 export function MarkdownLiveEditor({
+  active,
   value,
   linkBaseURL,
   onChange,
@@ -87,6 +89,7 @@ export function MarkdownLiveEditor({
   const editorRef = useRef<Vditor | null>(null)
   const editorReadyRef = useRef(false)
   const latestValueRef = useRef(value)
+  const latestLinkBaseRef = useRef(linkBaseURL)
   const onChangeRef = useRef(onChange)
   const onUploadAttachmentsRef = useRef(onUploadAttachments)
   const onAttachmentErrorRef = useRef(onAttachmentError)
@@ -107,12 +110,31 @@ export function MarkdownLiveEditor({
   }, [onAttachmentError])
 
   useEffect(() => {
+    latestLinkBaseRef.current = linkBaseURL
+    const editor = editorRef.current
+    if (!editor) {
+      return
+    }
+    syncEditorLinkBase(editor, linkBaseURL)
+    if (editorReadyRef.current && editor.getValue() === latestValueRef.current) {
+      editor.setValue(latestValueRef.current, true)
+    }
+  }, [linkBaseURL])
+
+  useEffect(() => {
     latestValueRef.current = value
     const editor = editorRef.current
     if (editor && editor.getValue() !== value) {
+      syncEditorLinkBase(editor, latestLinkBaseRef.current)
       editor.setValue(value, true)
     }
   }, [value])
+
+  useEffect(() => {
+    if (!active) {
+      editorRef.current?.blur()
+    }
+  }, [active])
 
   useEffect(() => {
     const container = containerRef.current
@@ -159,7 +181,7 @@ export function MarkdownLiveEditor({
             codeBlockPreview: true,
             mathBlockPreview: false,
             sanitize: true,
-            linkBase: linkBaseURL,
+            linkBase: latestLinkBaseRef.current,
           },
           hljs: {
             enable: false,
@@ -198,6 +220,7 @@ export function MarkdownLiveEditor({
           }
           editorReadyRef.current = true
           editorRef.current = editor
+          syncEditorLinkBase(editor, latestLinkBaseRef.current)
           setEditorReady(true)
         },
       })
@@ -215,7 +238,7 @@ export function MarkdownLiveEditor({
       }
       editorReadyRef.current = false
     }
-  }, [linkBaseURL])
+  }, [])
 
   useEffect(() => {
     const container = containerRef.current
@@ -286,18 +309,29 @@ export function MarkdownLiveEditor({
   const statusLabel = uploading ? "正在上传附件" : loadingEditor ? "编辑器加载中" : ""
 
   useEffect(() => {
-    onStatusChange(statusLabel ? { label: statusLabel } : null)
-  }, [onStatusChange, statusLabel])
+    onStatusChange(active && statusLabel ? { label: statusLabel } : null)
+  }, [active, onStatusChange, statusLabel])
 
   useEffect(() => {
     return () => onStatusChange(null)
   }, [onStatusChange])
 
   return (
-    <div className={`knowledge-markdown-editor${dragging ? " is-dragging" : ""}`}>
+    <div
+      className={`knowledge-markdown-editor${active ? " is-active" : ""}${dragging ? " is-dragging" : ""}`}
+      aria-hidden={!active}
+    >
       <div ref={containerRef} className="knowledge-vditor-editor" />
     </div>
   )
+}
+
+function syncEditorLinkBase(editor: Vditor | null, linkBaseURL: string) {
+  const markdownOptions = editor?.vditor.options.preview?.markdown
+  if (markdownOptions) {
+    markdownOptions.linkBase = linkBaseURL
+  }
+  editor?.vditor.lute?.SetLinkBase(linkBaseURL)
 }
 
 async function insertAttachments({

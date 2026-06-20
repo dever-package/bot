@@ -31,7 +31,7 @@ func knowledgeToolPolicyPrompt() string {
 
 func knowledgeRetrievalWorkflowPrompt() string {
 	return strings.Join([]string{
-		"- 推荐流程：list_knowledge_tree 看结构；search_knowledge_nodes 用关键词、向量、规划和图谱融合检索候选；open_knowledge_node 读取原文；expand_knowledge_node 展开上下文；find_related_knowledge 查相关节点。",
+		"- 推荐流程：list_knowledge_tree 看结构；search_knowledge_nodes 按知识库配置融合关键词、向量、规划和图谱检索候选；open_knowledge_node 读取原文；expand_knowledge_node 展开上下文；find_related_knowledge 查相关节点。",
 		"- 当召回结果不足、需要解释为什么命中某些资料，或需要调试检索计划时，使用 debug_knowledge_retrieval 查看规划、图谱扩展、来源统计和候选片段。",
 	}, "\n")
 }

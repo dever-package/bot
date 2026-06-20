@@ -915,6 +915,7 @@ export function shouldShowRuntimeTiming(nodeType: string) {
     nodeType === "agent" ||
     nodeType === "role" ||
     nodeType === "power" ||
+    nodeType === "knowledge" ||
     nodeType === "team"
   );
 }
@@ -1669,6 +1670,7 @@ export function debugNodeTypeLabel(type: any) {
     power: "能力节点",
     team: "团队工作流",
     context: "上下文节点",
+    knowledge: "知识库节点",
     condition: "条件节点",
     merge: "合并节点",
     human_approval: "人工确认",

@@ -25,6 +25,7 @@ import type {
 import "@xyflow/react/dist/style.css";
 import {
   AlertCircle,
+  BookOpen,
   Bot,
   CheckCircle,
   Combine,
@@ -1301,6 +1302,9 @@ function graphNodeIcon(name: string, type: string, kind: ViewMode) {
   }
   if (normalizedType === "context") {
     return <FileText size={20} color="#0ea5e9" />;
+  }
+  if (normalizedType === "knowledge") {
+    return <BookOpen size={20} color="#22c55e" />;
   }
   if (normalizedType === "condition") {
     return <GitBranch size={20} color="#f97316" />;

@@ -164,11 +164,12 @@ func (s Service) KnowledgeFileData(ctx context.Context, baseID uint64) (Knowledg
 	}
 	return KnowledgeFileData{
 		Base: map[string]any{
-			"id":           base.ID,
-			"name":         strings.TrimSpace(base.Name),
-			"status":       base.Status,
-			"index_status": base.IndexStatus,
-			"root":         filepath.ToSlash(root),
+			"id":                    base.ID,
+			"name":                  strings.TrimSpace(base.Name),
+			"status":                base.Status,
+			"index_status":          base.IndexStatus,
+			"concept_graph_enabled": base.ConceptGraphEnabled,
+			"root":                  filepath.ToSlash(root),
 		},
 		Files: files,
 		Drive: map[string]any{
@@ -241,7 +242,8 @@ func (s Service) CreateKnowledgeFileNode(ctx context.Context, input KnowledgeCre
 		return KnowledgeFileOperationResult{}, fmt.Errorf("同名文件或文件夹已存在")
 	}
 	newID := knowledgeFileID(joinDirPath(parentRel, name))
-	if normalizeFileType(input.Type) == "folder" {
+	isFolder := normalizeFileType(input.Type) == "folder"
+	if isFolder {
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return KnowledgeFileOperationResult{}, fmt.Errorf("创建文件夹失败: %w", err)
 		}
@@ -267,6 +269,9 @@ func (s Service) CreateKnowledgeFileNode(ctx context.Context, input KnowledgeCre
 	}
 	if err := syncKnowledgeFilesystem(ctx, base, root); err != nil {
 		return KnowledgeFileOperationResult{}, err
+	}
+	if !isFolder {
+		StartLightPendingIndex(ctx, base.ID)
 	}
 	data, err := s.KnowledgeFileData(ctx, base.ID)
 	if err != nil {
@@ -627,6 +632,7 @@ func (s Service) SaveKnowledgeFileNode(ctx context.Context, input KnowledgeSaveI
 			"keywords":     "",
 			"content_hash": contentHash(input.Content),
 		})
+		StartLightPendingIndex(ctx, base.ID)
 	}
 	return s.ReadKnowledgeFileNode(ctx, base.ID, knowledgeFileID(relPath))
 }
@@ -1730,6 +1736,7 @@ func (s Service) completeKnowledgeUploadParts(
 	if err := syncKnowledgeFilesystem(ctx, base, root); err != nil {
 		return KnowledgeFileData{}, "", err
 	}
+	StartLightPendingIndex(ctx, base.ID)
 	data, err := s.KnowledgeFileData(ctx, base.ID)
 	if err != nil {
 		return KnowledgeFileData{}, "", err

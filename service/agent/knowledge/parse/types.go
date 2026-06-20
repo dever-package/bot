@@ -6,6 +6,7 @@ type Request struct {
 	MimeType      string
 	Content       string
 	MaxNodeLength int
+	NodeOverlap   int
 }
 
 type Result struct {
@@ -48,12 +49,11 @@ type Asset struct {
 }
 
 const (
-	NodeTypeDoc        = "doc"
-	NodeTypePage       = "page"
-	NodeTypeHeading    = "heading"
-	NodeTypeParagraph  = "paragraph"
-	NodeTypeTable      = "table"
-	NodeTypeImage      = "image"
-	NodeTypeCode       = "code"
-	NodeTypeAttachment = "attachment"
+	NodeTypeDoc       = "doc"
+	NodeTypePage      = "page"
+	NodeTypeHeading   = "heading"
+	NodeTypeParagraph = "paragraph"
+	NodeTypeTable     = "table"
+	NodeTypeImage     = "image"
+	NodeTypeCode      = "code"
 )

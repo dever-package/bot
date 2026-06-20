@@ -157,12 +157,14 @@ func (s Service) parseDocument(ctx context.Context, base agentmodel.KnowledgeBas
 		}
 	}
 	sourceHash := fileContentHash(filePath, content, info)
+	maxNodeLength := normalizeNodeMaxLength(base.NodeMaxLength)
 	req := knowledgeparse.Request{
 		Path:          filePath,
 		Name:          doc.FileName,
 		MimeType:      doc.MimeType,
 		Content:       content,
-		MaxNodeLength: normalizeNodeMaxLength(base.NodeMaxLength),
+		MaxNodeLength: maxNodeLength,
+		NodeOverlap:   normalizeNodeSplitOverlap(base.NodeSplitOverlap, maxNodeLength),
 	}
 	result, err := s.parseDocumentContent(ctx, base, doc, req)
 	if err != nil {
@@ -177,6 +179,12 @@ func (s Service) parseDocumentContent(ctx context.Context, base agentmodel.Knowl
 		return knowledgeparse.Result{}, err
 	}
 	if parserService == nil {
+		if knowledgeparse.NeedsParserService(req.Name, req.MimeType) {
+			return knowledgeparse.Result{}, fmt.Errorf("该文件需要配置文档解析服务后才能索引")
+		}
+		if !knowledgeparse.CanParseLocally(req.Name, req.MimeType) {
+			return knowledgeparse.Result{}, fmt.Errorf("该文件类型暂不支持索引")
+		}
 		return knowledgeparse.ParseFile(req)
 	}
 	return knowledgeparse.ParseWithMinerU(ctx, req, knowledgeparse.MinerUConfig{

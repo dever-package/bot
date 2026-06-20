@@ -27,7 +27,7 @@ const (
 
 const (
 	DefaultKnowledgeCateID           uint64  = 1
-	DefaultKnowledgeIndexPowerID     uint64  = 1
+	DefaultKnowledgeIndexPowerID     uint64  = 0
 	DefaultKnowledgeNodeMaxLength    int     = 800
 	DefaultKnowledgeNodeSplitOverlap int     = 120
 	DefaultKnowledgeRetrieveLimit    int     = 5
@@ -37,11 +37,21 @@ const (
 	DefaultKnowledgeCollectionPrefix         = "zf_bot_knowledge_nodes"
 )
 
+const (
+	KnowledgeModeAdvanced int16 = 1
+	KnowledgeModeLight    int16 = 2
+)
+
 var knowledgeIndexStatusOptions = []map[string]any{
 	{"id": KnowledgeIndexStatusPending, "value": "待索引"},
 	{"id": KnowledgeIndexStatusRunning, "value": "索引中"},
 	{"id": KnowledgeIndexStatusSuccess, "value": "索引完成"},
 	{"id": KnowledgeIndexStatusFailed, "value": "索引失败"},
+}
+
+var knowledgeModeOptions = []map[string]any{
+	{"id": KnowledgeModeLight, "value": "轻量模式"},
+	{"id": KnowledgeModeAdvanced, "value": "智能增强"},
 }
 
 var knowledgeIndexStageOptions = []map[string]any{
@@ -57,6 +67,10 @@ var knowledgeIndexStageOptions = []map[string]any{
 
 func KnowledgeIndexStatusOptions() []map[string]any {
 	return cloneOptionRows(knowledgeIndexStatusOptions)
+}
+
+func KnowledgeModeOptions() []map[string]any {
+	return cloneOptionRows(knowledgeModeOptions)
 }
 
 var knowledgeNodeTypeOptions = []map[string]any{

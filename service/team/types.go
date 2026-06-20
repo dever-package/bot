@@ -161,6 +161,21 @@ type AgentCateOption struct {
 	Sort  int    `json:"sort"`
 }
 
+type KnowledgeCateOption struct {
+	ID    uint64 `json:"id"`
+	Value string `json:"value"`
+	Sort  int    `json:"sort"`
+}
+
+type KnowledgeBaseOption struct {
+	ID            uint64 `json:"id"`
+	CateID        uint64 `json:"cate_id"`
+	Name          string `json:"name"`
+	RetrieveLimit int    `json:"retrieve_limit"`
+	IndexStatus   string `json:"index_status"`
+	Sort          int    `json:"sort"`
+}
+
 type RunRequest struct {
 	TeamID    uint64
 	FlowID    uint64

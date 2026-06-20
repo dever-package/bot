@@ -222,6 +222,20 @@ func keywordNodeScore(row *agentmodel.KnowledgeNode, query string) float64 {
 	searchText := strings.ToLower(strings.TrimSpace(row.SearchText))
 	keywords := strings.ToLower(strings.TrimSpace(row.Keywords))
 	score := 0.0
+	phrase := strings.ToLower(strings.TrimSpace(query))
+	if phrase != "" {
+		if title == phrase {
+			score += 0.35
+		} else if strings.Contains(title, phrase) {
+			score += 0.24
+		}
+		if pathSegmentMatched(phrase, path) || strings.Contains(path, phrase) {
+			score += 0.18
+		}
+		if strings.Contains(summary, phrase) {
+			score += 0.12
+		}
+	}
 	for _, term := range terms {
 		term = strings.ToLower(term)
 		if term == "" {
@@ -625,19 +639,44 @@ func queryTerms(query string) []string {
 		if textLength(term) < 2 && !containsCJK(term) {
 			return
 		}
+		if len(terms) >= 18 {
+			return
+		}
 		if _, exists := seen[term]; exists {
 			return
 		}
 		seen[term] = struct{}{}
 		terms = append(terms, term)
 	}
-	for _, term := range strings.FieldsFunc(query, isQuerySeparator) {
-		addTerm(term)
-	}
 	if len([]rune(query)) <= 32 {
 		addTerm(query)
 	}
+	for _, term := range strings.FieldsFunc(query, isQuerySeparator) {
+		addTerm(term)
+		addCJKQuerySubterms(term, addTerm)
+	}
 	return terms
+}
+
+func addCJKQuerySubterms(term string, addTerm func(string)) {
+	if !containsCJK(term) {
+		return
+	}
+	runes := []rune(term)
+	if len(runes) < 3 {
+		return
+	}
+	for size := 2; size <= 3; size++ {
+		if len(runes) < size {
+			continue
+		}
+		for start := 0; start+size <= len(runes); start++ {
+			chunk := string(runes[start : start+size])
+			if containsCJK(chunk) {
+				addTerm(chunk)
+			}
+		}
+	}
 }
 
 func isQuerySeparator(r rune) bool {

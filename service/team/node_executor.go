@@ -12,6 +12,7 @@ import (
 	memorymodel "github.com/dever-package/bot/model/memory"
 	teammodel "github.com/dever-package/bot/model/team"
 	agentservice "github.com/dever-package/bot/service/agent"
+	knowledgeservice "github.com/dever-package/bot/service/agent/knowledge"
 	assetservice "github.com/dever-package/bot/service/asset"
 	memoryservice "github.com/dever-package/bot/service/memory"
 	"github.com/dever-package/bot/service/stream"
@@ -21,6 +22,8 @@ type resolvedNodeAgent struct {
 	AgentID uint64
 	Role    *teammodel.Role
 }
+
+const knowledgeQueryInputLimit = 6000
 
 func (s Service) executeNodeDAG(ctx context.Context, run teammodel.Run, flowRun teammodel.FlowRun, team teammodel.Team, roles []teammodel.Role, flow teammodel.Flow, nodes []teammodel.FlowNode, edges []teammodel.FlowNodeEdge) (string, map[string]any, error) {
 	nodeByID := map[uint64]teammodel.FlowNode{}
@@ -98,6 +101,16 @@ func (s Service) executeReadyNodes(ctx context.Context, run teammodel.Run, flowR
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					results[index] = nodeExecutionResult{
+						nodeID:   node.ID,
+						nodeName: node.Name,
+						status:   teammodel.RunStatusFail,
+						err:      runtimePanicError(recovered),
+					}
+				}
+			}()
 			status, err := s.executeNode(ctx, run, flowRun, team, roles, flow, node, incoming[node.ID], nodeByID)
 			results[index] = nodeExecutionResult{
 				nodeID:   node.ID,
@@ -342,6 +355,8 @@ func (s Service) runNodeByType(ctx context.Context, run teammodel.Run, flowRun t
 		return s.runSubTeamNode(ctx, run, flowRun, team, flow, node, config, input)
 	case teammodel.NodeTypeContext:
 		return s.runContextNode(ctx, run, node, config)
+	case teammodel.NodeTypeKnowledge:
+		return s.runKnowledgeNode(ctx, node, config, input)
 	case teammodel.NodeTypeCondition:
 		return runConditionNode(config, input), teammodel.RunStatusSuccess, 0, nil
 	case teammodel.NodeTypeMerge:
@@ -417,6 +432,134 @@ func (s Service) runAgentNode(ctx context.Context, run teammodel.Run, flowRun te
 		"agent_run_id": result.RunID,
 		"role":         roleInputPayload(executor.Role),
 	}, teammodel.RunStatusSuccess, result.RunID, nil
+}
+
+func (s Service) runKnowledgeNode(ctx context.Context, node teammodel.FlowNode, config map[string]any, input map[string]any) (map[string]any, string, uint64, error) {
+	baseID := uint64Value(config["knowledge_base_id"])
+	if baseID == 0 {
+		return nil, teammodel.RunStatusFail, 0, fmt.Errorf("知识库节点未选择知识库: %s", node.Name)
+	}
+	displayQuery := firstText(config["query"], config["goal"], node.Name)
+	query := buildKnowledgeNodeQuery(node, config, input)
+	if query == "" {
+		return nil, teammodel.RunStatusFail, 0, fmt.Errorf("知识库节点查询内容不能为空: %s", node.Name)
+	}
+	limit := intValue(config["retrieve_limit"], 0)
+	result, err := s.knowledge.SearchKnowledgeNodes(ctx, baseID, query, limit)
+	if err != nil {
+		return nil, teammodel.RunStatusFail, 0, err
+	}
+	nodes := knowledgeNodeOutputs(result.Nodes)
+	return map[string]any{
+		"kind":              "knowledge",
+		"knowledge_base_id": baseID,
+		"query":             query,
+		"text":              knowledgeNodeText(displayQuery, result.Nodes),
+		"nodes":             nodes,
+		"count":             len(nodes),
+	}, teammodel.RunStatusSuccess, 0, nil
+}
+
+func buildKnowledgeNodeQuery(node teammodel.FlowNode, config map[string]any, input map[string]any) string {
+	query := firstText(config["query"], config["goal"], node.Name)
+	if len(input) == 0 {
+		return query
+	}
+	inputText := knowledgeNodeInputText(input)
+	if inputText == "" {
+		inputText = jsonText(input)
+	}
+	if query == "" {
+		return inputText
+	}
+	return strings.TrimSpace(query + "\n\n上游输入：\n" + inputText)
+}
+
+func knowledgeNodeInputText(input map[string]any) string {
+	parts := make([]string, 0, len(input))
+	for _, key := range sortedAnyMapKeys(input) {
+		text := mergeNodeReadableTextDepth(input[key], 1)
+		if text == "" {
+			text = mergeNodeScalarText(input[key])
+		}
+		if text == "" {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s：%s", key, text))
+	}
+	return truncateKnowledgeNodeText(strings.Join(parts, "\n\n"), knowledgeQueryInputLimit)
+}
+
+func knowledgeNodeOutputs(nodes []knowledgeservice.KnowledgeNodeResult) []map[string]any {
+	result := make([]map[string]any, 0, len(nodes))
+	for _, node := range nodes {
+		text := knowledgeNodeContent(node, 1200)
+		if node.ID == 0 && text == "" {
+			continue
+		}
+		result = append(result, map[string]any{
+			"id":                node.ID,
+			"title":             knowledgeNodeTitle(node),
+			"text":              text,
+			"score":             node.Score,
+			"doc_id":            node.DocID,
+			"knowledge_base_id": node.BaseID,
+		})
+	}
+	return result
+}
+
+func knowledgeNodeText(query string, nodes []knowledgeservice.KnowledgeNodeResult) string {
+	query = strings.TrimSpace(query)
+	if len(nodes) == 0 {
+		if query == "" {
+			return "暂时没有找到相关内容。"
+		}
+		return fmt.Sprintf("未找到与「%s」相关的内容。", query)
+	}
+	sections := make([]string, 0, len(nodes)+1)
+	if query != "" {
+		sections = append(sections, "查询："+query)
+	}
+	for index, node := range nodes {
+		title := knowledgeNodeTitle(node)
+		content := knowledgeNodeContent(node, 1200)
+		lines := []string{fmt.Sprintf("%d. %s", index+1, title)}
+		if content != "" {
+			lines = append(lines, content)
+		}
+		sections = append(sections, strings.Join(lines, "\n"))
+	}
+	return strings.Join(sections, "\n\n")
+}
+
+func knowledgeNodeTitle(node knowledgeservice.KnowledgeNodeResult) string {
+	for _, value := range []string{node.Title, node.Path, node.DirPath} {
+		if text := strings.TrimSpace(value); text != "" {
+			return text
+		}
+	}
+	if node.ID > 0 {
+		return fmt.Sprintf("知识节点 #%d", node.ID)
+	}
+	return "知识内容"
+}
+
+func knowledgeNodeContent(node knowledgeservice.KnowledgeNodeResult, limit int) string {
+	content := firstText(node.PlainText, node.Content, node.Summary)
+	return truncateKnowledgeNodeText(content, limit)
+}
+
+func truncateKnowledgeNodeText(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	if limit <= 0 {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return strings.TrimSpace(string(runes[:limit])) + "..."
 }
 
 func (s Service) forwardAgentNodeStream(ctx context.Context, run teammodel.Run, flowRun teammodel.FlowRun, flow teammodel.Flow, node teammodel.FlowNode, nodeRun *teammodel.NodeRun, agentRunID uint64, payload map[string]any) {

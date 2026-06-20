@@ -101,6 +101,11 @@ func validateFlowNodeGraph(nodes []teammodel.FlowNode, edges []teammodel.FlowNod
 			if node.AssetCateID == 0 {
 				issues = append(issues, fmt.Sprintf("上下文节点 %s 未选择资产分类", node.Name))
 			}
+		case teammodel.NodeTypeKnowledge:
+			config := jsonMap(node.Config)
+			if uint64Value(config["knowledge_base_id"]) == 0 {
+				issues = append(issues, fmt.Sprintf("知识库节点 %s 未选择知识库", node.Name))
+			}
 		}
 	}
 	for _, edge := range edges {

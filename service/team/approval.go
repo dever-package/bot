@@ -160,9 +160,13 @@ func (s Service) submitRoleInteractionApproval(ctx context.Context, approval tea
 	requestID := renewRunRequestID(runRecord, &run)
 	s.repo.UpdateRun(ctx, run.ID, runRecord)
 	if textValue(input["_mode"]) == "conversation" {
-		go s.executeTeamRun(context.Background(), run.ID)
+		s.runAsync(context.Background(), run.ID, func(ctx context.Context) {
+			s.executeTeamRun(ctx, run.ID)
+		})
 	} else {
-		go s.executeRoleRun(context.Background(), run.ID)
+		s.runAsync(context.Background(), run.ID, func(ctx context.Context) {
+			s.executeRoleRun(ctx, run.ID)
+		})
 	}
 	return map[string]any{
 		"approval_id":  approval.ID,

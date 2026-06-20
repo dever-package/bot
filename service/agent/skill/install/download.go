@@ -16,6 +16,7 @@ import (
 	"time"
 
 	agentskill "github.com/dever-package/bot/service/agent/skill"
+	agenttool "github.com/dever-package/bot/service/agent/tool"
 )
 
 const maxDownloadBytes = 64 * 1024 * 1024
@@ -88,12 +89,20 @@ func githubArchiveCandidates(rawURL string) []string {
 }
 
 func downloadFile(ctx context.Context, rawURL string, dir string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	if err := agenttool.ValidateExternalURL(ctx, parsed); err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("User-Agent", "shemic-skill-installer/1.0")
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := agenttool.NewExternalHTTPClient(60 * time.Second)
+	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err

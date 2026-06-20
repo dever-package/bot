@@ -33,7 +33,7 @@ func runInstallCommand(ctx context.Context, workDir string, command string, onOu
 
 	cmd := osexec.CommandContext(ctx, "bash", "-lc", installCommandScript(command))
 	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), installCommandEnv(workDir, homeDir)...)
+	cmd.Env = installCommandEnv(workDir, homeDir)
 
 	text, err := runCommandWithOutput(ctx, cmd, onOutput)
 	if ctx.Err() != nil {

@@ -15,7 +15,7 @@ func normalizeText(value string) string {
 	return blankLinePattern.ReplaceAllString(value, "\n\n")
 }
 
-func splitLongText(content string, limit int) []string {
+func splitLongText(content string, limit int, overlap int) []string {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil
@@ -23,6 +23,7 @@ func splitLongText(content string, limit int) []string {
 	if limit <= 0 || utf8.RuneCountInString(content) <= limit {
 		return []string{content}
 	}
+	overlap = normalizeNodeOverlap(overlap, limit)
 	paragraphs := splitParagraphs(content)
 	chunks := make([]string, 0)
 	current := ""
@@ -43,25 +44,47 @@ func splitLongText(content string, limit int) []string {
 	}
 	result := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
-		result = append(result, splitOversizedText(chunk, limit)...)
+		result = append(result, splitOversizedText(chunk, limit, overlap)...)
 	}
 	return result
 }
 
-func splitOversizedText(content string, limit int) []string {
+func splitOversizedText(content string, limit int, overlap int) []string {
 	if limit <= 0 || utf8.RuneCountInString(content) <= limit {
 		return []string{content}
 	}
+	overlap = normalizeNodeOverlap(overlap, limit)
+	step := limit - overlap
+	if step <= 0 {
+		step = limit
+	}
 	runes := []rune(content)
-	result := make([]string, 0, len(runes)/limit+1)
-	for start := 0; start < len(runes); start += limit {
+	result := make([]string, 0, len(runes)/step+1)
+	for start := 0; start < len(runes); start += step {
 		end := start + limit
 		if end > len(runes) {
 			end = len(runes)
 		}
 		result = append(result, strings.TrimSpace(string(runes[start:end])))
+		if end >= len(runes) {
+			break
+		}
 	}
 	return result
+}
+
+func normalizeNodeOverlap(overlap int, limit int) int {
+	if overlap < 0 {
+		return 0
+	}
+	maxOverlap := limit / 2
+	if maxOverlap < 0 {
+		return 0
+	}
+	if overlap > maxOverlap {
+		return maxOverlap
+	}
+	return overlap
 }
 
 func splitParagraphs(content string) []string {

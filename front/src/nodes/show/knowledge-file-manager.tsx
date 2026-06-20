@@ -51,6 +51,7 @@ import {
   loadFileContent,
   loadFileIndexDetail,
   loadFileManagerData,
+  loadKnowledgeRetrieveDebug,
   moveFiles,
   previewFileURL,
   renameFile,
@@ -74,6 +75,7 @@ import type {
   KnowledgeFileItem,
   KnowledgeFileManagerData,
   KnowledgeFileViewerStatus,
+  KnowledgeRetrieveDebugResult,
   KnowledgeTreeNode,
 } from "./knowledge-file-manager/types"
 
@@ -143,6 +145,7 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
   const [indexDetailLoading, setIndexDetailLoading] = useState(false)
   const [indexMapOpen, setIndexMapOpen] = useState(false)
   const [indexConfirmOpen, setIndexConfirmOpen] = useState(false)
+  const [retrieveTestOpen, setRetrieveTestOpen] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null)
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null)
 
@@ -227,6 +230,7 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
     setIndexDetailOpen(false)
     setIndexMapOpen(false)
     setIndexConfirmOpen(false)
+    setRetrieveTestOpen(false)
     openFileRequestRef.current += 1
     restoredKnowledgeBaseRef.current = 0
   }, [knowledgeBaseID])
@@ -278,8 +282,6 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
       openFileRequestRef.current = requestID
       setSelectedID(node.id)
       setFocusedID(node.id)
-      setCurrentFile(null)
-      setDraft(null)
       setViewerStatus(null)
       setIndexDetail(null)
       setIndexDetailOpen(false)
@@ -714,6 +716,8 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
   const currentFileLinkBaseURL = currentFile
     ? downloadFileBaseURL(knowledgeBaseID, currentFileDirectoryID(currentFile.id))
     : ""
+  const hasOpenedFile = Boolean(draft && currentFile)
+  const fileViewerActive = hasOpenedFile && !openingFile
   const uploadEditorAttachments = useCallback(
     async (files: File[]): Promise<UploadedAttachment[]> => {
       if (!knowledgeBaseID || !currentFile) {
@@ -778,6 +782,14 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           >
             <Network size={16} />
             知识地图
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setRetrieveTestOpen(true)}
+          >
+            <Search size={16} />
+            测试检索
           </Button>
           <Button
             variant="outline"
@@ -960,76 +972,76 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
 
         <section className="knowledge-editor">
           {openingFile ? (
-            <FileOpeningPanel fileName={openingFile.name} />
+            <FileOpeningHeader fileName={openingFile.name} />
           ) : draft && currentFile ? (
-            <>
-              <div className="knowledge-editor__header">
-                <div className="knowledge-editor__title">
-                  <Input
-                    value={draft.name}
-                    title={draft.name}
-                    onChange={(event) =>
-                      setDraft((value) =>
-                        value ? { ...value, name: event.target.value, dirty: true } : value,
-                      )
-                    }
-                  />
-                  <SourceTypeBadge sourceType={currentFile?.source_type} />
-                  <IndexStatusBadge status={currentIndexStatus} />
-                </div>
-                <div className="knowledge-editor__actions">
-                  <EditorHeaderStatus status={viewerStatus} />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void openFileIndexDetail()}
-                  >
-                    <Network size={16} />
-                    索引详情
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => window.open(currentFileDownloadURL, "_blank")}
-                  >
-                    <Download size={16} />
-                    下载
-                  </Button>
-                  <Button
-                    size="sm"
-                    disabled={saving || !draft.dirty}
-                    onClick={() => void saveCurrentFile()}
-                  >
-                    <Save size={16} />
-                    {saving ? "保存中" : "保存"}
-                  </Button>
-                </div>
-              </div>
-              <div className="knowledge-editor__body">
-                <KnowledgeFileViewer
-                  file={currentFile}
-                  content={draft.content}
-                  downloadURL={currentFileDownloadURL}
-                  previewURL={currentFilePreviewURL}
-                  linkBaseURL={currentFileLinkBaseURL}
-                  onUploadAttachments={uploadEditorAttachments}
-                  onAttachmentError={(error) =>
-                    toast.error(errorMessage(error, "附件上传失败"))
-                  }
-                  onStatusChange={setViewerStatus}
-                  onChange={(content) =>
-                    setDraft((value) => (value ? { ...value, content, dirty: true } : value))
+            <div className="knowledge-editor__header">
+              <div className="knowledge-editor__title">
+                <Input
+                  value={draft.name}
+                  title={draft.name}
+                  onChange={(event) =>
+                    setDraft((value) =>
+                      value ? { ...value, name: event.target.value, dirty: true } : value,
+                    )
                   }
                 />
+                <SourceTypeBadge sourceType={currentFile?.source_type} />
+                <IndexStatusBadge status={currentIndexStatus} />
               </div>
-            </>
-          ) : (
-            <div className="knowledge-editor__placeholder">
-              <FileText size={42} />
-              <strong>选择左侧文件查看或编辑</strong>
-              <span>右键目录可以新建文件夹、文件或上传资料。</span>
+              <div className="knowledge-editor__actions">
+                <EditorHeaderStatus status={viewerStatus} />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void openFileIndexDetail()}
+                >
+                  <Network size={16} />
+                  索引详情
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openDownloadWindow(currentFileDownloadURL)}
+                >
+                  <Download size={16} />
+                  下载
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={saving || !draft.dirty}
+                  onClick={() => void saveCurrentFile()}
+                >
+                  <Save size={16} />
+                  {saving ? "保存中" : "保存"}
+                </Button>
+              </div>
             </div>
-          )}
+          ) : null}
+          <div className="knowledge-editor__body" aria-busy={openingFile ? true : undefined}>
+            <KnowledgeFileViewer
+              active={fileViewerActive}
+              file={currentFile}
+              content={draft?.content || ""}
+              downloadURL={currentFileDownloadURL}
+              previewURL={currentFilePreviewURL}
+              linkBaseURL={currentFileLinkBaseURL}
+              onUploadAttachments={uploadEditorAttachments}
+              onAttachmentError={(error) =>
+                toast.error(errorMessage(error, "附件上传失败"))
+              }
+              onStatusChange={setViewerStatus}
+              onChange={(content) =>
+                setDraft((value) => (value ? { ...value, content, dirty: true } : value))
+              }
+            />
+            {!openingFile && !hasOpenedFile ? (
+              <div className="knowledge-editor__placeholder">
+                <FileText size={42} />
+                <strong>选择左侧文件查看或编辑</strong>
+                <span>右键目录可以新建文件夹、文件或上传资料。</span>
+              </div>
+            ) : null}
+          </div>
         </section>
       </main>
 
@@ -1084,6 +1096,14 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
         onClose={() => setIndexMapOpen(false)}
         onRefreshFiles={() => void reloadFiles()}
       />
+      {retrieveTestOpen ? (
+        <RetrieveTestDialog
+          knowledgeBaseID={knowledgeBaseID}
+          baseName={baseName}
+          mode={data.base?.concept_graph_enabled}
+          onClose={() => setRetrieveTestOpen(false)}
+        />
+      ) : null}
       <ConfirmDialog
         open={indexConfirmOpen}
         onOpenChange={setIndexConfirmOpen}
@@ -1098,19 +1118,16 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
   )
 }
 
-function FileOpeningPanel({ fileName }: { fileName: string }) {
+function FileOpeningHeader({ fileName }: { fileName: string }) {
   return (
-    <>
-      <div className="knowledge-editor__header">
-        <div className="knowledge-editor__title">
-          <span className="knowledge-editor__title-text">{fileName || "文件"}</span>
-        </div>
-        <div className="knowledge-editor__actions">
-          <EditorHeaderStatus status={{ label: "文件加载中" }} />
-        </div>
+    <div className="knowledge-editor__header">
+      <div className="knowledge-editor__title">
+        <span className="knowledge-editor__title-text">{fileName || "文件"}</span>
       </div>
-      <div className="knowledge-editor__body" aria-busy="true" />
-    </>
+      <div className="knowledge-editor__actions">
+        <EditorHeaderStatus status={{ label: "文件加载中" }} />
+      </div>
+    </div>
   )
 }
 
@@ -1147,6 +1164,181 @@ function IndexStatusBadge({
       {compact ? null : <span>{item.label}</span>}
     </span>
   )
+}
+
+function RetrieveTestDialog({
+  knowledgeBaseID,
+  baseName,
+  mode,
+  onClose,
+}: {
+  knowledgeBaseID: number
+  baseName: string
+  mode?: number
+  onClose: () => void
+}) {
+  const [query, setQuery] = useState("")
+  const [limit, setLimit] = useState(8)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+  const [result, setResult] = useState<KnowledgeRetrieveDebugResult | null>(null)
+  const snippets = result?.snippets || []
+  const sourceCounts = Object.entries(result?.source_counts || {})
+  const plans = result?.plans || []
+
+  const runRetrieveTest = useCallback(async () => {
+    const text = query.trim()
+    if (!knowledgeBaseID || !text) {
+      setError("请输入要测试的问题")
+      return
+    }
+    setLoading(true)
+    setError("")
+    try {
+      setResult(await loadKnowledgeRetrieveDebug({
+        knowledgeBaseID,
+        query: text,
+        limit,
+      }))
+    } catch (currentError) {
+      setResult(null)
+      setError(errorMessage(currentError, "测试检索失败"))
+    } finally {
+      setLoading(false)
+    }
+  }, [knowledgeBaseID, limit, query])
+
+  return (
+    <div
+      className="knowledge-index-detail knowledge-retrieve-test"
+      role="dialog"
+      aria-modal="true"
+      aria-label="测试检索"
+      onClick={onClose}
+    >
+      <div className="knowledge-index-detail__panel" onClick={(event) => event.stopPropagation()}>
+        <div className="knowledge-index-detail__header">
+          <div>
+            <strong>测试检索</strong>
+            <span>{baseName} · {knowledgeModeLabel(mode)}</span>
+          </div>
+          <button type="button" onClick={onClose} aria-label="关闭">
+            ×
+          </button>
+        </div>
+        <form
+          className="knowledge-retrieve-test__form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void runRetrieveTest()
+          }}
+        >
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="输入一个问题测试知识库召回"
+            autoFocus
+          />
+          <input
+            className="knowledge-retrieve-test__limit"
+            type="number"
+            min={1}
+            max={20}
+            value={limit}
+            onChange={(event) => setLimit(clamp(Number(event.target.value) || 8, 1, 20))}
+            aria-label="返回数量"
+          />
+          <Button type="submit" disabled={loading || !query.trim()}>
+            {loading ? <RefreshCw className="knowledge-retrieve-test__spin" size={15} /> : <Search size={15} />}
+            测试
+          </Button>
+        </form>
+        {error ? <div className="knowledge-index-detail__error">{error}</div> : null}
+        {loading ? (
+          <div className="knowledge-index-detail__loading">
+            <RefreshCw size={18} />
+            检索测试中
+          </div>
+        ) : result ? (
+          <div className="knowledge-retrieve-test__body">
+            <div className="knowledge-index-detail__meta">
+              <span>问题：{result.query || query}</span>
+              <span>命中：{snippets.length}</span>
+              {sourceCounts.map(([source, count]) => (
+                <span key={source}>{sourceLabel(source)}：{count}</span>
+              ))}
+            </div>
+            <IndexDetailSection title="命中片段" count={snippets.length}>
+              <div className="knowledge-retrieve-test__results">
+                {snippets.map((snippet, index) => (
+                  <article className="knowledge-index-detail__card" key={`${snippet.node_id || index}-${index}`}>
+                    <div className="knowledge-index-detail__card-title">
+                      <strong>{snippet.title || `片段 ${index + 1}`}</strong>
+                      <span>{sourceLabel(snippet.source || "node")} · {formatScore(snippet.score)}</span>
+                    </div>
+                    <p>{snippet.content || "暂无内容。"}</p>
+                    <div className="knowledge-retrieve-test__meta">
+                      <span>文档：{snippet.doc_id || "-"}</span>
+                      <span>节点：{snippet.node_id || "-"}</span>
+                      <span>目录：{snippet.dir_path || "/"}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </IndexDetailSection>
+            <IndexDetailSection title="检索计划" count={plans.length}>
+              <div className="knowledge-retrieve-test__plans">
+                {plans.map((plan, index) => (
+                  <pre key={index}>{formatDebugJSON(plan)}</pre>
+                ))}
+              </div>
+            </IndexDetailSection>
+          </div>
+        ) : (
+          <div className="knowledge-index-detail__empty">输入问题后开始测试。</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function knowledgeModeLabel(value?: number) {
+  if (Number(value) === 2) {
+    return "轻量模式"
+  }
+  if (Number(value) === 1) {
+    return "智能增强"
+  }
+  return "未知模式"
+}
+
+function sourceLabel(value: string) {
+  const source = String(value || "").trim()
+  const labels: Record<string, string> = {
+    node: "关键词",
+    graph: "图谱",
+    vector: "向量",
+    planned_doc: "规划文档",
+    agentic_knowledge: "综合",
+    planner: "规划",
+  }
+  return labels[source] || source || "未知"
+}
+
+function formatScore(value?: number) {
+  const score = Number(value)
+  if (!Number.isFinite(score)) {
+    return "分数 -"
+  }
+  return `分数 ${score.toFixed(3)}`
+}
+
+function formatDebugJSON(value: Record<string, unknown>) {
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
 }
 
 function SourceTypeBadge({ sourceType }: { sourceType?: string }) {
@@ -1856,6 +2048,13 @@ async function uploadKnowledgeFile({
 function createUploadID() {
   const random = Math.random().toString(36).slice(2)
   return `${Date.now().toString(36)}_${random}`
+}
+
+function openDownloadWindow(url: string) {
+  const win = window.open(url, "_blank", "noopener,noreferrer")
+  if (win) {
+    win.opener = null
+  }
 }
 
 function fileUploadPercent(completedIndex: number, total: number, currentFileRatio: number) {

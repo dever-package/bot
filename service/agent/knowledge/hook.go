@@ -113,6 +113,17 @@ func (KnowledgeHook) ProviderBeforeSaveKnowledgeBase(c *server.Context, params [
 			panic(frontaction.NewFieldError("form.parser_service_id", err.Error()))
 		}
 	}
+	if shouldNormalize(record, "concept_graph_enabled", partial) {
+		record["concept_graph_enabled"] = normalizeKnowledgeMode(record["concept_graph_enabled"])
+	}
+	knowledgeMode := knowledgeModeValue(record, existingBase)
+	applyKnowledgeMode := !partial || shouldNormalize(record, "concept_graph_enabled", partial)
+	if applyKnowledgeMode && knowledgeMode == agentmodel.KnowledgeModeLight {
+		record["index_power_id"] = uint64(0)
+		record["embedding_power_id"] = uint64(0)
+		record["graph_depth"] = agentmodel.DefaultKnowledgeGraphDepth
+		record["score_threshold"] = agentmodel.DefaultKnowledgeScoreThreshold
+	}
 	if shouldNormalize(record, "index_power_id", partial) {
 		indexPowerID := util.ToUint64(record["index_power_id"])
 		record["index_power_id"] = indexPowerID
@@ -121,6 +132,9 @@ func (KnowledgeHook) ProviderBeforeSaveKnowledgeBase(c *server.Context, params [
 				panic(frontaction.NewFieldError("form.index_power_id", err.Error()))
 			}
 		}
+	}
+	if applyKnowledgeMode && knowledgeMode == agentmodel.KnowledgeModeAdvanced && knowledgeIndexPowerIDValue(record, existingBase) == 0 {
+		panic(frontaction.NewFieldError("form.index_power_id", "智能增强需要选择索引模型。"))
 	}
 	if shouldNormalize(record, "embedding_power_id", partial) {
 		embeddingPowerID := util.ToUint64(record["embedding_power_id"])
@@ -131,7 +145,7 @@ func (KnowledgeHook) ProviderBeforeSaveKnowledgeBase(c *server.Context, params [
 			}
 		}
 	}
-	defaultInt16(record, "concept_graph_enabled", 1, partial)
+	defaultInt16(record, "concept_graph_enabled", int16(agentmodel.KnowledgeModeLight), partial)
 	if shouldNormalize(record, "node_max_length", partial) {
 		record["node_max_length"] = normalizeNodeMaxLength(record["node_max_length"])
 	}
@@ -160,6 +174,35 @@ func (KnowledgeHook) ProviderBeforeSaveKnowledgeBase(c *server.Context, params [
 	defaultInt16(record, "status", 1, partial)
 	defaultInt(record, "sort", 100, partial)
 	return record
+}
+
+func normalizeKnowledgeMode(value any) int16 {
+	switch int16(util.ToIntDefault(value, int(agentmodel.KnowledgeModeLight))) {
+	case agentmodel.KnowledgeModeAdvanced:
+		return agentmodel.KnowledgeModeAdvanced
+	default:
+		return agentmodel.KnowledgeModeLight
+	}
+}
+
+func knowledgeModeValue(record map[string]any, existing *agentmodel.KnowledgeBase) int16 {
+	if value, exists := record["concept_graph_enabled"]; exists {
+		return normalizeKnowledgeMode(value)
+	}
+	if existing != nil {
+		return normalizeKnowledgeMode(existing.ConceptGraphEnabled)
+	}
+	return agentmodel.KnowledgeModeLight
+}
+
+func knowledgeIndexPowerIDValue(record map[string]any, existing *agentmodel.KnowledgeBase) uint64 {
+	if value, exists := record["index_power_id"]; exists {
+		return util.ToUint64(value)
+	}
+	if existing != nil {
+		return existing.IndexPowerID
+	}
+	return 0
 }
 
 func normalizeParserProvider(value any) string {

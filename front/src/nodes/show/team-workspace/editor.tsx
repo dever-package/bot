@@ -19,6 +19,8 @@ import type {
   AgentOption,
   AssetCateOption,
   FlowItem,
+  KnowledgeBaseOption,
+  KnowledgeCateOption,
   PowerKindOption,
   PowerOption,
   RoleOption,
@@ -57,6 +59,8 @@ export function EditorDialog({
   agents,
   agentCates,
   assetCates,
+  knowledgeCates,
+  knowledgeBases,
   teamBindingOptions,
   powers,
   powerKinds,
@@ -77,6 +81,8 @@ export function EditorDialog({
   agents: AgentOption[];
   agentCates: AgentCateOption[];
   assetCates: AssetCateOption[];
+  knowledgeCates: KnowledgeCateOption[];
+  knowledgeBases: KnowledgeBaseOption[];
   teamBindingOptions: TeamOption[];
   powers: PowerOption[];
   powerKinds: PowerKindOption[];
@@ -200,6 +206,15 @@ export function EditorDialog({
         {node.type === "condition" ? (
           <ConditionFields
             node={node}
+            readonly={readonly}
+            onChangeNode={onChangeNode}
+          />
+        ) : null}
+        {node.type === "knowledge" ? (
+          <KnowledgeBindingFields
+            node={node}
+            knowledgeCates={knowledgeCates}
+            knowledgeBases={knowledgeBases}
             readonly={readonly}
             onChangeNode={onChangeNode}
           />
@@ -849,6 +864,172 @@ function ConditionFields({
   );
 }
 
+function KnowledgeBindingFields({
+  node,
+  knowledgeCates,
+  knowledgeBases,
+  readonly,
+  onChangeNode,
+}: {
+  node: TeamNode;
+  knowledgeCates: KnowledgeCateOption[];
+  knowledgeBases: KnowledgeBaseOption[];
+  readonly: boolean;
+  onChangeNode: (key: string, patch: Partial<TeamNode>) => void;
+}) {
+  const selectedBaseID = Number(node.config?.knowledge_base_id || 0);
+  const selectedBase = findKnowledgeBase(knowledgeBases, selectedBaseID);
+  const visibleCates = knowledgeCates.length
+    ? knowledgeCates
+    : deriveKnowledgeCateOptions(knowledgeBases);
+  const selectedCateID = Number(
+    selectedBase?.cate_id ||
+      node.config?.knowledge_cate_id ||
+      visibleCates[0]?.id ||
+      knowledgeBases[0]?.cate_id ||
+      0,
+  );
+  const filteredBases = selectedCateID
+    ? knowledgeBases.filter(
+        (base) => Number(base.cate_id || 0) === selectedCateID,
+      )
+    : knowledgeBases;
+  const selectedName = knowledgeNodeName(selectedBase);
+  const updateConfig = (patch: Record<string, any>) =>
+    onChangeNode(node.node_key, {
+      config: {
+        ...omitConfigKeys(node.config, ["goal"]),
+        ...patch,
+      },
+    });
+
+  return (
+    <>
+      <Field label="知识库">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <SearchableOptionPicker
+            value={selectedCateID ? String(selectedCateID) : undefined}
+            options={visibleCates.map((cate) => ({
+              id: cate.id,
+              value: knowledgeCateLabel(cate),
+            }))}
+            disabled={readonly}
+            clearable={false}
+            placeholder="选择分类"
+            searchPlaceholder="输入分类筛选..."
+            emptyText="未找到知识库分类"
+            onChange={(nextValue) => {
+              const value = Array.isArray(nextValue)
+                ? (nextValue[0] ?? "")
+                : nextValue;
+              const nextCateID = Number(value || 0);
+              const keepBase =
+                selectedBase &&
+                Number(selectedBase.cate_id || 0) === nextCateID;
+              onChangeNode(
+                node.node_key,
+                withAutoNodeName(
+                  node,
+                  {
+                    config: {
+                      ...omitConfigKeys(node.config, ["goal"]),
+                      knowledge_cate_id: nextCateID,
+                      knowledge_base_id: keepBase ? selectedBaseID : 0,
+                    },
+                  },
+                  keepBase ? selectedName : "知识库",
+                  [selectedName],
+                ),
+              );
+            }}
+          />
+          <SearchableOptionPicker
+            value={
+              filteredBases.some((base) => Number(base.id) === selectedBaseID)
+                ? String(selectedBaseID)
+                : undefined
+            }
+            options={filteredBases.map((base) => ({
+              id: base.id,
+              value: knowledgeBaseLabel(base),
+            }))}
+            disabled={readonly}
+            placeholder="选择知识库"
+            searchPlaceholder="输入知识库筛选..."
+            emptyText="未找到知识库"
+            onClear={() =>
+              onChangeNode(
+                node.node_key,
+                withAutoNodeName(
+                  node,
+                  {
+                    config: {
+                      ...omitConfigKeys(node.config, ["goal"]),
+                      knowledge_cate_id: selectedCateID,
+                      knowledge_base_id: 0,
+                    },
+                  },
+                  "知识库",
+                  [selectedName],
+                ),
+              )
+            }
+            onChange={(nextValue) => {
+              const value = Array.isArray(nextValue)
+                ? (nextValue[0] ?? "")
+                : nextValue;
+              const nextBaseID = Number(value || 0);
+              const nextBase = findKnowledgeBase(knowledgeBases, nextBaseID);
+              onChangeNode(
+                node.node_key,
+                withAutoNodeName(
+                  node,
+                  {
+                    config: {
+                      ...omitConfigKeys(node.config, ["goal"]),
+                      knowledge_cate_id: Number(
+                        nextBase?.cate_id || selectedCateID || 0,
+                      ),
+                      knowledge_base_id: nextBaseID,
+                    },
+                  },
+                  knowledgeNodeName(nextBase),
+                  [selectedName],
+                ),
+              );
+            }}
+          />
+        </div>
+      </Field>
+      <Field label="查询内容">
+        <Textarea
+          value={String(node.config?.query ?? node.config?.goal ?? "")}
+          disabled={readonly}
+          placeholder="填写从知识库获取内容的提示词；留空时使用节点名称"
+          onChange={(event) => updateConfig({ query: event.target.value })}
+        />
+      </Field>
+      <Field label="召回数量">
+        <div className="space-y-1">
+          <Input
+            type="number"
+            min={0}
+            value={Number(node.config?.retrieve_limit || 0) || ""}
+            disabled={readonly}
+            placeholder="使用知识库默认值"
+            onChange={(event) =>
+              updateConfig({ retrieve_limit: Number(event.target.value || 0) })
+            }
+          />
+          <div className="text-xs text-muted-foreground">
+            每次检索从知识库取回的候选内容条数；留空使用知识库默认值，数量越大上下文越全，也会占用更多上下文。
+          </div>
+        </div>
+      </Field>
+    </>
+  );
+}
+
 function AssetCateBindingField({
   node,
   assetCates,
@@ -1043,6 +1224,10 @@ function normalizeNodeTypePatch(
   const baseConfig = omitConfigKeys(node.config, [
     "goal",
     "agent_cate_id",
+    "knowledge_cate_id",
+    "knowledge_base_id",
+    "query",
+    "retrieve_limit",
     "role_id",
     "role_key",
     "role_team_id",
@@ -1088,6 +1273,10 @@ function normalizeNodeTypePatch(
         "role_key",
         "role_team_id",
         "role_type",
+        "knowledge_cate_id",
+        "knowledge_base_id",
+        "query",
+        "retrieve_limit",
         "power_id",
         "power_key",
         "power_kind",
@@ -1112,6 +1301,10 @@ function normalizeNodeTypePatch(
       asset_cate_id: 0,
       config: omitConfigKeys(node.config, [
         "agent_cate_id",
+        "knowledge_cate_id",
+        "knowledge_base_id",
+        "query",
+        "retrieve_limit",
         "power_id",
         "power_key",
         "power_kind",
@@ -1137,6 +1330,10 @@ function normalizeNodeTypePatch(
       config: omitConfigKeys(node.config, [
         "goal",
         "agent_cate_id",
+        "knowledge_cate_id",
+        "knowledge_base_id",
+        "query",
+        "retrieve_limit",
         "role_id",
         "role_key",
         "role_team_id",
@@ -1163,6 +1360,10 @@ function normalizeNodeTypePatch(
       config: omitConfigKeys(node.config, [
         "goal",
         "agent_cate_id",
+        "knowledge_cate_id",
+        "knowledge_base_id",
+        "query",
+        "retrieve_limit",
         "role_id",
         "role_key",
         "role_team_id",
@@ -1189,6 +1390,10 @@ function normalizeNodeTypePatch(
         ...omitConfigKeys(node.config, [
           "goal",
           "agent_cate_id",
+          "knowledge_cate_id",
+          "knowledge_base_id",
+          "query",
+          "retrieve_limit",
           "role_id",
           "role_key",
           "role_team_id",
@@ -1207,6 +1412,23 @@ function normalizeNodeTypePatch(
         operator: normalizeConditionOperator(node.config?.operator),
       },
     });
+  }
+  if (type === "knowledge") {
+    return applyAutoName(
+      {
+        type,
+        ...basePatch,
+        asset_cate_id: 0,
+        config: {
+          ...baseConfig,
+          knowledge_cate_id: Number(node.config?.knowledge_cate_id || 0),
+          knowledge_base_id: Number(node.config?.knowledge_base_id || 0),
+          query: String(node.config?.query ?? node.config?.goal ?? ""),
+          retrieve_limit: Number(node.config?.retrieve_limit || 0),
+        },
+      },
+      "知识库",
+    );
   }
   if (type === "save") {
     return applyAutoName({
@@ -1239,6 +1461,7 @@ const AUTO_NODE_NAMES = new Set([
   "团队工作流",
   "读取上下文",
   "保存结果",
+  "知识库",
   "条件判断",
   "合并结果",
   "人工确认",
@@ -1269,6 +1492,9 @@ function canReplaceNodeName(
     return true;
   }
   if (currentName.startsWith("读取：") || currentName.startsWith("保存：")) {
+    return true;
+  }
+  if (currentName.startsWith("知识库：")) {
     return true;
   }
   return previousNames.some(
@@ -1306,6 +1532,9 @@ function defaultNodeName(type: string, assetCate?: AssetCateOption) {
   if (type === "team") {
     return "团队工作流";
   }
+  if (type === "knowledge") {
+    return "知识库";
+  }
   if (type === "condition") {
     return "条件判断";
   }
@@ -1330,6 +1559,29 @@ function findAssetCate(assetCates: AssetCateOption[], assetCateID: number) {
   return assetCates.find((cate) => Number(cate.id) === Number(assetCateID));
 }
 
+function findKnowledgeBase(
+  knowledgeBases: KnowledgeBaseOption[],
+  knowledgeBaseID: number,
+) {
+  return knowledgeBases.find(
+    (base) => Number(base.id) === Number(knowledgeBaseID),
+  );
+}
+
+function deriveKnowledgeCateOptions(knowledgeBases: KnowledgeBaseOption[]) {
+  const cateIDs = Array.from(
+    new Set(
+      knowledgeBases
+        .map((base) => Number(base.cate_id || 0))
+        .filter(Boolean),
+    ),
+  );
+  return cateIDs.map((id) => ({
+    id,
+    value: `分类${id}`,
+  }));
+}
+
 function teamNodeName(team?: TeamOption, flow?: FlowItem) {
   const teamName = String(team?.name || "").trim();
   const flowName = String(flow?.name || flow?.key || "").trim();
@@ -1345,6 +1597,19 @@ function agentCateLabel(cate: AgentCateOption) {
 
 function assetCateLabel(cate: AssetCateOption) {
   return String(cate.name || cate.id);
+}
+
+function knowledgeBaseLabel(base: KnowledgeBaseOption) {
+  return String(base.name || base.id);
+}
+
+function knowledgeCateLabel(cate: KnowledgeCateOption) {
+  return String(cate.value || cate.name || cate.id);
+}
+
+function knowledgeNodeName(base?: KnowledgeBaseOption) {
+  const name = String(base?.name || "").trim();
+  return name ? `知识库：${name}` : "知识库";
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

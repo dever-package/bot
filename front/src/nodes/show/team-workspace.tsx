@@ -124,6 +124,8 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
   const agents = workspace.agents ?? [];
   const agentCates = workspace.agent_cates ?? [];
   const assetCates = workspace.asset_cates ?? [];
+  const knowledgeCates = workspace.knowledge_cates ?? [];
+  const knowledgeBases = workspace.knowledge_bases ?? [];
   const teams = workspace.teams ?? [];
   const roleTypes = workspace.role_types?.length
     ? workspace.role_types
@@ -922,6 +924,8 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
         agents={agents}
         agentCates={agentCates}
         assetCates={assetCates}
+        knowledgeCates={knowledgeCates}
+        knowledgeBases={knowledgeBases}
         currentTeamID={teamID}
         currentTeamName={String(workspace.team?.name || "当前团队")}
         roles={roles}

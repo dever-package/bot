@@ -120,25 +120,23 @@ func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetm
 	if req.Name == "" {
 		return nil, nil, fmt.Errorf("资产名称不能为空")
 	}
-	assetModel := assetmodel.NewAssetModel()
-	asset := assetModel.Find(ctx, map[string]any{
-		"project_id":    req.ProjectID,
-		"body_id":       req.BodyID,
-		"team_id":       req.TeamID,
-		"flow_id":       req.FlowID,
-		"asset_cate_id": req.AssetCateID,
-		"role":          req.Role,
-		"name":          req.Name,
+	result, err := withAssetSaveLock(ctx, req, func() (saveVersionResult, error) {
+		asset, version, err := saveVersion(ctx, req)
+		return saveVersionResult{Asset: asset, Version: version}, err
 	})
+	return result.Asset, result.Version, err
+}
+
+type saveVersionResult struct {
+	Asset   *assetmodel.Asset
+	Version *assetmodel.Version
+}
+
+func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset, *assetmodel.Version, error) {
+	assetModel := assetmodel.NewAssetModel()
+	asset := assetModel.Find(ctx, assetIdentityFilter(req, true))
 	if asset == nil && req.Role == assetmodel.RoleContent {
-		asset = assetModel.Find(ctx, map[string]any{
-			"project_id":    req.ProjectID,
-			"body_id":       req.BodyID,
-			"team_id":       req.TeamID,
-			"flow_id":       req.FlowID,
-			"asset_cate_id": req.AssetCateID,
-			"name":          req.Name,
-		})
+		asset = assetModel.Find(ctx, assetIdentityFilter(req, false))
 		if asset != nil && NormalizeRole(asset.Role) != assetmodel.RoleContent {
 			asset = nil
 		}
@@ -165,15 +163,7 @@ func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetm
 		})
 		asset = assetModel.Find(ctx, map[string]any{"id": assetID})
 		if asset == nil {
-			asset = assetModel.Find(ctx, map[string]any{
-				"project_id":    req.ProjectID,
-				"body_id":       req.BodyID,
-				"team_id":       req.TeamID,
-				"flow_id":       req.FlowID,
-				"asset_cate_id": req.AssetCateID,
-				"role":          req.Role,
-				"name":          req.Name,
-			})
+			asset = assetModel.Find(ctx, assetIdentityFilter(req, true))
 		}
 	}
 	if asset == nil {
@@ -195,6 +185,21 @@ func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetm
 		return nil, nil, fmt.Errorf("读取资产版本失败")
 	}
 	return asset, version, nil
+}
+
+func assetIdentityFilter(req SaveVersionRequest, includeRole bool) map[string]any {
+	filter := map[string]any{
+		"project_id":    req.ProjectID,
+		"body_id":       req.BodyID,
+		"team_id":       req.TeamID,
+		"flow_id":       req.FlowID,
+		"asset_cate_id": req.AssetCateID,
+		"name":          req.Name,
+	}
+	if includeRole {
+		filter["role"] = req.Role
+	}
+	return filter
 }
 
 func (s Service) UpdateVersionContent(ctx context.Context, projectID uint64, assetID uint64, versionID uint64, content any) (*assetmodel.Asset, *assetmodel.Version, error) {

@@ -12,6 +12,7 @@ const (
 	NodeTypePower         = "power"
 	NodeTypeTeam          = "team"
 	NodeTypeContext       = "context"
+	NodeTypeKnowledge     = "knowledge"
 	NodeTypeCondition     = "condition"
 	NodeTypeMerge         = "merge"
 	NodeTypeHumanApproval = "human_approval"
@@ -24,6 +25,7 @@ var nodeTypeOptions = []map[string]any{
 	{"id": NodeTypePower, "value": "能力"},
 	{"id": NodeTypeTeam, "value": "团队"},
 	{"id": NodeTypeContext, "value": "上下文"},
+	{"id": NodeTypeKnowledge, "value": "知识库"},
 	{"id": NodeTypeCondition, "value": "条件"},
 	{"id": NodeTypeMerge, "value": "合并"},
 	{"id": NodeTypeHumanApproval, "value": "人工确认"},

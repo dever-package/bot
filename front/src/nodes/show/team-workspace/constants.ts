@@ -8,6 +8,7 @@ export const NODE_TYPES = [
   { id: "power", value: "能力" },
   { id: "team", value: "团队工作流" },
   { id: "context", value: "上下文" },
+  { id: "knowledge", value: "知识库" },
   { id: "condition", value: "条件" },
   { id: "merge", value: "合并" },
   { id: "human_approval", value: "人工确认" },

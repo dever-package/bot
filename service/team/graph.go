@@ -40,6 +40,8 @@ func (s Service) Workspace(ctx context.Context, teamID uint64) (map[string]any, 
 		"node_edges_by_flow": nodeEdgesByFlow,
 		"agents":             s.repo.ListAgents(ctx),
 		"agent_cates":        s.repo.ListAgentCates(ctx),
+		"knowledge_cates":    s.repo.ListKnowledgeCates(ctx),
+		"knowledge_bases":    s.repo.ListKnowledgeBases(ctx),
 		"teams":              s.publishedTeamOptions(ctx),
 		"powers":             powers,
 		"power_kinds":        powerKindOptions(powers),
@@ -448,6 +450,7 @@ func nodeTypes() []map[string]any {
 		{"id": teammodel.NodeTypePower, "value": "能力"},
 		{"id": teammodel.NodeTypeTeam, "value": "团队工作流"},
 		{"id": teammodel.NodeTypeContext, "value": "上下文"},
+		{"id": teammodel.NodeTypeKnowledge, "value": "知识库"},
 		{"id": teammodel.NodeTypeCondition, "value": "条件"},
 		{"id": teammodel.NodeTypeMerge, "value": "合并"},
 		{"id": teammodel.NodeTypeHumanApproval, "value": "人工确认"},
@@ -547,12 +550,13 @@ func parseGraphFlowNodes(raw any) []GraphFlowNode {
 }
 
 type graphFlowNodeNameLookup struct {
-	currentTeamID uint64
-	assetCates    map[uint64]string
-	agents        map[uint64]string
-	roles         map[uint64]string
-	powers        map[uint64]string
-	teams         map[uint64]graphTeamNameLookup
+	currentTeamID  uint64
+	assetCates     map[uint64]string
+	agents         map[uint64]string
+	knowledgeBases map[uint64]string
+	roles          map[uint64]string
+	powers         map[uint64]string
+	teams          map[uint64]graphTeamNameLookup
 }
 
 type graphTeamNameLookup struct {
@@ -579,18 +583,22 @@ func (s Service) normalizeGraphFlowNodeNames(ctx context.Context, team teammodel
 
 func (s Service) graphFlowNodeNameLookup(ctx context.Context, team teammodel.Team, nodes []GraphFlowNode) graphFlowNodeNameLookup {
 	lookup := graphFlowNodeNameLookup{
-		currentTeamID: team.ID,
-		assetCates:    map[uint64]string{},
-		agents:        map[uint64]string{},
-		roles:         map[uint64]string{},
-		powers:        map[uint64]string{},
-		teams:         map[uint64]graphTeamNameLookup{},
+		currentTeamID:  team.ID,
+		assetCates:     map[uint64]string{},
+		agents:         map[uint64]string{},
+		knowledgeBases: map[uint64]string{},
+		roles:          map[uint64]string{},
+		powers:         map[uint64]string{},
+		teams:          map[uint64]graphTeamNameLookup{},
 	}
 	for _, cate := range s.repo.ListAssetCates(ctx, team.ID, true) {
 		lookup.assetCates[cate.ID] = strings.TrimSpace(cate.Name)
 	}
 	for _, agent := range s.repo.ListAgents(ctx) {
 		lookup.agents[agent.ID] = strings.TrimSpace(agent.Name)
+	}
+	for _, base := range s.repo.ListKnowledgeBases(ctx) {
+		lookup.knowledgeBases[base.ID] = strings.TrimSpace(base.Name)
 	}
 	for _, power := range s.repo.ListPowers(ctx) {
 		lookup.powers[power.ID] = strings.TrimSpace(power.Name)
@@ -663,6 +671,11 @@ func deriveGraphFlowNodeName(node GraphFlowNode, lookup graphFlowNodeNameLookup)
 			return "读取：" + name
 		}
 		return "读取上下文"
+	case teammodel.NodeTypeKnowledge:
+		if name := lookup.knowledgeBases[uint64Value(config["knowledge_base_id"])]; name != "" {
+			return "知识库：" + name
+		}
+		return "知识库"
 	case teammodel.NodeTypeSave:
 		if name := lookup.assetCates[nodeAssetCateID(node)]; name != "" {
 			return "保存：" + name

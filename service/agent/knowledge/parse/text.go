@@ -5,7 +5,7 @@ import "fmt"
 func parseText(req Request, content string) Result {
 	content = normalizeText(content)
 	nodes := make([]Node, 0)
-	chunks := splitLongText(content, req.MaxNodeLength)
+	chunks := splitLongText(content, req.MaxNodeLength, req.NodeOverlap)
 	for index, chunk := range chunks {
 		nodes = append(nodes, Node{
 			Type:      NodeTypeParagraph,

@@ -116,23 +116,8 @@ func (Team) PostRunFlow(c *server.Context) error {
 	return botapi.WriteJSON(c, data, err)
 }
 
-func (Team) GetTypeList(c *server.Context) error {
-	data, err := teamRunner.TeamList(c.Context())
-	return botapi.WriteJSON(c, data, err)
-}
-
 func (Team) GetTeamList(c *server.Context) error {
 	data, err := teamRunner.TeamList(c.Context())
-	return botapi.WriteJSON(c, data, err)
-}
-
-func (Team) GetTypeDetail(c *server.Context) error {
-	teamID := uint64(frontstream.InputInt64(c.Input("team_id"), 0))
-	if teamID == 0 {
-		teamID = uint64(frontstream.InputInt64(c.Input("id"), 0))
-	}
-	releaseID := uint64(frontstream.InputInt64(c.Input("release_id"), 0))
-	data, err := teamRunner.TeamDetail(c.Context(), teamID, releaseID)
 	return botapi.WriteJSON(c, data, err)
 }
 

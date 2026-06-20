@@ -14,6 +14,8 @@ const (
 	maxBatchReindexWorkers = 4
 )
 
+var lightPendingIndexBases sync.Map
+
 func (s Service) BatchReindex(ctx context.Context, baseID uint64, docIDs []uint64) error {
 	if baseID == 0 {
 		return fmt.Errorf("知识库不能为空")
@@ -107,6 +109,72 @@ func joinBatchReindexErrors(errs <-chan error) error {
 		messages = append(messages[:5], fmt.Sprintf("另有 %d 个文档失败", len(messages)-5))
 	}
 	return fmt.Errorf("%s", strings.Join(messages, "；"))
+}
+
+func StartLightPendingIndex(ctx context.Context, baseID uint64) {
+	if baseID == 0 {
+		return
+	}
+	base := agentmodel.NewKnowledgeBaseModel().Find(ctx, map[string]any{"id": baseID, "status": 1})
+	if base == nil || base.ConceptGraphEnabled != agentmodel.KnowledgeModeLight {
+		return
+	}
+	if len(pendingKnowledgeDocs(ctx, baseID)) == 0 {
+		return
+	}
+	if _, loaded := lightPendingIndexBases.LoadOrStore(baseID, struct{}{}); loaded {
+		return
+	}
+	updated := agentmodel.NewKnowledgeBaseModel().Update(ctx, map[string]any{
+		"id":           baseID,
+		"index_status": map[string]any{"neq": agentmodel.KnowledgeIndexStatusRunning},
+	}, map[string]any{
+		"index_status":  agentmodel.KnowledgeIndexStatusRunning,
+		"error_message": "",
+	})
+	if updated == 0 {
+		lightPendingIndexBases.Delete(baseID)
+		return
+	}
+	go runLightPendingIndex(baseID)
+}
+
+func runLightPendingIndex(baseID uint64) {
+	bg := context.Background()
+	defer func() {
+		lightPendingIndexBases.Delete(baseID)
+		if len(pendingKnowledgeDocs(bg, baseID)) > 0 {
+			StartLightPendingIndex(bg, baseID)
+		}
+	}()
+	svc := NewService()
+	errorMessage := ""
+	for {
+		docs := pendingKnowledgeDocs(bg, baseID)
+		if len(docs) == 0 {
+			break
+		}
+		if err := svc.runBatchReindexWorkers(docs); err != nil {
+			errorMessage = appendIndexWarning(errorMessage, err.Error())
+		}
+	}
+	svc.refreshBaseStats(bg, baseID, finalBaseIndexStatus(bg, baseID, errorMessage), errorMessage)
+}
+
+func pendingKnowledgeDocs(ctx context.Context, baseID uint64) []*agentmodel.KnowledgeDoc {
+	if baseID == 0 {
+		return nil
+	}
+	return agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
+		"knowledge_base_id": baseID,
+		"index_status":      agentmodel.KnowledgeIndexStatusPending,
+		"status":            1,
+	}, map[string]any{
+		"field":    "main.id",
+		"order":    "main.id asc",
+		"page":     1,
+		"pageSize": maxBatchReindex,
+	})
 }
 
 func StartBaseIndex(ctx context.Context, baseID uint64) error {

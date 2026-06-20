@@ -15,7 +15,7 @@ func parseHTML(req Request, content string) Result {
 	content = normalizeText(content)
 	plain := htmlPlainText(content)
 	nodes := make([]Node, 0)
-	for index, chunk := range splitLongText(plain, req.MaxNodeLength) {
+	for index, chunk := range splitLongText(plain, req.MaxNodeLength, req.NodeOverlap) {
 		nodes = append(nodes, Node{
 			Type:      NodeTypeParagraph,
 			Title:     paragraphTitle(chunk, index+1),

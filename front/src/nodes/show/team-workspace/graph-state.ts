@@ -5,6 +5,8 @@ import type {
   AgentOption,
   CanvasPoint,
   FlowItem,
+  KnowledgeBaseOption,
+  KnowledgeCateOption,
   NodeEdge,
   PowerOption,
   RoleOption,
@@ -178,6 +180,12 @@ export function normalizeWorkspace(data: any): WorkspaceData {
     agent_cates: Array.isArray(data?.agent_cates)
       ? sortAgentCateOptions(data.agent_cates)
       : [],
+    knowledge_cates: Array.isArray(data?.knowledge_cates)
+      ? sortKnowledgeCateOptions(data.knowledge_cates)
+      : [],
+    knowledge_bases: Array.isArray(data?.knowledge_bases)
+      ? sortKnowledgeBaseOptions(data.knowledge_bases)
+      : [],
     teams: Array.isArray(data?.teams) ? data.teams : [],
     role_types: Array.isArray(data?.role_types) ? data.role_types : ROLE_TYPES,
     powers: Array.isArray(data?.powers) ? data.powers : [],
@@ -211,6 +219,14 @@ export function sortAgentOptions(agents: AgentOption[]) {
 
 export function sortAgentCateOptions(agentCates: AgentCateOption[]) {
   return [...agentCates].sort(compareOptionSort);
+}
+
+export function sortKnowledgeBaseOptions(bases: KnowledgeBaseOption[]) {
+  return [...bases].sort(compareOptionSort);
+}
+
+export function sortKnowledgeCateOptions(cates: KnowledgeCateOption[]) {
+  return [...cates].sort(compareOptionSort);
 }
 
 function compareOptionSort(
@@ -329,6 +345,10 @@ export function normalizeNodeConfigForSave(node: TeamNode) {
     "task",
     "input_keys",
     "output_key",
+    "knowledge_cate_id",
+    "knowledge_base_id",
+    "query",
+    "retrieve_limit",
   ]);
   if (node.type === "agent") {
     return omitConfigKeys(config, [
@@ -412,6 +432,36 @@ export function normalizeNodeConfigForSave(node: TeamNode) {
       "content_key",
     ]);
   }
+  if (node.type === "knowledge") {
+    return {
+      ...omitConfigKeys(config, [
+        "goal",
+        "agent_cate_id",
+        "role_id",
+        "role_key",
+        "role_team_id",
+        "role_type",
+        "power_id",
+        "power_key",
+        "power_kind",
+        "sub_team_id",
+        "sub_flow_id",
+        "sub_flow_key",
+        "release_id",
+        "asset_cate_id",
+        "operator",
+        "source_key",
+        "input_key",
+        "value",
+        "body_key",
+        "content_key",
+      ]),
+      knowledge_base_id: Number(node.config?.knowledge_base_id || 0),
+      knowledge_cate_id: Number(node.config?.knowledge_cate_id || 0),
+      query: String(node.config?.query ?? node.config?.goal ?? ""),
+      retrieve_limit: Number(node.config?.retrieve_limit || 0),
+    };
+  }
   if (node.type === "condition") {
     return {
       ...omitConfigKeys(config, [
@@ -429,6 +479,10 @@ export function normalizeNodeConfigForSave(node: TeamNode) {
         "sub_flow_key",
         "release_id",
         "asset_cate_id",
+        "operator",
+        "source_key",
+        "input_key",
+        "value",
         "body_key",
         "content_key",
       ]),

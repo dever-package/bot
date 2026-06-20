@@ -151,9 +151,9 @@
               "type": "show-base"
             },
             {
-              "value": "index_power.name",
-              "name": "索引模型",
-              "type": "show-base"
+              "value": "concept_graph_enabled",
+              "name": "检索模式",
+              "type": "show-tag"
             },
             {
               "value": "doc_count",
@@ -257,7 +257,7 @@
         "meta": {
           "stateKey": "dialog.create",
           "pageRoute": "/bot/agent/knowledge_base/update",
-          "description": "创建知识库后，在文档管理中上传或编辑文件，再手动触发智能索引。",
+          "description": "创建知识库后，在文档管理中上传或编辑文件，再手动触发索引。",
           "size": "xl",
           "footer": {
             "confirm": true,
@@ -273,7 +273,7 @@
         "meta": {
           "stateKey": "dialog.edit",
           "pageRoute": "/bot/agent/knowledge_base/update",
-          "description": "配置知识库的索引模型、知识分段和智能体检索策略。",
+          "description": "配置知识库的文档解析服务和检索模式。",
           "size": "xl",
           "footer": {
             "confirm": true,

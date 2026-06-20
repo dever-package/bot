@@ -548,12 +548,22 @@
 }
 
 .knowledge-markdown-editor {
-  position: relative;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   display: flex;
-  flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
   scrollbar-gutter: stable;
+  visibility: hidden;
+}
+
+.knowledge-markdown-editor.is-active {
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
 }
 
 .knowledge-markdown-editor.is-dragging::after {
@@ -1226,6 +1236,83 @@
 
 .knowledge-index-detail__loading svg {
   animation: knowledge-spin 1s linear infinite;
+}
+
+.knowledge-retrieve-test__form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px auto;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--knowledge-border);
+}
+
+.knowledge-retrieve-test__limit {
+  width: 88px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--knowledge-border);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.knowledge-retrieve-test__form button svg {
+  flex: 0 0 auto;
+}
+
+.knowledge-retrieve-test__spin {
+  animation: knowledge-spin 1s linear infinite;
+}
+
+.knowledge-retrieve-test__body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 16px 18px 22px;
+}
+
+.knowledge-retrieve-test__results {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.knowledge-retrieve-test__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.knowledge-retrieve-test__meta span {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #f8fafc;
+}
+
+.knowledge-retrieve-test__plans {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.knowledge-retrieve-test__plans pre {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--knowledge-border);
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
 
 .knowledge-context-menu__sep {
@@ -2043,5 +2130,13 @@
     min-height: 360px;
     border-right: 0;
     border-bottom: 1px solid var(--knowledge-border);
+  }
+
+  .knowledge-retrieve-test__form {
+    grid-template-columns: 1fr;
+  }
+
+  .knowledge-retrieve-test__limit {
+    width: 100%;
   }
 }

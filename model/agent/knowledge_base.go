@@ -11,8 +11,8 @@ type KnowledgeBase struct {
 	CateID              uint64    `dorm:"type:bigint;not null;default:1;comment:知识库分类"`
 	Name                string    `dorm:"type:varchar(128);not null;comment:名称"`
 	ParserServiceID     uint64    `dorm:"type:bigint;not null;default:0;comment:文档解析服务"`
-	IndexPowerID        uint64    `dorm:"type:bigint;not null;default:1;comment:索引模型"`
-	ConceptGraphEnabled int16     `dorm:"type:smallint;not null;default:1;comment:开启概念图谱"`
+	IndexPowerID        uint64    `dorm:"type:bigint;not null;default:0;comment:索引模型"`
+	ConceptGraphEnabled int16     `dorm:"type:smallint;not null;default:2;comment:检索模式"`
 	Collection          string    `dorm:"type:varchar(128);not null;default:'';comment:向量数据库集合"`
 	EmbeddingPowerID    uint64    `dorm:"type:bigint;not null;default:0;comment:向量能力"`
 	NodeMaxLength       int       `dorm:"type:int;not null;default:800;comment:节点最大长度"`
@@ -79,7 +79,7 @@ func NewKnowledgeBaseModel() *orm.Model[KnowledgeBase] {
 		Database: "default",
 		Options: map[string]any{
 			"status":                statusOptions,
-			"concept_graph_enabled": statusOptions,
+			"concept_graph_enabled": knowledgeModeOptions,
 			"index_status":          knowledgeIndexStatusOptions,
 		},
 		Relations: []orm.Relation{

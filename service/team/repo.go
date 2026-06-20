@@ -352,6 +352,57 @@ func (Repo) ListAgentCates(ctx context.Context) []AgentCateOption {
 	return result
 }
 
+func (Repo) ListKnowledgeBases(ctx context.Context) []KnowledgeBaseOption {
+	rows := agentmodel.NewKnowledgeBaseModel().Select(ctx, map[string]any{
+		"status": teammodel.StatusEnabled,
+	})
+	result := make([]KnowledgeBaseOption, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		result = append(result, KnowledgeBaseOption{
+			ID:            row.ID,
+			CateID:        row.CateID,
+			Name:          strings.TrimSpace(row.Name),
+			RetrieveLimit: row.RetrieveLimit,
+			IndexStatus:   strings.TrimSpace(row.IndexStatus),
+			Sort:          row.Sort,
+		})
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Sort == result[j].Sort {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].Sort < result[j].Sort
+	})
+	return result
+}
+
+func (Repo) ListKnowledgeCates(ctx context.Context) []KnowledgeCateOption {
+	rows := agentmodel.NewKnowledgeCateModel().Select(ctx, map[string]any{
+		"status": teammodel.StatusEnabled,
+	})
+	result := make([]KnowledgeCateOption, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		result = append(result, KnowledgeCateOption{
+			ID:    row.ID,
+			Value: strings.TrimSpace(row.Name),
+			Sort:  row.Sort,
+		})
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Sort == result[j].Sort {
+			return result[i].ID < result[j].ID
+		}
+		return result[i].Sort < result[j].Sort
+	})
+	return result
+}
+
 func (Repo) ListPowers(ctx context.Context) []PowerOption {
 	rows := energonmodel.NewPowerModel().Select(ctx, map[string]any{
 		"status": teammodel.StatusEnabled,

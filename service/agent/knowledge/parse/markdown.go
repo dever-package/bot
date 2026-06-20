@@ -22,7 +22,7 @@ func parseMarkdown(req Request, content string) Result {
 		if text == "" {
 			return
 		}
-		nodes := paragraphNodes(text, req.MaxNodeLength, currentLineStart, lineEnd)
+		nodes := paragraphNodes(text, req.MaxNodeLength, req.NodeOverlap, currentLineStart, lineEnd)
 		if len(stack) == 0 {
 			for index := range nodes {
 				node := nodes[index]
@@ -86,9 +86,9 @@ func dereferenceNodes(nodes []*Node) []Node {
 	return result
 }
 
-func paragraphNodes(text string, limit int, lineStart int, lineEnd int) []Node {
+func paragraphNodes(text string, limit int, overlap int, lineStart int, lineEnd int) []Node {
 	result := make([]Node, 0)
-	for index, chunk := range splitLongText(text, limit) {
+	for index, chunk := range splitLongText(text, limit, overlap) {
 		title := firstLine(chunk)
 		if title == "" {
 			title = fmt.Sprintf("段落 %d", index+1)

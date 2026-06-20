@@ -34,10 +34,6 @@ func (s Service) TeamList(ctx context.Context) (map[string]any, error) {
 	return map[string]any{"items": rows}, nil
 }
 
-func (s Service) TypeList(ctx context.Context) (map[string]any, error) {
-	return s.TeamList(ctx)
-}
-
 func (s Service) TeamDetail(ctx context.Context, teamID uint64, releaseID uint64) (map[string]any, error) {
 	release, graph, err := s.runtimeGraphByRelease(ctx, teamID, releaseID)
 	if err != nil {
@@ -77,10 +73,6 @@ func (s Service) TeamDetail(ctx context.Context, teamID uint64, releaseID uint64
 	}, nil
 }
 
-func (s Service) TypeDetail(ctx context.Context, teamID uint64, releaseID uint64) (map[string]any, error) {
-	return s.TeamDetail(ctx, teamID, releaseID)
-}
-
 func (s Service) RuntimeGraph(ctx context.Context, teamID uint64, releaseID uint64) (map[string]any, error) {
 	return s.TeamDetail(ctx, teamID, releaseID)
 }
@@ -89,14 +81,16 @@ func (s Service) CanvasConfig(ctx context.Context, releaseID uint64, flowID uint
 	if releaseID == 0 {
 		powers := s.repo.ListPowers(ctx)
 		return map[string]any{
-			"release_id":  0,
-			"flow":        map[string]any{},
-			"roles":       []GraphRole{},
-			"teams":       s.publishedTeamOptions(ctx),
-			"agents":      s.repo.ListAgents(ctx),
-			"agent_cates": s.repo.ListAgentCates(ctx),
-			"powers":      powers,
-			"power_kinds": powerKindOptions(powers),
+			"release_id":      0,
+			"flow":            map[string]any{},
+			"roles":           []GraphRole{},
+			"teams":           s.publishedTeamOptions(ctx),
+			"agents":          s.repo.ListAgents(ctx),
+			"agent_cates":     s.repo.ListAgentCates(ctx),
+			"knowledge_cates": s.repo.ListKnowledgeCates(ctx),
+			"knowledge_bases": s.repo.ListKnowledgeBases(ctx),
+			"powers":          powers,
+			"power_kinds":     powerKindOptions(powers),
 		}, nil
 	}
 	release, graph, err := s.runtimeGraphByRelease(ctx, 0, releaseID)
@@ -119,6 +113,8 @@ func (s Service) CanvasConfig(ctx context.Context, releaseID uint64, flowID uint
 		"teams":            s.publishedTeamOptions(ctx),
 		"agents":           s.repo.ListAgents(ctx),
 		"agent_cates":      s.repo.ListAgentCates(ctx),
+		"knowledge_cates":  s.repo.ListKnowledgeCates(ctx),
+		"knowledge_bases":  s.repo.ListKnowledgeBases(ctx),
 		"powers":           powers,
 		"power_kinds":      powerKindOptions(powers),
 	}, nil

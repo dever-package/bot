@@ -93,6 +93,7 @@ func ParseWithMinerU(ctx context.Context, req Request, cfg MinerUConfig) (Result
 	if req.MaxNodeLength <= 0 {
 		req.MaxNodeLength = defaultMaxNodeLength
 	}
+	req.NodeOverlap = normalizeNodeOverlap(req.NodeOverlap, req.MaxNodeLength)
 	if strings.TrimSpace(req.Path) == "" {
 		return Result{}, fmt.Errorf("MinerU 解析需要本地文件路径")
 	}

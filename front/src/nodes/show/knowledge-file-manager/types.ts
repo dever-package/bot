@@ -5,6 +5,7 @@ export type KnowledgeFileManagerData = {
     status: number
     root?: string
     index_status?: string
+    concept_graph_enabled?: number
   }
   files?: KnowledgeFileItem[]
   drive?: {

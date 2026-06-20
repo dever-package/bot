@@ -109,6 +109,22 @@ export type AssetCateOption = {
   sort?: number;
 };
 
+export type KnowledgeBaseOption = {
+  id: number;
+  cate_id?: number;
+  name: string;
+  retrieve_limit?: number;
+  index_status?: string;
+  sort?: number;
+};
+
+export type KnowledgeCateOption = {
+  id: number;
+  value?: string;
+  name?: string;
+  sort?: number;
+};
+
 export type WorkspaceData = {
   team?: Record<string, any>;
   asset_cates?: AssetCateOption[];
@@ -119,6 +135,8 @@ export type WorkspaceData = {
   roles?: RoleOption[];
   agents?: AgentOption[];
   agent_cates?: AgentCateOption[];
+  knowledge_cates?: KnowledgeCateOption[];
+  knowledge_bases?: KnowledgeBaseOption[];
   teams?: TeamOption[];
   role_types?: RoleTypeOption[];
   powers?: PowerOption[];

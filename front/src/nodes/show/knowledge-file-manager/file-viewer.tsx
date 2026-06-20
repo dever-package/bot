@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import CodeMirror from "@uiw/react-codemirror"
 import { css } from "@codemirror/lang-css"
 import { html } from "@codemirror/lang-html"
@@ -16,7 +16,8 @@ import {
 } from "./markdown-live-editor"
 
 type FileViewerProps = {
-  file: KnowledgeFileContent
+  active: boolean
+  file: KnowledgeFileContent | null
   content: string
   downloadURL: string
   previewURL: string
@@ -28,6 +29,7 @@ type FileViewerProps = {
 }
 
 export function KnowledgeFileViewer({
+  active,
   file,
   content,
   downloadURL,
@@ -38,58 +40,83 @@ export function KnowledgeFileViewer({
   onStatusChange,
   onChange,
 }: FileViewerProps) {
-  const kind = resolveFileKind(file)
-  if (file.editable) {
-    if (shouldUseMarkdownLiveEditor(file, kind)) {
-      return (
-        <MarkdownLiveEditor
-          value={content}
-          linkBaseURL={linkBaseURL}
-          onUploadAttachments={onUploadAttachments}
-          onAttachmentError={onAttachmentError}
-          onStatusChange={onStatusChange}
+  const kind = file ? resolveFileKind(file) : null
+  const markdownActive = Boolean(
+    active && file?.editable && kind && shouldUseMarkdownLiveEditor(kind),
+  )
+  let fileView: ReactNode = null
+
+  if (active && file && kind) {
+    if (file.editable && !markdownActive) {
+      fileView = (
+        <EditableCodeViewer
+          file={file}
+          content={content}
+          kind={kind}
           onChange={onChange}
         />
       )
+    } else if (!file.editable) {
+      fileView = (
+        <FilePreview
+          file={file}
+          kind={kind}
+          downloadURL={downloadURL}
+          previewURL={previewURL}
+          onStatusChange={onStatusChange}
+        />
+      )
     }
-    return (
-      <CodeMirror
-        value={content}
-        height="100%"
-        basicSetup={{
-          autocompletion: true,
-          bracketMatching: true,
-          foldGutter: true,
-          highlightActiveLine: true,
-          highlightSelectionMatches: true,
-          lineNumbers: true,
-        }}
-        extensions={editorExtensions(file.name, kind)}
-        className="knowledge-code-editor"
+  }
+
+  return (
+    <>
+      <MarkdownLiveEditor
+        active={markdownActive}
+        value={markdownActive ? content : ""}
+        linkBaseURL={markdownActive ? linkBaseURL : ""}
+        onUploadAttachments={onUploadAttachments}
+        onAttachmentError={onAttachmentError}
+        onStatusChange={onStatusChange}
         onChange={onChange}
       />
-    )
-  }
-  return (
-    <FilePreview
-      file={file}
-      kind={kind}
-      downloadURL={downloadURL}
-      previewURL={previewURL}
-      onStatusChange={onStatusChange}
-    />
+      {fileView}
+    </>
   )
 }
 
-function shouldUseMarkdownLiveEditor(
-  file: KnowledgeFileContent,
-  kind: KnowledgeFileKind,
-) {
-  const ext = fileExt(file.name)
-  if (kind === "markdown" || kind === "text") {
-    return true
-  }
-  return !ext && kind === "unknown"
+function shouldUseMarkdownLiveEditor(kind: KnowledgeFileKind) {
+  return kind === "markdown"
+}
+
+function EditableCodeViewer({
+  file,
+  content,
+  kind,
+  onChange,
+}: {
+  file: KnowledgeFileContent
+  content: string
+  kind: KnowledgeFileKind
+  onChange: (content: string) => void
+}) {
+  return (
+    <CodeMirror
+      value={content}
+      height="100%"
+      basicSetup={{
+        autocompletion: true,
+        bracketMatching: true,
+        foldGutter: true,
+        highlightActiveLine: true,
+        highlightSelectionMatches: true,
+        lineNumbers: true,
+      }}
+      extensions={editorExtensions(file.name, kind)}
+      className="knowledge-code-editor"
+      onChange={onChange}
+    />
+  )
 }
 
 function FilePreview({

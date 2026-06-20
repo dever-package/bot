@@ -13,7 +13,7 @@ func parseCode(req Request, content string) Result {
 		title = "代码"
 	}
 	nodes := make([]Node, 0)
-	chunks := splitLongText(content, req.MaxNodeLength)
+	chunks := splitLongText(content, req.MaxNodeLength, req.NodeOverlap)
 	for index, chunk := range chunks {
 		nodeTitle := title
 		if len(chunks) > 1 {

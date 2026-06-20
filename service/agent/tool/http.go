@@ -103,16 +103,7 @@ func performHTTPRequest(ctx context.Context, spec httpSpec) (map[string]any, err
 		request.Header.Set(key, value)
 	}
 
-	client := &http.Client{
-		Timeout:   time.Duration(timeoutSec) * time.Second,
-		Transport: newExternalHTTPTransport(),
-		CheckRedirect: func(next *http.Request, via []*http.Request) error {
-			if len(via) >= 3 {
-				return fmt.Errorf("HTTP 跳转次数超过限制")
-			}
-			return validateExternalURL(next.Context(), next.URL)
-		},
-	}
+	client := NewExternalHTTPClient(time.Duration(timeoutSec) * time.Second)
 	defer client.CloseIdleConnections()
 	response, err := client.Do(request)
 	if err != nil {
@@ -205,6 +196,26 @@ func validateExternalURL(ctx context.Context, parsed *url.URL) error {
 	}
 	_, err := resolveAllowedExternalIPs(ctx, host)
 	return err
+}
+
+func ValidateExternalURL(ctx context.Context, parsed *url.URL) error {
+	return validateExternalURL(ctx, parsed)
+}
+
+func NewExternalHTTPClient(timeout time.Duration) *http.Client {
+	if timeout <= 0 {
+		timeout = time.Duration(defaultTimeoutSec) * time.Second
+	}
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: newExternalHTTPTransport(),
+		CheckRedirect: func(next *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return fmt.Errorf("HTTP 跳转次数超过限制")
+			}
+			return validateExternalURL(next.Context(), next.URL)
+		},
+	}
 }
 
 func newExternalHTTPTransport() *http.Transport {

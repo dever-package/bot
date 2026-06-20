@@ -28,10 +28,6 @@
         "type": "main",
         "className": "p-0",
         "children": {
-          "tabs-row": {
-            "type": "container",
-            "className": "mb-4"
-          },
           "dialog-shell": {
             "type": "container",
             "className": "w-full"
@@ -41,32 +37,10 @@
     }
   },
   "nodes": {
-    "tabs-row": [
-      {
-        "type": "nav-tab",
-        "meta": {
-          "target": "state.currentTab",
-          "variant": "line",
-          "tabs": [
-            {
-              "label": "基础配置",
-              "value": "basic"
-            },
-            {
-              "label": "索引配置",
-              "value": "index"
-            },
-            {
-              "label": "检索配置",
-              "value": "retrieval"
-            }
-          ]
-        }
-      }
-    ],
     "dialog-shell": [
       {
         "type": "form-select",
+        "name": "知识库分类",
         "value": "form.cate_id",
         "mode": "form",
         "option": {
@@ -84,12 +58,12 @@
         ],
         "meta": {
           "formLayout": "horizontal",
-          "tab": "basic",
           "controlClassName": "max-w-[260px]"
         }
       },
       {
         "type": "form-input",
+        "name": "知识库名称",
         "placeholder": "例如：企业业务知识库",
         "value": "form.name",
         "mode": "form",
@@ -100,8 +74,7 @@
           }
         ],
         "meta": {
-          "formLayout": "horizontal",
-          "tab": "basic"
+          "formLayout": "horizontal"
         }
       },
       {
@@ -113,35 +86,66 @@
         "option": {
           "service": "bot.agent.setting.OptionService.LoadKnowledgeParserServices"
         },
-        "info": "可选。选择后，后续 PDF、Office、图片等复杂文件可以使用该服务解析；不选择则只使用本地文本解析和已有兜底能力。",
+        "info": "可选。PDF、Office、图片等复杂文件需要解析正文时选择；Markdown、文本、代码等文件可以不选。",
         "meta": {
           "formLayout": "horizontal",
-          "tab": "index",
           "controlClassName": "max-w-[360px]"
         }
       },
       {
-        "type": "form-number",
-        "name": "节点最大长度",
-        "value": "form.node_max_length",
+        "type": "form-radio",
+        "name": "检索模式",
+        "value": "form.concept_graph_enabled",
         "mode": "form",
-        "info": "单个知识节点的大致最大字符数。系统会优先按文档目录、标题、页面、段落、表格等结构生成节点；如果某个节点过长，再按这个长度做保底拆分，默认 800。",
+        "option": [
+          {
+            "id": 2,
+            "value": "轻量模式"
+          },
+          {
+            "id": 1,
+            "value": "智能增强"
+          }
+        ],
+        "info": "轻量模式使用本地全文检索，不调用索引模型、不生成向量；智能增强会启用 LLM 检索规划和概念图谱，可选向量检索。",
         "meta": {
           "formLayout": "horizontal",
-          "tab": "index",
-          "controlClassName": "max-w-[160px]"
+          "controlClassName": "max-w-[260px]"
         }
       },
       {
-        "type": "form-number",
-        "name": "长节点重叠",
-        "value": "form.node_split_overlap",
+        "type": "form-select",
+        "name": "索引模型",
+        "placeholder": "选择 text 类型能力",
+        "value": "form.index_power_id",
         "mode": "form",
-        "info": "长节点被保底拆分时，相邻节点重复保留的字符数，用于避免关键信息落在切分边界导致检索不到，默认 120。",
+        "option": {
+          "service": "bot.agent.setting.OptionService.LoadTextPowers"
+        },
+        "validate": [
+          {
+            "type": "required",
+            "message": "智能增强需要选择索引模型。",
+            "when": [
+              {
+                "path": "form.concept_graph_enabled",
+                "operator": "equals",
+                "value": 1
+              }
+            ]
+          }
+        ],
+        "info": "用于查询改写、检索规划、目录摘要和概念关系抽取。",
         "meta": {
           "formLayout": "horizontal",
-          "tab": "index",
-          "controlClassName": "max-w-[160px]"
+          "controlClassName": "max-w-[360px]",
+          "showWhen": [
+            {
+              "path": "form.concept_graph_enabled",
+              "operator": "equals",
+              "value": 1
+            }
+          ]
         }
       },
       {
@@ -153,49 +157,17 @@
         "option": {
           "service": "bot.agent.setting.OptionService.LoadEmbeddingPowers"
         },
-        "info": "可选。选择 embeddings 类型能力后，会额外生成语义向量，用于相似内容检索；不选择则使用全文检索、目录图谱和智能规划检索。",
+        "info": "可选。选择后会额外生成语义向量，用于相似内容检索；不选择则只使用全文、规划和图谱检索。",
         "meta": {
           "formLayout": "horizontal",
-          "tab": "index",
-          "controlClassName": "max-w-[360px]"
-        }
-      },
-      {
-        "type": "form-radio",
-        "name": "概念图谱",
-        "value": "form.concept_graph_enabled",
-        "mode": "form",
-        "option": [
-          {
-            "id": 1,
-            "value": "启用"
-          },
-          {
-            "id": 2,
-            "value": "禁用"
-          }
-        ],
-        "info": "启用后，索引阶段每篇文档会由 LLM 抽取概念和关系（includes、depends_on 等语义边），形成语义关系网络。检索时可通过图谱扩展找到更相关的文档，适合需要深度语义理解的场景。如只做关键词/语义检索，不需要关联发现，可关闭。",
-        "meta": {
-          "formLayout": "horizontal",
-          "tab": "index",
-          "controlClassName": "max-w-[240px]"
-        }
-      },
-      {
-        "type": "form-select",
-        "name": "索引模型",
-        "placeholder": "可选，选择文本类型能力",
-        "value": "form.index_power_id",
-        "mode": "form",
-        "option": {
-          "service": "bot.agent.setting.OptionService.LoadTextPowers"
-        },
-        "info": "启用概念图谱时需要选择索引模型，用于文档摘要、目录摘要、检索规划和概念关系抽取。如不启用概念图谱且仅做关键词/语义检索，则无需选择。",
-        "meta": {
-          "formLayout": "horizontal",
-          "tab": "index",
-          "controlClassName": "max-w-[360px]"
+          "controlClassName": "max-w-[360px]",
+          "showWhen": [
+            {
+              "path": "form.concept_graph_enabled",
+              "operator": "equals",
+              "value": 1
+            }
+          ]
         }
       },
       {
@@ -203,11 +175,17 @@
         "name": "检索数量",
         "value": "form.retrieve_limit",
         "mode": "form",
-        "info": "智能体每次从该知识库最多取多少条候选知识。数量越多覆盖面越大，但更容易混入弱相关内容，默认 5。",
+        "info": "智能体每次从该知识库最多取多少条候选知识，默认 5。",
         "meta": {
           "formLayout": "horizontal",
-          "tab": "retrieval",
-          "controlClassName": "max-w-[160px]"
+          "controlClassName": "max-w-[160px]",
+          "showWhen": [
+            {
+              "path": "form.concept_graph_enabled",
+              "operator": "equals",
+              "value": 1
+            }
+          ]
         }
       },
       {
@@ -215,23 +193,17 @@
         "name": "最大字数",
         "value": "form.max_context_chars",
         "mode": "form",
-        "info": "最多注入到智能体上下文里的知识内容总字数。太小可能信息不足，太大可能增加成本并干扰重点，默认 6000。",
+        "info": "最多注入到智能体上下文里的知识内容总字数，默认 6000。",
         "meta": {
           "formLayout": "horizontal",
-          "tab": "retrieval",
-          "controlClassName": "max-w-[180px]"
-        }
-      },
-      {
-        "type": "form-number",
-        "name": "匹配阈值",
-        "value": "form.score_threshold",
-        "mode": "form",
-        "info": "用于过滤低相关知识的最低匹配要求。阈值越高结果越严格；阈值越低覆盖更多但可能混入噪声，默认 0.35。",
-        "meta": {
-          "formLayout": "horizontal",
-          "tab": "retrieval",
-          "controlClassName": "max-w-[160px]"
+          "controlClassName": "max-w-[180px]",
+          "showWhen": [
+            {
+              "path": "form.concept_graph_enabled",
+              "operator": "equals",
+              "value": 1
+            }
+          ]
         }
       },
       {
@@ -239,11 +211,81 @@
         "name": "扩展层数",
         "value": "form.graph_depth",
         "mode": "form",
-        "info": "命中某个目录或知识点后，继续向父级和子级目录扩展几层关联内容。默认 1 层；2 层适合复杂关联问题，但可能带入更多噪声。",
+        "info": "命中目录或知识点后继续向关联内容扩展的层数，默认 1。",
         "meta": {
           "formLayout": "horizontal",
-          "tab": "retrieval",
-          "controlClassName": "max-w-[160px]"
+          "controlClassName": "max-w-[160px]",
+          "showWhen": [
+            {
+              "path": "form.concept_graph_enabled",
+              "operator": "equals",
+              "value": 1
+            }
+          ]
+        }
+      },
+      {
+        "type": "form-number",
+        "name": "匹配阈值",
+        "value": "form.score_threshold",
+        "mode": "form",
+        "info": "向量检索的最低相似度，默认 0.35。",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[160px]",
+          "showWhen": [
+            {
+              "path": "form.concept_graph_enabled",
+              "operator": "equals",
+              "value": 1
+            },
+            {
+              "path": "form.embedding_power_id",
+              "operator": "notEquals",
+              "value": 0
+            },
+            {
+              "path": "form.embedding_power_id",
+              "operator": "notEquals",
+              "value": ""
+            }
+          ]
+        }
+      },
+      {
+        "type": "form-number",
+        "name": "节点最大长度",
+        "value": "form.node_max_length",
+        "mode": "form",
+        "info": "单个知识节点的大致最大字符数，默认 800。",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[160px]",
+          "showWhen": [
+            {
+              "path": "form.concept_graph_enabled",
+              "operator": "equals",
+              "value": 1
+            }
+          ]
+        }
+      },
+      {
+        "type": "form-number",
+        "name": "长节点重叠",
+        "value": "form.node_split_overlap",
+        "mode": "form",
+        "info": "长节点被保底拆分时，相邻节点重复保留的字符数，默认 120。",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[160px]",
+          "showWhen": [
+            {
+              "path": "form.concept_graph_enabled",
+              "operator": "equals",
+              "value": 1
+            }
+          ]
         }
       }
     ]
@@ -256,7 +298,7 @@
       "parser_service_id": "",
       "index_power_id": "",
       "embedding_power_id": "",
-      "concept_graph_enabled": 1,
+      "concept_graph_enabled": 2,
       "node_max_length": 800,
       "node_split_overlap": 120,
       "retrieve_limit": 5,
@@ -267,9 +309,7 @@
       "sort": 100
     }
   },
-  "state": {
-    "currentTab": "basic"
-  },
+  "state": {},
   "action": {
     "submit": {
       "type": "save",

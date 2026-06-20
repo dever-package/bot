@@ -180,16 +180,13 @@ export async function uploadFilePart(params: UploadFilePartParams) {
   form.set("total_parts", String(params.totalParts))
   form.set("file", params.chunk, params.name)
 
-  const response = await fetch("/bot/admin/knowledge/create_file", {
-    method: "POST",
-    body: form,
-  })
-  const result = (await response.json().catch(() => null)) as KnowledgeApiResult<KnowledgeFileUploadPartData> | null
-  if (!response.ok) {
-    throw new Error(result?.msg || result?.message || `请求失败(${response.status})`)
-  }
-  if (!result) {
-    throw new Error("请求失败")
+  const result = (await request(
+    "/bot/admin/knowledge/create_file",
+    "post",
+    form,
+  )) as KnowledgeApiResult<KnowledgeFileUploadPartData> | KnowledgeFileUploadPartData
+  if (!isKnowledgeApiResult(result)) {
+    return result
   }
   return unwrapKnowledgeResult(result)
 }
