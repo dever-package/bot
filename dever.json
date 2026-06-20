@@ -12,6 +12,7 @@
   "front": {
     "sites": {
       "admin": {
+        "api": "bot/admin",
         "auth": [
           {
             "key": "bot",
@@ -54,7 +55,7 @@
         ]
       },
       "body": {
-        "api": "bot",
+        "api": "bot/body",
         "page": "body",
         "config": {
           "name": "工作台",

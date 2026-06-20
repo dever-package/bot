@@ -169,10 +169,10 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   const modalOpen = useStore(store, () =>
     openPath ? Boolean(getStoreValueByPath(store, openPath)) : true
   )
-  const requestApi = String(item.meta?.requestApi || '/bot/agent/run')
-  const streamApi = String(item.meta?.streamApi || '/bot/agent/stream')
-  const stopApi = String(item.meta?.stopApi || '/bot/agent/stop')
-  const paramApi = String(item.meta?.paramApi || '/bot/energon/power_params')
+  const requestApi = String(item.meta?.requestApi || '/bot/admin/agent/run')
+  const streamApi = String(item.meta?.streamApi || '/bot/admin/agent/stream')
+  const stopApi = String(item.meta?.stopApi || '/bot/admin/agent/stop')
+  const paramApi = String(item.meta?.paramApi || '/bot/admin/energon/power_params')
   const blockMs = Number(item.meta?.blockMs || 1000)
   const initialInput = String(item.meta?.initialInput || '')
   const inputPlaceholder = String(

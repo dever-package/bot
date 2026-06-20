@@ -98,14 +98,14 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
     Set<string>
   >(() => new Set());
 
-  const workspaceApi = String(meta.workspaceApi || "/bot/team/workspace_data");
-  const saveFlowApi = String(meta.saveFlowApi || "/bot/team/save_flow_graph");
-  const saveNodeApi = String(meta.saveNodeApi || "/bot/team/save_node_graph");
-  const runTeamApi = String(meta.runTeamApi || "/bot/team/run_team");
-  const runFlowApi = String(meta.runFlowApi || "/bot/team/run_flow");
-  const streamApi = String(meta.streamApi || "/bot/team/stream");
-  const approvalApi = String(meta.approvalApi || "/bot/team/submit_approval");
-  const paramApi = String(meta.paramApi || "/bot/energon/power_params");
+  const workspaceApi = String(meta.workspaceApi || "/bot/admin/team/workspace_data");
+  const saveFlowApi = String(meta.saveFlowApi || "/bot/admin/team/save_flow_graph");
+  const saveNodeApi = String(meta.saveNodeApi || "/bot/admin/team/save_node_graph");
+  const runTeamApi = String(meta.runTeamApi || "/bot/admin/team/run_team");
+  const runFlowApi = String(meta.runFlowApi || "/bot/admin/team/run_flow");
+  const streamApi = String(meta.streamApi || "/bot/admin/team/stream");
+  const approvalApi = String(meta.approvalApi || "/bot/admin/team/submit_approval");
+  const paramApi = String(meta.paramApi || "/bot/admin/energon/power_params");
 
   const publishStatus = normalizeTeamPublishStatus(
     workspace.team?.publish_status,

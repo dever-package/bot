@@ -49,17 +49,17 @@
       {
         "type": "show-team-workspace",
         "meta": {
-          "workspaceApi": "/bot/team/workspace_data",
-          "saveFlowApi": "/bot/team/save_flow_graph",
-          "saveNodeApi": "/bot/team/save_node_graph",
-          "validateFlowApi": "/bot/team/validate_flow",
-          "validateNodeApi": "/bot/team/validate_node",
-          "runTeamApi": "/bot/team/run_team",
-          "runFlowApi": "/bot/team/run_flow",
-          "runStatusApi": "/bot/team/run_status",
-          "streamApi": "/bot/team/stream",
-          "approvalApi": "/bot/team/submit_approval",
-          "stopRunApi": "/bot/team/stop_run"
+          "workspaceApi": "/bot/admin/team/workspace_data",
+          "saveFlowApi": "/bot/admin/team/save_flow_graph",
+          "saveNodeApi": "/bot/admin/team/save_node_graph",
+          "validateFlowApi": "/bot/admin/team/validate_flow",
+          "validateNodeApi": "/bot/admin/team/validate_node",
+          "runTeamApi": "/bot/admin/team/run_team",
+          "runFlowApi": "/bot/admin/team/run_flow",
+          "runStatusApi": "/bot/admin/team/run_status",
+          "streamApi": "/bot/admin/team/stream",
+          "approvalApi": "/bot/admin/team/submit_approval",
+          "stopRunApi": "/bot/admin/team/stop_run"
         }
       }
     ]

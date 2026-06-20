@@ -458,7 +458,7 @@
         "action": {
           "confirm": {
             "type": "request",
-            "api": "/bot/skill_install/run",
+            "api": "/bot/admin/skill_install/run",
             "method": "post",
             "params": "actionTarget.refreshRequest"
           }
@@ -509,9 +509,9 @@
           "agentPath": "data.actionTarget.installAgent.key",
           "agentNamePath": "data.actionTarget.installAgent.name",
           "openPath": "state.dialog.installSkill",
-          "requestApi": "/bot/skill_install/run",
-          "streamApi": "/bot/skill_install/stream",
-          "stopApi": "/bot/skill_install/stop",
+          "requestApi": "/bot/admin/skill_install/run",
+          "streamApi": "/bot/admin/skill_install/stream",
+          "stopApi": "/bot/admin/skill_install/stop",
           "blockMs": 1000,
           "reloadPageOnFinal": true,
           "reloadPageOnFinalKinds": [

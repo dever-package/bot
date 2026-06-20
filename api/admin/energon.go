@@ -5,6 +5,7 @@ import (
 
 	"github.com/shemic/dever/server"
 
+	botapi "github.com/dever-package/bot/api"
 	energonservice "github.com/dever-package/bot/service/energon"
 	frontstream "github.com/dever-package/front/service/stream"
 )
@@ -55,7 +56,7 @@ func (Energon) GetPowerParams(c *server.Context) error {
 }
 
 func (Energon) GetStream(c *server.Context) error {
-	return handleStreamRead(c, gateway.ReadStream)
+	return botapi.HandleStreamRead(c, gateway.ReadStream)
 }
 
 func (Energon) PostStreamStop(c *server.Context) error {
@@ -63,7 +64,7 @@ func (Energon) PostStreamStop(c *server.Context) error {
 	if err := c.BindJSON(&body); err != nil {
 		return c.Error(err)
 	}
-	requestID := streamRequestIDFromBody(body)
+	requestID := botapi.StreamRequestIDFromBody(body)
 	resp := gateway.StopStream(c.Context(), requestID)
 	return c.JSONPayload(200, resp.Payload())
 }

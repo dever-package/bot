@@ -11,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/shemic/dever/server"
 
+	botapi "github.com/dever-package/bot/api"
 	knowledgeservice "github.com/dever-package/bot/service/agent/knowledge"
 	frontstream "github.com/dever-package/front/service/stream"
 )
@@ -168,16 +169,16 @@ func createKnowledgeFile(c *server.Context, fallbackType string) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	fileType := textFromBody(body, "type")
+	fileType := botapi.TextFromBody(body, "type")
 	if fileType == "" {
 		fileType = fallbackType
 	}
 	data, err := knowledgeRunner.CreateKnowledgeFileNode(
 		c.Context(),
 		knowledgeservice.KnowledgeCreateInput{
-			BaseID:        uint64ValueFromBody(body, "knowledge_base_id", "base_id"),
-			ParentID:      textFromBody(body, "parent", "parent_id", "dir_id"),
-			Name:          textFromBody(body, "name", "title", "file_name", "dir_name"),
+			BaseID:        botapi.Uint64FromBody(body, "knowledge_base_id", "base_id"),
+			ParentID:      botapi.TextFromBody(body, "parent", "parent_id", "dir_id"),
+			Name:          botapi.TextFromBody(body, "name", "title", "file_name", "dir_name"),
 			Type:          fileType,
 			ContentBase64: knowledgeContentBase64FromBody(body),
 		},
@@ -235,8 +236,8 @@ func saveKnowledgeFile(c *server.Context) error {
 	data, err := knowledgeRunner.SaveKnowledgeFileNode(
 		c.Context(),
 		knowledgeservice.KnowledgeSaveInput{
-			BaseID:  uint64ValueFromBody(body, "knowledge_base_id", "base_id"),
-			ID:      textFromBody(body, "id", "doc_id"),
+			BaseID:  botapi.Uint64FromBody(body, "knowledge_base_id", "base_id"),
+			ID:      botapi.TextFromBody(body, "id", "doc_id"),
 			Content: rawTextFromBody(body, "content"),
 		},
 	)
@@ -255,9 +256,9 @@ func renameKnowledgeFile(c *server.Context) error {
 	data, err := knowledgeRunner.RenameKnowledgeFileNode(
 		c.Context(),
 		knowledgeservice.KnowledgeRenameInput{
-			BaseID: uint64ValueFromBody(body, "knowledge_base_id", "base_id"),
-			ID:     textFromBody(body, "id", "doc_id", "dir_id"),
-			Name:   textFromBody(body, "name", "title", "file_name", "dir_name"),
+			BaseID: botapi.Uint64FromBody(body, "knowledge_base_id", "base_id"),
+			ID:     botapi.TextFromBody(body, "id", "doc_id", "dir_id"),
+			Name:   botapi.TextFromBody(body, "name", "title", "file_name", "dir_name"),
 		},
 	)
 	return knowledgeJSON(c, data, err)
@@ -274,7 +275,7 @@ func deleteKnowledgeFiles(c *server.Context) error {
 	}
 	data, err := knowledgeRunner.DeleteKnowledgeFileNodes(
 		c.Context(),
-		uint64ValueFromBody(body, "knowledge_base_id", "base_id"),
+		botapi.Uint64FromBody(body, "knowledge_base_id", "base_id"),
 		stringSliceFromBodyKeys(body, "ids", "id", "doc_id", "dir_id"),
 	)
 	return knowledgeJSON(c, data, err)
@@ -291,7 +292,7 @@ func moveKnowledgeFiles(c *server.Context) error {
 	}
 	input := knowledgeMoveInputFromBody(body)
 	var data knowledgeservice.KnowledgeFileOperationResult
-	if strings.EqualFold(textFromBody(body, "operation", "action"), "copy") {
+	if strings.EqualFold(botapi.TextFromBody(body, "operation", "action"), "copy") {
 		data, err = knowledgeRunner.CopyKnowledgeFileNodes(c.Context(), input)
 	} else {
 		data, err = knowledgeRunner.MoveKnowledgeFileNodes(c.Context(), input)
@@ -314,9 +315,9 @@ func copyKnowledgeFiles(c *server.Context) error {
 
 func knowledgeMoveInputFromBody(body map[string]any) knowledgeservice.KnowledgeMoveInput {
 	return knowledgeservice.KnowledgeMoveInput{
-		BaseID: uint64ValueFromBody(body, "knowledge_base_id", "base_id"),
+		BaseID: botapi.Uint64FromBody(body, "knowledge_base_id", "base_id"),
 		IDs:    stringSliceFromBodyKeys(body, "ids", "id", "doc_id", "dir_id"),
-		Target: textFromBody(body, "target", "target_id", "parent", "parent_id"),
+		Target: botapi.TextFromBody(body, "target", "target_id", "parent", "parent_id"),
 	}
 }
 
@@ -347,8 +348,8 @@ func (Knowledge) PostFeedback(c *server.Context) error {
 	}
 	err = knowledgeRunner.FeedbackNode(
 		c.Context(),
-		uint64ValueFromBody(body, "knowledge_base_id", "base_id"),
-		uint64ValueFromBody(body, "node_id", "id"),
+		botapi.Uint64FromBody(body, "knowledge_base_id", "base_id"),
+		botapi.Uint64FromBody(body, "node_id", "id"),
 		frontstream.InputText(body["feedback"]),
 	)
 	return knowledgeJSON(c, map[string]any{"success": true}, err)
@@ -370,7 +371,7 @@ func (Knowledge) PostRefluxQA(c *server.Context) error {
 	}
 	docID, nodeID, err := knowledgeRunner.RefluxQA(
 		c.Context(),
-		uint64ValueFromBody(body, "knowledge_base_id", "base_id"),
+		botapi.Uint64FromBody(body, "knowledge_base_id", "base_id"),
 		uint64(frontstream.InputInt64(body["dir_id"], 0)),
 		frontstream.InputText(body["query"]),
 		frontstream.InputText(body["answer"]),
@@ -387,7 +388,7 @@ func (Knowledge) PostIndexBase(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	err = knowledgeservice.StartBaseIndex(c.Context(), uint64ValueFromBody(body, "knowledge_base_id", "base_id", "id"))
+	err = knowledgeservice.StartBaseIndex(c.Context(), botapi.Uint64FromBody(body, "knowledge_base_id", "base_id", "id"))
 	return knowledgeJSON(c, map[string]any{"index_status": "running"}, err)
 }
 
@@ -405,7 +406,7 @@ func (Knowledge) PostBatchReindex(c *server.Context) error {
 	}
 	err = knowledgeRunner.BatchReindex(
 		c.Context(),
-		uint64ValueFromBody(body, "knowledge_base_id", "base_id"),
+		botapi.Uint64FromBody(body, "knowledge_base_id", "base_id"),
 		docIDs,
 	)
 	return knowledgeJSON(c, map[string]any{"success": err == nil}, err)
@@ -461,7 +462,7 @@ func (Knowledge) PostReviewDoc(c *server.Context) error {
 	if len(docIDs) == 0 {
 		return c.Error("文档ID不能为空")
 	}
-	status := textFromBody(body, "review_status", "status")
+	status := botapi.TextFromBody(body, "review_status", "status")
 	if status == "" {
 		return c.Error("审核状态不能为空")
 	}
@@ -608,7 +609,7 @@ func stringSliceFromBodyKeys(body map[string]any, keys ...string) []string {
 }
 
 func knowledgeContentBase64FromBody(body map[string]any) string {
-	if encoded := textFromBody(body, "content_base64", "contentBase64"); encoded != "" {
+	if encoded := botapi.TextFromBody(body, "content_base64", "contentBase64"); encoded != "" {
 		return encoded
 	}
 	content := rawTextFromBody(body, "content")
@@ -630,7 +631,7 @@ func rawTextFromBody(body map[string]any, key string) string {
 }
 
 func nullableTextFromBody(body map[string]any, keys ...string) string {
-	text := strings.TrimSpace(textFromBody(body, keys...))
+	text := strings.TrimSpace(botapi.TextFromBody(body, keys...))
 	switch strings.ToLower(text) {
 	case "", "null", "undefined":
 		return ""

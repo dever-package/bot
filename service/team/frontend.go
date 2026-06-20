@@ -470,7 +470,7 @@ func (s Service) callCanvasPower(ctx context.Context, requestID string, power Po
 	resp := s.gateway.Request(ctx, energonservice.GatewayRequest{
 		RequestID: requestID,
 		Method:    "POST",
-		Path:      "/bot/energon/request",
+		Path:      "/bot/admin/energon/request",
 		Body:      body,
 	})
 	payload := resp.Payload()

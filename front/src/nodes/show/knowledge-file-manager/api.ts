@@ -60,7 +60,7 @@ export function loadFileManagerData(params: {
   knowledgeBaseID: number
 }) {
   return knowledgeRequest<KnowledgeFileManagerData>(
-    "/bot/knowledge/file_manager_data",
+    "/bot/admin/knowledge/file_manager_data",
     "get",
     {
       knowledge_base_id: params.knowledgeBaseID,
@@ -70,7 +70,7 @@ export function loadFileManagerData(params: {
 
 export function loadFileContent(params: { knowledgeBaseID: number; id: string }) {
   return knowledgeRequest<KnowledgeFileContent>(
-    "/bot/knowledge/file_content",
+    "/bot/admin/knowledge/file_content",
     "get",
     {
       knowledge_base_id: params.knowledgeBaseID,
@@ -81,7 +81,7 @@ export function loadFileContent(params: { knowledgeBaseID: number; id: string })
 
 export function loadFileIndexDetail(params: { knowledgeBaseID: number; id: string }) {
   return knowledgeRequest<KnowledgeFileIndexDetail>(
-    "/bot/knowledge/file_index_detail",
+    "/bot/admin/knowledge/file_index_detail",
     "get",
     {
       knowledge_base_id: params.knowledgeBaseID,
@@ -92,7 +92,7 @@ export function loadFileIndexDetail(params: { knowledgeBaseID: number; id: strin
 
 export function loadIndexOverview(params: { knowledgeBaseID: number }) {
   return knowledgeRequest<KnowledgeIndexOverview>(
-    "/bot/knowledge/index_overview",
+    "/bot/admin/knowledge/index_overview",
     "get",
     {
       knowledge_base_id: params.knowledgeBaseID,
@@ -106,7 +106,7 @@ export function loadKnowledgeIndexTree(params: {
   depth?: number
   limit?: number
 }) {
-  return knowledgeRequest<KnowledgeTreeResult>("/bot/knowledge/tree", "get", {
+  return knowledgeRequest<KnowledgeTreeResult>("/bot/admin/knowledge/tree", "get", {
     knowledge_base_id: params.knowledgeBaseID,
     parent_id: params.parentID || 0,
     depth: params.depth || 4,
@@ -118,20 +118,20 @@ export function loadKnowledgeGraph(params: {
   knowledgeBaseID: number
   limit?: number
 }) {
-  return knowledgeRequest<KnowledgeGraphResult>("/bot/knowledge/graph", "get", {
+  return knowledgeRequest<KnowledgeGraphResult>("/bot/admin/knowledge/graph", "get", {
     knowledge_base_id: params.knowledgeBaseID,
     limit: params.limit || 180,
   })
 }
 
 export function openKnowledgeNode(params: { nodeID: number }) {
-  return knowledgeRequest<KnowledgeNodeOpenResult>("/bot/knowledge/node_open", "get", {
+  return knowledgeRequest<KnowledgeNodeOpenResult>("/bot/admin/knowledge/node_open", "get", {
     node_id: params.nodeID,
   })
 }
 
 export function loadRelatedKnowledgeNodes(params: { nodeID: number; limit?: number }) {
-  return knowledgeRequest<KnowledgeRelatedResult>("/bot/knowledge/node_related", "get", {
+  return knowledgeRequest<KnowledgeRelatedResult>("/bot/admin/knowledge/node_related", "get", {
     node_id: params.nodeID,
     limit: params.limit || 12,
   })
@@ -143,7 +143,7 @@ export function loadKnowledgeRetrieveDebug(params: {
   query: string
   limit?: number
 }) {
-  return knowledgeRequest<KnowledgeRetrieveDebugResult>("/bot/knowledge/retrieve_debug", "get", {
+  return knowledgeRequest<KnowledgeRetrieveDebugResult>("/bot/admin/knowledge/retrieve_debug", "get", {
     knowledge_base_id: params.knowledgeBaseID,
     agent_id: params.agentID || 0,
     query: params.query,
@@ -158,7 +158,7 @@ export function createFile(params: {
   type: "file" | "folder"
   contentBase64?: string
 }) {
-  return knowledgeRequest<KnowledgeFileOperationData>("/bot/knowledge/create_file", "post", {
+  return knowledgeRequest<KnowledgeFileOperationData>("/bot/admin/knowledge/create_file", "post", {
     knowledge_base_id: params.knowledgeBaseID,
     parent: params.parent,
     parent_id: params.parent,
@@ -180,7 +180,7 @@ export async function uploadFilePart(params: UploadFilePartParams) {
   form.set("total_parts", String(params.totalParts))
   form.set("file", params.chunk, params.name)
 
-  const response = await fetch("/bot/knowledge/create_file", {
+  const response = await fetch("/bot/admin/knowledge/create_file", {
     method: "POST",
     body: form,
   })
@@ -199,7 +199,7 @@ export function renameFile(params: {
   id: string
   name: string
 }) {
-  return knowledgeRequest<KnowledgeFileOperationData>("/bot/knowledge/rename_file", "post", {
+  return knowledgeRequest<KnowledgeFileOperationData>("/bot/admin/knowledge/rename_file", "post", {
     knowledge_base_id: params.knowledgeBaseID,
     id: params.id,
     name: params.name,
@@ -211,7 +211,7 @@ export function saveFile(params: {
   id: string
   content: string
 }) {
-  return knowledgeRequest<KnowledgeFileContent>("/bot/knowledge/save_file", "post", {
+  return knowledgeRequest<KnowledgeFileContent>("/bot/admin/knowledge/save_file", "post", {
     knowledge_base_id: params.knowledgeBaseID,
     id: params.id,
     content: params.content,
@@ -219,13 +219,13 @@ export function saveFile(params: {
 }
 
 export function indexKnowledgeBase(params: { knowledgeBaseID: number }) {
-  return knowledgeRequest<{ index_status: string }>("/bot/knowledge/index_base", "post", {
+  return knowledgeRequest<{ index_status: string }>("/bot/admin/knowledge/index_base", "post", {
     knowledge_base_id: params.knowledgeBaseID,
   })
 }
 
 export function deleteFiles(params: { knowledgeBaseID: number; ids: string[] }) {
-  return knowledgeRequest<KnowledgeFileManagerData>("/bot/knowledge/delete_files", "post", {
+  return knowledgeRequest<KnowledgeFileManagerData>("/bot/admin/knowledge/delete_files", "post", {
     knowledge_base_id: params.knowledgeBaseID,
     ids: params.ids,
   })
@@ -236,7 +236,7 @@ export function moveFiles(params: {
   ids: string[]
   target: string
 }) {
-  return knowledgeRequest<KnowledgeFileOperationData>("/bot/knowledge/move_files", "post", {
+  return knowledgeRequest<KnowledgeFileOperationData>("/bot/admin/knowledge/move_files", "post", {
     knowledge_base_id: params.knowledgeBaseID,
     ids: params.ids,
     target: params.target,
@@ -249,7 +249,7 @@ export function copyFiles(params: {
   ids: string[]
   target: string
 }) {
-  return knowledgeRequest<KnowledgeFileOperationData>("/bot/knowledge/copy_files", "post", {
+  return knowledgeRequest<KnowledgeFileOperationData>("/bot/admin/knowledge/copy_files", "post", {
     knowledge_base_id: params.knowledgeBaseID,
     ids: params.ids,
     target: params.target,
@@ -262,7 +262,7 @@ export function downloadFileURL(knowledgeBaseID: number, id: string) {
     knowledge_base_id: String(knowledgeBaseID),
     id,
   })
-  return `/bot/knowledge/download_file?${params.toString()}`
+  return `/bot/admin/knowledge/download_file?${params.toString()}`
 }
 
 export function previewFileURL(knowledgeBaseID: number, id: string) {
@@ -271,12 +271,12 @@ export function previewFileURL(knowledgeBaseID: number, id: string) {
     id,
     preview: "1",
   })
-  return `/bot/knowledge/download_file?${params.toString()}`
+  return `/bot/admin/knowledge/download_file?${params.toString()}`
 }
 
 export function downloadFileBaseURL(knowledgeBaseID: number, directoryID: string) {
   const idPrefix = directoryID && directoryID !== "/" ? `${directoryID}/` : ""
-  return `/bot/knowledge/download_file?knowledge_base_id=${encodeURIComponent(
+  return `/bot/admin/knowledge/download_file?knowledge_base_id=${encodeURIComponent(
     String(knowledgeBaseID),
   )}&id=${encodeURIComponent(idPrefix)}`
 }

@@ -107,10 +107,10 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
     valueText(getStoreValueByPath(store, String(item.meta?.powerPath || '')))
   )
   const activeSelectedSourceID = selectedSource.power === powerKey ? selectedSource.id : ''
-  const requestApi = String(item.meta?.requestApi || '/bot/energon/request')
-  const paramApi = String(item.meta?.paramApi || '/bot/energon/power_params')
-  const streamApi = String(item.meta?.streamApi || '/bot/energon/stream')
-  const stopApi = String(item.meta?.stopApi || '/bot/energon/stream_stop')
+  const requestApi = String(item.meta?.requestApi || '/bot/admin/energon/request')
+  const paramApi = String(item.meta?.paramApi || '/bot/admin/energon/power_params')
+  const streamApi = String(item.meta?.streamApi || '/bot/admin/energon/stream')
+  const stopApi = String(item.meta?.stopApi || '/bot/admin/energon/stream_stop')
   const blockMs = Number(item.meta?.blockMs || 1000)
   const rawUploadRules = useMemo(
     () => normalizeResourceUploadRules(item.meta?.uploadRules),

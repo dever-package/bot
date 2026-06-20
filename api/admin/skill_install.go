@@ -3,6 +3,7 @@ package api
 import (
 	"github.com/shemic/dever/server"
 
+	botapi "github.com/dever-package/bot/api"
 	skillinstall "github.com/dever-package/bot/service/agent/skill/install"
 )
 
@@ -26,7 +27,7 @@ func (SkillInstall) PostRun(c *server.Context) error {
 }
 
 func (SkillInstall) GetStream(c *server.Context) error {
-	return handleStreamRead(c, skillInstaller.ReadStream)
+	return botapi.HandleStreamRead(c, skillInstaller.ReadStream)
 }
 
 func (SkillInstall) PostStop(c *server.Context) error {
@@ -34,7 +35,7 @@ func (SkillInstall) PostStop(c *server.Context) error {
 	if err := c.BindJSON(&body); err != nil {
 		return c.Error(err)
 	}
-	requestID := streamRequestIDFromBody(body)
+	requestID := botapi.StreamRequestIDFromBody(body)
 	resp := skillInstaller.Stop(c.Context(), requestID)
 	return c.JSONPayload(200, resp)
 }

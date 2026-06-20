@@ -343,10 +343,10 @@
           "agentPath": "data.actionTarget.runAgent.key",
           "agentNamePath": "data.actionTarget.runAgent.name",
           "openPath": "state.dialog.run",
-          "requestApi": "/bot/agent/run",
-          "streamApi": "/bot/agent/stream",
-          "stopApi": "/bot/agent/stop",
-          "paramApi": "/bot/energon/power_params",
+          "requestApi": "/bot/admin/agent/run",
+          "streamApi": "/bot/admin/agent/stream",
+          "stopApi": "/bot/admin/agent/stop",
+          "paramApi": "/bot/admin/energon/power_params",
           "blockMs": 1000
         }
       }

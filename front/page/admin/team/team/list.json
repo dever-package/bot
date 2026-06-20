@@ -163,7 +163,7 @@
                     "action": {
                       "click": {
                         "type": "request",
-                        "api": "/bot/team/save_flow_graph",
+                        "api": "/bot/admin/team/save_flow_graph",
                         "method": "post",
                         "params": {
                           "team_id": "$row.id",

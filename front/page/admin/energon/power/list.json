@@ -260,9 +260,9 @@
         "type": "show-stream-request",
         "meta": {
           "powerPath": "data.actionTarget.runPower.key",
-          "paramApi": "/bot/energon/power_params",
-          "requestApi": "/bot/energon/request",
-          "streamApi": "/bot/energon/stream",
+          "paramApi": "/bot/admin/energon/power_params",
+          "requestApi": "/bot/admin/energon/request",
+          "streamApi": "/bot/admin/energon/stream",
           "blockMs": 1000,
           "uploadRules": [
             {

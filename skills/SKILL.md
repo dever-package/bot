@@ -22,6 +22,8 @@ version: 0.1.0
 
 - 不为 package/front 已能处理的后台页面新增 CRUD wrapper Service/API。
 - 不手改生成文件或编译后的 front 插件产物。
+- 后台自定义 API 放 `api/admin`，URL 是 `/bot/admin/...`；body 工作台 API 放 `api/body`，URL 是 `/bot/body/...`。
+- `dever.json.front.sites.admin.api` 只追加 `bot/admin` 到后台权限域；`body` 站点主 API 是 `bot/body`。
 - canvas、workspace、team 执行语义留在 bot Service，不塞进 page JSON。
 - API 保持薄；执行、权限、锁、记录、流式输出和外部调用放 Service。
 - 节点、运行、资产执行状态通过现有 workspace/team/project service 路径持久化；没有清晰 model 目的时，不新增平行运行表或重复审计表。
@@ -32,6 +34,7 @@ version: 0.1.0
 - 普通 bot 后台页面保持 page JSON。
 - 只有 canvas、workspace、flow、editor 这类 page JSON 表达不了的交互才写 React/plugin。
 - 新增 bot 专属 page service 前，先复用 package/front node/action。
+- body 工作台前端使用 `joinSiteApi()`；后台自定义接口只调用 `/bot/admin/...`。
 - 不硬编码 `/front/route/action`，使用当前站点 runtime。
 
 ## Service/API 规则

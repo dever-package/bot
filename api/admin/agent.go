@@ -3,6 +3,7 @@ package api
 import (
 	"github.com/shemic/dever/server"
 
+	botapi "github.com/dever-package/bot/api"
 	agentservice "github.com/dever-package/bot/service/agent"
 )
 
@@ -26,7 +27,7 @@ func (Agent) PostRun(c *server.Context) error {
 }
 
 func (Agent) GetStream(c *server.Context) error {
-	return handleStreamRead(c, agentRunner.ReadStream)
+	return botapi.HandleStreamRead(c, agentRunner.ReadStream)
 }
 
 func (Agent) PostStop(c *server.Context) error {
@@ -34,7 +35,7 @@ func (Agent) PostStop(c *server.Context) error {
 	if err := c.BindJSON(&body); err != nil {
 		return c.Error(err)
 	}
-	requestID := streamRequestIDFromBody(body)
+	requestID := botapi.StreamRequestIDFromBody(body)
 	resp := agentRunner.Stop(c.Context(), requestID)
 	return c.JSONPayload(200, resp)
 }
