@@ -1,0 +1,270 @@
+{
+  "page": {
+    "name": "技能配置",
+    "parent": "bot/agent/skill_pack/list",
+    "type": 2,
+    "sort": 12
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0 space-y-4",
+        "children": {
+          "header-row": {
+            "type": "container",
+            "className": "flex items-center justify-between gap-3"
+          },
+          "table-row": {
+            "type": "container",
+            "className": "space-y-3"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "header-row": [
+      {
+        "type": "show-title",
+        "value": "page.title"
+      },
+      {
+        "type": "show-button",
+        "name": "新增配置",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "icon": "plus"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.create",
+            "value": true
+          }
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-base",
+        "value": "page.description",
+        "className": "text-sm text-muted-foreground"
+      },
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "savePath": "bot/agent/skill_config/update",
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "skill.name",
+              "name": "技能",
+              "type": "show-base"
+            },
+            {
+              "value": "target_key",
+              "name": "目标",
+              "type": "show-base"
+            },
+            {
+              "value": "name",
+              "type": "show-base"
+            },
+            {
+              "value": "key",
+              "type": "show-base"
+            },
+            {
+              "value": "type",
+              "type": "show-tag"
+            },
+            {
+              "value": "required",
+              "name": "必填",
+              "type": "show-tag"
+            },
+            {
+              "value": "value_hint",
+              "name": "配置状态",
+              "type": "show-tag"
+            },
+            {
+              "value": "status",
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑配置",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.id",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.edit",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "trash-2",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "删除配置",
+                    "className": "text-destructive hover:text-destructive",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.deleteConfig",
+                          "value": "$row"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "confirm.delete",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.create",
+          "pageRoute": "/bot/agent/skill_config/update",
+          "title": "新增技能配置",
+          "description": "配置项会同步到 skill manifest；真实值只加密保存。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "skill_id": "data.search.skill_id"
+          },
+          "size": "lg",
+          "bodyClassName": "px-6 py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.edit",
+          "pageRoute": "/bot/agent/skill_config/update",
+          "title": "编辑技能配置",
+          "description": "配置值留空时保留旧值，不会清空已有配置。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.id"
+          },
+          "size": "lg",
+          "bodyClassName": "px-6 py-2"
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "删除配置",
+        "info": "确认删除当前配置吗？删除后运行时将不再注入该环境变量。",
+        "meta": {
+          "stateKey": "confirm.delete"
+        },
+        "action": {
+          "confirm": {
+            "type": "delete",
+            "model": "bot.agent.NewSkillConfigModel",
+            "params": "actionTarget.deleteConfig",
+            "before": {
+              "service": "bot.agent.setting.AgentHook.BeforeDeleteSkillConfig"
+            },
+            "after": {
+              "service": "bot.agent.setting.AgentHook.AfterDeleteSkillConfig"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "技能配置",
+      "description": "维护 API Key、Cookie、Token 等运行配置；真实值不会写入 prompt、manifest 或日志。"
+    },
+    "search": {
+      "skill_id": 0,
+      "type": "",
+      "status": ""
+    },
+    "table": {
+      "searchFields": [
+        "name",
+        "key"
+      ],
+      "filterFields": [
+        "skill_id",
+        "type",
+        "status"
+      ],
+      "model": "bot.agent.NewSkillConfigModel"
+    },
+    "actionTarget": {
+      "id": "",
+      "deleteConfig": {}
+    }
+  },
+  "state": {
+    "dialog": {
+      "create": false,
+      "edit": false
+    },
+    "confirm": {
+      "delete": false
+    }
+  },
+  "action": {}
+}

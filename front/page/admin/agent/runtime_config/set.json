@@ -237,15 +237,15 @@
         "mode": "form",
         "option": [
           {
-            "id": "none",
-            "value": "断网"
-          },
-          {
             "id": "host",
             "value": "使用宿主网络"
+          },
+          {
+            "id": "none",
+            "value": "断网"
           }
         ],
-        "info": "默认断网。外部 API 请求建议让模型调用 http_request 或 curl_request，由后端统一做域名和响应限制。",
+        "info": "默认使用宿主网络。需要严格隔离时可切换为断网。",
         "validate": [
           {
             "type": "required",
@@ -329,7 +329,7 @@
       "skill_loaded_content_max_length": 30000,
       "script_sandbox_driver": "bwrap",
       "script_sandbox_bwrap_path": "bwrap",
-      "script_sandbox_network_mode": "none",
+      "script_sandbox_network_mode": "host",
       "script_sandbox_timeout_seconds": 15,
       "script_sandbox_output_max_bytes": 262144,
       "model": "bot.agent.NewRuntimeConfigModel"

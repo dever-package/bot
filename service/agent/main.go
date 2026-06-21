@@ -31,8 +31,9 @@ func (s Service) Run(ctx context.Context, req RunRequest) map[string]any {
 		"request_id": requestID,
 		"agent_id":   agent.ID,
 		"input": jsonText(map[string]any{
-			"input":   parsed.Input,
-			"history": parsed.History,
+			"input":                parsed.Input,
+			"history":              parsed.History,
+			"assistant_session_id": parsed.AssistantSessionID,
 		}),
 		"skills":          "[]",
 		"runtime_context": "",

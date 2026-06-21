@@ -15,6 +15,7 @@ const (
 
 	DefaultDriver         = DriverBwrap
 	DefaultBwrapPath      = "bwrap"
+	DefaultNetworkMode    = NetworkHost
 	DefaultTimeout        = 15 * time.Second
 	MaxTimeout            = 60 * time.Second
 	DefaultOutputMaxBytes = 256 * 1024
@@ -37,6 +38,7 @@ type Request struct {
 	TempRoot       string
 	ScriptRelative string
 	Args           []string
+	Env            []string
 	Timeout        time.Duration
 }
 
@@ -79,8 +81,10 @@ func normalizeNetworkMode(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case NetworkHost:
 		return NetworkHost
-	default:
+	case NetworkNone:
 		return NetworkNone
+	default:
+		return DefaultNetworkMode
 	}
 }
 

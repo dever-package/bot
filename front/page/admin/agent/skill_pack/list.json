@@ -92,7 +92,24 @@
       },
       {
         "type": "show-button",
-        "name": "新增技能",
+        "name": "创建技能",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "icon": "file-plus"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.skillDraft",
+            "value": true
+          }
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "安装技能",
         "className": "shrink-0",
         "meta": {
           "variant": "default",
@@ -306,6 +323,51 @@
                     }
                   },
                   {
+                    "icon": "settings",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "配置技能密钥",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.configSkillId",
+                          "value": "$row.skill_id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.configSkill",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "copy-plus",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "创建修改草稿",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.fromSkillRequest.skill_id",
+                          "value": "$row.skill_id"
+                        },
+                        {
+                          "type": "data",
+                          "key": "actionTarget.fromSkillRequest.pack_id",
+                          "value": "$row.pack_id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "confirm.fromSkill",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
                     "icon": "refresh-cw",
                     "variant": "outline",
                     "size": "sm",
@@ -437,6 +499,38 @@
       {
         "type": "feedback-modal",
         "meta": {
+          "stateKey": "dialog.skillDraft",
+          "pageRoute": "/bot/agent/skill_draft/update",
+          "title": "创建技能草稿",
+          "description": "创建自有 skill 草稿；保存后可校验、测试和发布。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存草稿"
+          },
+          "pageRouteQuery": {
+            "pack_id": "data.search.pack_id"
+          },
+          "size": "3xl",
+          "bodyClassName": "px-6 py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.configSkill",
+          "pageRoute": "/bot/agent/skill_config/list",
+          "title": "技能配置",
+          "description": "配置当前技能运行时需要的 API Key、Cookie、Token。",
+          "pageRouteQuery": {
+            "skill_id": "data.actionTarget.configSkillId"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
           "stateKey": "dialog.skillCate",
           "pageRoute": "/bot/agent/skill_cate/list",
           "title": "技能分类",
@@ -444,6 +538,24 @@
           "assistant": false,
           "size": "sm",
           "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "创建修改草稿",
+        "info": "确认从当前正式技能创建修改草稿吗？草稿不会影响正在运行的正式技能。",
+        "meta": {
+          "stateKey": "confirm.fromSkill",
+          "successMessage": "已创建修改草稿，可在创建技能中继续编辑。",
+          "errorMessage": "创建修改草稿失败。"
+        },
+        "action": {
+          "confirm": {
+            "type": "request",
+            "api": "/bot/admin/skill_draft/from_skill",
+            "method": "post",
+            "params": "actionTarget.fromSkillRequest"
+          }
         }
       },
       {
@@ -487,7 +599,7 @@
       },
       {
         "type": "feedback-modal",
-        "name": "新增技能",
+        "name": "安装技能",
         "info": "输入安装命令、GitHub 仓库、安装任务说明或技能说明。保存后会先进入安装记录，安装成功后自动加入当前方案。",
         "meta": {
           "stateKey": "dialog.installSkill",
@@ -512,6 +624,10 @@
           "requestApi": "/bot/admin/skill_install/run",
           "streamApi": "/bot/admin/skill_install/stream",
           "stopApi": "/bot/admin/skill_install/stop",
+          "sessionEnabled": true,
+          "sessionContext": {
+            "skill_pack": "data.search.pack_id"
+          },
           "blockMs": 1000,
           "reloadPageOnFinal": true,
           "reloadPageOnFinalKinds": [
@@ -558,6 +674,11 @@
       "packId": "",
       "viewSkillId": "",
       "editSkillId": "",
+      "configSkillId": "",
+      "fromSkillRequest": {
+        "skill_id": "",
+        "pack_id": ""
+      },
       "refreshRequest": {
         "input": {
           "context": {
@@ -581,10 +702,13 @@
       "editPack": false,
       "editSkill": false,
       "viewSkill": false,
+      "configSkill": false,
+      "skillDraft": false,
       "skillCate": false,
       "installSkill": false
     },
     "confirm": {
+      "fromSkill": false,
       "refreshSkill": false,
       "deleteSkill": false
     }

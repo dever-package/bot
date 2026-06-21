@@ -124,11 +124,28 @@ func bwrapArgs(config Config, req Request, commandName string, commandArgs []str
 		"--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin",
 		"--setenv", "LANG", "C.UTF-8",
 		"--setenv", "LC_ALL", "C.UTF-8",
+		"--setenv", "PYTHONPATH", "/skill/.dever/deps/python",
+		"--setenv", "NODE_PATH", "/skill/.dever/deps/node/node_modules",
+	)
+	args = appendBwrapEnv(args, req.Env)
+	args = append(args,
 		"--chdir", "/skill",
 		"--",
 		commandName,
 	)
 	return append(args, commandArgs...), nil
+}
+
+func appendBwrapEnv(args []string, env []string) []string {
+	for _, item := range env {
+		name, value, ok := strings.Cut(item, "=")
+		name = strings.TrimSpace(name)
+		if !ok || name == "" {
+			continue
+		}
+		args = append(args, "--setenv", name, value)
+	}
+	return args
 }
 
 func appendReadOnlyBinds(args []string, paths []string) []string {

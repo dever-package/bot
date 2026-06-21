@@ -39,10 +39,12 @@ const (
 	DefaultAgentID        uint64 = 1
 	FrontAssistantAgentID uint64 = 2
 	SkillInstallerAgentID uint64 = 3
+	SkillCreatorAgentID   uint64 = 4
 
 	DefaultAgentKey        = "default-agent"
 	FrontAssistantAgentKey = "front-assistant"
 	SkillInstallerAgentKey = "skill-installer"
+	SkillCreatorAgentKey   = "skill-creator"
 
 	AgentKindNormal   = "normal"
 	AgentKindInternal = "internal"
@@ -107,6 +109,22 @@ var (
 			"max_auto_steps":  1,
 			"status":          1,
 			"sort":            1,
+		},
+		{
+			"id":              SkillCreatorAgentID,
+			"cate_id":         SystemAgentCateID,
+			"name":            "技能创建工程师",
+			"key":             SkillCreatorAgentKey,
+			"kind":            AgentKindInternal,
+			"description":     "系统内置技能创建工程师，用于多轮创建或修改 Dever skill 草稿。",
+			"llm_power_id":    energonmodel.DefaultLLMPowerID,
+			"setting_pack_id": DefaultSettingPackID,
+			"skill_pack_id":   DefaultSkillPackID,
+			"temperature":     0.3,
+			"timeout_seconds": 300,
+			"max_auto_steps":  0,
+			"status":          1,
+			"sort":            2,
 		},
 	}
 

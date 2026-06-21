@@ -72,6 +72,8 @@ func builtinAgentID(identity string) uint64 {
 		return agentmodel.FrontAssistantAgentID
 	case agentmodel.SkillInstallerAgentKey:
 		return agentmodel.SkillInstallerAgentID
+	case agentmodel.SkillCreatorAgentKey:
+		return agentmodel.SkillCreatorAgentID
 	default:
 		return 0
 	}
@@ -232,8 +234,11 @@ func (Repo) ListActiveSkillPackEntries(ctx context.Context, packID uint64) []age
 			Name:        strings.TrimSpace(skill.Name),
 			Description: strings.TrimSpace(skill.Description),
 			Triggers:    agentskill.ManifestTriggers(skill.Manifest),
+			Domains:     agentskill.ManifestDomains(skill.Manifest),
+			Targets:     agentskill.ManifestTargets(skill.Manifest),
 			InstallPath: strings.TrimSpace(skill.InstallPath),
 			EntryFile:   strings.TrimSpace(skill.EntryFile),
+			Manifest:    strings.TrimSpace(skill.Manifest),
 		})
 	}
 	return result

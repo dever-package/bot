@@ -24,7 +24,7 @@ const (
 
 	DefaultRuntimeScriptSandboxDriver            = RuntimeScriptSandboxDriverBwrap
 	DefaultRuntimeScriptSandboxBwrapPath         = "bwrap"
-	DefaultRuntimeScriptSandboxNetworkMode       = RuntimeScriptSandboxNetworkNone
+	DefaultRuntimeScriptSandboxNetworkMode       = RuntimeScriptSandboxNetworkHost
 	DefaultRuntimeScriptSandboxTimeoutSeconds    = 15
 	DefaultRuntimeScriptSandboxMaxTimeoutSeconds = 60
 	DefaultRuntimeScriptSandboxOutputMaxBytes    = 256 * 1024
@@ -40,7 +40,7 @@ type RuntimeConfig struct {
 	SkillLoadedContentMaxLength int       `dorm:"type:int;not null;default:30000;comment:本轮技能正文最大总长度"`
 	ScriptSandboxDriver         string    `dorm:"type:varchar(32);not null;default:'bwrap';comment:脚本沙箱模式"`
 	ScriptSandboxBwrapPath      string    `dorm:"type:varchar(255);not null;default:'bwrap';comment:bwrap 可执行文件"`
-	ScriptSandboxNetworkMode    string    `dorm:"type:varchar(32);not null;default:'none';comment:脚本沙箱网络模式"`
+	ScriptSandboxNetworkMode    string    `dorm:"type:varchar(32);not null;default:'host';comment:脚本沙箱网络模式"`
 	ScriptSandboxTimeoutSeconds int       `dorm:"type:int;not null;default:15;comment:脚本沙箱超时时间(秒)"`
 	ScriptSandboxOutputMaxBytes int       `dorm:"type:int;not null;default:262144;comment:脚本输出最大字节数"`
 	CreatedAt                   time.Time `dorm:"comment:创建时间"`
@@ -54,8 +54,8 @@ var (
 	}
 
 	runtimeScriptSandboxNetworkModeOptions = []map[string]any{
-		{"id": RuntimeScriptSandboxNetworkNone, "value": "断网"},
 		{"id": RuntimeScriptSandboxNetworkHost, "value": "使用宿主网络"},
+		{"id": RuntimeScriptSandboxNetworkNone, "value": "断网"},
 	}
 )
 

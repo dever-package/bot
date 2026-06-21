@@ -9,14 +9,19 @@ import {
 } from 'react'
 import type { NodeItemProps } from '@/page/nodes'
 import {
+  Brain,
   ExternalLink,
+  History,
   Loader2,
   MessageSquarePlus,
+  Plus,
   RotateCcw,
   Send,
   Square,
+  Trash2,
 } from 'lucide-react'
 import { useStore } from 'zustand'
+import { request } from '@dever/front-plugin'
 import { runAgentStream, stopAgentStream } from '@/lib/agent/runner'
 import {
   assistantReferencePayload,
@@ -36,6 +41,7 @@ import {
   streamValueText as valueText,
   type RuntimeStreamFrame,
 } from '@/lib/stream'
+import { ASSISTANT_DIALOG_LAYER_CLASS } from '@/lib/floating-layer'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -55,6 +61,10 @@ import {
   AssistantReferenceList,
   AssistantReferencePicker,
 } from '@/components/assistant/reference-picker'
+import {
+  AssistantSessionHistoryDialog,
+  type AssistantSessionHistoryQuery,
+} from '@/components/assistant/session-history-dialog'
 import {
   EnergonContentView,
   type EnergonOutput,
@@ -114,6 +124,35 @@ type AgentSuggestion = {
 
 type AgentFrame = RuntimeStreamFrame<AgentOutput>
 
+type AssistantMemoryRecord = {
+  id: number
+  kind: string
+  title: string
+  content: string
+  tags?: unknown
+  importance?: number
+}
+
+type AssistantSessionRecord = {
+  id: number
+  title: string
+  context_key: string
+  agent_key: string
+  status: number
+  message_count: number
+  last_message_at: string
+}
+
+type AssistantSessionListPayload = {
+  sessions: AssistantSessionRecord[]
+  pagination: {
+    page: number
+    page_size: number
+    total: number
+    total_pages: number
+  }
+}
+
 const agentResultOutputKeys = [
   'title',
   'rich',
@@ -135,6 +174,14 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   const [references, setReferences] = useState<AssistantReferenceFile[]>([])
   const [referenceMessage, setReferenceMessage] = useState('')
   const [requestID, setRequestID] = useState('')
+  const [sessionID, setSessionID] = useState(0)
+  const [sessionLoading, setSessionLoading] = useState(false)
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false)
+  const [memories, setMemories] = useState<AssistantMemoryRecord[]>([])
+  const [memoryDialogOpen, setMemoryDialogOpen] = useState(false)
+  const [memoryTitle, setMemoryTitle] = useState('')
+  const [memoryContent, setMemoryContent] = useState('')
+  const [memorySaving, setMemorySaving] = useState(false)
   const [running, setRunning] = useState(false)
   const [cancelable, setCancelable] = useState(false)
   const [stopping, setStopping] = useState(false)
@@ -147,6 +194,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   const messageListRef = useRef<HTMLDivElement>(null)
   const lastAutoScrollResultKeyRef = useRef('')
   const finalSideEffectKeyRef = useRef('')
+  const draftPatchSideEffectKeyRef = useRef('')
   const runTokenRef = useRef(0)
   const openWasTrackedRef = useRef(false)
   const scrollMessageListToBottom = useCallback(() => {
@@ -173,6 +221,36 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   const streamApi = String(item.meta?.streamApi || '/bot/admin/agent/stream')
   const stopApi = String(item.meta?.stopApi || '/bot/admin/agent/stop')
   const paramApi = String(item.meta?.paramApi || '/bot/admin/energon/power_params')
+  const sessionEnabled = Boolean(item.meta?.sessionEnabled)
+  const memoryEnabled = Boolean(item.meta?.memoryEnabled)
+  const sessionApi = String(item.meta?.sessionApi || '/bot/admin/assistant/session')
+  const sessionsApi = String(
+    item.meta?.sessionsApi || '/bot/admin/assistant/sessions'
+  )
+  const archiveSessionApi = String(
+    item.meta?.archiveSessionApi || '/bot/admin/assistant/archive_session'
+  )
+  const restoreSessionApi = String(
+    item.meta?.restoreSessionApi || '/bot/admin/assistant/restore_session'
+  )
+  const renameSessionApi = String(
+    item.meta?.renameSessionApi || '/bot/admin/assistant/rename_session'
+  )
+  const newSessionApi = String(
+    item.meta?.newSessionApi || '/bot/admin/assistant/new_session'
+  )
+  const clearSessionApi = String(
+    item.meta?.clearSessionApi || '/bot/admin/assistant/clear_session'
+  )
+  const messageApi = String(item.meta?.messageApi || '/bot/admin/assistant/message')
+  const memoryApi = String(item.meta?.memoryApi || '/bot/admin/assistant/memory')
+  const deleteMemoryApi = String(
+    item.meta?.deleteMemoryApi || '/bot/admin/assistant/forget_memory'
+  )
+  const skillDraftPatchApi = String(item.meta?.skillDraftPatchApi || '')
+  const sessionContext = useStore(store, () =>
+    resolveAssistantSessionContext(item.meta?.sessionContext, store, agentKey)
+  )
   const blockMs = Number(item.meta?.blockMs || 1000)
   const initialInput = String(item.meta?.initialInput || '')
   const inputPlaceholder = String(
@@ -237,8 +315,9 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     () =>
       (input.trim().length > 0 || references.length > 0) &&
       agentKey.length > 0 &&
+      !sessionLoading &&
       !running,
-    [agentKey, input, references.length, running]
+    [agentKey, input, references.length, running, sessionLoading]
   )
   const hasRunningActionTiming = useMemo(
     () =>
@@ -279,6 +358,8 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     setReferences([])
     setReferenceMessage('')
     setRequestID('')
+    setSessionID(0)
+    setMemories([])
     setRunning(false)
     setCancelable(false)
     setStopping(false)
@@ -287,7 +368,258 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     setInteractionDialogOpen(false)
     setInteractionDialogMessageID('')
     setResultDrawerMessageID('')
+    setHistoryDialogOpen(false)
   }, [initialInput])
+
+  const applyAssistantSessionPayload = useCallback((payload: unknown) => {
+    const data = isPlainObject(payload) ? payload : {}
+    const session = isPlainObject(data.session) ? data.session : {}
+    const sessionId = Number(session.id || 0)
+    setSessionID(Number.isFinite(sessionId) ? sessionId : 0)
+    setMessages(normalizeAssistantSessionMessages(data.messages))
+    setMemories(normalizeAssistantMemories(data.memories))
+    scrollMessageListToBottom()
+  }, [scrollMessageListToBottom])
+
+  const loadAssistantSession = useCallback(
+    async (newSession = false) => {
+      if (!sessionEnabled || !agentKey) {
+        return
+      }
+      setSessionLoading(true)
+      try {
+        const payload = await assistantApiRequest(
+          newSession ? newSessionApi : sessionApi,
+          {
+            agent_key: agentKey,
+            context_key: sessionContext,
+            title: agentName ? `${agentName} 会话` : '新会话',
+            limit: 80,
+          }
+        )
+        applyAssistantSessionPayload(payload)
+        setError('')
+      } catch (currentError: unknown) {
+        setError(runtimeErrorMessage(currentError, '加载会话失败。'))
+      } finally {
+        setSessionLoading(false)
+      }
+    },
+    [
+      agentKey,
+      agentName,
+      applyAssistantSessionPayload,
+      newSessionApi,
+      sessionApi,
+      sessionContext,
+      sessionEnabled,
+    ]
+  )
+
+  const clearPersistentSession = async () => {
+    if (!sessionEnabled || !sessionID || running) {
+      resetSession()
+      return
+    }
+    setSessionLoading(true)
+    try {
+      const payload = await assistantApiRequest(clearSessionApi, {
+        session_id: sessionID,
+      })
+      applyAssistantSessionPayload(payload)
+    } catch (currentError: unknown) {
+      setError(runtimeErrorMessage(currentError, '清空会话失败。'))
+    } finally {
+      setSessionLoading(false)
+    }
+  }
+
+  const loadHistorySessions = useCallback(
+    async (
+      query: AssistantSessionHistoryQuery
+    ): Promise<AssistantSessionListPayload> => {
+      if (!sessionEnabled || !agentKey) {
+        return emptyAssistantSessionList(query)
+      }
+      const payload = await assistantApiRequest(sessionsApi, {
+        agent_key: agentKey,
+        context_key: sessionContext,
+        page: query.page,
+        page_size: query.pageSize,
+        keyword: query.keyword,
+        status: query.status,
+      })
+      const data = isPlainObject(payload) ? payload : {}
+      setError('')
+      return {
+        sessions: normalizeAssistantSessions(data.sessions),
+        pagination: normalizeAssistantPagination(data.pagination, query),
+      }
+    },
+    [agentKey, sessionContext, sessionEnabled, sessionsApi]
+  )
+
+  const archiveHistorySession = useCallback(
+    async (nextSessionID: number) => {
+      await assistantApiRequest(archiveSessionApi, {
+        session_id: nextSessionID,
+      })
+    },
+    [archiveSessionApi]
+  )
+
+  const restoreHistorySession = useCallback(
+    async (nextSessionID: number) => {
+      await assistantApiRequest(restoreSessionApi, {
+        session_id: nextSessionID,
+      })
+    },
+    [restoreSessionApi]
+  )
+
+  const renameHistorySession = useCallback(
+    async (nextSessionID: number, title: string) => {
+      const payload = await assistantApiRequest(renameSessionApi, {
+        session_id: nextSessionID,
+        title,
+      })
+      return normalizeAssistantSession(
+        isPlainObject(payload) ? payload.session : null
+      )
+    },
+    [renameSessionApi]
+  )
+
+  const openAssistantSession = async (nextSessionID: number) => {
+    if (!nextSessionID || running) {
+      return
+    }
+    setSessionLoading(true)
+    try {
+      const payload = await assistantApiRequest(sessionApi, {
+        session_id: nextSessionID,
+        agent_key: agentKey,
+        context_key: sessionContext,
+        limit: 80,
+      })
+      applyAssistantSessionPayload(payload)
+      setHistoryDialogOpen(false)
+      setError('')
+    } catch (currentError: unknown) {
+      setError(runtimeErrorMessage(currentError, '打开会话失败。'))
+    } finally {
+      setSessionLoading(false)
+    }
+  }
+
+  const startPersistentSession = async () => {
+    if (!sessionEnabled || running) {
+      resetSession()
+      return
+    }
+    resetSession()
+    await loadAssistantSession(true)
+  }
+
+  const saveMemory = async () => {
+    if (!memoryEnabled || memorySaving) {
+      return
+    }
+    const title = memoryTitle.trim()
+    const content = memoryContent.trim()
+    if (!title || !content) {
+      setError('记忆标题和内容不能为空。')
+      return
+    }
+    setMemorySaving(true)
+    try {
+      const payload = await assistantApiRequest(memoryApi, {
+        title,
+        content,
+        kind: 'semantic',
+        context_key: sessionContext,
+        agent_key: agentKey,
+      })
+      const memory = normalizeAssistantMemory(
+        isPlainObject(payload) ? payload.memory : null
+      )
+      if (memory) {
+        setMemories((current) => [memory, ...current])
+      }
+      setMemoryTitle('')
+      setMemoryContent('')
+      setError('')
+    } catch (currentError: unknown) {
+      setError(runtimeErrorMessage(currentError, '保存记忆失败。'))
+    } finally {
+      setMemorySaving(false)
+    }
+  }
+
+  const deleteMemory = async (memoryID: number) => {
+    if (!memoryEnabled || !memoryID) {
+      return
+    }
+    try {
+      await assistantApiRequest(deleteMemoryApi, { id: memoryID })
+      setMemories((current) => current.filter((memory) => memory.id !== memoryID))
+    } catch (currentError: unknown) {
+      setError(runtimeErrorMessage(currentError, '删除记忆失败。'))
+    }
+  }
+
+  const ensureAssistantSession = async () => {
+    if (!sessionEnabled) {
+      return 0
+    }
+    if (sessionID > 0) {
+      return sessionID
+    }
+    const payload = await assistantApiRequest(sessionApi, {
+      agent_key: agentKey,
+      context_key: sessionContext,
+      title: agentName ? `${agentName} 会话` : '新会话',
+      limit: 80,
+    })
+    applyAssistantSessionPayload(payload)
+    const session = isPlainObject(payload) && isPlainObject(payload.session)
+      ? payload.session
+      : {}
+    const nextID = Number(session.id || 0)
+    return Number.isFinite(nextID) ? nextID : 0
+  }
+
+  const savePersistentMessage = async (
+    activeSessionID: number,
+    message: Omit<AgentMessage, 'id'>,
+    options?: {
+      requestID?: string
+      status?: number
+      output?: unknown
+    }
+  ) => {
+    if (!sessionEnabled || activeSessionID <= 0) {
+      return
+    }
+    await assistantApiRequest(messageApi, {
+      session_id: activeSessionID,
+      agent_key: agentKey,
+      context_key: sessionContext,
+      role: message.role,
+      kind: message.kind || 'chat',
+      text: message.text,
+      content: {
+        kind: message.kind,
+        data: message.data,
+        interaction: message.interaction,
+        interaction_answered: message.interactionAnswered,
+        interaction_data: message.interactionData,
+      },
+      output: options?.output || message.output || {},
+      request_id: options?.requestID || message.requestID || '',
+      status: options?.status || 1,
+    })
+  }
 
   useEffect(() => {
     if (!openPath) {
@@ -305,6 +637,16 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   useEffect(() => {
     resetSession()
   }, [agentKey, resetSession])
+
+  useEffect(() => {
+    if (!sessionEnabled || !agentKey) {
+      return
+    }
+    if (openPath && !modalOpen) {
+      return
+    }
+    void loadAssistantSession(false)
+  }, [agentKey, loadAssistantSession, modalOpen, openPath, sessionEnabled])
 
   useEffect(() => {
     if (pendingInteractionMessageID) {
@@ -418,6 +760,15 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       setError('未选择智能体。')
       return
     }
+    let activeSessionID = 0
+    if (sessionEnabled) {
+      try {
+        activeSessionID = await ensureAssistantSession()
+      } catch (currentError: unknown) {
+        setError(runtimeErrorMessage(currentError, '创建会话失败。'))
+        return
+      }
+    }
 
     const token = runTokenRef.current + 1
     const userMessage: AgentMessage = {
@@ -438,6 +789,9 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       inputPayload,
       resolveMetaPathMap(item.meta?.inputContext, store)
     )
+    if (activeSessionID > 0) {
+      requestInput.assistant_session_id = activeSessionID
+    }
 
     runTokenRef.current = token
     finalSideEffectKeyRef.current = ''
@@ -465,6 +819,13 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     setLastStreamID('0-0')
 
     try {
+      await savePersistentMessage(activeSessionID, userMessage)
+    } catch (currentError: unknown) {
+      setError(runtimeErrorMessage(currentError, '保存用户消息失败。'))
+    }
+
+    let assistantSaved = false
+    try {
       await runAgentStream<AgentOutput>({
         agent: agentKey,
         input: requestInput,
@@ -484,6 +845,36 @@ export function ShowAgent({ item, store }: NodeItemProps) {
           }
           applyFrameToMessage(assistantID, frame)
           handleFinalFrameSideEffects(frame)
+          if (
+            activeSessionID > 0 &&
+            frame?.type === 'result' &&
+            !assistantSaved
+          ) {
+            assistantSaved = true
+            const finalOutput = normalizeRuntimeFrameOutput(frame?.output, frame)
+            const finalText =
+              valueText(finalOutput.text) ||
+              valueText(frame?.msg) ||
+              '智能体已返回结果。'
+            void savePersistentMessage(
+              activeSessionID,
+              {
+                ...assistantMessage,
+                text: finalText,
+                output: {
+                  text: finalText,
+                  finalOutput: normalizeAgentDisplayOutput(finalOutput, finalText),
+                },
+                running: false,
+                requestID: valueText(frame?.request_id) || requestID,
+              },
+              {
+                requestID: valueText(frame?.request_id) || requestID,
+                output: finalOutput,
+                status: Number(frame.status) === 2 ? 2 : 1,
+              }
+            )
+          }
         },
       })
     } catch (currentError: unknown) {
@@ -491,6 +882,20 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         const message = runtimeErrorMessage(currentError, '智能体测试失败。')
         setError(message)
         markAssistantError(assistantID, message)
+        if (activeSessionID > 0 && !assistantSaved) {
+          assistantSaved = true
+          void savePersistentMessage(
+            activeSessionID,
+            {
+              ...assistantMessage,
+              text: message,
+              running: false,
+              error: message,
+              requestID,
+            },
+            { requestID, status: 2, output: { error: message, text: message } }
+          )
+        }
       }
     } finally {
       if (runTokenRef.current === token) {
@@ -529,6 +934,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   }
 
   const handleFinalFrameSideEffects = (frame: AgentFrame) => {
+    handleSkillDraftPatchSideEffect(frame)
     if (frame?.type !== 'result' || item.meta?.reloadPageOnFinal !== true) {
       return
     }
@@ -559,6 +965,36 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     window.setTimeout(() => {
       void reloadStorePageSchema(store)
     }, delayMs)
+  }
+
+  const handleSkillDraftPatchSideEffect = (frame: AgentFrame) => {
+    if (frame?.type !== 'result' || !skillDraftPatchApi) {
+      return
+    }
+    if (Number(frame.status) === 2) {
+      return
+    }
+    const output = normalizeRuntimeFrameOutput(frame?.output, frame)
+    const payload = resolveSkillDraftPatchPayload(output)
+    if (!payload) {
+      return
+    }
+    const key = [frame.request_id, frame.stream_id, 'skill_draft_patch']
+      .map(valueText)
+      .join(':')
+    if (draftPatchSideEffectKeyRef.current === key) {
+      return
+    }
+    draftPatchSideEffectKeyRef.current = key
+    const context = resolveMetaPathMap(item.meta?.skillDraftPatchContext, store)
+    void assistantApiRequest(skillDraftPatchApi, {
+      ...context,
+      ...payload,
+    })
+      .then(() => reloadStorePageSchema(store))
+      .catch((currentError: unknown) => {
+        setError(runtimeErrorMessage(currentError, '应用技能草稿失败。'))
+      })
   }
 
   const applyFrameToMessage = (
@@ -806,6 +1242,99 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         }}
       />
 
+      <AssistantSessionHistoryDialog
+        open={historyDialogOpen}
+        onOpenChange={setHistoryDialogOpen}
+        agentKey={agentKey}
+        contextKey={sessionContext}
+        activeSessionID={sessionID}
+        disabled={running || sessionLoading}
+        assistantLayer
+        layerClassName={ASSISTANT_DIALOG_LAYER_CLASS}
+        loadSessions={loadHistorySessions}
+        onOpenSession={(id) => openAssistantSession(id)}
+        onArchiveSession={archiveHistorySession}
+        onRestoreSession={restoreHistorySession}
+        onRenameSession={renameHistorySession}
+      />
+
+      <Dialog open={memoryDialogOpen} onOpenChange={setMemoryDialogOpen}>
+        <DialogContent className='max-w-2xl'>
+          <DialogHeader>
+            <DialogTitle>长期记忆</DialogTitle>
+            <DialogDescription>
+              只保存已经确认会长期复用的偏好、约束和事实。
+            </DialogDescription>
+          </DialogHeader>
+          <div className='space-y-4'>
+            <div className='grid gap-2'>
+              <input
+                value={memoryTitle}
+                disabled={memorySaving}
+                placeholder='标题'
+                className='h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20'
+                onChange={(event) => setMemoryTitle(event.target.value)}
+              />
+              <Textarea
+                value={memoryContent}
+                disabled={memorySaving}
+                placeholder='记忆内容'
+                className='min-h-24'
+                onChange={(event) => setMemoryContent(event.target.value)}
+              />
+              <div className='flex justify-end'>
+                <Button
+                  type='button'
+                  size='sm'
+                  disabled={memorySaving || !memoryTitle.trim() || !memoryContent.trim()}
+                  onClick={() => void saveMemory()}
+                >
+                  {memorySaving ? (
+                    <Loader2 className='size-3.5 animate-spin' />
+                  ) : (
+                    <Plus className='size-3.5' />
+                  )}
+                  保存记忆
+                </Button>
+              </div>
+            </div>
+            <div className='max-h-72 space-y-2 overflow-y-auto'>
+              {memories.length === 0 ? (
+                <div className='rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground'>
+                  暂无长期记忆。
+                </div>
+              ) : null}
+              {memories.map((memory) => (
+                <div
+                  key={memory.id}
+                  className='rounded-md border bg-muted/20 px-3 py-2'
+                >
+                  <div className='flex items-start justify-between gap-3'>
+                    <div className='min-w-0'>
+                      <div className='truncate text-sm font-medium'>
+                        {memory.title || `记忆 ${memory.id}`}
+                      </div>
+                      <div className='mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground'>
+                        {memory.content}
+                      </div>
+                    </div>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='icon'
+                      className='size-8 shrink-0'
+                      onClick={() => void deleteMemory(memory.id)}
+                    >
+                      <Trash2 className='size-3.5' />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {error ? (
         <div className='rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive'>
           {error}
@@ -838,9 +1367,40 @@ export function ShowAgent({ item, store }: NodeItemProps) {
           <div className='min-w-0 truncate text-xs text-muted-foreground'>
             {requestID
               ? `RequestID: ${requestID}${lastStreamID !== '0-0' ? ` / ${lastStreamID}` : ''}`
-              : referenceMessage || '关闭弹窗后会清空本次测试上下文。'}
+              : referenceMessage ||
+                (sessionEnabled
+                  ? sessionLoading
+                    ? '正在加载历史会话。'
+                    : sessionID
+                      ? '会话已保存，刷新后可继续。'
+                      : '本次会话会保存到后台。'
+                  : '关闭弹窗后会清空本次测试上下文。')}
           </div>
           <div className='flex shrink-0 items-center gap-2'>
+            {sessionEnabled ? (
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                disabled={running || sessionLoading}
+                onClick={() => setHistoryDialogOpen(true)}
+              >
+                <History className='size-3.5' />
+                历史
+              </Button>
+            ) : null}
+            {memoryEnabled ? (
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                disabled={running}
+                onClick={() => setMemoryDialogOpen(true)}
+              >
+                <Brain className='size-3.5' />
+                记忆
+              </Button>
+            ) : null}
             <AssistantReferencePicker
               references={references}
               disabled={running}
@@ -852,11 +1412,29 @@ export function ShowAgent({ item, store }: NodeItemProps) {
               type='button'
               variant='outline'
               size='sm'
-              disabled={running}
-              onClick={resetSession}
+              disabled={running || sessionLoading}
+              onClick={() =>
+                sessionEnabled
+                  ? void clearPersistentSession()
+                  : resetSession()
+              }
+            >
+              <Trash2 className='size-3.5' />
+              清空
+            </Button>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              disabled={running || sessionLoading}
+              onClick={() =>
+                sessionEnabled
+                  ? void startPersistentSession()
+                  : resetSession()
+              }
             >
               <RotateCcw className='size-3.5' />
-              新对话
+              {sessionEnabled ? '新会话' : '新对话'}
             </Button>
             {running ? (
               <Button
@@ -931,6 +1509,224 @@ function scheduleAgentMessagesScrollToBottom(element: HTMLElement) {
   return () => {
     window.cancelAnimationFrame(frameID)
     window.clearTimeout(timerID)
+  }
+}
+
+async function assistantApiRequest(api: string, payload: Record<string, unknown>) {
+  const result = await request(api, 'post', payload)
+  if (!isPlainObject(result)) {
+    return {}
+  }
+  const status = Number(result.status || 0)
+  const code = Number(result.code || 0)
+  if (status === 2 || code === 401) {
+    throw new Error(valueText(result.msg || result.message) || '请求失败')
+  }
+  return isPlainObject(result.data) ? result.data : {}
+}
+
+function resolveAssistantSessionContext(
+  value: unknown,
+  store: NodeItemProps['store'],
+  agentKey: string
+) {
+  if (isPlainObject(value)) {
+    const resolved = resolveMetaPathMap(value, store)
+    const entries = Object.entries(resolved)
+      .filter(([, current]) => current != null && current !== '')
+      .sort(([left], [right]) => left.localeCompare(right))
+    if (entries.length > 0) {
+      return entries
+        .map(([key, current]) => `${key}:${valueText(current)}`)
+        .join('|')
+    }
+  }
+  const text = valueText(value).trim()
+  if (text) {
+    return text.replaceAll('{agent}', agentKey)
+  }
+  return agentKey ? `agent:${agentKey}` : 'agent'
+}
+
+function resolveSkillDraftPatchPayload(output: Record<string, unknown>) {
+  const source = skillDraftPatchSource(output)
+  if (!source) {
+    return null
+  }
+  const patch = isPlainObject(source.patch)
+    ? source.patch
+    : isPlainObject(source.draft)
+      ? source.draft
+      : null
+  if (!patch) {
+    return null
+  }
+  const draftID = Number(source.draft_id || source.draftId || source.id || 0)
+  const packID = Number(source.pack_id || source.packId || 0)
+  const cateID = Number(source.cate_id || source.cateId || 0)
+  return {
+    ...(Number.isFinite(draftID) && draftID > 0 ? { id: draftID } : {}),
+    ...(Number.isFinite(packID) && packID > 0 ? { pack_id: packID } : {}),
+    ...(Number.isFinite(cateID) && cateID > 0 ? { cate_id: cateID } : {}),
+    patch,
+  }
+}
+
+function skillDraftPatchSource(output: Record<string, unknown>) {
+  const candidates = [
+    output,
+    isPlainObject(output.json) ? output.json : null,
+    isPlainObject(output.content) && isPlainObject(output.content.json)
+      ? output.content.json
+      : null,
+  ]
+  for (const candidate of candidates) {
+    if (!isPlainObject(candidate)) {
+      continue
+    }
+    const kind = valueText(candidate.kind || candidate.type || candidate.event)
+      .trim()
+      .toLowerCase()
+    if (kind === 'skill_draft_patch') {
+      return candidate
+    }
+  }
+  return null
+}
+
+function normalizeAssistantSessionMessages(value: unknown): AgentMessage[] {
+  const rows = Array.isArray(value) ? value : []
+  return rows
+    .map((row, index) => normalizeAssistantSessionMessage(row, index))
+    .filter((message): message is AgentMessage => Boolean(message))
+}
+
+function normalizeAssistantSessionMessage(value: unknown, index: number) {
+  if (!isPlainObject(value)) {
+    return null
+  }
+  const role = valueText(value.role) === 'user' ? 'user' : 'assistant'
+  const text = valueText(value.text)
+  const content = isPlainObject(value.content) ? value.content : {}
+  const output = isPlainObject(value.output) ? value.output : {}
+  const kind = valueText(content.kind || value.kind) as AgentMessage['kind']
+  const message: AgentMessage = {
+    id: `saved-${valueText(value.id) || index}`,
+    role,
+    text,
+    kind: kind || 'chat',
+    data: isPlainObject(content.data)
+      ? (content.data as Record<string, unknown>)
+      : undefined,
+    requestID: valueText(value.request_id),
+    running: false,
+  }
+  if (role === 'assistant') {
+    const finalOutput = isEmptyRuntimeOutput(output)
+      ? normalizeAgentDisplayOutput({ text })
+      : normalizeAgentDisplayOutput(output, text)
+    message.output = {
+      text,
+      finalOutput,
+    }
+    if (Number(value.status) === 2) {
+      message.error = text
+    }
+  }
+  const interaction = normalizeFrameInteraction(content.interaction)
+  if (interaction) {
+    message.interaction = interaction
+    message.interactionAnswered = Boolean(content.interaction_answered)
+    if (isPlainObject(content.interaction_data)) {
+      message.interactionData = content.interaction_data as Record<string, unknown>
+    }
+  }
+  return message
+}
+
+function normalizeAssistantMemories(value: unknown) {
+  const rows = Array.isArray(value) ? value : []
+  return rows
+    .map(normalizeAssistantMemory)
+    .filter((memory): memory is AssistantMemoryRecord => Boolean(memory))
+}
+
+function normalizeAssistantSessions(value: unknown) {
+  const rows = Array.isArray(value) ? value : []
+  return rows
+    .map(normalizeAssistantSession)
+    .filter((session): session is AssistantSessionRecord => Boolean(session))
+}
+
+function normalizeAssistantSession(value: unknown) {
+  if (!isPlainObject(value)) {
+    return null
+  }
+  const id = Number(value.id || 0)
+  if (!Number.isFinite(id) || id <= 0) {
+    return null
+  }
+  return {
+    id,
+    title: valueText(value.title),
+    context_key: valueText(value.context_key),
+    agent_key: valueText(value.agent_key),
+    status: Number(value.status || 0),
+    message_count: Number(value.message_count || 0),
+    last_message_at: valueText(value.last_message_at),
+  }
+}
+
+function normalizeAssistantPagination(
+  value: unknown,
+  query: AssistantSessionHistoryQuery
+) {
+  const data = isPlainObject(value) ? value : {}
+  return {
+    page: positiveNumber(data.page, query.page),
+    page_size: positiveNumber(data.page_size ?? data.pageSize, query.pageSize),
+    total: positiveNumber(data.total, 0),
+    total_pages: positiveNumber(data.total_pages ?? data.totalPages, 0),
+  }
+}
+
+function emptyAssistantSessionList(
+  query: AssistantSessionHistoryQuery
+): AssistantSessionListPayload {
+  return {
+    sessions: [],
+    pagination: {
+      page: query.page,
+      page_size: query.pageSize,
+      total: 0,
+      total_pages: 0,
+    },
+  }
+}
+
+function positiveNumber(value: unknown, fallback: number) {
+  const number = Number(value)
+  if (!Number.isFinite(number) || number < 0) {
+    return fallback
+  }
+  return number
+}
+
+function normalizeAssistantMemory(value: unknown) {
+  if (!isPlainObject(value)) {
+    return null
+  }
+  const id = Number(value.id || 0)
+  if (!Number.isFinite(id) || id <= 0) {
+    return null
+  }
+  return {
+    id,
+    kind: valueText(value.kind),
+    title: valueText(value.title),
+    content: valueText(value.content),
+    tags: value.tags,
+    importance: Number(value.importance || 0),
   }
 }
 

@@ -1,0 +1,625 @@
+{
+  "page": {
+    "name": "技能草稿",
+    "parent": "bot/agent/skill_pack/list",
+    "type": 2,
+    "sort": 13
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0 space-y-4",
+        "children": {
+          "header-row": {
+            "type": "container",
+            "className": "flex items-center justify-between gap-3"
+          },
+          "table-row": {
+            "type": "container",
+            "className": "space-y-3"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "header-row": [
+      {
+        "type": "show-title",
+        "value": "page.title"
+      },
+      {
+        "type": "show-button",
+        "name": "AI 创建",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "icon": "sparkles"
+        },
+        "action": {
+          "click": [
+            {
+              "type": "data",
+              "key": "actionTarget.draftAgent.id",
+              "value": 0
+            },
+            {
+              "type": "data",
+              "key": "actionTarget.draftAgent.key",
+              "value": ""
+            },
+            {
+              "type": "data",
+              "key": "actionTarget.draftAgent.name",
+              "value": ""
+            },
+            {
+              "type": "data",
+              "key": "actionTarget.draftAgent.description",
+              "value": ""
+            },
+            {
+              "type": "data",
+              "key": "actionTarget.draftAgent.skill_md",
+              "value": ""
+            },
+            {
+              "type": "data",
+              "key": "actionTarget.draftAgent.files_json",
+              "value": "{}"
+            },
+            {
+              "type": "data",
+              "key": "actionTarget.draftAgent.manifest",
+              "value": ""
+            },
+            {
+              "type": "modal",
+              "key": "dialog.draftAssistant",
+              "value": true
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "引用开源代码",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "icon": "github"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.importSource",
+            "value": true
+          }
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "创建技能",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "icon": "plus"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.create",
+            "value": true
+          }
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-base",
+        "value": "page.description",
+        "className": "text-sm text-muted-foreground"
+      },
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "savePath": "bot/agent/skill_draft/update",
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "name",
+              "type": "show-base"
+            },
+            {
+              "value": "key",
+              "type": "show-base"
+            },
+            {
+              "value": "pack.name",
+              "name": "技能方案",
+              "type": "show-base"
+            },
+            {
+              "value": "cate.name",
+              "name": "分类",
+              "type": "show-base"
+            },
+            {
+              "value": "status",
+              "type": "show-tag"
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "sparkles",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "AI 修改草稿",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.draftAgent",
+                          "value": "$row"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.draftAssistant",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "check-circle",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "校验草稿",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.request.id",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "confirm.validate",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "play",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "测试草稿",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.testRequest.id",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "data",
+                          "key": "actionTarget.testRequest.script",
+                          "value": ""
+                        },
+                        {
+                          "type": "data",
+                          "key": "actionTarget.testRequest.target",
+                          "value": ""
+                        },
+                        {
+                          "type": "data",
+                          "key": "actionTarget.testRequest.args",
+                          "value": ""
+                        },
+                        {
+                          "type": "data",
+                          "key": "actionTarget.testRequest.timeout_seconds",
+                          "value": 15
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.test",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "upload-cloud",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "发布草稿",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.request.id",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "confirm.publish",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑草稿",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.id",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.edit",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "trash-2",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "删除草稿",
+                    "className": "text-destructive hover:text-destructive",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.deleteDraft",
+                          "value": "$row"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "confirm.delete",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "draft-assistant-panel": [
+      {
+        "id": "skill-draft-agent",
+        "type": "show-agent",
+        "meta": {
+          "agentPath": "data.actionTarget.skillCreatorAgent.key",
+          "agentNamePath": "data.actionTarget.skillCreatorAgent.name",
+          "openPath": "state.dialog.draftAssistant",
+          "requestApi": "/bot/admin/agent/run",
+          "streamApi": "/bot/admin/agent/stream",
+          "stopApi": "/bot/admin/agent/stop",
+          "paramApi": "/bot/admin/energon/power_params",
+          "sessionEnabled": true,
+          "memoryEnabled": true,
+          "sessionContext": {
+            "skill_pack": "data.search.pack_id",
+            "skill_draft": "data.actionTarget.draftAgent.id"
+          },
+          "skillDraftPatchApi": "/bot/admin/skill_draft/apply_patch",
+          "skillDraftPatchContext": {
+            "id": "data.actionTarget.draftAgent.id",
+            "pack_id": "data.search.pack_id",
+            "cate_id": "data.draftContext.cate_id"
+          },
+          "reloadPageOnFinal": true,
+          "reloadPageOnFinalKinds": [
+            "skill_draft_patch"
+          ],
+          "reloadPageOnFinalDelayMs": 500,
+          "blockMs": 1000,
+          "placeholder": "描述要创建或修改的 skill。需要脚本、配置项、MCP、依赖或引用代码时直接说明。",
+          "emptyText": "可以多轮描述需求。AI 会生成草稿 patch，写回同一个技能草稿；发布前仍需手动校验和测试。",
+          "inputContext": {
+            "draft_id": "data.actionTarget.draftAgent.id",
+            "pack_id": "data.search.pack_id",
+            "cate_id": "data.draftContext.cate_id",
+            "draft": "data.actionTarget.draftAgent"
+          }
+        }
+      }
+    ],
+    "draft-test-panel": [
+      {
+        "type": "form-input",
+        "placeholder": "scripts/run.py；留空自动选择第一个 scripts/ 脚本",
+        "value": "actionTarget.testRequest.script",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "可选 target_key",
+        "value": "actionTarget.testRequest.target",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "可选参数，一行一个或逗号分隔",
+        "value": "actionTarget.testRequest.args",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 4
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "15",
+        "value": "actionTarget.testRequest.timeout_seconds",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "运行测试",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "icon": "play"
+        },
+        "action": {
+          "click": {
+            "type": "request",
+            "api": "/bot/admin/skill_draft/test",
+            "method": "post",
+            "params": "actionTarget.testRequest"
+          }
+        }
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "name": "AI 创建技能",
+        "meta": {
+          "stateKey": "dialog.draftAssistant",
+          "formSection": "draft-assistant-panel",
+          "title": "AI 创建技能",
+          "description": "多轮生成或修改技能草稿；AI 只写草稿 patch，不会发布正式技能。",
+          "size": "3xl",
+          "bodyScroll": false,
+          "footer": {
+            "close": false,
+            "confirm": false
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.importSource",
+          "pageRoute": "/bot/agent/skill_draft/import_source",
+          "title": "引用开源代码",
+          "description": "拉取 GitHub/git 仓库，先作为 references/source/ 创建草稿，不直接执行来源代码。",
+          "footer": {
+            "confirm": false
+          },
+          "pageRouteQuery": {
+            "pack_id": "data.search.pack_id"
+          },
+          "size": "2xl",
+          "bodyClassName": "px-6 py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.create",
+          "pageRoute": "/bot/agent/skill_draft/update",
+          "title": "创建技能草稿",
+          "description": "可手动填写，也可以使用 AI 填写生成 SKILL.md、运行配置和草稿文件。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存草稿"
+          },
+          "pageRouteQuery": {
+            "pack_id": "data.search.pack_id"
+          },
+          "size": "3xl",
+          "bodyClassName": "px-6 py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.edit",
+          "pageRoute": "/bot/agent/skill_draft/update",
+          "title": "编辑技能草稿",
+          "description": "草稿保存后不会发布，发布和测试在后续流程完成。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存草稿"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.id"
+          },
+          "size": "3xl",
+          "bodyClassName": "px-6 py-2"
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "校验草稿",
+        "info": "确认校验当前技能草稿吗？校验结果会写回草稿。",
+        "meta": {
+          "stateKey": "confirm.validate",
+          "successMessage": "校验完成。",
+          "errorMessage": "校验失败。"
+        },
+        "action": {
+          "confirm": {
+            "type": "request",
+            "api": "/bot/admin/skill_draft/validate",
+            "method": "post",
+            "params": "actionTarget.request"
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "name": "测试草稿",
+        "meta": {
+          "stateKey": "dialog.test",
+          "formSection": "draft-test-panel",
+          "title": "测试技能草稿",
+          "description": "在沙箱中运行草稿脚本；通过后当前内容才允许发布。",
+          "size": "2xl",
+          "bodyScroll": false,
+          "footer": {
+            "close": true,
+            "confirm": false
+          }
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "发布草稿",
+        "info": "确认发布当前技能草稿吗？发布会写入 data/skills 并加入目标技能方案。",
+        "meta": {
+          "stateKey": "confirm.publish",
+          "successMessage": "发布完成。",
+          "errorMessage": "发布失败。"
+        },
+        "action": {
+          "confirm": {
+            "type": "request",
+            "api": "/bot/admin/skill_draft/publish",
+            "method": "post",
+            "params": "actionTarget.request"
+          }
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "删除草稿",
+        "info": "确认删除当前技能草稿吗？删除后不会影响已发布或已安装的技能。",
+        "meta": {
+          "stateKey": "confirm.delete"
+        },
+        "action": {
+          "confirm": {
+            "type": "delete",
+            "model": "bot.agent.NewSkillDraftModel",
+            "params": "actionTarget.deleteDraft"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "技能草稿",
+      "description": "创建或维护自有 skill 草稿；草稿不会进入正式技能方案，发布前必须经过校验和测试。"
+    },
+    "search": {
+      "keyword": "",
+      "pack_id": 0,
+      "status": ""
+    },
+    "draftContext": {
+      "cate_id": 1
+    },
+    "table": {
+      "searchFields": [
+        "name",
+        "key",
+        "description"
+      ],
+      "filterFields": [
+        "pack_id",
+        "status"
+      ],
+      "model": "bot.agent.NewSkillDraftModel"
+    },
+    "actionTarget": {
+      "id": "",
+      "draftAgent": {
+        "id": 0
+      },
+      "request": {
+        "id": ""
+      },
+      "testRequest": {
+        "id": "",
+        "script": "",
+        "target": "",
+        "args": "",
+        "timeout_seconds": 15
+      },
+      "deleteDraft": {},
+      "skillCreatorAgent": {
+        "key": "skill-creator",
+        "name": "技能创建工程师"
+      }
+    }
+  },
+  "state": {
+    "dialog": {
+      "draftAssistant": false,
+      "importSource": false,
+      "create": false,
+      "edit": false,
+      "test": false
+    },
+    "confirm": {
+      "validate": false,
+      "test": false,
+      "publish": false,
+      "delete": false
+    }
+  },
+  "action": {}
+}

@@ -32,19 +32,143 @@
         "className": "text-sm text-muted-foreground whitespace-pre-wrap break-words"
       },
       {
+        "type": "show-title",
+        "value": "page.installTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.source_url",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm break-all"
+      },
+      {
+        "type": "show-base",
+        "value": "form.install_input",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words"
+      },
+      {
         "type": "show-base",
         "value": "form.install_path",
         "className": "rounded-md border bg-muted/30 p-3 text-sm font-mono break-all"
       },
       {
         "type": "show-base",
-        "value": "form.manifest",
+        "value": "form.entry_file",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm font-mono break-all"
+      },
+      {
+        "type": "show-title",
+        "value": "page.scanTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.skill_scan_summary",
+        "className": "text-sm text-muted-foreground"
+      },
+      {
+        "type": "show-title",
+        "value": "page.sourceMetaTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.source_meta_pretty",
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words"
+      },
+      {
+        "type": "show-table",
+        "value": "form.skill_scan_files",
+        "meta": {
+          "rowKey": "path",
+          "columns": [
+            {
+              "value": "path",
+              "type": "show-base"
+            },
+            {
+              "value": "kind",
+              "type": "show-tag"
+            },
+            {
+              "value": "size",
+              "type": "show-base"
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-title",
+        "value": "page.configTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-table",
+        "value": "form.skill_config_rows",
+        "meta": {
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "name",
+              "type": "show-base"
+            },
+            {
+              "value": "key",
+              "type": "show-base"
+            },
+            {
+              "value": "target_key",
+              "type": "show-base"
+            },
+            {
+              "value": "type",
+              "type": "show-tag"
+            },
+            {
+              "value": "value_hint",
+              "name": "配置状态",
+              "type": "show-tag"
+            },
+            {
+              "value": "status",
+              "type": "show-tag"
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-title",
+        "value": "page.manifestTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.manifest_pretty",
         "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words"
       }
     ]
   },
   "data": {
-    "form": {}
+    "page": {
+      "installTitle": "安装信息",
+      "scanTitle": "来源文件",
+      "sourceMetaTitle": "_meta.json",
+      "configTitle": "运行配置项",
+      "manifestTitle": "运行配置"
+    },
+    "form": {
+      "service": "bot.agent.setting.AgentHook.LoadSkillDetail"
+    }
   },
   "state": {},
   "action": {}

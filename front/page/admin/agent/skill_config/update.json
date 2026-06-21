@@ -1,0 +1,185 @@
+{
+  "page": {
+    "parent": "bot/agent/skill_config/list",
+    "type": 2,
+    "sort": 1,
+    "auth": [
+      {
+        "key": "bot/agent/skill_config/create",
+        "name": "技能配置新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/agent/skill_config/update",
+        "name": "技能配置编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-select",
+        "value": "form.skill_id",
+        "mode": "form",
+        "option": {
+          "model": "bot.agent.NewSkillModel",
+          "filters": {
+            "status": 1
+          },
+          "order": "sort asc,id asc"
+        },
+        "validate": [
+          {
+            "type": "required",
+            "message": "技能不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "留空表示所有目标通用",
+        "value": "form.target_key",
+        "mode": "form",
+        "info": "同一个 skill 支持多个目标时填写，例如 wechat、douyin；留空表示通用配置。",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "例如：WECHAT_COOKIE",
+        "value": "form.key",
+        "mode": "form",
+        "info": "会转换为脚本环境变量名，只允许字母、数字、下划线等安全字符。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "配置键不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "例如：微信公众号 Cookie",
+        "value": "form.name",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-radio",
+        "value": "form.type",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "配置类型不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-radio",
+        "value": "form.required",
+        "mode": "form",
+        "info": "必填配置缺失时，运行脚本会返回缺配置提示并停止执行；可选配置只在已填写时注入环境变量。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "是否必填不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "编辑时留空表示保留已有值",
+        "value": "form.value_plain",
+        "mode": "form",
+        "info": "真实值只会加密保存，不写入 manifest、prompt 或日志；脚本运行时通过环境变量注入。",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 4
+        }
+      },
+      {
+        "type": "form-radio",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "model": "bot.agent.NewSkillConfigModel",
+      "id": 0,
+      "skill_id": 0,
+      "target_key": "",
+      "key": "",
+      "name": "",
+      "type": "secret",
+      "required": 1,
+      "value_plain": "",
+      "status": 1
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "model": "bot.agent.NewSkillConfigModel",
+      "params": "form",
+      "data": {
+        "id": "$form.id",
+        "skill_id": "$form.skill_id",
+        "target_key": "$form.target_key",
+        "key": "$form.key",
+        "name": "$form.name",
+        "type": "$form.type",
+        "required": "$form.required",
+        "value_plain": "$form.value_plain",
+        "status": "$form.status"
+      },
+      "before": {
+        "service": "bot.agent.setting.AgentHook.BeforeSaveSkillConfig"
+      },
+      "after": {
+        "service": "bot.agent.setting.AgentHook.AfterSaveSkillConfig"
+      }
+    }
+  }
+}

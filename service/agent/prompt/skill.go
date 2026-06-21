@@ -47,7 +47,9 @@ func skillToolPrompt(catalog agentskill.Catalog, tools ToolRuntime) string {
 	if tools.RunSkillScriptEnabled {
 		scriptRule = "- run_skill_script 当前使用 " + strings.TrimSpace(tools.ScriptSandboxDriver) + " 模式执行，只能执行当前技能 scripts/ 下的脚本，禁止传 command 字符串。"
 		if strings.TrimSpace(tools.ScriptNetworkMode) == "none" {
-			scriptRule += " 脚本默认断网；需要访问外部 API 时优先调用 http_request 或 curl_request。"
+			scriptRule += " 脚本当前断网；需要访问外部 API 时优先调用 http_request 或 curl_request。"
+		} else {
+			scriptRule += " 脚本默认可联网，但仍只能执行当前技能声明或 scripts/ 下的入口。"
 		}
 	}
 	return strings.Join([]string{
@@ -57,7 +59,7 @@ func skillToolPrompt(catalog agentskill.Catalog, tools ToolRuntime) string {
 		"- 技能正文出现 curl 示例时，转换为 call_tool 的 http_request 或 curl_request；后端不会执行系统 curl 命令。",
 		"- read_skill_file/list_skill_files 只能访问当前技能安装目录。",
 		scriptRule,
-		"- write_temp_file/read_temp_file 只读写本轮临时目录；internal_api 只用于平台白名单内部接口；mcp_call 只有接入 MCP 后可用。",
+		"- write_temp_file/read_temp_file 只读写本轮临时目录；internal_api 只用于平台白名单内部接口；mcp_call 只允许调用当前技能 manifest.mcp 声明的 server/tool。",
 		"- 工具调用结果会作为 tool_observation 回到下一轮；收到结果后继续判断原始目标，并按输出协议回复。",
 		"- 本轮已加载技能 key: " + strings.Join(keys, ", "),
 		"",

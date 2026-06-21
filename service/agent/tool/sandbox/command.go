@@ -38,7 +38,7 @@ func executableScriptCommand(runPath string, checkPath string, args []string) (s
 	return runPath, args, nil
 }
 
-func scriptEnv(tempRoot string) []string {
+func scriptEnv(tempRoot string, skillRoot string, extraEnv []string) []string {
 	env := []string{
 		"PATH=/usr/local/bin:/usr/bin:/bin",
 		"LANG=C.UTF-8",
@@ -47,5 +47,12 @@ func scriptEnv(tempRoot string) []string {
 	if tempRoot != "" {
 		env = append(env, "HOME="+tempRoot, "TMPDIR="+tempRoot, "AGENT_TEMP_DIR="+tempRoot)
 	}
+	if skillRoot != "" {
+		env = append(env,
+			"PYTHONPATH="+filepath.Join(skillRoot, ".dever", "deps", "python"),
+			"NODE_PATH="+filepath.Join(skillRoot, ".dever", "deps", "node", "node_modules"),
+		)
+	}
+	env = append(env, extraEnv...)
 	return env
 }

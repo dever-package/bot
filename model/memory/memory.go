@@ -10,8 +10,10 @@ const (
 	StatusEnabled  int16 = 1
 	StatusDisabled int16 = 2
 
-	OwnerTypeTeam  = "team"
-	OwnerTypeAgent = "agent"
+	OwnerTypeTeam     = "team"
+	OwnerTypeAgent    = "agent"
+	OwnerTypeAdmin    = "admin"
+	OwnerTypeBodyUser = "body_user"
 )
 
 var statusOptions = []map[string]any{
@@ -22,6 +24,8 @@ var statusOptions = []map[string]any{
 var ownerTypeOptions = []map[string]any{
 	{"id": OwnerTypeTeam, "value": "团队"},
 	{"id": OwnerTypeAgent, "value": "智能体"},
+	{"id": OwnerTypeAdmin, "value": "后台账号"},
+	{"id": OwnerTypeBodyUser, "value": "前台用户"},
 }
 
 var memoryKindOptions = []map[string]any{

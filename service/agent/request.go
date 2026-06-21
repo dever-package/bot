@@ -27,13 +27,22 @@ func parseRunRequest(body map[string]any) (parsedRunRequest, error) {
 	if len(history) == 0 {
 		history = normalizeHistory(body["messages"])
 	}
+	assistantSessionID := uint64(frontstream.InputInt64(firstPresent(
+		body["assistant_session_id"],
+		body["assistantSessionId"],
+		input["assistant_session_id"],
+		input["assistantSessionId"],
+	), 0))
+	delete(input, "assistant_session_id")
+	delete(input, "assistantSessionId")
 
 	return parsedRunRequest{
-		AgentIdentity:  agentIdentity,
-		Input:          input,
-		History:        history,
-		Options:        normalizeMap(body["options"]),
-		SourceTargetID: uint64(frontstream.InputInt64(body["source_target_id"], 0)),
+		AgentIdentity:      agentIdentity,
+		Input:              input,
+		History:            history,
+		Options:            normalizeMap(body["options"]),
+		SourceTargetID:     uint64(frontstream.InputInt64(body["source_target_id"], 0)),
+		AssistantSessionID: assistantSessionID,
 	}, nil
 }
 
@@ -59,6 +68,15 @@ func normalizeMap(raw any) map[string]any {
 
 func firstText(values ...any) string {
 	return agentskill.FirstText(values...)
+}
+
+func firstPresent(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 func errorText(err error) string {

@@ -15,6 +15,7 @@ import (
 	agentprompt "github.com/dever-package/bot/service/agent/prompt"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 	agenttool "github.com/dever-package/bot/service/agent/tool"
+	assistantservice "github.com/dever-package/bot/service/assistant"
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
@@ -142,10 +143,12 @@ func (s Service) execute(exec runExecution) {
 	agentSettings := s.repo.ListActiveAgentSettings(ctx, exec.Agent.ID)
 	knowledgeService := agentknowledge.NewService()
 	knowledgeBases := knowledgeService.AgentKnowledgeBases(ctx, exec.Agent.ID)
+	runtimeMemories := assistantservice.NewService().RuntimeMemories(ctx, exec.Parsed.AssistantSessionID, 12)
 	runtimePrompt := agentprompt.BuildRuntimePrompt(agentprompt.RuntimeInput{
 		PublicSettings: publicSettings,
 		AgentSettings:  agentSettings,
 		KnowledgeBases: promptKnowledgeBases(knowledgeBases),
+		Memory:         promptMemories(runtimeMemories),
 		Powers:         powers,
 		SkillCatalog:   catalog,
 		Tools:          runtimePromptTools(runtimeOptions.Tool),
@@ -159,6 +162,7 @@ func (s Service) execute(exec runExecution) {
 		"public_settings":  len(publicSettings),
 		"agent_settings":   len(agentSettings),
 		"knowledge_bases":  len(knowledgeBases),
+		"memories":         len(runtimeMemories),
 		"knowledge_mode":   "agentic_tools",
 		"history_messages": len(exec.Parsed.History),
 	}, stepStatusSuccess)

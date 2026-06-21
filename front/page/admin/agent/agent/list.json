@@ -347,6 +347,11 @@
           "streamApi": "/bot/admin/agent/stream",
           "stopApi": "/bot/admin/agent/stop",
           "paramApi": "/bot/admin/energon/power_params",
+          "sessionEnabled": true,
+          "memoryEnabled": true,
+          "sessionContext": {
+            "agent": "data.actionTarget.runAgent.key"
+          },
           "blockMs": 1000
         }
       }

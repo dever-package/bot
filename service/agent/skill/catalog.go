@@ -26,8 +26,11 @@ type Entry struct {
 	Name        string
 	Description string
 	Triggers    []string
+	Domains     []string
+	Targets     []string
 	InstallPath string
 	EntryFile   string
+	Manifest    string
 	Content     string
 }
 
@@ -157,6 +160,12 @@ func renderMetadata(entries []Entry) string {
 		}
 		if len(entry.Triggers) > 0 {
 			line += ", triggers: " + strings.Join(entry.Triggers, "、")
+		}
+		if len(entry.Domains) > 0 {
+			line += ", domains: " + strings.Join(entry.Domains, "、")
+		}
+		if len(entry.Targets) > 0 {
+			line += ", targets: " + strings.Join(entry.Targets, "、")
 		}
 		rows = append(rows, line)
 	}

@@ -14,6 +14,7 @@ type RuntimeInput struct {
 	AgentSettings  []agentmodel.AgentSetting
 	Knowledge      []KnowledgeSnippet
 	KnowledgeBases []KnowledgeBaseRuntime
+	Memory         []MemorySnippet
 	Powers         []energonmodel.Power
 	SkillCatalog   agentskill.Catalog
 	Tools          ToolRuntime
@@ -35,6 +36,15 @@ type KnowledgeBaseRuntime struct {
 	ID     uint64
 	Name   string
 	Prompt string
+}
+
+type MemorySnippet struct {
+	ID         uint64
+	Kind       string
+	Title      string
+	Content    string
+	Tags       string
+	Importance int
 }
 
 type EnergonBodyInput struct {
@@ -72,6 +82,7 @@ type KnowledgeSnippet struct {
 func BuildRuntimePrompt(input RuntimeInput) string {
 	sections := make([]string, 0, 8)
 	sections = appendNonEmpty(sections, settingPrompt(input.PublicSettings, input.AgentSettings))
+	sections = appendNonEmpty(sections, memoryPrompt(input.Memory))
 	sections = appendNonEmpty(sections, knowledgeToolPrompt(input.KnowledgeBases))
 	sections = appendNonEmpty(sections, powerPrompt(input.Powers))
 	sections = appendNonEmpty(sections, skillPrompt(input.SkillCatalog, input.Tools))

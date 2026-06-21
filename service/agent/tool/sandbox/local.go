@@ -22,7 +22,7 @@ func (localRunner) Run(ctx context.Context, config Config, req Request) (Result,
 		CommandName:    commandName,
 		CommandArgs:    commandArgs,
 		WorkDir:        req.SkillRoot,
-		Env:            scriptEnv(req.TempRoot),
+		Env:            scriptEnv(req.TempRoot, req.SkillRoot, req.Env),
 		Timeout:        requestTimeout(req, config),
 		OutputMaxBytes: config.OutputMaxBytes,
 	})

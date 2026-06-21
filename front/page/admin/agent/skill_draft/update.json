@@ -1,0 +1,182 @@
+{
+  "page": {
+    "parent": "bot/agent/skill_draft/list",
+    "type": 2,
+    "sort": 1,
+    "auth": [
+      {
+        "key": "bot/agent/skill_draft/create",
+        "name": "创建技能草稿",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/agent/skill_draft/update",
+        "name": "编辑技能草稿",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full space-y-3"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "placeholder": "例如：wechat-article-fetcher",
+        "value": "form.key",
+        "mode": "form",
+        "info": "发布后会作为 data/skills/<key> 目录名；保存草稿时会自动规范化。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "技能标识不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "例如：微信公众号文章采集",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "技能名称不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "说明这个 skill 做什么、什么时候使用。",
+        "value": "form.description",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 3
+        }
+      },
+      {
+        "type": "form-select",
+        "value": "form.pack_id",
+        "mode": "form",
+        "option": {
+          "model": "bot.agent.NewSkillPackModel",
+          "filters": {
+            "status": 1
+          },
+          "order": "sort asc,id asc"
+        },
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-select",
+        "value": "form.cate_id",
+        "mode": "form",
+        "option": {
+          "model": "bot.agent.NewSkillCateModel",
+          "filters": {
+            "status": 1
+          },
+          "order": "sort asc,id asc"
+        },
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "保存给 skill 的 SKILL.md 内容；不写 Dever 专用字段。",
+        "value": "form.skill_md",
+        "mode": "form",
+        "info": "这里只写第三方 agent 可读的技能说明、使用方式和注意事项。",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 10
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "{\"scripts/run.py\":\"print('ok')\"}",
+        "value": "form.files_json",
+        "mode": "form",
+        "info": "JSON 对象，key 是相对路径；发布阶段只允许 scripts/ 和 references/。",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 8
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "{\"config\":[],\"scripts\":[]}",
+        "value": "form.manifest",
+        "mode": "form",
+        "info": "Dever 运行配置。真实 secret 不允许写在这里。",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 8
+        }
+      },
+      {
+        "type": "form-radio",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "model": "bot.agent.NewSkillDraftModel",
+      "id": 0,
+      "pack_id": 0,
+      "cate_id": 1,
+      "source_skill_id": 0,
+      "key": "",
+      "name": "",
+      "description": "",
+      "skill_md": "",
+      "files_json": "{}",
+      "manifest": "",
+      "validation_result": "{}",
+      "status": 1
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "model": "bot.agent.NewSkillDraftModel",
+      "params": "form",
+      "before": {
+        "service": "bot.agent.setting.AgentHook.BeforeSaveSkillDraft"
+      }
+    }
+  }
+}

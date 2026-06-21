@@ -42,8 +42,10 @@ func NormalizeScriptSandboxNetworkMode(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case agentmodel.RuntimeScriptSandboxNetworkHost:
 		return agentmodel.RuntimeScriptSandboxNetworkHost
-	default:
+	case agentmodel.RuntimeScriptSandboxNetworkNone:
 		return agentmodel.RuntimeScriptSandboxNetworkNone
+	default:
+		return agentmodel.DefaultRuntimeScriptSandboxNetworkMode
 	}
 }
 

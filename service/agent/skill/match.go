@@ -69,9 +69,11 @@ func entryMatchesInput(entry Entry, normalizedInput string) bool {
 }
 
 func entryMatchTerms(entry Entry) []string {
-	terms := make([]string, 0, len(entry.Triggers)+2)
+	terms := make([]string, 0, len(entry.Triggers)+len(entry.Domains)+len(entry.Targets)+2)
 	terms = append(terms, entry.Key, entry.Name)
 	terms = append(terms, entry.Triggers...)
+	terms = append(terms, entry.Domains...)
+	terms = append(terms, entry.Targets...)
 	return terms
 }
 

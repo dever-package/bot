@@ -56,11 +56,12 @@ type RunRequest struct {
 }
 
 type parsedRunRequest struct {
-	AgentIdentity  string
-	Input          map[string]any
-	History        []any
-	Options        map[string]any
-	SourceTargetID uint64
+	AgentIdentity      string
+	Input              map[string]any
+	History            []any
+	Options            map[string]any
+	SourceTargetID     uint64
+	AssistantSessionID uint64
 }
 
 type runTracker struct {

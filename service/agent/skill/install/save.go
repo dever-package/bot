@@ -2,6 +2,7 @@ package install
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shemic/dever/orm"
 	"github.com/shemic/dever/util"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
@@ -58,18 +60,55 @@ func parseSkillSources(sources []installedSkillSource) ([]parsedSkillSource, err
 
 func (s Service) saveInstalledSkill(ctx context.Context, execInfo *skillInstallExecution, install parsedSkillSource) (map[string]any, error) {
 	model := agentmodel.NewSkillModel()
-	manifest := agentskill.CloneMap(install.Parsed.Manifest)
-	manifest["source_url"] = install.Source.SourceURL
 
 	if existing := model.Find(ctx, map[string]any{"key": install.Parsed.Key}); existing != nil {
+		manifest := installedSkillManifest(install.Parsed.Manifest, install.Source.SourceURL, existing.Manifest)
 		oldPath := strings.TrimSpace(existing.InstallPath)
-		if err := replaceInstalledSkill(install.Source.Directory, install.FinalDir); err != nil {
+		replacement, err := replaceInstalledSkill(install.Source.Directory, install.FinalDir)
+		if err != nil {
+			return nil, err
+		}
+		result, err := saveInstalledSkillWithRollback(ctx, replacement, func(txCtx context.Context) (map[string]any, error) {
+			model.Update(txCtx, map[string]any{"id": existing.ID}, map[string]any{
+				"cate_id":       execInfo.CateID,
+				"name":          install.Parsed.Name,
+				"description":   install.Parsed.Description,
+				"source_url":    install.Source.SourceURL,
+				"install_input": execInfo.Input,
+				"install_path":  filepath.ToSlash(install.FinalDir),
+				"entry_file":    install.EntryFile,
+				"manifest":      agentskill.JSONText(manifest),
+				"content_hash":  install.Parsed.Hash,
+				"status":        defaultStatus,
+			})
+			if execInfo.AutoAddToPack && execInfo.TargetPackID > 0 {
+				ensureSkillInPack(txCtx, execInfo.TargetPackID, existing.ID)
+			}
+			return map[string]any{
+				"id":   existing.ID,
+				"key":  install.Parsed.Key,
+				"name": install.Parsed.Name,
+				"path": filepath.ToSlash(install.FinalDir),
+			}, nil
+		})
+		if err != nil {
 			return nil, err
 		}
 		removeOldSkillPath(oldPath, install.FinalDir)
+		s.log(execInfo, "技能已存在，已刷新安装内容: %s (%s)", install.Parsed.Name, install.Parsed.Key)
+		return result, nil
+	}
 
-		model.Update(ctx, map[string]any{"id": existing.ID}, map[string]any{
+	manifest := installedSkillManifest(install.Parsed.Manifest, install.Source.SourceURL, "")
+	replacement, err := replaceInstalledSkill(install.Source.Directory, install.FinalDir)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := saveInstalledSkillWithRollback(ctx, replacement, func(txCtx context.Context) (map[string]any, error) {
+		skillID := uint64(model.Insert(txCtx, map[string]any{
 			"cate_id":       execInfo.CateID,
+			"key":           install.Parsed.Key,
 			"name":          install.Parsed.Name,
 			"description":   install.Parsed.Description,
 			"source_url":    install.Source.SourceURL,
@@ -79,52 +118,78 @@ func (s Service) saveInstalledSkill(ctx context.Context, execInfo *skillInstallE
 			"manifest":      agentskill.JSONText(manifest),
 			"content_hash":  install.Parsed.Hash,
 			"status":        defaultStatus,
-		})
-		if execInfo.AutoAddToPack && execInfo.TargetPackID > 0 {
-			ensureSkillInPack(ctx, execInfo.TargetPackID, existing.ID)
+			"sort":          defaultSort,
+			"created_at":    time.Now(),
+		}))
+		if skillID == 0 {
+			return nil, fmt.Errorf("写入技能记录失败: %s", install.Parsed.Key)
 		}
-		s.log(execInfo, "技能已存在，已刷新安装内容: %s (%s)", install.Parsed.Name, install.Parsed.Key)
+		if execInfo.AutoAddToPack && execInfo.TargetPackID > 0 {
+			ensureSkillInPack(txCtx, execInfo.TargetPackID, skillID)
+		}
 		return map[string]any{
-			"id":   existing.ID,
+			"id":   skillID,
 			"key":  install.Parsed.Key,
 			"name": install.Parsed.Name,
 			"path": filepath.ToSlash(install.FinalDir),
 		}, nil
-	}
-
-	if err := replaceInstalledSkill(install.Source.Directory, install.FinalDir); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
 
-	skillID := uint64(model.Insert(ctx, map[string]any{
-		"cate_id":       execInfo.CateID,
-		"key":           install.Parsed.Key,
-		"name":          install.Parsed.Name,
-		"description":   install.Parsed.Description,
-		"source_url":    install.Source.SourceURL,
-		"install_input": execInfo.Input,
-		"install_path":  filepath.ToSlash(install.FinalDir),
-		"entry_file":    install.EntryFile,
-		"manifest":      agentskill.JSONText(manifest),
-		"content_hash":  install.Parsed.Hash,
-		"status":        defaultStatus,
-		"sort":          defaultSort,
-		"created_at":    time.Now(),
-	}))
-	if skillID == 0 {
-		return nil, fmt.Errorf("写入技能记录失败: %s", install.Parsed.Key)
-	}
-	if execInfo.AutoAddToPack && execInfo.TargetPackID > 0 {
-		ensureSkillInPack(ctx, execInfo.TargetPackID, skillID)
+	s.log(execInfo, "安装成功: %s (%s)", install.Parsed.Name, install.Parsed.Key)
+	return result, nil
+}
+
+func installedSkillManifest(parsed map[string]any, sourceURL string, existingManifest string) map[string]any {
+	manifest := agentskill.CloneMap(parsed)
+	manifest["source_url"] = sourceURL
+	for _, key := range []string{"config", "scripts", "source_refs"} {
+		if _, exists := manifest[key]; !exists {
+			manifest[key] = []any{}
+		}
 	}
 
-	s.log(execInfo, "安装成功: %s (%s)", install.Parsed.Name, install.Parsed.Key)
-	return map[string]any{
-		"id":   skillID,
-		"key":  install.Parsed.Key,
-		"name": install.Parsed.Name,
-		"path": filepath.ToSlash(install.FinalDir),
-	}, nil
+	existingManifest = strings.TrimSpace(existingManifest)
+	if existingManifest == "" {
+		return manifest
+	}
+	existing := map[string]any{}
+	if err := json.Unmarshal([]byte(existingManifest), &existing); err != nil {
+		return manifest
+	}
+	for _, key := range []string{
+		"config",
+		"scripts",
+		"source_refs",
+		"mcp",
+		"dependencies",
+		"targets",
+		"domains",
+	} {
+		value, exists := existing[key]
+		if !exists || isEmptyManifestValue(value) {
+			continue
+		}
+		manifest[key] = value
+	}
+	return manifest
+}
+
+func isEmptyManifestValue(value any) bool {
+	switch typed := value.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(typed) == ""
+	case []any:
+		return len(typed) == 0
+	case map[string]any:
+		return len(typed) == 0
+	default:
+		return false
+	}
 }
 
 func ensureSkillInPack(ctx context.Context, packID uint64, skillID uint64) {
@@ -167,31 +232,90 @@ func nextSkillPackItemSort(ctx context.Context, packID uint64) int {
 	return maxSort + 10
 }
 
-func replaceInstalledSkill(source string, target string) error {
+type installedSkillReplacement struct {
+	target    string
+	backup    string
+	committed bool
+}
+
+func replaceInstalledSkill(source string, target string) (*installedSkillReplacement, error) {
 	if !agentskill.IsSafePath(target) {
-		return fmt.Errorf("技能安装目录不安全: %s", target)
+		return nil, fmt.Errorf("技能安装目录不安全: %s", target)
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
+		return nil, err
 	}
 
-	backup := ""
+	replacement := &installedSkillReplacement{target: target}
 	if _, err := os.Stat(target); err == nil {
-		backup = target + ".bak-" + backupSuffix()
-		if err := os.Rename(target, backup); err != nil {
-			return err
+		replacement.backup = target + ".bak-" + backupSuffix()
+		if err := os.Rename(target, replacement.backup); err != nil {
+			return nil, err
 		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
 	}
 
 	if err := moveInstalledSkill(source, target); err != nil {
 		_ = os.RemoveAll(target)
-		if backup != "" {
-			_ = os.Rename(backup, target)
+		if replacement.backup != "" {
+			if restoreErr := os.Rename(replacement.backup, target); restoreErr != nil {
+				return nil, fmt.Errorf("%w；恢复旧技能目录失败: %v", err, restoreErr)
+			}
 		}
-		return err
+		return nil, err
 	}
-	if backup != "" {
-		_ = os.RemoveAll(backup)
+	return replacement, nil
+}
+
+func saveInstalledSkillWithRollback(ctx context.Context, replacement *installedSkillReplacement, fn func(context.Context) (map[string]any, error)) (result map[string]any, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if recoveredErr, ok := recovered.(error); ok {
+				err = recoveredErr
+			} else {
+				err = fmt.Errorf("%v", recovered)
+			}
+		}
+		if err != nil {
+			if rollbackErr := replacement.rollback(); rollbackErr != nil {
+				err = fmt.Errorf("%w；目录回滚失败: %v", err, rollbackErr)
+			}
+			return
+		}
+		replacement.commit()
+	}()
+	err = orm.Transaction(ctx, func(txCtx context.Context) error {
+		var txErr error
+		result, txErr = fn(txCtx)
+		return txErr
+	})
+	return result, err
+}
+
+func (replacement *installedSkillReplacement) commit() {
+	if replacement == nil || replacement.committed {
+		return
+	}
+	replacement.committed = true
+	if replacement.backup != "" {
+		_ = os.RemoveAll(replacement.backup)
+	}
+}
+
+func (replacement *installedSkillReplacement) rollback() error {
+	if replacement == nil || replacement.committed {
+		return nil
+	}
+	replacement.committed = true
+	if err := os.RemoveAll(replacement.target); err != nil {
+		return fmt.Errorf("清理新技能目录失败: %w", err)
+	}
+	if replacement.backup == "" {
+		return nil
+	}
+	if err := os.Rename(replacement.backup, replacement.target); err != nil {
+		return fmt.Errorf("恢复旧技能目录失败: %w", err)
 	}
 	return nil
 }

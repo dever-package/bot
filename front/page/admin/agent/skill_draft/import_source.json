@@ -1,0 +1,172 @@
+{
+  "page": {
+    "parent": "bot/agent/skill_draft/list",
+    "type": 2,
+    "sort": 2
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full space-y-3"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "placeholder": "https://github.com/org/repo",
+        "value": "form.source_url",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "来源地址不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "分支、tag 或 commit，可留空",
+        "value": "form.ref",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "例如：wechat-article-fetcher",
+        "value": "form.key",
+        "mode": "form",
+        "info": "留空时会从仓库名推导。",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "例如：微信公众号文章采集",
+        "value": "form.name",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "这个 skill 计划做什么。",
+        "value": "form.description",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 3
+        }
+      },
+      {
+        "type": "form-select",
+        "value": "form.pack_id",
+        "mode": "form",
+        "option": {
+          "model": "bot.agent.NewSkillPackModel",
+          "filters": {
+            "status": 1
+          },
+          "order": "sort asc,id asc"
+        },
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-select",
+        "value": "form.cate_id",
+        "mode": "form",
+        "option": {
+          "model": "bot.agent.NewSkillCateModel",
+          "filters": {
+            "status": 1
+          },
+          "order": "sort asc,id asc"
+        },
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "例如：MIT",
+        "value": "form.license",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "一行一个要引用的文件；留空时只保存文件树，后续再选择。",
+        "value": "form.used_files",
+        "mode": "form",
+        "info": "选中的源码会放到 references/source/，不会直接作为脚本执行。",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 5
+        }
+      },
+      {
+        "type": "form-textarea",
+        "placeholder": "来源说明、改写计划或审查备注。",
+        "value": "form.notes",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 3
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "拉取并创建草稿",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "icon": "download"
+        },
+        "action": {
+          "click": {
+            "type": "request",
+            "api": "/bot/admin/skill_draft/import_source",
+            "method": "post",
+            "params": "form"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "source_url": "",
+      "ref": "",
+      "key": "",
+      "name": "",
+      "description": "",
+      "pack_id": 0,
+      "cate_id": 1,
+      "license": "",
+      "used_files": "",
+      "notes": ""
+    }
+  },
+  "state": {},
+  "action": {}
+}

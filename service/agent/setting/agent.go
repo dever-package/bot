@@ -141,7 +141,9 @@ func normalizeAgentCate(ctx context.Context, record map[string]any, partial bool
 }
 
 func isBuiltinAgent(id uint64) bool {
-	return id == agentmodel.FrontAssistantAgentID || id == agentmodel.SkillInstallerAgentID
+	return id == agentmodel.FrontAssistantAgentID ||
+		id == agentmodel.SkillInstallerAgentID ||
+		id == agentmodel.SkillCreatorAgentID
 }
 
 func builtinAgentKey(id uint64) string {
@@ -150,6 +152,8 @@ func builtinAgentKey(id uint64) string {
 		return agentmodel.FrontAssistantAgentKey
 	case agentmodel.SkillInstallerAgentID:
 		return agentmodel.SkillInstallerAgentKey
+	case agentmodel.SkillCreatorAgentID:
+		return agentmodel.SkillCreatorAgentKey
 	default:
 		return ""
 	}
