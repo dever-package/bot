@@ -12,6 +12,10 @@ const (
 
 	OwnerTypeAdmin    = "admin"
 	OwnerTypeBodyUser = "body_user"
+
+	TitleSourceAuto   = "auto"
+	TitleSourceLLM    = "llm"
+	TitleSourceManual = "manual"
 )
 
 var sessionStatusOptions = []map[string]any{
@@ -24,6 +28,12 @@ var ownerTypeOptions = []map[string]any{
 	{"id": OwnerTypeBodyUser, "value": "前台用户"},
 }
 
+var titleSourceOptions = []map[string]any{
+	{"id": TitleSourceAuto, "value": "自动"},
+	{"id": TitleSourceLLM, "value": "模型生成"},
+	{"id": TitleSourceManual, "value": "手动"},
+}
+
 type Session struct {
 	ID            uint64    `dorm:"primaryKey;autoIncrement;comment:会话ID"`
 	OwnerType     string    `dorm:"type:varchar(32);not null;default:'admin';comment:归属类型"`
@@ -31,6 +41,7 @@ type Session struct {
 	ContextKey    string    `dorm:"type:varchar(128);not null;default:'';comment:上下文"`
 	AgentKey      string    `dorm:"type:varchar(128);not null;default:'';comment:智能体"`
 	Title         string    `dorm:"type:varchar(255);not null;default:'';comment:标题"`
+	TitleSource   string    `dorm:"type:varchar(32);not null;default:'auto';comment:标题来源"`
 	Status        int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	MessageCount  int       `dorm:"type:int;not null;default:0;comment:消息数"`
 	LastMessageAt time.Time `dorm:"comment:最后消息时间"`
@@ -49,8 +60,9 @@ func NewSessionModel() *orm.Model[Session] {
 		Order:    "last_message_at desc,id desc",
 		Database: "default",
 		Options: map[string]any{
-			"owner_type": ownerTypeOptions,
-			"status":     sessionStatusOptions,
+			"owner_type":   ownerTypeOptions,
+			"status":       sessionStatusOptions,
+			"title_source": titleSourceOptions,
 		},
 	})
 }

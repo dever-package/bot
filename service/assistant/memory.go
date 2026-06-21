@@ -11,7 +11,12 @@ import (
 	memorymodel "github.com/dever-package/bot/model/memory"
 )
 
-const memoryReviewMaxRows = 500
+const (
+	memoryReviewMaxRows        = 500
+	memoryAutoSaveScore        = 0.85
+	memoryConfirmationScore    = 0.55
+	memoryLLMExtractionTimeout = 20 * time.Second
+)
 
 var sensitiveMemoryPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|passwd|cookie|authorization|bearer|private[_-]?key|密码|密钥|私钥|令牌|凭证)`),
@@ -68,7 +73,7 @@ func (s Service) reviewMemoryRows(ctx context.Context, owner ownerScope, req Mem
 		}
 	}
 
-	if memoryScope(req.Scope) == "all" {
+	if strings.ToLower(strings.TrimSpace(req.Scope)) == memoryScopeAll {
 		model := memorymodel.NewMemoryModel()
 		total := model.Count(ctx, filter)
 		rows := model.Select(ctx, filter, map[string]any{
@@ -101,38 +106,32 @@ func (s Service) reviewMemoryRows(ctx context.Context, owner ownerScope, req Mem
 	return memoryMaps(filtered[start:end]), int64(len(filtered)), page, pageSize
 }
 
-func (s Service) extractSessionMemoryAsync(owner ownerScope, session assistantmodel.Session) {
-	if session.ID == 0 {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		s.extractSessionMemory(ctx, owner, session)
-	}()
-}
-
-func (s Service) extractSessionMemory(ctx context.Context, owner ownerScope, session assistantmodel.Session) {
+func (s Service) extractSessionMemory(ctx context.Context, owner ownerScope, session assistantmodel.Session, sourceMessageID uint64) map[string]any {
 	userText := latestUserMessageText(ctx, session.ID)
 	if userText == "" {
-		return
+		return nil
 	}
 	if target, ok := forgetMemoryInstruction(userText); ok {
 		s.forgetSimilarMemories(ctx, owner, session, target)
-		return
+		return map[string]any{
+			"status": "forgot",
+			"text":   "已按本轮要求清理相关记忆。",
+		}
 	}
-	for _, candidate := range extractMemoryCandidates(userText) {
-		candidate.Tags = append(candidate.Tags, "source:auto")
-		_, _ = s.rememberForOwner(ctx, owner, MemoryRequest{
-			Kind:       candidate.Kind,
-			Title:      candidate.Title,
-			Content:    candidate.Content,
-			Tags:       candidate.Tags,
-			Importance: candidate.Importance,
-			ContextKey: session.ContextKey,
-			AgentKey:   session.AgentKey,
-		})
+	if !shouldEvaluateMemory(userText) {
+		return nil
 	}
+	candidates := s.extractMemoryCandidatesWithLLM(ctx, session, userText)
+	if len(candidates) == 0 {
+		candidates = extractMemoryCandidates(userText)
+	}
+	for _, candidate := range candidates {
+		review := s.handleMemoryCandidate(ctx, owner, session, sourceMessageID, candidate)
+		if len(review) > 0 {
+			return review
+		}
+	}
+	return nil
 }
 
 func latestUserMessageText(ctx context.Context, sessionID uint64) string {
@@ -161,6 +160,11 @@ type memoryCandidate struct {
 	Content    string
 	Tags       []string
 	Importance int
+	Scope      string
+	Source     string
+	Confidence float64
+	Reason     string
+	Explicit   bool
 }
 
 func extractMemoryCandidates(text string) []memoryCandidate {
@@ -171,6 +175,7 @@ func extractMemoryCandidates(text string) []memoryCandidate {
 	explicit := explicitMemoryContent(text)
 	content := explicit
 	importance := 80
+	explicitSignal := explicit != ""
 	if content == "" {
 		if !looksLikeLongTermMemory(text) {
 			return nil
@@ -185,6 +190,10 @@ func extractMemoryCandidates(text string) []memoryCandidate {
 		Title:      memoryTitle(kind, content),
 		Content:    content,
 		Importance: importance,
+		Source:     memorymodel.SourceAuto,
+		Confidence: 0.68,
+		Reason:     "命中长期记忆规则",
+		Explicit:   explicitSignal,
 	}}
 }
 
@@ -254,12 +263,12 @@ func (s Service) forgetSimilarMemories(ctx context.Context, owner ownerScope, se
 	}
 }
 
-func (s Service) findSimilarMemory(ctx context.Context, owner ownerScope, contextKey string, agentKey string, title string, content string) *memorymodel.Memory {
+func (s Service) findSimilarMemory(ctx context.Context, owner ownerScope, scope string, contextKey string, agentKey string, sessionID uint64, title string, content string) *memorymodel.Memory {
 	probe := normalizeMemoryComparable(title + " " + content)
 	if probe == "" {
 		return nil
 	}
-	req := MemoryListRequest{ContextKey: contextKey, AgentKey: agentKey, Scope: "current"}
+	req := MemoryListRequest{ContextKey: contextKey, AgentKey: agentKey, Scope: scope, SessionID: sessionID}
 	rows := memorymodel.NewMemoryModel().Select(
 		ctx,
 		map[string]any{
@@ -273,7 +282,7 @@ func (s Service) findSimilarMemory(ctx context.Context, owner ownerScope, contex
 		},
 	)
 	for _, row := range rows {
-		if row == nil || !memoryMatchesListRequest(*row, req) {
+		if row == nil || !memoryMatchesScope(*row, req) {
 			continue
 		}
 		current := normalizeMemoryComparable(row.Title + " " + row.Content)
@@ -293,53 +302,7 @@ func memoryMaps(rows []*memorymodel.Memory) []map[string]any {
 }
 
 func memoryMatchesListRequest(row memorymodel.Memory, req MemoryListRequest) bool {
-	scope := memoryScope(req.Scope)
-	tags := memoryTags(row.Tags)
-	switch scope {
-	case "global":
-		return !hasScopedMemoryTags(tags)
-	case "current":
-		contextTag := "context:" + normalizeContextKey(req.ContextKey, req.AgentKey)
-		agentTag := ""
-		if strings.TrimSpace(req.AgentKey) != "" {
-			agentTag = "agent:" + strings.TrimSpace(req.AgentKey)
-		}
-		if len(tags) == 0 {
-			return true
-		}
-		hasScoped := false
-		for _, tag := range tags {
-			if strings.HasPrefix(tag, "context:") || strings.HasPrefix(tag, "agent:") {
-				hasScoped = true
-			}
-			if tag == contextTag || (agentTag != "" && tag == agentTag) {
-				return true
-			}
-		}
-		return !hasScoped
-	default:
-		return true
-	}
-}
-
-func hasScopedMemoryTags(tags []string) bool {
-	for _, tag := range tags {
-		if strings.HasPrefix(tag, "context:") || strings.HasPrefix(tag, "agent:") {
-			return true
-		}
-	}
-	return false
-}
-
-func memoryScope(scope string) string {
-	switch strings.ToLower(strings.TrimSpace(scope)) {
-	case "all":
-		return "all"
-	case "global":
-		return "global"
-	default:
-		return "current"
-	}
+	return memoryMatchesScope(row, req)
 }
 
 func memoryStatusFilter(status string) int16 {
@@ -406,7 +369,12 @@ func hasSensitiveMemoryContent(text string) bool {
 }
 
 func looksLikeLongTermMemory(text string) bool {
-	signals := []string{"以后", "每次", "总是", "默认", "必须", "不许", "不要", "禁止", "规范", "规则", "约束", "偏好", "习惯", "希望", "长期记忆"}
+	signals := []string{
+		"以后", "每次", "总是", "默认", "必须", "不许", "禁止",
+		"规范", "规则", "约束", "偏好", "习惯", "希望", "喜欢",
+		"回复", "语气", "风格", "用中文", "长期记忆",
+		"不要默认", "不要再", "不需要兼容",
+	}
 	for _, signal := range signals {
 		if strings.Contains(text, signal) {
 			return true

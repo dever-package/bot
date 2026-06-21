@@ -14,14 +14,13 @@ import {
   History,
   Loader2,
   MessageSquarePlus,
-  Plus,
   RotateCcw,
   Send,
   Square,
   Trash2,
 } from 'lucide-react'
 import { useStore } from 'zustand'
-import { request } from '@dever/front-plugin'
+import { getCompatModule, request } from '@dever/front-plugin'
 import { runAgentStream, stopAgentStream } from '@/lib/agent/runner'
 import {
   assistantReferencePayload,
@@ -41,7 +40,6 @@ import {
   streamValueText as valueText,
   type RuntimeStreamFrame,
 } from '@/lib/stream'
-import { ASSISTANT_DIALOG_LAYER_CLASS } from '@/lib/floating-layer'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -61,10 +59,6 @@ import {
   AssistantReferenceList,
   AssistantReferencePicker,
 } from '@/components/assistant/reference-picker'
-import {
-  AssistantSessionHistoryDialog,
-  type AssistantSessionHistoryQuery,
-} from '@/components/assistant/session-history-dialog'
 import {
   EnergonContentView,
   type EnergonOutput,
@@ -91,6 +85,20 @@ import {
 
 type AgentRole = 'user' | 'assistant'
 
+const ASSISTANT_DIALOG_LAYER_CLASS = 'z-[100]'
+const ASSISTANT_DIALOG_LAYER_Z_INDEX = 1000
+const AssistantMemoryDialog = resolveCompatComponent(
+  '@/components/assistant/memory-dialog',
+  'AssistantMemoryDialog'
+)
+const AssistantSessionHistoryDialog = resolveCompatComponent(
+  '@/components/assistant/session-history-dialog',
+  'AssistantSessionHistoryDialog'
+)
+const compatReloadStoreDataContainer = getCompatModule(
+  '@/lib/page-data-reload'
+).reloadStoreDataContainer
+
 type AgentStreamOutput = {
   text: string
   finalOutput: AgentOutput | null
@@ -115,6 +123,7 @@ type AgentMessage = {
 
 type AgentOutput = AgentResultOutput & {
   interaction?: AgentInteraction
+  memory_review?: unknown
 }
 
 type AgentSuggestion = {
@@ -122,16 +131,27 @@ type AgentSuggestion = {
   prompt: string
 }
 
-type AgentFrame = RuntimeStreamFrame<AgentOutput>
-
-type AssistantMemoryRecord = {
-  id: number
-  kind: string
-  title: string
-  content: string
-  tags?: unknown
-  importance?: number
+type AgentMemoryReviewAction = {
+  key: string
+  label: string
+  memory_id?: number
 }
+
+type AgentMemoryReview = {
+  status: string
+  type?: string
+  text?: string
+  candidate_id?: number
+  source_message_id?: number
+  title?: string
+  content?: string
+  reason?: string
+  existing?: Record<string, unknown>
+  actions?: AgentMemoryReviewAction[]
+  error?: string
+}
+
+type AgentFrame = RuntimeStreamFrame<AgentOutput>
 
 type AssistantSessionRecord = {
   id: number
@@ -151,6 +171,13 @@ type AssistantSessionListPayload = {
     total: number
     total_pages: number
   }
+}
+
+type AssistantSessionHistoryQuery = {
+  page: number
+  pageSize: number
+  keyword: string
+  status: string
 }
 
 const agentResultOutputKeys = [
@@ -177,11 +204,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   const [sessionID, setSessionID] = useState(0)
   const [sessionLoading, setSessionLoading] = useState(false)
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false)
-  const [memories, setMemories] = useState<AssistantMemoryRecord[]>([])
   const [memoryDialogOpen, setMemoryDialogOpen] = useState(false)
-  const [memoryTitle, setMemoryTitle] = useState('')
-  const [memoryContent, setMemoryContent] = useState('')
-  const [memorySaving, setMemorySaving] = useState(false)
   const [running, setRunning] = useState(false)
   const [cancelable, setCancelable] = useState(false)
   const [stopping, setStopping] = useState(false)
@@ -243,10 +266,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     item.meta?.clearSessionApi || '/bot/admin/assistant/clear_session'
   )
   const messageApi = String(item.meta?.messageApi || '/bot/admin/assistant/message')
-  const memoryApi = String(item.meta?.memoryApi || '/bot/admin/assistant/memory')
-  const deleteMemoryApi = String(
-    item.meta?.deleteMemoryApi || '/bot/admin/assistant/forget_memory'
-  )
   const skillDraftPatchApi = String(item.meta?.skillDraftPatchApi || '')
   const sessionContext = useStore(store, () =>
     resolveAssistantSessionContext(item.meta?.sessionContext, store, agentKey)
@@ -359,7 +378,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     setReferenceMessage('')
     setRequestID('')
     setSessionID(0)
-    setMemories([])
     setRunning(false)
     setCancelable(false)
     setStopping(false)
@@ -377,7 +395,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     const sessionId = Number(session.id || 0)
     setSessionID(Number.isFinite(sessionId) ? sessionId : 0)
     setMessages(normalizeAssistantSessionMessages(data.messages))
-    setMemories(normalizeAssistantMemories(data.memories))
     scrollMessageListToBottom()
   }, [scrollMessageListToBottom])
 
@@ -521,53 +538,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     await loadAssistantSession(true)
   }
 
-  const saveMemory = async () => {
-    if (!memoryEnabled || memorySaving) {
-      return
-    }
-    const title = memoryTitle.trim()
-    const content = memoryContent.trim()
-    if (!title || !content) {
-      setError('记忆标题和内容不能为空。')
-      return
-    }
-    setMemorySaving(true)
-    try {
-      const payload = await assistantApiRequest(memoryApi, {
-        title,
-        content,
-        kind: 'semantic',
-        context_key: sessionContext,
-        agent_key: agentKey,
-      })
-      const memory = normalizeAssistantMemory(
-        isPlainObject(payload) ? payload.memory : null
-      )
-      if (memory) {
-        setMemories((current) => [memory, ...current])
-      }
-      setMemoryTitle('')
-      setMemoryContent('')
-      setError('')
-    } catch (currentError: unknown) {
-      setError(runtimeErrorMessage(currentError, '保存记忆失败。'))
-    } finally {
-      setMemorySaving(false)
-    }
-  }
-
-  const deleteMemory = async (memoryID: number) => {
-    if (!memoryEnabled || !memoryID) {
-      return
-    }
-    try {
-      await assistantApiRequest(deleteMemoryApi, { id: memoryID })
-      setMemories((current) => current.filter((memory) => memory.id !== memoryID))
-    } catch (currentError: unknown) {
-      setError(runtimeErrorMessage(currentError, '删除记忆失败。'))
-    }
-  }
-
   const ensureAssistantSession = async () => {
     if (!sessionEnabled) {
       return 0
@@ -601,7 +571,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     if (!sessionEnabled || activeSessionID <= 0) {
       return
     }
-    await assistantApiRequest(messageApi, {
+    return await assistantApiRequest(messageApi, {
       session_id: activeSessionID,
       agent_key: agentKey,
       context_key: sessionContext,
@@ -618,6 +588,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       output: options?.output || message.output || {},
       request_id: options?.requestID || message.requestID || '',
       status: options?.status || 1,
+      memory_enabled: memoryEnabled,
     })
   }
 
@@ -873,7 +844,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
                 output: finalOutput,
                 status: Number(frame.status) === 2 ? 2 : 1,
               }
-            )
+            ).then((saved) => applySavedMemoryReview(assistantID, saved))
           }
         },
       })
@@ -894,7 +865,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
               requestID,
             },
             { requestID, status: 2, output: { error: message, text: message } }
-          )
+          ).then((saved) => applySavedMemoryReview(assistantID, saved))
         }
       }
     } finally {
@@ -946,6 +917,9 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     const kind = valueText(output.kind || output.type || output.event)
       .trim()
       .toLowerCase()
+    if (kind === 'skill_draft_patch' && skillDraftPatchApi) {
+      return
+    }
     if (!shouldRunFinalSideEffect(kind, item.meta?.reloadPageOnFinalKinds)) {
       return
     }
@@ -987,11 +961,23 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     }
     draftPatchSideEffectKeyRef.current = key
     const context = resolveMetaPathMap(item.meta?.skillDraftPatchContext, store)
-    void assistantApiRequest(skillDraftPatchApi, {
+    const requestPayload = {
       ...context,
       ...payload,
-    })
-      .then(() => reloadStorePageSchema(store))
+    }
+    void assistantApiRequest(skillDraftPatchApi, requestPayload)
+      .then(async (data) => {
+        await reloadSkillDraftDataContainer(
+          store,
+          valueText(item.meta?.skillDraftPatchReloadDataKey).trim() || 'table'
+        )
+        syncSkillDraftPatchStore(
+          store,
+          item.meta?.skillDraftPatchTargetPath,
+          requestPayload,
+          data
+        )
+      })
       .catch((currentError: unknown) => {
         setError(runtimeErrorMessage(currentError, '应用技能草稿失败。'))
       })
@@ -1111,6 +1097,76 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     )
   }
 
+  const applySavedMemoryReview = (messageID: string, saved: unknown) => {
+    const message = isPlainObject(saved) && isPlainObject(saved.message)
+      ? saved.message
+      : {}
+    const output = isPlainObject(message.output) ? message.output : {}
+    const review = normalizeAgentMemoryReview(output.memory_review)
+    if (!review) {
+      return
+    }
+    updateAssistant(messageID, (current) => ({
+      ...current,
+      output: {
+        ...(current.output || EMPTY_OUTPUT),
+        finalOutput: {
+          ...(current.output?.finalOutput || {}),
+          memory_review: review,
+        },
+      },
+    }))
+  }
+
+  const chooseMemoryReview = async (
+    messageID: string,
+    review: AgentMemoryReview,
+    action: AgentMemoryReviewAction
+  ) => {
+    if (running) {
+      return
+    }
+    try {
+      const result = await assistantApiRequest('/bot/admin/assistant/memory_choice', {
+        candidate_id: review.candidate_id || 0,
+        memory_id: action.memory_id || 0,
+        source_message_id: review.source_message_id || 0,
+        choice: action.key,
+      })
+      const nextReview: AgentMemoryReview = {
+        ...review,
+        status: valueText(result.status) || action.key,
+        text: agentMemoryChoiceResultText(action.key, valueText(result.status)),
+        actions: [],
+      }
+      updateAssistant(messageID, (current) => ({
+        ...current,
+        output: {
+          ...(current.output || EMPTY_OUTPUT),
+          finalOutput: {
+            ...(current.output?.finalOutput || {}),
+            memory_review: nextReview,
+          },
+        },
+      }))
+    } catch (currentError: unknown) {
+      const message = runtimeErrorMessage(currentError, '记忆操作失败。')
+      updateAssistant(messageID, (current) => ({
+        ...current,
+        output: {
+          ...(current.output || EMPTY_OUTPUT),
+          finalOutput: {
+            ...(current.output?.finalOutput || {}),
+            memory_review: {
+              ...review,
+              error: message,
+            },
+          },
+        },
+      }))
+    }
+  }
+
   const updateRunningAssistant = (
     updater: (message: AgentMessage) => AgentMessage
   ) => {
@@ -1201,6 +1257,9 @@ export function ShowAgent({ item, store }: NodeItemProps) {
                   onSendSuggestion={(suggestion) =>
                     void sendSuggestion(suggestion)
                   }
+                  onMemoryAction={(review, action) =>
+                    void chooseMemoryReview(message.id, review, action)
+                  }
                 />
               )}
             </div>
@@ -1251,6 +1310,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         disabled={running || sessionLoading}
         assistantLayer
         layerClassName={ASSISTANT_DIALOG_LAYER_CLASS}
+        layerZIndex={ASSISTANT_DIALOG_LAYER_Z_INDEX}
         loadSessions={loadHistorySessions}
         onOpenSession={(id) => openAssistantSession(id)}
         onArchiveSession={archiveHistorySession}
@@ -1258,82 +1318,16 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         onRenameSession={renameHistorySession}
       />
 
-      <Dialog open={memoryDialogOpen} onOpenChange={setMemoryDialogOpen}>
-        <DialogContent className='max-w-2xl'>
-          <DialogHeader>
-            <DialogTitle>长期记忆</DialogTitle>
-            <DialogDescription>
-              只保存已经确认会长期复用的偏好、约束和事实。
-            </DialogDescription>
-          </DialogHeader>
-          <div className='space-y-4'>
-            <div className='grid gap-2'>
-              <input
-                value={memoryTitle}
-                disabled={memorySaving}
-                placeholder='标题'
-                className='h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20'
-                onChange={(event) => setMemoryTitle(event.target.value)}
-              />
-              <Textarea
-                value={memoryContent}
-                disabled={memorySaving}
-                placeholder='记忆内容'
-                className='min-h-24'
-                onChange={(event) => setMemoryContent(event.target.value)}
-              />
-              <div className='flex justify-end'>
-                <Button
-                  type='button'
-                  size='sm'
-                  disabled={memorySaving || !memoryTitle.trim() || !memoryContent.trim()}
-                  onClick={() => void saveMemory()}
-                >
-                  {memorySaving ? (
-                    <Loader2 className='size-3.5 animate-spin' />
-                  ) : (
-                    <Plus className='size-3.5' />
-                  )}
-                  保存记忆
-                </Button>
-              </div>
-            </div>
-            <div className='max-h-72 space-y-2 overflow-y-auto'>
-              {memories.length === 0 ? (
-                <div className='rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground'>
-                  暂无长期记忆。
-                </div>
-              ) : null}
-              {memories.map((memory) => (
-                <div
-                  key={memory.id}
-                  className='rounded-md border bg-muted/20 px-3 py-2'
-                >
-                  <div className='flex items-start justify-between gap-3'>
-                    <div className='min-w-0'>
-                      <div className='truncate text-sm font-medium'>
-                        {memory.title || `记忆 ${memory.id}`}
-                      </div>
-                      <div className='mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground'>
-                        {memory.content}
-                      </div>
-                    </div>
-                    <Button
-                      type='button'
-                      variant='ghost'
-                      size='icon'
-                      className='size-8 shrink-0'
-                      onClick={() => void deleteMemory(memory.id)}
-                    >
-                      <Trash2 className='size-3.5' />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <AssistantMemoryDialog
+        open={memoryDialogOpen}
+        onOpenChange={setMemoryDialogOpen}
+        agentKey={agentKey}
+        contextKey={sessionContext}
+        disabled={running || sessionLoading}
+        assistantLayer
+        layerClassName={ASSISTANT_DIALOG_LAYER_CLASS}
+        layerZIndex={ASSISTANT_DIALOG_LAYER_Z_INDEX}
+      />
 
       {error ? (
         <div className='rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive'>
@@ -1525,6 +1519,25 @@ async function assistantApiRequest(api: string, payload: Record<string, unknown>
   return isPlainObject(result.data) ? result.data : {}
 }
 
+function resolveCompatComponent(path: string, exportName: string) {
+  const component = getCompatModule(path)?.[exportName]
+  return typeof component === 'function' ? component : MissingCompatDialog
+}
+
+function MissingCompatDialog() {
+  return null
+}
+
+async function reloadSkillDraftDataContainer(
+  store: NodeItemProps['store'],
+  key: string
+) {
+  if (typeof compatReloadStoreDataContainer !== 'function') {
+    return false
+  }
+  return Boolean(await compatReloadStoreDataContainer(store, key))
+}
+
 function resolveAssistantSessionContext(
   value: unknown,
   store: NodeItemProps['store'],
@@ -1570,6 +1583,163 @@ function resolveSkillDraftPatchPayload(output: Record<string, unknown>) {
     ...(Number.isFinite(cateID) && cateID > 0 ? { cate_id: cateID } : {}),
     patch,
   }
+}
+
+function syncSkillDraftPatchStore(
+  store: NodeItemProps['store'],
+  configuredPath: unknown,
+  requestPayload: Record<string, unknown>,
+  responseData: Record<string, unknown>
+) {
+  const targetPath =
+    valueText(configuredPath).trim() || 'data.actionTarget.draftAgent'
+  const patch = isPlainObject(requestPayload.patch)
+    ? (requestPayload.patch as Record<string, unknown>)
+    : {}
+  const current = getStoreValueByPath(store, targetPath)
+  const currentDraft = isPlainObject(current)
+    ? (current as Record<string, unknown>)
+    : {}
+  const nextDraft = {
+    ...currentDraft,
+    ...skillDraftPatchStoreValues(patch),
+  }
+
+  const draftID =
+    skillDraftPatchNumber(responseData, 'draft_id', 'draftId', 'id') ||
+    skillDraftPatchNumber(requestPayload, 'id', 'draft_id', 'draftId') ||
+    skillDraftPatchNumber(currentDraft, 'id')
+  if (draftID > 0) {
+    nextDraft.id = draftID
+  }
+
+  const packID =
+    skillDraftPatchNumber(requestPayload, 'pack_id', 'packId') ||
+    skillDraftPatchNumber(patch, 'pack_id', 'packId') ||
+    skillDraftPatchNumber(currentDraft, 'pack_id', 'packId')
+  if (packID > 0) {
+    nextDraft.pack_id = packID
+  }
+
+  const cateID =
+    skillDraftPatchNumber(requestPayload, 'cate_id', 'cateId') ||
+    skillDraftPatchNumber(patch, 'cate_id', 'cateId') ||
+    skillDraftPatchNumber(currentDraft, 'cate_id', 'cateId')
+  if (cateID > 0) {
+    nextDraft.cate_id = cateID
+  }
+
+  store.getState().setValueByPath(targetPath, nextDraft)
+}
+
+function skillDraftPatchStoreValues(patch: Record<string, unknown>) {
+  const values: Record<string, unknown> = {}
+  assignPatchText(values, patch, 'key', 'key')
+  assignPatchText(values, patch, 'name', 'name')
+  assignPatchText(values, patch, 'description', 'description', 'desc')
+  assignPatchText(values, patch, 'skill_md', 'skill_md', 'skillMd', 'skill')
+  assignPatchJSONText(
+    values,
+    patch,
+    'files_json',
+    'files_json',
+    'filesJson',
+    'files'
+  )
+  assignPatchJSONText(
+    values,
+    patch,
+    'manifest',
+    'manifest',
+    'runtime_config',
+    'runtimeConfig'
+  )
+  assignPatchNumber(values, patch, 'pack_id', 'pack_id', 'packId')
+  assignPatchNumber(values, patch, 'cate_id', 'cate_id', 'cateId')
+  return values
+}
+
+function assignPatchText(
+  values: Record<string, unknown>,
+  patch: Record<string, unknown>,
+  field: string,
+  ...keys: string[]
+) {
+  const text = skillDraftPatchText(patch, ...keys)
+  if (text) {
+    values[field] = text
+  }
+}
+
+function assignPatchJSONText(
+  values: Record<string, unknown>,
+  patch: Record<string, unknown>,
+  field: string,
+  ...keys: string[]
+) {
+  const text = skillDraftPatchJSONText(patch, ...keys)
+  if (text) {
+    values[field] = text
+  }
+}
+
+function assignPatchNumber(
+  values: Record<string, unknown>,
+  patch: Record<string, unknown>,
+  field: string,
+  ...keys: string[]
+) {
+  const number = skillDraftPatchNumber(patch, ...keys)
+  if (number > 0) {
+    values[field] = number
+  }
+}
+
+function skillDraftPatchText(value: Record<string, unknown>, ...keys: string[]) {
+  const raw = firstSkillDraftPatchValue(value, keys)
+  return valueText(raw).trim()
+}
+
+function skillDraftPatchJSONText(
+  value: Record<string, unknown>,
+  ...keys: string[]
+) {
+  const raw = firstSkillDraftPatchValue(value, keys)
+  if (raw == null) {
+    return ''
+  }
+  if (typeof raw === 'string') {
+    return raw.trim()
+  }
+  if (isPlainObject(raw) || Array.isArray(raw)) {
+    try {
+      return JSON.stringify(raw)
+    } catch {
+      return ''
+    }
+  }
+  return ''
+}
+
+function skillDraftPatchNumber(
+  value: Record<string, unknown>,
+  ...keys: string[]
+) {
+  const raw = firstSkillDraftPatchValue(value, keys)
+  const number = Number(raw || 0)
+  return Number.isFinite(number) && number > 0 ? number : 0
+}
+
+function firstSkillDraftPatchValue(
+  value: Record<string, unknown>,
+  keys: string[]
+) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(value, key)) {
+      return value[key]
+    }
+  }
+  return undefined
 }
 
 function skillDraftPatchSource(output: Record<string, unknown>) {
@@ -1644,13 +1814,6 @@ function normalizeAssistantSessionMessage(value: unknown, index: number) {
   return message
 }
 
-function normalizeAssistantMemories(value: unknown) {
-  const rows = Array.isArray(value) ? value : []
-  return rows
-    .map(normalizeAssistantMemory)
-    .filter((memory): memory is AssistantMemoryRecord => Boolean(memory))
-}
-
 function normalizeAssistantSessions(value: unknown) {
   const rows = Array.isArray(value) ? value : []
   return rows
@@ -1712,24 +1875,6 @@ function positiveNumber(value: unknown, fallback: number) {
   return number
 }
 
-function normalizeAssistantMemory(value: unknown) {
-  if (!isPlainObject(value)) {
-    return null
-  }
-  const id = Number(value.id || 0)
-  if (!Number.isFinite(id) || id <= 0) {
-    return null
-  }
-  return {
-    id,
-    kind: valueText(value.kind),
-    title: valueText(value.title),
-    content: valueText(value.content),
-    tags: value.tags,
-    importance: Number(value.importance || 0),
-  }
-}
-
 function resolveMetaPathMap(value: unknown, store: NodeItemProps['store']) {
   if (!isPlainObject(value)) {
     return {}
@@ -1777,6 +1922,7 @@ function AgentAssistantMessage({
   onOpenInteraction,
   onOpenResult,
   onSendSuggestion,
+  onMemoryAction,
 }: {
   message: AgentMessage
   now: number
@@ -1784,6 +1930,10 @@ function AgentAssistantMessage({
   onOpenInteraction: (messageID: string) => void
   onOpenResult: () => void
   onSendSuggestion: (suggestion: AgentSuggestion) => void
+  onMemoryAction: (
+    review: AgentMemoryReview,
+    action: AgentMemoryReviewAction
+  ) => void
 }) {
   const resultDetail = buildAgentResultDetail(message)
   const isResultCard = shouldDisplayResultCard(resultDetail)
@@ -1831,6 +1981,11 @@ function AgentAssistantMessage({
           </Button>
         </div>
       ) : null}
+      <AgentMemoryReviewCard
+        review={agentMessageMemoryReview(message)}
+        disabled={running}
+        onSelect={onMemoryAction}
+      />
       <AgentSuggestionBar
         suggestions={suggestions}
         disabled={running}
@@ -2160,6 +2315,70 @@ function AgentSuggestionBar({
           {suggestion.label}
         </Button>
       ))}
+    </div>
+  )
+}
+
+function AgentMemoryReviewCard({
+  review,
+  disabled,
+  onSelect,
+}: {
+  review: AgentMemoryReview | null
+  disabled?: boolean
+  onSelect: (
+    review: AgentMemoryReview,
+    action: AgentMemoryReviewAction
+  ) => void
+}) {
+  if (!review) {
+    return null
+  }
+  const actions = review.actions || []
+  return (
+    <div className='rounded-md border bg-background/80 px-2 py-2 text-xs text-muted-foreground'>
+      <div className='font-medium text-foreground'>
+        {review.status === 'saved'
+          ? review.text || '已记住'
+          : review.type === 'conflict'
+            ? '这条记忆和已有记忆不一致'
+            : '发现一条可能需要长期记住的规则'}
+      </div>
+      {review.status === 'pending' ? (
+        <div className='mt-1 leading-5'>
+          <div className='text-foreground'>{review.title}</div>
+          {review.content ? <div>{review.content}</div> : null}
+          {valueText(review.existing?.content) ? (
+            <div className='mt-1 text-muted-foreground'>
+              原记忆：{valueText(review.existing?.content)}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {review.error ? (
+        <div className='mt-1 text-destructive'>{review.error}</div>
+      ) : null}
+      {actions.length > 0 ? (
+        <div className='mt-2 flex flex-wrap gap-2'>
+          {actions.map((action) => (
+            <Button
+              key={action.key}
+              type='button'
+              size='sm'
+              variant={
+                action.key === 'remember' || action.key === 'update'
+                  ? 'default'
+                  : 'outline'
+              }
+              className='h-7 px-2 text-xs'
+              disabled={disabled}
+              onClick={() => onSelect(review, action)}
+            >
+              {action.label}
+            </Button>
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -2685,6 +2904,63 @@ function buildMessageSuggestions(
     return suggestions
   }
   return []
+}
+
+function agentMessageMemoryReview(message: AgentMessage) {
+  const output = (message.output?.finalOutput || {}) as Record<string, unknown>
+  return normalizeAgentMemoryReview(output.memory_review)
+}
+
+function normalizeAgentMemoryReview(value: unknown): AgentMemoryReview | null {
+  if (!isPlainObject(value)) {
+    return null
+  }
+  const status = valueText(value.status)
+  if (!status) {
+    return null
+  }
+  const actions = Array.isArray(value.actions)
+    ? value.actions
+        .filter(isPlainObject)
+        .map((item) => ({
+          key: valueText(item.key),
+          label: valueText(item.label),
+          memory_id: Number(item.memory_id || 0) || undefined,
+        }))
+        .filter((item) => item.key && item.label)
+    : []
+  return {
+    status,
+    type: valueText(value.type),
+    text: valueText(value.text),
+    candidate_id: Number(value.candidate_id || 0) || undefined,
+    source_message_id: Number(value.source_message_id || 0) || undefined,
+    title: valueText(value.title),
+    content: valueText(value.content),
+    reason: valueText(value.reason),
+    existing: isPlainObject(value.existing) ? value.existing : undefined,
+    actions,
+    error: valueText(value.error),
+  }
+}
+
+function agentMemoryChoiceResultText(choice: string, status: string) {
+  if (choice === 'undo') {
+    return status === 'undone' ? '已撤销这条记忆。' : '已处理。'
+  }
+  if (choice === 'session') {
+    return '已设为仅本次使用，不会写入长期记忆。'
+  }
+  if (choice === 'keep_old') {
+    return '已保留原记忆。'
+  }
+  if (choice === 'ignore') {
+    return '已忽略这条候选记忆。'
+  }
+  if (choice === 'update') {
+    return '已更新记忆。'
+  }
+  return '已记住。'
 }
 
 function shouldRunFinalSideEffect(kind: string, allowedKinds: unknown) {
@@ -3381,7 +3657,12 @@ function AgentInteractionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='flex max-h-[86vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl'>
+      <DialogContent
+        data-assistant-layer='true'
+        layerClassName={ASSISTANT_DIALOG_LAYER_CLASS}
+        layerZIndex={ASSISTANT_DIALOG_LAYER_Z_INDEX}
+        className='flex max-h-[86vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl'
+      >
         <DialogHeader className='border-b px-5 py-4 text-start'>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>

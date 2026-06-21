@@ -43,8 +43,17 @@ version: 0.1.0
 - `service/energon`：provider/source/power 调用和归一化。
 - `service/project`：workspace/project canvas 执行、锁、记录、stream 和权限。
 - `service/team`：team flow runtime、节点执行、校验、审批和 stream。
+- `service/assistant`：后台 AI 助理、`show-agent` 多轮会话、历史会话、长期记忆和记忆确认。
 
 新增 Service 代码只放到归属 service 目录。避免新增会导致 package/front 循环依赖的跨 package import。
+
+## AI 助理和技能创建
+
+- 创建技能、安装技能、智能体测试和后台 AI 助理都复用 `bot_assistant_session` / `bot_assistant_message`，用 `agent_key + context_key` 隔离场景；不要再新增场景专用 message 表。
+- 长期记忆复用 `bot_memory`，按 `owner_type/owner_id + scope + agent_key + context_key + session_id` 隔离；低置信或冲突候选放 `bot_memory_candidate` 并在本轮消息下确认。
+- 记忆抽取复用当前 agent 的 `llm_power_id`；不可用时才退回确定性规则。secret、cookie、token、api key 不进入记忆、prompt、日志。
+- 创建技能的 AI 对话必须只产出和应用草稿 patch；发布仍走校验、沙箱测试和发布流程。
+- AI 助理内历史、记忆、交互参数弹窗必须高于 AI 助理层；AI 助理层必须高于普通业务弹窗，且不能点击助理导致普通弹窗关闭。
 
 ## 常见检查
 

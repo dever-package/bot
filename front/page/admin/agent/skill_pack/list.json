@@ -92,19 +92,67 @@
       },
       {
         "type": "show-button",
+        "name": "草稿箱",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "icon": "file-pen-line",
+          "to": "/bot/agent/skill_draft/list"
+        }
+      },
+      {
+        "type": "show-button",
         "name": "创建技能",
         "className": "shrink-0",
         "meta": {
           "variant": "outline",
           "size": "sm",
-          "icon": "file-plus"
+          "icon": "sparkles"
         },
         "action": {
-          "click": {
-            "type": "modal",
-            "key": "dialog.skillDraft",
-            "value": true
-          }
+          "click": [
+            {
+              "type": "data",
+              "key": "actionTarget.draftAgent.id",
+              "value": 0
+            },
+            {
+              "type": "data",
+              "key": "actionTarget.draftAgent.key",
+              "value": ""
+            },
+            {
+              "type": "data",
+              "key": "actionTarget.draftAgent.name",
+              "value": ""
+            },
+            {
+              "type": "data",
+              "key": "actionTarget.draftAgent.description",
+              "value": ""
+            },
+            {
+              "type": "data",
+              "key": "actionTarget.draftAgent.skill_md",
+              "value": ""
+            },
+            {
+              "type": "data",
+              "key": "actionTarget.draftAgent.files_json",
+              "value": "{}"
+            },
+            {
+              "type": "data",
+              "key": "actionTarget.draftAgent.manifest",
+              "value": ""
+            },
+            {
+              "type": "modal",
+              "key": "dialog.draftAssistant",
+              "value": true
+            }
+          ]
         }
       },
       {
@@ -499,19 +547,16 @@
       {
         "type": "feedback-modal",
         "meta": {
-          "stateKey": "dialog.skillDraft",
-          "pageRoute": "/bot/agent/skill_draft/update",
-          "title": "创建技能草稿",
-          "description": "创建自有 skill 草稿；保存后可校验、测试和发布。",
+          "stateKey": "dialog.draftAssistant",
+          "formSection": "draft-assistant-panel",
+          "title": "创建技能",
+          "description": "多轮生成技能草稿；AI 只写草稿 patch，不会发布正式技能。",
           "footer": {
-            "confirm": true,
-            "confirmText": "保存草稿"
-          },
-          "pageRouteQuery": {
-            "pack_id": "data.search.pack_id"
+            "close": false,
+            "confirm": false
           },
           "size": "3xl",
-          "bodyClassName": "px-6 py-2"
+          "bodyScroll": false
         }
       },
       {
@@ -613,6 +658,47 @@
         }
       }
     ],
+    "draft-assistant-panel": [
+      {
+        "id": "skill-pack-draft-agent",
+        "type": "show-agent",
+        "meta": {
+          "agentPath": "data.actionTarget.skillCreatorAgent.key",
+          "agentNamePath": "data.actionTarget.skillCreatorAgent.name",
+          "openPath": "state.dialog.draftAssistant",
+          "requestApi": "/bot/admin/agent/run",
+          "streamApi": "/bot/admin/agent/stream",
+          "stopApi": "/bot/admin/agent/stop",
+          "paramApi": "/bot/admin/energon/power_params",
+          "sessionEnabled": true,
+          "memoryEnabled": true,
+          "sessionContext": {
+            "skill_pack": "data.search.pack_id",
+            "skill_draft": "data.actionTarget.draftAgent.id"
+          },
+          "skillDraftPatchApi": "/bot/admin/skill_draft/apply_patch",
+          "skillDraftPatchContext": {
+            "id": "data.actionTarget.draftAgent.id",
+            "pack_id": "data.search.pack_id",
+            "cate_id": "data.draftContext.cate_id"
+          },
+          "reloadPageOnFinal": true,
+          "reloadPageOnFinalKinds": [
+            "skill_draft_patch"
+          ],
+          "reloadPageOnFinalDelayMs": 500,
+          "blockMs": 1000,
+          "placeholder": "描述要创建的 skill。需要脚本、配置项、MCP、依赖或引用代码时直接说明。",
+          "emptyText": "可以多轮描述需求。AI 会生成草稿 patch，写回同一个技能草稿；发布前仍需手动校验和测试。",
+          "inputContext": {
+            "draft_id": "data.actionTarget.draftAgent.id",
+            "pack_id": "data.search.pack_id",
+            "cate_id": "data.draftContext.cate_id",
+            "draft": "data.actionTarget.draftAgent"
+          }
+        }
+      }
+    ],
     "skill-install-panel": [
       {
         "id": "skill-install-agent",
@@ -654,6 +740,9 @@
       "pack_id": "",
       "status": ""
     },
+    "draftContext": {
+      "cate_id": 1
+    },
     "installContext": {
       "cate_id": 1,
       "auto_add_to_pack": true
@@ -690,6 +779,13 @@
         }
       },
       "deleteSkill": {},
+      "draftAgent": {
+        "id": 0
+      },
+      "skillCreatorAgent": {
+        "key": "skill-creator",
+        "name": "技能创建工程师"
+      },
       "installAgent": {
         "key": "skill-installer",
         "name": "技能安装规划器"
@@ -703,7 +799,7 @@
       "editSkill": false,
       "viewSkill": false,
       "configSkill": false,
-      "skillDraft": false,
+      "draftAssistant": false,
       "skillCate": false,
       "installSkill": false
     },

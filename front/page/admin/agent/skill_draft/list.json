@@ -1,6 +1,6 @@
 {
   "page": {
-    "name": "技能草稿",
+    "name": "技能草稿箱",
     "parent": "bot/agent/skill_pack/list",
     "type": 2,
     "sort": 13
@@ -10,15 +10,32 @@
     "children": {
       "page-main": {
         "type": "main",
-        "className": "p-0 space-y-4",
+        "className": "p-0 space-y-4 sm:space-y-5",
         "children": {
           "header-row": {
             "type": "container",
-            "className": "flex items-center justify-between gap-3"
+            "className": "flex flex-wrap items-start justify-between gap-4",
+            "children": {
+              "title-block": {
+                "type": "container",
+                "className": "min-w-0 flex-1 space-y-1"
+              },
+              "header-actions": {
+                "type": "row",
+                "className": "shrink-0 flex-wrap items-center justify-end gap-2"
+              }
+            }
+          },
+          "workflow-row": {
+            "type": "container"
+          },
+          "toolbar-row": {
+            "type": "row",
+            "className": "flex-wrap items-center gap-3"
           },
           "table-row": {
             "type": "container",
-            "className": "space-y-3"
+            "className": "overflow-hidden rounded-md border bg-background"
           },
           "feedback-shell": {
             "type": "container"
@@ -28,17 +45,34 @@
     }
   },
   "nodes": {
-    "header-row": [
+    "title-block": [
       {
         "type": "show-title",
         "value": "page.title"
       },
       {
+        "type": "show-base",
+        "value": "page.description",
+        "className": "text-sm text-muted-foreground"
+      }
+    ],
+    "header-actions": [
+      {
         "type": "show-button",
-        "name": "AI 创建",
+        "name": "返回技能方案",
         "className": "shrink-0",
         "meta": {
           "variant": "outline",
+          "size": "sm",
+          "to": "/bot/agent/skill_pack/list"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "创建技能",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "default",
           "size": "sm",
           "icon": "sparkles"
         },
@@ -106,12 +140,12 @@
       },
       {
         "type": "show-button",
-        "name": "创建技能",
+        "name": "手动创建",
         "className": "shrink-0",
         "meta": {
-          "variant": "default",
+          "variant": "outline",
           "size": "sm",
-          "icon": "plus"
+          "icon": "file-plus"
         },
         "action": {
           "click": {
@@ -122,12 +156,47 @@
         }
       }
     ],
-    "table-row": [
+    "workflow-row": [
       {
         "type": "show-base",
-        "value": "page.description",
-        "className": "text-sm text-muted-foreground"
+        "value": "page.workflow",
+        "className": "rounded-md border border-dashed bg-muted/30 px-3 py-2 text-sm text-muted-foreground"
+      }
+    ],
+    "toolbar-row": [
+      {
+        "type": "form-input",
+        "placeholder": "搜索技能名称、标识或描述...",
+        "value": "search.keyword",
+        "mode": "search"
       },
+      {
+        "type": "form-select",
+        "placeholder": "草稿状态",
+        "value": "search.status",
+        "mode": "search"
+      },
+      {
+        "type": "show-button",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "重置",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/agent/skill_draft/list"
+        }
+      }
+    ],
+    "table-row": [
       {
         "type": "show-table",
         "value": "table.list",
@@ -139,6 +208,7 @@
           "externalPagination": true,
           "savePath": "bot/agent/skill_draft/update",
           "rowKey": "id",
+          "emptyText": "还没有技能草稿。点击“创建技能”让 AI 生成草稿，或用“手动创建”直接填写。",
           "columns": [
             {
               "value": "name",
@@ -176,7 +246,7 @@
                     "icon": "sparkles",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "AI 修改草稿",
+                    "description": "AI 继续修改",
                     "action": {
                       "click": [
                         {
@@ -423,11 +493,11 @@
     "feedback-shell": [
       {
         "type": "feedback-modal",
-        "name": "AI 创建技能",
+        "name": "创建技能",
         "meta": {
           "stateKey": "dialog.draftAssistant",
           "formSection": "draft-assistant-panel",
-          "title": "AI 创建技能",
+          "title": "创建技能",
           "description": "多轮生成或修改技能草稿；AI 只写草稿 patch，不会发布正式技能。",
           "size": "3xl",
           "bodyScroll": false,
@@ -459,8 +529,8 @@
         "meta": {
           "stateKey": "dialog.create",
           "pageRoute": "/bot/agent/skill_draft/update",
-          "title": "创建技能草稿",
-          "description": "可手动填写，也可以使用 AI 填写生成 SKILL.md、运行配置和草稿文件。",
+          "title": "手动创建技能草稿",
+          "description": "高级手动编辑入口。推荐先用创建技能对话生成草稿，再在这里补充细节。",
           "footer": {
             "confirm": true,
             "confirmText": "保存草稿"
@@ -561,8 +631,9 @@
   },
   "data": {
     "page": {
-      "title": "技能草稿",
-      "description": "创建或维护自有 skill 草稿；草稿不会进入正式技能方案，发布前必须经过校验和测试。"
+      "title": "技能草稿箱",
+      "description": "集中管理 AI 创建、引用源码和手动创建的技能草稿。草稿不会进入正式技能方案，发布前必须经过校验和测试。",
+      "workflow": "流程：创建或导入草稿 -> 编辑确认 -> 校验 -> 测试 -> 发布到技能方案。"
     },
     "search": {
       "keyword": "",

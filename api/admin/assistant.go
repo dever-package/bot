@@ -118,6 +118,11 @@ func (Assistant) PostMessage(c *server.Context) error {
 		Output:     body["output"],
 		RequestID:  botapi.TextFromBody(body, "request_id", "requestId"),
 		Status:     status,
+		MemoryEnabled: botapi.BoolFromBody(
+			body,
+			"memory_enabled",
+			"memoryEnabled",
+		),
 	})
 	return botapi.WriteJSON(c, data, err)
 }
@@ -144,6 +149,7 @@ func (Assistant) PostMemories(c *server.Context) error {
 		ContextKey: botapi.TextFromBody(body, "context_key", "contextKey"),
 		AgentKey:   botapi.TextFromBody(body, "agent_key", "agentKey", "agent"),
 		Scope:      botapi.TextFromBody(body, "scope"),
+		SessionID:  botapi.Uint64FromBody(body, "session_id", "sessionId"),
 	})
 	return botapi.WriteJSON(c, data, err)
 }
@@ -159,8 +165,10 @@ func (Assistant) PostMemory(c *server.Context) error {
 		Content:    botapi.TextFromBody(body, "content", "text"),
 		Tags:       assistantStringList(body["tags"]),
 		Importance: int(frontstream.InputInt64(body["importance"], 0)),
+		Scope:      botapi.TextFromBody(body, "scope"),
 		ContextKey: botapi.TextFromBody(body, "context_key", "contextKey"),
 		AgentKey:   botapi.TextFromBody(body, "agent_key", "agentKey", "agent"),
+		SessionID:  botapi.Uint64FromBody(body, "session_id", "sessionId"),
 	})
 	return botapi.WriteJSON(c, data, err)
 }
@@ -178,8 +186,10 @@ func (Assistant) PostUpdateMemory(c *server.Context) error {
 		Tags:       assistantStringList(body["tags"]),
 		Importance: int(frontstream.InputInt64(body["importance"], 0)),
 		Status:     int16(frontstream.InputInt64(body["status"], 0)),
+		Scope:      botapi.TextFromBody(body, "scope"),
 		ContextKey: botapi.TextFromBody(body, "context_key", "contextKey"),
 		AgentKey:   botapi.TextFromBody(body, "agent_key", "agentKey", "agent"),
+		SessionID:  botapi.Uint64FromBody(body, "session_id", "sessionId"),
 	})
 	return botapi.WriteJSON(c, data, err)
 }
@@ -194,6 +204,20 @@ func (Assistant) PostForgetMemory(c *server.Context) error {
 		Hard: botapi.BoolFromBody(body, "hard"),
 	})
 	return botapi.WriteJSON(c, map[string]any{"ok": true}, err)
+}
+
+func (Assistant) PostMemoryChoice(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := assistantRunner.ChooseMemory(c.Context(), assistantservice.MemoryChoiceRequest{
+		CandidateID:     botapi.Uint64FromBody(body, "candidate_id", "candidateId", "id"),
+		MemoryID:        botapi.Uint64FromBody(body, "memory_id", "memoryId"),
+		SourceMessageID: botapi.Uint64FromBody(body, "source_message_id", "sourceMessageId"),
+		Choice:          botapi.TextFromBody(body, "choice", "action"),
+	})
+	return botapi.WriteJSON(c, data, err)
 }
 
 func assistantStringList(value any) []string {
