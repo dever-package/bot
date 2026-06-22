@@ -74,11 +74,12 @@ func (AgentHook) ProviderBeforeSaveSkillCate(_ *server.Context, params []any) an
 	if cateID == 0 {
 		panicAgentField("form.cate_id", "技能分类不能为空。")
 	}
-	return map[string]any{
+	result := map[string]any{
 		"_partial": true,
 		"id":       id,
 		"cate_id":  cateID,
 	}
+	return result
 }
 
 func (AgentHook) ProviderBeforeDeleteSkill(c *server.Context, params []any) any {
@@ -93,6 +94,8 @@ func (AgentHook) ProviderBeforeDeleteSkill(c *server.Context, params []any) any 
 	record["id"] = idValues
 	record[skillDeletePathsKey] = skillInstallPaths(skills)
 	agentmodel.NewSkillPackItemModel().Delete(c.Context(), map[string]any{"skill_id": idValues})
+	agentmodel.NewSkillConfigBindModel().Delete(c.Context(), map[string]any{"skill_id": idValues})
+	agentmodel.NewSkillConfigModel().Delete(c.Context(), map[string]any{"skill_id": idValues})
 	return record
 }
 

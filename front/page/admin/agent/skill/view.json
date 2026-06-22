@@ -125,17 +125,15 @@
               "type": "show-base"
             },
             {
-              "value": "target_key",
-              "type": "show-base"
-            },
-            {
               "value": "type",
+              "name": "变量类型",
               "type": "show-tag"
             },
             {
               "value": "value_hint",
-              "name": "配置状态",
-              "type": "show-tag"
+              "name": "变量值",
+              "type": "show-base",
+              "className": "w-[360px] max-w-[360px] overflow-hidden text-ellipsis whitespace-nowrap [&>div]:block [&>div]:truncate [&_span]:truncate"
             },
             {
               "value": "status",
@@ -163,7 +161,7 @@
       "installTitle": "安装信息",
       "scanTitle": "来源文件",
       "sourceMetaTitle": "_meta.json",
-      "configTitle": "运行配置项",
+      "configTitle": "环境变量",
       "manifestTitle": "运行配置"
     },
     "form": {

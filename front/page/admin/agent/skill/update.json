@@ -1,13 +1,13 @@
 {
   "page": {
-    "name": "技能分类编辑",
+    "name": "技能设置",
     "parent": "bot/agent/skill_pack/list",
     "type": 2,
     "sort": 10,
     "auth": [
       {
         "key": "bot/agent/skill/update",
-        "name": "技能分类编辑",
+        "name": "技能设置",
         "query": {
           "id": "required"
         }
@@ -33,6 +33,7 @@
     "dialog-shell": [
       {
         "type": "form-select",
+        "name": "技能分类",
         "value": "form.cate_id",
         "mode": "form",
         "option": {
@@ -76,6 +77,11 @@
     "submit": {
       "type": "save",
       "params": "form",
+      "data": {
+        "id": "$form.id",
+        "_partial": true,
+        "cate_id": "$form.cate_id"
+      },
       "before": {
         "service": "bot.agent.setting.AgentHook.BeforeSaveSkillCate"
       }

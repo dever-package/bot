@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
 type ScriptSpec struct {
@@ -54,19 +52,15 @@ func MissingRequiredConfig(ctx context.Context, skillID uint64, manifest string,
 	if !ok || len(raw) == 0 {
 		return nil
 	}
-	rows := agentmodel.NewSkillConfigModel().Select(ctx, map[string]any{
-		"skill_id": skillID,
-		"status":   1,
-	})
+	rows := SkillConfigRows(ctx, skillID, true)
 	configured := map[string]struct{}{}
 	for _, row := range rows {
 		if row == nil || strings.TrimSpace(row.ValueEncrypted) == "" {
 			continue
 		}
-		if !manifestTargetMatches(row.TargetKey, targetKey) {
-			continue
+		if key := ConfigEnvName(row.Key); key != "" {
+			configured[key] = struct{}{}
 		}
-		configured[configKey(row.TargetKey, row.Key)] = struct{}{}
 	}
 	missing := make([]string, 0)
 	for _, item := range raw {
@@ -82,13 +76,8 @@ func MissingRequiredConfig(ctx context.Context, skillID uint64, manifest string,
 		if !manifestTargetMatches(itemTarget, targetKey) {
 			continue
 		}
-		if _, exists := configured[configKey(itemTarget, key)]; exists {
+		if _, exists := configured[key]; exists {
 			continue
-		}
-		if itemTarget == "" {
-			if _, exists := configured[configKey("", key)]; exists {
-				continue
-			}
 		}
 		missing = append(missing, key)
 	}

@@ -283,6 +283,11 @@
           "stopApi": "/bot/admin/agent/stop",
           "paramApi": "/bot/admin/energon/power_params",
           "sessionEnabled": true,
+          "sessionContext": {
+            "prefix": "skill_draft",
+            "idPath": "data.actionTarget.draftAgent.id",
+            "fallback": "skill_draft:new"
+          },
           "memoryEnabled": false,
           "historyEnabled": false,
           "newSessionEnabled": false,
@@ -295,9 +300,7 @@
             "cate_id": "data.actionTarget.draftAgent.cate_id"
           },
           "reloadPageOnFinal": true,
-          "reloadPageOnFinalKinds": [
-            "skill_draft_patch"
-          ],
+          "reloadPageOnFinalKinds": ["skill_draft_patch"],
           "reloadPageOnFinalDelayMs": 500,
           "skillDraftPatchListPath": "/bot/agent/skill_draft/list",
           "blockMs": 1000,
@@ -324,6 +327,12 @@
           "testApi": "/bot/admin/skill_draft/test",
           "publishApi": "/bot/admin/skill_draft/publish",
           "publishOptionsApi": "/bot/admin/skill_draft/publish_options",
+          "skillDraftPatchApi": "/bot/admin/skill_draft/apply_patch",
+          "sessionApi": "/bot/admin/assistant/session",
+          "messageApi": "/bot/admin/assistant/message",
+          "draftAssistantOpenPath": "state.dialog.draftAssistant",
+          "draftAssistantDraftPath": "data.actionTarget.draftAgent",
+          "draftAssistantMetaPath": "data.actionTarget.draftAssistantMeta",
           "reloadPageOnPublish": true,
           "reloadPageOnPublishDelayMs": 500,
           "requestApi": "/bot/admin/agent/run",
@@ -398,15 +407,8 @@
       "status": ""
     },
     "table": {
-      "searchFields": [
-        "name",
-        "key",
-        "description"
-      ],
-      "filterFields": [
-        "pack_id",
-        "status"
-      ],
+      "searchFields": ["name", "key", "description"],
+      "filterFields": ["pack_id", "status"],
       "model": "bot.agent.NewSkillDraftModel"
     },
     "actionTarget": {

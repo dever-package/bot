@@ -12,49 +12,44 @@ import (
 	frontaction "github.com/dever-package/front/service/action"
 )
 
-const skillConfigSyncIDsKey = "_skill_config_sync_skill_ids"
-
 func (AgentHook) ProviderBeforeSaveSkillConfig(c *server.Context, params []any) any {
 	record := cloneAgentRecord(params)
 	if len(record) == 0 {
 		return record
 	}
 	partial := isPartialAgentRecord(record)
-	trimStringField(record, "target_key", partial)
 	trimStringField(record, "key", partial)
 	trimStringField(record, "name", partial)
-	trimStringField(record, "type", partial)
 
 	if shouldNormalizeField(record, "key", partial) {
-		record["key"] = skillservice.ConfigEnvName(util.ToStringTrimmed(record["key"]))
-	}
-	if shouldNormalizeField(record, "type", partial) && util.ToStringTrimmed(record["type"]) == "" {
-		record["type"] = "secret"
+		rawKey := util.ToStringTrimmed(record["key"])
+		envName := skillservice.ConfigEnvName(rawKey)
+		if rawKey != "" && envName == "" {
+			panicAgentField("form.key", "变量标识只能包含字母、数字和下划线，且不能使用 PATH、HOME 等系统保留变量名。")
+		}
+		record["key"] = envName
 	}
 	if shouldNormalizeField(record, "name", partial) && util.ToStringTrimmed(record["name"]) == "" {
 		record["name"] = util.ToStringTrimmed(record["key"])
 	}
-	if shouldNormalizeField(record, "required", partial) && util.ToIntDefault(record["required"], 0) <= 0 {
-		record["required"] = agentmodel.SkillConfigRequiredNo
-	}
-	if !partial && util.ToUint64(record["skill_id"]) == 0 {
-		panicAgentField("form.skill_id", "技能不能为空。")
-	}
 	if !partial && util.ToStringTrimmed(record["key"]) == "" {
-		panicAgentField("form.key", "配置键不能为空。")
+		panicAgentField("form.key", "变量标识不能为空。")
 	}
-	normalizeSkillConfigSecret(c.Context(), record)
-	defaultInt16Field(record, "status", defaultAgentStatus, partial)
+	if shouldNormalizeField(record, "skill_id", partial) {
+		skillID := util.ToUint64(record["skill_id"])
+		if skillID == 0 {
+			skillID = util.ToUint64(c.Input("skill_id"))
+		}
+		record["skill_id"] = skillID
+	}
+	record["target_key"] = ""
+	normalizeSkillConfigType(record, partial)
+	record["required"] = agentmodel.SkillConfigRequiredNo
+	normalizeSkillConfigValue(c.Context(), record)
+	if _, exists := record["status"]; exists {
+		defaultInt16Field(record, "status", defaultAgentStatus, partial)
+	}
 	return record
-}
-
-func (AgentHook) ProviderAfterSaveSkillConfig(c *server.Context, params []any) any {
-	payload := cloneAgentRecord(params)
-	skillID := skillConfigSkillIDFromPayload(c, payload)
-	if skillID > 0 {
-		_ = skillservice.SyncConfigManifest(c.Context(), skillID)
-	}
-	return nil
 }
 
 func (AgentHook) ProviderBeforeDeleteSkillConfig(c *server.Context, params []any) any {
@@ -63,51 +58,84 @@ func (AgentHook) ProviderBeforeDeleteSkillConfig(c *server.Context, params []any
 	if len(ids) == 0 {
 		return record
 	}
-	rows := agentmodel.NewSkillConfigModel().Select(c.Context(), map[string]any{
-		"id": uint64IDsToAny(ids),
+	agentmodel.NewSkillConfigBindModel().Delete(c.Context(), map[string]any{
+		"config_id": uint64IDsToAny(ids),
 	})
-	skillIDs := make([]uint64, 0, len(rows))
-	seen := map[uint64]struct{}{}
-	for _, row := range rows {
-		if row == nil || row.SkillID == 0 {
-			continue
-		}
-		if _, exists := seen[row.SkillID]; exists {
-			continue
-		}
-		seen[row.SkillID] = struct{}{}
-		skillIDs = append(skillIDs, row.SkillID)
-	}
 	record["id"] = uint64IDsToAny(ids)
-	record[skillConfigSyncIDsKey] = uint64IDsToAny(skillIDs)
 	return record
 }
 
-func (AgentHook) ProviderAfterDeleteSkillConfig(c *server.Context, params []any) any {
+func (AgentHook) ProviderAttachSkillConfigList(c *server.Context, params []any) any {
 	payload := cloneAgentRecord(params)
-	for _, skillID := range normalizeAgentUint64List(payload[skillConfigSyncIDsKey]) {
-		_ = skillservice.SyncConfigManifest(c.Context(), skillID)
+	rows := normalizeAgentChildRows(payload["rows"])
+	if len(rows) == 0 {
+		return rows
 	}
-	return nil
+
+	valueByID := loadSkillConfigStoredValues(c.Context(), rows)
+	for _, row := range rows {
+		id := util.ToUint64(row["id"])
+		configType := agentmodel.NormalizeSkillConfigType(util.ToStringTrimmed(row["type"]))
+		storedValue := util.ToStringTrimmed(row["value_encrypted"])
+		if storedValue == "" {
+			storedValue = valueByID[id]
+		}
+		row["type"] = configType
+		row["value_hint"] = truncateSkillConfigDisplayValue(skillConfigDisplayValue(configType, storedValue))
+		delete(row, "value_encrypted")
+	}
+	return rows
 }
 
-func normalizeSkillConfigSecret(ctx context.Context, record map[string]any) {
+func (AgentHook) ProviderAttachSkillConfigForm(c *server.Context, params []any) any {
+	payload := cloneAgentRecord(params)
+	record, ok := payload["record"].(map[string]any)
+	if !ok || len(record) == 0 {
+		return payload
+	}
+	configType := agentmodel.NormalizeSkillConfigType(util.ToStringTrimmed(record["type"]))
+	if configType == agentmodel.SkillConfigTypeText {
+		record["value_plain"] = util.ToStringTrimmed(record["value_encrypted"])
+		if record["value_plain"] == "" {
+			record["value_plain"] = loadPlainSkillConfigValue(c.Context(), util.ToUint64(record["id"]))
+		}
+	} else {
+		record["value_plain"] = ""
+	}
+	delete(record, "value_encrypted")
+	return record
+}
+
+func normalizeSkillConfigType(record map[string]any, partial bool) {
+	if !shouldNormalizeField(record, "type", partial) {
+		return
+	}
+	record["type"] = agentmodel.NormalizeSkillConfigType(util.ToStringTrimmed(record["type"]))
+}
+
+func normalizeSkillConfigValue(ctx context.Context, record map[string]any) {
 	plain := util.ToStringTrimmed(record["value_plain"])
 	delete(record, "value_plain")
 	delete(record, "value")
 	if plain == "" {
-		preserveExistingSkillConfigSecret(ctx, record)
+		preserveExistingSkillConfigValue(ctx, record)
+		return
+	}
+	configType := agentmodel.NormalizeSkillConfigType(util.ToStringTrimmed(record["type"]))
+	if configType == agentmodel.SkillConfigTypeText {
+		record["value_encrypted"] = plain
+		record["value_hint"] = plain
 		return
 	}
 	encrypted, err := skillservice.EncryptSecret(plain)
 	if err != nil {
-		panic(frontaction.NewFieldError("form.value_plain", "配置值加密失败。"))
+		panic(frontaction.NewFieldError("form.value_plain", "环境变量值加密失败。"))
 	}
 	record["value_encrypted"] = encrypted
 	record["value_hint"] = skillservice.SecretHint(plain)
 }
 
-func preserveExistingSkillConfigSecret(ctx context.Context, record map[string]any) {
+func preserveExistingSkillConfigValue(ctx context.Context, record map[string]any) {
 	id := util.ToUint64(record["id"])
 	if id == 0 {
 		delete(record, "value_encrypted")
@@ -120,47 +148,93 @@ func preserveExistingSkillConfigSecret(ctx context.Context, record map[string]an
 		delete(record, "value_hint")
 		return
 	}
+	nextType := agentmodel.NormalizeSkillConfigType(strings.TrimSpace(existing.Type))
+	if _, exists := record["type"]; exists {
+		nextType = agentmodel.NormalizeSkillConfigType(util.ToStringTrimmed(record["type"]))
+	}
+	currentType := agentmodel.NormalizeSkillConfigType(strings.TrimSpace(existing.Type))
+	if nextType != currentType {
+		panic(frontaction.NewFieldError("form.value_plain", "切换变量类型时必须重新填写变量值。"))
+	}
 	record["value_encrypted"] = existing.ValueEncrypted
 	record["value_hint"] = existing.ValueHint
 }
 
-func skillConfigSkillIDFromPayload(c *server.Context, payload map[string]any) uint64 {
-	if id := util.ToUint64(payload["skill_id"]); id > 0 {
-		return id
-	}
-	for _, key := range []string{"payload", "data"} {
-		if record, ok := payload[key].(map[string]any); ok {
-			if id := util.ToUint64(record["skill_id"]); id > 0 {
-				return id
-			}
+func loadSkillConfigStoredValues(ctx context.Context, rows []map[string]any) map[uint64]string {
+	result := map[uint64]string{}
+	ids := make([]uint64, 0, len(rows))
+	seen := map[uint64]struct{}{}
+	for _, row := range rows {
+		id := util.ToUint64(row["id"])
+		if id == 0 {
+			continue
 		}
-	}
-	configID := util.ToUint64(payload["id"])
-	if configID == 0 {
-		for _, key := range []string{"result", "data"} {
-			if record, ok := payload[key].(map[string]any); ok {
-				if id := util.ToUint64(record["id"]); id > 0 {
-					configID = id
-					break
-				}
-			}
+		if storedValue := util.ToStringTrimmed(row["value_encrypted"]); storedValue != "" {
+			result[id] = storedValue
+			continue
 		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
 	}
-	if configID == 0 {
-		return 0
+	if len(ids) == 0 {
+		return result
 	}
-	row := agentmodel.NewSkillConfigModel().Find(c.Context(), map[string]any{"id": configID})
+
+	configs := agentmodel.NewSkillConfigModel().Select(ctx, map[string]any{
+		"id": uint64IDsToAny(ids),
+	})
+	for _, config := range configs {
+		if config == nil {
+			continue
+		}
+		result[config.ID] = strings.TrimSpace(config.ValueEncrypted)
+	}
+	return result
+}
+
+func skillConfigDisplayValue(configType string, storedValue string) string {
+	storedValue = strings.TrimSpace(storedValue)
+	if storedValue == "" {
+		return "未填写"
+	}
+	if agentmodel.NormalizeSkillConfigType(configType) == agentmodel.SkillConfigTypeSecret {
+		return skillservice.SecretHint(storedValue)
+	}
+	return storedValue
+}
+
+func truncateSkillConfigDisplayValue(value string) string {
+	value = strings.TrimSpace(value)
+	const maxRunes = 48
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return string(runes[:maxRunes]) + "..."
+}
+
+func loadPlainSkillConfigValue(ctx context.Context, id uint64) string {
+	if id == 0 {
+		return ""
+	}
+	row := agentmodel.NewSkillConfigModel().Find(ctx, map[string]any{"id": id})
 	if row == nil {
-		return 0
+		return ""
 	}
-	return row.SkillID
+	if agentmodel.NormalizeSkillConfigType(strings.TrimSpace(row.Type)) != agentmodel.SkillConfigTypeText {
+		return ""
+	}
+	return strings.TrimSpace(row.ValueEncrypted)
 }
 
 func skillConfigRows(ctx context.Context, skillID uint64) []map[string]any {
 	if skillID == 0 {
 		return []map[string]any{}
 	}
-	rows := agentmodel.NewSkillConfigModel().Select(ctx, map[string]any{"skill_id": skillID})
+	rows := skillservice.SkillConfigRows(ctx, skillID, false)
 	result := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
@@ -168,12 +242,10 @@ func skillConfigRows(ctx context.Context, skillID uint64) []map[string]any {
 		}
 		result = append(result, map[string]any{
 			"id":         row.ID,
-			"target_key": strings.TrimSpace(row.TargetKey),
 			"key":        strings.TrimSpace(row.Key),
 			"name":       strings.TrimSpace(row.Name),
-			"type":       strings.TrimSpace(row.Type),
-			"required":   row.Required,
-			"value_hint": strings.TrimSpace(row.ValueHint),
+			"type":       agentmodel.NormalizeSkillConfigType(strings.TrimSpace(row.Type)),
+			"value_hint": skillConfigDisplayValue(row.Type, row.ValueEncrypted),
 			"status":     row.Status,
 			"created_at": row.CreatedAt,
 		})

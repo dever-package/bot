@@ -265,7 +265,11 @@
             },
             {
               "value": "status",
-              "type": "show-tag"
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
             },
             {
               "value": "sort",
@@ -325,7 +329,7 @@
                     "icon": "settings",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "配置技能密钥",
+                    "description": "环境变量",
                     "action": {
                       "click": [
                         {
@@ -336,33 +340,6 @@
                         {
                           "type": "modal",
                           "key": "dialog.configSkill",
-                          "value": true
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "icon": "sparkles",
-                    "variant": "outline",
-                    "size": "sm",
-                    "description": "升级自建技能",
-                    "hiddenWhen": [
-                      {
-                        "path": "skill.source_type",
-                        "operator": "notEquals",
-                        "value": "custom"
-                      }
-                    ],
-                    "action": {
-                      "click": [
-                        {
-                          "type": "data",
-                          "key": "actionTarget.draftAgent",
-                          "value": "$row.pending_draft"
-                        },
-                        {
-                          "type": "modal",
-                          "key": "dialog.draftAssistant",
                           "value": true
                         }
                       ]
@@ -421,7 +398,12 @@
                         {
                           "type": "data",
                           "key": "actionTarget.deleteSkill",
-                          "value": "$row.skill"
+                          "value": {}
+                        },
+                        {
+                          "type": "data",
+                          "key": "actionTarget.deleteSkill.id",
+                          "value": "$row.skill_id"
                         },
                         {
                           "type": "modal",
@@ -509,8 +491,8 @@
         "meta": {
           "stateKey": "dialog.configSkill",
           "pageRoute": "/bot/agent/skill_config/list",
-          "title": "技能配置",
-          "description": "配置当前技能运行时需要的 API Key、Cookie、Token。",
+          "title": "环境变量",
+          "description": "维护当前技能脚本运行时可注入的环境变量。",
           "pageRouteQuery": {
             "skill_id": "data.actionTarget.configSkillId"
           },
@@ -558,30 +540,8 @@
         "action": {
           "confirm": {
             "type": "delete",
-            "params": "actionTarget.deleteSkill",
-            "before": {
-              "service": "bot.agent.setting.AgentHook.BeforeDeleteSkill"
-            },
-            "after": {
-              "service": "bot.agent.setting.AgentHook.AfterDeleteSkill"
-            },
-            "model": "bot.agent.NewSkillModel"
-          }
-        }
-      },
-      {
-        "type": "feedback-modal",
-        "name": "升级技能",
-        "meta": {
-          "stateKey": "dialog.draftAssistant",
-          "formSection": "draft-assistant-panel",
-          "title": "升级技能",
-          "description": "通过 AI 对话升级自建技能；保存后到自创技能页继续测试和发布。",
-          "size": "3xl",
-          "bodyScroll": false,
-          "footer": {
-            "close": false,
-            "confirm": false
+            "key": "deleteSkill",
+            "params": "actionTarget.deleteSkill"
           }
         }
       },
@@ -612,11 +572,9 @@
           "requestApi": "/bot/admin/skill_install/run",
           "streamApi": "/bot/admin/skill_install/stream",
           "stopApi": "/bot/admin/skill_install/stop",
-          "sessionEnabled": true,
+          "sessionEnabled": false,
+          "historyEnabled": false,
           "newSessionEnabled": false,
-          "sessionContext": {
-            "skill_pack": "data.search.pack_id"
-          },
           "blockMs": 1000,
           "reloadPageOnFinal": true,
           "reloadPageOnFinalKinds": [
@@ -629,53 +587,6 @@
             "pack_id": "data.search.pack_id",
             "cate_id": "data.installContext.cate_id",
             "auto_add_to_pack": "data.installContext.auto_add_to_pack"
-          }
-        }
-      }
-    ],
-    "draft-assistant-panel": [
-      {
-        "id": "skill-draft-agent",
-        "type": "show-skill-creator",
-        "meta": {
-          "draftPath": "data.actionTarget.draftAgent",
-          "agentPath": "data.actionTarget.skillCreatorAgent.key",
-          "agentNamePath": "data.actionTarget.skillCreatorAgent.name",
-          "openPath": "state.dialog.draftAssistant",
-          "requestApi": "/bot/admin/agent/run",
-          "streamApi": "/bot/admin/agent/stream",
-          "stopApi": "/bot/admin/agent/stop",
-          "paramApi": "/bot/admin/energon/power_params",
-          "sessionEnabled": true,
-          "memoryEnabled": false,
-          "historyEnabled": false,
-          "newSessionEnabled": false,
-          "skillDraftPatchApi": "/bot/admin/skill_draft/apply_patch",
-          "skillDraftPatchAutoApply": false,
-          "skillDraftPatchCloseOnSave": true,
-          "skillDraftPatchContext": {
-            "id": "data.actionTarget.draftAgent.id",
-            "pack_id": "data.search.pack_id",
-            "cate_id": "data.actionTarget.draftAgent.cate_id"
-          },
-          "reloadPageOnFinal": true,
-          "reloadPageOnFinalKinds": [
-            "skill_draft_patch"
-          ],
-          "reloadPageOnFinalDelayMs": 500,
-          "skillDraftPatchReloadDataKeys": [
-            "table"
-          ],
-          "skillDraftPatchListPath": "/bot/agent/skill_draft/list",
-          "blockMs": 1000,
-          "placeholder": "描述要创建或升级的 skill。需要脚本、配置项、MCP、依赖或引用代码时直接说明。",
-          "emptyText": "通过多轮对话生成技能内容。确认结果后点击“保存”，未发布版本会出现在自创技能页。",
-          "inputContext": {
-            "draft_id": "data.actionTarget.draftAgent.id",
-            "pack_id": "data.search.pack_id",
-            "cate_id": "data.actionTarget.draftAgent.cate_id",
-            "source_skill_id": "data.actionTarget.draftAgent.source_skill_id",
-            "draft": "data.actionTarget.draftAgent"
           }
         }
       }
@@ -712,22 +623,6 @@
       "viewSkillId": "",
       "editSkillId": "",
       "configSkillId": "",
-      "draftAgent": {
-        "id": 0,
-        "pack_id": 0,
-        "cate_id": 1,
-        "source_skill_id": 0,
-        "key": "",
-        "name": "",
-        "description": "",
-        "skill_md": "",
-        "files_json": "{}",
-        "manifest": ""
-      },
-      "skillCreatorAgent": {
-        "key": "skill-creator",
-        "name": "技能创建工程师"
-      },
       "refreshRequest": {
         "input": {
           "context": {
@@ -753,13 +648,24 @@
       "viewSkill": false,
       "configSkill": false,
       "skillCate": false,
-      "installSkill": false,
-      "draftAssistant": false
+      "installSkill": false
     },
     "confirm": {
       "refreshSkill": false,
       "deleteSkill": false
     }
   },
-  "action": {}
+  "action": {
+    "deleteSkill": {
+      "type": "delete",
+      "path": "bot/agent/skill/update",
+      "model": "bot.agent.NewSkillModel",
+      "before": {
+        "service": "bot.agent.setting.AgentHook.BeforeDeleteSkill"
+      },
+      "after": {
+        "service": "bot.agent.setting.AgentHook.AfterDeleteSkill"
+      }
+    }
+  }
 }

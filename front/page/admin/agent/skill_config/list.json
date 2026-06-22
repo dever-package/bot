@@ -1,6 +1,6 @@
 {
   "page": {
-    "name": "技能配置",
+    "name": "环境变量",
     "parent": "bot/agent/skill_pack/list",
     "type": 2,
     "sort": 12
@@ -14,7 +14,7 @@
         "children": {
           "header-row": {
             "type": "container",
-            "className": "flex items-center justify-between gap-3"
+            "className": "flex justify-end"
           },
           "table-row": {
             "type": "container",
@@ -30,12 +30,8 @@
   "nodes": {
     "header-row": [
       {
-        "type": "show-title",
-        "value": "page.title"
-      },
-      {
         "type": "show-button",
-        "name": "新增配置",
+        "name": "新增环境变量",
         "className": "shrink-0",
         "meta": {
           "variant": "default",
@@ -53,11 +49,6 @@
     ],
     "table-row": [
       {
-        "type": "show-base",
-        "value": "page.description",
-        "className": "text-sm text-muted-foreground"
-      },
-      {
         "type": "show-table",
         "value": "table.list",
         "meta": {
@@ -70,48 +61,25 @@
           "rowKey": "id",
           "columns": [
             {
-              "value": "skill.name",
-              "name": "技能",
-              "type": "show-base"
-            },
-            {
-              "value": "target_key",
-              "name": "目标",
-              "type": "show-base"
-            },
-            {
               "value": "name",
+              "name": "变量名称",
               "type": "show-base"
             },
             {
               "value": "key",
+              "name": "变量标识",
               "type": "show-base"
             },
             {
               "value": "type",
-              "type": "show-tag"
-            },
-            {
-              "value": "required",
-              "name": "必填",
+              "name": "变量类型",
               "type": "show-tag"
             },
             {
               "value": "value_hint",
-              "name": "配置状态",
-              "type": "show-tag"
-            },
-            {
-              "value": "status",
-              "type": "form-switch",
-              "meta": {
-                "trueValue": 1,
-                "falseValue": 2
-              }
-            },
-            {
-              "value": "created_at",
-              "type": "show-date"
+              "name": "变量值",
+              "type": "show-base",
+              "className": "w-[360px] max-w-[360px] overflow-hidden text-ellipsis whitespace-nowrap [&>div]:block [&>div]:truncate [&_span]:truncate"
             },
             {
               "name": "操作",
@@ -123,7 +91,7 @@
                     "icon": "square-pen",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "编辑配置",
+                    "description": "编辑环境变量",
                     "action": {
                       "click": [
                         {
@@ -143,7 +111,7 @@
                     "icon": "trash-2",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "删除配置",
+                    "description": "删除环境变量",
                     "className": "text-destructive hover:text-destructive",
                     "action": {
                       "click": [
@@ -176,14 +144,15 @@
         "meta": {
           "stateKey": "dialog.create",
           "pageRoute": "/bot/agent/skill_config/update",
-          "title": "新增技能配置",
-          "description": "配置项会同步到 skill manifest；真实值只加密保存。",
+          "title": "新增环境变量",
+          "description": "技能选择该变量后，运行脚本时按变量标识注入环境变量；明文类型会展示真实值，加密类型只展示已填写。",
+          "assistant": false,
+          "pageRouteQuery": {
+            "skill_id": "data.search.skill_id"
+          },
           "footer": {
             "confirm": true,
             "confirmText": "保存"
-          },
-          "pageRouteQuery": {
-            "skill_id": "data.search.skill_id"
           },
           "size": "lg",
           "bodyClassName": "px-6 py-2"
@@ -194,14 +163,16 @@
         "meta": {
           "stateKey": "dialog.edit",
           "pageRoute": "/bot/agent/skill_config/update",
-          "title": "编辑技能配置",
-          "description": "配置值留空时保留旧值，不会清空已有配置。",
+          "title": "编辑环境变量",
+          "description": "变量值留空时保留旧值，不会清空已有变量。",
+          "assistant": false,
           "footer": {
             "confirm": true,
             "confirmText": "保存"
           },
           "pageRouteQuery": {
-            "id": "data.actionTarget.id"
+            "id": "data.actionTarget.id",
+            "skill_id": "data.search.skill_id"
           },
           "size": "lg",
           "bodyClassName": "px-6 py-2"
@@ -209,8 +180,8 @@
       },
       {
         "type": "feedback-confirm",
-        "name": "删除配置",
-        "info": "确认删除当前配置吗？删除后运行时将不再注入该环境变量。",
+        "name": "删除环境变量",
+        "info": "确认删除当前环境变量吗？删除后已绑定该变量的技能运行时将不再注入这个环境变量。",
         "meta": {
           "stateKey": "confirm.delete"
         },
@@ -221,9 +192,6 @@
             "params": "actionTarget.deleteConfig",
             "before": {
               "service": "bot.agent.setting.AgentHook.BeforeDeleteSkillConfig"
-            },
-            "after": {
-              "service": "bot.agent.setting.AgentHook.AfterDeleteSkillConfig"
             }
           }
         }
@@ -232,13 +200,11 @@
   },
   "data": {
     "page": {
-      "title": "技能配置",
-      "description": "维护 API Key、Cookie、Token 等运行配置；真实值不会写入 prompt、manifest 或日志。"
+      "title": "环境变量",
+      "description": "维护当前技能脚本运行时可注入的环境变量；变量不会写入 prompt 或 manifest，加密类型会隐藏展示。"
     },
     "search": {
-      "skill_id": 0,
-      "type": "",
-      "status": ""
+      "skill_id": ""
     },
     "table": {
       "searchFields": [
@@ -246,11 +212,13 @@
         "key"
       ],
       "filterFields": [
-        "skill_id",
-        "type",
-        "status"
+        "skill_id"
       ],
-      "model": "bot.agent.NewSkillConfigModel"
+      "defaultFilters": {
+        "skill_id": 0
+      },
+      "model": "bot.agent.NewSkillConfigModel",
+      "service": "bot.agent.setting.AgentHook.AttachSkillConfigList"
     },
     "actionTarget": {
       "id": "",

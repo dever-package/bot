@@ -389,6 +389,12 @@ func (Service) ApplyPatch(ctx context.Context, req PatchRequest) Result {
 	if err != nil {
 		return failResult(err.Error(), nil)
 	}
+	if draftPatchInvalidatesValidation(values) {
+		values["validation_result"] = agentskill.JSONText(map[string]any{
+			"assistant_patch": true,
+			"content_changed": true,
+		})
+	}
 	if req.ID > 0 {
 		row := agentmodel.NewSkillDraftModel().Find(ctx, map[string]any{"id": req.ID})
 		if row == nil {
@@ -402,11 +408,15 @@ func (Service) ApplyPatch(ctx context.Context, req PatchRequest) Result {
 			return okResult("没有需要更新的草稿内容", data)
 		}
 		agentmodel.NewSkillDraftModel().Update(ctx, map[string]any{"id": req.ID}, values)
+		validation := validateAndSaveDraft(ctx, req.ID)
 		data := applyPatchResultData(ctx, req.ID)
+		if validation != nil {
+			data["validation"] = validation
+		}
 		if warning := rebindDraftAssistantSession(ctx, req, req.ID); warning != "" {
 			data["assistant_session_warning"] = warning
 		}
-		return okResult("技能草稿已更新", data)
+		return okResult(draftPatchMessage("技能草稿已更新", validation), data)
 	}
 
 	if _, exists := values["key"]; !exists {
@@ -431,11 +441,47 @@ func (Service) ApplyPatch(ctx context.Context, req PatchRequest) Result {
 	if draftID == 0 {
 		return failResult("创建技能草稿失败", nil)
 	}
+	validation := validateAndSaveDraft(ctx, draftID)
 	data := applyPatchResultData(ctx, draftID)
+	if validation != nil {
+		data["validation"] = validation
+	}
 	if warning := rebindDraftAssistantSession(ctx, req, draftID); warning != "" {
 		data["assistant_session_warning"] = warning
 	}
-	return okResult("技能草稿已创建", data)
+	return okResult(draftPatchMessage("技能草稿已创建", validation), data)
+}
+
+func draftPatchInvalidatesValidation(values map[string]any) bool {
+	for _, key := range []string{"key", "name", "description", "skill_md", "files_json", "manifest"} {
+		if _, exists := values[key]; exists {
+			return true
+		}
+	}
+	return false
+}
+
+func validateAndSaveDraft(ctx context.Context, draftID uint64) map[string]any {
+	if draftID == 0 {
+		return nil
+	}
+	_, issues, err := loadAndValidate(ctx, draftID)
+	if err != nil {
+		return map[string]any{
+			"valid":  false,
+			"issues": []string{err.Error()},
+		}
+	}
+	payload := validationPayload(issues)
+	saveValidationResult(ctx, draftID, payload)
+	return payload
+}
+
+func draftPatchMessage(defaultMessage string, validation map[string]any) string {
+	if validation == nil || agentskill.Truthy(validation["valid"]) {
+		return defaultMessage
+	}
+	return defaultMessage + "，但内容检查未通过"
 }
 
 func applyPatchResultData(ctx context.Context, draftID uint64) map[string]any {
@@ -487,6 +533,8 @@ func loadAndValidate(ctx context.Context, id uint64) (draftSnapshot, []string, e
 	files, fileIssues := parseDraftFiles(row.FilesJSON)
 	issues = append(issues, manifestIssues...)
 	issues = append(issues, fileIssues...)
+	issues = append(issues, validateDraftManifestScripts(manifest, files)...)
+	issues = append(issues, validateDraftScriptSyntax(ctx, files)...)
 	snapshot.Manifest = manifest
 	snapshot.Files = files
 	return snapshot, issues, nil
@@ -533,6 +581,12 @@ func parseDraftManifest(raw string) (map[string]any, []string) {
 			if !ok {
 				issues = append(issues, fmt.Sprintf("manifest.config[%d] 必须是对象", index))
 				continue
+			}
+			configKey := strings.TrimSpace(fmt.Sprint(itemMap["key"]))
+			if configKey == "" {
+				issues = append(issues, fmt.Sprintf("manifest.config[%d].key 不能为空", index))
+			} else if !agentskill.IsValidConfigEnvName(configKey) {
+				issues = append(issues, fmt.Sprintf("manifest.config[%d].key 只能包含字母、数字和下划线，且不能使用系统保留变量名", index))
 			}
 			for _, key := range []string{"value", "value_encrypted", "secret_value"} {
 				if _, exists := itemMap[key]; exists {
@@ -1370,31 +1424,26 @@ func ensureConfigRows(ctx context.Context, skillID uint64, manifest map[string]a
 		if key == "" {
 			continue
 		}
-		targetKey := manifestString(mapped, "target_key", "")
-		required := agentmodel.SkillConfigRequiredNo
-		if agentskill.Truthy(mapped["required"]) {
-			required = agentmodel.SkillConfigRequiredYes
-		}
-		if existing := model.Find(ctx, map[string]any{"skill_id": skillID, "target_key": targetKey, "key": key}); existing != nil {
-			model.Update(ctx, map[string]any{"id": existing.ID}, map[string]any{
-				"name":     manifestString(mapped, "name", key),
-				"type":     manifestString(mapped, "type", "secret"),
-				"required": required,
-			})
+		existing := model.Find(ctx, map[string]any{"skill_id": skillID, "target_key": "", "key": key})
+		if existing != nil {
+			if strings.TrimSpace(existing.Name) == "" {
+				model.Update(ctx, map[string]any{"id": existing.ID}, map[string]any{
+					"name": manifestString(mapped, "name", key),
+				})
+			}
 			continue
 		}
 		model.Insert(ctx, map[string]any{
 			"skill_id":   skillID,
-			"target_key": targetKey,
+			"target_key": "",
 			"key":        key,
 			"name":       manifestString(mapped, "name", key),
-			"type":       manifestString(mapped, "type", "secret"),
-			"required":   required,
+			"type":       agentmodel.SkillConfigTypeText,
+			"required":   agentmodel.SkillConfigRequiredNo,
 			"status":     defaultStatus,
 			"created_at": time.Now(),
 		})
 	}
-	_ = agentskill.SyncConfigManifest(ctx, skillID)
 }
 
 func manifestString(values map[string]any, key string, fallback string) string {

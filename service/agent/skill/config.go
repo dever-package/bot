@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -100,11 +99,7 @@ func SecretHint(value string) string {
 	if value == "" {
 		return ""
 	}
-	runes := []rune(value)
-	if len(runes) <= 4 {
-		return "已配置 ****"
-	}
-	return "已配置 ****" + string(runes[len(runes)-4:])
+	return "已填写"
 }
 
 func RedactSecrets(text string, secrets []string) string {
@@ -124,31 +119,97 @@ func RedactSecrets(text string, secrets []string) string {
 
 func ConfigEnvName(key string) string {
 	key = strings.TrimSpace(key)
+	if !IsValidConfigEnvName(key) {
+		return ""
+	}
+	return key
+}
+
+func IsValidConfigEnvName(key string) bool {
+	key = strings.TrimSpace(key)
 	if key == "" {
-		return ""
+		return false
 	}
-	var builder strings.Builder
 	for _, char := range key {
-		switch {
-		case char >= 'a' && char <= 'z':
-			builder.WriteRune(char - ('a' - 'A'))
-		case char >= 'A' && char <= 'Z':
-			builder.WriteRune(char)
-		case char >= '0' && char <= '9':
-			builder.WriteRune(char)
-		case char == '_' || char == '-' || char == '.':
-			builder.WriteRune('_')
+		if (char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '_' {
+			continue
 		}
+		return false
 	}
-	result := strings.Trim(builder.String(), "_")
-	if result == "" {
-		return ""
+	if _, reserved := reservedConfigEnvNames[strings.ToUpper(key)]; reserved {
+		return false
 	}
-	if result[0] >= '0' && result[0] <= '9' {
-		result = "SKILL_" + result
+	return true
+}
+
+func SkillConfigRows(ctx context.Context, skillID uint64, activeOnly bool) []*agentmodel.SkillConfig {
+	result := []*agentmodel.SkillConfig{}
+	if skillID == 0 {
+		return result
 	}
-	if _, reserved := reservedConfigEnvNames[result]; reserved {
-		return ""
+
+	seen := map[uint64]struct{}{}
+	directFilters := map[string]any{
+		"skill_id": skillID,
+	}
+	if activeOnly {
+		directFilters["status"] = 1
+	}
+	directRows := agentmodel.NewSkillConfigModel().Select(ctx, directFilters)
+	for _, row := range directRows {
+		if row == nil || row.ID == 0 {
+			continue
+		}
+		seen[row.ID] = struct{}{}
+		result = append(result, row)
+	}
+
+	bindRows := agentmodel.NewSkillConfigBindModel().Select(ctx, map[string]any{
+		"skill_id": skillID,
+	})
+	configIDs := make([]uint64, 0, len(bindRows))
+	for _, bind := range bindRows {
+		if bind == nil || bind.ConfigID == 0 {
+			continue
+		}
+		configIDs = append(configIDs, bind.ConfigID)
+	}
+	configByID := skillConfigRowsByID(ctx, configIDs, activeOnly)
+	for _, configID := range configIDs {
+		row := configByID[configID]
+		if row == nil {
+			continue
+		}
+		if _, exists := seen[row.ID]; exists {
+			continue
+		}
+		seen[row.ID] = struct{}{}
+		result = append(result, row)
+	}
+	return result
+}
+
+func skillConfigRowsByID(ctx context.Context, configIDs []uint64, activeOnly bool) map[uint64]*agentmodel.SkillConfig {
+	result := map[uint64]*agentmodel.SkillConfig{}
+	if len(configIDs) == 0 {
+		return result
+	}
+	filters := map[string]any{
+		"id":       configIDs,
+		"skill_id": uint64(0),
+	}
+	if activeOnly {
+		filters["status"] = 1
+	}
+	rows := agentmodel.NewSkillConfigModel().Select(ctx, filters)
+	for _, row := range rows {
+		if row == nil || row.ID == 0 {
+			continue
+		}
+		result[row.ID] = row
 	}
 	return result
 }
@@ -157,15 +218,11 @@ func LoadConfigEnv(ctx context.Context, skillID uint64, targetKey string) (Confi
 	if skillID == 0 {
 		return ConfigEnv{}, nil
 	}
-	targetKey = strings.TrimSpace(targetKey)
-	rows := agentmodel.NewSkillConfigModel().Select(ctx, map[string]any{
-		"skill_id": skillID,
-		"status":   1,
-	})
+	rows := SkillConfigRows(ctx, skillID, true)
 	result := ConfigEnv{}
 	seen := map[string]struct{}{}
 	for _, row := range rows {
-		if row == nil || !skillConfigTargetMatches(row.TargetKey, targetKey) {
+		if row == nil {
 			continue
 		}
 		envName := ConfigEnvName(row.Key)
@@ -175,112 +232,35 @@ func LoadConfigEnv(ctx context.Context, skillID uint64, targetKey string) (Confi
 		if _, exists := seen[envName]; exists {
 			continue
 		}
-		secret, err := DecryptSecret(row.ValueEncrypted)
+		value, secret, err := resolveConfigEnvValue(row)
 		if err != nil {
-			return ConfigEnv{}, fmt.Errorf("技能配置 %s 解密失败", row.Key)
+			return ConfigEnv{}, err
 		}
-		if strings.TrimSpace(secret) == "" {
+		if value == "" {
 			continue
 		}
 		seen[envName] = struct{}{}
-		result.Env = append(result.Env, envName+"="+secret)
-		result.Secrets = append(result.Secrets, secret)
+		result.Env = append(result.Env, envName+"="+value)
+		if secret {
+			result.Secrets = append(result.Secrets, value)
+		}
 	}
 	return result, nil
 }
 
-func SyncConfigManifest(ctx context.Context, skillID uint64) error {
-	if skillID == 0 {
-		return nil
+func resolveConfigEnvValue(row *agentmodel.SkillConfig) (string, bool, error) {
+	storedValue := strings.TrimSpace(row.ValueEncrypted)
+	if storedValue == "" {
+		return "", false, nil
 	}
-	skillModel := agentmodel.NewSkillModel()
-	row := skillModel.Find(ctx, map[string]any{"id": skillID})
-	if row == nil {
-		return nil
+	if agentmodel.NormalizeSkillConfigType(strings.TrimSpace(row.Type)) != agentmodel.SkillConfigTypeSecret {
+		return storedValue, false, nil
 	}
-	manifest := parseManifestMap(row.Manifest)
-	configRows := agentmodel.NewSkillConfigModel().Select(ctx, map[string]any{
-		"skill_id": skillID,
-		"status":   1,
-	})
-	existingConfigs := manifestConfigByKey(manifest["config"])
-	configs := make([]any, 0, len(configRows))
-	for _, configRow := range configRows {
-		if configRow == nil {
-			continue
-		}
-		envName := ConfigEnvName(configRow.Key)
-		if envName == "" {
-			continue
-		}
-		config := map[string]any{
-			"key":        strings.TrimSpace(configRow.Key),
-			"name":       strings.TrimSpace(configRow.Name),
-			"type":       strings.TrimSpace(configRow.Type),
-			"target_key": strings.TrimSpace(configRow.TargetKey),
-			"env":        envName,
-		}
-		if skillConfigRequired(configRow.Required, existingConfigs[configKey(configRow.TargetKey, configRow.Key)]) {
-			config["required"] = true
-		}
-		configs = append(configs, config)
+	secret, err := DecryptSecret(storedValue)
+	if err != nil {
+		return "", false, fmt.Errorf("环境变量 %s 解密失败", row.Key)
 	}
-	manifest["config"] = configs
-	skillModel.Update(ctx, map[string]any{"id": skillID}, map[string]any{
-		"manifest": JSONText(manifest),
-	})
-	return nil
-}
-
-func manifestConfigByKey(raw any) map[string]map[string]any {
-	items, ok := raw.([]any)
-	if !ok {
-		return map[string]map[string]any{}
-	}
-	result := make(map[string]map[string]any, len(items))
-	for _, item := range items {
-		mapped, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		key := strings.TrimSpace(fmt.Sprint(FirstPresent(mapped, "key", "env")))
-		if key == "" || key == "<nil>" {
-			continue
-		}
-		targetKey := strings.TrimSpace(fmt.Sprint(FirstPresent(mapped, "target_key", "targetKey", "target")))
-		result[configKey(targetKey, key)] = mapped
-	}
-	return result
-}
-
-func skillConfigRequired(value int16, existing map[string]any) bool {
-	switch value {
-	case agentmodel.SkillConfigRequiredYes:
-		return true
-	case agentmodel.SkillConfigRequiredNo:
-		return false
-	default:
-		return existing != nil && Truthy(existing["required"])
-	}
-}
-
-func parseManifestMap(raw string) map[string]any {
-	result := map[string]any{}
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return result
-	}
-	_ = json.Unmarshal([]byte(raw), &result)
-	return result
-}
-
-func skillConfigTargetMatches(rowTarget string, requestTarget string) bool {
-	rowTarget = strings.TrimSpace(rowTarget)
-	requestTarget = strings.TrimSpace(requestTarget)
-	if rowTarget == "" {
-		return true
-	}
-	return requestTarget != "" && rowTarget == requestTarget
+	return strings.TrimSpace(secret), true, nil
 }
 
 func secretKey() []byte {

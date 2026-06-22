@@ -82,134 +82,130 @@ export function WorkLoginPage() {
   }
 
   return (
-    <main className="relative grid min-h-svh overflow-hidden bg-background text-foreground xl:grid-cols-[minmax(0,1fr)_460px]">
-      <section className="relative hidden min-h-svh flex-col justify-center border-r border-border bg-card px-16 xl:flex xl:px-24">
-        <div className="absolute inset-0 overflow-hidden">
-          <div className="absolute left-12 top-10 h-44 w-44 rounded-full border border-primary/15" />
-          <div className="absolute bottom-20 right-16 h-72 w-72 rounded-full border border-border/70" />
-          <div className="absolute inset-x-0 top-1/2 h-px bg-border/80" />
-          <div className="absolute left-28 top-1/2 h-72 w-px bg-border/70" />
-        </div>
-
-        <div className="relative z-10 max-w-2xl">
-          <div className="mb-8 flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/15">
-            <Sparkles className="size-7" />
-          </div>
-          <p className="mb-4 text-sm font-medium text-primary">
-            AI Creative Workspace
-          </p>
-          <h1 className="max-w-2xl text-5xl font-semibold leading-tight tracking-tight text-foreground">
-            神创 Work 工作台
-          </h1>
-          <p className="mt-6 max-w-xl text-lg leading-8 text-muted-foreground">
-            创建项目，编排能力节点和智能体流程，把每一次生成结果沉淀为可复用的项目资产。
-          </p>
-          <div className="mt-10 grid max-w-xl grid-cols-3 gap-3 text-sm">
-            {["项目工作台", "能力编排", "资产沉淀"].map((item) => (
-              <div
-                key={item}
-                className="rounded-lg border border-border bg-background/70 px-4 py-3 text-foreground shadow-xs"
-              >
-                {item}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="flex min-h-svh items-center justify-center px-5 py-8 sm:px-8 xl:bg-background">
-        <div className="w-full max-w-md">
-          <div className="mb-7 flex items-center justify-center gap-3 lg:hidden">
-            <SiteLogo className="size-8" />
-            <div className="min-w-0">
-              <p className="truncate text-lg font-semibold">
-                {site.name || "工作台"}
-              </p>
-              <p className="text-xs text-muted-foreground">AI 工作台</p>
+    <>
+      <WorkLoginStyles />
+      <main className="bot-work-auth-shell">
+        <section className="bot-work-auth-aside">
+          <div className="bot-work-auth-aside-content">
+            <div className="bot-work-auth-mark">
+              <Sparkles className="size-7" aria-hidden="true" />
+            </div>
+            <p className="bot-work-auth-kicker">
+              AI Creative Workspace
+            </p>
+            <h1 className="bot-work-auth-title">
+              神创 Work 工作台
+            </h1>
+            <p className="bot-work-auth-description">
+              创建项目，编排能力节点和智能体流程，把每一次生成结果沉淀为可复用的项目资产。
+            </p>
+            <div className="bot-work-auth-features">
+              {["项目工作台", "能力编排", "资产沉淀"].map((item) => (
+                <div
+                  key={item}
+                  className="bot-work-auth-feature"
+                >
+                  {item}
+                </div>
+              ))}
             </div>
           </div>
+        </section>
 
-          <Card className="gap-0 rounded-2xl border-border/80 p-0 shadow-2xl shadow-slate-950/10">
-            <div className="flex items-start justify-between gap-6 border-b border-border px-7 py-6">
-              <div className="min-w-0">
-                <p className="mb-2 text-sm text-muted-foreground">项目账号</p>
-                <h2 className="text-2xl font-semibold tracking-tight">
-                  {mode === "login" ? "登录" : "创建账号"}
-                </h2>
+        <section className="bot-work-auth-panel">
+          <div className="bot-work-auth-form-wrap">
+            <div className="bot-work-auth-mobile-brand">
+              <SiteLogo className="bot-work-auth-mobile-logo" />
+              <div>
+                <p className="bot-work-auth-mobile-name">
+                  {site.name || "工作台"}
+                </p>
+                <p className="bot-work-auth-mobile-desc">AI 工作台</p>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                className="shrink-0"
-                onClick={() => {
-                  setMode(mode === "login" ? "register" : "login");
-                  setMessage("");
-                }}
-              >
-                {mode === "login" ? "注册" : "登录"}
-              </Button>
             </div>
 
-            <form className="space-y-4 px-7 py-7" onSubmit={submit}>
-              <AuthField label="账号">
-                <Input
-                  value={account}
-                  onChange={(event) => setAccount(event.target.value)}
-                  autoComplete="username"
-                  placeholder="输入手机号或账号"
-                  className="h-11"
-                />
-              </AuthField>
+            <Card className="bot-work-auth-card">
+              <div className="bot-work-auth-card-header">
+                <div>
+                  <p className="bot-work-auth-card-eyebrow">项目账号</p>
+                  <h2 className="bot-work-auth-card-title">
+                    {mode === "login" ? "登录" : "创建账号"}
+                  </h2>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="bot-work-auth-mode-button"
+                  onClick={() => {
+                    setMode(mode === "login" ? "register" : "login");
+                    setMessage("");
+                  }}
+                >
+                  {mode === "login" ? "注册" : "登录"}
+                </Button>
+              </div>
 
-              {mode === "register" ? (
-                <AuthField label="昵称">
+              <form className="bot-work-auth-form" onSubmit={submit}>
+                <AuthField label="账号">
                   <Input
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    autoComplete="name"
-                    placeholder="项目中显示的名字"
+                    value={account}
+                    onChange={(event) => setAccount(event.target.value)}
+                    autoComplete="username"
+                    placeholder="输入手机号或账号"
                     className="h-11"
                   />
                 </AuthField>
-              ) : null}
 
-              <AuthField label="密码">
-                <Input
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  autoComplete={
-                    mode === "login" ? "current-password" : "new-password"
-                  }
-                  placeholder="至少 6 位"
-                  type="password"
-                  className="h-11"
-                />
-              </AuthField>
+                {mode === "register" ? (
+                  <AuthField label="昵称">
+                    <Input
+                      value={name}
+                      onChange={(event) => setName(event.target.value)}
+                      autoComplete="name"
+                      placeholder="项目中显示的名字"
+                      className="h-11"
+                    />
+                  </AuthField>
+                ) : null}
 
-              {message ? (
-                <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                  {message}
-                </div>
-              ) : null}
+                <AuthField label="密码">
+                  <Input
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    autoComplete={
+                      mode === "login" ? "current-password" : "new-password"
+                    }
+                    placeholder="至少 6 位"
+                    type="password"
+                    className="h-11"
+                  />
+                </AuthField>
 
-              <Button
-                className="h-11 w-full gap-2"
-                disabled={loading}
-                type="submit"
-              >
-                {loading ? <Loader2 className="size-4 animate-spin" /> : null}
-                {loading
-                  ? "处理中"
-                  : mode === "login"
-                    ? "进入工作台"
-                    : "注册并进入"}
-                {!loading ? <ArrowRight className="size-4" /> : null}
-              </Button>
-            </form>
-          </Card>
-        </div>
-      </section>
-    </main>
+                {message ? (
+                  <div className="bot-work-auth-message">
+                    {message}
+                  </div>
+                ) : null}
+
+                <Button
+                  className="bot-work-auth-submit"
+                  disabled={loading}
+                  type="submit"
+                >
+                  {loading ? <Loader2 className="size-4 animate-spin" /> : null}
+                  {loading
+                    ? "处理中"
+                    : mode === "login"
+                      ? "进入工作台"
+                      : "注册并进入"}
+                  {!loading ? <ArrowRight className="size-4" /> : null}
+                </Button>
+              </form>
+            </Card>
+          </div>
+        </section>
+      </main>
+    </>
   );
 }
 
@@ -221,12 +217,236 @@ function AuthField({
   children: ReactNode;
 }) {
   return (
-    <label className="block space-y-2">
-      <span className="text-sm font-medium text-foreground">{label}</span>
+    <label className="bot-work-auth-field">
+      <span>{label}</span>
       {children}
     </label>
   );
 }
+
+function WorkLoginStyles() {
+  return <style>{WORK_LOGIN_STYLES}</style>;
+}
+
+const WORK_LOGIN_STYLES = `
+.bot-work-auth-shell {
+  min-height: 100svh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(26rem, 30rem);
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.bot-work-auth-aside {
+  position: relative;
+  min-height: 100svh;
+  display: flex;
+  align-items: center;
+  border-right: 1px solid var(--border);
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--border) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(0deg, color-mix(in oklab, var(--border) 45%, transparent) 1px, transparent 1px),
+    color-mix(in oklab, var(--card) 92%, var(--muted) 8%);
+  background-size: 4rem 4rem;
+  padding: 4rem clamp(3rem, 7vw, 6rem);
+}
+
+.bot-work-auth-aside-content {
+  width: 100%;
+  max-width: 42rem;
+}
+
+.bot-work-auth-mark {
+  width: 3.5rem;
+  height: 3.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 1rem;
+  color: var(--primary);
+  background: color-mix(in oklab, var(--primary) 10%, transparent);
+  border: 1px solid color-mix(in oklab, var(--primary) 14%, transparent);
+}
+
+.bot-work-auth-kicker {
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+  color: var(--primary);
+  font-size: .875rem;
+  font-weight: 600;
+}
+
+.bot-work-auth-title {
+  max-width: 42rem;
+  color: var(--foreground);
+  font-size: clamp(2.5rem, 5vw, 4.25rem);
+  line-height: 1.08;
+  font-weight: 700;
+}
+
+.bot-work-auth-description {
+  margin-top: 1.5rem;
+  max-width: 36rem;
+  color: var(--muted-foreground);
+  font-size: 1.125rem;
+  line-height: 1.85;
+}
+
+.bot-work-auth-features {
+  margin-top: 2.5rem;
+  max-width: 36rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .75rem;
+}
+
+.bot-work-auth-feature {
+  border: 1px solid var(--border);
+  border-radius: .75rem;
+  background: color-mix(in oklab, var(--background) 76%, transparent);
+  padding: .75rem 1rem;
+  color: var(--foreground);
+  font-size: .875rem;
+  font-weight: 500;
+}
+
+.bot-work-auth-panel {
+  min-height: 100svh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: var(--background);
+}
+
+.bot-work-auth-form-wrap {
+  width: 100%;
+  max-width: 28rem;
+}
+
+.bot-work-auth-mobile-brand {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: .75rem;
+  margin-bottom: 1.75rem;
+}
+
+.bot-work-auth-mobile-logo {
+  width: 2rem;
+  height: 2rem;
+}
+
+.bot-work-auth-mobile-name {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--foreground);
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.bot-work-auth-mobile-desc {
+  color: var(--muted-foreground);
+  font-size: .75rem;
+}
+
+.bot-work-auth-card {
+  display: block;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--border) 88%, transparent);
+  border-radius: 1rem;
+  background: var(--card);
+  box-shadow: 0 24px 70px rgb(15 23 42 / 10%);
+}
+
+.bot-work-auth-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+  border-bottom: 1px solid var(--border);
+  padding: 1.5rem;
+}
+
+.bot-work-auth-card-eyebrow {
+  margin-bottom: .5rem;
+  color: var(--muted-foreground);
+  font-size: .875rem;
+}
+
+.bot-work-auth-card-title {
+  color: var(--foreground);
+  font-size: 1.5rem;
+  line-height: 1.25;
+  font-weight: 700;
+}
+
+.bot-work-auth-mode-button {
+  flex-shrink: 0;
+}
+
+.bot-work-auth-form {
+  display: grid;
+  gap: 1rem;
+  padding: 1.5rem;
+}
+
+.bot-work-auth-field {
+  display: grid;
+  gap: .5rem;
+}
+
+.bot-work-auth-field > span {
+  color: var(--foreground);
+  font-size: .875rem;
+  font-weight: 600;
+}
+
+.bot-work-auth-message {
+  border: 1px solid color-mix(in oklab, var(--destructive) 30%, transparent);
+  border-radius: .5rem;
+  background: color-mix(in oklab, var(--destructive) 10%, transparent);
+  padding: .5rem .75rem;
+  color: var(--destructive);
+  font-size: .875rem;
+}
+
+.bot-work-auth-submit {
+  width: 100%;
+  height: 2.75rem;
+  gap: .5rem;
+}
+
+@media (max-width: 1023px) {
+  .bot-work-auth-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bot-work-auth-aside {
+    display: none;
+  }
+
+  .bot-work-auth-mobile-brand {
+    display: flex;
+  }
+}
+
+@media (max-width: 640px) {
+  .bot-work-auth-panel {
+    padding: 1.25rem;
+  }
+
+  .bot-work-auth-card-header,
+  .bot-work-auth-form {
+    padding: 1.25rem;
+  }
+}
+`;
 
 function buildAuthPayload(
   mode: AuthMode,

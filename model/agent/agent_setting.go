@@ -144,7 +144,7 @@ var (
 				"json.patch 只允许包含 key、name、description、skill_md、files_json、manifest、pack_id、cate_id。",
 				"files_json 必须是对象，key 是相对路径，且只能使用 scripts/、references/、requirements.txt、package.json。",
 				"manifest 只写 Dever 运行配置，不要把这些字段塞进 SKILL.md frontmatter。",
-				"manifest.config 只声明配置 schema，可写 key、name、type、target_key、required；required=true 表示缺配置时禁止执行脚本。",
+				"manifest.config 只声明环境变量需求，可写 key、name、required；key 必须只包含字母、数字和下划线，运行时会按 key 原样注入环境变量；required=true 表示未绑定或未填写该环境变量时禁止执行脚本。",
 				"manifest.mcp 可声明 stdio MCP server，但每个 server 必须写 key、command、args、tools；tools 不能为空。",
 				"如果只是在追问，不要输出下面的 agent-result 示例；只有生成或更新草稿时才输出。",
 				"",
