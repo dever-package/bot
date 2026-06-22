@@ -92,67 +92,13 @@
       },
       {
         "type": "show-button",
-        "name": "草稿箱",
+        "name": "自创技能",
         "className": "shrink-0",
         "meta": {
           "variant": "outline",
           "size": "sm",
-          "icon": "file-pen-line",
+          "icon": "sparkles",
           "to": "/bot/agent/skill_draft/list"
-        }
-      },
-      {
-        "type": "show-button",
-        "name": "创建技能",
-        "className": "shrink-0",
-        "meta": {
-          "variant": "outline",
-          "size": "sm",
-          "icon": "sparkles"
-        },
-        "action": {
-          "click": [
-            {
-              "type": "data",
-              "key": "actionTarget.draftAgent.id",
-              "value": 0
-            },
-            {
-              "type": "data",
-              "key": "actionTarget.draftAgent.key",
-              "value": ""
-            },
-            {
-              "type": "data",
-              "key": "actionTarget.draftAgent.name",
-              "value": ""
-            },
-            {
-              "type": "data",
-              "key": "actionTarget.draftAgent.description",
-              "value": ""
-            },
-            {
-              "type": "data",
-              "key": "actionTarget.draftAgent.skill_md",
-              "value": ""
-            },
-            {
-              "type": "data",
-              "key": "actionTarget.draftAgent.files_json",
-              "value": "{}"
-            },
-            {
-              "type": "data",
-              "key": "actionTarget.draftAgent.manifest",
-              "value": ""
-            },
-            {
-              "type": "modal",
-              "key": "dialog.draftAssistant",
-              "value": true
-            }
-          ]
         }
       },
       {
@@ -160,7 +106,7 @@
         "name": "安装技能",
         "className": "shrink-0",
         "meta": {
-          "variant": "default",
+          "variant": "outline",
           "size": "sm",
           "icon": "plus"
         },
@@ -313,6 +259,11 @@
               }
             },
             {
+              "value": "source_type_label",
+              "name": "来源",
+              "type": "show-base"
+            },
+            {
               "value": "status",
               "type": "show-tag"
             },
@@ -391,25 +342,27 @@
                     }
                   },
                   {
-                    "icon": "copy-plus",
+                    "icon": "sparkles",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "创建修改草稿",
+                    "description": "升级自建技能",
+                    "hiddenWhen": [
+                      {
+                        "path": "skill.source_type",
+                        "operator": "notEquals",
+                        "value": "custom"
+                      }
+                    ],
                     "action": {
                       "click": [
                         {
                           "type": "data",
-                          "key": "actionTarget.fromSkillRequest.skill_id",
-                          "value": "$row.skill_id"
-                        },
-                        {
-                          "type": "data",
-                          "key": "actionTarget.fromSkillRequest.pack_id",
-                          "value": "$row.pack_id"
+                          "key": "actionTarget.draftAgent",
+                          "value": "$row.pending_draft"
                         },
                         {
                           "type": "modal",
-                          "key": "confirm.fromSkill",
+                          "key": "dialog.draftAssistant",
                           "value": true
                         }
                       ]
@@ -419,7 +372,14 @@
                     "icon": "refresh-cw",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "重新安装该技能",
+                    "description": "升级安装技能",
+                    "hiddenWhen": [
+                      {
+                        "path": "skill.source_type",
+                        "operator": "notEquals",
+                        "value": "installed"
+                      }
+                    ],
                     "action": {
                       "click": [
                         {
@@ -547,21 +507,6 @@
       {
         "type": "feedback-modal",
         "meta": {
-          "stateKey": "dialog.draftAssistant",
-          "formSection": "draft-assistant-panel",
-          "title": "创建技能",
-          "description": "多轮生成技能草稿；AI 只写草稿 patch，不会发布正式技能。",
-          "footer": {
-            "close": false,
-            "confirm": false
-          },
-          "size": "3xl",
-          "bodyScroll": false
-        }
-      },
-      {
-        "type": "feedback-modal",
-        "meta": {
           "stateKey": "dialog.configSkill",
           "pageRoute": "/bot/agent/skill_config/list",
           "title": "技能配置",
@@ -583,24 +528,6 @@
           "assistant": false,
           "size": "sm",
           "bodyClassName": "py-2"
-        }
-      },
-      {
-        "type": "feedback-confirm",
-        "name": "创建修改草稿",
-        "info": "确认从当前正式技能创建修改草稿吗？草稿不会影响正在运行的正式技能。",
-        "meta": {
-          "stateKey": "confirm.fromSkill",
-          "successMessage": "已创建修改草稿，可在创建技能中继续编辑。",
-          "errorMessage": "创建修改草稿失败。"
-        },
-        "action": {
-          "confirm": {
-            "type": "request",
-            "api": "/bot/admin/skill_draft/from_skill",
-            "method": "post",
-            "params": "actionTarget.fromSkillRequest"
-          }
         }
       },
       {
@@ -644,6 +571,22 @@
       },
       {
         "type": "feedback-modal",
+        "name": "升级技能",
+        "meta": {
+          "stateKey": "dialog.draftAssistant",
+          "formSection": "draft-assistant-panel",
+          "title": "升级技能",
+          "description": "通过 AI 对话升级自建技能；保存后到自创技能页继续测试和发布。",
+          "size": "3xl",
+          "bodyScroll": false,
+          "footer": {
+            "close": false,
+            "confirm": false
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
         "name": "安装技能",
         "info": "输入安装命令、GitHub 仓库、安装任务说明或技能说明。保存后会先进入安装记录，安装成功后自动加入当前方案。",
         "meta": {
@@ -654,47 +597,6 @@
           "footer": {
             "close": false,
             "confirm": false
-          }
-        }
-      }
-    ],
-    "draft-assistant-panel": [
-      {
-        "id": "skill-pack-draft-agent",
-        "type": "show-agent",
-        "meta": {
-          "agentPath": "data.actionTarget.skillCreatorAgent.key",
-          "agentNamePath": "data.actionTarget.skillCreatorAgent.name",
-          "openPath": "state.dialog.draftAssistant",
-          "requestApi": "/bot/admin/agent/run",
-          "streamApi": "/bot/admin/agent/stream",
-          "stopApi": "/bot/admin/agent/stop",
-          "paramApi": "/bot/admin/energon/power_params",
-          "sessionEnabled": true,
-          "memoryEnabled": true,
-          "sessionContext": {
-            "skill_pack": "data.search.pack_id",
-            "skill_draft": "data.actionTarget.draftAgent.id"
-          },
-          "skillDraftPatchApi": "/bot/admin/skill_draft/apply_patch",
-          "skillDraftPatchContext": {
-            "id": "data.actionTarget.draftAgent.id",
-            "pack_id": "data.search.pack_id",
-            "cate_id": "data.draftContext.cate_id"
-          },
-          "reloadPageOnFinal": true,
-          "reloadPageOnFinalKinds": [
-            "skill_draft_patch"
-          ],
-          "reloadPageOnFinalDelayMs": 500,
-          "blockMs": 1000,
-          "placeholder": "描述要创建的 skill。需要脚本、配置项、MCP、依赖或引用代码时直接说明。",
-          "emptyText": "可以多轮描述需求。AI 会生成草稿 patch，写回同一个技能草稿；发布前仍需手动校验和测试。",
-          "inputContext": {
-            "draft_id": "data.actionTarget.draftAgent.id",
-            "pack_id": "data.search.pack_id",
-            "cate_id": "data.draftContext.cate_id",
-            "draft": "data.actionTarget.draftAgent"
           }
         }
       }
@@ -711,6 +613,7 @@
           "streamApi": "/bot/admin/skill_install/stream",
           "stopApi": "/bot/admin/skill_install/stop",
           "sessionEnabled": true,
+          "newSessionEnabled": false,
           "sessionContext": {
             "skill_pack": "data.search.pack_id"
           },
@@ -729,6 +632,53 @@
           }
         }
       }
+    ],
+    "draft-assistant-panel": [
+      {
+        "id": "skill-draft-agent",
+        "type": "show-skill-creator",
+        "meta": {
+          "draftPath": "data.actionTarget.draftAgent",
+          "agentPath": "data.actionTarget.skillCreatorAgent.key",
+          "agentNamePath": "data.actionTarget.skillCreatorAgent.name",
+          "openPath": "state.dialog.draftAssistant",
+          "requestApi": "/bot/admin/agent/run",
+          "streamApi": "/bot/admin/agent/stream",
+          "stopApi": "/bot/admin/agent/stop",
+          "paramApi": "/bot/admin/energon/power_params",
+          "sessionEnabled": true,
+          "memoryEnabled": false,
+          "historyEnabled": false,
+          "newSessionEnabled": false,
+          "skillDraftPatchApi": "/bot/admin/skill_draft/apply_patch",
+          "skillDraftPatchAutoApply": false,
+          "skillDraftPatchCloseOnSave": true,
+          "skillDraftPatchContext": {
+            "id": "data.actionTarget.draftAgent.id",
+            "pack_id": "data.search.pack_id",
+            "cate_id": "data.actionTarget.draftAgent.cate_id"
+          },
+          "reloadPageOnFinal": true,
+          "reloadPageOnFinalKinds": [
+            "skill_draft_patch"
+          ],
+          "reloadPageOnFinalDelayMs": 500,
+          "skillDraftPatchReloadDataKeys": [
+            "table"
+          ],
+          "skillDraftPatchListPath": "/bot/agent/skill_draft/list",
+          "blockMs": 1000,
+          "placeholder": "描述要创建或升级的 skill。需要脚本、配置项、MCP、依赖或引用代码时直接说明。",
+          "emptyText": "通过多轮对话生成技能内容。确认结果后点击“保存”，未发布版本会出现在自创技能页。",
+          "inputContext": {
+            "draft_id": "data.actionTarget.draftAgent.id",
+            "pack_id": "data.search.pack_id",
+            "cate_id": "data.actionTarget.draftAgent.cate_id",
+            "source_skill_id": "data.actionTarget.draftAgent.source_skill_id",
+            "draft": "data.actionTarget.draftAgent"
+          }
+        }
+      }
     ]
   },
   "data": {
@@ -739,9 +689,6 @@
     "search": {
       "pack_id": "",
       "status": ""
-    },
-    "draftContext": {
-      "cate_id": 1
     },
     "installContext": {
       "cate_id": 1,
@@ -757,16 +704,29 @@
         "pack_id",
         "status"
       ],
-      "model": "bot.agent.NewSkillPackItemModel"
+      "model": "bot.agent.NewSkillPackItemModel",
+      "service": "bot.agent.setting.AgentHook.AttachSkillPackItemList"
     },
     "actionTarget": {
       "packId": "",
       "viewSkillId": "",
       "editSkillId": "",
       "configSkillId": "",
-      "fromSkillRequest": {
-        "skill_id": "",
-        "pack_id": ""
+      "draftAgent": {
+        "id": 0,
+        "pack_id": 0,
+        "cate_id": 1,
+        "source_skill_id": 0,
+        "key": "",
+        "name": "",
+        "description": "",
+        "skill_md": "",
+        "files_json": "{}",
+        "manifest": ""
+      },
+      "skillCreatorAgent": {
+        "key": "skill-creator",
+        "name": "技能创建工程师"
       },
       "refreshRequest": {
         "input": {
@@ -779,13 +739,6 @@
         }
       },
       "deleteSkill": {},
-      "draftAgent": {
-        "id": 0
-      },
-      "skillCreatorAgent": {
-        "key": "skill-creator",
-        "name": "技能创建工程师"
-      },
       "installAgent": {
         "key": "skill-installer",
         "name": "技能安装规划器"
@@ -799,12 +752,11 @@
       "editSkill": false,
       "viewSkill": false,
       "configSkill": false,
-      "draftAssistant": false,
       "skillCate": false,
-      "installSkill": false
+      "installSkill": false,
+      "draftAssistant": false
     },
     "confirm": {
-      "fromSkill": false,
       "refreshSkill": false,
       "deleteSkill": false
     }

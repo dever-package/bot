@@ -1006,6 +1006,60 @@
   box-shadow: 0 24px 68px rgba(15, 23, 42, 0.24);
 }
 
+.knowledge-name-dialog {
+  z-index: 94;
+}
+
+.knowledge-name-dialog__panel {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 56px);
+}
+
+.knowledge-name-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px;
+}
+
+.knowledge-name-dialog__body label {
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.knowledge-name-dialog__input {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--knowledge-border);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 14px;
+  outline: none;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.knowledge-name-dialog__input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.knowledge-name-dialog__input:disabled {
+  cursor: not-allowed;
+  background: #f8fafc;
+  color: #94a3b8;
+}
+
+.knowledge-name-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 0 18px 18px;
+}
+
 .knowledge-index-detail__header {
   display: flex;
   flex: 0 0 auto;

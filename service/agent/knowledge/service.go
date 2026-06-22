@@ -96,16 +96,22 @@ func (s Service) IndexDocument(ctx context.Context, docID uint64) (IndexResult, 
 		result.FinishedAt = time.Now()
 		return result, err
 	}
-	markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageVector, agentmodel.KnowledgeIndexStatusRunning, "")
-	vectorErr := s.indexDocumentVectors(ctx, *base, doc.ID)
+	advancedMode := isConceptGraphEnabled(base.ConceptGraphEnabled)
+	var vectorErr error
+	if advancedMode {
+		markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageVector, agentmodel.KnowledgeIndexStatusRunning, "")
+		vectorErr = s.indexDocumentVectors(ctx, *base, doc.ID)
+	} else {
+		markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageVector, agentmodel.KnowledgeIndexStatusSuccess, "")
+	}
 	errorMessage := ""
 	if vectorErr != nil {
 		errorMessage = appendIndexWarning(errorMessage, "向量索引失败: "+vectorErr.Error())
 		markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageVector, agentmodel.KnowledgeIndexStatusFailed, vectorErr.Error())
-	} else {
+	} else if advancedMode {
 		markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageVector, agentmodel.KnowledgeIndexStatusSuccess, "")
 	}
-	if isConceptGraphEnabled(base.ConceptGraphEnabled) && base.IndexPowerID > 0 {
+	if advancedMode && base.IndexPowerID > 0 {
 		if graphErr := s.extractDocumentConceptGraphWithStage(ctx, *base, *doc); graphErr != nil {
 			errorMessage = appendIndexWarning(errorMessage, "概念图谱失败: "+graphErr.Error())
 		}
@@ -976,40 +982,6 @@ func hasFailedKnowledgeDocs(ctx context.Context, baseID uint64) bool {
 	}) > 0
 }
 
-func (s Service) Retrieve(ctx context.Context, req RetrieveRequest) (RetrieveResult, error) {
-	query := strings.TrimSpace(req.Query)
-	if req.AgentID == 0 || query == "" {
-		return RetrieveResult{}, nil
-	}
-	bindings := s.activeBindings(ctx, req.AgentID)
-	if len(bindings) == 0 {
-		return RetrieveResult{}, nil
-	}
-	result := RetrieveResult{}
-	for _, binding := range bindings {
-		startedAt := time.Now()
-		bindingResult := s.retrieveAgenticBinding(ctx, binding, query)
-		bindingResult.Snippets = s.filterPublishedSnapshot(ctx, bindingResult.Snippets, binding.BaseID)
-		bindingResult.Snippets = filterUnavailableDocSnippets(ctx, bindingResult.Snippets)
-		result.Snippets = append(result.Snippets, bindingResult.Snippets...)
-		result.Matches = append(result.Matches, bindingResult.Matches...)
-		insertKnowledgeRetrieveLog(ctx, knowledgeRetrieveLogInput{
-			BaseID:    binding.BaseID,
-			AgentID:   req.AgentID,
-			Query:     query,
-			Snippets:  bindingResult.Snippets,
-			Matches:   bindingResult.Matches,
-			LatencyMs: int(time.Since(startedAt).Milliseconds()),
-		})
-	}
-	sort.SliceStable(result.Snippets, func(i, j int) bool {
-		return result.Snippets[i].Score > result.Snippets[j].Score
-	})
-	result.Snippets = limitContext(result.Snippets, bindings)
-	s.incrementHitCounts(ctx, result.Snippets)
-	return result, nil
-}
-
 func filterUnavailableDocSnippets(ctx context.Context, snippets []RetrievedSnippet) []RetrievedSnippet {
 	if len(snippets) == 0 {
 		return snippets
@@ -1182,7 +1154,6 @@ func (s Service) DebugRetrieve(ctx context.Context, req RetrieveDebugRequest) (R
 		return RetrieveDebugResult{}, err
 	}
 	result := s.retrieveAgenticBinding(ctx, binding, query)
-	result.Snippets = s.filterPublishedSnapshot(ctx, result.Snippets, binding.BaseID)
 	result.Snippets = filterUnavailableDocSnippets(ctx, result.Snippets)
 	if req.Limit > 0 && len(result.Snippets) > req.Limit {
 		result.Snippets = result.Snippets[:req.Limit]
@@ -1192,6 +1163,7 @@ func (s Service) DebugRetrieve(ctx context.Context, req RetrieveDebugRequest) (R
 		KnowledgeBase: KnowledgeRetrieveDebugBase{
 			ID:         binding.BaseID,
 			Name:       binding.Base.Name,
+			Mode:       binding.Base.ConceptGraphMode,
 			GraphDepth: binding.Base.GraphDepth,
 		},
 		Snippets:     result.Snippets,
@@ -1230,6 +1202,7 @@ func knowledgeBaseDebugBinding(base agentmodel.KnowledgeBase) agentKnowledgeBind
 			IndexPowerID:     base.IndexPowerID,
 			Collection:       baseCollection(base),
 			EmbeddingPowerID: base.EmbeddingPowerID,
+			ConceptGraphMode: base.ConceptGraphEnabled,
 			RetrieveLimit:    normalizeRetrieveLimit(base.RetrieveLimit),
 			ScoreThreshold:   normalizeScoreThreshold(base.ScoreThreshold),
 			MaxContextChars:  normalizeMaxContextChars(base.MaxContextChars),
@@ -1243,17 +1216,50 @@ func retrievalPlanMatches(matches []map[string]any) []map[string]any {
 	result := make([]map[string]any, 0, len(matches))
 	for _, match := range matches {
 		source := strings.TrimSpace(util.ToString(match["source"]))
-		if source == "planner" || source == "graph" || source == "agentic_knowledge" {
+		if (source == "planner" || source == "graph" || source == "agentic_knowledge") && retrievalMatchHasPlan(match) {
 			result = append(result, match)
 		}
 	}
 	return result
 }
 
+func retrievalMatchHasPlan(match map[string]any) bool {
+	if strings.TrimSpace(util.ToString(match["reason"])) != "" {
+		return true
+	}
+	for _, key := range []string{"planned_queries", "dir_ids", "doc_ids", "dir_paths"} {
+		if hasPlanListValue(match[key]) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasPlanListValue(value any) bool {
+	switch list := value.(type) {
+	case []string:
+		return len(list) > 0
+	case []uint64:
+		return len(list) > 0
+	case []int:
+		return len(list) > 0
+	case []any:
+		return len(list) > 0
+	default:
+		return false
+	}
+}
+
 func (s Service) retrieveAgenticBinding(ctx context.Context, binding agentKnowledgeBinding, query string) RetrieveResult {
-	rewrittenQueries := s.queryRewrite(ctx, binding, query)
-	plannerPlan := s.planRetrieval(ctx, binding, query)
-	graphPlan := graphRetrievalPlan(ctx, binding.BaseID, query, binding.Base.GraphDepth)
+	advanced := isConceptGraphEnabled(binding.Base.ConceptGraphMode)
+	var rewrittenQueries []string
+	var plannerPlan retrievalPlan
+	var graphPlan retrievalPlan
+	if advanced {
+		rewrittenQueries = s.queryRewrite(ctx, binding, query)
+		plannerPlan = s.planRetrieval(ctx, binding, query)
+		graphPlan = retrievalGraphPlan(ctx, binding, query)
+	}
 	plan := mergeRetrievalPlans(plannerPlan, graphPlan)
 	dirs := retrievalCandidateDirs(ctx, binding, query, plan)
 	dirIDs := candidateDirIDs(dirs)
@@ -1263,10 +1269,12 @@ func (s Service) retrieveAgenticBinding(ctx context.Context, binding agentKnowle
 			snippets = append(snippets, s.retrieveKeywordBinding(ctx, binding, rq)...)
 		}
 	}
-	plannedSnippets := s.retrievePlannedBinding(ctx, binding, query, plan, dirIDs)
-	docSnippets := retrievePlanDocNodes(ctx, binding, plan.DocIDs, query)
-	snippets = append(snippets, plannedSnippets...)
-	snippets = append(snippets, docSnippets...)
+	if advanced {
+		plannedSnippets := s.retrievePlannedBinding(ctx, binding, query, plan, dirIDs)
+		docSnippets := retrievePlanDocNodes(ctx, binding, plan.DocIDs, query)
+		snippets = append(snippets, plannedSnippets...)
+		snippets = append(snippets, docSnippets...)
+	}
 	snippets = rrfScoreSnippets(snippets)
 	snippets = rankKnowledgeSnippets(ctx, mergeKnowledgeSnippets(snippets), query, dirs, binding.BaseID)
 	return RetrieveResult{
@@ -1277,7 +1285,9 @@ func (s Service) retrieveAgenticBinding(ctx context.Context, binding agentKnowle
 
 func (s Service) retrieveBroadBinding(ctx context.Context, binding agentKnowledgeBinding, query string) []RetrievedSnippet {
 	snippets := s.retrieveKeywordBinding(ctx, binding, query)
-	snippets = append(snippets, s.retrieveVectorBinding(ctx, binding, query)...)
+	if isConceptGraphEnabled(binding.Base.ConceptGraphMode) {
+		snippets = append(snippets, s.retrieveVectorBinding(ctx, binding, query)...)
+	}
 	return snippets
 }
 
@@ -1293,7 +1303,7 @@ func (s Service) retrievePlannedBinding(ctx context.Context, binding agentKnowle
 		} else if !strings.EqualFold(strings.TrimSpace(plannedQuery), strings.TrimSpace(query)) {
 			snippets = append(snippets, s.retrieveKeywordBinding(ctx, binding, plannedQuery)...)
 		}
-		if !strings.EqualFold(strings.TrimSpace(plannedQuery), strings.TrimSpace(query)) {
+		if isConceptGraphEnabled(binding.Base.ConceptGraphMode) && !strings.EqualFold(strings.TrimSpace(plannedQuery), strings.TrimSpace(query)) {
 			snippets = append(snippets, s.retrieveVectorBinding(ctx, binding, plannedQuery)...)
 		}
 	}
@@ -1301,11 +1311,22 @@ func (s Service) retrievePlannedBinding(ctx context.Context, binding agentKnowle
 }
 
 func retrievalCandidateDirs(ctx context.Context, binding agentKnowledgeBinding, query string, plan retrievalPlan) []candidateDir {
+	candidates := []candidateDir{}
+	if isConceptGraphEnabled(binding.Base.ConceptGraphMode) {
+		candidates = expandedCandidateDirs(ctx, binding.BaseID, query, binding.Base.GraphDepth)
+	}
 	return mergeCandidateDirs(
-		expandedCandidateDirs(ctx, binding.BaseID, query, binding.Base.GraphDepth),
+		candidates,
 		candidateKnowledgeDirsByIDs(ctx, binding.BaseID, plan.DirIDs),
 		candidateKnowledgeDirsByDocIDs(ctx, binding.BaseID, plan.DocIDs),
 	)
+}
+
+func retrievalGraphPlan(ctx context.Context, binding agentKnowledgeBinding, query string) retrievalPlan {
+	if !isConceptGraphEnabled(binding.Base.ConceptGraphMode) {
+		return retrievalPlan{}
+	}
+	return graphRetrievalPlan(ctx, binding.BaseID, query, binding.Base.GraphDepth)
 }
 
 func retrievePlanDocNodes(ctx context.Context, binding agentKnowledgeBinding, docIDs []uint64, query string) []RetrievedSnippet {
@@ -1477,6 +1498,7 @@ func (s Service) activeBindings(ctx context.Context, agentID uint64) []agentKnow
 				IndexPowerID:     base.IndexPowerID,
 				Collection:       baseCollection(*base),
 				EmbeddingPowerID: base.EmbeddingPowerID,
+				ConceptGraphMode: base.ConceptGraphEnabled,
 				RetrieveLimit:    normalizeRetrieveLimit(base.RetrieveLimit),
 				ScoreThreshold:   normalizeScoreThreshold(base.ScoreThreshold),
 				MaxContextChars:  normalizeMaxContextChars(base.MaxContextChars),
@@ -1488,34 +1510,6 @@ func (s Service) activeBindings(ctx context.Context, agentID uint64) []agentKnow
 	sort.SliceStable(result, func(i, j int) bool {
 		return result[i].Sort < result[j].Sort
 	})
-	return result
-}
-
-func limitContext(snippets []RetrievedSnippet, bindings []agentKnowledgeBinding) []RetrievedSnippet {
-	if len(snippets) == 0 {
-		return snippets
-	}
-	limit := defaultMaxContextChars
-	for _, binding := range bindings {
-		if binding.Base.MaxContextChars > limit {
-			limit = binding.Base.MaxContextChars
-		}
-	}
-	total := 0
-	result := make([]RetrievedSnippet, 0, len(snippets))
-	for _, snippet := range snippets {
-		length := textLength(snippet.Content)
-		if total+length > limit {
-			remaining := limit - total
-			if remaining <= 0 {
-				break
-			}
-			snippet.Content = truncateText(snippet.Content, remaining)
-			length = textLength(snippet.Content)
-		}
-		result = append(result, snippet)
-		total += length
-	}
 	return result
 }
 
@@ -1635,270 +1629,4 @@ func (s Service) ListExpiredDocs(ctx context.Context, baseID uint64, page int, p
 		}
 	}
 	return all, total + len(statusRows), nil
-}
-
-type docSnapshotEntry struct {
-	DocID        uint64 `json:"doc_id"`
-	IndexVersion int    `json:"index_version"`
-	Title        string `json:"title"`
-}
-
-type baseSnapshotConfig struct {
-	Name                string  `json:"name"`
-	IndexPowerID        uint64  `json:"index_power_id"`
-	EmbeddingPowerID    uint64  `json:"embedding_power_id"`
-	RetrieveLimit       int     `json:"retrieve_limit"`
-	ScoreThreshold      float64 `json:"score_threshold"`
-	MaxContextChars     int     `json:"max_context_chars"`
-	GraphDepth          int     `json:"graph_depth"`
-	ConceptGraphEnabled int16   `json:"concept_graph_enabled"`
-}
-
-func (s Service) CreateSnapshot(ctx context.Context, baseID uint64, name string, description string) (*agentmodel.KnowledgeBaseSnapshot, error) {
-	base := agentmodel.NewKnowledgeBaseModel().Find(ctx, map[string]any{"id": baseID})
-	if base == nil {
-		return nil, fmt.Errorf("知识库不存在")
-	}
-	docs := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
-		"knowledge_base_id": baseID,
-		"index_status":      agentmodel.KnowledgeIndexStatusSuccess,
-		"status":            1,
-	}, map[string]any{
-		"field": "main.id, main.title, main.index_version, main.index_status, main.status",
-	})
-	entries := make([]docSnapshotEntry, 0, len(docs))
-	for _, doc := range docs {
-		if doc == nil {
-			continue
-		}
-		entries = append(entries, docSnapshotEntry{
-			DocID:        doc.ID,
-			IndexVersion: doc.IndexVersion,
-			Title:        doc.Title,
-		})
-	}
-	docJSON, err := json.Marshal(entries)
-	if err != nil {
-		return nil, fmt.Errorf("序列化文档快照失败: %w", err)
-	}
-	cfg := baseSnapshotConfig{
-		Name:                base.Name,
-		IndexPowerID:        base.IndexPowerID,
-		EmbeddingPowerID:    base.EmbeddingPowerID,
-		RetrieveLimit:       base.RetrieveLimit,
-		ScoreThreshold:      base.ScoreThreshold,
-		MaxContextChars:     base.MaxContextChars,
-		GraphDepth:          base.GraphDepth,
-		ConceptGraphEnabled: base.ConceptGraphEnabled,
-	}
-	cfgJSON, err := json.Marshal(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("序列化配置快照失败: %w", err)
-	}
-	lastSnapshot := agentmodel.NewKnowledgeBaseSnapshotModel().Find(ctx, map[string]any{
-		"knowledge_base_id": baseID,
-	}, map[string]any{
-		"field": "main.version",
-		"order": "main.version desc",
-	})
-	version := 1
-	if lastSnapshot != nil {
-		version = lastSnapshot.Version + 1
-	}
-	now := time.Now()
-	id := agentmodel.NewKnowledgeBaseSnapshotModel().Insert(ctx, map[string]any{
-		"knowledge_base_id": baseID,
-		"version":           version,
-		"name":              name,
-		"description":       description,
-		"doc_snapshot":      string(docJSON),
-		"base_config":       string(cfgJSON),
-		"status":            1,
-		"created_at":        now,
-	})
-	if id == 0 {
-		return nil, fmt.Errorf("创建快照失败")
-	}
-	return agentmodel.NewKnowledgeBaseSnapshotModel().Find(ctx, map[string]any{"id": id}), nil
-}
-
-func (s Service) PublishSnapshot(ctx context.Context, baseID uint64, snapshotID uint64) error {
-	snapshot := agentmodel.NewKnowledgeBaseSnapshotModel().Find(ctx, map[string]any{"id": snapshotID, "knowledge_base_id": baseID})
-	if snapshot == nil {
-		return fmt.Errorf("快照不存在")
-	}
-	agentmodel.NewKnowledgeBaseSnapshotModel().Update(ctx, map[string]any{
-		"knowledge_base_id": baseID,
-		"published_at":      map[string]any{"$ne": nil},
-		"status":            1,
-	}, map[string]any{
-		"published_at": nil,
-	})
-	now := time.Now()
-	if agentmodel.NewKnowledgeBaseSnapshotModel().Update(ctx, map[string]any{"id": snapshotID}, map[string]any{
-		"published_at": now,
-	}) == 0 {
-		return fmt.Errorf("发布快照失败")
-	}
-	return nil
-}
-
-func (s Service) ListSnapshots(ctx context.Context, baseID uint64, page int, pageSize int) ([]*agentmodel.KnowledgeBaseSnapshot, int, error) {
-	if baseID == 0 {
-		return nil, 0, nil
-	}
-	rows := agentmodel.NewKnowledgeBaseSnapshotModel().Select(ctx, map[string]any{
-		"knowledge_base_id": baseID,
-		"status":            1,
-	}, map[string]any{
-		"field":    "main.*",
-		"page":     page,
-		"pageSize": pageSize,
-		"order":    "main.version desc",
-	})
-	total := len(rows)
-	return rows, total, nil
-}
-
-func (s Service) GetPublishedSnapshot(ctx context.Context, baseID uint64) (*agentmodel.KnowledgeBaseSnapshot, error) {
-	if baseID == 0 {
-		return nil, nil
-	}
-	snapshot := agentmodel.NewKnowledgeBaseSnapshotModel().Find(ctx, map[string]any{
-		"knowledge_base_id": baseID,
-		"status":            1,
-	}, map[string]any{
-		"field": "main.*",
-		"where": "main.published_at IS NOT NULL",
-		"order": "main.published_at desc",
-	})
-	return snapshot, nil
-}
-
-func (s Service) RollbackSnapshot(ctx context.Context, baseID uint64, snapshotID uint64) error {
-	snapshot := agentmodel.NewKnowledgeBaseSnapshotModel().Find(ctx, map[string]any{"id": snapshotID, "knowledge_base_id": baseID})
-	if snapshot == nil {
-		return fmt.Errorf("快照不存在")
-	}
-	var entries []docSnapshotEntry
-	if err := json.Unmarshal([]byte(snapshot.DocSnapshot), &entries); err != nil {
-		return fmt.Errorf("解析文档快照失败: %w", err)
-	}
-	if len(entries) == 0 {
-		return fmt.Errorf("快照中没有文档")
-	}
-	snapshotDocIDs := make(map[uint64]int)
-	for _, e := range entries {
-		snapshotDocIDs[e.DocID] = e.IndexVersion
-	}
-	currentDocs := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
-		"knowledge_base_id": baseID,
-		"status":            1,
-	}, map[string]any{
-		"field": "main.id, main.index_version",
-	})
-	failed := 0
-	for _, doc := range currentDocs {
-		if doc == nil {
-			continue
-		}
-		wantedVersion, inSnapshot := snapshotDocIDs[doc.ID]
-		if !inSnapshot {
-			continue
-		}
-		if doc.IndexVersion != wantedVersion {
-			if _, err := s.IndexDocument(ctx, doc.ID); err != nil {
-				failed++
-			}
-		}
-	}
-	for _, doc := range currentDocs {
-		if doc == nil {
-			continue
-		}
-		if _, inSnapshot := snapshotDocIDs[doc.ID]; !inSnapshot {
-			s.clearDocumentIndex(ctx, *agentmodel.NewKnowledgeBaseModel().Find(ctx, map[string]any{"id": baseID}), doc.ID)
-			agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": doc.ID}, map[string]any{
-				"status": 0,
-			})
-		}
-	}
-	_ = failed
-	now := time.Now()
-	agentmodel.NewKnowledgeBaseSnapshotModel().Update(ctx, map[string]any{"id": snapshotID}, map[string]any{
-		"published_at": now,
-	})
-	return nil
-}
-
-func (s Service) filterPublishedSnapshot(ctx context.Context, snippets []RetrievedSnippet, baseID uint64) []RetrievedSnippet {
-	snapshot, err := s.GetPublishedSnapshot(ctx, baseID)
-	if err != nil || snapshot == nil || snapshot.DocSnapshot == "" {
-		return snippets
-	}
-	var entries []docSnapshotEntry
-	if err := json.Unmarshal([]byte(snapshot.DocSnapshot), &entries); err != nil {
-		return snippets
-	}
-	if len(entries) == 0 {
-		return snippets
-	}
-	snapshotVersions := make(map[uint64]int, len(entries))
-	for _, e := range entries {
-		if e.DocID > 0 {
-			snapshotVersions[e.DocID] = e.IndexVersion
-		}
-	}
-	validDocs := currentSnapshotVersionDocs(ctx, baseID, snapshotVersions, snippets)
-	if len(validDocs) == 0 {
-		return nil
-	}
-	filtered := make([]RetrievedSnippet, 0, len(snippets))
-	for _, sn := range snippets {
-		if _, ok := validDocs[sn.DocID]; ok {
-			filtered = append(filtered, sn)
-		}
-	}
-	return filtered
-}
-
-func currentSnapshotVersionDocs(ctx context.Context, baseID uint64, snapshotVersions map[uint64]int, snippets []RetrievedSnippet) map[uint64]struct{} {
-	if len(snapshotVersions) == 0 || len(snippets) == 0 {
-		return nil
-	}
-	docIDs := make([]uint64, 0, len(snippets))
-	seen := make(map[uint64]struct{}, len(snippets))
-	for _, sn := range snippets {
-		if _, inSnapshot := snapshotVersions[sn.DocID]; !inSnapshot || sn.DocID == 0 {
-			continue
-		}
-		if _, exists := seen[sn.DocID]; exists {
-			continue
-		}
-		seen[sn.DocID] = struct{}{}
-		docIDs = append(docIDs, sn.DocID)
-	}
-	if len(docIDs) == 0 {
-		return nil
-	}
-	rows := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
-		"id":                docIDs,
-		"knowledge_base_id": baseID,
-		"index_status":      agentmodel.KnowledgeIndexStatusSuccess,
-		"status":            1,
-	}, map[string]any{
-		"field":    "main.id, main.index_version",
-		"page":     1,
-		"pageSize": len(docIDs),
-	})
-	validDocs := make(map[uint64]struct{}, len(rows))
-	for _, row := range rows {
-		if row == nil {
-			continue
-		}
-		if row.IndexVersion == snapshotVersions[row.ID] {
-			validDocs[row.ID] = struct{}{}
-		}
-	}
-	return validDocs
 }

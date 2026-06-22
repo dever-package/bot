@@ -11,7 +11,6 @@ import (
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	"github.com/google/uuid"
-	"github.com/shemic/dever/util"
 )
 
 type embeddingService struct {
@@ -70,19 +69,6 @@ func activeEmbeddingPower(ctx context.Context, powerID uint64) (energonmodel.Pow
 		return energonmodel.Power{}, fmt.Errorf("向量能力必须选择 embeddings 类型: %s", row.Name)
 	}
 	return *row, nil
-}
-
-func defaultEmbeddingPowerID(ctx context.Context) uint64 {
-	rows := energonmodel.NewPowerModel().Select(ctx, map[string]any{
-		"kind":   "embeddings",
-		"status": 1,
-	})
-	for _, row := range rows {
-		if row != nil && row.ID > 0 {
-			return row.ID
-		}
-	}
-	return 0
 }
 
 func parseEmbeddingVector(output botprotocol.Output) []float64 {
@@ -201,27 +187,4 @@ func embeddingNumber(value any) (float64, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func ensureEmbeddingPowerID(ctx context.Context, value any) uint64 {
-	id := util.ToUint64(value)
-	if id > 0 {
-		return id
-	}
-	return defaultEmbeddingPowerID(ctx)
-}
-
-func ensureKnowledgeBaseEmbedding(ctx context.Context, record map[string]any) {
-	if id := ensureEmbeddingPowerID(ctx, record["embedding_power_id"]); id > 0 {
-		record["embedding_power_id"] = id
-	}
-}
-
-func validateKnowledgeBaseEmbedding(ctx context.Context, record map[string]any) error {
-	id := util.ToUint64(record["embedding_power_id"])
-	if id == 0 {
-		return fmt.Errorf("请先配置并选择 embeddings 类型的向量能力")
-	}
-	_, err := activeEmbeddingPower(ctx, id)
-	return err
 }

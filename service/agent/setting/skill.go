@@ -24,6 +24,7 @@ func (AgentHook) ProviderBeforeSaveSkill(_ *server.Context, params []any) any {
 	trimStringField(record, "key", partial)
 	trimStringField(record, "name", partial)
 	trimStringField(record, "description", partial)
+	trimStringField(record, "source_type", partial)
 	trimStringField(record, "source_url", partial)
 	trimStringField(record, "install_input", partial)
 	trimStringField(record, "install_path", partial)
@@ -38,6 +39,13 @@ func (AgentHook) ProviderBeforeSaveSkill(_ *server.Context, params []any) any {
 	}
 	if shouldNormalizeField(record, "entry_file", partial) && util.ToStringTrimmed(record["entry_file"]) == "" {
 		record["entry_file"] = "SKILL.md"
+	}
+	if shouldNormalizeField(record, "source_type", partial) {
+		record["source_type"] = agentmodel.NormalizeSkillSourceType(
+			util.ToStringTrimmed(record["source_type"]),
+			util.ToStringTrimmed(record["source_url"]),
+			util.ToStringTrimmed(record["install_input"]),
+		)
 	}
 	if !partial && util.ToStringTrimmed(record["key"]) == "" {
 		panicAgentField("form.key", "技能标识不能为空。")
@@ -135,8 +143,161 @@ func (AgentHook) ProviderBeforeSaveSkillPackItem(_ *server.Context, params []any
 	return record
 }
 
+func (AgentHook) ProviderAttachSkillPackItemList(c *server.Context, params []any) any {
+	payload := cloneAgentRecord(params)
+	rows := normalizeAgentChildRows(payload["rows"])
+	if len(rows) == 0 {
+		return rows
+	}
+
+	skillIDs := skillPackItemSkillIDs(rows)
+	skillsByID := loadSkillMapsByID(c, skillIDs)
+	draftsBySkillID := loadPendingSkillDraftsBySource(c, skillIDs)
+
+	for _, row := range rows {
+		skillID := util.ToUint64(row["skill_id"])
+		skill := normalizeSkillPackItemSkill(row["skill"])
+		if loaded := skillsByID[skillID]; len(loaded) > 0 {
+			for key, value := range loaded {
+				if _, exists := skill[key]; !exists || util.ToStringTrimmed(skill[key]) == "" {
+					skill[key] = value
+				}
+			}
+		}
+
+		sourceType := agentmodel.NormalizeSkillSourceType(
+			util.ToStringTrimmed(skill["source_type"]),
+			util.ToStringTrimmed(skill["source_url"]),
+			util.ToStringTrimmed(skill["install_input"]),
+		)
+		sourceLabel := agentmodel.SkillSourceTypeLabel(sourceType)
+		skill["source_type"] = sourceType
+		skill["source_type_label"] = sourceLabel
+		row["skill"] = skill
+		row["source_type"] = sourceType
+		row["source_type_label"] = sourceLabel
+
+		if draft := draftsBySkillID[skillID]; draft != nil {
+			row["pending_draft_id"] = draft.ID
+			row["pending_draft"] = skillDraftRowMap(draft)
+			row["publish_state"] = "pending_update"
+			row["publish_state_label"] = "有未发布版本"
+			continue
+		}
+		row["pending_draft_id"] = uint64(0)
+		row["pending_draft"] = pendingSkillDraftSeed(row, skill)
+		row["publish_state"] = "published"
+		if sourceType == agentmodel.SkillSourceTypeInstalled {
+			row["publish_state_label"] = "已安装"
+		} else {
+			row["publish_state_label"] = "已发布"
+		}
+	}
+	return rows
+}
+
 func normalizeSkillPackItemRows(value any) []any {
 	return normalizePackItemRows(value, "skill_id")
+}
+
+func skillPackItemSkillIDs(rows []map[string]any) []uint64 {
+	ids := make([]uint64, 0, len(rows))
+	seen := map[uint64]struct{}{}
+	for _, row := range rows {
+		id := util.ToUint64(row["skill_id"])
+		if id == 0 {
+			id = util.ToUint64(normalizeSkillPackItemSkill(row["skill"])["id"])
+		}
+		if id == 0 {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func normalizeSkillPackItemSkill(value any) map[string]any {
+	if mapped, ok := value.(map[string]any); ok && mapped != nil {
+		return mapped
+	}
+	return map[string]any{}
+}
+
+func loadSkillMapsByID(c *server.Context, skillIDs []uint64) map[uint64]map[string]any {
+	result := map[uint64]map[string]any{}
+	if c == nil || len(skillIDs) == 0 {
+		return result
+	}
+	rows := agentmodel.NewSkillModel().SelectMap(c.Context(), map[string]any{"id": skillIDs})
+	for _, row := range rows {
+		id := util.ToUint64(row["id"])
+		if id == 0 {
+			continue
+		}
+		result[id] = row
+	}
+	return result
+}
+
+func loadPendingSkillDraftsBySource(c *server.Context, skillIDs []uint64) map[uint64]*agentmodel.SkillDraft {
+	result := map[uint64]*agentmodel.SkillDraft{}
+	if c == nil || len(skillIDs) == 0 {
+		return result
+	}
+	rows := agentmodel.NewSkillDraftModel().Select(c.Context(), map[string]any{
+		"source_skill_id": skillIDs,
+		"status":          agentmodel.SkillDraftStatusDraft,
+	})
+	for _, row := range rows {
+		if row == nil || row.SourceSkillID == 0 {
+			continue
+		}
+		if _, exists := result[row.SourceSkillID]; exists {
+			continue
+		}
+		result[row.SourceSkillID] = row
+	}
+	return result
+}
+
+func skillDraftRowMap(row *agentmodel.SkillDraft) map[string]any {
+	if row == nil {
+		return map[string]any{}
+	}
+	return map[string]any{
+		"id":                row.ID,
+		"pack_id":           row.PackID,
+		"cate_id":           row.CateID,
+		"source_skill_id":   row.SourceSkillID,
+		"key":               row.Key,
+		"name":              row.Name,
+		"description":       row.Description,
+		"status":            row.Status,
+		"skill_md":          row.SkillMD,
+		"files_json":        row.FilesJSON,
+		"manifest":          row.Manifest,
+		"validation_result": row.ValidationResult,
+		"created_at":        row.CreatedAt,
+	}
+}
+
+func pendingSkillDraftSeed(row map[string]any, skill map[string]any) map[string]any {
+	return map[string]any{
+		"id":              0,
+		"pack_id":         util.ToUint64(row["pack_id"]),
+		"cate_id":         util.ToUint64(skill["cate_id"]),
+		"source_skill_id": util.ToUint64(row["skill_id"]),
+		"key":             util.ToStringTrimmed(skill["key"]),
+		"name":            util.ToStringTrimmed(skill["name"]),
+		"description":     util.ToStringTrimmed(skill["description"]),
+		"status":          agentmodel.SkillDraftStatusDraft,
+		"files_json":      "{}",
+		"manifest":        "",
+	}
 }
 
 func skillInstallPaths(skills []*agentmodel.Skill) []string {

@@ -29,6 +29,7 @@ type DefaultSettingCatalog struct{}
 const (
 	AssistantWorkSettingID    uint64 = 101
 	SkillInstallPlanSettingID uint64 = 201
+	SkillCreatePlanSettingID  uint64 = 202
 )
 
 var (
@@ -250,7 +251,7 @@ var (
 		},
 		{
 			"id":          SkillInstallPlanSettingID,
-			"cate_id":     DefaultSettingCateID,
+			"cate_id":     AssistantSettingCateID,
 			"name":        "技能安装计划协议",
 			"description": "规定技能安装规划器只输出可校验、可执行的安装计划。",
 			"content": settingText(
@@ -276,6 +277,45 @@ var (
 			),
 			"status": 1,
 			"sort":   10,
+		},
+		{
+			"id":          SkillCreatePlanSettingID,
+			"cate_id":     AssistantSettingCateID,
+			"name":        "技能创建计划协议",
+			"description": "规定技能创建工程师只输出可校验、可保存的技能草稿 patch。",
+			"content": settingText(
+				"- 你是技能创建工程师，只把用户需求转换成 skill_draft_patch，不安装第三方 skill，不发布正式 skill。",
+				"- 信息不足时先用普通回复提出最少的问题，不输出 agent-result，也不要输出空 patch。",
+				"- 信息足够、用户明确要求生成或更新草稿时，只输出一个 agent-result，kind 固定为 skill_draft_patch。",
+				"- patch 只允许包含 key、name、description、skill_md、files_json、manifest、pack_id、cate_id。",
+				"- files_json 必须是对象，key 是相对路径，且只能使用 scripts/、references/、requirements.txt、package.json。",
+				"- manifest 只写 Dever 运行配置，不要把这些字段塞进 SKILL.md frontmatter。",
+				"- manifest.config 只声明配置 schema，可写 key、name、type、target_key、required；required=true 表示缺配置时禁止执行脚本。",
+				"- manifest.scripts 只声明 scripts/ 下入口；manifest.mcp 可声明 stdio MCP server，但每个 server 必须写 key、command、args、tools，tools 不能为空。",
+				"- 不要把真实 cookie、token、api key、secret、私钥或验证码写入 SKILL.md、manifest、files_json、日志或回答。",
+				"- 第三方来源文件只能进入 references/source/；真正可执行能力必须审查后包装到 scripts/ 并在 manifest.scripts 声明。",
+				"- 只在生成或更新草稿时输出下面的 agent-result；追问信息时不要输出示例 JSON。",
+				"",
+				"```agent-result",
+				"{",
+				`  "kind": "skill_draft_patch",`,
+				`  "text": "已生成技能草稿，请检查后保存、测试或发布。",`,
+				`  "json": {`,
+				`    "draft_id": 0,`,
+				`    "patch": {`,
+				`      "key": "example-skill",`,
+				`      "name": "示例技能",`,
+				`      "description": "技能用途说明",`,
+				`      "skill_md": "---\nname: 示例技能\ndescription: 技能用途说明\n---\n\n# 示例技能\n\n## Usage\n\n按用户输入选择是否使用该技能。",`,
+				`      "files_json": {"scripts/run.py": "print('ok')"},`,
+				`      "manifest": {"triggers": [], "config": [], "scripts": [{"key": "run", "path": "scripts/run.py", "runtime": "python"}], "source_refs": []}`,
+				"    }",
+				"  }",
+				"}",
+				"```",
+			),
+			"status": 1,
+			"sort":   20,
 		},
 	}
 )

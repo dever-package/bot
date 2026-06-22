@@ -198,6 +198,7 @@ export type KnowledgeRetrieveDebugResult = {
   knowledge_base: {
     id: number
     name: string
+    mode?: number
     vector_enabled?: boolean
     graph_depth?: number
   }

@@ -3,6 +3,7 @@ package assistant
 import (
 	"strings"
 
+	assistantmodel "github.com/dever-package/bot/model/assistant"
 	memorymodel "github.com/dever-package/bot/model/memory"
 )
 
@@ -61,7 +62,7 @@ func displayMemoryScope(row memorymodel.Memory) string {
 	if scope := normalizeStoredMemoryScope(row); scope != "" {
 		return scope
 	}
-	return legacyMemoryScope(row)
+	return ""
 }
 
 func normalizeMemorySource(source string) string {
@@ -91,7 +92,7 @@ func memoryMatchesScope(row memorymodel.Memory, req MemoryListRequest) bool {
 	case memoryScopeAll:
 		return true
 	case memorymodel.ScopeGlobal:
-		return normalizeStoredMemoryScope(row) == memorymodel.ScopeGlobal || legacyMemoryScope(row) == memorymodel.ScopeGlobal
+		return normalizeStoredMemoryScope(row) == memorymodel.ScopeGlobal
 	case memorymodel.ScopeAgent:
 		return normalizeStoredMemoryScope(row) == memorymodel.ScopeAgent &&
 			strings.TrimSpace(row.AgentKey) == strings.TrimSpace(req.AgentKey)
@@ -108,9 +109,9 @@ func memoryMatchesRequestContext(row memorymodel.Memory, req MemoryListRequest) 
 	scope := normalizeStoredMemoryScope(row)
 	switch scope {
 	case memorymodel.ScopeGlobal:
-		return true
+		return false
 	case memorymodel.ScopeAgent:
-		return strings.TrimSpace(row.AgentKey) == "" || strings.TrimSpace(row.AgentKey) == strings.TrimSpace(req.AgentKey)
+		return false
 	case memorymodel.ScopeContext:
 		return strings.TrimSpace(row.AgentKey) == strings.TrimSpace(req.AgentKey) &&
 			normalizeContextKey(row.ContextKey, row.AgentKey) == normalizeContextKey(req.ContextKey, req.AgentKey)
@@ -118,45 +119,18 @@ func memoryMatchesRequestContext(row memorymodel.Memory, req MemoryListRequest) 
 		return req.SessionID > 0 && row.SessionID == req.SessionID
 	}
 
-	legacy := legacyMemoryScope(row)
-	if legacy == memorymodel.ScopeGlobal {
-		return true
-	}
-	return legacyMemoryMatchesRequest(row, req)
-}
-
-func legacyMemoryScope(row memorymodel.Memory) string {
-	tags := memoryTags(row.Tags)
-	if len(tags) == 0 {
-		return memorymodel.ScopeGlobal
-	}
-	for _, tag := range tags {
-		if strings.HasPrefix(tag, "context:") {
-			return memorymodel.ScopeContext
-		}
-	}
-	for _, tag := range tags {
-		if strings.HasPrefix(tag, "agent:") {
-			return memorymodel.ScopeAgent
-		}
-	}
-	return memorymodel.ScopeGlobal
-}
-
-func legacyMemoryMatchesRequest(row memorymodel.Memory, req MemoryListRequest) bool {
-	tags := memoryTags(row.Tags)
-	if len(tags) == 0 {
-		return true
-	}
-	contextTag := "context:" + normalizeContextKey(req.ContextKey, req.AgentKey)
-	agentTag := ""
-	if strings.TrimSpace(req.AgentKey) != "" {
-		agentTag = "agent:" + strings.TrimSpace(req.AgentKey)
-	}
-	for _, tag := range tags {
-		if tag == contextTag || (agentTag != "" && tag == agentTag) {
-			return true
-		}
-	}
 	return false
+}
+
+func memoryMatchesRuntimeSession(row memorymodel.Memory, session assistantmodel.Session) bool {
+	scope := normalizeStoredMemoryScope(row)
+	switch scope {
+	case memorymodel.ScopeContext:
+		return strings.TrimSpace(row.AgentKey) == strings.TrimSpace(session.AgentKey) &&
+			normalizeContextKey(row.ContextKey, row.AgentKey) == normalizeContextKey(session.ContextKey, session.AgentKey)
+	case memorymodel.ScopeSession:
+		return row.SessionID > 0 && row.SessionID == session.ID
+	default:
+		return false
+	}
 }

@@ -23,7 +23,14 @@ type resolvedNodeAgent struct {
 	Role    *teammodel.Role
 }
 
-const knowledgeQueryInputLimit = 6000
+const (
+	knowledgeQueryInputLimit    = 6000
+	knowledgeInitTextLimit      = 1600
+	knowledgeFileTextLimit      = 1200
+	knowledgeFileReadLimit      = 2400
+	knowledgeFileReadTotalLimit = 6000
+	knowledgeFileReadMaxHits    = 3
+)
 
 func (s Service) executeNodeDAG(ctx context.Context, run teammodel.Run, flowRun teammodel.FlowRun, team teammodel.Team, roles []teammodel.Role, flow teammodel.Flow, nodes []teammodel.FlowNode, edges []teammodel.FlowNodeEdge) (string, map[string]any, error) {
 	nodeByID := map[uint64]teammodel.FlowNode{}
@@ -449,15 +456,55 @@ func (s Service) runKnowledgeNode(ctx context.Context, node teammodel.FlowNode, 
 	if err != nil {
 		return nil, teammodel.RunStatusFail, 0, err
 	}
+	fileHits, fileErr := s.knowledge.SearchKnowledgeRuntimeFiles(ctx, baseID, query, limit)
+	fileContents, fileReadErrs := s.readKnowledgeFileHitContents(ctx, baseID, fileHits)
+	initContent, initFound, initErr := s.knowledge.OpenKnowledgeInitFile(ctx, baseID, knowledgeInitTextLimit)
 	nodes := knowledgeNodeOutputs(result.Nodes)
+	files := knowledgeFileHitOutputs(fileHits, fileContents)
 	return map[string]any{
 		"kind":              "knowledge",
 		"knowledge_base_id": baseID,
 		"query":             query,
-		"text":              knowledgeNodeText(displayQuery, result.Nodes),
+		"text":              knowledgeCombinedText(displayQuery, result.Nodes, fileHits, fileContents, initContent, initFound),
 		"nodes":             nodes,
-		"count":             len(nodes),
+		"files":             files,
+		"init":              knowledgeInitOutput(initContent, initFound),
+		"source_counts": map[string]any{
+			"nodes":      len(nodes),
+			"files":      len(files),
+			"file_texts": len(fileContents),
+			"init":       initFound,
+		},
+		"warnings":   knowledgeNodeWarnings(append([]error{fileErr, initErr}, fileReadErrs...)...),
+		"count":      len(nodes),
+		"file_count": len(files),
 	}, teammodel.RunStatusSuccess, 0, nil
+}
+
+func (s Service) readKnowledgeFileHitContents(ctx context.Context, baseID uint64, hits []knowledgeservice.KnowledgeRuntimeFileSearchHit) ([]knowledgeservice.KnowledgeRuntimeFileContent, []error) {
+	contents := make([]knowledgeservice.KnowledgeRuntimeFileContent, 0, knowledgeFileReadMaxHits)
+	errors := make([]error, 0)
+	remaining := knowledgeFileReadTotalLimit
+	for _, hit := range hits {
+		if len(contents) >= knowledgeFileReadMaxHits || remaining <= 0 {
+			break
+		}
+		readLimit := knowledgeFileReadLimit
+		if readLimit > remaining {
+			readLimit = remaining
+		}
+		content, err := s.knowledge.ReadKnowledgeRuntimeFile(ctx, baseID, hit.ID, readLimit)
+		if err != nil {
+			errors = append(errors, fmt.Errorf("读取原文 %s 失败: %w", hit.Path, err))
+			continue
+		}
+		if strings.TrimSpace(content.Content) == "" {
+			continue
+		}
+		contents = append(contents, content)
+		remaining -= knowledgeTextLength(content.Content)
+	}
+	return contents, errors
 }
 
 func buildKnowledgeNodeQuery(node teammodel.FlowNode, config map[string]any, input map[string]any) string {
@@ -493,7 +540,7 @@ func knowledgeNodeInputText(input map[string]any) string {
 func knowledgeNodeOutputs(nodes []knowledgeservice.KnowledgeNodeResult) []map[string]any {
 	result := make([]map[string]any, 0, len(nodes))
 	for _, node := range nodes {
-		text := knowledgeNodeContent(node, 1200)
+		text := knowledgeNodeContent(node, knowledgeFileTextLimit)
 		if node.ID == 0 && text == "" {
 			continue
 		}
@@ -509,21 +556,109 @@ func knowledgeNodeOutputs(nodes []knowledgeservice.KnowledgeNodeResult) []map[st
 	return result
 }
 
-func knowledgeNodeText(query string, nodes []knowledgeservice.KnowledgeNodeResult) string {
+func knowledgeFileHitOutputs(hits []knowledgeservice.KnowledgeRuntimeFileSearchHit, contents []knowledgeservice.KnowledgeRuntimeFileContent) []map[string]any {
+	contentByID := knowledgeFileContentByID(contents)
+	result := make([]map[string]any, 0, len(hits))
+	for _, hit := range hits {
+		if strings.TrimSpace(hit.Path) == "" {
+			continue
+		}
+		item := map[string]any{
+			"id":           hit.ID,
+			"path":         hit.Path,
+			"name":         hit.Name,
+			"preview":      truncateKnowledgeNodeText(hit.Preview, knowledgeFileTextLimit),
+			"score":        hit.Score,
+			"doc_id":       hit.DocID,
+			"index_status": hit.IndexStatus,
+			"source_type":  hit.SourceType,
+		}
+		if content, ok := contentByID[hit.ID]; ok {
+			item["text"] = truncateKnowledgeNodeText(content.Content, knowledgeFileReadLimit)
+			item["truncated"] = content.Truncated
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
+func knowledgeFileContentByID(contents []knowledgeservice.KnowledgeRuntimeFileContent) map[string]knowledgeservice.KnowledgeRuntimeFileContent {
+	result := make(map[string]knowledgeservice.KnowledgeRuntimeFileContent, len(contents))
+	for _, content := range contents {
+		if strings.TrimSpace(content.ID) != "" {
+			result[content.ID] = content
+		}
+	}
+	return result
+}
+
+func knowledgeInitOutput(content knowledgeservice.KnowledgeRuntimeFileContent, found bool) map[string]any {
+	if !found {
+		return nil
+	}
+	return map[string]any{
+		"id":        content.ID,
+		"path":      content.Path,
+		"name":      content.Name,
+		"text":      truncateKnowledgeNodeText(content.Content, knowledgeInitTextLimit),
+		"truncated": content.Truncated,
+	}
+}
+
+func knowledgeNodeWarnings(errors ...error) []string {
+	warnings := make([]string, 0, len(errors))
+	for _, err := range errors {
+		if err == nil {
+			continue
+		}
+		warnings = append(warnings, err.Error())
+	}
+	return warnings
+}
+
+func knowledgeCombinedText(query string, nodes []knowledgeservice.KnowledgeNodeResult, files []knowledgeservice.KnowledgeRuntimeFileSearchHit, fileContents []knowledgeservice.KnowledgeRuntimeFileContent, init knowledgeservice.KnowledgeRuntimeFileContent, initFound bool) string {
 	query = strings.TrimSpace(query)
-	if len(nodes) == 0 {
+	sections := make([]string, 0, 4)
+	if query != "" {
+		sections = append(sections, "查询："+query)
+	}
+	if initFound && strings.TrimSpace(init.Content) != "" {
+		sections = append(sections, "入口说明:\n"+truncateKnowledgeNodeText(init.Content, knowledgeInitTextLimit))
+	}
+	if len(nodes) > 0 {
+		sections = append(sections, "索引命中:\n"+knowledgeIndexedNodeText(nodes))
+	}
+	if len(fileContents) > 0 {
+		sections = append(sections, "原文内容:\n"+knowledgeFileContentText(fileContents))
+	} else if len(files) > 0 {
+		sections = append(sections, "原文命中:\n"+knowledgeFileHitText(files))
+	}
+	if len(sections) == 0 || (len(nodes) == 0 && len(files) == 0 && !initFound) {
 		if query == "" {
 			return "暂时没有找到相关内容。"
 		}
 		return fmt.Sprintf("未找到与「%s」相关的内容。", query)
 	}
-	sections := make([]string, 0, len(nodes)+1)
-	if query != "" {
-		sections = append(sections, "查询："+query)
+	return strings.Join(sections, "\n\n")
+}
+
+func knowledgeFileContentText(files []knowledgeservice.KnowledgeRuntimeFileContent) string {
+	sections := make([]string, 0, len(files))
+	for index, file := range files {
+		lines := []string{fmt.Sprintf("%d. %s", index+1, file.Path)}
+		if content := truncateKnowledgeNodeText(file.Content, knowledgeFileReadLimit); content != "" {
+			lines = append(lines, content)
+		}
+		sections = append(sections, strings.Join(lines, "\n"))
 	}
+	return strings.Join(sections, "\n\n")
+}
+
+func knowledgeIndexedNodeText(nodes []knowledgeservice.KnowledgeNodeResult) string {
+	sections := make([]string, 0, len(nodes))
 	for index, node := range nodes {
 		title := knowledgeNodeTitle(node)
-		content := knowledgeNodeContent(node, 1200)
+		content := knowledgeNodeContent(node, knowledgeFileTextLimit)
 		lines := []string{fmt.Sprintf("%d. %s", index+1, title)}
 		if content != "" {
 			lines = append(lines, content)
@@ -531,6 +666,22 @@ func knowledgeNodeText(query string, nodes []knowledgeservice.KnowledgeNodeResul
 		sections = append(sections, strings.Join(lines, "\n"))
 	}
 	return strings.Join(sections, "\n\n")
+}
+
+func knowledgeFileHitText(files []knowledgeservice.KnowledgeRuntimeFileSearchHit) string {
+	sections := make([]string, 0, len(files))
+	for index, hit := range files {
+		lines := []string{fmt.Sprintf("%d. %s", index+1, hit.Path)}
+		if preview := truncateKnowledgeNodeText(hit.Preview, knowledgeFileTextLimit); preview != "" {
+			lines = append(lines, preview)
+		}
+		sections = append(sections, strings.Join(lines, "\n"))
+	}
+	return strings.Join(sections, "\n\n")
+}
+
+func knowledgeTextLength(value string) int {
+	return len([]rune(value))
 }
 
 func knowledgeNodeTitle(node knowledgeservice.KnowledgeNodeResult) string {

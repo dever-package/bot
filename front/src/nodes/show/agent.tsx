@@ -9,7 +9,6 @@ import {
 } from 'react'
 import type { NodeItemProps } from '@/page/nodes'
 import {
-  Brain,
   ExternalLink,
   History,
   Loader2,
@@ -20,7 +19,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useStore } from 'zustand'
-import { getCompatModule, request } from '@dever/front-plugin'
+import { getCompatModule, request, useNavigate } from '@dever/front-plugin'
 import { runAgentStream, stopAgentStream } from '@/lib/agent/runner'
 import {
   assistantReferencePayload,
@@ -59,10 +58,7 @@ import {
   AssistantReferenceList,
   AssistantReferencePicker,
 } from '@/components/assistant/reference-picker'
-import {
-  EnergonContentView,
-  type EnergonOutput,
-} from '@/components/energon/content-view'
+import type { EnergonOutput } from '@/components/energon/content-view'
 import {
   cancelStreamTiming,
   StreamTimingBadge,
@@ -82,15 +78,16 @@ import {
   type AgentResultOutput,
   type AgentResultTask,
 } from './agent-result'
+import {
+  AgentContentOutputView,
+  readableAssistantText,
+} from './agent-content-output'
 
 type AgentRole = 'user' | 'assistant'
 
 const ASSISTANT_DIALOG_LAYER_CLASS = 'z-[100]'
 const ASSISTANT_DIALOG_LAYER_Z_INDEX = 1000
-const AssistantMemoryDialog = resolveCompatComponent(
-  '@/components/assistant/memory-dialog',
-  'AssistantMemoryDialog'
-)
+const ASSISTANT_MESSAGE_STATUS_RUNNING = 3
 const AssistantSessionHistoryDialog = resolveCompatComponent(
   '@/components/assistant/session-history-dialog',
   'AssistantSessionHistoryDialog'
@@ -131,24 +128,22 @@ type AgentSuggestion = {
   prompt: string
 }
 
-type AgentMemoryReviewAction = {
-  key: string
-  label: string
-  memory_id?: number
-}
-
 type AgentMemoryReview = {
   status: string
   type?: string
   text?: string
-  candidate_id?: number
   source_message_id?: number
   title?: string
   content?: string
   reason?: string
   existing?: Record<string, unknown>
-  actions?: AgentMemoryReviewAction[]
   error?: string
+}
+
+type SkillDraftPatchProgress = {
+  status: 'saving' | 'saved' | 'failed'
+  draft_id?: number
+  message?: string
 }
 
 type AgentFrame = RuntimeStreamFrame<AgentOutput>
@@ -196,6 +191,7 @@ const EMPTY_OUTPUT: AgentStreamOutput = {
 }
 
 export function ShowAgent({ item, store }: NodeItemProps) {
+  const navigate = useNavigate()
   const [messages, setMessages] = useState<AgentMessage[]>([])
   const [input, setInput] = useState('')
   const [references, setReferences] = useState<AssistantReferenceFile[]>([])
@@ -204,7 +200,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   const [sessionID, setSessionID] = useState(0)
   const [sessionLoading, setSessionLoading] = useState(false)
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false)
-  const [memoryDialogOpen, setMemoryDialogOpen] = useState(false)
   const [running, setRunning] = useState(false)
   const [cancelable, setCancelable] = useState(false)
   const [stopping, setStopping] = useState(false)
@@ -214,6 +209,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   const [interactionDialogMessageID, setInteractionDialogMessageID] =
     useState('')
   const [resultDrawerMessageID, setResultDrawerMessageID] = useState('')
+  const sessionIDRef = useRef(0)
   const messageListRef = useRef<HTMLDivElement>(null)
   const lastAutoScrollResultKeyRef = useRef('')
   const finalSideEffectKeyRef = useRef('')
@@ -245,6 +241,8 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   const stopApi = String(item.meta?.stopApi || '/bot/admin/agent/stop')
   const paramApi = String(item.meta?.paramApi || '/bot/admin/energon/power_params')
   const sessionEnabled = Boolean(item.meta?.sessionEnabled)
+  const historyEnabled = sessionEnabled && item.meta?.historyEnabled !== false
+  const newSessionEnabled = item.meta?.newSessionEnabled !== false
   const memoryEnabled = Boolean(item.meta?.memoryEnabled)
   const sessionApi = String(item.meta?.sessionApi || '/bot/admin/assistant/session')
   const sessionsApi = String(
@@ -267,6 +265,11 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   )
   const messageApi = String(item.meta?.messageApi || '/bot/admin/assistant/message')
   const skillDraftPatchApi = String(item.meta?.skillDraftPatchApi || '')
+  const skillDraftPatchListPath = String(
+    item.meta?.skillDraftPatchListPath || '/bot/agent/skill_draft/list'
+  )
+  const skillDraftPatchAutoApply =
+    item.meta?.skillDraftPatchAutoApply !== false
   const sessionContext = useStore(store, () =>
     resolveAssistantSessionContext(item.meta?.sessionContext, store, agentKey)
   )
@@ -330,13 +333,28 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     [resultDrawerDetail, resultDrawerMessage]
   )
 
+  const hasPendingAssistantMessage = useMemo(
+    () =>
+      messages.some(
+        (message) => message.role === 'assistant' && Boolean(message.running)
+      ),
+    [messages]
+  )
   const canSend = useMemo(
     () =>
       (input.trim().length > 0 || references.length > 0) &&
       agentKey.length > 0 &&
       !sessionLoading &&
-      !running,
-    [agentKey, input, references.length, running, sessionLoading]
+      !running &&
+      !hasPendingAssistantMessage,
+    [
+      agentKey,
+      hasPendingAssistantMessage,
+      input,
+      references.length,
+      running,
+      sessionLoading,
+    ]
   )
   const hasRunningActionTiming = useMemo(
     () =>
@@ -377,6 +395,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     setReferences([])
     setReferenceMessage('')
     setRequestID('')
+    sessionIDRef.current = 0
     setSessionID(0)
     setRunning(false)
     setCancelable(false)
@@ -393,7 +412,9 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     const data = isPlainObject(payload) ? payload : {}
     const session = isPlainObject(data.session) ? data.session : {}
     const sessionId = Number(session.id || 0)
-    setSessionID(Number.isFinite(sessionId) ? sessionId : 0)
+    const nextSessionID = Number.isFinite(sessionId) ? sessionId : 0
+    sessionIDRef.current = nextSessionID
+    setSessionID(nextSessionID)
     setMessages(normalizeAssistantSessionMessages(data.messages))
     scrollMessageListToBottom()
   }, [scrollMessageListToBottom])
@@ -455,7 +476,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     async (
       query: AssistantSessionHistoryQuery
     ): Promise<AssistantSessionListPayload> => {
-      if (!sessionEnabled || !agentKey) {
+      if (!historyEnabled || !agentKey) {
         return emptyAssistantSessionList(query)
       }
       const payload = await assistantApiRequest(sessionsApi, {
@@ -473,7 +494,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         pagination: normalizeAssistantPagination(data.pagination, query),
       }
     },
-    [agentKey, sessionContext, sessionEnabled, sessionsApi]
+    [agentKey, historyEnabled, sessionContext, sessionsApi]
   )
 
   const archiveHistorySession = useCallback(
@@ -596,14 +617,11 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     if (!openPath) {
       return
     }
-    if (modalOpen && !openWasTrackedRef.current) {
-      resetSession()
-    }
-    if (!modalOpen && openWasTrackedRef.current) {
+    if (modalOpen && !openWasTrackedRef.current && !running) {
       resetSession()
     }
     openWasTrackedRef.current = modalOpen
-  }, [modalOpen, openPath, resetSession])
+  }, [modalOpen, openPath, resetSession, running])
 
   useEffect(() => {
     resetSession()
@@ -616,8 +634,39 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     if (openPath && !modalOpen) {
       return
     }
+    if (running) {
+      return
+    }
     void loadAssistantSession(false)
-  }, [agentKey, loadAssistantSession, modalOpen, openPath, sessionEnabled])
+  }, [agentKey, loadAssistantSession, modalOpen, openPath, running, sessionEnabled])
+
+  useEffect(() => {
+    if (
+      !sessionEnabled ||
+      !agentKey ||
+      running ||
+      sessionLoading ||
+      (openPath && !modalOpen) ||
+      !hasPendingAssistantMessage
+    ) {
+      return
+    }
+    const timerID = window.setTimeout(() => {
+      void loadAssistantSession(false)
+    }, 2000)
+    return () => {
+      window.clearTimeout(timerID)
+    }
+  }, [
+    agentKey,
+    hasPendingAssistantMessage,
+    loadAssistantSession,
+    modalOpen,
+    openPath,
+    running,
+    sessionEnabled,
+    sessionLoading,
+  ])
 
   useEffect(() => {
     if (pendingInteractionMessageID) {
@@ -643,7 +692,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     const text =
       input.trim() ||
       (runReferences.length > 0 ? '请根据参考资料和当前任务进行分析。' : '')
-    if (!text || running) {
+    if (!text || running || hasPendingAssistantMessage) {
       return
     }
     const referencePayload = assistantReferencePayload(runReferences)
@@ -670,7 +719,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
 
   const sendSuggestion = async (suggestion: AgentSuggestion) => {
     const text = suggestion.prompt.trim()
-    if (!text || running) {
+    if (!text || running || hasPendingAssistantMessage) {
       return
     }
     setResultDrawerMessageID('')
@@ -796,6 +845,52 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     }
 
     let assistantSaved = false
+    let activeRequestID = ''
+    let assistantRunningMessageSaved = false
+    let assistantRunningMessagePromise: Promise<unknown> | null = null
+    const saveAssistantRunningMessage = (nextRequestID: string) => {
+      const normalizedRequestID = valueText(nextRequestID)
+      if (
+        !normalizedRequestID ||
+        activeSessionID <= 0 ||
+        assistantRunningMessageSaved
+      ) {
+        return
+      }
+      assistantRunningMessageSaved = true
+      assistantRunningMessagePromise = savePersistentMessage(
+        activeSessionID,
+        {
+          ...assistantMessage,
+          text: '智能体正在处理...',
+          requestID: normalizedRequestID,
+        },
+        {
+          requestID: normalizedRequestID,
+          output: {
+            event: 'running',
+            text: '智能体正在处理...',
+          },
+          status: ASSISTANT_MESSAGE_STATUS_RUNNING,
+        }
+      )
+    }
+    const saveAssistantFinalMessage = (
+      finalMessage: AgentMessage,
+      finalOutput: unknown,
+      finalStatus: number
+    ) => {
+      void (async () => {
+        if (assistantRunningMessagePromise) {
+          await assistantRunningMessagePromise.catch(() => undefined)
+        }
+        return await savePersistentMessage(activeSessionID, finalMessage, {
+          requestID: finalMessage.requestID || activeRequestID || requestID,
+          output: finalOutput,
+          status: finalStatus,
+        })
+      })().then((saved) => applySavedMemoryReview(assistantID, saved))
+    }
     try {
       await runAgentStream<AgentOutput>({
         agent: agentKey,
@@ -805,7 +900,11 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         streamApi,
         stopApi,
         blockMs,
-        onRequestID: setRequestID,
+        onRequestID: (nextRequestID) => {
+          activeRequestID = valueText(nextRequestID)
+          setRequestID(activeRequestID)
+          saveAssistantRunningMessage(activeRequestID)
+        },
         onFrame: (frame) => {
           if (runTokenRef.current !== token) {
             return
@@ -815,7 +914,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
             setLastStreamID(streamID)
           }
           applyFrameToMessage(assistantID, frame)
-          handleFinalFrameSideEffects(frame)
+          handleFinalFrameSideEffects(frame, assistantID)
           if (
             activeSessionID > 0 &&
             frame?.type === 'result' &&
@@ -823,12 +922,13 @@ export function ShowAgent({ item, store }: NodeItemProps) {
           ) {
             assistantSaved = true
             const finalOutput = normalizeRuntimeFrameOutput(frame?.output, frame)
+            const finalRequestID =
+              valueText(frame?.request_id) || activeRequestID || requestID
             const finalText =
               valueText(finalOutput.text) ||
               valueText(frame?.msg) ||
               '智能体已返回结果。'
-            void savePersistentMessage(
-              activeSessionID,
+            saveAssistantFinalMessage(
               {
                 ...assistantMessage,
                 text: finalText,
@@ -837,14 +937,11 @@ export function ShowAgent({ item, store }: NodeItemProps) {
                   finalOutput: normalizeAgentDisplayOutput(finalOutput, finalText),
                 },
                 running: false,
-                requestID: valueText(frame?.request_id) || requestID,
+                requestID: finalRequestID,
               },
-              {
-                requestID: valueText(frame?.request_id) || requestID,
-                output: finalOutput,
-                status: Number(frame.status) === 2 ? 2 : 1,
-              }
-            ).then((saved) => applySavedMemoryReview(assistantID, saved))
+              finalOutput,
+              Number(frame.status) === 2 ? 2 : 1
+            )
           }
         },
       })
@@ -855,17 +952,17 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         markAssistantError(assistantID, message)
         if (activeSessionID > 0 && !assistantSaved) {
           assistantSaved = true
-          void savePersistentMessage(
-            activeSessionID,
+          saveAssistantFinalMessage(
             {
               ...assistantMessage,
               text: message,
               running: false,
               error: message,
-              requestID,
+              requestID: activeRequestID || requestID,
             },
-            { requestID, status: 2, output: { error: message, text: message } }
-          ).then((saved) => applySavedMemoryReview(assistantID, saved))
+            { error: message, text: message },
+            2
+          )
         }
       }
     } finally {
@@ -904,8 +1001,11 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     }
   }
 
-  const handleFinalFrameSideEffects = (frame: AgentFrame) => {
-    handleSkillDraftPatchSideEffect(frame)
+  const handleFinalFrameSideEffects = (
+    frame: AgentFrame,
+    messageID?: string
+  ) => {
+    handleSkillDraftPatchSideEffect(frame, messageID)
     if (frame?.type !== 'result' || item.meta?.reloadPageOnFinal !== true) {
       return
     }
@@ -941,8 +1041,15 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     }, delayMs)
   }
 
-  const handleSkillDraftPatchSideEffect = (frame: AgentFrame) => {
-    if (frame?.type !== 'result' || !skillDraftPatchApi) {
+  const handleSkillDraftPatchSideEffect = (
+    frame: AgentFrame,
+    messageID?: string
+  ) => {
+    if (
+      frame?.type !== 'result' ||
+      !skillDraftPatchApi ||
+      !skillDraftPatchAutoApply
+    ) {
       return
     }
     if (Number(frame.status) === 2) {
@@ -964,23 +1071,104 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     const requestPayload = {
       ...context,
       ...payload,
+      ...buildSkillDraftPatchAssistantContext(
+        sessionEnabled,
+        sessionID || sessionIDRef.current,
+        agentKey,
+        sessionContext
+      ),
     }
+    void applySkillDraftPatchRequest(messageID, requestPayload)
+  }
+
+  const applySkillDraftPatchRequest = (
+    messageID: string | undefined,
+    requestPayload: Record<string, unknown>
+  ) => {
+    markSkillDraftPatchProgress(messageID, {
+      status: 'saving',
+      draft_id: skillDraftPatchNumber(
+        requestPayload,
+        'id',
+        'draft_id',
+        'draftId'
+      ),
+      message: '正在保存技能...',
+    })
     void assistantApiRequest(skillDraftPatchApi, requestPayload)
       .then(async (data) => {
-        await reloadSkillDraftDataContainer(
-          store,
-          valueText(item.meta?.skillDraftPatchReloadDataKey).trim() || 'table'
-        )
         syncSkillDraftPatchStore(
           store,
           item.meta?.skillDraftPatchTargetPath,
           requestPayload,
           data
         )
+        await reloadSkillDraftPatchPageData(
+          store,
+          item.meta?.skillDraftPatchReloadDataKeys,
+          item.meta?.skillDraftPatchReloadDataKey,
+          item.meta?.skillDraftPatchReloadPageOnSave
+        )
+        upsertSkillDraftPatchTableRow(
+          store,
+          item.meta?.skillDraftPatchTablePath,
+          item.meta?.skillDraftPatchTargetPath,
+          requestPayload,
+          data
+        )
+        markSkillDraftPatchProgress(messageID, {
+          status: 'saved',
+          draft_id:
+            skillDraftPatchNumber(data, 'draft_id', 'draftId', 'id') ||
+            skillDraftPatchNumber(
+              requestPayload,
+              'id',
+              'draft_id',
+              'draftId'
+            ),
+          message: '技能已保存。',
+        })
+        if (item.meta?.skillDraftPatchCloseOnSave === true && openPath) {
+          store.getState().setValueByPath(openPath, false)
+        }
       })
       .catch((currentError: unknown) => {
-        setError(runtimeErrorMessage(currentError, '应用技能草稿失败。'))
+        const message = runtimeErrorMessage(currentError, '保存技能失败。')
+        markSkillDraftPatchProgress(messageID, {
+          status: 'failed',
+          message,
+        })
+        setError(message)
       })
+  }
+
+  const applyMessageSkillDraftPatch = (
+    messageID: string,
+    output?: AgentOutput | null
+  ) => {
+    if (!skillDraftPatchApi || !output) {
+      return
+    }
+    const payload = resolveSkillDraftPatchPayload(output)
+    if (!payload) {
+      markSkillDraftPatchProgress(messageID, {
+        status: 'failed',
+        message: '没有找到可保存的技能内容。',
+      })
+      return
+    }
+    const context = resolveMetaPathMap(item.meta?.skillDraftPatchContext, store)
+    const requestPayload = {
+      ...context,
+      ...payload,
+      ...buildSkillDraftPatchAssistantContext(
+        sessionEnabled,
+        sessionID || sessionIDRef.current,
+        agentKey,
+        sessionContext
+      ),
+    }
+    applySkillDraftPatchRequest(messageID, requestPayload)
   }
 
   const applyFrameToMessage = (
@@ -1097,6 +1285,22 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     )
   }
 
+  const markSkillDraftPatchProgress = (
+    messageID: string | undefined,
+    progress: SkillDraftPatchProgress
+  ) => {
+    if (!messageID) {
+      return
+    }
+    updateAssistant(messageID, (current) => ({
+      ...current,
+      data: {
+        ...(current.data || {}),
+        skillDraftPatch: progress,
+      },
+    }))
+  }
+
   const applySavedMemoryReview = (messageID: string, saved: unknown) => {
     const message = isPlainObject(saved) && isPlainObject(saved.message)
       ? saved.message
@@ -1116,55 +1320,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         },
       },
     }))
-  }
-
-  const chooseMemoryReview = async (
-    messageID: string,
-    review: AgentMemoryReview,
-    action: AgentMemoryReviewAction
-  ) => {
-    if (running) {
-      return
-    }
-    try {
-      const result = await assistantApiRequest('/bot/admin/assistant/memory_choice', {
-        candidate_id: review.candidate_id || 0,
-        memory_id: action.memory_id || 0,
-        source_message_id: review.source_message_id || 0,
-        choice: action.key,
-      })
-      const nextReview: AgentMemoryReview = {
-        ...review,
-        status: valueText(result.status) || action.key,
-        text: agentMemoryChoiceResultText(action.key, valueText(result.status)),
-        actions: [],
-      }
-      updateAssistant(messageID, (current) => ({
-        ...current,
-        output: {
-          ...(current.output || EMPTY_OUTPUT),
-          finalOutput: {
-            ...(current.output?.finalOutput || {}),
-            memory_review: nextReview,
-          },
-        },
-      }))
-    } catch (currentError: unknown) {
-      const message = runtimeErrorMessage(currentError, '记忆操作失败。')
-      updateAssistant(messageID, (current) => ({
-        ...current,
-        output: {
-          ...(current.output || EMPTY_OUTPUT),
-          finalOutput: {
-            ...(current.output?.finalOutput || {}),
-            memory_review: {
-              ...review,
-              error: message,
-            },
-          },
-        },
-      }))
-    }
   }
 
   const updateRunningAssistant = (
@@ -1254,11 +1409,14 @@ export function ShowAgent({ item, store }: NodeItemProps) {
                   running={running}
                   onOpenInteraction={openInteractionDialog}
                   onOpenResult={() => setResultDrawerMessageID(message.id)}
+                  onOpenDraftBox={() =>
+                    navigate({ to: skillDraftPatchListPath })
+                  }
+                  onApplySkillDraftPatch={(output) =>
+                    applyMessageSkillDraftPatch(message.id, output)
+                  }
                   onSendSuggestion={(suggestion) =>
                     void sendSuggestion(suggestion)
-                  }
-                  onMemoryAction={(review, action) =>
-                    void chooseMemoryReview(message.id, review, action)
                   }
                 />
               )}
@@ -1301,33 +1459,24 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         }}
       />
 
-      <AssistantSessionHistoryDialog
-        open={historyDialogOpen}
-        onOpenChange={setHistoryDialogOpen}
-        agentKey={agentKey}
-        contextKey={sessionContext}
-        activeSessionID={sessionID}
-        disabled={running || sessionLoading}
-        assistantLayer
-        layerClassName={ASSISTANT_DIALOG_LAYER_CLASS}
-        layerZIndex={ASSISTANT_DIALOG_LAYER_Z_INDEX}
-        loadSessions={loadHistorySessions}
-        onOpenSession={(id) => openAssistantSession(id)}
-        onArchiveSession={archiveHistorySession}
-        onRestoreSession={restoreHistorySession}
-        onRenameSession={renameHistorySession}
-      />
-
-      <AssistantMemoryDialog
-        open={memoryDialogOpen}
-        onOpenChange={setMemoryDialogOpen}
-        agentKey={agentKey}
-        contextKey={sessionContext}
-        disabled={running || sessionLoading}
-        assistantLayer
-        layerClassName={ASSISTANT_DIALOG_LAYER_CLASS}
-        layerZIndex={ASSISTANT_DIALOG_LAYER_Z_INDEX}
-      />
+      {historyEnabled ? (
+        <AssistantSessionHistoryDialog
+          open={historyDialogOpen}
+          onOpenChange={setHistoryDialogOpen}
+          agentKey={agentKey}
+          contextKey={sessionContext}
+          activeSessionID={sessionID}
+          disabled={running || sessionLoading}
+          assistantLayer
+          layerClassName={ASSISTANT_DIALOG_LAYER_CLASS}
+          layerZIndex={ASSISTANT_DIALOG_LAYER_Z_INDEX}
+          loadSessions={loadHistorySessions}
+          onOpenSession={(id) => openAssistantSession(id)}
+          onArchiveSession={archiveHistorySession}
+          onRestoreSession={restoreHistorySession}
+          onRenameSession={renameHistorySession}
+        />
+      ) : null}
 
       {error ? (
         <div className='rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive'>
@@ -1340,7 +1489,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
           <div className='border-b px-3 py-2'>
             <AssistantReferenceList
               references={references}
-              disabled={running}
+              disabled={running || hasPendingAssistantMessage}
               onRemove={(index) =>
                 setReferences((current) =>
                   current.filter((_, currentIndex) => currentIndex !== index)
@@ -1351,7 +1500,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         ) : null}
         <Textarea
           value={input}
-          disabled={running}
+          disabled={running || hasPendingAssistantMessage}
           placeholder={inputPlaceholder}
           className='min-h-20 resize-none border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0'
           onChange={(event) => setInput(event.target.value)}
@@ -1361,17 +1510,19 @@ export function ShowAgent({ item, store }: NodeItemProps) {
           <div className='min-w-0 truncate text-xs text-muted-foreground'>
             {requestID
               ? `RequestID: ${requestID}${lastStreamID !== '0-0' ? ` / ${lastStreamID}` : ''}`
-              : referenceMessage ||
-                (sessionEnabled
-                  ? sessionLoading
-                    ? '正在加载历史会话。'
-                    : sessionID
-                      ? '会话已保存，刷新后可继续。'
-                      : '本次会话会保存到后台。'
-                  : '关闭弹窗后会清空本次测试上下文。')}
+              : hasPendingAssistantMessage
+                ? '智能体正在执行，结果会自动同步。'
+                : referenceMessage ||
+                  (sessionEnabled
+                    ? sessionLoading
+                      ? '正在加载历史会话。'
+                      : sessionID
+                        ? '会话已保存，刷新后可继续。'
+                        : '本次会话会保存到后台。'
+                    : '关闭弹窗后会清空本次测试上下文。')}
           </div>
           <div className='flex shrink-0 items-center gap-2'>
-            {sessionEnabled ? (
+            {historyEnabled ? (
               <Button
                 type='button'
                 variant='outline'
@@ -1383,21 +1534,9 @@ export function ShowAgent({ item, store }: NodeItemProps) {
                 历史
               </Button>
             ) : null}
-            {memoryEnabled ? (
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                disabled={running}
-                onClick={() => setMemoryDialogOpen(true)}
-              >
-                <Brain className='size-3.5' />
-                记忆
-              </Button>
-            ) : null}
             <AssistantReferencePicker
               references={references}
-              disabled={running}
+              disabled={running || hasPendingAssistantMessage}
               buttonLabel='素材'
               onReferencesChange={setReferences}
               onMessage={setReferenceMessage}
@@ -1416,20 +1555,22 @@ export function ShowAgent({ item, store }: NodeItemProps) {
               <Trash2 className='size-3.5' />
               清空
             </Button>
-            <Button
-              type='button'
-              variant='outline'
-              size='sm'
-              disabled={running || sessionLoading}
-              onClick={() =>
-                sessionEnabled
-                  ? void startPersistentSession()
-                  : resetSession()
-              }
-            >
-              <RotateCcw className='size-3.5' />
-              {sessionEnabled ? '新会话' : '新对话'}
-            </Button>
+            {newSessionEnabled ? (
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                disabled={running || sessionLoading}
+                onClick={() =>
+                  sessionEnabled
+                    ? void startPersistentSession()
+                    : resetSession()
+                }
+              >
+                <RotateCcw className='size-3.5' />
+                {sessionEnabled ? '新会话' : '新对话'}
+              </Button>
+            ) : null}
             {running ? (
               <Button
                 type='button'
@@ -1452,7 +1593,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
               disabled={!canSend}
               onClick={() => void send()}
             >
-              {running ? (
+              {running || hasPendingAssistantMessage ? (
                 <Loader2 className='size-4 animate-spin' />
               ) : (
                 <Send className='size-4' />
@@ -1538,6 +1679,63 @@ async function reloadSkillDraftDataContainer(
   return Boolean(await compatReloadStoreDataContainer(store, key))
 }
 
+async function reloadSkillDraftPatchPageData(
+  store: NodeItemProps['store'],
+  keysValue: unknown,
+  fallbackValue: unknown,
+  reloadPageValue: unknown
+) {
+  for (const reloadKey of resolveSkillDraftPatchReloadKeys(
+    keysValue,
+    fallbackValue
+  )) {
+    try {
+      await reloadSkillDraftDataContainer(store, reloadKey)
+    } catch {
+      // 保存已经成功，刷新失败时交给本地 upsert 兜底。
+    }
+  }
+  if (reloadPageValue === false) {
+    return
+  }
+  try {
+    await reloadStorePageSchema(store)
+  } catch {
+    // 保存已经成功，刷新失败时交给本地 upsert 兜底。
+  }
+}
+
+function resolveSkillDraftPatchReloadKeys(
+  keysValue: unknown,
+  fallbackValue: unknown
+) {
+  const keys: string[] = []
+  if (Array.isArray(keysValue)) {
+    for (const value of keysValue) {
+      const key = valueText(value).trim()
+      if (key && !keys.includes(key)) {
+        keys.push(key)
+      }
+    }
+  } else {
+    const raw = valueText(keysValue).trim()
+    if (raw) {
+      for (const item of raw.split(',')) {
+        const key = item.trim()
+        if (key && !keys.includes(key)) {
+          keys.push(key)
+        }
+      }
+    }
+  }
+
+  const fallback = valueText(fallbackValue).trim() || 'table'
+  if (keys.length === 0 && fallback) {
+    keys.push(fallback)
+  }
+  return keys
+}
+
 function resolveAssistantSessionContext(
   value: unknown,
   store: NodeItemProps['store'],
@@ -1566,23 +1764,74 @@ function resolveSkillDraftPatchPayload(output: Record<string, unknown>) {
   if (!source) {
     return null
   }
-  const patch = isPlainObject(source.patch)
-    ? source.patch
-    : isPlainObject(source.draft)
-      ? source.draft
+  const patchSource = skillDraftPatchPayloadSource(source)
+  if (!patchSource) {
+    return null
+  }
+  const patch = isPlainObject(patchSource.patch)
+    ? patchSource.patch
+    : isPlainObject(patchSource.draft)
+      ? patchSource.draft
       : null
   if (!patch) {
     return null
   }
-  const draftID = Number(source.draft_id || source.draftId || source.id || 0)
-  const packID = Number(source.pack_id || source.packId || 0)
-  const cateID = Number(source.cate_id || source.cateId || 0)
+  const draftID =
+    skillDraftPatchNumber(patchSource, 'draft_id', 'draftId', 'id') ||
+    skillDraftPatchNumber(source, 'draft_id', 'draftId', 'id')
+  const packID =
+    skillDraftPatchNumber(patchSource, 'pack_id', 'packId') ||
+    skillDraftPatchNumber(source, 'pack_id', 'packId')
+  const cateID =
+    skillDraftPatchNumber(patchSource, 'cate_id', 'cateId') ||
+    skillDraftPatchNumber(source, 'cate_id', 'cateId')
   return {
-    ...(Number.isFinite(draftID) && draftID > 0 ? { id: draftID } : {}),
-    ...(Number.isFinite(packID) && packID > 0 ? { pack_id: packID } : {}),
-    ...(Number.isFinite(cateID) && cateID > 0 ? { cate_id: cateID } : {}),
+    ...(draftID > 0 ? { id: draftID } : {}),
+    ...(packID > 0 ? { pack_id: packID } : {}),
+    ...(cateID > 0 ? { cate_id: cateID } : {}),
     patch,
   }
+}
+
+function buildSkillDraftPatchAssistantContext(
+  sessionEnabled: boolean,
+  sessionID: number,
+  agentKey: string,
+  sessionContext: string
+) {
+  if (!sessionEnabled) {
+    return {}
+  }
+  const payload: Record<string, unknown> = {}
+  if (sessionID > 0) {
+    payload.assistant_session_id = sessionID
+  }
+  if (agentKey) {
+    payload.assistant_agent_key = agentKey
+  }
+  if (sessionContext) {
+    payload.assistant_context_key = sessionContext
+  }
+  return payload
+}
+
+function skillDraftPatchPayloadSource(source: Record<string, unknown>) {
+  const result = isPlainObject(source.result) ? source.result : null
+  const content = isPlainObject(source.content) ? source.content : null
+  const candidates = [
+    source,
+    isPlainObject(source.json) ? source.json : null,
+    content && isPlainObject(content.json) ? content.json : null,
+    result,
+    result && isPlainObject(result.json) ? result.json : null,
+  ]
+  return (
+    candidates.find(
+      (candidate): candidate is Record<string, unknown> =>
+        isPlainObject(candidate) &&
+        (isPlainObject(candidate.patch) || isPlainObject(candidate.draft))
+    ) || null
+  )
 }
 
 function syncSkillDraftPatchStore(
@@ -1632,12 +1881,110 @@ function syncSkillDraftPatchStore(
   store.getState().setValueByPath(targetPath, nextDraft)
 }
 
+function upsertSkillDraftPatchTableRow(
+  store: NodeItemProps['store'],
+  configuredTablePath: unknown,
+  configuredTargetPath: unknown,
+  requestPayload: Record<string, unknown>,
+  responseData: Record<string, unknown>
+) {
+  const tablePath =
+    valueText(configuredTablePath).trim() || 'data.table.list'
+  const currentRows = getStoreValueByPath(store, tablePath)
+  if (!Array.isArray(currentRows)) {
+    return
+  }
+  const row = resolveSkillDraftPatchTableRow(
+    store,
+    configuredTargetPath,
+    requestPayload,
+    responseData
+  )
+  const draftID = skillDraftPatchNumber(row, 'id', 'draft_id', 'draftId')
+  if (draftID <= 0) {
+    return
+  }
+  row.id = draftID
+
+  let replaced = false
+  const nextRows = currentRows.map((current) => {
+    if (
+      isPlainObject(current) &&
+      skillDraftPatchNumber(current, 'id') === draftID
+    ) {
+      replaced = true
+      return { ...current, ...row }
+    }
+    return current
+  })
+  if (!replaced) {
+    nextRows.unshift(row)
+    incrementSkillDraftPatchTableTotal(store, tablePath)
+  }
+  store.getState().setValueByPath(tablePath, nextRows)
+}
+
+function resolveSkillDraftPatchTableRow(
+  store: NodeItemProps['store'],
+  configuredTargetPath: unknown,
+  requestPayload: Record<string, unknown>,
+  responseData: Record<string, unknown>
+) {
+  const targetPath =
+    valueText(configuredTargetPath).trim() || 'data.actionTarget.draftAgent'
+  const current = getStoreValueByPath(store, targetPath)
+  const currentDraft = isPlainObject(current)
+    ? (current as Record<string, unknown>)
+    : {}
+  const responseDraft = isPlainObject(responseData.draft)
+    ? (responseData.draft as Record<string, unknown>)
+    : {}
+  const patch = isPlainObject(requestPayload.patch)
+    ? (requestPayload.patch as Record<string, unknown>)
+    : {}
+  return {
+    ...currentDraft,
+    ...skillDraftPatchStoreValues(patch),
+    ...responseDraft,
+    id:
+      skillDraftPatchNumber(responseData, 'draft_id', 'draftId', 'id') ||
+      skillDraftPatchNumber(responseDraft, 'id', 'draft_id', 'draftId') ||
+      skillDraftPatchNumber(requestPayload, 'id', 'draft_id', 'draftId') ||
+      skillDraftPatchNumber(currentDraft, 'id'),
+  }
+}
+
+function incrementSkillDraftPatchTableTotal(
+  store: NodeItemProps['store'],
+  tablePath: string
+) {
+  const totalPath = tablePath.endsWith('.list')
+    ? `${tablePath.slice(0, -'.list'.length)}.total`
+    : ''
+  if (!totalPath) {
+    return
+  }
+  const total = Number(getStoreValueByPath(store, totalPath))
+  if (Number.isFinite(total)) {
+    store.getState().setValueByPath(totalPath, total + 1)
+  }
+}
+
 function skillDraftPatchStoreValues(patch: Record<string, unknown>) {
   const values: Record<string, unknown> = {}
   assignPatchText(values, patch, 'key', 'key')
   assignPatchText(values, patch, 'name', 'name')
   assignPatchText(values, patch, 'description', 'description', 'desc')
-  assignPatchText(values, patch, 'skill_md', 'skill_md', 'skillMd', 'skill')
+  assignPatchText(
+    values,
+    patch,
+    'skill_md',
+    'skill_md',
+    'skillMd',
+    'skill',
+    'content',
+    'markdown'
+  )
   assignPatchJSONText(
     values,
     patch,
@@ -1749,17 +2096,144 @@ function skillDraftPatchSource(output: Record<string, unknown>) {
     isPlainObject(output.content) && isPlainObject(output.content.json)
       ? output.content.json
       : null,
+    isPlainObject(output.result) ? output.result : null,
+    isPlainObject(output.result) && isPlainObject(output.result.json)
+      ? output.result.json
+      : null,
   ]
   for (const candidate of candidates) {
     if (!isPlainObject(candidate)) {
       continue
     }
-    const kind = valueText(candidate.kind || candidate.type || candidate.event)
-      .trim()
-      .toLowerCase()
-    if (kind === 'skill_draft_patch') {
+    if (isSkillDraftPatchObject(candidate)) {
       return candidate
     }
+  }
+  return skillDraftPatchSourceFromText(output)
+}
+
+function isSkillDraftPatchObject(candidate: Record<string, unknown>) {
+  const kind = valueText(candidate.kind || candidate.type || candidate.event)
+    .trim()
+    .toLowerCase()
+  return (
+    kind === 'skill_draft_patch' ||
+    isPlainObject(candidate.patch) ||
+    isPlainObject(candidate.draft)
+  )
+}
+
+function skillDraftPatchSourceFromText(output: Record<string, unknown>) {
+  for (const text of skillDraftPatchTextCandidates(output)) {
+    for (const block of extractJSONBlocks(text)) {
+      const parsed = parseSkillDraftPatchJSON(block)
+      if (parsed) {
+        return parsed
+      }
+    }
+  }
+  return null
+}
+
+function skillDraftPatchTextCandidates(output: Record<string, unknown>) {
+  const candidates: string[] = []
+  const pushText = (value: unknown) => {
+    const text = valueText(value).trim()
+    if (text && !candidates.includes(text)) {
+      candidates.push(text)
+    }
+  }
+  pushText(output.text)
+  pushText(output.markdown)
+  pushText(output.message)
+  const content = isPlainObject(output.content) ? output.content : null
+  if (content) {
+    pushText(content.text)
+    pushText(content.markdown)
+    pushText(content.message)
+  }
+  return candidates
+}
+
+function extractJSONBlocks(text: string) {
+  const blocks: string[] = []
+  for (const match of text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)) {
+    const block = match[1]?.trim()
+    if (block) {
+      blocks.push(block)
+    }
+  }
+  blocks.push(...extractBalancedJSONObjects(text))
+  if (blocks.length === 0) {
+    blocks.push(text)
+  }
+  return [...new Set(blocks)]
+}
+
+function extractBalancedJSONObjects(text: string) {
+  const results: string[] = []
+  for (let start = 0; start < text.length; start += 1) {
+    if (text[start] !== '{') {
+      continue
+    }
+    const block = readBalancedJSONObject(text, start)
+    if (block) {
+      results.push(block)
+      start += block.length - 1
+    }
+  }
+  return results
+}
+
+function readBalancedJSONObject(text: string, start: number) {
+  let depth = 0
+  let inString = false
+  let escaping = false
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index]
+    if (escaping) {
+      escaping = false
+      continue
+    }
+    if (char === '\\') {
+      escaping = true
+      continue
+    }
+    if (char === '"') {
+      inString = !inString
+      continue
+    }
+    if (inString) {
+      continue
+    }
+    if (char === '{') {
+      depth += 1
+    } else if (char === '}') {
+      depth -= 1
+      if (depth === 0) {
+        return text.slice(start, index + 1)
+      }
+    }
+  }
+  return ''
+}
+
+function parseSkillDraftPatchJSON(text: string) {
+  try {
+    const parsed = JSON.parse(text)
+    if (Array.isArray(parsed)) {
+      return (
+        parsed.find(
+          (item): item is Record<string, unknown> =>
+            isPlainObject(item) && isSkillDraftPatchObject(item)
+        ) || null
+      )
+    }
+    if (isPlainObject(parsed) && isSkillDraftPatchObject(parsed)) {
+      return parsed
+    }
+  } catch {
+    return null
   }
   return null
 }
@@ -1776,7 +2250,10 @@ function normalizeAssistantSessionMessage(value: unknown, index: number) {
     return null
   }
   const role = valueText(value.role) === 'user' ? 'user' : 'assistant'
-  const text = valueText(value.text)
+  const isRunningMessage =
+    Number(value.status || 0) === ASSISTANT_MESSAGE_STATUS_RUNNING
+  const text =
+    valueText(value.text) || (isRunningMessage ? '智能体正在处理...' : '')
   const content = isPlainObject(value.content) ? value.content : {}
   const output = isPlainObject(value.output) ? value.output : {}
   const kind = valueText(content.kind || value.kind) as AgentMessage['kind']
@@ -1789,7 +2266,10 @@ function normalizeAssistantSessionMessage(value: unknown, index: number) {
       ? (content.data as Record<string, unknown>)
       : undefined,
     requestID: valueText(value.request_id),
-    running: false,
+    running: isRunningMessage,
+    actionTiming: isRunningMessage
+      ? createStreamTiming('等待智能体返回')
+      : undefined,
   }
   if (role === 'assistant') {
     const finalOutput = isEmptyRuntimeOutput(output)
@@ -1921,25 +2401,28 @@ function AgentAssistantMessage({
   running,
   onOpenInteraction,
   onOpenResult,
+  onOpenDraftBox,
+  onApplySkillDraftPatch,
   onSendSuggestion,
-  onMemoryAction,
 }: {
   message: AgentMessage
   now: number
   running: boolean
   onOpenInteraction: (messageID: string) => void
   onOpenResult: () => void
+  onOpenDraftBox: () => void
+  onApplySkillDraftPatch: (output?: AgentOutput | null) => void
   onSendSuggestion: (suggestion: AgentSuggestion) => void
-  onMemoryAction: (
-    review: AgentMemoryReview,
-    action: AgentMemoryReviewAction
-  ) => void
 }) {
   const resultDetail = buildAgentResultDetail(message)
   const isResultCard = shouldDisplayResultCard(resultDetail)
   const contentOutput = buildContentViewOutput(message)
   const hasOutput = isResultCard || hasContentViewOutput(contentOutput)
   const suggestions = buildMessageSuggestions(message, hasOutput)
+  const draftProgress = agentMessageSkillDraftPatchProgress(message)
+  const draftPatchPayload = message.output?.finalOutput
+    ? resolveSkillDraftPatchPayload(message.output.finalOutput)
+    : null
 
   return (
     <div className='space-y-2'>
@@ -1956,6 +2439,12 @@ function AgentAssistantMessage({
       {resultDetail && !isResultCard ? (
         <AgentInlineResultActions onOpen={onOpenResult} />
       ) : null}
+      <AgentSkillDraftPatchProgress
+        progress={draftProgress}
+        hasPendingPatch={Boolean(draftPatchPayload)}
+        onApply={() => onApplySkillDraftPatch(message.output?.finalOutput)}
+        onOpenDraftBox={onOpenDraftBox}
+      />
       <StreamTimingBadge timing={message.actionTiming} now={now} />
       {message.error ? (
         <div className='rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-destructive'>
@@ -1981,11 +2470,7 @@ function AgentAssistantMessage({
           </Button>
         </div>
       ) : null}
-      <AgentMemoryReviewCard
-        review={agentMessageMemoryReview(message)}
-        disabled={running}
-        onSelect={onMemoryAction}
-      />
+      <AgentMemoryReviewCard review={agentMessageMemoryReview(message)} />
       <AgentSuggestionBar
         suggestions={suggestions}
         disabled={running}
@@ -2000,259 +2485,9 @@ function AgentAssistantMessage({
   )
 }
 
-function AgentContentOutputView({ output }: { output: unknown }) {
-  const markdown = agentMarkdownText(output)
-  if (markdown) {
-    return <AgentMarkdownView text={markdown} />
-  }
-  return (
-    <EnergonContentView
-      output={output as EnergonOutput}
-      streaming={false}
-      emptyText='等待智能体返回。'
-    />
-  )
-}
-
-function AgentMarkdownView({ text }: { text: string }) {
-  const blocks = markdownBlocks(text)
-  if (blocks.length === 0) {
-    return null
-  }
-  return (
-    <div className='space-y-3 text-sm leading-6 text-foreground'>
-      {blocks.map((block, index) => (
-        <AgentMarkdownBlock
-          key={`${block.type}-${index}-${block.text.slice(0, 20)}`}
-          block={block}
-        />
-      ))}
-    </div>
-  )
-}
-
-type AgentMarkdownBlockData = {
-  type: 'heading' | 'paragraph' | 'bullet' | 'ordered' | 'table'
-  level?: number
-  order?: string
-  text: string
-  header?: string[]
-  rows?: string[][]
-}
-
-function AgentMarkdownBlock({ block }: { block: AgentMarkdownBlockData }) {
-  if (block.type === 'heading') {
-    const className =
-      block.level === 1
-        ? 'text-base font-semibold'
-        : 'text-sm font-semibold text-foreground'
-    return <div className={className}>{inlineMarkdown(block.text)}</div>
-  }
-  if (block.type === 'bullet') {
-    return (
-      <div className='flex gap-2'>
-        <span className='mt-[0.55rem] size-1.5 shrink-0 rounded-full bg-primary/60' />
-        <div className='min-w-0 flex-1'>{inlineMarkdown(block.text)}</div>
-      </div>
-    )
-  }
-  if (block.type === 'ordered') {
-    return (
-      <div className='flex gap-2'>
-        <span className='min-w-5 shrink-0 font-medium text-muted-foreground'>
-          {block.order}.
-        </span>
-        <div className='min-w-0 flex-1'>{inlineMarkdown(block.text)}</div>
-      </div>
-    )
-  }
-  if (block.type === 'table') {
-    return <AgentMarkdownTable block={block} />
-  }
-  return <p>{inlineMarkdown(block.text)}</p>
-}
-
-function AgentMarkdownTable({ block }: { block: AgentMarkdownBlockData }) {
-  const header = block.header || []
-  const rows = block.rows || []
-  if (header.length === 0 && rows.length === 0) {
-    return null
-  }
-  return (
-    <div className='overflow-x-auto rounded-md border bg-background/70'>
-      <table className='w-full min-w-max border-collapse text-left text-xs'>
-        {header.length > 0 ? (
-          <thead className='bg-muted/70'>
-            <tr>
-              {header.map((cell, index) => (
-                <th
-                  key={`${cell}-${index}`}
-                  className='border-b px-2.5 py-1.5 font-medium'
-                >
-                  {inlineMarkdown(cell)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-        ) : null}
-        <tbody>
-          {rows.map((row, rowIndex) => (
-            <tr key={rowIndex} className='border-b last:border-0'>
-              {row.map((cell, cellIndex) => (
-                <td key={`${rowIndex}-${cellIndex}`} className='px-2.5 py-1.5'>
-                  {inlineMarkdown(cell)}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function agentMarkdownText(output: unknown) {
-  if (Array.isArray(output)) {
-    if (output.length !== 1) {
-      return ''
-    }
-    return agentMarkdownText(output[0])
-  }
-  if (!isPlainObject(output)) {
-    return typeof output === 'string' ? readableAssistantText(output) : ''
-  }
-  const content = isPlainObject(output.content) ? output.content : null
-  const format = valueText(content?.format || output.format).toLowerCase()
-  const text = valueText(content?.text || output.text).trim()
-  if (!text) {
-    return ''
-  }
-  return format === 'markdown' || looksLikeMarkdown(text)
-    ? readableAssistantText(text)
-    : ''
-}
-
-function looksLikeMarkdown(text: string) {
-  return /(^|\n)(#{1,6}\s+|\d{1,2}\.\s+|[-*]\s+)/.test(text)
-}
-
-function markdownBlocks(text: string): AgentMarkdownBlockData[] {
-  const lines = readableAssistantText(text)
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-  const blocks: AgentMarkdownBlockData[] = []
-  for (let index = 0; index < lines.length; index += 1) {
-    if (isMarkdownTableStart(lines, index)) {
-      const [table, nextIndex] = markdownTableBlock(lines, index)
-      blocks.push(table)
-      index = nextIndex - 1
-      continue
-    }
-    const block = markdownBlock(lines[index])
-    if (block) {
-      blocks.push(block)
-    }
-  }
-  return blocks
-}
-
-function markdownBlock(line: string): AgentMarkdownBlockData | null {
-  if (!line) {
-    return null
-  }
-  const heading = line.match(/^(#{1,6})\s+(.+)$/)
-  if (heading) {
-    return {
-      type: 'heading',
-      level: heading[1].length,
-      text: heading[2].trim(),
-    }
-  }
-  const ordered = line.match(/^(\d{1,2})\.\s+(.+)$/)
-  if (ordered) {
-    return {
-      type: 'ordered',
-      order: ordered[1],
-      text: ordered[2].trim(),
-    }
-  }
-  const bullet = line.match(/^[-*]\s+(.+)$/)
-  if (bullet) {
-    return {
-      type: 'bullet',
-      text: bullet[1].trim(),
-    }
-  }
-  return {
-    type: 'paragraph',
-    text: line,
-  }
-}
-
-function isMarkdownTableStart(lines: string[], index: number) {
-  return (
-    isMarkdownTableRow(lines[index]) &&
-    index + 1 < lines.length &&
-    isMarkdownTableSeparator(lines[index + 1])
-  )
-}
-
-function markdownTableBlock(
-  lines: string[],
-  start: number
-): [AgentMarkdownBlockData, number] {
-  const header = markdownTableCells(lines[start])
-  const rows: string[][] = []
-  let index = start + 2
-  while (index < lines.length && isMarkdownTableRow(lines[index])) {
-    if (!isMarkdownTableSeparator(lines[index])) {
-      rows.push(markdownTableCells(lines[index]))
-    }
-    index += 1
-  }
-  return [
-    {
-      type: 'table',
-      text: '',
-      header,
-      rows,
-    },
-    index,
-  ]
-}
-
-function isMarkdownTableRow(line: string) {
-  return line.includes('|') && markdownTableCells(line).length >= 2
-}
-
-function isMarkdownTableSeparator(line: string) {
-  const cells = markdownTableCells(line)
-  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell))
-}
-
-function markdownTableCells(line: string) {
-  return line
-    .replace(/^\|/, '')
-    .replace(/\|$/, '')
-    .split('|')
-    .map((cell) => cell.trim())
-}
-
-function inlineMarkdown(text: string) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g)
-  return parts.map((part, index) => {
-    const strong = part.match(/^\*\*([^*]+)\*\*$/)
-    if (strong) {
-      return <strong key={index}>{strong[1]}</strong>
-    }
-    return <span key={index}>{part}</span>
-  })
-}
-
 function AgentInlineResultActions({ onOpen }: { onOpen: () => void }) {
-	return (
-		<div className='flex justify-end'>
+  return (
+    <div className='flex justify-end'>
       <Button
         type='button'
         size='sm'
@@ -2263,6 +2498,107 @@ function AgentInlineResultActions({ onOpen }: { onOpen: () => void }) {
         查看详情
         <ExternalLink className='size-3.5' />
       </Button>
+    </div>
+  )
+}
+
+function AgentSkillDraftPatchProgress({
+  progress,
+  hasPendingPatch,
+  onApply,
+  onOpenDraftBox,
+}: {
+  progress: SkillDraftPatchProgress | null
+  hasPendingPatch: boolean
+  onApply: () => void
+  onOpenDraftBox: () => void
+}) {
+  if (!progress && !hasPendingPatch) {
+    return null
+  }
+  if (!progress && hasPendingPatch) {
+    return (
+      <div className='rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-900'>
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <div className='min-w-0 flex-1 leading-5'>
+            已生成技能内容，确认后保存为未发布版本。
+          </div>
+          <div className='flex shrink-0 items-center gap-2'>
+            <Button
+              type='button'
+              size='sm'
+              className='h-7 px-2 text-xs'
+              onClick={onApply}
+            >
+              保存
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+  const saving = progress.status === 'saving'
+  const failed = progress.status === 'failed'
+  const message =
+    progress.message ||
+    (failed
+      ? '技能保存失败。'
+      : saving
+        ? '正在保存技能...'
+        : '技能已保存。')
+  return (
+    <div
+      className={cn(
+        'rounded-md border px-2.5 py-2 text-xs',
+        failed
+          ? 'border-destructive/30 bg-destructive/10 text-destructive'
+          : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+      )}
+    >
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+        <div className='min-w-0 flex-1 leading-5'>
+          {saving ? (
+            <span className='inline-flex items-center gap-1.5'>
+              <Loader2 className='size-3.5 animate-spin' />
+              {message}
+            </span>
+          ) : failed ? (
+            message
+          ) : (
+            <>
+              {message}
+              {progress.draft_id ? ` ID: ${progress.draft_id}` : ''}
+              <span className='ml-1 text-emerald-700'>
+                下一步在技能草稿页校验、测试和发布。
+              </span>
+            </>
+          )}
+        </div>
+        {failed && hasPendingPatch ? (
+          <div className='flex shrink-0 items-center gap-2'>
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
+              className='h-7 px-2 text-xs'
+              onClick={onApply}
+            >
+              重新保存
+            </Button>
+          </div>
+        ) : !saving && !failed ? (
+          <div className='flex shrink-0 items-center gap-2'>
+            <Button
+              type='button'
+              size='sm'
+              className='h-7 px-2 text-xs'
+              onClick={onOpenDraftBox}
+            >
+              查看技能草稿
+            </Button>
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -2321,66 +2657,43 @@ function AgentSuggestionBar({
 
 function AgentMemoryReviewCard({
   review,
-  disabled,
-  onSelect,
 }: {
   review: AgentMemoryReview | null
-  disabled?: boolean
-  onSelect: (
-    review: AgentMemoryReview,
-    action: AgentMemoryReviewAction
-  ) => void
 }) {
-  if (!review) {
+  if (!review || review.status === 'pending') {
     return null
   }
-  const actions = review.actions || []
   return (
     <div className='rounded-md border bg-background/80 px-2 py-2 text-xs text-muted-foreground'>
       <div className='font-medium text-foreground'>
-        {review.status === 'saved'
-          ? review.text || '已记住'
-          : review.type === 'conflict'
-            ? '这条记忆和已有记忆不一致'
-            : '发现一条可能需要长期记住的规则'}
+        {review.text || agentMemoryReviewTitle(review.status)}
       </div>
-      {review.status === 'pending' ? (
+      {review.content || review.title ? (
         <div className='mt-1 leading-5'>
-          <div className='text-foreground'>{review.title}</div>
+          {review.title ? <div className='text-foreground'>{review.title}</div> : null}
           {review.content ? <div>{review.content}</div> : null}
-          {valueText(review.existing?.content) ? (
-            <div className='mt-1 text-muted-foreground'>
-              原记忆：{valueText(review.existing?.content)}
-            </div>
-          ) : null}
         </div>
       ) : null}
       {review.error ? (
         <div className='mt-1 text-destructive'>{review.error}</div>
       ) : null}
-      {actions.length > 0 ? (
-        <div className='mt-2 flex flex-wrap gap-2'>
-          {actions.map((action) => (
-            <Button
-              key={action.key}
-              type='button'
-              size='sm'
-              variant={
-                action.key === 'remember' || action.key === 'update'
-                  ? 'default'
-                  : 'outline'
-              }
-              className='h-7 px-2 text-xs'
-              disabled={disabled}
-              onClick={() => onSelect(review, action)}
-            >
-              {action.label}
-            </Button>
-          ))}
-        </div>
-      ) : null}
     </div>
   )
+}
+
+function agentMemoryReviewTitle(status: string) {
+  switch (status) {
+    case 'saved':
+      return '已自动保存长期记忆'
+    case 'updated':
+      return '已自动更新长期记忆'
+    case 'deduped':
+      return '已更新长期记忆权重'
+    case 'forgot':
+      return '已清理相关长期记忆'
+    default:
+      return '长期记忆已处理'
+  }
 }
 
 function buildHistory(messages: AgentMessage[]) {
@@ -2826,50 +3139,6 @@ function normalizeAssistantTextDisplayOutput(text: string): AgentOutput {
   })
 }
 
-function readableAssistantText(value: unknown) {
-  const text = valueText(value).trim()
-  if (!text || isProtocolDraftText(text) || text.includes('```')) {
-    return text
-  }
-  if (hasReadableTextStructure(text)) {
-    return text
-  }
-  return structureCompactAssistantText(text)
-}
-
-function hasReadableTextStructure(text: string) {
-  const lines = text
-    .split(/\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-  if (lines.length >= 3) {
-    return true
-  }
-  return lines.some((line) =>
-    /^(#{1,6}\s+|\d{1,2}\.\s+|[-*]\s+)/.test(line)
-  )
-}
-
-function structureCompactAssistantText(text: string) {
-  let result = text.replace(/[ \t]+/g, ' ')
-  result = result.replace(/([：:。！？!?；;])(?=\d{1,2}\.[^\d\s])/g, '$1\n\n')
-  result = result.replace(
-    /([^\n])(\d{1,2})\.([^\s\d])/g,
-    (_match, prefix: string, index: string, next: string) =>
-      `${prefix}\n\n${index}. ${next}`
-  )
-  result = result.replace(
-    /(^|\n)(\d{1,2})\.\s*([^\n-]{2,42})\s*-\s*/g,
-    (_match, prefix: string, index: string, title: string) =>
-      `${prefix}${index}. ${title.trim()}\n- `
-  )
-  result = result.replace(/(^|\n)(\d{1,2})\.([^\s])/g, '$1$2. $3')
-  result = result.replace(/([：:。！？!?；;])\s*-\s*/g, '$1\n- ')
-  result = result.replace(/\n-\s*/g, '\n- ')
-  result = result.replace(/\n{3,}/g, '\n\n')
-  return result.trim()
-}
-
 function shouldDisplayResultCard(detail?: AgentResultDetail | null) {
   return Boolean(detail && resultDisplayMode(detail) === 'artifact')
 }
@@ -2911,6 +3180,25 @@ function agentMessageMemoryReview(message: AgentMessage) {
   return normalizeAgentMemoryReview(output.memory_review)
 }
 
+function agentMessageSkillDraftPatchProgress(
+  message: AgentMessage
+): SkillDraftPatchProgress | null {
+  const raw = message.data?.skillDraftPatch
+  if (!isPlainObject(raw)) {
+    return null
+  }
+  const status = valueText(raw.status).trim()
+  if (status !== 'saving' && status !== 'saved' && status !== 'failed') {
+    return null
+  }
+  return {
+    status,
+    draft_id:
+      skillDraftPatchNumber(raw, 'draft_id', 'draftId', 'id') || undefined,
+    message: valueText(raw.message),
+  }
+}
+
 function normalizeAgentMemoryReview(value: unknown): AgentMemoryReview | null {
   if (!isPlainObject(value)) {
     return null
@@ -2919,48 +3207,17 @@ function normalizeAgentMemoryReview(value: unknown): AgentMemoryReview | null {
   if (!status) {
     return null
   }
-  const actions = Array.isArray(value.actions)
-    ? value.actions
-        .filter(isPlainObject)
-        .map((item) => ({
-          key: valueText(item.key),
-          label: valueText(item.label),
-          memory_id: Number(item.memory_id || 0) || undefined,
-        }))
-        .filter((item) => item.key && item.label)
-    : []
   return {
     status,
     type: valueText(value.type),
     text: valueText(value.text),
-    candidate_id: Number(value.candidate_id || 0) || undefined,
     source_message_id: Number(value.source_message_id || 0) || undefined,
     title: valueText(value.title),
     content: valueText(value.content),
     reason: valueText(value.reason),
     existing: isPlainObject(value.existing) ? value.existing : undefined,
-    actions,
     error: valueText(value.error),
   }
-}
-
-function agentMemoryChoiceResultText(choice: string, status: string) {
-  if (choice === 'undo') {
-    return status === 'undone' ? '已撤销这条记忆。' : '已处理。'
-  }
-  if (choice === 'session') {
-    return '已设为仅本次使用，不会写入长期记忆。'
-  }
-  if (choice === 'keep_old') {
-    return '已保留原记忆。'
-  }
-  if (choice === 'ignore') {
-    return '已忽略这条候选记忆。'
-  }
-  if (choice === 'update') {
-    return '已更新记忆。'
-  }
-  return '已记住。'
 }
 
 function shouldRunFinalSideEffect(kind: string, allowedKinds: unknown) {

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const knowledgeToolNames = "list_knowledge_tree, search_knowledge_nodes, open_knowledge_node, expand_knowledge_node, find_related_knowledge, debug_knowledge_retrieval"
+const knowledgeToolNames = "open_knowledge_init, list_knowledge_files, search_knowledge_files, read_knowledge_file, list_knowledge_tree, search_knowledge_nodes, open_knowledge_node, expand_knowledge_node, find_related_knowledge, debug_knowledge_retrieval"
 
 func knowledgeToolPrompt(bases []KnowledgeBaseRuntime) string {
 	bases = normalizeKnowledgeBaseRuntime(bases)
@@ -31,8 +31,9 @@ func knowledgeToolPolicyPrompt() string {
 
 func knowledgeRetrievalWorkflowPrompt() string {
 	return strings.Join([]string{
-		"- 推荐流程：list_knowledge_tree 看结构；search_knowledge_nodes 按知识库配置融合关键词、向量、规划和图谱检索候选；open_knowledge_node 读取原文；expand_knowledge_node 展开上下文；find_related_knowledge 查相关节点。",
-		"- 当召回结果不足、需要解释为什么命中某些资料，或需要调试检索计划时，使用 debug_knowledge_retrieval 查看规划、图谱扩展、来源统计和候选片段。",
+		"- 原文读取默认可用，不依赖索引。进入知识库先尝试 open_knowledge_init；没有 init.md 时用 list_knowledge_files 看文件，再用 search_knowledge_files 或 read_knowledge_file 读取原文。",
+		"- 需要召回候选时使用 search_knowledge_nodes；命中片段只是候选，关键事实要用 open_knowledge_node 或 read_knowledge_file 回读原文确认。",
+		"- 智能增强知识库可结合 expand_knowledge_node、find_related_knowledge 和 debug_knowledge_retrieval 查看规划、图谱扩展、来源统计和候选片段；轻量检索下不要依赖图谱或规划。",
 	}, "\n")
 }
 
@@ -73,7 +74,7 @@ func knowledgeToolExamplePrompt(baseID uint64) string {
 		"```agent-action",
 		"{",
 		`  "type": "call_tool",`,
-		`  "tool": "search_knowledge_nodes",`,
+		`  "tool": "search_knowledge_files",`,
 		`  "input": {`,
 		fmt.Sprintf(`    "knowledge_base_id": %d,`, baseID),
 		`    "query": "要查询的问题",`,

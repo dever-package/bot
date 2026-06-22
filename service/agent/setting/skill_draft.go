@@ -29,6 +29,9 @@ func (AgentHook) ProviderBeforeSaveSkillDraft(_ *server.Context, params []any) a
 	if shouldNormalizeField(record, "key", partial) {
 		record["key"] = skillservice.NormalizeKey(util.ToStringTrimmed(record["key"]))
 	}
+	if shouldNormalizeField(record, "pack_id", partial) && util.ToUint64(record["pack_id"]) == 0 {
+		record["pack_id"] = defaultSkillPackID
+	}
 	if shouldNormalizeField(record, "cate_id", partial) && util.ToUint64(record["cate_id"]) == 0 {
 		record["cate_id"] = defaultSkillCateID
 	}
@@ -51,7 +54,7 @@ func (AgentHook) ProviderBeforeSaveSkillDraft(_ *server.Context, params []any) a
 		record["manifest"] = normalizeSkillDraftManifest(record)
 	}
 	if shouldNormalizeField(record, "validation_result", partial) {
-		record["validation_result"] = normalizeSkillDraftJSON(record["validation_result"], "{}", "form.validation_result", "校验结果必须是 JSON 对象。")
+		record["validation_result"] = normalizeSkillDraftJSON(record["validation_result"], "{}", "form.validation_result", "测试结果必须是 JSON 对象。")
 	}
 	return record
 }

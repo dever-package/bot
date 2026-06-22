@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -331,14 +332,35 @@ func (Knowledge) GetDownloadFile(c *server.Context) error {
 		return c.Error("当前环境不支持文件下载")
 	}
 	raw.Status(fiber.StatusOK)
+	raw.Set("X-Content-Type-Options", "nosniff")
 	if file.MimeType != "" {
 		raw.Set(fiber.HeaderContentType, file.MimeType)
 	}
 	if strings.TrimSpace(c.Input("preview")) == "1" {
+		if !isSafeKnowledgeInlinePreview(file.Name, file.MimeType) {
+			return raw.Download(file.Path, file.Name)
+		}
 		raw.Set(fiber.HeaderContentDisposition, "inline")
 		return raw.SendFile(file.Path)
 	}
 	return raw.Download(file.Path, file.Name)
+}
+
+func isSafeKnowledgeInlinePreview(name string, mimeType string) bool {
+	mimeType = strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0]))
+	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(name)))
+	if ext == ".svg" || ext == ".html" || ext == ".htm" || ext == ".js" || ext == ".mjs" || ext == ".xml" {
+		return false
+	}
+	if strings.HasPrefix(mimeType, "image/") {
+		return mimeType != "image/svg+xml"
+	}
+	switch mimeType {
+	case "application/pdf", "application/json", "text/plain", "text/markdown", "text/csv":
+		return true
+	default:
+		return false
+	}
 }
 
 func (Knowledge) PostFeedback(c *server.Context) error {

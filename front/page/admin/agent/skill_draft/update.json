@@ -1,6 +1,6 @@
 {
   "page": {
-    "parent": "bot/agent/skill_draft/list",
+    "parent": "bot/agent/skill_pack/list",
     "type": 2,
     "sort": 1,
     "auth": [
@@ -80,6 +80,7 @@
       },
       {
         "type": "form-select",
+        "name": "技能方案",
         "value": "form.pack_id",
         "mode": "form",
         "option": {
@@ -155,7 +156,7 @@
     "form": {
       "model": "bot.agent.NewSkillDraftModel",
       "id": 0,
-      "pack_id": 0,
+      "pack_id": 1,
       "cate_id": 1,
       "source_skill_id": 0,
       "key": "",

@@ -85,6 +85,11 @@ type ContextMenuState = {
   node: KnowledgeTreeNode | null
 } | null
 
+type CreateNodeDialogState = {
+  type: "file" | "folder"
+  parent: string
+}
+
 type IndexStatus = "pending" | "running" | "success" | "failed" | ""
 
 type DraftState = {
@@ -146,6 +151,8 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
   const [indexMapOpen, setIndexMapOpen] = useState(false)
   const [indexConfirmOpen, setIndexConfirmOpen] = useState(false)
   const [retrieveTestOpen, setRetrieveTestOpen] = useState(false)
+  const [createDialog, setCreateDialog] = useState<CreateNodeDialogState | null>(null)
+  const [creatingNode, setCreatingNode] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null)
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null)
 
@@ -168,13 +175,10 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
   )
   const hasRunningIndex = baseIndexStatus === "running"
   const indexBusy = indexing || hasRunningIndex
-  const canReindex = baseIndexStatus === "success" || baseIndexStatus === "failed"
+  const enhancedIndexMode = Number(data.base?.concept_graph_enabled) === 1
+  const indexActionText = enhancedIndexMode ? "更新增强索引" : "更新搜索索引"
   const currentIndexStatus = normalizeFrontendIndexStatus(currentFile?.index_status)
-  const indexButtonText = indexBusy
-    ? "索引中"
-    : canReindex
-      ? "重新索引"
-      : "智能索引"
+  const indexButtonText = indexBusy ? "索引中" : indexActionText
   const reloadFiles = useCallback(async () => {
     if (!knowledgeBaseID) {
       return
@@ -231,6 +235,8 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
     setIndexMapOpen(false)
     setIndexConfirmOpen(false)
     setRetrieveTestOpen(false)
+    setCreateDialog(null)
+    setCreatingNode(false)
     openFileRequestRef.current += 1
     restoredKnowledgeBaseRef.current = 0
   }, [knowledgeBaseID])
@@ -317,24 +323,27 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
     [currentFile, draft, focusedID, knowledgeBaseID, selectedID, updateExpandedFolders],
   )
 
-  const createNode = useCallback(
-    async (type: "file" | "folder", parentID?: string) => {
+  const openCreateDialog = useCallback(
+    (type: "file" | "folder", parentID?: string) => {
       if (!knowledgeBaseID) {
         return
       }
-      const name = window.prompt(
-        type === "folder" ? "文件夹名称" : "文件名称",
-        type === "folder" ? defaultFolderName : defaultFileName,
-      )
-      if (!name?.trim()) {
-        return
+      setCreateDialog({ type, parent: parentID || rootNodeID })
+    },
+    [knowledgeBaseID],
+  )
+
+  const createNode = useCallback(
+    async (type: "file" | "folder", parent: string, name: string) => {
+      const trimmedName = name.trim()
+      if (!knowledgeBaseID || !trimmedName) {
+        return false
       }
-      const parent = parentID || rootNodeID
       try {
         const result = await createFile({
           knowledgeBaseID,
           parent,
-          name: name.trim(),
+          name: trimmedName,
           type,
         })
         setData(result)
@@ -346,11 +355,31 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           }
         }
         toast.success(type === "folder" ? "文件夹已创建" : "文件已创建")
+        return true
       } catch (error) {
         toast.error(errorMessage(error, "创建失败"))
+        return false
       }
     },
     [knowledgeBaseID, openFile, updateExpandedFolders],
+  )
+
+  const submitCreateNode = useCallback(
+    async (name: string) => {
+      if (!createDialog || creatingNode) {
+        return
+      }
+      setCreatingNode(true)
+      try {
+        const created = await createNode(createDialog.type, createDialog.parent, name)
+        if (created) {
+          setCreateDialog(null)
+        }
+      } finally {
+        setCreatingNode(false)
+      }
+    },
+    [createDialog, createNode, creatingNode],
   )
 
   const renameNode = useCallback(
@@ -462,7 +491,7 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
     }
   }, [currentFile, draft, knowledgeBaseID, reloadFiles])
 
-  const runSmartIndex = useCallback(
+  const runKnowledgeIndex = useCallback(
     async () => {
       if (!knowledgeBaseID || indexBusy) {
         return
@@ -472,15 +501,15 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
       try {
         await indexKnowledgeBase({ knowledgeBaseID })
         setData(markKnowledgeIndexRunning)
-        toast.success(canReindex ? "已开始重新索引知识库" : "已开始索引整个知识库")
+        toast.success(enhancedIndexMode ? "已开始更新增强索引" : "已开始更新搜索索引")
         await reloadFiles()
       } catch (error) {
-        toast.error(errorMessage(error, "智能索引启动失败"))
+        toast.error(errorMessage(error, "索引启动失败"))
       } finally {
         setIndexing(false)
       }
     },
-    [canReindex, indexBusy, knowledgeBaseID, reloadFiles],
+    [enhancedIndexMode, indexBusy, knowledgeBaseID, reloadFiles],
   )
 
   const openFileIndexDetail = useCallback(async () => {
@@ -803,11 +832,11 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
             <Network size={16} />
             {indexButtonText}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => void createNode("folder")}>
+          <Button variant="outline" size="sm" onClick={() => openCreateDialog("folder")}>
             <FolderPlus size={16} />
             文件夹
           </Button>
-          <Button variant="outline" size="sm" onClick={() => void createNode("file")}>
+          <Button variant="outline" size="sm" onClick={() => openCreateDialog("file")}>
             <Plus size={16} />
             文件
           </Button>
@@ -1050,14 +1079,14 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           state={contextMenu}
           onCreateFolder={(node) => {
             setContextMenu(null)
-            void createNode(
+            openCreateDialog(
               "folder",
               node?.type === "folder" ? node.id : parentIDOf(node?.id || ""),
             )
           }}
           onCreateFile={(node) => {
             setContextMenu(null)
-            void createNode(
+            openCreateDialog(
               "file",
               node?.type === "folder" ? node.id : parentIDOf(node?.id || ""),
             )
@@ -1092,6 +1121,7 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
       ) : null}
       <KnowledgeIndexMap
         knowledgeBaseID={knowledgeBaseID}
+        mode={data.base?.concept_graph_enabled}
         open={indexMapOpen}
         onClose={() => setIndexMapOpen(false)}
         onRefreshFiles={() => void reloadFiles()}
@@ -1104,16 +1134,116 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           onClose={() => setRetrieveTestOpen(false)}
         />
       ) : null}
+      {createDialog ? (
+        <CreateNodeDialog
+          key={`${createDialog.type}:${createDialog.parent}`}
+          state={createDialog}
+          loading={creatingNode}
+          onClose={() => {
+            if (!creatingNode) {
+              setCreateDialog(null)
+            }
+          }}
+          onSubmit={(name) => void submitCreateNode(name)}
+        />
+      ) : null}
       <ConfirmDialog
         open={indexConfirmOpen}
         onOpenChange={setIndexConfirmOpen}
-        title={canReindex ? "重新索引知识库" : "智能索引"}
-        desc="确定要索引整个知识库吗？系统会清空旧索引并重新解析全部文档，索引过程中不能重复触发。"
-        confirmText={canReindex ? "重新索引" : "开始索引"}
+        title={indexActionText}
+        desc={enhancedIndexMode
+          ? "将重新解析文档并生成搜索索引，同时更新图谱、向量等增强数据。索引过程中不能重复触发。"
+          : "将重新解析文档并生成本地搜索索引。原文读取不依赖索引，索引过程中不能重复触发。"}
+        confirmText="开始更新"
         disabled={indexBusy}
         isLoading={indexBusy}
-        handleConfirm={() => void runSmartIndex()}
+        handleConfirm={() => void runKnowledgeIndex()}
       />
+    </div>
+  )
+}
+
+function CreateNodeDialog({
+  state,
+  loading,
+  onClose,
+  onSubmit,
+}: {
+  state: CreateNodeDialogState
+  loading: boolean
+  onClose: () => void
+  onSubmit: (name: string) => void
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const initialName = state.type === "folder" ? defaultFolderName : defaultFileName
+  const [name, setName] = useState(initialName)
+
+  useLayoutEffect(() => {
+    const input = inputRef.current
+    if (!input) {
+      return
+    }
+    input.focus()
+    input.setSelectionRange(0, defaultNameSelectionEnd(initialName, state.type))
+  }, [initialName, state.type])
+
+  return (
+    <div
+      className="knowledge-index-detail knowledge-name-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label={state.type === "folder" ? "新建文件夹" : "新建文件"}
+      onClick={loading ? undefined : onClose}
+    >
+      <form
+        className="knowledge-index-detail__panel knowledge-name-dialog__panel"
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault()
+          const trimmedName = name.trim()
+          if (trimmedName) {
+            onSubmit(trimmedName)
+          }
+        }}
+      >
+        <div className="knowledge-index-detail__header">
+          <div>
+            <strong>{state.type === "folder" ? "新建文件夹" : "新建文件"}</strong>
+            <span>{state.type === "folder" ? "输入文件夹名称" : "输入文件名称"}</span>
+          </div>
+          <button type="button" onClick={onClose} aria-label="关闭" disabled={loading}>
+            ×
+          </button>
+        </div>
+        <div className="knowledge-name-dialog__body">
+          <label htmlFor="knowledge-create-node-name">
+            {state.type === "folder" ? "文件夹名称" : "文件名称"}
+          </label>
+          <input
+            ref={inputRef}
+            className="knowledge-name-dialog__input"
+            id="knowledge-create-node-name"
+            type="text"
+            value={name}
+            disabled={loading}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && !loading) {
+                event.preventDefault()
+                onClose()
+              }
+            }}
+          />
+        </div>
+        <div className="knowledge-name-dialog__footer">
+          <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
+            取消
+          </Button>
+          <Button type="submit" disabled={loading || !name.trim()}>
+            {loading ? "创建中" : "确定"}
+          </Button>
+        </div>
+      </form>
     </div>
   )
 }
@@ -1140,6 +1270,14 @@ function EditorHeaderStatus({ status }: { status: KnowledgeFileViewerStatus | nu
       <RefreshCw size={15} />
     </span>
   )
+}
+
+function defaultNameSelectionEnd(name: string, type: "file" | "folder") {
+  if (type === "folder") {
+    return name.length
+  }
+  const dotIndex = name.lastIndexOf(".")
+  return dotIndex > 0 ? dotIndex : name.length
 }
 
 function IndexStatusBadge({
@@ -1264,6 +1402,7 @@ function RetrieveTestDialog({
             <div className="knowledge-index-detail__meta">
               <span>问题：{result.query || query}</span>
               <span>命中：{snippets.length}</span>
+              <span>命中片段为候选，智能体会按需读取原文确认。</span>
               {sourceCounts.map(([source, count]) => (
                 <span key={source}>{sourceLabel(source)}：{count}</span>
               ))}
@@ -1286,13 +1425,15 @@ function RetrieveTestDialog({
                 ))}
               </div>
             </IndexDetailSection>
-            <IndexDetailSection title="检索计划" count={plans.length}>
-              <div className="knowledge-retrieve-test__plans">
-                {plans.map((plan, index) => (
-                  <pre key={index}>{formatDebugJSON(plan)}</pre>
-                ))}
-              </div>
-            </IndexDetailSection>
+            {plans.length ? (
+              <IndexDetailSection title="检索计划" count={plans.length}>
+                <div className="knowledge-retrieve-test__plans">
+                  {plans.map((plan, index) => (
+                    <pre key={index}>{formatDebugJSON(plan)}</pre>
+                  ))}
+                </div>
+              </IndexDetailSection>
+            ) : null}
           </div>
         ) : (
           <div className="knowledge-index-detail__empty">输入问题后开始测试。</div>
@@ -1304,7 +1445,7 @@ function RetrieveTestDialog({
 
 function knowledgeModeLabel(value?: number) {
   if (Number(value) === 2) {
-    return "轻量模式"
+    return "轻量检索"
   }
   if (Number(value) === 1) {
     return "智能增强"
@@ -1318,9 +1459,14 @@ function sourceLabel(value: string) {
     node: "关键词",
     graph: "图谱",
     vector: "向量",
+    node_vector: "向量",
     planned_doc: "规划文档",
     agentic_knowledge: "综合",
     planner: "规划",
+    init: "初始化文件",
+    file: "原文",
+    file_search: "原文搜索",
+    file_read: "原文读取",
   }
   return labels[source] || source || "未知"
 }

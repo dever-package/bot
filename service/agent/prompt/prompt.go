@@ -12,7 +12,6 @@ import (
 type RuntimeInput struct {
 	PublicSettings []agentmodel.Setting
 	AgentSettings  []agentmodel.AgentSetting
-	Knowledge      []KnowledgeSnippet
 	KnowledgeBases []KnowledgeBaseRuntime
 	Memory         []MemorySnippet
 	Powers         []energonmodel.Power

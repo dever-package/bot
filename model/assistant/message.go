@@ -7,13 +7,15 @@ import (
 )
 
 const (
-	MessageStatusNormal int16 = 1
-	MessageStatusError  int16 = 2
+	MessageStatusNormal  int16 = 1
+	MessageStatusError   int16 = 2
+	MessageStatusRunning int16 = 3
 )
 
 var messageStatusOptions = []map[string]any{
 	{"id": MessageStatusNormal, "value": "正常"},
 	{"id": MessageStatusError, "value": "异常"},
+	{"id": MessageStatusRunning, "value": "执行中"},
 }
 
 type Message struct {

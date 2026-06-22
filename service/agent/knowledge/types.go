@@ -19,11 +19,6 @@ type IndexResult struct {
 	FinishedAt time.Time `json:"finished_at"`
 }
 
-type RetrieveRequest struct {
-	AgentID uint64
-	Query   string
-}
-
 type RetrieveResult struct {
 	Snippets []RetrievedSnippet `json:"snippets"`
 	Matches  []map[string]any   `json:"matches"`
@@ -48,6 +43,7 @@ type RetrieveDebugResult struct {
 type KnowledgeRetrieveDebugBase struct {
 	ID         uint64 `json:"id"`
 	Name       string `json:"name"`
+	Mode       int16  `json:"mode"`
 	GraphDepth int    `json:"graph_depth"`
 }
 
@@ -75,6 +71,7 @@ type knowledgeBaseConfig struct {
 	IndexPowerID     uint64
 	Collection       string
 	EmbeddingPowerID uint64
+	ConceptGraphMode int16
 	RetrieveLimit    int
 	ScoreThreshold   float64
 	MaxContextChars  int

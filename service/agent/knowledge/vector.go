@@ -173,7 +173,7 @@ func (s Service) retrieveVectorBinding(ctx context.Context, binding agentKnowled
 }
 
 func knowledgeBaseVectorReady(base agentmodel.KnowledgeBase) bool {
-	return base.EmbeddingPowerID > 0
+	return isConceptGraphEnabled(base.ConceptGraphEnabled) && base.EmbeddingPowerID > 0
 }
 
 func vectorIndexNodes(ctx context.Context, baseID uint64, docID uint64) []*agentmodel.KnowledgeNode {

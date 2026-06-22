@@ -13,6 +13,7 @@ const (
 	knowledgeSearchTextLimit    = 280
 	knowledgeOpenTextLimit      = 4000
 	knowledgeDebugSnippetLimit  = 240
+	knowledgeFileListTextLimit  = 14
 )
 
 type knowledgeNodeBrief struct {
@@ -230,6 +231,88 @@ func executeKnowledgeDebug(ctx context.Context, req Request) (map[string]any, er
 	}, nil
 }
 
+func executeKnowledgeInit(ctx context.Context, req Request) (map[string]any, error) {
+	baseID := knowledgeBaseIDFromInput(req.Action.Input)
+	maxChars := inputInt(firstPresent(req.Action.Input, "max_chars", "maxChars"), 0)
+	content, found, err := knowledgeservice.NewService().OpenKnowledgeInitFile(ctx, baseID, maxChars)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return map[string]any{
+			"found":             false,
+			"knowledge_base_id": baseID,
+			"summary":           "未找到 init.md",
+			"text":              "该知识库根目录没有 init.md，可使用 list_knowledge_files 或 search_knowledge_files 查找原文。",
+		}, nil
+	}
+	return map[string]any{
+		"found":             true,
+		"knowledge_base_id": baseID,
+		"file":              knowledgeRuntimeFileMap(content.KnowledgeRuntimeFile),
+		"content":           content.Content,
+		"truncated":         content.Truncated,
+		"summary":           "已读取 init.md",
+		"text":              content.Content,
+	}, nil
+}
+
+func executeKnowledgeFiles(ctx context.Context, req Request) (map[string]any, error) {
+	baseID := knowledgeBaseIDFromInput(req.Action.Input)
+	limit := inputInt(firstPresent(req.Action.Input, "limit"), 0)
+	files, err := knowledgeservice.NewService().ListKnowledgeRuntimeFiles(ctx, baseID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"knowledge_base_id": baseID,
+		"files":             knowledgeRuntimeFileMaps(files),
+		"summary":           fmt.Sprintf("已读取 %d 个知识库文件条目。", len(files)),
+		"text":              knowledgeRuntimeFileListText(files),
+	}, nil
+}
+
+func executeKnowledgeFileSearch(ctx context.Context, req Request) (map[string]any, error) {
+	baseID := knowledgeBaseIDFromInput(req.Action.Input)
+	query := inputText(firstPresent(req.Action.Input, "query", "text", "keyword"))
+	if query == "" {
+		return nil, fmt.Errorf("搜索原文需要提供 query")
+	}
+	limit := inputInt(firstPresent(req.Action.Input, "limit"), 8)
+	hits, err := knowledgeservice.NewService().SearchKnowledgeRuntimeFiles(ctx, baseID, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"knowledge_base_id": baseID,
+		"query":             query,
+		"files":             knowledgeRuntimeFileSearchMaps(hits),
+		"summary":           fmt.Sprintf("已找到 %d 个原文候选文件。", len(hits)),
+		"text":              knowledgeRuntimeFileSearchText(query, hits),
+	}, nil
+}
+
+func executeKnowledgeFileRead(ctx context.Context, req Request) (map[string]any, error) {
+	baseID := knowledgeBaseIDFromInput(req.Action.Input)
+	path := inputText(firstPresent(req.Action.Input, "id", "file_id", "fileId", "path"))
+	if path == "" {
+		return nil, fmt.Errorf("读取原文需要提供 id 或 path")
+	}
+	maxChars := inputInt(firstPresent(req.Action.Input, "max_chars", "maxChars"), 0)
+	content, err := knowledgeservice.NewService().ReadKnowledgeRuntimeFile(ctx, baseID, path, maxChars)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"knowledge_base_id": baseID,
+		"file":              knowledgeRuntimeFileMap(content.KnowledgeRuntimeFile),
+		"content":           content.Content,
+		"truncated":         content.Truncated,
+		"summary":           "已读取知识库原文",
+		"text":              content.Content,
+	}, nil
+}
+
 func knowledgeNodeBriefs(nodes []knowledgeservice.KnowledgeNodeResult, previewLimit int) []knowledgeNodeBrief {
 	result := make([]knowledgeNodeBrief, 0, len(nodes))
 	for _, node := range nodes {
@@ -239,6 +322,72 @@ func knowledgeNodeBriefs(nodes []knowledgeservice.KnowledgeNodeResult, previewLi
 		result = append(result, knowledgeNodeBriefFromResult(node, previewLimit))
 	}
 	return result
+}
+
+func knowledgeRuntimeFileMaps(files []knowledgeservice.KnowledgeRuntimeFile) []map[string]any {
+	result := make([]map[string]any, 0, len(files))
+	for _, file := range files {
+		result = append(result, knowledgeRuntimeFileMap(file))
+	}
+	return result
+}
+
+func knowledgeRuntimeFileSearchMaps(hits []knowledgeservice.KnowledgeRuntimeFileSearchHit) []map[string]any {
+	result := make([]map[string]any, 0, len(hits))
+	for _, hit := range hits {
+		row := knowledgeRuntimeFileMap(hit.KnowledgeRuntimeFile)
+		row["preview"] = hit.Preview
+		row["score"] = hit.Score
+		result = append(result, row)
+	}
+	return result
+}
+
+func knowledgeRuntimeFileMap(file knowledgeservice.KnowledgeRuntimeFile) map[string]any {
+	return map[string]any{
+		"id":           file.ID,
+		"path":         file.Path,
+		"name":         file.Name,
+		"type":         file.Type,
+		"ext":          file.Ext,
+		"mime_type":    file.MimeType,
+		"size":         file.Size,
+		"editable":     file.Editable,
+		"doc_id":       file.DocID,
+		"dir_id":       file.DirID,
+		"index_status": file.IndexStatus,
+		"source_type":  file.SourceType,
+	}
+}
+
+func knowledgeRuntimeFileListText(files []knowledgeservice.KnowledgeRuntimeFile) string {
+	if len(files) == 0 {
+		return "知识库暂无文件。"
+	}
+	lines := []string{"知识库文件:"}
+	for index, file := range files {
+		if index >= knowledgeFileListTextLimit {
+			lines = append(lines, fmt.Sprintf("另有 %d 个文件条目未展示。", len(files)-index))
+			break
+		}
+		label := file.Path
+		if file.Type == "folder" {
+			label += "/"
+		}
+		lines = append(lines, fmt.Sprintf("- %s", label))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func knowledgeRuntimeFileSearchText(query string, hits []knowledgeservice.KnowledgeRuntimeFileSearchHit) string {
+	if len(hits) == 0 {
+		return fmt.Sprintf("未在原文文件中找到与「%s」相关的内容。", strings.TrimSpace(query))
+	}
+	lines := []string{fmt.Sprintf("原文搜索：%s", strings.TrimSpace(query))}
+	for index, hit := range hits {
+		lines = append(lines, fmt.Sprintf("%d. %s\n内容：%s", index+1, hit.Path, hit.Preview))
+	}
+	return strings.Join(lines, "\n\n")
 }
 
 func knowledgeTreeBriefs(nodes []knowledgeservice.KnowledgeTreeNode) []knowledgeNodeBrief {

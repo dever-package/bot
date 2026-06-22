@@ -44,6 +44,7 @@ import type {
 
 type KnowledgeIndexMapProps = {
   knowledgeBaseID: number
+  mode?: number
   open: boolean
   onClose: () => void
   onRefreshFiles?: () => void
@@ -58,6 +59,7 @@ const defaultGraphLimit = 240
 
 export function KnowledgeIndexMap({
   knowledgeBaseID,
+  mode,
   open,
   onClose,
   onRefreshFiles,
@@ -80,6 +82,7 @@ export function KnowledgeIndexMap({
     () => filterGraph(graph, mapQuery, graphType),
     [graph, graphType, mapQuery],
   )
+  const enhancedMode = Number(mode) === 1
 
   const hasRunningIndex = useMemo(() => {
     if (!overview) {
@@ -366,6 +369,7 @@ export function KnowledgeIndexMap({
               <GraphView
                 graph={graph}
                 loading={graphLoading}
+                enhancedMode={enhancedMode}
                 query={mapQuery}
                 typeFilter={graphType}
                 selectedNodeID={selectedNodeID}
@@ -564,7 +568,7 @@ function TreeView({
     return (
       <IndexMapState
         icon={<FolderTree size={20} />}
-        label={tree.length ? "没有匹配的节点" : "暂无索引节点，先执行智能索引"}
+        label={tree.length ? "没有匹配的节点" : "暂无索引节点，请先更新索引"}
       />
     )
   }
@@ -588,6 +592,7 @@ function TreeView({
 function GraphView({
   graph,
   loading,
+  enhancedMode,
   query,
   typeFilter,
   selectedNodeID,
@@ -597,6 +602,7 @@ function GraphView({
 }: {
   graph: KnowledgeGraphResult
   loading: boolean
+  enhancedMode: boolean
   query: string
   typeFilter: string
   selectedNodeID: number
@@ -624,7 +630,11 @@ function GraphView({
     return (
       <IndexMapState
         icon={<GitBranch size={20} />}
-        label={graph.nodes.length ? "没有匹配的关系图谱" : "暂无关系图谱，先执行智能索引"}
+        label={graph.nodes.length
+          ? "没有匹配的关系图谱"
+          : enhancedMode
+            ? "暂无关系图谱，请先更新增强索引"
+            : "当前为轻量检索，未启用智能增强"}
       />
     )
   }

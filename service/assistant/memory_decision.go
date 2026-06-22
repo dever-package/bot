@@ -4,10 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	assistantmodel "github.com/dever-package/bot/model/assistant"
 	memorymodel "github.com/dever-package/bot/model/memory"
+)
+
+const (
+	memoryAutoRememberScore = 0.55
+	memoryAutoUpdateScore   = 0.7
 )
 
 func shouldEvaluateMemory(text string) bool {
@@ -18,54 +22,51 @@ func shouldEvaluateMemory(text string) bool {
 	return explicitMemoryContent(text) != "" || looksLikeLongTermMemory(text)
 }
 
-func (s Service) handleMemoryCandidate(ctx context.Context, owner ownerScope, session assistantmodel.Session, sourceMessageID uint64, candidate memoryCandidate) map[string]any {
-	candidate = normalizeCandidate(session, candidate)
+func (s Service) rememberMemoryCandidate(ctx context.Context, owner ownerScope, session assistantmodel.Session, sourceMessageID uint64, candidate memoryCandidate) map[string]any {
+	candidate = normalizeCandidate(candidate)
 	if candidate.Title == "" || candidate.Content == "" || hasSensitiveMemoryContent(candidate.Content) {
 		return nil
 	}
 	score := scoreMemoryCandidate(candidate)
-	existing := s.findSimilarMemory(ctx, owner, candidate.Scope, session.ContextKey, session.AgentKey, session.ID, candidate.Title, candidate.Content)
-	if existing != nil && memoryConflicts(*existing, candidate) {
-		return s.createMemoryCandidateReview(ctx, owner, session, sourceMessageID, candidate, existing, score, "conflict")
+	if !shouldAutoRememberMemory(candidate, score) {
+		return nil
 	}
-	if score >= memoryAutoSaveScore {
-		resp, err := s.rememberForOwner(ctx, owner, MemoryRequest{
-			Kind:       candidate.Kind,
-			Title:      candidate.Title,
-			Content:    candidate.Content,
-			Tags:       candidate.Tags,
-			Importance: candidate.Importance,
-			Scope:      candidate.Scope,
-			ContextKey: session.ContextKey,
-			AgentKey:   session.AgentKey,
-			SessionID:  session.ID,
-			Source:     candidate.Source,
-			Confidence: candidate.Confidence,
-		})
-		if err != nil {
-			return nil
+	if existing := s.findRelatedMemory(ctx, owner, session, candidate); existing != nil {
+		if memorySimilar(existing.Content, candidate.Content) {
+			resp, err := s.rememberForOwner(ctx, owner, memoryRequestFromCandidate(session, candidate))
+			if err != nil {
+				return nil
+			}
+			return memoryReview("deduped", "已更新长期记忆权重。", resp, sourceMessageID)
 		}
-		memory := map[string]any{}
-		if mapped, ok := resp["memory"].(map[string]any); ok {
-			memory = mapped
+		if shouldAutoUpdateMemory(candidate, score) {
+			memory := s.updateExistingMemory(ctx, existing.ID, session, candidate, score)
+			if len(memory) == 0 {
+				return nil
+			}
+			return map[string]any{
+				"status":            "updated",
+				"text":              fmt.Sprintf("已自动更新长期记忆：%s", candidate.Title),
+				"memory":            memory,
+				"source_message_id": sourceMessageID,
+			}
 		}
-		return map[string]any{
-			"status":            "saved",
-			"text":              fmt.Sprintf("已记住：%s", candidate.Title),
-			"memory":            memory,
-			"source_message_id": sourceMessageID,
-			"actions": []map[string]any{
-				{"key": "undo", "label": "撤销", "memory_id": memory["id"]},
-			},
-		}
+		return nil
 	}
-	if candidate.Explicit || score >= memoryConfirmationScore || existing != nil {
-		return s.createMemoryCandidateReview(ctx, owner, session, sourceMessageID, candidate, existing, score, "confirm")
+	resp, err := s.rememberForOwner(ctx, owner, memoryRequestFromCandidate(session, candidate))
+	if err != nil {
+		return nil
 	}
-	return nil
+	status := "saved"
+	text := fmt.Sprintf("已自动记住：%s", candidate.Title)
+	if deduped, _ := resp["deduped"].(bool); deduped {
+		status = "deduped"
+		text = "已更新长期记忆权重。"
+	}
+	return memoryReview(status, text, resp, sourceMessageID)
 }
 
-func normalizeCandidate(session assistantmodel.Session, candidate memoryCandidate) memoryCandidate {
+func normalizeCandidate(candidate memoryCandidate) memoryCandidate {
 	candidate.Kind = normalizeMemoryKind(candidate.Kind)
 	if candidate.Kind == "" {
 		candidate.Kind = inferMemoryKind(candidate.Content)
@@ -77,7 +78,7 @@ func normalizeCandidate(session assistantmodel.Session, candidate memoryCandidat
 	candidate.Title = limitText(candidate.Title, 255)
 	candidate.Importance = clampMemoryImportance(candidate.Importance)
 	candidate.Confidence = clampCandidateConfidence(candidate.Confidence)
-	candidate.Scope = resolveMemoryScope(candidate.Scope, session.ContextKey, session.AgentKey, session.ID)
+	candidate.Scope = memorymodel.ScopeContext
 	candidate.Source = normalizeMemorySource(candidate.Source)
 	return candidate
 }
@@ -103,7 +104,7 @@ func scoreMemoryCandidate(candidate memoryCandidate) float64 {
 	if len([]rune(candidate.Content)) >= 12 && len([]rune(candidate.Content)) <= 260 {
 		score += 0.1
 	}
-	if candidate.Scope == memorymodel.ScopeContext || candidate.Scope == memorymodel.ScopeAgent {
+	if candidate.Scope == memorymodel.ScopeContext {
 		score += 0.05
 	}
 	if score > 1 {
@@ -112,76 +113,94 @@ func scoreMemoryCandidate(candidate memoryCandidate) float64 {
 	return score
 }
 
-func memoryConflicts(existing memorymodel.Memory, candidate memoryCandidate) bool {
-	current := normalizeMemoryComparable(existing.Content)
-	next := normalizeMemoryComparable(candidate.Content)
-	if current == "" || next == "" {
-		return false
+func shouldAutoRememberMemory(candidate memoryCandidate, score float64) bool {
+	if candidate.Explicit {
+		return true
 	}
-	if memorySimilar(current, next) {
-		return false
+	if candidate.Source == memorymodel.SourceLLM && candidate.Confidence >= 0.65 {
+		return true
 	}
-	title := normalizeMemoryComparable(existing.Title)
-	nextTitle := normalizeMemoryComparable(candidate.Title)
-	return title != "" && nextTitle != "" && memoryBigramSimilarity(title, nextTitle) >= 0.65
+	if score >= memoryAutoRememberScore {
+		return true
+	}
+	return looksLikeLongTermMemory(candidate.Content)
 }
 
-func (s Service) createMemoryCandidateReview(ctx context.Context, owner ownerScope, session assistantmodel.Session, sourceMessageID uint64, candidate memoryCandidate, existing *memorymodel.Memory, score float64, reviewType string) map[string]any {
-	now := time.Now()
-	existingID := uint64(0)
-	existingMap := map[string]any{}
-	if existing != nil {
-		existingID = existing.ID
-		existingMap = memoryMap(existing)
-	}
-	id := uint64(memorymodel.NewCandidateModel().Insert(ctx, map[string]any{
-		"owner_type":        owner.OwnerType,
-		"owner_id":          owner.OwnerID,
-		"agent_key":         strings.TrimSpace(session.AgentKey),
-		"context_key":       normalizeContextKey(session.ContextKey, session.AgentKey),
-		"session_id":        session.ID,
-		"source_message_id": sourceMessageID,
-		"existing_id":       existingID,
-		"scope":             candidate.Scope,
-		"kind":              candidate.Kind,
-		"title":             candidate.Title,
-		"content":           candidate.Content,
-		"reason":            candidate.Reason,
-		"tags":              jsonText(candidate.Tags, "[]"),
-		"source":            candidate.Source,
-		"confidence":        candidate.Confidence,
-		"score":             score,
-		"status":            memorymodel.CandidateStatusPending,
-		"created_at":        now,
-	}))
-	if id == 0 {
-		return nil
-	}
-	actions := []map[string]any{
-		{"key": memorymodel.CandidateActionRemember, "label": "记住"},
-		{"key": memorymodel.CandidateActionSession, "label": "仅本次使用"},
-		{"key": memorymodel.CandidateActionIgnore, "label": "不要记住"},
-	}
-	if reviewType == "conflict" {
-		actions = []map[string]any{
-			{"key": memorymodel.CandidateActionUpdate, "label": "更新记忆"},
-			{"key": memorymodel.CandidateActionKeepOld, "label": "保留原记忆"},
-			{"key": memorymodel.CandidateActionSession, "label": "仅本次使用"},
+func shouldAutoUpdateMemory(candidate memoryCandidate, score float64) bool {
+	return candidate.Explicit || candidate.Confidence >= 0.75 || score >= memoryAutoUpdateScore
+}
+
+func (s Service) findRelatedMemory(ctx context.Context, owner ownerScope, session assistantmodel.Session, candidate memoryCandidate) *memorymodel.Memory {
+	rows := memorymodel.NewMemoryModel().Select(
+		ctx,
+		map[string]any{
+			"owner_type": owner.OwnerType,
+			"owner_id":   owner.OwnerID,
+			"status":     memorymodel.StatusEnabled,
+		},
+		map[string]any{
+			"order": "main.importance desc,main.id desc",
+			"limit": 120,
+		},
+	)
+	for _, row := range rows {
+		if row == nil || !memoryMatchesRuntimeSession(*row, session) {
+			continue
+		}
+		if memorySimilar(row.Title+" "+row.Content, candidate.Title+" "+candidate.Content) {
+			return row
+		}
+		if strings.TrimSpace(row.Kind) == strings.TrimSpace(candidate.Kind) &&
+			memoryBigramSimilarity(normalizeMemoryComparable(row.Title), normalizeMemoryComparable(candidate.Title)) >= 0.65 {
+			return row
 		}
 	}
+	return nil
+}
+
+func (s Service) updateExistingMemory(ctx context.Context, id uint64, session assistantmodel.Session, candidate memoryCandidate, score float64) map[string]any {
+	memorymodel.NewMemoryModel().Update(ctx, map[string]any{"id": id}, map[string]any{
+		"scope":       memorymodel.ScopeContext,
+		"agent_key":   strings.TrimSpace(session.AgentKey),
+		"context_key": normalizeContextKey(session.ContextKey, session.AgentKey),
+		"session_id":  session.ID,
+		"kind":        candidate.Kind,
+		"title":       candidate.Title,
+		"content":     candidate.Content,
+		"tags":        jsonText(candidate.Tags, "[]"),
+		"source":      candidate.Source,
+		"confidence":  candidate.Confidence,
+		"importance":  clampMemoryImportance(firstPositive(candidate.Importance, int(score*100))),
+		"status":      memorymodel.StatusEnabled,
+	})
+	return memoryMap(memorymodel.NewMemoryModel().Find(ctx, map[string]any{"id": id}))
+}
+
+func memoryRequestFromCandidate(session assistantmodel.Session, candidate memoryCandidate) MemoryRequest {
+	return MemoryRequest{
+		Kind:       candidate.Kind,
+		Title:      candidate.Title,
+		Content:    candidate.Content,
+		Tags:       candidate.Tags,
+		Importance: candidate.Importance,
+		Scope:      memorymodel.ScopeContext,
+		ContextKey: session.ContextKey,
+		AgentKey:   session.AgentKey,
+		SessionID:  session.ID,
+		Source:     candidate.Source,
+		Confidence: candidate.Confidence,
+	}
+}
+
+func memoryReview(status string, text string, resp map[string]any, sourceMessageID uint64) map[string]any {
+	memory := map[string]any{}
+	if mapped, ok := resp["memory"].(map[string]any); ok {
+		memory = mapped
+	}
 	return map[string]any{
-		"status":            "pending",
-		"type":              reviewType,
-		"candidate_id":      id,
+		"status":            status,
+		"text":              text,
+		"memory":            memory,
 		"source_message_id": sourceMessageID,
-		"title":             candidate.Title,
-		"content":           candidate.Content,
-		"scope":             candidate.Scope,
-		"kind":              candidate.Kind,
-		"confidence":        candidate.Confidence,
-		"score":             score,
-		"reason":            candidate.Reason,
-		"existing":          existingMap,
-		"actions":           actions,
 	}
 }

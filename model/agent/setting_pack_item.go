@@ -30,6 +30,7 @@ var (
 		{"id": 102, "pack_id": AssistantSettingPackID, "setting_id": 4, "status": 1, "sort": 5},
 		{"id": 101, "pack_id": AssistantSettingPackID, "setting_id": AssistantWorkSettingID, "status": 1, "sort": 10},
 		{"id": 201, "pack_id": SkillInstallSettingPackID, "setting_id": SkillInstallPlanSettingID, "status": 1, "sort": 10},
+		{"id": 301, "pack_id": SkillCreateSettingPackID, "setting_id": SkillCreatePlanSettingID, "status": 1, "sort": 10},
 	}
 
 	settingPackRelation = orm.Relation{

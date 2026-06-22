@@ -50,7 +50,7 @@ var knowledgeIndexStatusOptions = []map[string]any{
 }
 
 var knowledgeModeOptions = []map[string]any{
-	{"id": KnowledgeModeLight, "value": "轻量模式"},
+	{"id": KnowledgeModeLight, "value": "轻量检索"},
 	{"id": KnowledgeModeAdvanced, "value": "智能增强"},
 }
 

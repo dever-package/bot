@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -13,8 +14,6 @@ import (
 
 const (
 	memoryReviewMaxRows        = 500
-	memoryAutoSaveScore        = 0.85
-	memoryConfirmationScore    = 0.55
 	memoryLLMExtractionTimeout = 20 * time.Second
 )
 
@@ -37,16 +36,10 @@ func (s Service) sessionMemoryRows(ctx context.Context, owner ownerScope, sessio
 			"limit": clampLimit(limit, defaultMemoryLimit, maxMemoryLimit) * 3,
 		},
 	)
-	maxRows := clampLimit(limit, defaultMemoryLimit, maxMemoryLimit)
-	result := make([]map[string]any, 0, len(rows))
-	for _, row := range rows {
-		if row == nil || !memoryMatchesSession(*row, session) {
-			continue
-		}
+	matched := rankSessionMemoryRows(rows, session, "", clampLimit(limit, defaultMemoryLimit, maxMemoryLimit))
+	result := make([]map[string]any, 0, len(matched))
+	for _, row := range matched {
 		result = append(result, memoryMap(row))
-		if len(result) >= maxRows {
-			break
-		}
 	}
 	return result
 }
@@ -126,7 +119,7 @@ func (s Service) extractSessionMemory(ctx context.Context, owner ownerScope, ses
 		candidates = extractMemoryCandidates(userText)
 	}
 	for _, candidate := range candidates {
-		review := s.handleMemoryCandidate(ctx, owner, session, sourceMessageID, candidate)
+		review := s.rememberMemoryCandidate(ctx, owner, session, sourceMessageID, candidate)
 		if len(review) > 0 {
 			return review
 		}
@@ -251,7 +244,7 @@ func (s Service) forgetSimilarMemories(ctx context.Context, owner ownerScope, se
 		},
 	)
 	for _, row := range rows {
-		if row == nil || !memoryMatchesSession(*row, session) {
+		if row == nil || !memoryMatchesRuntimeSession(*row, session) {
 			continue
 		}
 		current := normalizeMemoryComparable(row.Title + " " + row.Content)
@@ -299,6 +292,112 @@ func memoryMaps(rows []*memorymodel.Memory) []map[string]any {
 		result = append(result, memoryMap(row))
 	}
 	return result
+}
+
+type scoredMemoryRow struct {
+	row   *memorymodel.Memory
+	score float64
+}
+
+func runtimeMemoryRows(rows []*memorymodel.Memory, session assistantmodel.Session, query string, limit int) []RuntimeMemory {
+	matched := rankSessionMemoryRows(rows, session, query, limit)
+	result := make([]RuntimeMemory, 0, len(matched))
+	for _, row := range matched {
+		result = append(result, RuntimeMemory{
+			ID:         row.ID,
+			Kind:       row.Kind,
+			Title:      row.Title,
+			Content:    row.Content,
+			Tags:       row.Tags,
+			Importance: row.Importance,
+			Scope:      displayMemoryScope(*row),
+		})
+	}
+	return result
+}
+
+func rankSessionMemoryRows(rows []*memorymodel.Memory, session assistantmodel.Session, query string, limit int) []*memorymodel.Memory {
+	if limit <= 0 {
+		return []*memorymodel.Memory{}
+	}
+	scored := make([]scoredMemoryRow, 0, len(rows))
+	for _, row := range rows {
+		if row == nil || !memoryMatchesRuntimeSession(*row, session) {
+			continue
+		}
+		scored = append(scored, scoredMemoryRow{
+			row:   row,
+			score: runtimeMemoryScore(*row, query),
+		})
+	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score == scored[j].score {
+			return scored[i].row.ID > scored[j].row.ID
+		}
+		return scored[i].score > scored[j].score
+	})
+	if len(scored) > limit {
+		scored = scored[:limit]
+	}
+	result := make([]*memorymodel.Memory, 0, len(scored))
+	for _, item := range scored {
+		result = append(result, item.row)
+	}
+	return result
+}
+
+func runtimeMemoryScore(row memorymodel.Memory, query string) float64 {
+	score := float64(clampMemoryImportance(row.Importance)) / 100 * 0.35
+	score += runtimeMemoryConfidence(row.Confidence) * 0.2
+	score += runtimeMemoryKindBoost(row.Kind)
+	switch normalizeStoredMemoryScope(row) {
+	case memorymodel.ScopeSession:
+		score += 0.12
+	case memorymodel.ScopeContext:
+		score += 0.08
+	}
+	query = normalizeMemoryComparable(query)
+	if query == "" {
+		return score
+	}
+	score += memoryTextScore(query, row.Title) * 0.18
+	score += memoryTextScore(query, row.Content) * 0.28
+	score += memoryTextScore(query, row.Tags) * 0.08
+	return score
+}
+
+func runtimeMemoryConfidence(value float64) float64 {
+	if value <= 0 {
+		return 0.5
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
+}
+
+func runtimeMemoryKindBoost(kind string) float64 {
+	switch normalizeMemoryKind(kind) {
+	case "procedural":
+		return 0.12
+	case "persona":
+		return 0.1
+	case "semantic":
+		return 0.06
+	default:
+		return 0.03
+	}
+}
+
+func memoryTextScore(query string, text string) float64 {
+	current := normalizeMemoryComparable(text)
+	if query == "" || current == "" {
+		return 0
+	}
+	if query == current || strings.Contains(current, query) || strings.Contains(query, current) {
+		return 1
+	}
+	return memoryBigramSimilarity(query, current)
 }
 
 func memoryMatchesListRequest(row memorymodel.Memory, req MemoryListRequest) bool {

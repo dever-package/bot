@@ -8,6 +8,16 @@ const botPlugin = {
         default: mod.ShowAgent,
       })),
     ),
+    "show-skill-creator": lazyNode(() =>
+      import("./nodes/show/skill-creator").then((mod) => ({
+        default: mod.ShowSkillCreator,
+      })),
+    ),
+    "show-skill-test": lazyNode(() =>
+      import("./nodes/show/skill-test").then((mod) => ({
+        default: mod.ShowSkillTest,
+      })),
+    ),
     "show-team-workspace": lazyNode(() =>
       import("./nodes/show/team-workspace").then((mod) => ({
         default: mod.ShowTeamWorkspace,

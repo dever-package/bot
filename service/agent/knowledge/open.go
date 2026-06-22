@@ -74,8 +74,7 @@ func (s Service) SearchKnowledgeNodes(ctx context.Context, baseID uint64, query 
 
 	startedAt := time.Now()
 	retrieved := s.retrieveAgenticBinding(ctx, binding, query)
-	snippets := s.filterPublishedSnapshot(ctx, retrieved.Snippets, base.ID)
-	snippets = filterUnavailableDocSnippets(ctx, snippets)
+	snippets := filterUnavailableDocSnippets(ctx, retrieved.Snippets)
 	snippets = limitRetrievedSnippets(snippets, limit)
 	s.recordKnowledgeSearchLog(ctx, base.ID, query, snippets, retrieved.Matches, time.Since(startedAt))
 	s.incrementHitCounts(ctx, snippets)

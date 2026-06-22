@@ -14,7 +14,7 @@ const (
 
 type SkillDraft struct {
 	ID               uint64    `dorm:"primaryKey;autoIncrement;comment:技能草稿ID"`
-	PackID           uint64    `dorm:"type:bigint;not null;default:0;comment:目标技能方案"`
+	PackID           uint64    `dorm:"type:bigint;not null;default:1;comment:技能方案"`
 	CateID           uint64    `dorm:"type:bigint;not null;default:1;comment:技能分类"`
 	SourceSkillID    uint64    `dorm:"type:bigint;not null;default:0;comment:来源正式技能"`
 	Key              string    `dorm:"type:varchar(128);not null;default:'';comment:技能标识"`
@@ -24,7 +24,7 @@ type SkillDraft struct {
 	SkillMD          string    `dorm:"type:text;not null;default:'';comment:SKILL.md"`
 	FilesJSON        string    `dorm:"type:text;not null;default:'';comment:草稿文件"`
 	Manifest         string    `dorm:"type:text;not null;default:'';comment:运行配置"`
-	ValidationResult string    `dorm:"type:text;not null;default:'';comment:校验结果"`
+	ValidationResult string    `dorm:"type:text;not null;default:'';comment:测试结果"`
 	CreatedAt        time.Time `dorm:"comment:创建时间"`
 }
 
@@ -51,9 +51,9 @@ var (
 		OptionKeys: []string{"name", "key"},
 	}
 	skillDraftStatusOptions = []map[string]any{
-		{"id": SkillDraftStatusDraft, "value": "草稿"},
+		{"id": SkillDraftStatusDraft, "value": "未发布"},
 		{"id": SkillDraftStatusPublished, "value": "已发布"},
-		{"id": SkillDraftStatusDisabled, "value": "停用"},
+		{"id": SkillDraftStatusDisabled, "value": "已丢弃"},
 	}
 )
 

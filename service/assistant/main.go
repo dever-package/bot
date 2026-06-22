@@ -48,6 +48,13 @@ type MessageRequest struct {
 	MemoryEnabled bool
 }
 
+type RebindSessionContextRequest struct {
+	SessionID      uint64
+	AgentKey       string
+	FromContextKey string
+	ToContextKey   string
+}
+
 type MemoryRequest struct {
 	Kind       string
 	Title      string
@@ -93,13 +100,6 @@ type MemoryUpdateRequest struct {
 type MemoryForgetRequest struct {
 	ID   uint64
 	Hard bool
-}
-
-type MemoryChoiceRequest struct {
-	CandidateID     uint64
-	MemoryID        uint64
-	SourceMessageID uint64
-	Choice          string
 }
 
 type RuntimeMemory struct {
@@ -219,6 +219,36 @@ func (s Service) ClearSession(ctx context.Context, sessionID uint64) (map[string
 	}, nil
 }
 
+func (s Service) RebindSessionContext(ctx context.Context, req RebindSessionContextRequest) error {
+	if req.SessionID == 0 {
+		return nil
+	}
+	owner, err := currentOwner(ctx)
+	if err != nil {
+		return err
+	}
+	agentKey := strings.TrimSpace(req.AgentKey)
+	fromContextKey := normalizeContextKey(req.FromContextKey, agentKey)
+	toContextKey := normalizeContextKey(req.ToContextKey, agentKey)
+	if fromContextKey == toContextKey {
+		return nil
+	}
+	filters := map[string]any{
+		"id":          req.SessionID,
+		"owner_type":  owner.OwnerType,
+		"owner_id":    owner.OwnerID,
+		"context_key": fromContextKey,
+		"status":      assistantmodel.SessionStatusActive,
+	}
+	if agentKey != "" {
+		filters["agent_key"] = agentKey
+	}
+	if assistantmodel.NewSessionModel().Update(ctx, filters, map[string]any{"context_key": toContextKey}) == 0 {
+		return fmt.Errorf("会话不存在或上下文不匹配")
+	}
+	return nil
+}
+
 func (s Service) ArchiveSession(ctx context.Context, sessionID uint64) error {
 	return s.updateSessionStatus(ctx, sessionID, assistantmodel.SessionStatusArchived)
 }
@@ -285,7 +315,31 @@ func (s Service) RecordMessage(ctx context.Context, req MessageRequest) (map[str
 	if status == 0 {
 		status = assistantmodel.MessageStatusNormal
 	}
+	requestID := strings.TrimSpace(req.RequestID)
 	now := time.Now()
+	if requestID != "" && role == "assistant" {
+		message := assistantmodel.NewMessageModel().Find(ctx, map[string]any{
+			"session_id": session.ID,
+			"role":       role,
+			"request_id": requestID,
+		})
+		if message != nil {
+			assistantmodel.NewMessageModel().Update(ctx, map[string]any{"id": message.ID}, map[string]any{
+				"kind":    kind,
+				"text":    strings.TrimSpace(req.Text),
+				"content": jsonText(req.Content, "{}"),
+				"output":  jsonText(req.Output, "{}"),
+				"status":  status,
+			})
+			s.touchSession(ctx, session, role, req.Text, now)
+			message = assistantmodel.NewMessageModel().Find(ctx, map[string]any{"id": message.ID})
+			message = s.afterRecordMessage(ctx, owner, *session, message, role, status, req)
+			return map[string]any{
+				"session": sessionMap(*session),
+				"message": messageMap(message),
+			}, nil
+		}
+	}
 	messageID := uint64(assistantmodel.NewMessageModel().Insert(ctx, map[string]any{
 		"session_id": session.ID,
 		"role":       role,
@@ -293,7 +347,7 @@ func (s Service) RecordMessage(ctx context.Context, req MessageRequest) (map[str
 		"text":       strings.TrimSpace(req.Text),
 		"content":    jsonText(req.Content, "{}"),
 		"output":     jsonText(req.Output, "{}"),
-		"request_id": strings.TrimSpace(req.RequestID),
+		"request_id": requestID,
 		"status":     status,
 		"created_at": now,
 	}))
@@ -302,22 +356,38 @@ func (s Service) RecordMessage(ctx context.Context, req MessageRequest) (map[str
 	}
 	s.touchSession(ctx, session, role, req.Text, now)
 	message := assistantmodel.NewMessageModel().Find(ctx, map[string]any{"id": messageID})
-	if role == "assistant" && status == assistantmodel.MessageStatusNormal {
-		if req.MemoryEnabled {
-			if review := s.extractSessionMemory(ctx, owner, *session, messageID); len(review) > 0 {
-				output := mergeMessageOutput(req.Output, map[string]any{"memory_review": review})
-				assistantmodel.NewMessageModel().Update(ctx, map[string]any{"id": messageID}, map[string]any{
-					"output": jsonText(output, "{}"),
-				})
-				message = assistantmodel.NewMessageModel().Find(ctx, map[string]any{"id": messageID})
-			}
-		}
-		s.generateSessionTitleAsync(owner, *session)
-	}
+	message = s.afterRecordMessage(ctx, owner, *session, message, role, status, req)
 	return map[string]any{
 		"session": sessionMap(*session),
 		"message": messageMap(message),
 	}, nil
+}
+
+func (s Service) afterRecordMessage(
+	ctx context.Context,
+	owner ownerScope,
+	session assistantmodel.Session,
+	message *assistantmodel.Message,
+	role string,
+	status int16,
+	req MessageRequest,
+) *assistantmodel.Message {
+	if message == nil {
+		return nil
+	}
+	if role == "assistant" && status == assistantmodel.MessageStatusNormal {
+		if req.MemoryEnabled {
+			if review := s.extractSessionMemory(ctx, owner, session, message.ID); len(review) > 0 {
+				output := mergeMessageOutput(req.Output, map[string]any{"memory_review": review})
+				assistantmodel.NewMessageModel().Update(ctx, map[string]any{"id": message.ID}, map[string]any{
+					"output": jsonText(output, "{}"),
+				})
+				message = assistantmodel.NewMessageModel().Find(ctx, map[string]any{"id": message.ID})
+			}
+		}
+		s.generateSessionTitleAsync(owner, session)
+	}
+	return message
 }
 
 func (s Service) ReviewMemories(ctx context.Context, req MemoryListRequest) (map[string]any, error) {
@@ -474,7 +544,7 @@ func (s Service) ForgetMemory(ctx context.Context, req MemoryForgetRequest) erro
 	return nil
 }
 
-func (s Service) RuntimeMemories(ctx context.Context, sessionID uint64, limit int) []RuntimeMemory {
+func (s Service) RuntimeMemories(ctx context.Context, sessionID uint64, query string, limit int) []RuntimeMemory {
 	if sessionID == 0 {
 		return []RuntimeMemory{}
 	}
@@ -497,29 +567,7 @@ func (s Service) RuntimeMemories(ctx context.Context, sessionID uint64, limit in
 			"limit": clampLimit(limit, defaultMemoryLimit, maxMemoryLimit) * 3,
 		},
 	)
-	maxRows := clampLimit(limit, defaultMemoryLimit, maxMemoryLimit)
-	result := make([]RuntimeMemory, 0, len(rows))
-	for _, row := range rows {
-		if row == nil {
-			continue
-		}
-		if !memoryMatchesSession(*row, *session) {
-			continue
-		}
-		result = append(result, RuntimeMemory{
-			ID:         row.ID,
-			Kind:       row.Kind,
-			Title:      row.Title,
-			Content:    row.Content,
-			Tags:       row.Tags,
-			Importance: row.Importance,
-			Scope:      displayMemoryScope(*row),
-		})
-		if len(result) >= maxRows {
-			break
-		}
-	}
-	return result
+	return runtimeMemoryRows(rows, *session, query, clampLimit(limit, defaultMemoryLimit, maxMemoryLimit))
 }
 
 func (s Service) resolveSession(ctx context.Context, owner ownerScope, req ResolveRequest) assistantmodel.Session {
@@ -543,6 +591,9 @@ func (s Service) resolveSession(ctx context.Context, owner ownerScope, req Resol
 		)
 		if len(rows) > 0 && rows[0] != nil {
 			return *rows[0]
+		}
+		if legacy := s.resolveLegacyNewDraftSession(ctx, owner, contextKey, agentKey); legacy != nil {
+			return *legacy
 		}
 	}
 	title := strings.TrimSpace(req.Title)
@@ -569,6 +620,35 @@ func (s Service) resolveSession(ctx context.Context, owner ownerScope, req Resol
 		return assistantmodel.Session{ID: id, OwnerType: owner.OwnerType, OwnerID: owner.OwnerID, ContextKey: contextKey, AgentKey: agentKey, Title: title, TitleSource: assistantmodel.TitleSourceAuto, Status: assistantmodel.SessionStatusActive, LastMessageAt: now, CreatedAt: now}
 	}
 	return *row
+}
+
+func (s Service) resolveLegacyNewDraftSession(ctx context.Context, owner ownerScope, contextKey string, agentKey string) *assistantmodel.Session {
+	if contextKey != "skill_draft:new" {
+		return nil
+	}
+	rows := assistantmodel.NewSessionModel().Select(
+		ctx,
+		map[string]any{
+			"owner_type":  owner.OwnerType,
+			"owner_id":    owner.OwnerID,
+			"context_key": map[string]any{"LIKE": "skill_draft:new:%"},
+			"agent_key":   agentKey,
+			"status":      assistantmodel.SessionStatusActive,
+		},
+		map[string]any{
+			"order": "main.last_message_at desc,main.id desc",
+			"limit": 1,
+		},
+	)
+	if len(rows) == 0 || rows[0] == nil {
+		return nil
+	}
+	session := rows[0]
+	assistantmodel.NewSessionModel().Update(ctx, map[string]any{"id": session.ID}, map[string]any{
+		"context_key": contextKey,
+	})
+	session.ContextKey = contextKey
+	return session
 }
 
 func (s Service) resolveMessageSession(ctx context.Context, owner ownerScope, req MessageRequest) (*assistantmodel.Session, error) {
@@ -677,63 +757,7 @@ func normalizeMemoryTags(tags []string) []string {
 }
 
 func memoryMatchesSession(row memorymodel.Memory, session assistantmodel.Session) bool {
-	scope := normalizeStoredMemoryScope(row)
-	switch scope {
-	case memorymodel.ScopeGlobal:
-		return true
-	case memorymodel.ScopeAgent:
-		return strings.TrimSpace(row.AgentKey) == "" || strings.TrimSpace(row.AgentKey) == strings.TrimSpace(session.AgentKey)
-	case memorymodel.ScopeContext:
-		return strings.TrimSpace(row.AgentKey) == strings.TrimSpace(session.AgentKey) &&
-			normalizeContextKey(row.ContextKey, row.AgentKey) == normalizeContextKey(session.ContextKey, session.AgentKey)
-	case memorymodel.ScopeSession:
-		return row.SessionID > 0 && row.SessionID == session.ID
-	}
-
-	// Legacy rows before explicit scope are still readable through old tag scoping.
-	tags := memoryTags(row.Tags)
-	if len(tags) == 0 {
-		return true
-	}
-	contextTag := "context:" + normalizeContextKey(session.ContextKey, session.AgentKey)
-	agentTag := ""
-	if strings.TrimSpace(session.AgentKey) != "" {
-		agentTag = "agent:" + strings.TrimSpace(session.AgentKey)
-	}
-	hasScopedTag := false
-	for _, tag := range tags {
-		if strings.HasPrefix(tag, "context:") || strings.HasPrefix(tag, "agent:") {
-			hasScopedTag = true
-		}
-		if tag == contextTag || (agentTag != "" && tag == agentTag) {
-			return true
-		}
-	}
-	return !hasScopedTag
-}
-
-func memoryTags(raw string) []string {
-	var values []string
-	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &values); err == nil {
-		result := make([]string, 0, len(values))
-		for _, value := range values {
-			if tag := strings.TrimSpace(value); tag != "" {
-				result = append(result, tag)
-			}
-		}
-		return result
-	}
-	var generic []any
-	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &generic); err != nil {
-		return nil
-	}
-	result := make([]string, 0, len(generic))
-	for _, value := range generic {
-		if tag := strings.TrimSpace(fmt.Sprint(value)); tag != "" {
-			result = append(result, tag)
-		}
-	}
-	return result
+	return memoryMatchesRuntimeSession(row, session)
 }
 
 func sessionMap(row assistantmodel.Session) map[string]any {

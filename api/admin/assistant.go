@@ -206,20 +206,6 @@ func (Assistant) PostForgetMemory(c *server.Context) error {
 	return botapi.WriteJSON(c, map[string]any{"ok": true}, err)
 }
 
-func (Assistant) PostMemoryChoice(c *server.Context) error {
-	body, err := botapi.BindBody(c)
-	if err != nil {
-		return c.Error(err)
-	}
-	data, err := assistantRunner.ChooseMemory(c.Context(), assistantservice.MemoryChoiceRequest{
-		CandidateID:     botapi.Uint64FromBody(body, "candidate_id", "candidateId", "id"),
-		MemoryID:        botapi.Uint64FromBody(body, "memory_id", "memoryId"),
-		SourceMessageID: botapi.Uint64FromBody(body, "source_message_id", "sourceMessageId"),
-		Choice:          botapi.TextFromBody(body, "choice", "action"),
-	})
-	return botapi.WriteJSON(c, data, err)
-}
-
 func assistantStringList(value any) []string {
 	switch typed := value.(type) {
 	case []string:

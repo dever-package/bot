@@ -13,6 +13,7 @@ const (
 	defaultAgentSettingPackID = agentmodel.DefaultSettingPackID
 	defaultAgentSkillPackID   = agentmodel.DefaultSkillPackID
 	defaultAgentCateID        = uint64(1)
+	defaultSkillPackID        = agentmodel.DefaultSkillPackID
 	defaultSkillCateID        = agentmodel.DefaultSkillCateID
 	defaultAgentSettingType   = "identity"
 	defaultAgentStatus        = int16(1)

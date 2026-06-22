@@ -19,6 +19,7 @@ import (
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 	"github.com/dever-package/bot/service/agent/tool"
 	"github.com/dever-package/bot/service/agent/tool/sandbox"
+	assistantservice "github.com/dever-package/bot/service/assistant"
 	"github.com/shemic/dever/orm"
 )
 
@@ -39,6 +40,16 @@ type Request struct {
 	Timeout time.Duration
 }
 
+type PublishRequest struct {
+	ID             uint64
+	Name           string
+	NameSet        bool
+	Description    string
+	DescriptionSet bool
+	PackID         uint64
+	CateID         uint64
+}
+
 type SourceRequest struct {
 	PackID      uint64
 	CateID      uint64
@@ -53,10 +64,13 @@ type SourceRequest struct {
 }
 
 type PatchRequest struct {
-	ID     uint64
-	PackID uint64
-	CateID uint64
-	Patch  map[string]any
+	ID                  uint64
+	PackID              uint64
+	CateID              uint64
+	Patch               map[string]any
+	AssistantSessionID  uint64
+	AssistantAgentKey   string
+	AssistantContextKey string
 }
 
 type Result struct {
@@ -75,23 +89,6 @@ func NewService() Service {
 	return Service{}
 }
 
-func (Service) Validate(ctx context.Context, id uint64) Result {
-	snapshot, issues, err := loadAndValidate(ctx, id)
-	if err != nil {
-		return failResult(err.Error(), nil)
-	}
-	result := validationPayload(issues)
-	saveValidationResult(ctx, id, result)
-	if len(issues) > 0 {
-		return failResult("技能草稿校验失败", result)
-	}
-	return okResult("技能草稿校验通过", map[string]any{
-		"key":   snapshot.Row.Key,
-		"name":  snapshot.Row.Name,
-		"files": len(snapshot.Files),
-	})
-}
-
 func (Service) Test(ctx context.Context, req Request) Result {
 	snapshot, issues, err := loadAndValidate(ctx, req.ID)
 	if err != nil {
@@ -100,7 +97,7 @@ func (Service) Test(ctx context.Context, req Request) Result {
 	if len(issues) > 0 {
 		result := validationPayload(issues)
 		saveValidationResult(ctx, req.ID, result)
-		return failResult("技能草稿校验失败，不能测试", result)
+		return failResult("技能内容检查未通过，不能测试", result)
 	}
 	script := strings.TrimSpace(req.Script)
 	if script == "" {
@@ -168,15 +165,18 @@ func (Service) Test(ctx context.Context, req Request) Result {
 	return okResult("技能脚本测试通过", payload)
 }
 
-func (Service) Publish(ctx context.Context, id uint64) Result {
-	snapshot, issues, err := loadAndValidate(ctx, id)
+func (s Service) Publish(ctx context.Context, req PublishRequest) Result {
+	if err := s.applyPublishMetadata(ctx, req); err != nil {
+		return failResult(err.Error(), nil)
+	}
+	snapshot, issues, err := loadAndValidate(ctx, req.ID)
 	if err != nil {
 		return failResult(err.Error(), nil)
 	}
 	if len(issues) > 0 {
 		result := validationPayload(issues)
-		saveValidationResult(ctx, id, result)
-		return failResult("技能草稿校验失败，不能发布", result)
+		saveValidationResult(ctx, req.ID, result)
+		return failResult("技能内容检查未通过，不能发布", result)
 	}
 	if draftRequiresSandboxTest(snapshot) && !draftTestPassed(snapshot) {
 		return failResult("技能草稿必须先通过当前内容的沙箱测试后才能发布", map[string]any{
@@ -193,17 +193,62 @@ func (Service) Publish(ctx context.Context, id uint64) Result {
 	})
 }
 
+func (Service) applyPublishMetadata(ctx context.Context, req PublishRequest) error {
+	if req.ID == 0 {
+		return fmt.Errorf("技能草稿不存在")
+	}
+	row := agentmodel.NewSkillDraftModel().Find(ctx, map[string]any{"id": req.ID})
+	if row == nil {
+		return fmt.Errorf("技能草稿不存在")
+	}
+	values := map[string]any{}
+	if req.NameSet {
+		name := strings.TrimSpace(req.Name)
+		if name == "" {
+			return fmt.Errorf("技能名称不能为空")
+		}
+		values["name"] = name
+	}
+	if req.DescriptionSet {
+		values["description"] = strings.TrimSpace(req.Description)
+	}
+	if req.PackID > 0 {
+		values["pack_id"] = req.PackID
+	}
+	if req.CateID > 0 {
+		values["cate_id"] = req.CateID
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	if affected := agentmodel.NewSkillDraftModel().Update(ctx, map[string]any{"id": req.ID}, values); affected == 0 {
+		return fmt.Errorf("保存发布设置失败")
+	}
+	return nil
+}
+
 func (Service) CreateFromSkill(ctx context.Context, skillID uint64, packID uint64) Result {
 	skill := agentmodel.NewSkillModel().Find(ctx, map[string]any{"id": skillID})
 	if skill == nil {
 		return failResult("正式技能不存在", nil)
 	}
-	skillMD, filesJSON, err := readPublishedSkillFiles(*skill)
-	if err != nil {
-		return failResult(err.Error(), nil)
+	sourceType := agentmodel.NormalizeSkillSourceType(skill.SourceType, skill.SourceURL, skill.InstallInput)
+	if sourceType != agentmodel.SkillSourceTypeCustom {
+		return failResult("安装来源的技能不能直接修改，请使用升级安装。", map[string]any{
+			"skill_id":     skill.ID,
+			"source_type":  sourceType,
+			"source_label": agentmodel.SkillSourceTypeLabel(sourceType),
+		})
 	}
 	if packID == 0 {
 		packID = firstSkillPackID(ctx, skillID)
+	}
+	if draft := findEditableDraft(ctx, skill.ID, packID); draft != nil {
+		return okResult("已打开未发布版本", draftResultData(draft, skill.ID, false))
+	}
+	skillMD, filesJSON, err := readPublishedSkillFiles(*skill)
+	if err != nil {
+		return failResult(err.Error(), nil)
 	}
 	draftID := uint64(agentmodel.NewSkillDraftModel().Insert(ctx, map[string]any{
 		"pack_id":         packID,
@@ -224,10 +269,57 @@ func (Service) CreateFromSkill(ctx context.Context, skillID uint64, packID uint6
 	if draftID == 0 {
 		return failResult("创建修改草稿失败", nil)
 	}
-	return okResult("已创建修改草稿", map[string]any{
-		"draft_id": draftID,
-		"skill_id": skill.ID,
-	})
+	draft := agentmodel.NewSkillDraftModel().Find(ctx, map[string]any{"id": draftID})
+	return okResult("已创建未发布版本", draftResultData(draft, skill.ID, true))
+}
+
+func findEditableDraft(ctx context.Context, sourceSkillID uint64, packID uint64) *agentmodel.SkillDraft {
+	if sourceSkillID == 0 {
+		return nil
+	}
+	filters := map[string]any{
+		"source_skill_id": sourceSkillID,
+		"status":          agentmodel.SkillDraftStatusDraft,
+	}
+	if packID > 0 {
+		filters["pack_id"] = packID
+	}
+	rows := agentmodel.NewSkillDraftModel().Select(ctx, filters)
+	for _, row := range rows {
+		if row != nil {
+			return row
+		}
+	}
+	return nil
+}
+
+func draftResultData(draft *agentmodel.SkillDraft, sourceSkillID uint64, created bool) map[string]any {
+	if draft == nil {
+		return map[string]any{
+			"skill_id": sourceSkillID,
+			"created":  created,
+		}
+	}
+	return map[string]any{
+		"draft_id": draft.ID,
+		"skill_id": sourceSkillID,
+		"created":  created,
+		"draft": map[string]any{
+			"id":                draft.ID,
+			"pack_id":           draft.PackID,
+			"cate_id":           draft.CateID,
+			"source_skill_id":   draft.SourceSkillID,
+			"key":               draft.Key,
+			"name":              draft.Name,
+			"description":       draft.Description,
+			"status":            draft.Status,
+			"skill_md":          draft.SkillMD,
+			"files_json":        draft.FilesJSON,
+			"manifest":          draft.Manifest,
+			"validation_result": draft.ValidationResult,
+			"created_at":        draft.CreatedAt,
+		},
+	}
 }
 
 func (Service) ImportSource(ctx context.Context, req SourceRequest) Result {
@@ -303,10 +395,18 @@ func (Service) ApplyPatch(ctx context.Context, req PatchRequest) Result {
 			return failResult("技能草稿不存在", nil)
 		}
 		if len(values) == 0 {
-			return okResult("没有需要更新的草稿内容", map[string]any{"draft_id": req.ID})
+			data := applyPatchResultData(ctx, req.ID)
+			if warning := rebindDraftAssistantSession(ctx, req, req.ID); warning != "" {
+				data["assistant_session_warning"] = warning
+			}
+			return okResult("没有需要更新的草稿内容", data)
 		}
 		agentmodel.NewSkillDraftModel().Update(ctx, map[string]any{"id": req.ID}, values)
-		return okResult("技能草稿已更新", map[string]any{"draft_id": req.ID})
+		data := applyPatchResultData(ctx, req.ID)
+		if warning := rebindDraftAssistantSession(ctx, req, req.ID); warning != "" {
+			data["assistant_session_warning"] = warning
+		}
+		return okResult("技能草稿已更新", data)
 	}
 
 	if _, exists := values["key"]; !exists {
@@ -316,7 +416,11 @@ func (Service) ApplyPatch(ctx context.Context, req PatchRequest) Result {
 		values["name"] = values["key"]
 	}
 	if _, exists := values["pack_id"]; !exists {
-		values["pack_id"] = req.PackID
+		if req.PackID > 0 {
+			values["pack_id"] = req.PackID
+		} else {
+			values["pack_id"] = agentmodel.DefaultSkillPackID
+		}
 	}
 	if _, exists := values["cate_id"]; !exists {
 		values["cate_id"] = defaultCateID(req.CateID)
@@ -327,7 +431,49 @@ func (Service) ApplyPatch(ctx context.Context, req PatchRequest) Result {
 	if draftID == 0 {
 		return failResult("创建技能草稿失败", nil)
 	}
-	return okResult("技能草稿已创建", map[string]any{"draft_id": draftID})
+	data := applyPatchResultData(ctx, draftID)
+	if warning := rebindDraftAssistantSession(ctx, req, draftID); warning != "" {
+		data["assistant_session_warning"] = warning
+	}
+	return okResult("技能草稿已创建", data)
+}
+
+func applyPatchResultData(ctx context.Context, draftID uint64) map[string]any {
+	data := map[string]any{"draft_id": draftID}
+	if row := agentmodel.NewSkillDraftModel().Find(ctx, map[string]any{"id": draftID}); row != nil {
+		if draft, ok := draftResultData(row, row.SourceSkillID, false)["draft"]; ok {
+			data["draft"] = draft
+		}
+	}
+	return data
+}
+
+func rebindDraftAssistantSession(ctx context.Context, req PatchRequest, draftID uint64) string {
+	if req.AssistantSessionID == 0 || draftID == 0 {
+		return ""
+	}
+	fromContextKey := strings.TrimSpace(req.AssistantContextKey)
+	toContextKey := fmt.Sprintf("skill_draft:%d", draftID)
+	if fromContextKey == "" || fromContextKey == toContextKey {
+		return ""
+	}
+	if !isNewDraftAssistantContext(fromContextKey) {
+		return ""
+	}
+	err := assistantservice.NewService().RebindSessionContext(ctx, assistantservice.RebindSessionContextRequest{
+		SessionID:      req.AssistantSessionID,
+		AgentKey:       req.AssistantAgentKey,
+		FromContextKey: fromContextKey,
+		ToContextKey:   toContextKey,
+	})
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func isNewDraftAssistantContext(contextKey string) bool {
+	return contextKey == "skill_draft:new" || strings.HasPrefix(contextKey, "skill_draft:new:")
 }
 
 func loadAndValidate(ctx context.Context, id uint64) (draftSnapshot, []string, error) {
@@ -717,7 +863,7 @@ func draftPatchValues(ctx context.Context, req PatchRequest) (map[string]any, er
 	if cateID := patchUint64(patch, "cate_id", "cateId"); cateID > 0 {
 		values["cate_id"] = cateID
 	}
-	if skillMD := patchText(patch, "skill_md", "skillMd", "skill"); skillMD != "" {
+	if skillMD := patchText(patch, "skill_md", "skillMd", "skill", "content", "markdown"); skillMD != "" {
 		values["skill_md"] = skillMD
 	}
 	if filesJSON, ok, err := patchJSONText(patch, "files_json", "filesJson", "files"); err != nil {
@@ -1170,6 +1316,7 @@ func upsertPublishedSkill(ctx context.Context, snapshot draftSnapshot, target st
 		"key":           snapshot.Row.Key,
 		"name":          snapshot.Row.Name,
 		"description":   snapshot.Row.Description,
+		"source_type":   agentmodel.SkillSourceTypeCustom,
 		"source_url":    manifest["source_url"],
 		"install_input": "",
 		"install_path":  filepath.ToSlash(target),
@@ -1181,6 +1328,16 @@ func upsertPublishedSkill(ctx context.Context, snapshot draftSnapshot, target st
 	existing := skillModel.Find(ctx, map[string]any{"key": snapshot.Row.Key})
 	var skillID uint64
 	if existing != nil {
+		sourceType := agentmodel.NormalizeSkillSourceType(existing.SourceType, existing.SourceURL, existing.InstallInput)
+		if sourceType != agentmodel.SkillSourceTypeCustom {
+			return 0, fmt.Errorf("已存在同标识的安装来源技能，不能用自建技能覆盖: %s", snapshot.Row.Key)
+		}
+		if snapshot.Row.SourceSkillID == 0 {
+			return 0, fmt.Errorf("技能标识已存在，请从已有技能走升级流程: %s", snapshot.Row.Key)
+		}
+		if existing.ID != snapshot.Row.SourceSkillID {
+			return 0, fmt.Errorf("技能标识已被其他自创技能使用: %s", snapshot.Row.Key)
+		}
 		skillID = existing.ID
 		skillModel.Update(ctx, map[string]any{"id": skillID}, record)
 	} else {

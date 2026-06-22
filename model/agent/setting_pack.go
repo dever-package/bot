@@ -10,6 +10,7 @@ const (
 	DefaultSettingPackID      uint64 = 1
 	AssistantSettingPackID    uint64 = 2
 	SkillInstallSettingPackID uint64 = 3
+	SkillCreateSettingPackID  uint64 = 4
 )
 
 type SettingPack struct {
@@ -47,6 +48,13 @@ var (
 			"description": "系统内置技能安装规划器专用规则方案，只生成受控安装计划。",
 			"status":      1,
 			"sort":        3,
+		},
+		{
+			"id":          SkillCreateSettingPackID,
+			"name":        "技能创建规则方案",
+			"description": "系统内置技能创建工程师专用规则方案，只生成受控技能草稿 patch。",
+			"status":      1,
+			"sort":        4,
 		},
 	}
 

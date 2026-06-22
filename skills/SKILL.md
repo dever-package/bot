@@ -43,17 +43,25 @@ version: 0.1.0
 - `service/energon`：provider/source/power 调用和归一化。
 - `service/project`：workspace/project canvas 执行、锁、记录、stream 和权限。
 - `service/team`：team flow runtime、节点执行、校验、审批和 stream。
-- `service/assistant`：后台 AI 助理、`show-agent` 多轮会话、历史会话、长期记忆和记忆确认。
+- `service/assistant`：后台 AI 助理、`show-agent` 多轮会话、历史会话和自动长期记忆。
 
 新增 Service 代码只放到归属 service 目录。避免新增会导致 package/front 循环依赖的跨 package import。
 
 ## AI 助理和技能创建
 
 - 创建技能、安装技能、智能体测试和后台 AI 助理都复用 `bot_assistant_session` / `bot_assistant_message`，用 `agent_key + context_key` 隔离场景；不要再新增场景专用 message 表。
-- 长期记忆复用 `bot_memory`，按 `owner_type/owner_id + scope + agent_key + context_key + session_id` 隔离；低置信或冲突候选放 `bot_memory_candidate` 并在本轮消息下确认。
+- 长期记忆复用 `bot_memory`，只在主框架普通聊天和智能体运行页开启；按 `owner_type/owner_id + agent_key + context_key` 严格隔离，自动保存、更新或忽略，不走候选确认表，不做向量召回。
 - 记忆抽取复用当前 agent 的 `llm_power_id`；不可用时才退回确定性规则。secret、cookie、token、api key 不进入记忆、prompt、日志。
 - 创建技能的 AI 对话必须只产出和应用草稿 patch；发布仍走校验、沙箱测试和发布流程。
 - AI 助理内历史、记忆、交互参数弹窗必须高于 AI 助理层；AI 助理层必须高于普通业务弹窗，且不能点击助理导致普通弹窗关闭。
+
+## 知识库
+
+- 文件直读是默认基础能力，不做成可选检索模式；agent 先用 `open_knowledge_init` / `list_knowledge_files` / `search_knowledge_files` / `read_knowledge_file` 读取原文。
+- 检索模式仍是单选：`轻量检索` 生成本地搜索索引；`智能增强` 在轻量检索基础上启用 LLM 检索规划、概念图谱和可选向量。
+- 命中片段只当候选证据；需要确认事实、写长文或跨文档分析时，必须回读原文或打开索引节点，不要只复述候选列表。
+- 文档管理里的索引状态表示文档/节点搜索索引状态；不要再拆出无实际用途的增强状态字段。
+- 不新增 `_index.md` 约定；如需要知识库入口说明，使用根目录 `init.md`，没有则直接按文件列表和原文搜索处理。
 
 ## 常见检查
 

@@ -257,7 +257,7 @@
         "meta": {
           "stateKey": "dialog.create",
           "pageRoute": "/bot/agent/knowledge_base/update",
-          "description": "创建知识库后，在文档管理中上传或编辑文件，再手动触发索引。",
+          "description": "创建知识库后，在文档管理中上传或编辑文件，再按检索模式更新索引。",
           "size": "xl",
           "footer": {
             "confirm": true,
@@ -273,7 +273,7 @@
         "meta": {
           "stateKey": "dialog.edit",
           "pageRoute": "/bot/agent/knowledge_base/update",
-          "description": "配置知识库的文档解析服务和检索模式。",
+          "description": "配置知识库的文档解析服务和检索能力。",
           "size": "xl",
           "footer": {
             "confirm": true,

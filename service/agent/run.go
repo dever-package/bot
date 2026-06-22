@@ -143,7 +143,7 @@ func (s Service) execute(exec runExecution) {
 	agentSettings := s.repo.ListActiveAgentSettings(ctx, exec.Agent.ID)
 	knowledgeService := agentknowledge.NewService()
 	knowledgeBases := knowledgeService.AgentKnowledgeBases(ctx, exec.Agent.ID)
-	runtimeMemories := assistantservice.NewService().RuntimeMemories(ctx, exec.Parsed.AssistantSessionID, 12)
+	runtimeMemories := assistantservice.NewService().RuntimeMemories(ctx, exec.Parsed.AssistantSessionID, primaryInputText(exec.Parsed.Input), 12)
 	runtimePrompt := agentprompt.BuildRuntimePrompt(agentprompt.RuntimeInput{
 		PublicSettings: publicSettings,
 		AgentSettings:  agentSettings,
@@ -439,7 +439,8 @@ func actionFailureMessage(action agentaction.Action) string {
 
 func isKnowledgeAction(action agentaction.Action) bool {
 	switch strings.TrimSpace(action.Tool) {
-	case "list_knowledge_tree", "search_knowledge_nodes", "open_knowledge_node", "expand_knowledge_node", "find_related_knowledge", "debug_knowledge_retrieval":
+	case "list_knowledge_tree", "search_knowledge_nodes", "open_knowledge_node", "expand_knowledge_node", "find_related_knowledge", "debug_knowledge_retrieval",
+		"open_knowledge_init", "list_knowledge_files", "search_knowledge_files", "read_knowledge_file":
 		return true
 	default:
 		return false

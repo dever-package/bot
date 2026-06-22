@@ -1,27 +1,20 @@
 package api
 
 import (
+	"context"
 	"strings"
 	"time"
 
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
+	agentmodel "github.com/dever-package/bot/model/agent"
 	skilldraft "github.com/dever-package/bot/service/agent/skill/draft"
 )
 
 type SkillDraft struct{}
 
 var skillDraftService = skilldraft.NewService()
-
-func (SkillDraft) PostValidate(c *server.Context) error {
-	body, err := skillDraftBody(c)
-	if err != nil {
-		return c.Error(err)
-	}
-	resp := skillDraftService.Validate(c.Context(), util.ToUint64(body["id"]))
-	return skillDraftResponse(c, resp)
-}
 
 func (SkillDraft) PostTest(c *server.Context) error {
 	body, err := skillDraftBody(c)
@@ -43,8 +36,27 @@ func (SkillDraft) PostPublish(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	resp := skillDraftService.Publish(c.Context(), util.ToUint64(body["id"]))
+	resp := skillDraftService.Publish(c.Context(), skilldraft.PublishRequest{
+		ID:             util.ToUint64(body["id"]),
+		Name:           util.ToStringTrimmed(body["name"]),
+		NameSet:        skillDraftBodyHas(body, "name"),
+		Description:    util.ToStringTrimmed(body["description"]),
+		DescriptionSet: skillDraftBodyHas(body, "description"),
+		PackID:         util.ToUint64(firstSkillDraftBodyValue(body, "pack_id", "packId")),
+		CateID:         util.ToUint64(firstSkillDraftBodyValue(body, "cate_id", "cateId")),
+	})
 	return skillDraftResponse(c, resp)
+}
+
+func (SkillDraft) PostPublishOptions(c *server.Context) error {
+	return c.JSONPayload(200, map[string]any{
+		"status": 1,
+		"msg":    "ok",
+		"data": map[string]any{
+			"packs": skillDraftPackOptions(c.Context()),
+			"cates": skillDraftCateOptions(c.Context()),
+		},
+	})
 }
 
 func (SkillDraft) PostFromSkill(c *server.Context) error {
@@ -54,8 +66,8 @@ func (SkillDraft) PostFromSkill(c *server.Context) error {
 	}
 	resp := skillDraftService.CreateFromSkill(
 		c.Context(),
-		util.ToUint64(body["skill_id"]),
-		util.ToUint64(body["pack_id"]),
+		util.ToUint64(firstSkillDraftBodyValue(body, "skill_id", "skillId", "source_skill_id", "sourceSkillId")),
+		util.ToUint64(firstSkillDraftBodyValue(body, "pack_id", "packId")),
 	)
 	return skillDraftResponse(c, resp)
 }
@@ -86,10 +98,13 @@ func (SkillDraft) PostApplyPatch(c *server.Context) error {
 		return c.Error(err)
 	}
 	resp := skillDraftService.ApplyPatch(c.Context(), skilldraft.PatchRequest{
-		ID:     util.ToUint64(firstSkillDraftBodyValue(body, "id", "draft_id", "draftId")),
-		PackID: util.ToUint64(firstSkillDraftBodyValue(body, "pack_id", "packId")),
-		CateID: util.ToUint64(firstSkillDraftBodyValue(body, "cate_id", "cateId")),
-		Patch:  skillDraftMap(firstSkillDraftBodyValue(body, "patch", "draft")),
+		ID:                  util.ToUint64(firstSkillDraftBodyValue(body, "id", "draft_id", "draftId")),
+		PackID:              util.ToUint64(firstSkillDraftBodyValue(body, "pack_id", "packId")),
+		CateID:              util.ToUint64(firstSkillDraftBodyValue(body, "cate_id", "cateId")),
+		Patch:               skillDraftMap(firstSkillDraftBodyValue(body, "patch", "draft")),
+		AssistantSessionID:  util.ToUint64(firstSkillDraftBodyValue(body, "assistant_session_id", "assistantSessionId")),
+		AssistantAgentKey:   util.ToStringTrimmed(firstSkillDraftBodyValue(body, "assistant_agent_key", "assistantAgentKey")),
+		AssistantContextKey: util.ToStringTrimmed(firstSkillDraftBodyValue(body, "assistant_context_key", "assistantContextKey")),
 	})
 	return skillDraftResponse(c, resp)
 }
@@ -109,6 +124,15 @@ func firstSkillDraftBodyValue(body map[string]any, keys ...string) any {
 		}
 	}
 	return nil
+}
+
+func skillDraftBodyHas(body map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		if _, exists := body[key]; exists {
+			return true
+		}
+	}
+	return false
 }
 
 func skillDraftMap(raw any) map[string]any {
@@ -141,6 +165,36 @@ func skillDraftArgs(raw any) []string {
 	default:
 		return nil
 	}
+}
+
+func skillDraftPackOptions(ctx context.Context) []map[string]any {
+	rows := agentmodel.NewSkillPackModel().Select(ctx, map[string]any{"status": 1})
+	options := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		options = append(options, map[string]any{
+			"id":   row.ID,
+			"name": row.Name,
+		})
+	}
+	return options
+}
+
+func skillDraftCateOptions(ctx context.Context) []map[string]any {
+	rows := agentmodel.NewSkillCateModel().Select(ctx, map[string]any{"status": 1})
+	options := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		options = append(options, map[string]any{
+			"id":   row.ID,
+			"name": row.Name,
+		})
+	}
+	return options
 }
 
 func skillDraftStringList(raw any) []string {

@@ -110,7 +110,7 @@ func memoryExtractorRole() string {
 		"不要保存 API Key、Token、Cookie、密码、私钥、授权头或任何敏感凭证。",
 		"不要保存临时任务、单次操作、普通闲聊或不稳定猜测。",
 		"最多输出 1 条最高价值记忆；不要一次输出多条。",
-		"scope 只能是 global、agent、context、session。",
+		"scope 固定输出 context；记忆只服务当前 agent_key + context_key，不跨场景复用。",
 		"kind 只能是 working、episodic、semantic、procedural、persona、content。",
 		"输出格式：{\"memories\":[{\"action\":\"upsert\",\"scope\":\"context\",\"kind\":\"procedural\",\"title\":\"短标题\",\"content\":\"完整可执行规则\",\"tags\":[\"rule\"],\"confidence\":0.9,\"reason\":\"原因\"}]}",
 		"没有值得记忆的信息时输出 {\"memories\":[]}",
