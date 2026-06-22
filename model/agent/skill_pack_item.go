@@ -21,6 +21,16 @@ type SkillPackItemIndex struct {
 }
 
 var (
+	skillPackItemSeed = []map[string]any{
+		{
+			"id":       10001,
+			"pack_id":  DefaultSkillPackID,
+			"skill_id": BuiltinArticleImportSkillID,
+			"status":   1,
+			"sort":     10,
+		},
+	}
+
 	skillPackRelation = orm.Relation{
 		Field:      "pack_id",
 		Option:     "bot.agent.NewSkillPackModel",
@@ -37,6 +47,7 @@ var (
 func NewSkillPackItemModel() *orm.Model[SkillPackItem] {
 	return orm.LoadModel[SkillPackItem]("技能方案条目", "bot_skill_pack_item", orm.ModelConfig{
 		Index:    SkillPackItemIndex{},
+		Seeds:    skillPackItemSeed,
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{

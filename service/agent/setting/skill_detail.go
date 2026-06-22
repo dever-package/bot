@@ -28,11 +28,30 @@ func (AgentHook) ProviderLoadSkillDetail(c *server.Context, params []any) any {
 	record["manifest_pretty"] = prettyJSONText(util.ToStringTrimmed(record["manifest"]))
 	installPath := util.ToStringTrimmed(record["install_path"])
 	summary, files := scanSkillInstallFiles(installPath)
+	sourceMeta := readSkillSourceMeta(installPath)
+	configRows := skillConfigRows(c.Context(), util.ToUint64(record["id"]))
 	record["skill_scan_summary"] = summary
 	record["skill_scan_files"] = files
-	record["source_meta_pretty"] = readSkillSourceMeta(installPath)
-	record["skill_config_rows"] = skillConfigRows(c.Context(), util.ToUint64(record["id"]))
+	record["source_meta_pretty"] = sourceMeta
+	record["skill_config_rows"] = configRows
+	record["has_source_url"] = util.ToStringTrimmed(record["source_url"]) != ""
+	record["has_install_input"] = util.ToStringTrimmed(record["install_input"]) != ""
+	record["has_install_path"] = installPath != ""
+	record["has_entry_file"] = installPath != "" && util.ToStringTrimmed(record["entry_file"]) != ""
+	record["has_install_info"] = truthyRecordFlag(record, "has_source_url") ||
+		truthyRecordFlag(record, "has_install_input") ||
+		truthyRecordFlag(record, "has_install_path") ||
+		truthyRecordFlag(record, "has_entry_file")
+	record["has_skill_scan_files"] = len(files) > 0
+	record["has_source_meta"] = sourceMeta != ""
+	record["has_config_rows"] = len(configRows) > 0
+	record["has_manifest"] = util.ToStringTrimmed(record["manifest_pretty"]) != ""
 	return record
+}
+
+func truthyRecordFlag(record map[string]any, key string) bool {
+	value, ok := record[key].(bool)
+	return ok && value
 }
 
 func skillDetailRecord(params []any) map[string]any {
@@ -62,7 +81,7 @@ func prettyJSONText(raw string) string {
 func scanSkillInstallFiles(installPath string) (string, []map[string]any) {
 	root := filepath.Clean(strings.TrimSpace(installPath))
 	if root == "" || root == "." {
-		return "未记录安装目录。", []map[string]any{}
+		return "", []map[string]any{}
 	}
 	if !skillservice.IsSafePath(root) {
 		return "安装目录不在 data/skills 下，已跳过扫描。", []map[string]any{}

@@ -8,7 +8,6 @@ import (
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	energonmodel "github.com/dever-package/bot/model/energon"
-	skillservice "github.com/dever-package/bot/service/agent/skill"
 )
 
 type OptionService struct{}
@@ -114,7 +113,6 @@ func (OptionService) ProviderLoadSettingCates(c *server.Context, _ []any) any {
 }
 
 func (OptionService) ProviderLoadSkillCates(c *server.Context, _ []any) any {
-	skillservice.EnsureBuiltinSkills(c.Context())
 	return loadCateOptions(agentmodel.NewSkillCateModel().SelectMap(c.Context(), map[string]any{}, cateSelectOptions()))
 }
 

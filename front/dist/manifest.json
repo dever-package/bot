@@ -1,0 +1,30 @@
+{
+  "style.css": {
+    "file": "bot.css",
+    "src": "style.css"
+  },
+  "tmp/dever/compiler/front/src/runtime-entry.ts": {
+    "file": "bot.js",
+    "name": "runtime-entry",
+    "src": "tmp/dever/compiler/front/src/runtime-entry.ts",
+    "isEntry": true,
+    "css": [
+      "bot.css"
+    ]
+  },
+  "__plugin": {
+    "name": "bot",
+    "nodes": [
+      "bot-body-work-home-shell",
+      "bot-body-work-login-page",
+      "bot-body-work-project-page",
+      "bot-body-work-space-page",
+      "show-agent",
+      "show-knowledge-file-manager",
+      "show-skill-creator",
+      "show-skill-test",
+      "show-stream-request",
+      "show-team-workspace"
+    ]
+  }
+}

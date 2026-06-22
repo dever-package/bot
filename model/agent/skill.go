@@ -11,6 +11,17 @@ const (
 	SkillSourceTypeCustom    = "custom"
 	SkillSourceTypeInstalled = "installed"
 	SkillSourceTypeBuiltin   = "builtin"
+
+	BuiltinArticleImportSkillID          uint64 = 10001
+	BuiltinArticleImportSkillKey                = "front.article_import"
+	BuiltinArticleImportSkillName               = "文章导入"
+	BuiltinArticleImportSkillDescription        = "内置文章导入能力。支持从文章链接解析标题、正文结构和外部媒体资源，并可按需转存外部资源。"
+	BuiltinArticleImportSourceURL               = "dever:builtin/" + BuiltinArticleImportSkillKey
+	BuiltinMethodImportArticleURL               = "front.import_article_url"
+	BuiltinMethodImportURLResource              = "front.import_url_resource"
+	BuiltinServiceImportArticleURL              = "front.article.ArticleBuiltinService.ImportArticleURL"
+	BuiltinServiceImportURLResource             = "front.upload.UploadBuiltinService.ImportURLResource"
+	BuiltinArticleImportManifest                = `{"key":"front.article_import","name":"文章导入","description":"内置文章导入能力。支持从文章链接解析标题、正文结构和外部媒体资源，并可按需转存外部资源。","triggers":["文章导入","链接导入","自媒体采集","公众号采集","网页正文采集"],"domains":["article","media","import"],"targets":["article_import","rich_text"],"builtin_methods":[{"key":"front.import_article_url","service":"front.article.ArticleBuiltinService.ImportArticleURL","description":"解析文章链接，返回 title/html/assets/source_url/site。"},{"key":"front.import_url_resource","service":"front.upload.UploadBuiltinService.ImportURLResource","description":"把外部图片、视频、音频或文件链接转存为平台资源，返回上传文件信息。"}],"source":{"type":"builtin"}}`
 )
 
 type Skill struct {
@@ -49,9 +60,29 @@ var skillSourceTypeOptions = []map[string]any{
 	{"id": SkillSourceTypeBuiltin, "value": "内置"},
 }
 
+var skillSeed = []map[string]any{
+	{
+		"id":            BuiltinArticleImportSkillID,
+		"cate_id":       DefaultSkillCateID,
+		"key":           BuiltinArticleImportSkillKey,
+		"name":          BuiltinArticleImportSkillName,
+		"description":   BuiltinArticleImportSkillDescription,
+		"source_type":   SkillSourceTypeBuiltin,
+		"source_url":    BuiltinArticleImportSourceURL,
+		"install_input": "",
+		"install_path":  "",
+		"entry_file":    "SKILL.md",
+		"manifest":      BuiltinArticleImportManifest,
+		"content_hash":  "builtin:front.article_import:v1",
+		"status":        1,
+		"sort":          10,
+	},
+}
+
 func NewSkillModel() *orm.Model[Skill] {
 	return orm.LoadModel[Skill]("技能", "bot_skill", orm.ModelConfig{
 		Index:    SkillIndex{},
+		Seeds:    skillSeed,
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{

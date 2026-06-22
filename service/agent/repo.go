@@ -229,7 +229,6 @@ func isAlwaysLoadMode(loadMode string) bool {
 }
 
 func (Repo) ListActiveSkillPackEntries(ctx context.Context, packID uint64) []agentskill.Entry {
-	agentskill.EnsureBuiltinSkills(ctx)
 	if packID == 0 {
 		packID = agentmodel.DefaultSkillPackID
 	}

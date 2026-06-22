@@ -393,6 +393,13 @@
                     "size": "sm",
                     "description": "删除技能",
                     "className": "text-destructive hover:text-destructive",
+                    "hiddenWhen": [
+                      {
+                        "path": "skill.source_type",
+                        "operator": "equals",
+                        "value": "builtin"
+                      }
+                    ],
                     "action": {
                       "click": [
                         {

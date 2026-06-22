@@ -35,57 +35,139 @@
         "type": "show-title",
         "value": "page.installTitle",
         "meta": {
-          "variant": "section"
+          "variant": "section",
+          "hiddenWhen": [
+            {
+              "path": "form.has_install_info",
+              "operator": "equals",
+              "value": false
+            }
+          ]
         }
       },
       {
         "type": "show-base",
         "value": "form.source_url",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm break-all"
+        "className": "rounded-md border bg-muted/30 p-3 text-sm break-all",
+        "meta": {
+          "hiddenWhen": [
+            {
+              "path": "form.has_source_url",
+              "operator": "equals",
+              "value": false
+            }
+          ]
+        }
       },
       {
         "type": "show-base",
         "value": "form.install_input",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words"
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words",
+        "meta": {
+          "hiddenWhen": [
+            {
+              "path": "form.has_install_input",
+              "operator": "equals",
+              "value": false
+            }
+          ]
+        }
       },
       {
         "type": "show-base",
         "value": "form.install_path",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm font-mono break-all"
+        "className": "rounded-md border bg-muted/30 p-3 text-sm font-mono break-all",
+        "meta": {
+          "hiddenWhen": [
+            {
+              "path": "form.has_install_path",
+              "operator": "equals",
+              "value": false
+            }
+          ]
+        }
       },
       {
         "type": "show-base",
         "value": "form.entry_file",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm font-mono break-all"
+        "className": "rounded-md border bg-muted/30 p-3 text-sm font-mono break-all",
+        "meta": {
+          "hiddenWhen": [
+            {
+              "path": "form.has_entry_file",
+              "operator": "equals",
+              "value": false
+            }
+          ]
+        }
       },
       {
         "type": "show-title",
         "value": "page.scanTitle",
         "meta": {
-          "variant": "section"
+          "variant": "section",
+          "hiddenWhen": [
+            {
+              "path": "form.has_skill_scan_files",
+              "operator": "equals",
+              "value": false
+            }
+          ]
         }
       },
       {
         "type": "show-base",
         "value": "form.skill_scan_summary",
-        "className": "text-sm text-muted-foreground"
+        "className": "text-sm text-muted-foreground",
+        "meta": {
+          "hiddenWhen": [
+            {
+              "path": "form.has_skill_scan_files",
+              "operator": "equals",
+              "value": false
+            }
+          ]
+        }
       },
       {
         "type": "show-title",
         "value": "page.sourceMetaTitle",
         "meta": {
-          "variant": "section"
+          "variant": "section",
+          "hiddenWhen": [
+            {
+              "path": "form.has_source_meta",
+              "operator": "equals",
+              "value": false
+            }
+          ]
         }
       },
       {
         "type": "show-base",
         "value": "form.source_meta_pretty",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words"
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words",
+        "meta": {
+          "hiddenWhen": [
+            {
+              "path": "form.has_source_meta",
+              "operator": "equals",
+              "value": false
+            }
+          ]
+        }
       },
       {
         "type": "show-table",
         "value": "form.skill_scan_files",
         "meta": {
+          "hiddenWhen": [
+            {
+              "path": "form.has_skill_scan_files",
+              "operator": "equals",
+              "value": false
+            }
+          ],
           "rowKey": "path",
           "columns": [
             {
@@ -107,13 +189,27 @@
         "type": "show-title",
         "value": "page.configTitle",
         "meta": {
-          "variant": "section"
+          "variant": "section",
+          "hiddenWhen": [
+            {
+              "path": "form.has_config_rows",
+              "operator": "equals",
+              "value": false
+            }
+          ]
         }
       },
       {
         "type": "show-table",
         "value": "form.skill_config_rows",
         "meta": {
+          "hiddenWhen": [
+            {
+              "path": "form.has_config_rows",
+              "operator": "equals",
+              "value": false
+            }
+          ],
           "rowKey": "id",
           "columns": [
             {
@@ -146,13 +242,29 @@
         "type": "show-title",
         "value": "page.manifestTitle",
         "meta": {
-          "variant": "section"
+          "variant": "section",
+          "hiddenWhen": [
+            {
+              "path": "form.has_manifest",
+              "operator": "equals",
+              "value": false
+            }
+          ]
         }
       },
       {
         "type": "show-base",
         "value": "form.manifest_pretty",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words"
+        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-words",
+        "meta": {
+          "hiddenWhen": [
+            {
+              "path": "form.has_manifest",
+              "operator": "equals",
+              "value": false
+            }
+          ]
+        }
       }
     ]
   },

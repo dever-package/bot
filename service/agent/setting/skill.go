@@ -140,10 +140,7 @@ func (AgentHook) ProviderBeforeSaveSkillPack(_ *server.Context, params []any) an
 	return record
 }
 
-func (AgentHook) ProviderBeforeSaveSkillPackItem(c *server.Context, params []any) any {
-	if c != nil {
-		skillservice.EnsureBuiltinSkills(c.Context())
-	}
+func (AgentHook) ProviderBeforeSaveSkillPackItem(_ *server.Context, params []any) any {
 	record := cloneAgentRecord(params)
 	if len(record) == 0 {
 		return record
@@ -161,9 +158,6 @@ func (AgentHook) ProviderBeforeSaveSkillPackItem(c *server.Context, params []any
 }
 
 func (AgentHook) ProviderAttachSkillPackItemList(c *server.Context, params []any) any {
-	if c != nil {
-		skillservice.EnsureBuiltinSkills(c.Context())
-	}
 	payload := cloneAgentRecord(params)
 	rows := normalizeAgentChildRows(payload["rows"])
 	if len(rows) == 0 {
