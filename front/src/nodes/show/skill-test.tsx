@@ -222,6 +222,15 @@ export function ShowSkillTest({ item, store }: NodeItemProps) {
     reset();
   }, [draftID, modalOpen]);
 
+  useEffect(() => {
+    if (!publishDialogOpen || publishOptionsLoading) {
+      return;
+    }
+    setPublishForm((current) =>
+      normalizePublishFormSelections(current, publishOptions),
+    );
+  }, [publishDialogOpen, publishOptionsLoading, publishOptions]);
+
   const inputArgs = useMemo(() => splitArgs(input), [input]);
 
   useEffect(() => {
@@ -1228,13 +1237,12 @@ function PublishSelect({
   placeholder: string;
   onChange: (value: string) => void;
 }) {
-  const visibleOptions =
-    value && !options.some((option) => option.id === value)
-      ? [{ id: value, name: `ID ${value}` }, ...options]
-      : options;
+  const selectedValue = options.some((option) => option.id === value)
+    ? value
+    : undefined;
   return (
     <Select
-      value={value || undefined}
+      value={selectedValue}
       disabled={disabled}
       onValueChange={onChange}
     >
@@ -1242,7 +1250,7 @@ function PublishSelect({
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
-        {visibleOptions.map((option) => (
+        {options.map((option) => (
           <SelectItem key={option.id} value={option.id}>
             {option.name}
           </SelectItem>
@@ -1506,11 +1514,33 @@ function publishOptionList(value: unknown): PublishOption[] {
       if (!isPlainRecord(item)) {
         return null;
       }
-      const id = valueText(item.id);
-      const name = valueText(item.name || item.value || item.label);
+      const id = valueText(item.id || item.value || item.key);
+      const name = valueText(item.name || item.label || item.title || item.text);
       return id && name ? { id, name } : null;
     })
     .filter((item): item is PublishOption => Boolean(item));
+}
+
+function normalizePublishFormSelections(
+  form: PublishForm,
+  options: PublishOptions,
+): PublishForm {
+  const packID = resolvePublishOptionID(form.packID, options.packs);
+  const cateID = resolvePublishOptionID(form.cateID, options.cates);
+  if (packID === form.packID && cateID === form.cateID) {
+    return form;
+  }
+  return { ...form, packID, cateID };
+}
+
+function resolvePublishOptionID(
+  value: string,
+  options: PublishOption[],
+): string {
+  if (value && options.some((option) => option.id === value)) {
+    return value;
+  }
+  return options[0]?.id || "";
 }
 
 function draftPublishForm(draft: Record<string, unknown>): PublishForm {
@@ -1518,8 +1548,8 @@ function draftPublishForm(draft: Record<string, unknown>): PublishForm {
     key: valueText(draft.key),
     name: valueText(draft.name),
     description: valueText(draft.description),
-    packID: valueText(draft.pack_id || draft.packId || 1),
-    cateID: valueText(draft.cate_id || draft.cateId || 1),
+    packID: valueText(draft.pack_id || draft.packId),
+    cateID: valueText(draft.cate_id || draft.cateId),
   };
 }
 
