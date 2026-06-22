@@ -25,6 +25,7 @@ type Entry struct {
 	Key         string
 	Name        string
 	Description string
+	SourceType  string
 	Triggers    []string
 	Domains     []string
 	Targets     []string

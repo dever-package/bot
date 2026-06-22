@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shemic/dever/server"
+
 	agentaction "github.com/dever-package/bot/service/agent/action"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 	"github.com/dever-package/bot/service/agent/tool/sandbox"
@@ -42,6 +44,7 @@ type Request struct {
 	Loaded      []agentskill.Entry
 	TempRoot    string
 	Options     Options
+	Server      *server.Context
 	WriteStatus func(ctx context.Context, text string, meta map[string]any) error
 }
 
@@ -104,7 +107,7 @@ func Execute(ctx context.Context, req Request) agentaction.Result {
 }
 
 func registry() map[string]handler {
-	return map[string]handler{
+	handlers := map[string]handler{
 		NameHTTPRequest:         executeHTTPRequest,
 		NameCurlRequest:         executeCurlRequest,
 		NameListSkill:           executeListSkillFiles,
@@ -125,6 +128,12 @@ func registry() map[string]handler {
 		NameKnowledgeFileSearch: executeKnowledgeFileSearch,
 		NameKnowledgeFileRead:   executeKnowledgeFileRead,
 	}
+	for _, definition := range agentskill.BuiltinDefinitions() {
+		for _, method := range definition.Methods {
+			handlers[normalizeTool(method.Key)] = executeBuiltinService
+		}
+	}
+	return handlers
 }
 
 func toolRequiresSkill(name string) bool {
@@ -211,6 +220,9 @@ func isEmptyToolDisplayValue(value any) bool {
 func toolStatusText(name string) string {
 	if isKnowledgeTool(name) {
 		return "正在调用知识库"
+	}
+	if agentskill.IsBuiltinMethod(normalizeTool(name)) {
+		return "正在调用内置工具"
 	}
 	return "正在调用工具"
 }

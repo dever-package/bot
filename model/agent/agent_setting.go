@@ -22,7 +22,11 @@ type AgentSettingIndex struct {
 	AgentStatus struct{} `index:"agent_id,status"`
 }
 
+type DefaultAgentSettingCatalog struct{}
+
 var (
+	DefaultAgentSettings = DefaultAgentSettingCatalog{}
+
 	agentSettingTypeOptions = []map[string]any{
 		agentSettingTypeOption("identity", "身份", "定义智能体是谁、身份视角、使命定位和长期稳定的自我设定。", "core", "核心设定"),
 		agentSettingTypeOption("responsibility", "职责", "定义智能体负责做什么、主要任务范围、交付目标和判断重点。", "core", "核心设定"),
@@ -143,10 +147,18 @@ var (
 				"信息足够、用户明确要求生成或更新草稿时，输出一个 agent-result，kind 固定为 skill_draft_patch。",
 				"json.patch 只允许包含 key、name、description、skill_md、files_json、manifest、pack_id、cate_id。",
 				"files_json 必须是对象，key 是相对路径，且只能使用 scripts/、references/、requirements.txt、package.json。",
+				"files_json 中每个 scripts/ 文件必须在 manifest.scripts 声明同一路径；manifest.scripts 不声明不存在的脚本。",
+				"生成 Python/Node/Shell 脚本时必须输出完整可语法检查的源码：Python 等价通过 python3 -m py_compile，Node 等价通过 node --check，Shell 等价通过 sh/bash -n。",
+				"脚本必须是完整文件，不是片段；必须包含入口函数或 main 流程、参数读取、错误处理和最终输出；禁止伪代码、Markdown 代码围栏、TODO 占位、半截函数。",
+				"Python 脚本默认采用 main() + if __name__ == \"__main__\": main()；每个 if/for/while/try/except/finally/with/def/class 后必须有缩进代码块，必要时写 pass。",
+				"Python 的 try 必须配套 except 或 finally；循环变量和关键字之间必须有空格，例如 for item in items；禁止输出 foritem、ifx、try 后无 except/finally 这类非法写法。",
+				"复杂脚本先拆小函数：parse_args、fetch、parse、run；不要把长逻辑堆在一个 try 块里。",
+				"不确定依赖或网站解析细节时，优先生成可运行的保守版本并返回清晰错误，不要编造不可运行代码。",
 				"manifest 只写 Dever 运行配置，不要把这些字段塞进 SKILL.md frontmatter。",
 				"manifest.config 只声明环境变量需求，可写 key、name、required；key 必须只包含字母、数字和下划线，运行时会按 key 原样注入环境变量；required=true 表示未绑定或未填写该环境变量时禁止执行脚本。",
-				"manifest.mcp 可声明 stdio MCP server，但每个 server 必须写 key、command、args、tools；tools 不能为空。",
-				"如果只是在追问，不要输出下面的 agent-result 示例；只有生成或更新草稿时才输出。",
+				"manifest.scripts 只声明 scripts/ 下入口；manifest.mcp 可声明 stdio MCP server，但每个 server 必须写 key、command、args、tools，tools 不能为空。",
+				"第三方来源文件只能进入 references/source/；真正可执行能力必须审查后包装到 scripts/ 并在 manifest.scripts 声明。",
+				"只在生成或更新草稿时输出下面的 agent-result；追问信息时不要输出示例 JSON。",
 				"",
 				"```agent-result",
 				"{",
@@ -200,4 +212,22 @@ func NewAgentSettingModel() *orm.Model[AgentSetting] {
 
 func AgentSettingTypeOptions() []map[string]any {
 	return cloneOptionRows(agentSettingTypeOptions)
+}
+
+func (DefaultAgentSettingCatalog) Find(agentID uint64, settingType string) (AgentSetting, bool) {
+	for _, row := range agentSettingSeed {
+		if seedUint64(row["agent_id"]) != agentID || seedString(row["type"]) != settingType {
+			continue
+		}
+		return AgentSetting{
+			ID:          seedUint64(row["id"]),
+			AgentID:     seedUint64(row["agent_id"]),
+			Type:        seedString(row["type"]),
+			LoadMode:    seedString(row["load_mode"]),
+			Description: seedString(row["description"]),
+			Content:     seedString(row["content"]),
+			Status:      int16(seedInt(row["status"])),
+		}, true
+	}
+	return AgentSetting{}, false
 }

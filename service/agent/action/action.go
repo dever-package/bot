@@ -96,6 +96,8 @@ func mergeTopLevelToolInput(input map[string]any, raw map[string]any) map[string
 		"url", "uri", "endpoint", "method", "headers", "query", "body", "data", "payload", "json",
 		"script", "path", "file", "dir", "directory", "args", "arguments",
 		"route", "api", "server", "timeout_seconds", "timeoutSeconds",
+		"max_images", "maxImages", "rule_id", "ruleId", "name", "filename", "fileName", "mime", "mime_type", "mimeType",
+		"kind", "biz_key", "bizKey", "biz_name", "bizName", "category_id", "categoryId",
 		"knowledge_base_id", "knowledgeBaseId", "base_id", "baseId",
 		"agent_id", "agentId",
 		"node_id", "nodeId", "parent_id", "parentId",

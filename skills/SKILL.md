@@ -50,6 +50,7 @@ version: 0.1.0
 ## AI 助理和技能创建
 
 - 创建技能、安装技能、智能体测试和后台 AI 助理都复用 `bot_assistant_session` / `bot_assistant_message`，用 `agent_key + context_key` 隔离场景；不要再新增场景专用 message 表。
+- 内置技能用 `bot_skill.source_type=builtin` 和 `manifest.builtin_methods` 暴露已有 Dever service/provider；不要写安装目录、不要复制脚本、不要绕过技能方案绑定。
 - 长期记忆复用 `bot_memory`，只在主框架普通聊天和智能体运行页开启；按 `owner_type/owner_id + agent_key + context_key` 严格隔离，自动保存、更新或忽略，不走候选确认表，不做向量召回。
 - 记忆抽取复用当前 agent 的 `llm_power_id`；不可用时才退回确定性规则。secret、cookie、token、api key 不进入记忆、prompt、日志。
 - 创建技能的 AI 对话必须只产出和应用草稿 patch；发布仍走校验、沙箱测试和发布流程。

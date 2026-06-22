@@ -348,6 +348,7 @@ func (s Service) executeToolAction(ctx context.Context, exec runExecution, actio
 		Loaded:    catalog.Loaded,
 		TempRoot:  tempRoot,
 		Options:   toolOptions,
+		Server:    exec.Request.Server,
 		WriteStatus: func(ctx context.Context, text string, meta map[string]any) error {
 			return s.writeStreamStatus(ctx, exec.RequestID, text, meta)
 		},

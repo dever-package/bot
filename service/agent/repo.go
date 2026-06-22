@@ -174,10 +174,53 @@ func (Repo) ListActiveAgentSettings(ctx context.Context, agentID uint64) []agent
 			result = append(result, *row)
 		}
 	}
+	result = withRuntimeBuiltinAgentSettings(ctx, agentID, result)
 	sort.SliceStable(result, func(i, j int) bool {
 		return agentsetting.LessAgentSettingOrder(result[i].Type, result[i].ID, result[j].Type, result[j].ID)
 	})
 	return result
+}
+
+func withRuntimeBuiltinAgentSettings(ctx context.Context, agentID uint64, rows []agentmodel.AgentSetting) []agentmodel.AgentSetting {
+	if !isRuntimeSkillCreatorAgent(ctx, agentID) {
+		return rows
+	}
+	builtin, ok := agentmodel.DefaultAgentSettings.Find(agentID, "output")
+	if !ok {
+		builtin, ok = agentmodel.DefaultAgentSettings.Find(agentmodel.SkillCreatorAgentID, "output")
+	}
+	if !ok {
+		return rows
+	}
+	builtin.AgentID = agentID
+	for index := range rows {
+		if rows[index].Type != builtin.Type {
+			continue
+		}
+		if skillCreatorOutputIsStrict(rows[index].Content) {
+			return rows
+		}
+		builtin.ID = rows[index].ID
+		builtin.AgentID = rows[index].AgentID
+		builtin.LoadMode = rows[index].LoadMode
+		builtin.Status = rows[index].Status
+		rows[index] = builtin
+		return rows
+	}
+	return append(rows, builtin)
+}
+
+func isRuntimeSkillCreatorAgent(ctx context.Context, agentID uint64) bool {
+	if agentID == agentmodel.SkillCreatorAgentID {
+		return true
+	}
+	row := agentmodel.NewAgentModel().Find(ctx, map[string]any{"id": agentID})
+	return row != nil && strings.TrimSpace(row.Key) == agentmodel.SkillCreatorAgentKey
+}
+
+func skillCreatorOutputIsStrict(content string) bool {
+	return strings.Contains(content, "生成 Python/Node/Shell 脚本时必须输出完整可语法检查的源码") &&
+		strings.Contains(content, "禁止伪代码、Markdown 代码围栏")
 }
 
 func isAlwaysLoadMode(loadMode string) bool {
@@ -186,6 +229,7 @@ func isAlwaysLoadMode(loadMode string) bool {
 }
 
 func (Repo) ListActiveSkillPackEntries(ctx context.Context, packID uint64) []agentskill.Entry {
+	agentskill.EnsureBuiltinSkills(ctx)
 	if packID == 0 {
 		packID = agentmodel.DefaultSkillPackID
 	}
@@ -233,6 +277,7 @@ func (Repo) ListActiveSkillPackEntries(ctx context.Context, packID uint64) []age
 			Key:         strings.TrimSpace(skill.Key),
 			Name:        strings.TrimSpace(skill.Name),
 			Description: strings.TrimSpace(skill.Description),
+			SourceType:  agentmodel.NormalizeSkillSourceType(skill.SourceType, skill.SourceURL, skill.InstallInput),
 			Triggers:    agentskill.ManifestTriggers(skill.Manifest),
 			Domains:     agentskill.ManifestDomains(skill.Manifest),
 			Targets:     agentskill.ManifestTargets(skill.Manifest),

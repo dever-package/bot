@@ -10,6 +10,7 @@ import (
 const (
 	SkillSourceTypeCustom    = "custom"
 	SkillSourceTypeInstalled = "installed"
+	SkillSourceTypeBuiltin   = "builtin"
 )
 
 type Skill struct {
@@ -45,6 +46,7 @@ var skillCateRelation = orm.Relation{
 var skillSourceTypeOptions = []map[string]any{
 	{"id": SkillSourceTypeCustom, "value": "自建"},
 	{"id": SkillSourceTypeInstalled, "value": "安装"},
+	{"id": SkillSourceTypeBuiltin, "value": "内置"},
 }
 
 func NewSkillModel() *orm.Model[Skill] {
@@ -65,7 +67,7 @@ func NewSkillModel() *orm.Model[Skill] {
 func NormalizeSkillSourceType(sourceType string, sourceURL string, installInput string) string {
 	sourceType = strings.ToLower(strings.TrimSpace(sourceType))
 	switch sourceType {
-	case SkillSourceTypeCustom, SkillSourceTypeInstalled:
+	case SkillSourceTypeCustom, SkillSourceTypeInstalled, SkillSourceTypeBuiltin:
 		return sourceType
 	}
 	if strings.HasPrefix(strings.TrimSpace(sourceURL), "dever:draft/") {
@@ -83,6 +85,8 @@ func SkillSourceTypeLabel(sourceType string) string {
 		return "自建"
 	case SkillSourceTypeInstalled:
 		return "安装"
+	case SkillSourceTypeBuiltin:
+		return "内置"
 	default:
 		return "未知"
 	}

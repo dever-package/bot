@@ -42,6 +42,10 @@ func skillToolPrompt(catalog agentskill.Catalog, tools ToolRuntime) string {
 	if tools.RunSkillScriptEnabled {
 		toolNames = append(toolNames, "run_skill_script")
 	}
+	builtinMethods := agentskill.LoadedBuiltinMethods(catalog.Loaded)
+	for _, method := range builtinMethods {
+		toolNames = append(toolNames, method.Key)
+	}
 	toolNames = append(toolNames, "internal_api", "mcp_call")
 	scriptRule := "- 当前运行配置已禁用 run_skill_script；不要调用脚本工具。"
 	if tools.RunSkillScriptEnabled {
@@ -52,7 +56,7 @@ func skillToolPrompt(catalog agentskill.Catalog, tools ToolRuntime) string {
 			scriptRule += " 脚本默认可联网，但仍只能执行当前技能声明或 scripts/ 下的入口。"
 		}
 	}
-	return strings.Join([]string{
+	lines := []string{
 		"技能工具执行协议:",
 		"- 可用工具: " + strings.Join(toolNames, ", ") + "。",
 		"- 已加载技能可以通过平台工具执行其说明中的 " + capabilityTarget + "；不要要求用户自己执行 curl 或命令。",
@@ -62,13 +66,18 @@ func skillToolPrompt(catalog agentskill.Catalog, tools ToolRuntime) string {
 		"- write_temp_file/read_temp_file 只读写本轮临时目录；internal_api 只用于平台白名单内部接口；mcp_call 只允许调用当前技能 manifest.mcp 声明的 server/tool。",
 		"- 工具调用结果会作为 tool_observation 回到下一轮；收到结果后继续判断原始目标，并按输出协议回复。",
 		"- 本轮已加载技能 key: " + strings.Join(keys, ", "),
+	}
+	if len(builtinMethods) > 0 {
+		lines = append(lines, "- 当前已加载内置工具: "+builtinMethodSummary(builtinMethods)+"。")
+	}
+	lines = append(lines,
 		"",
 		"agent-action call_tool 示例:",
 		"```agent-action",
 		"{",
 		`  "type": "call_tool",`,
 		`  "tool": "http_request",`,
-		`  "skill": "` + keys[0] + `",`,
+		`  "skill": "`+keys[0]+`",`,
 		`  "input": {`,
 		`    "method": "GET",`,
 		`    "url": "https://example.com/api",`,
@@ -76,5 +85,18 @@ func skillToolPrompt(catalog agentskill.Catalog, tools ToolRuntime) string {
 		"  }",
 		"}",
 		"```",
-	}, "\n")
+	)
+	return strings.Join(lines, "\n")
+}
+
+func builtinMethodSummary(methods []agentskill.BuiltinMethod) string {
+	parts := make([]string, 0, len(methods))
+	for _, method := range methods {
+		text := method.Key
+		if strings.TrimSpace(method.Description) != "" {
+			text += "（" + strings.TrimSpace(method.Description) + "）"
+		}
+		parts = append(parts, text)
+	}
+	return strings.Join(parts, "；")
 }

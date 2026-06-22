@@ -37,6 +37,9 @@ func LoadContents(entries []Entry, limits Limits) ([]Entry, []string) {
 func ReadContent(entry Entry, limits Limits) (string, []string) {
 	limits = normalizeLimits(limits)
 	warnings := make([]string, 0)
+	if content := BuiltinContent(entry); strings.TrimSpace(content) != "" {
+		return strings.TrimSpace(content), warnings
+	}
 	installPath := strings.TrimSpace(entry.InstallPath)
 	if installPath == "" {
 		return "", []string{fmt.Sprintf("技能 %s 未配置安装目录", entry.Key)}

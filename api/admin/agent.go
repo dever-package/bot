@@ -22,6 +22,7 @@ func (Agent) PostRun(c *server.Context) error {
 		Path:    c.Path(),
 		Headers: requestHeaders(c),
 		Body:    body,
+		Server:  c,
 	})
 	return c.JSONPayload(200, resp)
 }

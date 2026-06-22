@@ -607,6 +607,7 @@ func parseDraftFiles(raw string) (map[string]string, []string) {
 	if err := json.Unmarshal([]byte(raw), &values); err != nil {
 		return values, []string{"files_json 必须是路径到文本内容的 JSON 对象"}
 	}
+	values = normalizeDraftFiles(values)
 	issues := make([]string, 0)
 	totalBytes := 0
 	for path, content := range values {
@@ -918,9 +919,9 @@ func draftPatchValues(ctx context.Context, req PatchRequest) (map[string]any, er
 		values["cate_id"] = cateID
 	}
 	if skillMD := patchText(patch, "skill_md", "skillMd", "skill", "content", "markdown"); skillMD != "" {
-		values["skill_md"] = skillMD
+		values["skill_md"] = normalizeDraftMarkdownContent(skillMD)
 	}
-	if filesJSON, ok, err := patchJSONText(patch, "files_json", "filesJson", "files"); err != nil {
+	if filesJSON, ok, err := patchFilesJSONText(patch, "files_json", "filesJson", "files"); err != nil {
 		return nil, err
 	} else if ok {
 		values["files_json"] = filesJSON
@@ -1054,7 +1055,7 @@ func patchJSONText(patch map[string]any, keys ...string) (string, bool, error) {
 		}
 		switch typed := value.(type) {
 		case string:
-			text := strings.TrimSpace(typed)
+			text := cleanPatchJSONText(typed)
 			if text == "" {
 				return "", false, nil
 			}
@@ -1067,6 +1068,238 @@ func patchJSONText(patch map[string]any, keys ...string) (string, bool, error) {
 		}
 	}
 	return "", false, nil
+}
+
+func patchFilesJSONText(patch map[string]any, keys ...string) (string, bool, error) {
+	for _, key := range keys {
+		value, exists := patch[key]
+		if !exists {
+			continue
+		}
+		files, empty, err := patchFilesMap(value)
+		if err != nil {
+			return "", false, fmt.Errorf("%s 必须是路径到文本内容的 JSON 对象", key)
+		}
+		if empty {
+			return "", false, nil
+		}
+		return agentskill.JSONText(normalizeDraftFiles(files)), true, nil
+	}
+	return "", false, nil
+}
+
+func patchFilesMap(value any) (map[string]string, bool, error) {
+	switch typed := value.(type) {
+	case string:
+		text := cleanPatchJSONText(typed)
+		if text == "" {
+			return nil, true, nil
+		}
+		files := map[string]string{}
+		if err := json.Unmarshal([]byte(text), &files); err != nil {
+			return nil, false, err
+		}
+		return files, false, nil
+	default:
+		raw, err := json.Marshal(typed)
+		if err != nil {
+			return nil, false, err
+		}
+		files := map[string]string{}
+		if err := json.Unmarshal(raw, &files); err != nil {
+			return nil, false, err
+		}
+		return files, false, nil
+	}
+}
+
+func cleanPatchJSONText(text string) string {
+	text = normalizeTextNewlines(strings.TrimPrefix(text, "\ufeff"))
+	text = unwrapWholeFencedBlock(text)
+	return strings.TrimSpace(text)
+}
+
+func normalizeDraftMarkdownContent(content string) string {
+	content = normalizeTextNewlines(strings.TrimPrefix(content, "\ufeff"))
+	content = unwrapWholeFencedBlock(content)
+	return strings.TrimSpace(content)
+}
+
+func normalizeDraftFiles(files map[string]string) map[string]string {
+	if len(files) == 0 {
+		return map[string]string{}
+	}
+	normalized := make(map[string]string, len(files))
+	for path, content := range files {
+		cleanPath := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+		if cleanPath == "." {
+			cleanPath = strings.TrimSpace(path)
+		}
+		normalized[cleanPath] = normalizeDraftFileContent(cleanPath, content)
+	}
+	return normalized
+}
+
+func normalizeDraftFileContent(path string, content string) string {
+	content = normalizeTextNewlines(strings.TrimPrefix(content, "\ufeff"))
+	content = unwrapWholeFencedBlock(content)
+	if isDraftSourceFile(path) {
+		content = normalizeLikelyEscapedSourceText(path, content)
+		content = unwrapWholeFencedBlock(content)
+		content = normalizeScriptTypography(content)
+		return strings.TrimSpace(content)
+	}
+	if path == "requirements.txt" || path == "package.json" {
+		return strings.TrimSpace(content)
+	}
+	return content
+}
+
+func normalizeTextNewlines(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	return text
+}
+
+func unwrapWholeFencedBlock(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, "```") {
+		return text
+	}
+	firstLineEnd := strings.Index(trimmed, "\n")
+	if firstLineEnd < 0 {
+		return text
+	}
+	body := strings.TrimSpace(trimmed[firstLineEnd+1:])
+	if !strings.HasSuffix(body, "```") {
+		return text
+	}
+	body = strings.TrimSpace(strings.TrimSuffix(body, "```"))
+	return body
+}
+
+func isDraftSourceFile(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".py", ".js", ".sh", ".bash":
+		return strings.HasPrefix(filepath.ToSlash(path), "scripts/")
+	default:
+		return false
+	}
+}
+
+func normalizeLikelyEscapedSourceText(path string, content string) string {
+	if strings.Contains(content, "\n") || !strings.Contains(content, `\n`) {
+		return content
+	}
+	candidate := strings.ReplaceAll(content, `\r\n`, "\n")
+	candidate = strings.ReplaceAll(candidate, `\n`, "\n")
+	candidate = strings.ReplaceAll(candidate, `\t`, "\t")
+	if sourceContentLooksStructured(path, candidate) {
+		return candidate
+	}
+	if strings.HasSuffix(content, `\n`) {
+		return strings.TrimSuffix(content, `\n`) + "\n"
+	}
+	return content
+}
+
+func sourceContentLooksStructured(path string, content string) bool {
+	if !strings.Contains(content, "\n") {
+		return false
+	}
+	trimmed := strings.TrimSpace(content)
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".py":
+		return strings.HasPrefix(trimmed, "import ") ||
+			strings.HasPrefix(trimmed, "from ") ||
+			strings.HasPrefix(trimmed, "def ") ||
+			strings.HasPrefix(trimmed, "class ") ||
+			strings.HasPrefix(trimmed, "if __name__") ||
+			strings.HasPrefix(trimmed, "try:") ||
+			containsAny(content, "\nimport ", "\nfrom ", "\ndef ", "\nclass ", "\nif __name__", "\ntry:", "\nexcept ", ":\n    ")
+	case ".js":
+		return strings.HasPrefix(trimmed, "import ") ||
+			strings.HasPrefix(trimmed, "const ") ||
+			strings.HasPrefix(trimmed, "let ") ||
+			strings.HasPrefix(trimmed, "var ") ||
+			strings.HasPrefix(trimmed, "function ") ||
+			strings.HasPrefix(trimmed, "export ") ||
+			containsAny(content, "\nimport ", "\nconst ", "\nlet ", "\nvar ", "\nfunction ", "\nexport ", "=>\n", "{\n")
+	case ".sh", ".bash":
+		return strings.HasPrefix(trimmed, "#!/") ||
+			strings.HasPrefix(trimmed, "set ") ||
+			strings.HasPrefix(trimmed, "if ") ||
+			strings.HasPrefix(trimmed, "for ") ||
+			strings.HasPrefix(trimmed, "while ") ||
+			containsAny(content, "\necho ", "\nif ", "\nfor ", "\nwhile ", "\ncase ", "\nset ")
+	default:
+		return false
+	}
+}
+
+func containsAny(text string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeScriptTypography(content string) string {
+	content = strings.ReplaceAll(content, "\u00a0", " ")
+	content = strings.ReplaceAll(content, "\u3000", " ")
+	content = replaceStandaloneQuotePairs(content, '“', '”', '"')
+	content = replaceStandaloneQuotePairs(content, '‘', '’', '\'')
+	return content
+}
+
+func replaceStandaloneQuotePairs(text string, open rune, close rune, replacement rune) string {
+	runes := []rune(text)
+	var builder strings.Builder
+	for index := 0; index < len(runes); index++ {
+		if runes[index] != open {
+			builder.WriteRune(runes[index])
+			continue
+		}
+		end := nextRuneIndex(runes, close, index+1)
+		if end < 0 || !quoteStartBoundary(runes, index) || !quoteEndBoundary(runes, end) {
+			builder.WriteRune(runes[index])
+			continue
+		}
+		builder.WriteRune(replacement)
+		for inner := index + 1; inner < end; inner++ {
+			builder.WriteRune(runes[inner])
+		}
+		builder.WriteRune(replacement)
+		index = end
+	}
+	return builder.String()
+}
+
+func nextRuneIndex(runes []rune, target rune, start int) int {
+	for index := start; index < len(runes); index++ {
+		if runes[index] == target {
+			return index
+		}
+	}
+	return -1
+}
+
+func quoteStartBoundary(runes []rune, index int) bool {
+	if index == 0 {
+		return true
+	}
+	prev := runes[index-1]
+	return prev == '\n' || prev == '\t' || prev == ' ' || strings.ContainsRune("([{=,:+-*/%!<>", prev)
+}
+
+func quoteEndBoundary(runes []rune, index int) bool {
+	if index >= len(runes)-1 {
+		return true
+	}
+	next := runes[index+1]
+	return next == '\n' || next == '\t' || next == ' ' || strings.ContainsRune(")]},.;:+-*/%!<>", next)
 }
 
 func defaultSourceSkillMD(req SourceRequest) string {
@@ -1157,7 +1390,7 @@ func writeDraftFiles(root string, snapshot draftSnapshot) error {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(root, agentskill.EntryFile), []byte(snapshot.Row.SkillMD), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, agentskill.EntryFile), []byte(normalizeDraftMarkdownContent(snapshot.Row.SkillMD)), 0o644); err != nil {
 		return err
 	}
 	for path, content := range snapshot.Files {
@@ -1172,7 +1405,7 @@ func writeDraftFiles(root string, snapshot draftSnapshot) error {
 		if strings.HasPrefix(filepath.ToSlash(path), "scripts/") {
 			mode = 0o755
 		}
-		if err := os.WriteFile(target, []byte(content), mode); err != nil {
+		if err := os.WriteFile(target, []byte(normalizeDraftFileContent(path, content)), mode); err != nil {
 			return err
 		}
 	}

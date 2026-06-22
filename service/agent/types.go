@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/shemic/dever/server"
+
 	agentmodel "github.com/dever-package/bot/model/agent"
 	energonservice "github.com/dever-package/bot/service/energon"
 	frontstream "github.com/dever-package/front/service/stream"
@@ -53,6 +55,7 @@ type RunRequest struct {
 	Path    string
 	Headers map[string]string
 	Body    map[string]any
+	Server  *server.Context
 }
 
 type parsedRunRequest struct {

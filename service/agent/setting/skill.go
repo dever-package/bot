@@ -53,7 +53,9 @@ func (AgentHook) ProviderBeforeSaveSkill(_ *server.Context, params []any) any {
 	if !partial && util.ToStringTrimmed(record["name"]) == "" {
 		panicAgentField("form.name", "技能名称不能为空。")
 	}
-	if !partial && util.ToStringTrimmed(record["install_path"]) == "" {
+	if !partial &&
+		util.ToStringTrimmed(record["install_path"]) == "" &&
+		util.ToStringTrimmed(record["source_type"]) != agentmodel.SkillSourceTypeBuiltin {
 		panicAgentField("form.install_path", "安装目录不能为空。")
 	}
 	defaultInt16Field(record, "status", defaultAgentStatus, partial)
@@ -91,6 +93,15 @@ func (AgentHook) ProviderBeforeDeleteSkill(c *server.Context, params []any) any 
 
 	idValues := uint64IDsToAny(skillIDs)
 	skills := agentmodel.NewSkillModel().Select(c.Context(), map[string]any{"id": idValues})
+	for _, skill := range skills {
+		if skill == nil {
+			continue
+		}
+		sourceType := agentmodel.NormalizeSkillSourceType(skill.SourceType, skill.SourceURL, skill.InstallInput)
+		if sourceType == agentmodel.SkillSourceTypeBuiltin {
+			panicAgentField("table.id", "内置技能不能删除。")
+		}
+	}
 	record["id"] = idValues
 	record[skillDeletePathsKey] = skillInstallPaths(skills)
 	agentmodel.NewSkillPackItemModel().Delete(c.Context(), map[string]any{"skill_id": idValues})
@@ -129,7 +140,10 @@ func (AgentHook) ProviderBeforeSaveSkillPack(_ *server.Context, params []any) an
 	return record
 }
 
-func (AgentHook) ProviderBeforeSaveSkillPackItem(_ *server.Context, params []any) any {
+func (AgentHook) ProviderBeforeSaveSkillPackItem(c *server.Context, params []any) any {
+	if c != nil {
+		skillservice.EnsureBuiltinSkills(c.Context())
+	}
 	record := cloneAgentRecord(params)
 	if len(record) == 0 {
 		return record
@@ -147,6 +161,9 @@ func (AgentHook) ProviderBeforeSaveSkillPackItem(_ *server.Context, params []any
 }
 
 func (AgentHook) ProviderAttachSkillPackItemList(c *server.Context, params []any) any {
+	if c != nil {
+		skillservice.EnsureBuiltinSkills(c.Context())
+	}
 	payload := cloneAgentRecord(params)
 	rows := normalizeAgentChildRows(payload["rows"])
 	if len(rows) == 0 {
@@ -179,6 +196,14 @@ func (AgentHook) ProviderAttachSkillPackItemList(c *server.Context, params []any
 		row["skill"] = skill
 		row["source_type"] = sourceType
 		row["source_type_label"] = sourceLabel
+
+		if sourceType == agentmodel.SkillSourceTypeBuiltin {
+			row["pending_draft_id"] = uint64(0)
+			row["pending_draft"] = map[string]any{}
+			row["publish_state"] = "published"
+			row["publish_state_label"] = "内置"
+			continue
+		}
 
 		if draft := draftsBySkillID[skillID]; draft != nil {
 			row["pending_draft_id"] = draft.ID
