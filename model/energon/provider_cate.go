@@ -13,8 +13,10 @@ type ProviderCate struct {
 	CreatedAt time.Time `dorm:"comment:创建时间"`
 }
 
+const defaultProviderCateID uint64 = 1
+
 var providerCateSeed = []map[string]any{
-	{"id": 1, "name": "默认分类", "sort": 100},
+	{"id": defaultProviderCateID, "name": "默认分类", "sort": 100},
 }
 
 func NewProviderCateModel() *orm.Model[ProviderCate] {

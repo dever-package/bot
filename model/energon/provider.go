@@ -21,7 +21,52 @@ type ProviderIndex struct {
 	CateProtocol struct{} `index:"cate_id,protocol,status"`
 }
 
+const (
+	providerShemicLabID      uint64 = 1
+	providerDoubaoID         uint64 = 2
+	providerRunningHubAPIID  uint64 = 3
+	providerRunningHubFlowID uint64 = 4
+	providerShemicLabHost           = "http://t.s.dever.cc:8080/v1"
+	providerDoubaoHost              = "https://ark.cn-beijing.volces.com/api/v3/"
+	providerRunningHubHost          = "https://www.runninghub.cn/openapi/v2/"
+)
+
 var (
+	providerSeed = []map[string]any{
+		{
+			"id":       providerShemicLabID,
+			"cate_id":  defaultProviderCateID,
+			"name":     "神秘城实验室",
+			"protocol": "openai",
+			"host":     providerShemicLabHost,
+			"status":   1,
+		},
+		{
+			"id":       providerDoubaoID,
+			"cate_id":  defaultProviderCateID,
+			"name":     "火山",
+			"protocol": "doubao",
+			"host":     providerDoubaoHost,
+			"status":   1,
+		},
+		{
+			"id":       providerRunningHubAPIID,
+			"cate_id":  defaultProviderCateID,
+			"name":     "runninghubapi",
+			"protocol": "rhapi",
+			"host":     providerRunningHubHost,
+			"status":   1,
+		},
+		{
+			"id":       providerRunningHubFlowID,
+			"cate_id":  defaultProviderCateID,
+			"name":     "runninghubflow",
+			"protocol": "rhflow",
+			"host":     providerRunningHubHost,
+			"status":   1,
+		},
+	}
+
 	statusOptions = []map[string]any{
 		{"id": 1, "value": "开启"},
 		{"id": 2, "value": "停用"},
@@ -59,6 +104,7 @@ var (
 func NewProviderModel() *orm.Model[Provider] {
 	return orm.LoadModel[Provider]("来源", "bot_energon_provider", orm.ModelConfig{
 		Index:    ProviderIndex{},
+		Seeds:    providerSeed,
 		Order:    "id asc",
 		Database: "default",
 		Options: map[string]any{

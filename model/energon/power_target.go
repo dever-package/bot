@@ -21,6 +21,30 @@ type PowerTargetIndex struct {
 }
 
 var (
+	powerTargetSeed = []map[string]any{
+		{
+			"id":         1,
+			"power_id":   DefaultLLMPowerID,
+			"service_id": serviceShemicLabGPTID,
+			"sort":       1,
+			"status":     1,
+		},
+		{
+			"id":         2,
+			"power_id":   DefaultLLMPowerID,
+			"service_id": serviceShemicLabGeminiID,
+			"sort":       2,
+			"status":     1,
+		},
+		{
+			"id":         3,
+			"power_id":   DefaultLLMPowerID,
+			"service_id": serviceDoubaoTextID,
+			"sort":       3,
+			"status":     1,
+		},
+	}
+
 	powerTargetPowerRelation = orm.Relation{
 		Field:      "power_id",
 		Option:     "bot.energon.NewPowerModel",
@@ -37,6 +61,7 @@ var (
 func NewPowerTargetModel() *orm.Model[PowerTarget] {
 	return orm.LoadModel[PowerTarget]("能力来源", "bot_energon_power_target", orm.ModelConfig{
 		Index:    PowerTargetIndex{},
+		Seeds:    powerTargetSeed,
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{

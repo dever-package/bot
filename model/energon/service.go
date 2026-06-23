@@ -21,7 +21,103 @@ type ServiceIndex struct {
 	ProviderStatus struct{} `index:"provider_id,status,sort"`
 }
 
+const (
+	serviceShemicLabImageID         uint64 = 1
+	serviceShemicLabGeminiID        uint64 = 2
+	serviceShemicLabGPTID           uint64 = 3
+	serviceDoubaoTextID             uint64 = 4
+	serviceDoubaoImageID            uint64 = 5
+	serviceDoubaoVideoID            uint64 = 6
+	serviceRunningHubImageID        uint64 = 7
+	serviceRunningHubMusicID        uint64 = 8
+	serviceRunningHubFlowClothingID uint64 = 9
+)
+
 var (
+	serviceSeed = []map[string]any{
+		{
+			"id":          serviceShemicLabImageID,
+			"provider_id": providerShemicLabID,
+			"name":        "image2生图",
+			"type":        "image",
+			"path":        "images/generations",
+			"sort":        1,
+			"status":      1,
+		},
+		{
+			"id":          serviceShemicLabGeminiID,
+			"provider_id": providerShemicLabID,
+			"name":        "gemini-3-flash",
+			"type":        "text",
+			"path":        "",
+			"sort":        2,
+			"status":      1,
+		},
+		{
+			"id":          serviceShemicLabGPTID,
+			"provider_id": providerShemicLabID,
+			"name":        "gpt-5.5",
+			"type":        "text",
+			"path":        "",
+			"sort":        3,
+			"status":      1,
+		},
+		{
+			"id":          serviceDoubaoTextID,
+			"provider_id": providerDoubaoID,
+			"name":        "doubao-seed-2-0-pro",
+			"type":        "text",
+			"path":        "",
+			"sort":        10,
+			"status":      1,
+		},
+		{
+			"id":          serviceDoubaoImageID,
+			"provider_id": providerDoubaoID,
+			"name":        "doubao-seedream-4-5",
+			"type":        "image",
+			"path":        "",
+			"sort":        11,
+			"status":      1,
+		},
+		{
+			"id":          serviceDoubaoVideoID,
+			"provider_id": providerDoubaoID,
+			"name":        "doubao-seedance-1-5-pro",
+			"type":        "video",
+			"path":        "/contents/generations/tasks",
+			"sort":        12,
+			"status":      1,
+		},
+		{
+			"id":          serviceRunningHubImageID,
+			"provider_id": providerRunningHubAPIID,
+			"name":        "生图",
+			"type":        "text",
+			"path":        "",
+			"sort":        20,
+			"status":      1,
+		},
+		{
+			"id":          serviceRunningHubMusicID,
+			"provider_id": providerRunningHubAPIID,
+			"name":        "生成歌曲",
+			"type":        "audio",
+			"path":        "",
+			"sort":        21,
+			"status":      1,
+		},
+		{
+			"id":          serviceRunningHubFlowClothingID,
+			"provider_id": providerRunningHubFlowID,
+			"name":        "换装",
+			"type":        "image",
+			"path":        "",
+			"sort":        30,
+			"status":      1,
+		},
+	}
+
 	serviceProviderRelation = orm.Relation{
 		Field:      "provider_id",
 		Option:     "bot.energon.NewProviderModel",
@@ -53,6 +149,7 @@ var (
 func NewServiceModel() *orm.Model[Service] {
 	return orm.LoadModel[Service]("来源服务", "bot_energon_service", orm.ModelConfig{
 		Index:    ServiceIndex{},
+		Seeds:    serviceSeed,
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{
