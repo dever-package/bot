@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/shemic/dever/server"
@@ -27,8 +28,9 @@ func (PowerHook) ProviderBeforeSavePower(c *server.Context, params []any) any {
 		record["status"] = defaultRecordStatus
 	}
 
+	powerID := util.ToUint64(record["id"])
 	if rawTargets, exists := record["targets"]; exists {
-		record["targets"] = normalizePowerTargetRows(c, rawTargets)
+		record["targets"] = normalizePowerTargetRows(c, powerID, rawTargets)
 	}
 	if rawParams, exists := record["params"]; exists {
 		record["params"] = normalizePowerParamRows(c, rawParams)
@@ -58,14 +60,16 @@ func normalizePowerParamRequired(value int) int16 {
 	return powerParamRequired
 }
 
-func normalizePowerTargetRows(c *server.Context, value any) []any {
+func normalizePowerTargetRows(c *server.Context, powerID uint64, value any) []any {
 	rawItems := normalizeChildRecordRows(value)
 	if len(rawItems) == 0 {
 		return []any{}
 	}
 
-	items := make([]any, 0, len(rawItems))
+	items := make([]map[string]any, 0, len(rawItems))
+	naturalRows := make([]naturalKeyedChildRow, 0, len(rawItems))
 	seen := map[uint64]struct{}{}
+	existingIDs := existingPowerTargetIDsByService(c, powerID)
 	for index, row := range rawItems {
 		next := util.CloneMap(row)
 		if util.ToIntDefault(next["sort"], 0) <= 0 {
@@ -93,8 +97,38 @@ func normalizePowerTargetRows(c *server.Context, value any) []any {
 		}
 
 		items = append(items, next)
+		naturalRows = append(naturalRows, naturalKeyedChildRow{
+			row:        next,
+			naturalKey: powerTargetNaturalKey(serviceID),
+			originalID: util.ToUint64(row["id"]),
+		})
 	}
-	return items
+	assignNaturalKeyedChildIDs(naturalRows, existingIDs)
+	return anyChildRows(items)
+}
+
+func existingPowerTargetIDsByService(c *server.Context, powerID uint64) map[string]uint64 {
+	if powerID == 0 {
+		return nil
+	}
+
+	rows := botmodel.NewPowerTargetModel().SelectMap(c.Context(), map[string]any{
+		"power_id": powerID,
+	})
+	result := make(map[string]uint64, len(rows))
+	for _, row := range rows {
+		id := util.ToUint64(row["id"])
+		serviceID := util.ToUint64(row["service_id"])
+		if id == 0 || serviceID == 0 {
+			continue
+		}
+		result[powerTargetNaturalKey(serviceID)] = id
+	}
+	return result
+}
+
+func powerTargetNaturalKey(serviceID uint64) string {
+	return strconv.FormatUint(serviceID, 10)
 }
 
 func normalizePowerParamRows(c *server.Context, value any) []any {
