@@ -13,8 +13,14 @@ type ParamCate struct {
 	CreatedAt time.Time `dorm:"comment:创建时间"`
 }
 
+const (
+	paramCateCommonID  uint64 = 1
+	paramCateSpecialID uint64 = 2
+)
+
 var paramCateSeed = []map[string]any{
-	{"id": 1, "name": "默认分类", "sort": 100},
+	{"id": paramCateCommonID, "name": "通用", "sort": 100},
+	{"id": paramCateSpecialID, "name": "特殊", "sort": 100},
 }
 
 func NewParamCateModel() *orm.Model[ParamCate] {
