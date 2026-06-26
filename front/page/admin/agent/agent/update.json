@@ -217,7 +217,7 @@
         "placeholder": "单位：秒，10-3600",
         "value": "form.timeout_seconds",
         "mode": "form",
-        "info": "单次运行的总超时时间，单位是秒。超过后运行应停止并记录失败/超时，默认 300 秒。",
+        "info": "单次运行的总超时时间，单位是秒。超过后运行应停止并记录失败/超时，默认 3600 秒。",
         "validate": [
           {
             "type": "min",
@@ -267,7 +267,7 @@
       "setting_pack_id": 1,
       "skill_pack_id": 1,
       "temperature": 0.7,
-      "timeout_seconds": 300,
+      "timeout_seconds": 3600,
       "max_auto_steps": 0
     }
   },

@@ -213,10 +213,7 @@ func (s WorkspaceService) executeCanvasRunnableNodes(ctx context.Context, req Ca
 	}
 	for _, node := range runnableNodes {
 		nodeRunID := nodeRuns[node.ID]
-		inputContext := previousCanvasOutput(ctx, run.ProjectID, node.ID, results, req.Canvas)
-		if inputContext == nil && req.SingleNode {
-			inputContext = previousCanvasOutput(ctx, run.ProjectID, node.ID, nil, req.Canvas)
-		}
+		inputContext := canvasNodePreviousOutput(ctx, run.ProjectID, req, node.ID, results)
 		markWorkspaceNodeRun(ctx, nodeRunID, teammodel.RunStatusRunning, map[string]any{
 			"input":            req.Input,
 			"node":             canvasRunNodeInput(node),
@@ -339,7 +336,7 @@ func (s WorkspaceService) recordCanvasNodeRunResult(ctx context.Context, req Can
 }
 
 func (s WorkspaceService) runCanvasNode(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, results []canvasNodeResult) (map[string]any, error) {
-	previousOutput := previousCanvasOutput(ctx, projectID, node.ID, results, req.Canvas)
+	previousOutput := canvasNodePreviousOutput(ctx, projectID, req, node.ID, results)
 	switch node.Type {
 	case "asset":
 		return canvasAssetRunPayload(ctx, projectID, req, run, node, nodeRunID), nil
@@ -361,6 +358,10 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 		return nil, fmt.Errorf("能力节点未配置能力")
 	}
 	input := mergeCanvasInput(req.Input, previousOutput, node.ComposerPrompt)
+	params := cloneInput(node.ParamValues)
+	if canvasContextText(input["text"]) != "" && canvasContextText(params["text"]) == "" {
+		delete(params, "text")
+	}
 	result, err := s.project.RunCanvasPower(ctx, projectID, teamservice.CanvasPowerRunRequest{
 		FlowID:         node.FlowID,
 		AssetCateID:    firstUint64(node.AssetCateID, req.AssetCateID),
@@ -372,7 +373,7 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 		SourceTargetID: node.SelectedTarget,
 		RequestID:      canvasChildRequestID(req.RequestID, node.ID),
 		Input:          input,
-		Params:         node.ParamValues,
+		Params:         params,
 	})
 	if err != nil {
 		return canvasNodeRunPayload(req, run, node, nodeRunID, result), err
@@ -665,6 +666,14 @@ func previousCanvasOutput(ctx context.Context, projectID uint64, nodeID string, 
 	return map[string]any{"sources": outputs}
 }
 
+func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasRunRequest, nodeID string, results []canvasNodeResult) any {
+	output := previousCanvasOutput(ctx, projectID, nodeID, results, req.Canvas)
+	if output != nil || !req.SingleNode {
+		return output
+	}
+	return manualCanvasInputContext(req.Input)
+}
+
 func upstreamCanvasNodeIDs(nodeID string, canvas map[string]any) []string {
 	edgesRaw, _ := canvas["edges"].([]any)
 	result := []string{}
@@ -703,6 +712,7 @@ func staticCanvasNodeOutput(ctx context.Context, projectID uint64, nodeID string
 	return firstPresent(
 		valueAtPath(asset, "version", "content"),
 		canvasOutputFromResultRef(ctx, projectID, mapValue(node["result_ref"])),
+		node["result_output"],
 		valueAtPath(node, "result", "output"),
 		valueAtPath(node, "result_ref", "output"),
 		asset,
@@ -792,14 +802,91 @@ func canvasOutputFromResultRef(ctx context.Context, projectID uint64, ref map[st
 
 func mergeCanvasInput(base map[string]any, previousOutput any, prompt string) map[string]any {
 	input := cloneInput(base)
+	manualContext := manualCanvasInputContext(input)
+	delete(input, "_manual_input_context")
+	delete(input, "manual_input_context")
+	delete(input, "manual_node_id")
+	delete(input, "start_node_id")
+	delete(input, "startNodeId")
+	delete(input, "node_id")
+	delete(input, "nodeId")
+	if previousOutput == nil {
+		previousOutput = manualContext
+	}
 	if previousOutput != nil {
 		input["previous_output"] = previousOutput
 	}
-	if strings.TrimSpace(prompt) != "" {
-		input["prompt"] = strings.TrimSpace(prompt)
-		input["text"] = strings.TrimSpace(prompt)
+	prompt = strings.TrimSpace(prompt)
+	if prompt != "" {
+		input["prompt"] = prompt
+		input["text"] = prompt
+	} else if canvasContextText(input["text"]) == "" {
+		if contextText := canvasContextText(previousOutput); contextText != "" {
+			input["text"] = contextText
+		}
 	}
 	return input
+}
+
+func manualCanvasInputContext(input map[string]any) any {
+	if input == nil {
+		return nil
+	}
+	context := firstPresent(input["_manual_input_context"], input["manual_input_context"])
+	if context == nil {
+		return nil
+	}
+	if row := mapValue(context); row != nil {
+		if canvasContextText(row["text"]) != "" || len(sliceValue(row["sources"])) > 0 {
+			return row
+		}
+		return nil
+	}
+	if text := canvasContextText(context); text != "" {
+		return text
+	}
+	return nil
+}
+
+func canvasContextText(value any) string {
+	switch current := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(current)
+	case map[string]any:
+		for _, key := range []string{"text", "prompt", "description", "output", "content"} {
+			if text := canvasContextText(current[key]); text != "" {
+				return text
+			}
+		}
+		if resultText := canvasContextText(valueAtPath(current, "result", "output")); resultText != "" {
+			return resultText
+		}
+		if previewText := canvasContextText(valueAtPath(current, "preview", "text")); previewText != "" {
+			return previewText
+		}
+		if sources := sliceValue(current["sources"]); len(sources) > 0 {
+			parts := make([]string, 0, len(sources))
+			for _, source := range sources {
+				if text := canvasContextText(source); text != "" {
+					parts = append(parts, text)
+				}
+			}
+			return strings.TrimSpace(strings.Join(parts, "\n\n"))
+		}
+		return ""
+	case []any:
+		parts := make([]string, 0, len(current))
+		for _, item := range current {
+			if text := canvasContextText(item); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.TrimSpace(strings.Join(parts, "\n\n"))
+	default:
+		return strings.TrimSpace(textValue(current))
+	}
 }
 
 func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, payload map[string]any) (map[string]any, error) {

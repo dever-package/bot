@@ -33,8 +33,16 @@ func parseRunRequest(body map[string]any) (parsedRunRequest, error) {
 		input["assistant_session_id"],
 		input["assistantSessionId"],
 	), 0))
+	memoryEnabled := inputBool(firstPresent(
+		body["memory_enabled"],
+		body["memoryEnabled"],
+		input["memory_enabled"],
+		input["memoryEnabled"],
+	), true)
 	delete(input, "assistant_session_id")
 	delete(input, "assistantSessionId")
+	delete(input, "memory_enabled")
+	delete(input, "memoryEnabled")
 
 	return parsedRunRequest{
 		AgentIdentity:      agentIdentity,
@@ -43,6 +51,7 @@ func parseRunRequest(body map[string]any) (parsedRunRequest, error) {
 		Options:            normalizeMap(body["options"]),
 		SourceTargetID:     uint64(frontstream.InputInt64(body["source_target_id"], 0)),
 		AssistantSessionID: assistantSessionID,
+		MemoryEnabled:      memoryEnabled,
 	}, nil
 }
 
@@ -77,6 +86,23 @@ func firstPresent(values ...any) any {
 		}
 	}
 	return nil
+}
+
+func inputBool(value any, fallback bool) bool {
+	if value == nil {
+		return fallback
+	}
+	if current, ok := value.(bool); ok {
+		return current
+	}
+	switch strings.ToLower(strings.TrimSpace(frontstream.InputText(value))) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func errorText(err error) string {

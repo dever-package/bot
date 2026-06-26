@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "技能分类",
     "parent": "bot/agent/skill_pack/list",
     "type": 2,
     "sort": 9
@@ -40,9 +41,7 @@
   },
   "data": {
     "form": {
-      "name": "",
-      "status": 1,
-      "sort": 100
+      "name": ""
     }
   },
   "state": {},

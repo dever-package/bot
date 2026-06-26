@@ -26,14 +26,16 @@ type GatewayService struct {
 	registry      *botprotocol.Registry
 }
 
+const defaultProviderHTTPTimeout = time.Hour
+
 func NewGatewayService() GatewayService {
-	return NewGatewayServiceWithClient(botprovider.NewHTTPClient(60 * time.Second))
+	return NewGatewayServiceWithClient(botprovider.NewHTTPClient(defaultProviderHTTPTimeout))
 }
 
 func NewGatewayServiceWithClient(client botprovider.Client) GatewayService {
 	repo := NewRepo()
 	if client == nil {
-		client = botprovider.NewHTTPClient(60 * time.Second)
+		client = botprovider.NewHTTPClient(defaultProviderHTTPTimeout)
 	}
 	service := GatewayService{
 		repo:          repo,

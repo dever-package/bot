@@ -19,7 +19,7 @@ type Agent struct {
 	SettingPackID  uint64    `dorm:"type:bigint;not null;default:1;comment:规则方案"`
 	SkillPackID    uint64    `dorm:"type:bigint;not null;default:1;comment:技能方案"`
 	Temperature    float64   `dorm:"type:double precision;not null;default:0.7;comment:温度"`
-	TimeoutSeconds int       `dorm:"type:int;not null;default:300;comment:超时时间(秒)"`
+	TimeoutSeconds int       `dorm:"type:int;not null;default:3600;comment:超时时间(秒)"`
 	MaxAutoSteps   int       `dorm:"type:int;not null;default:0;comment:最大自动步骤数"`
 	Status         int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	Sort           int       `dorm:"type:int;not null;default:100;comment:排序"`
@@ -73,7 +73,7 @@ var (
 			"setting_pack_id": DefaultSettingPackID,
 			"skill_pack_id":   DefaultSkillPackID,
 			"temperature":     0.7,
-			"timeout_seconds": 300,
+			"timeout_seconds": 3600,
 			"max_auto_steps":  0,
 			"status":          1,
 			"sort":            10,
@@ -89,7 +89,7 @@ var (
 			"setting_pack_id": AssistantSettingPackID,
 			"skill_pack_id":   DefaultSkillPackID,
 			"temperature":     0.4,
-			"timeout_seconds": 300,
+			"timeout_seconds": 3600,
 			"max_auto_steps":  0,
 			"status":          1,
 			"sort":            10,
@@ -121,7 +121,7 @@ var (
 			"setting_pack_id": SkillCreateSettingPackID,
 			"skill_pack_id":   DefaultSkillPackID,
 			"temperature":     0.3,
-			"timeout_seconds": 300,
+			"timeout_seconds": 3600,
 			"max_auto_steps":  0,
 			"status":          1,
 			"sort":            2,

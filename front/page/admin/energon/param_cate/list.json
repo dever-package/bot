@@ -23,11 +23,30 @@
         "type": "show-category-list",
         "id": "energon-param-cate-category",
         "value": "parent.data.search.cate_id",
+        "option": {
+          "model": "bot.energon.NewParamCateModel",
+          "order": "sort asc,id asc",
+          "extraFields": [
+            "status",
+            "sort"
+          ]
+        },
         "meta": {
           "title": "参数分类",
           "description": "左侧维护内部参数分类",
           "remote": true,
           "defaultFirst": true,
+          "sortable": true,
+          "sortField": "sort",
+          "sortChangeAction": {
+            "type": "save",
+            "path": "bot/energon/param_cate/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "sort": "$value"
+            }
+          },
           "createButton": {
             "name": "新增分类",
             "icon": "plus",
@@ -41,6 +60,29 @@
               }
             }
           },
+          "statusField": "status",
+          "statusDisplay": "select",
+          "statusChangeAction": {
+            "type": "save",
+            "path": "bot/energon/param_cate/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "status": "$value"
+            }
+          },
+          "statusCases": [
+            {
+              "value": 1,
+              "text": "启用",
+              "tone": "success"
+            },
+            {
+              "value": 2,
+              "text": "停用",
+              "tone": "muted"
+            }
+          ],
           "buttons": [
             {
               "icon": "square-pen",

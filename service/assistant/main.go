@@ -22,16 +22,17 @@ const (
 type Service struct{}
 
 type ResolveRequest struct {
-	SessionID  uint64
-	ContextKey string
-	AgentKey   string
-	Title      string
-	NewSession bool
-	Limit      int
-	Page       int
-	PageSize   int
-	Keyword    string
-	Status     string
+	SessionID     uint64
+	ContextKey    string
+	AgentKey      string
+	Title         string
+	NewSession    bool
+	Limit         int
+	Page          int
+	PageSize      int
+	Keyword       string
+	Status        string
+	MemoryEnabled bool
 }
 
 type MessageRequest struct {
@@ -134,16 +135,15 @@ func (s Service) ResolveSession(ctx context.Context, req ResolveRequest) (map[st
 		return map[string]any{
 			"session":  sessionMap(*session),
 			"messages": s.sessionMessages(ctx, session.ID, req.Limit),
-			"memories": s.sessionMemoryRows(ctx, owner, *session, defaultMemoryLimit),
+			"memories": s.resolveSessionMemories(ctx, owner, *session, req.MemoryEnabled),
 		}, nil
 	}
 	session := s.resolveSession(ctx, owner, req)
 	messages := s.sessionMessages(ctx, session.ID, req.Limit)
-	memories := s.sessionMemoryRows(ctx, owner, session, defaultMemoryLimit)
 	return map[string]any{
 		"session":  sessionMap(session),
 		"messages": messages,
-		"memories": memories,
+		"memories": s.resolveSessionMemories(ctx, owner, session, req.MemoryEnabled),
 	}, nil
 }
 
@@ -195,7 +195,7 @@ func (s Service) ReviewSessions(ctx context.Context, req ResolveRequest) (map[st
 	}, nil
 }
 
-func (s Service) ClearSession(ctx context.Context, sessionID uint64) (map[string]any, error) {
+func (s Service) ClearSession(ctx context.Context, sessionID uint64, memoryEnabled bool) (map[string]any, error) {
 	owner, err := currentOwner(ctx)
 	if err != nil {
 		return nil, err
@@ -215,8 +215,20 @@ func (s Service) ClearSession(ctx context.Context, sessionID uint64) (map[string
 	return map[string]any{
 		"session":  sessionMap(*session),
 		"messages": []any{},
-		"memories": s.sessionMemoryRows(ctx, owner, *session, defaultMemoryLimit),
+		"memories": s.resolveSessionMemories(ctx, owner, *session, memoryEnabled),
 	}, nil
+}
+
+func (s Service) resolveSessionMemories(
+	ctx context.Context,
+	owner ownerScope,
+	session assistantmodel.Session,
+	enabled bool,
+) []map[string]any {
+	if !enabled {
+		return []map[string]any{}
+	}
+	return s.sessionMemoryRows(ctx, owner, session, defaultMemoryLimit)
 }
 
 func (s Service) RebindSessionContext(ctx context.Context, req RebindSessionContextRequest) error {

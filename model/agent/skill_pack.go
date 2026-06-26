@@ -25,8 +25,8 @@ var (
 	skillPackSeed = []map[string]any{
 		{
 			"id":          DefaultSkillPackID,
-			"name":        "默认技能方案",
-			"description": "默认可选的智能体技能方案。",
+			"name":        "默认技能",
+			"description": "默认可选的智能体技能。",
 			"status":      1,
 			"sort":        1,
 		},

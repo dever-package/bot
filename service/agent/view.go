@@ -26,6 +26,20 @@ func (s Service) RunTraces(ctx context.Context, runIDs []uint64) []map[string]an
 	return result
 }
 
+func (s Service) RunStatus(ctx context.Context, requestID string) (map[string]any, error) {
+	run, err := s.repo.FindRunByRequestID(ctx, requestID)
+	if err != nil {
+		return nil, err
+	}
+	trace := agentRunTraceToMap(run, s.repo.ListStepsByRun(ctx, []uint64{run.ID})[run.ID])
+	if entries, err := s.ReadStream(ctx, run.RequestID, "", 100, 0); err == nil {
+		trace["stream"] = entries
+	}
+	return map[string]any{
+		"run": trace,
+	}, nil
+}
+
 func uniqueUint64(values []uint64) []uint64 {
 	seen := map[uint64]struct{}{}
 	result := make([]uint64, 0, len(values))

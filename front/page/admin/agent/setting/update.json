@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "规则",
     "parent": "bot/agent/setting/list",
     "sort": 10,
     "auth": [

@@ -29,12 +29,28 @@
         "id": "knowledge-cate-list",
         "value": "parent.data.search.cate_id",
         "option": {
-          "service": "bot.agent.setting.OptionService.LoadKnowledgeCates"
+          "model": "bot.agent.NewKnowledgeCateModel",
+          "order": "sort asc,id asc",
+          "extraFields": [
+            "status",
+            "sort"
+          ]
         },
         "meta": {
           "title": "知识库分类",
           "remote": true,
           "defaultFirst": true,
+          "sortable": true,
+          "sortField": "sort",
+          "sortChangeAction": {
+            "type": "save",
+            "path": "bot/agent/knowledge_cate/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "sort": "$value"
+            }
+          },
           "createButton": {
             "name": "新增分类",
             "icon": "plus",
@@ -48,6 +64,29 @@
               }
             }
           },
+          "statusField": "status",
+          "statusDisplay": "select",
+          "statusChangeAction": {
+            "type": "save",
+            "path": "bot/agent/knowledge_cate/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "status": "$value"
+            }
+          },
+          "statusCases": [
+            {
+              "value": 1,
+              "text": "启用",
+              "tone": "success"
+            },
+            {
+              "value": 2,
+              "text": "停用",
+              "tone": "muted"
+            }
+          ],
           "buttons": [
             {
               "icon": "square-pen",

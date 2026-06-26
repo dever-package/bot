@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "文档解析服务",
     "parent": "bot/agent/knowledge_parser_service/list",
     "type": 2,
     "sort": 1,

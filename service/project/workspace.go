@@ -6,6 +6,7 @@ import (
 	"time"
 
 	projectmodel "github.com/dever-package/bot/model/project"
+	teamservice "github.com/dever-package/bot/service/team"
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
@@ -15,7 +16,7 @@ type WorkspaceService struct {
 }
 
 func NewWorkspaceService() WorkspaceService {
-	return WorkspaceService{project: NewService(), streams: frontstream.New("team")}
+	return WorkspaceService{project: NewService(), streams: teamservice.StreamStore()}
 }
 
 func (s WorkspaceService) Bootstrap(ctx context.Context, projectID uint64) (map[string]any, error) {

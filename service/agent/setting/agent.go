@@ -61,6 +61,7 @@ func (AgentHook) ProviderBeforeSaveAgentCate(_ *server.Context, params []any) an
 	}
 	partial := isPartialAgentRecord(record)
 	trimStringField(record, "name", partial)
+	defaultInt16Field(record, "status", defaultAgentStatus, partial)
 	defaultIntField(record, "sort", defaultAgentSort, partial)
 	return record
 }
@@ -84,9 +85,10 @@ func ensureBaseAgentCate(ctx context.Context, id uint64, name string, sort int) 
 		return
 	}
 	model.Insert(ctx, map[string]any{
-		"id":   id,
-		"name": name,
-		"sort": sort,
+		"id":     id,
+		"name":   name,
+		"status": defaultAgentStatus,
+		"sort":   sort,
 	})
 }
 

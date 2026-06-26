@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "环境变量",
     "parent": "bot/agent/skill_config/list",
     "type": 2,
     "sort": 1,

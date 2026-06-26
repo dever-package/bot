@@ -109,6 +109,7 @@ func memoryExtractorRole() string {
 		"只输出 JSON，不要 Markdown，不要解释。",
 		"不要保存 API Key、Token、Cookie、密码、私钥、授权头或任何敏感凭证。",
 		"不要保存临时任务、单次操作、普通闲聊或不稳定猜测。",
+		"包含“本次、现在、这次、当前任务、我要生成、帮我做”等语义的任务需求不要保存；除非用户明确说以后、每次、默认或长期都按该规则执行。",
 		"最多输出 1 条最高价值记忆；不要一次输出多条。",
 		"scope 固定输出 context；记忆只服务当前 agent_key + context_key，不跨场景复用。",
 		"kind 只能是 working、episodic、semantic、procedural、persona、content。",

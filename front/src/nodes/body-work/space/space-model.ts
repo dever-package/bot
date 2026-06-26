@@ -474,6 +474,7 @@ function normalizeCanvasNode(value: Record<string, unknown>): SpaceCanvasNode | 
     functionOption: normalizeCanvasFunctionOption(value.function_option),
     composerDraft: normalizeCanvasComposerDraft(value.composer_draft),
     resultRef: normalizeCanvasResultRef(value.result_ref),
+    resultOutput: firstDefined(value.result_output, value.resultOutput),
     local: value.local !== false,
   };
   const kind = stringValue(value.kind) as SpaceCanvasNode["kind"];

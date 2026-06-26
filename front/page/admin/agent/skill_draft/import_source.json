@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "导入技能来源",
     "parent": "bot/agent/skill_draft/list",
     "type": 2,
     "sort": 2

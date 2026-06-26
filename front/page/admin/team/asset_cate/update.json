@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "资产分类",
     "parent": "bot/team/team/list",
     "type": 2,
     "sort": 8

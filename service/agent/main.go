@@ -34,6 +34,7 @@ func (s Service) Run(ctx context.Context, req RunRequest) map[string]any {
 			"input":                parsed.Input,
 			"history":              parsed.History,
 			"assistant_session_id": parsed.AssistantSessionID,
+			"memory_enabled":       parsed.MemoryEnabled,
 		}),
 		"skills":          "[]",
 		"runtime_context": "",

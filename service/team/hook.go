@@ -60,6 +60,7 @@ func (TeamHook) ProviderBeforeSaveTeamCate(_ *server.Context, params []any) any 
 	if !partial && record["name"] == "" {
 		panicTeamField("form.name", "分类名称不能为空。")
 	}
+	defaultTeamInt16Field(record, "status", defaultTeamStatus, partial)
 	defaultTeamIntField(record, "sort", defaultTeamSort, partial)
 	return record
 }

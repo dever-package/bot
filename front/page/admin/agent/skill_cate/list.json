@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "技能分类",
     "parent": "bot/agent/skill_pack/list",
     "type": 2,
     "sort": 1
@@ -39,6 +40,29 @@
               "sort": "$value"
             }
           },
+          "statusField": "status",
+          "statusDisplay": "select",
+          "statusChangeAction": {
+            "type": "save",
+            "path": "bot/agent/skill_cate/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "status": "$value"
+            }
+          },
+          "statusCases": [
+            {
+              "value": 1,
+              "text": "启用",
+              "tone": "success"
+            },
+            {
+              "value": 2,
+              "text": "停用",
+              "tone": "muted"
+            }
+          ],
           "createButton": {
             "name": "新增分类",
             "icon": "plus",

@@ -1,26 +1,11 @@
 import {
-  type CSSProperties,
   type FormEvent,
   useCallback,
   useEffect,
   useMemo,
   useState,
 } from "react";
-import {
-  ArrowUp,
-  Bot,
-  Brain,
-  ChevronDown,
-  ChevronRight,
-  FileText,
-  Image as ImageIcon,
-  Loader2,
-  MoreVertical,
-  Plus,
-  Video,
-  X,
-  Zap,
-} from "lucide-react";
+import { ChevronDown, Loader2, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { joinSiteApi, request, useNavigate } from "@dever/front-plugin";
 import { isSuccessResponse } from "../shared/api-response";
@@ -51,6 +36,12 @@ type TeamItem = {
   can_create?: boolean;
 };
 
+type CreateProjectPayload = {
+  name: string;
+  teamID: number;
+  releaseID?: number;
+};
+
 const freeCanvasTeam: TeamItem = {
   id: 0,
   name: "自由画布",
@@ -60,32 +51,13 @@ const freeCanvasTeam: TeamItem = {
   can_create: true,
 };
 
-type CreateProjectPayload = {
-  name: string;
-  teamID: number;
-  releaseID?: number;
-};
-
-const coverGradients = [
-  "linear-gradient(135deg, #dbeafe 0%, #eef2ff 46%, #f8fafc 100%)",
-  "linear-gradient(135deg, #dcfce7 0%, #f0fdf4 46%, #f8fafc 100%)",
-  "linear-gradient(135deg, #fef3c7 0%, #fff7ed 46%, #f8fafc 100%)",
-  "linear-gradient(135deg, #fce7f3 0%, #fdf2f8 46%, #f8fafc 100%)",
-];
-
 export function WorkProjectPage() {
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [teams, setTeams] = useState<TeamItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
-  const [prompt, setPrompt] = useState("");
-  const [selectedModel, setSelectedModel] = useState<"flagship" | "economy">("flagship");
-  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
 
-  const availableTeams = useMemo(
-    () => createTeamOptions(teams),
-    [teams],
-  );
+  const availableTeams = useMemo(() => createTeamOptions(teams), [teams]);
 
   const loadWorkspace = useCallback(async () => {
     setLoading(true);
@@ -96,7 +68,9 @@ export function WorkProjectPage() {
       ]);
 
       if (!isSuccessResponse(projectResult)) {
-        toast.error(projectResult.message || projectResult.msg || "加载作品失败");
+        toast.error(
+          projectResult.message || projectResult.msg || "加载剧本失败",
+        );
       } else {
         setProjects(toProjectItems(projectResult.data?.items));
       }
@@ -117,151 +91,25 @@ export function WorkProjectPage() {
     loadWorkspace();
   }, [loadWorkspace]);
 
-  function openCreateModal(initialName = "") {
-    setPrompt(initialName);
-    setModalOpen(true);
-  }
-
   return (
-    <div className="hb-project-page">
+    <div className="hb-script-page">
       <WorkProjectStyles />
 
-      <section className="hb-hero" aria-label="作品助手">
-        <h1 className="hb-hero-title">说吧，今天让我帮你搞定什么？</h1>
-
-        <div className="hb-prompt-card">
-          <textarea
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="可以向我提问或布置设计任务，输入 @ 使用 skill"
-            className="hb-prompt-input"
-          />
-
-          <div className="hb-prompt-toolbar">
-            <div className="hb-tool-group">
-              <button type="button" className="hb-chip is-strong">
-                <Bot size={14} />
-                Agent
-              </button>
-              <button type="button" className="hb-icon-chip" aria-label="图片">
-                <ImageIcon size={14} />
-              </button>
-              <button type="button" className="hb-icon-chip" aria-label="视频">
-                <Video size={14} />
-              </button>
-              <button
-                type="button"
-                className="hb-icon-chip"
-                onClick={() => openCreateModal(prompt)}
-                aria-label="新建作品"
-              >
-                <Plus size={16} />
-              </button>
-              <button type="button" className="hb-icon-chip" aria-label="文本">
-                <FileText size={14} />
-              </button>
-            </div>
-
-            <div className="hb-tool-group">
-              <div className="hb-model-select-container">
-                <button
-                  type="button"
-                  className="hb-model-chip"
-                  onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-                >
-                  {selectedModel === "flagship" ? (
-                    <>
-                      <Brain size={13} />
-                      旗舰
-                    </>
-                  ) : (
-                    <>
-                      <Zap size={13} />
-                      经济
-                    </>
-                  )}
-                  <ChevronDown size={14} className={`hb-select-arrow ${modelDropdownOpen ? 'is-open' : ''}`} />
-                </button>
-
-                {modelDropdownOpen && (
-                  <>
-                    <div className="hb-model-dropdown-backdrop" onClick={() => setModelDropdownOpen(false)} />
-                    <div className="hb-model-dropdown-popover">
-                      <button
-                        type="button"
-                        className={`hb-model-option ${selectedModel === 'flagship' ? 'is-active' : ''}`}
-                        onClick={() => {
-                          setSelectedModel("flagship");
-                          setModelDropdownOpen(false);
-                        }}
-                      >
-                        <div className="hb-model-icon-box">
-                          <Brain size={16} />
-                        </div>
-                        <div className="hb-model-info">
-                          <h4>旗舰</h4>
-                          <p>巅峰算力深度推理能力，1 倍算力消耗</p>
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        className={`hb-model-option ${selectedModel === 'economy' ? 'is-active' : ''}`}
-                        onClick={() => {
-                          setSelectedModel("economy");
-                          setModelDropdownOpen(false);
-                        }}
-                      >
-                        <div className="hb-model-icon-box">
-                          <Zap size={16} />
-                        </div>
-                        <div className="hb-model-info">
-                          <h4>经济</h4>
-                          <p>轻松应对日常简单任务，0.35 倍算力消耗</p>
-                        </div>
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-              <button
-                type="button"
-                className="hb-send"
-                onClick={() => openCreateModal(prompt)}
-                aria-label="创建作品"
-              >
-                <ArrowUp size={17} />
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="hb-workbench" aria-label="作品工作台">
-        <div className="hb-section-head">
-          <h2>最近作品</h2>
-          <button type="button" className="hb-link-button">
-            全部作品
-            <ChevronRight size={14} />
-          </button>
-        </div>
-
-        {loading ? (
-          <ProjectLoading />
-        ) : projects.length > 0 ? (
-          <ProjectGrid projects={projects} onCreate={() => openCreateModal()} />
-        ) : (
-          <ProjectEmpty onCreate={() => openCreateModal()} />
-        )}
-      </section>
+      {loading ? (
+        <ProjectLoading />
+      ) : (
+        <ProjectGrid
+          projects={projects}
+          onCreate={() => setModalOpen(true)}
+        />
+      )}
 
       {modalOpen ? (
         <CreateProjectModal
-          initialName={prompt}
           teams={availableTeams}
           onClose={() => setModalOpen(false)}
           onCreated={async () => {
             setModalOpen(false);
-            setPrompt("");
             await loadWorkspace();
           }}
         />
@@ -278,11 +126,10 @@ function ProjectGrid({
   onCreate: () => void;
 }) {
   return (
-    <div className="hb-project-grid">
+    <div className="hb-script-grid">
       <CreateProjectCard onCreate={onCreate} />
-
-      {projects.map((project, index) => (
-        <ProjectCard key={project.id} project={project} index={index} />
+      {projects.map((project) => (
+        <ProjectCard key={project.id} project={project} />
       ))}
     </div>
   );
@@ -290,33 +137,29 @@ function ProjectGrid({
 
 function CreateProjectCard({ onCreate }: { onCreate: () => void }) {
   return (
-    <button type="button" className="hb-create-card" onClick={onCreate}>
-      <div className="hb-create-cover">
-        <div className="hb-create-plus">
-          <Plus size={26} strokeWidth={1.8} />
-        </div>
-      </div>
-      <div className="hb-project-meta">
-        <div className="hb-project-title-row">
-          <h3>新建作品</h3>
-        </div>
-      </div>
+    <button
+      type="button"
+      className="hb-script-create-card"
+      onClick={onCreate}
+    >
+      <span className="hb-script-create-plus">
+        <Plus size={20} strokeWidth={1.35} />
+      </span>
+      <span className="hb-script-create-title">新作品</span>
+      <span className="hb-script-create-desc">撰写专业的结构化作品</span>
     </button>
   );
 }
 
-function ProjectCard({
-  project,
-  index,
-}: {
-  project: ProjectItem;
-  index: number;
-}) {
+function ProjectCard({ project }: { project: ProjectItem }) {
   const navigate = useNavigate();
+  const description =
+    project.description?.trim() || projectTeamDescription(project);
+
   return (
     <button
       type="button"
-      className="hb-project-card"
+      className="hb-script-card"
       onClick={() =>
         navigate({
           to: "/bot/work/space",
@@ -324,50 +167,43 @@ function ProjectCard({
         })
       }
     >
-      <div
-        className="hb-project-cover"
-        style={getProjectCoverStyle(project, index)}
-      >
-        {project.cover ? null : <DocumentMark />}
-        <span className="hb-card-badge">
-          {projectTeamLabel(project)}
-        </span>
-      </div>
-
-      <div className="hb-project-meta">
-        <div className="hb-project-title-row">
-          <h3>{project.name || "未命名作品"}</h3>
-          <MoreVertical size={15} />
-        </div>
-        <time>{formatTime(project.updated_at || project.created_at)}</time>
-      </div>
+      <span className="hb-script-card-binding" aria-hidden="true" />
+      <span className="hb-script-card-body">
+        <strong>{project.name || "未命名剧本"}</strong>
+        <span>{description}</span>
+      </span>
+      <time>
+        {formatRecentEdit(project.updated_at || project.created_at)}
+      </time>
     </button>
   );
 }
 
-function DocumentMark() {
+function ProjectLoading() {
   return (
-    <div className="hb-document-mark" aria-hidden="true">
-      <span />
-      <span />
-      <span />
-      <b>✓</b>
+    <div className="hb-script-grid">
+      {[0, 1, 2].map((item) => (
+        <div key={item} className="hb-script-skeleton">
+          <span />
+          <strong />
+          <em />
+          <small />
+        </div>
+      ))}
     </div>
   );
 }
 
 function CreateProjectModal({
-  initialName,
   teams,
   onClose,
   onCreated,
 }: {
-  initialName: string;
   teams: TeamItem[];
   onClose: () => void;
   onCreated: () => Promise<void>;
 }) {
-  const [name, setName] = useState(initialName.trim());
+  const [name, setName] = useState("");
   const [teamID, setTeamID] = useState(() => String(teams[0]?.id ?? 0));
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -386,7 +222,7 @@ function CreateProjectModal({
     }
     const selectedTeam = teams.find((team) => String(team.id) === teamID);
     if (!name.trim()) {
-      setMessage("请输入标题");
+      setMessage("请输入剧本标题");
       return;
     }
     if (!selectedTeam) {
@@ -403,10 +239,10 @@ function CreateProjectModal({
         releaseID: selectedTeam.release_id,
       });
       if (!isSuccessResponse(result)) {
-        setMessage(result.message || result.msg || "创建作品失败");
+        setMessage(result.message || result.msg || "创建剧本失败");
         return;
       }
-      toast.success("作品已创建");
+      toast.success("剧本已创建");
       await onCreated();
     } finally {
       setSubmitting(false);
@@ -416,118 +252,101 @@ function CreateProjectModal({
   const selectedTeam = teams.find((team) => String(team.id) === teamID);
 
   return (
-    <div className="hb-modal-backdrop">
-      <div className="hb-modal-container">
+    <div className="hb-script-modal-backdrop">
+      <form className="hb-script-modal" onSubmit={submit}>
         <button
           type="button"
-          className="hb-modal-close-outside"
+          className="hb-script-modal-close"
           onClick={onClose}
           aria-label="关闭"
         >
-          <X size={18} strokeWidth={2.4} />
+          <X size={17} strokeWidth={2.1} />
         </button>
 
-        <form className="hb-modal" onSubmit={submit}>
-          <div className="hb-modal-head">
-            <div className="hb-modal-head-title-row">
-              <h3>创建作品</h3>
-              <span className="hb-modal-head-tip">请填写作品名称并选择您的创作类型</span>
-            </div>
-          </div>
+        <header className="hb-script-modal-head">
+          <h2>新建剧本</h2>
+          <p>先创建一个剧本项目，后续功能会进入画布继续编辑。</p>
+        </header>
 
-        <div className="hb-modal-body">
-          <label className="hb-field">
+        <div className="hb-script-modal-body">
+          <label className="hb-script-field">
             <span>标题</span>
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="例如：小说世界观设定"
+              placeholder="例如：赤壁一把火"
               autoFocus
             />
           </label>
 
-          <div className="hb-field">
+          <div className="hb-script-field">
             <span>类型</span>
-            <div className="hb-custom-select-container">
+            <div className="hb-script-select">
               <button
                 type="button"
-                className="hb-custom-select-trigger"
+                className="hb-script-select-trigger"
                 onClick={() => setDropdownOpen(!dropdownOpen)}
               >
                 <span>
                   {selectedTeam ? teamDisplayName(selectedTeam) : "自由画布"}
                 </span>
-                <ChevronDown size={16} className={`hb-select-arrow ${dropdownOpen ? 'is-open' : ''}`} />
+                <ChevronDown
+                  size={16}
+                  className={dropdownOpen ? "is-open" : undefined}
+                />
               </button>
 
-              {dropdownOpen && teams.length > 0 && (
+              {dropdownOpen && teams.length > 0 ? (
                 <>
-                  <div className="hb-custom-select-backdrop" onClick={() => setDropdownOpen(false)} />
-                  <div className="hb-custom-select-options">
+                  <div
+                    className="hb-script-select-backdrop"
+                    onClick={() => setDropdownOpen(false)}
+                  />
+                  <div className="hb-script-select-options">
                     {teams.map((team) => (
                       <button
                         key={team.id}
                         type="button"
-                        className={`hb-custom-select-option ${String(team.id) === teamID ? 'is-selected' : ''}`}
+                        className={
+                          String(team.id) === teamID ? "is-selected" : undefined
+                        }
                         onClick={() => {
                           setTeamID(String(team.id));
                           setDropdownOpen(false);
                         }}
                       >
                         {teamDisplayName(team)}
-                        {String(team.id) === teamID && <span className="hb-option-check">✓</span>}
                       </button>
                     ))}
                   </div>
                 </>
-              )}
+              ) : null}
             </div>
           </div>
 
-          {message ? <div className="hb-form-error">{message}</div> : null}
+          {message ? (
+            <div className="hb-script-form-error">{message}</div>
+          ) : null}
         </div>
 
-        <div className="hb-modal-actions">
+        <footer className="hb-script-modal-actions">
           <button
             type="button"
-            className="hb-secondary-button"
+            className="hb-script-secondary"
             onClick={onClose}
           >
             取消
           </button>
           <button
             type="submit"
-            className="hb-primary-button"
+            className="hb-script-primary"
             disabled={submitting}
           >
-            {submitting ? <Loader2 size={16} className="hb-spin" /> : null}
-            创建作品
+            {submitting ? <Loader2 size={15} className="hb-script-spin" /> : null}
+            创建
           </button>
-        </div>
+        </footer>
       </form>
-    </div>
-  </div>
-  );
-}
-
-function ProjectEmpty({ onCreate }: { onCreate: () => void }) {
-  return (
-    <div className="hb-project-grid">
-      <CreateProjectCard onCreate={onCreate} />
-    </div>
-  );
-}
-
-function ProjectLoading() {
-  return (
-    <div className="hb-project-grid">
-      {[0, 1, 2, 3].map((item) => (
-        <div key={item} className="hb-card-skeleton">
-          <div />
-          <span />
-          <span />
-        </div>
-      ))}
     </div>
   );
 }
@@ -535,429 +354,274 @@ function ProjectLoading() {
 function WorkProjectStyles() {
   return (
     <style>{`
-      .hb-project-page {
+      .hb-script-page {
         width: 100%;
-        min-height: 100vh;
-        padding: 44px 44px 72px;
-      }
-
-      .hb-hero {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 24px;
-        margin-bottom: 40px;
-      }
-
-      .hb-hero-title {
-        margin: 0;
-        color: var(--hb-text, #0f172a);
-        font-size: 28px;
-        font-weight: 500;
-        line-height: 1.2;
-        letter-spacing: -0.02em;
-        text-align: center;
-      }
-
-      .hb-prompt-card {
-        display: flex;
-        width: min(840px, calc(100vw - 250px));
-        min-height: 136px;
-        flex-direction: column;
-        justify-content: space-between;
-        overflow: visible;
-        border: 1px solid #e2e8f0;
-        border-radius: 20px;
-        background: var(--hb-panel, #fff);
-        box-shadow: 0 8px 30px rgba(15, 23, 42, 0.03);
-        transition: border-color 160ms, box-shadow 160ms;
-      }
-
-      .hb-prompt-card:focus-within {
-        border-color: #cbd5e1;
-        box-shadow: 0 12px 36px rgba(15, 23, 42, 0.05);
-      }
-
-      .hb-prompt-input {
-        width: 100%;
-        min-height: 58px;
-        resize: none;
-        border: 0;
-        background: transparent;
-        padding: 20px 20px 8px;
-        color: var(--hb-text, #080d1c);
-        font: inherit;
-        font-size: 15px;
-        line-height: 1.55;
-        outline: none;
-      }
-
-      .hb-prompt-input::placeholder {
-        color: var(--hb-text-muted, #667085);
-      }
-
-      .hb-prompt-toolbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 14px;
-        border-top: 0;
-        padding: 12px 20px 16px;
-      }
-
-      .hb-tool-group {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-
-      .hb-chip,
-      .hb-icon-chip,
-      .hb-model-chip {
-        display: inline-flex;
-        cursor: pointer;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
+        min-height: 100%;
         background: #ffffff;
-        color: #475569;
-        font: inherit;
-        font-weight: 500;
-        letter-spacing: 0;
-        transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+        padding: 24px 31px 51px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, "Noto Sans SC", "PingFang SC", sans-serif;
       }
 
-      .hb-chip,
-      .hb-model-chip {
-        min-height: 32px;
-        padding: 0 10px;
-        font-size: 13px;
+      .hb-script-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, 181px);
+        gap: 22px;
+        align-items: start;
+        justify-content: start;
+        overflow: visible;
       }
 
-      .hb-chip.is-strong {
-        background: #f8fafc;
-        border-color: #e2e8f0;
-      }
-
-      .hb-icon-chip {
-        width: 32px;
-        height: 32px;
-      }
-
-      .hb-chip:hover,
-      .hb-icon-chip:hover,
-      .hb-model-chip:hover {
-        border-color: #cbd5e1;
-        background: #f8fafc;
-        color: #0f172a;
-      }
-
-      .hb-send {
-        display: inline-flex;
-        width: 36px;
-        height: 36px;
+      .hb-script-create-card,
+      .hb-script-card {
+        position: relative;
+        appearance: none;
+        display: flex;
+        width: 181px;
+        height: 254px;
         cursor: pointer;
+        flex-direction: column;
+        padding: 0;
+        border-radius: 3px;
+        background: #ffffff;
+        color: #171a19;
+        font: inherit;
+        letter-spacing: 0;
+        text-align: left;
+      }
+
+      .hb-script-create-card {
         align-items: center;
         justify-content: center;
-        border: 0;
-        border-radius: 999px;
-        background: #94a3b8;
-        color: #ffffff;
-        box-shadow: none;
-        transition: transform 160ms ease, background-color 160ms ease;
+        border: 1.6px dashed #7f9f91;
+        box-shadow: 8px 8px 0 rgba(28, 42, 36, 0.055);
+        transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
       }
 
-      .hb-send:hover {
-        background: #64748b;
-        transform: translateY(-1px);
+      .hb-script-create-card:hover {
+        border-color: #6b8d7e;
+        background: #fcfdfc;
       }
 
-      .hb-workbench {
-        width: 100%;
-        max-width: none;
+      @media (hover: hover) and (pointer: fine) {
+        .hb-script-create-card:hover {
+          z-index: 4;
+          box-shadow:
+            8px 8px 0 rgba(28, 42, 36, 0.055),
+            0 10px 18px rgba(16, 24, 21, 0.055);
+          transform: scale(1.018);
+        }
       }
 
-      .hb-section-head {
-        display: flex;
+      .hb-script-create-plus {
+        display: inline-flex;
+        width: 22px;
+        height: 22px;
         align-items: center;
-        justify-content: space-between;
-        gap: 24px;
-        margin-bottom: 36px;
+        justify-content: center;
+        color: #7f9a94;
+        transform: translateY(-18px);
       }
 
-      .hb-section-head h2 {
-        margin: 0;
-        color: var(--hb-text, #080d1c);
-        font-size: 16px;
-        font-weight: 800;
+      .hb-script-create-plus svg {
+        width: 16px;
+        height: 16px;
+      }
+
+      .hb-script-create-title {
+        margin-top: -5px;
+        color: #171a19;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.1;
+      }
+
+      .hb-script-create-desc {
+        margin-top: 10px;
+        color: #6b7370;
+        font-size: 10.5px;
+        font-weight: 400;
         line-height: 1.2;
       }
 
-      .hb-link-button {
-        display: inline-flex;
-        cursor: pointer;
-        align-items: center;
-        gap: 2px;
-        border: 0;
-        background: transparent;
-        color: var(--hb-text-muted, #667085);
-        font: inherit;
-        font-size: 12px;
-        font-weight: 650;
-      }
-
-      .hb-link-button:hover {
-        color: var(--hb-text, #080d1c);
-      }
-
-      .hb-primary-button {
-        min-height: 46px;
-        border-color: var(--hb-primary, #090f22);
-        background: var(--hb-primary, #090f22);
-        color: var(--hb-primary-text, #fff);
-        padding: 0 22px;
-        box-shadow: 0 14px 30px rgba(9, 15, 34, 0.16);
-      }
-
-      .hb-primary-button:disabled {
-        cursor: not-allowed;
-        opacity: 0.55;
-        transform: none;
-      }
-
-      .hb-secondary-button {
-        min-height: 44px;
-        padding: 0 20px;
-      }
-
-      .hb-project-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, 280px);
-        gap: 24px;
-        justify-content: start;
-      }
-
-      .hb-create-card,
-      .hb-project-card {
-        display: flex;
-        flex-direction: column;
-        width: 280px;
-        min-height: auto;
-        cursor: pointer;
-        border: 0;
-        background: transparent;
-        box-shadow: none;
-        padding: 0;
-        text-align: left;
-        transition: transform 180ms ease;
-      }
-
-      .hb-card-skeleton {
-        min-height: 160px;
-        border: 1px solid var(--hb-border, #dce3ee);
-        border-radius: 12px;
-        background: var(--hb-panel, #fff);
-        box-shadow: 0 3px 12px rgba(15, 23, 42, 0.05);
-      }
-
-      .hb-create-card:hover,
-      .hb-project-card:hover {
-        box-shadow: none;
-        transform: translateY(-2px);
-      }
-
-      .hb-project-cover {
-        position: relative;
-        display: flex;
-        width: 100%;
-        height: 160px;
-        align-items: center;
-        justify-content: center;
-        overflow: hidden;
-        border: 1px solid var(--hb-border, #dce3ee);
-        border-radius: 12px;
-        background: var(--hb-panel, #fff);
-        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.02);
-        transition: border-color 160ms, box-shadow 160ms;
-      }
-
-      .hb-project-card:hover .hb-project-cover {
-        border-color: var(--hb-border-strong, #cfd8e6);
-        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
-      }
-
-      .hb-create-cover {
-        position: relative;
-        display: flex;
-        width: 100%;
-        height: 160px;
-        align-items: center;
-        justify-content: center;
-        overflow: hidden;
-        border: 1px dashed var(--hb-border, #dce3ee);
-        border-radius: 12px;
-        background: var(--hb-panel, #fff);
-        box-shadow: none;
-        transition: border-color 160ms, background-color 160ms;
-      }
-
-      .hb-create-card:hover .hb-create-cover {
-        border-color: var(--hb-border-strong, #cfd8e6);
-        background: var(--hb-panel-soft, #f8fafc);
-      }
-
-      .hb-create-plus {
-        display: flex;
-        width: 48px;
-        height: 48px;
-        align-items: center;
-        justify-content: center;
-        color: var(--hb-text-muted, #94a3b8);
-      }
-
-      .hb-document-mark {
-        position: relative;
-        display: flex;
-        width: 62px;
-        height: 72px;
-        flex-direction: column;
-        gap: 9px;
-        border: 1px solid rgba(255, 255, 255, 0.7);
-        border-radius: 16px;
-        background: rgba(255, 255, 255, 0.82);
-        padding: 15px 13px;
-        box-shadow: 0 16px 34px rgba(15, 23, 42, 0.08);
-        backdrop-filter: blur(10px);
-      }
-
-      .hb-document-mark span {
-        display: block;
-        height: 6px;
-        border-radius: 999px;
-        background: #d8dee8;
-      }
-
-      .hb-document-mark span:nth-child(2) {
-        width: 72%;
-      }
-
-      .hb-document-mark span:nth-child(3) {
-        width: 48%;
-      }
-
-      .hb-document-mark b {
-        position: absolute;
-        top: -7px;
-        right: -7px;
-        display: flex;
-        width: 20px;
-        height: 20px;
-        align-items: center;
-        justify-content: center;
-        border: 2px solid #fff;
-        border-radius: 999px;
-        background: #c8ff21;
-        color: #111827;
-        font-size: 12px;
-        line-height: 1;
-      }
-
-      .hb-card-badge {
-        position: absolute;
-        top: 12px;
-        right: 12px;
-        border-radius: 999px;
-        background: rgba(9, 15, 34, 0.72);
-        color: #fff;
-        padding: 5px 9px;
-        font-size: 10px;
-        font-weight: 760;
-        letter-spacing: 0.02em;
-      }
-
-      .hb-project-meta {
-        border-top: 0;
-        padding: 12px 2px 4px;
-      }
-
-      .hb-project-title-row {
-        display: flex;
-        align-items: center;
+      .hb-script-card {
         justify-content: space-between;
-        gap: 12px;
+        isolation: isolate;
+        overflow: visible;
+        border: 1px solid #d2d9d6;
+        box-shadow:
+          2px 2px 0 rgba(6, 13, 11, 0.018),
+          6px 6px 0 rgba(6, 13, 11, 0.022);
+        transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
       }
 
-      .hb-project-title-row h3 {
-        margin: 0;
-        overflow: hidden;
-        color: var(--hb-text, #0f172a);
-        font-size: 13px;
-        font-weight: 600;
-        line-height: 1.4;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .hb-project-title-row svg {
-        flex: 0 0 auto;
-        color: var(--hb-text-muted, #667085);
+      .hb-script-card::before,
+      .hb-script-card::after {
+        content: "";
+        position: absolute;
+        inset: -1px;
+        pointer-events: none;
+        border: 1px solid #dce3e1;
+        border-radius: 3px;
+        background: #ffffff;
         opacity: 0;
-        transition: opacity 160ms, color 160ms;
+        transform: translate(0, 0) rotate(0deg);
+        transform-origin: 50% 88%;
+        transition: opacity 130ms ease, transform 150ms ease, box-shadow 150ms ease;
       }
 
-      .hb-project-card:hover .hb-project-title-row svg {
-        opacity: 1;
+      .hb-script-card::before {
+        z-index: -2;
       }
 
-      .hb-project-title-row svg {
-        flex: 0 0 auto;
-        color: var(--hb-text-muted, #667085);
-        transition: transform 160ms ease, color 160ms ease;
+      .hb-script-card::after {
+        z-index: -1;
       }
 
-      .hb-project-card:hover .hb-project-title-row svg {
-        color: var(--hb-text, #080d1c);
-        transform: translateX(2px);
+      @media (hover: hover) and (pointer: fine) {
+        .hb-script-card:hover {
+          z-index: 5;
+          border-color: #cfd8d4;
+          box-shadow:
+            0 10px 18px rgba(16, 24, 21, 0.06),
+            2px 2px 0 rgba(6, 13, 11, 0.018);
+          transform: translateY(-1px);
+        }
+
+        .hb-script-card:hover::before {
+          opacity: 0.86;
+          box-shadow: 0 6px 12px rgba(16, 24, 21, 0.04);
+          transform: translate(-4px, -4px) rotate(-1.2deg);
+        }
+
+        .hb-script-card:hover::after {
+          opacity: 0.92;
+          box-shadow: 0 7px 13px rgba(16, 24, 21, 0.045);
+          transform: translate(5px, -6px) rotate(1.4deg);
+        }
       }
 
-      .hb-project-meta time {
-        display: block;
-        margin: 8px 0 0;
+      .hb-script-card:focus-visible {
+        outline: 2px solid rgba(127, 159, 145, 0.7);
+        outline-offset: 4px;
+      }
+
+      .hb-script-card:active {
+        transform: translateY(1px);
+      }
+
+      .hb-script-card-binding {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 24px;
+        width: 1px;
+        border-left: 1px dashed #e4e8e6;
+      }
+
+      .hb-script-card-body {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        padding: 17px 19px 0 34px;
+      }
+
+      .hb-script-card-body strong {
+        display: -webkit-box;
         overflow: hidden;
-        color: var(--hb-text-muted, #667085);
-        font-size: 13px;
-        line-height: 1.35;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        color: #171a19;
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1.32;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
       }
 
-      .hb-card-skeleton {
+      .hb-script-card-body span {
+        display: -webkit-box;
+        max-width: 114px;
+        margin-top: 10px;
         overflow: hidden;
+        color: #5f6865;
+        font-size: 10.5px;
+        font-weight: 400;
+        line-height: 1.5;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
       }
 
-      .hb-card-skeleton div {
-        height: 150px;
-        background: linear-gradient(90deg, var(--hb-panel-soft, #f8fafc), var(--hb-accent, #e8eef7), var(--hb-panel-soft, #f8fafc));
-        background-size: 220% 100%;
-        animation: hb-shimmer 1.2s linear infinite;
-      }
-
-      .hb-card-skeleton span {
+      .hb-script-card time {
+        position: relative;
+        z-index: 1;
         display: block;
-        height: 14px;
-        margin: 18px 18px 0;
+        padding: 0 19px 18px 34px;
+        color: #9ca3a0;
+        font-size: 9.6px;
+        font-weight: 400;
+        line-height: 1.2;
+      }
+
+      .hb-script-skeleton {
+        position: relative;
+        width: 181px;
+        height: 254px;
+        overflow: hidden;
+        border: 1px solid #d2d9d6;
+        border-radius: 3px;
+        background: #ffffff;
+        box-shadow:
+          2px 2px 0 rgba(6, 13, 11, 0.02),
+          6px 6px 0 rgba(6, 13, 11, 0.022);
+      }
+
+      .hb-script-skeleton::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, transparent 0%, rgba(244, 246, 245, 0.9) 45%, transparent 75%);
+        animation: hb-script-shimmer 1.1s linear infinite;
+        transform: translateX(-100%);
+      }
+
+      .hb-script-skeleton span,
+      .hb-script-skeleton strong,
+      .hb-script-skeleton em,
+      .hb-script-skeleton small {
+        position: absolute;
+        display: block;
         border-radius: 999px;
-        background: var(--hb-panel-soft, #f8fafc);
+        background: #f4f6f5;
       }
 
-      .hb-card-skeleton span:last-child {
-        width: 54%;
-        margin-top: 12px;
+      .hb-script-skeleton span {
+        top: 21px;
+        left: 34px;
+        width: 106px;
+        height: 16px;
       }
 
-      .hb-modal-backdrop {
+      .hb-script-skeleton strong {
+        top: 46px;
+        left: 34px;
+        width: 74px;
+        height: 13px;
+      }
+
+      .hb-script-skeleton em {
+        top: 77px;
+        left: 34px;
+        width: 110px;
+        height: 10px;
+      }
+
+      .hb-script-skeleton small {
+        bottom: 19px;
+        left: 34px;
+        width: 70px;
+        height: 10px;
+      }
+
+      .hb-script-modal-backdrop {
         position: fixed;
         inset: 0;
         z-index: 1000;
@@ -966,438 +630,327 @@ function WorkProjectStyles() {
         justify-content: center;
         background: rgba(15, 23, 42, 0.18);
         padding: 24px;
-        backdrop-filter: blur(4px);
+        backdrop-filter: blur(3px);
       }
 
-      .hb-modal-container {
+      .hb-script-modal {
         position: relative;
-        width: min(520px, 100%);
+        width: min(460px, 100%);
+        overflow: visible;
+        border: 1px solid #dce3e1;
+        border-radius: 8px;
+        background: #ffffff;
+        box-shadow: 0 24px 70px rgba(16, 24, 21, 0.18);
       }
 
-      .hb-modal {
-        width: 100%;
-        overflow: hidden;
-        border: 1px solid var(--hb-border, #dce3ee);
-        border-radius: 16px;
-        background: var(--hb-panel, #fff);
-        box-shadow: 0 24px 64px rgba(15, 23, 42, 0.18);
-      }
-
-      .hb-modal-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 32px 32px 12px;
-      }
-
-      .hb-modal-head-title-row {
-        display: flex;
-        align-items: baseline;
-        gap: 12px;
-        flex-wrap: wrap;
-      }
-
-      .hb-modal-head-title-row h3 {
-        margin: 0;
-        color: var(--hb-text, #0f172a);
-        font-size: 14px;
-        font-weight: 700;
-        line-height: 1.2;
-      }
-
-      .hb-modal-head-tip {
-        color: var(--hb-text-muted, #64748b);
-        font-size: 11px;
-        font-weight: 400;
-      }
-
-      .hb-modal-close-outside {
+      .hb-script-modal-close {
         position: absolute;
-        top: 0;
-        right: -64px;
+        top: 12px;
+        right: 12px;
         display: inline-flex;
-        width: 44px;
-        height: 44px;
+        width: 30px;
+        height: 30px;
         cursor: pointer;
         align-items: center;
         justify-content: center;
         border: 0;
-        border-radius: 999px;
-        background: rgba(0, 0, 0, 0.46);
-        color: #ffffff;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
-        backdrop-filter: blur(8px);
-        transition: transform 160ms ease, background 160ms ease;
+        border-radius: 6px;
+        background: transparent;
+        color: #7b8783;
       }
 
-      .hb-modal-close-outside:hover {
-        background: rgba(0, 0, 0, 0.65);
-        transform: scale(1.06);
+      .hb-script-modal-close:hover {
+        background: #f0f3f2;
+        color: #101817;
       }
 
-      @media (max-width: 660px) {
-        .hb-modal-close-outside {
-          top: -64px;
-          right: 0;
-        }
+      .hb-script-modal-head {
+        padding: 28px 30px 14px;
       }
 
-      .hb-modal-body {
+      .hb-script-modal-head h2 {
+        margin: 0;
+        color: #101817;
+        font-size: 18px;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+
+      .hb-script-modal-head p {
+        margin: 8px 0 0;
+        color: #6f7b78;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .hb-script-modal-body {
         display: grid;
-        gap: 16px;
-        padding: 8px 32px 20px;
+        gap: 15px;
+        padding: 8px 30px 20px;
       }
 
-      .hb-field {
+      .hb-script-field {
         display: grid;
-        gap: 9px;
+        gap: 8px;
       }
 
-      .hb-field span {
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--hb-text-muted, #475569);
+      .hb-script-field > span {
+        color: #4e5a56;
+        font-size: 13px;
+        font-weight: 650;
       }
 
-      .hb-field input,
-      .hb-field select {
+      .hb-script-field input,
+      .hb-script-select-trigger {
         width: 100%;
         height: 42px;
-        border: 1px solid var(--hb-border, #dce3ee);
-        border-radius: 10px;
-        background: var(--hb-panel-soft, #f8fafc);
-        color: var(--hb-text, #080d1c);
+        border: 1px solid #dce3e1;
+        border-radius: 6px;
+        background: #fbfcfc;
+        color: #101817;
         font: inherit;
-        padding: 0 14px;
-        outline: none;
-        transition: border-color 160ms ease, background-color 160ms ease;
-      }
-
-      .hb-field input:focus,
-      .hb-field select:focus {
-        border-color: var(--hb-primary, #090f22);
-        background: var(--hb-panel, #fff);
-      }
-
-      .hb-form-error {
-        border: 1px solid #fecaca;
-        border-radius: 10px;
-        background: #fef2f2;
-        color: #dc2626;
-        padding: 11px 13px;
         font-size: 14px;
+        outline: none;
       }
 
-      .hb-modal-actions {
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        gap: 12px;
-        padding: 12px 32px 32px;
+      .hb-script-field input {
+        padding: 0 13px;
       }
 
-      .hb-modal-actions .hb-secondary-button {
-        min-height: 38px;
-        height: 38px;
-        border-radius: 8px;
-        border: 1px solid #e2e8f0;
+      .hb-script-field input:focus,
+      .hb-script-select-trigger:focus {
+        border-color: #95a8a1;
         background: #ffffff;
-        color: #475569;
-        padding: 0 32px;
-        font-size: 13px;
-        font-weight: 600;
-        box-shadow: none;
-        transition: background-color 160ms, border-color 160ms, color 160ms;
       }
 
-      .hb-modal-actions .hb-secondary-button:hover {
-        background: #f8fafc;
-        border-color: #cbd5e1;
-        color: #0f172a;
-      }
-
-      .hb-modal-actions .hb-primary-button {
-        min-height: 38px;
-        height: 38px;
-        border-radius: 8px;
-        border: 1px solid transparent;
-        background: #0f172a;
-        color: #ffffff;
-        padding: 0 32px;
-        font-size: 13px;
-        font-weight: 600;
-        box-shadow: none;
-        transition: background-color 160ms, opacity 160ms, transform 160ms;
-      }
-
-      .hb-modal-actions .hb-primary-button:hover:not(:disabled) {
-        background: #1e293b;
-        transform: translateY(-1px);
-      }
-
-      .hb-modal-actions .hb-primary-button:disabled {
-        cursor: not-allowed;
-        background: #f1f5f9;
-        border-color: #f1f5f9;
-        color: #94a3b8;
-        opacity: 1;
-        transform: none;
-      }
-
-      /* Custom Select Dropdown Styling */
-      .hb-custom-select-container {
+      .hb-script-select {
         position: relative;
-        width: 100%;
       }
 
-      .hb-custom-select-trigger {
+      .hb-script-select-trigger {
         display: flex;
+        cursor: pointer;
         align-items: center;
         justify-content: space-between;
-        width: 100%;
-        height: 42px;
-        border: 1px solid var(--hb-border, #dce3ee);
-        border-radius: 10px;
-        background: var(--hb-panel-soft, #f8fafc);
-        color: var(--hb-text, #080d1c);
-        font: inherit;
-        padding: 0 14px;
-        cursor: pointer;
-        outline: none;
-        transition: border-color 160ms, background-color 160ms;
+        gap: 12px;
+        padding: 0 12px;
+        text-align: left;
       }
 
-      .hb-custom-select-trigger:focus,
-      .hb-custom-select-trigger:active {
-        border-color: var(--hb-primary, #090f22);
-        background: var(--hb-panel, #fff);
+      .hb-script-select-trigger span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
-      .hb-custom-select-trigger:disabled {
-        cursor: not-allowed;
-        opacity: 0.6;
+      .hb-script-select-trigger svg {
+        color: #6f7b78;
+        transition: transform 120ms ease;
       }
 
-      .hb-select-arrow {
-        color: var(--hb-text-muted, #64748b);
-        transition: transform 160ms ease;
-      }
-
-      .hb-select-arrow.is-open {
+      .hb-script-select-trigger svg.is-open {
         transform: rotate(180deg);
       }
 
-      .hb-custom-select-backdrop {
+      .hb-script-select-backdrop {
         position: fixed;
         inset: 0;
         z-index: 1010;
         background: transparent;
       }
 
-      .hb-custom-select-options {
+      .hb-script-select-options {
         position: absolute;
         top: calc(100% + 6px);
         left: 0;
         right: 0;
         z-index: 1020;
-        max-height: 240px;
-        overflow-y: auto;
-        border: 1px solid var(--hb-border, #dce3ee);
-        border-radius: 10px;
-        background: var(--hb-panel, #fff);
-        box-shadow: 0 12px 36px rgba(15, 23, 42, 0.08);
-        padding: 6px;
+        display: grid;
+        gap: 3px;
+        max-height: 220px;
+        overflow: auto;
+        border: 1px solid #dce3e1;
+        border-radius: 6px;
+        background: #ffffff;
+        padding: 5px;
+        box-shadow: 0 14px 34px rgba(16, 24, 21, 0.12);
       }
 
-      .hb-custom-select-option {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        width: 100%;
-        min-height: 38px;
+      .hb-script-select-options button {
+        height: 34px;
+        cursor: pointer;
         border: 0;
-        border-radius: 6px;
+        border-radius: 5px;
         background: transparent;
-        color: var(--hb-text, #080d1c);
+        color: #101817;
         font: inherit;
         font-size: 13px;
-        font-weight: 500;
-        padding: 8px 12px;
-        cursor: pointer;
         text-align: left;
-        transition: background-color 120ms, color 120ms;
-      }
-
-      .hb-custom-select-option:hover {
-        background: var(--hb-panel-soft, #f8fafc);
-        color: var(--hb-primary, #090f22);
-      }
-
-      .hb-custom-select-option.is-selected {
-        background: var(--hb-accent, #e8eef7);
-        color: #0f172a;
-        font-weight: 700;
-      }
-
-      .hb-option-check {
-        color: #12c987;
-        font-weight: 900;
-      }
-
-      /* Model Selection Custom Popover Dropdown */
-      .hb-model-select-container {
-        position: relative;
-      }
-
-      .hb-model-chip {
-        min-height: 32px;
         padding: 0 10px;
-        font-size: 13px;
-        gap: 6px;
       }
 
-      .hb-model-dropdown-backdrop {
-        position: fixed;
-        inset: 0;
-        z-index: 1010;
-        background: transparent;
+      .hb-script-select-options button:hover,
+      .hb-script-select-options button.is-selected {
+        background: #eef3f1;
       }
 
-      .hb-model-dropdown-popover {
-        position: absolute;
-        bottom: calc(100% + 8px);
-        right: 0;
-        z-index: 1020;
-        display: flex;
-        flex-direction: column;
-        width: 320px;
-        border: 1px solid var(--hb-border, #e2e8f0);
-        border-radius: 14px;
-        background: var(--hb-panel, #fff);
-        box-shadow: 0 12px 36px rgba(15, 23, 42, 0.08);
-        padding: 8px;
-        gap: 6px;
-      }
-
-      .hb-model-option {
-        display: flex;
-        align-items: flex-start;
-        gap: 12px;
-        width: 100%;
-        border: 0;
-        border-radius: 10px;
-        background: transparent;
+      .hb-script-form-error {
+        border-radius: 6px;
+        background: #fff1f0;
+        color: #b42318;
         padding: 10px 12px;
-        cursor: pointer;
-        text-align: left;
-        transition: background-color 160ms, transform 160ms;
+        font-size: 13px;
       }
 
-      .hb-model-option:hover {
-        background: var(--hb-panel-soft, #f8fafc);
-        transform: translateY(-0.5px);
-      }
-
-      .hb-model-option.is-active {
-        background: var(--hb-panel-soft, #f8fafc);
-        background: color-mix(in srgb, var(--hb-accent, #e8eef7) 50%, var(--hb-panel-soft, #f8fafc) 50%);
-      }
-
-      .hb-model-icon-box {
+      .hb-script-modal-actions {
         display: flex;
-        width: 32px;
-        height: 32px;
+        justify-content: flex-end;
+        gap: 10px;
+        padding: 0 30px 28px;
+      }
+
+      .hb-script-secondary,
+      .hb-script-primary {
+        display: inline-flex;
+        height: 38px;
+        cursor: pointer;
         align-items: center;
         justify-content: center;
-        border-radius: 8px;
-        background: #ffffff;
-        border: 1px solid var(--hb-border, #e2e8f0);
-        color: var(--hb-text, #0f172a);
-        flex-shrink: 0;
-        box-shadow: 0 2px 6px rgba(15, 23, 42, 0.02);
-      }
-
-      .hb-model-option.is-active .hb-model-icon-box {
-        background: #0f172a;
-        color: #ffffff;
-        border-color: #0f172a;
-      }
-
-      .hb-model-info {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        min-width: 0;
-      }
-
-      .hb-model-info h4 {
-        margin: 0;
-        color: var(--hb-text, #0f172a);
+        gap: 7px;
+        border-radius: 6px;
+        font: inherit;
         font-size: 13px;
         font-weight: 700;
-        line-height: 1.2;
+        padding: 0 20px;
       }
 
-      .hb-model-info p {
-        margin: 0;
-        color: var(--hb-text-muted, #64748b);
-        font-size: 11px;
-        line-height: 1.35;
-        white-space: normal;
+      .hb-script-secondary {
+        border: 1px solid #dce3e1;
+        background: #ffffff;
+        color: #46524e;
       }
 
-      .hb-spin {
-        animation: hb-spin 0.85s linear infinite;
+      .hb-script-primary {
+        border: 1px solid #101817;
+        background: #101817;
+        color: #ffffff;
       }
 
-      @keyframes hb-spin {
+      .hb-script-primary:disabled {
+        cursor: not-allowed;
+        border-color: #cfd7d4;
+        background: #cfd7d4;
+      }
+
+      .hb-script-spin {
+        animation: hb-script-spin 0.8s linear infinite;
+      }
+
+      @keyframes hb-script-spin {
         to { transform: rotate(360deg); }
       }
 
-      @keyframes hb-shimmer {
-        to { background-position: -220% 0; }
+      @keyframes hb-script-shimmer {
+        to { transform: translateX(100%); }
       }
 
-      @media (max-width: 980px) {
-        .hb-project-page {
-          padding: 48px 28px 56px;
+      @media (max-width: 900px) {
+        .hb-script-page {
+          padding: 24px;
         }
 
-        .hb-hero {
-          align-items: stretch;
+        .hb-script-grid {
+          grid-template-columns: repeat(auto-fill, minmax(152px, 1fr));
         }
 
-        .hb-section-head,
-        .hb-prompt-toolbar {
-          align-items: stretch;
-          flex-direction: column;
-        }
-
-        .hb-tool-group {
-          justify-content: space-between;
-        }
-
-        .hb-project-grid {
-          grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+        .hb-script-create-card,
+        .hb-script-card,
+        .hb-script-skeleton {
+          width: 100%;
+          max-width: 181px;
         }
       }
 
       @media (max-width: 640px) {
-        .hb-project-page {
-          padding: 34px 18px 44px;
+        .hb-script-page {
+          padding: 16px 14px 22px;
         }
 
-        .hb-hero-title {
-          font-size: 24px;
+        .hb-script-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 14px 12px;
         }
 
-        .hb-prompt-card {
-          min-height: 190px;
-          border-radius: 24px;
-        }
-
-        .hb-prompt-card {
+        .hb-script-create-card,
+        .hb-script-card,
+        .hb-script-skeleton {
           width: 100%;
+          max-width: none;
+          height: auto;
+          min-height: 190px;
+          aspect-ratio: 181 / 254;
+        }
+
+        .hb-script-create-plus {
+          transform: translateY(-10px);
+        }
+
+        .hb-script-create-title {
+          font-size: 11.5px;
+        }
+
+        .hb-script-create-desc {
+          max-width: 86%;
+          font-size: 10px;
+          text-align: center;
+        }
+
+        .hb-script-card-binding {
+          left: 21px;
+        }
+
+        .hb-script-card-body {
+          padding: 15px 14px 0 30px;
+        }
+
+        .hb-script-card-body strong {
+          font-size: 14px;
+          line-height: 1.28;
+        }
+
+        .hb-script-card-body span {
+          max-width: none;
+          margin-top: 8px;
+          font-size: 10px;
+          line-height: 1.45;
+        }
+
+        .hb-script-card time {
+          padding: 0 14px 15px 30px;
+          font-size: 9px;
+        }
+
+        .hb-script-modal-backdrop {
+          align-items: flex-end;
+          padding: 12px;
+        }
+
+        .hb-script-modal {
+          width: 100%;
+          border-radius: 10px;
+        }
+
+        .hb-script-modal-head {
+          padding: 26px 22px 12px;
+        }
+
+        .hb-script-modal-body {
+          padding: 8px 22px 18px;
+        }
+
+        .hb-script-modal-actions {
+          padding: 0 22px 22px;
         }
       }
     `}</style>
@@ -1441,16 +994,18 @@ function toTeamItems(value: any): TeamItem[] {
 }
 
 function createTeamOptions(teams: TeamItem[]) {
-  const releasedTeams = teams.filter((team) => team.id > 0 && team.can_create !== false);
+  const releasedTeams = teams.filter(
+    (team) => team.id > 0 && team.can_create !== false,
+  );
   return [freeCanvasTeam, ...releasedTeams];
 }
 
-function projectTeamLabel(project: ProjectItem) {
+function projectTeamDescription(project: ProjectItem) {
   const name = project.team?.name?.trim();
   if (!project.team_id || !name || name.toLowerCase() === "workflow") {
-    return "自由画布";
+    return "开始你的创作之旅...";
   }
-  return name;
+  return `基于「${name}」继续创作...`;
 }
 
 function teamDisplayName(team: TeamItem) {
@@ -1468,40 +1023,26 @@ function createProject(payload: CreateProjectPayload) {
   });
 }
 
-function formatTime(value?: string) {
+function formatRecentEdit(value?: string) {
   if (!value) {
-    return "-";
+    return "最近编辑";
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return value;
+    return "最近编辑";
   }
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function getProjectCoverStyle(
-  project: ProjectItem,
-  index: number,
-): CSSProperties {
-  const cover = project.cover?.trim();
-  if (!cover) {
-    return { background: coverGradients[index % coverGradients.length] };
+  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  const minute = 60;
+  const hour = minute * 60;
+  const day = hour * 24;
+  if (seconds < minute) {
+    return "最近编辑 刚刚";
   }
-  if (
-    cover.startsWith("linear-gradient") ||
-    cover.startsWith("radial-gradient")
-  ) {
-    return { background: cover };
+  if (seconds < hour) {
+    return `最近编辑 ${Math.floor(seconds / minute)}分钟前`;
   }
-  return {
-    backgroundImage: `url(${cover})`,
-    backgroundPosition: "center",
-    backgroundSize: "cover",
-  };
+  if (seconds < day) {
+    return `最近编辑 ${Math.floor(seconds / hour)}小时前`;
+  }
+  return `最近编辑 ${Math.floor(seconds / day)}天前`;
 }

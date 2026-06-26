@@ -19,7 +19,13 @@ func shouldEvaluateMemory(text string) bool {
 	if text == "" || len([]rune(text)) > 1200 || hasSensitiveMemoryContent(text) {
 		return false
 	}
-	return explicitMemoryContent(text) != "" || looksLikeLongTermMemory(text)
+	if explicitMemoryContent(text) != "" {
+		return true
+	}
+	if looksLikeTemporaryTaskMemory(text) {
+		return false
+	}
+	return looksLikeLongTermMemory(text)
 }
 
 func (s Service) rememberMemoryCandidate(ctx context.Context, owner ownerScope, session assistantmodel.Session, sourceMessageID uint64, candidate memoryCandidate) map[string]any {

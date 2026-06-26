@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "团队分类",
     "parent": "bot/team/team/list",
     "type": 2,
     "sort": 1
@@ -24,13 +25,28 @@
         "value": "parent.data.search.cate_id",
         "option": {
           "model": "bot.team.NewTeamCateModel",
-          "order": "sort asc,id asc"
+          "order": "sort asc,id asc",
+          "extraFields": [
+            "status",
+            "sort"
+          ]
         },
         "meta": {
           "title": "团队分类",
           "description": "左侧维护团队分类",
           "remote": true,
           "defaultFirst": true,
+          "sortable": true,
+          "sortField": "sort",
+          "sortChangeAction": {
+            "type": "save",
+            "path": "bot/team/team_cate/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "sort": "$value"
+            }
+          },
           "createButton": {
             "name": "新增分类",
             "icon": "plus",
@@ -44,6 +60,29 @@
               }
             }
           },
+          "statusField": "status",
+          "statusDisplay": "select",
+          "statusChangeAction": {
+            "type": "save",
+            "path": "bot/team/team_cate/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "status": "$value"
+            }
+          },
+          "statusCases": [
+            {
+              "value": 1,
+              "text": "启用",
+              "tone": "success"
+            },
+            {
+              "value": 2,
+              "text": "停用",
+              "tone": "muted"
+            }
+          ],
           "buttons": [
             {
               "icon": "square-pen",

@@ -399,6 +399,7 @@ export function WorkSpacePage() {
   const pendingImportNodeRef = useRef<SpaceCanvasNode | null>(null);
   const requestedAssetDetailsRef = useRef<Set<number>>(new Set());
   const appliedCanvasRunsRef = useRef<Set<string>>(new Set());
+  const savingCanvasSnapshotsRef = useRef<Record<string, string>>({});
   const startFlowFeedbackRef = useRef<{
     nodeId: string;
     recordId: string;
@@ -428,7 +429,7 @@ export function WorkSpacePage() {
       setPowerKinds(nextSpace.powerKinds || []);
       requestedAssetDetailsRef.current = new Set();
       appliedCanvasRunsRef.current = new Set();
-      void loadWorkspaceCanvasExecutions(projectId, nextSpace, canvases);
+      await loadWorkspaceCanvasExecutions(projectId, nextSpace, canvases);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载创作空间失败");
     } finally {
@@ -544,8 +545,11 @@ export function WorkSpacePage() {
     [activeCate],
   );
 
-  const updateNodeResult = useCallback<NodeResultSetter>(
-    (nodeId, patch) => {
+  const updateCanvasNodeResult = useCallback(
+    (assetCateId: number, nodeId: string, patch: Partial<SpaceCanvasNode>) => {
+      if (!assetCateId) {
+        return;
+      }
       setNodeResultOverrides((current) => ({
         ...current,
         [nodeId]: {
@@ -553,14 +557,94 @@ export function WorkSpacePage() {
           ...patch,
         },
       }));
-      updateActiveCanvas((canvas) => ({
-        ...canvas,
-        nodes: canvas.nodes.map((node) =>
-          node.id === nodeId ? { ...node, ...patch } : node,
-        ),
-      }));
+      setCanvasStates((current) => {
+        const key = String(assetCateId);
+        const currentCanvas = current[key] || emptyCanvasState(assetCateId);
+        const nextCanvas = normalizeCanvasForState(
+          {
+            ...currentCanvas,
+            nodes: currentCanvas.nodes.map((node) =>
+              node.id === nodeId ? { ...node, ...patch } : node,
+            ),
+          },
+          assetCateId,
+        );
+        if (isSameCanvasState(currentCanvas, nextCanvas)) {
+          return current;
+        }
+        return {
+          ...current,
+          [key]: nextCanvas,
+        };
+      });
     },
-    [updateActiveCanvas],
+    [],
+  );
+
+  const updateNodeResult = useCallback<NodeResultSetter>(
+    (nodeId, patch) => {
+      updateCanvasNodeResult(Number(activeCate?.id || 0), nodeId, patch);
+    },
+    [activeCate?.id, updateCanvasNodeResult],
+  );
+
+  const persistCanvasRunSnapshot = useCallback(
+    async (input: CanvasStartRunInput) => {
+      const cateId = Number(input.assetCate.id || 0);
+      if (!cateId) {
+        return;
+      }
+      const key = String(cateId);
+      const canvas = normalizeCanvasForState(
+        {
+          assetCateId: cateId,
+          nodes: input.nodes,
+          edges: input.edges,
+          viewport: input.viewport || {},
+        },
+        cateId,
+      );
+      const submittedCanvasSnapshot = stableStringifyCanvas(canvas);
+      if (savingCanvasSnapshotsRef.current[key] === submittedCanvasSnapshot) {
+        return;
+      }
+      savingCanvasSnapshotsRef.current[key] = submittedCanvasSnapshot;
+      try {
+        const savedCanvas = await saveSpaceCanvas(input.projectId, cateId, canvas);
+        const savedCanvasSnapshot = stableStringifyCanvas(savedCanvas);
+        loadedCanvasesRef.current[key] = savedCanvasSnapshot;
+        setCanvasStates((current) => {
+          const currentCanvas = current[key];
+          if (!currentCanvas) {
+            return {
+              ...current,
+              [key]: savedCanvas,
+            };
+          }
+          const currentCanvasSnapshot = stableStringifyCanvas(currentCanvas);
+          if (
+            currentCanvasSnapshot !== submittedCanvasSnapshot &&
+            currentCanvasSnapshot !== savedCanvasSnapshot
+          ) {
+            return current;
+          }
+          if (currentCanvasSnapshot === savedCanvasSnapshot) {
+            return current;
+          }
+          return {
+            ...current,
+            [key]: savedCanvas,
+          };
+        });
+      } catch {
+        // Autosave will retry from canvasStates if the immediate run snapshot save fails.
+      } finally {
+        if (savingCanvasSnapshotsRef.current[key] === submittedCanvasSnapshot) {
+          delete savingCanvasSnapshotsRef.current[key];
+        }
+      }
+    },
+    [],
   );
 
   const updateNodeComposerDraft = useCallback<NodeDraftSetter>(
@@ -727,7 +811,7 @@ export function WorkSpacePage() {
             canvasModel.edges,
           ),
         );
-        await runCanvasFromStartNode({
+        const runInput: CanvasStartRunInput = {
           projectId,
           assetCate: activeCate,
           space,
@@ -739,7 +823,10 @@ export function WorkSpacePage() {
           onAssetCreated: upsertSpaceAsset,
           setRunningNode: setRunningNodes,
           requestFlowFeedback: requestStartFlowFeedback,
-        });
+        };
+        await runCanvasFromStartNode(runInput);
+        await persistCanvasRunSnapshot(runInput);
+        await loadWorkspaceCanvasExecutions(projectId, space, canvasStates);
         toast.success("开始节点执行完成");
       } catch (err) {
         if (isFeedbackReplacedError(err)) {
@@ -767,9 +854,11 @@ export function WorkSpacePage() {
       activeCanvas.viewport,
       canvasModel.edges,
       canvasModel.nodes,
+      canvasStates,
       clearNodeFeedbackRecords,
       projectId,
       requestStartFlowFeedback,
+      persistCanvasRunSnapshot,
       setRunningNodes,
       space,
       updateNodeResult,
@@ -791,7 +880,7 @@ export function WorkSpacePage() {
           target: edge.to,
         })),
       );
-      await runCanvasFromStartNode({
+      const runInput: CanvasStartRunInput = {
         projectId,
         assetCate: activeCate,
         space,
@@ -810,15 +899,20 @@ export function WorkSpacePage() {
         onAssetCreated: upsertSpaceAsset,
         setRunningNode: setRunningNodes,
         requestFlowFeedback: requestStartFlowFeedback,
-      });
+      };
+      await runCanvasFromStartNode(runInput);
+      await persistCanvasRunSnapshot(runInput);
+      await loadWorkspaceCanvasExecutions(projectId, space, canvasStates);
     },
     [
       activeCate,
       activeCanvas.viewport,
       canvasModel.edges,
       canvasModel.nodes,
+      canvasStates,
       projectId,
       requestStartFlowFeedback,
+      persistCanvasRunSnapshot,
       setRunningNodes,
       space,
       updateNodeResult,
@@ -857,9 +951,13 @@ export function WorkSpacePage() {
       return;
     }
     const dirtyCanvases = Object.entries(canvasStates).filter(
-      ([key, canvas]) =>
-        loadedCanvasesRef.current[key] !==
-        stableStringifyCanvas(canvas),
+      ([key, canvas]) => {
+        const snapshot = stableStringifyCanvas(canvas);
+        return (
+          loadedCanvasesRef.current[key] !== snapshot &&
+          savingCanvasSnapshotsRef.current[key] !== snapshot
+        );
+      },
     );
     if (dirtyCanvases.length === 0) {
       return;
@@ -867,6 +965,10 @@ export function WorkSpacePage() {
     const timer = window.setTimeout(() => {
       for (const [key, canvas] of dirtyCanvases) {
         const submittedCanvasSnapshot = stableStringifyCanvas(canvas);
+        if (savingCanvasSnapshotsRef.current[key] === submittedCanvasSnapshot) {
+          continue;
+        }
+        savingCanvasSnapshotsRef.current[key] = submittedCanvasSnapshot;
         void saveSpaceCanvas(space.project.id, canvas.assetCateId, canvas)
           .then((savedCanvas) => {
             const savedCanvasSnapshot = stableStringifyCanvas(savedCanvas);
@@ -891,6 +993,11 @@ export function WorkSpacePage() {
           .catch((err) => {
             loadedCanvasesRef.current[key] = submittedCanvasSnapshot;
             toast.error(err instanceof Error ? err.message : "保存画布失败");
+          })
+          .finally(() => {
+            if (savingCanvasSnapshotsRef.current[key] === submittedCanvasSnapshot) {
+              delete savingCanvasSnapshotsRef.current[key];
+            }
           });
       }
     }, 520);
@@ -1003,8 +1110,17 @@ export function WorkSpacePage() {
     if (relatedRuns.length === 0) {
       return;
     }
+    const appliedNodeKeys = new Set<string>();
     for (const run of relatedRuns) {
-      applyCanvasRunRecord(run, canvas, targetSpace);
+      const latestResults = (run.node_results || []).filter((result) => {
+        const nodeKey = result.node_key;
+        if (!nodeKey || appliedNodeKeys.has(nodeKey)) {
+          return false;
+        }
+        appliedNodeKeys.add(nodeKey);
+        return true;
+      });
+      applyCanvasRunRecord(run, canvas, targetSpace, latestResults);
     }
   }
 
@@ -1012,6 +1128,7 @@ export function WorkSpacePage() {
     run: WorkspaceCanvasRunRef,
     canvas: SpaceCanvasState,
     targetSpace: SpaceBootstrap,
+    results: CanvasNodeResultRef[] = run.node_results || [],
   ) {
     const startNode = canvasRunRecordStartNode(run, canvas.nodes);
     if (!startNode) {
@@ -1029,13 +1146,14 @@ export function WorkSpacePage() {
       nodes: canvas.nodes,
       edges: canvas.edges,
       viewport: canvas.viewport,
-      onNodeResult: updateNodeResult,
+      onNodeResult: (nodeId, patch) =>
+        updateCanvasNodeResult(canvas.assetCateId, nodeId, patch),
       onAssetCreated: upsertSpaceAsset,
       setRunningNode: setRunningNodes,
       requestFlowFeedback: requestStartFlowFeedback,
       canvasRun: run,
     };
-    const newResults = (run.node_results || []).filter((result) => {
+    const newResults = results.filter((result) => {
       const key = canvasRunRecordResultApplyKey(run, result);
       if (!key || appliedCanvasRunsRef.current.has(key)) {
         return false;
@@ -1090,6 +1208,7 @@ export function WorkSpacePage() {
       );
       applyBackendCanvasRunResults(input, canvasRun.node_results || []);
       finishBackendCanvasRunningNodes(input, canvasRun);
+      await persistCanvasRunSnapshot(input);
       toast.success("已继续画布运行");
       void loadWorkspaceCanvasExecutions(projectId, space, canvasStates);
     } catch (err) {
@@ -3508,13 +3627,17 @@ function NodeDetailDialog({
       activeDetailVersion?.id,
   );
   const hasVersionSidebar = versionItems.length > 0;
-  const isMediaDetail = Boolean(
-    preview.imageUrl ||
-      preview.videoUrl ||
-      preview.audioUrl ||
-      preview.fileUrl,
+  const canEditDetail = nodeDetailEditorSourcePrefersEditor(
+    editableSource,
+    preview,
   );
-  const canEditDetail = !isMediaDetail;
+  const isMediaDetail = Boolean(
+    !canEditDetail &&
+      (preview.imageUrl ||
+        preview.videoUrl ||
+        preview.audioUrl ||
+        preview.fileUrl),
+  );
   const saveStatusLabel = nodeDetailSaveStatusLabel(
     saveStatus,
     canAutoSaveVersion,
@@ -3552,7 +3675,13 @@ function NodeDetailDialog({
         toast.error(err instanceof Error ? err.message : "保存失败");
       }
     },
-    [activeNode, editableSource.contentFormat, node.asset, onNodeUpdated, projectId],
+    [
+      activeNode,
+      editableSource.contentFormat,
+      node.asset,
+      onNodeUpdated,
+      projectId,
+    ],
   );
 
   useEffect(() => {
@@ -3661,7 +3790,13 @@ function NodeDetailDialog({
             isMediaDetail ? "is-media-detail" : ""
           }`}
         >
-          {preview.imageUrl ? (
+          {canEditDetail ? (
+            <NodeDetailRichEditor
+              value={editableContent}
+              onChange={setEditableContent}
+              contentFormat={editableSource.contentFormat}
+            />
+          ) : preview.imageUrl ? (
             <img src={preview.imageUrl} alt={preview.text || activeNode.title} />
           ) : preview.videoUrl ? (
             <video src={preview.videoUrl} controls playsInline />
@@ -3677,12 +3812,6 @@ function NodeDetailDialog({
                 下载文件
               </a>
             </div>
-          ) : canEditDetail ? (
-            <NodeDetailRichEditor
-              value={editableContent}
-              onChange={setEditableContent}
-              contentFormat={editableSource.contentFormat}
-            />
           ) : (
             <div className="ws-node-detail-output ws-node-detail-empty">
               暂无详情
@@ -3937,14 +4066,6 @@ function nodeDetailEditorSource(
   displayOutput: any,
   fallbackText: string,
 ): NodeDetailEditorSource {
-  const markdownSource = nodeDetailMarkdownText(displayOutput);
-  if (markdownSource) {
-    return {
-      value: markdownSource,
-      contentFormat: "markdown",
-    };
-  }
-
   const richSource = rich || nodeDetailRichDocumentFromOutput(displayOutput);
   if (richSource) {
     return {
@@ -3953,10 +4074,28 @@ function nodeDetailEditorSource(
     };
   }
 
+  const markdownSource = nodeDetailMarkdownText(displayOutput);
+  if (markdownSource) {
+    return {
+      value: markdownSource,
+      contentFormat: "markdown",
+    };
+  }
+
   return {
     value: fallbackText || "",
     contentFormat: "markdown",
   };
+}
+
+function nodeDetailEditorSourcePrefersEditor(
+  source: NodeDetailEditorSource,
+  preview: GeneratedNodePreview,
+) {
+  if (!String(source.value || "").trim()) {
+    return false;
+  }
+  return source.contentFormat === "json" || !hasPreviewMedia(preview);
 }
 
 function nodeDetailRichDocumentFromOutput(
@@ -3975,7 +4114,240 @@ function nodeDetailRichDocumentFromOutput(
       return rich;
     }
   }
-  return null;
+  return nodeDetailMediaRichDocumentFromOutput(normalized);
+}
+
+function nodeDetailMediaRichDocumentFromOutput(
+  output: any,
+): ReturnType<typeof richDocument> {
+  const previews = nodeDetailMediaPreviewsFromOutput(output);
+  if (previews.length === 0) {
+    return null;
+  }
+
+  const content: any[] = [];
+  const seenText = new Set<string>();
+  for (const preview of previews) {
+    const text = nodeDetailRichParagraphText(preview.text);
+    if (text && !seenText.has(text)) {
+      seenText.add(text);
+      content.push({
+        type: "paragraph",
+        content: [{ type: "text", text }],
+      });
+    }
+    for (const entry of nodeDetailPreviewMediaEntries(preview)) {
+      content.push(nodeDetailRichMediaNode(entry.kind, entry.url, text));
+    }
+  }
+
+  const rich = safeRichDocument({ type: "doc", content });
+  return richDocumentHasMedia(rich) ? rich : null;
+}
+
+function nodeDetailMediaPreviewsFromOutput(output: any) {
+  const previews: GeneratedNodePreview[] = [];
+  collectNodeDetailMediaPreviews(
+    normalizeEnergonOutput?.(output) ?? output,
+    "",
+    previews,
+    new Set(),
+    new Set(),
+  );
+  return previews;
+}
+
+function collectNodeDetailMediaPreviews(
+  value: any,
+  kind: string,
+  previews: GeneratedNodePreview[],
+  seenValues: Set<any>,
+  seenMedia: Set<string>,
+  depth = 0,
+) {
+  if (depth > 8 || value == null) {
+    return;
+  }
+
+  const parsed = parseAgentResultBlock(parseMaybeJSON(value));
+  if (isHiddenEnergonOutput(parsed)) {
+    return;
+  }
+
+  const preview = generatedPreviewFromValue(
+    parsed,
+    kind || previewKindFromOutput(parsed),
+  );
+  appendNodeDetailMediaPreview(previews, preview, seenMedia);
+
+  if (Array.isArray(parsed)) {
+    for (const item of parsed) {
+      collectNodeDetailMediaPreviews(
+        item,
+        kind,
+        previews,
+        seenValues,
+        seenMedia,
+        depth + 1,
+      );
+    }
+    return;
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return;
+  }
+  if (seenValues.has(parsed)) {
+    return;
+  }
+  seenValues.add(parsed);
+
+  const row = parsed as Record<string, any>;
+  const directMediaValues = [
+    {
+      kind: "image" as const,
+      values: [
+        row.image,
+        row.image_url,
+        row.imageUrl,
+        row.images,
+        row.imageUrls,
+      ],
+    },
+    {
+      kind: "video" as const,
+      values: [
+        row.video,
+        row.video_url,
+        row.videoUrl,
+        row.videos,
+        row.videoUrls,
+      ],
+    },
+    {
+      kind: "audio" as const,
+      values: [
+        row.audio,
+        row.audio_url,
+        row.audioUrl,
+        row.audios,
+        row.audioUrls,
+      ],
+    },
+  ];
+  for (const media of directMediaValues) {
+    for (const mediaValue of media.values) {
+      collectNodeDetailMediaPreviews(
+        mediaValue,
+        media.kind,
+        previews,
+        seenValues,
+        seenMedia,
+        depth + 1,
+      );
+    }
+  }
+
+  for (const key of [
+    "output",
+    "result",
+    "content",
+    "body",
+    "data",
+    "value",
+    "rich",
+  ]) {
+    if (row[key] !== undefined && row[key] !== row) {
+      collectNodeDetailMediaPreviews(
+        row[key],
+        kind,
+        previews,
+        seenValues,
+        seenMedia,
+        depth + 1,
+      );
+    }
+  }
+}
+
+function appendNodeDetailMediaPreview(
+  previews: GeneratedNodePreview[],
+  preview: GeneratedNodePreview,
+  seenMedia: Set<string>,
+) {
+  const freshPreview: GeneratedNodePreview = {
+    ...preview,
+    imageUrl: nodeDetailFreshMediaURL("image", preview.imageUrl, seenMedia),
+    videoUrl: nodeDetailFreshMediaURL("video", preview.videoUrl, seenMedia),
+    audioUrl: nodeDetailFreshMediaURL("audio", preview.audioUrl, seenMedia),
+    fileUrl: "",
+  };
+  if (hasPreviewMedia(freshPreview)) {
+    previews.push(freshPreview);
+  }
+}
+
+function nodeDetailFreshMediaURL(
+  kind: string,
+  url: string,
+  seenMedia: Set<string>,
+) {
+  if (!url) {
+    return "";
+  }
+  const key = `${kind}:${url}`;
+  if (seenMedia.has(key)) {
+    return "";
+  }
+  seenMedia.add(key);
+  return url;
+}
+
+function nodeDetailPreviewMediaEntries(preview: GeneratedNodePreview) {
+  const entries: Array<{ kind: "image" | "video" | "audio"; url: string }> = [];
+  if (preview.imageUrl) {
+    entries.push({ kind: "image", url: preview.imageUrl });
+  }
+  if (preview.videoUrl) {
+    entries.push({ kind: "video", url: preview.videoUrl });
+  }
+  if (preview.audioUrl) {
+    entries.push({ kind: "audio", url: preview.audioUrl });
+  }
+  return entries;
+}
+
+function nodeDetailRichMediaNode(
+  kind: "image" | "video" | "audio",
+  url: string,
+  caption: string,
+) {
+  const typeByKind = {
+    image: "editorMediaImage",
+    video: "editorMediaVideo",
+    audio: "editorMediaAudio",
+  };
+  const attrs: Record<string, string> = { src: url };
+  if (caption) {
+    attrs.alt = caption;
+    attrs.title = caption;
+  }
+  return {
+    type: typeByKind[kind],
+    attrs,
+  };
+}
+
+function nodeDetailRichParagraphText(value: string) {
+  const text = String(value || "").trim();
+  if (
+    !text ||
+    isNonContentText(text) ||
+    looksLikeURL(text) ||
+    looksLikeStructuredJSONSnippet(text)
+  ) {
+    return "";
+  }
+  return text;
 }
 
 function nodeDetailMarkdownText(output: any) {
@@ -3992,6 +4364,20 @@ function nodeDetailMarkdownText(output: any) {
     }
   }
   return uniqueNonEmptyStrings(texts).join("\n\n").trim();
+}
+
+function richDocumentHasMedia(value: ReturnType<typeof richDocument>) {
+  if (!value) {
+    return false;
+  }
+  if (
+    value.type === "editorMediaImage" ||
+    value.type === "editorMediaVideo" ||
+    value.type === "editorMediaAudio"
+  ) {
+    return Boolean(value.attrs?.src);
+  }
+  return (value.content || []).some(richDocumentHasMedia);
 }
 
 function isHiddenEnergonOutput(value: any) {
@@ -4044,7 +4430,10 @@ function parseEditableContentForSave(
   contentFormat: NodeDetailEditorContentFormat,
 ) {
   if (contentFormat === "markdown") {
-    return value;
+    return {
+      format: "markdown",
+      text: value,
+    };
   }
   const parsed = parseMaybeJSON(value);
   const rich = safeRichDocument(parsed);
@@ -4643,6 +5032,7 @@ async function waitForCanvasRun(
     input,
     normalizeCanvasRunRef(rawCanvasRun),
   );
+  canvasRun = normalizeCanvasRunTerminalStatus(input, canvasRun);
   applyNodeResults(canvasRun.node_results || []);
   syncBackendCanvasFeedbackRecord(input, canvasRun);
   if (canvasRun.status !== "running" && canvasRun.status !== "pending") {
@@ -4689,24 +5079,42 @@ async function waitForCanvasRun(
       syncBackendCanvasFeedbackRecord(input, canvasRun);
     }
     applyNodeResults(canvasRun.node_results || []);
+    canvasRun = normalizeCanvasRunTerminalStatus(input, canvasRun);
+    if (canvasRunNeedsStatusConvergence(input, canvasRun)) {
+      canvasRun = await convergeCanvasRunStatus(
+        input,
+        canvasRun,
+        requestId,
+        applyNodeResults,
+        hasAppliedNodeResult() ? 4 : 2,
+      );
+    }
     return canvasRun;
   } catch (error) {
+    try {
+      canvasRun = await convergeCanvasRunStatus(
+        input,
+        canvasRun,
+        requestId,
+        applyNodeResults,
+        hasAppliedNodeResult() ? 4 : 2,
+      );
+      if (
+        !canvasRunNeedsStatusConvergence(input, canvasRun) ||
+        (input.singleNode && hasAppliedNodeResult())
+      ) {
+        finishBackendCanvasRunningNodes(input, canvasRun);
+        return canvasRun;
+      }
+    } catch {
+      if (!input.singleNode || !hasAppliedNodeResult()) {
+        throw error instanceof Error && !streamTimedOut
+          ? error
+          : new Error("画布仍在运行，请稍后刷新查看结果");
+      }
+    }
     if (input.singleNode && hasAppliedNodeResult()) {
       finishBackendCanvasRunningNodes(input, canvasRun);
-      return canvasRun;
-    }
-    const status = await fetchSpaceRunStatus({
-      projectId: input.projectId,
-      runId: Number(canvasRun.run_id || 0),
-      requestId,
-    });
-    canvasRun = normalizeSingleNodeCanvasRun(
-      input,
-      normalizeCanvasRunRef(status),
-    );
-    applyNodeResults(canvasRun.node_results || []);
-    syncBackendCanvasFeedbackRecord(input, canvasRun);
-    if (canvasRun.status !== "running" && canvasRun.status !== "pending") {
       return canvasRun;
     }
     throw error instanceof Error && !streamTimedOut
@@ -4717,6 +5125,114 @@ async function waitForCanvasRun(
     controller.abort();
   }
   throw new Error("画布流异常结束");
+}
+
+async function convergeCanvasRunStatus(
+  input: CanvasStartRunInput,
+  currentRun: CanvasRunRef,
+  fallbackRequestId: string,
+  applyNodeResults: (results: CanvasNodeResultRef[]) => void,
+  attempts: number,
+) {
+  let canvasRun = currentRun;
+  const runId = Number(canvasRun.run_id || 0);
+  const requestId = String(canvasRun.request_id || fallbackRequestId || "");
+  if (!runId && !requestId) {
+    return canvasRun;
+  }
+  const maxAttempts = Math.max(1, attempts);
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const status = await fetchSpaceRunStatus({
+      projectId: input.projectId,
+      runId,
+      requestId,
+    });
+    canvasRun = normalizeSingleNodeCanvasRun(
+      input,
+      mergeCanvasRunRef(canvasRun, normalizeCanvasRunRef(status)),
+    );
+    canvasRun = normalizeCanvasRunTerminalStatus(input, canvasRun);
+    applyNodeResults(canvasRun.node_results || []);
+    syncBackendCanvasFeedbackRecord(input, canvasRun);
+    if (!canvasRunNeedsStatusConvergence(input, canvasRun)) {
+      return canvasRun;
+    }
+    if (attempt < maxAttempts - 1) {
+      await waitForCanvasConvergence(650);
+    }
+  }
+  return canvasRun;
+}
+
+function canvasRunNeedsStatusConvergence(
+  input: CanvasStartRunInput,
+  canvasRun: CanvasRunRef,
+) {
+  const status = String(canvasRun.status || "").trim().toLowerCase();
+  if (status !== "running" && status !== "pending") {
+    return false;
+  }
+  return !canvasRunHasCompleteTerminalResults(input, canvasRun);
+}
+
+function canvasRunHasCompleteTerminalResults(
+  input: CanvasStartRunInput,
+  canvasRun: CanvasRunRef,
+) {
+  if (canvasRunRecordHasCompleteTerminalResults(canvasRun as WorkspaceCanvasRunRef)) {
+    return true;
+  }
+  if (!input.singleNode) {
+    return false;
+  }
+  return (canvasRun.node_results || []).some(
+    (result) =>
+      result.node_key === input.startNode.id &&
+      canvasNodeRunFinishedStatus(canvasRunNodeResultStatus(result)),
+  );
+}
+
+function normalizeCanvasRunTerminalStatus(
+  input: CanvasStartRunInput,
+  canvasRun: CanvasRunRef,
+) {
+  if (!canvasRunNeedsTerminalStatusPatch(input, canvasRun)) {
+    return canvasRun;
+  }
+  return {
+    ...canvasRun,
+    status: terminalCanvasRunStatusFromResults(canvasRun.node_results || []),
+  };
+}
+
+function canvasRunNeedsTerminalStatusPatch(
+  input: CanvasStartRunInput,
+  canvasRun: CanvasRunRef,
+) {
+  const status = String(canvasRun.status || "").trim().toLowerCase();
+  if (status !== "running" && status !== "pending") {
+    return false;
+  }
+  return canvasRunHasCompleteTerminalResults(input, canvasRun);
+}
+
+function terminalCanvasRunStatusFromResults(results: CanvasNodeResultRef[]) {
+  for (const result of results) {
+    const status = canvasRunNodeResultStatus(result);
+    if (status === "fail") {
+      return "fail";
+    }
+    if (status === "canceled" || status === "cancelled") {
+      return "canceled";
+    }
+  }
+  return "success";
+}
+
+function waitForCanvasConvergence(delayMs: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, delayMs);
+  });
 }
 
 async function waitForCanvasRunStream(
@@ -4746,9 +5262,6 @@ async function waitForCanvasRunStream(
       );
     },
   });
-  if (!finalRun) {
-    throw new Error("画布流未返回最终结果");
-  }
   return finalRun;
 }
 
@@ -5134,7 +5647,8 @@ function finishBackendCanvasRunningNodes(
       }
       next[nodeId] = {
         ...running,
-        progress: finishedStatus === "success" ? 100 : Math.max(running.progress, 92),
+        progress:
+          finishedStatus === "success" ? 100 : Math.max(running.progress, 92),
         status: finishedStatus,
       };
       changed = true;
@@ -5232,11 +5746,87 @@ function canvasRunRecordMatchesCate(run: WorkspaceCanvasRunRef, cateId: number) 
 }
 
 function isCanvasRunRecordActive(run: WorkspaceCanvasRunRef) {
-  return (
-    run.status === "running" ||
-    run.status === "pending" ||
-    run.status === "waiting"
-  );
+  const status = String(run.status || "").trim().toLowerCase();
+  if (status === "waiting" || canvasRunRecordHasWaitingNode(run)) {
+    return true;
+  }
+  if (status !== "running" && status !== "pending") {
+    return false;
+  }
+  return !canvasRunRecordHasCompleteTerminalResults(run);
+}
+
+function canvasRunRecordHasWaitingNode(run: WorkspaceCanvasRunRef) {
+  return canvasRunNodeResultStatus(run.pending_node) === "waiting";
+}
+
+function canvasRunRecordHasCompleteTerminalResults(
+  run: WorkspaceCanvasRunRef,
+) {
+  const expectedNodeIds = canvasRunRecordExpectedResultNodeIds(run);
+  if (expectedNodeIds.size === 0) {
+    return false;
+  }
+  const finishedNodeIds = new Set<string>();
+  for (const result of run.node_results || []) {
+    const status = canvasRunNodeResultStatus(result);
+    if (status === "waiting" || status === "running" || status === "pending") {
+      return false;
+    }
+    if (canvasNodeRunFinishedStatus(status)) {
+      finishedNodeIds.add(result.node_key);
+    }
+  }
+  for (const nodeId of expectedNodeIds) {
+    if (!finishedNodeIds.has(nodeId)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function canvasRunRecordExpectedResultNodeIds(run: WorkspaceCanvasRunRef) {
+  const planNodeIds = new Set<string>();
+  for (const node of run.execution_plan?.nodes || []) {
+    if (canvasRunPlanNodeCanReturnResult(node)) {
+      planNodeIds.add(node.id);
+    }
+  }
+  if (planNodeIds.size > 0) {
+    return planNodeIds;
+  }
+
+  const nodeRunIds = new Set<string>();
+  for (const nodeRun of run.node_runs || []) {
+    if (nodeRun.node_key) {
+      nodeRunIds.add(nodeRun.node_key);
+    }
+  }
+  if (nodeRunIds.size > 0) {
+    return nodeRunIds;
+  }
+
+  const startNodeId = String(run.start_node_id || "");
+  if (
+    startNodeId &&
+    (run.node_results || []).some((result) => result.node_key === startNodeId)
+  ) {
+    return new Set([startNodeId]);
+  }
+  return new Set<string>();
+}
+
+function canvasRunPlanNodeCanReturnResult(node: {
+  type?: string;
+  function_key?: string;
+}) {
+  if (["asset", "power", "agent", "flow"].includes(String(node.type || ""))) {
+    return true;
+  }
+  if (node.type !== "function") {
+    return false;
+  }
+  return node.function_key === "save" || node.function_key === "display";
 }
 
 function canvasRunRecordStartNode(
@@ -5268,7 +5858,24 @@ function canvasRunRecordResultApplyKey(
 }
 
 function canvasNodeRunFinishedStatus(status?: string) {
-  return status === "success" || status === "fail" || status === "canceled";
+  const normalized = String(status || "").trim().toLowerCase();
+  return (
+    normalized === "success" ||
+    normalized === "fail" ||
+    normalized === "canceled" ||
+    normalized === "cancelled"
+  );
+}
+
+function canvasRunNodeResultStatus(
+  result?: CanvasNodeResultRef | null,
+) {
+  if (!result) {
+    return "";
+  }
+  return String(result.status || (result.result as any)?.status || "")
+    .trim()
+    .toLowerCase();
 }
 
 function createCanvasRunRequestId(startNodeId: string) {
@@ -6158,6 +6765,7 @@ function richDocumentFromPayload(
   if (
     Array.isArray(payload.content) &&
     (String(payload.format || "").toLowerCase() === "rich_json" ||
+      String(payload.content?.format || "").toLowerCase() === "rich_json" ||
       payload.type === undefined)
   ) {
     return safeRichDocument({
@@ -6166,10 +6774,18 @@ function richDocumentFromPayload(
     });
   }
   if (
-    String(payload.format || "").toLowerCase() === "rich_json" &&
+    (String(payload.format || "").toLowerCase() === "rich_json" ||
+      String(payload.content?.format || "").toLowerCase() === "rich_json") &&
     payload.rich != null
   ) {
     return fixedRichDocument(payload.rich);
+  }
+  if (
+    (String(payload.format || "").toLowerCase() === "rich_json" ||
+      String(payload.content?.format || "").toLowerCase() === "rich_json") &&
+    payload.content?.rich != null
+  ) {
+    return fixedRichDocument(payload.content.rich);
   }
   return null;
 }
@@ -6396,6 +7012,19 @@ function generatedPreviewFromValue(
     fillGeneratedPreview(preview, value, kind);
   }
   return preview;
+}
+
+function mergeGeneratedPreview(
+  primary: GeneratedNodePreview,
+  fallback: GeneratedNodePreview,
+): GeneratedNodePreview {
+  return {
+    text: firstText(primary.text, fallback.text),
+    imageUrl: primary.imageUrl || fallback.imageUrl,
+    videoUrl: primary.videoUrl || fallback.videoUrl,
+    audioUrl: primary.audioUrl || fallback.audioUrl,
+    fileUrl: primary.fileUrl || fallback.fileUrl,
+  };
 }
 
 function fillGeneratedPreview(
@@ -6710,6 +7339,12 @@ function setPreviewString(
     preview.text ||= documentTextValue;
     return;
   }
+  const markdownMedia = firstMarkdownMediaPreview(text, kind);
+  if (markdownMedia) {
+    setPreviewMedia(preview, markdownMedia.kind, markdownMedia.url);
+    preview.text ||= markdownMedia.caption;
+    return;
+  }
   if (looksLikeURL(text)) {
     const normalizedKind = normalizePreviewMediaKind(kind);
     if (
@@ -6737,6 +7372,146 @@ function setPreviewString(
     return;
   }
   preview.text ||= text;
+}
+
+function firstMarkdownMediaPreview(text: string, kind: string) {
+  const hintedKind = previewKindFromTextHint(text, kind);
+  const imageMatch = text.match(
+    /!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+["'][^"']*["'])?\s*\)/,
+  );
+  if (imageMatch) {
+    const url = cleanMarkdownURL(imageMatch[2]);
+    if (url) {
+      return {
+        kind: "image" as const,
+        url,
+        caption: markdownMediaCaption(text, imageMatch[0], imageMatch[1]),
+      };
+    }
+  }
+  const looseImageMatch = text.match(
+    /!\[[^\]]*]\(\s*<?((?:https?:\/\/|data:|blob:)[^\s<>)]+)/i,
+  );
+  if (looseImageMatch) {
+    const url = cleanMarkdownURL(looseImageMatch[1]);
+    if (url) {
+      return {
+        kind: "image" as const,
+        url,
+        caption: markdownMediaCaption(text, looseImageMatch[0], ""),
+      };
+    }
+  }
+
+  const linkPattern =
+    /\[([^\]]+)\]\(\s*<?([^)\s>]+)>?(?:\s+["'][^"']*["'])?\s*\)/g;
+  let linkMatch: RegExpExecArray | null;
+  while ((linkMatch = linkPattern.exec(text))) {
+    const url = cleanMarkdownURL(linkMatch[2]);
+    const mediaKind = previewMediaKindFromURL(url, hintedKind);
+    if (mediaKind) {
+      return {
+        kind: mediaKind,
+        url,
+        caption: markdownMediaCaption(text, linkMatch[0], linkMatch[1]),
+      };
+    }
+  }
+
+  const inlineURL = firstInlineURL(text);
+  const mediaKind = previewMediaKindFromURL(inlineURL, hintedKind);
+  if (mediaKind) {
+    return {
+      kind: mediaKind,
+      url: inlineURL,
+      caption: markdownMediaCaption(text, inlineURL, ""),
+    };
+  }
+  return null;
+}
+
+function previewKindFromTextHint(text: string, kind: string) {
+  if (normalizePreviewMediaKind(kind)) {
+    return kind;
+  }
+  return textHasImagePreviewHint(text) ? "image" : kind;
+}
+
+function textHasImagePreviewHint(text: string) {
+  const imageKeywordURL =
+    /(?:图片|图像|image|photo|picture).{0,40}(?:https?:\/\/|data:|blob:)/i;
+  return (
+    /!\[[^\]]*]\(/.test(text) ||
+    imageKeywordURL.test(text)
+  );
+}
+
+function setPreviewMedia(
+  preview: GeneratedNodePreview,
+  kind: "image" | "video" | "audio" | "file",
+  url: string,
+) {
+  if (kind === "image") preview.imageUrl ||= url;
+  if (kind === "video") preview.videoUrl ||= url;
+  if (kind === "audio") preview.audioUrl ||= url;
+  if (kind === "file") preview.fileUrl ||= url;
+}
+
+function previewMediaKindFromURL(url: string, kind: string) {
+  if (!url || !looksLikeURL(url)) {
+    return "";
+  }
+  const normalizedKind = normalizePreviewMediaKind(kind);
+  if (
+    normalizedKind === "image" ||
+    /\.(png|jpe?g|gif|webp|avif|svg)(\?.*)?$/i.test(url)
+  ) {
+    return "image" as const;
+  }
+  if (
+    normalizedKind === "video" ||
+    /\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(url)
+  ) {
+    return "video" as const;
+  }
+  if (
+    normalizedKind === "audio" ||
+    /\.(mp3|wav|ogg|m4a|aac)(\?.*)?$/i.test(url)
+  ) {
+    return "audio" as const;
+  }
+  if (normalizedKind === "file") {
+    return "file" as const;
+  }
+  return "";
+}
+
+function markdownMediaCaption(text: string, matchedText: string, label: string) {
+  const caption = text
+    .replace(matchedText, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (caption && caption !== text.trim() && !looksLikeURL(caption)) {
+    return caption;
+  }
+  return String(label || "").trim();
+}
+
+function cleanMarkdownURL(value: string) {
+  const url = cleanInlineURL(value);
+  return looksLikeURL(url) ? url : "";
+}
+
+function firstInlineURL(text: string) {
+  const match = text.match(/(?:https?:\/\/|data:|blob:)[^\s<>)]+/i);
+  return match ? cleanInlineURL(match[0]) : "";
+}
+
+function cleanInlineURL(value: string) {
+  return String(value || "")
+    .trim()
+    .replace(/^<|>$/g, "")
+    .replace(/[.,，。；;]+$/g, "");
 }
 
 function isWrappedOutput(value: Record<string, any>) {
@@ -7310,7 +8085,6 @@ function looksLikeStructuredJSONSnippet(value: string) {
       (looksLikeJSONText(text) ||
         text.startsWith("{") ||
         text.startsWith("[") ||
-        text.includes("rich_json") ||
         text.includes('"agent_run_id"') ||
         text.includes('"node_run_id"') ||
         text.includes('"approval_id"')),
@@ -8040,17 +8814,27 @@ function NodeResultBubble({
   if (!nodeHasResultContent(node)) {
     return null;
   }
-  const preview = generatedNodePreview(node);
+  const basePreview = generatedNodePreview(node);
+  const outputText = nodeDisplayText(node);
   const text = firstText(
-    displayTextFromOutput(preview.text, ""),
+    displayTextFromOutput(basePreview.text, ""),
+    displayTextFromOutput(outputText, ""),
     displayTextFromOutput(node.description, ""),
     node.title,
     "暂无结果",
   );
+  const rich = nodeRichDocument(node);
+  const preview = hasPreviewMedia(basePreview)
+    ? basePreview
+    : mergeGeneratedPreview(
+        basePreview,
+        generatedPreviewFromValue(text, previewKindFromTextHint(text, "")),
+      );
+  const hasMedia = hasPreviewMedia(preview) || richDocumentHasMedia(rich);
   return (
     <button
       type="button"
-      className={`ws-agent-result-bubble nodrag ${
+      className={`ws-agent-result-bubble nodrag ${rich ? "has-rich" : ""} ${hasMedia ? "has-media" : ""} ${
         node.type === "function" ? "is-function" : ""
       }`}
       onMouseDown={(event) => event.stopPropagation()}
@@ -8060,9 +8844,63 @@ function NodeResultBubble({
         onShowNodeDetail?.(node);
       }}
     >
-      <p className="ws-result-text">{text}</p>
+      <NodeResultBubbleContent preview={preview} fallback={text} rich={rich} />
     </button>
   );
+}
+
+function NodeResultBubbleContent({
+  preview,
+  fallback,
+  rich,
+}: {
+  preview: GeneratedNodePreview;
+  fallback: string;
+  rich?: ReturnType<typeof richDocument>;
+}) {
+  if (rich) {
+    return (
+      <RichDocumentView
+        value={rich}
+        className="ws-result-rich-preview"
+      />
+    );
+  }
+  const caption = mediaPreviewCaption(preview);
+  const fallbackCaption = caption || fallback;
+  if (preview.imageUrl) {
+    return (
+      <div className="ws-result-preview-media">
+        {caption ? <p className="ws-result-preview-caption">{caption}</p> : null}
+        <img src={preview.imageUrl} alt={fallbackCaption || "图片结果"} />
+      </div>
+    );
+  }
+  if (preview.videoUrl) {
+    return (
+      <div className="ws-result-preview-media">
+        {caption ? <p className="ws-result-preview-caption">{caption}</p> : null}
+        <video src={preview.videoUrl} muted playsInline preload="metadata" />
+      </div>
+    );
+  }
+  if (preview.audioUrl) {
+    return (
+      <div className="ws-result-preview-file">
+        <Music size={15} />
+        <span>{fallbackCaption || "音频结果"}</span>
+      </div>
+    );
+  }
+  if (preview.fileUrl) {
+    return (
+      <div className="ws-result-preview-file">
+        <FileText size={15} />
+        <span>{fallbackCaption || "文件结果"}</span>
+      </div>
+    );
+  }
+  return <p className="ws-result-text">{fallback}</p>;
 }
 
 function FunctionResultCard({
@@ -9501,6 +10339,9 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
   const onShowNodeDetail = (data as any).onShowNodeDetail as
     | ((node: SpaceCanvasNode) => void)
     | undefined;
+  const onNodeResult = (data as any).onNodeResult as
+    | NodeResultSetter
+    | undefined;
   const onOpenFeedbackRecord = (data as any).onOpenFeedbackRecord as
     | ((node: SpaceCanvasNode, record: NodeFeedbackRecord) => void)
     | undefined;
@@ -9836,8 +10677,15 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
   if (node.type === "asset") {
     if (node.kind === "image") {
       const preview = nodeDetailPreview(node);
+      const className = [
+        "ws-node-image-wrap",
+        selected ? "is-selected" : "",
+        preview.imageUrl ? "has-media" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
       return (
-        <div className={`ws-node-image-wrap ${selected ? "is-selected" : ""}`}>
+        <div className={className}>
           <div className="ws-node-floating-label">
             <ImageIcon size={13} className="ws-icon-green" />
             <span>{node.title || "图片资产"}</span>
@@ -9879,8 +10727,15 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
 
     if (node.kind === "video") {
       const preview = nodeDetailPreview(node);
+      const className = [
+        "ws-node-video-wrap",
+        selected ? "is-selected" : "",
+        preview.videoUrl || preview.imageUrl ? "has-media" : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
       return (
-        <div className={`ws-node-video-wrap ${selected ? "is-selected" : ""}`}>
+        <div className={className}>
           <div className="ws-node-floating-label">
             <Video size={13} className="ws-icon-green" />
             <span>{node.title || "视频资产"}</span>
@@ -9938,8 +10793,18 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
     const rich = nodeRichDocument(node);
     const displayOutput = nodeEnergonOutput(node);
     const displayText = nodeDisplayText(node);
+    const hasTextMedia = Boolean(
+      preview.imageUrl || preview.videoUrl || preview.audioUrl,
+    );
+    const className = [
+      "ws-node-text-wrap",
+      selected ? "is-selected" : "",
+      hasTextMedia ? "has-media" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
     return (
-      <div className={`ws-node-text-wrap ${selected ? "is-selected" : ""}`}>
+      <div className={className}>
         <div className="ws-node-floating-label">
           <Type size={13} className="ws-icon-green" />
           <span>{node.title}</span>
@@ -9950,6 +10815,22 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
               value={rich}
               className="ws-node-text-rich-preview"
             />
+          ) : preview.imageUrl ? (
+            <div className="ws-node-text-media">
+              <img
+                src={preview.imageUrl}
+                alt={mediaPreviewCaption(preview) || node.title}
+              />
+            </div>
+          ) : preview.videoUrl ? (
+            <div className="ws-node-text-media">
+              <video
+                src={preview.videoUrl}
+                muted
+                playsInline
+                preload="metadata"
+              />
+            </div>
           ) : preview.audioUrl ? (
             <div className="ws-node-text-media is-audio">
               <audio src={preview.audioUrl} controls preload="metadata" />

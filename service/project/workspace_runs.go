@@ -88,6 +88,11 @@ func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammode
 			}
 		}
 		s.recordCanvasNodeRunResult(ctx, req, run, fullNode, parentNodeRunID, childStatus, payload, nil)
+		if childStatus == teammodel.RunStatusWaiting {
+			s.writeWorkspaceNodeEvent(ctx, run, fullNode, parentNodeRunID, "waiting", childStatus, payload)
+		} else {
+			s.writeWorkspaceNodeEvent(ctx, run, fullNode, parentNodeRunID, "node_finished", childStatus, payload)
+		}
 		nodeResults = workspaceNodeResults(ctx, run.ProjectID, run.ID)
 		if childStatus == teammodel.RunStatusWaiting {
 			s.finishWorkspaceRunFromNodeResults(ctx, run, input, plan, nodeResults)

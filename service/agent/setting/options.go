@@ -101,19 +101,32 @@ func (OptionService) ProviderLoadSettingLoadModes(_ *server.Context, _ []any) an
 
 func (OptionService) ProviderLoadAgentCates(c *server.Context, _ []any) any {
 	ensureBaseAgentCates(c.Context())
-	return loadCateOptions(agentmodel.NewAgentCateModel().SelectMap(c.Context(), map[string]any{}, agentCateSelectOptions()))
+	return loadAgentCateOptions(c, enabledCateFilter())
+}
+
+func (OptionService) ProviderLoadAllAgentCates(c *server.Context, _ []any) any {
+	ensureBaseAgentCates(c.Context())
+	return loadAgentCateOptions(c, map[string]any{})
 }
 
 func (OptionService) ProviderLoadKnowledgeCates(c *server.Context, _ []any) any {
-	return loadCateOptions(agentmodel.NewKnowledgeCateModel().SelectMap(c.Context(), map[string]any{}, agentCateSelectOptions()))
+	return loadCateOptions(agentmodel.NewKnowledgeCateModel().SelectMap(c.Context(), enabledCateFilter(), cateSelectOptions()))
 }
 
 func (OptionService) ProviderLoadSettingCates(c *server.Context, _ []any) any {
-	return loadCateOptions(agentmodel.NewSettingCateModel().SelectMap(c.Context(), map[string]any{}, cateSelectOptions()))
+	return loadCateOptions(agentmodel.NewSettingCateModel().SelectMap(c.Context(), enabledCateFilter(), cateSelectOptions()))
 }
 
 func (OptionService) ProviderLoadSkillCates(c *server.Context, _ []any) any {
-	return loadCateOptions(agentmodel.NewSkillCateModel().SelectMap(c.Context(), map[string]any{}, cateSelectOptions()))
+	return loadCateOptions(agentmodel.NewSkillCateModel().SelectMap(c.Context(), enabledCateFilter(), cateSelectOptions()))
+}
+
+func enabledCateFilter() map[string]any {
+	return map[string]any{"status": 1}
+}
+
+func loadAgentCateOptions(c *server.Context, filters map[string]any) []map[string]any {
+	return loadCateOptions(agentmodel.NewAgentCateModel().SelectMap(c.Context(), filters, agentCateSelectOptions()))
 }
 
 func cateSelectOptions() map[string]any {
@@ -125,7 +138,7 @@ func cateSelectOptions() map[string]any {
 
 func agentCateSelectOptions() map[string]any {
 	return map[string]any{
-		"field": "main.id, main.name, main.sort",
+		"field": "main.id, main.name, main.status, main.sort",
 		"order": "main.sort asc, main.id asc",
 	}
 }

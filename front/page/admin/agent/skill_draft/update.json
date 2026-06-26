@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "自创技能",
     "parent": "bot/agent/skill_pack/list",
     "type": 2,
     "sort": 1,

@@ -378,6 +378,18 @@ func (Repo) UpdateRunByRequestID(ctx context.Context, requestID string, record m
 	agentmodel.NewRunModel().Update(ctx, map[string]any{"request_id": requestID}, record)
 }
 
+func (Repo) FindRunByRequestID(ctx context.Context, requestID string) (agentmodel.Run, error) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return agentmodel.Run{}, fmt.Errorf("request_id 不能为空")
+	}
+	row := agentmodel.NewRunModel().Find(ctx, map[string]any{"request_id": requestID})
+	if row == nil {
+		return agentmodel.Run{}, fmt.Errorf("智能体运行不存在")
+	}
+	return *row, nil
+}
+
 func (Repo) ListRuns(ctx context.Context, ids []uint64) []agentmodel.Run {
 	values := uint64FilterValues(ids)
 	if len(values) == 0 {

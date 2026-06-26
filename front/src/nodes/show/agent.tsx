@@ -9,14 +9,19 @@ import {
 } from "react";
 import type { NodeItemProps } from "@/page/nodes";
 import {
+  Brain,
   ExternalLink,
   History,
   Loader2,
   MessageSquarePlus,
+  Pencil,
+  RefreshCw,
   RotateCcw,
+  Save,
   Send,
   Square,
   Trash2,
+  X,
 } from "lucide-react";
 import { useStore } from "zustand";
 import { getCompatModule, request, useNavigate } from "@dever/front-plugin";
@@ -39,6 +44,7 @@ import {
   streamValueText as valueText,
   type RuntimeStreamFrame,
 } from "@/lib/stream";
+import { watchRuntimeStream } from "@/lib/runtime-stream-runner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,6 +54,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   AgentInteractionPanel,
@@ -140,6 +147,25 @@ type AgentMemoryReview = {
   error?: string;
 };
 
+type AgentMemoryRecord = {
+  id: number;
+  kind: string;
+  title: string;
+  content: string;
+  tags: string[];
+  importance: number;
+  scope: string;
+  source: string;
+  status: number;
+  created_at: string;
+};
+
+type AgentMemoryPatch = {
+  title?: string;
+  content?: string;
+  status?: number;
+};
+
 type SkillDraftPatchProgress = {
   status: "saving" | "saved" | "failed";
   draft_id?: number;
@@ -147,6 +173,15 @@ type SkillDraftPatchProgress = {
 };
 
 type AgentFrame = RuntimeStreamFrame<AgentOutput>;
+
+type AgentRunStatusRecovery = {
+  run?: Record<string, unknown>;
+};
+
+type AgentRunStatusStreamEntry = {
+  id?: string;
+  payload?: Record<string, unknown>;
+};
 
 type AssistantSessionRecord = {
   id: number;
@@ -189,6 +224,8 @@ const EMPTY_OUTPUT: AgentStreamOutput = {
   text: "",
   finalOutput: null,
 };
+const AGENT_RUN_RECOVERY_TIMEOUT_MS = 3600 * 1000;
+const AGENT_RUN_RECOVERY_INTERVAL_MS = 1000;
 
 export function ShowAgent({ item, store }: NodeItemProps) {
   const navigate = useNavigate();
@@ -200,6 +237,10 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   const [sessionID, setSessionID] = useState(0);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [memoryDialogOpen, setMemoryDialogOpen] = useState(false);
+  const [memories, setMemories] = useState<AgentMemoryRecord[]>([]);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryError, setMemoryError] = useState("");
   const [running, setRunning] = useState(false);
   const [cancelable, setCancelable] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -215,6 +256,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   const finalSideEffectKeyRef = useRef("");
   const draftPatchSideEffectKeyRef = useRef("");
   const runTokenRef = useRef(0);
+  const recoveringRequestIDsRef = useRef<Set<string>>(new Set());
   const openWasTrackedRef = useRef(false);
   const scrollMessageListToBottom = useCallback(() => {
     const element = messageListRef.current;
@@ -239,6 +281,9 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   const requestApi = String(item.meta?.requestApi || "/bot/admin/agent/run");
   const streamApi = String(item.meta?.streamApi || "/bot/admin/agent/stream");
   const stopApi = String(item.meta?.stopApi || "/bot/admin/agent/stop");
+  const runStatusApi = String(
+    item.meta?.runStatusApi || "/bot/admin/agent/run_status",
+  );
   const paramApi = String(
     item.meta?.paramApi || "/bot/admin/energon/power_params",
   );
@@ -246,6 +291,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   const historyEnabled = sessionEnabled && item.meta?.historyEnabled !== false;
   const newSessionEnabled = item.meta?.newSessionEnabled !== false;
   const memoryEnabled = Boolean(item.meta?.memoryEnabled);
+  const memoryPanelEnabled = sessionEnabled && memoryEnabled;
   const sessionApi = String(
     item.meta?.sessionApi || "/bot/admin/assistant/session",
   );
@@ -269,6 +315,15 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   );
   const messageApi = String(
     item.meta?.messageApi || "/bot/admin/assistant/message",
+  );
+  const memoriesApi = String(
+    item.meta?.memoriesApi || "/bot/admin/assistant/memories",
+  );
+  const updateMemoryApi = String(
+    item.meta?.updateMemoryApi || "/bot/admin/assistant/update_memory",
+  );
+  const forgetMemoryApi = String(
+    item.meta?.forgetMemoryApi || "/bot/admin/assistant/forget_memory",
   );
   const skillDraftPatchApi = String(item.meta?.skillDraftPatchApi || "");
   const skillDraftPatchListPath = String(
@@ -328,6 +383,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       resultDrawerMessage ? buildAgentResultDetail(resultDrawerMessage) : null,
     [resultDrawerMessage],
   );
+  const resultDrawerRunning = Boolean(resultDrawerMessage?.running);
   const resultDrawerSuggestions = useMemo(
     () =>
       resultDrawerMessage
@@ -375,6 +431,10 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     () => buildLatestVisibleResultKey(messages),
     [messages],
   );
+  const enabledMemoryCount = useMemo(
+    () => memories.filter(isAgentMemoryEnabled).length,
+    [memories],
+  );
 
   useLayoutEffect(() => {
     if (
@@ -403,6 +463,8 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     setRequestID("");
     sessionIDRef.current = 0;
     setSessionID(0);
+    setMemories([]);
+    setMemoryError("");
     setRunning(false);
     setCancelable(false);
     setStopping(false);
@@ -412,6 +474,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     setInteractionDialogMessageID("");
     setResultDrawerMessageID("");
     setHistoryDialogOpen(false);
+    setMemoryDialogOpen(false);
   }, [initialInput]);
 
   const applyAssistantSessionPayload = useCallback(
@@ -423,6 +486,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       sessionIDRef.current = nextSessionID;
       setSessionID(nextSessionID);
       setMessages(normalizeAssistantSessionMessages(data.messages));
+      setMemories(normalizeAgentMemories(data.memories));
       scrollMessageListToBottom();
     },
     [scrollMessageListToBottom],
@@ -442,6 +506,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
             context_key: sessionContext,
             title: agentName ? `${agentName} 会话` : "新会话",
             limit: 80,
+            memory_enabled: memoryEnabled,
           },
         );
         applyAssistantSessionPayload(payload);
@@ -456,6 +521,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       agentKey,
       agentName,
       applyAssistantSessionPayload,
+      memoryEnabled,
       newSessionApi,
       sessionApi,
       sessionContext,
@@ -472,6 +538,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     try {
       const payload = await assistantApiRequest(clearSessionApi, {
         session_id: sessionID,
+        memory_enabled: memoryEnabled,
       });
       applyAssistantSessionPayload(payload);
     } catch (currentError: unknown) {
@@ -504,6 +571,92 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       };
     },
     [agentKey, historyEnabled, sessionContext, sessionsApi],
+  );
+
+  const loadAssistantMemories = useCallback(async () => {
+    if (!memoryPanelEnabled || !agentKey) {
+      setMemories([]);
+      return;
+    }
+    setMemoryLoading(true);
+    try {
+      const activeSessionID = sessionID || sessionIDRef.current;
+      const payload = await assistantApiRequest(memoriesApi, {
+        agent_key: agentKey,
+        context_key: sessionContext,
+        session_id: activeSessionID || undefined,
+        scope: "current",
+        status: "all",
+        page: 1,
+        page_size: 50,
+      });
+      const data = isPlainObject(payload) ? payload : {};
+      setMemories(normalizeAgentMemories(data.memories));
+      setMemoryError("");
+      setError("");
+    } catch (currentError: unknown) {
+      setMemoryError(runtimeErrorMessage(currentError, "加载长期记忆失败。"));
+    } finally {
+      setMemoryLoading(false);
+    }
+  }, [
+    agentKey,
+    memoriesApi,
+    memoryPanelEnabled,
+    sessionContext,
+    sessionID,
+  ]);
+
+  const openMemoryDialog = useCallback(() => {
+    setMemoryDialogOpen(true);
+  }, []);
+
+  const updateAssistantMemory = useCallback(
+    async (memoryID: number, patch: AgentMemoryPatch) => {
+      if (!memoryPanelEnabled || memoryID <= 0) {
+        return;
+      }
+      const activeSessionID = sessionID || sessionIDRef.current;
+      const payload = await assistantApiRequest(updateMemoryApi, {
+        id: memoryID,
+        ...patch,
+        agent_key: agentKey,
+        context_key: sessionContext,
+        session_id: activeSessionID || undefined,
+      });
+      const data = isPlainObject(payload) ? payload : {};
+      const saved = normalizeAgentMemory(data.memory);
+      if (saved) {
+        setMemories((current) => replaceAgentMemory(current, saved));
+      } else {
+        await loadAssistantMemories();
+      }
+      setMemoryError("");
+    },
+    [
+      agentKey,
+      loadAssistantMemories,
+      memoryPanelEnabled,
+      sessionContext,
+      sessionID,
+      updateMemoryApi,
+    ],
+  );
+
+  const forgetAssistantMemory = useCallback(
+    async (memoryID: number) => {
+      if (!memoryPanelEnabled || memoryID <= 0) {
+        return;
+      }
+      await assistantApiRequest(forgetMemoryApi, { id: memoryID });
+      setMemories((current) =>
+        current.map((memory) =>
+          memory.id === memoryID ? { ...memory, status: 2 } : memory,
+        ),
+      );
+      setMemoryError("");
+    },
+    [forgetMemoryApi, memoryPanelEnabled],
   );
 
   const archiveHistorySession = useCallback(
@@ -547,6 +700,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         session_id: nextSessionID,
         agent_key: agentKey,
         context_key: sessionContext,
+        memory_enabled: memoryEnabled,
         limit: 80,
       });
       applyAssistantSessionPayload(payload);
@@ -580,6 +734,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       context_key: sessionContext,
       title: agentName ? `${agentName} 会话` : "新会话",
       limit: 80,
+      memory_enabled: memoryEnabled,
     });
     applyAssistantSessionPayload(payload);
     const session =
@@ -623,6 +778,71 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     });
   };
 
+  const recoverSavedAssistantErrorMessage = async (
+    message: AgentMessage,
+    activeSessionID: number,
+  ) => {
+    const recoverRequestID = shouldRecoverSavedAgentErrorMessage(message);
+    if (!recoverRequestID) {
+      return;
+    }
+    const statusPayload = await fetchAgentRunStatus(
+      runStatusApi,
+      recoverRequestID,
+    ).catch(() => null);
+    const frame = agentRunStatusResultFrame(statusPayload, recoverRequestID);
+    if (!frame || Number(frame.status) === 2) {
+      return;
+    }
+
+    const finalOutput = normalizeRuntimeFrameOutput(frame?.output, frame);
+    const finalInteraction = normalizeOutputInteraction(finalOutput);
+    const finalText =
+      valueText(finalOutput.text) ||
+      valueText(frame?.msg) ||
+      "智能体已返回结果。";
+    const finalMessage: AgentMessage = {
+      ...message,
+      text: finalText,
+      output: {
+        text: finalText,
+        finalOutput: normalizeAgentDisplayOutput(finalOutput, finalText),
+      },
+      interaction: finalInteraction,
+      interactionAnswered: finalInteraction ? false : undefined,
+      running: false,
+      error: undefined,
+      requestID: recoverRequestID,
+    };
+    setMessages((current) =>
+      current.map((currentMessage) =>
+        currentMessage.id === message.id ? finalMessage : currentMessage,
+      ),
+    );
+    await savePersistentMessage(activeSessionID, finalMessage, {
+      requestID: recoverRequestID,
+      output: finalOutput,
+      status: 1,
+    });
+  };
+
+  useEffect(() => {
+    if (!sessionEnabled || sessionID <= 0) {
+      return;
+    }
+    messages.forEach((message) => {
+      const recoverRequestID = shouldRecoverSavedAgentErrorMessage(message);
+      if (
+        !recoverRequestID ||
+        recoveringRequestIDsRef.current.has(recoverRequestID)
+      ) {
+        return;
+      }
+      recoveringRequestIDsRef.current.add(recoverRequestID);
+      void recoverSavedAssistantErrorMessage(message, sessionID);
+    });
+  }, [messages, runStatusApi, sessionEnabled, sessionID]);
+
   useEffect(() => {
     if (!openPath) {
       return;
@@ -647,15 +867,26 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     if (running) {
       return;
     }
+    if (pendingInteractionMessageID) {
+      return;
+    }
     void loadAssistantSession(false);
   }, [
     agentKey,
     loadAssistantSession,
     modalOpen,
     openPath,
+    pendingInteractionMessageID,
     running,
     sessionEnabled,
   ]);
+
+  useEffect(() => {
+    if (!memoryDialogOpen) {
+      return;
+    }
+    void loadAssistantMemories();
+  }, [loadAssistantMemories, memoryDialogOpen]);
 
   useEffect(() => {
     if (
@@ -762,6 +993,11 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     ) {
       return;
     }
+    const answeredMessages = markInteractionMessageAnswered(
+      messages,
+      sourceMessage.id,
+      result.data,
+    );
     setInteractionDialogOpen(false);
     setInteractionDialogMessageID("");
 
@@ -772,6 +1008,8 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         interaction_type: sourceMessage.interaction.type || "",
         interaction: sourceMessage.interaction,
         data: result.data,
+        user_feedback: result.data,
+        feedback: result.data,
         text: result.text,
       },
       {
@@ -780,7 +1018,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         kind: "interaction_result",
         data: result.data,
       },
-      messages,
+      answeredMessages,
       sourceMessage.id,
       result.data,
     );
@@ -826,6 +1064,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       inputPayload,
       resolveMetaPathMap(item.meta?.inputContext, store),
     );
+    requestInput.memory_enabled = memoryEnabled;
     if (activeSessionID > 0) {
       requestInput.assistant_session_id = activeSessionID;
     }
@@ -863,6 +1102,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
 
     let assistantSaved = false;
     let activeRequestID = "";
+    let activeLastStreamID = "0-0";
     let assistantRunningMessageSaved = false;
     let assistantRunningMessagePromise: Promise<unknown> | null = null;
     const saveAssistantRunningMessage = (nextRequestID: string) => {
@@ -921,6 +1161,11 @@ export function ShowAgent({ item, store }: NodeItemProps) {
           activeRequestID = valueText(nextRequestID);
           setRequestID(activeRequestID);
           saveAssistantRunningMessage(activeRequestID);
+          void syncAssistantRunStatusFrames({
+            messageID: assistantID,
+            requestID: activeRequestID,
+            token,
+          });
         },
         onFrame: (frame) => {
           if (runTokenRef.current !== token) {
@@ -928,6 +1173,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
           }
           const streamID = valueText(frame?.stream_id);
           if (streamID) {
+            activeLastStreamID = streamID;
             setLastStreamID(streamID);
           }
           applyFrameToMessage(assistantID, frame);
@@ -942,6 +1188,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
               frame?.output,
               frame,
             );
+            const finalInteraction = normalizeOutputInteraction(finalOutput);
             const finalRequestID =
               valueText(frame?.request_id) || activeRequestID || requestID;
             const finalText =
@@ -959,6 +1206,8 @@ export function ShowAgent({ item, store }: NodeItemProps) {
                     finalText,
                   ),
                 },
+                interaction: finalInteraction,
+                interactionAnswered: finalInteraction ? false : undefined,
                 running: false,
                 requestID: finalRequestID,
               },
@@ -970,10 +1219,42 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       });
     } catch (currentError: unknown) {
       if (runTokenRef.current === token) {
+        const recovered = await recoverAssistantFinalAfterStreamError({
+          assistantID,
+          activeSessionID,
+          assistantMessage,
+          requestID: activeRequestID || requestID,
+          lastID: activeLastStreamID,
+          streamApi,
+          runStatusApi,
+          blockMs,
+          token,
+          isAlreadySaved: () => assistantSaved,
+          markSaved: () => {
+            assistantSaved = true;
+          },
+          applyFrame: (frame) => {
+            const streamID = valueText(frame?.stream_id);
+            if (streamID) {
+              activeLastStreamID = streamID;
+              setLastStreamID(streamID);
+            }
+            applyFrameToMessage(assistantID, frame);
+            handleFinalFrameSideEffects(frame, assistantID);
+          },
+          saveFinal: saveAssistantFinalMessage,
+        });
+        if (recovered) {
+          return;
+        }
         const message = runtimeErrorMessage(currentError, "智能体测试失败。");
         setError(message);
         markAssistantError(assistantID, message);
-        if (activeSessionID > 0 && !assistantSaved) {
+        if (
+          activeSessionID > 0 &&
+          !assistantSaved &&
+          !isRecoverableAgentStreamErrorMessage(message)
+        ) {
           assistantSaved = true;
           saveAssistantFinalMessage(
             {
@@ -996,6 +1277,206 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         markAssistantDone(assistantID);
       }
     }
+  };
+
+  const recoverAssistantFinalAfterStreamError = async ({
+    assistantID,
+    activeSessionID,
+    assistantMessage,
+    requestID,
+    lastID,
+    streamApi,
+    runStatusApi,
+    blockMs,
+    token,
+    isAlreadySaved,
+    markSaved,
+    applyFrame,
+    saveFinal,
+  }: {
+    assistantID: string;
+    activeSessionID: number;
+    assistantMessage: AgentMessage;
+    requestID: string;
+    lastID: string;
+    streamApi: string;
+    runStatusApi: string;
+    blockMs: number;
+    token: number;
+    isAlreadySaved: () => boolean;
+    markSaved: () => void;
+    applyFrame: (frame: AgentFrame) => void;
+    saveFinal: (
+      finalMessage: AgentMessage,
+      finalOutput: unknown,
+      finalStatus: number,
+    ) => void;
+  }) => {
+    if (!requestID || isAlreadySaved()) {
+      return false;
+    }
+    const saveResultFrame = (frame: AgentFrame) => {
+      applyFrame(frame);
+      if (frame?.type !== "result") {
+        return false;
+      }
+      if (activeSessionID > 0 && !isAlreadySaved()) {
+        markSaved();
+        const finalOutput = normalizeRuntimeFrameOutput(frame?.output, frame);
+        const finalInteraction = normalizeOutputInteraction(finalOutput);
+        const finalText =
+          valueText(finalOutput.text) ||
+          valueText(frame?.msg) ||
+          "智能体已返回结果。";
+        saveFinal(
+          {
+            ...assistantMessage,
+            text: finalText,
+            output: {
+              text: finalText,
+              finalOutput: normalizeAgentDisplayOutput(finalOutput, finalText),
+            },
+            interaction: finalInteraction,
+            interactionAnswered: finalInteraction ? false : undefined,
+            running: false,
+            requestID: valueText(frame?.request_id) || requestID,
+          },
+          finalOutput,
+          Number(frame.status) === 2 ? 2 : 1,
+        );
+      }
+      return Number(frame.status) !== 2;
+    };
+
+    let recovered = false;
+    try {
+      await watchRuntimeStream<AgentOutput>({
+        streamApi,
+        requestID,
+        lastID: lastID || "0-0",
+        blockMs,
+        transport: "poll",
+        stopOnResult: true,
+        recoverOnError: true,
+        onFrame: (frame) => {
+          if (runTokenRef.current !== token) {
+            return false;
+          }
+          if (frame?.type !== "result" || Number(frame.status) === 2) {
+            applyFrame(frame);
+            return;
+          }
+          recovered = saveResultFrame(frame);
+        },
+      });
+    } catch {
+      recovered = false;
+    }
+    if (recovered) {
+      return true;
+    }
+
+    return await recoverAssistantFinalFromRunStatus({
+      runStatusApi,
+      requestID,
+      token,
+      applyResultFrame: saveResultFrame,
+    });
+  };
+
+  const syncAssistantRunStatusFrames = async ({
+    messageID,
+    requestID,
+    token,
+  }: {
+    messageID: string;
+    requestID: string;
+    token: number;
+  }) => {
+    if (!requestID) {
+      return;
+    }
+    const deadline = Date.now() + AGENT_RUN_RECOVERY_TIMEOUT_MS;
+    const recoveredStreamIDs = new Set<string>();
+    while (runTokenRef.current === token && Date.now() < deadline) {
+      const statusPayload = await fetchAgentRunStatus(
+        runStatusApi,
+        requestID,
+      ).catch(() => null);
+      if (!statusPayload) {
+        await waitAgentRunRecoveryDelay(AGENT_RUN_RECOVERY_INTERVAL_MS);
+        continue;
+      }
+
+      for (const frame of agentRunStatusStreamFrames(
+        statusPayload,
+        requestID,
+        recoveredStreamIDs,
+      )) {
+        const streamID = valueText(frame.stream_id);
+        if (streamID) {
+          recoveredStreamIDs.add(streamID);
+        }
+        applyFrameToMessage(messageID, frame, { updateCancelable: false });
+      }
+
+      const run = isPlainObject(statusPayload.run) ? statusPayload.run : {};
+      if (isFinishedAgentRunStatus(valueText(run.status).toLowerCase())) {
+        return;
+      }
+      await waitAgentRunRecoveryDelay(AGENT_RUN_RECOVERY_INTERVAL_MS);
+    }
+  };
+
+  const recoverAssistantFinalFromRunStatus = async ({
+    runStatusApi,
+    requestID,
+    token,
+    applyResultFrame,
+  }: {
+    runStatusApi: string;
+    requestID: string;
+    token: number;
+    applyResultFrame: (frame: AgentFrame) => boolean;
+  }) => {
+    const deadline = Date.now() + AGENT_RUN_RECOVERY_TIMEOUT_MS;
+    let failedStatusChecks = 0;
+    const recoveredStreamIDs = new Set<string>();
+    while (runTokenRef.current === token && Date.now() < deadline) {
+      const statusPayload = await fetchAgentRunStatus(
+        runStatusApi,
+        requestID,
+      ).catch(() => {
+        failedStatusChecks += 1;
+        return null;
+      });
+      if (failedStatusChecks >= 3) {
+        return false;
+      }
+      if (statusPayload) {
+        failedStatusChecks = 0;
+      }
+      for (const frame of agentRunStatusStreamFrames(
+        statusPayload,
+        requestID,
+        recoveredStreamIDs,
+      )) {
+        const streamID = valueText(frame.stream_id);
+        if (streamID) {
+          recoveredStreamIDs.add(streamID);
+        }
+        if (applyResultFrame(frame)) {
+          return true;
+        }
+      }
+      const frame = agentRunStatusResultFrame(statusPayload, requestID);
+      if (frame) {
+        applyResultFrame(frame);
+        return true;
+      }
+      await waitAgentRunRecoveryDelay(AGENT_RUN_RECOVERY_INTERVAL_MS);
+    }
+    return false;
   };
 
   const stop = async () => {
@@ -1219,9 +1700,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       };
 
       const event = valueText(frameOutput.event).toLowerCase();
-      const frameInteraction = normalizeFrameInteraction(
-        frameOutput.interaction,
-      );
+      const frameInteraction = normalizeOutputInteraction(frameOutput);
       if (frame?.type !== "result" && isAgentResultRuntimeEvent(event)) {
         return applyResultRuntimeEvent(message, frameOutput, frame);
       }
@@ -1333,6 +1812,9 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     if (!review) {
       return;
     }
+    if (!memoryEnabled) {
+      return;
+    }
     updateAssistant(messageID, (current) => ({
       ...current,
       output: {
@@ -1343,6 +1825,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         },
       },
     }));
+    void loadAssistantMemories();
   };
 
   const updateRunningAssistant = (
@@ -1430,6 +1913,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
                   message={message}
                   now={nowMs}
                   running={running}
+                  memoryEnabled={memoryEnabled}
                   onOpenInteraction={openInteractionDialog}
                   onOpenResult={() => setResultDrawerMessageID(message.id)}
                   onOpenDraftBox={() =>
@@ -1465,7 +1949,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       <AgentResultDrawer
         open={Boolean(resultDrawerMessage)}
         detail={resultDrawerDetail}
-        running={running}
+        running={resultDrawerRunning}
         suggestions={
           resultDrawerSuggestions.length > 0 ? (
             <AgentSuggestionBar
@@ -1498,6 +1982,20 @@ export function ShowAgent({ item, store }: NodeItemProps) {
           onArchiveSession={archiveHistorySession}
           onRestoreSession={restoreHistorySession}
           onRenameSession={renameHistorySession}
+        />
+      ) : null}
+
+      {memoryPanelEnabled ? (
+        <AgentMemoryDialog
+          open={memoryDialogOpen}
+          memories={memories}
+          loading={memoryLoading}
+          error={memoryError}
+          disabled={running || sessionLoading}
+          onOpenChange={setMemoryDialogOpen}
+          onRefresh={loadAssistantMemories}
+          onUpdate={updateAssistantMemory}
+          onForget={forgetAssistantMemory}
         />
       ) : null}
 
@@ -1545,6 +2043,18 @@ export function ShowAgent({ item, store }: NodeItemProps) {
                     : "关闭弹窗后会清空本次测试上下文。")}
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {memoryPanelEnabled ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={running || sessionLoading}
+                onClick={openMemoryDialog}
+              >
+                <Brain className="size-3.5" />
+                {enabledMemoryCount > 0 ? `记忆 ${enabledMemoryCount}` : "记忆"}
+              </Button>
+            ) : null}
             {historyEnabled ? (
               <Button
                 type="button"
@@ -1682,6 +2192,197 @@ async function assistantApiRequest(
     throw new Error(valueText(result.msg || result.message) || "请求失败");
   }
   return isPlainObject(result.data) ? result.data : {};
+}
+
+async function fetchAgentRunStatus(
+  api: string,
+  requestID: string,
+): Promise<AgentRunStatusRecovery> {
+  const result = await request(api, "get", { request_id: requestID });
+  if (!isPlainObject(result)) {
+    return {};
+  }
+  const status = Number(result.status || 0);
+  const code = Number(result.code || 0);
+  if (status === 2 || code === 401) {
+    throw new Error(valueText(result.msg || result.message) || "请求失败");
+  }
+  return isPlainObject(result.data) ? result.data : {};
+}
+
+function agentRunStatusResultFrame(
+  payload: AgentRunStatusRecovery | null,
+  requestID: string,
+): AgentFrame | null {
+  const run = isPlainObject(payload?.run) ? payload.run : {};
+  const status = valueText(run.status).toLowerCase();
+  if (!isFinishedAgentRunStatus(status)) {
+    return null;
+  }
+
+  const output = isPlainObject(run.output) ? run.output : {};
+  const errorMessage =
+    valueText(run.error) ||
+    valueText(output.error) ||
+    valueText(output.text) ||
+    "智能体运行失败。";
+  const frameStatus = status === "success" ? 1 : 2;
+  const finalOutput =
+    frameStatus === 2 && !valueText(output.text)
+      ? {
+          ...output,
+          event: "status",
+          text: errorMessage,
+          error: errorMessage,
+        }
+      : output;
+
+  return {
+    request_id: valueText(run.request_id) || requestID,
+    type: "result",
+    status: frameStatus,
+    msg: frameStatus === 2 ? errorMessage : "",
+    output: finalOutput as AgentOutput,
+  };
+}
+
+function agentRunStatusStreamFrames(
+  payload: AgentRunStatusRecovery | null,
+  requestID: string,
+  seenStreamIDs?: Set<string>,
+): AgentFrame[] {
+  const run = isPlainObject(payload?.run) ? payload.run : {};
+  const entries = Array.isArray(run.stream) ? run.stream : [];
+  const frames: AgentFrame[] = [];
+  for (const entry of entries) {
+    const frame = agentRunStatusStreamFrame(entry, requestID);
+    if (!frame) {
+      continue;
+    }
+    const streamID = valueText(frame.stream_id);
+    if (streamID && seenStreamIDs?.has(streamID)) {
+      continue;
+    }
+    frames.push(frame);
+  }
+  const snapshotFrame = agentRunStatusSnapshotFrame(run, requestID);
+  if (snapshotFrame) {
+    const streamID = valueText(snapshotFrame.stream_id);
+    if (!streamID || !seenStreamIDs?.has(streamID)) {
+      frames.push(snapshotFrame);
+    }
+  }
+  return frames;
+}
+
+function agentRunStatusStreamFrame(
+  entry: unknown,
+  requestID: string,
+): AgentFrame | null {
+  const streamEntry: AgentRunStatusStreamEntry = isPlainObject(entry)
+    ? (entry as AgentRunStatusStreamEntry)
+    : {};
+  const payload = isPlainObject(streamEntry.payload)
+    ? streamEntry.payload
+    : isPlainObject(entry)
+      ? (entry as Record<string, unknown>)
+      : {};
+  const output = isPlainObject(payload.output)
+    ? (payload.output as AgentOutput)
+    : {};
+  const event = valueText(output.event).toLowerCase();
+  const frameType = valueText(payload.type || "stream").toLowerCase();
+  if (frameType !== "result" && !isAgentResultRuntimeEvent(event)) {
+    return null;
+  }
+  return {
+    request_id: valueText(payload.request_id) || requestID,
+    stream_id: valueText(payload.stream_id) || valueText(streamEntry.id),
+    type: frameType || "stream",
+    status: Number(payload.status || 0) || 1,
+    msg: valueText(payload.msg),
+    output,
+  };
+}
+
+function agentRunStatusSnapshotFrame(
+  run: Record<string, unknown>,
+  requestID: string,
+): AgentFrame | null {
+  if (isFinishedAgentRunStatus(valueText(run.status).toLowerCase())) {
+    return null;
+  }
+  const output = isPlainObject(run.output) ? (run.output as AgentOutput) : {};
+  const detail = resultDetailFromFinalOutput(output);
+  if (!detail || (!detail.result && detail.tasks.length === 0)) {
+    return null;
+  }
+  const resultID = detail.id || valueText(output.result_id) || requestID;
+  const snapshotVersion = agentResultSnapshotVersion(detail);
+  return {
+    request_id: valueText(run.request_id) || requestID,
+    stream_id: `run-output:${resultID}:${snapshotVersion}`,
+    type: "stream",
+    status: 1,
+    msg: "",
+    output: {
+      event: "result_detail",
+      result_id: resultID,
+      result_mode: detail.mode || "artifact",
+      title: detail.title,
+      result: detail.result,
+      tasks: output.tasks || detail.result?.tasks || detail.tasks,
+      progress: detail.progress,
+      progress_text: detail.progressText,
+    } as AgentOutput,
+  };
+}
+
+function agentResultSnapshotVersion(detail: AgentResultDetail) {
+  const taskVersion = detail.tasks
+    .map((task) =>
+      [
+        task.id,
+        task.placeholderID,
+        task.status,
+        task.progress ?? "",
+        task.text,
+        task.error,
+        task.output ? "output" : "",
+      ].join(","),
+    )
+    .join("|");
+  return encodeURIComponent(
+    [detail.progress ?? "", detail.progressText, taskVersion].join("|"),
+  ).slice(0, 500);
+}
+
+function isFinishedAgentRunStatus(status: string) {
+  return ["success", "fail", "canceled"].includes(status);
+}
+
+function isRecoverableAgentStreamErrorMessage(message: string) {
+  return /network|failed to fetch|读取运行流失败\((408|425|429|500|502|503|504)\)|timeout|超时/i.test(
+    message,
+  );
+}
+
+function shouldRecoverSavedAgentErrorMessage(message: AgentMessage) {
+  if (
+    message.role !== "assistant" ||
+    !message.requestID ||
+    !message.error ||
+    !isRecoverableAgentStreamErrorMessage(message.error)
+  ) {
+    return "";
+  }
+  return message.requestID;
+}
+
+function waitAgentRunRecoveryDelay(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function resolveCompatComponent(path: string, exportName: string) {
@@ -2292,9 +2993,11 @@ function parseSkillDraftPatchJSON(text: string) {
 
 function normalizeAssistantSessionMessages(value: unknown): AgentMessage[] {
   const rows = Array.isArray(value) ? value : [];
-  return rows
-    .map((row, index) => normalizeAssistantSessionMessage(row, index))
-    .filter((message): message is AgentMessage => Boolean(message));
+  return reconcileInteractionResultMessages(
+    rows
+      .map((row, index) => normalizeAssistantSessionMessage(row, index))
+      .filter((message): message is AgentMessage => Boolean(message)),
+  );
 }
 
 function normalizeAssistantSessionMessage(value: unknown, index: number) {
@@ -2335,7 +3038,9 @@ function normalizeAssistantSessionMessage(value: unknown, index: number) {
       message.error = text;
     }
   }
-  const interaction = normalizeFrameInteraction(content.interaction);
+  const interaction =
+    normalizeFrameInteraction(content.interaction) ||
+    normalizeOutputInteraction(output);
   if (interaction) {
     message.interaction = interaction;
     message.interactionAnswered = Boolean(content.interaction_answered);
@@ -2347,6 +3052,90 @@ function normalizeAssistantSessionMessage(value: unknown, index: number) {
     }
   }
   return message;
+}
+
+function markInteractionMessageAnswered(
+  messages: AgentMessage[],
+  messageID: string,
+  data?: Record<string, unknown>,
+) {
+  return messages.map((message) =>
+    message.id === messageID && message.interaction
+      ? {
+          ...message,
+          interactionAnswered: true,
+          interactionData: data,
+        }
+      : message,
+  );
+}
+
+function reconcileInteractionResultMessages(messages: AgentMessage[]) {
+  let nextMessages = messages;
+
+  messages.forEach((message, index) => {
+    if (message.role !== "user" || message.kind !== "interaction_result") {
+      return;
+    }
+    const pendingIndex = findPendingInteractionMessageIndex(
+      nextMessages,
+      index,
+      message,
+    );
+    if (pendingIndex < 0) {
+      return;
+    }
+    const current = nextMessages[pendingIndex];
+    if (!current) {
+      return;
+    }
+    const interactionData = isPlainObject(message.data)
+      ? message.data
+      : undefined;
+    nextMessages = nextMessages.map((item, itemIndex) =>
+      itemIndex === pendingIndex
+        ? {
+            ...current,
+            interactionAnswered: true,
+            interactionData,
+          }
+        : item,
+    );
+  });
+
+  return nextMessages;
+}
+
+function findPendingInteractionMessageIndex(
+  messages: AgentMessage[],
+  beforeIndex: number,
+  resultMessage: AgentMessage,
+) {
+  const interactionID = valueText(
+    resultMessage.data?.interaction_id || resultMessage.data?.interactionId,
+  );
+  for (let index = beforeIndex - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message) {
+      continue;
+    }
+    if (
+      message.role !== "assistant" ||
+      !message.interaction ||
+      message.interactionAnswered
+    ) {
+      continue;
+    }
+    if (
+      interactionID &&
+      valueText(message.interaction.id) &&
+      valueText(message.interaction.id) !== interactionID
+    ) {
+      continue;
+    }
+    return index;
+  }
+  return -1;
 }
 
 function normalizeAssistantSessions(value: unknown) {
@@ -2456,6 +3245,7 @@ function AgentAssistantMessage({
   message,
   now,
   running,
+  memoryEnabled,
   onOpenInteraction,
   onOpenResult,
   onOpenDraftBox,
@@ -2465,6 +3255,7 @@ function AgentAssistantMessage({
   message: AgentMessage;
   now: number;
   running: boolean;
+  memoryEnabled: boolean;
   onOpenInteraction: (messageID: string) => void;
   onOpenResult: () => void;
   onOpenDraftBox: () => void;
@@ -2476,6 +3267,12 @@ function AgentAssistantMessage({
   const contentOutput = buildContentViewOutput(message);
   const hasOutput = isResultCard || hasContentViewOutput(contentOutput);
   const suggestions = buildMessageSuggestions(message, hasOutput);
+  const interactionTitle = message.interaction
+    ? valueText(message.interaction.title) || "补充交互信息"
+    : "";
+  const interactionDescription = message.interaction
+    ? valueText(message.interaction.description)
+    : "";
   const draftProgress = agentMessageSkillDraftPatchProgress(message);
   const draftPatchPayload = message.output?.finalOutput
     ? resolveSkillDraftPatchPayload(message.output.finalOutput)
@@ -2502,7 +3299,9 @@ function AgentAssistantMessage({
         onApply={() => onApplySkillDraftPatch(message.output?.finalOutput)}
         onOpenDraftBox={onOpenDraftBox}
       />
-      <StreamTimingBadge timing={message.actionTiming} now={now} />
+      {!isResultCard ? (
+        <StreamTimingBadge timing={message.actionTiming} now={now} />
+      ) : null}
       {message.error ? (
         <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-destructive">
           {message.error}
@@ -2510,10 +3309,13 @@ function AgentAssistantMessage({
       ) : null}
       {message.interaction ? (
         <div className="flex items-center justify-between gap-2 rounded-md border bg-background/80 px-2 py-1.5 text-xs text-muted-foreground">
-          <span>
-            {message.interactionAnswered
-              ? "交互信息已提交。"
-              : "需要补充交互信息。"}
+          <span className="min-w-0">
+            <span className="block truncate text-foreground">
+              {message.interactionAnswered ? "交互信息已提交。" : interactionTitle}
+            </span>
+            {interactionDescription ? (
+              <span className="block truncate">{interactionDescription}</span>
+            ) : null}
           </span>
           <Button
             type="button"
@@ -2527,7 +3329,9 @@ function AgentAssistantMessage({
           </Button>
         </div>
       ) : null}
-      <AgentMemoryReviewCard review={agentMessageMemoryReview(message)} />
+      {memoryEnabled ? (
+        <AgentMemoryReviewCard review={agentMessageMemoryReview(message)} />
+      ) : null}
       <AgentSuggestionBar
         suggestions={suggestions}
         disabled={running}
@@ -2556,6 +3360,332 @@ function AgentInlineResultActions({ onOpen }: { onOpen: () => void }) {
         <ExternalLink className="size-3.5" />
       </Button>
     </div>
+  );
+}
+
+function AgentMemoryDialog({
+  open,
+  memories,
+  loading,
+  error,
+  disabled,
+  onOpenChange,
+  onRefresh,
+  onUpdate,
+  onForget,
+}: {
+  open: boolean;
+  memories: AgentMemoryRecord[];
+  loading: boolean;
+  error: string;
+  disabled?: boolean;
+  onOpenChange: (open: boolean) => void;
+  onRefresh: () => Promise<void>;
+  onUpdate: (memoryID: number, patch: AgentMemoryPatch) => Promise<void>;
+  onForget: (memoryID: number) => Promise<void>;
+}) {
+  const [editingID, setEditingID] = useState(0);
+  const [draft, setDraft] = useState({ title: "", content: "" });
+  const [busyID, setBusyID] = useState(0);
+  const [actionError, setActionError] = useState("");
+
+  useEffect(() => {
+    if (!open) {
+      setEditingID(0);
+      setDraft({ title: "", content: "" });
+      setBusyID(0);
+      setActionError("");
+    }
+  }, [open]);
+
+  const startEdit = (memory: AgentMemoryRecord) => {
+    setEditingID(memory.id);
+    setDraft({ title: memory.title, content: memory.content });
+    setActionError("");
+  };
+
+  const saveEdit = async () => {
+    if (editingID <= 0) {
+      return;
+    }
+    const title = draft.title.trim();
+    const content = draft.content.trim();
+    if (!title || !content) {
+      setActionError("标题和内容不能为空。");
+      return;
+    }
+    setBusyID(editingID);
+    try {
+      await onUpdate(editingID, { title, content });
+      setEditingID(0);
+      setDraft({ title: "", content: "" });
+      setActionError("");
+    } catch (currentError: unknown) {
+      setActionError(runtimeErrorMessage(currentError, "保存长期记忆失败。"));
+    } finally {
+      setBusyID(0);
+    }
+  };
+
+  const updateStatus = async (memoryID: number, status: number) => {
+    setBusyID(memoryID);
+    try {
+      await onUpdate(memoryID, { status });
+      setActionError("");
+    } catch (currentError: unknown) {
+      setActionError(runtimeErrorMessage(currentError, "更新长期记忆失败。"));
+    } finally {
+      setBusyID(0);
+    }
+  };
+
+  const forget = async (memoryID: number) => {
+    setBusyID(memoryID);
+    try {
+      await onForget(memoryID);
+      if (editingID === memoryID) {
+        setEditingID(0);
+      }
+      setActionError("");
+    } catch (currentError: unknown) {
+      setActionError(runtimeErrorMessage(currentError, "停用长期记忆失败。"));
+    } finally {
+      setBusyID(0);
+    }
+  };
+
+  const cancelEdit = () => {
+    setEditingID(0);
+    setDraft({ title: "", content: "" });
+    setActionError("");
+  };
+
+  const enabledCount = memories.filter(isAgentMemoryEnabled).length;
+  const disabledCount = memories.length - enabledCount;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        data-assistant-layer="true"
+        layerClassName={ASSISTANT_DIALOG_LAYER_CLASS}
+        layerZIndex={ASSISTANT_DIALOG_LAYER_Z_INDEX}
+        className="max-h-[86vh] max-w-3xl"
+      >
+        <DialogHeader>
+          <DialogTitle>长期记忆</DialogTitle>
+          <DialogDescription>
+            当前智能体和上下文会带入已启用记忆；停用后不会再参与后续运行。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+          <div className="min-w-0 text-muted-foreground">
+            已启用 {enabledCount} 条
+            {disabledCount > 0 ? `，已停用 ${disabledCount} 条` : ""}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={disabled || loading}
+            onClick={() => void onRefresh()}
+          >
+            {loading ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="size-3.5" />
+            )}
+            刷新
+          </Button>
+        </div>
+
+        {error || actionError ? (
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {actionError || error}
+          </div>
+        ) : null}
+
+        <div className="max-h-[56vh] space-y-2 overflow-y-auto pr-1">
+          {loading && memories.length === 0 ? (
+            <div className="flex min-h-32 items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
+              <Loader2 className="mr-2 size-4 animate-spin" />
+              正在加载长期记忆
+            </div>
+          ) : memories.length === 0 ? (
+            <div className="flex min-h-32 items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
+              当前上下文还没有长期记忆。
+            </div>
+          ) : (
+            memories.map((memory) => {
+              const editing = editingID === memory.id;
+              const busy = busyID === memory.id;
+              const enabled = isAgentMemoryEnabled(memory);
+              return (
+                <div
+                  key={memory.id}
+                  className={cn(
+                    "rounded-md border bg-background p-3 text-sm",
+                    !enabled && "bg-muted/20 text-muted-foreground",
+                  )}
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
+                          {agentMemoryKindLabel(memory.kind)}
+                        </span>
+                        <span
+                          className={cn(
+                            "rounded-full px-2 py-0.5 text-[11px]",
+                            enabled
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "bg-muted text-muted-foreground",
+                          )}
+                        >
+                          {enabled ? "启用" : "停用"}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          {agentMemorySourceLabel(memory.source)} / 重要度{" "}
+                          {memory.importance}
+                        </span>
+                      </div>
+
+                      {editing ? (
+                        <div className="space-y-2">
+                          <Input
+                            value={draft.title}
+                            disabled={busy}
+                            placeholder="记忆标题"
+                            onChange={(event) =>
+                              setDraft((current) => ({
+                                ...current,
+                                title: event.target.value,
+                              }))
+                            }
+                          />
+                          <Textarea
+                            value={draft.content}
+                            disabled={busy}
+                            placeholder="记忆内容"
+                            className="min-h-24 resize-y"
+                            onChange={(event) =>
+                              setDraft((current) => ({
+                                ...current,
+                                content: event.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          <div className="break-words font-medium text-foreground">
+                            {memory.title || "未命名记忆"}
+                          </div>
+                          <div className="whitespace-pre-wrap break-words leading-6">
+                            {memory.content || "无内容"}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                        {memory.scope ? (
+                          <span>作用域：{agentMemoryScopeLabel(memory.scope)}</span>
+                        ) : null}
+                        {memory.created_at ? (
+                          <span>创建：{memory.created_at}</span>
+                        ) : null}
+                        {memory.tags.length > 0 ? (
+                          <span>标签：{memory.tags.join("、")}</span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="flex shrink-0 flex-wrap items-center gap-1 sm:justify-end">
+                      {editing ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 px-2"
+                            disabled={disabled || busy}
+                            onClick={() => void saveEdit()}
+                          >
+                            {busy ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <Save className="size-3.5" />
+                            )}
+                            保存
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 px-2"
+                            disabled={busy}
+                            onClick={cancelEdit}
+                          >
+                            <X className="size-3.5" />
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 px-2"
+                            disabled={disabled || busy}
+                            onClick={() => startEdit(memory)}
+                          >
+                            <Pencil className="size-3.5" />
+                            编辑
+                          </Button>
+                          {enabled ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 px-2"
+                              disabled={disabled || busy}
+                              onClick={() => void forget(memory.id)}
+                            >
+                              {busy ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="size-3.5" />
+                              )}
+                              停用
+                            </Button>
+                          ) : (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 px-2"
+                              disabled={disabled || busy}
+                              onClick={() => void updateStatus(memory.id, 1)}
+                            >
+                              {busy ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <RefreshCw className="size-3.5" />
+                              )}
+                              启用
+                            </Button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -3053,9 +4183,15 @@ function updateResultDetailProgress(
   progress: number | null,
 ): AgentResultDetail {
   const base = current || emptyAgentResultDetail(resultID);
+  const nextProgress =
+    base.progress == null
+      ? progress
+      : progress == null
+        ? base.progress
+        : Math.max(base.progress, progress);
   return {
     ...base,
-    progress,
+    progress: nextProgress,
     progressText: text || base.progressText,
   };
 }
@@ -3079,9 +4215,49 @@ function mergeAgentResultTasks(
   current.forEach((task) => byID.set(task.id, task));
   incoming.forEach((task) => {
     const previous = byID.get(task.id);
-    byID.set(task.id, previous ? { ...previous, ...task } : task);
+    byID.set(task.id, previous ? mergeAgentResultTask(previous, task) : task);
   });
   return sortAgentResultTasks([...byID.values()]);
+}
+
+function mergeAgentResultTask(
+  previous: AgentResultTask,
+  incoming: AgentResultTask,
+): AgentResultTask {
+  const previousProgress = previous.progress;
+  const incomingProgress = incoming.progress;
+  const progress =
+    previousProgress == null
+      ? incomingProgress
+      : incomingProgress == null
+        ? previousProgress
+        : Math.max(previousProgress, incomingProgress);
+  const previousRank = agentResultTaskStatusRank(previous.status);
+  const incomingRank = agentResultTaskStatusRank(incoming.status);
+  const keepPreviousState = previousRank > incomingRank;
+  return {
+    ...previous,
+    ...incoming,
+    status: keepPreviousState ? previous.status : incoming.status,
+    text: keepPreviousState ? previous.text : incoming.text,
+    error: keepPreviousState ? previous.error : incoming.error,
+    output: keepPreviousState ? previous.output : incoming.output,
+    progress,
+  };
+}
+
+function agentResultTaskStatusRank(status: string) {
+  switch (status) {
+    case "succeeded":
+    case "failed":
+      return 3;
+    case "running":
+      return 2;
+    case "pending":
+      return 1;
+    default:
+      return 0;
+  }
 }
 
 function sortAgentResultTasks(tasks: AgentResultTask[]) {
@@ -3254,6 +4430,108 @@ function agentMessageSkillDraftPatchProgress(
   };
 }
 
+function normalizeAgentMemories(value: unknown): AgentMemoryRecord[] {
+  const values = Array.isArray(value) ? value : [];
+  return values
+    .map(normalizeAgentMemory)
+    .filter((memory): memory is AgentMemoryRecord => memory != null);
+}
+
+function normalizeAgentMemory(value: unknown): AgentMemoryRecord | null {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+  const id = Number(value.id || value.memory_id || value.memoryId || 0);
+  if (!Number.isFinite(id) || id <= 0) {
+    return null;
+  }
+  return {
+    id,
+    kind: valueText(value.kind || value.type),
+    title: valueText(value.title || value.name),
+    content: valueText(value.content || value.text),
+    tags: normalizeAgentMemoryTags(value.tags),
+    importance: normalizeAgentMemoryImportance(value.importance),
+    scope: valueText(value.scope),
+    source: valueText(value.source),
+    status: normalizeAgentMemoryStatus(value.status),
+    created_at: valueText(value.created_at || value.createdAt),
+  };
+}
+
+function normalizeAgentMemoryTags(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map(valueText).map((item) => item.trim()).filter(Boolean);
+  }
+  return valueText(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeAgentMemoryImportance(value: unknown) {
+  const importance = Number(value || 0);
+  if (!Number.isFinite(importance) || importance <= 0) {
+    return 60;
+  }
+  return Math.round(Math.max(1, Math.min(100, importance)));
+}
+
+function normalizeAgentMemoryStatus(value: unknown) {
+  const status = Number(value || 0);
+  return status === 2 ? 2 : 1;
+}
+
+function isAgentMemoryEnabled(memory: AgentMemoryRecord) {
+  return memory.status !== 2;
+}
+
+function replaceAgentMemory(
+  memories: AgentMemoryRecord[],
+  nextMemory: AgentMemoryRecord,
+) {
+  let replaced = false;
+  const next = memories.map((memory) => {
+    if (memory.id !== nextMemory.id) {
+      return memory;
+    }
+    replaced = true;
+    return nextMemory;
+  });
+  return replaced ? next : [nextMemory, ...next];
+}
+
+function agentMemoryKindLabel(kind: string) {
+  const labels: Record<string, string> = {
+    working: "工作记忆",
+    episodic: "事件记忆",
+    semantic: "语义记忆",
+    procedural: "流程记忆",
+    persona: "人格记忆",
+    content: "内容记忆",
+  };
+  return labels[kind] || "长期记忆";
+}
+
+function agentMemoryScopeLabel(scope: string) {
+  const labels: Record<string, string> = {
+    global: "全局",
+    agent: "智能体",
+    context: "当前上下文",
+    session: "当前会话",
+  };
+  return labels[scope] || scope;
+}
+
+function agentMemorySourceLabel(source: string) {
+  const labels: Record<string, string> = {
+    manual: "手动",
+    auto: "自动",
+    llm: "模型抽取",
+  };
+  return labels[source] || "自动";
+}
+
 function normalizeAgentMemoryReview(value: unknown): AgentMemoryReview | null {
   if (!isPlainObject(value)) {
     return null;
@@ -3262,13 +4540,14 @@ function normalizeAgentMemoryReview(value: unknown): AgentMemoryReview | null {
   if (!status) {
     return null;
   }
+  const memory = isPlainObject(value.memory) ? value.memory : {};
   return {
     status,
     type: valueText(value.type),
     text: valueText(value.text),
     source_message_id: Number(value.source_message_id || 0) || undefined,
-    title: valueText(value.title),
-    content: valueText(value.content),
+    title: valueText(value.title || memory.title),
+    content: valueText(value.content || memory.content),
     reason: valueText(value.reason),
     existing: isPlainObject(value.existing) ? value.existing : undefined,
     error: valueText(value.error),
@@ -3780,25 +5059,25 @@ function normalizeAgentContentRecord(
       text: value.trim(),
     };
   }
-  const nodes = normalizeAgentRichNodes(value);
-  if (nodes.length === 0) {
+  const text = agentContentMarkdown(value);
+  if (!text) {
     return null;
   }
-  const content: Record<string, unknown> = {
-    format: "rich_json",
-    rich: {
-      type: "doc",
-      content: nodes,
-    },
+  return {
+    format: "markdown",
+    text,
   };
-  const text = richNodesText(nodes);
-  if (text) {
-    content.text = text;
-  }
-  return content;
 }
 
-function normalizeAgentRichNodes(value: unknown): Record<string, unknown>[] {
+function agentContentMarkdown(value: unknown): string {
+  const nodes = normalizeAgentContentNodes(value);
+  if (nodes.length === 0) {
+    return "";
+  }
+  return contentNodesText(nodes);
+}
+
+function normalizeAgentContentNodes(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -3825,15 +5104,15 @@ function paragraphNode(text: string): Record<string, unknown> {
   };
 }
 
-function richNodesText(nodes: Record<string, unknown>[]) {
+function contentNodesText(nodes: Record<string, unknown>[]) {
   const values: string[] = [];
-  nodes.forEach((node) => collectRichNodeText(node, values));
+  nodes.forEach((node) => collectContentNodeText(node, values));
   return values.join("\n\n").trim();
 }
 
-function collectRichNodeText(value: unknown, values: string[]) {
+function collectContentNodeText(value: unknown, values: string[]) {
   if (Array.isArray(value)) {
-    value.forEach((item) => collectRichNodeText(item, values));
+    value.forEach((item) => collectContentNodeText(item, values));
     return;
   }
   if (!isPlainObject(value)) {
@@ -3846,7 +5125,7 @@ function collectRichNodeText(value: unknown, values: string[]) {
     }
     return;
   }
-  collectRichNodeText(value.content, values);
+  collectContentNodeText(value.content, values);
 }
 
 function isGoMapTextDump(value: unknown) {
@@ -4022,4 +5301,18 @@ function normalizeFrameInteraction(
     return undefined;
   }
   return value as AgentInteraction;
+}
+
+function normalizeOutputInteraction(
+  output: unknown,
+): AgentInteraction | undefined {
+  if (!isPlainObject(output)) {
+    return undefined;
+  }
+  return (
+    normalizeFrameInteraction(output.interaction) ||
+    (isPlainObject(output.content)
+      ? normalizeFrameInteraction(output.content.interaction)
+      : undefined)
+  );
 }

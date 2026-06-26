@@ -65,7 +65,6 @@ export function AgentResultCard({
   running?: boolean
   onOpen: () => void
 }) {
-  const runningTasks = detail.tasks.filter((task) => task.status === 'running')
   const failedTasks = detail.tasks.filter((task) => task.status === 'failed')
   const doneTasks = detail.tasks.filter((task) => task.status === 'succeeded')
   const taskText =
@@ -83,9 +82,7 @@ export function AgentResultCard({
         <div className='min-w-0'>
           <div className='truncate text-sm font-medium'>内容已生成</div>
           <div className='mt-0.5 truncate text-xs text-muted-foreground'>
-            {running && runningTasks.length > 0
-              ? `正在生成：${runningTasks[0].title}`
-              : taskText}
+            {taskText}
           </div>
         </div>
         <div className='flex shrink-0 items-center gap-2 text-xs text-primary'>

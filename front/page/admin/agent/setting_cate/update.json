@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "规则分类",
     "parent": "bot/agent/setting_pack/list",
     "type": 2,
     "sort": 9
@@ -40,9 +41,7 @@
   },
   "data": {
     "form": {
-      "name": "",
-      "status": 1,
-      "sort": 100
+      "name": ""
     }
   },
   "state": {},

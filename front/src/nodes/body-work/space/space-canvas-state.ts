@@ -38,6 +38,7 @@ type PersistedCanvasNode = {
   function_option?: Pick<CanvasFunctionOption, "key" | "label" | "description">;
   composer_draft?: Record<string, unknown>;
   result_ref?: Record<string, unknown>;
+  result_output?: unknown;
   local?: boolean;
 };
 
@@ -124,6 +125,9 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
   const resultRef = persistedResultRef((node as any).resultRef);
   if (resultRef) {
     result.result_ref = resultRef;
+  }
+  if (node.resultOutput != null && isJSONValue(node.resultOutput)) {
+    result.result_output = node.resultOutput;
   }
   if (node.local != null) {
     result.local = node.local;

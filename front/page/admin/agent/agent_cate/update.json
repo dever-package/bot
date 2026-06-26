@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "智能体分类",
     "parent": "bot/agent/agent/list",
     "type": 2,
     "sort": 9
@@ -32,18 +33,11 @@
             "message": "分类名称不能为空。"
           }
         ]
-      },
-      {
-        "type": "form-number",
-        "value": "form.sort",
-        "mode": "form"
       }
     ]
   },
   "data": {
-    "form": {
-      "sort": 100
-    }
+    "form": {}
   },
   "state": {},
   "action": {

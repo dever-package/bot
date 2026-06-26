@@ -17,6 +17,8 @@ const (
 	ResultInteraction = "interaction"
 	ResultCanceled    = "canceled"
 	ResultError       = "error"
+
+	knowledgeObservationContentLimit = 3200
 )
 
 type ExecuteRequest struct {
@@ -107,7 +109,7 @@ func AppendHistoryObservation(history []any, result Result) []any {
 		"type":   "tool_observation",
 		"action": strings.TrimSpace(result.Action.Type),
 		"text":   observationText(result),
-		"output": result.Output,
+		"output": observationOutput(result),
 	}
 	if strings.TrimSpace(result.Action.Power) != "" {
 		observation["power"] = result.Action.Power
@@ -122,6 +124,102 @@ func AppendHistoryObservation(history []any, result Result) []any {
 		observation["source_target_id"] = result.Action.SourceTargetID
 	}
 	return append(append([]any{}, history...), observation)
+}
+
+func observationOutput(result Result) map[string]any {
+	if !isKnowledgeObservation(result.Action.Tool) {
+		return result.Output
+	}
+	return compactKnowledgeObservationOutput(result.Output)
+}
+
+func isKnowledgeObservation(tool string) bool {
+	switch strings.TrimSpace(tool) {
+	case "open_knowledge_init",
+		"list_knowledge_files",
+		"search_knowledge_files",
+		"read_knowledge_file",
+		"list_knowledge_tree",
+		"search_knowledge_nodes",
+		"open_knowledge_node",
+		"expand_knowledge_node",
+		"find_related_knowledge",
+		"debug_knowledge_retrieval":
+		return true
+	default:
+		return false
+	}
+}
+
+func compactKnowledgeObservationOutput(output map[string]any) map[string]any {
+	next := cloneMap(output)
+	result := cloneMap(normalizeMap(next["result"]))
+	content := firstText(result["content"], next["content"])
+	if content != "" {
+		result["content_excerpt"] = compactObservationText(content, knowledgeObservationContentLimit)
+		delete(result, "content")
+		delete(next, "content")
+		if summary := firstText(result["summary"], next["text"]); summary != "" {
+			result["text"] = summary
+		} else {
+			delete(result, "text")
+		}
+	} else if text := firstText(result["text"], next["text"]); text != "" {
+		result["text"] = compactObservationText(text, knowledgeObservationContentLimit)
+	}
+	compactKnowledgeObservationFiles(result)
+	if _, exists := next["files"]; exists {
+		if files, ok := result["files"]; ok {
+			next["files"] = files
+		} else {
+			compactKnowledgeObservationFiles(next)
+		}
+	}
+	if summary := firstText(result["summary"], next["text"]); summary != "" {
+		next["text"] = summary
+	}
+	next["result"] = result
+	return next
+}
+
+func compactKnowledgeObservationFiles(result map[string]any) {
+	switch files := result["files"].(type) {
+	case []map[string]any:
+		compacted := make([]map[string]any, 0, len(files))
+		for _, file := range files {
+			compacted = append(compacted, compactKnowledgeObservationFile(file))
+		}
+		result["files"] = compacted
+	case []any:
+		compacted := make([]any, 0, len(files))
+		for _, file := range files {
+			mapped, ok := file.(map[string]any)
+			if !ok {
+				compacted = append(compacted, file)
+				continue
+			}
+			compacted = append(compacted, compactKnowledgeObservationFile(mapped))
+		}
+		result["files"] = compacted
+	}
+}
+
+func compactKnowledgeObservationFile(file map[string]any) map[string]any {
+	next := cloneMap(file)
+	if content := firstText(next["content"]); content != "" {
+		next["content_excerpt"] = compactObservationText(content, knowledgeObservationContentLimit)
+		delete(next, "content")
+	}
+	return next
+}
+
+func compactObservationText(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit <= 0 || len([]rune(value)) <= limit {
+		return value
+	}
+	runes := []rune(value)
+	return string(runes[:limit]) + "\n\n[内容已截断，后续推理应优先使用当前摘录；如确需更多原文，再按 path/id 读取。]"
 }
 
 func SummaryText(output map[string]any) string {

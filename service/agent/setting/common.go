@@ -19,7 +19,7 @@ const (
 	defaultAgentStatus        = int16(1)
 	defaultAgentSort          = 100
 	defaultAgentTemperature   = 0.7
-	defaultAgentTimeout       = 300
+	defaultAgentTimeout       = 3600
 	defaultAgentMaxAutoSteps  = 0
 )
 

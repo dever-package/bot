@@ -31,6 +31,14 @@ func (Agent) GetStream(c *server.Context) error {
 	return botapi.HandleStreamRead(c, agentRunner.ReadStream)
 }
 
+func (Agent) GetRunStatus(c *server.Context) error {
+	data, err := agentRunner.RunStatus(
+		c.Context(),
+		botapi.QueryText(c, "request_id", "requestId"),
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
 func (Agent) PostStop(c *server.Context) error {
 	body := map[string]any{}
 	if err := c.BindJSON(&body); err != nil {

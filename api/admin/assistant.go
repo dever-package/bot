@@ -26,6 +26,12 @@ func (Assistant) PostSession(c *server.Context) error {
 		Title:      botapi.TextFromBody(body, "title"),
 		NewSession: botapi.BoolFromBody(body, "new_session", "newSession"),
 		Limit:      int(frontstream.InputInt64(body["limit"], 0)),
+		MemoryEnabled: assistantBoolFromBody(
+			body,
+			true,
+			"memory_enabled",
+			"memoryEnabled",
+		),
 	})
 	return botapi.WriteJSON(c, data, err)
 }
@@ -57,6 +63,12 @@ func (Assistant) PostNewSession(c *server.Context) error {
 		AgentKey:   botapi.TextFromBody(body, "agent_key", "agentKey", "agent"),
 		Title:      botapi.TextFromBody(body, "title"),
 		Limit:      int(frontstream.InputInt64(body["limit"], 0)),
+		MemoryEnabled: assistantBoolFromBody(
+			body,
+			true,
+			"memory_enabled",
+			"memoryEnabled",
+		),
 	})
 	return botapi.WriteJSON(c, data, err)
 }
@@ -66,7 +78,11 @@ func (Assistant) PostClearSession(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	data, err := assistantRunner.ClearSession(c.Context(), botapi.Uint64FromBody(body, "session_id", "sessionId", "id"))
+	data, err := assistantRunner.ClearSession(
+		c.Context(),
+		botapi.Uint64FromBody(body, "session_id", "sessionId", "id"),
+		assistantBoolFromBody(body, true, "memory_enabled", "memoryEnabled"),
+	)
 	return botapi.WriteJSON(c, data, err)
 }
 
@@ -239,4 +255,22 @@ func firstBodyValue(body map[string]any, keys ...string) any {
 		}
 	}
 	return nil
+}
+
+func assistantBoolFromBody(body map[string]any, fallback bool, keys ...string) bool {
+	value := firstBodyValue(body, keys...)
+	if value == nil {
+		return fallback
+	}
+	if current, ok := value.(bool); ok {
+		return current
+	}
+	switch strings.ToLower(strings.TrimSpace(frontstream.InputText(value))) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
 }

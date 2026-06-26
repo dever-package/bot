@@ -45,7 +45,7 @@ type runExecution struct {
 func (s Service) execute(exec runExecution) {
 	timeout := time.Duration(exec.Agent.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
-		timeout = 300 * time.Second
+		timeout = time.Hour
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -143,7 +143,10 @@ func (s Service) execute(exec runExecution) {
 	agentSettings := s.repo.ListActiveAgentSettings(ctx, exec.Agent.ID)
 	knowledgeService := agentknowledge.NewService()
 	knowledgeBases := knowledgeService.AgentKnowledgeBases(ctx, exec.Agent.ID)
-	runtimeMemories := assistantservice.NewService().RuntimeMemories(ctx, exec.Parsed.AssistantSessionID, primaryInputText(exec.Parsed.Input), 12)
+	var runtimeMemories []assistantservice.RuntimeMemory
+	if exec.Parsed.MemoryEnabled {
+		runtimeMemories = assistantservice.NewService().RuntimeMemories(ctx, exec.Parsed.AssistantSessionID, primaryInputText(exec.Parsed.Input), 12)
+	}
 	runtimePrompt := agentprompt.BuildRuntimePrompt(agentprompt.RuntimeInput{
 		PublicSettings: publicSettings,
 		AgentSettings:  agentSettings,

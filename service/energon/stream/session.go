@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	WorkerTimeout     = 10 * time.Minute
+	WorkerTimeout     = time.Hour
 	startWriteTimeout = 3 * time.Second
 )
 

@@ -482,6 +482,15 @@ func looksLikeLongTermMemory(text string) bool {
 	return false
 }
 
+func looksLikeTemporaryTaskMemory(text string) bool {
+	if containsAny(text, []string{"以后", "每次", "默认", "长期", "记住"}) {
+		return false
+	}
+	temporarySignals := []string{"本次", "现在", "这次", "当前任务", "这回"}
+	taskSignals := []string{"生成", "写", "做", "帮我", "我要", "要求", "小红书", "图文", "文案", "图片"}
+	return containsAny(text, temporarySignals) && containsAny(text, taskSignals)
+}
+
 func inferMemoryKind(content string) string {
 	switch {
 	case containsAny(content, []string{"偏好", "习惯", "喜欢", "希望", "回复", "语气", "风格", "不要默认认同", "迎合"}):

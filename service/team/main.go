@@ -19,6 +19,12 @@ type Service struct {
 	streams   frontstream.Service
 }
 
+var sharedStreams = frontstream.New("team")
+
+func StreamStore() frontstream.Service {
+	return sharedStreams
+}
+
 func NewService() Service {
 	return Service{
 		repo:      NewRepo(),
@@ -27,6 +33,6 @@ func NewService() Service {
 		asset:     assetservice.NewService(),
 		gateway:   energonservice.NewGatewayService(),
 		memory:    memoryservice.NewService(),
-		streams:   frontstream.New("team"),
+		streams:   StreamStore(),
 	}
 }

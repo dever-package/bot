@@ -29,6 +29,8 @@ const (
 	finalTaskStatusFailed    = "failed"
 )
 
+var finalResultSnapshotMu sync.Mutex
+
 type finalTaskState struct {
 	ID            string
 	PlaceholderID string
@@ -250,12 +252,15 @@ func (s Service) executeFinalTask(
 		},
 		WriteStatus: func(ctx context.Context, text string, meta map[string]any) error {
 			state.Text = text
-			state.Progress = finalTaskProgress(meta)
+			state.Progress = mergeFinalTaskProgress(state.Progress, finalTaskProgress(meta))
 			return s.writeFinalResultTask(streamCtx, exec.RequestID, resultID, state, meta)
 		},
 		WriteOutput: func(ctx context.Context, output map[string]any) error {
 			state.Text = firstText(output["text"], output["title"], state.Text)
-			state.Progress = int(frontstream.InputInt64(output["progress"], int64(state.Progress)))
+			state.Progress = mergeFinalTaskProgress(
+				state.Progress,
+				int(frontstream.InputInt64(output["progress"], -1)),
+			)
 			return s.writeFinalResultTask(streamCtx, exec.RequestID, resultID, state, map[string]any{"output": output})
 		},
 		StreamBlock: time.Duration(defaultAgentStreamBlockMs) * time.Millisecond,
@@ -756,7 +761,72 @@ func (s Service) writeFinalResultDetail(ctx context.Context, requestID string, r
 		payload["result"] = output
 		payload["title"] = firstText(output["title"], "最终结果")
 	}
+	s.saveFinalResultSnapshot(ctx, requestID, resultID, resultMode, output, states)
 	return s.writeStreamOutput(ctx, requestID, payload)
+}
+
+func (s Service) saveFinalResultSnapshot(ctx context.Context, requestID string, resultID string, resultMode string, output map[string]any, states []finalTaskState) {
+	if len(output) == 0 {
+		return
+	}
+	finalResultSnapshotMu.Lock()
+	defer finalResultSnapshotMu.Unlock()
+	s.repo.UpdateRunByRequestID(ctx, requestID, map[string]any{
+		"output": runOutputText(finalResultCard(resultID, resultMode, output, states), ""),
+	})
+}
+
+func (s Service) updateFinalResultSnapshot(ctx context.Context, requestID string, resultID string, update func(map[string]any) bool) {
+	if strings.TrimSpace(requestID) == "" || update == nil {
+		return
+	}
+	finalResultSnapshotMu.Lock()
+	defer finalResultSnapshotMu.Unlock()
+
+	run, err := s.repo.FindRunByRequestID(ctx, requestID)
+	if err != nil {
+		return
+	}
+	card := normalizeMap(jsonAny(run.Output))
+	if len(card) == 0 || strings.TrimSpace(firstText(card["event"])) != finalResultEventCard {
+		return
+	}
+	if currentID := strings.TrimSpace(firstText(card["result_id"])); currentID != "" && strings.TrimSpace(resultID) != "" && currentID != strings.TrimSpace(resultID) {
+		return
+	}
+	if !update(card) {
+		return
+	}
+	s.repo.UpdateRunByRequestID(ctx, requestID, map[string]any{
+		"output": runOutputText(card, ""),
+	})
+}
+
+func (s Service) saveFinalResultTaskSnapshot(ctx context.Context, requestID string, resultID string, task map[string]any) {
+	if len(task) == 0 {
+		return
+	}
+	s.updateFinalResultSnapshot(ctx, requestID, resultID, func(card map[string]any) bool {
+		tasks := mergeFinalResultSnapshotTask(card["tasks"], task)
+		card["tasks"] = tasks
+		if result := cloneMap(normalizeMap(card["result"])); len(result) > 0 {
+			result["tasks"] = tasks
+			if content := cloneMap(normalizeMap(result["content"])); len(content) > 0 {
+				content["tasks"] = tasks
+				result["content"] = content
+			}
+			card["result"] = result
+		}
+		return true
+	})
+}
+
+func (s Service) saveFinalResultProgressSnapshot(ctx context.Context, requestID string, resultID string, text string, progress int) {
+	s.updateFinalResultSnapshot(ctx, requestID, resultID, func(card map[string]any) bool {
+		card["progress"] = progress
+		card["progress_text"] = strings.TrimSpace(text)
+		return true
+	})
 }
 
 func finalResultDetailText(resultMode string, output map[string]any) string {
@@ -770,12 +840,15 @@ func finalResultDetailText(resultMode string, output map[string]any) string {
 }
 
 func (s Service) writeFinalResultTask(ctx context.Context, requestID string, resultID string, state finalTaskState, meta map[string]any) error {
-	payload := state.Map()
+	taskPayload := state.Map()
+	payload := cloneMap(taskPayload)
 	payload["event"] = finalResultEventTask
 	payload["result_id"] = resultID
 	if len(meta) > 0 {
 		payload["meta"] = meta
+		taskPayload["meta"] = meta
 	}
+	s.saveFinalResultTaskSnapshot(ctx, requestID, resultID, taskPayload)
 	return s.writeStreamOutput(ctx, requestID, payload)
 }
 
@@ -786,6 +859,7 @@ func (s Service) writeFinalResultProgress(ctx context.Context, requestID string,
 	if progress > 100 {
 		progress = 100
 	}
+	s.saveFinalResultProgressSnapshot(ctx, requestID, resultID, text, progress)
 	return s.writeStreamOutput(ctx, requestID, map[string]any{
 		"event":     finalResultEventProgress,
 		"result_id": resultID,
@@ -853,6 +927,45 @@ func (state finalTaskState) Map() map[string]any {
 		row["output"] = state.Output
 	}
 	return row
+}
+
+func mergeFinalResultSnapshotTask(raw any, task map[string]any) []map[string]any {
+	rows := finalResultSnapshotTaskRows(raw)
+	if len(rows) == 0 {
+		return []map[string]any{cloneMap(task)}
+	}
+	taskID := finalResultSnapshotTaskID(task)
+	if taskID == "" {
+		return rows
+	}
+	for index, row := range rows {
+		if finalResultSnapshotTaskID(row) != taskID {
+			continue
+		}
+		next := cloneMap(row)
+		for key, value := range task {
+			next[key] = value
+		}
+		rows[index] = next
+		return rows
+	}
+	return append(rows, cloneMap(task))
+}
+
+func finalResultSnapshotTaskRows(raw any) []map[string]any {
+	items := normalizeAnySlice(raw)
+	rows := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		row := normalizeMap(item)
+		if len(row) > 0 {
+			rows = append(rows, cloneMap(row))
+		}
+	}
+	return rows
+}
+
+func finalResultSnapshotTaskID(row map[string]any) string {
+	return strings.TrimSpace(firstText(row["id"], row["task_id"], row["taskId"], row["placeholder_id"], row["placeholderId"]))
 }
 
 type knowledgeSearchCall struct {
@@ -942,6 +1055,16 @@ func finalTaskProgress(meta map[string]any) int {
 		return progress
 	}
 	return int(frontstream.InputInt64(nested["percent"], -1))
+}
+
+func mergeFinalTaskProgress(current int, incoming int) int {
+	if incoming < 0 {
+		return current
+	}
+	if current < 0 || incoming > current {
+		return incoming
+	}
+	return current
 }
 
 func finalResultID(exec runExecution) string {

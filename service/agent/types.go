@@ -65,6 +65,7 @@ type parsedRunRequest struct {
 	Options            map[string]any
 	SourceTargetID     uint64
 	AssistantSessionID uint64
+	MemoryEnabled      bool
 }
 
 type runTracker struct {

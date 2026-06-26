@@ -1,5 +1,6 @@
 {
   "page": {
+    "name": "智能体分类",
     "parent": "bot/agent/agent/list",
     "type": 2,
     "sort": 1
@@ -23,13 +24,24 @@
         "id": "agent-cate-category",
         "value": "parent.data.search.cate_id",
         "option": {
-          "service": "bot.agent.setting.OptionService.LoadAgentCates"
+          "service": "bot.agent.setting.OptionService.LoadAllAgentCates"
         },
         "meta": {
           "title": "智能体分类",
           "description": "左侧维护智能体分类",
           "remote": true,
           "defaultFirst": true,
+          "sortable": true,
+          "sortField": "sort",
+          "sortChangeAction": {
+            "type": "save",
+            "path": "bot/agent/agent_cate/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "sort": "$value"
+            }
+          },
           "createButton": {
             "name": "新增分类",
             "icon": "plus",
@@ -43,6 +55,29 @@
               }
             }
           },
+          "statusField": "status",
+          "statusDisplay": "select",
+          "statusChangeAction": {
+            "type": "save",
+            "path": "bot/agent/agent_cate/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "status": "$value"
+            }
+          },
+          "statusCases": [
+            {
+              "value": 1,
+              "text": "启用",
+              "tone": "success"
+            },
+            {
+              "value": 2,
+              "text": "停用",
+              "tone": "muted"
+            }
+          ],
           "buttons": [
             {
               "icon": "square-pen",

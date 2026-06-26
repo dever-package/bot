@@ -64,7 +64,7 @@ func (s Service) RunCanvasAgent(ctx context.Context, projectID uint64, req Canva
 		AgentID:   req.AgentID,
 		RequestID: req.RequestID,
 		Input:     cloneInput(req.Input),
-		Options:   map[string]any{"full_runtime": false},
+		Options:   map[string]any{"full_runtime": true},
 	})
 	if err != nil {
 		return map[string]any{
@@ -191,7 +191,6 @@ func (s Service) ReadStream(ctx context.Context, projectID uint64, requestID str
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	NewWorkspaceService().SyncCanvasRunProgress(ctx, projectID, 0, requestID)
 	return s.team.ReadProjectStream(ctx, projectID, requestID, lastID, count, block)
 }
 

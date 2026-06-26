@@ -18,7 +18,7 @@ type HTTPClient struct {
 
 func NewHTTPClient(timeout time.Duration) HTTPClient {
 	if timeout <= 0 {
-		timeout = 60 * time.Second
+		timeout = time.Hour
 	}
 	return HTTPClient{
 		client:         &http.Client{},

@@ -138,6 +138,18 @@
           "remote": true,
           "defaultFirst": true,
           "queryKey": "pack_id",
+          "sortable": true,
+          "sortField": "sort",
+          "sortChangeAction": {
+            "type": "save",
+            "key": "submit",
+            "path": "bot/agent/skill_pack/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "sort": "$value"
+            }
+          },
           "createButton": {
             "name": "新增方案",
             "icon": "plus",

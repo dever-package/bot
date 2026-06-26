@@ -153,6 +153,10 @@ func (s WorkspaceService) CanvasExecutionList(ctx context.Context, query CanvasE
 		if row == nil {
 			continue
 		}
+		row = s.syncWorkspaceExecutionRow(ctx, row)
+		if strings.TrimSpace(query.Status) != "" && strings.TrimSpace(row.Status) != strings.TrimSpace(query.Status) {
+			continue
+		}
 		items = append(items, workspaceExecutionListPayload(ctx, row))
 	}
 	return map[string]any{
@@ -183,6 +187,7 @@ func (s WorkspaceService) CanvasExecution(ctx context.Context, projectID uint64,
 	if execution == nil {
 		return nil, fmt.Errorf("画布执行不存在")
 	}
+	execution = s.syncWorkspaceExecutionRow(ctx, execution)
 	return workspaceExecutionPayload(ctx, execution), nil
 }
 
@@ -191,6 +196,7 @@ func (s WorkspaceService) CanvasNodeResults(ctx context.Context, projectID uint6
 	if err != nil {
 		return nil, err
 	}
+	execution = s.syncWorkspaceExecutionRow(ctx, execution)
 	return workspaceNodeResultsPayload(ctx, execution.ProjectID, execution.RunID), nil
 }
 
@@ -217,6 +223,29 @@ func (s WorkspaceService) canvasExecutionRow(ctx context.Context, projectID uint
 		return nil, fmt.Errorf("画布执行不存在")
 	}
 	return execution, nil
+}
+
+func (s WorkspaceService) syncWorkspaceExecutionRow(ctx context.Context, execution *workspacemodel.Execution) *workspacemodel.Execution {
+	if !workspaceExecutionCanSync(execution) {
+		return execution
+	}
+	s.SyncCanvasRunProgress(ctx, execution.ProjectID, execution.RunID, execution.RequestID)
+	if refreshed := workspacemodel.NewExecutionModel().Find(ctx, map[string]any{"id": execution.ID}); refreshed != nil {
+		return refreshed
+	}
+	return execution
+}
+
+func workspaceExecutionCanSync(execution *workspacemodel.Execution) bool {
+	if execution == nil || execution.RunID == 0 {
+		return false
+	}
+	switch strings.TrimSpace(execution.Status) {
+	case teammodel.RunStatusPending, teammodel.RunStatusRunning:
+		return true
+	default:
+		return false
+	}
 }
 
 func finishWorkspaceRun(ctx context.Context, runID uint64, status string, output map[string]any, errorText string) {

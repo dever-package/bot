@@ -14,6 +14,7 @@ const (
 	knowledgeOpenTextLimit      = 4000
 	knowledgeDebugSnippetLimit  = 240
 	knowledgeFileListTextLimit  = 14
+	knowledgeFileReadBatchLimit = 6
 )
 
 type knowledgeNodeBrief struct {
@@ -294,15 +295,53 @@ func executeKnowledgeFileSearch(ctx context.Context, req Request) (map[string]an
 
 func executeKnowledgeFileRead(ctx context.Context, req Request) (map[string]any, error) {
 	baseID := knowledgeBaseIDFromInput(req.Action.Input)
-	path := inputText(firstPresent(req.Action.Input, "id", "file_id", "fileId", "path"))
-	if path == "" {
-		return nil, fmt.Errorf("读取原文需要提供 id 或 path")
+	targets := knowledgeFileReadTargets(req.Action.Input)
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("读取原文需要提供 id、path、file_name 或 paths")
 	}
 	maxChars := inputInt(firstPresent(req.Action.Input, "max_chars", "maxChars"), 0)
-	content, err := knowledgeservice.NewService().ReadKnowledgeRuntimeFile(ctx, baseID, path, maxChars)
-	if err != nil {
-		return nil, err
+	service := knowledgeservice.NewService()
+	if len(targets) == 1 {
+		content, err := service.ReadKnowledgeRuntimeFile(ctx, baseID, targets[0], maxChars)
+		if err != nil {
+			return nil, err
+		}
+		return singleKnowledgeFileReadOutput(baseID, content), nil
 	}
+	truncatedTargets := false
+	if len(targets) > knowledgeFileReadBatchLimit {
+		targets = targets[:knowledgeFileReadBatchLimit]
+		truncatedTargets = true
+	}
+	files := make([]map[string]any, 0, len(targets))
+	sections := make([]string, 0, len(targets))
+	for _, target := range targets {
+		content, err := service.ReadKnowledgeRuntimeFile(ctx, baseID, target, maxChars)
+		if err != nil {
+			return nil, fmt.Errorf("读取原文失败（%s）: %w", target, err)
+		}
+		file := knowledgeRuntimeFileMap(content.KnowledgeRuntimeFile)
+		file["content"] = content.Content
+		file["truncated"] = content.Truncated
+		files = append(files, file)
+		sections = append(sections, knowledgeFileReadSection(target, content))
+	}
+	summary := fmt.Sprintf("已读取 %d 个知识库原文", len(files))
+	if truncatedTargets {
+		summary += fmt.Sprintf("，已按上限只读取前 %d 个", knowledgeFileReadBatchLimit)
+	}
+	return map[string]any{
+		"knowledge_base_id": baseID,
+		"files":             files,
+		"summary":           summary,
+		"text":              strings.Join(sections, "\n\n"),
+		"truncated_targets": truncatedTargets,
+		"read_target_count": len(files),
+		"read_target_limit": knowledgeFileReadBatchLimit,
+	}, nil
+}
+
+func singleKnowledgeFileReadOutput(baseID uint64, content knowledgeservice.KnowledgeRuntimeFileContent) map[string]any {
 	return map[string]any{
 		"knowledge_base_id": baseID,
 		"file":              knowledgeRuntimeFileMap(content.KnowledgeRuntimeFile),
@@ -310,7 +349,53 @@ func executeKnowledgeFileRead(ctx context.Context, req Request) (map[string]any,
 		"truncated":         content.Truncated,
 		"summary":           "已读取知识库原文",
 		"text":              content.Content,
-	}, nil
+	}
+}
+
+func knowledgeFileReadSection(target string, content knowledgeservice.KnowledgeRuntimeFileContent) string {
+	title := strings.TrimSpace(content.Path)
+	if title == "" {
+		title = strings.TrimSpace(content.Name)
+	}
+	if title == "" {
+		title = strings.TrimSpace(target)
+	}
+	if title == "" {
+		title = "知识库原文"
+	}
+	return fmt.Sprintf("## %s\n%s", title, content.Content)
+}
+
+func knowledgeFileReadTargets(input map[string]any) []string {
+	keys := []string{
+		"id", "ids",
+		"file_id", "file_ids", "fileId", "fileIds",
+		"path", "paths",
+		"storage_path", "storage_paths", "storagePath", "storagePaths",
+		"file_name", "file_names", "fileName", "fileNames",
+		"filename", "filenames",
+		"name", "names",
+	}
+	seen := map[string]struct{}{}
+	targets := make([]string, 0, 4)
+	for _, key := range keys {
+		value, exists := input[key]
+		if !exists {
+			continue
+		}
+		for _, target := range inputStringSlice(value) {
+			target = strings.TrimSpace(target)
+			if target == "" {
+				continue
+			}
+			if _, ok := seen[target]; ok {
+				continue
+			}
+			seen[target] = struct{}{}
+			targets = append(targets, target)
+		}
+	}
+	return targets
 }
 
 func knowledgeNodeBriefs(nodes []knowledgeservice.KnowledgeNodeResult, previewLimit int) []knowledgeNodeBrief {

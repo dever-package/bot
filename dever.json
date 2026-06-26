@@ -58,7 +58,7 @@
         "api": "bot/body",
         "page": "body",
         "config": {
-          "name": "工作台",
+          "name": "神创工作台",
           "subtitle": "AI 工作台",
           "description": "Dever Work 前台",
           "logo": "bot/assets/body/images/logo.svg",
