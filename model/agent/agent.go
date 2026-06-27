@@ -9,30 +9,34 @@ import (
 )
 
 type Agent struct {
-	ID             uint64    `dorm:"primaryKey;autoIncrement;comment:智能体ID"`
-	CateID         uint64    `dorm:"type:bigint;not null;default:1;comment:智能体分类"`
-	Name           string    `dorm:"type:varchar(128);not null;comment:名称"`
-	Key            string    `dorm:"type:varchar(128);not null;comment:标识"`
-	Kind           string    `dorm:"type:varchar(32);not null;default:'normal';comment:类型"`
-	Description    string    `dorm:"type:text;not null;default:'';comment:描述"`
-	LLMPowerID     uint64    `dorm:"type:bigint;not null;default:0;comment:LLM能力"`
-	SettingPackID  uint64    `dorm:"type:bigint;not null;default:1;comment:规则方案"`
-	SkillPackID    uint64    `dorm:"type:bigint;not null;default:1;comment:技能方案"`
-	Temperature    float64   `dorm:"type:double precision;not null;default:0.7;comment:温度"`
-	TimeoutSeconds int       `dorm:"type:int;not null;default:3600;comment:超时时间(秒)"`
-	MaxAutoSteps   int       `dorm:"type:int;not null;default:0;comment:最大自动步骤数"`
-	Status         int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	Sort           int       `dorm:"type:int;not null;default:100;comment:排序"`
-	CreatedAt      time.Time `dorm:"comment:创建时间"`
+	ID              uint64    `dorm:"primaryKey;autoIncrement;comment:智能体ID"`
+	CateID          uint64    `dorm:"type:bigint;not null;default:1;comment:智能体分类"`
+	Name            string    `dorm:"type:varchar(128);not null;comment:名称"`
+	Key             string    `dorm:"type:varchar(128);not null;comment:标识"`
+	Kind            string    `dorm:"type:varchar(32);not null;default:'normal';comment:类型"`
+	Description     string    `dorm:"type:text;not null;default:'';comment:描述"`
+	LLMPowerID      uint64    `dorm:"type:bigint;not null;default:0;comment:LLM能力"`
+	PlannerPowerID  uint64    `dorm:"type:bigint;not null;default:0;comment:规划模型能力"`
+	SelectorPowerID uint64    `dorm:"type:bigint;not null;default:0;comment:技能选择模型能力"`
+	SettingPackID   uint64    `dorm:"type:bigint;not null;default:1;comment:规则方案"`
+	SkillPackID     uint64    `dorm:"type:bigint;not null;default:1;comment:技能方案"`
+	Temperature     float64   `dorm:"type:double precision;not null;default:0.7;comment:温度"`
+	TimeoutSeconds  int       `dorm:"type:int;not null;default:3600;comment:超时时间(秒)"`
+	MaxAutoSteps    int       `dorm:"type:int;not null;default:0;comment:最大自动步骤数"`
+	Status          int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	Sort            int       `dorm:"type:int;not null;default:100;comment:排序"`
+	CreatedAt       time.Time `dorm:"comment:创建时间"`
 }
 
 type AgentIndex struct {
-	Key               struct{} `unique:"key"`
-	KindStatusSort    struct{} `index:"kind,status,sort"`
-	CateStatusSort    struct{} `index:"cate_id,status,sort"`
-	SettingPackStatus struct{} `index:"setting_pack_id,status"`
-	SkillPackStatus   struct{} `index:"skill_pack_id,status"`
-	StatusSort        struct{} `index:"status,sort"`
+	Key                 struct{} `unique:"key"`
+	KindStatusSort      struct{} `index:"kind,status,sort"`
+	CateStatusSort      struct{} `index:"cate_id,status,sort"`
+	SettingPackStatus   struct{} `index:"setting_pack_id,status"`
+	SkillPackStatus     struct{} `index:"skill_pack_id,status"`
+	PlannerPowerStatus  struct{} `index:"planner_power_id,status"`
+	SelectorPowerStatus struct{} `index:"selector_power_id,status"`
+	StatusSort          struct{} `index:"status,sort"`
 }
 
 const (
@@ -140,6 +144,18 @@ var (
 		OptionKeys: []string{"name", "key", "kind"},
 	}
 
+	agentPlannerPowerRelation = orm.Relation{
+		Field:      "planner_power_id",
+		Option:     "bot.energon.NewPowerModel",
+		OptionKeys: []string{"name", "key", "kind"},
+	}
+
+	agentSelectorPowerRelation = orm.Relation{
+		Field:      "selector_power_id",
+		Option:     "bot.energon.NewPowerModel",
+		OptionKeys: []string{"name", "key", "kind"},
+	}
+
 	agentSettingPackRelation = orm.Relation{
 		Field:      "setting_pack_id",
 		Option:     "bot.agent.NewSettingPackModel",
@@ -166,6 +182,8 @@ func NewAgentModel() *orm.Model[Agent] {
 		Relations: []orm.Relation{
 			agentCateRelation,
 			agentLLMPowerRelation,
+			agentPlannerPowerRelation,
+			agentSelectorPowerRelation,
 			agentSettingPackRelation,
 			agentSkillPackRelation,
 		},

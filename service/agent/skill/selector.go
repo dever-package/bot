@@ -52,6 +52,20 @@ func SelectRuntime(ctx context.Context, req SelectionRequest) SelectionResult {
 			Raw:      "local_trigger",
 		}
 	}
+	if len(localSelected) == 0 && CanSkipSelectorWithoutLocalCandidate(req.Catalog.SelectableEntries()) {
+		return SelectionResult{
+			Reason: "无本地触发词命中，且可选技能均配置显式触发范围，跳过 LLM 技能选择。",
+			Raw:    "local_no_trigger",
+		}
+	}
+	if strings.TrimSpace(req.PowerKey) == "" {
+		return SelectionResult{
+			Selected: localSelected,
+			Keys:     localKeys,
+			Reason:   "未配置技能选择模型能力，仅使用本地触发词结果。",
+			Raw:      "selector_disabled",
+		}
+	}
 
 	selectorCatalog := req.Catalog
 	if len(localSelected) > 1 {
@@ -118,18 +132,26 @@ func selectionRole(metadata string) string {
 }
 
 func selectionPrompt(input map[string]any, history []any, catalog Catalog, localCandidates []string) string {
+	inputText := limitedSelectionJSON(input, 1600)
+	historyText := limitedSelectionJSON(history, 2200)
 	parts := []string{
 		"请根据本轮用户输入、临时历史和可用技能 metadata，选择需要读取正文的技能。",
 		"",
 		"用户输入:",
-		JSONText(input),
-		"",
-		"临时历史:",
-		JSONText(history),
+		inputText,
+	}
+	if historyText != "" && historyText != "[]" {
+		parts = append(parts,
+			"",
+			"临时历史摘要:",
+			historyText,
+		)
+	}
+	parts = append(parts,
 		"",
 		"可选技能 key:",
 		strings.Join(catalog.MetadataKeys(), ", "),
-	}
+	)
 	if len(localCandidates) > 1 {
 		parts = append(parts,
 			"",
@@ -139,6 +161,43 @@ func selectionPrompt(input map[string]any, history []any, catalog Catalog, local
 		)
 	}
 	return strings.Join(parts, "\n")
+}
+
+func CanSkipSelectorWithoutLocalCandidate(entries []Entry) bool {
+	if len(entries) == 0 {
+		return true
+	}
+	for _, entry := range entries {
+		if len(explicitSelectorTerms(entry)) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func explicitSelectorTerms(entry Entry) []string {
+	terms := make([]string, 0, len(entry.Triggers)+len(entry.Domains)+len(entry.Targets))
+	terms = append(terms, entry.Triggers...)
+	terms = append(terms, entry.Domains...)
+	terms = append(terms, entry.Targets...)
+
+	result := make([]string, 0, len(terms))
+	for _, term := range terms {
+		term = normalizeMatchText(term)
+		if isUsefulMatchTerm(term) {
+			result = append(result, term)
+		}
+	}
+	return result
+}
+
+func limitedSelectionJSON(value any, maxRunes int) string {
+	text := strings.TrimSpace(JSONText(value))
+	if text == "" {
+		return ""
+	}
+	limited, _ := truncateRunes(text, maxRunes)
+	return limited
 }
 
 func parseSelection(raw string, output map[string]any) ([]string, string, error) {

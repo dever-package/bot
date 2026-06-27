@@ -11,19 +11,12 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 	energonmodel "github.com/dever-package/bot/model/energon"
 	agentaction "github.com/dever-package/bot/service/agent/action"
-	agentknowledge "github.com/dever-package/bot/service/agent/knowledge"
-	agentprompt "github.com/dever-package/bot/service/agent/prompt"
+	agentcontext "github.com/dever-package/bot/service/agent/context"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 	agenttool "github.com/dever-package/bot/service/agent/tool"
-	assistantservice "github.com/dever-package/bot/service/assistant"
-	frontstream "github.com/dever-package/front/service/stream"
 )
 
-type runtimeOptions struct {
-	MaxSteps            int
-	AsyncMaxConcurrency int
-	Tool                agenttool.Options
-}
+type runtimeOptions = agentcontext.RuntimeOptions
 
 type agentLoopResult struct {
 	Output  map[string]any
@@ -33,13 +26,16 @@ type agentLoopResult struct {
 }
 
 type runExecution struct {
-	Request   RunRequest
-	Parsed    parsedRunRequest
-	Agent     agentmodel.Agent
-	Power     energonmodel.Power
-	RunID     uint64
-	RequestID string
-	StartedAt time.Time
+	Request     RunRequest
+	Parsed      parsedRunRequest
+	Agent       agentmodel.Agent
+	Power       energonmodel.Power
+	Scene       agentcontext.Scene
+	RunID       uint64
+	RequestID   string
+	StartedAt   time.Time
+	ContextPlan agentcontext.Plan
+	Baseline    agentcontext.Baseline
 }
 
 func (s Service) execute(exec runExecution) {
@@ -69,26 +65,48 @@ func (s Service) execute(exec runExecution) {
 		"history": exec.Parsed.History,
 	}, stepStatusSuccess)
 
-	powers := s.repo.ListActiveCallablePowers(ctx, exec.Power.ID)
-	runtimeConfig := s.repo.FindRuntimeConfig(ctx)
-	runtimeOptions := resolveRuntimeOptions(runtimeConfig, exec.Agent, exec.Parsed.Options)
-	skillLimits := agentskill.LimitsFromRuntimeConfig(runtimeConfig)
-	catalog := agentskill.BuildCatalog(exec.Agent.SkillPackID, s.repo.ListActiveSkillPackEntries(ctx, exec.Agent.SkillPackID), skillLimits)
+	scene := exec.Scene
+	if scene == "" {
+		scene = agentcontext.SceneAgent
+	}
+	contextStartedAt := time.Now()
+	bundle := agentcontext.NewAssembler(agentcontext.Dependencies{
+		Repo:    s.repo,
+		Gateway: s.gateway,
+	}).Build(ctx, agentcontext.Request{
+		Scene:              scene,
+		Method:             exec.Request.Method,
+		Host:               exec.Request.Host,
+		Path:               exec.Request.Path,
+		Headers:            exec.Request.Headers,
+		Agent:              exec.Agent,
+		Power:              exec.Power,
+		Input:              exec.Parsed.Input,
+		History:            exec.Parsed.History,
+		Options:            exec.Parsed.Options,
+		SourceTargetID:     exec.Parsed.SourceTargetID,
+		AssistantSessionID: exec.Parsed.AssistantSessionID,
+		Memory: agentcontext.MemoryRequest{
+			Enabled:   exec.Parsed.MemoryEnabled,
+			SessionID: exec.Parsed.AssistantSessionID,
+		},
+	})
+	contextLatencyMs := time.Since(contextStartedAt).Milliseconds()
+	exec.ContextPlan = bundle.Diagnostics.Plan
+	exec.Baseline = bundle.Baseline
+	runtimeOptions := bundle.RuntimeOptions
+	catalog := bundle.SkillCatalog
 	skillCatalogStatus := stepStatusSuccess
 	if catalog.Warning != "" {
 		skillCatalogStatus = stepStatusWarning
 	}
 	tracker.Step(ctx, "skill_catalog", "技能目录", catalog.Metadata, map[string]any{
-		"skill_pack_id": exec.Agent.SkillPackID,
-		"available":     catalog.AvailableKeys(),
-		"loaded":        catalog.LoadedKeys(),
-		"warning":       catalog.Warning,
-		"limits": map[string]any{
-			"metadata_max_skills":       skillLimits.MetadataMaxSkills,
-			"metadata_field_max_length": skillLimits.MetadataFieldMaxRunes,
-			"skill_file_max_bytes":      skillLimits.SkillFileMaxBytes,
-			"loaded_content_max_length": skillLimits.LoadedContentMaxRunes,
-		},
+		"skill_pack_id":      exec.Agent.SkillPackID,
+		"available":          catalog.AvailableKeys(),
+		"loaded":             catalog.LoadedKeys(),
+		"warning":            catalog.Warning,
+		"context":            bundle.Diagnostics,
+		"context_latency_ms": contextLatencyMs,
 	}, skillCatalogStatus)
 	if catalog.Warning != "" {
 		_ = s.writeStreamStatus(ctx, exec.RequestID, catalog.Warning, nil)
@@ -96,20 +114,7 @@ func (s Service) execute(exec runExecution) {
 		_ = s.writeStreamStatus(ctx, exec.RequestID, "已加载技能方案", nil)
 	}
 
-	selection := agentskill.SelectRuntime(ctx, agentskill.SelectionRequest{
-		Gateway:        s.gateway,
-		Method:         exec.Request.Method,
-		Host:           exec.Request.Host,
-		Path:           exec.Request.Path,
-		Headers:        exec.Request.Headers,
-		AgentIdentity:  agentIdentity(exec.Agent),
-		PowerKey:       exec.Power.Key,
-		Input:          exec.Parsed.Input,
-		History:        exec.Parsed.History,
-		SourceTargetID: exec.Parsed.SourceTargetID,
-		Catalog:        catalog,
-		Limits:         skillLimits,
-	})
+	selection := bundle.SkillSelection
 	selectionStatus := stepStatusSuccess
 	if selection.Warning != "" {
 		selectionStatus = stepStatusWarning
@@ -124,12 +129,6 @@ func (s Service) execute(exec runExecution) {
 		_ = s.writeStreamStatus(ctx, exec.RequestID, selection.Warning, nil)
 	}
 
-	loadedSkills, loadWarnings := agentskill.LoadContents(selection.Selected, skillLimits)
-	catalog.Loaded = loadedSkills
-	catalog.LoadedContent = agentskill.RenderLoaded(loadedSkills)
-	if len(loadWarnings) > 0 {
-		catalog.Warning = strings.Join(loadWarnings, "\n")
-	}
 	loadStatus := stepStatusSuccess
 	if catalog.Warning != "" {
 		loadStatus = stepStatusWarning
@@ -139,43 +138,31 @@ func (s Service) execute(exec runExecution) {
 		"warning": catalog.Warning,
 	}, loadStatus)
 
-	publicSettings := s.repo.ListActivePublicSettings(ctx, exec.Agent.SettingPackID)
-	agentSettings := s.repo.ListActiveAgentSettings(ctx, exec.Agent.ID)
-	knowledgeService := agentknowledge.NewService()
-	knowledgeBases := knowledgeService.AgentKnowledgeBases(ctx, exec.Agent.ID)
-	var runtimeMemories []assistantservice.RuntimeMemory
-	if exec.Parsed.MemoryEnabled {
-		runtimeMemories = assistantservice.NewService().RuntimeMemories(ctx, exec.Parsed.AssistantSessionID, primaryInputText(exec.Parsed.Input), 12)
-	}
-	runtimePrompt := agentprompt.BuildRuntimePrompt(agentprompt.RuntimeInput{
-		PublicSettings: publicSettings,
-		AgentSettings:  agentSettings,
-		KnowledgeBases: promptKnowledgeBases(knowledgeBases),
-		Memory:         promptMemories(runtimeMemories),
-		Powers:         powers,
-		SkillCatalog:   catalog,
-		Tools:          runtimePromptTools(runtimeOptions.Tool),
-		Result: agentprompt.ResultRuntime{
-			AsyncMaxConcurrency: runtimeOptions.AsyncMaxConcurrency,
-		},
-		History: exec.Parsed.History,
-	})
+	runtimePrompt := bundle.RuntimePrompt
 	tracker.Step(ctx, "knowledge", "运行资料", runtimePrompt, map[string]any{
-		"setting_pack_id":  exec.Agent.SettingPackID,
-		"public_settings":  len(publicSettings),
-		"agent_settings":   len(agentSettings),
-		"knowledge_bases":  len(knowledgeBases),
-		"memories":         len(runtimeMemories),
-		"knowledge_mode":   "agentic_tools",
-		"history_messages": len(exec.Parsed.History),
+		"setting_pack_id":      exec.Agent.SettingPackID,
+		"public_settings":      len(bundle.PromptInput.PublicSettings),
+		"agent_settings":       len(bundle.PromptInput.AgentSettings),
+		"knowledge_bases":      len(bundle.KnowledgeBases),
+		"memories":             len(bundle.Memories),
+		"knowledge_mode":       bundle.Diagnostics.KnowledgeMode,
+		"history_messages":     len(exec.Parsed.History),
+		"context":              bundle.Diagnostics,
+		"context_latency_ms":   contextLatencyMs,
+		"prompt_mode":          bundle.PromptInput.Mode,
+		"prompt_sections":      bundle.PromptSections,
+		"runtime_prompt_runes": len([]rune(runtimePrompt)),
+		"runtime_prompt_bytes": len(runtimePrompt),
 	}, stepStatusSuccess)
 	s.repo.UpdateRun(ctx, exec.RunID, map[string]any{
 		"skills": jsonText(map[string]any{
-			"skill_pack_id": catalog.PackID,
-			"available":     catalog.AvailableKeys(),
-			"selected":      selection.Keys,
-			"loaded":        catalog.LoadedKeys(),
-			"warning":       firstText(selection.Warning, catalog.Warning),
+			"skill_pack_id":      catalog.PackID,
+			"available":          catalog.AvailableKeys(),
+			"selected":           selection.Keys,
+			"loaded":             catalog.LoadedKeys(),
+			"warning":            firstText(selection.Warning, catalog.Warning),
+			"context":            bundle.Diagnostics,
+			"context_latency_ms": contextLatencyMs,
 		}),
 		"runtime_context": runtimePrompt,
 	})
@@ -191,7 +178,7 @@ func (s Service) execute(exec runExecution) {
 		"async_max_concurrency": runtimeOptions.AsyncMaxConcurrency,
 	}, stepStatusSuccess)
 
-	result := s.runAgentLoop(ctx, exec, runtimePrompt, catalog, &tracker, runtimeOptions)
+	result := s.runAgentLoop(ctx, exec, runtimePrompt, bundle.ModelHistory, catalog, &tracker, runtimeOptions)
 	if result.Status == runStatusSuccess {
 		tracker.Step(ctx, "final", "最终输出", result.Summary, map[string]any{"output": result.Output}, stepStatusSuccess)
 		s.finishRun(ctx, exec, runStatusSuccess, result.Output, result.Summary, "", tracker.seq)
@@ -229,8 +216,9 @@ func (s Service) finishRun(
 	})
 }
 
-func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePrompt string, catalog agentskill.Catalog, tracker *runTracker, options runtimeOptions) agentLoopResult {
-	history := append([]any{}, exec.Parsed.History...)
+func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePrompt string, initialModelHistory []any, catalog agentskill.Catalog, tracker *runTracker, options runtimeOptions) agentLoopResult {
+	sourceHistory := append([]any{}, exec.Parsed.History...)
+	history := append([]any{}, initialModelHistory...)
 	artifacts := agentaction.NewArtifactAccumulator()
 	lastOutput := ""
 	gatewayLastID := ""
@@ -241,7 +229,7 @@ func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePro
 	defer os.RemoveAll(tempRoot)
 
 	for step := 1; step <= options.MaxSteps; step++ {
-		assets := agentaction.CollectAssets(exec.Parsed.Input, history)
+		assets := agentaction.CollectAssets(exec.Parsed.Input, combinedRunHistory(sourceHistory, history))
 		turn := s.collectAgentTurn(ctx, exec, runtimePromptWithAssets(runtimePrompt, assets), history, step, options.MaxSteps, gatewayLastID)
 		if turn.LastID != "" {
 			gatewayLastID = turn.LastID
@@ -289,6 +277,19 @@ func (s Service) runAgentLoop(ctx context.Context, exec runExecution, runtimePro
 
 	output := stepLimitOutput(options.MaxSteps, lastOutput, artifacts)
 	return s.handleFinalResult(ctx, exec, tracker, output, history, options)
+}
+
+func combinedRunHistory(sourceHistory []any, modelHistory []any) []any {
+	if len(sourceHistory) == 0 {
+		return append([]any{}, modelHistory...)
+	}
+	if len(modelHistory) == 0 {
+		return append([]any{}, sourceHistory...)
+	}
+	combined := make([]any, 0, len(sourceHistory)+len(modelHistory))
+	combined = append(combined, sourceHistory...)
+	combined = append(combined, modelHistory...)
+	return combined
 }
 
 func duplicateActionOutput(action agentaction.Action, executed map[string]struct{}, artifacts agentaction.ArtifactAccumulator) (map[string]any, bool) {
@@ -516,74 +517,6 @@ func stepLimitOutput(maxSteps int, lastOutput string, artifacts agentaction.Arti
 		"kind":  agentaction.KindFinal,
 		"text":  text,
 	})
-}
-
-func resolveRuntimeOptions(config agentmodel.RuntimeConfig, agent agentmodel.Agent, requestOptions map[string]any) runtimeOptions {
-	defaultMax := positiveInt(config.DefaultMaxAutoSteps, agentmodel.DefaultRuntimeMaxAutoSteps)
-	hardMax := positiveInt(config.HardMaxAutoSteps, agentmodel.DefaultRuntimeHardMaxAutoSteps)
-	if hardMax < defaultMax {
-		hardMax = defaultMax
-	}
-
-	maxSteps := defaultMax
-	if agent.MaxAutoSteps > 0 {
-		maxSteps = agent.MaxAutoSteps
-	}
-	if requested := requestMaxSteps(requestOptions); requested > 0 {
-		maxSteps = requested
-	}
-	if maxSteps <= 0 {
-		maxSteps = defaultMax
-	}
-	if maxSteps > hardMax {
-		maxSteps = hardMax
-	}
-	return runtimeOptions{
-		MaxSteps:            maxSteps,
-		AsyncMaxConcurrency: 10,
-		Tool:                agenttool.OptionsFromRuntimeConfig(config),
-	}
-}
-
-func runtimePromptTools(options agenttool.Options) agentprompt.ToolRuntime {
-	sandboxConfig := options.ScriptSandbox
-	return agentprompt.ToolRuntime{
-		RunSkillScriptEnabled: sandboxConfig.Driver != agentmodel.RuntimeScriptSandboxDriverDisabled,
-		ScriptSandboxDriver:   sandboxConfig.Driver,
-		ScriptNetworkMode:     sandboxConfig.NetworkMode,
-	}
-}
-
-func promptKnowledgeBases(rows []agentknowledge.AgentKnowledgeBaseRuntime) []agentprompt.KnowledgeBaseRuntime {
-	result := make([]agentprompt.KnowledgeBaseRuntime, 0, len(rows))
-	for _, row := range rows {
-		result = append(result, agentprompt.KnowledgeBaseRuntime{
-			ID:     row.ID,
-			Name:   row.Name,
-			Prompt: row.Prompt,
-		})
-	}
-	return result
-}
-
-func requestMaxSteps(options map[string]any) int {
-	if len(options) == 0 {
-		return 0
-	}
-	for _, key := range []string{"max_steps", "maxSteps", "max_auto_steps", "maxAutoSteps"} {
-		value, exists := options[key]
-		if exists {
-			return int(frontstream.InputInt64(value, 0))
-		}
-	}
-	return 0
-}
-
-func positiveInt(value int, fallback int) int {
-	if value > 0 {
-		return value
-	}
-	return fallback
 }
 
 func agentToolTempRoot(requestID string) string {

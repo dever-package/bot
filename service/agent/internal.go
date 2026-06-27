@@ -9,8 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	agentaction "github.com/dever-package/bot/service/agent/action"
-	agentknowledge "github.com/dever-package/bot/service/agent/knowledge"
-	agentprompt "github.com/dever-package/bot/service/agent/prompt"
+	agentcontext "github.com/dever-package/bot/service/agent/context"
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
@@ -107,6 +106,7 @@ func (s Service) RunInternal(ctx context.Context, req InternalRunRequest) (Inter
 		},
 		Agent:     agent,
 		Power:     power,
+		Scene:     agentcontext.SceneInternal,
 		RunID:     runID,
 		RequestID: requestID,
 		StartedAt: now,
@@ -120,20 +120,38 @@ func (s Service) RunInternal(ctx context.Context, req InternalRunRequest) (Inter
 	tracker := runTracker{repo: s.repo, runID: runID, requestID: requestID}
 	tracker.Step(ctx, "input", "内部输入", primaryInputText(input), map[string]any{"input": input}, stepStatusSuccess)
 
-	knowledgeBases := agentknowledge.NewService().AgentKnowledgeBases(ctx, agent.ID)
-	runtimePrompt := agentprompt.BuildRuntimePrompt(agentprompt.RuntimeInput{
-		PublicSettings: s.repo.ListActivePublicSettings(ctx, agent.SettingPackID),
-		AgentSettings:  s.repo.ListActiveAgentSettings(ctx, agent.ID),
-		KnowledgeBases: promptKnowledgeBases(knowledgeBases),
+	contextStartedAt := time.Now()
+	bundle := agentcontext.NewAssembler(agentcontext.Dependencies{
+		Repo:    s.repo,
+		Gateway: s.gateway,
+	}).Build(ctx, agentcontext.Request{
+		Scene:          agentcontext.SceneInternal,
+		Method:         req.Method,
+		Host:           req.Host,
+		Path:           req.Path,
+		Headers:        req.Headers,
+		Agent:          agent,
+		Power:          power,
+		Input:          input,
 		History:        req.History,
+		Options:        runtimeOptions,
+		SourceTargetID: 0,
 	})
+	contextLatencyMs := time.Since(contextStartedAt).Milliseconds()
+	exec.ContextPlan = bundle.Diagnostics.Plan
+	exec.Baseline = bundle.Baseline
+	runtimePrompt := bundle.RuntimePrompt
 	s.repo.UpdateRun(ctx, runID, map[string]any{"runtime_context": runtimePrompt})
 	tracker.Step(ctx, "knowledge", "知识库工具", runtimePrompt, map[string]any{
-		"knowledge_bases": len(knowledgeBases),
-		"knowledge_mode":  "agentic_tools",
+		"knowledge_bases":      len(bundle.KnowledgeBases),
+		"knowledge_mode":       bundle.Diagnostics.KnowledgeMode,
+		"context":              bundle.Diagnostics,
+		"context_latency_ms":   contextLatencyMs,
+		"runtime_prompt_runes": len([]rune(runtimePrompt)),
+		"runtime_prompt_bytes": len(runtimePrompt),
 	}, stepStatusSuccess)
 
-	turn := s.collectAgentTurn(ctx, exec, runtimePrompt, req.History, 1, 1, "")
+	turn := s.collectAgentTurn(ctx, exec, runtimePrompt, bundle.ModelHistory, 1, 1, "")
 	tracker.Step(ctx, "llm_turn", "内部规划", turn.Text, map[string]any{
 		"kind":    turn.Kind,
 		"text":    turn.Text,

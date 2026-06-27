@@ -6,6 +6,10 @@ import {
 import { streamValueText as valueText } from '@/lib/stream'
 import { isPlainRecord as isPlainObject } from '@/lib/runtime-stream-output'
 import {
+  StreamTimingBadge,
+  type StreamTiming,
+} from '@/components/stream-timing'
+import {
   EnergonContentView,
   type EnergonOutput,
 } from '@/components/energon/content-view'
@@ -21,6 +25,8 @@ import {
 export type AgentResultOutput = EnergonOutput & {
   kind?: string
   type?: string
+  semantic_event?: unknown
+  event_type?: unknown
   content?: unknown
   suggestions?: unknown
   result_id?: unknown
@@ -59,10 +65,14 @@ export type AgentResultDetail = {
 export function AgentResultCard({
   detail,
   running,
+  timing,
+  now,
   onOpen,
 }: {
   detail: AgentResultDetail
   running?: boolean
+  timing?: StreamTiming
+  now?: number
   onOpen: () => void
 }) {
   const failedTasks = detail.tasks.filter((task) => task.status === 'failed')
@@ -78,6 +88,11 @@ export function AgentResultCard({
       className='block w-full rounded-md border bg-background px-3 py-2 text-left transition-colors hover:bg-muted/40'
       onClick={onOpen}
     >
+      {timing ? (
+        <div className='mb-2'>
+          <StreamTimingBadge timing={timing} now={now} className='max-w-full' />
+        </div>
+      ) : null}
       <div className='flex items-center justify-between gap-3'>
         <div className='min-w-0'>
           <div className='truncate text-sm font-medium'>内容已生成</div>
@@ -151,7 +166,19 @@ export function AgentResultDrawer({
 
 function visibleProgressText(value: unknown) {
   const text = valueText(value).trim()
-  return text === '内容已生成，点击查看结果。' ? '' : text
+  if (!text) {
+    return ''
+  }
+  const hidden = [
+    '内容已生成，点击查看结果。',
+    '等待生成结果',
+    '等待智能体返回',
+    '图片生成中，请稍后',
+    '素材生成中，请稍后',
+    '内容生成中，请稍后',
+    '生成中，请稍后',
+  ]
+  return hidden.some((item) => text.includes(item)) ? '' : text
 }
 
 export function applyResultTaskPlaceholders(

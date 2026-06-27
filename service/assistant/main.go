@@ -9,6 +9,7 @@ import (
 
 	assistantmodel "github.com/dever-package/bot/model/assistant"
 	memorymodel "github.com/dever-package/bot/model/memory"
+	memoryservice "github.com/dever-package/bot/service/memory"
 	deverjwt "github.com/shemic/dever/auth/jwt"
 )
 
@@ -103,15 +104,7 @@ type MemoryForgetRequest struct {
 	Hard bool
 }
 
-type RuntimeMemory struct {
-	ID         uint64 `json:"id"`
-	Kind       string `json:"kind"`
-	Title      string `json:"title"`
-	Content    string `json:"content"`
-	Tags       string `json:"tags"`
-	Importance int    `json:"importance"`
-	Scope      string `json:"scope"`
-}
+type RuntimeMemory = memoryservice.RuntimeMemory
 
 type ownerScope struct {
 	OwnerType string
@@ -557,29 +550,7 @@ func (s Service) ForgetMemory(ctx context.Context, req MemoryForgetRequest) erro
 }
 
 func (s Service) RuntimeMemories(ctx context.Context, sessionID uint64, query string, limit int) []RuntimeMemory {
-	if sessionID == 0 {
-		return []RuntimeMemory{}
-	}
-	session := assistantmodel.NewSessionModel().Find(ctx, map[string]any{
-		"id":     sessionID,
-		"status": assistantmodel.SessionStatusActive,
-	})
-	if session == nil {
-		return []RuntimeMemory{}
-	}
-	rows := memorymodel.NewMemoryModel().Select(
-		ctx,
-		map[string]any{
-			"owner_type": session.OwnerType,
-			"owner_id":   session.OwnerID,
-			"status":     memorymodel.StatusEnabled,
-		},
-		map[string]any{
-			"order": "main.importance desc,main.id desc",
-			"limit": clampLimit(limit, defaultMemoryLimit, maxMemoryLimit) * 3,
-		},
-	)
-	return runtimeMemoryRows(rows, *session, query, clampLimit(limit, defaultMemoryLimit, maxMemoryLimit))
+	return memoryservice.NewService().RuntimeMemoriesBySession(ctx, sessionID, query, limit)
 }
 
 func (s Service) resolveSession(ctx context.Context, owner ownerScope, req ResolveRequest) assistantmodel.Session {

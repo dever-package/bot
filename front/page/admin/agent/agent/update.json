@@ -141,6 +141,36 @@
       },
       {
         "type": "form-select",
+        "name": "规划模型能力",
+        "placeholder": "不启用独立规划模型",
+        "value": "form.planner_power_id",
+        "mode": "form",
+        "option": {
+          "service": "bot.agent.setting.OptionService.LoadTextPowers"
+        },
+        "info": "仅在上下文规划器确实需要 LLM 判断且这里已配置时调用；留空则不调用 planner LLM，使用确定性规划。",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[360px]"
+        }
+      },
+      {
+        "type": "form-select",
+        "name": "技能选择模型能力",
+        "placeholder": "不启用独立技能选择模型",
+        "value": "form.selector_power_id",
+        "mode": "form",
+        "option": {
+          "service": "bot.agent.setting.OptionService.LoadTextPowers"
+        },
+        "info": "仅在本地触发词无法唯一确定且这里已配置时调用；留空则只使用本地触发词和确定性跳过规则。",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[360px]"
+        }
+      },
+      {
+        "type": "form-select",
         "name": "规则方案",
         "placeholder": "请选择规则方案",
         "value": "form.setting_pack_id",
@@ -264,6 +294,8 @@
       "kind": "normal",
       "description": "",
       "llm_power_id": "",
+      "planner_power_id": "",
+      "selector_power_id": "",
       "setting_pack_id": 1,
       "skill_pack_id": 1,
       "temperature": 0.7,

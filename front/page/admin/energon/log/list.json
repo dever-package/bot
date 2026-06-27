@@ -153,6 +153,16 @@
               }
             },
             {
+              "name": "总Token",
+              "value": "total_tokens",
+              "type": "show-base"
+            },
+            {
+              "name": "缓存Token",
+              "value": "cached_tokens",
+              "type": "show-base"
+            },
+            {
               "value": "created_at",
               "type": "show-date"
             },
@@ -221,6 +231,7 @@
       "created_at_end": ""
     },
     "table": {
+      "field": "main.id,main.request_id,main.mode,main.protocol,main.power_id,main.power_key,main.power_name,main.provider_id,main.provider_name,main.account_id,main.account_name,main.service_id,main.service_name,main.status,main.latency,main.prompt_tokens,main.completion_tokens,main.total_tokens,main.cached_tokens,main.created_at",
       "searchFields": [
         "request_id",
         "power_key",

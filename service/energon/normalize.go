@@ -141,25 +141,46 @@ func (s GatewayService) recordCallLog(
 	result string,
 	nativeRequests ...botprovider.Request,
 ) botmodel.Log {
+	return s.recordCallLogWithUsage(ctx, req, selected, status, latency, result, tokenUsage{}, nativeRequests...)
+}
+
+func (s GatewayService) recordCallLogWithUsage(
+	ctx context.Context,
+	req *botprotocol.ShemicRequest,
+	selected selectedTarget,
+	status string,
+	latency time.Duration,
+	result string,
+	usage tokenUsage,
+	nativeRequests ...botprovider.Request,
+) botmodel.Log {
+	powerParams := buildPowerParamsLog(req, nativeRequests...)
+	if !usage.IsZero() {
+		powerParams["usage"] = usage.Map()
+	}
 	record := botlog.Record(ctx, botmodel.Log{
-		RequestID:     req.RequestID,
-		Mode:          req.Mode,
-		Protocol:      req.Protocol,
-		PowerID:       selected.Power.ID,
-		PowerKey:      selected.Power.Key,
-		PowerName:     selected.Power.Name,
-		PowerTargetID: selected.PowerTarget.ID,
-		PowerParams:   encodeLogJSON(buildPowerParamsLog(req, nativeRequests...)),
-		ServiceID:     selected.Service.ID,
-		ServiceName:   selected.Service.Name,
-		ProviderID:    selected.Provider.ID,
-		ProviderName:  selected.Provider.Name,
-		AccountID:     selected.Account.ID,
-		AccountName:   selected.Account.Name,
-		ServiceApi:    selected.ServiceAPI,
-		Status:        status,
-		Latency:       latency.Milliseconds(),
-		Result:        result,
+		RequestID:        req.RequestID,
+		Mode:             req.Mode,
+		Protocol:         req.Protocol,
+		PowerID:          selected.Power.ID,
+		PowerKey:         selected.Power.Key,
+		PowerName:        selected.Power.Name,
+		PowerTargetID:    selected.PowerTarget.ID,
+		PowerParams:      encodeLogJSON(powerParams),
+		ServiceID:        selected.Service.ID,
+		ServiceName:      selected.Service.Name,
+		ProviderID:       selected.Provider.ID,
+		ProviderName:     selected.Provider.Name,
+		AccountID:        selected.Account.ID,
+		AccountName:      selected.Account.Name,
+		ServiceApi:       selected.ServiceAPI,
+		Status:           status,
+		Latency:          latency.Milliseconds(),
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		TotalTokens:      usage.TotalTokens,
+		CachedTokens:     usage.CachedTokens,
+		Result:           result,
 	})
 	if status == StatusSuccess {
 		botruntime.Record(ctx, selected.Service.ID, latency)
@@ -169,10 +190,10 @@ func (s GatewayService) recordCallLog(
 
 func buildPowerParamsLog(req *botprotocol.ShemicRequest, nativeRequests ...botprovider.Request) map[string]any {
 	payload := map[string]any{
-		"set":     req.Set,
-		"input":   req.Input,
-		"history": req.History,
-		"options": req.Options,
+		"set":           req.Set,
+		"input":         req.Input,
+		"history_count": len(req.History),
+		"options":       req.Options,
 	}
 	if len(nativeRequests) == 0 {
 		return payload

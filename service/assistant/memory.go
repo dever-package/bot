@@ -3,13 +3,12 @@ package assistant
 import (
 	"context"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
-	"unicode"
 
 	assistantmodel "github.com/dever-package/bot/model/assistant"
 	memorymodel "github.com/dever-package/bot/model/memory"
+	memoryservice "github.com/dever-package/bot/service/memory"
 )
 
 const (
@@ -24,21 +23,16 @@ var sensitiveMemoryPatterns = []*regexp.Regexp{
 }
 
 func (s Service) sessionMemoryRows(ctx context.Context, owner ownerScope, session assistantmodel.Session, limit int) []map[string]any {
-	rows := memorymodel.NewMemoryModel().Select(
-		ctx,
-		map[string]any{
-			"owner_type": owner.OwnerType,
-			"owner_id":   owner.OwnerID,
-			"status":     memorymodel.StatusEnabled,
-		},
-		map[string]any{
-			"order": "main.importance desc,main.id desc",
-			"limit": clampLimit(limit, defaultMemoryLimit, maxMemoryLimit) * 3,
-		},
-	)
-	matched := rankSessionMemoryRows(rows, session, "", clampLimit(limit, defaultMemoryLimit, maxMemoryLimit))
-	result := make([]map[string]any, 0, len(matched))
-	for _, row := range matched {
+	rows := memoryservice.NewService().RuntimeRows(ctx, memoryservice.RuntimeRequest{
+		OwnerType:  owner.OwnerType,
+		OwnerID:    owner.OwnerID,
+		AgentKey:   session.AgentKey,
+		ContextKey: session.ContextKey,
+		SessionID:  session.ID,
+		Limit:      limit,
+	})
+	result := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
 		result = append(result, memoryMap(row))
 	}
 	return result
@@ -227,7 +221,7 @@ func forgetMemoryInstruction(text string) (string, bool) {
 }
 
 func (s Service) forgetSimilarMemories(ctx context.Context, owner ownerScope, session assistantmodel.Session, target string) {
-	target = normalizeMemoryComparable(target)
+	target = memoryservice.NormalizeComparableText(target)
 	if target == "" {
 		return
 	}
@@ -247,8 +241,8 @@ func (s Service) forgetSimilarMemories(ctx context.Context, owner ownerScope, se
 		if row == nil || !memoryMatchesRuntimeSession(*row, session) {
 			continue
 		}
-		current := normalizeMemoryComparable(row.Title + " " + row.Content)
-		if memorySimilar(target, current) {
+		current := memoryservice.NormalizeComparableText(row.Title + " " + row.Content)
+		if memoryservice.TextSimilar(target, current) {
 			memorymodel.NewMemoryModel().Update(ctx, map[string]any{"id": row.ID}, map[string]any{
 				"status": memorymodel.StatusDisabled,
 			})
@@ -257,7 +251,7 @@ func (s Service) forgetSimilarMemories(ctx context.Context, owner ownerScope, se
 }
 
 func (s Service) findSimilarMemory(ctx context.Context, owner ownerScope, scope string, contextKey string, agentKey string, sessionID uint64, title string, content string) *memorymodel.Memory {
-	probe := normalizeMemoryComparable(title + " " + content)
+	probe := memoryservice.NormalizeComparableText(title + " " + content)
 	if probe == "" {
 		return nil
 	}
@@ -278,8 +272,8 @@ func (s Service) findSimilarMemory(ctx context.Context, owner ownerScope, scope 
 		if row == nil || !memoryMatchesScope(*row, req) {
 			continue
 		}
-		current := normalizeMemoryComparable(row.Title + " " + row.Content)
-		if memorySimilar(probe, current) {
+		current := memoryservice.NormalizeComparableText(row.Title + " " + row.Content)
+		if memoryservice.TextSimilar(probe, current) {
 			return row
 		}
 	}
@@ -292,112 +286,6 @@ func memoryMaps(rows []*memorymodel.Memory) []map[string]any {
 		result = append(result, memoryMap(row))
 	}
 	return result
-}
-
-type scoredMemoryRow struct {
-	row   *memorymodel.Memory
-	score float64
-}
-
-func runtimeMemoryRows(rows []*memorymodel.Memory, session assistantmodel.Session, query string, limit int) []RuntimeMemory {
-	matched := rankSessionMemoryRows(rows, session, query, limit)
-	result := make([]RuntimeMemory, 0, len(matched))
-	for _, row := range matched {
-		result = append(result, RuntimeMemory{
-			ID:         row.ID,
-			Kind:       row.Kind,
-			Title:      row.Title,
-			Content:    row.Content,
-			Tags:       row.Tags,
-			Importance: row.Importance,
-			Scope:      displayMemoryScope(*row),
-		})
-	}
-	return result
-}
-
-func rankSessionMemoryRows(rows []*memorymodel.Memory, session assistantmodel.Session, query string, limit int) []*memorymodel.Memory {
-	if limit <= 0 {
-		return []*memorymodel.Memory{}
-	}
-	scored := make([]scoredMemoryRow, 0, len(rows))
-	for _, row := range rows {
-		if row == nil || !memoryMatchesRuntimeSession(*row, session) {
-			continue
-		}
-		scored = append(scored, scoredMemoryRow{
-			row:   row,
-			score: runtimeMemoryScore(*row, query),
-		})
-	}
-	sort.SliceStable(scored, func(i, j int) bool {
-		if scored[i].score == scored[j].score {
-			return scored[i].row.ID > scored[j].row.ID
-		}
-		return scored[i].score > scored[j].score
-	})
-	if len(scored) > limit {
-		scored = scored[:limit]
-	}
-	result := make([]*memorymodel.Memory, 0, len(scored))
-	for _, item := range scored {
-		result = append(result, item.row)
-	}
-	return result
-}
-
-func runtimeMemoryScore(row memorymodel.Memory, query string) float64 {
-	score := float64(clampMemoryImportance(row.Importance)) / 100 * 0.35
-	score += runtimeMemoryConfidence(row.Confidence) * 0.2
-	score += runtimeMemoryKindBoost(row.Kind)
-	switch normalizeStoredMemoryScope(row) {
-	case memorymodel.ScopeSession:
-		score += 0.12
-	case memorymodel.ScopeContext:
-		score += 0.08
-	}
-	query = normalizeMemoryComparable(query)
-	if query == "" {
-		return score
-	}
-	score += memoryTextScore(query, row.Title) * 0.18
-	score += memoryTextScore(query, row.Content) * 0.28
-	score += memoryTextScore(query, row.Tags) * 0.08
-	return score
-}
-
-func runtimeMemoryConfidence(value float64) float64 {
-	if value <= 0 {
-		return 0.5
-	}
-	if value > 1 {
-		return 1
-	}
-	return value
-}
-
-func runtimeMemoryKindBoost(kind string) float64 {
-	switch normalizeMemoryKind(kind) {
-	case "procedural":
-		return 0.12
-	case "persona":
-		return 0.1
-	case "semantic":
-		return 0.06
-	default:
-		return 0.03
-	}
-}
-
-func memoryTextScore(query string, text string) float64 {
-	current := normalizeMemoryComparable(text)
-	if query == "" || current == "" {
-		return 0
-	}
-	if query == current || strings.Contains(current, query) || strings.Contains(query, current) {
-		return 1
-	}
-	return memoryBigramSimilarity(query, current)
 }
 
 func memoryMatchesListRequest(row memorymodel.Memory, req MemoryListRequest) bool {
@@ -526,62 +414,4 @@ func containsAny(text string, values []string) bool {
 		}
 	}
 	return false
-}
-
-func normalizeMemoryComparable(text string) string {
-	var builder strings.Builder
-	for _, current := range strings.ToLower(text) {
-		if unicode.IsLetter(current) || unicode.IsDigit(current) {
-			builder.WriteRune(current)
-		}
-	}
-	return builder.String()
-}
-
-func memorySimilar(left string, right string) bool {
-	left = normalizeMemoryComparable(left)
-	right = normalizeMemoryComparable(right)
-	if left == "" || right == "" {
-		return false
-	}
-	if left == right {
-		return true
-	}
-	if len(left) >= 16 && strings.Contains(right, left) {
-		return true
-	}
-	if len(right) >= 16 && strings.Contains(left, right) {
-		return true
-	}
-	return memoryBigramSimilarity(left, right) >= 0.82
-}
-
-func memoryBigramSimilarity(left string, right string) float64 {
-	leftSet := bigramSet(left)
-	rightSet := bigramSet(right)
-	if len(leftSet) == 0 || len(rightSet) == 0 {
-		return 0
-	}
-	intersection := 0
-	for key := range leftSet {
-		if rightSet[key] {
-			intersection++
-		}
-	}
-	return float64(intersection*2) / float64(len(leftSet)+len(rightSet))
-}
-
-func bigramSet(text string) map[string]bool {
-	runes := []rune(text)
-	if len(runes) < 2 {
-		if text == "" {
-			return map[string]bool{}
-		}
-		return map[string]bool{text: true}
-	}
-	result := make(map[string]bool, len(runes)-1)
-	for i := 0; i < len(runes)-1; i++ {
-		result[string(runes[i:i+2])] = true
-	}
-	return result
 }

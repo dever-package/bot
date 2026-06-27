@@ -94,6 +94,42 @@
         }
       },
       {
+        "type": "show-base",
+        "name": "输入Token",
+        "value": "form.prompt_tokens",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "输出Token",
+        "value": "form.completion_tokens",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "总Token",
+        "value": "form.total_tokens",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "缓存Token",
+        "value": "form.cached_tokens",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
         "type": "show-date",
         "value": "form.created_at",
         "mode": "form",
@@ -212,6 +248,16 @@
               "meta": {
                 "format": "duration-ms"
               }
+            },
+            {
+              "name": "总Token",
+              "value": "total_tokens",
+              "type": "show-base"
+            },
+            {
+              "name": "缓存Token",
+              "value": "cached_tokens",
+              "type": "show-base"
             },
             {
               "name": "错误详情",

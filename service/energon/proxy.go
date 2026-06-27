@@ -63,7 +63,8 @@ func (s GatewayService) callProxyTarget(ctx context.Context, req *botprotocol.Sh
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem}, fmt.Errorf("来源返回失败: %s", errorMessage)
 	}
 
-	logItem := s.recordCallLog(ctx, req, selected, StatusSuccess, time.Since(startedAt), encodeLogJSON(resp.Body), nativeReq)
+	usage := extractResponseTokenUsage(resp)
+	logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusSuccess, time.Since(startedAt), encodeLogJSON(resp.Body), usage, nativeReq)
 	return callResult{
 		NativeRequest: nativeReq,
 		Response:      resp,

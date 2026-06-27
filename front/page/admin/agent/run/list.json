@@ -226,6 +226,7 @@
       "created_at_end": ""
     },
     "table": {
+      "field": "main.id,main.request_id,main.agent_id,main.status,main.step_count,main.latency,main.started_at,main.finished_at,main.created_at",
       "searchFields": [
         "request_id"
       ],

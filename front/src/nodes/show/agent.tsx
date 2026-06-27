@@ -69,6 +69,7 @@ import type { EnergonOutput } from "@/components/energon/content-view";
 import {
   cancelStreamTiming,
   StreamTimingBadge,
+  createRuntimeStreamTiming,
   createStreamTiming,
   finishStreamTiming,
   isStreamTimingStatusOutput,
@@ -224,8 +225,9 @@ const EMPTY_OUTPUT: AgentStreamOutput = {
   text: "",
   finalOutput: null,
 };
-const AGENT_RUN_RECOVERY_TIMEOUT_MS = 3600 * 1000;
-const AGENT_RUN_RECOVERY_INTERVAL_MS = 1000;
+const AGENT_RUN_RECOVERY_TIMEOUT_MS = 15 * 1000;
+const AGENT_RUN_RECOVERY_INTERVAL_MS = 1500;
+const AGENT_RUN_RECOVERY_MAX_STATUS_CHECKS = 6;
 
 export function ShowAgent({ item, store }: NodeItemProps) {
   const navigate = useNavigate();
@@ -1161,11 +1163,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
           activeRequestID = valueText(nextRequestID);
           setRequestID(activeRequestID);
           saveAssistantRunningMessage(activeRequestID);
-          void syncAssistantRunStatusFrames({
-            messageID: assistantID,
-            requestID: activeRequestID,
-            token,
-          });
         },
         onFrame: (frame) => {
           if (runTokenRef.current !== token) {
@@ -1384,50 +1381,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     });
   };
 
-  const syncAssistantRunStatusFrames = async ({
-    messageID,
-    requestID,
-    token,
-  }: {
-    messageID: string;
-    requestID: string;
-    token: number;
-  }) => {
-    if (!requestID) {
-      return;
-    }
-    const deadline = Date.now() + AGENT_RUN_RECOVERY_TIMEOUT_MS;
-    const recoveredStreamIDs = new Set<string>();
-    while (runTokenRef.current === token && Date.now() < deadline) {
-      const statusPayload = await fetchAgentRunStatus(
-        runStatusApi,
-        requestID,
-      ).catch(() => null);
-      if (!statusPayload) {
-        await waitAgentRunRecoveryDelay(AGENT_RUN_RECOVERY_INTERVAL_MS);
-        continue;
-      }
-
-      for (const frame of agentRunStatusStreamFrames(
-        statusPayload,
-        requestID,
-        recoveredStreamIDs,
-      )) {
-        const streamID = valueText(frame.stream_id);
-        if (streamID) {
-          recoveredStreamIDs.add(streamID);
-        }
-        applyFrameToMessage(messageID, frame, { updateCancelable: false });
-      }
-
-      const run = isPlainObject(statusPayload.run) ? statusPayload.run : {};
-      if (isFinishedAgentRunStatus(valueText(run.status).toLowerCase())) {
-        return;
-      }
-      await waitAgentRunRecoveryDelay(AGENT_RUN_RECOVERY_INTERVAL_MS);
-    }
-  };
-
   const recoverAssistantFinalFromRunStatus = async ({
     runStatusApi,
     requestID,
@@ -1441,8 +1394,14 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   }) => {
     const deadline = Date.now() + AGENT_RUN_RECOVERY_TIMEOUT_MS;
     let failedStatusChecks = 0;
+    let statusChecks = 0;
     const recoveredStreamIDs = new Set<string>();
-    while (runTokenRef.current === token && Date.now() < deadline) {
+    while (
+      runTokenRef.current === token &&
+      Date.now() < deadline &&
+      statusChecks < AGENT_RUN_RECOVERY_MAX_STATUS_CHECKS
+    ) {
+      statusChecks += 1;
       const statusPayload = await fetchAgentRunStatus(
         runStatusApi,
         requestID,
@@ -1699,7 +1658,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         finalOutput: currentOutput.finalOutput,
       };
 
-      const event = valueText(frameOutput.event).toLowerCase();
+      const event = agentResultRuntimeEvent(frameOutput);
       const frameInteraction = normalizeOutputInteraction(frameOutput);
       if (frame?.type !== "result" && isAgentResultRuntimeEvent(event)) {
         return applyResultRuntimeEvent(message, frameOutput, frame);
@@ -2290,7 +2249,7 @@ function agentRunStatusStreamFrame(
   const output = isPlainObject(payload.output)
     ? (payload.output as AgentOutput)
     : {};
-  const event = valueText(output.event).toLowerCase();
+  const event = agentResultRuntimeEvent(output);
   const frameType = valueText(payload.type || "stream").toLowerCase();
   if (frameType !== "result" && !isAgentResultRuntimeEvent(event)) {
     return null;
@@ -3012,6 +2971,9 @@ function normalizeAssistantSessionMessage(value: unknown, index: number) {
   const content = isPlainObject(value.content) ? value.content : {};
   const output = isPlainObject(value.output) ? value.output : {};
   const kind = valueText(content.kind || value.kind) as AgentMessage["kind"];
+  const actionTiming = isRunningMessage
+    ? createStreamTiming("等待智能体返回")
+    : normalizeSavedAssistantActionTiming(value, output);
   const message: AgentMessage = {
     id: `saved-${valueText(value.id) || index}`,
     role,
@@ -3022,9 +2984,7 @@ function normalizeAssistantSessionMessage(value: unknown, index: number) {
       : undefined,
     requestID: valueText(value.request_id),
     running: isRunningMessage,
-    actionTiming: isRunningMessage
-      ? createStreamTiming("等待智能体返回")
-      : undefined,
+    actionTiming,
   };
   if (role === "assistant") {
     const finalOutput = isEmptyRuntimeOutput(output)
@@ -3052,6 +3012,77 @@ function normalizeAssistantSessionMessage(value: unknown, index: number) {
     }
   }
   return message;
+}
+
+function normalizeSavedAssistantActionTiming(
+  message: Record<string, unknown>,
+  output: Record<string, unknown>,
+) {
+  const source = savedAssistantTimingSource(output);
+  const startedAt = firstSavedAssistantTimingValue(
+    message,
+    output,
+    source,
+    "started_at_ms",
+    "started_at",
+  );
+  if (startedAt == null) {
+    return undefined;
+  }
+  const finishedAt = firstSavedAssistantTimingValue(
+    message,
+    output,
+    source,
+    "finished_at_ms",
+    "finished_at",
+  );
+  return createRuntimeStreamTiming({
+    status: Number(message.status || 0) === 2 ? "failed" : "done",
+    startedAt,
+    finishedAt,
+    label: "内容生成完成",
+  });
+}
+
+function savedAssistantTimingSource(output: Record<string, unknown>) {
+  const result = isPlainObject(output.result)
+    ? (output.result as Record<string, unknown>)
+    : {};
+  const content = isPlainObject(output.content)
+    ? (output.content as Record<string, unknown>)
+    : {};
+  const resultContent = isPlainObject(result.content)
+    ? (result.content as Record<string, unknown>)
+    : {};
+  return {
+    result,
+    content,
+    resultContent,
+  };
+}
+
+function firstSavedAssistantTimingValue(
+  message: Record<string, unknown>,
+  output: Record<string, unknown>,
+  source: ReturnType<typeof savedAssistantTimingSource>,
+  primaryKey: string,
+  fallbackKey: string,
+) {
+  for (const row of [
+    message,
+    output,
+    source.result,
+    source.content,
+    source.resultContent,
+  ]) {
+    if (row[primaryKey] != null && row[primaryKey] !== "") {
+      return row[primaryKey];
+    }
+    if (row[fallbackKey] != null && row[fallbackKey] !== "") {
+      return row[fallbackKey];
+    }
+  }
+  return undefined;
 }
 
 function markInteractionMessageAnswered(
@@ -3277,14 +3308,24 @@ function AgentAssistantMessage({
   const draftPatchPayload = message.output?.finalOutput
     ? resolveSkillDraftPatchPayload(message.output.finalOutput)
     : null;
+  const showInlineTiming = Boolean(message.actionTiming && !isResultCard);
 
   return (
     <div className="space-y-2">
-      <AgentResultKindBadge message={message} hasOutput={hasOutput} />
+      {showInlineTiming ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <AgentResultKindBadge message={message} hasOutput={hasOutput} />
+          <StreamTimingBadge timing={message.actionTiming} now={now} />
+        </div>
+      ) : (
+        <AgentResultKindBadge message={message} hasOutput={hasOutput} />
+      )}
       {isResultCard && resultDetail ? (
         <AgentResultCard
           detail={resultDetail}
           running={Boolean(message.running)}
+          timing={message.actionTiming}
+          now={now}
           onOpen={onOpenResult}
         />
       ) : hasOutput ? (
@@ -3299,9 +3340,6 @@ function AgentAssistantMessage({
         onApply={() => onApplySkillDraftPatch(message.output?.finalOutput)}
         onOpenDraftBox={onOpenDraftBox}
       />
-      {!isResultCard ? (
-        <StreamTimingBadge timing={message.actionTiming} now={now} />
-      ) : null}
       {message.error ? (
         <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-destructive">
           {message.error}
@@ -3941,7 +3979,10 @@ function isAgentResultRuntimeEvent(event: string) {
   return (
     event === "result_detail" ||
     event === "result_task" ||
-    event === "result_progress"
+    event === "result_progress" ||
+    event === "result_created" ||
+    event === "task_progress" ||
+    event === "task_done"
   );
 }
 
@@ -3950,14 +3991,18 @@ function applyResultRuntimeEvent(
   output: AgentOutput,
   frame: AgentFrame,
 ): AgentMessage {
-  const event = valueText(output.event).toLowerCase();
+  const event = agentResultRuntimeEvent(output);
   let detail = message.resultDetail;
-  if (event === "result_detail") {
+  if (event === "result_detail" || event === "result_created") {
     detail = mergeMessageResultDetail(
       detail,
       resultDetailFromRuntimeOutput(output),
     );
-  } else if (event === "result_task") {
+  } else if (
+    event === "result_task" ||
+    event === "task_progress" ||
+    event === "task_done"
+  ) {
     detail = updateResultDetailTask(
       detail,
       normalizeAgentResultTask(output),
@@ -3977,6 +4022,10 @@ function applyResultRuntimeEvent(
     resultDetail: detail,
     requestID: valueText(frame?.request_id) || message.requestID,
   };
+}
+
+function agentResultRuntimeEvent(output: AgentOutput) {
+  return valueText(output.semantic_event || output.event).toLowerCase();
 }
 
 function buildAgentResultDetail(
@@ -4103,7 +4152,7 @@ function actionResultTaskFromOutput(
     power,
     execution: "async",
     status,
-    text: valueText(output.text || output.progress_text).trim(),
+    text: visibleAgentResultTaskText(output.text || output.progress_text),
     error,
     progress: normalizeProgressValue(
       output.progress ?? meta.progress ?? meta.percent,
@@ -4304,7 +4353,7 @@ function normalizeAgentResultTask(value: unknown): AgentResultTask | null {
     power: valueText(value.power).trim(),
     execution: valueText(value.execution || value.mode).trim() || "async",
     status: valueText(value.status || value.state).trim() || "pending",
-    text: valueText(value.text || value.message).trim(),
+    text: visibleAgentResultTaskText(value.text || value.message),
     error: valueText(value.error).trim(),
     progress: normalizeProgressValue(
       value.progress ?? meta.progress ?? meta.percent,
@@ -4320,6 +4369,22 @@ function normalizeProgressValue(value: unknown) {
     return null;
   }
   return Math.max(0, Math.min(100, Math.round(progress)));
+}
+
+function visibleAgentResultTaskText(value: unknown) {
+  const text = valueText(value).trim();
+  if (!text) {
+    return "";
+  }
+  const hidden = [
+    "等待生成结果",
+    "等待智能体返回",
+    "图片生成中，请稍后",
+    "素材生成中，请稍后",
+    "内容生成中，请稍后",
+    "生成中，请稍后",
+  ];
+  return hidden.some((item) => text.includes(item)) ? "" : text;
 }
 
 function buildContentViewOutput(message: AgentMessage) {

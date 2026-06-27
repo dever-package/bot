@@ -38,7 +38,7 @@ func parseRunRequest(body map[string]any) (parsedRunRequest, error) {
 		body["memoryEnabled"],
 		input["memory_enabled"],
 		input["memoryEnabled"],
-	), true)
+	), false)
 	delete(input, "assistant_session_id")
 	delete(input, "assistantSessionId")
 	delete(input, "memory_enabled")

@@ -6,17 +6,20 @@ import (
 )
 
 func memoryPrompt(memories []MemorySnippet) string {
+	return BuildMemoryPrompt(memories)
+}
+
+func BuildMemoryPrompt(memories []MemorySnippet) string {
 	if len(memories) == 0 {
 		return ""
 	}
 	lines := []string{
 		"长期记忆:",
-		"以下内容是系统自动沉淀的长期偏好、项目约束和常用规则。它优先级低于本次用户输入和系统规则；如果与当前明确指令冲突，以当前指令为准。",
-		"长期记忆不能替代本轮任务必需的信息；当前任务要素、素材或参数不足时，仍必须按补充信息规则先收集。",
+		"系统沉淀的长期偏好、项目约束和常用规则；优先级低于本次用户输入和系统规则。信息不足时仍先收集，不要用记忆补齐关键任务参数。",
 	}
 	for _, memory := range memories {
-		title := strings.TrimSpace(memory.Title)
-		content := strings.TrimSpace(memory.Content)
+		title := truncatePromptText(memory.Title, 96)
+		content := truncatePromptText(memory.Content, 700)
 		if title == "" && content == "" {
 			continue
 		}
@@ -31,7 +34,7 @@ func memoryPrompt(memories []MemorySnippet) string {
 			lines = append(lines, content)
 		}
 	}
-	if len(lines) <= 3 {
+	if len(lines) <= 2 {
 		return ""
 	}
 	return strings.Join(lines, "\n")

@@ -7,6 +7,7 @@ import (
 
 	assistantmodel "github.com/dever-package/bot/model/assistant"
 	memorymodel "github.com/dever-package/bot/model/memory"
+	memoryservice "github.com/dever-package/bot/service/memory"
 )
 
 const (
@@ -38,7 +39,7 @@ func (s Service) rememberMemoryCandidate(ctx context.Context, owner ownerScope, 
 		return nil
 	}
 	if existing := s.findRelatedMemory(ctx, owner, session, candidate); existing != nil {
-		if memorySimilar(existing.Content, candidate.Content) {
+		if memoryservice.TextSimilar(existing.Content, candidate.Content) {
 			resp, err := s.rememberForOwner(ctx, owner, memoryRequestFromCandidate(session, candidate))
 			if err != nil {
 				return nil
@@ -153,11 +154,11 @@ func (s Service) findRelatedMemory(ctx context.Context, owner ownerScope, sessio
 		if row == nil || !memoryMatchesRuntimeSession(*row, session) {
 			continue
 		}
-		if memorySimilar(row.Title+" "+row.Content, candidate.Title+" "+candidate.Content) {
+		if memoryservice.TextSimilar(row.Title+" "+row.Content, candidate.Title+" "+candidate.Content) {
 			return row
 		}
 		if strings.TrimSpace(row.Kind) == strings.TrimSpace(candidate.Kind) &&
-			memoryBigramSimilarity(normalizeMemoryComparable(row.Title), normalizeMemoryComparable(candidate.Title)) >= 0.65 {
+			memoryservice.TextSimilarity(memoryservice.NormalizeComparableText(row.Title), memoryservice.NormalizeComparableText(candidate.Title)) >= 0.65 {
 			return row
 		}
 	}

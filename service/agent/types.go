@@ -23,6 +23,10 @@ const (
 	stepStatusWarning = "warning"
 
 	defaultAgentStreamBlockMs = 1000
+
+	maxStepContentRunes        = 20000
+	maxStepPayloadPreviewRunes = 12000
+	maxStepPayloadBytes        = 128 * 1024
 )
 
 type Service struct {
@@ -83,8 +87,36 @@ func (t *runTracker) Step(ctx context.Context, stepType string, title string, co
 		Seq:       t.seq,
 		Type:      stepType,
 		Title:     title,
-		Content:   content,
-		Payload:   jsonText(payload),
+		Content:   compactStepContent(content),
+		Payload:   compactStepPayload(jsonText(payload)),
 		Status:    status,
 	})
+}
+
+func compactStepContent(content string) string {
+	return truncateRunesWithNotice(content, maxStepContentRunes)
+}
+
+func compactStepPayload(payload string) string {
+	payload = strings.TrimSpace(payload)
+	if payload == "" || len(payload) <= maxStepPayloadBytes {
+		return payload
+	}
+	return jsonText(map[string]any{
+		"truncated":      true,
+		"original_bytes": len(payload),
+		"preview":        truncateRunesWithNotice(payload, maxStepPayloadPreviewRunes),
+	})
+}
+
+func truncateRunesWithNotice(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit <= 0 || value == "" {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit]) + "\n\n...内容过长，已截断。"
 }

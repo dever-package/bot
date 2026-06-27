@@ -84,7 +84,8 @@ func (s GatewayService) callNormalizeTarget(
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 
-	logItem := s.recordCallLog(ctx, req, selected, StatusSuccess, time.Since(startedAt), encodeLogJSON(data), nativeReq)
+	usage := extractResponseTokenUsage(resp, data)
+	logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusSuccess, time.Since(startedAt), encodeLogJSON(data), usage, nativeReq)
 	return callResult{
 		NativeRequest: nativeReq,
 		Response:      resp,
@@ -222,6 +223,7 @@ func (s GatewayService) callStreamTarget(
 			NativeRequest: nativeReq,
 			Response:      result.Response,
 			Data:          result.Data,
+			Usage:         extractResponseTokenUsage(result.Response, result.Data),
 			Progress:      progress,
 			WriteEnd:      true,
 		})
@@ -231,6 +233,7 @@ func (s GatewayService) callStreamTarget(
 		nativeReq.Body = map[string]any{}
 	}
 	nativeReq.Body["stream"] = true
+	enableStreamUsage(adapter, nativeReq.Body)
 
 	streamClient, ok := s.client.(botprovider.StreamClient)
 	if !ok {
@@ -240,7 +243,9 @@ func (s GatewayService) callStreamTarget(
 	}
 
 	streamOutputs := make([]botprotocol.Output, 0)
+	streamUsage := tokenUsage{}
 	resp, err := streamClient.Stream(ctx, nativeReq, func(chunk botprovider.StreamChunk) error {
+		streamUsage = streamUsage.Prefer(extractTokenUsage(chunk.Data))
 		output := botprotocol.ExtractStreamOutput(chunk.Data)
 		if len(output) == 0 {
 			return nil
@@ -281,6 +286,7 @@ func (s GatewayService) callStreamTarget(
 		NativeRequest: nativeReq,
 		Response:      resp,
 		Data:          data,
+		Usage:         streamUsage.Prefer(extractResponseTokenUsage(resp, data)),
 		Progress:      progress,
 		WriteEnd:      writeEnd,
 	})
@@ -291,6 +297,26 @@ func (s GatewayService) writeStreamStatus(ctx context.Context, requestID string,
 		"event": "status",
 		"text":  message,
 	})
+}
+
+func enableStreamUsage(adapter botprotocol.Adapter, body map[string]any) {
+	if adapter == nil || body == nil {
+		return
+	}
+	switch adapter.Name() {
+	case "openai", "doubao":
+	default:
+		return
+	}
+
+	options, _ := body["stream_options"].(map[string]any)
+	if options == nil {
+		options = map[string]any{}
+	}
+	if _, exists := options["include_usage"]; !exists {
+		options["include_usage"] = true
+	}
+	body["stream_options"] = options
 }
 
 func (s GatewayService) streamOutputWriter(ctx context.Context, requestID string) func(botprotocol.Output) error {
@@ -313,13 +339,14 @@ type streamFinishInput struct {
 	NativeRequest botprovider.Request
 	Response      *botprovider.Response
 	Data          any
+	Usage         tokenUsage
 	Progress      *botruntime.ProgressTracker
 	WriteEnd      bool
 }
 
 func (s GatewayService) finishStreamResult(ctx context.Context, input streamFinishInput) (callResult, error) {
 	if err := input.Progress.Complete(); err != nil {
-		logItem := s.recordCallLog(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("stream_progress", err.Error()), input.NativeRequest)
+		logItem := s.recordCallLogWithUsage(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("stream_progress", err.Error()), input.Usage, input.NativeRequest)
 		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err
 	}
 	if input.WriteEnd {
@@ -330,11 +357,11 @@ func (s GatewayService) finishStreamResult(ctx context.Context, input streamFini
 
 	resultResp := botprotocol.BuildSuccessResponse(input.Request.RequestID, input.Data)
 	if err := s.writeStream(ctx, input.Request.RequestID, resultResp); err != nil {
-		logItem := s.recordCallLog(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("stream_result", err.Error()), input.NativeRequest)
+		logItem := s.recordCallLogWithUsage(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("stream_result", err.Error()), input.Usage, input.NativeRequest)
 		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err
 	}
 
-	logItem := s.recordCallLog(ctx, input.Request, input.Selected, StatusSuccess, time.Since(input.StartedAt), encodeLogJSON(resultResp.Payload()), input.NativeRequest)
+	logItem := s.recordCallLogWithUsage(ctx, input.Request, input.Selected, StatusSuccess, time.Since(input.StartedAt), encodeLogJSON(resultResp.Payload()), input.Usage, input.NativeRequest)
 	return callResult{
 		NativeRequest: input.NativeRequest,
 		Response:      input.Response,

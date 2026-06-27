@@ -51,6 +51,12 @@ func (AgentHook) ProviderBeforeSaveAgent(c *server.Context, params []any) any {
 	if shouldNormalizeField(record, "llm_power_id", partial) {
 		validateAgentLLMPower(c, util.ToUint64(record["llm_power_id"]))
 	}
+	if shouldNormalizeField(record, "planner_power_id", partial) {
+		validateOptionalAgentTextPower(c, "form.planner_power_id", util.ToUint64(record["planner_power_id"]), "规划模型能力")
+	}
+	if shouldNormalizeField(record, "selector_power_id", partial) {
+		validateOptionalAgentTextPower(c, "form.selector_power_id", util.ToUint64(record["selector_power_id"]), "技能选择模型能力")
+	}
 	return record
 }
 
@@ -351,14 +357,25 @@ func validateAgentLLMPower(c *server.Context, powerID uint64) {
 	if powerID == 0 {
 		panicAgentField("form.llm_power_id", "LLM能力不能为空。")
 	}
+	validateAgentTextPower(c, "form.llm_power_id", powerID, "LLM能力")
+}
+
+func validateOptionalAgentTextPower(c *server.Context, field string, powerID uint64, label string) {
+	if powerID == 0 {
+		return
+	}
+	validateAgentTextPower(c, field, powerID, label)
+}
+
+func validateAgentTextPower(c *server.Context, field string, powerID uint64, label string) {
 	row := energonmodel.NewPowerModel().Find(c.Context(), map[string]any{"id": powerID})
 	if row == nil {
-		panicAgentField("form.llm_power_id", "LLM能力不存在。")
+		panicAgentField(field, label+"不存在。")
 	}
 	if row.Status != 1 {
-		panicAgentField("form.llm_power_id", "LLM能力已停用。")
+		panicAgentField(field, label+"已停用。")
 	}
 	if strings.ToLower(strings.TrimSpace(row.Kind)) != "text" {
-		panicAgentField("form.llm_power_id", "LLM能力只能选择文本类型能力。")
+		panicAgentField(field, label+"只能选择文本类型能力。")
 	}
 }

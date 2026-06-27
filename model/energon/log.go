@@ -27,10 +27,14 @@ type Log struct {
 	ServiceName string `dorm:"type:varchar(128);not null;default:'';comment:服务名称"`
 	ServiceApi  string `dorm:"type:varchar(128);not null;comment:服务地址"`
 
-	Status    string    `dorm:"type:varchar(32);not null;comment:状态"`
-	Latency   int64     `dorm:"type:bigint;not null;default:0;comment:耗时"`
-	Result    string    `dorm:"type:text;not null;comment:响应数据"`
-	CreatedAt time.Time `dorm:"comment:创建时间"`
+	Status           string    `dorm:"type:varchar(32);not null;comment:状态"`
+	Latency          int64     `dorm:"type:bigint;not null;default:0;comment:耗时"`
+	PromptTokens     int64     `dorm:"type:bigint;not null;default:0;comment:输入Token"`
+	CompletionTokens int64     `dorm:"type:bigint;not null;default:0;comment:输出Token"`
+	TotalTokens      int64     `dorm:"type:bigint;not null;default:0;comment:总Token"`
+	CachedTokens     int64     `dorm:"type:bigint;not null;default:0;comment:缓存命中Token"`
+	Result           string    `dorm:"type:text;not null;comment:响应数据"`
+	CreatedAt        time.Time `dorm:"comment:创建时间"`
 }
 
 type LogIndex struct {

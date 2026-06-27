@@ -383,7 +383,8 @@ func (s Service) runAgentNode(ctx context.Context, run teammodel.Run, flowRun te
 		return nil, teammodel.RunStatusFail, 0, err
 	}
 	goal := firstText(config["goal"], config["task"], node.Name)
-	prompt := buildAgentPrompt(team, flow, node, executor, goal, input)
+	memories := s.roleRuntimeMemories(ctx, team, executor.Role, input)
+	prompt := buildAgentPrompt(team, flow, node, executor, goal, input, memories)
 	nodeRunID := s.currentNodeRunID(ctx, flowRun.ID, node.ID)
 	nodeRun := s.repo.FindNodeRun(ctx, nodeRunID)
 	var agentRunID atomic.Uint64
@@ -856,7 +857,7 @@ func findRuntimeRole(roles []teammodel.Role, roleID uint64, roleKey string, role
 	return first, first != nil
 }
 
-func buildAgentPrompt(team teammodel.Team, flow teammodel.Flow, node teammodel.FlowNode, executor resolvedNodeAgent, goal string, input map[string]any) string {
+func buildAgentPrompt(team teammodel.Team, flow teammodel.Flow, node teammodel.FlowNode, executor resolvedNodeAgent, goal string, input map[string]any, memories []memoryservice.RuntimeMemory) string {
 	parts := []string{
 		"你正在作为 Team 编排中的一个智能体节点执行任务。",
 		fmt.Sprintf("团队：%s", team.Name),
@@ -868,6 +869,9 @@ func buildAgentPrompt(team teammodel.Team, flow teammodel.Flow, node teammodel.F
 	if executor.Role != nil {
 		parts = append(parts, fmt.Sprintf("当前角色：%s（%s / %s）", executor.Role.Name, executor.Role.RoleType, executor.Role.RoleKey))
 		appendPromptText(&parts, "角色职责", executor.Role.Assignment)
+	}
+	if memoryPrompt := teamRoleMemoryPrompt(memories); memoryPrompt != "" {
+		parts = append(parts, memoryPrompt)
 	}
 	appendPromptText(&parts, "节点目标", goal)
 	parts = append(

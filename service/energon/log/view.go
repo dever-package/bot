@@ -11,6 +11,12 @@ import (
 
 type LogViewService struct{}
 
+const (
+	logRequestIDSelectFields   = "main.request_id"
+	logPowerParamsSelectFields = "main.power_params"
+	logAttemptsSelectFields    = "main.id,main.power_target_id,main.service_id,main.service_name,main.provider_id,main.provider_name,main.account_id,main.account_name,main.status,main.latency,main.prompt_tokens,main.completion_tokens,main.total_tokens,main.cached_tokens,main.result,main.created_at"
+)
+
 func (LogViewService) ProviderLoadRequestParams(c *server.Context, _ []any) any {
 	payload, raw := loadLogPowerParams(c)
 	if len(payload) == 0 {
@@ -48,7 +54,9 @@ func (LogViewService) ProviderLoadAttempts(c *server.Context, _ []any) any {
 		return []map[string]any{}
 	}
 
-	current := botmodel.NewLogModel().FindMap(c.Context(), map[string]any{"id": logID})
+	current := botmodel.NewLogModel().FindMap(c.Context(), map[string]any{"id": logID}, map[string]any{
+		"field": logRequestIDSelectFields,
+	})
 	requestID := util.ToStringTrimmed(current["request_id"])
 	if requestID == "" {
 		return []map[string]any{}
@@ -58,24 +66,29 @@ func (LogViewService) ProviderLoadAttempts(c *server.Context, _ []any) any {
 		"request_id": requestID,
 	}, map[string]any{
 		"order": "main.id asc",
+		"field": logAttemptsSelectFields,
 	})
 
 	attempts := make([]map[string]any, 0, len(rows))
 	for index, row := range rows {
 		attempts = append(attempts, map[string]any{
-			"attempt_no":      index + 1,
-			"id":              row["id"],
-			"power_target_id": row["power_target_id"],
-			"service_id":      row["service_id"],
-			"service_name":    row["service_name"],
-			"provider_id":     row["provider_id"],
-			"provider_name":   row["provider_name"],
-			"account_id":      row["account_id"],
-			"account_name":    row["account_name"],
-			"status":          row["status"],
-			"latency":         row["latency"],
-			"error_detail":    extractLogFailureDetail(row["result"]),
-			"created_at":      row["created_at"],
+			"attempt_no":        index + 1,
+			"id":                row["id"],
+			"power_target_id":   row["power_target_id"],
+			"service_id":        row["service_id"],
+			"service_name":      row["service_name"],
+			"provider_id":       row["provider_id"],
+			"provider_name":     row["provider_name"],
+			"account_id":        row["account_id"],
+			"account_name":      row["account_name"],
+			"status":            row["status"],
+			"latency":           row["latency"],
+			"prompt_tokens":     row["prompt_tokens"],
+			"completion_tokens": row["completion_tokens"],
+			"total_tokens":      row["total_tokens"],
+			"cached_tokens":     row["cached_tokens"],
+			"error_detail":      extractLogFailureDetail(row["result"]),
+			"created_at":        row["created_at"],
 		})
 	}
 	return attempts
@@ -91,7 +104,9 @@ func loadLogPowerParams(c *server.Context) (map[string]any, string) {
 		return nil, ""
 	}
 
-	current := botmodel.NewLogModel().FindMap(c.Context(), map[string]any{"id": logID})
+	current := botmodel.NewLogModel().FindMap(c.Context(), map[string]any{"id": logID}, map[string]any{
+		"field": logPowerParamsSelectFields,
+	})
 	raw := util.ToStringTrimmed(current["power_params"])
 	if raw == "" {
 		return nil, ""

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -9,8 +10,10 @@ import (
 	"time"
 
 	agentaction "github.com/dever-package/bot/service/agent/action"
+	agentcontext "github.com/dever-package/bot/service/agent/context"
 	agentknowledge "github.com/dever-package/bot/service/agent/knowledge"
 	agenttool "github.com/dever-package/bot/service/agent/tool"
+	"github.com/dever-package/bot/service/stream"
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
@@ -61,6 +64,16 @@ func (s Service) handleFinalResult(
 ) agentLoopResult {
 	streamCtx := context.Background()
 	resultID := finalResultID(exec)
+	output = mergePartialResultWithBaseline(output, exec.Baseline, exec.ContextPlan)
+	var validation agentaction.ResultValidation
+	output, validation = agentaction.RepairAgentResultOutput(output)
+	if len(validation.Warnings) > 0 {
+		tracker.Step(ctx, "result_validate", "结果协议修复", strings.Join(validation.Warnings, "\n"), map[string]any{
+			"repaired": validation.Repaired,
+			"warnings": validation.Warnings,
+			"plan":     exec.ContextPlan,
+		}, stepStatusWarning)
+	}
 	tasks := agentaction.ExtractAbilityTasks(output)
 	sort.SliceStable(tasks, func(i, j int) bool {
 		return tasks[i].Sort < tasks[j].Sort
@@ -95,12 +108,15 @@ func (s Service) handleFinalResult(
 		detailOutput = mergeFinalTaskOutputs(agentaction.EnsureAgentRichOutput(output), states)
 		attachFinalTaskStates(detailOutput, states)
 		attachFinalResultMode(detailOutput, resultMode)
-		_ = s.writeFinalResultDetail(streamCtx, exec.RequestID, resultID, resultMode, detailOutput, states)
 	} else {
 		attachFinalTaskStates(detailOutput, states)
 		attachFinalResultMode(detailOutput, resultMode)
 	}
 
+	attachFinalResultTiming(detailOutput, exec.StartedAt, time.Now())
+	if resultMode == finalResultModeArtifact {
+		_ = s.writeFinalResultDetail(streamCtx, exec.RequestID, resultID, resultMode, detailOutput, states)
+	}
 	s.triggerRefluxIfNeeded(context.Background(), exec, history, detailOutput)
 
 	if resultMode == finalResultModeInline {
@@ -126,10 +142,13 @@ func (s Service) executeFinalTasks(
 	if len(tasks) == 0 {
 		return nil
 	}
+	taskPlan := dedupeFinalTasks(tasks)
 	if finalTaskExecutionMode(tasks) == agentaction.TaskExecutionSync {
-		return s.executeFinalTasksSync(ctx, exec, resultID, resultMode, tasks, states, history)
+		runs := s.executeFinalTasksSync(ctx, exec, resultID, resultMode, taskPlan.Tasks, states, history)
+		return expandFinalTaskRuns(runs, taskPlan.Aliases)
 	}
-	return s.executeFinalTasksAsync(ctx, exec, resultID, resultMode, tasks, states, history, options.AsyncMaxConcurrency)
+	runs := s.executeFinalTasksAsync(ctx, exec, resultID, resultMode, taskPlan.Tasks, states, history, options.AsyncMaxConcurrency)
+	return expandFinalTaskRuns(runs, taskPlan.Aliases)
 }
 
 func (s Service) executeFinalTasksSync(
@@ -211,6 +230,49 @@ func (s Service) executeFinalTasksAsync(
 }
 
 func (s Service) executeFinalTask(
+	ctx context.Context,
+	exec runExecution,
+	resultID string,
+	task agentaction.AbilityTask,
+	history []any,
+) finalTaskRunResult {
+	key := finalTaskInflightKey(exec, task)
+	if key != "" {
+		return s.executeFinalTaskInflight(ctx, exec, resultID, task, history, key)
+	}
+	return s.executeFinalTaskDirect(ctx, exec, resultID, task, history)
+}
+
+func (s Service) executeFinalTaskInflight(
+	ctx context.Context,
+	exec runExecution,
+	resultID string,
+	task agentaction.AbilityTask,
+	history []any,
+	key string,
+) finalTaskRunResult {
+	call := &finalTaskInflightCall{done: make(chan struct{})}
+	actual, loaded := finalTaskInflightRegistry.LoadOrStore(key, call)
+	if loaded {
+		existing, _ := actual.(*finalTaskInflightCall)
+		if existing == nil {
+			return s.executeFinalTaskDirect(ctx, exec, resultID, task, history)
+		}
+		select {
+		case <-existing.done:
+			return aliasFinalTaskRun(existing.result, task)
+		case <-ctx.Done():
+			return finalTaskContextResult(task, ctx.Err())
+		}
+	}
+	defer finalTaskInflightRegistry.Delete(key)
+	defer close(call.done)
+	result := s.executeFinalTaskDirect(ctx, exec, resultID, task, history)
+	call.result = result
+	return result
+}
+
+func (s Service) executeFinalTaskDirect(
 	ctx context.Context,
 	exec runExecution,
 	resultID string,
@@ -307,6 +369,113 @@ func finalTaskExecutionMode(tasks []agentaction.AbilityTask) string {
 		}
 	}
 	return agentaction.TaskExecutionSync
+}
+
+type finalTaskDedupePlan struct {
+	Tasks   []agentaction.AbilityTask
+	Aliases map[string][]agentaction.AbilityTask
+}
+
+func dedupeFinalTasks(tasks []agentaction.AbilityTask) finalTaskDedupePlan {
+	plan := finalTaskDedupePlan{
+		Tasks:   make([]agentaction.AbilityTask, 0, len(tasks)),
+		Aliases: map[string][]agentaction.AbilityTask{},
+	}
+	primaryByKey := map[string]string{}
+	for _, task := range tasks {
+		key := finalTaskDedupeKey(task)
+		if key == "" {
+			plan.Tasks = append(plan.Tasks, task)
+			continue
+		}
+		if primaryID := primaryByKey[key]; primaryID != "" {
+			plan.Aliases[primaryID] = append(plan.Aliases[primaryID], task)
+			continue
+		}
+		primaryByKey[key] = task.ID
+		plan.Tasks = append(plan.Tasks, task)
+	}
+	return plan
+}
+
+func finalTaskDedupeKey(task agentaction.AbilityTask) string {
+	placeholderID := strings.TrimSpace(task.PlaceholderID)
+	if placeholderID == "" {
+		return ""
+	}
+	payload := map[string]any{
+		"placeholder_id":   placeholderID,
+		"kind":             strings.TrimSpace(task.Kind),
+		"execution":        strings.TrimSpace(task.Execution),
+		"power":            strings.TrimSpace(task.Action.Power),
+		"input":            task.Action.Input,
+		"options":          task.Action.Options,
+		"protocol":         strings.TrimSpace(task.Action.Protocol),
+		"action_kind":      strings.TrimSpace(task.Action.Kind),
+		"source_target_id": task.Action.SourceTargetID,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+func finalTaskInflightKey(exec runExecution, task agentaction.AbilityTask) string {
+	if strings.TrimSpace(task.Action.Power) == "" {
+		return ""
+	}
+	payload := map[string]any{
+		"power":            strings.TrimSpace(task.Action.Power),
+		"input":            task.Action.Input,
+		"options":          task.Action.Options,
+		"protocol":         strings.TrimSpace(task.Action.Protocol),
+		"kind":             strings.TrimSpace(task.Action.Kind),
+		"source_target_id": firstNonZeroUint64(task.Action.SourceTargetID, exec.Parsed.SourceTargetID),
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+func firstNonZeroUint64(values ...uint64) uint64 {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func expandFinalTaskRuns(runs []finalTaskRunResult, aliases map[string][]agentaction.AbilityTask) []finalTaskRunResult {
+	if len(runs) == 0 || len(aliases) == 0 {
+		return runs
+	}
+	expanded := make([]finalTaskRunResult, 0, len(runs)+len(aliases))
+	for _, run := range runs {
+		expanded = append(expanded, run)
+		for _, alias := range aliases[run.State.ID] {
+			expanded = append(expanded, aliasFinalTaskRun(run, alias))
+		}
+	}
+	return expanded
+}
+
+func aliasFinalTaskRun(source finalTaskRunResult, task agentaction.AbilityTask) finalTaskRunResult {
+	state := source.State
+	state.ID = task.ID
+	state.PlaceholderID = task.PlaceholderID
+	state.Title = finalTaskTitle(task)
+	state.Kind = task.Kind
+	state.Power = task.Action.Power
+	state.Execution = task.Execution
+	state.Sort = task.Sort
+
+	result := source.Result
+	result.Action = task.Action
+	return finalTaskRunResult{State: state, Result: result}
 }
 
 func initialFinalTaskStates(tasks []agentaction.AbilityTask) []finalTaskState {
@@ -410,6 +579,91 @@ func resolveFinalResultMode(output map[string]any, states []finalTaskState) stri
 		return finalResultModeArtifact
 	}
 	return finalResultModeInline
+}
+
+func mergePartialResultWithBaseline(output map[string]any, baseline agentcontext.Baseline, plan agentcontext.Plan) map[string]any {
+	if len(output) == 0 || !baseline.Found || len(baseline.Output) == 0 {
+		return output
+	}
+	if !shouldPatchBaselineResult(output, plan) {
+		return output
+	}
+	base := cloneMap(baseline.Output)
+	if result := normalizeMap(base["result"]); len(result) > 0 {
+		base = cloneMap(result)
+	}
+	next := cloneMap(base)
+	for _, key := range []string{"kind", "event", "result_mode", "display_mode"} {
+		if value, exists := output[key]; exists && hasResultValue(value) {
+			next[key] = value
+		}
+	}
+	for _, key := range []string{"title", "suggestions", "tasks", "ability_tasks", "abilityTasks"} {
+		if value, exists := output[key]; exists && hasResultValue(value) {
+			next[key] = value
+		}
+	}
+	content := cloneMap(normalizeMap(next["content"]))
+	incomingContent := normalizeMap(output["content"])
+	for _, key := range []string{"tasks", "ability_tasks", "abilityTasks"} {
+		if value, exists := incomingContent[key]; exists && hasResultValue(value) {
+			content[key] = value
+		}
+	}
+	if len(content) > 0 {
+		next["content"] = content
+	}
+	if text := strings.TrimSpace(firstText(output["text"])); text != "" && !baselinePatchShouldKeepText(plan) {
+		next["text"] = text
+		if len(content) > 0 {
+			content["text"] = text
+			next["content"] = content
+		}
+	}
+	return next
+}
+
+func shouldPatchBaselineResult(output map[string]any, plan agentcontext.Plan) bool {
+	switch strings.TrimSpace(plan.EditScope) {
+	case "local", "replace_assets":
+	default:
+		return false
+	}
+	if hasRichResultContent(output) {
+		return false
+	}
+	return hasAbilityTaskFieldInAgentOutput(output) || hasTaskFieldInContent(output)
+}
+
+func baselinePatchShouldKeepText(plan agentcontext.Plan) bool {
+	return strings.TrimSpace(plan.EditScope) == "replace_assets"
+}
+
+func hasRichResultContent(output map[string]any) bool {
+	if len(normalizeMap(output["rich"])) > 0 {
+		return true
+	}
+	content := normalizeMap(output["content"])
+	return len(normalizeMap(content["rich"])) > 0
+}
+
+func hasAbilityTaskFieldInAgentOutput(output map[string]any) bool {
+	for _, key := range []string{"tasks", "ability_tasks", "abilityTasks"} {
+		if hasResultValue(output[key]) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTaskFieldInContent(output map[string]any) bool {
+	content := normalizeMap(output["content"])
+	for _, key := range []string{"tasks", "ability_tasks", "abilityTasks"} {
+		if hasResultValue(content[key]) {
+			return true
+		}
+	}
+	return false
 }
 
 func explicitFinalResultMode(output map[string]any) string {
@@ -564,8 +818,10 @@ func finalTaskPlaceholderAttrs(attrs map[string]any, state finalTaskState) map[s
 	if state.Progress >= 0 {
 		next["progress"] = state.Progress
 	}
-	if state.Text != "" {
-		next["text"] = state.Text
+	if text := finalTaskDisplayText(state.Text); text != "" {
+		next["text"] = text
+	} else {
+		delete(next, "text")
 	}
 	if state.Error != "" {
 		next["error"] = state.Error
@@ -751,11 +1007,13 @@ func uniqueStrings(values []string) []string {
 
 func (s Service) writeFinalResultDetail(ctx context.Context, requestID string, resultID string, resultMode string, output map[string]any, states []finalTaskState) error {
 	payload := map[string]any{
-		"event":       finalResultEventDetail,
-		"result_id":   resultID,
-		"result_mode": resultMode,
-		"text":        finalResultDetailText(resultMode, output),
-		"tasks":       finalTaskStateMaps(states),
+		"event":          finalResultEventDetail,
+		"semantic_event": stream.EventResultCreated,
+		"event_type":     stream.EventTypeResult,
+		"result_id":      resultID,
+		"result_mode":    resultMode,
+		"text":           finalResultDetailText(resultMode, output),
+		"tasks":          finalTaskStateMaps(states),
 	}
 	if len(output) > 0 {
 		payload["result"] = output
@@ -783,7 +1041,7 @@ func (s Service) updateFinalResultSnapshot(ctx context.Context, requestID string
 	finalResultSnapshotMu.Lock()
 	defer finalResultSnapshotMu.Unlock()
 
-	run, err := s.repo.FindRunByRequestID(ctx, requestID)
+	run, err := s.repo.FindRunOutputByRequestID(ctx, requestID)
 	if err != nil {
 		return
 	}
@@ -806,6 +1064,9 @@ func (s Service) saveFinalResultTaskSnapshot(ctx context.Context, requestID stri
 	if len(task) == 0 {
 		return
 	}
+	if !shouldPersistFinalResultTaskSnapshot(task) {
+		return
+	}
 	s.updateFinalResultSnapshot(ctx, requestID, resultID, func(card map[string]any) bool {
 		tasks := mergeFinalResultSnapshotTask(card["tasks"], task)
 		card["tasks"] = tasks
@@ -821,12 +1082,13 @@ func (s Service) saveFinalResultTaskSnapshot(ctx context.Context, requestID stri
 	})
 }
 
-func (s Service) saveFinalResultProgressSnapshot(ctx context.Context, requestID string, resultID string, text string, progress int) {
-	s.updateFinalResultSnapshot(ctx, requestID, resultID, func(card map[string]any) bool {
-		card["progress"] = progress
-		card["progress_text"] = strings.TrimSpace(text)
+func shouldPersistFinalResultTaskSnapshot(task map[string]any) bool {
+	switch strings.TrimSpace(firstText(task["status"])) {
+	case finalTaskStatusSucceeded, finalTaskStatusFailed:
 		return true
-	})
+	default:
+		return false
+	}
 }
 
 func finalResultDetailText(resultMode string, output map[string]any) string {
@@ -842,7 +1104,10 @@ func finalResultDetailText(resultMode string, output map[string]any) string {
 func (s Service) writeFinalResultTask(ctx context.Context, requestID string, resultID string, state finalTaskState, meta map[string]any) error {
 	taskPayload := state.Map()
 	payload := cloneMap(taskPayload)
+	semanticEvent := finalTaskSemanticEvent(state)
 	payload["event"] = finalResultEventTask
+	payload["semantic_event"] = semanticEvent
+	payload["event_type"] = stream.EventType(semanticEvent)
 	payload["result_id"] = resultID
 	if len(meta) > 0 {
 		payload["meta"] = meta
@@ -859,23 +1124,35 @@ func (s Service) writeFinalResultProgress(ctx context.Context, requestID string,
 	if progress > 100 {
 		progress = 100
 	}
-	s.saveFinalResultProgressSnapshot(ctx, requestID, resultID, text, progress)
 	return s.writeStreamOutput(ctx, requestID, map[string]any{
-		"event":     finalResultEventProgress,
-		"result_id": resultID,
-		"text":      strings.TrimSpace(text),
-		"progress":  progress,
+		"event":          finalResultEventProgress,
+		"semantic_event": stream.EventResultProgress,
+		"event_type":     stream.EventTypeProgress,
+		"result_id":      resultID,
+		"text":           strings.TrimSpace(text),
+		"progress":       progress,
 	})
+}
+
+func finalTaskSemanticEvent(state finalTaskState) string {
+	switch strings.TrimSpace(state.Status) {
+	case finalTaskStatusSucceeded, finalTaskStatusFailed:
+		return stream.EventTaskDone
+	default:
+		return stream.EventTaskProgress
+	}
 }
 
 func finalResultCard(resultID string, resultMode string, output map[string]any, states []finalTaskState) map[string]any {
 	cardText := "内容已生成，点击查看结果。"
 	card := map[string]any{
-		"event":       finalResultEventCard,
-		"kind":        agentaction.KindFinal,
-		"result_id":   resultID,
-		"result_mode": resultMode,
-		"text":        cardText,
+		"event":          finalResultEventCard,
+		"semantic_event": stream.EventResultCreated,
+		"event_type":     stream.EventTypeResult,
+		"kind":           agentaction.KindFinal,
+		"result_id":      resultID,
+		"result_mode":    resultMode,
+		"text":           cardText,
 		"content": map[string]any{
 			"format": "markdown",
 			"text":   cardText,
@@ -883,6 +1160,7 @@ func finalResultCard(resultID string, resultMode string, output map[string]any, 
 		"result": output,
 		"tasks":  finalTaskStateMaps(states),
 	}
+	copyFinalResultTiming(card, output)
 	if suggestions, exists := output["suggestions"]; exists {
 		card["suggestions"] = suggestions
 	}
@@ -890,6 +1168,33 @@ func finalResultCard(resultID string, resultMode string, output map[string]any, 
 		card["title"] = title
 	}
 	return card
+}
+
+func attachFinalResultTiming(output map[string]any, startedAt time.Time, finishedAt time.Time) {
+	if len(output) == 0 || startedAt.IsZero() || finishedAt.IsZero() {
+		return
+	}
+	latencyMs := finishedAt.Sub(startedAt).Milliseconds()
+	if latencyMs < 0 {
+		latencyMs = 0
+	}
+	output["started_at"] = startedAt.Format(time.RFC3339Nano)
+	output["started_at_ms"] = startedAt.UnixMilli()
+	output["finished_at"] = finishedAt.Format(time.RFC3339Nano)
+	output["finished_at_ms"] = finishedAt.UnixMilli()
+	output["latency"] = latencyMs
+	output["latency_ms"] = latencyMs
+}
+
+func copyFinalResultTiming(target map[string]any, source map[string]any) {
+	if len(target) == 0 || len(source) == 0 {
+		return
+	}
+	for _, key := range []string{"started_at", "started_at_ms", "finished_at", "finished_at_ms", "latency", "latency_ms"} {
+		if value, exists := source[key]; exists {
+			target[key] = value
+		}
+	}
 }
 
 func finalTaskStateMaps(states []finalTaskState) []map[string]any {
@@ -917,8 +1222,8 @@ func (state finalTaskState) Map() map[string]any {
 	if state.Progress >= 0 {
 		row["progress"] = state.Progress
 	}
-	if strings.TrimSpace(state.Text) != "" {
-		row["text"] = state.Text
+	if text := finalTaskDisplayText(state.Text); text != "" {
+		row["text"] = text
 	}
 	if strings.TrimSpace(state.Error) != "" {
 		row["error"] = state.Error
@@ -950,6 +1255,25 @@ func mergeFinalResultSnapshotTask(raw any, task map[string]any) []map[string]any
 		return rows
 	}
 	return append(rows, cloneMap(task))
+}
+
+func finalTaskDisplayText(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	generic := []string{
+		"图片生成中，请稍后",
+		"素材生成中，请稍后",
+		"内容生成中，请稍后",
+		"生成中，请稍后",
+	}
+	for _, item := range generic {
+		if strings.Contains(text, item) {
+			return ""
+		}
+	}
+	return text
 }
 
 func finalResultSnapshotTaskRows(raw any) []map[string]any {
@@ -1105,9 +1429,15 @@ func safeFinalTaskID(value string) string {
 }
 
 var (
-	finalTaskStreamRegistry sync.Map
-	finalTaskCancelRegistry sync.Map
+	finalTaskStreamRegistry   sync.Map
+	finalTaskCancelRegistry   sync.Map
+	finalTaskInflightRegistry sync.Map
 )
+
+type finalTaskInflightCall struct {
+	done   chan struct{}
+	result finalTaskRunResult
+}
 
 func registerFinalTaskCancel(parentID string, cancel context.CancelFunc) func() {
 	parentID = strings.TrimSpace(parentID)

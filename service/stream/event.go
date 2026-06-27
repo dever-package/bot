@@ -24,22 +24,26 @@ const (
 	EventTypeEdge      = "edge"
 	EventTypeWaiting   = "waiting"
 
-	EventStart        = "start"
-	EventProgress     = "progress"
-	EventStatus       = "status"
-	EventWarning      = "warning"
-	EventDelta        = "delta"
-	EventResult       = "result"
-	EventCancel       = "cancel"
-	EventRunStarted   = "run_started"
-	EventRunFinished  = "run_finished"
-	EventFlowStarted  = "flow_started"
-	EventFlowFinished = "flow_finished"
-	EventNodeStarted  = "node_started"
-	EventNodeOutput   = "node_output"
-	EventNodeFinished = "node_finished"
-	EventEdgeActive   = "edge_active"
-	EventWaiting      = "waiting"
+	EventStart          = "start"
+	EventProgress       = "progress"
+	EventStatus         = "status"
+	EventWarning        = "warning"
+	EventDelta          = "delta"
+	EventResult         = "result"
+	EventCancel         = "cancel"
+	EventRunStarted     = "run_started"
+	EventRunFinished    = "run_finished"
+	EventFlowStarted    = "flow_started"
+	EventFlowFinished   = "flow_finished"
+	EventNodeStarted    = "node_started"
+	EventNodeOutput     = "node_output"
+	EventNodeFinished   = "node_finished"
+	EventEdgeActive     = "edge_active"
+	EventWaiting        = "waiting"
+	EventResultCreated  = "result_created"
+	EventResultProgress = "result_progress"
+	EventTaskProgress   = "task_progress"
+	EventTaskDone       = "task_done"
 )
 
 var lifecycleEvents = map[string]struct{}{
@@ -151,11 +155,11 @@ func EventType(event string) string {
 		return EventTypeLifecycle
 	}
 	switch event {
-	case EventProgress:
+	case EventProgress, EventResultProgress, EventTaskProgress:
 		return EventTypeProgress
 	case EventDelta, EventNodeOutput:
 		return EventTypeOutput
-	case EventResult:
+	case EventResult, EventResultCreated, EventTaskDone:
 		return EventTypeResult
 	case EventEdgeActive:
 		return EventTypeEdge

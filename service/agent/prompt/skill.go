@@ -7,6 +7,9 @@ import (
 )
 
 func skillPrompt(catalog agentskill.Catalog, tools ToolRuntime) string {
+	if len(catalog.Loaded) == 0 {
+		return ""
+	}
 	sections := make([]string, 0, 3)
 	sections = appendNonEmpty(sections, catalog.Metadata)
 	sections = appendNonEmpty(sections, catalog.LoadedContent)
@@ -60,11 +63,10 @@ func skillToolPrompt(catalog agentskill.Catalog, tools ToolRuntime) string {
 		"技能工具执行协议:",
 		"- 可用工具: " + strings.Join(toolNames, ", ") + "。",
 		"- 已加载技能可以通过平台工具执行其说明中的 " + capabilityTarget + "；不要要求用户自己执行 curl 或命令。",
-		"- 技能正文出现 curl 示例时，转换为 call_tool 的 http_request 或 curl_request；后端不会执行系统 curl 命令。",
-		"- read_skill_file/list_skill_files 只能访问当前技能安装目录。",
+		"- curl 示例转为 call_tool 的 http_request/curl_request；read_skill_file/list_skill_files 只能访问当前技能安装目录。",
 		scriptRule,
-		"- write_temp_file/read_temp_file 只读写本轮临时目录；internal_api 只用于平台白名单内部接口；mcp_call 只允许调用当前技能 manifest.mcp 声明的 server/tool。",
-		"- 工具调用结果会作为 tool_observation 回到下一轮；收到结果后继续判断原始目标，并按输出协议回复。",
+		"- write_temp_file/read_temp_file 只读写本轮临时目录；internal_api 和 mcp_call 只允许调用白名单或 manifest 声明的接口。",
+		"- 工具结果会作为 tool_observation 回到下一轮；收到后继续判断原始目标，并按输出协议回复。",
 		"- 本轮已加载技能 key: " + strings.Join(keys, ", "),
 	}
 	if len(builtinMethods) > 0 {
@@ -72,7 +74,7 @@ func skillToolPrompt(catalog agentskill.Catalog, tools ToolRuntime) string {
 	}
 	lines = append(lines,
 		"",
-		"agent-action call_tool 示例:",
+		"call_tool 示例:",
 		"```agent-action",
 		"{",
 		`  "type": "call_tool",`,

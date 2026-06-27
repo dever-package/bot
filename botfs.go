@@ -1,6 +1,10 @@
 package bot
 
-import "embed"
+import (
+	"embed"
+
+	_ "github.com/dever-package/bot/service/maintenance"
+)
 
 // ManifestFS 内嵌 bot 组件声明。
 //

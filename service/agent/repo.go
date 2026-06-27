@@ -28,6 +28,11 @@ type stepRecord struct {
 	Status    string
 }
 
+const (
+	runStatusSelectFields = "main.id,main.request_id,main.agent_id,main.output,main.error,main.status,main.step_count,main.latency,main.started_at,main.finished_at,main.created_at"
+	runOutputSelectFields = "main.id,main.request_id,main.output"
+)
+
 func NewRepo() Repo {
 	return Repo{}
 }
@@ -314,6 +319,24 @@ func (repo Repo) ListActiveCallablePowers(ctx context.Context, excludedID uint64
 	return result
 }
 
+func (Repo) FindActiveTextPowerKey(ctx context.Context, powerID uint64) (string, bool) {
+	if powerID == 0 {
+		return "", false
+	}
+	row := energonmodel.NewPowerModel().Find(ctx, map[string]any{"id": powerID})
+	if row == nil || row.Status != 1 {
+		return "", false
+	}
+	if !strings.EqualFold(strings.TrimSpace(row.Kind), "text") {
+		return "", false
+	}
+	key := strings.TrimSpace(row.Key)
+	if key == "" {
+		return "", false
+	}
+	return key, true
+}
+
 func (Repo) FindRuntimeConfig(ctx context.Context) agentmodel.RuntimeConfig {
 	row := agentmodel.NewRuntimeConfigModel().Find(ctx, map[string]any{
 		"id": agentmodel.DefaultRuntimeConfigID,
@@ -384,6 +407,28 @@ func (Repo) FindRunByRequestID(ctx context.Context, requestID string) (agentmode
 		return agentmodel.Run{}, fmt.Errorf("request_id 不能为空")
 	}
 	row := agentmodel.NewRunModel().Find(ctx, map[string]any{"request_id": requestID})
+	if row == nil {
+		return agentmodel.Run{}, fmt.Errorf("智能体运行不存在")
+	}
+	return *row, nil
+}
+
+func (Repo) FindRunStatusByRequestID(ctx context.Context, requestID string) (agentmodel.Run, error) {
+	return findRunByRequestID(ctx, requestID, runStatusSelectFields)
+}
+
+func (Repo) FindRunOutputByRequestID(ctx context.Context, requestID string) (agentmodel.Run, error) {
+	return findRunByRequestID(ctx, requestID, runOutputSelectFields)
+}
+
+func findRunByRequestID(ctx context.Context, requestID string, field string) (agentmodel.Run, error) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return agentmodel.Run{}, fmt.Errorf("request_id 不能为空")
+	}
+	row := agentmodel.NewRunModel().Find(ctx, map[string]any{"request_id": requestID}, map[string]any{
+		"field": field,
+	})
 	if row == nil {
 		return agentmodel.Run{}, fmt.Errorf("智能体运行不存在")
 	}

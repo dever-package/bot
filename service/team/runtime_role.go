@@ -125,7 +125,8 @@ func (s Service) executeStandaloneRole(ctx context.Context, run teammodel.Run, t
 	}
 	executor := resolvedNodeAgent{AgentID: role.AgentID, Role: &role}
 	goal := firstText(input["goal"], input["task"], input["prompt"], role.Name)
-	prompt := buildAgentPrompt(team, flow, node, executor, goal, input)
+	memories := s.roleRuntimeMemories(ctx, team, &role, input)
+	prompt := buildAgentPrompt(team, flow, node, executor, goal, input, memories)
 	result, err := s.agent.RunInternal(ctx, agentservice.InternalRunRequest{
 		AgentID:   role.AgentID,
 		RequestID: newRequestID(),
