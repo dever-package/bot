@@ -33,11 +33,26 @@
             "message": "分类名称不能为空。"
           }
         ]
+      },
+      {
+        "type": "form-textarea",
+        "name": "公共提示词",
+        "placeholder": "可留空。填写该分类下所有智能体共同遵守的提示词。",
+        "value": "form.prompt",
+        "mode": "form",
+        "info": "运行时直接读取当前内容，修改后会立即影响该分类下的智能体，不会复制到智能体记录。",
+        "meta": {
+          "rows": 10
+        }
       }
     ]
   },
   "data": {
-    "form": {}
+    "form": {
+      "id": 0,
+      "name": "",
+      "prompt": ""
+    }
   },
   "state": {},
   "action": {

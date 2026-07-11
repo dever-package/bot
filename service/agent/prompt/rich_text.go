@@ -24,11 +24,7 @@ func TextFromRichText(raw string) string {
 		return text
 	}
 
-	normalized := strings.TrimSpace(richTextNodeText(doc))
-	if normalized == "" {
-		return text
-	}
-	return normalized
+	return strings.TrimSpace(richTextNodeText(doc))
 }
 
 func richTextNodeText(node map[string]any) string {

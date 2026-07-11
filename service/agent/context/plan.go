@@ -289,7 +289,6 @@ func plannerCacheKey(req Request, collected collectedContext) string {
 		string(req.Scene),
 		agentIdentity(req.Agent),
 		req.Power.Key,
-		strconv.FormatUint(req.Agent.PlannerPowerID, 10),
 		strconv.FormatUint(req.SourceTargetID, 10),
 		jsonText(req.Input),
 		jsonText(contextNoteStringsForPlanner(collected.ContextNotes)),

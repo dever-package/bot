@@ -13,10 +13,8 @@ import (
 
 type Repository interface {
 	ListActiveCallablePowers(ctx context.Context, excludedID uint64) []energonmodel.Power
-	FindActiveTextPowerKey(ctx context.Context, powerID uint64) (string, bool)
 	FindRuntimeConfig(ctx context.Context) agentmodel.RuntimeConfig
-	ListActivePublicSettings(ctx context.Context, packID uint64) []agentmodel.Setting
-	ListActiveAgentSettings(ctx context.Context, agentID uint64) []agentmodel.AgentSetting
+	FindAgentCatePrompt(ctx context.Context, cateID uint64) string
 	ListActiveSkillPackEntries(ctx context.Context, packID uint64) []agentskill.Entry
 }
 
@@ -32,7 +30,7 @@ type Services struct {
 }
 
 type KnowledgeService interface {
-	AgentKnowledgeBases(ctx context.Context, agentID uint64) []agentknowledge.AgentKnowledgeBaseRuntime
+	KnowledgeBasesByCate(ctx context.Context, cateID uint64) []agentknowledge.KnowledgeBaseRuntime
 }
 
 type MemoryService interface {

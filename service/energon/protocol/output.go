@@ -66,11 +66,10 @@ func normalizeOutputValue(value any) Output {
 	case map[string]any:
 		return normalizeOutput(current)
 	case string:
-		text := strings.TrimSpace(current)
-		if text == "" {
+		if current == "" {
 			return Output{}
 		}
-		return Output{"text": text}
+		return Output{"text": current}
 	default:
 		return Output{"json": current}
 	}
@@ -122,10 +121,20 @@ func hasOutputField(output map[string]any) bool {
 
 func copyOutputValue(target Output, source map[string]any, key string) {
 	value, exists := source[key]
-	if !exists || isEmptyProtocolValue(value) {
+	if !exists || isEmptyOutputValue(key, value) {
 		return
 	}
 	target[key] = value
+}
+
+func isEmptyOutputValue(key string, value any) bool {
+	switch key {
+	case "text", "reasoning":
+		if text, ok := value.(string); ok {
+			return text == ""
+		}
+	}
+	return isEmptyProtocolValue(value)
 }
 
 func copyFirstOutputValue(target Output, source Output, key string) {

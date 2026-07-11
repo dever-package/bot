@@ -109,13 +109,13 @@
         "meta": {
           "stateKey": "dialog.create",
           "pageRoute": "/bot/agent/agent_cate/update",
-          "description": "新增后会立刻出现在左侧分类栏，并可用于智能体归类。",
+          "description": "新增分类并按需设置该分类共用的提示词。",
           "assistant": false,
           "footer": {
             "confirm": true,
             "confirmText": "保存"
           },
-          "size": "sm",
+          "size": "lg",
           "bodyClassName": "py-2"
         }
       },
@@ -124,7 +124,7 @@
         "meta": {
           "stateKey": "dialog.edit",
           "pageRoute": "/bot/agent/agent_cate/update",
-          "description": "修改分类名称后，左侧分类栏和智能体编辑表单会同步显示新名称。",
+          "description": "分类提示词会被该分类下的智能体实时读取。",
           "assistant": false,
           "footer": {
             "confirm": true,
@@ -133,7 +133,7 @@
           "pageRouteQuery": {
             "id": "data.actionTarget.id"
           },
-          "size": "sm",
+          "size": "lg",
           "bodyClassName": "py-2"
         }
       }

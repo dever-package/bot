@@ -15,11 +15,10 @@ type Agent struct {
 	Key             string    `dorm:"type:varchar(128);not null;comment:标识"`
 	Kind            string    `dorm:"type:varchar(32);not null;default:'normal';comment:类型"`
 	Description     string    `dorm:"type:text;not null;default:'';comment:描述"`
+	Prompt          string    `dorm:"type:text;not null;default:'';comment:设定"`
 	LLMPowerID      uint64    `dorm:"type:bigint;not null;default:0;comment:LLM能力"`
-	PlannerPowerID  uint64    `dorm:"type:bigint;not null;default:0;comment:规划模型能力"`
-	SelectorPowerID uint64    `dorm:"type:bigint;not null;default:0;comment:技能选择模型能力"`
-	SettingPackID   uint64    `dorm:"type:bigint;not null;default:1;comment:规则方案"`
-	SkillPackID     uint64    `dorm:"type:bigint;not null;default:1;comment:技能方案"`
+	KnowledgeCateID uint64    `dorm:"type:bigint;not null;default:0;comment:知识库分类"`
+	SkillPackID     uint64    `dorm:"type:bigint;not null;default:0;comment:技能方案"`
 	Temperature     float64   `dorm:"type:double precision;not null;default:0.7;comment:温度"`
 	TimeoutSeconds  int       `dorm:"type:int;not null;default:3600;comment:超时时间(秒)"`
 	MaxAutoSteps    int       `dorm:"type:int;not null;default:0;comment:最大自动步骤数"`
@@ -32,10 +31,8 @@ type AgentIndex struct {
 	Key                 struct{} `unique:"key"`
 	KindStatusSort      struct{} `index:"kind,status,sort"`
 	CateStatusSort      struct{} `index:"cate_id,status,sort"`
-	SettingPackStatus   struct{} `index:"setting_pack_id,status"`
+	KnowledgeCateStatus struct{} `index:"knowledge_cate_id,status"`
 	SkillPackStatus     struct{} `index:"skill_pack_id,status"`
-	PlannerPowerStatus  struct{} `index:"planner_power_id,status"`
-	SelectorPowerStatus struct{} `index:"selector_power_id,status"`
 	StatusSort          struct{} `index:"status,sort"`
 }
 
@@ -67,68 +64,72 @@ var (
 
 	agentSeed = []map[string]any{
 		{
-			"id":              DefaultAgentID,
-			"cate_id":         DefaultAgentCateID,
-			"name":            "默认智能体",
-			"key":             DefaultAgentKey,
-			"kind":            AgentKindNormal,
-			"description":     "默认通用智能体，适合普通文本任务和能力调用。",
-			"llm_power_id":    energonmodel.DefaultLLMPowerID,
-			"setting_pack_id": DefaultSettingPackID,
-			"skill_pack_id":   DefaultSkillPackID,
-			"temperature":     0.7,
-			"timeout_seconds": 3600,
-			"max_auto_steps":  0,
-			"status":          1,
-			"sort":            10,
+			"id":                DefaultAgentID,
+			"cate_id":           DefaultAgentCateID,
+			"name":              "默认智能体",
+			"key":               DefaultAgentKey,
+			"kind":              AgentKindNormal,
+			"description":       "默认通用智能体，适合普通文本任务和能力调用。",
+			"prompt":            "",
+			"llm_power_id":      energonmodel.DefaultLLMPowerID,
+			"knowledge_cate_id": 0,
+			"skill_pack_id":     0,
+			"temperature":       0.7,
+			"timeout_seconds":   3600,
+			"max_auto_steps":    0,
+			"status":            1,
+			"sort":              10,
 		},
 		{
-			"id":              FrontAssistantAgentID,
-			"cate_id":         SystemAgentCateID,
-			"name":            "AI助理",
-			"key":             FrontAssistantAgentKey,
-			"kind":            AgentKindInternal,
-			"description":     "后台页面 AI 助理，用于理解当前页面、生成内容、补全表单和返回受控前端动作。",
-			"llm_power_id":    energonmodel.DefaultLLMPowerID,
-			"setting_pack_id": AssistantSettingPackID,
-			"skill_pack_id":   DefaultSkillPackID,
-			"temperature":     0.4,
-			"timeout_seconds": 3600,
-			"max_auto_steps":  0,
-			"status":          1,
-			"sort":            10,
+			"id":                FrontAssistantAgentID,
+			"cate_id":           SystemAgentCateID,
+			"name":              "AI助理",
+			"key":               FrontAssistantAgentKey,
+			"kind":              AgentKindInternal,
+			"description":       "后台页面 AI 助理，用于理解当前页面、生成内容、补全表单和返回受控前端动作。",
+			"prompt":            frontAssistantPrompt,
+			"llm_power_id":      energonmodel.DefaultLLMPowerID,
+			"knowledge_cate_id": 0,
+			"skill_pack_id":     DefaultSkillPackID,
+			"temperature":       0.4,
+			"timeout_seconds":   3600,
+			"max_auto_steps":    0,
+			"status":            1,
+			"sort":              10,
 		},
 		{
-			"id":              SkillInstallerAgentID,
-			"cate_id":         SystemAgentCateID,
-			"name":            "技能安装规划器",
-			"key":             SkillInstallerAgentKey,
-			"kind":            AgentKindInternal,
-			"description":     "系统内置技能安装规划器，只负责把安装输入转换成受控安装计划。",
-			"llm_power_id":    energonmodel.DefaultLLMPowerID,
-			"setting_pack_id": SkillInstallSettingPackID,
-			"skill_pack_id":   DefaultSkillPackID,
-			"temperature":     0.2,
-			"timeout_seconds": 180,
-			"max_auto_steps":  1,
-			"status":          1,
-			"sort":            1,
+			"id":                SkillInstallerAgentID,
+			"cate_id":           SystemAgentCateID,
+			"name":              "技能安装规划器",
+			"key":               SkillInstallerAgentKey,
+			"kind":              AgentKindInternal,
+			"description":       "系统内置技能安装规划器，只负责把安装输入转换成受控安装计划。",
+			"prompt":            skillInstallerPrompt,
+			"llm_power_id":      energonmodel.DefaultLLMPowerID,
+			"knowledge_cate_id": 0,
+			"skill_pack_id":     0,
+			"temperature":       0.2,
+			"timeout_seconds":   180,
+			"max_auto_steps":    1,
+			"status":            1,
+			"sort":              1,
 		},
 		{
-			"id":              SkillCreatorAgentID,
-			"cate_id":         SystemAgentCateID,
-			"name":            "技能创建工程师",
-			"key":             SkillCreatorAgentKey,
-			"kind":            AgentKindInternal,
-			"description":     "系统内置技能创建工程师，用于多轮创建或修改 Dever skill 草稿。",
-			"llm_power_id":    energonmodel.DefaultLLMPowerID,
-			"setting_pack_id": SkillCreateSettingPackID,
-			"skill_pack_id":   DefaultSkillPackID,
-			"temperature":     0.3,
-			"timeout_seconds": 3600,
-			"max_auto_steps":  0,
-			"status":          1,
-			"sort":            2,
+			"id":                SkillCreatorAgentID,
+			"cate_id":           SystemAgentCateID,
+			"name":              "技能创建工程师",
+			"key":               SkillCreatorAgentKey,
+			"kind":              AgentKindInternal,
+			"description":       "系统内置技能创建工程师，用于多轮创建或修改 Dever skill 草稿。",
+			"prompt":            skillCreatorPrompt,
+			"llm_power_id":      energonmodel.DefaultLLMPowerID,
+			"knowledge_cate_id": 0,
+			"skill_pack_id":     0,
+			"temperature":       0.3,
+			"timeout_seconds":   3600,
+			"max_auto_steps":    0,
+			"status":            1,
+			"sort":              2,
 		},
 	}
 
@@ -144,21 +145,9 @@ var (
 		OptionKeys: []string{"name", "key", "kind"},
 	}
 
-	agentPlannerPowerRelation = orm.Relation{
-		Field:      "planner_power_id",
-		Option:     "bot.energon.NewPowerModel",
-		OptionKeys: []string{"name", "key", "kind"},
-	}
-
-	agentSelectorPowerRelation = orm.Relation{
-		Field:      "selector_power_id",
-		Option:     "bot.energon.NewPowerModel",
-		OptionKeys: []string{"name", "key", "kind"},
-	}
-
-	agentSettingPackRelation = orm.Relation{
-		Field:      "setting_pack_id",
-		Option:     "bot.agent.NewSettingPackModel",
+	agentKnowledgeCateRelation = orm.Relation{
+		Field:      "knowledge_cate_id",
+		Option:     "bot.agent.NewKnowledgeCateModel",
 		OptionKeys: []string{"name"},
 	}
 
@@ -182,9 +171,7 @@ func NewAgentModel() *orm.Model[Agent] {
 		Relations: []orm.Relation{
 			agentCateRelation,
 			agentLLMPowerRelation,
-			agentPlannerPowerRelation,
-			agentSelectorPowerRelation,
-			agentSettingPackRelation,
+			agentKnowledgeCateRelation,
 			agentSkillPackRelation,
 		},
 	})

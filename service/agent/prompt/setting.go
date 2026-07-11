@@ -1,54 +1,14 @@
 package prompt
 
-import (
-	"fmt"
-	"strings"
+import "strings"
 
-	agentmodel "github.com/dever-package/bot/model/agent"
-)
-
-func settingPrompt(publicSettings []agentmodel.Setting, agentSettings []agentmodel.AgentSetting) string {
+func settingPrompt(categoryPrompt string, agentPrompt string) string {
 	sections := make([]string, 0, 2)
-	sections = appendNonEmpty(sections, snippetSection("规则", publicSettingSnippets(publicSettings)))
-	sections = appendNonEmpty(sections, snippetSection("智能体设定", agentSettingSnippets(agentSettings)))
+	if prompt := strings.TrimSpace(promptTextFromRichText(categoryPrompt)); prompt != "" {
+		sections = append(sections, "分类提示词:\n"+prompt)
+	}
+	if prompt := strings.TrimSpace(promptTextFromRichText(agentPrompt)); prompt != "" {
+		sections = append(sections, "智能体设定:\n"+prompt)
+	}
 	return strings.Join(sections, "\n\n")
-}
-
-func publicSettingSnippets(settings []agentmodel.Setting) []snippet {
-	items := make([]snippet, 0, len(settings))
-	for _, setting := range settings {
-		content := promptTextFromRichText(setting.Content)
-		if content == "" {
-			continue
-		}
-		title := strings.TrimSpace(setting.Name)
-		if title == "" {
-			title = fmt.Sprintf("规则 #%d", setting.ID)
-		}
-		items = append(items, snippet{Title: title, Content: content})
-	}
-	return items
-}
-
-func agentSettingSnippets(settings []agentmodel.AgentSetting) []snippet {
-	items := make([]snippet, 0, len(settings))
-	for _, setting := range settings {
-		content := promptTextFromRichText(setting.Content)
-		if content == "" {
-			continue
-		}
-		settingType := strings.TrimSpace(setting.Type)
-		if settingType == "" {
-			settingType = "other"
-		}
-		status := ""
-		if setting.Status != 1 {
-			status = "，状态: 停用"
-		}
-		items = append(items, snippet{
-			Title:   fmt.Sprintf("智能体设定（ID: %d，类型: %s%s）", setting.ID, settingType, status),
-			Content: content,
-		})
-	}
-	return items
 }

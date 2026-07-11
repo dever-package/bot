@@ -119,12 +119,14 @@
               "type": "show-base"
             },
             {
-              "value": "setting_pack.name",
-              "name": "方案",
-              "type": "show-base",
-              "meta": {
-                "template": "{row.setting_pack.name} / {row.skill_pack.name}"
-              }
+              "value": "knowledge_cate.name",
+              "name": "知识库分类",
+              "type": "show-base"
+            },
+            {
+              "value": "skill_pack.name",
+              "name": "技能方案",
+              "type": "show-base"
             },
             {
               "value": "status",
@@ -136,10 +138,7 @@
             },
             {
               "value": "sort",
-              "type": "show-base",
-              "editor": "form-number",
-              "trigger": "doubleClick",
-              "tip": "正序排序，数值越大越靠后。双击可修改。"
+              "type": "show-base"
             },
             {
               "value": "created_at",
@@ -172,26 +171,6 @@
                     }
                   },
                   {
-                    "icon": "file-text",
-                    "variant": "outline",
-                    "size": "sm",
-                    "description": "设定",
-                    "to": "/bot/agent/agent_setting/list",
-                    "searchParam": "id",
-                    "searchField": "id",
-                    "withBack": true
-                  },
-                  {
-                    "icon": "book-open-check",
-                    "variant": "outline",
-                    "size": "sm",
-                    "description": "知识库",
-                    "to": "/bot/agent/agent_knowledge_base/list",
-                    "searchParam": "agent_id",
-                    "searchField": "id",
-                    "withBack": true
-                  },
-                  {
                     "icon": "message-circle",
                     "variant": "outline",
                     "size": "sm",
@@ -206,34 +185,6 @@
                         {
                           "type": "modal",
                           "key": "dialog.run",
-                          "value": true
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "icon": "trash-2",
-                    "variant": "outline",
-                    "size": "sm",
-                    "description": "删除智能体",
-                    "className": "text-destructive hover:text-destructive",
-                    "hiddenWhen": [
-                      {
-                        "path": "kind",
-                        "operator": "equals",
-                        "value": "internal"
-                      }
-                    ],
-                    "action": {
-                      "click": [
-                        {
-                          "type": "data",
-                          "key": "actionTarget.deleteAgent",
-                          "value": "$row"
-                        },
-                        {
-                          "type": "modal",
-                          "key": "confirm.delete",
                           "value": true
                         }
                       ]
@@ -273,7 +224,7 @@
         "meta": {
           "stateKey": "dialog.edit",
           "pageRoute": "/bot/agent/agent/update",
-          "description": "配置智能体标识、LLM 能力和方案。",
+          "description": "配置智能体基础信息、设定和运行配置。",
           "size": "xl",
           "footer": {
             "confirm": true,
@@ -289,7 +240,7 @@
         "meta": {
           "stateKey": "dialog.create",
           "pageRoute": "/bot/agent/agent/update",
-          "description": "创建智能体后，运行时会基于标识、方案、智能体设定和 Energon 能力执行。",
+          "description": "创建智能体并配置基础信息、设定和运行配置。",
           "size": "xl",
           "footer": {
             "confirm": true,
@@ -301,57 +252,16 @@
         }
       },
       {
-        "type": "feedback-modal",
-        "name": "运行智能体",
-        "info": "当前对话会保存为历史会话，关闭或刷新后可继续；点击“新会话”重新开始。",
-        "meta": {
-          "stateKey": "dialog.run",
-          "formSection": "agent-panel",
-          "titleNamePath": "data.actionTarget.runAgent.name",
-          "titleKeyPath": "data.actionTarget.runAgent.key",
-          "size": "3xl",
-          "bodyScroll": false,
-          "footer": {
-            "close": false,
-            "confirm": false
-          }
-        }
-      },
-      {
-        "type": "feedback-confirm",
-        "name": "删除智能体",
-        "info": "确认删除当前智能体吗？已产生的运行记录不会自动删除。",
-        "meta": {
-          "stateKey": "confirm.delete"
-        },
-        "action": {
-          "confirm": {
-            "type": "delete",
-            "params": "actionTarget.deleteAgent",
-            "before": {
-              "service": "bot.agent.setting.AgentHook.BeforeDeleteAgent"
-            }
-          }
-        }
-      }
-    ],
-    "agent-panel": [
-      {
         "id": "agent-stream",
-        "type": "show-agent",
+        "type": "show-agent-chat",
         "meta": {
           "agentPath": "data.actionTarget.runAgent.key",
           "agentNamePath": "data.actionTarget.runAgent.name",
           "openPath": "state.dialog.run",
-          "requestApi": "/bot/admin/agent/run",
-          "streamApi": "/bot/admin/agent/stream",
-          "stopApi": "/bot/admin/agent/stop",
-          "paramApi": "/bot/admin/energon/power_params",
-          "sessionEnabled": true,
-          "memoryEnabled": false,
-          "sessionContext": {
-            "agent": "data.actionTarget.runAgent.key"
-          },
+          "requestApi": "/bot/admin/agent_runtime/run",
+          "streamApi": "/bot/admin/agent_runtime/stream",
+          "statusApi": "/bot/admin/agent_runtime/status",
+          "stopApi": "/bot/admin/agent_runtime/stop",
           "blockMs": 1000
         }
       }
@@ -360,7 +270,7 @@
   "data": {
     "page": {
       "title": "智能体",
-      "description": "维护智能体基础设定。运行时会追加智能体设定、能力、技能和临时上下文。"
+      "description": "维护智能体基础信息、设定和运行配置。"
     },
     "table": {
       "filterFields": [
@@ -372,18 +282,15 @@
     },
     "actionTarget": {
       "editAgentId": "",
-      "deleteAgent": {},
       "runAgent": {}
     }
   },
   "state": {
     "dialog": {
+      "runtimeConfig": false,
       "edit": false,
       "create": false,
       "run": false
-    },
-    "confirm": {
-      "delete": false
     }
   },
   "action": {}

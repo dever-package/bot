@@ -29,8 +29,8 @@ func buildPromptInput(req Request, collected collectedContext, plan Plan, catalo
 	return agentprompt.RuntimeInput{
 		Mode:           mode,
 		TaskFrame:      taskFrame,
-		PublicSettings: collected.PublicSettings,
-		AgentSettings:  collected.AgentSettings,
+		CategoryPrompt: collected.CategoryPrompt,
+		AgentPrompt:    collected.AgentPrompt,
 		KnowledgeBases: knowledgeBases,
 		Memory:         memories,
 		Powers:         collected.Powers,

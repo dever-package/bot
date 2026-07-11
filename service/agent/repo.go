@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -11,7 +10,6 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 	energonmodel "github.com/dever-package/bot/model/energon"
 	agentruntime "github.com/dever-package/bot/service/agent/runtime"
-	agentsetting "github.com/dever-package/bot/service/agent/setting"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
@@ -62,6 +60,9 @@ func (Repo) FindAgent(ctx context.Context, identity string) (agentmodel.Agent, e
 	if row == nil {
 		return agentmodel.Agent{}, fmt.Errorf("未找到智能体: %s", identity)
 	}
+	if strings.TrimSpace(row.Prompt) == "" {
+		row.Prompt = agentmodel.BuiltinAgentPrompt(row.Key)
+	}
 	if row.Status != 1 {
 		return agentmodel.Agent{}, fmt.Errorf("智能体已停用: %s", row.Name)
 	}
@@ -101,141 +102,20 @@ func (Repo) FindPower(ctx context.Context, id uint64) (energonmodel.Power, error
 	return *row, nil
 }
 
-func (Repo) ListActivePublicSettings(ctx context.Context, packID uint64) []agentmodel.Setting {
-	if packID == 0 {
-		packID = agentmodel.DefaultSettingPackID
+func (Repo) FindAgentCatePrompt(ctx context.Context, cateID uint64) string {
+	if cateID == 0 {
+		return ""
 	}
-	items := agentmodel.NewSettingPackItemModel().Select(ctx, map[string]any{
-		"pack_id": packID,
-		"status":  1,
-	})
-	if len(items) == 0 {
-		return nil
+	row := agentmodel.NewAgentCateModel().Find(ctx, map[string]any{"id": cateID})
+	if row == nil {
+		return ""
 	}
-
-	settingIDs := make([]any, 0, len(items))
-	for _, item := range items {
-		if item == nil || item.SettingID == 0 {
-			continue
-		}
-		settingIDs = append(settingIDs, item.SettingID)
-	}
-	if len(settingIDs) == 0 {
-		return nil
-	}
-
-	settingModel := agentmodel.NewSettingModel()
-	settingRows := settingModel.Select(ctx, map[string]any{
-		"id":     settingIDs,
-		"status": 1,
-	})
-	settingByID := make(map[uint64]agentmodel.Setting, len(settingRows))
-	for _, row := range settingRows {
-		if row != nil {
-			settingByID[row.ID] = *row
-		}
-	}
-
-	result := make([]agentmodel.Setting, 0, len(settingByID))
-	for _, item := range items {
-		if item == nil || item.SettingID == 0 {
-			continue
-		}
-		if setting, ok := settingByID[item.SettingID]; ok {
-			if !isAlwaysLoadMode(setting.LoadMode) {
-				continue
-			}
-			setting = runtimeDefaultSetting(packID, setting)
-			result = append(result, setting)
-		}
-	}
-	return result
-}
-
-func runtimeDefaultSetting(packID uint64, setting agentmodel.Setting) agentmodel.Setting {
-	defaultSetting, ok := agentmodel.DefaultSettings.Find(setting.ID)
-	if !ok {
-		return setting
-	}
-	defaultSetting.LoadMode = setting.LoadMode
-	defaultSetting.Status = setting.Status
-	defaultSetting.Sort = setting.Sort
-	return defaultSetting
-}
-
-func (Repo) ListActiveAgentSettings(ctx context.Context, agentID uint64) []agentmodel.AgentSetting {
-	if agentID == 0 {
-		return nil
-	}
-	filter := map[string]any{
-		"agent_id":  agentID,
-		"load_mode": "always",
-		"status":    1,
-	}
-	rows := agentmodel.NewAgentSettingModel().Select(ctx, filter)
-	result := make([]agentmodel.AgentSetting, 0, len(rows))
-	for _, row := range rows {
-		if row != nil {
-			result = append(result, *row)
-		}
-	}
-	result = withRuntimeBuiltinAgentSettings(ctx, agentID, result)
-	sort.SliceStable(result, func(i, j int) bool {
-		return agentsetting.LessAgentSettingOrder(result[i].Type, result[i].ID, result[j].Type, result[j].ID)
-	})
-	return result
-}
-
-func withRuntimeBuiltinAgentSettings(ctx context.Context, agentID uint64, rows []agentmodel.AgentSetting) []agentmodel.AgentSetting {
-	if !isRuntimeSkillCreatorAgent(ctx, agentID) {
-		return rows
-	}
-	builtin, ok := agentmodel.DefaultAgentSettings.Find(agentID, "output")
-	if !ok {
-		builtin, ok = agentmodel.DefaultAgentSettings.Find(agentmodel.SkillCreatorAgentID, "output")
-	}
-	if !ok {
-		return rows
-	}
-	builtin.AgentID = agentID
-	for index := range rows {
-		if rows[index].Type != builtin.Type {
-			continue
-		}
-		if skillCreatorOutputIsStrict(rows[index].Content) {
-			return rows
-		}
-		builtin.ID = rows[index].ID
-		builtin.AgentID = rows[index].AgentID
-		builtin.LoadMode = rows[index].LoadMode
-		builtin.Status = rows[index].Status
-		rows[index] = builtin
-		return rows
-	}
-	return append(rows, builtin)
-}
-
-func isRuntimeSkillCreatorAgent(ctx context.Context, agentID uint64) bool {
-	if agentID == agentmodel.SkillCreatorAgentID {
-		return true
-	}
-	row := agentmodel.NewAgentModel().Find(ctx, map[string]any{"id": agentID})
-	return row != nil && strings.TrimSpace(row.Key) == agentmodel.SkillCreatorAgentKey
-}
-
-func skillCreatorOutputIsStrict(content string) bool {
-	return strings.Contains(content, "生成 Python/Node/Shell 脚本时必须输出完整可语法检查的源码") &&
-		strings.Contains(content, "禁止伪代码、Markdown 代码围栏")
-}
-
-func isAlwaysLoadMode(loadMode string) bool {
-	loadMode = strings.ToLower(strings.TrimSpace(loadMode))
-	return loadMode == "" || loadMode == "always"
+	return strings.TrimSpace(row.Prompt)
 }
 
 func (Repo) ListActiveSkillPackEntries(ctx context.Context, packID uint64) []agentskill.Entry {
 	if packID == 0 {
-		packID = agentmodel.DefaultSkillPackID
+		return nil
 	}
 	items := agentmodel.NewSkillPackItemModel().Select(ctx, map[string]any{
 		"pack_id": packID,
@@ -317,24 +197,6 @@ func (repo Repo) ListActiveCallablePowers(ctx context.Context, excludedID uint64
 		}
 	}
 	return result
-}
-
-func (Repo) FindActiveTextPowerKey(ctx context.Context, powerID uint64) (string, bool) {
-	if powerID == 0 {
-		return "", false
-	}
-	row := energonmodel.NewPowerModel().Find(ctx, map[string]any{"id": powerID})
-	if row == nil || row.Status != 1 {
-		return "", false
-	}
-	if !strings.EqualFold(strings.TrimSpace(row.Kind), "text") {
-		return "", false
-	}
-	key := strings.TrimSpace(row.Key)
-	if key == "" {
-		return "", false
-	}
-	return key, true
 }
 
 func (Repo) FindRuntimeConfig(ctx context.Context) agentmodel.RuntimeConfig {

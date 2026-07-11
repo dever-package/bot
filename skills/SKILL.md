@@ -39,20 +39,24 @@ version: 0.1.0
 
 ## Service/API 规则
 
-- `service/agent`：agent 执行和最终结果行为。
+- `service/agent/runtime`：单智能体运行、会话消息、后端上下文组装、标题、摘要、run/step 和流式状态。
+- `service/agent` 其他目录：智能体配置、知识库和技能等领域能力；不要在 runtime 外新增平行执行链路。
 - `service/energon`：provider/source/power 调用和归一化。
+- `service/memory`：长期记忆的存储、作用域、检索和后台管理。
 - `service/project`：workspace/project canvas 执行、锁、记录、stream 和权限。
 - `service/team`：team flow runtime、节点执行、校验、审批和 stream。
-- `service/assistant`：后台 AI 助理、`show-agent` 多轮会话、历史会话和自动长期记忆。
+
+`service/assistant` 已删除。后台 AI 助理、技能创建和智能体调试的会话都复用 `service/agent/runtime`，API 只能做参数转换。
 
 新增 Service 代码只放到归属 service 目录。避免新增会导致 package/front 循环依赖的跨 package import。
 
 ## AI 助理和技能创建
 
-- 创建技能、安装技能、智能体测试和后台 AI 助理都复用 `bot_assistant_session` / `bot_assistant_message`，用 `agent_key + context_key` 隔离场景；不要再新增场景专用 message 表。
+- 创建技能、安装技能、智能体测试和后台 AI 助理都复用 `bot_agent_session` / `bot_agent_message`，用 `agent_key + context_key` 隔离场景；不要再新增场景专用 message 表。
+- 模型上下文只能由 `service/agent/runtime/context` 从服务端会话、摘要和记忆组装；前端不得提交历史消息作为模型上下文。
 - 内置技能用 `bot_skill.source_type=builtin` 和 `manifest.builtin_methods` 暴露已有 Dever service/provider；内置技能本体和默认技能方案绑定只通过 model seed 创建，运行时和页面 option 不自动补写；不要写安装目录、不要复制脚本、不要绕过技能方案绑定。
-- 长期记忆复用 `bot_memory`，只在主框架普通聊天和智能体运行页开启；按 `owner_type/owner_id + agent_key + context_key` 严格隔离，自动保存、更新或忽略，不走候选确认表，不做向量召回。
-- 记忆抽取复用当前 agent 的 `llm_power_id`；不可用时才退回确定性规则。secret、cookie、token、api key 不进入记忆、prompt、日志。
+- 长期记忆复用 `bot_memory`，按 `owner_type/owner_id + agent_key + context_key` 严格隔离，不新增候选确认表或平行记忆表。
+- 自动记忆抽取由 runtime 在消息完成后异步触发，仅在 `memory_enabled` 开启时复用当前 agent 的 `llm_power_id`；不得阻塞主输出。secret、cookie、token、api key 不进入记忆、prompt、日志。
 - 创建技能的 AI 对话必须只产出和应用草稿 patch；发布仍走校验、沙箱测试和发布流程。
 - AI 助理内历史、记忆、交互参数弹窗必须高于 AI 助理层；AI 助理层必须高于普通业务弹窗，且不能点击助理导致普通弹窗关闭。
 

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -1175,12 +1174,16 @@ func (s Service) DebugRetrieve(ctx context.Context, req RetrieveDebugRequest) (R
 
 func (s Service) debugRetrieveBinding(ctx context.Context, req RetrieveDebugRequest) (agentKnowledgeBinding, error) {
 	if req.AgentID > 0 {
-		for _, binding := range s.activeBindings(ctx, req.AgentID) {
+		agent := agentmodel.NewAgentModel().Find(ctx, map[string]any{"id": req.AgentID, "status": 1})
+		if agent == nil {
+			return agentKnowledgeBinding{}, fmt.Errorf("智能体不存在或已停用")
+		}
+		for _, binding := range s.activeBindings(ctx, agent.KnowledgeCateID) {
 			if req.BaseID == 0 || binding.BaseID == req.BaseID {
 				return binding, nil
 			}
 		}
-		return agentKnowledgeBinding{}, fmt.Errorf("智能体未绑定该知识库")
+		return agentKnowledgeBinding{}, fmt.Errorf("智能体知识库分类不包含该知识库")
 	}
 	if req.BaseID == 0 {
 		return agentKnowledgeBinding{}, fmt.Errorf("知识库不能为空")
@@ -1410,11 +1413,11 @@ func retrievalSourceCounts(snippets []RetrievedSnippet) map[string]int {
 	return result
 }
 
-func (s Service) AgentKnowledgeBases(ctx context.Context, agentID uint64) []AgentKnowledgeBaseRuntime {
-	bindings := s.activeBindings(ctx, agentID)
-	result := make([]AgentKnowledgeBaseRuntime, 0, len(bindings))
+func (s Service) KnowledgeBasesByCate(ctx context.Context, cateID uint64) []KnowledgeBaseRuntime {
+	bindings := s.activeBindings(ctx, cateID)
+	result := make([]KnowledgeBaseRuntime, 0, len(bindings))
 	for _, binding := range bindings {
-		result = append(result, AgentKnowledgeBaseRuntime{
+		result = append(result, KnowledgeBaseRuntime{
 			ID:     binding.BaseID,
 			Name:   binding.Base.Name,
 			Prompt: binding.Prompt,
@@ -1466,50 +1469,23 @@ func (s Service) retrieveKeywordBinding(ctx context.Context, binding agentKnowle
 	return rankKnowledgeSnippets(ctx, mergeKnowledgeSnippets(snippets), query, nil, binding.BaseID)
 }
 
-func (s Service) activeBindings(ctx context.Context, agentID uint64) []agentKnowledgeBinding {
-	rows := agentmodel.NewAgentKnowledgeBaseModel().Select(ctx, map[string]any{
-		"agent_id": agentID,
-		"status":   1,
+func (s Service) activeBindings(ctx context.Context, cateID uint64) []agentKnowledgeBinding {
+	if cateID == 0 {
+		return nil
+	}
+	rows := agentmodel.NewKnowledgeBaseModel().Select(ctx, map[string]any{
+		"cate_id": cateID,
+		"status":  1,
+	}, map[string]any{
+		"order": "main.sort asc,main.id asc",
 	})
 	result := make([]agentKnowledgeBinding, 0, len(rows))
 	for _, row := range rows {
-		if row == nil || row.KnowledgeBaseID == 0 {
+		if row == nil || row.ID == 0 {
 			continue
 		}
-		base := agentmodel.NewKnowledgeBaseModel().Find(ctx, map[string]any{
-			"id":     row.KnowledgeBaseID,
-			"status": 1,
-		})
-		if base == nil {
-			continue
-		}
-		result = append(result, agentKnowledgeBinding{
-			ID:             row.ID,
-			AgentID:        row.AgentID,
-			BaseID:         row.KnowledgeBaseID,
-			Prompt:         row.Prompt,
-			RetrieveLimit:  row.RetrieveLimit,
-			ScoreThreshold: row.ScoreThreshold,
-			Sort:           row.Sort,
-			Base: knowledgeBaseConfig{
-				ID:               base.ID,
-				CateID:           base.CateID,
-				Name:             base.Name,
-				IndexPowerID:     base.IndexPowerID,
-				Collection:       baseCollection(*base),
-				EmbeddingPowerID: base.EmbeddingPowerID,
-				ConceptGraphMode: base.ConceptGraphEnabled,
-				RetrieveLimit:    normalizeRetrieveLimit(base.RetrieveLimit),
-				ScoreThreshold:   normalizeScoreThreshold(base.ScoreThreshold),
-				MaxContextChars:  normalizeMaxContextChars(base.MaxContextChars),
-				GraphDepth:       normalizeGraphDepth(base.GraphDepth),
-				Status:           base.Status,
-			},
-		})
+		result = append(result, knowledgeBaseDebugBinding(*row))
 	}
-	sort.SliceStable(result, func(i, j int) bool {
-		return result[i].Sort < result[j].Sort
-	})
 	return result
 }
 

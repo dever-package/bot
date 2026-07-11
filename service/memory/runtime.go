@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode"
 
-	assistantmodel "github.com/dever-package/bot/model/assistant"
+	agentmodel "github.com/dever-package/bot/model/agent"
 	memorymodel "github.com/dever-package/bot/model/memory"
 )
 
@@ -47,9 +47,9 @@ func (Service) RuntimeMemoriesBySession(ctx context.Context, sessionID uint64, q
 	if sessionID == 0 {
 		return []RuntimeMemory{}
 	}
-	session := assistantmodel.NewSessionModel().Find(ctx, map[string]any{
+	session := agentmodel.NewSessionModel().Find(ctx, map[string]any{
 		"id":     sessionID,
-		"status": assistantmodel.SessionStatusActive,
+		"status": agentmodel.SessionStatusActive,
 	})
 	if session == nil {
 		return []RuntimeMemory{}

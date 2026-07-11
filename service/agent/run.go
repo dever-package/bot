@@ -140,9 +140,8 @@ func (s Service) execute(exec runExecution) {
 
 	runtimePrompt := bundle.RuntimePrompt
 	tracker.Step(ctx, "knowledge", "运行资料", runtimePrompt, map[string]any{
-		"setting_pack_id":      exec.Agent.SettingPackID,
-		"public_settings":      len(bundle.PromptInput.PublicSettings),
-		"agent_settings":       len(bundle.PromptInput.AgentSettings),
+		"category_prompt":      strings.TrimSpace(bundle.PromptInput.CategoryPrompt) != "",
+		"agent_prompt":         strings.TrimSpace(bundle.PromptInput.AgentPrompt) != "",
 		"knowledge_bases":      len(bundle.KnowledgeBases),
 		"memories":             len(bundle.Memories),
 		"knowledge_mode":       bundle.Diagnostics.KnowledgeMode,

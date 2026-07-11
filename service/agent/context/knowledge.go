@@ -9,24 +9,24 @@ import (
 	agentprompt "github.com/dever-package/bot/service/agent/prompt"
 )
 
-const knowledgeBindingCacheTTL = 30 * time.Second
+const knowledgeCategoryCacheTTL = 30 * time.Second
 
-func (a Assembler) collectKnowledgeBases(ctx context.Context, req Request) []agentknowledge.AgentKnowledgeBaseRuntime {
-	if a.knowledge == nil {
+func (a Assembler) collectKnowledgeBases(ctx context.Context, req Request) []agentknowledge.KnowledgeBaseRuntime {
+	if a.knowledge == nil || req.Agent.KnowledgeCateID == 0 {
 		return nil
 	}
-	key := fmt.Sprintf("agent-knowledge-bases:%d", req.Agent.ID)
+	key := fmt.Sprintf("agent-knowledge-category:%d", req.Agent.KnowledgeCateID)
 	if cached, ok := a.cache.Get(key); ok {
-		if rows, ok := cached.([]agentknowledge.AgentKnowledgeBaseRuntime); ok {
+		if rows, ok := cached.([]agentknowledge.KnowledgeBaseRuntime); ok {
 			return rows
 		}
 	}
-	rows := a.knowledge.AgentKnowledgeBases(ctx, req.Agent.ID)
-	a.cache.Set(key, rows, knowledgeBindingCacheTTL)
+	rows := a.knowledge.KnowledgeBasesByCate(ctx, req.Agent.KnowledgeCateID)
+	a.cache.Set(key, rows, knowledgeCategoryCacheTTL)
 	return rows
 }
 
-func promptKnowledgeBases(rows []agentknowledge.AgentKnowledgeBaseRuntime) []agentprompt.KnowledgeBaseRuntime {
+func promptKnowledgeBases(rows []agentknowledge.KnowledgeBaseRuntime) []agentprompt.KnowledgeBaseRuntime {
 	result := make([]agentprompt.KnowledgeBaseRuntime, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, agentprompt.KnowledgeBaseRuntime{

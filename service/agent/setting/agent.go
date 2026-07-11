@@ -23,6 +23,7 @@ func (AgentHook) ProviderBeforeSaveAgent(c *server.Context, params []any) any {
 	trimStringField(record, "name", partial)
 	normalizeAgentKeyField(c.Context(), record, partial)
 	trimStringField(record, "description", partial)
+	trimStringField(record, "prompt", partial)
 	if shouldNormalizeField(record, "kind", partial) {
 		record["kind"] = normalizeAgentKind(util.ToStringTrimmed(record["kind"]))
 	}
@@ -30,12 +31,8 @@ func (AgentHook) ProviderBeforeSaveAgent(c *server.Context, params []any) any {
 		record["cate_id"] = defaultAgentCateID
 	}
 	normalizeAgentCate(c.Context(), record, partial)
-	if shouldNormalizeField(record, "setting_pack_id", partial) && util.ToUint64(record["setting_pack_id"]) == 0 {
-		record["setting_pack_id"] = defaultAgentSettingPackID
-	}
-	if shouldNormalizeField(record, "skill_pack_id", partial) && util.ToUint64(record["skill_pack_id"]) == 0 {
-		record["skill_pack_id"] = defaultAgentSkillPackID
-	}
+	normalizeOptionalAgentKnowledgeCate(c, record, partial)
+	normalizeOptionalAgentSkillPack(c, record, partial)
 	defaultInt16FieldOnCreateOrPresent(record, "status", defaultAgentStatus, partial)
 	defaultIntFieldOnCreateOrPresent(record, "sort", defaultAgentSort, partial)
 	if shouldNormalizeField(record, "temperature", partial) {
@@ -51,12 +48,6 @@ func (AgentHook) ProviderBeforeSaveAgent(c *server.Context, params []any) any {
 	if shouldNormalizeField(record, "llm_power_id", partial) {
 		validateAgentLLMPower(c, util.ToUint64(record["llm_power_id"]))
 	}
-	if shouldNormalizeField(record, "planner_power_id", partial) {
-		validateOptionalAgentTextPower(c, "form.planner_power_id", util.ToUint64(record["planner_power_id"]), "规划模型能力")
-	}
-	if shouldNormalizeField(record, "selector_power_id", partial) {
-		validateOptionalAgentTextPower(c, "form.selector_power_id", util.ToUint64(record["selector_power_id"]), "技能选择模型能力")
-	}
 	return record
 }
 
@@ -67,6 +58,7 @@ func (AgentHook) ProviderBeforeSaveAgentCate(_ *server.Context, params []any) an
 	}
 	partial := isPartialAgentRecord(record)
 	trimStringField(record, "name", partial)
+	trimStringField(record, "prompt", partial)
 	defaultInt16Field(record, "status", defaultAgentStatus, partial)
 	defaultIntField(record, "sort", defaultAgentSort, partial)
 	return record
@@ -75,9 +67,9 @@ func (AgentHook) ProviderBeforeSaveAgentCate(_ *server.Context, params []any) an
 func ensureBaseAgentCates(ctx context.Context) {
 	// Seeds 只在建表时写入；这里保证内置分类 ID 存在，但不限制用户维护自定义分类。
 	agentModel := agentmodel.NewAgentModel()
-	ensureBuiltinAgent(ctx, agentmodel.FrontAssistantAgentID, agentmodel.FrontAssistantAgentKey, agentmodel.AssistantSettingPackID)
-	ensureBuiltinAgent(ctx, agentmodel.SkillInstallerAgentID, agentmodel.SkillInstallerAgentKey, agentmodel.SkillInstallSettingPackID)
-	ensureBuiltinAgent(ctx, agentmodel.SkillCreatorAgentID, agentmodel.SkillCreatorAgentKey, agentmodel.SkillCreateSettingPackID)
+	ensureBuiltinAgent(ctx, agentmodel.FrontAssistantAgentID, agentmodel.FrontAssistantAgentKey)
+	ensureBuiltinAgent(ctx, agentmodel.SkillInstallerAgentID, agentmodel.SkillInstallerAgentKey)
+	ensureBuiltinAgent(ctx, agentmodel.SkillCreatorAgentID, agentmodel.SkillCreatorAgentKey)
 	agentModel.Update(ctx, map[string]any{"kind": agentmodel.AgentKindInternal}, map[string]any{
 		"cate_id": agentmodel.SystemAgentCateID,
 	})
@@ -93,41 +85,43 @@ func ensureBaseAgentCate(ctx context.Context, id uint64, name string, sort int) 
 	model.Insert(ctx, map[string]any{
 		"id":     id,
 		"name":   name,
+		"prompt": "",
 		"status": defaultAgentStatus,
 		"sort":   sort,
 	})
 }
 
-func ensureBuiltinAgent(ctx context.Context, id uint64, key string, settingPackID uint64) {
+func ensureBuiltinAgent(ctx context.Context, id uint64, key string) {
 	name, ok := builtinAgentNameForKey(key)
 	if !ok {
 		return
 	}
 
 	model := agentmodel.NewAgentModel()
-	record := builtinAgentUpdateRecord(settingPackID)
-
 	if existing := model.Find(ctx, map[string]any{"key": key}); existing != nil {
+		record := builtinAgentUpdateRecord(key, existing.Prompt)
 		model.Update(ctx, map[string]any{"id": existing.ID}, record)
-		ensureBuiltinAgentSettingOwner(ctx, id, existing.ID)
 		return
 	}
 
+	record := builtinAgentUpdateRecord(key, "")
 	record["key"] = key
 	if existing := model.Find(ctx, map[string]any{"id": id}); existing != nil {
 		if canUseBuiltinAgentID(existing, name) {
+			record = builtinAgentUpdateRecord(key, existing.Prompt)
+			record["key"] = key
 			model.Update(ctx, map[string]any{"id": id}, record)
 		}
 	}
 }
 
-func builtinAgentUpdateRecord(settingPackID uint64) map[string]any {
+func builtinAgentUpdateRecord(key string, currentPrompt string) map[string]any {
 	record := map[string]any{
 		"kind":    agentmodel.AgentKindInternal,
 		"cate_id": agentmodel.SystemAgentCateID,
 	}
-	if settingPackID > 0 {
-		record["setting_pack_id"] = settingPackID
+	if strings.TrimSpace(currentPrompt) == "" {
+		record["prompt"] = agentmodel.BuiltinAgentPrompt(key)
 	}
 	return record
 }
@@ -150,23 +144,6 @@ func canUseBuiltinAgentID(row *agentmodel.Agent, name string) bool {
 		return false
 	}
 	return normalizeAgentKind(row.Kind) == agentmodel.AgentKindInternal || strings.TrimSpace(row.Name) == name
-}
-
-func ensureBuiltinAgentSettingOwner(ctx context.Context, fromAgentID uint64, toAgentID uint64) {
-	if fromAgentID == 0 || toAgentID == 0 || fromAgentID == toAgentID {
-		return
-	}
-	model := agentmodel.NewAgentSettingModel()
-	rows := model.Select(ctx, map[string]any{"agent_id": fromAgentID})
-	for _, row := range rows {
-		if row == nil || row.Type == "" {
-			continue
-		}
-		if model.Find(ctx, map[string]any{"agent_id": toAgentID, "type": row.Type}) != nil {
-			continue
-		}
-		model.Update(ctx, map[string]any{"id": row.ID}, map[string]any{"agent_id": toAgentID})
-	}
 }
 
 func (AgentHook) ProviderBeforeDeleteAgent(c *server.Context, params []any) any {
@@ -209,6 +186,42 @@ func normalizeAgentCate(ctx context.Context, record map[string]any, partial bool
 	}
 	if util.ToUint64(record["cate_id"]) == agentmodel.SystemAgentCateID {
 		record["cate_id"] = agentmodel.DefaultAgentCateID
+	}
+}
+
+func normalizeOptionalAgentKnowledgeCate(c *server.Context, record map[string]any, partial bool) {
+	if !shouldNormalizeField(record, "knowledge_cate_id", partial) {
+		return
+	}
+	cateID := util.ToUint64(record["knowledge_cate_id"])
+	record["knowledge_cate_id"] = cateID
+	if cateID == 0 {
+		return
+	}
+	row := agentmodel.NewKnowledgeCateModel().Find(c.Context(), map[string]any{"id": cateID})
+	if row == nil {
+		panicAgentField("form.knowledge_cate_id", "知识库分类不存在。")
+	}
+	if row.Status != 1 {
+		panicAgentField("form.knowledge_cate_id", "知识库分类已停用。")
+	}
+}
+
+func normalizeOptionalAgentSkillPack(c *server.Context, record map[string]any, partial bool) {
+	if !shouldNormalizeField(record, "skill_pack_id", partial) {
+		return
+	}
+	packID := util.ToUint64(record["skill_pack_id"])
+	record["skill_pack_id"] = packID
+	if packID == 0 {
+		return
+	}
+	row := agentmodel.NewSkillPackModel().Find(c.Context(), map[string]any{"id": packID})
+	if row == nil {
+		panicAgentField("form.skill_pack_id", "技能方案不存在。")
+	}
+	if row.Status != 1 {
+		panicAgentField("form.skill_pack_id", "技能方案已停用。")
 	}
 }
 
@@ -358,13 +371,6 @@ func validateAgentLLMPower(c *server.Context, powerID uint64) {
 		panicAgentField("form.llm_power_id", "LLM能力不能为空。")
 	}
 	validateAgentTextPower(c, "form.llm_power_id", powerID, "LLM能力")
-}
-
-func validateOptionalAgentTextPower(c *server.Context, field string, powerID uint64, label string) {
-	if powerID == 0 {
-		return
-	}
-	validateAgentTextPower(c, field, powerID, label)
 }
 
 func validateAgentTextPower(c *server.Context, field string, powerID uint64, label string) {

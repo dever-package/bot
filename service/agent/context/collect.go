@@ -11,10 +11,10 @@ import (
 
 type collectedContext struct {
 	RuntimeConfig  agentmodel.RuntimeConfig
+	CategoryPrompt string
+	AgentPrompt    string
 	Powers         []energonmodel.Power
-	PublicSettings []agentmodel.Setting
-	AgentSettings  []agentmodel.AgentSetting
-	KnowledgeBases []agentknowledge.AgentKnowledgeBaseRuntime
+	KnowledgeBases []agentknowledge.KnowledgeBaseRuntime
 	SkillLimits    agentskill.Limits
 	SkillCatalog   agentskill.Catalog
 	ContextNotes   []ContextNote
@@ -31,9 +31,9 @@ func (a Assembler) collect(ctx context.Context, req Request) collectedContext {
 	)
 	return collectedContext{
 		RuntimeConfig:  runtimeConfig,
+		CategoryPrompt: a.repo.FindAgentCatePrompt(ctx, req.Agent.CateID),
+		AgentPrompt:    req.Agent.Prompt,
 		Powers:         a.repo.ListActiveCallablePowers(ctx, req.Power.ID),
-		PublicSettings: a.repo.ListActivePublicSettings(ctx, req.Agent.SettingPackID),
-		AgentSettings:  a.repo.ListActiveAgentSettings(ctx, req.Agent.ID),
 		KnowledgeBases: a.collectKnowledgeBases(ctx, req),
 		SkillLimits:    skillLimits,
 		SkillCatalog:   skillCatalog,

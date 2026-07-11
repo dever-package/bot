@@ -47,20 +47,17 @@ type KnowledgeRetrieveDebugBase struct {
 	GraphDepth int    `json:"graph_depth"`
 }
 
-type AgentKnowledgeBaseRuntime struct {
+type KnowledgeBaseRuntime struct {
 	ID     uint64
 	Name   string
 	Prompt string
 }
 
 type agentKnowledgeBinding struct {
-	ID             uint64
-	AgentID        uint64
 	BaseID         uint64
 	Prompt         string
 	RetrieveLimit  int
 	ScoreThreshold float64
-	Sort           int
 	Base           knowledgeBaseConfig
 }
 

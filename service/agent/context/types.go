@@ -64,7 +64,7 @@ type Bundle struct {
 	PromptSections []agentprompt.SectionStat
 	SkillCatalog   agentskill.Catalog
 	SkillSelection agentskill.SelectionResult
-	KnowledgeBases []agentknowledge.AgentKnowledgeBaseRuntime
+	KnowledgeBases []agentknowledge.KnowledgeBaseRuntime
 	Memories       []memoryservice.RuntimeMemory
 	ContextNotes   []ContextNote
 	Baseline       Baseline

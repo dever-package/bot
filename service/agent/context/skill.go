@@ -110,7 +110,6 @@ func skillSelectionCacheKey(req Request, collected collectedContext) string {
 		strconv.FormatUint(req.Agent.SkillPackID, 10),
 		strconv.FormatUint(req.SourceTargetID, 10),
 		req.Power.Key,
-		strconv.FormatUint(req.Agent.SelectorPowerID, 10),
 		jsonText(collected.SkillCatalog.MetadataKeys()),
 		jsonText(req.Input),
 		jsonText(selectionHistory(collected.ContextNotes, collected.Baseline)),

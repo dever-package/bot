@@ -10,6 +10,7 @@ type Run struct {
 	ID        uint64 `dorm:"primaryKey;autoIncrement;comment:运行ID"`
 	RequestID string `dorm:"type:varchar(64);not null;comment:请求ID"`
 	AgentID   uint64 `dorm:"type:bigint;not null;default:0;comment:智能体"`
+	SessionID uint64 `dorm:"type:bigint;not null;default:0;comment:会话"`
 
 	Input          string `dorm:"type:text;not null;default:'';comment:输入内容"`
 	Skills         string `dorm:"type:text;not null;default:'[]';comment:技能列表"`
@@ -26,9 +27,10 @@ type Run struct {
 }
 
 type RunIndex struct {
-	RequestID     struct{} `index:"request_id"`
-	AgentCreated  struct{} `index:"agent_id,created_at"`
-	StatusCreated struct{} `index:"status,created_at"`
+	RequestID      struct{} `index:"request_id"`
+	AgentCreated   struct{} `index:"agent_id,created_at"`
+	SessionCreated struct{} `index:"session_id,created_at"`
+	StatusCreated  struct{} `index:"status,created_at"`
 }
 
 var (

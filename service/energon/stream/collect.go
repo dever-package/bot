@@ -7,7 +7,6 @@ import (
 	"time"
 
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
-	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type Reader func(ctx context.Context, requestID string, lastID string, count int64, block time.Duration) ([]Entry, error)
@@ -89,7 +88,7 @@ func Collect(ctx context.Context, reader Reader, stop Stopper, options CollectOp
 			frameType := FrameType(frame)
 
 			if options.CollectDeltaText && frameType != "result" && shouldCollectText(output) {
-				text.WriteString(frontstream.InputText(output["text"]))
+				text.WriteString(botprotocol.AsText(output["text"]))
 			}
 			if options.CollectOutputs && len(output) > 0 {
 				outputs = append(outputs, output)
@@ -107,7 +106,7 @@ func Collect(ctx context.Context, reader Reader, stop Stopper, options CollectOp
 }
 
 func shouldCollectText(output botprotocol.Output) bool {
-	if strings.TrimSpace(frontstream.InputText(output["text"])) == "" {
+	if botprotocol.AsText(output["text"]) == "" {
 		return false
 	}
 	switch OutputEvent(output) {

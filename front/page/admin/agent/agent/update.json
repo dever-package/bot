@@ -28,6 +28,10 @@
         "type": "main",
         "className": "p-0",
         "children": {
+          "tabs-row": {
+            "type": "container",
+            "className": "mb-4"
+          },
           "dialog-shell": {
             "type": "container",
             "className": "w-full"
@@ -37,6 +41,29 @@
     }
   },
   "nodes": {
+    "tabs-row": [
+      {
+        "type": "nav-tab",
+        "meta": {
+          "target": "state.currentTab",
+          "variant": "line",
+          "tabs": [
+            {
+              "label": "基础信息",
+              "value": "basic"
+            },
+            {
+              "label": "设定",
+              "value": "setting"
+            },
+            {
+              "label": "运行配置",
+              "value": "runtime"
+            }
+          ]
+        }
+      }
+    ],
     "dialog-shell": [
       {
         "type": "form-select",
@@ -53,6 +80,7 @@
         ],
         "meta": {
           "formLayout": "horizontal",
+          "tab": "basic",
           "controlClassName": "max-w-[260px]"
         }
       },
@@ -68,7 +96,8 @@
           }
         ],
         "meta": {
-          "formLayout": "horizontal"
+          "formLayout": "horizontal",
+          "tab": "basic"
         }
       },
       {
@@ -81,6 +110,7 @@
         "info": "用于系统调用和跨环境稳定定位，建议使用小写字母、数字和中划线。",
         "meta": {
           "formLayout": "horizontal",
+          "tab": "basic",
           "hiddenWhen": [
             {
               "path": "form.kind",
@@ -99,6 +129,7 @@
         "info": "系统内置智能体的标识不可修改。",
         "meta": {
           "formLayout": "horizontal",
+          "tab": "basic",
           "disabled": true,
           "showWhen": [
             {
@@ -116,6 +147,7 @@
         "mode": "form",
         "meta": {
           "formLayout": "horizontal",
+          "tab": "basic",
           "rows": 3
         }
       },
@@ -136,68 +168,30 @@
         ],
         "meta": {
           "formLayout": "horizontal",
+          "tab": "setting",
           "controlClassName": "max-w-[360px]"
         }
       },
       {
         "type": "form-select",
-        "name": "规划模型能力",
-        "placeholder": "不启用独立规划模型",
-        "value": "form.planner_power_id",
+        "name": "知识库分类",
+        "placeholder": "不使用知识库",
+        "value": "form.knowledge_cate_id",
         "mode": "form",
         "option": {
-          "service": "bot.agent.setting.OptionService.LoadTextPowers"
+          "service": "bot.agent.setting.OptionService.LoadKnowledgeCates"
         },
-        "info": "仅在上下文规划器确实需要 LLM 判断且这里已配置时调用；留空则不调用 planner LLM，使用确定性规划。",
+        "info": "选择后，智能体可以读取该分类下所有启用的知识库；留空则不挂载知识库。",
         "meta": {
           "formLayout": "horizontal",
-          "controlClassName": "max-w-[360px]"
-        }
-      },
-      {
-        "type": "form-select",
-        "name": "技能选择模型能力",
-        "placeholder": "不启用独立技能选择模型",
-        "value": "form.selector_power_id",
-        "mode": "form",
-        "option": {
-          "service": "bot.agent.setting.OptionService.LoadTextPowers"
-        },
-        "info": "仅在本地触发词无法唯一确定且这里已配置时调用；留空则只使用本地触发词和确定性跳过规则。",
-        "meta": {
-          "formLayout": "horizontal",
-          "controlClassName": "max-w-[360px]"
-        }
-      },
-      {
-        "type": "form-select",
-        "name": "规则方案",
-        "placeholder": "请选择规则方案",
-        "value": "form.setting_pack_id",
-        "mode": "form",
-        "option": {
-          "model": "bot.agent.NewSettingPackModel",
-          "filters": {
-            "status": 1
-          },
-          "order": "sort asc,id asc"
-        },
-        "info": "运行时加载这个方案下的规则，再加载智能体设定。",
-        "validate": [
-          {
-            "type": "required",
-            "message": "规则方案不能为空。"
-          }
-        ],
-        "meta": {
-          "formLayout": "horizontal",
+          "tab": "setting",
           "controlClassName": "max-w-[260px]"
         }
       },
       {
         "type": "form-select",
         "name": "技能方案",
-        "placeholder": "请选择技能方案",
+        "placeholder": "不使用技能",
         "value": "form.skill_pack_id",
         "mode": "form",
         "option": {
@@ -207,16 +201,25 @@
           },
           "order": "sort asc,id asc"
         },
-        "info": "运行时先注入这个方案下的技能 metadata，命中后再读取技能正文。",
-        "validate": [
-          {
-            "type": "required",
-            "message": "技能方案不能为空。"
-          }
-        ],
+        "info": "选择后加载该方案中的启用技能；留空则不挂载技能。",
         "meta": {
           "formLayout": "horizontal",
+          "tab": "setting",
           "controlClassName": "max-w-[260px]"
+        }
+      },
+      {
+        "type": "form-editor",
+        "name": "设定",
+        "placeholder": "填写智能体的身份、职责、边界和工作要求。",
+        "value": "form.prompt",
+        "mode": "form",
+        "info": "运行时会先读取智能体分类的公共提示词，再追加这里的智能体设定。",
+        "meta": {
+          "formLayout": "vertical",
+          "tab": "setting",
+          "minHeight": 320,
+          "maxHeight": 560
         }
       },
       {
@@ -239,6 +242,7 @@
         ],
         "meta": {
           "formLayout": "horizontal",
+          "tab": "runtime",
           "controlClassName": "max-w-[160px]"
         }
       },
@@ -262,6 +266,7 @@
         ],
         "meta": {
           "formLayout": "horizontal",
+          "tab": "runtime",
           "controlClassName": "max-w-[160px]"
         }
       },
@@ -280,6 +285,7 @@
         ],
         "meta": {
           "formLayout": "horizontal",
+          "tab": "runtime",
           "controlClassName": "max-w-[180px]"
         }
       }
@@ -293,17 +299,18 @@
       "key": "",
       "kind": "normal",
       "description": "",
+      "prompt": "",
       "llm_power_id": "",
-      "planner_power_id": "",
-      "selector_power_id": "",
-      "setting_pack_id": 1,
-      "skill_pack_id": 1,
+      "knowledge_cate_id": "",
+      "skill_pack_id": "",
       "temperature": 0.7,
       "timeout_seconds": 3600,
       "max_auto_steps": 0
     }
   },
-  "state": {},
+  "state": {
+    "currentTab": "basic"
+  },
   "action": {
     "submit": {
       "type": "save",

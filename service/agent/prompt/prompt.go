@@ -12,8 +12,8 @@ import (
 type RuntimeInput struct {
 	Mode           string
 	TaskFrame      TaskFrameRuntime
-	PublicSettings []agentmodel.Setting
-	AgentSettings  []agentmodel.AgentSetting
+	CategoryPrompt string
+	AgentPrompt    string
 	KnowledgeBases []KnowledgeBaseRuntime
 	Memory         []MemorySnippet
 	Powers         []energonmodel.Power
@@ -135,7 +135,7 @@ func runtimeSections(input RuntimeInput) []promptSection {
 	mode := normalizeRuntimePromptMode(input.Mode)
 	sections := make([]promptSection, 0, 10)
 
-	sections = appendPromptSection(sections, "settings", "基础设置", settingPrompt(input.PublicSettings, input.AgentSettings))
+	sections = appendPromptSection(sections, "settings", "提示词", settingPrompt(input.CategoryPrompt, input.AgentPrompt))
 	sections = appendPromptSection(sections, "chat_style", "普通对话风格", chatStylePrompt(mode))
 	sections = appendPromptSection(sections, "knowledge_tools", "知识库工具", knowledgeToolPrompt(input.KnowledgeBases))
 	if shouldIncludePowerPrompt(mode) {

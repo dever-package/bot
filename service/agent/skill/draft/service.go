@@ -19,7 +19,6 @@ import (
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 	"github.com/dever-package/bot/service/agent/tool"
 	"github.com/dever-package/bot/service/agent/tool/sandbox"
-	assistantservice "github.com/dever-package/bot/service/assistant"
 	"github.com/shemic/dever/orm"
 )
 
@@ -506,7 +505,7 @@ func rebindDraftAssistantSession(ctx context.Context, req PatchRequest, draftID 
 	if !isNewDraftAssistantContext(fromContextKey) {
 		return ""
 	}
-	err := assistantservice.NewService().RebindSessionContext(ctx, assistantservice.RebindSessionContextRequest{
+	err := agentruntime.NewService().RebindSessionContext(ctx, agentruntime.RebindSessionContextRequest{
 		SessionID:      req.AssistantSessionID,
 		AgentKey:       req.AssistantAgentKey,
 		FromContextKey: fromContextKey,

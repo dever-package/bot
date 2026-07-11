@@ -8,6 +8,11 @@ const botPlugin = {
         default: mod.ShowAgent,
       })),
     ),
+    "show-agent-chat": lazyNode(() =>
+      import("./nodes/show/agent-chat").then((mod) => ({
+        default: mod.ShowAgentChat,
+      })),
+    ),
     "show-skill-creator": lazyNode(() =>
       import("./nodes/show/skill-creator").then((mod) => ({
         default: mod.ShowSkillCreator,

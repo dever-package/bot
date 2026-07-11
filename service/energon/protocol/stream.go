@@ -6,11 +6,10 @@ import (
 )
 
 func ExtractStreamOutput(raw string) Output {
-	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
 	}
-	if strings.EqualFold(raw, "[DONE]") {
+	if strings.EqualFold(strings.TrimSpace(raw), "[DONE]") {
 		return Output{"event": "end"}
 	}
 
@@ -31,7 +30,7 @@ func MergeStreamResult(outputs []Output) Output {
 			continue
 		}
 		event := strings.ToLower(strings.TrimSpace(asText(output["event"])))
-		if text := strings.TrimSpace(asText(output["text"])); text != "" {
+		if text := firstNonEmptyStreamText(output["text"]); text != "" {
 			switch event {
 			case "reasoning":
 				reasoningParts = append(reasoningParts, text)
@@ -40,7 +39,7 @@ func MergeStreamResult(outputs []Output) Output {
 				textParts = append(textParts, text)
 			}
 		}
-		if text := strings.TrimSpace(asText(output["reasoning"])); text != "" {
+		if text := firstNonEmptyStreamText(output["reasoning"]); text != "" {
 			reasoningParts = append(reasoningParts, text)
 		}
 		copyFirstOutputValue(result, output, "title")
@@ -90,21 +89,17 @@ func extractOpenAIStreamOutput(mapped map[string]any) Output {
 
 	output := Output{}
 	if delta, ok := choice["delta"].(map[string]any); ok {
-		if text := firstText(delta["reasoning_content"], delta["reasoning"], delta["reasoning_text"]); text != "" {
+		if text := firstNonEmptyStreamText(delta["reasoning_content"], delta["reasoning"], delta["reasoning_text"]); text != "" {
 			output["event"] = "reasoning"
 			output["reasoning"] = text
 		}
-		if text := strings.TrimSpace(asText(delta["content"])); text != "" {
-			if output["event"] == nil {
-				output["event"] = "delta"
-			}
+		if text := firstNonEmptyStreamText(delta["content"]); text != "" {
+			output["event"] = "delta"
 			output["text"] = text
 		}
 	}
-	if text := strings.TrimSpace(asText(choice["text"])); text != "" {
-		if output["event"] == nil {
-			output["event"] = "delta"
-		}
+	if text := firstNonEmptyStreamText(choice["text"]); text != "" {
+		output["event"] = "delta"
 		output["text"] = text
 	}
 	if finishReason := strings.TrimSpace(asText(choice["finish_reason"])); finishReason != "" {
@@ -112,4 +107,13 @@ func extractOpenAIStreamOutput(mapped map[string]any) Output {
 		output["text"] = finishReason
 	}
 	return normalizeOutput(output)
+}
+
+func firstNonEmptyStreamText(values ...any) string {
+	for _, value := range values {
+		if text := asText(value); text != "" {
+			return text
+		}
+	}
+	return ""
 }

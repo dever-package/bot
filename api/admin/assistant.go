@@ -6,26 +6,30 @@ import (
 	"github.com/shemic/dever/server"
 
 	botapi "github.com/dever-package/bot/api"
-	assistantservice "github.com/dever-package/bot/service/assistant"
+	agentruntime "github.com/dever-package/bot/service/agent/runtime"
+	memoryservice "github.com/dever-package/bot/service/memory"
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type Assistant struct{}
 
-var assistantRunner = assistantservice.NewService()
+var assistantSessionRunner = agentruntime.NewService()
+var assistantMemoryRunner = memoryservice.NewService()
 
 func (Assistant) PostSession(c *server.Context) error {
 	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
-	data, err := assistantRunner.ResolveSession(c.Context(), assistantservice.ResolveRequest{
-		SessionID:  botapi.Uint64FromBody(body, "session_id", "sessionId", "id"),
-		ContextKey: botapi.TextFromBody(body, "context_key", "contextKey"),
-		AgentKey:   botapi.TextFromBody(body, "agent_key", "agentKey", "agent"),
-		Title:      botapi.TextFromBody(body, "title"),
-		NewSession: botapi.BoolFromBody(body, "new_session", "newSession"),
-		Limit:      int(frontstream.InputInt64(body["limit"], 0)),
+	data, err := assistantSessionRunner.ResolveSession(c.Context(), agentruntime.SessionRequest{
+		SessionID:     botapi.Uint64FromBody(body, "session_id", "sessionId", "id"),
+		LastMessageID: botapi.Uint64FromBody(body, "last_message_id", "lastMessageId"),
+		ContextKey:    botapi.TextFromBody(body, "context_key", "contextKey"),
+		AgentKey:      botapi.TextFromBody(body, "agent_key", "agentKey", "agent"),
+		Title:         botapi.TextFromBody(body, "title"),
+		NewSession:    botapi.BoolFromBody(body, "new_session", "newSession"),
+		Limit:         int(frontstream.InputInt64(body["limit"], 0)),
+		SessionOnly:   botapi.BoolFromBody(body, "session_only", "sessionOnly"),
 		MemoryEnabled: assistantBoolFromBody(
 			body,
 			true,
@@ -41,14 +45,15 @@ func (Assistant) PostSessions(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	data, err := assistantRunner.ReviewSessions(c.Context(), assistantservice.ResolveRequest{
-		ContextKey: botapi.TextFromBody(body, "context_key", "contextKey"),
-		AgentKey:   botapi.TextFromBody(body, "agent_key", "agentKey", "agent"),
-		Limit:      int(frontstream.InputInt64(body["limit"], 0)),
-		Page:       int(frontstream.InputInt64(firstBodyValue(body, "page"), 0)),
-		PageSize:   int(frontstream.InputInt64(firstBodyValue(body, "page_size", "pageSize"), 0)),
-		Keyword:    botapi.TextFromBody(body, "keyword", "search", "query"),
-		Status:     botapi.TextFromBody(body, "status"),
+	data, err := assistantSessionRunner.ReviewSessions(c.Context(), agentruntime.SessionRequest{
+		LastSessionID: botapi.Uint64FromBody(body, "last_session_id", "lastSessionId"),
+		ContextKey:    botapi.TextFromBody(body, "context_key", "contextKey"),
+		AgentKey:      botapi.TextFromBody(body, "agent_key", "agentKey", "agent"),
+		Limit:         int(frontstream.InputInt64(body["limit"], 0)),
+		Page:          int(frontstream.InputInt64(firstBodyValue(body, "page"), 0)),
+		PageSize:      int(frontstream.InputInt64(firstBodyValue(body, "page_size", "pageSize"), 0)),
+		Keyword:       botapi.TextFromBody(body, "keyword", "search", "query"),
+		Status:        botapi.TextFromBody(body, "status"),
 	})
 	return botapi.WriteJSON(c, data, err)
 }
@@ -58,7 +63,7 @@ func (Assistant) PostNewSession(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	data, err := assistantRunner.StartSession(c.Context(), assistantservice.ResolveRequest{
+	data, err := assistantSessionRunner.StartSession(c.Context(), agentruntime.SessionRequest{
 		ContextKey: botapi.TextFromBody(body, "context_key", "contextKey"),
 		AgentKey:   botapi.TextFromBody(body, "agent_key", "agentKey", "agent"),
 		Title:      botapi.TextFromBody(body, "title"),
@@ -78,7 +83,7 @@ func (Assistant) PostClearSession(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	data, err := assistantRunner.ClearSession(
+	data, err := assistantSessionRunner.ClearSession(
 		c.Context(),
 		botapi.Uint64FromBody(body, "session_id", "sessionId", "id"),
 		assistantBoolFromBody(body, true, "memory_enabled", "memoryEnabled"),
@@ -91,7 +96,7 @@ func (Assistant) PostArchiveSession(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	err = assistantRunner.ArchiveSession(c.Context(), botapi.Uint64FromBody(body, "session_id", "sessionId", "id"))
+	err = assistantSessionRunner.ArchiveSession(c.Context(), botapi.Uint64FromBody(body, "session_id", "sessionId", "id"))
 	return botapi.WriteJSON(c, map[string]any{"ok": true}, err)
 }
 
@@ -100,7 +105,7 @@ func (Assistant) PostRestoreSession(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	err = assistantRunner.RestoreSession(c.Context(), botapi.Uint64FromBody(body, "session_id", "sessionId", "id"))
+	err = assistantSessionRunner.RestoreSession(c.Context(), botapi.Uint64FromBody(body, "session_id", "sessionId", "id"))
 	return botapi.WriteJSON(c, map[string]any{"ok": true}, err)
 }
 
@@ -109,7 +114,7 @@ func (Assistant) PostRenameSession(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	data, err := assistantRunner.RenameSession(
+	data, err := assistantSessionRunner.RenameSession(
 		c.Context(),
 		botapi.Uint64FromBody(body, "session_id", "sessionId", "id"),
 		botapi.TextFromBody(body, "title", "name"),
@@ -123,7 +128,7 @@ func (Assistant) PostMessage(c *server.Context) error {
 		return c.Error(err)
 	}
 	status := int16(frontstream.InputInt64(body["status"], 0))
-	data, err := assistantRunner.RecordMessage(c.Context(), assistantservice.MessageRequest{
+	data, err := assistantSessionRunner.RecordMessage(c.Context(), agentruntime.MessageRequest{
 		SessionID:  botapi.Uint64FromBody(body, "session_id", "sessionId"),
 		ContextKey: botapi.TextFromBody(body, "context_key", "contextKey"),
 		AgentKey:   botapi.TextFromBody(body, "agent_key", "agentKey", "agent"),
@@ -144,7 +149,7 @@ func (Assistant) PostMessage(c *server.Context) error {
 }
 
 func (Assistant) GetMemories(c *server.Context) error {
-	data, err := assistantRunner.ReviewMemories(c.Context(), assistantservice.MemoryListRequest{
+	data, err := assistantMemoryRunner.ReviewMemories(c.Context(), memoryservice.MemoryListRequest{
 		Limit: botapi.QueryInt(c, "limit"),
 	})
 	return botapi.WriteJSON(c, data, err)
@@ -155,7 +160,7 @@ func (Assistant) PostMemories(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	data, err := assistantRunner.ReviewMemories(c.Context(), assistantservice.MemoryListRequest{
+	data, err := assistantMemoryRunner.ReviewMemories(c.Context(), memoryservice.MemoryListRequest{
 		Limit:      int(frontstream.InputInt64(body["limit"], 0)),
 		Page:       int(frontstream.InputInt64(firstBodyValue(body, "page"), 0)),
 		PageSize:   int(frontstream.InputInt64(firstBodyValue(body, "page_size", "pageSize"), 0)),
@@ -175,7 +180,7 @@ func (Assistant) PostMemory(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	data, err := assistantRunner.Remember(c.Context(), assistantservice.MemoryRequest{
+	data, err := assistantMemoryRunner.Remember(c.Context(), memoryservice.MemoryRequest{
 		Kind:       botapi.TextFromBody(body, "kind", "type"),
 		Title:      botapi.TextFromBody(body, "title", "name"),
 		Content:    botapi.TextFromBody(body, "content", "text"),
@@ -194,7 +199,7 @@ func (Assistant) PostUpdateMemory(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	data, err := assistantRunner.UpdateMemory(c.Context(), assistantservice.MemoryUpdateRequest{
+	data, err := assistantMemoryRunner.UpdateMemory(c.Context(), memoryservice.MemoryUpdateRequest{
 		ID:         botapi.Uint64FromBody(body, "id", "memory_id", "memoryId"),
 		Kind:       botapi.TextFromBody(body, "kind", "type"),
 		Title:      botapi.TextFromBody(body, "title", "name"),
@@ -215,7 +220,7 @@ func (Assistant) PostForgetMemory(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	err = assistantRunner.ForgetMemory(c.Context(), assistantservice.MemoryForgetRequest{
+	err = assistantMemoryRunner.ForgetMemory(c.Context(), memoryservice.MemoryForgetRequest{
 		ID:   botapi.Uint64FromBody(body, "id", "memory_id", "memoryId"),
 		Hard: botapi.BoolFromBody(body, "hard"),
 	})

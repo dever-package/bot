@@ -278,7 +278,7 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
     setRunning(true)
     setError('')
     setOutput(EMPTY_OUTPUT)
-    setTiming(createStreamTiming('等待生成结果'))
+    setTiming(createStreamTiming('正在连接模型'))
     setRequestID('')
     setRequestIDCopied(false)
     setLastStreamID('0-0')
@@ -580,7 +580,7 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
           ) : null}
           <EnergonContentView
             output={buildContentViewOutput(output)}
-            streaming={running && hasStreamingTextOutput(output)}
+            streaming={running && !output.finalOutput}
             emptyText="AI 返回内容会显示在这里。"
             uploadRules={uploadRules}
           />
@@ -611,12 +611,6 @@ function buildContentViewOutput(output: StreamOutput): EnergonOutput[] | Energon
     items.push({ text: output.text })
   }
   return items
-}
-
-function hasStreamingTextOutput(output: StreamOutput) {
-  return (
-    !output.finalOutput && (Boolean(output.text) || Boolean(output.reasoning))
-  )
 }
 
 function clearRequestIDCopyTimer(timerRef: { current: number | null }) {

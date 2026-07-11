@@ -403,50 +403,6 @@ func firstPayloadRecord(payload map[string]any) (map[string]any, bool) {
 	return payload, len(payload) > 0
 }
 
-func (KnowledgeHook) ProviderBeforeSaveAgentKnowledgeBase(_ *server.Context, params []any) any {
-	record := cloneRecord(params)
-	keepRecordFields(record, agentKnowledgeBaseSaveFields)
-	partial := isPartialRecord(record)
-	if !partial && util.ToUint64(record["agent_id"]) == 0 {
-		panic(frontaction.NewFieldError("form.agent_id", "智能体不能为空。"))
-	}
-	if !partial && util.ToUint64(record["knowledge_base_id"]) == 0 {
-		panic(frontaction.NewFieldError("form.knowledge_base_id", "知识库不能为空。"))
-	}
-	trimField(record, "prompt", partial)
-	if shouldNormalize(record, "retrieve_limit", partial) {
-		record["retrieve_limit"] = normalizeOptionalRetrieveLimit(record["retrieve_limit"])
-	}
-	if shouldNormalize(record, "score_threshold", partial) {
-		record["score_threshold"] = normalizeOptionalScoreThreshold(record["score_threshold"])
-	}
-	defaultInt16(record, "status", 1, partial)
-	defaultInt(record, "sort", 100, partial)
-	return record
-}
-
-func normalizeOptionalRetrieveLimit(value any) int {
-	limit := util.ToIntDefault(value, 0)
-	if limit <= 0 {
-		return 0
-	}
-	if limit > 50 {
-		return 50
-	}
-	return limit
-}
-
-func normalizeOptionalScoreThreshold(value any) float64 {
-	score := floatValue(value)
-	if score <= 0 {
-		return 0
-	}
-	if score > 1 {
-		return 1
-	}
-	return score
-}
-
 func normalizeGraphDepth(value any) int {
 	depth := util.ToIntDefault(value, agentmodel.DefaultKnowledgeGraphDepth)
 	if depth < 0 {
@@ -536,17 +492,6 @@ var (
 		"score_threshold",
 		"max_context_chars",
 		"graph_depth",
-		"status",
-		"sort",
-	)
-	agentKnowledgeBaseSaveFields = fieldSet(
-		"id",
-		"_partial",
-		"agent_id",
-		"knowledge_base_id",
-		"prompt",
-		"retrieve_limit",
-		"score_threshold",
 		"status",
 		"sort",
 	)
