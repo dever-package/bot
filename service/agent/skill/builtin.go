@@ -7,12 +7,6 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
-const (
-	BuiltinArticleImportKey        = agentmodel.BuiltinArticleImportSkillKey
-	BuiltinMethodImportArticleURL  = agentmodel.BuiltinMethodImportArticleURL
-	BuiltinMethodImportURLResource = agentmodel.BuiltinMethodImportURLResource
-)
-
 type BuiltinMethod struct {
 	Key         string `json:"key"`
 	Service     string `json:"service"`
@@ -78,23 +72,6 @@ func BuiltinByKey(key string) (BuiltinDefinition, bool) {
 	return BuiltinDefinition{}, false
 }
 
-func BuiltinMethodByKey(key string) (BuiltinMethod, bool) {
-	key = strings.TrimSpace(key)
-	for _, definition := range BuiltinDefinitions() {
-		for _, method := range definition.Methods {
-			if method.Key == key {
-				return method, true
-			}
-		}
-	}
-	return BuiltinMethod{}, false
-}
-
-func IsBuiltinMethod(key string) bool {
-	_, ok := BuiltinMethodByKey(key)
-	return ok
-}
-
 func BuiltinContent(entry Entry) string {
 	if entry.SourceType != agentmodel.SkillSourceTypeBuiltin {
 		return ""
@@ -118,21 +95,6 @@ func LoadedBuiltinMethods(entries []Entry) []BuiltinMethod {
 		}
 	}
 	return result
-}
-
-func ResolveLoadedBuiltinMethod(entries []Entry, methodKey string) (BuiltinMethod, Entry, bool) {
-	methodKey = strings.TrimSpace(methodKey)
-	if methodKey == "" {
-		return BuiltinMethod{}, Entry{}, false
-	}
-	for _, entry := range entries {
-		for _, method := range manifestBuiltinMethods(entry.Manifest) {
-			if method.Key == methodKey {
-				return method, entry, true
-			}
-		}
-	}
-	return BuiltinMethod{}, Entry{}, false
 }
 
 func manifestBuiltinMethods(manifest string) []BuiltinMethod {

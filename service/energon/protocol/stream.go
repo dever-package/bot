@@ -24,6 +24,7 @@ func MergeStreamResult(outputs []Output) Output {
 	textParts := make([]string, 0)
 	reasoningParts := make([]string, 0)
 	result := Output{}
+	toolCalls := make([]ToolCall, 0)
 
 	for _, output := range outputs {
 		if output == nil {
@@ -44,16 +45,25 @@ func MergeStreamResult(outputs []Output) Output {
 		}
 		copyFirstOutputValue(result, output, "title")
 		copyFirstOutputValue(result, output, "rich")
+		if reason := strings.TrimSpace(asText(output["finish_reason"])); reason != "" {
+			result["finish_reason"] = reason
+		}
+		toolCalls = MergeToolCalls(toolCalls, ParseToolCalls(output["tool_calls"]))
 		appendOutputList(result, "images", output["images"], output["image"])
 		appendOutputList(result, "videos", output["videos"], output["video"])
 		appendOutputList(result, "audios", output["audios"], output["audio"])
 		appendOutputList(result, "files", output["files"], output["file"])
+		appendOutputItems(result, "media_files", output["media_files"])
 	}
 	if len(textParts) > 0 {
 		result["text"] = strings.Join(textParts, "")
 	}
 	if len(reasoningParts) > 0 {
 		result["reasoning"] = strings.Join(reasoningParts, "")
+	}
+	if len(toolCalls) > 0 {
+		result["event"] = "tool_call"
+		result["tool_calls"] = ToolCallsValue(toolCalls)
 	}
 	return result
 }
@@ -97,6 +107,12 @@ func extractOpenAIStreamOutput(mapped map[string]any) Output {
 			output["event"] = "delta"
 			output["text"] = text
 		}
+		if calls := ParseToolCalls(delta["tool_calls"]); len(calls) > 0 {
+			if firstNonEmptyStreamText(output["text"]) == "" {
+				output["event"] = "tool_call_delta"
+			}
+			output["tool_calls"] = ToolCallFragmentsValue(calls)
+		}
 	}
 	if text := firstNonEmptyStreamText(choice["text"]); text != "" {
 		output["event"] = "delta"
@@ -104,7 +120,7 @@ func extractOpenAIStreamOutput(mapped map[string]any) Output {
 	}
 	if finishReason := strings.TrimSpace(asText(choice["finish_reason"])); finishReason != "" {
 		output["event"] = "end"
-		output["text"] = finishReason
+		output["finish_reason"] = finishReason
 	}
 	return normalizeOutput(output)
 }

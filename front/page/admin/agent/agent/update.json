@@ -159,7 +159,7 @@
         "option": {
           "service": "bot.agent.setting.OptionService.LoadTextPowers"
         },
-        "info": "第一阶段 Agent 直接通过这个 LLM 能力调用 Energon。",
+        "info": "作为智能体运行时的主模型，通过 Energon 执行对话和工具决策。",
         "validate": [
           {
             "type": "required",
@@ -170,6 +170,26 @@
           "formLayout": "horizontal",
           "tab": "setting",
           "controlClassName": "max-w-[360px]"
+        }
+      },
+      {
+        "type": "form-select",
+        "name": "工具能力分类",
+        "placeholder": "不使用能力工具",
+        "value": "form.power_cate_id",
+        "mode": "form",
+        "option": {
+          "model": "bot.energon.NewPowerCateModel",
+          "filters": {
+            "status": 1
+          },
+          "order": "sort asc,id asc"
+        },
+        "info": "只挂载该分类下启用的能力；留空则模型不能调用额外能力。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "setting",
+          "controlClassName": "max-w-[260px]"
         }
       },
       {
@@ -301,6 +321,7 @@
       "description": "",
       "prompt": "",
       "llm_power_id": "",
+      "power_cate_id": "",
       "knowledge_cate_id": "",
       "skill_pack_id": "",
       "temperature": 0.7,

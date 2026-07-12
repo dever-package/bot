@@ -15,12 +15,23 @@ import {
   readAgentChatRunFrame,
   type AgentChatRunStatus,
 } from "./runtime";
+import {
+  mergeAgentChatActivities,
+  mergeAgentChatActivityLists,
+  readAgentChatActivities,
+} from "./activity";
+import {
+  hasAgentChatOutput,
+  normalizeAgentChatOutput,
+  type AgentChatOutput,
+} from "./output";
 import { createStreamTextBuffer, type StreamTextBuffer } from "./stream";
 import type {
   AgentChatRuntimeApis,
   ChatMessage,
   ChatStreamOutput,
 } from "./types";
+import type { ReferenceContent, ReferenceInput } from "./reference";
 
 type SessionRun = {
   sessionID: number;
@@ -28,6 +39,7 @@ type SessionRun = {
   userMessageID: string;
   assistantMessageID: string;
   input: string;
+  content?: ReferenceContent;
   buffer: StreamTextBuffer;
   lastStreamID: string;
   cancelable: boolean;
@@ -136,13 +148,23 @@ export function useAgentChatRuns({
   );
 
   const updateRunMessage = useCallback(
-    (run: SessionRun, patch: Partial<ChatMessage>) => {
+    (
+      run: SessionRun,
+      update:
+        | Partial<ChatMessage>
+        | ((message: ChatMessage) => Partial<ChatMessage>),
+    ) => {
       if (run.detached) {
         return;
       }
       updateSessionMessages(run.sessionID, (current) =>
         current.map((message) =>
-          isRunMessage(message, run) ? { ...message, ...patch } : message,
+          isRunMessage(message, run)
+            ? {
+                ...message,
+                ...(typeof update === "function" ? update(message) : update),
+              }
+            : message,
         ),
       );
     },
@@ -152,17 +174,33 @@ export function useAgentChatRuns({
   const finish = useCallback(
     (
       run: SessionRun,
-      result: { text: string; error?: boolean; requestID?: string },
+      result: {
+        text: string;
+        output?: AgentChatOutput;
+        error?: boolean;
+        requestID?: string;
+      },
     ) => {
       if (runsRef.current.get(run.sessionID) !== run) {
         return;
       }
       run.buffer.flush();
-      updateRunMessage(run, {
-        text: result.text,
-        requestID: result.requestID || run.requestID || undefined,
-        running: false,
-        error: Boolean(result.error),
+      updateRunMessage(run, (message) => {
+        const persistedActivities = readAgentChatActivities(result.output);
+        const patch: Partial<ChatMessage> = {
+          text: result.text,
+          requestID: result.requestID || run.requestID || undefined,
+          running: false,
+          error: Boolean(result.error),
+          activities: mergeAgentChatActivityLists(
+            message.activities,
+            persistedActivities,
+          ),
+        };
+        if (hasAgentChatOutput(result.output)) {
+          patch.output = result.output;
+        }
+        return patch;
       });
       remove(run);
       void syncSessionTitle(run.sessionID);
@@ -193,6 +231,21 @@ export function useAgentChatRuns({
         }
         run.buffer.append(next.delta);
       }
+      const activity = next.activity;
+      if (activity) {
+        run.buffer.flush();
+        const anchoredActivity = activity.anchorText
+          ? activity
+          : { ...activity, anchorText: run.buffer.text };
+        updateRunMessage(run, (message) => ({
+          activities: mergeAgentChatActivities(
+            message.activities,
+            anchoredActivity,
+          ),
+          requestID: next.requestID || run.requestID || undefined,
+          running: true,
+        }));
+      }
       if (!next.finished) {
         return true;
       }
@@ -204,10 +257,11 @@ export function useAgentChatRuns({
           "智能体已返回结果。",
         error: next.failed,
         requestID: next.requestID,
+        output: next.output,
       });
       return false;
     },
-    [finish, publish],
+    [finish, publish, updateRunMessage],
   );
 
   const createRun = useCallback(
@@ -219,6 +273,7 @@ export function useAgentChatRuns({
       text?: string;
       prompt?: string;
       replayPending?: boolean;
+      content?: ReferenceContent;
     }) => {
       let run: SessionRun;
       const buffer = createStreamTextBuffer(input.text || "", (text) => {
@@ -235,6 +290,7 @@ export function useAgentChatRuns({
         userMessageID: input.userMessageID,
         assistantMessageID: input.assistantMessageID,
         input: input.prompt || "",
+        content: input.content,
         buffer,
         lastStreamID: "0-0",
         cancelable: false,
@@ -270,6 +326,7 @@ export function useAgentChatRuns({
         text: finalText,
         error: failed,
         requestID: status.requestID,
+        output: status.output,
       });
       if (failed && getActiveSessionID() === run.sessionID) {
         setError(status.error.trim() || finalText);
@@ -387,8 +444,8 @@ export function useAgentChatRuns({
   }, [messages, modalOpen, recover, sessionID, sessionLoading]);
 
   const send = useCallback(
-    async (rawText: string) => {
-      const text = rawText.trim();
+    async (input: ReferenceInput) => {
+      const text = input.text.trim();
       const activeSessionID = getActiveSessionID();
       if (
         !text ||
@@ -403,6 +460,7 @@ export function useAgentChatRuns({
         id: `${activeSessionID}-user-${now}`,
         role: "user",
         text,
+        content: input.content,
       };
       const assistantMessageID = `${activeSessionID}-assistant-${now}`;
       const run = createRun({
@@ -410,6 +468,7 @@ export function useAgentChatRuns({
         userMessageID: userMessage.id,
         assistantMessageID,
         prompt: text,
+        content: input.content,
       });
       if (!register(run)) {
         run.buffer.dispose();
@@ -443,7 +502,10 @@ export function useAgentChatRuns({
             agent: agentKey,
             session_id: activeSessionID,
             context_key: contextKey,
-            input: text,
+            input: {
+              text,
+              content: input.content,
+            },
           },
           onRequestID: (requestID) => {
             if (run.detached) {
@@ -470,7 +532,11 @@ export function useAgentChatRuns({
         if (!finalText) {
           throw new Error("模型未返回可展示内容。");
         }
-        finish(run, { text: finalText, requestID: result.requestID });
+        finish(run, {
+          text: finalText,
+          output: normalizeAgentChatOutput(result.finalOutput),
+          requestID: result.requestID,
+        });
       } catch (currentError: unknown) {
         if (
           run.detached ||
@@ -628,6 +694,7 @@ function mergeRunMessages(messages: ChatMessage[], run?: SessionRun) {
             id: run.userMessageID,
             role: "user" as const,
             text: run.input,
+            content: run.content,
           },
         ]
       : []),

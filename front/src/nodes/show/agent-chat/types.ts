@@ -1,17 +1,31 @@
 import type { RefObject, WheelEvent } from "react";
 import type { AgentChatMessageRecord, AgentChatSession } from "./api";
+import {
+  readAgentChatActivities,
+  type AgentChatActivity,
+} from "./activity";
+import type { AgentChatOutput } from "./output";
+import type {
+  ReferenceContent,
+  ReferenceInput,
+  ReferenceLoadRequest,
+  ReferenceLoadResult,
+} from "./reference";
 
 export type ChatMessage = {
   id: string;
   recordID?: number;
   role: "user" | "assistant";
   text: string;
+  content?: ReferenceContent;
+  output?: AgentChatOutput;
+  activities?: AgentChatActivity[];
   requestID?: string;
   running?: boolean;
   error?: boolean;
 };
 
-export type ChatStreamOutput = Record<string, unknown> & {
+export type ChatStreamOutput = AgentChatOutput & {
   event?: string;
   text?: string;
   error?: string;
@@ -57,7 +71,10 @@ export type AgentChatController = {
   handleSessionListScroll: () => void;
   handleMessageListScroll: () => void;
   handleMessageListWheel: (event: WheelEvent<HTMLDivElement>) => void;
-  send: (text: string) => Promise<void>;
+  loadReferences: (
+    request: ReferenceLoadRequest,
+  ) => Promise<ReferenceLoadResult>;
+  send: (input: ReferenceInput) => Promise<void>;
   stop: () => Promise<void>;
 };
 
@@ -69,6 +86,9 @@ export function mapChatMessages(
     recordID: message.id || undefined,
     role: message.role,
     text: message.text,
+    content: message.content,
+    output: message.output,
+    activities: readAgentChatActivities(message.output),
     requestID: message.requestID || undefined,
     running: message.status === 3,
     error: message.status === 2,

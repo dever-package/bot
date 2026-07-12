@@ -9,10 +9,17 @@ import (
 )
 
 type AssembleRequest struct {
-	Session        agentmodel.Session
+	Session         agentmodel.Session
+	Agent           agentmodel.Agent
+	CategoryPrompt  string
+	Input           string
+	ReferencePrompt string
+}
+
+type InternalAssembleRequest struct {
 	Agent          agentmodel.Agent
 	CategoryPrompt string
-	Input          string
+	History        []any
 }
 
 type Result struct {
@@ -38,4 +45,13 @@ func (Assembler) Assemble(ctx context.Context, request AssembleRequest) (Result,
 	history := recentHistory(ctx, session)
 	prompt := buildPrompt(ctx, request, session)
 	return Result{Prompt: prompt, History: history, HistoryCount: len(history)}, nil
+}
+
+func (Assembler) AssembleInternal(request InternalAssembleRequest) Result {
+	history := normalizeHistory(request.History)
+	return Result{
+		Prompt:       buildInternalPrompt(request),
+		History:      history,
+		HistoryCount: len(history),
+	}
 }

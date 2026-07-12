@@ -5,7 +5,7 @@ import (
 	"github.com/shemic/dever/util"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
-	agentruntime "github.com/dever-package/bot/service/agent/runtime"
+	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
 )
 
 func (AgentHook) ProviderBeforeSaveRuntimeConfig(_ *server.Context, params []any) any {
@@ -26,9 +26,9 @@ func (AgentHook) ProviderBeforeSaveRuntimeConfig(_ *server.Context, params []any
 	record["skill_metadata_field_max_length"] = normalizeRuntimeMetadataFieldMaxLength(record["skill_metadata_field_max_length"])
 	record["skill_file_max_bytes"] = normalizePositiveInt(record["skill_file_max_bytes"], agentmodel.DefaultRuntimeSkillFileMaxBytes)
 	record["skill_loaded_content_max_length"] = normalizePositiveInt(record["skill_loaded_content_max_length"], agentmodel.DefaultRuntimeSkillLoadedContentMaxLength)
-	record["script_sandbox_driver"] = agentruntime.NormalizeScriptSandboxDriver(util.ToStringTrimmed(record["script_sandbox_driver"]))
+	record["script_sandbox_driver"] = runtimeconfig.NormalizeScriptSandboxDriver(util.ToStringTrimmed(record["script_sandbox_driver"]))
 	record["script_sandbox_bwrap_path"] = normalizeRuntimeText(record["script_sandbox_bwrap_path"], agentmodel.DefaultRuntimeScriptSandboxBwrapPath)
-	record["script_sandbox_network_mode"] = agentruntime.NormalizeScriptSandboxNetworkMode(util.ToStringTrimmed(record["script_sandbox_network_mode"]))
+	record["script_sandbox_network_mode"] = runtimeconfig.NormalizeScriptSandboxNetworkMode(util.ToStringTrimmed(record["script_sandbox_network_mode"]))
 	record["script_sandbox_timeout_seconds"] = normalizeRuntimeSandboxTimeout(record["script_sandbox_timeout_seconds"])
 	record["script_sandbox_output_max_bytes"] = normalizePositiveInt(record["script_sandbox_output_max_bytes"], agentmodel.DefaultRuntimeScriptSandboxOutputMaxBytes)
 	return record

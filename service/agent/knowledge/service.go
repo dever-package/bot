@@ -14,7 +14,7 @@ import (
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	knowledgeparse "github.com/dever-package/bot/service/agent/knowledge/parse"
-	agentprompt "github.com/dever-package/bot/service/agent/prompt"
+	agentrichtext "github.com/dever-package/bot/service/agent/richtext"
 )
 
 type Service struct {
@@ -437,7 +437,7 @@ func insertParseNodeTree(ctx context.Context, base agentmodel.KnowledgeBase, doc
 	}
 	plainText := strings.TrimSpace(node.PlainText)
 	if plainText == "" {
-		plainText = strings.TrimSpace(agentprompt.TextFromRichText(node.Content))
+		plainText = strings.TrimSpace(agentrichtext.PlainText(node.Content))
 	}
 	nodePath := strings.Trim(strings.Join(nonEmptyStrings(parentPath, title), "/"), "/")
 	// Extract structured metadata for table nodes
@@ -579,7 +579,7 @@ func insertKnowledgeNode(ctx context.Context, input knowledgeNodeInput) uint64 {
 	content := strings.TrimSpace(input.Content)
 	plainText := strings.TrimSpace(input.PlainText)
 	if plainText == "" {
-		plainText = strings.TrimSpace(agentprompt.TextFromRichText(content))
+		plainText = strings.TrimSpace(agentrichtext.PlainText(content))
 	}
 	summary := strings.TrimSpace(input.Summary)
 	if summary == "" {
@@ -1004,7 +1004,7 @@ func filterUnavailableDocSnippets(ctx context.Context, snippets []RetrievedSnipp
 	return filtered
 }
 
-func snippetNodeIDsJSON(snippets []agentprompt.KnowledgeSnippet) string {
+func snippetNodeIDsJSON(snippets []RetrievedSnippet) string {
 	if len(snippets) == 0 {
 		return ""
 	}
@@ -1064,7 +1064,7 @@ func (s Service) ListRetrieveLogs(ctx context.Context, baseID uint64, limit int)
 	return rows, nil
 }
 
-func (s Service) incrementHitCounts(ctx context.Context, snippets []agentprompt.KnowledgeSnippet) {
+func (s Service) incrementHitCounts(ctx context.Context, snippets []RetrievedSnippet) {
 	if len(snippets) == 0 {
 		return
 	}

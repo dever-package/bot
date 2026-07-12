@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dever-package/bot/service/agent/netguard"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
-	agenttool "github.com/dever-package/bot/service/agent/tool"
 )
 
 const maxDownloadBytes = 64 * 1024 * 1024
@@ -93,7 +93,7 @@ func downloadFile(ctx context.Context, rawURL string, dir string) (string, error
 	if err != nil {
 		return "", err
 	}
-	if err := agenttool.ValidateExternalURL(ctx, parsed); err != nil {
+	if err := netguard.ValidateURL(ctx, parsed); err != nil {
 		return "", err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
@@ -101,7 +101,7 @@ func downloadFile(ctx context.Context, rawURL string, dir string) (string, error
 		return "", err
 	}
 	req.Header.Set("User-Agent", "shemic-skill-installer/1.0")
-	client := agenttool.NewExternalHTTPClient(60 * time.Second)
+	client := netguard.NewClient(60 * time.Second)
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {

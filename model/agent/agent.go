@@ -17,6 +17,7 @@ type Agent struct {
 	Description     string    `dorm:"type:text;not null;default:'';comment:描述"`
 	Prompt          string    `dorm:"type:text;not null;default:'';comment:设定"`
 	LLMPowerID      uint64    `dorm:"type:bigint;not null;default:0;comment:LLM能力"`
+	PowerCateID     uint64    `dorm:"type:bigint;not null;default:0;comment:工具能力分类"`
 	KnowledgeCateID uint64    `dorm:"type:bigint;not null;default:0;comment:知识库分类"`
 	SkillPackID     uint64    `dorm:"type:bigint;not null;default:0;comment:技能方案"`
 	Temperature     float64   `dorm:"type:double precision;not null;default:0.7;comment:温度"`
@@ -31,6 +32,7 @@ type AgentIndex struct {
 	Key                 struct{} `unique:"key"`
 	KindStatusSort      struct{} `index:"kind,status,sort"`
 	CateStatusSort      struct{} `index:"cate_id,status,sort"`
+	PowerCateStatus     struct{} `index:"power_cate_id,status"`
 	KnowledgeCateStatus struct{} `index:"knowledge_cate_id,status"`
 	SkillPackStatus     struct{} `index:"skill_pack_id,status"`
 	StatusSort          struct{} `index:"status,sort"`
@@ -72,6 +74,7 @@ var (
 			"description":       "默认通用智能体，适合普通文本任务和能力调用。",
 			"prompt":            "",
 			"llm_power_id":      energonmodel.DefaultLLMPowerID,
+			"power_cate_id":     0,
 			"knowledge_cate_id": 0,
 			"skill_pack_id":     0,
 			"temperature":       0.7,
@@ -89,6 +92,7 @@ var (
 			"description":       "后台页面 AI 助理，用于理解当前页面、生成内容、补全表单和返回受控前端动作。",
 			"prompt":            frontAssistantPrompt,
 			"llm_power_id":      energonmodel.DefaultLLMPowerID,
+			"power_cate_id":     0,
 			"knowledge_cate_id": 0,
 			"skill_pack_id":     DefaultSkillPackID,
 			"temperature":       0.4,
@@ -106,6 +110,7 @@ var (
 			"description":       "系统内置技能安装规划器，只负责把安装输入转换成受控安装计划。",
 			"prompt":            skillInstallerPrompt,
 			"llm_power_id":      energonmodel.DefaultLLMPowerID,
+			"power_cate_id":     0,
 			"knowledge_cate_id": 0,
 			"skill_pack_id":     0,
 			"temperature":       0.2,
@@ -123,6 +128,7 @@ var (
 			"description":       "系统内置技能创建工程师，用于多轮创建或修改 Dever skill 草稿。",
 			"prompt":            skillCreatorPrompt,
 			"llm_power_id":      energonmodel.DefaultLLMPowerID,
+			"power_cate_id":     0,
 			"knowledge_cate_id": 0,
 			"skill_pack_id":     0,
 			"temperature":       0.3,
@@ -143,6 +149,12 @@ var (
 		Field:      "llm_power_id",
 		Option:     "bot.energon.NewPowerModel",
 		OptionKeys: []string{"name", "key", "kind"},
+	}
+
+	agentPowerCateRelation = orm.Relation{
+		Field:      "power_cate_id",
+		Option:     "bot.energon.NewPowerCateModel",
+		OptionKeys: []string{"name"},
 	}
 
 	agentKnowledgeCateRelation = orm.Relation{
@@ -171,6 +183,7 @@ func NewAgentModel() *orm.Model[Agent] {
 		Relations: []orm.Relation{
 			agentCateRelation,
 			agentLLMPowerRelation,
+			agentPowerCateRelation,
 			agentKnowledgeCateRelation,
 			agentSkillPackRelation,
 		},

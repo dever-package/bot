@@ -47,6 +47,12 @@ func buildOpenAIHistoryMessage(value any, options PromptOptions) map[string]any 
 		if currentRole := strings.TrimSpace(asText(mapped["role"])); currentRole != "" {
 			role = currentRole
 		}
+		if strings.EqualFold(role, "tool") {
+			return buildOpenAIToolMessage(mapped)
+		}
+		if strings.EqualFold(role, "assistant") && len(ParseToolCalls(mapped["tool_calls"])) > 0 {
+			return buildOpenAIAssistantToolMessage(mapped, options)
+		}
 		input := make(map[string]any, len(mapped))
 		for key, current := range mapped {
 			if key != "role" {
@@ -57,6 +63,38 @@ func buildOpenAIHistoryMessage(value any, options PromptOptions) map[string]any 
 	}
 
 	return buildOpenAIInputMessage(map[string]any{"text": value}, "user", options)
+}
+
+func buildOpenAIToolMessage(mapped map[string]any) map[string]any {
+	toolCallID := strings.TrimSpace(asText(mapped["tool_call_id"]))
+	if toolCallID == "" {
+		return nil
+	}
+	content := firstText(mapped["content"], mapped["text"], mapped["result"])
+	message := map[string]any{
+		"role":         "tool",
+		"tool_call_id": toolCallID,
+		"content":      content,
+	}
+	if name := strings.TrimSpace(asText(mapped["name"])); name != "" {
+		message["name"] = name
+	}
+	return message
+}
+
+func buildOpenAIAssistantToolMessage(mapped map[string]any, _ PromptOptions) map[string]any {
+	message := map[string]any{
+		"role":       "assistant",
+		"tool_calls": ToolCallsValue(ParseToolCalls(mapped["tool_calls"])),
+	}
+	if content, exists := mapped["content"]; exists && !isEmptyContent(content) {
+		message["content"] = content
+	} else if text := strings.TrimSpace(asText(mapped["text"])); text != "" {
+		message["content"] = text
+	} else {
+		message["content"] = nil
+	}
+	return message
 }
 
 func buildOpenAIInputMessage(input map[string]any, role string, options PromptOptions) map[string]any {
@@ -145,7 +183,7 @@ func buildSystemPrompt(value any) string {
 	return strings.Join(parts, "\n")
 }
 
-func extractOpenAIContentValue(mapped map[string]any) (any, bool) {
+func extractOpenAIOutput(mapped map[string]any) (map[string]any, bool) {
 	choices := normalizeAnyList(mapped["choices"])
 	if len(choices) == 0 {
 		return nil, false
@@ -155,18 +193,30 @@ func extractOpenAIContentValue(mapped map[string]any) (any, bool) {
 	if choice == nil {
 		return nil, false
 	}
+	output := map[string]any{}
 	if message, ok := choice["message"].(map[string]any); ok {
 		if content, exists := message["content"]; exists {
-			return content, true
+			output["text"] = content
+		}
+		if calls := ParseToolCalls(message["tool_calls"]); len(calls) > 0 {
+			output["event"] = "tool_call"
+			output["tool_calls"] = ToolCallsValue(calls)
 		}
 	}
 	if delta, ok := choice["delta"].(map[string]any); ok {
 		if content, exists := delta["content"]; exists {
-			return content, true
+			output["text"] = content
+		}
+		if calls := ParseToolCalls(delta["tool_calls"]); len(calls) > 0 {
+			output["event"] = "tool_call"
+			output["tool_calls"] = ToolCallsValue(calls)
 		}
 	}
 	if text, exists := choice["text"]; exists {
-		return text, true
+		output["text"] = text
 	}
-	return nil, false
+	if reason := strings.TrimSpace(asText(choice["finish_reason"])); reason != "" {
+		output["finish_reason"] = reason
+	}
+	return output, len(output) > 0
 }

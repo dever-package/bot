@@ -166,7 +166,7 @@ func (s GatewayService) recordCallLogWithUsage(
 		PowerKey:         selected.Power.Key,
 		PowerName:        selected.Power.Name,
 		PowerTargetID:    selected.PowerTarget.ID,
-		PowerParams:      encodeLogJSON(powerParams),
+		PowerParams:      encodeLogJSON(sanitizeLogValue(powerParams, "")),
 		ServiceID:        selected.Service.ID,
 		ServiceName:      selected.Service.Name,
 		ProviderID:       selected.Provider.ID,
@@ -180,7 +180,7 @@ func (s GatewayService) recordCallLogWithUsage(
 		CompletionTokens: usage.CompletionTokens,
 		TotalTokens:      usage.TotalTokens,
 		CachedTokens:     usage.CachedTokens,
-		Result:           result,
+		Result:           sanitizeLogJSON(result),
 	})
 	if status == StatusSuccess {
 		botruntime.Record(ctx, selected.Service.ID, latency)

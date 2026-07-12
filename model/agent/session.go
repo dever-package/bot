@@ -44,6 +44,7 @@ type Session struct {
 	TitleSource      string    `dorm:"type:varchar(32);not null;default:'auto';comment:标题来源"`
 	ContextSummary   string    `dorm:"type:text;not null;default:'';comment:上下文摘要"`
 	SummaryMessageID uint64    `dorm:"type:bigint;not null;default:0;comment:摘要覆盖的最后消息"`
+	ActiveSeriesID   uint64    `dorm:"type:bigint;not null;default:0;comment:当前素材系列"`
 	Status           int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	MessageCount     int       `dorm:"type:int;not null;default:0;comment:消息数"`
 	LastMessageAt    time.Time `dorm:"comment:最后消息时间"`

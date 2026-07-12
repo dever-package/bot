@@ -11,8 +11,8 @@ import (
 
 	memorymodel "github.com/dever-package/bot/model/memory"
 	teammodel "github.com/dever-package/bot/model/team"
-	agentservice "github.com/dever-package/bot/service/agent"
 	knowledgeservice "github.com/dever-package/bot/service/agent/knowledge"
+	runtimeloop "github.com/dever-package/bot/service/agent/runtime/loop"
 	assetservice "github.com/dever-package/bot/service/asset"
 	memoryservice "github.com/dever-package/bot/service/memory"
 	"github.com/dever-package/bot/service/stream"
@@ -388,7 +388,7 @@ func (s Service) runAgentNode(ctx context.Context, run teammodel.Run, flowRun te
 	nodeRunID := s.currentNodeRunID(ctx, flowRun.ID, node.ID)
 	nodeRun := s.repo.FindNodeRun(ctx, nodeRunID)
 	var agentRunID atomic.Uint64
-	result, err := s.agent.RunInternal(ctx, agentservice.InternalRunRequest{
+	result, err := s.agent.RunInternal(ctx, runtimeloop.InternalRequest{
 		AgentID:   executor.AgentID,
 		RequestID: newRequestID(),
 		Method:    "POST",
@@ -402,10 +402,6 @@ func (s Service) runAgentNode(ctx context.Context, run teammodel.Run, flowRun te
 			"node":       node.Name,
 			"role":       roleInputPayload(executor.Role),
 			"blackboard": input,
-		},
-		Options: map[string]any{
-			"full_runtime": true,
-			"stream":       true,
 		},
 		OnRunCreated: func(createdAgentRunID uint64, requestID string) {
 			if nodeRunID == 0 {

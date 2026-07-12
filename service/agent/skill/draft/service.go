@@ -15,10 +15,11 @@ import (
 	"time"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
-	agentruntime "github.com/dever-package/bot/service/agent/runtime"
+	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
+	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
+	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
+	"github.com/dever-package/bot/service/agent/runtime/tool/sandbox"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
-	"github.com/dever-package/bot/service/agent/tool"
-	"github.com/dever-package/bot/service/agent/tool/sandbox"
 	"github.com/shemic/dever/orm"
 )
 
@@ -123,13 +124,13 @@ func (Service) Test(ctx context.Context, req Request) Result {
 	if err := installDraftDependencies(ctx, skillRoot, snapshot.Files); err != nil {
 		return failResult(err.Error(), nil)
 	}
-	runtimeConfig := agentruntime.WithDefaults(runtimeConfig(ctx))
-	options := tool.OptionsFromRuntimeConfig(runtimeConfig)
+	runtimeConfig := runtimeconfig.WithDefaults(runtimeConfig(ctx))
+	sandboxConfig := runtimetool.SandboxConfig(runtimeConfig)
 	configEnv, err := agentskill.LoadConfigEnv(ctx, draftConfigSkillID(ctx, snapshot), req.Target)
 	if err != nil {
 		return failResult(err.Error(), nil)
 	}
-	runResult, err := sandbox.Run(ctx, options.ScriptSandbox, sandbox.Request{
+	runResult, err := sandbox.Run(ctx, sandboxConfig, sandbox.Request{
 		SkillRoot:      skillRoot,
 		TempRoot:       tempRoot,
 		ScriptRelative: filepath.ToSlash(script),
@@ -505,7 +506,7 @@ func rebindDraftAssistantSession(ctx context.Context, req PatchRequest, draftID 
 	if !isNewDraftAssistantContext(fromContextKey) {
 		return ""
 	}
-	err := agentruntime.NewService().RebindSessionContext(ctx, agentruntime.RebindSessionContextRequest{
+	err := runtimechat.NewService().RebindSessionContext(ctx, runtimechat.RebindSessionContextRequest{
 		SessionID:      req.AssistantSessionID,
 		AgentKey:       req.AssistantAgentKey,
 		FromContextKey: fromContextKey,

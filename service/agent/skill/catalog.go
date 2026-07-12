@@ -1,10 +1,6 @@
 package skill
 
-import (
-	"fmt"
-	agentmodel "github.com/dever-package/bot/model/agent"
-	"strings"
-)
+import agentmodel "github.com/dever-package/bot/model/agent"
 
 const (
 	Root       = "data/skills"
@@ -35,16 +31,6 @@ type Entry struct {
 	Content     string
 }
 
-type Catalog struct {
-	PackID          uint64
-	Metadata        string
-	LoadedContent   string
-	Warning         string
-	Entries         []Entry
-	MetadataEntries []Entry
-	Loaded          []Entry
-}
-
 type ParsedFile struct {
 	Key         string
 	Name        string
@@ -64,35 +50,24 @@ func DefaultLimits() Limits {
 	}
 }
 
-func BuildCatalog(packID uint64, entries []Entry, limits Limits) Catalog {
+func MetadataEntries(entries []Entry, limits Limits) []Entry {
 	limits = normalizeLimits(limits)
-	metadataEntries, warnings := metadataEntries(entries, limits)
-	return Catalog{
-		PackID:          packID,
-		Entries:         entries,
-		MetadataEntries: metadataEntries,
-		Metadata:        renderMetadata(metadataEntries),
-		Warning:         strings.Join(warnings, "\n"),
+	count := len(entries)
+	if count > limits.MetadataMaxSkills {
+		count = limits.MetadataMaxSkills
 	}
-}
-
-func (catalog Catalog) AvailableKeys() []string {
-	return entryKeys(catalog.Entries)
-}
-
-func (catalog Catalog) MetadataKeys() []string {
-	return entryKeys(catalog.MetadataEntries)
-}
-
-func (catalog Catalog) LoadedKeys() []string {
-	return entryKeys(catalog.Loaded)
-}
-
-func (catalog Catalog) SelectableEntries() []Entry {
-	if len(catalog.MetadataEntries) > 0 {
-		return catalog.MetadataEntries
+	result := make([]Entry, 0, count)
+	for index := 0; index < count; index++ {
+		entry := entries[index]
+		entry.Triggers = append([]string(nil), entry.Triggers...)
+		entry.Name, _ = truncateRunes(entry.Name, limits.MetadataFieldMaxRunes)
+		entry.Description, _ = truncateRunes(entry.Description, limits.MetadataFieldMaxRunes)
+		for triggerIndex, trigger := range entry.Triggers {
+			entry.Triggers[triggerIndex], _ = truncateRunes(trigger, limits.MetadataFieldMaxRunes)
+		}
+		result = append(result, entry)
 	}
-	return catalog.Entries
+	return result
 }
 
 func normalizeLimits(limits Limits) Limits {
@@ -110,73 +85,4 @@ func normalizeLimits(limits Limits) Limits {
 		limits.LoadedContentMaxRunes = defaults.LoadedContentMaxRunes
 	}
 	return limits
-}
-
-func metadataEntries(entries []Entry, limits Limits) ([]Entry, []string) {
-	count := len(entries)
-	if count > limits.MetadataMaxSkills {
-		count = limits.MetadataMaxSkills
-	}
-	result := make([]Entry, 0, count)
-	warnings := make([]string, 0)
-	if len(entries) > limits.MetadataMaxSkills {
-		warnings = append(warnings, fmt.Sprintf("技能 metadata 超过 %d 个，仅注入前 %d 个。", limits.MetadataMaxSkills, limits.MetadataMaxSkills))
-	}
-	for index := 0; index < count; index++ {
-		entry := entries[index]
-		entry.Triggers = append([]string(nil), entry.Triggers...)
-		var truncated bool
-		entry.Name, truncated = truncateRunes(entry.Name, limits.MetadataFieldMaxRunes)
-		if truncated {
-			warnings = append(warnings, fmt.Sprintf("技能 %s 名称超过 %d 字，metadata 已截断。", entry.Key, limits.MetadataFieldMaxRunes))
-		}
-		entry.Description, truncated = truncateRunes(entry.Description, limits.MetadataFieldMaxRunes)
-		if truncated {
-			warnings = append(warnings, fmt.Sprintf("技能 %s 描述超过 %d 字，metadata 已截断。", entry.Key, limits.MetadataFieldMaxRunes))
-		}
-		for triggerIndex, trigger := range entry.Triggers {
-			entry.Triggers[triggerIndex], truncated = truncateRunes(trigger, limits.MetadataFieldMaxRunes)
-			if truncated {
-				warnings = append(warnings, fmt.Sprintf("技能 %s 触发词超过 %d 字，metadata 已截断。", entry.Key, limits.MetadataFieldMaxRunes))
-			}
-		}
-		result = append(result, entry)
-	}
-	return result, warnings
-}
-
-func renderMetadata(entries []Entry) string {
-	rows := []string{
-		"可用技能:",
-		"以下技能来自当前智能体绑定的技能方案，可提供流程规范、领域知识、工具使用说明、格式约束或附属脚本资源。",
-		"如需使用某个技能，先在内部选择对应 key，再参考已加载技能正文；技能不是 Energon 能力，不能作为 call_power.power，可按运行时工具协议使用 call_tool。",
-	}
-	if len(entries) == 0 {
-		return strings.Join(append(rows, "- 暂无可用技能。"), "\n")
-	}
-	for _, entry := range entries {
-		line := fmt.Sprintf("- key: %s, name: %s", entry.Key, entry.Name)
-		if entry.Description != "" {
-			line += ", description: " + entry.Description
-		}
-		if len(entry.Triggers) > 0 {
-			line += ", triggers: " + strings.Join(entry.Triggers, "、")
-		}
-		if len(entry.Domains) > 0 {
-			line += ", domains: " + strings.Join(entry.Domains, "、")
-		}
-		if len(entry.Targets) > 0 {
-			line += ", targets: " + strings.Join(entry.Targets, "、")
-		}
-		rows = append(rows, line)
-	}
-	return strings.Join(rows, "\n")
-}
-
-func entryKeys(entries []Entry) []string {
-	keys := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		keys = append(keys, entry.Key)
-	}
-	return keys
 }

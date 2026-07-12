@@ -1,8 +1,8 @@
 package team
 
 import (
-	agentservice "github.com/dever-package/bot/service/agent"
 	knowledgeservice "github.com/dever-package/bot/service/agent/knowledge"
+	runtimeloop "github.com/dever-package/bot/service/agent/runtime/loop"
 	assetservice "github.com/dever-package/bot/service/asset"
 	energonservice "github.com/dever-package/bot/service/energon"
 	memoryservice "github.com/dever-package/bot/service/memory"
@@ -11,7 +11,7 @@ import (
 
 type Service struct {
 	repo      Repo
-	agent     agentservice.Service
+	agent     runtimeloop.Service
 	knowledge knowledgeservice.Service
 	asset     assetservice.Service
 	gateway   energonservice.GatewayService
@@ -28,7 +28,7 @@ func StreamStore() frontstream.Service {
 func NewService() Service {
 	return Service{
 		repo:      NewRepo(),
-		agent:     agentservice.NewService(),
+		agent:     runtimeloop.NewService(),
 		knowledge: knowledgeservice.NewService(),
 		asset:     assetservice.NewService(),
 		gateway:   energonservice.NewGatewayService(),

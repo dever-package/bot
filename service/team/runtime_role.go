@@ -6,7 +6,7 @@ import (
 	"time"
 
 	teammodel "github.com/dever-package/bot/model/team"
-	agentservice "github.com/dever-package/bot/service/agent"
+	runtimeloop "github.com/dever-package/bot/service/agent/runtime/loop"
 	"github.com/dever-package/bot/service/stream"
 )
 
@@ -127,7 +127,7 @@ func (s Service) executeStandaloneRole(ctx context.Context, run teammodel.Run, t
 	goal := firstText(input["goal"], input["task"], input["prompt"], role.Name)
 	memories := s.roleRuntimeMemories(ctx, team, &role, input)
 	prompt := buildAgentPrompt(team, flow, node, executor, goal, input, memories)
-	result, err := s.agent.RunInternal(ctx, agentservice.InternalRunRequest{
+	result, err := s.agent.RunInternal(ctx, runtimeloop.InternalRequest{
 		AgentID:   role.AgentID,
 		RequestID: newRequestID(),
 		Method:    "POST",
@@ -139,10 +139,6 @@ func (s Service) executeStandaloneRole(ctx context.Context, run teammodel.Run, t
 			"team":       team.Name,
 			"role":       roleInputPayload(&role),
 			"blackboard": input,
-		},
-		Options: map[string]any{
-			"full_runtime": true,
-			"stream":       true,
 		},
 		OnRunCreated: func(agentRunID uint64, requestID string) {
 			s.writeStandaloneRoleEvent(context.Background(), run, role, stream.EventNodeStarted, teammodel.RunStatusRunning, map[string]any{

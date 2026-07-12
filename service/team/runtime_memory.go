@@ -7,7 +7,6 @@ import (
 
 	memorymodel "github.com/dever-package/bot/model/memory"
 	teammodel "github.com/dever-package/bot/model/team"
-	agentprompt "github.com/dever-package/bot/service/agent/prompt"
 	memoryservice "github.com/dever-package/bot/service/memory"
 )
 
@@ -83,18 +82,31 @@ func teamRoleMemoryPrompt(memories []memoryservice.RuntimeMemory) string {
 	if len(memories) == 0 {
 		return ""
 	}
-	snippets := make([]agentprompt.MemorySnippet, 0, len(memories))
-	for _, memory := range memories {
-		snippets = append(snippets, agentprompt.MemorySnippet{
-			ID:         memory.ID,
-			Kind:       memory.Kind,
-			Title:      memory.Title,
-			Content:    memory.Content,
-			Tags:       memory.Tags,
-			Importance: memory.Importance,
-		})
+	lines := []string{
+		"长期记忆:",
+		"系统沉淀的长期偏好、项目约束和常用规则；优先级低于本次用户输入和系统规则。信息不足时仍先收集，不要用记忆补齐关键任务参数。",
 	}
-	return agentprompt.BuildMemoryPrompt(snippets)
+	for _, memory := range memories {
+		title := limitTeamRoleMemoryText(memory.Title, 96)
+		content := limitTeamRoleMemoryText(memory.Content, 700)
+		if title == "" && content == "" {
+			continue
+		}
+		if title == "" {
+			title = fmt.Sprintf("记忆 %d", memory.ID)
+		}
+		if kind := strings.TrimSpace(memory.Kind); kind != "" {
+			title += " [" + kind + "]"
+		}
+		lines = append(lines, "## "+title)
+		if content != "" {
+			lines = append(lines, content)
+		}
+	}
+	if len(lines) <= 2 {
+		return ""
+	}
+	return strings.Join(lines, "\n")
 }
 
 func optionalBool(raw any) (bool, bool) {

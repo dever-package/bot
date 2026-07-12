@@ -18,8 +18,9 @@ func StripOutputProgress(output Output) {
 }
 
 var (
-	scalarOutputKeys  = []string{"event", "title", "text", "reasoning", "progress", "error", "json", "rich"}
-	mediaOutputFields = []struct {
+	scalarOutputKeys     = []string{"event", "title", "text", "reasoning", "progress", "error", "json", "rich", "finish_reason", "interaction"}
+	structuredOutputKeys = []string{"media_files"}
+	mediaOutputFields    = []struct {
 		Target  string
 		Sources []string
 	}{
@@ -50,8 +51,8 @@ func ExtractOutput(value any) Output {
 			}
 		}
 	}
-	if content, exists := extractOpenAIContentValue(mapped); exists {
-		return normalizeOutputValue(map[string]any{"text": content})
+	if output, exists := extractOpenAIOutput(mapped); exists {
+		return normalizeOutput(output)
 	}
 
 	return normalizeOutputValue(mapped)
@@ -87,6 +88,16 @@ func normalizeOutput(output map[string]any) Output {
 	for _, key := range scalarOutputKeys {
 		copyOutputValue(result, output, key)
 	}
+	for _, key := range structuredOutputKeys {
+		copyOutputValue(result, output, key)
+	}
+	if calls := ParseToolCalls(output["tool_calls"]); len(calls) > 0 {
+		if strings.EqualFold(strings.TrimSpace(asText(output["event"])), "tool_call_delta") || hasToolCallIndex(output["tool_calls"]) {
+			result["tool_calls"] = ToolCallFragmentsValue(calls)
+		} else {
+			result["tool_calls"] = ToolCallsValue(calls)
+		}
+	}
 	if meta := normalizeMap(output["meta"]); len(meta) > 0 {
 		result["meta"] = meta
 	}
@@ -105,6 +116,14 @@ func hasOutputField(output map[string]any) bool {
 		if _, exists := output[key]; exists {
 			return true
 		}
+	}
+	for _, key := range structuredOutputKeys {
+		if _, exists := output[key]; exists {
+			return true
+		}
+	}
+	if len(ParseToolCalls(output["tool_calls"])) > 0 {
+		return true
 	}
 	if _, exists := output["meta"]; exists {
 		return true
@@ -154,6 +173,16 @@ func appendOutputList(target Output, key string, values ...any) {
 		return
 	}
 	target[key] = result
+}
+
+func appendOutputItems(target Output, key string, values ...any) {
+	result := normalizeAnyList(target[key])
+	for _, value := range values {
+		result = append(result, normalizeAnyList(value)...)
+	}
+	if len(result) > 0 {
+		target[key] = result
+	}
 }
 
 func uniqueOutputStrings(values []string) []string {

@@ -1,4 +1,9 @@
 import { request } from "@dever/front-plugin";
+import { isPlainRecord } from "@/lib/runtime-stream-output";
+import {
+  normalizeAgentChatOutput,
+  type AgentChatOutput,
+} from "./output";
 
 export type AgentChatRole = "user" | "assistant";
 
@@ -13,6 +18,8 @@ export type AgentChatMessageRecord = {
   id: number;
   role: AgentChatRole;
   text: string;
+  content?: import("./reference").ReferenceContent;
+  output: AgentChatOutput;
   requestID: string;
   status: number;
 };
@@ -124,7 +131,7 @@ export async function archiveAgentChatSession(
 
 async function assistantRequest(api: string, payload: Record<string, unknown>) {
   const result = await request(api, "post", payload);
-  if (!isPlainObject(result)) {
+  if (!isPlainRecord(result)) {
     throw new Error("会话请求失败");
   }
   const code = Number(result.code || 0);
@@ -132,11 +139,11 @@ async function assistantRequest(api: string, payload: Record<string, unknown>) {
   if (code !== 0 || status === 2) {
     throw new Error(textValue(result.message || result.msg) || "会话请求失败");
   }
-  return isPlainObject(result.data) ? result.data : {};
+  return isPlainRecord(result.data) ? result.data : {};
 }
 
 function normalizeSession(value: unknown): AgentChatSession | null {
-  if (!isPlainObject(value)) {
+  if (!isPlainRecord(value)) {
     return null;
   }
   const id = Number(value.id || 0);
@@ -155,7 +162,7 @@ function normalizeMessages(value: unknown): AgentChatMessageRecord[] {
   const rows = Array.isArray(value) ? value : [];
   return rows
     .map((row) => {
-      if (!isPlainObject(row)) {
+      if (!isPlainRecord(row)) {
         return null;
       }
       const role = textValue(row.role) === "user" ? "user" : "assistant";
@@ -163,6 +170,8 @@ function normalizeMessages(value: unknown): AgentChatMessageRecord[] {
         id: Number(row.id || 0),
         role,
         text: textValue(row.text),
+        content: normalizeReferenceContent(row.content),
+        output: normalizeAgentChatOutput(row.output),
         requestID: textValue(row.request_id),
         status: Number(row.status || 1),
       } satisfies AgentChatMessageRecord;
@@ -170,8 +179,57 @@ function normalizeMessages(value: unknown): AgentChatMessageRecord[] {
     .filter((message): message is AgentChatMessageRecord => Boolean(message));
 }
 
-function isPlainObject(value: unknown): value is Record<string, any> {
-  return value != null && typeof value === "object" && !Array.isArray(value);
+function normalizeReferenceContent(
+  value: unknown,
+): import("./reference").ReferenceContent | undefined {
+  if (!isPlainRecord(value) || Number(value.version) !== 1) {
+    return undefined;
+  }
+  const parts = Array.isArray(value.parts) ? value.parts : [];
+  const normalized = parts
+    .map((part) => {
+      if (!isPlainRecord(part)) {
+        return null;
+      }
+      if (part.type === "text") {
+        return { type: "text" as const, text: String(part.text || "") };
+      }
+      const refID = Number(part.ref_id || 0);
+      const refType = textValue(part.ref_type);
+      if (part.type !== "reference" || !refID || !isReferenceType(refType)) {
+        return null;
+      }
+      return {
+        type: "reference" as const,
+        ref_type: refType,
+        ref_id: refID,
+        label: textValue(part.label) || `${refType} ${refID}`,
+        usage: textValue(part.usage) || undefined,
+        preview: normalizeReferencePreview(part.preview),
+      };
+    })
+    .filter((part): part is NonNullable<typeof part> => Boolean(part));
+  return { version: 1, parts: normalized };
+}
+
+function normalizeReferencePreview(
+  value: unknown,
+): import("./reference").ReferencePreview | undefined {
+  if (!isPlainRecord(value)) {
+    return undefined;
+  }
+  const preview = {
+    text: textValue(value.text) || undefined,
+    kind: textValue(value.kind) || undefined,
+    url: textValue(value.url) || undefined,
+  };
+  return preview.text || preview.kind || preview.url ? preview : undefined;
+}
+
+function isReferenceType(
+  value: string,
+): value is import("./reference").ReferenceType {
+  return ["message", "artifact", "upload_file", "session"].includes(value);
 }
 
 function textValue(value: unknown) {

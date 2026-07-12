@@ -263,33 +263,7 @@
           "paramApi": "/bot/admin/energon/power_params",
           "requestApi": "/bot/admin/energon/request",
           "streamApi": "/bot/admin/energon/stream",
-          "blockMs": 1000,
-          "uploadRules": [
-            {
-              "ruleId": 1,
-              "kind": "image",
-              "bizKey": "energon",
-              "bizName": "AI生成"
-            },
-            {
-              "ruleId": 2,
-              "kind": "video",
-              "bizKey": "energon",
-              "bizName": "AI生成"
-            },
-            {
-              "ruleId": 3,
-              "kind": "audio",
-              "bizKey": "energon",
-              "bizName": "AI生成"
-            },
-            {
-              "ruleId": 4,
-              "kind": "file",
-              "bizKey": "energon",
-              "bizName": "AI生成"
-            }
-          ]
+          "blockMs": 1000
         }
       }
     ]

@@ -66,17 +66,6 @@ func ReadContent(entry Entry, limits Limits) (string, []string) {
 	return strings.TrimSpace(body), warnings
 }
 
-func RenderLoaded(entries []Entry) string {
-	if len(entries) == 0 {
-		return "已加载技能正文:\n本轮未加载额外技能。"
-	}
-	parts := []string{"已加载技能正文:"}
-	for _, entry := range entries {
-		parts = append(parts, fmt.Sprintf("## %s\n%s", entry.Key, strings.TrimSpace(entry.Content)))
-	}
-	return strings.Join(parts, "\n\n")
-}
-
 func readLimitedFile(path string, maxBytes int64) ([]byte, bool, error) {
 	file, err := os.Open(path)
 	if err != nil {

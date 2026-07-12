@@ -83,6 +83,11 @@ func (s GatewayService) callNormalizeTarget(
 		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("parse_response", err.Error()), nativeReq)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
+	data, err = s.storeGeneratedMediaOutput(ctx, req.RequestID, selected.Power.Kind, data, nil)
+	if err != nil {
+		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("store_media", err.Error()), nativeReq)
+		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
+	}
 
 	usage := extractResponseTokenUsage(resp, data)
 	logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusSuccess, time.Since(startedAt), encodeLogJSON(data), usage, nativeReq)
@@ -190,7 +195,7 @@ func (s GatewayService) callStreamTarget(
 		return callResult{NativeRequest: nativeReq}, err
 	}
 
-	writeOutput := s.streamOutputWriter(ctx, req.RequestID)
+	writeOutput := s.streamOutputWriter(ctx, req.RequestID, selected.Power.Kind)
 	progress, err := botruntime.StartProgress(ctx, selected.Service, selected.Power, writeOutput)
 	if err != nil {
 		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("stream_progress", err.Error()), nativeReq)
@@ -319,8 +324,11 @@ func enableStreamUsage(adapter botprotocol.Adapter, body map[string]any) {
 	body["stream_options"] = options
 }
 
-func (s GatewayService) streamOutputWriter(ctx context.Context, requestID string) func(botprotocol.Output) error {
+func (s GatewayService) streamOutputWriter(ctx context.Context, requestID string, kind string) func(botprotocol.Output) error {
 	return func(output botprotocol.Output) error {
+		if _, generated := generatedMediaRuleForKind(kind); generated && botprotocol.HasMediaOutput(output) {
+			return nil
+		}
 		return s.writeStreamOutput(ctx, requestID, output)
 	}
 }
@@ -345,6 +353,20 @@ type streamFinishInput struct {
 }
 
 func (s GatewayService) finishStreamResult(ctx context.Context, input streamFinishInput) (callResult, error) {
+	storedData, err := s.storeGeneratedMediaOutput(
+		ctx,
+		input.Request.RequestID,
+		input.Selected.Power.Kind,
+		input.Data,
+		func(output botprotocol.Output) error {
+			return s.writeStreamOutput(ctx, input.Request.RequestID, output)
+		},
+	)
+	if err != nil {
+		logItem := s.recordCallLogWithUsage(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("store_media", err.Error()), input.Usage, input.NativeRequest)
+		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err
+	}
+	input.Data = storedData
 	if err := input.Progress.Complete(); err != nil {
 		logItem := s.recordCallLogWithUsage(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("stream_progress", err.Error()), input.Usage, input.NativeRequest)
 		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err

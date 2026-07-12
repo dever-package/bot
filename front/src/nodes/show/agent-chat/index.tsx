@@ -19,9 +19,10 @@ import { Sidebar } from "./sidebar";
 import { useAgentChatStore } from "./store";
 import { Thread } from "./thread";
 import type { AgentChatRuntimeApis } from "./types";
-
-const AGENT_CHAT_LAYER_CLASS = "z-[100]";
-const AGENT_CHAT_LAYER_Z_INDEX = 2000;
+import {
+  AGENT_CHAT_LAYER_CLASS,
+  AGENT_CHAT_LAYER_Z_INDEX,
+} from "./layers";
 
 export function ShowAgentChat({ item, store }: NodeItemProps) {
   const agentKey = useStore(store, () =>

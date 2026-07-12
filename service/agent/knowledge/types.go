@@ -2,11 +2,24 @@ package knowledge
 
 import (
 	"time"
-
-	agentprompt "github.com/dever-package/bot/service/agent/prompt"
 )
 
-type RetrievedSnippet = agentprompt.KnowledgeSnippet
+type RetrievedSnippet struct {
+	BaseID   uint64  `json:"base_id"`
+	BaseName string  `json:"base_name"`
+	Prompt   string  `json:"prompt"`
+	DirID    uint64  `json:"dir_id"`
+	DirPath  string  `json:"dir_path"`
+	DocID    uint64  `json:"doc_id"`
+	NodeID   uint64  `json:"node_id"`
+	Title    string  `json:"title"`
+	Content  string  `json:"content"`
+	Score    float64 `json:"score"`
+	Source   string  `json:"source"`
+	SortRank int     `json:"sort_rank"`
+	HitCount int     `json:"-"`
+	Weight   float64 `json:"-"`
+}
 
 type IndexResult struct {
 	BaseID     uint64    `json:"base_id"`

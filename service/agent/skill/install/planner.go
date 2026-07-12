@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
-	agentruntime "github.com/dever-package/bot/service/agent"
+	runtimeloop "github.com/dever-package/bot/service/agent/runtime/loop"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
@@ -17,7 +17,7 @@ func (s Service) buildInstallPlan(ctx context.Context, execInfo *skillInstallExe
 	input := plannerInput(execInfo)
 	s.status(ctx, execInfo, "正在调用技能安装规划器")
 	stopHeartbeat := s.heartbeat(ctx, execInfo, "仍在生成技能安装计划，请稍后")
-	result, err := agentruntime.NewService().RunInternal(ctx, agentruntime.InternalRunRequest{
+	result, err := runtimeloop.NewService().RunInternal(ctx, runtimeloop.InternalRequest{
 		AgentID:   agentmodel.SkillInstallerAgentID,
 		RequestID: execInfo.RequestID + "-planner",
 		Method:    execInfo.Request.Method,
@@ -25,7 +25,6 @@ func (s Service) buildInstallPlan(ctx context.Context, execInfo *skillInstallExe
 		Path:      execInfo.Request.Path,
 		Headers:   execInfo.Request.Headers,
 		Input:     map[string]any{"text": input},
-		Options:   map[string]any{"stream": true},
 	})
 	stopHeartbeat()
 	if err != nil {

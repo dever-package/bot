@@ -8,7 +8,7 @@ import (
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	projectmodel "github.com/dever-package/bot/model/project"
-	agentservice "github.com/dever-package/bot/service/agent"
+	runtimeloop "github.com/dever-package/bot/service/agent/runtime/loop"
 	assetservice "github.com/dever-package/bot/service/asset"
 	bodyservice "github.com/dever-package/bot/service/body"
 	teamservice "github.com/dever-package/bot/service/team"
@@ -60,11 +60,10 @@ func (s Service) RunCanvasAgent(ctx context.Context, projectID uint64, req Canva
 	if agent == nil {
 		return nil, fmt.Errorf("智能体不存在或未开启")
 	}
-	result, err := agentservice.NewService().RunInternal(ctx, agentservice.InternalRunRequest{
+	result, err := runtimeloop.NewService().RunInternal(ctx, runtimeloop.InternalRequest{
 		AgentID:   req.AgentID,
 		RequestID: req.RequestID,
 		Input:     cloneInput(req.Input),
-		Options:   map[string]any{"full_runtime": true},
 	})
 	if err != nil {
 		return map[string]any{

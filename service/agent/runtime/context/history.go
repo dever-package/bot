@@ -2,8 +2,11 @@ package runtimecontext
 
 import (
 	"context"
+	"strings"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimereference "github.com/dever-package/bot/service/agent/runtime/reference"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 const (
@@ -25,13 +28,40 @@ func recentHistory(ctx context.Context, session agentmodel.Session) []any {
 		"order": "main.id desc",
 		"limit": recentMessageLimit,
 	})
-	selected := make([]map[string]any, 0, len(rows))
-	totalRunes := 0
-	for _, row := range rows {
+	history := make([]any, 0, len(rows))
+	for index := len(rows) - 1; index >= 0; index-- {
+		row := rows[index]
 		if row == nil || (row.Role != "user" && row.Role != "assistant") {
 			continue
 		}
-		text := limitRunes(row.Text, historyMessageMaxRunes)
+		text := row.Text
+		if references := runtimereference.ReferencesFromContent(row.Content); len(references) > 0 {
+			if resolved, err := runtimereference.NewResolver().Resolve(ctx, session, references); err == nil && strings.TrimSpace(resolved.Prompt) != "" {
+				text = strings.TrimSpace(text + "\n\n" + resolved.Prompt)
+			}
+		}
+		history = append(history, map[string]any{"role": row.Role, "text": text})
+	}
+	return normalizeHistory(history)
+}
+
+func normalizeHistory(history []any) []any {
+	selected := make([]map[string]any, 0, len(history))
+	totalRunes := 0
+	for index := len(history) - 1; index >= 0; index-- {
+		message, ok := history[index].(map[string]any)
+		if !ok {
+			continue
+		}
+		role := strings.ToLower(strings.TrimSpace(frontstream.InputText(message["role"])))
+		if role != "user" && role != "assistant" {
+			continue
+		}
+		text := strings.TrimSpace(frontstream.InputText(message["text"]))
+		if text == "" {
+			text = strings.TrimSpace(frontstream.InputText(message["content"]))
+		}
+		text = limitRunes(text, historyMessageMaxRunes)
 		if text == "" {
 			continue
 		}
@@ -39,7 +69,7 @@ func recentHistory(ctx context.Context, session agentmodel.Session) []any {
 		if len(selected) >= historyMinimumMessages && totalRunes+cost > historyTotalMaxRunes {
 			break
 		}
-		selected = append(selected, map[string]any{"role": row.Role, "text": text})
+		selected = append(selected, map[string]any{"role": role, "text": text})
 		totalRunes += cost
 	}
 	result := make([]any, 0, len(selected))

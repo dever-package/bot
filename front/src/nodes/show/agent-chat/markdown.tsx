@@ -43,10 +43,8 @@ function normalizeMarkdownHeadingMarker(
 }
 
 export const StreamingMarkdown = memo(function StreamingMarkdown({
-  running,
   error,
 }: {
-  running: boolean;
   error: boolean;
 }) {
   return (
@@ -64,7 +62,7 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({
       preprocess={normalizeMarkdownSource}
       className={cn(
         markdownClassName,
-        running && "agent-chat-streaming-markdown",
+        "agent-chat-markdown",
         error && "text-destructive",
       )}
     />

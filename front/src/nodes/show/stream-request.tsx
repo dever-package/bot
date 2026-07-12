@@ -21,10 +21,6 @@ import {
   streamValueText as valueText,
   type RuntimeStreamFrame,
 } from '@/lib/stream'
-import {
-  mergeResourceUploadRules,
-  normalizeResourceUploadRules,
-} from '@/lib/resource'
 import { getStoreValueByPath } from '@/lib/store'
 import {
   isEmptyRuntimeOutput,
@@ -112,10 +108,6 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
   const streamApi = String(item.meta?.streamApi || '/bot/admin/energon/stream')
   const stopApi = String(item.meta?.stopApi || '/bot/admin/energon/stream_stop')
   const blockMs = Number(item.meta?.blockMs || 1000)
-  const rawUploadRules = useMemo(
-    () => normalizeResourceUploadRules(item.meta?.uploadRules),
-    [item.meta?.uploadRules]
-  )
   const paramUploadRuleIds = useMemo(
     () =>
       powerParams
@@ -123,14 +115,7 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
         .filter((ruleId) => Number.isFinite(ruleId) && ruleId > 0),
     [powerParams]
   )
-  const uploadRuleMetas = useUploadRuleMetas([
-    ...rawUploadRules.map((current) => current.ruleId),
-    ...paramUploadRuleIds,
-  ])
-  const uploadRules = useMemo(
-    () => mergeResourceUploadRules(rawUploadRules, uploadRuleMetas),
-    [rawUploadRules, uploadRuleMetas]
-  )
+  const uploadRuleMetas = useUploadRuleMetas(paramUploadRuleIds)
   const mainPowerParams = useMemo(
     () =>
       powerParams.filter((param) => isMainParam(param) && !isHiddenParam(param)),
@@ -582,7 +567,6 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
             output={buildContentViewOutput(output)}
             streaming={running && !output.finalOutput}
             emptyText="AI 返回内容会显示在这里。"
-            uploadRules={uploadRules}
           />
         </div>
       </div>

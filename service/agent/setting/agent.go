@@ -31,6 +31,7 @@ func (AgentHook) ProviderBeforeSaveAgent(c *server.Context, params []any) any {
 		record["cate_id"] = defaultAgentCateID
 	}
 	normalizeAgentCate(c.Context(), record, partial)
+	normalizeOptionalAgentPowerCate(c, record, partial)
 	normalizeOptionalAgentKnowledgeCate(c, record, partial)
 	normalizeOptionalAgentSkillPack(c, record, partial)
 	defaultInt16FieldOnCreateOrPresent(record, "status", defaultAgentStatus, partial)
@@ -186,6 +187,24 @@ func normalizeAgentCate(ctx context.Context, record map[string]any, partial bool
 	}
 	if util.ToUint64(record["cate_id"]) == agentmodel.SystemAgentCateID {
 		record["cate_id"] = agentmodel.DefaultAgentCateID
+	}
+}
+
+func normalizeOptionalAgentPowerCate(c *server.Context, record map[string]any, partial bool) {
+	if !shouldNormalizeField(record, "power_cate_id", partial) {
+		return
+	}
+	cateID := util.ToUint64(record["power_cate_id"])
+	record["power_cate_id"] = cateID
+	if cateID == 0 {
+		return
+	}
+	row := energonmodel.NewPowerCateModel().Find(c.Context(), map[string]any{"id": cateID})
+	if row == nil {
+		panicAgentField("form.power_cate_id", "工具能力分类不存在。")
+	}
+	if row.Status != 1 {
+		panicAgentField("form.power_cate_id", "工具能力分类已停用。")
 	}
 }
 

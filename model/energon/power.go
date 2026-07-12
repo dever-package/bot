@@ -45,6 +45,7 @@ var (
 		{"id": "image", "value": "图片"},
 		{"id": "video", "value": "视频"},
 		{"id": "audio", "value": "音频"},
+		{"id": "file", "value": "文件"},
 		{"id": "role", "value": "角色"},
 		{"id": "multi", "value": "多模态"},
 		{"id": "embeddings", "value": "向量"},

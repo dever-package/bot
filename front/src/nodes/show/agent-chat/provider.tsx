@@ -5,7 +5,9 @@ import {
   type AppendMessage,
   type ThreadMessageLike,
 } from "@assistant-ui/react";
+import { buildAgentChatAssistantContent } from "./message-content";
 import type { AgentChatController, ChatMessage } from "./types";
+import type { ReferenceInput } from "./reference";
 
 export function RuntimeProvider({
   controller,
@@ -19,7 +21,7 @@ export function RuntimeProvider({
         .join("")
         .trim();
       if (text) {
-        await controller.send(text);
+        await controller.send(plainReferenceInput(text));
       }
     },
     [controller.send],
@@ -44,14 +46,13 @@ export function RuntimeProvider({
 }
 
 function convertMessage(message: ChatMessage): ThreadMessageLike {
-  const content = message.text
-    ? [{ type: "text" as const, text: message.text }]
-    : [];
   if (message.role === "user") {
     return {
       id: message.id,
       role: "user",
-      content,
+      content: message.text
+        ? [{ type: "text" as const, text: message.text }]
+        : [],
       metadata: {
         custom: messageMetadata(message),
       },
@@ -60,7 +61,7 @@ function convertMessage(message: ChatMessage): ThreadMessageLike {
   return {
     id: message.id,
     role: "assistant",
-    content,
+    content: buildAgentChatAssistantContent(message),
     status: message.running
       ? { type: "running" }
       : message.error
@@ -76,5 +77,19 @@ function messageMetadata(message: ChatMessage) {
   return {
     recordID: message.recordID || 0,
     requestID: message.requestID || "",
+    output: message.output,
+    activities: message.activities || [],
+    sourceText: message.text,
+    content: message.content,
+  };
+}
+
+function plainReferenceInput(text: string): ReferenceInput {
+  return {
+    text,
+    content: {
+      version: 1,
+      parts: [{ type: "text", text }],
+    },
   };
 }

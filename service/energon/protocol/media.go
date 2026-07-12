@@ -1,7 +1,9 @@
 package protocol
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"net/http"
 	"strings"
 )
 
@@ -121,6 +123,10 @@ func collectMediaString(output Output, value string, defaultType string, eventTy
 	if value == "" {
 		return
 	}
+	if isBase64DataURL(value) {
+		appendMediaByType(output, mediaTypeFromEvent(eventType, defaultType), []string{value})
+		return
+	}
 
 	if strings.Contains(value, "\ndata:") || strings.HasPrefix(value, "data:") || strings.Contains(value, "\nevent:") || strings.HasPrefix(value, "event:") {
 		for _, payload := range ParseSSEPayloads(value) {
@@ -136,6 +142,14 @@ func collectMediaString(output Output, value string, defaultType string, eventTy
 	}
 
 	appendMediaByType(output, mediaTypeFromEvent(eventType, defaultType), []string{value})
+}
+
+func isBase64DataURL(value string) bool {
+	value = strings.TrimSpace(value)
+	comma := strings.Index(value, ",")
+	return comma > 5 &&
+		strings.HasPrefix(strings.ToLower(value), "data:") &&
+		strings.Contains(strings.ToLower(value[:comma]), ";base64")
 }
 
 func collectMediaMap(output Output, mapped map[string]any, defaultType string, eventType string) {
@@ -405,5 +419,23 @@ func normalizeBase64ImageURL(value string) string {
 	if value == "" || strings.HasPrefix(value, "data:") {
 		return value
 	}
-	return "data:image/jpeg;base64," + value
+	return "data:" + detectBase64ImageMIME(value) + ";base64," + value
+}
+
+func detectBase64ImageMIME(value string) string {
+	prefix := strings.NewReplacer("\n", "", "\r", "", " ", "", "\t", "").Replace(value)
+	if len(prefix) > 684 {
+		prefix = prefix[:684]
+	}
+	prefix = prefix[:len(prefix)-len(prefix)%4]
+	decoded, err := base64.StdEncoding.DecodeString(prefix)
+	if err != nil {
+		decoded, err = base64.RawStdEncoding.DecodeString(strings.TrimRight(prefix, "="))
+	}
+	if err == nil {
+		if mimeType := strings.ToLower(strings.TrimSpace(http.DetectContentType(decoded))); strings.HasPrefix(mimeType, "image/") {
+			return mimeType
+		}
+	}
+	return "image/jpeg"
 }

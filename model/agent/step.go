@@ -30,11 +30,9 @@ type StepIndex struct {
 var (
 	stepTypeOptions = []map[string]any{
 		{"id": "input", "value": "输入"},
-		{"id": "skill_catalog", "value": "技能目录"},
-		{"id": "skill_select", "value": "技能选择"},
-		{"id": "skill_load", "value": "技能加载"},
-		{"id": "context", "value": "运行上下文"},
-		{"id": "llm_delta", "value": "LLM片段"},
+		{"id": "model", "value": "模型调用"},
+		{"id": "tool", "value": "工具调用"},
+		{"id": "interaction", "value": "等待用户输入"},
 		{"id": "final", "value": "最终输出"},
 		{"id": "error", "value": "错误"},
 		{"id": "warning", "value": "警告"},

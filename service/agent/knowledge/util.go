@@ -16,7 +16,6 @@ import (
 	"github.com/shemic/dever/util"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
-	agentprompt "github.com/dever-package/bot/service/agent/prompt"
 )
 
 func trimText(value any) string {
@@ -702,12 +701,12 @@ func focusedRetrieveLimit(limit int, focused bool) int {
 	return limit * 2
 }
 
-func mergeKnowledgeSnippets(rows []agentprompt.KnowledgeSnippet) []agentprompt.KnowledgeSnippet {
+func mergeKnowledgeSnippets(rows []RetrievedSnippet) []RetrievedSnippet {
 	if len(rows) == 0 {
 		return rows
 	}
 	seen := make(map[uint64]int, len(rows))
-	result := make([]agentprompt.KnowledgeSnippet, 0, len(rows))
+	result := make([]RetrievedSnippet, 0, len(rows))
 	for _, row := range rows {
 		if row.NodeID == 0 {
 			result = append(result, row)
@@ -830,7 +829,7 @@ func backlinkBoost(edgeCount int) float64 {
 	return boost * 0.15
 }
 
-func rankKnowledgeSnippets(ctx context.Context, rows []agentprompt.KnowledgeSnippet, query string, dirs []candidateDir, baseID uint64) []agentprompt.KnowledgeSnippet {
+func rankKnowledgeSnippets(ctx context.Context, rows []RetrievedSnippet, query string, dirs []candidateDir, baseID uint64) []RetrievedSnippet {
 	if len(rows) == 0 {
 		return rows
 	}

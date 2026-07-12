@@ -17,6 +17,10 @@ import {
 } from "./api";
 import { useAgentChatRuns } from "./runs";
 import {
+  loadAgentChatReferences,
+  type ReferenceLoadRequest,
+} from "./reference";
+import {
   appendUniqueSessions,
   mergeLatestMessages,
   prependUniqueMessages,
@@ -166,6 +170,20 @@ export function useAgentChatStore({
       );
     },
     [],
+  );
+
+  const loadReferences = useCallback(
+    (request: ReferenceLoadRequest) =>
+      loadAgentChatReferences(
+        {
+          api: assistantApi,
+          agentKey,
+          contextKey,
+          sessionID: sessionIDRef.current,
+        },
+        request,
+      ),
+    [agentKey, assistantApi, contextKey],
   );
 
   const runs = useAgentChatRuns({
@@ -631,6 +649,7 @@ export function useAgentChatStore({
     handleSessionListScroll,
     handleMessageListScroll,
     handleMessageListWheel,
+    loadReferences,
     send: runs.send,
     stop: runs.stop,
   };
