@@ -4,19 +4,19 @@ import (
 	"github.com/shemic/dever/server"
 
 	botapi "github.com/dever-package/bot/api"
-	agentruntime "github.com/dever-package/bot/service/agent/runtime"
+	runtimeloop "github.com/dever-package/bot/service/agent/runtime/loop"
 )
 
 type AgentRuntime struct{}
 
-var agentChatRuntime = agentruntime.NewService()
+var agentChatRuntime = runtimeloop.NewService()
 
 func (AgentRuntime) PostRun(c *server.Context) error {
 	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
-	response := agentChatRuntime.Run(c.Context(), agentruntime.ChatRequest{
+	response := agentChatRuntime.RunChat(c.Context(), runtimeloop.ChatRequest{
 		AgentIdentity: botapi.TextFromBody(body, "agent", "agent_key", "agent_id"),
 		SessionID:     botapi.Uint64FromBody(body, "session_id", "sessionId"),
 		ContextKey:    botapi.TextFromBody(body, "context_key", "contextKey"),
@@ -25,6 +25,7 @@ func (AgentRuntime) PostRun(c *server.Context) error {
 		Host:          c.Header("Host"),
 		Path:          c.Path(),
 		Headers:       requestHeaders(c),
+		Server:        c,
 	})
 	return c.JSONPayload(200, response)
 }
@@ -46,12 +47,16 @@ func (AgentRuntime) PostStop(c *server.Context) error {
 	return c.JSONPayload(200, agentChatRuntime.Stop(c.Context(), botapi.StreamRequestIDFromBody(body)))
 }
 
-func agentRuntimeInput(body map[string]any) string {
-	if input := botapi.TextFromBody(body, "input", "text", "message"); input != "" {
-		return input
-	}
+func agentRuntimeInput(body map[string]any) map[string]any {
 	if input, ok := body["input"].(map[string]any); ok {
-		return botapi.TextFromBody(input, "text", "message", "prompt")
+		result := make(map[string]any, len(input))
+		for key, value := range input {
+			result[key] = value
+		}
+		return result
 	}
-	return ""
+	if input := botapi.TextFromBody(body, "input", "text", "message", "prompt"); input != "" {
+		return map[string]any{"text": input}
+	}
+	return map[string]any{}
 }

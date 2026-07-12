@@ -6,14 +6,14 @@ import (
 	"github.com/shemic/dever/server"
 
 	botapi "github.com/dever-package/bot/api"
-	agentruntime "github.com/dever-package/bot/service/agent/runtime"
+	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
 	memoryservice "github.com/dever-package/bot/service/memory"
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type Assistant struct{}
 
-var assistantSessionRunner = agentruntime.NewService()
+var assistantSessionRunner = runtimechat.NewService()
 var assistantMemoryRunner = memoryservice.NewService()
 
 func (Assistant) PostSession(c *server.Context) error {
@@ -21,7 +21,7 @@ func (Assistant) PostSession(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	data, err := assistantSessionRunner.ResolveSession(c.Context(), agentruntime.SessionRequest{
+	data, err := assistantSessionRunner.ResolveSession(c.Context(), runtimechat.SessionRequest{
 		SessionID:     botapi.Uint64FromBody(body, "session_id", "sessionId", "id"),
 		LastMessageID: botapi.Uint64FromBody(body, "last_message_id", "lastMessageId"),
 		ContextKey:    botapi.TextFromBody(body, "context_key", "contextKey"),
@@ -45,7 +45,7 @@ func (Assistant) PostSessions(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	data, err := assistantSessionRunner.ReviewSessions(c.Context(), agentruntime.SessionRequest{
+	data, err := assistantSessionRunner.ReviewSessions(c.Context(), runtimechat.SessionRequest{
 		LastSessionID: botapi.Uint64FromBody(body, "last_session_id", "lastSessionId"),
 		ContextKey:    botapi.TextFromBody(body, "context_key", "contextKey"),
 		AgentKey:      botapi.TextFromBody(body, "agent_key", "agentKey", "agent"),
@@ -63,7 +63,7 @@ func (Assistant) PostNewSession(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
-	data, err := assistantSessionRunner.StartSession(c.Context(), agentruntime.SessionRequest{
+	data, err := assistantSessionRunner.StartSession(c.Context(), runtimechat.SessionRequest{
 		ContextKey: botapi.TextFromBody(body, "context_key", "contextKey"),
 		AgentKey:   botapi.TextFromBody(body, "agent_key", "agentKey", "agent"),
 		Title:      botapi.TextFromBody(body, "title"),
@@ -128,7 +128,7 @@ func (Assistant) PostMessage(c *server.Context) error {
 		return c.Error(err)
 	}
 	status := int16(frontstream.InputInt64(body["status"], 0))
-	data, err := assistantSessionRunner.RecordMessage(c.Context(), agentruntime.MessageRequest{
+	data, err := assistantSessionRunner.RecordMessage(c.Context(), runtimechat.MessageRequest{
 		SessionID:  botapi.Uint64FromBody(body, "session_id", "sessionId"),
 		ContextKey: botapi.TextFromBody(body, "context_key", "contextKey"),
 		AgentKey:   botapi.TextFromBody(body, "agent_key", "agentKey", "agent"),
