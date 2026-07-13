@@ -35,6 +35,11 @@ func recentHistory(ctx context.Context, session agentmodel.Session) []any {
 			continue
 		}
 		text := row.Text
+		if row.Role == "user" {
+			if response := runtimereference.InteractionResponsePrompt(row.Content); response != "" {
+				text = strings.TrimSpace(text + "\n\n" + response)
+			}
+		}
 		if references := runtimereference.ReferencesFromContent(row.Content); len(references) > 0 {
 			if resolved, err := runtimereference.NewResolver().Resolve(ctx, session, references); err == nil && strings.TrimSpace(resolved.Prompt) != "" {
 				text = strings.TrimSpace(text + "\n\n" + resolved.Prompt)

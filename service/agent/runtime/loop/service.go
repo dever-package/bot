@@ -216,7 +216,9 @@ func chatTimeout(seconds int) time.Duration {
 
 func joinRuntimePrompt(base string, mounted string) string {
 	parts := []string{strings.TrimSpace(base), strings.TrimSpace(mounted), strings.TrimSpace(`工具由系统通过原生 Function Calling 提供。需要工具时直接调用，不要在正文中伪造工具 JSON。
-当任务缺少必要参数、需要用户选择/确认或补充素材时，必须调用 ask_user，并把本轮所有必要问题合并到一个表单中。
+当任务缺少必要参数、需要用户选择/确认或补充素材时，必须调用 ask_user；一次最多询问四个必要问题，仍有必要信息缺失时可在用户回答后的下一轮继续询问。
+调用 ask_user 前，先用用户当前语言输出一句简短自然说明，解释为什么需要确认这些信息；不要在正文中重复表单问题和选项。
+主题、风格、用途、比例等信息优先使用 option 或 multi_option，给出 2-6 个常用选项和推荐值；前端会自动提供自定义补充，不要因此改用自由输入。
 禁止在正文中列出任务问题、选项，或要求用户直接回复这些信息；如果准备等待用户回答，ask_user 是唯一允许的交互方式。
 能根据当前上下文安全推断或使用合理默认值时直接继续执行，不要为了非必要信息调用 ask_user。普通聊天和不要求用户回答的反问不受此限制。
 当用户消息包含 interaction_response 时，它是对上一份表单的回答；直接结合其中的数据继续原任务，不要重复询问已经回答的内容。

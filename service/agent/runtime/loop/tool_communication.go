@@ -28,6 +28,9 @@ func fallbackToolPreamble(calls []botprotocol.ToolCall, registry *runtimetool.Re
 	if len(calls) == 0 || registry == nil {
 		return ""
 	}
+	if definition, exists := registry.Definition(calls[0].Name); exists && strings.EqualFold(strings.TrimSpace(definition.Kind), "interaction") {
+		return "为了继续完成这个任务，我需要先确认几个关键信息。"
+	}
 	for _, call := range calls {
 		definition, exists := registry.Definition(call.Name)
 		if !exists || !isGeneratedMediaKind(definition.Kind) {

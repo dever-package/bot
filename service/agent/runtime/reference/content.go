@@ -96,6 +96,18 @@ func ReferencesFromContent(value any) []Reference {
 	return references
 }
 
+func InteractionResponsePrompt(value any) string {
+	content, ok := parseContent(value)
+	if !ok || content.InteractionResponse == nil {
+		return ""
+	}
+	raw, err := json.Marshal(content.InteractionResponse.Value())
+	if err != nil {
+		return ""
+	}
+	return "interaction_response:\n" + string(raw)
+}
+
 func parseContent(value any) (Content, bool) {
 	if value == nil {
 		return Content{}, false

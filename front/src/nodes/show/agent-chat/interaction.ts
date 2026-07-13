@@ -29,6 +29,7 @@ export function readAgentChatInteraction(
     ...interaction,
     id,
     type: textValue(interaction.type) || "form",
+    presentation: textValue(interaction.presentation),
     title: textValue(interaction.title) || "需要补充信息",
     description: textValue(interaction.description),
     fields,

@@ -22,7 +22,12 @@ export function AgentChatInteractionView({
   onSubmit: (result: AgentInteractionSubmitResult) => void;
 }) {
   return (
-    <div className="agent-chat-interaction mt-5 max-w-2xl">
+    <div
+      className={cn(
+        "agent-chat-interaction mt-5",
+        interaction.presentation === "stepper" ? "max-w-xl" : "max-w-2xl",
+      )}
+    >
       <AgentInteractionPanel
         interaction={interaction}
         disabled={disabled}
