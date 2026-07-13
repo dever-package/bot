@@ -8,14 +8,19 @@ export function Sidebar({
   agentName,
   agentReady,
   controller,
+  collapsed = false,
 }: {
   agentName: string;
   agentReady: boolean;
   controller: AgentChatController;
+  collapsed?: boolean;
 }) {
   return (
     <aside
-      className="hidden h-full shrink-0 flex-col border-r bg-muted/25 md:flex"
+      className={cn(
+        "hidden h-full shrink-0 flex-col border-r bg-muted/25",
+        !collapsed && "md:flex",
+      )}
       style={{ width: 300, minWidth: 300, flexBasis: 300 }}
     >
       <div className="shrink-0 border-b p-3">

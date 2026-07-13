@@ -9,6 +9,7 @@ import { runtimeErrorMessage } from "@/lib/runtime-stream-output";
 import {
   archiveAgentChatSession,
   listAgentChatSessions,
+  loadAgentChatReferencePreview,
   loadAgentChatSession,
   loadAgentChatSessionState,
   renameAgentChatSession,
@@ -19,6 +20,8 @@ import { useAgentChatRuns } from "./runs";
 import {
   loadAgentChatReferences,
   type ReferenceLoadRequest,
+  type ReferencePreview,
+  type ReferencePreviewRequest,
 } from "./reference";
 import {
   appendUniqueSessions,
@@ -59,6 +62,9 @@ export function useAgentChatStore({
 
   const sessionIDRef = useRef(0);
   const sessionViewsRef = useRef(new Map<number, SessionView>());
+  const referencePreviewCacheRef = useRef(
+    new Map<string, Promise<ReferencePreview>>(),
+  );
   const scopeKeyRef = useRef("");
   const loadTokenRef = useRef(0);
   const sessionListTokenRef = useRef(0);
@@ -186,6 +192,33 @@ export function useAgentChatStore({
     [agentKey, assistantApi, contextKey],
   );
 
+  const loadReferencePreview = useCallback(
+    (reference: ReferencePreviewRequest) => {
+      const activeSessionID = sessionIDRef.current;
+      if (!activeSessionID || !agentKey) {
+        return Promise.reject(new Error("当前会话不可用"));
+      }
+      const key = `${activeSessionID}:${reference.refType}:${reference.refId}`;
+      const cached = referencePreviewCacheRef.current.get(key);
+      if (cached) {
+        return cached;
+      }
+      const pending = loadAgentChatReferencePreview(
+        runtimeApi.referencePreview,
+        { agentKey, sessionID: activeSessionID },
+        reference,
+      );
+      referencePreviewCacheRef.current.set(key, pending);
+      void pending.catch(() => {
+        if (referencePreviewCacheRef.current.get(key) === pending) {
+          referencePreviewCacheRef.current.delete(key);
+        }
+      });
+      return pending;
+    },
+    [agentKey, runtimeApi.referencePreview],
+  );
+
   const runs = useAgentChatRuns({
     agentKey,
     contextKey,
@@ -223,8 +256,7 @@ export function useAgentChatStore({
         messages: nextMessages,
         oldestMessageID:
           previousView?.oldestMessageID || payload.messages[0]?.id || 0,
-        canLoadOlder:
-          previousView?.canLoadOlder ?? payload.messages.length > 0,
+        canLoadOlder: previousView?.canLoadOlder ?? payload.messages.length > 0,
       };
       sessionViewsRef.current.set(nextSessionID, view);
       syncVisibleView(nextSessionID, view);
@@ -607,6 +639,7 @@ export function useAgentChatStore({
       scopeKeyRef.current = scopeKey;
       runs.reset();
       sessionViewsRef.current.clear();
+      referencePreviewCacheRef.current.clear();
       setSessions([]);
       sessionIDRef.current = 0;
       setSessionID(0);
@@ -650,6 +683,7 @@ export function useAgentChatStore({
     handleMessageListScroll,
     handleMessageListWheel,
     loadReferences,
+    loadReferencePreview,
     send: runs.send,
     stop: runs.stop,
   };

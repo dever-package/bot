@@ -47,6 +47,22 @@ func (AgentRuntime) PostStop(c *server.Context) error {
 	return c.JSONPayload(200, agentChatRuntime.Stop(c.Context(), botapi.StreamRequestIDFromBody(body)))
 }
 
+func (AgentRuntime) PostReferencePreview(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := agentChatRuntime.ReferencePreview(c.Context(), runtimeloop.ReferencePreviewRequest{
+		SessionID:     botapi.Uint64FromBody(body, "session_id", "sessionId"),
+		AgentKey:      botapi.TextFromBody(body, "agent_key", "agentKey", "agent"),
+		ReferenceType: botapi.TextFromBody(body, "ref_type", "refType"),
+		ReferenceID:   botapi.Uint64FromBody(body, "ref_id", "refId"),
+		Label:         botapi.TextFromBody(body, "label"),
+		Server:        c,
+	})
+	return botapi.WriteJSON(c, data, err)
+}
+
 func agentRuntimeInput(body map[string]any) map[string]any {
 	if input, ok := body["input"].(map[string]any); ok {
 		result := make(map[string]any, len(input))

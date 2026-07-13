@@ -7,7 +7,7 @@ import {
 } from "@assistant-ui/react";
 import { buildAgentChatAssistantContent } from "./message-content";
 import type { AgentChatController, ChatMessage } from "./types";
-import type { ReferenceInput } from "./reference";
+import { textReferenceInput } from "./reference";
 
 export function RuntimeProvider({
   controller,
@@ -21,7 +21,7 @@ export function RuntimeProvider({
         .join("")
         .trim();
       if (text) {
-        await controller.send(plainReferenceInput(text));
+        await controller.send(textReferenceInput(text));
       }
     },
     [controller.send],
@@ -81,15 +81,5 @@ function messageMetadata(message: ChatMessage) {
     activities: message.activities || [],
     sourceText: message.text,
     content: message.content,
-  };
-}
-
-function plainReferenceInput(text: string): ReferenceInput {
-  return {
-    text,
-    content: {
-      version: 1,
-      parts: [{ type: "text", text }],
-    },
   };
 }

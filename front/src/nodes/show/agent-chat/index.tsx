@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useStore } from "zustand";
 import { Plus, X } from "lucide-react";
 import type { NodeItemProps } from "@/page/nodes";
@@ -18,11 +18,13 @@ import { RuntimeProvider } from "./provider";
 import { Sidebar } from "./sidebar";
 import { useAgentChatStore } from "./store";
 import { Thread } from "./thread";
-import type { AgentChatRuntimeApis } from "./types";
 import {
-  AGENT_CHAT_LAYER_CLASS,
-  AGENT_CHAT_LAYER_Z_INDEX,
-} from "./layers";
+  AgentChatMediaInspector,
+  AgentChatMediaPreviewProvider,
+  useAgentChatMediaInspector,
+} from "./media-inspector";
+import type { AgentChatRuntimeApis } from "./types";
+import { AGENT_CHAT_LAYER_CLASS, AGENT_CHAT_LAYER_Z_INDEX } from "./layers";
 
 export function ShowAgentChat({ item, store }: NodeItemProps) {
   const agentKey = useStore(store, () =>
@@ -54,8 +56,7 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
         item.meta?.renameSessionApi || "/bot/admin/assistant/rename_session",
       ),
       archiveSession: String(
-        item.meta?.archiveSessionApi ||
-          "/bot/admin/assistant/archive_session",
+        item.meta?.archiveSessionApi || "/bot/admin/assistant/archive_session",
       ),
     }),
     [
@@ -72,9 +73,14 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
       stream: String(item.meta?.streamApi || "/bot/admin/agent_runtime/stream"),
       stop: String(item.meta?.stopApi || "/bot/admin/agent_runtime/stop"),
       status: String(item.meta?.statusApi || "/bot/admin/agent_runtime/status"),
+      referencePreview: String(
+        item.meta?.referencePreviewApi ||
+          "/bot/admin/agent_runtime/reference_preview",
+      ),
     }),
     [
       item.meta?.requestApi,
+      item.meta?.referencePreviewApi,
       item.meta?.statusApi,
       item.meta?.stopApi,
       item.meta?.streamApi,
@@ -87,77 +93,99 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
     assistantApi,
     runtimeApi,
   });
+  const mediaInspector = useAgentChatMediaInspector();
   const closeDialog = useCallback(() => {
     if (openPath) {
       store.getState().setValueByPath(openPath, false);
     }
   }, [openPath, store]);
 
+  useEffect(() => {
+    mediaInspector.closePreview();
+  }, [
+    agentKey,
+    controller.sessionID,
+    mediaInspector.closePreview,
+    modalOpen,
+  ]);
+
   if (openPath && !modalOpen) {
     return null;
   }
 
   const chatContent = (
-    <div
-      data-agent-chat-layer="true"
-      className={cn(
-        "flex min-h-0 w-full flex-col overflow-hidden bg-background md:flex-row",
-        fullScreen ? "h-full flex-1" : "border-y",
-      )}
-      style={
-        fullScreen
-          ? undefined
-          : { height: containerHeight, minHeight: "min(420px, 78dvh)" }
-      }
-    >
-      <Sidebar
-        agentName={agentName}
-        agentReady={Boolean(agentKey)}
-        controller={controller}
-      />
+    <AgentChatMediaPreviewProvider controller={mediaInspector}>
+      <div
+        data-agent-chat-layer="true"
+        data-media-inspector-open={mediaInspector.open ? "true" : undefined}
+        className={cn(
+          "relative flex min-h-0 w-full flex-col overflow-hidden bg-background md:flex-row",
+          fullScreen ? "h-full flex-1" : "border-y",
+        )}
+        style={
+          fullScreen
+            ? undefined
+            : { height: containerHeight, minHeight: "min(420px, 78dvh)" }
+        }
+      >
+        <Sidebar
+          agentName={agentName}
+          agentReady={Boolean(agentKey)}
+          controller={controller}
+          collapsed={mediaInspector.open}
+        />
 
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-        <header className="flex h-12 shrink-0 items-center gap-3 px-3 md:h-14 md:px-6">
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold text-foreground">
-              {controller.sessionTitle || "新会话"}
+        <section
+          className={cn(
+            "flex min-h-0 min-w-0 flex-1 flex-col bg-background",
+            mediaInspector.open &&
+              "md:w-[38vw] md:min-w-[360px] md:max-w-[640px] md:flex-none",
+          )}
+        >
+          <header className="flex h-12 shrink-0 items-center gap-3 px-3 md:h-14 md:px-6">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold text-foreground">
+                {controller.sessionTitle || "新会话"}
+              </div>
             </div>
-          </div>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="size-10 shrink-0 md:hidden"
-            title="新对话"
-            disabled={controller.sessionLoading || !agentKey}
-            onClick={() => void controller.startNewSession()}
-          >
-            <Plus className="size-4" />
-            <span className="sr-only">新对话</span>
-          </Button>
-          {fullScreen ? (
             <Button
               type="button"
               size="icon"
               variant="ghost"
-              className="size-10 shrink-0 md:size-8"
-              title="关闭运行智能体"
-              onClick={closeDialog}
+              className="size-10 shrink-0 md:hidden"
+              title="新对话"
+              disabled={controller.sessionLoading || !agentKey}
+              onClick={() => void controller.startNewSession()}
             >
-              <X className="size-4" />
-              <span className="sr-only">关闭运行智能体</span>
+              <Plus className="size-4" />
+              <span className="sr-only">新对话</span>
             </Button>
-          ) : null}
-        </header>
+            {fullScreen && !mediaInspector.open ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-10 shrink-0 md:size-8"
+                title="关闭运行智能体"
+                onClick={closeDialog}
+              >
+                <X className="size-4" />
+                <span className="sr-only">关闭运行智能体</span>
+              </Button>
+            ) : null}
+          </header>
 
-        <RuntimeProvider
-          key={`${agentKey}:${controller.sessionID || "loading"}`}
-          controller={controller}
-        >
-          <Thread controller={controller} />
-        </RuntimeProvider>
-      </section>
-    </div>
+          <RuntimeProvider
+            key={`${agentKey}:${controller.sessionID || "loading"}`}
+            controller={controller}
+          >
+            <Thread controller={controller} />
+          </RuntimeProvider>
+        </section>
+
+        <AgentChatMediaInspector controller={mediaInspector} />
+      </div>
+    </AgentChatMediaPreviewProvider>
   );
 
   if (!fullScreen) {

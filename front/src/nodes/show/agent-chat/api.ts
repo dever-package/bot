@@ -1,9 +1,11 @@
 import { request } from "@dever/front-plugin";
 import { isPlainRecord } from "@/lib/runtime-stream-output";
-import {
-  normalizeAgentChatOutput,
-  type AgentChatOutput,
-} from "./output";
+import { normalizeAgentChatOutput, type AgentChatOutput } from "./output";
+import type {
+  ReferencePreview,
+  ReferencePreviewMedia,
+  ReferencePreviewRequest,
+} from "./reference";
 
 export type AgentChatRole = "user" | "assistant";
 
@@ -56,7 +58,7 @@ export async function loadAgentChatSession(
     lastMessageID?: number;
   },
 ): Promise<AgentChatSessionPayload> {
-  const data = await assistantRequest(
+  const data = await agentChatRequest(
     scope.create ? api.newSession : api.session,
     {
       session_id: scope.sessionID || undefined,
@@ -78,7 +80,7 @@ export async function listAgentChatSessions(
   api: AgentChatApi,
   scope: SessionScope & { limit?: number; lastSessionID?: number },
 ): Promise<AgentChatSessionListPayload> {
-  const data = await assistantRequest(api.sessions, {
+  const data = await agentChatRequest(api.sessions, {
     agent_key: scope.agentKey,
     context_key: scope.contextKey,
     limit: scope.limit || 20,
@@ -96,7 +98,7 @@ export async function loadAgentChatSessionState(
   api: AgentChatApi,
   scope: SessionScope & { sessionID: number },
 ): Promise<AgentChatSession | null> {
-  const data = await assistantRequest(api.session, {
+  const data = await agentChatRequest(api.session, {
     session_id: scope.sessionID,
     agent_key: scope.agentKey,
     context_key: scope.contextKey,
@@ -111,7 +113,7 @@ export async function renameAgentChatSession(
   sessionID: number,
   title: string,
 ): Promise<AgentChatSession> {
-  const data = await assistantRequest(api.renameSession, {
+  const data = await agentChatRequest(api.renameSession, {
     session_id: sessionID,
     title,
   });
@@ -126,10 +128,36 @@ export async function archiveAgentChatSession(
   api: AgentChatApi,
   sessionID: number,
 ) {
-  await assistantRequest(api.archiveSession, { session_id: sessionID });
+  await agentChatRequest(api.archiveSession, { session_id: sessionID });
 }
 
-async function assistantRequest(api: string, payload: Record<string, unknown>) {
+export async function loadAgentChatReferencePreview(
+  api: string,
+  scope: { agentKey: string; sessionID: number },
+  reference: ReferencePreviewRequest,
+): Promise<ReferencePreview> {
+  const data = await agentChatRequest(api, {
+    session_id: scope.sessionID,
+    agent_key: scope.agentKey,
+    ref_type: reference.refType,
+    ref_id: reference.refId,
+    label: reference.label,
+  });
+  const refType = textValue(data.ref_type);
+  const refID = Number(data.ref_id || 0);
+  if (!isReferenceType(refType) || !refID) {
+    throw new Error("引用内容无效");
+  }
+  return {
+    refType,
+    refId: refID,
+    title: textValue(data.title) || reference.label,
+    text: data.text == null ? "" : String(data.text),
+    media: normalizeReferencePreviewMedia(data.media),
+  };
+}
+
+async function agentChatRequest(api: string, payload: Record<string, unknown>) {
   const result = await request(api, "post", payload);
   if (!isPlainRecord(result)) {
     throw new Error("会话请求失败");
@@ -205,31 +233,78 @@ function normalizeReferenceContent(
         ref_id: refID,
         label: textValue(part.label) || `${refType} ${refID}`,
         usage: textValue(part.usage) || undefined,
-        preview: normalizeReferencePreview(part.preview),
       };
     })
     .filter((part): part is NonNullable<typeof part> => Boolean(part));
-  return { version: 1, parts: normalized };
+  const interactionResponse = normalizeInteractionResponse(
+    value.interaction_response,
+  );
+  return {
+    version: 1,
+    parts: normalized,
+    interaction_response: interactionResponse,
+  };
 }
 
-function normalizeReferencePreview(
+function normalizeInteractionResponse(
   value: unknown,
-): import("./reference").ReferencePreview | undefined {
+): import("./reference").InteractionResponseContent | undefined {
   if (!isPlainRecord(value)) {
     return undefined;
   }
-  const preview = {
-    text: textValue(value.text) || undefined,
-    kind: textValue(value.kind) || undefined,
-    url: textValue(value.url) || undefined,
+  const interactionID = textValue(value.interaction_id);
+  if (!interactionID) {
+    return undefined;
+  }
+  return {
+    interaction_id: interactionID,
+    data: isPlainRecord(value.data) ? value.data : {},
   };
-  return preview.text || preview.kind || preview.url ? preview : undefined;
+}
+
+function normalizeReferencePreviewMedia(
+  value: unknown,
+): ReferencePreviewMedia[] {
+  const rows = Array.isArray(value) ? value : [];
+  return rows
+    .map((row) => {
+      if (!isPlainRecord(row)) {
+        return null;
+      }
+      const url = textValue(row.url);
+      if (!url) {
+        return null;
+      }
+      const mediaRefType = textValue(row.ref_type);
+      return {
+        refType: isReferenceType(mediaRefType) ? mediaRefType : undefined,
+        refId: positiveNumber(row.ref_id) || undefined,
+        artifactId: positiveNumber(row.artifact_id) || undefined,
+        fileId: positiveNumber(row.file_id) || undefined,
+        seriesId: positiveNumber(row.series_id) || undefined,
+        kind: normalizeMediaKind(row.kind),
+        name: textValue(row.name) || undefined,
+        label: textValue(row.label || row.name) || "素材",
+        url,
+      } satisfies ReferencePreviewMedia;
+    })
+    .filter((media): media is ReferencePreviewMedia => Boolean(media));
+}
+
+function normalizeMediaKind(value: unknown) {
+  const kind = textValue(value).toLowerCase();
+  return ["image", "video", "audio"].includes(kind) ? kind : "file";
 }
 
 function isReferenceType(
   value: string,
 ): value is import("./reference").ReferenceType {
   return ["message", "artifact", "upload_file", "session"].includes(value);
+}
+
+function positiveNumber(value: unknown) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
 }
 
 function textValue(value: unknown) {

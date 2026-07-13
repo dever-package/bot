@@ -265,7 +265,7 @@ func (s Service) CanvasConfig(ctx context.Context, projectID uint64, flowID uint
 	if err != nil {
 		return nil, err
 	}
-	applyBodyLimits(ctx, s.body, project.BodyID, config)
+	applyBodyAgentAndTeamLimits(ctx, s.body, project.BodyID, config)
 	return config, nil
 }
 
@@ -276,9 +276,6 @@ func (s Service) CanvasPowerForm(ctx context.Context, projectID uint64, flowID u
 	}
 	project, err = s.SyncTeamRelease(ctx, project)
 	if err != nil {
-		return nil, err
-	}
-	if err := requireBodyPower(ctx, s.body, project.BodyID, powerID); err != nil {
 		return nil, err
 	}
 	return s.team.CanvasPowerForm(ctx, project.ReleaseID, flowID, powerID, powerKey, targetID)

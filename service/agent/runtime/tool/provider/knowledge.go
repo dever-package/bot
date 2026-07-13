@@ -172,12 +172,15 @@ func knowledgeParameters(baseProperty map[string]any, required []any, extra map[
 	for key, value := range extra {
 		properties[key] = value
 	}
-	return map[string]any{
+	result := map[string]any{
 		"type":                 "object",
 		"properties":           properties,
-		"required":             required,
 		"additionalProperties": false,
 	}
+	if len(required) > 0 {
+		result["required"] = required
+	}
+	return result
 }
 
 func integerProperty(description string) map[string]any {

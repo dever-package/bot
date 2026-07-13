@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
+	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
@@ -12,6 +13,15 @@ const toolContinuationPrompt = "请根据刚刚返回的工具结果继续完成
 
 func toolContinuationInput() map[string]any {
 	return map[string]any{"text": toolContinuationPrompt}
+}
+
+func shouldStreamToolActivity(definition runtimeprovider.Definition) bool {
+	switch strings.ToLower(strings.TrimSpace(definition.Kind)) {
+	case "interaction", "presentation":
+		return false
+	default:
+		return true
+	}
 }
 
 func fallbackToolPreamble(calls []botprotocol.ToolCall, registry *runtimetool.Registry) string {

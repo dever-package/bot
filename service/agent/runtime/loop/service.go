@@ -215,7 +215,12 @@ func chatTimeout(seconds int) time.Duration {
 }
 
 func joinRuntimePrompt(base string, mounted string) string {
-	parts := []string{strings.TrimSpace(base), strings.TrimSpace(mounted), strings.TrimSpace(`工具由系统通过原生 Function Calling 提供。需要工具时直接调用，不要在正文中伪造工具 JSON。缺少继续执行所必需的信息时调用 ask_user；任务完成后直接用 Markdown 回答用户。`)}
+	parts := []string{strings.TrimSpace(base), strings.TrimSpace(mounted), strings.TrimSpace(`工具由系统通过原生 Function Calling 提供。需要工具时直接调用，不要在正文中伪造工具 JSON。
+当任务缺少必要参数、需要用户选择/确认或补充素材时，必须调用 ask_user，并把本轮所有必要问题合并到一个表单中。
+禁止在正文中列出任务问题、选项，或要求用户直接回复这些信息；如果准备等待用户回答，ask_user 是唯一允许的交互方式。
+能根据当前上下文安全推断或使用合理默认值时直接继续执行，不要为了非必要信息调用 ask_user。普通聊天和不要求用户回答的反问不受此限制。
+当用户消息包含 interaction_response 时，它是对上一份表单的回答；直接结合其中的数据继续原任务，不要重复询问已经回答的内容。
+任务完成时先用 Markdown 完整回答用户；仅当确实存在自然的后续操作时，再调用 present_suggestions 给出不超过 3 个建议。没有合适建议时直接结束，不要调用该工具。`)}
 	result := make([]string, 0, len(parts))
 	for _, part := range parts {
 		if part != "" {

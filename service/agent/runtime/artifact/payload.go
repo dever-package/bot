@@ -59,7 +59,7 @@ func Payloads(ctx context.Context, rows []agentmodel.Artifact) []map[string]any 
 func displayLabel(row agentmodel.Artifact) string {
 	prefix := artifactKindLabel(row.Kind)
 	if row.DisplayNo > 0 {
-		prefix = fmt.Sprintf("%s %d", prefix, row.DisplayNo)
+		prefix = fmt.Sprintf("%s%d", prefix, row.DisplayNo)
 	}
 	if strings.TrimSpace(row.Name) == "" {
 		return prefix

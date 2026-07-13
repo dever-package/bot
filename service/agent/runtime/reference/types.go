@@ -10,24 +10,23 @@ const (
 )
 
 type Part struct {
-	Type    string            `json:"type"`
-	Text    string            `json:"text,omitempty"`
-	RefType string            `json:"ref_type,omitempty"`
-	RefID   uint64            `json:"ref_id,omitempty"`
-	Label   string            `json:"label,omitempty"`
-	Usage   string            `json:"usage,omitempty"`
-	Preview *ReferencePreview `json:"preview,omitempty"`
-}
-
-type ReferencePreview struct {
-	Text string `json:"text,omitempty"`
-	Kind string `json:"kind,omitempty"`
-	URL  string `json:"url,omitempty"`
+	Type    string `json:"type"`
+	Text    string `json:"text,omitempty"`
+	RefType string `json:"ref_type,omitempty"`
+	RefID   uint64 `json:"ref_id,omitempty"`
+	Label   string `json:"label,omitempty"`
+	Usage   string `json:"usage,omitempty"`
 }
 
 type Content struct {
-	Version int    `json:"version"`
-	Parts   []Part `json:"parts"`
+	Version             int                  `json:"version"`
+	Parts               []Part               `json:"parts"`
+	InteractionResponse *InteractionResponse `json:"interaction_response,omitempty"`
+}
+
+type InteractionResponse struct {
+	InteractionID string         `json:"interaction_id"`
+	Data          map[string]any `json:"data"`
 }
 
 type Input struct {

@@ -28,8 +28,12 @@ func ParseInput(input map[string]any) (Input, error) {
 		parts = []Part{{Type: "text", Text: displayText}}
 	}
 	return Input{
-		Text:       displayText,
-		Content:    Content{Version: ContentVersion, Parts: parts},
+		Text: displayText,
+		Content: Content{
+			Version:             ContentVersion,
+			Parts:               parts,
+			InteractionResponse: content.InteractionResponse,
+		},
 		References: references,
 	}, nil
 }
@@ -42,6 +46,9 @@ func ModelInput(source map[string]any, input Input) map[string]any {
 		}
 	}
 	result["text"] = input.Text
+	if input.Content.InteractionResponse != nil {
+		result["interaction_response"] = input.Content.InteractionResponse.Value()
+	}
 	return result
 }
 
@@ -64,12 +71,20 @@ func (content Content) Value() map[string]any {
 		if part.Usage != "" {
 			current["usage"] = part.Usage
 		}
-		if preview := referencePreviewValue(part.Preview); preview != nil {
-			current["preview"] = preview
-		}
 		parts = append(parts, current)
 	}
-	return map[string]any{"version": ContentVersion, "parts": parts}
+	result := map[string]any{"version": ContentVersion, "parts": parts}
+	if content.InteractionResponse != nil {
+		result["interaction_response"] = content.InteractionResponse.Value()
+	}
+	return result
+}
+
+func (response InteractionResponse) Value() map[string]any {
+	return map[string]any{
+		"interaction_id": strings.TrimSpace(response.InteractionID),
+		"data":           response.Data,
+	}
 }
 
 func ReferencesFromContent(value any) []Reference {
@@ -113,10 +128,29 @@ func parseContent(value any) (Content, bool) {
 			RefID:   uint64Value(current["ref_id"]),
 			Label:   cleanLabel(textValue(current["label"])),
 			Usage:   strings.TrimSpace(textValue(current["usage"])),
-			Preview: parseReferencePreview(current["preview"]),
 		})
 	}
-	return Content{Version: ContentVersion, Parts: parts}, true
+	return Content{
+		Version:             ContentVersion,
+		Parts:               parts,
+		InteractionResponse: parseInteractionResponse(mapped["interaction_response"]),
+	}, true
+}
+
+func parseInteractionResponse(value any) *InteractionResponse {
+	mapped, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	interactionID := strings.TrimSpace(textValue(mapped["interaction_id"]))
+	if interactionID == "" {
+		return nil
+	}
+	data, _ := mapped["data"].(map[string]any)
+	if data == nil {
+		data = map[string]any{}
+	}
+	return &InteractionResponse{InteractionID: interactionID, Data: data}
 }
 
 func rawText(value any) string {
@@ -140,7 +174,6 @@ func normalizeParts(parts []Part) ([]Part, []Reference, string, error) {
 			if part.Text == "" {
 				continue
 			}
-			part.Preview = nil
 			result = appendTextPart(result, part.Text)
 			text.WriteString(part.Text)
 		case "reference":
@@ -153,7 +186,6 @@ func normalizeParts(parts []Part) ([]Part, []Reference, string, error) {
 				part.Label = fmt.Sprintf("%s %d", part.RefType, part.RefID)
 			}
 			part.Text = ""
-			part.Preview = normalizeReferencePreview(part.Preview)
 			result = append(result, part)
 			text.WriteString("@" + part.Label)
 			key := fmt.Sprintf("%s:%d", part.RefType, part.RefID)
@@ -201,59 +233,4 @@ func cleanLabel(value string) string {
 		return string(runes[:80])
 	}
 	return value
-}
-
-func parseReferencePreview(value any) *ReferencePreview {
-	mapped, ok := value.(map[string]any)
-	if !ok {
-		return nil
-	}
-	return normalizeReferencePreview(&ReferencePreview{
-		Text: rawText(mapped["text"]),
-		Kind: textValue(mapped["kind"]),
-		URL:  textValue(mapped["url"]),
-	})
-}
-
-func normalizeReferencePreview(preview *ReferencePreview) *ReferencePreview {
-	if preview == nil {
-		return nil
-	}
-	text := limitText(preview.Text, 1200)
-	kind := normalizePreviewKind(preview.Kind)
-	url := strings.TrimSpace(preview.URL)
-	if len([]rune(url)) > 2048 {
-		url = ""
-	}
-	if text == "" && kind == "" && url == "" {
-		return nil
-	}
-	return &ReferencePreview{Text: text, Kind: kind, URL: url}
-}
-
-func referencePreviewValue(preview *ReferencePreview) map[string]any {
-	preview = normalizeReferencePreview(preview)
-	if preview == nil {
-		return nil
-	}
-	value := map[string]any{}
-	if preview.Text != "" {
-		value["text"] = preview.Text
-	}
-	if preview.Kind != "" {
-		value["kind"] = preview.Kind
-	}
-	if preview.URL != "" {
-		value["url"] = preview.URL
-	}
-	return value
-}
-
-func normalizePreviewKind(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "message", "image", "video", "audio", "file", "session":
-		return strings.ToLower(strings.TrimSpace(value))
-	default:
-		return ""
-	}
 }

@@ -1,15 +1,13 @@
 import type { RefObject, WheelEvent } from "react";
 import type { AgentChatMessageRecord, AgentChatSession } from "./api";
-import {
-  readAgentChatActivities,
-  type AgentChatActivity,
-} from "./activity";
+import { readAgentChatActivities, type AgentChatActivity } from "./activity";
 import type { AgentChatOutput } from "./output";
 import type {
   ReferenceContent,
   ReferenceInput,
   ReferenceLoadRequest,
   ReferenceLoadResult,
+  ReferencePreviewLoader,
 } from "./reference";
 
 export type ChatMessage = {
@@ -37,6 +35,7 @@ export type AgentChatRuntimeApis = {
   stream: string;
   stop: string;
   status: string;
+  referencePreview: string;
 };
 
 export type AgentChatStoreOptions = {
@@ -74,6 +73,7 @@ export type AgentChatController = {
   loadReferences: (
     request: ReferenceLoadRequest,
   ) => Promise<ReferenceLoadResult>;
+  loadReferencePreview: ReferencePreviewLoader;
   send: (input: ReferenceInput) => Promise<void>;
   stop: () => Promise<void>;
 };

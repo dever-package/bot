@@ -46,6 +46,10 @@ func (r Resolver) Resolve(ctx context.Context, session agentmodel.Session, refer
 	return result, nil
 }
 
+func (r Resolver) Preview(ctx context.Context, session agentmodel.Session, reference Reference) (Resolved, error) {
+	return r.resolveOne(ctx, session, reference)
+}
+
 func (r Resolver) resolveOne(ctx context.Context, session agentmodel.Session, reference Reference) (Resolved, error) {
 	switch reference.Type {
 	case TypeMessage:
@@ -76,7 +80,7 @@ func (r Resolver) resolveMessage(ctx context.Context, session agentmodel.Session
 	return Resolved{
 		Reference: reference,
 		Title:     messageReferenceTitle(*message),
-		Text:      limitText(message.Text, 6000),
+		Text:      strings.TrimSpace(message.Text),
 		Media:     cleanMedia(media),
 	}, nil
 }
@@ -145,7 +149,7 @@ func (r Resolver) resolveSession(ctx context.Context, current agentmodel.Session
 			media = append(media, mediaFromArtifactPayload(runtimeartifact.Payload(ctx, artifact)))
 		}
 	}
-	return Resolved{Reference: reference, Title: session.Title, Text: limitText(text, 8000), Media: cleanMedia(media)}, nil
+	return Resolved{Reference: reference, Title: session.Title, Text: strings.TrimSpace(text), Media: cleanMedia(media)}, nil
 }
 
 func requireSourceSession(ctx context.Context, current agentmodel.Session, sessionID uint64) (*agentmodel.Session, error) {
@@ -230,7 +234,20 @@ func appendUniqueMedia(current []Media, values ...Media) []Media {
 }
 
 func cleanMedia(values []Media) []Media {
-	return appendUniqueMedia(nil, values...)
+	result := make([]Media, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, item := range values {
+		if item.ReferenceID == 0 || item.URL == "" {
+			continue
+		}
+		key := fmt.Sprintf("%s:%d", item.ReferenceType, item.ReferenceID)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, item)
+	}
+	return result
 }
 
 func normalizeMediaKind(value string) string {

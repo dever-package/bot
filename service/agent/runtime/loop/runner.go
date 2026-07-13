@@ -139,15 +139,21 @@ func (s Service) run(controller *runController, execution execution) {
 				return
 			}
 			definition, _ := execution.registry.Definition(call.Name)
+			streamActivity := shouldStreamToolActivity(definition)
 			artifactBatch, toolErr := s.beginToolArtifactBatch(ctx, execution, call, definition)
 			startedOutput := artifactBatch.startedOutput(ctx)
-			state.RecordToolActivity(toolStartedOutput(call, definition, startedOutput))
-			_ = s.writeToolStarted(ctx, execution, call, definition, startedOutput)
+			if streamActivity {
+				state.RecordToolActivity(toolStartedOutput(call, definition, startedOutput))
+				_ = s.writeToolStarted(ctx, execution, call, definition, startedOutput)
+			}
 			childRequestID := uuid.NewString()
 			toolResult := runtimeprovider.Result{}
 			if toolErr == nil {
 				controller.SetChild(childRequestID)
 				toolResult, toolErr = execution.registry.Execute(ctx, call, childRequestID, func(output map[string]any) error {
+					if !streamActivity {
+						return nil
+					}
 					return s.writeToolProgress(ctx, execution, call, definition, output)
 				})
 				controller.ClearChild(childRequestID)
@@ -156,8 +162,10 @@ func (s Service) run(controller *runController, execution execution) {
 				cancelErr := fmt.Errorf("生成已停止")
 				toolResult.Content = artifactBatch.fail(context.Background(), cancelErr.Error())
 				state.AbsorbToolOutput(toolResult.Content)
-				state.RecordToolActivity(toolFinishedOutput(call, definition, toolResult, cancelErr))
-				_ = s.writeToolFinished(context.Background(), execution, call, definition, toolResult, cancelErr)
+				if streamActivity {
+					state.RecordToolActivity(toolFinishedOutput(call, definition, toolResult, cancelErr))
+					_ = s.writeToolFinished(context.Background(), execution, call, definition, toolResult, cancelErr)
+				}
 				s.finishContext(controller, &state)
 				return
 			}
@@ -198,18 +206,28 @@ func (s Service) run(controller *runController, execution execution) {
 				if len(toolResult.Interaction) > 0 {
 					stepType = "interaction"
 					stepTitle = "等待用户输入"
+				} else if toolResult.Terminal {
+					stepType = "presentation"
+					stepTitle = "展示后续建议"
 				}
 			}
-			state.RecordToolActivity(toolFinishedOutput(call, definition, toolResult, toolErr))
-			_ = s.writeToolFinished(ctx, execution, call, definition, toolResult, toolErr)
+			if streamActivity {
+				state.RecordToolActivity(toolFinishedOutput(call, definition, toolResult, toolErr))
+				_ = s.writeToolFinished(ctx, execution, call, definition, toolResult, toolErr)
+			}
 			if err := state.Step(stepType, stepTitle, toolStepContent(toolResult.Text, toolErr), stepPayload, stepStatus); err != nil {
 				s.finish(&state, finishOutcome{status: runStatusFail, text: state.lastText, message: err.Error(), stepType: "error", stepTitle: "保存工具步骤失败", stepStatus: stepStatusFail})
 				return
 			}
 			conversation = append(conversation, toolHistoryMessage(call, content))
-			if toolErr == nil && len(toolResult.Interaction) > 0 {
+			if toolErr == nil && toolResult.Terminal {
+				text := strings.TrimSpace(state.lastText)
+				if text == "" {
+					text = strings.TrimSpace(toolResult.Text)
+				}
 				output := toolResult.Output()
-				s.finish(&state, finishOutcome{status: runStatusSuccess, text: toolResult.Text, output: output})
+				output["text"] = text
+				s.finish(&state, finishOutcome{status: runStatusSuccess, text: text, output: output})
 				return
 			}
 		}

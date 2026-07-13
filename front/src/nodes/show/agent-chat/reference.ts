@@ -1,22 +1,45 @@
 import { getCompatModule } from "@dever/front-plugin";
 import type { AgentChatApi, AgentChatMessageRecord } from "./api";
-import {
-  listAgentChatSessions,
-  loadAgentChatSession,
-} from "./api";
+import { listAgentChatSessions, loadAgentChatSession } from "./api";
 import { readAgentChatArtifacts } from "./artifact";
 
-export type ReferenceType =
-  | "message"
-  | "artifact"
-  | "upload_file"
-  | "session";
+export type ReferenceType = "message" | "artifact" | "upload_file" | "session";
 
-export type ReferencePreview = {
+export type ReferencePreviewHint = {
   text?: string;
   kind?: string;
   url?: string;
 };
+
+export type ReferencePreviewMedia = {
+  refType?: ReferenceType;
+  refId?: number;
+  artifactId?: number;
+  fileId?: number;
+  seriesId?: number;
+  kind: string;
+  name?: string;
+  label: string;
+  url: string;
+};
+
+export type ReferencePreview = {
+  refType: ReferenceType;
+  refId: number;
+  title: string;
+  text: string;
+  media: ReferencePreviewMedia[];
+};
+
+export type ReferencePreviewRequest = {
+  refType: ReferenceType;
+  refId: number;
+  label: string;
+};
+
+export type ReferencePreviewLoader = (
+  request: ReferencePreviewRequest,
+) => Promise<ReferencePreview>;
 
 export type ReferencePart =
   | { type: "text"; text: string }
@@ -26,12 +49,17 @@ export type ReferencePart =
       ref_id: number;
       label: string;
       usage?: string;
-      preview?: ReferencePreview;
     };
 
 export type ReferenceContent = {
   version: 1;
   parts: ReferencePart[];
+  interaction_response?: InteractionResponseContent;
+};
+
+export type InteractionResponseContent = {
+  interaction_id: string;
+  data: Record<string, unknown>;
 };
 
 export type ReferenceInput = {
@@ -47,7 +75,7 @@ export type ReferenceOption = {
   refId: number;
   label: string;
   description?: string;
-  preview?: ReferencePreview;
+  preview?: ReferencePreviewHint;
   parentKey?: string;
   selectable?: boolean;
   hasChildren?: boolean;
@@ -75,9 +103,33 @@ export type ReferenceComposerProps = {
   loadReferences: (
     request: ReferenceLoadRequest,
   ) => Promise<ReferenceLoadResult>;
+  loadPreview: ReferencePreviewLoader;
   onSubmit: (input: ReferenceInput) => void | Promise<void>;
   onCancel?: () => void | Promise<void>;
 };
+
+export function textReferenceInput(text: string): ReferenceInput {
+  return {
+    text,
+    content: {
+      version: 1,
+      parts: [{ type: "text", text }],
+    },
+  };
+}
+
+export function interactionResponseInput(
+  interactionID: string,
+  text: string,
+  data: Record<string, unknown>,
+): ReferenceInput {
+  const input = textReferenceInput(text);
+  input.content.interaction_response = {
+    interaction_id: interactionID,
+    data,
+  };
+  return input;
+}
 
 type ResourceItem = Record<string, unknown>;
 type ResourceListResult = {
@@ -137,9 +189,7 @@ export async function loadAgentChatReferences(
     };
   }
   const targetSessionID =
-    request.scope === "history"
-      ? request.parent?.refId || 0
-      : input.sessionID;
+    request.scope === "history" ? request.parent?.refId || 0 : input.sessionID;
   if (!targetSessionID) {
     return { items: [] };
   }
@@ -222,7 +272,7 @@ async function loadResourceReferences(
   const page = Math.max(1, positiveNumber(request.cursor) || 1);
   const result = await listResources({
     page,
-    pageSize: 24,
+    pageSize: 12,
     keyword: request.query,
   });
   return {
@@ -271,15 +321,22 @@ function messageLabel(message: AgentChatMessageRecord) {
 }
 
 function filterOptions(options: ReferenceOption[], query: string) {
-  const keyword = query.trim().toLowerCase();
+  const keyword = searchableText(query);
   if (!keyword) {
     return options;
   }
   return options.filter((option) =>
-    `${option.label} ${option.description || ""}`
-      .toLowerCase()
-      .includes(keyword),
+    searchableText(`${option.label} ${option.description || ""}`).includes(
+      keyword,
+    ),
   );
+}
+
+function searchableText(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/(图|视频|音频|文件)\s+(\d+)/g, "$1$2");
 }
 
 function resourceKind(value: ResourceItem) {

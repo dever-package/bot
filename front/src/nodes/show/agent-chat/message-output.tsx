@@ -5,7 +5,7 @@ import {
 } from "@/components/energon/content-view";
 import { FileText, ImageIcon, Loader2, Video, Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { AGENT_CHAT_RESOURCE_LAYER_Z_INDEX } from "./layers";
+import { useAgentChatMediaPreview } from "./media-inspector";
 import {
   artifactDisplayOutput,
   readAgentChatArtifacts,
@@ -33,6 +33,7 @@ export function AgentChatMessageOutput({
   excludeText = "",
   className,
 }: AgentChatMessageOutputProps) {
+  const onMediaPreview = useAgentChatMediaPreview();
   const displayOutput = agentChatMessageOutputWithOptions(output, {
     excludedKeys: displayKeys(excludeOutputs),
     excludeText,
@@ -64,7 +65,7 @@ export function AgentChatMessageOutput({
       <EnergonContentView
         output={displayOutput}
         mediaLayout="chat"
-        mediaPreviewLayerZIndex={AGENT_CHAT_RESOURCE_LAYER_Z_INDEX}
+        onMediaPreview={onMediaPreview}
       />
     </div>
   );

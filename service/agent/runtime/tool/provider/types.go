@@ -47,11 +47,13 @@ type Call struct {
 type OutputHandler func(map[string]any) error
 
 type Result struct {
-	Text        string
-	Content     any
-	ModelResult any
-	Interaction map[string]any
-	Tools       []Tool
+	Text         string
+	Content      any
+	ModelResult  any
+	Interaction  map[string]any
+	Presentation map[string]any
+	Terminal     bool
+	Tools        []Tool
 }
 
 func (result Result) ModelContent() string {
@@ -68,6 +70,9 @@ func (result Result) ModelContent() string {
 	}
 	if len(result.Interaction) > 0 {
 		payload["interaction"] = result.Interaction
+	}
+	for key, value := range result.Presentation {
+		payload[key] = value
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -95,6 +100,11 @@ func (result Result) Output() map[string]any {
 	if len(result.Interaction) > 0 {
 		output["event"] = "interaction"
 		output["interaction"] = result.Interaction
+	} else if result.Terminal {
+		output["event"] = "final"
+	}
+	for key, value := range result.Presentation {
+		output[key] = value
 	}
 	return output
 }

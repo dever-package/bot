@@ -43,7 +43,10 @@ func (result MountResult) Close() {
 }
 
 func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
-	registry, err := NewRegistry(runtimeprovider.AskUserTool())
+	registry, err := NewRegistry(
+		runtimeprovider.AskUserTool(),
+		runtimeprovider.PresentSuggestionsTool(),
+	)
 	if err != nil {
 		return MountResult{}, err
 	}

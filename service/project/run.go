@@ -35,9 +35,6 @@ func (s Service) RunCanvasPower(ctx context.Context, projectID uint64, req teams
 	if err != nil {
 		return nil, err
 	}
-	if err := requireBodyPower(ctx, s.body, project.BodyID, req.PowerID); err != nil {
-		return nil, err
-	}
 	req.ProjectID = project.ID
 	req.BodyID = project.BodyID
 	req.TeamID = project.TeamID
@@ -229,17 +226,6 @@ func (s Service) resolveRunTeam(ctx context.Context, project *projectmodel.Proje
 	return team.ID, release.ID, nil
 }
 
-func requireBodyPower(ctx context.Context, body bodyservice.Service, bodyID uint64, powerID uint64) error {
-	allowed, restricted := body.AllowedPowerIDs(ctx, bodyID)
-	if !restricted {
-		return nil
-	}
-	if powerID == 0 || !allowed[powerID] {
-		return fmt.Errorf("当前画布不允许使用该能力")
-	}
-	return nil
-}
-
 func requireBodyAgent(ctx context.Context, body bodyservice.Service, bodyID uint64, agentID uint64) error {
 	allowed, restricted := body.AllowedAgentIDs(ctx, bodyID)
 	if !restricted {
@@ -262,14 +248,7 @@ func requireBodyTeam(ctx context.Context, body bodyservice.Service, bodyID uint6
 	return nil
 }
 
-func applyBodyLimits(ctx context.Context, body bodyservice.Service, bodyID uint64, config map[string]any) {
-	powerOrder, restricted := body.AllowedPowerOrder(ctx, bodyID)
-	if restricted {
-		if powers, ok := config["powers"].([]teamservice.PowerOption); ok {
-			config["powers"] = orderOptions(powers, powerOrder, func(option teamservice.PowerOption) uint64 { return option.ID })
-		}
-	}
-
+func applyBodyAgentAndTeamLimits(ctx context.Context, body bodyservice.Service, bodyID uint64, config map[string]any) {
 	agentOrder, restrictedAgents := body.AllowedAgentOrder(ctx, bodyID)
 	if restrictedAgents {
 		if agents, ok := config["agents"].([]teamservice.AgentOption); ok {

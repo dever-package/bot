@@ -112,7 +112,7 @@ func ToolCallArguments(call ToolCall) (map[string]any, error) {
 	}
 	result := map[string]any{}
 	if err := json.Unmarshal([]byte(arguments), &result); err != nil {
-		return nil, fmt.Errorf("工具 %s 参数不是合法 JSON: %w", call.Name, err)
+		return nil, fmt.Errorf("工具 %s 参数不是合法 JSON，可能是参数过长或返回不完整；请删除非必要参数并重新调用: %w", call.Name, err)
 	}
 	return result, nil
 }

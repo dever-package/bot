@@ -12,10 +12,22 @@ import { AgentChatActivityView } from "./activity-view";
 import type { AgentChatActivity } from "./activity";
 import { AgentChatMessageOutput } from "./message-output";
 import { MessageNavigator } from "./message-navigator";
+import {
+  findAgentChatInteractionResponse,
+  readAgentChatInteraction,
+  readAgentChatSuggestions,
+} from "./interaction";
+import {
+  AgentChatInteractionView,
+  AgentChatSuggestions,
+} from "./interaction-view";
 import type { AgentChatController } from "./types";
-import type {
-  ReferenceComposerProps,
-  ReferenceContent,
+import {
+  interactionResponseInput,
+  textReferenceInput,
+  type ReferenceComposerProps,
+  type ReferenceContent,
+  type ReferencePreviewLoader,
 } from "./reference";
 
 const referenceComposerModule = getCompatModule(
@@ -27,6 +39,7 @@ const ReferenceContentView =
   referenceComposerModule.ReferenceContentView as ComponentType<{
     content?: ReferenceContent;
     fallback?: string;
+    loadPreview?: ReferencePreviewLoader;
   }>;
 
 const CHAT_COLUMN_CLASS = "agent-chat-column";
@@ -69,7 +82,7 @@ export function Thread({ controller }: { controller: AgentChatController }) {
             ) : (
               <div className="agent-chat-message-stack flex flex-col">
                 <ThreadPrimitive.Messages>
-                  {() => <Message />}
+                  {() => <Message controller={controller} />}
                 </ThreadPrimitive.Messages>
               </div>
             )}
@@ -106,12 +119,16 @@ export function Thread({ controller }: { controller: AgentChatController }) {
   );
 }
 
-function Message() {
+function Message({ controller }: { controller: AgentChatController }) {
   const role = useAuiState((state) => state.message.role);
-  return role === "user" ? <UserMessage /> : <AssistantMessage />;
+  return role === "user" ? (
+    <UserMessage controller={controller} />
+  ) : (
+    <AssistantMessage controller={controller} />
+  );
 }
 
-function UserMessage() {
+function UserMessage({ controller }: { controller: AgentChatController }) {
   const content = useAuiState(
     (state) => state.message.metadata.custom?.content,
   ) as ReferenceContent | undefined;
@@ -124,17 +141,20 @@ function UserMessage() {
         <ReferenceContentView
           content={content}
           fallback={typeof sourceText === "string" ? sourceText : ""}
+          loadPreview={controller.loadReferencePreview}
         />
       </div>
     </MessagePrimitive.Root>
   );
 }
 
-function AssistantMessage() {
+function AssistantMessage({
+  controller,
+}: {
+  controller: AgentChatController;
+}) {
   const status = useAuiState((state) => state.message.status);
-  const output = useAuiState(
-    (state) => state.message.metadata.custom?.output,
-  );
+  const output = useAuiState((state) => state.message.metadata.custom?.output);
   const activities = useAuiState(
     (state) => state.message.metadata.custom?.activities,
   ) as AgentChatActivity[] | undefined;
@@ -142,6 +162,11 @@ function AssistantMessage() {
     (state) => state.message.metadata.custom?.sourceText,
   );
   const visibleActivities = Array.isArray(activities) ? activities : [];
+  const interaction = readAgentChatInteraction(output);
+  const interactionResponse = interaction?.id
+    ? findAgentChatInteractionResponse(controller.messages, interaction.id)
+    : undefined;
+  const suggestions = readAgentChatSuggestions(output);
   const error = status?.type === "incomplete" && status.reason === "error";
   return (
     <MessagePrimitive.Root
@@ -176,6 +201,29 @@ function AssistantMessage() {
         excludeOutputs={visibleActivities.map((activity) => activity.output)}
         excludeText={typeof sourceText === "string" ? sourceText : ""}
       />
+      {interaction ? (
+        <AgentChatInteractionView
+          interaction={interaction}
+          response={interactionResponse}
+          disabled={controller.sendDisabled}
+          onSubmit={(result) => {
+            void controller.send(
+              interactionResponseInput(
+                interaction.id || "",
+                result.text,
+                result.data,
+              ),
+            );
+          }}
+        />
+      ) : null}
+      <AgentChatSuggestions
+        suggestions={suggestions}
+        disabled={controller.sendDisabled}
+        onSelect={(suggestion) => {
+          void controller.send(textReferenceInput(suggestion.prompt));
+        }}
+      />
     </MessagePrimitive.Root>
   );
 }
@@ -189,6 +237,7 @@ function Composer({ controller }: { controller: AgentChatController }) {
       stopping={controller.stopping}
       cancelable={controller.cancelable}
       loadReferences={controller.loadReferences}
+      loadPreview={controller.loadReferencePreview}
       onSubmit={controller.send}
       onCancel={controller.stop}
     />
@@ -436,6 +485,22 @@ const threadStyles = `
   pointer-events: none;
   background: currentColor;
   animation: agent-chat-streaming-tail 0.9s ease-in-out infinite;
+}
+
+[data-agent-chat-layer="true"][data-media-inspector-open="true"] .agent-chat-column {
+  padding-inline: 20px;
+}
+
+[data-agent-chat-layer="true"][data-media-inspector-open="true"] .agent-chat-media-grid,
+[data-agent-chat-layer="true"][data-media-inspector-open="true"]
+  .agent-chat-media-result[data-kind="image"]
+  .agent-chat-activity-output
+  .grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+[data-agent-chat-layer="true"][data-media-inspector-open="true"] .agent-chat-message-navigator {
+  display: none;
 }
 
 @media (max-width: 767px) {
