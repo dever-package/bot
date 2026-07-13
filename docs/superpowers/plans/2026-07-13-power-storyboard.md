@@ -28,9 +28,9 @@ Prompt string `dorm:"type:text;not null;default:'';comment:设定提示词"`
 
 默认 LLM seed 显式写入 `"prompt": ""`，保证 seed 与字段默认值一致。
 
-- [ ] **Step 2: 在能力编辑页增加设定提示词编辑器**
+- [ ] **Step 2: 在能力编辑页最后增加设定提示词编辑器**
 
-在类型之后、来源规则之前增加：
+在来源和参数配置之后、表单末尾增加：
 
 ```json
 {
@@ -150,3 +150,67 @@ git diff -- model/energon/power.go front/page/admin/energon/power/update.json se
 ```
 
 确认没有修改生成文件、编译产物、API、额外 Service 或画布节点类型。目标文件已有用户改动，因此不自动提交实现代码，避免把无关修改带入提交。
+
+### Task 5: 画布来源菜单遵守能力规则
+
+**Files:**
+- Modify: `front/src/nodes/body-work/space/space-page.tsx`
+
+- [ ] **Step 1: 统一计算画布可选来源状态**
+
+在 `NodeBottomSettings` 中以 `powerForm.source_rule === 2` 作为唯一可选条件。表单加载完成后，非可选规则把 `selectedTargetId` 归零；保存草稿和运行节点时也使用归零后的有效来源 ID。
+
+- [ ] **Step 2: 按规则传递来源菜单属性**
+
+只有可选规则才向 `PromptComposer` 传入 `sources` 和 `onSourceChange`。现有来源切换、参数合并和缓存逻辑保持不变。
+
+### Task 6: 共享 storyboard 解析与表格组件
+
+**Files:**
+- Create: `front/src/nodes/body-work/space/space-storyboard.ts`
+- Create: `front/src/nodes/body-work/space/space-storyboard-view.tsx`
+- Modify: `front/src/nodes/body-work/space/space-content-view.tsx`
+- Modify: `front/src/nodes/body-work/space/space.css`
+
+- [ ] **Step 1: 实现单一 storyboard 解析器**
+
+定义 `StoryboardDocument`、`StoryboardShot` 和 `parseStoryboardOutput`。解析直接对象、包装字段、JSON 字符串、代码块及富文本中的 JSON；规范化缺失的 `id`、`order`、`duration` 和文本字段，同时保留未知字段。
+
+- [ ] **Step 2: 实现可复用分镜表格**
+
+表格提供标题、时长加减、画面描述、台词、旁白、新增、删除和上下移动。只在收到保存回调时启用编辑，否则作为所有节点共用的只读分镜结果视图。
+
+- [ ] **Step 3: 接入统一内容渲染入口**
+
+`CanvasNodeContentView` 先调用 storyboard 解析器；成功则渲染分镜表格，失败继续走现有 `ContentView`。不在具体节点中复制解析判断。
+
+### Task 7: 分镜编辑保存与节点尺寸
+
+**Files:**
+- Modify: `front/src/nodes/body-work/space/space-page.tsx`
+- Modify: `front/src/nodes/body-work/space/space-model.ts`
+
+- [ ] **Step 1: 复用资产版本接口保存分镜**
+
+脚本能力结果把保存回调传给共享内容视图。稳定资产调用 `saveSpaceAssetEditVersion`，成功后复用 `buildAssetVersionNodePatch` 和资产列表更新；无资产结果直接更新 `resultOutput`。
+
+- [ ] **Step 2: 增加防抖和顺序保存**
+
+分镜组件在停止输入 800 毫秒后保存，并串行提交连续修改，避免较早请求晚返回覆盖新内容。显示“编辑中 / 保存中 / 已保存 / 保存失败”。
+
+- [ ] **Step 3: 调整新建分镜能力节点默认尺寸**
+
+`createLocalNode` 根据所选能力类型给 storyboard 使用表格尺寸，其他节点默认尺寸不变；现有四角等比例缩放继续生效。
+
+### Task 8: 静态自检与手工验证清单
+
+**Files:**
+- Check all files changed in Tasks 5-7 and `front/page/admin/energon/power/update.json`
+
+- [ ] **Step 1: 执行非构建、非测试静态检查**
+
+仅运行 `git diff --check`、定向 `rg` 引用检查和 Dever 静态审计。按用户要求不运行 `npm run build`、任何 build、Go test、npm test 或其他测试命令。
+
+- [ ] **Step 2: 检查变更范围**
+
+确认能力表单字段顺序正确，来源规则没有前端重复常量分支，storyboard 解析只存在一个入口，且未修改生成文件或新增后端 API。
