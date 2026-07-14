@@ -58,14 +58,16 @@ export function mergeProjectAssetVersionHistory(
   const normalizedPreviousAsset = previousAsset
     ? normalizeRichAssetVersionContent(previousAsset)
     : null;
-  const sourceVersions =
-    normalizedNextAsset.versions ||
-    normalizedPreviousAsset?.versions ||
-    [];
-  const versions = mergeAssetVersionHistory([
-    markCurrentAssetVersion(normalizedNextAsset.version),
-    ...sourceVersions,
-  ]);
+  const sourceVersions = [
+    ...(normalizedNextAsset.versions || []),
+    ...(normalizedPreviousAsset?.versions || []),
+  ];
+  const versions = mergeAssetVersions(
+    [markCurrentAssetVersion(normalizedNextAsset.version)].filter(
+      (version): version is AssetVersion => Boolean(version),
+    ),
+    sourceVersions,
+  );
 
   return {
     ...normalizedPreviousAsset,
@@ -111,37 +113,58 @@ function normalizeRichAssetVersion(
     : version;
 }
 
-function mergeAssetVersionHistory(
-  candidates: Array<AssetVersion | undefined | null>,
-) {
+export function mergeAssetVersions(...groups: AssetVersion[][]) {
+  const candidates = groups.flat();
   const versions: AssetVersion[] = [];
-  const seen = new Set<string>();
-  let hasCurrentVersion = false;
+  const indexes = new Map<string, number>();
   for (const version of candidates) {
     if (!version || Number(version.id || 0) <= 0) {
       continue;
     }
     const key = String(version.id);
-    if (seen.has(key)) {
+    const existingIndex = indexes.get(key);
+    if (existingIndex !== undefined) {
+      versions[existingIndex] = mergeDefinedVersion(
+        versions[existingIndex],
+        version,
+      );
       continue;
     }
-    seen.add(key);
-    if (isCurrentAssetVersion(version)) {
-      versions.push(
-        hasCurrentVersion ? clearCurrentAssetVersion(version) : version,
-      );
+    indexes.set(key, versions.length);
+    versions.push(version);
+  }
+  let hasCurrentVersion = false;
+  return versions
+    .sort(
+      (left, right) =>
+        Number(isCurrentAssetVersion(right)) -
+          Number(isCurrentAssetVersion(left)) ||
+        Number(right.version || right.id || 0) -
+          Number(left.version || left.id || 0),
+    )
+    .map((version) => {
+      if (!isCurrentAssetVersion(version)) {
+        return version;
+      }
+      if (hasCurrentVersion) {
+        return clearCurrentAssetVersion(version);
+      }
       hasCurrentVersion = true;
-    } else {
-      versions.push(version);
+      return version;
+    });
+}
+
+function mergeDefinedVersion(
+  previous: AssetVersion,
+  next: AssetVersion,
+): AssetVersion {
+  const merged: AssetVersion = { ...previous };
+  for (const [key, value] of Object.entries(next)) {
+    if (value !== undefined && value !== "") {
+      (merged as any)[key] = value;
     }
   }
-  return versions.sort(
-    (left, right) =>
-      Number(isCurrentAssetVersion(right)) -
-        Number(isCurrentAssetVersion(left)) ||
-      Number(right.version || right.id || 0) -
-        Number(left.version || left.id || 0),
-  );
+  return merged;
 }
 
 function isCurrentAssetVersion(version: AssetVersion) {

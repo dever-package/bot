@@ -100,13 +100,20 @@ func (Service) ListProject(ctx context.Context, projectID uint64, flowID uint64,
 }
 
 func (Service) ProjectDetail(ctx context.Context, projectID uint64, assetID uint64) (map[string]any, error) {
-	asset := Service{}.FindProjectAsset(ctx, projectID, assetID)
+	service := Service{}
+	asset := service.FindProjectAsset(ctx, projectID, assetID)
 	if asset == nil {
 		return nil, fmt.Errorf("资产不存在")
 	}
+	page, err := service.ProjectVersionPage(ctx, projectID, assetID, VersionPageRequest{})
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
-		"asset":    Service{}.AssetDetailMap(ctx, *asset, nil),
-		"versions": VersionsToMaps(listVersions(ctx, asset.ID)),
+		"asset":         service.AssetDetailMap(ctx, *asset, nil),
+		"versions":      page["items"],
+		"version_total": page["total"],
+		"has_more":      page["has_more"],
 	}, nil
 }
 
@@ -169,6 +176,22 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 	if asset == nil {
 		return nil, nil, fmt.Errorf("创建资产失败")
 	}
+	if version := findSavedVersion(ctx, asset.ID, req.RequestID, req.NodeKey); version != nil {
+		if current := (Service{}).FindVersion(ctx, asset.VersionID); current != nil && current.Version > version.Version {
+			return asset, current, nil
+		}
+		assetModel.Update(ctx, map[string]any{"id": asset.ID}, map[string]any{
+			"kind":       req.Kind,
+			"role":       req.Role,
+			"version_id": version.ID,
+			"status":     assetmodel.StatusCurrent,
+		})
+		asset = assetModel.Find(ctx, map[string]any{"id": asset.ID})
+		if asset == nil {
+			return nil, nil, fmt.Errorf("读取资产失败")
+		}
+		return asset, version, nil
+	}
 	versionID := insertAssetVersionWithRetry(ctx, asset.ID, req, now)
 	if versionID == 0 {
 		return nil, nil, fmt.Errorf("创建资产版本失败")
@@ -207,6 +230,27 @@ func (s Service) UpdateVersionContent(ctx context.Context, projectID uint64, ass
 	if asset == nil {
 		return nil, nil, fmt.Errorf("资产不存在")
 	}
+	result, err := withAssetSaveLock(ctx, SaveVersionRequest{
+		ProjectID:   asset.ProjectID,
+		BodyID:      asset.BodyID,
+		TeamID:      asset.TeamID,
+		FlowID:      asset.FlowID,
+		AssetCateID: asset.AssetCateID,
+		Name:        asset.Name,
+		Kind:        asset.Kind,
+		Role:        NormalizeRole(asset.Role),
+	}, func() (saveVersionResult, error) {
+		asset, version, err := s.updateVersionContent(ctx, projectID, assetID, versionID, content)
+		return saveVersionResult{Asset: asset, Version: version}, err
+	})
+	return result.Asset, result.Version, err
+}
+
+func (s Service) updateVersionContent(ctx context.Context, projectID uint64, assetID uint64, versionID uint64, content any) (*assetmodel.Asset, *assetmodel.Version, error) {
+	asset := s.FindProjectAsset(ctx, projectID, assetID)
+	if asset == nil {
+		return nil, nil, fmt.Errorf("资产不存在")
+	}
 	if versionID == 0 {
 		versionID = asset.VersionID
 	}
@@ -214,39 +258,20 @@ func (s Service) UpdateVersionContent(ctx context.Context, projectID uint64, ass
 	if version == nil || version.AssetID != asset.ID {
 		return nil, nil, fmt.Errorf("资产版本不存在")
 	}
-	now := time.Now()
+	if version.ID != asset.VersionID {
+		return nil, nil, fmt.Errorf("历史版本不可编辑，请先恢复为新版本")
+	}
 	assetmodel.NewVersionModel().Update(ctx, map[string]any{"id": version.ID}, map[string]any{
 		"content":    jsonText(EnsureDocument(content, asset.Kind)),
-		"created_at": now,
+		"updated_at": time.Now(),
 	})
 	assetmodel.NewAssetModel().Update(ctx, map[string]any{"id": asset.ID}, map[string]any{
-		"version_id": version.ID,
-		"status":     assetmodel.StatusCurrent,
+		"status": assetmodel.StatusCurrent,
 	})
 	asset = s.FindProjectAsset(ctx, projectID, assetID)
 	version = s.FindVersion(ctx, versionID)
 	if asset == nil || version == nil {
 		return nil, nil, fmt.Errorf("读取资产版本失败")
-	}
-	return asset, version, nil
-}
-
-func (s Service) UseVersion(ctx context.Context, projectID uint64, assetID uint64, versionID uint64) (*assetmodel.Asset, *assetmodel.Version, error) {
-	asset := s.FindProjectAsset(ctx, projectID, assetID)
-	if asset == nil {
-		return nil, nil, fmt.Errorf("资产不存在")
-	}
-	version := s.FindVersion(ctx, versionID)
-	if version == nil || version.AssetID != asset.ID {
-		return nil, nil, fmt.Errorf("资产版本不存在")
-	}
-	assetmodel.NewAssetModel().Update(ctx, map[string]any{"id": asset.ID}, map[string]any{
-		"version_id": version.ID,
-		"status":     assetmodel.StatusCurrent,
-	})
-	asset = s.FindProjectAsset(ctx, projectID, assetID)
-	if asset == nil {
-		return nil, nil, fmt.Errorf("读取资产失败")
 	}
 	return asset, version, nil
 }
@@ -259,7 +284,6 @@ func (s Service) AssetDetailMap(ctx context.Context, row assetmodel.Asset, curre
 	if current != nil {
 		item["version"] = VersionToMap(*current)
 	}
-	item["versions"] = VersionsToMaps(listVersions(ctx, row.ID))
 	return item
 }
 
@@ -293,6 +317,16 @@ func NormalizeRole(role string) string {
 }
 
 func VersionToMap(row assetmodel.Version) map[string]any {
+	item := versionMetadataToMap(row)
+	item["content"] = jsonValue(row.Content)
+	return item
+}
+
+func versionMetadataToMap(row assetmodel.Version) map[string]any {
+	updatedAt := row.CreatedAt
+	if row.UpdatedAt != nil && !row.UpdatedAt.IsZero() {
+		updatedAt = *row.UpdatedAt
+	}
 	return map[string]any{
 		"id":          row.ID,
 		"asset_id":    row.AssetID,
@@ -303,8 +337,8 @@ func VersionToMap(row assetmodel.Version) map[string]any {
 		"node_key":    strings.TrimSpace(row.NodeKey),
 		"source":      jsonValue(row.Source),
 		"version":     row.Version,
-		"content":     jsonValue(row.Content),
 		"created_at":  row.CreatedAt,
+		"updated_at":  updatedAt,
 	}
 }
 
@@ -336,8 +370,8 @@ func NormalizeKindFilter(kind string) string {
 }
 
 func EnsureDocument(raw any, kind string) map[string]any {
-	if doc, ok := raw.(map[string]any); ok && doc["type"] == "doc" {
-		return doc
+	if document, ok := raw.(map[string]any); ok && isStructuredAssetDocument(document) {
+		return document
 	}
 	text := contentText(raw)
 	if text == "" {
@@ -369,6 +403,20 @@ func EnsureDocument(raw any, kind string) map[string]any {
 	}
 }
 
+func isStructuredAssetDocument(document map[string]any) bool {
+	typeName := strings.ToLower(strings.TrimSpace(fmt.Sprint(document["type"])))
+	switch typeName {
+	case "doc":
+		return true
+	case "storyboard":
+		return document["shots"] != nil
+	case "file":
+		return document["file_url"] != nil || document["file"] != nil
+	}
+	format := strings.ToLower(strings.TrimSpace(fmt.Sprint(document["format"])))
+	return format == "markdown" || format == "rich_json"
+}
+
 func listProjectAssets(ctx context.Context, projectID uint64, flowID uint64, kind string) []assetmodel.Asset {
 	if projectID == 0 {
 		return nil
@@ -382,20 +430,6 @@ func listProjectAssets(ctx context.Context, projectID uint64, flowID uint64, kin
 	}
 	rows := assetmodel.NewAssetModel().Select(ctx, filter)
 	result := make([]assetmodel.Asset, 0, len(rows))
-	for _, row := range rows {
-		if row != nil {
-			result = append(result, *row)
-		}
-	}
-	return result
-}
-
-func listVersions(ctx context.Context, assetID uint64) []assetmodel.Version {
-	if assetID == 0 {
-		return nil
-	}
-	rows := assetmodel.NewVersionModel().Select(ctx, map[string]any{"asset_id": assetID})
-	result := make([]assetmodel.Version, 0, len(rows))
 	for _, row := range rows {
 		if row != nil {
 			result = append(result, *row)
@@ -436,6 +470,7 @@ func insertAssetVersionWithRetry(ctx context.Context, assetID uint64, req SaveVe
 			"version":     nextVersion(ctx, assetID),
 			"content":     jsonText(EnsureDocument(req.Content, req.Kind)),
 			"created_at":  now,
+			"updated_at":  now,
 		})
 		if versionID > 0 {
 			return versionID
@@ -443,6 +478,19 @@ func insertAssetVersionWithRetry(ctx context.Context, assetID uint64, req SaveVe
 		time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
 	}
 	return 0
+}
+
+func findSavedVersion(ctx context.Context, assetID uint64, requestID string, nodeKey string) *assetmodel.Version {
+	requestID = strings.TrimSpace(requestID)
+	nodeKey = strings.TrimSpace(nodeKey)
+	if assetID == 0 || requestID == "" || nodeKey == "" {
+		return nil
+	}
+	return assetmodel.NewVersionModel().Find(ctx, map[string]any{
+		"asset_id":   assetID,
+		"request_id": requestID,
+		"node_key":   nodeKey,
+	})
 }
 
 func safeInsertAssetVersion(ctx context.Context, record map[string]any) (id uint64) {

@@ -24,6 +24,7 @@ func (AgentHook) ProviderLoadSkillDetail(c *server.Context, params []any) any {
 	if len(record) == 0 {
 		return record
 	}
+	applySkillDisplayDefaults(record)
 
 	record["manifest_pretty"] = prettyJSONText(util.ToStringTrimmed(record["manifest"]))
 	installPath := util.ToStringTrimmed(record["install_path"])

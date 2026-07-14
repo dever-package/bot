@@ -53,9 +53,9 @@ func (r Response) Payload() map[string]any {
 	if status == 0 {
 		status = ResponseStatusSuccess
 	}
-	output := Output{}
-	if r.Output != nil {
-		output = r.Output
+	output := map[string]any{}
+	for key, value := range r.Output {
+		output[key] = value
 	}
 	return map[string]any{
 		"request_id": r.RequestID,

@@ -25,21 +25,24 @@ const (
 )
 
 type Skill struct {
-	ID           uint64    `dorm:"primaryKey;autoIncrement;comment:技能ID"`
-	CateID       uint64    `dorm:"type:bigint;not null;default:1;comment:技能分类"`
-	Key          string    `dorm:"type:varchar(128);not null;comment:技能标识"`
-	Name         string    `dorm:"type:varchar(128);not null;comment:技能名称"`
-	Description  string    `dorm:"type:varchar(512);not null;default:'';comment:技能描述"`
-	SourceType   string    `dorm:"type:varchar(32);not null;default:'';comment:来源类型"`
-	SourceURL    string    `dorm:"type:varchar(512);not null;default:'';comment:来源链接"`
-	InstallInput string    `dorm:"type:text;not null;default:'';comment:安装输入"`
-	InstallPath  string    `dorm:"type:varchar(512);not null;default:'';comment:安装目录"`
-	EntryFile    string    `dorm:"type:varchar(128);not null;default:'SKILL.md';comment:入口文件"`
-	Manifest     string    `dorm:"type:text;not null;default:'';comment:技能元信息"`
-	ContentHash  string    `dorm:"type:varchar(128);not null;default:'';comment:内容哈希"`
-	Status       int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	Sort         int       `dorm:"type:int;not null;default:100;comment:排序"`
-	CreatedAt    time.Time `dorm:"comment:创建时间"`
+	ID                 uint64    `dorm:"primaryKey;autoIncrement;comment:技能ID"`
+	CateID             uint64    `dorm:"type:bigint;not null;default:1;comment:技能分类"`
+	Key                string    `dorm:"type:varchar(128);not null;comment:技能标识"`
+	Name               string    `dorm:"type:varchar(128);not null;comment:技能名称"`
+	Description        string    `dorm:"type:varchar(512);not null;default:'';comment:技能描述"`
+	DisplayName        string    `dorm:"type:varchar(128);not null;default:'';comment:展示标题"`
+	DisplayIcon        string    `dorm:"type:varchar(64);not null;default:'';comment:展示图标"`
+	DisplayDescription string    `dorm:"type:varchar(512);not null;default:'';comment:展示描述"`
+	SourceType         string    `dorm:"type:varchar(32);not null;default:'';comment:来源类型"`
+	SourceURL          string    `dorm:"type:varchar(512);not null;default:'';comment:来源链接"`
+	InstallInput       string    `dorm:"type:text;not null;default:'';comment:安装输入"`
+	InstallPath        string    `dorm:"type:varchar(512);not null;default:'';comment:安装目录"`
+	EntryFile          string    `dorm:"type:varchar(128);not null;default:'SKILL.md';comment:入口文件"`
+	Manifest           string    `dorm:"type:text;not null;default:'';comment:技能元信息"`
+	ContentHash        string    `dorm:"type:varchar(128);not null;default:'';comment:内容哈希"`
+	Status             int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	Sort               int       `dorm:"type:int;not null;default:100;comment:排序"`
+	CreatedAt          time.Time `dorm:"comment:创建时间"`
 }
 
 type SkillIndex struct {
@@ -62,20 +65,23 @@ var skillSourceTypeOptions = []map[string]any{
 
 var skillSeed = []map[string]any{
 	{
-		"id":            BuiltinArticleImportSkillID,
-		"cate_id":       DefaultSkillCateID,
-		"key":           BuiltinArticleImportSkillKey,
-		"name":          BuiltinArticleImportSkillName,
-		"description":   BuiltinArticleImportSkillDescription,
-		"source_type":   SkillSourceTypeBuiltin,
-		"source_url":    BuiltinArticleImportSourceURL,
-		"install_input": "",
-		"install_path":  "",
-		"entry_file":    "SKILL.md",
-		"manifest":      BuiltinArticleImportManifest,
-		"content_hash":  "builtin:front.article_import:v1",
-		"status":        1,
-		"sort":          10,
+		"id":                  BuiltinArticleImportSkillID,
+		"cate_id":             DefaultSkillCateID,
+		"key":                 BuiltinArticleImportSkillKey,
+		"name":                BuiltinArticleImportSkillName,
+		"description":         BuiltinArticleImportSkillDescription,
+		"display_name":        BuiltinArticleImportSkillName,
+		"display_icon":        "",
+		"display_description": "",
+		"source_type":         SkillSourceTypeBuiltin,
+		"source_url":          BuiltinArticleImportSourceURL,
+		"install_input":       "",
+		"install_path":        "",
+		"entry_file":          "SKILL.md",
+		"manifest":            BuiltinArticleImportManifest,
+		"content_hash":        "builtin:front.article_import:v1",
+		"status":              1,
+		"sort":                10,
 	},
 }
 

@@ -36,6 +36,9 @@ func recentHistory(ctx context.Context, session agentmodel.Session) []any {
 		}
 		text := row.Text
 		if row.Role == "user" {
+			if params := runtimereference.ParamsPrompt(row.Content); params != "" {
+				text = strings.TrimSpace(text + "\n\n" + params)
+			}
 			if response := runtimereference.InteractionResponsePrompt(row.Content); response != "" {
 				text = strings.TrimSpace(text + "\n\n" + response)
 			}

@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import type {
@@ -173,6 +174,7 @@ export function AgentChatMediaInspector({
       )}
       aria-label={`${title}预览`}
     >
+      <style>{mediaInspectorStyles}</style>
       <header className="flex h-14 shrink-0 items-center gap-3 border-b px-3 md:px-4">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <MediaKindIcon kind={request.kind} className="size-4 shrink-0" />
@@ -331,41 +333,52 @@ function MediaThumbnailRail({
   activeIndex: number;
   onSelect: (index: number) => void;
 }) {
+  const activeItemRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    activeItemRef.current?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, [activeIndex]);
+
   return (
     <nav
-      className={cn(
-        "flex h-20 shrink-0 gap-2 overflow-x-auto border-t bg-background px-3 py-2",
-        "md:h-auto md:w-20 md:flex-col md:overflow-x-hidden md:overflow-y-auto md:border-l md:border-t-0",
-      )}
+      className="agent-chat-media-thumbnail-rail"
       aria-label="同批素材"
     >
-      {items.map((item, index) => (
-        <button
-          key={`${String(item.id)}-${index}`}
-          type="button"
-          title={item.name}
-          aria-label={`查看第 ${index + 1} 个素材`}
-          aria-current={index === activeIndex ? "true" : undefined}
-          className={cn(
-            "flex aspect-square h-full shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted/30 transition",
-            "md:h-auto md:w-full",
-            index === activeIndex
-              ? "border-foreground ring-1 ring-foreground"
-              : "hover:border-foreground/40",
-          )}
-          onClick={() => onSelect(index)}
-        >
-          {(kind === "image" && item.url) || item.thumbnail ? (
-            <img
-              src={item.thumbnail || item.url}
-              alt=""
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <MediaKindIcon kind={kind} className="size-5 text-muted-foreground" />
-          )}
-        </button>
-      ))}
+      <div className="agent-chat-media-thumbnail-list">
+        {items.map((item, index) => (
+          <button
+            ref={index === activeIndex ? activeItemRef : undefined}
+            key={`${String(item.id)}-${index}`}
+            type="button"
+            title={item.name}
+            aria-label={`查看第 ${index + 1} 个素材`}
+            aria-current={index === activeIndex ? "true" : undefined}
+            className={cn(
+              "agent-chat-media-thumbnail flex items-center justify-center overflow-hidden rounded-md border bg-muted/30 transition",
+              index === activeIndex
+                ? "border-foreground ring-1 ring-foreground"
+                : "hover:border-foreground/40",
+            )}
+            onClick={() => onSelect(index)}
+          >
+            {(kind === "image" && item.url) || item.thumbnail ? (
+              <img
+                src={item.thumbnail || item.url}
+                alt=""
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <MediaKindIcon
+                kind={kind}
+                className="size-5 text-muted-foreground"
+              />
+            )}
+          </button>
+        ))}
+      </div>
     </nav>
   );
 }
@@ -429,6 +442,72 @@ function mediaKindLabel(kind: EnergonMediaKind) {
   if (kind === "audio") return "音频";
   return "文件";
 }
+
+const mediaInspectorStyles = `
+.agent-chat-media-thumbnail-rail {
+  display: flex;
+  height: 80px;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--background);
+}
+
+.agent-chat-media-thumbnail-list {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.agent-chat-media-thumbnail {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+}
+
+@media (min-width: 768px) {
+  .agent-chat-media-thumbnail-rail {
+    width: 92px;
+    height: 100%;
+    padding: 12px 10px;
+    border-top: 0;
+    border-left: 1px solid var(--border);
+  }
+
+  .agent-chat-media-thumbnail-list {
+    display: grid;
+    width: 100%;
+    max-height: min(460px, 100%);
+    flex: none;
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: 70px;
+    gap: 8px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding-right: 2px;
+    scrollbar-width: thin;
+  }
+
+  .agent-chat-media-thumbnail-list::-webkit-scrollbar {
+    width: 5px;
+  }
+
+  .agent-chat-media-thumbnail-list::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background: color-mix(in oklab, var(--foreground) 28%, transparent);
+  }
+
+  .agent-chat-media-thumbnail {
+    width: 100%;
+    height: 70px;
+    min-height: 70px;
+    flex: none;
+  }
+}
+`;
 
 function clampZoom(value: number) {
   return Math.min(3, Math.max(0.5, value));

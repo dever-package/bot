@@ -32,6 +32,51 @@
         "className": "text-sm text-muted-foreground whitespace-pre-wrap break-words"
       },
       {
+        "type": "show-base",
+        "name": "技能标识",
+        "value": "form.key",
+        "mode": "form",
+        "className": "font-mono break-all",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-title",
+        "value": "page.displayTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "展示标题",
+        "value": "form.display_name",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-icon",
+        "name": "展示图标",
+        "value": "form.display_icon",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "展示描述",
+        "value": "form.display_description",
+        "mode": "form",
+        "className": "whitespace-pre-wrap break-words",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
         "type": "show-title",
         "value": "page.installTitle",
         "meta": {
@@ -270,6 +315,7 @@
   },
   "data": {
     "page": {
+      "displayTitle": "界面展示",
       "installTitle": "安装信息",
       "scanTitle": "来源文件",
       "sourceMetaTitle": "_meta.json",

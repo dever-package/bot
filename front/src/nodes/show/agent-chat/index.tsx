@@ -77,10 +77,14 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
         item.meta?.referencePreviewApi ||
           "/bot/admin/agent_runtime/reference_preview",
       ),
+      inputConfig: String(
+        item.meta?.inputConfigApi || "/bot/admin/agent_runtime/input_config",
+      ),
     }),
     [
       item.meta?.requestApi,
       item.meta?.referencePreviewApi,
+      item.meta?.inputConfigApi,
       item.meta?.statusApi,
       item.meta?.stopApi,
       item.meta?.streamApi,
@@ -102,12 +106,7 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
 
   useEffect(() => {
     mediaInspector.closePreview();
-  }, [
-    agentKey,
-    controller.sessionID,
-    mediaInspector.closePreview,
-    modalOpen,
-  ]);
+  }, [agentKey, controller.sessionID, mediaInspector.closePreview, modalOpen]);
 
   if (openPath && !modalOpen) {
     return null;

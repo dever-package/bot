@@ -51,6 +51,13 @@ type UpdateAssetVersionRequest struct {
 	Content   any
 }
 
+type RestoreAssetVersionRequest struct {
+	AssetID   uint64
+	VersionID uint64
+	RequestID string
+	NodeKey   string
+}
+
 func NewService() Service {
 	return Service{
 		asset: assetservice.NewService(),
@@ -176,11 +183,37 @@ func (s Service) Assets(ctx context.Context, projectID uint64, flowID uint64, ki
 	return s.asset.ListProject(ctx, projectID, flowID, kind)
 }
 
-func (s Service) AssetDetail(ctx context.Context, projectID uint64, assetID uint64) (map[string]any, error) {
+func (s Service) AssetDetail(ctx context.Context, projectID uint64, assetID uint64, currentOnly bool) (map[string]any, error) {
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
+	if currentOnly {
+		asset := s.asset.FindProjectAsset(ctx, projectID, assetID)
+		if asset == nil {
+			return nil, fmt.Errorf("资产不存在")
+		}
+		return map[string]any{
+			"asset": s.asset.AssetDetailMap(ctx, *asset, nil),
+		}, nil
+	}
 	return s.asset.ProjectDetail(ctx, projectID, assetID)
+}
+
+func (s Service) AssetVersions(ctx context.Context, projectID uint64, assetID uint64, page int, pageSize int) (map[string]any, error) {
+	if _, err := requireProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	return s.asset.ProjectVersionPage(ctx, projectID, assetID, assetservice.VersionPageRequest{
+		Page:     page,
+		PageSize: pageSize,
+	})
+}
+
+func (s Service) AssetVersionDetail(ctx context.Context, projectID uint64, assetID uint64, versionID uint64) (map[string]any, error) {
+	if _, err := requireProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	return s.asset.ProjectVersionDetail(ctx, projectID, assetID, versionID)
 }
 
 func (s Service) SaveAsset(ctx context.Context, projectID uint64, req SaveAssetRequest) (map[string]any, error) {
@@ -237,12 +270,23 @@ func (s Service) UpdateAssetVersion(ctx context.Context, projectID uint64, req U
 	})
 }
 
-func (s Service) UseAssetVersion(ctx context.Context, projectID uint64, assetID uint64, versionID uint64) (map[string]any, error) {
+func (s Service) RestoreAssetVersion(ctx context.Context, projectID uint64, req RestoreAssetVersionRequest) (map[string]any, error) {
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	return withWorkspaceAssetLock(ctx, projectID, []string{"use", fmt.Sprintf("%d", assetID), fmt.Sprintf("%d", versionID)}, func() (map[string]any, error) {
-		asset, version, err := s.asset.UseVersion(ctx, projectID, assetID, versionID)
+	return withWorkspaceAssetLock(ctx, projectID, []string{
+		"restore",
+		fmt.Sprintf("%d", req.AssetID),
+		fmt.Sprintf("%d", req.VersionID),
+		req.RequestID,
+	}, func() (map[string]any, error) {
+		asset, version, err := s.asset.RestoreProjectVersion(ctx, assetservice.RestoreVersionRequest{
+			ProjectID: projectID,
+			AssetID:   req.AssetID,
+			VersionID: req.VersionID,
+			RequestID: req.RequestID,
+			NodeKey:   req.NodeKey,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -261,12 +305,7 @@ func (s Service) CanvasConfig(ctx context.Context, projectID uint64, flowID uint
 	if err != nil {
 		return nil, err
 	}
-	config, err := s.team.CanvasConfig(ctx, project.ReleaseID, flowID)
-	if err != nil {
-		return nil, err
-	}
-	applyBodyAgentAndTeamLimits(ctx, s.body, project.BodyID, config)
-	return config, nil
+	return s.team.CanvasConfig(ctx, project.ReleaseID, flowID)
 }
 
 func (s Service) CanvasPowerForm(ctx context.Context, projectID uint64, flowID uint64, powerID uint64, powerKey string, targetID uint64) (map[string]any, error) {

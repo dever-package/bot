@@ -24,6 +24,9 @@ func (AgentHook) ProviderBeforeSaveSkill(_ *server.Context, params []any) any {
 	trimStringField(record, "key", partial)
 	trimStringField(record, "name", partial)
 	trimStringField(record, "description", partial)
+	trimStringField(record, "display_name", partial)
+	trimStringField(record, "display_icon", partial)
+	trimStringField(record, "display_description", partial)
 	trimStringField(record, "source_type", partial)
 	trimStringField(record, "source_url", partial)
 	trimStringField(record, "install_input", partial)
@@ -53,6 +56,9 @@ func (AgentHook) ProviderBeforeSaveSkill(_ *server.Context, params []any) any {
 	if !partial && util.ToStringTrimmed(record["name"]) == "" {
 		panicAgentField("form.name", "技能名称不能为空。")
 	}
+	if !partial && util.ToStringTrimmed(record["display_name"]) == "" {
+		record["display_name"] = util.ToStringTrimmed(record["name"])
+	}
 	if !partial &&
 		util.ToStringTrimmed(record["install_path"]) == "" &&
 		util.ToStringTrimmed(record["source_type"]) != agentmodel.SkillSourceTypeBuiltin {
@@ -63,7 +69,7 @@ func (AgentHook) ProviderBeforeSaveSkill(_ *server.Context, params []any) any {
 	return record
 }
 
-func (AgentHook) ProviderBeforeSaveSkillCate(_ *server.Context, params []any) any {
+func (AgentHook) ProviderBeforeSaveSkillDisplay(c *server.Context, params []any) any {
 	record := cloneAgentRecord(params)
 	if len(record) == 0 {
 		return record
@@ -76,10 +82,19 @@ func (AgentHook) ProviderBeforeSaveSkillCate(_ *server.Context, params []any) an
 	if cateID == 0 {
 		panicAgentField("form.cate_id", "技能分类不能为空。")
 	}
+	displayName := util.ToStringTrimmed(record["display_name"])
+	if displayName == "" && c != nil {
+		if skill := agentmodel.NewSkillModel().Find(c.Context(), map[string]any{"id": id}); skill != nil {
+			displayName = strings.TrimSpace(skill.Name)
+		}
+	}
 	result := map[string]any{
-		"_partial": true,
-		"id":       id,
-		"cate_id":  cateID,
+		"_partial":            true,
+		"id":                  id,
+		"cate_id":             cateID,
+		"display_name":        displayName,
+		"display_icon":        util.ToStringTrimmed(record["display_icon"]),
+		"display_description": util.ToStringTrimmed(record["display_description"]),
 	}
 	return result
 }
@@ -178,6 +193,7 @@ func (AgentHook) ProviderAttachSkillPackItemList(c *server.Context, params []any
 				}
 			}
 		}
+		applySkillDisplayDefaults(skill)
 
 		sourceType := agentmodel.NormalizeSkillSourceType(
 			util.ToStringTrimmed(skill["source_type"]),
@@ -216,6 +232,13 @@ func (AgentHook) ProviderAttachSkillPackItemList(c *server.Context, params []any
 		}
 	}
 	return rows
+}
+
+func applySkillDisplayDefaults(skill map[string]any) {
+	if len(skill) == 0 || util.ToStringTrimmed(skill["display_name"]) != "" {
+		return
+	}
+	skill["display_name"] = util.ToStringTrimmed(skill["name"])
 }
 
 func normalizeSkillPackItemRows(value any) []any {

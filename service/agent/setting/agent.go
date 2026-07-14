@@ -45,6 +45,9 @@ func (AgentHook) ProviderBeforeSaveAgent(c *server.Context, params []any) any {
 	if shouldNormalizeField(record, "max_auto_steps", partial) {
 		record["max_auto_steps"] = normalizeNonNegativeInt(record["max_auto_steps"], defaultAgentMaxAutoSteps)
 	}
+	if rawParams, exists := record["params"]; exists {
+		record["params"] = normalizeAgentParamRows(c, util.ToUint64(record["id"]), rawParams)
+	}
 
 	if shouldNormalizeField(record, "llm_power_id", partial) {
 		validateAgentLLMPower(c, util.ToUint64(record["llm_power_id"]))

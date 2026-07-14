@@ -28,6 +28,13 @@ func assistantToolHistoryMessage(text string, calls []botprotocol.ToolCall) map[
 	return message
 }
 
+func assistantHistoryMessage(text string) map[string]any {
+	return map[string]any{
+		"role":    "assistant",
+		"content": strings.TrimSpace(text),
+	}
+}
+
 func toolHistoryMessage(call botprotocol.ToolCall, content string) map[string]any {
 	return map[string]any{
 		"role":         "tool",

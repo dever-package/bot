@@ -40,7 +40,7 @@ var (
 	packItemSkillRelation = orm.Relation{
 		Field:      "skill_id",
 		Option:     "bot.agent.NewSkillModel",
-		OptionKeys: []string{"name", "key", "cate_id", "description", "source_type", "source_url", "install_input"},
+		OptionKeys: []string{"name", "key", "cate_id", "description", "display_name", "display_icon", "display_description", "source_type", "source_url", "install_input"},
 	}
 )
 

@@ -13,6 +13,7 @@ type Power struct {
 	Name       string    `dorm:"type:varchar(128);not null;comment:名称"`
 	Icon       string    `dorm:"type:varchar(64);not null;default:'';comment:图标"`
 	Kind       string    `dorm:"type:varchar(64);not null;comment:类型"`
+	Prompt     string    `dorm:"type:text;not null;default:'';comment:设定提示词"`
 	SourceRule int16     `dorm:"type:smallint;not null;default:1;comment:来源规则"`
 	Status     int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	CreatedAt  time.Time `dorm:"comment:创建时间"`
@@ -24,7 +25,10 @@ type PowerIndex struct {
 	KindStatus struct{} `index:"kind,status"`
 }
 
-const DefaultLLMPowerID uint64 = 1
+const (
+	DefaultLLMPowerID   uint64 = 1
+	PowerKindStoryboard        = "storyboard"
+)
 
 var (
 	powerSeed = []map[string]any{
@@ -35,6 +39,7 @@ var (
 			"name":        "LLM",
 			"icon":        "file-text",
 			"kind":        "text",
+			"prompt":      "",
 			"source_rule": 1,
 			"status":      1,
 		},
@@ -42,6 +47,7 @@ var (
 
 	kindOptions = []map[string]any{
 		{"id": "text", "value": "文本"},
+		{"id": PowerKindStoryboard, "value": "分镜脚本"},
 		{"id": "image", "value": "图片"},
 		{"id": "video", "value": "视频"},
 		{"id": "audio", "value": "音频"},

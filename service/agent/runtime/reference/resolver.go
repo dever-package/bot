@@ -39,6 +39,9 @@ func (r Resolver) Resolve(ctx context.Context, session agentmodel.Session, refer
 		if err != nil {
 			return Result{}, err
 		}
+		for index := range resolved.Media {
+			resolved.Media[index].Usage = current.Usage
+		}
 		result.Items = append(result.Items, resolved)
 		result.Media = appendUniqueMedia(result.Media, resolved.Media...)
 	}
@@ -176,6 +179,9 @@ func resolvedPrompt(items []Resolved, allowedMedia []Media) string {
 	remainingTextRunes := maxReferenceTextRunes
 	for index, item := range items {
 		line := fmt.Sprintf("%d. [%s:%d] %s", index+1, item.Reference.Type, item.Reference.ID, strings.TrimSpace(item.Title))
+		if item.Reference.Usage != "" {
+			line += "\n- 用于输入参数：" + item.Reference.Usage
+		}
 		if item.Text != "" && remainingTextRunes > 0 {
 			limit := min(maxReferenceItemRunes, remainingTextRunes)
 			text := limitText(item.Text, limit)
@@ -214,7 +220,7 @@ func mediaFromArtifactPayload(payload map[string]any) Media {
 func appendUniqueMedia(current []Media, values ...Media) []Media {
 	seen := make(map[string]struct{}, len(current))
 	for _, item := range current {
-		seen[fmt.Sprintf("%s:%d", item.ReferenceType, item.ReferenceID)] = struct{}{}
+		seen[mediaKey(item)] = struct{}{}
 	}
 	for _, item := range values {
 		if len(current) >= maxResolvedMedia {
@@ -223,7 +229,7 @@ func appendUniqueMedia(current []Media, values ...Media) []Media {
 		if item.ReferenceID == 0 || item.URL == "" {
 			continue
 		}
-		key := fmt.Sprintf("%s:%d", item.ReferenceType, item.ReferenceID)
+		key := mediaKey(item)
 		if _, exists := seen[key]; exists {
 			continue
 		}
@@ -240,7 +246,7 @@ func cleanMedia(values []Media) []Media {
 		if item.ReferenceID == 0 || item.URL == "" {
 			continue
 		}
-		key := fmt.Sprintf("%s:%d", item.ReferenceType, item.ReferenceID)
+		key := mediaKey(item)
 		if _, exists := seen[key]; exists {
 			continue
 		}
@@ -248,6 +254,10 @@ func cleanMedia(values []Media) []Media {
 		result = append(result, item)
 	}
 	return result
+}
+
+func mediaKey(item Media) string {
+	return fmt.Sprintf("%s:%d:%s", item.ReferenceType, item.ReferenceID, strings.TrimSpace(item.Usage))
 }
 
 func normalizeMediaKind(value string) string {

@@ -14,15 +14,13 @@ import (
 )
 
 const (
-	mediaCountArgument = "count"
+	mediaCountArgument = "__runtime_count"
 	maxMediaCount      = 8
 )
 
-var mediaCountAliases = []string{mediaCountArgument, "n", "num", "quantity"}
-
 type mediaCountPlan struct {
-	key     string
-	runtime bool
+	key       string
+	promptKey string
 }
 
 type powerBatchResult struct {
@@ -31,21 +29,24 @@ type powerBatchResult struct {
 	err    error
 }
 
-func buildMediaCountPlan(power energonmodel.Power, parameters map[string]any) mediaCountPlan {
+func buildMediaCountPlan(power energonmodel.Power, params []energonservice.PowerParam) mediaCountPlan {
 	if !isMediaPower(power) {
 		return mediaCountPlan{}
 	}
-	if key := nativeMediaCountParameter(parameters); key != "" {
-		return mediaCountPlan{key: key}
+	return mediaCountPlan{
+		key:       mediaCountArgument,
+		promptKey: mediaPromptParameterKey(params),
 	}
-	return mediaCountPlan{key: mediaCountArgument, runtime: true}
 }
 
-func nativeMediaCountParameter(parameters map[string]any) string {
-	properties, _ := parameters["properties"].(map[string]any)
-	for _, key := range mediaCountAliases {
-		if _, exists := properties[key]; exists {
-			return key
+func mediaPromptParameterKey(params []energonservice.PowerParam) string {
+	for _, param := range params {
+		if param.IsToolbar() || !strings.EqualFold(strings.TrimSpace(param.ValueType), "string") {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(param.Type)) {
+		case "text", "textarea", "input":
+			return strings.TrimSpace(param.Key)
 		}
 	}
 	return ""
@@ -56,16 +57,14 @@ func mediaToolParameters(parameters map[string]any, plan mediaCountPlan) map[str
 		return parameters
 	}
 	result := clonePowerParameters(parameters)
-	if plan.runtime {
-		properties, _ := result["properties"].(map[string]any)
-		properties[plan.key] = map[string]any{
-			"type":        "integer",
-			"description": "生成独立结果的数量。用户要求几个就填写几，范围 1-8；每个结果必须是单独的素材或文件，不能合并为一个结果。",
-			"minimum":     1,
-			"maximum":     maxMediaCount,
-		}
-		result["properties"] = properties
+	properties, _ := result["properties"].(map[string]any)
+	properties[plan.key] = map[string]any{
+		"type":        "integer",
+		"description": "生成独立结果的数量。用户要求几个就填写几，范围 1-8；每个结果必须是单独的素材或文件，不能合并为一个结果。",
+		"minimum":     1,
+		"maximum":     maxMediaCount,
 	}
+	result["properties"] = properties
 	result["required"] = appendRequiredParameter(result["required"], plan.key)
 	return result
 }
@@ -104,7 +103,7 @@ func appendRequiredParameter(value any, key string) []any {
 }
 
 func mediaExecutionCount(power energonmodel.Power, arguments map[string]any, plan mediaCountPlan) (int, error) {
-	if !plan.runtime {
+	if plan.key == "" {
 		return 1, nil
 	}
 	if _, exists := arguments[plan.key]; !exists {
@@ -120,10 +119,10 @@ func mediaExecutionCount(power energonmodel.Power, arguments map[string]any, pla
 func mediaProviderArguments(arguments map[string]any, plan mediaCountPlan) map[string]any {
 	result := make(map[string]any, len(arguments))
 	for key, value := range arguments {
-		if key == mediaReferencesArgument || key == "series_id" {
+		if key == MediaReferencesArgument {
 			continue
 		}
-		if plan.runtime && key == plan.key {
+		if plan.key != "" && key == plan.key {
 			continue
 		}
 		result[key] = value
@@ -135,6 +134,7 @@ func executeMediaPower(
 	ctx context.Context,
 	power energonmodel.Power,
 	count int,
+	promptKey string,
 	requestID string,
 	input map[string]any,
 	targetID uint64,
@@ -152,7 +152,7 @@ func executeMediaPower(
 	serializedOutput := serializeOutputHandler(onOutput)
 	for index := 0; index < count; index++ {
 		go func(index int) {
-			currentInput := mediaVariantInput(power, input, index, count)
+			currentInput := mediaVariantInput(power, input, promptKey, index, count)
 			output, err := executePower(batchCtx, uuid.NewString(), power.Key, currentInput, targetID, gateway, transport, serializedOutput)
 			results <- powerBatchResult{index: index, output: output, err: err}
 		}(index)
@@ -189,12 +189,11 @@ func serializeOutputHandler(handler OutputHandler) OutputHandler {
 	}
 }
 
-func mediaVariantInput(power energonmodel.Power, input map[string]any, index int, count int) map[string]any {
+func mediaVariantInput(power energonmodel.Power, input map[string]any, promptKey string, index int, count int) map[string]any {
 	result := make(map[string]any, len(input))
 	for key, value := range input {
 		result[key] = value
 	}
-	promptKey := mediaPromptKey(result)
 	if promptKey == "" {
 		return result
 	}
@@ -222,20 +221,6 @@ func mediaVariantInstruction(power energonmodel.Power, index int, count int) str
 	default:
 		return prefix
 	}
-}
-
-func mediaPromptKey(input map[string]any) string {
-	for _, key := range []string{"prompt", "text", "content", "input"} {
-		if text := strings.TrimSpace(botprotocol.AsText(input[key])); text != "" {
-			return key
-		}
-	}
-	for key, value := range input {
-		if strings.Contains(strings.ToLower(key), "prompt") && strings.TrimSpace(botprotocol.AsText(value)) != "" {
-			return key
-		}
-	}
-	return ""
 }
 
 func isMediaPower(power energonmodel.Power) bool {

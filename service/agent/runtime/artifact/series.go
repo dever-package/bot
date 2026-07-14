@@ -91,14 +91,12 @@ func ensureReadySeriesMaster(ctx context.Context, artifacts []agentmodel.Artifac
 }
 
 func seriesName(profile map[string]any) string {
-	for _, key := range []string{"prompt", "text", "name"} {
-		if value := textValue(profile[key]); value != "" {
-			runes := []rune(strings.Join(strings.Fields(value), " "))
-			if len(runes) > 28 {
-				runes = runes[:28]
-			}
-			return string(runes)
+	if value := textValue(profile["artifact_name"]); value != "" {
+		runes := []rune(strings.Join(strings.Fields(value), " "))
+		if len(runes) > 28 {
+			runes = runes[:28]
 		}
+		return string(runes)
 	}
 	return "素材系列"
 }

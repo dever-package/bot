@@ -11,11 +11,14 @@ import (
 const maxModelResultRunes = 24000
 
 type Definition struct {
-	Name        string
-	Title       string
-	Kind        string
-	Description string
-	Parameters  map[string]any
+	Name                  string
+	Title                 string
+	Kind                  string
+	Description           string
+	Parameters            map[string]any
+	ActivityParameterKeys []string
+	ActivityCountKey      string
+	ActivityPromptKey     string
 }
 
 func (definition Definition) Native() map[string]any {

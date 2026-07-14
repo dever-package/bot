@@ -1,0 +1,89 @@
+{
+  "page": {
+    "name": "智能体参数编辑",
+    "parent": "bot/agent/agent/list",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-cascader",
+        "value": "form.param_id",
+        "mode": "form",
+        "placeholder": "请选择参数",
+        "validate": [
+          {
+            "type": "required",
+            "message": "输入参数不能为空。"
+          }
+        ],
+        "meta": {
+          "childParentField": "cate_id",
+          "valueMode": "leaf",
+          "placeholder": ["选择参数分类", "选择参数"],
+          "childExtraFields": "type,key,status,upload_rule_id,max_files",
+          "model": "bot.energon.NewParamCateModel",
+          "childModel": "bot.energon.NewParamModel",
+          "optionFilter": [
+            {
+              "field": "key",
+              "path": "state.excludedParamKey",
+              "operator": "notEquals"
+            },
+            {
+              "field": "status",
+              "path": "state.enabledStatus",
+              "operator": "equals"
+            }
+          ]
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "必填",
+        "value": "form.required",
+        "mode": "form",
+        "info": "开启后，本轮发送前必须填写该参数。",
+        "meta": {
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "id": 0,
+      "agent_id": 0,
+      "param_id": 0,
+      "required": 2,
+      "sort": 100
+    }
+  },
+  "state": {
+    "excludedParamKey": "text",
+    "enabledStatus": 1
+  },
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}

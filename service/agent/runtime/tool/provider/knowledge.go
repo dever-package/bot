@@ -33,13 +33,14 @@ func KnowledgeTools(bases []knowledgeservice.KnowledgeBaseRuntime) ([]Tool, stri
 
 func knowledgeInitTool(service knowledgeservice.Service, allowed map[uint64]knowledgeservice.KnowledgeBaseRuntime, baseProperty map[string]any, required []any) Tool {
 	return Tool{
-		Definition: Definition{
-			Name:        "open_knowledge_init",
-			Description: "读取知识库根目录的 init.md，优先了解知识库结构和使用说明。",
-			Parameters: knowledgeParameters(baseProperty, required, map[string]any{
+		Definition: knowledgeToolDefinition(
+			"open_knowledge_init",
+			"知识库说明",
+			"读取知识库根目录的 init.md，优先了解知识库结构和使用说明。",
+			knowledgeParameters(baseProperty, required, map[string]any{
 				"max_chars": integerProperty("最多读取字符数，默认 8000"),
 			}),
-		},
+		),
 		Handle: func(ctx context.Context, call Call) (Result, error) {
 			base, err := resolveKnowledgeBase(call.Arguments, allowed)
 			if err != nil {
@@ -59,13 +60,14 @@ func knowledgeInitTool(service knowledgeservice.Service, allowed map[uint64]know
 
 func knowledgeListTool(service knowledgeservice.Service, allowed map[uint64]knowledgeservice.KnowledgeBaseRuntime, baseProperty map[string]any, required []any) Tool {
 	return Tool{
-		Definition: Definition{
-			Name:        "list_knowledge_files",
-			Description: "列出知识库中的目录和文件。需要了解有哪些资料时使用。",
-			Parameters: knowledgeParameters(baseProperty, required, map[string]any{
+		Definition: knowledgeToolDefinition(
+			"list_knowledge_files",
+			"知识库文件",
+			"列出知识库中的目录和文件。需要了解有哪些资料时使用。",
+			knowledgeParameters(baseProperty, required, map[string]any{
 				"limit": integerProperty("最多返回条数，默认 120，最大 300"),
 			}),
-		},
+		),
 		Handle: func(ctx context.Context, call Call) (Result, error) {
 			base, err := resolveKnowledgeBase(call.Arguments, allowed)
 			if err != nil {
@@ -83,14 +85,15 @@ func knowledgeListTool(service knowledgeservice.Service, allowed map[uint64]know
 func knowledgeSearchTool(service knowledgeservice.Service, allowed map[uint64]knowledgeservice.KnowledgeBaseRuntime, baseProperty map[string]any, required []any) Tool {
 	required = append(append([]any{}, required...), "query")
 	return Tool{
-		Definition: Definition{
-			Name:        "search_knowledge_files",
-			Description: "按关键词搜索知识库文本文件，并返回路径和相关内容预览。",
-			Parameters: knowledgeParameters(baseProperty, required, map[string]any{
+		Definition: knowledgeToolDefinition(
+			"search_knowledge_files",
+			"知识库搜索",
+			"按关键词搜索知识库文本文件，并返回路径和相关内容预览。",
+			knowledgeParameters(baseProperty, required, map[string]any{
 				"query": map[string]any{"type": "string", "description": "搜索关键词或短语"},
 				"limit": integerProperty("最多返回条数，默认 8，最大 20"),
 			}),
-		},
+		),
 		Handle: func(ctx context.Context, call Call) (Result, error) {
 			base, err := resolveKnowledgeBase(call.Arguments, allowed)
 			if err != nil {
@@ -109,14 +112,15 @@ func knowledgeSearchTool(service knowledgeservice.Service, allowed map[uint64]kn
 func knowledgeReadTool(service knowledgeservice.Service, allowed map[uint64]knowledgeservice.KnowledgeBaseRuntime, baseProperty map[string]any, required []any) Tool {
 	required = append(append([]any{}, required...), "path")
 	return Tool{
-		Definition: Definition{
-			Name:        "read_knowledge_file",
-			Description: "按 list/search 返回的文件 id 或 path 读取知识库文件正文。",
-			Parameters: knowledgeParameters(baseProperty, required, map[string]any{
+		Definition: knowledgeToolDefinition(
+			"read_knowledge_file",
+			"知识库文件",
+			"按 list/search 返回的文件 id 或 path 读取知识库文件正文。",
+			knowledgeParameters(baseProperty, required, map[string]any{
 				"path":      map[string]any{"type": "string", "description": "文件 id 或相对路径"},
 				"max_chars": integerProperty("最多读取字符数，默认 8000，最大 24000"),
 			}),
-		},
+		),
 		Handle: func(ctx context.Context, call Call) (Result, error) {
 			base, err := resolveKnowledgeBase(call.Arguments, allowed)
 			if err != nil {
@@ -129,6 +133,16 @@ func knowledgeReadTool(service knowledgeservice.Service, allowed map[uint64]know
 			}
 			return Result{Text: "已读取知识库文件: " + content.Path, Content: map[string]any{"knowledge_base": knowledgeBaseRef(base), "file": content}}, nil
 		},
+	}
+}
+
+func knowledgeToolDefinition(name string, title string, description string, parameters map[string]any) Definition {
+	return Definition{
+		Name:        name,
+		Title:       title,
+		Kind:        "knowledge",
+		Description: description,
+		Parameters:  parameters,
 	}
 }
 

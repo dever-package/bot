@@ -21,6 +21,7 @@ type Part struct {
 type Content struct {
 	Version             int                  `json:"version"`
 	Parts               []Part               `json:"parts"`
+	Params              map[string]any       `json:"params,omitempty"`
 	InteractionResponse *InteractionResponse `json:"interaction_response,omitempty"`
 }
 
@@ -32,6 +33,7 @@ type InteractionResponse struct {
 type Input struct {
 	Text       string
 	Content    Content
+	Params     map[string]any
 	References []Reference
 }
 
@@ -52,6 +54,7 @@ type Media struct {
 	Name          string
 	Label         string
 	URL           string
+	Usage         string
 }
 
 type Resolved struct {

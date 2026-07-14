@@ -116,6 +116,7 @@ export function deriveAgentCateOptions(agents: AgentOption[]) {
 export function derivePowerKindOptions(powers: PowerOption[]) {
   const labels: Record<string, string> = {
     text: "文本",
+    storyboard: "分镜脚本",
     image: "图片",
     video: "视频",
     audio: "音频",

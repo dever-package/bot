@@ -24,6 +24,10 @@ function normalizeMarkdownSource(value: unknown) {
   return String(value || "")
     .replace(/\r\n/g, "\n")
     .replace(
+      /([。！？!?：:；;])([ \t\u00a0\u3000]*)(#{1,6})(?!#)([ \t\u00a0\u3000]+)(?=\S)/g,
+      "$1\n\n$3 ",
+    )
+    .replace(
       /(^|\n)([ \t\u00a0\u3000]{0,3})(#{1,6})(?!#)([ \t\u00a0\u3000]*)(?=\S)/g,
       normalizeMarkdownHeadingMarker,
     );

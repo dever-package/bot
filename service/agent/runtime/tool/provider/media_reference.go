@@ -8,7 +8,7 @@ import (
 	energonservice "github.com/dever-package/bot/service/energon"
 )
 
-const mediaReferencesArgument = "references"
+const MediaReferencesArgument = "__runtime_references"
 const MaxRuntimeMediaReferences = 32
 
 type MediaReference struct {
@@ -21,7 +21,7 @@ type MediaReference struct {
 	Name          string
 	Label         string
 	URL           string
-	Role          string
+	ParameterKey  string
 }
 
 type mediaReferenceStore struct {
@@ -73,34 +73,35 @@ func (store *mediaReferenceStore) Add(references []MediaReference) {
 func supportedMediaReferences(references []MediaReference, params []energonservice.PowerParam) []MediaReference {
 	result := make([]MediaReference, 0, len(references))
 	for _, current := range references {
-		if _, exists := mediaReferenceParam(params, current.Kind, ""); exists {
+		if len(mediaReferenceParams(params, current.Kind)) > 0 {
 			result = append(result, current)
 		}
 	}
 	return result
 }
 
-func MediaReferencesParameters(parameters map[string]any, references []MediaReference) map[string]any {
-	if len(references) == 0 {
+func MediaReferencesParameters(parameters map[string]any, references []MediaReference, params []energonservice.PowerParam) map[string]any {
+	parameterKeys, parameterDescription := mediaReferenceParameterOptions(params, references)
+	if len(references) == 0 || len(parameterKeys) == 0 {
 		return parameters
 	}
 	result := clonePowerParameters(parameters)
 	properties, _ := result["properties"].(map[string]any)
-	properties[mediaReferencesArgument] = map[string]any{
+	properties[MediaReferencesArgument] = map[string]any{
 		"type":        "array",
-		"description": "当前运行允许使用的素材。仅可填写工具说明中列出的 ref_type 和 ref_id；需要使用素材时必须传入，禁止猜测其他ID。",
+		"description": "当前运行允许使用的素材。仅可填写工具说明中列出的 ref_type 和 ref_id；需要使用素材时必须传入，并通过 param_key 明确选择能力当前配置的素材参数，禁止猜测其他ID。",
 		"items": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"ref_type": map[string]any{"type": "string", "enum": []any{"artifact", "upload_file"}},
 				"ref_id":   map[string]any{"type": "integer", "minimum": 1},
-				"role": map[string]any{
+				"param_key": map[string]any{
 					"type":        "string",
-					"enum":        []any{"reference", "subject", "style", "first_frame", "last_frame"},
-					"description": "素材用途。能力有多个同类型素材参数时必须填写，例如首帧用 first_frame、尾帧用 last_frame。",
+					"enum":        parameterKeys,
+					"description": parameterDescription,
 				},
 			},
-			"required":             []any{"ref_type", "ref_id"},
+			"required":             []any{"ref_type", "ref_id", "param_key"},
 			"additionalProperties": false,
 		},
 	}
@@ -117,12 +118,9 @@ func ApplyMediaReferences(arguments map[string]any, params []energonservice.Powe
 	grouped := map[string][]MediaReference{}
 	paramMap := map[string]energonservice.PowerParam{}
 	for _, current := range selected {
-		param, exists := mediaReferenceParam(params, current.Kind, current.Role)
+		param, exists := mediaReferenceParam(params, current.Kind, current.ParameterKey)
 		if !exists {
-			if current.Role != "" {
-				return nil, nil, fmt.Errorf("当前能力没有与用途 %s 匹配的%s参数", current.Role, mediaReferenceKindLabel(current.Kind))
-			}
-			return nil, nil, fmt.Errorf("当前能力不支持引用%s素材", mediaReferenceKindLabel(current.Kind))
+			return nil, nil, fmt.Errorf("当前能力参数 %s 不支持引用%s素材", current.ParameterKey, mediaReferenceKindLabel(current.Kind))
 		}
 		grouped[param.Key] = append(grouped[param.Key], current)
 		paramMap[param.Key] = param
@@ -151,7 +149,7 @@ func ApplyMediaReferences(arguments map[string]any, params []energonservice.Powe
 }
 
 func SelectedMediaReferences(arguments map[string]any, available []MediaReference) ([]MediaReference, error) {
-	requested := mapListArgument(arguments[mediaReferencesArgument])
+	requested := mapListArgument(arguments[MediaReferencesArgument])
 	if len(requested) == 0 {
 		return nil, nil
 	}
@@ -172,8 +170,11 @@ func SelectedMediaReferences(arguments map[string]any, available []MediaReferenc
 		if !exists {
 			return nil, fmt.Errorf("引用素材 %s 不在用户本轮选择范围内", key)
 		}
-		current.Role = normalizeMediaReferenceRole(textValue(item["role"]))
-		selectionKey := key + ":" + current.Role
+		current.ParameterKey = strings.TrimSpace(textValue(item["param_key"]))
+		if current.ParameterKey == "" {
+			return nil, fmt.Errorf("引用素材 %s 缺少能力参数 param_key", key)
+		}
+		selectionKey := key + ":" + current.ParameterKey
 		if _, duplicate := seen[selectionKey]; duplicate {
 			continue
 		}
@@ -194,83 +195,52 @@ func MediaReferencesDescription(references []MediaReference) string {
 	return "。本轮允许工具使用的素材：" + strings.Join(rows, "；") + "。标记为“当前系列主素材”的项，只在用户明确要求继续、修改或保持上一版一致时使用；用户显式引用的素材优先。"
 }
 
-func mediaReferenceParam(params []energonservice.PowerParam, kind string, role string) (energonservice.PowerParam, bool) {
-	ruleID := mediaReferenceRuleID(kind)
-	aliases := mediaReferenceRoleAliases(role)
-	if len(aliases) > 0 {
-		for _, param := range params {
-			if ruleID > 0 && param.UploadRuleID != ruleID {
-				continue
-			}
-			name := strings.ToLower(strings.TrimSpace(param.Name + " " + param.Key))
-			if containsAny(name, aliases) {
-				return param, true
-			}
-		}
-	}
-	if normalizeMediaReferenceRole(role) == "first_frame" || normalizeMediaReferenceRole(role) == "last_frame" {
-		candidates := mediaReferenceParamsByRule(params, ruleID)
-		if len(candidates) == 1 {
-			return candidates[0], true
-		}
-		return energonservice.PowerParam{}, false
-	}
+func mediaReferenceParam(params []energonservice.PowerParam, kind string, key string) (energonservice.PowerParam, bool) {
+	key = strings.TrimSpace(key)
 	for _, param := range params {
-		if ruleID > 0 && param.UploadRuleID == ruleID {
-			return param, true
-		}
-	}
-	for _, param := range params {
-		name := strings.ToLower(strings.TrimSpace(param.Name + " " + param.Key))
-		if strings.Contains(name, mediaReferenceKindLabel(kind)) || strings.Contains(name, englishMediaKind(kind)) {
+		if strings.TrimSpace(param.Key) == key && mediaReferenceParamSupports(param, kind) {
 			return param, true
 		}
 	}
 	return energonservice.PowerParam{}, false
 }
 
-func mediaReferenceParamsByRule(params []energonservice.PowerParam, ruleID uint64) []energonservice.PowerParam {
-	if ruleID == 0 {
-		return nil
-	}
+func mediaReferenceParams(params []energonservice.PowerParam, kind string) []energonservice.PowerParam {
 	result := make([]energonservice.PowerParam, 0)
 	for _, param := range params {
-		if param.UploadRuleID == ruleID {
+		if mediaReferenceParamSupports(param, kind) {
 			result = append(result, param)
 		}
 	}
 	return result
 }
 
-func normalizeMediaReferenceRole(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "reference", "subject", "style", "first_frame", "last_frame":
-		return strings.ToLower(strings.TrimSpace(value))
-	default:
-		return ""
-	}
+func mediaReferenceParamSupports(param energonservice.PowerParam, kind string) bool {
+	ruleID := mediaReferenceRuleID(kind)
+	return ruleID > 0 && param.UploadRuleID == ruleID
 }
 
-func mediaReferenceRoleAliases(role string) []string {
-	switch normalizeMediaReferenceRole(role) {
-	case "first_frame":
-		return []string{"first_frame", "firstframe", "first", "start", "首帧", "起始"}
-	case "last_frame":
-		return []string{"last_frame", "lastframe", "last", "end", "尾帧", "结束"}
-	case "subject":
-		return []string{"subject", "character", "主体", "人物", "角色"}
-	case "style":
-		return []string{"style", "风格"}
-	case "reference":
-		return []string{"reference", "refer", "参考"}
-	default:
-		return nil
+func mediaReferenceParameterOptions(params []energonservice.PowerParam, references []MediaReference) ([]any, string) {
+	keys := make([]any, 0)
+	labels := make([]string, 0)
+	for _, param := range params {
+		key := strings.TrimSpace(param.Key)
+		if key == "" || !mediaReferenceParameterAvailable(param, references) {
+			continue
+		}
+		keys = append(keys, key)
+		name := strings.TrimSpace(param.Name)
+		if name == "" {
+			name = key
+		}
+		labels = append(labels, key+"（"+name+"）")
 	}
+	return keys, "选择要接收该素材的能力参数。可选参数：" + strings.Join(labels, "、")
 }
 
-func containsAny(value string, aliases []string) bool {
-	for _, alias := range aliases {
-		if strings.Contains(value, alias) {
+func mediaReferenceParameterAvailable(param energonservice.PowerParam, references []MediaReference) bool {
+	for _, reference := range references {
+		if mediaReferenceParamSupports(param, reference.Kind) {
 			return true
 		}
 	}
@@ -303,14 +273,6 @@ func mediaReferenceKindLabel(kind string) string {
 	default:
 		return "文件"
 	}
-}
-
-func englishMediaKind(kind string) string {
-	value := strings.ToLower(strings.TrimSpace(kind))
-	if value == "file" {
-		return "upload"
-	}
-	return value
 }
 
 func mediaReferenceKey(refType string, refID uint64) string {

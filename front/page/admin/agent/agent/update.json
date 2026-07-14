@@ -57,6 +57,10 @@
               "value": "setting"
             },
             {
+              "label": "输入参数",
+              "value": "input"
+            },
+            {
               "label": "运行配置",
               "value": "runtime"
             }
@@ -243,6 +247,19 @@
         }
       },
       {
+        "type": "form-array",
+        "name": "输入参数",
+        "value": "form.params",
+        "mode": "form",
+        "info": "配置聊天输入框可附带的文件、选项和补充参数。主聊天文本为内置输入，无需添加提示词参数。",
+        "meta": {
+          "tab": "input",
+          "pageRoute": "/bot/agent/agent_param/update",
+          "addText": "添加输入参数",
+          "drag": "sort"
+        }
+      },
+      {
         "type": "form-number",
         "placeholder": "0-2，建议 0.2-1.0",
         "value": "form.temperature",
@@ -324,6 +341,7 @@
       "power_cate_id": "",
       "knowledge_cate_id": "",
       "skill_pack_id": "",
+      "params": [],
       "temperature": 0.7,
       "timeout_seconds": 3600,
       "max_auto_steps": 0

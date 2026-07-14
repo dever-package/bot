@@ -19,9 +19,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { AgentChatSession } from "./api";
+import { AGENT_CHAT_CHILD_LAYER_Z_INDEX } from "./layers";
 import type { AgentChatController } from "./types";
 
-const SESSION_ACTION_LAYER_Z_INDEX = 2100;
 const SESSION_MENU_WIDTH = 152;
 const SESSION_MENU_HEIGHT = 76;
 const SESSION_MENU_GAP = 6;
@@ -159,7 +159,7 @@ export function SessionActions({
               top: menuPosition.top,
               left: menuPosition.left,
               width: SESSION_MENU_WIDTH,
-              zIndex: SESSION_ACTION_LAYER_Z_INDEX,
+              zIndex: AGENT_CHAT_CHILD_LAYER_Z_INDEX,
               pointerEvents: "auto",
             }}
             onClick={(event) => event.stopPropagation()}
@@ -226,7 +226,7 @@ export function SessionActions({
       >
         <DialogContent
           data-assistant-layer="true"
-          layerZIndex={SESSION_ACTION_LAYER_Z_INDEX}
+          layerZIndex={AGENT_CHAT_CHILD_LAYER_Z_INDEX}
           showCloseButton={!saving}
           className="sm:max-w-md"
         >
@@ -271,7 +271,7 @@ export function SessionActions({
       >
         <DialogContent
           data-assistant-layer="true"
-          layerZIndex={SESSION_ACTION_LAYER_Z_INDEX}
+          layerZIndex={AGENT_CHAT_CHILD_LAYER_Z_INDEX}
           showCloseButton={!deleting}
           className="sm:max-w-md"
         >
@@ -328,10 +328,7 @@ function resolveMenuPosition(trigger: HTMLElement): MenuPosition {
     below + SESSION_MENU_HEIGHT <= window.innerHeight - VIEWPORT_GAP;
   const top = fitsBelow
     ? below
-    : Math.max(
-        VIEWPORT_GAP,
-        rect.top - SESSION_MENU_HEIGHT - SESSION_MENU_GAP,
-      );
+    : Math.max(VIEWPORT_GAP, rect.top - SESSION_MENU_HEIGHT - SESSION_MENU_GAP);
 
   return { top, left };
 }

@@ -23,7 +23,7 @@ type Transport struct {
 
 func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig, parameters map[string]any, gateway energonservice.GatewayService, transport Transport, references []MediaReference) Tool {
 	name := FunctionName("power_", power.Key)
-	countPlan := buildMediaCountPlan(power, parameters)
+	countPlan := buildMediaCountPlan(power, config.Params)
 	toolReferences := references
 	if !isMediaPower(power) {
 		toolReferences = nil
@@ -34,11 +34,14 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 	currentDefinition := func() Definition {
 		currentReferences := referenceStore.Snapshot()
 		return Definition{
-			Name:        name,
-			Title:       strings.TrimSpace(power.Name),
-			Kind:        strings.TrimSpace(power.Kind),
-			Description: powerToolDescription(power, countPlan) + MediaReferencesDescription(currentReferences),
-			Parameters:  mediaToolParameters(MediaReferencesParameters(parameters, currentReferences), countPlan),
+			Name:                  name,
+			Title:                 strings.TrimSpace(power.Name),
+			Kind:                  strings.TrimSpace(power.Kind),
+			Description:           powerToolDescription(power, countPlan) + MediaReferencesDescription(currentReferences),
+			Parameters:            mediaToolParameters(MediaReferencesParameters(parameters, currentReferences, config.Params), countPlan),
+			ActivityParameterKeys: powerActivityParameterKeys(config.Params),
+			ActivityCountKey:      countPlan.key,
+			ActivityPromptKey:     countPlan.promptKey,
 		}
 	}
 	return Tool{
@@ -65,6 +68,7 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 				ctx,
 				power,
 				count,
+				countPlan.promptKey,
 				call.RequestID,
 				input,
 				config.SelectedTargetID,
@@ -81,6 +85,18 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 			}, nil
 		},
 	}
+}
+
+func powerActivityParameterKeys(params []energonservice.PowerParam) []string {
+	result := make([]string, 0, len(params))
+	for _, param := range params {
+		key := strings.TrimSpace(param.Key)
+		if !param.IsToolbar() || key == "" {
+			continue
+		}
+		result = append(result, key)
+	}
+	return result
 }
 
 func preparePowerInput(arguments map[string]any, params []energonservice.PowerParam) (map[string]any, error) {

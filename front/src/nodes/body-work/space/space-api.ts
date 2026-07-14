@@ -1,5 +1,7 @@
 import { joinSiteApi, request } from "@dever/front-plugin";
 import {
+  normalizeAssetVersion,
+  normalizeAssetVersions,
   normalizeCanvasState,
   normalizePowerCatalog,
   normalizeProjectAsset,
@@ -8,11 +10,14 @@ import {
 import { persistedCanvasState } from "./space-canvas-state";
 import { isSuccessResponse } from "../shared/api-response";
 import type {
+  AssetVersion,
+  AssetVersionPage,
   CanvasResultSourceRef,
   PowerForm,
   PowerKindOption,
   PowerOption,
   ProjectAsset,
+  SpaceAssetDetail,
   SpaceBootstrap,
   SpaceCanvasState,
 } from "./types";
@@ -217,15 +222,17 @@ export async function saveSpaceAssetEditVersion(input: {
   assetId: number;
   versionId: number;
   content: unknown;
-  requestId?: string;
 }): Promise<ProjectAsset> {
-  const result = await request(joinSiteApi("project/update_asset_version"), "post", {
-    project_id: input.projectId,
-    asset_id: input.assetId,
-    version_id: input.versionId,
-    content: input.content,
-    request_id: input.requestId || "",
-  });
+  const result = await request(
+    joinSiteApi("project/update_asset_version"),
+    "post",
+    {
+      project_id: input.projectId,
+      asset_id: input.assetId,
+      version_id: input.versionId,
+      content: input.content,
+    },
+  );
   if (!isSuccessResponse(result)) {
     throw new Error(result.message || result.msg || "保存资产版本失败");
   }
@@ -236,22 +243,30 @@ export async function saveSpaceAssetEditVersion(input: {
   return normalizeProjectAsset(asset);
 }
 
-export async function useSpaceAssetVersion(input: {
+export async function restoreSpaceAssetVersion(input: {
   projectId: number;
   assetId: number;
   versionId: number;
+  requestId: string;
+  nodeKey: string;
 }): Promise<ProjectAsset> {
-  const result = await request(joinSiteApi("project/use_asset_version"), "post", {
-    project_id: input.projectId,
-    asset_id: input.assetId,
-    version_id: input.versionId,
-  });
+  const result = await request(
+    joinSiteApi("project/restore_asset_version"),
+    "post",
+    {
+      project_id: input.projectId,
+      asset_id: input.assetId,
+      version_id: input.versionId,
+      request_id: input.requestId,
+      node_key: input.nodeKey,
+    },
+  );
   if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "切换资产版本失败");
+    throw new Error(result.message || result.msg || "恢复资产版本失败");
   }
   const asset = (result.data as any)?.asset;
   if (!asset) {
-    throw new Error("资产版本切换结果为空");
+    throw new Error("资产版本恢复结果为空");
   }
   return normalizeProjectAsset(asset);
 }
@@ -259,10 +274,12 @@ export async function useSpaceAssetVersion(input: {
 export async function fetchSpaceAssetDetail(input: {
   projectId: number;
   assetId: number;
-}): Promise<ProjectAsset> {
+  currentOnly?: boolean;
+}): Promise<SpaceAssetDetail> {
   const result = await request(joinSiteApi("project/asset_detail"), "get", {
     project_id: input.projectId,
     asset_id: input.assetId,
+    current_only: input.currentOnly ? 1 : 0,
   });
   if (!isSuccessResponse(result)) {
     throw new Error(result.message || result.msg || "读取资产详情失败");
@@ -271,7 +288,67 @@ export async function fetchSpaceAssetDetail(input: {
   if (!asset) {
     throw new Error("资产详情为空");
   }
-  return normalizeProjectAsset(asset);
+  const data = (result.data || {}) as Record<string, unknown>;
+  const versions = normalizeAssetVersions(data.versions);
+  return {
+    asset: normalizeProjectAsset(asset),
+    versions,
+    versionTotal: Number(data.version_total || versions.length),
+    hasMore: Boolean(data.has_more),
+  };
+}
+
+export async function fetchSpaceAssetVersions(input: {
+  projectId: number;
+  assetId: number;
+  page: number;
+  pageSize?: number;
+}): Promise<AssetVersionPage> {
+  const result = await request(joinSiteApi("project/asset_versions"), "get", {
+    project_id: input.projectId,
+    asset_id: input.assetId,
+    page: input.page,
+    page_size: input.pageSize || 20,
+  });
+  if (!isSuccessResponse(result)) {
+    throw new Error(result.message || result.msg || "读取资产版本失败");
+  }
+  const data = (result.data || {}) as Record<string, unknown>;
+  const items = normalizeAssetVersions(data.items);
+  return {
+    items,
+    page: Number(data.page || input.page || 1),
+    pageSize: Number(data.page_size || input.pageSize || 20),
+    total: Number(data.total || items.length),
+    hasMore: Boolean(data.has_more),
+  };
+}
+
+export async function fetchSpaceAssetVersionDetail(input: {
+  projectId: number;
+  assetId: number;
+  versionId: number;
+}): Promise<AssetVersion> {
+  const result = await request(
+    joinSiteApi("project/asset_version_detail"),
+    "get",
+    {
+      project_id: input.projectId,
+      asset_id: input.assetId,
+      version_id: input.versionId,
+    },
+  );
+  if (!isSuccessResponse(result)) {
+    throw new Error(result.message || result.msg || "读取历史版本失败");
+  }
+  const raw = (result.data as any)?.version;
+  const version = normalizeAssetVersion(
+    raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {},
+  );
+  if (!version?.id) {
+    throw new Error("历史版本内容为空");
+  }
+  return version;
 }
 
 type SaveSpaceCanvasResultInput = {

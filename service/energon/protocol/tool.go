@@ -96,7 +96,8 @@ func MergeToolCalls(current []ToolCall, fragments []ToolCall) []ToolCall {
 }
 
 func mergeToolCallArguments(current string, fragment string) string {
-	if fragment == "" || current == fragment || strings.HasSuffix(current, fragment) {
+	// Delta fragments are positional; repeated suffix text can be valid JSON closers.
+	if fragment == "" || current == fragment {
 		return current
 	}
 	if current == "" || strings.HasPrefix(fragment, current) {

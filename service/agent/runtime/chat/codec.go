@@ -43,11 +43,39 @@ func messageMapWithArtifacts(ctx context.Context, row *agentmodel.Message, artif
 		output = mergeMessageOutput(output, map[string]any{"artifacts": artifacts})
 		output = hydrateActivityArtifacts(output, artifacts)
 	}
+	output = sanitizeActivityErrors(output)
 	return map[string]any{
 		"id": row.ID, "session_id": row.SessionID, "role": row.Role, "kind": row.Kind,
 		"text": row.Text, "content": decodeJSON(row.Content), "output": output,
 		"request_id": row.RequestID, "status": row.Status, "created_at": timeText(row.CreatedAt),
 	}
+}
+
+func sanitizeActivityErrors(output any) map[string]any {
+	result := mergeMessageOutput(output, nil)
+	activities, ok := result["activities"].([]any)
+	if !ok {
+		return result
+	}
+	for index, value := range activities {
+		activity, currentOK := value.(map[string]any)
+		if !currentOK {
+			continue
+		}
+		meta, _ := activity["meta"].(map[string]any)
+		if !strings.EqualFold(strings.TrimSpace(fmt.Sprint(meta["tool_status"])), "failed") {
+			continue
+		}
+		message := runtimeartifact.FailureText(fmt.Sprint(meta["tool_kind"]))
+		if message == "" {
+			continue
+		}
+		activity["text"] = message
+		activity["error"] = message
+		activities[index] = activity
+	}
+	result["activities"] = activities
+	return result
 }
 
 func hydrateActivityArtifacts(output any, artifacts []map[string]any) map[string]any {

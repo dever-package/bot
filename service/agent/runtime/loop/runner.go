@@ -87,12 +87,6 @@ func (s Service) run(controller *runController, execution execution) {
 			return
 		}
 		modelResult, err := s.callModel(ctx, controller, execution, input, history)
-		if err == nil && len(modelResult.ToolCalls) > 0 && strings.TrimSpace(modelResult.Text) == "" {
-			modelResult.Text = fallbackToolPreamble(modelResult.ToolCalls, execution.registry)
-			if modelResult.Text != "" {
-				_ = s.writeExecutionOutput(ctx, execution, map[string]any{"event": "delta", "text": modelResult.Text})
-			}
-		}
 		hasVisibleText := state.AppendVisibleText(modelResult.Text)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -130,7 +124,6 @@ func (s Service) run(controller *runController, execution execution) {
 			s.finish(&state, finishOutcome{status: runStatusFail, text: state.lastText, message: fmt.Sprintf("智能体达到最大步骤数 %d", maxSteps), stepType: "error", stepTitle: "达到最大步骤", stepStatus: stepStatusFail})
 			return
 		}
-
 		calls := normalizeToolCallIDs(modelResult.ToolCalls)
 		conversation = append(conversation, assistantToolHistoryMessage(modelResult.Text, calls))
 		for _, call := range calls {
@@ -184,7 +177,7 @@ func (s Service) run(controller *runController, execution execution) {
 			stepStatus := stepStatusSuccess
 			stepPayload := map[string]any{"tool_call": firstToolCallValue(call)}
 			if toolErr != nil {
-				content = toolErrorContent(toolErr.Error())
+				content = toolErrorContent(toolFailureText(definition, toolErr))
 				stepStatus = stepStatusWarning
 				stepPayload["error"] = toolErr.Error()
 				if toolResult.Content != nil {

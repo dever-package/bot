@@ -1628,6 +1628,7 @@ func upsertPublishedSkill(ctx context.Context, snapshot draftSnapshot, target st
 		skillID = existing.ID
 		skillModel.Update(ctx, map[string]any{"id": skillID}, record)
 	} else {
+		record["display_name"] = snapshot.Row.Name
 		record["sort"] = defaultSort
 		record["created_at"] = time.Now()
 		skillID = uint64(skillModel.Insert(ctx, record))

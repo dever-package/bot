@@ -773,6 +773,7 @@ func parseGraphFlowNodeEdges(raw any) []GraphFlowNodeEdge {
 func powerKindOptions(powers []PowerOption) []PowerKindOption {
 	labels := map[string]string{
 		"text":       "文本",
+		"storyboard": "分镜脚本",
 		"image":      "图片",
 		"video":      "视频",
 		"audio":      "音频",
@@ -781,7 +782,7 @@ func powerKindOptions(powers []PowerOption) []PowerKindOption {
 		"embeddings": "向量",
 		"workflow":   "工作流",
 	}
-	order := []string{"text", "image", "video", "audio", "role", "multi", "embeddings", "workflow"}
+	order := []string{"text", "storyboard", "image", "video", "audio", "role", "multi", "embeddings", "workflow"}
 	seen := map[string]bool{}
 	for _, power := range powers {
 		if power.Kind != "" {

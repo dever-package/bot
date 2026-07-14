@@ -21,6 +21,7 @@ import {
   AgentChatInteractionView,
   AgentChatSuggestions,
 } from "./interaction-view";
+import { AGENT_CHAT_CHILD_LAYER_Z_INDEX } from "./layers";
 import type { AgentChatController } from "./types";
 import {
   interactionResponseInput,
@@ -148,11 +149,7 @@ function UserMessage({ controller }: { controller: AgentChatController }) {
   );
 }
 
-function AssistantMessage({
-  controller,
-}: {
-  controller: AgentChatController;
-}) {
+function AssistantMessage({ controller }: { controller: AgentChatController }) {
   const status = useAuiState((state) => state.message.status);
   const output = useAuiState((state) => state.message.metadata.custom?.output);
   const activities = useAuiState(
@@ -168,6 +165,11 @@ function AssistantMessage({
     : undefined;
   const suggestions = readAgentChatSuggestions(output);
   const error = status?.type === "incomplete" && status.reason === "error";
+  const waitingForNextStep = isWaitingAfterKnowledge(
+    status?.type === "running",
+    visibleActivities,
+    sourceText,
+  );
   return (
     <MessagePrimitive.Root
       className={cn(
@@ -196,6 +198,7 @@ function AssistantMessage({
           return null;
         }}
       </MessagePrimitive.Parts>
+      {waitingForNextStep ? <NextStepIndicator /> : null}
       <AgentChatMessageOutput
         output={output}
         excludeOutputs={visibleActivities.map((activity) => activity.output)}
@@ -236,6 +239,8 @@ function Composer({ controller }: { controller: AgentChatController }) {
       running={controller.running}
       stopping={controller.stopping}
       cancelable={controller.cancelable}
+      layerZIndex={AGENT_CHAT_CHILD_LAYER_Z_INDEX}
+      parameters={controller.inputParams}
       loadReferences={controller.loadReferences}
       loadPreview={controller.loadReferencePreview}
       onSubmit={controller.send}
@@ -259,6 +264,39 @@ function WaitingIndicator() {
         />
       ))}
     </div>
+  );
+}
+
+function NextStepIndicator() {
+  return (
+    <div
+      role="status"
+      aria-label="智能体正在执行下一步"
+      className="agent-chat-next-step-indicator"
+    >
+      <span className="agent-chat-next-step-dot" />
+    </div>
+  );
+}
+
+function isWaitingAfterKnowledge(
+  running: boolean,
+  activities: AgentChatActivity[],
+  sourceText: unknown,
+) {
+  if (!running) {
+    return false;
+  }
+  const lastActivity = activities.at(-1);
+  if (
+    !lastActivity ||
+    lastActivity.kind !== "knowledge" ||
+    lastActivity.status === "running"
+  ) {
+    return false;
+  }
+  return (
+    String(sourceText || "").trimEnd() === lastActivity.anchorText.trimEnd()
   );
 }
 
@@ -290,6 +328,11 @@ const threadStyles = `
 .agent-chat-message-stack {
   gap: 28px;
   padding-bottom: 88px;
+}
+
+.agent-chat-interaction[data-presentation="stepper"] {
+  width: min(52%, 560px);
+  min-width: min(100%, 480px);
 }
 
 .agent-chat-media-grid {
@@ -473,6 +516,24 @@ const threadStyles = `
   animation: agent-chat-waiting-dot 1.05s ease-in-out infinite;
 }
 
+.agent-chat-next-step-indicator {
+  display: flex;
+  height: 18px;
+  margin-top: 4px;
+  align-items: center;
+  color: var(--foreground);
+}
+
+.agent-chat-next-step-dot {
+  display: block;
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 9999px;
+  background-color: currentColor;
+  animation: agent-chat-streaming-tail 0.9s ease-in-out infinite;
+}
+
 .agent-chat-markdown[data-status="running"] > :last-child:not(ul):not(ol)::after,
 .agent-chat-markdown[data-status="running"] > :last-child:is(ul, ol) > li:last-child::after {
   content: '';
@@ -515,6 +576,11 @@ const threadStyles = `
   .agent-chat-message-stack {
     gap: 20px;
     padding-bottom: 56px;
+  }
+
+  .agent-chat-interaction[data-presentation="stepper"] {
+    width: 100%;
+    min-width: 0;
   }
 
   .agent-chat-media-grid {

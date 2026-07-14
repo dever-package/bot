@@ -4,12 +4,22 @@ import (
 	"github.com/shemic/dever/server"
 
 	botapi "github.com/dever-package/bot/api"
+	runtimecontext "github.com/dever-package/bot/service/agent/runtime/context"
+	runtimeinput "github.com/dever-package/bot/service/agent/runtime/input"
 	runtimeloop "github.com/dever-package/bot/service/agent/runtime/loop"
 )
 
 type AgentRuntime struct{}
 
 var agentChatRuntime = runtimeloop.NewService()
+
+func (AgentRuntime) GetInputConfig(c *server.Context) error {
+	agent, err := runtimecontext.ResolveAgent(c.Context(), botapi.QueryText(c, "agent", "agent_key", "agent_id"))
+	if err != nil {
+		return botapi.WriteJSON(c, nil, err)
+	}
+	return botapi.WriteJSON(c, runtimeinput.LoadConfig(c.Context(), agent.ID), nil)
+}
 
 func (AgentRuntime) PostRun(c *server.Context) error {
 	body, err := botapi.BindBody(c)

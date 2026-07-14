@@ -65,6 +65,28 @@ func (Project) GetAssetDetail(c *server.Context) error {
 		c.Context(),
 		botapi.QueryUint64(c, "project_id", "projectId"),
 		botapi.QueryUint64(c, "asset_id", "assetId", "id"),
+		botapi.QueryUint64(c, "current_only", "currentOnly") > 0,
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Project) GetAssetVersions(c *server.Context) error {
+	data, err := projectRunner.AssetVersions(
+		c.Context(),
+		botapi.QueryUint64(c, "project_id", "projectId"),
+		botapi.QueryUint64(c, "asset_id", "assetId", "id"),
+		int(botapi.QueryUint64(c, "page")),
+		int(botapi.QueryUint64(c, "page_size", "pageSize")),
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Project) GetAssetVersionDetail(c *server.Context) error {
+	data, err := projectRunner.AssetVersionDetail(
+		c.Context(),
+		botapi.QueryUint64(c, "project_id", "projectId"),
+		botapi.QueryUint64(c, "asset_id", "assetId", "id"),
+		botapi.QueryUint64(c, "version_id", "versionId"),
 	)
 	return botapi.WriteJSON(c, data, err)
 }
@@ -112,16 +134,20 @@ func (Project) PostUpdateAssetVersion(c *server.Context) error {
 	return botapi.WriteJSON(c, data, err)
 }
 
-func (Project) PostUseAssetVersion(c *server.Context) error {
+func (Project) PostRestoreAssetVersion(c *server.Context) error {
 	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
-	data, err := projectRunner.UseAssetVersion(
+	data, err := projectRunner.RestoreAssetVersion(
 		c.Context(),
 		botapi.Uint64FromBody(body, "project_id", "projectId"),
-		botapi.Uint64FromBody(body, "asset_id", "assetId"),
-		botapi.Uint64FromBody(body, "version_id", "versionId"),
+		projectservice.RestoreAssetVersionRequest{
+			AssetID:   botapi.Uint64FromBody(body, "asset_id", "assetId"),
+			VersionID: botapi.Uint64FromBody(body, "version_id", "versionId"),
+			RequestID: botapi.TextFromBody(body, "request_id", "requestId"),
+			NodeKey:   botapi.TextFromBody(body, "node_key", "nodeKey"),
+		},
 	)
 	return botapi.WriteJSON(c, data, err)
 }

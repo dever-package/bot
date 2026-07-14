@@ -16,11 +16,11 @@ import {
   Loader2,
   Plus,
   Search,
-  Settings2,
   Upload,
   X,
 } from "lucide-react";
 import { defaultPowerParamValue } from "./space-power-param";
+import { PowerParamIcon } from "./space-power-icon";
 import type { PowerParam, PowerParamSource } from "./types";
 
 export { defaultPowerParamValue } from "./space-power-param";
@@ -831,7 +831,7 @@ function ParamMenu({
       id={param.key}
       openKey={openKey}
       label={paramControlLabel(param, value)}
-      icon={<Settings2 size={15} />}
+      icon={<PowerParamIcon name={param.icon} size={15} />}
       disabled={disabled}
       onToggle={onToggle}
     >

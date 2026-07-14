@@ -9,6 +9,7 @@ import { runtimeErrorMessage } from "@/lib/runtime-stream-output";
 import {
   archiveAgentChatSession,
   listAgentChatSessions,
+  loadAgentInputConfig,
   loadAgentChatReferencePreview,
   loadAgentChatSession,
   loadAgentChatSessionState,
@@ -19,6 +20,7 @@ import {
 import { useAgentChatRuns } from "./runs";
 import {
   loadAgentChatReferences,
+  type ReferenceComposerParam,
   type ReferenceLoadRequest,
   type ReferencePreview,
   type ReferencePreviewRequest,
@@ -59,6 +61,7 @@ export function useAgentChatStore({
   const [sessionsLoadingMore, setSessionsLoadingMore] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [error, setError] = useState("");
+  const [inputParams, setInputParams] = useState<ReferenceComposerParam[]>([]);
 
   const sessionIDRef = useRef(0);
   const sessionViewsRef = useRef(new Map<number, SessionView>());
@@ -658,6 +661,29 @@ export function useAgentChatStore({
     };
   }, [agentKey, contextKey, initializeChat, modalOpen, runs.reset]);
 
+  useEffect(() => {
+    if (!modalOpen || !agentKey) {
+      setInputParams([]);
+      return;
+    }
+    setInputParams([]);
+    let active = true;
+    void loadAgentInputConfig(runtimeApi.inputConfig, agentKey)
+      .then((params) => {
+        if (active) {
+          setInputParams(params);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setInputParams([]);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [agentKey, modalOpen, runtimeApi.inputConfig]);
+
   return {
     sessionID,
     sessionTitle,
@@ -671,6 +697,7 @@ export function useAgentChatStore({
     cancelable: runs.cancelable,
     sendDisabled: !agentKey || !sessionID || sessionLoading || runs.running,
     error,
+    inputParams,
     sessionListRef,
     messageListRef,
     openSession: (nextSessionID) => openSession(nextSessionID, false),

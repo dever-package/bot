@@ -1,5 +1,6 @@
 import {
   AudioLines,
+  BookOpen,
   CheckCircle2,
   CircleAlert,
   FileText,
@@ -19,6 +20,7 @@ import {
 import { artifactDisplayOutput, readAgentChatArtifacts } from "./artifact";
 
 const mediaKinds = new Set(["image", "video", "audio", "file"]);
+const compactActivityKinds = new Set(["knowledge", "skill"]);
 
 export function AgentChatActivityView({
   activity,
@@ -70,6 +72,13 @@ function ActivityPlaceholder({
   const Icon = activityIcon(activity.kind);
   const media = mediaKinds.has(activity.kind);
   const failed = activity.status === "failed";
+  if (compactActivityKinds.has(activity.kind)) {
+    return (
+      <div className="mt-2 max-w-2xl py-1 text-muted-foreground">
+        <ActivityLabel activity={activity} />
+      </div>
+    );
+  }
   if (failed || !media) {
     return (
       <div
@@ -153,6 +162,8 @@ function activityIcon(kind: string): LucideIcon {
       return AudioLines;
     case "file":
       return FileText;
+    case "knowledge":
+      return BookOpen;
     default:
       return Wrench;
   }

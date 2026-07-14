@@ -1,5 +1,6 @@
 import type {
   CanvasFunctionOption,
+  CanvasResultViewState,
   PowerOption,
   ProjectAsset,
   SpaceCanvasEdge,
@@ -32,17 +33,33 @@ type PersistedCanvasNode = {
   cardinality?: string;
   count?: number;
   flow?: Pick<TeamFlow, "id" | "key" | "name" | "goal">;
-  role?: Pick<TeamRole, "id" | "name" | "role_type" | "agent_id" | "asset_cate_id">;
-  asset?: Pick<ProjectAsset, "id" | "name" | "kind" | "role" | "asset_cate_id" | "version_id">;
+  role?: Pick<
+    TeamRole,
+    "id" | "name" | "role_type" | "agent_id" | "asset_cate_id"
+  >;
+  asset?: Pick<
+    ProjectAsset,
+    "id" | "name" | "kind" | "role" | "asset_cate_id" | "version_id"
+  >;
   power?: Pick<PowerOption, "id" | "key" | "name" | "kind" | "icon">;
   function_option?: Pick<CanvasFunctionOption, "key" | "label" | "description">;
   composer_draft?: Record<string, unknown>;
   result_ref?: Record<string, unknown>;
   result_output?: unknown;
+  result_view?: PersistedCanvasResultView;
   local?: boolean;
 };
 
-export function persistedCanvasState(canvas: SpaceCanvasState): PersistedCanvasState {
+type PersistedCanvasResultView = {
+  width: number;
+  height: number;
+  offset_x?: number;
+  offset_y?: number;
+};
+
+export function persistedCanvasState(
+  canvas: SpaceCanvasState,
+): PersistedCanvasState {
   return {
     asset_cate_id: Number(canvas.assetCateId || 0),
     nodes: canvas.nodes.map(persistedCanvasNode),
@@ -126,11 +143,46 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
   if (resultRef) {
     result.result_ref = resultRef;
   }
-  if (node.resultOutput != null && isJSONValue(node.resultOutput)) {
+  const hasStableResultAsset = Boolean(
+    Number(resultRef?.asset_id || 0) > 0 &&
+    Number(resultRef?.version_id || 0) > 0,
+  );
+  if (
+    !hasStableResultAsset &&
+    node.resultOutput != null &&
+    isJSONValue(node.resultOutput)
+  ) {
     result.result_output = node.resultOutput;
+  }
+  const resultView = persistedResultView(node.resultView);
+  if (resultView) {
+    result.result_view = resultView;
   }
   if (node.local != null) {
     result.local = node.local;
+  }
+  return result;
+}
+
+function persistedResultView(
+  value: CanvasResultViewState | undefined,
+): PersistedCanvasResultView | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const width = finiteNumber(value.width);
+  const height = finiteNumber(value.height);
+  if (width == null || height == null || width <= 0 || height <= 0) {
+    return undefined;
+  }
+  const result: PersistedCanvasResultView = { width, height };
+  const offsetX = finiteNumber(value.offsetX);
+  const offsetY = finiteNumber(value.offsetY);
+  if (offsetX != null) {
+    result.offset_x = offsetX;
+  }
+  if (offsetY != null) {
+    result.offset_y = offsetY;
   }
   return result;
 }
@@ -177,10 +229,10 @@ function isTransientParamValue(value: unknown) {
   }
   return Boolean(
     value.file ||
-      value.blob ||
-      value.preview ||
-      value.progress != null ||
-      value.uploading != null,
+    value.blob ||
+    value.preview ||
+    value.progress != null ||
+    value.uploading != null,
   );
 }
 
@@ -209,17 +261,33 @@ function persistedResultRef(value: unknown) {
   return Object.keys(result).length ? result : null;
 }
 
-function assignText(target: Record<string, unknown>, key: string, value: unknown) {
+function assignText(
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown,
+) {
   if (typeof value === "string" && value.trim()) {
     target[key] = value;
   }
 }
 
-function assignNumber(target: Record<string, unknown>, key: string, value: unknown) {
+function assignNumber(
+  target: Record<string, unknown>,
+  key: string,
+  value: unknown,
+) {
   const number = Number(value || 0);
   if (number > 0) {
     target[key] = number;
   }
+}
+
+function finiteNumber(value: unknown) {
+  if (value == null || value === "") {
+    return undefined;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, any> {

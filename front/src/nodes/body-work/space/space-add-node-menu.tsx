@@ -1,0 +1,239 @@
+import {
+  Eye,
+  Play,
+  Save,
+  Upload,
+  UserCheck,
+  Workflow,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
+import type { ReactNode } from "react";
+import { PowerIcon } from "./space-power-icon";
+import type {
+  CanvasFunctionOption,
+  PowerOption,
+  TeamFlow,
+  TeamRole,
+} from "./types";
+
+export const canvasFunctionOptions: CanvasFunctionOption[] = [
+  {
+    key: "start",
+    label: "开始",
+    description: "启动连接的创作节点，直到保存或展示。",
+  },
+  { key: "import", label: "导入", description: "导入资产并连接到当前节点。" },
+  {
+    key: "save",
+    label: "保存",
+    description: "将上游结果保存为当前资产类型的资产。",
+  },
+  { key: "display", label: "展示", description: "展示上游节点的结果。" },
+];
+
+type AddNodeMenuModel = {
+  x: number;
+  y: number;
+  connection?: { nodeId: string };
+};
+
+export function AddNodeMenu({
+  menu,
+  flows,
+  powers,
+  roles,
+  onClose,
+  onSelectFlow,
+  onSelectFunction,
+  onSelectRole,
+  onSelectPower,
+}: {
+  menu: AddNodeMenuModel;
+  flows: TeamFlow[];
+  powers: PowerOption[];
+  roles: TeamRole[];
+  onClose: () => void;
+  onSelectFlow: (flow: TeamFlow) => void;
+  onSelectFunction: (option: CanvasFunctionOption) => void;
+  onSelectRole: (role: TeamRole) => void;
+  onSelectPower: (power: PowerOption) => void;
+}) {
+  const point = clampMenuPoint(menu);
+  const sections: ReactNode[] = [];
+
+  if (powers.length > 0) {
+    sections.push(
+      renderMenuSection({
+        sectionKey: "powers",
+        title: "能力",
+        items: powers,
+        itemKey: (power) => String(power.key || power.id),
+        itemClassName: "is-power",
+        label: (power) => power.name,
+        icon: (power) => <PowerIcon power={power} size={16} />,
+        onSelect: onSelectPower,
+      }),
+    );
+  }
+  if (roles.length > 0) {
+    sections.push(
+      renderMenuSection({
+        sectionKey: "roles",
+        title: "智能体",
+        items: roles,
+        itemKey: (role) => String(role.id || role.role_key || role.name),
+        itemClassName: "is-agent",
+        label: (role) => role.name,
+        icon: () => <UserCheck size={16} />,
+        onSelect: onSelectRole,
+      }),
+    );
+  }
+  if (flows.length > 0) {
+    sections.push(
+      renderMenuSection({
+        sectionKey: "flows",
+        title: "流程",
+        items: flows,
+        itemKey: (flow) => String(flow.id || flow.key || flow.name),
+        itemClassName: "is-flow",
+        label: (flow) => flow.name,
+        icon: () => <Workflow size={16} />,
+        onSelect: onSelectFlow,
+      }),
+    );
+  }
+  sections.push(
+    renderMenuSection({
+      sectionKey: "functions",
+      title: "功能",
+      items: canvasFunctionOptions,
+      itemKey: (option) => option.key,
+      itemClassName: (option) =>
+        option.key === "import" ? "is-function is-import" : "is-function",
+      label: (option) => option.label,
+      icon: (option) => {
+        const Icon = functionIcon(option.key);
+        return <Icon size={16} />;
+      },
+      onSelect: onSelectFunction,
+    }),
+  );
+
+  return (
+    <>
+      <div
+        className="ws-add-menu-backdrop"
+        onMouseDown={onClose}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onClose();
+        }}
+      />
+      <section
+        className="ws-add-menu custom-scrollbar"
+        style={{ left: point.x, top: point.y, maxHeight: point.maxHeight }}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="ws-add-menu-head">
+          <strong>{menu.connection ? "引用该节点生成" : "添加节点"}</strong>
+        </div>
+        <div className="ws-add-menu-body">
+          {sections.map((section, index) => (
+            <div key={index}>
+              {section}
+              {index < sections.length - 1 ? (
+                <div className="ws-add-divider" />
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function renderMenuSection<T>({
+  sectionKey,
+  title,
+  items,
+  itemKey,
+  itemClassName,
+  label,
+  icon,
+  onSelect,
+}: {
+  sectionKey: string;
+  title: string;
+  items: T[];
+  itemKey: (item: T) => string;
+  itemClassName: string | ((item: T) => string);
+  label: (item: T) => string;
+  icon: (item: T) => ReactNode;
+  onSelect: (item: T) => void;
+}) {
+  return (
+    <div key={sectionKey} className="ws-add-section">
+      <div className="ws-add-section-title">{title}</div>
+      <div className="ws-add-menu-list">
+        {items.map((item) => {
+          const className =
+            typeof itemClassName === "function"
+              ? itemClassName(item)
+              : itemClassName;
+          return (
+            <button
+              key={itemKey(item)}
+              type="button"
+              className={`ws-add-item ${className}`.trim()}
+              title={label(item)}
+              onClick={() => onSelect(item)}
+            >
+              <span className="ws-add-icon">{icon(item)}</span>
+              <span className="ws-add-copy">
+                <span className="ws-add-label">{label(item)}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function functionIcon(key: string): LucideIcon {
+  if (key === "start") return Play;
+  if (key === "import") return Upload;
+  if (key === "save") return Save;
+  if (key === "display") return Eye;
+  return Zap;
+}
+
+function clampMenuPoint(menu: AddNodeMenuModel) {
+  if (typeof window === "undefined") {
+    return { x: menu.x, y: menu.y, maxHeight: 520 };
+  }
+  const margin = 14;
+  const minTop = 62;
+  const width = Math.min(292, window.innerWidth - margin * 2);
+  const maxHeight = Math.min(
+    520,
+    Math.max(180, window.innerHeight - minTop - margin),
+  );
+  const preferredY =
+    menu.y + maxHeight > window.innerHeight - margin
+      ? menu.y - maxHeight
+      : menu.y;
+  return {
+    x: Math.min(
+      Math.max(margin, menu.x),
+      Math.max(margin, window.innerWidth - width - margin),
+    ),
+    y: Math.min(
+      Math.max(minTop, preferredY),
+      Math.max(minTop, window.innerHeight - maxHeight - margin),
+    ),
+    maxHeight,
+  };
+}

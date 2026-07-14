@@ -10,14 +10,15 @@ import (
 func knowledgeNodeExpandTool(service knowledgeservice.Service, allowed map[uint64]knowledgeservice.KnowledgeBaseRuntime, baseProperty map[string]any, required []any) Tool {
 	required = appendRequired(required, "node_id")
 	return Tool{
-		Definition: Definition{
-			Name:        "expand_knowledge_node",
-			Description: "展开知识节点的多层子节点，用于继续浏览章节结构。",
-			Parameters: knowledgeParameters(baseProperty, required, map[string]any{
+		Definition: knowledgeToolDefinition(
+			"expand_knowledge_node",
+			"知识库节点",
+			"展开知识节点的多层子节点，用于继续浏览章节结构。",
+			knowledgeParameters(baseProperty, required, map[string]any{
 				"node_id": integerProperty("要展开的知识节点 ID"),
 				"depth":   integerProperty("展开层数，默认 1，最大 3"),
 			}),
-		},
+		),
 		Handle: func(ctx context.Context, call Call) (Result, error) {
 			base, opened, err := openMountedKnowledgeNode(ctx, service, allowed, call.Arguments)
 			if err != nil {
@@ -45,10 +46,11 @@ func knowledgeNodeExpandTool(service knowledgeservice.Service, allowed map[uint6
 func knowledgeNodeRelatedTool(service knowledgeservice.Service, allowed map[uint64]knowledgeservice.KnowledgeBaseRuntime, baseProperty map[string]any, required []any) Tool {
 	required = appendRequired(required, "node_id")
 	return Tool{
-		Definition: Definition{
-			Name:        "find_related_knowledge",
-			Description: "查找与指定知识节点有关联的其他节点。",
-			Parameters: knowledgeParameters(baseProperty, required, map[string]any{
+		Definition: knowledgeToolDefinition(
+			"find_related_knowledge",
+			"关联知识",
+			"查找与指定知识节点有关联的其他节点。",
+			knowledgeParameters(baseProperty, required, map[string]any{
 				"node_id": integerProperty("起始知识节点 ID"),
 				"edge_types": map[string]any{
 					"type":        "array",
@@ -57,7 +59,7 @@ func knowledgeNodeRelatedTool(service knowledgeservice.Service, allowed map[uint
 				},
 				"limit": integerProperty("最多返回条数，默认 10，最大 50"),
 			}),
-		},
+		),
 		Handle: func(ctx context.Context, call Call) (Result, error) {
 			base, opened, err := openMountedKnowledgeNode(ctx, service, allowed, call.Arguments)
 			if err != nil {
@@ -86,14 +88,15 @@ func knowledgeNodeRelatedTool(service knowledgeservice.Service, allowed map[uint
 func knowledgeDebugTool(service knowledgeservice.Service, allowed map[uint64]knowledgeservice.KnowledgeBaseRuntime, baseProperty map[string]any, required []any) Tool {
 	required = appendRequired(required, "query")
 	return Tool{
-		Definition: Definition{
-			Name:        "debug_knowledge_retrieval",
-			Description: "查看知识检索候选、来源和规划信息；仅在普通检索结果异常时使用。",
-			Parameters: knowledgeParameters(baseProperty, required, map[string]any{
+		Definition: knowledgeToolDefinition(
+			"debug_knowledge_retrieval",
+			"知识库检索诊断",
+			"查看知识检索候选、来源和规划信息；仅在普通检索结果异常时使用。",
+			knowledgeParameters(baseProperty, required, map[string]any{
 				"query": map[string]any{"type": "string", "description": "要调试的检索问题"},
 				"limit": integerProperty("最多返回候选数，默认 8"),
 			}),
-		},
+		),
 		Handle: func(ctx context.Context, call Call) (Result, error) {
 			base, err := resolveKnowledgeBase(call.Arguments, allowed)
 			if err != nil {

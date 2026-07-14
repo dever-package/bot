@@ -3294,7 +3294,9 @@ function AgentAssistantMessage({
   onSendSuggestion: (suggestion: AgentSuggestion) => void;
 }) {
   const resultDetail = buildAgentResultDetail(message);
-  const isResultCard = shouldDisplayResultCard(resultDetail);
+  const hasInteraction = Boolean(message.interaction);
+  const isResultCard =
+    !hasInteraction && shouldDisplayResultCard(resultDetail);
   const contentOutput = buildContentViewOutput(message);
   const hasOutput = isResultCard || hasContentViewOutput(contentOutput);
   const suggestions = buildMessageSuggestions(message, hasOutput);
@@ -3331,7 +3333,7 @@ function AgentAssistantMessage({
       ) : hasOutput ? (
         <AgentContentOutputView output={contentOutput} />
       ) : null}
-      {resultDetail && !isResultCard ? (
+      {resultDetail && !hasInteraction && !isResultCard ? (
         <AgentInlineResultActions onOpen={onOpenResult} />
       ) : null}
       <AgentSkillDraftPatchProgress

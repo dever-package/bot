@@ -40,36 +40,6 @@ var sessionRelation = orm.Relation{
 	OptionKeys: []string{"request_id", "status"},
 }
 
-var canvasRelation = orm.Relation{
-	Field:      "canvas_id",
-	Option:     "bot.body.NewCanvasModel",
-	OptionKeys: []string{"name", "status"},
-}
-
-var powerRelation = orm.Relation{
-	Field:      "power_id",
-	Option:     "bot.energon.NewPowerModel",
-	OptionKeys: []string{"name", "key", "kind", "cate_id"},
-}
-
-var agentRelation = orm.Relation{
-	Field:      "agent_id",
-	Option:     "bot.agent.NewAgentModel",
-	OptionKeys: []string{"name", "key", "cate_id"},
-}
-
-var teamRelation = orm.Relation{
-	Field:      "team_id",
-	Option:     "bot.team.NewTeamModel",
-	OptionKeys: []string{"name", "key", "cate_id"},
-}
-
-var releaseRelation = orm.Relation{
-	Field:      "release_id",
-	Option:     "bot.team.NewTeamReleaseModel",
-	OptionKeys: []string{"version", "status"},
-}
-
 type Body struct {
 	ID        uint64    `dorm:"primaryKey;autoIncrement;comment:载体ID"`
 	ProjectID uint64    `dorm:"type:bigint;not null;default:0;comment:项目"`

@@ -17,7 +17,7 @@ const (
 )
 
 func runtimeSkillTools(loaded map[string]agentskill.Entry, runtime SkillRuntime) []Tool {
-	return []Tool{
+	return skillActivityTools([]Tool{
 		listSkillFilesTool(loaded),
 		readSkillFileTool(loaded),
 		writeTempFileTool(loaded, runtime),
@@ -26,6 +26,42 @@ func runtimeSkillTools(loaded map[string]agentskill.Entry, runtime SkillRuntime)
 		httpRequestTool(loaded),
 		curlRequestTool(loaded),
 		mcpCallTool(loaded, runtime),
+	})
+}
+
+func skillActivityTools(tools []Tool) []Tool {
+	for index := range tools {
+		tools[index] = skillActivityTool(tools[index])
+	}
+	return tools
+}
+
+func skillActivityTool(tool Tool) Tool {
+	tool.Definition.Kind = "skill"
+	if strings.TrimSpace(tool.Definition.Title) == "" {
+		tool.Definition.Title = skillActivityTitle(tool.Definition.Name)
+	}
+	return tool
+}
+
+func skillActivityTitle(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "load_skill":
+		return "技能加载"
+	case "list_skill_files":
+		return "技能目录读取"
+	case "read_skill_file", "read_temp_file":
+		return "技能文件读取"
+	case "write_temp_file":
+		return "技能文件准备"
+	case "run_skill_script":
+		return "技能执行"
+	case "http_request", "curl_request":
+		return "技能请求"
+	case "mcp_call":
+		return "技能工具调用"
+	default:
+		return "技能调用"
 	}
 }
 

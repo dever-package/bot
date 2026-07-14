@@ -10,7 +10,6 @@ import (
 	projectmodel "github.com/dever-package/bot/model/project"
 	runtimeloop "github.com/dever-package/bot/service/agent/runtime/loop"
 	assetservice "github.com/dever-package/bot/service/asset"
-	bodyservice "github.com/dever-package/bot/service/body"
 	teamservice "github.com/dever-package/bot/service/team"
 	frontstream "github.com/dever-package/front/service/stream"
 )
@@ -20,9 +19,12 @@ type CanvasAgentRunRequest struct {
 	AssetCateID   uint64
 	NodeKey       string
 	NodeName      string
+	RoleID        uint64
 	AgentID       uint64
 	RequestID     string
 	Input         map[string]any
+	History       []any
+	OnStream      func(map[string]any)
 	PersistResult bool
 }
 
@@ -47,7 +49,11 @@ func (s Service) RunCanvasAgent(ctx context.Context, projectID uint64, req Canva
 	if err != nil {
 		return nil, err
 	}
-	if err := requireBodyAgent(ctx, s.body, project.BodyID, req.AgentID); err != nil {
+	project, err = s.SyncTeamRelease(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.team.ValidateCanvasAgent(ctx, project.ReleaseID, req.RoleID, req.AgentID); err != nil {
 		return nil, err
 	}
 	agent := agentmodel.NewAgentModel().Find(ctx, map[string]any{
@@ -61,6 +67,8 @@ func (s Service) RunCanvasAgent(ctx context.Context, projectID uint64, req Canva
 		AgentID:   req.AgentID,
 		RequestID: req.RequestID,
 		Input:     cloneInput(req.Input),
+		History:   req.History,
+		OnStream:  req.OnStream,
 	})
 	if err != nil {
 		return map[string]any{
@@ -94,6 +102,7 @@ func (s Service) RunCanvasAgent(ctx context.Context, projectID uint64, req Canva
 		FlowID:      req.FlowID,
 		AssetCateID: req.AssetCateID,
 		RunID:       result.RunID,
+		ReleaseID:   project.ReleaseID,
 		RequestID:   result.RequestID,
 		NodeKey:     req.NodeKey,
 		Name:        nodeName,
@@ -220,62 +229,7 @@ func (s Service) resolveRunTeam(ctx context.Context, project *projectmodel.Proje
 	if err != nil {
 		return 0, 0, err
 	}
-	if err := requireBodyTeam(ctx, s.body, project.BodyID, team.ID); err != nil {
-		return 0, 0, err
-	}
 	return team.ID, release.ID, nil
-}
-
-func requireBodyAgent(ctx context.Context, body bodyservice.Service, bodyID uint64, agentID uint64) error {
-	allowed, restricted := body.AllowedAgentIDs(ctx, bodyID)
-	if !restricted {
-		return nil
-	}
-	if agentID == 0 || !allowed[agentID] {
-		return fmt.Errorf("当前画布不允许使用该智能体")
-	}
-	return nil
-}
-
-func requireBodyTeam(ctx context.Context, body bodyservice.Service, bodyID uint64, teamID uint64) error {
-	allowed, restricted := body.AllowedTeamIDs(ctx, bodyID)
-	if !restricted {
-		return nil
-	}
-	if teamID == 0 || !allowed[teamID] {
-		return fmt.Errorf("当前画布不允许使用该团队")
-	}
-	return nil
-}
-
-func applyBodyAgentAndTeamLimits(ctx context.Context, body bodyservice.Service, bodyID uint64, config map[string]any) {
-	agentOrder, restrictedAgents := body.AllowedAgentOrder(ctx, bodyID)
-	if restrictedAgents {
-		if agents, ok := config["agents"].([]teamservice.AgentOption); ok {
-			config["agents"] = orderOptions(agents, agentOrder, func(option teamservice.AgentOption) uint64 { return option.ID })
-		}
-	}
-
-	teamOrder, restrictedTeams := body.AllowedTeamOrder(ctx, bodyID)
-	if restrictedTeams {
-		if teams, ok := config["teams"].([]teamservice.TeamOption); ok {
-			config["teams"] = orderOptions(teams, teamOrder, func(option teamservice.TeamOption) uint64 { return option.ID })
-		}
-	}
-}
-
-func orderOptions[T any](options []T, order []uint64, id func(T) uint64) []T {
-	byID := make(map[uint64]T, len(options))
-	for _, option := range options {
-		byID[id(option)] = option
-	}
-	result := make([]T, 0, len(order))
-	for _, id := range order {
-		if option, ok := byID[id]; ok {
-			result = append(result, option)
-		}
-	}
-	return result
 }
 
 func cloneInput(input map[string]any) map[string]any {

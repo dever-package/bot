@@ -112,6 +112,7 @@ func (s Service) saveInstalledSkill(ctx context.Context, execInfo *skillInstallE
 			"key":           install.Parsed.Key,
 			"name":          install.Parsed.Name,
 			"description":   install.Parsed.Description,
+			"display_name":  install.Parsed.Name,
 			"source_type":   agentmodel.SkillSourceTypeInstalled,
 			"source_url":    install.Source.SourceURL,
 			"install_input": execInfo.Input,

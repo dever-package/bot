@@ -151,8 +151,7 @@ export function useAgentChatRuns({
     (
       run: SessionRun,
       update:
-        | Partial<ChatMessage>
-        | ((message: ChatMessage) => Partial<ChatMessage>),
+        Partial<ChatMessage> | ((message: ChatMessage) => Partial<ChatMessage>),
     ) => {
       if (run.detached) {
         return;
@@ -505,6 +504,7 @@ export function useAgentChatRuns({
             input: {
               text,
               content: input.content,
+              params: input.params,
             },
           },
           onRequestID: (requestID) => {

@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const maxPresentedSuggestions = 3
+const maxPresentedSuggestions = 8
 
 func PresentSuggestionsTool() Tool {
 	return Tool{
@@ -14,7 +14,7 @@ func PresentSuggestionsTool() Tool {
 			Name:        "present_suggestions",
 			Title:       "后续建议",
 			Kind:        "presentation",
-			Description: "可选工具。仅在已经完整回答用户之后调用，用 1 到 3 个简短按钮给出自然的后续操作。调用后结束当前运行；不要把建议重复写进正文。",
+			Description: "可选工具。仅在已经完整回答一个具体任务，且本轮结果自然产生了与结果直接相关的后续操作时调用，用 1 到 8 个简短按钮让用户继续选择。禁止用产品的通用功能导航替代回答；普通问候、闲聊和没有明确后续操作的回答不要调用。调用后结束当前运行。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -47,7 +47,6 @@ func executePresentSuggestions(_ context.Context, call Call) (Result, error) {
 		return Result{}, err
 	}
 	return Result{
-		Text:         "你还可以继续选择下面的建议。",
 		Content:      map[string]any{"suggestions": items},
 		Presentation: map[string]any{"suggestions": items},
 		Terminal:     true,

@@ -36,6 +36,7 @@ export type AgentChatRuntimeApis = {
   stop: string;
   status: string;
   referencePreview: string;
+  inputConfig: string;
 };
 
 export type AgentChatStoreOptions = {
@@ -59,6 +60,7 @@ export type AgentChatController = {
   cancelable: boolean;
   sendDisabled: boolean;
   error: string;
+  inputParams: import("./reference").ReferenceComposerParam[];
   sessionListRef: RefObject<HTMLDivElement | null>;
   messageListRef: RefObject<HTMLDivElement | null>;
   openSession: (sessionID: number) => Promise<void>;

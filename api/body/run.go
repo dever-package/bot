@@ -47,6 +47,7 @@ func (Run) PostCanvasAgent(c *server.Context) error {
 		AssetCateID:   botapi.Uint64FromBody(body, "asset_cate_id", "assetCateId"),
 		NodeKey:       botapi.TextFromBody(body, "node_key", "nodeKey"),
 		NodeName:      botapi.TextFromBody(body, "node_name", "nodeName", "name"),
+		RoleID:        botapi.Uint64FromBody(body, "role_id", "roleId"),
 		AgentID:       botapi.Uint64FromBody(body, "agent_id", "agentId", "id"),
 		RequestID:     botapi.TextFromBody(body, "request_id", "requestId"),
 		Input:         botapi.MapFromBody(body, "input"),

@@ -19,6 +19,7 @@ import type {
   WorkRelease,
   WorkTeam,
 } from "./types";
+import { isStoryboardKind } from "./space-storyboard";
 
 const freeAssetCate: AssetCate = {
   id: 0,
@@ -30,6 +31,9 @@ const freeAssetCate: AssetCate = {
   sort: 0,
   virtual: true,
 };
+
+const DEFAULT_POWER_NODE_SIZE = { width: 180, height: 180 } as const;
+const DEFAULT_STORYBOARD_NODE_SIZE = { width: 620, height: 360 } as const;
 
 export function normalizeSpaceBootstrap(value: unknown): SpaceBootstrap {
   const row = asRecord(value);
@@ -172,7 +176,7 @@ export function createLocalNode(
     ],
   };
   const [title, subtitle, description] = labels[type];
-  const size = nodeDefaultSize(type);
+  const size = nodeDefaultSize(type, selectedPower?.kind);
   return {
     id: `local-${type}-${Date.now()}-${index}`,
     type,
@@ -214,6 +218,8 @@ export function assetKindLabel(kind: AssetKind) {
 
 export function powerKindLabel(kind: string) {
   switch (kind) {
+    case "storyboard":
+      return "分镜脚本";
     case "image":
       return "图片";
     case "audio":
@@ -394,9 +400,7 @@ function normalizePowerKind(value: Record<string, unknown>): PowerKindOption {
 
 function normalizeAsset(value: Record<string, unknown>): ProjectAsset {
   const version = normalizeAssetVersion(asRecord(value.version));
-  const versions = asRecords(value.versions)
-    .map(normalizeAssetVersion)
-    .filter((item): item is AssetVersion => Boolean(item));
+  const versions = normalizeAssetVersions(value.versions);
   return {
     id: numberValue(value.id),
     project_id: numberValue(value.project_id),
@@ -415,7 +419,7 @@ function normalizeAsset(value: Record<string, unknown>): ProjectAsset {
   };
 }
 
-function normalizeAssetVersion(
+export function normalizeAssetVersion(
   value: Record<string, unknown>,
 ): ProjectAsset["version"] {
   const id = numberValue(value.id);
@@ -428,10 +432,21 @@ function normalizeAssetVersion(
     run_id: numberValue(value.run_id),
     node_run_id: numberValue(value.node_run_id),
     release_id: numberValue(value.release_id),
+    request_id: stringValue(value.request_id),
+    node_key: stringValue(value.node_key),
+    source: asRecord(value.source),
     version: numberValue(value.version),
+    summary: stringValue(value.summary),
     content: value.content,
     created_at: stringValue(value.created_at),
+    updated_at: stringValue(value.updated_at),
   };
+}
+
+export function normalizeAssetVersions(value: unknown) {
+  return asRecords(value)
+    .map(normalizeAssetVersion)
+    .filter((item): item is AssetVersion => Boolean(item));
 }
 
 function normalizeNodesByFlow(value: unknown) {
@@ -475,6 +490,9 @@ function normalizeCanvasNode(value: Record<string, unknown>): SpaceCanvasNode | 
     composerDraft: normalizeCanvasComposerDraft(value.composer_draft),
     resultRef: normalizeCanvasResultRef(value.result_ref),
     resultOutput: firstDefined(value.result_output, value.resultOutput),
+    resultView: normalizeCanvasResultView(
+      firstDefined(value.result_view, value.resultView),
+    ),
     local: value.local !== false,
   };
   const kind = stringValue(value.kind) as SpaceCanvasNode["kind"];
@@ -501,7 +519,39 @@ function normalizeCanvasNode(value: Record<string, unknown>): SpaceCanvasNode | 
   if (power) {
     node.power = power;
   }
-  return node;
+  return normalizeLegacyStoryboardNodeSize(node);
+}
+
+function normalizeLegacyStoryboardNodeSize(node: SpaceCanvasNode) {
+  if (
+    node.type !== "power" ||
+    !isStoryboardKind(node.power?.kind || node.kind) ||
+    node.width !== DEFAULT_POWER_NODE_SIZE.width ||
+    node.height !== DEFAULT_POWER_NODE_SIZE.height
+  ) {
+    return node;
+  }
+  return {
+    ...node,
+    ...DEFAULT_STORYBOARD_NODE_SIZE,
+  };
+}
+
+function normalizeCanvasResultView(value: unknown) {
+  const row = asRecord(value);
+  const width = finiteNumber(row.width);
+  const height = finiteNumber(row.height);
+  if (width == null || height == null || width <= 0 || height <= 0) {
+    return undefined;
+  }
+  const offsetX = finiteNumber(firstDefined(row.offset_x, row.offsetX));
+  const offsetY = finiteNumber(firstDefined(row.offset_y, row.offsetY));
+  return {
+    width,
+    height,
+    ...(offsetX == null ? {} : { offsetX }),
+    ...(offsetY == null ? {} : { offsetY }),
+  };
 }
 
 function normalizeCanvasFlow(value: unknown) {
@@ -666,6 +716,8 @@ function flowOutputAssetCateIds(space: SpaceBootstrap, flow: TeamFlow) {
 
 function defaultPowerName(kind: AssetKind) {
   switch (kind) {
+    case "storyboard":
+      return "分镜脚本能力";
     case "image":
       return "生图能力";
     case "video":
@@ -677,7 +729,7 @@ function defaultPowerName(kind: AssetKind) {
   }
 }
 
-function nodeDefaultSize(type: SpaceCanvasNode["type"]) {
+function nodeDefaultSize(type: SpaceCanvasNode["type"], powerKind = "") {
   switch (type) {
     case "agent":
       return { width: 154, height: 154 };
@@ -686,10 +738,27 @@ function nodeDefaultSize(type: SpaceCanvasNode["type"]) {
     case "function":
       return { width: 128, height: 46 };
     case "power":
-      return { width: 180, height: 180 };
+      return isStoryboardKind(powerKind)
+        ? { ...DEFAULT_STORYBOARD_NODE_SIZE }
+        : { ...DEFAULT_POWER_NODE_SIZE };
     default:
       return { width: 250, height: 170 };
   }
+}
+
+export function hasDefaultCanvasNodeSize(
+  node: Pick<
+    SpaceCanvasNode,
+    "type" | "width" | "height" | "kind" | "power"
+  >,
+) {
+  const defaultSize = nodeDefaultSize(
+    node.type,
+    node.power?.kind || String(node.kind || ""),
+  );
+  return (
+    node.width === defaultSize.width && node.height === defaultSize.height
+  );
 }
 
 export type RichDocumentNode = {
@@ -1016,6 +1085,14 @@ function firstDefined(...values: unknown[]) {
 function numberValue(value: unknown) {
   const number = Number(value || 0);
   return Number.isFinite(number) ? number : 0;
+}
+
+function finiteNumber(value: unknown) {
+  if (value == null || value === "") {
+    return undefined;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
 }
 
 function stringValue(value: unknown) {

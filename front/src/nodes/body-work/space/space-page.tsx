@@ -1,5 +1,4 @@
 import {
-  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -11,11 +10,9 @@ import {
   type DragEvent,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
-  type ReactNode,
   type SetStateAction,
 } from "react";
 import { createPortal } from "react-dom";
-import * as LucideIcons from "lucide-react";
 import {
   Handle,
   MiniMap,
@@ -31,15 +28,14 @@ import {
   type OnConnect,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import "./space.css";
 import {
   ArrowLeft,
   Bot,
-  Brain,
   CheckCircle2,
   ChevronDown,
   Columns3,
   Compass,
-  Copy,
   Crop,
   Download,
   Eye,
@@ -51,14 +47,12 @@ import {
   Layers,
   Lightbulb,
   Loader2,
-  Map as MapIcon,
   Maximize2,
   MessageSquare,
   Minus,
   Moon,
   MoreHorizontal,
   MousePointer2,
-  Music,
   PenTool,
   Play,
   Plus,
@@ -66,9 +60,7 @@ import {
   Save,
   Scissors,
   Send,
-  Sparkles,
   Sun,
-  Trash2,
   Type,
   Users,
   UserCheck,
@@ -90,24 +82,47 @@ import {
   fetchSpaceRunStatus,
   submitSpaceCanvasFeedback,
   runSpaceCanvas,
-  saveSpaceCanvas,
   saveSpaceCanvasContent,
   saveSpaceCanvasMaterial,
   sendSpaceMessage,
   saveSpaceAssetEditVersion,
-  useSpaceAssetVersion,
 } from "./space-api";
-import { persistedCanvasState } from "./space-canvas-state";
+import { useCanvasAutosave, type CanvasSaveStatus } from "./space-autosave";
+import { SpaceCatalogCache } from "./space-catalog-cache";
+import { AddNodeMenu } from "./space-add-node-menu";
+import { PowerIcon } from "./space-power-icon";
+import {
+  CanvasViewControls,
+  NodeActionMenu,
+  useTransientFlowNodes,
+} from "./space-workbench";
+import {
+  CanvasFloatingResizer,
+  CanvasNodeResizer,
+  normalizeCanvasResultViewState,
+  withResizedCanvasNode,
+  withResizedCanvasResultView,
+  type CanvasNodeBounds,
+  type CanvasNodeResizeHandler,
+  type CanvasResultViewChangeHandler,
+} from "./space-resizer";
+import { CanvasResultView } from "./space-result-view";
+import { CanvasAgentResultContent } from "./space-agent-result";
+import {
+  emptyCanvasAgentRuntime,
+  hasCanvasAgentRuntimeContent,
+  readCanvasAgentResult,
+  reduceCanvasAgentRuntime,
+  type CanvasAgentRuntimeState,
+} from "./space-agent-runtime";
+import type { ReferenceInput } from "../../show/agent-chat/reference";
 import {
   mergeProjectAssetVersionHistory,
   resultAssetKind,
   runResultAsset,
   withRunResultAsset,
 } from "./space-assets";
-import {
-  buildNodeResultRef,
-  canvasResultSourceFromNode,
-} from "./space-result";
+import { buildNodeResultRef, canvasResultSourceFromNode } from "./space-result";
 import {
   AssetPickerButton,
   AssetWorkspacePanel,
@@ -125,10 +140,7 @@ import {
   canvasExecutionNodeIds,
   canvasNodeStopsExecution,
 } from "./space-execution-plan";
-import {
-  watchSpaceCanvasStream,
-  type SpaceStreamFrame,
-} from "./space-stream";
+import { watchSpaceCanvasStream, type SpaceStreamFrame } from "./space-stream";
 import {
   FEEDBACK_REPLACED_MESSAGE,
   agentFeedbackFromResult,
@@ -151,6 +163,7 @@ import {
   documentPreview,
   documentText,
   emptyCanvasState,
+  hasDefaultCanvasNodeSize,
   isExecutionRole,
   looseRichJSONText,
   powerKindLabel,
@@ -158,14 +171,12 @@ import {
   richDocument,
   visibleAssetCates,
 } from "./space-model";
-import { WorkSpaceStyles } from "./space-styles";
 import type {
   AssetCate,
-  AssetVersion,
-  CanvasResultSourceRef,
   CanvasFunctionOption,
+  CanvasResultSourceRef,
+  CanvasResultViewState,
   PowerForm,
-  PowerKindOption,
   PowerOption,
   PowerParam,
   ProjectAsset,
@@ -186,29 +197,25 @@ import {
   isUploadPowerParam,
 } from "./space-prompt-composer";
 import { defaultPowerParamValues } from "./space-power-param";
-
-const { EnergonContentView, normalizeEnergonOutput } = getCompatModule(
-  "@/components/energon/content-view",
+import {
+  CanvasNodeContentView,
+  contentOutputNeedsRenderer,
+  normalizeEnergonOutput,
+} from "./space-content-view";
+import { plainMarkdownTextFromRichOutput } from "./space-content-output";
+import {
+  isStoryboardKind,
+  storyboardSummary,
+  type StoryboardDocument,
+} from "./space-storyboard";
+import {
+  StoryboardNodeContent,
+  type StoryboardNodeStatus,
+} from "./space-storyboard-node";
+import { NodeDetailDialog } from "./node-detail/node-detail-dialog";
+const { normalizeAgentResultOutputValue } = getCompatModule(
+  "@/lib/agent-result-protocol",
 ) as {
-  EnergonContentView?: React.ComponentType<{ output: any; emptyText?: string }>;
-  normalizeEnergonOutput?: (output: any) => any;
-};
-const { RichTextEditor: CompatRichTextEditor } = getCompatModule(
-  "@/components/rich-text-editor",
-) as {
-  RichTextEditor?: React.ComponentType<{
-    value: unknown;
-    onChange: (value: string) => void;
-    contentFormat?: "json" | "markdown";
-    placeholder?: string;
-    minHeight?: number;
-    maxHeight?: number;
-    className?: string;
-    controlClassName?: string;
-    disabled?: boolean;
-  }>;
-};
-const { normalizeAgentResultOutputValue } = getCompatModule("@/lib/agent-result-protocol") as {
   normalizeAgentResultOutputValue?: (value: any) => any;
 };
 
@@ -220,8 +227,12 @@ type RunningNodeState = {
   startedAt: number;
   progress: number;
   status: "running" | "waiting" | "success" | "error";
+  streamText?: string;
+  streamStarted?: boolean;
+  agent?: CanvasAgentRuntimeState;
 };
 type RunningNodeMap = Record<string, RunningNodeState>;
+const EMPTY_RUNNING_NODE_MAP: RunningNodeMap = {};
 type RunningNodeSetter = Dispatch<SetStateAction<RunningNodeMap>>;
 type WorkspaceCanvasRunRef = CanvasRunRef & {
   asset_cate_id?: number;
@@ -238,10 +249,19 @@ type ComposerDraft = {
 };
 type NodeDraftSetter = (nodeId: string, draft: ComposerDraft) => void;
 type NodeStartRunner = (node: SpaceCanvasNode) => Promise<void>;
-type BackendNodeRunner = (node: SpaceCanvasNode) => Promise<void>;
+type BackendNodeRunOptions = {
+  agentInput?: ReferenceInput;
+};
+type BackendNodeRunner = (
+  node: SpaceCanvasNode,
+  options?: BackendNodeRunOptions,
+) => Promise<void>;
 type FunctionNodeRunner = (node: SpaceCanvasNode) => Promise<boolean>;
 
-function omitRunningNode(nodes: RunningNodeMap, nodeId: string): RunningNodeMap {
+function omitRunningNode(
+  nodes: RunningNodeMap,
+  nodeId: string,
+): RunningNodeMap {
   if (!nodes[nodeId]) {
     return nodes;
   }
@@ -312,32 +332,9 @@ type AddNodeMenuState = {
   x: number;
   y: number;
   position: CanvasPoint;
-  view: "types" | "assets" | "powers" | "agents" | "flows" | "functions";
   connection?: PendingNodeConnection;
 };
 
-const functionOptions: CanvasFunctionOption[] = [
-  {
-    key: "start",
-    label: "开始",
-    description: "启动连接的创作节点，直到保存或展示。",
-  },
-  {
-    key: "import",
-    label: "导入",
-    description: "导入资产并连接到当前节点。",
-  },
-  {
-    key: "save",
-    label: "保存",
-    description: "将上游结果保存为当前资产类型的资产。",
-  },
-  {
-    key: "display",
-    label: "展示",
-    description: "展示上游节点的结果。",
-  },
-];
 const uploadComposerParam: PowerParam = {
   id: 0,
   name: "上传",
@@ -347,7 +344,6 @@ const uploadComposerParam: PowerParam = {
   max_files: 6,
 };
 const agentComposerParams: PowerParam[] = [uploadComposerParam];
-const powerFormCache = new Map<string, PowerForm>();
 
 const flowNodeTypes = {
   workSpace: SpaceNodeView,
@@ -360,6 +356,7 @@ const flowEdgeTypes = {
 export function WorkSpacePage() {
   const navigate = useNavigate();
   const projectId = useMemo(() => readProjectId(), []);
+  const catalogCache = useMemo(() => new SpaceCatalogCache(), []);
   const [space, setSpace] = useState<SpaceBootstrap | null>(null);
   const [activeCateId, setActiveCateId] = useState(0);
   const [selectedNodeId, setSelectedNodeId] = useState("");
@@ -372,8 +369,6 @@ export function WorkSpacePage() {
   const [theme, setTheme] = useState<WorkSpaceTheme>(() => readStoredTheme());
   const [nodeMenu, setNodeMenu] = useState<AddNodeMenuState | null>(null);
   const [powers, setPowers] = useState<PowerOption[]>([]);
-  const [powerKinds, setPowerKinds] = useState<PowerKindOption[]>([]);
-  const [powersLoading, setPowersLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [runningNodes, setRunningNodes] = useState<RunningNodeMap>({});
@@ -381,31 +376,56 @@ export function WorkSpacePage() {
     Record<string, Partial<SpaceCanvasNode>>
   >({});
   const [nodeDetail, setNodeDetail] = useState<SpaceCanvasNode | null>(null);
-  const [confirmRequest, setConfirmRequest] =
-    useState<ConfirmRequest | null>(null);
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(
+    null,
+  );
   const [focusNodeRequest, setFocusNodeRequest] =
     useState<NodeFocusRequest | null>(null);
   const [importPickerSignal, setImportPickerSignal] = useState(0);
   const [pendingImportNodeId, setPendingImportNodeId] = useState("");
   const [error, setError] = useState("");
   const [runStatus, setRunStatus] = useState("");
-  const [canvasRunRecords, setCanvasRunRecords] = useState<WorkspaceCanvasRunRef[]>([]);
+  const [canvasRunRecords, setCanvasRunRecords] = useState<
+    WorkspaceCanvasRunRef[]
+  >([]);
   const [startFlowFeedbackPrompt, setStartFlowFeedbackPrompt] = useState<{
     node: SpaceCanvasNode;
     recordId: string;
     prompt: FlowFeedbackPrompt;
   } | null>(null);
-  const loadedCanvasesRef = useRef<Record<string, string>>({});
   const pendingImportNodeRef = useRef<SpaceCanvasNode | null>(null);
   const requestedAssetDetailsRef = useRef<Set<number>>(new Set());
   const appliedCanvasRunsRef = useRef<Set<string>>(new Set());
-  const savingCanvasSnapshotsRef = useRef<Record<string, string>>({});
+  const changedCanvasKeysRef = useRef<Set<number>>(new Set());
   const startFlowFeedbackRef = useRef<{
     nodeId: string;
     recordId: string;
     resolve: (values: Record<string, unknown>) => void;
     reject: (err: Error) => void;
   } | null>(null);
+
+  const handleCanvasSaveError = useCallback((err: unknown) => {
+    toast.error(err instanceof Error ? err.message : "保存画布失败");
+  }, []);
+  const { markCanvasDirty, resetCanvasAutosave, canvasSaveStatus } =
+    useCanvasAutosave({
+      projectId,
+      enabled: Boolean(space),
+      canvases: canvasStates,
+      setCanvases: setCanvasStates,
+      onError: handleCanvasSaveError,
+    });
+
+  useEffect(() => {
+    if (changedCanvasKeysRef.current.size === 0) {
+      return;
+    }
+    const changedKeys = [...changedCanvasKeysRef.current];
+    changedCanvasKeysRef.current.clear();
+    for (const assetCateId of changedKeys) {
+      markCanvasDirty(assetCateId);
+    }
+  }, [canvasStates, markCanvasDirty]);
 
   const loadSpace = useCallback(async () => {
     if (!projectId) {
@@ -423,10 +443,17 @@ export function WorkSpacePage() {
       );
       setSpace(nextSpace);
       setCanvasStates(canvases);
-      loadedCanvasesRef.current = serializeCanvasMap(canvases);
+      resetCanvasAutosave(canvases);
       setActiveCateId(defaultAssetCateId(nextSpace));
       setPowers(nextSpace.powers || []);
-      setPowerKinds(nextSpace.powerKinds || []);
+      catalogCache.primeCatalog(
+        projectId,
+        Number(nextSpace.release?.id || nextSpace.project.release_id || 0),
+        {
+          powers: nextSpace.powers || [],
+          powerKinds: nextSpace.powerKinds || [],
+        },
+      );
       requestedAssetDetailsRef.current = new Set();
       appliedCanvasRunsRef.current = new Set();
       await loadWorkspaceCanvasExecutions(projectId, nextSpace, canvases);
@@ -435,7 +462,7 @@ export function WorkSpacePage() {
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [catalogCache, projectId, resetCanvasAutosave]);
 
   const requestConfirm = useCallback<ConfirmRequester>((request) => {
     setConfirmRequest(request);
@@ -455,7 +482,6 @@ export function WorkSpacePage() {
     () => (space && activeCate ? relatedFlows(space, activeCate.id) : []),
     [activeCate, space],
   );
-  const menuAssets = useMemo(() => space?.assets || [], [space]);
   const menuRoles = useMemo(() => {
     if (!space) return [];
     const workerRoles = (space.roles || []).filter(isExecutionRole);
@@ -465,10 +491,7 @@ export function WorkSpacePage() {
         role.asset_cate_id === 0 || role.asset_cate_id === activeCate.id,
     );
   }, [space, activeCate]);
-  const menuFlows = useMemo(
-    () => activeFlows,
-    [activeFlows],
-  );
+  const menuFlows = useMemo(() => activeFlows, [activeFlows]);
   const activeCanvas = useMemo(
     () =>
       activeCate
@@ -506,20 +529,24 @@ export function WorkSpacePage() {
       return;
     }
     const key = String(activeCate.id);
+    if (Object.prototype.hasOwnProperty.call(canvasStates, key)) {
+      return;
+    }
+    const seededCanvas = createSeedCanvasFromFlows(activeCate, activeFlows);
+    if (seededCanvas.nodes.length === 0) {
+      return;
+    }
     setCanvasStates((current) => {
       if (Object.prototype.hasOwnProperty.call(current, key)) {
         return current;
       }
-      const seededCanvas = createSeedCanvasFromFlows(activeCate, activeFlows);
-      if (seededCanvas.nodes.length === 0) {
-        return current;
-      }
+      changedCanvasKeysRef.current.add(activeCate.id);
       return {
         ...current,
         [key]: seededCanvas,
       };
     });
-  }, [activeCate, activeFlows, space]);
+  }, [activeCate, activeFlows, canvasStates, space]);
 
   const updateActiveCanvas = useCallback(
     (updater: (canvas: SpaceCanvasState) => SpaceCanvasState) => {
@@ -536,6 +563,7 @@ export function WorkSpacePage() {
         if (isSameCanvasState(currentCanvas, nextCanvas)) {
           return current;
         }
+        changedCanvasKeysRef.current.add(activeCate.id);
         return {
           ...current,
           [key]: nextCanvas,
@@ -572,6 +600,7 @@ export function WorkSpacePage() {
         if (isSameCanvasState(currentCanvas, nextCanvas)) {
           return current;
         }
+        changedCanvasKeysRef.current.add(assetCateId);
         return {
           ...current,
           [key]: nextCanvas,
@@ -591,60 +620,11 @@ export function WorkSpacePage() {
   const persistCanvasRunSnapshot = useCallback(
     async (input: CanvasStartRunInput) => {
       const cateId = Number(input.assetCate.id || 0);
-      if (!cateId) {
-        return;
-      }
-      const key = String(cateId);
-      const canvas = normalizeCanvasForState(
-        {
-          assetCateId: cateId,
-          nodes: input.nodes,
-          edges: input.edges,
-          viewport: input.viewport || {},
-        },
-        cateId,
-      );
-      const submittedCanvasSnapshot = stableStringifyCanvas(canvas);
-      if (savingCanvasSnapshotsRef.current[key] === submittedCanvasSnapshot) {
-        return;
-      }
-      savingCanvasSnapshotsRef.current[key] = submittedCanvasSnapshot;
-      try {
-        const savedCanvas = await saveSpaceCanvas(input.projectId, cateId, canvas);
-        const savedCanvasSnapshot = stableStringifyCanvas(savedCanvas);
-        loadedCanvasesRef.current[key] = savedCanvasSnapshot;
-        setCanvasStates((current) => {
-          const currentCanvas = current[key];
-          if (!currentCanvas) {
-            return {
-              ...current,
-              [key]: savedCanvas,
-            };
-          }
-          const currentCanvasSnapshot = stableStringifyCanvas(currentCanvas);
-          if (
-            currentCanvasSnapshot !== submittedCanvasSnapshot &&
-            currentCanvasSnapshot !== savedCanvasSnapshot
-          ) {
-            return current;
-          }
-          if (currentCanvasSnapshot === savedCanvasSnapshot) {
-            return current;
-          }
-          return {
-            ...current,
-            [key]: savedCanvas,
-          };
-        });
-      } catch {
-        // Autosave will retry from canvasStates if the immediate run snapshot save fails.
-      } finally {
-        if (savingCanvasSnapshotsRef.current[key] === submittedCanvasSnapshot) {
-          delete savingCanvasSnapshotsRef.current[key];
-        }
+      if (cateId) {
+        markCanvasDirty(cateId);
       }
     },
-    [],
+    [markCanvasDirty],
   );
 
   const updateNodeComposerDraft = useCallback<NodeDraftSetter>(
@@ -670,7 +650,9 @@ export function WorkSpacePage() {
       updater: (records: NodeFeedbackRecord[]) => NodeFeedbackRecord[],
     ) => {
       setNodeResultOverrides((current) => {
-        const canvasNode = activeCanvas.nodes.find((node) => node.id === nodeId);
+        const canvasNode = activeCanvas.nodes.find(
+          (node) => node.id === nodeId,
+        );
         if (!canvasNode) {
           return current;
         }
@@ -691,39 +673,36 @@ export function WorkSpacePage() {
     [activeCanvas.nodes],
   );
 
-  const clearNodeFeedbackRecords = useCallback(
-    (nodeIds: string[]) => {
-      const targets = new Set(nodeIds.filter(Boolean));
-      if (targets.size === 0) {
-        return;
+  const clearNodeFeedbackRecords = useCallback((nodeIds: string[]) => {
+    const targets = new Set(nodeIds.filter(Boolean));
+    if (targets.size === 0) {
+      return;
+    }
+    if (
+      startFlowFeedbackRef.current &&
+      targets.has(startFlowFeedbackRef.current.nodeId)
+    ) {
+      const pending = startFlowFeedbackRef.current;
+      startFlowFeedbackRef.current = null;
+      pending.reject(new Error(FEEDBACK_REPLACED_MESSAGE));
+    }
+    setStartFlowFeedbackPrompt((current) =>
+      current && targets.has(current.node.id) ? null : current,
+    );
+    setNodeResultOverrides((current) => {
+      const next = { ...current };
+      let changed = false;
+      for (const nodeId of targets) {
+        const currentPatch = next[nodeId] || {};
+        next[nodeId] = {
+          ...currentPatch,
+          feedbackRequests: [],
+        };
+        changed = true;
       }
-      if (
-        startFlowFeedbackRef.current &&
-        targets.has(startFlowFeedbackRef.current.nodeId)
-      ) {
-        const pending = startFlowFeedbackRef.current;
-        startFlowFeedbackRef.current = null;
-        pending.reject(new Error(FEEDBACK_REPLACED_MESSAGE));
-      }
-      setStartFlowFeedbackPrompt((current) =>
-        current && targets.has(current.node.id) ? null : current,
-      );
-      setNodeResultOverrides((current) => {
-        const next = { ...current };
-        let changed = false;
-        for (const nodeId of targets) {
-          const currentPatch = next[nodeId] || {};
-          next[nodeId] = {
-            ...currentPatch,
-            feedbackRequests: [],
-          };
-          changed = true;
-        }
-        return changed ? next : current;
-      });
-    },
-    [],
-  );
+      return changed ? next : current;
+    });
+  }, []);
 
   const upsertSpaceAsset = useCallback((asset: ProjectAsset) => {
     if (!asset || !asset.id) {
@@ -784,9 +763,8 @@ export function WorkSpacePage() {
       startFlowFeedbackRef.current = null;
       setStartFlowFeedbackPrompt(null);
       if (pending) {
-        patchNodeFeedbackRecords(
-          pending.nodeId,
-          (records) => submitNodeFeedbackRecord(records, pending.recordId, values),
+        patchNodeFeedbackRecords(pending.nodeId, (records) =>
+          submitNodeFeedbackRecord(records, pending.recordId, values),
         );
       }
       pending?.resolve(values);
@@ -867,7 +845,7 @@ export function WorkSpacePage() {
   );
 
   const runBackendSingleNode = useCallback<BackendNodeRunner>(
-    async (node) => {
+    async (node, options) => {
       if (!space || !activeCate) {
         return;
       }
@@ -893,6 +871,7 @@ export function WorkSpacePage() {
         viewport: activeCanvas.viewport,
         runInput: {
           _manual_input_context: inputContext || undefined,
+          _agent_turn_input: options?.agentInput,
           manual_node_id: node.id,
         },
         onNodeResult: updateNodeResult,
@@ -929,7 +908,8 @@ export function WorkSpacePage() {
         node,
         projectId,
         assetCate: activeCate,
-        inputContext: ((node as any).inputContext || null) as NodeInputContext | null,
+        inputContext: ((node as any).inputContext ||
+          null) as NodeInputContext | null,
         onNodeResult: updateNodeResult,
         onAssetCreated: upsertSpaceAsset,
         onRunStartNode: runStartNode,
@@ -950,65 +930,12 @@ export function WorkSpacePage() {
     if (!space) {
       return;
     }
-    const dirtyCanvases = Object.entries(canvasStates).filter(
-      ([key, canvas]) => {
-        const snapshot = stableStringifyCanvas(canvas);
-        return (
-          loadedCanvasesRef.current[key] !== snapshot &&
-          savingCanvasSnapshotsRef.current[key] !== snapshot
-        );
-      },
+    applyCanvasRunRecordsToCanvas(
+      canvasRunRecords,
+      activeCanvas,
+      activeCateId,
+      space,
     );
-    if (dirtyCanvases.length === 0) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      for (const [key, canvas] of dirtyCanvases) {
-        const submittedCanvasSnapshot = stableStringifyCanvas(canvas);
-        if (savingCanvasSnapshotsRef.current[key] === submittedCanvasSnapshot) {
-          continue;
-        }
-        savingCanvasSnapshotsRef.current[key] = submittedCanvasSnapshot;
-        void saveSpaceCanvas(space.project.id, canvas.assetCateId, canvas)
-          .then((savedCanvas) => {
-            const savedCanvasSnapshot = stableStringifyCanvas(savedCanvas);
-            loadedCanvasesRef.current[key] = savedCanvasSnapshot;
-            setCanvasStates((current) => {
-              const currentCanvas = current[key];
-              if (
-                !currentCanvas ||
-                stableStringifyCanvas(currentCanvas) !== submittedCanvasSnapshot
-              ) {
-                return current;
-              }
-              if (submittedCanvasSnapshot === savedCanvasSnapshot) {
-                return current;
-              }
-              return {
-                ...current,
-                [key]: savedCanvas,
-              };
-            });
-          })
-          .catch((err) => {
-            loadedCanvasesRef.current[key] = submittedCanvasSnapshot;
-            toast.error(err instanceof Error ? err.message : "保存画布失败");
-          })
-          .finally(() => {
-            if (savingCanvasSnapshotsRef.current[key] === submittedCanvasSnapshot) {
-              delete savingCanvasSnapshotsRef.current[key];
-            }
-          });
-      }
-    }, 520);
-    return () => window.clearTimeout(timer);
-  }, [canvasStates, space]);
-
-  useEffect(() => {
-    if (!space) {
-      return;
-    }
-    applyCanvasRunRecordsToCanvas(canvasRunRecords, activeCanvas, activeCateId, space);
   }, [activeCanvas, activeCateId, canvasRunRecords, space]);
 
   useEffect(() => {
@@ -1019,7 +946,14 @@ export function WorkSpacePage() {
       projectId,
       nodes: activeCanvas.nodes,
       requested: requestedAssetDetailsRef.current,
-      fetchAsset: (assetId) => fetchSpaceAssetDetail({ projectId, assetId }),
+      fetchAsset: async (assetId) =>
+        (
+          await fetchSpaceAssetDetail({
+            projectId,
+            assetId,
+            currentOnly: true,
+          })
+        ).asset,
       onAsset: (asset) => {
         upsertSpaceAsset(asset);
         setNodeResultOverrides((current) => {
@@ -1106,7 +1040,9 @@ export function WorkSpacePage() {
     cateId: number,
     targetSpace: SpaceBootstrap,
   ) {
-    const relatedRuns = runs.filter((run) => canvasRunRecordMatchesCate(run, cateId));
+    const relatedRuns = runs.filter((run) =>
+      canvasRunRecordMatchesCate(run, cateId),
+    );
     if (relatedRuns.length === 0) {
       return;
     }
@@ -1164,58 +1100,6 @@ export function WorkSpacePage() {
     applyBackendCanvasRunResults(input, newResults);
     syncBackendCanvasFeedbackRecord(input, run);
     markCanvasRunRecordRunningNodes(input, run);
-  }
-
-  async function continueCanvasRunRecord(run: WorkspaceCanvasRunRef) {
-    if (!space || !activeCate) {
-      return;
-    }
-    const canvas = canvasStates[String(activeCate.id)] || activeCanvas;
-    const startNode = canvasRunRecordStartNode(run, canvas.nodes);
-    if (!startNode) {
-      toast.error("运行记录缺少开始节点");
-      return;
-    }
-    const input: CanvasStartRunInput = {
-      projectId,
-      assetCate: activeCate,
-      space,
-      startNode,
-      nodes: canvas.nodes,
-      edges: canvas.edges,
-      viewport: canvas.viewport,
-      onNodeResult: updateNodeResult,
-      onAssetCreated: upsertSpaceAsset,
-      setRunningNode: setRunningNodes,
-      requestFlowFeedback: requestStartFlowFeedback,
-      canvasRun: run,
-    };
-    try {
-      const resumed = await resumeBackendCanvasRun(input, run);
-      let streamLastId = "0-0";
-      const canvasRun = await waitForCanvasRun(
-        input,
-        resumed,
-        streamLastId,
-        (results) => {
-          applyBackendCanvasRunResults(input, results);
-          markBackendCanvasNodeResultsDone(input, results);
-        },
-        () => false,
-        (lastId) => {
-          streamLastId = lastId;
-        },
-      );
-      applyBackendCanvasRunResults(input, canvasRun.node_results || []);
-      finishBackendCanvasRunningNodes(input, canvasRun);
-      await persistCanvasRunSnapshot(input);
-      toast.success("已继续画布运行");
-      void loadWorkspaceCanvasExecutions(projectId, space, canvasStates);
-    } catch (err) {
-      if (!isFeedbackReplacedError(err)) {
-        toast.error(err instanceof Error ? err.message : "继续画布运行失败");
-      }
-    }
   }
 
   function addConfiguredNode(
@@ -1329,7 +1213,11 @@ export function WorkSpacePage() {
         const endpoints = connectedNodeEdgeEndpoints(connection, node.id);
         edges = appendCanvasEdge(edges, endpoints.source, endpoints.target);
       } else if (options?.connectFromNodeId) {
-        edges = appendCanvasEdge(edges, options.connectFromNodeId || "", node.id);
+        edges = appendCanvasEdge(
+          edges,
+          options.connectFromNodeId || "",
+          node.id,
+        );
       } else if (options?.connectToNodeId) {
         edges = appendCanvasEdge(edges, node.id, options.connectToNodeId || "");
       }
@@ -1359,9 +1247,7 @@ export function WorkSpacePage() {
     }
     setWorkMode("create");
     setNodeMenu(null);
-    return replacementTarget
-      ? replaceAssetNode(replacementTarget, node)
-      : node;
+    return replacementTarget ? replaceAssetNode(replacementTarget, node) : node;
   }
 
   function copyCanvasNode(node: SpaceCanvasNode, position?: CanvasPoint) {
@@ -1449,7 +1335,10 @@ export function WorkSpacePage() {
     void patchDirectDisplayNodes(nodeId, output);
   }
 
-  async function patchDirectDisplayNodes(sourceNodeId: string, output: unknown) {
+  async function patchDirectDisplayNodes(
+    sourceNodeId: string,
+    output: unknown,
+  ) {
     if (!sourceNodeId) {
       return;
     }
@@ -1468,11 +1357,7 @@ export function WorkSpacePage() {
     for (const displayNode of directDisplayNodes) {
       updateNodeResult(
         displayNode.id,
-        buildGeneratedNodeResultPatch(
-          displayNode,
-          { output },
-          "展示导入结果",
-        ),
+        buildGeneratedNodeResultPatch(displayNode, { output }, "展示导入结果"),
       );
     }
   }
@@ -1565,7 +1450,6 @@ export function WorkSpacePage() {
       x: screen.x,
       y: screen.y,
       position,
-      view: "types",
       connection,
     });
     void loadPowerCatalog();
@@ -1579,37 +1463,21 @@ export function WorkSpacePage() {
     });
   }
 
-  async function showPowerPicker() {
-    setNodeMenu((current: AddNodeMenuState | null) =>
-      current ? { ...current, view: "powers" as const } : current,
-    );
-    await loadPowerCatalog();
-  }
-
-  async function loadPowerCatalog() {
+  async function loadPowerCatalog(force = false) {
     if (!space) {
       return;
     }
-    setPowersLoading(true);
     try {
-      const catalog = await fetchSpacePowers(space.project.id);
+      const catalog = await catalogCache.loadCatalog(
+        space.project.id,
+        Number(space.release?.id || space.project.release_id || 0),
+        () => fetchSpacePowers(space.project.id),
+        force,
+      );
       setPowers(catalog.powers);
-      setPowerKinds(catalog.powerKinds);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "加载能力列表失败");
-    } finally {
-      setPowersLoading(false);
     }
-  }
-
-  function selectMenuNodeType(type: SpaceCanvasNode["type"]) {
-    if (type === "power") {
-      void showPowerPicker();
-      return;
-    }
-    setNodeMenu((current: AddNodeMenuState | null) =>
-      current ? { ...current, view: nodeMenuViewForType(type) } : current,
-    );
   }
 
   async function submitMessage() {
@@ -1636,7 +1504,6 @@ export function WorkSpacePage() {
   if (loading) {
     return (
       <main className={`ws-page is-${theme} ws-loading-screen`}>
-        <WorkSpaceStyles />
         <div className="ws-loading-card">
           <Loader2 size={20} className="ws-spin" />
           <span>正在加载创作空间...</span>
@@ -1648,7 +1515,6 @@ export function WorkSpacePage() {
   if (error || !space || !activeCate) {
     return (
       <main className={`ws-page is-${theme} ws-loading-screen`}>
-        <WorkSpaceStyles />
         <div className="ws-loading-card ws-error-card">
           <span>{error || "创作空间不存在"}</span>
         </div>
@@ -1658,7 +1524,6 @@ export function WorkSpacePage() {
 
   return (
     <main className={`ws-page is-${theme} is-${workMode}-view`}>
-      <WorkSpaceStyles />
       <CanvasWorkbench
         activeCate={activeCate}
         mode={workMode}
@@ -1694,6 +1559,7 @@ export function WorkSpacePage() {
         onFocusNodeRequestConsumed={consumeFocusNodeRequest}
         projectId={projectId}
         space={space}
+        catalogCache={catalogCache}
         runningNodes={runningNodes}
         setRunningNode={setRunningNodes}
         onNodeResult={updateNodeResult}
@@ -1733,6 +1599,7 @@ export function WorkSpacePage() {
         space={space}
         cates={cates}
         activeCate={activeCate}
+        saveStatus={canvasSaveStatus[String(activeCate.id)] || "saved"}
         hasAssetCates={hasAssetCates}
         onBack={() => navigate({ to: "/bot/work" })}
         onSelectCate={switchCate}
@@ -1747,24 +1614,6 @@ export function WorkSpacePage() {
           setWorkMode(mode);
           setNodeMenu(null);
           setRunStatus("");
-        }}
-      />
-
-      <CanvasRunBanner
-        runs={canvasRunRecords.filter(
-          (run) =>
-            canvasRunRecordMatchesCate(run, activeCate.id) &&
-            isCanvasRunRecordActive(run),
-        )}
-        nodes={canvasModel.nodes}
-        onRefresh={loadSpace}
-        onFocusNode={(nodeId) => {
-          setWorkMode("create");
-          focusCanvasNode(nodeId);
-          setSelectedNodeId(nodeId);
-        }}
-        onContinue={(run) => {
-          void continueCanvasRunRecord(run);
         }}
       />
 
@@ -1866,26 +1715,14 @@ export function WorkSpacePage() {
       {nodeMenu ? (
         <AddNodeMenu
           menu={nodeMenu}
-          assets={menuAssets}
-          assetCates={cates}
           flows={menuFlows}
-          functionOptions={functionOptions}
           powers={powers}
-          powerKinds={powerKinds}
-          powersLoading={powersLoading}
           roles={menuRoles}
           onClose={() => setNodeMenu(null)}
-          onBack={() =>
-            setNodeMenu((current: AddNodeMenuState | null) =>
-              current ? { ...current, view: "types" as const } : current,
-            )
-          }
-          onSelectAsset={(asset) => addAssetNode(asset, nodeMenu.position)}
           onSelectFlow={(flow) => addFlowNode(flow, nodeMenu.position)}
           onSelectFunction={(functionOption) =>
             addFunctionNode(functionOption, nodeMenu.position)
           }
-          onSelect={selectMenuNodeType}
           onSelectRole={(role) => addAgentNode(role, nodeMenu.position)}
           onSelectPower={(power) => addPowerNode(power, nodeMenu.position)}
         />
@@ -1895,7 +1732,15 @@ export function WorkSpacePage() {
         <NodeDetailDialog
           projectId={space.project.id}
           node={nodeDetail}
-          onNodeUpdated={(nodePatch) => {
+          onAssetUpdated={(asset) => {
+            const normalizedAsset = mergeProjectAssetVersionHistory(
+              asset,
+              nodeDetail.asset,
+            );
+            const nodePatch = buildAssetVersionNodePatch(
+              nodeDetail,
+              normalizedAsset,
+            );
             updateNodeResult(nodeDetail.id, nodePatch);
             setNodeDetail((current) =>
               current?.id === nodeDetail.id
@@ -1917,6 +1762,7 @@ function TopCanvasToolbar({
   space,
   cates,
   activeCate,
+  saveStatus,
   hasAssetCates,
   onBack,
   onSelectCate,
@@ -1927,6 +1773,7 @@ function TopCanvasToolbar({
   space: SpaceBootstrap;
   cates: AssetCate[];
   activeCate: AssetCate;
+  saveStatus: CanvasSaveStatus;
   hasAssetCates: boolean;
   onBack: () => void;
   onSelectCate: (cateId: number) => void;
@@ -1951,7 +1798,9 @@ function TopCanvasToolbar({
         </button>
         <div className="ws-project-copy">
           <strong>{space.project.name}</strong>
-          <span>{space.team.name || space.project.team?.name || "自由团队"}</span>
+          <span>
+            {space.team.name || space.project.team?.name || "自由团队"}
+          </span>
         </div>
       </div>
 
@@ -1981,6 +1830,7 @@ function TopCanvasToolbar({
       ) : null}
 
       <div className="ws-top-actions">
+        <CanvasSaveIndicator status={saveStatus} />
         <div className="ws-team-pill">
           <Bot size={14} />
           {space.assets.length} 资产
@@ -1998,80 +1848,25 @@ function TopCanvasToolbar({
   );
 }
 
-function CanvasRunBanner({
-  runs,
-  nodes,
-  onRefresh,
-  onFocusNode,
-  onContinue,
-}: {
-  runs: WorkspaceCanvasRunRef[];
-  nodes: SpaceCanvasNode[];
-  onRefresh: () => void;
-  onFocusNode: (nodeId: string) => void;
-  onContinue: (run: WorkspaceCanvasRunRef) => void;
-}) {
-  if (runs.length === 0) {
-    return null;
-  }
-  const activeRun = runs[0];
-  const pendingNode = activeRun.pending_node;
-  const focusNodeId =
-    pendingNode?.node_key ||
-    activeRun.start_node_id ||
-    activeRun.execution_plan?.order?.[0] ||
-    "";
-  const nodeTitle =
-    nodes.find((node) => node.id === focusNodeId)?.title ||
-    pendingNode?.node_key ||
-    activeRun.start_node_id ||
-    "画布运行";
+function CanvasSaveIndicator({ status }: { status: CanvasSaveStatus }) {
+  const label =
+    status === "saving"
+      ? "保存中"
+      : status === "error"
+        ? "保存失败，正在重试"
+        : status === "dirty"
+          ? "未保存"
+          : "已保存";
   return (
-    <section className="ws-run-banner" aria-live="polite">
-      <div className="ws-run-banner-copy">
-        <span className={`ws-run-banner-dot is-${activeRun.status || "running"}`} />
-        <div>
-          <strong>{canvasRunRecordTitle(activeRun, runs.length)}</strong>
-          <span>{canvasRunRecordDescription(activeRun, nodeTitle)}</span>
-        </div>
-      </div>
-      <div className="ws-run-banner-actions">
-        {focusNodeId ? (
-          <button type="button" onClick={() => onFocusNode(focusNodeId)}>
-            定位
-          </button>
-        ) : null}
-        {activeRun.status === "waiting" && pendingNode?.node_key ? (
-          <button type="button" className="is-primary" onClick={() => onContinue(activeRun)}>
-            继续
-          </button>
-        ) : null}
-        <button type="button" onClick={onRefresh}>
-          刷新
-        </button>
-      </div>
-    </section>
+    <span className={`ws-save-indicator is-${status}`} title={label}>
+      {status === "saving" ? (
+        <Loader2 size={14} className="ws-spin" />
+      ) : (
+        <Save size={14} />
+      )}
+      {label}
+    </span>
   );
-}
-
-function canvasRunRecordTitle(run: WorkspaceCanvasRunRef, count: number) {
-  const suffix = count > 1 ? `等 ${count} 个` : "";
-  switch (run.status) {
-    case "waiting":
-      return `有等待反馈的画布运行${suffix}`;
-    case "pending":
-      return `有排队中的画布运行${suffix}`;
-    default:
-      return `有未完成的画布运行${suffix}`;
-  }
-}
-
-function canvasRunRecordDescription(run: WorkspaceCanvasRunRef, nodeTitle: string) {
-  const executed = Number(run.executed || run.node_results?.length || 0);
-  if (run.status === "waiting") {
-    return `${nodeTitle} 正在等待补充信息，已保留 ${executed} 个节点结果`;
-  }
-  return `${nodeTitle} 仍在运行，已读取 ${executed} 个节点结果`;
 }
 
 const dockModeOptions: Array<{
@@ -2107,197 +1902,6 @@ function LeftCanvasDock({
         );
       })}
     </nav>
-  );
-}
-
-function AddNodeMenu({
-  menu,
-  flows,
-  functionOptions,
-  powers,
-  roles,
-  onClose,
-  onSelectFlow,
-  onSelectFunction,
-  onSelectRole,
-  onSelectPower,
-}: {
-  menu: AddNodeMenuState;
-  assets: ProjectAsset[];
-  assetCates: AssetCate[];
-  flows: TeamFlow[];
-  functionOptions: CanvasFunctionOption[];
-  powers: PowerOption[];
-  powerKinds: PowerKindOption[];
-  powersLoading: boolean;
-  roles: TeamRole[];
-  onClose: () => void;
-  onBack: () => void;
-  onSelectAsset: (asset: ProjectAsset) => void;
-  onSelectFlow: (flow: TeamFlow) => void;
-  onSelectFunction: (functionOption: CanvasFunctionOption) => void;
-  onSelect: (type: SpaceCanvasNode["type"]) => void;
-  onSelectRole: (role: TeamRole) => void;
-  onSelectPower: (power: PowerOption) => void;
-}) {
-  const point = clampMenuPoint(menu);
-  const safePowers = powers || [];
-  const safeRoles = roles || [];
-  const safeFlows = flows || [];
-
-  const visibleSections: ReactNode[] = [];
-
-  const powerItems = safePowers;
-  if (powerItems.length > 0) {
-    visibleSections.push(
-      renderAddMenuSection({
-        sectionKey: "powers",
-        title: "能力",
-        items: powerItems,
-        itemKey: (item) => String(item.key || item.id),
-        itemClassName: "is-power",
-        label: (item) => item.name,
-        icon: (item) => {
-          return <PowerIcon power={item} size={16} />;
-        },
-        onSelect: onSelectPower,
-      }),
-    );
-  }
-
-  if (safeRoles.length > 0) {
-    visibleSections.push(
-      renderAddMenuSection({
-        sectionKey: "roles",
-        title: "智能体",
-        items: safeRoles,
-        itemKey: (role) => String(role.id || role.role_key || role.name),
-        itemClassName: "is-agent",
-        label: (role) => role.name,
-        icon: () => <UserCheck size={16} />,
-        onSelect: onSelectRole,
-      }),
-    );
-  }
-
-  if (safeFlows.length > 0) {
-    visibleSections.push(
-      renderAddMenuSection({
-        sectionKey: "flows",
-        title: "流程",
-        items: safeFlows,
-        itemKey: (flow) => String(flow.id || flow.key || flow.name),
-        itemClassName: "is-flow",
-        label: (flow) => flow.name,
-        icon: () => <Workflow size={16} />,
-        onSelect: onSelectFlow,
-      }),
-    );
-  }
-
-  const functionItems: CanvasFunctionOption[] = [
-    ...(functionOptions || []).filter((item) => item.key === "start"),
-    ...(functionOptions || []).filter((item) => item.key !== "start"),
-  ];
-  if (functionItems.length > 0) {
-    visibleSections.push(
-      renderAddMenuSection({
-        sectionKey: "functions",
-        title: "功能",
-        items: functionItems,
-        itemKey: (item) => item.key,
-        itemClassName: (item) =>
-          item.key === "import" ? "is-function is-import" : "is-function",
-        label: (item) => item.label,
-        icon: (option) => {
-          const Icon = functionIcon(option.key);
-          return <Icon size={16} />;
-        },
-        onSelect: onSelectFunction,
-      }),
-    );
-  }
-
-  return (
-    <>
-      <div
-        className="ws-add-menu-backdrop"
-        onMouseDown={onClose}
-        onContextMenu={(event: any) => {
-          event.preventDefault();
-          onClose();
-        }}
-      />
-      <section
-        className="ws-add-menu custom-scrollbar"
-        style={{ left: point.x, top: point.y, maxHeight: point.maxHeight }}
-        onMouseDown={(event: any) => event.stopPropagation()}
-      >
-        <div className="ws-add-menu-head">
-          <strong>{menu.connection ? "引用该节点生成" : "添加节点"}</strong>
-        </div>
-        <div className="ws-add-menu-body">
-          {visibleSections.map((sec, index) => (
-            <div key={index}>
-              {sec}
-              {index < visibleSections.length - 1 && (
-                <div className="ws-add-divider" />
-              )}
-            </div>
-          ))}
-        </div>
-      </section>
-    </>
-  );
-}
-
-function renderAddMenuSection<T>({
-  sectionKey,
-  title,
-  items,
-  itemKey,
-  itemClassName,
-  listClassName = "",
-  label,
-  icon,
-  onSelect,
-}: {
-  sectionKey: string;
-  title: string;
-  items: T[];
-  itemKey: (item: T) => string;
-  itemClassName: string | ((item: T) => string);
-  listClassName?: string;
-  label: (item: T) => string;
-  icon: (item: T) => ReactNode;
-  onSelect: (item: T) => void;
-}) {
-  return (
-    <div key={sectionKey} className="ws-add-section">
-      <div className="ws-add-section-title">{title}</div>
-      <div className={`ws-add-menu-list ${listClassName}`.trim()}>
-        {items.map((item) => {
-          const extraClassName =
-            typeof itemClassName === "function"
-              ? itemClassName(item)
-              : itemClassName;
-          return (
-            <button
-              key={itemKey(item)}
-              type="button"
-              className={`ws-add-item ${extraClassName}`.trim()}
-              title={label(item)}
-              onClick={() => onSelect(item)}
-            >
-              <span className="ws-add-icon">{icon(item)}</span>
-              <span className="ws-add-copy">
-                <span className="ws-add-label">{label(item)}</span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 
@@ -2386,6 +1990,12 @@ function AssetEditorSurface({
     safeDocumentText(displayValue) ||
     displayTextFromOutput(displayValue, "") ||
     assetContentText(asset);
+  const contentOutput = hasDisplayOutput(displayOutput)
+    ? displayOutput
+    : rich
+      ? { rich }
+      : content;
+  const useContentView = contentOutputNeedsRenderer(contentOutput);
   return (
     <article className="ws-asset-editor">
       <header className="ws-asset-editor-head">
@@ -2408,19 +2018,19 @@ function AssetEditorSurface({
       <div className="ws-asset-editor-body custom-scrollbar">
         {!asset ? (
           <EmptyAssetDetail activeCate={activeCate} />
-        ) : preview.imageUrl ? (
+        ) : !useContentView && preview.imageUrl ? (
           <div className="ws-asset-media-detail">
             <img src={preview.imageUrl} alt={asset.name || activeCate.name} />
           </div>
-        ) : preview.videoUrl ? (
+        ) : !useContentView && preview.videoUrl ? (
           <div className="ws-asset-media-detail">
             <video src={preview.videoUrl} controls playsInline />
           </div>
-        ) : preview.audioUrl ? (
+        ) : !useContentView && preview.audioUrl ? (
           <div className="ws-asset-media-detail">
             <audio src={preview.audioUrl} controls />
           </div>
-        ) : preview.fileUrl ? (
+        ) : !useContentView && preview.fileUrl ? (
           <div className="ws-asset-file-detail">
             <FileText size={40} />
             <strong>{asset.name || activeCate.name}</strong>
@@ -2430,15 +2040,14 @@ function AssetEditorSurface({
               下载文件
             </a>
           </div>
-        ) : EnergonContentView && hasDisplayOutput(displayOutput) ? (
+        ) : useContentView ? (
           <div className="ws-asset-energon-detail">
-            <EnergonContentView output={displayOutput} emptyText="暂无内容" />
+            <CanvasNodeContentView
+              output={contentOutput}
+              fallback={content}
+              className="ws-canvas-content-view"
+            />
           </div>
-        ) : rich ? (
-          <RichDocumentView
-            value={rich}
-            className="ws-asset-rich-detail"
-          />
         ) : (
           <textarea
             value={content}
@@ -2497,6 +2106,7 @@ function CanvasWorkbench({
   onFocusNodeRequestConsumed,
   projectId,
   space,
+  catalogCache,
   runningNodes,
   setRunningNode,
   onNodeResult,
@@ -2534,6 +2144,7 @@ function CanvasWorkbench({
   onFocusNodeRequestConsumed: (request: NodeFocusRequest) => void;
   projectId: number;
   space: SpaceBootstrap;
+  catalogCache: SpaceCatalogCache;
   runningNodes: RunningNodeMap;
   setRunningNode: RunningNodeSetter;
   onNodeResult: NodeResultSetter;
@@ -2553,6 +2164,7 @@ function CanvasWorkbench({
   const [flowInstance, setFlowInstance] = useState<FlowViewport | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState("");
   const [draggingNodeId, setDraggingNodeId] = useState("");
+  const [resizingNodeId, setResizingNodeId] = useState("");
   const [proximityEdge, setProximityEdge] = useState<Edge | null>(null);
   const [nodeActionMenu, setNodeActionMenu] = useState<{
     nodeId: string;
@@ -2568,6 +2180,112 @@ function CanvasWorkbench({
   const connectionCompletedRef = useRef(false);
   const skipNextPaneClickRef = useRef(false);
   const skipNextNodeClickRef = useRef(false);
+  const resizeNode: CanvasNodeResizeHandler = (nodeId, bounds) => {
+    setResizingNodeId("");
+    if (!interactive) {
+      return;
+    }
+    const nextNodes = withResizedCanvasNode(nodes, nodeId, bounds);
+    if (nextNodes !== nodes) {
+      onNodesCommit(nextNodes);
+    }
+  };
+  const resizeResultView: CanvasResultViewChangeHandler = (
+    nodeId,
+    resultView,
+  ) => {
+    setResizingNodeId("");
+    if (!interactive) {
+      return;
+    }
+    const nextNodes = withResizedCanvasResultView(
+      nodes,
+      nodeId,
+      resultView,
+    );
+    if (nextNodes !== nodes) {
+      onNodesCommit(nextNodes);
+    }
+  };
+  const nodeActionsRef = useRef({
+    onAddConfiguredNode,
+    onNodeResult,
+    onNodeDraftChange,
+    onAssetCreated,
+    onRunStartNode,
+    onRunFunctionNode,
+    onOpenImportPicker,
+    onClearFeedbackRecords,
+    onOpenFeedbackRecord,
+    onShowNodeDetail,
+    requestConfirm,
+    onRunBackendNode,
+    onNodeResizeStart: setResizingNodeId,
+    onNodeResizeEnd: resizeNode,
+    onResultViewResizeEnd: resizeResultView,
+  });
+  nodeActionsRef.current = {
+    onAddConfiguredNode,
+    onNodeResult,
+    onNodeDraftChange,
+    onAssetCreated,
+    onRunStartNode,
+    onRunFunctionNode,
+    onOpenImportPicker,
+    onClearFeedbackRecords,
+    onOpenFeedbackRecord,
+    onShowNodeDetail,
+    requestConfirm,
+    onRunBackendNode,
+    onNodeResizeStart: setResizingNodeId,
+    onNodeResizeEnd: resizeNode,
+    onResultViewResizeEnd: resizeResultView,
+  };
+  const stableNodeActions = useMemo(
+    () => ({
+      onAddConfiguredNode: (
+        type: SpaceCanvasNode["type"],
+        position?: CanvasPoint,
+        options?: Parameters<AddConfiguredNodeHandler>[2],
+      ) =>
+        nodeActionsRef.current.onAddConfiguredNode?.(type, position, options),
+      onNodeResult: (nodeId: string, patch: Partial<SpaceCanvasNode>) =>
+        nodeActionsRef.current.onNodeResult(nodeId, patch),
+      onNodeDraftChange: (nodeId: string, draft: ComposerDraft) =>
+        nodeActionsRef.current.onNodeDraftChange(nodeId, draft),
+      onAssetCreated: (asset: ProjectAsset) =>
+        nodeActionsRef.current.onAssetCreated(asset),
+      onRunStartNode: (node: SpaceCanvasNode) =>
+        nodeActionsRef.current.onRunStartNode(node),
+      onRunFunctionNode: (node: SpaceCanvasNode) =>
+        nodeActionsRef.current.onRunFunctionNode(node),
+      onOpenImportPicker: (nodeId: string) =>
+        nodeActionsRef.current.onOpenImportPicker(nodeId),
+      onClearFeedbackRecords: (nodeIds: string[]) =>
+        nodeActionsRef.current.onClearFeedbackRecords(nodeIds),
+      onOpenFeedbackRecord: (
+        node: SpaceCanvasNode,
+        record: NodeFeedbackRecord,
+      ) => nodeActionsRef.current.onOpenFeedbackRecord(node, record),
+      onShowNodeDetail: (node: SpaceCanvasNode) =>
+        nodeActionsRef.current.onShowNodeDetail(node),
+      requestConfirm: (request: ConfirmRequest) =>
+        nodeActionsRef.current.requestConfirm(request),
+      onRunBackendNode: (
+        node: SpaceCanvasNode,
+        options?: BackendNodeRunOptions,
+      ) => nodeActionsRef.current.onRunBackendNode(node, options),
+      onNodeResizeStart: (nodeId: string) =>
+        nodeActionsRef.current.onNodeResizeStart(nodeId),
+      onNodeResizeEnd: (nodeId: string, bounds: CanvasNodeBounds) =>
+        nodeActionsRef.current.onNodeResizeEnd(nodeId, bounds),
+      onResultViewResizeEnd: (
+        nodeId: string,
+        resultView: CanvasResultViewState,
+      ) => nodeActionsRef.current.onResultViewResizeEnd(nodeId, resultView),
+    }),
+    [],
+  );
   const fitKey = useMemo(() => {
     if (nodes.length === 0) {
       return "";
@@ -2575,7 +2293,7 @@ function CanvasWorkbench({
     return `${activeCate.id}:${nodes.map((node) => node.id).join("|")}`;
   }, [activeCate.id, nodes]);
 
-  const flowNodes = useMemo<Node[]>(() => {
+  const derivedFlowNodes = useMemo<Node[]>(() => {
     const activeIds = new Set<string>();
     const contextEdges = edges.map((edge) => ({
       source: edge.from,
@@ -2587,30 +2305,40 @@ function CanvasWorkbench({
       const selected = node.id === selectedNodeId;
       const className = `ws-flow-node ws-flow-node-${node.type}`;
 
-      const nodeData = {
-        ...node,
-        projectId,
-        space,
-        runningNode: runningNodes[node.id] || null,
-        canvasRunningNodes: runningNodes,
-        setRunningNode,
-        onAddConfiguredNode,
-        onNodeResult,
-        onNodeDraftChange,
-        onAssetCreated,
-        onRunStartNode,
-        onRunFunctionNode,
-        onOpenImportPicker,
-        onClearFeedbackRecords,
-        onOpenFeedbackRecord,
-        onShowNodeDetail,
-        requestConfirm,
-        onRunBackendNode,
-        viewportZoom,
-        inputContext: buildNodeInputContext(node.id, nodes, contextEdges),
-      };
-
+      const runningNode = runningNodes[node.id] || null;
+      const canvasRunningNodes =
+        node.type === "function" && node.functionOption?.key === "start"
+          ? runningNodes
+          : EMPTY_RUNNING_NODE_MAP;
+      const inputContext = buildNodeInputContext(node.id, nodes, contextEdges);
       const cached = flowNodeCache.current.get(node.id);
+      const cachedData = cached?.data as any;
+      const canReuseData =
+        cachedData?.sourceNode === node &&
+        cachedData.projectId === projectId &&
+        cachedData.space === space &&
+        cachedData.runningNode === runningNode &&
+        cachedData.canvasRunningNodes === canvasRunningNodes &&
+        cachedData.interactive === interactive &&
+        cachedData.viewportZoom === viewportZoom &&
+        sameNodeInputContext(cachedData.inputContext, inputContext);
+      const nodeData = canReuseData
+        ? cachedData
+        : {
+            ...node,
+            sourceNode: node,
+            projectId,
+            space,
+            catalogCache,
+            runningNode,
+            canvasRunningNodes,
+            interactive,
+            setRunningNode,
+            ...stableNodeActions,
+            viewportZoom,
+            inputContext,
+          };
+
       const cachedStyle = cached?.style as CSSProperties | undefined;
       const nodeStyleSize = canvasNodeStyleSize(node);
       if (
@@ -2650,26 +2378,22 @@ function CanvasWorkbench({
     return nextNodes;
   }, [
     edges,
+    interactive,
     nodes,
-    onAddConfiguredNode,
-    onAssetCreated,
-    onClearFeedbackRecords,
-    onNodeResult,
-    onNodeDraftChange,
-    onRunFunctionNode,
-    onOpenFeedbackRecord,
-    onOpenImportPicker,
-    onRunBackendNode,
-    onRunStartNode,
-    onShowNodeDetail,
     projectId,
-    requestConfirm,
     runningNodes,
     selectedNodeId,
     setRunningNode,
     space,
+    catalogCache,
+    stableNodeActions,
     viewportZoom,
   ]);
+
+  const { flowNodes, setFlowNodes } = useTransientFlowNodes(
+    derivedFlowNodes,
+    draggingNodeId || resizingNodeId,
+  );
 
   const deleteEdge = useCallback(
     (edgeId: string) => {
@@ -2778,23 +2502,13 @@ function CanvasWorkbench({
       if (!interactive) {
         return;
       }
-      const nextNodes = applyNodeChanges(changes, flowNodes);
-      const positionsById = new Map(
-        nextNodes.map((node) => [node.id, node.position]),
-      );
-      onNodesCommit(
-        nodes.map((node) => {
-          const position = positionsById.get(node.id);
-          if (!position || (node.x === position.x && node.y === position.y)) {
-            return node;
-          }
-          return {
-            ...node,
-            x: position.x,
-            y: position.y,
-          };
-        }),
-      );
+      setFlowNodes((current) => {
+        const nextNodes = applyNodeChanges(changes, current);
+        for (const node of nextNodes) {
+          flowNodeCache.current.set(node.id, node);
+        }
+        return nextNodes;
+      });
 
       let hasSelect = false;
       let selectedId = "";
@@ -2814,12 +2528,8 @@ function CanvasWorkbench({
       } else if (hasDeselect) {
         onSelectNode("");
       }
-
-      for (const node of nextNodes) {
-        flowNodeCache.current.set(node.id, node);
-      }
     },
-    [flowNodes, interactive, nodes, onNodesCommit, onSelectNode],
+    [interactive, onSelectNode],
   );
 
   const handleEdgesChange = useCallback(
@@ -2840,7 +2550,13 @@ function CanvasWorkbench({
       if (hasSelectionChange) {
         setSelectedEdgeId(nextSelectedEdgeId);
       }
-      const nextEdges = applyEdgeChanges(changes, flowEdges);
+      const structuralChanges = changes.filter(
+        (change) => change.type !== "select",
+      );
+      if (structuralChanges.length === 0) {
+        return;
+      }
+      const nextEdges = applyEdgeChanges(structuralChanges, flowEdges);
       onEdgesCommit(flowEdgesToCanvasEdges(nextEdges));
     },
     [flowEdges, interactive, onEdgesCommit],
@@ -3022,36 +2738,59 @@ function CanvasWorkbench({
     [flowEdges, flowNodes, interactive, nodes, updateProximityEdge],
   );
 
-  const handleNodeDragStop = useCallback(() => {
-    if (!interactive) {
+  const handleNodeDragStop = useCallback(
+    (_event: ReactMouseEvent | MouseEvent, draggedNode: Node) => {
+      if (!interactive) {
+        setDraggingNodeId("");
+        updateProximityEdge(null);
+        return;
+      }
+      const sourceNode = nodes.find((node) => node.id === draggedNode.id);
+      if (
+        sourceNode &&
+        (sourceNode.x !== draggedNode.position.x ||
+          sourceNode.y !== draggedNode.position.y)
+      ) {
+        onNodesCommit(
+          nodes.map((node) =>
+            node.id === draggedNode.id
+              ? {
+                  ...node,
+                  x: draggedNode.position.x,
+                  y: draggedNode.position.y,
+                }
+              : node,
+          ),
+        );
+      }
       setDraggingNodeId("");
-      updateProximityEdge(null);
-      return;
-    }
-    setDraggingNodeId("");
-    if (!proximityEdge) {
-      updateProximityEdge(null);
-      return;
-    }
-    const exists = flowEdges.some(
-      (edge) =>
-        edge.source === proximityEdge.source &&
-        edge.target === proximityEdge.target,
-    );
-    if (!exists) {
-      onEdgesCommit(
-        appendCanvasEdge(edges, proximityEdge.source, proximityEdge.target),
+      if (!proximityEdge) {
+        updateProximityEdge(null);
+        return;
+      }
+      const exists = flowEdges.some(
+        (edge) =>
+          edge.source === proximityEdge.source &&
+          edge.target === proximityEdge.target,
       );
-    }
-    updateProximityEdge(null);
-  }, [
-    edges,
-    flowEdges,
-    interactive,
-    onEdgesCommit,
-    proximityEdge,
-    updateProximityEdge,
-  ]);
+      if (!exists) {
+        onEdgesCommit(
+          appendCanvasEdge(edges, proximityEdge.source, proximityEdge.target),
+        );
+      }
+      updateProximityEdge(null);
+    },
+    [
+      edges,
+      flowEdges,
+      interactive,
+      onEdgesCommit,
+      onNodesCommit,
+      nodes,
+      proximityEdge,
+      updateProximityEdge,
+    ],
+  );
 
   const handlePaneClick = useCallback(
     (event: ReactMouseEvent | MouseEvent) => {
@@ -3157,15 +2896,18 @@ function CanvasWorkbench({
     closeNodeActionMenu();
   }
 
-  const onDragOver = useCallback((event: DragEvent) => {
-    if (!interactive) {
-      return;
-    }
-    event.preventDefault();
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = "move";
-    }
-  }, [interactive]);
+  const onDragOver = useCallback(
+    (event: DragEvent) => {
+      if (!interactive) {
+        return;
+      }
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "move";
+      }
+    },
+    [interactive],
+  );
 
   const onDrop = useCallback(
     (event: DragEvent) => {
@@ -3238,6 +2980,7 @@ function CanvasWorkbench({
   const canvasWrapClassName = [
     "ws-canvas-wrap",
     draggingNodeId ? "is-dragging" : "",
+    resizingNodeId ? "is-resizing" : "",
     interactive ? "is-interactive" : "is-passive",
     mode === "result" ? "is-result-mode" : "",
   ]
@@ -3310,6 +3053,8 @@ function CanvasWorkbench({
           setViewportZoom((current) =>
             Math.abs(current - viewport.zoom) > 0.005 ? viewport.zoom : current,
           );
+        }}
+        onMoveEnd={(_, viewport) => {
           onViewportCommit({
             x: viewport.x,
             y: viewport.y,
@@ -3389,1068 +3134,6 @@ function CanvasWorkbench({
   );
 }
 
-function NodeActionMenu({
-  point,
-  canShowDetail,
-  onClose,
-  onCopy,
-  onDelete,
-  onDetail,
-}: {
-  point: CanvasPoint;
-  canShowDetail: boolean;
-  onClose: () => void;
-  onCopy: () => void;
-  onDelete: () => void;
-  onDetail: () => void;
-}) {
-  return (
-    <>
-      <div className="ws-node-action-backdrop" onMouseDown={onClose} />
-      <section
-        className="ws-node-action-menu"
-        style={{ left: point.x, top: point.y }}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        {canShowDetail ? (
-          <button type="button" onClick={onDetail}>
-            <Eye size={15} />
-            <span>详情</span>
-          </button>
-        ) : null}
-        <button type="button" onClick={onCopy}>
-          <Copy size={15} />
-          <span>复制</span>
-        </button>
-        <button type="button" className="is-danger" onClick={onDelete}>
-          <Trash2 size={15} />
-          <span>删除</span>
-        </button>
-      </section>
-    </>
-  );
-}
-
-function CanvasViewControls({
-  showMiniMap,
-  snapToGrid,
-  zoom,
-  onToggleMiniMap,
-  onToggleSnap,
-  onReset,
-  onZoomIn,
-  onZoomOut,
-  onZoomChange,
-}: {
-  showMiniMap: boolean;
-  snapToGrid: boolean;
-  zoom: number;
-  onToggleMiniMap: () => void;
-  onToggleSnap: () => void;
-  onReset: () => void;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  onZoomChange: (zoom: number) => void;
-}) {
-  return (
-    <div className="ws-view-controls nodrag nopan">
-      <button
-        type="button"
-        className={showMiniMap ? "is-active" : ""}
-        onClick={onToggleMiniMap}
-        aria-label={showMiniMap ? "隐藏小地图" : "显示小地图"}
-        title={showMiniMap ? "隐藏小地图" : "显示小地图"}
-      >
-        <MapIcon size={16} />
-      </button>
-      <button
-        type="button"
-        className={snapToGrid ? "is-active" : ""}
-        onClick={onToggleSnap}
-        aria-label={snapToGrid ? "关闭网格吸附" : "开启网格吸附"}
-        title={snapToGrid ? "关闭网格吸附" : "开启网格吸附"}
-      >
-        <MousePointer2 size={16} />
-      </button>
-      <button
-        type="button"
-        onClick={onReset}
-        aria-label="重置视图"
-        title="重置视图"
-      >
-        <Maximize2 size={15} />
-      </button>
-      <div className="ws-view-zoom">
-        <button
-          type="button"
-          onClick={onZoomOut}
-          aria-label="缩小"
-          title="缩小"
-        >
-          <Minus size={15} />
-        </button>
-        <input
-          type="range"
-          min="0.35"
-          max="1.45"
-          step="0.01"
-          value={Math.max(0.35, Math.min(1.45, zoom))}
-          onChange={(event) => onZoomChange(Number(event.target.value))}
-          aria-label="画布缩放"
-        />
-        <button type="button" onClick={onZoomIn} aria-label="放大" title="放大">
-          <Plus size={15} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function NodeDetailDialog({
-  projectId,
-  node,
-  onNodeUpdated,
-  onClose,
-}: {
-  projectId: number;
-  node: SpaceCanvasNode;
-  onNodeUpdated?: (patch: Partial<SpaceCanvasNode>) => void;
-  onClose: () => void;
-}) {
-  const [detailNode, setDetailNode] = useState(node);
-  useEffect(() => {
-    setDetailNode((current) => {
-      const currentAssetId = Number(current.asset?.id || 0);
-      const nextAssetId = Number(node.asset?.id || 0);
-      if (
-        current.id === node.id &&
-        currentAssetId > 0 &&
-        currentAssetId === nextAssetId &&
-        node.asset
-      ) {
-        return {
-          ...node,
-          asset: mergeProjectAssetVersionHistory(node.asset, current.asset),
-        };
-      }
-      return node;
-    });
-  }, [node]);
-  useEffect(() => {
-    const assetId = Number(node.asset?.id || 0);
-    if (!assetId) {
-      return;
-    }
-    let canceled = false;
-    fetchSpaceAssetDetail({ projectId, assetId })
-      .then((asset) => {
-        if (canceled) {
-          return;
-        }
-        setDetailNode((current) => ({
-          ...current,
-          ...buildAssetVersionNodePatch(
-            current,
-            mergeProjectAssetVersionHistory(asset, current.asset || node.asset),
-          ),
-        }));
-      })
-      .catch(() => {});
-    return () => {
-      canceled = true;
-    };
-  }, [node.asset?.id, projectId]);
-  const versionItems = useMemo(
-    () => nodeDetailVersionItems(detailNode),
-    [detailNode],
-  );
-  const currentVersionItemId = versionItems[0]?.id || "current";
-  const [activeVersionId, setActiveVersionId] = useState(
-    () => currentVersionItemId,
-  );
-  const activeVersion =
-    versionItems.find((candidate) => candidate.id === activeVersionId) ||
-    versionItems[0];
-  const activeNode = activeVersion?.node || detailNode;
-  const detailRich = nodeRichDocument(activeNode);
-  const displayOutput = nodeEnergonOutput(activeNode);
-  const detailText = displayTextFromOutput(
-    displayOutput,
-    activeNode.description || "",
-  );
-  const editableSource = nodeDetailEditorSource(
-    detailRich,
-    displayOutput,
-    detailText,
-  );
-  const [editableContent, setEditableContent] = useState(
-    () => editableSource.value,
-  );
-  const autoSaveTimerRef = useRef<number | null>(null);
-  const savedContentRef = useRef(editableSource.value);
-  const [saveStatus, setSaveStatus] = useState<NodeDetailSaveStatus>("saved");
-  const [savedAt, setSavedAt] = useState(() => nodeDetailUpdatedAt(activeNode));
-  useEffect(() => {
-    setActiveVersionId(currentVersionItemId);
-  }, [node.id, currentVersionItemId]);
-  useEffect(() => {
-    setEditableContent(editableSource.value);
-    savedContentRef.current = editableSource.value;
-    setSaveStatus("saved");
-    setSavedAt(nodeDetailUpdatedAt(activeNode));
-    if (autoSaveTimerRef.current) {
-      window.clearTimeout(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = null;
-    }
-  }, [
-    editableSource.value,
-    editableSource.contentFormat,
-    activeNode.id,
-    activeVersion?.id,
-  ]);
-  useEffect(
-    () => () => {
-      if (autoSaveTimerRef.current) {
-        window.clearTimeout(autoSaveTimerRef.current);
-      }
-    },
-    [],
-  );
-  const preview = nodeDetailPreview(activeNode);
-  const downloadUrl =
-    preview.imageUrl || preview.videoUrl || preview.audioUrl || preview.fileUrl;
-  const activeDetailAsset = activeNode.asset || node.asset;
-  const activeDetailVersion = activeDetailAsset?.version;
-  const canAutoSaveVersion = Boolean(
-    activeVersion?.isCurrent &&
-      activeDetailAsset?.id &&
-      activeDetailVersion?.id,
-  );
-  const hasVersionSidebar = versionItems.length > 0;
-  const canEditDetail = nodeDetailEditorSourcePrefersEditor(
-    editableSource,
-    preview,
-  );
-  const isMediaDetail = Boolean(
-    !canEditDetail &&
-      (preview.imageUrl ||
-        preview.videoUrl ||
-        preview.audioUrl ||
-        preview.fileUrl),
-  );
-  const saveStatusLabel = nodeDetailSaveStatusLabel(
-    saveStatus,
-    canAutoSaveVersion,
-  );
-  const persistCurrentContent = useCallback(
-    async (content: string) => {
-      const asset = activeNode.asset || node.asset;
-      const version = asset?.version;
-      if (!onNodeUpdated || !asset?.id || !version?.id) {
-        return;
-      }
-      setSaveStatus("saving");
-      const contentValue = parseEditableContentForSave(
-        content,
-        editableSource.contentFormat,
-      );
-      try {
-        const savedAsset = await saveSpaceAssetEditVersion({
-          projectId,
-          assetId: asset.id,
-          versionId: version.id,
-          content: contentValue,
-          requestId: createCanvasSaveRequestId("edit", activeNode.id, content),
-        });
-        const normalizedAsset = mergeProjectAssetVersionHistory(
-          savedAsset,
-          asset,
-        );
-        onNodeUpdated(buildAssetVersionNodePatch(activeNode, normalizedAsset));
-        savedContentRef.current = content;
-        setSavedAt(nodeDetailAssetUpdatedAt(normalizedAsset));
-        setSaveStatus("saved");
-      } catch (err) {
-        setSaveStatus("error");
-        toast.error(err instanceof Error ? err.message : "保存失败");
-      }
-    },
-    [
-      activeNode,
-      editableSource.contentFormat,
-      node.asset,
-      onNodeUpdated,
-      projectId,
-    ],
-  );
-
-  useEffect(() => {
-    if (!canEditDetail || !canAutoSaveVersion) {
-      return;
-    }
-    if (editableContent === savedContentRef.current) {
-      if (saveStatus === "typing" || saveStatus === "error") {
-        setSaveStatus("saved");
-      }
-      return;
-    }
-    setSaveStatus("typing");
-    if (autoSaveTimerRef.current) {
-      window.clearTimeout(autoSaveTimerRef.current);
-    }
-    autoSaveTimerRef.current = window.setTimeout(() => {
-      autoSaveTimerRef.current = null;
-      persistCurrentContent(editableContent);
-    }, 900);
-  }, [
-    canAutoSaveVersion,
-    canEditDetail,
-    editableContent,
-    persistCurrentContent,
-    saveStatus,
-  ]);
-
-  async function handleVersionSelect(candidate: NodeDetailVersionItem) {
-    if (candidate.id === activeVersion?.id) {
-      setActiveVersionId(candidate.id);
-      return;
-    }
-    if (autoSaveTimerRef.current) {
-      window.clearTimeout(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = null;
-    }
-    setActiveVersionId(candidate.id);
-    const candidateSource = nodeDetailEditorSource(
-      nodeRichDocument(candidate.node),
-      nodeEnergonOutput(candidate.node),
-      displayTextFromOutput(
-        nodeEnergonOutput(candidate.node),
-        candidate.node.description || "",
-      ),
-    );
-    setEditableContent(candidateSource.value);
-    savedContentRef.current = candidateSource.value;
-    setSaveStatus("saved");
-    setSavedAt(nodeDetailUpdatedAt(candidate.node));
-    if (!candidate.isCurrent && onNodeUpdated) {
-      const candidateVersion = candidate.node.asset?.version;
-      const asset = node.asset;
-      if (candidateVersion?.id && asset?.id) {
-        try {
-          const savedAsset = await useSpaceAssetVersion({
-            projectId,
-            assetId: asset.id,
-            versionId: candidateVersion.id,
-          });
-          const normalizedAsset = mergeProjectAssetVersionHistory(
-            savedAsset,
-            asset,
-          );
-          onNodeUpdated(buildAssetVersionNodePatch(node, normalizedAsset));
-          const currentVersionId =
-            normalizedAsset.version?.id || candidateVersion.id;
-          setActiveVersionId(`version-${currentVersionId}`);
-          setSavedAt(nodeDetailAssetUpdatedAt(normalizedAsset));
-        } catch (err) {
-          toast.error(err instanceof Error ? err.message : "切换版本失败");
-        }
-      }
-    }
-  }
-
-  return (
-    <div className="ws-node-detail-backdrop" onMouseDown={onClose}>
-      <section
-        className={`ws-node-detail-modal ${
-          hasVersionSidebar ? "has-version-sidebar" : ""
-        }`}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header className="ws-node-detail-head">
-          <div className="ws-node-detail-title">
-            <strong>{activeNode.title}</strong>
-            {savedAt ? <span>最后更新：{savedAt}</span> : null}
-            {saveStatusLabel ? (
-              <em className={`is-${saveStatus}`}>{saveStatusLabel}</em>
-            ) : null}
-          </div>
-          <div className="ws-node-detail-actions">
-            {downloadUrl ? (
-              <a href={downloadUrl} download aria-label="下载内容">
-                <Download size={20} />
-              </a>
-            ) : null}
-            <button type="button" onClick={onClose} aria-label="关闭详情">
-              <X size={22} />
-            </button>
-          </div>
-        </header>
-        <div
-          className={`ws-node-detail-body ${
-            isMediaDetail ? "is-media-detail" : ""
-          }`}
-        >
-          {canEditDetail ? (
-            <NodeDetailRichEditor
-              value={editableContent}
-              onChange={setEditableContent}
-              contentFormat={editableSource.contentFormat}
-            />
-          ) : preview.imageUrl ? (
-            <img src={preview.imageUrl} alt={preview.text || activeNode.title} />
-          ) : preview.videoUrl ? (
-            <video src={preview.videoUrl} controls playsInline />
-          ) : preview.audioUrl ? (
-            <audio src={preview.audioUrl} controls />
-          ) : preview.fileUrl ? (
-            <div className="ws-node-detail-file">
-              <FileText size={46} />
-              <strong>{preview.text || activeNode.title}</strong>
-              <span>{preview.fileUrl}</span>
-              <a href={preview.fileUrl} download>
-                <Download size={16} />
-                下载文件
-              </a>
-            </div>
-          ) : (
-            <div className="ws-node-detail-output ws-node-detail-empty">
-              暂无详情
-            </div>
-          )}
-        </div>
-        {hasVersionSidebar ? (
-          <aside className="ws-node-detail-side">
-            <div className="ws-node-detail-side-head">
-              <span>记录</span>
-              <strong>{versionItems.length}</strong>
-            </div>
-            <div className="ws-node-detail-side-list">
-              {versionItems.map((candidate) => (
-                <button
-                  key={candidate.id}
-                  type="button"
-                  className={[
-                    candidate.id === activeVersion?.id ? "is-active" : "",
-                    candidate.isCurrent ? "is-current" : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  onClick={() => handleVersionSelect(candidate)}
-                >
-                  <span className="ws-node-detail-version-title">
-                    <strong>{candidate.title}</strong>
-                    {candidate.isCurrent ? (
-                      <i>
-                        <CheckCircle2 size={12} />
-                        当前版本
-                      </i>
-                    ) : null}
-                  </span>
-                  {candidate.time ? <em>{candidate.time}</em> : null}
-                  <small>{candidate.summary}</small>
-                </button>
-              ))}
-            </div>
-          </aside>
-        ) : null}
-      </section>
-    </div>
-  );
-}
-
-type NodeDetailVersionItem = {
-  id: string;
-  title: string;
-  summary: string;
-  time: string;
-  isCurrent: boolean;
-  node: SpaceCanvasNode;
-};
-
-type NodeDetailSaveStatus = "saved" | "typing" | "saving" | "error";
-
-function nodeDetailSaveStatusLabel(
-  status: NodeDetailSaveStatus,
-  canAutoSave: boolean,
-) {
-  if (!canAutoSave) {
-    return "";
-  }
-  if (status === "typing") {
-    return "输入中";
-  }
-  if (status === "saving") {
-    return "保存中";
-  }
-  if (status === "error") {
-    return "保存失败";
-  }
-  return "已保存";
-}
-
-function nodeDetailVersionItems(node: SpaceCanvasNode): NodeDetailVersionItem[] {
-  if (!node.asset?.id) {
-    return [];
-  }
-  const currentVersionId = Number(
-    node.asset.version_id || node.asset.version?.id || 0,
-  );
-  return nodeDetailOrderedVersions(node).map((version, index) =>
-    nodeDetailVersionItem(
-      node,
-      version,
-      currentVersionId > 0
-        ? Number(version.id || 0) === currentVersionId
-        : index === 0,
-    ),
-  );
-}
-
-function nodeDetailOrderedVersions(node: SpaceCanvasNode): AssetVersion[] {
-  if (!node.asset?.id) {
-    return [];
-  }
-  const versions: AssetVersion[] = [];
-  const seen = new Set<string>();
-  const appendVersion = (version: AssetVersion | undefined | null) => {
-    if (!version || Number(version.id || 0) <= 0) {
-      return;
-    }
-    const key = String(version.id || version.version || versions.length);
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    versions.push(version);
-  };
-
-  appendVersion(node.asset.version);
-  const historyVersions = nodeDetailHistoryVersions(node);
-  for (const version of historyVersions) {
-    appendVersion(version);
-  }
-
-  return versions;
-}
-
-function nodeDetailHistoryVersions(node: SpaceCanvasNode): AssetVersion[] {
-  const candidates = node.asset?.versions;
-  if (!Array.isArray(candidates)) {
-    return [];
-  }
-  return candidates
-    .filter((version): version is AssetVersion => Boolean(version))
-    .sort(
-      (left, right) =>
-        Number(right.version || right.id || 0) - Number(left.version || left.id || 0),
-    );
-}
-
-function nodeDetailVersionItem(
-  node: SpaceCanvasNode,
-  version: AssetVersion,
-  isCurrent: boolean,
-): NodeDetailVersionItem {
-  const versionNode: SpaceCanvasNode = {
-    ...node,
-    asset: node.asset
-      ? { ...node.asset, version, version_id: version.id || node.asset.version_id }
-      : node.asset,
-  };
-  return {
-    id: `version-${Number(version.id || 0) || Number(version.version || 0) || "latest"}`,
-    title: Number(version.version || 0)
-      ? `第 ${Number(version.version)} 版`
-      : isCurrent
-        ? "当前版本"
-        : "历史版本",
-    summary: nodeDetailResultSummary(versionNode),
-    time: formatNodeDetailTime(version.created_at),
-    isCurrent,
-    node: versionNode,
-  };
-}
-
-function isEnergonProtocolDetailOutput(value: any) {
-  const rawParsed = parseMaybeJSON(value);
-  if (typeof rawParsed === "string") {
-    return isAgentResultProtocolText(rawParsed);
-  }
-  const normalized = normalizeEnergonOutput?.(rawParsed);
-  const items = Array.isArray(normalized) ? normalized : [normalized ?? rawParsed];
-  return items.some((item) => {
-    const parsed = parseMaybeJSON(item);
-    if (typeof parsed === "string") {
-      return isAgentResultProtocolText(parsed);
-    }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return false;
-    }
-    return (
-      "content" in parsed ||
-      "kind" in parsed ||
-      "event" in parsed ||
-      [
-        "title",
-        "text",
-        "reasoning",
-        "images",
-        "videos",
-        "audios",
-        "files",
-        "json",
-        "error",
-        "progress",
-        "meta",
-        "suggestions",
-        "tasks",
-      ].some((key) => hasDisplayOutput(parsed[key]))
-    );
-  });
-}
-
-function nodeDetailUpdatedAt(node: SpaceCanvasNode) {
-  const raw = firstDefined(
-    node.asset?.version?.created_at,
-    node.asset?.created_at,
-  );
-  return formatNodeDetailTime(raw);
-}
-
-function nodeDetailAssetUpdatedAt(asset: ProjectAsset) {
-  return formatNodeDetailTime(
-    firstDefined(asset.version?.created_at, asset.created_at),
-  );
-}
-
-function formatNodeDetailTime(value: unknown) {
-  const text = String(value || "").trim();
-  if (!text) {
-    return "";
-  }
-  return text
-    .replace("T", " ")
-    .replace(/\.\d+(Z)?$/, "")
-    .replace(/Z$/, "");
-}
-
-function nodeDetailResultSummary(node: SpaceCanvasNode) {
-  const preview = nodeDetailPreview(node);
-  if (preview.imageUrl) {
-    return "图片内容";
-  }
-  if (preview.videoUrl) {
-    return "视频内容";
-  }
-  if (preview.audioUrl) {
-    return "音频内容";
-  }
-  if (preview.fileUrl) {
-    return preview.text || "文件内容";
-  }
-  return (
-    displayTextFromOutput(nodeEnergonOutput(node), node.description || "") ||
-    "暂无内容"
-  );
-}
-
-type NodeDetailEditorContentFormat = "json" | "markdown";
-
-type NodeDetailEditorSource = {
-  value: string;
-  contentFormat: NodeDetailEditorContentFormat;
-};
-
-function nodeDetailEditorSource(
-  rich: ReturnType<typeof richDocument>,
-  displayOutput: any,
-  fallbackText: string,
-): NodeDetailEditorSource {
-  const richSource = rich || nodeDetailRichDocumentFromOutput(displayOutput);
-  if (richSource) {
-    return {
-      value: richDocumentToEditorValue(richSource),
-      contentFormat: "json",
-    };
-  }
-
-  const markdownSource = nodeDetailMarkdownText(displayOutput);
-  if (markdownSource) {
-    return {
-      value: markdownSource,
-      contentFormat: "markdown",
-    };
-  }
-
-  return {
-    value: fallbackText || "",
-    contentFormat: "markdown",
-  };
-}
-
-function nodeDetailEditorSourcePrefersEditor(
-  source: NodeDetailEditorSource,
-  preview: GeneratedNodePreview,
-) {
-  if (!String(source.value || "").trim()) {
-    return false;
-  }
-  return source.contentFormat === "json" || !hasPreviewMedia(preview);
-}
-
-function nodeDetailRichDocumentFromOutput(
-  output: any,
-): ReturnType<typeof richDocument> {
-  const directRich = fixedRichDocument(output);
-  if (directRich) {
-    return directRich;
-  }
-
-  const normalized = normalizeEnergonOutput?.(output) ?? output;
-  const items = Array.isArray(normalized) ? normalized : [normalized];
-  for (const item of items) {
-    const rich = fixedRichDocument(item);
-    if (rich) {
-      return rich;
-    }
-  }
-  return nodeDetailMediaRichDocumentFromOutput(normalized);
-}
-
-function nodeDetailMediaRichDocumentFromOutput(
-  output: any,
-): ReturnType<typeof richDocument> {
-  const previews = nodeDetailMediaPreviewsFromOutput(output);
-  if (previews.length === 0) {
-    return null;
-  }
-
-  const content: any[] = [];
-  const seenText = new Set<string>();
-  for (const preview of previews) {
-    const text = nodeDetailRichParagraphText(preview.text);
-    if (text && !seenText.has(text)) {
-      seenText.add(text);
-      content.push({
-        type: "paragraph",
-        content: [{ type: "text", text }],
-      });
-    }
-    for (const entry of nodeDetailPreviewMediaEntries(preview)) {
-      content.push(nodeDetailRichMediaNode(entry.kind, entry.url, text));
-    }
-  }
-
-  const rich = safeRichDocument({ type: "doc", content });
-  return richDocumentHasMedia(rich) ? rich : null;
-}
-
-function nodeDetailMediaPreviewsFromOutput(output: any) {
-  const previews: GeneratedNodePreview[] = [];
-  collectNodeDetailMediaPreviews(
-    normalizeEnergonOutput?.(output) ?? output,
-    "",
-    previews,
-    new Set(),
-    new Set(),
-  );
-  return previews;
-}
-
-function collectNodeDetailMediaPreviews(
-  value: any,
-  kind: string,
-  previews: GeneratedNodePreview[],
-  seenValues: Set<any>,
-  seenMedia: Set<string>,
-  depth = 0,
-) {
-  if (depth > 8 || value == null) {
-    return;
-  }
-
-  const parsed = parseAgentResultBlock(parseMaybeJSON(value));
-  if (isHiddenEnergonOutput(parsed)) {
-    return;
-  }
-
-  const preview = generatedPreviewFromValue(
-    parsed,
-    kind || previewKindFromOutput(parsed),
-  );
-  appendNodeDetailMediaPreview(previews, preview, seenMedia);
-
-  if (Array.isArray(parsed)) {
-    for (const item of parsed) {
-      collectNodeDetailMediaPreviews(
-        item,
-        kind,
-        previews,
-        seenValues,
-        seenMedia,
-        depth + 1,
-      );
-    }
-    return;
-  }
-  if (!parsed || typeof parsed !== "object") {
-    return;
-  }
-  if (seenValues.has(parsed)) {
-    return;
-  }
-  seenValues.add(parsed);
-
-  const row = parsed as Record<string, any>;
-  const directMediaValues = [
-    {
-      kind: "image" as const,
-      values: [
-        row.image,
-        row.image_url,
-        row.imageUrl,
-        row.images,
-        row.imageUrls,
-      ],
-    },
-    {
-      kind: "video" as const,
-      values: [
-        row.video,
-        row.video_url,
-        row.videoUrl,
-        row.videos,
-        row.videoUrls,
-      ],
-    },
-    {
-      kind: "audio" as const,
-      values: [
-        row.audio,
-        row.audio_url,
-        row.audioUrl,
-        row.audios,
-        row.audioUrls,
-      ],
-    },
-  ];
-  for (const media of directMediaValues) {
-    for (const mediaValue of media.values) {
-      collectNodeDetailMediaPreviews(
-        mediaValue,
-        media.kind,
-        previews,
-        seenValues,
-        seenMedia,
-        depth + 1,
-      );
-    }
-  }
-
-  for (const key of [
-    "output",
-    "result",
-    "content",
-    "body",
-    "data",
-    "value",
-    "rich",
-  ]) {
-    if (row[key] !== undefined && row[key] !== row) {
-      collectNodeDetailMediaPreviews(
-        row[key],
-        kind,
-        previews,
-        seenValues,
-        seenMedia,
-        depth + 1,
-      );
-    }
-  }
-}
-
-function appendNodeDetailMediaPreview(
-  previews: GeneratedNodePreview[],
-  preview: GeneratedNodePreview,
-  seenMedia: Set<string>,
-) {
-  const freshPreview: GeneratedNodePreview = {
-    ...preview,
-    imageUrl: nodeDetailFreshMediaURL("image", preview.imageUrl, seenMedia),
-    videoUrl: nodeDetailFreshMediaURL("video", preview.videoUrl, seenMedia),
-    audioUrl: nodeDetailFreshMediaURL("audio", preview.audioUrl, seenMedia),
-    fileUrl: "",
-  };
-  if (hasPreviewMedia(freshPreview)) {
-    previews.push(freshPreview);
-  }
-}
-
-function nodeDetailFreshMediaURL(
-  kind: string,
-  url: string,
-  seenMedia: Set<string>,
-) {
-  if (!url) {
-    return "";
-  }
-  const key = `${kind}:${url}`;
-  if (seenMedia.has(key)) {
-    return "";
-  }
-  seenMedia.add(key);
-  return url;
-}
-
-function nodeDetailPreviewMediaEntries(preview: GeneratedNodePreview) {
-  const entries: Array<{ kind: "image" | "video" | "audio"; url: string }> = [];
-  if (preview.imageUrl) {
-    entries.push({ kind: "image", url: preview.imageUrl });
-  }
-  if (preview.videoUrl) {
-    entries.push({ kind: "video", url: preview.videoUrl });
-  }
-  if (preview.audioUrl) {
-    entries.push({ kind: "audio", url: preview.audioUrl });
-  }
-  return entries;
-}
-
-function nodeDetailRichMediaNode(
-  kind: "image" | "video" | "audio",
-  url: string,
-  caption: string,
-) {
-  const typeByKind = {
-    image: "editorMediaImage",
-    video: "editorMediaVideo",
-    audio: "editorMediaAudio",
-  };
-  const attrs: Record<string, string> = { src: url };
-  if (caption) {
-    attrs.alt = caption;
-    attrs.title = caption;
-  }
-  return {
-    type: typeByKind[kind],
-    attrs,
-  };
-}
-
-function nodeDetailRichParagraphText(value: string) {
-  const text = String(value || "").trim();
-  if (
-    !text ||
-    isNonContentText(text) ||
-    looksLikeURL(text) ||
-    looksLikeStructuredJSONSnippet(text)
-  ) {
-    return "";
-  }
-  return text;
-}
-
-function nodeDetailMarkdownText(output: any) {
-  const normalized = normalizeEnergonOutput?.(output) ?? output;
-  const items = Array.isArray(normalized) ? normalized : [normalized];
-  const texts: string[] = [];
-  for (const item of items) {
-    if (isHiddenEnergonOutput(item)) {
-      continue;
-    }
-    const text = textFromEnergonItem(item);
-    if (text) {
-      texts.push(text);
-    }
-  }
-  return uniqueNonEmptyStrings(texts).join("\n\n").trim();
-}
-
-function richDocumentHasMedia(value: ReturnType<typeof richDocument>) {
-  if (!value) {
-    return false;
-  }
-  if (
-    value.type === "editorMediaImage" ||
-    value.type === "editorMediaVideo" ||
-    value.type === "editorMediaAudio"
-  ) {
-    return Boolean(value.attrs?.src);
-  }
-  return (value.content || []).some(richDocumentHasMedia);
-}
-
-function isHiddenEnergonOutput(value: any) {
-  const parsed = parseAgentResultBlock(parseMaybeJSON(value));
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return false;
-  }
-  const row = parsed as Record<string, any>;
-  const event = String(row.event || "").trim().toLowerCase();
-  if (event === "start" || event === "progress") {
-    return true;
-  }
-  return event === "end" && !hasDisplayOutput(row.text) && !hasDisplayOutput(row.error);
-}
-
-function textFromEnergonItem(value: any): string {
-  const parsed = parseAgentResultBlock(parseMaybeJSON(value));
-  if (typeof parsed === "string") {
-    return looksLikeStructuredJSONSnippet(parsed) ? "" : parsed;
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return "";
-  }
-  const content =
-    parsed.content && typeof parsed.content === "object" && !Array.isArray(parsed.content)
-      ? parsed.content
-      : null;
-  const directText = firstText(
-    parsed.text,
-    content?.text,
-    parsed.summary,
-    content?.summary,
-  );
-  if (directText) {
-    return directText;
-  }
-  for (const key of ["output", "result", "data", "value", "content"]) {
-    if (parsed[key] !== undefined && parsed[key] !== parsed) {
-      const nestedText = textFromEnergonItem(parsed[key]);
-      if (nestedText) {
-        return nestedText;
-      }
-    }
-  }
-  return "";
-}
-
-function parseEditableContentForSave(
-  value: string,
-  contentFormat: NodeDetailEditorContentFormat,
-) {
-  if (contentFormat === "markdown") {
-    return {
-      format: "markdown",
-      text: value,
-    };
-  }
-  const parsed = parseMaybeJSON(value);
-  const rich = safeRichDocument(parsed);
-  return rich || plainTextToRichDocument(value);
-}
-
-function richDocumentToEditorValue(value: ReturnType<typeof richDocument>) {
-  if (!value) {
-    return "";
-  }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "";
-  }
-}
-
 function CanvasConfirmDialog({
   request,
   onClose,
@@ -4505,165 +3188,6 @@ function CanvasConfirmDialog({
       </section>
     </div>
   );
-}
-
-function plainTextToRichDocument(value: string) {
-  const blocks = String(value || "")
-    .split(/\n{2,}/)
-    .map((block) => block.trim())
-    .filter(Boolean);
-  return {
-    type: "doc",
-    content: (blocks.length > 0 ? blocks : [""]).map((block) => ({
-      type: "paragraph",
-      content: block
-        ? [
-            {
-              type: "text",
-              text: block,
-            },
-          ]
-        : [],
-    })),
-  };
-}
-
-function NodeDetailRichEditor({
-  value,
-  onChange,
-  contentFormat,
-  disabled,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  contentFormat: NodeDetailEditorContentFormat;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="ws-node-detail-editor">
-      {CompatRichTextEditor ? (
-        <CompatRichTextEditor
-          value={value}
-          onChange={onChange}
-          contentFormat={contentFormat}
-          placeholder="编辑内容"
-          disabled={disabled}
-          minHeight={0}
-          maxHeight={2400}
-          controlClassName="ws-node-detail-rich-editor"
-        />
-      ) : (
-        <textarea
-          className="ws-node-detail-fallback-editor"
-          disabled={disabled}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          placeholder="编辑内容"
-        />
-      )}
-    </div>
-  );
-}
-
-function RichDocumentView({
-  value,
-  className,
-}: {
-  value: ReturnType<typeof richDocument>;
-  className?: string;
-}) {
-  if (!value) {
-    return null;
-  }
-  return (
-    <div className={className}>
-      {renderRichDocumentNodes(value.content || [], "root")}
-    </div>
-  );
-}
-
-function renderRichDocumentNodes(nodes: any[], keyPrefix: string): ReactNode {
-  return nodes.map((node, index) =>
-    renderRichDocumentNode(node, `${keyPrefix}-${index}`),
-  );
-}
-
-function renderRichDocumentNode(node: any, key: string): ReactNode {
-  const children = renderRichDocumentNodes(node?.content || [], key);
-  switch (node?.type) {
-    case "heading": {
-      const level = Math.min(Math.max(Number(node.attrs?.level || 2), 1), 6);
-      const HeadingTag = richHeadingTag(level);
-      return <HeadingTag key={key}>{children}</HeadingTag>;
-    }
-    case "paragraph":
-      return <p key={key}>{children}</p>;
-    case "bulletList":
-      return <ul key={key}>{children}</ul>;
-    case "orderedList":
-      return <ol key={key}>{children}</ol>;
-    case "listItem":
-      return <li key={key}>{children}</li>;
-    case "blockquote":
-      return <blockquote key={key}>{children}</blockquote>;
-    case "codeBlock":
-      return (
-        <pre key={key}>
-          <code>{safeDocumentText(node)}</code>
-        </pre>
-      );
-    case "hardBreak":
-      return <br key={key} />;
-    case "horizontalRule":
-      return <hr key={key} />;
-    case "text":
-      return renderRichTextNode(node, key);
-    case "editorMediaImage":
-      return node.attrs?.src ? (
-        <img key={key} src={String(node.attrs.src)} alt={String(node.attrs.alt || "")} />
-      ) : null;
-    default:
-      return children;
-  }
-}
-
-function renderRichTextNode(node: any, key: string): ReactNode {
-  let content: ReactNode = node.text || "";
-  for (const mark of node.marks || []) {
-    switch (mark?.type) {
-      case "bold":
-        content = <strong key={`${key}-bold`}>{content}</strong>;
-        break;
-      case "italic":
-        content = <em key={`${key}-italic`}>{content}</em>;
-        break;
-      case "strike":
-        content = <s key={`${key}-strike`}>{content}</s>;
-        break;
-      case "code":
-        content = <code key={`${key}-code`}>{content}</code>;
-        break;
-      case "link": {
-        const href = String(mark.attrs?.href || "");
-        content = href ? (
-          <a key={`${key}-link`} href={href} target="_blank" rel="noreferrer">
-            {content}
-          </a>
-        ) : (
-          content
-        );
-        break;
-      }
-      default:
-        break;
-    }
-  }
-  return <Fragment key={key}>{content}</Fragment>;
-}
-
-function richHeadingTag(level: number) {
-  const tags = ["h1", "h2", "h3", "h4", "h5", "h6"] as const;
-  return tags[level - 1] || "h2";
 }
 
 function safeRichDocument(value: any): ReturnType<typeof richDocument> {
@@ -4737,16 +3261,16 @@ function buildGeneratedNodeResultPatch(
     result?.data?.result,
     result?.data,
   );
-  const output = firstDisplayOutput(rawOutput) || extractDisplayOutput(rawOutput);
+  const output =
+    node.type === "agent" && rawOutput != null
+      ? parseMaybeJSON(rawOutput)
+      : firstDisplayOutput(rawOutput) || extractDisplayOutput(rawOutput);
   const resultKind = firstText(
     String(result?.asset?.kind || ""),
     String(result?.kind || ""),
     nodePreviewKind(node, output),
   );
-  const preview = generatedPreviewFromValue(
-    output,
-    resultKind,
-  );
+  const preview = generatedPreviewFromValue(output, resultKind);
   const outputText = displayTextFromOutput(output, "");
   const summary =
     preview.text ||
@@ -5168,7 +3692,9 @@ function canvasRunNeedsStatusConvergence(
   input: CanvasStartRunInput,
   canvasRun: CanvasRunRef,
 ) {
-  const status = String(canvasRun.status || "").trim().toLowerCase();
+  const status = String(canvasRun.status || "")
+    .trim()
+    .toLowerCase();
   if (status !== "running" && status !== "pending") {
     return false;
   }
@@ -5179,7 +3705,11 @@ function canvasRunHasCompleteTerminalResults(
   input: CanvasStartRunInput,
   canvasRun: CanvasRunRef,
 ) {
-  if (canvasRunRecordHasCompleteTerminalResults(canvasRun as WorkspaceCanvasRunRef)) {
+  if (
+    canvasRunRecordHasCompleteTerminalResults(
+      canvasRun as WorkspaceCanvasRunRef,
+    )
+  ) {
     return true;
   }
   if (!input.singleNode) {
@@ -5209,7 +3739,9 @@ function canvasRunNeedsTerminalStatusPatch(
   input: CanvasStartRunInput,
   canvasRun: CanvasRunRef,
 ) {
-  const status = String(canvasRun.status || "").trim().toLowerCase();
+  const status = String(canvasRun.status || "")
+    .trim()
+    .toLowerCase();
   if (status !== "running" && status !== "pending") {
     return false;
   }
@@ -5334,7 +3866,9 @@ function firstPendingApprovalFromCanvasRun(canvasRun: CanvasRunRef) {
   const output = canvasRun.output;
   const approvals = Array.isArray(canvasRun.approvals)
     ? canvasRun.approvals
-    : output && typeof output === "object" && Array.isArray((output as any).approvals)
+    : output &&
+        typeof output === "object" &&
+        Array.isArray((output as any).approvals)
       ? (output as any).approvals
       : output &&
           typeof output === "object" &&
@@ -5406,13 +3940,19 @@ function canvasNodeResultFromStreamOutput(
   }
   return {
     node_key: nodeKey,
-    execution_id: Number(output.execution_id || (result as any).execution_id || 0),
+    execution_id: Number(
+      output.execution_id || (result as any).execution_id || 0,
+    ),
     node_type: String(output.node_type || ""),
     node_run_id: Number(output.node_run_id || 0),
     run_id: Number(output.run_id || (result as any).run_id || 0),
     request_id: String(output.request_id || (result as any).request_id || ""),
-    child_run_id: Number(output.child_run_id || (result as any).child_run_id || 0),
-    child_request_id: String(output.child_request_id || (result as any).child_request_id || ""),
+    child_run_id: Number(
+      output.child_run_id || (result as any).child_run_id || 0,
+    ),
+    child_request_id: String(
+      output.child_request_id || (result as any).child_request_id || "",
+    ),
     status: String(output.status || ""),
     output: (result as any).output ?? resultOutput,
     asset: (result as any).asset,
@@ -5420,7 +3960,9 @@ function canvasNodeResultFromStreamOutput(
     result,
     approval: streamApprovalFromOutput(output, result),
     persists_result: Boolean(output.persists_result),
-    agent_run_id: Number(output.agent_run_id || (result as any).agent_run_id || 0),
+    agent_run_id: Number(
+      output.agent_run_id || (result as any).agent_run_id || 0,
+    ),
   };
 }
 
@@ -5469,10 +4011,10 @@ function shouldApplyCanvasStreamResult(
   }
   return Boolean(
     result.asset ||
-      result.version ||
-      (result as any).asset?.version ||
-      (result as any).data?.asset ||
-      (result as any).data?.version,
+    result.version ||
+    (result as any).asset?.version ||
+    (result as any).data?.asset ||
+    (result as any).data?.version,
   );
 }
 
@@ -5498,6 +4040,7 @@ function applyCanvasStreamNodeFrame(
         startedAt: Date.now(),
         status: "running",
         progress: Math.max(current[nodeId]?.progress || 0, 18),
+        agent: current[nodeId]?.agent,
       },
     }));
     return;
@@ -5508,15 +4051,42 @@ function applyCanvasStreamNodeFrame(
       if (!running || running.status !== "running") {
         return current;
       }
+      const nodeOutput = canvasStreamNodeOutput(output.output);
+      const nodeType = String(output.node_type || "").toLowerCase();
+      const isPowerStream = nodeType === "power";
+      const isAgentStream = nodeType === "agent";
+      const streamEvent = String(
+        nodeOutput.semantic_event || nodeOutput.event || "",
+      ).toLowerCase();
+      const deltaText =
+        isPowerStream &&
+        typeof nodeOutput.text === "string" &&
+        (streamEvent === "delta" || !streamEvent)
+          ? nodeOutput.text
+          : "";
       return {
         ...current,
         [nodeId]: {
           ...running,
           progress: Math.max(running.progress, 72),
+          streamText: deltaText
+            ? `${running.streamText || ""}${deltaText}`
+            : running.streamText,
+          streamStarted: running.streamStarted || Boolean(deltaText),
+          agent: isAgentStream
+            ? reduceCanvasAgentRuntime(running.agent, nodeOutput)
+            : running.agent,
         },
       };
     });
   }
+}
+
+function canvasStreamNodeOutput(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return value as Record<string, unknown>;
 }
 
 function mergeCanvasRunRef(
@@ -5594,8 +4164,8 @@ function markCanvasNodeResultsDoneState(
   const next = { ...current };
   for (const result of results) {
     const nodeId = result.node_key;
+    const node = input.nodes.find((item) => item.id === nodeId);
     if (result.status === "waiting") {
-      const node = input.nodes.find((item) => item.id === nodeId);
       next[nodeId] = {
         nodeId,
         title: node?.title || nodeId,
@@ -5614,6 +4184,10 @@ function markCanvasNodeResultsDoneState(
       ...running,
       progress: 100,
       status: result.status === "success" ? "success" : "error",
+      agent:
+        node?.type === "agent"
+          ? readCanvasAgentResult(result.output)
+          : running.agent,
     };
     changed = true;
   }
@@ -5655,25 +4229,32 @@ function finishBackendCanvasRunningNodes(
     }
     return changed ? next : current;
   });
-  window.setTimeout(() => {
-    input.setRunningNode?.((current) => {
-      let changed = false;
-      let next = current;
-      const nodeIds = backendCanvasRunActiveNodeIds(input, canvasRun, current);
-      for (const nodeId of nodeIds) {
-        const running = next[nodeId];
-        if (!running || running.status === "running") {
-          continue;
+  window.setTimeout(
+    () => {
+      input.setRunningNode?.((current) => {
+        let changed = false;
+        let next = current;
+        const nodeIds = backendCanvasRunActiveNodeIds(
+          input,
+          canvasRun,
+          current,
+        );
+        for (const nodeId of nodeIds) {
+          const running = next[nodeId];
+          if (!running || running.status === "running") {
+            continue;
+          }
+          if (next === current) {
+            next = { ...current };
+          }
+          delete next[nodeId];
+          changed = true;
         }
-        if (next === current) {
-          next = { ...current };
-        }
-        delete next[nodeId];
-        changed = true;
-      }
-      return changed ? next : current;
-    });
-  }, finishedStatus === "success" ? 650 : 1200);
+        return changed ? next : current;
+      });
+    },
+    finishedStatus === "success" ? 650 : 1200,
+  );
 }
 
 function backendCanvasRunActiveNodeIds(
@@ -5740,29 +4321,15 @@ function backendCanvasRunNodeIds(
   return [...result];
 }
 
-function canvasRunRecordMatchesCate(run: WorkspaceCanvasRunRef, cateId: number) {
+function canvasRunRecordMatchesCate(
+  run: WorkspaceCanvasRunRef,
+  cateId: number,
+) {
   const runCateId = Number(run.asset_cate_id || 0);
   return runCateId === 0 || runCateId === Number(cateId || 0);
 }
 
-function isCanvasRunRecordActive(run: WorkspaceCanvasRunRef) {
-  const status = String(run.status || "").trim().toLowerCase();
-  if (status === "waiting" || canvasRunRecordHasWaitingNode(run)) {
-    return true;
-  }
-  if (status !== "running" && status !== "pending") {
-    return false;
-  }
-  return !canvasRunRecordHasCompleteTerminalResults(run);
-}
-
-function canvasRunRecordHasWaitingNode(run: WorkspaceCanvasRunRef) {
-  return canvasRunNodeResultStatus(run.pending_node) === "waiting";
-}
-
-function canvasRunRecordHasCompleteTerminalResults(
-  run: WorkspaceCanvasRunRef,
-) {
+function canvasRunRecordHasCompleteTerminalResults(run: WorkspaceCanvasRunRef) {
   const expectedNodeIds = canvasRunRecordExpectedResultNodeIds(run);
   if (expectedNodeIds.size === 0) {
     return false;
@@ -5858,7 +4425,9 @@ function canvasRunRecordResultApplyKey(
 }
 
 function canvasNodeRunFinishedStatus(status?: string) {
-  const normalized = String(status || "").trim().toLowerCase();
+  const normalized = String(status || "")
+    .trim()
+    .toLowerCase();
   return (
     normalized === "success" ||
     normalized === "fail" ||
@@ -5867,9 +4436,7 @@ function canvasNodeRunFinishedStatus(status?: string) {
   );
 }
 
-function canvasRunNodeResultStatus(
-  result?: CanvasNodeResultRef | null,
-) {
+function canvasRunNodeResultStatus(result?: CanvasNodeResultRef | null) {
   if (!result) {
     return "";
   }
@@ -6059,11 +4626,7 @@ function canvasNodeResultApplyKey(result: CanvasNodeResultRef) {
         (result.result as any)?.version?.id ||
         0,
     ),
-    Number(
-      result.asset?.id ||
-        (result.result as any)?.asset?.id ||
-        0,
-    ),
+    Number(result.asset?.id || (result.result as any)?.asset?.id || 0),
   ].join(":");
 }
 
@@ -6090,11 +4653,7 @@ function buildBackendCanvasNodePatch(
     );
   }
   return withFeedbackRecords(
-    buildGeneratedNodeResultPatch(
-      node,
-      normalizedResult,
-      "后端执行结果",
-    ),
+    buildGeneratedNodeResultPatch(node, normalizedResult, "后端执行结果"),
   );
 }
 
@@ -6114,7 +4673,9 @@ function mergeNodeFeedbackRecordsIntoPatch(
 
 function backendCanvasNodeResultPayload(result: CanvasNodeResultRef) {
   const payload: Record<string, unknown> = {
-    ...(result.result && typeof result.result === "object" ? result.result : {}),
+    ...(result.result && typeof result.result === "object"
+      ? result.result
+      : {}),
     execution_id: result.execution_id || (result.result as any)?.execution_id,
     run_id: (result.result as any)?.run_id,
     request_id: result.request_id || (result.result as any)?.request_id,
@@ -6274,8 +4835,7 @@ function normalizeEnergonDisplayOutput(value: any): any {
   if (agentResult !== parsed) {
     return normalizeEnergonDisplayOutput(agentResult);
   }
-  const protocolOutput =
-    normalizeAgentResultOutputValue?.(parsed) ?? parsed;
+  const protocolOutput = normalizeAgentResultOutputValue?.(parsed) ?? parsed;
   const output = normalizeEnergonDisplayValue(protocolOutput, new Set());
   if (hasDisplayOutput(output)) {
     return output;
@@ -6324,6 +4884,14 @@ function normalizeEnergonDisplayValue(value: any, seen: Set<any>): any {
     return parsed;
   }
   if (isRichDocumentLike(parsed)) {
+    const embeddedOutput = embeddedStructuredDisplayOutput(parsed);
+    if (embeddedOutput !== undefined) {
+      return normalizeEnergonDisplayValue(embeddedOutput, seen);
+    }
+    const markdownText = plainMarkdownTextFromRichDocument(parsed);
+    if (markdownText) {
+      return { text: markdownText };
+    }
     const rich = fixedTiptapRichDocument(parsed) || safeRichDocument(parsed);
     return rich ? { rich } : parsed;
   }
@@ -6518,10 +5086,7 @@ function fixedTiptapRichDocument(value: any, seen = new Set<any>()): any {
   return null;
 }
 
-function fixedTiptapRichDocumentFromTextDoc(
-  doc: any,
-  seen: Set<any>,
-): any {
+function fixedTiptapRichDocumentFromTextDoc(doc: any, seen: Set<any>): any {
   const texts = collectTiptapTextValues(doc);
   for (const text of texts) {
     const rich = fixedTiptapRichDocumentFromStructuredText(text, seen);
@@ -6649,7 +5214,10 @@ function escapeJSONControlChar(value: string) {
 
 function unescapeEscapedJSONQuotes(value: string) {
   const text = value.trim();
-  if (!text.includes('\\"') || (!text.startsWith("{") && !text.startsWith("["))) {
+  if (
+    !text.includes('\\"') ||
+    (!text.startsWith("{") && !text.startsWith("["))
+  ) {
     return value;
   }
   return text.replace(/\\"/g, '"');
@@ -6790,13 +5358,15 @@ function richDocumentFromPayload(
   return null;
 }
 
-function isRichDocumentLike(value: any): value is NonNullable<ReturnType<typeof richDocument>> {
+function isRichDocumentLike(
+  value: any,
+): value is NonNullable<ReturnType<typeof richDocument>> {
   return Boolean(
     value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      value.type === "doc" &&
-      Array.isArray(value.content),
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    value.type === "doc" &&
+    Array.isArray(value.content),
   );
 }
 
@@ -6945,7 +5515,9 @@ function displayTextFromOutput(value: any, fallback = "") {
     return text;
   }
   if (looksLikeJSONText(text)) {
-    const parsedText = safeDocumentText(extractDisplayOutput(parseMaybeJSON(text))).trim();
+    const parsedText = safeDocumentText(
+      extractDisplayOutput(parseMaybeJSON(text)),
+    ).trim();
     if (parsedText && parsedText !== text && !isNonContentText(parsedText)) {
       return parsedText;
     }
@@ -6977,7 +5549,9 @@ function isNonContentText(text: string) {
   if (!normalized) {
     return false;
   }
-  return isEmptyPlaceholderText(normalized) || isTransientAssistantText(normalized);
+  return (
+    isEmptyPlaceholderText(normalized) || isTransientAssistantText(normalized)
+  );
 }
 
 function isEmptyPlaceholderText(text: string) {
@@ -7010,6 +5584,12 @@ function generatedPreviewFromValue(
   fillGeneratedPreview(preview, normalizedValue, kind);
   if (!hasGeneratedPreview(preview) && normalizedValue !== value) {
     fillGeneratedPreview(preview, value, kind);
+  }
+  if (
+    hasPreviewMedia(preview) &&
+    looksLikeStructuredJSONSnippet(preview.text)
+  ) {
+    preview.text = "";
   }
   return preview;
 }
@@ -7440,10 +6020,7 @@ function previewKindFromTextHint(text: string, kind: string) {
 function textHasImagePreviewHint(text: string) {
   const imageKeywordURL =
     /(?:图片|图像|image|photo|picture).{0,40}(?:https?:\/\/|data:|blob:)/i;
-  return (
-    /!\[[^\]]*]\(/.test(text) ||
-    imageKeywordURL.test(text)
-  );
+  return /!\[[^\]]*]\(/.test(text) || imageKeywordURL.test(text);
 }
 
 function setPreviewMedia(
@@ -7468,10 +6045,7 @@ function previewMediaKindFromURL(url: string, kind: string) {
   ) {
     return "image" as const;
   }
-  if (
-    normalizedKind === "video" ||
-    /\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(url)
-  ) {
+  if (normalizedKind === "video" || /\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(url)) {
     return "video" as const;
   }
   if (
@@ -7486,11 +6060,12 @@ function previewMediaKindFromURL(url: string, kind: string) {
   return "";
 }
 
-function markdownMediaCaption(text: string, matchedText: string, label: string) {
-  const caption = text
-    .replace(matchedText, "")
-    .replace(/\s+/g, " ")
-    .trim();
+function markdownMediaCaption(
+  text: string,
+  matchedText: string,
+  label: string,
+) {
+  const caption = text.replace(matchedText, "").replace(/\s+/g, " ").trim();
   if (caption && caption !== text.trim() && !looksLikeURL(caption)) {
     return caption;
   }
@@ -7517,11 +6092,11 @@ function cleanInlineURL(value: string) {
 function isWrappedOutput(value: Record<string, any>) {
   return Boolean(
     value.output ||
-      value.result ||
-      value.content ||
-      value.rich ||
-      value.agent_run_id ||
-      value.approval_id,
+    value.result ||
+    value.content ||
+    value.rich ||
+    value.agent_run_id ||
+    value.approval_id,
   );
 }
 
@@ -7538,10 +6113,7 @@ function hasGeneratedPreview(preview: GeneratedNodePreview) {
 
 function hasPreviewMedia(preview: GeneratedNodePreview) {
   return Boolean(
-    preview.imageUrl ||
-      preview.videoUrl ||
-      preview.audioUrl ||
-      preview.fileUrl,
+    preview.imageUrl || preview.videoUrl || preview.audioUrl || preview.fileUrl,
   );
 }
 
@@ -7683,7 +6255,10 @@ function buildNodeInputContext(
         nodePreviewKind(node, output),
       );
       if (!hasGeneratedPreview(preview)) {
-        preview.text = displayTextFromOutput(output, node.description || node.title);
+        preview.text = displayTextFromOutput(
+          output,
+          node.description || node.title,
+        );
       }
       return {
         nodeId: node.id,
@@ -7704,6 +6279,36 @@ function buildNodeInputContext(
   };
 }
 
+function sameNodeInputContext(
+  left: NodeInputContext | null | undefined,
+  right: NodeInputContext | null | undefined,
+) {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right || left.text !== right.text) {
+    return false;
+  }
+  return (
+    left.sources.length === right.sources.length &&
+    left.sources.every((source, index) => {
+      const candidate = right.sources[index];
+      return (
+        source.nodeId === candidate.nodeId &&
+        source.title === candidate.title &&
+        source.type === candidate.type &&
+        source.output === candidate.output &&
+        source.resultRef === candidate.resultRef &&
+        source.preview.text === candidate.preview.text &&
+        source.preview.imageUrl === candidate.preview.imageUrl &&
+        source.preview.videoUrl === candidate.preview.videoUrl &&
+        source.preview.audioUrl === candidate.preview.audioUrl &&
+        source.preview.fileUrl === candidate.preview.fileUrl
+      );
+    })
+  );
+}
+
 function nodeInputContextLine(source: NodeInputContext["sources"][number]) {
   const preview = source.preview;
   const text =
@@ -7720,7 +6325,10 @@ function nodeInputContextLine(source: NodeInputContext["sources"][number]) {
 }
 
 function nodeContextOutput(node: SpaceCanvasNode) {
-  return firstMeaningfulNodeOutput(node.asset?.version?.content, node.resultOutput);
+  return firstMeaningfulNodeOutput(
+    node.asset?.version?.content,
+    node.resultOutput,
+  );
 }
 
 function firstMeaningfulNodeOutput(...values: any[]) {
@@ -7732,6 +6340,14 @@ function firstMeaningfulNodeOutput(...values: any[]) {
     if (fallback === undefined) {
       fallback = value;
     }
+    const embeddedOutput = embeddedStructuredDisplayOutput(value);
+    if (embeddedOutput !== undefined) {
+      return embeddedOutput;
+    }
+    const markdownText = plainMarkdownTextFromRichDocument(value);
+    if (markdownText) {
+      return { text: markdownText };
+    }
     const output = firstDisplayOutput(value) || extractDisplayOutput(value);
     if (hasDisplayOutput(output) || hasContextOutput(output)) {
       return output;
@@ -7741,6 +6357,33 @@ function firstMeaningfulNodeOutput(...values: any[]) {
     return firstDisplayOutput(fallback) || extractDisplayOutput(fallback);
   }
   return undefined;
+}
+
+function embeddedStructuredDisplayOutput(value: any) {
+  const parsed = parseMaybeJSON(value);
+  const rich = isRichDocumentLike(parsed) ? parsed : fixedRichDocument(parsed);
+  if (!rich) {
+    return undefined;
+  }
+  const richText = collectTiptapText(rich).trim();
+  if (!looksLikeStructuredJSONSnippet(richText)) {
+    return undefined;
+  }
+  const embedded = parseMaybeEmbeddedJSON(richText);
+  if (embedded === richText) {
+    return undefined;
+  }
+  const normalized = extractDisplayOutput(embedded);
+  if (hasDisplayOutput(normalized) || hasContextOutput(normalized)) {
+    return normalized;
+  }
+  return undefined;
+}
+
+function plainMarkdownTextFromRichDocument(value: any) {
+  const parsed = parseMaybeJSON(value);
+  const rich = isRichDocumentLike(parsed) ? parsed : fixedRichDocument(parsed);
+  return plainMarkdownTextFromRichOutput(rich);
 }
 
 function extractDisplayOutput(value: any): any {
@@ -7797,7 +6440,10 @@ function extractDisplayOutputInner(value: any, seen: Set<any>): any {
     if (candidate === undefined || candidate === value) {
       continue;
     }
-    const normalized = extractDisplayOutputInner(parseMaybeJSON(candidate), seen);
+    const normalized = extractDisplayOutputInner(
+      parseMaybeJSON(candidate),
+      seen,
+    );
     if (isDisplayOutputValue(normalized)) {
       return normalized;
     }
@@ -7808,7 +6454,10 @@ function extractDisplayOutputInner(value: any, seen: Set<any>): any {
       if (row[key] === undefined || row[key] === value) {
         continue;
       }
-      const normalized = extractDisplayOutputInner(parseMaybeJSON(row[key]), seen);
+      const normalized = extractDisplayOutputInner(
+        parseMaybeJSON(row[key]),
+        seen,
+      );
       if (isDisplayOutputValue(normalized)) {
         return normalized;
       }
@@ -7858,7 +6507,10 @@ function directRichOutput(row: Record<string, any>) {
   if (payloadRich) {
     return payloadRich;
   }
-  if (String(row.result_mode || "").toLowerCase() === "inline" && row.content != null) {
+  if (
+    String(row.result_mode || "").toLowerCase() === "inline" &&
+    row.content != null
+  ) {
     const content = parseMaybeJSON(row.content);
     if (content && typeof content === "object") {
       const rich = directRichOutput(content as Record<string, any>);
@@ -7896,11 +6548,11 @@ function normalizeDisplayOutput(value: any) {
 function isRunEnvelope(row: Record<string, any>) {
   return Boolean(
     row.agent_run_id ||
-      row.approval_id ||
-      row.node_run_id ||
-      row.request_id ||
-      row.approved !== undefined ||
-      row.message !== undefined,
+    row.approval_id ||
+    row.node_run_id ||
+    row.request_id ||
+    row.approved !== undefined ||
+    row.message !== undefined,
   );
 }
 
@@ -7985,7 +6637,8 @@ function extractFencedAgentResultPayload(value: string, language: string) {
   let searchStart = bodyStart;
   while (searchStart < value.length) {
     const end = value.indexOf("```", searchStart);
-    const body = end >= 0 ? value.slice(bodyStart, end) : value.slice(bodyStart);
+    const body =
+      end >= 0 ? value.slice(bodyStart, end) : value.slice(bodyStart);
     const parsed = parseAgentResultJSON(body, language === "json");
     if (parsed) {
       return parsed;
@@ -8005,7 +6658,9 @@ function parseAgentResultJSON(value: string, strict = false) {
     const parsed = parseMaybeJSON(source);
     if (
       parsed !== source &&
-      (strict ? isStrictAgentResultPayload(parsed) : isAgentResultPayload(parsed))
+      (strict
+        ? isStrictAgentResultPayload(parsed)
+        : isAgentResultPayload(parsed))
     ) {
       return parsed;
     }
@@ -8082,12 +6737,12 @@ function looksLikeStructuredJSONSnippet(value: string) {
   const text = String(value || "").trim();
   return Boolean(
     text &&
-      (looksLikeJSONText(text) ||
-        text.startsWith("{") ||
-        text.startsWith("[") ||
-        text.includes('"agent_run_id"') ||
-        text.includes('"node_run_id"') ||
-        text.includes('"approval_id"')),
+    (looksLikeJSONText(text) ||
+      text.startsWith("{") ||
+      text.startsWith("[") ||
+      text.includes('"agent_run_id"') ||
+      text.includes('"node_run_id"') ||
+      text.includes('"approval_id"')),
   );
 }
 
@@ -8114,7 +6769,9 @@ function buildComposerAssetLibrary(
       id: String(asset.id),
       title: asset.name || `资产 ${asset.id}`,
       kind: composerKindFromPreview(preview, String(asset.kind || "")),
-      role: activeCate ? assetRoleForView(asset, activeCate) : String(asset.role || ""),
+      role: activeCate
+        ? assetRoleForView(asset, activeCate)
+        : String(asset.role || ""),
       source: "asset" as const,
       output,
       preview,
@@ -8170,16 +6827,6 @@ function isEmptyContextText(text: string) {
     normalized === "null" ||
     isNonContentText(normalized)
   );
-}
-
-function nodeMenuViewForType(
-  type: SpaceCanvasNode["type"],
-): AddNodeMenuState["view"] {
-  if (type === "asset") return "assets";
-  if (type === "power") return "powers";
-  if (type === "agent") return "agents";
-  if (type === "flow") return "flows";
-  return "functions";
 }
 
 function canConnectNodes(
@@ -8306,7 +6953,9 @@ function replaceAssetNode(
   };
 }
 
-function assetNodeResultOverride(node: SpaceCanvasNode): Partial<SpaceCanvasNode> {
+function assetNodeResultOverride(
+  node: SpaceCanvasNode,
+): Partial<SpaceCanvasNode> {
   return {
     title: node.title,
     subtitle: node.subtitle,
@@ -8333,16 +6982,30 @@ function normalizeCanvasForState(
   assetCateId: number,
 ): SpaceCanvasState {
   const nodeIds = new Set(canvas.nodes.map((node) => node.id));
+  let nodesChanged = false;
+  const normalizedNodes = canvas.nodes.map((node) => {
+    const nodeAssetCateId = Number(node.assetCateId ?? assetCateId);
+    const local = node.local !== false;
+    if (node.assetCateId === nodeAssetCateId && node.local === local) {
+      return node;
+    }
+    nodesChanged = true;
+    return {
+      ...node,
+      assetCateId: nodeAssetCateId,
+      local,
+    };
+  });
+  const normalizedEdges = canvas.edges.filter(
+    (edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to),
+  );
   return {
     assetCateId,
-    nodes: canvas.nodes.map((node) => ({
-      ...node,
-      assetCateId: Number(node.assetCateId ?? assetCateId),
-      local: node.local !== false,
-    })),
-    edges: canvas.edges.filter(
-      (edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to),
-    ),
+    nodes: nodesChanged ? normalizedNodes : canvas.nodes,
+    edges:
+      normalizedEdges.length === canvas.edges.length
+        ? canvas.edges
+        : normalizedEdges,
     viewport: canvas.viewport || {},
   };
 }
@@ -8416,7 +7079,8 @@ function hydrateMissingCanvasAssetDetails(input: {
   }
   for (const assetID of missingAssetIDs) {
     input.requested.add(assetID);
-    void input.fetchAsset(assetID)
+    void input
+      .fetchAsset(assetID)
       .then(input.onAsset)
       .catch(() => {
         input.requested.delete(assetID);
@@ -8425,19 +7089,40 @@ function hydrateMissingCanvasAssetDetails(input: {
 }
 
 function isSameCanvasState(left: SpaceCanvasState, right: SpaceCanvasState) {
-  return stableStringifyCanvas(left) === stableStringifyCanvas(right);
+  return (
+    left === right ||
+    (left.assetCateId === right.assetCateId &&
+      sameCanvasNodes(left.nodes, right.nodes) &&
+      sameCanvasEdges(left.edges, right.edges) &&
+      left.viewport.x === right.viewport.x &&
+      left.viewport.y === right.viewport.y &&
+      left.viewport.zoom === right.viewport.zoom &&
+      left.updatedAt === right.updatedAt)
+  );
 }
 
-function serializeCanvasMap(canvases: Record<string, SpaceCanvasState>) {
-  const result: Record<string, string> = {};
-  for (const [key, canvas] of Object.entries(canvases)) {
-    result[key] = stableStringifyCanvas(canvas);
-  }
-  return result;
+function sameCanvasNodes(left: SpaceCanvasNode[], right: SpaceCanvasNode[]) {
+  return (
+    left === right ||
+    (left.length === right.length &&
+      left.every((node, index) => node === right[index]))
+  );
 }
 
-function stableStringifyCanvas(canvas: SpaceCanvasState) {
-  return JSON.stringify(persistedCanvasState(canvas));
+function sameCanvasEdges(left: SpaceCanvasEdge[], right: SpaceCanvasEdge[]) {
+  return (
+    left === right ||
+    (left.length === right.length &&
+      left.every((edge, index) => {
+        const candidate = right[index];
+        return (
+          edge === candidate ||
+          (edge.id === candidate.id &&
+            edge.from === candidate.from &&
+            edge.to === candidate.to)
+        );
+      }))
+  );
 }
 
 function resolveProximityConnection(
@@ -8654,7 +7339,9 @@ function shouldRenderFunctionResultCard(node: SpaceCanvasNode) {
   return isVisibleResultFunctionNode(node) && nodeHasResultContent(node);
 }
 
-function buildFunctionStatusPatch(description: string): Partial<SpaceCanvasNode> {
+function buildFunctionStatusPatch(
+  description: string,
+): Partial<SpaceCanvasNode> {
   return {
     description,
   };
@@ -8678,6 +7365,12 @@ function buildFunctionRunPatch(
 function canvasNodeStyleSize(node: SpaceCanvasNode) {
   if (node.type === "function") {
     if (shouldRenderFunctionResultCard(node)) {
+      if (
+        node.functionOption?.key === "display" &&
+        !hasDefaultCanvasNodeSize(node)
+      ) {
+        return { width: node.width, height: node.height };
+      }
       return { width: 330, height: 250 };
     }
     return { width: 128, height: 46 };
@@ -8709,7 +7402,9 @@ function NodeHandle({
       className={`ws-rf-handle ${className}`}
       style={style}
     >
-      <span>+</span>
+      <span aria-hidden="true">
+        {type === "target" ? <Minus size={12} /> : <Plus size={12} />}
+      </span>
     </Handle>
   );
 }
@@ -8721,11 +7416,35 @@ function NodeSelectionOverlays({
   node: SpaceCanvasNode;
   selected?: boolean;
 }) {
-  if (node.type === "asset" || node.type === "function") {
-    return null;
+  const onNodeResizeStart = (node as any).onNodeResizeStart as
+    | ((nodeId: string) => void)
+    | undefined;
+  const onNodeResizeEnd = (node as any).onNodeResizeEnd as
+    | CanvasNodeResizeHandler
+    | undefined;
+  const resizable =
+    node.type === "asset" ||
+    node.type === "power" ||
+    (node.type === "function" &&
+      node.functionOption?.key === "display" &&
+      shouldRenderFunctionResultCard(node));
+  const resizer = (
+    <CanvasNodeResizer
+      node={node}
+      enabled={Boolean((node as any).interactive)}
+      resizable={resizable}
+      onResizeStart={onNodeResizeStart}
+      onResizeEnd={onNodeResizeEnd}
+    />
+  );
+  if (node.type === "asset") {
+    return resizer;
+  }
+  if (node.type === "function") {
+    return resizer;
   }
   if (!selected && node.type !== "flow") {
-    return null;
+    return resizer;
   }
   const { projectId, runningNode, setRunningNode } = node as any;
   const onNodeResult = (node as any).onNodeResult as
@@ -8757,6 +7476,7 @@ function NodeSelectionOverlays({
     | undefined;
   return (
     <>
+      {resizer}
       <NodeBottomSettings
         key={node.id}
         node={node}
@@ -8804,14 +7524,49 @@ function NodeQuickDetailButton({
   );
 }
 
+const DEFAULT_ATTACHED_RESULT_VIEW: CanvasResultViewState = {
+  width: 270,
+  height: 250,
+  offsetX: 0,
+  offsetY: 0,
+};
+
 function NodeResultBubble({
   node,
+  runningNode,
   onShowNodeDetail,
 }: {
   node: SpaceCanvasNode;
+  runningNode?: RunningNodeState | null;
   onShowNodeDetail?: (node: SpaceCanvasNode) => void;
 }) {
-  if (!nodeHasResultContent(node)) {
+  const normalizedResultView = normalizeCanvasResultViewState(
+    node.resultView || DEFAULT_ATTACHED_RESULT_VIEW,
+  );
+  const {
+    width: savedResultWidth,
+    height: savedResultHeight,
+    offsetX: savedResultOffsetX,
+    offsetY: savedResultOffsetY,
+  } = normalizedResultView;
+  const [resultView, setResultView] = useState(normalizedResultView);
+  const [resizing, setResizing] = useState(false);
+  useEffect(() => {
+    setResultView({
+      width: savedResultWidth,
+      height: savedResultHeight,
+      offsetX: savedResultOffsetX,
+      offsetY: savedResultOffsetY,
+    });
+  }, [
+    savedResultHeight,
+    savedResultOffsetX,
+    savedResultOffsetY,
+    savedResultWidth,
+  ]);
+  const agentRuntime = node.type === "agent" ? runningNode?.agent : undefined;
+  const hasAgentRuntime = hasCanvasAgentRuntimeContent(agentRuntime);
+  if (!nodeHasResultContent(node) && !hasAgentRuntime) {
     return null;
   }
   const basePreview = generatedNodePreview(node);
@@ -8824,83 +7579,130 @@ function NodeResultBubble({
     "暂无结果",
   );
   const rich = nodeRichDocument(node);
+  const displayOutput = nodeEnergonOutput(node);
+  const contentOutput = hasDisplayOutput(displayOutput)
+    ? displayOutput
+    : rich
+      ? { rich }
+      : text;
   const preview = hasPreviewMedia(basePreview)
     ? basePreview
     : mergeGeneratedPreview(
         basePreview,
         generatedPreviewFromValue(text, previewKindFromTextHint(text, "")),
       );
-  const hasMedia = hasPreviewMedia(preview) || richDocumentHasMedia(rich);
-  return (
-    <button
-      type="button"
-      className={`ws-agent-result-bubble nodrag ${rich ? "has-rich" : ""} ${hasMedia ? "has-media" : ""} ${
-        node.type === "function" ? "is-function" : ""
-      }`}
-      onMouseDown={(event) => event.stopPropagation()}
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onShowNodeDetail?.(node);
-      }}
-    >
-      <NodeResultBubbleContent preview={preview} fallback={text} rich={rich} />
-    </button>
+  const onNodeResizeStart = (node as any).onNodeResizeStart as
+    | ((nodeId: string) => void)
+    | undefined;
+  const onResultViewResizeEnd = (node as any).onResultViewResizeEnd as
+    | CanvasResultViewChangeHandler
+    | undefined;
+  const canResize = Boolean(
+    (node as any).interactive && onResultViewResizeEnd,
   );
-}
-
-function NodeResultBubbleContent({
-  preview,
-  fallback,
-  rich,
-}: {
-  preview: GeneratedNodePreview;
-  fallback: string;
-  rich?: ReturnType<typeof richDocument>;
-}) {
-  if (rich) {
-    return (
-      <RichDocumentView
-        value={rich}
-        className="ws-result-rich-preview"
-      />
-    );
-  }
-  const caption = mediaPreviewCaption(preview);
-  const fallbackCaption = caption || fallback;
-  if (preview.imageUrl) {
-    return (
-      <div className="ws-result-preview-media">
-        {caption ? <p className="ws-result-preview-caption">{caption}</p> : null}
-        <img src={preview.imageUrl} alt={fallbackCaption || "图片结果"} />
-      </div>
-    );
-  }
-  if (preview.videoUrl) {
-    return (
-      <div className="ws-result-preview-media">
-        {caption ? <p className="ws-result-preview-caption">{caption}</p> : null}
-        <video src={preview.videoUrl} muted playsInline preload="metadata" />
-      </div>
-    );
-  }
-  if (preview.audioUrl) {
-    return (
-      <div className="ws-result-preview-file">
-        <Music size={15} />
-        <span>{fallbackCaption || "音频结果"}</span>
-      </div>
-    );
-  }
-  if (preview.fileUrl) {
-    return (
-      <div className="ws-result-preview-file">
-        <FileText size={15} />
-        <span>{fallbackCaption || "文件结果"}</span>
-      </div>
-    );
-  }
-  return <p className="ws-result-text">{fallback}</p>;
+  const setRunningNode = (node as any).setRunningNode as
+    | RunningNodeSetter
+    | undefined;
+  const onRunBackendNode = (node as any).onRunBackendNode as
+    | BackendNodeRunner
+    | undefined;
+  const rawAgentOutput = firstDefined(
+    node.resultOutput,
+    node.asset?.version?.content,
+  );
+  const continueAgent =
+    node.type === "agent" && setRunningNode && onRunBackendNode
+      ? async (agentInput: ReferenceInput) => {
+          if (isActiveRunningNode(runningNode)) {
+            return;
+          }
+          setRunningNode((current) => ({
+            ...current,
+            [node.id]: {
+              nodeId: node.id,
+              title: node.title,
+              startedAt: Date.now(),
+              progress: 0,
+              status: "running",
+              agent: emptyCanvasAgentRuntime(),
+            },
+          }));
+          try {
+            await onRunBackendNode(node, { agentInput });
+          } catch (err) {
+            setRunningNode((current) => {
+              const active = current[node.id];
+              if (!active) {
+                return current;
+              }
+              return {
+                ...current,
+                [node.id]: {
+                  ...active,
+                  status: "error",
+                  progress: Math.max(active.progress, 92),
+                },
+              };
+            });
+            toast.error(
+              err instanceof Error ? err.message : "智能体继续运行失败",
+            );
+            window.setTimeout(() => {
+              setRunningNode((current) =>
+                current[node.id]?.status === "error"
+                  ? omitRunningNode(current, node.id)
+                  : current,
+              );
+            }, 1200);
+          }
+        }
+      : undefined;
+  return (
+    <CanvasResultView
+      output={contentOutput}
+      fallback={text}
+      preview={preview}
+      mediaLabel={mediaPreviewCaption(preview)}
+      className={`ws-agent-result-bubble ${resizing ? "is-resizing" : ""}`}
+      followContent={Boolean(runningNode && runningNode.status !== "error")}
+      followKey={agentRuntime}
+      style={{
+        width: resultView.width,
+        height: resultView.height,
+        left: `calc(100% + 12px + ${Number(resultView.offsetX || 0)}px)`,
+        top: `calc(50% + ${Number(resultView.offsetY || 0)}px)`,
+      }}
+      onOpen={
+        onShowNodeDetail ? () => onShowNodeDetail(node) : undefined
+      }
+      resizeControls={
+        <CanvasFloatingResizer
+          value={resultView}
+          enabled={canResize}
+          onResizeStart={() => {
+            setResizing(true);
+            onNodeResizeStart?.(node.id);
+          }}
+          onResize={setResultView}
+          onResizeEnd={(nextView) => {
+            setResultView(nextView);
+            setResizing(false);
+            onResultViewResizeEnd?.(node.id, nextView);
+          }}
+        />
+      }
+    >
+      {node.type === "agent" ? (
+        <CanvasAgentResultContent
+          output={rawAgentOutput}
+          runtime={agentRuntime}
+          fallback={text}
+          running={isActiveRunningNode(runningNode)}
+          onContinue={continueAgent}
+        />
+      ) : undefined}
+    </CanvasResultView>
+  );
 }
 
 function FunctionResultCard({
@@ -8919,56 +7721,22 @@ function FunctionResultCard({
     displayTextFromOutput(node.description, ""),
     "暂无内容",
   );
+  const contentOutput = hasDisplayOutput(displayOutput)
+    ? displayOutput
+    : rich
+      ? { rich }
+      : displayText;
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      className="ws-node-function-result-card nodrag"
-      onMouseDown={(event) => event.stopPropagation()}
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onShowNodeDetail?.(node);
-      }}
-      onKeyDown={(event) => {
-        if (event.key !== "Enter" && event.key !== " ") {
-          return;
-        }
-        event.preventDefault();
-        event.stopPropagation();
-        onShowNodeDetail?.(node);
-      }}
-    >
-      {preview.imageUrl ? (
-        <div className="ws-node-function-result-media">
-          <img src={preview.imageUrl} alt={displayText || node.title} />
-        </div>
-      ) : preview.videoUrl ? (
-        <div className="ws-node-function-result-media">
-          <video src={preview.videoUrl} muted playsInline preload="metadata" />
-        </div>
-      ) : preview.audioUrl ? (
-        <div className="ws-node-function-result-media is-audio">
-          <audio src={preview.audioUrl} controls preload="metadata" />
-        </div>
-      ) : preview.fileUrl ? (
-        <div className="ws-node-function-result-file">
-          <FileText size={16} />
-          <span>{mediaPreviewCaption(preview) || "文件内容"}</span>
-        </div>
-      ) : rich ? (
-        <RichDocumentView
-          value={rich}
-          className="ws-node-text-rich-preview ws-node-function-result-preview"
-        />
-      ) : EnergonContentView && hasDisplayOutput(displayOutput) ? (
-        <div className="ws-node-text-energon-preview ws-node-function-result-preview">
-          <EnergonContentView output={displayOutput} emptyText="暂无内容" />
-        </div>
-      ) : (
-        <p className="ws-node-function-result-text">{displayText}</p>
-      )}
-    </div>
+    <CanvasResultView
+      output={contentOutput}
+      fallback={displayText}
+      preview={preview}
+      mediaLabel={mediaPreviewCaption(preview)}
+      className="ws-node-function-result-card"
+      onOpen={
+        onShowNodeDetail ? () => onShowNodeDetail(node) : undefined
+      }
+    />
   );
 }
 
@@ -8986,8 +7754,9 @@ function NodeFeedbackBeacon({
   if (!onOpenFeedbackRecord || records.length === 0) {
     return null;
   }
-  const pendingCount = records.filter((record) => record.status === "pending")
-    .length;
+  const pendingCount = records.filter(
+    (record) => record.status === "pending",
+  ).length;
   const latest = records[records.length - 1];
   return (
     <button
@@ -9013,10 +7782,10 @@ function nodeHasResultRef(node: SpaceCanvasNode) {
   const ref = node.resultRef;
   return Boolean(
     ref?.run_id ||
-      ref?.node_run_id ||
-      ref?.asset_id ||
-      ref?.version_id ||
-      ref?.request_id,
+    ref?.node_run_id ||
+    ref?.asset_id ||
+    ref?.version_id ||
+    ref?.request_id,
   );
 }
 
@@ -9039,9 +7808,7 @@ function nodeHasResultContent(node: SpaceCanvasNode) {
     output,
     nodePreviewKind(node, output),
   );
-  return (
-    hasGeneratedPreview(preview) || hasContextOutput(output)
-  );
+  return hasGeneratedPreview(preview) || hasContextOutput(output);
 }
 
 function nodeCanHaveExecutionResult(node: SpaceCanvasNode) {
@@ -9089,7 +7856,11 @@ async function runCanvasFunctionNodeAction(input: {
       kind: resultAssetKind(input.node),
       content: upstreamOutput,
       nodeKey: input.node.id,
-      requestId: createCanvasSaveRequestId("save", input.node.id, upstreamOutput),
+      requestId: createCanvasSaveRequestId(
+        "save",
+        input.node.id,
+        upstreamOutput,
+      ),
       source: canvasResultSourceFromContext(input.inputContext),
       previousAsset: input.node.asset,
     });
@@ -9296,6 +8067,10 @@ function functionAssetName(
   return firstText(source?.title, node.title, "画布资产");
 }
 
+function powerFormAllowsSourceSelection(powerForm: PowerForm | null) {
+  return Number(powerForm?.source_rule || 0) === 2;
+}
+
 function NodeBottomSettings({
   node,
   projectId,
@@ -9336,9 +8111,7 @@ function NodeBottomSettings({
   const inputContext = ((node as any).inputContext ||
     null) as NodeInputContext | null;
 
-  const nodeRunning =
-    running ||
-    isActiveRunningNode(runningNode);
+  const nodeRunning = running || isActiveRunningNode(runningNode);
   const selectedNodeType = node.type;
   const selectedNodeId = node.id;
   const selectedFlowId = node.flow?.id || 0;
@@ -9350,6 +8123,10 @@ function NodeBottomSettings({
   const overlayStyle = stableNodeOverlayStyle(viewportZoom);
   const flowRunOverlayStyle = stableFlowRunOverlayStyle();
   const space = ((node as any).space || null) as SpaceBootstrap | null;
+  const catalogCache = (node as any).catalogCache as SpaceCatalogCache;
+  const releaseId = Number(
+    space?.release?.id || space?.project.release_id || 0,
+  );
   const nodeAssetCateId = Number(node.assetCateId || 0);
   const nodeAssetCate = space ? assetCateById(space, nodeAssetCateId) : null;
   const assetLibrary = useMemo(
@@ -9360,39 +8137,36 @@ function NodeBottomSettings({
   useEffect(() => {
     if (selectedNodeType === "power" && (selectedPowerId || selectedPowerKey)) {
       const draftTargetId = savedDraft.selectedTargetId || 0;
-      const cacheKey = powerFormCacheKey(
-        projectId,
-        selectedFlowId,
-        selectedPowerId,
-        selectedPowerKey,
-        draftTargetId,
-      );
-      const cachedForm = powerFormCache.get(cacheKey);
-      if (cachedForm) {
-        setPowerForm(cachedForm);
-        setSelectedTargetId(
-          cachedForm.selected_target_id || draftTargetId || 0,
-        );
-        setParamValues(
-          mergeSavedComposerParamValues(cachedForm.params || [], savedDraft),
-        );
-        setPrompt(savedDraft.prompt || "");
-        setPowerFormLoading(false);
-        return;
-      }
+      let canceled = false;
       setPowerFormLoading(true);
-      fetchSpacePowerForm({
-        projectId,
-        flowId: selectedFlowId,
-        powerId: selectedPowerId,
-        powerKey: selectedPowerKey,
-        targetId: draftTargetId,
-      })
+      catalogCache
+        .loadPowerForm(
+          {
+            projectId,
+            releaseId,
+            flowId: selectedFlowId,
+            powerId: selectedPowerId,
+            powerKey: selectedPowerKey,
+            targetId: draftTargetId,
+          },
+          () =>
+            fetchSpacePowerForm({
+              projectId,
+              flowId: selectedFlowId,
+              powerId: selectedPowerId,
+              powerKey: selectedPowerKey,
+              targetId: draftTargetId,
+            }),
+        )
         .then((form) => {
-          powerFormCache.set(cacheKey, form);
+          if (canceled) {
+            return;
+          }
           setPowerForm(form);
           setSelectedTargetId(
-            form.selected_target_id || draftTargetId || 0,
+            powerFormAllowsSourceSelection(form)
+              ? form.selected_target_id || draftTargetId || 0
+              : 0,
           );
           setParamValues(
             mergeSavedComposerParamValues(form.params || [], savedDraft),
@@ -9400,12 +8174,20 @@ function NodeBottomSettings({
           setPrompt(savedDraft.prompt || "");
         })
         .catch((err) => {
-          toast.error(err instanceof Error ? err.message : "加载能力参数失败");
+          if (!canceled) {
+            toast.error(
+              err instanceof Error ? err.message : "加载能力参数失败",
+            );
+          }
         })
         .finally(() => {
-          setPowerFormLoading(false);
+          if (!canceled) {
+            setPowerFormLoading(false);
+          }
         });
-      return;
+      return () => {
+        canceled = true;
+      };
     }
     setPowerForm(null);
     if (selectedNodeType === "agent") {
@@ -9418,7 +8200,9 @@ function NodeBottomSettings({
     setSelectedTargetId(0);
     setPrompt("");
   }, [
+    catalogCache,
     projectId,
+    releaseId,
     selectedFlowId,
     selectedAgentId,
     selectedNodeId,
@@ -9447,6 +8231,10 @@ function NodeBottomSettings({
   const powerPrompt = promptParam
     ? String(paramValues[promptParam.key] ?? "")
     : prompt;
+  const canSelectPowerSource = powerFormAllowsSourceSelection(powerForm);
+  const effectiveSelectedTargetId = canSelectPowerSource
+    ? selectedTargetId
+    : 0;
 
   function saveComposerDraft(draft: ComposerDraft) {
     onNodeDraftChange(node.id, normalizeComposerDraft(draft));
@@ -9461,7 +8249,7 @@ function NodeBottomSettings({
       saveComposerDraft({
         prompt: nextPrompt,
         paramValues: nextValues,
-        selectedTargetId,
+        selectedTargetId: effectiveSelectedTargetId,
       });
       return nextValues;
     });
@@ -9476,7 +8264,7 @@ function NodeBottomSettings({
       saveComposerDraft({
         prompt,
         paramValues: nextValues,
-        selectedTargetId,
+        selectedTargetId: effectiveSelectedTargetId,
       });
       return nextValues;
     });
@@ -9529,15 +8317,11 @@ function NodeBottomSettings({
     files: File[],
     param: PowerParam,
   ): Promise<UploadPreview[]> {
-    return uploadSpaceFiles(
-      projectId,
-      files,
-      param.upload_rule_id,
-    );
+    return uploadSpaceFiles(projectId, files, param.upload_rule_id);
   }
 
   async function selectPowerSource(targetId: number) {
-    if (nodeRunning) {
+    if (nodeRunning || !canSelectPowerSource) {
       return;
     }
     setSelectedTargetId(targetId);
@@ -9545,43 +8329,28 @@ function NodeBottomSettings({
       return;
     }
     try {
-      const cacheKey = powerFormCacheKey(
-        projectId,
-        node.flow?.id || 0,
-        node.power.id,
-        node.power.key,
-        targetId,
+      const form = await catalogCache.loadPowerForm(
+        {
+          projectId,
+          releaseId,
+          flowId: node.flow?.id || 0,
+          powerId: node.power.id,
+          powerKey: node.power.key,
+          targetId,
+        },
+        () =>
+          fetchSpacePowerForm({
+            projectId,
+            flowId: node.flow?.id || 0,
+            powerId: node.power?.id || 0,
+            powerKey: node.power?.key || "",
+            targetId,
+          }),
       );
-      const cachedForm = powerFormCache.get(cacheKey);
-      if (cachedForm) {
-        setPowerForm(cachedForm);
-        const nextTargetId = cachedForm.selected_target_id || targetId;
-        setSelectedTargetId(nextTargetId);
-        setParamValues((current) => {
-          const nextValues = mergePowerParamValues(
-            cachedForm.params || [],
-            current,
-            powerForm?.params || [],
-          );
-          saveComposerDraft({
-            prompt,
-            paramValues: nextValues,
-            selectedTargetId: nextTargetId,
-          });
-          return nextValues;
-        });
-        return;
-      }
-      const form = await fetchSpacePowerForm({
-        projectId,
-        flowId: node.flow?.id || 0,
-        powerId: node.power.id,
-        powerKey: node.power.key,
-        targetId,
-      });
-      powerFormCache.set(cacheKey, form);
       setPowerForm(form);
-      const nextTargetId = form.selected_target_id || targetId;
+      const nextTargetId = powerFormAllowsSourceSelection(form)
+        ? form.selected_target_id || targetId
+        : 0;
       setSelectedTargetId(nextTargetId);
       setParamValues((current) => {
         const nextValues = mergePowerParamValues(
@@ -9618,7 +8387,8 @@ function NodeBottomSettings({
     let outcome: RunningNodeState["status"] = "error";
     try {
       if (node.type === "asset") {
-        const output = node.asset?.version?.content ?? node.resultOutput ?? node.asset;
+        const output =
+          node.asset?.version?.content ?? node.resultOutput ?? node.asset;
         if (output == null) {
           throw new Error("资产节点没有可载入的内容");
         }
@@ -9644,14 +8414,14 @@ function NodeBottomSettings({
         saveComposerDraft({
           prompt: powerPrompt,
           paramValues,
-          selectedTargetId,
+          selectedTargetId: effectiveSelectedTargetId,
         });
         await onRunBackendNode({
           ...node,
           composerDraft: {
             prompt: powerPrompt,
             paramValues,
-            selectedTargetId,
+            selectedTargetId: effectiveSelectedTargetId,
           },
         });
         toast.success("能力节点执行成功");
@@ -9733,7 +8503,13 @@ function NodeBottomSettings({
       });
       window.setTimeout(
         () => {
-          setRunningNode((current) => omitRunningNode(current, node.id));
+          setRunningNode((current) => {
+            const currentNode = current[node.id];
+            if (currentNode?.status === "error" && currentNode.streamStarted) {
+              return current;
+            }
+            return omitRunningNode(current, node.id);
+          });
         },
         outcome === "success" ? 650 : 1200,
       );
@@ -9746,9 +8522,13 @@ function NodeBottomSettings({
     }
     if (requestConfirm && shouldConfirmNodeRun(node)) {
       requestConfirm({
-        title: node.type === "function" ? `执行「${node.title}」` : `运行「${node.title}」`,
+        title:
+          node.type === "function"
+            ? `执行「${node.title}」`
+            : `运行「${node.title}」`,
         description: nodeRunConfirmDescription(node),
-        confirmText: node.type === "flow" || node.type === "function" ? "执行" : "运行",
+        confirmText:
+          node.type === "flow" || node.type === "function" ? "执行" : "运行",
         onConfirm: runNodeNow,
       });
       return;
@@ -9795,15 +8575,19 @@ function NodeBottomSettings({
             value={powerPrompt}
             placeholder="在此处为该能力输入生成提示词..."
             running={nodeRunning}
-            sourceOptions={powerForm?.sources || []}
-            selectedSourceId={selectedTargetId}
+            sourceOptions={canSelectPowerSource ? powerForm?.sources || [] : []}
+            selectedSourceId={effectiveSelectedTargetId}
             params={composerParams}
             paramValues={paramValues}
             assetLibrary={assetLibrary}
             disabled={powerFormLoading}
             onChange={setPowerPrompt}
             onParamChange={setParamValue}
-            onSourceChange={(targetId) => void selectPowerSource(targetId)}
+            onSourceChange={
+              canSelectPowerSource
+                ? (targetId) => void selectPowerSource(targetId)
+                : undefined
+            }
             onAssetReference={handleAssetReference}
             onLocalUpload={handleLocalUpload}
             onSubmit={handleRun}
@@ -10082,7 +8866,11 @@ function FlowFeedbackDialog({
               className="ws-flow-feedback-submit"
               disabled={running}
             >
-              {running ? <Loader2 size={16} className="ws-spin" /> : <Send size={16} />}
+              {running ? (
+                <Loader2 size={16} className="ws-spin" />
+              ) : (
+                <Send size={16} />
+              )}
               <span>{running ? "提交中" : "提交并继续"}</span>
             </button>
           )}
@@ -10289,22 +9077,6 @@ function nodeRunConfirmDescription(node: SpaceCanvasNode) {
   return "确认后开始执行该节点。";
 }
 
-function powerFormCacheKey(
-  projectId: number,
-  flowId: number,
-  powerId: number,
-  powerKey: string,
-  targetId: number,
-) {
-  return [
-    projectId || 0,
-    flowId || 0,
-    powerId || 0,
-    powerKey || "",
-    targetId || 0,
-  ].join(":");
-}
-
 function NodeSettingButton({
   icon: Icon,
   label,
@@ -10330,6 +9102,8 @@ function NodeSettingButton({
 
 function SpaceNodeView({ data, selected }: NodeProps<any>) {
   const node = data as SpaceCanvasNode;
+  const sourceNode = ((data as any).sourceNode || node) as SpaceCanvasNode;
+  const projectId = Number((data as any).projectId || 0);
   const runningNode = (data as any).runningNode as RunningNodeState | null;
   const canvasRunningNodes = ((data as any).canvasRunningNodes ||
     {}) as RunningNodeMap;
@@ -10342,9 +9116,55 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
   const onNodeResult = (data as any).onNodeResult as
     | NodeResultSetter
     | undefined;
+  const onAssetCreated = (data as any).onAssetCreated as
+    | ((asset: ProjectAsset) => void)
+    | undefined;
   const onOpenFeedbackRecord = (data as any).onOpenFeedbackRecord as
     | ((node: SpaceCanvasNode, record: NodeFeedbackRecord) => void)
     | undefined;
+  const isStoryboardPower =
+    node.type === "power" &&
+    isStoryboardKind(node.power?.kind || node.kind);
+  const storyboardEditable =
+    isStoryboardPower && !isActiveRunningNode(runningNode);
+  const saveStoryboard = useCallback(
+    async (storyboard: StoryboardDocument) => {
+      if (!onNodeResult) {
+        throw new Error("当前节点缺少结果保存入口");
+      }
+      const asset = sourceNode.asset;
+      const assetId = Number(asset?.id || 0);
+      const versionId = Number(asset?.version?.id || asset?.version_id || 0);
+      if (!projectId || !assetId || !versionId) {
+        onNodeResult(sourceNode.id, {
+          resultOutput: storyboard,
+          description: storyboardSummary(storyboard),
+        });
+        return;
+      }
+      try {
+        const savedAsset = await saveSpaceAssetEditVersion({
+          projectId,
+          assetId,
+          versionId,
+          content: storyboard,
+        });
+        const normalizedAsset = mergeProjectAssetVersionHistory(
+          savedAsset,
+          asset,
+        );
+        onNodeResult(sourceNode.id, {
+          ...buildAssetVersionNodePatch(sourceNode, normalizedAsset),
+          description: storyboardSummary(storyboard),
+        });
+        onAssetCreated?.(normalizedAsset);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "保存分镜失败");
+        throw err;
+      }
+    },
+    [onAssetCreated, onNodeResult, projectId, sourceNode],
+  );
 
   // 1. circular agent representation
   if (node.type === "agent") {
@@ -10403,7 +9223,11 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
           node={node}
           onOpenFeedbackRecord={onOpenFeedbackRecord}
         />
-        <NodeResultBubble node={node} onShowNodeDetail={onShowNodeDetail} />
+        <NodeResultBubble
+          node={node}
+          runningNode={runningNode}
+          onShowNodeDetail={onShowNodeDetail}
+        />
         <NodeSelectionOverlays node={node} selected={selected} />
       </div>
     );
@@ -10643,10 +9467,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
           </span>
         </div>
         {renderResultCard ? (
-          <FunctionResultCard
-            node={node}
-            onShowNodeDetail={onShowNodeDetail}
-          />
+          <FunctionResultCard node={node} onShowNodeDetail={onShowNodeDetail} />
         ) : null}
         <NodeHandle
           id="input-0"
@@ -10677,6 +9498,8 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
   if (node.type === "asset") {
     if (node.kind === "image") {
       const preview = nodeDetailPreview(node);
+      const contentOutput = nodeEnergonOutput(node);
+      const useContentView = contentOutputNeedsRenderer(contentOutput);
       const className = [
         "ws-node-image-wrap",
         selected ? "is-selected" : "",
@@ -10690,8 +9513,16 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
             <ImageIcon size={13} className="ws-icon-green" />
             <span>{node.title || "图片资产"}</span>
           </div>
-          <div className="ws-node-image-container">
-            {preview.imageUrl ? (
+          <div className="ws-node-image-container ws-node-content-container">
+            {useContentView ? (
+              <div className="ws-node-scroll-content nowheel">
+                <CanvasNodeContentView
+                  output={contentOutput}
+                  fallback={preview.text || node.description || "图片资产"}
+                  className="ws-canvas-content-view"
+                />
+              </div>
+            ) : preview.imageUrl ? (
               <img
                 src={preview.imageUrl}
                 alt={node.title}
@@ -10727,6 +9558,8 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
 
     if (node.kind === "video") {
       const preview = nodeDetailPreview(node);
+      const contentOutput = nodeEnergonOutput(node);
+      const useContentView = contentOutputNeedsRenderer(contentOutput);
       const className = [
         "ws-node-video-wrap",
         selected ? "is-selected" : "",
@@ -10740,8 +9573,16 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
             <Video size={13} className="ws-icon-green" />
             <span>{node.title || "视频资产"}</span>
           </div>
-          <div className="ws-node-video-container">
-            {preview.videoUrl ? (
+          <div className="ws-node-video-container ws-node-content-container">
+            {useContentView ? (
+              <div className="ws-node-scroll-content nowheel">
+                <CanvasNodeContentView
+                  output={contentOutput}
+                  fallback={preview.text || node.description || "视频资产"}
+                  className="ws-canvas-content-view"
+                />
+              </div>
+            ) : preview.videoUrl ? (
               <video
                 src={preview.videoUrl}
                 className="ws-node-video-raw"
@@ -10761,11 +9602,13 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
                 <span>{preview.text || node.description || "视频资产"}</span>
               </div>
             )}
-            <div className="ws-node-video-play">
-              <div>
-                <Play size={14} fill="currentColor" />
+            {useContentView ? null : (
+              <div className="ws-node-video-play">
+                <div>
+                  <Play size={14} fill="currentColor" />
+                </div>
               </div>
-            </div>
+            )}
           </div>
           <NodeHandle
             id="input-0"
@@ -10793,6 +9636,12 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
     const rich = nodeRichDocument(node);
     const displayOutput = nodeEnergonOutput(node);
     const displayText = nodeDisplayText(node);
+    const contentOutput = hasDisplayOutput(displayOutput)
+      ? displayOutput
+      : rich
+        ? { rich }
+        : displayText || preview.text;
+    const useContentView = contentOutputNeedsRenderer(contentOutput);
     const hasTextMedia = Boolean(
       preview.imageUrl || preview.videoUrl || preview.audioUrl,
     );
@@ -10810,19 +9659,14 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
           <span>{node.title}</span>
         </div>
         <div className="ws-node-text-card">
-          {rich ? (
-            <RichDocumentView
-              value={rich}
-              className="ws-node-text-rich-preview"
-            />
-          ) : preview.imageUrl ? (
+          {!useContentView && preview.imageUrl ? (
             <div className="ws-node-text-media">
               <img
                 src={preview.imageUrl}
                 alt={mediaPreviewCaption(preview) || node.title}
               />
             </div>
-          ) : preview.videoUrl ? (
+          ) : !useContentView && preview.videoUrl ? (
             <div className="ws-node-text-media">
               <video
                 src={preview.videoUrl}
@@ -10831,23 +9675,23 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
                 preload="metadata"
               />
             </div>
-          ) : preview.audioUrl ? (
+          ) : !useContentView && preview.audioUrl ? (
             <div className="ws-node-text-media is-audio">
               <audio src={preview.audioUrl} controls preload="metadata" />
             </div>
-          ) : preview.fileUrl ? (
+          ) : !useContentView && preview.fileUrl ? (
             <div className="ws-node-text-file">
               <FileText size={16} />
               <span>{mediaPreviewCaption(preview) || "文件内容"}</span>
             </div>
-          ) : EnergonContentView && hasDisplayOutput(displayOutput) ? (
-            <div className="ws-node-text-energon-preview">
-              <EnergonContentView output={displayOutput} emptyText="暂无内容" />
-            </div>
           ) : (
-            <p className="ws-node-text-content">
-              {displayText || displayTextFromOutput(preview.text, "") || "暂无内容"}
-            </p>
+            <div className="ws-node-scroll-content nowheel">
+              <CanvasNodeContentView
+                output={contentOutput}
+                fallback={displayText || preview.text || "暂无内容"}
+                className="ws-canvas-content-view"
+              />
+            </div>
           )}
         </div>
         <NodeHandle
@@ -10873,20 +9717,51 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
 
   // 5. Power Nodes
   if (node.type === "power") {
-    const showRunFrame =
-      isActiveRunningNode(runningNode) || runningNode?.status === "success";
-    const preview = generatedNodePreview(node);
-    const hasPowerContent = nodeHasResultContent(node);
-    const hasPowerMedia = Boolean(
-      preview.imageUrl ||
-        preview.videoUrl ||
-        preview.audioUrl ||
-        preview.fileUrl,
+    const isPowerRunning = isActiveRunningNode(runningNode);
+    const storyboardHasResult = nodeHasResultContent(node);
+    const storyboardStatus: StoryboardNodeStatus = isPowerRunning
+      ? "running"
+      : runningNode?.status === "error"
+        ? "error"
+        : runningNode?.status === "success" && !storyboardHasResult
+          ? "running"
+          : storyboardHasResult
+            ? "complete"
+            : "empty";
+    const showStreamText = Boolean(
+      !isStoryboardPower &&
+        runningNode?.streamStarted &&
+        runningNode.streamText &&
+        runningNode.status !== "success",
     );
+    const preview = showStreamText
+      ? {
+          text: runningNode?.streamText || "",
+          imageUrl: "",
+          videoUrl: "",
+          audioUrl: "",
+          fileUrl: "",
+        }
+      : generatedNodePreview(node);
+    const contentOutput = showStreamText
+      ? { text: runningNode?.streamText || "" }
+      : nodeEnergonOutput(node);
+    const hasPowerContent =
+      isStoryboardPower || showStreamText || storyboardHasResult;
+    const hasPowerMedia =
+      !isStoryboardPower &&
+      Boolean(
+        preview.imageUrl ||
+          preview.videoUrl ||
+          preview.audioUrl ||
+          preview.fileUrl,
+      );
+    const canAdoptGeneratedMediaSize = hasDefaultCanvasNodeSize(node);
     const className = [
       "ws-node-power-wrap",
       selected ? "is-selected" : "",
-      showRunFrame ? "is-running" : "",
+      isPowerRunning ? "is-running" : "",
+      isStoryboardPower ? "is-storyboard" : "",
       hasPowerContent ? "has-content" : "",
       hasPowerMedia ? "has-media" : "",
     ]
@@ -10904,7 +9779,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
           <span>{node.title}</span>
         </div>
         <div className="ws-node-power-card">
-          {showRunFrame ? (
+          {isPowerRunning ? (
             <svg
               className="ws-node-running-border is-spin"
               aria-hidden="true"
@@ -10933,22 +9808,40 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
               />
             </svg>
           ) : null}
-          {hasPowerContent ? (
+          {isStoryboardPower ? (
+            <StoryboardNodeContent
+              output={nodeEnergonOutput(node)}
+              status={storyboardStatus}
+              editable={storyboardEditable}
+              onSave={storyboardEditable ? saveStoryboard : undefined}
+              onOpenDetail={
+                storyboardHasResult && onShowNodeDetail
+                  ? () => onShowNodeDetail(node)
+                  : undefined
+              }
+            />
+          ) : hasPowerContent ? (
             <PowerNodeGeneratedContent
               preview={preview}
+              output={contentOutput}
               fallback={node.description}
-              onMediaSize={(width, height) => {
-                const nextSize = generatedMediaNodeSize(width, height);
-                if (!nextSize || !onNodeResult) {
-                  return;
-                }
-                if (
-                  Math.abs((node.width || 0) - nextSize.width) > 2 ||
-                  Math.abs((node.height || 0) - nextSize.height) > 2
-                ) {
-                  onNodeResult(node.id, nextSize);
-                }
-              }}
+              streaming={isPowerRunning && showStreamText}
+              onMediaSize={
+                canAdoptGeneratedMediaSize
+                  ? (width, height) => {
+                      const nextSize = generatedMediaNodeSize(width, height);
+                      if (!nextSize || !onNodeResult) {
+                        return;
+                      }
+                      if (
+                        Math.abs((node.width || 0) - nextSize.width) > 2 ||
+                        Math.abs((node.height || 0) - nextSize.height) > 2
+                      ) {
+                        onNodeResult(node.id, nextSize);
+                      }
+                    }
+                  : undefined
+              }
             />
           ) : (
             <PowerNodeEmptyState />
@@ -10966,10 +9859,12 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
           position={Position.Right}
           className="is-out"
         />
-        <NodeQuickDetailButton
-          node={node}
-          onShowNodeDetail={onShowNodeDetail}
-        />
+        {isStoryboardPower ? null : (
+          <NodeQuickDetailButton
+            node={node}
+            onShowNodeDetail={onShowNodeDetail}
+          />
+        )}
         <NodeSelectionOverlays node={node} selected={selected} />
       </div>
     );
@@ -11000,15 +9895,35 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
 
 function PowerNodeGeneratedContent({
   preview,
+  output,
   fallback,
+  streaming,
   onMediaSize,
 }: {
   preview: GeneratedNodePreview;
+  output: any;
   fallback: string;
+  streaming?: boolean;
   onMediaSize?: (width: number, height: number) => void;
 }) {
+  const textRef = useRef<HTMLDivElement>(null);
+  const followStreamRef = useRef(true);
   const caption = mediaPreviewCaption(preview);
-  if (preview.imageUrl) {
+  const useContentView = contentOutputNeedsRenderer(output);
+
+  useEffect(() => {
+    if (!streaming) {
+      followStreamRef.current = true;
+      return;
+    }
+    const element = textRef.current;
+    if (!element || !followStreamRef.current) {
+      return;
+    }
+    element.scrollTop = element.scrollHeight;
+  }, [preview.text, streaming]);
+
+  if (!useContentView && preview.imageUrl) {
     return (
       <div className="ws-node-power-media">
         <img
@@ -11025,7 +9940,7 @@ function PowerNodeGeneratedContent({
       </div>
     );
   }
-  if (preview.videoUrl) {
+  if (!useContentView && preview.videoUrl) {
     return (
       <div className="ws-node-power-media">
         <video
@@ -11044,7 +9959,7 @@ function PowerNodeGeneratedContent({
       </div>
     );
   }
-  if (preview.audioUrl) {
+  if (!useContentView && preview.audioUrl) {
     return (
       <div className="ws-node-power-media is-audio">
         <audio src={preview.audioUrl} controls preload="metadata" />
@@ -11052,7 +9967,7 @@ function PowerNodeGeneratedContent({
       </div>
     );
   }
-  if (preview.fileUrl) {
+  if (!useContentView && preview.fileUrl) {
     return (
       <div className="ws-node-power-file">
         <FileText size={16} />
@@ -11060,7 +9975,24 @@ function PowerNodeGeneratedContent({
       </div>
     );
   }
-  return <p className="ws-node-power-desc">{preview.text || fallback}</p>;
+  return (
+    <div
+      ref={textRef}
+      className="ws-node-power-desc ws-node-scroll-content nowheel"
+      onScroll={(event) => {
+        const element = event.currentTarget;
+        followStreamRef.current =
+          element.scrollHeight - element.scrollTop - element.clientHeight < 12;
+      }}
+    >
+      <CanvasNodeContentView
+        output={output}
+        fallback={preview.text || fallback}
+        streaming={streaming}
+        className="ws-canvas-content-view"
+      />
+    </div>
+  );
 }
 
 function mediaPreviewCaption(preview: GeneratedNodePreview) {
@@ -11112,123 +10044,12 @@ function PowerNodeEmptyState() {
   );
 }
 
-function PowerIcon({
-  power,
-  kind,
-  size,
-  className,
-}: {
-  power?: PowerOption;
-  kind?: string;
-  size: number;
-  className?: string;
-}) {
-  const FallbackIcon = powerIcon(power?.kind || kind || "");
-  const Icon =
-    resolveSharedLucideIcon(normalizePowerIconName(power?.icon)) ||
-    FallbackIcon;
-
-  return <Icon size={size} className={className} />;
-}
-
-function resolveSharedLucideIcon(iconName?: string): LucideIcon | null {
-  if (!iconName) {
-    return null;
-  }
-  try {
-    const resolver = getCompatModule("@/lib/icon").resolveLucideIcon as
-      | ((name?: string) => LucideIcon | null)
-      | undefined;
-    const Icon = resolver?.(iconName);
-    if (Icon) {
-      return Icon;
-    }
-  } catch {
-    // The host SDK may not expose this compat module on older dev sessions.
-  }
-  return resolveLocalLucideIcon(iconName);
-}
-
-function resolveLocalLucideIcon(iconName?: string): LucideIcon | null {
-  if (!iconName) {
-    return null;
-  }
-  const exportName = iconName
-    .split("-")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join("");
-  return (
-    (LucideIcons as unknown as Record<string, LucideIcon | undefined>)[
-      exportName
-    ] || null
-  );
-}
-
-function normalizePowerIconName(icon?: string) {
-  const text = String(icon || "").trim();
-  if (!text || text === "-") {
-    return "";
-  }
-  return text
-    .replace(/^i-lucide-/i, "")
-    .replace(/^lucide[:/\\-]/i, "")
-    .replace(/Icon$/i, "")
-    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
-    .replace(/[_\s]+/g, "-")
-    .replace(/[^a-zA-Z0-9-]/g, "")
-    .replace(/--+/g, "-")
-    .replace(/^-|-$/g, "")
-    .toLowerCase();
-}
-
-function powerIcon(kind: string): LucideIcon {
-  const normalizedKind = String(kind || "").toLowerCase();
-  if (normalizedKind === "text" || normalizedKind === "llm") return Type;
-  if (normalizedKind === "image") return ImageIcon;
-  if (normalizedKind === "video") return Video;
-  if (normalizedKind === "audio" || normalizedKind === "music") return Music;
-  if (normalizedKind === "file") return FileText;
-  if (normalizedKind === "workflow") return Workflow;
-  if (normalizedKind === "role" || normalizedKind === "agent") return UserCheck;
-  if (normalizedKind === "multi") return Sparkles;
-  return Brain;
-}
-
 function miniMapNodeColor(node: SpaceCanvasNode) {
   if (node.type === "asset") return "#23c483";
   if (node.type === "power") return "#8b5cf6";
   if (node.type === "agent") return "#f59e0b";
   if (node.type === "flow") return "#3b82f6";
   return "#e85d75";
-}
-
-function clampMenuPoint(menu: AddNodeMenuState) {
-  if (typeof window === "undefined") {
-    return { x: menu.x, y: menu.y, maxHeight: 520 };
-  }
-  const margin = 14;
-  const minTop = 62;
-  const width = Math.min(292, window.innerWidth - margin * 2);
-  const maxHeight = Math.min(
-    520,
-    Math.max(180, window.innerHeight - minTop - margin),
-  );
-  const preferredY =
-    menu.y + maxHeight > window.innerHeight - margin
-      ? menu.y - maxHeight
-      : menu.y;
-  return {
-    x: Math.min(
-      Math.max(margin, menu.x),
-      Math.max(margin, window.innerWidth - width - margin),
-    ),
-    y: Math.min(
-      Math.max(minTop, preferredY),
-      Math.max(minTop, window.innerHeight - maxHeight - margin),
-    ),
-    maxHeight,
-  };
 }
 
 function readStoredTheme(): WorkSpaceTheme {

@@ -104,6 +104,7 @@ export type PowerParam = {
   power_param_id?: number;
   name: string;
   key: string;
+  icon?: string;
   type: "input" | "textarea" | "switch" | "option" | "multi_option" | "file" | "files" | "hidden" | "description" | string;
   usage?: number;
   value_type?: "string" | "number" | string;
@@ -149,9 +150,29 @@ export type AssetVersion = {
   run_id?: number;
   node_run_id?: number;
   release_id?: number;
+  request_id?: string;
+  node_key?: string;
+  source?: Record<string, unknown>;
   version: number;
+  summary?: string;
   content?: unknown;
   created_at?: string;
+  updated_at?: string;
+};
+
+export type AssetVersionPage = {
+  items: AssetVersion[];
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+};
+
+export type SpaceAssetDetail = {
+  asset: ProjectAsset;
+  versions: AssetVersion[];
+  versionTotal: number;
+  hasMore: boolean;
 };
 
 export type ProjectAsset = {
@@ -212,6 +233,13 @@ export type SpaceBootstrap = {
   powerKinds: PowerKindOption[];
 };
 
+export type CanvasResultViewState = {
+  width: number;
+  height: number;
+  offsetX?: number;
+  offsetY?: number;
+};
+
 export type SpaceCanvasNode = {
   [key: string]: unknown;
   id: string;
@@ -234,6 +262,7 @@ export type SpaceCanvasNode = {
   functionOption?: CanvasFunctionOption;
   resultRef?: CanvasResultRef;
   resultOutput?: unknown;
+  resultView?: CanvasResultViewState;
   local?: boolean;
 };
 

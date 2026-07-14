@@ -10,6 +10,7 @@ type Param struct {
 	ID           uint64    `dorm:"primaryKey;autoIncrement;comment:参数ID"`
 	Name         string    `dorm:"type:varchar(128);not null;comment:参数名"`
 	Key          string    `dorm:"type:varchar(128);not null;comment:参数标识"`
+	Icon         string    `dorm:"type:varchar(64);not null;default:'';comment:图标"`
 	Type         string    `dorm:"type:varchar(32);not null;comment:类型"`
 	Usage        int16     `dorm:"type:smallint;not null;default:1;comment:用途"`
 	ValueType    string    `dorm:"type:varchar(32);not null;default:string;comment:值类型"`

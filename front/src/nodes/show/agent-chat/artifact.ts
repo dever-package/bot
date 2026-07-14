@@ -4,6 +4,7 @@ import type { AgentChatOutput } from "./output";
 export type AgentChatArtifact = {
   id: number;
   fileID: number;
+  displayNo: number;
   label: string;
   name: string;
   kind: "image" | "video" | "audio" | "file";
@@ -59,6 +60,7 @@ function readArtifact(value: unknown): AgentChatArtifact | null {
   return {
     id,
     fileID: positiveNumber(value.file_id),
+    displayNo: Math.floor(positiveNumber(value.display_no)),
     label: textValue(value.label) || `素材 ${id}`,
     name: textValue(value.name),
     kind: artifactKind(value.kind),

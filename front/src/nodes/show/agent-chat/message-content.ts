@@ -4,16 +4,42 @@ import type { ChatMessage } from "./types";
 
 type MessageContent = Exclude<ThreadMessageLike["content"], string>;
 
+export type AgentChatContentSegment =
+  | { type: "text"; text: string }
+  | { type: "activity"; activity: AgentChatActivity };
+
 export function buildAgentChatAssistantContent(
   message: ChatMessage,
 ): MessageContent {
   const activities = message.activities || [];
-  const text = withoutActivityMediaMarkdown(message.text, activities);
+  return buildAgentChatContentSegments(message.text, activities).map<
+    MessageContent[number]
+  >(
+    (segment) =>
+      segment.type === "text"
+        ? { type: "text", text: segment.text }
+        : {
+            type: "tool-call",
+            toolCallId: segment.activity.id,
+            toolName: segment.activity.title,
+            args: {},
+            argsText: "{}",
+            result: segment.activity.output,
+            isError: segment.activity.status === "failed",
+          },
+  );
+}
+
+export function buildAgentChatContentSegments(
+  sourceText: string,
+  activities: AgentChatActivity[],
+): AgentChatContentSegment[] {
+  const text = withoutActivityMediaMarkdown(sourceText, activities);
   if (activities.length === 0) {
     return text ? [{ type: "text", text }] : [];
   }
 
-  const content: Array<MessageContent[number]> = [];
+  const content: AgentChatContentSegment[] = [];
   let cursor = 0;
   for (const activity of activities) {
     const anchor = withoutActivityMediaMarkdown(
@@ -21,23 +47,15 @@ export function buildAgentChatAssistantContent(
       activities,
     );
     const anchorEnd = resolveAnchorEnd(text, anchor, cursor);
-    appendTextPart(content, text.slice(cursor, anchorEnd));
-    content.push({
-      type: "tool-call",
-      toolCallId: activity.id,
-      toolName: activity.title,
-      args: {},
-      argsText: "{}",
-      result: activity.output,
-      isError: activity.status === "failed",
-    });
+    appendTextSegment(content, text.slice(cursor, anchorEnd));
+    content.push({ type: "activity", activity });
     cursor = anchorEnd;
   }
-  appendTextPart(content, text.slice(cursor));
+  appendTextSegment(content, text.slice(cursor));
   return content;
 }
 
-function appendTextPart(content: Array<MessageContent[number]>, text: string) {
+function appendTextSegment(content: AgentChatContentSegment[], text: string) {
   if (text) {
     content.push({ type: "text", text });
   }

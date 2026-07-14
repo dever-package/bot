@@ -9,6 +9,8 @@ import (
 	teammodel "github.com/dever-package/bot/model/team"
 	assetservice "github.com/dever-package/bot/service/asset"
 	energonservice "github.com/dever-package/bot/service/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	energonstream "github.com/dever-package/bot/service/energon/stream"
 	"github.com/dever-package/bot/service/stream"
 )
 
@@ -120,6 +122,34 @@ func (s Service) CanvasConfig(ctx context.Context, releaseID uint64, flowID uint
 	}, nil
 }
 
+// ValidateCanvasAgent ensures a canvas node uses the agent assigned to a role
+// in the current team release snapshot.
+func (s Service) ValidateCanvasAgent(ctx context.Context, releaseID uint64, roleID uint64, agentID uint64) error {
+	if releaseID == 0 {
+		return fmt.Errorf("当前项目未绑定已发布团队")
+	}
+	if roleID == 0 {
+		return fmt.Errorf("智能体节点未配置团队角色")
+	}
+	if agentID == 0 {
+		return fmt.Errorf("智能体节点未配置智能体")
+	}
+	_, graph, err := s.runtimeGraphByRelease(ctx, 0, releaseID)
+	if err != nil {
+		return err
+	}
+	for _, role := range graph.Roles {
+		if role.ID != roleID || role.Status != teammodel.StatusEnabled {
+			continue
+		}
+		if role.AgentID != agentID {
+			return fmt.Errorf("智能体与当前团队角色不匹配")
+		}
+		return nil
+	}
+	return fmt.Errorf("当前团队发布版本中不存在该角色")
+}
+
 func (s Service) CanvasPowerForm(ctx context.Context, releaseID uint64, flowID uint64, powerID uint64, powerKey string, targetID uint64) (map[string]any, error) {
 	power, ok := s.repo.FindPowerOption(ctx, powerID, powerKey)
 	if !ok {
@@ -214,9 +244,6 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	if run == nil {
 		return nil, fmt.Errorf("画布能力运行不存在")
 	}
-	stopForward := s.forwardCanvasPowerStream(ctx, requestID, req.OnStream)
-	defer stopForward()
-
 	s.writeRunEvent(ctx, *run, stream.EventRunStarted, map[string]any{
 		"feature": stream.FeaturePower,
 		"scope":   "run",
@@ -274,7 +301,7 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		})
 	}
 
-	output, err := s.callCanvasPower(ctx, requestID, power, input, req.SourceTargetID)
+	output, err := s.callCanvasPower(ctx, requestID, power, input, req.SourceTargetID, req.OnStream)
 	status := teammodel.RunStatusSuccess
 	if err != nil {
 		status = teammodel.RunStatusFail
@@ -368,45 +395,6 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	}, nil
 }
 
-func (s Service) forwardCanvasPowerStream(ctx context.Context, requestID string, forward func(map[string]any)) func() {
-	if forward == nil || strings.TrimSpace(requestID) == "" {
-		return func() {}
-	}
-	streamCtx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		lastID := "0-0"
-		for {
-			entries, err := s.ReadStream(streamCtx, requestID, lastID, 100, time.Second)
-			for _, entry := range entries {
-				if strings.TrimSpace(entry.ID) != "" {
-					lastID = entry.ID
-				}
-				if entry.Payload != nil {
-					forward(entry.Payload)
-				}
-			}
-			if err != nil && streamCtx.Err() != nil {
-				return
-			}
-			select {
-			case <-streamCtx.Done():
-				return
-			default:
-			}
-		}
-	}()
-	return func() {
-		cancel()
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-		case <-ctx.Done():
-		}
-	}
-}
-
 func (s Service) ListProjectAssets(ctx context.Context, projectID uint64, flowID uint64, kind string) (map[string]any, error) {
 	if projectID == 0 {
 		return nil, fmt.Errorf("项目不能为空")
@@ -451,29 +439,50 @@ func (s Service) runtimeGraphByRelease(ctx context.Context, teamID uint64, relea
 	return release, graph, err
 }
 
-func (s Service) callCanvasPower(ctx context.Context, requestID string, power PowerOption, input map[string]any, sourceTargetID uint64) (map[string]any, error) {
+func (s Service) callCanvasPower(ctx context.Context, requestID string, power PowerOption, input map[string]any, sourceTargetID uint64, onStream func(map[string]any)) (map[string]any, error) {
 	sourceTargetID = resolveSourceTargetID(sourceTargetID, input)
 	body := map[string]any{
 		"protocol": "shemic",
 		"power":    power.Key,
 		"input":    input,
 		"history":  []any{},
-		"options":  map[string]any{"stream": false},
+		"options":  map[string]any{"stream": true},
 	}
 	if sourceTargetID > 0 {
 		body["source_target_id"] = sourceTargetID
 	}
-	resp := s.gateway.Request(ctx, energonservice.GatewayRequest{
+	start := s.gateway.Request(ctx, energonservice.GatewayRequest{
 		RequestID: requestID,
 		Method:    "POST",
 		Path:      "/bot/admin/energon/request",
 		Body:      body,
 	})
-	payload := resp.Payload()
-	if resp.Status != 1 {
-		return powerOutputValue(payload["output"], power.Kind), fmt.Errorf("%s", firstText(payload["msg"], "能力运行失败"))
+	if start.Status != 1 {
+		return nil, fmt.Errorf("%s", firstText(start.Msg, "能力运行失败"))
 	}
-	return powerOutputValue(payload["output"], power.Kind), nil
+
+	collected := s.gateway.CollectStream(ctx, energonstream.CollectOptions{
+		RequestID:        requestID,
+		Block:            time.Second,
+		CollectDeltaText: true,
+		OnOutput: func(_ context.Context, output botprotocol.Output) error {
+			if onStream != nil {
+				onStream(botprotocol.BuildStreamResponse(requestID, output).Payload())
+			}
+			return nil
+		},
+	})
+	output := mapValue(collected.Frame["output"])
+	if collected.State.Text != "" && textValue(output["text"]) == "" {
+		output["text"] = collected.State.Text
+	}
+	if collected.Err != nil {
+		return powerOutputValue(output, power.Kind), collected.Err
+	}
+	if intValue(collected.Frame["status"], 1) != 1 {
+		return powerOutputValue(output, power.Kind), fmt.Errorf("%s", firstText(collected.Frame["msg"], "能力运行失败"))
+	}
+	return powerOutputValue(output, power.Kind), nil
 }
 
 func powerOutputValue(raw any, kind string) map[string]any {

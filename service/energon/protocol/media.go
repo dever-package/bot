@@ -162,15 +162,29 @@ func collectMediaMap(output Output, mapped map[string]any, defaultType string, e
 	}
 
 	currentEvent := firstText(
-		eventType,
 		strings.TrimSpace(asText(mapped["event"])),
 		strings.TrimSpace(asText(mapped["type"])),
+		strings.TrimSpace(asText(mapped["kind"])),
+		strings.TrimSpace(asText(mapped["media_type"])),
+		strings.TrimSpace(asText(mapped["mime"])),
+		eventType,
 	)
 	currentType := mediaTypeFromEvent(currentEvent, defaultType)
 
 	collectKnownMediaFields(output, mapped, currentType)
-	collectMediaOutput(output, mapped["content"], currentType, currentEvent)
-	collectMediaOutput(output, mapped["data"], currentType, currentEvent)
+	for _, key := range []string{
+		"attrs",
+		"content",
+		"data",
+		"sources",
+		"result",
+		"preview",
+		"rich",
+		"json",
+		"media_files",
+	} {
+		collectMediaOutput(output, mapped[key], currentType, currentEvent)
+	}
 	collectMetaFields(output, mapped)
 }
 
@@ -182,9 +196,13 @@ func collectKnownMediaFields(output Output, mapped map[string]any, currentType s
 	appendMediaFieldValues(output, MediaTypeFile, mapped["files"], mapped["file"])
 
 	appendMediaByType(output, MediaTypeImage, collectURLValues(mapped["image_url"]))
+	appendMediaByType(output, MediaTypeImage, collectURLValues(mapped["imageUrl"]))
 	appendMediaByType(output, MediaTypeVideo, collectURLValues(mapped["video_url"]))
+	appendMediaByType(output, MediaTypeVideo, collectURLValues(mapped["videoUrl"]))
 	appendMediaByType(output, MediaTypeAudio, collectURLValues(mapped["audio_url"]))
+	appendMediaByType(output, MediaTypeAudio, collectURLValues(mapped["audioUrl"]))
 	appendMediaByType(output, MediaTypeFile, collectURLValues(mapped["file_url"]))
+	appendMediaByType(output, MediaTypeFile, collectURLValues(mapped["fileUrl"]))
 	appendMediaByType(output, MediaTypeImage, collectURLValues(mapped["first_frame_url"]))
 	appendMediaByType(output, MediaTypeImage, collectURLValues(mapped["last_frame_url"]))
 	appendMediaByType(output, MediaTypeImage, collectURLValues(mapped["cover_url"]))
@@ -193,6 +211,9 @@ func collectKnownMediaFields(output Output, mapped map[string]any, currentType s
 		appendMediaByType(output, MediaTypeImage, []string{normalizeBase64ImageURL(b64)})
 	}
 	if urls := collectURLValues(mapped["url"]); len(urls) > 0 {
+		appendMediaByType(output, currentType, urls)
+	}
+	if urls := collectURLValues(mapped["src"]); len(urls) > 0 {
 		appendMediaByType(output, currentType, urls)
 	}
 }

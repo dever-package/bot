@@ -73,9 +73,57 @@ func workspaceAgentHistory(ctx context.Context, projectID uint64, assetCateID ui
 			continue
 		}
 		value := jsonValue(row.Content, map[string]any{})
-		if value != nil {
-			result = append(result, value)
+		if message := workspaceAgentHistoryMessage(value); message != nil {
+			result = append(result, message)
 		}
+	}
+	return result
+}
+
+func workspaceAgentHistoryMessage(value any) any {
+	stored := mapValue(value)
+	if stored == nil {
+		return nil
+	}
+	role := strings.TrimSpace(textValue(stored["role"]))
+	content := stored["content"]
+	if message := mapValue(content); message != nil {
+		result := cloneInput(message)
+		for _, key := range []string{
+			"event",
+			"semantic_event",
+			"meta",
+			"activities",
+			"suggestions",
+			"progress",
+			"status",
+		} {
+			delete(result, key)
+		}
+		if role != "" {
+			result["role"] = role
+		}
+		return result
+	}
+	text := canvasContextText(content)
+	if text == "" {
+		return nil
+	}
+	return map[string]any{
+		"role": role,
+		"text": text,
+	}
+}
+
+func workspaceAgentUserInput(input map[string]any) map[string]any {
+	result := cloneInput(input)
+	for _, key := range []string{
+		"_manual_input_context",
+		"manual_node_id",
+		"previous_output",
+		"role_id",
+	} {
+		delete(result, key)
 	}
 	return result
 }

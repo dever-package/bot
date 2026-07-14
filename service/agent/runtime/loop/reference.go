@@ -23,6 +23,7 @@ func mediaReferences(values []runtimereference.Media) []runtimeprovider.MediaRef
 			Name:          current.Name,
 			Label:         current.Label,
 			URL:           current.URL,
+			ParameterKey:  current.Usage,
 		})
 	}
 	return result

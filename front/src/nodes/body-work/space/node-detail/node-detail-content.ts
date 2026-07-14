@@ -1,0 +1,552 @@
+import { normalizeEnergonOutput } from "../space-content-view";
+import { plainMarkdownTextFromRichOutput } from "../space-content-output";
+import { documentText, richDocument } from "../space-model";
+import {
+  parseStoryboardOutput,
+  storyboardSummary,
+  type StoryboardDocument,
+} from "../space-storyboard";
+import type { AssetVersion, SpaceCanvasNode } from "../types";
+
+export type NodeDetailContentMode = "rich" | "storyboard" | "file";
+export type NodeDetailContentFormat = "json" | "markdown";
+
+export type NodeDetailFileValue = {
+  url: string;
+  name: string;
+  description: string;
+};
+
+export type NodeDetailEditableContent = {
+  mode: NodeDetailContentMode;
+  value: string | StoryboardDocument | NodeDetailFileValue;
+  format: NodeDetailContentFormat;
+  summary: string;
+  downloadUrl: string;
+};
+
+export function resolveNodeDetailContent(
+  node: SpaceCanvasNode,
+  version?: AssetVersion,
+): NodeDetailEditableContent {
+  const raw = firstDefined(
+    version?.content,
+    node.asset?.version?.content,
+    node.resultOutput,
+    valueAtPath(node, "result", "output"),
+    node.description,
+  );
+  const storyboard = parseStoryboardOutput(raw);
+  if (storyboard) {
+    return {
+      mode: "storyboard",
+      value: storyboard,
+      format: "json",
+      summary: storyboardSummary(storyboard),
+      downloadUrl: "",
+    };
+  }
+
+  const directRich = directRichDocument(raw);
+  if (directRich) {
+    const plainMarkdown = isExplicitRichJSON(raw)
+      ? ""
+      : plainMarkdownTextFromRichOutput(directRich);
+    if (plainMarkdown && looksLikeMarkdownSyntax(plainMarkdown)) {
+      return markdownContent(plainMarkdown);
+    }
+    return richContent(directRich);
+  }
+
+  const file = fileValueFromOutput(raw);
+  if (file) {
+    return {
+      mode: "file",
+      value: file,
+      format: "json",
+      summary: file.description || file.name || "文件内容",
+      downloadUrl: file.url,
+    };
+  }
+
+  const directMarkdown = directMarkdownText(raw);
+  if (directMarkdown) {
+    return markdownContent(directMarkdown);
+  }
+
+  const protocolRich = protocolRichDocument(raw);
+  if (protocolRich) {
+    return richContent(protocolRich);
+  }
+
+  const markdown = markdownTextFromOutput(raw) || node.description || "";
+  return markdownContent(markdown);
+}
+
+export function serializeNodeDetailContent(
+  content: NodeDetailEditableContent,
+): unknown {
+  if (content.mode === "storyboard") {
+    return content.value;
+  }
+  if (content.mode === "file") {
+    return fileContent(content.value as NodeDetailFileValue);
+  }
+  const value = String(content.value || "");
+  if (content.format === "markdown") {
+    return { format: "markdown", text: value };
+  }
+  return safeRichDocument(parseMaybeJSON(value)) || plainTextDocument(value);
+}
+
+export function nodeDetailContentFingerprint(
+  content: NodeDetailEditableContent,
+) {
+  return safeJSONString(serializeNodeDetailContent(content));
+}
+
+export function nodeDetailContentWithValue(
+  content: NodeDetailEditableContent,
+  value: NodeDetailEditableContent["value"],
+): NodeDetailEditableContent {
+  const next = { ...content, value };
+  if (next.mode === "storyboard") {
+    next.summary = storyboardSummary(value as StoryboardDocument);
+  } else if (next.mode === "file") {
+    const file = value as NodeDetailFileValue;
+    next.summary = file.description || file.name || "文件内容";
+    next.downloadUrl = file.url;
+  } else {
+    next.summary = summarizeText(documentText(serializeNodeDetailContent(next)));
+  }
+  return next;
+}
+
+function richContent(value: NonNullable<ReturnType<typeof richDocument>>) {
+  const text = documentText(value);
+  return {
+    mode: "rich" as const,
+    value: safeJSONString(value),
+    format: "json" as const,
+    summary: summarizeText(text),
+    downloadUrl: firstRichMediaURL(value),
+  };
+}
+
+function markdownContent(value: string): NodeDetailEditableContent {
+  return {
+    mode: "rich",
+    value,
+    format: "markdown",
+    summary: summarizeText(value),
+    downloadUrl: "",
+  };
+}
+
+function protocolRichDocument(raw: unknown) {
+  if (typeof raw === "string" && parseMaybeJSON(raw) === raw) {
+    return null;
+  }
+  const normalized = normalizeEnergonOutput?.(raw) ?? raw;
+  const content: any[] = [];
+  const seenValues = new Set<object>();
+  const seenText = new Set<string>();
+  const seenMedia = new Set<string>();
+  collectProtocolNodes(
+    normalized,
+    content,
+    seenValues,
+    seenText,
+    seenMedia,
+    0,
+  );
+  if (content.length === 0) {
+    return null;
+  }
+  return safeRichDocument({ type: "doc", content });
+}
+
+function collectProtocolNodes(
+  value: unknown,
+  content: any[],
+  seenValues: Set<object>,
+  seenText: Set<string>,
+  seenMedia: Set<string>,
+  depth: number,
+) {
+  if (value == null || depth > 12) {
+    return;
+  }
+  const parsed = parseMaybeJSON(value);
+  if (typeof parsed === "string") {
+    appendParagraph(content, parsed, seenText);
+    return;
+  }
+  if (Array.isArray(parsed)) {
+    parsed.forEach((item) =>
+      collectProtocolNodes(
+        item,
+        content,
+        seenValues,
+        seenText,
+        seenMedia,
+        depth + 1,
+      ),
+    );
+    return;
+  }
+  if (!isRecord(parsed) || seenValues.has(parsed)) {
+    return;
+  }
+  seenValues.add(parsed);
+
+  const directRich = directRichDocument(parsed);
+  if (directRich) {
+    for (const child of directRich.content || []) {
+      content.push(child);
+    }
+    return;
+  }
+
+  appendParagraph(content, firstText(parsed.title, parsed.text), seenText);
+  appendMediaFields(parsed, content, seenMedia);
+
+  for (const key of [
+    "rich",
+    "content",
+    "output",
+    "result",
+    "data",
+    "body",
+    "value",
+  ]) {
+    if (parsed[key] !== undefined) {
+      collectProtocolNodes(
+        parsed[key],
+        content,
+        seenValues,
+        seenText,
+        seenMedia,
+        depth + 1,
+      );
+    }
+  }
+}
+
+function appendMediaFields(
+  row: Record<string, any>,
+  content: any[],
+  seen: Set<string>,
+) {
+  const fields = [
+    { kind: "image", values: [row.image, row.image_url, row.imageUrl, row.images] },
+    { kind: "video", values: [row.video, row.video_url, row.videoUrl, row.videos] },
+    { kind: "audio", values: [row.audio, row.audio_url, row.audioUrl, row.audios] },
+  ] as const;
+  for (const field of fields) {
+    for (const value of field.values) {
+      for (const url of mediaURLs(value)) {
+        const key = `${field.kind}:${url}`;
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        content.push({
+          type: mediaNodeType(field.kind),
+          attrs: { src: url },
+        });
+      }
+    }
+  }
+}
+
+function appendParagraph(content: any[], value: unknown, seen: Set<string>) {
+  const text = String(value || "").trim();
+  if (
+    !text ||
+    looksLikeURL(text) ||
+    looksLikeStructuredJSON(text) ||
+    seen.has(text)
+  ) {
+    return;
+  }
+  seen.add(text);
+  content.push({
+    type: "paragraph",
+    content: [{ type: "text", text }],
+  });
+}
+
+function mediaURLs(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(mediaURLs);
+  }
+  if (typeof value === "string") {
+    return looksLikeURL(value.trim()) ? [value.trim()] : [];
+  }
+  if (!isRecord(value)) {
+    return [];
+  }
+  return [
+    value.url,
+    value.src,
+    value.path,
+    value.download_url,
+    value.downloadUrl,
+  ].flatMap(mediaURLs);
+}
+
+function fileValueFromOutput(value: unknown): NodeDetailFileValue | null {
+  const parsed = parseMaybeJSON(value);
+  if (Array.isArray(parsed)) {
+    for (const item of parsed) {
+      const file = fileValueFromOutput(item);
+      if (file) {
+        return file;
+      }
+    }
+    return null;
+  }
+  if (!isRecord(parsed)) {
+    return null;
+  }
+  const url = firstURL(
+    parsed.file,
+    parsed.file_url,
+    parsed.fileUrl,
+    parsed.files,
+  );
+  if (url) {
+    return {
+      url,
+      name: firstText(parsed.name, parsed.filename, parsed.title) || fileName(url),
+      description: firstText(parsed.description, parsed.text, parsed.summary),
+    };
+  }
+  for (const key of ["content", "output", "result", "data", "body", "value"]) {
+    if (parsed[key] !== undefined) {
+      const file = fileValueFromOutput(parsed[key]);
+      if (file) {
+        return file;
+      }
+    }
+  }
+  return null;
+}
+
+function fileContent(file: NodeDetailFileValue) {
+  return {
+    type: "file",
+    file_url: file.url,
+    name: file.name || fileName(file.url),
+    description: file.description.trim(),
+  };
+}
+
+function markdownTextFromOutput(value: unknown): string {
+  const parsed = parseMaybeJSON(value);
+  if (typeof parsed === "string") {
+    return looksLikeStructuredJSON(parsed) ? "" : parsed;
+  }
+  if (Array.isArray(parsed)) {
+    return parsed.map(markdownTextFromOutput).filter(Boolean).join("\n\n");
+  }
+  if (!isRecord(parsed)) {
+    return "";
+  }
+  const direct = firstText(parsed.text, parsed.summary, parsed.description);
+  if (direct) {
+    return direct;
+  }
+  for (const key of ["content", "output", "result", "data", "body", "value"]) {
+    if (parsed[key] !== undefined) {
+      const text = markdownTextFromOutput(parsed[key]);
+      if (text) {
+        return text;
+      }
+    }
+  }
+  return "";
+}
+
+function directMarkdownText(value: unknown) {
+  const parsed = parseMaybeJSON(value);
+  if (typeof parsed === "string") {
+    return looksLikeStructuredJSON(parsed) ? "" : parsed;
+  }
+  if (!isRecord(parsed)) {
+    return "";
+  }
+  const format = String(parsed.format || "").trim().toLowerCase();
+  return format === "markdown" ? firstText(parsed.text, parsed.markdown) : "";
+}
+
+function plainTextDocument(value: string) {
+  const blocks = value.split(/\n{2,}/).map((block) => block.trim());
+  return {
+    type: "doc",
+    content: (blocks.length ? blocks : [""]).map((block) => ({
+      type: "paragraph",
+      content: block ? [{ type: "text", text: block }] : [],
+    })),
+  };
+}
+
+function firstRichMediaURL(value: any): string {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  if (
+    ["editorMediaImage", "editorMediaVideo", "editorMediaAudio"].includes(
+      String(value.type || ""),
+    )
+  ) {
+    return String(value.attrs?.src || "").trim();
+  }
+  for (const child of Array.isArray(value.content) ? value.content : []) {
+    const url = firstRichMediaURL(child);
+    if (url) {
+      return url;
+    }
+  }
+  return "";
+}
+
+function safeRichDocument(value: unknown) {
+  try {
+    return richDocument(value);
+  } catch {
+    return null;
+  }
+}
+
+function directRichDocument(value: unknown) {
+  const parsed = parseMaybeJSON(value);
+  if (!isRecord(parsed)) {
+    return null;
+  }
+  if (String(parsed.type || "") === "doc") {
+    return safeRichDocument(parsed);
+  }
+  const wrapperKeys = Object.keys(parsed).filter((key) => key !== "format");
+  if (wrapperKeys.length === 1 && wrapperKeys[0] === "rich") {
+    return safeRichDocument(parsed.rich);
+  }
+  if (String(parsed.format || "").trim().toLowerCase() === "rich_json") {
+    return safeRichDocument(parsed.rich ?? parsed.content);
+  }
+  return null;
+}
+
+function isExplicitRichJSON(value: unknown) {
+  const parsed = parseMaybeJSON(value);
+  return (
+    isRecord(parsed) &&
+    String(parsed.format || "").trim().toLowerCase() === "rich_json"
+  );
+}
+
+function parseMaybeJSON(value: unknown): any {
+  if (typeof value !== "string") {
+    return value;
+  }
+  const text = value.trim();
+  if (!text || (!text.startsWith("{") && !text.startsWith("["))) {
+    return value;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return value;
+  }
+}
+
+function mediaNodeType(kind: "image" | "video" | "audio") {
+  return {
+    image: "editorMediaImage",
+    video: "editorMediaVideo",
+    audio: "editorMediaAudio",
+  }[kind];
+}
+
+function firstURL(...values: unknown[]) {
+  for (const value of values) {
+    const url = mediaURLs(value)[0];
+    if (url) {
+      return url;
+    }
+  }
+  return "";
+}
+
+function firstText(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function firstDefined(...values: unknown[]) {
+  return values.find((value) => value !== undefined && value !== null);
+}
+
+function valueAtPath(value: unknown, ...path: string[]) {
+  let current: any = value;
+  for (const key of path) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[key];
+  }
+  return current;
+}
+
+function fileName(url: string) {
+  const clean = url.split(/[?#]/)[0] || "";
+  const name = clean.split("/").pop() || "";
+  try {
+    return decodeURIComponent(name) || "文件";
+  } catch {
+    return name || "文件";
+  }
+}
+
+function summarizeText(value: string) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > 120 ? `${text.slice(0, 120)}…` : text || "暂无内容";
+}
+
+function looksLikeURL(value: string) {
+  return /^(https?:\/\/|\/|data:)/i.test(value);
+}
+
+function looksLikeStructuredJSON(value: string) {
+  const text = value.trim();
+  return (
+    (text.startsWith("{") && text.endsWith("}")) ||
+    (text.startsWith("[") && text.endsWith("]"))
+  );
+}
+
+function looksLikeMarkdownSyntax(value: string) {
+  return (
+    /(^|\n)\s*(#{1,6}\s|[-*+]\s|>\s|\d+\.\s|```)/m.test(value) ||
+    /(\*\*[^*]+\*\*|__[^_]+__|!\[[^\]]*\]\(|\[[^\]]+\]\([^)]+\)|`[^`]+`)/.test(
+      value,
+    )
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function safeJSONString(value: unknown) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+}

@@ -253,13 +253,18 @@
           "rowKey": "id",
           "columns": [
             {
+              "value": "skill.display_icon",
+              "name": "图标",
+              "type": "show-icon"
+            },
+            {
               "value": "skill.name",
-              "name": "技能",
+              "name": "技能名称",
               "type": "show-base"
             },
             {
-              "value": "skill.key",
-              "name": "标识",
+              "value": "skill.display_name",
+              "name": "展示标题",
               "type": "show-base"
             },
             {
@@ -321,7 +326,7 @@
                     "icon": "square-pen",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "编辑技能分类",
+                    "description": "编辑技能",
                     "action": {
                       "click": [
                         {
@@ -479,7 +484,7 @@
         "meta": {
           "stateKey": "dialog.editSkill",
           "pageRoute": "/bot/agent/skill/update",
-          "description": "仅修改技能所属分类，不修改技能正文、标识或安装目录。",
+          "description": "修改技能分类和界面展示信息，不影响技能正文、标识、安装目录或运行时描述。",
           "assistant": false,
           "footer": {
             "confirm": true,
@@ -488,7 +493,7 @@
           "pageRouteQuery": {
             "id": "data.actionTarget.editSkillId"
           },
-          "size": "sm",
+          "size": "lg",
           "bodyClassName": "py-2"
         }
       },

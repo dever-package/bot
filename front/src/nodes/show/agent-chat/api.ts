@@ -2,6 +2,7 @@ import { request } from "@dever/front-plugin";
 import { isPlainRecord } from "@/lib/runtime-stream-output";
 import { normalizeAgentChatOutput, type AgentChatOutput } from "./output";
 import type {
+  ReferenceComposerParam,
   ReferencePreview,
   ReferencePreviewMedia,
   ReferencePreviewRequest,
@@ -42,6 +43,25 @@ export type AgentChatApi = {
   renameSession: string;
   archiveSession: string;
 };
+
+export async function loadAgentInputConfig(
+  api: string,
+  agentKey: string,
+): Promise<ReferenceComposerParam[]> {
+  const result = await request(api, "get", { agent_key: agentKey });
+  if (!isPlainRecord(result)) {
+    throw new Error("读取智能体输入参数失败");
+  }
+  const code = Number(result.code || 0);
+  const status = Number(result.status || 0);
+  if (code !== 0 || status === 2) {
+    throw new Error(
+      textValue(result.message || result.msg) || "读取智能体输入参数失败",
+    );
+  }
+  const data = isPlainRecord(result.data) ? result.data : {};
+  return normalizeInputParams(data.params);
+}
 
 type SessionScope = {
   agentKey: string;
@@ -242,8 +262,61 @@ function normalizeReferenceContent(
   return {
     version: 1,
     parts: normalized,
+    params: isPlainRecord(value.params) ? value.params : undefined,
     interaction_response: interactionResponse,
   };
+}
+
+function normalizeInputParams(value: unknown): ReferenceComposerParam[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((row) => {
+      if (!isPlainRecord(row)) {
+        return null;
+      }
+      const id = Number(row.id || 0);
+      const key = textValue(row.key);
+      if (!id || !key || key === "text") {
+        return null;
+      }
+      const options = Array.isArray(row.options)
+        ? row.options
+            .map((option) => {
+              if (!isPlainRecord(option)) {
+                return null;
+              }
+              return {
+                id: Number(option.id || 0) || textValue(option.id),
+                name: textValue(option.name) || undefined,
+                value: textValue(option.value || option.name),
+                native_value: textValue(option.native_value) || undefined,
+                sort: Number(option.sort || 0),
+              };
+            })
+            .filter((option): option is NonNullable<typeof option> =>
+              Boolean(option),
+            )
+        : [];
+      return {
+        id,
+        power_param_id: Number(row.power_param_id || 0) || undefined,
+        name: textValue(row.name || row.key),
+        key,
+        icon: textValue(row.icon) || undefined,
+        type: textValue(row.type) || "input",
+        usage: Number(row.usage || 1),
+        value_type: textValue(row.value_type) || "string",
+        default_value: textValue(row.default_value) || undefined,
+        required: Boolean(row.required),
+        upload_rule_id: Number(row.upload_rule_id || 0) || undefined,
+        max_files: Number(row.max_files || 0) || undefined,
+        sort: Number(row.sort || 0),
+        options,
+      } satisfies ReferenceComposerParam;
+    })
+    .filter((param): param is ReferenceComposerParam => Boolean(param));
 }
 
 function normalizeInteractionResponse(

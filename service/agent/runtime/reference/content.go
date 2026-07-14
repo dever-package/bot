@@ -27,13 +27,19 @@ func ParseInput(input map[string]any) (Input, error) {
 	if len(parts) == 0 && displayText != "" {
 		parts = []Part{{Type: "text", Text: displayText}}
 	}
+	params := cloneMap(content.Params)
+	if explicit, ok := input["params"].(map[string]any); ok {
+		params = cloneMap(explicit)
+	}
 	return Input{
 		Text: displayText,
 		Content: Content{
 			Version:             ContentVersion,
 			Parts:               parts,
+			Params:              params,
 			InteractionResponse: content.InteractionResponse,
 		},
+		Params:     params,
 		References: references,
 	}, nil
 }
@@ -41,11 +47,21 @@ func ParseInput(input map[string]any) (Input, error) {
 func ModelInput(source map[string]any, input Input) map[string]any {
 	result := make(map[string]any, len(source))
 	for key, value := range source {
-		if key != "content" {
+		if key != "content" && key != "params" {
 			result[key] = value
 		}
 	}
-	result["text"] = input.Text
+	modelText := input.Text
+	if params := ParamsPrompt(input.Content.Value()); params != "" {
+		modelText = strings.TrimSpace(modelText + "\n\n" + params)
+	}
+	result["text"] = modelText
+	for key, value := range input.Params {
+		if key == "" || key == "text" || key == "content" {
+			continue
+		}
+		result[key] = value
+	}
 	if input.Content.InteractionResponse != nil {
 		result["interaction_response"] = input.Content.InteractionResponse.Value()
 	}
@@ -74,6 +90,9 @@ func (content Content) Value() map[string]any {
 		parts = append(parts, current)
 	}
 	result := map[string]any{"version": ContentVersion, "parts": parts}
+	if len(content.Params) > 0 {
+		result["params"] = cloneMap(content.Params)
+	}
 	if content.InteractionResponse != nil {
 		result["interaction_response"] = content.InteractionResponse.Value()
 	}
@@ -106,6 +125,18 @@ func InteractionResponsePrompt(value any) string {
 		return ""
 	}
 	return "interaction_response:\n" + string(raw)
+}
+
+func ParamsPrompt(value any) string {
+	content, ok := parseContent(value)
+	if !ok || len(content.Params) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(content.Params)
+	if err != nil {
+		return ""
+	}
+	return "本轮补充参数：\n" + string(raw)
 }
 
 func parseContent(value any) (Content, bool) {
@@ -145,8 +176,25 @@ func parseContent(value any) (Content, bool) {
 	return Content{
 		Version:             ContentVersion,
 		Parts:               parts,
+		Params:              mapValue(mapped["params"]),
 		InteractionResponse: parseInteractionResponse(mapped["interaction_response"]),
 	}, true
+}
+
+func mapValue(value any) map[string]any {
+	mapped, _ := value.(map[string]any)
+	return cloneMap(mapped)
+}
+
+func cloneMap(value map[string]any) map[string]any {
+	if len(value) == 0 {
+		return map[string]any{}
+	}
+	result := make(map[string]any, len(value))
+	for key, current := range value {
+		result[key] = current
+	}
+	return result
 }
 
 func parseInteractionResponse(value any) *InteractionResponse {
@@ -200,7 +248,7 @@ func normalizeParts(parts []Part) ([]Part, []Reference, string, error) {
 			part.Text = ""
 			result = append(result, part)
 			text.WriteString("@" + part.Label)
-			key := fmt.Sprintf("%s:%d", part.RefType, part.RefID)
+			key := fmt.Sprintf("%s:%d:%s", part.RefType, part.RefID, part.Usage)
 			if _, exists := seen[key]; exists {
 				continue
 			}

@@ -168,6 +168,13 @@ var (
 		Option:     "bot.agent.NewSkillPackModel",
 		OptionKeys: []string{"name"},
 	}
+
+	agentParamRelation = orm.Relation{
+		Field:      "params",
+		Through:    "bot.agent.NewAgentParamModel",
+		OwnerField: "agent_id",
+		Order:      "sort asc,id asc",
+	}
 )
 
 func NewAgentModel() *orm.Model[Agent] {
@@ -186,6 +193,7 @@ func NewAgentModel() *orm.Model[Agent] {
 			agentPowerCateRelation,
 			agentKnowledgeCateRelation,
 			agentSkillPackRelation,
+			agentParamRelation,
 		},
 	})
 }

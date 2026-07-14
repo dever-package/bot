@@ -2,7 +2,6 @@ package input
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"strings"
 
@@ -14,6 +13,7 @@ type PowerParam struct {
 	PowerParamID uint64             `json:"power_param_id"`
 	Name         string             `json:"name"`
 	Key          string             `json:"key"`
+	Icon         string             `json:"icon,omitempty"`
 	Type         string             `json:"type"`
 	Usage        int16              `json:"usage"`
 	ValueType    string             `json:"value_type"`
@@ -49,6 +49,10 @@ type PowerSource struct {
 	ProviderName string `json:"provider_name,omitempty"`
 	Name         string `json:"name"`
 	Sort         int    `json:"sort"`
+}
+
+func (param PowerParam) IsToolbar() bool {
+	return param.Usage == paramUsageToolbar
 }
 
 type powerParamOptionFilter struct {
@@ -157,6 +161,7 @@ func buildPowerParamRow(
 		PowerParamID: powerParam.ID,
 		Name:         powerParamName(param, config.Name),
 		Key:          strings.TrimSpace(config.Key),
+		Icon:         strings.TrimSpace(param.Icon),
 		Type:         NormalizeParamControlType(param.Type),
 		Usage:        normalizeParamUsage(param.Usage),
 		ValueType:    NormalizeParamValueType(param.ValueType),
@@ -263,6 +268,10 @@ func powerParamOptions(
 	return rows
 }
 
+func BuildParamOptions(ctx context.Context, repo Repository, paramID uint64) []PowerParamOption {
+	return powerParamOptions(ctx, repo, paramID, powerParamOptionFilter{})
+}
+
 func NormalizePowerParamInput(input map[string]any, params []PowerParam) map[string]any {
 	result := map[string]any{}
 	for _, param := range params {
@@ -288,50 +297,9 @@ func powerParamInputValue(input map[string]any, param PowerParam) (any, bool) {
 }
 
 func powerParamLookupKeys(param PowerParam) []string {
-	keys := []string{}
-	if isPromptPowerParam(param) {
-		for _, key := range promptInputAliases() {
-			keys = appendUniqueInputKey(keys, key)
-		}
-	}
+	keys := make([]string, 0, 1)
 	keys = appendUniqueInputKey(keys, strings.TrimSpace(param.Key))
-	keys = appendUniqueInputKey(keys, strings.TrimSpace(param.Name))
-	if param.ID > 0 {
-		keys = appendUniqueInputKey(keys, fmt.Sprintf("param_%d", param.ID))
-	}
-	for _, key := range powerParamInputAliases(param) {
-		keys = appendUniqueInputKey(keys, key)
-	}
 	return keys
-}
-
-func powerParamInputAliases(param PowerParam) []string {
-	switch strings.TrimSpace(param.Key) {
-	case "aspectRatio":
-		return []string{"ratio", "aspect_ratio"}
-	}
-	switch strings.TrimSpace(param.Name) {
-	case "比例":
-		return []string{"ratio", "aspect_ratio"}
-	case "分辨率":
-		return []string{"resolution"}
-	default:
-		return nil
-	}
-}
-
-func isPromptPowerParam(param PowerParam) bool {
-	for _, value := range []string{param.Key, param.Name} {
-		text := strings.ToLower(strings.TrimSpace(value))
-		switch text {
-		case "prompt", "text", "content", "input":
-			return true
-		}
-		if strings.Contains(text, "prompt") || strings.Contains(text, "提示词") || strings.Contains(text, "提示语") {
-			return true
-		}
-	}
-	return false
 }
 
 func powerParamSort(powerSort int, serviceSort int) int {

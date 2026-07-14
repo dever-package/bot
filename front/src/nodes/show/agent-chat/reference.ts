@@ -1,7 +1,9 @@
-import { getCompatModule } from "@dever/front-plugin";
 import type { AgentChatApi, AgentChatMessageRecord } from "./api";
 import { listAgentChatSessions, loadAgentChatSession } from "./api";
-import { readAgentChatArtifacts } from "./artifact";
+import {
+  readAgentChatArtifacts,
+  type AgentChatArtifact,
+} from "./artifact";
 
 export type ReferenceType = "message" | "artifact" | "upload_file" | "session";
 
@@ -9,6 +11,7 @@ export type ReferencePreviewHint = {
   text?: string;
   kind?: string;
   url?: string;
+  sourceUrl?: string;
 };
 
 export type ReferencePreviewMedia = {
@@ -54,6 +57,7 @@ export type ReferencePart =
 export type ReferenceContent = {
   version: 1;
   parts: ReferencePart[];
+  params?: Record<string, unknown>;
   interaction_response?: InteractionResponseContent;
 };
 
@@ -65,9 +69,33 @@ export type InteractionResponseContent = {
 export type ReferenceInput = {
   text: string;
   content: ReferenceContent;
+  params?: Record<string, unknown>;
 };
 
-export type ReferenceScope = "current" | "history" | "resource";
+export type ReferenceComposerParam = {
+  id: string | number;
+  power_param_id?: string | number;
+  name: string;
+  key?: string;
+  icon?: string;
+  type: string;
+  usage: number;
+  value_type: string;
+  default_value?: string;
+  required?: boolean;
+  upload_rule_id?: string | number;
+  max_files?: number;
+  sort?: number;
+  options?: Array<{
+    id: string | number;
+    name?: string;
+    value: string;
+    native_value?: string;
+    sort?: number;
+  }>;
+};
+
+export type ReferenceScope = "current" | "history";
 
 export type ReferenceOption = {
   key: string;
@@ -75,10 +103,12 @@ export type ReferenceOption = {
   refId: number;
   label: string;
   description?: string;
+  messageRole?: "user" | "assistant";
   preview?: ReferencePreviewHint;
-  parentKey?: string;
+  materials?: ReferenceOption[];
   selectable?: boolean;
   hasChildren?: boolean;
+  usage?: string;
 };
 
 export type ReferenceLoadRequest = {
@@ -100,6 +130,8 @@ export type ReferenceComposerProps = {
   stopping?: boolean;
   cancelable?: boolean;
   className?: string;
+  layerZIndex?: number;
+  parameters?: ReferenceComposerParam[];
   loadReferences: (
     request: ReferenceLoadRequest,
   ) => Promise<ReferenceLoadResult>;
@@ -131,22 +163,6 @@ export function interactionResponseInput(
   return input;
 }
 
-type ResourceItem = Record<string, unknown>;
-type ResourceListResult = {
-  list: ResourceItem[];
-  page: number;
-  pageSize: number;
-  total: number;
-};
-
-const { listResources } = getCompatModule("@/lib/resource") as {
-  listResources: (query: {
-    page: number;
-    pageSize: number;
-    keyword?: string;
-  }) => Promise<ResourceListResult>;
-};
-
 export async function loadAgentChatReferences(
   input: {
     api: AgentChatApi;
@@ -156,9 +172,6 @@ export async function loadAgentChatReferences(
   },
   request: ReferenceLoadRequest,
 ): Promise<ReferenceLoadResult> {
-  if (request.scope === "resource") {
-    return loadResourceReferences(request);
-  }
   if (request.scope === "history" && !request.parent) {
     const page = await listAgentChatSessions(input.api, {
       agentKey: input.agentKey,
@@ -213,103 +226,56 @@ export async function loadAgentChatReferences(
 }
 
 function messageReferenceOptions(messages: AgentChatMessageRecord[]) {
-  const result: ReferenceOption[] = [];
-  for (const message of messages) {
-    const messageKey = `message:${message.id}`;
-    result.push({
-      key: messageKey,
+  return messages.map(
+    (message): ReferenceOption => ({
+      key: `message:${message.id}`,
       refType: "message",
       refId: message.id,
       label: messageLabel(message),
       description: message.role === "user" ? "用户消息" : "智能体回复",
+      messageRole: message.role,
       preview: {
         text: message.text,
         kind: "message",
       },
-    });
-    for (const artifact of messageArtifacts(message)) {
-      result.push({
+      materials: messageMaterialOptions(message),
+    }),
+  );
+}
+
+function messageMaterialOptions(
+  message: AgentChatMessageRecord,
+): ReferenceOption[] {
+  const fallbackNumbers: Record<AgentChatArtifact["kind"], number> = {
+    image: 0,
+    video: 0,
+    audio: 0,
+    file: 0,
+  };
+  return readAgentChatArtifacts(message.output)
+    .filter(
+      (artifact) =>
+        artifact.status === "ready" &&
+        Boolean(artifact.url || artifact.previewUrl),
+    )
+    .map((artifact): ReferenceOption => {
+      fallbackNumbers[artifact.kind] =
+        (fallbackNumbers[artifact.kind] || 0) + 1;
+      const displayNo =
+        artifact.displayNo || fallbackNumbers[artifact.kind] || 1;
+      return {
         key: `artifact:${artifact.id}`,
         refType: "artifact",
         refId: artifact.id,
-        label: artifact.label,
-        description: artifact.name || artifact.status,
+        label: `${artifactKindLabel(artifact.kind)}${displayNo}`,
         preview: {
-          text: artifact.name || artifact.status,
+          text: artifact.name || artifact.label,
           kind: artifact.kind,
-          url: artifact.previewUrl,
+          url: artifact.previewUrl || artifact.url,
+          sourceUrl: artifact.url,
         },
-        parentKey: messageKey,
-        selectable: artifact.status === "已生成",
-      });
-    }
-  }
-  return result;
-}
-
-function messageArtifacts(message: AgentChatMessageRecord) {
-  return readAgentChatArtifacts(message.output).map((artifact) => ({
-    id: artifact.id,
-    label: artifact.label,
-    name: artifact.name,
-    kind: artifact.kind,
-    status:
-      artifact.status === "generating"
-        ? "生成中"
-        : artifact.status === "failed"
-          ? "生成失败"
-          : "已生成",
-    previewUrl: artifact.kind === "image" ? artifact.previewUrl : undefined,
-  }));
-}
-
-async function loadResourceReferences(
-  request: ReferenceLoadRequest,
-): Promise<ReferenceLoadResult> {
-  if (typeof listResources !== "function") {
-    throw new Error("资源中心暂不可用");
-  }
-  const page = Math.max(1, positiveNumber(request.cursor) || 1);
-  const result = await listResources({
-    page,
-    pageSize: 12,
-    keyword: request.query,
-  });
-  return {
-    items: result.list
-      .map(resourceReferenceOption)
-      .filter((item): item is ReferenceOption => Boolean(item)),
-    nextCursor:
-      result.page * result.pageSize < result.total
-        ? String(result.page + 1)
-        : undefined,
-  };
-}
-
-function resourceReferenceOption(value: ResourceItem): ReferenceOption | null {
-  const id = positiveNumber(value.id);
-  if (!id) {
-    return null;
-  }
-  const name =
-    textValue(value.name || value.file_name || value.origin_name) ||
-    `资源 ${id}`;
-  const kind = resourceKind(value);
-  return {
-    key: `upload_file:${id}`,
-    refType: "upload_file",
-    refId: id,
-    label: name,
-    description: resourceKindLabel(kind),
-    preview: {
-      text: name,
-      kind,
-      url:
-        kind === "image"
-          ? textValue(value.thumbnail || value.thumb || value.url)
-          : undefined,
-    },
-  };
+      };
+    });
 }
 
 function messageLabel(message: AgentChatMessageRecord) {
@@ -325,11 +291,19 @@ function filterOptions(options: ReferenceOption[], query: string) {
   if (!keyword) {
     return options;
   }
-  return options.filter((option) =>
-    searchableText(`${option.label} ${option.description || ""}`).includes(
-      keyword,
-    ),
-  );
+  return options.filter((option) => {
+    const ownText = searchableText(
+      `${option.label} ${option.description || ""}`,
+    );
+    return (
+      ownText.includes(keyword) ||
+      (option.materials || []).some((material) =>
+        searchableText(
+          `${material.label} ${material.preview?.text || ""} ${material.preview?.kind || ""}`,
+        ).includes(keyword),
+      )
+    );
+  });
 }
 
 function searchableText(value: string) {
@@ -339,17 +313,8 @@ function searchableText(value: string) {
     .replace(/(图|视频|音频|文件)\s+(\d+)/g, "$1$2");
 }
 
-function resourceKind(value: ResourceItem) {
-  const kind = textValue(value.kind).toLowerCase();
-  const mime = textValue(value.mime || value.type).toLowerCase();
-  if (kind === "image" || mime.startsWith("image/")) return "image";
-  if (kind === "video" || mime.startsWith("video/")) return "video";
-  if (kind === "audio" || mime.startsWith("audio/")) return "audio";
-  return "file";
-}
-
-function resourceKindLabel(kind: string) {
-  if (kind === "image") return "图片";
+function artifactKindLabel(kind: AgentChatArtifact["kind"]) {
+  if (kind === "image") return "图";
   if (kind === "video") return "视频";
   if (kind === "audio") return "音频";
   return "文件";
@@ -358,8 +323,4 @@ function resourceKindLabel(kind: string) {
 function positiveNumber(value: unknown) {
   const number = Number(value || 0);
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
-}
-
-function textValue(value: unknown) {
-  return value == null ? "" : String(value).trim();
 }

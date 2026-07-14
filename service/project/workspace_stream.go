@@ -7,6 +7,17 @@ import (
 	"github.com/dever-package/bot/service/stream"
 )
 
+func (s WorkspaceService) forwardWorkspaceNodeStream(ctx context.Context, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, payload map[string]any) {
+	if textValue(payload["type"]) == "result" {
+		return
+	}
+	output := mapValue(payload["output"])
+	if len(output) == 0 {
+		return
+	}
+	s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, stream.EventNodeOutput, teammodel.RunStatusRunning, output)
+}
+
 func (s WorkspaceService) writeWorkspaceNodeEvent(ctx context.Context, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, event string, status string, output map[string]any) {
 	if run == nil || run.RequestID == "" {
 		return

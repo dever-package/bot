@@ -45,7 +45,7 @@ func loadSkillTool(entries map[string]agentskill.Entry, loaded map[string]agents
 	sort.Slice(keys, func(i, j int) bool {
 		return fmt.Sprint(keys[i]) < fmt.Sprint(keys[j])
 	})
-	return Tool{
+	return skillActivityTool(Tool{
 		Definition: Definition{
 			Name:        "load_skill",
 			Description: "按 key 加载当前智能体技能方案中的一个技能正文。只有任务确实需要该技能时才调用。",
@@ -95,7 +95,7 @@ func loadSkillTool(entries map[string]agentskill.Entry, loaded map[string]agents
 				Tools: tools,
 			}, nil
 		},
-	}
+	})
 }
 
 func builtinSkillTools(entry agentskill.Entry, serverContext *server.Context) ([]Tool, []map[string]any) {
@@ -105,7 +105,7 @@ func builtinSkillTools(entry agentskill.Entry, serverContext *server.Context) ([
 	for _, method := range methods {
 		method := method
 		name := FunctionName("skill_"+entry.Key+"_", method.Key)
-		tools = append(tools, Tool{
+		tools = append(tools, skillActivityTool(Tool{
 			Definition: Definition{
 				Name:        name,
 				Description: method.Description,
@@ -122,7 +122,7 @@ func builtinSkillTools(entry agentskill.Entry, serverContext *server.Context) ([
 				}
 				return Result{Text: method.Key + " 调用完成", Content: result}, nil
 			},
-		})
+		}))
 		definitions = append(definitions, map[string]any{
 			"name":        name,
 			"source_key":  method.Key,

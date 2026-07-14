@@ -27,7 +27,7 @@ func Payload(ctx context.Context, row agentmodel.Artifact) map[string]any {
 		"meta":                decodeMap(row.Meta),
 		"status":              artifactStatusName(row.Status),
 		"status_code":         row.Status,
-		"error":               row.Error,
+		"error":               publicError(row.Kind, row.Error),
 	}
 	if row.FileID == 0 {
 		return result

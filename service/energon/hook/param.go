@@ -10,11 +10,12 @@ import (
 
 type ParamHook struct{}
 
-func (ParamHook) ProviderBeforeSaveParam(_ *server.Context, params []any) any {
+func (ParamHook) ProviderBeforeSaveParam(c *server.Context, params []any) any {
 	record := cloneEnergonRecord(params)
 	if len(record) == 0 {
 		return record
 	}
+	paramID := util.ToUint64(record["id"])
 
 	record["name"] = util.ToStringTrimmed(record["name"])
 	record["key"] = util.ToStringTrimmed(record["key"])
@@ -57,7 +58,7 @@ func (ParamHook) ProviderBeforeSaveParam(_ *server.Context, params []any) any {
 	case "option", "multi_option":
 		record["upload_rule_id"] = 0
 		record["max_files"] = 0
-		record["options"] = normalizeParamOptionRows(record["options"])
+		record["options"] = normalizeParamOptionRows(c, paramID, record["options"])
 	case "hidden":
 		if record["default_value"] == "" {
 			panicParamField("form.default_value", "隐藏框必须填写默认值")
@@ -91,30 +92,65 @@ func (ParamHook) ProviderBeforeDeleteParam(c *server.Context, params []any) any 
 	return record
 }
 
-func normalizeParamOptionRows(value any) []any {
+func normalizeParamOptionRows(c *server.Context, paramID uint64, value any) []any {
 	rawItems := normalizeChildRecordRows(value)
 	if len(rawItems) == 0 {
 		return []any{}
 	}
 
-	items := make([]any, 0, len(rawItems))
+	items := make([]map[string]any, 0, len(rawItems))
+	naturalRows := make([]naturalKeyedChildRow, 0, len(rawItems))
+	seenValues := make(map[string]struct{}, len(rawItems))
+	existingIDs := existingParamOptionIDsByValue(c, paramID)
 	for _, row := range rawItems {
 		name := util.ToStringTrimmed(row["name"])
-		value := util.ToStringTrimmed(row["value"])
-		if name == "" && value == "" {
+		optionValue := util.ToStringTrimmed(row["value"])
+		if name == "" && optionValue == "" {
 			continue
 		}
+		if optionValue == "" {
+			panicParamField("form.options", "选项值不能为空")
+		}
+		if _, exists := seenValues[optionValue]; exists {
+			panicParamField("form.options", "选项值不能重复："+optionValue)
+		}
+		seenValues[optionValue] = struct{}{}
 		if name == "" {
-			name = value
+			name = optionValue
 		}
 
 		next := util.CloneMap(row)
 		next["name"] = name
-		next["value"] = value
+		next["value"] = optionValue
 		if util.ToIntDefault(next["sort"], 0) <= 0 {
 			next["sort"] = defaultRecordSort
 		}
 		items = append(items, next)
+		naturalRows = append(naturalRows, naturalKeyedChildRow{
+			row:        next,
+			naturalKey: optionValue,
+			originalID: util.ToUint64(row["id"]),
+		})
 	}
-	return items
+	assignNaturalKeyedChildIDs(naturalRows, existingIDs)
+	return anyChildRows(items)
+}
+
+func existingParamOptionIDsByValue(c *server.Context, paramID uint64) map[string]uint64 {
+	if paramID == 0 {
+		return nil
+	}
+
+	rows := botmodel.NewParamOptionModel().SelectMap(c.Context(), map[string]any{
+		"param_id": paramID,
+	})
+	result := make(map[string]uint64, len(rows))
+	for _, row := range rows {
+		id := util.ToUint64(row["id"])
+		optionValue := util.ToStringTrimmed(row["value"])
+		if id > 0 {
+			result[optionValue] = id
+		}
+	}
+	return result
 }

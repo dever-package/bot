@@ -128,3 +128,38 @@
 - [ ] **Step 4: 提供手动验收清单**
 
   手动验证当前会话、历史会话、搜索、消息引用、各类素材引用、素材换行、视频首帧、悬浮预览居中以及移动端可用宽度。
+
+### Task 5: 将消息列表按对话轮次展示
+
+**Files:**
+- Create: `/data/project/shemic/front/src/components/reference-composer/turns.ts`
+- Modify: `/data/project/shemic/front/src/components/reference-composer/types.ts`
+- Modify: `/data/project/shemic/front/src/components/reference-composer/picker.tsx`
+- Modify: `/data/project/shemic/front/src/components/reference-composer/index.tsx`
+- Modify: `/data/project/shemic/backend/package/bot/front/src/nodes/show/agent-chat/reference.ts`
+
+- [x] **Step 1: 给消息选项补充角色元数据**
+
+  两侧 `ReferenceOption` 增加可选的 `messageRole`：
+
+  ```ts
+  messageRole?: "user" | "assistant"
+  ```
+
+  bot 引用加载器从消息记录写入该字段；会话和素材选项不写，避免通过展示文案推断业务角色。
+
+- [x] **Step 2: 提取轮次分组函数**
+
+  新建 `turns.ts`，将按时间倒序的相邻 `assistant`、`user` 消息组合成一个派生轮次。非消息选项保持普通列表行；分页边界缺失一侧时保留单侧轮次，下一页合并后重新计算。
+
+- [x] **Step 3: 分离轮次、消息侧和素材渲染**
+
+  `ReferencePicker` 对派生轮次使用两列布局，左侧渲染智能体回复，右侧渲染用户消息。两个消息按钮各自保留原来的 `ReferencePreviewPopover` 和 `onSelect(item)`；素材对两侧集合去重后统一放在轮次下方。
+
+- [x] **Step 4: 保持键盘选择和移动端行为**
+
+  `activeIndex` 继续对应原始消息选项，键盘回车仍只选择当前单条消息。移动端将用户消息排在上方、智能体回复排在下方，素材继续位于整轮底部。
+
+- [x] **Step 5: 进行非构建静态检查**
+
+  只检查补丁格式、消息角色字段一致性和已删除样式引用；不运行 build、TypeScript 检查或任何自动化测试。

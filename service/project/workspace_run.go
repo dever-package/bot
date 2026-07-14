@@ -10,6 +10,7 @@ import (
 
 	teammodel "github.com/dever-package/bot/model/team"
 	assetservice "github.com/dever-package/bot/service/asset"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	teamservice "github.com/dever-package/bot/service/team"
 )
 
@@ -320,7 +321,7 @@ func (s WorkspaceService) recordCanvasNodeRunResult(ctx context.Context, req Can
 		nodeExecution.FinishedAt = time.Now()
 	}
 	recordWorkspaceNodeExecution(ctx, nodeExecution)
-	if node.Type == "agent" && node.AgentID > 0 {
+	if node.Type == "agent" && node.AgentID > 0 && executionStatus == teammodel.RunStatusSuccess {
 		appendWorkspaceAgentMemory(ctx, workspaceAgentMemoryEntry{
 			ProjectID:   run.ProjectID,
 			AssetCateID: firstUint64(node.AssetCateID, req.AssetCateID),
@@ -374,6 +375,9 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 		RequestID:      canvasChildRequestID(req.RequestID, node.ID),
 		Input:          input,
 		Params:         params,
+		OnStream: func(payload map[string]any) {
+			s.forwardWorkspaceNodeStream(ctx, run, node, nodeRunID, payload)
+		},
 	})
 	if err != nil {
 		return canvasNodeRunPayload(req, run, node, nodeRunID, result), err
@@ -387,26 +391,65 @@ func (s WorkspaceService) runCanvasAgentNode(ctx context.Context, projectID uint
 		return nil, fmt.Errorf("智能体节点未配置智能体")
 	}
 	input := mergeCanvasInput(req.Input, previousOutput, node.ComposerPrompt)
-	if history := workspaceAgentHistory(ctx, projectID, firstUint64(node.AssetCateID, req.AssetCateID), node.ID, node.AgentID); len(history) > 0 {
-		input["workspace_agent_history"] = history
-	}
+	delete(input, "workspace_agent_history")
+	applyCanvasAgentTurnInput(input, req.Input)
 	if node.RoleID > 0 {
 		input["role_id"] = node.RoleID
 	}
+	assetCateID := firstUint64(node.AssetCateID, req.AssetCateID)
+	history := workspaceAgentHistory(ctx, projectID, assetCateID, node.ID, node.AgentID)
 	result, err := s.project.RunCanvasAgent(ctx, projectID, CanvasAgentRunRequest{
 		FlowID:      node.FlowID,
-		AssetCateID: firstUint64(node.AssetCateID, req.AssetCateID),
+		AssetCateID: assetCateID,
 		NodeKey:     node.ID,
 		NodeName:    node.Title,
+		RoleID:      node.RoleID,
 		AgentID:     node.AgentID,
 		RequestID:   canvasChildRequestID(req.RequestID, node.ID),
 		Input:       input,
+		History:     history,
+		OnStream: func(payload map[string]any) {
+			s.forwardWorkspaceNodeStream(ctx, run, node, nodeRunID, payload)
+		},
 	})
 	if err != nil {
 		return canvasNodeRunPayload(req, run, node, nodeRunID, result), err
 	}
+	agentRunID := uint64Value(result["run_id"])
+	result["agent_run_id"] = agentRunID
 	result, err = s.saveWorkspaceCanvasMaterial(ctx, projectID, req, run, node, nodeRunID, result)
-	return canvasNodeRunPayload(req, run, node, nodeRunID, result), err
+	if err != nil {
+		return canvasNodeRunPayload(req, run, node, nodeRunID, result), err
+	}
+	appendWorkspaceAgentMemory(ctx, workspaceAgentMemoryEntry{
+		ProjectID:   projectID,
+		AssetCateID: assetCateID,
+		AgentID:     node.AgentID,
+		NodeKey:     node.ID,
+		Role:        "user",
+		Content:     workspaceAgentUserInput(input),
+		RunID:       run.ID,
+		NodeRunID:   nodeRunID,
+		AgentRunID:  agentRunID,
+	})
+	return canvasNodeRunPayload(req, run, node, nodeRunID, result), nil
+}
+
+func applyCanvasAgentTurnInput(input map[string]any, base map[string]any) {
+	turn := mapValue(base["_agent_turn_input"])
+	delete(input, "_agent_turn_input")
+	if len(turn) == 0 {
+		return
+	}
+	for key, value := range turn {
+		input[key] = value
+	}
+	if content := mapValue(turn["content"]); content != nil {
+		if response := mapValue(content["interaction_response"]); response != nil {
+			input["interaction_response"] = response
+		}
+		delete(input, "content")
+	}
 }
 
 func (s WorkspaceService) runCanvasFlowNode(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, previousOutput any) (map[string]any, error) {
@@ -596,6 +639,9 @@ func parseCanvasRunGraph(canvas map[string]any) ([]canvasRunNode, []canvasRunEdg
 			SelectedTarget: uint64Value(valueAtPath(row, "composer_draft", "selected_target_id")),
 			ParamValues:    mapValue(valueAtPath(row, "composer_draft", "param_values")),
 		}
+		if node.Type == "power" && node.PowerKind != "" {
+			node.Kind = node.PowerKind
+		}
 		node.PersistsResult = canvasRunNodePersistsResult(node.Type, node.FunctionKey)
 		if node.ID == "" || node.Type == "" {
 			return nil, nil, fmt.Errorf("画布节点格式错误")
@@ -667,11 +713,16 @@ func previousCanvasOutput(ctx context.Context, projectID uint64, nodeID string, 
 }
 
 func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasRunRequest, nodeID string, results []canvasNodeResult) any {
+	if req.SingleNode {
+		if manualContext := manualCanvasInputContext(req.Input); manualContext != nil {
+			return manualContext
+		}
+	}
 	output := previousCanvasOutput(ctx, projectID, nodeID, results, req.Canvas)
-	if output != nil || !req.SingleNode {
+	if output != nil {
 		return output
 	}
-	return manualCanvasInputContext(req.Input)
+	return nil
 }
 
 func upstreamCanvasNodeIDs(nodeID string, canvas map[string]any) []string {
@@ -710,11 +761,11 @@ func staticCanvasNodeOutput(ctx context.Context, projectID uint64, nodeID string
 	}
 	asset := hydrateCanvasAsset(ctx, projectID, mapValue(node["asset"]))
 	return firstPresent(
-		valueAtPath(asset, "version", "content"),
-		canvasOutputFromResultRef(ctx, projectID, mapValue(node["result_ref"])),
 		node["result_output"],
 		valueAtPath(node, "result", "output"),
 		valueAtPath(node, "result_ref", "output"),
+		canvasOutputFromResultRef(ctx, projectID, mapValue(node["result_ref"])),
+		valueAtPath(asset, "version", "content"),
 		asset,
 	)
 }
@@ -815,6 +866,7 @@ func mergeCanvasInput(base map[string]any, previousOutput any, prompt string) ma
 	}
 	if previousOutput != nil {
 		input["previous_output"] = previousOutput
+		mergeCanvasContextMedia(input, previousOutput)
 	}
 	prompt = strings.TrimSpace(prompt)
 	if prompt != "" {
@@ -826,6 +878,57 @@ func mergeCanvasInput(base map[string]any, previousOutput any, prompt string) ma
 		}
 	}
 	return input
+}
+
+var canvasContextMediaFields = []struct {
+	plural    string
+	singular  string
+	mediaType string
+}{
+	{plural: "images", singular: "image", mediaType: botprotocol.MediaTypeImage},
+	{plural: "videos", singular: "video", mediaType: botprotocol.MediaTypeVideo},
+	{plural: "audios", singular: "audio", mediaType: botprotocol.MediaTypeAudio},
+	{plural: "files", singular: "file", mediaType: botprotocol.MediaTypeFile},
+}
+
+func mergeCanvasContextMedia(input map[string]any, context any) {
+	media := botprotocol.ExtractMediaOutput(context, "")
+	for _, field := range canvasContextMediaFields {
+		incoming := botprotocol.NormalizeMediaList(media[field.plural], field.mediaType)
+		if len(incoming) == 0 {
+			continue
+		}
+		if merged := mergeCanvasMediaURLs(input[field.plural], input[field.singular], incoming, field.mediaType); len(merged) > 0 {
+			input[field.plural] = merged
+		}
+	}
+}
+
+func mergeCanvasMediaURLs(plural any, singular any, incoming []string, mediaType string) []string {
+	result := botprotocol.NormalizeMediaList(plural, mediaType)
+	seen := make(map[string]struct{}, len(result)+len(incoming))
+	for _, value := range result {
+		if value = strings.TrimSpace(value); value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	for _, value := range botprotocol.NormalizeMediaList(singular, mediaType) {
+		if value = strings.TrimSpace(value); value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	for _, value := range incoming {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func manualCanvasInputContext(input map[string]any) any {
@@ -927,7 +1030,9 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 	if asset != nil {
 		payload["asset"] = asset
 		payload["version"] = mapValue(asset["version"])
-		payload["output"] = firstPresent(valueAtPath(asset, "version", "content"), output)
+		// The asset stores a display document; downstream nodes need the original
+		// runtime protocol so media and agent interaction fields are not flattened.
+		payload["output"] = output
 	}
 	return payload, nil
 }

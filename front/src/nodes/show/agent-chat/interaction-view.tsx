@@ -23,9 +23,10 @@ export function AgentChatInteractionView({
 }) {
   return (
     <div
+      data-presentation={interaction.presentation || "form"}
       className={cn(
         "agent-chat-interaction mt-5",
-        interaction.presentation === "stepper" ? "max-w-xl" : "max-w-2xl",
+        interaction.presentation === "stepper" ? "w-full" : "max-w-2xl",
       )}
     >
       <AgentInteractionPanel

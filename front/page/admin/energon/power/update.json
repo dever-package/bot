@@ -97,6 +97,19 @@
           "addText": "添加能力参数",
           "drag": "sort"
         }
+      },
+      {
+        "type": "form-editor",
+        "name": "设定提示词",
+        "placeholder": "填写该能力长期生效的职责、输出要求和约束，可留空。",
+        "value": "form.prompt",
+        "mode": "form",
+        "info": "每次调用该能力时作为系统设定发送；分镜脚本还会自动加入固定的 storyboard JSON 协议。",
+        "meta": {
+          "formLayout": "vertical",
+          "minHeight": 220,
+          "maxHeight": 420
+        }
       }
     ]
   },
@@ -105,6 +118,7 @@
       "cate_id": 1,
       "icon": "zap",
       "kind": "text",
+      "prompt": "",
       "source_rule": 1,
       "params": [],
       "targets": []

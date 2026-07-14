@@ -2,6 +2,8 @@ import type { AgentInteraction } from "@/components/agent/interaction-panel";
 import { isPlainRecord } from "@/lib/runtime-stream-output";
 import type { ChatMessage } from "./types";
 
+const MAX_AGENT_CHAT_SUGGESTIONS = 8;
+
 export type AgentChatSuggestion = {
   label: string;
   prompt: string;
@@ -55,7 +57,7 @@ export function readAgentChatSuggestions(
     }
     seen.add(prompt);
     suggestions.push({ label, prompt });
-    if (suggestions.length === 3) {
+    if (suggestions.length === MAX_AGENT_CHAT_SUGGESTIONS) {
       break;
     }
   }

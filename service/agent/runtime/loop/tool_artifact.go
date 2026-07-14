@@ -29,7 +29,7 @@ func (s Service) beginToolArtifactBatch(ctx context.Context, execution execution
 		return batch, err
 	}
 	sourceIDs := make([]uint64, 0, len(selected))
-	seriesID := runtimeprovider.ArgumentUint64(arguments, "series_id")
+	seriesID := uint64(0)
 	for _, current := range selected {
 		if current.ArtifactID > 0 {
 			sourceIDs = append(sourceIDs, current.ArtifactID)
@@ -39,15 +39,19 @@ func (s Service) beginToolArtifactBatch(ctx context.Context, execution execution
 		}
 	}
 	profile := cloneToolArguments(arguments)
-	delete(profile, "references")
+	delete(profile, runtimeprovider.MediaReferencesArgument)
+	if key := strings.TrimSpace(definition.ActivityCountKey); key != "" {
+		delete(profile, key)
+	}
 	profile["tool_name"] = call.Name
 	profile["tool_kind"] = definition.Kind
+	profile["artifact_name"] = toolArtifactName(arguments, definition)
 	batch.pending, err = batch.service.BeginBatch(ctx, runtimeartifact.BatchRequest{
 		SessionID:         execution.sessionID,
 		MessageID:         execution.assistantMessageID,
 		RunID:             execution.runID,
 		Kind:              definition.Kind,
-		Count:             toolRequestedCount(call),
+		Count:             toolRequestedCount(call, definition),
 		Name:              toolArtifactName(arguments, definition),
 		BatchKey:          call.ID,
 		SeriesID:          seriesID,
@@ -154,7 +158,7 @@ func isArtifactKind(kind string) bool {
 }
 
 func toolArtifactName(arguments map[string]any, definition runtimeprovider.Definition) string {
-	for _, key := range []string{"prompt", "text", "content", "name"} {
+	if key := strings.TrimSpace(definition.ActivityPromptKey); key != "" {
 		if value := strings.TrimSpace(botprotocol.AsText(arguments[key])); value != "" {
 			return value
 		}
