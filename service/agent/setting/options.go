@@ -12,10 +12,11 @@ type OptionService struct{}
 
 func (OptionService) ProviderLoadTextPowers(c *server.Context, _ []any) any {
 	rows := energonmodel.NewPowerModel().SelectMap(c.Context(), map[string]any{
-		"kind":   "text",
-		"status": 1,
+		"kind":        "text",
+		"output_type": energonmodel.OutputTypeGeneral,
+		"status":      1,
 	}, map[string]any{
-		"field": "main.id, main.name, main.key, main.kind",
+		"field": "main.id, main.name, main.key, main.kind, main.output_type",
 		"order": "main.id asc",
 	})
 	if len(rows) == 0 {

@@ -13,6 +13,7 @@ import type {
   AssetVersion,
   AssetVersionPage,
   CanvasResultSourceRef,
+  OutputTypeOption,
   PowerForm,
   PowerKindOption,
   PowerOption,
@@ -56,6 +57,7 @@ export async function sendSpaceMessage(
 export async function fetchSpacePowers(projectId: number): Promise<{
   powers: PowerOption[];
   powerKinds: PowerKindOption[];
+  outputTypes: OutputTypeOption[];
 }> {
   const result = await request(joinSiteApi("project/canvas_config"), "get", {
     project_id: projectId,

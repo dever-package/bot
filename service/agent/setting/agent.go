@@ -63,8 +63,8 @@ func (AgentHook) ProviderBeforeSaveAgentCate(_ *server.Context, params []any) an
 	partial := isPartialAgentRecord(record)
 	trimStringField(record, "name", partial)
 	trimStringField(record, "prompt", partial)
-	defaultInt16Field(record, "status", defaultAgentStatus, partial)
-	defaultIntField(record, "sort", defaultAgentSort, partial)
+	defaultInt16FieldOnCreateOrPresent(record, "status", defaultAgentStatus, partial)
+	defaultIntFieldOnCreateOrPresent(record, "sort", defaultAgentSort, partial)
 	return record
 }
 
@@ -405,5 +405,8 @@ func validateAgentTextPower(c *server.Context, field string, powerID uint64, lab
 	}
 	if strings.ToLower(strings.TrimSpace(row.Kind)) != "text" {
 		panicAgentField(field, label+"只能选择文本类型能力。")
+	}
+	if !energonmodel.IsGeneralTextPower(*row) {
+		panicAgentField(field, label+"只能选择通用文本能力。")
 	}
 }

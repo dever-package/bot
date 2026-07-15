@@ -12,6 +12,7 @@ func deleteServiceReferences(c *server.Context, serviceIDs []uint64) {
 	filters := map[string]any{"service_id": uint64IDsToAny(serviceIDs)}
 	botmodel.NewServiceEndpointModel().Delete(c.Context(), filters)
 	botmodel.NewServiceParamModel().Delete(c.Context(), filters)
+	botmodel.NewServiceRuntimeStatModel().Delete(c.Context(), filters)
 	botmodel.NewPowerTargetModel().Delete(c.Context(), filters)
 }
 

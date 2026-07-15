@@ -107,6 +107,10 @@
               "type": "show-tag"
             },
             {
+              "value": "output_type",
+              "type": "show-tag"
+            },
+            {
               "value": "status",
               "type": "form-switch",
               "meta": {

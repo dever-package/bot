@@ -12,7 +12,6 @@ func buildPrompt(ctx context.Context, request AssembleRequest, session agentmode
 	sections := basePromptSections(request.CategoryPrompt, request.Agent.Prompt)
 	sections = appendPromptSection(sections, "长期记忆", runtimeMemoryText(ctx, session.ID, request.Input))
 	sections = appendPromptSection(sections, "较早对话摘要", session.ContextSummary)
-	sections = appendPromptSection(sections, "本轮引用", request.ReferencePrompt)
 	return strings.Join(sections, "\n\n")
 }
 

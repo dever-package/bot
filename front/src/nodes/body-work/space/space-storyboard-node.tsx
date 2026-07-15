@@ -8,7 +8,6 @@ import {
 import {
   parseStoryboardOutput,
   storyboardTotalDuration,
-  type StoryboardDocument,
 } from "./space-storyboard";
 import { StoryboardView } from "./space-storyboard-view";
 
@@ -21,16 +20,16 @@ export type StoryboardNodeStatus =
 type StoryboardNodeContentProps = {
   output?: unknown;
   status: StoryboardNodeStatus;
-  editable?: boolean;
-  onSave?: (storyboard: StoryboardDocument) => Promise<void>;
+  started?: boolean;
+  generatedShotCount?: number;
   onOpenDetail?: () => void;
 };
 
 export function StoryboardNodeContent({
   output,
   status,
-  editable = false,
-  onSave,
+  started = false,
+  generatedShotCount = 0,
   onOpenDetail,
 }: StoryboardNodeContentProps) {
   if (status === "running") {
@@ -41,7 +40,13 @@ export function StoryboardNodeContent({
           <span />
           <span />
         </div>
-        <strong>正在生成分镜，请稍候</strong>
+        <strong>
+          {!started
+            ? "分镜等待生成"
+            : generatedShotCount > 0
+              ? `分镜正在生成，已生成 ${generatedShotCount} 个分镜`
+              : "分镜正在生成"}
+        </strong>
       </div>
     );
   }
@@ -61,8 +66,8 @@ export function StoryboardNodeContent({
     return (
       <StoryboardNodeMessage
         icon={<Clapperboard size={28} />}
-        title="等待生成分镜"
-        description="运行后将在这里展示可编辑镜头"
+        title="分镜等待生成"
+        description="运行后展示镜头表格，详情中可以编辑"
       />
     );
   }
@@ -93,11 +98,7 @@ export function StoryboardNodeContent({
         </span>
       </header>
       <div className="ws-storyboard-node-body nowheel">
-        <StoryboardView
-          storyboard={storyboard}
-          editable={editable}
-          onSave={onSave}
-        />
+        <StoryboardView storyboard={storyboard} showMetrics={false} />
       </div>
       {onOpenDetail ? (
         <footer className="ws-storyboard-node-actions">

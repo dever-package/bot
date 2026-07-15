@@ -5,19 +5,97 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shemic/dever/orm"
+
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
+	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 type runState struct {
-	execution  execution
-	repository repository
-	seq        int
-	lastText   string
-	artifacts  map[string]any
-	activities []map[string]any
-	loaded     []string
-	completed  bool
+	execution        execution
+	repository       repository
+	seq              int
+	phase            string
+	modelStep        int
+	input            map[string]any
+	history          []any
+	lastText         string
+	artifacts        map[string]any
+	activities       []map[string]any
+	loaded           []string
+	pendingTools     []botprotocol.ToolCall
+	pendingIndex     int
+	pendingVisible   bool
+	documentID       uint64
+	documentTextStep int
+	finalStatus      string
+	finalText        string
+	finalMessage     string
+	finalOutput      map[string]any
+	finalCommitted   bool
+	completed        bool
+}
+
+func newRunState(execution execution) runState {
+	checkpoint := normalizeCheckpoint(execution.checkpoint)
+	return runState{
+		execution:        execution,
+		repository:       newRepository(),
+		seq:              checkpoint.Seq,
+		phase:            checkpoint.Phase,
+		modelStep:        checkpoint.ModelStep,
+		input:            cloneMap(checkpoint.Input),
+		history:          append([]any(nil), checkpoint.History...),
+		lastText:         checkpoint.LastText,
+		artifacts:        cloneMap(checkpoint.Artifacts),
+		activities:       append([]map[string]any(nil), checkpoint.Activities...),
+		loaded:           append([]string(nil), checkpoint.LoadedSkills...),
+		pendingTools:     append([]botprotocol.ToolCall(nil), checkpoint.PendingTools...),
+		pendingIndex:     checkpoint.PendingIndex,
+		pendingVisible:   checkpoint.PendingVisible,
+		documentID:       checkpoint.DocumentID,
+		documentTextStep: checkpoint.DocumentTextStep,
+		finalStatus:      checkpoint.FinalStatus,
+		finalText:        checkpoint.FinalText,
+		finalMessage:     checkpoint.FinalMessage,
+		finalOutput:      cloneMap(checkpoint.FinalOutput),
+		finalCommitted:   checkpoint.FinalCommitted,
+	}
+}
+
+func (state *runState) Checkpoint(seq int) runCheckpoint {
+	return runCheckpoint{
+		Version:          runtimeSnapshotVersion,
+		Phase:            state.phase,
+		ModelStep:        state.modelStep,
+		Seq:              seq,
+		Input:            cloneMap(state.input),
+		History:          append([]any(nil), state.history...),
+		LastText:         state.lastText,
+		Artifacts:        cloneMap(state.artifacts),
+		Activities:       append([]map[string]any(nil), state.activities...),
+		LoadedSkills:     append([]string(nil), state.loaded...),
+		MediaReferences:  append([]runtimeprovider.MediaReference(nil), state.execution.mediaReferences...),
+		PendingTools:     append([]botprotocol.ToolCall(nil), state.pendingTools...),
+		PendingIndex:     state.pendingIndex,
+		PendingVisible:   state.pendingVisible,
+		DocumentID:       state.documentID,
+		DocumentTextStep: state.documentTextStep,
+		FinalStatus:      state.finalStatus,
+		FinalText:        state.finalText,
+		FinalMessage:     state.finalMessage,
+		FinalOutput:      cloneMap(state.finalOutput),
+		FinalCommitted:   state.finalCommitted,
+	}
+}
+
+func (state *runState) MarkFinal(status string, text string, output map[string]any, message string) {
+	state.phase = runPhaseFinal
+	state.finalStatus = status
+	state.finalText = strings.TrimSpace(text)
+	state.finalMessage = strings.TrimSpace(message)
+	state.finalOutput = state.ApplyArtifacts(output)
 }
 
 func (state *runState) AppendVisibleText(value string) bool {
@@ -44,12 +122,15 @@ func (state *runState) AddLoadedSkill(key string) {
 		}
 	}
 	state.loaded = append(state.loaded, key)
-	_ = state.repository.UpdateRunSkills(context.Background(), state.execution.runID, state.loaded)
 }
 
 func (state *runState) Step(stepType string, title string, content string, payload any, status string) error {
 	next := state.seq + 1
-	err := state.repository.CreateStep(context.Background(), stepRecord{
+	checkpoint, err := encodeCheckpoint(state.Checkpoint(next))
+	if err != nil {
+		return err
+	}
+	err = state.repository.CommitStep(context.Background(), stepRecord{
 		RunID:     state.execution.runID,
 		RequestID: state.execution.requestID,
 		Seq:       next,
@@ -58,7 +139,7 @@ func (state *runState) Step(stepType string, title string, content string, paylo
 		Content:   content,
 		Payload:   encodeJSON(payload, "{}"),
 		Status:    status,
-	})
+	}, checkpoint, state.loaded, state.execution.workerID, time.Now().Add(runtimeLeaseDuration))
 	if err == nil {
 		state.seq = next
 	}
@@ -215,31 +296,17 @@ func (s Service) finish(state *runState, outcome finishOutcome) {
 	if state == nil || state.completed {
 		return
 	}
-	state.completed = true
-	if outcome.stepType != "" {
-		stepType := outcome.stepType
-		if stepType == "" {
-			stepType = "final"
+	if state.documentID > 0 {
+		if state.finalText == "" {
+			state.finalText = strings.TrimSpace(outcome.text)
 		}
-		stepTitle := outcome.stepTitle
-		if stepTitle == "" {
-			stepTitle = "最终输出"
+		if state.finalOutput == nil {
+			state.finalOutput = cloneMap(outcome.output)
 		}
-		stepStatus := outcome.stepStatus
-		if stepStatus == "" {
-			stepStatus = stepStatusSuccess
-		}
-		content := strings.TrimSpace(outcome.text)
-		if outcome.status != runStatusSuccess && strings.TrimSpace(outcome.message) != "" {
-			content = strings.TrimSpace(outcome.message)
-		}
-		_ = state.Step(stepType, stepTitle, content, map[string]any{
-			"output":         outcome.output,
-			"error":          strings.TrimSpace(outcome.message),
-			"partial_output": strings.TrimSpace(outcome.text),
-		}, stepStatus)
+		s.finalizeDocument(state)
+		outcome.text = state.finalText
+		outcome.output = state.finalOutput
 	}
-
 	output := state.ApplyArtifacts(outcome.output)
 	if _, exists := output["text"]; !exists {
 		output["text"] = strings.TrimSpace(outcome.text)
@@ -259,6 +326,54 @@ func (s Service) finish(state *runState, outcome finishOutcome) {
 		output["event"] = "error"
 		output["error"] = message
 	}
+	state.MarkFinal(outcome.status, outcome.text, output, message)
+	if !state.finalCommitted {
+		state.finalCommitted = true
+		stepType := outcome.stepType
+		stepTitle := outcome.stepTitle
+		stepStatus := outcome.stepStatus
+		if stepType == "" {
+			stepType = "final"
+		}
+		if stepTitle == "" {
+			stepTitle = "最终输出"
+		}
+		if stepStatus == "" {
+			stepStatus = stepStatusSuccess
+		}
+		content := strings.TrimSpace(outcome.text)
+		if outcome.status != runStatusSuccess && message != "" {
+			content = message
+		}
+		if err := state.Step(stepType, stepTitle, content, map[string]any{
+			"output":         output,
+			"error":          message,
+			"partial_output": strings.TrimSpace(outcome.text),
+		}, stepStatus); err != nil {
+			state.finalCommitted = false
+			return
+		}
+	}
+
+	finishedAt := time.Now()
+	finished, err := s.finishRunAndChat(context.Background(), state.execution.runID, state.execution.workerID, state.execution.persistChat, runResult{
+		Status:     outcome.status,
+		Output:     encodeJSON(output, "{}"),
+		Error:      message,
+		StepCount:  state.seq,
+		Latency:    finishedAt.Sub(state.execution.startedAt).Milliseconds(),
+		FinishedAt: finishedAt,
+	}, runtimechat.RunTurnCompletion{
+		RequestID: state.execution.requestID,
+		Status:    outcome.status,
+		Text:      outcome.text,
+		Output:    output,
+		Error:     message,
+	})
+	if err != nil || !finished {
+		return
+	}
+	state.completed = true
 	defer state.complete(runCompletion{
 		Status:  outcome.status,
 		Text:    strings.TrimSpace(outcome.text),
@@ -266,24 +381,80 @@ func (s Service) finish(state *runState, outcome finishOutcome) {
 		Output:  output,
 	})
 
-	finishedAt := time.Now()
-	_ = s.repository.FinishRun(context.Background(), state.execution.runID, runResult{
-		Status:     outcome.status,
-		Output:     encodeJSON(output, "{}"),
-		Error:      message,
-		StepCount:  state.seq,
-		Latency:    finishedAt.Sub(state.execution.startedAt).Milliseconds(),
-		FinishedAt: finishedAt,
-	})
-	if state.execution.persistChat {
-		s.completeRunTurn(state.execution.requestID, outcome.status, outcome.text, output, message)
-	}
-
 	responseStatus := botprotocol.ResponseStatusSuccess
 	if outcome.status == runStatusFail {
 		responseStatus = botprotocol.ResponseStatusFail
 	}
 	_ = s.writeExecutionResult(context.Background(), state.execution, output, message, responseStatus)
+}
+
+func (s Service) finishRunAndChat(
+	ctx context.Context,
+	runID uint64,
+	workerID string,
+	persistChat bool,
+	result runResult,
+	completion runtimechat.RunTurnCompletion,
+) (bool, error) {
+	return s.commitRunTerminal(ctx, completion, func(tx context.Context) (bool, bool, error) {
+		finished, err := s.repository.FinishRun(tx, runID, workerID, result)
+		return finished, persistChat, err
+	})
+}
+
+type runTerminalMutation func(context.Context) (committed bool, persistChat bool, err error)
+
+func (s Service) commitRunTerminal(
+	ctx context.Context,
+	completion runtimechat.RunTurnCompletion,
+	mutation runTerminalMutation,
+) (bool, error) {
+	transactionCommitted := false
+	sessionID := uint64(0)
+	err := func() (transactionErr error) {
+		defer repositoryError(&transactionErr)
+		return orm.Transaction(ctx, func(tx context.Context) error {
+			var persistChat bool
+			var err error
+			transactionCommitted, persistChat, err = mutation(tx)
+			if err != nil || !transactionCommitted || !persistChat {
+				return err
+			}
+			sessionID, err = s.chat.SaveRunTurnCompletion(tx, completion)
+			return err
+		})
+	}()
+	if err != nil {
+		return false, err
+	}
+	if transactionCommitted && sessionID > 0 {
+		s.chat.AfterRunTurnCompletion(sessionID)
+	}
+	return transactionCommitted, nil
+}
+
+func (s Service) finishCheckpoint(state *runState) {
+	status := strings.TrimSpace(state.finalStatus)
+	if status == "" {
+		status = runStatusFail
+		state.finalMessage = "智能体最终检查点无效"
+	}
+	stepType := "final"
+	stepTitle := "最终输出"
+	stepStatus := stepStatusSuccess
+	if status != runStatusSuccess {
+		stepType = "error"
+		stepTitle = "运行失败"
+		stepStatus = stepStatusFail
+	}
+	if status == runStatusCanceled {
+		stepTitle = "运行已取消"
+		stepStatus = stepStatusWarning
+	}
+	s.finish(state, finishOutcome{
+		status: status, text: state.finalText, message: state.finalMessage,
+		output: state.finalOutput, stepType: stepType, stepTitle: stepTitle, stepStatus: stepStatus,
+	})
 }
 
 func (state *runState) complete(completion runCompletion) {

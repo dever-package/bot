@@ -60,8 +60,8 @@ func (TeamHook) ProviderBeforeSaveTeamCate(_ *server.Context, params []any) any 
 	if !partial && record["name"] == "" {
 		panicTeamField("form.name", "分类名称不能为空。")
 	}
-	defaultTeamInt16Field(record, "status", defaultTeamStatus, partial)
-	defaultTeamIntField(record, "sort", defaultTeamSort, partial)
+	defaultTeamInt16FieldOnCreateOrPresent(record, "status", defaultTeamStatus, partial)
+	defaultTeamIntFieldOnCreateOrPresent(record, "sort", defaultTeamSort, partial)
 	return record
 }
 
@@ -490,6 +490,15 @@ func defaultTeamInt16Field(record map[string]any, field string, fallback int16, 
 	}
 }
 
+func defaultTeamInt16FieldOnCreateOrPresent(record map[string]any, field string, fallback int16, partial bool) {
+	if !shouldDefaultTeamFieldOnCreateOrPresent(record, field, partial) {
+		return
+	}
+	if util.ToIntDefault(record[field], 0) <= 0 {
+		record[field] = fallback
+	}
+}
+
 func defaultTeamIntField(record map[string]any, field string, fallback int, partial bool) {
 	if !shouldNormalizeTeamField(record, field, partial) {
 		return
@@ -497,6 +506,26 @@ func defaultTeamIntField(record map[string]any, field string, fallback int, part
 	if util.ToIntDefault(record[field], 0) <= 0 {
 		record[field] = fallback
 	}
+}
+
+func defaultTeamIntFieldOnCreateOrPresent(record map[string]any, field string, fallback int, partial bool) {
+	if !shouldDefaultTeamFieldOnCreateOrPresent(record, field, partial) {
+		return
+	}
+	if util.ToIntDefault(record[field], 0) <= 0 {
+		record[field] = fallback
+	}
+}
+
+func shouldDefaultTeamFieldOnCreateOrPresent(record map[string]any, field string, partial bool) bool {
+	if partial {
+		_, exists := record[field]
+		return exists
+	}
+	if _, exists := record[field]; exists {
+		return true
+	}
+	return util.ToUint64(record["id"]) == 0
 }
 
 func shouldNormalizeTeamField(record map[string]any, field string, partial bool) bool {

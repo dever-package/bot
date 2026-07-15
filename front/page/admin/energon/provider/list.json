@@ -99,6 +99,10 @@
               "type": "show-tag"
             },
             {
+              "value": "processor",
+              "type": "show-base"
+            },
+            {
               "value": "host",
               "type": "show-base"
             },
@@ -147,7 +151,14 @@
                     "to": "/bot/energon/service/list",
                     "searchParam": "provider_id",
                     "searchField": "id",
-                    "withBack": true
+                    "withBack": true,
+                    "hiddenWhen": [
+                      {
+                        "path": "protocol",
+                        "operator": "equals",
+                        "value": "local"
+                      }
+                    ]
                   },
                   {
                     "icon": "trash-2",

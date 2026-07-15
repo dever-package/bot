@@ -44,6 +44,15 @@ func (AgentRuntime) GetStream(c *server.Context) error {
 	return botapi.HandleStreamRead(c, agentChatRuntime.ReadStream)
 }
 
+func (AgentRuntime) GetDocument(c *server.Context) error {
+	data, err := agentChatRuntime.Document(c.Context(), botapi.QueryUint64(c, "document_id", "documentId", "id"))
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (AgentRuntime) GetDocumentStream(c *server.Context) error {
+	return botapi.HandleStreamRead(c, agentChatRuntime.ReadDocumentStream)
+}
+
 func (AgentRuntime) GetStatus(c *server.Context) error {
 	data, err := agentChatRuntime.Status(c.Context(), botapi.QueryText(c, "request_id", "requestId"))
 	return botapi.WriteJSON(c, data, err)

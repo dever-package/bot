@@ -1,6 +1,12 @@
-import { request } from "@dever/front-plugin";
+import { requestRaw } from "@dever/front-plugin";
 import { isPlainRecord } from "@/lib/runtime-stream-output";
+import { readAgentChatActivities } from "./activity";
+import { buildAgentChatPreviewContent } from "./message-content";
 import { normalizeAgentChatOutput, type AgentChatOutput } from "./output";
+import {
+  normalizeAgentChatDocument,
+  type AgentChatDocument,
+} from "./document";
 import type {
   ReferenceComposerParam,
   ReferencePreview,
@@ -25,6 +31,7 @@ export type AgentChatMessageRecord = {
   output: AgentChatOutput;
   requestID: string;
   status: number;
+  document?: AgentChatDocument;
 };
 
 export type AgentChatSessionPayload = {
@@ -48,19 +55,26 @@ export async function loadAgentInputConfig(
   api: string,
   agentKey: string,
 ): Promise<ReferenceComposerParam[]> {
-  const result = await request(api, "get", { agent_key: agentKey });
-  if (!isPlainRecord(result)) {
-    throw new Error("读取智能体输入参数失败");
-  }
-  const code = Number(result.code || 0);
-  const status = Number(result.status || 0);
-  if (code !== 0 || status === 2) {
-    throw new Error(
-      textValue(result.message || result.msg) || "读取智能体输入参数失败",
-    );
-  }
-  const data = isPlainRecord(result.data) ? result.data : {};
+  const data = await readRequestData(
+    requestRaw(api, "get", { agent_key: agentKey }),
+    "读取智能体输入参数失败",
+  );
   return normalizeInputParams(data.params);
+}
+
+export async function loadAgentChatDocument(
+  api: string,
+  documentID: number,
+): Promise<AgentChatDocument> {
+  const data = await readRequestData(
+    requestRaw(api, "get", { document_id: documentID }),
+    "读取图文内容失败",
+  );
+  const document = normalizeAgentChatDocument(data);
+  if (!document) {
+    throw new Error("图文内容无效");
+  }
+  return document;
 }
 
 type SessionScope = {
@@ -168,24 +182,38 @@ export async function loadAgentChatReferencePreview(
   if (!isReferenceType(refType) || !refID) {
     throw new Error("引用内容无效");
   }
+  const text = data.text == null ? "" : String(data.text);
+  const output = normalizeAgentChatOutput(data.output);
+  const content = buildAgentChatPreviewContent(
+    text,
+    readAgentChatActivities(output),
+  );
   return {
     refType,
     refId: refID,
     title: textValue(data.title) || reference.label,
-    text: data.text == null ? "" : String(data.text),
+    text,
     media: normalizeReferencePreviewMedia(data.media),
+    content: content.length > 0 ? content : undefined,
   };
 }
 
 async function agentChatRequest(api: string, payload: Record<string, unknown>) {
-  const result = await request(api, "post", payload);
+  return readRequestData(requestRaw(api, "post", payload), "会话请求失败");
+}
+
+async function readRequestData(
+  pending: Promise<unknown>,
+  fallback: string,
+) {
+  const result = await pending;
   if (!isPlainRecord(result)) {
-    throw new Error("会话请求失败");
+    throw new Error(fallback);
   }
   const code = Number(result.code || 0);
   const status = Number(result.status || 0);
   if (code !== 0 || status === 2) {
-    throw new Error(textValue(result.message || result.msg) || "会话请求失败");
+    throw new Error(textValue(result.message || result.msg) || fallback);
   }
   return isPlainRecord(result.data) ? result.data : {};
 }
@@ -222,6 +250,7 @@ function normalizeMessages(value: unknown): AgentChatMessageRecord[] {
         output: normalizeAgentChatOutput(row.output),
         requestID: textValue(row.request_id),
         status: Number(row.status || 1),
+        document: normalizeAgentChatDocument(row.document),
       } satisfies AgentChatMessageRecord;
     })
     .filter((message): message is AgentChatMessageRecord => Boolean(message));

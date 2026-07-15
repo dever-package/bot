@@ -26,6 +26,11 @@ import {
   type AgentChatOutput,
 } from "./output";
 import { createStreamTextBuffer, type StreamTextBuffer } from "./stream";
+import {
+  mergeAgentChatDocument,
+  mergeAgentChatDocumentEvent,
+  normalizeAgentChatDocument,
+} from "./document";
 import type {
   AgentChatRuntimeApis,
   ChatMessage,
@@ -47,6 +52,7 @@ type SessionRun = {
   stopped: boolean;
   detached: boolean;
   replayPending: boolean;
+  runVersion: number;
   controller: AbortController;
 };
 
@@ -199,6 +205,10 @@ export function useAgentChatRuns({
         if (hasAgentChatOutput(result.output)) {
           patch.output = result.output;
         }
+        patch.document = mergeAgentChatDocument(
+          message.document,
+          normalizeAgentChatDocument(result.output?.document),
+        );
         return patch;
       });
       remove(run);
@@ -219,9 +229,27 @@ export function useAgentChatRuns({
       if (next.streamID) {
         run.lastStreamID = next.streamID;
       }
+      if (next.runVersion > 0) {
+        if (run.runVersion > next.runVersion) {
+          return true;
+        }
+        run.runVersion = next.runVersion;
+      }
       if (next.cancelable != null && next.cancelable !== run.cancelable) {
         run.cancelable = next.cancelable;
         publish(run);
+      }
+      if (isDocumentFrame(next.event, next.output)) {
+        updateRunMessage(run, (message) => ({
+          document: mergeAgentChatDocumentEvent(message.document, next.output),
+          requestID: next.requestID || run.requestID || undefined,
+          running: true,
+        }));
+      }
+      if (next.event === "reset") {
+        run.replayPending = false;
+        run.buffer.reset(valueText(next.output.text));
+        run.buffer.flush();
       }
       if (next.delta) {
         if (run.replayPending) {
@@ -249,11 +277,12 @@ export function useAgentChatRuns({
         return true;
       }
       finish(run, {
-        text:
-          next.finalText.trim() ||
-          run.buffer.text.trim() ||
-          next.error.trim() ||
-          "智能体已返回结果。",
+        text: resolveCompletedRunText({
+          text: next.finalText,
+          streamedText: run.buffer.text,
+          error: next.error,
+          failed: next.failed,
+        }),
         error: next.failed,
         requestID: next.requestID,
         output: next.output,
@@ -297,6 +326,7 @@ export function useAgentChatRuns({
         stopped: false,
         detached: false,
         replayPending: Boolean(input.replayPending),
+        runVersion: 0,
         controller: new AbortController(),
       };
       return run;
@@ -311,16 +341,13 @@ export function useAgentChatRuns({
       }
       const failed = status.status === "fail";
       const canceled = status.status === "canceled";
-      const fallbackText = canceled
-        ? "已停止生成"
-        : failed
-          ? "智能体运行失败。"
-          : "智能体已返回结果。";
-      const finalText =
-        status.text.trim() ||
-        run.buffer.text.trim() ||
-        status.error.trim() ||
-        fallbackText;
+      const finalText = resolveCompletedRunText({
+        text: status.text,
+        streamedText: run.buffer.text,
+        error: status.error,
+        failed,
+        canceled,
+      });
       finish(run, {
         text: finalText,
         error: failed,
@@ -365,6 +392,7 @@ export function useAgentChatRuns({
         if (run.detached || runsRef.current.get(activeSessionID) !== run) {
           return;
         }
+        run.runVersion = Math.max(run.runVersion, status.runVersion);
         if (finishFromStatus(run, status)) {
           return;
         }
@@ -374,7 +402,9 @@ export function useAgentChatRuns({
           lastID: run.lastStreamID,
           blockMs,
           signal: run.controller.signal,
-          stopOnResult: true,
+          // applyFrame only returns false for the current run version. Old
+          // terminal frames from an interrupted attempt must not stop replay.
+          stopOnResult: false,
           recoverOnError: true,
           fallbackToPoll: false,
           onFrame: (frame) => (applyFrame(run, frame) ? undefined : false),
@@ -665,6 +695,22 @@ function isRunMessage(message: ChatMessage, run: SessionRun) {
   );
 }
 
+function isDocumentFrame(event: string, output: AgentChatOutput) {
+  return (
+    Boolean(output.document || output.document_id) ||
+    [
+      "document_start",
+      "block_commit",
+      "media_block_append",
+      "artifact_progress",
+      "artifact_ready",
+      "artifact_failed",
+      "document_content_complete",
+      "document_complete",
+    ].includes(event)
+  );
+}
+
 function mergeRunMessages(messages: ChatMessage[], run?: SessionRun) {
   if (!run) {
     return messages;
@@ -717,4 +763,24 @@ function resolveSessionTitle(currentTitle: string, message: string) {
     .slice(0, 40)
     .join("");
   return title || "新会话";
+}
+
+function resolveCompletedRunText(input: {
+  text?: string;
+  streamedText?: string;
+  error?: string;
+  failed?: boolean;
+  canceled?: boolean;
+}) {
+  const visibleText = input.text?.trim() || input.streamedText?.trim() || "";
+  if (visibleText) {
+    return visibleText;
+  }
+  if (input.canceled) {
+    return "已停止生成";
+  }
+  if (input.failed) {
+    return input.error?.trim() || "智能体运行失败。";
+  }
+  return "";
 }

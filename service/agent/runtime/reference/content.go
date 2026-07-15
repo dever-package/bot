@@ -44,18 +44,21 @@ func ParseInput(input map[string]any) (Input, error) {
 	}, nil
 }
 
-func ModelInput(source map[string]any, input Input) map[string]any {
+func ModelInput(source map[string]any, input Input, referencePrompt string) map[string]any {
 	result := make(map[string]any, len(source))
 	for key, value := range source {
 		if key != "content" && key != "params" {
 			result[key] = value
 		}
 	}
-	modelText := input.Text
-	if params := ParamsPrompt(input.Content.Value()); params != "" {
-		modelText = strings.TrimSpace(modelText + "\n\n" + params)
+	modelParts := []string{strings.TrimSpace(input.Text)}
+	if referencePrompt = strings.TrimSpace(referencePrompt); referencePrompt != "" {
+		modelParts = append(modelParts, "本轮引用：\n"+referencePrompt)
 	}
-	result["text"] = modelText
+	if params := ParamsPrompt(input.Content.Value()); params != "" {
+		modelParts = append(modelParts, params)
+	}
+	result["text"] = strings.TrimSpace(strings.Join(modelParts, "\n\n"))
 	for key, value := range input.Params {
 		if key == "" || key == "text" || key == "content" {
 			continue

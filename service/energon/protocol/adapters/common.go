@@ -96,3 +96,14 @@ func isOpenAINativeBodyKey(key string) bool {
 		return false
 	}
 }
+
+func applyToolOptionOverrides(body map[string]any, options map[string]any) {
+	if body == nil || options == nil {
+		return
+	}
+	for _, key := range []string{"tools", "tool_choice", "parallel_tool_calls"} {
+		if value, exists := options[key]; exists {
+			body[key] = value
+		}
+	}
+}

@@ -85,11 +85,20 @@ import {
   saveSpaceCanvasContent,
   saveSpaceCanvasMaterial,
   sendSpaceMessage,
-  saveSpaceAssetEditVersion,
 } from "./space-api";
 import { useCanvasAutosave, type CanvasSaveStatus } from "./space-autosave";
 import { SpaceCatalogCache } from "./space-catalog-cache";
 import { AddNodeMenu } from "./space-add-node-menu";
+import { CanvasGroupNodeView } from "./space-group-node";
+import { summarizeCanvasGroupRuntime } from "./space-group-runtime";
+import {
+  canConnectCanvasNodes,
+  canvasGroupMembers,
+  reconcileCanvasGroupEdges,
+  withCanvasNodeGroupAtPosition,
+  withMovedCanvasNode,
+  withoutCanvasGroup,
+} from "./space-group-model";
 import { PowerIcon } from "./space-power-icon";
 import {
   CanvasViewControls,
@@ -166,13 +175,13 @@ import {
   hasDefaultCanvasNodeSize,
   isExecutionRole,
   looseRichJSONText,
-  powerKindLabel,
   relatedFlows,
   richDocument,
   visibleAssetCates,
 } from "./space-model";
 import type {
   AssetCate,
+  CanvasComposerDraft,
   CanvasFunctionOption,
   CanvasResultSourceRef,
   CanvasResultViewState,
@@ -203,11 +212,16 @@ import {
   normalizeEnergonOutput,
 } from "./space-content-view";
 import { plainMarkdownTextFromRichOutput } from "./space-content-output";
+import { resolvePowerPresentation } from "./space-power-presentation";
 import {
-  isStoryboardKind,
-  storyboardSummary,
-  type StoryboardDocument,
-} from "./space-storyboard";
+  firstAvailableImagePower,
+  syncCanvasStoryboardMaterialGroups,
+} from "./space-storyboard-material-groups";
+import {
+  parseMaybeEmbeddedJSON,
+  parseMaybeJSON,
+  repairJSONControlChars,
+} from "./space-structured-json";
 import {
   StoryboardNodeContent,
   type StoryboardNodeStatus,
@@ -229,6 +243,7 @@ type RunningNodeState = {
   status: "running" | "waiting" | "success" | "error";
   streamText?: string;
   streamStarted?: boolean;
+  generatedCount?: number;
   agent?: CanvasAgentRuntimeState;
 };
 type RunningNodeMap = Record<string, RunningNodeState>;
@@ -242,12 +257,7 @@ type NodeResultSetter = (
   nodeId: string,
   patch: Partial<SpaceCanvasNode>,
 ) => void;
-type ComposerDraft = {
-  prompt?: string;
-  paramValues?: Record<string, unknown>;
-  selectedTargetId?: number;
-};
-type NodeDraftSetter = (nodeId: string, draft: ComposerDraft) => void;
+type NodeDraftSetter = (nodeId: string, draft: CanvasComposerDraft) => void;
 type NodeStartRunner = (node: SpaceCanvasNode) => Promise<void>;
 type BackendNodeRunOptions = {
   agentInput?: ReferenceInput;
@@ -452,6 +462,7 @@ export function WorkSpacePage() {
         {
           powers: nextSpace.powers || [],
           powerKinds: nextSpace.powerKinds || [],
+          outputTypes: nextSpace.outputTypes || [],
         },
       );
       requestedAssetDetailsRef.current = new Set();
@@ -492,6 +503,10 @@ export function WorkSpacePage() {
     );
   }, [space, activeCate]);
   const menuFlows = useMemo(() => activeFlows, [activeFlows]);
+  const imagePower = useMemo(
+    () => firstAvailableImagePower(powers),
+    [powers],
+  );
   const activeCanvas = useMemo(
     () =>
       activeCate
@@ -503,6 +518,32 @@ export function WorkSpacePage() {
     () => applyNodeResultOverrides(activeCanvas, nodeResultOverrides),
     [activeCanvas, nodeResultOverrides],
   );
+
+  useEffect(() => {
+    if (!space) {
+      return;
+    }
+    setCanvasStates((current) => {
+      let next = current;
+      for (const [key, canvas] of Object.entries(current)) {
+        const assetCateId = Number(key || canvas.assetCateId || 0);
+        const synced = syncCanvasStoryboardMaterialGroups({
+          canvas,
+          assetCate: assetCateById(space, assetCateId),
+          imagePower,
+        });
+        if (synced === canvas) {
+          continue;
+        }
+        if (next === current) {
+          next = { ...current };
+        }
+        next[key] = synced;
+        changedCanvasKeysRef.current.add(assetCateId);
+      }
+      return next;
+    });
+  }, [imagePower, space]);
 
   const openImportPickerByNodeId = useCallback(
     (nodeId = "") => {
@@ -588,13 +629,21 @@ export function WorkSpacePage() {
       setCanvasStates((current) => {
         const key = String(assetCateId);
         const currentCanvas = current[key] || emptyCanvasState(assetCateId);
+        const patchedCanvas = {
+          ...currentCanvas,
+          nodes: currentCanvas.nodes.map((node) =>
+            node.id === nodeId ? { ...node, ...patch } : node,
+          ),
+        };
+        const syncedCanvas = space
+          ? syncCanvasStoryboardMaterialGroups({
+              canvas: patchedCanvas,
+              assetCate: assetCateById(space, assetCateId),
+              imagePower,
+            })
+          : patchedCanvas;
         const nextCanvas = normalizeCanvasForState(
-          {
-            ...currentCanvas,
-            nodes: currentCanvas.nodes.map((node) =>
-              node.id === nodeId ? { ...node, ...patch } : node,
-            ),
-          },
+          syncedCanvas,
           assetCateId,
         );
         if (isSameCanvasState(currentCanvas, nextCanvas)) {
@@ -607,7 +656,7 @@ export function WorkSpacePage() {
         };
       });
     },
-    [],
+    [imagePower, space],
   );
 
   const updateNodeResult = useCallback<NodeResultSetter>(
@@ -1197,16 +1246,17 @@ export function WorkSpacePage() {
             options.connectToNodeId || "",
           );
         }
+        const nextNodes = canvas.nodes
+          .filter((item) => !duplicateNodeIds.has(item.id))
+          .map((item) =>
+            item.id === currentReplacementTarget.id
+              ? replaceAssetNode(item, node)
+              : item,
+          );
         return {
           ...canvas,
-          nodes: canvas.nodes
-            .filter((item) => !duplicateNodeIds.has(item.id))
-            .map((item) =>
-              item.id === currentReplacementTarget.id
-                ? replaceAssetNode(item, node)
-                : item,
-            ),
-          edges,
+          nodes: nextNodes,
+          edges: reconcileCanvasGroupEdges(nextNodes, edges),
         };
       }
       if (connection) {
@@ -1221,10 +1271,15 @@ export function WorkSpacePage() {
       } else if (options?.connectToNodeId) {
         edges = appendCanvasEdge(edges, node.id, options.connectToNodeId || "");
       }
+      const nextNodes = withCanvasNodeGroupAtPosition(
+        [...canvas.nodes, node],
+        node.id,
+        { x: node.x, y: node.y },
+      );
       return {
         ...canvas,
-        nodes: [...canvas.nodes, node],
-        edges,
+        nodes: nextNodes,
+        edges: reconcileCanvasGroupEdges(nextNodes, edges),
       };
     });
     if (replacementTarget) {
@@ -1260,10 +1315,18 @@ export function WorkSpacePage() {
       activeCanvas.nodes.length,
       position,
     );
-    updateActiveCanvas((canvas) => ({
-      ...canvas,
-      nodes: [...canvas.nodes, clone],
-    }));
+    updateActiveCanvas((canvas) => {
+      const nodes = withCanvasNodeGroupAtPosition(
+        [...canvas.nodes, clone],
+        clone.id,
+        { x: clone.x, y: clone.y },
+      );
+      return {
+        ...canvas,
+        nodes,
+        edges: reconcileCanvasGroupEdges(nodes, canvas.edges),
+      };
+    });
     setNodeResultOverrides((current) => {
       const patch = current[node.id];
       return patch ? { ...current, [clone.id]: patch } : current;
@@ -1275,13 +1338,23 @@ export function WorkSpacePage() {
   }
 
   function deleteCanvasNode(node: SpaceCanvasNode) {
-    updateActiveCanvas((canvas) => ({
-      ...canvas,
-      nodes: canvas.nodes.filter((item) => item.id !== node.id),
-      edges: canvas.edges.filter(
-        (edge) => edge.from !== node.id && edge.to !== node.id,
-      ),
-    }));
+    updateActiveCanvas((canvas) => {
+      const nodes =
+        node.type === "group"
+          ? withoutCanvasGroup(canvas.nodes, node.id)
+          : canvas.nodes.filter((item) => item.id !== node.id);
+      const edges =
+        node.type === "group"
+          ? canvas.edges.filter(
+              (edge) => edge.from !== node.id && edge.to !== node.id,
+            )
+          : canvas.edges;
+      return {
+        ...canvas,
+        nodes,
+        edges: reconcileCanvasGroupEdges(nodes, edges),
+      };
+    });
     setNodeResultOverrides((current) => {
       if (!Object.prototype.hasOwnProperty.call(current, node.id)) {
         return current;
@@ -1427,6 +1500,10 @@ export function WorkSpacePage() {
 
   function addFlowNode(flow: TeamFlow, position?: CanvasPoint) {
     addConfiguredNode("flow", position, { flow });
+  }
+
+  function addGroupNode(position?: CanvasPoint) {
+    addConfiguredNode("group", position);
   }
 
   function addFunctionNode(
@@ -1723,6 +1800,7 @@ export function WorkSpacePage() {
           onSelectFunction={(functionOption) =>
             addFunctionNode(functionOption, nodeMenu.position)
           }
+          onSelectGroup={() => addGroupNode(nodeMenu.position)}
           onSelectRole={(role) => addAgentNode(role, nodeMenu.position)}
           onSelectPower={(power) => addPowerNode(power, nodeMenu.position)}
         />
@@ -2306,8 +2384,11 @@ function CanvasWorkbench({
       const className = `ws-flow-node ws-flow-node-${node.type}`;
 
       const runningNode = runningNodes[node.id] || null;
+      const groupMembers =
+        node.type === "group" ? canvasGroupMembers(nodes, node.id) : [];
       const canvasRunningNodes =
-        node.type === "function" && node.functionOption?.key === "start"
+        node.type === "group" ||
+        (node.type === "function" && node.functionOption?.key === "start")
           ? runningNodes
           : EMPTY_RUNNING_NODE_MAP;
       const inputContext = buildNodeInputContext(node.id, nodes, contextEdges);
@@ -2318,6 +2399,7 @@ function CanvasWorkbench({
         cachedData.projectId === projectId &&
         cachedData.space === space &&
         cachedData.runningNode === runningNode &&
+        sameCanvasNodes(cachedData.groupMembers || [], groupMembers) &&
         cachedData.canvasRunningNodes === canvasRunningNodes &&
         cachedData.interactive === interactive &&
         cachedData.viewportZoom === viewportZoom &&
@@ -2331,6 +2413,7 @@ function CanvasWorkbench({
             space,
             catalogCache,
             runningNode,
+            groupMembers,
             canvasRunningNodes,
             interactive,
             setRunningNode,
@@ -2348,6 +2431,7 @@ function CanvasWorkbench({
         cached.data === nodeData &&
         cached.selected === selected &&
         cached.className === className &&
+        cached.zIndex === (node.type === "group" ? 0 : node.groupId ? 2 : 1) &&
         cachedStyle?.width === nodeStyleSize.width &&
         cachedStyle?.height === nodeStyleSize.height
       ) {
@@ -2361,6 +2445,7 @@ function CanvasWorkbench({
         data: nodeData,
         selected,
         className,
+        zIndex: node.type === "group" ? 0 : node.groupId ? 2 : 1,
         style: {
           ...cached?.style,
           width: nodeStyleSize.width,
@@ -2438,6 +2523,10 @@ function CanvasWorkbench({
         targetHandle: "input-0",
         type: "animated",
         animated: false,
+        data: {
+          logicalFrom: edge.logicalFrom,
+          logicalTo: edge.logicalTo,
+        },
       }))
       .map((edge) =>
         decorateFlowEdge(
@@ -2707,16 +2796,37 @@ function CanvasWorkbench({
       if (!interactive) {
         return;
       }
+      const sourceNode = nodes.find((node) => node.id === draggedNode.id);
+      if (!sourceNode) {
+        updateProximityEdge(null);
+        return;
+      }
+      if (sourceNode.type === "group") {
+        const deltaX = draggedNode.position.x - sourceNode.x;
+        const deltaY = draggedNode.position.y - sourceNode.y;
+        setFlowNodes((current) =>
+          current.map((flowNode) => {
+            const member = nodes.find((node) => node.id === flowNode.id);
+            if (member?.groupId !== sourceNode.id) {
+              return flowNode;
+            }
+            return {
+              ...flowNode,
+              position: {
+                x: member.x + deltaX,
+                y: member.y + deltaY,
+              },
+            };
+          }),
+        );
+        updateProximityEdge(null);
+        return;
+      }
       const hasConnections = flowEdges.some(
         (edge) =>
           edge.source === draggedNode.id || edge.target === draggedNode.id,
       );
       if (hasConnections) {
-        updateProximityEdge(null);
-        return;
-      }
-      const sourceNode = nodes.find((node) => node.id === draggedNode.id);
-      if (!sourceNode) {
         updateProximityEdge(null);
         return;
       }
@@ -2735,7 +2845,14 @@ function CanvasWorkbench({
       }
       updateProximityEdge(createProximityPreviewEdge(connection));
     },
-    [flowEdges, flowNodes, interactive, nodes, updateProximityEdge],
+    [
+      flowEdges,
+      flowNodes,
+      interactive,
+      nodes,
+      setFlowNodes,
+      updateProximityEdge,
+    ],
   );
 
   const handleNodeDragStop = useCallback(
@@ -2746,24 +2863,34 @@ function CanvasWorkbench({
         return;
       }
       const sourceNode = nodes.find((node) => node.id === draggedNode.id);
-      if (
-        sourceNode &&
-        (sourceNode.x !== draggedNode.position.x ||
-          sourceNode.y !== draggedNode.position.y)
-      ) {
-        onNodesCommit(
-          nodes.map((node) =>
-            node.id === draggedNode.id
-              ? {
-                  ...node,
-                  x: draggedNode.position.x,
-                  y: draggedNode.position.y,
-                }
-              : node,
-          ),
+      let membershipChanged = false;
+      if (sourceNode) {
+        const movedNodes = withMovedCanvasNode(
+          nodes,
+          draggedNode.id,
+          draggedNode.position,
         );
+        const groupedNodes = withCanvasNodeGroupAtPosition(
+          movedNodes,
+          draggedNode.id,
+          draggedNode.position,
+        );
+        membershipChanged =
+          (sourceNode.groupId || "") !==
+          (groupedNodes.find((node) => node.id === sourceNode.id)?.groupId || "");
+        if (groupedNodes !== nodes) {
+          onNodesCommit(groupedNodes);
+        }
+        const groupedEdges = reconcileCanvasGroupEdges(groupedNodes, edges);
+        if (!sameCanvasEdges(edges, groupedEdges)) {
+          onEdgesCommit(groupedEdges);
+        }
       }
       setDraggingNodeId("");
+      if (membershipChanged) {
+        updateProximityEdge(null);
+        return;
+      }
       if (!proximityEdge) {
         updateProximityEdge(null);
         return;
@@ -2878,7 +3005,10 @@ function CanvasWorkbench({
     closeNodeActionMenu();
     requestConfirm({
       title: `删除「${targetNode.title}」`,
-      description: "会同时移除与该节点相连的连线。",
+      description:
+        targetNode.type === "group"
+          ? "只删除分组容器，组内节点会保留；分组边界上的连线会移除。"
+          : "会同时移除与该节点相连的连线。",
       confirmText: "删除",
       tone: "danger",
       onConfirm: () => {
@@ -3505,7 +3635,7 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
     );
     input.canvasRun = canvasRun;
     syncBackendCanvasFeedbackRecord(input, canvasRun);
-    if (resumeParentRun && !input.singleNode) {
+    if (resumeParentRun) {
       rawCanvasRun = await fetchSpaceRunStatus({
         projectId: input.projectId,
         runId: Number(resumeParentRun.run_id || 0),
@@ -3517,6 +3647,7 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
     }
     if (
       input.singleNode &&
+      !isGroupCanvasRunInput(input) &&
       hasAppliedNodeResult &&
       (canvasRun.status === "running" || canvasRun.status === "pending")
     ) {
@@ -3537,7 +3668,7 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
       finishBackendCanvasRunningNodes(input, canvasRun);
       return;
     }
-    resumeParentRun = input.singleNode ? null : canvasRun;
+    resumeParentRun = shouldResumeCanvasParentRun(input) ? canvasRun : null;
     rawCanvasRun = await resumeBackendCanvasRun(input, canvasRun);
     streamLastId = "0-0";
   }
@@ -3808,6 +3939,9 @@ function normalizeSingleNodeCanvasRun(
   if (!input.singleNode) {
     return canvasRun;
   }
+  if (isGroupCanvasRunInput(input)) {
+    return canvasRun;
+  }
   const existing = (canvasRun.node_results || []).find(
     (result) => result.node_key === input.startNode.id,
   );
@@ -3860,6 +3994,14 @@ function normalizeSingleNodeCanvasRun(
           }
         : canvasRun.pending_node,
   };
+}
+
+function isGroupCanvasRunInput(input: CanvasStartRunInput) {
+  return input.singleNode && input.startNode.type === "group";
+}
+
+function shouldResumeCanvasParentRun(input: CanvasStartRunInput) {
+  return !input.singleNode || isGroupCanvasRunInput(input);
 }
 
 function firstPendingApprovalFromCanvasRun(canvasRun: CanvasRunRef) {
@@ -4058,6 +4200,18 @@ function applyCanvasStreamNodeFrame(
       const streamEvent = String(
         nodeOutput.semantic_event || nodeOutput.event || "",
       ).toLowerCase();
+      const streamMeta = canvasStreamNodeOutput(nodeOutput.meta);
+      const isStructuredStatus =
+        isPowerStream &&
+        streamEvent === "status" &&
+        Boolean(String(streamMeta.output_type || ""));
+      const nextGeneratedCount = Number(streamMeta.generated_count || 0);
+      const generatedCount = isStructuredStatus
+        ? Math.max(
+            running.generatedCount || 0,
+            Number.isFinite(nextGeneratedCount) ? nextGeneratedCount : 0,
+          )
+        : running.generatedCount;
       const deltaText =
         isPowerStream &&
         typeof nodeOutput.text === "string" &&
@@ -4073,6 +4227,9 @@ function applyCanvasStreamNodeFrame(
             ? `${running.streamText || ""}${deltaText}`
             : running.streamText,
           streamStarted: running.streamStarted || Boolean(deltaText),
+          ...(isStructuredStatus
+            ? { streamStarted: true, generatedCount }
+            : {}),
           agent: isAgentStream
             ? reduceCanvasAgentRuntime(running.agent, nodeOutput)
             : running.agent,
@@ -4802,6 +4959,14 @@ function nodeEnergonOutput(node: SpaceCanvasNode) {
   return nodeContextOutput(node);
 }
 
+function storyboardNodeOutput(node: SpaceCanvasNode) {
+  return [
+    node.resultOutput,
+    node.asset?.version?.content,
+    nodeEnergonOutput(node),
+  ];
+}
+
 function fixedTiptapRichDocumentFromNode(node: SpaceCanvasNode) {
   return firstTiptapRichDocument(
     node.asset?.version?.content,
@@ -5141,86 +5306,6 @@ function collectTiptapTextValues(value: any, seen = new Set<any>()): string[] {
     values.push(...collectTiptapTextValues(value.content, seen));
   }
   return values;
-}
-
-function parseMaybeEmbeddedJSON(value: string): any {
-  const text = String(value || "").trim();
-  const parsed = parseStructuredJSONText(text);
-  if (parsed !== text) return parsed;
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) {
-    return value;
-  }
-  const sliced = text.slice(start, end + 1);
-  const slicedParsed = parseStructuredJSONText(sliced);
-  return slicedParsed === sliced ? value : slicedParsed;
-}
-
-function parseStructuredJSONText(value: string): any {
-  const text = String(value || "").trim();
-  const repaired = repairJSONControlChars(text);
-  const unescaped = unescapeEscapedJSONQuotes(repaired);
-  for (const source of uniqueNonEmptyStrings([text, repaired, unescaped])) {
-    const parsed = parseMaybeJSON(source);
-    if (parsed !== source) {
-      return parsed;
-    }
-  }
-  return value;
-}
-
-function repairJSONControlChars(value: string) {
-  let result = "";
-  let inString = false;
-  let escaped = false;
-  for (const char of value) {
-    if (escaped) {
-      result += char;
-      escaped = false;
-      continue;
-    }
-    if (char === "\\") {
-      result += char;
-      escaped = inString;
-      continue;
-    }
-    if (char === '"') {
-      inString = !inString;
-      result += char;
-      continue;
-    }
-    if (inString && char.charCodeAt(0) < 32) {
-      result += escapeJSONControlChar(char);
-      continue;
-    }
-    result += char;
-  }
-  return result;
-}
-
-function escapeJSONControlChar(value: string) {
-  switch (value) {
-    case "\n":
-      return "\\n";
-    case "\r":
-      return "\\r";
-    case "\t":
-      return "\\t";
-    default:
-      return `\\u${value.charCodeAt(0).toString(16).padStart(4, "0")}`;
-  }
-}
-
-function unescapeEscapedJSONQuotes(value: string) {
-  const text = value.trim();
-  if (
-    !text.includes('\\"') ||
-    (!text.startsWith("{") && !text.startsWith("["))
-  ) {
-    return value;
-  }
-  return text.replace(/\\"/g, '"');
 }
 
 function uniqueNonEmptyStrings(values: string[]) {
@@ -6595,21 +6680,6 @@ function valueAtPath(source: Record<string, any>, path: readonly string[]) {
   return current;
 }
 
-function parseMaybeJSON(value: any) {
-  if (typeof value !== "string") {
-    return value;
-  }
-  const text = value.trim();
-  if (!looksLikeJSONText(text)) {
-    return value;
-  }
-  try {
-    return JSON.parse(text);
-  } catch {
-    return value;
-  }
-}
-
 function parseAgentResultBlock(value: any) {
   if (typeof value !== "string") {
     return value;
@@ -6833,13 +6903,7 @@ function canConnectNodes(
   sourceNode?: SpaceCanvasNode,
   targetNode?: SpaceCanvasNode,
 ) {
-  if (!sourceNode || !targetNode) {
-    return false;
-  }
-  if (sourceNode.id === targetNode.id) {
-    return false;
-  }
-  return true;
+  return canConnectCanvasNodes(sourceNode, targetNode);
 }
 
 function connectedNodeEdgeEndpoints(
@@ -6949,6 +7013,7 @@ function replaceAssetNode(
     y: currentNode.y,
     width: currentNode.width || nextNode.width,
     height: currentNode.height || nextNode.height,
+    groupId: currentNode.groupId,
     local: currentNode.local !== false,
   };
 }
@@ -6973,6 +7038,8 @@ function flowEdgesToCanvasEdges(edges: Edge[]): SpaceCanvasEdge[] {
       id: String(edge.id || `edge-${edge.source}-${edge.target}`),
       from: String(edge.source || ""),
       to: String(edge.target || ""),
+      logicalFrom: String(edge.data?.logicalFrom || "") || undefined,
+      logicalTo: String(edge.data?.logicalTo || "") || undefined,
     }))
     .filter((edge) => edge.from && edge.to && edge.from !== edge.to);
 }
@@ -7119,7 +7186,9 @@ function sameCanvasEdges(left: SpaceCanvasEdge[], right: SpaceCanvasEdge[]) {
           edge === candidate ||
           (edge.id === candidate.id &&
             edge.from === candidate.from &&
-            edge.to === candidate.to)
+            edge.to === candidate.to &&
+            (edge.logicalFrom || "") === (candidate.logicalFrom || "") &&
+            (edge.logicalTo || "") === (candidate.logicalTo || ""))
         );
       }))
   );
@@ -7425,6 +7494,7 @@ function NodeSelectionOverlays({
   const resizable =
     node.type === "asset" ||
     node.type === "power" ||
+    node.type === "group" ||
     (node.type === "function" &&
       node.functionOption?.key === "display" &&
       shouldRenderFunctionResultCard(node));
@@ -7438,6 +7508,9 @@ function NodeSelectionOverlays({
     />
   );
   if (node.type === "asset") {
+    return resizer;
+  }
+  if (node.type === "group") {
     return resizer;
   }
   if (node.type === "function") {
@@ -9122,49 +9195,84 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
   const onOpenFeedbackRecord = (data as any).onOpenFeedbackRecord as
     | ((node: SpaceCanvasNode, record: NodeFeedbackRecord) => void)
     | undefined;
-  const isStoryboardPower =
-    node.type === "power" &&
-    isStoryboardKind(node.power?.kind || node.kind);
-  const storyboardEditable =
-    isStoryboardPower && !isActiveRunningNode(runningNode);
-  const saveStoryboard = useCallback(
-    async (storyboard: StoryboardDocument) => {
-      if (!onNodeResult) {
-        throw new Error("当前节点缺少结果保存入口");
-      }
-      const asset = sourceNode.asset;
-      const assetId = Number(asset?.id || 0);
-      const versionId = Number(asset?.version?.id || asset?.version_id || 0);
-      if (!projectId || !assetId || !versionId) {
-        onNodeResult(sourceNode.id, {
-          resultOutput: storyboard,
-          description: storyboardSummary(storyboard),
-        });
-        return;
-      }
-      try {
-        const savedAsset = await saveSpaceAssetEditVersion({
-          projectId,
-          assetId,
-          versionId,
-          content: storyboard,
-        });
-        const normalizedAsset = mergeProjectAssetVersionHistory(
-          savedAsset,
-          asset,
-        );
-        onNodeResult(sourceNode.id, {
-          ...buildAssetVersionNodePatch(sourceNode, normalizedAsset),
-          description: storyboardSummary(storyboard),
-        });
-        onAssetCreated?.(normalizedAsset);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "保存分镜失败");
-        throw err;
-      }
-    },
-    [onAssetCreated, onNodeResult, projectId, sourceNode],
-  );
+  const powerPresentation =
+    node.type === "power"
+      ? resolvePowerPresentation(node.power, node.kind, node.outputType)
+      : null;
+  const isStoryboardPower = powerPresentation?.viewMode === "storyboard";
+
+  if (node.type === "group") {
+    const members = ((data as any).groupMembers || []) as SpaceCanvasNode[];
+    const groupRuntime = summarizeCanvasGroupRuntime({
+      members,
+      runningNodes: canvasRunningNodes,
+      groupState: runningNode,
+      hasResult: nodeHasResultContent,
+    });
+    const onRunBackendNode = (data as any).onRunBackendNode as
+      | BackendNodeRunner
+      | undefined;
+    const runGroup = onRunBackendNode
+      ? () => {
+          setRunningNode?.((current) => ({
+            ...current,
+            [node.id]: {
+              nodeId: node.id,
+              title: node.title,
+              startedAt: Date.now(),
+              progress: 8,
+              status: "running",
+            },
+          }));
+          void onRunBackendNode(sourceNode).catch((error) => {
+            setRunningNode?.((current) => ({
+              ...current,
+              [node.id]: {
+                ...(current[node.id] || {
+                  nodeId: node.id,
+                  title: node.title,
+                  startedAt: Date.now(),
+                  progress: 8,
+                }),
+                status: "error",
+              },
+            }));
+            toast.error(error instanceof Error ? error.message : "分组运行失败");
+          });
+        }
+      : undefined;
+    return (
+      <CanvasGroupNodeView
+        node={node}
+        memberCount={groupRuntime.memberCount}
+        runnableCount={groupRuntime.runnableCount}
+        completedCount={groupRuntime.completedCount}
+        failedCount={groupRuntime.failedCount}
+        status={groupRuntime.status}
+        selected={selected}
+        onRename={
+          onNodeResult
+            ? (title) => onNodeResult(node.id, { title })
+            : undefined
+        }
+        onRun={runGroup}
+      >
+        <NodeHandle
+          id="input-0"
+          type="target"
+          position={Position.Left}
+          className="is-in"
+        />
+        <NodeHandle
+          id="output-0"
+          type="source"
+          position={Position.Right}
+          className="is-out"
+        />
+        <NodeSelectionOverlays node={node} selected={selected} />
+      </CanvasGroupNodeView>
+    );
+  }
 
   // 1. circular agent representation
   if (node.type === "agent") {
@@ -9773,10 +9881,17 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
           <PowerIcon
             power={node.power}
             kind={node.kind}
+            outputType={node.outputType}
             size={13}
             className="ws-icon-violet"
           />
           <span>{node.title}</span>
+          {powerPresentation?.outputName &&
+          powerPresentation.outputName !== node.title ? (
+            <small className="ws-node-power-output">
+              {powerPresentation.outputName}
+            </small>
+          ) : null}
         </div>
         <div className="ws-node-power-card">
           {isPowerRunning ? (
@@ -9810,10 +9925,14 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
           ) : null}
           {isStoryboardPower ? (
             <StoryboardNodeContent
-              output={nodeEnergonOutput(node)}
+              output={
+                isPowerRunning
+                  ? runningNode?.streamText || ""
+                  : storyboardNodeOutput(node)
+              }
               status={storyboardStatus}
-              editable={storyboardEditable}
-              onSave={storyboardEditable ? saveStoryboard : undefined}
+              started={Boolean(runningNode?.streamStarted)}
+              generatedShotCount={runningNode?.generatedCount || 0}
               onOpenDetail={
                 storyboardHasResult && onShowNodeDetail
                   ? () => onShowNodeDetail(node)
@@ -10045,6 +10164,7 @@ function PowerNodeEmptyState() {
 }
 
 function miniMapNodeColor(node: SpaceCanvasNode) {
+  if (node.type === "group") return "#e85d75";
   if (node.type === "asset") return "#23c483";
   if (node.type === "power") return "#8b5cf6";
   if (node.type === "agent") return "#f59e0b";

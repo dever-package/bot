@@ -1,6 +1,7 @@
 import { isPlainRecord } from "@/lib/runtime-stream-output";
 import { streamValueText as valueText } from "@/lib/stream";
 import { normalizeAgentChatOutput, type AgentChatOutput } from "./output";
+import { readAgentChatAspectRatio } from "./media";
 
 export type AgentChatActivity = {
   id: string;
@@ -58,7 +59,7 @@ export function readAgentChatActivity(
     error: valueText(output.error),
     progress: activityProgress(output.progress ?? meta.progress ?? meta.percent),
     count: activityCount(meta.tool_count),
-    aspectRatio: activityAspectRatio(Object.values(toolParams)),
+    aspectRatio: readAgentChatAspectRatio(Object.values(toolParams)),
     anchorText: valueText(output.anchor_text),
     output,
   };
@@ -230,17 +231,6 @@ function activityCount(value: unknown) {
     return 1;
   }
   return Math.min(8, Math.floor(count));
-}
-
-function activityAspectRatio(values: unknown[]) {
-  for (const value of values) {
-    const text = valueText(value);
-    const match = text.match(/^(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)$/);
-    if (match && Number(match[1]) > 0 && Number(match[2]) > 0) {
-      return `${match[1]} / ${match[2]}`;
-    }
-  }
-  return "";
 }
 
 function mergeProgress(current: number | null, incoming: number | null) {

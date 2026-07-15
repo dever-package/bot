@@ -11,6 +11,24 @@ import (
 
 type repository struct{}
 
+func (repository) byRunBatch(ctx context.Context, runID uint64, batchKey string) []agentmodel.Artifact {
+	batchKey = strings.TrimSpace(batchKey)
+	if runID == 0 || batchKey == "" {
+		return nil
+	}
+	rows := agentmodel.NewArtifactModel().Select(ctx, map[string]any{
+		"run_id":    runID,
+		"batch_key": batchKey,
+	}, map[string]any{"order": "main.id asc"})
+	result := make([]agentmodel.Artifact, 0, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			result = append(result, *row)
+		}
+	}
+	return result
+}
+
 func (repository) nextDisplayNo(ctx context.Context, sessionID uint64, kind string) int {
 	rows := agentmodel.NewArtifactModel().Select(ctx, map[string]any{
 		"session_id": sessionID,
@@ -85,4 +103,28 @@ func (repository) byMessages(ctx context.Context, messageIDs []uint64) []agentmo
 		}
 	}
 	return result
+}
+
+func (repository) byBlocks(ctx context.Context, blockIDs []uint64) []agentmodel.Artifact {
+	blockIDs = uniqueIDs(blockIDs)
+	if len(blockIDs) == 0 {
+		return []agentmodel.Artifact{}
+	}
+	rows := agentmodel.NewArtifactModel().Select(ctx, map[string]any{"block_id": blockIDs}, map[string]any{
+		"order": "main.block_id asc,main.id asc",
+	})
+	result := make([]agentmodel.Artifact, 0, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			result = append(result, *row)
+		}
+	}
+	return result
+}
+
+func (repository) byBlock(ctx context.Context, blockID uint64) []agentmodel.Artifact {
+	if blockID == 0 {
+		return []agentmodel.Artifact{}
+	}
+	return repository{}.byBlocks(ctx, []uint64{blockID})
 }

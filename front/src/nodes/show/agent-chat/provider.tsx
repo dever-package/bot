@@ -81,5 +81,6 @@ function messageMetadata(message: ChatMessage) {
     activities: message.activities || [],
     sourceText: message.text,
     content: message.content,
+    document: message.document,
   };
 }

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	energonmodel "github.com/dever-package/bot/model/energon"
 	teammodel "github.com/dever-package/bot/model/team"
 )
 
@@ -45,6 +46,7 @@ func (s Service) Workspace(ctx context.Context, teamID uint64) (map[string]any, 
 		"teams":              s.publishedTeamOptions(ctx),
 		"powers":             powers,
 		"power_kinds":        powerKindOptions(powers),
+		"output_types":       energonmodel.OutputTypeSpecs(),
 		"role_types":         roleTypes(),
 		"node_types":         nodeTypes(),
 		"edge_conditions":    edgeConditions(),

@@ -203,12 +203,18 @@ func (s Service) StopRun(ctx context.Context, projectID uint64, runID uint64, re
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
+	if run := findWorkspaceRunForStatus(ctx, projectID, runID, requestID); run != nil {
+		return NewWorkspaceService().StopCanvasRun(ctx, run)
+	}
 	return s.team.StopProjectRun(ctx, projectID, runID, requestID)
 }
 
 func (s Service) SubmitApproval(ctx context.Context, projectID uint64, approvalID uint64, decision string, comment string, data map[string]any) (map[string]any, error) {
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
+	}
+	if workspaceApprovalRunCanceled(ctx, projectID, approvalID) {
+		return nil, fmt.Errorf("运行已取消，不能继续提交反馈")
 	}
 	result, err := s.team.SubmitProjectApproval(ctx, projectID, approvalID, decision, comment, data)
 	if err != nil {

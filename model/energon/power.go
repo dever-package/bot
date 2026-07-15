@@ -12,6 +12,7 @@ type Power struct {
 	Key        string    `dorm:"type:varchar(128);not null;comment:标识"`
 	Name       string    `dorm:"type:varchar(128);not null;comment:名称"`
 	Icon       string    `dorm:"type:varchar(64);not null;default:'';comment:图标"`
+	OutputType string    `json:"output_type" dorm:"type:varchar(64);not null;default:general;comment:输出类型"`
 	Kind       string    `dorm:"type:varchar(64);not null;comment:类型"`
 	Prompt     string    `dorm:"type:text;not null;default:'';comment:设定提示词"`
 	SourceRule int16     `dorm:"type:smallint;not null;default:1;comment:来源规则"`
@@ -20,15 +21,13 @@ type Power struct {
 }
 
 type PowerIndex struct {
-	Key        struct{} `unique:"key"`
-	CateStatus struct{} `index:"cate_id,status"`
-	KindStatus struct{} `index:"kind,status"`
+	Key              struct{} `unique:"key"`
+	CateStatus       struct{} `index:"cate_id,status"`
+	KindStatus       struct{} `index:"kind,status"`
+	OutputKindStatus struct{} `index:"output_type,kind,status"`
 }
 
-const (
-	DefaultLLMPowerID   uint64 = 1
-	PowerKindStoryboard        = "storyboard"
-)
+const DefaultLLMPowerID uint64 = 1
 
 var (
 	powerSeed = []map[string]any{
@@ -38,6 +37,7 @@ var (
 			"key":         "llm",
 			"name":        "LLM",
 			"icon":        "file-text",
+			"output_type": OutputTypeGeneral,
 			"kind":        "text",
 			"prompt":      "",
 			"source_rule": 1,
@@ -47,7 +47,6 @@ var (
 
 	kindOptions = []map[string]any{
 		{"id": "text", "value": "文本"},
-		{"id": PowerKindStoryboard, "value": "分镜脚本"},
 		{"id": "image", "value": "图片"},
 		{"id": "video", "value": "视频"},
 		{"id": "audio", "value": "音频"},
@@ -91,6 +90,7 @@ func NewPowerModel() *orm.Model[Power] {
 		Order:    "id asc",
 		Database: "default",
 		Options: map[string]any{
+			"output_type": OutputTypeOptions(),
 			"kind":        kindOptions,
 			"source_rule": sourceRuleOptions,
 			"status":      statusOptions,

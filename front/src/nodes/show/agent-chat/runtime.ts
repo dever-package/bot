@@ -1,4 +1,4 @@
-import { request } from "@dever/front-plugin";
+import { requestRaw } from "@dever/front-plugin";
 import {
   isPlainRecord,
   normalizeRuntimeFrameOutput,
@@ -20,6 +20,7 @@ import {
 export type AgentChatRunStatus = {
   requestID: string;
   status: "running" | "success" | "fail" | "canceled" | string;
+  runVersion: number;
   text: string;
   output: AgentChatOutput;
   error: string;
@@ -35,6 +36,7 @@ export type AgentChatRunFrame = {
   activity?: AgentChatActivity;
   error: string;
   cancelable: boolean | null;
+  runVersion: number;
   finished: boolean;
   failed: boolean;
 };
@@ -43,7 +45,7 @@ export async function loadAgentChatRunStatus(
   api: string,
   requestID: string,
 ): Promise<AgentChatRunStatus> {
-  const result = await request(api, "get", { request_id: requestID });
+  const result = await requestRaw(api, "get", { request_id: requestID });
   if (!isPlainRecord(result)) {
     throw new Error("读取智能体运行状态失败");
   }
@@ -60,6 +62,7 @@ export async function loadAgentChatRunStatus(
   return {
     requestID: valueText(run.request_id) || requestID,
     status: valueText(run.status).toLowerCase(),
+    runVersion: Number(run.version || 0),
     text: valueText(output.text),
     output,
     error: valueText(run.error || output.error),
@@ -76,6 +79,7 @@ export function readAgentChatRunFrame(
   const finished = frame?.type === "result";
   const failed = Number(frame?.status || 0) === 2;
   const isDelta = event === "delta" || (!event && Boolean(text) && !finished);
+  const meta = isPlainRecord(output.meta) ? output.meta : {};
   return {
     requestID: valueText(frame?.request_id),
     streamID: valueText(frame?.stream_id),
@@ -86,6 +90,7 @@ export function readAgentChatRunFrame(
     activity: readAgentChatActivity(output),
     error: valueText(output.error || (failed ? frame?.msg : "")),
     cancelable: resolveRuntimeFrameCancelable(frame),
+    runVersion: Number(meta.run_version || 0),
     finished,
     failed,
   };

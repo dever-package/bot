@@ -1,6 +1,7 @@
 import { memo, type ComponentProps } from "react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import remarkGfm from "remark-gfm";
+import { EnergonContentView } from "@/components/energon/content-view";
 import { cn } from "@/lib/utils";
 
 type MarkdownComponents = NonNullable<
@@ -19,6 +20,34 @@ const markdownComponents: MarkdownComponents = {
 };
 
 const markdownPlugins = [remarkGfm];
+
+export const AgentChatMarkdown = memo(function AgentChatMarkdown({
+  text,
+  streaming = false,
+  error = false,
+  className,
+}: {
+  text: string;
+  streaming?: boolean;
+  error?: boolean;
+  className?: string;
+}) {
+  if (!text) {
+    return null;
+  }
+  return (
+    <EnergonContentView
+      output={{ text: normalizeMarkdownSource(text) }}
+      streaming={streaming}
+      markdownClassName={markdownClassName}
+      className={cn(
+        "agent-chat-markdown",
+        error && "[&_*]:text-destructive",
+        className,
+      )}
+    />
+  );
+});
 
 function normalizeMarkdownSource(value: unknown) {
   return String(value || "")

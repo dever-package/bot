@@ -14,6 +14,7 @@ export type AgentChatArtifact = {
   previewUrl: string;
   mime: string;
   size: number;
+  meta: Record<string, unknown>;
 };
 
 export function readAgentChatArtifacts(value: unknown): AgentChatArtifact[] {
@@ -70,6 +71,7 @@ function readArtifact(value: unknown): AgentChatArtifact | null {
     previewUrl: textValue(value.preview_url || value.url),
     mime: textValue(value.mime),
     size: positiveNumber(value.size),
+    meta: isPlainRecord(value.meta) ? { ...value.meta } : {},
   };
 }
 

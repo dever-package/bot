@@ -24,17 +24,15 @@
             "type": "container",
             "className": "rounded-lg border bg-background p-4"
           },
-          "param-card": {
+          "detail-card": {
             "type": "container",
-            "className": "rounded-lg border bg-background p-4"
-          },
-          "channel-card": {
-            "type": "container",
-            "className": "rounded-lg border bg-background p-4"
-          },
-          "result-card": {
-            "type": "container",
-            "className": "rounded-lg border bg-background p-4"
+            "className": "rounded-lg border bg-background p-4",
+            "children": {
+              "detail-actions": {
+                "type": "row",
+                "className": "flex-wrap items-center gap-2"
+              }
+            }
           },
           "feedback-shell": {
             "type": "container"
@@ -291,46 +289,72 @@
         }
       }
     ],
-    "param-card": [
+    "detail-card": [
       {
         "type": "show-title",
-        "value": "page.paramTitle",
+        "value": "page.detailTitle",
         "meta": {
           "variant": "section"
         }
-      },
-      {
-        "type": "show-base",
-        "value": "requestParams",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
       }
     ],
-    "channel-card": [
+    "detail-actions": [
       {
-        "type": "show-title",
-        "value": "page.channelTitle",
+        "type": "show-button",
+        "name": "能力请求参数",
+        "icon": "braces",
         "meta": {
-          "variant": "section"
+          "variant": "outline",
+          "size": "sm",
+          "description": "查看调用能力时传入的完整参数"
+        },
+        "action": {
+          "click": [
+            {
+              "type": "modal",
+              "key": "dialog.requestParams",
+              "value": true
+            }
+          ]
         }
       },
       {
-        "type": "show-base",
-        "value": "channelRequest",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
-      }
-    ],
-    "result-card": [
-      {
-        "type": "show-title",
-        "value": "page.resultTitle",
+        "type": "show-button",
+        "name": "渠道请求参数",
+        "icon": "send",
         "meta": {
-          "variant": "section"
+          "variant": "outline",
+          "size": "sm",
+          "description": "查看实际发送给来源渠道的完整请求"
+        },
+        "action": {
+          "click": [
+            {
+              "type": "modal",
+              "key": "dialog.channelRequest",
+              "value": true
+            }
+          ]
         }
       },
       {
-        "type": "show-base",
-        "value": "form.result",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+        "type": "show-button",
+        "name": "响应数据",
+        "icon": "file-json",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "description": "查看完整响应或失败信息"
+        },
+        "action": {
+          "click": [
+            {
+              "type": "modal",
+              "key": "dialog.result",
+              "value": true
+            }
+          ]
+        }
       }
     ],
     "feedback-shell": [
@@ -347,13 +371,82 @@
             "confirm": false
           }
         }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.requestParams",
+          "title": "能力请求参数",
+          "description": "调用 Energon 时传入的 set、input、history 和 options。",
+          "size": "xl",
+          "formSection": "request-param-content",
+          "bodyClassName": "max-h-[65vh] overflow-y-auto px-6 py-2",
+          "assistant": false,
+          "footer": {
+            "close": true,
+            "confirm": false
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.channelRequest",
+          "title": "渠道请求参数",
+          "description": "转换后实际发送给来源渠道的 url、method、headers 和 body。",
+          "size": "xl",
+          "formSection": "channel-request-content",
+          "bodyClassName": "max-h-[65vh] overflow-y-auto px-6 py-2",
+          "assistant": false,
+          "footer": {
+            "close": true,
+            "confirm": false
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.result",
+          "title": "响应数据",
+          "description": "本次调用的完整响应或失败信息。",
+          "size": "xl",
+          "formSection": "result-content",
+          "bodyClassName": "max-h-[65vh] overflow-y-auto px-6 py-2",
+          "assistant": false,
+          "footer": {
+            "close": true,
+            "confirm": false
+          }
+        }
       }
     ],
     "attempt-error-content": [
       {
         "type": "show-base",
         "value": "actionTarget.attemptError",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+        "className": "rounded-md bg-muted/30 p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "request-param-content": [
+      {
+        "type": "show-base",
+        "value": "requestParams",
+        "className": "rounded-md bg-muted/30 p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "channel-request-content": [
+      {
+        "type": "show-base",
+        "value": "channelRequest",
+        "className": "rounded-md bg-muted/30 p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "result-content": [
+      {
+        "type": "show-base",
+        "value": "form.result",
+        "className": "rounded-md bg-muted/30 p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-all"
       }
     ]
   },
@@ -371,17 +464,9 @@
         "title": "调用尝试",
         "description": "同一个 RequestID 下按实际调用顺序展示所有能力来源，前一个失败后才会尝试后一个。"
       },
-      "paramTitle": {
-        "title": "本次能力请求参数",
-        "description": "这里记录调用 Energon 时传入的 set、input、history、options。"
-      },
-      "channelTitle": {
-        "title": "渠道请求参数",
-        "description": "这里记录转换后实际发给来源渠道的 url、method、headers、body。"
-      },
-      "resultTitle": {
-        "title": "响应数据",
-        "description": "成功时展示响应，失败时展示失败环节和错误信息。"
+      "detailTitle": {
+        "title": "完整内容",
+        "description": "长参数和响应按需打开，页面只保留便于排查的摘要。"
       }
     },
     "attempts": {
@@ -400,7 +485,10 @@
   },
   "state": {
     "dialog": {
-      "attemptError": false
+      "attemptError": false,
+      "requestParams": false,
+      "channelRequest": false,
+      "result": false
     }
   },
   "action": {}

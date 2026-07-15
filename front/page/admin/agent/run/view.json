@@ -16,29 +16,22 @@
             "type": "container",
             "className": "rounded-lg border bg-background p-4"
           },
-          "input-card": {
+          "detail-card": {
             "type": "container",
-            "className": "rounded-lg border bg-background p-4"
-          },
-          "skills-card": {
-            "type": "container",
-            "className": "rounded-lg border bg-background p-4"
-          },
-          "context-card": {
-            "type": "container",
-            "className": "rounded-lg border bg-background p-4"
-          },
-          "output-card": {
-            "type": "container",
-            "className": "rounded-lg border bg-background p-4"
+            "className": "rounded-lg border bg-background p-4",
+            "children": {
+              "detail-actions": {
+                "type": "row",
+                "className": "flex-wrap items-center gap-2"
+              }
+            }
           },
           "steps-card": {
             "type": "container",
             "className": "rounded-lg border bg-background p-4"
           },
-          "error-card": {
-            "type": "container",
-            "className": "rounded-lg border bg-background p-4"
+          "feedback-shell": {
+            "type": "container"
           }
         }
       }
@@ -124,60 +117,116 @@
         }
       }
     ],
-    "input-card": [
+    "detail-card": [
       {
         "type": "show-title",
-        "value": "page.inputTitle",
+        "value": "page.detailTitle",
         "meta": {
           "variant": "section"
         }
-      },
-      {
-        "type": "show-base",
-        "value": "form.input",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
       }
     ],
-    "skills-card": [
+    "detail-actions": [
       {
-        "type": "show-title",
-        "value": "page.skillsTitle",
+        "type": "show-button",
+        "name": "输入内容",
+        "icon": "message-square-text",
         "meta": {
-          "variant": "section"
+          "variant": "outline",
+          "size": "sm",
+          "description": "查看本次运行的原始输入"
+        },
+        "action": {
+          "click": [
+            {
+              "type": "modal",
+              "key": "dialog.input",
+              "value": true
+            }
+          ]
         }
       },
       {
-        "type": "show-base",
-        "value": "form.skills",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
-      }
-    ],
-    "context-card": [
-      {
-        "type": "show-title",
-        "value": "page.contextTitle",
+        "type": "show-button",
+        "name": "已加载技能",
+        "icon": "blocks",
         "meta": {
-          "variant": "section"
+          "variant": "outline",
+          "size": "sm",
+          "description": "查看本次运行加载的技能"
+        },
+        "action": {
+          "click": [
+            {
+              "type": "modal",
+              "key": "dialog.skills",
+              "value": true
+            }
+          ]
         }
       },
       {
-        "type": "show-base",
-        "value": "form.runtime_context",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
-      }
-    ],
-    "output-card": [
-      {
-        "type": "show-title",
-        "value": "page.outputTitle",
+        "type": "show-button",
+        "name": "运行上下文",
+        "icon": "braces",
         "meta": {
-          "variant": "section"
+          "variant": "outline",
+          "size": "sm",
+          "description": "查看发给模型的完整运行上下文"
+        },
+        "action": {
+          "click": [
+            {
+              "type": "modal",
+              "key": "dialog.context",
+              "value": true
+            }
+          ]
         }
       },
       {
-        "type": "show-base",
-        "value": "form.output",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+        "type": "show-button",
+        "name": "输出内容",
+        "icon": "file-text",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "description": "查看本次运行的完整输出"
+        },
+        "action": {
+          "click": [
+            {
+              "type": "modal",
+              "key": "dialog.output",
+              "value": true
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "错误信息",
+        "icon": "triangle-alert",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "description": "查看本次运行的错误详情",
+          "showWhen": [
+            {
+              "path": "form.error",
+              "operator": "notEmpty"
+            }
+          ]
+        },
+        "action": {
+          "click": [
+            {
+              "type": "modal",
+              "key": "dialog.error",
+              "value": true
+            }
+          ]
+        }
       }
     ],
     "steps-card": [
@@ -213,23 +262,169 @@
             {
               "value": "created_at",
               "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "eye",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看步骤详情",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.viewStepId",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.step",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
             }
           ]
         }
       }
     ],
-    "error-card": [
+    "feedback-shell": [
       {
-        "type": "show-title",
-        "value": "page.errorTitle",
+        "type": "feedback-modal",
         "meta": {
-          "variant": "section"
+          "stateKey": "dialog.input",
+          "title": "输入内容",
+          "description": "运行时传给 Agent 的原始输入。",
+          "size": "xl",
+          "formSection": "input-content",
+          "bodyClassName": "max-h-[65vh] overflow-y-auto px-6 py-2",
+          "assistant": false,
+          "footer": {
+            "close": true,
+            "confirm": false
+          }
         }
       },
       {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.skills",
+          "title": "已加载技能",
+          "description": "本次运行从技能方案中选择并读取的技能。",
+          "size": "xl",
+          "formSection": "skills-content",
+          "bodyClassName": "max-h-[65vh] overflow-y-auto px-6 py-2",
+          "assistant": false,
+          "footer": {
+            "close": true,
+            "confirm": false
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.context",
+          "title": "运行上下文",
+          "description": "运行时组装后发给模型的完整上下文。",
+          "size": "xl",
+          "formSection": "context-content",
+          "bodyClassName": "max-h-[65vh] overflow-y-auto px-6 py-2",
+          "assistant": false,
+          "footer": {
+            "close": true,
+            "confirm": false
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.output",
+          "title": "输出内容",
+          "description": "Agent 完成本次运行后生成的完整内容。",
+          "size": "xl",
+          "formSection": "output-content",
+          "bodyClassName": "max-h-[65vh] overflow-y-auto px-6 py-2",
+          "assistant": false,
+          "footer": {
+            "close": true,
+            "confirm": false
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.error",
+          "title": "错误信息",
+          "description": "本次运行失败时记录的错误详情。",
+          "size": "xl",
+          "formSection": "error-content",
+          "bodyClassName": "max-h-[65vh] overflow-y-auto px-6 py-2",
+          "assistant": false,
+          "footer": {
+            "close": true,
+            "confirm": false
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.step",
+          "pageRoute": "/bot/agent/step/view",
+          "description": "查看当前步骤的可读内容和原始数据。",
+          "size": "xl",
+          "bodyClassName": "max-h-[65vh] overflow-y-auto px-6 py-2",
+          "assistant": false,
+          "pageRouteQuery": {
+            "id": "data.actionTarget.viewStepId"
+          }
+        }
+      }
+    ],
+    "input-content": [
+      {
+        "type": "show-base",
+        "value": "form.input",
+        "className": "rounded-md bg-muted/30 p-4 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "skills-content": [
+      {
+        "type": "show-base",
+        "value": "form.skills",
+        "className": "rounded-md bg-muted/30 p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "context-content": [
+      {
+        "type": "show-base",
+        "value": "form.runtime_context",
+        "className": "rounded-md bg-muted/30 p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "output-content": [
+      {
+        "type": "show-base",
+        "value": "form.output",
+        "className": "rounded-md bg-muted/30 p-4 text-sm leading-6 whitespace-pre-wrap break-all"
+      }
+    ],
+    "error-content": [
+      {
         "type": "show-base",
         "value": "form.error",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+        "className": "rounded-md bg-destructive/5 p-4 font-mono text-xs leading-6 text-destructive whitespace-pre-wrap break-all"
       }
     ]
   },
@@ -239,35 +434,31 @@
         "title": "运行信息",
         "description": "展示本次运行的智能体、状态、步骤数与耗时。"
       },
-      "inputTitle": {
-        "title": "输入内容",
-        "description": "运行时传给 Agent 的原始输入。"
-      },
-      "skillsTitle": {
-        "title": "已加载技能",
-        "description": "本次运行从技能方案中选择并读取正文的技能列表。"
-      },
-      "contextTitle": {
-        "title": "运行上下文",
-        "description": "运行时组装后发给 Energon LLM 能力的设定、资料、能力和临时上下文。"
-      },
-      "outputTitle": {
-        "title": "输出内容",
-        "description": "Agent 完成本次运行后生成的内容。"
+      "detailTitle": {
+        "title": "运行内容",
+        "description": "输入、上下文和输出按需打开，页面优先展示运行状态与执行过程。"
       },
       "stepsTitle": {
         "title": "执行步骤",
         "description": "按执行顺序展示本次运行产生的输入、技能目录、运行上下文、输出、警告或错误。"
-      },
-      "errorTitle": {
-        "title": "错误信息",
-        "description": "失败时记录的错误详情。"
       }
     },
     "form": {
       "steps": []
+    },
+    "actionTarget": {
+      "viewStepId": ""
     }
   },
-  "state": {},
+  "state": {
+    "dialog": {
+      "input": false,
+      "skills": false,
+      "context": false,
+      "output": false,
+      "error": false,
+      "step": false
+    }
+  },
   "action": {}
 }

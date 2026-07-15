@@ -62,6 +62,7 @@ type Resolved struct {
 	Title     string
 	Text      string
 	Media     []Media
+	Output    map[string]any
 }
 
 type Result struct {

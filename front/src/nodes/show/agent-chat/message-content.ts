@@ -1,5 +1,7 @@
 import type { ThreadMessageLike } from "@assistant-ui/react";
 import type { AgentChatActivity } from "./activity";
+import { artifactDisplayOutput } from "./artifact";
+import { agentChatDisplayOutput } from "./message-output";
 import type { ChatMessage } from "./types";
 
 type MessageContent = Exclude<ThreadMessageLike["content"], string>;
@@ -53,6 +55,32 @@ export function buildAgentChatContentSegments(
   }
   appendTextSegment(content, text.slice(cursor));
   return content;
+}
+
+export function buildAgentChatPreviewContent(
+  sourceText: string,
+  activities: AgentChatActivity[],
+) {
+  const content: unknown[] = [];
+  let hasActivityOutput = false;
+  for (const segment of buildAgentChatContentSegments(sourceText, activities)) {
+    if (segment.type === "text") {
+      content.push(segment.text);
+      continue;
+    }
+    const artifactOutput = artifactDisplayOutput(segment.activity.output);
+    const output = agentChatDisplayOutput(
+      Object.keys(artifactOutput).length > 0
+        ? artifactOutput
+        : segment.activity.output,
+    );
+    if (output.length === 0) {
+      continue;
+    }
+    hasActivityOutput = true;
+    content.push(...output);
+  }
+  return hasActivityOutput ? content : [];
 }
 
 function appendTextSegment(content: AgentChatContentSegment[], text: string) {

@@ -2,18 +2,20 @@ package loop
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/shemic/dever/server"
 
+	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimeartifact "github.com/dever-package/bot/service/agent/runtime/artifact"
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
 	runtimecontext "github.com/dever-package/bot/service/agent/runtime/context"
 	runtimeinput "github.com/dever-package/bot/service/agent/runtime/input"
 	runtimereference "github.com/dever-package/bot/service/agent/runtime/reference"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
+	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
@@ -21,6 +23,7 @@ import (
 )
 
 const (
+	runStatusPending  = "pending"
 	runStatusRunning  = "running"
 	runStatusSuccess  = "success"
 	runStatusFail     = "fail"
@@ -53,16 +56,34 @@ type Service struct {
 	chat       runtimechat.Service
 	streams    frontstream.Service
 	runs       *runRegistry
+	dispatcher RunDispatcher
 }
 
 func NewService() Service {
+	return NewServiceWithDispatcherFactory(defaultRunDispatcher)
+}
+
+// NewServiceWithDispatcherFactory gives an adapter both stable runtime
+// contracts it needs: the executor activity and the durable backlog used for
+// startup reconciliation. Passing nil keeps the built-in database scheduler.
+func NewServiceWithDispatcherFactory(factory RunDispatcherFactory) Service {
+	service := newService()
+	if factory == nil {
+		factory = defaultRunDispatcher
+	}
+	service.dispatcher = factory(service, NewRunBacklog())
+	return service
+}
+
+func newService() Service {
 	gateway := energonservice.NewGatewayService()
+	runtimeartifact.StartJobScheduler()
 	return Service{
 		repository: newRepository(),
 		gateway:    gateway,
 		context:    runtimecontext.NewAssembler(),
 		chat:       runtimechat.NewServiceWithGateway(gateway),
-		streams:    frontstream.New(runtimeStreamNamespace),
+		streams:    StreamStore(),
 		runs:       newRunRegistry(),
 	}
 }
@@ -106,11 +127,10 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 		return botprotocol.BuildErrorResponse(requestID, err).Payload()
 	}
 	assembled, err := s.context.Assemble(ctx, runtimecontext.AssembleRequest{
-		Session:         *session,
-		Agent:           agent,
-		CategoryPrompt:  runtimecontext.CategoryPrompt(ctx, agent.CateID),
-		Input:           inputText,
-		ReferencePrompt: resolvedReferences.Prompt,
+		Session:        *session,
+		Agent:          agent,
+		CategoryPrompt: runtimecontext.CategoryPrompt(ctx, agent.CateID),
+		Input:          inputText,
 	})
 	if err != nil {
 		return botprotocol.BuildErrorResponse(requestID, err).Payload()
@@ -129,14 +149,15 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 	toolReferences := attachBoundUploads(mediaReferences(resolvedReferences.Media), boundUploads)
 	toolReferences = withActiveSeriesReference(ctx, *session, toolReferences)
 	mounted, err := runtimetool.Mount(ctx, runtimetool.MountRequest{
-		Agent:      agent,
-		Gateway:    s.gateway,
-		References: toolReferences,
-		Method:     request.Method,
-		Host:       request.Host,
-		Path:       request.Path,
-		Headers:    request.Headers,
-		Server:     request.Server,
+		Agent:          agent,
+		Gateway:        s.gateway,
+		References:     toolReferences,
+		EnableDocument: true,
+		Method:         request.Method,
+		Host:           request.Host,
+		Path:           request.Path,
+		Headers:        request.Headers,
+		Server:         request.Server,
 	})
 	if err != nil {
 		_ = s.chat.CompleteRunTurn(ctx, runtimechat.RunTurnCompletion{
@@ -145,7 +166,7 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 		return botprotocol.BuildErrorResponse(requestID, err).Payload()
 	}
 	prompt := joinRuntimePrompt(assembled.Prompt, mounted.Prompt)
-	modelInput := runtimereference.ModelInput(input, parsedInput)
+	modelInput := runtimereference.ModelInput(input, parsedInput, resolvedReferences.Prompt)
 	execution, err := s.createExecution(ctx, requestID, executionSpec{
 		Agent:              agent,
 		Power:              power,
@@ -169,16 +190,18 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 	if err != nil {
 		return botprotocol.BuildErrorResponse(requestID, err).Payload()
 	}
-	controller := s.runs.Start(requestID, context.Background(), chatTimeout(agent.TimeoutSeconds))
 	startPayload, err := s.startExecutionStream(ctx, execution)
 	if err != nil {
-		controller.Stop("fail")
-		s.runs.Remove(requestID)
 		s.failExecutionStart(execution, err)
 		execution.close()
 		return botprotocol.BuildErrorResponse(requestID, err).Payload()
 	}
-	go s.run(controller, execution)
+	if err := s.enqueueExecution(ctx, execution); err != nil {
+		s.failExecutionStart(execution, err)
+		execution.close()
+		return botprotocol.BuildErrorResponse(requestID, err).Payload()
+	}
+	execution.close()
 	return startPayload
 }
 
@@ -199,18 +222,58 @@ func (s Service) StopTask(requestID string) map[string]any {
 }
 
 func (s Service) stopTask(requestID string) map[string]any {
-	controller := s.runs.Find(requestID)
-	if controller == nil {
-		return botprotocol.BuildErrorResponse(requestID, fmt.Errorf("当前运行已结束或不在本实例执行")).Payload()
+	row, canceled, err := s.cancelRunAndChat(context.Background(), requestID)
+	if err != nil {
+		return botprotocol.BuildErrorResponse(requestID, err).Payload()
 	}
-	childRequestID := controller.Stop("canceled")
-	if childRequestID != "" {
-		_ = s.gateway.StopStream(context.Background(), childRequestID)
+	if !canceled {
+		event := "final"
+		text := "当前运行已结束"
+		if row.Status == runStatusCanceled {
+			event = "cancel"
+			text = "已停止生成"
+		}
+		return botprotocol.BuildSuccessResponse(requestID, botprotocol.Output{
+			"event": event,
+			"text":  text,
+		}).Payload()
 	}
+	if controller := s.runs.Find(requestID); controller != nil {
+		childRequestID := controller.Stop("canceled")
+		if childRequestID != "" {
+			_ = s.gateway.StopStream(context.Background(), childRequestID)
+		}
+	}
+	if s.dispatcher != nil {
+		_ = s.dispatcher.Cancel(context.Background(), row.ID)
+	}
+	execution := execution{runID: row.ID, version: row.Version, requestID: requestID}
+	_ = s.writeExecutionResult(context.Background(), execution, map[string]any{
+		"event": "cancel", "text": "已停止生成",
+	}, "", botprotocol.ResponseStatusSuccess)
 	return botprotocol.BuildSuccessResponse(requestID, botprotocol.Output{
 		"event": "cancel",
 		"text":  "已停止生成",
 	}).Payload()
+}
+
+func (s Service) cancelRunAndChat(ctx context.Context, requestID string) (
+	row agentmodel.Run,
+	canceled bool,
+	err error,
+) {
+	canceled, err = s.commitRunTerminal(ctx, runtimechat.RunTurnCompletion{
+		RequestID: requestID,
+		Status:    runStatusCanceled,
+		Text:      "已停止生成",
+		Output:    map[string]any{"event": "cancel", "text": "已停止生成"},
+		Error:     "任务已取消",
+	}, func(tx context.Context) (bool, bool, error) {
+		var currentErr error
+		row, canceled, currentErr = s.repository.RequestCancel(tx, requestID)
+		return canceled, row.SessionID > 0, currentErr
+	})
+	return row, canceled, err
 }
 
 func chatTimeout(seconds int) time.Duration {
@@ -220,9 +283,25 @@ func chatTimeout(seconds int) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
+func remainingChatTimeout(startedAt time.Time, seconds int) time.Duration {
+	total := chatTimeout(seconds)
+	if startedAt.IsZero() {
+		return total
+	}
+	elapsed := time.Since(startedAt)
+	if elapsed <= 0 {
+		return total
+	}
+	remaining := total - elapsed
+	if remaining <= 0 {
+		return time.Millisecond
+	}
+	return remaining
+}
+
 func joinRuntimePrompt(base string, mounted string) string {
 	parts := []string{strings.TrimSpace(base), strings.TrimSpace(mounted), strings.TrimSpace(`工具由系统通过原生 Function Calling 提供。需要工具时直接调用，不要在正文中伪造工具 JSON。
-不需要工具时直接正常回答用户；没有工具调用的模型回复就是本轮最终答复。普通问候、闲聊和一般咨询必须自然回复，禁止调用 ask_user 询问用户想做什么。
+普通问候、闲聊和一般咨询必须自然回复，禁止调用 ask_user 询问用户想做什么；能够直接回答时完整输出正文，本轮没有工具调用即表示回答结束。
 尚有可自主执行的步骤时必须直接调用所需工具并继续，不得要求用户回复“继续”“开始”“确认”等内容来推进。
 只有当用户已经提出明确的具体任务，并且任务缺少无法安全推断的必要参数、选择或素材时，才调用 ask_user；一次最多询问四个必要问题，仍有必要信息缺失时可在用户回答后的下一轮继续询问。
 调用 ask_user 前，先用用户当前语言输出一句简短自然说明，解释为什么需要确认这些信息；不要在正文中重复表单问题和选项。
@@ -231,7 +310,8 @@ func joinRuntimePrompt(base string, mounted string) string {
 任何表示“需要确认、选择、提供或补充信息后才能继续”的正文，如果没有在同一轮调用 ask_user，都会被视为无效输出；不要只承诺稍后开始，也不要用普通问句结束任务。
 能根据当前上下文安全推断或使用合理默认值时直接继续执行，不要为了非必要信息调用 ask_user。普通聊天和不要求用户回答的反问不受此限制。
 当用户消息包含 interaction_response 时，它是对上一份表单的回答；直接结合其中的数据继续原任务，不要重复询问已经回答的内容。
-任务完成时用 Markdown 完整回答用户；Markdown 标题必须独占一行，并在标题前后保留空行。仅当本轮完成了具体任务，并且结果自然产生了与本轮内容直接相关的后续操作时，才调用 present_suggestions 给出不超过 8 个建议，正文不得重复列出这些选项。没有明确后续操作时不要调用任何终止工具，直接完成回答。`)}
+任务完成时用 Markdown 完整回答用户；Markdown 标题必须独占一行，并在标题前后保留空行。`) + "\n" + runtimeprovider.PresentSuggestionsDecisionRule + `
+如果最终答复准备给出多个可继续选择的后续动作，必须在同一轮调用 present_suggestions：用 message 提供自然引导语，用 items 提供按钮，不得把这些动作只写成 Markdown 列表后直接结束。正文只保留已经完成的结果，不得重复按钮选项。没有明确选择项时不要调用 present_suggestions；已经完整回答且没有交互或待执行步骤时直接结束正文。`}
 	result := make([]string, 0, len(parts))
 	for _, part := range parts {
 		if part != "" {

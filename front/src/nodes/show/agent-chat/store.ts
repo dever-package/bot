@@ -18,6 +18,8 @@ import {
   type AgentChatSessionPayload,
 } from "./api";
 import { useAgentChatRuns } from "./runs";
+import { useAgentChatDocumentStreams } from "./document-stream";
+import type { AgentChatDocument } from "./document";
 import {
   loadAgentChatReferences,
   type ReferenceComposerParam,
@@ -121,6 +123,24 @@ export function useAgentChatStore({
       });
     },
     [saveSessionView],
+  );
+
+  const updateMessageDocument = useCallback(
+    (
+      targetSessionID: number,
+      documentID: number,
+      document: AgentChatDocument,
+    ) => {
+      updateSessionMessages(targetSessionID, (current) =>
+        current.map((message) =>
+          message.document?.id === documentID ||
+          (document.messageID > 0 && message.recordID === document.messageID)
+            ? { ...message, document }
+            : message,
+        ),
+      );
+    },
+    [updateSessionMessages],
   );
 
   const updateSessionTitle = useCallback(
@@ -238,6 +258,15 @@ export function useAgentChatStore({
     syncSessionTitle,
     setSessionRunning,
     setError,
+  });
+
+  useAgentChatDocumentStreams({
+    modalOpen,
+    sessionID,
+    messages,
+    blockMs,
+    runtimeApi,
+    updateDocument: updateMessageDocument,
   });
 
   const applySessionPayload = useCallback(

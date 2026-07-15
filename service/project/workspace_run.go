@@ -29,6 +29,8 @@ type canvasRunNode struct {
 	Type           string
 	Title          string
 	Kind           string
+	OutputType     string
+	GroupID        string
 	AssetCateID    uint64
 	FunctionKey    string
 	FlowID         uint64
@@ -98,6 +100,9 @@ func (s WorkspaceService) runCanvasWithProject(ctx context.Context, req CanvasRu
 		return nil, err
 	}
 	nodesByID := canvasRunNodeMap(nodes)
+	if err := validateCanvasGroups(nodesByID, edges); err != nil {
+		return nil, err
+	}
 	if err := validateCanvasRunGraph(nodesByID, edges); err != nil {
 		return nil, err
 	}
@@ -108,11 +113,27 @@ func (s WorkspaceService) runCanvasWithProject(ctx context.Context, req CanvasRu
 	if !req.SingleNode && !isCanvasStartNode(startNode) {
 		return nil, fmt.Errorf("请选择开始节点运行")
 	}
+	if err := validateReachableCanvasGroups(nodesByID, edges, req.StartNodeID, req.SingleNode); err != nil {
+		return nil, err
+	}
+	req.Canvas, edges = prepareCanvasRunGraph(
+		req.Canvas,
+		nodesByID,
+		edges,
+		req.StartNodeID,
+		req.SingleNode,
+	)
+	if err := validateCanvasRunGraph(nodesByID, edges); err != nil {
+		return nil, err
+	}
 	plan := buildCanvasRunExecutionPlan(req.StartNodeID, nodesByID, edges, req.SingleNode)
+	if req.SingleNode && startNode.Type == "group" && len(filterRunnableCanvasNodes(plan.Nodes)) == 0 {
+		return nil, fmt.Errorf("分组内暂无可运行节点")
+	}
 	if !req.SingleNode && len(plan.Nodes) == 0 {
 		return nil, fmt.Errorf("开始节点没有连接后续节点")
 	}
-	if !req.SingleNode {
+	if !req.SingleNode || startNode.Type == "group" {
 		if err := validateCanvasExecutionPlan(plan); err != nil {
 			return nil, err
 		}
@@ -197,86 +218,187 @@ func (s WorkspaceService) executeCanvasRunAsync(ctx context.Context, req CanvasR
 }
 
 func (s WorkspaceService) executeCanvasRunnableNodes(ctx context.Context, req CanvasRunRequest, run *teammodel.Run, plan canvasExecutionPlan, runnableNodes []canvasRunNode, flowRunID uint64, nodeRuns map[string]uint64, existingResults []canvasNodeResult) (map[string]any, error) {
+	if plan.Start.Type == "group" {
+		return s.executeCanvasGroupRunnableNodes(ctx, req, run, plan, runnableNodes, flowRunID, nodeRuns, existingResults)
+	}
 	if len(runnableNodes) == 0 {
-		summary := canvasRunSummary(req, "success", run, nil, existingResults, canvasRunPlan(plan), flowRunID)
-		summary["node_runs"] = workspaceNodeRunPayloads(ctx, run.ID)
-		finishWorkspaceRun(ctx, run.ID, teammodel.RunStatusSuccess, summary, "")
-		finishWorkspaceFlowRun(ctx, flowRunID, teammodel.RunStatusSuccess, summary, "")
-		return summary, nil
+		return s.finishCanvasRunnableNodes(ctx, req, run, plan, teammodel.RunStatusSuccess, nil, existingResults, flowRunID), nil
 	}
 
 	results := make([]canvasNodeResult, 0, len(existingResults)+len(runnableNodes))
 	results = append(results, existingResults...)
 	status := "success"
 	var lastPayload map[string]any
+	executedGroups := map[string]bool{}
 	if len(results) > 0 {
 		lastPayload = results[len(results)-1].Payload
 	}
 	for _, node := range runnableNodes {
-		nodeRunID := nodeRuns[node.ID]
-		inputContext := canvasNodePreviousOutput(ctx, run.ProjectID, req, node.ID, results)
-		markWorkspaceNodeRun(ctx, nodeRunID, teammodel.RunStatusRunning, map[string]any{
-			"input":            req.Input,
-			"node":             canvasRunNodeInput(node),
-			"previous_output":  inputContext,
-			"execution_plan":   canvasRunPlan(plan),
-			"workspace_run_id": run.ID,
-		}, nil, "", 0)
-		recordWorkspaceNodeExecution(ctx, workspaceNodeExecution{
-			ExecutionID: workspaceExecutionIDByRunID(ctx, run.ID),
-			ProjectID:   run.ProjectID,
-			AssetCateID: firstUint64(node.AssetCateID, req.AssetCateID),
-			RunID:       run.ID,
-			FlowRunID:   flowRunID,
-			NodeRunID:   nodeRunID,
-			RequestID:   run.RequestID,
-			NodeKey:     node.ID,
-			NodeType:    node.Type,
-			FunctionKey: node.FunctionKey,
-			Status:      teammodel.RunStatusRunning,
-			Input:       map[string]any{"input": req.Input, "node": canvasRunNodeInput(node), "previous_output": inputContext},
-			StartedAt:   time.Now(),
-		})
-		s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "node_started", teammodel.RunStatusRunning, nil)
-		payload, runErr := s.runCanvasNode(ctx, run.ProjectID, req, run, node, nodeRunID, results)
-		if payload == nil {
-			payload = map[string]any{}
+		if node.GroupID != "" {
+			if executedGroups[node.GroupID] {
+				continue
+			}
+			executedGroups[node.GroupID] = true
+			batch := s.executeCanvasGroupNodeBatch(
+				ctx,
+				req,
+				run,
+				plan,
+				canvasRunnableNodesInGroup(runnableNodes, node.GroupID),
+				flowRunID,
+				nodeRuns,
+				results,
+			)
+			results = batch.Results
+			lastPayload = batch.LastPayload
+			status = batch.Status
+			if canvasRunShouldStop(status) {
+				break
+			}
+			continue
 		}
-		lastPayload = payload
+		execution := s.executeCanvasRunnableNode(ctx, req, run, plan, node, flowRunID, nodeRuns[node.ID], results)
+		lastPayload = execution.Payload
 		results = append(results, canvasNodeResult{
 			NodeKey: node.ID,
-			Payload: payload,
+			Payload: execution.Payload,
 		})
-		status = canvasRunStatus(payload)
-		if runErr != nil {
-			status = "fail"
-			payload["error"] = runErr.Error()
-			s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRunID, status, payload, runErr)
-			s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "node_finished", status, payload)
+		status = execution.Status
+		if execution.Err != nil {
 			break
-		}
-		s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRunID, status, payload, nil)
-		if status == teammodel.RunStatusWaiting {
-			s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "waiting", status, payload)
-		} else if status != teammodel.RunStatusRunning && status != teammodel.RunStatusPending {
-			s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "node_finished", status, payload)
 		}
 		if canvasRunShouldStop(status) {
 			break
 		}
 	}
+	return s.finishCanvasRunnableNodes(ctx, req, run, plan, status, lastPayload, results, flowRunID), nil
+}
+
+func (s WorkspaceService) finishCanvasRunnableNodes(
+	ctx context.Context,
+	req CanvasRunRequest,
+	run *teammodel.Run,
+	plan canvasExecutionPlan,
+	status string,
+	lastPayload map[string]any,
+	results []canvasNodeResult,
+	flowRunID uint64,
+) map[string]any {
+	if workspaceRunCanceled(ctx, run.ID) {
+		status = teammodel.RunStatusCanceled
+		lastPayload = map[string]any{
+			"run_id":     run.ID,
+			"request_id": run.RequestID,
+			"status":     teammodel.RunStatusCanceled,
+		}
+	}
 	summary := canvasRunSummary(req, status, run, lastPayload, results, canvasRunPlan(plan), flowRunID)
+	if plan.Start.Type == "group" {
+		summary["output"] = canvasGroupRunOutput(plan, results)
+	}
 	summary["node_runs"] = workspaceNodeRunPayloads(ctx, run.ID)
-	finishWorkspaceRun(ctx, run.ID, status, summary, textValue(valueAtPath(lastPayload, "error")))
-	finishWorkspaceFlowRun(ctx, flowRunID, status, summary, textValue(valueAtPath(lastPayload, "error")))
+	errorText := textValue(valueAtPath(lastPayload, "error"))
+	finishWorkspaceRun(ctx, run.ID, status, summary, errorText)
+	finishWorkspaceFlowRun(ctx, flowRunID, status, summary, errorText)
 	resultStatus := 1
 	if status == teammodel.RunStatusFail || status == teammodel.RunStatusCanceled {
 		resultStatus = 2
 	}
 	if status != teammodel.RunStatusRunning && status != teammodel.RunStatusPending {
-		s.writeWorkspaceRunResult(ctx, run, summary, textValue(valueAtPath(lastPayload, "error")), resultStatus)
+		s.writeWorkspaceRunResult(ctx, run, summary, errorText, resultStatus)
 	}
-	return summary, nil
+	return summary
+}
+
+type canvasRunnableNodeResult struct {
+	Node    canvasRunNode
+	Payload map[string]any
+	Status  string
+	Err     error
+}
+
+func (s WorkspaceService) executeCanvasRunnableNode(
+	ctx context.Context,
+	req CanvasRunRequest,
+	run *teammodel.Run,
+	plan canvasExecutionPlan,
+	node canvasRunNode,
+	flowRunID uint64,
+	nodeRunID uint64,
+	results []canvasNodeResult,
+) canvasRunnableNodeResult {
+	if workspaceRunCanceled(ctx, run.ID) {
+		return s.canceledCanvasRunnableNodeResult(ctx, req, run, node, nodeRunID)
+	}
+	inputContext := canvasNodePreviousOutput(ctx, run.ProjectID, req, node.ID, results)
+	markWorkspaceNodeRun(ctx, nodeRunID, teammodel.RunStatusRunning, map[string]any{
+		"input":            req.Input,
+		"node":             canvasRunNodeInput(node),
+		"previous_output":  inputContext,
+		"execution_plan":   canvasRunPlan(plan),
+		"workspace_run_id": run.ID,
+	}, nil, "", 0)
+	recordWorkspaceNodeExecution(ctx, workspaceNodeExecution{
+		ExecutionID:    workspaceExecutionIDByRunID(ctx, run.ID),
+		ProjectID:      run.ProjectID,
+		AssetCateID:    firstUint64(node.AssetCateID, req.AssetCateID),
+		RunID:          run.ID,
+		FlowRunID:      flowRunID,
+		NodeRunID:      nodeRunID,
+		RequestID:      run.RequestID,
+		NodeKey:        node.ID,
+		NodeType:       node.Type,
+		FunctionKey:    node.FunctionKey,
+		ChildRequestID: canvasChildRequestID(run.RequestID, node.ID),
+		Status:         teammodel.RunStatusRunning,
+		Input:          map[string]any{"input": req.Input, "node": canvasRunNodeInput(node), "previous_output": inputContext},
+		StartedAt:      time.Now(),
+	})
+	s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "node_started", teammodel.RunStatusRunning, nil)
+	if workspaceRunCanceled(ctx, run.ID) {
+		return s.canceledCanvasRunnableNodeResult(ctx, req, run, node, nodeRunID)
+	}
+	payload, runErr := s.runCanvasNode(ctx, run.ProjectID, req, run, node, nodeRunID, results)
+	if workspaceRunCanceled(ctx, run.ID) {
+		return s.canceledCanvasRunnableNodeResult(ctx, req, run, node, nodeRunID)
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	status := canvasRunStatus(payload)
+	if runErr != nil {
+		status = teammodel.RunStatusFail
+		payload["error"] = runErr.Error()
+		s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRunID, status, payload, runErr)
+		s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "node_finished", status, payload)
+		return canvasRunnableNodeResult{Node: node, Payload: payload, Status: status, Err: runErr}
+	}
+	s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRunID, status, payload, nil)
+	if status == teammodel.RunStatusWaiting {
+		s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "waiting", status, payload)
+	} else if status != teammodel.RunStatusRunning && status != teammodel.RunStatusPending {
+		s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "node_finished", status, payload)
+	}
+	return canvasRunnableNodeResult{Node: node, Payload: payload, Status: status}
+}
+
+func (s WorkspaceService) canceledCanvasRunnableNodeResult(
+	ctx context.Context,
+	req CanvasRunRequest,
+	run *teammodel.Run,
+	node canvasRunNode,
+	nodeRunID uint64,
+) canvasRunnableNodeResult {
+	payload := canvasNodeRunPayload(req, run, node, nodeRunID, map[string]any{
+		"status": teammodel.RunStatusCanceled,
+	})
+	s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRunID, teammodel.RunStatusCanceled, payload, nil)
+	s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "node_finished", teammodel.RunStatusCanceled, payload)
+	return canvasRunnableNodeResult{
+		Node:    node,
+		Payload: payload,
+		Status:  teammodel.RunStatusCanceled,
+	}
 }
 
 func (s WorkspaceService) recordCanvasNodeRunResult(ctx context.Context, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, status string, payload map[string]any, runErr error) {
@@ -420,6 +542,9 @@ func (s WorkspaceService) runCanvasAgentNode(ctx context.Context, projectID uint
 	result, err = s.saveWorkspaceCanvasMaterial(ctx, projectID, req, run, node, nodeRunID, result)
 	if err != nil {
 		return canvasNodeRunPayload(req, run, node, nodeRunID, result), err
+	}
+	if canvasRunStatus(result) == teammodel.RunStatusCanceled {
+		return canvasNodeRunPayload(req, run, node, nodeRunID, result), nil
 	}
 	appendWorkspaceAgentMemory(ctx, workspaceAgentMemoryEntry{
 		ProjectID:   projectID,
@@ -575,6 +700,11 @@ func (s WorkspaceService) runCanvasFunctionNode(ctx context.Context, projectID u
 		if previousOutput == nil {
 			return nil, fmt.Errorf("保存节点没有可保存的上游结果")
 		}
+		if workspaceRunCanceled(ctx, run.ID) {
+			return canvasNodeRunPayload(req, run, node, nodeRunID, map[string]any{
+				"status": teammodel.RunStatusCanceled,
+			}), nil
+		}
 		result, err := s.project.SaveAsset(ctx, projectID, SaveAssetRequest{
 			AssetCateID: firstUint64(node.AssetCateID, req.AssetCateID),
 			FlowID:      node.FlowID,
@@ -624,6 +754,8 @@ func parseCanvasRunGraph(canvas map[string]any) ([]canvasRunNode, []canvasRunEdg
 			Type:           textValue(row["type"]),
 			Title:          textValue(row["title"]),
 			Kind:           textValue(row["kind"]),
+			OutputType:     textValue(row["output_type"]),
+			GroupID:        textValue(row["group_id"]),
 			AssetCateID:    uint64Value(row["asset_cate_id"]),
 			FunctionKey:    textValue(valueAtPath(row, "function_option", "key")),
 			FlowID:         uint64Value(valueAtPath(row, "flow", "id")),
@@ -689,22 +821,68 @@ func canvasNodeStopsRun(node canvasRunNode) bool {
 }
 
 func previousCanvasOutput(ctx context.Context, projectID uint64, nodeID string, results []canvasNodeResult, canvas map[string]any) any {
+	return previousCanvasOutputExcluding(ctx, projectID, nodeID, results, canvas, nil)
+}
+
+func previousCanvasOutputExcluding(
+	ctx context.Context,
+	projectID uint64,
+	nodeID string,
+	results []canvasNodeResult,
+	canvas map[string]any,
+	excludedUpstreamIDs map[string]bool,
+) any {
 	upstream := upstreamCanvasNodeIDs(nodeID, canvas)
 	if len(upstream) == 0 {
+		if len(excludedUpstreamIDs) > 0 {
+			return nil
+		}
 		return lastCanvasOutput(results, "")
 	}
 	outputs := make([]any, 0, len(upstream))
+	targetGroupID := textValue(canvasNodeByID(nodeID, canvas)["group_id"])
+	groupSources := map[string][]map[string]any{}
+	groupOrder := make([]string, 0)
 	for _, upstreamID := range upstream {
-		if output := lastCanvasOutput(results, upstreamID); output != nil {
-			outputs = append(outputs, output)
+		if excludedUpstreamIDs[upstreamID] {
 			continue
 		}
-		if output := staticCanvasNodeOutput(ctx, projectID, upstreamID, canvas); output != nil {
-			outputs = append(outputs, output)
+		upstreamNode := canvasNodeByID(upstreamID, canvas)
+		if textValue(upstreamNode["type"]) == "group" {
+			if output := canvasGroupPreviousOutput(ctx, projectID, upstreamID, results, canvas); output != nil {
+				outputs = append(outputs, output)
+			}
+			continue
 		}
+		output := lastCanvasOutput(results, upstreamID)
+		if output == nil {
+			output = staticCanvasNodeOutput(ctx, projectID, upstreamID, canvas)
+		}
+		if output == nil {
+			continue
+		}
+		upstreamGroupID := textValue(upstreamNode["group_id"])
+		if upstreamGroupID != "" && upstreamGroupID != targetGroupID {
+			if _, ok := groupSources[upstreamGroupID]; !ok {
+				groupOrder = append(groupOrder, upstreamGroupID)
+			}
+			groupSources[upstreamGroupID] = append(
+				groupSources[upstreamGroupID],
+				canvasGroupOutputSource(upstreamNode, lastCanvasNodeResult(results, upstreamID), output),
+			)
+			continue
+		}
+		outputs = append(outputs, output)
+	}
+	for _, groupID := range groupOrder {
+		outputs = append(outputs, map[string]any{
+			"type":     "group_output",
+			"group_id": groupID,
+			"sources":  groupSources[groupID],
+		})
 	}
 	if len(outputs) == 0 {
-		return lastCanvasOutput(results, "")
+		return nil
 	}
 	if len(outputs) == 1 {
 		return outputs[0]
@@ -715,7 +893,22 @@ func previousCanvasOutput(ctx context.Context, projectID uint64, nodeID string, 
 func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasRunRequest, nodeID string, results []canvasNodeResult) any {
 	if req.SingleNode {
 		if manualContext := manualCanvasInputContext(req.Input); manualContext != nil {
-			return manualContext
+			startNode := canvasNodeByID(req.StartNodeID, req.Canvas)
+			excludedUpstreamIDs := manualCanvasContextNodeIDs(manualContext)
+			if textValue(startNode["type"]) == "group" {
+				excludedUpstreamIDs[req.StartNodeID] = true
+			}
+			return mergeCanvasContextOutputs(
+				manualContext,
+				previousCanvasOutputExcluding(
+					ctx,
+					projectID,
+					nodeID,
+					results,
+					req.Canvas,
+					excludedUpstreamIDs,
+				),
+			)
 		}
 	}
 	output := previousCanvasOutput(ctx, projectID, nodeID, results, req.Canvas)
@@ -723,6 +916,18 @@ func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasR
 		return output
 	}
 	return nil
+}
+
+func manualCanvasContextNodeIDs(context any) map[string]bool {
+	result := map[string]bool{}
+	for _, raw := range sliceValue(valueAtPath(context, "sources")) {
+		source := mapValue(raw)
+		nodeID := firstText(source["node_id"], source["nodeId"])
+		if nodeID != "" {
+			result[nodeID] = true
+		}
+	}
+	return result
 }
 
 func upstreamCanvasNodeIDs(nodeID string, canvas map[string]any) []string {
@@ -996,6 +1201,10 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 	if payload == nil {
 		payload = map[string]any{}
 	}
+	if workspaceRunCanceled(ctx, run.ID) {
+		payload["status"] = teammodel.RunStatusCanceled
+		return payload, nil
+	}
 	if canvasRunStatus(payload) != teammodel.RunStatusSuccess {
 		return payload, nil
 	}
@@ -1209,6 +1418,9 @@ func canvasRunPlan(plan canvasExecutionPlan) map[string]any {
 			"id":              node.ID,
 			"type":            node.Type,
 			"title":           canvasRunNodeTitle(node),
+			"kind":            node.Kind,
+			"output_type":     node.OutputType,
+			"group_id":        node.GroupID,
 			"function_key":    node.FunctionKey,
 			"asset_cate_id":   node.AssetCateID,
 			"persists_result": node.PersistsResult,
@@ -1248,7 +1460,7 @@ func canvasRunStatus(payload map[string]any) string {
 
 func canvasRunShouldStop(status string) bool {
 	switch status {
-	case "fail", "running", "pending", "waiting":
+	case "fail", "canceled", "running", "pending", "waiting":
 		return true
 	default:
 		return false

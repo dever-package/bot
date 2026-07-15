@@ -86,7 +86,11 @@ func recordWorkspaceNodeExecution(ctx context.Context, execution workspaceNodeEx
 		_ = model.Insert(ctx, record)
 		return
 	}
-	_ = model.Update(ctx, map[string]any{"id": row.ID}, record)
+	filters := map[string]any{"id": row.ID}
+	if status != teammodel.RunStatusCanceled {
+		filters["status"] = map[string]any{"neq": teammodel.RunStatusCanceled}
+	}
+	_ = model.Update(ctx, filters, record)
 }
 
 func workspaceNodeExecutions(ctx context.Context, projectID uint64, runID uint64) []map[string]any {

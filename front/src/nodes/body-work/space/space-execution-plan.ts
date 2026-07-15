@@ -11,6 +11,16 @@ export function canvasExecutionNodeIds(
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
   const outgoing = canvasOutgoingEdges(edges);
   const result = new Set<string>();
+  const groupMembers = new Map<string, string[]>();
+  for (const node of nodes) {
+    if (!node.groupId) {
+      continue;
+    }
+    groupMembers.set(node.groupId, [
+      ...(groupMembers.get(node.groupId) || []),
+      node.id,
+    ]);
+  }
   const visit = (nodeId: string) => {
     for (const targetId of outgoing.get(nodeId) || []) {
       if (result.has(targetId)) {
@@ -18,6 +28,14 @@ export function canvasExecutionNodeIds(
       }
       result.add(targetId);
       const targetNode = nodeMap.get(targetId);
+      if (targetNode?.type === "group") {
+        for (const memberId of groupMembers.get(targetNode.id) || []) {
+          if (!result.has(memberId)) {
+            result.add(memberId);
+            visit(memberId);
+          }
+        }
+      }
       if (!targetNode || !canvasNodeStopsExecution(targetNode)) {
         visit(targetId);
       }
@@ -39,6 +57,17 @@ export function orderedCanvasExecutionNodes(
 }
 
 export function canvasNodeStopsExecution(node: SpaceCanvasNode) {
+  return (
+    node.type === "function" &&
+    (node.functionOption?.key === "save" ||
+      node.functionOption?.key === "display")
+  );
+}
+
+export function canvasNodeRunsInBackend(node: SpaceCanvasNode) {
+  if (["asset", "power", "agent", "flow"].includes(node.type)) {
+    return true;
+  }
   return (
     node.type === "function" &&
     (node.functionOption?.key === "save" ||

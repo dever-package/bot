@@ -9,15 +9,12 @@ import (
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeartifact "github.com/dever-package/bot/service/agent/runtime/artifact"
+	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
 	uploadaccess "github.com/dever-package/front/service/upload/access"
 	uploadrepo "github.com/dever-package/front/service/upload/repository"
 )
 
-const (
-	maxResolvedMedia      = 32
-	maxReferenceTextRunes = 12000
-	maxReferenceItemRunes = 4000
-)
+const maxResolvedMedia = 32
 
 type Resolver struct {
 	artifacts runtimeartifact.Service
@@ -76,15 +73,17 @@ func (r Resolver) resolveMessage(ctx context.Context, session agentmodel.Session
 	if _, err := requireSourceSession(ctx, session, message.SessionID); err != nil {
 		return Resolved{}, err
 	}
-	media := make([]Media, 0)
-	for _, artifact := range r.artifacts.ByMessage(ctx, message.ID) {
-		media = append(media, mediaFromArtifactPayload(runtimeartifact.Payload(ctx, artifact)))
+	artifacts := r.artifacts.MessagePayloads(ctx, message.ID)
+	media := make([]Media, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		media = append(media, mediaFromArtifactPayload(artifact))
 	}
 	return Resolved{
 		Reference: reference,
 		Title:     messageReferenceTitle(*message),
 		Text:      strings.TrimSpace(message.Text),
 		Media:     cleanMedia(media),
+		Output:    runtimemessageoutput.Format(message.Output, artifacts),
 	}, nil
 }
 
@@ -176,17 +175,13 @@ func resolvedPrompt(items []Resolved, allowedMedia []Media) string {
 	for _, media := range allowedMedia {
 		allowed[fmt.Sprintf("%s:%d", media.ReferenceType, media.ReferenceID)] = struct{}{}
 	}
-	remainingTextRunes := maxReferenceTextRunes
 	for index, item := range items {
 		line := fmt.Sprintf("%d. [%s:%d] %s", index+1, item.Reference.Type, item.Reference.ID, strings.TrimSpace(item.Title))
 		if item.Reference.Usage != "" {
 			line += "\n- 用于输入参数：" + item.Reference.Usage
 		}
-		if item.Text != "" && remainingTextRunes > 0 {
-			limit := min(maxReferenceItemRunes, remainingTextRunes)
-			text := limitText(item.Text, limit)
+		if text := strings.TrimSpace(item.Text); text != "" {
 			line += "\n" + text
-			remainingTextRunes -= len([]rune(text))
 		}
 		for _, media := range item.Media {
 			if _, exists := allowed[fmt.Sprintf("%s:%d", media.ReferenceType, media.ReferenceID)]; !exists {

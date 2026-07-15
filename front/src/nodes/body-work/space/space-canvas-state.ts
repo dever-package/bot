@@ -14,8 +14,16 @@ import type {
 export type PersistedCanvasState = {
   asset_cate_id: number;
   nodes: PersistedCanvasNode[];
-  edges: SpaceCanvasEdge[];
+  edges: PersistedCanvasEdge[];
   viewport: SpaceCanvasViewport;
+};
+
+type PersistedCanvasEdge = {
+  id: string;
+  from: string;
+  to: string;
+  logical_from?: string;
+  logical_to?: string;
 };
 
 type PersistedCanvasNode = {
@@ -28,8 +36,22 @@ type PersistedCanvasNode = {
   y: number;
   width: number;
   height: number;
+  group_id?: string;
+  group?: {
+    origin?: string;
+    source_node_id?: string;
+    sync_key?: string;
+  };
+  storyboard_material?: {
+    source_node_id: string;
+    material_type: string;
+    material_id: string;
+    generated_prompt?: string;
+    stale?: boolean;
+  };
   asset_cate_id?: number;
   kind?: string;
+  output_type?: string;
   cardinality?: string;
   count?: number;
   flow?: Pick<TeamFlow, "id" | "key" | "name" | "goal">;
@@ -41,7 +63,10 @@ type PersistedCanvasNode = {
     ProjectAsset,
     "id" | "name" | "kind" | "role" | "asset_cate_id" | "version_id"
   >;
-  power?: Pick<PowerOption, "id" | "key" | "name" | "kind" | "icon">;
+  power?: Pick<
+    PowerOption,
+    "id" | "key" | "name" | "kind" | "icon" | "output"
+  > & { output_type?: string };
   function_option?: Pick<CanvasFunctionOption, "key" | "label" | "description">;
   composer_draft?: Record<string, unknown>;
   result_ref?: Record<string, unknown>;
@@ -67,6 +92,8 @@ export function persistedCanvasState(
       id: edge.id,
       from: edge.from,
       to: edge.to,
+      ...(edge.logicalFrom ? { logical_from: edge.logicalFrom } : {}),
+      ...(edge.logicalTo ? { logical_to: edge.logicalTo } : {}),
     })),
     viewport: {
       ...(canvas.viewport.x == null ? {} : { x: canvas.viewport.x }),
@@ -88,8 +115,31 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
     width: node.width,
     height: node.height,
   };
+  assignText(result, "group_id", node.groupId);
+  if (node.group) {
+    const group: NonNullable<PersistedCanvasNode["group"]> = {};
+    assignText(group, "origin", node.group.origin);
+    assignText(group, "source_node_id", node.group.sourceNodeId);
+    assignText(group, "sync_key", node.group.syncKey);
+    if (Object.keys(group).length > 0) {
+      result.group = group;
+    }
+  }
+  if (node.storyboardMaterial) {
+    const material = node.storyboardMaterial;
+    result.storyboard_material = {
+      source_node_id: material.sourceNodeId,
+      material_type: material.materialType,
+      material_id: material.materialId,
+      ...(material.generatedPrompt
+        ? { generated_prompt: material.generatedPrompt }
+        : {}),
+      ...(material.stale ? { stale: true } : {}),
+    };
+  }
   assignNumber(result, "asset_cate_id", node.assetCateId);
   assignText(result, "kind", node.kind);
+  assignText(result, "output_type", node.outputType);
   assignText(result, "cardinality", node.cardinality);
   assignNumber(result, "count", node.count);
   if (node.flow) {
@@ -126,6 +176,8 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
       name: node.power.name,
       kind: node.power.kind,
       icon: node.power.icon,
+      output_type: node.power.outputType,
+      output: node.power.output,
     };
   }
   if (node.functionOption) {
@@ -135,7 +187,7 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
       description: node.functionOption.description,
     };
   }
-  const composerDraft = persistedComposerDraft((node as any).composerDraft);
+  const composerDraft = persistedComposerDraft(node.composerDraft);
   if (composerDraft) {
     result.composer_draft = composerDraft;
   }

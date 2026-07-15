@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	botmodel "github.com/dever-package/bot/model/energon"
 	botinput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
@@ -18,6 +19,9 @@ func (s GatewayService) callNormalizeTarget(
 	req *botprotocol.ShemicRequest,
 	selected selectedTarget,
 ) (callResult, error) {
+	if isLocalProvider(selected.Provider) {
+		return s.callLocalTarget(ctx, req, selected, false)
+	}
 	startedAt := time.Now()
 	adapter, err := s.adapterForSelected(req, selected)
 	if err != nil {
@@ -81,6 +85,11 @@ func (s GatewayService) callNormalizeTarget(
 	}
 	if err != nil {
 		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("parse_response", err.Error()), nativeReq)
+		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
+	}
+	data, err = normalizePowerOutput(selected.Power, data)
+	if err != nil {
+		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("normalize_output", err.Error()), nativeReq)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 	data, err = s.storeGeneratedMediaOutput(ctx, req.RequestID, selected.Power.Kind, data, nil)
@@ -149,6 +158,9 @@ func (s GatewayService) callStreamTarget(
 	req *botprotocol.ShemicRequest,
 	selected selectedTarget,
 ) (callResult, error) {
+	if isLocalProvider(selected.Provider) {
+		return s.callLocalTarget(ctx, req, selected, true)
+	}
 	startedAt := time.Now()
 	adapter, err := s.adapterForSelected(req, selected)
 	if err != nil {
@@ -195,7 +207,7 @@ func (s GatewayService) callStreamTarget(
 		return callResult{NativeRequest: nativeReq}, err
 	}
 
-	writeOutput := s.streamOutputWriter(ctx, req.RequestID, selected.Power.Kind)
+	writeOutput := s.streamOutputWriter(ctx, req.RequestID, selected.Power)
 	progress, err := botruntime.StartProgress(ctx, selected.Service, selected.Power, writeOutput)
 	if err != nil {
 		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("stream_progress", err.Error()), nativeReq)
@@ -278,7 +290,7 @@ func (s GatewayService) callStreamTarget(
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 
-	writeEnd := !botstream.HasEnd(streamOutputs)
+	writeEnd := !botstream.HasEnd(streamOutputs) || botmodel.RequiresStructuredOutput(selected.Power)
 	if writeEnd {
 		streamOutputs = append(streamOutputs, botprotocol.Output{"event": "end"})
 	}
@@ -324,9 +336,18 @@ func enableStreamUsage(adapter botprotocol.Adapter, body map[string]any) {
 	body["stream_options"] = options
 }
 
-func (s GatewayService) streamOutputWriter(ctx context.Context, requestID string, kind string) func(botprotocol.Output) error {
+func (s GatewayService) streamOutputWriter(ctx context.Context, requestID string, power botmodel.Power) func(botprotocol.Output) error {
+	structuredProgress := newPowerOutputStreamProgress(power)
 	return func(output botprotocol.Output) error {
-		if _, generated := generatedMediaRuleForKind(kind); generated && botprotocol.HasMediaOutput(output) {
+		if progressOutput, changed := structuredProgress.Consume(output); changed {
+			if err := s.writeStreamOutput(ctx, requestID, progressOutput); err != nil {
+				return err
+			}
+		}
+		if suppressStructuredOutputStream(power, output) {
+			return nil
+		}
+		if _, generated := generatedMediaRuleForKind(power.Kind); generated && botprotocol.HasMediaOutput(output) {
 			return nil
 		}
 		return s.writeStreamOutput(ctx, requestID, output)
@@ -341,27 +362,37 @@ func (s GatewayService) writeStreamOutput(ctx context.Context, requestID string,
 }
 
 type streamFinishInput struct {
-	Request       *botprotocol.ShemicRequest
-	Selected      selectedTarget
-	StartedAt     time.Time
-	NativeRequest botprovider.Request
-	Response      *botprovider.Response
-	Data          any
-	Usage         tokenUsage
-	Progress      *botruntime.ProgressTracker
-	WriteEnd      bool
+	Request        *botprotocol.ShemicRequest
+	Selected       selectedTarget
+	StartedAt      time.Time
+	NativeRequest  botprovider.Request
+	Response       *botprovider.Response
+	Data           any
+	Usage          tokenUsage
+	Progress       *botruntime.ProgressTracker
+	WriteEnd       bool
+	SkipMediaStore bool
 }
 
 func (s GatewayService) finishStreamResult(ctx context.Context, input streamFinishInput) (callResult, error) {
-	storedData, err := s.storeGeneratedMediaOutput(
-		ctx,
-		input.Request.RequestID,
-		input.Selected.Power.Kind,
-		input.Data,
-		func(output botprotocol.Output) error {
-			return s.writeStreamOutput(ctx, input.Request.RequestID, output)
-		},
-	)
+	normalizedData, err := normalizePowerOutput(input.Selected.Power, input.Data)
+	if err != nil {
+		logItem := s.recordCallLogWithUsage(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("normalize_output", err.Error()), input.Usage, input.NativeRequest)
+		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err
+	}
+	input.Data = normalizedData
+	storedData := input.Data
+	if !input.SkipMediaStore {
+		storedData, err = s.storeGeneratedMediaOutput(
+			ctx,
+			input.Request.RequestID,
+			input.Selected.Power.Kind,
+			input.Data,
+			func(output botprotocol.Output) error {
+				return s.writeStreamOutput(ctx, input.Request.RequestID, output)
+			},
+		)
+	}
 	if err != nil {
 		logItem := s.recordCallLogWithUsage(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("store_media", err.Error()), input.Usage, input.NativeRequest)
 		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err

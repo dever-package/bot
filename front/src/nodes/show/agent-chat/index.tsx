@@ -80,11 +80,20 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
       inputConfig: String(
         item.meta?.inputConfigApi || "/bot/admin/agent_runtime/input_config",
       ),
+      document: String(
+        item.meta?.documentApi || "/bot/admin/agent_runtime/document",
+      ),
+      documentStream: String(
+        item.meta?.documentStreamApi ||
+          "/bot/admin/agent_runtime/document_stream",
+      ),
     }),
     [
       item.meta?.requestApi,
       item.meta?.referencePreviewApi,
       item.meta?.inputConfigApi,
+      item.meta?.documentApi,
+      item.meta?.documentStreamApi,
       item.meta?.statusApi,
       item.meta?.stopApi,
       item.meta?.streamApi,

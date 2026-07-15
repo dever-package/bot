@@ -23,8 +23,8 @@ func (KnowledgeHook) ProviderBeforeSaveKnowledgeCate(_ *server.Context, params [
 	if !partial && trimText(record["name"]) == "" {
 		panic(frontaction.NewFieldError("form.name", "分类名称不能为空。"))
 	}
-	defaultInt16(record, "status", 1, partial)
-	defaultInt(record, "sort", 100, partial)
+	defaultInt16OnCreateOrPresent(record, "status", 1, partial)
+	defaultIntOnCreateOrPresent(record, "sort", 100, partial)
 	return record
 }
 
@@ -547,6 +547,15 @@ func defaultInt16(record map[string]any, field string, fallback int16, partial b
 	}
 }
 
+func defaultInt16OnCreateOrPresent(record map[string]any, field string, fallback int16, partial bool) {
+	if !shouldDefaultOnCreateOrPresent(record, field, partial) {
+		return
+	}
+	if util.ToIntDefault(record[field], 0) <= 0 {
+		record[field] = fallback
+	}
+}
+
 func defaultInt(record map[string]any, field string, fallback int, partial bool) {
 	if !shouldNormalize(record, field, partial) {
 		return
@@ -554,6 +563,26 @@ func defaultInt(record map[string]any, field string, fallback int, partial bool)
 	if util.ToIntDefault(record[field], 0) <= 0 {
 		record[field] = fallback
 	}
+}
+
+func defaultIntOnCreateOrPresent(record map[string]any, field string, fallback int, partial bool) {
+	if !shouldDefaultOnCreateOrPresent(record, field, partial) {
+		return
+	}
+	if util.ToIntDefault(record[field], 0) <= 0 {
+		record[field] = fallback
+	}
+}
+
+func shouldDefaultOnCreateOrPresent(record map[string]any, field string, partial bool) bool {
+	if partial {
+		_, exists := record[field]
+		return exists
+	}
+	if _, exists := record[field]; exists {
+		return true
+	}
+	return util.ToUint64(record["id"]) == 0
 }
 
 func savedRecordID(payload map[string]any) uint64 {

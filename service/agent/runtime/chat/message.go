@@ -184,14 +184,25 @@ func (s Service) BeginRunTurn(ctx context.Context, request RunTurnRequest) (RunT
 }
 
 func (s Service) CompleteRunTurn(ctx context.Context, completion RunTurnCompletion) error {
+	sessionID, err := s.SaveRunTurnCompletion(ctx, completion)
+	if err != nil {
+		return err
+	}
+	s.AfterRunTurnCompletion(sessionID)
+	return nil
+}
+
+// SaveRunTurnCompletion only persists the message state. Keeping lifecycle
+// work outside this method lets callers commit the run and message atomically.
+func (s Service) SaveRunTurnCompletion(ctx context.Context, completion RunTurnCompletion) (uint64, error) {
 	requestID := strings.TrimSpace(completion.RequestID)
 	if requestID == "" {
-		return fmt.Errorf("运行请求ID不能为空")
+		return 0, fmt.Errorf("运行请求ID不能为空")
 	}
 	messageModel := agentmodel.NewMessageModel()
 	message := messageModel.Find(ctx, map[string]any{"role": "assistant", "request_id": requestID})
 	if message == nil {
-		return fmt.Errorf("运行中的助手消息不存在")
+		return 0, fmt.Errorf("运行中的助手消息不存在")
 	}
 	status, text, output := completedRunTurnMessage(completion)
 	messageModel.Update(ctx, map[string]any{"id": message.ID}, map[string]any{
@@ -201,8 +212,13 @@ func (s Service) CompleteRunTurn(ctx context.Context, completion RunTurnCompleti
 		"status":  status,
 	})
 	touchSessionTimestamp(ctx, message.SessionID, time.Now())
-	s.afterTurn(message.SessionID)
-	return nil
+	return message.SessionID, nil
+}
+
+func (s Service) AfterRunTurnCompletion(sessionID uint64) {
+	if sessionID > 0 {
+		s.afterTurn(sessionID)
+	}
 }
 
 func (s Service) RequireRunAccess(ctx context.Context, requestID string) error {

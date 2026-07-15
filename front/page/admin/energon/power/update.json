@@ -66,9 +66,51 @@
         "mode": "form"
       },
       {
+        "id": "power-kind",
         "type": "form-radio",
         "value": "form.kind",
-        "mode": "form"
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "技术类型不能为空。"
+          }
+        ],
+        "meta": {
+          "clearOnChange": [
+            "form.output_type"
+          ]
+        }
+      },
+      {
+        "id": "power-output-type",
+        "type": "form-radio",
+        "name": "输出类型",
+        "value": "form.output_type",
+        "mode": "form",
+        "info": "通用输出按原始文本展示；分镜脚本使用系统固定结构并在画布中展示为可编辑分镜。",
+        "meta": {
+          "hiddenWhen": [
+            {
+              "path": "form.kind",
+              "operator": "notEquals",
+              "value": "text"
+            }
+          ]
+        },
+        "validate": [
+          {
+            "type": "required",
+            "message": "文本能力必须选择输出类型。",
+            "when": [
+              {
+                "path": "form.kind",
+                "operator": "equals",
+                "value": "text"
+              }
+            ]
+          }
+        ]
       },
       {
         "type": "form-radio",
@@ -104,7 +146,7 @@
         "placeholder": "填写该能力长期生效的职责、输出要求和约束，可留空。",
         "value": "form.prompt",
         "mode": "form",
-        "info": "每次调用该能力时作为系统设定发送；分镜脚本还会自动加入固定的 storyboard JSON 协议。",
+        "info": "每次调用该能力时作为系统设定发送；分镜脚本会额外强制使用系统固定的结构化输出协议。",
         "meta": {
           "formLayout": "vertical",
           "minHeight": 220,
@@ -117,6 +159,7 @@
     "form": {
       "cate_id": 1,
       "icon": "zap",
+      "output_type": "general",
       "kind": "text",
       "prompt": "",
       "source_rule": 1,

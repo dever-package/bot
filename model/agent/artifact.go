@@ -24,6 +24,8 @@ type Artifact struct {
 	MessageID         uint64    `dorm:"type:bigint;not null;default:0;comment:消息"`
 	RunID             uint64    `dorm:"type:bigint;not null;default:0;comment:运行"`
 	StepID            uint64    `dorm:"type:bigint;not null;default:0;comment:步骤"`
+	DocumentID        uint64    `dorm:"type:bigint;not null;default:0;comment:文档"`
+	BlockID           uint64    `dorm:"type:bigint;not null;default:0;comment:内容块"`
 	FileID            uint64    `dorm:"type:bigint;not null;default:0;comment:上传文件"`
 	SeriesID          uint64    `dorm:"type:bigint;not null;default:0;comment:素材系列"`
 	Kind              string    `dorm:"type:varchar(32);not null;default:'file';comment:素材类型"`
@@ -43,6 +45,8 @@ type ArtifactIndex struct {
 	SessionID     struct{} `index:"session_id,id"`
 	MessageID     struct{} `index:"message_id,id"`
 	RunID         struct{} `index:"run_id,id"`
+	DocumentID    struct{} `index:"document_id,id"`
+	BlockID       struct{} `index:"block_id,id"`
 	SeriesID      struct{} `index:"series_id,id"`
 	FileID        struct{} `index:"file_id"`
 	BatchKey      struct{} `index:"batch_key"`

@@ -100,6 +100,7 @@ func buildOpenAIChatRequest(input botprotocol.NativeInput, path string) botprovi
 		body[key] = value
 		excludedPromptKeys[key] = true
 	}
+	applyToolOptionOverrides(body, input.Request.Options)
 
 	messages := botprotocol.BuildOpenAIMessagesFromParts(
 		input.Request.Set,
@@ -143,6 +144,7 @@ func buildOpenAIConfiguredRequest(input botprotocol.NativeInput, path string) bo
 	for key, value := range mapped.NativeBody() {
 		body[key] = value
 	}
+	applyToolOptionOverrides(body, input.Request.Options)
 	if nativeName := nativeModelName(input.ServiceAPI); nativeName != "" {
 		setBodyDefault(body, "model", nativeName)
 	}

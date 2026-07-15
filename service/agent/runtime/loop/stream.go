@@ -9,8 +9,16 @@ import (
 
 const runtimeStreamNamespace = "agent_runtime"
 
+var sharedRuntimeStreams = frontstream.New(runtimeStreamNamespace)
+
+// StreamStore keeps API readers and durable workers on the same fallback
+// memory stream when Redis is temporarily unavailable.
+func StreamStore() frontstream.Service {
+	return sharedRuntimeStreams
+}
+
 func (s Service) startExecutionStream(ctx context.Context, execution execution) (map[string]any, error) {
-	payload := frontstream.ResponsePayload(execution.requestID, botprotocol.ResponseTypeStream, map[string]any{
+	payload := frontstream.ResponsePayload(execution.requestID, botprotocol.ResponseTypeStream, withExecutionStreamMeta(execution, map[string]any{
 		"event": "start",
 		"text":  "",
 		"meta": map[string]any{
@@ -18,7 +26,7 @@ func (s Service) startExecutionStream(ctx context.Context, execution execution) 
 			"cancelable": true,
 			"run_id":     execution.runID,
 		},
-	}, "", botprotocol.ResponseStatusSuccess)
+	}), "", botprotocol.ResponseStatusSuccess)
 	if err := s.writeExecutionPayload(ctx, execution, payload); err != nil {
 		return nil, err
 	}
@@ -29,7 +37,7 @@ func (s Service) writeExecutionOutput(ctx context.Context, execution execution, 
 	return s.writeExecutionPayload(ctx, execution, frontstream.ResponsePayload(
 		execution.requestID,
 		botprotocol.ResponseTypeStream,
-		output,
+		withExecutionStreamMeta(execution, output),
 		"",
 		botprotocol.ResponseStatusSuccess,
 	))
@@ -39,10 +47,30 @@ func (s Service) writeExecutionResult(ctx context.Context, execution execution, 
 	return s.writeExecutionPayload(ctx, execution, frontstream.ResponsePayload(
 		execution.requestID,
 		botprotocol.ResponseTypeResult,
-		output,
+		withExecutionStreamMeta(execution, output),
 		message,
 		status,
 	))
+}
+
+func withExecutionStreamMeta(execution execution, output map[string]any) map[string]any {
+	result := cloneMap(output)
+	if result == nil {
+		result = map[string]any{}
+	}
+	meta, _ := result["meta"].(map[string]any)
+	meta = cloneMap(meta)
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	if execution.runID > 0 {
+		meta["run_id"] = execution.runID
+	}
+	if execution.version > 0 {
+		meta["run_version"] = execution.version
+	}
+	result["meta"] = meta
+	return result
 }
 
 func (s Service) writeExecutionPayload(ctx context.Context, execution execution, payload map[string]any) error {

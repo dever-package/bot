@@ -62,11 +62,13 @@ export function AgentChatMessageOutput({
       {generatingArtifacts.length > 0 ? (
         <ArtifactRecoveryPlaceholder artifacts={generatingArtifacts} />
       ) : null}
-      <EnergonContentView
-        output={displayOutput}
-        mediaLayout="chat"
-        onMediaPreview={onMediaPreview}
-      />
+      {displayOutput.length > 0 ? (
+        <EnergonContentView
+          output={displayOutput}
+          mediaLayout="chat"
+          onMediaPreview={onMediaPreview}
+        />
+      ) : null}
     </div>
   );
 }
@@ -107,10 +109,10 @@ function artifactPlaceholderIcon(kind: AgentChatArtifact["kind"]) {
 }
 
 export function hasAgentChatMessageOutput(output: unknown) {
-  return agentChatMessageOutput(output).length > 0;
+  return agentChatDisplayOutput(output).length > 0;
 }
 
-function agentChatMessageOutput(output: unknown) {
+export function agentChatDisplayOutput(output: unknown) {
   return agentChatMessageOutputWithOptions(output, {
     excludedKeys: new Set(),
     excludeText: "",

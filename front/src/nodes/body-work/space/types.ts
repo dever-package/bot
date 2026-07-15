@@ -1,7 +1,13 @@
 export type AssetKind = "text" | "image" | "audio" | "video" | "file" | "mixed" | string;
 export type AssetCardinality = "single" | "multiple" | "ordered" | string;
 export type AssetRole = "content" | "material" | string;
-export type SpaceNodeType = "asset" | "power" | "agent" | "flow" | "function";
+export type SpaceNodeType =
+  | "asset"
+  | "power"
+  | "agent"
+  | "flow"
+  | "function"
+  | "group";
 
 export type WorkProject = {
   id: number;
@@ -83,7 +89,20 @@ export type PowerOption = {
   name: string;
   key: string;
   icon: string;
+  outputType: string;
+  output?: OutputTypeOption;
   kind: string;
+};
+
+export type OutputTypeOption = {
+  key: string;
+  name: string;
+  allowedKinds: string[];
+  viewMode: string;
+  defaultWidth: number;
+  defaultHeight: number;
+  structured: boolean;
+  sort: number;
 };
 
 export type PowerKindOption = {
@@ -231,6 +250,7 @@ export type SpaceBootstrap = {
   assets: ProjectAsset[];
   powers: PowerOption[];
   powerKinds: PowerKindOption[];
+  outputTypes: OutputTypeOption[];
 };
 
 export type CanvasResultViewState = {
@@ -238,6 +258,26 @@ export type CanvasResultViewState = {
   height: number;
   offsetX?: number;
   offsetY?: number;
+};
+
+export type CanvasGroupConfig = {
+  origin?: "manual" | "script" | string;
+  sourceNodeId?: string;
+  syncKey?: string;
+};
+
+export type CanvasComposerDraft = {
+  prompt?: string;
+  paramValues?: Record<string, unknown>;
+  selectedTargetId?: number;
+};
+
+export type CanvasStoryboardMaterialConfig = {
+  sourceNodeId: string;
+  materialType: "character" | "scene" | "prop";
+  materialId: string;
+  generatedPrompt: string;
+  stale?: boolean;
 };
 
 export type SpaceCanvasNode = {
@@ -251,8 +291,12 @@ export type SpaceCanvasNode = {
   y: number;
   width: number;
   height: number;
+  groupId?: string;
+  group?: CanvasGroupConfig;
+  storyboardMaterial?: CanvasStoryboardMaterialConfig;
   assetCateId?: number;
   kind?: AssetKind;
+  outputType?: string;
   cardinality?: AssetCardinality;
   count?: number;
   flow?: TeamFlow;
@@ -260,6 +304,7 @@ export type SpaceCanvasNode = {
   asset?: ProjectAsset;
   power?: PowerOption;
   functionOption?: CanvasFunctionOption;
+  composerDraft?: CanvasComposerDraft;
   resultRef?: CanvasResultRef;
   resultOutput?: unknown;
   resultView?: CanvasResultViewState;
@@ -270,6 +315,8 @@ export type SpaceCanvasEdge = {
   id: string;
   from: string;
   to: string;
+  logicalFrom?: string;
+  logicalTo?: string;
 };
 
 export type SpaceCanvasViewport = {

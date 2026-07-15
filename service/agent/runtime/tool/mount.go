@@ -19,14 +19,15 @@ import (
 )
 
 type MountRequest struct {
-	Agent      agentmodel.Agent
-	Gateway    energonservice.GatewayService
-	References []runtimeprovider.MediaReference
-	Method     string
-	Host       string
-	Path       string
-	Headers    map[string]string
-	Server     *server.Context
+	Agent          agentmodel.Agent
+	Gateway        energonservice.GatewayService
+	References     []runtimeprovider.MediaReference
+	EnableDocument bool
+	Method         string
+	Host           string
+	Path           string
+	Headers        map[string]string
+	Server         *server.Context
 }
 
 type MountResult struct {
@@ -43,15 +44,22 @@ func (result MountResult) Close() {
 }
 
 func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
-	registry, err := NewRegistry(
+	tools := []runtimeprovider.Tool{
 		runtimeprovider.AskUserTool(),
 		runtimeprovider.PresentSuggestionsTool(),
-	)
+	}
+	if request.EnableDocument {
+		tools = append(tools, runtimeprovider.StartDocumentTool())
+	}
+	registry, err := NewRegistry(tools...)
 	if err != nil {
 		return MountResult{}, err
 	}
 	result := MountResult{Registry: registry}
-	prompts := make([]string, 0, 2)
+	prompts := make([]string, 0, 3)
+	if request.EnableDocument {
+		prompts = append(prompts, runtimeprovider.StartDocumentPrompt)
+	}
 
 	if request.Agent.KnowledgeCateID > 0 {
 		bases := knowledgeservice.NewService().KnowledgeBasesByCate(ctx, request.Agent.KnowledgeCateID)

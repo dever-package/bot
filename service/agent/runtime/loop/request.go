@@ -15,14 +15,18 @@ const toolCommunicationRules = `工具调用沟通规则：
 - 技能加载等其他快速内部工具无需播报。
 - 工具完成后直接结合结果继续回答，不要重复前置说明。`
 
-func buildGatewayBody(agent agentmodel.Agent, power energonmodel.Power, prompt string, input map[string]any, history []any, tools []any) map[string]any {
+func buildGatewayBody(agent agentmodel.Agent, power energonmodel.Power, prompt string, input map[string]any, history []any, tools []any, toolChoice string) map[string]any {
 	options := map[string]any{
 		"stream":      true,
 		"temperature": normalizeTemperature(agent.Temperature),
 	}
 	if len(tools) > 0 {
+		toolChoice = strings.TrimSpace(toolChoice)
+		if toolChoice == "" {
+			toolChoice = "auto"
+		}
 		options["tools"] = tools
-		options["tool_choice"] = "auto"
+		options["tool_choice"] = toolChoice
 		options["parallel_tool_calls"] = false
 	}
 	return map[string]any{

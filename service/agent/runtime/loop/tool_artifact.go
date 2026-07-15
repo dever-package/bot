@@ -15,9 +15,16 @@ type toolArtifactBatch struct {
 	pending []agentmodel.Artifact
 }
 
-func (s Service) beginToolArtifactBatch(ctx context.Context, execution execution, call botprotocol.ToolCall, definition runtimeprovider.Definition) (toolArtifactBatch, error) {
+func (s Service) beginToolArtifactBatch(
+	ctx context.Context,
+	execution execution,
+	call botprotocol.ToolCall,
+	definition runtimeprovider.Definition,
+	documentID uint64,
+	blockID uint64,
+) (toolArtifactBatch, error) {
 	batch := toolArtifactBatch{service: runtimeartifact.NewService()}
-	if execution.sessionID == 0 || execution.assistantMessageID == 0 || !isArtifactKind(definition.Kind) {
+	if execution.sessionID == 0 || execution.assistantMessageID == 0 || !runtimeartifact.IsSupportedKind(definition.Kind) {
 		return batch, nil
 	}
 	arguments, err := botprotocol.ToolCallArguments(call)
@@ -50,6 +57,8 @@ func (s Service) beginToolArtifactBatch(ctx context.Context, execution execution
 		SessionID:         execution.sessionID,
 		MessageID:         execution.assistantMessageID,
 		RunID:             execution.runID,
+		DocumentID:        documentID,
+		BlockID:           blockID,
 		Kind:              definition.Kind,
 		Count:             toolRequestedCount(call, definition),
 		Name:              toolArtifactName(arguments, definition),
@@ -66,6 +75,22 @@ func (batch toolArtifactBatch) startedOutput(ctx context.Context) map[string]any
 		return nil
 	}
 	return map[string]any{"artifacts": runtimeartifact.Payloads(ctx, batch.pending)}
+}
+
+func (batch toolArtifactBatch) recoveredResult(ctx context.Context) (runtimeprovider.Result, bool) {
+	if len(batch.pending) == 0 {
+		return runtimeprovider.Result{}, false
+	}
+	for _, artifact := range batch.pending {
+		if artifact.Status != agentmodel.ArtifactStatusReady || artifact.FileID == 0 {
+			return runtimeprovider.Result{}, false
+		}
+	}
+	output := map[string]any{"artifacts": runtimeartifact.Payloads(ctx, batch.pending)}
+	return runtimeprovider.Result{
+		Content:     output,
+		ModelResult: runtimeartifact.ModelOutput(output),
+	}, true
 }
 
 func (batch toolArtifactBatch) complete(ctx context.Context, result runtimeprovider.Result) runtimeprovider.Result {
@@ -146,15 +171,6 @@ func appendMediaReferences(current []runtimeprovider.MediaReference, values []ru
 		current = append(current, reference)
 	}
 	return current
-}
-
-func isArtifactKind(kind string) bool {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "image", "video", "audio", "file":
-		return true
-	default:
-		return false
-	}
 }
 
 func toolArtifactName(arguments map[string]any, definition runtimeprovider.Definition) string {

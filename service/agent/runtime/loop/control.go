@@ -64,8 +64,10 @@ type runRegistry struct {
 	items sync.Map
 }
 
+var sharedRuns = &runRegistry{}
+
 func newRunRegistry() *runRegistry {
-	return &runRegistry{}
+	return sharedRuns
 }
 
 func (registry *runRegistry) Start(requestID string, parent context.Context, timeout time.Duration) *runController {

@@ -183,7 +183,11 @@ func markWorkspaceNodeRun(ctx context.Context, nodeRunID uint64, status string, 
 	if canvasRunStatusFinished(status) {
 		record["finished_at"] = now
 	}
-	teammodel.NewNodeRunModel().Update(ctx, map[string]any{"id": nodeRunID}, record)
+	filters := map[string]any{"id": nodeRunID}
+	if status != teammodel.RunStatusCanceled {
+		filters["status"] = map[string]any{"neq": teammodel.RunStatusCanceled}
+	}
+	teammodel.NewNodeRunModel().Update(ctx, filters, record)
 }
 
 func canvasRunNodeInput(node canvasRunNode) map[string]any {
@@ -192,6 +196,8 @@ func canvasRunNodeInput(node canvasRunNode) map[string]any {
 		"node_type":        node.Type,
 		"title":            node.Title,
 		"kind":             node.Kind,
+		"output_type":      node.OutputType,
+		"group_id":         node.GroupID,
 		"function_key":     node.FunctionKey,
 		"asset_cate_id":    node.AssetCateID,
 		"flow_id":          node.FlowID,
@@ -219,12 +225,12 @@ func canvasRunNodeTitle(node canvasRunNode) string {
 func canvasRunTrackedNodes(plan canvasExecutionPlan) []canvasRunNode {
 	result := make([]canvasRunNode, 0, len(plan.Nodes)+1)
 	seen := map[string]bool{}
-	if strings.TrimSpace(plan.Start.ID) != "" && !isCanvasStartNode(plan.Start) {
+	if strings.TrimSpace(plan.Start.ID) != "" && !isCanvasStartNode(plan.Start) && plan.Start.Type != "group" {
 		result = append(result, plan.Start)
 		seen[plan.Start.ID] = true
 	}
 	for _, node := range plan.Nodes {
-		if strings.TrimSpace(node.ID) == "" || seen[node.ID] {
+		if strings.TrimSpace(node.ID) == "" || seen[node.ID] || node.Type == "group" {
 			continue
 		}
 		result = append(result, node)
@@ -327,14 +333,32 @@ func validateCanvasRunGraph(nodes map[string]canvasRunNode, edges []canvasRunEdg
 
 func validateCanvasExecutionPlan(plan canvasExecutionPlan) error {
 	for _, node := range plan.Nodes {
-		if node.Type == "function" && node.FunctionKey == "save" && len(plan.Incoming[node.ID]) != 1 {
+		incomingCount := canvasLogicalIncomingCount(plan, node)
+		if node.Type == "function" && node.FunctionKey == "save" && incomingCount != 1 {
 			return fmt.Errorf("保存节点 %s 需要且只需要一个执行结果上游节点", canvasRunNodeTitle(node))
 		}
-		if node.Type == "function" && node.FunctionKey == "display" && len(plan.Incoming[node.ID]) != 1 {
+		if node.Type == "function" && node.FunctionKey == "display" && incomingCount != 1 {
 			return fmt.Errorf("展示节点 %s 需要且只需要一个执行结果上游节点", canvasRunNodeTitle(node))
 		}
 	}
 	return nil
+}
+
+func canvasLogicalIncomingCount(plan canvasExecutionPlan, target canvasRunNode) int {
+	nodeByID := make(map[string]canvasRunNode, len(plan.Nodes))
+	for _, node := range plan.Nodes {
+		nodeByID[node.ID] = node
+	}
+	logicalSources := map[string]bool{}
+	for _, sourceID := range plan.Incoming[target.ID] {
+		source := nodeByID[sourceID]
+		key := sourceID
+		if target.GroupID == "" && source.GroupID != "" {
+			key = "group:" + source.GroupID
+		}
+		logicalSources[key] = true
+	}
+	return len(logicalSources)
 }
 
 func buildCanvasRunExecutionPlan(
@@ -344,6 +368,9 @@ func buildCanvasRunExecutionPlan(
 	singleNode bool,
 ) canvasExecutionPlan {
 	if singleNode {
+		if nodes[startNodeID].Type == "group" {
+			return buildCanvasExecutionPlan(startNodeID, nodes, edges)
+		}
 		return buildSingleCanvasNodeExecutionPlan(startNodeID, nodes)
 	}
 	return buildCanvasExecutionPlan(startNodeID, nodes, edges)

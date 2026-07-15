@@ -1,9 +1,10 @@
 import {
+  ActionBarPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
   useAuiState,
 } from "@assistant-ui/react";
-import { ArrowDown, Bot, Loader2 } from "lucide-react";
+import { ArrowDown, Bot, Check, Copy, Loader2 } from "lucide-react";
 import type { ComponentType } from "react";
 import { getCompatModule } from "@dever/front-plugin";
 import { cn } from "@/lib/utils";
@@ -11,6 +12,8 @@ import { StreamingMarkdown } from "./markdown";
 import { AgentChatActivityView } from "./activity-view";
 import type { AgentChatActivity } from "./activity";
 import { AgentChatMessageOutput } from "./message-output";
+import { AgentChatDocumentView } from "./document-view";
+import type { AgentChatDocument } from "./document";
 import { MessageNavigator } from "./message-navigator";
 import {
   findAgentChatInteractionResponse,
@@ -137,7 +140,7 @@ function UserMessage({ controller }: { controller: AgentChatController }) {
     (state) => state.message.metadata.custom?.sourceText,
   );
   return (
-    <MessagePrimitive.Root className="agent-chat-user-message flex justify-end pl-6 md:pl-20">
+    <MessagePrimitive.Root className="agent-chat-message agent-chat-user-message relative flex justify-end pl-6 md:pl-20">
       <div className="max-w-[88%] whitespace-pre-wrap break-words rounded-lg bg-muted px-3.5 py-2.5 text-base leading-7 text-foreground [overflow-wrap:anywhere] md:max-w-full">
         <ReferenceContentView
           content={content}
@@ -145,6 +148,7 @@ function UserMessage({ controller }: { controller: AgentChatController }) {
           loadPreview={controller.loadReferencePreview}
         />
       </div>
+      <MessageActions role="user" />
     </MessagePrimitive.Root>
   );
 }
@@ -158,6 +162,9 @@ function AssistantMessage({ controller }: { controller: AgentChatController }) {
   const sourceText = useAuiState(
     (state) => state.message.metadata.custom?.sourceText,
   );
+  const document = useAuiState(
+    (state) => state.message.metadata.custom?.document,
+  ) as AgentChatDocument | undefined;
   const visibleActivities = Array.isArray(activities) ? activities : [];
   const interaction = readAgentChatInteraction(output);
   const interactionResponse = interaction?.id
@@ -173,37 +180,48 @@ function AssistantMessage({ controller }: { controller: AgentChatController }) {
   return (
     <MessagePrimitive.Root
       className={cn(
-        "relative min-w-0 [contain-intrinsic-size:auto_180px] [content-visibility:auto]",
+        "agent-chat-message relative min-w-0 [contain-intrinsic-size:auto_180px] [content-visibility:auto]",
         error && "text-destructive",
       )}
     >
-      <MessagePrimitive.Parts>
-        {({ part }) => {
-          if (part.type === "text") {
-            const running = part.status.type === "running";
-            if (running && !part.text && visibleActivities.length === 0) {
-              return <WaitingIndicator />;
-            }
-            if (!part.text) {
+      {document ? (
+        <AgentChatDocumentView
+          document={document}
+          sourceText={typeof sourceText === "string" ? sourceText : ""}
+          running={status?.type === "running"}
+          error={error}
+        />
+      ) : (
+        <>
+          <MessagePrimitive.Parts>
+            {({ part }) => {
+              if (part.type === "text") {
+                const running = part.status.type === "running";
+                if (running && !part.text && visibleActivities.length === 0) {
+                  return <WaitingIndicator />;
+                }
+                if (!part.text) {
+                  return null;
+                }
+                return <StreamingMarkdown error={error} />;
+              }
+              if (part.type === "tool-call") {
+                const activity = visibleActivities.find(
+                  (current) => current.id === part.toolCallId,
+                );
+                return <AgentChatActivityView activity={activity} />;
+              }
               return null;
-            }
-            return <StreamingMarkdown error={error} />;
-          }
-          if (part.type === "tool-call") {
-            const activity = visibleActivities.find(
-              (current) => current.id === part.toolCallId,
-            );
-            return <AgentChatActivityView activity={activity} />;
-          }
-          return null;
-        }}
-      </MessagePrimitive.Parts>
-      {waitingForNextStep ? <NextStepIndicator /> : null}
-      <AgentChatMessageOutput
-        output={output}
-        excludeOutputs={visibleActivities.map((activity) => activity.output)}
-        excludeText={typeof sourceText === "string" ? sourceText : ""}
-      />
+            }}
+          </MessagePrimitive.Parts>
+          {waitingForNextStep ? <NextStepIndicator /> : null}
+          <AgentChatMessageOutput
+            output={output}
+            excludeOutputs={visibleActivities.map((activity) => activity.output)}
+            excludeText={typeof sourceText === "string" ? sourceText : ""}
+          />
+        </>
+      )}
       {interaction ? (
         <AgentChatInteractionView
           interaction={interaction}
@@ -227,7 +245,30 @@ function AssistantMessage({ controller }: { controller: AgentChatController }) {
           void controller.send(textReferenceInput(suggestion.prompt));
         }}
       />
+      <MessageActions role="assistant" />
     </MessagePrimitive.Root>
+  );
+}
+
+function MessageActions({ role }: { role: "user" | "assistant" }) {
+  return (
+    <ActionBarPrimitive.Root
+      className={cn(
+        "agent-chat-message-actions",
+        role === "user" ? "right-0 justify-end" : "left-0",
+      )}
+      data-message-role={role}
+    >
+      <ActionBarPrimitive.Copy
+        copiedDuration={1800}
+        className="agent-chat-message-action agent-chat-copy-action"
+        title="复制"
+        aria-label="复制消息"
+      >
+        <Copy className="agent-chat-copy-icon" aria-hidden="true" />
+        <Check className="agent-chat-copied-icon" aria-hidden="true" />
+      </ActionBarPrimitive.Copy>
+    </ActionBarPrimitive.Root>
   );
 }
 
@@ -330,6 +371,17 @@ const threadStyles = `
   padding-bottom: 88px;
 }
 
+.agent-chat-document {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.agent-chat-document .agent-chat-message-output,
+.agent-chat-document .agent-chat-media-grid {
+  margin-top: 0;
+}
+
 .agent-chat-interaction[data-presentation="stepper"] {
   width: min(52%, 560px);
   min-width: min(100%, 480px);
@@ -410,6 +462,68 @@ const threadStyles = `
 
 .agent-chat-user-message {
   scroll-margin-top: 24px;
+}
+
+.agent-chat-message-actions {
+  position: absolute;
+  top: 100%;
+  z-index: 2;
+  display: flex;
+  height: 28px;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.agent-chat-message:hover .agent-chat-message-actions,
+.agent-chat-message:focus-within .agent-chat-message-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.agent-chat-message-action {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.agent-chat-message-action:hover:not(:disabled),
+.agent-chat-message-action:focus-visible {
+  background: var(--muted);
+  color: var(--foreground);
+  outline: none;
+}
+
+.agent-chat-message-action:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.agent-chat-message-action svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.8;
+}
+
+.agent-chat-copied-icon,
+.agent-chat-copy-action[data-copied="true"] .agent-chat-copy-icon {
+  display: none;
+}
+
+.agent-chat-copy-action[data-copied="true"] .agent-chat-copied-icon {
+  display: block;
 }
 
 .agent-chat-footer {
@@ -608,6 +722,13 @@ const threadStyles = `
     height: 18px;
   }
 
+}
+
+@media (hover: none) {
+  .agent-chat-message-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 `;

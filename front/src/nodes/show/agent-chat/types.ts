@@ -2,6 +2,7 @@ import type { RefObject, WheelEvent } from "react";
 import type { AgentChatMessageRecord, AgentChatSession } from "./api";
 import { readAgentChatActivities, type AgentChatActivity } from "./activity";
 import type { AgentChatOutput } from "./output";
+import type { AgentChatDocument } from "./document";
 import type {
   ReferenceContent,
   ReferenceInput,
@@ -21,6 +22,7 @@ export type ChatMessage = {
   requestID?: string;
   running?: boolean;
   error?: boolean;
+  document?: AgentChatDocument;
 };
 
 export type ChatStreamOutput = AgentChatOutput & {
@@ -37,6 +39,8 @@ export type AgentChatRuntimeApis = {
   status: string;
   referencePreview: string;
   inputConfig: string;
+  document: string;
+  documentStream: string;
 };
 
 export type AgentChatStoreOptions = {
@@ -94,5 +98,6 @@ export function mapChatMessages(
     requestID: message.requestID || undefined,
     running: message.status === 3,
     error: message.status === 2,
+    document: message.document,
   }));
 }

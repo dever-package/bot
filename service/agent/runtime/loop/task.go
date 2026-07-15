@@ -42,16 +42,18 @@ func (s Service) RunTask(ctx context.Context, request TaskRequest) map[string]an
 	if err != nil {
 		return botprotocol.BuildErrorResponse(requestID, err).Payload()
 	}
-	controller := s.runs.Start(requestID, context.Background(), chatTimeout(execution.agent.TimeoutSeconds))
 	startPayload, err := s.startExecutionStream(ctx, execution)
 	if err != nil {
-		controller.Stop("fail")
-		s.runs.Remove(requestID)
 		s.failExecutionStart(execution, err)
 		execution.close()
 		return botprotocol.BuildErrorResponse(requestID, err).Payload()
 	}
-	go s.run(controller, execution)
+	if err := s.enqueueExecution(ctx, execution); err != nil {
+		s.failExecutionStart(execution, err)
+		execution.close()
+		return botprotocol.BuildErrorResponse(requestID, err).Payload()
+	}
+	execution.close()
 	return startPayload
 }
 

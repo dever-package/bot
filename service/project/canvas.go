@@ -20,6 +20,7 @@ var allowedCanvasNodeTypes = map[string]bool{
 	"agent":    true,
 	"flow":     true,
 	"function": true,
+	"group":    true,
 }
 
 var forbiddenCanvasDataFields = map[string]bool{

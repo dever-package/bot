@@ -1,5 +1,6 @@
 import {
   Eye,
+  FolderTree,
   Play,
   Save,
   Upload,
@@ -10,6 +11,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { PowerIcon } from "./space-power-icon";
+import { resolvePowerPresentation } from "./space-power-presentation";
 import type {
   CanvasFunctionOption,
   PowerOption,
@@ -46,6 +48,7 @@ export function AddNodeMenu({
   onClose,
   onSelectFlow,
   onSelectFunction,
+  onSelectGroup,
   onSelectRole,
   onSelectPower,
 }: {
@@ -56,6 +59,7 @@ export function AddNodeMenu({
   onClose: () => void;
   onSelectFlow: (flow: TeamFlow) => void;
   onSelectFunction: (option: CanvasFunctionOption) => void;
+  onSelectGroup: () => void;
   onSelectRole: (role: TeamRole) => void;
   onSelectPower: (power: PowerOption) => void;
 }) {
@@ -64,16 +68,7 @@ export function AddNodeMenu({
 
   if (powers.length > 0) {
     sections.push(
-      renderMenuSection({
-        sectionKey: "powers",
-        title: "能力",
-        items: powers,
-        itemKey: (power) => String(power.key || power.id),
-        itemClassName: "is-power",
-        label: (power) => power.name,
-        icon: (power) => <PowerIcon power={power} size={16} />,
-        onSelect: onSelectPower,
-      }),
+      renderPowerMenuSection(powers, onSelectPower),
     );
   }
   if (roles.length > 0) {
@@ -104,22 +99,7 @@ export function AddNodeMenu({
       }),
     );
   }
-  sections.push(
-    renderMenuSection({
-      sectionKey: "functions",
-      title: "功能",
-      items: canvasFunctionOptions,
-      itemKey: (option) => option.key,
-      itemClassName: (option) =>
-        option.key === "import" ? "is-function is-import" : "is-function",
-      label: (option) => option.label,
-      icon: (option) => {
-        const Icon = functionIcon(option.key);
-        return <Icon size={16} />;
-      },
-      onSelect: onSelectFunction,
-    }),
-  );
+  sections.push(renderFunctionMenuSection(onSelectFunction, onSelectGroup));
 
   return (
     <>
@@ -161,6 +141,7 @@ function renderMenuSection<T>({
   itemKey,
   itemClassName,
   label,
+  description,
   icon,
   onSelect,
 }: {
@@ -170,34 +151,135 @@ function renderMenuSection<T>({
   itemKey: (item: T) => string;
   itemClassName: string | ((item: T) => string);
   label: (item: T) => string;
+  description?: (item: T) => string;
   icon: (item: T) => ReactNode;
   onSelect: (item: T) => void;
 }) {
   return (
     <div key={sectionKey} className="ws-add-section">
       <div className="ws-add-section-title">{title}</div>
-      <div className="ws-add-menu-list">
-        {items.map((item) => {
-          const className =
-            typeof itemClassName === "function"
-              ? itemClassName(item)
-              : itemClassName;
-          return (
-            <button
-              key={itemKey(item)}
-              type="button"
-              className={`ws-add-item ${className}`.trim()}
-              title={label(item)}
-              onClick={() => onSelect(item)}
-            >
-              <span className="ws-add-icon">{icon(item)}</span>
-              <span className="ws-add-copy">
-                <span className="ws-add-label">{label(item)}</span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      {renderMenuItems({
+        items,
+        itemKey,
+        itemClassName,
+        label,
+        description,
+        icon,
+        onSelect,
+      })}
+    </div>
+  );
+}
+
+function renderPowerMenuSection(
+  powers: PowerOption[],
+  onSelect: (power: PowerOption) => void,
+) {
+  return (
+    <div key="powers" className="ws-add-section">
+      <div className="ws-add-section-title">能力</div>
+      {renderMenuItems({
+        items: powers,
+        itemKey: (power) => String(power.key || power.id),
+        itemClassName: "is-power",
+        label: (power) => power.name,
+        description: (power) => resolvePowerPresentation(power).kindName,
+        icon: (power) => <PowerIcon power={power} size={16} />,
+        onSelect,
+      })}
+    </div>
+  );
+}
+
+function renderFunctionMenuSection(
+  onSelectFunction: (option: CanvasFunctionOption) => void,
+  onSelectGroup: () => void,
+) {
+  const items = [
+    ...canvasFunctionOptions.map((option) => ({
+      key: option.key,
+      label: option.label,
+      description: option.description,
+      className:
+        option.key === "import" ? "is-function is-import" : "is-function",
+      Icon: functionIcon(option.key),
+      select: () => onSelectFunction(option),
+    })),
+    {
+      key: "group",
+      label: "分组",
+      description: "组织并统一运行一组节点",
+      className: "is-group",
+      Icon: FolderTree,
+      select: onSelectGroup,
+    },
+  ];
+  return (
+    <div key="functions" className="ws-add-section">
+      <div className="ws-add-section-title">功能</div>
+      {renderMenuItems({
+        items,
+        itemKey: (item) => item.key,
+        itemClassName: (item) => item.className,
+        label: (item) => item.label,
+        description: (item) => item.description,
+        icon: (item) => {
+          const Icon = item.Icon;
+          return <Icon size={16} />;
+        },
+        onSelect: (item) => item.select(),
+      })}
+    </div>
+  );
+}
+
+function renderMenuItems<T>({
+  items,
+  itemKey,
+  itemClassName,
+  label,
+  description,
+  icon,
+  onSelect,
+}: {
+  items: T[];
+  itemKey: (item: T) => string;
+  itemClassName: string | ((item: T) => string);
+  label: (item: T) => string;
+  description?: (item: T) => string;
+  icon: (item: T) => ReactNode;
+  onSelect: (item: T) => void;
+}) {
+  return (
+    <div className="ws-add-menu-list">
+      {items.map((item) => {
+        const className =
+          typeof itemClassName === "function"
+            ? itemClassName(item)
+            : itemClassName;
+        const itemDescription = description?.(item) || "";
+        return (
+          <button
+            key={itemKey(item)}
+            type="button"
+            className={`ws-add-item ${className}`.trim()}
+            title={
+              itemDescription
+                ? `${label(item)} · ${itemDescription}`
+                : label(item)
+            }
+            onClick={() => onSelect(item)}
+          >
+            <span className="ws-add-icon">{icon(item)}</span>
+            <span className="ws-add-copy">
+              <span className="ws-add-label">{label(item)}</span>
+              {itemDescription ? (
+                <span className="ws-add-desc">{itemDescription}</span>
+              ) : null}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

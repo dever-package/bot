@@ -56,6 +56,9 @@ export type CanvasExecutionPlanNodeRef = {
   id: string;
   type: string;
   title: string;
+  kind?: string;
+  output_type?: string;
+  group_id?: string;
   function_key: string;
   asset_cate_id: number;
   persists_result: boolean;
@@ -172,6 +175,9 @@ function normalizeCanvasExecutionPlanNodeRef(
     id,
     type: String(value?.type || ""),
     title: String(value?.title || ""),
+    kind: String(value?.kind || ""),
+    output_type: String(value?.output_type || ""),
+    group_id: String(value?.group_id || ""),
     function_key: String(value?.function_key || ""),
     asset_cate_id: Number(value?.asset_cate_id || 0),
     persists_result: Boolean(value?.persists_result),

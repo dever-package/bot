@@ -15,6 +15,8 @@ type BatchRequest struct {
 	SessionID         uint64
 	MessageID         uint64
 	RunID             uint64
+	DocumentID        uint64
+	BlockID           uint64
 	Kind              string
 	Count             int
 	Name              string
@@ -42,6 +44,9 @@ func (s Service) BeginBatch(ctx context.Context, request BatchRequest) ([]agentm
 	if request.SessionID == 0 || request.MessageID == 0 || request.RunID == 0 {
 		return []agentmodel.Artifact{}, nil
 	}
+	if existing := s.repository.byRunBatch(ctx, request.RunID, request.BatchKey); len(existing) > 0 {
+		return existing, nil
+	}
 	session := agentmodel.NewSessionModel().Find(ctx, map[string]any{"id": request.SessionID})
 	if session == nil {
 		return nil, fmt.Errorf("素材所属会话不存在")
@@ -68,6 +73,8 @@ func (s Service) BeginBatch(ctx context.Context, request BatchRequest) ([]agentm
 			"message_id":          request.MessageID,
 			"run_id":              request.RunID,
 			"step_id":             0,
+			"document_id":         request.DocumentID,
+			"block_id":            request.BlockID,
 			"file_id":             0,
 			"series_id":           seriesID,
 			"kind":                kind,
@@ -149,6 +156,18 @@ func (s Service) FailBatch(ctx context.Context, pending []agentmodel.Artifact, m
 	return Payloads(ctx, rows)
 }
 
+func (s Service) ResetBatch(ctx context.Context, pending []agentmodel.Artifact) []agentmodel.Artifact {
+	rows := make([]agentmodel.Artifact, 0, len(pending))
+	for _, current := range pending {
+		rows = append(rows, s.repository.update(ctx, current.ID, map[string]any{
+			"file_id": 0,
+			"status":  agentmodel.ArtifactStatusGenerating,
+			"error":   "",
+		}))
+	}
+	return rows
+}
+
 func (s Service) BindUploads(ctx context.Context, sessionID uint64, messageID uint64, bindings []UploadBinding) ([]agentmodel.Artifact, error) {
 	if sessionID == 0 || messageID == 0 || len(bindings) == 0 {
 		return []agentmodel.Artifact{}, nil
@@ -212,13 +231,29 @@ func (s Service) MessagePayloadMap(ctx context.Context, messageIDs []uint64) map
 	return result
 }
 
-func normalizeKind(kind string) string {
+func (s Service) BlockPayloadMap(ctx context.Context, blockIDs []uint64) map[uint64][]map[string]any {
+	result := make(map[uint64][]map[string]any, len(blockIDs))
+	for _, current := range s.repository.byBlocks(ctx, blockIDs) {
+		result[current.BlockID] = append(result[current.BlockID], Payload(ctx, current))
+	}
+	return result
+}
+
+func IsSupportedKind(kind string) bool {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "image", "video", "audio", "file":
-		return strings.ToLower(strings.TrimSpace(kind))
+		return true
 	default:
-		return "file"
+		return false
 	}
+}
+
+func normalizeKind(kind string) string {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	if IsSupportedKind(kind) {
+		return kind
+	}
+	return "file"
 }
 
 func batchArtifactName(base string, index int, count int) string {

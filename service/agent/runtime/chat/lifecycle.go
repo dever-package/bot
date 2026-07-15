@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
 )
 
 const (
@@ -34,9 +35,7 @@ func completedRunTurnMessage(completion RunTurnCompletion) (int16, string, map[s
 	event := status
 	switch status {
 	case completionSuccess:
-		if text == "" {
-			text = "智能体已返回结果。"
-		}
+		// Suggestions and other structured results may intentionally have no text.
 	case completionCanceled:
 		if text == "" {
 			text = "已停止生成"
@@ -50,10 +49,10 @@ func completedRunTurnMessage(completion RunTurnCompletion) (int16, string, map[s
 		messageStatus = agentmodel.MessageStatusError
 		event = completionFail
 	}
-	if text == "" {
+	if text == "" && status != completionSuccess {
 		text = "智能体运行失败。"
 	}
-	output := mergeMessageOutput(completion.Output, map[string]any{"event": event, "text": text})
+	output := runtimemessageoutput.Merge(completion.Output, map[string]any{"event": event, "text": text})
 	if errorMessage != "" {
 		output["error"] = errorMessage
 	}

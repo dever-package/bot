@@ -32,6 +32,7 @@ export type ReferencePreview = {
   title: string;
   text: string;
   media: ReferencePreviewMedia[];
+  content?: unknown;
 };
 
 export type ReferencePreviewRequest = {

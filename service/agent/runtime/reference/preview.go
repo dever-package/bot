@@ -15,11 +15,15 @@ func PreviewPayload(value Resolved) map[string]any {
 			"url":         current.URL,
 		})
 	}
-	return map[string]any{
+	result := map[string]any{
 		"ref_type": value.Reference.Type,
 		"ref_id":   value.Reference.ID,
 		"title":    value.Title,
 		"text":     value.Text,
 		"media":    media,
 	}
+	if len(value.Output) > 0 {
+		result["output"] = value.Output
+	}
+	return result
 }

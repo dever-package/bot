@@ -44,16 +44,62 @@
         ]
       },
       {
+        "id": "provider-protocol",
         "type": "form-radio",
         "value": "form.protocol",
         "mode": "form"
       },
       {
-        "type": "form-input",
-        "value": "form.host",
-        "mode": "form"
+        "id": "provider-processor",
+        "type": "form-select",
+        "name": "本地处理器",
+        "placeholder": "请选择本地处理器",
+        "value": "form.processor",
+        "mode": "form",
+        "option": {
+          "service": "bot.energon.LocalProcessorService.LoadOptions"
+        },
+        "validate": [
+          {
+            "type": "required",
+            "message": "本地来源必须选择处理器。",
+            "when": [
+              {
+                "path": "form.protocol",
+                "operator": "equals",
+                "value": "local"
+              }
+            ]
+          }
+        ],
+        "info": "服务、接口和参数由处理器自动提供，无需手工维护。",
+        "meta": {
+          "hiddenWhen": [
+            {
+              "path": "form.protocol",
+              "operator": "notEquals",
+              "value": "local"
+            }
+          ]
+        }
       },
       {
+        "id": "provider-host",
+        "type": "form-input",
+        "value": "form.host",
+        "mode": "form",
+        "meta": {
+          "hiddenWhen": [
+            {
+              "path": "form.protocol",
+              "operator": "equals",
+              "value": "local"
+            }
+          ]
+        }
+      },
+      {
+        "id": "provider-accounts",
         "type": "form-array",
         "value": "form.accounts",
         "mode": "form",
@@ -61,7 +107,14 @@
         "meta": {
           "pageRoute": "/bot/energon/account/update",
           "addText": "添加账号",
-          "drag": "sort"
+          "drag": "sort",
+          "hiddenWhen": [
+            {
+              "path": "form.protocol",
+              "operator": "equals",
+              "value": "local"
+            }
+          ]
         }
       }
     ]
@@ -69,7 +122,8 @@
   "data": {
     "form": {
       "cate_id": 1,
-      "protocol": "openai"
+      "protocol": "openai",
+      "processor": "ffmpeg"
     }
   },
   "state": {},
@@ -79,6 +133,9 @@
       "params": "form",
       "before": {
         "service": "bot.energon.hook.ProviderHook.BeforeSaveProvider"
+      },
+      "after": {
+        "service": "bot.energon.hook.ProviderHook.AfterSaveProvider"
       }
     }
   }

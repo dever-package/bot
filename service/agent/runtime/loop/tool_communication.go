@@ -14,7 +14,7 @@ func toolContinuationInput() map[string]any {
 
 func shouldStreamToolActivity(definition runtimeprovider.Definition) bool {
 	switch strings.ToLower(strings.TrimSpace(definition.Kind)) {
-	case "interaction", "presentation":
+	case "control", "interaction", "presentation", "document":
 		return false
 	default:
 		return true

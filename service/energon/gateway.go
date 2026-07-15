@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	botmodel "github.com/dever-package/bot/model/energon"
+	botprocessor "github.com/dever-package/bot/service/energon/processor"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botadapters "github.com/dever-package/bot/service/energon/protocol/adapters"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
@@ -24,6 +25,7 @@ type GatewayService struct {
 	tasks         bottask.Service
 	client        botprovider.Client
 	registry      *botprotocol.Registry
+	processors    *botprocessor.Registry
 }
 
 const defaultProviderHTTPTimeout = time.Hour
@@ -43,6 +45,7 @@ func NewGatewayServiceWithClient(client botprovider.Client) GatewayService {
 		streamCancels: botstream.NewCancelRegistry(),
 		client:        client,
 		registry:      botadapters.DefaultRegistry(),
+		processors:    botprocessor.DefaultRegistry(),
 	}
 	service.tasks = bottask.NewService(bottask.NewInlineQueue(bottask.HandlerFunc(func(ctx context.Context, job bottask.Job) error {
 		return service.handleStreamJob(ctx, job)
@@ -116,9 +119,13 @@ func (s GatewayService) selectTarget(ctx context.Context, power botmodel.Power, 
 	if !ok || !isActive(provider.Status) {
 		return selectedTarget{}, fmt.Errorf("来源不可用")
 	}
-	account, err := selectProviderAccount(ctx, s.repo, provider)
-	if err != nil {
-		return selectedTarget{}, err
+	account := botmodel.Account{}
+	if !isLocalProvider(provider) {
+		var err error
+		account, err = selectProviderAccount(ctx, s.repo, provider)
+		if err != nil {
+			return selectedTarget{}, err
+		}
 	}
 	return selectedTarget{
 		Provider:    provider,
@@ -127,6 +134,10 @@ func (s GatewayService) selectTarget(ctx context.Context, power botmodel.Power, 
 		PowerTarget: target,
 		Service:     service,
 	}, nil
+}
+
+func isLocalProvider(provider botmodel.Provider) bool {
+	return strings.EqualFold(strings.TrimSpace(provider.Protocol), botprocessor.ProtocolLocal)
 }
 
 func (s GatewayService) adapterForSelected(req *botprotocol.ShemicRequest, selected selectedTarget) (botprotocol.Adapter, error) {

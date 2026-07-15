@@ -10,9 +10,10 @@ import {
   Video,
   Workflow,
   X,
-  Zap,
   type LucideIcon,
 } from "lucide-react";
+import { PowerIcon } from "../space-power-icon";
+import { resolvePowerPresentation } from "../space-power-presentation";
 import type { SpaceCanvasNode } from "../types";
 import type { NodeDetailDraftStatus } from "./use-node-detail-draft";
 
@@ -35,16 +36,23 @@ export function NodeDetailHeader({
   onRetry: () => void;
   onClose: () => void;
 }) {
-  const NodeIcon = detailNodeIcon(node);
+  const powerPresentation =
+    node.type === "power"
+      ? resolvePowerPresentation(node.power, node.kind, node.outputType)
+      : null;
+  const detailLabel =
+    powerPresentation && powerPresentation.outputName !== contentLabel
+      ? `${powerPresentation.outputName} · ${contentLabel}`
+      : powerPresentation?.outputName || contentLabel;
   return (
     <header className="ws-node-detail-head">
       <div className="ws-node-detail-heading">
         <span className="ws-node-detail-kind-icon" aria-hidden="true">
-          <NodeIcon size={16} />
+          <DetailNodeIcon node={node} />
         </span>
         <div>
           <strong>{node.title || "节点详情"}</strong>
-          <span>{contentLabel}</span>
+          <span>{detailLabel}</span>
         </div>
       </div>
 
@@ -108,15 +116,27 @@ function saveStatusLabel(status: NodeDetailDraftStatus) {
   return "已保存";
 }
 
+function DetailNodeIcon({ node }: { node: SpaceCanvasNode }) {
+  if (node.type === "power") {
+    return (
+      <PowerIcon
+        power={node.power}
+        kind={node.kind}
+        outputType={node.outputType}
+        size={16}
+      />
+    );
+  }
+  const Icon = detailNodeIcon(node);
+  return <Icon size={16} />;
+}
+
 function detailNodeIcon(node: SpaceCanvasNode): LucideIcon {
   if (node.type === "agent") {
     return Bot;
   }
   if (node.type === "flow") {
     return Workflow;
-  }
-  if (node.type === "power") {
-    return Zap;
   }
   if (node.type === "function") {
     return Eye;

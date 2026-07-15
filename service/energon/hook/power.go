@@ -21,7 +21,24 @@ func (PowerHook) ProviderBeforeSavePower(c *server.Context, params []any) any {
 	record["name"] = util.ToStringTrimmed(record["name"])
 	record["key"] = util.ToStringTrimmed(record["key"])
 	record["icon"] = util.ToStringTrimmed(record["icon"])
-	record["kind"] = strings.TrimSpace(util.ToString(record["kind"]))
+	kind := strings.ToLower(strings.TrimSpace(util.ToString(record["kind"])))
+	kind = botmodel.NormalizePowerKind(kind)
+	if kind == "" {
+		kind = "text"
+	}
+	outputType := botmodel.OutputTypeGeneral
+	if kind == "text" {
+		outputType = botmodel.NormalizeOutputType(util.ToString(record["output_type"]))
+	}
+	_, exists := botmodel.FindOutputTypeSpec(outputType)
+	if !exists {
+		panicParamField("form.output_type", "输出类型无效。")
+	}
+	if !botmodel.IsOutputKindAllowed(outputType, kind) {
+		panicParamField("form.kind", "当前输出类型不支持所选技术类型。")
+	}
+	record["output_type"] = outputType
+	record["kind"] = kind
 	record["source_rule"] = normalizePowerSourceRule(util.ToIntDefault(record["source_rule"], int(powerSourceRuleFirst)))
 	ensureDefaultCategory(record)
 	if util.ToIntDefault(record["status"], 0) <= 0 {

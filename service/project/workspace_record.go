@@ -255,6 +255,14 @@ func finishWorkspaceRun(ctx context.Context, runID uint64, status string, output
 	if strings.TrimSpace(status) == "" {
 		status = teammodel.RunStatusSuccess
 	}
+	if workspaceRunCanceled(ctx, runID) {
+		status = teammodel.RunStatusCanceled
+		if output == nil {
+			output = map[string]any{}
+		}
+		output["status"] = teammodel.RunStatusCanceled
+		errorText = ""
+	}
 	record := map[string]any{
 		"status":     status,
 		"output":     jsonText(output, "{}"),
@@ -264,7 +272,11 @@ func finishWorkspaceRun(ctx context.Context, runID uint64, status string, output
 	if status != teammodel.RunStatusRunning && status != teammodel.RunStatusPending && status != teammodel.RunStatusWaiting {
 		record["finished_at"] = time.Now()
 	}
-	teammodel.NewRunModel().Update(ctx, map[string]any{"id": runID}, record)
+	filters := map[string]any{"id": runID}
+	if status != teammodel.RunStatusCanceled {
+		filters["status"] = map[string]any{"neq": teammodel.RunStatusCanceled}
+	}
+	teammodel.NewRunModel().Update(ctx, filters, record)
 	finishWorkspaceExecution(ctx, runID, status, output, errorText)
 }
 

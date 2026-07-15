@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	energonmodel "github.com/dever-package/bot/model/energon"
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
@@ -142,12 +143,14 @@ type TeamOption struct {
 }
 
 type PowerOption struct {
-	ID     uint64 `json:"id"`
-	CateID uint64 `json:"cate_id"`
-	Name   string `json:"name"`
-	Key    string `json:"key"`
-	Icon   string `json:"icon"`
-	Kind   string `json:"kind"`
+	ID         uint64                      `json:"id"`
+	CateID     uint64                      `json:"cate_id"`
+	Name       string                      `json:"name"`
+	Key        string                      `json:"key"`
+	Icon       string                      `json:"icon"`
+	OutputType string                      `json:"output_type"`
+	Output     energonmodel.OutputTypeSpec `json:"output"`
+	Kind       string                      `json:"kind"`
 }
 
 type PowerKindOption struct {

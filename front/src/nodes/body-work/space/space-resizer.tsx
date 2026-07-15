@@ -11,6 +11,10 @@ import type {
   CanvasResultViewState,
   SpaceCanvasNode,
 } from "./types";
+import {
+  MAX_GROUP_NODE_SIZE,
+  MIN_GROUP_NODE_SIZE,
+} from "./space-group-model";
 
 export type CanvasNodeBounds = Pick<
   SpaceCanvasNode,
@@ -131,6 +135,7 @@ export function CanvasNodeResizer({
   if (!enabled || !resizable || !onResizeEnd) {
     return null;
   }
+  const isGroup = node.type === "group";
   return (
     <>
       {RESIZE_CORNERS.map((corner) => (
@@ -138,11 +143,11 @@ export function CanvasNodeResizer({
           key={corner.position}
           position={corner.position}
           className={`ws-resize-control ws-node-resize-control ${corner.className} nodrag nopan`}
-          minWidth={MIN_RESULT_WIDTH}
-          minHeight={MIN_RESULT_HEIGHT}
-          maxWidth={MAX_RESULT_SIZE}
-          maxHeight={MAX_RESULT_SIZE}
-          keepAspectRatio
+          minWidth={isGroup ? MIN_GROUP_NODE_SIZE.width : MIN_RESULT_WIDTH}
+          minHeight={isGroup ? MIN_GROUP_NODE_SIZE.height : MIN_RESULT_HEIGHT}
+          maxWidth={isGroup ? MAX_GROUP_NODE_SIZE.width : MAX_RESULT_SIZE}
+          maxHeight={isGroup ? MAX_GROUP_NODE_SIZE.height : MAX_RESULT_SIZE}
+          keepAspectRatio={!isGroup}
           onResizeStart={() => onResizeStart?.(node.id)}
           onResizeEnd={(_event, params: ResizeParams) =>
             onResizeEnd(node.id, normalizeCanvasNodeBounds(params))

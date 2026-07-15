@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 const maxModelResultRunes = 24000
@@ -22,21 +24,12 @@ type Definition struct {
 }
 
 func (definition Definition) Native() map[string]any {
-	parameters := definition.Parameters
-	if len(parameters) == 0 {
-		parameters = map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		}
-	}
-	return map[string]any{
-		"type": "function",
-		"function": map[string]any{
-			"name":        definition.Name,
-			"description": definition.Description,
-			"parameters":  parameters,
-		},
-	}
+	return botprotocol.FunctionToolDefinition(
+		definition.Name,
+		definition.Description,
+		definition.Parameters,
+		false,
+	)
 }
 
 type Call struct {

@@ -9,11 +9,10 @@ import (
 )
 
 type AssembleRequest struct {
-	Session         agentmodel.Session
-	Agent           agentmodel.Agent
-	CategoryPrompt  string
-	Input           string
-	ReferencePrompt string
+	Session        agentmodel.Session
+	Agent          agentmodel.Agent
+	CategoryPrompt string
+	Input          string
 }
 
 type InternalAssembleRequest struct {

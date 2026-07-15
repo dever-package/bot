@@ -2,10 +2,12 @@ package loop
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	energonmodel "github.com/dever-package/bot/model/energon"
+	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 )
@@ -50,6 +52,17 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 		cleanup:            spec.Cleanup,
 		mediaReferences:    append([]runtimeprovider.MediaReference(nil), spec.MediaReferences...),
 	}
+	current.checkpoint = initialCheckpoint(current)
+	snapshot, err := encodeSnapshot(snapshotFromExecution(current))
+	if err != nil {
+		current.close()
+		return execution{}, err
+	}
+	checkpoint, err := encodeCheckpoint(current.checkpoint)
+	if err != nil {
+		current.close()
+		return execution{}, err
+	}
 	recordInput := spec.RecordInput
 	if recordInput == nil {
 		recordInput = spec.Input
@@ -60,7 +73,20 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 		SessionID:      spec.SessionID,
 		Input:          encodeJSON(recordInput, "{}"),
 		RuntimeContext: spec.Prompt,
+		Snapshot:       snapshot,
+		Checkpoint:     checkpoint,
 		StartedAt:      startedAt,
+	}, stepRecord{
+		Seq:     1,
+		Type:    "input",
+		Title:   "用户输入",
+		Content: spec.InputText,
+		Payload: encodeJSON(map[string]any{
+			"history_count": len(spec.History),
+			"tools":         spec.Registry.Names(),
+			"warnings":      spec.Warnings,
+		}, "{}"),
+		Status: stepStatusSuccess,
 	})
 	if err != nil {
 		current.close()
@@ -70,25 +96,24 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 		return execution{}, err
 	}
 	current.runID = runID
-	if err := s.repository.CreateStep(ctx, stepRecord{
-		RunID:     runID,
-		RequestID: requestID,
-		Seq:       1,
-		Type:      "input",
-		Title:     "用户输入",
-		Content:   spec.InputText,
-		Payload: encodeJSON(map[string]any{
-			"history_count": len(spec.History),
-			"tools":         spec.Registry.Names(),
-			"warnings":      spec.Warnings,
-		}, "{}"),
-		Status: stepStatusSuccess,
-	}); err != nil {
-		s.failExecutionStart(current, err)
-		current.close()
-		return execution{}, err
-	}
 	return current, nil
+}
+
+func (s Service) enqueueExecution(ctx context.Context, execution execution) error {
+	if s.dispatcher == nil {
+		return fmt.Errorf("智能体运行调度器未初始化")
+	}
+	queued, err := s.repository.EnqueueRun(ctx, execution.runID, time.Now())
+	if err != nil {
+		return err
+	}
+	if !queued {
+		return fmt.Errorf("智能体运行入队失败")
+	}
+	if err := s.dispatcher.Dispatch(ctx, execution.runID); err != nil {
+		logDispatchDeliveryError(execution.runID, err)
+	}
+	return nil
 }
 
 func (s Service) failExecutionStart(execution execution, err error) {
@@ -97,17 +122,14 @@ func (s Service) failExecutionStart(execution execution, err error) {
 		message = err.Error()
 	}
 	finishedAt := time.Now()
-	_ = s.repository.CreateStep(context.Background(), stepRecord{
-		RunID: execution.runID, RequestID: execution.requestID, Seq: 2,
-		Type: "error", Title: "启动失败", Content: message, Payload: "{}", Status: stepStatusFail,
-	})
-	_ = s.repository.FinishRun(context.Background(), execution.runID, runResult{
+	_, _ = s.finishRunAndChat(context.Background(), execution.runID, execution.workerID, execution.persistChat, runResult{
 		Status: runStatusFail,
 		Output: encodeJSON(map[string]any{"event": "error", "text": "", "error": message}, "{}"),
-		Error:  message, StepCount: 2,
+		Error:  message, StepCount: 1,
 		Latency: finishedAt.Sub(execution.startedAt).Milliseconds(), FinishedAt: finishedAt,
+	}, runtimechat.RunTurnCompletion{
+		RequestID: execution.requestID,
+		Status:    runStatusFail,
+		Error:     message,
 	})
-	if execution.persistChat {
-		s.completeRunTurn(execution.requestID, runStatusFail, "", nil, message)
-	}
 }

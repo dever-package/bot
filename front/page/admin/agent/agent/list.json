@@ -260,6 +260,8 @@
           "openPath": "state.dialog.run",
           "requestApi": "/bot/admin/agent_runtime/run",
           "streamApi": "/bot/admin/agent_runtime/stream",
+          "documentApi": "/bot/admin/agent_runtime/document",
+          "documentStreamApi": "/bot/admin/agent_runtime/document_stream",
           "statusApi": "/bot/admin/agent_runtime/status",
           "stopApi": "/bot/admin/agent_runtime/stop",
           "blockMs": 1000

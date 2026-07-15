@@ -94,14 +94,6 @@ func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammode
 			s.writeWorkspaceNodeEvent(ctx, run, fullNode, parentNodeRunID, "node_finished", childStatus, payload)
 		}
 		nodeResults = workspaceNodeResults(ctx, run.ProjectID, run.ID)
-		if childStatus == teammodel.RunStatusWaiting {
-			s.finishWorkspaceRunFromNodeResults(ctx, run, input, plan, nodeResults)
-			return
-		}
-		if childStatus == teammodel.RunStatusFail || childStatus == teammodel.RunStatusCanceled {
-			s.finishWorkspaceRunFromNodeResults(ctx, run, input, plan, nodeResults)
-			return
-		}
 	}
 	if s.continueWorkspaceRunAfterBlockedNode(ctx, run, input, plan, nodeResults) {
 		return
@@ -388,12 +380,27 @@ func latestWorkspaceChildAsset(ctx context.Context, projectID uint64, nodeRunID 
 }
 
 func (s WorkspaceService) finishWorkspaceRunFromNodeResults(ctx context.Context, run *teammodel.Run, input map[string]any, plan map[string]any, nodeResults []map[string]any) {
+	if run != nil && workspaceRunCanceled(ctx, run.ID) {
+		return
+	}
+	if run != nil && workspaceHasActiveNodeExecution(ctx, run.ProjectID, run.ID) {
+		updateWorkspaceExecutionStatus(ctx, run.ID, teammodel.RunStatusRunning, "")
+		teammodel.NewRunModel().Update(ctx, map[string]any{"id": run.ID}, map[string]any{
+			"status": teammodel.RunStatusRunning,
+			"error":  "",
+		})
+		return
+	}
 	status := workspaceRunStatusFromNodeResults(plan, nodeResults)
 	if status == "" || status == teammodel.RunStatusRunning {
 		if run != nil && !workspaceHasActiveNodeExecution(ctx, run.ProjectID, run.ID) {
 			updateWorkspaceExecutionStatus(ctx, run.ID, teammodel.RunStatusRunning, "")
 		}
 		return
+	}
+	runOutput := workspaceRunOutputFromNodeResults(nodeResults)
+	if startNode := canvasNodeByID(textValue(input["_start_node_id"]), mapValue(input["canvas"])); textValue(startNode["type"]) == "group" {
+		runOutput = canvasGroupRunOutputFromRecords(textValue(startNode["id"]), plan, nodeResults)
 	}
 	output := map[string]any{
 		"run_id":         run.ID,
@@ -404,7 +411,7 @@ func (s WorkspaceService) finishWorkspaceRunFromNodeResults(ctx context.Context,
 		"node_results":   nodeResults,
 		"node_runs":      workspaceNodeRunPayloads(ctx, run.ID),
 		"execution_plan": plan,
-		"output":         workspaceRunOutputFromNodeResults(nodeResults),
+		"output":         runOutput,
 	}
 	if input != nil {
 		output["asset_cate_id"] = uint64Value(input["_asset_cate_id"])

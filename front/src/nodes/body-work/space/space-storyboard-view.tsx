@@ -18,6 +18,7 @@ import {
 import {
   createStoryboardShot,
   normalizeStoryboardOrder,
+  storyboardTotalDuration,
   type StoryboardDocument,
   type StoryboardShot,
 } from "./space-storyboard";
@@ -32,6 +33,7 @@ export function StoryboardView({
   onChange,
   saveStatus: externalSaveStatus,
   showSaveStatus = true,
+  showMetrics = true,
 }: {
   storyboard: StoryboardDocument;
   editable?: boolean;
@@ -40,6 +42,7 @@ export function StoryboardView({
   onChange?: (storyboard: StoryboardDocument) => void;
   saveStatus?: StoryboardSaveStatus;
   showSaveStatus?: boolean;
+  showMetrics?: boolean;
 }) {
   const externalSignature = useMemo(
     () => JSON.stringify(storyboard),
@@ -202,10 +205,21 @@ export function StoryboardView({
         ) : (
           <strong>{draft.title || "分镜脚本"}</strong>
         )}
-        {canEdit && showSaveStatus ? (
-          <StoryboardSaveState
-            status={controlled ? externalSaveStatus || "saved" : saveStatus}
-          />
+        {showMetrics || (canEdit && showSaveStatus) ? (
+          <div className="ws-storyboard-head-meta">
+            {showMetrics ? (
+              <span>
+                {draft.shots.length} 个镜头 · {storyboardTotalDuration(draft)} 秒
+              </span>
+            ) : null}
+            {canEdit && showSaveStatus ? (
+              <StoryboardSaveState
+                status={
+                  controlled ? externalSaveStatus || "saved" : saveStatus
+                }
+              />
+            ) : null}
+          </div>
         ) : null}
       </header>
 
@@ -216,7 +230,9 @@ export function StoryboardView({
               <th className="is-order">序号</th>
               <th className="is-duration">时长</th>
               <th className="is-visual">画面描述</th>
+              <th className="is-camera">运镜</th>
               <th className="is-speech">台词 / 旁白</th>
+              <th className="is-sound">音效 / 配乐</th>
               {canEdit ? <th className="is-actions" aria-label="操作" /> : null}
             </tr>
           </thead>
@@ -296,6 +312,18 @@ export function StoryboardView({
                     onChange={(visual) => updateShot(index, { visual })}
                   />
                 </td>
+                <td className="is-camera">
+                  <StoryboardTextField
+                    label={`镜头 ${index + 1} 运镜`}
+                    value={shot.camera_movement}
+                    readOnly={!canEdit}
+                    disabled={disabled}
+                    placeholder="景别、机位和运动方式"
+                    onChange={(camera_movement) =>
+                      updateShot(index, { camera_movement })
+                    }
+                  />
+                </td>
                 <td className="is-speech">
                   <div className="ws-storyboard-speech-fields">
                     <StoryboardTextField
@@ -315,6 +343,18 @@ export function StoryboardView({
                       onChange={(narration) => updateShot(index, { narration })}
                     />
                   </div>
+                </td>
+                <td className="is-sound">
+                  <StoryboardTextField
+                    label={`镜头 ${index + 1} 音效或配乐`}
+                    value={shot.sound_music}
+                    readOnly={!canEdit}
+                    disabled={disabled}
+                    placeholder="环境音、音效或配乐"
+                    onChange={(sound_music) =>
+                      updateShot(index, { sound_music })
+                    }
+                  />
                 </td>
                 {canEdit ? (
                   <td className="is-actions">

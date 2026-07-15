@@ -98,7 +98,7 @@
       {
         "type": "show-base",
         "value": "form.content",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+        "className": "rounded-md bg-muted/30 p-4 text-sm leading-6 whitespace-pre-wrap break-all"
       }
     ],
     "payload-card": [
@@ -112,7 +112,7 @@
       {
         "type": "show-base",
         "value": "form.payload",
-        "className": "rounded-md border bg-muted/30 p-3 text-sm leading-6 whitespace-pre-wrap break-all"
+        "className": "rounded-md bg-muted/30 p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-all"
       }
     ]
   },

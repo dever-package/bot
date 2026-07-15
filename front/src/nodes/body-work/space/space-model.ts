@@ -4,6 +4,7 @@ import type {
   AssetKind,
   AssetVersion,
   CanvasFunctionOption,
+  OutputTypeOption,
   PowerKindOption,
   PowerOption,
   ProjectAsset,
@@ -19,7 +20,12 @@ import type {
   WorkRelease,
   WorkTeam,
 } from "./types";
-import { isStoryboardKind } from "./space-storyboard";
+import { DEFAULT_GROUP_NODE_SIZE } from "./space-group-model";
+import {
+  isStoryboardPowerType,
+  powerKindLabel,
+  resolvePowerPresentation,
+} from "./space-power-presentation";
 
 const freeAssetCate: AssetCate = {
   id: 0,
@@ -38,6 +44,13 @@ const DEFAULT_STORYBOARD_NODE_SIZE = { width: 620, height: 360 } as const;
 export function normalizeSpaceBootstrap(value: unknown): SpaceBootstrap {
   const row = asRecord(value);
   const canvasConfig = asRecord(row.canvas_config);
+  const powers = asRecords(firstDefined(row.powers, canvasConfig.powers)).map(
+    normalizePower,
+  );
+  const canvases = hydrateCanvasPowers(
+    normalizeCanvases(firstDefined(row.canvases, row.canvas)),
+    powers,
+  );
   return {
     project: normalizeProject(row.project),
     team: normalizeTeam(row.team || row.type),
@@ -46,10 +59,13 @@ export function normalizeSpaceBootstrap(value: unknown): SpaceBootstrap {
     roles: asRecords(firstDefined(row.roles, asRecord(row.team).roles, canvasConfig.roles)).map(normalizeRole),
     flows: asRecords(firstDefined(row.flows, asRecord(row.team).flows)).map(normalizeFlow),
     nodesByFlow: normalizeNodesByFlow(firstDefined(row.nodes_by_flow, asRecord(row.team).nodes_by_flow)),
-    canvases: normalizeCanvases(firstDefined(row.canvases, row.canvas)),
+    canvases,
     assets: asRecords(firstDefined(row.assets, asRecord(row.assets).items)).map(normalizeAsset),
-    powers: asRecords(firstDefined(row.powers, canvasConfig.powers)).map(normalizePower),
+    powers,
     powerKinds: asRecords(firstDefined(row.power_kinds, canvasConfig.power_kinds)).map(normalizePowerKind),
+    outputTypes: asRecords(
+      firstDefined(row.output_types, canvasConfig.output_types),
+    ).map(normalizeOutputType),
   };
 }
 
@@ -77,11 +93,13 @@ export function normalizeCanvasState(value: unknown, fallbackAssetCateId = 0): S
 export function normalizePowerCatalog(value: unknown): {
   powers: PowerOption[];
   powerKinds: PowerKindOption[];
+  outputTypes: OutputTypeOption[];
 } {
   const row = asRecord(value);
   return {
     powers: asRecords(row.powers).map(normalizePower),
     powerKinds: asRecords(row.power_kinds).map(normalizePowerKind),
+    outputTypes: asRecords(row.output_types).map(normalizeOutputType),
   };
 }
 
@@ -145,6 +163,9 @@ export function createLocalNode(
   const selectedFunction = options?.functionOption;
   const selectedPower = options?.power;
   const selectedRole = options?.role;
+  const selectedPowerPresentation = selectedPower
+    ? resolvePowerPresentation(selectedPower)
+    : null;
   const nodeAssetCateId = Number(selectedAsset?.asset_cate_id || assetCate.id);
   const labels: Record<SpaceCanvasNode["type"], [string, string, string]> = {
     asset: [
@@ -156,7 +177,9 @@ export function createLocalNode(
     ],
     power: [
       selectedPower?.name || defaultPowerName(assetCate.kind),
-      selectedPower ? powerKindLabel(selectedPower.kind) : "能力节点",
+      selectedPowerPresentation?.outputName ||
+        selectedPowerPresentation?.kindName ||
+        "能力节点",
       selectedPower ? `调用 ${selectedPower.name} 能力，按参数生成内容。` : "输入提示词和参数，直接生成文本、图片、视频或音频。",
     ],
     agent: [
@@ -174,9 +197,14 @@ export function createLocalNode(
       "功能",
       selectedFunction?.description || "开始、导入、保存、展示等功能节点。",
     ],
+    group: [
+      "未命名分组",
+      "分组",
+      "拖入节点后，可统一接收上下文并执行组内节点。",
+    ],
   };
   const [title, subtitle, description] = labels[type];
-  const size = nodeDefaultSize(type, selectedPower?.kind);
+  const size = nodeDefaultSize(type, selectedPower);
   return {
     id: `local-${type}-${Date.now()}-${index}`,
     type,
@@ -188,13 +216,15 @@ export function createLocalNode(
     width: size.width,
     height: size.height,
     assetCateId: nodeAssetCateId,
-    kind: selectedAsset?.kind || assetCate.kind,
+    kind: selectedAsset?.kind || selectedPower?.kind || assetCate.kind,
+    outputType: selectedPower?.outputType,
     cardinality: assetCate.cardinality,
     asset: selectedAsset,
     flow: selectedFlow,
     functionOption: selectedFunction,
     power: selectedPower,
     role: selectedRole,
+    group: type === "group" ? { origin: "manual" } : undefined,
     local: true,
   };
 }
@@ -211,29 +241,6 @@ export function assetKindLabel(kind: AssetKind) {
       return "文件";
     case "mixed":
       return "富文本";
-    default:
-      return "文本";
-  }
-}
-
-export function powerKindLabel(kind: string) {
-  switch (kind) {
-    case "storyboard":
-      return "分镜脚本";
-    case "image":
-      return "图片";
-    case "audio":
-      return "音频";
-    case "video":
-      return "视频";
-    case "role":
-      return "角色";
-    case "multi":
-      return "多模态";
-    case "embeddings":
-      return "向量";
-    case "workflow":
-      return "工作流";
     default:
       return "文本";
   }
@@ -381,13 +388,33 @@ function normalizeFlowNode(value: Record<string, unknown>): TeamFlowNode {
 }
 
 function normalizePower(value: Record<string, unknown>): PowerOption {
+  const kind = stringValue(value.kind) || "text";
+  const output = normalizeOutputType(asRecord(value.output));
+  const outputType = stringValue(value.output_type) || "general";
   return {
     id: numberValue(value.id),
     cate_id: numberValue(value.cate_id),
     name: stringValue(value.name) || stringValue(value.key) || "未命名能力",
     key: stringValue(value.key),
     icon: stringValue(value.icon),
-    kind: stringValue(value.kind) || "text",
+    outputType,
+    output: output.key ? output : undefined,
+    kind,
+  };
+}
+
+function normalizeOutputType(
+  value: Record<string, unknown>,
+): OutputTypeOption {
+  return {
+    key: stringValue(value.key || value.id),
+    name: stringValue(value.name || value.value),
+    allowedKinds: stringArray(value.allowed_kinds || value.allowedKinds),
+    viewMode: stringValue(value.view_mode || value.viewMode),
+    defaultWidth: numberValue(value.default_width || value.defaultWidth),
+    defaultHeight: numberValue(value.default_height || value.defaultHeight),
+    structured: Boolean(value.structured),
+    sort: numberValue(value.sort),
   };
 }
 
@@ -468,6 +495,45 @@ function normalizeCanvases(value: unknown) {
   return result;
 }
 
+function hydrateCanvasPowers(
+  canvases: Record<string, SpaceCanvasState>,
+  powers: PowerOption[],
+) {
+  const byID = new Map(
+    powers.filter((power) => power.id > 0).map((power) => [power.id, power]),
+  );
+  const byKey = new Map(
+    powers.filter((power) => power.key).map((power) => [power.key, power]),
+  );
+  for (const canvas of Object.values(canvases)) {
+    canvas.nodes = canvas.nodes.map((node) => {
+      if (node.type !== "power" || !node.power) {
+        return node;
+      }
+      const current =
+        byID.get(Number(node.power.id || 0)) || byKey.get(node.power.key);
+      if (!current) {
+        return node;
+      }
+      const outputType =
+        node.outputType || node.power.outputType || current.outputType;
+      return normalizeStoryboardNodeSize({
+        ...node,
+        outputType,
+        power: {
+          ...current,
+          outputType,
+          output:
+            current.outputType === outputType
+              ? current.output
+              : node.power.output,
+        },
+      });
+    });
+  }
+  return canvases;
+}
+
 function normalizeCanvasNode(value: Record<string, unknown>): SpaceCanvasNode | null {
   const id = stringValue(value.id);
   const type = stringValue(value.type) as SpaceCanvasNode["type"];
@@ -484,7 +550,13 @@ function normalizeCanvasNode(value: Record<string, unknown>): SpaceCanvasNode | 
     y: numberValue(value.y),
     width: numberValue(value.width),
     height: numberValue(value.height),
+    groupId: stringValue(firstDefined(value.group_id, value.groupId)),
+    group: normalizeCanvasGroup(value.group),
+    storyboardMaterial: normalizeCanvasStoryboardMaterial(
+      firstDefined(value.storyboard_material, value.storyboardMaterial),
+    ),
     assetCateId: numberValue(value.asset_cate_id),
+    outputType: stringValue(value.output_type),
     count: value.count == null ? undefined : numberValue(value.count),
     functionOption: normalizeCanvasFunctionOption(value.function_option),
     composerDraft: normalizeCanvasComposerDraft(value.composer_draft),
@@ -518,14 +590,15 @@ function normalizeCanvasNode(value: Record<string, unknown>): SpaceCanvasNode | 
   }
   if (power) {
     node.power = power;
+    node.outputType = node.outputType || power.outputType;
   }
-  return normalizeLegacyStoryboardNodeSize(node);
+  return normalizeStoryboardNodeSize(node);
 }
 
-function normalizeLegacyStoryboardNodeSize(node: SpaceCanvasNode) {
+function normalizeStoryboardNodeSize(node: SpaceCanvasNode) {
   if (
     node.type !== "power" ||
-    !isStoryboardKind(node.power?.kind || node.kind) ||
+    !isStoryboardPowerType(node.power, node.kind, node.outputType) ||
     node.width !== DEFAULT_POWER_NODE_SIZE.width ||
     node.height !== DEFAULT_POWER_NODE_SIZE.height
   ) {
@@ -551,6 +624,52 @@ function normalizeCanvasResultView(value: unknown) {
     height,
     ...(offsetX == null ? {} : { offsetX }),
     ...(offsetY == null ? {} : { offsetY }),
+  };
+}
+
+function normalizeCanvasGroup(value: unknown) {
+  const row = asRecord(value);
+  if (!Object.keys(row).length) {
+    return undefined;
+  }
+  return {
+    origin: stringValue(row.origin),
+    sourceNodeId: stringValue(
+      firstDefined(row.source_node_id, row.sourceNodeId),
+    ),
+    syncKey: stringValue(firstDefined(row.sync_key, row.syncKey)),
+  };
+}
+
+function normalizeCanvasStoryboardMaterial(value: unknown) {
+  const row = asRecord(value);
+  const sourceNodeId = stringValue(
+    firstDefined(row.source_node_id, row.sourceNodeId),
+  );
+  const materialType = stringValue(
+    firstDefined(row.material_type, row.materialType),
+  );
+  const materialId = stringValue(
+    firstDefined(row.material_id, row.materialId),
+  );
+  if (
+    !sourceNodeId ||
+    !materialId ||
+    !["character", "scene", "prop"].includes(materialType)
+  ) {
+    return undefined;
+  }
+  return {
+    sourceNodeId,
+    materialType: materialType as "character" | "scene" | "prop",
+    materialId,
+    generatedPrompt: stringValue(
+      firstDefined(row.generated_prompt, row.generatedPrompt),
+    ),
+    stale:
+      row.stale === true ||
+      row.stale === 1 ||
+      String(row.stale || "").toLowerCase() === "true",
   };
 }
 
@@ -614,13 +733,12 @@ function normalizeCanvasPower(value: unknown) {
   if (!id && !key) {
     return undefined;
   }
-  return {
+  return normalizePower({
+    ...row,
     id,
     key,
     name: stringValue(row.name),
-    kind: stringValue(row.kind) as PowerOption["kind"],
-    icon: stringValue(row.icon),
-  } as PowerOption;
+  });
 }
 
 function normalizeCanvasFunctionOption(value: unknown) {
@@ -680,6 +798,8 @@ function normalizeCanvasEdge(value: Record<string, unknown>): SpaceCanvasEdge | 
     id: stringValue(value.id) || `edge-${from}-${to}`,
     from,
     to,
+    logicalFrom: stringValue(firstDefined(value.logical_from, value.logicalFrom)) || undefined,
+    logicalTo: stringValue(firstDefined(value.logical_to, value.logicalTo)) || undefined,
   };
 }
 
@@ -716,8 +836,6 @@ function flowOutputAssetCateIds(space: SpaceBootstrap, flow: TeamFlow) {
 
 function defaultPowerName(kind: AssetKind) {
   switch (kind) {
-    case "storyboard":
-      return "分镜脚本能力";
     case "image":
       return "生图能力";
     case "video":
@@ -729,7 +847,10 @@ function defaultPowerName(kind: AssetKind) {
   }
 }
 
-function nodeDefaultSize(type: SpaceCanvasNode["type"], powerKind = "") {
+function nodeDefaultSize(
+  type: SpaceCanvasNode["type"],
+  power?: Pick<PowerOption, "kind" | "outputType" | "output">,
+) {
   switch (type) {
     case "agent":
       return { width: 154, height: 154 };
@@ -737,8 +858,19 @@ function nodeDefaultSize(type: SpaceCanvasNode["type"], powerKind = "") {
       return { width: 210, height: 160 };
     case "function":
       return { width: 128, height: 46 };
+    case "group":
+      return { ...DEFAULT_GROUP_NODE_SIZE };
     case "power":
-      return isStoryboardKind(powerKind)
+      if (
+        Number(power?.output?.defaultWidth || 0) > 0 &&
+        Number(power?.output?.defaultHeight || 0) > 0
+      ) {
+        return {
+          width: Number(power?.output?.defaultWidth),
+          height: Number(power?.output?.defaultHeight),
+        };
+      }
+      return isStoryboardPowerType(power)
         ? { ...DEFAULT_STORYBOARD_NODE_SIZE }
         : { ...DEFAULT_POWER_NODE_SIZE };
     default:
@@ -749,16 +881,26 @@ function nodeDefaultSize(type: SpaceCanvasNode["type"], powerKind = "") {
 export function hasDefaultCanvasNodeSize(
   node: Pick<
     SpaceCanvasNode,
-    "type" | "width" | "height" | "kind" | "power"
+    "type" | "width" | "height" | "kind" | "outputType" | "power"
   >,
 ) {
   const defaultSize = nodeDefaultSize(
     node.type,
-    node.power?.kind || String(node.kind || ""),
+    node.power || {
+      kind: String(node.kind || ""),
+      outputType: node.outputType || "",
+    },
   );
   return (
     node.width === defaultSize.width && node.height === defaultSize.height
   );
+}
+
+function stringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map(stringValue).filter(Boolean);
 }
 
 export type RichDocumentNode = {

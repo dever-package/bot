@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimedocument "github.com/dever-package/bot/service/agent/runtime/document"
 )
 
 const (
@@ -38,6 +39,17 @@ type RebindSessionContextRequest struct {
 	AgentKey       string
 	FromContextKey string
 	ToContextKey   string
+}
+
+// RequireSessionAccess verifies that the current owner can access the session.
+// Runtime APIs use this shared guard instead of duplicating ownership filters.
+func (Service) RequireSessionAccess(ctx context.Context, sessionID uint64) error {
+	owner, err := currentOwner(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = requireSession(ctx, owner, sessionID)
+	return err
 }
 
 func (s Service) ResolveSession(ctx context.Context, request SessionRequest) (map[string]any, error) {
@@ -142,6 +154,7 @@ func (s Service) ClearSession(ctx context.Context, sessionID uint64, memoryEnabl
 	if err != nil {
 		return nil, err
 	}
+	runtimedocument.NewService().DeleteSession(ctx, session.ID)
 	agentmodel.NewArtifactModel().Delete(ctx, map[string]any{"session_id": session.ID})
 	agentmodel.NewMessageModel().Delete(ctx, map[string]any{"session_id": session.ID})
 	now := time.Now()

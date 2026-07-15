@@ -16,6 +16,8 @@ func Payload(ctx context.Context, row agentmodel.Artifact) map[string]any {
 		"message_id":          row.MessageID,
 		"run_id":              row.RunID,
 		"step_id":             row.StepID,
+		"document_id":         row.DocumentID,
+		"block_id":            row.BlockID,
 		"file_id":             row.FileID,
 		"series_id":           row.SeriesID,
 		"kind":                row.Kind,

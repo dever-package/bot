@@ -413,21 +413,31 @@ func (Repo) ListPowers(ctx context.Context) []PowerOption {
 			continue
 		}
 		result = append(result, PowerOption{
-			ID:     row.ID,
-			CateID: row.CateID,
-			Name:   strings.TrimSpace(row.Name),
-			Key:    strings.TrimSpace(row.Key),
-			Icon:   strings.TrimSpace(row.Icon),
-			Kind:   strings.TrimSpace(row.Kind),
+			ID:         row.ID,
+			CateID:     row.CateID,
+			Name:       strings.TrimSpace(row.Name),
+			Key:        strings.TrimSpace(row.Key),
+			Icon:       strings.TrimSpace(row.Icon),
+			OutputType: energonmodel.NormalizeOutputType(row.OutputType),
+			Output:     outputTypeSpec(row.OutputType),
+			Kind:       energonmodel.NormalizePowerKind(row.Kind),
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Output.Sort != result[j].Output.Sort {
+			return result[i].Output.Sort < result[j].Output.Sort
+		}
 		if result[i].Kind == result[j].Kind {
 			return result[i].ID < result[j].ID
 		}
 		return result[i].Kind < result[j].Kind
 	})
 	return result
+}
+
+func outputTypeSpec(outputType string) energonmodel.OutputTypeSpec {
+	spec, _ := energonmodel.FindOutputTypeSpec(energonmodel.NormalizeOutputType(outputType))
+	return spec
 }
 
 func (r Repo) FindPowerOption(ctx context.Context, powerID uint64, powerKey string) (PowerOption, bool) {

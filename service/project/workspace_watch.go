@@ -25,7 +25,9 @@ func (s WorkspaceService) watchWorkspaceApproval(ctx context.Context, projectID 
 	if nodeExecution == nil || nodeExecution.RunID == 0 {
 		return
 	}
-	markWorkspaceApprovalNodeRunning(ctx, nodeExecution)
+	if workspaceRunCanceled(ctx, nodeExecution.RunID) || !markWorkspaceApprovalNodeRunning(ctx, nodeExecution) {
+		return
+	}
 	s.watchWorkspaceRun(ctx, nodeExecution.RunID, approvalID)
 }
 
@@ -56,12 +58,28 @@ func (s WorkspaceService) watchWorkspaceRun(ctx context.Context, runID uint64, s
 	}
 }
 
-func markWorkspaceApprovalNodeRunning(ctx context.Context, nodeExecution *workspacemodel.NodeExecution) {
+func markWorkspaceApprovalNodeRunning(ctx context.Context, nodeExecution *workspacemodel.NodeExecution) bool {
 	if nodeExecution == nil || nodeExecution.RunID == 0 || strings.TrimSpace(nodeExecution.NodeKey) == "" {
-		return
+		return false
+	}
+	if workspaceRunCanceled(ctx, nodeExecution.RunID) {
+		return false
 	}
 	now := time.Now()
-	workspacemodel.NewNodeExecutionModel().Update(ctx, map[string]any{"id": nodeExecution.ID}, map[string]any{
+	if teammodel.NewRunModel().Update(ctx, map[string]any{
+		"id":     nodeExecution.RunID,
+		"status": map[string]any{"neq": teammodel.RunStatusCanceled},
+	}, map[string]any{
+		"status":     teammodel.RunStatusRunning,
+		"error":      "",
+		"updated_at": now,
+	}) == 0 {
+		return false
+	}
+	workspacemodel.NewNodeExecutionModel().Update(ctx, map[string]any{
+		"id":     nodeExecution.ID,
+		"status": map[string]any{"neq": teammodel.RunStatusCanceled},
+	}, map[string]any{
 		"status":     teammodel.RunStatusRunning,
 		"error":      "",
 		"updated_at": now,
@@ -70,11 +88,18 @@ func markWorkspaceApprovalNodeRunning(ctx context.Context, nodeExecution *worksp
 		markWorkspaceNodeRun(ctx, nodeExecution.NodeRunID, teammodel.RunStatusRunning, nil, nil, "", nodeExecution.AgentRunID)
 	}
 	updateWorkspaceExecutionStatus(ctx, nodeExecution.RunID, teammodel.RunStatusRunning, "")
-	teammodel.NewRunModel().Update(ctx, map[string]any{"id": nodeExecution.RunID}, map[string]any{
-		"status":     teammodel.RunStatusRunning,
-		"error":      "",
-		"updated_at": now,
+	return !workspaceRunCanceled(ctx, nodeExecution.RunID)
+}
+
+func workspaceApprovalRunCanceled(ctx context.Context, projectID uint64, approvalID uint64) bool {
+	if projectID == 0 || approvalID == 0 {
+		return false
+	}
+	nodeExecution := workspacemodel.NewNodeExecutionModel().Find(ctx, map[string]any{
+		"project_id":  projectID,
+		"approval_id": approvalID,
 	})
+	return nodeExecution != nil && workspaceRunCanceled(ctx, nodeExecution.RunID)
 }
 
 func workspaceRunWatchShouldContinue(ctx context.Context, run *teammodel.Run, submittedApprovalID uint64) bool {

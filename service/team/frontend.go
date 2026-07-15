@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	energonmodel "github.com/dever-package/bot/model/energon"
 	teammodel "github.com/dever-package/bot/model/team"
 	assetservice "github.com/dever-package/bot/service/asset"
 	energonservice "github.com/dever-package/bot/service/energon"
@@ -93,6 +94,7 @@ func (s Service) CanvasConfig(ctx context.Context, releaseID uint64, flowID uint
 			"knowledge_bases": s.repo.ListKnowledgeBases(ctx),
 			"powers":          powers,
 			"power_kinds":     powerKindOptions(powers),
+			"output_types":    energonmodel.OutputTypeSpecs(),
 		}, nil
 	}
 	release, graph, err := s.runtimeGraphByRelease(ctx, 0, releaseID)
@@ -119,6 +121,7 @@ func (s Service) CanvasConfig(ctx context.Context, releaseID uint64, flowID uint
 		"knowledge_bases":  s.repo.ListKnowledgeBases(ctx),
 		"powers":           powers,
 		"power_kinds":      powerKindOptions(powers),
+		"output_types":     energonmodel.OutputTypeSpecs(),
 	}, nil
 }
 
@@ -250,10 +253,11 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		"mode":    "canvas_power",
 		"input":   input,
 		"power": map[string]any{
-			"id":   power.ID,
-			"name": power.Name,
-			"key":  power.Key,
-			"kind": power.Kind,
+			"id":          power.ID,
+			"name":        power.Name,
+			"key":         power.Key,
+			"kind":        power.Kind,
+			"output_type": power.OutputType,
 		},
 	})
 	var flowRunID uint64

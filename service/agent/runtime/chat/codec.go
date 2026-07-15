@@ -3,12 +3,13 @@ package chat
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeartifact "github.com/dever-package/bot/service/agent/runtime/artifact"
+	runtimedocument "github.com/dever-package/bot/service/agent/runtime/document"
+	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
 )
 
 func messageValues(kind string, text string, content any, output any, status int16) map[string]any {
@@ -28,82 +29,37 @@ func normalizeRole(role string) string {
 }
 
 func messageMap(ctx context.Context, row *agentmodel.Message) map[string]any {
-	return messageMapWithArtifacts(ctx, row, nil)
-}
-
-func messageMapWithArtifacts(ctx context.Context, row *agentmodel.Message, artifacts []map[string]any) map[string]any {
 	if row == nil {
 		return map[string]any{}
 	}
-	output := decodeJSON(row.Output)
-	if artifacts == nil {
-		artifacts = runtimeartifact.NewService().MessagePayloads(ctx, row.ID)
+	artifacts := runtimeartifact.NewService().MessagePayloads(ctx, row.ID)
+	documents := runtimedocument.NewService().MessagePayloadMap(
+		ctx,
+		[]uint64{row.ID},
+		artifactsByBlock(map[uint64][]map[string]any{row.ID: artifacts}),
+	)
+	document, hasDocument := documents[row.ID]
+	return messageMapWithRelations(row, artifacts, document, hasDocument)
+}
+
+func messageMapWithRelations(
+	row *agentmodel.Message,
+	artifacts []map[string]any,
+	document runtimedocument.Payload,
+	hasDocument bool,
+) map[string]any {
+	if row == nil {
+		return map[string]any{}
 	}
-	if len(artifacts) > 0 {
-		output = mergeMessageOutput(output, map[string]any{"artifacts": artifacts})
-		output = hydrateActivityArtifacts(output, artifacts)
-	}
-	output = sanitizeActivityErrors(output)
-	return map[string]any{
+	output := runtimemessageoutput.Format(row.Output, artifacts)
+	result := map[string]any{
 		"id": row.ID, "session_id": row.SessionID, "role": row.Role, "kind": row.Kind,
 		"text": row.Text, "content": decodeJSON(row.Content), "output": output,
 		"request_id": row.RequestID, "status": row.Status, "created_at": timeText(row.CreatedAt),
 	}
-}
-
-func sanitizeActivityErrors(output any) map[string]any {
-	result := mergeMessageOutput(output, nil)
-	activities, ok := result["activities"].([]any)
-	if !ok {
-		return result
+	if hasDocument {
+		result["document"] = document
 	}
-	for index, value := range activities {
-		activity, currentOK := value.(map[string]any)
-		if !currentOK {
-			continue
-		}
-		meta, _ := activity["meta"].(map[string]any)
-		if !strings.EqualFold(strings.TrimSpace(fmt.Sprint(meta["tool_status"])), "failed") {
-			continue
-		}
-		message := runtimeartifact.FailureText(fmt.Sprint(meta["tool_kind"]))
-		if message == "" {
-			continue
-		}
-		activity["text"] = message
-		activity["error"] = message
-		activities[index] = activity
-	}
-	result["activities"] = activities
-	return result
-}
-
-func hydrateActivityArtifacts(output any, artifacts []map[string]any) map[string]any {
-	result := mergeMessageOutput(output, nil)
-	activities, ok := result["activities"].([]any)
-	if !ok {
-		return result
-	}
-	byBatch := make(map[string][]map[string]any)
-	for _, artifact := range artifacts {
-		batchKey := strings.TrimSpace(fmt.Sprint(artifact["batch_key"]))
-		if batchKey != "" {
-			byBatch[batchKey] = append(byBatch[batchKey], artifact)
-		}
-	}
-	for index, value := range activities {
-		activity, currentOK := value.(map[string]any)
-		if !currentOK {
-			continue
-		}
-		meta, _ := activity["meta"].(map[string]any)
-		callID := strings.TrimSpace(fmt.Sprint(meta["tool_call_id"]))
-		if current := byBatch[callID]; len(current) > 0 {
-			activity["artifacts"] = current
-			activities[index] = activity
-		}
-	}
-	result["activities"] = activities
 	return result
 }
 
@@ -115,6 +71,7 @@ func messageMaps(ctx context.Context, rows []*agentmodel.Message) []map[string]a
 		}
 	}
 	artifacts := runtimeartifact.NewService().MessagePayloadMap(ctx, messageIDs)
+	documents := runtimedocument.NewService().MessagePayloadMap(ctx, messageIDs, artifactsByBlock(artifacts))
 	result := make([]map[string]any, 0, len(rows))
 	for index := len(rows) - 1; index >= 0; index-- {
 		row := rows[index]
@@ -123,29 +80,23 @@ func messageMaps(ctx context.Context, rows []*agentmodel.Message) []map[string]a
 			if messageArtifacts == nil {
 				messageArtifacts = []map[string]any{}
 			}
-			result = append(result, messageMapWithArtifacts(ctx, row, messageArtifacts))
+			document, hasDocument := documents[row.ID]
+			result = append(result, messageMapWithRelations(row, messageArtifacts, document, hasDocument))
 		}
 	}
 	return result
 }
 
-func mergeMessageOutput(base any, extras map[string]any) map[string]any {
-	result := map[string]any{}
-	current := base
-	if raw, ok := base.(string); ok {
-		current = decodeJSON(raw)
-	}
-	if values, ok := current.(map[string]any); ok {
-		for key, value := range values {
-			result[key] = value
+func artifactsByBlock(messages map[uint64][]map[string]any) runtimedocument.ArtifactPayloadMap {
+	result := runtimedocument.ArtifactPayloadMap{}
+	for _, artifacts := range messages {
+		for _, artifact := range artifacts {
+			blockID, ok := artifact["block_id"].(uint64)
+			if !ok || blockID == 0 {
+				continue
+			}
+			result[blockID] = append(result[blockID], artifact)
 		}
-	} else if values, ok := decodeJSON(encodeJSON(current, "{}")).(map[string]any); ok {
-		for key, value := range values {
-			result[key] = value
-		}
-	}
-	for key, value := range extras {
-		result[key] = value
 	}
 	return result
 }

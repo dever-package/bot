@@ -10,6 +10,7 @@ import (
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	memorymodel "github.com/dever-package/bot/model/memory"
+	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	memoryservice "github.com/dever-package/bot/service/memory"
@@ -134,7 +135,7 @@ func saveMemoryReview(ctx context.Context, sessionID uint64, messageID uint64, r
 	if message == nil {
 		return
 	}
-	output := mergeMessageOutput(message.Output, map[string]any{"memory_review": review})
+	output := runtimemessageoutput.Merge(message.Output, map[string]any{"memory_review": review})
 	agentmodel.NewMessageModel().Update(ctx, map[string]any{"id": message.ID}, map[string]any{
 		"output": encodeJSON(output, "{}"),
 	})

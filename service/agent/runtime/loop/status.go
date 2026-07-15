@@ -27,6 +27,8 @@ func (s Service) taskStatus(ctx context.Context, requestID string) (map[string]a
 			"id":          run.ID,
 			"request_id":  run.RequestID,
 			"status":      run.Status,
+			"attempt":     run.Attempt,
+			"version":     run.Version,
 			"output":      decodeOutput(run.Output),
 			"error":       run.Error,
 			"started_at":  run.StartedAt,

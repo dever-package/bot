@@ -14,23 +14,37 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { getCompatModule } from "@dever/front-plugin";
+import { resolvePowerPresentation } from "./space-power-presentation";
 import type { PowerOption } from "./types";
 
 export function PowerIcon({
   power,
   kind,
+  outputType,
   size,
   className,
 }: {
   power?: PowerOption;
   kind?: string;
+  outputType?: string;
   size: number;
   className?: string;
 }) {
-  const FallbackIcon = powerKindIcon(power?.kind || kind || "");
+  const presentation = resolvePowerPresentation(power, kind, outputType);
+  const FallbackIcon =
+    powerOutputIcon(presentation.outputType) ||
+    powerKindIcon(power?.kind || kind || "");
   const Icon = resolveConfiguredIcon(power?.icon, FallbackIcon);
 
   return <Icon size={size} className={className} />;
+}
+
+function powerOutputIcon(outputType?: string): LucideIcon | null {
+  const normalized = String(outputType || "").trim().toLowerCase();
+  if (normalized === "storyboard") {
+    return Clapperboard;
+  }
+  return null;
 }
 
 export function PowerParamIcon({
@@ -110,7 +124,6 @@ function normalizePowerIconName(icon?: string) {
 function powerKindIcon(kind: string): LucideIcon {
   const normalizedKind = String(kind || "").toLowerCase();
   if (normalizedKind === "text" || normalizedKind === "llm") return Type;
-  if (normalizedKind === "storyboard") return Clapperboard;
   if (normalizedKind === "image") return ImageIcon;
   if (normalizedKind === "video") return Video;
   if (normalizedKind === "audio" || normalizedKind === "music") return Music;

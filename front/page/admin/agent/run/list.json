@@ -176,16 +176,6 @@
                         }
                       ]
                     }
-                  },
-                  {
-                    "icon": "list-tree",
-                    "variant": "outline",
-                    "size": "sm",
-                    "description": "查看运行步骤",
-                    "to": "/bot/agent/step/list",
-                    "searchParam": "run_id",
-                    "searchField": "id",
-                    "withBack": true
                   }
                 ]
               }

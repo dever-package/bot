@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -56,7 +57,19 @@ func (s Service) RunInternal(ctx context.Context, request InternalRequest) (Inte
 		return InternalResult{}, err
 	}
 	execution.completion = completion
+	execution.workerID = "direct:" + uuid.NewString()
+	execution.version = 2
 	notifyRunCreated(request.OnRunCreated, execution.runID, execution.requestID)
+	now := time.Now()
+	started, err := s.repository.StartDirectRun(ctx, execution.runID, execution.workerID, now, now.Add(runtimeLeaseDuration))
+	if err != nil || !started {
+		if err == nil {
+			err = fmt.Errorf("启动内部智能体运行失败")
+		}
+		s.failExecutionStart(execution, err)
+		execution.close()
+		return InternalResult{}, err
+	}
 	controller := s.runs.Start(requestID, ctx, chatTimeout(execution.agent.TimeoutSeconds))
 	if _, err := s.startExecutionStream(ctx, execution); err != nil {
 		controller.Stop("fail")
@@ -65,8 +78,17 @@ func (s Service) RunInternal(ctx context.Context, request InternalRequest) (Inte
 		execution.close()
 		return InternalResult{}, err
 	}
+	heartbeatDone := make(chan struct{})
+	go s.heartbeatRun(controller, execution, heartbeatDone)
 	s.run(controller, execution)
-	result := <-completion
+	close(heartbeatDone)
+	result, err := waitInternalCompletion(completion, controller.Context())
+	if err != nil {
+		return InternalResult{
+			RequestID: execution.requestID,
+			RunID:     execution.runID,
+		}, err
+	}
 	response := InternalResult{
 		Output:    result.Output,
 		Summary:   result.Text,
@@ -81,6 +103,22 @@ func (s Service) RunInternal(ctx context.Context, request InternalRequest) (Inte
 		return response, fmt.Errorf("%s", message)
 	}
 	return response, nil
+}
+
+func waitInternalCompletion(completion <-chan runCompletion, runContext context.Context) (runCompletion, error) {
+	// A successful finish publishes completion before the run context is closed.
+	// Prefer that buffered result when both signals become ready together.
+	select {
+	case result := <-completion:
+		return result, nil
+	default:
+	}
+	select {
+	case result := <-completion:
+		return result, nil
+	case <-runContext.Done():
+		return runCompletion{}, fmt.Errorf("内部智能体运行未完成: %w", runContext.Err())
+	}
 }
 
 func notifyRunCreated(callback func(uint64, string), runID uint64, requestID string) {

@@ -106,7 +106,11 @@ func finishWorkspaceExecution(ctx context.Context, runID uint64, status string, 
 	if status != teammodel.RunStatusRunning && status != teammodel.RunStatusPending && status != teammodel.RunStatusWaiting {
 		record["finished_at"] = now
 	}
-	workspacemodel.NewExecutionModel().Update(ctx, map[string]any{"id": row.ID}, record)
+	filters := map[string]any{"id": row.ID}
+	if status != teammodel.RunStatusCanceled {
+		filters["status"] = map[string]any{"neq": teammodel.RunStatusCanceled}
+	}
+	workspacemodel.NewExecutionModel().Update(ctx, filters, record)
 }
 
 func updateWorkspaceExecutionStatus(ctx context.Context, runID uint64, status string, errorText string) {
@@ -124,7 +128,11 @@ func updateWorkspaceExecutionStatus(ctx context.Context, runID uint64, status st
 	if status != teammodel.RunStatusRunning && status != teammodel.RunStatusPending && status != teammodel.RunStatusWaiting {
 		record["finished_at"] = now
 	}
-	workspacemodel.NewExecutionModel().Update(ctx, map[string]any{"id": row.ID}, record)
+	filters := map[string]any{"id": row.ID}
+	if status != teammodel.RunStatusCanceled {
+		filters["status"] = map[string]any{"neq": teammodel.RunStatusCanceled}
+	}
+	workspacemodel.NewExecutionModel().Update(ctx, filters, record)
 }
 
 func workspaceExecutionPayload(ctx context.Context, execution *workspacemodel.Execution) map[string]any {

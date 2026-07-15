@@ -1,12 +1,30 @@
 import { plainMarkdownTextFromRichOutput } from "./space-content-output";
+import { embeddedJSONValues } from "./space-structured-json";
+
+export type StoryboardMaterialType = "character" | "scene" | "prop";
+
+export type StoryboardMaterial = Record<string, unknown> & {
+  id: string;
+  name: string;
+  prompt: string;
+  shot_ids: string[];
+};
+
+export type StoryboardMaterials = {
+  characters: StoryboardMaterial[];
+  scenes: StoryboardMaterial[];
+  props: StoryboardMaterial[];
+};
 
 export type StoryboardShot = Record<string, unknown> & {
   id: string;
   order: number;
   duration: number;
   visual: string;
+  camera_movement: string;
   dialogue: string;
   narration: string;
+  sound_music: string;
 };
 
 export type StoryboardDocument = Record<string, unknown> & {
@@ -14,6 +32,7 @@ export type StoryboardDocument = Record<string, unknown> & {
   version: number;
   title: string;
   shots: StoryboardShot[];
+  materials?: StoryboardMaterials;
 };
 
 const STORYBOARD_WRAPPER_KEYS = [
@@ -31,12 +50,34 @@ const STORYBOARD_WRAPPER_KEYS = [
   "rich",
 ] as const;
 
+const CAMERA_MOVEMENT_ALIASES = [
+  "cameraMovement",
+  "camera_motion",
+  "cameraMotion",
+  "camera",
+  "movement",
+  "运镜",
+] as const;
+
+const SOUND_MUSIC_ALIASES = [
+  "soundMusic",
+  "sound",
+  "music",
+  "audio",
+  "bgm",
+  "音效/配乐",
+  "音效",
+  "配乐",
+] as const;
+
+const MATERIAL_LIST_ALIASES = {
+  characters: ["characters", "roles", "people", "角色", "人物"],
+  scenes: ["scenes", "locations", "places", "场景", "地点"],
+  props: ["props", "items", "objects", "道具", "物品"],
+} as const;
+
 export function parseStoryboardOutput(value: unknown) {
   return findStoryboard(value, new Set(), 0);
-}
-
-export function isStoryboardKind(value: unknown) {
-  return String(value || "").trim().toLowerCase() === "storyboard";
 }
 
 export function storyboardTotalDuration(storyboard: StoryboardDocument) {
@@ -52,8 +93,10 @@ export function createStoryboardShot(index: number): StoryboardShot {
     order: index + 1,
     duration: 4,
     visual: "",
+    camera_movement: "",
     dialogue: "",
     narration: "",
+    sound_music: "",
   };
 }
 
@@ -75,6 +118,12 @@ export function storyboardSummary(storyboard: StoryboardDocument) {
   return `${title} · ${storyboard.shots.length} 个镜头`;
 }
 
+export function storyboardHasMaterialManifest(
+  storyboard: StoryboardDocument,
+) {
+  return Boolean(storyboard.materials);
+}
+
 function findStoryboard(
   value: unknown,
   seen: Set<object>,
@@ -84,10 +133,13 @@ function findStoryboard(
     return null;
   }
   if (typeof value === "string") {
-    const parsed = parseStoryboardText(value);
-    return parsed === value
-      ? null
-      : findStoryboard(parsed, seen, depth + 1);
+    for (const parsed of embeddedJSONValues(value)) {
+      const storyboard = findStoryboard(parsed, seen, depth + 1);
+      if (storyboard) {
+        return storyboard;
+      }
+    }
+    return null;
   }
   if (typeof value !== "object") {
     return null;
@@ -149,8 +201,10 @@ function isStoryboardShotRecord(value: unknown) {
   }
   return [
     "visual",
+    "camera_movement",
     "dialogue",
     "narration",
+    "sound_music",
     "duration",
     "order",
   ].some((key) => key in value);
@@ -159,6 +213,7 @@ function isStoryboardShotRecord(value: unknown) {
 function normalizeStoryboard(row: Record<string, unknown>): StoryboardDocument {
   const shots = Array.isArray(row.shots) ? row.shots : [];
   const usedShotIds = new Set<string>();
+  const materials = normalizeStoryboardMaterials(row);
   return {
     ...row,
     type: "storyboard",
@@ -170,7 +225,146 @@ function normalizeStoryboard(row: Record<string, unknown>): StoryboardDocument {
       usedShotIds.add(normalized.id);
       return normalized;
     }),
+    ...(materials ? { materials } : {}),
   };
+}
+
+function normalizeStoryboardMaterials(
+  row: Record<string, unknown>,
+): StoryboardMaterials | undefined {
+  const nested = isRecord(row.materials)
+    ? row.materials
+    : isRecord(row.material_manifest)
+      ? row.material_manifest
+      : null;
+  const source = nested || row;
+  const hasManifest = Boolean(
+    nested ||
+      Object.values(MATERIAL_LIST_ALIASES).some((aliases) =>
+        aliases.some((key) => source[key] != null),
+      ),
+  );
+  if (!hasManifest) {
+    return undefined;
+  }
+  return {
+    characters: normalizeMaterialList(
+      firstDefined(
+        ...MATERIAL_LIST_ALIASES.characters.map((key) => source[key]),
+      ),
+      "character",
+    ),
+    scenes: normalizeMaterialList(
+      firstDefined(...MATERIAL_LIST_ALIASES.scenes.map((key) => source[key])),
+      "scene",
+    ),
+    props: normalizeMaterialList(
+      firstDefined(...MATERIAL_LIST_ALIASES.props.map((key) => source[key])),
+      "prop",
+    ),
+  };
+}
+
+function normalizeMaterialList(
+  value: unknown,
+  type: StoryboardMaterialType,
+) {
+  const values = Array.isArray(value)
+    ? value
+    : isRecord(value)
+      ? Object.entries(value).map(([key, item]) =>
+          isRecord(item) ? { id: key, ...item } : { id: key, name: item },
+        )
+      : [];
+  const usedIds = new Set<string>();
+  return values.map((value, index) => {
+    const row = isRecord(value) ? value : { name: value };
+    const name = stringValue(firstDefined(row.name, row.title, row.label));
+    const requestedId = stringValue(firstDefined(row.id, row.key));
+    const baseId = requestedId || fallbackMaterialId(type, name, index);
+    const id = uniqueMaterialId(baseId, usedIds);
+    usedIds.add(id);
+    return {
+      ...row,
+      id,
+      name: name || materialFallbackName(type, index),
+      prompt: stringValue(
+        firstDefined(
+          row.prompt,
+          row.image_prompt,
+          row.imagePrompt,
+          row.description,
+          row.visual,
+          row.appearance,
+        ),
+      ),
+      shot_ids: normalizeShotIds(
+        firstDefined(row.shot_ids, row.shotIds, row.shots),
+      ),
+    };
+  });
+}
+
+function normalizeShotIds(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  return value
+    .map((item) => stringValue(isRecord(item) ? item.id : item).trim())
+    .filter((id) => {
+      if (!id || seen.has(id)) {
+        return false;
+      }
+      seen.add(id);
+      return true;
+    });
+}
+
+function fallbackMaterialId(
+  type: StoryboardMaterialType,
+  name: string,
+  index: number,
+) {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `${type}-${slug || stableTextHash(name) || index + 1}`;
+}
+
+function stableTextHash(value: string) {
+  const text = value.trim();
+  if (!text) {
+    return "";
+  }
+  let hash = 2166136261;
+  for (const char of text) {
+    hash ^= char.codePointAt(0) || 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function uniqueMaterialId(requestedId: string, usedIds: Set<string>) {
+  if (!usedIds.has(requestedId)) {
+    return requestedId;
+  }
+  let suffix = 2;
+  while (usedIds.has(`${requestedId}-${suffix}`)) {
+    suffix += 1;
+  }
+  return `${requestedId}-${suffix}`;
+}
+
+function materialFallbackName(type: StoryboardMaterialType, index: number) {
+  const labels: Record<StoryboardMaterialType, string> = {
+    character: "角色",
+    scene: "场景",
+    prop: "道具",
+  };
+  return `${labels[type]} ${index + 1}`;
 }
 
 function normalizeStoryboardShot(
@@ -178,54 +372,34 @@ function normalizeStoryboardShot(
   index: number,
 ): StoryboardShot {
   const row = isRecord(value) ? value : {};
-  return {
+  const normalized: StoryboardShot = {
     ...row,
     id: stringValue(row.id) || `shot-${index + 1}`,
     order: index + 1,
     duration: positiveInteger(row.duration, 4),
     visual: stringValue(row.visual),
+    camera_movement: stringValue(
+      firstDefined(
+        row.camera_movement,
+        ...CAMERA_MOVEMENT_ALIASES.map((key) => row[key]),
+      ),
+    ),
     dialogue: stringValue(row.dialogue),
     narration: stringValue(row.narration),
+    sound_music: stringValue(
+      firstDefined(
+        row.sound_music,
+        ...SOUND_MUSIC_ALIASES.map((key) => row[key]),
+      ),
+    ),
   };
-}
-
-function parseStoryboardText(value: string): unknown {
-  const text = value.trim();
-  if (!text) {
-    return value;
+  for (const key of [
+    ...CAMERA_MOVEMENT_ALIASES,
+    ...SOUND_MUSIC_ALIASES,
+  ]) {
+    delete normalized[key];
   }
-  const fenced = extractJSONFence(text);
-  if (fenced) {
-    const parsed = parseJSON(fenced);
-    if (parsed !== fenced) {
-      return parsed;
-    }
-  }
-  const parsed = parseJSON(text);
-  if (parsed !== text) {
-    return parsed;
-  }
-  const objectText = extractJSONObject(text);
-  return objectText ? parseJSON(objectText) : value;
-}
-
-function extractJSONFence(value: string) {
-  const match = value.match(/```(?:json|storyboard)?\s*([\s\S]*?)```/i);
-  return match?.[1]?.trim() || "";
-}
-
-function extractJSONObject(value: string) {
-  const start = value.indexOf("{");
-  const end = value.lastIndexOf("}");
-  return start >= 0 && end > start ? value.slice(start, end + 1) : "";
-}
-
-function parseJSON(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
+  return normalized;
 }
 
 function richDocumentText(value: unknown) {
@@ -280,6 +454,10 @@ function stringValue(value: unknown) {
     : value == null
       ? ""
       : String(value);
+}
+
+function firstDefined(...values: unknown[]) {
+  return values.find((value) => value !== undefined && value !== null);
 }
 
 function uniqueShotId(

@@ -15,6 +15,36 @@ type ToolCall struct {
 	Arguments string
 }
 
+func FunctionToolDefinition(name string, description string, parameters map[string]any, strict bool) map[string]any {
+	if len(parameters) == 0 {
+		parameters = map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		}
+	}
+	function := map[string]any{
+		"name":        strings.TrimSpace(name),
+		"description": strings.TrimSpace(description),
+		"parameters":  parameters,
+	}
+	if strict {
+		function["strict"] = true
+	}
+	return map[string]any{
+		"type":     "function",
+		"function": function,
+	}
+}
+
+func ForcedFunctionToolChoice(name string) map[string]any {
+	return map[string]any{
+		"type": "function",
+		"function": map[string]any{
+			"name": strings.TrimSpace(name),
+		},
+	}
+}
+
 func ParseToolCalls(value any) []ToolCall {
 	items := normalizeAnyList(value)
 	result := make([]ToolCall, 0, len(items))

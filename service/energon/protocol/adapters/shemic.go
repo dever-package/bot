@@ -50,6 +50,7 @@ func (ShemicAdapter) BuildNativeRequest(input botprotocol.NativeInput) (botprovi
 			}
 		}
 	}
+	applyToolOptionOverrides(body, input.Request.Options)
 
 	path := resolveNativePath(input, "/")
 	if path == "" {

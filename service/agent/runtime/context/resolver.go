@@ -61,6 +61,9 @@ func ResolveTextPower(ctx context.Context, id uint64) (energonmodel.Power, error
 	if !strings.EqualFold(strings.TrimSpace(row.Kind), "text") {
 		return energonmodel.Power{}, fmt.Errorf("LLM 能力必须是文本类型: %s", row.Name)
 	}
+	if !energonmodel.IsGeneralTextPower(*row) {
+		return energonmodel.Power{}, fmt.Errorf("LLM 能力必须是通用文本能力: %s", row.Name)
+	}
 	return *row, nil
 }
 

@@ -57,7 +57,9 @@ func (s GatewayService) resolveNormalizePlan(ctx context.Context, req *botprotoc
 	if !ok || !isActive(power.Status) {
 		return normalizePlan{}, fmt.Errorf("未匹配到 Energon 能力: %s", req.Name)
 	}
-	applyPowerPrompt(req, power)
+	if err := preparePowerRequest(req, power); err != nil {
+		return normalizePlan{}, err
+	}
 
 	targets := orderActivePowerTargets(s.repo.ListTargetsByPower(ctx, power.ID))
 	if targetID := requestedSourceTargetID(req); targetID > 0 && normalizePowerSourceRule(int(power.SourceRule)) == powerSourceRulePick {
