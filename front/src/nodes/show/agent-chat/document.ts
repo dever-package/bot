@@ -1,4 +1,5 @@
 import { isPlainRecord } from "@/lib/runtime-stream-output";
+import { resolveAssetUrl } from "@/lib/request";
 import {
   readAgentChatArtifacts,
   type AgentChatArtifact,
@@ -43,6 +44,83 @@ export type AgentChatDocument = {
   updatedAt: string;
   completedAt: string;
 };
+
+export function normalizeAgentChatDocumentBlockText(
+  text: string,
+  title: string,
+) {
+  const comparableTitle = title.trim();
+  const paragraphs = String(text || "")
+    .trim()
+    .split(/\n{2,}/)
+    .map((paragraph) =>
+      paragraph
+        .split("\n")
+        .filter((line) => !isDocumentTitleHeading(line, comparableTitle))
+        .join("\n")
+        .trim(),
+    )
+    .filter(Boolean);
+  return paragraphs
+    .filter((paragraph, index) => paragraph !== paragraphs[index - 1])
+    .join("\n\n");
+}
+
+export function agentChatDocumentMarkdown(document: AgentChatDocument) {
+  return agentChatDocumentText(document, false);
+}
+
+export function agentChatDocumentCopyText(document: AgentChatDocument) {
+  return agentChatDocumentText(document, true);
+}
+
+function agentChatDocumentText(
+  document: AgentChatDocument,
+  includeArtifacts: boolean,
+) {
+  const content = document.blocks.flatMap((block) => {
+    if (block.type === "text") {
+      const text = normalizeAgentChatDocumentBlockText(
+        block.text,
+        document.title,
+      );
+      return text ? [text] : [];
+    }
+    if (!includeArtifacts) {
+      return [];
+    }
+    return block.artifacts
+      .map(agentChatArtifactMarkdown)
+      .filter((value): value is string => Boolean(value));
+  });
+  if (document.title) {
+    content.unshift(`# ${document.title}`);
+  }
+  return content.join("\n\n");
+}
+
+function agentChatArtifactMarkdown(artifact: AgentChatArtifact) {
+  const url = resolveAssetUrl(
+    String(artifact.url || artifact.previewUrl || "").trim(),
+  );
+  if (artifact.status !== "ready" || !url) {
+    return "";
+  }
+  const label = markdownLabel(
+    artifact.label || artifact.name || `素材 ${artifact.id}`,
+  );
+  const target = `<${url
+    .replaceAll("<", "%3C")
+    .replaceAll(">", "%3E")
+    .replaceAll(" ", "%20")}>`;
+  return artifact.kind === "image"
+    ? `![${label}](${target})`
+    : `[${label}](${target})`;
+}
+
+function markdownLabel(value: string) {
+  return String(value || "").replace(/[\\[\]]/g, "\\$&");
+}
 
 export function normalizeAgentChatDocument(
   value: unknown,
@@ -89,6 +167,7 @@ export function mergeAgentChatDocument(
   if (!current || current.id !== incoming.id) {
     return incoming;
   }
+  const status = mergeDocumentStatus(current.status, incoming.status);
   return {
     ...current,
     ...incoming,
@@ -96,6 +175,11 @@ export function mergeAgentChatDocument(
     messageID: incoming.messageID || current.messageID,
     runID: incoming.runID || current.runID,
     title: incoming.title || current.title,
+    status,
+    pendingJobCount:
+      status === "ready" || status === "partial_failed"
+        ? 0
+        : incoming.pendingJobCount,
     hydrated: current.hydrated || incoming.hydrated,
     meta: { ...current.meta, ...incoming.meta },
     blocks: mergeDocumentBlocks(current.blocks, incoming.blocks),
@@ -132,7 +216,10 @@ export function mergeAgentChatDocumentEvent(
   if (blockID) {
     document = updateDocumentBlock(document, blockID, (currentBlock) => ({
       ...currentBlock,
-      status: eventBlockStatus(event, currentBlock.status),
+      status: mergeBlockStatus(
+        currentBlock.status,
+        eventBlockStatus(event, currentBlock.status),
+      ),
       artifacts:
         artifacts.length > 0
           ? mergeArtifacts(currentBlock.artifacts, artifacts)
@@ -149,12 +236,18 @@ export function mergeAgentChatDocumentEvent(
   if (event === "document_content_complete") {
     document = {
       ...document,
-      status: documentStatus(status || "generating"),
+      status: mergeDocumentStatus(
+        document.status,
+        documentStatus(status || "generating"),
+      ),
     };
   } else if (event === "document_complete") {
     document = {
       ...document,
-      status: documentStatus(status || "ready"),
+      status: mergeDocumentStatus(
+        document.status,
+        documentStatus(status || "ready"),
+      ),
       pendingJobCount: 0,
     };
   }
@@ -170,7 +263,24 @@ export function isAgentChatDocumentPending(document?: AgentChatDocument) {
     document.status === "generating" ||
     document.pendingJobCount > 0 ||
     document.blocks.some(
-      (block) => block.type === "media" && block.status === "generating",
+      (block) =>
+        block.type === "media" &&
+        block.status !== "failed" &&
+        !isAgentChatDocumentMediaReady(block),
+    )
+  );
+}
+
+export function isAgentChatDocumentMediaReady(
+  block: AgentChatDocumentBlock,
+) {
+  return (
+    block.type === "media" &&
+    block.artifacts.length > 0 &&
+    block.artifacts.every(
+      (artifact) =>
+        artifact.status === "ready" &&
+        Boolean(String(artifact.url || artifact.previewUrl || "").trim()),
     )
   );
 }
@@ -217,6 +327,7 @@ function mergeDocumentBlocks(
             ...existing,
             ...block,
             text: block.text || existing.text,
+            status: mergeBlockStatus(existing.status, block.status),
             meta: { ...existing.meta, ...block.meta },
             artifacts: mergeArtifacts(existing.artifacts, block.artifacts),
           }
@@ -249,10 +360,22 @@ function mergeArtifacts(
 ) {
   const artifacts = new Map(current.map((artifact) => [artifact.id, artifact]));
   for (const artifact of incoming) {
-    artifacts.set(artifact.id, {
-      ...artifacts.get(artifact.id),
-      ...artifact,
-    });
+    const existing = artifacts.get(artifact.id);
+    artifacts.set(
+      artifact.id,
+      existing
+        ? {
+            ...existing,
+            ...artifact,
+            fileID: artifact.fileID || existing.fileID,
+            status: mergeArtifactStatus(existing.status, artifact.status),
+            url: artifact.url || existing.url,
+            previewUrl: artifact.previewUrl || existing.previewUrl,
+            mime: artifact.mime || existing.mime,
+            size: artifact.size || existing.size,
+          }
+        : artifact,
+    );
   }
   return Array.from(artifacts.values()).sort(
     (left, right) => left.displayNo - right.displayNo || left.id - right.id,
@@ -274,6 +397,49 @@ function eventBlockStatus(
   if (event === "artifact_failed") return "failed";
   if (event === "artifact_progress") return "generating";
   return fallback;
+}
+
+function mergeDocumentStatus(
+  current: AgentChatDocumentStatus,
+  incoming: AgentChatDocumentStatus,
+) {
+  return documentStatusRank(incoming) >= documentStatusRank(current)
+    ? incoming
+    : current;
+}
+
+function documentStatusRank(status: AgentChatDocumentStatus) {
+  if (status === "ready" || status === "partial_failed") return 2;
+  if (status === "generating") return 1;
+  return 0;
+}
+
+function mergeBlockStatus(
+  current: AgentChatDocumentBlockStatus,
+  incoming: AgentChatDocumentBlockStatus,
+) {
+  if (current !== "generating" && incoming === "generating") {
+    return current;
+  }
+  return incoming;
+}
+
+function mergeArtifactStatus(
+  current: AgentChatArtifact["status"],
+  incoming: AgentChatArtifact["status"],
+) {
+  if (current !== "generating" && incoming === "generating") {
+    return current;
+  }
+  return incoming;
+}
+
+function isDocumentTitleHeading(line: string, title: string) {
+  if (!title) {
+    return false;
+  }
+  const match = line.trim().match(/^#{1,6}\s+(.+)$/);
+  return Boolean(match && match[1].trim() === title);
 }
 
 function documentStatus(value: unknown): AgentChatDocumentStatus {

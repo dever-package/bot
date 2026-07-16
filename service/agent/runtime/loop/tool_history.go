@@ -30,8 +30,8 @@ func assistantToolHistoryMessage(text string, calls []botprotocol.ToolCall) map[
 
 func assistantHistoryMessage(text string) map[string]any {
 	return map[string]any{
-		"role":    "assistant",
-		"content": strings.TrimSpace(text),
+		"role": "assistant",
+		"text": strings.TrimSpace(text),
 	}
 }
 

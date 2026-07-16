@@ -33,14 +33,14 @@ func ManifestScripts(manifest string) []ScriptSpec {
 		if !ok {
 			continue
 		}
-		path := strings.TrimSpace(fmt.Sprint(FirstPresent(mapped, "path", "file")))
-		if path == "" || path == "<nil>" {
+		path := FirstText(FirstPresent(mapped, "path", "file"))
+		if path == "" {
 			continue
 		}
 		scripts = append(scripts, ScriptSpec{
-			Key:       strings.TrimSpace(fmt.Sprint(FirstPresent(mapped, "key", "name"))),
+			Key:       FirstText(FirstPresent(mapped, "key", "name")),
 			Path:      strings.TrimPrefix(strings.TrimSpace(path), "/"),
-			TargetKey: strings.TrimSpace(fmt.Sprint(FirstPresent(mapped, "target_key", "targetKey", "target"))),
+			TargetKey: FirstText(FirstPresent(mapped, "target_key", "targetKey", "target")),
 		})
 	}
 	return scripts
@@ -68,11 +68,11 @@ func MissingRequiredConfig(ctx context.Context, skillID uint64, manifest string,
 		if !ok || !Truthy(mapped["required"]) {
 			continue
 		}
-		key := ConfigEnvName(fmt.Sprint(mapped["key"]))
+		key := ConfigEnvName(FirstText(mapped["key"]))
 		if key == "" {
 			continue
 		}
-		itemTarget := strings.TrimSpace(fmt.Sprint(FirstPresent(mapped, "target_key", "targetKey", "target")))
+		itemTarget := FirstText(FirstPresent(mapped, "target_key", "targetKey", "target"))
 		if !manifestTargetMatches(itemTarget, targetKey) {
 			continue
 		}

@@ -1,4 +1,7 @@
-import { normalizeEnergonOutput } from "../space-content-view";
+import {
+  contentOutputHasMedia,
+  normalizeEnergonOutput,
+} from "../space-content-view";
 import { plainMarkdownTextFromRichOutput } from "../space-content-output";
 import { documentText, richDocument } from "../space-model";
 import {
@@ -29,13 +32,7 @@ export function resolveNodeDetailContent(
   node: SpaceCanvasNode,
   version?: AssetVersion,
 ): NodeDetailEditableContent {
-  const raw = firstDefined(
-    version?.content,
-    node.asset?.version?.content,
-    node.resultOutput,
-    valueAtPath(node, "result", "output"),
-    node.description,
-  );
+  const raw = resolveNodeDetailRawContent(node, version);
   const storyboard = parseStoryboardOutput(raw);
   if (storyboard) {
     return {
@@ -81,6 +78,52 @@ export function resolveNodeDetailContent(
 
   const markdown = markdownTextFromOutput(raw) || node.description || "";
   return markdownContent(markdown);
+}
+
+export function resolveNodeDetailMediaOutput(
+  node: SpaceCanvasNode,
+  version?: AssetVersion,
+) {
+  const raw = resolveNodeDetailRawContent(node, version);
+  const parsedRaw = parseMaybeJSON(raw);
+  const embeddedText = plainMarkdownTextFromRichOutput(parsedRaw);
+  for (const parsed of [parsedRaw, parseMaybeJSON(embeddedText)]) {
+    if (contentOutputHasMedia(parsed)) {
+      return mediaDisplayOutput(parsed);
+    }
+  }
+  const directMedia = directMediaOutput(node.kind, parsedRaw);
+  if (directMedia) {
+    return directMedia;
+  }
+  return undefined;
+}
+
+function mediaDisplayOutput(value: unknown) {
+  const normalized = normalizeEnergonOutput?.(value);
+  const items = Array.isArray(normalized) ? normalized : [value];
+  const displayItems = items.map((item) => {
+    if (!isRecord(item) || item.json === undefined) {
+      return item;
+    }
+    const displayItem = { ...item };
+    delete displayItem.json;
+    return displayItem;
+  });
+  return displayItems.length === 1 ? displayItems[0] : displayItems;
+}
+
+function resolveNodeDetailRawContent(
+  node: SpaceCanvasNode,
+  version?: AssetVersion,
+) {
+  return firstDefined(
+    version?.content,
+    node.asset?.version?.content,
+    node.resultOutput,
+    valueAtPath(node, "result", "output"),
+    node.description,
+  );
 }
 
 export function serializeNodeDetailContent(
@@ -340,6 +383,19 @@ function fileContent(file: NodeDetailFileValue) {
     file_url: file.url,
     name: file.name || fileName(file.url),
     description: file.description.trim(),
+  };
+}
+
+function directMediaOutput(kind: SpaceCanvasNode["kind"], value: unknown) {
+  if (kind !== "image" && kind !== "video" && kind !== "audio") {
+    return undefined;
+  }
+  const urls = mediaURLs(value);
+  if (urls.length === 0) {
+    return undefined;
+  }
+  return {
+    [`${kind}s`]: urls,
   };
 }
 

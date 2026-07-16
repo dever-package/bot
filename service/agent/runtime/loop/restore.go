@@ -7,19 +7,24 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	dlog "github.com/shemic/dever/log"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
+	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 func (s Service) ExecuteRun(ctx context.Context, lease RunLease) error {
+	prepareCtx, prepareCancel := operationContext(ctx, runtimeMaintenanceTimeout)
+	defer prepareCancel()
 	workerID := strings.TrimSpace(lease.WorkerID)
 	if workerID == "" {
 		workerID = "runtime:" + uuid.NewString()
 	}
-	candidate, err := s.repository.FindRunByID(ctx, lease.RunID)
+	candidate, err := s.repository.FindRunByID(prepareCtx, lease.RunID)
 	if err != nil {
 		return err
 	}
@@ -27,18 +32,18 @@ func (s Service) ExecuteRun(ctx context.Context, lease RunLease) error {
 		return nil
 	}
 	now := time.Now()
-	claimed, err := s.repository.ClaimRun(ctx, candidate, workerID, now, now.Add(runtimeLeaseDuration))
+	claimed, err := s.repository.ClaimRun(prepareCtx, candidate, workerID, now, now.Add(runtimeLeaseDuration))
 	if err != nil {
 		return err
 	}
 	if !claimed {
-		current, findErr := s.repository.FindRunByID(ctx, lease.RunID)
+		current, findErr := s.repository.FindRunByID(prepareCtx, lease.RunID)
 		if findErr == nil && isTerminalRunStatus(current.Status) {
 			return nil
 		}
 		return errRunLeaseLost
 	}
-	row, err := s.repository.FindRunByID(ctx, lease.RunID)
+	row, err := s.repository.FindRunByID(prepareCtx, lease.RunID)
 	if err != nil {
 		return err
 	}
@@ -53,30 +58,14 @@ func (s Service) ExecuteRun(ctx context.Context, lease RunLease) error {
 		return err
 	}
 	references := appendMediaReferences(snapshot.MediaReferences, checkpoint.MediaReferences)
-	mounted, err := runtimetool.Mount(ctx, runtimetool.MountRequest{
-		Agent:          snapshot.Agent,
-		Gateway:        s.gateway,
-		References:     references,
-		EnableDocument: snapshot.PersistChat && snapshot.AssistantMessageID > 0,
-		Method:         snapshot.Transport.Method,
-		Host:           snapshot.Transport.Host,
-		Path:           snapshot.Transport.Path,
-	})
-	if err != nil {
-		s.failClaimedRun(row, workerID, err)
-		return err
-	}
-	if err := restoreLoadedSkills(ctx, mounted.Registry, checkpoint.LoadedSkills, row.RequestID); err != nil {
-		mounted.Close()
-		s.failClaimedRun(row, workerID, err)
-		return err
-	}
 	execution := execution{
 		runID:              row.ID,
 		version:            row.Version,
 		workerID:           workerID,
 		requestID:          row.RequestID,
+		requestedAt:        snapshot.RequestedAt,
 		startedAt:          row.StartedAt,
+		claimedAt:          now,
 		agent:              snapshot.Agent,
 		power:              snapshot.Power,
 		sessionID:          snapshot.SessionID,
@@ -85,31 +74,46 @@ func (s Service) ExecuteRun(ctx context.Context, lease RunLease) error {
 		prompt:             snapshot.Prompt,
 		input:              snapshot.Input,
 		history:            snapshot.History,
-		registry:           mounted.Registry,
 		transport: modelTransport{
 			Method: snapshot.Transport.Method,
 			Host:   snapshot.Transport.Host,
 			Path:   snapshot.Transport.Path,
 		},
 		persistChat:     snapshot.PersistChat,
-		cleanup:         mounted.Close,
 		mediaReferences: references,
+		scope:           runtimescope.RestoreSession(prepareCtx, snapshot.Scope, snapshot.SessionID),
 		checkpoint:      checkpoint,
 	}
+	prepareCancel()
+	controller := s.runs.Start(row.RequestID, context.Background(), remainingChatTimeout(row.StartedAt, snapshot.Agent.TimeoutSeconds))
+	heartbeatDone := make(chan struct{})
+	runtimeasync.Start("智能体运行租约心跳", func() {
+		s.heartbeatRun(controller, execution, heartbeatDone)
+	}, func(heartbeatErr error) {
+		controller.Stop("lease_lost")
+		dlog.ErrorFields("agent_runtime_heartbeat", "智能体运行心跳异常", dlog.Fields{
+			"run_id": row.ID, "request_id": row.RequestID, "error": heartbeatErr.Error(),
+		})
+	})
+	defer close(heartbeatDone)
+	if err := s.mountExecutionTools(controller.Context(), &execution, nil, checkpoint.LoadedSkills); err != nil {
+		controller.Stop("fail")
+		s.runs.Remove(row.RequestID)
+		s.failClaimedRun(row, workerID, err)
+		return err
+	}
 	if row.Attempt > 1 {
-		_ = s.writeExecutionOutput(context.Background(), execution, map[string]any{
+		writeCtx, writeCancel := maintenanceContext()
+		_ = s.writeExecutionOutput(writeCtx, execution, map[string]any{
 			"event": "reset",
 			"text":  checkpoint.LastText,
 			"meta": map[string]any{
 				"attempt": row.Attempt,
 			},
 		})
+		writeCancel()
 	}
-	controller := s.runs.Start(row.RequestID, context.Background(), remainingChatTimeout(row.StartedAt, snapshot.Agent.TimeoutSeconds))
-	heartbeatDone := make(chan struct{})
-	go s.heartbeatRun(controller, execution, heartbeatDone)
 	s.run(controller, execution)
-	close(heartbeatDone)
 	return nil
 }
 
@@ -135,6 +139,7 @@ func restoreLoadedSkills(ctx context.Context, registry *runtimetool.Registry, ke
 func (s Service) heartbeatRun(controller *runController, execution execution, done <-chan struct{}) {
 	ticker := time.NewTicker(runtimeHeartbeatInterval)
 	defer ticker.Stop()
+	renewFailures := 0
 	for {
 		select {
 		case <-done:
@@ -143,26 +148,47 @@ func (s Service) heartbeatRun(controller *runController, execution execution, do
 			return
 		case <-ticker.C:
 			now := time.Now()
+			maintenanceCtx, cancel := maintenanceContext()
 			renewed, err := s.repository.RenewLease(
-				context.Background(), execution.runID, execution.workerID, now, now.Add(runtimeLeaseDuration),
+				maintenanceCtx, execution.runID, execution.workerID, now, now.Add(runtimeLeaseDuration),
 			)
+			cancel()
 			if err != nil {
-				continue
+				renewFailures++
+				if renewFailures < 3 {
+					continue
+				}
+				dlog.ErrorFields("agent_runtime_lease", "智能体运行连续续租失败，停止当前 Worker", dlog.Fields{
+					"run_id": execution.runID, "request_id": execution.requestID, "error": err.Error(),
+				})
+				s.stopRunForLease(controller, "lease_lost")
+				return
 			}
+			renewFailures = 0
 			if renewed {
 				continue
 			}
 			reason := "lease_lost"
-			if row, findErr := s.repository.FindRunByID(context.Background(), execution.runID); findErr == nil && row.CancelRequested {
+			findCtx, findCancel := maintenanceContext()
+			row, findErr := s.repository.FindRunByID(findCtx, execution.runID)
+			findCancel()
+			if findErr == nil && row.CancelRequested {
 				reason = "canceled"
 			}
-			childRequestID := controller.Stop(reason)
-			if childRequestID != "" {
-				_ = s.gateway.StopStream(context.Background(), childRequestID)
-			}
+			s.stopRunForLease(controller, reason)
 			return
 		}
 	}
+}
+
+func (s Service) stopRunForLease(controller *runController, reason string) {
+	childRequestID := controller.Stop(reason)
+	if childRequestID == "" {
+		return
+	}
+	stopCtx, stopCancel := stopContext()
+	defer stopCancel()
+	_ = s.gateway.StopStream(stopCtx, childRequestID)
 }
 
 func (s Service) failClaimedRun(row agentmodel.Run, workerID string, runErr error) {
@@ -176,7 +202,18 @@ func (s Service) failClaimedRun(row agentmodel.Run, workerID string, runErr erro
 		"text":  "",
 		"error": message,
 	}
-	finished, _ := s.finishRunAndChat(context.Background(), row.ID, workerID, row.SessionID > 0, runResult{
+	execution := execution{runID: row.ID, version: row.Version, requestID: row.RequestID}
+	resultCtx, resultCancel := maintenanceContext()
+	resultErr := s.writeExecutionResult(resultCtx, execution, output, message, botprotocol.ResponseStatusFail)
+	resultCancel()
+	if resultErr != nil {
+		dlog.ErrorFields("agent_runtime_restore_finish", "恢复失败终态投递失败，等待租约恢复", dlog.Fields{
+			"run_id": row.ID, "request_id": row.RequestID, "error": resultErr.Error(),
+		})
+		return
+	}
+	finishCtx, finishCancel := maintenanceContext()
+	finished, finishErr := s.finishRunAndChat(finishCtx, row.ID, workerID, row.SessionID > 0, runResult{
 		Status:     runStatusFail,
 		Output:     encodeJSON(output, "{}"),
 		Error:      message,
@@ -189,11 +226,15 @@ func (s Service) failClaimedRun(row agentmodel.Run, workerID string, runErr erro
 		Output:    output,
 		Error:     message,
 	})
-	if !finished {
-		return
+	finishCancel()
+	if finishErr != nil || !finished {
+		if finishErr == nil {
+			finishErr = errRunLeaseLost
+		}
+		dlog.ErrorFields("agent_runtime_restore_finish", "保存恢复失败终态失败，等待租约恢复", dlog.Fields{
+			"run_id": row.ID, "request_id": row.RequestID, "error": finishErr.Error(),
+		})
 	}
-	execution := execution{runID: row.ID, version: row.Version, requestID: row.RequestID}
-	_ = s.writeExecutionResult(context.Background(), execution, output, message, botprotocol.ResponseStatusFail)
 }
 
 func deterministicToolRequestID(requestID string, call botprotocol.ToolCall) string {

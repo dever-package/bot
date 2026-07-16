@@ -3,6 +3,7 @@ import type {
   AssetCate,
   AssetKind,
   AssetVersion,
+  CanvasComposerDraft,
   CanvasFunctionOption,
   OutputTypeOption,
   PowerKindOption,
@@ -55,14 +56,26 @@ export function normalizeSpaceBootstrap(value: unknown): SpaceBootstrap {
     project: normalizeProject(row.project),
     team: normalizeTeam(row.team || row.type),
     release: normalizeRelease(row.release),
-    assetCates: asRecords(firstDefined(row.asset_cates, asRecord(row.team).asset_cates)).map(normalizeAssetCate),
-    roles: asRecords(firstDefined(row.roles, asRecord(row.team).roles, canvasConfig.roles)).map(normalizeRole),
-    flows: asRecords(firstDefined(row.flows, asRecord(row.team).flows)).map(normalizeFlow),
-    nodesByFlow: normalizeNodesByFlow(firstDefined(row.nodes_by_flow, asRecord(row.team).nodes_by_flow)),
+    assetCates: asRecords(
+      firstDefined(row.asset_cates, asRecord(row.team).asset_cates),
+    ).map(normalizeAssetCate),
+    roles: asRecords(
+      firstDefined(row.roles, asRecord(row.team).roles, canvasConfig.roles),
+    ).map(normalizeRole),
+    flows: asRecords(firstDefined(row.flows, asRecord(row.team).flows)).map(
+      normalizeFlow,
+    ),
+    nodesByFlow: normalizeNodesByFlow(
+      firstDefined(row.nodes_by_flow, asRecord(row.team).nodes_by_flow),
+    ),
     canvases,
-    assets: asRecords(firstDefined(row.assets, asRecord(row.assets).items)).map(normalizeAsset),
+    assets: asRecords(firstDefined(row.assets, asRecord(row.assets).items)).map(
+      normalizeAsset,
+    ),
     powers,
-    powerKinds: asRecords(firstDefined(row.power_kinds, canvasConfig.power_kinds)).map(normalizePowerKind),
+    powerKinds: asRecords(
+      firstDefined(row.power_kinds, canvasConfig.power_kinds),
+    ).map(normalizePowerKind),
     outputTypes: asRecords(
       firstDefined(row.output_types, canvasConfig.output_types),
     ).map(normalizeOutputType),
@@ -72,22 +85,89 @@ export function normalizeSpaceBootstrap(value: unknown): SpaceBootstrap {
 export function emptyCanvasState(assetCateId: number): SpaceCanvasState {
   return {
     assetCateId,
+    nextNodeNo: 1,
     nodes: [],
     edges: [],
     viewport: {},
   };
 }
 
-export function normalizeCanvasState(value: unknown, fallbackAssetCateId = 0): SpaceCanvasState {
+export function normalizeCanvasState(
+  value: unknown,
+  fallbackAssetCateId = 0,
+): SpaceCanvasState {
   const row = asRecord(value);
-  const assetCateId = numberValue(firstDefined(row.asset_cate_id, fallbackAssetCateId));
-  return {
+  const assetCateId = numberValue(
+    firstDefined(row.asset_cate_id, fallbackAssetCateId),
+  );
+  return normalizeCanvasNodeIdentities({
     assetCateId,
-    nodes: asRecords(row.nodes).map(normalizeCanvasNode).filter((node): node is SpaceCanvasNode => Boolean(node)),
-    edges: asRecords(row.edges).map(normalizeCanvasEdge).filter((edge): edge is SpaceCanvasEdge => Boolean(edge)),
+    nextNodeNo: Math.max(1, numberValue(row.next_node_no)),
+    nodes: asRecords(row.nodes)
+      .map(normalizeCanvasNode)
+      .filter((node): node is SpaceCanvasNode => Boolean(node)),
+    edges: asRecords(row.edges)
+      .map(normalizeCanvasEdge)
+      .filter((edge): edge is SpaceCanvasEdge => Boolean(edge)),
     viewport: normalizeCanvasViewport(row.viewport),
     updatedAt: stringValue(row.updated_at),
-  };
+  });
+}
+
+export function normalizeCanvasNodeIdentities(
+  canvas: SpaceCanvasState,
+): SpaceCanvasState {
+  let nextNodeNo = nextCanvasNodeNo(canvas.nodes, canvas.nextNodeNo);
+  let changed = nextNodeNo !== canvas.nextNodeNo;
+  const nodes = canvas.nodes.map((node) => {
+    if (!canvasNodeHasMaterialSlot(node) || Number(node.nodeNo || 0) > 0) {
+      return node;
+    }
+    const nodeNo = nextNodeNo++;
+    const titleMode = node.titleMode || "manual";
+    changed = true;
+    return {
+      ...node,
+      nodeNo,
+      titleMode,
+      ...(titleMode === "auto" && !node.storyboardItem
+        ? { title: defaultCanvasNodeTitle(node, nodeNo) }
+        : {}),
+    };
+  });
+  return changed ? { ...canvas, nextNodeNo, nodes } : canvas;
+}
+
+export function nextCanvasNodeNo(nodes: SpaceCanvasNode[], current = 1) {
+  return Math.max(
+    1,
+    Number(current || 1),
+    ...nodes.map((node) => Number(node.nodeNo || 0) + 1),
+  );
+}
+
+export function canvasNodeHasMaterialSlot(node: SpaceCanvasNode) {
+  return node.type === "power" || node.type === "agent" || node.type === "flow";
+}
+
+export function defaultCanvasNodeTitle(node: SpaceCanvasNode, nodeNo: number) {
+  let label = "节点";
+  if (node.type === "power") {
+    const presentation = resolvePowerPresentation(
+      node.power,
+      node.kind,
+      node.outputType,
+    );
+    label =
+      (presentation.outputType !== "general" && presentation.outputName) ||
+      presentation.kindName ||
+      "能力";
+  } else if (node.type === "agent") {
+    label = String(node.role?.name || "智能体").trim() || "智能体";
+  } else if (node.type === "flow") {
+    label = String(node.flow?.name || "流程").trim() || "流程";
+  }
+  return `${label}-${nodeNo}`;
 }
 
 export function normalizePowerCatalog(value: unknown): {
@@ -116,7 +196,11 @@ export function defaultAssetCateId(space: SpaceBootstrap) {
 }
 
 export function assetCateById(space: SpaceBootstrap, assetCateId: number) {
-  return visibleAssetCates(space).find((item) => item.id === assetCateId) || visibleAssetCates(space)[0] || freeAssetCate;
+  return (
+    visibleAssetCates(space).find((item) => item.id === assetCateId) ||
+    visibleAssetCates(space)[0] ||
+    freeAssetCate
+  );
 }
 
 export function assetsForCate(space: SpaceBootstrap, assetCateId: number) {
@@ -170,9 +254,12 @@ export function createLocalNode(
   const labels: Record<SpaceCanvasNode["type"], [string, string, string]> = {
     asset: [
       selectedAsset?.name || "资产引用",
-      selectedAsset ? assetKindLabel(selectedAsset.kind) : assetKindLabel(assetCate.kind),
       selectedAsset
-        ? documentPreview(selectedAsset.version?.content) || "引用已有资产，作为其他节点的上下文。"
+        ? assetKindLabel(selectedAsset.kind)
+        : assetKindLabel(assetCate.kind),
+      selectedAsset
+        ? documentPreview(selectedAsset.version?.content) ||
+          "引用已有资产，作为其他节点的上下文。"
         : "引用已有资产，作为其他节点的上下文。",
     ],
     power: [
@@ -180,7 +267,9 @@ export function createLocalNode(
       selectedPowerPresentation?.outputName ||
         selectedPowerPresentation?.kindName ||
         "能力节点",
-      selectedPower ? `调用 ${selectedPower.name} 能力，按参数生成内容。` : "输入提示词和参数，直接生成文本、图片、视频或音频。",
+      selectedPower
+        ? `调用 ${selectedPower.name} 能力，按参数生成内容。`
+        : "输入提示词和参数，直接生成文本、图片、视频或音频。",
     ],
     agent: [
       selectedRole?.name || "智能体节点",
@@ -209,6 +298,10 @@ export function createLocalNode(
     id: `local-${type}-${Date.now()}-${index}`,
     type,
     title,
+    titleMode:
+      type === "power" || type === "agent" || type === "flow"
+        ? "auto"
+        : undefined,
     subtitle,
     description,
     x: baseX,
@@ -340,7 +433,8 @@ function normalizeAssetCate(value: Record<string, unknown>): AssetCate {
     team_id: numberValue(value.team_id),
     name: stringValue(value.name) || "未命名资产",
     kind: (stringValue(value.kind) || "text") as AssetKind,
-    cardinality: (stringValue(value.cardinality) || "single") as AssetCardinality,
+    cardinality: (stringValue(value.cardinality) ||
+      "single") as AssetCardinality,
     status: numberValue(value.status),
     sort: numberValue(value.sort),
   };
@@ -403,9 +497,7 @@ function normalizePower(value: Record<string, unknown>): PowerOption {
   };
 }
 
-function normalizeOutputType(
-  value: Record<string, unknown>,
-): OutputTypeOption {
+function normalizeOutputType(value: Record<string, unknown>): OutputTypeOption {
   return {
     key: stringValue(value.key || value.id),
     name: stringValue(value.name || value.value),
@@ -421,7 +513,10 @@ function normalizeOutputType(
 function normalizePowerKind(value: Record<string, unknown>): PowerKindOption {
   return {
     id: stringValue(value.id),
-    value: stringValue(value.value) || stringValue(value.name) || stringValue(value.id),
+    value:
+      stringValue(value.value) ||
+      stringValue(value.name) ||
+      stringValue(value.id),
   };
 }
 
@@ -435,10 +530,12 @@ function normalizeAsset(value: Record<string, unknown>): ProjectAsset {
     team_id: numberValue(value.team_id),
     flow_id: numberValue(value.flow_id),
     asset_cate_id: numberValue(value.asset_cate_id),
+    node_key: stringValue(value.node_key),
     name: stringValue(value.name),
     kind: (stringValue(value.kind) || "text") as AssetKind,
     role: stringValue(value.role),
     version_id: numberValue(value.version_id),
+    status: stringValue(value.status),
     sort: numberValue(value.sort),
     created_at: stringValue(value.created_at),
     version,
@@ -534,7 +631,9 @@ function hydrateCanvasPowers(
   return canvases;
 }
 
-function normalizeCanvasNode(value: Record<string, unknown>): SpaceCanvasNode | null {
+function normalizeCanvasNode(
+  value: Record<string, unknown>,
+): SpaceCanvasNode | null {
   const id = stringValue(value.id);
   const type = stringValue(value.type) as SpaceCanvasNode["type"];
   if (!id || !type) {
@@ -542,8 +641,16 @@ function normalizeCanvasNode(value: Record<string, unknown>): SpaceCanvasNode | 
   }
   const node: SpaceCanvasNode = {
     id,
+    nodeNo: numberValue(firstDefined(value.node_no, value.nodeNo)) || undefined,
     type,
     title: stringValue(value.title),
+    titleMode:
+      stringValue(firstDefined(value.title_mode, value.titleMode)) === "manual"
+        ? "manual"
+        : stringValue(firstDefined(value.title_mode, value.titleMode)) ===
+            "auto"
+          ? "auto"
+          : undefined,
     subtitle: stringValue(value.subtitle),
     description: stringValue(value.description),
     x: numberValue(value.x),
@@ -552,8 +659,13 @@ function normalizeCanvasNode(value: Record<string, unknown>): SpaceCanvasNode | 
     height: numberValue(value.height),
     groupId: stringValue(firstDefined(value.group_id, value.groupId)),
     group: normalizeCanvasGroup(value.group),
-    storyboardMaterial: normalizeCanvasStoryboardMaterial(
-      firstDefined(value.storyboard_material, value.storyboardMaterial),
+    storyboardItem: normalizeCanvasStoryboardItem(
+      firstDefined(
+        value.storyboard_item,
+        value.storyboardItem,
+        value.storyboard_material,
+        value.storyboardMaterial,
+      ),
     ),
     assetCateId: numberValue(value.asset_cate_id),
     outputType: stringValue(value.output_type),
@@ -568,7 +680,9 @@ function normalizeCanvasNode(value: Record<string, unknown>): SpaceCanvasNode | 
     local: value.local !== false,
   };
   const kind = stringValue(value.kind) as SpaceCanvasNode["kind"];
-  const cardinality = stringValue(value.cardinality) as SpaceCanvasNode["cardinality"];
+  const cardinality = stringValue(
+    value.cardinality,
+  ) as SpaceCanvasNode["cardinality"];
   const flow = normalizeCanvasFlow(value.flow);
   const role = normalizeCanvasRole(value.role);
   const asset = normalizeCanvasAssetRef(value.asset);
@@ -638,31 +752,42 @@ function normalizeCanvasGroup(value: unknown) {
       firstDefined(row.source_node_id, row.sourceNodeId),
     ),
     syncKey: stringValue(firstDefined(row.sync_key, row.syncKey)),
+    layoutKey: stringValue(firstDefined(row.layout_key, row.layoutKey)),
   };
 }
 
-function normalizeCanvasStoryboardMaterial(value: unknown) {
+function normalizeCanvasStoryboardItem(value: unknown) {
   const row = asRecord(value);
   const sourceNodeId = stringValue(
     firstDefined(row.source_node_id, row.sourceNodeId),
   );
-  const materialType = stringValue(
-    firstDefined(row.material_type, row.materialType),
+  const itemType = stringValue(
+    firstDefined(
+      row.item_type,
+      row.itemType,
+      row.material_type,
+      row.materialType,
+    ),
   );
-  const materialId = stringValue(
-    firstDefined(row.material_id, row.materialId),
+  const itemId = stringValue(
+    firstDefined(row.item_id, row.itemId, row.material_id, row.materialId),
   );
   if (
     !sourceNodeId ||
-    !materialId ||
-    !["character", "scene", "prop"].includes(materialType)
+    !itemId ||
+    !["character", "scene", "prop", "shot_frame", "shot"].includes(itemType)
   ) {
     return undefined;
   }
   return {
     sourceNodeId,
-    materialType: materialType as "character" | "scene" | "prop",
-    materialId,
+    itemType: itemType as
+      | "character"
+      | "scene"
+      | "prop"
+      | "shot_frame"
+      | "shot",
+    itemId,
     generatedPrompt: stringValue(
       firstDefined(row.generated_prompt, row.generatedPrompt),
     ),
@@ -761,11 +886,28 @@ function normalizeCanvasComposerDraft(value: unknown) {
   }
   return {
     prompt: stringValue(row.prompt),
+    promptContent: normalizeCanvasReferenceContent(
+      firstDefined(row.promptContent, row.prompt_content),
+    ),
     paramValues: asRecord(firstDefined(row.paramValues, row.param_values)),
     selectedTargetId: numberValue(
       firstDefined(row.selectedTargetId, row.selected_target_id),
     ),
   };
+}
+
+function normalizeCanvasReferenceContent(value: unknown) {
+  const row = asRecord(value);
+  const parts = Array.isArray(row.parts)
+    ? row.parts.filter((part) => {
+        const item = asRecord(part);
+        return item.type === "text" || item.type === "reference";
+      })
+    : [];
+  if (Number(row.version) !== 1 || parts.length === 0) {
+    return undefined;
+  }
+  return { version: 1 as const, parts } as CanvasComposerDraft["promptContent"];
 }
 
 function normalizeCanvasResultRef(value: unknown) {
@@ -788,7 +930,9 @@ function normalizeCanvasResultRef(value: unknown) {
   };
 }
 
-function normalizeCanvasEdge(value: Record<string, unknown>): SpaceCanvasEdge | null {
+function normalizeCanvasEdge(
+  value: Record<string, unknown>,
+): SpaceCanvasEdge | null {
   const from = stringValue(value.from);
   const to = stringValue(value.to);
   if (!from || !to) {
@@ -798,8 +942,16 @@ function normalizeCanvasEdge(value: Record<string, unknown>): SpaceCanvasEdge | 
     id: stringValue(value.id) || `edge-${from}-${to}`,
     from,
     to,
-    logicalFrom: stringValue(firstDefined(value.logical_from, value.logicalFrom)) || undefined,
-    logicalTo: stringValue(firstDefined(value.logical_to, value.logicalTo)) || undefined,
+    logicalFrom:
+      stringValue(firstDefined(value.logical_from, value.logicalFrom)) ||
+      undefined,
+    logicalTo:
+      stringValue(firstDefined(value.logical_to, value.logicalTo)) || undefined,
+    executionMode:
+      stringValue(firstDefined(value.execution_mode, value.executionMode)) ===
+      "manual"
+        ? "manual"
+        : undefined,
   };
 }
 
@@ -891,9 +1043,7 @@ export function hasDefaultCanvasNodeSize(
       outputType: node.outputType || "",
     },
   );
-  return (
-    node.width === defaultSize.width && node.height === defaultSize.height
-  );
+  return node.width === defaultSize.width && node.height === defaultSize.height;
 }
 
 function stringArray(value: unknown) {
@@ -963,10 +1113,7 @@ function collectDocumentText(value: unknown): string {
     return collectRichDocumentText(rich);
   }
   const text = typeof row.text === "string" ? row.text : "";
-  const pieces = [
-    text,
-    typeof row.markdown === "string" ? row.markdown : "",
-  ];
+  const pieces = [text, typeof row.markdown === "string" ? row.markdown : ""];
   for (const key of richWrapperKeys) {
     if (row[key] != null) {
       pieces.push(collectDocumentText(row[key]));
@@ -1014,7 +1161,10 @@ function findRichDocument(
     return direct;
   }
 
-  if (String(row.format || "").toLowerCase() === "rich_json" && row.rich != null) {
+  if (
+    String(row.format || "").toLowerCase() === "rich_json" &&
+    row.rich != null
+  ) {
     const rich = findRichDocument(row.rich, seen);
     if (rich) {
       return rich;
@@ -1124,9 +1274,8 @@ function normalizeRichMarks(value: unknown) {
         attrs: isRecord(mark.attrs) ? mark.attrs : undefined,
       };
     })
-    .filter(
-      (mark): mark is { type: string; attrs?: Record<string, unknown> } =>
-        Boolean(mark),
+    .filter((mark): mark is { type: string; attrs?: Record<string, unknown> } =>
+      Boolean(mark),
     );
 }
 

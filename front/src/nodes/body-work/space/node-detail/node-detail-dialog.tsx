@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowLeft, History, Loader2, RotateCw } from "lucide-react";
 import { toast } from "sonner";
@@ -19,33 +13,30 @@ import {
   mergeAssetVersions,
   mergeProjectAssetVersionHistory,
 } from "../space-assets";
-import type {
-  AssetVersion,
-  ProjectAsset,
-  SpaceCanvasNode,
-} from "../types";
+import type { AssetVersion, ProjectAsset, SpaceCanvasNode } from "../types";
 import {
   nodeDetailContentFingerprint,
   resolveNodeDetailContent,
+  resolveNodeDetailMediaOutput,
   serializeNodeDetailContent,
   type NodeDetailEditableContent,
 } from "./node-detail-content";
 import { NodeDetailEditor } from "./node-detail-editor";
+import type { ComposerAssetItem } from "../space-prompt-composer";
 import { NodeDetailHeader } from "./node-detail-header";
 import { useNodeDetailDraft } from "./use-node-detail-draft";
-import {
-  formatNodeDetailVersionTime,
-  VersionPanel,
-} from "./version-panel";
+import { formatNodeDetailVersionTime, VersionPanel } from "./version-panel";
 
 export function NodeDetailDialog({
   projectId,
   node,
+  canvasReferenceItems,
   onAssetUpdated,
   onClose,
 }: {
   projectId: number;
   node: SpaceCanvasNode;
+  canvasReferenceItems?: ComposerAssetItem[];
   onAssetUpdated?: (asset: ProjectAsset) => void;
   onClose: () => void;
 }) {
@@ -63,8 +54,9 @@ export function NodeDetailDialog({
   const [selectedVersionId, setSelectedVersionId] = useState(() =>
     currentAssetVersionId(node.asset),
   );
-  const [historyVersion, setHistoryVersion] =
-    useState<AssetVersion | null>(null);
+  const [historyVersion, setHistoryVersion] = useState<AssetVersion | null>(
+    null,
+  );
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
   const [restoring, setRestoring] = useState(false);
@@ -168,6 +160,10 @@ export function NodeDetailDialog({
   const activeVersion = isCurrentVersion ? asset?.version : historyVersion;
   const resolvedContent = useMemo(
     () => resolveNodeDetailContent(node, activeVersion),
+    [activeVersion, node],
+  );
+  const mediaOutput = useMemo(
+    () => resolveNodeDetailMediaOutput(node, activeVersion),
     [activeVersion, node],
   );
 
@@ -320,13 +316,7 @@ export function NodeDetailDialog({
     } finally {
       setVersionsLoadingMore(false);
     }
-  }, [
-    assetId,
-    hasMoreVersions,
-    projectId,
-    versionsLoadingMore,
-    versionsPage,
-  ]);
+  }, [assetId, hasMoreVersions, projectId, versionsLoadingMore, versionsPage]);
 
   const restoreVersion = useCallback(async () => {
     const currentAsset = assetRef.current;
@@ -373,10 +363,7 @@ export function NodeDetailDialog({
       } catch {
         const restoredVersion = mergedAsset.version;
         setVersions((current) =>
-          mergeAssetVersions(
-            restoredVersion ? [restoredVersion] : [],
-            current,
-          ),
+          mergeAssetVersions(restoredVersion ? [restoredVersion] : [], current),
         );
         setVersionTotal((total) => total + 1);
         const nextVersionId = currentAssetVersionId(mergedAsset);
@@ -387,9 +374,9 @@ export function NodeDetailDialog({
         setContentGeneration((generation) => generation + 1);
       }
       restoreRequestRef.current = null;
-      toast.success("已恢复为新版本");
+      toast.success("已切换到所选版本");
     } catch (error) {
-      toast.error(errorMessage(error, "恢复版本失败"));
+      toast.error(errorMessage(error, "切换版本失败"));
     } finally {
       setRestoring(false);
     }
@@ -402,7 +389,9 @@ export function NodeDetailDialog({
     closingRef.current = true;
     setClosing(true);
     let saved = true;
-    if (selectedVersionIdRef.current === currentAssetVersionId(assetRef.current)) {
+    if (
+      selectedVersionIdRef.current === currentAssetVersionId(assetRef.current)
+    ) {
       saved = await draft.flush();
     }
     if (!saved) {
@@ -433,7 +422,8 @@ export function NodeDetailDialog({
   const editorReadonly =
     readonly || closing || (assetId > 0 && versionsLoading);
   const activeContent = draft.draft;
-  const showHistoryState = !isCurrentVersion && (historyLoading || historyError);
+  const showHistoryState =
+    !isCurrentVersion && (historyLoading || historyError);
   const modal = (
     <div
       className="ws-node-detail-backdrop"
@@ -472,7 +462,8 @@ export function NodeDetailDialog({
                   type="button"
                   onClick={() =>
                     void selectVersion(
-                      asset?.version || ({ id: currentVersionId } as AssetVersion),
+                      asset?.version ||
+                        ({ id: currentVersionId } as AssetVersion),
                     )
                   }
                 >
@@ -482,7 +473,9 @@ export function NodeDetailDialog({
                 <button
                   type="button"
                   className="is-primary"
-                  disabled={restoring || historyLoading || Boolean(historyError)}
+                  disabled={
+                    restoring || historyLoading || Boolean(historyError)
+                  }
                   onClick={() => void restoreVersion()}
                 >
                   {restoring ? (
@@ -490,7 +483,7 @@ export function NodeDetailDialog({
                   ) : (
                     <RotateCw size={13} />
                   )}
-                  {restoring ? "恢复中" : "恢复为新版本"}
+                  {restoring ? "切换中" : "切换到此版本"}
                 </button>
               </div>
             </div>
@@ -520,7 +513,9 @@ export function NodeDetailDialog({
             ) : (
               <NodeDetailEditor
                 content={activeContent}
+                mediaOutput={mediaOutput}
                 readonly={editorReadonly}
+                referenceItems={canvasReferenceItems}
                 onChange={draft.setDraft}
               />
             )}

@@ -1,6 +1,20 @@
-export type AssetKind = "text" | "image" | "audio" | "video" | "file" | "mixed" | string;
+export type AssetKind =
+  | "text"
+  | "image"
+  | "audio"
+  | "video"
+  | "file"
+  | "mixed"
+  | string;
 export type AssetCardinality = "single" | "multiple" | "ordered" | string;
 export type AssetRole = "content" | "material" | string;
+export type CanvasContentPreview = {
+  text: string;
+  imageUrl: string;
+  videoUrl: string;
+  audioUrl: string;
+  fileUrl: string;
+};
 export type SpaceNodeType =
   | "asset"
   | "power"
@@ -124,7 +138,17 @@ export type PowerParam = {
   name: string;
   key: string;
   icon?: string;
-  type: "input" | "textarea" | "switch" | "option" | "multi_option" | "file" | "files" | "hidden" | "description" | string;
+  type:
+    | "input"
+    | "textarea"
+    | "switch"
+    | "option"
+    | "multi_option"
+    | "file"
+    | "files"
+    | "hidden"
+    | "description"
+    | string;
   usage?: number;
   value_type?: "string" | "number" | string;
   default_value?: string;
@@ -201,10 +225,12 @@ export type ProjectAsset = {
   team_id: number;
   flow_id: number;
   asset_cate_id: number;
+  node_key?: string;
   name: string;
   kind: AssetKind;
   role?: AssetRole;
   version_id: number;
+  status?: string;
   sort: number;
   created_at?: string;
   version?: AssetVersion;
@@ -264,18 +290,41 @@ export type CanvasGroupConfig = {
   origin?: "manual" | "script" | string;
   sourceNodeId?: string;
   syncKey?: string;
+  layoutKey?: string;
 };
 
 export type CanvasComposerDraft = {
   prompt?: string;
+  promptContent?: CanvasReferenceContent;
   paramValues?: Record<string, unknown>;
   selectedTargetId?: number;
 };
 
-export type CanvasStoryboardMaterialConfig = {
+export type CanvasReferenceContent = {
+  version: 1;
+  parts: Array<
+    | { type: "text"; text: string }
+    | {
+        type: "reference";
+        ref_type: "canvas_node" | "artifact";
+        ref_id: number;
+        label: string;
+        usage?: string;
+      }
+  >;
+};
+
+export type CanvasStoryboardItemType =
+  | "character"
+  | "scene"
+  | "prop"
+  | "shot_frame"
+  | "shot";
+
+export type CanvasStoryboardItemConfig = {
   sourceNodeId: string;
-  materialType: "character" | "scene" | "prop";
-  materialId: string;
+  itemType: CanvasStoryboardItemType;
+  itemId: string;
   generatedPrompt: string;
   stale?: boolean;
 };
@@ -283,8 +332,10 @@ export type CanvasStoryboardMaterialConfig = {
 export type SpaceCanvasNode = {
   [key: string]: unknown;
   id: string;
+  nodeNo?: number;
   type: SpaceNodeType;
   title: string;
+  titleMode?: "auto" | "manual";
   subtitle: string;
   description: string;
   x: number;
@@ -293,7 +344,7 @@ export type SpaceCanvasNode = {
   height: number;
   groupId?: string;
   group?: CanvasGroupConfig;
-  storyboardMaterial?: CanvasStoryboardMaterialConfig;
+  storyboardItem?: CanvasStoryboardItemConfig;
   assetCateId?: number;
   kind?: AssetKind;
   outputType?: string;
@@ -317,6 +368,7 @@ export type SpaceCanvasEdge = {
   to: string;
   logicalFrom?: string;
   logicalTo?: string;
+  executionMode?: "auto" | "manual";
 };
 
 export type SpaceCanvasViewport = {
@@ -327,6 +379,7 @@ export type SpaceCanvasViewport = {
 
 export type SpaceCanvasState = {
   assetCateId: number;
+  nextNodeNo: number;
   nodes: SpaceCanvasNode[];
   edges: SpaceCanvasEdge[];
   viewport: SpaceCanvasViewport;

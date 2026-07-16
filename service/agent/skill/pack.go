@@ -49,19 +49,17 @@ func EntriesByPack(ctx context.Context, packID uint64) []Entry {
 		if !exists {
 			continue
 		}
-		result = append(result, Entry{
+		entry := ResolveEntryManifest(Entry{
 			ID:          skill.ID,
 			Key:         strings.TrimSpace(skill.Key),
 			Name:        strings.TrimSpace(skill.Name),
 			Description: strings.TrimSpace(skill.Description),
 			SourceType:  agentmodel.NormalizeSkillSourceType(skill.SourceType, skill.SourceURL, skill.InstallInput),
-			Triggers:    ManifestTriggers(skill.Manifest),
-			Domains:     ManifestDomains(skill.Manifest),
-			Targets:     ManifestTargets(skill.Manifest),
 			InstallPath: strings.TrimSpace(skill.InstallPath),
 			EntryFile:   strings.TrimSpace(skill.EntryFile),
 			Manifest:    strings.TrimSpace(skill.Manifest),
 		})
+		result = append(result, entry)
 	}
 	return result
 }

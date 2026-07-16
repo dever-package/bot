@@ -70,14 +70,15 @@ func runSkillScriptTool(loaded map[string]agentskill.Entry, runtime SkillRuntime
 			runResult.Stdout = agentskill.RedactSecrets(runResult.Stdout, configEnv.Secrets)
 			runResult.Stderr = agentskill.RedactSecrets(runResult.Stderr, configEnv.Secrets)
 			runResult.Error = agentskill.RedactSecrets(runResult.Error, configEnv.Secrets)
+			if runResult.ExitCode != 0 || strings.TrimSpace(runResult.Error) != "" {
+				detail := firstNonEmpty(runResult.Stderr, runResult.Stdout, runResult.Error)
+				return Result{}, fmt.Errorf("技能脚本执行失败: %s", detail)
+			}
 			text := firstNonEmpty(runResult.Stdout, runResult.Stderr, runResult.Error)
 			content := map[string]any{
 				"skill": entry.Key, "runner": runResult.Runner, "script": relative,
 				"exit_code": runResult.ExitCode, "duration_ms": runResult.DurationMS,
 				"stdout": runResult.Stdout, "stderr": runResult.Stderr, "truncated": runResult.Truncated,
-			}
-			if runResult.Error != "" {
-				content["error"] = runResult.Error
 			}
 			return Result{Text: text, Content: content}, nil
 		},
@@ -85,11 +86,12 @@ func runSkillScriptTool(loaded map[string]agentskill.Entry, runtime SkillRuntime
 }
 
 func resolveSkillScript(entry agentskill.Entry, identity string, target string) (agentskill.ScriptSpec, error) {
+	scripts := agentskill.ManifestScripts(entry.Manifest)
 	identity = strings.TrimPrefix(strings.TrimSpace(identity), "/")
 	if identity == "" {
 		return agentskill.ScriptSpec{}, fmt.Errorf("script 不能为空")
 	}
-	for _, script := range agentskill.ManifestScripts(entry.Manifest) {
+	for _, script := range scripts {
 		if script.TargetKey != "" && script.TargetKey != strings.TrimSpace(target) {
 			continue
 		}

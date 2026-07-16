@@ -5,16 +5,19 @@ export function defaultPowerParamValue(param: PowerParam) {
   if (param.type === "switch") {
     return truthy(raw);
   }
-  if (param.type === "multi_option" || param.type === "files") {
+  if (param.type === "multi_option") {
+    return normalizePowerParamValue(param, parseJSONValue(raw));
+  }
+  if (param.type === "files") {
     return valueAsList(parseJSONValue(raw));
   }
   if (param.type === "option" || param.type === "select") {
-    return raw || param.options?.[0]?.value || "";
+    return normalizePowerParamScalarValue(
+      param,
+      raw || param.options?.[0]?.value || "",
+    );
   }
-  if (param.value_type === "number") {
-    return raw === "" ? "" : Number(raw);
-  }
-  return raw;
+  return normalizePowerParamScalarValue(param, raw);
 }
 
 export function defaultPowerParamValues(params: PowerParam[]) {
@@ -26,6 +29,25 @@ export function defaultPowerParamValues(params: PowerParam[]) {
     values[param.key] = defaultPowerParamValue(param);
   }
   return values;
+}
+
+function normalizePowerParamScalarValue(
+  param: PowerParam,
+  value: unknown,
+) {
+  if (param.value_type !== "number" || value === "") {
+    return value;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : value;
+}
+
+export function normalizePowerParamValue(param: PowerParam, value: unknown) {
+  return param.type === "multi_option"
+    ? valueAsList(value).map((item) =>
+        normalizePowerParamScalarValue(param, item),
+      )
+    : normalizePowerParamScalarValue(param, value);
 }
 
 function parseJSONValue(value: unknown) {

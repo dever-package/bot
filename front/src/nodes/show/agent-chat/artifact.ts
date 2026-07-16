@@ -54,21 +54,22 @@ function readArtifact(value: unknown): AgentChatArtifact | null {
   if (!isPlainRecord(value)) {
     return null;
   }
-  const id = positiveNumber(value.artifact_id);
+  // Document blocks reuse this decoder after their artifacts are normalized.
+  const id = positiveNumber(value.artifact_id ?? value.id);
   if (!id) {
     return null;
   }
   return {
     id,
-    fileID: positiveNumber(value.file_id),
-    displayNo: Math.floor(positiveNumber(value.display_no)),
+    fileID: positiveNumber(value.file_id ?? value.fileID),
+    displayNo: Math.floor(positiveNumber(value.display_no ?? value.displayNo)),
     label: textValue(value.label) || `素材 ${id}`,
     name: textValue(value.name),
     kind: artifactKind(value.kind),
     status: artifactStatus(value.status),
     error: textValue(value.error),
     url: textValue(value.url || value.open_url),
-    previewUrl: textValue(value.preview_url || value.url),
+    previewUrl: textValue(value.preview_url || value.previewUrl || value.url),
     mime: textValue(value.mime),
     size: positiveNumber(value.size),
     meta: isPlainRecord(value.meta) ? { ...value.meta } : {},

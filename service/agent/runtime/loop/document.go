@@ -14,6 +14,7 @@ import (
 )
 
 func (s Service) prepareDocumentModelStep(ctx context.Context, state *runState, result modelStepResult) error {
+	started := false
 	if state.documentID == 0 {
 		call, found := startDocumentCall(result.ToolCalls)
 		if !found {
@@ -30,16 +31,21 @@ func (s Service) prepareDocumentModelStep(ctx context.Context, state *runState, 
 			Title:     strings.TrimSpace(botprotocol.AsText(arguments["title"])),
 			Meta: map[string]any{
 				"purpose": strings.TrimSpace(botprotocol.AsText(arguments["purpose"])),
+				"intro":   strings.TrimSpace(result.Text),
 			},
 		})
 		if err != nil {
 			return err
 		}
 		state.documentID = document.ID
+		started = true
 		_ = s.writeExecutionOutput(ctx, state.execution, map[string]any{
 			"event":    "document_start",
 			"document": s.documentPayload(ctx, document.ID),
 		})
+	}
+	if started {
+		return nil
 	}
 
 	if state.documentTextStep >= state.modelStep || strings.TrimSpace(result.Text) == "" {
@@ -74,6 +80,46 @@ func startDocumentCall(calls []botprotocol.ToolCall) (botprotocol.ToolCall, bool
 	return botprotocol.ToolCall{}, false
 }
 
+// Document calls are kept in provider order so one model response can enqueue
+// several adjacent media blocks without another LLM round trip. Start is moved
+// to the front and finish to the end because both delimit the document.
+func documentStepToolCalls(documentID uint64, calls []botprotocol.ToolCall) []botprotocol.ToolCall {
+	if len(calls) <= 1 {
+		return calls
+	}
+	result := make([]botprotocol.ToolCall, 0, len(calls))
+	if documentID == 0 {
+		if start, found := startDocumentCall(calls); found {
+			result = append(result, start)
+			for _, call := range calls {
+				if strings.EqualFold(strings.TrimSpace(call.ID), strings.TrimSpace(start.ID)) {
+					continue
+				}
+				if !strings.EqualFold(strings.TrimSpace(call.Name), runtimeprovider.FinishDocumentToolName) {
+					result = append(result, call)
+				}
+			}
+			for _, call := range calls {
+				if strings.EqualFold(strings.TrimSpace(call.Name), runtimeprovider.FinishDocumentToolName) {
+					result = append(result, call)
+				}
+			}
+			return result
+		}
+	}
+	for _, call := range calls {
+		if !strings.EqualFold(strings.TrimSpace(call.Name), runtimeprovider.FinishDocumentToolName) {
+			result = append(result, call)
+		}
+	}
+	for _, call := range calls {
+		if strings.EqualFold(strings.TrimSpace(call.Name), runtimeprovider.FinishDocumentToolName) {
+			result = append(result, call)
+		}
+	}
+	return result
+}
+
 func (s Service) scheduleDocumentArtifact(
 	ctx context.Context,
 	state *runState,
@@ -100,7 +146,7 @@ func (s Service) scheduleDocumentArtifact(
 	}
 	batch, err := s.beginToolArtifactBatch(ctx, state.execution, call, definition, state.documentID, block.ID)
 	if err != nil {
-		documents.MarkBlockFailed(ctx, block.ID, err.Error())
+		_, _ = documents.MarkBlockFailed(ctx, block.ID, err.Error())
 		return documentArtifactError(call, definition, err, map[string]any{
 			"document_id": state.documentID,
 			"block_id":    block.ID,
@@ -135,6 +181,7 @@ func (s Service) scheduleDocumentArtifact(
 		Arguments:  arguments,
 		Snapshot: runtimeartifact.JobSnapshot{
 			Agent: state.execution.agent,
+			Scope: state.execution.scope,
 			Transport: runtimeartifact.JobTransport{
 				Method: state.execution.transport.Method,
 				Host:   state.execution.transport.Host,
@@ -145,7 +192,7 @@ func (s Service) scheduleDocumentArtifact(
 	})
 	if err != nil {
 		batch.fail(ctx, err.Error())
-		documents.MarkBlockFailed(ctx, block.ID, err.Error())
+		_, _ = documents.MarkBlockFailed(ctx, block.ID, err.Error())
 		return documentArtifactError(call, definition, err, map[string]any{
 			"document_id": state.documentID,
 			"block_id":    block.ID,
@@ -160,7 +207,7 @@ func (s Service) scheduleDocumentArtifact(
 		"status":      "generating",
 	}
 	result := runtimeprovider.Result{
-		Text:        "素材已按当前位置加入文档并在后台生成。请立即继续输出下一段正文；不要等待素材完成。",
+		Text:        "下一轮直接输出下一段可发布正文；不要说明素材状态、计划或进度，也不要等待素材完成。",
 		Content:     content,
 		ModelResult: content,
 	}
@@ -196,15 +243,26 @@ func documentArtifactError(call botprotocol.ToolCall, definition runtimeprovider
 	}
 }
 
-func (s Service) finalizeDocument(state *runState) {
+func (s Service) finalizeDocument(state *runState) error {
 	if state == nil || state.documentID == 0 {
-		return
+		return nil
 	}
-	ctx := context.Background()
+	ctx, cancel := maintenanceContext()
+	defer cancel()
+	serverContext, err := state.execution.scope.Server(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if serverContext != nil {
+		ctx = serverContext.Context()
+	}
 	documents := runtimedocument.NewService()
 	document, err := documents.MarkContentComplete(ctx, state.documentID)
-	if err != nil || document == nil {
-		return
+	if err != nil {
+		return err
+	}
+	if document == nil {
+		return fmt.Errorf("完成图文文档失败")
 	}
 	if text := strings.TrimSpace(documents.Text(ctx, state.documentID)); text != "" {
 		state.finalText = text
@@ -213,11 +271,15 @@ func (s Service) finalizeDocument(state *runState) {
 		state.finalOutput = map[string]any{}
 	}
 	state.finalOutput["text"] = state.finalText
-	state.finalOutput["document"] = map[string]any{
-		"id":     document.ID,
-		"status": document.Status,
-		"stream": runtimedocument.StreamRequestID(document.ID),
+	state.finalOutput["document"] = s.documentPayload(ctx, document.ID)
+	if state.finalOutput["document"] == nil {
+		state.finalOutput["document"] = map[string]any{
+			"id":     document.ID,
+			"status": document.Status,
+			"stream": runtimedocument.StreamRequestID(document.ID),
+		}
 	}
+	return nil
 }
 
 func (s Service) documentPayload(ctx context.Context, documentID uint64) any {

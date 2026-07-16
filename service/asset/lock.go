@@ -106,7 +106,13 @@ func releaseAssetSaveLock(ctx context.Context, lockKey string, owner string) {
 }
 
 func assetSaveLockKey(req SaveVersionRequest) string {
-	if (req.ProjectID == 0 && req.BodyID == 0) || strings.TrimSpace(req.Name) == "" {
+	if req.ProjectID == 0 && req.BodyID == 0 {
+		return ""
+	}
+	identity := "name:" + strings.TrimSpace(req.Name)
+	if nodeKey := strings.TrimSpace(req.NodeKey); nodeKey != "" {
+		identity = "node:" + nodeKey
+	} else if strings.TrimSpace(req.Name) == "" {
 		return ""
 	}
 	parts := []string{
@@ -117,7 +123,7 @@ func assetSaveLockKey(req SaveVersionRequest) string {
 		fmt.Sprintf("flow:%d", req.FlowID),
 		fmt.Sprintf("cate:%d", req.AssetCateID),
 		"role:" + strings.TrimSpace(req.Role),
-		"name:" + strings.TrimSpace(req.Name),
+		identity,
 	}
 	sum := sha1.Sum([]byte(strings.Join(parts, "\x1f")))
 	return "asset:" + hex.EncodeToString(sum[:])

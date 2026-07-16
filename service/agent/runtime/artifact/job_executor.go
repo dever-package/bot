@@ -7,9 +7,14 @@ import (
 	"strings"
 	"time"
 
+	dlog "github.com/shemic/dever/log"
+	"github.com/shemic/dever/server"
+
 	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
 	runtimedocument "github.com/dever-package/bot/service/agent/runtime/document"
 	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
+	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	energonservice "github.com/dever-package/bot/service/energon"
@@ -33,6 +38,9 @@ func newJobExecutor() jobExecutor {
 }
 
 func (executor jobExecutor) Execute(ctx context.Context, lease runtimequeue.Lease) error {
+	executionCtx, executionCancel := executionContext(ctx)
+	defer executionCancel()
+	ctx = executionCtx
 	candidate := executor.repository.find(ctx, lease.ID)
 	if candidate == nil || isTerminalJobStatus(candidate.Status) {
 		return nil
@@ -48,40 +56,154 @@ func (executor jobExecutor) Execute(ctx context.Context, lease runtimequeue.Leas
 	workerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	heartbeatDone := make(chan struct{})
-	go executor.heartbeat(workerCtx, *job, lease.WorkerID, heartbeatDone, cancel)
+	runtimeasync.Start("智能体素材任务心跳", func() {
+		executor.heartbeat(workerCtx, *job, lease.WorkerID, heartbeatDone, cancel)
+	}, func(heartbeatErr error) {
+		cancel()
+		dlog.ErrorFields("agent_artifact_heartbeat", "智能体素材任务心跳异常", dlog.Fields{
+			"job_id": job.ID, "worker_id": lease.WorkerID, "error": heartbeatErr.Error(),
+		})
+	})
 	err := executor.executeTool(workerCtx, *job)
 	close(heartbeatDone)
 	if err == nil {
-		executor.repository.finish(context.Background(), *job, lease.WorkerID, agentmodel.ArtifactJobStatusSuccess, "")
-		_, _ = executor.documents.RefreshStatus(context.Background(), job.DocumentID)
-		return nil
+		return executor.finishSuccess(*job, lease.WorkerID)
+	}
+	pendingCtx, pendingCancel := maintenanceContext()
+	pending := executor.artifacts.repository.byBlock(pendingCtx, job.BlockID)
+	pendingCancel()
+	// Generated files and document write-back have different retry lifecycles.
+	// Once files are ready, keep retrying only the cheap write-back operation.
+	if artifactBatchReady(pending) {
+		if job.Attempt < artifactWritebackMaxAttempts {
+			return executor.retryWriteback(*job, lease.WorkerID, err)
+		}
+		return executor.failWriteback(*job, lease.WorkerID, err)
 	}
 	if job.Attempt < artifactJobMaxAttempts {
-		pending := executor.artifacts.repository.byBlock(context.Background(), job.BlockID)
-		executor.artifacts.ResetBatch(context.Background(), pending)
-		executor.repository.retry(context.Background(), *job, lease.WorkerID, err.Error())
-		executor.documents.Publish(context.Background(), job.DocumentID, "artifact_progress", map[string]any{
-			"block_id": job.BlockID,
-			"status":   "retrying",
-		})
+		return executor.retry(*job, lease.WorkerID, err, true)
+	}
+	failCtx, failCancel := maintenanceContext()
+	executor.artifacts.FailBatch(failCtx, pending, err.Error())
+	failCancel()
+	finishCtx, finishCancel := maintenanceContext()
+	finished := executor.repository.finish(finishCtx, *job, lease.WorkerID, agentmodel.ArtifactJobStatusFailed, err.Error())
+	finishCancel()
+	if !finished {
+		return fmt.Errorf("保存素材任务失败状态失败: %w", err)
+	}
+	documentCtx, documentCancel := maintenanceContext()
+	_, documentErr := executor.documents.MarkBlockFailed(documentCtx, job.BlockID, err.Error())
+	documentCancel()
+	if documentErr != nil {
+		return documentErr
+	}
+	dlog.ErrorFields("agent_artifact_failed", "智能体素材任务最终失败", dlog.Fields{
+		"job_id": job.ID, "document_id": job.DocumentID, "block_id": job.BlockID,
+		"tool_name": job.ToolName, "attempt": job.Attempt, "error": err.Error(),
+	})
+	return nil
+}
+
+func (executor jobExecutor) finishSuccess(job agentmodel.ArtifactJob, workerID string) error {
+	finishCtx, finishCancel := maintenanceContext()
+	finished := executor.repository.finish(finishCtx, job, workerID, agentmodel.ArtifactJobStatusSuccess, "")
+	finishCancel()
+	if !finished {
+		return fmt.Errorf("完成素材任务状态失败")
+	}
+	refreshCtx, refreshCancel := maintenanceContext()
+	_, refreshErr := executor.documents.RefreshStatus(refreshCtx, job.DocumentID)
+	refreshCancel()
+	if refreshErr == nil {
 		return nil
 	}
-	pending := executor.artifacts.repository.byBlock(context.Background(), job.BlockID)
-	executor.artifacts.FailBatch(context.Background(), pending, err.Error())
-	executor.repository.finish(context.Background(), *job, lease.WorkerID, agentmodel.ArtifactJobStatusFailed, err.Error())
-	executor.documents.MarkBlockFailed(context.Background(), job.BlockID, err.Error())
+	finishedJob := job
+	finishedJob.Status = agentmodel.ArtifactJobStatusSuccess
+	reopenCtx, reopenCancel := maintenanceContext()
+	reopened := executor.repository.reopen(reopenCtx, finishedJob, time.Now())
+	reopenCancel()
+	if reopened {
+		dispatchJob(job.ID)
+	}
+	return fmt.Errorf("刷新素材文档状态失败: %w", refreshErr)
+}
+
+func (executor jobExecutor) failWriteback(job agentmodel.ArtifactJob, workerID string, runErr error) error {
+	finishCtx, finishCancel := maintenanceContext()
+	finished := executor.repository.finish(finishCtx, job, workerID, agentmodel.ArtifactJobStatusFailed, runErr.Error())
+	finishCancel()
+	if !finished {
+		return fmt.Errorf("保存素材回写失败状态失败: %w", runErr)
+	}
+	documentCtx, documentCancel := maintenanceContext()
+	_, documentErr := executor.documents.MarkBlockFailed(documentCtx, job.BlockID, runErr.Error())
+	documentCancel()
+	if documentErr != nil {
+		return documentErr
+	}
+	dlog.ErrorFields("agent_artifact_writeback_failed", "素材已生成但文档回写达到重试上限", dlog.Fields{
+		"job_id": job.ID, "document_id": job.DocumentID, "block_id": job.BlockID,
+		"tool_name": job.ToolName, "attempt": job.Attempt, "error": runErr.Error(),
+	})
+	return nil
+}
+
+func (executor jobExecutor) retry(job agentmodel.ArtifactJob, workerID string, runErr error, resetArtifacts bool) error {
+	if resetArtifacts {
+		resetCtx, resetCancel := maintenanceContext()
+		pending := executor.artifacts.repository.byBlock(resetCtx, job.BlockID)
+		executor.artifacts.ResetBatch(resetCtx, pending)
+		resetCancel()
+	}
+	retryCtx, retryCancel := maintenanceContext()
+	retried := executor.repository.retry(retryCtx, job, workerID, runErr.Error())
+	retryCancel()
+	if !retried {
+		return fmt.Errorf("保存素材任务重试状态失败: %w", runErr)
+	}
+	publishCtx, publishCancel := maintenanceContext()
+	executor.documents.Publish(publishCtx, job.DocumentID, "artifact_progress", map[string]any{
+		"block_id": job.BlockID,
+		"status":   "retrying",
+	})
+	publishCancel()
+	dlog.ErrorFields("agent_artifact_retry", "智能体素材任务执行失败，将自动重试", dlog.Fields{
+		"job_id": job.ID, "document_id": job.DocumentID, "block_id": job.BlockID,
+		"tool_name": job.ToolName, "attempt": job.Attempt, "error": runErr.Error(),
+	})
+	return nil
+}
+
+func (executor jobExecutor) retryWriteback(job agentmodel.ArtifactJob, workerID string, runErr error) error {
+	retryCtx, retryCancel := maintenanceContext()
+	retried := executor.repository.retryWriteback(retryCtx, job, workerID, runErr.Error())
+	retryCancel()
+	if !retried {
+		return fmt.Errorf("保存素材回写重试状态失败: %w", runErr)
+	}
+	publishCtx, publishCancel := maintenanceContext()
+	executor.documents.Publish(publishCtx, job.DocumentID, "artifact_progress", map[string]any{
+		"block_id": job.BlockID,
+		"status":   "writeback_retrying",
+	})
+	publishCancel()
+	dlog.ErrorFields("agent_artifact_writeback_retry", "素材已生成，文档回写将自动重试", dlog.Fields{
+		"job_id": job.ID, "document_id": job.DocumentID, "block_id": job.BlockID,
+		"tool_name": job.ToolName, "attempt": job.Attempt, "error": runErr.Error(),
+	})
 	return nil
 }
 
 func (executor jobExecutor) executeTool(ctx context.Context, job agentmodel.ArtifactJob) error {
-	pending := executor.artifacts.repository.byBlock(ctx, job.BlockID)
-	if artifactBatchReady(pending) {
-		executor.documents.MarkBlockReady(ctx, job.BlockID, Payloads(ctx, pending))
-		return nil
-	}
-	snapshot, arguments, err := decodeJob(job)
+	jobCtx, serverContext, snapshot, arguments, err := restoreJobRuntime(ctx, job)
 	if err != nil {
 		return err
+	}
+	ctx = jobCtx
+	pending := executor.artifacts.repository.byBlock(ctx, job.BlockID)
+	if artifactBatchReady(pending) {
+		return executor.markBlockReady(ctx, job.BlockID, pending)
 	}
 	mounted, err := runtimetool.Mount(ctx, runtimetool.MountRequest{
 		Agent:      snapshot.Agent,
@@ -90,6 +212,7 @@ func (executor jobExecutor) executeTool(ctx context.Context, job agentmodel.Arti
 		Method:     snapshot.Transport.Method,
 		Host:       snapshot.Transport.Host,
 		Path:       snapshot.Transport.Path,
+		Server:     serverContext,
 	})
 	if err != nil {
 		return err
@@ -104,13 +227,51 @@ func (executor jobExecutor) executeTool(ctx context.Context, job agentmodel.Arti
 	if err != nil {
 		return err
 	}
-	content, _ := result.Content.(map[string]any)
-	executor.artifacts.CompleteBatch(ctx, pending, content)
+	if _, err = executor.artifacts.CompleteBatch(ctx, pending, result.Content); err != nil {
+		return err
+	}
 	current := executor.artifacts.repository.byBlock(ctx, job.BlockID)
 	if !artifactBatchReady(current) {
 		return fmt.Errorf("素材生成结果不完整")
 	}
-	executor.documents.MarkBlockReady(ctx, job.BlockID, Payloads(ctx, current))
+	return executor.markBlockReady(ctx, job.BlockID, current)
+}
+
+func restoreJobRuntime(
+	ctx context.Context,
+	job agentmodel.ArtifactJob,
+) (context.Context, *server.Context, JobSnapshot, map[string]any, error) {
+	snapshot, arguments, err := decodeJob(job)
+	if err != nil {
+		return ctx, nil, snapshot, nil, err
+	}
+	snapshot.Scope = runtimescope.RestoreSession(ctx, snapshot.Scope, job.SessionID)
+	serverContext, err := snapshot.Scope.Server(ctx, nil)
+	if err != nil {
+		return ctx, nil, snapshot, nil, err
+	}
+	if serverContext != nil {
+		ctx = serverContext.Context()
+	}
+	return ctx, serverContext, snapshot, arguments, nil
+}
+
+func (executor jobExecutor) markJobBlockReady(ctx context.Context, job agentmodel.ArtifactJob, artifacts []agentmodel.Artifact) error {
+	jobCtx, _, _, _, err := restoreJobRuntime(ctx, job)
+	if err != nil {
+		return err
+	}
+	return executor.markBlockReady(jobCtx, job.BlockID, artifacts)
+}
+
+func (executor jobExecutor) markBlockReady(ctx context.Context, blockID uint64, artifacts []agentmodel.Artifact) error {
+	block, err := executor.documents.MarkBlockReady(ctx, blockID, Payloads(ctx, artifacts))
+	if err != nil {
+		return err
+	}
+	if block == nil || block.Status != agentmodel.DocumentBlockStatusReady {
+		return fmt.Errorf("回写素材文档块失败")
+	}
 	return nil
 }
 
@@ -132,7 +293,9 @@ func (executor jobExecutor) progressWriter(job agentmodel.ArtifactJob) runtimepr
 		if event == "" {
 			event = "progress"
 		}
-		executor.documents.Publish(context.Background(), job.DocumentID, "artifact_progress", map[string]any{
+		publishCtx, publishCancel := maintenanceContext()
+		defer publishCancel()
+		executor.documents.Publish(publishCtx, job.DocumentID, "artifact_progress", map[string]any{
 			"block_id": job.BlockID,
 			"progress": output["progress"],
 			"text":     strings.TrimSpace(botprotocol.AsText(output["text"])),
@@ -152,7 +315,10 @@ func (executor jobExecutor) heartbeat(ctx context.Context, job agentmodel.Artifa
 		case <-done:
 			return
 		case <-ticker.C:
-			if !executor.repository.renew(context.Background(), job.ID, workerID, time.Now()) {
+			renewCtx, renewCancel := maintenanceContext()
+			renewed := executor.repository.renew(renewCtx, job.ID, workerID, time.Now())
+			renewCancel()
+			if !renewed {
 				cancel()
 				return
 			}

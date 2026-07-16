@@ -22,6 +22,7 @@ func (AgentHook) ProviderBeforeSaveRuntimeConfig(_ *server.Context, params []any
 	}
 	record["default_max_auto_steps"] = defaultMax
 	record["hard_max_auto_steps"] = hardMax
+	record["run_worker_concurrency"] = normalizeRuntimeWorkerConcurrency(record["run_worker_concurrency"])
 	record["skill_metadata_max_skills"] = normalizePositiveInt(record["skill_metadata_max_skills"], agentmodel.DefaultRuntimeSkillMetadataMaxSkills)
 	record["skill_metadata_field_max_length"] = normalizeRuntimeMetadataFieldMaxLength(record["skill_metadata_field_max_length"])
 	record["skill_file_max_bytes"] = normalizePositiveInt(record["skill_file_max_bytes"], agentmodel.DefaultRuntimeSkillFileMaxBytes)
@@ -56,4 +57,12 @@ func normalizeRuntimeMetadataFieldMaxLength(value any) int {
 		return agentmodel.DefaultRuntimeSkillMetadataFieldMaxLength
 	}
 	return length
+}
+
+func normalizeRuntimeWorkerConcurrency(value any) int {
+	concurrency := normalizePositiveInt(value, agentmodel.DefaultRuntimeRunWorkerConcurrency)
+	if concurrency > agentmodel.MaxRuntimeRunWorkerConcurrency {
+		panicAgentField("form.run_worker_concurrency", "并行运行数不能超过 64。")
+	}
+	return concurrency
 }

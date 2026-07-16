@@ -1,4 +1,9 @@
+import {
+  reconcileCanvasReferenceContent,
+  type CanvasReferenceTarget,
+} from "./space-reference-content";
 import type {
+  CanvasReferenceContent,
   CanvasFunctionOption,
   CanvasResultViewState,
   PowerOption,
@@ -13,6 +18,7 @@ import type {
 
 export type PersistedCanvasState = {
   asset_cate_id: number;
+  next_node_no: number;
   nodes: PersistedCanvasNode[];
   edges: PersistedCanvasEdge[];
   viewport: SpaceCanvasViewport;
@@ -24,12 +30,15 @@ type PersistedCanvasEdge = {
   to: string;
   logical_from?: string;
   logical_to?: string;
+  execution_mode?: "manual";
 };
 
 type PersistedCanvasNode = {
   id: string;
+  node_no?: number;
   type: SpaceCanvasNode["type"];
   title: string;
+  title_mode?: "auto" | "manual";
   subtitle: string;
   description: string;
   x: number;
@@ -41,11 +50,12 @@ type PersistedCanvasNode = {
     origin?: string;
     source_node_id?: string;
     sync_key?: string;
+    layout_key?: string;
   };
-  storyboard_material?: {
+  storyboard_item?: {
     source_node_id: string;
-    material_type: string;
-    material_id: string;
+    item_type: string;
+    item_id: string;
     generated_prompt?: string;
     stale?: boolean;
   };
@@ -85,15 +95,30 @@ type PersistedCanvasResultView = {
 export function persistedCanvasState(
   canvas: SpaceCanvasState,
 ): PersistedCanvasState {
+  const referenceTargets = canvas.nodes
+    .filter((node) => Number(node.nodeNo || 0) > 0)
+    .map(
+      (node): CanvasReferenceTarget => ({
+        refType: "canvas_node",
+        refId: Number(node.nodeNo),
+        label: node.title,
+      }),
+    );
   return {
     asset_cate_id: Number(canvas.assetCateId || 0),
-    nodes: canvas.nodes.map(persistedCanvasNode),
+    next_node_no: Math.max(1, Number(canvas.nextNodeNo || 1)),
+    nodes: canvas.nodes.map((node) =>
+      persistedCanvasNode(node, referenceTargets),
+    ),
     edges: canvas.edges.map((edge) => ({
       id: edge.id,
       from: edge.from,
       to: edge.to,
       ...(edge.logicalFrom ? { logical_from: edge.logicalFrom } : {}),
       ...(edge.logicalTo ? { logical_to: edge.logicalTo } : {}),
+      ...(edge.executionMode === "manual"
+        ? { execution_mode: "manual" as const }
+        : {}),
     })),
     viewport: {
       ...(canvas.viewport.x == null ? {} : { x: canvas.viewport.x }),
@@ -103,7 +128,10 @@ export function persistedCanvasState(
   };
 }
 
-function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
+function persistedCanvasNode(
+  node: SpaceCanvasNode,
+  referenceTargets: CanvasReferenceTarget[],
+): PersistedCanvasNode {
   const result: PersistedCanvasNode = {
     id: node.id,
     type: node.type,
@@ -115,26 +143,31 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
     width: node.width,
     height: node.height,
   };
+  assignNumber(result, "node_no", node.nodeNo);
+  if (node.titleMode) {
+    result.title_mode = node.titleMode;
+  }
   assignText(result, "group_id", node.groupId);
   if (node.group) {
     const group: NonNullable<PersistedCanvasNode["group"]> = {};
     assignText(group, "origin", node.group.origin);
     assignText(group, "source_node_id", node.group.sourceNodeId);
     assignText(group, "sync_key", node.group.syncKey);
+    assignText(group, "layout_key", node.group.layoutKey);
     if (Object.keys(group).length > 0) {
       result.group = group;
     }
   }
-  if (node.storyboardMaterial) {
-    const material = node.storyboardMaterial;
-    result.storyboard_material = {
-      source_node_id: material.sourceNodeId,
-      material_type: material.materialType,
-      material_id: material.materialId,
-      ...(material.generatedPrompt
-        ? { generated_prompt: material.generatedPrompt }
+  if (node.storyboardItem) {
+    const item = node.storyboardItem;
+    result.storyboard_item = {
+      source_node_id: item.sourceNodeId,
+      item_type: item.itemType,
+      item_id: item.itemId,
+      ...(item.generatedPrompt
+        ? { generated_prompt: item.generatedPrompt }
         : {}),
-      ...(material.stale ? { stale: true } : {}),
+      ...(item.stale ? { stale: true } : {}),
     };
   }
   assignNumber(result, "asset_cate_id", node.assetCateId);
@@ -187,7 +220,11 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
       description: node.functionOption.description,
     };
   }
-  const composerDraft = persistedComposerDraft(node.composerDraft);
+  const composerDraft = persistedComposerDraft(
+    node.composerDraft,
+    referenceTargets,
+    Number(node.nodeNo || 0),
+  );
   if (composerDraft) {
     result.composer_draft = composerDraft;
   }
@@ -239,12 +276,28 @@ function persistedResultView(
   return result;
 }
 
-function persistedComposerDraft(value: unknown) {
+function persistedComposerDraft(
+  value: unknown,
+  referenceTargets: CanvasReferenceTarget[],
+  currentNodeNo: number,
+) {
   if (!isRecord(value)) {
     return null;
   }
   const result: Record<string, unknown> = {};
   assignText(result, "prompt", value.prompt);
+  const prompt = typeof value.prompt === "string" ? value.prompt : "";
+  const savedPromptContent = normalizeReferenceContent(
+    value.promptContent ?? value.prompt_content,
+  );
+  const promptContent = reconcileCanvasReferenceContent(
+    prompt,
+    savedPromptContent,
+    referenceTargets.filter((target) => target.refId !== currentNodeNo),
+  );
+  if (promptContent && isJSONValue(promptContent)) {
+    result.prompt_content = promptContent;
+  }
   assignNumber(
     result,
     "selected_target_id",
@@ -257,6 +310,17 @@ function persistedComposerDraft(value: unknown) {
     result.param_values = paramValues;
   }
   return Object.keys(result).length ? result : null;
+}
+
+function normalizeReferenceContent(value: unknown) {
+  if (
+    !isRecord(value) ||
+    Number(value.version || 0) !== 1 ||
+    !Array.isArray(value.parts)
+  ) {
+    return undefined;
+  }
+  return value as CanvasReferenceContent;
 }
 
 function serializableParamValues(value: unknown) {

@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	energonmodel "github.com/dever-package/bot/model/energon"
+	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
@@ -22,6 +24,7 @@ const (
 // server contexts and credentials deliberately stay outside the persisted payload.
 type executionSnapshot struct {
 	Version            int                              `json:"version"`
+	RequestedAt        time.Time                        `json:"requested_at"`
 	Agent              agentmodel.Agent                 `json:"agent"`
 	Power              energonmodel.Power               `json:"power"`
 	SessionID          uint64                           `json:"session_id,omitempty"`
@@ -33,6 +36,7 @@ type executionSnapshot struct {
 	Transport          persistedTransport               `json:"transport"`
 	PersistChat        bool                             `json:"persist_chat"`
 	MediaReferences    []runtimeprovider.MediaReference `json:"media_references,omitempty"`
+	Scope              runtimescope.Scope               `json:"scope,omitempty"`
 }
 
 type persistedTransport struct {
@@ -58,6 +62,7 @@ type runCheckpoint struct {
 	PendingVisible   bool                             `json:"pending_visible,omitempty"`
 	DocumentID       uint64                           `json:"document_id,omitempty"`
 	DocumentTextStep int                              `json:"document_text_step,omitempty"`
+	KnowledgeUsed    bool                             `json:"knowledge_used,omitempty"`
 	FinalStatus      string                           `json:"final_status,omitempty"`
 	FinalText        string                           `json:"final_text,omitempty"`
 	FinalMessage     string                           `json:"final_message,omitempty"`
@@ -68,6 +73,7 @@ type runCheckpoint struct {
 func snapshotFromExecution(execution execution) executionSnapshot {
 	return executionSnapshot{
 		Version:            runtimeSnapshotVersion,
+		RequestedAt:        execution.requestedAt,
 		Agent:              execution.agent,
 		Power:              execution.power,
 		SessionID:          execution.sessionID,
@@ -83,6 +89,7 @@ func snapshotFromExecution(execution execution) executionSnapshot {
 		},
 		PersistChat:     execution.persistChat,
 		MediaReferences: append([]runtimeprovider.MediaReference(nil), execution.mediaReferences...),
+		Scope:           execution.scope,
 	}
 }
 

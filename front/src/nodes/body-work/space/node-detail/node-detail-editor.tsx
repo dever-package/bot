@@ -3,15 +3,15 @@ import { Download, FileText } from "lucide-react";
 import { getCompatModule } from "@dever/front-plugin";
 import { StoryboardView } from "../space-storyboard-view";
 import type { StoryboardDocument } from "../space-storyboard";
+import type { ComposerAssetItem } from "../space-prompt-composer";
+import { CanvasNodeContentView } from "../space-content-view";
 import {
   nodeDetailContentWithValue,
   type NodeDetailEditableContent,
   type NodeDetailFileValue,
 } from "./node-detail-content";
 
-const { RichTextEditor } = getCompatModule(
-  "@/components/rich-text-editor",
-) as {
+const { RichTextEditor } = getCompatModule("@/components/rich-text-editor") as {
   RichTextEditor?: ComponentType<{
     value: unknown;
     onChange: (value: string) => void;
@@ -27,19 +27,35 @@ const { RichTextEditor } = getCompatModule(
 
 export function NodeDetailEditor({
   content,
+  mediaOutput,
   readonly,
+  referenceItems,
   onChange,
 }: {
   content: NodeDetailEditableContent;
+  mediaOutput?: unknown;
   readonly: boolean;
+  referenceItems?: ComposerAssetItem[];
   onChange: (content: NodeDetailEditableContent) => void;
 }) {
+  if (mediaOutput !== undefined) {
+    return (
+      <CanvasNodeContentView
+        className="ws-node-detail-media"
+        output={mediaOutput}
+        emptyText="暂无媒体内容"
+        mediaLayout="chat"
+      />
+    );
+  }
+
   if (content.mode === "storyboard") {
     return (
       <div className="ws-node-detail-storyboard">
         <StoryboardView
           storyboard={content.value as StoryboardDocument}
           editable={!readonly}
+          referenceItems={referenceItems}
           onChange={(storyboard) =>
             onChange(nodeDetailContentWithValue(content, storyboard))
           }
@@ -134,9 +150,7 @@ function FileDetailEditor({
           value={file.description}
           rows={8}
           placeholder="补充文件说明"
-          onChange={(event) =>
-            updateFile({ description: event.target.value })
-          }
+          onChange={(event) => updateFile({ description: event.target.value })}
         />
       )}
     </div>

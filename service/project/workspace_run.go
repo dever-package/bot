@@ -330,7 +330,7 @@ func (s WorkspaceService) executeCanvasRunnableNode(
 	if workspaceRunCanceled(ctx, run.ID) {
 		return s.canceledCanvasRunnableNodeResult(ctx, req, run, node, nodeRunID)
 	}
-	inputContext := canvasNodePreviousOutput(ctx, run.ProjectID, req, node.ID, results)
+	inputContext, _ := canvasNodePreviousOutput(ctx, run.ProjectID, req, node.ID, results)
 	markWorkspaceNodeRun(ctx, nodeRunID, teammodel.RunStatusRunning, map[string]any{
 		"input":            req.Input,
 		"node":             canvasRunNodeInput(node),
@@ -459,7 +459,10 @@ func (s WorkspaceService) recordCanvasNodeRunResult(ctx context.Context, req Can
 }
 
 func (s WorkspaceService) runCanvasNode(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, results []canvasNodeResult) (map[string]any, error) {
-	previousOutput := canvasNodePreviousOutput(ctx, projectID, req, node.ID, results)
+	previousOutput, err := canvasNodePreviousOutput(ctx, projectID, req, node.ID, results)
+	if err != nil {
+		return nil, err
+	}
 	switch node.Type {
 	case "asset":
 		return canvasAssetRunPayload(ctx, projectID, req, run, node, nodeRunID), nil
@@ -783,6 +786,9 @@ func parseCanvasRunGraph(canvas map[string]any) ([]canvasRunNode, []canvasRunEdg
 	edges := make([]canvasRunEdge, 0, len(edgesRaw))
 	for _, raw := range edgesRaw {
 		row := mapValue(raw)
+		if !canvasEdgeRuns(row) {
+			continue
+		}
 		edge := canvasRunEdge{
 			ID:   textValue(row["id"]),
 			From: textValue(firstPresent(row["from"], row["source"])),
@@ -890,7 +896,11 @@ func previousCanvasOutputExcluding(
 	return map[string]any{"sources": outputs}
 }
 
-func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasRunRequest, nodeID string, results []canvasNodeResult) any {
+func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasRunRequest, nodeID string, results []canvasNodeResult) (any, error) {
+	referenceOutput, err := canvasPromptReferenceOutput(ctx, projectID, nodeID, results, req.Canvas)
+	if err != nil {
+		return nil, err
+	}
 	if req.SingleNode {
 		if manualContext := manualCanvasInputContext(req.Input); manualContext != nil {
 			startNode := canvasNodeByID(req.StartNodeID, req.Canvas)
@@ -900,6 +910,7 @@ func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasR
 			}
 			return mergeCanvasContextOutputs(
 				manualContext,
+				referenceOutput,
 				previousCanvasOutputExcluding(
 					ctx,
 					projectID,
@@ -908,14 +919,180 @@ func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasR
 					req.Canvas,
 					excludedUpstreamIDs,
 				),
-			)
+			), nil
 		}
 	}
 	output := previousCanvasOutput(ctx, projectID, nodeID, results, req.Canvas)
-	if output != nil {
-		return output
+	return mergeCanvasContextOutputs(referenceOutput, output), nil
+}
+
+func canvasPromptReferenceOutput(
+	ctx context.Context,
+	projectID uint64,
+	nodeID string,
+	results []canvasNodeResult,
+	canvas map[string]any,
+) (any, error) {
+	node := canvasNodeByID(nodeID, canvas)
+	prompt := textValue(valueAtPath(node, "composer_draft", "prompt"))
+	content := mapValue(valueAtPath(node, "composer_draft", "prompt_content"))
+	structured := canvasStructuredPromptReferences(content, nodeID, canvas)
+	if prompt == "" && len(structured) == 0 {
+		return nil, nil
+	}
+	if len(structured) == 0 {
+		for _, candidate := range canvasPromptReferencedNodes(prompt, nodeID, canvas) {
+			structured = append(structured, canvasPromptReference{Node: candidate})
+		}
+	}
+	sources := make([]any, 0, len(structured))
+	for _, reference := range structured {
+		if reference.AssetID > 0 {
+			asset := hydrateCanvasAsset(ctx, projectID, map[string]any{"id": reference.AssetID})
+			output := valueAtPath(asset, "version", "content")
+			if output == nil {
+				return nil, fmt.Errorf("引用内容 %d 不存在或尚未生成", reference.AssetID)
+			}
+			sources = append(sources, newCanvasGroupOutputSource(
+				fmt.Sprintf("asset:%d", reference.AssetID),
+				firstText(asset["name"], reference.Label, fmt.Sprintf("内容 %d", reference.AssetID)),
+				textValue(asset["kind"]),
+				"",
+				reference.AssetID,
+				uint64Value(valueAtPath(asset, "version", "id")),
+				output,
+			))
+			continue
+		}
+		candidate := reference.Node
+		if candidate == nil && reference.NodeNo > 0 {
+			return nil, fmt.Errorf("引用节点 %d 已删除", reference.NodeNo)
+		}
+		candidateID := textValue(candidate["id"])
+		output := lastCanvasOutput(results, candidateID)
+		if output == nil {
+			output = staticCanvasNodeOutput(ctx, projectID, candidateID, canvas)
+		}
+		if output == nil {
+			if reference.NodeNo > 0 {
+				return nil, fmt.Errorf("引用节点“%s”尚未生成", firstText(candidate["title"], fmt.Sprintf("节点 %d", reference.NodeNo)))
+			}
+			continue
+		}
+		sources = append(
+			sources,
+			canvasGroupOutputSource(candidate, lastCanvasNodeResult(results, candidateID), output),
+		)
+	}
+	if len(sources) == 0 {
+		return nil, nil
+	}
+	return map[string]any{
+		"type":    "reference_output",
+		"sources": sources,
+	}, nil
+}
+
+type canvasPromptReference struct {
+	Node    map[string]any
+	NodeNo  uint64
+	AssetID uint64
+	Label   string
+}
+
+func canvasStructuredPromptReferences(content map[string]any, nodeID string, canvas map[string]any) []canvasPromptReference {
+	if uint64Value(content["version"]) != 1 {
+		return nil
+	}
+	result := []canvasPromptReference{}
+	used := map[string]bool{}
+	for _, raw := range sliceValue(content["parts"]) {
+		part := mapValue(raw)
+		if textValue(part["type"]) != "reference" {
+			continue
+		}
+		refType := textValue(part["ref_type"])
+		refID := uint64Value(part["ref_id"])
+		key := fmt.Sprintf("%s:%d", refType, refID)
+		if refID == 0 || used[key] {
+			continue
+		}
+		used[key] = true
+		switch refType {
+		case "canvas_node":
+			result = append(result, canvasPromptReference{
+				Node:   canvasNodeByNumber(refID, nodeID, canvas),
+				NodeNo: refID,
+			})
+		case "artifact":
+			result = append(result, canvasPromptReference{
+				AssetID: refID,
+				Label:   textValue(part["label"]),
+			})
+		}
+	}
+	return result
+}
+
+func canvasNodeByNumber(nodeNo uint64, excludedNodeID string, canvas map[string]any) map[string]any {
+	for _, raw := range sliceValue(canvas["nodes"]) {
+		candidate := mapValue(raw)
+		if textValue(candidate["id"]) == excludedNodeID || uint64Value(candidate["node_no"]) != nodeNo {
+			continue
+		}
+		return candidate
 	}
 	return nil
+}
+
+func canvasPromptReferencedNodes(prompt string, nodeID string, canvas map[string]any) []map[string]any {
+	candidates := make([]map[string]any, 0)
+	for _, raw := range sliceValue(canvas["nodes"]) {
+		candidate := mapValue(raw)
+		candidateID := textValue(candidate["id"])
+		title := canvasReferenceTitle(candidate)
+		if candidateID == "" || candidateID == nodeID || title == "" {
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
+
+	result := make([]map[string]any, 0)
+	used := map[string]bool{}
+	for cursor := 0; cursor < len(prompt); {
+		at := strings.Index(prompt[cursor:], "@")
+		if at < 0 {
+			break
+		}
+		at += cursor
+		remainder := prompt[at+1:]
+		matchedTitle := ""
+		for _, candidate := range candidates {
+			title := canvasReferenceTitle(candidate)
+			if strings.HasPrefix(remainder, title) && len(title) > len(matchedTitle) {
+				matchedTitle = title
+			}
+		}
+		if matchedTitle == "" {
+			cursor = at + 1
+			continue
+		}
+		for _, candidate := range candidates {
+			candidateID := textValue(candidate["id"])
+			title := canvasReferenceTitle(candidate)
+			if title != matchedTitle || used[candidateID] {
+				continue
+			}
+			used[candidateID] = true
+			result = append(result, candidate)
+		}
+		cursor = at + 1 + len(matchedTitle)
+	}
+	return result
+}
+
+func canvasReferenceTitle(node map[string]any) string {
+	return strings.TrimLeft(strings.TrimSpace(textValue(node["title"])), "@")
 }
 
 func manualCanvasContextNodeIDs(context any) map[string]bool {
@@ -935,6 +1112,9 @@ func upstreamCanvasNodeIDs(nodeID string, canvas map[string]any) []string {
 	result := []string{}
 	for _, raw := range edgesRaw {
 		row := mapValue(raw)
+		if !canvasEdgeRuns(row) {
+			continue
+		}
 		to := textValue(firstPresent(row["to"], row["target"]))
 		if to != nodeID {
 			continue
@@ -944,6 +1124,10 @@ func upstreamCanvasNodeIDs(nodeID string, canvas map[string]any) []string {
 		}
 	}
 	return result
+}
+
+func canvasEdgeRuns(edge map[string]any) bool {
+	return strings.ToLower(textValue(firstPresent(edge["execution_mode"], edge["executionMode"]))) != "manual"
 }
 
 func lastCanvasOutput(results []canvasNodeResult, nodeID string) any {
@@ -1251,15 +1435,7 @@ func workspaceCanvasAssetName(name string, nodeID string) string {
 	if name == "" {
 		name = "画布结果"
 	}
-	nodeID = strings.TrimSpace(nodeID)
-	if nodeID == "" {
-		return truncateWorkspaceAssetName(name)
-	}
-	suffix := nodeID
-	if len(suffix) > 12 {
-		suffix = suffix[:12]
-	}
-	return truncateWorkspaceAssetName(fmt.Sprintf("%s [%s]", name, suffix))
+	return truncateWorkspaceAssetName(name)
 }
 
 func truncateWorkspaceAssetName(name string) string {

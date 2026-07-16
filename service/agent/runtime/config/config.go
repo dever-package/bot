@@ -13,6 +13,11 @@ func WithDefaults(config agentmodel.RuntimeConfig) agentmodel.RuntimeConfig {
 	}
 	config.DefaultMaxAutoSteps = positiveInt(config.DefaultMaxAutoSteps, defaults.DefaultMaxAutoSteps)
 	config.HardMaxAutoSteps = positiveInt(config.HardMaxAutoSteps, defaults.HardMaxAutoSteps)
+	config.RunWorkerConcurrency = boundedPositiveInt(
+		config.RunWorkerConcurrency,
+		defaults.RunWorkerConcurrency,
+		agentmodel.MaxRuntimeRunWorkerConcurrency,
+	)
 	config.SkillMetadataMaxSkills = positiveInt(config.SkillMetadataMaxSkills, defaults.SkillMetadataMaxSkills)
 	config.SkillMetadataFieldMaxLength = positiveInt(config.SkillMetadataFieldMaxLength, defaults.SkillMetadataFieldMaxLength)
 	config.SkillFileMaxBytes = positiveInt(config.SkillFileMaxBytes, defaults.SkillFileMaxBytes)
@@ -54,6 +59,14 @@ func positiveInt(value int, fallback int) int {
 		return value
 	}
 	return fallback
+}
+
+func boundedPositiveInt(value int, fallback int, maximum int) int {
+	value = positiveInt(value, fallback)
+	if maximum > 0 && value > maximum {
+		return maximum
+	}
+	return value
 }
 
 func defaultString(value string, fallback string) string {

@@ -7,6 +7,7 @@ import (
 
 	dlog "github.com/shemic/dever/log"
 
+	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
 	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
 )
 
@@ -49,6 +50,9 @@ func StartJobScheduler() runtimequeue.Dispatcher {
 				},
 			},
 		)
+		runtimeasync.Start("智能体素材状态对账", runJobReconciler, func(err error) {
+			dlog.ErrorFields("agent_artifact_reconcile", "智能体素材状态对账异常", dlog.Fields{"error": err.Error()})
+		})
 	})
 	return jobDispatcher
 }
@@ -58,7 +62,9 @@ func dispatchJob(jobID uint64) {
 	if dispatcher == nil {
 		return
 	}
-	if err := dispatcher.Dispatch(context.Background(), jobID); err != nil {
+	ctx, cancel := maintenanceContext()
+	defer cancel()
+	if err := dispatcher.Dispatch(ctx, jobID); err != nil {
 		dlog.ErrorFields("agent_artifact_dispatch", "智能体素材任务投递失败，等待后台对账重试", dlog.Fields{
 			"job_id": jobID,
 			"error":  err.Error(),

@@ -26,6 +26,10 @@ func NormalizePowerParamInput(input map[string]any, params []PowerParam) map[str
 	return botinput.NormalizePowerParamInput(input, params)
 }
 
+func ApplyPowerParamDefaults(values map[string]any, params []PowerParam) map[string]any {
+	return botinput.ApplyPowerParamDefaults(values, params)
+}
+
 func (s GatewayService) PowerParamConfig(ctx context.Context, powerKey string, targetID uint64) (PowerParamConfig, error) {
 	powerKey = strings.TrimSpace(powerKey)
 	if powerKey == "" {

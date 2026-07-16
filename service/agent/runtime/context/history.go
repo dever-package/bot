@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
 	runtimereference "github.com/dever-package/bot/service/agent/runtime/reference"
 	frontstream "github.com/dever-package/front/service/stream"
 )
@@ -34,18 +35,13 @@ func recentHistory(ctx context.Context, session agentmodel.Session) []any {
 		if row == nil || (row.Role != "user" && row.Role != "assistant") {
 			continue
 		}
-		text := row.Text
+		text := runtimemessageoutput.NormalizeText(row.Text)
 		if row.Role == "user" {
 			if params := runtimereference.ParamsPrompt(row.Content); params != "" {
 				text = strings.TrimSpace(text + "\n\n" + params)
 			}
 			if response := runtimereference.InteractionResponsePrompt(row.Content); response != "" {
 				text = strings.TrimSpace(text + "\n\n" + response)
-			}
-		}
-		if references := runtimereference.ReferencesFromContent(row.Content); len(references) > 0 {
-			if resolved, err := runtimereference.NewResolver().Resolve(ctx, session, references); err == nil && strings.TrimSpace(resolved.Prompt) != "" {
-				text = strings.TrimSpace(text + "\n\n" + resolved.Prompt)
 			}
 		}
 		history = append(history, map[string]any{"role": row.Role, "text": text})

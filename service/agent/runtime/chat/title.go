@@ -9,19 +9,15 @@ import (
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimecontext "github.com/dever-package/bot/service/agent/runtime/context"
+	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 func (s Service) generateSessionTitleAsync(sessionID uint64) {
-	if sessionID == 0 {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
+	submitChatMaintenance("生成会话标题", sessionID, 20*time.Second, func(ctx context.Context) {
 		s.generateSessionTitle(ctx, sessionID)
-	}()
+	})
 }
 
 func (s Service) generateSessionTitle(ctx context.Context, sessionID uint64) {
@@ -94,7 +90,7 @@ func titleSourceText(ctx context.Context, sessionID uint64) (string, uint64) {
 		if role == "" {
 			role = "message"
 		}
-		parts = append(parts, role+": "+limitText(row.Text, 600))
+		parts = append(parts, role+": "+limitText(runtimemessageoutput.NormalizeText(row.Text), 600))
 		lastMessageID = row.ID
 	}
 	return strings.Join(parts, "\n"), lastMessageID

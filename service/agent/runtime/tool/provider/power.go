@@ -100,16 +100,10 @@ func powerActivityParameterKeys(params []energonservice.PowerParam) []string {
 }
 
 func preparePowerInput(arguments map[string]any, params []energonservice.PowerParam) (map[string]any, error) {
-	input := energonservice.NormalizePowerParamInput(arguments, params)
-	for _, param := range params {
-		key := strings.TrimSpace(param.Key)
-		if key == "" || !energoninput.IsMissing(input[key]) {
-			continue
-		}
-		if value := strings.TrimSpace(param.DefaultValue); value != "" {
-			input[key] = energoninput.ParseJSONValue(value)
-		}
-	}
+	input := energonservice.ApplyPowerParamDefaults(
+		energonservice.NormalizePowerParamInput(arguments, params),
+		params,
+	)
 	missing := make([]string, 0)
 	for _, param := range params {
 		if !param.Required || !energoninput.IsMissing(input[param.Key]) {
@@ -175,10 +169,10 @@ func executePower(ctx context.Context, requestID string, powerKey string, input 
 	if int(frontstream.InputInt64(collected.Frame["status"], 0)) == botprotocol.ResponseStatusFail {
 		return nil, fmt.Errorf("%s", powerErrorMessage(collected.Frame, "能力调用失败"))
 	}
-	output := botstream.FrameOutput(collected.Frame)
-	if len(output) == 0 {
-		output = botprotocol.MergeStreamResult(collected.State.Outputs)
-	}
+	output := botprotocol.MergeStreamFinal(
+		collected.State.Outputs,
+		botstream.FrameOutput(collected.Frame),
+	)
 	return output, nil
 }
 

@@ -39,7 +39,7 @@ type ArtifactJob struct {
 	Attempt        int        `dorm:"type:int;not null;default:0;comment:执行次数"`
 	Version        int        `dorm:"type:int;not null;default:1;comment:调度版本"`
 	WorkerID       string     `dorm:"type:varchar(128);not null;default:'';comment:执行者"`
-	AvailableAt    time.Time  `dorm:"type:timestamp;not null;comment:下次可执行时间"`
+	AvailableAt    time.Time  `dorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP;comment:下次可执行时间"`
 	LeaseExpiresAt *time.Time `dorm:"null;comment:租约过期时间"`
 	HeartbeatAt    *time.Time `dorm:"null;comment:心跳时间"`
 	Error          string     `dorm:"type:text;not null;default:'';comment:错误信息"`

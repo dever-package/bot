@@ -4,11 +4,20 @@ import (
 	"context"
 	"strings"
 
+	agentmodel "github.com/dever-package/bot/model/agent"
 	memoryservice "github.com/dever-package/bot/service/memory"
 )
 
-func runtimeMemoryText(ctx context.Context, sessionID uint64, query string) string {
-	rows := memoryservice.NewService().RuntimeMemoriesBySession(ctx, sessionID, query, 12)
+func runtimeMemoryText(ctx context.Context, session agentmodel.Session, query string) string {
+	rows := memoryservice.NewService().RuntimeMemories(ctx, memoryservice.RuntimeRequest{
+		OwnerType:  session.OwnerType,
+		OwnerID:    session.OwnerID,
+		AgentKey:   session.AgentKey,
+		ContextKey: session.ContextKey,
+		SessionID:  session.ID,
+		Query:      query,
+		Limit:      12,
+	})
 	parts := make([]string, 0, len(rows))
 	totalRunes := 0
 	for _, row := range rows {

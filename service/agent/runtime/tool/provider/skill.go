@@ -13,6 +13,12 @@ import (
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
+const (
+	skillPromptDescriptionRunes = 96
+	skillPromptTriggerItems     = 3
+	skillPromptTriggerRunes     = 24
+)
+
 type SkillRuntime struct {
 	TempRoot string
 	Sandbox  sandbox.Config
@@ -151,18 +157,39 @@ func skillPrompt(entries []agentskill.Entry) string {
 	for _, entry := range entries {
 		line := "- key=" + strings.TrimSpace(entry.Key) + ", name=" + strings.TrimSpace(entry.Name)
 		if description := strings.TrimSpace(entry.Description); description != "" {
-			line += ", description=" + description
+			line += ", description=" + compactSkillPromptText(description, skillPromptDescriptionRunes)
 		}
-		if len(entry.Triggers) > 0 {
-			line += ", triggers=" + strings.Join(entry.Triggers, "、")
-		}
-		if len(entry.Domains) > 0 {
-			line += ", domains=" + strings.Join(entry.Domains, "、")
-		}
-		if len(entry.Targets) > 0 {
-			line += ", targets=" + strings.Join(entry.Targets, "、")
+		if triggers := compactSkillPromptList(entry.Triggers, skillPromptTriggerItems, skillPromptTriggerRunes); len(triggers) > 0 {
+			line += ", triggers=" + strings.Join(triggers, "、")
 		}
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func compactSkillPromptList(values []string, maxItems int, maxRunes int) []string {
+	result := make([]string, 0, min(len(values), maxItems))
+	for _, value := range values {
+		value = compactSkillPromptText(value, maxRunes)
+		if value == "" {
+			continue
+		}
+		result = append(result, value)
+		if len(result) == maxItems {
+			break
+		}
+	}
+	return result
+}
+
+func compactSkillPromptText(value string, maxRunes int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return strings.TrimSpace(string(runes[:maxRunes])) + "..."
 }

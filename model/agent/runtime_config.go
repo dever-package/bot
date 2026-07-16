@@ -10,6 +10,8 @@ const (
 	DefaultRuntimeConfigID                    uint64 = 1
 	DefaultRuntimeMaxAutoSteps                       = 5
 	DefaultRuntimeHardMaxAutoSteps                   = 8
+	DefaultRuntimeRunWorkerConcurrency               = 16
+	MaxRuntimeRunWorkerConcurrency                   = 64
 	DefaultRuntimeSkillMetadataMaxSkills             = 80
 	DefaultRuntimeSkillMetadataFieldMaxLength        = 1000
 	DefaultRuntimeSkillFileMaxBytes                  = 256 * 1024
@@ -34,6 +36,7 @@ type RuntimeConfig struct {
 	ID                          uint64    `dorm:"primaryKey;autoIncrement;comment:配置ID"`
 	DefaultMaxAutoSteps         int       `dorm:"type:int;not null;default:5;comment:默认最大自动步骤数"`
 	HardMaxAutoSteps            int       `dorm:"type:int;not null;default:8;comment:强制最大自动步骤数"`
+	RunWorkerConcurrency        int       `dorm:"type:int;not null;default:16;comment:并行运行数"`
 	SkillMetadataMaxSkills      int       `dorm:"type:int;not null;default:80;comment:技能 metadata 最大技能数"`
 	SkillMetadataFieldMaxLength int       `dorm:"type:int;not null;default:1000;comment:技能 metadata 单字段最大长度"`
 	SkillFileMaxBytes           int       `dorm:"type:int;not null;default:262144;comment:SKILL.md 最大读取字节数"`
@@ -64,6 +67,7 @@ var runtimeConfigSeed = []map[string]any{
 		"id":                              DefaultRuntimeConfigID,
 		"default_max_auto_steps":          DefaultRuntimeMaxAutoSteps,
 		"hard_max_auto_steps":             DefaultRuntimeHardMaxAutoSteps,
+		"run_worker_concurrency":          DefaultRuntimeRunWorkerConcurrency,
 		"skill_metadata_max_skills":       DefaultRuntimeSkillMetadataMaxSkills,
 		"skill_metadata_field_max_length": DefaultRuntimeSkillMetadataFieldMaxLength,
 		"skill_file_max_bytes":            DefaultRuntimeSkillFileMaxBytes,
@@ -92,6 +96,7 @@ func DefaultRuntimeConfig() RuntimeConfig {
 		ID:                          DefaultRuntimeConfigID,
 		DefaultMaxAutoSteps:         DefaultRuntimeMaxAutoSteps,
 		HardMaxAutoSteps:            DefaultRuntimeHardMaxAutoSteps,
+		RunWorkerConcurrency:        DefaultRuntimeRunWorkerConcurrency,
 		SkillMetadataMaxSkills:      DefaultRuntimeSkillMetadataMaxSkills,
 		SkillMetadataFieldMaxLength: DefaultRuntimeSkillMetadataFieldMaxLength,
 		SkillFileMaxBytes:           DefaultRuntimeSkillFileMaxBytes,

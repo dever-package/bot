@@ -26,7 +26,8 @@ func listSkillFilesTool(loaded map[string]agentskill.Entry) Tool {
 			if err != nil {
 				return Result{}, err
 			}
-			base, relativeBase, err := safeSkillPath(entry, argumentText(call.Arguments, "path"))
+			requested := normalizeSkillListPath(entry, argumentText(call.Arguments, "path"))
+			base, relativeBase, err := safeSkillPath(entry, requested)
 			if err != nil {
 				return Result{}, err
 			}
@@ -55,7 +56,7 @@ func listSkillFilesTool(loaded map[string]agentskill.Entry) Tool {
 				if infoErr != nil {
 					return infoErr
 				}
-				_, relative, pathErr := safeSkillPath(entry, relativeSkillPath(entry.InstallPath, path))
+				relative, pathErr := relativeSkillPath(entry.InstallPath, path)
 				if pathErr != nil {
 					return pathErr
 				}
@@ -122,6 +123,29 @@ func safeSkillPath(entry agentskill.Entry, requested string) (string, string, er
 	return safeRelativePath(root, requested)
 }
 
+func normalizeSkillListPath(entry agentskill.Entry, requested string) string {
+	requested = strings.TrimSpace(requested)
+	if requested == "" || requested == "/" || requested == "." {
+		return "."
+	}
+	if !filepath.IsAbs(requested) {
+		return requested
+	}
+	requestedPath, requestedErr := filepath.Abs(filepath.Clean(requested))
+	rootPath, rootErr := filepath.Abs(filepath.Clean(entry.InstallPath))
+	if requestedErr == nil && rootErr == nil && requestedPath == rootPath {
+		return "."
+	}
+	requested = strings.TrimLeft(filepath.ToSlash(requested), "/")
+	if requested == "skill" {
+		return "."
+	}
+	if strings.HasPrefix(requested, "skill/") {
+		return strings.TrimPrefix(requested, "skill/")
+	}
+	return requested
+}
+
 func safeRelativePath(root string, requested string) (string, string, error) {
 	if strings.TrimSpace(root) == "" {
 		return "", "", fmt.Errorf("运行目录未初始化")
@@ -131,7 +155,7 @@ func safeRelativePath(root string, requested string) (string, string, error) {
 		requested = "."
 	}
 	if filepath.IsAbs(requested) {
-		return "", "", fmt.Errorf("不允许使用绝对路径")
+		return "", "", fmt.Errorf("不允许使用绝对路径，请使用技能目录内的相对路径")
 	}
 	cleanRoot, err := filepath.Abs(filepath.Clean(root))
 	if err != nil {
@@ -190,10 +214,21 @@ func pathDepth(path string) int {
 	return len(strings.Split(filepath.Clean(path), string(filepath.Separator)))
 }
 
-func relativeSkillPath(root string, path string) string {
-	relative, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
+func relativeSkillPath(root string, path string) (string, error) {
+	cleanRoot, err := filepath.Abs(filepath.Clean(root))
 	if err != nil {
-		return path
+		return "", err
 	}
-	return relative
+	cleanPath, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(cleanRoot, cleanPath)
+	if err != nil {
+		return "", err
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("路径超出允许目录")
+	}
+	return filepath.ToSlash(relative), nil
 }

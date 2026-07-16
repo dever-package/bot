@@ -3,6 +3,8 @@ import { AgentChatActivityView } from "./activity-view";
 import type { AgentChatActivity } from "./activity";
 import {
   isAgentChatDocumentPending,
+  isAgentChatDocumentMediaReady,
+  normalizeAgentChatDocumentBlockText,
   type AgentChatDocument,
   type AgentChatDocumentBlock,
 } from "./document";
@@ -20,8 +22,10 @@ export function AgentChatDocumentView({
   running: boolean;
   error: boolean;
 }) {
+  const intro = documentIntro(document);
+  const bodySource = stripDocumentIntro(sourceText, intro);
   const pendingText = running
-    ? resolvePendingDocumentText(sourceText, document.blocks)
+    ? resolvePendingDocumentText(bodySource, document.blocks)
     : "";
   const waitingForBlock =
     running &&
@@ -31,15 +35,20 @@ export function AgentChatDocumentView({
 
   return (
     <div className="agent-chat-document min-w-0">
+      {document.title ? (
+        <h1 className="mb-5 text-xl font-semibold leading-tight">
+          {document.title}
+        </h1>
+      ) : null}
       {document.blocks.map((block) =>
         block.type === "media" ? (
           <DocumentMediaBlock key={block.id} block={block} />
         ) : (
-          <AgentChatMarkdown
+          <DocumentTextBlock
             key={block.id}
-            text={block.text}
+            block={block}
+            title={document.title}
             error={error}
-            className="agent-chat-document-text"
           />
         ),
       )}
@@ -62,6 +71,46 @@ export function AgentChatDocumentView({
   );
 }
 
+function documentIntro(document: AgentChatDocument) {
+  return typeof document.meta.intro === "string"
+    ? document.meta.intro.trim()
+    : "";
+}
+
+function stripDocumentIntro(sourceText: string, intro: string) {
+  const source = String(sourceText || "");
+  if (!intro) {
+    return source;
+  }
+  const position = source.indexOf(intro);
+  if (position < 0) {
+    return source;
+  }
+  return `${source.slice(0, position)}${source.slice(position + intro.length)}`.trimStart();
+}
+
+function DocumentTextBlock({
+  block,
+  title,
+  error,
+}: {
+  block: AgentChatDocumentBlock;
+  title: string;
+  error: boolean;
+}) {
+  const text = normalizeAgentChatDocumentBlockText(block.text, title);
+  if (!text) {
+    return null;
+  }
+  return (
+    <AgentChatMarkdown
+      text={text}
+      error={error}
+      className="agent-chat-document-text"
+    />
+  );
+}
+
 function DocumentMediaBlock({ block }: { block: AgentChatDocumentBlock }) {
   if (block.status === "failed") {
     return (
@@ -78,11 +127,12 @@ function documentBlockActivity(
   block: AgentChatDocumentBlock,
 ): AgentChatActivity {
   const progress = Number(block.meta.progress);
+  const ready = isAgentChatDocumentMediaReady(block);
   return {
     id: `document-block-${block.id}`,
     title: `${mediaLabel(block.mediaKind)}生成`,
     kind: block.mediaKind,
-    status: block.status === "ready" ? "succeeded" : "running",
+    status: ready ? "succeeded" : "running",
     text:
       typeof block.meta.progress_text === "string"
         ? block.meta.progress_text

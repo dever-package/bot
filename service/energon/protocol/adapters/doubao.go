@@ -19,7 +19,7 @@ const (
 	doubaoKindEmbedding    = "doubao.embeddings"
 	doubaoKindImage        = "doubao.image"
 	doubaoKindVideo        = "doubao.video"
-	doubaoVideoPollMax     = 60
+	doubaoVideoPollMax     = 1200
 	doubaoVideoPollDelayMS = 3000
 )
 
@@ -446,11 +446,14 @@ func (adapter DoubaoAdapter) buildVideoRequest(input botprotocol.NativeInput) (b
 	}
 
 	normalizeDoubaoVideoBodyContent(body)
-	if _, exists := body["content"]; !exists {
-		content := doubaoVideoContent(input, body)
-		if len(content) > 0 {
-			body["content"] = content
-		}
+	content := mergeDoubaoVideoContent(
+		botprotocol.NormalizeAnyList(body["content"]),
+		doubaoVideoContent(input, body),
+	)
+	if len(content) > 0 {
+		body["content"] = content
+	} else {
+		delete(body, "content")
 	}
 	if len(botprotocol.NormalizeAnyList(body["content"])) == 0 {
 		return botprovider.Request{}, fmt.Errorf("豆包视频服务缺少 content")
@@ -500,11 +503,12 @@ func doubaoVideoContent(input botprotocol.NativeInput, body map[string]any) []an
 	mapped := doubaoMappedInput(input)
 	prompt := botprotocol.BuildPromptContent(mapped.PromptInput(mapped.InputKeySet()), mapped.PromptOptions("用户输入"))
 	text := strings.TrimSpace(botprotocol.AsText(body["prompt"]))
-	if text != "" {
-		delete(body, "prompt")
-	} else if text = strings.TrimSpace(botprotocol.AsText(body["text"])); text != "" {
-		delete(body, "text")
-	} else {
+	if text == "" {
+		text = strings.TrimSpace(botprotocol.AsText(body["text"]))
+	}
+	delete(body, "prompt")
+	delete(body, "text")
+	if text == "" {
 		text = prompt.TextWithMediaReferences(botprotocol.MediaReferenceOptions{
 			Files: true,
 		})
@@ -519,9 +523,9 @@ func doubaoVideoContent(input botprotocol.NativeInput, body map[string]any) []an
 	delete(body, "videos")
 	delete(body, "audio")
 	delete(body, "audios")
-	images = append(images, prompt.Images...)
-	videos = append(videos, prompt.Videos...)
-	audios = append(audios, prompt.Audios...)
+	images = uniqueDoubaoMediaURLs(append(images, prompt.Images...))
+	videos = uniqueDoubaoMediaURLs(append(videos, prompt.Videos...))
+	audios = uniqueDoubaoMediaURLs(append(audios, prompt.Audios...))
 
 	content := make([]any, 0, 1+len(images)+len(videos)+len(audios))
 	if text != "" {
@@ -562,6 +566,60 @@ func doubaoVideoContent(input botprotocol.NativeInput, body map[string]any) []an
 		})
 	}
 	return content
+}
+
+func mergeDoubaoVideoContent(existing []any, incoming []any) []any {
+	result := make([]any, 0, len(existing)+len(incoming))
+	seen := map[string]bool{}
+	appendItems := func(items []any) {
+		for _, item := range items {
+			mapped, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			normalized, valid := normalizeDoubaoContentItem(mapped)
+			if !valid {
+				continue
+			}
+			key := doubaoVideoContentItemKey(normalized)
+			if key != "" && seen[key] {
+				continue
+			}
+			if key != "" {
+				seen[key] = true
+			}
+			result = append(result, normalized)
+		}
+	}
+	appendItems(existing)
+	appendItems(incoming)
+	return result
+}
+
+func doubaoVideoContentItemKey(item map[string]any) string {
+	contentType := strings.ToLower(strings.TrimSpace(botprotocol.AsText(item["type"])))
+	switch contentType {
+	case "text":
+		return contentType + ":" + strings.TrimSpace(botprotocol.AsText(item["text"]))
+	case "image_url", "video_url", "audio_url":
+		return contentType + ":" + doubaoContentMediaURL(item[contentType]) + ":" + strings.TrimSpace(botprotocol.AsText(item["role"]))
+	default:
+		return ""
+	}
+}
+
+func uniqueDoubaoMediaURLs(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
 }
 
 func normalizeDoubaoVideoBodyContent(body map[string]any) {

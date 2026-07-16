@@ -1,7 +1,4 @@
-import type {
-  SpaceCanvasEdge,
-  SpaceCanvasNode,
-} from "./types";
+import type { SpaceCanvasEdge, SpaceCanvasNode } from "./types";
 
 export const DEFAULT_GROUP_NODE_SIZE = { width: 720, height: 420 };
 export const MIN_GROUP_NODE_SIZE = { width: 360, height: 240 };
@@ -14,10 +11,7 @@ export function isCanvasGroupNode(node?: SpaceCanvasNode | null) {
   return node?.type === "group";
 }
 
-export function canvasGroupMembers(
-  nodes: SpaceCanvasNode[],
-  groupId: string,
-) {
+export function canvasGroupMembers(nodes: SpaceCanvasNode[], groupId: string) {
   return nodes.filter((node) => node.groupId === groupId);
 }
 
@@ -85,21 +79,17 @@ export function withCanvasNodeGroupAtPosition(
     return nodes;
   }
   return nodes.map((node) =>
-    node.id === nodeId
-      ? { ...node, groupId: groupId || undefined }
-      : node,
+    node.id === nodeId ? { ...node, groupId: groupId || undefined } : node,
   );
 }
 
-export function withoutCanvasGroup(
+export function withoutCanvasGroupAndMembers(
   nodes: SpaceCanvasNode[],
   groupId: string,
 ) {
-  return nodes
-    .filter((node) => node.id !== groupId)
-    .map((node) =>
-      node.groupId === groupId ? { ...node, groupId: undefined } : node,
-    );
+  return nodes.filter(
+    (node) => node.id !== groupId && node.groupId !== groupId,
+  );
 }
 
 export function reconcileCanvasGroupEdges(
@@ -155,6 +145,8 @@ function containingCanvasGroupId(
         centerY >= node.y + GROUP_HEADER_HEIGHT &&
         centerY <= node.y + node.height - GROUP_CONTENT_PADDING,
     )
-    .sort((left, right) => left.width * left.height - right.width * right.height);
+    .sort(
+      (left, right) => left.width * left.height - right.width * right.height,
+    );
   return groups[0]?.id || "";
 }

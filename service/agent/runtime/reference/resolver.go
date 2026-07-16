@@ -78,12 +78,13 @@ func (r Resolver) resolveMessage(ctx context.Context, session agentmodel.Session
 	for _, artifact := range artifacts {
 		media = append(media, mediaFromArtifactPayload(artifact))
 	}
+	output, text := runtimemessageoutput.FormatMessage(message.Output, message.Text, artifacts)
 	return Resolved{
 		Reference: reference,
 		Title:     messageReferenceTitle(*message),
-		Text:      strings.TrimSpace(message.Text),
+		Text:      text,
 		Media:     cleanMedia(media),
-		Output:    runtimemessageoutput.Format(message.Output, artifacts),
+		Output:    output,
 	}, nil
 }
 
@@ -274,7 +275,7 @@ func messageReferenceTitle(message agentmodel.Message) string {
 	if message.Role == "user" {
 		prefix = "提问"
 	}
-	preview := limitText(message.Text, 36)
+	preview := limitText(runtimemessageoutput.NormalizeText(message.Text), 36)
 	if preview == "" {
 		return prefix
 	}

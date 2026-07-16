@@ -100,6 +100,31 @@
       },
       {
         "type": "form-number",
+        "name": "并行运行数",
+        "placeholder": "例如：16",
+        "value": "form.run_worker_concurrency",
+        "mode": "form",
+        "info": "同一进程可并行执行的智能体运行数。素材后台任务使用独立队列，不占用这里的名额。",
+        "validate": [
+          {
+            "type": "min",
+            "min": 1,
+            "message": "并行运行数不能小于 1。"
+          },
+          {
+            "type": "max",
+            "max": 64,
+            "message": "并行运行数不能超过 64。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "basic",
+          "controlClassName": "max-w-[160px]"
+        }
+      },
+      {
+        "type": "form-number",
         "name": "技能 metadata 最大技能数",
         "placeholder": "例如：80",
         "value": "form.skill_metadata_max_skills",
@@ -323,6 +348,7 @@
       "id": 1,
       "default_max_auto_steps": 5,
       "hard_max_auto_steps": 8,
+      "run_worker_concurrency": 16,
       "skill_metadata_max_skills": 80,
       "skill_metadata_field_max_length": 1000,
       "skill_file_max_bytes": 262144,

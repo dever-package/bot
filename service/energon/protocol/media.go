@@ -190,6 +190,7 @@ func collectMediaMap(output Output, mapped map[string]any, defaultType string, e
 
 func collectKnownMediaFields(output Output, mapped map[string]any, currentType string) {
 	appendOutputText(output, mapped["text"], mapped["lyrics"], mapped["lyric"], mapped["lrc"], mapped["song_lyrics"], mapped["songLyrics"])
+	collectEmbeddedMediaJSON(output, mapped["text"], currentType)
 	appendMediaFieldValues(output, MediaTypeImage, mapped["images"], mapped["image"])
 	appendMediaFieldValues(output, MediaTypeVideo, mapped["videos"], mapped["video"])
 	appendMediaFieldValues(output, MediaTypeAudio, mapped["audios"], mapped["audio"])
@@ -216,6 +217,22 @@ func collectKnownMediaFields(output Output, mapped map[string]any, currentType s
 	if urls := collectURLValues(mapped["src"]); len(urls) > 0 {
 		appendMediaByType(output, currentType, urls)
 	}
+}
+
+func collectEmbeddedMediaJSON(output Output, value any, defaultType string) {
+	text, ok := value.(string)
+	if !ok {
+		return
+	}
+	text = strings.TrimSpace(text)
+	if text == "" || (!strings.HasPrefix(text, "{") && !strings.HasPrefix(text, "[")) {
+		return
+	}
+	var payload any
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		return
+	}
+	collectMediaOutput(output, payload, defaultType, defaultType)
 }
 
 func appendMediaFieldValues(output Output, mediaType string, values ...any) {

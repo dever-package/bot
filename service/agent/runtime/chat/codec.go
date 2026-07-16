@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,10 +52,10 @@ func messageMapWithRelations(
 	if row == nil {
 		return map[string]any{}
 	}
-	output := runtimemessageoutput.Format(row.Output, artifacts)
+	output, text := runtimemessageoutput.FormatMessage(row.Output, row.Text, artifacts)
 	result := map[string]any{
 		"id": row.ID, "session_id": row.SessionID, "role": row.Role, "kind": row.Kind,
-		"text": row.Text, "content": decodeJSON(row.Content), "output": output,
+		"text": text, "content": decodeJSON(row.Content), "output": output,
 		"request_id": row.RequestID, "status": row.Status, "created_at": timeText(row.CreatedAt),
 	}
 	if hasDocument {
@@ -91,14 +92,42 @@ func artifactsByBlock(messages map[uint64][]map[string]any) runtimedocument.Arti
 	result := runtimedocument.ArtifactPayloadMap{}
 	for _, artifacts := range messages {
 		for _, artifact := range artifacts {
-			blockID, ok := artifact["block_id"].(uint64)
-			if !ok || blockID == 0 {
+			blockID := positiveUint64(artifact["block_id"])
+			if blockID == 0 {
 				continue
 			}
 			result[blockID] = append(result[blockID], artifact)
 		}
 	}
 	return result
+}
+
+func positiveUint64(value any) uint64 {
+	switch current := value.(type) {
+	case uint64:
+		return current
+	case uint:
+		return uint64(current)
+	case int:
+		if current > 0 {
+			return uint64(current)
+		}
+	case int64:
+		if current > 0 {
+			return uint64(current)
+		}
+	case float64:
+		if current > 0 {
+			return uint64(current)
+		}
+	case json.Number:
+		parsed, _ := strconv.ParseUint(string(current), 10, 64)
+		return parsed
+	case string:
+		parsed, _ := strconv.ParseUint(strings.TrimSpace(current), 10, 64)
+		return parsed
+	}
+	return 0
 }
 
 func encodeJSON(value any, fallback string) string {

@@ -37,6 +37,7 @@ export type AgentChatRunFrame = {
   error: string;
   cancelable: boolean | null;
   runVersion: number;
+  assistantMessageID: number;
   finished: boolean;
   failed: boolean;
 };
@@ -91,6 +92,7 @@ export function readAgentChatRunFrame(
     error: valueText(output.error || (failed ? frame?.msg : "")),
     cancelable: resolveRuntimeFrameCancelable(frame),
     runVersion: Number(meta.run_version || 0),
+    assistantMessageID: Number(meta.assistant_message_id || 0),
     finished,
     failed,
   };

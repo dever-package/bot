@@ -30,6 +30,7 @@ import {
 } from '@/lib/runtime-stream-output'
 import { useUploadRuleMetas } from '@/hooks/use-upload-rule-metas'
 import type { NodeItemProps } from '@/page/nodes'
+import { copyTextToClipboard } from './clipboard'
 import {
   PowerParamPopover,
   PowerParamField,
@@ -603,24 +604,4 @@ function clearRequestIDCopyTimer(timerRef: { current: number | null }) {
   }
   window.clearTimeout(timerRef.current)
   timerRef.current = null
-}
-
-async function copyTextToClipboard(value: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value)
-    return
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = value
-  textarea.setAttribute('readonly', 'true')
-  textarea.style.position = 'fixed'
-  textarea.style.left = '-9999px'
-  document.body.appendChild(textarea)
-  textarea.select()
-  const copied = document.execCommand('copy')
-  textarea.remove()
-  if (!copied) {
-    throw new Error('copy failed')
-  }
 }

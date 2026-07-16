@@ -19,19 +19,22 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { defaultPowerParamValue } from "./space-power-param";
+import {
+  defaultPowerParamValue,
+  normalizePowerParamValue,
+} from "./space-power-param";
 import { PowerParamIcon } from "./space-power-icon";
-import type { PowerParam, PowerParamSource } from "./types";
+import { CanvasReferenceEditor } from "./space-reference-editor";
+import type {
+  CanvasContentPreview,
+  CanvasReferenceContent,
+  PowerParam,
+  PowerParamSource,
+} from "./types";
 
 export { defaultPowerParamValue } from "./space-power-param";
 
-export type ComposerAssetPreview = {
-  text: string;
-  imageUrl: string;
-  videoUrl: string;
-  audioUrl: string;
-  fileUrl: string;
-};
+export type ComposerAssetPreview = CanvasContentPreview;
 
 export type ComposerAssetItem = {
   id: string;
@@ -39,6 +42,8 @@ export type ComposerAssetItem = {
   kind: string;
   role?: "content" | "material" | string;
   source: "current" | "asset";
+  refType?: "canvas_node" | "artifact";
+  refId?: number;
   output?: unknown;
   preview: ComposerAssetPreview;
   asset?: unknown;
@@ -58,7 +63,8 @@ type PromptComposerProps = {
     current: ComposerAssetItem[];
     assets: ComposerAssetItem[];
   };
-  onChange: (value: string) => void;
+  referenceContent?: CanvasReferenceContent;
+  onChange: (value: string, content?: CanvasReferenceContent) => void;
   onParamChange?: (key: string, value: unknown) => void;
   onSourceChange?: (sourceId: number) => void;
   onAssetReference?: (
@@ -102,6 +108,7 @@ export function PromptComposer({
   params = [],
   paramValues = {},
   assetLibrary = { current: [], assets: [] },
+  referenceContent,
   onChange,
   onParamChange,
   onSourceChange,
@@ -127,6 +134,7 @@ export function PromptComposer({
     (source) =>
       source.target_id === selectedSourceId || source.id === selectedSourceId,
   );
+  const referenceItems = assetLibrary.current;
 
   useEffect(() => {
     if (disabled || running) {
@@ -184,22 +192,15 @@ export function PromptComposer({
         ) : null}
 
         <div className="ws-prompt-editor-shell">
-          <textarea
-            className="ws-prompt-editor"
+          <CanvasReferenceEditor
+            className="ws-prompt-reference-editor nodrag nopan"
             value={value}
+            content={referenceContent}
             disabled={disabled || running}
             placeholder={placeholder}
-            onChange={(event) => onChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (
-                (event.metaKey || event.ctrlKey) &&
-                event.key === "Enter" &&
-                !running
-              ) {
-                event.preventDefault();
-                onSubmit();
-              }
-            }}
+            items={referenceItems}
+            onChange={onChange}
+            onSubmit={!running ? onSubmit : undefined}
           />
         </div>
       </div>
@@ -924,7 +925,7 @@ function ParamEditor({
               type="button"
               className={`ws-prompt-menu-item ${active ? "is-active" : ""}`}
               onClick={() => {
-                onChange(option.value);
+                onChange(normalizePowerParamValue(param, option.value));
                 onClose();
               }}
             >
@@ -955,7 +956,7 @@ function ParamEditor({
                 } else {
                   next.add(option.value);
                 }
-                onChange(Array.from(next));
+                onChange(normalizePowerParamValue(param, Array.from(next)));
               }}
             >
               <span>{option.name || option.value}</span>

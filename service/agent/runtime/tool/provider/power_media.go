@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	energonmodel "github.com/dever-package/bot/model/energon"
+	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
@@ -21,12 +22,6 @@ const (
 type mediaCountPlan struct {
 	key       string
 	promptKey string
-}
-
-type powerBatchResult struct {
-	index  int
-	output botprotocol.Output
-	err    error
 }
 
 func buildMediaCountPlan(power energonmodel.Power, params []energonservice.PowerParam) mediaCountPlan {
@@ -148,28 +143,31 @@ func executeMediaPower(
 
 	batchCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	results := make(chan powerBatchResult, count)
 	serializedOutput := serializeOutputHandler(onOutput)
-	for index := 0; index < count; index++ {
-		go func(index int) {
-			currentInput := mediaVariantInput(power, input, promptKey, index, count)
-			output, err := executePower(batchCtx, uuid.NewString(), power.Key, currentInput, targetID, gateway, transport, serializedOutput)
-			results <- powerBatchResult{index: index, output: output, err: err}
-		}(index)
-	}
-
 	outputs := make([]botprotocol.Output, count)
+	var resultMutex sync.Mutex
 	var firstErr error
+	var group runtimeasync.Group
 	for index := 0; index < count; index++ {
-		result := <-results
-		if result.err != nil {
-			if firstErr == nil {
-				firstErr = result.err
-				cancel()
+		currentIndex := index
+		group.Go("并行生成素材", func() error {
+			currentInput := mediaVariantInput(power, input, promptKey, currentIndex, count)
+			output, err := executePower(batchCtx, uuid.NewString(), power.Key, currentInput, targetID, gateway, transport, serializedOutput)
+			if err != nil {
+				resultMutex.Lock()
+				if firstErr == nil {
+					firstErr = err
+					cancel()
+				}
+				resultMutex.Unlock()
+				return err
 			}
-			continue
-		}
-		outputs[result.index] = result.output
+			outputs[currentIndex] = output
+			return nil
+		})
+	}
+	if err := group.Wait(); firstErr == nil {
+		firstErr = err
 	}
 	if firstErr != nil {
 		return nil, firstErr

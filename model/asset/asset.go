@@ -103,6 +103,7 @@ type Asset struct {
 	TeamID      uint64    `dorm:"type:bigint;not null;default:0;comment:团队"`
 	FlowID      uint64    `dorm:"type:bigint;not null;default:0;comment:工作流"`
 	AssetCateID uint64    `dorm:"type:bigint;not null;default:0;comment:资产分类"`
+	NodeKey     string    `dorm:"type:varchar(128);not null;default:'';comment:画布节点"`
 	Name        string    `dorm:"type:varchar(128);not null;comment:名称"`
 	Kind        string    `dorm:"type:varchar(32);not null;default:'text';comment:产物类型"`
 	Role        string    `dorm:"type:varchar(32);not null;default:'content';comment:资产角色"`
@@ -121,6 +122,7 @@ type AssetIndex struct {
 	AssetCateStatus struct{} `index:"asset_cate_id,status,sort,id"`
 	ProjectRole     struct{} `index:"project_id,role,status,sort,id"`
 	AssetCateRole   struct{} `index:"asset_cate_id,role,status,sort,id"`
+	ProjectNodeRole struct{} `index:"project_id,asset_cate_id,role,node_key,status"`
 	Version         struct{} `index:"version_id"`
 }
 

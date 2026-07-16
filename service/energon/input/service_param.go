@@ -48,7 +48,7 @@ func mapDirectOptionParamValue(
 			if !ok {
 				return nil, false, fmt.Errorf("参数“%s”的选项“%s”不存在", ServiceParamDisplayName(serviceParam, param), ValueText(item))
 			}
-			result = append(result, option.Value)
+			result = append(result, ScalarByType(param.ValueType, option.Value))
 		}
 		return result, len(result) > 0, nil
 	}
@@ -57,7 +57,7 @@ func mapDirectOptionParamValue(
 	if !ok {
 		return nil, false, fmt.Errorf("参数“%s”的选项“%s”不存在", ServiceParamDisplayName(serviceParam, param), ValueText(value))
 	}
-	return option.Value, true, nil
+	return ScalarByType(param.ValueType, option.Value), true, nil
 }
 
 func mapOptionParamValue(

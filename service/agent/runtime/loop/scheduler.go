@@ -8,11 +8,12 @@ import (
 
 	dlog "github.com/shemic/dever/log"
 
+	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
 	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
 )
 
 const (
-	runtimeWorkerConcurrency = 4
 	runtimePollInterval      = time.Second
 	runtimeEnqueueFallback   = 30 * time.Second
 	runtimeLeaseDuration     = 45 * time.Second
@@ -99,7 +100,7 @@ func defaultRunDispatcher(executor RunExecutor, backlog RunBacklog) RunDispatche
 			queueExecutorAdapter{executor: executor},
 			runtimequeue.Config{
 				Name:         "agent_run",
-				Concurrency:  runtimeWorkerConcurrency,
+				Concurrency:  runWorkerConcurrency(),
 				PollInterval: runtimePollInterval,
 				ShouldIgnore: func(err error) bool {
 					return errors.Is(err, errRunLeaseLost)
@@ -116,6 +117,18 @@ func defaultRunDispatcher(executor RunExecutor, backlog RunBacklog) RunDispatche
 		)
 	})
 	return defaultDispatcher
+}
+
+func runWorkerConcurrency() int {
+	config := agentmodel.DefaultRuntimeConfig()
+	ctx, cancel := maintenanceContext()
+	defer cancel()
+	if row := agentmodel.NewRuntimeConfigModel().Find(ctx, map[string]any{
+		"id": agentmodel.DefaultRuntimeConfigID,
+	}); row != nil {
+		config = runtimeconfig.WithDefaults(*row)
+	}
+	return config.RunWorkerConcurrency
 }
 
 func logDispatchDeliveryError(runID uint64, err error) {

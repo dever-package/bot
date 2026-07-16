@@ -51,6 +51,7 @@ func parseCurl(raw string) (httpRequestSpec, error) {
 		token := fields[index]
 		switch {
 		case token == "-s" || token == "-S" || token == "-L" || token == "--silent" || token == "--show-error" || token == "--location":
+		case isPassiveCurlFlags(token):
 		case token == "-G" || token == "--get":
 			spec.Method = http.MethodGet
 		case token == "-I" || token == "--head":
@@ -109,6 +110,18 @@ func parseCurl(raw string) (httpRequestSpec, error) {
 	}
 	spec.URL = parsed.String()
 	return spec, nil
+}
+
+func isPassiveCurlFlags(token string) bool {
+	if len(token) < 3 || !strings.HasPrefix(token, "-") || strings.HasPrefix(token, "--") {
+		return false
+	}
+	for _, flag := range token[1:] {
+		if flag != 's' && flag != 'S' && flag != 'L' {
+			return false
+		}
+	}
+	return true
 }
 
 func splitCurl(raw string) ([]string, error) {

@@ -799,10 +799,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
 
     const finalOutput = normalizeRuntimeFrameOutput(frame?.output, frame);
     const finalInteraction = normalizeOutputInteraction(finalOutput);
-    const finalText =
-      valueText(finalOutput.text) ||
-      valueText(frame?.msg) ||
-      "智能体已返回结果。";
+    const finalText = agentResultText(finalOutput) || valueText(frame?.msg);
     const finalMessage: AgentMessage = {
       ...message,
       text: finalText,
@@ -1189,9 +1186,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
             const finalRequestID =
               valueText(frame?.request_id) || activeRequestID || requestID;
             const finalText =
-              valueText(finalOutput.text) ||
-              valueText(frame?.msg) ||
-              "智能体已返回结果。";
+              agentResultText(finalOutput) || valueText(frame?.msg);
             saveAssistantFinalMessage(
               {
                 ...assistantMessage,
@@ -1322,9 +1317,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         const finalOutput = normalizeRuntimeFrameOutput(frame?.output, frame);
         const finalInteraction = normalizeOutputInteraction(finalOutput);
         const finalText =
-          valueText(finalOutput.text) ||
-          valueText(frame?.msg) ||
-          "智能体已返回结果。";
+          agentResultText(finalOutput) || valueText(frame?.msg);
         saveFinal(
           {
             ...assistantMessage,

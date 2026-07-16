@@ -8,14 +8,16 @@ import (
 )
 
 func scriptCommand(path string, args []string) (string, []string, error) {
-	return scriptCommandForPath(path, path, args)
+	return ScriptCommandForPath(path, path, args)
 }
 
-func scriptCommandForPath(runPath string, checkPath string, args []string) (string, []string, error) {
+// ScriptCommandForPath resolves a script command while checking permissions on
+// the host path. runPath may point to the same file inside a sandbox.
+func ScriptCommandForPath(runPath string, checkPath string, args []string) (string, []string, error) {
 	ext := strings.ToLower(filepath.Ext(runPath))
 	switch ext {
 	case ".sh":
-		return "/bin/sh", append([]string{runPath}, args...), nil
+		return "/bin/bash", append([]string{runPath}, args...), nil
 	case ".bash":
 		return "/bin/bash", append([]string{runPath}, args...), nil
 	case ".js":

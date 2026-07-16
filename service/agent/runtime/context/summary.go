@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
@@ -25,7 +26,15 @@ type Compactor struct {
 	gateway energonservice.GatewayService
 }
 
-var sessionCompactionLocks sync.Map
+type compactionLockEntry struct {
+	mutex      sync.Mutex
+	references int
+}
+
+var sessionCompactionLocks = struct {
+	sync.Mutex
+	entries map[uint64]*compactionLockEntry
+}{entries: make(map[uint64]*compactionLockEntry)}
 
 func NewCompactor(gateway energonservice.GatewayService) Compactor {
 	return Compactor{gateway: gateway}
@@ -40,9 +49,8 @@ func (c Compactor) Compact(ctx context.Context, sessionID uint64, powerKey strin
 		return false
 	}
 
-	lock := compactionLock(sessionID)
-	lock.Lock()
-	defer lock.Unlock()
+	release := acquireCompactionLock(sessionID)
+	defer release()
 
 	session := agentmodel.NewSessionModel().Find(ctx, map[string]any{
 		"id":     sessionID,
@@ -118,9 +126,26 @@ func needsCompaction(ctx context.Context, sessionID uint64, threshold int) bool 
 	return len(rows) > threshold
 }
 
-func compactionLock(sessionID uint64) *sync.Mutex {
-	lock, _ := sessionCompactionLocks.LoadOrStore(sessionID, &sync.Mutex{})
-	return lock.(*sync.Mutex)
+func acquireCompactionLock(sessionID uint64) func() {
+	sessionCompactionLocks.Lock()
+	entry := sessionCompactionLocks.entries[sessionID]
+	if entry == nil {
+		entry = &compactionLockEntry{}
+		sessionCompactionLocks.entries[sessionID] = entry
+	}
+	entry.references++
+	sessionCompactionLocks.Unlock()
+
+	entry.mutex.Lock()
+	return func() {
+		entry.mutex.Unlock()
+		sessionCompactionLocks.Lock()
+		entry.references--
+		if entry.references == 0 {
+			delete(sessionCompactionLocks.entries, sessionID)
+		}
+		sessionCompactionLocks.Unlock()
+	}
 }
 
 func unsummarizedMessages(ctx context.Context, session agentmodel.Session) []*agentmodel.Message {
@@ -147,7 +172,9 @@ func summarySource(previous string, rows []*agentmodel.Message) string {
 		if row == nil || strings.TrimSpace(row.Text) == "" {
 			continue
 		}
-		message := strings.TrimSpace(row.Role) + ": " + compactMessageText(row.Text)
+		message := strings.TrimSpace(row.Role) + ": " + compactMessageText(
+			runtimemessageoutput.NormalizeText(row.Text),
+		)
 		messages = append(messages, message)
 	}
 	if len(messages) > 0 {

@@ -48,15 +48,20 @@ export function useAgentChatDocumentStreams({
       return;
     }
 
+    const documents = new Map<number, AgentChatDocument>();
     const documentsToSync = new Map<number, AgentChatDocument>();
     for (const message of messages) {
-      if (message.document && needsAgentChatDocumentSync(message.document)) {
+      if (!message.document) {
+        continue;
+      }
+      documents.set(message.document.id, message.document);
+      if (needsAgentChatDocumentSync(message.document)) {
         documentsToSync.set(message.document.id, message.document);
       }
     }
 
     for (const [documentID, watch] of watches) {
-      const document = documentsToSync.get(documentID);
+      const document = documents.get(documentID);
       if (!document || watch.sessionID !== sessionID) {
         watch.controller.abort();
         watches.delete(documentID);
@@ -100,6 +105,7 @@ async function watchDocument(input: {
 }) {
   const { watch, watches, blockMs, runtimeApi, updateDocument } = input;
   const documentID = watch.document.id;
+  let streamController: AbortController | null = null;
   const publish = (document: AgentChatDocument | undefined) => {
     if (!document || watch.controller.signal.aborted) {
       return;
@@ -107,42 +113,57 @@ async function watchDocument(input: {
     watch.document = document;
     updateDocument(watch.sessionID, documentID, document);
   };
+  const syncSnapshot = async () => {
+    const snapshot = await loadAgentChatDocument(
+      runtimeApi.document,
+      documentID,
+    );
+    publish(mergeAgentChatDocument(watch.document, snapshot));
+    return snapshot;
+  };
+  const startEventStream = () => {
+    if (streamController || watch.controller.signal.aborted) {
+      return;
+    }
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    streamController = controller;
+    watch.controller.signal.addEventListener("abort", abort, { once: true });
+    void watchRuntimeStream<Record<string, unknown>>({
+      streamApi: runtimeApi.documentStream,
+      requestID: `document:${documentID}`,
+      blockMs,
+      signal: controller.signal,
+      stopOnResult: false,
+      recoverOnError: true,
+      fallbackToPoll: false,
+      onFrame: (frame) => {
+        const output = documentFrameOutput(frame);
+        publish(mergeAgentChatDocumentEvent(watch.document, output));
+        if (documentEventName(output) === "document_complete") {
+          void syncSnapshot().catch(() => undefined);
+        }
+      },
+    })
+      .catch(() => undefined)
+      .finally(() => {
+        watch.controller.signal.removeEventListener("abort", abort);
+        if (streamController === controller) {
+          streamController = null;
+        }
+      });
+  };
 
   try {
     while (!watch.controller.signal.aborted) {
       try {
-        const snapshot = await loadAgentChatDocument(
-          runtimeApi.document,
-          documentID,
-        );
-        publish(mergeAgentChatDocument(watch.document, snapshot));
-        if (!isAgentChatDocumentPending(watch.document)) {
+        const snapshot = await syncSnapshot();
+        // Stream events only carry incremental fields. A complete document
+        // snapshot is the source of truth for terminal state and media URLs.
+        if (!isAgentChatDocumentPending(snapshot)) {
           return;
         }
-
-        await watchRuntimeStream<Record<string, unknown>>({
-          streamApi: runtimeApi.documentStream,
-          requestID: `document:${documentID}`,
-          blockMs,
-          signal: watch.controller.signal,
-          stopOnResult: false,
-          recoverOnError: true,
-          fallbackToPoll: false,
-          onFrame: (frame) => {
-            const output = documentFrameOutput(frame);
-            publish(mergeAgentChatDocumentEvent(watch.document, output));
-            return isAgentChatDocumentPending(watch.document)
-              ? undefined
-              : false;
-          },
-        });
-        if (watch.controller.signal.aborted) {
-          return;
-        }
-        publish(await loadAgentChatDocument(runtimeApi.document, documentID));
-        if (!isAgentChatDocumentPending(watch.document)) {
-          return;
-        }
+        startEventStream();
       } catch {
         if (watch.controller.signal.aborted) {
           return;
@@ -151,6 +172,7 @@ async function watchDocument(input: {
       await waitForDocumentRetry(watch.controller.signal);
     }
   } finally {
+    streamController?.abort();
     if (watches.get(documentID) === watch) {
       watches.delete(documentID);
     }
@@ -177,6 +199,12 @@ function documentFrameOutput(
   frame: RuntimeStreamFrame<Record<string, unknown>>,
 ) {
   return normalizeRuntimeFrameOutput(frame.output, frame);
+}
+
+function documentEventName(output: Record<string, unknown>) {
+  return String(output.event || output.semantic_event || "")
+    .trim()
+    .toLowerCase();
 }
 
 function abortDocumentWatches(watches: Map<number, DocumentWatch>) {

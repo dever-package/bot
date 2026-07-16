@@ -9,17 +9,12 @@ import (
 )
 
 func (s Service) compactSessionContextAsync(sessionID uint64) {
-	if sessionID == 0 {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+	submitChatMaintenance("压缩会话上下文", sessionID, 30*time.Second, func(ctx context.Context) {
 		powerKey := s.sessionPowerKey(ctx, sessionID)
 		if powerKey != "" {
 			s.compactor.Compact(ctx, sessionID, powerKey, false)
 		}
-	}()
+	})
 }
 
 func (s Service) sessionPowerKey(ctx context.Context, sessionID uint64) string {

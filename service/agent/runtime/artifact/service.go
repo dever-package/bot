@@ -9,8 +9,6 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
-const mediaFilesKey = "media_files"
-
 type BatchRequest struct {
 	SessionID         uint64
 	MessageID         uint64
@@ -102,47 +100,46 @@ func (s Service) BeginBatch(ctx context.Context, request BatchRequest) ([]agentm
 	return rows, nil
 }
 
-func (s Service) CompleteBatch(ctx context.Context, pending []agentmodel.Artifact, output map[string]any) map[string]any {
-	result := cloneMap(output)
-	files := mapList(result[mediaFilesKey])
-	delete(result, mediaFilesKey)
-	for _, key := range []string{"images", "videos", "audios", "files"} {
+func (s Service) CompleteBatch(ctx context.Context, pending []agentmodel.Artifact, output any) (map[string]any, error) {
+	result := generatedOutputMap(output)
+	if len(pending) == 0 {
+		return result, nil
+	}
+	files := generatedFiles(result)
+	if len(files) < len(pending) {
+		return result, fmt.Errorf("素材生成结果数量不足: 需要 %d 个，实际返回 %d 个", len(pending), len(files))
+	}
+	fileIDs := make([]uint64, len(pending))
+	for index := range pending {
+		fileIDs[index] = uint64Value(firstValue(files[index], "file_id", "id"))
+		if fileIDs[index] == 0 {
+			return result, fmt.Errorf("第 %d 个素材没有有效文件ID", index+1)
+		}
+	}
+	for _, key := range generatedFileKeys {
 		delete(result, key)
 	}
 	rows := make([]agentmodel.Artifact, 0, len(pending))
 	for index, current := range pending {
-		if index >= len(files) {
-			rows = append(rows, s.repository.update(ctx, current.ID, map[string]any{
-				"status": agentmodel.ArtifactStatusFailed,
-				"error":  "生成结果没有返回对应文件",
-			}))
-			continue
-		}
 		file := files[index]
-		fileID := uint64Value(firstValue(file, "file_id", "id"))
-		if fileID == 0 {
-			rows = append(rows, s.repository.update(ctx, current.ID, map[string]any{
-				"status": agentmodel.ArtifactStatusFailed,
-				"error":  "生成结果没有有效文件ID",
-			}))
-			continue
-		}
 		name := textValue(file["name"])
 		values := map[string]any{
-			"file_id": fileID,
+			"file_id": fileIDs[index],
 			"status":  agentmodel.ArtifactStatusReady,
 			"error":   "",
 		}
 		if name != "" {
 			values["name"] = name
 		}
-		rows = append(rows, s.repository.update(ctx, current.ID, values))
+		updated := s.repository.update(ctx, current.ID, values)
+		if updated.ID == 0 || updated.FileID != fileIDs[index] || updated.Status != agentmodel.ArtifactStatusReady {
+			return result, fmt.Errorf("保存第 %d 个素材结果失败", index+1)
+		}
+		rows = append(rows, updated)
 	}
-	if len(rows) > 0 {
-		ensureReadySeriesMaster(ctx, rows)
-		result["artifacts"] = Payloads(ctx, rows)
-	}
-	return result
+	ensureReadySeriesMaster(ctx, rows)
+	result["artifacts"] = Payloads(ctx, rows)
+	return result, nil
 }
 
 func (s Service) FailBatch(ctx context.Context, pending []agentmodel.Artifact, message string) []map[string]any {

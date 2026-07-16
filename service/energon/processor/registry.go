@@ -67,8 +67,8 @@ func (r *Registry) Options() []map[string]any {
 	options := make([]map[string]any, 0, len(manifests))
 	for _, manifest := range manifests {
 		options = append(options, map[string]any{
-			"id":    manifest.Key,
-			"value": manifest.Name,
+			"id":   manifest.Key,
+			"name": manifest.Name,
 		})
 	}
 	return options

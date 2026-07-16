@@ -10,7 +10,9 @@ import (
 
 func buildPrompt(ctx context.Context, request AssembleRequest, session agentmodel.Session) string {
 	sections := basePromptSections(request.CategoryPrompt, request.Agent.Prompt)
-	sections = appendPromptSection(sections, "长期记忆", runtimeMemoryText(ctx, session.ID, request.Input))
+	if request.IncludeMemory {
+		sections = appendPromptSection(sections, "长期记忆", runtimeMemoryText(ctx, session, request.Input))
+	}
 	sections = appendPromptSection(sections, "较早对话摘要", session.ContextSummary)
 	return strings.Join(sections, "\n\n")
 }

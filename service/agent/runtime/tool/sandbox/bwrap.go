@@ -18,7 +18,7 @@ func (bwrapRunner) Run(ctx context.Context, config Config, req Request) (Result,
 	}
 	hostScriptPath := filepath.Join(req.SkillRoot, filepath.FromSlash(req.ScriptRelative))
 	sandboxScriptPath := "/skill/" + strings.TrimPrefix(filepath.ToSlash(req.ScriptRelative), "/")
-	commandName, commandArgs, err := scriptCommandForPath(sandboxScriptPath, hostScriptPath, req.Args)
+	commandName, commandArgs, err := ScriptCommandForPath(sandboxScriptPath, hostScriptPath, req.Args)
 	if err != nil {
 		return Result{}, err
 	}
@@ -111,9 +111,12 @@ func bwrapArgs(config Config, req Request, commandName string, commandArgs []str
 		"/etc/nsswitch.conf",
 		"/etc/passwd",
 		"/etc/group",
+		"/etc/hosts",
+		"/etc/gai.conf",
 		"/etc/ssl/certs",
 		"/etc/ca-certificates",
 	})
+	args = appendResolvedReadOnlyBind(args, "/etc/resolv.conf", "/etc/resolv.conf")
 	args = append(args,
 		"--proc", "/proc",
 		"--dev", "/dev",
@@ -155,6 +158,17 @@ func appendReadOnlyBinds(args []string, paths []string) []string {
 		}
 	}
 	return args
+}
+
+func appendResolvedReadOnlyBind(args []string, source string, target string) []string {
+	resolved, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		return args
+	}
+	if _, err := os.Stat(resolved); err != nil {
+		return args
+	}
+	return append(args, "--ro-bind", resolved, target)
 }
 
 func isBwrapStartupError(stderr string) bool {

@@ -27,7 +27,7 @@ type Run struct {
 	Version         int        `dorm:"type:int;not null;default:1;comment:调度版本"`
 	StepCount       int        `dorm:"type:int;not null;default:0;comment:步骤数"`
 	Latency         int64      `dorm:"type:bigint;not null;default:0;comment:耗时"`
-	AvailableAt     time.Time  `dorm:"type:timestamp;not null;comment:下次可执行时间"`
+	AvailableAt     time.Time  `dorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP;comment:下次可执行时间"`
 	LeaseExpiresAt  *time.Time `dorm:"null;comment:租约过期时间"`
 	HeartbeatAt     *time.Time `dorm:"null;comment:心跳时间"`
 	StartedAt       time.Time  `dorm:"comment:开始时间"`

@@ -112,12 +112,7 @@ export function CanvasNodeContentView({
 }
 
 export function contentOutputNeedsRenderer(output: unknown) {
-  const normalized = normalizeEnergonOutput?.(output);
-  const items = Array.isArray(normalized)
-    ? normalized
-    : Array.isArray(output)
-      ? output
-      : [output];
+  const items = normalizedContentItems(output);
   if (items.length > 1) {
     return true;
   }
@@ -135,6 +130,55 @@ export function contentOutputNeedsRenderer(output: unknown) {
       item.json,
     ].some(hasCanvasContent);
   });
+}
+
+export function contentOutputHasMedia(output: unknown) {
+  return normalizedContentItems(output).some((item) =>
+    mediaContentExists(item, new Set(), 0),
+  );
+}
+
+function normalizedContentItems(output: unknown): unknown[] {
+  const normalized = normalizeEnergonOutput?.(output);
+  if (Array.isArray(normalized)) {
+    return normalized;
+  }
+  return Array.isArray(output) ? output : [output];
+}
+
+function mediaContentExists(
+  value: unknown,
+  seen: Set<object>,
+  depth: number,
+): boolean {
+  if (value == null || depth > 12) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => mediaContentExists(item, seen, depth + 1));
+  }
+  if (typeof value !== "object") {
+    return false;
+  }
+  if (seen.has(value)) {
+    return false;
+  }
+  seen.add(value);
+
+  const record = value as Record<string, unknown>;
+  if (
+    ["editorMediaImage", "editorMediaVideo", "editorMediaAudio"].includes(
+      String(record.type || ""),
+    )
+  ) {
+    return true;
+  }
+  if ([record.images, record.videos, record.audios].some(hasCanvasContent)) {
+    return true;
+  }
+  return [record.rich, record.content, record.output, record.result].some(
+    (item) => mediaContentExists(item, seen, depth + 1),
+  );
 }
 
 function hasCanvasContent(value: unknown) {

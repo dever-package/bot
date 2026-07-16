@@ -9,7 +9,10 @@ import (
 
 	"github.com/google/uuid"
 
+	dlog "github.com/shemic/dever/log"
 	"github.com/shemic/dever/server"
+
+	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
 )
 
 type InternalRequest struct {
@@ -61,6 +64,7 @@ func (s Service) RunInternal(ctx context.Context, request InternalRequest) (Inte
 	execution.version = 2
 	notifyRunCreated(request.OnRunCreated, execution.runID, execution.requestID)
 	now := time.Now()
+	execution.claimedAt = now
 	started, err := s.repository.StartDirectRun(ctx, execution.runID, execution.workerID, now, now.Add(runtimeLeaseDuration))
 	if err != nil || !started {
 		if err == nil {
@@ -71,6 +75,23 @@ func (s Service) RunInternal(ctx context.Context, request InternalRequest) (Inte
 		return InternalResult{}, err
 	}
 	controller := s.runs.Start(requestID, ctx, chatTimeout(execution.agent.TimeoutSeconds))
+	heartbeatDone := make(chan struct{})
+	defer close(heartbeatDone)
+	runtimeasync.Start("内部智能体运行租约心跳", func() {
+		s.heartbeatRun(controller, execution, heartbeatDone)
+	}, func(heartbeatErr error) {
+		controller.Stop("lease_lost")
+		dlog.ErrorFields("agent_internal_heartbeat", "内部智能体运行心跳异常", dlog.Fields{
+			"run_id": execution.runID, "request_id": execution.requestID, "error": heartbeatErr.Error(),
+		})
+	})
+	if err := s.mountExecutionTools(controller.Context(), &execution, request.Server, nil); err != nil {
+		controller.Stop("fail")
+		s.runs.Remove(requestID)
+		s.failExecutionStart(execution, err)
+		execution.close()
+		return InternalResult{}, err
+	}
 	if _, err := s.startExecutionStream(ctx, execution); err != nil {
 		controller.Stop("fail")
 		s.runs.Remove(requestID)
@@ -78,10 +99,7 @@ func (s Service) RunInternal(ctx context.Context, request InternalRequest) (Inte
 		execution.close()
 		return InternalResult{}, err
 	}
-	heartbeatDone := make(chan struct{})
-	go s.heartbeatRun(controller, execution, heartbeatDone)
 	s.run(controller, execution)
-	close(heartbeatDone)
 	result, err := waitInternalCompletion(completion, controller.Context())
 	if err != nil {
 		return InternalResult{

@@ -38,9 +38,9 @@ func ParseStreamRequestID(requestID string) (uint64, error) {
 	return documentID, nil
 }
 
-func (writer streamWriter) write(ctx context.Context, documentID uint64, event string, output map[string]any) {
+func (writer streamWriter) write(ctx context.Context, documentID uint64, event string, output map[string]any) error {
 	if documentID == 0 {
-		return
+		return nil
 	}
 	if output == nil {
 		output = map[string]any{}
@@ -48,7 +48,8 @@ func (writer streamWriter) write(ctx context.Context, documentID uint64, event s
 	output["event"] = event
 	output["document_id"] = documentID
 	requestID := StreamRequestID(documentID)
-	_, _ = writer.store.WritePayload(ctx, requestID, frontstream.ResponsePayload(requestID, "stream", output, "", 1))
+	_, err := writer.store.WritePayload(ctx, requestID, frontstream.ResponsePayload(requestID, "stream", output, "", 1))
+	return err
 }
 
 func (s Service) ReadStream(ctx context.Context, documentID uint64, lastID string, count int64, block time.Duration) ([]frontstream.Entry, error) {
@@ -56,5 +57,5 @@ func (s Service) ReadStream(ctx context.Context, documentID uint64, lastID strin
 }
 
 func (s Service) Publish(ctx context.Context, documentID uint64, event string, output map[string]any) {
-	s.streams.write(ctx, documentID, event, output)
+	_ = s.streams.write(ctx, documentID, event, output)
 }

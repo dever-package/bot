@@ -7,9 +7,8 @@ import {
   type ReactNode,
 } from "react";
 import {
-  ArrowDown,
-  ArrowUp,
   Check,
+  GripVertical,
   Loader2,
   Minus,
   Plus,
@@ -20,10 +19,25 @@ import {
   normalizeStoryboardOrder,
   storyboardTotalDuration,
   type StoryboardDocument,
+  type StoryboardReferenceField,
   type StoryboardShot,
 } from "./space-storyboard";
+import type { ComposerAssetItem } from "./space-prompt-composer";
+import {
+  reconcileCanvasReferenceContent,
+  type CanvasReferenceTarget,
+} from "./space-reference-content";
+import type { CanvasReferenceContent } from "./types";
+import {
+  CanvasReferenceEditorWithAdapter,
+  CanvasReferenceTextWithAdapter,
+  useCanvasReferenceAdapter,
+  type CanvasReferenceAdapter,
+} from "./space-reference-editor";
 
 export type StoryboardSaveStatus = "saved" | "typing" | "saving" | "error";
+
+const EMPTY_REFERENCE_ITEMS: ComposerAssetItem[] = [];
 
 export function StoryboardView({
   storyboard,
@@ -34,6 +48,7 @@ export function StoryboardView({
   saveStatus: externalSaveStatus,
   showSaveStatus = true,
   showMetrics = true,
+  referenceItems = EMPTY_REFERENCE_ITEMS,
 }: {
   storyboard: StoryboardDocument;
   editable?: boolean;
@@ -43,14 +58,20 @@ export function StoryboardView({
   saveStatus?: StoryboardSaveStatus;
   showSaveStatus?: boolean;
   showMetrics?: boolean;
+  referenceItems?: ComposerAssetItem[];
 }) {
   const externalSignature = useMemo(
     () => JSON.stringify(storyboard),
     [storyboard],
   );
   const [internalDraft, setInternalDraft] = useState(storyboard);
-  const [saveStatus, setSaveStatus] =
-    useState<StoryboardSaveStatus>("saved");
+  const [saveStatus, setSaveStatus] = useState<StoryboardSaveStatus>("saved");
+  const [activeFieldId, setActiveFieldId] = useState("");
+  const [draggedShotId, setDraggedShotId] = useState("");
+  const [dragOverShotId, setDragOverShotId] = useState("");
+  const [dragPlacement, setDragPlacement] = useState<"before" | "after">(
+    "before",
+  );
   const draftRef = useRef(storyboard);
   const dirtyRef = useRef(false);
   const revisionRef = useRef(0);
@@ -62,6 +83,7 @@ export function StoryboardView({
   const draft = controlled ? storyboard : internalDraft;
   const canAutoSave = editable && !disabled && !controlled && Boolean(onSave);
   const canEdit = editable && !disabled && Boolean(onChange || onSave);
+  const referenceAdapter = useCanvasReferenceAdapter(referenceItems);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -133,7 +155,10 @@ export function StoryboardView({
       return;
     }
     const current = controlled ? storyboard : draftRef.current;
-    const next = normalizeStoryboardOrder(updater(current));
+    const next = withStoryboardReferenceContents(
+      normalizeStoryboardOrder(updater(current)),
+      referenceAdapter.options,
+    );
     draftRef.current = next;
     if (controlled) {
       onChange?.(next);
@@ -145,10 +170,7 @@ export function StoryboardView({
     setSaveStatus("typing");
   };
 
-  const updateShot = (
-    index: number,
-    patch: Partial<StoryboardShot>,
-  ) => {
+  const updateShot = (index: number, patch: Partial<StoryboardShot>) => {
     updateDraft((current) => ({
       ...current,
       shots: current.shots.map((shot, shotIndex) =>
@@ -157,14 +179,28 @@ export function StoryboardView({
     }));
   };
 
-  const moveShot = (index: number, offset: -1 | 1) => {
+  const reorderShot = (
+    sourceId: string,
+    targetId: string,
+    placement: "before" | "after",
+  ) => {
+    if (!sourceId || !targetId || sourceId === targetId) {
+      return;
+    }
     updateDraft((current) => {
-      const targetIndex = index + offset;
-      if (targetIndex < 0 || targetIndex >= current.shots.length) {
+      const sourceIndex = current.shots.findIndex(
+        (shot) => shot.id === sourceId,
+      );
+      if (sourceIndex < 0) {
         return current;
       }
       const shots = [...current.shots];
-      [shots[index], shots[targetIndex]] = [shots[targetIndex], shots[index]];
+      const [source] = shots.splice(sourceIndex, 1);
+      const targetIndex = shots.findIndex((shot) => shot.id === targetId);
+      if (targetIndex < 0) {
+        return current;
+      }
+      shots.splice(targetIndex + (placement === "after" ? 1 : 0), 0, source);
       return { ...current, shots };
     });
   };
@@ -209,14 +245,13 @@ export function StoryboardView({
           <div className="ws-storyboard-head-meta">
             {showMetrics ? (
               <span>
-                {draft.shots.length} 个镜头 · {storyboardTotalDuration(draft)} 秒
+                {draft.shots.length} 个镜头 · {storyboardTotalDuration(draft)}{" "}
+                秒
               </span>
             ) : null}
             {canEdit && showSaveStatus ? (
               <StoryboardSaveState
-                status={
-                  controlled ? externalSaveStatus || "saved" : saveStatus
-                }
+                status={controlled ? externalSaveStatus || "saved" : saveStatus}
               />
             ) : null}
           </div>
@@ -233,31 +268,68 @@ export function StoryboardView({
               <th className="is-camera">运镜</th>
               <th className="is-speech">台词 / 旁白</th>
               <th className="is-sound">音效 / 配乐</th>
+              {canEdit ? <th className="is-prompt">视频提示词</th> : null}
               {canEdit ? <th className="is-actions" aria-label="操作" /> : null}
             </tr>
           </thead>
           <tbody>
             {draft.shots.map((shot, index) => (
-              <tr key={shot.id || `shot-${index + 1}`}>
+              <tr
+                key={shot.id || `shot-${index + 1}`}
+                className={`${draggedShotId === shot.id ? "is-dragging" : ""} ${dragOverShotId === shot.id ? `is-drag-over-${dragPlacement}` : ""}`.trim()}
+                onDragOver={
+                  canEdit && !disabled
+                    ? (event) => {
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "move";
+                        setDragOverShotId(shot.id);
+                        const bounds =
+                          event.currentTarget.getBoundingClientRect();
+                        setDragPlacement(
+                          event.clientY < bounds.top + bounds.height / 2
+                            ? "before"
+                            : "after",
+                        );
+                      }
+                    : undefined
+                }
+                onDrop={
+                  canEdit && !disabled
+                    ? (event) => {
+                        event.preventDefault();
+                        reorderShot(draggedShotId, shot.id, dragPlacement);
+                        setDraggedShotId("");
+                        setDragOverShotId("");
+                        setDragPlacement("before");
+                      }
+                    : undefined
+                }
+              >
                 <td className="is-order">
                   <span>{index + 1}</span>
                   {canEdit ? (
-                    <div className="ws-storyboard-order-actions">
-                      <StoryboardIconButton
-                        label="上移镜头"
-                        disabled={disabled || index === 0}
-                        onClick={() => moveShot(index, -1)}
-                      >
-                        <ArrowUp size={12} />
-                      </StoryboardIconButton>
-                      <StoryboardIconButton
-                        label="下移镜头"
-                        disabled={disabled || index === draft.shots.length - 1}
-                        onClick={() => moveShot(index, 1)}
-                      >
-                        <ArrowDown size={12} />
-                      </StoryboardIconButton>
-                    </div>
+                    <button
+                      type="button"
+                      className="ws-storyboard-drag-handle nodrag nopan"
+                      draggable={!disabled}
+                      disabled={disabled}
+                      aria-label={`拖动镜头 ${index + 1} 排序`}
+                      title="拖动排序"
+                      onDragStart={(event) => {
+                        setDraggedShotId(shot.id);
+                        setDragOverShotId(shot.id);
+                        setDragPlacement("before");
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", shot.id);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedShotId("");
+                        setDragOverShotId("");
+                        setDragPlacement("before");
+                      }}
+                    >
+                      <GripVertical size={14} />
+                    </button>
                   ) : null}
                 </td>
                 <td className="is-duration">
@@ -306,21 +378,49 @@ export function StoryboardView({
                   <StoryboardTextField
                     label={`镜头 ${index + 1} 画面描述`}
                     value={shot.visual}
+                    content={shot.reference_contents?.visual}
                     readOnly={!canEdit}
                     disabled={disabled}
                     placeholder="描述场景、人物、动作和镜头"
-                    onChange={(visual) => updateShot(index, { visual })}
+                    fieldId={`${shot.id}:visual`}
+                    activeFieldId={activeFieldId}
+                    referenceAdapter={referenceAdapter}
+                    onActivate={setActiveFieldId}
+                    onChange={(visual, content) =>
+                      updateShot(
+                        index,
+                        storyboardReferenceFieldPatch(
+                          shot,
+                          "visual",
+                          visual,
+                          content,
+                        ),
+                      )
+                    }
                   />
                 </td>
                 <td className="is-camera">
                   <StoryboardTextField
                     label={`镜头 ${index + 1} 运镜`}
                     value={shot.camera_movement}
+                    content={shot.reference_contents?.camera_movement}
                     readOnly={!canEdit}
                     disabled={disabled}
                     placeholder="景别、机位和运动方式"
-                    onChange={(camera_movement) =>
-                      updateShot(index, { camera_movement })
+                    fieldId={`${shot.id}:camera`}
+                    activeFieldId={activeFieldId}
+                    referenceAdapter={referenceAdapter}
+                    onActivate={setActiveFieldId}
+                    onChange={(camera_movement, content) =>
+                      updateShot(
+                        index,
+                        storyboardReferenceFieldPatch(
+                          shot,
+                          "camera_movement",
+                          camera_movement,
+                          content,
+                        ),
+                      )
                     }
                   />
                 </td>
@@ -329,18 +429,48 @@ export function StoryboardView({
                     <StoryboardTextField
                       label={`镜头 ${index + 1} 台词`}
                       value={shot.dialogue}
+                      content={shot.reference_contents?.dialogue}
                       readOnly={!canEdit}
                       disabled={disabled}
                       placeholder="台词"
-                      onChange={(dialogue) => updateShot(index, { dialogue })}
+                      fieldId={`${shot.id}:dialogue`}
+                      activeFieldId={activeFieldId}
+                      referenceAdapter={referenceAdapter}
+                      onActivate={setActiveFieldId}
+                      onChange={(dialogue, content) =>
+                        updateShot(
+                          index,
+                          storyboardReferenceFieldPatch(
+                            shot,
+                            "dialogue",
+                            dialogue,
+                            content,
+                          ),
+                        )
+                      }
                     />
                     <StoryboardTextField
                       label={`镜头 ${index + 1} 旁白`}
                       value={shot.narration}
+                      content={shot.reference_contents?.narration}
                       readOnly={!canEdit}
                       disabled={disabled}
                       placeholder="旁白"
-                      onChange={(narration) => updateShot(index, { narration })}
+                      fieldId={`${shot.id}:narration`}
+                      activeFieldId={activeFieldId}
+                      referenceAdapter={referenceAdapter}
+                      onActivate={setActiveFieldId}
+                      onChange={(narration, content) =>
+                        updateShot(
+                          index,
+                          storyboardReferenceFieldPatch(
+                            shot,
+                            "narration",
+                            narration,
+                            content,
+                          ),
+                        )
+                      }
                     />
                   </div>
                 </td>
@@ -348,14 +478,54 @@ export function StoryboardView({
                   <StoryboardTextField
                     label={`镜头 ${index + 1} 音效或配乐`}
                     value={shot.sound_music}
+                    content={shot.reference_contents?.sound_music}
                     readOnly={!canEdit}
                     disabled={disabled}
                     placeholder="环境音、音效或配乐"
-                    onChange={(sound_music) =>
-                      updateShot(index, { sound_music })
+                    fieldId={`${shot.id}:sound`}
+                    activeFieldId={activeFieldId}
+                    referenceAdapter={referenceAdapter}
+                    onActivate={setActiveFieldId}
+                    onChange={(sound_music, content) =>
+                      updateShot(
+                        index,
+                        storyboardReferenceFieldPatch(
+                          shot,
+                          "sound_music",
+                          sound_music,
+                          content,
+                        ),
+                      )
                     }
                   />
                 </td>
+                {canEdit ? (
+                  <td className="is-prompt">
+                    <StoryboardTextField
+                      label={`镜头 ${index + 1} 视频提示词`}
+                      value={shot.prompt}
+                      content={shot.reference_contents?.prompt}
+                      readOnly={false}
+                      disabled={disabled}
+                      placeholder="完整描述画面、动作、运镜、光线与风格"
+                      fieldId={`${shot.id}:prompt`}
+                      activeFieldId={activeFieldId}
+                      referenceAdapter={referenceAdapter}
+                      onActivate={setActiveFieldId}
+                      onChange={(prompt, content) =>
+                        updateShot(
+                          index,
+                          storyboardReferenceFieldPatch(
+                            shot,
+                            "prompt",
+                            prompt,
+                            content,
+                          ),
+                        )
+                      }
+                    />
+                  </td>
+                ) : null}
                 {canEdit ? (
                   <td className="is-actions">
                     <StoryboardIconButton
@@ -394,39 +564,145 @@ export function StoryboardView({
   );
 }
 
+function withStoryboardReferenceContents(
+  storyboard: StoryboardDocument,
+  targets: CanvasReferenceTarget[],
+): StoryboardDocument {
+  return {
+    ...storyboard,
+    shots: storyboard.shots.map((shot) => {
+      const referenceContents = { ...(shot.reference_contents || {}) };
+      for (const field of STORYBOARD_REFERENCE_FIELDS) {
+        const content = reconcileCanvasReferenceContent(
+          shot[field],
+          referenceContents[field],
+          targets,
+        );
+        if (content) {
+          referenceContents[field] = content;
+        } else {
+          delete referenceContents[field];
+        }
+      }
+      return { ...shot, reference_contents: referenceContents };
+    }),
+  };
+}
+
+const STORYBOARD_REFERENCE_FIELDS: StoryboardReferenceField[] = [
+  "visual",
+  "camera_movement",
+  "dialogue",
+  "narration",
+  "sound_music",
+  "prompt",
+];
+
 function StoryboardTextField({
   label,
   value,
+  content,
   placeholder,
   readOnly,
   disabled,
+  fieldId,
+  activeFieldId,
+  referenceAdapter,
+  onActivate,
   onChange,
 }: {
   label: string;
   value: string;
+  content?: CanvasReferenceContent;
   placeholder: string;
   readOnly: boolean;
   disabled: boolean;
-  onChange: (value: string) => void;
+  fieldId: string;
+  activeFieldId: string;
+  referenceAdapter: CanvasReferenceAdapter;
+  onActivate: (fieldId: string) => void;
+  onChange: (value: string, content?: CanvasReferenceContent) => void;
 }) {
   if (readOnly) {
     return (
       <div className="ws-storyboard-readonly-field">
-        {value || <span>{placeholder}</span>}
+        <CanvasReferenceTextWithAdapter
+          value={value}
+          content={content}
+          placeholder={placeholder}
+          adapter={referenceAdapter}
+        />
+      </div>
+    );
+  }
+  if (activeFieldId !== fieldId) {
+    return (
+      <div
+        className="ws-storyboard-edit-field nodrag nopan"
+        role="textbox"
+        tabIndex={disabled ? -1 : 0}
+        aria-label={label}
+        aria-readonly="false"
+        onClick={(event) => {
+          if (
+            disabled ||
+            (event.target as HTMLElement).closest("[data-reference-tag]")
+          ) {
+            return;
+          }
+          onActivate(fieldId);
+        }}
+        onKeyDown={(event) => {
+          if (
+            !disabled &&
+            !(event.target as HTMLElement).closest("[data-reference-tag]") &&
+            (event.key === "Enter" || event.key === " ")
+          ) {
+            event.preventDefault();
+            onActivate(fieldId);
+          }
+        }}
+      >
+        <CanvasReferenceTextWithAdapter
+          value={value}
+          content={content}
+          placeholder={placeholder}
+          adapter={referenceAdapter}
+        />
       </div>
     );
   }
   return (
-    <textarea
-      className="nodrag nopan nowheel"
+    <CanvasReferenceEditorWithAdapter
+      className="ws-storyboard-reference-editor nodrag nopan nowheel"
       value={value}
-      rows={2}
-      aria-label={label}
+      content={content}
+      adapter={referenceAdapter}
       placeholder={placeholder}
       disabled={disabled}
-      onChange={(event) => onChange(event.target.value)}
+      autoFocus
+      layerZIndex={2600}
+      onChange={onChange}
     />
   );
+}
+
+function storyboardReferenceFieldPatch(
+  shot: StoryboardShot,
+  field: StoryboardReferenceField,
+  value: string,
+  content?: CanvasReferenceContent,
+): Partial<StoryboardShot> {
+  const referenceContents = { ...(shot.reference_contents || {}) };
+  if (content) {
+    referenceContents[field] = content;
+  } else {
+    delete referenceContents[field];
+  }
+  return {
+    [field]: value,
+    reference_contents: referenceContents,
+  };
 }
 
 function StoryboardIconButton({

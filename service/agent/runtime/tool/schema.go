@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	energonservice "github.com/dever-package/bot/service/energon"
+	energoninput "github.com/dever-package/bot/service/energon/input"
 )
 
 func powerParametersSchema(params []energonservice.PowerParam) map[string]any {
@@ -75,12 +76,12 @@ func powerParamEnum(param energonservice.PowerParam) []any {
 	}
 	result := make([]any, 0, len(param.Options))
 	for _, option := range param.Options {
-		value := strings.TrimSpace(option.Value)
+		value := strings.TrimSpace(option.NativeValue)
 		if value == "" {
-			value = strings.TrimSpace(option.NativeValue)
+			value = strings.TrimSpace(option.Value)
 		}
 		if value != "" {
-			result = append(result, value)
+			result = append(result, energoninput.ScalarByType(param.ValueType, value))
 		}
 	}
 	return result

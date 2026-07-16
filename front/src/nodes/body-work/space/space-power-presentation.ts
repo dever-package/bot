@@ -27,6 +27,7 @@ const POWER_KIND_LABELS: Record<string, string> = {
   music: "音频",
   video: "视频",
   file: "文件",
+  mixed: "图文",
   role: "角色",
   multi: "多模态",
   embeddings: "向量",

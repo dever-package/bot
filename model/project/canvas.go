@@ -10,6 +10,7 @@ type Canvas struct {
 	ID          uint64    `dorm:"primaryKey;autoIncrement;comment:画布ID"`
 	ProjectID   uint64    `dorm:"type:bigint;not null;default:0;comment:项目"`
 	AssetCateID uint64    `dorm:"type:bigint;not null;default:0;comment:资产分类"`
+	NextNodeNo  int       `dorm:"type:int;not null;default:1;comment:下一个节点编号"`
 	Nodes       string    `dorm:"type:text;not null;default:'[]';comment:节点"`
 	Edges       string    `dorm:"type:text;not null;default:'[]';comment:连线"`
 	Viewport    string    `dorm:"type:text;not null;default:'{}';comment:视图"`

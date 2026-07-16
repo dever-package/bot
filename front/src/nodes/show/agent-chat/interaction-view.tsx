@@ -33,6 +33,7 @@ export function AgentChatInteractionView({
         interaction={interaction}
         disabled={disabled}
         readonly={Boolean(response)}
+        allowCustomChoice={false}
         initialData={response?.data}
         onSubmit={onSubmit}
       />

@@ -16,12 +16,7 @@ type ToolCall struct {
 }
 
 func FunctionToolDefinition(name string, description string, parameters map[string]any, strict bool) map[string]any {
-	if len(parameters) == 0 {
-		parameters = map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		}
-	}
+	parameters = normalizeFunctionParameters(parameters)
 	function := map[string]any{
 		"name":        strings.TrimSpace(name),
 		"description": strings.TrimSpace(description),
@@ -33,6 +28,38 @@ func FunctionToolDefinition(name string, description string, parameters map[stri
 	return map[string]any{
 		"type":     "function",
 		"function": function,
+	}
+}
+
+func normalizeFunctionParameters(parameters map[string]any) map[string]any {
+	result := make(map[string]any, len(parameters)+3)
+	for key, value := range parameters {
+		result[key] = value
+	}
+	if strings.TrimSpace(asText(result["type"])) == "" {
+		result["type"] = "object"
+	}
+	if strings.EqualFold(strings.TrimSpace(asText(result["type"])), "object") {
+		if _, exists := result["properties"].(map[string]any); !exists {
+			result["properties"] = map[string]any{}
+		}
+		result["required"] = normalizeRequiredProperties(result["required"])
+	}
+	return result
+}
+
+func normalizeRequiredProperties(value any) []any {
+	switch current := value.(type) {
+	case []any:
+		return append([]any(nil), current...)
+	case []string:
+		result := make([]any, 0, len(current))
+		for _, item := range current {
+			result = append(result, item)
+		}
+		return result
+	default:
+		return []any{}
 	}
 }
 

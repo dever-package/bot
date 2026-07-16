@@ -10,18 +10,16 @@ import {
   storyboardTotalDuration,
 } from "./space-storyboard";
 import { StoryboardView } from "./space-storyboard-view";
+import type { ComposerAssetItem } from "./space-prompt-composer";
 
-export type StoryboardNodeStatus =
-  | "empty"
-  | "running"
-  | "complete"
-  | "error";
+export type StoryboardNodeStatus = "empty" | "running" | "complete" | "error";
 
 type StoryboardNodeContentProps = {
   output?: unknown;
   status: StoryboardNodeStatus;
   started?: boolean;
   generatedShotCount?: number;
+  referenceItems?: ComposerAssetItem[];
   onOpenDetail?: () => void;
 };
 
@@ -30,6 +28,7 @@ export function StoryboardNodeContent({
   status,
   started = false,
   generatedShotCount = 0,
+  referenceItems,
   onOpenDetail,
 }: StoryboardNodeContentProps) {
   if (status === "running") {
@@ -98,7 +97,11 @@ export function StoryboardNodeContent({
         </span>
       </header>
       <div className="ws-storyboard-node-body nowheel">
-        <StoryboardView storyboard={storyboard} showMetrics={false} />
+        <StoryboardView
+          storyboard={storyboard}
+          showMetrics={false}
+          referenceItems={referenceItems}
+        />
       </div>
       {onOpenDetail ? (
         <footer className="ws-storyboard-node-actions">
@@ -131,10 +134,7 @@ function StoryboardNodeMessage({
       <strong>{title}</strong>
       <span>{description}</span>
       {onOpenDetail ? (
-        <StoryboardDetailButton
-          label="打开详情"
-          onOpenDetail={onOpenDetail}
-        />
+        <StoryboardDetailButton label="打开详情" onOpenDetail={onOpenDetail} />
       ) : null}
     </div>
   );

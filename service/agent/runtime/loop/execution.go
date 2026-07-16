@@ -8,7 +8,7 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 	energonmodel "github.com/dever-package/bot/model/energon"
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
-	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
+	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 )
 
@@ -23,19 +23,23 @@ type executionSpec struct {
 	RecordInput        map[string]any
 	InputText          string
 	History            []any
-	Registry           *runtimetool.Registry
-	Warnings           []string
 	Transport          modelTransport
 	PersistChat        bool
 	OnStream           func(map[string]any)
-	Cleanup            func()
 	MediaReferences    []runtimeprovider.MediaReference
+	Scope              runtimescope.Scope
+	RequestedAt        time.Time
 }
 
 func (s Service) createExecution(ctx context.Context, requestID string, spec executionSpec) (execution, error) {
 	startedAt := time.Now()
+	requestedAt := spec.RequestedAt
+	if requestedAt.IsZero() {
+		requestedAt = startedAt
+	}
 	current := execution{
 		requestID:          requestID,
+		requestedAt:        requestedAt,
 		startedAt:          startedAt,
 		agent:              spec.Agent,
 		power:              spec.Power,
@@ -45,12 +49,11 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 		prompt:             spec.Prompt,
 		input:              spec.Input,
 		history:            spec.History,
-		registry:           spec.Registry,
 		transport:          spec.Transport,
 		persistChat:        spec.PersistChat,
 		onStream:           spec.OnStream,
-		cleanup:            spec.Cleanup,
 		mediaReferences:    append([]runtimeprovider.MediaReference(nil), spec.MediaReferences...),
+		scope:              spec.Scope,
 	}
 	current.checkpoint = initialCheckpoint(current)
 	snapshot, err := encodeSnapshot(snapshotFromExecution(current))
@@ -83,8 +86,7 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 		Content: spec.InputText,
 		Payload: encodeJSON(map[string]any{
 			"history_count": len(spec.History),
-			"tools":         spec.Registry.Names(),
-			"warnings":      spec.Warnings,
+			"timing":        preparationTiming(requestedAt, startedAt),
 		}, "{}"),
 		Status: stepStatusSuccess,
 	})
@@ -122,7 +124,9 @@ func (s Service) failExecutionStart(execution execution, err error) {
 		message = err.Error()
 	}
 	finishedAt := time.Now()
-	_, _ = s.finishRunAndChat(context.Background(), execution.runID, execution.workerID, execution.persistChat, runResult{
+	ctx, cancel := maintenanceContext()
+	defer cancel()
+	_, _ = s.finishRunAndChat(ctx, execution.runID, execution.workerID, execution.persistChat, runResult{
 		Status: runStatusFail,
 		Output: encodeJSON(map[string]any{"event": "error", "text": "", "error": message}, "{}"),
 		Error:  message, StepCount: 1,

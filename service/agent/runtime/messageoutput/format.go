@@ -8,14 +8,40 @@ import (
 	runtimeartifact "github.com/dever-package/bot/service/agent/runtime/artifact"
 )
 
-func Format(output any, artifacts []map[string]any) map[string]any {
+func FormatMessage(output any, text string, artifacts []map[string]any) (map[string]any, string) {
 	result := Merge(output, nil)
 	if len(artifacts) > 0 {
 		result["artifacts"] = artifacts
 		hydrateActivityArtifacts(result, artifacts)
 	}
 	sanitizeActivityErrors(result)
-	return result
+	return result, strings.TrimSpace(text)
+}
+
+func NormalizeText(text string) string {
+	return strings.TrimSpace(text)
+}
+
+// HasValue reports whether a normalized runtime output field carries useful
+// content. Presence alone is not enough because providers may emit empty
+// interaction or media fields in an otherwise valid response.
+func HasValue(value any) bool {
+	switch current := value.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(current) != ""
+	case []any:
+		return len(current) > 0
+	case []string:
+		return len(current) > 0
+	case []map[string]any:
+		return len(current) > 0
+	case map[string]any:
+		return len(current) > 0
+	default:
+		return true
+	}
 }
 
 func Merge(base any, extras map[string]any) map[string]any {

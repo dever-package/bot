@@ -12,7 +12,7 @@ const (
 )
 
 var askUserFieldTypes = map[string]struct{}{
-	"textarea": {}, "option": {}, "multi_option": {}, "file": {}, "files": {},
+	"option": {}, "multi_option": {}, "file": {}, "files": {},
 }
 
 func AskUserTool() Tool {
@@ -21,7 +21,7 @@ func AskUserTool() Tool {
 			Name:        "ask_user",
 			Title:       "等待用户输入",
 			Kind:        "interaction",
-			Description: "仅当用户已经提出明确的具体任务，并且任务缺少无法安全推断的必要参数、选择或素材时，才调用此工具显示逐题表单并结束当前运行。禁止在问候、闲聊、一般咨询中调用，也禁止用它询问用户想做什么。一次只询问 1-4 个无法安全推断的必要信息。除具体名称、原始文案或详细补充等无法合理枚举的内容外，必须使用 option 或 multi_option；主题、风格、用途、数量、比例等必须提供 2-16 个简短选项和推荐值。选项来自知识库时，应先读取原文并完整保留有效选项，不得擅自缩减。自由输入只能使用 textarea，前端会自动提供自定义补充。不得加入可选字段，不得改用正文提问。",
+			Description: "仅当用户已经提出明确任务，并且缺少无法安全推断的必要选择或素材时，才调用此工具显示逐题表单并结束当前运行。禁止在问候、闲聊和一般咨询中调用，也禁止用它询问用户想做什么。一次只询问 1-4 个必要信息。所有可确认信息都必须使用 option 或 multi_option，提供 2-16 个具体选项和推荐值；主题、名称、风格、用途、数量、比例等也要先给出合理候选，选择题界面会自动允许用户自定义补充。只有必须上传素材时使用 file 或 files。选项来自知识库时，应先读取原文并完整保留有效选项。不得生成自由输入框，不得加入可选字段，也不得改用正文提问后结束。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -37,7 +37,7 @@ func AskUserTool() Tool {
 								"label": map[string]any{"type": "string", "description": "用户看到的字段名称"},
 								"type": map[string]any{
 									"type": "string",
-									"enum": []any{"option", "multi_option", "textarea", "file", "files"},
+									"enum": []any{"option", "multi_option", "file", "files"},
 								},
 								"options": map[string]any{
 									"type":        "array",
@@ -48,12 +48,12 @@ func AskUserTool() Tool {
 								},
 								"recommended": map[string]any{
 									"type":        "array",
-									"description": "AI 推荐并默认选中的选项，必须来自 options；非选择题传空数组",
+									"description": "可选。AI 推荐并默认选中的选项，必须来自 options；省略时默认第一项",
 									"maxItems":    maxAskUserOptions,
 									"items":       map[string]any{"type": "string"},
 								},
 							},
-							"required":             []any{"key", "label", "type", "recommended"},
+							"required":             []any{"key", "label", "type"},
 							"additionalProperties": false,
 						},
 					},
@@ -127,9 +127,6 @@ func normalizeAskUserFields(value any) ([]map[string]any, error) {
 		}
 		if fieldType == "option" || fieldType == "multi_option" {
 			options := normalizeAskUserOptions(field["options"])
-			if strings.EqualFold(argumentText(field, "type"), "switch") && len(options) == 0 {
-				options = normalizeAskUserOptions([]any{"是", "否"})
-			}
 			if len(options) < 2 {
 				return nil, fmt.Errorf("ask_user.fields[%d].options 需要 2-%d 个选项", index, maxAskUserOptions)
 			}
@@ -148,14 +145,7 @@ func normalizeAskUserFields(value any) ([]map[string]any, error) {
 }
 
 func normalizeAskUserFieldType(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "input", "number":
-		return "textarea"
-	case "switch":
-		return "option"
-	default:
-		return strings.ToLower(strings.TrimSpace(value))
-	}
+	return strings.ToLower(strings.TrimSpace(value))
 }
 
 func normalizeRecommendedOptions(value any, options []map[string]any, single bool) []string {

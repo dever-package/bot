@@ -68,6 +68,52 @@ func MergeStreamResult(outputs []Output) Output {
 	return result
 }
 
+// MergeStreamFinal keeps accumulated deltas when a provider returns only a
+// partial final frame, while still accepting a complete final result.
+func MergeStreamFinal(outputs []Output, final Output) Output {
+	result := MergeStreamResult(outputs)
+	for key, value := range final {
+		if isEmptyProtocolValue(value) {
+			continue
+		}
+		switch key {
+		case "text", "reasoning":
+			result[key] = mergeStreamText(asText(result[key]), asText(value))
+		case "tool_calls":
+			result[key] = ToolCallsValue(MergeToolCalls(
+				ParseToolCalls(result[key]),
+				ParseToolCalls(value),
+			))
+		default:
+			result[key] = value
+		}
+	}
+	if calls := ParseToolCalls(result["tool_calls"]); len(calls) > 0 {
+		result["event"] = "tool_call"
+		result["tool_calls"] = ToolCallsValue(calls)
+	}
+	return result
+}
+
+func mergeStreamText(streamed string, final string) string {
+	if streamed == "" {
+		return final
+	}
+	if final == "" || streamed == final {
+		return streamed
+	}
+	if strings.Contains(final, streamed) {
+		return final
+	}
+	if strings.Contains(streamed, final) {
+		return streamed
+	}
+	if len([]rune(final)) > len([]rune(streamed)) {
+		return final
+	}
+	return streamed
+}
+
 func extractStreamPayload(payload any) Output {
 	switch current := payload.(type) {
 	case map[string]any:
@@ -119,17 +165,51 @@ func extractOpenAIStreamOutput(mapped map[string]any) Output {
 		output["text"] = text
 	}
 	if finishReason := strings.TrimSpace(asText(choice["finish_reason"])); finishReason != "" {
-		output["event"] = "end"
 		output["finish_reason"] = finishReason
+		if strings.TrimSpace(asText(output["event"])) == "" {
+			output["event"] = "end"
+		}
 	}
 	return normalizeOutput(output)
 }
 
 func firstNonEmptyStreamText(values ...any) string {
 	for _, value := range values {
-		if text := asText(value); text != "" {
+		if text := contentText(value); text != "" {
 			return text
 		}
 	}
 	return ""
+}
+
+func contentText(value any) string {
+	switch current := value.(type) {
+	case string:
+		return current
+	case []any:
+		parts := make([]string, 0, len(current))
+		for _, item := range current {
+			if text := strings.TrimSpace(contentText(item)); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "")
+	case []map[string]any:
+		parts := make([]string, 0, len(current))
+		for _, item := range current {
+			if text := strings.TrimSpace(contentText(item)); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "")
+	case map[string]any:
+		for _, key := range []string{"text", "output_text", "content"} {
+			if text := contentText(current[key]); text != "" {
+				return text
+			}
+		}
+		return ""
+	default:
+		return asText(current)
+	}
 }

@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shemic/dever/server"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimecontext "github.com/dever-package/bot/service/agent/runtime/context"
-	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
+	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
@@ -58,6 +59,7 @@ func (s Service) RunTask(ctx context.Context, request TaskRequest) map[string]an
 }
 
 func (s Service) prepareStatelessExecution(ctx context.Context, request statelessRequest) (execution, error) {
+	requestedAt := time.Now()
 	requestID := strings.TrimSpace(request.RequestID)
 	if requestID == "" {
 		requestID = uuid.NewString()
@@ -83,37 +85,30 @@ func (s Service) prepareStatelessExecution(ctx context.Context, request stateles
 	if err != nil {
 		return execution{}, err
 	}
-	mounted, err := runtimetool.Mount(ctx, runtimetool.MountRequest{
-		Agent:   agent,
-		Gateway: s.gateway,
-		Method:  request.Method,
-		Host:    request.Host,
-		Path:    request.Path,
-		Headers: request.Headers,
-		Server:  request.Server,
-	})
-	if err != nil {
-		return execution{}, err
-	}
-	prompt := joinRuntimePrompt(assembled.Prompt, mounted.Prompt)
 	return s.createExecution(ctx, requestID, executionSpec{
 		Agent:     agent,
 		Power:     power,
-		Prompt:    prompt,
+		Prompt:    assembled.Prompt,
 		Input:     input,
 		InputText: inputText,
 		History:   assembled.History,
-		Registry:  mounted.Registry,
-		Warnings:  mounted.Warnings,
-		Cleanup:   mounted.Close,
 		Transport: modelTransport{
 			Method:  request.Method,
 			Host:    request.Host,
 			Path:    request.Path,
 			Headers: request.Headers,
 		},
-		OnStream: request.OnStream,
+		OnStream:    request.OnStream,
+		Scope:       runtimescope.FromContext(requestContext(ctx, request.Server)),
+		RequestedAt: requestedAt,
 	})
+}
+
+func requestContext(ctx context.Context, currentServer *server.Context) context.Context {
+	if currentServer != nil {
+		return currentServer.Context()
+	}
+	return ctx
 }
 
 func (s Service) assembleTaskContext(ctx context.Context, request statelessRequest, agent agentmodel.Agent, inputText string) (runtimecontext.Result, error) {

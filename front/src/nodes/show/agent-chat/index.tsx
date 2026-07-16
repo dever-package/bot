@@ -43,6 +43,9 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
   const containerHeight =
     valueText(item.meta?.height || item.meta?.containerHeight) ||
     "min(78dvh, 720px)";
+  const clipboardImageUploadRuleId = Number(
+    item.meta?.clipboardImageUploadRuleId || 0,
+  );
   const assistantApi = useMemo<AgentChatApi>(
     () => ({
       session: String(item.meta?.sessionApi || "/bot/admin/assistant/session"),
@@ -187,7 +190,10 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
             key={`${agentKey}:${controller.sessionID || "loading"}`}
             controller={controller}
           >
-            <Thread controller={controller} />
+            <Thread
+              controller={controller}
+              clipboardImageUploadRuleId={clipboardImageUploadRuleId}
+            />
           </RuntimeProvider>
         </section>
 

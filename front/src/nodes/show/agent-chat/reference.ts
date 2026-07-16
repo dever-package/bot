@@ -132,6 +132,7 @@ export type ReferenceComposerProps = {
   cancelable?: boolean;
   className?: string;
   layerZIndex?: number;
+  clipboardImageUploadRuleId?: number;
   parameters?: ReferenceComposerParam[];
   loadReferences: (
     request: ReferenceLoadRequest,

@@ -195,8 +195,8 @@ func extractOpenAIOutput(mapped map[string]any) (map[string]any, bool) {
 	}
 	output := map[string]any{}
 	if message, ok := choice["message"].(map[string]any); ok {
-		if content, exists := message["content"]; exists {
-			output["text"] = content
+		if text := firstNonEmptyStreamText(message["content"]); text != "" {
+			output["text"] = text
 		}
 		if calls := ParseToolCalls(message["tool_calls"]); len(calls) > 0 {
 			output["event"] = "tool_call"
@@ -204,8 +204,8 @@ func extractOpenAIOutput(mapped map[string]any) (map[string]any, bool) {
 		}
 	}
 	if delta, ok := choice["delta"].(map[string]any); ok {
-		if content, exists := delta["content"]; exists {
-			output["text"] = content
+		if text := firstNonEmptyStreamText(delta["content"]); text != "" {
+			output["text"] = text
 		}
 		if calls := ParseToolCalls(delta["tool_calls"]); len(calls) > 0 {
 			output["event"] = "tool_call"

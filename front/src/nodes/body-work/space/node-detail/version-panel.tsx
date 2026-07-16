@@ -67,7 +67,7 @@ export function VersionPanel({
                   {isCurrent ? (
                     <small>
                       <i aria-hidden="true" />
-                      当前
+                      当前版本
                     </small>
                   ) : null}
                 </span>
@@ -77,10 +77,6 @@ export function VersionPanel({
                       version.updated_at || version.created_at,
                     )}
                   </time>
-                  <em>{versionSourceLabel(version)}</em>
-                </span>
-                <span className="ws-node-detail-version-summary">
-                  {version.summary || "暂无内容摘要"}
                 </span>
               </button>
             );
@@ -120,17 +116,6 @@ function VersionPanelState({
 function versionTitle(version: AssetVersion) {
   const number = Number(version.version || 0);
   return number > 0 ? `第 ${number} 版` : "历史版本";
-}
-
-function versionSourceLabel(version: AssetVersion) {
-  const source = version.source || {};
-  if (String(source.action || "") === "restore") {
-    return "版本恢复";
-  }
-  if (Number(version.run_id || 0) > 0 || version.request_id) {
-    return "节点生成";
-  }
-  return "手动编辑";
 }
 
 export function formatNodeDetailVersionTime(value: unknown) {

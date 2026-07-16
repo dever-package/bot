@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	artifactJobMaxAttempts = 3
-	artifactJobLease       = 5 * time.Minute
-	artifactJobHeartbeat   = 10 * time.Second
+	artifactJobMaxAttempts       = 3
+	artifactWritebackMaxAttempts = 6
+	artifactJobLease             = 45 * time.Second
+	artifactJobHeartbeat         = 10 * time.Second
 )
 
 type jobRepository struct{}
@@ -71,6 +72,49 @@ func (jobRepository) listRunnable(ctx context.Context, now time.Time, limit int)
 	return result
 }
 
+func (jobRepository) listByBlocks(ctx context.Context, blockIDs []uint64, statuses []string) []agentmodel.ArtifactJob {
+	if len(blockIDs) == 0 || len(statuses) == 0 {
+		return []agentmodel.ArtifactJob{}
+	}
+	statusValues := make([]any, 0, len(statuses))
+	for _, status := range statuses {
+		statusValues = append(statusValues, status)
+	}
+	rows := agentmodel.NewArtifactJobModel().Select(ctx, map[string]any{
+		"status":   statusValues,
+		"block_id": blockIDs,
+	}, map[string]any{"order": "main.id desc"})
+	result := make([]agentmodel.ArtifactJob, 0, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			result = append(result, *row)
+		}
+	}
+	return result
+}
+
+func (jobRepository) reopen(ctx context.Context, row agentmodel.ArtifactJob, now time.Time) bool {
+	if row.ID == 0 || (row.Status != agentmodel.ArtifactJobStatusSuccess && row.Status != agentmodel.ArtifactJobStatusFailed) {
+		return false
+	}
+	return agentmodel.NewArtifactJobModel().Update(ctx, map[string]any{
+		"id":      row.ID,
+		"status":  row.Status,
+		"version": row.Version,
+	}, map[string]any{
+		"status":           agentmodel.ArtifactJobStatusPending,
+		"attempt":          0,
+		"version":          row.Version + 1,
+		"worker_id":        "",
+		"available_at":     now,
+		"lease_expires_at": nil,
+		"heartbeat_at":     nil,
+		"finished_at":      nil,
+		"error":            "",
+		"updated_at":       now,
+	}) == 1
+}
+
 func (jobRepository) claim(ctx context.Context, row agentmodel.ArtifactJob, workerID string, now time.Time) bool {
 	workerID = strings.TrimSpace(workerID)
 	if row.ID == 0 || workerID == "" {
@@ -116,8 +160,32 @@ func (jobRepository) renew(ctx context.Context, id uint64, workerID string, now 
 }
 
 func (jobRepository) retry(ctx context.Context, row agentmodel.ArtifactJob, workerID string, message string) bool {
-	now := time.Now()
 	delay := time.Duration(row.Attempt*row.Attempt) * 5 * time.Second
+	if delay > time.Minute {
+		delay = time.Minute
+	}
+	return jobRepository{}.retryAfter(ctx, row, workerID, message, delay)
+}
+
+func (jobRepository) retryWriteback(ctx context.Context, row agentmodel.ArtifactJob, workerID string, message string) bool {
+	delay := time.Second
+	for attempt := 1; attempt < row.Attempt && delay < time.Minute; attempt++ {
+		delay *= 2
+	}
+	if delay > time.Minute {
+		delay = time.Minute
+	}
+	return jobRepository{}.retryAfter(ctx, row, workerID, message, delay)
+}
+
+func (jobRepository) retryAfter(
+	ctx context.Context,
+	row agentmodel.ArtifactJob,
+	workerID string,
+	message string,
+	delay time.Duration,
+) bool {
+	now := time.Now()
 	return agentmodel.NewArtifactJobModel().Update(ctx, map[string]any{
 		"id":        row.ID,
 		"status":    agentmodel.ArtifactJobStatusRunning,

@@ -11,8 +11,8 @@ const runtimeStreamNamespace = "agent_runtime"
 
 var sharedRuntimeStreams = frontstream.New(runtimeStreamNamespace)
 
-// StreamStore keeps API readers and durable workers on the same fallback
-// memory stream when Redis is temporarily unavailable.
+// StreamStore keeps API readers and durable workers on the same configured
+// stream backend. Redis failures are surfaced so terminal delivery can retry.
 func StreamStore() frontstream.Service {
 	return sharedRuntimeStreams
 }
@@ -68,6 +68,9 @@ func withExecutionStreamMeta(execution execution, output map[string]any) map[str
 	}
 	if execution.version > 0 {
 		meta["run_version"] = execution.version
+	}
+	if execution.assistantMessageID > 0 {
+		meta["assistant_message_id"] = execution.assistantMessageID
 	}
 	result["meta"] = meta
 	return result

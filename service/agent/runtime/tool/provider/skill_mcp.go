@@ -199,18 +199,7 @@ func mcpCommand(entry agentskill.Entry, server mcpServer, sandboxDriver string) 
 		if sandboxDriver == sandbox.DriverBwrap {
 			runPath = "/skill/" + strings.TrimPrefix(filepath.ToSlash(relative), "/")
 		}
-		switch strings.ToLower(filepath.Ext(runPath)) {
-		case ".py":
-			return "python3", append([]string{runPath}, args...), nil
-		case ".js":
-			return "node", append([]string{runPath}, args...), nil
-		case ".sh":
-			return "/bin/sh", append([]string{runPath}, args...), nil
-		case ".bash":
-			return "/bin/bash", append([]string{runPath}, args...), nil
-		default:
-			return runPath, args, nil
-		}
+		return sandbox.ScriptCommandForPath(runPath, path, args)
 	}
 	resolved, err := exec.LookPath(command)
 	if err != nil {

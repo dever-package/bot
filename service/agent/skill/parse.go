@@ -27,13 +27,24 @@ func ParseFile(path string) (ParsedFile, error) {
 	if entry.Name == "" {
 		entry.Name = entry.Key
 	}
-	hash := sha256.Sum256(raw)
 	manifest := map[string]any{
 		"key":         entry.Key,
 		"name":        entry.Name,
 		"description": entry.Description,
 		"triggers":    entry.Triggers,
 	}
+	manifest, manifestRaw, err := mergeManifestFile(filepath.Dir(path), manifest)
+	if err != nil {
+		return ParsedFile{}, err
+	}
+	// SKILL.md owns identity fields; manifest.json only declares runtime capabilities.
+	manifest["key"] = entry.Key
+	manifest["name"] = entry.Name
+	manifest["description"] = entry.Description
+	manifest["triggers"] = entry.Triggers
+	hasher := sha256.New()
+	_, _ = hasher.Write(raw)
+	_, _ = hasher.Write(manifestRaw)
 	return ParsedFile{
 		Key:         entry.Key,
 		Name:        entry.Name,
@@ -41,7 +52,7 @@ func ParseFile(path string) (ParsedFile, error) {
 		Triggers:    entry.Triggers,
 		Content:     strings.TrimSpace(body),
 		Manifest:    manifest,
-		Hash:        hex.EncodeToString(hash[:]),
+		Hash:        hex.EncodeToString(hasher.Sum(nil)),
 	}, nil
 }
 

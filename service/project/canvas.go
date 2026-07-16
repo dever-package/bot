@@ -9,6 +9,7 @@ import (
 
 type persistedCanvas struct {
 	AssetCateID uint64
+	NextNodeNo  int
 	Nodes       []any
 	Edges       []any
 	Viewport    map[string]any
@@ -57,10 +58,26 @@ func sanitizeCanvasPayload(assetCateID uint64, canvas map[string]any) (persisted
 	}
 	return persistedCanvas{
 		AssetCateID: assetCateID,
+		NextNodeNo:  nextCanvasNodeNo(canvas, nodes),
 		Nodes:       nodes,
 		Edges:       edges,
 		Viewport:    viewport,
 	}, nil
+}
+
+func nextCanvasNodeNo(canvas map[string]any, nodes []any) int {
+	next := int(uint64FromAny(canvas["next_node_no"]))
+	if next < 1 {
+		next = 1
+	}
+	for _, raw := range nodes {
+		row, _ := raw.(map[string]any)
+		candidate := int(uint64FromAny(row["node_no"])) + 1
+		if candidate > next {
+			next = candidate
+		}
+	}
+	return next
 }
 
 func sanitizeCanvasNodes(value any) ([]any, error) {

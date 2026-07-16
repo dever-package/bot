@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,10 +13,19 @@ import (
 type Reader func(ctx context.Context, requestID string, lastID string, count int64, block time.Duration) ([]Entry, error)
 type Stopper func(ctx context.Context, requestID string) botprotocol.Response
 
+var ErrIdleTimeout = errors.New("stream 长时间没有返回新内容")
+
+const (
+	defaultReadCount  = int64(64)
+	streamStopTimeout = 5 * time.Second
+)
+
 type CollectOptions struct {
 	RequestID        string
 	InitialLastID    string
 	Block            time.Duration
+	ReadCount        int64
+	IdleTimeout      time.Duration
 	CollectDeltaText bool
 	CollectOutputs   bool
 	OnOutput         func(ctx context.Context, output botprotocol.Output) error
@@ -51,6 +61,11 @@ func Collect(ctx context.Context, reader Reader, stop Stopper, options CollectOp
 	if block <= 0 {
 		block = time.Second
 	}
+	readCount := options.ReadCount
+	if readCount <= 0 {
+		readCount = defaultReadCount
+	}
+	lastActivity := time.Now()
 
 	var text strings.Builder
 	outputs := make([]botprotocol.Output, 0)
@@ -66,20 +81,31 @@ func Collect(ctx context.Context, reader Reader, stop Stopper, options CollectOp
 	for {
 		select {
 		case <-ctx.Done():
-			if stop != nil {
-				_ = stop(context.Background(), requestID)
-			}
+			stopRequest(stop, requestID)
 			return CollectResult{State: state(), Err: ctx.Err(), Timeout: true}
 		default:
 		}
 
-		entries, err := reader(ctx, requestID, lastID, 1, block)
+		readBlock := block
+		if options.IdleTimeout > 0 {
+			idleRemaining := options.IdleTimeout - time.Since(lastActivity)
+			if idleRemaining <= 0 {
+				stopRequest(stop, requestID)
+				return CollectResult{State: state(), Err: ErrIdleTimeout, Timeout: true}
+			}
+			if idleRemaining < readBlock {
+				readBlock = idleRemaining
+			}
+		}
+
+		entries, err := reader(ctx, requestID, lastID, readCount, readBlock)
 		if err != nil {
 			return CollectResult{State: state(), Err: err}
 		}
 		if len(entries) == 0 {
 			continue
 		}
+		lastActivity = time.Now()
 
 		for _, entry := range entries {
 			lastID = entry.ID
@@ -90,11 +116,11 @@ func Collect(ctx context.Context, reader Reader, stop Stopper, options CollectOp
 			if options.CollectDeltaText && frameType != "result" && shouldCollectText(output) {
 				text.WriteString(botprotocol.AsText(output["text"]))
 			}
-			if options.CollectOutputs && len(output) > 0 {
-				outputs = append(outputs, output)
-			}
 			if frameType == "result" {
 				return CollectResult{Frame: frame, State: state()}
+			}
+			if options.CollectOutputs && len(output) > 0 {
+				outputs = append(outputs, output)
 			}
 			if options.OnOutput != nil && len(output) > 0 {
 				if err := options.OnOutput(ctx, output); err != nil {
@@ -103,6 +129,15 @@ func Collect(ctx context.Context, reader Reader, stop Stopper, options CollectOp
 			}
 		}
 	}
+}
+
+func stopRequest(stop Stopper, requestID string) {
+	if stop == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), streamStopTimeout)
+	defer cancel()
+	_ = stop(ctx, requestID)
 }
 
 func shouldCollectText(output botprotocol.Output) bool {

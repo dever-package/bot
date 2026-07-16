@@ -78,7 +78,7 @@ export function canvasNodeRunsInBackend(node: SpaceCanvasNode) {
 function canvasOutgoingEdges(edges: SpaceCanvasEdge[]) {
   const outgoing = new Map<string, string[]>();
   for (const edge of edges) {
-    if (!edge.from || !edge.to) {
+    if (!edge.from || !edge.to || edge.executionMode === "manual") {
       continue;
     }
     outgoing.set(edge.from, [...(outgoing.get(edge.from) || []), edge.to]);

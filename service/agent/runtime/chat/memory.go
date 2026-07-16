@@ -35,11 +35,9 @@ func (s Service) extractSessionMemoryAsync(sessionID uint64, sourceMessageID uin
 	if sessionID == 0 || sourceMessageID == 0 {
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), memoryExtractionTimeout)
-		defer cancel()
+	submitChatMaintenance("提取会话记忆", sourceMessageID, memoryExtractionTimeout, func(ctx context.Context) {
 		s.extractSessionMemory(ctx, sessionID, sourceMessageID)
-	}()
+	})
 }
 
 func (s Service) extractSessionMemory(ctx context.Context, sessionID uint64, sourceMessageID uint64) {

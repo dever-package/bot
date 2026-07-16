@@ -235,6 +235,9 @@ export function useAgentChatRuns({
         }
         run.runVersion = next.runVersion;
       }
+	  if (next.assistantMessageID > 0) {
+		updateRunMessage(run, { recordID: next.assistantMessageID });
+	  }
       if (next.cancelable != null && next.cancelable !== run.cancelable) {
         run.cancelable = next.cancelable;
         publish(run);
@@ -531,6 +534,7 @@ export function useAgentChatRuns({
             agent: agentKey,
             session_id: activeSessionID,
             context_key: contextKey,
+            memory_enabled: false,
             input: {
               text,
               content: input.content,
@@ -556,15 +560,13 @@ export function useAgentChatRuns({
         ) {
           return;
         }
-        const finalText = valueText(
+		const finalOutput = normalizeAgentChatOutput(result.finalOutput);
+		const finalText = valueText(
           result.finalOutput?.text || result.textOutput || run.buffer.text,
         ).trim();
-        if (!finalText) {
-          throw new Error("模型未返回可展示内容。");
-        }
         finish(run, {
           text: finalText,
-          output: normalizeAgentChatOutput(result.finalOutput),
+		  output: finalOutput,
           requestID: result.requestID,
         });
       } catch (currentError: unknown) {

@@ -19,7 +19,10 @@ import {
 } from "./api";
 import { useAgentChatRuns } from "./runs";
 import { useAgentChatDocumentStreams } from "./document-stream";
-import type { AgentChatDocument } from "./document";
+import {
+  mergeAgentChatDocument,
+  type AgentChatDocument,
+} from "./document";
 import {
   loadAgentChatReferences,
   type ReferenceComposerParam,
@@ -135,7 +138,11 @@ export function useAgentChatStore({
         current.map((message) =>
           message.document?.id === documentID ||
           (document.messageID > 0 && message.recordID === document.messageID)
-            ? { ...message, document }
+            ? {
+                ...message,
+                document:
+                  mergeAgentChatDocument(message.document, document) || document,
+              }
             : message,
         ),
       );

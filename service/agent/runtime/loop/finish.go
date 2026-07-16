@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	dlog "github.com/shemic/dever/log"
 	"github.com/shemic/dever/orm"
 
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
@@ -29,6 +30,7 @@ type runState struct {
 	pendingVisible   bool
 	documentID       uint64
 	documentTextStep int
+	knowledgeUsed    bool
 	finalStatus      string
 	finalText        string
 	finalMessage     string
@@ -56,6 +58,7 @@ func newRunState(execution execution) runState {
 		pendingVisible:   checkpoint.PendingVisible,
 		documentID:       checkpoint.DocumentID,
 		documentTextStep: checkpoint.DocumentTextStep,
+		knowledgeUsed:    checkpoint.KnowledgeUsed,
 		finalStatus:      checkpoint.FinalStatus,
 		finalText:        checkpoint.FinalText,
 		finalMessage:     checkpoint.FinalMessage,
@@ -82,6 +85,7 @@ func (state *runState) Checkpoint(seq int) runCheckpoint {
 		PendingVisible:   state.pendingVisible,
 		DocumentID:       state.documentID,
 		DocumentTextStep: state.documentTextStep,
+		KnowledgeUsed:    state.knowledgeUsed,
 		FinalStatus:      state.finalStatus,
 		FinalText:        state.finalText,
 		FinalMessage:     state.finalMessage,
@@ -130,7 +134,9 @@ func (state *runState) Step(stepType string, title string, content string, paylo
 	if err != nil {
 		return err
 	}
-	err = state.repository.CommitStep(context.Background(), stepRecord{
+	ctx, cancel := maintenanceContext()
+	defer cancel()
+	err = state.repository.CommitStep(ctx, stepRecord{
 		RunID:     state.execution.runID,
 		RequestID: state.execution.requestID,
 		Seq:       next,
@@ -303,7 +309,10 @@ func (s Service) finish(state *runState, outcome finishOutcome) {
 		if state.finalOutput == nil {
 			state.finalOutput = cloneMap(outcome.output)
 		}
-		s.finalizeDocument(state)
+		if err := s.finalizeDocument(state); err != nil {
+			logFinishRecovery(state, "document_finalize", err)
+			return
+		}
 		outcome.text = state.finalText
 		outcome.output = state.finalOutput
 	}
@@ -351,12 +360,25 @@ func (s Service) finish(state *runState, outcome finishOutcome) {
 			"partial_output": strings.TrimSpace(outcome.text),
 		}, stepStatus); err != nil {
 			state.finalCommitted = false
+			logFinishRecovery(state, "checkpoint_commit", err)
 			return
 		}
 	}
+	responseStatus := botprotocol.ResponseStatusSuccess
+	if outcome.status == runStatusFail {
+		responseStatus = botprotocol.ResponseStatusFail
+	}
+	resultCtx, resultCancel := maintenanceContext()
+	resultErr := s.writeExecutionResult(resultCtx, state.execution, output, message, responseStatus)
+	resultCancel()
+	if resultErr != nil {
+		logFinishRecovery(state, "result_publish", resultErr)
+		return
+	}
 
 	finishedAt := time.Now()
-	finished, err := s.finishRunAndChat(context.Background(), state.execution.runID, state.execution.workerID, state.execution.persistChat, runResult{
+	finishCtx, finishCancel := maintenanceContext()
+	finished, err := s.finishRunAndChat(finishCtx, state.execution.runID, state.execution.workerID, state.execution.persistChat, runResult{
 		Status:     outcome.status,
 		Output:     encodeJSON(output, "{}"),
 		Error:      message,
@@ -370,22 +392,35 @@ func (s Service) finish(state *runState, outcome finishOutcome) {
 		Output:    output,
 		Error:     message,
 	})
-	if err != nil || !finished {
+	finishCancel()
+	if err != nil {
+		logFinishRecovery(state, "terminal_commit", err)
+		return
+	}
+	if !finished {
+		logFinishRecovery(state, "terminal_commit", errRunLeaseLost)
 		return
 	}
 	state.completed = true
-	defer state.complete(runCompletion{
+	completion := runCompletion{
 		Status:  outcome.status,
 		Text:    strings.TrimSpace(outcome.text),
 		Message: message,
 		Output:  output,
-	})
-
-	responseStatus := botprotocol.ResponseStatusSuccess
-	if outcome.status == runStatusFail {
-		responseStatus = botprotocol.ResponseStatusFail
 	}
-	_ = s.writeExecutionResult(context.Background(), state.execution, output, message, responseStatus)
+	state.complete(completion)
+}
+
+func logFinishRecovery(state *runState, stage string, err error) {
+	if state == nil || err == nil {
+		return
+	}
+	dlog.ErrorFields("agent_run_finish_recovery", "智能体运行收口失败，等待租约恢复", dlog.Fields{
+		"run_id":     state.execution.runID,
+		"request_id": state.execution.requestID,
+		"stage":      stage,
+		"error":      err.Error(),
+	})
 }
 
 func (s Service) finishRunAndChat(
@@ -468,7 +503,9 @@ func (state *runState) complete(completion runCompletion) {
 }
 
 func (s Service) completeRunTurn(requestID string, status string, text string, output map[string]any, message string) {
-	_ = s.chat.CompleteRunTurn(context.Background(), runtimechat.RunTurnCompletion{
+	ctx, cancel := maintenanceContext()
+	defer cancel()
+	_ = s.chat.CompleteRunTurn(ctx, runtimechat.RunTurnCompletion{
 		RequestID: requestID,
 		Status:    status,
 		Text:      text,

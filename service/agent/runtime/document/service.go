@@ -3,6 +3,7 @@ package document
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -44,12 +45,23 @@ func (s Service) Start(ctx context.Context, request StartRequest) (agentmodel.Do
 		}
 		return agentmodel.Document{}, err
 	}
-	s.streams.write(ctx, row.ID, "document_start", map[string]any{"document": s.Payload(ctx, row, nil)})
+	_ = s.streams.write(ctx, row.ID, "document_start", map[string]any{"document": s.Payload(ctx, row, nil)})
 	return row, nil
 }
 
 func (s Service) AppendText(ctx context.Context, request AppendTextRequest) (agentmodel.DocumentBlock, error) {
-	text := strings.TrimSpace(request.Text)
+	if existing := s.repository.blockBySource(ctx, request.DocumentID, request.SourceKey); existing != nil {
+		return *existing, nil
+	}
+	document := s.repository.find(ctx, request.DocumentID)
+	if document == nil {
+		return agentmodel.DocumentBlock{}, fmt.Errorf("智能体文档不存在")
+	}
+	text := uniqueDocumentBlockText(
+		request.Text,
+		document.Title,
+		s.repository.blocks(ctx, request.DocumentID),
+	)
 	if text == "" {
 		return agentmodel.DocumentBlock{}, nil
 	}
@@ -61,6 +73,75 @@ func (s Service) AppendText(ctx context.Context, request AppendTextRequest) (age
 		"status":     agentmodel.DocumentBlockStatusReady,
 		"meta":       encodeJSON(request.Meta, "{}"),
 	})
+}
+
+var documentParagraphBreak = regexp.MustCompile(`\n{2,}`)
+
+func uniqueDocumentBlockText(text string, title string, blocks []agentmodel.DocumentBlock) string {
+	seen := make([]string, 0)
+	for _, block := range blocks {
+		if block.Type != agentmodel.DocumentBlockTypeText {
+			continue
+		}
+		for _, paragraph := range splitDocumentParagraphs(block.Text) {
+			if key := documentParagraphKey(paragraph); key != "" {
+				seen = append(seen, key)
+			}
+		}
+	}
+
+	result := make([]string, 0)
+	for _, paragraph := range splitDocumentParagraphs(text) {
+		paragraph = withoutDocumentTitle(paragraph, title)
+		key := documentParagraphKey(paragraph)
+		if key == "" {
+			continue
+		}
+		if documentParagraphSeen(seen, key) {
+			continue
+		}
+		seen = append(seen, key)
+		result = append(result, paragraph)
+	}
+	return strings.Join(result, "\n\n")
+}
+
+func documentParagraphSeen(seen []string, current string) bool {
+	for _, existing := range seen {
+		if existing == current || strings.HasPrefix(existing, current) {
+			return true
+		}
+	}
+	return false
+}
+
+func splitDocumentParagraphs(text string) []string {
+	text = strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+	if text == "" {
+		return nil
+	}
+	return documentParagraphBreak.Split(text, -1)
+}
+
+func withoutDocumentTitle(paragraph string, title string) string {
+	titleKey := documentParagraphKey(title)
+	if titleKey == "" {
+		return strings.TrimSpace(paragraph)
+	}
+	lines := strings.Split(paragraph, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") && documentParagraphKey(strings.TrimSpace(strings.TrimLeft(trimmed, "#"))) == titleKey {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
+func documentParagraphKey(value string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 }
 
 func (s Service) AppendMedia(ctx context.Context, request AppendMediaRequest) (agentmodel.DocumentBlock, error) {
@@ -108,31 +189,42 @@ func (s Service) appendBlock(ctx context.Context, documentID uint64, sourceKey s
 	if block.Type == agentmodel.DocumentBlockTypeMedia {
 		event = "media_block_append"
 	}
-	s.streams.write(ctx, document.ID, event, map[string]any{"block": blockPayload(block, nil)})
+	_ = s.streams.write(ctx, document.ID, event, map[string]any{"block": blockPayload(block, nil)})
 	return block, nil
 }
 
-func (s Service) MarkBlockReady(ctx context.Context, blockID uint64, artifacts []map[string]any) *agentmodel.DocumentBlock {
+func (s Service) MarkBlockReady(ctx context.Context, blockID uint64, artifacts []map[string]any) (*agentmodel.DocumentBlock, error) {
 	block := s.repository.updateBlock(ctx, blockID, map[string]any{"status": agentmodel.DocumentBlockStatusReady})
-	s.writeBlockStatus(ctx, block, "artifact_ready", artifacts)
-	return block
+	if block == nil {
+		return nil, fmt.Errorf("更新素材文档块失败")
+	}
+	return block, s.writeBlockStatus(ctx, block, "artifact_ready", artifacts)
 }
 
-func (s Service) MarkBlockFailed(ctx context.Context, blockID uint64, message string) *agentmodel.DocumentBlock {
+func (s Service) MarkBlockFailed(ctx context.Context, blockID uint64, message string) (*agentmodel.DocumentBlock, error) {
 	block := s.repository.updateBlock(ctx, blockID, map[string]any{
 		"status": agentmodel.DocumentBlockStatusFailed,
 		"meta":   encodeJSON(map[string]any{"error": publicError(message)}, "{}"),
 	})
-	s.writeBlockStatus(ctx, block, "artifact_failed", nil)
-	return block
+	if block == nil {
+		return nil, fmt.Errorf("更新素材失败状态失败")
+	}
+	return block, s.writeBlockStatus(ctx, block, "artifact_failed", nil)
 }
 
-func (s Service) writeBlockStatus(ctx context.Context, block *agentmodel.DocumentBlock, event string, artifacts []map[string]any) {
+func (s Service) writeBlockStatus(ctx context.Context, block *agentmodel.DocumentBlock, event string, artifacts []map[string]any) error {
 	if block == nil {
-		return
+		return fmt.Errorf("素材文档块不存在")
 	}
-	s.streams.write(ctx, block.DocumentID, event, map[string]any{"block": blockPayload(*block, artifacts)})
-	_, _ = s.RefreshStatus(ctx, block.DocumentID)
+	output := map[string]any{"block": blockPayload(*block, artifacts)}
+	if len(artifacts) > 0 {
+		output["artifacts"] = artifacts
+	}
+	if err := s.streams.write(ctx, block.DocumentID, event, output); err != nil {
+		return err
+	}
+	_, err := s.RefreshStatus(ctx, block.DocumentID)
+	return err
 }
 
 func (s Service) MarkContentComplete(ctx context.Context, documentID uint64) (*agentmodel.Document, error) {
@@ -141,7 +233,7 @@ func (s Service) MarkContentComplete(ctx context.Context, documentID uint64) (*a
 		return nil, fmt.Errorf("智能体文档不存在")
 	}
 	if isTerminalDocumentStatus(document.Status) {
-		return document, nil
+		return s.RefreshStatus(ctx, documentID)
 	}
 	if document.Status == agentmodel.DocumentStatusWriting {
 		document = s.repository.update(ctx, documentID, map[string]any{"status": agentmodel.DocumentStatusGenerating})
@@ -149,7 +241,7 @@ func (s Service) MarkContentComplete(ctx context.Context, documentID uint64) (*a
 	if document == nil {
 		return nil, fmt.Errorf("更新智能体文档状态失败")
 	}
-	s.streams.write(ctx, documentID, "document_content_complete", map[string]any{
+	_ = s.streams.write(ctx, documentID, "document_content_complete", map[string]any{
 		"document_id": documentID,
 		"status":      document.Status,
 	})
@@ -182,7 +274,7 @@ func (s Service) RefreshStatus(ctx context.Context, documentID uint64) (*agentmo
 		return updated, nil
 	}
 	if isTerminalDocumentStatus(document.Status) && pending == 0 {
-		return document, nil
+		return document, s.publishDocumentComplete(ctx, *document)
 	}
 	status := agentmodel.DocumentStatusReady
 	completedAt := any(time.Now())
@@ -192,18 +284,31 @@ func (s Service) RefreshStatus(ctx context.Context, documentID uint64) (*agentmo
 	} else if failed > 0 {
 		status = agentmodel.DocumentStatusPartialFailed
 	}
+	if status == agentmodel.DocumentStatusReady || status == agentmodel.DocumentStatusPartialFailed {
+		projected := *document
+		projected.Status = status
+		if err := s.publishDocumentComplete(ctx, projected); err != nil {
+			// Keep the durable document non-terminal so periodic reconciliation can
+			// retry a terminal event that did not reach the shared stream.
+			return document, err
+		}
+	}
 	updated := s.repository.update(ctx, documentID, map[string]any{
 		"status":            status,
 		"pending_job_count": pending,
 		"completed_at":      completedAt,
 	})
-	if updated != nil && (status == agentmodel.DocumentStatusReady || status == agentmodel.DocumentStatusPartialFailed) {
-		s.streams.write(ctx, documentID, "document_complete", map[string]any{
-			"document_id": documentID,
-			"status":      status,
-		})
+	if updated == nil {
+		return nil, fmt.Errorf("更新智能体文档状态失败")
 	}
 	return updated, nil
+}
+
+func (s Service) publishDocumentComplete(ctx context.Context, document agentmodel.Document) error {
+	return s.streams.write(ctx, document.ID, "document_complete", map[string]any{
+		"document_id": document.ID,
+		"status":      document.Status,
+	})
 }
 
 func isTerminalDocumentStatus(status string) bool {

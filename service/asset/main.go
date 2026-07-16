@@ -141,8 +141,8 @@ type saveVersionResult struct {
 
 func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset, *assetmodel.Version, error) {
 	assetModel := assetmodel.NewAssetModel()
-	asset := assetModel.Find(ctx, assetIdentityFilter(req, true))
-	if asset == nil && req.Role == assetmodel.RoleContent {
+	asset := findAssetByIdentity(ctx, req)
+	if asset == nil && strings.TrimSpace(req.NodeKey) == "" && req.Role == assetmodel.RoleContent {
 		asset = assetModel.Find(ctx, assetIdentityFilter(req, false))
 		if asset != nil && NormalizeRole(asset.Role) != assetmodel.RoleContent {
 			asset = nil
@@ -160,6 +160,7 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 			"team_id":       req.TeamID,
 			"flow_id":       req.FlowID,
 			"asset_cate_id": req.AssetCateID,
+			"node_key":      strings.TrimSpace(req.NodeKey),
 			"name":          req.Name,
 			"kind":          req.Kind,
 			"role":          req.Role,
@@ -170,7 +171,7 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 		})
 		asset = assetModel.Find(ctx, map[string]any{"id": assetID})
 		if asset == nil {
-			asset = assetModel.Find(ctx, assetIdentityFilter(req, true))
+			asset = findAssetByIdentity(ctx, req)
 		}
 	}
 	if asset == nil {
@@ -181,8 +182,10 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 			return asset, current, nil
 		}
 		assetModel.Update(ctx, map[string]any{"id": asset.ID}, map[string]any{
+			"name":       req.Name,
 			"kind":       req.Kind,
 			"role":       req.Role,
+			"node_key":   strings.TrimSpace(req.NodeKey),
 			"version_id": version.ID,
 			"status":     assetmodel.StatusCurrent,
 		})
@@ -197,8 +200,10 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 		return nil, nil, fmt.Errorf("创建资产版本失败")
 	}
 	assetModel.Update(ctx, map[string]any{"id": asset.ID}, map[string]any{
+		"name":       req.Name,
 		"kind":       req.Kind,
 		"role":       req.Role,
+		"node_key":   strings.TrimSpace(req.NodeKey),
 		"version_id": versionID,
 		"status":     assetmodel.StatusCurrent,
 	})
@@ -211,18 +216,61 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 }
 
 func assetIdentityFilter(req SaveVersionRequest, includeRole bool) map[string]any {
-	filter := map[string]any{
-		"project_id":    req.ProjectID,
-		"body_id":       req.BodyID,
-		"team_id":       req.TeamID,
-		"flow_id":       req.FlowID,
-		"asset_cate_id": req.AssetCateID,
-		"name":          req.Name,
+	filter := map[string]any{"project_id": req.ProjectID, "asset_cate_id": req.AssetCateID}
+	if nodeKey := strings.TrimSpace(req.NodeKey); nodeKey != "" {
+		filter["node_key"] = nodeKey
+		if req.ProjectID == 0 {
+			filter["body_id"] = req.BodyID
+			filter["team_id"] = req.TeamID
+			filter["flow_id"] = req.FlowID
+		}
+	} else {
+		filter["body_id"] = req.BodyID
+		filter["team_id"] = req.TeamID
+		filter["flow_id"] = req.FlowID
+		filter["name"] = req.Name
 	}
 	if includeRole {
 		filter["role"] = req.Role
 	}
 	return filter
+}
+
+func findAssetByIdentity(ctx context.Context, req SaveVersionRequest) *assetmodel.Asset {
+	assetModel := assetmodel.NewAssetModel()
+	if asset := assetModel.Find(ctx, assetIdentityFilter(req, true)); asset != nil {
+		return asset
+	}
+	nodeKey := strings.TrimSpace(req.NodeKey)
+	if nodeKey == "" {
+		return nil
+	}
+	for _, version := range assetmodel.NewVersionModel().Select(ctx, map[string]any{
+		"node_key": nodeKey,
+	}, map[string]any{"order": "main.id desc", "limit": 100}) {
+		if version == nil {
+			continue
+		}
+		asset := assetModel.Find(ctx, map[string]any{"id": version.AssetID})
+		if !assetMatchesSaveRequest(asset, req) {
+			continue
+		}
+		assetModel.Update(ctx, map[string]any{"id": asset.ID}, map[string]any{"node_key": nodeKey})
+		asset.NodeKey = nodeKey
+		return asset
+	}
+	return nil
+}
+
+func assetMatchesSaveRequest(asset *assetmodel.Asset, req SaveVersionRequest) bool {
+	if asset == nil ||
+		asset.ProjectID != req.ProjectID ||
+		asset.AssetCateID != req.AssetCateID ||
+		NormalizeRole(asset.Role) != req.Role {
+		return false
+	}
+	return req.ProjectID > 0 ||
+		(asset.BodyID == req.BodyID && asset.TeamID == req.TeamID && asset.FlowID == req.FlowID)
 }
 
 func (s Service) UpdateVersionContent(ctx context.Context, projectID uint64, assetID uint64, versionID uint64, content any) (*assetmodel.Asset, *assetmodel.Version, error) {
@@ -239,6 +287,7 @@ func (s Service) UpdateVersionContent(ctx context.Context, projectID uint64, ass
 		Name:        asset.Name,
 		Kind:        asset.Kind,
 		Role:        NormalizeRole(asset.Role),
+		NodeKey:     asset.NodeKey,
 	}, func() (saveVersionResult, error) {
 		asset, version, err := s.updateVersionContent(ctx, projectID, assetID, versionID, content)
 		return saveVersionResult{Asset: asset, Version: version}, err
@@ -295,6 +344,7 @@ func AssetToMap(row assetmodel.Asset) map[string]any {
 		"team_id":       row.TeamID,
 		"flow_id":       row.FlowID,
 		"asset_cate_id": row.AssetCateID,
+		"node_key":      strings.TrimSpace(row.NodeKey),
 		"name":          row.Name,
 		"kind":          row.Kind,
 		"role":          NormalizeRole(row.Role),

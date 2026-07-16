@@ -92,7 +92,7 @@ func (m MappedInput) NativeBody() map[string]any {
 	}
 	for key, value := range m.Original {
 		key = strings.TrimSpace(key)
-		if key == "" || IsInternalInputKey(key) || mappedKeys[key] || mappedNativeKeys[key] || isEmptyNativeValue(value) {
+		if key == "" || isNativeInputKeyExcluded(key) || mappedKeys[key] || mappedNativeKeys[key] || isEmptyNativeValue(value) {
 			continue
 		}
 		assignNativeValue(body, key, value)
@@ -312,6 +312,11 @@ func splitMappedInputKeys(value string) []string {
 
 func IsInternalInputKey(key string) bool {
 	return strings.HasPrefix(strings.TrimSpace(key), InternalServiceParamInputPrefix)
+}
+
+func isNativeInputKeyExcluded(key string) bool {
+	key = strings.TrimSpace(key)
+	return key == "previous_output" || IsInternalInputKey(key)
 }
 
 func cloneAnyMap(source map[string]any) map[string]any {

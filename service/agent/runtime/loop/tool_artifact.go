@@ -93,16 +93,19 @@ func (batch toolArtifactBatch) recoveredResult(ctx context.Context) (runtimeprov
 	}, true
 }
 
-func (batch toolArtifactBatch) complete(ctx context.Context, result runtimeprovider.Result) runtimeprovider.Result {
+func (batch toolArtifactBatch) complete(ctx context.Context, result runtimeprovider.Result) (runtimeprovider.Result, error) {
 	if len(batch.pending) == 0 {
-		return result
+		return result, nil
 	}
-	content, _ := result.Content.(map[string]any)
-	result.Content = batch.service.CompleteBatch(ctx, batch.pending, content)
+	content, err := batch.service.CompleteBatch(ctx, batch.pending, result.Content)
+	if err != nil {
+		return result, err
+	}
+	result.Content = content
 	if output, ok := result.Content.(map[string]any); ok {
 		result.ModelResult = runtimeartifact.ModelOutput(output)
 	}
-	return result
+	return result, nil
 }
 
 func (batch toolArtifactBatch) fail(ctx context.Context, message string) map[string]any {

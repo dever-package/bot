@@ -5,15 +5,19 @@ import {
   useAuiState,
 } from "@assistant-ui/react";
 import { ArrowDown, Bot, Check, Copy, Loader2 } from "lucide-react";
-import type { ComponentType } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import { getCompatModule } from "@dever/front-plugin";
 import { cn } from "@/lib/utils";
+import { copyTextToClipboard } from "../clipboard";
 import { StreamingMarkdown } from "./markdown";
 import { AgentChatActivityView } from "./activity-view";
 import type { AgentChatActivity } from "./activity";
 import { AgentChatMessageOutput } from "./message-output";
 import { AgentChatDocumentView } from "./document-view";
-import type { AgentChatDocument } from "./document";
+import {
+  agentChatDocumentCopyText,
+  type AgentChatDocument,
+} from "./document";
 import { MessageNavigator } from "./message-navigator";
 import {
   findAgentChatInteractionResponse,
@@ -48,7 +52,13 @@ const ReferenceContentView =
 
 const CHAT_COLUMN_CLASS = "agent-chat-column";
 
-export function Thread({ controller }: { controller: AgentChatController }) {
+export function Thread({
+  controller,
+  clipboardImageUploadRuleId,
+}: {
+  controller: AgentChatController;
+  clipboardImageUploadRuleId?: number;
+}) {
   return (
     <ThreadPrimitive.Root className="relative flex min-h-0 flex-1 flex-col bg-background">
       <style>{threadStyles}</style>
@@ -115,7 +125,10 @@ export function Thread({ controller }: { controller: AgentChatController }) {
                 {controller.error}
               </div>
             ) : null}
-            <Composer controller={controller} />
+            <Composer
+              controller={controller}
+              clipboardImageUploadRuleId={clipboardImageUploadRuleId}
+            />
           </div>
         </footer>
       </ThreadPrimitive.ViewportProvider>
@@ -251,6 +264,66 @@ function AssistantMessage({ controller }: { controller: AgentChatController }) {
 }
 
 function MessageActions({ role }: { role: "user" | "assistant" }) {
+  const status = useAuiState((state) => state.message.status);
+  const sourceText = useAuiState(
+    (state) => state.message.metadata.custom?.sourceText,
+  );
+  const document = useAuiState(
+    (state) => state.message.metadata.custom?.document,
+  ) as AgentChatDocument | undefined;
+  const partText = useAuiState((state) =>
+    state.message.parts
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("\n"),
+  );
+  const copyText = document?.hydrated
+    ? agentChatDocumentCopyText(document)
+    : typeof sourceText === "string" && sourceText.trim()
+      ? sourceText
+      : partText;
+  const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const resetTimerRef = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (resetTimerRef.current != null) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const resetCopyStateLater = () => {
+    if (resetTimerRef.current != null) {
+      window.clearTimeout(resetTimerRef.current);
+    }
+    resetTimerRef.current = window.setTimeout(() => {
+      setCopied(false);
+      setCopyFailed(false);
+      resetTimerRef.current = null;
+    }, 1800);
+  };
+
+  const copyMessage = async () => {
+    if (!copyText.trim()) {
+      return;
+    }
+    setCopyFailed(false);
+    try {
+      await copyTextToClipboard(copyText);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+      setCopyFailed(true);
+    }
+    resetCopyStateLater();
+  };
+
+  const disabled =
+    !copyText.trim() ||
+    (role === "assistant" && status?.type === "running");
   return (
     <ActionBarPrimitive.Root
       className={cn(
@@ -259,20 +332,32 @@ function MessageActions({ role }: { role: "user" | "assistant" }) {
       )}
       data-message-role={role}
     >
-      <ActionBarPrimitive.Copy
-        copiedDuration={1800}
+      <button
+        type="button"
         className="agent-chat-message-action agent-chat-copy-action"
-        title="复制"
-        aria-label="复制消息"
+        title={
+          copyFailed ? "复制失败，请手动选择消息文本" : copied ? "已复制" : "复制"
+        }
+        aria-label={copied ? "消息已复制" : "复制消息"}
+        data-copied={copied ? "true" : undefined}
+        data-copy-failed={copyFailed ? "true" : undefined}
+        disabled={disabled}
+        onClick={() => void copyMessage()}
       >
         <Copy className="agent-chat-copy-icon" aria-hidden="true" />
         <Check className="agent-chat-copied-icon" aria-hidden="true" />
-      </ActionBarPrimitive.Copy>
+      </button>
     </ActionBarPrimitive.Root>
   );
 }
 
-function Composer({ controller }: { controller: AgentChatController }) {
+function Composer({
+  controller,
+  clipboardImageUploadRuleId,
+}: {
+  controller: AgentChatController;
+  clipboardImageUploadRuleId?: number;
+}) {
   return (
     <ReferenceComposer
       placeholder="发消息"
@@ -281,6 +366,7 @@ function Composer({ controller }: { controller: AgentChatController }) {
       stopping={controller.stopping}
       cancelable={controller.cancelable}
       layerZIndex={AGENT_CHAT_CHILD_LAYER_Z_INDEX}
+      clipboardImageUploadRuleId={clipboardImageUploadRuleId}
       parameters={controller.inputParams}
       loadReferences={controller.loadReferences}
       loadPreview={controller.loadReferencePreview}
@@ -524,6 +610,10 @@ const threadStyles = `
 
 .agent-chat-copy-action[data-copied="true"] .agent-chat-copied-icon {
   display: block;
+}
+
+.agent-chat-copy-action[data-copy-failed="true"] {
+  color: var(--destructive);
 }
 
 .agent-chat-footer {

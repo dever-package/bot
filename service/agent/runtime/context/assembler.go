@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
 )
 
 type AssembleRequest struct {
@@ -13,6 +14,7 @@ type AssembleRequest struct {
 	Agent          agentmodel.Agent
 	CategoryPrompt string
 	Input          string
+	IncludeMemory  bool
 }
 
 type InternalAssembleRequest struct {
@@ -41,8 +43,20 @@ func (Assembler) Assemble(ctx context.Context, request AssembleRequest) (Result,
 	if strings.TrimSpace(request.Agent.Key) == "" || session.AgentKey != strings.TrimSpace(request.Agent.Key) {
 		return Result{}, fmt.Errorf("会话智能体不匹配")
 	}
-	history := recentHistory(ctx, session)
-	prompt := buildPrompt(ctx, request, session)
+	var history []any
+	var prompt string
+	var group runtimeasync.Group
+	group.Go("读取会话历史", func() error {
+		history = recentHistory(ctx, session)
+		return nil
+	})
+	group.Go("组装智能体提示词", func() error {
+		prompt = buildPrompt(ctx, request, session)
+		return nil
+	})
+	if err := group.Wait(); err != nil {
+		return Result{}, err
+	}
 	return Result{Prompt: prompt, History: history, HistoryCount: len(history)}, nil
 }
 

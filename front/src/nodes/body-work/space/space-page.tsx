@@ -97,7 +97,7 @@ import {
   reconcileCanvasGroupEdges,
   withCanvasNodeGroupAtPosition,
   withMovedCanvasNode,
-  withoutCanvasGroup,
+  withoutCanvasGroupAndMembers,
 } from "./space-group-model";
 import { PowerIcon } from "./space-power-icon";
 import {
@@ -141,6 +141,10 @@ import {
   type AssetDetailRenderInput,
 } from "./space-asset-viewer";
 import {
+  buildCanvasAssetIndex,
+  type CanvasAssetEntry,
+} from "./space-asset-index";
+import {
   normalizeCanvasRunRef,
   type CanvasNodeResultRef,
   type CanvasRunRef,
@@ -175,6 +179,8 @@ import {
   hasDefaultCanvasNodeSize,
   isExecutionRole,
   looseRichJSONText,
+  nextCanvasNodeNo,
+  normalizeCanvasNodeIdentities,
   relatedFlows,
   richDocument,
   visibleAssetCates,
@@ -182,6 +188,8 @@ import {
 import type {
   AssetCate,
   CanvasComposerDraft,
+  CanvasContentPreview,
+  CanvasReferenceContent,
   CanvasFunctionOption,
   CanvasResultSourceRef,
   CanvasResultViewState,
@@ -197,6 +205,7 @@ import type {
   TeamRole,
 } from "./types";
 import { SpaceAnimatedEdge } from "./space-edge";
+import { EditableCanvasNodeTitle } from "./space-node-title";
 import {
   type ComposerAssetItem,
   type UploadPreview,
@@ -205,7 +214,10 @@ import {
   isToolbarPowerParam,
   isUploadPowerParam,
 } from "./space-prompt-composer";
-import { defaultPowerParamValues } from "./space-power-param";
+import {
+  defaultPowerParamValues,
+  normalizePowerParamValue,
+} from "./space-power-param";
 import {
   CanvasNodeContentView,
   contentOutputNeedsRenderer,
@@ -214,9 +226,10 @@ import {
 import { plainMarkdownTextFromRichOutput } from "./space-content-output";
 import { resolvePowerPresentation } from "./space-power-presentation";
 import {
-  firstAvailableImagePower,
-  syncCanvasStoryboardMaterialGroups,
-} from "./space-storyboard-material-groups";
+  firstAvailablePower,
+  syncCanvasStoryboardDerivedGroups,
+} from "./space-storyboard-derived-groups";
+import { parseStoryboardOutput } from "./space-storyboard";
 import {
   parseMaybeEmbeddedJSON,
   parseMaybeJSON,
@@ -258,6 +271,7 @@ type NodeResultSetter = (
   patch: Partial<SpaceCanvasNode>,
 ) => void;
 type NodeDraftSetter = (nodeId: string, draft: CanvasComposerDraft) => void;
+type ComposerDraft = CanvasComposerDraft;
 type NodeStartRunner = (node: SpaceCanvasNode) => Promise<void>;
 type BackendNodeRunOptions = {
   agentInput?: ReferenceInput;
@@ -272,12 +286,22 @@ function omitRunningNode(
   nodes: RunningNodeMap,
   nodeId: string,
 ): RunningNodeMap {
-  if (!nodes[nodeId]) {
-    return nodes;
+  return omitRecordKeys(nodes, new Set([nodeId]));
+}
+
+function omitRecordKeys<T>(
+  values: Record<string, T>,
+  keys: ReadonlySet<string>,
+) {
+  let next: Record<string, T> | null = null;
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(values, key)) {
+      continue;
+    }
+    next ||= { ...values };
+    delete next[key];
   }
-  const next = { ...nodes };
-  delete next[nodeId];
-  return next;
+  return next || values;
 }
 
 function hasRunningCanvasNode(nodes: RunningNodeMap) {
@@ -311,13 +335,7 @@ type AddConfiguredNodeHandler = (
   },
 ) => void;
 type CanvasPoint = { x: number; y: number };
-type GeneratedNodePreview = {
-  text: string;
-  imageUrl: string;
-  videoUrl: string;
-  audioUrl: string;
-  fileUrl: string;
-};
+type GeneratedNodePreview = CanvasContentPreview;
 type NodeInputContext = {
   text: string;
   sources: Array<{
@@ -504,7 +522,11 @@ export function WorkSpacePage() {
   }, [space, activeCate]);
   const menuFlows = useMemo(() => activeFlows, [activeFlows]);
   const imagePower = useMemo(
-    () => firstAvailableImagePower(powers),
+    () => firstAvailablePower(powers, "image"),
+    [powers],
+  );
+  const videoPower = useMemo(
+    () => firstAvailablePower(powers, "video"),
     [powers],
   );
   const activeCanvas = useMemo(
@@ -518,6 +540,34 @@ export function WorkSpacePage() {
     () => applyNodeResultOverrides(activeCanvas, nodeResultOverrides),
     [activeCanvas, nodeResultOverrides],
   );
+  const canvasAssetEntries = useMemo(
+    () =>
+      buildCanvasAssetIndex({
+        nodes: canvasModel.nodes,
+        assets: space?.assets || [],
+        assetCateId: activeCate?.id || 0,
+        nodeOutput: nodeContextOutput,
+        nodePreview: generatedNodePreview,
+        assetPreview: (asset) => {
+          const output = asset.version?.content ?? asset.name;
+          const preview = generatedPreviewFromValue(
+            output,
+            String(asset.kind || ""),
+          );
+          if (!hasGeneratedPreview(preview)) {
+            preview.text = asset.name;
+          }
+          return preview;
+        },
+        nodeHasResult: nodeHasResultContent,
+        nodeRunStatus: (node) => runningNodes[node.id]?.status || "",
+      }),
+    [activeCate?.id, canvasModel.nodes, runningNodes, space?.assets],
+  );
+  const canvasReferenceItems = useMemo(
+    () => buildCanvasReferenceItems(canvasAssetEntries),
+    [canvasAssetEntries],
+  );
 
   useEffect(() => {
     if (!space) {
@@ -527,23 +577,25 @@ export function WorkSpacePage() {
       let next = current;
       for (const [key, canvas] of Object.entries(current)) {
         const assetCateId = Number(key || canvas.assetCateId || 0);
-        const synced = syncCanvasStoryboardMaterialGroups({
+        const synced = syncCanvasStoryboardDerivedGroups({
           canvas,
           assetCate: assetCateById(space, assetCateId),
           imagePower,
+          videoPower,
         });
-        if (synced === canvas) {
+        const normalized = normalizeCanvasForState(synced, assetCateId);
+        if (isSameCanvasState(canvas, normalized)) {
           continue;
         }
         if (next === current) {
           next = { ...current };
         }
-        next[key] = synced;
+        next[key] = normalized;
         changedCanvasKeysRef.current.add(assetCateId);
       }
       return next;
     });
-  }, [imagePower, space]);
+  }, [imagePower, space, videoPower]);
 
   const openImportPickerByNodeId = useCallback(
     (nodeId = "") => {
@@ -636,16 +688,14 @@ export function WorkSpacePage() {
           ),
         };
         const syncedCanvas = space
-          ? syncCanvasStoryboardMaterialGroups({
+          ? syncCanvasStoryboardDerivedGroups({
               canvas: patchedCanvas,
               assetCate: assetCateById(space, assetCateId),
               imagePower,
+              videoPower,
             })
           : patchedCanvas;
-        const nextCanvas = normalizeCanvasForState(
-          syncedCanvas,
-          assetCateId,
-        );
+        const nextCanvas = normalizeCanvasForState(syncedCanvas, assetCateId);
         if (isSameCanvasState(currentCanvas, nextCanvas)) {
           return current;
         }
@@ -656,14 +706,34 @@ export function WorkSpacePage() {
         };
       });
     },
-    [imagePower, space],
+    [imagePower, space, videoPower],
   );
 
   const updateNodeResult = useCallback<NodeResultSetter>(
     (nodeId, patch) => {
       updateCanvasNodeResult(Number(activeCate?.id || 0), nodeId, patch);
+      if (typeof patch.title === "string" && patch.title.trim()) {
+        updateActiveCanvas((canvas) => ({
+          ...canvas,
+          nodes: canvas.nodes.map((node) =>
+            node.id !== nodeId
+              ? node
+              : patch.titleMode === "manual"
+                ? {
+                    ...node,
+                    title: patch.title!.trim(),
+                    titleMode: "manual",
+                  }
+                : node.titleMode === "auto"
+                  ? { ...node, title: patch.title!.trim() }
+                  : node.type === "group"
+                    ? { ...node, title: patch.title!.trim() }
+                    : node,
+          ),
+        }));
+      }
     },
-    [activeCate?.id, updateCanvasNodeResult],
+    [activeCate?.id, updateActiveCanvas, updateCanvasNodeResult],
   );
 
   const persistCanvasRunSnapshot = useCallback(
@@ -899,9 +969,12 @@ export function WorkSpacePage() {
         return;
       }
       const targetNode = mergeBackendSingleNodeDraft(node);
+      const executionNodes = canvasModel.nodes.map((item) =>
+        item.id === targetNode.id ? targetNode : item,
+      );
       const inputContext = buildNodeInputContext(
         node.id,
-        canvasModel.nodes,
+        executionNodes,
         canvasModel.edges.map((edge) => ({
           source: edge.from,
           target: edge.to,
@@ -913,9 +986,7 @@ export function WorkSpacePage() {
         space,
         startNode: targetNode,
         singleNode: true,
-        nodes: canvasModel.nodes.map((item) =>
-          item.id === targetNode.id ? targetNode : item,
-        ),
+        nodes: executionNodes,
         edges: canvasModel.edges,
         viewport: activeCanvas.viewport,
         runInput: {
@@ -1338,37 +1409,52 @@ export function WorkSpacePage() {
   }
 
   function deleteCanvasNode(node: SpaceCanvasNode) {
+    const removedNodeIds = new Set(
+      node.type === "group"
+        ? [
+            node.id,
+            ...canvasGroupMembers(activeCanvas.nodes, node.id).map(
+              (member) => member.id,
+            ),
+          ]
+        : [node.id],
+    );
     updateActiveCanvas((canvas) => {
       const nodes =
         node.type === "group"
-          ? withoutCanvasGroup(canvas.nodes, node.id)
-          : canvas.nodes.filter((item) => item.id !== node.id);
-      const edges =
-        node.type === "group"
-          ? canvas.edges.filter(
-              (edge) => edge.from !== node.id && edge.to !== node.id,
-            )
-          : canvas.edges;
+          ? withoutCanvasGroupAndMembers(canvas.nodes, node.id)
+          : canvas.nodes.filter((item) => !removedNodeIds.has(item.id));
       return {
         ...canvas,
         nodes,
-        edges: reconcileCanvasGroupEdges(nodes, edges),
+        edges: reconcileCanvasGroupEdges(nodes, canvas.edges),
       };
     });
-    setNodeResultOverrides((current) => {
-      if (!Object.prototype.hasOwnProperty.call(current, node.id)) {
-        return current;
-      }
-      const next = { ...current };
-      delete next[node.id];
-      return next;
-    });
+    setNodeResultOverrides((current) =>
+      omitRecordKeys(current, removedNodeIds),
+    );
+    setRunningNodes((current) => omitRecordKeys(current, removedNodeIds));
     setSelectedNodeId("");
     setFocusNodeRequest((current) =>
-      current?.nodeId === node.id ? null : current,
+      current && removedNodeIds.has(current.nodeId) ? null : current,
     );
-    setNodeDetail((current) => (current?.id === node.id ? null : current));
-    toast.success("已删除节点");
+    setNodeDetail((current) =>
+      current && removedNodeIds.has(current.id) ? null : current,
+    );
+    setPendingImportNodeId((current) =>
+      removedNodeIds.has(current) ? "" : current,
+    );
+    if (
+      pendingImportNodeRef.current &&
+      removedNodeIds.has(pendingImportNodeRef.current.id)
+    ) {
+      pendingImportNodeRef.current = null;
+    }
+    toast.success(
+      node.type === "group"
+        ? "已删除分组及 " + (removedNodeIds.size - 1) + " 个节点"
+        : "已删除节点",
+    );
   }
 
   function addAssetNode(asset: ProjectAsset, position?: CanvasPoint) {
@@ -1636,6 +1722,7 @@ export function WorkSpacePage() {
         onFocusNodeRequestConsumed={consumeFocusNodeRequest}
         projectId={projectId}
         space={space}
+        canvasReferenceItems={canvasReferenceItems}
         catalogCache={catalogCache}
         runningNodes={runningNodes}
         setRunningNode={setRunningNodes}
@@ -1719,9 +1806,25 @@ export function WorkSpacePage() {
 
       {workMode === "result" ? (
         <AssetWorkspacePanel
-          space={space}
           activeCate={activeCate}
+          hasAssetCates={hasAssetCates}
+          entries={canvasAssetEntries}
           onClose={() => setWorkMode("create")}
+          onOpenNode={setNodeDetail}
+          onOpenAsset={(asset) => {
+            const detailNode = createLocalNode(
+              "asset",
+              activeCate,
+              0,
+              { x: 0, y: 0 },
+              { asset },
+            );
+            setNodeDetail({
+              ...detailNode,
+              id: `asset-detail-${asset.id}`,
+              local: false,
+            });
+          }}
           renderAssetDetail={(input) => <AssetEditorSurface {...input} />}
         />
       ) : null}
@@ -1810,16 +1913,22 @@ export function WorkSpacePage() {
         <NodeDetailDialog
           projectId={space.project.id}
           node={nodeDetail}
+          canvasReferenceItems={canvasReferenceItems.filter(
+            (item) => item.source !== "current" || item.id !== nodeDetail.id,
+          )}
           onAssetUpdated={(asset) => {
             const normalizedAsset = mergeProjectAssetVersionHistory(
               asset,
               nodeDetail.asset,
             );
+            upsertSpaceAsset(normalizedAsset);
             const nodePatch = buildAssetVersionNodePatch(
               nodeDetail,
               normalizedAsset,
             );
-            updateNodeResult(nodeDetail.id, nodePatch);
+            if (!nodeDetail.id.startsWith("asset-detail-")) {
+              updateNodeResult(nodeDetail.id, nodePatch);
+            }
             setNodeDetail((current) =>
               current?.id === nodeDetail.id
                 ? {
@@ -1953,7 +2062,7 @@ const dockModeOptions: Array<{
   icon: LucideIcon;
 }> = [
   { key: "create", label: "创作", icon: PenTool },
-  { key: "result", label: "结果", icon: FileSearch },
+  { key: "result", label: "资产", icon: FileSearch },
 ];
 
 function LeftCanvasDock({
@@ -2184,6 +2293,7 @@ function CanvasWorkbench({
   onFocusNodeRequestConsumed,
   projectId,
   space,
+  canvasReferenceItems,
   catalogCache,
   runningNodes,
   setRunningNode,
@@ -2222,6 +2332,7 @@ function CanvasWorkbench({
   onFocusNodeRequestConsumed: (request: NodeFocusRequest) => void;
   projectId: number;
   space: SpaceBootstrap;
+  canvasReferenceItems: ComposerAssetItem[];
   catalogCache: SpaceCatalogCache;
   runningNodes: RunningNodeMap;
   setRunningNode: RunningNodeSetter;
@@ -2276,11 +2387,7 @@ function CanvasWorkbench({
     if (!interactive) {
       return;
     }
-    const nextNodes = withResizedCanvasResultView(
-      nodes,
-      nodeId,
-      resultView,
-    );
+    const nextNodes = withResizedCanvasResultView(nodes, nodeId, resultView);
     if (nextNodes !== nodes) {
       onNodesCommit(nextNodes);
     }
@@ -2401,6 +2508,7 @@ function CanvasWorkbench({
         cachedData.runningNode === runningNode &&
         sameCanvasNodes(cachedData.groupMembers || [], groupMembers) &&
         cachedData.canvasRunningNodes === canvasRunningNodes &&
+        cachedData.canvasReferenceItems === canvasReferenceItems &&
         cachedData.interactive === interactive &&
         cachedData.viewportZoom === viewportZoom &&
         sameNodeInputContext(cachedData.inputContext, inputContext);
@@ -2415,6 +2523,7 @@ function CanvasWorkbench({
             runningNode,
             groupMembers,
             canvasRunningNodes,
+            canvasReferenceItems,
             interactive,
             setRunningNode,
             ...stableNodeActions,
@@ -2471,6 +2580,7 @@ function CanvasWorkbench({
     setRunningNode,
     space,
     catalogCache,
+    canvasReferenceItems,
     stableNodeActions,
     viewportZoom,
   ]);
@@ -2526,6 +2636,7 @@ function CanvasWorkbench({
         data: {
           logicalFrom: edge.logicalFrom,
           logicalTo: edge.logicalTo,
+          executionMode: edge.executionMode,
         },
       }))
       .map((edge) =>
@@ -2877,7 +2988,8 @@ function CanvasWorkbench({
         );
         membershipChanged =
           (sourceNode.groupId || "") !==
-          (groupedNodes.find((node) => node.id === sourceNode.id)?.groupId || "");
+          (groupedNodes.find((node) => node.id === sourceNode.id)?.groupId ||
+            "");
         if (groupedNodes !== nodes) {
           onNodesCommit(groupedNodes);
         }
@@ -3410,8 +3522,17 @@ function buildGeneratedNodeResultPatch(
     preview.audioUrl ||
     preview.fileUrl ||
     (fallbackPrompt ? `已按提示生成：${fallbackPrompt}` : "生成完成");
+  const storyboard =
+    node.type === "power" &&
+    resolvePowerPresentation(node.power, node.kind, node.outputType)
+      .viewMode === "storyboard"
+      ? parseStoryboardOutput(output)
+      : null;
 
   return {
+    ...(storyboard?.title && node.titleMode === "auto"
+      ? { title: storyboard.title }
+      : {}),
     description: summary,
     resultRef: buildNodeResultRef(result),
     resultOutput: output,
@@ -3452,17 +3573,47 @@ function normalizeComposerDraft(value: unknown): ComposerDraft {
       : {};
   return {
     prompt: typeof row.prompt === "string" ? row.prompt : "",
+    promptContent:
+      row.promptContent && typeof row.promptContent === "object"
+        ? (row.promptContent as CanvasReferenceContent)
+        : row.prompt_content && typeof row.prompt_content === "object"
+          ? (row.prompt_content as CanvasReferenceContent)
+          : undefined,
     paramValues,
     selectedTargetId: numericDraftValue(row.selectedTargetId),
   };
 }
 
 function readNodeComposerDraft(node: SpaceCanvasNode): ComposerDraft {
-  return normalizeComposerDraft((node as any).composerDraft);
+  const draft = normalizeComposerDraft((node as any).composerDraft);
+  const contentPrompt = composerPromptFromReferenceContent(
+    draft.promptContent,
+  );
+  if (contentPrompt) {
+    return { ...draft, prompt: contentPrompt };
+  }
+  return draft;
+}
+
+function composerPromptFromReferenceContent(
+  content: CanvasReferenceContent | undefined,
+) {
+  if (!content?.parts?.some((part) => part.type === "reference")) {
+    return "";
+  }
+  return content.parts
+    .map((part) => {
+      if (part.type === "text") {
+        return part.text;
+      }
+      const label = String(part.label || "").trim();
+      return label.startsWith("@") ? label : `@${label}`;
+    })
+    .join("");
 }
 
 function mergeBackendSingleNodeDraft(node: SpaceCanvasNode): SpaceCanvasNode {
-  const draft = normalizeComposerDraft((node as any).composerDraft);
+  const draft = readNodeComposerDraft(node);
   if (node.type !== "power" && node.type !== "agent") {
     return node;
   }
@@ -3471,6 +3622,7 @@ function mergeBackendSingleNodeDraft(node: SpaceCanvasNode): SpaceCanvasNode {
     composerDraft: {
       ...(node as any).composerDraft,
       prompt: draft.prompt,
+      promptContent: draft.promptContent,
       paramValues: draft.paramValues,
       selectedTargetId: draft.selectedTargetId,
     },
@@ -3480,6 +3632,7 @@ function mergeBackendSingleNodeDraft(node: SpaceCanvasNode): SpaceCanvasNode {
 function mergeSavedComposerParamValues(
   params: PowerParam[],
   draft: ComposerDraft,
+  primaryParamKey?: string,
 ) {
   const values = defaultPowerParamValues(params);
   const savedValues = draft.paramValues || {};
@@ -3488,8 +3641,17 @@ function mergeSavedComposerParamValues(
       param.key &&
       Object.prototype.hasOwnProperty.call(savedValues, param.key)
     ) {
-      values[param.key] = savedValues[param.key];
+      values[param.key] = normalizePowerParamValue(
+        param,
+        savedValues[param.key],
+      );
     }
+  }
+  const promptParam = params.find((param) =>
+    isPromptPowerParam(param, primaryParamKey),
+  );
+  if (promptParam?.key && draft.prompt.trim()) {
+    values[promptParam.key] = draft.prompt;
   }
   return values;
 }
@@ -3605,6 +3767,7 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
     singleNode: input.singleNode,
     canvas: {
       assetCateId: Number(input.assetCate.id || 0),
+      nextNodeNo: nextCanvasNodeNo(input.nodes),
       nodes: input.nodes,
       edges: input.edges,
       viewport: input.viewport || {},
@@ -6288,6 +6451,7 @@ function createSeedCanvasFromFlows(
   return normalizeCanvasForState(
     {
       assetCateId: activeCate.id,
+      nextNodeNo: 1,
       nodes,
       edges: [],
       viewport: {},
@@ -6314,7 +6478,9 @@ function cloneCanvasNode(
   return {
     ...node,
     id: `local-${node.type}-${Date.now()}-${index}`,
+    nodeNo: undefined,
     title: `${node.title} 副本`,
+    titleMode: "manual",
     x,
     y,
     assetCateId: node.assetCateId || assetCateId,
@@ -6332,28 +6498,10 @@ function buildNodeInputContext(
     .filter((edge) => edge.target === nodeId)
     .map((edge) => nodeMap.get(edge.source))
     .filter((node): node is SpaceCanvasNode => Boolean(node))
-    .filter(nodeHasResultContent)
-    .map((node) => {
-      const output = nodeContextOutput(node);
-      const preview = generatedPreviewFromValue(
-        output,
-        nodePreviewKind(node, output),
-      );
-      if (!hasGeneratedPreview(preview)) {
-        preview.text = displayTextFromOutput(
-          output,
-          node.description || node.title,
-        );
-      }
-      return {
-        nodeId: node.id,
-        title: node.title,
-        type: node.type,
-        output,
-        preview,
-        resultRef: node.resultRef,
-      };
-    })
+    .map(nodeInputContextSource)
+    .filter((source): source is NodeInputContext["sources"][number] =>
+      Boolean(source),
+    )
     .filter((source) => nodeInputContextLine(source).trim() !== "");
   if (sources.length === 0) {
     return null;
@@ -6361,6 +6509,31 @@ function buildNodeInputContext(
   return {
     sources,
     text: sources.map(nodeInputContextLine).join("\n\n"),
+  };
+}
+
+function nodeInputContextSource(node: SpaceCanvasNode) {
+  if (!nodeHasResultContent(node)) {
+    return null;
+  }
+  const output = nodeContextOutput(node);
+  const preview = generatedPreviewFromValue(
+    output,
+    nodePreviewKind(node, output),
+  );
+  if (!hasGeneratedPreview(preview)) {
+    preview.text = displayTextFromOutput(
+      output,
+      node.description || node.title,
+    );
+  }
+  return {
+    nodeId: node.id,
+    title: node.title,
+    type: node.type,
+    output,
+    preview,
+    resultRef: node.resultRef,
   };
 }
 
@@ -6820,35 +6993,80 @@ function buildComposerAssetLibrary(
   space: SpaceBootstrap | null,
   inputContext: NodeInputContext | null,
   activeCate?: AssetCate | null,
+  canvasItems: ComposerAssetItem[] = [],
 ): { current: ComposerAssetItem[]; assets: ComposerAssetItem[] } {
-  const current = (inputContext?.sources || []).map((source) => ({
-    id: source.nodeId,
-    title: source.title,
-    kind: composerKindFromPreview(source.preview, String(source.type || "")),
-    source: "current" as const,
-    output: source.output,
-    preview: source.preview,
-  }));
-  const assets = (space?.assets || []).map((asset) => {
-    const output = asset.version?.content ?? asset.name;
-    const preview = generatedPreviewFromValue(output, String(asset.kind || ""));
-    if (!hasGeneratedPreview(preview)) {
-      preview.text = asset.name;
-    }
-    return {
-      id: String(asset.id),
-      title: asset.name || `资产 ${asset.id}`,
-      kind: composerKindFromPreview(preview, String(asset.kind || "")),
-      role: activeCate
-        ? assetRoleForView(asset, activeCate)
-        : String(asset.role || ""),
-      source: "asset" as const,
-      output,
-      preview,
-      asset,
-    };
-  });
+  const current = mergeComposerAssetItems([
+    ...canvasItems,
+    ...(inputContext?.sources || []).map((source) => ({
+      id: source.nodeId,
+      title: source.title,
+      kind: composerKindFromPreview(source.preview, String(source.type || "")),
+      source: "current" as const,
+      output: source.output,
+      preview: source.preview,
+    })),
+  ]);
+  const assets = (space?.assets || [])
+    .filter((asset) => String(asset.status || "") !== "archived")
+    .map((asset) => {
+      const output = asset.version?.content ?? asset.name;
+      const preview = generatedPreviewFromValue(
+        output,
+        String(asset.kind || ""),
+      );
+      if (!hasGeneratedPreview(preview)) {
+        preview.text = asset.name;
+      }
+      return {
+        id: String(asset.id),
+        title: asset.name || `资产 ${asset.id}`,
+        kind: composerKindFromPreview(preview, String(asset.kind || "")),
+        role: activeCate
+          ? assetRoleForView(asset, activeCate)
+          : String(asset.role || ""),
+        source: "asset" as const,
+        refType: "artifact" as const,
+        refId: asset.id,
+        output,
+        preview,
+        asset,
+      };
+    });
   return { current, assets };
+}
+
+function buildCanvasReferenceItems(entries: CanvasAssetEntry[]) {
+  return entries.map(
+    (entry): ComposerAssetItem => ({
+      id:
+        entry.role === "material"
+          ? entry.nodeId || entry.key
+          : String(entry.assetId || entry.key),
+      title: entry.title,
+      kind: composerKindFromPreview(entry.preview, entry.nodeType),
+      role: entry.role,
+      source: entry.role === "material" ? "current" : "asset",
+      refType: entry.role === "material" ? "canvas_node" : "artifact",
+      refId: entry.role === "material" ? entry.nodeNo : entry.assetId,
+      output: entry.output,
+      preview: entry.preview,
+      asset: entry.asset,
+    }),
+  );
+}
+
+function mergeComposerAssetItems(items: ComposerAssetItem[]) {
+  const result: ComposerAssetItem[] = [];
+  const keys = new Set<string>();
+  for (const item of items) {
+    const key = `${item.source}:${item.id}`;
+    if (keys.has(key)) {
+      continue;
+    }
+    keys.add(key);
+    result.push(item);
+  }
+  return result;
 }
 
 function composerKindFromPreview(
@@ -7040,6 +7258,10 @@ function flowEdgesToCanvasEdges(edges: Edge[]): SpaceCanvasEdge[] {
       to: String(edge.target || ""),
       logicalFrom: String(edge.data?.logicalFrom || "") || undefined,
       logicalTo: String(edge.data?.logicalTo || "") || undefined,
+      executionMode:
+        String(edge.data?.executionMode || "") === "manual"
+          ? ("manual" as const)
+          : undefined,
     }))
     .filter((edge) => edge.from && edge.to && edge.from !== edge.to);
 }
@@ -7066,15 +7288,17 @@ function normalizeCanvasForState(
   const normalizedEdges = canvas.edges.filter(
     (edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to),
   );
-  return {
+  return normalizeCanvasNodeIdentities({
     assetCateId,
+    nextNodeNo: canvas.nextNodeNo,
     nodes: nodesChanged ? normalizedNodes : canvas.nodes,
     edges:
       normalizedEdges.length === canvas.edges.length
         ? canvas.edges
         : normalizedEdges,
     viewport: canvas.viewport || {},
-  };
+    updatedAt: canvas.updatedAt,
+  });
 }
 
 function hydrateCanvasMapAssets(
@@ -7097,21 +7321,38 @@ function hydrateCanvasAssets(
     return canvas;
   }
   const byID = new Map(assets.map((asset) => [asset.id, asset]));
+  const byNodeKey = new Map(
+    assets
+      .filter(
+        (asset) =>
+          String(asset.role || "") === "material" &&
+          String(asset.status || "") !== "archived" &&
+          String(asset.node_key || asset.version?.node_key || "").trim(),
+      )
+      .map((asset) => [
+        String(asset.node_key || asset.version?.node_key || "").trim(),
+        asset,
+      ]),
+  );
   return {
     ...canvas,
-    nodes: canvas.nodes.map((node) => hydrateCanvasNodeAsset(node, byID)),
+    nodes: canvas.nodes.map((node) =>
+      hydrateCanvasNodeAsset(node, byID, byNodeKey),
+    ),
   };
 }
 
 function hydrateCanvasNodeAsset(
   node: SpaceCanvasNode,
   assetsByID: Map<number, ProjectAsset>,
+  assetsByNodeKey: Map<string, ProjectAsset>,
 ): SpaceCanvasNode {
   const assetID = canvasNodeReferencedAssetID(node);
-  if (assetID <= 0) {
-    return node;
-  }
-  const asset = assetsByID.get(assetID);
+  const asset =
+    (assetID > 0 ? assetsByID.get(assetID) : undefined) ||
+    (node.type === "power" || node.type === "agent" || node.type === "flow"
+      ? assetsByNodeKey.get(node.id)
+      : undefined);
   if (!asset) {
     return node;
   }
@@ -7188,7 +7429,9 @@ function sameCanvasEdges(left: SpaceCanvasEdge[], right: SpaceCanvasEdge[]) {
             edge.from === candidate.from &&
             edge.to === candidate.to &&
             (edge.logicalFrom || "") === (candidate.logicalFrom || "") &&
-            (edge.logicalTo || "") === (candidate.logicalTo || ""))
+            (edge.logicalTo || "") === (candidate.logicalTo || "") &&
+            (edge.executionMode || "auto") ===
+              (candidate.executionMode || "auto"))
         );
       }))
   );
@@ -7670,9 +7913,7 @@ function NodeResultBubble({
   const onResultViewResizeEnd = (node as any).onResultViewResizeEnd as
     | CanvasResultViewChangeHandler
     | undefined;
-  const canResize = Boolean(
-    (node as any).interactive && onResultViewResizeEnd,
-  );
+  const canResize = Boolean((node as any).interactive && onResultViewResizeEnd);
   const setRunningNode = (node as any).setRunningNode as
     | RunningNodeSetter
     | undefined;
@@ -7745,9 +7986,7 @@ function NodeResultBubble({
         left: `calc(100% + 12px + ${Number(resultView.offsetX || 0)}px)`,
         top: `calc(50% + ${Number(resultView.offsetY || 0)}px)`,
       }}
-      onOpen={
-        onShowNodeDetail ? () => onShowNodeDetail(node) : undefined
-      }
+      onOpen={onShowNodeDetail ? () => onShowNodeDetail(node) : undefined}
       resizeControls={
         <CanvasFloatingResizer
           value={resultView}
@@ -7806,9 +8045,7 @@ function FunctionResultCard({
       preview={preview}
       mediaLabel={mediaPreviewCaption(preview)}
       className="ws-node-function-result-card"
-      onOpen={
-        onShowNodeDetail ? () => onShowNodeDetail(node) : undefined
-      }
+      onOpen={onShowNodeDetail ? () => onShowNodeDetail(node) : undefined}
     />
   );
 }
@@ -8061,7 +8298,7 @@ function mergePowerParamValues(
       Object.prototype.hasOwnProperty.call(current, param.key) &&
       canPreservePowerParamValue(param, previousParam, current[param.key])
     ) {
-      values[param.key] = current[param.key];
+      values[param.key] = normalizePowerParamValue(param, current[param.key]);
     }
   }
   return values;
@@ -8174,6 +8411,9 @@ function NodeBottomSettings({
   onRunBackendNode?: BackendNodeRunner;
 }) {
   const [prompt, setPrompt] = useState("");
+  const [promptContent, setPromptContent] = useState<
+    CanvasReferenceContent | undefined
+  >(undefined);
   const [running, setRunning] = useState(false);
   const [powerForm, setPowerForm] = useState<PowerForm | null>(null);
   const [powerFormLoading, setPowerFormLoading] = useState(false);
@@ -8196,6 +8436,8 @@ function NodeBottomSettings({
   const overlayStyle = stableNodeOverlayStyle(viewportZoom);
   const flowRunOverlayStyle = stableFlowRunOverlayStyle();
   const space = ((node as any).space || null) as SpaceBootstrap | null;
+  const canvasReferenceItems = ((node as any).canvasReferenceItems ||
+    []) as ComposerAssetItem[];
   const catalogCache = (node as any).catalogCache as SpaceCatalogCache;
   const releaseId = Number(
     space?.release?.id || space?.project.release_id || 0,
@@ -8203,8 +8445,14 @@ function NodeBottomSettings({
   const nodeAssetCateId = Number(node.assetCateId || 0);
   const nodeAssetCate = space ? assetCateById(space, nodeAssetCateId) : null;
   const assetLibrary = useMemo(
-    () => buildComposerAssetLibrary(space, inputContext, nodeAssetCate),
-    [inputContext, nodeAssetCateId, space],
+    () =>
+      buildComposerAssetLibrary(
+        space,
+        inputContext,
+        nodeAssetCate,
+        canvasReferenceItems.filter((item) => item.id !== node.id),
+      ),
+    [canvasReferenceItems, inputContext, node.id, nodeAssetCateId, space],
   );
 
   useEffect(() => {
@@ -8242,9 +8490,14 @@ function NodeBottomSettings({
               : 0,
           );
           setParamValues(
-            mergeSavedComposerParamValues(form.params || [], savedDraft),
+            mergeSavedComposerParamValues(
+              form.params || [],
+              savedDraft,
+              form.primary_param_key,
+            ),
           );
           setPrompt(savedDraft.prompt || "");
+          setPromptContent(savedDraft.promptContent);
         })
         .catch((err) => {
           if (!canceled) {
@@ -8266,12 +8519,14 @@ function NodeBottomSettings({
     if (selectedNodeType === "agent") {
       setParamValues(savedDraft.paramValues);
       setPrompt(savedDraft.prompt || "");
+      setPromptContent(savedDraft.promptContent);
       setSelectedTargetId(0);
       return;
     }
     setParamValues({});
     setSelectedTargetId(0);
     setPrompt("");
+    setPromptContent(undefined);
   }, [
     catalogCache,
     projectId,
@@ -8305,22 +8560,31 @@ function NodeBottomSettings({
     ? String(paramValues[promptParam.key] ?? "")
     : prompt;
   const canSelectPowerSource = powerFormAllowsSourceSelection(powerForm);
-  const effectiveSelectedTargetId = canSelectPowerSource
-    ? selectedTargetId
-    : 0;
+  const effectiveSelectedTargetId = canSelectPowerSource ? selectedTargetId : 0;
 
   function saveComposerDraft(draft: ComposerDraft) {
-    onNodeDraftChange(node.id, normalizeComposerDraft(draft));
+    onNodeDraftChange(
+      node.id,
+      normalizeComposerDraft({
+        ...draft,
+        promptContent: draft.promptContent ?? promptContent,
+      }),
+    );
   }
 
-  function setPowerPrompt(nextPrompt: string) {
+  function setPowerPrompt(
+    nextPrompt: string,
+    nextContent?: CanvasReferenceContent,
+  ) {
     setPrompt(nextPrompt);
+    setPromptContent(nextContent);
     setParamValues((current) => {
       const nextValues = promptParam
         ? { ...current, [promptParam.key]: nextPrompt }
         : current;
       saveComposerDraft({
         prompt: nextPrompt,
+        promptContent: nextContent,
         paramValues: nextValues,
         selectedTargetId: effectiveSelectedTargetId,
       });
@@ -8335,7 +8599,8 @@ function NodeBottomSettings({
         [key]: value,
       };
       saveComposerDraft({
-        prompt,
+        prompt: powerPrompt,
+        promptContent,
         paramValues: nextValues,
         selectedTargetId: effectiveSelectedTargetId,
       });
@@ -8343,10 +8608,15 @@ function NodeBottomSettings({
     });
   }
 
-  function setAgentPrompt(nextPrompt: string) {
+  function setAgentPrompt(
+    nextPrompt: string,
+    nextContent?: CanvasReferenceContent,
+  ) {
     setPrompt(nextPrompt);
+    setPromptContent(nextContent);
     saveComposerDraft({
       prompt: nextPrompt,
+      promptContent: nextContent,
       paramValues,
       selectedTargetId: 0,
     });
@@ -8432,7 +8702,8 @@ function NodeBottomSettings({
           powerForm?.params || [],
         );
         saveComposerDraft({
-          prompt,
+          prompt: powerPrompt,
+          promptContent,
           paramValues: nextValues,
           selectedTargetId: nextTargetId,
         });
@@ -8486,6 +8757,7 @@ function NodeBottomSettings({
         }
         saveComposerDraft({
           prompt: powerPrompt,
+          promptContent,
           paramValues,
           selectedTargetId: effectiveSelectedTargetId,
         });
@@ -8493,6 +8765,7 @@ function NodeBottomSettings({
           ...node,
           composerDraft: {
             prompt: powerPrompt,
+            promptContent,
             paramValues,
             selectedTargetId: effectiveSelectedTargetId,
           },
@@ -8505,6 +8778,7 @@ function NodeBottomSettings({
         }
         saveComposerDraft({
           prompt,
+          promptContent,
           paramValues,
           selectedTargetId: 0,
         });
@@ -8512,6 +8786,7 @@ function NodeBottomSettings({
           ...node,
           composerDraft: {
             prompt,
+            promptContent,
             paramValues,
             selectedTargetId: 0,
           },
@@ -8646,6 +8921,7 @@ function NodeBottomSettings({
         ) : (
           <PromptComposer
             value={powerPrompt}
+            referenceContent={promptContent}
             placeholder="在此处为该能力输入生成提示词..."
             running={nodeRunning}
             sourceOptions={canSelectPowerSource ? powerForm?.sources || [] : []}
@@ -8679,6 +8955,7 @@ function NodeBottomSettings({
       >
         <PromptComposer
           value={prompt}
+          referenceContent={promptContent}
           placeholder="向智能体发送任务指令..."
           running={nodeRunning}
           params={agentComposerParams}
@@ -9200,6 +9477,8 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
       ? resolvePowerPresentation(node.power, node.kind, node.outputType)
       : null;
   const isStoryboardPower = powerPresentation?.viewMode === "storyboard";
+  const canvasReferenceItems = ((data as any).canvasReferenceItems ||
+    []) as ComposerAssetItem[];
 
   if (node.type === "group") {
     const members = ((data as any).groupMembers || []) as SpaceCanvasNode[];
@@ -9237,7 +9516,9 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
                 status: "error",
               },
             }));
-            toast.error(error instanceof Error ? error.message : "分组运行失败");
+            toast.error(
+              error instanceof Error ? error.message : "分组运行失败",
+            );
           });
         }
       : undefined;
@@ -9251,9 +9532,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
         status={groupRuntime.status}
         selected={selected}
         onRename={
-          onNodeResult
-            ? (title) => onNodeResult(node.id, { title })
-            : undefined
+          onNodeResult ? (title) => onNodeResult(node.id, { title }) : undefined
         }
         onRun={runGroup}
       >
@@ -9300,7 +9579,16 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
           <div className="ws-node-circle-avatar">
             <UserCheck size={20} className="ws-icon-amber" />
           </div>
-          <div className="ws-node-circle-title">{node.title}</div>
+          <EditableCanvasNodeTitle
+            className="ws-node-circle-title"
+            title={node.title}
+            onRename={
+              onNodeResult
+                ? (title) =>
+                    onNodeResult(node.id, { title, titleMode: "manual" })
+                : undefined
+            }
+          />
         </div>
         {showRunFrame ? (
           <svg
@@ -9386,7 +9674,16 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
           <div className="ws-node-flow-avatar">
             <Workflow size={16} className="ws-icon-blue" />
           </div>
-          <div className="ws-node-flow-title">{node.title}</div>
+          <EditableCanvasNodeTitle
+            className="ws-node-flow-title"
+            title={node.title}
+            onRename={
+              onNodeResult
+                ? (title) =>
+                    onNodeResult(node.id, { title, titleMode: "manual" })
+                : undefined
+            }
+          />
         </div>
         <NodeHandle
           id="input-0"
@@ -9622,7 +9919,13 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
             <span>{node.title || "图片资产"}</span>
           </div>
           <div className="ws-node-image-container ws-node-content-container">
-            {useContentView ? (
+            {preview.imageUrl ? (
+              <img
+                src={preview.imageUrl}
+                alt={node.title}
+                className="ws-node-image-raw"
+              />
+            ) : useContentView ? (
               <div className="ws-node-scroll-content nowheel">
                 <CanvasNodeContentView
                   output={contentOutput}
@@ -9630,12 +9933,6 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
                   className="ws-canvas-content-view"
                 />
               </div>
-            ) : preview.imageUrl ? (
-              <img
-                src={preview.imageUrl}
-                alt={node.title}
-                className="ws-node-image-raw"
-              />
             ) : (
               <div className="ws-node-image-empty">
                 <ImageIcon size={24} />
@@ -9838,9 +10135,9 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
             : "empty";
     const showStreamText = Boolean(
       !isStoryboardPower &&
-        runningNode?.streamStarted &&
-        runningNode.streamText &&
-        runningNode.status !== "success",
+      runningNode?.streamStarted &&
+      runningNode.streamText &&
+      runningNode.status !== "success",
     );
     const preview = showStreamText
       ? {
@@ -9860,11 +10157,12 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
       !isStoryboardPower &&
       Boolean(
         preview.imageUrl ||
-          preview.videoUrl ||
-          preview.audioUrl ||
-          preview.fileUrl,
+        preview.videoUrl ||
+        preview.audioUrl ||
+        preview.fileUrl,
       );
-    const canAdoptGeneratedMediaSize = hasDefaultCanvasNodeSize(node);
+    const canAdoptGeneratedMediaSize =
+      !node.groupId && hasDefaultCanvasNodeSize(node);
     const className = [
       "ws-node-power-wrap",
       selected ? "is-selected" : "",
@@ -9885,38 +10183,35 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
             size={13}
             className="ws-icon-violet"
           />
-          <span>{node.title}</span>
-          {powerPresentation?.outputName &&
-          powerPresentation.outputName !== node.title ? (
-            <small className="ws-node-power-output">
-              {powerPresentation.outputName}
-            </small>
-          ) : null}
+          <EditableCanvasNodeTitle
+            title={node.title}
+            onRename={
+              onNodeResult
+                ? (title) =>
+                    onNodeResult(node.id, { title, titleMode: "manual" })
+                : undefined
+            }
+          />
         </div>
         <div className="ws-node-power-card">
           {isPowerRunning ? (
-            <svg
-              className="ws-node-running-border is-spin"
-              aria-hidden="true"
-              viewBox="0 0 100 100"
-              preserveAspectRatio="none"
-            >
+            <svg className="ws-node-running-border is-spin" aria-hidden="true">
               <rect
                 className="ws-node-running-track"
-                x="2"
-                y="2"
-                width="96"
-                height="96"
-                rx="7"
+                x="0"
+                y="0"
+                width="100%"
+                height="100%"
+                rx="6"
                 pathLength="100"
               />
               <rect
                 className="ws-node-running-progress"
-                x="2"
-                y="2"
-                width="96"
-                height="96"
-                rx="7"
+                x="0"
+                y="0"
+                width="100%"
+                height="100%"
+                rx="6"
                 pathLength="100"
                 strokeDasharray="18 82"
                 strokeDashoffset="0"
@@ -9933,6 +10228,9 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
               status={storyboardStatus}
               started={Boolean(runningNode?.streamStarted)}
               generatedShotCount={runningNode?.generatedCount || 0}
+              referenceItems={canvasReferenceItems.filter(
+                (item) => item.source !== "current" || item.id !== node.id,
+              )}
               onOpenDetail={
                 storyboardHasResult && onShowNodeDetail
                   ? () => onShowNodeDetail(node)

@@ -281,10 +281,86 @@ func NormalizePowerParamInput(input map[string]any, params []PowerParam) map[str
 		}
 		value, ok := powerParamInputValue(input, param)
 		if ok {
+			result[key] = normalizePowerParamValue(param, value)
+		}
+	}
+	return result
+}
+
+func ApplyPowerParamDefaults(values map[string]any, params []PowerParam) map[string]any {
+	result := make(map[string]any, len(values)+len(params))
+	for key, value := range values {
+		result[key] = value
+	}
+	for _, param := range params {
+		key := strings.TrimSpace(param.Key)
+		if key == "" {
+			continue
+		}
+		if _, exists := result[key]; exists {
+			continue
+		}
+		if value, ok := powerParamDefaultValue(param); ok {
 			result[key] = value
 		}
 	}
 	return result
+}
+
+func powerParamDefaultValue(param PowerParam) (any, bool) {
+	raw := strings.TrimSpace(param.DefaultValue)
+	paramType := NormalizeParamControlType(param.Type)
+	if IsOptionParamType(param.Type) && raw == "" && len(param.Options) > 0 {
+		raw = powerParamOptionNativeValue(param.Options[0])
+	}
+	if raw != "" {
+		return normalizePowerParamValue(param, ParseJSONValue(raw)), true
+	}
+	switch paramType {
+	case "switch", "multi_option", "files":
+		return parseDefaultParamValue(param.Type, param.ValueType, raw), true
+	default:
+		return nil, false
+	}
+}
+
+func normalizePowerParamValue(param PowerParam, value any) any {
+	switch NormalizeParamControlType(param.Type) {
+	case "switch":
+		return SwitchByType(param.ValueType, value)
+	case "multi_option":
+		items := List(value)
+		for index, item := range items {
+			items[index] = powerParamOptionValue(param, item)
+		}
+		return ListByType(param.ValueType, items)
+	case "files":
+		return ListByType(param.ValueType, List(value))
+	default:
+		return ScalarByType(param.ValueType, powerParamOptionValue(param, value))
+	}
+}
+
+func powerParamOptionValue(param PowerParam, value any) any {
+	text := strings.TrimSpace(ValueText(value))
+	if text == "" || len(param.Options) == 0 {
+		return value
+	}
+	for _, option := range param.Options {
+		if strings.EqualFold(text, strings.TrimSpace(option.Name)) ||
+			strings.EqualFold(text, strings.TrimSpace(option.Value)) ||
+			strings.EqualFold(text, strings.TrimSpace(option.NativeValue)) {
+			return powerParamOptionNativeValue(option)
+		}
+	}
+	return value
+}
+
+func powerParamOptionNativeValue(option PowerParamOption) string {
+	if value := strings.TrimSpace(option.NativeValue); value != "" {
+		return value
+	}
+	return strings.TrimSpace(option.Value)
 }
 
 func powerParamInputValue(input map[string]any, param PowerParam) (any, bool) {

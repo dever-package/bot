@@ -88,6 +88,13 @@ func normalizeOutput(output map[string]any) Output {
 	for _, key := range scalarOutputKeys {
 		copyOutputValue(result, output, key)
 	}
+	if value, exists := result["text"]; exists {
+		if text := firstNonEmptyStreamText(value); text != "" {
+			result["text"] = text
+		} else {
+			delete(result, "text")
+		}
+	}
 	for _, key := range structuredOutputKeys {
 		copyOutputValue(result, output, key)
 	}
