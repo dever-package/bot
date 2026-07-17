@@ -25,9 +25,12 @@ import {
 } from "./space-power-param";
 import { PowerParamIcon } from "./space-power-icon";
 import { CanvasReferenceEditor } from "./space-reference-editor";
+import { useAssetReferenceProvider } from "../asset/asset-reference-provider";
+import { assetKindLabel } from "../asset/asset-contract";
 import type {
   CanvasContentPreview,
   CanvasReferenceContent,
+  AssetKind,
   PowerParam,
   PowerParamSource,
 } from "./types";
@@ -40,10 +43,11 @@ export type ComposerAssetItem = {
   id: string;
   title: string;
   kind: string;
-  role?: "content" | "material" | string;
+  role?: "work" | "material" | string;
   source: "current" | "asset";
-  refType?: "canvas_node" | "artifact";
+  refType?: "asset";
   refId?: number;
+  versionID?: number;
   output?: unknown;
   preview: ComposerAssetPreview;
   asset?: unknown;
@@ -64,6 +68,12 @@ type PromptComposerProps = {
     assets: ComposerAssetItem[];
   };
   referenceContent?: CanvasReferenceContent;
+  assetReference?: {
+    teamID: number;
+    projectID: number;
+    assetCateID?: number;
+    allowedKinds?: AssetKind[];
+  };
   onChange: (value: string, content?: CanvasReferenceContent) => void;
   onParamChange?: (key: string, value: unknown) => void;
   onSourceChange?: (sourceId: number) => void;
@@ -109,6 +119,7 @@ export function PromptComposer({
   paramValues = {},
   assetLibrary = { current: [], assets: [] },
   referenceContent,
+  assetReference,
   onChange,
   onParamChange,
   onSourceChange,
@@ -117,6 +128,17 @@ export function PromptComposer({
   onLocalUpload,
   onSubmit,
 }: PromptComposerProps) {
+  const assetReferenceProvider = useAssetReferenceProvider({
+    teamID: Number(assetReference?.teamID || 0),
+    initialFilters: assetReference?.projectID
+      ? {
+          sourceType: "project",
+          projectID: assetReference.projectID,
+          assetCateID: Number(assetReference.assetCateID || 0),
+        }
+      : undefined,
+    allowedKinds: assetReference?.allowedKinds,
+  });
   const [openKey, setOpenKey] = useState("");
   const [uploadPreviews, setUploadPreviews] = useState<
     Record<string, UploadPreview[]>
@@ -199,6 +221,9 @@ export function PromptComposer({
             disabled={disabled || running}
             placeholder={placeholder}
             items={referenceItems}
+            assetReferenceProvider={
+              assetReference?.teamID ? assetReferenceProvider : undefined
+            }
             onChange={onChange}
             onSubmit={!running ? onSubmit : undefined}
           />
@@ -438,7 +463,7 @@ export function AssetReferenceDialog({
   ) => Promise<UploadPreview[]>;
 }) {
   const [tab, setTab] = useState<"current" | "asset">("current");
-  const [roleFilter, setRoleFilter] = useState<"all" | "content" | "material">(
+  const [roleFilter, setRoleFilter] = useState<"all" | "work" | "material">(
     "all",
   );
   const [query, setQuery] = useState("");
@@ -530,7 +555,7 @@ export function AssetReferenceDialog({
           <div className="ws-asset-role-tabs" aria-label="内容筛选">
             {[
               ["all", "全部"],
-              ["content", "内容"],
+              ["work", "作品"],
               ["material", "素材"],
             ].map(([key, label]) => (
               <button
@@ -538,7 +563,7 @@ export function AssetReferenceDialog({
                 type="button"
                 className={roleFilter === key ? "is-active" : ""}
                 onClick={() =>
-                  setRoleFilter(key as "all" | "content" | "material")
+                  setRoleFilter(key as "all" | "work" | "material")
                 }
               >
                 {label}
@@ -718,7 +743,7 @@ function acceptedAssetKinds(param: PowerParam) {
 function filterComposerAssets(
   items: ComposerAssetItem[],
   acceptedKinds: string[],
-  roleFilter: "all" | "content" | "material",
+  roleFilter: "all" | "work" | "material",
   query: string,
 ) {
   const normalizedQuery = query.trim().toLowerCase();
@@ -747,12 +772,9 @@ function filterComposerAssets(
 
 function kindLabel(kind: string) {
   const normalized = String(kind || "").toLowerCase();
-  if (normalized === "image") return "图片";
-  if (normalized === "video") return "视频";
-  if (normalized === "audio" || normalized === "music") return "音频";
-  if (normalized === "text") return "文本";
-  if (normalized === "file") return "文件";
-  return kind || "内容";
+  if (normalized === "music") return assetKindLabel("audio");
+  if (normalized === "rich") return assetKindLabel("richtext");
+  return assetKindLabel(normalized);
 }
 
 function UploadPreviewDialog({
@@ -982,7 +1004,7 @@ function ParamEditor({
     );
   }
 
-  if (param.type === "textarea") {
+  if (param.type === "prompt" || param.type === "textarea") {
     return (
       <textarea
         className="ws-prompt-param-textarea"
@@ -1014,25 +1036,15 @@ export function isUploadPowerParam(param: PowerParam) {
   return param.type === "file" || param.type === "files";
 }
 
-export function isPromptPowerParam(param: PowerParam, primaryKey?: string) {
-  if (param.type === "hidden" || param.type === "description") {
-    return false;
-  }
-  if (primaryKey && param.key === primaryKey) {
-    return true;
-  }
-  return (
-    param.usage === 1 &&
-    (param.type === "textarea" ||
-      param.key === "prompt" ||
-      param.key === "text")
-  );
+export function isPromptPowerParam(param: PowerParam) {
+  return param.type === "prompt";
 }
 
 export function isToolbarPowerParam(param: PowerParam) {
   if (
     param.type === "hidden" ||
     param.type === "description" ||
+    isPromptPowerParam(param) ||
     isUploadPowerParam(param)
   ) {
     return false;

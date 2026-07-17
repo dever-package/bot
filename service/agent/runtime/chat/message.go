@@ -12,31 +12,34 @@ import (
 )
 
 type MessageRequest struct {
-	SessionID     uint64
-	ContextKey    string
-	AgentKey      string
-	Role          string
-	Kind          string
-	Text          string
-	Content       any
-	Output        any
-	RequestID     string
-	Status        int16
-	MemoryEnabled bool
+	SessionID  uint64
+	ContextKey string
+	AgentKey   string
+	Role       string
+	Kind       string
+	Text       string
+	Content    any
+	Output     any
+	RequestID  string
+	Status     int16
 }
 
 type RunTurnRequest struct {
-	SessionID  uint64
-	AgentKey   string
-	ContextKey string
-	RequestID  string
-	Input      string
-	Content    any
+	SessionID       uint64
+	AgentKey        string
+	ContextKey      string
+	RequestID       string
+	Input           string
+	Content         any
+	InteractionID   string
+	InteractionData map[string]any
 }
 
 type RunTurn struct {
 	UserMessageID      uint64
 	AssistantMessageID uint64
+	InteractionResumed bool
+	PriorKnowledgeUsed bool
 }
 
 type RunTurnCompletion struct {
@@ -81,7 +84,7 @@ func (s Service) RecordMessage(ctx context.Context, request MessageRequest) (map
 			touchSessionTimestamp(ctx, session.ID, now)
 			session.LastMessageAt = now
 			existing = messageModel.Find(ctx, map[string]any{"id": existing.ID})
-			s.afterRecordedMessage(existing, request.MemoryEnabled)
+			s.afterRecordedMessage(ctx, existing)
 			return map[string]any{"session": sessionMap(*session), "message": messageMap(ctx, existing)}, nil
 		}
 	}
@@ -103,7 +106,7 @@ func (s Service) RecordMessage(ctx context.Context, request MessageRequest) (map
 	}
 	touchSession(ctx, session, role, request.Text, now)
 	message := messageModel.Find(ctx, map[string]any{"id": messageID})
-	s.afterRecordedMessage(message, request.MemoryEnabled)
+	s.afterRecordedMessage(ctx, message)
 	return map[string]any{"session": sessionMap(*session), "message": messageMap(ctx, message)}, nil
 }
 
@@ -139,6 +142,21 @@ func (s Service) BeginRunTurn(ctx context.Context, request RunTurnRequest) (RunT
 		}
 		if existing := messageModel.Find(tx, map[string]any{"role": "assistant", "request_id": requestID}); existing != nil {
 			return fmt.Errorf("运行请求ID已存在")
+		}
+		if claimed := agentmodel.NewSessionModel().Update(tx, map[string]any{
+			"id": session.ID, "status": agentmodel.SessionStatusActive, "active_request_id": "",
+		}, map[string]any{"active_request_id": requestID}); claimed != 1 {
+			return fmt.Errorf("当前会话正在生成，请等待完成或先停止")
+		}
+		if strings.TrimSpace(request.InteractionID) != "" {
+			knowledgeUsed, interactionErr := resolveInteractionResponse(
+				tx, session.ID, request.InteractionID, request.InteractionData,
+			)
+			if interactionErr != nil {
+				return interactionErr
+			}
+			turn.InteractionResumed = true
+			turn.PriorKnowledgeUsed = knowledgeUsed
 		}
 		now := time.Now()
 		turn.UserMessageID = uint64(messageModel.Insert(tx, map[string]any{
@@ -177,47 +195,69 @@ func (s Service) BeginRunTurn(ctx context.Context, request RunTurnRequest) (RunT
 			values["title"] = shortTitle(input)
 			values["title_source"] = agentmodel.TitleSourceAuto
 		}
-		agentmodel.NewSessionModel().Update(tx, map[string]any{"id": session.ID}, values)
+		agentmodel.NewSessionModel().Update(tx, map[string]any{
+			"id": session.ID, "active_request_id": requestID,
+		}, values)
 		return nil
 	})
 	return turn, err
 }
 
 func (s Service) CompleteRunTurn(ctx context.Context, completion RunTurnCompletion) error {
-	sessionID, err := s.SaveRunTurnCompletion(ctx, completion)
+	sessionID := uint64(0)
+	messageID := uint64(0)
+	err := orm.Transaction(ctx, func(tx context.Context) error {
+		var saveErr error
+		sessionID, messageID, saveErr = s.SaveRunTurnCompletion(tx, completion)
+		return saveErr
+	})
 	if err != nil {
 		return err
 	}
-	s.AfterRunTurnCompletion(sessionID)
+	s.AfterRunTurnCompletion(sessionID, messageID, completion.Status)
 	return nil
 }
 
 // SaveRunTurnCompletion only persists the message state. Keeping lifecycle
 // work outside this method lets callers commit the run and message atomically.
-func (s Service) SaveRunTurnCompletion(ctx context.Context, completion RunTurnCompletion) (uint64, error) {
+func (s Service) SaveRunTurnCompletion(ctx context.Context, completion RunTurnCompletion) (uint64, uint64, error) {
 	requestID := strings.TrimSpace(completion.RequestID)
 	if requestID == "" {
-		return 0, fmt.Errorf("运行请求ID不能为空")
+		return 0, 0, fmt.Errorf("运行请求ID不能为空")
 	}
 	messageModel := agentmodel.NewMessageModel()
 	message := messageModel.Find(ctx, map[string]any{"role": "assistant", "request_id": requestID})
 	if message == nil {
-		return 0, fmt.Errorf("运行中的助手消息不存在")
+		return 0, 0, fmt.Errorf("运行中的助手消息不存在")
 	}
 	status, text, output := completedRunTurnMessage(completion)
-	messageModel.Update(ctx, map[string]any{"id": message.ID}, map[string]any{
+	if updated := messageModel.Update(ctx, map[string]any{
+		"id": message.ID, "status": agentmodel.MessageStatusRunning,
+	}, map[string]any{
 		"text":    text,
 		"content": encodeJSON(map[string]any{"format": "markdown", "text": text}, "{}"),
 		"output":  encodeJSON(output, "{}"),
 		"status":  status,
-	})
-	touchSessionTimestamp(ctx, message.SessionID, time.Now())
-	return message.SessionID, nil
+	}); updated != 1 {
+		return 0, 0, fmt.Errorf("运行中的助手消息状态已变化")
+	}
+	if updated := agentmodel.NewSessionModel().Update(ctx, map[string]any{
+		"id": message.SessionID, "active_request_id": requestID,
+	}, map[string]any{
+		"active_request_id": "",
+		"last_message_at":   time.Now(),
+	}); updated != 1 {
+		return 0, 0, fmt.Errorf("会话运行状态已变化")
+	}
+	return message.SessionID, message.ID, nil
 }
 
-func (s Service) AfterRunTurnCompletion(sessionID uint64) {
+func (s Service) AfterRunTurnCompletion(sessionID uint64, messageID uint64, status string) {
 	if sessionID > 0 {
 		s.afterTurn(sessionID)
+	}
+	if messageID > 0 && strings.EqualFold(strings.TrimSpace(status), completionSuccess) {
+		s.extractSessionMemoryAsync(sessionID, messageID)
 	}
 }
 

@@ -77,7 +77,7 @@
         "name": "资产分类",
         "value": "form.asset_cates",
         "mode": "form",
-        "info": "资产分类是团队产出结果的目录，可配置产物类型和单个、多个、有序多个规则。工作流保存节点和团队角色可以选择分类，运行结果会沉淀到对应目录下。",
+        "info": "资产分类是项目作品的目录，可配置产物类型和单个、多个、有序多个规则。项目流程中的保存节点可以选择分类，作品会沉淀到对应目录下。",
         "meta": {
           "pageRoute": "/bot/team/asset_cate/update",
           "addText": "添加资产分类",
@@ -90,11 +90,23 @@
         "name": "团队能力",
         "value": "form.team_powers",
         "mode": "form",
-        "info": "配置团队拥有的专业能力，例如文本生成、图像生成、视频生成等，供工作流和团队角色调用。",
+        "info": "配置团队拥有的专业能力，例如文本生成、图像生成、视频生成等，供工具入口、工作流和团队角色调用。工具运行结果由用户按需保存。",
         "meta": {
           "pageRoute": "/bot/team/team_power/update",
           "addText": "添加能力",
           "drag": "sort",
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "启用项目",
+        "value": "form.project_enabled",
+        "mode": "form",
+        "info": "开启后，用户可在该团队工作区创建项目并进入画布编辑。关闭只隐藏项目入口，不影响团队能力、角色和流程配置。",
+        "meta": {
+          "trueValue": 1,
+          "falseValue": 2,
           "formLayout": "horizontal"
         }
       },
@@ -117,6 +129,7 @@
       "name": "",
       "asset_cates": [],
       "team_powers": [],
+      "project_enabled": 1,
       "description": ""
     }
   },

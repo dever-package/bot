@@ -10,14 +10,15 @@ import (
 )
 
 const (
-	defaultAgentCateID       = uint64(1)
-	defaultSkillPackID       = agentmodel.DefaultSkillPackID
-	defaultSkillCateID       = agentmodel.DefaultSkillCateID
-	defaultAgentStatus       = int16(1)
-	defaultAgentSort         = 100
-	defaultAgentTemperature  = 0.7
-	defaultAgentTimeout      = 3600
-	defaultAgentMaxAutoSteps = 0
+	defaultAgentCateID          = uint64(1)
+	defaultSkillPackID          = agentmodel.DefaultSkillPackID
+	defaultSkillCateID          = agentmodel.DefaultSkillCateID
+	defaultAgentStatus          = int16(1)
+	defaultAgentSort            = 100
+	defaultAgentTemperature     = 0.7
+	defaultAgentTimeout         = 3600
+	defaultAgentMaxAutoSteps    = 0
+	defaultAgentMaxOutputTokens = 0
 )
 
 type AgentHook struct{}

@@ -13,10 +13,10 @@ func curlRequestTool(loaded map[string]agentskill.Entry) Tool {
 	return Tool{
 		Definition: Definition{
 			Name:        "curl_request",
-			Description: "解析一条不含 shell 管道和重定向的 curl 命令，并按 http_request 相同安全规则请求。",
+			Description: "通过已加载技能执行 curl 请求。",
 			Parameters: objectParameters(map[string]any{
 				"skill":   skillProperty(),
-				"command": map[string]any{"type": "string", "description": "受限 curl 命令"},
+				"command": map[string]any{"type": "string", "description": "curl 命令"},
 			}, "command"),
 		},
 		Handle: func(ctx context.Context, call Call) (Result, error) {

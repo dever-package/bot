@@ -253,11 +253,13 @@ function withStoryboardItemReferences(
               node.storyboardItem.itemType,
             ) &&
             !node.storyboardItem.stale &&
-            Number(node.nodeNo || 0) > 0,
+            Number(node.asset?.id || 0) > 0 &&
+            Number(node.asset?.version_id || 0) > 0,
         )
         .map((node) => ({
-          refType: "canvas_node" as const,
-          refId: Number(node.nodeNo),
+          refType: "asset" as const,
+          refId: Number(node.asset?.id),
+          versionId: Number(node.asset?.version_id),
           label: node.title,
         })),
     );
@@ -274,7 +276,8 @@ function withStoryboardItemReferences(
       node.storyboardItem.itemType === "shot_frame" &&
       node.storyboardItem.itemId === item.id &&
       !node.storyboardItem.stale &&
-      Number(node.nodeNo || 0) > 0,
+      Number(node.asset?.id || 0) > 0 &&
+      Number(node.asset?.version_id || 0) > 0,
   );
   if (!frameNode) {
     return item;
@@ -282,8 +285,9 @@ function withStoryboardItemReferences(
   const prompt = `@${frameNode.title} ${item.prompt}`.trim();
   const content = canvasReferenceContentFromText(prompt, [
     {
-      refType: "canvas_node" as const,
-      refId: Number(frameNode.nodeNo),
+      refType: "asset" as const,
+      refId: Number(frameNode.asset?.id),
+      versionId: Number(frameNode.asset?.version_id),
       label: frameNode.title,
     },
   ]);
@@ -495,6 +499,8 @@ function mergeExistingDerivedNode(
             refType: frameReference.ref_type,
             refId: frameReference.ref_id,
             label: frameReference.label,
+            trigger: "@",
+            versionId: frameReference.ref_version_id,
           },
         ]);
   const promptContentChanged =

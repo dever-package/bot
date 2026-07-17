@@ -8,8 +8,13 @@ import (
 	energonservice "github.com/dever-package/bot/service/energon"
 )
 
-const MediaReferencesArgument = "__runtime_references"
-const MaxRuntimeMediaReferences = 32
+const (
+	MediaReferencesArgument   = "__runtime_references"
+	MediaSeriesModeArgument   = "__runtime_series_mode"
+	MediaSeriesModeContinue   = "continue"
+	MediaSeriesModeNew        = "new"
+	MaxRuntimeMediaReferences = 32
+)
 
 type MediaReference struct {
 	ReferenceType string
@@ -22,6 +27,8 @@ type MediaReference struct {
 	Label         string
 	URL           string
 	ParameterKey  string
+	ActiveSeries  bool
+	SeriesProfile map[string]any
 }
 
 type mediaReferenceStore struct {
@@ -89,7 +96,7 @@ func MediaReferencesParameters(parameters map[string]any, references []MediaRefe
 	properties, _ := result["properties"].(map[string]any)
 	properties[MediaReferencesArgument] = map[string]any{
 		"type":        "array",
-		"description": "当前运行允许使用的素材。仅可填写工具说明中列出的 ref_type 和 ref_id；需要使用素材时必须传入，并通过 param_key 明确选择能力当前配置的素材参数，禁止猜测其他ID。",
+		"description": "本轮使用的素材及接收参数",
 		"items": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -184,6 +191,43 @@ func SelectedMediaReferences(arguments map[string]any, available []MediaReferenc
 	return result, nil
 }
 
+func ArtifactReferences(arguments map[string]any, available []MediaReference) ([]MediaReference, error) {
+	selected, err := SelectedMediaReferences(arguments, available)
+	if err != nil || mediaSeriesMode(arguments) != MediaSeriesModeContinue {
+		return selected, err
+	}
+	current, exists := activeSeriesReference(available)
+	if !exists {
+		return nil, fmt.Errorf("当前会话没有可延续的图片系列")
+	}
+	result := []MediaReference{current}
+	for _, reference := range selected {
+		if sameMediaReference(reference, current) {
+			continue
+		}
+		result = append(result, reference)
+	}
+	return result, nil
+}
+
+func activeSeriesReference(references []MediaReference) (MediaReference, bool) {
+	for _, current := range references {
+		if current.ActiveSeries && current.SeriesID > 0 && current.ArtifactID > 0 {
+			return current, true
+		}
+	}
+	return MediaReference{}, false
+}
+
+func mediaSeriesMode(arguments map[string]any) string {
+	return strings.ToLower(strings.TrimSpace(textValue(arguments[MediaSeriesModeArgument])))
+}
+
+func sameMediaReference(left MediaReference, right MediaReference) bool {
+	return strings.EqualFold(strings.TrimSpace(left.ReferenceType), strings.TrimSpace(right.ReferenceType)) &&
+		left.ReferenceID > 0 && left.ReferenceID == right.ReferenceID
+}
+
 func MediaReferencesDescription(references []MediaReference) string {
 	if len(references) == 0 {
 		return ""
@@ -192,7 +236,7 @@ func MediaReferencesDescription(references []MediaReference) string {
 	for _, current := range references {
 		rows = append(rows, fmt.Sprintf("[%s:%d] %s（%s）", current.ReferenceType, current.ReferenceID, current.Label, current.Kind))
 	}
-	return "。本轮允许工具使用的素材：" + strings.Join(rows, "；") + "。标记为“当前系列主素材”的项，只在用户明确要求继续、修改或保持上一版一致时使用；用户显式引用的素材优先。"
+	return "。可用素材：" + strings.Join(rows, "；") + "。用户指定的素材优先；仅在用户要求延续或修改上一版时使用“当前系列主素材”。"
 }
 
 func mediaReferenceParam(params []energonservice.PowerParam, kind string, key string) (energonservice.PowerParam, bool) {
@@ -235,7 +279,7 @@ func mediaReferenceParameterOptions(params []energonservice.PowerParam, referenc
 		}
 		labels = append(labels, key+"（"+name+"）")
 	}
-	return keys, "选择要接收该素材的能力参数。可选参数：" + strings.Join(labels, "、")
+	return keys, "接收素材的参数：" + strings.Join(labels, "、")
 }
 
 func mediaReferenceParameterAvailable(param energonservice.PowerParam, references []MediaReference) bool {

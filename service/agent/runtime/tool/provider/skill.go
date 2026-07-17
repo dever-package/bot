@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	skillPromptDescriptionRunes = 96
-	skillPromptTriggerItems     = 3
-	skillPromptTriggerRunes     = 24
+	skillDescriptionRunes = 96
+	skillTriggerItems     = 3
+	skillTriggerRunes     = 24
 )
 
 type SkillRuntime struct {
@@ -24,10 +24,10 @@ type SkillRuntime struct {
 	Sandbox  sandbox.Config
 }
 
-func SkillTools(entries []agentskill.Entry, limits agentskill.Limits, serverContext *server.Context, runtime SkillRuntime) ([]Tool, string) {
+func SkillTools(entries []agentskill.Entry, limits agentskill.Limits, serverContext *server.Context, runtime SkillRuntime) []Tool {
 	entries = agentskill.MetadataEntries(entries, limits)
 	if len(entries) == 0 {
-		return nil, ""
+		return nil
 	}
 	byKey := make(map[string]agentskill.Entry, len(entries))
 	for _, entry := range entries {
@@ -37,13 +37,13 @@ func SkillTools(entries []agentskill.Entry, limits agentskill.Limits, serverCont
 		}
 	}
 	if len(byKey) == 0 {
-		return nil, ""
+		return nil
 	}
 	loaded := map[string]agentskill.Entry{}
-	return []Tool{loadSkillTool(byKey, loaded, limits, serverContext, runtime)}, skillPrompt(entries)
+	return []Tool{loadSkillTool(byKey, loaded, limits, serverContext, runtime, skillToolDescription(entries))}
 }
 
-func loadSkillTool(entries map[string]agentskill.Entry, loaded map[string]agentskill.Entry, limits agentskill.Limits, serverContext *server.Context, runtime SkillRuntime) Tool {
+func loadSkillTool(entries map[string]agentskill.Entry, loaded map[string]agentskill.Entry, limits agentskill.Limits, serverContext *server.Context, runtime SkillRuntime, description string) Tool {
 	keys := make([]any, 0, len(entries))
 	for key := range entries {
 		keys = append(keys, key)
@@ -54,7 +54,8 @@ func loadSkillTool(entries map[string]agentskill.Entry, loaded map[string]agents
 	return skillActivityTool(Tool{
 		Definition: Definition{
 			Name:        "load_skill",
-			Description: "按 key 加载当前智能体技能方案中的一个技能正文。只有任务确实需要该技能时才调用。",
+			Description: description,
+			Execution:   ExecutionPolicy{ReuseSuccessfulArguments: true},
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -111,15 +112,24 @@ func builtinSkillTools(entry agentskill.Entry, serverContext *server.Context) ([
 	for _, method := range methods {
 		method := method
 		name := FunctionName("skill_"+entry.Key+"_", method.Key)
+		description := compactSkillText(method.Description, skillDescriptionRunes)
+		if description == "" {
+			description = "调用已加载技能方法“" + method.Key + "”。"
+		}
+		parameters := method.Parameters
+		if len(parameters) == 0 {
+			parameters = map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{},
+				"additionalProperties": true,
+			}
+		}
 		tools = append(tools, skillActivityTool(Tool{
 			Definition: Definition{
 				Name:        name,
-				Description: method.Description,
-				Parameters: map[string]any{
-					"type":                 "object",
-					"properties":           map[string]any{},
-					"additionalProperties": true,
-				},
+				Description: description,
+				Execution:   ExecutionPolicy{PreventDuplicateRecovery: true},
+				Parameters:  parameters,
 			},
 			Handle: func(_ context.Context, call Call) (Result, error) {
 				result, err := callBuiltinSkillMethod(serverContext, method, call.Arguments)
@@ -132,7 +142,7 @@ func builtinSkillTools(entry agentskill.Entry, serverContext *server.Context) ([
 		definitions = append(definitions, map[string]any{
 			"name":        name,
 			"source_key":  method.Key,
-			"description": method.Description,
+			"description": description,
 		})
 	}
 	return tools, definitions
@@ -150,27 +160,27 @@ func callBuiltinSkillMethod(serverContext *server.Context, method agentskill.Bui
 	return load.Service(method.Service, []any{arguments}), nil
 }
 
-func skillPrompt(entries []agentskill.Entry) string {
+func skillToolDescription(entries []agentskill.Entry) string {
 	lines := []string{
-		"可用技能 metadata（技能正文不会自动注入，需要时先调用 load_skill）：",
+		"加载完成当前任务所需的技能说明。可用技能：",
 	}
 	for _, entry := range entries {
-		line := "- key=" + strings.TrimSpace(entry.Key) + ", name=" + strings.TrimSpace(entry.Name)
+		line := "- " + strings.TrimSpace(entry.Key) + "：" + strings.TrimSpace(entry.Name)
 		if description := strings.TrimSpace(entry.Description); description != "" {
-			line += ", description=" + compactSkillPromptText(description, skillPromptDescriptionRunes)
+			line += "，" + compactSkillText(description, skillDescriptionRunes)
 		}
-		if triggers := compactSkillPromptList(entry.Triggers, skillPromptTriggerItems, skillPromptTriggerRunes); len(triggers) > 0 {
-			line += ", triggers=" + strings.Join(triggers, "、")
+		if triggers := compactSkillList(entry.Triggers, skillTriggerItems, skillTriggerRunes); len(triggers) > 0 {
+			line += "；适用：" + strings.Join(triggers, "、")
 		}
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }
 
-func compactSkillPromptList(values []string, maxItems int, maxRunes int) []string {
+func compactSkillList(values []string, maxItems int, maxRunes int) []string {
 	result := make([]string, 0, min(len(values), maxItems))
 	for _, value := range values {
-		value = compactSkillPromptText(value, maxRunes)
+		value = compactSkillText(value, maxRunes)
 		if value == "" {
 			continue
 		}
@@ -182,7 +192,7 @@ func compactSkillPromptList(values []string, maxItems int, maxRunes int) []strin
 	return result
 }
 
-func compactSkillPromptText(value string, maxRunes int) string {
+func compactSkillText(value string, maxRunes int) string {
 	value = strings.Join(strings.Fields(value), " ")
 	if maxRunes <= 0 {
 		return ""

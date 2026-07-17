@@ -43,13 +43,6 @@ var (
 			"sort":       3,
 			"status":     1,
 		},
-		{
-			"id":         4,
-			"power_id":   FFmpegComposePowerID,
-			"service_id": serviceFFmpegComposeID,
-			"sort":       1,
-			"status":     1,
-		},
 	}
 
 	powerTargetPowerRelation = orm.Relation{

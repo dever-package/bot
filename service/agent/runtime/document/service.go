@@ -3,7 +3,6 @@ package document
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -53,15 +52,10 @@ func (s Service) AppendText(ctx context.Context, request AppendTextRequest) (age
 	if existing := s.repository.blockBySource(ctx, request.DocumentID, request.SourceKey); existing != nil {
 		return *existing, nil
 	}
-	document := s.repository.find(ctx, request.DocumentID)
-	if document == nil {
+	if s.repository.find(ctx, request.DocumentID) == nil {
 		return agentmodel.DocumentBlock{}, fmt.Errorf("智能体文档不存在")
 	}
-	text := uniqueDocumentBlockText(
-		request.Text,
-		document.Title,
-		s.repository.blocks(ctx, request.DocumentID),
-	)
+	text := strings.TrimSpace(strings.ReplaceAll(request.Text, "\r\n", "\n"))
 	if text == "" {
 		return agentmodel.DocumentBlock{}, nil
 	}
@@ -73,75 +67,6 @@ func (s Service) AppendText(ctx context.Context, request AppendTextRequest) (age
 		"status":     agentmodel.DocumentBlockStatusReady,
 		"meta":       encodeJSON(request.Meta, "{}"),
 	})
-}
-
-var documentParagraphBreak = regexp.MustCompile(`\n{2,}`)
-
-func uniqueDocumentBlockText(text string, title string, blocks []agentmodel.DocumentBlock) string {
-	seen := make([]string, 0)
-	for _, block := range blocks {
-		if block.Type != agentmodel.DocumentBlockTypeText {
-			continue
-		}
-		for _, paragraph := range splitDocumentParagraphs(block.Text) {
-			if key := documentParagraphKey(paragraph); key != "" {
-				seen = append(seen, key)
-			}
-		}
-	}
-
-	result := make([]string, 0)
-	for _, paragraph := range splitDocumentParagraphs(text) {
-		paragraph = withoutDocumentTitle(paragraph, title)
-		key := documentParagraphKey(paragraph)
-		if key == "" {
-			continue
-		}
-		if documentParagraphSeen(seen, key) {
-			continue
-		}
-		seen = append(seen, key)
-		result = append(result, paragraph)
-	}
-	return strings.Join(result, "\n\n")
-}
-
-func documentParagraphSeen(seen []string, current string) bool {
-	for _, existing := range seen {
-		if existing == current || strings.HasPrefix(existing, current) {
-			return true
-		}
-	}
-	return false
-}
-
-func splitDocumentParagraphs(text string) []string {
-	text = strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
-	if text == "" {
-		return nil
-	}
-	return documentParagraphBreak.Split(text, -1)
-}
-
-func withoutDocumentTitle(paragraph string, title string) string {
-	titleKey := documentParagraphKey(title)
-	if titleKey == "" {
-		return strings.TrimSpace(paragraph)
-	}
-	lines := strings.Split(paragraph, "\n")
-	kept := make([]string, 0, len(lines))
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "#") && documentParagraphKey(strings.TrimSpace(strings.TrimLeft(trimmed, "#"))) == titleKey {
-			continue
-		}
-		kept = append(kept, line)
-	}
-	return strings.TrimSpace(strings.Join(kept, "\n"))
-}
-
-func documentParagraphKey(value string) string {
-	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 }
 
 func (s Service) AppendMedia(ctx context.Context, request AppendMediaRequest) (agentmodel.DocumentBlock, error) {

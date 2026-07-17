@@ -158,6 +158,36 @@ func (repository) CommitStep(
 	})
 }
 
+func (repository) CommitCheckpoint(
+	ctx context.Context,
+	runID uint64,
+	checkpoint string,
+	skills []string,
+	workerID string,
+	leaseUntil time.Time,
+) (err error) {
+	if runID == 0 || strings.TrimSpace(workerID) == "" {
+		return errRunLeaseLost
+	}
+	defer repositoryError(&err)
+	affected := agentmodel.NewRunModel().Update(ctx, map[string]any{
+		"id":               runID,
+		"status":           runStatusRunning,
+		"worker_id":        workerID,
+		"cancel_requested": false,
+		"lease_expires_at": map[string]any{"gt": time.Now()},
+	}, map[string]any{
+		"checkpoint":       checkpoint,
+		"skills":           encodeJSON(skills, "[]"),
+		"heartbeat_at":     time.Now(),
+		"lease_expires_at": leaseUntil,
+	})
+	if affected == 0 {
+		return errRunLeaseLost
+	}
+	return nil
+}
+
 func (repository) ListRunnable(ctx context.Context, now time.Time, limit int) (rows []agentmodel.Run, err error) {
 	defer repositoryError(&err)
 	if limit < 1 {

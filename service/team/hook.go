@@ -40,6 +40,7 @@ func (TeamHook) ProviderBeforeSaveTeam(c *server.Context, params []any) any {
 		record["config"] = "{}"
 	}
 	defaultTeamInt16Field(record, "status", defaultTeamStatus, partial)
+	defaultTeamInt16Field(record, "project_enabled", teammodel.StatusEnabled, partial)
 	defaultTeamIntField(record, "sort", defaultTeamSort, partial)
 	if rawRows, exists := record["asset_cates"]; exists {
 		record["asset_cates"] = normalizeTeamAssetCateRows(c.Context(), util.ToUint64(record["id"]), rawRows)
@@ -118,6 +119,7 @@ func (TeamHook) ProviderBeforeSaveTeamPower(c *server.Context, params []any) any
 	if shouldNormalizeTeamField(record, "config", partial) && record["config"] == "" {
 		record["config"] = "{}"
 	}
+	defaultTeamInt16Field(record, "home_status", teammodel.StatusEnabled, partial)
 	defaultTeamInt16Field(record, "status", defaultTeamStatus, partial)
 	defaultTeamIntField(record, "sort", defaultTeamSort, partial)
 	return record
@@ -147,33 +149,12 @@ func (TeamHook) ProviderBeforeSaveRole(c *server.Context, params []any) any {
 	if !partial && util.ToUint64(record["agent_id"]) == 0 {
 		panicTeamField("form.agent_id", "智能体不能为空。")
 	}
-	if shouldNormalizeTeamField(record, "asset_cate_id", partial) {
-		normalizeRoleAssetCate(c.Context(), record)
-	}
 	if shouldNormalizeTeamField(record, "config", partial) && record["config"] == "" {
 		record["config"] = "{}"
 	}
 	defaultTeamInt16Field(record, "status", defaultTeamStatus, partial)
 	defaultTeamIntField(record, "sort", defaultTeamSort, partial)
 	return record
-}
-
-func normalizeRoleAssetCate(ctx context.Context, record map[string]any) {
-	assetCateID := util.ToUint64(record["asset_cate_id"])
-	if assetCateID == 0 {
-		record["asset_cate_id"] = 0
-		return
-	}
-	teamID := util.ToUint64(record["team_id"])
-	row := teammodel.NewAssetCateModel().Find(ctx, map[string]any{
-		"id": assetCateID,
-	})
-	if row == nil || row.Status != teammodel.StatusEnabled {
-		panicTeamField("form.asset_cate_id", "资产分类不存在或已停用。")
-	}
-	if teamID > 0 && row.TeamID != teamID {
-		panicTeamField("form.asset_cate_id", "资产分类不属于当前团队。")
-	}
 }
 
 func normalizeTeamAssetCateRows(ctx context.Context, teamID uint64, value any) []any {
@@ -268,7 +249,6 @@ func normalizeTeamPowerRows(ctx context.Context, teamID uint64, value any) []any
 				next["id"] = existingID
 			}
 		}
-
 		power := energonmodel.NewPowerModel().Find(ctx, map[string]any{"id": powerID})
 		if power == nil || power.Status != teammodel.StatusEnabled {
 			panicTeamField("form.team_powers", "所选能力不存在或已停用。")
@@ -277,6 +257,7 @@ func normalizeTeamPowerRows(ctx context.Context, teamID uint64, value any) []any
 		if util.ToStringTrimmed(next["config"]) == "" {
 			next["config"] = "{}"
 		}
+		defaultTeamInt16Field(next, "home_status", teammodel.StatusEnabled, false)
 		defaultTeamInt16Field(next, "status", defaultTeamStatus, false)
 		if util.ToIntDefault(next["sort"], 0) <= 0 {
 			next["sort"] = index + 1

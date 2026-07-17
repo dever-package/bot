@@ -3,6 +3,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentType,
+  type ReactNode,
 } from 'react'
 import { useStore } from 'zustand'
 import { Loader2, Send, Square } from 'lucide-react'
@@ -22,6 +24,7 @@ import {
   type RuntimeStreamFrame,
 } from '@/lib/stream'
 import { getStoreValueByPath } from '@/lib/store'
+import { getCompatModule } from '@dever/front-plugin'
 import {
   isEmptyRuntimeOutput,
   normalizeRuntimeFrameOutput,
@@ -60,6 +63,28 @@ import {
   useStreamClock,
   type StreamTiming,
 } from '@/components/stream-timing'
+import type {
+  ReferenceContent,
+  ReferenceProvider,
+} from './agent-chat/reference'
+import { useAssetReferenceProvider } from '../body-work/asset/asset-reference-provider'
+
+type ReferenceEditorProps = {
+  value: string
+  content?: ReferenceContent
+  references: []
+  placeholder?: string
+  disabled?: boolean
+  providers?: ReferenceProvider[]
+  onChange: (value: string, content: ReferenceContent) => void
+}
+
+const ReferenceEditor = getCompatModule(
+  '@/components/reference-composer'
+).ReferenceEditor as ComponentType<ReferenceEditorProps> | undefined
+const isPromptParam = getCompatModule(
+  '@/components/agent/stream-request-params'
+).isPromptParam as ((param: PowerParam) => boolean) | undefined
 
 type StreamFrame = RuntimeStreamFrame<EnergonOutput>
 
@@ -78,12 +103,66 @@ const EMPTY_OUTPUT: StreamOutput = {
 }
 
 export function ShowStreamRequest({ item, store }: NodeItemProps) {
+  const powerKey = useStore(store, () =>
+    valueText(getStoreValueByPath(store, String(item.meta?.powerPath || '')))
+  )
+  return (
+    <StreamPowerRunner
+      powerKey={powerKey}
+      requestApi={String(item.meta?.requestApi || '/bot/admin/energon/request')}
+      paramApi={String(item.meta?.paramApi || '/bot/admin/energon/power_params')}
+      streamApi={String(item.meta?.streamApi || '/bot/admin/energon/stream')}
+      stopApi={String(item.meta?.stopApi || '/bot/admin/energon/stream_stop')}
+      blockMs={Number(item.meta?.blockMs || 1000)}
+    />
+  )
+}
+
+export type StreamPowerRunnerProps = {
+  powerKey: string
+  requestApi: string
+  paramApi: string
+  streamApi: string
+  stopApi: string
+  blockMs?: number
+  requestScope?: Record<string, unknown>
+  paramScope?: Record<string, unknown>
+  height?: string
+  resultTitle?: string
+  renderResultActions?: (result: StreamPowerResult) => ReactNode
+  referenceProviders?: ReferenceProvider[]
+  assetReferenceTeamID?: number
+}
+
+export type StreamPowerResult = {
+  requestID: string
+  output: EnergonOutput | null
+  running: boolean
+  successful: boolean
+}
+
+export function StreamPowerRunner({
+  powerKey,
+  requestApi,
+  paramApi,
+  streamApi,
+  stopApi,
+  blockMs = 1000,
+  requestScope,
+  paramScope = requestScope,
+  height = 'min(60vh, 600px)',
+  resultTitle = '测试结果',
+  renderResultActions,
+  referenceProviders = [],
+  assetReferenceTeamID = 0,
+}: StreamPowerRunnerProps) {
   const [requestID, setRequestID] = useState('')
   const [lastStreamID, setLastStreamID] = useState('0-0')
   const [running, setRunning] = useState(false)
   const [cancelable, setCancelable] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [error, setError] = useState('')
+  const [resultFailed, setResultFailed] = useState(false)
   const [output, setOutput] = useState<StreamOutput>(EMPTY_OUTPUT)
   const [timing, setTiming] = useState<StreamTiming | undefined>()
   const [paramsLoading, setParamsLoading] = useState(false)
@@ -93,6 +172,9 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
   const [selectedSource, setSelectedSource] = useState({ power: '', id: '' })
   const [paramValues, setParamValues] = useState<ParamValueMap>({})
   const [paramFiles, setParamFiles] = useState<ParamFileMap>({})
+  const [paramReferenceContents, setParamReferenceContents] = useState<
+    Record<string, ReferenceContent>
+  >({})
   const [requestIDCopied, setRequestIDCopied] = useState(false)
   const runTokenRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
@@ -100,15 +182,7 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
   const outputScrollRef = useRef<HTMLDivElement | null>(null)
   const autoScrollRef = useRef(true)
 
-  const powerKey = useStore(store, () =>
-    valueText(getStoreValueByPath(store, String(item.meta?.powerPath || '')))
-  )
   const activeSelectedSourceID = selectedSource.power === powerKey ? selectedSource.id : ''
-  const requestApi = String(item.meta?.requestApi || '/bot/admin/energon/request')
-  const paramApi = String(item.meta?.paramApi || '/bot/admin/energon/power_params')
-  const streamApi = String(item.meta?.streamApi || '/bot/admin/energon/stream')
-  const stopApi = String(item.meta?.stopApi || '/bot/admin/energon/stream_stop')
-  const blockMs = Number(item.meta?.blockMs || 1000)
   const paramUploadRuleIds = useMemo(
     () =>
       powerParams
@@ -160,7 +234,9 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
     setPowerSources([])
     setParamValues({})
     setParamFiles({})
+    setParamReferenceContents({})
     setError('')
+    setResultFailed(false)
 
     if (!powerKey) {
       setSourceRule(1)
@@ -173,6 +249,7 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
     async function loadPowerParams() {
       setParamsLoading(true)
       const result = await request(paramApi, 'get', {
+        ...paramScope,
         power: powerKey,
         include_sources: 1,
         source_target_id: activeSelectedSourceID,
@@ -180,9 +257,9 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
       if (cancelled) {
         return
       }
-      if (result.code !== 0) {
+      if (result.code !== 0 && result.status !== 1) {
         setParamsLoading(false)
-        setError(result.message || '读取能力参数失败。')
+        setError(result.message || result.msg || '读取能力参数失败。')
         return
       }
 
@@ -205,7 +282,7 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
     return () => {
       cancelled = true
     }
-  }, [activeSelectedSourceID, paramApi, powerKey])
+  }, [activeSelectedSourceID, paramApi, paramScope, powerKey])
 
   useEffect(() => {
     const element = outputScrollRef.current
@@ -263,6 +340,7 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
     runTokenRef.current = token
     setRunning(true)
     setError('')
+    setResultFailed(false)
     setOutput(EMPTY_OUTPUT)
     setTiming(createStreamTiming('正在连接模型'))
     setRequestID('')
@@ -275,9 +353,14 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
     abortRef.current = controller
 
     try {
+      const requestInput = buildRequestInput(powerParams, paramValues)
+      if (Object.keys(paramReferenceContents).length > 0) {
+        requestInput._reference_contents = paramReferenceContents
+      }
       const body: Record<string, unknown> = {
+        ...requestScope,
         power: powerKey,
-        input: buildRequestInput(powerParams, paramValues),
+        input: requestInput,
         history: [],
         options: {
           stream: true,
@@ -336,6 +419,7 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
       setTiming((current) => updateStreamTimingFromOutput(current, frameOutput))
     }
     if (frame.type === 'result') {
+      setResultFailed(Number(frame.status) === 2)
       setTiming((current) =>
         finishStreamTiming(
           current,
@@ -420,10 +504,10 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col gap-4 md:flex-row"
-      style={{ height: 'min(60vh, 600px)' }}
+      className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto md:flex-row md:overflow-hidden"
+      style={{ height }}
     >
-      <div className="flex h-full min-h-0 w-full max-w-md shrink-0 flex-col gap-3">
+      <div className="flex min-h-[360px] w-full max-w-md shrink-0 flex-col gap-3 md:h-full md:min-h-0">
         <div className="min-h-0 flex-1 overflow-y-auto rounded-xl bg-background/70 p-3">
           {paramsLoading ? (
             <span className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
@@ -452,6 +536,30 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
             <div className="space-y-3">
               {mainPowerParams.map((param) => {
                 const key = inputKeyForParam(param)
+                if (
+                  isPromptParam?.(param) &&
+                  ReferenceEditor &&
+                  (assetReferenceTeamID > 0 || referenceProviders.length > 0)
+                ) {
+                  return (
+                    <PowerPromptReferenceField
+                      key={`${param.id}-${key}`}
+                      param={param}
+                      value={String(paramValues[key] || '')}
+                      content={paramReferenceContents[key]}
+                      providers={referenceProviders}
+                      assetReferenceTeamID={assetReferenceTeamID}
+                      disabled={running}
+                      onChange={(nextValue, nextContent) => {
+                        setParamValue(param, nextValue)
+                        setParamReferenceContents((current) => ({
+                          ...current,
+                          [key]: nextContent,
+                        }))
+                      }}
+                    />
+                  )
+                }
                 return (
                   <PowerParamField
                     key={`${param.id}-${key}`}
@@ -531,27 +639,37 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
 
       <div className="hidden w-px shrink-0 bg-border md:block" aria-hidden="true" />
 
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-background">
+      <div className="flex min-h-[360px] min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-background md:h-full md:min-h-0">
         <div className="flex shrink-0 items-center justify-between gap-3 border-b px-3 py-2">
-          <span className="text-sm font-medium text-foreground">测试结果</span>
-          {requestID ? (
-            <button
-              type="button"
-              className="flex min-w-0 max-w-[70%] items-center justify-end rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
-              title={`双击复制完整 RequestID：${requestID}${
-                lastStreamID !== '0-0' ? ` / StreamID: ${lastStreamID}` : ''
-              }`}
-              onDoubleClick={() => void copyRequestID()}
-            >
-              <span className="mr-1 shrink-0">RequestID:</span>
-              <span className="min-w-0 truncate font-mono">{requestID}</span>
-              {requestIDCopied ? (
-                <span className="ml-2 shrink-0 text-primary">已复制</span>
-              ) : null}
-            </button>
-          ) : (
-            <span className="text-xs text-muted-foreground">暂无 RequestID</span>
-          )}
+          <span className="text-sm font-medium text-foreground">{resultTitle}</span>
+          <div className="flex min-w-0 items-center justify-end gap-2">
+            {renderResultActions?.({
+              requestID,
+              output: output.finalOutput,
+              running,
+              successful: Boolean(
+                requestID && output.finalOutput && !running && !resultFailed && !error
+              ),
+            })}
+            {requestID ? (
+              <button
+                type="button"
+                className="flex min-w-0 max-w-[70%] items-center justify-end rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                title={`双击复制完整 RequestID：${requestID}${
+                  lastStreamID !== '0-0' ? ` / StreamID: ${lastStreamID}` : ''
+                }`}
+                onDoubleClick={() => void copyRequestID()}
+              >
+                <span className="mr-1 shrink-0">RequestID:</span>
+                <span className="min-w-0 truncate font-mono">{requestID}</span>
+                {requestIDCopied ? (
+                  <span className="ml-2 shrink-0 text-primary">已复制</span>
+                ) : null}
+              </button>
+            ) : (
+              <span className="text-xs text-muted-foreground">暂无 RequestID</span>
+            )}
+          </div>
         </div>
         <div
           ref={outputScrollRef}
@@ -571,6 +689,57 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
           />
         </div>
       </div>
+    </div>
+  )
+}
+
+function PowerPromptReferenceField({
+  param,
+  value,
+  content,
+  providers,
+  assetReferenceTeamID,
+  disabled,
+  onChange,
+}: {
+  param: PowerParam
+  value: string
+  content?: ReferenceContent
+  providers: ReferenceProvider[]
+  assetReferenceTeamID: number
+  disabled: boolean
+  onChange: (value: string, content: ReferenceContent) => void
+}) {
+  const assetReferenceProvider = useAssetReferenceProvider({
+    teamID: assetReferenceTeamID,
+    allowedKinds: param.asset_kinds,
+  })
+  const activeProviders = useMemo(
+    () =>
+      assetReferenceTeamID > 0
+        ? [
+            assetReferenceProvider,
+            ...providers.filter((provider) => provider.trigger !== '@'),
+          ]
+        : providers,
+    [assetReferenceProvider, assetReferenceTeamID, providers]
+  )
+
+  return (
+    <div className='space-y-2 rounded-xl bg-muted/30 p-3'>
+      <div className='text-sm font-medium text-foreground'>
+        {param.name}
+        {param.required ? <span className='ml-0.5 text-destructive'>*</span> : null}
+      </div>
+      <ReferenceEditor
+        value={value}
+        content={content}
+        references={[]}
+        placeholder={param.placeholder || `请输入${param.name}`}
+        disabled={disabled}
+        providers={activeProviders}
+        onChange={onChange}
+      />
     </div>
   )
 }

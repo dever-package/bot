@@ -20,8 +20,8 @@ var assetCateKindOptions = []map[string]any{
 	{"id": assetmodel.KindImage, "value": "图片"},
 	{"id": assetmodel.KindAudio, "value": "音频"},
 	{"id": assetmodel.KindVideo, "value": "视频"},
+	{"id": assetmodel.KindRichText, "value": "富文本"},
 	{"id": assetmodel.KindFile, "value": "文件"},
-	{"id": assetmodel.KindMixed, "value": "富文本"},
 }
 
 var assetCateCardinalityOptions = []map[string]any{
@@ -69,10 +69,10 @@ func NormalizeAssetCateKind(kind string) string {
 		return assetmodel.KindAudio
 	case assetmodel.KindVideo:
 		return assetmodel.KindVideo
+	case assetmodel.KindRichText:
+		return assetmodel.KindRichText
 	case assetmodel.KindFile:
 		return assetmodel.KindFile
-	case assetmodel.KindMixed:
-		return assetmodel.KindMixed
 	default:
 		return assetmodel.KindText
 	}

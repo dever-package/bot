@@ -9,6 +9,7 @@ import (
 
 type PromptOptions struct {
 	TextTitle string
+	MainKey   string
 	Labels    map[string]string
 }
 
@@ -48,7 +49,13 @@ func BuildPromptContent(input map[string]any, options PromptOptions) PromptConte
 		Audios: collectPromptMedia(input, "audios"),
 		Files:  collectPromptMedia(input, "files"),
 	}
-	content.Text = buildPromptText(promptMainText(input), promptExtraParams(input, options.Labels), options, content.HasMedia())
+	mainKey := promptMainKey(options.MainKey)
+	content.Text = buildPromptText(
+		promptMainText(input, mainKey),
+		promptExtraParams(input, mainKey, options.Labels),
+		options,
+		content.HasMedia(),
+	)
 	return content
 }
 
@@ -76,17 +83,24 @@ func (p PromptContent) TextWithMediaReferences(options MediaReferenceOptions) st
 	return strings.Join(parts, "\n\n")
 }
 
-func promptMainText(input map[string]any) string {
-	if text, exists := input["text"]; exists {
-		return strings.TrimSpace(promptValueText(text))
+func promptMainKey(value string) string {
+	if key := strings.TrimSpace(value); key != "" {
+		return key
+	}
+	return "prompt"
+}
+
+func promptMainText(input map[string]any, mainKey string) string {
+	if prompt, exists := input[mainKey]; exists {
+		return strings.TrimSpace(promptValueText(prompt))
 	}
 	return ""
 }
 
-func promptExtraParams(input map[string]any, labels map[string]string) []string {
+func promptExtraParams(input map[string]any, mainKey string, labels map[string]string) []string {
 	keys := make([]string, 0, len(input))
 	for key, value := range input {
-		if isPromptReservedKey(key) || isEmptyProtocolValue(value) {
+		if isPromptReservedKey(key, mainKey) || isEmptyProtocolValue(value) {
 			continue
 		}
 		keys = append(keys, key)
@@ -148,9 +162,9 @@ func appendMediaReference(parts *[]string, label string, urls []string) {
 	*parts = append(*parts, strings.Join(lines, "\n"))
 }
 
-func isPromptReservedKey(key string) bool {
+func isPromptReservedKey(key string, mainKey string) bool {
 	key = strings.TrimSpace(key)
-	if key == "text" {
+	if key == mainKey {
 		return true
 	}
 	for _, field := range promptMediaFields {

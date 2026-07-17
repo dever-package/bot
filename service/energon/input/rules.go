@@ -27,6 +27,8 @@ func IsActive(status int16) bool {
 
 func NormalizeParamControlType(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "prompt":
+		return "prompt"
 	case "textarea", "text", "string":
 		return "textarea"
 	case "input", "number":
@@ -38,6 +40,14 @@ func NormalizeParamControlType(value string) string {
 	default:
 		return "input"
 	}
+}
+
+func IsPromptParamType(paramType string) bool {
+	return NormalizeParamControlType(paramType) == "prompt"
+}
+
+func IsPromptParam(param botmodel.Param) bool {
+	return IsPromptParamType(param.Type)
 }
 
 func NormalizeParamValueType(value string) string {

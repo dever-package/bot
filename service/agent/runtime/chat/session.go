@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shemic/dever/orm"
+
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimedocument "github.com/dever-package/bot/service/agent/runtime/document"
 )
@@ -30,7 +32,6 @@ type SessionRequest struct {
 	PageSize      int
 	Keyword       string
 	Status        string
-	MemoryEnabled bool
 	SessionOnly   bool
 }
 
@@ -77,8 +78,10 @@ func (s Service) ResolveSession(ctx context.Context, request SessionRequest) (ma
 	if request.SessionOnly {
 		return result, nil
 	}
+	memoryEnabled := sessionMemoryEnabled(ctx, session)
+	result["memory_enabled"] = memoryEnabled
 	result["messages"] = sessionMessages(ctx, session.ID, request.Limit, request.LastMessageID)
-	result["memories"] = sessionMemories(ctx, session, request.MemoryEnabled)
+	result["memories"] = sessionMemories(ctx, session, memoryEnabled)
 	return result, nil
 }
 
@@ -129,11 +132,27 @@ func (Service) ReviewSessions(ctx context.Context, request SessionRequest) (map[
 }
 
 func reviewSessionsByCursor(ctx context.Context, filter map[string]any, lastSessionID uint64, requestedLimit int) map[string]any {
+	model := agentmodel.NewSessionModel()
 	if lastSessionID > 0 {
-		filter["id"] = map[string]any{"lt": lastSessionID}
+		cursorFilter := make(map[string]any, len(filter)+1)
+		for key, value := range filter {
+			cursorFilter[key] = value
+		}
+		cursorFilter["id"] = lastSessionID
+		cursor := model.Find(ctx, cursorFilter)
+		if cursor == nil {
+			return map[string]any{"sessions": []map[string]any{}}
+		}
+		filter["or"] = []map[string]any{
+			{"last_message_at": map[string]any{"lt": cursor.LastMessageAt}},
+			{
+				"last_message_at": cursor.LastMessageAt,
+				"id":              map[string]any{"lt": cursor.ID},
+			},
+		}
 	}
-	rows := agentmodel.NewSessionModel().Select(ctx, filter, map[string]any{
-		"order": "main.id desc",
+	rows := model.Select(ctx, filter, map[string]any{
+		"order": "main.last_message_at desc,main.id desc",
 		"limit": clampLimit(requestedLimit, defaultSessionLimit, maxSessionLimit),
 	})
 	sessions := make([]map[string]any, 0, len(rows))
@@ -145,7 +164,7 @@ func reviewSessionsByCursor(ctx context.Context, filter map[string]any, lastSess
 	return map[string]any{"sessions": sessions}
 }
 
-func (s Service) ClearSession(ctx context.Context, sessionID uint64, memoryEnabled bool) (map[string]any, error) {
+func (s Service) ClearSession(ctx context.Context, sessionID uint64) (map[string]any, error) {
 	owner, err := currentOwner(ctx)
 	if err != nil {
 		return nil, err
@@ -154,19 +173,33 @@ func (s Service) ClearSession(ctx context.Context, sessionID uint64, memoryEnabl
 	if err != nil {
 		return nil, err
 	}
-	runtimedocument.NewService().DeleteSession(ctx, session.ID)
-	agentmodel.NewArtifactModel().Delete(ctx, map[string]any{"session_id": session.ID})
-	agentmodel.NewMessageModel().Delete(ctx, map[string]any{"session_id": session.ID})
+	if sessionHasActiveWork(ctx, *session) {
+		return nil, fmt.Errorf("当前会话仍在生成，请等待完成或先停止")
+	}
 	now := time.Now()
-	agentmodel.NewSessionModel().Update(ctx, map[string]any{"id": session.ID}, map[string]any{
-		"message_count":      0,
-		"title":              "新会话",
-		"title_source":       agentmodel.TitleSourceAuto,
-		"context_summary":    "",
-		"summary_message_id": 0,
-		"active_series_id":   0,
-		"last_message_at":    now,
+	err = orm.Transaction(ctx, func(tx context.Context) error {
+		runtimedocument.NewService().DeleteSession(tx, session.ID)
+		agentmodel.NewArtifactModel().Delete(tx, map[string]any{"session_id": session.ID})
+		agentmodel.NewMessageModel().Delete(tx, map[string]any{"session_id": session.ID})
+		updated := agentmodel.NewSessionModel().Update(tx, map[string]any{
+			"id": session.ID, "active_request_id": "",
+		}, map[string]any{
+			"message_count":      0,
+			"title":              "新会话",
+			"title_source":       agentmodel.TitleSourceAuto,
+			"context_summary":    "",
+			"summary_message_id": 0,
+			"active_series_id":   0,
+			"last_message_at":    now,
+		})
+		if updated != 1 {
+			return fmt.Errorf("当前会话状态已变化，请重试")
+		}
+		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 	session.MessageCount = 0
 	session.Title = "新会话"
 	session.TitleSource = agentmodel.TitleSourceAuto
@@ -175,9 +208,10 @@ func (s Service) ClearSession(ctx context.Context, sessionID uint64, memoryEnabl
 	session.ActiveSeriesID = 0
 	session.LastMessageAt = now
 	return map[string]any{
-		"session":  sessionMap(*session),
-		"messages": []map[string]any{},
-		"memories": sessionMemories(ctx, *session, memoryEnabled),
+		"session":        sessionMap(*session),
+		"messages":       []map[string]any{},
+		"memories":       sessionMemories(ctx, *session, sessionMemoryEnabled(ctx, *session)),
+		"memory_enabled": sessionMemoryEnabled(ctx, *session),
 	}, nil
 }
 

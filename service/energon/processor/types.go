@@ -18,6 +18,13 @@ type ParamDefinition struct {
 	MaxFiles     int
 	DefaultValue string
 	Sort         int
+	Options      []ParamOptionDefinition
+}
+
+type ParamOptionDefinition struct {
+	Name  string
+	Value string
+	Sort  int
 }
 
 type ParamSpec struct {

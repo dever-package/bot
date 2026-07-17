@@ -26,20 +26,34 @@ import type { ComposerAssetItem } from "../space-prompt-composer";
 import { NodeDetailHeader } from "./node-detail-header";
 import { useNodeDetailDraft } from "./use-node-detail-draft";
 import { formatNodeDetailVersionTime, VersionPanel } from "./version-panel";
+import { useAssetReferenceProvider } from "../../asset/asset-reference-provider";
+import { CanvasAssetReferenceProviderContext } from "../space-reference-editor";
 
 export function NodeDetailDialog({
   projectId,
+  teamId,
+  assetCateId,
   node,
   canvasReferenceItems,
   onAssetUpdated,
   onClose,
 }: {
   projectId: number;
+  teamId: number;
+  assetCateId: number;
   node: SpaceCanvasNode;
   canvasReferenceItems?: ComposerAssetItem[];
   onAssetUpdated?: (asset: ProjectAsset) => void;
   onClose: () => void;
 }) {
+  const assetReferenceProvider = useAssetReferenceProvider({
+    teamID: teamId,
+    initialFilters: {
+      sourceType: "project",
+      projectID: projectId,
+      assetCateID: assetCateId,
+    },
+  });
   const assetId = Number(node.asset?.id || 0);
   const [asset, setAsset] = useState<ProjectAsset | undefined>(node.asset);
   const [versions, setVersions] = useState<AssetVersion[]>(() =>
@@ -511,13 +525,17 @@ export function NodeDetailDialog({
                 )}
               </div>
             ) : (
-              <NodeDetailEditor
-                content={activeContent}
-                mediaOutput={mediaOutput}
-                readonly={editorReadonly}
-                referenceItems={canvasReferenceItems}
-                onChange={draft.setDraft}
-              />
+              <CanvasAssetReferenceProviderContext.Provider
+                value={assetReferenceProvider}
+              >
+                <NodeDetailEditor
+                  content={activeContent}
+                  mediaOutput={mediaOutput}
+                  readonly={editorReadonly}
+                  referenceItems={canvasReferenceItems}
+                  onChange={draft.setDraft}
+                />
+              </CanvasAssetReferenceProviderContext.Provider>
             )}
           </div>
         </main>
@@ -592,7 +610,7 @@ function detailContentLabel(
   if (content.mode === "file") {
     return "文件";
   }
-  if (node.kind === "image" || node.kind === "mixed") {
+  if (node.kind === "image" || node.kind === "richtext") {
     return "图文内容";
   }
   if (node.kind === "video") {

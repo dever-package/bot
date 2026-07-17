@@ -24,6 +24,16 @@ func (s Service) ReadProjectStream(ctx context.Context, projectID uint64, reques
 	return s.ReadStream(ctx, requestID, lastID, count, block)
 }
 
+func (s Service) ReadBodyStream(ctx context.Context, bodyID uint64, requestID string, lastID string, count int64, block time.Duration) ([]frontstream.Entry, error) {
+	if bodyID == 0 {
+		return nil, fmt.Errorf("团队工作区不能为空")
+	}
+	if s.repo.FindRunByRequestIDInBody(ctx, requestID, bodyID) == nil {
+		return nil, fmt.Errorf("运行不存在")
+	}
+	return s.ReadStream(ctx, requestID, lastID, count, block)
+}
+
 func (s Service) writeRunEvent(ctx context.Context, run teammodel.Run, event string, fields map[string]any) {
 	if run.RequestID == "" {
 		return

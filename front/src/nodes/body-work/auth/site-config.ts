@@ -1,0 +1,236 @@
+import { useEffect, useState } from "react";
+import {
+  getSiteConfig,
+  joinSiteApi,
+  request,
+} from "@dever/front-plugin";
+import { isSuccessResponse } from "../shared/api-response";
+
+export type BodySiteConfig = {
+  siteName: string;
+  logo: string;
+  favicon: string;
+  loginTitle: string;
+  loginDescription: string;
+};
+
+export type BodyLoginLink = {
+  id: number;
+  name: string;
+  url: string;
+  target: "_self" | "_blank";
+};
+
+export type BodyLoginAccount = {
+  id: number;
+  provider: string;
+  name: string;
+  icon: string;
+};
+
+export type BodyLoginConfig = {
+  site: BodySiteConfig;
+  links: BodyLoginLink[];
+  accounts: BodyLoginAccount[];
+};
+
+const DEFAULT_LOGIN_TITLE = "把想法变成作品";
+const DEFAULT_LOGIN_DESCRIPTION =
+  "调用团队能力，与智能体协作，把每一次创作沉淀为可复用的项目资产。";
+
+let cachedLoginConfig: BodyLoginConfig | null = null;
+let pendingLoginConfig: Promise<BodyLoginConfig> | null = null;
+
+export function useBodyLoginConfig() {
+  const [config, setConfig] = useState<BodyLoginConfig>(() =>
+    cachedLoginConfig || fallbackLoginConfig(),
+  );
+
+  useEffect(() => {
+    let active = true;
+    void loadBodyLoginConfig().then((next) => {
+      if (active) {
+        setConfig(next);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return config;
+}
+
+export function loadBodyLoginConfig() {
+  if (cachedLoginConfig) {
+    return Promise.resolve(cachedLoginConfig);
+  }
+  if (pendingLoginConfig) {
+    return pendingLoginConfig;
+  }
+
+  pendingLoginConfig = request(joinSiteApi("login/config"), "get")
+    .then((result: any) => {
+      if (!isSuccessResponse(result)) {
+        throw new Error(String(result?.message || result?.msg || "读取登录配置失败"));
+      }
+      cachedLoginConfig = normalizeLoginConfig(result?.data);
+      return cachedLoginConfig;
+    })
+    .catch(() => fallbackLoginConfig())
+    .finally(() => {
+      pendingLoginConfig = null;
+    });
+
+  return pendingLoginConfig;
+}
+
+export function applyBodySiteMetadata(site: BodySiteConfig) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  if (site.siteName) {
+    document.title = site.siteName;
+  }
+  if (!site.favicon) {
+    return;
+  }
+
+  let favicon = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+  if (!favicon) {
+    favicon = document.createElement("link");
+    favicon.rel = "icon";
+    document.head.appendChild(favicon);
+  }
+  favicon.href = site.favicon;
+}
+
+function normalizeLoginConfig(value: unknown): BodyLoginConfig {
+  const fallback = fallbackLoginConfig();
+  const root = recordValue(value);
+  const config = recordValue(root.config);
+
+  return {
+    site: {
+      siteName: textValue(config.site_name) || fallback.site.siteName,
+      logo: mediaURL(config.logo) || fallback.site.logo,
+      favicon: mediaURL(config.favicon) || fallback.site.favicon,
+      loginTitle: textValue(config.login_title) || fallback.site.loginTitle,
+      loginDescription: Object.prototype.hasOwnProperty.call(
+        config,
+        "login_description",
+      )
+        ? textValue(config.login_description)
+        : fallback.site.loginDescription,
+    },
+    links: rowsValue(root.links).map(normalizeLink).filter(validLink),
+    accounts: rowsValue(root.accounts)
+      .map(normalizeAccount)
+      .filter(validAccount),
+  };
+}
+
+function fallbackLoginConfig(): BodyLoginConfig {
+  const site = getSiteConfig?.() || {};
+  return {
+    site: {
+      siteName: textValue(site.name) || "神创工作台",
+      logo: mediaURL(site.logo),
+      favicon: mediaURL(site.favicon),
+      loginTitle: DEFAULT_LOGIN_TITLE,
+      loginDescription: DEFAULT_LOGIN_DESCRIPTION,
+    },
+    links: [],
+    accounts: [
+      {
+        id: 1,
+        provider: "feishu",
+        name: "使用飞书账户继续",
+        icon: "",
+      },
+    ],
+  };
+}
+
+function normalizeLink(value: unknown): BodyLoginLink {
+  const row = recordValue(value);
+  return {
+    id: positiveNumber(row.id),
+    name: textValue(row.name),
+    url: safeLinkURL(row.url),
+    target: textValue(row.target) === "_blank" ? "_blank" : "_self",
+  };
+}
+
+function normalizeAccount(value: unknown): BodyLoginAccount {
+  const row = recordValue(value);
+  return {
+    id: positiveNumber(row.id),
+    provider: textValue(row.provider).toLowerCase(),
+    name: textValue(row.name),
+    icon: mediaURL(row.icon),
+  };
+}
+
+function validLink(link: BodyLoginLink) {
+  return Boolean(link.id && link.name && link.url);
+}
+
+function validAccount(account: BodyLoginAccount) {
+  return Boolean(account.id && account.provider && account.name);
+}
+
+function safeLinkURL(value: unknown) {
+  const text = textValue(value);
+  if (!text || typeof window === "undefined") {
+    return "";
+  }
+  try {
+    const url = new URL(text, window.location.origin);
+    return ["http:", "https:", "mailto:"].includes(url.protocol)
+      ? url.href
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+function mediaURL(value: unknown): string {
+  if (Array.isArray(value)) {
+    return mediaURL(value[0]);
+  }
+  if (value && typeof value === "object") {
+    const row = value as Record<string, unknown>;
+    return textValue(row.url || row.src || row.path || row.open_url);
+  }
+
+  const text = textValue(value);
+  if (!text || (!text.startsWith("[") && !text.startsWith("{"))) {
+    return text;
+  }
+  try {
+    return mediaURL(JSON.parse(text));
+  } catch {
+    return text;
+  }
+}
+
+function recordValue(value: unknown): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, any>)
+    : {};
+}
+
+function rowsValue(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function positiveNumber(value: unknown) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function textValue(value: unknown) {
+  return value == null ? "" : String(value).trim();
+}

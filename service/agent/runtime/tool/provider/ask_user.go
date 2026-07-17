@@ -7,6 +7,7 @@ import (
 )
 
 const (
+	AskUserToolName   = "ask_user"
 	maxAskUserFields  = 4
 	maxAskUserOptions = 16
 )
@@ -18,37 +19,37 @@ var askUserFieldTypes = map[string]struct{}{
 func AskUserTool() Tool {
 	return Tool{
 		Definition: Definition{
-			Name:        "ask_user",
+			Name:        AskUserToolName,
 			Title:       "等待用户输入",
 			Kind:        "interaction",
-			Description: "仅当用户已经提出明确任务，并且缺少无法安全推断的必要选择或素材时，才调用此工具显示逐题表单并结束当前运行。禁止在问候、闲聊和一般咨询中调用，也禁止用它询问用户想做什么。一次只询问 1-4 个必要信息。所有可确认信息都必须使用 option 或 multi_option，提供 2-16 个具体选项和推荐值；主题、名称、风格、用途、数量、比例等也要先给出合理候选，选择题界面会自动允许用户自定义补充。只有必须上传素材时使用 file 或 files。选项来自知识库时，应先读取原文并完整保留有效选项。不得生成自由输入框，不得加入可选字段，也不得改用正文提问后结束。",
+			Description: "继续任务所必需且无法合理推断的信息，必须调用此工具收集；可安全采用默认值时直接执行。禁止在正文中提问或列出待确认项后结束。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"fields": map[string]any{
 						"type":        "array",
-						"description": "需要用户确认的必要问题，最多 4 个，所有字段均为必填",
+						"description": "需要用户确认的信息",
 						"minItems":    1,
 						"maxItems":    maxAskUserFields,
 						"items": map[string]any{
 							"type": "object",
 							"properties": map[string]any{
-								"key":   map[string]any{"type": "string", "description": "稳定的英文或下划线字段名"},
-								"label": map[string]any{"type": "string", "description": "用户看到的字段名称"},
+								"key":   map[string]any{"type": "string", "description": "字段标识"},
+								"label": map[string]any{"type": "string", "description": "字段名称"},
 								"type": map[string]any{
 									"type": "string",
 									"enum": []any{"option", "multi_option", "file", "files"},
 								},
 								"options": map[string]any{
 									"type":        "array",
-									"description": "option 或 multi_option 的简短选项文本，最多 16 个",
+									"description": "可选项",
 									"minItems":    2,
 									"maxItems":    maxAskUserOptions,
 									"items":       map[string]any{"type": "string"},
 								},
 								"recommended": map[string]any{
 									"type":        "array",
-									"description": "可选。AI 推荐并默认选中的选项，必须来自 options；省略时默认第一项",
+									"description": "默认选中的选项",
 									"maxItems":    maxAskUserOptions,
 									"items":       map[string]any{"type": "string"},
 								},
@@ -185,7 +186,7 @@ func normalizeAskUserOptions(value any) []map[string]any {
 			continue
 		}
 		text = strings.TrimSpace(text)
-		if text == "" || isAskUserCustomOption(text) {
+		if text == "" {
 			continue
 		}
 		result = append(result, map[string]any{"label": text, "value": text})
@@ -194,15 +195,6 @@ func normalizeAskUserOptions(value any) []map[string]any {
 		}
 	}
 	return result
-}
-
-func isAskUserCustomOption(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "其他", "其它", "自定义", "自定义补充", "other", "custom":
-		return true
-	default:
-		return false
-	}
 }
 
 func argumentText(arguments map[string]any, key string) string {

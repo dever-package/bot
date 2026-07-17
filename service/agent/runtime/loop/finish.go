@@ -14,84 +14,124 @@ import (
 )
 
 type runState struct {
-	execution        execution
-	repository       repository
-	seq              int
-	phase            string
-	modelStep        int
-	input            map[string]any
-	history          []any
-	lastText         string
-	artifacts        map[string]any
-	activities       []map[string]any
-	loaded           []string
-	pendingTools     []botprotocol.ToolCall
-	pendingIndex     int
-	pendingVisible   bool
-	documentID       uint64
-	documentTextStep int
-	knowledgeUsed    bool
-	finalStatus      string
-	finalText        string
-	finalMessage     string
-	finalOutput      map[string]any
-	finalCommitted   bool
-	completed        bool
+	execution              execution
+	repository             repository
+	seq                    int
+	phase                  string
+	modelStep              int
+	input                  map[string]any
+	history                []any
+	lastText               string
+	artifacts              map[string]any
+	activities             []map[string]any
+	loaded                 []string
+	toolReceipts           []toolReceipt
+	activeToolExecution    *toolExecutionMarker
+	pendingTools           []botprotocol.ToolCall
+	pendingIndex           int
+	pendingModelText       string
+	awaitingDelivery       bool
+	deliveryContinuations  int
+	completionReviews      int
+	requiredToolName       string
+	documentID             uint64
+	knowledgeUsed          bool
+	knowledgeContinuations int
+	finalStatus            string
+	finalText              string
+	finalMessage           string
+	finalOutput            map[string]any
+	finalCommitted         bool
+	completed              bool
 }
 
 func newRunState(execution execution) runState {
 	checkpoint := normalizeCheckpoint(execution.checkpoint)
 	return runState{
-		execution:        execution,
-		repository:       newRepository(),
-		seq:              checkpoint.Seq,
-		phase:            checkpoint.Phase,
-		modelStep:        checkpoint.ModelStep,
-		input:            cloneMap(checkpoint.Input),
-		history:          append([]any(nil), checkpoint.History...),
-		lastText:         checkpoint.LastText,
-		artifacts:        cloneMap(checkpoint.Artifacts),
-		activities:       append([]map[string]any(nil), checkpoint.Activities...),
-		loaded:           append([]string(nil), checkpoint.LoadedSkills...),
-		pendingTools:     append([]botprotocol.ToolCall(nil), checkpoint.PendingTools...),
-		pendingIndex:     checkpoint.PendingIndex,
-		pendingVisible:   checkpoint.PendingVisible,
-		documentID:       checkpoint.DocumentID,
-		documentTextStep: checkpoint.DocumentTextStep,
-		knowledgeUsed:    checkpoint.KnowledgeUsed,
-		finalStatus:      checkpoint.FinalStatus,
-		finalText:        checkpoint.FinalText,
-		finalMessage:     checkpoint.FinalMessage,
-		finalOutput:      cloneMap(checkpoint.FinalOutput),
-		finalCommitted:   checkpoint.FinalCommitted,
+		execution:              execution,
+		repository:             newRepository(),
+		seq:                    checkpoint.Seq,
+		phase:                  checkpoint.Phase,
+		modelStep:              checkpoint.ModelStep,
+		input:                  cloneMap(checkpoint.Input),
+		history:                append([]any(nil), execution.history...),
+		lastText:               checkpoint.LastText,
+		artifacts:              cloneMap(checkpoint.Artifacts),
+		activities:             append([]map[string]any(nil), checkpoint.Activities...),
+		loaded:                 append([]string(nil), checkpoint.LoadedSkills...),
+		toolReceipts:           append([]toolReceipt(nil), checkpoint.ToolReceipts...),
+		activeToolExecution:    cloneToolExecutionMarker(checkpoint.ActiveToolExecution),
+		pendingTools:           append([]botprotocol.ToolCall(nil), checkpoint.PendingTools...),
+		pendingIndex:           checkpoint.PendingIndex,
+		pendingModelText:       checkpoint.PendingModelText,
+		awaitingDelivery:       checkpoint.AwaitingDelivery,
+		deliveryContinuations:  checkpoint.DeliveryContinuations,
+		completionReviews:      checkpoint.CompletionReviews,
+		requiredToolName:       checkpoint.RequiredToolName,
+		documentID:             checkpoint.DocumentID,
+		knowledgeUsed:          checkpoint.KnowledgeUsed,
+		knowledgeContinuations: checkpoint.KnowledgeContinuations,
+		finalStatus:            checkpoint.FinalStatus,
+		finalText:              checkpoint.FinalText,
+		finalMessage:           checkpoint.FinalMessage,
+		finalOutput:            cloneMap(checkpoint.FinalOutput),
+		finalCommitted:         checkpoint.FinalCommitted,
 	}
 }
 
 func (state *runState) Checkpoint(seq int) runCheckpoint {
 	return runCheckpoint{
-		Version:          runtimeSnapshotVersion,
-		Phase:            state.phase,
-		ModelStep:        state.modelStep,
-		Seq:              seq,
-		Input:            cloneMap(state.input),
-		History:          append([]any(nil), state.history...),
-		LastText:         state.lastText,
-		Artifacts:        cloneMap(state.artifacts),
-		Activities:       append([]map[string]any(nil), state.activities...),
-		LoadedSkills:     append([]string(nil), state.loaded...),
-		MediaReferences:  append([]runtimeprovider.MediaReference(nil), state.execution.mediaReferences...),
-		PendingTools:     append([]botprotocol.ToolCall(nil), state.pendingTools...),
-		PendingIndex:     state.pendingIndex,
-		PendingVisible:   state.pendingVisible,
-		DocumentID:       state.documentID,
-		DocumentTextStep: state.documentTextStep,
-		KnowledgeUsed:    state.knowledgeUsed,
-		FinalStatus:      state.finalStatus,
-		FinalText:        state.finalText,
-		FinalMessage:     state.finalMessage,
-		FinalOutput:      cloneMap(state.finalOutput),
-		FinalCommitted:   state.finalCommitted,
+		Version:                runtimeSnapshotVersion,
+		Phase:                  state.phase,
+		ModelStep:              state.modelStep,
+		Seq:                    seq,
+		Input:                  cloneMap(state.input),
+		HistoryDelta:           historyCheckpointDelta(state),
+		LastText:               state.lastText,
+		Artifacts:              cloneMap(state.artifacts),
+		Activities:             append([]map[string]any(nil), state.activities...),
+		LoadedSkills:           append([]string(nil), state.loaded...),
+		ToolReceipts:           append([]toolReceipt(nil), state.toolReceipts...),
+		ActiveToolExecution:    cloneToolExecutionMarker(state.activeToolExecution),
+		MediaDelta:             mediaCheckpointDelta(state),
+		PendingTools:           append([]botprotocol.ToolCall(nil), state.pendingTools...),
+		PendingIndex:           state.pendingIndex,
+		PendingModelText:       state.pendingModelText,
+		AwaitingDelivery:       state.awaitingDelivery,
+		DeliveryContinuations:  state.deliveryContinuations,
+		CompletionReviews:      state.completionReviews,
+		RequiredToolName:       state.requiredToolName,
+		DocumentID:             state.documentID,
+		KnowledgeUsed:          state.knowledgeUsed,
+		KnowledgeContinuations: state.knowledgeContinuations,
+		FinalStatus:            state.finalStatus,
+		FinalText:              state.finalText,
+		FinalMessage:           state.finalMessage,
+		FinalOutput:            cloneMap(state.finalOutput),
+		FinalCommitted:         state.finalCommitted,
 	}
+}
+
+func historyCheckpointDelta(state *runState) []any {
+	if state == nil {
+		return nil
+	}
+	start := state.execution.snapshotHistoryLen
+	if start < 0 || start > len(state.history) {
+		start = 0
+	}
+	return append([]any(nil), state.history[start:]...)
+}
+
+func mediaCheckpointDelta(state *runState) []runtimeprovider.MediaReference {
+	if state == nil {
+		return nil
+	}
+	start := state.execution.snapshotMediaLen
+	if start < 0 || start > len(state.execution.mediaReferences) {
+		start = 0
+	}
+	return append([]runtimeprovider.MediaReference(nil), state.execution.mediaReferences[start:]...)
 }
 
 func (state *runState) MarkFinal(status string, text string, output map[string]any, message string) {
@@ -102,17 +142,28 @@ func (state *runState) MarkFinal(status string, text string, output map[string]a
 	state.finalOutput = state.ApplyArtifacts(output)
 }
 
-func (state *runState) AppendVisibleText(value string) bool {
+func (state *runState) AppendVisibleText(value string) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return false
+		return
 	}
 	if state.lastText == "" {
 		state.lastText = value
-		return true
+		return
 	}
 	state.lastText += "\n\n" + value
-	return true
+}
+
+func (state *runState) continueAfterTools() bool {
+	hadVisibleText := strings.TrimSpace(state.pendingModelText) != ""
+	state.phase = runPhaseModel
+	state.modelStep++
+	state.input = nextModelInput()
+	state.pendingTools = nil
+	state.pendingIndex = 0
+	state.pendingModelText = ""
+	state.awaitingDelivery = true
+	return hadVisibleText
 }
 
 func (state *runState) AddLoadedSkill(key string) {
@@ -152,7 +203,11 @@ func (state *runState) Step(stepType string, title string, content string, paylo
 	return err
 }
 
-func (state *runState) AbsorbToolOutput(content any) {
+func (state *runState) AbsorbToolOutput(content any, definition runtimeprovider.Definition) {
+	switch strings.ToLower(strings.TrimSpace(definition.Kind)) {
+	case "knowledge", "skill", "control", "interaction", "presentation", "document":
+		return
+	}
 	source, ok := content.(map[string]any)
 	if !ok {
 		return
@@ -446,6 +501,7 @@ func (s Service) commitRunTerminal(
 ) (bool, error) {
 	transactionCommitted := false
 	sessionID := uint64(0)
+	messageID := uint64(0)
 	err := func() (transactionErr error) {
 		defer repositoryError(&transactionErr)
 		return orm.Transaction(ctx, func(tx context.Context) error {
@@ -455,15 +511,18 @@ func (s Service) commitRunTerminal(
 			if err != nil || !transactionCommitted || !persistChat {
 				return err
 			}
-			sessionID, err = s.chat.SaveRunTurnCompletion(tx, completion)
-			return err
+			sessionID, messageID, err = s.chat.SaveRunTurnCompletion(tx, completion)
+			if err != nil {
+				return err
+			}
+			return nil
 		})
 	}()
 	if err != nil {
 		return false, err
 	}
 	if transactionCommitted && sessionID > 0 {
-		s.chat.AfterRunTurnCompletion(sessionID)
+		s.chat.AfterRunTurnCompletion(sessionID, messageID, completion.Status)
 	}
 	return transactionCommitted, nil
 }

@@ -45,6 +45,7 @@ type Session struct {
 	ContextSummary   string    `dorm:"type:text;not null;default:'';comment:上下文摘要"`
 	SummaryMessageID uint64    `dorm:"type:bigint;not null;default:0;comment:摘要覆盖的最后消息"`
 	ActiveSeriesID   uint64    `dorm:"type:bigint;not null;default:0;comment:当前素材系列"`
+	ActiveRequestID  string    `dorm:"type:varchar(64);not null;default:'';comment:当前运行请求"`
 	Status           int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	MessageCount     int       `dorm:"type:int;not null;default:0;comment:消息数"`
 	LastMessageAt    time.Time `dorm:"comment:最后消息时间"`
@@ -52,9 +53,10 @@ type Session struct {
 }
 
 type SessionIndex struct {
-	OwnerContext struct{} `index:"owner_type,owner_id,context_key,agent_key,status,last_message_at"`
-	OwnerStatus  struct{} `index:"owner_type,owner_id,status,last_message_at"`
-	AgentStatus  struct{} `index:"agent_key,status,last_message_at"`
+	OwnerContext  struct{} `index:"owner_type,owner_id,context_key,agent_key,status,last_message_at"`
+	OwnerStatus   struct{} `index:"owner_type,owner_id,status,last_message_at"`
+	AgentStatus   struct{} `index:"agent_key,status,last_message_at"`
+	ActiveRequest struct{} `index:"active_request_id"`
 }
 
 func NewSessionModel() *orm.Model[Session] {

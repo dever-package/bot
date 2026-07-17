@@ -44,23 +44,22 @@ func ParseInput(input map[string]any) (Input, error) {
 	}, nil
 }
 
-func ModelInput(source map[string]any, input Input, referencePrompt string) map[string]any {
+func ModelInput(source map[string]any, input Input, references []map[string]any) map[string]any {
 	result := make(map[string]any, len(source))
 	for key, value := range source {
-		if key != "content" && key != "params" {
+		switch key {
+		case "content", "params", "references", "runtime_context", "runtime_event", "interaction_response":
+			continue
+		default:
 			result[key] = value
 		}
 	}
-	modelParts := []string{strings.TrimSpace(input.Text)}
-	if referencePrompt = strings.TrimSpace(referencePrompt); referencePrompt != "" {
-		modelParts = append(modelParts, "本轮引用：\n"+referencePrompt)
+	result["prompt"] = strings.TrimSpace(input.Text)
+	if len(references) > 0 {
+		result["references"] = references
 	}
-	if params := ParamsPrompt(input.Content.Value()); params != "" {
-		modelParts = append(modelParts, params)
-	}
-	result["text"] = strings.TrimSpace(strings.Join(modelParts, "\n\n"))
 	for key, value := range input.Params {
-		if key == "" || key == "text" || key == "content" {
+		if key == "" || key == "text" || key == "prompt" || key == "content" {
 			continue
 		}
 		result[key] = value
@@ -90,6 +89,12 @@ func (content Content) Value() map[string]any {
 		if part.Usage != "" {
 			current["usage"] = part.Usage
 		}
+		if part.Trigger != "" {
+			current["ref_trigger"] = part.Trigger
+		}
+		if part.VersionID > 0 {
+			current["ref_version_id"] = part.VersionID
+		}
 		parts = append(parts, current)
 	}
 	result := map[string]any{"version": ContentVersion, "parts": parts}
@@ -118,28 +123,22 @@ func ReferencesFromContent(value any) []Reference {
 	return references
 }
 
-func InteractionResponsePrompt(value any) string {
+func ContentContext(value any) map[string]any {
 	content, ok := parseContent(value)
-	if !ok || content.InteractionResponse == nil {
-		return ""
+	if !ok {
+		return nil
 	}
-	raw, err := json.Marshal(content.InteractionResponse.Value())
-	if err != nil {
-		return ""
+	result := map[string]any{}
+	if len(content.Params) > 0 {
+		result["params"] = cloneMap(content.Params)
 	}
-	return "interaction_response:\n" + string(raw)
-}
-
-func ParamsPrompt(value any) string {
-	content, ok := parseContent(value)
-	if !ok || len(content.Params) == 0 {
-		return ""
+	if content.InteractionResponse != nil {
+		result["interaction_response"] = content.InteractionResponse.Value()
 	}
-	raw, err := json.Marshal(content.Params)
-	if err != nil {
-		return ""
+	if len(result) == 0 {
+		return nil
 	}
-	return "本轮补充参数：\n" + string(raw)
+	return result
 }
 
 func parseContent(value any) (Content, bool) {
@@ -168,12 +167,14 @@ func parseContent(value any) (Content, bool) {
 			continue
 		}
 		parts = append(parts, Part{
-			Type:    strings.ToLower(strings.TrimSpace(textValue(current["type"]))),
-			Text:    rawText(current["text"]),
-			RefType: normalizeType(textValue(current["ref_type"])),
-			RefID:   uint64Value(current["ref_id"]),
-			Label:   cleanLabel(textValue(current["label"])),
-			Usage:   strings.TrimSpace(textValue(current["usage"])),
+			Type:      strings.ToLower(strings.TrimSpace(textValue(current["type"]))),
+			Text:      rawText(current["text"]),
+			RefType:   normalizeType(textValue(current["ref_type"])),
+			RefID:     uint64Value(current["ref_id"]),
+			Label:     cleanLabel(textValue(current["label"])),
+			Usage:     strings.TrimSpace(textValue(current["usage"])),
+			Trigger:   normalizeTrigger(textValue(current["ref_trigger"])),
+			VersionID: uint64Value(current["ref_version_id"]),
 		})
 	}
 	return Content{
@@ -249,9 +250,13 @@ func normalizeParts(parts []Part) ([]Part, []Reference, string, error) {
 				part.Label = fmt.Sprintf("%s %d", part.RefType, part.RefID)
 			}
 			part.Text = ""
+			part.Trigger = normalizeReferenceTrigger(part.RefType, part.Trigger)
+			if part.RefType == TypeAsset && part.VersionID == 0 {
+				return nil, nil, "", fmt.Errorf("资产引用缺少版本")
+			}
 			result = append(result, part)
-			text.WriteString("@" + part.Label)
-			key := fmt.Sprintf("%s:%d:%s", part.RefType, part.RefID, part.Usage)
+			text.WriteString(part.Trigger + part.Label)
+			key := fmt.Sprintf("%s:%d:%d:%s", part.RefType, part.RefID, part.VersionID, part.Usage)
 			if _, exists := seen[key]; exists {
 				continue
 			}
@@ -259,7 +264,7 @@ func normalizeParts(parts []Part) ([]Part, []Reference, string, error) {
 				return nil, nil, "", fmt.Errorf("一次最多引用 %d 项内容", maxReferences)
 			}
 			seen[key] = struct{}{}
-			references = append(references, Reference{Type: part.RefType, ID: part.RefID, Label: part.Label, Usage: part.Usage})
+			references = append(references, Reference{Type: part.RefType, ID: part.RefID, Label: part.Label, Usage: part.Usage, Trigger: part.Trigger, VersionID: part.VersionID})
 		}
 	}
 	return result, references, strings.TrimSpace(text.String()), nil
@@ -282,11 +287,29 @@ func plainContent(text string) Content {
 
 func normalizeType(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case TypeMessage, TypeArtifact, TypeUploadFile, TypeSession:
+	case TypeMessage, TypeArtifact, TypeUploadFile, TypeSession, TypeAsset:
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return ""
 	}
+}
+
+func normalizeTrigger(value string) string {
+	value = strings.TrimSpace(value)
+	if len([]rune(value)) == 1 {
+		return value
+	}
+	return ""
+}
+
+func normalizeReferenceTrigger(referenceType string, trigger string) string {
+	if referenceType == TypeAsset {
+		return "@"
+	}
+	if referenceType == TypeMessage || referenceType == TypeArtifact || referenceType == TypeUploadFile || referenceType == TypeSession {
+		return "#"
+	}
+	return normalizeTrigger(trigger)
 }
 
 func cleanLabel(value string) string {

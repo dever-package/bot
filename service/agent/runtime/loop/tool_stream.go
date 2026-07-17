@@ -86,6 +86,17 @@ func toolFinishedOutput(call botprotocol.ToolCall, definition runtimeprovider.De
 	)
 }
 
+func toolQueuedOutput(call botprotocol.ToolCall, definition runtimeprovider.Definition, content map[string]any) map[string]any {
+	return toolEventOutput(
+		toolEventResult,
+		botprotocol.MediaOutputLabel(definition.Kind)+"已提交后台生成",
+		"succeeded",
+		call,
+		definition,
+		content,
+	)
+}
+
 func toolFailureText(definition runtimeprovider.Definition, resultErr error) string {
 	if resultErr == nil {
 		return ""

@@ -233,16 +233,9 @@
       "description": "定义同一个来源服务下不同参数场景对应的接口地址。"
     },
     "option": {
-      "param_mode": [
-        {
-          "id": "all",
-          "value": "全部参数满足"
-        },
-        {
-          "id": "any",
-          "value": "任一参数满足"
-        }
-      ],
+      "param_mode": {
+        "service": "bot.energon.ParamOptionService.LoadServiceEndpointParamModeOptions"
+      },
       "status": [
         {
           "id": 1,

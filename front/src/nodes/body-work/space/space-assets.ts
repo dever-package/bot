@@ -47,7 +47,7 @@ export function withRunResultAsset(result: any, asset: ProjectAsset | null) {
 }
 
 export function resultAssetKind(node: SpaceCanvasNode, fallbackKind = "") {
-  return String(node.kind || node.power?.kind || fallbackKind || "mixed");
+  return String(node.kind || node.power?.kind || fallbackKind || "richtext");
 }
 
 export function mergeProjectAssetVersionHistory(

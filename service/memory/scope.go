@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
 
 	deverjwt "github.com/shemic/dever/auth/jwt"
 
@@ -54,6 +55,44 @@ func resolveMemoryScope(scope string, contextKey string, agentKey string, sessio
 		return memorymodel.ScopeSession
 	}
 	return memorymodel.ScopeGlobal
+}
+
+func normalizeMemoryKey(value string) string {
+	var builder strings.Builder
+	for _, current := range strings.ToLower(strings.TrimSpace(value)) {
+		if unicode.IsLetter(current) && current <= unicode.MaxASCII || unicode.IsDigit(current) || current == '.' || current == '_' || current == '-' {
+			builder.WriteRune(current)
+		}
+	}
+	return limitMemoryText(strings.Trim(builder.String(), ".-_"), 160)
+}
+
+func memoryScopeValues(scope string, contextKey string, agentKey string, sessionID uint64) map[string]any {
+	agentKey = strings.TrimSpace(agentKey)
+	values := map[string]any{"agent_key": "", "context_key": "", "session_id": uint64(0)}
+	switch scope {
+	case memorymodel.ScopeAgent:
+		values["agent_key"] = agentKey
+	case memorymodel.ScopeContext:
+		values["agent_key"] = agentKey
+		values["context_key"] = NormalizeContextKey(contextKey, agentKey)
+	case memorymodel.ScopeSession:
+		values["agent_key"] = agentKey
+		values["context_key"] = NormalizeContextKey(contextKey, agentKey)
+		values["session_id"] = sessionID
+	}
+	return values
+}
+
+func memoryScopeFilter(owner memoryOwner, scope string, values map[string]any) map[string]any {
+	filter := map[string]any{
+		"owner_type": owner.OwnerType, "owner_id": owner.OwnerID,
+		"scope": scope, "status": memorymodel.StatusEnabled,
+	}
+	for _, field := range []string{"agent_key", "context_key", "session_id"} {
+		filter[field] = values[field]
+	}
+	return filter
 }
 
 func normalizeMemoryScope(scope string) string {

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	assetmodel "github.com/dever-package/bot/model/asset"
 	memorymodel "github.com/dever-package/bot/model/memory"
 	teammodel "github.com/dever-package/bot/model/team"
 	knowledgeservice "github.com/dever-package/bot/service/agent/knowledge"
@@ -884,13 +885,12 @@ func roleInputPayload(role *teammodel.Role) map[string]any {
 		return map[string]any{}
 	}
 	return map[string]any{
-		"id":            role.ID,
-		"type":          role.RoleType,
-		"key":           role.RoleKey,
-		"name":          role.Name,
-		"agent_id":      role.AgentID,
-		"asset_cate_id": role.AssetCateID,
-		"assignment":    role.Assignment,
+		"id":         role.ID,
+		"type":       role.RoleType,
+		"key":        role.RoleKey,
+		"name":       role.Name,
+		"agent_id":   role.AgentID,
+		"assignment": role.Assignment,
 	}
 }
 
@@ -1451,10 +1451,13 @@ func (s Service) runSaveNode(ctx context.Context, run teammodel.Run, flowRun tea
 	if err != nil {
 		return nil, teammodel.RunStatusFail, 0, err
 	}
+	if node.AssetCateID == 0 {
+		return body, teammodel.RunStatusSuccess, 0, nil
+	}
 	assetName := firstText(valueAtPath(body, "title"), flow.Name)
 	nodeRunID := s.currentNodeRunID(ctx, flowRun.ID, node.ID)
 	if isDebugRun(run) {
-		return debugSaveOutput(assetName, firstText(valueAtPath(body, "kind"), "mixed"), node.AssetCateID, body), teammodel.RunStatusSuccess, 0, nil
+		return debugSaveOutput(assetName, firstText(valueAtPath(body, "kind"), assetmodel.KindRichText), node.AssetCateID, body), teammodel.RunStatusSuccess, 0, nil
 	}
 	asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
 		ProjectID:   run.ProjectID,
@@ -1467,8 +1470,8 @@ func (s Service) runSaveNode(ctx context.Context, run teammodel.Run, flowRun tea
 		RequestID:   run.RequestID,
 		NodeKey:     node.NodeKey,
 		Name:        assetName,
-		Kind:        firstText(valueAtPath(body, "kind"), "mixed"),
-		Role:        "content",
+		Kind:        firstText(valueAtPath(body, "kind"), assetmodel.KindRichText),
+		Role:        assetmodel.RoleWork,
 		Content:     body,
 	})
 	if err != nil {

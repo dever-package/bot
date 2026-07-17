@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	runtimeSnapshotVersion = 1
+	runtimeSnapshotVersion = 2
 	runPhaseModel          = "model"
 	runPhaseTool           = "tool"
 	runPhaseFinal          = "final"
@@ -28,7 +28,6 @@ type executionSnapshot struct {
 	Agent              agentmodel.Agent                 `json:"agent"`
 	Power              energonmodel.Power               `json:"power"`
 	SessionID          uint64                           `json:"session_id,omitempty"`
-	UserMessageID      uint64                           `json:"user_message_id,omitempty"`
 	AssistantMessageID uint64                           `json:"assistant_message_id,omitempty"`
 	Prompt             string                           `json:"prompt"`
 	Input              map[string]any                   `json:"input"`
@@ -46,28 +45,34 @@ type persistedTransport struct {
 }
 
 type runCheckpoint struct {
-	Version          int                              `json:"version"`
-	Phase            string                           `json:"phase"`
-	ModelStep        int                              `json:"model_step"`
-	Seq              int                              `json:"seq"`
-	Input            map[string]any                   `json:"input"`
-	History          []any                            `json:"history"`
-	LastText         string                           `json:"last_text,omitempty"`
-	Artifacts        map[string]any                   `json:"artifacts,omitempty"`
-	Activities       []map[string]any                 `json:"activities,omitempty"`
-	LoadedSkills     []string                         `json:"loaded_skills,omitempty"`
-	MediaReferences  []runtimeprovider.MediaReference `json:"media_references,omitempty"`
-	PendingTools     []botprotocol.ToolCall           `json:"pending_tools,omitempty"`
-	PendingIndex     int                              `json:"pending_index,omitempty"`
-	PendingVisible   bool                             `json:"pending_visible,omitempty"`
-	DocumentID       uint64                           `json:"document_id,omitempty"`
-	DocumentTextStep int                              `json:"document_text_step,omitempty"`
-	KnowledgeUsed    bool                             `json:"knowledge_used,omitempty"`
-	FinalStatus      string                           `json:"final_status,omitempty"`
-	FinalText        string                           `json:"final_text,omitempty"`
-	FinalMessage     string                           `json:"final_message,omitempty"`
-	FinalOutput      map[string]any                   `json:"final_output,omitempty"`
-	FinalCommitted   bool                             `json:"final_committed,omitempty"`
+	Version                int                              `json:"version"`
+	Phase                  string                           `json:"phase"`
+	ModelStep              int                              `json:"model_step"`
+	Seq                    int                              `json:"seq"`
+	Input                  map[string]any                   `json:"input"`
+	HistoryDelta           []any                            `json:"history_delta,omitempty"`
+	LastText               string                           `json:"last_text,omitempty"`
+	Artifacts              map[string]any                   `json:"artifacts,omitempty"`
+	Activities             []map[string]any                 `json:"activities,omitempty"`
+	LoadedSkills           []string                         `json:"loaded_skills,omitempty"`
+	ToolReceipts           []toolReceipt                    `json:"tool_receipts,omitempty"`
+	ActiveToolExecution    *toolExecutionMarker             `json:"active_tool_execution,omitempty"`
+	MediaDelta             []runtimeprovider.MediaReference `json:"media_delta,omitempty"`
+	PendingTools           []botprotocol.ToolCall           `json:"pending_tools,omitempty"`
+	PendingIndex           int                              `json:"pending_index,omitempty"`
+	PendingModelText       string                           `json:"pending_model_text,omitempty"`
+	AwaitingDelivery       bool                             `json:"awaiting_delivery,omitempty"`
+	DeliveryContinuations  int                              `json:"delivery_continuations,omitempty"`
+	CompletionReviews      int                              `json:"completion_reviews,omitempty"`
+	RequiredToolName       string                           `json:"required_tool_name,omitempty"`
+	DocumentID             uint64                           `json:"document_id,omitempty"`
+	KnowledgeUsed          bool                             `json:"knowledge_used,omitempty"`
+	KnowledgeContinuations int                              `json:"knowledge_continuations,omitempty"`
+	FinalStatus            string                           `json:"final_status,omitempty"`
+	FinalText              string                           `json:"final_text,omitempty"`
+	FinalMessage           string                           `json:"final_message,omitempty"`
+	FinalOutput            map[string]any                   `json:"final_output,omitempty"`
+	FinalCommitted         bool                             `json:"final_committed,omitempty"`
 }
 
 func snapshotFromExecution(execution execution) executionSnapshot {
@@ -77,7 +82,6 @@ func snapshotFromExecution(execution execution) executionSnapshot {
 		Agent:              execution.agent,
 		Power:              execution.power,
 		SessionID:          execution.sessionID,
-		UserMessageID:      execution.userMessageID,
 		AssistantMessageID: execution.assistantMessageID,
 		Prompt:             execution.prompt,
 		Input:              cloneMap(execution.input),
@@ -94,15 +98,15 @@ func snapshotFromExecution(execution execution) executionSnapshot {
 }
 
 func initialCheckpoint(execution execution) runCheckpoint {
-	return runCheckpoint{
-		Version:         runtimeSnapshotVersion,
-		Phase:           runPhaseModel,
-		ModelStep:       1,
-		Seq:             1,
-		Input:           gatewayInput(execution.input),
-		History:         append([]any(nil), execution.history...),
-		MediaReferences: append([]runtimeprovider.MediaReference(nil), execution.mediaReferences...),
+	checkpoint := runCheckpoint{
+		Version:   runtimeSnapshotVersion,
+		Phase:     runPhaseModel,
+		ModelStep: 1,
+		Seq:       1,
+		Input:     gatewayInput(execution.input),
 	}
+	checkpoint.KnowledgeUsed = execution.priorKnowledgeUsed
+	return checkpoint
 }
 
 func encodeSnapshot(value executionSnapshot) (string, error) {
@@ -148,8 +152,17 @@ func normalizeCheckpoint(value runCheckpoint) runCheckpoint {
 	if value.Input == nil {
 		value.Input = map[string]any{}
 	}
-	if value.History == nil {
-		value.History = []any{}
+	if value.HistoryDelta == nil {
+		value.HistoryDelta = []any{}
+	}
+	if value.DeliveryContinuations < 0 {
+		value.DeliveryContinuations = 0
+	}
+	if value.CompletionReviews < 0 {
+		value.CompletionReviews = 0
+	}
+	if value.KnowledgeContinuations < 0 {
+		value.KnowledgeContinuations = 0
 	}
 	return value
 }

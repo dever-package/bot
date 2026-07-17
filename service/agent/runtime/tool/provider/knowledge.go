@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	knowledgeservice "github.com/dever-package/bot/service/agent/knowledge"
 )
 
-func KnowledgeTools(bases []knowledgeservice.KnowledgeBaseRuntime) ([]Tool, string) {
+func KnowledgeTools(bases []knowledgeservice.KnowledgeBaseRuntime) []Tool {
 	allowed := make(map[uint64]knowledgeservice.KnowledgeBaseRuntime, len(bases))
 	for _, base := range bases {
 		if base.ID > 0 {
@@ -17,7 +18,7 @@ func KnowledgeTools(bases []knowledgeservice.KnowledgeBaseRuntime) ([]Tool, stri
 		}
 	}
 	if len(allowed) == 0 {
-		return nil, ""
+		return nil
 	}
 	service := knowledgeservice.NewService()
 	baseProperty, required := knowledgeBaseProperty(bases)
@@ -28,7 +29,7 @@ func KnowledgeTools(bases []knowledgeservice.KnowledgeBaseRuntime) ([]Tool, stri
 		knowledgeReadTool(service, allowed, baseProperty, required),
 	}
 	tools = append(tools, knowledgeNodeTools(service, allowed, baseProperty, required)...)
-	return tools, knowledgePrompt(bases)
+	return tools
 }
 
 func knowledgeInitTool(service knowledgeservice.Service, allowed map[uint64]knowledgeservice.KnowledgeBaseRuntime, baseProperty map[string]any, required []any) Tool {
@@ -36,9 +37,9 @@ func knowledgeInitTool(service knowledgeservice.Service, allowed map[uint64]know
 		Definition: knowledgeToolDefinition(
 			"open_knowledge_init",
 			"知识库说明",
-			"读取知识库根目录的 init.md，优先了解知识库结构和使用说明。",
+			"读取知识库入口说明。",
 			knowledgeParameters(baseProperty, required, map[string]any{
-				"max_chars": integerProperty("最多读取字符数，默认 8000"),
+				"max_chars": integerProperty("最多读取字符数"),
 			}),
 		),
 		Handle: func(ctx context.Context, call Call) (Result, error) {
@@ -63,9 +64,9 @@ func knowledgeListTool(service knowledgeservice.Service, allowed map[uint64]know
 		Definition: knowledgeToolDefinition(
 			"list_knowledge_files",
 			"知识库文件",
-			"列出知识库中的目录和文件。需要了解有哪些资料时使用。",
+			"列出知识库文件和目录。",
 			knowledgeParameters(baseProperty, required, map[string]any{
-				"limit": integerProperty("最多返回条数，默认 120，最大 300"),
+				"limit": integerProperty("最多返回数量"),
 			}),
 		),
 		Handle: func(ctx context.Context, call Call) (Result, error) {
@@ -88,10 +89,10 @@ func knowledgeSearchTool(service knowledgeservice.Service, allowed map[uint64]kn
 		Definition: knowledgeToolDefinition(
 			"search_knowledge_files",
 			"知识库搜索",
-			"按关键词搜索知识库文本文件，并返回路径和相关内容预览。",
+			"按关键词搜索知识库文件。",
 			knowledgeParameters(baseProperty, required, map[string]any{
-				"query": map[string]any{"type": "string", "description": "搜索关键词或短语"},
-				"limit": integerProperty("最多返回条数，默认 8，最大 20"),
+				"query": map[string]any{"type": "string", "description": "搜索内容"},
+				"limit": integerProperty("最多返回数量"),
 			}),
 		),
 		Handle: func(ctx context.Context, call Call) (Result, error) {
@@ -115,10 +116,10 @@ func knowledgeReadTool(service knowledgeservice.Service, allowed map[uint64]know
 		Definition: knowledgeToolDefinition(
 			"read_knowledge_file",
 			"知识库文件",
-			"按 list/search 返回的文件 id 或 path 读取知识库文件正文。",
+			"读取指定知识库文件正文。",
 			knowledgeParameters(baseProperty, required, map[string]any{
-				"path":      map[string]any{"type": "string", "description": "文件 id 或相对路径"},
-				"max_chars": integerProperty("最多读取字符数，默认 8000，最大 24000"),
+				"path":      map[string]any{"type": "string", "description": "文件 ID 或相对路径"},
+				"max_chars": integerProperty("最多读取字符数"),
 			}),
 		),
 		Handle: func(ctx context.Context, call Call) (Result, error) {
@@ -143,6 +144,10 @@ func knowledgeToolDefinition(name string, title string, description string, para
 		Kind:        "knowledge",
 		Description: description,
 		Parameters:  parameters,
+		Execution: ExecutionPolicy{
+			ReuseSuccessfulArguments: true,
+			Timeout:                  90 * time.Second,
+		},
 	}
 }
 
@@ -168,12 +173,16 @@ func knowledgeBaseProperty(bases []knowledgeservice.KnowledgeBaseRuntime) (map[s
 	lines := make([]string, 0, len(bases))
 	for _, base := range bases {
 		if base.ID > 0 {
-			lines = append(lines, strconv.FormatUint(base.ID, 10)+"="+strings.TrimSpace(base.Name))
+			line := strconv.FormatUint(base.ID, 10) + "=" + strings.TrimSpace(base.Name)
+			if usage := strings.TrimSpace(base.Prompt); usage != "" {
+				line += "（" + usage + "）"
+			}
+			lines = append(lines, line)
 		}
 	}
 	property := map[string]any{
 		"type":        "integer",
-		"description": "知识库 ID，可用值: " + strings.Join(lines, ", "),
+		"description": "知识库 ID：" + strings.Join(lines, ", "),
 	}
 	if len(lines) <= 1 {
 		return property, nil
@@ -199,25 +208,4 @@ func knowledgeParameters(baseProperty map[string]any, required []any, extra map[
 
 func integerProperty(description string) map[string]any {
 	return map[string]any{"type": "integer", "description": description}
-}
-
-func knowledgePrompt(bases []knowledgeservice.KnowledgeBaseRuntime) string {
-	lines := []string{
-		"知识库使用规则：",
-		"- 回答依赖知识库事实时先检索证据；关键事实再用 read_knowledge_file 或 open_knowledge_node 回读确认。",
-		"- 优先 open_knowledge_init 了解结构；没有 init.md 时使用 list/search/read_knowledge_files。",
-		"- 已有工具结果足够时不要重复读取，最终回答默认不暴露内部 ID 和路径。",
-		"已挂载知识库（不要猜测未挂载 ID）：",
-	}
-	for _, base := range bases {
-		if base.ID == 0 {
-			continue
-		}
-		line := fmt.Sprintf("- id=%d, name=%s", base.ID, strings.TrimSpace(base.Name))
-		if prompt := strings.TrimSpace(base.Prompt); prompt != "" {
-			line += ", usage=" + prompt
-		}
-		lines = append(lines, line)
-	}
-	return strings.Join(lines, "\n")
 }

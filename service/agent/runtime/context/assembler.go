@@ -10,21 +10,20 @@ import (
 )
 
 type AssembleRequest struct {
-	Session        agentmodel.Session
-	Agent          agentmodel.Agent
-	CategoryPrompt string
-	Input          string
-	IncludeMemory  bool
+	Session       agentmodel.Session
+	Agent         agentmodel.Agent
+	Input         string
+	IncludeMemory bool
 }
 
 type InternalAssembleRequest struct {
-	Agent          agentmodel.Agent
-	CategoryPrompt string
-	History        []any
+	Agent   agentmodel.Agent
+	History []any
 }
 
 type Result struct {
 	Prompt       string
+	Context      map[string]any
 	History      []any
 	HistoryCount int
 }
@@ -45,25 +44,27 @@ func (Assembler) Assemble(ctx context.Context, request AssembleRequest) (Result,
 	}
 	var history []any
 	var prompt string
+	var runtimeContext map[string]any
 	var group runtimeasync.Group
 	group.Go("读取会话历史", func() error {
 		history = recentHistory(ctx, session)
 		return nil
 	})
 	group.Go("组装智能体提示词", func() error {
-		prompt = buildPrompt(ctx, request, session)
+		prompt = buildPrompt(request.Agent.Prompt)
+		runtimeContext = buildRuntimeContext(ctx, request, session)
 		return nil
 	})
 	if err := group.Wait(); err != nil {
 		return Result{}, err
 	}
-	return Result{Prompt: prompt, History: history, HistoryCount: len(history)}, nil
+	return Result{Prompt: prompt, Context: runtimeContext, History: history, HistoryCount: len(history)}, nil
 }
 
 func (Assembler) AssembleInternal(request InternalAssembleRequest) Result {
 	history := normalizeHistory(request.History)
 	return Result{
-		Prompt:       buildInternalPrompt(request),
+		Prompt:       buildPrompt(request.Agent.Prompt),
 		History:      history,
 		HistoryCount: len(history),
 	}

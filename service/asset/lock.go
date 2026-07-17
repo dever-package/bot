@@ -117,11 +117,14 @@ func assetSaveLockKey(req SaveVersionRequest) string {
 	}
 	parts := []string{
 		"asset_save",
+		fmt.Sprintf("asset:%d", req.AssetID),
 		fmt.Sprintf("project:%d", req.ProjectID),
 		fmt.Sprintf("body:%d", req.BodyID),
 		fmt.Sprintf("team:%d", req.TeamID),
 		fmt.Sprintf("flow:%d", req.FlowID),
 		fmt.Sprintf("cate:%d", req.AssetCateID),
+		"source_type:" + strings.TrimSpace(req.SourceType),
+		fmt.Sprintf("source_id:%d", req.SourceID),
 		"role:" + strings.TrimSpace(req.Role),
 		identity,
 	}

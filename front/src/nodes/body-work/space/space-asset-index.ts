@@ -7,7 +7,7 @@ import type {
 
 export type CanvasAssetNodeType =
   | "text"
-  | "mixed"
+  | "richtext"
   | "image"
   | "audio"
   | "video"
@@ -26,7 +26,7 @@ export type CanvasAssetPreview = CanvasContentPreview;
 
 export type CanvasAssetEntry = {
   key: string;
-  role: "content" | "material";
+  role: "work" | "material";
   title: string;
   sourcePath?: string;
   nodeType: CanvasAssetNodeType;
@@ -60,7 +60,7 @@ export const canvasAssetNodeTypeOptions: Array<{
 }> = [
   { key: "all", label: "全部" },
   { key: "text", label: "文本" },
-  { key: "mixed", label: "图文" },
+  { key: "richtext", label: "富文本" },
   { key: "image", label: "图片" },
   { key: "audio", label: "音频" },
   { key: "video", label: "视频" },
@@ -128,19 +128,20 @@ export function buildCanvasAssetIndex(
         assetId: asset?.id,
         versionId: asset?.version?.id || asset?.version_id,
       } satisfies CanvasAssetEntry;
-    });
-  const contents = input.assets
+    })
+    .filter((entry) => Boolean(entry.assetId && entry.versionId));
+  const works = input.assets
     .filter(
       (asset) =>
         Number(asset.asset_cate_id || 0) === input.assetCateId &&
-        String(asset.role || "content") === "content" &&
+        String(asset.role || "material") === "work" &&
         String(asset.status || "") !== "archived",
     )
     .map(
       (asset): CanvasAssetEntry => ({
         key: `asset:${asset.id}`,
-        role: "content",
-        title: asset.name || `内容 ${asset.id}`,
+        role: "work",
+        title: asset.name || `作品 ${asset.id}`,
         nodeType: assetKindNodeType(asset.kind),
         status: asset.version?.id || asset.version_id ? "ready" : "empty",
         preview: input.assetPreview(asset),
@@ -150,7 +151,9 @@ export function buildCanvasAssetIndex(
         versionId: asset.version?.id || asset.version_id,
       }),
     );
-  return [...contents, ...materials];
+  return [...works, ...materials].filter((entry) =>
+    Boolean(entry.assetId && entry.versionId),
+  );
 }
 
 export function canvasAssetNodeType(
@@ -170,9 +173,9 @@ export function canvasAssetNodeType(
 
 function assetKindNodeType(kind: unknown): CanvasAssetNodeType {
   switch (String(kind || "text").toLowerCase()) {
-    case "mixed":
     case "rich":
-      return "mixed";
+    case "richtext":
+      return "richtext";
     case "image":
       return "image";
     case "audio":

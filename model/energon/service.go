@@ -31,7 +31,7 @@ const (
 	serviceRunningHubImageID        uint64 = 7
 	serviceRunningHubMusicID        uint64 = 8
 	serviceRunningHubFlowClothingID uint64 = 9
-	serviceFFmpegComposeID         uint64 = 10
+	serviceFFmpegComposeID          uint64 = 10
 )
 
 var (
@@ -131,7 +131,7 @@ var (
 	serviceProviderRelation = orm.Relation{
 		Field:      "provider_id",
 		Option:     "bot.energon.NewProviderModel",
-		OptionKeys: []string{"name", "host"},
+		OptionKeys: []string{"name", "host", "protocol", "processor"},
 	}
 
 	serviceParamRelation = orm.Relation{

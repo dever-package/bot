@@ -1,0 +1,27 @@
+.bot-work-login-page,
+.hb-laper-app {
+  --body-work-bg: #f4f6f5;
+  --body-work-canvas: #fbfcfb;
+  --body-work-surface: #ffffff;
+  --body-work-text: #171a19;
+  --body-work-muted: #6b7370;
+  --body-work-line: #e0e5e2;
+  --body-work-active: #e6eae8;
+  --body-work-green: #1c6548;
+  --body-work-green-deep: #174d38;
+  --body-work-green-bright: #17a35f;
+  --body-work-green-soft: #e8f1ec;
+  --body-work-blue: #123d66;
+  --body-work-indigo: #151681;
+  --body-work-shadow: 0 14px 34px rgba(28, 43, 35, 0.08);
+  color: var(--body-work-text);
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  letter-spacing: 0;
+}
+
+.bot-work-toaster [data-sonner-toast] {
+  border-color: var(--body-work-line);
+  border-radius: 6px;
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  letter-spacing: 0;
+}

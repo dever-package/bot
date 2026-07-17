@@ -150,9 +150,6 @@ export function useCanvasAutosave({
   saveCanvasRef.current = saveCanvas;
 
   const markDirty = useCallback((assetCateId: number) => {
-    if (!assetCateId) {
-      return;
-    }
     const key = String(assetCateId);
     revisionsRef.current[key] = (revisionsRef.current[key] || 0) + 1;
     retryCountsRef.current[key] = 0;

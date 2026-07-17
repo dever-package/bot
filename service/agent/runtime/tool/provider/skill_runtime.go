@@ -38,10 +38,22 @@ func skillActivityTools(tools []Tool) []Tool {
 
 func skillActivityTool(tool Tool) Tool {
 	tool.Definition.Kind = "skill"
+	if skillToolHasExternalSideEffect(tool.Definition.Name) {
+		tool.Definition.Execution.PreventDuplicateRecovery = true
+	}
 	if strings.TrimSpace(tool.Definition.Title) == "" {
 		tool.Definition.Title = skillActivityTitle(tool.Definition.Name)
 	}
 	return tool
+}
+
+func skillToolHasExternalSideEffect(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "run_skill_script", "http_request", "curl_request", "mcp_call":
+		return true
+	default:
+		return false
+	}
 }
 
 func skillActivityTitle(name string) string {
@@ -86,7 +98,7 @@ func loadedSkill(loaded map[string]agentskill.Entry, arguments map[string]any) (
 func skillProperty() map[string]any {
 	return map[string]any{
 		"type":        "string",
-		"description": "已通过 load_skill 加载的技能 key；本轮只加载一个技能时可省略",
+		"description": "已加载的技能；只有一个时可省略",
 	}
 }
 

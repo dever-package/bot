@@ -121,11 +121,6 @@
               "type": "show-base"
             },
             {
-              "value": "asset_cate.name",
-              "name": "资产分类",
-              "type": "show-base"
-            },
-            {
               "value": "status",
               "type": "form-switch",
               "meta": {

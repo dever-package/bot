@@ -1,9 +1,11 @@
 import type { CanvasReferenceContent } from "./types";
 
 export type CanvasReferenceTarget = {
-  refType: "canvas_node" | "artifact";
+  refType: "asset";
   refId: number;
   label: string;
+  trigger?: "@" | "#";
+  versionId?: number;
 };
 
 type CanvasReferenceMatch = CanvasReferenceTarget & {
@@ -39,6 +41,8 @@ export function canvasReferenceContentFromText(
       ref_type: match.target.refType,
       ref_id: match.target.refId,
       label: match.target.mention,
+      ref_trigger: match.target.trigger || "@",
+      ref_version_id: match.target.versionId,
     });
     cursor = match.index + match.target.mention.length;
   }
@@ -58,7 +62,7 @@ export function reconcileCanvasReferenceContent(
   content: CanvasReferenceContent | undefined,
   targets: CanvasReferenceTarget[],
 ) {
-  if (!value.includes("@")) {
+  if (!content || (!value.includes("@") && !value.includes("#"))) {
     return content;
   }
   const derived = canvasReferenceContentFromText(value, [
@@ -81,6 +85,8 @@ export function canvasReferenceTargetsFromContent(
         refType: part.ref_type,
         refId: part.ref_id,
         label: part.label,
+        trigger: part.ref_trigger === "#" ? "#" : "@",
+        versionId: part.ref_version_id,
       }),
     );
 }
@@ -91,11 +97,12 @@ function referenceMatches(targets: CanvasReferenceTarget[]) {
     if (target.refId <= 0) {
       continue;
     }
-    const label = target.label.trim().replace(/^@+/, "");
+    const trigger = target.trigger || "@";
+    const label = target.label.trim().replace(/^[@#]+/, "");
     if (!label) {
       continue;
     }
-    const mention = `@${label}`;
+    const mention = `${trigger}${label}`;
     if (!matches.has(mention)) {
       matches.set(mention, { ...target, mention });
     }

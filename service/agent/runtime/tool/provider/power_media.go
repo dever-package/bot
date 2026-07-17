@@ -11,6 +11,7 @@ import (
 	energonmodel "github.com/dever-package/bot/model/energon"
 	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
 	energonservice "github.com/dever-package/bot/service/energon"
+	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
@@ -24,6 +25,12 @@ type mediaCountPlan struct {
 	promptKey string
 }
 
+type mediaSeriesPlan struct {
+	current           MediaReference
+	promptKey         string
+	referenceParamKey string
+}
+
 func buildMediaCountPlan(power energonmodel.Power, params []energonservice.PowerParam) mediaCountPlan {
 	if !isMediaPower(power) {
 		return mediaCountPlan{}
@@ -34,14 +41,34 @@ func buildMediaCountPlan(power energonmodel.Power, params []energonservice.Power
 	}
 }
 
+func buildMediaSeriesPlan(power energonmodel.Power, params []energonservice.PowerParam, references []MediaReference) mediaSeriesPlan {
+	if normalizedMediaPowerKind(power) != botprotocol.MediaTypeImage {
+		return mediaSeriesPlan{}
+	}
+	current, exists := activeSeriesReference(references)
+	if !exists {
+		return mediaSeriesPlan{}
+	}
+	plan := mediaSeriesPlan{
+		current:   current,
+		promptKey: mediaPromptParameterKey(params),
+	}
+	if strings.TrimSpace(current.URL) != "" {
+		referenceParams := mediaReferenceParams(params, botprotocol.MediaTypeImage)
+		if len(referenceParams) > 0 {
+			plan.referenceParamKey = strings.TrimSpace(referenceParams[0].Key)
+		}
+	}
+	return plan
+}
+
 func mediaPromptParameterKey(params []energonservice.PowerParam) string {
 	for _, param := range params {
-		if param.IsToolbar() || !strings.EqualFold(strings.TrimSpace(param.ValueType), "string") {
+		if !energoninput.IsPromptParamType(param.Type) {
 			continue
 		}
-		switch strings.ToLower(strings.TrimSpace(param.Type)) {
-		case "text", "textarea", "input":
-			return strings.TrimSpace(param.Key)
+		if key := strings.TrimSpace(param.Key); key != "" {
+			return key
 		}
 	}
 	return ""
@@ -55,13 +82,111 @@ func mediaToolParameters(parameters map[string]any, plan mediaCountPlan) map[str
 	properties, _ := result["properties"].(map[string]any)
 	properties[plan.key] = map[string]any{
 		"type":        "integer",
-		"description": "生成独立结果的数量。用户要求几个就填写几，范围 1-8；每个结果必须是单独的素材或文件，不能合并为一个结果。",
+		"description": "生成独立结果的数量",
 		"minimum":     1,
 		"maximum":     maxMediaCount,
 	}
 	result["properties"] = properties
 	result["required"] = appendRequiredParameter(result["required"], plan.key)
 	return result
+}
+
+func mediaSeriesParameters(parameters map[string]any, plan mediaSeriesPlan) map[string]any {
+	if !plan.available() {
+		return parameters
+	}
+	result := clonePowerParameters(parameters)
+	properties, _ := result["properties"].(map[string]any)
+	properties[MediaSeriesModeArgument] = map[string]any{
+		"type":        "string",
+		"description": "延续当前图片系列时选择 continue；开始无关的新图片主题时选择 new",
+		"enum":        []any{MediaSeriesModeContinue, MediaSeriesModeNew},
+	}
+	result["properties"] = properties
+	result["required"] = appendRequiredParameter(result["required"], MediaSeriesModeArgument)
+	return result
+}
+
+func (plan mediaSeriesPlan) available() bool {
+	return plan.current.ActiveSeries && plan.current.SeriesID > 0 && plan.current.ArtifactID > 0
+}
+
+func (plan mediaSeriesPlan) description() string {
+	if !plan.available() {
+		return ""
+	}
+	return "。当前会话已有图片系列；用户要求延续、修改或补充上一组时，系列模式必须选择 continue；开始无关的新图片主题时选择 new。"
+}
+
+func (plan mediaSeriesPlan) apply(arguments map[string]any) (map[string]any, error) {
+	if !plan.available() {
+		return arguments, nil
+	}
+	mode := mediaSeriesMode(arguments)
+	switch mode {
+	case MediaSeriesModeNew:
+		if requestedMediaReference(arguments, plan.current) {
+			return nil, fmt.Errorf("新图片系列不能同时引用当前系列主素材")
+		}
+		return arguments, nil
+	case MediaSeriesModeContinue:
+		result := cloneArguments(arguments)
+		if plan.referenceParamKey != "" {
+			result[MediaReferencesArgument] = appendMediaReferenceSelection(
+				result[MediaReferencesArgument],
+				plan.current,
+				plan.referenceParamKey,
+			)
+			return result, nil
+		}
+		if plan.promptKey == "" {
+			return nil, fmt.Errorf("当前图片能力无法延续系列风格")
+		}
+		currentPrompt := strings.TrimSpace(botprotocol.AsText(result[plan.promptKey]))
+		profilePrompt := strings.TrimSpace(botprotocol.AsText(plan.current.SeriesProfile[plan.promptKey]))
+		if profilePrompt == "" {
+			profilePrompt = strings.TrimSpace(botprotocol.AsText(plan.current.SeriesProfile["prompt"]))
+		}
+		result[plan.promptKey] = continueSeriesPrompt(currentPrompt, profilePrompt)
+		return result, nil
+	default:
+		return nil, fmt.Errorf("已有图片系列时必须选择 series mode: continue 或 new")
+	}
+}
+
+func requestedMediaReference(arguments map[string]any, target MediaReference) bool {
+	for _, item := range mapListArgument(arguments[MediaReferencesArgument]) {
+		if strings.EqualFold(strings.TrimSpace(textValue(item["ref_type"])), target.ReferenceType) &&
+			ArgumentUint64(item, "ref_id") == target.ReferenceID {
+			return true
+		}
+	}
+	return false
+}
+
+func appendMediaReferenceSelection(value any, reference MediaReference, parameterKey string) []map[string]any {
+	items := append([]map[string]any(nil), mapListArgument(value)...)
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(textValue(item["ref_type"])), reference.ReferenceType) &&
+			ArgumentUint64(item, "ref_id") == reference.ReferenceID &&
+			strings.TrimSpace(textValue(item["param_key"])) == parameterKey {
+			return items
+		}
+	}
+	return append(items, map[string]any{
+		"ref_type":  reference.ReferenceType,
+		"ref_id":    reference.ReferenceID,
+		"param_key": parameterKey,
+	})
+}
+
+func continueSeriesPrompt(current string, profile string) string {
+	current = strings.TrimSpace(current)
+	profile = strings.TrimSpace(profile)
+	if current == "" || profile == "" || current == profile {
+		return current
+	}
+	return current + "\n\n系列视觉基准（只继承风格、色彩、光线、质感和构图语言，场景与内容以本次要求为准）：\n" + profile
 }
 
 func clonePowerParameters(parameters map[string]any) map[string]any {
@@ -114,7 +239,7 @@ func mediaExecutionCount(power energonmodel.Power, arguments map[string]any, pla
 func mediaProviderArguments(arguments map[string]any, plan mediaCountPlan) map[string]any {
 	result := make(map[string]any, len(arguments))
 	for key, value := range arguments {
-		if key == MediaReferencesArgument {
+		if key == MediaReferencesArgument || key == MediaSeriesModeArgument {
 			continue
 		}
 		if plan.key != "" && key == plan.key {

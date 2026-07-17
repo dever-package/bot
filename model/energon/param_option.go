@@ -32,6 +32,19 @@ var (
 		{"id": 11, "param_id": paramAspectRatioID, "name": "5:4", "value": "5:4", "sort": 8},
 		{"id": 12, "param_id": paramAspectRatioID, "name": "4:5", "value": "4:5", "sort": 9},
 		{"id": 13, "param_id": paramAspectRatioID, "name": "21:9", "value": "21:9", "sort": 10},
+		{"id": 14, "param_id": paramDurationID, "name": "5秒", "value": "5", "sort": 1},
+		{"id": 15, "param_id": paramDurationID, "name": "6秒", "value": "6", "sort": 2},
+		{"id": 16, "param_id": paramDurationID, "name": "7秒", "value": "7", "sort": 3},
+		{"id": 17, "param_id": paramDurationID, "name": "8秒", "value": "8", "sort": 4},
+		{"id": 18, "param_id": paramDurationID, "name": "9秒", "value": "9", "sort": 5},
+		{"id": 19, "param_id": paramDurationID, "name": "10秒", "value": "10", "sort": 6},
+		{"id": 20, "param_id": paramDurationID, "name": "11秒", "value": "11", "sort": 7},
+		{"id": 22, "param_id": paramDurationID, "name": "12秒", "value": "12", "sort": 8},
+		{"id": 23, "param_id": paramFPSID, "name": "24 帧/秒", "value": "24", "sort": 1},
+		{"id": 24, "param_id": paramFPSID, "name": "25 帧/秒", "value": "25", "sort": 2},
+		{"id": 25, "param_id": paramFPSID, "name": "30 帧/秒", "value": "30", "sort": 3},
+		{"id": 26, "param_id": paramFPSID, "name": "50 帧/秒", "value": "50", "sort": 4},
+		{"id": 27, "param_id": paramFPSID, "name": "60 帧/秒", "value": "60", "sort": 5},
 	}
 
 	paramOptionParamRelation = orm.Relation{

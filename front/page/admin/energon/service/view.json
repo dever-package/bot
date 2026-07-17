@@ -1,0 +1,173 @@
+{
+  "page": {
+    "name": "服务详情",
+    "parent": "bot/energon/service/list",
+    "type": 2,
+    "sort": 11
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-col gap-4 p-0",
+        "children": {
+          "basic-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
+          "endpoint-card": {
+            "type": "container",
+            "className": "overflow-hidden rounded-lg border bg-background p-4"
+          },
+          "param-card": {
+            "type": "container",
+            "className": "overflow-hidden rounded-lg border bg-background p-4"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "basic-card": [
+      {
+        "type": "show-title",
+        "value": "form.name"
+      },
+      {
+        "type": "show-base",
+        "name": "来源",
+        "value": "form.provider.name",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.type",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.path",
+        "mode": "form",
+        "className": "font-mono break-all",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      }
+    ],
+    "endpoint-card": [
+      {
+        "type": "show-title",
+        "value": "page.endpointTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-table",
+        "value": "form.endpoints",
+        "meta": {
+          "rowKey": "id",
+          "readOnly": true,
+          "columns": [
+            {
+              "name": "接口标识",
+              "value": "api",
+              "type": "show-base"
+            },
+            {
+              "name": "参数要求",
+              "value": "param_mode",
+              "type": "show-tag"
+            }
+          ]
+        }
+      }
+    ],
+    "param-card": [
+      {
+        "type": "show-title",
+        "value": "page.paramTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-table",
+        "value": "form.params",
+        "meta": {
+          "rowKey": "id",
+          "readOnly": true,
+          "columns": [
+            {
+              "name": "映射规则",
+              "value": "param_rule",
+              "type": "show-tag"
+            },
+            {
+              "name": "参数",
+              "value": "param_id",
+              "type": "show-base",
+              "meta": {
+                "cases": [
+                  {
+                    "field": "param_id",
+                    "value": 0,
+                    "text": "-"
+                  },
+                  {
+                    "field": "param_id",
+                    "value": "",
+                    "text": "-"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "字段标识",
+              "value": "key",
+              "type": "show-base"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "endpointTitle": "服务接口",
+      "paramTitle": "服务参数"
+    },
+    "option": {
+      "param": {
+        "service": "bot.energon.ParamOptionService.LoadParamOptions"
+      },
+      "param_mode": {
+        "service": "bot.energon.ParamOptionService.LoadServiceEndpointParamModeOptions"
+      },
+      "param_rule": {
+        "service": "bot.energon.ParamOptionService.LoadServiceParamRuleOptions"
+      }
+    },
+    "form": {
+      "_fields": [
+        "provider_id",
+        "name",
+        "type",
+        "path",
+        "endpoints",
+        "params"
+      ],
+      "endpoints": [],
+      "params": []
+    }
+  },
+  "state": {},
+  "action": {}
+}

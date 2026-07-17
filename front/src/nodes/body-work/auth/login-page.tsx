@@ -1,12 +1,21 @@
-import { type FormEvent, type ReactNode, useState } from "react";
-import { ArrowRight, Loader2, Sparkles } from "lucide-react";
+import {
+  type FormEvent,
+  type ReactNode,
+  useEffect,
+  useState,
+} from "react";
+import {
+  Eye,
+  EyeOff,
+  Languages,
+  Loader2,
+  Menu,
+  PanelsTopLeft,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
-  Button,
-  Card,
   Input,
-  SiteLogo,
-  getSiteConfig,
   loadMainInfo,
   request,
   resetFrontRuntimeCache,
@@ -15,8 +24,24 @@ import {
   useNavigate,
 } from "@dever/front-plugin";
 import { isSuccessResponse } from "../shared/api-response";
+import { BodyToaster } from "../shared/body-toaster";
+import "../shared/body-theme.css";
+import { BodyConfiguredImage, BodySiteBrand } from "./site-brand";
+import {
+  applyBodySiteMetadata,
+  type BodyLoginAccount,
+  type BodyLoginConfig,
+  useBodyLoginConfig,
+} from "./site-config";
+import "./login-page.css";
+
+const LOGIN_ARTWORK_SRC = new URL(
+  "./assets/login-artwork.png",
+  import.meta.url,
+).href;
 
 type AuthMode = "login" | "register";
+
 type AuthPayload = {
   account: string;
   password: string;
@@ -24,9 +49,8 @@ type AuthPayload = {
 };
 
 export function WorkLoginPage() {
-  const site = getSiteConfig();
+  const config = useBodyLoginConfig();
   const navigate = useNavigate();
-  const redirect = readRedirectParam();
   const { auth } = useAuthStore();
   const [mode, setMode] = useState<AuthMode>("login");
   const [account, setAccount] = useState("");
@@ -34,6 +58,33 @@ export function WorkLoginPage() {
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [mobileLinksOpen, setMobileLinksOpen] = useState(false);
+
+  useEffect(() => {
+    applyBodySiteMetadata(config.site);
+  }, [config.site]);
+
+  useEffect(() => {
+    if (!mobileLinksOpen) {
+      return;
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMobileLinksOpen(false);
+      }
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [mobileLinksOpen]);
+
+  function switchMode() {
+    if (loading) {
+      return;
+    }
+    setMode((current) => (current === "login" ? "register" : "login"));
+    setMessage("");
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -63,18 +114,17 @@ export function WorkLoginPage() {
       resetFrontRuntimeCache();
       auth.setUser(result.data.user);
       auth.setAccessToken(result.data.token);
-
-      const mainInfo = await loadMainInfo();
-      const target = resolvePostLoginTarget({
-        redirectTo: redirect,
-        entry: mainInfo.entry,
-        menu: mainInfo.menu,
-      });
-      navigate({ to: target.to, search: target.search, replace: true });
       toast.success(
         mode === "login"
           ? `欢迎回来，${result.data.user?.name || payload.data.account}`
           : "账号已创建",
+      );
+      await navigateAfterLogin(navigate, readRedirectParam());
+    } catch (currentError: unknown) {
+      setMessage(
+        currentError instanceof Error && currentError.message
+          ? currentError.message
+          : "操作失败，请稍后重试",
       );
     } finally {
       setLoading(false);
@@ -82,77 +132,43 @@ export function WorkLoginPage() {
   }
 
   return (
-    <>
-      <WorkLoginStyles />
-      <main className="bot-work-auth-shell">
-        <section className="bot-work-auth-aside">
-          <div className="bot-work-auth-aside-content">
-            <div className="bot-work-auth-mark">
-              <Sparkles className="size-7" aria-hidden="true" />
+    <main className="bot-work-login-page">
+      <BodyToaster />
+      <LoginHeader
+        config={config}
+        mobileLinksOpen={mobileLinksOpen}
+        onCloseMobileLinks={() => setMobileLinksOpen(false)}
+        onToggleMobileLinks={() => setMobileLinksOpen((open) => !open)}
+      />
+
+      <div className="bot-work-login-stage">
+        <div className="bot-work-login-layout">
+          <section className="bot-work-login-auth" aria-labelledby="login-title">
+            <div className="bot-work-login-copy">
+              <h1 id="login-title">{config.site.loginTitle}</h1>
+              {config.site.loginDescription ? (
+                <p>{config.site.loginDescription}</p>
+              ) : null}
             </div>
-            <p className="bot-work-auth-kicker">
-              AI Creative Workspace
-            </p>
-            <h1 className="bot-work-auth-title">
-              神创 Work 工作台
-            </h1>
-            <p className="bot-work-auth-description">
-              创建项目，编排能力节点和智能体流程，把每一次生成结果沉淀为可复用的项目资产。
-            </p>
-            <div className="bot-work-auth-features">
-              {["项目工作台", "能力编排", "资产沉淀"].map((item) => (
-                <div
-                  key={item}
-                  className="bot-work-auth-feature"
-                >
-                  {item}
+
+            <section className="bot-work-login-form-panel">
+              <ThirdPartyAccounts accounts={config.accounts} />
+
+              {config.accounts.length > 0 ? (
+                <div className="bot-work-login-divider">
+                  <span>或</span>
                 </div>
-              ))}
-            </div>
-          </div>
-        </section>
+              ) : null}
 
-        <section className="bot-work-auth-panel">
-          <div className="bot-work-auth-form-wrap">
-            <div className="bot-work-auth-mobile-brand">
-              <SiteLogo className="bot-work-auth-mobile-logo" />
-              <div>
-                <p className="bot-work-auth-mobile-name">
-                  {site.name || "工作台"}
-                </p>
-                <p className="bot-work-auth-mobile-desc">AI 工作台</p>
-              </div>
-            </div>
-
-            <Card className="bot-work-auth-card">
-              <div className="bot-work-auth-card-header">
-                <div>
-                  <p className="bot-work-auth-card-eyebrow">项目账号</p>
-                  <h2 className="bot-work-auth-card-title">
-                    {mode === "login" ? "登录" : "创建账号"}
-                  </h2>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="bot-work-auth-mode-button"
-                  onClick={() => {
-                    setMode(mode === "login" ? "register" : "login");
-                    setMessage("");
-                  }}
-                >
-                  {mode === "login" ? "注册" : "登录"}
-                </Button>
-              </div>
-
-              <form className="bot-work-auth-form" onSubmit={submit}>
+              <form className="bot-work-login-form" onSubmit={submit}>
                 <AuthField label="账号">
                   <Input
                     value={account}
-                    onChange={(event) => setAccount(event.target.value)}
                     autoComplete="username"
                     placeholder="输入手机号或账号"
-                    className="h-11"
+                    aria-label="账号"
+                    className="bot-work-login-input"
+                    onChange={(event) => setAccount(event.target.value)}
                   />
                 </AuthField>
 
@@ -160,52 +176,201 @@ export function WorkLoginPage() {
                   <AuthField label="昵称">
                     <Input
                       value={name}
-                      onChange={(event) => setName(event.target.value)}
                       autoComplete="name"
-                      placeholder="项目中显示的名字"
-                      className="h-11"
+                      placeholder="输入昵称"
+                      aria-label="昵称"
+                      className="bot-work-login-input"
+                      onChange={(event) => setName(event.target.value)}
                     />
                   </AuthField>
                 ) : null}
 
                 <AuthField label="密码">
-                  <Input
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    autoComplete={
-                      mode === "login" ? "current-password" : "new-password"
-                    }
-                    placeholder="至少 6 位"
-                    type="password"
-                    className="h-11"
-                  />
+                  <span className="bot-work-login-password">
+                    <Input
+                      value={password}
+                      type={showPassword ? "text" : "password"}
+                      autoComplete={
+                        mode === "login" ? "current-password" : "new-password"
+                      }
+                      placeholder="至少 6 位"
+                      aria-label="密码"
+                      className="bot-work-login-input"
+                      onChange={(event) => setPassword(event.target.value)}
+                    />
+                    <button
+                      type="button"
+                      aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                      title={showPassword ? "隐藏密码" : "显示密码"}
+                      onClick={() => setShowPassword((show) => !show)}
+                    >
+                      {showPassword ? (
+                        <EyeOff size={17} strokeWidth={1.8} />
+                      ) : (
+                        <Eye size={17} strokeWidth={1.8} />
+                      )}
+                    </button>
+                  </span>
                 </AuthField>
 
                 {message ? (
-                  <div className="bot-work-auth-message">
+                  <div className="bot-work-login-message" role="alert">
                     {message}
                   </div>
                 ) : null}
 
-                <Button
-                  className="bot-work-auth-submit"
-                  disabled={loading}
+                <button
                   type="submit"
+                  className="bot-work-login-submit"
+                  disabled={loading}
                 >
-                  {loading ? <Loader2 className="size-4 animate-spin" /> : null}
-                  {loading
-                    ? "处理中"
-                    : mode === "login"
-                      ? "进入工作台"
-                      : "注册并进入"}
-                  {!loading ? <ArrowRight className="size-4" /> : null}
-                </Button>
+                  {loading ? (
+                    <Loader2 className="bot-work-login-spin" />
+                  ) : null}
+                  <span>
+                    {loading
+                      ? "处理中"
+                      : mode === "login"
+                        ? "登录"
+                        : "注册"}
+                  </span>
+                </button>
               </form>
-            </Card>
-          </div>
-        </section>
-      </main>
-    </>
+
+              <p className="bot-work-login-mode-switch">
+                <span>{mode === "login" ? "还没有账号？" : "已经有账号？"}</span>
+                <button type="button" disabled={loading} onClick={switchMode}>
+                  {mode === "login" ? "注册" : "登录"}
+                </button>
+              </p>
+
+              <p className="bot-work-login-legal">
+                继续即表示您同意 {config.site.siteName} 的
+                <span>服务条款</span>和<span>隐私政策</span>
+              </p>
+            </section>
+          </section>
+
+          <LoginArtwork siteName={config.site.siteName} />
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function LoginHeader({
+  config,
+  mobileLinksOpen,
+  onCloseMobileLinks,
+  onToggleMobileLinks,
+}: {
+  config: BodyLoginConfig;
+  mobileLinksOpen: boolean;
+  onCloseMobileLinks: () => void;
+  onToggleMobileLinks: () => void;
+}) {
+  return (
+    <header className="bot-work-login-header">
+      <div className="bot-work-login-header-inner">
+        <BodySiteBrand
+          site={config.site}
+          className="bot-work-login-brand"
+          logoClassName="bot-work-login-brand-logo"
+          nameClassName="bot-work-login-brand-name"
+        />
+
+        <nav className="bot-work-login-links" aria-label="站点链接">
+          {config.links.map((link) => (
+            <a
+              key={link.id}
+              href={link.url}
+              target={link.target}
+              rel={link.target === "_blank" ? "noreferrer" : undefined}
+            >
+              {link.name}
+            </a>
+          ))}
+        </nav>
+
+        <div className="bot-work-login-header-actions">
+          {config.links.length > 0 ? (
+            <button
+              type="button"
+              className="bot-work-login-menu-button"
+              aria-label={mobileLinksOpen ? "关闭站点链接" : "打开站点链接"}
+              aria-controls="bot-work-login-mobile-links"
+              aria-expanded={mobileLinksOpen}
+              onClick={onToggleMobileLinks}
+            >
+              {mobileLinksOpen ? <X size={18} /> : <Menu size={18} />}
+            </button>
+          ) : null}
+          <span className="bot-work-login-language" aria-label="当前语言：中文">
+            <Languages size={15} strokeWidth={1.8} />
+            中文
+          </span>
+        </div>
+      </div>
+
+      {mobileLinksOpen && config.links.length > 0 ? (
+        <nav
+          id="bot-work-login-mobile-links"
+          className="bot-work-login-mobile-links"
+          aria-label="移动端站点链接"
+        >
+          {config.links.map((link) => (
+            <a
+              key={link.id}
+              href={link.url}
+              target={link.target}
+              rel={link.target === "_blank" ? "noreferrer" : undefined}
+              onClick={onCloseMobileLinks}
+            >
+              {link.name}
+            </a>
+          ))}
+        </nav>
+      ) : null}
+    </header>
+  );
+}
+
+function LoginArtwork({ siteName }: { siteName: string }) {
+  return (
+    <section className="bot-work-login-artwork" aria-label="创作灵感">
+      <img src={LOGIN_ARTWORK_SRC} alt={`${siteName} 创作灵感插画`} />
+    </section>
+  );
+}
+
+function ThirdPartyAccounts({ accounts }: { accounts: BodyLoginAccount[] }) {
+  if (accounts.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="bot-work-login-third-party">
+      {accounts.map((account) => (
+        <button
+          key={account.id}
+          type="button"
+          onClick={() =>
+            toast.info(
+              account.provider === "feishu"
+                ? "飞书账户登录将在接入配置后开放"
+                : `${account.name}暂未开放`,
+            )
+          }
+        >
+          <BodyConfiguredImage
+            src={account.icon}
+            alt=""
+            fallback={<PanelsTopLeft size={19} strokeWidth={1.9} />}
+          />
+          <span>{account.name}</span>
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -217,236 +382,12 @@ function AuthField({
   children: ReactNode;
 }) {
   return (
-    <label className="bot-work-auth-field">
-      <span>{label}</span>
+    <label className="bot-work-login-field">
+      <span className="bot-work-login-field-label">{label}</span>
       {children}
     </label>
   );
 }
-
-function WorkLoginStyles() {
-  return <style>{WORK_LOGIN_STYLES}</style>;
-}
-
-const WORK_LOGIN_STYLES = `
-.bot-work-auth-shell {
-  min-height: 100svh;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(26rem, 30rem);
-  overflow: hidden;
-  background: var(--background);
-  color: var(--foreground);
-}
-
-.bot-work-auth-aside {
-  position: relative;
-  min-height: 100svh;
-  display: flex;
-  align-items: center;
-  border-right: 1px solid var(--border);
-  background:
-    linear-gradient(90deg, color-mix(in oklab, var(--border) 55%, transparent) 1px, transparent 1px),
-    linear-gradient(0deg, color-mix(in oklab, var(--border) 45%, transparent) 1px, transparent 1px),
-    color-mix(in oklab, var(--card) 92%, var(--muted) 8%);
-  background-size: 4rem 4rem;
-  padding: 4rem clamp(3rem, 7vw, 6rem);
-}
-
-.bot-work-auth-aside-content {
-  width: 100%;
-  max-width: 42rem;
-}
-
-.bot-work-auth-mark {
-  width: 3.5rem;
-  height: 3.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 1rem;
-  color: var(--primary);
-  background: color-mix(in oklab, var(--primary) 10%, transparent);
-  border: 1px solid color-mix(in oklab, var(--primary) 14%, transparent);
-}
-
-.bot-work-auth-kicker {
-  margin-top: 2rem;
-  margin-bottom: 1rem;
-  color: var(--primary);
-  font-size: .875rem;
-  font-weight: 600;
-}
-
-.bot-work-auth-title {
-  max-width: 42rem;
-  color: var(--foreground);
-  font-size: clamp(2.5rem, 5vw, 4.25rem);
-  line-height: 1.08;
-  font-weight: 700;
-}
-
-.bot-work-auth-description {
-  margin-top: 1.5rem;
-  max-width: 36rem;
-  color: var(--muted-foreground);
-  font-size: 1.125rem;
-  line-height: 1.85;
-}
-
-.bot-work-auth-features {
-  margin-top: 2.5rem;
-  max-width: 36rem;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: .75rem;
-}
-
-.bot-work-auth-feature {
-  border: 1px solid var(--border);
-  border-radius: .75rem;
-  background: color-mix(in oklab, var(--background) 76%, transparent);
-  padding: .75rem 1rem;
-  color: var(--foreground);
-  font-size: .875rem;
-  font-weight: 500;
-}
-
-.bot-work-auth-panel {
-  min-height: 100svh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2rem;
-  background: var(--background);
-}
-
-.bot-work-auth-form-wrap {
-  width: 100%;
-  max-width: 28rem;
-}
-
-.bot-work-auth-mobile-brand {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  gap: .75rem;
-  margin-bottom: 1.75rem;
-}
-
-.bot-work-auth-mobile-logo {
-  width: 2rem;
-  height: 2rem;
-}
-
-.bot-work-auth-mobile-name {
-  max-width: 16rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--foreground);
-  font-size: 1.125rem;
-  font-weight: 700;
-}
-
-.bot-work-auth-mobile-desc {
-  color: var(--muted-foreground);
-  font-size: .75rem;
-}
-
-.bot-work-auth-card {
-  display: block;
-  gap: 0;
-  padding: 0;
-  overflow: hidden;
-  border: 1px solid color-mix(in oklab, var(--border) 88%, transparent);
-  border-radius: 1rem;
-  background: var(--card);
-  box-shadow: 0 24px 70px rgb(15 23 42 / 10%);
-}
-
-.bot-work-auth-card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1.5rem;
-  border-bottom: 1px solid var(--border);
-  padding: 1.5rem;
-}
-
-.bot-work-auth-card-eyebrow {
-  margin-bottom: .5rem;
-  color: var(--muted-foreground);
-  font-size: .875rem;
-}
-
-.bot-work-auth-card-title {
-  color: var(--foreground);
-  font-size: 1.5rem;
-  line-height: 1.25;
-  font-weight: 700;
-}
-
-.bot-work-auth-mode-button {
-  flex-shrink: 0;
-}
-
-.bot-work-auth-form {
-  display: grid;
-  gap: 1rem;
-  padding: 1.5rem;
-}
-
-.bot-work-auth-field {
-  display: grid;
-  gap: .5rem;
-}
-
-.bot-work-auth-field > span {
-  color: var(--foreground);
-  font-size: .875rem;
-  font-weight: 600;
-}
-
-.bot-work-auth-message {
-  border: 1px solid color-mix(in oklab, var(--destructive) 30%, transparent);
-  border-radius: .5rem;
-  background: color-mix(in oklab, var(--destructive) 10%, transparent);
-  padding: .5rem .75rem;
-  color: var(--destructive);
-  font-size: .875rem;
-}
-
-.bot-work-auth-submit {
-  width: 100%;
-  height: 2.75rem;
-  gap: .5rem;
-}
-
-@media (max-width: 1023px) {
-  .bot-work-auth-shell {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .bot-work-auth-aside {
-    display: none;
-  }
-
-  .bot-work-auth-mobile-brand {
-    display: flex;
-  }
-}
-
-@media (max-width: 640px) {
-  .bot-work-auth-panel {
-    padding: 1.25rem;
-  }
-
-  .bot-work-auth-card-header,
-  .bot-work-auth-form {
-    padding: 1.25rem;
-  }
-}
-`;
 
 function buildAuthPayload(
   mode: AuthMode,
@@ -482,4 +423,21 @@ function readRedirectParam() {
     return "";
   }
   return new URLSearchParams(window.location.search).get("redirect") || "";
+}
+
+async function navigateAfterLogin(
+  navigate: ReturnType<typeof useNavigate>,
+  redirectTo: string,
+) {
+  try {
+    const mainInfo = await loadMainInfo();
+    const target = resolvePostLoginTarget({
+      redirectTo,
+      entry: mainInfo.entry,
+      menu: mainInfo.menu,
+    });
+    navigate({ to: target.to, search: target.search, replace: true });
+  } catch {
+    navigate({ to: "/", replace: true });
+  }
 }

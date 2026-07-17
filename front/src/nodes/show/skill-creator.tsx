@@ -89,7 +89,6 @@ export function ShowSkillCreator({ item, store }: NodeItemProps) {
       meta: {
         ...(item.meta || {}),
         sessionEnabled: true,
-        memoryEnabled: false,
         historyEnabled: false,
         newSessionEnabled: false,
         skillDraftPatchAutoApply: false,

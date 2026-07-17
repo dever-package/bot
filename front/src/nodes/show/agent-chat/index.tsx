@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useMemo } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { useStore } from "zustand";
-import { Plus, X } from "lucide-react";
+import { ArrowLeft, Plus, X } from "lucide-react";
 import type { NodeItemProps } from "@/page/nodes";
 import { getStoreValueByPath } from "@/lib/store";
 import { streamValueText as valueText } from "@/lib/stream";
@@ -23,8 +29,34 @@ import {
   AgentChatMediaPreviewProvider,
   useAgentChatMediaInspector,
 } from "./media-inspector";
-import type { AgentChatRuntimeApis } from "./types";
+import type {
+  AgentChatMessageActionContext,
+  AgentChatRuntimeApis,
+} from "./types";
+import type { ReferenceProvider } from "./reference";
 import { AGENT_CHAT_LAYER_CLASS, AGENT_CHAT_LAYER_Z_INDEX } from "./layers";
+
+export type AgentChatPanelProps = {
+  agentKey: string;
+  agentName?: string;
+  contextKey?: string;
+  open?: boolean;
+  height?: string;
+  minHeight?: string;
+  fullScreen?: boolean;
+  lazySession?: boolean;
+  mobileSessionNavigation?: boolean;
+  clipboardImageUploadRuleId?: number;
+  blockMs?: number;
+  assistantApi: AgentChatApi;
+  runtimeApi: AgentChatRuntimeApis;
+  requestScope?: Record<string, unknown>;
+  referenceProviders?: ReferenceProvider[];
+  renderMessageActions?: (
+    message: AgentChatMessageActionContext,
+  ) => ReactNode;
+  onClose?: () => void;
+};
 
 export function ShowAgentChat({ item, store }: NodeItemProps) {
   const agentKey = useStore(store, () =>
@@ -36,15 +68,8 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
     ),
   );
   const openPath = String(item.meta?.openPath || "");
-  const modalOpen = useStore(store, () =>
+  const open = useStore(store, () =>
     openPath ? Boolean(getStoreValueByPath(store, openPath)) : true,
-  );
-  const fullScreen = Boolean(openPath);
-  const containerHeight =
-    valueText(item.meta?.height || item.meta?.containerHeight) ||
-    "min(78dvh, 720px)";
-  const clipboardImageUploadRuleId = Number(
-    item.meta?.clipboardImageUploadRuleId || 0,
   );
   const assistantApi = useMemo<AgentChatApi>(
     () => ({
@@ -92,35 +117,96 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
       ),
     }),
     [
-      item.meta?.requestApi,
-      item.meta?.referencePreviewApi,
-      item.meta?.inputConfigApi,
       item.meta?.documentApi,
       item.meta?.documentStreamApi,
+      item.meta?.inputConfigApi,
+      item.meta?.referencePreviewApi,
+      item.meta?.requestApi,
       item.meta?.statusApi,
       item.meta?.stopApi,
       item.meta?.streamApi,
     ],
   );
-  const controller = useAgentChatStore({
-    agentKey,
-    modalOpen,
-    blockMs: Number(item.meta?.blockMs || 1000),
-    assistantApi,
-    runtimeApi,
-  });
-  const mediaInspector = useAgentChatMediaInspector();
-  const closeDialog = useCallback(() => {
+  const close = useCallback(() => {
     if (openPath) {
       store.getState().setValueByPath(openPath, false);
     }
   }, [openPath, store]);
 
+  return (
+    <AgentChatPanel
+      agentKey={agentKey}
+      agentName={agentName}
+      open={open}
+      fullScreen={Boolean(openPath)}
+      height={
+        valueText(item.meta?.height || item.meta?.containerHeight) ||
+        "min(78dvh, 720px)"
+      }
+      clipboardImageUploadRuleId={Number(
+        item.meta?.clipboardImageUploadRuleId || 0,
+      )}
+      blockMs={Number(item.meta?.blockMs || 1000)}
+      assistantApi={assistantApi}
+      runtimeApi={runtimeApi}
+      onClose={close}
+    />
+  );
+}
+
+export function AgentChatPanel({
+  agentKey,
+  agentName = "",
+  contextKey,
+  open = true,
+  height = "min(78dvh, 720px)",
+  minHeight = "min(420px, 78dvh)",
+  fullScreen = false,
+  lazySession = false,
+  mobileSessionNavigation = false,
+  clipboardImageUploadRuleId = 0,
+  blockMs = 1000,
+  assistantApi,
+  runtimeApi,
+  requestScope,
+  referenceProviders,
+  renderMessageActions,
+  onClose,
+}: AgentChatPanelProps) {
+  const controller = useAgentChatStore({
+    agentKey,
+    contextKey,
+    modalOpen: open,
+    blockMs,
+    lazySession,
+    assistantApi,
+    runtimeApi,
+    requestScope,
+  });
+  const mediaInspector = useAgentChatMediaInspector();
+  const [mobilePane, setMobilePane] = useState<"sessions" | "chat">("chat");
+
   useEffect(() => {
     mediaInspector.closePreview();
-  }, [agentKey, controller.sessionID, mediaInspector.closePreview, modalOpen]);
+  }, [agentKey, controller.sessionID, mediaInspector.closePreview, open]);
 
-  if (openPath && !modalOpen) {
+  useEffect(() => {
+    setMobilePane("chat");
+  }, [agentKey, contextKey, mobileSessionNavigation]);
+
+  const openMobileSession = useCallback(
+    async (sessionID: number) => {
+      await controller.openSession(sessionID);
+      setMobilePane("chat");
+    },
+    [controller.openSession],
+  );
+  const startMobileSession = useCallback(async () => {
+    await controller.startNewSession();
+    setMobilePane("chat");
+  }, [controller.startNewSession]);
+
+  if (!open) {
     return null;
   }
 
@@ -134,9 +220,7 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
           fullScreen ? "h-full flex-1" : "border-y",
         )}
         style={
-          fullScreen
-            ? undefined
-            : { height: containerHeight, minHeight: "min(420px, 78dvh)" }
+          fullScreen ? undefined : { height, minHeight }
         }
       >
         <Sidebar
@@ -146,14 +230,41 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
           collapsed={mediaInspector.open}
         />
 
+        {mobileSessionNavigation && mobilePane === "sessions" ? (
+          <Sidebar
+            mobile
+            agentName={agentName}
+            agentReady={Boolean(agentKey)}
+            controller={controller}
+            onOpenSession={openMobileSession}
+            onStartNewSession={startMobileSession}
+          />
+        ) : null}
+
         <section
           className={cn(
-            "flex min-h-0 min-w-0 flex-1 flex-col bg-background",
+            "min-h-0 min-w-0 flex-1 flex-col bg-background",
+            mobileSessionNavigation && mobilePane === "sessions"
+              ? "hidden md:flex"
+              : "flex",
             mediaInspector.open &&
               "md:w-[38vw] md:min-w-[360px] md:max-w-[640px] md:flex-none",
           )}
         >
-          <header className="flex h-12 shrink-0 items-center gap-3 px-3 md:h-14 md:px-6">
+          <header className="flex h-12 shrink-0 items-center gap-2 px-3 md:h-14 md:px-6">
+            {mobileSessionNavigation ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-10 shrink-0 md:hidden"
+                title="返回会话列表"
+                onClick={() => setMobilePane("sessions")}
+              >
+                <ArrowLeft className="size-4" />
+                <span className="sr-only">返回会话列表</span>
+              </Button>
+            ) : null}
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold text-foreground">
                 {controller.sessionTitle || "新会话"}
@@ -166,7 +277,7 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
               className="size-10 shrink-0 md:hidden"
               title="新对话"
               disabled={controller.sessionLoading || !agentKey}
-              onClick={() => void controller.startNewSession()}
+              onClick={() => void startMobileSession()}
             >
               <Plus className="size-4" />
               <span className="sr-only">新对话</span>
@@ -178,7 +289,7 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
                 variant="ghost"
                 className="size-10 shrink-0 md:size-8"
                 title="关闭运行智能体"
-                onClick={closeDialog}
+                onClick={onClose}
               >
                 <X className="size-4" />
                 <span className="sr-only">关闭运行智能体</span>
@@ -187,12 +298,14 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
           </header>
 
           <RuntimeProvider
-            key={`${agentKey}:${controller.sessionID || "loading"}`}
+            key={`${agentKey}:${contextKey || "default"}:${controller.sessionID || "draft"}`}
             controller={controller}
           >
             <Thread
               controller={controller}
               clipboardImageUploadRuleId={clipboardImageUploadRuleId}
+              referenceProviders={referenceProviders}
+              renderMessageActions={renderMessageActions}
             />
           </RuntimeProvider>
         </section>
@@ -208,10 +321,10 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
 
   return (
     <Dialog
-      open={modalOpen}
-      onOpenChange={(open) => {
-        if (!open) {
-          closeDialog();
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          onClose?.();
         }
       }}
     >

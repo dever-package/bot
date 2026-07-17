@@ -13,10 +13,10 @@ func writeTempFileTool(loaded map[string]agentskill.Entry, runtime SkillRuntime)
 	return Tool{
 		Definition: Definition{
 			Name:        "write_temp_file",
-			Description: "向本次智能体运行的临时目录写入文本文件，供后续技能脚本使用。",
+			Description: "写入本次运行的临时文本文件。",
 			Parameters: objectParameters(map[string]any{
 				"skill":   skillProperty(),
-				"path":    map[string]any{"type": "string", "description": "临时目录内的相对路径"},
+				"path":    map[string]any{"type": "string", "description": "文件相对路径"},
 				"content": map[string]any{"type": "string", "description": "文件内容"},
 			}, "path", "content"),
 		},
@@ -50,10 +50,10 @@ func readTempFileTool(loaded map[string]agentskill.Entry, runtime SkillRuntime) 
 	return Tool{
 		Definition: Definition{
 			Name:        "read_temp_file",
-			Description: "读取本次智能体运行临时目录内的文本文件。",
+			Description: "读取本次运行的临时文本文件。",
 			Parameters: objectParameters(map[string]any{
 				"skill": skillProperty(),
-				"path":  map[string]any{"type": "string", "description": "临时目录内的相对路径"},
+				"path":  map[string]any{"type": "string", "description": "文件相对路径"},
 			}, "path"),
 		},
 		Handle: func(_ context.Context, call Call) (Result, error) {

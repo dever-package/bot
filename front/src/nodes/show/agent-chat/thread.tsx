@@ -5,7 +5,13 @@ import {
   useAuiState,
 } from "@assistant-ui/react";
 import { ArrowDown, Bot, Check, Copy, Loader2 } from "lucide-react";
-import { useEffect, useRef, useState, type ComponentType } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import { getCompatModule } from "@dever/front-plugin";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "../clipboard";
@@ -29,13 +35,17 @@ import {
   AgentChatSuggestions,
 } from "./interaction-view";
 import { AGENT_CHAT_CHILD_LAYER_Z_INDEX } from "./layers";
-import type { AgentChatController } from "./types";
+import type {
+  AgentChatController,
+  AgentChatMessageActionContext,
+} from "./types";
 import {
   interactionResponseInput,
   textReferenceInput,
   type ReferenceComposerProps,
   type ReferenceContent,
   type ReferencePreviewLoader,
+  type ReferenceProvider,
 } from "./reference";
 
 const referenceComposerModule = getCompatModule(
@@ -55,10 +65,31 @@ const CHAT_COLUMN_CLASS = "agent-chat-column";
 export function Thread({
   controller,
   clipboardImageUploadRuleId,
+  renderMessageActions,
+  referenceProviders = [],
 }: {
   controller: AgentChatController;
   clipboardImageUploadRuleId?: number;
+  renderMessageActions?: (
+    message: AgentChatMessageActionContext,
+  ) => ReactNode;
+  referenceProviders?: ReferenceProvider[];
 }) {
+  const providers = [
+    ...referenceProviders,
+    {
+      trigger: "#",
+      referenceTypes: ["message", "artifact", "upload_file", "session"],
+      loadReferences: controller.loadReferences,
+      loadPreview: controller.loadReferencePreview,
+      availableScopes: ["current", "history"],
+      searchPlaceholder: "搜索消息或会话",
+    } satisfies ReferenceProvider,
+  ];
+  const loadPreview = referencePreviewDispatcher(
+    providers,
+    controller.loadReferencePreview,
+  );
   return (
     <ThreadPrimitive.Root className="relative flex min-h-0 flex-1 flex-col bg-background">
       <style>{threadStyles}</style>
@@ -96,7 +127,13 @@ export function Thread({
             ) : (
               <div className="agent-chat-message-stack flex flex-col">
                 <ThreadPrimitive.Messages>
-                  {() => <Message controller={controller} />}
+                  {() => (
+                    <Message
+                      controller={controller}
+                      loadPreview={loadPreview}
+                      renderMessageActions={renderMessageActions}
+                    />
+                  )}
                 </ThreadPrimitive.Messages>
               </div>
             )}
@@ -127,6 +164,7 @@ export function Thread({
             ) : null}
             <Composer
               controller={controller}
+              referenceProviders={providers}
               clipboardImageUploadRuleId={clipboardImageUploadRuleId}
             />
           </div>
@@ -136,16 +174,44 @@ export function Thread({
   );
 }
 
-function Message({ controller }: { controller: AgentChatController }) {
+function Message({
+  controller,
+  loadPreview,
+  renderMessageActions,
+}: {
+  controller: AgentChatController;
+  loadPreview: ReferencePreviewLoader;
+  renderMessageActions?: (
+    message: AgentChatMessageActionContext,
+  ) => ReactNode;
+}) {
   const role = useAuiState((state) => state.message.role);
   return role === "user" ? (
-    <UserMessage controller={controller} />
+    <UserMessage
+      controller={controller}
+      loadPreview={loadPreview}
+      renderMessageActions={renderMessageActions}
+    />
   ) : (
-    <AssistantMessage controller={controller} />
+    <AssistantMessage
+      controller={controller}
+      loadPreview={loadPreview}
+      renderMessageActions={renderMessageActions}
+    />
   );
 }
 
-function UserMessage({ controller }: { controller: AgentChatController }) {
+function UserMessage({
+  controller,
+  loadPreview,
+  renderMessageActions,
+}: {
+  controller: AgentChatController;
+  loadPreview: ReferencePreviewLoader;
+  renderMessageActions?: (
+    message: AgentChatMessageActionContext,
+  ) => ReactNode;
+}) {
   const content = useAuiState(
     (state) => state.message.metadata.custom?.content,
   ) as ReferenceContent | undefined;
@@ -158,15 +224,28 @@ function UserMessage({ controller }: { controller: AgentChatController }) {
         <ReferenceContentView
           content={content}
           fallback={typeof sourceText === "string" ? sourceText : ""}
-          loadPreview={controller.loadReferencePreview}
+          loadPreview={loadPreview}
         />
       </div>
-      <MessageActions role="user" />
+      <MessageActions
+        role="user"
+        renderMessageActions={renderMessageActions}
+      />
     </MessagePrimitive.Root>
   );
 }
 
-function AssistantMessage({ controller }: { controller: AgentChatController }) {
+function AssistantMessage({
+  controller,
+  loadPreview: _loadPreview,
+  renderMessageActions,
+}: {
+  controller: AgentChatController;
+  loadPreview: ReferencePreviewLoader;
+  renderMessageActions?: (
+    message: AgentChatMessageActionContext,
+  ) => ReactNode;
+}) {
   const status = useAuiState((state) => state.message.status);
   const output = useAuiState((state) => state.message.metadata.custom?.output);
   const activities = useAuiState(
@@ -258,13 +337,30 @@ function AssistantMessage({ controller }: { controller: AgentChatController }) {
           void controller.send(textReferenceInput(suggestion.prompt));
         }}
       />
-      <MessageActions role="assistant" />
+      <MessageActions
+        role="assistant"
+        renderMessageActions={renderMessageActions}
+      />
     </MessagePrimitive.Root>
   );
 }
 
-function MessageActions({ role }: { role: "user" | "assistant" }) {
+function MessageActions({
+  role,
+  renderMessageActions,
+}: {
+  role: "user" | "assistant";
+  renderMessageActions?: (
+    message: AgentChatMessageActionContext,
+  ) => ReactNode;
+}) {
   const status = useAuiState((state) => state.message.status);
+  const recordID = Number(
+    useAuiState((state) => state.message.metadata.custom?.recordID) || 0,
+  );
+  const requestID = String(
+    useAuiState((state) => state.message.metadata.custom?.requestID) || "",
+  );
   const sourceText = useAuiState(
     (state) => state.message.metadata.custom?.sourceText,
   );
@@ -347,6 +443,13 @@ function MessageActions({ role }: { role: "user" | "assistant" }) {
         <Copy className="agent-chat-copy-icon" aria-hidden="true" />
         <Check className="agent-chat-copied-icon" aria-hidden="true" />
       </button>
+      {renderMessageActions?.({
+        role,
+        recordID,
+        requestID,
+        running: status?.type === "running",
+        error: status?.type === "incomplete",
+      })}
     </ActionBarPrimitive.Root>
   );
 }
@@ -354,9 +457,11 @@ function MessageActions({ role }: { role: "user" | "assistant" }) {
 function Composer({
   controller,
   clipboardImageUploadRuleId,
+  referenceProviders,
 }: {
   controller: AgentChatController;
   clipboardImageUploadRuleId?: number;
+  referenceProviders: ReferenceProvider[];
 }) {
   return (
     <ReferenceComposer
@@ -368,12 +473,27 @@ function Composer({
       layerZIndex={AGENT_CHAT_CHILD_LAYER_Z_INDEX}
       clipboardImageUploadRuleId={clipboardImageUploadRuleId}
       parameters={controller.inputParams}
+      providers={referenceProviders}
       loadReferences={controller.loadReferences}
       loadPreview={controller.loadReferencePreview}
       onSubmit={controller.send}
       onCancel={controller.stop}
     />
   );
+}
+
+function referencePreviewDispatcher(
+  providers: ReferenceProvider[],
+  fallback: ReferencePreviewLoader,
+): ReferencePreviewLoader {
+  return (request) => {
+    const provider = providers.find((current) =>
+      current.referenceTypes.includes(request.refType),
+    );
+    return provider?.loadPreview
+      ? provider.loadPreview(request)
+      : fallback(request);
+  };
 }
 
 function WaitingIndicator() {

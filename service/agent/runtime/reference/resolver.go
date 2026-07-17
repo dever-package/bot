@@ -2,7 +2,9 @@ package reference
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/shemic/dever/server"
@@ -10,6 +12,8 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeartifact "github.com/dever-package/bot/service/agent/runtime/artifact"
 	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
+	runtimesessionstate "github.com/dever-package/bot/service/agent/runtime/sessionstate"
+	assetservice "github.com/dever-package/bot/service/asset"
 	uploadaccess "github.com/dever-package/front/service/upload/access"
 	uploadrepo "github.com/dever-package/front/service/upload/repository"
 )
@@ -18,15 +22,16 @@ const maxResolvedMedia = 32
 
 type Resolver struct {
 	artifacts runtimeartifact.Service
+	assets    assetservice.Service
 	server    *server.Context
 }
 
 func NewRequestResolver(serverContext *server.Context) Resolver {
-	return Resolver{artifacts: runtimeartifact.NewService(), server: serverContext}
+	return Resolver{artifacts: runtimeartifact.NewService(), assets: assetservice.NewService(), server: serverContext}
 }
 
 func NewResolver() Resolver {
-	return Resolver{artifacts: runtimeartifact.NewService()}
+	return Resolver{artifacts: runtimeartifact.NewService(), assets: assetservice.NewService()}
 }
 
 func (r Resolver) Resolve(ctx context.Context, session agentmodel.Session, references []Reference) (Result, error) {
@@ -42,7 +47,7 @@ func (r Resolver) Resolve(ctx context.Context, session agentmodel.Session, refer
 		result.Items = append(result.Items, resolved)
 		result.Media = appendUniqueMedia(result.Media, resolved.Media...)
 	}
-	result.Prompt = resolvedPrompt(result.Items, result.Media)
+	result.Context = resolvedContext(result.Items, result.Media)
 	return result, nil
 }
 
@@ -60,9 +65,50 @@ func (r Resolver) resolveOne(ctx context.Context, session agentmodel.Session, re
 		return r.resolveUploadFile(ctx, reference)
 	case TypeSession:
 		return r.resolveSession(ctx, session, reference)
+	case TypeAsset:
+		return r.resolveAsset(ctx, session, reference)
 	default:
 		return Resolved{}, fmt.Errorf("不支持的引用类型: %s", reference.Type)
 	}
+}
+
+func (r Resolver) resolveAsset(ctx context.Context, session agentmodel.Session, reference Reference) (Resolved, error) {
+	teamID := bodyTeamID(session.ContextKey)
+	if teamID == 0 {
+		return Resolved{}, fmt.Errorf("当前会话不支持团队资产引用")
+	}
+	if reference.VersionID == 0 {
+		return Resolved{}, fmt.Errorf("资产引用缺少版本")
+	}
+	resolved, err := r.assets.RequireCurrentReference(ctx, teamID, reference.ID, reference.VersionID)
+	if err != nil {
+		return Resolved{}, err
+	}
+	content := resolved.Content
+	title := firstText(resolved.Asset.Name, reference.Label, fmt.Sprintf("资产 %d", reference.ID))
+	kind := firstText(resolved.Asset.Kind, "file")
+	media := []Media{}
+	if url := assetContentURL(content, kind); url != "" {
+		media = append(media, Media{
+			ReferenceType: TypeAsset,
+			ReferenceID:   reference.ID,
+			Kind:          normalizeMediaKind(kind),
+			Name:          title,
+			Label:         title,
+			URL:           url,
+		})
+	}
+	output := mapValue(content)
+	if len(output) == 0 && content != nil {
+		output = map[string]any{"content": content}
+	}
+	return Resolved{
+		Reference: reference,
+		Title:     title,
+		Text:      assetContentText(content),
+		Media:     cleanMedia(media),
+		Output:    output,
+	}, nil
 }
 
 func (r Resolver) resolveMessage(ctx context.Context, session agentmodel.Session, reference Reference) (Resolved, error) {
@@ -142,7 +188,7 @@ func (r Resolver) resolveSession(ctx context.Context, current agentmodel.Session
 		"role":       "assistant",
 		"status":     agentmodel.MessageStatusNormal,
 	}, map[string]any{"order": "main.id desc", "limit": 1})
-	text := strings.TrimSpace(session.ContextSummary)
+	text := runtimesessionstate.Render(session.ContextSummary)
 	media := []Media{}
 	if len(rows) > 0 && rows[0] != nil {
 		if text == "" {
@@ -161,41 +207,156 @@ func requireSourceSession(ctx context.Context, current agentmodel.Session, sessi
 		"owner_type": current.OwnerType,
 		"owner_id":   current.OwnerID,
 	})
-	if session == nil {
+	if session == nil ||
+		strings.TrimSpace(session.AgentKey) != strings.TrimSpace(current.AgentKey) ||
+		strings.TrimSpace(session.ContextKey) != strings.TrimSpace(current.ContextKey) {
 		return nil, fmt.Errorf("引用内容不存在或无权访问")
 	}
 	return session, nil
 }
 
-func resolvedPrompt(items []Resolved, allowedMedia []Media) string {
+func resolvedContext(items []Resolved, allowedMedia []Media) []map[string]any {
 	if len(items) == 0 {
-		return ""
+		return nil
 	}
-	rows := []string{"用户通过 @ 明确引用了以下内容。引用素材时必须使用列出的 ref_type 和 ref_id，禁止猜测其他素材："}
 	allowed := make(map[string]struct{}, len(allowedMedia))
 	for _, media := range allowedMedia {
 		allowed[fmt.Sprintf("%s:%d", media.ReferenceType, media.ReferenceID)] = struct{}{}
 	}
-	for index, item := range items {
-		line := fmt.Sprintf("%d. [%s:%d] %s", index+1, item.Reference.Type, item.Reference.ID, strings.TrimSpace(item.Title))
+	result := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		current := map[string]any{
+			"ref_type": item.Reference.Type,
+			"ref_id":   item.Reference.ID,
+			"trigger":  item.Reference.Trigger,
+			"title":    strings.TrimSpace(item.Title),
+		}
+		if item.Reference.VersionID > 0 {
+			current["version_id"] = item.Reference.VersionID
+		}
 		if item.Reference.Usage != "" {
-			line += "\n- 用于输入参数：" + item.Reference.Usage
+			current["usage"] = item.Reference.Usage
 		}
 		if text := strings.TrimSpace(item.Text); text != "" {
-			line += "\n" + text
+			current["text"] = text
 		}
+		mediaItems := make([]map[string]any, 0, len(item.Media))
 		for _, media := range item.Media {
 			if _, exists := allowed[fmt.Sprintf("%s:%d", media.ReferenceType, media.ReferenceID)]; !exists {
 				continue
 			}
-			line += fmt.Sprintf("\n- 素材 [%s:%d] %s，类型 %s", media.ReferenceType, media.ReferenceID, media.Label, media.Kind)
+			mediaItem := map[string]any{
+				"ref_type": media.ReferenceType,
+				"ref_id":   media.ReferenceID,
+				"label":    media.Label,
+				"kind":     media.Kind,
+			}
 			if media.ArtifactID > 0 {
-				line += fmt.Sprintf("，artifact_id=%d", media.ArtifactID)
+				mediaItem["artifact_id"] = media.ArtifactID
+			}
+			mediaItems = append(mediaItems, mediaItem)
+		}
+		if len(mediaItems) > 0 {
+			current["media"] = mediaItems
+		}
+		result = append(result, current)
+	}
+	return result
+}
+
+func bodyTeamID(contextKey string) uint64 {
+	const prefix = "body-team:"
+	value := strings.TrimSpace(contextKey)
+	if !strings.HasPrefix(value, prefix) {
+		return 0
+	}
+	value = strings.TrimPrefix(value, prefix)
+	teamText, _, exists := strings.Cut(value, ":role:")
+	if !exists {
+		return 0
+	}
+	teamID, _ := strconv.ParseUint(teamText, 10, 64)
+	return teamID
+}
+
+func assetContentText(value any) string {
+	if text := nestedAssetText(value, 0); text != "" {
+		return text
+	}
+	raw, _ := json.Marshal(value)
+	return strings.TrimSpace(string(raw))
+}
+
+func nestedAssetText(value any, depth int) string {
+	if depth > 10 || value == nil {
+		return ""
+	}
+	switch current := value.(type) {
+	case string:
+		text := strings.TrimSpace(current)
+		if strings.HasPrefix(text, "http://") || strings.HasPrefix(text, "https://") || strings.HasPrefix(text, "/") || strings.HasPrefix(text, "data:") {
+			return ""
+		}
+		return text
+	case []any:
+		parts := make([]string, 0, len(current))
+		for _, item := range current {
+			if text := nestedAssetText(item, depth+1); text != "" {
+				parts = append(parts, text)
 			}
 		}
-		rows = append(rows, line)
+		return strings.Join(parts, "\n")
+	case map[string]any:
+		for _, key := range []string{"text", "markdown", "prompt", "summary", "caption", "title"} {
+			if text := nestedAssetText(current[key], depth+1); text != "" {
+				return text
+			}
+		}
+		for _, key := range []string{"content", "body", "output", "result", "data", "parts", "blocks"} {
+			if text := nestedAssetText(current[key], depth+1); text != "" {
+				return text
+			}
+		}
 	}
-	return strings.Join(rows, "\n")
+	return ""
+}
+
+func assetContentURL(value any, kind string) string {
+	keys := []string{"url", "open_url", "source_url", kind}
+	if kind != "" {
+		keys = append(keys, kind+"s")
+	}
+	return nestedAssetURL(value, keys, 0)
+}
+
+func nestedAssetURL(value any, preferred []string, depth int) string {
+	if depth > 5 || value == nil {
+		return ""
+	}
+	switch current := value.(type) {
+	case string:
+		if strings.HasPrefix(current, "http://") || strings.HasPrefix(current, "https://") || strings.HasPrefix(current, "/") || strings.HasPrefix(current, "data:") {
+			return strings.TrimSpace(current)
+		}
+	case []any:
+		for _, item := range current {
+			if url := nestedAssetURL(item, preferred, depth+1); url != "" {
+				return url
+			}
+		}
+	case map[string]any:
+		for _, key := range preferred {
+			if url := nestedAssetURL(current[key], preferred, depth+1); url != "" {
+				return url
+			}
+		}
+		for _, item := range current {
+			if url := nestedAssetURL(item, preferred, depth+1); url != "" {
+				return url
+			}
+		}
+	}
+	return ""
 }
 
 func mediaFromArtifactPayload(payload map[string]any) Media {

@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"errors"
 	"strings"
 )
 
@@ -35,10 +36,14 @@ func BuildErrorResponse(requestID string, err error) Response {
 	if err != nil {
 		message = err.Error()
 	}
+	output := Output{}
+	if code := responseErrorCode(err); code != "" {
+		output["error_code"] = code
+	}
 	return newResponse(
 		requestID,
 		ResponseTypeResult,
-		Output{},
+		output,
 		message,
 		ResponseStatusFail,
 	)
@@ -81,17 +86,32 @@ func BuildStreamErrorResponse(requestID string, err error) Response {
 	if err != nil {
 		message = err.Error()
 	}
+	output := Output{
+		"event": "status",
+		"text":  message,
+		"error": message,
+	}
+	if code := responseErrorCode(err); code != "" {
+		output["error_code"] = code
+	}
 	return newResponse(
 		requestID,
 		ResponseTypeStream,
-		Output{
-			"event": "status",
-			"text":  message,
-			"error": message,
-		},
+		output,
 		message,
 		ResponseStatusFail,
 	)
+}
+
+func responseErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	var coded interface{ ErrorCode() string }
+	if errors.As(err, &coded) {
+		return strings.TrimSpace(coded.ErrorCode())
+	}
+	return ""
 }
 
 func newResponse(requestID string, responseType string, output Output, msg string, status int) Response {

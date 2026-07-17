@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,6 +42,26 @@ func (Service) CreateCanvasBody(ctx context.Context, projectID uint64, name stri
 		"status":     bodymodel.SessionStatusActive,
 		"created_at": time.Now(),
 	})
+	return bodyID, nil
+}
+
+func (Service) CreateTeamWorkspaceBody(ctx context.Context, name string) (uint64, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "团队工作区"
+	}
+	bodyID := uint64(bodymodel.NewBodyModel().Insert(ctx, map[string]any{
+		"project_id": 0,
+		"name":       name,
+		"type":       bodymodel.TypeWorkspace,
+		"config":     "{}",
+		"status":     bodymodel.StatusEnabled,
+		"sort":       100,
+		"created_at": time.Now(),
+	}))
+	if bodyID == 0 {
+		return 0, fmt.Errorf("创建团队工作区载体失败")
+	}
 	return bodyID, nil
 }
 

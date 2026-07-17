@@ -1,58 +1,133 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  BookOpen,
+  Archive,
+  Building2,
   ChevronDown,
-  Clock3,
-  FileText,
-  Film,
+  FileStack,
   Gift,
+  Loader2,
   Megaphone,
+  MessagesSquare,
   PanelLeft,
-  Plus,
-  Trash2,
+  RefreshCw,
+  Zap,
 } from "lucide-react";
-import { SiteLogo, getSiteConfig } from "@dever/front-plugin";
+import { BodySiteBrand } from "../auth/site-brand";
+import {
+  applyBodySiteMetadata,
+  useBodyLoginConfig,
+} from "../auth/site-config";
 import { WorkProjectPage } from "../project/project-page";
+import { BodyToaster } from "../shared/body-toaster";
+import "../shared/body-theme.css";
+import type { AssetRecord } from "../asset/asset-types";
+import { WorkbenchAssetPage } from "./asset-page";
+import { WorkbenchDialoguePage } from "./dialogue-page";
+import { WorkbenchFunctionPage } from "./function-page";
+import {
+  loadWorkbenchCatalog,
+  type WorkbenchCatalog,
+  type WorkbenchTeam,
+} from "./workbench-api";
 
-type WorkPageKey = "project" | "video" | "community" | "recent" | "trash";
+type WorkPageKey = "function" | "dialogue" | "works" | "assets";
 
-type PrimaryNavItem = {
-  key: WorkPageKey;
-  label: string;
-  icon: typeof FileText;
-  badge?: string;
-};
-
-const primaryNavItems: PrimaryNavItem[] = [
-  { key: "recent", label: "最近", icon: Clock3 },
-  { key: "project", label: "剧本项目", icon: FileText },
-  { key: "video", label: "影像制作", icon: Film, badge: "BETA" },
-  { key: "community", label: "社区", icon: BookOpen },
-  { key: "trash", label: "回收站", icon: Trash2 },
-];
-
-const pageTitles: Record<WorkPageKey, string> = {
-  project: "剧本项目",
-  video: "影像制作",
-  community: "社区",
-  recent: "最近",
-  trash: "回收站",
-};
+const TEAM_STORAGE_KEY = "bot.body.workbench.team";
+const pageItems = [
+  { key: "works", label: "项目", icon: FileStack },
+  { key: "dialogue", label: "对话", icon: MessagesSquare },
+  { key: "function", label: "工具", icon: Zap },
+  { key: "assets", label: "资产", icon: Archive },
+] satisfies Array<{ key: WorkPageKey; label: string; icon: typeof Zap }>;
 
 export function WorkHomeShell({ item }: { item?: any }) {
-  const site = getSiteConfig();
-  const pageValue =
-    typeof item?.value === "string" ? item.value : item?.value?.page;
-  const initialPage = resolveInitialPage(pageValue);
-  const [activePage, setActivePage] = useState<WorkPageKey>(initialPage);
+  const loginConfig = useBodyLoginConfig();
+  const [activePage, setActivePage] = useState<WorkPageKey>(() =>
+    resolveInitialPage(
+      typeof item?.value === "string" ? item.value : item?.value?.page,
+    ),
+  );
+  const [catalog, setCatalog] = useState<WorkbenchCatalog | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [continuationAsset, setContinuationAsset] =
+    useState<AssetRecord | null>(null);
+  const catalogRequestRef = useRef(0);
 
-  const content = useMemo(() => {
-    if (activePage === "project" || activePage === "recent") {
-      return <WorkProjectPage />;
+  const loadCatalog = useCallback(async (teamID = 0) => {
+    const requestID = ++catalogRequestRef.current;
+    setLoading(true);
+    setError("");
+    try {
+      const next = await loadWorkbenchCatalog(teamID);
+      if (requestID !== catalogRequestRef.current) {
+        return;
+      }
+      setCatalog(next);
+      setContinuationAsset(null);
+      if (next.team?.id) {
+        rememberTeamID(next.team.id);
+      }
+      setActivePage((current) => resolveCatalogPage(current, next));
+    } catch (currentError: unknown) {
+      if (requestID !== catalogRequestRef.current) {
+        return;
+      }
+      setError(
+        currentError instanceof Error
+          ? currentError.message
+          : "加载团队工作区失败",
+      );
+    } finally {
+      if (requestID === catalogRequestRef.current) {
+        setLoading(false);
+      }
     }
-    return <ComingSoon title={pageTitles[activePage]} />;
-  }, [activePage]);
+  }, []);
+
+  useEffect(() => {
+    applyBodySiteMetadata(loginConfig.site);
+  }, [loginConfig.site]);
+
+  useEffect(() => {
+    void loadCatalog(readTeamID());
+  }, [loadCatalog]);
+
+  const navigation = useMemo(
+    () =>
+      pageItems.filter(
+        (page) =>
+          page.key !== "works" ||
+          !catalog ||
+          catalog.projectEnabled,
+      ),
+    [catalog],
+  );
+  const currentPage =
+    navigation.find((page) => page.key === activePage) || navigation[0];
+
+  const canContinueAsset = useCallback(
+    (asset: AssetRecord) =>
+      asset.sourceType === "dialogue"
+        ? Boolean(catalog?.roles.some((role) => role.id === asset.sourceID))
+        : Boolean(catalog?.powers.some((power) => power.id === asset.sourceID)),
+    [catalog?.powers, catalog?.roles],
+  );
+
+  const continueAsset = useCallback(
+    (asset: AssetRecord) => {
+      if (!canContinueAsset(asset)) {
+        return;
+      }
+      setContinuationAsset(asset);
+      setActivePage(
+        asset.sourceType === "dialogue" ? "dialogue" : "function",
+      );
+    },
+    [canContinueAsset],
+  );
+  const clearContinuation = useCallback(() => setContinuationAsset(null), []);
 
   return (
     <main
@@ -61,13 +136,15 @@ export function WorkHomeShell({ item }: { item?: any }) {
         sidebarCollapsed && "is-sidebar-collapsed",
       )}
     >
+      <BodyToaster />
       <WorkHomeStyles />
       <aside className="hb-laper-sidebar" aria-label="工作台导航">
         <div className="hb-laper-sidebar-head">
-          <div className="hb-laper-brand" aria-label={site.name || "神创工作台"}>
-            <SiteLogo className="hb-laper-brand-logo" />
-            <span>{site.name || "神创工作台"}</span>
-          </div>
+          <BodySiteBrand
+            site={loginConfig.site}
+            className="hb-laper-brand"
+            logoClassName="hb-laper-brand-logo"
+          />
           <button
             type="button"
             className="hb-laper-collapse"
@@ -80,59 +157,39 @@ export function WorkHomeShell({ item }: { item?: any }) {
           </button>
         </div>
 
-        <nav className="hb-laper-nav" aria-label="工作台菜单">
-          <button
-            type="button"
-            className="hb-laper-nav-item"
-            aria-label="新建"
-            title="新建"
-          >
-            <Plus size={19} strokeWidth={1.9} />
-            <span>新建</span>
-          </button>
-          {primaryNavItems.map((nav) => (
-            <SidebarButton
-              key={nav.key}
-              active={activePage === nav.key}
-              item={nav}
-              onClick={() => setActivePage(nav.key)}
+        <nav className="hb-laper-nav" aria-label="工作区导航">
+          {navigation.map((page) => (
+            <NavigationButton
+              key={page.key}
+              page={page}
+              active={currentPage?.key === page.key}
+              onClick={() => setActivePage(page.key)}
             />
           ))}
         </nav>
 
         <div className="hb-laper-sidebar-foot">
-          <button
-            type="button"
-            className="hb-laper-earn"
-            aria-label="赚取"
-            title="赚取"
-          >
+          <button type="button" className="hb-laper-earn">
             <Gift size={19} strokeWidth={1.9} />
             <span>赚取</span>
           </button>
 
-          <section className="hb-laper-points" aria-label="积分">
+          <section className="hb-laper-points" aria-label="团队工作区">
             <div className="hb-laper-points-top">
-              <strong>110积分</strong>
-              <span>订阅神创</span>
+              <strong>团队工作区</strong>
+              <span>{catalog?.teams.length || 0} 个团队</span>
             </div>
-            <p>在社交媒体发布神创帖子 获得最高2000积分,或3个月会员</p>
-            <button type="button" className="hb-laper-profile">
-              <span className="hb-laper-avatar">你</span>
-              <span className="hb-laper-profile-text">
-                <strong>你好</strong>
-                <small>Junior</small>
-              </span>
-              <ChevronDown size={18} strokeWidth={1.8} />
-            </button>
+            <p>项目、对话、工具和资产均按当前团队隔离。</p>
+            <TeamPicker
+              teams={catalog?.teams || []}
+              teamID={catalog?.team?.id || 0}
+              disabled={loading}
+              profile
+              onChange={(teamID) => void loadCatalog(teamID)}
+            />
           </section>
 
-          <button
-            type="button"
-            className="hb-laper-update"
-            aria-label="更新说明"
-            title="更新说明"
-          >
+          <button type="button" className="hb-laper-update">
             <Megaphone size={18} strokeWidth={1.9} />
             <span>更新说明</span>
           </button>
@@ -142,75 +199,306 @@ export function WorkHomeShell({ item }: { item?: any }) {
       <section className="hb-laper-main">
         <div className="hb-laper-frame">
           <header className="hb-laper-topbar">
-            <h1>{pageTitles[activePage]}</h1>
+            <h1>{currentPage?.label || "工作区"}</h1>
+            <div className="hb-laper-mobile-team">
+              <TeamPicker
+                teams={catalog?.teams || []}
+                teamID={catalog?.team?.id || 0}
+                disabled={loading}
+                compact
+                onChange={(teamID) => void loadCatalog(teamID)}
+              />
+            </div>
           </header>
-          <div className="hb-laper-content">{content}</div>
+
+          <div className="hb-laper-content">
+            {loading ? (
+              <PageLoading />
+            ) : error ? (
+              <PageError
+                message={error}
+                onRetry={() => void loadCatalog(catalog?.team?.id)}
+              />
+            ) : !catalog?.team ? (
+              <NoTeam />
+            ) : (
+              <PageContent
+                page={currentPage?.key || "assets"}
+                catalog={catalog}
+                continuationAsset={continuationAsset}
+                onContinueAsset={continueAsset}
+                canContinueAsset={canContinueAsset}
+                onClearContinuation={clearContinuation}
+              />
+            )}
+          </div>
         </div>
       </section>
     </main>
   );
 }
 
-function SidebarButton({
+function PageContent({
+  page,
+  catalog,
+  continuationAsset,
+  onContinueAsset,
+  canContinueAsset,
+  onClearContinuation,
+}: {
+  page: WorkPageKey;
+  catalog: WorkbenchCatalog;
+  continuationAsset: AssetRecord | null;
+  onContinueAsset: (asset: AssetRecord) => void;
+  canContinueAsset: (asset: AssetRecord) => boolean;
+  onClearContinuation: () => void;
+}) {
+  const teamID = catalog.team?.id || 0;
+  const [visitedPages, setVisitedPages] = useState<WorkPageKey[]>([page]);
+
+  useEffect(() => {
+    setVisitedPages((current) =>
+      current.includes(page) ? current : [...current, page],
+    );
+  }, [page]);
+
+  return (
+    <div className="h-full min-h-0">
+      {visitedPages.includes("function") ? (
+        <div className={page === "function" ? "h-full min-h-0" : "hidden"}>
+          <WorkbenchFunctionPage
+            teamID={teamID}
+            powers={catalog.powers}
+            continuationAsset={continuationAsset}
+            onClearContinuation={onClearContinuation}
+          />
+        </div>
+      ) : null}
+      {visitedPages.includes("dialogue") ? (
+        <div className={page === "dialogue" ? "h-full min-h-0" : "hidden"}>
+          <WorkbenchDialoguePage
+            teamID={teamID}
+            roles={catalog.roles}
+            continuationAsset={continuationAsset}
+            onClearContinuation={onClearContinuation}
+          />
+        </div>
+      ) : null}
+      {page === "works" ? (
+        <div className="h-full overflow-y-auto">
+          <WorkProjectPage teamID={teamID} />
+        </div>
+      ) : null}
+      {page === "assets" ? (
+        <WorkbenchAssetPage
+          teamID={teamID}
+          onContinue={onContinueAsset}
+          canContinue={canContinueAsset}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function NavigationButton({
+  page,
   active,
-  item,
   onClick,
 }: {
+  page: (typeof pageItems)[number];
   active: boolean;
-  item: PrimaryNavItem;
   onClick: () => void;
 }) {
-  const Icon = item.icon;
+  const Icon = page.icon;
   return (
     <button
       type="button"
       className={cx("hb-laper-nav-item", active && "is-active")}
-      aria-label={item.label}
-      title={item.label}
+      aria-label={page.label}
+      title={page.label}
       onClick={onClick}
     >
       <Icon size={20} strokeWidth={1.85} />
-      <span>{item.label}</span>
-      {item.badge ? <em>{item.badge}</em> : null}
+      <span>{page.label}</span>
     </button>
   );
 }
 
-function ComingSoon({ title }: { title: string }) {
+function TeamPicker({
+  teams,
+  teamID,
+  disabled,
+  compact = false,
+  profile = false,
+  onChange,
+}: {
+  teams: WorkbenchTeam[];
+  teamID: number;
+  disabled: boolean;
+  compact?: boolean;
+  profile?: boolean;
+  onChange: (teamID: number) => void;
+}) {
+  const selectedTeam = teams.find((team) => team.id === teamID);
+
+  if (profile) {
+    return (
+      <label className="hb-laper-profile">
+        <span className="hb-laper-avatar">
+          {(selectedTeam?.name || "团").slice(0, 1)}
+        </span>
+        <span className="hb-laper-profile-text">
+          <strong>{selectedTeam?.name || "暂无团队"}</strong>
+          <small>切换团队</small>
+        </span>
+        <ChevronDown size={18} strokeWidth={1.8} />
+        <select
+          value={teamID || ""}
+          disabled={disabled || teams.length === 0}
+          aria-label="切换团队"
+          onChange={(event) => onChange(Number(event.target.value))}
+        >
+          {teams.length === 0 ? <option value="">暂无团队</option> : null}
+          {teams.map((team) => (
+            <option key={team.id} value={team.id}>
+              {team.name}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
   return (
-    <div className="hb-laper-placeholder">
-      <h2>{title}</h2>
-      <p>当前入口只完成视觉占位，功能稍后接入。</p>
+    <label
+      className={
+        compact
+          ? "relative flex h-9 min-w-0 max-w-[240px] flex-1 items-center gap-2 rounded-md border border-[#d8ddda] bg-white px-2"
+          : "relative flex h-11 w-full items-center gap-2 rounded-md border border-[#d8ddda] bg-[#f8f9f8] px-3"
+      }
+    >
+      <Building2 className="size-4 shrink-0 text-[#66716c]" />
+      <select
+        value={teamID || ""}
+        disabled={disabled || teams.length === 0}
+        className="min-w-0 flex-1 appearance-none bg-transparent pr-5 text-sm font-medium text-[#27312c] outline-none disabled:opacity-60"
+        aria-label="切换团队"
+        onChange={(event) => onChange(Number(event.target.value))}
+      >
+        {teams.length === 0 ? <option value="">暂无团队</option> : null}
+        {teams.map((team) => (
+          <option key={team.id} value={team.id}>
+            {team.name}
+          </option>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-3 size-3.5 text-[#78827e]" />
+    </label>
+  );
+}
+
+function PageLoading() {
+  return (
+    <div className="flex h-full items-center justify-center text-[#74807a]">
+      <Loader2 className="size-5 animate-spin" />
+    </div>
+  );
+}
+
+function PageError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex h-full items-center justify-center px-6 text-center">
+      <div>
+        <p className="m-0 text-sm text-red-600">{message}</p>
+        <button
+          type="button"
+          className="mx-auto mt-4 inline-flex h-9 items-center gap-2 rounded-md border border-[#d7ddda] bg-white px-3 text-sm text-[#3f4a45]"
+          onClick={onRetry}
+        >
+          <RefreshCw className="size-4" />
+          重试
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NoTeam() {
+  return (
+    <div className="flex h-full items-center justify-center px-6 text-center">
+      <div>
+        <Building2 className="mx-auto mb-3 size-6 text-[#8b9691]" />
+        <p className="m-0 text-sm font-medium text-[#4f5a55]">暂无已发布团队</p>
+      </div>
     </div>
   );
 }
 
 function resolveInitialPage(value: unknown): WorkPageKey {
-  return value === "video" ||
-    value === "community" ||
-    value === "recent" ||
-    value === "trash"
-    ? value
-    : "project";
+  switch (value) {
+    case "dialogue":
+      return "dialogue";
+    case "works":
+    case "project":
+      return "works";
+    case "assets":
+      return "assets";
+    default:
+      return "works";
+  }
+}
+
+function resolveCatalogPage(
+  current: WorkPageKey,
+  catalog: WorkbenchCatalog,
+): WorkPageKey {
+  if (current !== "works" || catalog.projectEnabled) {
+    return current;
+  }
+  if (catalog.roles.length > 0) {
+    return "dialogue";
+  }
+  if (catalog.powers.length > 0) {
+    return "function";
+  }
+  return "assets";
+}
+
+function readTeamID() {
+  try {
+    return Number(window.localStorage.getItem(TEAM_STORAGE_KEY) || 0);
+  } catch {
+    return 0;
+  }
+}
+
+function rememberTeamID(teamID: number) {
+  try {
+    window.localStorage.setItem(TEAM_STORAGE_KEY, String(teamID));
+  } catch {
+    // 浏览器禁用本地存储时只影响团队记忆，不影响当前工作区。
+  }
 }
 
 function WorkHomeStyles() {
   return (
     <style>{`
       .hb-laper-app {
-        --laper-bg: #f4f6f5;
-        --laper-sidebar: #f4f6f5;
-        --laper-surface: #ffffff;
-        --laper-text: #171a19;
-        --laper-muted: #6b7370;
-        --laper-faint: #9ca3a0;
-        --laper-line: #e4e8e6;
-        --laper-line-strong: #d2d9d6;
-        --laper-active: #e4e8e6;
-        --laper-primary: #1a4a35;
-        --laper-green: #4a6d47;
-        --laper-deep-blue: #123d66;
-        --laper-indigo: #151681;
+        --laper-bg: var(--body-work-bg);
+        --laper-sidebar: var(--body-work-bg);
+        --laper-surface: var(--body-work-surface);
+        --laper-text: var(--body-work-text);
+        --laper-muted: var(--body-work-muted);
+        --laper-line: var(--body-work-line);
+        --laper-active: var(--body-work-active);
+        --laper-deep-blue: var(--body-work-blue);
+        --laper-indigo: var(--body-work-indigo);
         position: fixed;
         inset: 0;
         z-index: 1;
@@ -222,9 +510,7 @@ function WorkHomeStyles() {
         overflow: hidden;
         background: var(--laper-bg);
         color: var(--laper-text);
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, "Noto Sans SC", "PingFang SC", sans-serif;
         font-size: 12.8px;
-        letter-spacing: 0;
       }
 
       .hb-laper-app * {
@@ -253,9 +539,9 @@ function WorkHomeStyles() {
 
       .hb-laper-brand {
         display: inline-flex;
+        min-width: 0;
         align-items: center;
         gap: 6px;
-        min-width: 0;
         color: #171a19;
         font-size: 18px;
         font-weight: 700;
@@ -264,7 +550,6 @@ function WorkHomeStyles() {
 
       .hb-laper-brand span,
       .hb-laper-nav-item span,
-      .hb-laper-nav-item em,
       .hb-laper-earn span,
       .hb-laper-update span,
       .hb-laper-points {
@@ -282,8 +567,7 @@ function WorkHomeStyles() {
       .hb-laper-collapse,
       .hb-laper-nav-item,
       .hb-laper-earn,
-      .hb-laper-update,
-      .hb-laper-profile {
+      .hb-laper-update {
         appearance: none;
         border: 0;
         font: inherit;
@@ -336,15 +620,14 @@ function WorkHomeStyles() {
       }
 
       .hb-laper-nav-item svg {
-        flex: 0 0 auto;
         width: 16px;
         height: 16px;
+        flex: 0 0 auto;
         color: #6b7370;
       }
 
       .hb-laper-nav-item span {
         min-width: 0;
-        flex: 0 1 auto;
         overflow: hidden;
         font-size: 12.8px;
         font-weight: 400;
@@ -360,19 +643,6 @@ function WorkHomeStyles() {
 
       .hb-laper-nav-item.is-active span {
         font-weight: 500;
-      }
-
-      .hb-laper-nav-item em {
-        display: inline-flex;
-        height: 13px;
-        align-items: center;
-        border-radius: 999px;
-        background: #d2d9d6;
-        color: #6b7370;
-        padding: 0 7px;
-        font-size: 9px;
-        font-style: normal;
-        font-weight: 700;
       }
 
       .hb-laper-sidebar-foot {
@@ -444,7 +714,7 @@ function WorkHomeStyles() {
       }
 
       .hb-laper-points p {
-        margin: 11px 0 11px;
+        margin: 11px 0;
         max-width: 176px;
         color: rgba(255, 255, 255, 0.88);
         font-size: 10.5px;
@@ -453,12 +723,14 @@ function WorkHomeStyles() {
       }
 
       .hb-laper-profile {
+        position: relative;
         display: flex;
         width: 100%;
         height: 56px;
         cursor: pointer;
         align-items: center;
         gap: 10px;
+        overflow: hidden;
         border-radius: 6px;
         background: #ffffff;
         color: var(--laper-text);
@@ -489,22 +761,43 @@ function WorkHomeStyles() {
         gap: 2px;
       }
 
+      .hb-laper-profile-text strong,
+      .hb-laper-profile-text small {
+        display: block;
+        width: 100%;
+        overflow: hidden;
+        line-height: 1.1;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
       .hb-laper-profile-text strong {
         font-size: 12.5px;
         font-weight: 600;
-        line-height: 1.1;
       }
 
       .hb-laper-profile-text small {
         color: var(--laper-muted);
         font-size: 10.5px;
-        line-height: 1.1;
       }
 
       .hb-laper-profile svg {
         width: 14px;
         height: 14px;
         color: #5d6865;
+      }
+
+      .hb-laper-profile select {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        cursor: pointer;
+        opacity: 0;
+      }
+
+      .hb-laper-profile select:disabled {
+        cursor: default;
       }
 
       .hb-laper-update {
@@ -543,8 +836,8 @@ function WorkHomeStyles() {
       }
 
       .hb-laper-app.is-sidebar-collapsed .hb-laper-collapse {
-        background: #e4e8e6;
-        color: #171a19;
+        background: var(--laper-active);
+        color: var(--laper-text);
         transform: rotate(180deg);
       }
 
@@ -561,7 +854,6 @@ function WorkHomeStyles() {
       }
 
       .hb-laper-app.is-sidebar-collapsed .hb-laper-nav-item span,
-      .hb-laper-app.is-sidebar-collapsed .hb-laper-nav-item em,
       .hb-laper-app.is-sidebar-collapsed .hb-laper-earn span,
       .hb-laper-app.is-sidebar-collapsed .hb-laper-update span,
       .hb-laper-app.is-sidebar-collapsed .hb-laper-points {
@@ -624,34 +916,15 @@ function WorkHomeStyles() {
         line-height: 1;
       }
 
+      .hb-laper-mobile-team {
+        display: none;
+      }
+
       .hb-laper-content {
         min-height: 0;
         flex: 1;
-        overflow: auto;
+        overflow: hidden;
         background: #ffffff;
-      }
-
-      .hb-laper-placeholder {
-        display: flex;
-        height: 100%;
-        min-height: 288px;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        color: #7b8783;
-        text-align: center;
-      }
-
-      .hb-laper-placeholder h2 {
-        margin: 0 0 6px;
-        color: var(--laper-text);
-        font-size: 16px;
-        font-weight: 600;
-      }
-
-      .hb-laper-placeholder p {
-        margin: 0;
-        font-size: 11px;
       }
 
       @media (max-width: 900px) {
@@ -661,6 +934,14 @@ function WorkHomeStyles() {
         }
 
         .hb-laper-points {
+          overflow: visible;
+          background: transparent;
+          padding: 0;
+          box-shadow: none;
+        }
+
+        .hb-laper-points-top,
+        .hb-laper-points p {
           display: none;
         }
 
@@ -671,81 +952,55 @@ function WorkHomeStyles() {
 
       @media (max-width: 640px) {
         .hb-laper-app {
-          position: fixed;
           flex-direction: column;
         }
 
-        .hb-laper-sidebar {
+        .hb-laper-sidebar,
+        .hb-laper-app.is-sidebar-collapsed .hb-laper-sidebar {
           order: 2;
           width: 100%;
-          height: 58px;
-          flex: 0 0 58px;
+          height: calc(58px + env(safe-area-inset-bottom));
+          flex: 0 0 calc(58px + env(safe-area-inset-bottom));
           flex-direction: row;
-          align-items: center;
+          align-items: flex-start;
           justify-content: center;
-          border-top: 1px solid var(--laper-line);
-          padding: 6px 8px;
           overflow-x: auto;
+          border-top: 1px solid var(--laper-line);
+          padding: 6px 8px env(safe-area-inset-bottom);
         }
 
-        .hb-laper-app.is-sidebar-collapsed .hb-laper-sidebar {
-          width: 100%;
-          height: 58px;
-          flex: 0 0 58px;
-          flex-direction: row;
-          align-items: center;
-          justify-content: center;
-          padding: 6px 8px;
-        }
-
-        .hb-laper-sidebar-head {
-          display: none;
-        }
-
+        .hb-laper-sidebar-head,
         .hb-laper-sidebar-foot {
           display: none;
         }
 
-        .hb-laper-nav {
-          width: max-content;
-          min-width: 100%;
+        .hb-laper-nav,
+        .hb-laper-app.is-sidebar-collapsed .hb-laper-nav {
+          width: 100%;
+          min-width: 0;
           flex-direction: row;
           justify-content: space-around;
           gap: 4px;
         }
 
-        .hb-laper-nav-item {
-          width: 50px;
+        .hb-laper-nav-item,
+        .hb-laper-app.is-sidebar-collapsed .hb-laper-nav-item {
+          width: 64px;
           min-height: 44px;
-          flex: 0 0 50px;
+          flex: 1 1 64px;
           flex-direction: column;
           justify-content: center;
           gap: 4px;
           padding: 0;
         }
 
-        .hb-laper-app.is-sidebar-collapsed .hb-laper-nav-item {
-          width: 50px;
-          min-height: 44px;
-          flex: 0 0 50px;
-          flex-direction: column;
-          gap: 4px;
-        }
-
-        .hb-laper-nav-item span {
+        .hb-laper-nav-item span,
+        .hb-laper-app.is-sidebar-collapsed .hb-laper-nav-item span {
           display: block;
           width: 100%;
           font-size: 10px;
           font-weight: 500;
           text-align: center;
-        }
-
-        .hb-laper-app.is-sidebar-collapsed .hb-laper-nav-item span {
-          display: block;
-        }
-
-        .hb-laper-nav-item em {
-          display: none;
         }
 
         .hb-laper-main {
@@ -757,10 +1012,29 @@ function WorkHomeStyles() {
           padding: 0;
         }
 
+        .hb-laper-frame {
+          border-radius: 0;
+        }
+
         .hb-laper-topbar {
-          height: 40px;
-          flex-basis: 40px;
-          padding: 0 14px;
+          height: 48px;
+          flex-basis: 48px;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 0 12px 0 14px;
+        }
+
+        .hb-laper-topbar h1 {
+          flex: 0 0 auto;
+          font-size: 14px;
+        }
+
+        .hb-laper-mobile-team {
+          display: flex;
+          min-width: 0;
+          max-width: 220px;
+          flex: 1;
+          justify-content: flex-end;
         }
       }
     `}</style>

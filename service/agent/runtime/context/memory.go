@@ -10,13 +10,15 @@ import (
 
 func runtimeMemoryText(ctx context.Context, session agentmodel.Session, query string) string {
 	rows := memoryservice.NewService().RuntimeMemories(ctx, memoryservice.RuntimeRequest{
-		OwnerType:  session.OwnerType,
-		OwnerID:    session.OwnerID,
-		AgentKey:   session.AgentKey,
-		ContextKey: session.ContextKey,
-		SessionID:  session.ID,
-		Query:      query,
-		Limit:      12,
+		OwnerType:     session.OwnerType,
+		OwnerID:       session.OwnerID,
+		AgentKey:      session.AgentKey,
+		ContextKey:    session.ContextKey,
+		SessionID:     session.ID,
+		Query:         query,
+		Limit:         8,
+		IncludeGlobal: true,
+		IncludeAgent:  true,
 	})
 	parts := make([]string, 0, len(rows))
 	totalRunes := 0
@@ -29,7 +31,7 @@ func runtimeMemoryText(ctx context.Context, session agentmodel.Session, query st
 		if title := strings.TrimSpace(row.Title); title != "" {
 			part = "- " + limitRunes(title, 120) + ": " + content
 		}
-		if len(parts) > 0 && totalRunes+runeCount(part) > 6000 {
+		if len(parts) > 0 && totalRunes+runeCount(part) > 4000 {
 			break
 		}
 		parts = append(parts, part)

@@ -44,7 +44,7 @@ func (s Service) generateSessionTitle(ctx context.Context, sessionID uint64) {
 		Body: map[string]any{
 			"power":   power.Key,
 			"set":     map[string]any{"role": sessionTitleRole()},
-			"input":   map[string]any{"text": source},
+			"input":   energonservice.PromptInput(source),
 			"options": map[string]any{"stream": false, "temperature": 0},
 		},
 	})
@@ -100,7 +100,7 @@ func sessionTitleRole() string {
 	return strings.Join([]string{
 		"你是会话标题生成器。",
 		"根据首轮对话生成一个简短中文标题。",
-		"要求：6到16个汉字；不要标点；不要解释；不要使用“关于”“帮助”“对话”。",
+		"要求：6到16个汉字；不要标点；不要解释。",
 		"只输出标题文本。",
 	}, "\n")
 }
@@ -111,7 +111,7 @@ func normalizeGeneratedTitle(text string) string {
 	text = strings.ReplaceAll(text, "\n", " ")
 	text = strings.Join(strings.Fields(text), "")
 	text = strings.Trim(text, "。.!！?？、，,：:")
-	if text == "" || strings.Contains(text, "关于") || strings.Contains(text, "帮助") || strings.Contains(text, "对话") {
+	if text == "" {
 		return ""
 	}
 	return limitText(text, 24)

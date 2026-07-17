@@ -43,7 +43,6 @@ type ChatRequest struct {
 	AgentIdentity string
 	SessionID     uint64
 	ContextKey    string
-	MemoryEnabled bool
 	Input         map[string]any
 	Method        string
 	Host          string
@@ -106,8 +105,9 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 		return botprotocol.BuildErrorResponse(requestID, err).Payload()
 	}
 	runtimetool.WarmMountAsync(runtimetool.MountRequest{
-		Agent:   agent,
-		Gateway: s.gateway,
+		Agent:          agent,
+		Gateway:        s.gateway,
+		PreparationKey: requestID,
 	})
 	baseRunTurn := runtimechat.RunTurnRequest{
 		SessionID:  request.SessionID,
@@ -115,6 +115,10 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 		ContextKey: request.ContextKey,
 		RequestID:  requestID,
 		Input:      inputText,
+	}
+	if response := parsedInput.Content.InteractionResponse; response != nil {
+		baseRunTurn.InteractionID = response.InteractionID
+		baseRunTurn.InteractionData = response.Data
 	}
 	var (
 		normalizedParams map[string]any
@@ -153,11 +157,10 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 	})
 	contextGroup.Go("组装模型上下文", func() (currentErr error) {
 		assembled, currentErr = s.context.Assemble(ctx, runtimecontext.AssembleRequest{
-			Session:        *session,
-			Agent:          agent,
-			CategoryPrompt: runtimecontext.CategoryPrompt(ctx, agent.CateID),
-			Input:          inputText,
-			IncludeMemory:  request.MemoryEnabled,
+			Session:       *session,
+			Agent:         agent,
+			Input:         inputText,
+			IncludeMemory: agent.MemoryEnabled,
 		})
 		return currentErr
 	})
@@ -177,12 +180,19 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 	}
 	toolReferences := attachBoundUploads(mediaReferences(resolvedReferences.Media), boundUploads)
 	toolReferences = withActiveSeriesReference(ctx, *session, toolReferences)
-	modelInput := runtimereference.ModelInput(input, parsedInput, resolvedReferences.Prompt)
+	modelInput := runtimereference.ModelInput(input, parsedInput, resolvedReferences.Context)
+	if len(assembled.Context) > 0 {
+		modelInput["runtime_context"] = assembled.Context
+	}
+	if turn.InteractionResumed {
+		modelInput["runtime_event"] = map[string]any{
+			"type": "interaction_resumed",
+		}
+	}
 	execution, err := s.createExecution(ctx, requestID, executionSpec{
 		Agent:              agent,
 		Power:              power,
 		SessionID:          session.ID,
-		UserMessageID:      turn.UserMessageID,
 		AssistantMessageID: turn.AssistantMessageID,
 		Prompt:             assembled.Prompt,
 		Input:              modelInput,
@@ -192,10 +202,11 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 		Transport: modelTransport{
 			Method: request.Method, Host: request.Host, Path: request.Path, Headers: request.Headers,
 		},
-		PersistChat:     true,
-		MediaReferences: toolReferences,
-		Scope:           runtimescope.FromSession(ctx, *session),
-		RequestedAt:     requestedAt,
+		PersistChat:        true,
+		MediaReferences:    toolReferences,
+		Scope:              runtimescope.FromSession(ctx, *session),
+		RequestedAt:        requestedAt,
+		PriorKnowledgeUsed: turn.PriorKnowledgeUsed,
 	})
 	if err != nil {
 		return botprotocol.BuildErrorResponse(requestID, err).Payload()
@@ -315,15 +326,4 @@ func remainingChatTimeout(startedAt time.Time, seconds int) time.Duration {
 		return time.Millisecond
 	}
 	return remaining
-}
-
-func joinRuntimePrompt(base string, mounted string) string {
-	parts := []string{strings.TrimSpace(base), strings.TrimSpace(mounted)}
-	result := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if part != "" {
-			result = append(result, part)
-		}
-	}
-	return strings.Join(result, "\n\n")
 }

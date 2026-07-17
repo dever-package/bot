@@ -12,7 +12,7 @@ type Project struct{}
 var projectRunner = projectservice.NewService()
 
 func (Project) GetList(c *server.Context) error {
-	data, err := projectRunner.List(c.Context())
+	data, err := projectRunner.List(c.Context(), botapi.QueryUint64(c, "team_id", "teamId"))
 	return botapi.WriteJSON(c, data, err)
 }
 
@@ -26,7 +26,6 @@ func (Project) PostCreate(c *server.Context) error {
 		Description: botapi.TextFromBody(body, "description"),
 		Cover:       botapi.TextFromBody(body, "cover"),
 		TeamID:      botapi.Uint64FromBody(body, "team_id", "teamId"),
-		ReleaseID:   botapi.Uint64FromBody(body, "release_id", "releaseId"),
 	})
 	return botapi.WriteJSON(c, data, err)
 }

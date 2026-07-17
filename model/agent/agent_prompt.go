@@ -35,16 +35,3 @@ Python、Node 和 Shell 脚本必须是完整、可语法检查的源码，包�
 manifest 只保存 Dever 运行配置。manifest.config 只声明环境变量 key、name、required；manifest.mcp 必须显式声明 server 和 tools allowlist。第三方来源只能放入 references/source/，真正可执行能力必须审查后包装到 scripts/。
 
 不要把真实 cookie、token、api key、secret、私钥或验证码写入 SKILL.md、manifest、files_json、日志或回答。`
-
-func BuiltinAgentPrompt(key string) string {
-	switch key {
-	case FrontAssistantAgentKey:
-		return frontAssistantPrompt
-	case SkillInstallerAgentKey:
-		return skillInstallerPrompt
-	case SkillCreatorAgentKey:
-		return skillCreatorPrompt
-	default:
-		return ""
-	}
-}

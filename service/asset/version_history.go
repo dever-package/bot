@@ -32,6 +32,10 @@ func (s Service) ProjectVersionPage(ctx context.Context, projectID uint64, asset
 	if asset == nil {
 		return nil, fmt.Errorf("资产不存在")
 	}
+	return s.versionPage(ctx, *asset, req), nil
+}
+
+func (s Service) versionPage(ctx context.Context, asset assetmodel.Asset, req VersionPageRequest) map[string]any {
 	page, pageSize := normalizeVersionPage(req.Page, req.PageSize)
 	filter := map[string]any{"asset_id": asset.ID}
 	model := assetmodel.NewVersionModel()
@@ -53,7 +57,7 @@ func (s Service) ProjectVersionPage(ctx context.Context, projectID uint64, asset
 		"page_size": pageSize,
 		"total":     total,
 		"has_more":  int64(page*pageSize) < total,
-	}, nil
+	}
 }
 
 func (s Service) ProjectVersionDetail(ctx context.Context, projectID uint64, assetID uint64, versionID uint64) (map[string]any, error) {
@@ -61,11 +65,7 @@ func (s Service) ProjectVersionDetail(ctx context.Context, projectID uint64, ass
 	if asset == nil {
 		return nil, fmt.Errorf("资产不存在")
 	}
-	version := s.FindVersion(ctx, versionID)
-	if version == nil || version.AssetID != asset.ID {
-		return nil, fmt.Errorf("资产版本不存在")
-	}
-	return map[string]any{"version": VersionToMap(*version)}, nil
+	return s.versionDetail(ctx, *asset, versionID)
 }
 
 func (s Service) RestoreProjectVersion(ctx context.Context, req RestoreVersionRequest) (*assetmodel.Asset, *assetmodel.Version, error) {
@@ -77,33 +77,15 @@ func (s Service) RestoreProjectVersion(ctx context.Context, req RestoreVersionRe
 	if version == nil || version.AssetID != asset.ID {
 		return nil, nil, fmt.Errorf("资产版本不存在")
 	}
-	requestID := strings.TrimSpace(req.RequestID)
-	nodeKey := strings.TrimSpace(req.NodeKey)
-	if requestID == "" || nodeKey == "" {
-		return nil, nil, fmt.Errorf("恢复版本缺少请求或节点标识")
+	_, err := s.setCurrentVersion(ctx, *asset, *version)
+	if err != nil {
+		return nil, nil, err
 	}
-	return s.SaveVersion(ctx, SaveVersionRequest{
-		ProjectID:   asset.ProjectID,
-		BodyID:      asset.BodyID,
-		TeamID:      asset.TeamID,
-		FlowID:      asset.FlowID,
-		AssetCateID: asset.AssetCateID,
-		RequestID:   requestID,
-		NodeKey:     nodeKey,
-		Source: map[string]any{
-			"action":                    "restore",
-			"restored_from_version_id":  version.ID,
-			"restored_from_version":     version.Version,
-			"restored_from_request_id":  strings.TrimSpace(version.RequestID),
-			"restored_from_node_run_id": version.NodeRunID,
-			"restored_from_release_id":  version.ReleaseID,
-		},
-		Name:    asset.Name,
-		Kind:    asset.Kind,
-		Role:    asset.Role,
-		Content: jsonValue(version.Content),
-		Sort:    asset.Sort,
-	})
+	asset = s.FindProjectAsset(ctx, req.ProjectID, req.AssetID)
+	if asset == nil {
+		return nil, nil, fmt.Errorf("读取资产失败")
+	}
+	return asset, version, nil
 }
 
 func VersionSummaryToMap(row assetmodel.Version, kind string) map[string]any {

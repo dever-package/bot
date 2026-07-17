@@ -20,7 +20,7 @@ func (SkillInstall) PostRun(c *server.Context) error {
 		Method:  c.Method(),
 		Host:    c.Header("Host"),
 		Path:    c.Path(),
-		Headers: requestHeaders(c),
+		Headers: botapi.RequestHeaders(c),
 		Body:    body,
 	})
 	return c.JSONPayload(200, resp)

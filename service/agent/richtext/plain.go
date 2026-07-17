@@ -51,7 +51,23 @@ func richTextNodeText(node map[string]any) string {
 }
 
 func joinRichTextInline(value any) string {
-	return joinRichTextNodes(value, "")
+	nodes, ok := value.([]any)
+	if !ok {
+		return ""
+	}
+	var result strings.Builder
+	for _, current := range nodes {
+		node, currentOK := current.(map[string]any)
+		if !currentOK {
+			continue
+		}
+		if strings.TrimSpace(valueText(node["type"])) == "hardBreak" {
+			result.WriteByte('\n')
+			continue
+		}
+		result.WriteString(richTextNodeText(node))
+	}
+	return strings.TrimSpace(result.String())
 }
 
 func joinRichTextNodes(value any, separator string) string {

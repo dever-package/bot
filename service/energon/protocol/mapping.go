@@ -43,6 +43,10 @@ func (p MappedParam) HasInputKey(target string) bool {
 	return false
 }
 
+func (p MappedParam) IsPrompt() bool {
+	return strings.EqualFold(strings.TrimSpace(p.ParamType), "prompt")
+}
+
 type MappedInput struct {
 	Original map[string]any
 	Labels   map[string]string
@@ -112,15 +116,22 @@ func (m MappedInput) PromptInput(excludedKeys map[string]bool) map[string]any {
 		}
 		input[key] = value
 	}
+	if prompt := m.PrimaryPrompt(); prompt != "" {
+		input["prompt"] = prompt
+	}
 	return input
 }
 
 func (m MappedInput) PrimaryPrompt() string {
-	if len(m.Original) == 0 {
-		return ""
+	for _, param := range m.Params {
+		if !param.IsPrompt() {
+			continue
+		}
+		if prompt := firstText(param.Value); prompt != "" {
+			return prompt
+		}
 	}
 	return firstText(
-		m.Original["text"],
 		m.Original["prompt"],
 		m.Original["content"],
 		m.Original["input"],
@@ -130,6 +141,7 @@ func (m MappedInput) PrimaryPrompt() string {
 func (m MappedInput) PromptOptions(textTitle string) PromptOptions {
 	return PromptOptions{
 		TextTitle: textTitle,
+		MainKey:   "prompt",
 		Labels:    m.Labels,
 	}
 }

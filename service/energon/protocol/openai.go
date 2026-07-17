@@ -41,6 +41,7 @@ func buildOpenAIHistoryMessage(value any, options PromptOptions) map[string]any 
 	if value == nil {
 		return nil
 	}
+	options.MainKey = "text"
 
 	if mapped, ok := value.(map[string]any); ok {
 		role := "user"

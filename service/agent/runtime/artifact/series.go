@@ -90,6 +90,10 @@ func ensureReadySeriesMaster(ctx context.Context, artifacts []agentmodel.Artifac
 	}
 }
 
+func SeriesProfile(series agentmodel.ArtifactSeries) map[string]any {
+	return decodeMap(series.Profile)
+}
+
 func seriesName(profile map[string]any) string {
 	if value := textValue(profile["artifact_name"]); value != "" {
 		runes := []rune(strings.Join(strings.Fields(value), " "))

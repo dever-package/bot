@@ -3,11 +3,11 @@ export type AssetKind =
   | "image"
   | "audio"
   | "video"
+  | "richtext"
   | "file"
-  | "mixed"
   | string;
 export type AssetCardinality = "single" | "multiple" | "ordered" | string;
-export type AssetRole = "content" | "material" | string;
+export type AssetRole = "work" | "material" | string;
 export type CanvasContentPreview = {
   text: string;
   imageUrl: string;
@@ -69,7 +69,6 @@ export type TeamRole = {
   role_key: string;
   name: string;
   agent_id: number;
-  asset_cate_id: number;
   assignment: string;
 };
 
@@ -157,6 +156,7 @@ export type PowerParam = {
   max_files?: number;
   sort?: number;
   options?: PowerParamOption[];
+  asset_kinds?: AssetKind[];
 };
 
 export type PowerParamSource = {
@@ -306,10 +306,12 @@ export type CanvasReferenceContent = {
     | { type: "text"; text: string }
     | {
         type: "reference";
-        ref_type: "canvas_node" | "artifact";
+        ref_type: "asset";
         ref_id: number;
         label: string;
         usage?: string;
+        ref_trigger?: string;
+        ref_version_id?: number;
       }
   >;
 };

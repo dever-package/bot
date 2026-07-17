@@ -30,15 +30,14 @@ func (s embeddingService) embed(ctx context.Context, powerID uint64, text string
 	if err != nil {
 		return nil, err
 	}
+	input := energonservice.PromptInput(text)
+	input["input"] = text
 
 	resp := s.gateway.Request(ctx, energonservice.GatewayRequest{
 		RequestID: uuid.NewString(),
 		Body: map[string]any{
 			"power": power.Key,
-			"input": map[string]any{
-				"text":  text,
-				"input": text,
-			},
+			"input": input,
 			"options": map[string]any{
 				"stream": false,
 			},

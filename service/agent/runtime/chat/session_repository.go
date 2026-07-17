@@ -9,6 +9,7 @@ import (
 	deverjwt "github.com/shemic/dever/auth/jwt"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	userservice "github.com/dever-package/user/service"
 )
 
 type ownerScope struct {
@@ -41,8 +42,8 @@ func resolveSession(ctx context.Context, owner ownerScope, request SessionReques
 		"context_key": contextKey, "agent_key": agentKey,
 		"title": title, "title_source": agentmodel.TitleSourceAuto,
 		"context_summary": "", "summary_message_id": 0,
-		"active_series_id": 0,
-		"status":           agentmodel.SessionStatusActive, "message_count": 0,
+		"active_series_id": 0, "active_request_id": "",
+		"status": agentmodel.SessionStatusActive, "message_count": 0,
 		"last_message_at": now, "created_at": now,
 	}))
 	if id == 0 {
@@ -91,11 +92,43 @@ func updateSessionStatus(ctx context.Context, sessionID uint64, status int16) er
 	if session == nil {
 		return fmt.Errorf("会话不存在")
 	}
-	agentmodel.NewSessionModel().Update(ctx, map[string]any{"id": session.ID}, map[string]any{"status": status})
+	if status == agentmodel.SessionStatusArchived && sessionHasActiveWork(ctx, *session) {
+		return fmt.Errorf("当前会话仍在生成，请等待完成或先停止")
+	}
+	filter := map[string]any{"id": session.ID}
+	if status == agentmodel.SessionStatusArchived {
+		filter["active_request_id"] = ""
+	}
+	if updated := agentmodel.NewSessionModel().Update(ctx, filter, map[string]any{"status": status}); updated != 1 {
+		return fmt.Errorf("当前会话状态已变化，请重试")
+	}
 	return nil
 }
 
+func sessionHasActiveWork(ctx context.Context, session agentmodel.Session) bool {
+	if strings.TrimSpace(session.ActiveRequestID) != "" {
+		return true
+	}
+	if agentmodel.NewMessageModel().Find(ctx, map[string]any{
+		"session_id": session.ID,
+		"role":       "assistant",
+		"status":     agentmodel.MessageStatusRunning,
+	}) != nil {
+		return true
+	}
+	return agentmodel.NewArtifactJobModel().Find(ctx, map[string]any{
+		"session_id": session.ID,
+		"status": []any{
+			agentmodel.ArtifactJobStatusPending,
+			agentmodel.ArtifactJobStatusRunning,
+		},
+	}) != nil
+}
+
 func currentOwner(ctx context.Context) (ownerScope, error) {
+	if actor, ok := userservice.ActorFromContext(ctx); ok && actor.UserID > 0 {
+		return ownerScope{OwnerType: agentmodel.SessionOwnerTypeBodyUser, OwnerID: actor.UserID}, nil
+	}
 	uid, ok := deverjwt.ActiveInt64(ctx)
 	if !ok || uid <= 0 {
 		return ownerScope{}, fmt.Errorf("登录账号无效")

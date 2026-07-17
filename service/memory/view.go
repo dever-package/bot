@@ -51,12 +51,20 @@ func MemoryMap(row *memorymodel.Memory) map[string]any {
 		return map[string]any{}
 	}
 	return map[string]any{
-		"id": row.ID, "kind": row.Kind, "title": row.Title, "content": row.Content,
+		"id": row.ID, "key": row.Key, "kind": row.Kind, "title": row.Title, "content": row.Content,
 		"tags": decodeMemoryJSON(row.Tags), "importance": row.Importance, "scope": normalizeStoredMemoryScope(*row),
 		"agent_key": row.AgentKey, "context_key": row.ContextKey, "session_id": row.SessionID,
 		"source": row.Source, "confidence": row.Confidence, "status": row.Status,
-		"created_at": row.CreatedAt.Format(time.RFC3339),
+		"source_message_id": row.SourceMessageID,
+		"created_at":        row.CreatedAt.Format(time.RFC3339), "updated_at": memoryTimeText(row.UpdatedAt),
 	}
+}
+
+func memoryTimeText(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.Format(time.RFC3339)
 }
 
 func encodeMemoryJSON(value any, fallback string) string {

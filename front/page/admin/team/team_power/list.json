@@ -98,7 +98,17 @@
               "type": "show-base"
             },
             {
+              "value": "home_status",
+              "name": "首页",
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
               "value": "status",
+              "name": "状态",
               "type": "form-switch",
               "meta": {
                 "trueValue": 1,
@@ -163,7 +173,7 @@
           "stateKey": "dialog.create",
           "pageRoute": "/bot/team/team_power/update",
           "title": "新增团队能力",
-          "description": "选择当前团队可在流程和作品画布中使用的能力。未配置任何能力时表示不限制能力。",
+          "description": "选择当前团队可在工具入口、流程和项目画布中使用的能力。",
           "size": "lg",
           "footer": {
             "confirm": true,
@@ -204,7 +214,7 @@
   "data": {
     "page": {
       "title": "团队能力",
-      "description": "维护团队允许使用的能力。为空时表示该团队不限制能力。"
+      "description": "维护团队明确允许使用的能力。工具入口严格按此列表展示，运行结果由用户按需保存。"
     },
     "search": {
       "team_id": ""

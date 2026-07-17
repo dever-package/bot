@@ -8,9 +8,10 @@ import (
 )
 
 type BuiltinMethod struct {
-	Key         string `json:"key"`
-	Service     string `json:"service"`
-	Description string `json:"description"`
+	Key         string         `json:"key"`
+	Service     string         `json:"service"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
 }
 
 type BuiltinDefinition struct {
@@ -38,11 +39,25 @@ func BuiltinDefinitions() []BuiltinDefinition {
 					Key:         agentmodel.BuiltinMethodImportArticleURL,
 					Service:     agentmodel.BuiltinServiceImportArticleURL,
 					Description: "解析文章链接，返回 title/html/assets/source_url/site。",
+					Parameters: objectSchema(map[string]any{
+						"url":        stringSchema("需要解析的文章链接"),
+						"max_images": integerSchema("最多解析的图片数量；0 表示使用服务默认值"),
+					}, "url"),
 				},
 				{
 					Key:         agentmodel.BuiltinMethodImportURLResource,
 					Service:     agentmodel.BuiltinServiceImportURLResource,
 					Description: "把外部图片、视频、音频或文件链接转存为平台资源，返回上传文件信息。",
+					Parameters: objectSchema(map[string]any{
+						"rule_id":     positiveIntegerSchema("上传规则 ID"),
+						"url":         stringSchema("需要转存的外部资源链接"),
+						"name":        stringSchema("可选的资源名称"),
+						"mime":        stringSchema("可选的 MIME 类型"),
+						"kind":        stringSchema("可选的资源类型，如 image、video、audio 或 file"),
+						"biz_key":     stringSchema("可选的业务标识"),
+						"biz_name":    stringSchema("可选的业务名称"),
+						"category_id": positiveIntegerSchema("可选的资源分类 ID"),
+					}, "rule_id", "url"),
 				},
 			},
 			Content: strings.TrimSpace(`
@@ -70,6 +85,18 @@ func BuiltinByKey(key string) (BuiltinDefinition, bool) {
 		}
 	}
 	return BuiltinDefinition{}, false
+}
+
+func builtinMethodByKey(key string) (BuiltinMethod, bool) {
+	key = strings.TrimSpace(key)
+	for _, definition := range BuiltinDefinitions() {
+		for _, method := range definition.Methods {
+			if method.Key == key {
+				return method, true
+			}
+		}
+	}
+	return BuiltinMethod{}, false
 }
 
 func BuiltinContent(entry Entry) string {
@@ -117,7 +144,41 @@ func manifestBuiltinMethods(manifest string) []BuiltinMethod {
 		if method.Key == "" || method.Service == "" {
 			continue
 		}
+		method.Parameters, _ = mapped["parameters"].(map[string]any)
+		if len(method.Parameters) == 0 {
+			if builtin, exists := builtinMethodByKey(method.Key); exists {
+				method.Parameters = builtin.Parameters
+			}
+		}
 		methods = append(methods, method)
 	}
 	return methods
+}
+
+func objectSchema(properties map[string]any, required ...string) map[string]any {
+	result := map[string]any{
+		"type":                 "object",
+		"properties":           properties,
+		"additionalProperties": false,
+	}
+	if len(required) > 0 {
+		values := make([]any, 0, len(required))
+		for _, key := range required {
+			values = append(values, key)
+		}
+		result["required"] = values
+	}
+	return result
+}
+
+func stringSchema(description string) map[string]any {
+	return map[string]any{"type": "string", "description": description}
+}
+
+func integerSchema(description string) map[string]any {
+	return map[string]any{"type": "integer", "description": description, "minimum": 0}
+}
+
+func positiveIntegerSchema(description string) map[string]any {
+	return map[string]any{"type": "integer", "description": description, "minimum": 1}
 }

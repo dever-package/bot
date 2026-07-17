@@ -101,7 +101,6 @@ export async function loadAgentChatSession(
       title: scope.title || "新会话",
       limit: scope.limit || 10,
       last_message_id: scope.lastMessageID || undefined,
-      memory_enabled: false,
     },
   );
   return {
@@ -137,7 +136,6 @@ export async function loadAgentChatSessionState(
     agent_key: scope.agentKey,
     context_key: scope.contextKey,
     session_only: true,
-    memory_enabled: false,
   });
   return normalizeSession(data.session);
 }
@@ -307,7 +305,8 @@ function normalizeInputParams(value: unknown): ReferenceComposerParam[] {
       }
       const id = Number(row.id || 0);
       const key = textValue(row.key);
-      if (!id || !key || key === "text") {
+      const type = textValue(row.type).toLowerCase();
+      if (!id || !key || type === "prompt") {
         return null;
       }
       const options = Array.isArray(row.options)
@@ -334,7 +333,7 @@ function normalizeInputParams(value: unknown): ReferenceComposerParam[] {
         name: textValue(row.name || row.key),
         key,
         icon: textValue(row.icon) || undefined,
-        type: textValue(row.type) || "input",
+        type: type || "input",
         usage: Number(row.usage || 1),
         value_type: textValue(row.value_type) || "string",
         default_value: textValue(row.default_value) || undefined,

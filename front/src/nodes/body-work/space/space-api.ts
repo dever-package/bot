@@ -405,7 +405,7 @@ function canvasResultPayload(input: SaveSpaceCanvasResultInput) {
 }
 
 async function saveSpaceCanvasResult(
-  role: "material" | "content",
+  role: "material" | "work",
   input: SaveSpaceCanvasResultInput,
 ): Promise<ProjectAsset> {
   const result = await request(joinSiteApi("project/save_asset"), "post", {
@@ -431,7 +431,7 @@ export function saveSpaceCanvasMaterial(
 export function saveSpaceCanvasContent(
   input: SaveSpaceCanvasResultInput,
 ): Promise<ProjectAsset> {
-  return saveSpaceCanvasResult("content", input);
+  return saveSpaceCanvasResult("work", input);
 }
 
 export async function saveSpaceCanvas(

@@ -6,240 +6,226 @@ import (
 	"strings"
 	"time"
 
+	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeartifact "github.com/dever-package/bot/service/agent/runtime/artifact"
 	runtimedocument "github.com/dever-package/bot/service/agent/runtime/document"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	frontstream "github.com/dever-package/front/service/stream"
+	"github.com/shemic/dever/orm"
 )
 
-func (s Service) prepareDocumentModelStep(ctx context.Context, state *runState, result modelStepResult) error {
-	started := false
-	if state.documentID == 0 {
-		call, found := startDocumentCall(result.ToolCalls)
-		if !found {
-			return nil
+type persistedDocumentArtifact struct {
+	call       botprotocol.ToolCall
+	definition runtimeprovider.Definition
+	block      agentmodel.DocumentBlock
+	batch      toolArtifactBatch
+	job        agentmodel.ArtifactJob
+}
+
+type persistedDocumentBlock struct {
+	block         agentmodel.DocumentBlock
+	artifactIndex int
+}
+
+func (s Service) executeComposeDocumentStep(
+	ctx context.Context,
+	state *runState,
+	call botprotocol.ToolCall,
+) toolStepResult {
+	arguments, err := botprotocol.ToolCallArguments(call)
+	if err != nil {
+		return composeDocumentError(call, err)
+	}
+	artifactTools := state.execution.registry.DefinitionsByKind("image", "video", "audio", "file")
+	input, err := runtimeprovider.ParseComposeDocument(arguments, artifactTools)
+	if err != nil {
+		return composeDocumentError(call, err)
+	}
+	mediaDefinitions := make(map[int]runtimeprovider.Definition)
+	for index, current := range input.Blocks {
+		if current.Type == "text" {
+			continue
 		}
-		arguments, err := botprotocol.ToolCallArguments(call)
-		if err != nil {
-			return fmt.Errorf("解析图文文档参数失败: %w", err)
+		definition, exists := state.execution.registry.Definition(current.Tool)
+		if !exists || !runtimeartifact.IsSupportedKind(definition.Kind) {
+			return composeDocumentError(call, fmt.Errorf("图文素材工具已不可用: %s", current.Tool))
 		}
-		document, err := runtimedocument.NewService().Start(ctx, runtimedocument.StartRequest{
+		if err = state.execution.registry.ValidateArguments(current.Tool, current.Arguments); err != nil {
+			return composeDocumentError(call, fmt.Errorf("第 %d 个内容块参数无效: %w", index+1, err))
+		}
+		mediaDefinitions[index] = definition
+	}
+	intro := strings.TrimSpace(state.pendingModelText)
+	if intro == "" {
+		intro = runtimeprovider.ComposeDocumentIntro(input.Title)
+	}
+
+	documents := runtimedocument.NewService()
+	document := agentmodel.Document{}
+	blocks := make([]persistedDocumentBlock, 0, len(input.Blocks))
+	artifacts := make([]persistedDocumentArtifact, 0, len(mediaDefinitions))
+	err = orm.Transaction(ctx, func(tx context.Context) error {
+		tx = runtimedocument.DeferStream(tx)
+		document, err = documents.Start(tx, runtimedocument.StartRequest{
 			SessionID: state.execution.sessionID,
 			MessageID: state.execution.assistantMessageID,
 			RunID:     state.execution.runID,
-			Title:     strings.TrimSpace(botprotocol.AsText(arguments["title"])),
+			Title:     input.Title,
 			Meta: map[string]any{
-				"purpose": strings.TrimSpace(botprotocol.AsText(arguments["purpose"])),
-				"intro":   strings.TrimSpace(result.Text),
+				"purpose": input.Purpose,
+				"source":  runtimeprovider.ComposeDocumentToolName,
+				"intro":   intro,
 			},
 		})
 		if err != nil {
 			return err
 		}
-		state.documentID = document.ID
-		started = true
-		_ = s.writeExecutionOutput(ctx, state.execution, map[string]any{
-			"event":    "document_start",
-			"document": s.documentPayload(ctx, document.ID),
-		})
-	}
-	if started {
-		return nil
-	}
-
-	if state.documentTextStep >= state.modelStep || strings.TrimSpace(result.Text) == "" {
-		return nil
-	}
-	block, err := runtimedocument.NewService().AppendText(ctx, runtimedocument.AppendTextRequest{
-		DocumentID: state.documentID,
-		SourceKey:  fmt.Sprintf("model:%d", state.modelStep),
-		Text:       result.Text,
-		Meta:       map[string]any{"model_step": state.modelStep},
-	})
-	if err != nil {
-		return err
-	}
-	state.documentTextStep = state.modelStep
-	if block.ID > 0 {
-		_ = s.writeExecutionOutput(ctx, state.execution, map[string]any{
-			"event":       "block_commit",
-			"document_id": state.documentID,
-			"block":       runtimedocument.BuildBlockPayload(block, nil),
-		})
-	}
-	return nil
-}
-
-func startDocumentCall(calls []botprotocol.ToolCall) (botprotocol.ToolCall, bool) {
-	for _, call := range calls {
-		if strings.EqualFold(strings.TrimSpace(call.Name), runtimeprovider.StartDocumentToolName) {
-			return call, true
-		}
-	}
-	return botprotocol.ToolCall{}, false
-}
-
-// Document calls are kept in provider order so one model response can enqueue
-// several adjacent media blocks without another LLM round trip. Start is moved
-// to the front and finish to the end because both delimit the document.
-func documentStepToolCalls(documentID uint64, calls []botprotocol.ToolCall) []botprotocol.ToolCall {
-	if len(calls) <= 1 {
-		return calls
-	}
-	result := make([]botprotocol.ToolCall, 0, len(calls))
-	if documentID == 0 {
-		if start, found := startDocumentCall(calls); found {
-			result = append(result, start)
-			for _, call := range calls {
-				if strings.EqualFold(strings.TrimSpace(call.ID), strings.TrimSpace(start.ID)) {
-					continue
+		for index, current := range input.Blocks {
+			sourceKey := fmt.Sprintf("compose:block:%d", index+1)
+			if current.Type == "text" {
+				block, appendErr := documents.AppendText(tx, runtimedocument.AppendTextRequest{
+					DocumentID: document.ID,
+					SourceKey:  sourceKey,
+					Text:       current.Text,
+					Meta:       map[string]any{"compose_index": index + 1},
+				})
+				if appendErr != nil {
+					return appendErr
 				}
-				if !strings.EqualFold(strings.TrimSpace(call.Name), runtimeprovider.FinishDocumentToolName) {
-					result = append(result, call)
+				if block.ID > 0 {
+					blocks = append(blocks, persistedDocumentBlock{block: block, artifactIndex: -1})
 				}
+				continue
 			}
-			for _, call := range calls {
-				if strings.EqualFold(strings.TrimSpace(call.Name), runtimeprovider.FinishDocumentToolName) {
-					result = append(result, call)
-				}
-			}
-			return result
-		}
-	}
-	for _, call := range calls {
-		if !strings.EqualFold(strings.TrimSpace(call.Name), runtimeprovider.FinishDocumentToolName) {
-			result = append(result, call)
-		}
-	}
-	for _, call := range calls {
-		if strings.EqualFold(strings.TrimSpace(call.Name), runtimeprovider.FinishDocumentToolName) {
-			result = append(result, call)
-		}
-	}
-	return result
-}
 
-func (s Service) scheduleDocumentArtifact(
-	ctx context.Context,
-	state *runState,
-	call botprotocol.ToolCall,
-	definition runtimeprovider.Definition,
-) toolStepResult {
-	arguments, err := botprotocol.ToolCallArguments(call)
-	if err != nil {
-		return documentArtifactError(call, definition, err, nil)
-	}
-	documents := runtimedocument.NewService()
-	block, err := documents.AppendMedia(ctx, runtimedocument.AppendMediaRequest{
-		DocumentID: state.documentID,
-		SourceKey:  "tool:" + strings.TrimSpace(call.ID),
-		Kind:       definition.Kind,
-		Meta: map[string]any{
-			"tool_name":  call.Name,
-			"tool_title": toolTitle(definition, call.Name),
-			"arguments":  arguments,
-		},
+			definition := mediaDefinitions[index]
+			artifactCall := botprotocol.ToolCall{
+				ID:        fmt.Sprintf("compose:%d:%d", state.execution.runID, index+1),
+				Type:      "function",
+				Name:      current.Tool,
+				Arguments: encodeJSON(current.Arguments, "{}"),
+			}
+			block, appendErr := documents.AppendMedia(tx, runtimedocument.AppendMediaRequest{
+				DocumentID: document.ID,
+				SourceKey:  sourceKey,
+				Kind:       definition.Kind,
+				Meta: map[string]any{
+					"compose_index": index + 1,
+					"tool_name":     current.Tool,
+					"tool_title":    toolTitle(definition, current.Tool),
+					"arguments":     current.Arguments,
+				},
+			})
+			if appendErr != nil {
+				return appendErr
+			}
+			batch, batchErr := s.beginToolArtifactBatch(tx, state.execution, artifactCall, definition, document.ID, block.ID)
+			if batchErr != nil {
+				return batchErr
+			}
+			job, enqueueErr := s.enqueueArtifactJob(tx, state, artifactCall, definition, document.ID, block.ID, true)
+			if enqueueErr != nil {
+				return enqueueErr
+			}
+			artifacts = append(artifacts, persistedDocumentArtifact{
+				call: artifactCall, definition: definition, block: block, batch: batch, job: job,
+			})
+			blocks = append(blocks, persistedDocumentBlock{block: block, artifactIndex: len(artifacts) - 1})
+		}
+		return nil
 	})
 	if err != nil {
-		return documentArtifactError(call, definition, err, nil)
+		return composeDocumentError(call, err)
 	}
-	batch, err := s.beginToolArtifactBatch(ctx, state.execution, call, definition, state.documentID, block.ID)
-	if err != nil {
-		_, _ = documents.MarkBlockFailed(ctx, block.ID, err.Error())
-		return documentArtifactError(call, definition, err, map[string]any{
-			"document_id": state.documentID,
-			"block_id":    block.ID,
-		})
-	}
-	started := batch.startedOutput(ctx)
-	if started == nil {
-		started = map[string]any{}
-	}
-	started["document_id"] = state.documentID
-	started["block_id"] = block.ID
-	documents.Publish(ctx, state.documentID, "media_block_append", map[string]any{
-		"block":     runtimedocument.BuildBlockPayload(block, nil),
-		"artifacts": started["artifacts"],
-	})
+	state.documentID = document.ID
+	s.resetVisibleOutput(ctx, state)
+	emptyPayload := documents.PayloadFromSnapshot(runtimedocument.Snapshot{Document: document}, nil)
+	documents.Publish(ctx, document.ID, "document_start", map[string]any{"document": emptyPayload})
 	_ = s.writeExecutionOutput(ctx, state.execution, map[string]any{
-		"event":       "media_block_append",
-		"document_id": state.documentID,
-		"block":       runtimedocument.BuildBlockPayload(block, nil),
-		"artifacts":   started["artifacts"],
-		"meta":        toolEventMeta(call, definition, "running", started),
+		"event":    "document_start",
+		"document": emptyPayload,
 	})
 
-	job, err := runtimeartifact.NewService().EnqueueJob(ctx, runtimeartifact.JobRequest{
-		DocumentID: state.documentID,
-		BlockID:    block.ID,
-		SessionID:  state.execution.sessionID,
-		MessageID:  state.execution.assistantMessageID,
-		RunID:      state.execution.runID,
-		Call:       call,
-		Kind:       definition.Kind,
-		Arguments:  arguments,
-		Snapshot: runtimeartifact.JobSnapshot{
-			Agent: state.execution.agent,
-			Scope: state.execution.scope,
-			Transport: runtimeartifact.JobTransport{
-				Method: state.execution.transport.Method,
-				Host:   state.execution.transport.Host,
-				Path:   state.execution.transport.Path,
-			},
-			MediaReferences: append([]runtimeprovider.MediaReference(nil), state.execution.mediaReferences...),
-		},
-	})
-	if err != nil {
-		batch.fail(ctx, err.Error())
-		_, _ = documents.MarkBlockFailed(ctx, block.ID, err.Error())
-		return documentArtifactError(call, definition, err, map[string]any{
-			"document_id": state.documentID,
-			"block_id":    block.ID,
-			"artifacts":   batch.startedOutput(ctx)["artifacts"],
+	jobs := make([]map[string]any, 0, len(artifacts))
+	artifactService := runtimeartifact.NewService()
+	for _, persisted := range blocks {
+		blockPayload := runtimedocument.BuildBlockPayload(persisted.block, nil)
+		if persisted.artifactIndex < 0 {
+			documents.Publish(ctx, document.ID, "block_commit", map[string]any{"block": blockPayload})
+			_ = s.writeExecutionOutput(ctx, state.execution, map[string]any{
+				"event": "block_commit", "document_id": document.ID, "block": blockPayload,
+			})
+			continue
+		}
+		artifact := artifacts[persisted.artifactIndex]
+		started := artifact.batch.startedOutput(ctx)
+		if started == nil {
+			started = map[string]any{}
+		}
+		started["document_id"] = document.ID
+		started["block_id"] = artifact.block.ID
+		documents.Publish(ctx, document.ID, "media_block_append", map[string]any{
+			"block": blockPayload, "artifacts": started["artifacts"],
 		})
+		_ = s.writeExecutionOutput(ctx, state.execution, map[string]any{
+			"event":       "media_block_append",
+			"document_id": document.ID,
+			"block":       blockPayload,
+			"artifacts":   started["artifacts"],
+			"meta":        toolEventMeta(artifact.call, artifact.definition, "running", started),
+		})
+		jobs = append(jobs, map[string]any{
+			"job_id": artifact.job.ID, "block_id": artifact.block.ID,
+			"kind": artifact.definition.Kind, "status": "pending",
+		})
+	}
+	if len(artifacts) > 0 {
+		artifactService.DispatchJob(artifacts[0].job.ID)
 	}
 
 	content := map[string]any{
-		"document_id": state.documentID,
-		"block_id":    block.ID,
-		"job_id":      job.ID,
-		"status":      "generating",
+		"document_id":   document.ID,
+		"block_count":   len(input.Blocks),
+		"pending_jobs":  len(jobs),
+		"failed_blocks": 0,
+		"jobs":          jobs,
 	}
 	result := runtimeprovider.Result{
-		Text:        "下一轮直接输出下一段可发布正文；不要说明素材状态、计划或进度，也不要等待素材完成。",
 		Content:     content,
-		ModelResult: content,
+		ModelResult: map[string]any{"document_id": document.ID, "submitted": true},
+		Terminal:    true,
 	}
 	return toolStepResult{
-		result:  result,
-		content: result.ModelContent(),
-		typeKey: "tool",
-		title:   "后台生成素材: " + toolTitle(definition, call.Name),
-		status:  stepStatusSuccess,
-		payload: map[string]any{
-			"tool_call": firstToolCallValue(call),
-			"output":    content,
-			"artifacts": started["artifacts"],
-		},
+		result:      result,
+		receiptable: true,
+		content:     result.ModelContent(),
+		typeKey:     "document",
+		title:       "提交完整图文",
+		status:      stepStatusSuccess,
+		payload:     map[string]any{"tool_call": firstToolCallValue(call), "output": content},
 	}
 }
 
-func documentArtifactError(call botprotocol.ToolCall, definition runtimeprovider.Definition, err error, output map[string]any) toolStepResult {
-	if output == nil {
-		output = map[string]any{}
-	}
+func (s Service) resetVisibleOutput(ctx context.Context, state *runState) {
+	state.lastText = ""
+	state.pendingModelText = ""
+	_ = s.writeExecutionOutput(ctx, state.execution, map[string]any{
+		"event": "reset",
+		"text":  "",
+	})
+}
+
+func composeDocumentError(call botprotocol.ToolCall, err error) toolStepResult {
 	return toolStepResult{
-		err:     err,
-		content: toolErrorContent(toolFailureText(definition, err)),
-		typeKey: "tool",
-		title:   "后台生成素材: " + toolTitle(definition, call.Name),
-		status:  stepStatusWarning,
-		payload: map[string]any{
-			"tool_call": firstToolCallValue(call),
-			"output":    output,
-			"error":     err.Error(),
-		},
+		result:      runtimeprovider.Result{},
+		err:         err,
+		receiptable: true,
+		content:     toolErrorContent(err.Error()),
+		typeKey:     "document",
+		title:       "提交完整图文",
+		status:      stepStatusWarning,
+		payload:     map[string]any{"tool_call": firstToolCallValue(call), "error": err.Error()},
 	}
 }
 

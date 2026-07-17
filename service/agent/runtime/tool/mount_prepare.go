@@ -71,7 +71,11 @@ func WarmMount(ctx context.Context, request MountRequest) {
 // The durable worker may outlive that request and should still reuse the
 // preparation result instead of loading knowledge, skills and powers again.
 func WarmMountAsync(request MountRequest) {
-	mountWarmExecutor.Submit(mountPreparationKey(request.Agent), "预热智能体工具", func() {
+	cacheKey := mountPreparationKey(request)
+	if cacheKey == "" {
+		return
+	}
+	mountWarmExecutor.Submit(cacheKey, "预热智能体工具", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), mountWarmTimeout)
 		defer cancel()
 		WarmMount(ctx, request)
@@ -79,7 +83,10 @@ func WarmMountAsync(request MountRequest) {
 }
 
 func prepareMount(ctx context.Context, request MountRequest) (mountPreparation, error) {
-	cacheKey := mountPreparationKey(request.Agent)
+	cacheKey := mountPreparationKey(request)
+	if cacheKey == "" {
+		return loadMountPreparationData(ctx, request)
+	}
 	for {
 		if prepared, exists := loadMountPreparation(cacheKey); exists {
 			return prepared, nil
@@ -134,8 +141,13 @@ func loadMountPreparationData(ctx context.Context, request MountRequest) (mountP
 	return prepared, nil
 }
 
-func mountPreparationKey(agent agentmodel.Agent) string {
-	return fmt.Sprintf("%d:%d:%d:%d:%d", agent.ID, agent.LLMPowerID, agent.PowerCateID, agent.KnowledgeCateID, agent.SkillPackID)
+func mountPreparationKey(request MountRequest) string {
+	key := strings.TrimSpace(request.PreparationKey)
+	if key == "" {
+		return ""
+	}
+	agent := request.Agent
+	return fmt.Sprintf("%s:%d:%d:%d:%d:%d", key, agent.ID, agent.LLMPowerID, agent.PowerCateID, agent.KnowledgeCateID, agent.SkillPackID)
 }
 
 func mountPreparationReusable(prepared mountPreparation) bool {

@@ -166,7 +166,7 @@ func rhapiPromptExcludedKeys(mapped botprotocol.MappedInput) map[string]bool {
 	for key := range mapped.NativeBody() {
 		keys[key] = true
 	}
-	delete(keys, "text")
+	delete(keys, "prompt")
 	for _, param := range mapped.Params {
 		if rhapiIsPromptNativeKey(param.NativeKey) {
 			continue
@@ -183,12 +183,12 @@ func rhapiPromptExcludedKeys(mapped botprotocol.MappedInput) map[string]bool {
 
 func rhapiPromptInput(mapped botprotocol.MappedInput, excludedKeys map[string]bool) map[string]any {
 	input := mapped.PromptInput(excludedKeys)
-	if rhapiHasValue(input["text"]) {
+	if rhapiHasValue(input["prompt"]) {
 		return input
 	}
 
 	for _, param := range mapped.Params {
-		if !rhapiIsPromptNativeKey(param.NativeKey) {
+		if !param.IsPrompt() {
 			continue
 		}
 		key := param.FirstInputKey()
@@ -200,7 +200,7 @@ func rhapiPromptInput(mapped botprotocol.MappedInput, excludedKeys map[string]bo
 			continue
 		}
 		delete(input, key)
-		input["text"] = value
+		input["prompt"] = value
 		return input
 	}
 	return input

@@ -34,6 +34,9 @@ func (AgentHook) ProviderBeforeSaveAgent(c *server.Context, params []any) any {
 	normalizeOptionalAgentPowerCate(c, record, partial)
 	normalizeOptionalAgentKnowledgeCate(c, record, partial)
 	normalizeOptionalAgentSkillPack(c, record, partial)
+	if shouldNormalizeField(record, "memory_enabled", partial) {
+		record["memory_enabled"] = util.ToBool(record["memory_enabled"])
+	}
 	defaultInt16FieldOnCreateOrPresent(record, "status", defaultAgentStatus, partial)
 	defaultIntFieldOnCreateOrPresent(record, "sort", defaultAgentSort, partial)
 	if shouldNormalizeField(record, "temperature", partial) {
@@ -44,6 +47,9 @@ func (AgentHook) ProviderBeforeSaveAgent(c *server.Context, params []any) any {
 	}
 	if shouldNormalizeField(record, "max_auto_steps", partial) {
 		record["max_auto_steps"] = normalizeNonNegativeInt(record["max_auto_steps"], defaultAgentMaxAutoSteps)
+	}
+	if shouldNormalizeField(record, "max_output_tokens", partial) {
+		record["max_output_tokens"] = normalizeAgentMaxOutputTokens(record["max_output_tokens"])
 	}
 	if rawParams, exists := record["params"]; exists {
 		record["params"] = normalizeAgentParamRows(c, util.ToUint64(record["id"]), rawParams)
@@ -62,7 +68,6 @@ func (AgentHook) ProviderBeforeSaveAgentCate(_ *server.Context, params []any) an
 	}
 	partial := isPartialAgentRecord(record)
 	trimStringField(record, "name", partial)
-	trimStringField(record, "prompt", partial)
 	defaultInt16FieldOnCreateOrPresent(record, "status", defaultAgentStatus, partial)
 	defaultIntFieldOnCreateOrPresent(record, "sort", defaultAgentSort, partial)
 	return record
@@ -89,7 +94,6 @@ func ensureBaseAgentCate(ctx context.Context, id uint64, name string, sort int) 
 	model.Insert(ctx, map[string]any{
 		"id":     id,
 		"name":   name,
-		"prompt": "",
 		"status": defaultAgentStatus,
 		"sort":   sort,
 	})
@@ -103,31 +107,26 @@ func ensureBuiltinAgent(ctx context.Context, id uint64, key string) {
 
 	model := agentmodel.NewAgentModel()
 	if existing := model.Find(ctx, map[string]any{"key": key}); existing != nil {
-		record := builtinAgentUpdateRecord(key, existing.Prompt)
-		model.Update(ctx, map[string]any{"id": existing.ID}, record)
+		model.Update(ctx, map[string]any{"id": existing.ID}, builtinAgentUpdateRecord())
 		return
 	}
 
-	record := builtinAgentUpdateRecord(key, "")
+	record := builtinAgentUpdateRecord()
 	record["key"] = key
 	if existing := model.Find(ctx, map[string]any{"id": id}); existing != nil {
 		if canUseBuiltinAgentID(existing, name) {
-			record = builtinAgentUpdateRecord(key, existing.Prompt)
+			record = builtinAgentUpdateRecord()
 			record["key"] = key
 			model.Update(ctx, map[string]any{"id": id}, record)
 		}
 	}
 }
 
-func builtinAgentUpdateRecord(key string, currentPrompt string) map[string]any {
-	record := map[string]any{
+func builtinAgentUpdateRecord() map[string]any {
+	return map[string]any{
 		"kind":    agentmodel.AgentKindInternal,
 		"cate_id": agentmodel.SystemAgentCateID,
 	}
-	if strings.TrimSpace(currentPrompt) == "" {
-		record["prompt"] = agentmodel.BuiltinAgentPrompt(key)
-	}
-	return record
 }
 
 func builtinAgentNameForKey(key string) (string, bool) {
@@ -386,6 +385,14 @@ func normalizeAgentTemperature(value any) float64 {
 		panicAgentField("form.temperature", "温度不能大于 2。")
 	}
 	return temperature
+}
+
+func normalizeAgentMaxOutputTokens(value any) int {
+	tokens := normalizeNonNegativeInt(value, defaultAgentMaxOutputTokens)
+	if tokens > agentmodel.MaxAgentOutputTokens {
+		panicAgentField("form.max_output_tokens", "单次模型最大输出 Token 数不能超过 131072。")
+	}
+	return tokens
 }
 
 func validateAgentLLMPower(c *server.Context, powerID uint64) {

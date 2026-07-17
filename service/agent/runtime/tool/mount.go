@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 
 	"github.com/shemic/dever/server"
@@ -19,6 +18,7 @@ import (
 type MountRequest struct {
 	Agent          agentmodel.Agent
 	Gateway        energonservice.GatewayService
+	PreparationKey string
 	References     []runtimeprovider.MediaReference
 	EnableDocument bool
 	Method         string
@@ -30,7 +30,6 @@ type MountRequest struct {
 
 type MountResult struct {
 	Registry *Registry
-	Prompt   string
 	Warnings []string
 	cleanup  func()
 }
@@ -48,32 +47,18 @@ func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
 	}
 	tools := []runtimeprovider.Tool{
 		runtimeprovider.AskUserTool(),
-		runtimeprovider.FinishResponseTool(),
 		runtimeprovider.PresentSuggestionsTool(),
-	}
-	if request.EnableDocument {
-		tools = append(tools,
-			runtimeprovider.StartDocumentTool(),
-			runtimeprovider.FinishDocumentTool(),
-		)
 	}
 	registry, err := NewRegistry(tools...)
 	if err != nil {
 		return MountResult{}, err
 	}
 	result := MountResult{Registry: registry}
-	prompts := make([]string, 0, 3)
-	if request.EnableDocument {
-		prompts = append(prompts, runtimeprovider.StartDocumentPrompt)
-	}
 
 	if len(prepared.knowledgeBases) > 0 {
-		knowledgeTools, knowledgePrompt := runtimeprovider.KnowledgeTools(prepared.knowledgeBases)
+		knowledgeTools := runtimeprovider.KnowledgeTools(prepared.knowledgeBases)
 		if err := registry.Add(knowledgeTools...); err != nil {
 			return MountResult{}, err
-		}
-		if strings.TrimSpace(knowledgePrompt) != "" {
-			prompts = append(prompts, knowledgePrompt)
 		}
 	}
 
@@ -87,7 +72,7 @@ func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
 		result.cleanup = func() {
 			cleanupOnce.Do(func() { _ = os.RemoveAll(tempRoot) })
 		}
-		tools, prompt := runtimeprovider.SkillTools(prepared.skillEntries, skillLimits(prepared.skillConfig), request.Server, runtimeprovider.SkillRuntime{
+		tools := runtimeprovider.SkillTools(prepared.skillEntries, skillLimits(prepared.skillConfig), request.Server, runtimeprovider.SkillRuntime{
 			TempRoot: tempRoot,
 			Sandbox:  SandboxConfig(prepared.skillConfig),
 		})
@@ -95,13 +80,16 @@ func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
 			result.Close()
 			return MountResult{}, err
 		}
-		if strings.TrimSpace(prompt) != "" {
-			prompts = append(prompts, prompt)
-		}
 	}
 
 	warnings := mountPowerTools(request, registry, prepared.powerCandidates)
-	result.Prompt = strings.Join(prompts, "\n\n")
+	artifactTools := registry.DefinitionsByKind("image", "video", "audio", "file")
+	if request.EnableDocument && len(artifactTools) > 0 {
+		if err := registry.Add(runtimeprovider.ComposeDocumentTool(artifactTools)); err != nil {
+			result.Close()
+			return MountResult{}, err
+		}
+	}
 	result.Warnings = warnings
 	return result, nil
 }
@@ -128,11 +116,7 @@ func mountPowerTools(request MountRequest, registry *Registry, candidates []powe
 }
 
 func runtimeConfig(ctx context.Context) agentmodel.RuntimeConfig {
-	config := agentmodel.DefaultRuntimeConfig()
-	if row := agentmodel.NewRuntimeConfigModel().Find(ctx, map[string]any{"id": agentmodel.DefaultRuntimeConfigID}); row != nil {
-		config = runtimeconfig.WithDefaults(*row)
-	}
-	return config
+	return runtimeconfig.Load(ctx)
 }
 
 func skillLimits(config agentmodel.RuntimeConfig) agentskill.Limits {

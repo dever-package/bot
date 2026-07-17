@@ -255,6 +255,7 @@ func teamWorkspacePayload(team teammodel.Team) map[string]any {
 		"name":               team.Name,
 		"description":        team.Description,
 		"config":             jsonMap(team.Config),
+		"project_enabled":    normalizeProjectEnabled(team.ProjectEnabled),
 		"status":             team.Status,
 		"publish_status":     publishStatus,
 		"current_release_id": team.CurrentReleaseID,
@@ -266,31 +267,38 @@ func teamWorkspacePayload(team teammodel.Team) map[string]any {
 
 func teamReleasePayload(team teammodel.Team) GraphTeam {
 	return GraphTeam{
-		ID:          team.ID,
-		CateID:      team.CateID,
-		Name:        team.Name,
-		Description: team.Description,
-		Config:      jsonMap(team.Config),
-		Status:      team.Status,
-		Sort:        team.Sort,
+		ID:             team.ID,
+		CateID:         team.CateID,
+		Name:           team.Name,
+		Description:    team.Description,
+		Config:         jsonMap(team.Config),
+		ProjectEnabled: normalizeProjectEnabled(team.ProjectEnabled),
+		Status:         team.Status,
+		Sort:           team.Sort,
 	}
+}
+
+func normalizeProjectEnabled(value int16) int16 {
+	if value == teammodel.StatusDisabled {
+		return teammodel.StatusDisabled
+	}
+	return teammodel.StatusEnabled
 }
 
 func rolePayloads(roles []teammodel.Role) []GraphRole {
 	result := make([]GraphRole, 0, len(roles))
 	for _, role := range roles {
 		result = append(result, GraphRole{
-			ID:          role.ID,
-			TeamID:      role.TeamID,
-			RoleType:    role.RoleType,
-			RoleKey:     role.RoleKey,
-			Name:        role.Name,
-			AgentID:     role.AgentID,
-			AssetCateID: role.AssetCateID,
-			Assignment:  role.Assignment,
-			Config:      jsonMap(role.Config),
-			Status:      role.Status,
-			Sort:        role.Sort,
+			ID:         role.ID,
+			TeamID:     role.TeamID,
+			RoleType:   role.RoleType,
+			RoleKey:    role.RoleKey,
+			Name:       role.Name,
+			AgentID:    role.AgentID,
+			Assignment: role.Assignment,
+			Config:     jsonMap(role.Config),
+			Status:     role.Status,
+			Sort:       role.Sort,
 		})
 	}
 	return result
@@ -316,15 +324,23 @@ func teamPowerPayloads(rows []teammodel.TeamPower) []GraphTeamPower {
 	result := make([]GraphTeamPower, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, GraphTeamPower{
-			ID:      row.ID,
-			TeamID:  row.TeamID,
-			PowerID: row.PowerID,
-			Config:  jsonMap(row.Config),
-			Status:  row.Status,
-			Sort:    row.Sort,
+			ID:         row.ID,
+			TeamID:     row.TeamID,
+			PowerID:    row.PowerID,
+			Config:     jsonMap(row.Config),
+			HomeStatus: normalizeTeamPowerHomeStatus(row.HomeStatus),
+			Status:     row.Status,
+			Sort:       row.Sort,
 		})
 	}
 	return result
+}
+
+func normalizeTeamPowerHomeStatus(value int16) int16 {
+	if value == teammodel.StatusDisabled {
+		return teammodel.StatusDisabled
+	}
+	return teammodel.StatusEnabled
 }
 
 func scopedPowerOptions(powers []PowerOption, teamPowers []teammodel.TeamPower) []PowerOption {

@@ -1,0 +1,123 @@
+{
+  "page": {
+    "name": "登录链接编辑",
+    "parent": "bot/body/config/set",
+    "type": 2,
+    "auth": [
+      {
+        "key": "bot/body/link/create",
+        "name": "登录链接新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/body/link/update",
+        "name": "登录链接编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "name": "名称",
+        "placeholder": "例如：产品文档",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "名称不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "name": "链接地址",
+        "placeholder": "https://example.com/docs",
+        "value": "form.url",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "链接地址不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-select",
+        "name": "打开方式",
+        "value": "form.target",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[220px]"
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "状态",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      },
+      {
+        "type": "form-number",
+        "name": "排序",
+        "value": "form.sort",
+        "mode": "form",
+        "info": "数值越小越靠前。",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[180px]"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "id": 0,
+      "name": "",
+      "url": "",
+      "target": "_self",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}

@@ -116,12 +116,11 @@ func (s Service) executeStandaloneRole(ctx context.Context, run teammodel.Run, t
 	}
 	flow := teammodel.Flow{Name: "角色"}
 	node := teammodel.FlowNode{
-		Name:        role.Name,
-		Type:        teammodel.NodeTypeRole,
-		RoleID:      role.ID,
-		RoleKey:     role.RoleKey,
-		AgentID:     role.AgentID,
-		AssetCateID: role.AssetCateID,
+		Name:    role.Name,
+		Type:    teammodel.NodeTypeRole,
+		RoleID:  role.ID,
+		RoleKey: role.RoleKey,
+		AgentID: role.AgentID,
 	}
 	executor := resolvedNodeAgent{AgentID: role.AgentID, Role: &role}
 	goal := firstText(input["goal"], input["task"], input["prompt"], role.Name)
@@ -210,7 +209,6 @@ func (s Service) writeStandaloneRoleEvent(ctx context.Context, run teammodel.Run
 	fields["role_name"] = role.Name
 	fields["role_type"] = role.RoleType
 	fields["agent_id"] = role.AgentID
-	fields["asset_cate_id"] = role.AssetCateID
 	fields["status"] = status
 	s.writeRunEvent(ctx, run, event, fields)
 }

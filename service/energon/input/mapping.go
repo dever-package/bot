@@ -20,7 +20,7 @@ func BuildMapped(
 	normalized := NormalizeParamInput(ctx, repo, target.PowerID, target.ServiceID, req.Input, params)
 	mapped := botprotocol.NewMappedInput(normalized, labels)
 
-	if err := validatePowerMainParams(ctx, repo, target.PowerID, target.ServiceID, normalized, params); err != nil {
+	if err := validatePowerMainParams(ctx, repo, req, target.PowerID, target.ServiceID, normalized, params); err != nil {
 		return mapped, err
 	}
 
@@ -92,6 +92,9 @@ func BuildMapped(
 		inputKey, value, exists := resolveServiceParamInputValue(normalized, serviceParam, param)
 		if !exists {
 			if requiredServiceParamIDs[serviceParam.ID] && ParamRequiresInput(param) {
+				if allowsRuntimePromptlessContinuation(req, param) {
+					continue
+				}
 				return mapped, fmt.Errorf("缺少必填参数“%s”", ServiceParamDisplayName(serviceParam, param))
 			}
 			continue
@@ -132,6 +135,7 @@ func fixedServiceParamValue(serviceParam botmodel.ServiceParam) (any, error) {
 func validatePowerMainParams(
 	ctx context.Context,
 	repo Repository,
+	req *botprotocol.ShemicRequest,
 	powerID uint64,
 	serviceID uint64,
 	input map[string]any,
@@ -150,10 +154,27 @@ func validatePowerMainParams(
 			continue
 		}
 		if _, _, exists := ResolveParamValue(input, param); !exists {
+			if allowsRuntimePromptlessContinuation(req, param) {
+				continue
+			}
 			return fmt.Errorf("缺少必填参数“%s”", param.Name)
 		}
 	}
 	return nil
+}
+
+func allowsRuntimePromptlessContinuation(req *botprotocol.ShemicRequest, param botmodel.Param) bool {
+	if req == nil || !IsPromptParam(param) {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(req.PromptOwner), botprotocol.PromptOwnerAgentRuntime) {
+		return false
+	}
+	if len(req.History) == 0 {
+		return false
+	}
+	event, ok := req.Input["runtime_event"].(map[string]any)
+	return ok && strings.TrimSpace(botprotocol.AsText(event["type"])) != ""
 }
 
 func inputParamLabels(ctx context.Context, repo Repository, powerID uint64, serviceID uint64) map[string]string {

@@ -15,16 +15,17 @@ type RawRequest struct {
 }
 
 type ShemicRequest struct {
-	RequestID string
-	Mode      string
-	Protocol  string
-	Kind      string
-	Name      string
-	Set       map[string]any
-	Input     map[string]any
-	History   []any
-	Options   map[string]any
-	Raw       RawRequest
+	RequestID   string
+	Mode        string
+	Protocol    string
+	Kind        string
+	Name        string
+	PromptOwner string
+	Set         map[string]any
+	Input       map[string]any
+	History     []any
+	Options     map[string]any
+	Raw         RawRequest
 }
 
 type NativeInput struct {

@@ -14,6 +14,8 @@ const StreamNamespace = "agent_document"
 
 var sharedStreams = frontstream.New(StreamNamespace)
 
+type deferStreamKey struct{}
+
 type streamWriter struct {
 	store frontstream.Service
 }
@@ -38,8 +40,12 @@ func ParseStreamRequestID(requestID string) (uint64, error) {
 	return documentID, nil
 }
 
+func DeferStream(ctx context.Context) context.Context {
+	return context.WithValue(ctx, deferStreamKey{}, true)
+}
+
 func (writer streamWriter) write(ctx context.Context, documentID uint64, event string, output map[string]any) error {
-	if documentID == 0 {
+	if documentID == 0 || ctx.Value(deferStreamKey{}) == true {
 		return nil
 	}
 	if output == nil {

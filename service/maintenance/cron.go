@@ -28,6 +28,8 @@ func init() {
 	frontcron.RegisterProvider(HistoryCleanupCronProvider, func(ctx context.Context, payload map[string]any) (any, error) {
 		return CleanupHistory(ctx, payload)
 	})
+	frontcron.RegisterBootstrap(EnsureEnergonPromptParam)
+	frontcron.RegisterBootstrap(EnsureEnergonVideoComposePower)
 	frontcron.RegisterBootstrap(EnsureHistoryCleanupCron)
 }
 

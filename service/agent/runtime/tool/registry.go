@@ -10,8 +10,9 @@ import (
 )
 
 type Registry struct {
-	items map[string]runtimeprovider.Tool
-	order []string
+	items             map[string]runtimeprovider.Tool
+	order             []string
+	cachedDefinitions []any
 }
 
 func NewRegistry(tools ...runtimeprovider.Tool) (*Registry, error) {
@@ -41,6 +42,7 @@ func (registry *Registry) Add(tools ...runtimeprovider.Tool) error {
 		registry.items[name] = current
 		registry.order = append(registry.order, name)
 	}
+	registry.cachedDefinitions = nil
 	return nil
 }
 
@@ -56,11 +58,15 @@ func (registry *Registry) Definitions() []any {
 	if registry == nil {
 		return nil
 	}
+	if registry.cachedDefinitions != nil {
+		return append([]any(nil), registry.cachedDefinitions...)
+	}
 	result := make([]any, 0, len(registry.order))
 	for _, name := range registry.order {
 		result = append(result, registry.items[name].CurrentDefinition().Native())
 	}
-	return result
+	registry.cachedDefinitions = result
+	return append([]any(nil), result...)
 }
 
 func (registry *Registry) Names() []string {
@@ -68,6 +74,33 @@ func (registry *Registry) Names() []string {
 		return nil
 	}
 	return append([]string(nil), registry.order...)
+}
+
+func (registry *Registry) NamesByKind(kinds ...string) []string {
+	definitions := registry.DefinitionsByKind(kinds...)
+	result := make([]string, 0, len(definitions))
+	for _, definition := range definitions {
+		result = append(result, definition.Name)
+	}
+	return result
+}
+
+func (registry *Registry) DefinitionsByKind(kinds ...string) []runtimeprovider.Definition {
+	if registry == nil || len(kinds) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(kinds))
+	for _, kind := range kinds {
+		allowed[strings.ToLower(strings.TrimSpace(kind))] = struct{}{}
+	}
+	result := make([]runtimeprovider.Definition, 0)
+	for _, name := range registry.order {
+		definition := registry.items[name].CurrentDefinition()
+		if _, exists := allowed[strings.ToLower(strings.TrimSpace(definition.Kind))]; exists {
+			result = append(result, definition)
+		}
+	}
+	return result
 }
 
 func (registry *Registry) Definition(name string) (runtimeprovider.Definition, bool) {
@@ -88,6 +121,21 @@ func (registry *Registry) AddMediaReferences(references []runtimeprovider.MediaR
 			current.AddMediaReferences(references)
 		}
 	}
+	registry.cachedDefinitions = nil
+}
+
+func (registry *Registry) ValidateArguments(name string, arguments map[string]any) error {
+	if registry == nil {
+		return fmt.Errorf("工具注册表未初始化")
+	}
+	current, exists := registry.items[strings.TrimSpace(name)]
+	if !exists {
+		return fmt.Errorf("当前智能体未挂载工具: %s", name)
+	}
+	if current.ValidateArguments == nil {
+		return nil
+	}
+	return current.ValidateArguments(arguments)
 }
 
 func (registry *Registry) Execute(ctx context.Context, call botprotocol.ToolCall, requestID string, onOutput runtimeprovider.OutputHandler) (runtimeprovider.Result, error) {
@@ -100,6 +148,9 @@ func (registry *Registry) Execute(ctx context.Context, call botprotocol.ToolCall
 	}
 	arguments, err := botprotocol.ToolCallArguments(call)
 	if err != nil {
+		return runtimeprovider.Result{}, err
+	}
+	if err = registry.ValidateArguments(call.Name, arguments); err != nil {
 		return runtimeprovider.Result{}, err
 	}
 	result, err := current.Handle(ctx, runtimeprovider.Call{

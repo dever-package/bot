@@ -245,6 +245,59 @@ func formatProviderStatusError(method string, url string, resp *botprovider.Resp
 	return strings.Join(parts, " ")
 }
 
+type providerStatusError struct {
+	message string
+	code    string
+}
+
+func (err providerStatusError) Error() string {
+	return err.message
+}
+
+func (err providerStatusError) ErrorCode() string {
+	return err.code
+}
+
+func newProviderStatusError(method string, url string, resp *botprovider.Response) error {
+	message := "来源返回失败: " + formatProviderStatusError(method, url, resp)
+	return providerStatusError{message: message, code: providerResponseErrorCode(resp)}
+}
+
+func providerResponseErrorCode(resp *botprovider.Response) string {
+	if resp == nil {
+		return ""
+	}
+	values := make([]string, 0, 4)
+	collectProviderErrorCodes(resp.Body, &values)
+	for _, value := range values {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "context_length_exceeded", "context_window_exceeded", "max_context_length_exceeded", "context_overflow", "prompt_too_long", "input_too_long":
+			return "context_overflow"
+		}
+	}
+	return ""
+}
+
+func collectProviderErrorCodes(value any, result *[]string) {
+	switch current := value.(type) {
+	case map[string]any:
+		for key, item := range current {
+			switch strings.ToLower(strings.TrimSpace(key)) {
+			case "code", "type", "error_code":
+				if text, ok := item.(string); ok {
+					*result = append(*result, text)
+				}
+			default:
+				collectProviderErrorCodes(item, result)
+			}
+		}
+	case []any:
+		for _, item := range current {
+			collectProviderErrorCodes(item, result)
+		}
+	}
+}
+
 func compactResponseBody(value any) string {
 	if value == nil {
 		return ""

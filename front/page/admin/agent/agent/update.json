@@ -205,7 +205,7 @@
         "option": {
           "service": "bot.agent.setting.OptionService.LoadKnowledgeCates"
         },
-        "info": "选择后，智能体可以读取该分类下所有启用的知识库；留空则不挂载知识库。",
+        "info": "选择后挂载该分类下所有启用的知识库，并要求本轮最终交付前至少成功读取一次；留空则不挂载知识库。",
         "meta": {
           "formLayout": "horizontal",
           "tab": "setting",
@@ -233,12 +233,25 @@
         }
       },
       {
+        "type": "form-switch",
+        "name": "长期记忆",
+        "value": "form.memory_enabled",
+        "mode": "form",
+        "info": "开启后，智能体会读取与当前用户、智能体和上下文匹配的长期记忆，并在成功回复后异步提取稳定偏好和规则。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "setting",
+          "trueValue": true,
+          "falseValue": false
+        }
+      },
+      {
         "type": "form-editor",
         "name": "设定",
         "placeholder": "填写智能体的身份、职责、边界和工作要求。",
         "value": "form.prompt",
         "mode": "form",
-        "info": "运行时会先读取智能体分类的公共提示词，再追加这里的智能体设定。",
+        "info": "定义该智能体的身份、流程、知识使用要求和输出规则，是唯一的自然语言业务设定。",
         "meta": {
           "formLayout": "vertical",
           "tab": "setting",
@@ -325,6 +338,31 @@
           "tab": "runtime",
           "controlClassName": "max-w-[180px]"
         }
+      },
+      {
+        "type": "form-number",
+        "name": "单次模型最大输出 Token 数",
+        "placeholder": "0 表示使用模型服务默认值",
+        "value": "form.max_output_tokens",
+        "mode": "form",
+        "info": "限制一次模型请求的最大输出长度。0 表示不由智能体覆盖模型服务默认值；长文场景可按所用模型上限配置。",
+        "validate": [
+          {
+            "type": "min",
+            "min": 0,
+            "message": "单次模型最大输出 Token 数不能小于 0。"
+          },
+          {
+            "type": "max",
+            "max": 131072,
+            "message": "单次模型最大输出 Token 数不能超过 131072。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "runtime",
+          "controlClassName": "max-w-[220px]"
+        }
       }
     ]
   },
@@ -341,10 +379,12 @@
       "power_cate_id": "",
       "knowledge_cate_id": "",
       "skill_pack_id": "",
+      "memory_enabled": false,
       "params": [],
       "temperature": 0.7,
       "timeout_seconds": 3600,
-      "max_auto_steps": 0
+      "max_auto_steps": 0,
+      "max_output_tokens": 0
     }
   },
   "state": {

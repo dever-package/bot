@@ -38,13 +38,13 @@ func mcpCallTool(loaded map[string]agentskill.Entry, runtime SkillRuntime) Tool 
 	return Tool{
 		Definition: Definition{
 			Name:        "mcp_call",
-			Description: "调用已加载技能 manifest.mcp 明确声明并加入 allowlist 的 stdio MCP 工具。",
+			Description: "调用已加载技能声明的 MCP 工具。",
 			Parameters: objectParameters(map[string]any{
 				"skill":     skillProperty(),
-				"server":    map[string]any{"type": "string", "description": "manifest.mcp server key"},
-				"tool":      map[string]any{"type": "string", "description": "server.tools 中允许的工具名"},
+				"server":    map[string]any{"type": "string", "description": "MCP 服务标识"},
+				"tool":      map[string]any{"type": "string", "description": "MCP 工具名称"},
 				"arguments": map[string]any{"type": "object", "additionalProperties": true},
-				"target":    map[string]any{"type": "string", "description": "配置目标 key"},
+				"target":    map[string]any{"type": "string", "description": "配置目标"},
 			}, "server", "tool"),
 		},
 		Handle: func(ctx context.Context, call Call) (Result, error) {

@@ -41,9 +41,6 @@ func ResolveAgent(ctx context.Context, identity string) (agentmodel.Agent, error
 	if row.LLMPowerID == 0 {
 		return agentmodel.Agent{}, fmt.Errorf("智能体未配置 LLM 能力")
 	}
-	if strings.TrimSpace(row.Prompt) == "" {
-		row.Prompt = agentmodel.BuiltinAgentPrompt(row.Key)
-	}
 	return *row, nil
 }
 
@@ -78,15 +75,4 @@ func builtinAgentID(identity string) uint64 {
 	default:
 		return 0
 	}
-}
-
-func CategoryPrompt(ctx context.Context, categoryID uint64) string {
-	if categoryID == 0 {
-		return ""
-	}
-	row := agentmodel.NewAgentCateModel().Find(ctx, map[string]any{"id": categoryID})
-	if row == nil {
-		return ""
-	}
-	return strings.TrimSpace(row.Prompt)
 }

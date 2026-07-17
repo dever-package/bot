@@ -60,20 +60,5 @@ func promptMappedParamInput(prompt string, value any) (any, bool) {
 }
 
 func isPromptMappedParam(param botprotocol.MappedParam) bool {
-	key := strings.ToLower(lastNativeKeySegment(param.NativeKey))
-	switch key {
-	case "prompt", "text", "content", "input":
-		return true
-	default:
-		return false
-	}
-}
-
-func lastNativeKeySegment(key string) string {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return ""
-	}
-	parts := strings.Split(key, ".")
-	return strings.TrimSpace(parts[len(parts)-1])
+	return param.IsPrompt()
 }

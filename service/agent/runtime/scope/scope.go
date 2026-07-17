@@ -11,6 +11,7 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 	frontauthcontext "github.com/dever-package/front/service/authcontext"
 	"github.com/dever-package/front/service/siteconfig"
+	userservice "github.com/dever-package/user/service"
 )
 
 type Scope struct {
@@ -28,6 +29,9 @@ func New(ctx context.Context, actorType string, actorID uint64) Scope {
 }
 
 func FromContext(ctx context.Context) Scope {
+	if actor, ok := userservice.ActorFromContext(ctx); ok && actor.UserID > 0 {
+		return New(ctx, agentmodel.SessionOwnerTypeBodyUser, actor.UserID)
+	}
 	actorID := uint64(0)
 	if current, ok := deverjwt.ActiveInt64(ctx); ok && current > 0 {
 		actorID = uint64(current)

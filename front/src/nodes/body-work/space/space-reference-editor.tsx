@@ -1,16 +1,24 @@
-import { useMemo, type ComponentType } from "react";
+import {
+  createContext,
+  useContext,
+  useMemo,
+  type ComponentType,
+} from "react";
 import { getCompatModule } from "@dever/front-plugin";
 import type { ComposerAssetItem } from "./space-prompt-composer";
 import { canvasReferenceContentFromText } from "./space-reference-content";
 import type { CanvasReferenceContent } from "./types";
+import type { WorkbenchReferenceProvider } from "../asset/asset-reference-provider";
 
 type ReferenceScope = "current" | "history";
-type ReferenceType = "artifact" | "canvas_node";
+type ReferenceType = "asset";
 
 type ReferenceOption = {
   key: string;
   refType: ReferenceType;
   refId: number;
+  trigger?: "@" | "#";
+  versionID?: number;
   label: string;
   description?: string;
   preview?: {
@@ -29,6 +37,8 @@ type ReferencePreviewRequest = {
   refType: ReferenceType;
   refId: number;
   label: string;
+  trigger?: "@" | "#";
+  versionId?: number;
 };
 
 type ReferencePreview = {
@@ -59,6 +69,7 @@ type ReferenceEditorProps = {
     items: ReferenceOption[];
   }>;
   loadPreview: (request: ReferencePreviewRequest) => Promise<ReferencePreview>;
+  providers?: WorkbenchReferenceProvider[];
   onChange: (value: string, content: CanvasReferenceContent) => void;
   onSubmit?: () => void;
 };
@@ -79,6 +90,9 @@ const referenceComposerModule = getCompatModule(
 const ReferenceEditor = referenceComposerModule.ReferenceEditor;
 const ReferenceContentView = referenceComposerModule.ReferenceContentView;
 
+export const CanvasAssetReferenceProviderContext =
+  createContext<WorkbenchReferenceProvider | undefined>(undefined);
+
 export function CanvasReferenceEditor({
   value,
   content,
@@ -90,6 +104,7 @@ export function CanvasReferenceEditor({
   layerZIndex,
   onChange,
   onSubmit,
+  assetReferenceProvider,
 }: {
   value: string;
   content?: CanvasReferenceContent;
@@ -101,6 +116,7 @@ export function CanvasReferenceEditor({
   layerZIndex?: number;
   onChange: (value: string, content?: CanvasReferenceContent) => void;
   onSubmit?: () => void;
+  assetReferenceProvider?: WorkbenchReferenceProvider;
 }) {
   const adapter = useCanvasReferenceAdapter(items);
   return (
@@ -115,6 +131,7 @@ export function CanvasReferenceEditor({
       layerZIndex={layerZIndex}
       onChange={onChange}
       onSubmit={onSubmit}
+      assetReferenceProvider={assetReferenceProvider}
     />
   );
 }
@@ -130,6 +147,7 @@ export function CanvasReferenceEditorWithAdapter({
   layerZIndex,
   onChange,
   onSubmit,
+  assetReferenceProvider,
 }: {
   value: string;
   content?: CanvasReferenceContent;
@@ -141,7 +159,13 @@ export function CanvasReferenceEditorWithAdapter({
   layerZIndex?: number;
   onChange: (value: string, content?: CanvasReferenceContent) => void;
   onSubmit?: () => void;
+  assetReferenceProvider?: WorkbenchReferenceProvider;
 }) {
+  const contextualAssetProvider = useContext(
+    CanvasAssetReferenceProviderContext,
+  );
+  const activeAssetProvider =
+    assetReferenceProvider || contextualAssetProvider;
   if (!ReferenceEditor) {
     return (
       <textarea
@@ -167,7 +191,7 @@ export function CanvasReferenceEditorWithAdapter({
     <ReferenceEditor
       value={value}
       content={content}
-      references={adapter.options}
+      references={activeAssetProvider ? [] : adapter.options}
       placeholder={placeholder}
       disabled={disabled}
       autoFocus={autoFocus}
@@ -177,6 +201,7 @@ export function CanvasReferenceEditorWithAdapter({
       pickerSearchPlaceholder="搜索当前画布的内容或素材"
       loadReferences={adapter.loadReferences}
       loadPreview={adapter.loadPreview}
+      providers={activeAssetProvider ? [activeAssetProvider] : undefined}
       onChange={onChange}
       onSubmit={onSubmit}
     />
@@ -221,6 +246,9 @@ export function CanvasReferenceTextWithAdapter({
   placeholder?: string;
   className?: string;
 }) {
+  const assetReferenceProvider = useContext(
+    CanvasAssetReferenceProviderContext,
+  );
   const resolvedContent = content
     ? hydrateReferenceLabels(content, adapter.options)
     : canvasReferenceContentFromText(value, adapter.options);
@@ -232,7 +260,11 @@ export function CanvasReferenceTextWithAdapter({
       <ReferenceContentView
         content={resolvedContent}
         fallback={value || placeholder}
-        loadPreview={adapter.loadPreview}
+        loadPreview={(request) =>
+          request.refType === "asset" && assetReferenceProvider?.loadPreview
+            ? assetReferenceProvider.loadPreview(request)
+            : adapter.loadPreview(request)
+        }
       />
     </span>
   );
@@ -244,7 +276,7 @@ function hydrateReferenceLabels(
 ): CanvasReferenceContent {
   const labels = new Map(
     options.map((option) => [
-      referenceTargetKey(option.refType, option.refId),
+      referenceTargetKey(option.refType, option.refId, option.versionID),
       option.label,
     ]),
   );
@@ -255,7 +287,13 @@ function hydrateReferenceLabels(
         ? {
             ...part,
             label:
-              labels.get(referenceTargetKey(part.ref_type, part.ref_id)) ||
+              labels.get(
+                referenceTargetKey(
+                  part.ref_type,
+                  part.ref_id,
+                  part.ref_version_id,
+                ),
+              ) ||
               part.label,
           }
         : part,
@@ -279,12 +317,13 @@ export function useCanvasReferenceAdapter(
     const itemByReference = new Map<string, ComposerAssetItem>();
     const options = normalizedItems.flatMap((item) => {
       const refId = Number(item.refId || 0);
-      if (refId <= 0) {
+      const versionID = Number(item.versionID || 0);
+      if (refId <= 0 || versionID <= 0) {
         return [];
       }
       const option = referenceOption(item, refId);
       itemByReference.set(
-        referenceTargetKey(option.refType, option.refId),
+        referenceTargetKey(option.refType, option.refId, option.versionID),
         item,
       );
       return [option];
@@ -300,7 +339,11 @@ export function useCanvasReferenceAdapter(
       loadPreview: async (request: ReferencePreviewRequest) =>
         referencePreview(
           itemByReference.get(
-            referenceTargetKey(request.refType, request.refId),
+            referenceTargetKey(
+              request.refType,
+              request.refId,
+              request.versionId,
+            ),
           ),
           request,
         ),
@@ -332,9 +375,9 @@ function referenceOption(
 ): ReferenceOption {
   return {
     key: `canvas:${item.source}:${item.id}`,
-    refType:
-      item.refType || (item.source === "current" ? "canvas_node" : "artifact"),
+    refType: "asset",
     refId,
+    versionID: Number(item.versionID || 0) || undefined,
     label: `@${referenceTitle(item.title)}`,
     description: referenceDescription(item),
     preview: {
@@ -369,8 +412,12 @@ function referencePreview(
   };
 }
 
-function referenceTargetKey(refType: ReferenceType, refId: number) {
-  return `${refType}:${refId}`;
+function referenceTargetKey(
+  refType: ReferenceType,
+  refId: number,
+  versionId = 0,
+) {
+  return `${refType}:${refId}:${versionId}`;
 }
 
 function referenceMedia(item: ComposerAssetItem) {

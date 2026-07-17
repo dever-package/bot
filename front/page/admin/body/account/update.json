@@ -1,0 +1,131 @@
+{
+  "page": {
+    "name": "三方账号编辑",
+    "parent": "bot/body/config/set",
+    "type": 2,
+    "auth": [
+      {
+        "key": "bot/body/account/create",
+        "name": "三方账号新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/body/account/update",
+        "name": "三方账号编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "name": "账号标识",
+        "placeholder": "例如：feishu",
+        "value": "form.provider",
+        "mode": "form",
+        "info": "使用小写字母、数字和中划线，接入真实登录后作为稳定识别值。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "账号标识不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "name": "按钮名称",
+        "placeholder": "例如：使用飞书账户继续",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "按钮名称不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-upload",
+        "name": "按钮图标",
+        "value": "form.icon",
+        "mode": "form",
+        "info": "不上传时登录页使用默认三方账号图标。",
+        "meta": {
+          "formLayout": "horizontal",
+          "uploadType": "pic",
+          "kind": "image",
+          "saveMode": "url",
+          "ruleId": 1,
+          "bizKey": "body.account.icon",
+          "bizName": "Body三方账号图标",
+          "maxCount": 1
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "状态",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      },
+      {
+        "type": "form-number",
+        "name": "排序",
+        "value": "form.sort",
+        "mode": "form",
+        "info": "数值越小越靠前。",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[180px]"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "id": 0,
+      "provider": "",
+      "name": "",
+      "icon": "",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}

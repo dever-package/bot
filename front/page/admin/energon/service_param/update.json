@@ -297,28 +297,9 @@
       "mapping": ""
     },
     "option": {
-      "param_rule": [
-        {
-          "id": 1,
-          "value": "直接映射"
-        },
-        {
-          "id": 2,
-          "value": "选项映射"
-        },
-        {
-          "id": 3,
-          "value": "附件映射"
-        },
-        {
-          "id": 4,
-          "value": "组合映射"
-        },
-        {
-          "id": 5,
-          "value": "固定值映射"
-        }
-      ],
+      "param_rule": {
+        "service": "bot.energon.ParamOptionService.LoadServiceParamRuleOptions"
+      },
       "fixed_value_type": [
         {
           "id": "string",

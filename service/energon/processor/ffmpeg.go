@@ -64,11 +64,18 @@ func (FFmpegProcessor) Manifest() Manifest {
 			{
 				Key:          "fps",
 				Name:         "帧率",
-				Type:         "input",
+				Type:         "option",
 				Usage:        2,
 				ValueType:    "number",
 				DefaultValue: "25",
 				Sort:         130,
+				Options: []ParamOptionDefinition{
+					{Name: "24 帧/秒", Value: "24", Sort: 1},
+					{Name: "25 帧/秒", Value: "25", Sort: 2},
+					{Name: "30 帧/秒", Value: "30", Sort: 3},
+					{Name: "50 帧/秒", Value: "50", Sort: 4},
+					{Name: "60 帧/秒", Value: "60", Sort: 5},
+				},
 			},
 		},
 		Services: []ServiceSpec{

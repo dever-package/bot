@@ -34,7 +34,7 @@ func normalizeAgentParamRows(c *server.Context, agentID uint64, value any) []any
 		if param == nil || param.Status != 1 {
 			panicAgentField("form.params", "输入参数不存在或已停用。")
 		}
-		if strings.EqualFold(strings.TrimSpace(param.Key), "text") {
+		if energoninput.IsPromptParam(*param) {
 			panicAgentField("form.params", "主聊天文本是内置输入，不需要重复配置。")
 		}
 		paramType := energoninput.NormalizeParamControlType(param.Type)

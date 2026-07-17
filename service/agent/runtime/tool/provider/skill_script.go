@@ -15,12 +15,12 @@ func runSkillScriptTool(loaded map[string]agentskill.Entry, runtime SkillRuntime
 	return Tool{
 		Definition: Definition{
 			Name:        "run_skill_script",
-			Description: "在配置的沙箱中执行已加载技能 manifest.scripts 声明的脚本。",
+			Description: "执行已加载技能声明的脚本。",
 			Parameters: objectParameters(map[string]any{
 				"skill":           skillProperty(),
-				"script":          map[string]any{"type": "string", "description": "manifest.scripts 的 key 或 scripts/ 相对路径"},
+				"script":          map[string]any{"type": "string", "description": "脚本标识或相对路径"},
 				"args":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "脚本参数"},
-				"target":          map[string]any{"type": "string", "description": "配置目标 key"},
+				"target":          map[string]any{"type": "string", "description": "配置目标"},
 				"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 60},
 			}, "script"),
 		},

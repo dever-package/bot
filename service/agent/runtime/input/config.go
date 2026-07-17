@@ -36,7 +36,7 @@ func LoadParams(ctx context.Context, agentID uint64) []energoninput.PowerParam {
 			continue
 		}
 		param, exists := params[relation.ParamID]
-		if !exists || !energoninput.IsActive(param.Status) || strings.EqualFold(strings.TrimSpace(param.Key), "text") {
+		if !exists || !energoninput.IsActive(param.Status) || energoninput.IsPromptParam(param) {
 			continue
 		}
 		result = append(result, buildAgentParam(ctx, repo, *relation, param))
@@ -121,6 +121,7 @@ func buildAgentParam(
 		Required:     relation.Required == 1 && energoninput.ParamRequiresInput(param),
 		UploadRuleID: param.UploadRuleID,
 		MaxFiles:     param.MaxFiles,
+		AssetKinds:   energoninput.PromptAssetKinds(param),
 		Sort:         relation.Sort,
 	}
 	if energoninput.IsOptionParamType(result.Type) {

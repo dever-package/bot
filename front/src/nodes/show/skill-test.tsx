@@ -1702,7 +1702,6 @@ async function saveAssistantMessage({
     output: output || {},
     request_id: requestID || "",
     status: status || ASSISTANT_MESSAGE_STATUS_NORMAL,
-    memory_enabled: false,
   });
 }
 

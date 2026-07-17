@@ -106,6 +106,8 @@ async function watchDocument(input: {
   const { watch, watches, blockMs, runtimeApi, updateDocument } = input;
   const documentID = watch.document.id;
   let streamController: AbortController | null = null;
+  let lastStreamEventAt = 0;
+  let snapshotAttempt = 0;
   const publish = (document: AgentChatDocument | undefined) => {
     if (!document || watch.controller.signal.aborted) {
       return;
@@ -128,6 +130,7 @@ async function watchDocument(input: {
     const controller = new AbortController();
     const abort = () => controller.abort();
     streamController = controller;
+    lastStreamEventAt = Date.now();
     watch.controller.signal.addEventListener("abort", abort, { once: true });
     void watchRuntimeStream<Record<string, unknown>>({
       streamApi: runtimeApi.documentStream,
@@ -138,6 +141,7 @@ async function watchDocument(input: {
       recoverOnError: true,
       fallbackToPoll: false,
       onFrame: (frame) => {
+        lastStreamEventAt = Date.now();
         const output = documentFrameOutput(frame);
         publish(mergeAgentChatDocumentEvent(watch.document, output));
         if (documentEventName(output) === "document_complete") {
@@ -155,7 +159,32 @@ async function watchDocument(input: {
   };
 
   try {
+    try {
+      const initial = await syncSnapshot();
+      if (!isAgentChatDocumentPending(initial)) {
+        return;
+      }
+    } catch {
+      if (watch.controller.signal.aborted) {
+        return;
+      }
+      snapshotAttempt = 1;
+    }
+    startEventStream();
     while (!watch.controller.signal.aborted) {
+      await waitForDocumentRetry(
+        watch.controller.signal,
+        documentSnapshotDelay(snapshotAttempt),
+      );
+      if (watch.controller.signal.aborted) {
+        return;
+      }
+      const streamFresh =
+        streamController !== null &&
+        Date.now() - lastStreamEventAt < Math.max(6000, blockMs * 3);
+      if (streamFresh) {
+        continue;
+      }
       try {
         const snapshot = await syncSnapshot();
         // Stream events only carry incremental fields. A complete document
@@ -163,13 +192,14 @@ async function watchDocument(input: {
         if (!isAgentChatDocumentPending(snapshot)) {
           return;
         }
+        snapshotAttempt = Math.min(snapshotAttempt + 1, 3);
         startEventStream();
       } catch {
         if (watch.controller.signal.aborted) {
           return;
         }
+        snapshotAttempt = Math.min(snapshotAttempt + 1, 3);
       }
-      await waitForDocumentRetry(watch.controller.signal);
     }
   } finally {
     streamController?.abort();
@@ -179,13 +209,18 @@ async function watchDocument(input: {
   }
 }
 
-function waitForDocumentRetry(signal: AbortSignal) {
+function documentSnapshotDelay(attempt: number) {
+  const delays = [2000, 4000, 8000, 12000] as const;
+  return delays[Math.min(attempt, delays.length - 1)] ?? delays[delays.length - 1];
+}
+
+function waitForDocumentRetry(signal: AbortSignal, delay: number) {
   return new Promise<void>((resolve) => {
     if (signal.aborted) {
       resolve();
       return;
     }
-    const timer = window.setTimeout(done, 1000);
+    const timer = window.setTimeout(done, delay);
     signal.addEventListener("abort", done, { once: true });
     function done() {
       window.clearTimeout(timer);

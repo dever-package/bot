@@ -6,6 +6,7 @@ import (
 
 	botmodel "github.com/dever-package/bot/model/energon"
 	botinput "github.com/dever-package/bot/service/energon/input"
+	frontmeta "github.com/dever-package/front/service/meta"
 )
 
 const defaultMaxFiles = 5
@@ -25,6 +26,22 @@ func (ParamOptionService) ProviderLoadParamOptions(c *server.Context, _ []any) a
 		})
 	}
 	return options
+}
+
+func (ParamOptionService) ProviderLoadServiceParamRuleOptions(c *server.Context, _ []any) any {
+	return loadEnergonModelFieldOptions(c, "bot.energon.NewServiceParamModel", "param_rule")
+}
+
+func (ParamOptionService) ProviderLoadServiceEndpointParamModeOptions(c *server.Context, _ []any) any {
+	return loadEnergonModelFieldOptions(c, "bot.energon.NewServiceEndpointModel", "param_mode")
+}
+
+func loadEnergonModelFieldOptions(c *server.Context, modelName string, field string) any {
+	options := frontmeta.ResolveModelOptions(c.Context(), modelName)
+	if rows, exists := options[field]; exists {
+		return rows
+	}
+	return []map[string]any{}
 }
 
 func (ParamOptionService) ProviderLoadFileIndexOptions(c *server.Context, params []any) any {

@@ -5,7 +5,13 @@ import {
   type AgentChatArtifact,
 } from "./artifact";
 
-export type ReferenceType = "message" | "artifact" | "upload_file" | "session";
+export type ReferenceType =
+  | "message"
+  | "artifact"
+  | "upload_file"
+  | "session"
+  | "canvas_node"
+  | "asset";
 
 export type ReferencePreviewHint = {
   text?: string;
@@ -23,6 +29,8 @@ export type ReferencePreviewMedia = {
   kind: string;
   name?: string;
   label: string;
+  trigger?: string;
+  versionId?: number;
   url: string;
 };
 
@@ -39,6 +47,8 @@ export type ReferencePreviewRequest = {
   refType: ReferenceType;
   refId: number;
   label: string;
+  trigger?: string;
+  versionId?: number;
 };
 
 export type ReferencePreviewLoader = (
@@ -53,6 +63,8 @@ export type ReferencePart =
       ref_id: number;
       label: string;
       usage?: string;
+      ref_trigger?: string;
+      ref_version_id?: number;
     };
 
 export type ReferenceContent = {
@@ -110,6 +122,8 @@ export type ReferenceOption = {
   selectable?: boolean;
   hasChildren?: boolean;
   usage?: string;
+  trigger?: string;
+  versionID?: number;
 };
 
 export type ReferenceLoadRequest = {
@@ -124,6 +138,22 @@ export type ReferenceLoadResult = {
   nextCursor?: string;
 };
 
+export type ReferenceProvider = {
+  trigger: string;
+  referenceTypes: ReferenceType[];
+  loadReferences?: (
+    request: ReferenceLoadRequest,
+  ) => Promise<ReferenceLoadResult>;
+  loadPreview?: ReferencePreviewLoader;
+  availableScopes?: ReferenceScope[];
+  searchPlaceholder?: string;
+  renderPicker?: (props: {
+    open: boolean;
+    onSelect: (option: ReferenceOption) => void;
+    onClose: () => void;
+  }) => import("react").ReactNode;
+};
+
 export type ReferenceComposerProps = {
   placeholder?: string;
   disabled?: boolean;
@@ -134,6 +164,7 @@ export type ReferenceComposerProps = {
   layerZIndex?: number;
   clipboardImageUploadRuleId?: number;
   parameters?: ReferenceComposerParam[];
+  providers?: ReferenceProvider[];
   loadReferences: (
     request: ReferenceLoadRequest,
   ) => Promise<ReferenceLoadResult>;

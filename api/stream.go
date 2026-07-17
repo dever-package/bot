@@ -18,6 +18,16 @@ func BindBody(c *server.Context) (map[string]any, error) {
 	return body, nil
 }
 
+func RequestHeaders(c *server.Context) map[string]string {
+	headers := map[string]string{}
+	for _, key := range []string{"Authorization", "Content-Type", "X-Request-ID", "X-Request-Id"} {
+		if value := strings.TrimSpace(c.Header(key)); value != "" {
+			headers[key] = value
+		}
+	}
+	return headers
+}
+
 func WriteJSON(c *server.Context, data any, err error) error {
 	if err != nil {
 		payload := map[string]any{

@@ -32,15 +32,15 @@ func httpRequestTool(loaded map[string]agentskill.Entry) Tool {
 	return Tool{
 		Definition: Definition{
 			Name:        "http_request",
-			Description: "代表已加载技能发起受限的外部 HTTP 请求。拒绝访问本机、内网地址和敏感请求头。",
+			Description: "通过已加载技能发起 HTTP 请求。",
 			Parameters: objectParameters(map[string]any{
 				"skill":           skillProperty(),
-				"url":             map[string]any{"type": "string", "description": "http/https 地址"},
+				"url":             map[string]any{"type": "string", "description": "请求地址"},
 				"method":          map[string]any{"type": "string", "enum": []any{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}},
 				"headers":         map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
 				"query":           map[string]any{"type": "object", "additionalProperties": true},
-				"json":            map[string]any{"description": "JSON 请求体"},
-				"body":            map[string]any{"type": "string", "description": "文本请求体"},
+				"json":            map[string]any{"description": "JSON 内容"},
+				"body":            map[string]any{"type": "string", "description": "文本内容"},
 				"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 60},
 			}, "url"),
 		},

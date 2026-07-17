@@ -139,9 +139,7 @@ func (s Service) generateConceptGraph(ctx context.Context, base agentmodel.Knowl
 			"set": map[string]any{
 				"role": prompt,
 			},
-			"input": map[string]any{
-				"text": source,
-			},
+			"input": energonservice.PromptInput(source),
 			"options": map[string]any{
 				"temperature": 0.1,
 				"stream":      false,

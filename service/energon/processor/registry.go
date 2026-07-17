@@ -88,7 +88,14 @@ func normalizeKey(value string) string {
 
 func cloneManifest(source Manifest) Manifest {
 	result := source
-	result.ParamDefinitions = append([]ParamDefinition(nil), source.ParamDefinitions...)
+	result.ParamDefinitions = make([]ParamDefinition, len(source.ParamDefinitions))
+	for index, definition := range source.ParamDefinitions {
+		result.ParamDefinitions[index] = definition
+		result.ParamDefinitions[index].Options = append(
+			[]ParamOptionDefinition(nil),
+			definition.Options...,
+		)
+	}
 	result.Services = make([]ServiceSpec, len(source.Services))
 	for index, service := range source.Services {
 		result.Services[index] = service

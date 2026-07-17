@@ -1,7 +1,3 @@
-import {
-  reconcileCanvasReferenceContent,
-  type CanvasReferenceTarget,
-} from "./space-reference-content";
 import type {
   CanvasReferenceContent,
   CanvasFunctionOption,
@@ -67,7 +63,7 @@ type PersistedCanvasNode = {
   flow?: Pick<TeamFlow, "id" | "key" | "name" | "goal">;
   role?: Pick<
     TeamRole,
-    "id" | "name" | "role_type" | "agent_id" | "asset_cate_id"
+    "id" | "name" | "role_type" | "agent_id"
   >;
   asset?: Pick<
     ProjectAsset,
@@ -95,21 +91,10 @@ type PersistedCanvasResultView = {
 export function persistedCanvasState(
   canvas: SpaceCanvasState,
 ): PersistedCanvasState {
-  const referenceTargets = canvas.nodes
-    .filter((node) => Number(node.nodeNo || 0) > 0)
-    .map(
-      (node): CanvasReferenceTarget => ({
-        refType: "canvas_node",
-        refId: Number(node.nodeNo),
-        label: node.title,
-      }),
-    );
   return {
     asset_cate_id: Number(canvas.assetCateId || 0),
     next_node_no: Math.max(1, Number(canvas.nextNodeNo || 1)),
-    nodes: canvas.nodes.map((node) =>
-      persistedCanvasNode(node, referenceTargets),
-    ),
+    nodes: canvas.nodes.map(persistedCanvasNode),
     edges: canvas.edges.map((edge) => ({
       id: edge.id,
       from: edge.from,
@@ -130,7 +115,6 @@ export function persistedCanvasState(
 
 function persistedCanvasNode(
   node: SpaceCanvasNode,
-  referenceTargets: CanvasReferenceTarget[],
 ): PersistedCanvasNode {
   const result: PersistedCanvasNode = {
     id: node.id,
@@ -189,7 +173,6 @@ function persistedCanvasNode(
       name: node.role.name,
       role_type: node.role.role_type,
       agent_id: node.role.agent_id,
-      asset_cate_id: node.role.asset_cate_id,
     };
   }
   if (node.asset) {
@@ -220,11 +203,7 @@ function persistedCanvasNode(
       description: node.functionOption.description,
     };
   }
-  const composerDraft = persistedComposerDraft(
-    node.composerDraft,
-    referenceTargets,
-    Number(node.nodeNo || 0),
-  );
+  const composerDraft = persistedComposerDraft(node.composerDraft);
   if (composerDraft) {
     result.composer_draft = composerDraft;
   }
@@ -276,24 +255,14 @@ function persistedResultView(
   return result;
 }
 
-function persistedComposerDraft(
-  value: unknown,
-  referenceTargets: CanvasReferenceTarget[],
-  currentNodeNo: number,
-) {
+function persistedComposerDraft(value: unknown) {
   if (!isRecord(value)) {
     return null;
   }
   const result: Record<string, unknown> = {};
   assignText(result, "prompt", value.prompt);
-  const prompt = typeof value.prompt === "string" ? value.prompt : "";
-  const savedPromptContent = normalizeReferenceContent(
+  const promptContent = normalizeReferenceContent(
     value.promptContent ?? value.prompt_content,
-  );
-  const promptContent = reconcileCanvasReferenceContent(
-    prompt,
-    savedPromptContent,
-    referenceTargets.filter((target) => target.refId !== currentNodeNo),
   );
   if (promptContent && isJSONValue(promptContent)) {
     result.prompt_content = promptContent;

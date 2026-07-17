@@ -6,25 +6,30 @@ import (
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	agentrichtext "github.com/dever-package/bot/service/agent/richtext"
+	runtimesessionstate "github.com/dever-package/bot/service/agent/runtime/sessionstate"
 )
 
-func buildPrompt(ctx context.Context, request AssembleRequest, session agentmodel.Session) string {
-	sections := basePromptSections(request.CategoryPrompt, request.Agent.Prompt)
+func buildPrompt(agentPrompt string) string {
+	return strings.Join(agentPromptSections(agentPrompt), "\n\n")
+}
+
+func buildRuntimeContext(ctx context.Context, request AssembleRequest, session agentmodel.Session) map[string]any {
+	result := map[string]any{}
 	if request.IncludeMemory {
-		sections = appendPromptSection(sections, "长期记忆", runtimeMemoryText(ctx, session, request.Input))
+		if memory := strings.TrimSpace(runtimeMemoryText(ctx, session, request.Input)); memory != "" {
+			result["long_term_memory"] = memory
+		}
 	}
-	sections = appendPromptSection(sections, "较早对话摘要", session.ContextSummary)
-	return strings.Join(sections, "\n\n")
+	if summary, ok := runtimesessionstate.Decode(session.ContextSummary); ok {
+		result["session_state"] = summary
+	} else if summary := strings.TrimSpace(runtimesessionstate.Render(session.ContextSummary)); summary != "" {
+		result["session_state"] = summary
+	}
+	return result
 }
 
-func buildInternalPrompt(request InternalAssembleRequest) string {
-	return strings.Join(basePromptSections(request.CategoryPrompt, request.Agent.Prompt), "\n\n")
-}
-
-func basePromptSections(categoryPrompt string, agentPrompt string) []string {
-	sections := make([]string, 0, 2)
-	sections = appendPromptSection(sections, "通用设定", agentrichtext.PlainText(categoryPrompt))
-	return appendPromptSection(sections, "智能体设定", agentrichtext.PlainText(agentPrompt))
+func agentPromptSections(agentPrompt string) []string {
+	return appendPromptSection(nil, "智能体设定", agentrichtext.PlainText(agentPrompt))
 }
 
 func appendPromptSection(sections []string, title string, content string) []string {

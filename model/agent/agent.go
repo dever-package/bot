@@ -20,9 +20,11 @@ type Agent struct {
 	PowerCateID     uint64    `dorm:"type:bigint;not null;default:0;comment:工具能力分类"`
 	KnowledgeCateID uint64    `dorm:"type:bigint;not null;default:0;comment:知识库分类"`
 	SkillPackID     uint64    `dorm:"type:bigint;not null;default:0;comment:技能方案"`
+	MemoryEnabled   bool      `dorm:"type:boolean;not null;default:false;comment:长期记忆"`
 	Temperature     float64   `dorm:"type:double precision;not null;default:0.7;comment:温度"`
 	TimeoutSeconds  int       `dorm:"type:int;not null;default:3600;comment:超时时间(秒)"`
 	MaxAutoSteps    int       `dorm:"type:int;not null;default:0;comment:最大自动步骤数"`
+	MaxOutputTokens int       `dorm:"type:int;not null;default:0;comment:单次模型最大输出Token数"`
 	Status          int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	Sort            int       `dorm:"type:int;not null;default:100;comment:排序"`
 	CreatedAt       time.Time `dorm:"comment:创建时间"`
@@ -51,6 +53,8 @@ const (
 
 	AgentKindNormal   = "normal"
 	AgentKindInternal = "internal"
+
+	MaxAgentOutputTokens = 131072
 )
 
 var (
@@ -77,9 +81,11 @@ var (
 			"power_cate_id":     0,
 			"knowledge_cate_id": 0,
 			"skill_pack_id":     0,
+			"memory_enabled":    false,
 			"temperature":       0.7,
 			"timeout_seconds":   3600,
 			"max_auto_steps":    0,
+			"max_output_tokens": 0,
 			"status":            1,
 			"sort":              10,
 		},
@@ -95,9 +101,11 @@ var (
 			"power_cate_id":     0,
 			"knowledge_cate_id": 0,
 			"skill_pack_id":     DefaultSkillPackID,
+			"memory_enabled":    true,
 			"temperature":       0.4,
 			"timeout_seconds":   3600,
 			"max_auto_steps":    0,
+			"max_output_tokens": 0,
 			"status":            1,
 			"sort":              10,
 		},
@@ -113,9 +121,11 @@ var (
 			"power_cate_id":     0,
 			"knowledge_cate_id": 0,
 			"skill_pack_id":     0,
+			"memory_enabled":    false,
 			"temperature":       0.2,
 			"timeout_seconds":   180,
 			"max_auto_steps":    1,
+			"max_output_tokens": 0,
 			"status":            1,
 			"sort":              1,
 		},
@@ -131,9 +141,11 @@ var (
 			"power_cate_id":     0,
 			"knowledge_cate_id": 0,
 			"skill_pack_id":     0,
+			"memory_enabled":    false,
 			"temperature":       0.3,
 			"timeout_seconds":   3600,
 			"max_auto_steps":    0,
+			"max_output_tokens": 0,
 			"status":            1,
 			"sort":              2,
 		},

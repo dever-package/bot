@@ -68,7 +68,7 @@ func (s GatewayService) callNormalizeTarget(
 	if resp.StatusCode >= 400 {
 		errorMessage := formatProviderStatusError(nativeReq.Method, nativeReq.URL, resp)
 		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_status", errorMessage), nativeReq)
-		err := fmt.Errorf("来源返回失败: %s", errorMessage)
+		err := newProviderStatusError(nativeReq.Method, nativeReq.URL, resp)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 
@@ -285,7 +285,7 @@ func (s GatewayService) callStreamTarget(
 	}
 	if resp.StatusCode >= 400 {
 		errorMessage := formatProviderStatusError(nativeReq.Method, nativeReq.URL, resp)
-		err := fmt.Errorf("来源返回失败: %s", errorMessage)
+		err := newProviderStatusError(nativeReq.Method, nativeReq.URL, resp)
 		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_status", errorMessage), nativeReq)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}

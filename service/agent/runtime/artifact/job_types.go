@@ -23,13 +23,14 @@ type JobTransport struct {
 }
 
 type JobRequest struct {
-	DocumentID uint64
-	BlockID    uint64
-	SessionID  uint64
-	MessageID  uint64
-	RunID      uint64
-	Call       botprotocol.ToolCall
-	Kind       string
-	Arguments  map[string]any
-	Snapshot   JobSnapshot
+	DocumentID    uint64
+	BlockID       uint64
+	SessionID     uint64
+	MessageID     uint64
+	RunID         uint64
+	Call          botprotocol.ToolCall
+	Kind          string
+	Arguments     map[string]any
+	Snapshot      JobSnapshot
+	DeferDispatch bool
 }

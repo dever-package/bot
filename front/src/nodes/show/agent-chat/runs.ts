@@ -73,6 +73,7 @@ type RunManagerOptions = {
   messages: ChatMessage[];
   blockMs: number;
   runtimeApi: AgentChatRuntimeApis;
+  requestScope?: Record<string, unknown>;
   getActiveSessionID: () => number;
   getSessionTitle: (sessionID: number) => string;
   updateSessionMessages: (
@@ -94,6 +95,7 @@ export function useAgentChatRuns({
   messages,
   blockMs,
   runtimeApi,
+  requestScope,
   getActiveSessionID,
   getSessionTitle,
   updateSessionMessages,
@@ -235,14 +237,19 @@ export function useAgentChatRuns({
         }
         run.runVersion = next.runVersion;
       }
-	  if (next.assistantMessageID > 0) {
-		updateRunMessage(run, { recordID: next.assistantMessageID });
-	  }
+      if (next.assistantMessageID > 0) {
+        updateRunMessage(run, { recordID: next.assistantMessageID });
+      }
       if (next.cancelable != null && next.cancelable !== run.cancelable) {
         run.cancelable = next.cancelable;
         publish(run);
       }
       if (isDocumentFrame(next.event, next.output)) {
+        if (next.event === "document_start") {
+          run.replayPending = false;
+          run.buffer.reset();
+          run.buffer.flush();
+        }
         updateRunMessage(run, (message) => ({
           document: mergeAgentChatDocumentEvent(message.document, next.output),
           requestID: next.requestID || run.requestID || undefined,
@@ -531,10 +538,10 @@ export function useAgentChatRuns({
           blockMs,
           signal: run.controller.signal,
           body: {
+            ...requestScope,
             agent: agentKey,
             session_id: activeSessionID,
             context_key: contextKey,
-            memory_enabled: false,
             input: {
               text,
               content: input.content,
@@ -560,13 +567,13 @@ export function useAgentChatRuns({
         ) {
           return;
         }
-		const finalOutput = normalizeAgentChatOutput(result.finalOutput);
-		const finalText = valueText(
+        const finalOutput = normalizeAgentChatOutput(result.finalOutput);
+        const finalText = valueText(
           result.finalOutput?.text || result.textOutput || run.buffer.text,
         ).trim();
         finish(run, {
           text: finalText,
-		  output: finalOutput,
+          output: finalOutput,
           requestID: result.requestID,
         });
       } catch (currentError: unknown) {
@@ -599,6 +606,7 @@ export function useAgentChatRuns({
       getSessionTitle,
       publish,
       register,
+      requestScope,
       runtimeApi.request,
       runtimeApi.stop,
       runtimeApi.stream,

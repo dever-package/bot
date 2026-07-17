@@ -46,7 +46,7 @@ export function CanvasResultView({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const followsLatestRef = useRef(true);
-  const useContentView = contentOutputNeedsRenderer(output);
+  const useContentView = contentOutputNeedsRenderer(output, preview);
   const hasCustomContent = children != null;
   const hasPureMedia =
     !hasCustomContent && !useContentView && hasResultPreviewMedia(preview);

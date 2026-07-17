@@ -16,17 +16,19 @@ const (
 )
 
 type MemoryRequest struct {
-	Kind       string
-	Title      string
-	Content    string
-	Tags       []string
-	Importance int
-	Scope      string
-	ContextKey string
-	AgentKey   string
-	SessionID  uint64
-	Source     string
-	Confidence float64
+	Key             string
+	Kind            string
+	Title           string
+	Content         string
+	Tags            []string
+	Importance      int
+	Scope           string
+	ContextKey      string
+	AgentKey        string
+	SessionID       uint64
+	Source          string
+	Confidence      float64
+	SourceMessageID uint64
 }
 
 type MemoryListRequest struct {
@@ -44,6 +46,7 @@ type MemoryListRequest struct {
 
 type MemoryUpdateRequest struct {
 	ID         uint64
+	Key        string
 	Kind       string
 	Title      string
 	Content    string
@@ -102,6 +105,9 @@ func (Service) UpdateMemory(ctx context.Context, request MemoryUpdateRequest) (m
 		return nil, fmt.Errorf("记忆不存在")
 	}
 	values := map[string]any{}
+	if key := normalizeMemoryKey(request.Key); key != "" {
+		values["key"] = key
+	}
 	if title := strings.TrimSpace(request.Title); title != "" {
 		values["title"] = limitMemoryText(title, 255)
 	}
@@ -119,15 +125,19 @@ func (Service) UpdateMemory(ctx context.Context, request MemoryUpdateRequest) (m
 	}
 	if scope := normalizeMemoryScope(request.Scope); scope != "" {
 		values["scope"] = scope
-	}
-	if request.ContextKey != "" {
-		values["context_key"] = NormalizeContextKey(request.ContextKey, request.AgentKey)
-	}
-	if request.AgentKey != "" {
-		values["agent_key"] = strings.TrimSpace(request.AgentKey)
-	}
-	if request.SessionID > 0 {
-		values["session_id"] = request.SessionID
+		for field, value := range memoryScopeValues(scope, request.ContextKey, request.AgentKey, request.SessionID) {
+			values[field] = value
+		}
+	} else {
+		if request.ContextKey != "" {
+			values["context_key"] = NormalizeContextKey(request.ContextKey, request.AgentKey)
+		}
+		if request.AgentKey != "" {
+			values["agent_key"] = strings.TrimSpace(request.AgentKey)
+		}
+		if request.SessionID > 0 {
+			values["session_id"] = request.SessionID
+		}
 	}
 	if request.Confidence > 0 {
 		values["confidence"] = clampMemoryConfidence(request.Confidence)
@@ -136,6 +146,7 @@ func (Service) UpdateMemory(ctx context.Context, request MemoryUpdateRequest) (m
 		values["tags"] = encodeMemoryJSON(normalizeMemoryTags(request.Tags), "[]")
 	}
 	if len(values) > 0 {
+		values["updated_at"] = time.Now()
 		memorymodel.NewMemoryModel().Update(ctx, map[string]any{"id": row.ID}, values)
 		row = memorymodel.NewMemoryModel().Find(ctx, map[string]any{"id": row.ID})
 	}
@@ -175,7 +186,19 @@ func (s Service) rememberForOwner(ctx context.Context, owner memoryOwner, reques
 		kind = "semantic"
 	}
 	scope := resolveMemoryScope(request.Scope, request.ContextKey, request.AgentKey, request.SessionID)
-	contextKey := NormalizeContextKey(request.ContextKey, request.AgentKey)
+	key := normalizeMemoryKey(request.Key)
+	scopeValues := memoryScopeValues(scope, request.ContextKey, request.AgentKey, request.SessionID)
+	if key != "" {
+		if existing := s.findMemoryByKey(ctx, owner, scope, scopeValues, key); existing != nil {
+			values := memoryContentValues(request, key, scope, scopeValues)
+			memorymodel.NewMemoryModel().Update(ctx, map[string]any{"id": existing.ID}, values)
+			return map[string]any{
+				"memory":  MemoryMap(memorymodel.NewMemoryModel().Find(ctx, map[string]any{"id": existing.ID})),
+				"deduped": true,
+			}, nil
+		}
+	}
+	contextKey, _ := scopeValues["context_key"].(string)
 	if existing := s.findSimilarMemory(ctx, owner, scope, contextKey, request.AgentKey, request.SessionID, title, content); existing != nil {
 		importance := clampMemoryImportance(request.Importance)
 		if importance > existing.Importance {
@@ -184,25 +207,51 @@ func (s Service) rememberForOwner(ctx context.Context, owner memoryOwner, reques
 		}
 		return map[string]any{"memory": MemoryMap(existing), "deduped": true}, nil
 	}
-	id := uint64(memorymodel.NewMemoryModel().Insert(ctx, map[string]any{
-		"owner_type":  owner.OwnerType,
-		"owner_id":    owner.OwnerID,
-		"scope":       scope,
-		"agent_key":   strings.TrimSpace(request.AgentKey),
-		"context_key": contextKey,
-		"session_id":  request.SessionID,
-		"kind":        kind,
-		"title":       limitMemoryText(title, 255),
-		"content":     content,
-		"tags":        encodeMemoryJSON(normalizeMemoryTags(request.Tags), "[]"),
-		"source":      normalizeMemorySource(request.Source),
-		"confidence":  clampMemoryConfidence(request.Confidence),
-		"importance":  clampMemoryImportance(request.Importance),
-		"status":      memorymodel.StatusEnabled,
-		"created_at":  time.Now(),
-	}))
+	record := map[string]any{
+		"owner_type":        owner.OwnerType,
+		"owner_id":          owner.OwnerID,
+		"scope":             scope,
+		"key":               key,
+		"kind":              kind,
+		"title":             limitMemoryText(title, 255),
+		"content":           content,
+		"tags":              encodeMemoryJSON(normalizeMemoryTags(request.Tags), "[]"),
+		"source":            normalizeMemorySource(request.Source),
+		"confidence":        clampMemoryConfidence(request.Confidence),
+		"importance":        clampMemoryImportance(request.Importance),
+		"source_message_id": request.SourceMessageID,
+		"status":            memorymodel.StatusEnabled,
+		"created_at":        time.Now(),
+		"updated_at":        time.Now(),
+	}
+	for field, value := range scopeValues {
+		record[field] = value
+	}
+	id := uint64(memorymodel.NewMemoryModel().Insert(ctx, record))
 	if id == 0 {
 		return nil, fmt.Errorf("保存记忆失败")
 	}
 	return map[string]any{"memory": MemoryMap(memorymodel.NewMemoryModel().Find(ctx, map[string]any{"id": id}))}, nil
+}
+
+func memoryContentValues(request MemoryRequest, key string, scope string, scopeValues map[string]any) map[string]any {
+	values := map[string]any{
+		"scope": scope, "key": key, "kind": firstMemoryKind(request.Kind),
+		"title": limitMemoryText(request.Title, 255), "content": strings.TrimSpace(request.Content),
+		"tags":   encodeMemoryJSON(normalizeMemoryTags(request.Tags), "[]"),
+		"source": normalizeMemorySource(request.Source), "confidence": clampMemoryConfidence(request.Confidence),
+		"importance": clampMemoryImportance(request.Importance), "status": memorymodel.StatusEnabled,
+		"source_message_id": request.SourceMessageID, "updated_at": time.Now(),
+	}
+	for field, value := range scopeValues {
+		values[field] = value
+	}
+	return values
+}
+
+func firstMemoryKind(kind string) string {
+	if kind = normalizeMemoryKind(kind); kind != "" {
+		return kind
+	}
+	return "semantic"
 }

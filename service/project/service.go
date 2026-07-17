@@ -27,7 +27,6 @@ type CreateRequest struct {
 	Description string
 	Cover       string
 	TeamID      uint64
-	ReleaseID   uint64
 }
 
 type SaveAssetRequest struct {
@@ -66,13 +65,17 @@ func NewService() Service {
 	}
 }
 
-func (s Service) List(ctx context.Context) (map[string]any, error) {
+func (s Service) List(ctx context.Context, teamID uint64) (map[string]any, error) {
 	userID, err := currentUserID(ctx)
 	if err != nil {
 		return nil, err
 	}
+	if teamID == 0 {
+		return nil, fmt.Errorf("团队不能为空")
+	}
 	rows := projectmodel.NewProjectModel().Select(ctx, map[string]any{
 		"user_id": userID,
+		"team_id": teamID,
 		"status":  projectmodel.StatusEnabled,
 	})
 	builder := newPayloadBuilder(ctx)
@@ -94,7 +97,7 @@ func (s Service) Create(ctx context.Context, req CreateRequest) (map[string]any,
 	if name == "" {
 		return nil, fmt.Errorf("项目名称不能为空")
 	}
-	team, release, err := resolvePublishedTeamRelease(ctx, req.TeamID, req.ReleaseID)
+	binding, err := s.team.ResolveProjectRelease(ctx, req.TeamID)
 	if err != nil {
 		return nil, err
 	}
@@ -104,8 +107,8 @@ func (s Service) Create(ctx context.Context, req CreateRequest) (map[string]any,
 		now := time.Now()
 		projectID = uint64(projectmodel.NewProjectModel().Insert(tx, map[string]any{
 			"user_id":     userID,
-			"team_id":     team.ID,
-			"release_id":  release.ID,
+			"team_id":     binding.TeamID,
+			"release_id":  binding.ReleaseID,
 			"name":        name,
 			"description": strings.TrimSpace(req.Description),
 			"cover":       strings.TrimSpace(req.Cover),

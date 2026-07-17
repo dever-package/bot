@@ -21,6 +21,7 @@ import type {
   WorkRelease,
   WorkTeam,
 } from "./types";
+import { assetKindLabel } from "../asset/asset-contract";
 import { DEFAULT_GROUP_NODE_SIZE } from "./space-group-model";
 import {
   isStoryboardPowerType,
@@ -32,7 +33,7 @@ const freeAssetCate: AssetCate = {
   id: 0,
   team_id: 0,
   name: "自由",
-  kind: "mixed",
+  kind: "richtext",
   cardinality: "multiple",
   status: 1,
   sort: 0,
@@ -322,23 +323,6 @@ export function createLocalNode(
   };
 }
 
-export function assetKindLabel(kind: AssetKind) {
-  switch (kind) {
-    case "image":
-      return "图片";
-    case "audio":
-      return "音频";
-    case "video":
-      return "视频";
-    case "file":
-      return "文件";
-    case "mixed":
-      return "富文本";
-    default:
-      return "文本";
-  }
-}
-
 export function cardinalityLabel(cardinality: AssetCardinality) {
   switch (cardinality) {
     case "multiple":
@@ -410,10 +394,15 @@ function normalizeProject(value: unknown): WorkProject {
 
 function normalizeTeam(value: unknown): WorkTeam {
   const row = asRecord(value);
+  const nestedTeam = asRecord(row.team);
+  const team =
+    numberValue(nestedTeam.id) > 0 || stringValue(nestedTeam.name)
+      ? nestedTeam
+      : row;
   return {
-    id: numberValue(row.id),
-    name: stringValue(row.name) || "自由团队",
-    description: stringValue(row.description),
+    id: numberValue(team.id),
+    name: stringValue(team.name) || "自由团队",
+    description: stringValue(team.description),
   };
 }
 
@@ -448,7 +437,6 @@ function normalizeRole(value: Record<string, unknown>): TeamRole {
     role_key: stringValue(value.role_key),
     name: stringValue(value.name),
     agent_id: numberValue(value.agent_id),
-    asset_cate_id: numberValue(value.asset_cate_id),
     assignment: stringValue(value.assignment),
   };
 }
@@ -826,7 +814,6 @@ function normalizeCanvasRole(value: unknown) {
     name,
     role_type: stringValue(row.role_type),
     agent_id: numberValue(row.agent_id),
-    asset_cate_id: numberValue(row.asset_cate_id),
   } as TeamRole;
 }
 

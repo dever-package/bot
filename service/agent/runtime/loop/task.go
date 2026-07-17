@@ -114,9 +114,8 @@ func requestContext(ctx context.Context, currentServer *server.Context) context.
 func (s Service) assembleTaskContext(ctx context.Context, request statelessRequest, agent agentmodel.Agent, inputText string) (runtimecontext.Result, error) {
 	if request.SessionID == 0 {
 		return s.context.AssembleInternal(runtimecontext.InternalAssembleRequest{
-			Agent:          agent,
-			CategoryPrompt: runtimecontext.CategoryPrompt(ctx, agent.CateID),
-			History:        request.History,
+			Agent:   agent,
+			History: request.History,
 		}), nil
 	}
 	session, err := s.chat.RequireAgentSession(ctx, request.SessionID, agent.Key)
@@ -124,10 +123,10 @@ func (s Service) assembleTaskContext(ctx context.Context, request statelessReque
 		return runtimecontext.Result{}, err
 	}
 	result, err := s.context.Assemble(ctx, runtimecontext.AssembleRequest{
-		Session:        *session,
-		Agent:          agent,
-		CategoryPrompt: runtimecontext.CategoryPrompt(ctx, agent.CateID),
-		Input:          inputText,
+		Session:       *session,
+		Agent:         agent,
+		Input:         inputText,
+		IncludeMemory: agent.MemoryEnabled,
 	})
 	if err != nil {
 		return runtimecontext.Result{}, err

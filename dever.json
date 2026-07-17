@@ -70,7 +70,8 @@
         },
         "entry": "bot/work",
         "public": [
-          "login"
+          "login",
+          "login/config"
         ]
       }
     }

@@ -119,7 +119,7 @@ var (
 			"service_id": serviceFFmpegComposeID,
 			"api":        "compose",
 			"param_mode": "all",
-			"param_ids":  "[]",
+			"param_ids":  `[{"param_id":12,"sort":1}]`,
 			"status":     1,
 			"sort":       1,
 		},

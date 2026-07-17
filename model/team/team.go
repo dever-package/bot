@@ -24,6 +24,11 @@ var statusOptions = []map[string]any{
 	{"id": StatusDisabled, "value": "停用"},
 }
 
+var projectEnabledOptions = []map[string]any{
+	{"id": StatusEnabled, "value": "启用"},
+	{"id": StatusDisabled, "value": "关闭"},
+}
+
 var teamPublishStatusOptions = []map[string]any{
 	{"id": TeamPublishStatusDraft, "value": "草稿"},
 	{"id": TeamPublishStatusPublished, "value": "已发布"},
@@ -32,14 +37,15 @@ var teamPublishStatusOptions = []map[string]any{
 
 var teamSeed = []map[string]any{
 	{
-		"id":             DefaultTeamID,
-		"cate_id":        DefaultTeamCateID,
-		"name":           "默认团队",
-		"description":    "你是一个通用 AI 团队，负责根据用户目标协调不同角色完成任务。理解用户目标，规划执行步骤，调度合适角色完成任务并输出可复用结果。",
-		"config":         "{}",
-		"status":         StatusEnabled,
-		"publish_status": TeamPublishStatusDraft,
-		"sort":           10,
+		"id":              DefaultTeamID,
+		"cate_id":         DefaultTeamCateID,
+		"name":            "默认团队",
+		"description":     "你是一个通用 AI 团队，负责根据用户目标协调不同角色完成任务。理解用户目标，规划执行步骤，调度合适角色完成任务并输出可复用结果。",
+		"config":          "{}",
+		"project_enabled": StatusEnabled,
+		"status":          StatusEnabled,
+		"publish_status":  TeamPublishStatusDraft,
+		"sort":            10,
 	},
 }
 
@@ -49,6 +55,7 @@ type Team struct {
 	Name             string    `dorm:"type:varchar(128);not null;comment:名称"`
 	Description      string    `dorm:"type:text;not null;default:'';comment:描述"`
 	Config           string    `dorm:"type:text;not null;default:'{}';comment:配置"`
+	ProjectEnabled   int16     `dorm:"type:smallint;not null;default:1;comment:是否启用作品"`
 	Status           int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	PublishStatus    string    `dorm:"type:varchar(32);not null;default:'draft';comment:发布状态"`
 	CurrentReleaseID uint64    `dorm:"type:bigint;not null;default:0;comment:当前发布版本"`
@@ -70,8 +77,9 @@ func NewTeamModel() *orm.Model[Team] {
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{
-			"status":         statusOptions,
-			"publish_status": teamPublishStatusOptions,
+			"status":          statusOptions,
+			"project_enabled": projectEnabledOptions,
+			"publish_status":  teamPublishStatusOptions,
 		},
 		Relations: []orm.Relation{
 			teamCateRelation,

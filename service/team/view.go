@@ -7,6 +7,7 @@ func runToMap(run teammodel.Run) map[string]any {
 		"id":          run.ID,
 		"request_id":  run.RequestID,
 		"project_id":  run.ProjectID,
+		"body_id":     run.BodyID,
 		"team_id":     run.TeamID,
 		"release_id":  run.ReleaseID,
 		"input":       jsonMap(run.Input),

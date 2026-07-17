@@ -57,7 +57,9 @@ func (s Service) ExecuteRun(ctx context.Context, lease RunLease) error {
 		s.failClaimedRun(row, workerID, err)
 		return err
 	}
-	references := appendMediaReferences(snapshot.MediaReferences, checkpoint.MediaReferences)
+	history := append(append([]any(nil), snapshot.History...), checkpoint.HistoryDelta...)
+	snapshotReferences := appendMediaReferences(nil, snapshot.MediaReferences)
+	references := appendMediaReferences(snapshotReferences, checkpoint.MediaDelta)
 	execution := execution{
 		runID:              row.ID,
 		version:            row.Version,
@@ -69,20 +71,22 @@ func (s Service) ExecuteRun(ctx context.Context, lease RunLease) error {
 		agent:              snapshot.Agent,
 		power:              snapshot.Power,
 		sessionID:          snapshot.SessionID,
-		userMessageID:      snapshot.UserMessageID,
 		assistantMessageID: snapshot.AssistantMessageID,
 		prompt:             snapshot.Prompt,
 		input:              snapshot.Input,
-		history:            snapshot.History,
+		history:            history,
 		transport: modelTransport{
 			Method: snapshot.Transport.Method,
 			Host:   snapshot.Transport.Host,
 			Path:   snapshot.Transport.Path,
 		},
-		persistChat:     snapshot.PersistChat,
-		mediaReferences: references,
-		scope:           runtimescope.RestoreSession(prepareCtx, snapshot.Scope, snapshot.SessionID),
-		checkpoint:      checkpoint,
+		persistChat:        snapshot.PersistChat,
+		mediaReferences:    references,
+		priorKnowledgeUsed: false,
+		snapshotHistoryLen: len(snapshot.History),
+		snapshotMediaLen:   len(snapshotReferences),
+		scope:              runtimescope.RestoreSession(prepareCtx, snapshot.Scope, snapshot.SessionID),
+		checkpoint:         checkpoint,
 	}
 	prepareCancel()
 	controller := s.runs.Start(row.RequestID, context.Background(), remainingChatTimeout(row.StartedAt, snapshot.Agent.TimeoutSeconds))

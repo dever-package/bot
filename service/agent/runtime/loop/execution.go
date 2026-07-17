@@ -16,7 +16,6 @@ type executionSpec struct {
 	Agent              agentmodel.Agent
 	Power              energonmodel.Power
 	SessionID          uint64
-	UserMessageID      uint64
 	AssistantMessageID uint64
 	Prompt             string
 	Input              map[string]any
@@ -29,22 +28,31 @@ type executionSpec struct {
 	MediaReferences    []runtimeprovider.MediaReference
 	Scope              runtimescope.Scope
 	RequestedAt        time.Time
+	PriorKnowledgeUsed bool
 }
 
-func (s Service) createExecution(ctx context.Context, requestID string, spec executionSpec) (execution, error) {
+func (s Service) createExecution(ctx context.Context, requestID string, spec executionSpec) (_ execution, resultErr error) {
+	defer func() {
+		if resultErr != nil && spec.PersistChat {
+			s.completeRunTurn(requestID, runStatusFail, "", nil, resultErr.Error())
+		}
+	}()
 	startedAt := time.Now()
 	requestedAt := spec.RequestedAt
 	if requestedAt.IsZero() {
 		requestedAt = startedAt
 	}
+	runtimeAgent := spec.Agent
+	// The assembled prompt is persisted separately and is the only prompt used
+	// after preparation. Avoid copying the original setting into every snapshot.
+	runtimeAgent.Prompt = ""
 	current := execution{
 		requestID:          requestID,
 		requestedAt:        requestedAt,
 		startedAt:          startedAt,
-		agent:              spec.Agent,
+		agent:              runtimeAgent,
 		power:              spec.Power,
 		sessionID:          spec.SessionID,
-		userMessageID:      spec.UserMessageID,
 		assistantMessageID: spec.AssistantMessageID,
 		prompt:             spec.Prompt,
 		input:              spec.Input,
@@ -53,7 +61,10 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 		persistChat:        spec.PersistChat,
 		onStream:           spec.OnStream,
 		mediaReferences:    append([]runtimeprovider.MediaReference(nil), spec.MediaReferences...),
+		snapshotHistoryLen: len(spec.History),
+		snapshotMediaLen:   len(spec.MediaReferences),
 		scope:              spec.Scope,
+		priorKnowledgeUsed: spec.PriorKnowledgeUsed,
 	}
 	current.checkpoint = initialCheckpoint(current)
 	snapshot, err := encodeSnapshot(snapshotFromExecution(current))
@@ -92,9 +103,6 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 	})
 	if err != nil {
 		current.close()
-		if spec.PersistChat {
-			s.completeRunTurn(requestID, runStatusFail, "", nil, err.Error())
-		}
 		return execution{}, err
 	}
 	current.runID = runID

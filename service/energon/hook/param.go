@@ -20,14 +20,27 @@ func (ParamHook) ProviderBeforeSaveParam(c *server.Context, params []any) any {
 	record["name"] = util.ToStringTrimmed(record["name"])
 	record["key"] = util.ToStringTrimmed(record["key"])
 	record["default_value"] = util.ToStringTrimmed(record["default_value"])
+	if paramID == botmodel.ParamPromptID {
+		record["name"] = "提示词"
+		record["key"] = "prompt"
+		record["type"] = "prompt"
+	}
 	paramType := botinput.NormalizeParamControlType(util.ToStringTrimmed(record["type"]))
 	record["type"] = paramType
-	record["value_type"] = botinput.NormalizeParamValueType(util.ToStringTrimmed(record["value_type"]))
+	valueType := botinput.NormalizeParamValueType(util.ToStringTrimmed(record["value_type"]))
+	if botinput.IsPromptParamType(paramType) {
+		valueType = "string"
+	}
+	record["value_type"] = valueType
 	ensureDefaultCategory(record)
 
 	usage := int16(util.ToIntDefault(record["usage"], int(paramUsageMain)))
 	if usage != paramUsageMain && usage != paramUsageToolbar {
 		usage = paramUsageMain
+	}
+	if botinput.IsPromptParamType(paramType) {
+		usage = paramUsageMain
+		normalizePromptAssetKinds(record)
 	}
 	record["usage"] = usage
 
@@ -77,6 +90,30 @@ func (ParamHook) ProviderBeforeSaveParam(c *server.Context, params []any) any {
 	}
 
 	return record
+}
+
+func normalizePromptAssetKinds(record map[string]any) {
+	fields := []string{
+		"asset_text",
+		"asset_image",
+		"asset_audio",
+		"asset_video",
+		"asset_richtext",
+		"asset_file",
+	}
+	enabled := 0
+	for _, field := range fields {
+		value := int16(util.ToIntDefault(record[field], 1))
+		if value != 1 {
+			value = 2
+		} else {
+			enabled++
+		}
+		record[field] = value
+	}
+	if enabled == 0 {
+		panicParamField("form.asset_text", "提示词参数至少要允许一种资产类型")
+	}
 }
 
 func (ParamHook) ProviderBeforeDeleteParam(c *server.Context, params []any) any {

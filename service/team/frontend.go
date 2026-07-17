@@ -6,10 +6,12 @@ import (
 	"strings"
 	"time"
 
+	assetmodel "github.com/dever-package/bot/model/asset"
 	energonmodel "github.com/dever-package/bot/model/energon"
 	teammodel "github.com/dever-package/bot/model/team"
 	assetservice "github.com/dever-package/bot/service/asset"
 	energonservice "github.com/dever-package/bot/service/energon"
+	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	energonstream "github.com/dever-package/bot/service/energon/stream"
 	"github.com/dever-package/bot/service/stream"
@@ -24,17 +26,29 @@ func (s Service) TeamList(ctx context.Context) (map[string]any, error) {
 			continue
 		}
 		rows = append(rows, map[string]any{
-			"id":             team.ID,
-			"name":           team.Name,
-			"description":    strings.TrimSpace(team.Description),
-			"publish_status": normalizeTeamPublishStatus(team.PublishStatus),
-			"release_id":     release.ID,
-			"version":        release.Version,
-			"can_create":     true,
-			"created_at":     team.CreatedAt,
+			"id":              team.ID,
+			"name":            team.Name,
+			"description":     strings.TrimSpace(team.Description),
+			"publish_status":  normalizeTeamPublishStatus(team.PublishStatus),
+			"release_id":      release.ID,
+			"version":         release.Version,
+			"project_enabled": releaseProjectEnabled(release),
+			"can_create":      releaseProjectEnabled(release),
+			"created_at":      team.CreatedAt,
 		})
 	}
 	return map[string]any{"items": rows}, nil
+}
+
+func releaseProjectEnabled(release *teammodel.TeamRelease) bool {
+	if release == nil {
+		return false
+	}
+	snapshot, err := releaseSnapshotFromText(release.Snapshot)
+	if err != nil {
+		return false
+	}
+	return snapshot.Team.ProjectEnabled != teammodel.StatusDisabled
 }
 
 func (s Service) TeamDetail(ctx context.Context, teamID uint64, releaseID uint64) (map[string]any, error) {
@@ -52,9 +66,10 @@ func (s Service) TeamDetail(ctx context.Context, teamID uint64, releaseID uint64
 		)
 	}
 	teamPayload := map[string]any{
-		"id":          graph.Team.ID,
-		"name":        graph.Team.Name,
-		"description": strings.TrimSpace(graph.Team.Description),
+		"id":              graph.Team.ID,
+		"name":            graph.Team.Name,
+		"description":     strings.TrimSpace(graph.Team.Description),
+		"project_enabled": graph.Team.ProjectEnabled == teammodel.StatusEnabled,
 	}
 	return map[string]any{
 		"team": teamPayload,
@@ -191,8 +206,9 @@ func (s Service) CanvasPowerForm(ctx context.Context, releaseID uint64, flowID u
 }
 
 func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) (map[string]any, error) {
-	if req.ProjectID == 0 {
-		return nil, fmt.Errorf("项目不能为空")
+	workspaceRun := req.ProjectID == 0
+	if req.ProjectID == 0 && req.BodyID == 0 {
+		return nil, fmt.Errorf("项目或团队工作区不能为空")
 	}
 	var releaseID uint64
 	var teamID uint64
@@ -211,6 +227,24 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 			if flow.ID == 0 {
 				return nil, fmt.Errorf("发布版本中不存在当前工作流")
 			}
+		}
+	}
+	if workspaceRun {
+		if req.TeamPowerID == 0 {
+			return nil, fmt.Errorf("团队能力不能为空")
+		}
+		matched := false
+		for _, teamPower := range teamPowers {
+			if teamPower.ID != req.TeamPowerID || teamPower.Status != teammodel.StatusEnabled {
+				continue
+			}
+			req.PowerID = teamPower.PowerID
+			req.PowerKey = ""
+			matched = true
+			break
+		}
+		if !matched {
+			return nil, fmt.Errorf("当前团队发布版本中不存在该能力")
 		}
 	}
 	power, ok := s.repo.FindPowerOption(ctx, req.PowerID, req.PowerKey)
@@ -233,12 +267,18 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	}
 	now := time.Now()
 	input := mergeMaps(req.Input, req.Params)
+	runInput := cloneInput(input)
+	if workspaceRun {
+		runInput["_mode"] = "workspace_power"
+		runInput["_team_power_id"] = req.TeamPowerID
+	}
 	runID := s.repo.InsertRun(ctx, map[string]any{
 		"request_id": requestID,
 		"project_id": req.ProjectID,
+		"body_id":    req.BodyID,
 		"team_id":    teamID,
 		"release_id": releaseID,
-		"input":      jsonText(input),
+		"input":      jsonText(runInput),
 		"output":     "{}",
 		"error":      "",
 		"status":     teammodel.RunStatusRunning,
@@ -266,6 +306,9 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 			"output_type": power.OutputType,
 		},
 	})
+	if req.OnRunCreated != nil {
+		req.OnRunCreated(run.ID, requestID)
+	}
 	var flowRunID uint64
 	var flowRun *teammodel.FlowRun
 	if flow.ID > 0 {
@@ -285,6 +328,9 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		})
 	}
 	nodeKey := normalizeKey("node", req.NodeKey)
+	if workspaceRun {
+		nodeKey = fmt.Sprintf("function:%d:%s", req.TeamPowerID, requestID)
+	}
 	nodeName := strings.TrimSpace(req.NodeName)
 	if nodeName == "" {
 		nodeName = power.Name
@@ -311,10 +357,20 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		})
 	}
 
-	output, err := s.callCanvasPower(ctx, requestID, power, input, req.SourceTargetID, req.OnStream)
+	onStream := func(payload map[string]any) {
+		_, _ = s.streams.WritePayload(ctx, requestID, stream.NormalizePayload(stream.FeaturePower, payload))
+		if req.OnStream != nil {
+			req.OnStream(payload)
+		}
+	}
+	output, err := s.callCanvasPower(ctx, requestID, power, input, req.SourceTargetID, onStream)
 	status := teammodel.RunStatusSuccess
 	if err != nil {
 		status = teammodel.RunStatusFail
+	}
+	if current := s.repo.FindRun(ctx, run.ID); current != nil && current.Status == teammodel.RunStatusCanceled {
+		status = teammodel.RunStatusCanceled
+		err = nil
 	}
 	finishedAt := time.Now()
 	nodeRecord := map[string]any{
@@ -353,6 +409,24 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 			"finished_at": finishedAt.Format(time.RFC3339Nano),
 		})
 	}
+	assetRequest := assetservice.SaveVersionRequest{
+		ProjectID:   req.ProjectID,
+		BodyID:      req.BodyID,
+		TeamID:      teamID,
+		FlowID:      flow.ID,
+		AssetCateID: req.AssetCateID,
+		RunID:       run.ID,
+		NodeRunID:   nodeRunID,
+		ReleaseID:   releaseID,
+		RequestID:   requestID,
+		NodeKey:     nodeKey,
+		Name:        nodeName,
+		Kind:        power.Kind,
+		Role:        assetmodel.RoleMaterial,
+		Content:     output,
+	}
+	var asset *assetmodel.Asset
+	var version *assetmodel.Version
 	s.finishRun(ctx, run.ID, status, output, err)
 	if err != nil {
 		return map[string]any{
@@ -361,6 +435,16 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 			"node_run_id": nodeRunID,
 			"status":      status,
 		}, err
+	}
+	if status != teammodel.RunStatusSuccess {
+		return map[string]any{
+			"run_id":      run.ID,
+			"request_id":  requestID,
+			"flow_run_id": flowRunID,
+			"node_run_id": nodeRunID,
+			"status":      status,
+			"output":      output,
+		}, nil
 	}
 
 	if !req.PersistResult {
@@ -374,24 +458,11 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		}, nil
 	}
 
-	asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
-		ProjectID:   req.ProjectID,
-		BodyID:      req.BodyID,
-		TeamID:      teamID,
-		FlowID:      flow.ID,
-		AssetCateID: req.AssetCateID,
-		RunID:       run.ID,
-		NodeRunID:   nodeRunID,
-		ReleaseID:   releaseID,
-		RequestID:   requestID,
-		NodeKey:     nodeKey,
-		Name:        nodeName,
-		Kind:        power.Kind,
-		Role:        "material",
-		Content:     output,
-	})
-	if err != nil {
-		return nil, err
+	if asset == nil || version == nil {
+		asset, version, err = s.asset.SaveVersion(ctx, assetRequest)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return map[string]any{
 		"run_id":      run.ID,
@@ -543,21 +614,11 @@ func powerOutputListKey(kind string) string {
 
 func primaryPowerParamKey(params []energonservice.PowerParam) string {
 	for _, param := range params {
-		if param.Usage != 1 || strings.TrimSpace(param.Key) == "" {
+		if !energoninput.IsPromptParamType(param.Type) {
 			continue
 		}
-		switch strings.TrimSpace(param.Type) {
-		case "textarea", "input":
-			return strings.TrimSpace(param.Key)
-		}
-	}
-	for _, param := range params {
-		if strings.TrimSpace(param.Key) == "" {
-			continue
-		}
-		switch strings.TrimSpace(param.Type) {
-		case "textarea", "input":
-			return strings.TrimSpace(param.Key)
+		if key := strings.TrimSpace(param.Key); key != "" {
+			return key
 		}
 	}
 	return ""

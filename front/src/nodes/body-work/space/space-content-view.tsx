@@ -14,6 +14,13 @@ type SharedContentViewProps = {
   mediaLayout?: "default" | "chat";
 };
 
+type CanvasContentMediaPreview = {
+  imageUrl?: string;
+  videoUrl?: string;
+  audioUrl?: string;
+  fileUrl?: string;
+};
+
 type ContentViewModule = {
   ContentView?: ComponentType<SharedContentViewProps>;
   EnergonContentView?: ComponentType<SharedContentViewProps>;
@@ -111,7 +118,13 @@ export function CanvasNodeContentView({
   ) : null;
 }
 
-export function contentOutputNeedsRenderer(output: unknown) {
+export function contentOutputNeedsRenderer(
+  output: unknown,
+  preview?: CanvasContentMediaPreview,
+) {
+  if (isStandalonePreviewMediaOutput(output, preview)) {
+    return false;
+  }
   const items = normalizedContentItems(output);
   if (items.length > 1) {
     return true;
@@ -130,6 +143,56 @@ export function contentOutputNeedsRenderer(output: unknown) {
       item.json,
     ].some(hasCanvasContent);
   });
+}
+
+function isStandalonePreviewMediaOutput(
+  output: unknown,
+  preview?: CanvasContentMediaPreview,
+) {
+  const outputText = standaloneOutputText(output, new Set(), 0);
+  if (!outputText || !preview) {
+    return false;
+  }
+  return [
+    preview.imageUrl,
+    preview.videoUrl,
+    preview.audioUrl,
+    preview.fileUrl,
+  ].some((url) => String(url || "").trim() === outputText);
+}
+
+function standaloneOutputText(
+  value: unknown,
+  seen: Set<object>,
+  depth: number,
+): string {
+  if (value == null || depth > 12) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (Array.isArray(value)) {
+    return value.length === 1
+      ? standaloneOutputText(value[0], seen, depth + 1)
+      : "";
+  }
+  if (typeof value !== "object" || seen.has(value)) {
+    return "";
+  }
+  seen.add(value);
+
+  const record = value as Record<string, unknown>;
+  const contentValues = Object.entries(record)
+    .filter(
+      ([key, item]) =>
+        !["type", "kind", "format", "version"].includes(key) &&
+        hasCanvasContent(item),
+    )
+    .map(([, item]) => item);
+  return contentValues.length === 1
+    ? standaloneOutputText(contentValues[0], seen, depth + 1)
+    : "";
 }
 
 export function contentOutputHasMedia(output: unknown) {

@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"strings"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
@@ -13,10 +14,11 @@ const (
 	completionCanceled = "canceled"
 )
 
-func (s Service) afterRecordedMessage(message *agentmodel.Message, memoryEnabled bool) {
+func (s Service) afterRecordedMessage(ctx context.Context, message *agentmodel.Message) {
 	if message != nil && message.Role == "assistant" && message.Status == agentmodel.MessageStatusNormal {
 		s.afterTurn(message.SessionID)
-		if memoryEnabled {
+		session := agentmodel.NewSessionModel().Find(ctx, map[string]any{"id": message.SessionID})
+		if session != nil && sessionMemoryEnabled(ctx, *session) {
 			s.extractSessionMemoryAsync(message.SessionID, message.ID)
 		}
 	}

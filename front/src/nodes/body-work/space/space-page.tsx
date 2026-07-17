@@ -125,6 +125,7 @@ import {
   type CanvasAgentRuntimeState,
 } from "./space-agent-runtime";
 import type { ReferenceInput } from "../../show/agent-chat/reference";
+import { AssetBrowser } from "../asset/asset-browser";
 import {
   mergeProjectAssetVersionHistory,
   resultAssetKind,
@@ -133,12 +134,8 @@ import {
 } from "./space-assets";
 import { buildNodeResultRef, canvasResultSourceFromNode } from "./space-result";
 import {
-  AssetPickerButton,
-  AssetWorkspacePanel,
-  EmptyAssetDetail,
   WorkspaceSurface,
   assetRoleForView,
-  type AssetDetailRenderInput,
 } from "./space-asset-viewer";
 import {
   buildCanvasAssetIndex,
@@ -513,13 +510,8 @@ export function WorkSpacePage() {
   );
   const menuRoles = useMemo(() => {
     if (!space) return [];
-    const workerRoles = (space.roles || []).filter(isExecutionRole);
-    if (!activeCate) return workerRoles;
-    return workerRoles.filter(
-      (role) =>
-        role.asset_cate_id === 0 || role.asset_cate_id === activeCate.id,
-    );
-  }, [space, activeCate]);
+    return (space.roles || []).filter(isExecutionRole);
+  }, [space]);
   const menuFlows = useMemo(() => activeFlows, [activeFlows]);
   const imagePower = useMemo(
     () => firstAvailablePower(powers, "image"),
@@ -615,7 +607,6 @@ export function WorkSpacePage() {
   useEffect(() => {
     if (
       !space ||
-      space.assetCates.length === 0 ||
       !activeCate ||
       activeFlows.length === 0
     ) {
@@ -668,9 +659,6 @@ export function WorkSpacePage() {
 
   const updateCanvasNodeResult = useCallback(
     (assetCateId: number, nodeId: string, patch: Partial<SpaceCanvasNode>) => {
-      if (!assetCateId) {
-        return;
-      }
       setNodeResultOverrides((current) => ({
         ...current,
         [nodeId]: {
@@ -1787,7 +1775,7 @@ export function WorkSpacePage() {
           placeholder=""
           openAssetPickerSignal={importPickerSignal}
           params={agentComposerParams}
-          assetLibrary={buildComposerAssetLibrary(space, null, activeCate)}
+          assetLibrary={buildComposerAssetLibrary(space, null)}
           onChange={() => undefined}
           onParamChange={() => undefined}
           onAssetReference={(asset) => {
@@ -1805,28 +1793,26 @@ export function WorkSpacePage() {
       </div>
 
       {workMode === "result" ? (
-        <AssetWorkspacePanel
-          activeCate={activeCate}
-          hasAssetCates={hasAssetCates}
-          entries={canvasAssetEntries}
-          onClose={() => setWorkMode("create")}
-          onOpenNode={setNodeDetail}
-          onOpenAsset={(asset) => {
-            const detailNode = createLocalNode(
-              "asset",
-              activeCate,
-              0,
-              { x: 0, y: 0 },
-              { asset },
-            );
-            setNodeDetail({
-              ...detailNode,
-              id: `asset-detail-${asset.id}`,
-              local: false,
-            });
-          }}
-          renderAssetDetail={(input) => <AssetEditorSurface {...input} />}
-        />
+        <WorkspaceSurface className="ws-asset-workspace">
+          <AssetBrowser
+            teamID={space.project.team_id}
+            initialFilters={{
+              sourceType: "project",
+              projectID: space.project.id,
+              assetCateID: hasAssetCates ? activeCate.id : 0,
+            }}
+            headerAction={
+              <button
+                type="button"
+                onClick={() => setWorkMode("create")}
+                title="关闭资产"
+              >
+                <X aria-hidden="true" />
+                <span className="sr-only">关闭资产</span>
+              </button>
+            }
+          />
+        </WorkspaceSurface>
       ) : null}
 
       <button
@@ -1912,6 +1898,13 @@ export function WorkSpacePage() {
       {nodeDetail ? (
         <NodeDetailDialog
           projectId={space.project.id}
+          teamId={space.team.id}
+          assetCateId={Number(
+            nodeDetail.assetCateId ||
+              nodeDetail.asset?.asset_cate_id ||
+              activeCate?.id ||
+              0,
+          )}
           node={nodeDetail}
           canvasReferenceItems={canvasReferenceItems.filter(
             (item) => item.source !== "current" || item.id !== nodeDetail.id,
@@ -2158,118 +2151,6 @@ function CommunicationWorkspacePanel({
       </section>
     </WorkspaceSurface>
   );
-}
-
-function AssetEditorSurface({
-  activeCate,
-  asset,
-  mode = "browse",
-  onPickAsset,
-}: AssetDetailRenderInput) {
-  const displayValue = assetDisplayValue(asset?.version?.content);
-  const preview = generatedPreviewFromValue(
-    firstDefined(asset?.version?.content, displayValue),
-    String(asset?.kind || activeCate.kind || ""),
-  );
-  const rich = firstTiptapRichDocument(displayValue);
-  const displayOutput = normalizeEnergonDisplayOutput(displayValue);
-  const content =
-    safeDocumentText(displayValue) ||
-    displayTextFromOutput(displayValue, "") ||
-    assetContentText(asset);
-  const contentOutput = hasDisplayOutput(displayOutput)
-    ? displayOutput
-    : rich
-      ? { rich }
-      : content;
-  const useContentView = contentOutputNeedsRenderer(contentOutput);
-  return (
-    <article className="ws-asset-editor">
-      <header className="ws-asset-editor-head">
-        <div>
-          <span>{activeCate.name}</span>
-          <strong>{asset?.name || activeCate.name}</strong>
-        </div>
-        <div className="ws-asset-editor-actions">
-          {asset?.version?.version ? (
-            <button type="button" disabled>
-              <History size={14} />
-              <span>版本 {asset.version.version}</span>
-            </button>
-          ) : null}
-          {mode === "select" && asset && onPickAsset ? (
-            <AssetPickerButton onPickAsset={onPickAsset} />
-          ) : null}
-        </div>
-      </header>
-      <div className="ws-asset-editor-body custom-scrollbar">
-        {!asset ? (
-          <EmptyAssetDetail activeCate={activeCate} />
-        ) : !useContentView && preview.imageUrl ? (
-          <div className="ws-asset-media-detail">
-            <img src={preview.imageUrl} alt={asset.name || activeCate.name} />
-          </div>
-        ) : !useContentView && preview.videoUrl ? (
-          <div className="ws-asset-media-detail">
-            <video src={preview.videoUrl} controls playsInline />
-          </div>
-        ) : !useContentView && preview.audioUrl ? (
-          <div className="ws-asset-media-detail">
-            <audio src={preview.audioUrl} controls />
-          </div>
-        ) : !useContentView && preview.fileUrl ? (
-          <div className="ws-asset-file-detail">
-            <FileText size={40} />
-            <strong>{asset.name || activeCate.name}</strong>
-            <span>{preview.fileUrl}</span>
-            <a href={preview.fileUrl} download>
-              <Download size={15} />
-              下载文件
-            </a>
-          </div>
-        ) : useContentView ? (
-          <div className="ws-asset-energon-detail">
-            <CanvasNodeContentView
-              output={contentOutput}
-              fallback={content}
-              className="ws-canvas-content-view"
-            />
-          </div>
-        ) : (
-          <textarea
-            value={content}
-            readOnly
-            placeholder={`暂无${activeCate.name}内容`}
-          />
-        )}
-      </div>
-    </article>
-  );
-}
-
-function assetDisplayValue(value: unknown) {
-  const parsed = parseMaybeJSON(value);
-  const agentResult = parseAgentResultBlock(parsed);
-  if (agentResult !== parsed) {
-    return assetDisplayValue(agentResult);
-  }
-  const normalized = normalizeDisplayOutputForCanvas(parsed);
-  if (normalized !== parsed && hasDisplayOutput(normalized)) {
-    return normalized;
-  }
-  const rich = fixedTiptapRichDocument(parsed);
-  if (rich) {
-    return rich;
-  }
-  return parsed;
-}
-
-function assetContentText(asset: ProjectAsset | null) {
-  if (!asset) {
-    return "";
-  }
-  const text = safeDocumentText(asset.version?.content).trim();
-  return isNonContentText(text) ? "" : text;
 }
 
 function CanvasWorkbench({
@@ -3632,7 +3513,6 @@ function mergeBackendSingleNodeDraft(node: SpaceCanvasNode): SpaceCanvasNode {
 function mergeSavedComposerParamValues(
   params: PowerParam[],
   draft: ComposerDraft,
-  primaryParamKey?: string,
 ) {
   const values = defaultPowerParamValues(params);
   const savedValues = draft.paramValues || {};
@@ -3647,9 +3527,7 @@ function mergeSavedComposerParamValues(
       );
     }
   }
-  const promptParam = params.find((param) =>
-    isPromptPowerParam(param, primaryParamKey),
-  );
+  const promptParam = params.find(isPromptPowerParam);
   if (promptParam?.key && draft.prompt.trim()) {
     values[promptParam.key] = draft.prompt;
   }
@@ -5039,6 +4917,9 @@ async function saveCanvasContentResult(input: {
   previousAssets?: ProjectAsset[];
 }) {
   const assetCateId = requireRealAssetCateId(input.assetCateId);
+  if (!assetCateId) {
+    throw new Error("当前团队没有配置资产分类，不能保存作品");
+  }
   const savedAsset = await saveSpaceCanvasContent({
     projectId: input.projectId,
     assetCateId,
@@ -6992,7 +6873,6 @@ function looksLikeStructuredJSONSnippet(value: string) {
 function buildComposerAssetLibrary(
   space: SpaceBootstrap | null,
   inputContext: NodeInputContext | null,
-  activeCate?: AssetCate | null,
   canvasItems: ComposerAssetItem[] = [],
 ): { current: ComposerAssetItem[]; assets: ComposerAssetItem[] } {
   const current = mergeComposerAssetItems([
@@ -7021,12 +6901,11 @@ function buildComposerAssetLibrary(
         id: String(asset.id),
         title: asset.name || `资产 ${asset.id}`,
         kind: composerKindFromPreview(preview, String(asset.kind || "")),
-        role: activeCate
-          ? assetRoleForView(asset, activeCate)
-          : String(asset.role || ""),
+        role: assetRoleForView(asset),
         source: "asset" as const,
-        refType: "artifact" as const,
+        refType: "asset" as const,
         refId: asset.id,
+        versionID: asset.version?.id || asset.version_id,
         output,
         preview,
         asset,
@@ -7046,8 +6925,9 @@ function buildCanvasReferenceItems(entries: CanvasAssetEntry[]) {
       kind: composerKindFromPreview(entry.preview, entry.nodeType),
       role: entry.role,
       source: entry.role === "material" ? "current" : "asset",
-      refType: entry.role === "material" ? "canvas_node" : "artifact",
-      refId: entry.role === "material" ? entry.nodeNo : entry.assetId,
+      refType: "asset",
+      refId: entry.assetId,
+      versionID: entry.versionId,
       output: entry.output,
       preview: entry.preview,
       asset: entry.asset,
@@ -7178,9 +7058,6 @@ function findReplaceableAssetNode(
   assetCateId: number,
   sourceNodeId?: string,
 ) {
-  if (!assetCateId) {
-    return null;
-  }
   const byId = new Map(nodes.map((node) => [node.id, node]));
   if (sourceNodeId) {
     for (const edge of edges) {
@@ -8449,7 +8326,6 @@ function NodeBottomSettings({
       buildComposerAssetLibrary(
         space,
         inputContext,
-        nodeAssetCate,
         canvasReferenceItems.filter((item) => item.id !== node.id),
       ),
     [canvasReferenceItems, inputContext, node.id, nodeAssetCateId, space],
@@ -8493,7 +8369,6 @@ function NodeBottomSettings({
             mergeSavedComposerParamValues(
               form.params || [],
               savedDraft,
-              form.primary_param_key,
             ),
           );
           setPrompt(savedDraft.prompt || "");
@@ -8541,11 +8416,8 @@ function NodeBottomSettings({
 
   const powerParams = powerForm?.params || [];
   const promptParam = useMemo(
-    () =>
-      powerParams.find((param) =>
-        isPromptPowerParam(param, powerForm?.primary_param_key),
-      ) || null,
-    [powerForm?.primary_param_key, powerParams],
+    () => powerParams.find(isPromptPowerParam) || null,
+    [powerParams],
   );
   const composerParams = useMemo(
     () =>
@@ -8929,6 +8801,12 @@ function NodeBottomSettings({
             params={composerParams}
             paramValues={paramValues}
             assetLibrary={assetLibrary}
+            assetReference={{
+              teamID: Number(space?.project.team_id || 0),
+              projectID: projectId,
+              assetCateID: nodeAssetCateId,
+              allowedKinds: promptParam?.asset_kinds,
+            }}
             disabled={powerFormLoading}
             onChange={setPowerPrompt}
             onParamChange={setParamValue}
@@ -8961,6 +8839,11 @@ function NodeBottomSettings({
           params={agentComposerParams}
           paramValues={paramValues}
           assetLibrary={assetLibrary}
+          assetReference={{
+            teamID: Number(space?.project.team_id || 0),
+            projectID: projectId,
+            assetCateID: nodeAssetCateId,
+          }}
           onChange={setAgentPrompt}
           onParamChange={setAgentParamValue}
           onAssetReference={handleAssetReference}
@@ -9332,7 +9215,7 @@ function FlowFeedbackField({
       </fieldset>
     );
   }
-  if (field.type === "textarea") {
+  if (field.type === "prompt" || field.type === "textarea") {
     return (
       <label className="ws-flow-feedback-field">
         <span>
@@ -9503,23 +9386,34 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
               status: "running",
             },
           }));
-          void onRunBackendNode(sourceNode).catch((error) => {
-            setRunningNode?.((current) => ({
-              ...current,
-              [node.id]: {
-                ...(current[node.id] || {
-                  nodeId: node.id,
-                  title: node.title,
-                  startedAt: Date.now(),
-                  progress: 8,
-                }),
-                status: "error",
-              },
-            }));
-            toast.error(
-              error instanceof Error ? error.message : "分组运行失败",
-            );
-          });
+          void onRunBackendNode(sourceNode)
+            .then(() => {
+              setRunningNode?.((current) =>
+                omitRunningNode(current, node.id),
+              );
+            })
+            .catch((error) => {
+              setRunningNode?.((current) => ({
+                ...current,
+                [node.id]: {
+                  ...(current[node.id] || {
+                    nodeId: node.id,
+                    title: node.title,
+                    startedAt: Date.now(),
+                    progress: 8,
+                  }),
+                  status: "error",
+                },
+              }));
+              toast.error(
+                error instanceof Error ? error.message : "分组运行失败",
+              );
+              window.setTimeout(() => {
+                setRunningNode?.((current) =>
+                  omitRunningNode(current, node.id),
+                );
+              }, 1400);
+            });
         }
       : undefined;
     return (
@@ -9904,7 +9798,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
     if (node.kind === "image") {
       const preview = nodeDetailPreview(node);
       const contentOutput = nodeEnergonOutput(node);
-      const useContentView = contentOutputNeedsRenderer(contentOutput);
+      const useContentView = contentOutputNeedsRenderer(contentOutput, preview);
       const className = [
         "ws-node-image-wrap",
         selected ? "is-selected" : "",
@@ -9964,7 +9858,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
     if (node.kind === "video") {
       const preview = nodeDetailPreview(node);
       const contentOutput = nodeEnergonOutput(node);
-      const useContentView = contentOutputNeedsRenderer(contentOutput);
+      const useContentView = contentOutputNeedsRenderer(contentOutput, preview);
       const className = [
         "ws-node-video-wrap",
         selected ? "is-selected" : "",
@@ -10046,7 +9940,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
       : rich
         ? { rich }
         : displayText || preview.text;
-    const useContentView = contentOutputNeedsRenderer(contentOutput);
+    const useContentView = contentOutputNeedsRenderer(contentOutput, preview);
     const hasTextMedia = Boolean(
       preview.imageUrl || preview.videoUrl || preview.audioUrl,
     );
@@ -10326,7 +10220,7 @@ function PowerNodeGeneratedContent({
   const textRef = useRef<HTMLDivElement>(null);
   const followStreamRef = useRef(true);
   const caption = mediaPreviewCaption(preview);
-  const useContentView = contentOutputNeedsRenderer(output);
+  const useContentView = contentOutputNeedsRenderer(output, preview);
 
   useEffect(() => {
     if (!streaming) {

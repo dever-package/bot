@@ -56,14 +56,24 @@ func (s Service) findSimilarMemory(ctx context.Context, owner memoryOwner, scope
 	if probe == "" {
 		return nil
 	}
-	request := MemoryListRequest{Scope: scope, ContextKey: contextKey, AgentKey: agentKey, SessionID: sessionID}
-	rows := memorymodel.NewMemoryModel().Select(ctx, map[string]any{
-		"owner_type": owner.OwnerType, "owner_id": owner.OwnerID, "status": memorymodel.StatusEnabled,
-	}, map[string]any{"order": "main.importance desc,main.id desc", "limit": 120})
+	values := memoryScopeValues(scope, contextKey, agentKey, sessionID)
+	rows := memorymodel.NewMemoryModel().Select(ctx, memoryScopeFilter(owner, scope, values), map[string]any{
+		"order": "main.importance desc,main.id desc", "limit": 200,
+	})
 	for _, row := range rows {
-		if row != nil && memoryMatchesScope(*row, request) && TextSimilar(probe, row.Title+" "+row.Content) {
+		if row != nil && TextSimilar(probe, row.Title+" "+row.Content) {
 			return row
 		}
 	}
 	return nil
+}
+
+func (s Service) findMemoryByKey(ctx context.Context, owner memoryOwner, scope string, scopeValues map[string]any, key string) *memorymodel.Memory {
+	key = normalizeMemoryKey(key)
+	if key == "" {
+		return nil
+	}
+	filter := memoryScopeFilter(owner, scope, scopeValues)
+	filter["key"] = key
+	return memorymodel.NewMemoryModel().Find(ctx, filter)
 }

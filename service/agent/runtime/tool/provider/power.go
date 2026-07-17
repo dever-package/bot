@@ -24,6 +24,7 @@ type Transport struct {
 func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig, parameters map[string]any, gateway energonservice.GatewayService, transport Transport, references []MediaReference) Tool {
 	name := FunctionName("power_", power.Key)
 	countPlan := buildMediaCountPlan(power, config.Params)
+	seriesPlan := buildMediaSeriesPlan(power, config.Params, references)
 	toolReferences := references
 	if !isMediaPower(power) {
 		toolReferences = nil
@@ -31,17 +32,41 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 		toolReferences = supportedMediaReferences(references, config.Params)
 	}
 	referenceStore := newMediaReferenceStore(toolReferences)
+	prepareCall := func(arguments map[string]any) (int, map[string]any, error) {
+		currentReferences := referenceStore.Snapshot()
+		count, err := mediaExecutionCount(power, arguments, countPlan)
+		if err != nil {
+			return 0, nil, err
+		}
+		arguments, err = seriesPlan.apply(arguments)
+		if err != nil {
+			return 0, nil, err
+		}
+		arguments, _, err = ApplyMediaReferences(arguments, config.Params, currentReferences)
+		if err != nil {
+			return 0, nil, err
+		}
+		input, err := preparePowerInput(mediaProviderArguments(arguments, countPlan), config.Params)
+		if err != nil {
+			return 0, nil, err
+		}
+		return count, input, nil
+	}
 	currentDefinition := func() Definition {
 		currentReferences := referenceStore.Snapshot()
+		toolParameters := MediaReferencesParameters(parameters, currentReferences, config.Params)
+		toolParameters = mediaToolParameters(toolParameters, countPlan)
+		toolParameters = mediaSeriesParameters(toolParameters, seriesPlan)
 		return Definition{
 			Name:                  name,
 			Title:                 strings.TrimSpace(power.Name),
 			Kind:                  strings.TrimSpace(power.Kind),
-			Description:           powerToolDescription(power, countPlan) + MediaReferencesDescription(currentReferences),
-			Parameters:            mediaToolParameters(MediaReferencesParameters(parameters, currentReferences, config.Params), countPlan),
+			Description:           powerToolDescription(power) + MediaReferencesDescription(currentReferences) + seriesPlan.description(),
+			Parameters:            toolParameters,
 			ActivityParameterKeys: powerActivityParameterKeys(config.Params),
 			ActivityCountKey:      countPlan.key,
 			ActivityPromptKey:     countPlan.promptKey,
+			Execution:             ExecutionPolicy{PreventDuplicateRecovery: true},
 		}
 	}
 	return Tool{
@@ -50,17 +75,12 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 		AddMediaReferences: func(values []MediaReference) {
 			referenceStore.Add(supportedMediaReferences(values, config.Params))
 		},
+		ValidateArguments: func(arguments map[string]any) error {
+			_, _, err := prepareCall(arguments)
+			return err
+		},
 		Handle: func(ctx context.Context, call Call) (Result, error) {
-			currentReferences := referenceStore.Snapshot()
-			count, err := mediaExecutionCount(power, call.Arguments, countPlan)
-			if err != nil {
-				return Result{}, err
-			}
-			arguments, _, err := ApplyMediaReferences(call.Arguments, config.Params, currentReferences)
-			if err != nil {
-				return Result{}, err
-			}
-			input, err := preparePowerInput(mediaProviderArguments(arguments, countPlan), config.Params)
+			count, input, err := prepareCall(call.Arguments)
 			if err != nil {
 				return Result{}, err
 			}
@@ -176,15 +196,15 @@ func executePower(ctx context.Context, requestID string, powerKey string, input 
 	return output, nil
 }
 
-func powerToolDescription(power energonmodel.Power, countPlan mediaCountPlan) string {
-	description := "调用已挂载能力“" + strings.TrimSpace(power.Name) + "”"
+func powerToolDescription(power energonmodel.Power) string {
+	description := "使用已挂载能力“" + strings.TrimSpace(power.Name) + "”"
+	if isMediaPower(power) {
+		return description + "生成" + mediaPowerLabel(power) + "。"
+	}
 	if kind := strings.TrimSpace(power.Kind); kind != "" {
-		description += "，能力类型为 " + kind
+		return description + "执行" + kind + "任务。"
 	}
-	if countPlan.key != "" {
-		description += "。用户要求多个结果时，必须在一次调用中设置 " + countPlan.key + "；提示词只描述每个独立结果的共同要求，禁止把多个结果合并成一个素材、合集或文件"
-	}
-	return description + "。只在用户任务确实需要该能力时调用。"
+	return description + "完成任务。"
 }
 
 func powerErrorMessage(payload map[string]any, fallback string) string {

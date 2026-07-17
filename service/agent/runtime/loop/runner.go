@@ -11,7 +11,6 @@ import (
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	energonmodel "github.com/dever-package/bot/model/energon"
-	runtimeartifact "github.com/dever-package/bot/service/agent/runtime/artifact"
 	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
 	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
@@ -34,7 +33,6 @@ type execution struct {
 	agent              agentmodel.Agent
 	power              energonmodel.Power
 	sessionID          uint64
-	userMessageID      uint64
 	assistantMessageID uint64
 	prompt             string
 	input              map[string]any
@@ -46,6 +44,9 @@ type execution struct {
 	completion         chan runCompletion
 	cleanup            func()
 	mediaReferences    []runtimeprovider.MediaReference
+	priorKnowledgeUsed bool
+	snapshotHistoryLen int
+	snapshotMediaLen   int
 	scope              runtimescope.Scope
 	scopedContext      context.Context
 	checkpoint         runCheckpoint
@@ -56,14 +57,6 @@ type modelTransport struct {
 	Host    string
 	Path    string
 	Headers map[string]string
-}
-
-type modelCallConfig struct {
-	Role              string
-	Tools             []any
-	ToolChoice        any
-	ParallelToolCalls bool
-	Publish           bool
 }
 
 func (execution execution) close() {
@@ -83,14 +76,29 @@ type modelStepResult struct {
 	Attempts            int
 }
 
+type modelCallError struct {
+	code    string
+	message string
+}
+
+func (err modelCallError) Error() string {
+	return err.message
+}
+
+func (err modelCallError) ErrorCode() string {
+	return err.code
+}
+
 type toolStepResult struct {
-	result  runtimeprovider.Result
-	err     error
-	content string
-	typeKey string
-	title   string
-	status  string
-	payload map[string]any
+	result      runtimeprovider.Result
+	err         error
+	receiptable bool
+	blockRetry  bool
+	content     string
+	typeKey     string
+	title       string
+	status      string
+	payload     map[string]any
 }
 
 func (s Service) run(controller *runController, execution execution) {
@@ -126,7 +134,7 @@ func (s Service) run(controller *runController, execution execution) {
 				return
 			}
 		case runPhaseModel:
-			maxSteps := stepLimits.forDocument(state.documentID > 0)
+			maxSteps := stepLimits.current(state.awaitingDelivery)
 			if state.modelStep > maxSteps {
 				s.finish(&state, finishOutcome{
 					status: runStatusFail, text: state.lastText,
@@ -149,11 +157,15 @@ func (s Service) run(controller *runController, execution execution) {
 }
 
 func (s Service) runModelStep(ctx context.Context, controller *runController, state *runState, stepLimits modelStepLimits) bool {
-	result, err := s.callModel(ctx, controller, state.execution, state.input, state.history, state.documentID > 0, "auto")
+	requiredToolName := strings.TrimSpace(state.requiredToolName)
+	toolChoice := any("auto")
+	if requiredToolName != "" {
+		toolChoice = botprotocol.ForcedFunctionToolChoice(requiredToolName)
+	}
+	result, err := s.callModel(ctx, controller, state.execution, state.input, state.history, toolChoice)
 	calls := normalizeToolCallIDs(result.ToolCalls)
-	calls = documentStepToolCalls(state.documentID, calls)
 	result.ToolCalls = calls
-	hasVisibleText := state.AppendVisibleText(result.Text)
+	state.AppendVisibleText(result.Text)
 	if err != nil {
 		if ctx.Err() != nil {
 			s.finishContext(controller, state)
@@ -165,20 +177,24 @@ func (s Service) runModelStep(ctx context.Context, controller *runController, st
 		})
 		return false
 	}
-
-	if err := s.prepareDocumentModelStep(ctx, state, result); err != nil {
+	state.requiredToolName = ""
+	if requiredToolName != "" && !hasToolCall(calls, requiredToolName) {
 		s.finish(state, finishOutcome{
-			status: runStatusFail, text: state.lastText, message: err.Error(),
-			stepType: "error", stepTitle: "保存图文内容失败", stepStatus: stepStatusFail,
+			status: runStatusFail, text: state.lastText,
+			message:    fmt.Sprintf("模型未调用完成当前任务所需的工具: %s", requiredToolName),
+			stepType:   "error",
+			stepTitle:  "必要工具未调用",
+			stepStatus: stepStatusFail,
 		})
 		return false
 	}
+
 	if len(calls) == 0 {
-		return s.finishModelOutput(state, result, stepLimits)
+		return s.finishModelOutput(ctx, controller, state, result, stepLimits)
 	}
 
-	maxSteps := stepLimits.forDocument(state.documentID > 0)
-	if state.modelStep >= maxSteps && !terminalToolCalls(state.execution.registry, calls, state.documentID > 0) {
+	maxSteps := stepLimits.withDelivery
+	if state.modelStep >= maxSteps && !endsWithTerminalToolCall(calls) {
 		state.MarkFinal(runStatusFail, state.lastText, nil, fmt.Sprintf("智能体达到最大步骤数 %d", maxSteps))
 		if !s.commitFinalRuntimeStep(state, "model", modelStepTitle(result), result.Text, map[string]any{
 			"finish_reason": result.FinishMode,
@@ -198,7 +214,8 @@ func (s Service) runModelStep(ctx context.Context, controller *runController, st
 	state.phase = runPhaseTool
 	state.pendingTools = calls
 	state.pendingIndex = 0
-	state.pendingVisible = hasVisibleText
+	state.pendingModelText = strings.TrimSpace(result.Text)
+	state.deliveryContinuations = 0
 	return s.commitRuntimeStep(state, "model", modelStepTitle(result), result.Text, map[string]any{
 		"finish_reason": result.FinishMode,
 		"tool_calls":    botprotocol.ToolCallsValue(calls),
@@ -206,26 +223,97 @@ func (s Service) runModelStep(ctx context.Context, controller *runController, st
 	}, stepStatusSuccess)
 }
 
-func (s Service) finishModelOutput(state *runState, result modelStepResult, stepLimits modelStepLimits) bool {
+func (s Service) finishModelOutput(
+	ctx context.Context,
+	controller *runController,
+	state *runState,
+	result modelStepResult,
+	stepLimits modelStepLimits,
+) bool {
 	if isLengthLimitedFinish(result.FinishMode) {
 		return s.continueLengthLimitedOutput(state, result, stepLimits)
 	}
+	if state.execution.agent.KnowledgeCateID > 0 && !state.knowledgeUsed {
+		return s.continueMissingKnowledge(state, result, stepLimits)
+	}
+	if state.awaitingDelivery && !modelStepHasDelivery(state, result) {
+		return s.continueMissingDelivery(state, result, stepLimits)
+	}
+	if shouldReviewCompletion(state) {
+		review, err := s.inspectCompletion(ctx, controller, state, result)
+		if ctx.Err() != nil {
+			s.finishContext(controller, state)
+			return false
+		}
+		if err != nil {
+			logCompletionReviewError(state, err)
+			state.completionReviews++
+			if state.completionReviews >= maxCompletionReviews {
+				s.finish(state, finishOutcome{
+					status: runStatusFail, text: state.lastText,
+					message:    "模型完成检查连续失败",
+					stepType:   "error",
+					stepTitle:  "完成检查失败",
+					stepStatus: stepStatusFail,
+				})
+				return false
+			}
+			state.awaitingDelivery = true
+			return s.continueModelOutput(
+				state,
+				result,
+				completionContinuationInput("", ""),
+				"completion_continuation_fallback",
+				stepStatusWarning,
+			)
+		} else if review.Status == "continue" {
+			state.completionReviews++
+			state.requiredToolName = review.NextTool
+			if review.NextTool == "" {
+				if state.completionReviews >= maxCompletionReviews {
+					s.finish(state, finishOutcome{
+						status: runStatusFail, text: state.lastText,
+						message:    "模型连续未完成当前任务",
+						stepType:   "error",
+						stepTitle:  "任务未完成",
+						stepStatus: stepStatusFail,
+					})
+					return false
+				}
+				state.awaitingDelivery = true
+			}
+			return s.continueModelOutput(
+				state,
+				result,
+				completionContinuationInput(review.NextAction, review.NextTool),
+				"completion_continuation",
+				stepStatusWarning,
+			)
+		}
+	}
+	return s.finishImplicitModelOutput(state, result)
+}
+
+func (s Service) finishImplicitModelOutput(state *runState, result modelStepResult) bool {
 	text := strings.TrimSpace(state.lastText)
 	output := map[string]any(result.Output)
 	if output == nil {
 		output = map[string]any{}
 	}
-	if text == "" && !hasDisplayableOutcome(state, output) {
+	if !modelStepHasDelivery(state, result) {
 		s.finish(state, finishOutcome{
 			status: runStatusFail, message: "模型未返回可展示内容",
 			stepType: "error", stepTitle: "模型输出为空", stepStatus: stepStatusFail,
 		})
 		return false
 	}
+	appendModelHistory(state, result.Text)
 	output["event"] = "final"
 	output["text"] = text
 	output["completion_mode"] = "implicit"
 	output["knowledge_used"] = state.knowledgeUsed
+	state.awaitingDelivery = false
+	state.deliveryContinuations = 0
 	state.MarkFinal(runStatusSuccess, text, output, "")
 	if !s.commitFinalRuntimeStep(state, "model", modelStepTitle(result), result.Text, map[string]any{
 		"finish_reason": result.FinishMode,
@@ -235,6 +323,24 @@ func (s Service) finishModelOutput(state *runState, result modelStepResult, step
 	}
 	s.finishCheckpoint(state)
 	return false
+}
+
+const maxKnowledgeContinuations = 1
+
+func (s Service) continueMissingKnowledge(state *runState, result modelStepResult, stepLimits modelStepLimits) bool {
+	maxSteps := stepLimits.current(state.awaitingDelivery)
+	if state.modelStep >= maxSteps || state.knowledgeContinuations >= maxKnowledgeContinuations {
+		s.finish(state, finishOutcome{
+			status: runStatusFail, text: state.lastText,
+			message:  "模型未按要求读取绑定知识库",
+			stepType: "error", stepTitle: "缺少知识依据", stepStatus: stepStatusFail,
+		})
+		return false
+	}
+	state.knowledgeContinuations++
+	return s.continueModelOutput(
+		state, result, knowledgeContinuationInput(), "knowledge_required", stepStatusWarning,
+	)
 }
 
 func isLengthLimitedFinish(value string) bool {
@@ -248,7 +354,7 @@ func isLengthLimitedFinish(value string) bool {
 
 func (s Service) continueLengthLimitedOutput(state *runState, result modelStepResult, stepLimits modelStepLimits) bool {
 	currentStep := state.modelStep
-	maxSteps := stepLimits.forDocument(state.documentID > 0)
+	maxSteps := stepLimits.current(state.awaitingDelivery)
 	if currentStep >= maxSteps {
 		message := fmt.Sprintf("模型输出因长度限制仍未完成，已达到最大步骤数 %d", maxSteps)
 		output := map[string]any(result.Output)
@@ -267,28 +373,61 @@ func (s Service) continueLengthLimitedOutput(state *runState, result modelStepRe
 		s.finishCheckpoint(state)
 		return false
 	}
-	if currentStep == 1 {
-		state.history = append(state.history, userHistoryMessage(state.execution.input))
-	}
-	state.history = append(state.history, assistantHistoryMessage(result.Text))
+	return s.continueModelOutput(
+		state, result, lengthContinuationInput(), "length_continuation", stepStatusSuccess,
+	)
+}
+
+func (s Service) continueModelOutput(state *runState, result modelStepResult, input map[string]any, protocol string, status string) bool {
+	currentStep := state.modelStep
+	appendModelHistory(state, result.Text)
 	state.phase = runPhaseModel
 	state.modelStep++
-	state.input = lengthContinuationInput(state.documentID)
+	state.input = input
 	return s.commitRuntimeStep(state, "model", modelStepTitle(result), result.Text, map[string]any{
 		"finish_reason": result.FinishMode,
 		"timing":        modelTiming(state.execution, currentStep, result),
-		"protocol":      "length_continuation",
-	}, stepStatusSuccess)
+		"protocol":      protocol,
+	}, status)
+}
+
+func appendModelHistory(state *runState, text string) {
+	if state == nil {
+		return
+	}
+	if state.modelStep == 1 {
+		state.history = append(state.history, userHistoryMessage(state.execution.input))
+	}
+	if text = strings.TrimSpace(text); text != "" {
+		state.history = append(state.history, assistantHistoryMessage(text))
+	}
+}
+
+func hasToolCall(calls []botprotocol.ToolCall, name string) bool {
+	for _, call := range calls {
+		if strings.EqualFold(strings.TrimSpace(call.Name), strings.TrimSpace(name)) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasDisplayableOutcome(state *runState, output map[string]any) bool {
 	if state == nil {
 		return false
 	}
-	if state.documentID > 0 || len(state.artifacts) > 0 || len(state.activities) > 0 {
+	if state.documentID > 0 {
 		return true
 	}
-	for _, key := range []string{"interaction", "document", "artifacts", "images", "videos", "audios", "files", "rich", "content"} {
+	if hasDeliverableArtifacts(state.artifacts["artifacts"]) || hasDeliverableArtifacts(output["artifacts"]) {
+		return true
+	}
+	for _, key := range []string{"images", "videos", "audios", "files", "rich", "content"} {
+		if runtimemessageoutput.HasValue(state.artifacts[key]) {
+			return true
+		}
+	}
+	for _, key := range []string{"interaction", "document", "images", "videos", "audios", "files", "rich", "content"} {
 		if runtimemessageoutput.HasValue(output[key]) {
 			return true
 		}
@@ -296,36 +435,60 @@ func hasDisplayableOutcome(state *runState, output map[string]any) bool {
 	return false
 }
 
-func terminalToolCalls(registry *runtimetool.Registry, calls []botprotocol.ToolCall, documentMode bool) bool {
-	if registry == nil || len(calls) == 0 {
+func hasDeliverableArtifacts(value any) bool {
+	artifacts := artifactValues(value)
+	if len(artifacts) == 0 {
+		return runtimemessageoutput.HasValue(value)
+	}
+	for _, artifact := range artifacts {
+		switch strings.ToLower(strings.TrimSpace(botprotocol.AsText(artifact["status"]))) {
+		case "failed", "fail", "canceled", "cancelled":
+			continue
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+func modelStepHasDelivery(state *runState, result modelStepResult) bool {
+	return strings.TrimSpace(result.Text) != "" || hasDisplayableOutcome(state, result.Output)
+}
+
+const maxDeliveryContinuations = 1
+
+func (s Service) continueMissingDelivery(state *runState, result modelStepResult, stepLimits modelStepLimits) bool {
+	currentStep := state.modelStep
+	if currentStep >= stepLimits.withDelivery || state.deliveryContinuations >= maxDeliveryContinuations {
+		s.finish(state, finishOutcome{
+			status: runStatusFail, text: state.lastText,
+			message:    "工具执行后未交付最终结果",
+			stepType:   "error",
+			stepTitle:  "缺少最终交付",
+			stepStatus: stepStatusWarning,
+		})
 		return false
 	}
-	terminalFound := false
-	for _, call := range calls {
-		definition, exists := registry.Definition(call.Name)
-		if !exists {
-			return false
-		}
-		switch strings.ToLower(strings.TrimSpace(definition.Kind)) {
-		case "control", "interaction", "presentation":
-			terminalFound = true
-		default:
-			if !documentMode || !runtimeartifact.IsSupportedKind(definition.Kind) {
-				return false
-			}
-		}
+	state.deliveryContinuations++
+	return s.continueModelOutput(
+		state,
+		result,
+		deliveryContinuationInput(),
+		"delivery_continuation",
+		stepStatusWarning,
+	)
+}
+
+func endsWithTerminalToolCall(calls []botprotocol.ToolCall) bool {
+	if len(calls) == 0 {
+		return false
 	}
-	return terminalFound
+	return isTerminalToolName(calls[len(calls)-1].Name)
 }
 
 func (s Service) runToolStep(ctx context.Context, controller *runController, state *runState) bool {
 	if state.pendingIndex < 0 || state.pendingIndex >= len(state.pendingTools) {
-		state.phase = runPhaseModel
-		state.modelStep++
-		state.input = nextModelInput(state.documentID)
-		state.pendingTools = nil
-		state.pendingIndex = 0
-		state.pendingVisible = false
+		state.continueAfterTools()
 		return true
 	}
 	call := state.pendingTools[state.pendingIndex]
@@ -335,9 +498,13 @@ func (s Service) runToolStep(ctx context.Context, controller *runController, sta
 		return false
 	}
 
-	state.AbsorbToolOutput(completed.result.Content)
 	definition, _ := state.execution.registry.Definition(call.Name)
+	state.AbsorbToolOutput(completed.result.Content, definition)
+	state.recordToolReceipt(call, definition, completed)
 	if completed.err == nil && strings.EqualFold(strings.TrimSpace(definition.Kind), "knowledge") {
+		if !state.knowledgeUsed && state.knowledgeContinuations > 0 {
+			s.resetVisibleOutput(ctx, state)
+		}
 		state.knowledgeUsed = true
 	}
 	if completed.err == nil && call.Name == "load_skill" {
@@ -348,23 +515,22 @@ func (s Service) runToolStep(ctx context.Context, controller *runController, sta
 	state.history = append(state.history, toolHistoryMessage(call, completed.content))
 	state.pendingIndex++
 
-	terminal := completed.err == nil && completed.result.Terminal
+	terminal := completed.result.Terminal
 	if terminal {
 		text := terminalResultText(state.lastText, completed)
 		output := completed.result.Output()
 		output["text"] = text
 		output["completion_mode"] = call.Name
 		output["knowledge_used"] = state.knowledgeUsed
-		state.MarkFinal(runStatusSuccess, text, output, "")
+		status := runStatusSuccess
+		message := ""
+		if completed.err != nil {
+			status = runStatusFail
+			message = completed.err.Error()
+		}
+		state.MarkFinal(status, text, output, message)
 	} else if state.pendingIndex >= len(state.pendingTools) {
-		visible := state.pendingVisible
-		state.phase = runPhaseModel
-		state.modelStep++
-		state.input = nextModelInput(state.documentID)
-		state.pendingTools = nil
-		state.pendingIndex = 0
-		state.pendingVisible = false
-		if visible {
+		if state.continueAfterTools() {
 			_ = s.writeExecutionOutput(ctx, state.execution, map[string]any{"event": "delta", "text": "\n\n"})
 		}
 	}
@@ -384,24 +550,20 @@ func (s Service) runToolStep(ctx context.Context, controller *runController, sta
 
 func terminalResultText(current string, completed toolStepResult) string {
 	current = strings.TrimSpace(current)
-	message := strings.TrimSpace(completed.result.Text)
-	if current == "" {
-		return message
-	}
-	if message == "" || strings.HasSuffix(current, message) {
+	if current != "" {
 		return current
 	}
-	return current
+	return strings.TrimSpace(completed.result.Text)
 }
 
 func (s Service) executeToolStep(ctx context.Context, controller *runController, state *runState, call botprotocol.ToolCall) (toolStepResult, bool) {
 	definition, _ := state.execution.registry.Definition(call.Name)
-	if validationErr := validateFinishResponseCall(state, call); validationErr != nil {
+	if validationErr := validateTerminalCall(state, call); validationErr != nil {
 		return toolStepResult{
 			err:     validationErr,
 			content: toolErrorContent(validationErr.Error()),
 			typeKey: "control",
-			title:   "完成度检查未通过",
+			title:   "终态工具调用无效",
 			status:  stepStatusWarning,
 			payload: map[string]any{
 				"tool_call": firstToolCallValue(call),
@@ -409,8 +571,42 @@ func (s Service) executeToolStep(ctx context.Context, controller *runController,
 			},
 		}, false
 	}
-	if state.documentID > 0 && runtimeartifact.IsSupportedKind(definition.Kind) {
-		return s.scheduleDocumentArtifact(ctx, state, call, definition), false
+	if reused, ok := state.reusableToolStep(call, definition); ok {
+		return reused, false
+	}
+	if repeated, ok := state.repeatedFailureStep(call); ok {
+		return repeated, false
+	}
+	if strings.EqualFold(strings.TrimSpace(call.Name), runtimeprovider.ComposeDocumentToolName) {
+		return s.executeComposeDocumentStep(ctx, state, call), false
+	}
+	if shouldEnqueueArtifact(state.execution, definition) {
+		return s.enqueueMessageArtifact(ctx, state, call, definition), false
+	}
+	if definition.Execution.PreventDuplicateRecovery {
+		arguments, parseErr := botprotocol.ToolCallArguments(call)
+		if parseErr != nil {
+			return buildToolStepResult(state.execution.registry, call, definition, runtimeprovider.Result{}, parseErr), false
+		}
+		if validationErr := state.execution.registry.ValidateArguments(call.Name, arguments); validationErr != nil {
+			return buildToolStepResult(state.execution.registry, call, definition, runtimeprovider.Result{}, validationErr), false
+		}
+		if state.consumeInterruptedToolExecution(call) {
+			err := fmt.Errorf("该工具上次执行结果未能确认，为避免重复执行，本轮不再自动重放: %s", call.Name)
+			return toolStepResult{
+				err: err, receiptable: true, blockRetry: true,
+				content: toolErrorContent(err.Error()),
+				typeKey: "tool", title: "阻止重复工具执行", status: stepStatusWarning,
+				payload: map[string]any{"tool_call": firstToolCallValue(call), "error": err.Error(), "recovery_blocked": true},
+			}, false
+		}
+		if err := state.markToolExecution(call); err != nil {
+			if errors.Is(err, errRunLeaseLost) {
+				controller.Stop("lease_lost")
+				return toolStepResult{}, true
+			}
+			return buildToolStepResult(state.execution.registry, call, definition, runtimeprovider.Result{}, err), false
+		}
 	}
 	streamActivity := shouldStreamToolActivity(definition)
 	artifactBatch, toolErr := s.beginToolArtifactBatch(ctx, state.execution, call, definition, 0, 0)
@@ -423,7 +619,7 @@ func (s Service) executeToolStep(ctx context.Context, controller *runController,
 	childRequestID := deterministicToolRequestID(state.execution.requestID, call)
 	toolResult, recovered := artifactBatch.recoveredResult(ctx)
 	if toolErr == nil && !recovered {
-		toolCtx, cancel := operationContext(ctx, toolRequestTimeout)
+		toolCtx, cancel := operationContext(ctx, definition.RequestTimeout(toolRequestTimeout))
 		controller.SetChild(childRequestID)
 		toolResult, toolErr = state.execution.registry.Execute(toolCtx, call, childRequestID, func(output map[string]any) error {
 			if !streamActivity {
@@ -442,7 +638,7 @@ func (s Service) executeToolStep(ctx context.Context, controller *runController,
 			cancelErr := fmt.Errorf("生成已停止")
 			cancelCtx, cancel := maintenanceContext()
 			toolResult.Content = artifactBatch.fail(cancelCtx, cancelErr.Error())
-			state.AbsorbToolOutput(toolResult.Content)
+			state.AbsorbToolOutput(toolResult.Content, definition)
 			if streamActivity {
 				state.RecordToolActivity(toolFinishedOutput(call, definition, toolResult, cancelErr))
 				_ = s.writeToolFinished(cancelCtx, state.execution, call, definition, toolResult, cancelErr)
@@ -468,13 +664,32 @@ func (s Service) executeToolStep(ctx context.Context, controller *runController,
 		}
 	}
 
+	result := buildToolStepResult(state.execution.registry, call, definition, toolResult, toolErr)
+	if definition.Execution.PreventDuplicateRecovery {
+		state.activeToolExecution = nil
+	}
+	if streamActivity {
+		state.RecordToolActivity(toolFinishedOutput(call, definition, toolResult, toolErr))
+		_ = s.writeToolFinished(ctx, state.execution, call, definition, toolResult, toolErr)
+	}
+	return result, false
+}
+
+func buildToolStepResult(
+	registry *runtimetool.Registry,
+	call botprotocol.ToolCall,
+	definition runtimeprovider.Definition,
+	toolResult runtimeprovider.Result,
+	toolErr error,
+) toolStepResult {
 	result := toolStepResult{
-		result:  toolResult,
-		err:     toolErr,
-		typeKey: "tool",
-		title:   "工具调用: " + call.Name,
-		status:  stepStatusSuccess,
-		payload: map[string]any{"tool_call": firstToolCallValue(call)},
+		result:      toolResult,
+		err:         toolErr,
+		receiptable: true,
+		typeKey:     "tool",
+		title:       "工具调用: " + call.Name,
+		status:      stepStatusSuccess,
+		payload:     map[string]any{"tool_call": firstToolCallValue(call)},
 	}
 	if toolErr != nil {
 		result.content = toolErrorContent(toolFailureText(definition, toolErr))
@@ -486,8 +701,8 @@ func (s Service) executeToolStep(ctx context.Context, controller *runController,
 	} else {
 		result.content = toolResult.ModelContent()
 		result.payload["output"] = toolResult.Output()
-		if len(toolResult.Tools) > 0 {
-			result.payload["added_tools"] = state.execution.registry.Names()
+		if len(toolResult.Tools) > 0 && registry != nil {
+			result.payload["added_tools"] = registry.Names()
 		}
 		if len(toolResult.Interaction) > 0 {
 			result.typeKey = "interaction"
@@ -500,26 +715,7 @@ func (s Service) executeToolStep(ctx context.Context, controller *runController,
 			result.title = "任务完成"
 		}
 	}
-	if streamActivity {
-		state.RecordToolActivity(toolFinishedOutput(call, definition, toolResult, toolErr))
-		_ = s.writeToolFinished(ctx, state.execution, call, definition, toolResult, toolErr)
-	}
-	return result, false
-}
-
-func validateFinishResponseCall(state *runState, call botprotocol.ToolCall) error {
-	if state == nil || !strings.EqualFold(strings.TrimSpace(call.Name), runtimeprovider.FinishResponseToolName) {
-		return nil
-	}
-	arguments, err := botprotocol.ToolCallArguments(call)
-	if err != nil {
-		return err
-	}
-	knowledgeRequired, _ := arguments["knowledge_required"].(bool)
-	if knowledgeRequired && !state.knowledgeUsed {
-		return fmt.Errorf("智能体设定要求读取知识库，但本轮还没有成功调用知识工具；请先读取知识库后继续完成任务")
-	}
-	return nil
+	return result
 }
 
 func (s Service) commitRuntimeStep(state *runState, stepType string, title string, content string, payload any, status string) bool {
@@ -558,30 +754,81 @@ func (s Service) commitRuntimeStepState(
 	return true
 }
 
-func (s Service) callModel(ctx context.Context, controller *runController, execution execution, input map[string]any, history []any, documentMode bool, toolChoice string) (modelStepResult, error) {
-	tools := execution.registry.Definitions()
-	return s.callModelWithConfig(ctx, controller, execution, input, history, modelCallConfig{
-		Role:              modelRolePrompt(execution.prompt, len(tools) > 0, documentMode),
-		Tools:             tools,
-		ToolChoice:        toolChoice,
-		ParallelToolCalls: documentMode,
-		Publish:           true,
-	})
+func (s Service) callModel(ctx context.Context, controller *runController, execution execution, input map[string]any, history []any, toolChoice any) (modelStepResult, error) {
+	return s.callModelRequest(
+		ctx,
+		controller,
+		execution,
+		input,
+		history,
+		execution.registry.Definitions(),
+		toolChoice,
+		true,
+	)
 }
 
-func (s Service) callModelWithConfig(ctx context.Context, controller *runController, execution execution, input map[string]any, history []any, config modelCallConfig) (modelStepResult, error) {
-	result, err := s.callModelOnce(ctx, controller, execution, input, history, config)
+func (s Service) callModelRequest(
+	ctx context.Context,
+	controller *runController,
+	execution execution,
+	input map[string]any,
+	history []any,
+	tools []any,
+	toolChoice any,
+	publish bool,
+) (modelStepResult, error) {
+	return s.callModelRequestWithRole(
+		ctx,
+		controller,
+		execution,
+		modelRolePrompt(execution.prompt),
+		input,
+		history,
+		tools,
+		toolChoice,
+		publish,
+	)
+}
+
+func (s Service) callModelRequestWithRole(
+	ctx context.Context,
+	controller *runController,
+	execution execution,
+	role string,
+	input map[string]any,
+	history []any,
+	tools []any,
+	toolChoice any,
+	publish bool,
+) (modelStepResult, error) {
+	preparedInput := compactModelInput(input, false)
+	preparedHistory := compactModelHistory(role, preparedInput, history, tools, false)
+	result, err := s.callModelOnce(ctx, controller, execution, preparedInput, preparedHistory, role, tools, toolChoice, publish)
 	result.Attempts = 1
-	if err != nil || ctx.Err() != nil || !shouldRetryEmptyModelResult(result) {
+	if ctx.Err() != nil {
 		return result, err
 	}
-
-	retried, retryErr := s.callModelOnce(ctx, controller, execution, input, history, config)
+	if err != nil && !isContextOverflowError(err) {
+		return result, err
+	}
+	if err == nil && !shouldRetryEmptyModelResult(result) {
+		return result, nil
+	}
+	if isContextOverflowError(err) {
+		preparedInput = compactModelInput(input, true)
+		preparedHistory = compactModelHistory(role, preparedInput, history, tools, true)
+	}
+	retried, retryErr := s.callModelOnce(ctx, controller, execution, preparedInput, preparedHistory, role, tools, toolChoice, publish)
 	if !result.ProviderRequestedAt.IsZero() {
 		retried.ProviderRequestedAt = result.ProviderRequestedAt
 	}
 	retried.Attempts = 2
 	return retried, retryErr
+}
+
+func isContextOverflowError(err error) bool {
+	var coded interface{ ErrorCode() string }
+	return errors.As(err, &coded) && strings.EqualFold(strings.TrimSpace(coded.ErrorCode()), "context_overflow")
 }
 
 func shouldRetryEmptyModelResult(result modelStepResult) bool {
@@ -597,7 +844,17 @@ func shouldRetryEmptyModelResult(result modelStepResult) bool {
 	return result.ProviderFinishedAt.Sub(result.ProviderRequestedAt) <= 2*time.Second
 }
 
-func (s Service) callModelOnce(ctx context.Context, controller *runController, execution execution, input map[string]any, history []any, config modelCallConfig) (modelStepResult, error) {
+func (s Service) callModelOnce(
+	ctx context.Context,
+	controller *runController,
+	execution execution,
+	input map[string]any,
+	history []any,
+	role string,
+	tools []any,
+	toolChoice any,
+	publish bool,
+) (modelStepResult, error) {
 	modelCtx, cancel := operationContext(ctx, modelRequestTimeout)
 	defer cancel()
 	providerRequestedAt := time.Now()
@@ -611,11 +868,11 @@ func (s Service) callModelOnce(ctx context.Context, controller *runController, e
 		Host:      execution.transport.Host,
 		Path:      execution.transport.Path,
 		Headers:   execution.transport.Headers,
-		Body:      buildGatewayBody(execution.agent, execution.power, config.Role, input, history, config.Tools, config.ToolChoice, config.ParallelToolCalls),
+		Body:      buildGatewayBody(execution.agent, execution.power, role, input, history, tools, toolChoice, false),
 	})
 	payload := response.Payload()
 	if int(frontstream.InputInt64(payload["status"], 0)) == botprotocol.ResponseStatusFail {
-		return modelStepResult{ProviderRequestedAt: providerRequestedAt, ProviderFinishedAt: time.Now()}, fmt.Errorf("%s", responseMessage(payload, "调用 LLM 能力失败"))
+		return modelStepResult{ProviderRequestedAt: providerRequestedAt, ProviderFinishedAt: time.Now()}, modelErrorFromPayload(payload, "调用 LLM 能力失败")
 	}
 	if botstream.FrameType(payload) == botprotocol.ResponseTypeResult {
 		finishedAt := time.Now()
@@ -639,17 +896,20 @@ func (s Service) callModelOnce(ctx context.Context, controller *runController, e
 		CollectDeltaText: true,
 		CollectOutputs:   true,
 		OnOutput: func(ctx context.Context, output botprotocol.Output) error {
-			if !config.Publish {
-				return nil
-			}
 			if firstDeltaAt.IsZero() && (botstream.OutputEvent(output) == "" || botstream.OutputEvent(output) == "delta") && botprotocol.AsText(output["text"]) != "" {
 				firstDeltaAt = time.Now()
+			}
+			if !publish {
+				return nil
 			}
 			return publisher.Write(ctx, output)
 		},
 	})
 	providerFinishedAt := time.Now()
-	publishErr := publisher.Flush(modelCtx)
+	var publishErr error
+	if publish {
+		publishErr = publisher.Flush(modelCtx)
+	}
 	if collected.Err != nil {
 		stopCtx, stopCancel := stopContext()
 		_ = s.gateway.StopStream(stopCtx, childRequestID)
@@ -666,7 +926,7 @@ func (s Service) callModelOnce(ctx context.Context, controller *runController, e
 		return modelStepResult{Text: collected.State.Text, ProviderRequestedAt: providerRequestedAt, FirstDeltaAt: firstDeltaAt, ProviderFinishedAt: providerFinishedAt}, publishErr
 	}
 	if int(frontstream.InputInt64(collected.Frame["status"], 0)) == botprotocol.ResponseStatusFail {
-		return modelStepResult{Text: collected.State.Text, ProviderRequestedAt: providerRequestedAt, FirstDeltaAt: firstDeltaAt, ProviderFinishedAt: providerFinishedAt}, fmt.Errorf("%s", responseMessage(collected.Frame, "LLM 能力调用失败"))
+		return modelStepResult{Text: collected.State.Text, ProviderRequestedAt: providerRequestedAt, FirstDeltaAt: firstDeltaAt, ProviderFinishedAt: providerFinishedAt}, modelErrorFromPayload(collected.Frame, "LLM 能力调用失败")
 	}
 	output := botprotocol.MergeStreamFinal(
 		collected.State.Outputs,
@@ -680,6 +940,14 @@ func (s Service) callModelOnce(ctx context.Context, controller *runController, e
 	result.FirstDeltaAt = firstDeltaAt
 	result.ProviderFinishedAt = providerFinishedAt
 	return result, nil
+}
+
+func modelErrorFromPayload(payload map[string]any, fallback string) error {
+	output := botprotocol.ExtractOutput(payload)
+	return modelCallError{
+		code:    strings.TrimSpace(botprotocol.AsText(output["error_code"])),
+		message: responseMessage(payload, fallback),
+	}
 }
 
 func isEmptyModelStepResult(result modelStepResult) bool {
@@ -730,22 +998,19 @@ func firstToolCallValue(call botprotocol.ToolCall) any {
 }
 
 type modelStepLimits struct {
-	standard int
-	hard     int
+	standard     int
+	withDelivery int
 }
 
-func (limits modelStepLimits) forDocument(document bool) int {
-	if document {
-		return limits.hard
+func (limits modelStepLimits) current(awaitingDelivery bool) int {
+	if awaitingDelivery {
+		return limits.withDelivery
 	}
 	return limits.standard
 }
 
 func loadModelStepLimits(ctx context.Context, agent agentmodel.Agent) modelStepLimits {
-	config := agentmodel.DefaultRuntimeConfig()
-	if row := agentmodel.NewRuntimeConfigModel().Find(ctx, map[string]any{"id": agentmodel.DefaultRuntimeConfigID}); row != nil {
-		config = runtimeconfig.WithDefaults(*row)
-	}
+	config := runtimeconfig.Load(ctx)
 	hard := config.HardMaxAutoSteps
 	if hard <= 0 {
 		hard = 1
@@ -760,7 +1025,11 @@ func loadModelStepLimits(ctx context.Context, agent agentmodel.Agent) modelStepL
 	if standard > hard {
 		standard = hard
 	}
-	return modelStepLimits{standard: standard, hard: hard}
+	withDelivery := standard
+	if withDelivery < hard {
+		withDelivery++
+	}
+	return modelStepLimits{standard: standard, withDelivery: withDelivery}
 }
 
 func (s Service) finishContext(controller *runController, state *runState) {

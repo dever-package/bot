@@ -24,10 +24,8 @@ func (Energon) PostRequest(c *server.Context) error {
 
 func (Energon) GetDemo(c *server.Context) error {
 	return handlePowerRequest(c, map[string]any{
-		"power": "llm",
-		"input": map[string]any{
-			"text": "你好",
-		},
+		"power":   "llm",
+		"input":   energonservice.PromptInput("你好"),
 		"history": []any{},
 		"options": map[string]any{
 			"stream": isRequestTruthy(c.Input("stream")),
@@ -74,7 +72,7 @@ func handlePowerRequest(c *server.Context, body map[string]any) error {
 		Method:  c.Method(),
 		Host:    c.Header("Host"),
 		Path:    c.Path(),
-		Headers: requestHeaders(c),
+		Headers: botapi.RequestHeaders(c),
 		Body:    body,
 	})
 	return c.JSONPayload(200, resp.Payload())
@@ -87,14 +85,4 @@ func isRequestTruthy(value any) bool {
 	default:
 		return false
 	}
-}
-
-func requestHeaders(c *server.Context) map[string]string {
-	headers := map[string]string{}
-	for _, key := range []string{"Authorization", "Content-Type", "X-Request-ID", "X-Request-Id"} {
-		if value := strings.TrimSpace(c.Header(key)); value != "" {
-			headers[key] = value
-		}
-	}
-	return headers
 }

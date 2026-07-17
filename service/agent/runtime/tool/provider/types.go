@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
@@ -21,6 +22,21 @@ type Definition struct {
 	ActivityParameterKeys []string
 	ActivityCountKey      string
 	ActivityPromptKey     string
+	Execution             ExecutionPolicy
+}
+
+type ExecutionPolicy struct {
+	ReuseSuccessfulArguments bool
+	PreventDuplicateRecovery bool
+	Timeout                  time.Duration
+}
+
+func (definition Definition) RequestTimeout(fallback time.Duration) time.Duration {
+	timeout := definition.Execution.Timeout
+	if timeout <= 0 || (fallback > 0 && timeout > fallback) {
+		return fallback
+	}
+	return timeout
 }
 
 func (definition Definition) Native() map[string]any {
@@ -107,10 +123,13 @@ func (result Result) Output() map[string]any {
 
 type Handler func(context.Context, Call) (Result, error)
 
+type ArgumentValidator func(map[string]any) error
+
 type Tool struct {
 	Definition         Definition
 	ResolveDefinition  func() Definition
 	AddMediaReferences func([]MediaReference)
+	ValidateArguments  ArgumentValidator
 	Handle             Handler
 }
 

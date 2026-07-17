@@ -7,10 +7,11 @@ import (
 )
 
 const (
-	TypeCanvas = "canvas"
-	TypeRobot  = "robot"
-	TypeChat   = "chat"
-	TypeApp    = "app"
+	TypeCanvas    = "canvas"
+	TypeRobot     = "robot"
+	TypeChat      = "chat"
+	TypeApp       = "app"
+	TypeWorkspace = "workspace"
 
 	StatusDisabled int16 = 2
 	StatusEnabled  int16 = 1
@@ -21,6 +22,7 @@ var typeOptions = []map[string]any{
 	{"id": TypeRobot, "value": "机器人"},
 	{"id": TypeChat, "value": "聊天"},
 	{"id": TypeApp, "value": "应用"},
+	{"id": TypeWorkspace, "value": "团队工作区"},
 }
 
 var statusOptions = []map[string]any{

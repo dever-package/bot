@@ -14,7 +14,7 @@ type Version struct {
 	ReleaseID uint64     `dorm:"type:bigint;not null;default:0;comment:团队发布版本"`
 	RequestID string     `dorm:"type:varchar(64);not null;default:'';comment:请求ID"`
 	NodeKey   string     `dorm:"type:varchar(128);not null;default:'';comment:画布节点"`
-	Source    string     `dorm:"type:text;not null;default:'{}';comment:来源信息"`
+	Source    string     `dorm:"type:text;not null;default:'{}';comment:完整来源追溯"`
 	Version   int        `dorm:"type:int;not null;default:1;comment:版本号"`
 	Content   string     `dorm:"type:text;not null;default:'{}';comment:内容"`
 	CreatedAt time.Time  `dorm:"comment:创建时间"`

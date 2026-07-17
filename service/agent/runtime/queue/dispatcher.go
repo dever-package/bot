@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,12 +13,14 @@ import (
 )
 
 type Candidate struct {
-	ID uint64
+	ID  uint64
+	Key string
 }
 
 type Lease struct {
 	ID       uint64
 	WorkerID string
+	Key      string
 }
 
 type Executor interface {
@@ -34,13 +37,15 @@ type Dispatcher interface {
 }
 
 type Config struct {
-	Name             string
-	Concurrency      int
-	PollInterval     time.Duration
-	PollTimeout      time.Duration
-	ShouldIgnore     func(error) bool
-	OnPollError      func(error)
-	OnExecutionError func(Lease, error)
+	Name               string
+	Concurrency        int
+	PerKeyConcurrency  int
+	CandidateScanLimit int
+	PollInterval       time.Duration
+	PollTimeout        time.Duration
+	ShouldIgnore       func(error) bool
+	OnPollError        func(error)
+	OnExecutionError   func(Lease, error)
 }
 
 type databaseDispatcher struct {
@@ -52,6 +57,8 @@ type databaseDispatcher struct {
 	direct      chan uint64
 	slots       chan struct{}
 	active      sync.Map
+	keyMu       sync.Mutex
+	keyActive   map[string]int
 	lastPollLog time.Time
 }
 
@@ -65,6 +72,7 @@ func NewDatabaseDispatcher(backlog Backlog, executor Executor, config Config) Di
 		wake:       make(chan struct{}, 1),
 		direct:     make(chan uint64, max(config.Concurrency*4, 16)),
 		slots:      make(chan struct{}, config.Concurrency),
+		keyActive:  map[string]int{},
 	}
 	runtimeasync.Start(config.Name+" 持久队列", dispatcher.supervise, func(err error) {
 		dispatcher.reportPollError(err)
@@ -76,6 +84,12 @@ func NewDatabaseDispatcher(backlog Backlog, executor Executor, config Config) Di
 func normalizeConfig(config Config) Config {
 	if config.Concurrency < 1 {
 		config.Concurrency = 1
+	}
+	if config.PerKeyConcurrency < 0 {
+		config.PerKeyConcurrency = 0
+	}
+	if config.CandidateScanLimit < config.Concurrency {
+		config.CandidateScanLimit = config.Concurrency
 	}
 	if config.PollInterval <= 0 {
 		config.PollInterval = time.Second
@@ -159,7 +173,11 @@ func (dispatcher *databaseDispatcher) poll() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), dispatcher.config.PollTimeout)
 	defer cancel()
-	candidates, err := dispatcher.backlog.ListRunnable(ctx, capacity)
+	limit := capacity
+	if dispatcher.config.CandidateScanLimit > limit {
+		limit = dispatcher.config.CandidateScanLimit
+	}
+	candidates, err := dispatcher.backlog.ListRunnable(ctx, limit)
 	if err != nil {
 		dispatcher.reportPollError(err)
 		return
@@ -179,9 +197,14 @@ func (dispatcher *databaseDispatcher) start(candidate Candidate) bool {
 	if _, running := dispatcher.active.LoadOrStore(candidate.ID, workerID); running {
 		return true
 	}
+	candidate.Key = normalizeCandidateKey(candidate.Key)
+	if !dispatcher.reserveKey(candidate.Key) {
+		dispatcher.active.Delete(candidate.ID)
+		return true
+	}
 	select {
 	case dispatcher.slots <- struct{}{}:
-		lease := Lease{ID: candidate.ID, WorkerID: workerID}
+		lease := Lease{ID: candidate.ID, WorkerID: workerID, Key: candidate.Key}
 		runtimeasync.Start(dispatcher.config.Name+" 任务执行", func() {
 			dispatcher.execute(lease)
 		}, func(err error) {
@@ -189,6 +212,7 @@ func (dispatcher *databaseDispatcher) start(candidate Candidate) bool {
 		})
 		return true
 	default:
+		dispatcher.releaseKey(candidate.Key)
 		dispatcher.active.Delete(candidate.ID)
 		return false
 	}
@@ -198,6 +222,7 @@ func (dispatcher *databaseDispatcher) execute(lease Lease) {
 	defer func() {
 		dispatcher.active.Delete(lease.ID)
 		<-dispatcher.slots
+		dispatcher.releaseKey(lease.Key)
 		dispatcher.notify()
 	}()
 	if err := dispatcher.executor.Execute(context.Background(), lease); err != nil {
@@ -206,6 +231,36 @@ func (dispatcher *databaseDispatcher) execute(lease Lease) {
 		}
 		dispatcher.reportExecutionError(lease, err)
 	}
+}
+
+func (dispatcher *databaseDispatcher) reserveKey(key string) bool {
+	if key == "" || dispatcher.config.PerKeyConcurrency <= 0 {
+		return true
+	}
+	dispatcher.keyMu.Lock()
+	defer dispatcher.keyMu.Unlock()
+	if dispatcher.keyActive[key] >= dispatcher.config.PerKeyConcurrency {
+		return false
+	}
+	dispatcher.keyActive[key]++
+	return true
+}
+
+func (dispatcher *databaseDispatcher) releaseKey(key string) {
+	if key == "" || dispatcher.config.PerKeyConcurrency <= 0 {
+		return
+	}
+	dispatcher.keyMu.Lock()
+	defer dispatcher.keyMu.Unlock()
+	if dispatcher.keyActive[key] <= 1 {
+		delete(dispatcher.keyActive, key)
+		return
+	}
+	dispatcher.keyActive[key]--
+}
+
+func normalizeCandidateKey(key string) string {
+	return strings.ToLower(strings.TrimSpace(key))
 }
 
 func (dispatcher *databaseDispatcher) reportPollError(err error) {

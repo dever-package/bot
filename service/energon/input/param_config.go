@@ -21,6 +21,7 @@ type PowerParam struct {
 	Required     bool               `json:"required"`
 	UploadRuleID uint64             `json:"upload_rule_id,omitempty"`
 	MaxFiles     int                `json:"max_files,omitempty"`
+	AssetKinds   []string           `json:"asset_kinds,omitempty"`
 	Sort         int                `json:"sort"`
 	Options      []PowerParamOption `json:"options,omitempty"`
 }
@@ -169,12 +170,55 @@ func buildPowerParamRow(
 		Required:     PowerParamRequiresInput(powerParam),
 		UploadRuleID: param.UploadRuleID,
 		MaxFiles:     param.MaxFiles,
+		AssetKinds:   PromptAssetKinds(param),
 		Sort:         config.Sort,
 	}
 	if IsOptionParamType(row.Type) {
 		row.Options = powerParamOptions(ctx, repo, param.ID, config.Filter)
 	}
 	return row
+}
+
+func PromptAssetKinds(param botmodel.Param) []string {
+	if !IsPromptParamType(param.Type) {
+		return nil
+	}
+	flags := []struct {
+		kind    string
+		enabled int16
+	}{
+		{kind: "text", enabled: param.AssetText},
+		{kind: "image", enabled: param.AssetImage},
+		{kind: "audio", enabled: param.AssetAudio},
+		{kind: "video", enabled: param.AssetVideo},
+		{kind: "richtext", enabled: param.AssetRichtext},
+		{kind: "file", enabled: param.AssetFile},
+	}
+	result := make([]string, 0, len(flags))
+	for _, flag := range flags {
+		if flag.enabled == 1 {
+			result = append(result, flag.kind)
+		}
+	}
+	return result
+}
+
+func PromptParamAssetKinds(params []PowerParam, key string) (map[string]struct{}, bool) {
+	key = strings.TrimSpace(key)
+	for _, param := range params {
+		if strings.TrimSpace(param.Key) != key || !IsPromptParamType(param.Type) {
+			continue
+		}
+		result := make(map[string]struct{}, len(param.AssetKinds))
+		for _, kind := range param.AssetKinds {
+			kind = strings.ToLower(strings.TrimSpace(kind))
+			if kind != "" {
+				result[kind] = struct{}{}
+			}
+		}
+		return result, true
+	}
+	return nil, false
 }
 
 func powerParamOptionFilters(
@@ -400,7 +444,7 @@ func powerParamName(param botmodel.Param, serviceParamName string) string {
 }
 
 func powerParamInputKey(serviceParam botmodel.ServiceParam, param botmodel.Param) string {
-	if serviceParam.ParamRule == paramRuleComboMap {
+	if IsPromptParam(param) || serviceParam.ParamRule == paramRuleComboMap {
 		return strings.TrimSpace(param.Key)
 	}
 	return ServiceParamInputKey(serviceParam)

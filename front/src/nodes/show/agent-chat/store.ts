@@ -19,6 +19,7 @@ import {
 } from "./api";
 import { useAgentChatRuns } from "./runs";
 import { useAgentChatDocumentStreams } from "./document-stream";
+import { useAgentChatArtifactSync } from "./artifact-sync";
 import {
   mergeAgentChatDocument,
   type AgentChatDocument,
@@ -26,6 +27,7 @@ import {
 import {
   loadAgentChatReferences,
   type ReferenceComposerParam,
+  type ReferenceInput,
   type ReferenceLoadRequest,
   type ReferencePreview,
   type ReferencePreviewRequest,
@@ -52,12 +54,17 @@ const SESSION_TITLE_SYNC_DELAYS = [500, 1000, 2000, 4000, 8000, 8000];
 
 export function useAgentChatStore({
   agentKey,
+  contextKey: configuredContextKey,
   modalOpen,
   blockMs,
+  lazySession = false,
   assistantApi,
   runtimeApi,
+  requestScope,
 }: AgentChatStoreOptions): AgentChatController {
-  const contextKey = agentKey ? `agent-runtime:${agentKey}` : "";
+  const contextKey =
+    configuredContextKey?.trim() ||
+    (agentKey ? `agent-runtime:${agentKey}` : "");
   const [sessions, setSessions] = useState<AgentChatSession[]>([]);
   const [sessionID, setSessionID] = useState(0);
   const [sessionTitle, setSessionTitle] = useState("新会话");
@@ -199,11 +206,15 @@ export function useAgentChatStore({
 
   const setSessionRunning = useCallback(
     (targetSessionID: number, running: boolean) => {
-      setSessions((current) =>
-        current.map((session) =>
-          session.id === targetSessionID ? { ...session, running } : session,
-        ),
-      );
+      setSessions((current) => {
+        const session = current.find(
+          (candidate) => candidate.id === targetSessionID,
+        );
+        if (!session) {
+          return current;
+        }
+        return upsertSession(current, { ...session, running }, running);
+      });
     },
     [],
   );
@@ -258,6 +269,7 @@ export function useAgentChatStore({
     messages,
     blockMs,
     runtimeApi,
+    requestScope,
     getActiveSessionID,
     getSessionTitle,
     updateSessionMessages,
@@ -274,6 +286,44 @@ export function useAgentChatStore({
     blockMs,
     runtimeApi,
     updateDocument: updateMessageDocument,
+  });
+
+  const refreshArtifactMessages = useCallback(
+    async (targetSessionID: number) => {
+      if (!agentKey || !contextKey || sessionIDRef.current !== targetSessionID) {
+        return;
+      }
+      const payload = await loadAgentChatSession(assistantApi, {
+        agentKey,
+        contextKey,
+        sessionID: targetSessionID,
+        limit: INITIAL_MESSAGE_PAGE_SIZE,
+      });
+      if (sessionIDRef.current !== targetSessionID) {
+        return;
+      }
+      const incoming = runs.mergeMessages(
+        targetSessionID,
+        mapChatMessages(payload.messages),
+      );
+      updateSessionMessages(targetSessionID, (current) =>
+        mergeLatestMessages(current, incoming),
+      );
+    },
+    [
+      agentKey,
+      assistantApi,
+      contextKey,
+      runs.mergeMessages,
+      updateSessionMessages,
+    ],
+  );
+
+  useAgentChatArtifactSync({
+    modalOpen,
+    sessionID,
+    messages,
+    refreshSession: refreshArtifactMessages,
   });
 
   const applySessionPayload = useCallback(
@@ -357,6 +407,13 @@ export function useAgentChatStore({
         syncVisibleView(currentSession.id, cached);
         setSessionLoading(false);
       }
+      if (!currentSession && lazySession) {
+        sessionIDRef.current = 0;
+        setSessionID(0);
+        setSessionTitle("新会话");
+        setMessages([]);
+        return;
+      }
       const payload = await loadAgentChatSession(assistantApi, {
         agentKey,
         contextKey,
@@ -390,6 +447,7 @@ export function useAgentChatStore({
     applySessionPayload,
     assistantApi,
     contextKey,
+    lazySession,
     runs.hasRun,
     syncVisibleView,
   ]);
@@ -442,9 +500,26 @@ export function useAgentChatStore({
     [agentKey, applySessionPayload, assistantApi, contextKey, syncVisibleView],
   );
 
+  const openDraftSession = useCallback(() => {
+    loadTokenRef.current += 1;
+    olderMessagesLoadingRef.current = false;
+    sessionIDRef.current = 0;
+    setSessionID(0);
+    setSessionTitle("新会话");
+    setMessages([]);
+    setSessionLoading(false);
+    setError("");
+  }, []);
+
   const startNewSession = useCallback(
-    () => openSession(0, true),
-    [openSession],
+    async () => {
+      if (lazySession) {
+        openDraftSession();
+        return;
+      }
+      await openSession(0, true);
+    },
+    [lazySession, openDraftSession, openSession],
   );
 
   const renameSession = useCallback(
@@ -493,7 +568,7 @@ export function useAgentChatStore({
         if (nextSession) {
           await openSession(nextSession.id, false);
         } else {
-          await openSession(0, true);
+          await startNewSession();
         }
       } catch (currentError: unknown) {
         const message = runtimeErrorMessage(currentError, "删除会话失败。");
@@ -501,7 +576,7 @@ export function useAgentChatStore({
         throw new Error(message);
       }
     },
-    [assistantApi, openSession, runs.hasRun, sessions],
+    [assistantApi, openSession, runs.hasRun, sessions, startNewSession],
   );
 
   const loadMoreSessions = useCallback(async () => {
@@ -633,8 +708,8 @@ export function useAgentChatStore({
     }
   }, [agentKey, assistantApi, contextKey, saveSessionView]);
 
-  const handleSessionListScroll = useCallback(() => {
-    const element = sessionListRef.current;
+  const handleSessionListScroll = useCallback((currentElement?: HTMLDivElement) => {
+    const element = currentElement || sessionListRef.current;
     if (
       element &&
       element.scrollHeight - element.scrollTop - element.clientHeight <=
@@ -720,6 +795,42 @@ export function useAgentChatStore({
     };
   }, [agentKey, modalOpen, runtimeApi.inputConfig]);
 
+  const send = useCallback(
+    async (input: ReferenceInput) => {
+      if (!input.text.trim() || !agentKey) {
+        return;
+      }
+      if (!sessionIDRef.current && lazySession) {
+        setSessionLoading(true);
+        setError("");
+        try {
+          const payload = await loadAgentChatSession(assistantApi, {
+            agentKey,
+            contextKey,
+            create: true,
+            title: "新会话",
+            limit: INITIAL_MESSAGE_PAGE_SIZE,
+          });
+          applySessionPayload(payload, true);
+        } catch (currentError: unknown) {
+          setError(runtimeErrorMessage(currentError, "创建会话失败。"));
+          return;
+        } finally {
+          setSessionLoading(false);
+        }
+      }
+      await runs.send(input);
+    },
+    [
+      agentKey,
+      applySessionPayload,
+      assistantApi,
+      contextKey,
+      lazySession,
+      runs.send,
+    ],
+  );
+
   return {
     sessionID,
     sessionTitle,
@@ -731,7 +842,8 @@ export function useAgentChatStore({
     running: runs.running,
     stopping: runs.stopping,
     cancelable: runs.cancelable,
-    sendDisabled: !agentKey || !sessionID || sessionLoading || runs.running,
+    sendDisabled:
+      !agentKey || (!sessionID && !lazySession) || sessionLoading || runs.running,
     error,
     inputParams,
     sessionListRef,
@@ -747,7 +859,7 @@ export function useAgentChatStore({
     handleMessageListWheel,
     loadReferences,
     loadReferencePreview,
-    send: runs.send,
+    send,
     stop: runs.stop,
   };
 }

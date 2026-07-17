@@ -2,6 +2,9 @@ package runtimecontext
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -9,17 +12,19 @@ import (
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
+	runtimesessionstate "github.com/dever-package/bot/service/agent/runtime/sessionstate"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 const (
 	softSummaryMessageLimit = 20
-	hardSummaryMessageLimit = 40
 	summaryKeepRecent       = 10
 	summaryBatchLimit       = 100
 	maxSummaryLength        = 8000
-	summaryMessageMaxRunes  = 300
+	summaryMessageMaxRunes  = 800
+	summaryStructuredRunes  = 1200
+	softSummaryMaxRunes     = 18000
 )
 
 type Compactor struct {
@@ -40,12 +45,10 @@ func NewCompactor(gateway energonservice.GatewayService) Compactor {
 	return Compactor{gateway: gateway}
 }
 
-func (c Compactor) Compact(ctx context.Context, sessionID uint64, powerKey string, hard bool) bool {
+func (c Compactor) Compact(ctx context.Context, sessionID uint64, powerKey string) bool {
 	threshold := softSummaryMessageLimit
-	if hard {
-		threshold = hardSummaryMessageLimit
-	}
-	if strings.TrimSpace(powerKey) == "" || !needsCompaction(ctx, sessionID, threshold) {
+	runeThreshold := softSummaryMaxRunes
+	if strings.TrimSpace(powerKey) == "" || !needsCompaction(ctx, sessionID, threshold, runeThreshold) {
 		return false
 	}
 
@@ -60,7 +63,7 @@ func (c Compactor) Compact(ctx context.Context, sessionID uint64, powerKey strin
 		return false
 	}
 	rows := unsummarizedMessages(ctx, *session)
-	if len(rows) <= threshold || len(rows) <= summaryKeepRecent {
+	if !messagesNeedCompaction(rows, threshold, runeThreshold) || len(rows) <= summaryKeepRecent {
 		return false
 	}
 	rows = rows[:len(rows)-summaryKeepRecent]
@@ -73,16 +76,19 @@ func (c Compactor) Compact(ctx context.Context, sessionID uint64, powerKey strin
 		Body: map[string]any{
 			"power":   powerKey,
 			"set":     map[string]any{"role": summaryRole()},
-			"input":   map[string]any{"text": source},
+			"input":   energonservice.PromptInput(source),
 			"options": map[string]any{"stream": false, "temperature": 0},
 		},
 	})
-	if response.Status == botprotocol.ResponseStatusFail {
-		return false
+	summary := ""
+	if response.Status != botprotocol.ResponseStatusFail {
+		summary = normalizeSummary(botprotocol.AsText(botprotocol.ExtractOutput(response.Payload())["text"]))
 	}
-	summary := normalizeSummary(botprotocol.AsText(botprotocol.ExtractOutput(response.Payload())["text"]))
 	if summary == "" {
-		return false
+		summary = fallbackSummary(session.ContextSummary, rows)
+		if summary == "" {
+			return false
+		}
 	}
 	lastMessageID := rows[len(rows)-1].ID
 	if agentmodel.NewMessageModel().Find(ctx, map[string]any{
@@ -101,7 +107,7 @@ func (c Compactor) Compact(ctx context.Context, sessionID uint64, powerKey strin
 	return updated > 0
 }
 
-func needsCompaction(ctx context.Context, sessionID uint64, threshold int) bool {
+func needsCompaction(ctx context.Context, sessionID uint64, threshold int, runeThreshold int) bool {
 	if sessionID == 0 || threshold <= 0 {
 		return false
 	}
@@ -121,9 +127,29 @@ func needsCompaction(ctx context.Context, sessionID uint64, threshold int) bool 
 	}
 	rows := agentmodel.NewMessageModel().Select(ctx, filter, map[string]any{
 		"order": "main.id asc",
-		"limit": threshold + 1,
+		"limit": summaryBatchLimit,
 	})
-	return len(rows) > threshold
+	return messagesNeedCompaction(rows, threshold, runeThreshold)
+}
+
+func messagesNeedCompaction(rows []*agentmodel.Message, threshold int, runeThreshold int) bool {
+	if len(rows) > threshold {
+		return true
+	}
+	if runeThreshold <= 0 {
+		return false
+	}
+	total := 0
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		total += runeCount(row.Text) + runeCount(row.Content) + runeCount(row.Output)
+		if total > runeThreshold {
+			return true
+		}
+	}
+	return false
 }
 
 func acquireCompactionLock(sessionID uint64) func() {
@@ -169,18 +195,208 @@ func summarySource(previous string, rows []*agentmodel.Message) string {
 	}
 	messages := make([]string, 0, len(rows))
 	for _, row := range rows {
-		if row == nil || strings.TrimSpace(row.Text) == "" {
+		if row == nil {
 			continue
 		}
-		message := strings.TrimSpace(row.Role) + ": " + compactMessageText(
-			runtimemessageoutput.NormalizeText(row.Text),
-		)
-		messages = append(messages, message)
+		if message := summaryMessageJSON(row); message != "" {
+			messages = append(messages, message)
+		}
 	}
 	if len(messages) > 0 {
 		parts = append(parts, "需要合并的对话:\n"+strings.Join(messages, "\n"))
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+func summaryMessageJSON(row *agentmodel.Message) string {
+	message := map[string]any{
+		"id": row.ID, "role": strings.TrimSpace(row.Role), "kind": strings.TrimSpace(row.Kind),
+	}
+	if text := compactMessageText(runtimemessageoutput.NormalizeText(row.Text)); text != "" {
+		message["text"] = text
+	}
+	if content := compactSummaryPayload(row.Content, []string{
+		"kind", "data", "interaction", "interaction_response", "interaction_answered", "interaction_data",
+	}); content != "" {
+		message["content"] = content
+	}
+	if output := compactSummaryPayload(row.Output, []string{
+		"event", "interaction", "document", "artifacts", "images", "videos", "audios", "files",
+		"completion_mode", "knowledge_used", "error",
+	}); output != "" {
+		message["output"] = output
+	}
+	if len(message) <= 3 {
+		return ""
+	}
+	encoded, err := json.Marshal(message)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
+}
+
+func compactSummaryPayload(value string, keys []string) string {
+	var source map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(value)), &source); err != nil || len(source) == 0 {
+		return ""
+	}
+	selected := make(map[string]any, len(keys))
+	for _, key := range keys {
+		if current, exists := source[key]; exists && current != nil {
+			selected[key] = current
+		}
+	}
+	if len(selected) == 0 {
+		return ""
+	}
+	return encodeCompactSummaryPayload(selected)
+}
+
+func encodeCompactSummaryPayload(value map[string]any) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	if runeCount(string(encoded)) <= summaryStructuredRunes {
+		return string(encoded)
+	}
+	for key, current := range value {
+		if text, ok := current.(string); ok {
+			value[key] = limitRunes(text, 240)
+		}
+	}
+	encoded, err = json.Marshal(value)
+	if err != nil || runeCount(string(encoded)) > summaryStructuredRunes {
+		return ""
+	}
+	return string(encoded)
+}
+
+func fallbackSummary(previous string, rows []*agentmodel.Message) string {
+	summary, ok := runtimesessionstate.Decode(previous)
+	if !ok {
+		summary = runtimesessionstate.Summary{Version: runtimesessionstate.Version}
+		if previous = strings.TrimSpace(previous); previous != "" {
+			summary.Confirmed = append(summary.Confirmed, limitRunes(previous, 400))
+		}
+	}
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		text := compactMessageText(runtimemessageoutput.NormalizeText(row.Text))
+		switch strings.ToLower(strings.TrimSpace(row.Role)) {
+		case "user":
+			if summary.Goal == "" && text != "" {
+				summary.Goal = text
+			}
+			if text != "" {
+				summary.Confirmed = append(summary.Confirmed, text)
+			}
+			if summary.Interaction.Status == "waiting" {
+				summary.Interaction.Status = "answered"
+			}
+		case "assistant":
+			if text != "" {
+				summary.Completed = append(summary.Completed, text)
+			}
+		}
+		mergeFallbackSummaryPayload(&summary, row.Content)
+		mergeFallbackSummaryPayload(&summary, row.Output)
+	}
+	return runtimesessionstate.Encode(summary)
+}
+
+func mergeFallbackSummaryPayload(summary *runtimesessionstate.Summary, raw string) {
+	if summary == nil {
+		return
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &payload); err != nil {
+		return
+	}
+	if interaction, ok := payload["interaction"].(map[string]any); ok && len(interaction) > 0 {
+		summary.Interaction.Status = "waiting"
+		for _, key := range []string{"question", "prompt", "text", "title"} {
+			if value := strings.TrimSpace(fmt.Sprint(interaction[key])); value != "" && value != "<nil>" {
+				summary.Interaction.Question = value
+				break
+			}
+		}
+	}
+	if answered, _ := payload["interaction_answered"].(bool); answered {
+		summary.Interaction.Status = "answered"
+	}
+	mergeInteractionResponse(summary, payload["interaction_response"])
+	appendFallbackArtifacts(summary, payload["document"])
+	appendFallbackArtifacts(summary, payload["artifacts"])
+}
+
+func mergeInteractionResponse(summary *runtimesessionstate.Summary, value any) {
+	response, ok := value.(map[string]any)
+	if !ok {
+		return
+	}
+	data, ok := response["data"].(map[string]any)
+	if !ok || len(data) == 0 {
+		return
+	}
+	summary.Interaction.Status = "answered"
+	keys := make([]string, 0, len(data))
+	for key := range data {
+		if key = strings.TrimSpace(key); key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if value := compactInteractionValue(data[key]); value != "" {
+			summary.Confirmed = append(summary.Confirmed, key+": "+value)
+		}
+	}
+}
+
+func compactInteractionValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return limitRunes(text, 240)
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return limitRunes(fmt.Sprint(value), 240)
+	}
+	return limitRunes(string(encoded), 240)
+}
+
+func appendFallbackArtifacts(summary *runtimesessionstate.Summary, value any) {
+	switch current := value.(type) {
+	case map[string]any:
+		id := firstSummaryValue(current, "id", "document_id", "artifact_id", "key")
+		if id == "" {
+			return
+		}
+		summary.Artifacts = append(summary.Artifacts, runtimesessionstate.Artifact{
+			Type: firstSummaryValue(current, "type", "kind"),
+			ID:   id, Status: firstSummaryValue(current, "status", "state"),
+		})
+	case []any:
+		for _, item := range current {
+			appendFallbackArtifacts(summary, item)
+		}
+	}
+}
+
+func firstSummaryValue(values map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value := strings.TrimSpace(fmt.Sprint(values[key]))
+		if value != "" && value != "<nil>" {
+			return value
+		}
+	}
+	return ""
 }
 
 func compactMessageText(value string) string {
@@ -197,21 +413,15 @@ func compactMessageText(value string) string {
 func summaryRole() string {
 	return strings.Join([]string{
 		"你是对话上下文压缩器。",
-		"将已有摘要和新增对话合并为一份紧凑、准确、可供后续模型继续工作的摘要。",
-		"保留用户目标、约束、偏好、已确认事实、关键产出和未完成事项。",
+		"将已有摘要和新增对话合并为一份紧凑、准确、可供后续模型继续工作的结构化状态。",
+		"保留用户目标、约束、已确认事实、已完成步骤、待完成事项、产物标识和交互等待状态。",
+		"interaction.status 只能是 none、waiting、answered；产物必须保留 type、id、status。",
 		"删除寒暄、重复内容和无关措辞；不要补充对话中不存在的信息。",
-		"直接输出摘要正文，不要解释过程。",
+		"只输出合法 JSON，不要 Markdown，不要解释过程。",
+		`输出格式：{"version":1,"goal":"","constraints":[],"confirmed":[],"completed":[],"pending":[],"artifacts":[{"type":"","id":"","status":""}],"interaction":{"status":"none","question":""}}`,
 	}, "\n")
 }
 
 func normalizeSummary(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	runes := []rune(value)
-	if len(runes) > maxSummaryLength {
-		return strings.TrimSpace(string(runes[:maxSummaryLength]))
-	}
-	return value
+	return runtimesessionstate.Normalize(value)
 }

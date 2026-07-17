@@ -9,7 +9,6 @@ import (
 	"time"
 
 	teammodel "github.com/dever-package/bot/model/team"
-	assetservice "github.com/dever-package/bot/service/asset"
 	"github.com/dever-package/bot/service/stream"
 )
 
@@ -263,6 +262,15 @@ func (s Service) StopProjectRun(ctx context.Context, projectID uint64, runID uin
 	return s.stopResolvedRun(ctx, run)
 }
 
+func (s Service) StopBodyRun(ctx context.Context, bodyID uint64, runID uint64, requestID string) (map[string]any, error) {
+	run := s.resolveBodyRun(ctx, bodyID, runID, requestID)
+	if run == nil {
+		return nil, fmt.Errorf("运行不存在")
+	}
+	_ = s.gateway.StopStream(ctx, run.RequestID)
+	return s.stopResolvedRun(ctx, run)
+}
+
 func (s Service) stopResolvedRun(ctx context.Context, run *teammodel.Run) (map[string]any, error) {
 	if run == nil {
 		return nil, fmt.Errorf("运行不存在")
@@ -293,6 +301,10 @@ func (s Service) RunStatus(ctx context.Context, runID uint64, requestID string) 
 func (s Service) ProjectRunStatus(ctx context.Context, projectID uint64, runID uint64, requestID string) (map[string]any, error) {
 	run := s.resolveProjectRun(ctx, projectID, runID, requestID)
 	return s.resolvedRunStatus(ctx, run)
+}
+
+func (s Service) BodyRunStatus(ctx context.Context, bodyID uint64, runID uint64, requestID string) (map[string]any, error) {
+	return s.resolvedRunStatus(ctx, s.resolveBodyRun(ctx, bodyID, runID, requestID))
 }
 
 func (s Service) resolvedRunStatus(ctx context.Context, run *teammodel.Run) (map[string]any, error) {
@@ -366,6 +378,16 @@ func (s Service) resolveProjectRun(ctx context.Context, projectID uint64, runID 
 		return s.repo.FindRunInProject(ctx, runID, projectID)
 	}
 	return s.repo.FindRunByRequestIDInProject(ctx, requestID, projectID)
+}
+
+func (s Service) resolveBodyRun(ctx context.Context, bodyID uint64, runID uint64, requestID string) *teammodel.Run {
+	if bodyID == 0 {
+		return nil
+	}
+	if runID > 0 {
+		return s.repo.FindRunInBody(ctx, runID, bodyID)
+	}
+	return s.repo.FindRunByRequestIDInBody(ctx, requestID, bodyID)
 }
 
 func (s Service) executeTeamRun(ctx context.Context, runID uint64) {
@@ -625,10 +647,6 @@ func (s Service) executeFlowWithGraph(ctx context.Context, run teammodel.Run, te
 }
 
 func (s Service) finishRun(ctx context.Context, runID uint64, status string, output map[string]any, err error) {
-	var assetErr error
-	if status == teammodel.RunStatusSuccess {
-		assetErr = s.saveFinalRunAsset(ctx, runID, output)
-	}
 	record := map[string]any{
 		"status": status,
 		"output": jsonText(output),
@@ -638,8 +656,6 @@ func (s Service) finishRun(ctx context.Context, runID uint64, status string, out
 	}
 	if err != nil {
 		record["error"] = err.Error()
-	} else if assetErr != nil {
-		record["error"] = assetErr.Error()
 	}
 	s.repo.UpdateRun(ctx, runID, record)
 	if run := s.repo.FindRun(ctx, runID); run != nil {
@@ -651,7 +667,7 @@ func (s Service) finishRun(ctx context.Context, runID uint64, status string, out
 		s.writeRunEvent(ctx, *run, event, map[string]any{
 			"scope":  "run",
 			"output": output,
-			"error":  firstText(errorText(err), errorText(assetErr)),
+			"error":  errorText(err),
 		})
 		s.writeRunResult(ctx, *run)
 	}
@@ -662,6 +678,9 @@ func (s Service) writeRunResult(ctx context.Context, run teammodel.Run) {
 		return
 	}
 	output, err := s.resolvedRunStatus(ctx, &run)
+	if firstText(jsonMap(run.Input)["_mode"]) == "workspace_power" {
+		output = jsonMap(run.Output)
+	}
 	status := 1
 	msg := ""
 	if err != nil {
@@ -694,87 +713,6 @@ func executionInput(input map[string]any) map[string]any {
 	return result
 }
 
-func (s Service) saveFinalRunAsset(ctx context.Context, runID uint64, output map[string]any) error {
-	if len(output) == 0 {
-		return nil
-	}
-	run := s.repo.FindRun(ctx, runID)
-	if run == nil || run.ProjectID == 0 {
-		return nil
-	}
-	input := jsonMap(run.Input)
-	mode := firstText(input["_mode"])
-	if mode != "team" && mode != "flow" && mode != "role" && mode != "conversation" {
-		return nil
-	}
-	flowID := uint64(0)
-	assetCateID := uint64(0)
-	name := "团队运行结果"
-	if mode == "flow" {
-		flowID = uint64Value(input["_flow_id"])
-		name = "工作流运行结果"
-		if flowID > 0 {
-			if flow, err := s.repo.FindFlow(ctx, flowID); err == nil {
-				name = fmt.Sprintf("%s 运行结果", flow.Name)
-			}
-		}
-	} else if mode == "role" {
-		name = "角色运行结果"
-		if role, ok := s.findRunRole(ctx, run.TeamID, uint64Value(input["_role_id"])); ok {
-			name = fmt.Sprintf("%s 运行结果", role.Name)
-			assetCateID = role.AssetCateID
-		}
-		if assetCateID == 0 {
-			return nil
-		}
-	} else if mode == "conversation" {
-		name = "团队对话运行结果"
-		rolePayload := mapValue(output["role"])
-		roleID := uint64Value(rolePayload["id"])
-		if role, ok := s.findRunRole(ctx, run.TeamID, roleID); ok {
-			name = fmt.Sprintf("%s 运行结果", role.Name)
-			assetCateID = role.AssetCateID
-		} else {
-			assetCateID = uint64Value(rolePayload["asset_cate_id"])
-			if roleName := firstText(rolePayload["name"]); roleName != "" {
-				name = fmt.Sprintf("%s 运行结果", roleName)
-			}
-		}
-		if assetCateID == 0 {
-			return nil
-		}
-	}
-	_, _, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
-		ProjectID:   run.ProjectID,
-		TeamID:      run.TeamID,
-		FlowID:      flowID,
-		AssetCateID: assetCateID,
-		RunID:       run.ID,
-		ReleaseID:   run.ReleaseID,
-		RequestID:   run.RequestID,
-		Name:        name,
-		Kind:        finalAssetKind(output),
-		Role:        "content",
-		Content:     output,
-	})
-	return err
-}
-
-func (s Service) findRunRole(ctx context.Context, teamID uint64, roleID uint64) (teammodel.Role, bool) {
-	if roleID == 0 {
-		return teammodel.Role{}, false
-	}
-	role := teammodel.NewRoleModel().Find(ctx, map[string]any{
-		"id":      roleID,
-		"team_id": teamID,
-		"status":  teammodel.StatusEnabled,
-	})
-	if role == nil {
-		return teammodel.Role{}, false
-	}
-	return *role, true
-}
-
 func finalAssetKind(output map[string]any) string {
 	if kind := firstText(output["kind"], output["content_type"], output["type"]); kind != "" {
 		return kind
@@ -801,7 +739,7 @@ func finalAssetKind(output map[string]any) string {
 		return "text"
 	}
 	if len(output) > 1 {
-		return "mixed"
+		return "richtext"
 	}
 	return "text"
 }

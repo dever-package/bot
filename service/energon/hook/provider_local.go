@@ -3,6 +3,7 @@ package hook
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
@@ -97,28 +98,79 @@ func ensureLocalProcessorParams(c *server.Context, definitions []botprocessor.Pa
 			"cate_id": defaultCategoryID,
 			"key":     key,
 		})
+		paramValues := localProcessorParamValues(definition)
+		var paramID uint64
 		if len(existing) > 0 {
 			if !isActive(int16(util.ToIntDefault(existing["status"], 0))) {
 				return fmt.Errorf("本地处理器依赖的参数“%s”已停用", definition.Name)
 			}
+			paramID = util.ToUint64(existing["id"])
+			if len(definition.Options) > 0 {
+				botmodel.NewParamModel().Update(c.Context(), map[string]any{"id": paramID}, paramValues)
+			}
+		} else {
+			paramValues["key"] = key
+			paramValues["cate_id"] = defaultCategoryID
+			paramValues["status"] = defaultRecordStatus
+			paramValues["created_at"] = time.Now()
+			insertID := botmodel.NewParamModel().Insert(c.Context(), paramValues)
+			if insertID <= 0 {
+				return fmt.Errorf("创建本地处理器参数“%s”失败", definition.Name)
+			}
+			paramID = uint64(insertID)
+		}
+		if err := ensureLocalProcessorParamOptions(c, paramID, definition.Options); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func localProcessorParamValues(definition botprocessor.ParamDefinition) map[string]any {
+	return map[string]any{
+		"name":           strings.TrimSpace(definition.Name),
+		"type":           strings.TrimSpace(definition.Type),
+		"usage":          definition.Usage,
+		"value_type":     strings.TrimSpace(definition.ValueType),
+		"upload_rule_id": definition.UploadRuleID,
+		"max_files":      definition.MaxFiles,
+		"default_value":  definition.DefaultValue,
+		"sort":           definition.Sort,
+	}
+}
+
+func ensureLocalProcessorParamOptions(
+	c *server.Context,
+	paramID uint64,
+	definitions []botprocessor.ParamOptionDefinition,
+) error {
+	if paramID == 0 || len(definitions) == 0 {
+		return nil
+	}
+	existingRows := botmodel.NewParamOptionModel().SelectMap(c.Context(), map[string]any{"param_id": paramID})
+	existingByValue := make(map[string]uint64, len(existingRows))
+	for _, row := range existingRows {
+		existingByValue[util.ToStringTrimmed(row["value"])] = util.ToUint64(row["id"])
+	}
+
+	for _, definition := range definitions {
+		value := strings.TrimSpace(definition.Value)
+		name := strings.TrimSpace(definition.Name)
+		if value == "" || name == "" {
+			return fmt.Errorf("本地处理器参数选项定义不完整")
+		}
+		values := map[string]any{
+			"name":  name,
+			"value": value,
+			"sort":  definition.Sort,
+		}
+		if optionID := existingByValue[value]; optionID > 0 {
+			botmodel.NewParamOptionModel().Update(c.Context(), map[string]any{"id": optionID}, values)
 			continue
 		}
-
-		insertID := botmodel.NewParamModel().Insert(c.Context(), map[string]any{
-			"name":           strings.TrimSpace(definition.Name),
-			"key":            key,
-			"type":           strings.TrimSpace(definition.Type),
-			"usage":          definition.Usage,
-			"value_type":     strings.TrimSpace(definition.ValueType),
-			"cate_id":        defaultCategoryID,
-			"upload_rule_id": definition.UploadRuleID,
-			"max_files":      definition.MaxFiles,
-			"default_value":  definition.DefaultValue,
-			"status":         defaultRecordStatus,
-			"sort":           definition.Sort,
-		})
-		if insertID == 0 {
-			return fmt.Errorf("创建本地处理器参数“%s”失败", definition.Name)
+		values["param_id"] = paramID
+		if botmodel.NewParamOptionModel().Insert(c.Context(), values) == 0 {
+			return fmt.Errorf("创建本地处理器参数 %d 的选项“%s”失败", paramID, name)
 		}
 	}
 	return nil

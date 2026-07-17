@@ -25,6 +25,14 @@ export type ChatMessage = {
   document?: AgentChatDocument;
 };
 
+export type AgentChatMessageActionContext = {
+  role: "user" | "assistant";
+  recordID: number;
+  requestID: string;
+  running: boolean;
+  error: boolean;
+};
+
 export type ChatStreamOutput = AgentChatOutput & {
   event?: string;
   text?: string;
@@ -45,10 +53,13 @@ export type AgentChatRuntimeApis = {
 
 export type AgentChatStoreOptions = {
   agentKey: string;
+  contextKey?: string;
   modalOpen: boolean;
   blockMs: number;
+  lazySession?: boolean;
   assistantApi: import("./api").AgentChatApi;
   runtimeApi: AgentChatRuntimeApis;
+  requestScope?: Record<string, unknown>;
 };
 
 export type AgentChatController = {
@@ -73,7 +84,7 @@ export type AgentChatController = {
   deleteSession: (sessionID: number) => Promise<void>;
   loadMoreSessions: () => Promise<void>;
   loadOlderMessages: () => Promise<void>;
-  handleSessionListScroll: () => void;
+  handleSessionListScroll: (element?: HTMLDivElement) => void;
   handleMessageListScroll: () => void;
   handleMessageListWheel: (event: WheelEvent<HTMLDivElement>) => void;
   loadReferences: (

@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"strings"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	memoryservice "github.com/dever-package/bot/service/memory"
@@ -29,13 +30,22 @@ func sessionMemories(ctx context.Context, session agentmodel.Session, enabled bo
 	rows := memoryservice.NewService().RuntimeRows(ctx, memoryservice.RuntimeRequest{
 		OwnerType: session.OwnerType, OwnerID: session.OwnerID,
 		AgentKey: session.AgentKey, ContextKey: session.ContextKey,
-		SessionID: session.ID, Limit: 20,
+		SessionID: session.ID, Limit: 20, IncludeGlobal: true, IncludeAgent: true,
 	})
 	result := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, memoryservice.MemoryMap(row))
 	}
 	return result
+}
+
+func sessionMemoryEnabled(ctx context.Context, session agentmodel.Session) bool {
+	agentKey := strings.TrimSpace(session.AgentKey)
+	if agentKey == "" {
+		return false
+	}
+	agent := agentmodel.NewAgentModel().Find(ctx, map[string]any{"key": agentKey, "status": 1})
+	return agent != nil && agent.MemoryEnabled
 }
 
 func normalizePage(page int, pageSize int) (int, int) {

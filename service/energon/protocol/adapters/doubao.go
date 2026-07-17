@@ -97,7 +97,6 @@ func doubaoIsMultimodalEmbeddingPath(path string) bool {
 func doubaoEmbeddingInput(input botprotocol.NativeInput) string {
 	for _, value := range []any{
 		input.Request.Input["input"],
-		input.Request.Input["text"],
 		input.Request.Input["prompt"],
 		input.Request.Input["content"],
 	} {

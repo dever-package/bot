@@ -7,8 +7,6 @@ import (
 	knowledgeservice "github.com/dever-package/bot/service/agent/knowledge"
 )
 
-const knowledgeDebugPreviewRunes = 240
-
 type knowledgeNodeView struct {
 	ID            uint64              `json:"id"`
 	BaseID        uint64              `json:"knowledge_base_id"`
@@ -89,23 +87,4 @@ func firstKnowledgeNodeText(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func knowledgeDebugSnippets(snippets []knowledgeservice.RetrievedSnippet) []map[string]any {
-	result := make([]map[string]any, 0, len(snippets))
-	for _, snippet := range snippets {
-		result = append(result, map[string]any{
-			"knowledge_base_id": snippet.BaseID,
-			"knowledge_base":    snippet.BaseName,
-			"dir_id":            snippet.DirID,
-			"dir_path":          snippet.DirPath,
-			"doc_id":            snippet.DocID,
-			"node_id":           snippet.NodeID,
-			"title":             snippet.Title,
-			"content":           truncateRunes(snippet.Content, knowledgeDebugPreviewRunes),
-			"score":             snippet.Score,
-			"source":            snippet.Source,
-		})
-	}
-	return result
 }

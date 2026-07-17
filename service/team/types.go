@@ -62,13 +62,14 @@ type GraphFlowNodeEdge struct {
 }
 
 type GraphTeam struct {
-	ID          uint64         `json:"id"`
-	CateID      uint64         `json:"cate_id"`
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Config      map[string]any `json:"config"`
-	Status      int16          `json:"status"`
-	Sort        int            `json:"sort"`
+	ID             uint64         `json:"id"`
+	CateID         uint64         `json:"cate_id"`
+	Name           string         `json:"name"`
+	Description    string         `json:"description"`
+	Config         map[string]any `json:"config"`
+	ProjectEnabled int16          `json:"project_enabled"`
+	Status         int16          `json:"status"`
+	Sort           int            `json:"sort"`
 }
 
 type TeamReleaseSnapshot struct {
@@ -93,26 +94,26 @@ type GraphAssetCate struct {
 }
 
 type GraphTeamPower struct {
-	ID      uint64         `json:"id"`
-	TeamID  uint64         `json:"team_id"`
-	PowerID uint64         `json:"power_id"`
-	Config  map[string]any `json:"config"`
-	Status  int16          `json:"status"`
-	Sort    int            `json:"sort"`
+	ID         uint64         `json:"id"`
+	TeamID     uint64         `json:"team_id"`
+	PowerID    uint64         `json:"power_id"`
+	Config     map[string]any `json:"config"`
+	HomeStatus int16          `json:"home_status"`
+	Status     int16          `json:"status"`
+	Sort       int            `json:"sort"`
 }
 
 type GraphRole struct {
-	ID          uint64         `json:"id"`
-	TeamID      uint64         `json:"team_id"`
-	RoleType    string         `json:"role_type"`
-	RoleKey     string         `json:"role_key"`
-	Name        string         `json:"name"`
-	AgentID     uint64         `json:"agent_id"`
-	AssetCateID uint64         `json:"asset_cate_id"`
-	Assignment  string         `json:"assignment"`
-	Config      map[string]any `json:"config"`
-	Status      int16          `json:"status"`
-	Sort        int            `json:"sort"`
+	ID         uint64         `json:"id"`
+	TeamID     uint64         `json:"team_id"`
+	RoleType   string         `json:"role_type"`
+	RoleKey    string         `json:"role_key"`
+	Name       string         `json:"name"`
+	AgentID    uint64         `json:"agent_id"`
+	Assignment string         `json:"assignment"`
+	Config     map[string]any `json:"config"`
+	Status     int16          `json:"status"`
+	Sort       int            `json:"sort"`
 }
 
 type AgentOption struct {
@@ -124,13 +125,12 @@ type AgentOption struct {
 }
 
 type RoleOption struct {
-	ID          uint64 `json:"id"`
-	TeamID      uint64 `json:"team_id"`
-	RoleType    string `json:"role_type"`
-	RoleKey     string `json:"role_key"`
-	Name        string `json:"name"`
-	AgentID     uint64 `json:"agent_id"`
-	AssetCateID uint64 `json:"asset_cate_id"`
+	ID       uint64 `json:"id"`
+	TeamID   uint64 `json:"team_id"`
+	RoleType string `json:"role_type"`
+	RoleKey  string `json:"role_key"`
+	Name     string `json:"name"`
+	AgentID  uint64 `json:"agent_id"`
 }
 
 type TeamOption struct {
@@ -202,12 +202,19 @@ type CanvasPowerRunRequest struct {
 	NodeName       string
 	Kind           string
 	PowerID        uint64
+	TeamPowerID    uint64
 	PowerKey       string
 	SourceTargetID uint64
 	Input          map[string]any
 	Params         map[string]any
 	PersistResult  bool
 	OnStream       func(payload map[string]any)
+	OnRunCreated   func(runID uint64, requestID string)
+}
+
+type PublishedTeamBinding struct {
+	TeamID    uint64
+	ReleaseID uint64
 }
 
 type runWaitError struct {

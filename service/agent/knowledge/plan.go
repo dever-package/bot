@@ -35,9 +35,7 @@ func (s Service) queryRewrite(ctx context.Context, binding agentKnowledgeBinding
 			"set": map[string]any{
 				"role": queryRewriteRole(),
 			},
-			"input": map[string]any{
-				"text": query,
-			},
+			"input": energonservice.PromptInput(query),
 			"options": map[string]any{
 				"stream":      false,
 				"temperature": 0,
@@ -96,9 +94,7 @@ func (s Service) planRetrieval(ctx context.Context, binding agentKnowledgeBindin
 			"set": map[string]any{
 				"role": retrievalPlannerRole(),
 			},
-			"input": map[string]any{
-				"text": retrievalPlannerPrompt(query, catalog),
-			},
+			"input": energonservice.PromptInput(retrievalPlannerPrompt(query, catalog)),
 			"options": map[string]any{
 				"stream":      false,
 				"temperature": 0,

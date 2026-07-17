@@ -7,13 +7,14 @@ import (
 )
 
 type TeamPower struct {
-	ID        uint64    `dorm:"primaryKey;autoIncrement;comment:团队能力ID"`
-	TeamID    uint64    `dorm:"type:bigint;not null;default:0;comment:团队"`
-	PowerID   uint64    `dorm:"type:bigint;not null;default:0;comment:能力"`
-	Config    string    `dorm:"type:text;not null;default:'{}';comment:配置"`
-	Status    int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	Sort      int       `dorm:"type:int;not null;default:100;comment:排序"`
-	CreatedAt time.Time `dorm:"comment:创建时间"`
+	ID         uint64    `dorm:"primaryKey;autoIncrement;comment:团队能力ID"`
+	TeamID     uint64    `dorm:"type:bigint;not null;default:0;comment:团队"`
+	PowerID    uint64    `dorm:"type:bigint;not null;default:0;comment:能力"`
+	Config     string    `dorm:"type:text;not null;default:'{}';comment:配置"`
+	HomeStatus int16     `dorm:"type:smallint;not null;default:1;comment:首页"`
+	Status     int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	Sort       int       `dorm:"type:int;not null;default:100;comment:排序"`
+	CreatedAt  time.Time `dorm:"comment:创建时间"`
 }
 
 type TeamPowerIndex struct {
@@ -28,7 +29,8 @@ func NewTeamPowerModel() *orm.Model[TeamPower] {
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{
-			"status": statusOptions,
+			"home_status": statusOptions,
+			"status":      statusOptions,
 		},
 		Relations: []orm.Relation{
 			teamRelation,

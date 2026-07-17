@@ -74,20 +74,22 @@ func withActiveSeriesReference(ctx context.Context, session agentmodel.Session, 
 	if series == nil || series.MasterArtifactID == 0 {
 		return references
 	}
-	for _, current := range references {
+	profile := runtimeartifact.SeriesProfile(*series)
+	for index, current := range references {
 		if current.ArtifactID == series.MasterArtifactID {
-			return references
+			result := append([]runtimeprovider.MediaReference(nil), references...)
+			result[index].SeriesID = series.ID
+			result[index].ActiveSeries = true
+			result[index].SeriesProfile = profile
+			return result
 		}
 	}
 	artifact := runtimeartifact.NewService().Find(ctx, series.MasterArtifactID)
-	if artifact == nil || artifact.Status != agentmodel.ArtifactStatusReady {
+	if artifact == nil || artifact.Status == agentmodel.ArtifactStatusFailed {
 		return references
 	}
 	payload := runtimeartifact.Payload(ctx, *artifact)
 	url, _ := payload["url"].(string)
-	if strings.TrimSpace(url) == "" {
-		return references
-	}
 	label, _ := payload["label"].(string)
 	return append(references, runtimeprovider.MediaReference{
 		ReferenceType: runtimereference.TypeArtifact,
@@ -99,5 +101,7 @@ func withActiveSeriesReference(ctx context.Context, session agentmodel.Session, 
 		Name:          artifact.Name,
 		Label:         "当前系列主素材 · " + strings.TrimSpace(label),
 		URL:           strings.TrimSpace(url),
+		ActiveSeries:  true,
+		SeriesProfile: profile,
 	})
 }

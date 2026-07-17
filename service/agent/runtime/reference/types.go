@@ -7,15 +7,18 @@ const (
 	TypeArtifact   = "artifact"
 	TypeUploadFile = "upload_file"
 	TypeSession    = "session"
+	TypeAsset      = "asset"
 )
 
 type Part struct {
-	Type    string `json:"type"`
-	Text    string `json:"text,omitempty"`
-	RefType string `json:"ref_type,omitempty"`
-	RefID   uint64 `json:"ref_id,omitempty"`
-	Label   string `json:"label,omitempty"`
-	Usage   string `json:"usage,omitempty"`
+	Type      string `json:"type"`
+	Text      string `json:"text,omitempty"`
+	RefType   string `json:"ref_type,omitempty"`
+	RefID     uint64 `json:"ref_id,omitempty"`
+	Label     string `json:"label,omitempty"`
+	Usage     string `json:"usage,omitempty"`
+	Trigger   string `json:"ref_trigger,omitempty"`
+	VersionID uint64 `json:"ref_version_id,omitempty"`
 }
 
 type Content struct {
@@ -38,10 +41,12 @@ type Input struct {
 }
 
 type Reference struct {
-	Type  string
-	ID    uint64
-	Label string
-	Usage string
+	Type      string
+	ID        uint64
+	Label     string
+	Usage     string
+	Trigger   string
+	VersionID uint64
 }
 
 type Media struct {
@@ -66,7 +71,7 @@ type Resolved struct {
 }
 
 type Result struct {
-	Items  []Resolved
-	Media  []Media
-	Prompt string
+	Items   []Resolved
+	Media   []Media
+	Context []map[string]any
 }

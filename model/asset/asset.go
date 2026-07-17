@@ -7,15 +7,19 @@ import (
 )
 
 const (
-	KindText  = "text"
-	KindImage = "image"
-	KindVideo = "video"
-	KindAudio = "audio"
-	KindFile  = "file"
-	KindMixed = "mixed"
+	KindText     = "text"
+	KindImage    = "image"
+	KindAudio    = "audio"
+	KindVideo    = "video"
+	KindRichText = "richtext"
+	KindFile     = "file"
 
-	RoleContent  = "content"
+	RoleWork     = "work"
 	RoleMaterial = "material"
+
+	SourceProject  = "project"
+	SourceTool     = "tool"
+	SourceDialogue = "dialogue"
 
 	StatusDraft   = "draft"
 	StatusCurrent = "current"
@@ -25,10 +29,10 @@ const (
 var kindOptions = []map[string]any{
 	{"id": KindText, "value": "文本"},
 	{"id": KindImage, "value": "图片"},
-	{"id": KindVideo, "value": "视频"},
 	{"id": KindAudio, "value": "音频"},
+	{"id": KindVideo, "value": "视频"},
+	{"id": KindRichText, "value": "富文本"},
 	{"id": KindFile, "value": "文件"},
-	{"id": KindMixed, "value": "富文本"},
 }
 
 var statusOptions = []map[string]any{
@@ -38,8 +42,14 @@ var statusOptions = []map[string]any{
 }
 
 var roleOptions = []map[string]any{
-	{"id": RoleContent, "value": "内容"},
+	{"id": RoleWork, "value": "作品"},
 	{"id": RoleMaterial, "value": "素材"},
+}
+
+var sourceTypeOptions = []map[string]any{
+	{"id": SourceProject, "value": "项目"},
+	{"id": SourceTool, "value": "工具"},
+	{"id": SourceDialogue, "value": "对话"},
 }
 
 var bodyRelation = orm.Relation{
@@ -104,9 +114,12 @@ type Asset struct {
 	FlowID      uint64    `dorm:"type:bigint;not null;default:0;comment:工作流"`
 	AssetCateID uint64    `dorm:"type:bigint;not null;default:0;comment:资产分类"`
 	NodeKey     string    `dorm:"type:varchar(128);not null;default:'';comment:画布节点"`
+	SourceType  string    `dorm:"type:varchar(32);not null;default:'project';comment:来源类型"`
+	SourceID    uint64    `dorm:"type:bigint;not null;default:0;comment:来源对象"`
+	SourceName  string    `dorm:"type:varchar(512);not null;default:'';comment:来源路径"`
 	Name        string    `dorm:"type:varchar(128);not null;comment:名称"`
 	Kind        string    `dorm:"type:varchar(32);not null;default:'text';comment:产物类型"`
-	Role        string    `dorm:"type:varchar(32);not null;default:'content';comment:资产角色"`
+	Role        string    `dorm:"type:varchar(32);not null;default:'material';comment:资产角色"`
 	VersionID   uint64    `dorm:"type:bigint;not null;default:0;comment:当前版本"`
 	Status      string    `dorm:"type:varchar(32);not null;default:'draft';comment:状态"`
 	Sort        int       `dorm:"type:int;not null;default:100;comment:排序"`
@@ -118,6 +131,9 @@ type AssetIndex struct {
 	ProjectFlow     struct{} `index:"project_id,flow_id,status,sort,id"`
 	BodyStatus      struct{} `index:"body_id,status,sort,id"`
 	TeamStatus      struct{} `index:"team_id,status,sort,id"`
+	TeamSource      struct{} `index:"team_id,source_type,source_id,status,sort,id"`
+	TeamRole        struct{} `index:"team_id,role,status,sort,id"`
+	TeamKind        struct{} `index:"team_id,kind,status,sort,id"`
 	FlowStatus      struct{} `index:"flow_id,status,sort,id"`
 	AssetCateStatus struct{} `index:"asset_cate_id,status,sort,id"`
 	ProjectRole     struct{} `index:"project_id,role,status,sort,id"`
@@ -132,9 +148,10 @@ func NewAssetModel() *orm.Model[Asset] {
 		Order:    "sort asc,id desc",
 		Database: "default",
 		Options: map[string]any{
-			"kind":   kindOptions,
-			"role":   roleOptions,
-			"status": statusOptions,
+			"kind":        kindOptions,
+			"role":        roleOptions,
+			"source_type": sourceTypeOptions,
+			"status":      statusOptions,
 		},
 		Relations: []orm.Relation{
 			bodyRelation,

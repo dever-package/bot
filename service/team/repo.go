@@ -769,6 +769,13 @@ func (Repo) FindRunInProject(ctx context.Context, id uint64, projectID uint64) *
 	})
 }
 
+func (Repo) FindRunInBody(ctx context.Context, id uint64, bodyID uint64) *teammodel.Run {
+	if id == 0 || bodyID == 0 {
+		return nil
+	}
+	return teammodel.NewRunModel().Find(ctx, map[string]any{"id": id, "body_id": bodyID})
+}
+
 func (Repo) FindRunByRequestID(ctx context.Context, requestID string) *teammodel.Run {
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
@@ -785,6 +792,17 @@ func (Repo) FindRunByRequestIDInProject(ctx context.Context, requestID string, p
 	return teammodel.NewRunModel().Find(ctx, map[string]any{
 		"request_id": requestID,
 		"project_id": projectID,
+	})
+}
+
+func (Repo) FindRunByRequestIDInBody(ctx context.Context, requestID string, bodyID uint64) *teammodel.Run {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" || bodyID == 0 {
+		return nil
+	}
+	return teammodel.NewRunModel().Find(ctx, map[string]any{
+		"request_id": requestID,
+		"body_id":    bodyID,
 	})
 }
 

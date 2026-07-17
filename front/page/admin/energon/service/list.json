@@ -54,7 +54,14 @@
         "type": "show-button",
         "meta": {
           "variant": "default",
-          "size": "sm"
+          "size": "sm",
+          "hiddenWhen": [
+            {
+              "path": "search.provider_protocol",
+              "operator": "equals",
+              "value": "local"
+            }
+          ]
         },
         "action": {
           "click": {
@@ -77,6 +84,13 @@
           "externalPagination": true,
           "savePath": "bot/energon/service/update",
           "rowKey": "id",
+          "readOnlyWhen": [
+            {
+              "path": "search.provider_protocol",
+              "operator": "equals",
+              "value": "local"
+            }
+          ],
           "columns": [
             {
               "value": "id",
@@ -124,9 +138,37 @@
               "meta": {
                 "buttons": [
                   {
+                    "icon": "eye",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看详情",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.id",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.view",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
                     "icon": "square-pen",
                     "variant": "outline",
                     "size": "sm",
+                    "description": "编辑服务",
+                    "hiddenWhen": [
+                      {
+                        "path": "provider.protocol",
+                        "operator": "equals",
+                        "value": "local"
+                      }
+                    ],
                     "action": {
                       "click": [
                         {
@@ -153,6 +195,19 @@
       }
     ],
     "page-main": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.view",
+          "pageRoute": "/bot/energon/service/view",
+          "description": "查看服务接口和全部参数配置。",
+          "size": "xl",
+          "bodyClassName": "max-h-[70vh] overflow-y-auto px-6 py-2",
+          "pageRouteQuery": {
+            "id": "data.actionTarget.id"
+          }
+        }
+      },
       {
         "type": "feedback-modal",
         "meta": {
@@ -192,7 +247,8 @@
       "description": "定义来源可提供的模型、工作流等服务入口。"
     },
     "search": {
-      "provider_id": ""
+      "provider_id": "",
+      "provider_protocol": ""
     },
     "table": {
       "filterFields": [
@@ -205,6 +261,7 @@
   },
   "state": {
     "dialog": {
+      "view": false,
       "edit": false,
       "create": false
     }

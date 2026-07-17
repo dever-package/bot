@@ -240,6 +240,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   const [sessionLoading, setSessionLoading] = useState(false);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [memoryDialogOpen, setMemoryDialogOpen] = useState(false);
+  const [memoryEnabled, setMemoryEnabled] = useState(false);
   const [memories, setMemories] = useState<AgentMemoryRecord[]>([]);
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryError, setMemoryError] = useState("");
@@ -292,7 +293,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   const sessionEnabled = Boolean(item.meta?.sessionEnabled);
   const historyEnabled = sessionEnabled && item.meta?.historyEnabled !== false;
   const newSessionEnabled = item.meta?.newSessionEnabled !== false;
-  const memoryEnabled = Boolean(item.meta?.memoryEnabled);
   const memoryPanelEnabled = sessionEnabled && memoryEnabled;
   const sessionApi = String(
     item.meta?.sessionApi || "/bot/admin/assistant/session",
@@ -465,6 +465,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     setRequestID("");
     sessionIDRef.current = 0;
     setSessionID(0);
+    setMemoryEnabled(false);
     setMemories([]);
     setMemoryError("");
     setRunning(false);
@@ -487,6 +488,7 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       const nextSessionID = Number.isFinite(sessionId) ? sessionId : 0;
       sessionIDRef.current = nextSessionID;
       setSessionID(nextSessionID);
+      setMemoryEnabled(Boolean(data.memory_enabled));
       setMessages(normalizeAssistantSessionMessages(data.messages));
       setMemories(normalizeAgentMemories(data.memories));
       scrollMessageListToBottom();
@@ -508,7 +510,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
             context_key: sessionContext,
             title: agentName ? `${agentName} 会话` : "新会话",
             limit: 80,
-            memory_enabled: memoryEnabled,
           },
         );
         applyAssistantSessionPayload(payload);
@@ -523,7 +524,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       agentKey,
       agentName,
       applyAssistantSessionPayload,
-      memoryEnabled,
       newSessionApi,
       sessionApi,
       sessionContext,
@@ -540,7 +540,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     try {
       const payload = await assistantApiRequest(clearSessionApi, {
         session_id: sessionID,
-        memory_enabled: memoryEnabled,
       });
       applyAssistantSessionPayload(payload);
     } catch (currentError: unknown) {
@@ -702,7 +701,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         session_id: nextSessionID,
         agent_key: agentKey,
         context_key: sessionContext,
-        memory_enabled: memoryEnabled,
         limit: 80,
       });
       applyAssistantSessionPayload(payload);
@@ -736,7 +734,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       context_key: sessionContext,
       title: agentName ? `${agentName} 会话` : "新会话",
       limit: 80,
-      memory_enabled: memoryEnabled,
     });
     applyAssistantSessionPayload(payload);
     const session =
@@ -776,7 +773,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       output: options?.output || message.output || {},
       request_id: options?.requestID || message.requestID || "",
       status: options?.status || 1,
-      memory_enabled: memoryEnabled,
     });
   };
 
@@ -1063,7 +1059,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       inputPayload,
       resolveMetaPathMap(item.meta?.inputContext, store),
     );
-    requestInput.memory_enabled = memoryEnabled;
     if (activeSessionID > 0) {
       requestInput.assistant_session_id = activeSessionID;
     }

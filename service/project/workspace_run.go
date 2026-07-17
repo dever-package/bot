@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
+	assetmodel "github.com/dever-package/bot/model/asset"
 	teammodel "github.com/dever-package/bot/model/team"
 	assetservice "github.com/dever-package/bot/service/asset"
+	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	teamservice "github.com/dever-package/bot/service/team"
 )
@@ -483,10 +485,10 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 	if node.PowerID == 0 && node.PowerKey == "" {
 		return nil, fmt.Errorf("能力节点未配置能力")
 	}
-	input := mergeCanvasInput(req.Input, previousOutput, node.ComposerPrompt)
+	input := mergeCanvasPromptInput(req.Input, previousOutput, node.ComposerPrompt)
 	params := cloneInput(node.ParamValues)
-	if canvasContextText(input["text"]) != "" && canvasContextText(params["text"]) == "" {
-		delete(params, "text")
+	if canvasContextText(input["prompt"]) != "" && canvasContextText(params["prompt"]) == "" {
+		delete(params, "prompt")
 	}
 	result, err := s.project.RunCanvasPower(ctx, projectID, teamservice.CanvasPowerRunRequest{
 		FlowID:         node.FlowID,
@@ -515,7 +517,7 @@ func (s WorkspaceService) runCanvasAgentNode(ctx context.Context, projectID uint
 	if node.AgentID == 0 {
 		return nil, fmt.Errorf("智能体节点未配置智能体")
 	}
-	input := mergeCanvasInput(req.Input, previousOutput, node.ComposerPrompt)
+	input := mergeCanvasChatInput(req.Input, previousOutput, node.ComposerPrompt)
 	delete(input, "workspace_agent_history")
 	applyCanvasAgentTurnInput(input, req.Input)
 	if node.RoleID > 0 {
@@ -587,7 +589,7 @@ func (s WorkspaceService) runCanvasFlowNode(ctx context.Context, projectID uint6
 	result, err := s.project.RunFlow(ctx, projectID, teamservice.RunRequest{
 		FlowID:    node.FlowID,
 		RequestID: canvasChildRequestID(req.RequestID, node.ID),
-		Input:     mergeCanvasInput(req.Input, previousOutput, node.ComposerPrompt),
+		Input:     mergeCanvasPromptInput(req.Input, previousOutput, node.ComposerPrompt),
 		Mode:      "flow",
 	})
 	if err != nil {
@@ -708,8 +710,16 @@ func (s WorkspaceService) runCanvasFunctionNode(ctx context.Context, projectID u
 				"status": teammodel.RunStatusCanceled,
 			}), nil
 		}
+		assetCateID := firstUint64(node.AssetCateID, req.AssetCateID)
+		if assetCateID == 0 {
+			return canvasNodeRunPayload(req, run, node, nodeRunID, map[string]any{
+				"status": "success",
+				"output": previousOutput,
+				"result": map[string]any{"output": previousOutput},
+			}), nil
+		}
 		result, err := s.project.SaveAsset(ctx, projectID, SaveAssetRequest{
-			AssetCateID: firstUint64(node.AssetCateID, req.AssetCateID),
+			AssetCateID: assetCateID,
 			FlowID:      node.FlowID,
 			RunID:       run.ID,
 			NodeRunID:   nodeRunID,
@@ -723,8 +733,8 @@ func (s WorkspaceService) runCanvasFunctionNode(ctx context.Context, projectID u
 				"source_status":     "success",
 			},
 			Name:    workspaceCanvasAssetName(canvasRunNodeTitle(node), node.ID),
-			Kind:    firstText(node.Kind, "mixed"),
-			Role:    "content",
+			Kind:    firstText(node.Kind, assetmodel.KindRichText),
+			Role:    assetmodel.RoleWork,
 			Content: previousOutput,
 		})
 		if err != nil {
@@ -930,28 +940,39 @@ func canvasPromptReferenceOutput(
 	ctx context.Context,
 	projectID uint64,
 	nodeID string,
-	results []canvasNodeResult,
+	_ []canvasNodeResult,
 	canvas map[string]any,
 ) (any, error) {
 	node := canvasNodeByID(nodeID, canvas)
-	prompt := textValue(valueAtPath(node, "composer_draft", "prompt"))
 	content := mapValue(valueAtPath(node, "composer_draft", "prompt_content"))
-	structured := canvasStructuredPromptReferences(content, nodeID, canvas)
-	if prompt == "" && len(structured) == 0 {
-		return nil, nil
+	structured, err := canvasStructuredPromptReferences(content)
+	if err != nil {
+		return nil, err
 	}
 	if len(structured) == 0 {
-		for _, candidate := range canvasPromptReferencedNodes(prompt, nodeID, canvas) {
-			structured = append(structured, canvasPromptReference{Node: candidate})
-		}
+		return nil, nil
 	}
 	sources := make([]any, 0, len(structured))
+	allowedAssetKinds, restrictAssetKinds, err := canvasPromptAssetKindPolicy(
+		ctx,
+		projectID,
+		node,
+		structured,
+	)
+	if err != nil {
+		return nil, err
+	}
 	for _, reference := range structured {
 		if reference.AssetID > 0 {
-			asset := hydrateCanvasAsset(ctx, projectID, map[string]any{"id": reference.AssetID})
-			output := valueAtPath(asset, "version", "content")
-			if output == nil {
-				return nil, fmt.Errorf("引用内容 %d 不存在或尚未生成", reference.AssetID)
+			asset, output, err := resolveCanvasReferenceAsset(ctx, projectID, reference)
+			if err != nil {
+				return nil, err
+			}
+			if restrictAssetKinds {
+				kind := textValue(asset["kind"])
+				if _, allowed := allowedAssetKinds[kind]; !allowed {
+					return nil, fmt.Errorf("当前提示词参数不支持引用%s资产", kind)
+				}
 			}
 			sources = append(sources, newCanvasGroupOutputSource(
 				fmt.Sprintf("asset:%d", reference.AssetID),
@@ -959,30 +980,11 @@ func canvasPromptReferenceOutput(
 				textValue(asset["kind"]),
 				"",
 				reference.AssetID,
-				uint64Value(valueAtPath(asset, "version", "id")),
+				reference.VersionID,
 				output,
 			))
 			continue
 		}
-		candidate := reference.Node
-		if candidate == nil && reference.NodeNo > 0 {
-			return nil, fmt.Errorf("引用节点 %d 已删除", reference.NodeNo)
-		}
-		candidateID := textValue(candidate["id"])
-		output := lastCanvasOutput(results, candidateID)
-		if output == nil {
-			output = staticCanvasNodeOutput(ctx, projectID, candidateID, canvas)
-		}
-		if output == nil {
-			if reference.NodeNo > 0 {
-				return nil, fmt.Errorf("引用节点“%s”尚未生成", firstText(candidate["title"], fmt.Sprintf("节点 %d", reference.NodeNo)))
-			}
-			continue
-		}
-		sources = append(
-			sources,
-			canvasGroupOutputSource(candidate, lastCanvasNodeResult(results, candidateID), output),
-		)
 	}
 	if len(sources) == 0 {
 		return nil, nil
@@ -993,16 +995,54 @@ func canvasPromptReferenceOutput(
 	}, nil
 }
 
-type canvasPromptReference struct {
-	Node    map[string]any
-	NodeNo  uint64
-	AssetID uint64
-	Label   string
+func canvasPromptAssetKindPolicy(
+	ctx context.Context,
+	projectID uint64,
+	node map[string]any,
+	references []canvasPromptReference,
+) (map[string]struct{}, bool, error) {
+	hasAsset := false
+	for _, reference := range references {
+		if reference.AssetID > 0 {
+			hasAsset = true
+			break
+		}
+	}
+	if !hasAsset || textValue(node["type"]) != "power" {
+		return nil, false, nil
+	}
+	form, err := NewService().CanvasPowerForm(
+		ctx,
+		projectID,
+		uint64Value(valueAtPath(node, "flow", "id")),
+		uint64Value(valueAtPath(node, "power", "id")),
+		textValue(valueAtPath(node, "power", "key")),
+		uint64Value(valueAtPath(node, "composer_draft", "selected_target_id")),
+	)
+	if err != nil {
+		return nil, false, err
+	}
+	params, ok := form["params"].([]energoninput.PowerParam)
+	if !ok {
+		return nil, false, fmt.Errorf("能力参数配置无效")
+	}
+	key := textValue(form["primary_param_key"])
+	allowedKinds, exists := energoninput.PromptParamAssetKinds(params, key)
+	if !exists {
+		return nil, false, fmt.Errorf("能力没有可引用资产的提示词参数")
+	}
+	return allowedKinds, true, nil
 }
 
-func canvasStructuredPromptReferences(content map[string]any, nodeID string, canvas map[string]any) []canvasPromptReference {
+type canvasPromptReference struct {
+	AssetID   uint64
+	VersionID uint64
+	Label     string
+}
+
+func canvasStructuredPromptReferences(content map[string]any) ([]canvasPromptReference, error) {
 	if uint64Value(content["version"]) != 1 {
-		return nil
+		return nil, nil
 	}
 	result := []canvasPromptReference{}
 	used := map[string]bool{}
@@ -1012,87 +1052,49 @@ func canvasStructuredPromptReferences(content map[string]any, nodeID string, can
 			continue
 		}
 		refType := textValue(part["ref_type"])
+		if refType != "asset" {
+			return nil, fmt.Errorf("项目提示词只支持引用已保存资产")
+		}
+		if trigger := textValue(part["ref_trigger"]); trigger != "" && trigger != "@" {
+			return nil, fmt.Errorf("项目资产引用必须使用 @ 触发符")
+		}
 		refID := uint64Value(part["ref_id"])
+		if refID == 0 {
+			return nil, fmt.Errorf("资产引用缺少资产标识")
+		}
 		key := fmt.Sprintf("%s:%d", refType, refID)
-		if refID == 0 || used[key] {
+		if used[key] {
 			continue
 		}
 		used[key] = true
-		switch refType {
-		case "canvas_node":
-			result = append(result, canvasPromptReference{
-				Node:   canvasNodeByNumber(refID, nodeID, canvas),
-				NodeNo: refID,
-			})
-		case "artifact":
-			result = append(result, canvasPromptReference{
-				AssetID: refID,
-				Label:   textValue(part["label"]),
-			})
-		}
+		result = append(result, canvasPromptReference{
+			AssetID:   refID,
+			VersionID: uint64Value(part["ref_version_id"]),
+			Label:     textValue(part["label"]),
+		})
 	}
-	return result
+	return result, nil
 }
 
-func canvasNodeByNumber(nodeNo uint64, excludedNodeID string, canvas map[string]any) map[string]any {
-	for _, raw := range sliceValue(canvas["nodes"]) {
-		candidate := mapValue(raw)
-		if textValue(candidate["id"]) == excludedNodeID || uint64Value(candidate["node_no"]) != nodeNo {
-			continue
-		}
-		return candidate
+func resolveCanvasReferenceAsset(ctx context.Context, projectID uint64, reference canvasPromptReference) (map[string]any, any, error) {
+	if reference.VersionID == 0 {
+		return nil, nil, fmt.Errorf("资产引用缺少版本")
 	}
-	return nil
-}
-
-func canvasPromptReferencedNodes(prompt string, nodeID string, canvas map[string]any) []map[string]any {
-	candidates := make([]map[string]any, 0)
-	for _, raw := range sliceValue(canvas["nodes"]) {
-		candidate := mapValue(raw)
-		candidateID := textValue(candidate["id"])
-		title := canvasReferenceTitle(candidate)
-		if candidateID == "" || candidateID == nodeID || title == "" {
-			continue
-		}
-		candidates = append(candidates, candidate)
+	project, err := requireProject(ctx, projectID)
+	if err != nil {
+		return nil, nil, err
 	}
-
-	result := make([]map[string]any, 0)
-	used := map[string]bool{}
-	for cursor := 0; cursor < len(prompt); {
-		at := strings.Index(prompt[cursor:], "@")
-		if at < 0 {
-			break
-		}
-		at += cursor
-		remainder := prompt[at+1:]
-		matchedTitle := ""
-		for _, candidate := range candidates {
-			title := canvasReferenceTitle(candidate)
-			if strings.HasPrefix(remainder, title) && len(title) > len(matchedTitle) {
-				matchedTitle = title
-			}
-		}
-		if matchedTitle == "" {
-			cursor = at + 1
-			continue
-		}
-		for _, candidate := range candidates {
-			candidateID := textValue(candidate["id"])
-			title := canvasReferenceTitle(candidate)
-			if title != matchedTitle || used[candidateID] {
-				continue
-			}
-			used[candidateID] = true
-			result = append(result, candidate)
-		}
-		cursor = at + 1 + len(matchedTitle)
+	resolved, err := assetservice.NewService().RequireCurrentReference(
+		ctx, project.TeamID, reference.AssetID, reference.VersionID,
+	)
+	if err != nil {
+		return nil, nil, err
 	}
-	return result
-}
-
-func canvasReferenceTitle(node map[string]any) string {
-	return strings.TrimLeft(strings.TrimSpace(textValue(node["title"])), "@")
+	output := resolved.Content
+	if output == nil {
+		return nil, nil, fmt.Errorf("引用资产 %d 没有可用内容", reference.AssetID)
+	}
+	return assetservice.AssetToMap(resolved.Asset), output, nil
 }
 
 func manualCanvasContextNodeIDs(context any) map[string]bool {
@@ -1240,7 +1242,15 @@ func canvasOutputFromResultRef(ctx context.Context, projectID uint64, ref map[st
 	return nil
 }
 
-func mergeCanvasInput(base map[string]any, previousOutput any, prompt string) map[string]any {
+func mergeCanvasPromptInput(base map[string]any, previousOutput any, prompt string) map[string]any {
+	return mergeCanvasInput(base, previousOutput, prompt, "prompt")
+}
+
+func mergeCanvasChatInput(base map[string]any, previousOutput any, prompt string) map[string]any {
+	return mergeCanvasInput(base, previousOutput, prompt, "text")
+}
+
+func mergeCanvasInput(base map[string]any, previousOutput any, prompt string, promptKey string) map[string]any {
 	input := cloneInput(base)
 	manualContext := manualCanvasInputContext(input)
 	delete(input, "_manual_input_context")
@@ -1259,11 +1269,10 @@ func mergeCanvasInput(base map[string]any, previousOutput any, prompt string) ma
 	}
 	prompt = strings.TrimSpace(prompt)
 	if prompt != "" {
-		input["prompt"] = prompt
-		input["text"] = prompt
-	} else if canvasContextText(input["text"]) == "" {
+		input[promptKey] = prompt
+	} else if canvasContextText(input[promptKey]) == "" {
 		if contextText := canvasContextText(previousOutput); contextText != "" {
-			input["text"] = contextText
+			input[promptKey] = contextText
 		}
 	}
 	return input
@@ -1393,7 +1402,7 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 		return payload, nil
 	}
 	output := firstPresent(payload["output"], valueAtPath(payload, "result", "output"), valueAtPath(payload, "asset", "version", "content"))
-	if output == nil {
+	if !assetservice.HasContent(output) {
 		return payload, nil
 	}
 	result, err := s.project.SaveAsset(ctx, projectID, SaveAssetRequest{
@@ -1412,8 +1421,8 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 			"source_status":     canvasRunStatus(payload),
 		},
 		Name:    workspaceCanvasAssetName(canvasRunNodeTitle(node), node.ID),
-		Kind:    firstText(node.Kind, node.PowerKind, "mixed"),
-		Role:    "material",
+		Kind:    firstText(node.Kind, node.PowerKind, assetmodel.KindRichText),
+		Role:    assetmodel.RoleMaterial,
 		Content: output,
 	})
 	if err != nil {

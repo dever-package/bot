@@ -4,6 +4,11 @@ import (
 	"strings"
 )
 
+const (
+	SetPromptOwnerKey       = "prompt_owner"
+	PromptOwnerAgentRuntime = "agent_runtime"
+)
+
 type RequestParts struct {
 	Set     map[string]any
 	Input   map[string]any

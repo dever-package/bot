@@ -32,6 +32,7 @@ func (s Service) mountExecutionTools(
 	mounted, err := runtimetool.Mount(mountCtx, runtimetool.MountRequest{
 		Agent:          execution.agent,
 		Gateway:        s.gateway,
+		PreparationKey: execution.requestID,
 		References:     execution.mediaReferences,
 		EnableDocument: execution.persistChat && execution.assistantMessageID > 0,
 		Method:         execution.transport.Method,
@@ -47,7 +48,6 @@ func (s Service) mountExecutionTools(
 		mounted.Close()
 		return err
 	}
-	execution.prompt = joinRuntimePrompt(execution.prompt, mounted.Prompt)
 	execution.registry = mounted.Registry
 	execution.cleanup = mounted.Close
 	if len(mounted.Warnings) > 0 {

@@ -163,7 +163,14 @@
       "kind": "text",
       "prompt": "",
       "source_rule": 1,
-      "params": [],
+      "params": [
+        {
+          "param_id": 1,
+          "show": 1,
+          "status": 1,
+          "sort": 1
+        }
+      ],
       "targets": []
     }
   },

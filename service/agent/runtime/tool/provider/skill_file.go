@@ -15,10 +15,10 @@ func listSkillFilesTool(loaded map[string]agentskill.Entry) Tool {
 	return Tool{
 		Definition: Definition{
 			Name:        "list_skill_files",
-			Description: "列出已加载技能安装目录内的文件。隐藏目录、依赖目录和过深路径不会返回。",
+			Description: "列出已加载技能目录中的文件。",
 			Parameters: objectParameters(map[string]any{
 				"skill": skillProperty(),
-				"path":  map[string]any{"type": "string", "description": "相对技能根目录的目录，默认 ."},
+				"path":  map[string]any{"type": "string", "description": "目录相对路径"},
 			}),
 		},
 		Handle: func(_ context.Context, call Call) (Result, error) {
@@ -78,10 +78,10 @@ func readSkillFileTool(loaded map[string]agentskill.Entry) Tool {
 	return Tool{
 		Definition: Definition{
 			Name:        "read_skill_file",
-			Description: "读取已加载技能目录内的一个文本文件。",
+			Description: "读取已加载技能目录中的文本文件。",
 			Parameters: objectParameters(map[string]any{
 				"skill": skillProperty(),
-				"path":  map[string]any{"type": "string", "description": "相对技能根目录的文件路径"},
+				"path":  map[string]any{"type": "string", "description": "文件相对路径"},
 			}, "path"),
 		},
 		Handle: func(_ context.Context, call Call) (Result, error) {

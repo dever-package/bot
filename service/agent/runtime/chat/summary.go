@@ -12,7 +12,7 @@ func (s Service) compactSessionContextAsync(sessionID uint64) {
 	submitChatMaintenance("压缩会话上下文", sessionID, 30*time.Second, func(ctx context.Context) {
 		powerKey := s.sessionPowerKey(ctx, sessionID)
 		if powerKey != "" {
-			s.compactor.Compact(ctx, sessionID, powerKey, false)
+			s.compactor.Compact(ctx, sessionID, powerKey)
 		}
 	})
 }

@@ -28,6 +28,7 @@ type Run struct {
 	ID        uint64 `dorm:"primaryKey;autoIncrement;comment:运行ID"`
 	RequestID string `dorm:"type:varchar(64);not null;comment:请求ID"`
 	ProjectID uint64 `dorm:"type:bigint;not null;default:0;comment:项目"`
+	BodyID    uint64 `dorm:"type:bigint;not null;default:0;comment:载体"`
 	TeamID    uint64 `dorm:"type:bigint;not null;default:0;comment:团队"`
 	ReleaseID uint64 `dorm:"type:bigint;not null;default:0;comment:发布版本"`
 	Input     string `dorm:"type:text;not null;default:'{}';comment:输入"`
@@ -44,6 +45,7 @@ type Run struct {
 type RunIndex struct {
 	RequestID     struct{} `index:"request_id"`
 	ProjectStatus struct{} `index:"project_id,status,created_at"`
+	BodyStatus    struct{} `index:"body_id,status,created_at"`
 	TeamStatus    struct{} `index:"team_id,status,created_at"`
 	ReleaseStatus struct{} `index:"release_id,status,created_at"`
 	StatusCreated struct{} `index:"status,created_at"`

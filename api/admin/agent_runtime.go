@@ -30,12 +30,11 @@ func (AgentRuntime) PostRun(c *server.Context) error {
 		AgentIdentity: botapi.TextFromBody(body, "agent", "agent_key", "agent_id"),
 		SessionID:     botapi.Uint64FromBody(body, "session_id", "sessionId"),
 		ContextKey:    botapi.TextFromBody(body, "context_key", "contextKey"),
-		MemoryEnabled: botapi.BoolFromBody(body, "memory_enabled", "memoryEnabled"),
 		Input:         agentRuntimeInput(body),
 		Method:        c.Method(),
 		Host:          c.Header("Host"),
 		Path:          c.Path(),
-		Headers:       requestHeaders(c),
+		Headers:       botapi.RequestHeaders(c),
 		Server:        c,
 	})
 	return c.JSONPayload(200, response)

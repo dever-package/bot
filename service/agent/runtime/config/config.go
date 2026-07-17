@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"strings"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
@@ -18,6 +19,19 @@ func WithDefaults(config agentmodel.RuntimeConfig) agentmodel.RuntimeConfig {
 		defaults.RunWorkerConcurrency,
 		agentmodel.MaxRuntimeRunWorkerConcurrency,
 	)
+	config.ArtifactWorkerConcurrency = boundedPositiveInt(
+		config.ArtifactWorkerConcurrency,
+		defaults.ArtifactWorkerConcurrency,
+		agentmodel.MaxRuntimeArtifactWorkerConcurrency,
+	)
+	config.ArtifactPerToolConcurrency = boundedPositiveInt(
+		config.ArtifactPerToolConcurrency,
+		defaults.ArtifactPerToolConcurrency,
+		agentmodel.MaxRuntimeArtifactPerToolConcurrency,
+	)
+	if config.ArtifactPerToolConcurrency > config.ArtifactWorkerConcurrency {
+		config.ArtifactPerToolConcurrency = config.ArtifactWorkerConcurrency
+	}
 	config.SkillMetadataMaxSkills = positiveInt(config.SkillMetadataMaxSkills, defaults.SkillMetadataMaxSkills)
 	config.SkillMetadataFieldMaxLength = positiveInt(config.SkillMetadataFieldMaxLength, defaults.SkillMetadataFieldMaxLength)
 	config.SkillFileMaxBytes = positiveInt(config.SkillFileMaxBytes, defaults.SkillFileMaxBytes)
@@ -28,6 +42,16 @@ func WithDefaults(config agentmodel.RuntimeConfig) agentmodel.RuntimeConfig {
 	config.ScriptSandboxTimeoutSeconds = positiveInt(config.ScriptSandboxTimeoutSeconds, defaults.ScriptSandboxTimeoutSeconds)
 	config.ScriptSandboxOutputMaxBytes = positiveInt(config.ScriptSandboxOutputMaxBytes, defaults.ScriptSandboxOutputMaxBytes)
 	return config
+}
+
+func Load(ctx context.Context) agentmodel.RuntimeConfig {
+	config := agentmodel.DefaultRuntimeConfig()
+	if row := agentmodel.NewRuntimeConfigModel().Find(ctx, map[string]any{
+		"id": agentmodel.DefaultRuntimeConfigID,
+	}); row != nil {
+		config = *row
+	}
+	return WithDefaults(config)
 }
 
 func NormalizeScriptSandboxDriver(value string) string {

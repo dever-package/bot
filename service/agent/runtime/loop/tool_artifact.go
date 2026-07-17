@@ -15,6 +15,108 @@ type toolArtifactBatch struct {
 	pending []agentmodel.Artifact
 }
 
+func shouldEnqueueArtifact(execution execution, definition runtimeprovider.Definition) bool {
+	return execution.persistChat &&
+		execution.sessionID > 0 &&
+		execution.assistantMessageID > 0 &&
+		runtimeartifact.IsSupportedKind(definition.Kind)
+}
+
+func (s Service) enqueueMessageArtifact(
+	ctx context.Context,
+	state *runState,
+	call botprotocol.ToolCall,
+	definition runtimeprovider.Definition,
+) toolStepResult {
+	batch, batchErr := s.beginToolArtifactBatch(ctx, state.execution, call, definition, 0, 0)
+	startedOutput := batch.startedOutput(ctx)
+	startedEvent := toolStartedOutput(call, definition, startedOutput)
+	state.RecordToolActivity(startedEvent)
+	_ = s.writeExecutionOutput(ctx, state.execution, startedEvent)
+
+	if batchErr != nil {
+		result := buildToolStepResult(state.execution.registry, call, definition, runtimeprovider.Result{}, batchErr)
+		finishedEvent := toolFinishedOutput(call, definition, result.result, batchErr)
+		state.RecordToolActivity(finishedEvent)
+		_ = s.writeExecutionOutput(ctx, state.execution, finishedEvent)
+		return result
+	}
+	if recovered, ok := batch.recoveredResult(ctx); ok {
+		result := buildToolStepResult(state.execution.registry, call, definition, recovered, nil)
+		finishedEvent := toolFinishedOutput(call, definition, recovered, nil)
+		state.RecordToolActivity(finishedEvent)
+		_ = s.writeExecutionOutput(ctx, state.execution, finishedEvent)
+		return result
+	}
+
+	job, jobErr := s.enqueueArtifactJob(ctx, state, call, definition, 0, 0, false)
+	if jobErr != nil {
+		failedContent := batch.fail(ctx, jobErr.Error())
+		toolResult := runtimeprovider.Result{Content: failedContent}
+		result := buildToolStepResult(state.execution.registry, call, definition, toolResult, jobErr)
+		finishedEvent := toolFinishedOutput(call, definition, toolResult, jobErr)
+		state.RecordToolActivity(finishedEvent)
+		_ = s.writeExecutionOutput(ctx, state.execution, finishedEvent)
+		return result
+	}
+
+	content := cloneMap(startedOutput)
+	if content == nil {
+		content = map[string]any{}
+	}
+	content["job_id"] = job.ID
+	content["status"] = "generating"
+	modelResult := runtimeartifact.ModelOutput(content)
+	modelResult["job_id"] = job.ID
+	modelResult["status"] = "generating"
+	toolResult := runtimeprovider.Result{
+		Content:     content,
+		ModelResult: modelResult,
+	}
+	queuedEvent := toolQueuedOutput(call, definition, content)
+	state.RecordToolActivity(queuedEvent)
+	_ = s.writeExecutionOutput(ctx, state.execution, queuedEvent)
+	result := buildToolStepResult(state.execution.registry, call, definition, toolResult, nil)
+	result.title = "后台生成素材: " + toolTitle(definition, call.Name)
+	return result
+}
+
+func (s Service) enqueueArtifactJob(
+	ctx context.Context,
+	state *runState,
+	call botprotocol.ToolCall,
+	definition runtimeprovider.Definition,
+	documentID uint64,
+	blockID uint64,
+	deferDispatch bool,
+) (agentmodel.ArtifactJob, error) {
+	arguments, err := botprotocol.ToolCallArguments(call)
+	if err != nil {
+		return agentmodel.ArtifactJob{}, err
+	}
+	return runtimeartifact.NewService().EnqueueJob(ctx, runtimeartifact.JobRequest{
+		DocumentID:    documentID,
+		BlockID:       blockID,
+		SessionID:     state.execution.sessionID,
+		MessageID:     state.execution.assistantMessageID,
+		RunID:         state.execution.runID,
+		Call:          call,
+		Kind:          definition.Kind,
+		Arguments:     arguments,
+		DeferDispatch: deferDispatch,
+		Snapshot: runtimeartifact.JobSnapshot{
+			Agent: state.execution.agent,
+			Scope: state.execution.scope,
+			Transport: runtimeartifact.JobTransport{
+				Method: state.execution.transport.Method,
+				Host:   state.execution.transport.Host,
+				Path:   state.execution.transport.Path,
+			},
+			MediaReferences: append([]runtimeprovider.MediaReference(nil), state.execution.mediaReferences...),
+		},
+	})
+}
+
 func (s Service) beginToolArtifactBatch(
 	ctx context.Context,
 	execution execution,
@@ -31,7 +133,10 @@ func (s Service) beginToolArtifactBatch(
 	if err != nil {
 		return batch, err
 	}
-	selected, err := runtimeprovider.SelectedMediaReferences(arguments, execution.mediaReferences)
+	if err = execution.registry.ValidateArguments(call.Name, arguments); err != nil {
+		return batch, err
+	}
+	selected, err := runtimeprovider.ArtifactReferences(arguments, execution.mediaReferences)
 	if err != nil {
 		return batch, err
 	}
@@ -47,6 +152,7 @@ func (s Service) beginToolArtifactBatch(
 	}
 	profile := cloneToolArguments(arguments)
 	delete(profile, runtimeprovider.MediaReferencesArgument)
+	delete(profile, runtimeprovider.MediaSeriesModeArgument)
 	if key := strings.TrimSpace(definition.ActivityCountKey); key != "" {
 		delete(profile, key)
 	}

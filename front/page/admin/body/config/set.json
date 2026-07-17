@@ -1,0 +1,536 @@
+{
+  "page": {
+    "name": "基础配置",
+    "icon": "settings-2",
+    "parent": "bot-body",
+    "sort": 1
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "tabs-row": {
+            "type": "container"
+          },
+          "site-panel": {
+            "type": "container",
+            "className": "w-full max-w-4xl"
+          },
+          "links-panel": {
+            "type": "container",
+            "className": "overflow-hidden rounded-md border bg-background"
+          },
+          "accounts-panel": {
+            "type": "container",
+            "className": "overflow-hidden rounded-md border bg-background"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "保存配置",
+        "className": "shrink-0",
+        "meta": {
+          "tab": "site",
+          "variant": "default",
+          "size": "sm",
+          "icon": "save",
+          "validateForm": true,
+          "loadingText": "保存中...",
+          "successMessage": "配置已保存"
+        },
+        "action": {
+          "click": "submit"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "新增链接",
+        "className": "shrink-0",
+        "meta": {
+          "tab": "links",
+          "variant": "default",
+          "size": "sm",
+          "icon": "plus"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.createLink",
+            "value": true
+          }
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "新增账号入口",
+        "className": "shrink-0",
+        "meta": {
+          "tab": "accounts",
+          "variant": "default",
+          "size": "sm",
+          "icon": "plus"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.createAccount",
+            "value": true
+          }
+        }
+      }
+    ],
+    "tabs-row": [
+      {
+        "type": "nav-tab",
+        "meta": {
+          "target": "state.currentTab",
+          "variant": "line",
+          "tabs": [
+            {
+              "label": "站点设置",
+              "value": "site"
+            },
+            {
+              "label": "登录链接",
+              "value": "links"
+            },
+            {
+              "label": "三方账号",
+              "value": "accounts"
+            }
+          ]
+        }
+      }
+    ],
+    "site-panel": [
+      {
+        "type": "form-input",
+        "name": "站点名称",
+        "placeholder": "例如：神创工作台",
+        "value": "form.site_name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "站点名称不能为空。"
+          }
+        ],
+        "meta": {
+          "tab": "site",
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-xl"
+        }
+      },
+      {
+        "type": "form-upload",
+        "name": "站点 Logo",
+        "value": "form.logo",
+        "mode": "form",
+        "info": "用于登录页和 Body 工作台左上角品牌区域。",
+        "meta": {
+          "tab": "site",
+          "formLayout": "horizontal",
+          "uploadType": "pic",
+          "kind": "image",
+          "saveMode": "url",
+          "ruleId": 1,
+          "bizKey": "body.config.logo",
+          "bizName": "Body站点Logo",
+          "maxCount": 1
+        }
+      },
+      {
+        "type": "form-upload",
+        "name": "站点图标",
+        "value": "form.favicon",
+        "mode": "form",
+        "info": "用于浏览器标签页，推荐上传正方形 PNG 或 SVG。",
+        "meta": {
+          "tab": "site",
+          "formLayout": "horizontal",
+          "uploadType": "pic",
+          "kind": "image",
+          "saveMode": "url",
+          "ruleId": 1,
+          "bizKey": "body.config.favicon",
+          "bizName": "Body站点图标",
+          "maxCount": 1
+        }
+      },
+      {
+        "type": "form-input",
+        "name": "登录页标题",
+        "placeholder": "例如：把想法变成作品",
+        "value": "form.login_title",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "登录页标题不能为空。"
+          }
+        ],
+        "meta": {
+          "tab": "site",
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-xl"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "name": "登录页说明",
+        "placeholder": "说明 Body 工作台的主要用途。",
+        "value": "form.login_description",
+        "mode": "form",
+        "meta": {
+          "tab": "site",
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-xl",
+          "rows": 4
+        }
+      }
+    ],
+    "links-panel": [
+      {
+        "type": "show-table",
+        "value": "links.list",
+        "meta": {
+          "tab": "links",
+          "pagePath": "data.links.page",
+          "pageSizePath": "data.links.pageSize",
+          "totalPath": "data.links.total",
+          "remote": true,
+          "externalPagination": true,
+          "reloadDataKey": "links",
+          "savePath": "bot/body/link/update",
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "name",
+              "type": "show-base"
+            },
+            {
+              "value": "url",
+              "type": "show-base"
+            },
+            {
+              "value": "target",
+              "type": "show-tag"
+            },
+            {
+              "value": "status",
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "value": "sort",
+              "type": "show-base",
+              "editor": "form-number",
+              "trigger": "doubleClick"
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑链接",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.editLinkId",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.editLink",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "trash-2",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "删除链接",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.deleteLink",
+                          "value": "$row"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "confirm.deleteLink",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page",
+        "meta": {
+          "tab": "links",
+          "reloadDataKey": "links"
+        }
+      }
+    ],
+    "accounts-panel": [
+      {
+        "type": "show-table",
+        "value": "accounts.list",
+        "meta": {
+          "tab": "accounts",
+          "pagePath": "data.accounts.page",
+          "pageSizePath": "data.accounts.pageSize",
+          "totalPath": "data.accounts.total",
+          "remote": true,
+          "externalPagination": true,
+          "reloadDataKey": "accounts",
+          "savePath": "bot/body/account/update",
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "provider",
+              "type": "show-base"
+            },
+            {
+              "value": "name",
+              "type": "show-base"
+            },
+            {
+              "value": "icon",
+              "name": "图标",
+              "type": "show-base"
+            },
+            {
+              "value": "status",
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "value": "sort",
+              "type": "show-base",
+              "editor": "form-number",
+              "trigger": "doubleClick"
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑账号入口",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.editAccountId",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.editAccount",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page",
+        "meta": {
+          "tab": "accounts",
+          "reloadDataKey": "accounts"
+        }
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.createLink",
+          "pageRoute": "/bot/body/link/update",
+          "title": "新增登录链接",
+          "size": "lg",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.editLink",
+          "pageRoute": "/bot/body/link/update",
+          "pageRouteQuery": {
+            "id": "data.actionTarget.editLinkId"
+          },
+          "title": "编辑登录链接",
+          "size": "lg",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          }
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "删除登录链接",
+        "info": "确认删除当前登录链接吗？",
+        "meta": {
+          "stateKey": "confirm.deleteLink"
+        },
+        "action": {
+          "confirm": {
+            "type": "delete",
+            "model": "bot.body.NewLinkModel",
+            "params": "actionTarget.deleteLink"
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.createAccount",
+          "pageRoute": "/bot/body/account/update",
+          "title": "新增账号入口",
+          "size": "lg",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.editAccount",
+          "pageRoute": "/bot/body/account/update",
+          "pageRouteQuery": {
+            "id": "data.actionTarget.editAccountId"
+          },
+          "title": "编辑账号入口",
+          "size": "lg",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "基础配置",
+      "description": "维护 Body 站点品牌、登录页链接和第三方账号入口。"
+    },
+    "form": {
+      "id": 1,
+      "site_name": "神创工作台",
+      "logo": "",
+      "favicon": "",
+      "login_title": "把想法变成作品",
+      "login_description": "调用团队能力，与智能体协作，把每一次创作沉淀为可复用的项目资产。",
+      "model": "bot.body.NewConfigModel"
+    },
+    "links": {
+      "model": "bot.body.NewLinkModel",
+      "pageSize": 100,
+      "order": "sort asc,id asc"
+    },
+    "accounts": {
+      "model": "bot.body.NewAccountModel",
+      "pageSize": 100,
+      "order": "sort asc,id asc"
+    },
+    "actionTarget": {
+      "editLinkId": "",
+      "deleteLink": {},
+      "editAccountId": ""
+    }
+  },
+  "state": {
+    "currentTab": "site",
+    "dialog": {
+      "createLink": false,
+      "editLink": false,
+      "createAccount": false,
+      "editAccount": false
+    },
+    "confirm": {
+      "deleteLink": false
+    }
+  },
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "model": "bot.body.NewConfigModel"
+    }
+  }
+}

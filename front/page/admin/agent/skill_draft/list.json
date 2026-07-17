@@ -288,7 +288,6 @@
             "idPath": "data.actionTarget.draftAgent.id",
             "fallback": "skill_draft:new"
           },
-          "memoryEnabled": false,
           "historyEnabled": false,
           "newSessionEnabled": false,
           "skillDraftPatchApi": "/bot/admin/skill_draft/apply_patch",

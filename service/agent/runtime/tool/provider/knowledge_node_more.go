@@ -13,10 +13,10 @@ func knowledgeNodeExpandTool(service knowledgeservice.Service, allowed map[uint6
 		Definition: knowledgeToolDefinition(
 			"expand_knowledge_node",
 			"知识库节点",
-			"展开知识节点的多层子节点，用于继续浏览章节结构。",
+			"展开指定知识节点的子级。",
 			knowledgeParameters(baseProperty, required, map[string]any{
-				"node_id": integerProperty("要展开的知识节点 ID"),
-				"depth":   integerProperty("展开层数，默认 1，最大 3"),
+				"node_id": integerProperty("知识节点 ID"),
+				"depth":   integerProperty("展开层数"),
 			}),
 		),
 		Handle: func(ctx context.Context, call Call) (Result, error) {
@@ -49,15 +49,15 @@ func knowledgeNodeRelatedTool(service knowledgeservice.Service, allowed map[uint
 		Definition: knowledgeToolDefinition(
 			"find_related_knowledge",
 			"关联知识",
-			"查找与指定知识节点有关联的其他节点。",
+			"查找指定知识节点的关联内容。",
 			knowledgeParameters(baseProperty, required, map[string]any{
-				"node_id": integerProperty("起始知识节点 ID"),
+				"node_id": integerProperty("知识节点 ID"),
 				"edge_types": map[string]any{
 					"type":        "array",
-					"description": "可选的关联类型过滤",
+					"description": "关联类型",
 					"items":       map[string]any{"type": "string"},
 				},
-				"limit": integerProperty("最多返回条数，默认 10，最大 50"),
+				"limit": integerProperty("最多返回数量"),
 			}),
 		),
 		Handle: func(ctx context.Context, call Call) (Result, error) {
@@ -79,50 +79,6 @@ func knowledgeNodeRelatedTool(service knowledgeservice.Service, allowed map[uint
 				Content: map[string]any{
 					"knowledge_base": knowledgeBaseRef(base),
 					"nodes":          knowledgeNodeViews(result.Nodes, 220, false),
-				},
-			}, nil
-		},
-	}
-}
-
-func knowledgeDebugTool(service knowledgeservice.Service, allowed map[uint64]knowledgeservice.KnowledgeBaseRuntime, baseProperty map[string]any, required []any) Tool {
-	required = appendRequired(required, "query")
-	return Tool{
-		Definition: knowledgeToolDefinition(
-			"debug_knowledge_retrieval",
-			"知识库检索诊断",
-			"查看知识检索候选、来源和规划信息；仅在普通检索结果异常时使用。",
-			knowledgeParameters(baseProperty, required, map[string]any{
-				"query": map[string]any{"type": "string", "description": "要调试的检索问题"},
-				"limit": integerProperty("最多返回候选数，默认 8"),
-			}),
-		),
-		Handle: func(ctx context.Context, call Call) (Result, error) {
-			base, err := resolveKnowledgeBase(call.Arguments, allowed)
-			if err != nil {
-				return Result{}, err
-			}
-			query := argumentText(call.Arguments, "query")
-			if query == "" {
-				return Result{}, fmt.Errorf("检索调试需要提供 query")
-			}
-			result, err := service.DebugRetrieve(ctx, knowledgeservice.RetrieveDebugRequest{
-				BaseID: base.ID,
-				Query:  query,
-				Limit:  ArgumentInt(call.Arguments, "limit", 8),
-			})
-			if err != nil {
-				return Result{}, err
-			}
-			return Result{
-				Text: fmt.Sprintf("检索调试完成，返回 %d 个候选片段", len(result.Snippets)),
-				Content: map[string]any{
-					"knowledge_base": result.KnowledgeBase,
-					"query":          result.Query,
-					"snippets":       knowledgeDebugSnippets(result.Snippets),
-					"matches":        result.Matches,
-					"source_counts":  result.SourceCounts,
-					"plans":          result.Plans,
 				},
 			}, nil
 		},

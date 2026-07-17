@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	assetmodel "github.com/dever-package/bot/model/asset"
 	projectmodel "github.com/dever-package/bot/model/project"
 	runtimeloop "github.com/dever-package/bot/service/agent/runtime/loop"
 	assetservice "github.com/dever-package/bot/service/asset"
@@ -107,6 +108,7 @@ func (s Service) RunCanvasAgent(ctx context.Context, projectID uint64, req Canva
 		NodeKey:     req.NodeKey,
 		Name:        nodeName,
 		Kind:        "text",
+		Role:        assetmodel.RoleMaterial,
 		Content:     result.Output,
 	})
 	if err != nil {

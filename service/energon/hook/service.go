@@ -18,6 +18,7 @@ func (ServiceHook) ProviderBeforeSaveService(c *server.Context, params []any) an
 	if len(record) == 0 {
 		return record
 	}
+	ensureServiceIsManuallyManaged(c, record)
 
 	record["name"] = util.ToStringTrimmed(record["name"])
 	record["type"] = strings.TrimSpace(util.ToString(record["type"]))
@@ -44,6 +45,26 @@ func (ServiceHook) ProviderBeforeSaveService(c *server.Context, params []any) an
 	}
 
 	return record
+}
+
+func ensureServiceIsManuallyManaged(c *server.Context, record map[string]any) {
+	providerIDs := make([]uint64, 0, 2)
+	if providerID := util.ToUint64(record["provider_id"]); providerID > 0 {
+		providerIDs = append(providerIDs, providerID)
+	}
+	if serviceID := util.ToUint64(record["id"]); serviceID > 0 {
+		service := botmodel.NewServiceModel().FindMap(c.Context(), map[string]any{"id": serviceID})
+		if providerID := util.ToUint64(service["provider_id"]); providerID > 0 {
+			providerIDs = append(providerIDs, providerID)
+		}
+	}
+
+	for _, providerID := range providerIDs {
+		provider := botmodel.NewProviderModel().FindMap(c.Context(), map[string]any{"id": providerID})
+		if strings.EqualFold(util.ToStringTrimmed(provider["protocol"]), "local") {
+			panicParamField("form.provider_id", "本地处理器服务由系统自动维护，只能查看详情。")
+		}
+	}
 }
 
 func normalizeServiceParamRows(c *server.Context, serviceID uint64, value any) []any {

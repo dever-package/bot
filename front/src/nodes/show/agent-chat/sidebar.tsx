@@ -9,19 +9,28 @@ export function Sidebar({
   agentReady,
   controller,
   collapsed = false,
+  mobile = false,
+  onOpenSession,
+  onStartNewSession,
 }: {
   agentName: string;
   agentReady: boolean;
   controller: AgentChatController;
   collapsed?: boolean;
+  mobile?: boolean;
+  onOpenSession?: (sessionID: number) => Promise<void>;
+  onStartNewSession?: () => Promise<void>;
 }) {
   return (
     <aside
       className={cn(
-        "hidden h-full shrink-0 flex-col border-r bg-muted/25",
-        !collapsed && "md:flex",
+        "h-full shrink-0 flex-col bg-muted/25",
+        mobile ? "flex w-full md:hidden" : "hidden border-r",
+        !mobile && !collapsed && "md:flex",
       )}
-      style={{ width: 300, minWidth: 300, flexBasis: 300 }}
+      style={
+        mobile ? undefined : { width: 300, minWidth: 300, flexBasis: 300 }
+      }
     >
       <div className="shrink-0 border-b p-3">
         <div className="mb-3 min-w-0 truncate px-2 py-1 text-left text-sm font-semibold text-foreground">
@@ -33,7 +42,11 @@ export function Sidebar({
           className="h-10 w-full justify-start gap-2 bg-background px-3"
           title="新对话"
           disabled={controller.sessionLoading || !agentReady}
-          onClick={() => void controller.startNewSession()}
+          onClick={() =>
+            void (onStartNewSession
+              ? onStartNewSession()
+              : controller.startNewSession())
+          }
         >
           <Plus className="size-4" />
           <span>新对话</span>
@@ -47,7 +60,9 @@ export function Sidebar({
         <div
           ref={controller.sessionListRef}
           className="min-h-0 flex-1 overflow-y-auto px-2 pb-3"
-          onScroll={controller.handleSessionListScroll}
+          onScroll={(event) =>
+            controller.handleSessionListScroll(event.currentTarget)
+          }
         >
           {controller.sessionsLoading && controller.sessions.length === 0 ? (
             <div className="flex h-24 items-center justify-center text-muted-foreground">
@@ -73,7 +88,11 @@ export function Sidebar({
                     type="button"
                     className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left text-sm"
                     title={session.title}
-                    onClick={() => void controller.openSession(session.id)}
+                    onClick={() =>
+                      void (onOpenSession
+                        ? onOpenSession(session.id)
+                        : controller.openSession(session.id))
+                    }
                   >
                     {session.running ? (
                       <Loader2 className="size-3.5 shrink-0 animate-spin" />

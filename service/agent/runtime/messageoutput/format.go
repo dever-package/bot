@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimeartifact "github.com/dever-package/bot/service/agent/runtime/artifact"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 func FormatMessage(output any, text string, artifacts []map[string]any) (map[string]any, string) {
@@ -107,7 +108,43 @@ func hydrateActivityArtifacts(output map[string]any, artifacts []map[string]any)
 		callID := strings.TrimSpace(fmt.Sprint(meta["tool_call_id"]))
 		if current := byBatch[callID]; len(current) > 0 {
 			activity["artifacts"] = current
+			hydrateActivityArtifactStatus(activity, meta, current)
 		}
+	}
+}
+
+func hydrateActivityArtifactStatus(activity map[string]any, meta map[string]any, artifacts []map[string]any) {
+	status := "succeeded"
+	for _, artifact := range artifacts {
+		switch strings.ToLower(strings.TrimSpace(fmt.Sprint(artifact["status"]))) {
+		case "failed":
+			status = "failed"
+		case "generating":
+			if status != "failed" {
+				status = "running"
+			}
+		}
+	}
+	kind := strings.TrimSpace(fmt.Sprint(meta["tool_kind"]))
+	label := botprotocol.MediaOutputLabel(kind)
+	switch status {
+	case "failed":
+		message := runtimeartifact.FailureText(kind)
+		activity["event"] = "tool_error"
+		activity["text"] = message
+		activity["error"] = message
+		meta["tool_status"] = "failed"
+	case "running":
+		activity["event"] = "tool_start"
+		activity["text"] = label + "生成中，请稍后"
+		delete(activity, "error")
+		meta["tool_status"] = "running"
+	default:
+		activity["event"] = "tool_result"
+		activity["text"] = label + "生成完成"
+		activity["progress"] = 100
+		delete(activity, "error")
+		meta["tool_status"] = "succeeded"
 	}
 }
 

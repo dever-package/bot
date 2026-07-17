@@ -2,6 +2,18 @@ package workspace
 
 import "github.com/shemic/dever/orm"
 
+var workspaceUserRelation = orm.Relation{
+	Field:      "user_id",
+	Option:     "user.NewUserModel",
+	OptionKeys: []string{"account", "name", "status"},
+}
+
+var workspaceBodyRelation = orm.Relation{
+	Field:      "body_id",
+	Option:     "bot.body.NewBodyModel",
+	OptionKeys: []string{"name", "type", "status"},
+}
+
 var projectRelation = orm.Relation{
 	Field:      "project_id",
 	Option:     "bot.project.NewProjectModel",

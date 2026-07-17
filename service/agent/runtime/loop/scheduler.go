@@ -8,7 +8,6 @@ import (
 
 	dlog "github.com/shemic/dever/log"
 
-	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
 	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
 )
@@ -120,15 +119,9 @@ func defaultRunDispatcher(executor RunExecutor, backlog RunBacklog) RunDispatche
 }
 
 func runWorkerConcurrency() int {
-	config := agentmodel.DefaultRuntimeConfig()
 	ctx, cancel := maintenanceContext()
 	defer cancel()
-	if row := agentmodel.NewRuntimeConfigModel().Find(ctx, map[string]any{
-		"id": agentmodel.DefaultRuntimeConfigID,
-	}); row != nil {
-		config = runtimeconfig.WithDefaults(*row)
-	}
-	return config.RunWorkerConcurrency
+	return runtimeconfig.Load(ctx).RunWorkerConcurrency
 }
 
 func logDispatchDeliveryError(runID uint64, err error) {

@@ -35,6 +35,9 @@ export function AgentChatDocumentView({
 
   return (
     <div className="agent-chat-document min-w-0">
+      {intro ? (
+        <AgentChatMarkdown text={intro} error={error} className="mb-5" />
+      ) : null}
       {document.title ? (
         <h1 className="mb-5 text-xl font-semibold leading-tight">
           {document.title}

@@ -163,29 +163,29 @@ func releaseSnapshotFromText(text string) (TeamReleaseSnapshot, error) {
 
 func graphTeamToModel(payload GraphTeam) teammodel.Team {
 	return teammodel.Team{
-		ID:          payload.ID,
-		CateID:      payload.CateID,
-		Name:        payload.Name,
-		Description: payload.Description,
-		Config:      jsonText(payload.Config),
-		Status:      payload.Status,
-		Sort:        payload.Sort,
+		ID:             payload.ID,
+		CateID:         payload.CateID,
+		Name:           payload.Name,
+		Description:    payload.Description,
+		Config:         jsonText(payload.Config),
+		ProjectEnabled: normalizeProjectEnabled(payload.ProjectEnabled),
+		Status:         payload.Status,
+		Sort:           payload.Sort,
 	}
 }
 
 func graphRoleToModel(teamID uint64, payload GraphRole) teammodel.Role {
 	return teammodel.Role{
-		ID:          payload.ID,
-		TeamID:      teamID,
-		RoleType:    payload.RoleType,
-		RoleKey:     payload.RoleKey,
-		Name:        payload.Name,
-		AgentID:     payload.AgentID,
-		AssetCateID: payload.AssetCateID,
-		Assignment:  payload.Assignment,
-		Config:      jsonText(payload.Config),
-		Status:      payload.Status,
-		Sort:        payload.Sort,
+		ID:         payload.ID,
+		TeamID:     teamID,
+		RoleType:   payload.RoleType,
+		RoleKey:    payload.RoleKey,
+		Name:       payload.Name,
+		AgentID:    payload.AgentID,
+		Assignment: payload.Assignment,
+		Config:     jsonText(payload.Config),
+		Status:     payload.Status,
+		Sort:       payload.Sort,
 	}
 }
 
@@ -203,12 +203,13 @@ func graphAssetCateToModel(teamID uint64, payload GraphAssetCate) teammodel.Asse
 
 func graphTeamPowerToModel(teamID uint64, payload GraphTeamPower) teammodel.TeamPower {
 	return teammodel.TeamPower{
-		ID:      payload.ID,
-		TeamID:  teamID,
-		PowerID: payload.PowerID,
-		Config:  jsonText(payload.Config),
-		Status:  payload.Status,
-		Sort:    payload.Sort,
+		ID:         payload.ID,
+		TeamID:     teamID,
+		PowerID:    payload.PowerID,
+		Config:     jsonText(payload.Config),
+		HomeStatus: normalizeTeamPowerHomeStatus(payload.HomeStatus),
+		Status:     payload.Status,
+		Sort:       payload.Sort,
 	}
 }
 

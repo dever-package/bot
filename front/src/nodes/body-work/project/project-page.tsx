@@ -2,10 +2,10 @@ import {
   type FormEvent,
   useCallback,
   useEffect,
-  useMemo,
+  useRef,
   useState,
 } from "react";
-import { ChevronDown, Loader2, Plus, X } from "lucide-react";
+import { Loader2, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { joinSiteApi, request, useNavigate } from "@dever/front-plugin";
 import { isSuccessResponse } from "../shared/api-response";
@@ -27,68 +27,60 @@ type ProjectItem = {
   };
 };
 
-type TeamItem = {
-  id: number;
-  name: string;
-  description?: string;
-  release_id?: number;
-  version?: number;
-  can_create?: boolean;
-};
-
 type CreateProjectPayload = {
   name: string;
   teamID: number;
-  releaseID?: number;
 };
 
-const freeCanvasTeam: TeamItem = {
-  id: 0,
-  name: "自由画布",
-  description: "不绑定团队流程和资产类型，自由添加节点创作。",
-  release_id: 0,
-  version: 0,
-  can_create: true,
-};
-
-export function WorkProjectPage() {
+export function WorkProjectPage({
+  teamID = 0,
+  onRequireAuth,
+}: {
+  teamID?: number;
+  onRequireAuth?: () => void;
+}) {
   const [projects, setProjects] = useState<ProjectItem[]>([]);
-  const [teams, setTeams] = useState<TeamItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(teamID > 0);
   const [modalOpen, setModalOpen] = useState(false);
-
-  const availableTeams = useMemo(() => createTeamOptions(teams), [teams]);
+  const loadRequestRef = useRef(0);
 
   const loadWorkspace = useCallback(async () => {
+    const requestID = ++loadRequestRef.current;
+    if (!teamID) {
+      setProjects([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const [projectResult, teamResult] = await Promise.all([
-        request(joinSiteApi("project/list")),
-        request(joinSiteApi("project/team_list")),
-      ]);
+      const projectResult = await request(joinSiteApi("project/list"), "get", {
+        team_id: teamID,
+      });
 
+      if (requestID !== loadRequestRef.current) {
+        return;
+      }
       if (!isSuccessResponse(projectResult)) {
-        toast.error(
-          projectResult.message || projectResult.msg || "加载剧本失败",
-        );
+        toast.error(projectResult.message || projectResult.msg || "加载项目失败");
       } else {
         setProjects(toProjectItems(projectResult.data?.items));
       }
-
-      if (!isSuccessResponse(teamResult)) {
-        toast.error(teamResult.message || teamResult.msg || "加载类型失败");
-      } else {
-        setTeams(toTeamItems(teamResult.data?.items));
-      }
     } catch {
-      toast.error("加载工作台失败");
+      if (requestID === loadRequestRef.current) {
+        toast.error("加载项目失败");
+      }
     } finally {
-      setLoading(false);
+      if (requestID === loadRequestRef.current) {
+        setLoading(false);
+      }
     }
-  }, []);
+  }, [teamID]);
 
   useEffect(() => {
-    loadWorkspace();
+    void loadWorkspace();
+    return () => {
+      loadRequestRef.current += 1;
+    };
   }, [loadWorkspace]);
 
   return (
@@ -100,13 +92,19 @@ export function WorkProjectPage() {
       ) : (
         <ProjectGrid
           projects={projects}
-          onCreate={() => setModalOpen(true)}
+          onCreate={() => {
+            if (!teamID && onRequireAuth) {
+              onRequireAuth();
+              return;
+            }
+            setModalOpen(true);
+          }}
         />
       )}
 
       {modalOpen ? (
         <CreateProjectModal
-          teams={availableTeams}
+          teamID={teamID}
           onClose={() => setModalOpen(false)}
           onCreated={async () => {
             setModalOpen(false);
@@ -145,8 +143,8 @@ function CreateProjectCard({ onCreate }: { onCreate: () => void }) {
       <span className="hb-script-create-plus">
         <Plus size={20} strokeWidth={1.35} />
       </span>
-      <span className="hb-script-create-title">新作品</span>
-      <span className="hb-script-create-desc">撰写专业的结构化作品</span>
+      <span className="hb-script-create-title">新项目</span>
+      <span className="hb-script-create-desc">创建团队协作项目</span>
     </button>
   );
 }
@@ -169,7 +167,7 @@ function ProjectCard({ project }: { project: ProjectItem }) {
     >
       <span className="hb-script-card-binding" aria-hidden="true" />
       <span className="hb-script-card-body">
-        <strong>{project.name || "未命名剧本"}</strong>
+        <strong>{project.name || "未命名项目"}</strong>
         <span>{description}</span>
       </span>
       <time>
@@ -195,38 +193,29 @@ function ProjectLoading() {
 }
 
 function CreateProjectModal({
-  teams,
+  teamID,
   onClose,
   onCreated,
 }: {
-  teams: TeamItem[];
+  teamID: number;
   onClose: () => void;
   onCreated: () => Promise<void>;
 }) {
   const [name, setName] = useState("");
-  const [teamID, setTeamID] = useState(() => String(teams[0]?.id ?? 0));
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-
-  useEffect(() => {
-    if (!teamID && teams.length > 0) {
-      setTeamID(String(teams[0].id));
-    }
-  }, [teamID, teams]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submitting) {
       return;
     }
-    const selectedTeam = teams.find((team) => String(team.id) === teamID);
     if (!name.trim()) {
-      setMessage("请输入剧本标题");
+      setMessage("请输入项目名称");
       return;
     }
-    if (!selectedTeam) {
-      setMessage("请选择类型");
+    if (!teamID) {
+      setMessage("当前团队不可用");
       return;
     }
 
@@ -235,21 +224,18 @@ function CreateProjectModal({
     try {
       const result = await createProject({
         name: name.trim(),
-        teamID: selectedTeam.id,
-        releaseID: selectedTeam.release_id,
+        teamID,
       });
       if (!isSuccessResponse(result)) {
-        setMessage(result.message || result.msg || "创建剧本失败");
+        setMessage(result.message || result.msg || "创建项目失败");
         return;
       }
-      toast.success("剧本已创建");
+      toast.success("项目已创建");
       await onCreated();
     } finally {
       setSubmitting(false);
     }
   }
-
-  const selectedTeam = teams.find((team) => String(team.id) === teamID);
 
   return (
     <div className="hb-script-modal-backdrop">
@@ -264,8 +250,8 @@ function CreateProjectModal({
         </button>
 
         <header className="hb-script-modal-head">
-          <h2>新建剧本</h2>
-          <p>先创建一个剧本项目，后续功能会进入画布继续编辑。</p>
+          <h2>新建项目</h2>
+          <p>项目会使用当前团队的能力、角色和流程配置。</p>
         </header>
 
         <div className="hb-script-modal-body">
@@ -274,55 +260,10 @@ function CreateProjectModal({
             <input
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="例如：赤壁一把火"
+              placeholder="输入项目名称"
               autoFocus
             />
           </label>
-
-          <div className="hb-script-field">
-            <span>类型</span>
-            <div className="hb-script-select">
-              <button
-                type="button"
-                className="hb-script-select-trigger"
-                onClick={() => setDropdownOpen(!dropdownOpen)}
-              >
-                <span>
-                  {selectedTeam ? teamDisplayName(selectedTeam) : "自由画布"}
-                </span>
-                <ChevronDown
-                  size={16}
-                  className={dropdownOpen ? "is-open" : undefined}
-                />
-              </button>
-
-              {dropdownOpen && teams.length > 0 ? (
-                <>
-                  <div
-                    className="hb-script-select-backdrop"
-                    onClick={() => setDropdownOpen(false)}
-                  />
-                  <div className="hb-script-select-options">
-                    {teams.map((team) => (
-                      <button
-                        key={team.id}
-                        type="button"
-                        className={
-                          String(team.id) === teamID ? "is-selected" : undefined
-                        }
-                        onClick={() => {
-                          setTeamID(String(team.id));
-                          setDropdownOpen(false);
-                        }}
-                      >
-                        {teamDisplayName(team)}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : null}
-            </div>
-          </div>
 
           {message ? (
             <div className="hb-script-form-error">{message}</div>
@@ -979,27 +920,6 @@ function toProjectItems(value: any): ProjectItem[] {
   }));
 }
 
-function toTeamItems(value: any): TeamItem[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.map((item) => ({
-    id: Number(item?.id || 0),
-    name: String(item?.name || ""),
-    description: String(item?.description || ""),
-    release_id: Number(item?.release_id || 0),
-    version: Number(item?.version || 0),
-    can_create: item?.can_create !== false,
-  }));
-}
-
-function createTeamOptions(teams: TeamItem[]) {
-  const releasedTeams = teams.filter(
-    (team) => team.id > 0 && team.can_create !== false,
-  );
-  return [freeCanvasTeam, ...releasedTeams];
-}
-
 function projectTeamDescription(project: ProjectItem) {
   const name = project.team?.name?.trim();
   if (!project.team_id || !name || name.toLowerCase() === "workflow") {
@@ -1008,18 +928,10 @@ function projectTeamDescription(project: ProjectItem) {
   return `基于「${name}」继续创作...`;
 }
 
-function teamDisplayName(team: TeamItem) {
-  if (team.id === 0) {
-    return "自由画布";
-  }
-  return team.name.trim() || "未命名团队";
-}
-
 function createProject(payload: CreateProjectPayload) {
   return request(joinSiteApi("project/create"), "post", {
     name: payload.name,
     team_id: payload.teamID,
-    release_id: payload.releaseID || 0,
   });
 }
 
