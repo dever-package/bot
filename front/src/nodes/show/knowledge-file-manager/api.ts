@@ -8,8 +8,11 @@ import type {
   KnowledgeFileUploadPartData,
   KnowledgeGraphResult,
   KnowledgeIndexOverview,
+  KnowledgeIndexStatusResult,
   KnowledgeNodeOpenResult,
   KnowledgeRelatedResult,
+  KnowledgeReviewStatus,
+  KnowledgeReviewDocumentResult,
   KnowledgeRetrieveDebugResult,
   KnowledgeTreeResult,
 } from "./types"
@@ -97,6 +100,14 @@ export function loadIndexOverview(params: { knowledgeBaseID: number }) {
     {
       knowledge_base_id: params.knowledgeBaseID,
     },
+  )
+}
+
+export function loadKnowledgeIndexStatus(params: { knowledgeBaseID: number }) {
+  return knowledgeRequest<KnowledgeIndexStatusResult>(
+    "/bot/admin/knowledge/index_status",
+    "get",
+    { knowledge_base_id: params.knowledgeBaseID },
   )
 }
 
@@ -218,6 +229,34 @@ export function saveFile(params: {
 export function indexKnowledgeBase(params: { knowledgeBaseID: number }) {
   return knowledgeRequest<{ index_status: string }>("/bot/admin/knowledge/index_base", "post", {
     knowledge_base_id: params.knowledgeBaseID,
+  })
+}
+
+export function reviewKnowledgeDocument(params: { docID: number; status: KnowledgeReviewStatus }) {
+  return knowledgeRequest<{ success: boolean }>("/bot/admin/knowledge/review_doc", "post", {
+    doc_ids: [params.docID],
+    review_status: params.status,
+  })
+}
+
+export function loadKnowledgeReviewDocuments(params: {
+  knowledgeBaseID: number
+  status?: KnowledgeReviewStatus
+  page?: number
+  pageSize?: number
+}) {
+  return knowledgeRequest<KnowledgeReviewDocumentResult>("/bot/admin/knowledge/review_docs", "get", {
+    knowledge_base_id: params.knowledgeBaseID,
+    review_status: params.status || "pending",
+    page: params.page || 1,
+    pageSize: params.pageSize || 100,
+  })
+}
+
+export function setKnowledgeDocumentExpiration(params: { docID: number; expiresAt?: string }) {
+  return knowledgeRequest<{ success: boolean }>("/bot/admin/knowledge/set_expiration", "post", {
+    doc_ids: [params.docID],
+    expires_at: params.expiresAt || "",
   })
 }
 

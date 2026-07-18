@@ -19,6 +19,7 @@ import {
 } from "react-complex-tree"
 import {
   ArrowLeft,
+  CalendarClock,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -51,11 +52,15 @@ import {
   loadFileContent,
   loadFileIndexDetail,
   loadFileManagerData,
+  loadKnowledgeIndexStatus,
+  loadKnowledgeReviewDocuments,
   loadKnowledgeRetrieveDebug,
   moveFiles,
   previewFileURL,
   renameFile,
+  reviewKnowledgeDocument,
   saveFile,
+  setKnowledgeDocumentExpiration,
   uploadFilePart,
 } from "./knowledge-file-manager/api"
 import {
@@ -76,6 +81,8 @@ import type {
   KnowledgeFileManagerData,
   KnowledgeFileViewerStatus,
   KnowledgeRetrieveDebugResult,
+  KnowledgeReviewDocument,
+  KnowledgeReviewStatus,
   KnowledgeTreeNode,
 } from "./knowledge-file-manager/types"
 
@@ -148,9 +155,12 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
   const [indexDetail, setIndexDetail] = useState<KnowledgeFileIndexDetail | null>(null)
   const [indexDetailOpen, setIndexDetailOpen] = useState(false)
   const [indexDetailLoading, setIndexDetailLoading] = useState(false)
+  const [reviewingDocument, setReviewingDocument] = useState(false)
+  const [updatingExpiration, setUpdatingExpiration] = useState(false)
   const [indexMapOpen, setIndexMapOpen] = useState(false)
   const [indexConfirmOpen, setIndexConfirmOpen] = useState(false)
   const [retrieveTestOpen, setRetrieveTestOpen] = useState(false)
+  const [reviewQueueOpen, setReviewQueueOpen] = useState(false)
   const [createDialog, setCreateDialog] = useState<CreateNodeDialogState | null>(null)
   const [creatingNode, setCreatingNode] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null)
@@ -193,6 +203,29 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
     }
   }, [knowledgeBaseID])
 
+  const pollIndexStatus = useCallback(async () => {
+    if (!knowledgeBaseID) {
+      return
+    }
+    try {
+      const status = await loadKnowledgeIndexStatus({ knowledgeBaseID })
+      if (normalizeFrontendIndexStatus(status.index_status) !== "running") {
+        await reloadFiles()
+        return
+      }
+      setData((current) =>
+        current.base
+          ? {
+              ...current,
+              base: { ...current.base, index_status: status.index_status },
+            }
+          : current,
+      )
+    } catch {
+      // The next interval retries without interrupting the current editor state.
+    }
+  }, [knowledgeBaseID, reloadFiles])
+
   useEffect(() => {
     void reloadFiles()
   }, [reloadFiles])
@@ -202,10 +235,10 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
       return
     }
     const timer = window.setInterval(() => {
-      void reloadFiles()
+      void pollIndexStatus()
     }, indexPollInterval)
     return () => window.clearInterval(timer)
-  }, [hasRunningIndex, knowledgeBaseID, reloadFiles])
+  }, [hasRunningIndex, knowledgeBaseID, pollIndexStatus])
 
   useEffect(() => {
     if (!currentFile) {
@@ -235,6 +268,7 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
     setIndexMapOpen(false)
     setIndexConfirmOpen(false)
     setRetrieveTestOpen(false)
+    setReviewQueueOpen(false)
     setCreateDialog(null)
     setCreatingNode(false)
     openFileRequestRef.current += 1
@@ -527,6 +561,38 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
       setIndexDetailLoading(false)
     }
   }, [currentFile, knowledgeBaseID])
+
+  const reviewCurrentDocument = useCallback(async (status: KnowledgeReviewStatus) => {
+    if (!currentFile || !indexDetail?.doc_id || reviewingDocument) {
+      return
+    }
+    setReviewingDocument(true)
+    try {
+      await reviewKnowledgeDocument({ docID: indexDetail.doc_id, status })
+      setIndexDetail(await loadFileIndexDetail({ knowledgeBaseID, id: currentFile.id }))
+      toast.success(reviewStatusActionMessage(status))
+    } catch (error) {
+      toast.error(errorMessage(error, "更新审核状态失败"))
+    } finally {
+      setReviewingDocument(false)
+    }
+  }, [currentFile, indexDetail?.doc_id, knowledgeBaseID, reviewingDocument])
+
+  const updateCurrentDocumentExpiration = useCallback(async (expiresAt?: string) => {
+    if (!currentFile || !indexDetail?.doc_id || updatingExpiration) {
+      return
+    }
+    setUpdatingExpiration(true)
+    try {
+      await setKnowledgeDocumentExpiration({ docID: indexDetail.doc_id, expiresAt })
+      setIndexDetail(await loadFileIndexDetail({ knowledgeBaseID, id: currentFile.id }))
+      toast.success(expiresAt ? "文档过期时间已更新" : "文档过期时间已清除")
+    } catch (error) {
+      toast.error(errorMessage(error, "更新过期时间失败"))
+    } finally {
+      setUpdatingExpiration(false)
+    }
+  }, [currentFile, indexDetail?.doc_id, knowledgeBaseID, updatingExpiration])
 
   const moveNode = useCallback(
     async (sourceID: string, targetID: string) => {
@@ -823,6 +889,14 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           <Button
             variant="outline"
             size="sm"
+            onClick={() => setReviewQueueOpen(true)}
+          >
+            <CheckCircle2 size={16} />
+            待审核
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => {
               setContextMenu(null)
               setIndexConfirmOpen(true)
@@ -1114,8 +1188,12 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
       {indexDetailOpen ? (
         <IndexDetailDialog
           detail={indexDetail}
+          expirationUpdating={updatingExpiration}
           loading={indexDetailLoading}
+          reviewing={reviewingDocument}
           fileName={currentFile?.name || ""}
+          onReview={reviewCurrentDocument}
+          onExpiration={updateCurrentDocumentExpiration}
           onClose={() => setIndexDetailOpen(false)}
         />
       ) : null}
@@ -1132,6 +1210,13 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           baseName={baseName}
           mode={data.base?.concept_graph_enabled}
           onClose={() => setRetrieveTestOpen(false)}
+        />
+      ) : null}
+      {reviewQueueOpen ? (
+        <ReviewQueueDialog
+          knowledgeBaseID={knowledgeBaseID}
+          onClose={() => setReviewQueueOpen(false)}
+          onUpdated={() => void reloadFiles()}
         />
       ) : null}
       {createDialog ? (
@@ -1161,6 +1246,162 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
       />
     </div>
   )
+}
+
+function ReviewQueueDialog({
+  knowledgeBaseID,
+  onClose,
+  onUpdated,
+}: {
+  knowledgeBaseID: number
+  onClose: () => void
+  onUpdated: () => void
+}) {
+  const pageSize = 50
+  const [documents, setDocuments] = useState<KnowledgeReviewDocument[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [page, setPage] = useState(1)
+  const [reviewingID, setReviewingID] = useState(0)
+
+  const loadPage = useCallback(async (nextPage: number, append: boolean) => {
+    if (append) {
+      setLoadingMore(true)
+    } else {
+      setLoading(true)
+    }
+    try {
+      const result = await loadKnowledgeReviewDocuments({
+        knowledgeBaseID,
+        page: nextPage,
+        pageSize,
+      })
+      const rows = result.list || []
+      setDocuments((current) => append
+        ? mergeReviewDocuments(current, rows)
+        : rows)
+      setTotal(result.total || 0)
+      setPage(nextPage)
+    } catch (error) {
+      toast.error(errorMessage(error, "加载待审核文档失败"))
+    } finally {
+      if (append) {
+        setLoadingMore(false)
+      } else {
+        setLoading(false)
+      }
+    }
+  }, [knowledgeBaseID])
+
+  const reload = useCallback(async () => {
+    await loadPage(1, false)
+  }, [loadPage])
+
+  useEffect(() => {
+    void reload()
+  }, [reload])
+
+  const review = useCallback(async (docID: number, status: KnowledgeReviewStatus) => {
+    setReviewingID(docID)
+    try {
+      await reviewKnowledgeDocument({ docID, status })
+      toast.success(reviewStatusActionMessage(status))
+      await reload()
+      onUpdated()
+    } catch (error) {
+      toast.error(errorMessage(error, "更新审核状态失败"))
+    } finally {
+      setReviewingID(0)
+    }
+  }, [onUpdated, reload])
+
+  return (
+    <div
+      className="knowledge-index-detail knowledge-review-queue"
+      role="dialog"
+      aria-modal="true"
+      aria-label="待审核文档"
+      onClick={onClose}
+    >
+      <div className="knowledge-index-detail__panel" onClick={(event) => event.stopPropagation()}>
+        <div className="knowledge-index-detail__header">
+          <div>
+            <strong>待审核文档</strong>
+            <span>{total} 条待处理内容</span>
+          </div>
+          <button type="button" onClick={onClose} aria-label="关闭">
+            ×
+          </button>
+        </div>
+        <div className="knowledge-review-queue__body">
+          {loading ? <div className="knowledge-sidebar__state">加载中...</div> : null}
+          {!loading && documents.length === 0 ? (
+            <div className="knowledge-sidebar__state">暂无待审核内容</div>
+          ) : null}
+          {documents.map((document) => (
+            <article className="knowledge-review-queue__row" key={document.id}>
+              <div className="knowledge-review-queue__content">
+                <div className="knowledge-review-queue__title">
+                  <strong>{document.title || `文档 ${document.id}`}</strong>
+                  <SourceTypeBadge sourceType={document.source_type} />
+                </div>
+                <p>{reviewDocumentPreview(document)}</p>
+              </div>
+              <div className="knowledge-review-queue__actions">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  title="审核通过"
+                  aria-label="审核通过"
+                  disabled={reviewingID > 0}
+                  onClick={() => void review(document.id, "approved")}
+                >
+                  <CheckCircle2 size={16} />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  title="驳回"
+                  aria-label="驳回"
+                  disabled={reviewingID > 0}
+                  onClick={() => void review(document.id, "rejected")}
+                >
+                  <XCircle size={16} />
+                </Button>
+              </div>
+            </article>
+          ))}
+          {total > documents.length ? (
+            <div className="knowledge-review-queue__limit">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={loadingMore || reviewingID > 0}
+                onClick={() => void loadPage(page + 1, true)}
+              >
+                {loadingMore ? "加载中..." : `加载更多 (${documents.length}/${total})`}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function mergeReviewDocuments(
+  current: KnowledgeReviewDocument[],
+  incoming: KnowledgeReviewDocument[],
+) {
+  const byID = new Map(current.map((document) => [document.id, document]))
+  incoming.forEach((document) => byID.set(document.id, document))
+  return Array.from(byID.values())
+}
+
+function reviewDocumentPreview(document: KnowledgeReviewDocument) {
+  const value = (document.summary || document.content || "暂无摘要").trim()
+  return value.length > 240 ? `${value.slice(0, 240)}...` : value
 }
 
 function CreateNodeDialog({
@@ -1646,17 +1887,31 @@ function ContextMenu({
 
 function IndexDetailDialog({
   detail,
+  expirationUpdating,
   loading,
+  reviewing,
   fileName,
+  onReview,
+  onExpiration,
   onClose,
 }: {
   detail: KnowledgeFileIndexDetail | null
+  expirationUpdating: boolean
   loading: boolean
+  reviewing: boolean
   fileName: string
+  onReview: (status: KnowledgeReviewStatus) => Promise<void>
+  onExpiration: (expiresAt?: string) => Promise<void>
   onClose: () => void
 }) {
   const nodes = detail?.nodes || []
   const edges = detail?.edges || []
+  const [expiresAtInput, setExpiresAtInput] = useState(
+    knowledgeExpirationInputValue(detail?.expires_at),
+  )
+  useEffect(() => {
+    setExpiresAtInput(knowledgeExpirationInputValue(detail?.expires_at))
+  }, [detail?.doc_id, detail?.expires_at])
   return (
     <div
       className="knowledge-index-detail"
@@ -1685,9 +1940,69 @@ function IndexDetailDialog({
             <div className="knowledge-index-detail__meta">
               <IndexStatusBadge status={detail.index_status} />
               <SourceTypeBadge sourceType={detail.source_type} />
+              <ReviewStatusBadge status={detail.review_status} />
               <span>文档ID：{detail.doc_id || "-"}</span>
               <span>节点：{detail.node_count || nodes.length}</span>
               <span>目录：{detail.dir_path || "/"}</span>
+              <div className="knowledge-expiration-control">
+                <input
+                  type="datetime-local"
+                  value={expiresAtInput}
+                  disabled={expirationUpdating}
+                  aria-label="文档过期时间"
+                  onChange={(event) => setExpiresAtInput(event.target.value)}
+                />
+                <button
+                  type="button"
+                  title="保存过期时间"
+                  aria-label="保存过期时间"
+                  disabled={expirationUpdating || !expiresAtInput}
+                  onClick={() => void onExpiration(new Date(expiresAtInput).toISOString())}
+                >
+                  <CalendarClock size={15} />
+                </button>
+                <button
+                  type="button"
+                  title="清除过期时间"
+                  aria-label="清除过期时间"
+                  disabled={expirationUpdating || (!expiresAtInput && !detail.expires_at)}
+                  onClick={() => {
+                    setExpiresAtInput("")
+                    void onExpiration()
+                  }}
+                >
+                  <XCircle size={15} />
+                </button>
+              </div>
+              <div className="knowledge-review-actions" aria-label="文档审核">
+                <button
+                  type="button"
+                  title="审核通过"
+                  aria-label="审核通过"
+                  disabled={reviewing || detail.review_status === "approved"}
+                  onClick={() => void onReview("approved")}
+                >
+                  <CheckCircle2 size={15} />
+                </button>
+                <button
+                  type="button"
+                  title="驳回文档"
+                  aria-label="驳回文档"
+                  disabled={reviewing || detail.review_status === "rejected"}
+                  onClick={() => void onReview("rejected")}
+                >
+                  <XCircle size={15} />
+                </button>
+                <button
+                  type="button"
+                  title="重置为待审核"
+                  aria-label="重置为待审核"
+                  disabled={reviewing || detail.review_status === "pending"}
+                  onClick={() => void onReview("pending")}
+                >
+                  <Timer size={15} />
+                </button>
+              </div>
             </div>
             {detail.error_message ? (
               <div className="knowledge-index-detail__error">{detail.error_message}</div>
@@ -1731,6 +2046,39 @@ function IndexDetailDialog({
       </div>
     </div>
   )
+}
+
+function ReviewStatusBadge({ status }: { status?: KnowledgeReviewStatus }) {
+  const labels: Record<KnowledgeReviewStatus, string> = {
+    pending: "待审核",
+    approved: "已通过",
+    rejected: "已驳回",
+    expired: "已过期",
+  }
+  const current = status || "pending"
+  return <span className={`knowledge-review-status is-${current}`}>{labels[current]}</span>
+}
+
+function reviewStatusActionMessage(status: KnowledgeReviewStatus) {
+  if (status === "approved") {
+    return "文档已审核通过"
+  }
+  if (status === "rejected") {
+    return "文档已驳回"
+  }
+  return "文档已重置为待审核"
+}
+
+function knowledgeExpirationInputValue(value?: string) {
+  if (!value) {
+    return ""
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return ""
+  }
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+  return local.toISOString().slice(0, 16)
 }
 
 function IndexDetailSection({

@@ -244,7 +244,7 @@ function mediaContentExists(
   );
 }
 
-function hasCanvasContent(value: unknown) {
+export function hasCanvasContent(value: unknown) {
   if (value == null || value === "") {
     return false;
   }

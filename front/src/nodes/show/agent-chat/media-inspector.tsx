@@ -27,6 +27,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  findAgentChatMediaArtifact,
+  readAgentChatMediaPreviewContext,
+} from "./artifact-actions";
+import type { AgentChatArtifactActionRenderer } from "./types";
 
 const MediaPreviewContext = createContext<EnergonMediaPreviewHandler | null>(
   null,
@@ -101,8 +106,10 @@ export function useAgentChatMediaPreview() {
 
 export function AgentChatMediaInspector({
   controller,
+  renderArtifactActions,
 }: {
   controller: AgentChatMediaInspectorController;
+  renderArtifactActions?: AgentChatArtifactActionRenderer;
 }) {
   const { request, activeIndex, activeItem, closePreview, move, selectIndex } =
     controller;
@@ -165,6 +172,15 @@ export function AgentChatMediaInspector({
 
   const multiple = request.items.length > 1;
   const title = mediaKindLabel(request.kind);
+  const previewContext = readAgentChatMediaPreviewContext(request.context);
+  const activeArtifact = previewContext
+    ? findAgentChatMediaArtifact(
+        previewContext.artifacts,
+        request.kind,
+        activeItem.url,
+        activeIndex,
+      )
+    : null;
 
   return (
     <aside
@@ -190,6 +206,13 @@ export function AgentChatMediaInspector({
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
+          {activeArtifact && previewContext && renderArtifactActions
+            ? renderArtifactActions({
+                messageID: previewContext.messageID,
+                artifact: activeArtifact,
+                placement: "preview",
+              })
+            : null}
           {request.kind === "image" ? (
             <>
               <InspectorButton

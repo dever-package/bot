@@ -12,19 +12,20 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
+	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
-func (s Service) ExecuteRun(ctx context.Context, lease RunLease) error {
+func (s Service) Execute(ctx context.Context, lease runtimequeue.Lease) error {
 	prepareCtx, prepareCancel := operationContext(ctx, runtimeMaintenanceTimeout)
 	defer prepareCancel()
 	workerID := strings.TrimSpace(lease.WorkerID)
 	if workerID == "" {
 		workerID = "runtime:" + uuid.NewString()
 	}
-	candidate, err := s.repository.FindRunByID(prepareCtx, lease.RunID)
+	candidate, err := s.repository.FindRunByID(prepareCtx, lease.ID)
 	if err != nil {
 		return err
 	}
@@ -37,13 +38,13 @@ func (s Service) ExecuteRun(ctx context.Context, lease RunLease) error {
 		return err
 	}
 	if !claimed {
-		current, findErr := s.repository.FindRunByID(prepareCtx, lease.RunID)
+		current, findErr := s.repository.FindRunByID(prepareCtx, lease.ID)
 		if findErr == nil && isTerminalRunStatus(current.Status) {
 			return nil
 		}
 		return errRunLeaseLost
 	}
-	row, err := s.repository.FindRunByID(prepareCtx, lease.RunID)
+	row, err := s.repository.FindRunByID(prepareCtx, lease.ID)
 	if err != nil {
 		return err
 	}

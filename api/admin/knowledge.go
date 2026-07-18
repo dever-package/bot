@@ -15,6 +15,7 @@ import (
 	botapi "github.com/dever-package/bot/api"
 	knowledgeservice "github.com/dever-package/bot/service/agent/knowledge"
 	frontstream "github.com/dever-package/front/service/stream"
+	userservice "github.com/dever-package/user/service"
 )
 
 type Knowledge struct{}
@@ -52,6 +53,11 @@ func (Knowledge) GetFileIndexDetail(c *server.Context) error {
 
 func (Knowledge) GetIndexOverview(c *server.Context) error {
 	data, err := knowledgeRunner.ReadKnowledgeIndexOverview(c.Context(), inputBaseID(c))
+	return knowledgeJSON(c, data, err)
+}
+
+func (Knowledge) GetIndexStatus(c *server.Context) error {
+	data, err := knowledgeRunner.ReadKnowledgeIndexStatus(c.Context(), inputBaseID(c))
 	return knowledgeJSON(c, data, err)
 }
 
@@ -488,10 +494,11 @@ func (Knowledge) PostReviewDoc(c *server.Context) error {
 	if status == "" {
 		return c.Error("审核状态不能为空")
 	}
-	reviewerID := uint64(frontstream.InputInt64(body["reviewer_id"], 0))
-	if reviewerID == 0 {
-		reviewerID = uint64(frontstream.InputInt64(body["user_id"], 0))
+	actor, err := userservice.RequireActor(c.Context())
+	if err != nil {
+		return c.Error(err)
 	}
+	reviewerID := actor.UserID
 	if len(docIDs) == 1 {
 		err = knowledgeRunner.ReviewDoc(c.Context(), docIDs[0], status, reviewerID)
 	} else {
@@ -508,6 +515,20 @@ func (Knowledge) GetExpiredDocs(c *server.Context) error {
 	docs, total, err := knowledgeRunner.ListExpiredDocs(
 		c.Context(),
 		baseID,
+		int(frontstream.InputInt64(c.Input("page"), 1)),
+		int(frontstream.InputInt64(c.Input("pageSize"), 20)),
+	)
+	return knowledgeJSON(c, map[string]any{
+		"list":  docs,
+		"total": total,
+	}, err)
+}
+
+func (Knowledge) GetReviewDocs(c *server.Context) error {
+	docs, total, err := knowledgeRunner.ListReviewDocs(
+		c.Context(),
+		inputBaseID(c),
+		strings.TrimSpace(c.Input("review_status")),
 		int(frontstream.InputInt64(c.Input("page"), 1)),
 		int(frontstream.InputInt64(c.Input("pageSize"), 20)),
 	)
@@ -607,18 +628,26 @@ func uint64SliceFromBody(body map[string]any, key string) []uint64 {
 	if !ok {
 		return nil
 	}
+	result := make([]uint64, 0)
 	switch values := raw.(type) {
 	case []any:
-		result := make([]uint64, 0, len(values))
 		for _, value := range values {
-			result = append(result, uint64(frontstream.InputInt64(value, 0)))
+			if id := frontstream.InputInt64(value, 0); id > 0 {
+				result = append(result, uint64(id))
+			}
 		}
-		return result
 	case []uint64:
-		return values
+		for _, id := range values {
+			if id > 0 {
+				result = append(result, id)
+			}
+		}
 	default:
-		return nil
+		if id := frontstream.InputInt64(raw, 0); id > 0 {
+			result = append(result, uint64(id))
+		}
 	}
+	return result
 }
 
 func stringSliceFromBodyKeys(body map[string]any, keys ...string) []string {

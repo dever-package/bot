@@ -75,6 +75,7 @@ type Memory struct {
 	ContextKey      string    `dorm:"type:varchar(128);not null;default:'';comment:上下文"`
 	SessionID       uint64    `dorm:"type:bigint;not null;default:0;comment:会话"`
 	Key             string    `dorm:"type:varchar(160);not null;default:'';comment:稳定记忆键"`
+	DedupeKey       *string   `dorm:"type:varchar(64);null;comment:去重指纹"`
 	Kind            string    `dorm:"type:varchar(32);not null;default:'episodic';comment:类型"`
 	Title           string    `dorm:"type:varchar(255);not null;default:'';comment:标题"`
 	Content         string    `dorm:"type:text;not null;default:'{}';comment:内容"`
@@ -92,6 +93,7 @@ type MemoryIndex struct {
 	OwnerKind   struct{} `index:"owner_type,owner_id,kind,status,created_at"`
 	OwnerScope  struct{} `index:"owner_type,owner_id,scope,agent_key,context_key,session_id,status"`
 	OwnerKey    struct{} `index:"owner_type,owner_id,scope,key,status"`
+	DedupeKey   struct{} `unique:"dedupe_key"`
 	ProjectKind struct{} `index:"project_id,kind,status,created_at"`
 	TeamKind    struct{} `index:"team_id,kind,status,created_at"`
 	FlowKind    struct{} `index:"flow_id,kind,status,created_at"`

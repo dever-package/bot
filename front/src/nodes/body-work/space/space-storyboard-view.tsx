@@ -22,6 +22,7 @@ import {
   type StoryboardReferenceField,
   type StoryboardShot,
 } from "./space-storyboard";
+import { moveOrderedItemById } from "./space-ordered-list";
 import type { ComposerAssetItem } from "./space-prompt-composer";
 import {
   reconcileCanvasReferenceContent,
@@ -188,20 +189,14 @@ export function StoryboardView({
       return;
     }
     updateDraft((current) => {
-      const sourceIndex = current.shots.findIndex(
-        (shot) => shot.id === sourceId,
+      const shots = moveOrderedItemById(
+        current.shots,
+        sourceId,
+        targetId,
+        placement,
+        (shot) => shot.id,
       );
-      if (sourceIndex < 0) {
-        return current;
-      }
-      const shots = [...current.shots];
-      const [source] = shots.splice(sourceIndex, 1);
-      const targetIndex = shots.findIndex((shot) => shot.id === targetId);
-      if (targetIndex < 0) {
-        return current;
-      }
-      shots.splice(targetIndex + (placement === "after" ? 1 : 0), 0, source);
-      return { ...current, shots };
+      return shots === current.shots ? current : { ...current, shots };
     });
   };
 

@@ -12,6 +12,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { PowerIcon } from "../space-power-icon";
 import { resolvePowerPresentation } from "../space-power-presentation";
 import type { SpaceCanvasNode } from "../types";
@@ -20,6 +21,7 @@ import type { NodeDetailDraftStatus } from "./use-node-detail-draft";
 export function NodeDetailHeader({
   node,
   contentLabel,
+  versionSelect,
   updatedAt,
   status,
   readonly,
@@ -29,6 +31,7 @@ export function NodeDetailHeader({
 }: {
   node: SpaceCanvasNode;
   contentLabel: string;
+  versionSelect?: ReactNode;
   updatedAt: string;
   status: NodeDetailDraftStatus;
   readonly: boolean;
@@ -57,6 +60,7 @@ export function NodeDetailHeader({
       </div>
 
       <div className="ws-node-detail-meta">
+        {versionSelect}
         {!readonly ? (
           status === "error" ? (
             <button

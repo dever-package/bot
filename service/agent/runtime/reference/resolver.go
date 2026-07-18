@@ -30,10 +30,6 @@ func NewRequestResolver(serverContext *server.Context) Resolver {
 	return Resolver{artifacts: runtimeartifact.NewService(), assets: assetservice.NewService(), server: serverContext}
 }
 
-func NewResolver() Resolver {
-	return Resolver{artifacts: runtimeartifact.NewService(), assets: assetservice.NewService()}
-}
-
 func (r Resolver) Resolve(ctx context.Context, session agentmodel.Session, references []Reference) (Result, error) {
 	result := Result{Items: make([]Resolved, 0, len(references))}
 	for _, current := range references {

@@ -31,7 +31,6 @@ const (
 	serviceRunningHubImageID        uint64 = 7
 	serviceRunningHubMusicID        uint64 = 8
 	serviceRunningHubFlowClothingID uint64 = 9
-	serviceFFmpegComposeID          uint64 = 10
 )
 
 var (
@@ -115,15 +114,6 @@ var (
 			"type":        "image",
 			"path":        "",
 			"sort":        30,
-			"status":      1,
-		},
-		{
-			"id":          serviceFFmpegComposeID,
-			"provider_id": providerFFmpegLocalID,
-			"name":        "FFmpeg 视频合成",
-			"type":        "video",
-			"path":        "local://ffmpeg/compose",
-			"sort":        10,
 			"status":      1,
 		},
 	}

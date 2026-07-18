@@ -88,25 +88,60 @@
         "name": "输出类型",
         "value": "form.output_type",
         "mode": "form",
-        "info": "通用输出按原始文本展示；分镜脚本使用系统固定结构并在画布中展示为可编辑分镜。",
+        "info": "输出类型决定画布中的展示和编辑方式：文本可使用分镜脚本，视频可使用视频合成器。",
         "meta": {
+          "hiddenCondition": "all",
+          "optionFilter": [
+            {
+              "field": "id",
+              "path": "form.kind",
+              "sourceNodeId": "power-kind",
+              "sourceField": "id",
+              "map": {
+                "text": [
+                  "general",
+                  "storyboard"
+                ],
+                "video": [
+                  "general",
+                  "video_compose"
+                ]
+              }
+            }
+          ],
           "hiddenWhen": [
             {
               "path": "form.kind",
               "operator": "notEquals",
               "value": "text"
+            },
+            {
+              "path": "form.kind",
+              "operator": "notEquals",
+              "value": "video"
             }
           ]
         },
         "validate": [
           {
             "type": "required",
-            "message": "文本能力必须选择输出类型。",
+            "message": "能力必须选择输出类型。",
             "when": [
               {
                 "path": "form.kind",
                 "operator": "equals",
                 "value": "text"
+              }
+            ]
+          },
+          {
+            "type": "required",
+            "message": "能力必须选择输出类型。",
+            "when": [
+              {
+                "path": "form.kind",
+                "operator": "equals",
+                "value": "video"
               }
             ]
           }

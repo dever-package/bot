@@ -1,4 +1,4 @@
-export type AssetSourceType = "project" | "tool" | "dialogue";
+export type AssetSourceType = "project" | "tool" | "dialogue" | "upload";
 export type AssetRole = "work" | "material";
 export type AssetKind =
   | "text"
@@ -104,4 +104,3 @@ export const emptyAssetFilters: AssetFilters = {
   role: "",
   kind: "",
 };
-

@@ -56,6 +56,7 @@
             "message": "知识库分类不能为空。"
           }
         ],
+        "info": "分类决定文件目录和向量集合，知识库创建后不可修改。",
         "meta": {
           "formLayout": "horizontal",
           "controlClassName": "max-w-[260px]"
@@ -111,6 +112,18 @@
         "meta": {
           "formLayout": "horizontal",
           "controlClassName": "max-w-[260px]"
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "严格审核",
+        "value": "form.review_required",
+        "mode": "form",
+        "info": "开启后，只有审核通过且未过期的文档可被智能体读取；文档内容变化后会自动回到待审核。",
+        "meta": {
+          "formLayout": "horizontal",
+          "trueValue": true,
+          "falseValue": false
         }
       },
       {
@@ -190,20 +203,13 @@
       },
       {
         "type": "form-number",
-        "name": "最大字数",
+        "name": "单次读取字数",
         "value": "form.max_context_chars",
         "mode": "form",
-        "info": "最多注入到智能体上下文里的知识内容总字数，默认 6000。",
+        "info": "原文或节点工具单次最多返回的正文字符数，默认 6000。",
         "meta": {
           "formLayout": "horizontal",
-          "controlClassName": "max-w-[180px]",
-          "showWhen": [
-            {
-              "path": "form.concept_graph_enabled",
-              "operator": "equals",
-              "value": 1
-            }
-          ]
+          "controlClassName": "max-w-[180px]"
         }
       },
       {
@@ -299,6 +305,7 @@
       "index_power_id": "",
       "embedding_power_id": "",
       "concept_graph_enabled": 2,
+      "review_required": false,
       "node_max_length": 800,
       "node_split_overlap": 120,
       "retrieve_limit": 5,

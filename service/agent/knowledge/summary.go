@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/shemic/dever/util"
 
@@ -14,6 +16,10 @@ import (
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
+const maxConcurrentDirectorySummaries = 3
+
+var directorySummarySemaphore = make(chan struct{}, maxConcurrentDirectorySummaries)
+
 func (s Service) refreshDirectorySummaries(ctx context.Context, baseID uint64, dirID uint64) {
 	base := agentmodel.NewKnowledgeBaseModel().Find(ctx, map[string]any{"id": baseID, "status": 1})
 	if base == nil {
@@ -21,12 +27,12 @@ func (s Service) refreshDirectorySummaries(ctx context.Context, baseID uint64, d
 	}
 	dirIDs := []uint64{dirID}
 	if dirID > 0 {
-		dirIDs = descendantDirIDs(ctx, baseID, dirID)
+		dirIDs = ancestorDirIDs(ctx, baseID, dirID)
 	} else {
 		dirIDs = allDirectoryIDs(ctx, baseID)
 	}
-	for i := len(dirIDs) - 1; i >= 0; i-- {
-		refreshDirectorySummary(ctx, base, dirIDs[i])
+	for _, currentDirID := range dirIDs {
+		refreshDirectorySummary(ctx, base, currentDirID)
 	}
 }
 
@@ -59,19 +65,7 @@ func refreshDirectorySummary(ctx context.Context, base *agentmodel.KnowledgeBase
 		"field": "main.id, main.name, main.summary, main.keywords",
 		"order": "main.sort asc, main.id asc",
 	})
-	docs := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
-		"knowledge_base_id": base.ID,
-		"dir_id":            dirID,
-		"status":            1,
-	}, map[string]any{
-		"field":    "main.id, main.title, main.summary, main.keywords",
-		"order":    "main.id desc",
-		"page":     1,
-		"pageSize": 40,
-	})
-	if base.IndexPowerID > 0 && len(docs) >= 3 {
-		go generateLLMDirectorySummary(context.Background(), base, dirID, childDirs, docs)
-	}
+	docs := representativeDirectorySummaryDocs(ctx, base, dirID, 40)
 	parts := make([]string, 0, len(childDirs)+len(docs)+1)
 	keywords := make([]string, 0)
 	for _, dir := range childDirs {
@@ -92,18 +86,165 @@ func refreshDirectorySummary(ctx context.Context, base *agentmodel.KnowledgeBase
 		}
 		keywords = append(keywords, splitSummaryKeywords(doc.Keywords)...)
 	}
+	summary := truncateText(strings.Join(parts, "\n"), 3000)
+	keywordText := strings.Join(uniqueSummaryKeywords(keywords, 60), ", ")
 	agentmodel.NewKnowledgeDirModel().Update(ctx, map[string]any{"id": dirID}, map[string]any{
-		"summary":  truncateText(strings.Join(parts, "\n"), 3000),
-		"keywords": strings.Join(uniqueSummaryKeywords(keywords, 60), ", "),
+		"summary":  summary,
+		"keywords": keywordText,
 	})
+	if base.IndexPowerID <= 0 || len(docs) < 3 {
+		return
+	}
+	select {
+	case directorySummarySemaphore <- struct{}{}:
+		go func() {
+			defer func() { <-directorySummarySemaphore }()
+			generateLLMDirectorySummary(context.Background(), base, dirID, childDirs, docs, summary, keywordText)
+		}()
+	default:
+	}
 }
 
-func generateLLMDirectorySummary(ctx context.Context, base *agentmodel.KnowledgeBase, dirID uint64, childDirs []*agentmodel.KnowledgeDir, docs []*agentmodel.KnowledgeDoc) {
+func representativeDirectorySummaryDocs(ctx context.Context, base *agentmodel.KnowledgeBase, dirID uint64, limit int) []*agentmodel.KnowledgeDoc {
+	if base == nil || base.ID == 0 || dirID == 0 || limit <= 0 {
+		return nil
+	}
+	const pageSize = 250
+	filters := map[string]any{
+		"knowledge_base_id": base.ID,
+		"dir_id":            dirID,
+		"status":            1,
+	}
+	total := countInt(agentmodel.NewKnowledgeDocModel().Count(ctx, filters))
+	stride := 1
+	if total > limit {
+		stride = (total + limit - 1) / limit
+	}
+	selected := make([]*agentmodel.KnowledgeDoc, 0, limit)
+	latest := make([]*agentmodel.KnowledgeDoc, 0, 6)
+	ordinal := 0
+	now := time.Now()
+	var afterID uint64
+	for {
+		pageFilters := mergeFilter(filters, map[string]any{})
+		if afterID > 0 {
+			pageFilters["id"] = map[string]any{"gt": afterID}
+		}
+		rows := agentmodel.NewKnowledgeDocModel().Select(ctx, pageFilters, map[string]any{
+			"field":    "main.id, main.title, main.summary, main.keywords, main.status, main.index_status, main.expires_at, main.review_status",
+			"order":    "main.id asc",
+			"page":     1,
+			"pageSize": pageSize,
+		})
+		if len(rows) == 0 {
+			break
+		}
+		afterID = rows[len(rows)-1].ID
+		for _, row := range rows {
+			currentOrdinal := ordinal
+			ordinal++
+			if !knowledgeDocAvailableAt(row, base.ReviewRequired, now) {
+				continue
+			}
+			latest = append(latest, row)
+			if len(latest) > 6 {
+				latest = latest[1:]
+			}
+			if currentOrdinal%stride == 0 {
+				selected = append(selected, row)
+			}
+		}
+		if len(rows) < pageSize {
+			break
+		}
+	}
+	seen := make(map[uint64]struct{}, len(selected)+len(latest))
+	result := make([]*agentmodel.KnowledgeDoc, 0, limit)
+	for _, group := range [][]*agentmodel.KnowledgeDoc{latest, selected} {
+		for _, row := range group {
+			if row == nil || len(result) >= limit {
+				continue
+			}
+			if _, exists := seen[row.ID]; exists {
+				continue
+			}
+			seen[row.ID] = struct{}{}
+			result = append(result, row)
+		}
+	}
+	return result
+}
+
+func (s Service) refreshDocumentDirectorySummaries(ctx context.Context, docIDs []uint64) {
+	docIDs = uniqueUint64s(docIDs, 0)
+	if len(docIDs) == 0 {
+		return
+	}
+	docs := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{"id": docIDs}, map[string]any{
+		"field":    "main.id, main.knowledge_base_id, main.dir_id",
+		"page":     1,
+		"pageSize": len(docIDs),
+	})
+	dirsByBase := make(map[uint64][]uint64)
+	for _, doc := range docs {
+		if doc != nil && doc.KnowledgeBaseID > 0 && doc.DirID > 0 {
+			dirsByBase[doc.KnowledgeBaseID] = append(dirsByBase[doc.KnowledgeBaseID], doc.DirID)
+		}
+	}
+	for baseID, changedDirIDs := range dirsByBase {
+		base := agentmodel.NewKnowledgeBaseModel().Find(ctx, map[string]any{"id": baseID, "status": 1})
+		if base == nil {
+			continue
+		}
+		dirs := agentmodel.NewKnowledgeDirModel().Select(ctx, map[string]any{
+			"knowledge_base_id": baseID,
+			"status":            1,
+		}, map[string]any{
+			"field": "main.id, main.parent_id, main.depth",
+		})
+		dirByID := make(map[uint64]*agentmodel.KnowledgeDir, len(dirs))
+		for _, dir := range dirs {
+			if dir != nil {
+				dirByID[dir.ID] = dir
+			}
+		}
+		refreshIDs := make(map[uint64]struct{})
+		for _, dirID := range uniqueUint64s(changedDirIDs, 0) {
+			for dir := dirByID[dirID]; dir != nil; dir = dirByID[dir.ParentID] {
+				if _, exists := refreshIDs[dir.ID]; exists {
+					break
+				}
+				refreshIDs[dir.ID] = struct{}{}
+			}
+		}
+		ordered := make([]*agentmodel.KnowledgeDir, 0, len(refreshIDs))
+		for dirID := range refreshIDs {
+			if dir := dirByID[dirID]; dir != nil {
+				ordered = append(ordered, dir)
+			}
+		}
+		sort.SliceStable(ordered, func(i, j int) bool {
+			if ordered[i].Depth == ordered[j].Depth {
+				return ordered[i].ID > ordered[j].ID
+			}
+			return ordered[i].Depth > ordered[j].Depth
+		})
+		for _, dir := range ordered {
+			refreshDirectorySummary(ctx, base, dir.ID)
+		}
+	}
+}
+
+func generateLLMDirectorySummary(ctx context.Context, base *agentmodel.KnowledgeBase, dirID uint64, childDirs []*agentmodel.KnowledgeDir, docs []*agentmodel.KnowledgeDoc, expectedSummary string, expectedKeywords string) {
 	powerKey, err := knowledgeIndexPowerKey(ctx, base.IndexPowerID)
 	if err != nil {
 		return
 	}
-	dir := agentmodel.NewKnowledgeDirModel().Find(ctx, map[string]any{"id": dirID})
+	dir := agentmodel.NewKnowledgeDirModel().Find(ctx, map[string]any{
+		"id":                dirID,
+		"knowledge_base_id": base.ID,
+		"status":            1,
+	})
 	if dir == nil {
 		return
 	}
@@ -140,7 +281,13 @@ func generateLLMDirectorySummary(ctx context.Context, base *agentmodel.Knowledge
 	if llmSummary == "" {
 		return
 	}
-	agentmodel.NewKnowledgeDirModel().Update(ctx, map[string]any{"id": dirID}, map[string]any{
+	agentmodel.NewKnowledgeDirModel().Update(ctx, map[string]any{
+		"id":                dirID,
+		"knowledge_base_id": base.ID,
+		"summary":           expectedSummary,
+		"keywords":          expectedKeywords,
+		"status":            1,
+	}, map[string]any{
 		"summary": truncateText(llmSummary, 2000),
 	})
 }

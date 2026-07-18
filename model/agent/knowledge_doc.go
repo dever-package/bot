@@ -15,6 +15,7 @@ type KnowledgeDoc struct {
 	StoragePath      string     `dorm:"type:varchar(1024);not null;default:'';comment:存储路径"`
 	MimeType         string     `dorm:"type:varchar(128);not null;default:'';comment:MIME类型"`
 	Size             int64      `dorm:"type:bigint;not null;default:0;comment:文件大小"`
+	FileModifiedAt   int64      `dorm:"type:bigint;not null;default:0;comment:文件修改时间纳秒"`
 	Content          string     `dorm:"type:text;not null;default:'';comment:内容"`
 	Summary          string     `dorm:"type:text;not null;default:'';comment:摘要"`
 	Keywords         string     `dorm:"type:text;not null;default:'';comment:关键词"`
@@ -40,6 +41,8 @@ type KnowledgeDocIndex struct {
 	BaseDir      struct{} `index:"knowledge_base_id,dir_id,status,id"`
 	BaseIndex    struct{} `index:"knowledge_base_id,index_status,id"`
 	BaseStage    struct{} `index:"knowledge_base_id,index_stage,status"`
+	BaseReview   struct{} `index:"knowledge_base_id,review_status,status,id"`
+	BaseExpires  struct{} `index:"knowledge_base_id,expires_at,status,id"`
 	StoragePath  struct{} `index:"knowledge_base_id,storage_path"`
 	ContentHash  struct{} `index:"knowledge_base_id,content_hash"`
 }

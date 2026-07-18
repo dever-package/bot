@@ -17,6 +17,7 @@ const OUTPUT_TYPE_FALLBACKS: Record<
 > = {
   general: { name: "通用", viewMode: "content" },
   storyboard: { name: "分镜脚本", viewMode: "storyboard" },
+  video_compose: { name: "视频合成", viewMode: "video_compose" },
 };
 
 const POWER_KIND_LABELS: Record<string, string> = {
@@ -47,7 +48,8 @@ export function resolvePowerPresentation(
     normalizedValue(power?.output?.key) === outputType
       ? power?.output
       : undefined;
-  const showsOutputType = kind === "text" || kind === "llm";
+  const showsOutputType =
+    kind === "text" || kind === "llm" || outputType !== "general";
 
   return {
     outputType,
@@ -68,6 +70,17 @@ export function isStoryboardPowerType(
   return (
     resolvePowerPresentation(power, fallbackKind, fallbackOutputType)
       .viewMode === "storyboard"
+  );
+}
+
+export function isVideoComposePowerType(
+  power?: PowerLike,
+  fallbackKind: unknown = "",
+  fallbackOutputType: unknown = "",
+) {
+  return (
+    resolvePowerPresentation(power, fallbackKind, fallbackOutputType)
+      .viewMode === "video_compose"
   );
 }
 

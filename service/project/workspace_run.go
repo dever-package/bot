@@ -9,6 +9,7 @@ import (
 	"time"
 
 	assetmodel "github.com/dever-package/bot/model/asset"
+	energonmodel "github.com/dever-package/bot/model/energon"
 	teammodel "github.com/dever-package/bot/model/team"
 	assetservice "github.com/dever-package/bot/service/asset"
 	energoninput "github.com/dever-package/bot/service/energon/input"
@@ -27,27 +28,28 @@ type CanvasRunRequest struct {
 }
 
 type canvasRunNode struct {
-	ID             string
-	Type           string
-	Title          string
-	Kind           string
-	OutputType     string
-	GroupID        string
-	AssetCateID    uint64
-	FunctionKey    string
-	FlowID         uint64
-	PowerID        uint64
-	PowerKey       string
-	PowerKind      string
-	AgentID        uint64
-	RoleID         uint64
-	Asset          map[string]any
-	AssetID        uint64
-	AssetVersionID uint64
-	ComposerPrompt string
-	SelectedTarget uint64
-	ParamValues    map[string]any
-	PersistsResult bool
+	ID               string
+	Type             string
+	Title            string
+	Kind             string
+	OutputType       string
+	GroupID          string
+	AssetCateID      uint64
+	FunctionKey      string
+	FlowID           uint64
+	PowerID          uint64
+	PowerKey         string
+	PowerKind        string
+	AgentID          uint64
+	RoleID           uint64
+	Asset            map[string]any
+	AssetID          uint64
+	AssetVersionID   uint64
+	ComposerPrompt   string
+	VideoComposition map[string]any
+	SelectedTarget   uint64
+	ParamValues      map[string]any
+	PersistsResult   bool
 }
 
 type canvasRunEdge struct {
@@ -487,6 +489,16 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 	}
 	input := mergeCanvasPromptInput(req.Input, previousOutput, node.ComposerPrompt)
 	params := cloneInput(node.ParamValues)
+	if energonmodel.NormalizeOutputType(node.OutputType) == energonmodel.OutputTypeVideoCompose {
+		composition, err := resolveCanvasVideoComposition(ctx, projectID, node.VideoComposition)
+		if err != nil {
+			return nil, err
+		}
+		params["composition"] = composition
+		if len(sliceValue(params["videos"])) == 0 {
+			params["videos"] = canvasVideoCompositionURLs(composition)
+		}
+	}
 	if canvasContextText(input["prompt"]) != "" && canvasContextText(params["prompt"]) == "" {
 		delete(params, "prompt")
 	}
@@ -763,26 +775,27 @@ func parseCanvasRunGraph(canvas map[string]any) ([]canvasRunNode, []canvasRunEdg
 	for _, raw := range nodesRaw {
 		row := mapValue(raw)
 		node := canvasRunNode{
-			ID:             textValue(row["id"]),
-			Type:           textValue(row["type"]),
-			Title:          textValue(row["title"]),
-			Kind:           textValue(row["kind"]),
-			OutputType:     textValue(row["output_type"]),
-			GroupID:        textValue(row["group_id"]),
-			AssetCateID:    uint64Value(row["asset_cate_id"]),
-			FunctionKey:    textValue(valueAtPath(row, "function_option", "key")),
-			FlowID:         uint64Value(valueAtPath(row, "flow", "id")),
-			PowerID:        uint64Value(valueAtPath(row, "power", "id")),
-			PowerKey:       textValue(valueAtPath(row, "power", "key")),
-			PowerKind:      textValue(valueAtPath(row, "power", "kind")),
-			AgentID:        uint64Value(valueAtPath(row, "role", "agent_id")),
-			RoleID:         uint64Value(valueAtPath(row, "role", "id")),
-			Asset:          mapValue(row["asset"]),
-			AssetID:        uint64Value(valueAtPath(row, "asset", "id")),
-			AssetVersionID: uint64Value(valueAtPath(row, "asset", "version_id")),
-			ComposerPrompt: textValue(valueAtPath(row, "composer_draft", "prompt")),
-			SelectedTarget: uint64Value(valueAtPath(row, "composer_draft", "selected_target_id")),
-			ParamValues:    mapValue(valueAtPath(row, "composer_draft", "param_values")),
+			ID:               textValue(row["id"]),
+			Type:             textValue(row["type"]),
+			Title:            textValue(row["title"]),
+			Kind:             textValue(row["kind"]),
+			OutputType:       textValue(row["output_type"]),
+			GroupID:          textValue(row["group_id"]),
+			AssetCateID:      uint64Value(row["asset_cate_id"]),
+			FunctionKey:      textValue(valueAtPath(row, "function_option", "key")),
+			FlowID:           uint64Value(valueAtPath(row, "flow", "id")),
+			PowerID:          uint64Value(valueAtPath(row, "power", "id")),
+			PowerKey:         textValue(valueAtPath(row, "power", "key")),
+			PowerKind:        textValue(valueAtPath(row, "power", "kind")),
+			AgentID:          uint64Value(valueAtPath(row, "role", "agent_id")),
+			RoleID:           uint64Value(valueAtPath(row, "role", "id")),
+			Asset:            mapValue(row["asset"]),
+			AssetID:          uint64Value(valueAtPath(row, "asset", "id")),
+			AssetVersionID:   uint64Value(valueAtPath(row, "asset", "version_id")),
+			ComposerPrompt:   textValue(valueAtPath(row, "composer_draft", "prompt")),
+			VideoComposition: mapValue(valueAtPath(row, "composer_draft", "video_composition")),
+			SelectedTarget:   uint64Value(valueAtPath(row, "composer_draft", "selected_target_id")),
+			ParamValues:      mapValue(valueAtPath(row, "composer_draft", "param_values")),
 		}
 		if node.Type == "power" && node.PowerKind != "" {
 			node.Kind = node.PowerKind

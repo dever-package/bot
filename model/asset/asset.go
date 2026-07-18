@@ -20,6 +20,7 @@ const (
 	SourceProject  = "project"
 	SourceTool     = "tool"
 	SourceDialogue = "dialogue"
+	SourceUpload   = "upload"
 
 	StatusDraft   = "draft"
 	StatusCurrent = "current"
@@ -50,6 +51,7 @@ var sourceTypeOptions = []map[string]any{
 	{"id": SourceProject, "value": "项目"},
 	{"id": SourceTool, "value": "工具"},
 	{"id": SourceDialogue, "value": "对话"},
+	{"id": SourceUpload, "value": "上传"},
 }
 
 var bodyRelation = orm.Relation{

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,13 +30,41 @@ type qdrantPoint struct {
 	Payload map[string]any `json:"payload"`
 }
 
+type qdrantRequestError struct {
+	StatusCode int
+	Status     string
+	Body       string
+}
+
+func (e *qdrantRequestError) Error() string {
+	return fmt.Sprintf("向量数据库请求失败: %s %s", e.Status, e.Body)
+}
+
+type qdrantCollectionResponse struct {
+	Result struct {
+		Config struct {
+			Params struct {
+				Vectors struct {
+					Size int `json:"size"`
+				} `json:"vectors"`
+			} `json:"params"`
+		} `json:"config"`
+	} `json:"result"`
+}
+
 func (c qdrantClient) ensureCollection(ctx context.Context, collection string, vectorSize int) error {
 	if vectorSize <= 0 {
 		return fmt.Errorf("向量维度无效")
 	}
 	collection = normalizeCollection(collection)
-	if err := c.request(ctx, http.MethodGet, "/collections/"+collection, nil, nil); err == nil {
-		return nil
+	response := qdrantCollectionResponse{}
+	err := c.request(ctx, http.MethodGet, "/collections/"+collection, nil, &response)
+	if err == nil {
+		return validateQdrantCollectionSize(collection, vectorSize, response)
+	}
+	var requestErr *qdrantRequestError
+	if !errors.As(err, &requestErr) || requestErr.StatusCode != http.StatusNotFound {
+		return err
 	}
 
 	body := map[string]any{
@@ -44,7 +73,27 @@ func (c qdrantClient) ensureCollection(ctx context.Context, collection string, v
 			"distance": "Cosine",
 		},
 	}
-	return c.request(ctx, http.MethodPut, "/collections/"+collection, body, nil)
+	if createErr := c.request(ctx, http.MethodPut, "/collections/"+collection, body, nil); createErr != nil {
+		// Another indexing worker may have created the shared category collection
+		// after our initial GET. Verify the resulting collection before failing.
+		created := qdrantCollectionResponse{}
+		if err := c.request(ctx, http.MethodGet, "/collections/"+collection, nil, &created); err == nil {
+			return validateQdrantCollectionSize(collection, vectorSize, created)
+		}
+		return createErr
+	}
+	return nil
+}
+
+func validateQdrantCollectionSize(collection string, vectorSize int, response qdrantCollectionResponse) error {
+	existingSize := response.Result.Config.Params.Vectors.Size
+	if existingSize <= 0 {
+		return fmt.Errorf("向量集合 %s 未返回有效维度", collection)
+	}
+	if existingSize != vectorSize {
+		return fmt.Errorf("向量集合 %s 的维度为 %d，当前模型返回 %d", collection, existingSize, vectorSize)
+	}
+	return nil
 }
 
 func (c qdrantClient) upsertPoints(ctx context.Context, collection string, points []qdrantPoint) error {
@@ -54,6 +103,15 @@ func (c qdrantClient) upsertPoints(ctx context.Context, collection string, point
 	body := map[string]any{"points": points}
 	path := "/collections/" + normalizeCollection(collection) + "/points?wait=true"
 	return c.request(ctx, http.MethodPut, path, body, nil)
+}
+
+func (c qdrantClient) deleteCollection(ctx context.Context, collection string) error {
+	err := c.request(ctx, http.MethodDelete, "/collections/"+normalizeCollection(collection), nil, nil)
+	var requestErr *qdrantRequestError
+	if errors.As(err, &requestErr) && requestErr.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	return err
 }
 
 func (c qdrantClient) deleteByBase(ctx context.Context, collection string, baseID uint64) error {
@@ -66,7 +124,12 @@ func (c qdrantClient) deleteByBase(ctx context.Context, collection string, baseI
 		}),
 	}
 	path := "/collections/" + normalizeCollection(collection) + "/points/delete?wait=true"
-	return c.request(ctx, http.MethodPost, path, body, nil)
+	err := c.request(ctx, http.MethodPost, path, body, nil)
+	var requestErr *qdrantRequestError
+	if errors.As(err, &requestErr) && requestErr.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	return err
 }
 
 func (c qdrantClient) deleteByDoc(ctx context.Context, collection string, baseID uint64, docID uint64) error {
@@ -80,7 +143,53 @@ func (c qdrantClient) deleteByDoc(ctx context.Context, collection string, baseID
 		}),
 	}
 	path := "/collections/" + normalizeCollection(collection) + "/points/delete?wait=true"
-	return c.request(ctx, http.MethodPost, path, body, nil)
+	err := c.request(ctx, http.MethodPost, path, body, nil)
+	var requestErr *qdrantRequestError
+	if errors.As(err, &requestErr) && requestErr.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	return err
+}
+
+func (c qdrantClient) deleteByDocVersion(ctx context.Context, collection string, baseID uint64, docID uint64, indexVersion int) error {
+	if baseID == 0 || docID == 0 || indexVersion <= 0 {
+		return nil
+	}
+	return c.deleteByFilter(ctx, collection, qdrantPayloadFilter([]payloadMatch{
+		{Key: "knowledge_base_id", Values: []uint64{baseID}},
+		{Key: "doc_id", Values: []uint64{docID}},
+		{Key: "index_version", Values: []uint64{uint64(indexVersion)}},
+	}))
+}
+
+func (c qdrantClient) deleteByDocBeforeVersion(ctx context.Context, collection string, baseID uint64, docID uint64, indexVersion int) error {
+	if baseID == 0 || docID == 0 || indexVersion <= 0 {
+		return nil
+	}
+	filter := qdrantPayloadFilter([]payloadMatch{
+		{Key: "knowledge_base_id", Values: []uint64{baseID}},
+		{Key: "doc_id", Values: []uint64{docID}},
+	})
+	must, _ := filter["must"].([]map[string]any)
+	must = append(must, map[string]any{
+		"key": "index_version",
+		"range": map[string]any{
+			"lt": indexVersion,
+		},
+	})
+	filter["must"] = must
+	return c.deleteByFilter(ctx, collection, filter)
+}
+
+func (c qdrantClient) deleteByFilter(ctx context.Context, collection string, filter map[string]any) error {
+	body := map[string]any{"filter": filter}
+	path := "/collections/" + normalizeCollection(collection) + "/points/delete?wait=true"
+	err := c.request(ctx, http.MethodPost, path, body, nil)
+	var requestErr *qdrantRequestError
+	if errors.As(err, &requestErr) && requestErr.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	return err
 }
 
 func (c qdrantClient) search(ctx context.Context, collection string, vector []float64, baseIDs []uint64, limit int, scoreThreshold float64) ([]searchHit, error) {
@@ -162,9 +271,16 @@ func (c qdrantClient) request(ctx context.Context, method string, path string, b
 		return err
 	}
 	defer resp.Body.Close()
-	payload, _ := io.ReadAll(resp.Body)
+	payload, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("读取向量数据库响应失败: %w", err)
+	}
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("向量数据库请求失败: %s %s", resp.Status, strings.TrimSpace(string(payload)))
+		return &qdrantRequestError{
+			StatusCode: resp.StatusCode,
+			Status:     resp.Status,
+			Body:       strings.TrimSpace(string(payload)),
+		}
 	}
 	if result == nil || len(payload) == 0 {
 		return nil

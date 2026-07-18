@@ -25,9 +25,18 @@ import { NodeDetailEditor } from "./node-detail-editor";
 import type { ComposerAssetItem } from "../space-prompt-composer";
 import { NodeDetailHeader } from "./node-detail-header";
 import { useNodeDetailDraft } from "./use-node-detail-draft";
-import { formatNodeDetailVersionTime, VersionPanel } from "./version-panel";
+import {
+  formatNodeDetailVersionTime,
+  NodeDetailVersionSelect,
+} from "./version-select";
 import { useAssetReferenceProvider } from "../../asset/asset-reference-provider";
 import { CanvasAssetReferenceProviderContext } from "../space-reference-editor";
+import { isVideoComposePowerType } from "../space-power-presentation";
+import { VideoComposeView } from "../space-video-compose-view";
+import {
+  emptyVideoComposition,
+  type CanvasVideoComposition,
+} from "../space-video-compose";
 
 export function NodeDetailDialog({
   projectId,
@@ -35,6 +44,8 @@ export function NodeDetailDialog({
   assetCateId,
   node,
   canvasReferenceItems,
+  onNodeDraftChange,
+  onRunNode,
   onAssetUpdated,
   onClose,
 }: {
@@ -43,6 +54,8 @@ export function NodeDetailDialog({
   assetCateId: number;
   node: SpaceCanvasNode;
   canvasReferenceItems?: ComposerAssetItem[];
+  onNodeDraftChange?: (draft: SpaceCanvasNode["composerDraft"]) => void;
+  onRunNode?: (node: SpaceCanvasNode) => Promise<void>;
   onAssetUpdated?: (asset: ProjectAsset) => void;
   onClose: () => void;
 }) {
@@ -55,6 +68,16 @@ export function NodeDetailDialog({
     },
   });
   const assetId = Number(node.asset?.id || 0);
+  const isVideoCompose = isVideoComposePowerType(
+    node.power,
+    node.kind,
+    node.outputType,
+  );
+  const [videoComposition, setVideoComposition] =
+    useState<CanvasVideoComposition>(
+      () => node.composerDraft?.videoComposition || emptyVideoComposition(),
+    );
+  const [videoComposeRunning, setVideoComposeRunning] = useState(false);
   const [asset, setAsset] = useState<ProjectAsset | undefined>(node.asset);
   const [versions, setVersions] = useState<AssetVersion[]>(() =>
     initialVersionItems(node.asset),
@@ -161,6 +184,9 @@ export function NodeDetailDialog({
     setHistoryVersion(null);
     setHistoryError("");
     setContentGeneration((generation) => generation + 1);
+    setVideoComposition(
+      node.composerDraft?.videoComposition || emptyVideoComposition(),
+    );
     void loadDetail();
     return () => {
       detailRequestRef.current += 1;
@@ -209,14 +235,20 @@ export function NodeDetailDialog({
           summary: content.summary,
         };
       }
+      const nextVersionId = currentAssetVersionId(mergedAsset);
       assetRef.current = mergedAsset;
+      selectedVersionIdRef.current = nextVersionId;
       setAsset(mergedAsset);
+      setSelectedVersionId(nextVersionId);
       setVersions((current) =>
         mergeAssetVersions(
           current,
           mergedAsset.version ? [mergedAsset.version] : [],
         ),
       );
+      if (nextVersionId && nextVersionId !== activeVersionId) {
+        setVersionTotal((total) => total + 1);
+      }
       onAssetUpdatedRef.current?.(mergedAsset);
     },
     [projectId],
@@ -432,7 +464,9 @@ export function NodeDetailDialog({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [closeDialog, showDiscardConfirm]);
 
-  const readonly = !isCurrentVersion || !asset?.id || !asset?.version?.id;
+  const readonly =
+    !isCurrentVersion ||
+    (!isVideoCompose && (!asset?.id || !asset?.version?.id));
   const editorReadonly =
     readonly || closing || (assetId > 0 && versionsLoading);
   const activeContent = draft.draft;
@@ -445,7 +479,7 @@ export function NodeDetailDialog({
       onMouseDown={() => void closeDialog()}
     >
       <section
-        className={`ws-node-detail-modal ${assetId ? "has-version-sidebar" : ""}`}
+        className="ws-node-detail-modal"
         role="dialog"
         aria-modal="true"
         aria-label={`${node.title || "节点"}详情`}
@@ -454,6 +488,23 @@ export function NodeDetailDialog({
         <NodeDetailHeader
           node={node}
           contentLabel={detailContentLabel(activeContent, node)}
+          versionSelect={
+            assetId ? (
+              <NodeDetailVersionSelect
+                versions={versions}
+                currentVersionId={currentVersionId}
+                selectedVersionId={selectedVersionId || currentVersionId}
+                total={versionTotal}
+                hasMore={hasMoreVersions}
+                loading={versionsLoading}
+                loadingMore={versionsLoadingMore}
+                error={versionsError}
+                onSelect={(version) => void selectVersion(version)}
+                onLoadMore={() => void loadMoreVersions()}
+                onRetry={() => void retryDetail()}
+              />
+            ) : undefined
+          }
           updatedAt={formatNodeDetailVersionTime(
             activeVersion?.updated_at || activeVersion?.created_at,
           )}
@@ -528,33 +579,62 @@ export function NodeDetailDialog({
               <CanvasAssetReferenceProviderContext.Provider
                 value={assetReferenceProvider}
               >
-                <NodeDetailEditor
-                  content={activeContent}
-                  mediaOutput={mediaOutput}
-                  readonly={editorReadonly}
-                  referenceItems={canvasReferenceItems}
-                  onChange={draft.setDraft}
-                />
+                {isVideoCompose ? (
+                  <VideoComposeView
+                    composition={videoComposition}
+                    referenceItems={canvasReferenceItems || []}
+                    readonly={
+                      !isCurrentVersion || closing || videoComposeRunning
+                    }
+                    running={videoComposeRunning}
+                    fullScreen
+                    finalOutput={mediaOutput}
+                    onChange={(next) => {
+                      setVideoComposition(next);
+                      onNodeDraftChange?.({
+                        ...(node.composerDraft || {}),
+                        videoComposition: next,
+                      });
+                    }}
+                    onRun={
+                      onRunNode
+                        ? (nextComposition) => {
+                            setVideoComposeRunning(true);
+                            void onRunNode({
+                              ...node,
+                              composerDraft: {
+                                ...(node.composerDraft || {}),
+                                videoComposition: nextComposition,
+                              },
+                            })
+                              .then(() =>
+                                assetId ? loadDetail() : undefined,
+                              )
+                              .catch((error) =>
+                                toast.error(
+                                  error instanceof Error
+                                    ? error.message
+                                    : "视频合成失败",
+                                ),
+                              )
+                              .finally(() => setVideoComposeRunning(false));
+                          }
+                        : undefined
+                    }
+                  />
+                ) : (
+                  <NodeDetailEditor
+                    content={activeContent}
+                    mediaOutput={mediaOutput}
+                    readonly={editorReadonly}
+                    referenceItems={canvasReferenceItems}
+                    onChange={draft.setDraft}
+                  />
+                )}
               </CanvasAssetReferenceProviderContext.Provider>
             )}
           </div>
         </main>
-
-        {assetId ? (
-          <VersionPanel
-            versions={versions}
-            currentVersionId={currentVersionId}
-            selectedVersionId={selectedVersionId || currentVersionId}
-            total={versionTotal}
-            hasMore={hasMoreVersions}
-            loading={versionsLoading}
-            loadingMore={versionsLoadingMore}
-            error={versionsError}
-            onSelect={(version) => void selectVersion(version)}
-            onLoadMore={() => void loadMoreVersions()}
-            onRetry={() => void retryDetail()}
-          />
-        ) : null}
 
         {showDiscardConfirm ? (
           <div className="ws-node-detail-discard-backdrop">
@@ -606,6 +686,9 @@ function detailContentLabel(
 ) {
   if (content.mode === "storyboard") {
     return "分镜脚本";
+  }
+  if (isVideoComposePowerType(node.power, node.kind, node.outputType)) {
+    return "视频合成";
   }
   if (content.mode === "file") {
     return "文件";

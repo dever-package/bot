@@ -47,7 +47,11 @@ func knowledgeInitTool(service knowledgeservice.Service, allowed map[uint64]know
 			if err != nil {
 				return Result{}, err
 			}
-			content, exists, err := service.OpenKnowledgeInitFile(ctx, base.ID, ArgumentInt(call.Arguments, "max_chars", 8000))
+			content, exists, err := service.OpenKnowledgeInitFile(
+				ctx,
+				base.ID,
+				knowledgeReadLimit(base, ArgumentInt(call.Arguments, "max_chars", 8000), 8000),
+			)
 			if err != nil {
 				return Result{}, err
 			}
@@ -118,8 +122,9 @@ func knowledgeReadTool(service knowledgeservice.Service, allowed map[uint64]know
 			"知识库文件",
 			"读取指定知识库文件正文。",
 			knowledgeParameters(baseProperty, required, map[string]any{
-				"path":      map[string]any{"type": "string", "description": "文件 ID 或相对路径"},
-				"max_chars": integerProperty("最多读取字符数"),
+				"path":         map[string]any{"type": "string", "description": "文件 ID 或相对路径"},
+				"offset_bytes": integerProperty("字节偏移，首次为 0，后续使用上次返回的 next_offset_bytes"),
+				"max_chars":    integerProperty("本次最多读取字符数"),
 			}),
 		),
 		Handle: func(ctx context.Context, call Call) (Result, error) {
@@ -128,7 +133,13 @@ func knowledgeReadTool(service knowledgeservice.Service, allowed map[uint64]know
 				return Result{}, err
 			}
 			path := argumentText(call.Arguments, "path")
-			content, err := service.ReadKnowledgeRuntimeFile(ctx, base.ID, path, ArgumentInt(call.Arguments, "max_chars", 8000))
+			content, err := service.ReadKnowledgeRuntimeFileRange(
+				ctx,
+				base.ID,
+				path,
+				int64(ArgumentInt(call.Arguments, "offset_bytes", 0)),
+				knowledgeReadLimit(base, ArgumentInt(call.Arguments, "max_chars", 8000), 8000),
+			)
 			if err != nil {
 				return Result{}, err
 			}
@@ -208,4 +219,14 @@ func knowledgeParameters(baseProperty map[string]any, required []any, extra map[
 
 func integerProperty(description string) map[string]any {
 	return map[string]any{"type": "integer", "description": description}
+}
+
+func knowledgeReadLimit(base knowledgeservice.KnowledgeBaseRuntime, requested int, fallback int) int {
+	if requested <= 0 {
+		requested = fallback
+	}
+	if base.MaxContextChars > 0 && requested > base.MaxContextChars {
+		return base.MaxContextChars
+	}
+	return requested
 }

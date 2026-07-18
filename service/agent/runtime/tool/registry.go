@@ -76,15 +76,6 @@ func (registry *Registry) Names() []string {
 	return append([]string(nil), registry.order...)
 }
 
-func (registry *Registry) NamesByKind(kinds ...string) []string {
-	definitions := registry.DefinitionsByKind(kinds...)
-	result := make([]string, 0, len(definitions))
-	for _, definition := range definitions {
-		result = append(result, definition.Name)
-	}
-	return result
-}
-
 func (registry *Registry) DefinitionsByKind(kinds ...string) []runtimeprovider.Definition {
 	if registry == nil || len(kinds) == 0 {
 		return nil

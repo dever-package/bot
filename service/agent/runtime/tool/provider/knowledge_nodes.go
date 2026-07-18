@@ -122,7 +122,7 @@ func knowledgeNodeOpenTool(service knowledgeservice.Service, allowed map[uint64]
 				Text: "已读取知识节点: " + knowledgeNodeName(result.Node),
 				Content: map[string]any{
 					"knowledge_base": knowledgeBaseRef(base),
-					"node":           knowledgeNodeViewFromResult(result.Node, knowledgeOpenTextRunes, true),
+					"node":           knowledgeNodeViewFromResult(result.Node, knowledgeReadLimit(base, knowledgeOpenTextRunes, knowledgeOpenTextRunes), true),
 					"parents":        knowledgeNodeViews(result.Parents, 160, false),
 					"children":       knowledgeNodeViews(result.Children, 160, false),
 					"siblings":       knowledgeNodeViews(result.Siblings, 160, false),

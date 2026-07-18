@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -15,63 +16,14 @@ import (
 )
 
 const (
-	maxPlanDirectoryRows = 80
-	maxPlanCatalogChars  = 12000
+	maxPlanDirectoryRows  = 80
+	maxPlanCatalogChars   = 12000
+	planDirectoryPageSize = 250
 )
 
-func (s Service) queryRewrite(ctx context.Context, binding agentKnowledgeBinding, query string) []string {
-	query = strings.TrimSpace(query)
-	if query == "" || binding.Base.IndexPowerID == 0 {
-		return nil
-	}
-	powerKey, err := knowledgeIndexPowerKey(ctx, binding.Base.IndexPowerID)
-	if err != nil {
-		return nil
-	}
-	resp := s.gateway().Request(ctx, energonservice.GatewayRequest{
-		RequestID: uuid.NewString(),
-		Body: map[string]any{
-			"power": powerKey,
-			"set": map[string]any{
-				"role": queryRewriteRole(),
-			},
-			"input": energonservice.PromptInput(query),
-			"options": map[string]any{
-				"stream":      false,
-				"temperature": 0,
-			},
-		},
-	})
-	payload := resp.Payload()
-	output := mapFromAny(payload["output"])
-	raw := strings.TrimSpace(firstPlannerText(output["text"], outputJSONText(output["json"])))
-	if util.ToIntDefault(payload["status"], 0) == 2 || raw == "" {
-		return nil
-	}
-	return parseQueryRewriteResult(raw)
-}
-
-func queryRewriteRole() string {
-	return "你是知识库检索的查询改写器。将用户自然语言问题转写成3-5个适合关键词检索的短查询词。只输出JSON数组，不要Markdown。格式: [\"查询词1\", \"查询词2\", \"查询词3\"]"
-}
-
-func parseQueryRewriteResult(raw string) []string {
-	raw = strings.TrimSpace(raw)
-	raw = trimJSONFence(raw)
-	var result []string
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		return nil
-	}
-	cleaned := make([]string, 0, len(result))
-	for _, q := range result {
-		if strings.TrimSpace(q) != "" {
-			cleaned = append(cleaned, strings.TrimSpace(q))
-		}
-	}
-	if len(cleaned) == 0 {
-		return nil
-	}
-	return cleaned
+type scoredPlanDirectory struct {
+	dir   *agentmodel.KnowledgeDir
+	score float64
 }
 
 func (s Service) planRetrieval(ctx context.Context, binding agentKnowledgeBinding, query string) retrievalPlan {
@@ -79,7 +31,7 @@ func (s Service) planRetrieval(ctx context.Context, binding agentKnowledgeBindin
 	if query == "" || binding.Base.IndexPowerID == 0 {
 		return retrievalPlan{}
 	}
-	catalog := planDirectoryCatalog(ctx, binding.BaseID)
+	catalog := planDirectoryCatalog(ctx, binding.BaseID, query)
 	if strings.TrimSpace(catalog) == "" {
 		return retrievalPlan{}
 	}
@@ -143,18 +95,40 @@ func retrievalPlannerPrompt(query string, catalog string) string {
 	}, "\n")
 }
 
-func planDirectoryCatalog(ctx context.Context, baseID uint64) string {
-	rows := agentmodel.NewKnowledgeDirModel().Select(ctx, map[string]any{
-		"knowledge_base_id": baseID,
-		"status":            1,
-	}, map[string]any{
-		"field":    "main.id, main.name, main.path, main.summary, main.keywords",
-		"order":    "main.depth asc, main.sort asc, main.id asc",
-		"page":     1,
-		"pageSize": maxPlanDirectoryRows,
-	})
-	parts := make([]string, 0, len(rows))
-	for _, row := range rows {
+func planDirectoryCatalog(ctx context.Context, baseID uint64, query string) string {
+	candidates := make([]scoredPlanDirectory, 0, maxPlanDirectoryRows)
+	var afterID uint64
+	for {
+		filters := map[string]any{
+			"knowledge_base_id": baseID,
+			"status":            1,
+		}
+		if afterID > 0 {
+			filters["id"] = map[string]any{"gt": afterID}
+		}
+		rows := agentmodel.NewKnowledgeDirModel().Select(ctx, filters, map[string]any{
+			"field":    "main.id, main.name, main.path, main.summary, main.keywords, main.depth, main.sort",
+			"order":    "main.id asc",
+			"page":     1,
+			"pageSize": planDirectoryPageSize,
+		})
+		if len(rows) == 0 {
+			break
+		}
+		afterID = rows[len(rows)-1].ID
+		for _, row := range rows {
+			if row != nil {
+				candidates = append(candidates, scoredPlanDirectory{dir: row, score: planDirectoryScore(row, query)})
+			}
+		}
+		candidates = topPlanDirectories(candidates, maxPlanDirectoryRows)
+		if len(rows) < planDirectoryPageSize {
+			break
+		}
+	}
+	parts := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		row := candidate.dir
 		if row == nil {
 			continue
 		}
@@ -175,6 +149,54 @@ func planDirectoryCatalog(ctx context.Context, baseID uint64) string {
 		parts = append(parts, line)
 	}
 	return truncateText(strings.Join(parts, "\n"), maxPlanCatalogChars)
+}
+
+func planDirectoryScore(dir *agentmodel.KnowledgeDir, query string) float64 {
+	if dir == nil {
+		return 0
+	}
+	name := strings.ToLower(strings.TrimSpace(dir.Name))
+	path := strings.ToLower(strings.TrimSpace(dir.Path))
+	summary := strings.ToLower(strings.TrimSpace(dir.Summary))
+	keywords := strings.ToLower(strings.TrimSpace(dir.Keywords))
+	score := 0.0
+	for _, term := range queryTerms(query) {
+		term = strings.ToLower(term)
+		if name == term {
+			score += 0.5
+		} else if strings.Contains(name, term) {
+			score += 0.3
+		}
+		if pathSegmentMatched(term, path) || strings.Contains(path, term) {
+			score += 0.25
+		}
+		if strings.Contains(keywords, term) {
+			score += 0.18
+		}
+		if strings.Contains(summary, term) {
+			score += 0.1
+		}
+	}
+	return score
+}
+
+func topPlanDirectories(candidates []scoredPlanDirectory, limit int) []scoredPlanDirectory {
+	sort.SliceStable(candidates, func(left int, right int) bool {
+		if candidates[left].score != candidates[right].score {
+			return candidates[left].score > candidates[right].score
+		}
+		if candidates[left].dir.Depth != candidates[right].dir.Depth {
+			return candidates[left].dir.Depth < candidates[right].dir.Depth
+		}
+		if candidates[left].dir.Sort != candidates[right].dir.Sort {
+			return candidates[left].dir.Sort < candidates[right].dir.Sort
+		}
+		return candidates[left].dir.ID < candidates[right].dir.ID
+	})
+	if len(candidates) > limit {
+		return candidates[:limit]
+	}
+	return candidates
 }
 
 func parseRetrievalPlan(raw string, output map[string]any) (retrievalPlan, error) {
@@ -199,10 +221,6 @@ func retrievalPlanFromMap(payload map[string]any) retrievalPlan {
 		Reason:   strings.TrimSpace(frontstream.InputText(payload["reason"])),
 	}
 	return plan
-}
-
-func retrievalPlanMatch(binding agentKnowledgeBinding, plan retrievalPlan) []map[string]any {
-	return retrievalPlanMatchWithSource(binding, "planner", plan)
 }
 
 func retrievalPlanMatchWithSource(binding agentKnowledgeBinding, source string, plan retrievalPlan) []map[string]any {
@@ -254,31 +272,26 @@ func planDirIDsByPath(ctx context.Context, baseID uint64, paths []string) []uint
 	if baseID == 0 || len(paths) == 0 {
 		return nil
 	}
-	rows := agentmodel.NewKnowledgeDirModel().Select(ctx, map[string]any{
-		"knowledge_base_id": baseID,
-		"status":            1,
-	})
-	dirByPath := make(map[string]uint64, len(rows))
-	for _, row := range rows {
-		if row == nil {
-			continue
-		}
-		if path := NormalizeDirPath(row.Path); path != "" {
-			dirByPath[path] = row.ID
-		}
-	}
 	ids := make([]uint64, 0, len(paths))
 	seen := map[uint64]struct{}{}
 	for _, path := range paths {
-		id := dirByPath[NormalizeDirPath(path)]
-		if id == 0 {
+		path = NormalizeDirPath(path)
+		if path == "" {
 			continue
 		}
-		if _, exists := seen[id]; exists {
+		row := agentmodel.NewKnowledgeDirModel().Find(ctx, map[string]any{
+			"knowledge_base_id": baseID,
+			"path":              path,
+			"status":            1,
+		})
+		if row == nil || row.ID == 0 {
 			continue
 		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
+		if _, exists := seen[row.ID]; exists {
+			continue
+		}
+		seen[row.ID] = struct{}{}
+		ids = append(ids, row.ID)
 	}
 	return ids
 }

@@ -114,15 +114,6 @@ func (response InteractionResponse) Value() map[string]any {
 	}
 }
 
-func ReferencesFromContent(value any) []Reference {
-	content, ok := parseContent(value)
-	if !ok {
-		return nil
-	}
-	_, references, _, _ := normalizeParts(content.Parts)
-	return references
-}
-
 func ContentContext(value any) map[string]any {
 	content, ok := parseContent(value)
 	if !ok {

@@ -3,6 +3,7 @@ package knowledge
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -139,8 +140,22 @@ func contentHash(value string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func pointID(chunkID uint64) uint64 {
-	return chunkID
+func contentHashParts(values ...string) string {
+	hash := sha256.New()
+	for _, value := range values {
+		_, _ = hash.Write([]byte(strings.TrimSpace(value)))
+		_, _ = hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func vectorPointID(nodeID uint64, indexVersion int) uint64 {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%d", nodeID, indexVersion)))
+	id := binary.BigEndian.Uint64(sum[:8])
+	if id == 0 {
+		return nodeID
+	}
+	return id
 }
 
 func keywordText(value string) string {
@@ -154,7 +169,7 @@ func keywordText(value string) string {
 	return strings.Join(tokens, " ")
 }
 
-func keywordNodeFilters(baseID uint64, keyword string, dirIDs ...uint64) any {
+func keywordNodeFilters(baseID uint64, keyword string, dirIDs ...uint64) map[string]any {
 	keyword = strings.TrimSpace(keyword)
 	filter := map[string]any{"knowledge_base_id": baseID, "index_status": "success", "status": 1}
 	if len(dirIDs) > 0 {
@@ -348,6 +363,25 @@ func truncateText(value string, limit int) string {
 		return value
 	}
 	return string(runes[:limit])
+}
+
+func representativeText(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit <= 0 || value == "" {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	marker := []rune("\n\n[中间内容已省略]\n\n")
+	if limit <= len(marker)+2 {
+		return string(runes[:limit])
+	}
+	remaining := limit - len(marker)
+	headLength := remaining * 3 / 4
+	tailLength := remaining - headLength
+	return string(runes[:headLength]) + string(marker) + string(runes[len(runes)-tailLength:])
 }
 
 type candidateDir struct {
@@ -876,6 +910,10 @@ func rankKnowledgeSnippets(ctx context.Context, rows []RetrievedSnippet, query s
 		}
 		rows[index].Score = score
 	}
+	return sortKnowledgeSnippetsByScore(rows)
+}
+
+func sortKnowledgeSnippetsByScore(rows []RetrievedSnippet) []RetrievedSnippet {
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].Score == rows[j].Score {
 			return rows[i].SortRank < rows[j].SortRank

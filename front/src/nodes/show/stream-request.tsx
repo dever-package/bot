@@ -132,6 +132,11 @@ export type StreamPowerRunnerProps = {
   renderResultActions?: (result: StreamPowerResult) => ReactNode
   referenceProviders?: ReferenceProvider[]
   assetReferenceTeamID?: number
+  appearance?: 'default' | 'body'
+  uploadBizKey?: string
+  uploadBizName?: string
+  allowResourceLibrary?: boolean
+  onUploadedFiles?: (files: ParamUploadedFile[]) => void | Promise<void>
 }
 
 export type StreamPowerResult = {
@@ -155,6 +160,11 @@ export function StreamPowerRunner({
   renderResultActions,
   referenceProviders = [],
   assetReferenceTeamID = 0,
+  appearance = 'default',
+  uploadBizKey,
+  uploadBizName,
+  allowResourceLibrary = true,
+  onUploadedFiles,
 }: StreamPowerRunnerProps) {
   const [requestID, setRequestID] = useState('')
   const [lastStreamID, setLastStreamID] = useState('0-0')
@@ -504,11 +514,12 @@ export function StreamPowerRunner({
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto md:flex-row md:overflow-hidden"
+      data-stream-power-appearance={appearance}
+      className="stream-power-runner flex h-full min-h-0 flex-col gap-4 overflow-y-auto md:flex-row md:overflow-hidden"
       style={{ height }}
     >
-      <div className="flex min-h-[360px] w-full max-w-md shrink-0 flex-col gap-3 md:h-full md:min-h-0">
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-xl bg-background/70 p-3">
+      <div className="stream-power-form-column flex min-h-[360px] w-full max-w-md shrink-0 flex-col gap-3 md:h-full md:min-h-0">
+        <div className="stream-power-form min-h-0 flex-1 overflow-y-auto rounded-xl bg-background/70 p-3">
           {paramsLoading ? (
             <span className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
               <Loader2 className="size-3 animate-spin" />
@@ -568,6 +579,10 @@ export function StreamPowerRunner({
                     files={paramFiles[key] || []}
                     uploadRuleMeta={uploadRuleMetas.get(Number(param.upload_rule_id || 0))}
                     disabled={running}
+                    uploadBizKey={uploadBizKey}
+                    uploadBizName={uploadBizName}
+                    allowResourceLibrary={allowResourceLibrary}
+                    onUploadedFiles={onUploadedFiles}
                     onChange={(nextValue) => setParamValue(param, nextValue)}
                     onFilesChange={(nextFiles) => setParamFileValue(param, nextFiles)}
                   />
@@ -592,6 +607,10 @@ export function StreamPowerRunner({
                     files={paramFiles[key] || []}
                     uploadRuleMeta={uploadRuleMetas.get(Number(param.upload_rule_id || 0))}
                     disabled={running}
+                    uploadBizKey={uploadBizKey}
+                    uploadBizName={uploadBizName}
+                    allowResourceLibrary={allowResourceLibrary}
+                    onUploadedFiles={onUploadedFiles}
                     onChange={(nextValue) => setParamValue(param, nextValue)}
                     onFilesChange={(nextFiles) => setParamFileValue(param, nextFiles)}
                   />
@@ -608,7 +627,7 @@ export function StreamPowerRunner({
         </div>
 
         {hasConfiguredParams ? (
-          <div className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-background px-3 py-3">
+          <div className="stream-power-actions flex shrink-0 items-center justify-center gap-2 rounded-xl bg-background px-3 py-3">
             {running ? (
               <Button
                 type="button"
@@ -637,10 +656,10 @@ export function StreamPowerRunner({
         ) : null}
       </div>
 
-      <div className="hidden w-px shrink-0 bg-border md:block" aria-hidden="true" />
+      <div className="stream-power-divider hidden w-px shrink-0 bg-border md:block" aria-hidden="true" />
 
-      <div className="flex min-h-[360px] min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-background md:h-full md:min-h-0">
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b px-3 py-2">
+      <div className="stream-power-result flex min-h-[360px] min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-background md:h-full md:min-h-0">
+        <div className="stream-power-result-header flex shrink-0 items-center justify-between gap-3 border-b px-3 py-2">
           <span className="text-sm font-medium text-foreground">{resultTitle}</span>
           <div className="flex min-w-0 items-center justify-end gap-2">
             {renderResultActions?.({
@@ -675,7 +694,7 @@ export function StreamPowerRunner({
           ref={outputScrollRef}
           onScroll={handleOutputScroll}
           style={{ scrollbarGutter: 'stable' }}
-          className="h-0 min-h-0 flex-1 overflow-y-auto p-3"
+          className="stream-power-result-body h-0 min-h-0 flex-1 overflow-y-auto p-3"
         >
           {timing ? (
             <div className="mb-3">
@@ -726,7 +745,7 @@ function PowerPromptReferenceField({
   )
 
   return (
-    <div className='space-y-2 rounded-xl bg-muted/30 p-3'>
+    <div className='stream-power-prompt-field space-y-2 rounded-xl bg-muted/30 p-3'>
       <div className='text-sm font-medium text-foreground'>
         {param.name}
         {param.required ? <span className='ml-0.5 text-destructive'>*</span> : null}

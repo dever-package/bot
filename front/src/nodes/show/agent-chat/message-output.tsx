@@ -2,10 +2,17 @@ import {
   EnergonContentView,
   normalizeEnergonOutput,
   type EnergonOutput,
+  type EnergonMediaActionContext,
+  type EnergonMediaPreviewRequest,
 } from "@/components/energon/content-view";
 import { FileText, ImageIcon, Loader2, Video, Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAgentChatMediaPreview } from "./media-inspector";
+import {
+  agentChatMediaPreviewRequest,
+  findAgentChatMediaArtifact,
+  useAgentChatArtifactActions,
+} from "./artifact-actions";
 import {
   artifactDisplayOutput,
   readAgentChatArtifacts,
@@ -34,6 +41,7 @@ export function AgentChatMessageOutput({
   className,
 }: AgentChatMessageOutputProps) {
   const onMediaPreview = useAgentChatMediaPreview();
+  const artifactActions = useAgentChatArtifactActions();
   const displayOutput = agentChatMessageOutputWithOptions(output, {
     excludedKeys: displayKeys(excludeOutputs),
     excludeText,
@@ -47,6 +55,38 @@ export function AgentChatMessageOutput({
     (artifact) =>
       artifact.status === "generating" && !excludedArtifactIDs.has(artifact.id),
   );
+  const readyArtifacts = readAgentChatArtifacts(output).filter(
+    (artifact) =>
+      artifact.status === "ready" && !excludedArtifactIDs.has(artifact.id),
+  );
+
+  const renderMediaActions = artifactActions.render
+    ? (context: EnergonMediaActionContext) => {
+        const artifact = findAgentChatMediaArtifact(
+          readyArtifacts,
+          context.kind,
+          context.item.url,
+          context.index,
+        );
+        return artifact && artifactActions.messageID > 0
+          ? artifactActions.render?.({
+              messageID: artifactActions.messageID,
+              artifact,
+              placement: "inline",
+            })
+          : null;
+      }
+    : undefined;
+  const openMediaPreview = onMediaPreview
+    ? (request: EnergonMediaPreviewRequest) =>
+        onMediaPreview(
+          agentChatMediaPreviewRequest(
+            request,
+            artifactActions.messageID,
+            readyArtifacts,
+          ),
+        )
+    : undefined;
 
   if (displayOutput.length === 0 && generatingArtifacts.length === 0) {
     return null;
@@ -66,7 +106,8 @@ export function AgentChatMessageOutput({
         <EnergonContentView
           output={displayOutput}
           mediaLayout="chat"
-          onMediaPreview={onMediaPreview}
+          onMediaPreview={openMediaPreview}
+          renderMediaActions={renderMediaActions}
         />
       ) : null}
     </div>

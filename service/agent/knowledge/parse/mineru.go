@@ -24,6 +24,7 @@ const (
 	defaultMinerUPollInterval    = 3 * time.Second
 	defaultMinerUMaxPollAttempts = 80
 	defaultMinerUMaxZipSize      = 220 << 20
+	minerUPageTextMaxRunes       = 6000
 )
 
 type MinerUConfig struct {
@@ -109,7 +110,7 @@ func ParseWithMinerU(ctx context.Context, req Request, cfg MinerUConfig) (Result
 		host:   normalizeMinerUHost(cfg.Host),
 		apiKey: strings.TrimSpace(cfg.APIKey),
 		http: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: 10 * time.Minute,
 		},
 	}
 	batchID, fileURLs, err := client.createUploadURLs(ctx, req, cfg)
@@ -129,11 +130,12 @@ func ParseWithMinerU(ctx context.Context, req Request, cfg MinerUConfig) (Result
 	if strings.TrimSpace(extractResult.FullZipURL) == "" {
 		return Result{}, fmt.Errorf("MinerU 解析完成但未返回 full_zip_url")
 	}
-	zipData, err := client.downloadZip(ctx, extractResult.FullZipURL)
+	zipPath, err := client.downloadZip(ctx, extractResult.FullZipURL)
 	if err != nil {
 		return Result{}, err
 	}
-	result, err := parseMinerUZip(req, zipData)
+	defer os.Remove(zipPath)
+	result, err := parseMinerUZip(req, zipPath)
 	if err != nil {
 		return Result{}, err
 	}
@@ -254,6 +256,9 @@ func (c minerUClient) uploadFile(ctx context.Context, uploadURL string, filePath
 	if err != nil {
 		return fmt.Errorf("创建 MinerU 文件上传请求失败: %w", err)
 	}
+	if info, statErr := file.Stat(); statErr == nil {
+		request.ContentLength = info.Size()
+	}
 	response, err := c.http.Do(request)
 	if err != nil {
 		return fmt.Errorf("上传文件到 MinerU 失败: %w", err)
@@ -329,28 +334,44 @@ func pickMinerUResult(results []minerUExtractResult, fileName string) (minerUExt
 	return results[0], true
 }
 
-func (c minerUClient) downloadZip(ctx context.Context, zipURL string) ([]byte, error) {
+func (c minerUClient) downloadZip(ctx context.Context, zipURL string) (string, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, zipURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("创建 MinerU 结果下载请求失败: %w", err)
+		return "", fmt.Errorf("创建 MinerU 结果下载请求失败: %w", err)
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("下载 MinerU 解析结果失败: %w", err)
+		return "", fmt.Errorf("下载 MinerU 解析结果失败: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
-		return nil, fmt.Errorf("下载 MinerU 解析结果失败: HTTP %d %s", response.StatusCode, strings.TrimSpace(string(message)))
+		return "", fmt.Errorf("下载 MinerU 解析结果失败: HTTP %d %s", response.StatusCode, strings.TrimSpace(string(message)))
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, defaultMinerUMaxZipSize+1))
+	tempFile, err := os.CreateTemp("", "bot-mineru-*.zip")
 	if err != nil {
-		return nil, fmt.Errorf("读取 MinerU 解析结果失败: %w", err)
+		return "", fmt.Errorf("创建 MinerU 结果临时文件失败: %w", err)
 	}
-	if len(data) > defaultMinerUMaxZipSize {
-		return nil, fmt.Errorf("MinerU 解析结果过大，超过 %dMB", defaultMinerUMaxZipSize>>20)
+	tempPath := tempFile.Name()
+	keepFile := false
+	defer func() {
+		_ = tempFile.Close()
+		if !keepFile {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	written, err := io.Copy(tempFile, io.LimitReader(response.Body, defaultMinerUMaxZipSize+1))
+	if err != nil {
+		return "", fmt.Errorf("读取 MinerU 解析结果失败: %w", err)
 	}
-	return data, nil
+	if written > defaultMinerUMaxZipSize {
+		return "", fmt.Errorf("MinerU 解析结果过大，超过 %dMB", defaultMinerUMaxZipSize>>20)
+	}
+	if err := tempFile.Close(); err != nil {
+		return "", fmt.Errorf("保存 MinerU 解析结果失败: %w", err)
+	}
+	keepFile = true
+	return tempPath, nil
 }
 
 func (c minerUClient) doJSON(ctx context.Context, method string, apiPath string, payload any) ([]byte, error) {
@@ -386,21 +407,21 @@ func (c minerUClient) doJSON(ctx context.Context, method string, apiPath string,
 	return raw, nil
 }
 
-func parseMinerUZip(req Request, zipData []byte) (Result, error) {
-	reader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+func parseMinerUZip(req Request, zipPath string) (Result, error) {
+	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return Result{}, fmt.Errorf("打开 MinerU 解析结果压缩包失败: %w", err)
 	}
+	defer reader.Close()
 	files := zipFileNames(reader.File)
-	markdown, markdownName, err := readMinerUMarkdown(reader.File)
+	result, markdownName, err := parseMinerUMarkdown(req, reader.File)
 	if err != nil {
 		return Result{}, err
 	}
 	contentList, contentListName := readMinerUContentList(reader.File)
-	result := parseMarkdown(req, markdown)
-	if len(contentList) > 0 {
-		result.Pages = minerUPages(contentList)
-		result.Assets = minerUAssets(contentList)
+	if contentList.Count > 0 {
+		result.Pages = contentList.Pages
+		result.Assets = contentList.Assets
 	}
 	if result.Raw == nil {
 		result.Raw = map[string]any{}
@@ -409,7 +430,7 @@ func parseMinerUZip(req Request, zipData []byte) (Result, error) {
 	result.Raw["markdown_file"] = markdownName
 	if contentListName != "" {
 		result.Raw["content_list_file"] = contentListName
-		result.Raw["content_list"] = contentList
+		result.Raw["content_list_count"] = contentList.Count
 	}
 	return result, nil
 }
@@ -423,7 +444,7 @@ func zipFileNames(files []*zip.File) []string {
 	return names
 }
 
-func readMinerUMarkdown(files []*zip.File) (string, string, error) {
+func parseMinerUMarkdown(req Request, files []*zip.File) (Result, string, error) {
 	candidates := make([]*zip.File, 0)
 	for _, file := range files {
 		name := strings.ToLower(filepath.ToSlash(file.Name))
@@ -439,35 +460,127 @@ func readMinerUMarkdown(files []*zip.File) (string, string, error) {
 		}
 	}
 	if len(candidates) == 0 {
-		return "", "", fmt.Errorf("MinerU 解析结果中未找到 Markdown 文件")
+		return Result{}, "", fmt.Errorf("MinerU 解析结果中未找到 Markdown 文件")
 	}
 	sort.SliceStable(candidates, func(i, j int) bool {
 		return len(candidates[i].Name) < len(candidates[j].Name)
 	})
-	content, err := readZipText(candidates[0])
-	if err != nil {
-		return "", "", err
+	markdownFile := candidates[0]
+	if markdownFile.UncompressedSize64 > uint64(streamingParseThresholdBytes) {
+		result, err := parseLargeMinerUMarkdown(req, markdownFile)
+		return result, markdownFile.Name, err
 	}
-	return content, candidates[0].Name, nil
+	content, err := readZipText(markdownFile)
+	if err != nil {
+		return Result{}, "", err
+	}
+	return parseMarkdown(req, content), markdownFile.Name, nil
 }
 
-func readMinerUContentList(files []*zip.File) ([]map[string]any, string) {
+func parseLargeMinerUMarkdown(req Request, file *zip.File) (Result, error) {
+	if file == nil || file.UncompressedSize64 > uint64(defaultMinerUMaxZipSize) {
+		return Result{}, fmt.Errorf("MinerU 结果文件过大")
+	}
+	source, err := file.Open()
+	if err != nil {
+		return Result{}, fmt.Errorf("读取 MinerU 结果文件失败: %w", err)
+	}
+	defer source.Close()
+	tempFile, err := os.CreateTemp("", "bot-mineru-markdown-*.md")
+	if err != nil {
+		return Result{}, fmt.Errorf("创建 MinerU Markdown 临时文件失败: %w", err)
+	}
+	tempPath := tempFile.Name()
+	defer tempFile.Close()
+	defer os.Remove(tempPath)
+	written, copyErr := io.Copy(tempFile, io.LimitReader(source, defaultMinerUMaxZipSize+1))
+	closeErr := tempFile.Close()
+	if copyErr != nil {
+		return Result{}, fmt.Errorf("读取 MinerU 结果文件失败: %w", copyErr)
+	}
+	if closeErr != nil {
+		return Result{}, fmt.Errorf("保存 MinerU Markdown 临时文件失败: %w", closeErr)
+	}
+	if written > defaultMinerUMaxZipSize {
+		return Result{}, fmt.Errorf("MinerU 结果文件过大: %s", file.Name)
+	}
+	req.Path = tempPath
+	req.Name = file.Name
+	req.Content = ""
+	return ParseFile(req)
+}
+
+type minerUContentList struct {
+	Pages  []Page
+	Assets []Asset
+	Count  int
+}
+
+func readMinerUContentList(files []*zip.File) (minerUContentList, string) {
 	for _, file := range files {
 		name := strings.ToLower(filepath.ToSlash(file.Name))
 		if !strings.HasSuffix(name, "content_list.json") {
 			continue
 		}
-		content, err := readZipText(file)
+		if file.UncompressedSize64 > uint64(defaultMinerUMaxZipSize) {
+			return minerUContentList{}, ""
+		}
+		reader, err := file.Open()
 		if err != nil {
-			return nil, ""
+			return minerUContentList{}, ""
 		}
-		var items []map[string]any
-		if err := json.Unmarshal([]byte(content), &items); err != nil {
-			return nil, ""
+		result, err := decodeMinerUContentList(io.LimitReader(reader, defaultMinerUMaxZipSize+1))
+		_ = reader.Close()
+		if err != nil {
+			return minerUContentList{}, ""
 		}
-		return items, file.Name
+		return result, file.Name
 	}
-	return nil, ""
+	return minerUContentList{}, ""
+}
+
+func decodeMinerUContentList(reader io.Reader) (minerUContentList, error) {
+	decoder := json.NewDecoder(reader)
+	token, err := decoder.Token()
+	if err != nil {
+		return minerUContentList{}, err
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok || delimiter != '[' {
+		return minerUContentList{}, fmt.Errorf("MinerU content_list 不是数组")
+	}
+	groupedPages := make(map[int]*representativeRunes)
+	assets := make([]Asset, 0)
+	seenAssets := make(map[string]bool)
+	count := 0
+	for decoder.More() {
+		item := map[string]any{}
+		if err := decoder.Decode(&item); err != nil {
+			return minerUContentList{}, err
+		}
+		count++
+		page := minerUPageNumber(item)
+		if text := minerUItemText(item); text != "" {
+			aggregate := groupedPages[page]
+			if aggregate == nil {
+				value := newRepresentativeRunes(minerUPageTextMaxRunes / 2)
+				aggregate = &value
+				groupedPages[page] = aggregate
+			} else {
+				aggregate.addText("\n\n")
+			}
+			aggregate.addText(text)
+		}
+		assets = appendMinerUAssets(assets, seenAssets, item, page)
+	}
+	if _, err := decoder.Token(); err != nil {
+		return minerUContentList{}, err
+	}
+	return minerUContentList{
+		Pages:  minerUPages(groupedPages),
+		Assets: assets,
+		Count:  count,
+	}, nil
 }
 
 func readZipText(file *zip.File) (string, error) {
@@ -486,19 +599,13 @@ func readZipText(file *zip.File) (string, error) {
 	return string(raw), nil
 }
 
-func minerUPages(items []map[string]any) []Page {
-	grouped := make(map[int][]string)
-	for _, item := range items {
-		page := minerUPageNumber(item)
-		text := minerUItemText(item)
-		if text == "" {
+func minerUPages(grouped map[int]*representativeRunes) []Page {
+	pages := make([]Page, 0, len(grouped))
+	for page, aggregate := range grouped {
+		if aggregate == nil {
 			continue
 		}
-		grouped[page] = append(grouped[page], text)
-	}
-	pages := make([]Page, 0, len(grouped))
-	for page, lines := range grouped {
-		content := normalizeText(strings.Join(lines, "\n\n"))
+		content := aggregate.text()
 		pages = append(pages, Page{
 			Number:    page,
 			Title:     fmt.Sprintf("第 %d 页", page),
@@ -515,31 +622,27 @@ func minerUPages(items []map[string]any) []Page {
 	return pages
 }
 
-func minerUAssets(items []map[string]any) []Asset {
-	seen := map[string]bool{}
-	assets := make([]Asset, 0)
-	for _, item := range items {
-		for _, key := range []string{"img_path", "table_img_path"} {
-			path := strings.TrimSpace(anyString(item[key]))
-			if path == "" || seen[path] {
-				continue
-			}
-			seen[path] = true
-			assetType := NodeTypeImage
-			if key == "table_img_path" {
-				assetType = NodeTypeTable
-			}
-			assets = append(assets, Asset{
-				Name:     filepath.Base(path),
-				Path:     path,
-				Type:     assetType,
-				MimeType: mime.TypeByExtension(filepath.Ext(path)),
-				Metadata: map[string]any{
-					"page":   minerUPageNumber(item),
-					"source": "mineru",
-				},
-			})
+func appendMinerUAssets(assets []Asset, seen map[string]bool, item map[string]any, page int) []Asset {
+	for _, key := range []string{"img_path", "table_img_path"} {
+		path := strings.TrimSpace(anyString(item[key]))
+		if path == "" || seen[path] {
+			continue
 		}
+		seen[path] = true
+		assetType := NodeTypeImage
+		if key == "table_img_path" {
+			assetType = NodeTypeTable
+		}
+		assets = append(assets, Asset{
+			Name:     filepath.Base(path),
+			Path:     path,
+			Type:     assetType,
+			MimeType: mime.TypeByExtension(filepath.Ext(path)),
+			Metadata: map[string]any{
+				"page":   page,
+				"source": "mineru",
+			},
+		})
 	}
 	return assets
 }

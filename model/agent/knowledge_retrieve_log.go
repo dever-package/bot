@@ -36,4 +36,5 @@ func NewKnowledgeRetrieveLogModel() *orm.Model[KnowledgeRetrieveLog] {
 type KnowledgeRetrieveLogIndex struct {
 	BaseStatus struct{} `index:"knowledge_base_id,status,id"`
 	AgentQuery struct{} `index:"agent_id,created_at"`
+	CreatedAt  struct{} `index:"created_at"`
 }

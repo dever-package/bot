@@ -27,7 +27,6 @@ const (
 	providerDoubaoID         uint64 = 2
 	providerRunningHubAPIID  uint64 = 3
 	providerRunningHubFlowID uint64 = 4
-	providerFFmpegLocalID    uint64 = 5
 	providerShemicLabHost           = "http://t.s.dever.cc:8080/v1"
 	providerDoubaoHost              = "https://ark.cn-beijing.volces.com/api/v3/"
 	providerRunningHubHost          = "https://www.runninghub.cn/openapi/v2/"
@@ -66,15 +65,6 @@ var (
 			"protocol": "rhflow",
 			"host":     providerRunningHubHost,
 			"status":   1,
-		},
-		{
-			"id":        providerFFmpegLocalID,
-			"cate_id":   defaultProviderCateID,
-			"name":      "FFmpeg 本地合成",
-			"protocol":  "local",
-			"processor": "ffmpeg",
-			"host":      "",
-			"status":    1,
 		},
 	}
 

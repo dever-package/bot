@@ -21,10 +21,6 @@ type PowerParamIndex struct {
 }
 
 var (
-	powerParamSeed = []map[string]any{
-		{"id": 1, "power_id": DefaultLLMPowerID, "param_id": ParamPromptID, "show": 1, "status": 1, "sort": 1},
-	}
-
 	powerParamShowOptions = []map[string]any{
 		{"id": 1, "value": "始终展示"},
 		{"id": 2, "value": "按来源展示"},
@@ -51,7 +47,6 @@ var (
 func NewPowerParamModel() *orm.Model[PowerParam] {
 	return orm.LoadModel[PowerParam]("能力参数", "bot_energon_power_param", orm.ModelConfig{
 		Index:    PowerParamIndex{},
-		Seeds:    powerParamSeed,
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{

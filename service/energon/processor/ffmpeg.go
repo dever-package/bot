@@ -90,7 +90,7 @@ func (FFmpegProcessor) Manifest() Manifest {
 						Name: "合成视频",
 						Sort: 10,
 						Params: []ParamSpec{
-							{ParamKey: "videos", NativeKey: "videos", Name: "视频片段", Required: true, Sort: 10},
+							{ParamKey: "videos", NativeKey: "videos", Name: "视频片段", Sort: 10},
 							{ParamKey: "audio", NativeKey: "audio", Name: "背景音频", Sort: 20},
 							{ParamKey: "subtitles", NativeKey: "subtitles", Name: "字幕文件", Sort: 30},
 							{ParamKey: "resolution", NativeKey: "resolution", Name: "输出分辨率", Sort: 40},
@@ -118,42 +118,25 @@ func (FFmpegProcessor) Execute(ctx context.Context, request ExecuteRequest) (any
 	}
 	defer os.RemoveAll(workspace)
 
-	videoPaths, err := resolveLocalMediaPaths(request.Input["videos"])
-	if err != nil {
-		return nil, fmt.Errorf("读取视频片段失败: %w", err)
-	}
-	if len(videoPaths) == 0 {
-		return nil, fmt.Errorf("视频合成至少需要一个视频片段")
-	}
-	if len(videoPaths) > 50 {
-		return nil, fmt.Errorf("单次视频合成最多支持 50 个视频片段")
-	}
-	audioPath, err := resolveOptionalLocalMediaPath(request.Input["audio"])
-	if err != nil {
-		return nil, fmt.Errorf("读取背景音频失败: %w", err)
-	}
-	subtitlePath, err := resolveOptionalLocalMediaPath(request.Input["subtitles"])
-	if err != nil {
-		return nil, fmt.Errorf("读取字幕文件失败: %w", err)
-	}
-	resolution, err := normalizeFFmpegResolution(request.Input["resolution"])
-	if err != nil {
-		return nil, err
-	}
-	fps, err := normalizeFFmpegFPS(request.Input["fps"])
-	if err != nil {
-		return nil, err
-	}
-
-	concatPath := filepath.Join(workspace, "videos.txt")
-	if err := os.WriteFile(concatPath, []byte(ffmpegConcatList(videoPaths)), 0600); err != nil {
-		return nil, fmt.Errorf("写入视频合成清单失败: %w", err)
-	}
 	outputPath := filepath.Join(workspace, "output.mp4")
-	args := buildFFmpegComposeArgs(concatPath, outputPath, audioPath, subtitlePath, resolution, fps)
+	composition, hasComposition, err := parseFFmpegComposition(request.Input["composition"])
+	if err != nil {
+		return nil, err
+	}
+	var args []string
+	statusText := "正在合成视频"
+	if hasComposition {
+		args, err = buildFFmpegCompositionArgs(ctx, workspace, outputPath, composition)
+		statusText = "正在按镜头清单合成视频"
+	} else {
+		args, err = buildSimpleFFmpegComposeArgs(workspace, outputPath, request.Input)
+	}
+	if err != nil {
+		return nil, err
+	}
 	if err := notifyProcessorOutput(request.Write, botprotocol.Output{
 		"event": "status",
-		"text":  "正在合成视频",
+		"text":  statusText,
 	}); err != nil {
 		return nil, err
 	}
@@ -201,12 +184,47 @@ func (FFmpegProcessor) Execute(ctx context.Context, request ExecuteRequest) (any
 			"upload_rule_id": ffmpegVideoRuleID,
 			"processor":      ffmpegProcessorKey,
 			"operation":      ffmpegComposeOperation,
+			"composition":    hasComposition,
 		},
 	}
 	if err := notifyProcessorOutput(request.Write, output); err != nil {
 		return nil, err
 	}
 	return output, nil
+}
+
+func buildSimpleFFmpegComposeArgs(workspace string, outputPath string, input map[string]any) ([]string, error) {
+	videoPaths, err := resolveLocalMediaPaths(input["videos"])
+	if err != nil {
+		return nil, fmt.Errorf("读取视频片段失败: %w", err)
+	}
+	if len(videoPaths) == 0 {
+		return nil, fmt.Errorf("视频合成至少需要一个视频片段")
+	}
+	if len(videoPaths) > 50 {
+		return nil, fmt.Errorf("单次视频合成最多支持 50 个视频片段")
+	}
+	audioPath, err := resolveOptionalLocalMediaPath(input["audio"])
+	if err != nil {
+		return nil, fmt.Errorf("读取背景音频失败: %w", err)
+	}
+	subtitlePath, err := resolveOptionalLocalMediaPath(input["subtitles"])
+	if err != nil {
+		return nil, fmt.Errorf("读取字幕文件失败: %w", err)
+	}
+	resolution, err := normalizeFFmpegResolution(input["resolution"])
+	if err != nil {
+		return nil, err
+	}
+	fps, err := normalizeFFmpegFPS(input["fps"])
+	if err != nil {
+		return nil, err
+	}
+	concatPath := filepath.Join(workspace, "videos.txt")
+	if err := os.WriteFile(concatPath, []byte(ffmpegConcatList(videoPaths)), 0600); err != nil {
+		return nil, fmt.Errorf("写入视频合成清单失败: %w", err)
+	}
+	return buildFFmpegComposeArgs(concatPath, outputPath, audioPath, subtitlePath, resolution, fps), nil
 }
 
 func resolveLocalMediaPaths(value any) ([]string, error) {

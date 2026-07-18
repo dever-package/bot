@@ -6,9 +6,13 @@ import {
   Paperclip,
 } from "lucide-react";
 import { CanvasNodeContentView } from "../space/space-content-view";
-import { richDocument } from "../space/space-model";
 import type { AssetKind } from "./asset-types";
 import { assetKindLabel } from "./asset-contract";
+import {
+  assetPreviewOutput,
+  assetPreviewText,
+  findAssetMediaURL,
+} from "./asset-content";
 
 export function AssetPreview({
   kind,
@@ -22,7 +26,7 @@ export function AssetPreview({
   compact?: boolean;
 }) {
   if (!compact) {
-    const output = fullPreviewOutput(kind, content);
+    const output = assetPreviewOutput(kind, content);
     return (
       <CanvasNodeContentView
         output={output}
@@ -33,7 +37,7 @@ export function AssetPreview({
     );
   }
 
-  const mediaURL = findMediaURL(content, kind);
+  const mediaURL = findAssetMediaURL(content, kind);
   if (kind === "image" && mediaURL) {
     return <img src={mediaURL} alt="" loading="lazy" />;
   }
@@ -43,27 +47,10 @@ export function AssetPreview({
   return (
     <div className="wb-asset-card-fallback">
       <AssetKindIcon kind={kind} />
-      <p>{summary || previewText(content) || assetKindLabel(kind)}</p>
+      <p>{summary || assetPreviewText(content) || assetKindLabel(kind)}</p>
     </div>
   );
 }
-
-function fullPreviewOutput(kind: AssetKind, content: unknown) {
-  const mediaField = mediaOutputFields[kind];
-  const mediaURL = mediaField ? findMediaURL(content, kind) : "";
-  if (mediaField && mediaURL) {
-    return { [mediaField]: [mediaURL] };
-  }
-  const rich = richDocument(content);
-  return rich ? { rich } : content;
-}
-
-const mediaOutputFields: Partial<Record<AssetKind, string>> = {
-  image: "images",
-  audio: "audios",
-  video: "videos",
-  file: "files",
-};
 
 export function AssetKindIcon({ kind }: { kind: AssetKind }) {
   switch (kind) {
@@ -78,56 +65,4 @@ export function AssetKindIcon({ kind }: { kind: AssetKind }) {
     default:
       return <FileText aria-hidden="true" />;
   }
-}
-
-function findMediaURL(value: unknown, kind: AssetKind, depth = 0): string {
-  if (depth > 10 || value == null) return "";
-  if (typeof value === "string") {
-    return looksLikeURL(value) ? value : "";
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const url = findMediaURL(item, kind, depth + 1);
-      if (url) return url;
-    }
-    return "";
-  }
-  if (typeof value !== "object") return "";
-  const record = value as Record<string, unknown>;
-  const keysByKind: Record<AssetKind, string[]> = {
-    text: [],
-    image: ["src", "url", "image", "image_url", "file_url"],
-    audio: ["src", "url", "audio", "audio_url", "file_url"],
-    video: ["src", "url", "video", "video_url", "file_url"],
-    richtext: ["src", "url"],
-    file: ["src", "url", "file", "file_url"],
-  };
-  for (const key of keysByKind[kind]) {
-    const text = typeof record[key] === "string" ? String(record[key]) : "";
-    if (looksLikeURL(text)) return text;
-  }
-  for (const key of ["content", "output", "result", "data", "attrs", "text"]) {
-    const url = findMediaURL(record[key], kind, depth + 1);
-    if (url) return url;
-  }
-  return "";
-}
-
-function previewText(value: unknown, depth = 0): string {
-  if (depth > 8 || value == null) return "";
-  if (typeof value === "string") return looksLikeURL(value) ? "" : value.trim();
-  if (Array.isArray(value)) {
-    return value.map((item) => previewText(item, depth + 1)).filter(Boolean)[0] || "";
-  }
-  if (typeof value !== "object") return "";
-  const record = value as Record<string, unknown>;
-  for (const key of ["summary", "title", "text", "caption", "content", "output", "result"]) {
-    const text = previewText(record[key], depth + 1);
-    if (text) return text;
-  }
-  return "";
-}
-
-function looksLikeURL(value: string) {
-  return /^(https?:\/\/|\/|data:|blob:)/.test(value.trim());
 }

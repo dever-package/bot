@@ -10,9 +10,8 @@ import (
 )
 
 const (
-	memoryScopeCurrent  = "current"
-	memoryScopeAll      = "all"
-	memoryReviewMaxRows = 500
+	memoryScopeCurrent = "current"
+	memoryScopeAll     = "all"
 )
 
 type MemoryRequest struct {
@@ -105,13 +104,32 @@ func (Service) UpdateMemory(ctx context.Context, request MemoryUpdateRequest) (m
 		return nil, fmt.Errorf("记忆不存在")
 	}
 	values := map[string]any{}
-	if key := normalizeMemoryKey(request.Key); key != "" {
-		values["key"] = key
+	key := row.Key
+	if requestedKey := normalizeMemoryKey(request.Key); requestedKey != "" {
+		values["key"] = requestedKey
+		key = requestedKey
 	}
-	if title := strings.TrimSpace(request.Title); title != "" {
-		values["title"] = limitMemoryText(title, 255)
+	title := row.Title
+	if requestedTitle := strings.TrimSpace(request.Title); requestedTitle != "" {
+		title = requestedTitle
 	}
-	if content := strings.TrimSpace(request.Content); content != "" {
+	content := row.Content
+	if requestedContent := strings.TrimSpace(request.Content); requestedContent != "" {
+		content = requestedContent
+	}
+	tags := storedMemoryTags(row.Tags)
+	if request.Tags != nil {
+		tags = request.Tags
+	}
+	title, content, tags, err = prepareMemoryFields(title, content, tags)
+	contentChanged := strings.TrimSpace(request.Title) != "" || strings.TrimSpace(request.Content) != "" || request.Tags != nil
+	if err != nil && (contentChanged || request.Status != memorymodel.StatusDisabled) {
+		return nil, err
+	}
+	if strings.TrimSpace(request.Title) != "" {
+		values["title"] = title
+	}
+	if strings.TrimSpace(request.Content) != "" {
 		values["content"] = content
 	}
 	if kind := normalizeMemoryKind(request.Kind); kind != "" {
@@ -123,31 +141,48 @@ func (Service) UpdateMemory(ctx context.Context, request MemoryUpdateRequest) (m
 	if request.Status == memorymodel.StatusEnabled || request.Status == memorymodel.StatusDisabled {
 		values["status"] = request.Status
 	}
-	if scope := normalizeMemoryScope(request.Scope); scope != "" {
+	scope := normalizeStoredMemoryScope(*row)
+	agentKey := row.AgentKey
+	contextKey := row.ContextKey
+	sessionID := row.SessionID
+	if requestedScope := normalizeMemoryScope(request.Scope); requestedScope != "" {
+		scope = requestedScope
+		agentKey = strings.TrimSpace(request.AgentKey)
+		contextKey = request.ContextKey
+		sessionID = request.SessionID
 		values["scope"] = scope
-		for field, value := range memoryScopeValues(scope, request.ContextKey, request.AgentKey, request.SessionID) {
+		for field, value := range memoryScopeValues(scope, contextKey, agentKey, sessionID) {
 			values[field] = value
 		}
 	} else {
 		if request.ContextKey != "" {
-			values["context_key"] = NormalizeContextKey(request.ContextKey, request.AgentKey)
+			contextKey = request.ContextKey
 		}
 		if request.AgentKey != "" {
-			values["agent_key"] = strings.TrimSpace(request.AgentKey)
+			agentKey = strings.TrimSpace(request.AgentKey)
 		}
 		if request.SessionID > 0 {
-			values["session_id"] = request.SessionID
+			sessionID = request.SessionID
+		}
+		if request.ContextKey != "" || request.AgentKey != "" || request.SessionID > 0 {
+			for field, value := range memoryScopeValues(scope, contextKey, agentKey, sessionID) {
+				values[field] = value
+			}
 		}
 	}
 	if request.Confidence > 0 {
 		values["confidence"] = clampMemoryConfidence(request.Confidence)
 	}
 	if request.Tags != nil {
-		values["tags"] = encodeMemoryJSON(normalizeMemoryTags(request.Tags), "[]")
+		values["tags"] = encodeMemoryJSON(tags, "[]")
 	}
 	if len(values) > 0 {
+		scopeValues := memoryScopeValues(scope, contextKey, agentKey, sessionID)
+		values["dedupe_key"] = memoryDedupeColumn(memoryDedupeKey(owner, scope, scopeValues, key, title, content))
 		values["updated_at"] = time.Now()
-		memorymodel.NewMemoryModel().Update(ctx, map[string]any{"id": row.ID}, values)
+		if _, updateErr := updateMemoryRecord(ctx, row.ID, values); updateErr != nil {
+			return nil, updateErr
+		}
 		row = memorymodel.NewMemoryModel().Find(ctx, map[string]any{"id": row.ID})
 	}
 	return map[string]any{"memory": MemoryMap(row)}, nil
@@ -165,22 +200,29 @@ func (Service) ForgetMemory(ctx context.Context, request MemoryForgetRequest) er
 		return fmt.Errorf("记忆不存在")
 	}
 	if request.Hard {
-		memorymodel.NewMemoryModel().Delete(ctx, map[string]any{"id": row.ID})
-		return nil
+		_, err = deleteMemoryRecord(ctx, row.ID)
+		return err
 	}
-	memorymodel.NewMemoryModel().Update(ctx, map[string]any{"id": row.ID}, map[string]any{"status": memorymodel.StatusDisabled})
-	return nil
+	_, err = updateMemoryRecord(ctx, row.ID, map[string]any{
+		"status": memorymodel.StatusDisabled, "updated_at": time.Now(),
+	})
+	return err
 }
 
 func (s Service) rememberForOwner(ctx context.Context, owner memoryOwner, request MemoryRequest) (map[string]any, error) {
-	title := strings.TrimSpace(request.Title)
-	content := strings.TrimSpace(request.Content)
+	title, content, tags, err := prepareMemoryFields(request.Title, request.Content, request.Tags)
+	if err != nil {
+		return nil, err
+	}
 	if title == "" {
 		return nil, fmt.Errorf("记忆标题不能为空")
 	}
 	if content == "" {
 		return nil, fmt.Errorf("记忆内容不能为空")
 	}
+	request.Title = title
+	request.Content = content
+	request.Tags = tags
 	kind := normalizeMemoryKind(request.Kind)
 	if kind == "" {
 		kind = "semantic"
@@ -188,34 +230,57 @@ func (s Service) rememberForOwner(ctx context.Context, owner memoryOwner, reques
 	scope := resolveMemoryScope(request.Scope, request.ContextKey, request.AgentKey, request.SessionID)
 	key := normalizeMemoryKey(request.Key)
 	scopeValues := memoryScopeValues(scope, request.ContextKey, request.AgentKey, request.SessionID)
+	dedupeKey := memoryDedupeKey(owner, scope, scopeValues, key, title, content)
 	if key != "" {
 		if existing := s.findMemoryByKey(ctx, owner, scope, scopeValues, key); existing != nil {
-			values := memoryContentValues(request, key, scope, scopeValues)
-			memorymodel.NewMemoryModel().Update(ctx, map[string]any{"id": existing.ID}, values)
+			values := memoryContentValues(request, key, scope, scopeValues, dedupeKey)
+			if _, updateErr := updateMemoryRecord(ctx, existing.ID, values); updateErr != nil {
+				return nil, updateErr
+			}
 			return map[string]any{
 				"memory":  MemoryMap(memorymodel.NewMemoryModel().Find(ctx, map[string]any{"id": existing.ID})),
 				"deduped": true,
 			}, nil
 		}
 	}
+	if existing := findMemoryByDedupeKey(ctx, dedupeKey); existing != nil {
+		values := memoryContentValues(request, key, scope, scopeValues, dedupeKey)
+		if _, updateErr := updateMemoryRecord(ctx, existing.ID, values); updateErr != nil {
+			return nil, updateErr
+		}
+		return map[string]any{
+			"memory":  MemoryMap(memorymodel.NewMemoryModel().Find(ctx, map[string]any{"id": existing.ID})),
+			"deduped": true,
+		}, nil
+	}
 	contextKey, _ := scopeValues["context_key"].(string)
 	if existing := s.findSimilarMemory(ctx, owner, scope, contextKey, request.AgentKey, request.SessionID, title, content); existing != nil {
+		values := map[string]any{
+			"dedupe_key": memoryDedupeColumn(dedupeKey),
+			"updated_at": time.Now(),
+		}
 		importance := clampMemoryImportance(request.Importance)
 		if importance > existing.Importance {
-			memorymodel.NewMemoryModel().Update(ctx, map[string]any{"id": existing.ID}, map[string]any{"importance": importance})
-			existing.Importance = importance
+			values["importance"] = importance
 		}
-		return map[string]any{"memory": MemoryMap(existing), "deduped": true}, nil
+		if _, updateErr := updateMemoryRecord(ctx, existing.ID, values); updateErr != nil {
+			return nil, updateErr
+		}
+		return map[string]any{
+			"memory":  MemoryMap(memorymodel.NewMemoryModel().Find(ctx, map[string]any{"id": existing.ID})),
+			"deduped": true,
+		}, nil
 	}
 	record := map[string]any{
 		"owner_type":        owner.OwnerType,
 		"owner_id":          owner.OwnerID,
 		"scope":             scope,
 		"key":               key,
+		"dedupe_key":        memoryDedupeColumn(dedupeKey),
 		"kind":              kind,
-		"title":             limitMemoryText(title, 255),
+		"title":             title,
 		"content":           content,
-		"tags":              encodeMemoryJSON(normalizeMemoryTags(request.Tags), "[]"),
+		"tags":              encodeMemoryJSON(tags, "[]"),
 		"source":            normalizeMemorySource(request.Source),
 		"confidence":        clampMemoryConfidence(request.Confidence),
 		"importance":        clampMemoryImportance(request.Importance),
@@ -227,18 +292,32 @@ func (s Service) rememberForOwner(ctx context.Context, owner memoryOwner, reques
 	for field, value := range scopeValues {
 		record[field] = value
 	}
-	id := uint64(memorymodel.NewMemoryModel().Insert(ctx, record))
-	if id == 0 {
+	id, insertErr := insertMemoryRecord(ctx, record)
+	if insertErr != nil || id == 0 {
+		if existing := findMemoryByDedupeKey(ctx, dedupeKey); existing != nil {
+			values := memoryContentValues(request, key, scope, scopeValues, dedupeKey)
+			if _, updateErr := updateMemoryRecord(ctx, existing.ID, values); updateErr != nil {
+				return nil, updateErr
+			}
+			return map[string]any{
+				"memory":  MemoryMap(memorymodel.NewMemoryModel().Find(ctx, map[string]any{"id": existing.ID})),
+				"deduped": true,
+			}, nil
+		}
+		if insertErr != nil {
+			return nil, insertErr
+		}
 		return nil, fmt.Errorf("保存记忆失败")
 	}
 	return map[string]any{"memory": MemoryMap(memorymodel.NewMemoryModel().Find(ctx, map[string]any{"id": id}))}, nil
 }
 
-func memoryContentValues(request MemoryRequest, key string, scope string, scopeValues map[string]any) map[string]any {
+func memoryContentValues(request MemoryRequest, key string, scope string, scopeValues map[string]any, dedupeKey *string) map[string]any {
 	values := map[string]any{
 		"scope": scope, "key": key, "kind": firstMemoryKind(request.Kind),
-		"title": limitMemoryText(request.Title, 255), "content": strings.TrimSpace(request.Content),
-		"tags":   encodeMemoryJSON(normalizeMemoryTags(request.Tags), "[]"),
+		"dedupe_key": memoryDedupeColumn(dedupeKey),
+		"title":      request.Title, "content": request.Content,
+		"tags":   encodeMemoryJSON(request.Tags, "[]"),
 		"source": normalizeMemorySource(request.Source), "confidence": clampMemoryConfidence(request.Confidence),
 		"importance": clampMemoryImportance(request.Importance), "status": memorymodel.StatusEnabled,
 		"source_message_id": request.SourceMessageID, "updated_at": time.Now(),

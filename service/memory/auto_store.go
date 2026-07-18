@@ -21,42 +21,46 @@ type CandidateRequest struct {
 	Candidate       Candidate
 }
 
-func (s Service) ReviewCandidate(ctx context.Context, request CandidateRequest) map[string]any {
+func (s Service) ReviewCandidate(ctx context.Context, request CandidateRequest) (map[string]any, error) {
 	candidate := normalizeCandidate(request.Candidate)
 	if candidate.Operation == "delete" {
 		return s.forgetCandidate(ctx, request.Session, request.SourceMessageID, candidate)
 	}
-	if candidate.Operation != "upsert" || candidate.Title == "" || candidate.Content == "" || hasSensitiveMemoryContent(candidate.Content) {
-		return nil
+	if candidate.Operation != "upsert" || candidate.Title == "" || candidate.Content == "" ||
+		memoryFieldsContainSensitiveData(candidate.Title, candidate.Content, candidate.Tags) {
+		return nil, nil
 	}
 	score := scoreMemoryCandidate(candidate)
 	if !shouldAutoRememberMemory(candidate, score) {
-		return nil
+		return nil, nil
 	}
 	owner := memoryOwner{OwnerType: request.Session.OwnerType, OwnerID: request.Session.OwnerID}
 	if existing := s.findRelatedMemory(ctx, owner, request.Session, candidate); existing != nil {
 		if TextSimilar(existing.Content, candidate.Content) {
 			response, err := s.rememberForOwner(ctx, owner, memoryRequestFromCandidate(request.Session, request.SourceMessageID, candidate))
 			if err != nil {
-				return nil
+				return nil, err
 			}
-			return memoryReview("deduped", "已更新长期记忆权重。", response, request.SourceMessageID)
+			return memoryReview("deduped", "已更新长期记忆权重。", response, request.SourceMessageID), nil
 		}
 		if !shouldAutoUpdateMemory(candidate, score) {
-			return nil
+			return nil, nil
 		}
-		memory := s.updateExistingMemory(ctx, existing.ID, request.Session, request.SourceMessageID, candidate, score)
+		memory, err := s.updateExistingMemory(ctx, existing.ID, request.Session, request.SourceMessageID, candidate, score)
+		if err != nil {
+			return nil, err
+		}
 		if len(memory) == 0 {
-			return nil
+			return nil, nil
 		}
 		return map[string]any{
 			"status": "updated", "text": fmt.Sprintf("已自动更新长期记忆：%s", candidate.Title),
 			"memory": memory, "source_message_id": request.SourceMessageID,
-		}
+		}, nil
 	}
 	response, err := s.rememberForOwner(ctx, owner, memoryRequestFromCandidate(request.Session, request.SourceMessageID, candidate))
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	status := "saved"
 	text := fmt.Sprintf("已自动记住：%s", candidate.Title)
@@ -64,27 +68,29 @@ func (s Service) ReviewCandidate(ctx context.Context, request CandidateRequest) 
 		status = "deduped"
 		text = "已更新长期记忆权重。"
 	}
-	return memoryReview(status, text, response, request.SourceMessageID)
+	return memoryReview(status, text, response, request.SourceMessageID), nil
 }
 
-func (s Service) forgetCandidate(ctx context.Context, session agentmodel.Session, sourceMessageID uint64, candidate Candidate) map[string]any {
+func (s Service) forgetCandidate(ctx context.Context, session agentmodel.Session, sourceMessageID uint64, candidate Candidate) (map[string]any, error) {
 	if candidate.MemoryID == 0 || !candidate.Explicit {
-		return nil
+		return nil, nil
 	}
 	row := memorymodel.NewMemoryModel().Find(ctx, map[string]any{
 		"id": candidate.MemoryID, "owner_type": session.OwnerType, "owner_id": session.OwnerID,
 		"status": memorymodel.StatusEnabled,
 	})
 	if row == nil || !memoryMatchesRuntimeSession(*row, session) {
-		return nil
+		return nil, nil
 	}
-	memorymodel.NewMemoryModel().Update(ctx, map[string]any{"id": row.ID}, map[string]any{
+	if _, err := updateMemoryRecord(ctx, row.ID, map[string]any{
 		"status": memorymodel.StatusDisabled, "updated_at": time.Now(),
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"status": "forgot", "text": "已按本轮要求清理相关记忆。",
 		"memory_id": row.ID, "source_message_id": sourceMessageID,
-	}
+	}, nil
 }
 
 func normalizeCandidate(candidate Candidate) Candidate {
@@ -102,7 +108,8 @@ func normalizeCandidate(candidate Candidate) Candidate {
 	if candidate.Title == "" {
 		candidate.Title = memoryTitle(candidate.Kind, candidate.Content)
 	}
-	candidate.Title = limitMemoryText(candidate.Title, 255)
+	candidate.Title = limitMemoryText(candidate.Title, memoryTitleLimit)
+	candidate.Tags = normalizeMemoryTags(candidate.Tags)
 	candidate.Importance = clampMemoryImportance(candidate.Importance)
 	candidate.Confidence = clampCandidateConfidence(candidate.Confidence)
 	candidate.Source = normalizeMemorySource(candidate.Source)
@@ -155,21 +162,33 @@ func (s Service) findRelatedMemory(ctx context.Context, owner memoryOwner, sessi
 	return nil
 }
 
-func (s Service) updateExistingMemory(ctx context.Context, id uint64, session agentmodel.Session, sourceMessageID uint64, candidate Candidate, score float64) map[string]any {
+func (s Service) updateExistingMemory(ctx context.Context, id uint64, session agentmodel.Session, sourceMessageID uint64, candidate Candidate, score float64) (map[string]any, error) {
+	scopeValues := memoryScopeValues(candidate.Scope, session.ContextKey, session.AgentKey, session.ID)
+	dedupeKey := memoryDedupeKey(
+		memoryOwner{OwnerType: session.OwnerType, OwnerID: session.OwnerID},
+		candidate.Scope,
+		scopeValues,
+		candidate.Key,
+		candidate.Title,
+		candidate.Content,
+	)
 	values := map[string]any{
 		"scope": candidate.Scope, "key": candidate.Key,
-		"kind": candidate.Kind, "title": candidate.Title, "content": candidate.Content,
+		"dedupe_key": memoryDedupeColumn(dedupeKey),
+		"kind":       candidate.Kind, "title": candidate.Title, "content": candidate.Content,
 		"tags": encodeMemoryJSON(candidate.Tags, "[]"), "source": candidate.Source,
 		"confidence":        candidate.Confidence,
 		"importance":        clampMemoryImportance(firstPositive(candidate.Importance, int(score*100))),
 		"source_message_id": sourceMessageID, "status": memorymodel.StatusEnabled,
 		"updated_at": time.Now(),
 	}
-	for field, value := range memoryScopeValues(candidate.Scope, session.ContextKey, session.AgentKey, session.ID) {
+	for field, value := range scopeValues {
 		values[field] = value
 	}
-	memorymodel.NewMemoryModel().Update(ctx, map[string]any{"id": id}, values)
-	return MemoryMap(memorymodel.NewMemoryModel().Find(ctx, map[string]any{"id": id}))
+	if _, err := updateMemoryRecord(ctx, id, values); err != nil {
+		return nil, err
+	}
+	return MemoryMap(memorymodel.NewMemoryModel().Find(ctx, map[string]any{"id": id})), nil
 }
 
 func memoryRequestFromCandidate(session agentmodel.Session, sourceMessageID uint64, candidate Candidate) MemoryRequest {

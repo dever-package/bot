@@ -20,6 +20,7 @@ import {
 import { WorkProjectPage } from "../project/project-page";
 import { BodyToaster } from "../shared/body-toaster";
 import "../shared/body-theme.css";
+import "./workbench-appearance.css";
 import type { AssetRecord } from "../asset/asset-types";
 import { WorkbenchAssetPage } from "./asset-page";
 import { WorkbenchDialoguePage } from "./dialogue-page";

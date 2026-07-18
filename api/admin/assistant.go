@@ -185,7 +185,7 @@ func (Assistant) PostUpdateMemory(c *server.Context) error {
 		Kind:       botapi.TextFromBody(body, "kind", "type"),
 		Title:      botapi.TextFromBody(body, "title", "name"),
 		Content:    botapi.TextFromBody(body, "content", "text"),
-		Tags:       assistantStringList(body["tags"]),
+		Tags:       assistantOptionalStringList(body, "tags"),
 		Importance: int(frontstream.InputInt64(body["importance"], 0)),
 		Status:     int16(frontstream.InputInt64(body["status"], 0)),
 		Scope:      botapi.TextFromBody(body, "scope"),
@@ -232,6 +232,14 @@ func assistantStringList(value any) []string {
 	default:
 		return []string{}
 	}
+}
+
+func assistantOptionalStringList(body map[string]any, key string) []string {
+	value, exists := body[key]
+	if !exists {
+		return nil
+	}
+	return assistantStringList(value)
 }
 
 func firstBodyValue(body map[string]any, keys ...string) any {

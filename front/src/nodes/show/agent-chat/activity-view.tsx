@@ -49,11 +49,7 @@ export function AgentChatActivityView({
         }
       >
         <AgentChatMessageOutput
-          output={
-            Object.keys(displayOutput).length > 0
-              ? displayOutput
-              : activity.output
-          }
+          output={activity.output}
           className="agent-chat-activity-output"
         />
       </div>

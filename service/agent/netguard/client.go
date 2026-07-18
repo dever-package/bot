@@ -10,10 +10,13 @@ import (
 	"time"
 )
 
-var externalDialer = &net.Dialer{
-	Timeout:   10 * time.Second,
-	KeepAlive: 30 * time.Second,
-}
+var (
+	externalDialer = &net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	externalTransport = newTransport()
+)
 
 func ValidateURL(ctx context.Context, parsed *url.URL) error {
 	if parsed == nil {
@@ -36,7 +39,7 @@ func NewClient(timeout time.Duration) *http.Client {
 	}
 	return &http.Client{
 		Timeout:   timeout,
-		Transport: transport(),
+		Transport: externalTransport,
 		CheckRedirect: func(request *http.Request, previous []*http.Request) error {
 			if len(previous) >= 3 {
 				return fmt.Errorf("外部请求跳转次数超过限制")
@@ -46,7 +49,7 @@ func NewClient(timeout time.Duration) *http.Client {
 	}
 }
 
-func transport() *http.Transport {
+func newTransport() *http.Transport {
 	transport, ok := http.DefaultTransport.(*http.Transport)
 	if ok {
 		cloned := transport.Clone()

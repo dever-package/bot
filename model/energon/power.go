@@ -28,7 +28,6 @@ type PowerIndex struct {
 }
 
 const DefaultLLMPowerID uint64 = 1
-const FFmpegComposePowerID uint64 = 2
 
 var (
 	powerSeed = []map[string]any{
@@ -40,18 +39,6 @@ var (
 			"icon":        "file-text",
 			"output_type": OutputTypeGeneral,
 			"kind":        "text",
-			"prompt":      "",
-			"source_rule": 1,
-			"status":      1,
-		},
-		{
-			"id":          FFmpegComposePowerID,
-			"cate_id":     1,
-			"key":         "video-compose",
-			"name":        "视频合成",
-			"icon":        "clapperboard",
-			"output_type": OutputTypeGeneral,
-			"kind":        "video",
 			"prompt":      "",
 			"source_rule": 1,
 			"status":      1,

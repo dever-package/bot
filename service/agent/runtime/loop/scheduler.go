@@ -19,84 +19,36 @@ const (
 	runtimeHeartbeatInterval = 10 * time.Second
 )
 
-type RunLease struct {
-	RunID    uint64
-	WorkerID string
-}
-
-type RunExecutor interface {
-	ExecuteRun(context.Context, RunLease) error
-}
-
-type RunCandidate struct {
-	RunID uint64
-}
-
-type RunBacklog interface {
-	ListRunnable(context.Context, int) ([]RunCandidate, error)
-}
-
-type RunDispatcher interface {
-	Dispatch(context.Context, uint64) error
-	Cancel(context.Context, uint64) error
-}
-
-type RunDispatcherFactory func(RunExecutor, RunBacklog) RunDispatcher
-
 type databaseBacklog struct {
 	repository repository
 }
 
-func NewRunBacklog() RunBacklog {
+func newRunBacklog() databaseBacklog {
 	return databaseBacklog{repository: newRepository()}
 }
 
-func (backlog databaseBacklog) ListRunnable(ctx context.Context, limit int) ([]RunCandidate, error) {
+func (backlog databaseBacklog) ListRunnable(ctx context.Context, limit int) ([]runtimequeue.Candidate, error) {
 	rows, err := backlog.repository.ListRunnable(ctx, time.Now(), limit)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]RunCandidate, 0, len(rows))
-	for _, row := range rows {
-		result = append(result, RunCandidate{RunID: row.ID})
-	}
-	return result, nil
-}
-
-type queueBacklogAdapter struct {
-	backlog RunBacklog
-}
-
-func (adapter queueBacklogAdapter) ListRunnable(ctx context.Context, limit int) ([]runtimequeue.Candidate, error) {
-	rows, err := adapter.backlog.ListRunnable(ctx, limit)
 	if err != nil {
 		return nil, err
 	}
 	result := make([]runtimequeue.Candidate, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, runtimequeue.Candidate{ID: row.RunID})
+		result = append(result, runtimequeue.Candidate{ID: row.ID})
 	}
 	return result, nil
 }
 
-type queueExecutorAdapter struct {
-	executor RunExecutor
-}
-
-func (adapter queueExecutorAdapter) Execute(ctx context.Context, lease runtimequeue.Lease) error {
-	return adapter.executor.ExecuteRun(ctx, RunLease{RunID: lease.ID, WorkerID: lease.WorkerID})
-}
-
 var (
 	defaultDispatcherOnce sync.Once
-	defaultDispatcher     RunDispatcher
+	defaultDispatcher     runtimequeue.Dispatcher
 )
 
-func defaultRunDispatcher(executor RunExecutor, backlog RunBacklog) RunDispatcher {
+func defaultRunDispatcher(executor runtimequeue.Executor, backlog runtimequeue.Backlog) runtimequeue.Dispatcher {
 	defaultDispatcherOnce.Do(func() {
 		defaultDispatcher = runtimequeue.NewDatabaseDispatcher(
-			queueBacklogAdapter{backlog: backlog},
-			queueExecutorAdapter{executor: executor},
+			backlog,
+			executor,
 			runtimequeue.Config{
 				Name:         "agent_run",
 				Concurrency:  runWorkerConcurrency(),

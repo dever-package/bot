@@ -42,7 +42,7 @@ func (s Service) ReadKnowledgeGraph(ctx context.Context, baseID uint64, limit in
 	if len(edges) == 0 {
 		return KnowledgeGraphResult{}, nil
 	}
-	nodeMap := knowledgeGraphNodeMap(ctx, graphEdgeNodeIDs(edges))
+	nodeMap := knowledgeGraphNodeMap(ctx, baseID, graphEdgeNodeIDs(edges))
 	result := KnowledgeGraphResult{
 		Nodes: make([]KnowledgeNodeResult, 0, len(nodeMap)),
 		Edges: make([]KnowledgeGraphEdge, 0, len(edges)),
@@ -189,9 +189,10 @@ func inferGraphRelations(ctx context.Context, baseID uint64, edges []*agentmodel
 	}
 	// Fetch doc IDs and titles for inferred nodes
 	nodes := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
-		"id":           nodeIDs,
-		"index_status": agentmodel.KnowledgeIndexStatusSuccess,
-		"status":       1,
+		"id":                nodeIDs,
+		"knowledge_base_id": baseID,
+		"index_status":      agentmodel.KnowledgeIndexStatusSuccess,
+		"status":            1,
 	}, map[string]any{
 		"field":    "main.id, main.doc_id, main.title, main.index_status, main.status",
 		"page":     1,
@@ -411,14 +412,15 @@ func graphEdgeNodeIDs(edges []*agentmodel.KnowledgeEdge) []uint64 {
 	return uniqueUint64s(ids, maxKnowledgeGraphLimit*2)
 }
 
-func knowledgeGraphNodeMap(ctx context.Context, nodeIDs []uint64) map[uint64]*agentmodel.KnowledgeNode {
-	if len(nodeIDs) == 0 {
+func knowledgeGraphNodeMap(ctx context.Context, baseID uint64, nodeIDs []uint64) map[uint64]*agentmodel.KnowledgeNode {
+	if baseID == 0 || len(nodeIDs) == 0 {
 		return nil
 	}
 	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
-		"id":           nodeIDs,
-		"index_status": agentmodel.KnowledgeIndexStatusSuccess,
-		"status":       1,
+		"id":                nodeIDs,
+		"knowledge_base_id": baseID,
+		"index_status":      agentmodel.KnowledgeIndexStatusSuccess,
+		"status":            1,
 	}, map[string]any{
 		"page":     1,
 		"pageSize": len(nodeIDs),

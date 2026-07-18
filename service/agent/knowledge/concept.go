@@ -65,17 +65,13 @@ func (s Service) extractDocumentConceptGraph(ctx context.Context, base agentmode
 	return nil
 }
 
-func (s Service) extractDocumentConceptGraphAsync(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc) {
-	_ = s.extractDocumentConceptGraphWithStage(ctx, base, doc)
-}
-
 func (s Service) extractDocumentConceptGraphWithStage(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc) error {
-	markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageGraph, agentmodel.KnowledgeIndexStatusRunning, "")
+	markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageGraph, agentmodel.KnowledgeIndexStatusRunning, "")
 	err := s.extractDocumentConceptGraph(ctx, base, doc)
 	if err != nil {
-		markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageGraph, agentmodel.KnowledgeIndexStatusFailed, err.Error())
+		markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageGraph, agentmodel.KnowledgeIndexStatusFailed, err.Error())
 	} else {
-		markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageGraph, agentmodel.KnowledgeIndexStatusSuccess, "")
+		markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageGraph, agentmodel.KnowledgeIndexStatusSuccess, "")
 	}
 	return err
 }

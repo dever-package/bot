@@ -11,34 +11,46 @@ import (
 	memorymodel "github.com/dever-package/bot/model/memory"
 )
 
-func memoryMatchesScope(row memorymodel.Memory, request MemoryListRequest) bool {
+func memoryListScopeConditions(request MemoryListRequest) []any {
 	scope := strings.ToLower(strings.TrimSpace(request.Scope))
 	switch scope {
-	case memoryScopeAll:
-		return true
 	case memorymodel.ScopeGlobal:
-		return normalizeStoredMemoryScope(row) == memorymodel.ScopeGlobal
+		return []any{memoryScopeCondition(map[string]any{"main.scope": memorymodel.ScopeGlobal})}
 	case memorymodel.ScopeAgent:
-		return normalizeStoredMemoryScope(row) == memorymodel.ScopeAgent && strings.TrimSpace(row.AgentKey) == strings.TrimSpace(request.AgentKey)
+		return []any{memoryScopeCondition(map[string]any{
+			"main.scope": memorymodel.ScopeAgent, "main.agent_key": strings.TrimSpace(request.AgentKey),
+		})}
 	case memorymodel.ScopeSession:
-		return normalizeStoredMemoryScope(row) == memorymodel.ScopeSession && request.SessionID > 0 && row.SessionID == request.SessionID
+		if request.SessionID == 0 {
+			return []any{memoryScopeCondition(map[string]any{"main.id": uint64(0)})}
+		}
+		return []any{memoryScopeCondition(map[string]any{
+			"main.scope": memorymodel.ScopeSession, "main.session_id": request.SessionID,
+		})}
 	case memorymodel.ScopeContext, memoryScopeCurrent, "":
-		return memoryMatchesRequestContext(row, request)
+		return currentMemoryScopeConditions(request)
 	default:
-		return memoryMatchesRequestContext(row, request)
+		return currentMemoryScopeConditions(request)
 	}
 }
 
-func memoryMatchesRequestContext(row memorymodel.Memory, request MemoryListRequest) bool {
-	switch normalizeStoredMemoryScope(row) {
-	case memorymodel.ScopeContext:
-		return strings.TrimSpace(row.AgentKey) == strings.TrimSpace(request.AgentKey) &&
-			NormalizeContextKey(row.ContextKey, row.AgentKey) == NormalizeContextKey(request.ContextKey, request.AgentKey)
-	case memorymodel.ScopeSession:
-		return request.SessionID > 0 && row.SessionID == request.SessionID
-	default:
-		return false
+func currentMemoryScopeConditions(request MemoryListRequest) []any {
+	agentKey := strings.TrimSpace(request.AgentKey)
+	conditions := []any{memoryScopeCondition(map[string]any{
+		"main.scope":       memorymodel.ScopeContext,
+		"main.agent_key":   agentKey,
+		"main.context_key": NormalizeContextKey(request.ContextKey, agentKey),
+	})}
+	if request.SessionID > 0 {
+		conditions = append(conditions, memoryScopeCondition(map[string]any{
+			"main.scope": memorymodel.ScopeSession, "main.session_id": request.SessionID,
+		}))
 	}
+	return conditions
+}
+
+func memoryScopeCondition(fields map[string]any) any {
+	return map[string]any{"and": fields}
 }
 
 func resolveMemoryScope(scope string, contextKey string, agentKey string, sessionID uint64) string {
@@ -128,9 +140,9 @@ func normalizeMemoryKind(kind string) string {
 
 func normalizeMemoryTags(tags []string) []string {
 	seen := map[string]struct{}{}
-	result := make([]string, 0, len(tags))
+	result := make([]string, 0, min(len(tags), memoryTagCount))
 	for _, tag := range tags {
-		tag = strings.TrimSpace(tag)
+		tag = limitMemoryText(tag, memoryTagLimit)
 		if tag == "" {
 			continue
 		}
@@ -139,6 +151,9 @@ func normalizeMemoryTags(tags []string) []string {
 		}
 		seen[tag] = struct{}{}
 		result = append(result, tag)
+		if len(result) >= memoryTagCount {
+			break
+		}
 	}
 	return result
 }

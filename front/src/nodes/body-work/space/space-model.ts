@@ -28,6 +28,7 @@ import {
   powerKindLabel,
   resolvePowerPresentation,
 } from "./space-power-presentation";
+import { normalizeVideoComposition } from "./space-video-compose";
 
 const freeAssetCate: AssetCate = {
   id: 0,
@@ -879,6 +880,9 @@ function normalizeCanvasComposerDraft(value: unknown) {
     paramValues: asRecord(firstDefined(row.paramValues, row.param_values)),
     selectedTargetId: numberValue(
       firstDefined(row.selectedTargetId, row.selected_target_id),
+    ),
+    videoComposition: normalizeVideoComposition(
+      firstDefined(row.videoComposition, row.video_composition),
     ),
   };
 }

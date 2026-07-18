@@ -50,6 +50,20 @@ func (Workspace) PostCanvasExecute(c *server.Context) error {
 	return botapi.WriteJSON(c, data, err)
 }
 
+func (Workspace) PostCanvasNodeTitle(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := workspaceRunner.GenerateCanvasNodeTitle(c.Context(), projectservice.CanvasNodeTitleRequest{
+		ProjectID: botapi.Uint64FromBody(body, "project_id", "projectId"),
+		NodeKey:   botapi.TextFromBody(body, "node_key", "nodeKey", "node_id", "nodeId"),
+		VersionID: botapi.Uint64FromBody(body, "version_id", "versionId"),
+		Prompt:    botapi.TextFromBody(body, "prompt"),
+	})
+	return botapi.WriteJSON(c, data, err)
+}
+
 func (Workspace) GetCanvasExecutionList(c *server.Context) error {
 	data, err := workspaceRunner.CanvasExecutionList(c.Context(), projectservice.CanvasExecutionQuery{
 		ProjectID:   botapi.QueryUint64(c, "project_id", "projectId"),

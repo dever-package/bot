@@ -66,7 +66,10 @@ export async function loadWorkbenchCatalog(teamID = 0) {
     workspaceBodyID: numberValue(data.workspace?.body_id),
     projectEnabled: Boolean(data.project_enabled),
     powers: toRows(data.powers).map(normalizePower).filter(hasID),
-    roles: toRows(data.roles).map(normalizeRole).filter(hasID),
+    roles: toRows(data.roles)
+      .map(normalizeRole)
+      .filter(hasID)
+      .filter(isExecutionRole),
     assetCates: toRows(data.asset_cates)
       .map(normalizeAssetCate)
       .filter(hasID),
@@ -87,6 +90,49 @@ export function scopedWorkbenchApi(
   }
   const api = workbenchApi(path);
   return `${api}${api.includes("?") ? "&" : "?"}${query.toString()}`;
+}
+
+export async function saveWorkbenchDialogueAsset(input: {
+  teamID: number;
+  roleID: number;
+  messageID: number;
+  artifactID?: number;
+  targetAssetID?: number;
+}) {
+  return saveWorkbenchAsset("chat_save_asset", {
+    team_id: input.teamID,
+    role_id: input.roleID,
+    message_id: input.messageID,
+    artifact_id: input.artifactID || undefined,
+    target_asset_id: input.targetAssetID || undefined,
+  });
+}
+
+export async function saveWorkbenchPowerAsset(input: {
+  teamID: number;
+  teamPowerID: number;
+  requestID: string;
+  targetAssetID?: number;
+}) {
+  return saveWorkbenchAsset("power_save_asset", {
+    team_id: input.teamID,
+    team_power_id: input.teamPowerID,
+    request_id: input.requestID,
+    target_asset_id: input.targetAssetID || undefined,
+  });
+}
+
+async function saveWorkbenchAsset(
+  path: string,
+  payload: Record<string, unknown>,
+) {
+  const result = await request(workbenchApi(path), "post", payload);
+  const data = responseData(result, "保存资产失败");
+  const assetID = numberValue(data.asset?.id);
+  if (!assetID) {
+    throw new Error("保存资产结果为空");
+  }
+  return assetID;
 }
 
 function responseData(result: any, fallback: string): Record<string, any> {
@@ -140,6 +186,10 @@ function normalizeAssetCate(value: any): WorkbenchAssetCate {
 
 function hasID<T extends { id: number }>(value: T) {
   return value.id > 0;
+}
+
+function isExecutionRole(role: WorkbenchRole) {
+  return role.roleType === "worker";
 }
 
 function toRows(value: unknown): any[] {

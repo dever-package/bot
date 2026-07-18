@@ -1,3 +1,5 @@
+import type { CanvasVideoComposition } from "./space-video-compose";
+
 export type AssetKind =
   | "text"
   | "image"
@@ -298,6 +300,7 @@ export type CanvasComposerDraft = {
   promptContent?: CanvasReferenceContent;
   paramValues?: Record<string, unknown>;
   selectedTargetId?: number;
+  videoComposition?: CanvasVideoComposition;
 };
 
 export type CanvasReferenceContent = {

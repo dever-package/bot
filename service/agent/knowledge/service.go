@@ -2,8 +2,11 @@ package knowledge
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +25,13 @@ type Service struct {
 	qdrant   qdrantClient
 }
 
+const (
+	maxStoredDocumentTextChars = 120000
+	maxStoredParseTextChars    = 120000
+	maxDocumentRootTextChars   = 6000
+	maxStoredParseListItems    = 200
+)
+
 func NewService() Service {
 	return Service{
 		embedder: newEmbeddingService(),
@@ -37,6 +47,10 @@ func baseCollection(base agentmodel.KnowledgeBase) string {
 }
 
 func (s Service) IndexDocument(ctx context.Context, docID uint64) (IndexResult, error) {
+	return s.indexDocument(ctx, docID, true)
+}
+
+func (s Service) indexDocument(ctx context.Context, docID uint64, refreshSummary bool) (IndexResult, error) {
 	startedAt := time.Now()
 	doc := agentmodel.NewKnowledgeDocModel().Find(ctx, map[string]any{"id": docID})
 	if doc == nil {
@@ -46,6 +60,11 @@ func (s Service) IndexDocument(ctx context.Context, docID uint64) (IndexResult, 
 	if base == nil {
 		return IndexResult{}, fmt.Errorf("知识库不存在")
 	}
+	releaseIndexSlot, err := acquireDocumentIndexSlot(ctx, doc.Size)
+	if err != nil {
+		return IndexResult{}, err
+	}
+	defer releaseIndexSlot()
 	result := IndexResult{BaseID: base.ID, DocID: doc.ID, StartedAt: startedAt}
 	previousDoc := *doc
 	if _, ok := beginKnowledgeDocIndex(ctx, doc); !ok {
@@ -54,7 +73,10 @@ func (s Service) IndexDocument(ctx context.Context, docID uint64) (IndexResult, 
 		result.FinishedAt = time.Now()
 		return result, err
 	}
-	markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageParse, agentmodel.KnowledgeIndexStatusRunning, "")
+	if strings.EqualFold(strings.TrimSpace(doc.SourceType), "qa") {
+		return s.reindexQADocument(ctx, *base, *doc, refreshSummary, result)
+	}
+	markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageParse, agentmodel.KnowledgeIndexStatusRunning, "")
 	agentmodel.NewKnowledgeBaseModel().Update(ctx, map[string]any{"id": base.ID}, map[string]any{
 		"index_status":  agentmodel.KnowledgeIndexStatusRunning,
 		"error_message": "",
@@ -62,81 +84,91 @@ func (s Service) IndexDocument(ctx context.Context, docID uint64) (IndexResult, 
 
 	parseResult, sourceHash, err := s.parseDocument(ctx, *base, *doc)
 	if err != nil {
-		s.markDocFailed(ctx, doc.ID, base.ID, err)
+		s.markDocReindexFailed(ctx, previousDoc, doc.IndexVersion, base.ID, err)
 		result.Error = err.Error()
 		result.FinishedAt = time.Now()
 		return result, err
 	}
-	markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageParse, agentmodel.KnowledgeIndexStatusSuccess, "")
+	markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageParse, agentmodel.KnowledgeIndexStatusSuccess, "")
 	if previousDoc.NodeCount > 0 || previousDoc.ContentHash != "" {
 		saveDocumentVersionSnapshot(ctx, *base, previousDoc)
 	}
-	s.clearDocumentIndex(ctx, *base, doc.ID)
-	markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageNodes, agentmodel.KnowledgeIndexStatusRunning, "")
+	oldVectorCollections := knowledgeDocumentVectorCollections(ctx, *base, doc.ID)
 	var parseID uint64
 	var nodeCount int
 	txErr := orm.Transaction(ctx, func(txCtx context.Context) error {
+		updated := agentmodel.NewKnowledgeDocModel().Update(txCtx, map[string]any{
+			"id":            doc.ID,
+			"index_version": doc.IndexVersion,
+			"index_status":  agentmodel.KnowledgeIndexStatusRunning,
+			"index_stage":   agentmodel.KnowledgeIndexStageParse,
+		}, map[string]any{
+			"index_stage": agentmodel.KnowledgeIndexStageNodes,
+		})
+		if updated == 0 {
+			return fmt.Errorf("文档索引任务已失效")
+		}
+		clearKnowledgeDocumentDatabaseIndex(txCtx, base.ID, doc.ID)
 		parseID = saveKnowledgeParse(txCtx, *base, *doc, parseResult, sourceHash)
 		var txErr error
 		nodeCount, txErr = s.saveDocumentNodes(txCtx, *base, *doc, parseID, parseResult)
-		return txErr
+		if txErr != nil {
+			return txErr
+		}
+		if nodeCount == 0 {
+			return fmt.Errorf("文档内容为空，无法索引")
+		}
+		return nil
 	})
 	if txErr != nil {
-		s.markDocFailed(ctx, doc.ID, base.ID, txErr)
+		s.markDocReindexFailed(ctx, previousDoc, doc.IndexVersion, base.ID, txErr)
 		result.Error = txErr.Error()
 		result.FinishedAt = time.Now()
 		return result, txErr
 	}
-	markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageNodes, agentmodel.KnowledgeIndexStatusSuccess, "")
-	if nodeCount == 0 {
-		err := fmt.Errorf("文档内容为空，无法索引")
-		s.markDocFailed(ctx, doc.ID, base.ID, err)
-		result.Error = err.Error()
-		result.FinishedAt = time.Now()
-		return result, err
-	}
+	markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageNodes, agentmodel.KnowledgeIndexStatusSuccess, "")
 	advancedMode := isConceptGraphEnabled(base.ConceptGraphEnabled)
-	var vectorErr error
-	if advancedMode {
-		markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageVector, agentmodel.KnowledgeIndexStatusRunning, "")
-		vectorErr = s.indexDocumentVectors(ctx, *base, doc.ID)
-	} else {
-		markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageVector, agentmodel.KnowledgeIndexStatusSuccess, "")
-	}
+	vectorErr := s.rebuildDocumentVectors(ctx, *base, *doc, oldVectorCollections)
 	errorMessage := ""
 	if vectorErr != nil {
 		errorMessage = appendIndexWarning(errorMessage, "向量索引失败: "+vectorErr.Error())
-		markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageVector, agentmodel.KnowledgeIndexStatusFailed, vectorErr.Error())
-	} else if advancedMode {
-		markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageVector, agentmodel.KnowledgeIndexStatusSuccess, "")
 	}
 	if advancedMode && base.IndexPowerID > 0 {
 		if graphErr := s.extractDocumentConceptGraphWithStage(ctx, *base, *doc); graphErr != nil {
 			errorMessage = appendIndexWarning(errorMessage, "概念图谱失败: "+graphErr.Error())
 		}
-		go s.autoDiscoverRelations(context.Background(), *base)
 	} else {
-		markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageGraph, agentmodel.KnowledgeIndexStatusSuccess, "")
+		markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageGraph, agentmodel.KnowledgeIndexStatusSuccess, "")
 	}
-	markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageSummary, agentmodel.KnowledgeIndexStatusRunning, "")
+	markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageSummary, agentmodel.KnowledgeIndexStatusRunning, "")
 	docSummary := documentSummaryFromNodes(ctx, doc.ID)
 	keywords := keywordText(docSummary)
-	markDocumentIndexStage(ctx, doc.ID, agentmodel.KnowledgeIndexStageSummary, agentmodel.KnowledgeIndexStatusSuccess, "")
+	markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageSummary, agentmodel.KnowledgeIndexStatusSuccess, "")
 	finalStage := agentmodel.KnowledgeIndexStageComplete
 	if errorMessage != "" {
 		finalStage = firstFailedIndexStage(ctx, doc.ID)
 	}
-	agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": doc.ID}, map[string]any{
-		"content":       parseResult.PlainText,
-		"summary":       truncateText(docSummary, 1200),
-		"keywords":      keywords,
-		"content_hash":  sourceHash,
-		"node_count":    nodeCount,
-		"index_status":  agentmodel.KnowledgeIndexStatusSuccess,
-		"index_stage":   finalStage,
-		"error_message": errorMessage,
+	updated := agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{
+		"id":            doc.ID,
+		"index_version": doc.IndexVersion,
+		"index_status":  agentmodel.KnowledgeIndexStatusRunning,
+	}, map[string]any{
+		"content":          representativeText(parseResult.PlainText, maxStoredDocumentTextChars),
+		"summary":          truncateText(docSummary, 3000),
+		"keywords":         keywords,
+		"content_hash":     sourceHash,
+		"file_modified_at": knowledgeDocumentFileModifiedAt(ctx, base.ID, doc.StoragePath),
+		"node_count":       nodeCount,
+		"index_status":     agentmodel.KnowledgeIndexStatusSuccess,
+		"index_stage":      finalStage,
+		"error_message":    errorMessage,
 	})
-	if doc.DirID > 0 {
+	if updated == 0 {
+		result.NodeCount = nodeCount
+		result.FinishedAt = time.Now()
+		return result, nil
+	}
+	if refreshSummary && doc.DirID > 0 {
 		s.refreshDirectorySummaries(ctx, base.ID, doc.DirID)
 	}
 	s.refreshBaseStats(ctx, base.ID, agentmodel.KnowledgeIndexStatusSuccess, errorMessage)
@@ -144,6 +176,77 @@ func (s Service) IndexDocument(ctx context.Context, docID uint64) (IndexResult, 
 	result.Indexed = nodeCount
 	result.FinishedAt = time.Now()
 	return result, nil
+}
+
+func (s Service) reindexQADocument(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, refreshSummary bool, result IndexResult) (IndexResult, error) {
+	markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageParse, agentmodel.KnowledgeIndexStatusSuccess, "")
+	markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageNodes, agentmodel.KnowledgeIndexStatusSuccess, "")
+	collections := knowledgeDocumentVectorCollections(ctx, base, doc.ID)
+	vectorErr := s.rebuildDocumentVectors(ctx, base, doc, collections)
+	errorMessage := ""
+	if vectorErr != nil {
+		errorMessage = "向量索引失败: " + vectorErr.Error()
+	}
+	markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageGraph, agentmodel.KnowledgeIndexStatusSuccess, "")
+	markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageSummary, agentmodel.KnowledgeIndexStatusSuccess, "")
+	finalStage := agentmodel.KnowledgeIndexStageComplete
+	if errorMessage != "" {
+		finalStage = firstFailedIndexStage(ctx, doc.ID)
+	}
+	updated := agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{
+		"id":            doc.ID,
+		"index_version": doc.IndexVersion,
+		"index_status":  agentmodel.KnowledgeIndexStatusRunning,
+	}, map[string]any{
+		"index_status":  agentmodel.KnowledgeIndexStatusSuccess,
+		"index_stage":   finalStage,
+		"error_message": errorMessage,
+	})
+	if updated == 0 {
+		result.FinishedAt = time.Now()
+		return result, nil
+	}
+	if refreshSummary && doc.DirID > 0 {
+		s.refreshDirectorySummaries(ctx, base.ID, doc.DirID)
+	}
+	s.refreshBaseStats(ctx, base.ID, agentmodel.KnowledgeIndexStatusSuccess, errorMessage)
+	result.NodeCount = doc.NodeCount
+	result.Indexed = doc.NodeCount
+	result.FinishedAt = time.Now()
+	return result, nil
+}
+
+func (s Service) rebuildDocumentVectors(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, collections []string) error {
+	var indexErr error
+	if isConceptGraphEnabled(base.ConceptGraphEnabled) {
+		markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageVector, agentmodel.KnowledgeIndexStatusRunning, "")
+		indexErr = s.indexDocumentVectors(ctx, base, doc.ID, doc.IndexVersion)
+	}
+	if indexErr != nil {
+		markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageVector, agentmodel.KnowledgeIndexStatusFailed, indexErr.Error())
+		return indexErr
+	}
+	cleanupErr := deleteKnowledgeDocumentVectorVersionsBefore(ctx, s.qdrant, base.ID, doc.ID, doc.IndexVersion, collections)
+	vectorErr := combineKnowledgeIndexErrors(cleanupErr)
+	if vectorErr != nil {
+		markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageVector, agentmodel.KnowledgeIndexStatusFailed, vectorErr.Error())
+		return vectorErr
+	}
+	markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageVector, agentmodel.KnowledgeIndexStatusSuccess, "")
+	return nil
+}
+
+func combineKnowledgeIndexErrors(errors ...error) error {
+	messages := make([]string, 0, len(errors))
+	for _, err := range errors {
+		if err != nil && strings.TrimSpace(err.Error()) != "" {
+			messages = append(messages, strings.TrimSpace(err.Error()))
+		}
+	}
+	if len(messages) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s", strings.Join(messages, "；"))
 }
 
 func (s Service) parseDocument(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc) (knowledgeparse.Result, string, error) {
@@ -155,15 +258,16 @@ func (s Service) parseDocument(ctx context.Context, base agentmodel.KnowledgeBas
 	if err != nil || info.IsDir() {
 		return knowledgeparse.Result{}, "", fmt.Errorf("文件不存在")
 	}
-	content := doc.Content
-	if content == "" && isEditableKnowledgeFile(filePath, doc.MimeType, info.Size()) {
+	content := ""
+	if isEditableKnowledgeFile(filePath, doc.MimeType, info.Size()) {
 		if raw, err := os.ReadFile(filePath); err == nil {
 			content = string(raw)
 		}
 	}
-	sourceHash := fileContentHash(filePath, content, info)
+	sourceHash := fileContentHash(filePath, info)
 	maxNodeLength := normalizeNodeMaxLength(base.NodeMaxLength)
 	req := knowledgeparse.Request{
+		Context:       ctx,
 		Path:          filePath,
 		Name:          doc.FileName,
 		MimeType:      doc.MimeType,
@@ -175,7 +279,21 @@ func (s Service) parseDocument(ctx context.Context, base agentmodel.KnowledgeBas
 	if err != nil {
 		return knowledgeparse.Result{}, sourceHash, err
 	}
+	result.PlainText = representativeText(result.PlainText, maxStoredParseTextChars)
+	result.Markdown = representativeText(result.Markdown, maxStoredParseTextChars)
 	return result, sourceHash, nil
+}
+
+func knowledgeDocumentFileModifiedAt(ctx context.Context, baseID uint64, storagePath string) int64 {
+	filePath, err := knowledgeDocFilePath(ctx, baseID, storagePath)
+	if err != nil {
+		return 0
+	}
+	info, err := os.Stat(filePath)
+	if err != nil || info.IsDir() {
+		return 0
+	}
+	return info.ModTime().UnixNano()
 }
 
 func (s Service) parseDocumentContent(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, req knowledgeparse.Request) (knowledgeparse.Result, error) {
@@ -236,18 +354,27 @@ func knowledgeDocFilePath(ctx context.Context, baseID uint64, storagePath string
 	return filePath, nil
 }
 
-func fileContentHash(filePath string, content string, info os.FileInfo) string {
-	if strings.TrimSpace(content) != "" {
-		return contentHash(content)
+func fileContentHash(filePath string, info os.FileInfo) string {
+	file, err := os.Open(filePath)
+	if err == nil {
+		defer file.Close()
+		hash := sha256.New()
+		if _, copyErr := io.Copy(hash, file); copyErr == nil {
+			return hex.EncodeToString(hash.Sum(nil))
+		}
 	}
+	return fileMetadataHash(filePath, info)
+}
+
+func fileMetadataHash(filePath string, info os.FileInfo) string {
 	return contentHash(fmt.Sprintf("%s|%d|%d", filepath.ToSlash(filePath), info.Size(), info.ModTime().UnixNano()))
 }
 
 func saveKnowledgeParse(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, result knowledgeparse.Result, sourceHash string) uint64 {
-	outlineJSON := jsonText(result.Outline)
-	pagesJSON := jsonText(result.Pages)
-	assetsJSON := jsonText(result.Assets)
-	rawJSON := jsonText(result.Raw)
+	outlineJSON := jsonText(compactKnowledgeParseNodes(result.Outline))
+	pagesJSON := jsonText(compactKnowledgeParsePages(result.Pages))
+	assetsJSON := jsonText(compactKnowledgeParseAssets(result.Assets))
+	rawJSON := jsonText(compactKnowledgeParseRaw(result.Raw))
 	parserServiceID, provider := parseProviderMetadata(ctx, base, doc, result)
 	return util.ToUint64(agentmodel.NewKnowledgeParseModel().Insert(ctx, withCreatedAt(map[string]any{
 		"knowledge_base_id": base.ID,
@@ -256,9 +383,9 @@ func saveKnowledgeParse(ctx context.Context, base agentmodel.KnowledgeBase, doc 
 		"parser_service_id": parserServiceID,
 		"provider":          provider,
 		"source_hash":       sourceHash,
-		"parse_hash":        contentHash(result.PlainText + outlineJSON + pagesJSON + assetsJSON),
-		"plain_text":        result.PlainText,
-		"markdown":          result.Markdown,
+		"parse_hash":        contentHashParts(sourceHash, outlineJSON, pagesJSON, assetsJSON),
+		"plain_text":        representativeText(result.PlainText, maxStoredParseTextChars),
+		"markdown":          representativeText(result.Markdown, maxStoredParseTextChars),
 		"outline_json":      outlineJSON,
 		"pages_json":        pagesJSON,
 		"assets_json":       assetsJSON,
@@ -266,6 +393,107 @@ func saveKnowledgeParse(ctx context.Context, base agentmodel.KnowledgeBase, doc 
 		"status":            1,
 		"error_message":     "",
 	})))
+}
+
+type storedKnowledgeParseNode struct {
+	Type      string                     `json:"type,omitempty"`
+	Title     string                     `json:"title,omitempty"`
+	Level     int                        `json:"level,omitempty"`
+	PageStart int                        `json:"page_start,omitempty"`
+	PageEnd   int                        `json:"page_end,omitempty"`
+	LineStart int                        `json:"line_start,omitempty"`
+	LineEnd   int                        `json:"line_end,omitempty"`
+	Children  []storedKnowledgeParseNode `json:"children,omitempty"`
+}
+
+type storedKnowledgeParsePage struct {
+	Number int    `json:"number"`
+	Title  string `json:"title,omitempty"`
+}
+
+type storedKnowledgeParseAsset struct {
+	Name     string `json:"name,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Type     string `json:"type,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
+}
+
+func compactKnowledgeParseNodes(nodes []knowledgeparse.Node) []storedKnowledgeParseNode {
+	result := make([]storedKnowledgeParseNode, 0, len(nodes))
+	for _, node := range nodes {
+		result = append(result, storedKnowledgeParseNode{
+			Type:      strings.TrimSpace(node.Type),
+			Title:     strings.TrimSpace(node.Title),
+			Level:     node.Level,
+			PageStart: node.PageStart,
+			PageEnd:   node.PageEnd,
+			LineStart: node.LineStart,
+			LineEnd:   node.LineEnd,
+			Children:  compactKnowledgeParseNodes(node.Children),
+		})
+	}
+	return result
+}
+
+func compactKnowledgeParsePages(pages []knowledgeparse.Page) []storedKnowledgeParsePage {
+	result := make([]storedKnowledgeParsePage, 0, len(pages))
+	for _, page := range pages {
+		result = append(result, storedKnowledgeParsePage{
+			Number: page.Number,
+			Title:  strings.TrimSpace(page.Title),
+		})
+	}
+	return result
+}
+
+func compactKnowledgeParseAssets(assets []knowledgeparse.Asset) []storedKnowledgeParseAsset {
+	result := make([]storedKnowledgeParseAsset, 0, len(assets))
+	for _, asset := range assets {
+		result = append(result, storedKnowledgeParseAsset{
+			Name:     strings.TrimSpace(asset.Name),
+			Path:     strings.TrimSpace(asset.Path),
+			Type:     strings.TrimSpace(asset.Type),
+			MimeType: strings.TrimSpace(asset.MimeType),
+		})
+	}
+	return result
+}
+
+func compactKnowledgeParseRaw(raw map[string]any) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	result := make(map[string]any)
+	for _, key := range []string{
+		"parser", "batch_id", "file_name", "data_id", "full_zip_url",
+		"model_version", "markdown_file", "content_list_file", "content_list_count",
+	} {
+		if value := compactKnowledgeParseScalar(raw[key]); value != nil {
+			result[key] = value
+		}
+	}
+	if files, ok := raw["zip_files"].([]string); ok {
+		result["zip_file_count"] = len(files)
+		if len(files) > maxStoredParseListItems {
+			files = files[:maxStoredParseListItems]
+		}
+		result["zip_files"] = files
+	}
+	return result
+}
+
+func compactKnowledgeParseScalar(value any) any {
+	switch current := value.(type) {
+	case string:
+		if strings.TrimSpace(current) == "" {
+			return nil
+		}
+		return representativeText(current, 2048)
+	case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return current
+	default:
+		return nil
+	}
 }
 
 func parseProviderMetadata(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, result knowledgeparse.Result) (uint64, string) {
@@ -310,7 +538,7 @@ func saveDocumentVersionSnapshot(ctx context.Context, base agentmodel.KnowledgeB
 		"file_name":         doc.FileName,
 		"storage_path":      doc.StoragePath,
 		"mime_type":         doc.MimeType,
-		"content":           doc.Content,
+		"content":           representativeText(doc.Content, maxStoredDocumentTextChars),
 		"summary":           doc.Summary,
 		"keywords":          doc.Keywords,
 		"node_count":        doc.NodeCount,
@@ -321,22 +549,19 @@ func saveDocumentVersionSnapshot(ctx context.Context, base agentmodel.KnowledgeB
 	}))
 }
 
-func (s Service) clearDocumentIndex(ctx context.Context, base agentmodel.KnowledgeBase, docID uint64) {
-	clearKnowledgeDocumentIndexWithBase(ctx, base, docID)
-}
-
 func (s Service) saveDocumentNodes(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, parseID uint64, result knowledgeparse.Result) (int, error) {
 	dirPath := KnowledgeDirPath(ctx, doc.DirID)
 	docPath := strings.Trim(strings.Join(nonEmptyStrings(dirPath, doc.Title), "/"), "/")
 	docNodeID := insertKnowledgeNode(ctx, knowledgeNodeInput{
 		Base:      base,
 		Doc:       doc,
+		DirPath:   dirPath,
 		ParseID:   parseID,
 		ParentID:  0,
 		NodeType:  agentmodel.KnowledgeNodeTypeDoc,
 		Title:     doc.Title,
-		Content:   result.Markdown,
-		PlainText: result.PlainText,
+		Content:   representativeText(result.Markdown, maxDocumentRootTextChars),
+		PlainText: representativeText(result.PlainText, maxDocumentRootTextChars),
 		Path:      docPath,
 		NodeKey:   "doc",
 		Depth:     0,
@@ -346,19 +571,45 @@ func (s Service) saveDocumentNodes(ctx context.Context, base agentmodel.Knowledg
 		return 0, fmt.Errorf("创建文档节点失败")
 	}
 	conceptNodes := loadConceptNodeIDs(ctx, base.ID)
-	insertNodeMentionEdges(ctx, base, doc, docNodeID, result.PlainText, conceptNodes)
+	insertNodeMentionEdges(ctx, base, doc, docNodeID, representativeText(result.PlainText, maxDocumentRootTextChars), conceptNodes)
 	count := 1
 	for index, node := range result.Outline {
-		count += insertParseNodeTree(ctx, base, doc, parseID, docNodeID, docPath, node, 1, index+1, fmt.Sprintf("n%d", index+1), conceptNodes)
+		if err := ctx.Err(); err != nil {
+			return count, err
+		}
+		count += insertParseNodeTree(ctx, base, doc, dirPath, parseID, docNodeID, docPath, node, 1, index+1, fmt.Sprintf("n%d", index+1), conceptNodes)
 	}
-	count += insertParsePages(ctx, base, doc, parseID, docNodeID, docPath, result.Pages)
-	count += insertParseAssets(ctx, base, doc, parseID, docNodeID, docPath, result.Assets)
+	count += insertParsePages(ctx, base, doc, dirPath, parseID, docNodeID, docPath, result.Pages)
+	count += insertParseAssets(ctx, base, doc, dirPath, parseID, docNodeID, docPath, result.Assets)
+	expected := 1 + parseOutlineNodeCount(result.Outline) + indexableParsePageCount(result.Pages) + len(result.Assets)
+	if count != expected {
+		return count, fmt.Errorf("保存文档节点不完整: 已保存 %d/%d", count, expected)
+	}
 	return count, nil
+}
+
+func parseOutlineNodeCount(nodes []knowledgeparse.Node) int {
+	count := len(nodes)
+	for _, node := range nodes {
+		count += parseOutlineNodeCount(node.Children)
+	}
+	return count
+}
+
+func indexableParsePageCount(pages []knowledgeparse.Page) int {
+	count := 0
+	for _, page := range pages {
+		if strings.TrimSpace(firstNonEmpty(page.PlainText, page.Markdown)) != "" {
+			count++
+		}
+	}
+	return count
 }
 
 type knowledgeNodeInput struct {
 	Base      agentmodel.KnowledgeBase
 	Doc       agentmodel.KnowledgeDoc
+	DirPath   string
 	ParseID   uint64
 	ParentID  uint64
 	NodeType  string
@@ -430,7 +681,7 @@ func tableStructuredMetadata(content string) map[string]any {
 	}
 }
 
-func insertParseNodeTree(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, parseID uint64, parentID uint64, parentPath string, node knowledgeparse.Node, depth int, sortRank int, key string, conceptNodes map[string]uint64) int {
+func insertParseNodeTree(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, dirPath string, parseID uint64, parentID uint64, parentPath string, node knowledgeparse.Node, depth int, sortRank int, key string, conceptNodes map[string]uint64) int {
 	title := strings.TrimSpace(node.Title)
 	if title == "" {
 		title = defaultNodeTitle(node.Type, sortRank)
@@ -457,6 +708,7 @@ func insertParseNodeTree(ctx context.Context, base agentmodel.KnowledgeBase, doc
 	nodeID := insertKnowledgeNode(ctx, knowledgeNodeInput{
 		Base:      base,
 		Doc:       doc,
+		DirPath:   dirPath,
 		ParseID:   parseID,
 		ParentID:  parentID,
 		NodeType:  normalizeParseNodeType(node.Type),
@@ -481,15 +733,15 @@ func insertParseNodeTree(ctx context.Context, base agentmodel.KnowledgeBase, doc
 	insertNodeMentionEdges(ctx, base, doc, nodeID, plainText, conceptNodes)
 	count := 1
 	for index, child := range node.Children {
-		count += insertParseNodeTree(ctx, base, doc, parseID, nodeID, nodePath, child, depth+1, index+1, fmt.Sprintf("%s.%d", key, index+1), conceptNodes)
+		count += insertParseNodeTree(ctx, base, doc, dirPath, parseID, nodeID, nodePath, child, depth+1, index+1, fmt.Sprintf("%s.%d", key, index+1), conceptNodes)
 	}
 	return count
 }
 
-func insertParsePages(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, parseID uint64, parentID uint64, parentPath string, pages []knowledgeparse.Page) int {
+func insertParsePages(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, dirPath string, parseID uint64, parentID uint64, parentPath string, pages []knowledgeparse.Page) int {
 	count := 0
 	for index, page := range pages {
-		text := strings.TrimSpace(firstNonEmpty(page.PlainText, page.Markdown))
+		text := representativeText(firstNonEmpty(page.PlainText, page.Markdown), maxDocumentRootTextChars)
 		if text == "" {
 			continue
 		}
@@ -500,11 +752,12 @@ func insertParsePages(ctx context.Context, base agentmodel.KnowledgeBase, doc ag
 		nodeID := insertKnowledgeNode(ctx, knowledgeNodeInput{
 			Base:      base,
 			Doc:       doc,
+			DirPath:   dirPath,
 			ParseID:   parseID,
 			ParentID:  parentID,
 			NodeType:  agentmodel.KnowledgeNodeTypePage,
 			Title:     title,
-			Content:   strings.TrimSpace(page.Markdown),
+			Content:   representativeText(page.Markdown, maxDocumentRootTextChars),
 			PlainText: text,
 			Path:      strings.Trim(strings.Join(nonEmptyStrings(parentPath, title), "/"), "/"),
 			NodeKey:   fmt.Sprintf("page:%d", firstPositive(page.Number, index+1)),
@@ -523,7 +776,7 @@ func insertParsePages(ctx context.Context, base agentmodel.KnowledgeBase, doc ag
 	return count
 }
 
-func insertParseAssets(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, parseID uint64, parentID uint64, parentPath string, assets []knowledgeparse.Asset) int {
+func insertParseAssets(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, dirPath string, parseID uint64, parentID uint64, parentPath string, assets []knowledgeparse.Asset) int {
 	count := 0
 	for index, asset := range assets {
 		title := strings.TrimSpace(firstNonEmpty(asset.Name, asset.Path, fmt.Sprintf("资源 %d", index+1)))
@@ -535,6 +788,7 @@ func insertParseAssets(ctx context.Context, base agentmodel.KnowledgeBase, doc a
 		nodeID := insertKnowledgeNode(ctx, knowledgeNodeInput{
 			Base:      base,
 			Doc:       doc,
+			DirPath:   dirPath,
 			ParseID:   parseID,
 			ParentID:  parentID,
 			NodeType:  nodeType,
@@ -585,7 +839,11 @@ func insertKnowledgeNode(ctx context.Context, input knowledgeNodeInput) uint64 {
 	if summary == "" {
 		summary = truncateText(firstNonEmpty(plainText, content, input.Title), 600)
 	}
-	searchText := searchableNodeText(KnowledgeDirPath(ctx, input.Doc.DirID), input.Doc.Title, input.Path, input.Title, summary, plainText)
+	dirPath := strings.TrimSpace(input.DirPath)
+	if dirPath == "" && input.Doc.DirID > 0 {
+		dirPath = KnowledgeDirPath(ctx, input.Doc.DirID)
+	}
+	searchText := searchableNodeText(dirPath, input.Doc.Title, input.Path, input.Title, summary, plainText)
 	return util.ToUint64(agentmodel.NewKnowledgeNodeModel().Insert(ctx, withCreatedAt(map[string]any{
 		"knowledge_base_id": input.Base.ID,
 		"dir_id":            input.Doc.DirID,
@@ -687,32 +945,60 @@ func searchableNodeText(dirPath string, docTitle string, path string, title stri
 }
 
 func documentSummaryFromNodes(ctx context.Context, docID uint64) string {
-	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
+	const (
+		summaryNodeSampleLimit = 80
+		summaryNodePageSize    = 250
+	)
+	total := countInt(agentmodel.NewKnowledgeNodeModel().Count(ctx, map[string]any{
 		"doc_id": docID,
 		"status": 1,
-	}, map[string]any{
-		"field":    "main.title, main.summary, main.plain_text, main.node_type, main.depth, main.sort",
-		"order":    "main.depth asc, main.sort asc, main.id asc",
-		"page":     1,
-		"pageSize": 40,
-	})
-	parts := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if row == nil || row.NodeType == agentmodel.KnowledgeNodeTypeDoc {
-			continue
+	}))
+	stride := 1
+	if total > summaryNodeSampleLimit {
+		stride = (total + summaryNodeSampleLimit - 1) / summaryNodeSampleLimit
+	}
+	parts := make([]string, 0, summaryNodeSampleLimit)
+	ordinal := 0
+	var afterID uint64
+	for len(parts) < summaryNodeSampleLimit {
+		filters := map[string]any{"doc_id": docID, "status": 1}
+		if afterID > 0 {
+			filters["id"] = map[string]any{"gt": afterID}
 		}
-		text := strings.TrimSpace(row.Summary)
-		if text == "" {
-			text = truncateText(strings.TrimSpace(row.PlainText), 180)
+		rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, filters, map[string]any{
+			"field":    "main.id, main.title, main.summary, main.plain_text, main.node_type",
+			"order":    "main.id asc",
+			"page":     1,
+			"pageSize": summaryNodePageSize,
+		})
+		if len(rows) == 0 {
+			break
 		}
-		if text == "" {
-			continue
+		afterID = rows[len(rows)-1].ID
+		for _, row := range rows {
+			currentOrdinal := ordinal
+			ordinal++
+			if row == nil || row.NodeType == agentmodel.KnowledgeNodeTypeDoc || currentOrdinal%stride != 0 {
+				continue
+			}
+			text := strings.TrimSpace(row.Summary)
+			if text == "" {
+				text = truncateText(strings.TrimSpace(row.PlainText), 180)
+			}
+			if text == "" {
+				continue
+			}
+			if title := strings.TrimSpace(row.Title); title != "" {
+				text = title + "： " + text
+			}
+			parts = append(parts, text)
+			if len(parts) >= summaryNodeSampleLimit {
+				break
+			}
 		}
-		title := strings.TrimSpace(row.Title)
-		if title != "" {
-			text = title + "： " + text
+		if len(rows) < summaryNodePageSize {
+			break
 		}
-		parts = append(parts, text)
 	}
 	return strings.Join(parts, "\n")
 }
@@ -726,31 +1012,38 @@ func (s Service) RebuildBase(ctx context.Context, baseID uint64) (IndexResult, e
 		"index_status":  agentmodel.KnowledgeIndexStatusRunning,
 		"error_message": "",
 	})
-	clearKnowledgeBaseIndex(ctx, *base)
-	docs := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
+	docCount := countInt(agentmodel.NewKnowledgeDocModel().Count(ctx, map[string]any{
 		"knowledge_base_id": baseID,
 		"status":            1,
-	}, map[string]any{
-		"order": "main.storage_path asc, main.id asc",
-	})
-	if len(docs) == 0 {
+	}))
+	if docCount == 0 {
 		s.refreshBaseStats(ctx, baseID, agentmodel.KnowledgeIndexStatusSuccess, "")
 		now := time.Now()
 		return IndexResult{BaseID: baseID, StartedAt: now, FinishedAt: now}, nil
 	}
 	total := IndexResult{BaseID: baseID, StartedAt: time.Now()}
-	for _, doc := range docs {
-		if doc == nil {
-			continue
+	var afterID uint64
+	for {
+		docs := knowledgeDocIndexPage(ctx, baseID, afterID)
+		if len(docs) == 0 {
+			break
 		}
-		result, err := s.IndexDocument(ctx, doc.ID)
-		total.NodeCount += result.NodeCount
-		total.Indexed += result.Indexed
-		total.Failed += result.Failed
-		if err != nil && total.Error == "" {
-			total.Error = err.Error()
+		afterID = docs[len(docs)-1].ID
+		if err := s.runBatchReindexWorkers(ctx, docs); err != nil {
+			total.Error = appendIndexWarning(total.Error, err.Error())
+		}
+		if ctx.Err() != nil || len(docs) < maxBatchReindex {
+			break
 		}
 	}
+	if ctx.Err() == nil && isConceptGraphEnabled(base.ConceptGraphEnabled) && base.IndexPowerID > 0 {
+		s.autoDiscoverRelations(ctx, *base)
+	}
+	docStatus := knowledgeDocStatusCounts(ctx, baseID)
+	nodeStatus := knowledgeNodeStatusCounts(ctx, baseID)
+	total.NodeCount = nodeStatus.Total
+	total.Indexed = nodeStatus.Success
+	total.Failed = docStatus.Failed
 	total.FinishedAt = time.Now()
 	s.refreshDirectorySummaries(ctx, baseID, 0)
 	s.refreshBaseStats(ctx, baseID, finalBaseIndexStatus(ctx, baseID, total.Error), total.Error)
@@ -760,16 +1053,64 @@ func (s Service) RebuildBase(ctx context.Context, baseID uint64) (IndexResult, e
 	return total, nil
 }
 
-func (s Service) markDocFailed(ctx context.Context, docID uint64, baseID uint64, err error) {
+func knowledgeDocIndexPage(ctx context.Context, baseID uint64, afterID uint64) []*agentmodel.KnowledgeDoc {
+	filters := map[string]any{
+		"knowledge_base_id": baseID,
+		"status":            1,
+	}
+	if afterID > 0 {
+		filters["id"] = map[string]any{"gt": afterID}
+	}
+	return agentmodel.NewKnowledgeDocModel().Select(ctx, filters, map[string]any{
+		"field":    "main.id, main.size",
+		"order":    "main.id asc",
+		"page":     1,
+		"pageSize": maxBatchReindex,
+	})
+}
+
+func (s Service) markDocFailed(ctx context.Context, docID uint64, indexVersion int, baseID uint64, err error) {
 	message := ""
 	if err != nil {
 		message = err.Error()
 	}
-	agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": docID}, map[string]any{
+	updated := agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{
+		"id":            docID,
+		"index_version": indexVersion,
+		"index_status":  agentmodel.KnowledgeIndexStatusRunning,
+	}, map[string]any{
 		"index_status":  agentmodel.KnowledgeIndexStatusFailed,
 		"error_message": message,
 	})
-	s.refreshBaseStats(ctx, baseID, agentmodel.KnowledgeIndexStatusFailed, message)
+	if updated > 0 {
+		s.refreshBaseStats(ctx, baseID, agentmodel.KnowledgeIndexStatusFailed, message)
+	}
+}
+
+func (s Service) markDocReindexFailed(ctx context.Context, previous agentmodel.KnowledgeDoc, indexVersion int, baseID uint64, err error) {
+	if previous.NodeCount <= 0 {
+		s.markDocFailed(ctx, previous.ID, indexVersion, baseID, err)
+		return
+	}
+	message := "重索引失败，继续使用上一次成功索引"
+	if err != nil && strings.TrimSpace(err.Error()) != "" {
+		message += ": " + strings.TrimSpace(err.Error())
+	}
+	updated := agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{
+		"id":            previous.ID,
+		"index_version": indexVersion,
+		"index_status":  agentmodel.KnowledgeIndexStatusRunning,
+	}, map[string]any{
+		"index_version":      previous.IndexVersion,
+		"index_status":       agentmodel.KnowledgeIndexStatusSuccess,
+		"index_stage":        previous.IndexStage,
+		"index_stage_detail": previous.IndexStageDetail,
+		"error_message":      message,
+		"node_count":         previous.NodeCount,
+	})
+	if updated > 0 {
+		s.refreshBaseStats(ctx, baseID, agentmodel.KnowledgeIndexStatusSuccess, message)
+	}
 }
 
 func (s Service) RefluxQA(ctx context.Context, baseID uint64, dirID uint64, query string, answer string, sourceNodeIDs []uint64) (uint64, uint64, error) {
@@ -782,90 +1123,115 @@ func (s Service) RefluxQA(ctx context.Context, baseID uint64, dirID uint64, quer
 	if base == nil {
 		return 0, 0, fmt.Errorf("知识库不存在或已停用")
 	}
+	if dirID > 0 && agentmodel.NewKnowledgeDirModel().Find(ctx, map[string]any{
+		"id":                dirID,
+		"knowledge_base_id": baseID,
+		"status":            1,
+	}) == nil {
+		return 0, 0, fmt.Errorf("知识目录不存在或不属于当前知识库")
+	}
 	qaHash := refluxQAContentHash(query, answer)
 	if existingDoc := findExistingRefluxQADoc(ctx, baseID, qaHash); existingDoc != nil {
 		return existingDoc.ID, refluxQANodeID(ctx, existingDoc.ID), nil
 	}
 
-	// 1. Insert doc (source_type=qa, index_status=success to skip pipeline)
 	summary := truncateText(answer, 200)
 	title := uniqueRefluxQATitle(ctx, baseID, dirID, query, qaHash)
-	docID := util.ToUint64(agentmodel.NewKnowledgeDocModel().Insert(ctx, withCreatedAt(map[string]any{
-		"knowledge_base_id": baseID,
-		"dir_id":            dirID,
-		"title":             title,
-		"file_name":         "",
-		"storage_path":      "",
-		"mime_type":         "text/plain",
-		"size":              int64(len(answer)),
-		"content":           answer,
-		"summary":           summary,
-		"keywords":          keywordText(query + " " + answer),
-		"content_hash":      qaHash,
-		"node_count":        1,
-		"index_status":      agentmodel.KnowledgeIndexStatusSuccess,
-		"index_stage":       agentmodel.KnowledgeIndexStageComplete,
-		"source_type":       "qa",
-		"review_status":     agentmodel.KnowledgeReviewStatusPending,
-		"status":            1,
-	})))
-	if docID == 0 {
-		return 0, 0, fmt.Errorf("创建 QA 文档失败")
-	}
-
-	// 2. Insert node (node_type=qa)
-	nodeID := insertKnowledgeNode(ctx, knowledgeNodeInput{
-		Base:      *base,
-		Doc:       agentmodel.KnowledgeDoc{ID: docID, DirID: dirID, KnowledgeBaseID: baseID, Title: title},
-		ParseID:   0,
-		ParentID:  0,
-		NodeType:  agentmodel.KnowledgeNodeTypeQA,
-		Title:     query,
-		Content:   answer,
-		PlainText: answer,
-		Summary:   summary,
-		Path:      query,
-		NodeKey:   fmt.Sprintf("qa:%d", docID),
-		Depth:     0,
-		Sort:      100,
-	})
-	if nodeID == 0 {
-		return 0, 0, fmt.Errorf("创建 QA 节点失败")
-	}
-
-	// 3. Insert reference edges: qa node → source nodes
-	for _, sourceNodeID := range sourceNodeIDs {
-		if sourceNodeID == 0 {
-			continue
+	var docID uint64
+	var nodeID uint64
+	err := orm.Transaction(ctx, func(txCtx context.Context) error {
+		docID = util.ToUint64(agentmodel.NewKnowledgeDocModel().Insert(txCtx, withCreatedAt(map[string]any{
+			"knowledge_base_id": baseID,
+			"dir_id":            dirID,
+			"title":             title,
+			"file_name":         "",
+			"storage_path":      "",
+			"mime_type":         "text/plain",
+			"size":              int64(len(answer)),
+			"content":           answer,
+			"summary":           summary,
+			"keywords":          keywordText(query + " " + answer),
+			"content_hash":      qaHash,
+			"node_count":        1,
+			"index_status":      agentmodel.KnowledgeIndexStatusRunning,
+			"index_stage":       agentmodel.KnowledgeIndexStageVector,
+			"index_version":     1,
+			"source_type":       "qa",
+			"review_status":     agentmodel.KnowledgeReviewStatusPending,
+			"status":            1,
+		})))
+		if docID == 0 {
+			return fmt.Errorf("创建 QA 文档失败")
 		}
-		sourceNode := agentmodel.NewKnowledgeNodeModel().Find(ctx, map[string]any{"id": sourceNodeID, "status": 1})
-		if sourceNode == nil {
-			continue
-		}
-		insertKnowledgeEdge(ctx, knowledgeEdgeInput{
-			BaseID:     baseID,
-			DocID:      docID,
-			FromNodeID: nodeID,
-			ToNodeID:   sourceNodeID,
-			EdgeType:   agentmodel.KnowledgeEdgeTypeReferences,
-			Label:      "QA 引用",
-			Summary:    fmt.Sprintf("问题「%s」引用了知识节点", truncateText(query, 120)),
-			Evidence:   truncateText(answer, 500),
-			Weight:     0.8,
-			Confidence: 0.9,
-			Metadata: map[string]any{
-				"source": "qa_reflux",
-				"query":  query,
-			},
+		nodeID = insertKnowledgeNode(txCtx, knowledgeNodeInput{
+			Base:      *base,
+			Doc:       agentmodel.KnowledgeDoc{ID: docID, DirID: dirID, KnowledgeBaseID: baseID, Title: title},
+			ParseID:   0,
+			ParentID:  0,
+			NodeType:  agentmodel.KnowledgeNodeTypeQA,
+			Title:     query,
+			Content:   answer,
+			PlainText: answer,
+			Summary:   summary,
+			Path:      query,
+			NodeKey:   fmt.Sprintf("qa:%d", docID),
+			Depth:     0,
+			Sort:      100,
 		})
+		if nodeID == 0 {
+			return fmt.Errorf("创建 QA 节点失败")
+		}
+		for _, sourceNodeID := range uniqueUint64s(sourceNodeIDs, 0) {
+			sourceNode := agentmodel.NewKnowledgeNodeModel().Find(txCtx, map[string]any{
+				"id":                sourceNodeID,
+				"knowledge_base_id": baseID,
+				"status":            1,
+			})
+			if sourceNode == nil {
+				continue
+			}
+			if insertKnowledgeEdge(txCtx, knowledgeEdgeInput{
+				BaseID:     baseID,
+				DocID:      docID,
+				FromNodeID: nodeID,
+				ToNodeID:   sourceNodeID,
+				EdgeType:   agentmodel.KnowledgeEdgeTypeReferences,
+				Label:      "QA 引用",
+				Summary:    fmt.Sprintf("问题「%s」引用了知识节点", truncateText(query, 120)),
+				Evidence:   truncateText(answer, 500),
+				Weight:     0.8,
+				Confidence: 0.9,
+				Metadata: map[string]any{
+					"source": "qa_reflux",
+					"query":  query,
+				},
+			}) == 0 {
+				return fmt.Errorf("创建 QA 引用关系失败")
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, 0, err
 	}
 
-	// 4. Refresh directory summary and base stats
 	if dirID > 0 {
 		s.refreshDirectorySummaries(ctx, baseID, dirID)
 	}
-	_ = s.indexDocumentVectors(ctx, *base, docID)
-	s.refreshBaseStats(ctx, baseID, agentmodel.KnowledgeIndexStatusSuccess, "")
+	vectorWarning := ""
+	if err := s.indexDocumentVectors(ctx, *base, docID, 1); err != nil {
+		vectorWarning = "向量索引失败: " + err.Error()
+	}
+	agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{
+		"id":            docID,
+		"index_version": 1,
+		"index_status":  agentmodel.KnowledgeIndexStatusRunning,
+	}, map[string]any{
+		"index_status":  agentmodel.KnowledgeIndexStatusSuccess,
+		"index_stage":   agentmodel.KnowledgeIndexStageComplete,
+		"error_message": vectorWarning,
+	})
+	s.refreshBaseStats(ctx, baseID, agentmodel.KnowledgeIndexStatusSuccess, vectorWarning)
 	return docID, nodeID, nil
 }
 
@@ -936,6 +1302,11 @@ func refluxQANodeID(ctx context.Context, docID uint64) uint64 {
 }
 
 func (s Service) refreshBaseStats(ctx context.Context, baseID uint64, status string, message string) {
+	values := knowledgeBaseStatsValues(ctx, baseID, status, message, true)
+	agentmodel.NewKnowledgeBaseModel().Update(ctx, map[string]any{"id": baseID}, values)
+}
+
+func knowledgeBaseStatsValues(ctx context.Context, baseID uint64, status string, message string, respectLease bool) map[string]any {
 	docCount := agentmodel.NewKnowledgeDocModel().Count(ctx, map[string]any{
 		"knowledge_base_id": baseID,
 		"status":            1,
@@ -944,25 +1315,38 @@ func (s Service) refreshBaseStats(ctx context.Context, baseID uint64, status str
 		"knowledge_base_id": baseID,
 		"status":            1,
 	})
-	if hasRunningKnowledgeDocs(ctx, baseID) {
+	if hasRunningKnowledgeDocs(ctx, baseID) || (respectLease && activeKnowledgeIndexLease(ctx, baseID)) {
 		status = agentmodel.KnowledgeIndexStatusRunning
 		message = ""
 	} else if hasFailedKnowledgeDocs(ctx, baseID) {
 		status = agentmodel.KnowledgeIndexStatusFailed
+	} else if hasPendingKnowledgeDocs(ctx, baseID) {
+		status = agentmodel.KnowledgeIndexStatusPending
 	}
-	agentmodel.NewKnowledgeBaseModel().Update(ctx, map[string]any{"id": baseID}, map[string]any{
+	return map[string]any{
 		"doc_count":     docCount,
 		"node_count":    nodeCount,
 		"index_status":  normalizeIndexStatus(status),
 		"error_message": strings.TrimSpace(message),
-	})
+	}
 }
 
 func finalBaseIndexStatus(ctx context.Context, baseID uint64, message string) string {
 	if strings.TrimSpace(message) != "" || hasFailedKnowledgeDocs(ctx, baseID) {
 		return agentmodel.KnowledgeIndexStatusFailed
 	}
+	if hasPendingKnowledgeDocs(ctx, baseID) {
+		return agentmodel.KnowledgeIndexStatusPending
+	}
 	return agentmodel.KnowledgeIndexStatusSuccess
+}
+
+func hasPendingKnowledgeDocs(ctx context.Context, baseID uint64) bool {
+	return agentmodel.NewKnowledgeDocModel().Count(ctx, map[string]any{
+		"knowledge_base_id": baseID,
+		"status":            1,
+		"index_status":      agentmodel.KnowledgeIndexStatusPending,
+	}) > 0
 }
 
 func hasRunningKnowledgeDocs(ctx context.Context, baseID uint64) bool {
@@ -1153,7 +1537,6 @@ func (s Service) DebugRetrieve(ctx context.Context, req RetrieveDebugRequest) (R
 		return RetrieveDebugResult{}, err
 	}
 	result := s.retrieveAgenticBinding(ctx, binding, query)
-	result.Snippets = filterUnavailableDocSnippets(ctx, result.Snippets)
 	if req.Limit > 0 && len(result.Snippets) > req.Limit {
 		result.Snippets = result.Snippets[:req.Limit]
 	}
@@ -1206,6 +1589,7 @@ func knowledgeBaseDebugBinding(base agentmodel.KnowledgeBase) agentKnowledgeBind
 			Collection:       baseCollection(base),
 			EmbeddingPowerID: base.EmbeddingPowerID,
 			ConceptGraphMode: base.ConceptGraphEnabled,
+			ReviewRequired:   base.ReviewRequired,
 			RetrieveLimit:    normalizeRetrieveLimit(base.RetrieveLimit),
 			ScoreThreshold:   normalizeScoreThreshold(base.ScoreThreshold),
 			MaxContextChars:  normalizeMaxContextChars(base.MaxContextChars),
@@ -1255,23 +1639,18 @@ func hasPlanListValue(value any) bool {
 
 func (s Service) retrieveAgenticBinding(ctx context.Context, binding agentKnowledgeBinding, query string) RetrieveResult {
 	advanced := isConceptGraphEnabled(binding.Base.ConceptGraphMode)
-	var rewrittenQueries []string
 	var plannerPlan retrievalPlan
 	var graphPlan retrievalPlan
+	snippets := s.retrieveBroadBinding(ctx, binding, query)
 	if advanced {
-		rewrittenQueries = s.queryRewrite(ctx, binding, query)
-		plannerPlan = s.planRetrieval(ctx, binding, query)
 		graphPlan = retrievalGraphPlan(ctx, binding, query)
+		if needsRetrievalPlan(binding, snippets) && len(graphPlan.Queries) == 0 && len(graphPlan.DocIDs) == 0 {
+			plannerPlan = s.planRetrieval(ctx, binding, query)
+		}
 	}
 	plan := mergeRetrievalPlans(plannerPlan, graphPlan)
 	dirs := retrievalCandidateDirs(ctx, binding, query, plan)
 	dirIDs := candidateDirIDs(dirs)
-	snippets := s.retrieveBroadBinding(ctx, binding, query)
-	for _, rq := range rewrittenQueries {
-		if strings.TrimSpace(rq) != "" && !strings.EqualFold(strings.TrimSpace(rq), strings.TrimSpace(query)) {
-			snippets = append(snippets, s.retrieveKeywordBinding(ctx, binding, rq)...)
-		}
-	}
 	if advanced {
 		plannedSnippets := s.retrievePlannedBinding(ctx, binding, query, plan, dirIDs)
 		docSnippets := retrievePlanDocNodes(ctx, binding, plan.DocIDs, query)
@@ -1279,7 +1658,8 @@ func (s Service) retrieveAgenticBinding(ctx context.Context, binding agentKnowle
 		snippets = append(snippets, docSnippets...)
 	}
 	snippets = rrfScoreSnippets(snippets)
-	snippets = rankKnowledgeSnippets(ctx, mergeKnowledgeSnippets(snippets), query, dirs, binding.BaseID)
+	snippets = filterUnavailableDocSnippets(ctx, mergeKnowledgeSnippets(snippets))
+	snippets = rankKnowledgeSnippets(ctx, snippets, query, dirs, binding.BaseID)
 	return RetrieveResult{
 		Snippets: snippets,
 		Matches:  retrievalMatches(binding, query, plan, plannerPlan, graphPlan, dirIDs, snippets),
@@ -1355,6 +1735,8 @@ func retrievePlanDocNodes(ctx context.Context, binding agentKnowledgeBinding, do
 		"page":     1,
 		"pageSize": keywordCandidateLimit(limit, true, query),
 	})
+	rows = filterAvailableKnowledgeNodes(ctx, rows)
+	dirPaths := knowledgeDirPaths(ctx, binding.BaseID, knowledgeNodeDirIDs(rows))
 	snippets := make([]RetrievedSnippet, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
@@ -1369,7 +1751,7 @@ func retrievePlanDocNodes(ctx context.Context, binding agentKnowledgeBinding, do
 			BaseName: binding.Base.Name,
 			Prompt:   binding.Prompt,
 			DirID:    row.DirID,
-			DirPath:  KnowledgeDirPath(ctx, row.DirID),
+			DirPath:  dirPaths[row.DirID],
 			DocID:    row.DocID,
 			NodeID:   row.ID,
 			Title:    strings.TrimSpace(firstNonEmpty(row.Path, row.Title)),
@@ -1418,55 +1800,13 @@ func (s Service) KnowledgeBasesByCate(ctx context.Context, cateID uint64) []Know
 	result := make([]KnowledgeBaseRuntime, 0, len(bindings))
 	for _, binding := range bindings {
 		result = append(result, KnowledgeBaseRuntime{
-			ID:     binding.BaseID,
-			Name:   binding.Base.Name,
-			Prompt: binding.Prompt,
+			ID:              binding.BaseID,
+			Name:            binding.Base.Name,
+			Prompt:          binding.Prompt,
+			MaxContextChars: binding.Base.MaxContextChars,
 		})
 	}
 	return result
-}
-
-func (s Service) retrieveKeywordBinding(ctx context.Context, binding agentKnowledgeBinding, query string, dirIDs ...uint64) []RetrievedSnippet {
-	limit := binding.RetrieveLimit
-	if limit <= 0 {
-		limit = binding.Base.RetrieveLimit
-	}
-	if limit <= 0 {
-		limit = defaultRetrieveLimit
-	}
-	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, keywordNodeFilters(binding.BaseID, query, dirIDs...), map[string]any{
-		"field":    "main.id, main.dir_id, main.doc_id, main.title, main.content, main.plain_text, main.search_text, main.keywords, main.path, main.sort, main.node_type, main.hit_count, main.weight",
-		"order":    "main.depth asc, main.sort asc, main.id asc",
-		"page":     1,
-		"pageSize": keywordCandidateLimit(limit, len(dirIDs) > 0, query),
-	})
-	snippets := make([]RetrievedSnippet, 0, len(rows))
-	for _, row := range rows {
-		if row == nil {
-			continue
-		}
-		content := strings.TrimSpace(firstNonEmpty(row.PlainText, row.Content, row.Summary))
-		if content == "" {
-			continue
-		}
-		snippets = append(snippets, RetrievedSnippet{
-			BaseID:   binding.BaseID,
-			BaseName: binding.Base.Name,
-			Prompt:   binding.Prompt,
-			DirID:    row.DirID,
-			DirPath:  KnowledgeDirPath(ctx, row.DirID),
-			DocID:    row.DocID,
-			NodeID:   row.ID,
-			Title:    strings.TrimSpace(firstNonEmpty(row.Path, row.Title)),
-			Content:  content,
-			Score:    keywordNodeScore(row, query),
-			Source:   "node",
-			SortRank: row.Sort,
-			HitCount: row.HitCount,
-			Weight:   row.Weight,
-		})
-	}
-	return rankKnowledgeSnippets(ctx, mergeKnowledgeSnippets(snippets), query, nil, binding.BaseID)
 }
 
 func (s Service) activeBindings(ctx context.Context, cateID uint64) []agentKnowledgeBinding {
@@ -1503,6 +1843,8 @@ func (s Service) SetDocExpiration(ctx context.Context, docID uint64, expiresAt *
 	if agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": docID}, updates) == 0 {
 		return fmt.Errorf("设置过期时间失败")
 	}
+	resetLegacyExpiredReviewStatus(ctx, []uint64{docID})
+	s.refreshDocumentDirectorySummaries(ctx, []uint64{docID})
 	return nil
 }
 
@@ -1519,7 +1861,24 @@ func (s Service) BatchSetDocExpiration(ctx context.Context, docIDs []uint64, exp
 	if agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": docIDs}, updates) == 0 {
 		return fmt.Errorf("批量设置过期时间失败")
 	}
+	resetLegacyExpiredReviewStatus(ctx, docIDs)
+	s.refreshDocumentDirectorySummaries(ctx, docIDs)
 	return nil
+}
+
+func resetLegacyExpiredReviewStatus(ctx context.Context, docIDs []uint64) {
+	docIDs = uniqueUint64s(docIDs, 0)
+	if len(docIDs) == 0 {
+		return
+	}
+	agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{
+		"id":            docIDs,
+		"review_status": agentmodel.KnowledgeReviewStatusExpired,
+	}, map[string]any{
+		"review_status": agentmodel.KnowledgeReviewStatusPending,
+		"reviewed_at":   nil,
+		"reviewer_id":   uint64(0),
+	})
 }
 
 func (s Service) ReviewDoc(ctx context.Context, docID uint64, status string, reviewerID uint64) error {
@@ -1527,21 +1886,14 @@ func (s Service) ReviewDoc(ctx context.Context, docID uint64, status string, rev
 	if doc == nil {
 		return fmt.Errorf("知识文档不存在")
 	}
-	switch status {
-	case agentmodel.KnowledgeReviewStatusApproved,
-		agentmodel.KnowledgeReviewStatusRejected,
-		agentmodel.KnowledgeReviewStatusPending:
-	default:
-		return fmt.Errorf("无效的审核状态: %s", status)
-	}
-	updates := map[string]any{
-		"review_status": status,
-		"reviewed_at":   time.Now(),
-		"reviewer_id":   reviewerID,
+	updates, err := knowledgeReviewUpdates(status, reviewerID)
+	if err != nil {
+		return err
 	}
 	if agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": docID}, updates) == 0 {
 		return fmt.Errorf("审核文档失败")
 	}
+	s.refreshDocumentDirectorySummaries(ctx, []uint64{docID})
 	return nil
 }
 
@@ -1549,60 +1901,123 @@ func (s Service) BatchReviewDocs(ctx context.Context, docIDs []uint64, status st
 	if len(docIDs) == 0 {
 		return nil
 	}
-	switch status {
-	case agentmodel.KnowledgeReviewStatusApproved,
-		agentmodel.KnowledgeReviewStatusRejected,
-		agentmodel.KnowledgeReviewStatusPending:
-	default:
-		return fmt.Errorf("无效的审核状态: %s", status)
-	}
-	updates := map[string]any{
-		"review_status": status,
-		"reviewed_at":   time.Now(),
-		"reviewer_id":   reviewerID,
+	updates, err := knowledgeReviewUpdates(status, reviewerID)
+	if err != nil {
+		return err
 	}
 	if agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": docIDs}, updates) == 0 {
 		return fmt.Errorf("批量审核文档失败")
 	}
+	s.refreshDocumentDirectorySummaries(ctx, docIDs)
 	return nil
 }
 
+func knowledgeReviewUpdates(status string, reviewerID uint64) (map[string]any, error) {
+	status = strings.TrimSpace(status)
+	if status == agentmodel.KnowledgeReviewStatusPending {
+		return map[string]any{
+			"review_status": status,
+			"reviewed_at":   nil,
+			"reviewer_id":   uint64(0),
+		}, nil
+	}
+	if status != agentmodel.KnowledgeReviewStatusApproved && status != agentmodel.KnowledgeReviewStatusRejected {
+		return nil, fmt.Errorf("无效的审核状态: %s", status)
+	}
+	if reviewerID == 0 {
+		return nil, fmt.Errorf("审核人不能为空")
+	}
+	return map[string]any{
+		"review_status": status,
+		"reviewed_at":   time.Now(),
+		"reviewer_id":   reviewerID,
+	}, nil
+}
+
 func (s Service) ListExpiredDocs(ctx context.Context, baseID uint64, page int, pageSize int) ([]*agentmodel.KnowledgeDoc, int, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	now := time.Now()
 	cond := map[string]any{
 		"knowledge_base_id": baseID,
 		"status":            1,
+		"or": []any{
+			map[string]any{"expires_at": map[string]any{"lt": now}},
+			map[string]any{"review_status": agentmodel.KnowledgeReviewStatusExpired},
+		},
 	}
-	rows := agentmodel.NewKnowledgeDocModel().Select(ctx, cond, map[string]any{
+	model := agentmodel.NewKnowledgeDocModel()
+	rows := model.Select(ctx, cond, map[string]any{
 		"field":    "main.id, main.title, main.expires_at, main.review_status, main.reviewed_at",
 		"page":     page,
 		"pageSize": pageSize,
 		"order":    "main.expires_at asc",
 	})
-	all := make([]*agentmodel.KnowledgeDoc, 0, len(rows))
-	for _, r := range rows {
-		if r != nil && (r.ExpiresAt != nil && r.ExpiresAt.Before(time.Now())) {
-			all = append(all, r)
-		}
+	return rows, countInt(model.Count(ctx, cond)), nil
+}
+
+func (s Service) ListReviewDocs(ctx context.Context, baseID uint64, status string, page int, pageSize int) ([]*agentmodel.KnowledgeDoc, int, error) {
+	if baseID == 0 {
+		return nil, 0, fmt.Errorf("知识库不能为空")
 	}
-	total := len(rows)
-	statusRows := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
+	status = strings.TrimSpace(status)
+	if status == "" {
+		status = agentmodel.KnowledgeReviewStatusPending
+	}
+	switch status {
+	case agentmodel.KnowledgeReviewStatusPending,
+		agentmodel.KnowledgeReviewStatusApproved,
+		agentmodel.KnowledgeReviewStatusRejected,
+		agentmodel.KnowledgeReviewStatusExpired:
+	default:
+		return nil, 0, fmt.Errorf("无效的审核状态: %s", status)
+	}
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	cond := map[string]any{
 		"knowledge_base_id": baseID,
 		"status":            1,
-		"review_status":     []string{agentmodel.KnowledgeReviewStatusExpired, agentmodel.KnowledgeReviewStatusRejected},
-	})
-	seen := make(map[uint64]struct{})
-	for _, r := range rows {
-		if r != nil {
-			seen[r.ID] = struct{}{}
+	}
+	now := time.Now()
+	if status == agentmodel.KnowledgeReviewStatusExpired {
+		cond["or"] = []any{
+			map[string]any{"expires_at": map[string]any{"lt": now}},
+			map[string]any{"review_status": agentmodel.KnowledgeReviewStatusExpired},
+		}
+	} else {
+		cond["review_status"] = status
+		cond["or"] = []any{
+			map[string]any{"expires_at": nil},
+			map[string]any{"expires_at": map[string]any{"gte": now}},
 		}
 	}
-	for _, r := range statusRows {
-		if r != nil {
-			if _, exists := seen[r.ID]; !exists {
-				seen[r.ID] = struct{}{}
-				all = append(all, r)
+	model := agentmodel.NewKnowledgeDocModel()
+	rows := model.Select(ctx, cond, map[string]any{
+		"field":    "main.id, main.title, main.source_type, main.summary, main.index_status, main.review_status, main.expires_at, main.created_at",
+		"page":     page,
+		"pageSize": pageSize,
+		"order":    "main.id desc",
+	})
+	if status == agentmodel.KnowledgeReviewStatusExpired {
+		for _, row := range rows {
+			if row != nil {
+				row.ReviewStatus = agentmodel.KnowledgeReviewStatusExpired
 			}
 		}
 	}
-	return all, total + len(statusRows), nil
+	return rows, countInt(model.Count(ctx, cond)), nil
 }

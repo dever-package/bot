@@ -114,7 +114,6 @@ func performHTTP(ctx context.Context, spec httpRequestSpec) (map[string]any, err
 		request.Header.Set(key, value)
 	}
 	client := netguard.NewClient(time.Duration(timeout) * time.Second)
-	defer client.CloseIdleConnections()
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, err

@@ -22,13 +22,21 @@ func newEmbeddingService() embeddingService {
 }
 
 func (s embeddingService) embed(ctx context.Context, powerID uint64, text string) ([]float64, error) {
+	power, err := activeEmbeddingPower(ctx, powerID)
+	if err != nil {
+		return nil, err
+	}
+	return s.embedWithPower(ctx, power.Key, text)
+}
+
+func (s embeddingService) embedWithPower(ctx context.Context, powerKey string, text string) ([]float64, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil, fmt.Errorf("向量文本不能为空")
 	}
-	power, err := activeEmbeddingPower(ctx, powerID)
-	if err != nil {
-		return nil, err
+	powerKey = strings.TrimSpace(powerKey)
+	if powerKey == "" {
+		return nil, fmt.Errorf("向量能力标识不能为空")
 	}
 	input := energonservice.PromptInput(text)
 	input["input"] = text
@@ -36,7 +44,7 @@ func (s embeddingService) embed(ctx context.Context, powerID uint64, text string
 	resp := s.gateway.Request(ctx, energonservice.GatewayRequest{
 		RequestID: uuid.NewString(),
 		Body: map[string]any{
-			"power": power.Key,
+			"power": powerKey,
 			"input": input,
 			"options": map[string]any{
 				"stream": false,

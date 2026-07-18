@@ -3,8 +3,9 @@ package energon
 import "strings"
 
 const (
-	OutputTypeGeneral    = "general"
-	OutputTypeStoryboard = "storyboard"
+	OutputTypeGeneral      = "general"
+	OutputTypeStoryboard   = "storyboard"
+	OutputTypeVideoCompose = "video_compose"
 )
 
 type OutputTypeSpec struct {
@@ -37,6 +38,15 @@ var outputTypeSpecs = []OutputTypeSpec{
 		DefaultHeight: 360,
 		Structured:    true,
 		Sort:          20,
+	},
+	{
+		Key:           OutputTypeVideoCompose,
+		Name:          "视频合成",
+		AllowedKinds:  []string{"video"},
+		ViewMode:      "video_compose",
+		DefaultWidth:  680,
+		DefaultHeight: 440,
+		Sort:          30,
 	},
 }
 
@@ -108,6 +118,11 @@ func IsGeneralTextPower(power Power) bool {
 
 func IsStoryboardPower(power Power) bool {
 	return NormalizeOutputType(power.OutputType) == OutputTypeStoryboard
+}
+
+func IsVideoComposePower(power Power) bool {
+	return NormalizePowerKind(power.Kind) == "video" &&
+		NormalizeOutputType(power.OutputType) == OutputTypeVideoCompose
 }
 
 func RequiresStructuredOutput(power Power) bool {

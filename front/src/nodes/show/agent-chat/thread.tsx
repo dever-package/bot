@@ -20,8 +20,12 @@ import { AgentChatActivityView } from "./activity-view";
 import type { AgentChatActivity } from "./activity";
 import { AgentChatMessageOutput } from "./message-output";
 import { AgentChatDocumentView } from "./document-view";
+import { AgentChatTooltip } from "./tooltip";
+import { AgentChatArtifactActionsProvider } from "./artifact-actions";
+import { readAgentChatArtifacts } from "./artifact";
 import {
   agentChatDocumentCopyText,
+  isAgentChatDocumentPending,
   type AgentChatDocument,
 } from "./document";
 import { MessageNavigator } from "./message-navigator";
@@ -36,6 +40,7 @@ import {
 } from "./interaction-view";
 import { AGENT_CHAT_CHILD_LAYER_Z_INDEX } from "./layers";
 import type {
+  AgentChatArtifactActionRenderer,
   AgentChatController,
   AgentChatMessageActionContext,
 } from "./types";
@@ -46,6 +51,7 @@ import {
   type ReferenceContent,
   type ReferencePreviewLoader,
   type ReferenceProvider,
+  type ReferenceUploadedFile,
 } from "./reference";
 
 const referenceComposerModule = getCompatModule(
@@ -65,14 +71,26 @@ const CHAT_COLUMN_CLASS = "agent-chat-column";
 export function Thread({
   controller,
   clipboardImageUploadRuleId,
+  uploadBizKey,
+  uploadBizName,
+  allowResourceLibrary,
+  onUploadedFiles,
   renderMessageActions,
+  renderArtifactActions,
   referenceProviders = [],
 }: {
   controller: AgentChatController;
   clipboardImageUploadRuleId?: number;
+  uploadBizKey?: string;
+  uploadBizName?: string;
+  allowResourceLibrary?: boolean;
+  onUploadedFiles?: (
+    files: ReferenceUploadedFile[],
+  ) => void | Promise<void>;
   renderMessageActions?: (
     message: AgentChatMessageActionContext,
   ) => ReactNode;
+  renderArtifactActions?: AgentChatArtifactActionRenderer;
   referenceProviders?: ReferenceProvider[];
 }) {
   const providers = [
@@ -91,7 +109,7 @@ export function Thread({
     controller.loadReferencePreview,
   );
   return (
-    <ThreadPrimitive.Root className="relative flex min-h-0 flex-1 flex-col bg-background">
+    <ThreadPrimitive.Root className="agent-chat-thread relative flex min-h-0 flex-1 flex-col bg-background">
       <style>{threadStyles}</style>
       <ThreadPrimitive.ViewportProvider>
         <ThreadPrimitive.Viewport
@@ -132,6 +150,7 @@ export function Thread({
                       controller={controller}
                       loadPreview={loadPreview}
                       renderMessageActions={renderMessageActions}
+                      renderArtifactActions={renderArtifactActions}
                     />
                   )}
                 </ThreadPrimitive.Messages>
@@ -166,6 +185,10 @@ export function Thread({
               controller={controller}
               referenceProviders={providers}
               clipboardImageUploadRuleId={clipboardImageUploadRuleId}
+              uploadBizKey={uploadBizKey}
+              uploadBizName={uploadBizName}
+              allowResourceLibrary={allowResourceLibrary}
+              onUploadedFiles={onUploadedFiles}
             />
           </div>
         </footer>
@@ -178,12 +201,14 @@ function Message({
   controller,
   loadPreview,
   renderMessageActions,
+  renderArtifactActions,
 }: {
   controller: AgentChatController;
   loadPreview: ReferencePreviewLoader;
   renderMessageActions?: (
     message: AgentChatMessageActionContext,
   ) => ReactNode;
+  renderArtifactActions?: AgentChatArtifactActionRenderer;
 }) {
   const role = useAuiState((state) => state.message.role);
   return role === "user" ? (
@@ -197,6 +222,7 @@ function Message({
       controller={controller}
       loadPreview={loadPreview}
       renderMessageActions={renderMessageActions}
+      renderArtifactActions={renderArtifactActions}
     />
   );
 }
@@ -219,8 +245,8 @@ function UserMessage({
     (state) => state.message.metadata.custom?.sourceText,
   );
   return (
-    <MessagePrimitive.Root className="agent-chat-message agent-chat-user-message relative flex justify-end pl-6 md:pl-20">
-      <div className="max-w-[88%] whitespace-pre-wrap break-words rounded-lg bg-muted px-3.5 py-2.5 text-base leading-7 text-foreground [overflow-wrap:anywhere] md:max-w-full">
+    <MessagePrimitive.Root className="agent-chat-message agent-chat-user-message relative flex flex-col items-end pl-6 md:pl-20">
+      <div className="agent-chat-user-bubble max-w-[88%] whitespace-pre-wrap break-words rounded-lg bg-muted px-3.5 py-2.5 text-base leading-7 text-foreground [overflow-wrap:anywhere] md:max-w-full">
         <ReferenceContentView
           content={content}
           fallback={typeof sourceText === "string" ? sourceText : ""}
@@ -239,12 +265,14 @@ function AssistantMessage({
   controller,
   loadPreview: _loadPreview,
   renderMessageActions,
+  renderArtifactActions,
 }: {
   controller: AgentChatController;
   loadPreview: ReferencePreviewLoader;
   renderMessageActions?: (
     message: AgentChatMessageActionContext,
   ) => ReactNode;
+  renderArtifactActions?: AgentChatArtifactActionRenderer;
 }) {
   const status = useAuiState((state) => state.message.status);
   const output = useAuiState((state) => state.message.metadata.custom?.output);
@@ -257,6 +285,9 @@ function AssistantMessage({
   const document = useAuiState(
     (state) => state.message.metadata.custom?.document,
   ) as AgentChatDocument | undefined;
+  const recordID = Number(
+    useAuiState((state) => state.message.metadata.custom?.recordID) || 0,
+  );
   const visibleActivities = Array.isArray(activities) ? activities : [];
   const interaction = readAgentChatInteraction(output);
   const interactionResponse = interaction?.id
@@ -276,71 +307,82 @@ function AssistantMessage({
         error && "text-destructive",
       )}
     >
-      {document ? (
-        <AgentChatDocumentView
-          document={document}
-          sourceText={typeof sourceText === "string" ? sourceText : ""}
-          running={status?.type === "running"}
-          error={error}
-        />
-      ) : (
-        <>
-          <MessagePrimitive.Parts>
-            {({ part }) => {
-              if (part.type === "text") {
-                const running = part.status.type === "running";
-                if (running && !part.text && visibleActivities.length === 0) {
-                  return <WaitingIndicator />;
-                }
-                if (!part.text) {
-                  return null;
-                }
-                return <StreamingMarkdown error={error} />;
-              }
-              if (part.type === "tool-call") {
-                const activity = visibleActivities.find(
-                  (current) => current.id === part.toolCallId,
-                );
-                return <AgentChatActivityView activity={activity} />;
-              }
-              return null;
-            }}
-          </MessagePrimitive.Parts>
-          {waitingForNextStep ? <NextStepIndicator /> : null}
-          <AgentChatMessageOutput
-            output={output}
-            excludeOutputs={visibleActivities.map((activity) => activity.output)}
-            excludeText={typeof sourceText === "string" ? sourceText : ""}
+      <AgentChatArtifactActionsProvider
+        messageID={recordID}
+        render={renderArtifactActions}
+      >
+        {document ? (
+          <AgentChatDocumentView
+            document={document}
+            sourceText={typeof sourceText === "string" ? sourceText : ""}
+            running={status?.type === "running"}
+            error={error}
           />
-        </>
-      )}
-      {interaction ? (
-        <AgentChatInteractionView
-          interaction={interaction}
-          response={interactionResponse}
+        ) : (
+          <>
+            <MessagePrimitive.Parts>
+              {({ part }) => {
+                if (part.type === "text") {
+                  const running = part.status.type === "running";
+                  if (
+                    running &&
+                    !part.text &&
+                    visibleActivities.length === 0
+                  ) {
+                    return <WaitingIndicator />;
+                  }
+                  if (!part.text) {
+                    return null;
+                  }
+                  return <StreamingMarkdown error={error} />;
+                }
+                if (part.type === "tool-call") {
+                  const activity = visibleActivities.find(
+                    (current) => current.id === part.toolCallId,
+                  );
+                  return <AgentChatActivityView activity={activity} />;
+                }
+                return null;
+              }}
+            </MessagePrimitive.Parts>
+            {waitingForNextStep ? <NextStepIndicator /> : null}
+            <AgentChatMessageOutput
+              output={output}
+              excludeOutputs={visibleActivities.map(
+                (activity) => activity.output,
+              )}
+              excludeText={typeof sourceText === "string" ? sourceText : ""}
+            />
+          </>
+        )}
+        {interaction ? (
+          <AgentChatInteractionView
+            interaction={interaction}
+            response={interactionResponse}
+            disabled={controller.sendDisabled}
+            onSubmit={(result) => {
+              void controller.send(
+                interactionResponseInput(
+                  interaction.id || "",
+                  result.text,
+                  result.data,
+                ),
+              );
+            }}
+          />
+        ) : null}
+        <AgentChatSuggestions
+          suggestions={suggestions}
           disabled={controller.sendDisabled}
-          onSubmit={(result) => {
-            void controller.send(
-              interactionResponseInput(
-                interaction.id || "",
-                result.text,
-                result.data,
-              ),
-            );
+          onSelect={(suggestion) => {
+            void controller.send(textReferenceInput(suggestion.prompt));
           }}
         />
-      ) : null}
-      <AgentChatSuggestions
-        suggestions={suggestions}
-        disabled={controller.sendDisabled}
-        onSelect={(suggestion) => {
-          void controller.send(textReferenceInput(suggestion.prompt));
-        }}
-      />
-      <MessageActions
-        role="assistant"
-        renderMessageActions={renderMessageActions}
-      />
+        <MessageActions
+          role="assistant"
+          renderMessageActions={renderMessageActions}
+        />
+      </AgentChatArtifactActionsProvider>
     </MessagePrimitive.Root>
   );
 }
@@ -367,6 +409,7 @@ function MessageActions({
   const document = useAuiState(
     (state) => state.message.metadata.custom?.document,
   ) as AgentChatDocument | undefined;
+  const output = useAuiState((state) => state.message.metadata.custom?.output);
   const partText = useAuiState((state) =>
     state.message.parts
       .filter((part) => part.type === "text")
@@ -420,35 +463,43 @@ function MessageActions({
   const disabled =
     !copyText.trim() ||
     (role === "assistant" && status?.type === "running");
+  const hasPendingArtifacts =
+    readAgentChatArtifacts(output).some(
+      (artifact) => artifact.status === "generating",
+    ) || Boolean(document && isAgentChatDocumentPending(document));
   return (
     <ActionBarPrimitive.Root
       className={cn(
         "agent-chat-message-actions",
-        role === "user" ? "right-0 justify-end" : "left-0",
+        role === "user" && "justify-end",
       )}
       data-message-role={role}
     >
-      <button
-        type="button"
-        className="agent-chat-message-action agent-chat-copy-action"
-        title={
+      <AgentChatTooltip
+        label={
           copyFailed ? "复制失败，请手动选择消息文本" : copied ? "已复制" : "复制"
         }
-        aria-label={copied ? "消息已复制" : "复制消息"}
-        data-copied={copied ? "true" : undefined}
-        data-copy-failed={copyFailed ? "true" : undefined}
-        disabled={disabled}
-        onClick={() => void copyMessage()}
       >
-        <Copy className="agent-chat-copy-icon" aria-hidden="true" />
-        <Check className="agent-chat-copied-icon" aria-hidden="true" />
-      </button>
+        <button
+          type="button"
+          className="agent-chat-message-action agent-chat-copy-action"
+          aria-label={copied ? "消息已复制" : "复制消息"}
+          data-copied={copied ? "true" : undefined}
+          data-copy-failed={copyFailed ? "true" : undefined}
+          disabled={disabled}
+          onClick={() => void copyMessage()}
+        >
+          <Copy className="agent-chat-copy-icon" aria-hidden="true" />
+          <Check className="agent-chat-copied-icon" aria-hidden="true" />
+        </button>
+      </AgentChatTooltip>
       {renderMessageActions?.({
         role,
         recordID,
         requestID,
         running: status?.type === "running",
         error: status?.type === "incomplete",
+        hasPendingArtifacts,
       })}
     </ActionBarPrimitive.Root>
   );
@@ -457,10 +508,20 @@ function MessageActions({
 function Composer({
   controller,
   clipboardImageUploadRuleId,
+  uploadBizKey,
+  uploadBizName,
+  allowResourceLibrary,
+  onUploadedFiles,
   referenceProviders,
 }: {
   controller: AgentChatController;
   clipboardImageUploadRuleId?: number;
+  uploadBizKey?: string;
+  uploadBizName?: string;
+  allowResourceLibrary?: boolean;
+  onUploadedFiles?: (
+    files: ReferenceUploadedFile[],
+  ) => void | Promise<void>;
   referenceProviders: ReferenceProvider[];
 }) {
   return (
@@ -472,6 +533,10 @@ function Composer({
       cancelable={controller.cancelable}
       layerZIndex={AGENT_CHAT_CHILD_LAYER_Z_INDEX}
       clipboardImageUploadRuleId={clipboardImageUploadRuleId}
+      uploadBizKey={uploadBizKey}
+      uploadBizName={uploadBizName}
+      allowResourceLibrary={allowResourceLibrary}
+      onUploadedFiles={onUploadedFiles}
       parameters={controller.inputParams}
       providers={referenceProviders}
       loadReferences={controller.loadReferences}
@@ -671,11 +736,10 @@ const threadStyles = `
 }
 
 .agent-chat-message-actions {
-  position: absolute;
-  top: 100%;
-  z-index: 2;
   display: flex;
-  height: 28px;
+  width: 100%;
+  min-height: 28px;
+  margin-top: 4px;
   align-items: center;
   gap: 2px;
   opacity: 0;
@@ -684,7 +748,8 @@ const threadStyles = `
 }
 
 .agent-chat-message:hover .agent-chat-message-actions,
-.agent-chat-message:focus-within .agent-chat-message-actions {
+.agent-chat-message:focus-within .agent-chat-message-actions,
+.agent-chat-message-actions:hover {
   opacity: 1;
   pointer-events: auto;
 }

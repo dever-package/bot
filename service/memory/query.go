@@ -10,6 +10,7 @@ import (
 func (s Service) reviewMemoryRows(ctx context.Context, owner memoryOwner, request MemoryListRequest) ([]map[string]any, int64, int, int) {
 	page, pageSize := normalizeMemoryPage(request.Page, firstPositive(request.PageSize, request.Limit, 10))
 	filter := map[string]any{"owner_type": owner.OwnerType, "owner_id": owner.OwnerID}
+	conditions := make([]any, 0, 2)
 	if status := memoryStatusFilter(request.Status); status > 0 {
 		filter["status"] = status
 	}
@@ -18,37 +19,23 @@ func (s Service) reviewMemoryRows(ctx context.Context, owner memoryOwner, reques
 	}
 	if keyword := strings.TrimSpace(request.Keyword); keyword != "" {
 		like := "%" + keyword + "%"
-		filter["or"] = []map[string]any{
+		conditions = append(conditions, map[string]any{"or": []map[string]any{
 			{"title": map[string]any{"LIKE": like}},
 			{"content": map[string]any{"LIKE": like}},
-		}
+		}})
+	}
+	if !strings.EqualFold(strings.TrimSpace(request.Scope), memoryScopeAll) {
+		conditions = append(conditions, map[string]any{"or": memoryListScopeConditions(request)})
+	}
+	if len(conditions) > 0 {
+		filter["and"] = conditions
 	}
 	model := memorymodel.NewMemoryModel()
-	if strings.EqualFold(strings.TrimSpace(request.Scope), memoryScopeAll) {
-		total := model.Count(ctx, filter)
-		rows := model.Select(ctx, filter, map[string]any{
-			"order": "main.importance desc,main.id desc", "page": page, "pageSize": pageSize,
-		})
-		return memoryMaps(rows), total, page, pageSize
-	}
+	total := model.Count(ctx, filter)
 	rows := model.Select(ctx, filter, map[string]any{
-		"order": "main.importance desc,main.id desc", "limit": memoryReviewMaxRows,
+		"order": "main.importance desc,main.id desc", "page": page, "pageSize": pageSize,
 	})
-	filtered := make([]*memorymodel.Memory, 0, len(rows))
-	for _, row := range rows {
-		if row != nil && memoryMatchesScope(*row, request) {
-			filtered = append(filtered, row)
-		}
-	}
-	start := (page - 1) * pageSize
-	if start >= len(filtered) {
-		return []map[string]any{}, int64(len(filtered)), page, pageSize
-	}
-	end := start + pageSize
-	if end > len(filtered) {
-		end = len(filtered)
-	}
-	return memoryMaps(filtered[start:end]), int64(len(filtered)), page, pageSize
+	return memoryMaps(rows), total, page, pageSize
 }
 
 func (s Service) findSimilarMemory(ctx context.Context, owner memoryOwner, scope string, contextKey string, agentKey string, sessionID uint64, title string, content string) *memorymodel.Memory {

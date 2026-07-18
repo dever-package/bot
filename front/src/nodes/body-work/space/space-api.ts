@@ -9,6 +9,10 @@ import {
 } from "./space-model";
 import { persistedCanvasState } from "./space-canvas-state";
 import { isSuccessResponse } from "../shared/api-response";
+import {
+  BODY_UPLOAD_BIZ_KEY,
+  BODY_UPLOAD_BIZ_NAME,
+} from "../asset/upload-asset-api";
 import type {
   AssetVersion,
   AssetVersionPage,
@@ -107,6 +111,30 @@ export async function runSpaceCanvas(input: {
     input: input.runInput || {},
   });
   return normalizeRunResponse(result, "画布运行失败");
+}
+
+export async function generateSpaceCanvasNodeTitle(input: {
+  projectId: number;
+  nodeKey: string;
+  versionId: number;
+  prompt?: string;
+}): Promise<{ nodeKey: string; versionId: number; title: string }> {
+  const result = await request(
+    joinSiteApi("workspace/canvas_node_title"),
+    "post",
+    {
+      project_id: input.projectId,
+      node_key: input.nodeKey,
+      version_id: input.versionId,
+      prompt: input.prompt || "",
+    },
+  );
+  const data = normalizeRunResponse(result, "生成节点标题失败");
+  return {
+    nodeKey: String(data.node_key || input.nodeKey),
+    versionId: Number(data.version_id || input.versionId || 0),
+    title: String(data.title || "").trim(),
+  };
 }
 
 function normalizeRunResponse(result: any, fallbackMessage: string) {
@@ -470,8 +498,8 @@ export async function initSpaceUpload(input: {
     mime: input.mime,
     hash: input.hash || "",
     kind: input.kind || "",
-    biz_key: "bot_work",
-    biz_name: "作品工作台",
+    biz_key: BODY_UPLOAD_BIZ_KEY,
+    biz_name: BODY_UPLOAD_BIZ_NAME,
   });
   if (!isSuccessResponse(result)) {
     throw new Error(result.message || result.msg || "初始化上传失败");

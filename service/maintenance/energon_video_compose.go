@@ -23,7 +23,7 @@ type composeParamSpec struct {
 }
 
 var composeParamSpecs = []composeParamSpec{
-	{Key: "videos", Name: "视频片段", Required: 1, Sort: 10},
+	{Key: "videos", Name: "视频片段", Required: 2, Sort: 10},
 	{Key: "audio", Name: "背景音频", Required: 2, Sort: 20},
 	{Key: "subtitles", Name: "字幕文件", Required: 2, Sort: 30},
 	{Key: "resolution", Name: "输出分辨率", Required: 2, Sort: 40},
@@ -52,7 +52,7 @@ func EnsureEnergonVideoComposePower(ctx context.Context) (err error) {
 		return err
 	}
 	ensureFFmpegServiceParams(ctx, serviceID, params)
-	ensureFFmpegComposeEndpoint(ctx, serviceID, params["videos"].ID)
+	ensureFFmpegComposeEndpoint(ctx, serviceID)
 
 	powerID, err := ensureVideoComposePower(ctx)
 	if err != nil {
@@ -148,26 +148,33 @@ func ensureFFmpegServiceParams(
 	}
 }
 
-func ensureFFmpegComposeEndpoint(ctx context.Context, serviceID uint64, videosParamID uint64) {
+func ensureFFmpegComposeEndpoint(ctx context.Context, serviceID uint64) {
 	model := energonmodel.NewServiceEndpointModel()
 	filter := map[string]any{"service_id": serviceID, "api": ffmpegComposeAPI}
-	if model.Find(ctx, filter) != nil {
-		return
-	}
-	model.Insert(ctx, map[string]any{
-		"service_id": serviceID,
-		"api":        ffmpegComposeAPI,
+	values := map[string]any{
 		"param_mode": "all",
-		"param_ids":  fmt.Sprintf(`[{"param_id":%d,"sort":1}]`, videosParamID),
+		"param_ids":  "[]",
 		"status":     1,
 		"sort":       1,
-		"created_at": time.Now(),
-	})
+	}
+	if row := model.Find(ctx, filter); row != nil {
+		model.Update(ctx, map[string]any{"id": row.ID}, values)
+		return
+	}
+	values["service_id"] = serviceID
+	values["api"] = ffmpegComposeAPI
+	values["created_at"] = time.Now()
+	model.Insert(ctx, values)
 }
 
 func ensureVideoComposePower(ctx context.Context) (uint64, error) {
 	model := energonmodel.NewPowerModel()
 	if row := model.Find(ctx, map[string]any{"key": videoComposeKey}); row != nil {
+		if energonmodel.NormalizeOutputType(row.OutputType) != energonmodel.OutputTypeVideoCompose {
+			model.Update(ctx, map[string]any{"id": row.ID}, map[string]any{
+				"output_type": energonmodel.OutputTypeVideoCompose,
+			})
+		}
 		return row.ID, nil
 	}
 	id := uint64(model.Insert(ctx, map[string]any{
@@ -175,7 +182,7 @@ func ensureVideoComposePower(ctx context.Context) (uint64, error) {
 		"key":         videoComposeKey,
 		"name":        "视频合成",
 		"icon":        "clapperboard",
-		"output_type": energonmodel.OutputTypeGeneral,
+		"output_type": energonmodel.OutputTypeVideoCompose,
 		"kind":        "video",
 		"prompt":      "",
 		"source_rule": 1,
@@ -212,16 +219,18 @@ func ensureVideoComposeParams(
 	for index, spec := range composeParamSpecs {
 		param := params[spec.Key]
 		filter := map[string]any{"power_id": powerID, "param_id": param.ID}
-		if model.Find(ctx, filter) != nil {
+		values := map[string]any{
+			"show":   1,
+			"status": spec.Required,
+			"sort":   index + 1,
+		}
+		if row := model.Find(ctx, filter); row != nil {
+			model.Update(ctx, map[string]any{"id": row.ID}, values)
 			continue
 		}
-		model.Insert(ctx, map[string]any{
-			"power_id":   powerID,
-			"param_id":   param.ID,
-			"show":       1,
-			"status":     spec.Required,
-			"sort":       index + 1,
-			"created_at": time.Now(),
-		})
+		values["power_id"] = powerID
+		values["param_id"] = param.ID
+		values["created_at"] = time.Now()
+		model.Insert(ctx, values)
 	}
 }

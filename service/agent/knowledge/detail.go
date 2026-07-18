@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 )
@@ -24,6 +25,10 @@ type KnowledgeFileIndexDetail struct {
 	DirID        uint64                   `json:"dir_id"`
 	DirPath      string                   `json:"dir_path"`
 	SourceType   string                   `json:"source_type"`
+	ReviewStatus string                   `json:"review_status"`
+	ReviewedAt   *time.Time               `json:"reviewed_at,omitempty"`
+	ReviewerID   uint64                   `json:"reviewer_id,omitempty"`
+	ExpiresAt    *time.Time               `json:"expires_at,omitempty"`
 	IndexStatus  string                   `json:"index_status"`
 	IndexStage   string                   `json:"index_stage"`
 	IndexVersion int                      `json:"index_version"`
@@ -65,9 +70,6 @@ func (s Service) ReadKnowledgeFileIndexDetail(ctx context.Context, baseID uint64
 	if err != nil {
 		return KnowledgeFileIndexDetail{}, err
 	}
-	if err := syncKnowledgeFilesystem(ctx, base, root); err != nil {
-		return KnowledgeFileIndexDetail{}, err
-	}
 	filePath, relPath, err := knowledgeIDPath(root, id)
 	if err != nil {
 		return KnowledgeFileIndexDetail{}, err
@@ -100,6 +102,10 @@ func knowledgeFileIndexDetail(ctx context.Context, id string, name string, doc *
 		DirID:        doc.DirID,
 		DirPath:      KnowledgeDirPath(ctx, doc.DirID),
 		SourceType:   strings.TrimSpace(doc.SourceType),
+		ReviewStatus: knowledgeDocReviewStatusAt(doc, time.Now()),
+		ReviewedAt:   doc.ReviewedAt,
+		ReviewerID:   doc.ReviewerID,
+		ExpiresAt:    doc.ExpiresAt,
 		IndexStatus:  strings.TrimSpace(doc.IndexStatus),
 		IndexStage:   strings.TrimSpace(doc.IndexStage),
 		IndexVersion: doc.IndexVersion,

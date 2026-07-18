@@ -13,6 +13,7 @@ import (
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	assetmodel "github.com/dever-package/bot/model/asset"
+	projectmodel "github.com/dever-package/bot/model/project"
 	workspacemodel "github.com/dever-package/bot/model/workspace"
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
 	assetservice "github.com/dever-package/bot/service/asset"
@@ -21,6 +22,7 @@ import (
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	teamservice "github.com/dever-package/bot/service/team"
 	frontstream "github.com/dever-package/front/service/stream"
+	uploadrepo "github.com/dever-package/front/service/upload/repository"
 	userservice "github.com/dever-package/user/service"
 )
 
@@ -53,8 +55,15 @@ type SaveDialogueAssetRequest struct {
 	TeamID      uint64
 	RoleID      uint64
 	MessageID   uint64
+	ArtifactID  uint64
 	Name        string
 	TargetAsset uint64
+}
+
+type SaveUploadAssetRequest struct {
+	TeamID    uint64
+	ProjectID uint64
+	File      uploadrepo.UploadFile
 }
 
 type ChatRoleBinding struct {
@@ -357,19 +366,21 @@ func (s Service) SaveDialogueAsset(ctx context.Context, request SaveDialogueAsse
 	if err != nil {
 		return nil, err
 	}
-	if request.TargetAsset > 0 {
+	projection, err := projectDialogueAsset(ctx, message, request.ArtifactID)
+	if err != nil {
+		return nil, err
+	}
+	targetAssetID := request.TargetAsset
+	if request.ArtifactID > 0 {
+		// A single generated artifact is always an independent material. It must
+		// not replace the continued conversation asset with a different kind.
+		targetAssetID = 0
+	}
+	if targetAssetID > 0 {
 		run := agentmodel.NewRunModel().Find(ctx, map[string]any{"request_id": message.RequestID})
-		if run == nil || nestedUint64(recordValue(run.Input), "_target_asset_id") != request.TargetAsset {
+		if run == nil || nestedUint64(recordValue(run.Input), "_target_asset_id") != targetAssetID {
 			return nil, fmt.Errorf("请先从目标素材发起一条新的对话回复")
 		}
-	}
-	content := map[string]any{
-		"text":    message.Text,
-		"content": message.Content,
-		"output":  message.Output,
-	}
-	if message.Document != nil {
-		content["document"] = message.Document
 	}
 	source := map[string]any{
 		"role_id":    binding.RoleID,
@@ -378,13 +389,19 @@ func (s Service) SaveDialogueAsset(ctx context.Context, request SaveDialogueAsse
 		"session_id": message.SessionID,
 		"message_id": message.ID,
 	}
+	for key, value := range projection.Source {
+		source[key] = value
+	}
 	name := strings.TrimSpace(request.Name)
-	if name == "" && request.TargetAsset > 0 {
-		if target := s.asset.Find(ctx, request.TargetAsset); target != nil {
+	if name == "" && targetAssetID > 0 {
+		if target := s.asset.Find(ctx, targetAssetID); target != nil {
 			name = target.Name
 			source["parent_asset_id"] = target.ID
 			source["parent_version_id"] = target.VersionID
 		}
+	}
+	if name == "" {
+		name = projection.DefaultName
 	}
 	if name == "" {
 		name = binding.Name + " 回复"
@@ -393,26 +410,143 @@ func (s Service) SaveDialogueAsset(ctx context.Context, request SaveDialogueAsse
 	if requestID == "" {
 		requestID = fmt.Sprintf("dialogue-message-%d", message.ID)
 	}
+	requestID += projection.RequestSuffix
 	asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
-		AssetID:    request.TargetAsset,
+		AssetID:    targetAssetID,
 		BodyID:     binding.BodyID,
 		TeamID:     binding.TeamID,
 		ReleaseID:  binding.ReleaseID,
 		RequestID:  requestID,
-		NodeKey:    fmt.Sprintf("dialogue:%d:message:%d", binding.RoleID, message.ID),
+		NodeKey:    fmt.Sprintf("dialogue:%d:message:%d%s", binding.RoleID, message.ID, projection.NodeSuffix),
 		SourceType: assetmodel.SourceDialogue,
 		SourceID:   binding.RoleID,
 		SourceName: binding.Name,
 		Source:     source,
 		Name:       name,
-		Kind:       dialogueAssetKind(message),
+		Kind:       projection.Kind,
 		Role:       assetmodel.RoleMaterial,
-		Content:    content,
+		Content:    projection.Content,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return map[string]any{"asset": s.asset.AssetDetailMap(ctx, *asset, version)}, nil
+}
+
+func (s Service) SaveUploadAsset(ctx context.Context, request SaveUploadAssetRequest) (map[string]any, error) {
+	file := request.File
+	if file.ID == 0 {
+		return nil, fmt.Errorf("上传文件不能为空")
+	}
+
+	teamID := request.TeamID
+	bodyID := uint64(0)
+	releaseID := uint64(0)
+	if request.ProjectID > 0 {
+		actor, err := userservice.RequireActor(ctx)
+		if err != nil {
+			return nil, err
+		}
+		project := projectmodel.NewProjectModel().Find(ctx, map[string]any{
+			"id":      request.ProjectID,
+			"user_id": actor.UserID,
+			"status":  projectmodel.StatusEnabled,
+		})
+		if project == nil {
+			return nil, fmt.Errorf("项目不存在")
+		}
+		if teamID > 0 && project.TeamID != teamID {
+			return nil, fmt.Errorf("项目不属于当前团队")
+		}
+		if project.BodyID == 0 {
+			return nil, fmt.Errorf("项目载体不存在")
+		}
+		teamID = project.TeamID
+		bodyID = project.BodyID
+		releaseID = project.ReleaseID
+	} else {
+		workspace, err := s.requireWorkspace(ctx, teamID)
+		if err != nil {
+			return nil, err
+		}
+		bodyID = workspace.BodyID
+	}
+
+	payload := uploadrepo.BuildUploadFilePayload(file)
+	kind := uploadAssetKind(file)
+	name := strings.TrimSpace(file.Name)
+	if name == "" {
+		name = fmt.Sprintf("上传文件 %d", file.ID)
+	}
+	nodeKey := fmt.Sprintf("upload:body:%d:file:%d", bodyID, file.ID)
+	if request.ProjectID > 0 {
+		nodeKey = fmt.Sprintf("upload:project:%d:file:%d", request.ProjectID, file.ID)
+	}
+	asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
+		ProjectID:  request.ProjectID,
+		BodyID:     bodyID,
+		TeamID:     teamID,
+		ReleaseID:  releaseID,
+		RequestID:  fmt.Sprintf("upload-file:%d", file.ID),
+		NodeKey:    nodeKey,
+		SourceType: assetmodel.SourceUpload,
+		SourceID:   file.ID,
+		SourceName: "上传",
+		Source:     uploadAssetSource(file),
+		Name:       name,
+		Kind:       kind,
+		Role:       assetmodel.RoleMaterial,
+		Content:    uploadAssetContent(kind, payload),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"asset": s.asset.AssetDetailMap(ctx, *asset, version)}, nil
+}
+
+func uploadAssetKind(file uploadrepo.UploadFile) string {
+	kind := strings.ToLower(strings.TrimSpace(file.Kind))
+	mimeType := strings.ToLower(strings.TrimSpace(file.Mime))
+	switch {
+	case kind == assetmodel.KindImage || strings.HasPrefix(mimeType, "image/"):
+		return assetmodel.KindImage
+	case kind == assetmodel.KindVideo || strings.HasPrefix(mimeType, "video/"):
+		return assetmodel.KindVideo
+	case kind == assetmodel.KindAudio || strings.HasPrefix(mimeType, "audio/"):
+		return assetmodel.KindAudio
+	default:
+		return assetmodel.KindFile
+	}
+}
+
+func uploadAssetSource(file uploadrepo.UploadFile) map[string]any {
+	return map[string]any{
+		"upload_file_id": file.ID,
+		"rule_id":        file.RuleID,
+		"kind":           file.Kind,
+		"mime":           file.Mime,
+		"size":           file.Size,
+		"hash":           file.Hash,
+		"biz_key":        file.BizKey,
+	}
+}
+
+func uploadAssetContent(kind string, payload map[string]any) map[string]any {
+	url := nestedText(payload, "url")
+	switch kind {
+	case assetmodel.KindImage:
+		return map[string]any{"image": url, "images": []any{payload}}
+	case assetmodel.KindVideo:
+		return map[string]any{"video": url, "videos": []any{payload}}
+	case assetmodel.KindAudio:
+		return map[string]any{"audio": url, "audios": []any{payload}}
+	default:
+		return map[string]any{
+			"file":  url,
+			"files": []any{payload},
+			"text":  nestedText(payload, "name"),
+		}
+	}
 }
 
 func (s Service) RequireDialogueContinuation(
@@ -431,57 +565,6 @@ func (s Service) RequireDialogueContinuation(
 		binding.RoleID,
 	)
 	return err
-}
-
-func dialogueAssetKind(message runtimechat.CompletedAssistantMessage) string {
-	if message.Document != nil {
-		return assetmodel.KindRichText
-	}
-	kinds := map[string]bool{}
-	if artifacts, ok := message.Output["artifacts"].([]any); ok {
-		for _, value := range artifacts {
-			artifact, _ := value.(map[string]any)
-			if kind := dialogueMaterialKind(nestedText(artifact, "kind")); kind != "" {
-				kinds[kind] = true
-			}
-		}
-	}
-	if len(kinds) == 1 {
-		for kind := range kinds {
-			return kind
-		}
-	}
-	if len(kinds) > 1 {
-		return assetmodel.KindRichText
-	}
-	for kind, keys := range map[string][]string{
-		assetmodel.KindImage: {"image", "images"},
-		assetmodel.KindAudio: {"audio", "audios"},
-		assetmodel.KindVideo: {"video", "videos"},
-		assetmodel.KindFile:  {"file", "files"},
-	} {
-		for _, key := range keys {
-			if value, exists := message.Output[key]; exists && value != nil {
-				return kind
-			}
-		}
-	}
-	return assetmodel.KindText
-}
-
-func dialogueMaterialKind(kind string) string {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case assetmodel.KindImage:
-		return assetmodel.KindImage
-	case assetmodel.KindAudio:
-		return assetmodel.KindAudio
-	case assetmodel.KindVideo:
-		return assetmodel.KindVideo
-	case assetmodel.KindFile:
-		return assetmodel.KindFile
-	default:
-		return ""
-	}
 }
 
 func (s Service) Assets(ctx context.Context, req assetservice.QueryRequest) (map[string]any, error) {

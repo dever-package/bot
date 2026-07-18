@@ -73,8 +73,31 @@ export type KnowledgeFileIndexDetail = {
   summary: string
   keywords?: string[]
   source_type?: string
+  review_status?: KnowledgeReviewStatus
+  reviewed_at?: string
+  reviewer_id?: number
+  expires_at?: string
   nodes?: KnowledgeFileIndexNode[]
   edges?: KnowledgeFileIndexEdge[]
+}
+
+export type KnowledgeReviewStatus = "pending" | "approved" | "rejected" | "expired"
+
+export type KnowledgeReviewDocument = {
+  id: number
+  title: string
+  source_type?: string
+  summary?: string
+  content?: string
+  index_status?: string
+  review_status: KnowledgeReviewStatus
+  expires_at?: string
+  created_at?: string
+}
+
+export type KnowledgeReviewDocumentResult = {
+  list: KnowledgeReviewDocument[]
+  total: number
 }
 
 export type KnowledgeFileIndexNode = {
@@ -106,6 +129,12 @@ export type KnowledgeFileViewerStatus = {
 }
 
 export type KnowledgeIndexStatus = "pending" | "running" | "success" | "failed" | ""
+
+export type KnowledgeIndexStatusResult = {
+  id: number
+  index_status: KnowledgeIndexStatus
+  error_message?: string
+}
 
 export type KnowledgeIndexOverview = {
   base: {

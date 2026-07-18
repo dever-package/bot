@@ -5,7 +5,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shemic/dever/util"
+
 	agentmodel "github.com/dever-package/bot/model/agent"
+)
+
+const (
+	knowledgeRetrieveLogRetention = 90 * 24 * time.Hour
+	knowledgeRetrieveLogPruneStep = 100
 )
 
 func withCreatedAt(values map[string]any) map[string]any {
@@ -20,7 +27,7 @@ func insertKnowledgeRetrieveLog(ctx context.Context, req knowledgeRetrieveLogInp
 	if req.BaseID == 0 || query == "" {
 		return
 	}
-	agentmodel.NewKnowledgeRetrieveLogModel().Insert(ctx, withCreatedAt(map[string]any{
+	id := util.ToUint64(agentmodel.NewKnowledgeRetrieveLogModel().Insert(ctx, withCreatedAt(map[string]any{
 		"knowledge_base_id": req.BaseID,
 		"agent_id":          req.AgentID,
 		"query":             query,
@@ -28,7 +35,12 @@ func insertKnowledgeRetrieveLog(ctx context.Context, req knowledgeRetrieveLogInp
 		"node_ids":          snippetNodeIDsJSON(req.Snippets),
 		"snippet_count":     len(req.Snippets),
 		"latency_ms":        req.LatencyMs,
-	}))
+	})))
+	if id > 0 && id%knowledgeRetrieveLogPruneStep == 0 {
+		agentmodel.NewKnowledgeRetrieveLogModel().Delete(ctx, map[string]any{
+			"created_at": map[string]any{"lt": time.Now().Add(-knowledgeRetrieveLogRetention)},
+		})
+	}
 }
 
 type knowledgeRetrieveLogInput struct {

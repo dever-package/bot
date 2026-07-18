@@ -1,8 +1,9 @@
-import type { RefObject, WheelEvent } from "react";
+import type { ReactNode, RefObject, WheelEvent } from "react";
 import type { AgentChatMessageRecord, AgentChatSession } from "./api";
 import { readAgentChatActivities, type AgentChatActivity } from "./activity";
 import type { AgentChatOutput } from "./output";
 import type { AgentChatDocument } from "./document";
+import type { AgentChatArtifact } from "./artifact";
 import type {
   ReferenceContent,
   ReferenceInput,
@@ -31,7 +32,18 @@ export type AgentChatMessageActionContext = {
   requestID: string;
   running: boolean;
   error: boolean;
+  hasPendingArtifacts: boolean;
 };
+
+export type AgentChatArtifactActionContext = {
+  messageID: number;
+  artifact: AgentChatArtifact;
+  placement: "inline" | "preview";
+};
+
+export type AgentChatArtifactActionRenderer = (
+  context: AgentChatArtifactActionContext,
+) => ReactNode;
 
 export type ChatStreamOutput = AgentChatOutput & {
   event?: string;

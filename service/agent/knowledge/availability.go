@@ -7,6 +7,11 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
+type knowledgeBaseAvailability struct {
+	active         bool
+	reviewRequired bool
+}
+
 func unavailableKnowledgeDocIDs(ctx context.Context, docIDs []uint64) map[uint64]struct{} {
 	docIDs = uniqueUint64s(docIDs, 0)
 	invalid := make(map[uint64]struct{})
@@ -17,10 +22,17 @@ func unavailableKnowledgeDocIDs(ctx context.Context, docIDs []uint64) map[uint64
 	rows := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
 		"id": docIDs,
 	}, map[string]any{
-		"field":    "main.id, main.status, main.index_status, main.expires_at, main.review_status",
+		"field":    "main.id, main.knowledge_base_id, main.status, main.index_status, main.expires_at, main.review_status",
 		"page":     1,
 		"pageSize": len(docIDs),
 	})
+	baseIDs := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		if row != nil && row.KnowledgeBaseID > 0 {
+			baseIDs = append(baseIDs, row.KnowledgeBaseID)
+		}
+	}
+	baseAvailability := knowledgeBaseAvailabilityByID(ctx, baseIDs)
 	found := make(map[uint64]struct{}, len(rows))
 	now := time.Now()
 	for _, row := range rows {
@@ -28,7 +40,8 @@ func unavailableKnowledgeDocIDs(ctx context.Context, docIDs []uint64) map[uint64
 			continue
 		}
 		found[row.ID] = struct{}{}
-		if !knowledgeDocAvailableAt(row, now) {
+		base := baseAvailability[row.KnowledgeBaseID]
+		if !base.active || !knowledgeDocAvailableAt(row, base.reviewRequired, now) {
 			invalid[row.ID] = struct{}{}
 		}
 	}
@@ -40,26 +53,66 @@ func unavailableKnowledgeDocIDs(ctx context.Context, docIDs []uint64) map[uint64
 	return invalid
 }
 
-func knowledgeDocAvailableAt(row *agentmodel.KnowledgeDoc, now time.Time) bool {
+func knowledgeDocAvailableAt(row *agentmodel.KnowledgeDoc, reviewRequired bool, now time.Time) bool {
+	return knowledgeDocGovernanceAvailableAt(row, reviewRequired, now) &&
+		row.IndexStatus == agentmodel.KnowledgeIndexStatusSuccess
+}
+
+func knowledgeDocGovernanceAvailableAt(row *agentmodel.KnowledgeDoc, reviewRequired bool, now time.Time) bool {
 	if row == nil {
 		return false
 	}
 	if row.Status != 1 {
 		return false
 	}
-	if row.IndexStatus != agentmodel.KnowledgeIndexStatusSuccess {
+	reviewStatus := knowledgeDocReviewStatusAt(row, now)
+	if reviewStatus == agentmodel.KnowledgeReviewStatusRejected {
 		return false
 	}
-	if row.ReviewStatus == agentmodel.KnowledgeReviewStatusRejected {
+	if reviewStatus == agentmodel.KnowledgeReviewStatusExpired {
 		return false
 	}
-	if row.ReviewStatus == agentmodel.KnowledgeReviewStatusExpired {
-		return false
-	}
-	if row.ExpiresAt != nil && row.ExpiresAt.Before(now) {
+	if reviewRequired && reviewStatus != agentmodel.KnowledgeReviewStatusApproved {
 		return false
 	}
 	return true
+}
+
+func knowledgeDocReviewStatusAt(row *agentmodel.KnowledgeDoc, now time.Time) string {
+	if row == nil {
+		return agentmodel.KnowledgeReviewStatusPending
+	}
+	if row.ExpiresAt != nil && row.ExpiresAt.Before(now) {
+		return agentmodel.KnowledgeReviewStatusExpired
+	}
+	status := row.ReviewStatus
+	if status == "" {
+		return agentmodel.KnowledgeReviewStatusPending
+	}
+	return status
+}
+
+func knowledgeBaseAvailabilityByID(ctx context.Context, baseIDs []uint64) map[uint64]knowledgeBaseAvailability {
+	baseIDs = uniqueUint64s(baseIDs, 0)
+	result := make(map[uint64]knowledgeBaseAvailability, len(baseIDs))
+	if len(baseIDs) == 0 {
+		return result
+	}
+	rows := agentmodel.NewKnowledgeBaseModel().Select(ctx, map[string]any{"id": baseIDs}, map[string]any{
+		"field":    "main.id, main.review_required, main.status",
+		"page":     1,
+		"pageSize": len(baseIDs),
+	})
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		result[row.ID] = knowledgeBaseAvailability{
+			active:         row.Status == 1,
+			reviewRequired: row.ReviewRequired,
+		}
+	}
+	return result
 }
 
 func availableKnowledgeNode(ctx context.Context, nodeID uint64) *agentmodel.KnowledgeNode {

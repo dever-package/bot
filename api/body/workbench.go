@@ -11,6 +11,8 @@ import (
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	workbenchservice "github.com/dever-package/bot/service/workbench"
 	frontstream "github.com/dever-package/front/service/stream"
+	uploadaccess "github.com/dever-package/front/service/upload/access"
+	uploadrepo "github.com/dever-package/front/service/upload/repository"
 )
 
 type Workbench struct{}
@@ -123,8 +125,32 @@ func (Workbench) PostChatSaveAsset(c *server.Context) error {
 		TeamID:      botapi.Uint64FromBody(body, "team_id", "teamId"),
 		RoleID:      botapi.Uint64FromBody(body, "role_id", "roleId"),
 		MessageID:   botapi.Uint64FromBody(body, "message_id", "messageId"),
+		ArtifactID:  botapi.Uint64FromBody(body, "artifact_id", "artifactId"),
 		Name:        botapi.TextFromBody(body, "name"),
 		TargetAsset: botapi.Uint64FromBody(body, "target_asset_id", "targetAssetId"),
+	})
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Workbench) PostUploadSaveAsset(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	file, err := uploadrepo.FindUploadFile(
+		c.Context(),
+		botapi.Uint64FromBody(body, "file_id", "fileId", "id"),
+	)
+	if err != nil {
+		return botapi.WriteJSON(c, nil, err)
+	}
+	if err = uploadaccess.EnsureFile(c, uploadaccess.OperationRead, file); err != nil {
+		return botapi.WriteJSON(c, nil, err)
+	}
+	data, err := workbenchRunner.SaveUploadAsset(c.Context(), workbenchservice.SaveUploadAssetRequest{
+		TeamID:    botapi.Uint64FromBody(body, "team_id", "teamId"),
+		ProjectID: botapi.Uint64FromBody(body, "project_id", "projectId"),
+		File:      file,
 	})
 	return botapi.WriteJSON(c, data, err)
 }

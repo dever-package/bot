@@ -8,6 +8,7 @@ import (
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	energonmodel "github.com/dever-package/bot/model/energon"
+	energonservice "github.com/dever-package/bot/service/energon"
 )
 
 func ResolveAgent(ctx context.Context, identity string) (agentmodel.Agent, error) {
@@ -45,23 +46,7 @@ func ResolveAgent(ctx context.Context, identity string) (agentmodel.Agent, error
 }
 
 func ResolveTextPower(ctx context.Context, id uint64) (energonmodel.Power, error) {
-	if id == 0 {
-		return energonmodel.Power{}, fmt.Errorf("LLM 能力不能为空")
-	}
-	row := energonmodel.NewPowerModel().Find(ctx, map[string]any{"id": id})
-	if row == nil {
-		return energonmodel.Power{}, fmt.Errorf("LLM 能力不存在")
-	}
-	if row.Status != 1 {
-		return energonmodel.Power{}, fmt.Errorf("LLM 能力已停用: %s", row.Name)
-	}
-	if !strings.EqualFold(strings.TrimSpace(row.Kind), "text") {
-		return energonmodel.Power{}, fmt.Errorf("LLM 能力必须是文本类型: %s", row.Name)
-	}
-	if !energonmodel.IsGeneralTextPower(*row) {
-		return energonmodel.Power{}, fmt.Errorf("LLM 能力必须是通用文本能力: %s", row.Name)
-	}
-	return *row, nil
+	return energonservice.ResolveGeneralTextPower(ctx, id)
 }
 
 func builtinAgentID(identity string) uint64 {

@@ -102,7 +102,6 @@ func downloadFile(ctx context.Context, rawURL string, dir string) (string, error
 	}
 	req.Header.Set("User-Agent", "shemic-skill-installer/1.0")
 	client := netguard.NewClient(60 * time.Second)
-	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err

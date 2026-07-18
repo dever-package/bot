@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { AgentChatSession } from "./api";
 import { AGENT_CHAT_CHILD_LAYER_Z_INDEX } from "./layers";
+import { AgentChatTooltip } from "./tooltip";
 import type { AgentChatController } from "./types";
 
 const SESSION_MENU_WIDTH = 152;
@@ -195,24 +196,25 @@ export function SessionActions({
   return (
     <>
       <span ref={triggerRef} className="flex shrink-0">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className={cn(
-            "size-7 shrink-0 text-muted-foreground transition-opacity hover:text-foreground",
-            active
-              ? "opacity-100"
-              : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
-          )}
-          title="会话操作"
-          aria-label={`管理会话：${session.title}`}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          onClick={toggleMenu}
-        >
-          <Ellipsis className="size-4" />
-        </Button>
+        <AgentChatTooltip label="会话操作">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "size-7 shrink-0 text-muted-foreground transition-opacity hover:text-foreground",
+              active
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+            )}
+            aria-label={`管理会话：${session.title}`}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={toggleMenu}
+          >
+            <Ellipsis className="size-4" />
+          </Button>
+        </AgentChatTooltip>
       </span>
       {menu}
 

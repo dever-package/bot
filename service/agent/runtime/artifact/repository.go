@@ -121,10 +121,3 @@ func (repository) byBlocks(ctx context.Context, blockIDs []uint64) []agentmodel.
 	}
 	return result
 }
-
-func (repository) byBlock(ctx context.Context, blockID uint64) []agentmodel.Artifact {
-	if blockID == 0 {
-		return []agentmodel.Artifact{}
-	}
-	return repository{}.byBlocks(ctx, []uint64{blockID})
-}

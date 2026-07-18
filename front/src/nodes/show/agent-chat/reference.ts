@@ -154,6 +154,14 @@ export type ReferenceProvider = {
   }) => import("react").ReactNode;
 };
 
+export type ReferenceUploadedFile = {
+  id: string | number;
+  name?: string;
+  kind?: string;
+  mime?: string;
+  url?: string;
+};
+
 export type ReferenceComposerProps = {
   placeholder?: string;
   disabled?: boolean;
@@ -163,6 +171,12 @@ export type ReferenceComposerProps = {
   className?: string;
   layerZIndex?: number;
   clipboardImageUploadRuleId?: number;
+  uploadBizKey?: string;
+  uploadBizName?: string;
+  allowResourceLibrary?: boolean;
+  onUploadedFiles?: (
+    files: ReferenceUploadedFile[],
+  ) => void | Promise<void>;
   parameters?: ReferenceComposerParam[];
   providers?: ReferenceProvider[];
   loadReferences: (

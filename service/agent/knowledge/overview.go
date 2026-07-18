@@ -22,6 +22,12 @@ type KnowledgeIndexOverview struct {
 	RecentErrors []KnowledgeIndexOverviewDocError `json:"recent_errors"`
 }
 
+type KnowledgeIndexStatus struct {
+	ID           uint64 `json:"id"`
+	IndexStatus  string `json:"index_status"`
+	ErrorMessage string `json:"error_message,omitempty"`
+}
+
 type KnowledgeIndexOverviewBase struct {
 	ID           uint64 `json:"id"`
 	Name         string `json:"name"`
@@ -78,6 +84,18 @@ func (s Service) ReadKnowledgeIndexOverview(ctx context.Context, baseID uint64) 
 		Vectors:      knowledgeVectorCount(ctx, base.ID),
 		Progress:     indexProgressPercent(docStatus),
 		RecentErrors: recentKnowledgeIndexErrors(ctx, base.ID),
+	}, nil
+}
+
+func (s Service) ReadKnowledgeIndexStatus(ctx context.Context, baseID uint64) (KnowledgeIndexStatus, error) {
+	base := agentmodel.NewKnowledgeBaseModel().Find(ctx, map[string]any{"id": baseID, "status": 1})
+	if base == nil {
+		return KnowledgeIndexStatus{}, fmt.Errorf("知识库不存在")
+	}
+	return KnowledgeIndexStatus{
+		ID:           base.ID,
+		IndexStatus:  strings.TrimSpace(base.IndexStatus),
+		ErrorMessage: strings.TrimSpace(base.ErrorMessage),
 	}, nil
 }
 
@@ -184,7 +202,7 @@ func indexProgressPercent(status KnowledgeIndexOverviewStatus) int {
 func recentKnowledgeIndexErrors(ctx context.Context, baseID uint64) []KnowledgeIndexOverviewDocError {
 	rows := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
 		"knowledge_base_id": baseID,
-		"index_status":      agentmodel.KnowledgeIndexStatusFailed,
+		"error_message":     map[string]any{"neq": ""},
 		"status":            1,
 	}, map[string]any{
 		"field":    "main.id, main.title, main.storage_path, main.index_status, main.error_message",

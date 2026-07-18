@@ -344,7 +344,7 @@ func normalizeQueryRequest(req QueryRequest) (QueryRequest, error) {
 	req.Kind = strings.ToLower(strings.TrimSpace(req.Kind))
 	if req.SourceType != "" {
 		switch req.SourceType {
-		case assetmodel.SourceProject, assetmodel.SourceTool, assetmodel.SourceDialogue:
+		case assetmodel.SourceProject, assetmodel.SourceTool, assetmodel.SourceDialogue, assetmodel.SourceUpload:
 		default:
 			return QueryRequest{}, fmt.Errorf("资产来源不合法")
 		}

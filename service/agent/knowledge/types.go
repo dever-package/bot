@@ -1,8 +1,6 @@
 package knowledge
 
-import (
-	"time"
-)
+import "time"
 
 type RetrievedSnippet struct {
 	BaseID   uint64  `json:"base_id"`
@@ -61,9 +59,10 @@ type KnowledgeRetrieveDebugBase struct {
 }
 
 type KnowledgeBaseRuntime struct {
-	ID     uint64
-	Name   string
-	Prompt string
+	ID              uint64
+	Name            string
+	Prompt          string
+	MaxContextChars int
 }
 
 type agentKnowledgeBinding struct {
@@ -82,6 +81,7 @@ type knowledgeBaseConfig struct {
 	Collection       string
 	EmbeddingPowerID uint64
 	ConceptGraphMode int16
+	ReviewRequired   bool
 	RetrieveLimit    int
 	ScoreThreshold   float64
 	MaxContextChars  int

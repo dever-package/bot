@@ -10,6 +10,8 @@ import (
 
 const defaultMaxNodeLength = 1200
 
+const streamingParseThresholdBytes = 8 * 1024 * 1024
+
 var textExts = map[string]bool{
 	".conf": true, ".csv": true, ".env": true, ".ini": true, ".log": true,
 	".sql": true, ".txt": true, ".xml": true, ".yaml": true, ".yml": true,
@@ -51,13 +53,17 @@ func ParseFile(req Request) (Result, error) {
 	req.NodeOverlap = normalizeNodeOverlap(req.NodeOverlap, req.MaxNodeLength)
 	content := req.Content
 	if content == "" && strings.TrimSpace(req.Path) != "" {
+		if info, err := os.Stat(req.Path); err == nil && info.Size() > streamingParseThresholdBytes {
+			return parseStreamedTextFile(req)
+		}
 		raw, err := os.ReadFile(req.Path)
 		if err != nil {
 			return Result{}, fmt.Errorf("读取文档失败: %w", err)
 		}
-		if utf8.Valid(raw) {
-			content = string(raw)
+		if !utf8.Valid(raw) {
+			return Result{}, fmt.Errorf("文档不是有效的 UTF-8 文本")
 		}
+		content = string(raw)
 	}
 	ext := strings.ToLower(filepath.Ext(req.Name))
 	if ext == "" && strings.TrimSpace(req.Path) != "" {

@@ -80,10 +80,10 @@ import {
   fetchSpacePowerForm,
   fetchSpacePowers,
   fetchSpaceRunStatus,
+  generateSpaceCanvasNodeTitle,
   submitSpaceCanvasFeedback,
   runSpaceCanvas,
   saveSpaceCanvasContent,
-  saveSpaceCanvasMaterial,
   sendSpaceMessage,
 } from "./space-api";
 import { useCanvasAutosave, type CanvasSaveStatus } from "./space-autosave";
@@ -165,11 +165,12 @@ import {
   type FlowFeedbackRequester,
   type NodeFeedbackRecord,
 } from "./space-feedback";
-import { uploadAssetContent, uploadSpaceFiles } from "./space-upload";
+import { uploadSpaceFiles } from "./space-upload";
 import {
   assetCateById,
   createLocalNode,
   defaultAssetCateId,
+  defaultCanvasNodeTitle,
   documentPreview,
   documentText,
   emptyCanvasState,
@@ -178,6 +179,7 @@ import {
   looseRichJSONText,
   nextCanvasNodeNo,
   normalizeCanvasNodeIdentities,
+  normalizeProjectAsset,
   relatedFlows,
   richDocument,
   visibleAssetCates,
@@ -221,7 +223,10 @@ import {
   normalizeEnergonOutput,
 } from "./space-content-view";
 import { plainMarkdownTextFromRichOutput } from "./space-content-output";
-import { resolvePowerPresentation } from "./space-power-presentation";
+import {
+  isVideoComposePowerType,
+  resolvePowerPresentation,
+} from "./space-power-presentation";
 import {
   firstAvailablePower,
   syncCanvasStoryboardDerivedGroups,
@@ -237,6 +242,7 @@ import {
   type StoryboardNodeStatus,
 } from "./space-storyboard-node";
 import { NodeDetailDialog } from "./node-detail/node-detail-dialog";
+import { VideoComposeView } from "./space-video-compose-view";
 const { normalizeAgentResultOutputValue } = getCompatModule(
   "@/lib/agent-result-protocol",
 ) as {
@@ -420,6 +426,7 @@ export function WorkSpacePage() {
   } | null>(null);
   const pendingImportNodeRef = useRef<SpaceCanvasNode | null>(null);
   const requestedAssetDetailsRef = useRef<Set<number>>(new Set());
+  const requestedNodeTitlesRef = useRef<Set<string>>(new Set());
   const appliedCanvasRunsRef = useRef<Set<string>>(new Set());
   const changedCanvasKeysRef = useRef<Set<number>>(new Set());
   const startFlowFeedbackRef = useRef<{
@@ -440,6 +447,73 @@ export function WorkSpacePage() {
       setCanvases: setCanvasStates,
       onError: handleCanvasSaveError,
     });
+
+  const requestGeneratedNodeTitle = useCallback(
+    (
+      assetCateId: number,
+      node: SpaceCanvasNode,
+      result: CanvasNodeResultRef,
+    ) => {
+      if (!shouldGenerateCanvasNodeTitle(node, result)) {
+        return;
+      }
+      const versionId = canvasNodeResultVersionId(result);
+      const requestKey = `${node.id}:${versionId}`;
+      if (requestedNodeTitlesRef.current.has(requestKey)) {
+        return;
+      }
+      requestedNodeTitlesRef.current.add(requestKey);
+      const expectedTitle = node.title.trim();
+      void generateSpaceCanvasNodeTitle({
+        projectId,
+        nodeKey: node.id,
+        versionId,
+        prompt: readNodeComposerDraft(node).prompt,
+      })
+        .then((generated) => {
+          const title = generated.title.trim();
+          if (
+            !title ||
+            title === expectedTitle ||
+            generated.versionId !== versionId
+          ) {
+            return;
+          }
+          setCanvasStates((current) => {
+            const key = String(assetCateId);
+            const canvas = current[key];
+            if (!canvas) {
+              return current;
+            }
+            const currentNode = canvas.nodes.find(
+              (item) => item.id === node.id,
+            );
+            if (
+              !currentNode ||
+              currentNode.titleMode !== "auto" ||
+              currentNode.title.trim() !== expectedTitle ||
+              !isDefaultCanvasNodeTitle(currentNode)
+            ) {
+              return current;
+            }
+            changedCanvasKeysRef.current.add(assetCateId);
+            return {
+              ...current,
+              [key]: {
+                ...canvas,
+                nodes: canvas.nodes.map((item) =>
+                  item.id === node.id ? { ...item, title } : item,
+                ),
+              },
+            };
+          });
+        })
+        .catch(() => {
+          requestedNodeTitlesRef.current.delete(requestKey);
+        });
+    },
+    [projectId],
+  );
 
   useEffect(() => {
     if (changedCanvasKeysRef.current.size === 0) {
@@ -481,6 +555,7 @@ export function WorkSpacePage() {
         },
       );
       requestedAssetDetailsRef.current = new Set();
+      requestedNodeTitlesRef.current = new Set();
       appliedCanvasRunsRef.current = new Set();
       await loadWorkspaceCanvasExecutions(projectId, nextSpace, canvases);
     } catch (err) {
@@ -700,6 +775,9 @@ export function WorkSpacePage() {
   const updateNodeResult = useCallback<NodeResultSetter>(
     (nodeId, patch) => {
       updateCanvasNodeResult(Number(activeCate?.id || 0), nodeId, patch);
+      setNodeDetail((current) =>
+        current?.id === nodeId ? { ...current, ...patch } : current,
+      );
       if (typeof patch.title === "string" && patch.title.trim()) {
         updateActiveCanvas((canvas) => ({
           ...canvas,
@@ -908,6 +986,8 @@ export function WorkSpacePage() {
           onAssetCreated: upsertSpaceAsset,
           setRunningNode: setRunningNodes,
           requestFlowFeedback: requestStartFlowFeedback,
+          requestNodeTitle: (node, result) =>
+            requestGeneratedNodeTitle(activeCate.id, node, result),
         };
         await runCanvasFromStartNode(runInput);
         await persistCanvasRunSnapshot(runInput);
@@ -942,6 +1022,7 @@ export function WorkSpacePage() {
       canvasStates,
       clearNodeFeedbackRecords,
       projectId,
+      requestGeneratedNodeTitle,
       requestStartFlowFeedback,
       persistCanvasRunSnapshot,
       setRunningNodes,
@@ -986,6 +1067,8 @@ export function WorkSpacePage() {
         onAssetCreated: upsertSpaceAsset,
         setRunningNode: setRunningNodes,
         requestFlowFeedback: requestStartFlowFeedback,
+        requestNodeTitle: (resultNode, result) =>
+          requestGeneratedNodeTitle(activeCate.id, resultNode, result),
       };
       await runCanvasFromStartNode(runInput);
       await persistCanvasRunSnapshot(runInput);
@@ -998,6 +1081,7 @@ export function WorkSpacePage() {
       canvasModel.nodes,
       canvasStates,
       projectId,
+      requestGeneratedNodeTitle,
       requestStartFlowFeedback,
       persistCanvasRunSnapshot,
       setRunningNodes,
@@ -1541,28 +1625,16 @@ export function WorkSpacePage() {
     files: File[],
     param: PowerParam,
   ): Promise<UploadPreview[]> {
-    const previews = await uploadSpaceFiles(
-      projectId,
+    const previews = await uploadSpaceFiles({
+      projectID: projectId,
+      teamID: Number(space?.project.team_id || 0),
       files,
-      param.upload_rule_id,
-    );
-    const assetCateId = requireRealAssetCateId(Number(activeCate.id || 0));
+      ruleID: param.upload_rule_id,
+    });
     for (const preview of previews) {
-      try {
-        const asset = await saveSpaceCanvasMaterial({
-          projectId,
-          assetCateId,
-          name: preview.name || activeCate.name,
-          kind: String(preview.kind || activeCate.kind || "file"),
-          content: uploadAssetContent(preview),
-          requestId: createCanvasSaveRequestId("import", nodeId, preview.name),
-        });
-        upsertSpaceAsset({
-          ...asset,
-          role: "material",
-        });
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "导入资产保存失败");
+      const asset = normalizeProjectAsset(preview.asset);
+      if (asset.id) {
+        upsertSpaceAsset(asset);
       }
     }
     return previews;
@@ -1909,6 +1981,18 @@ export function WorkSpacePage() {
           canvasReferenceItems={canvasReferenceItems.filter(
             (item) => item.source !== "current" || item.id !== nodeDetail.id,
           )}
+          onNodeDraftChange={(draft) => {
+            if (!draft) {
+              return;
+            }
+            updateNodeComposerDraft(nodeDetail.id, draft);
+            setNodeDetail((current) =>
+              current?.id === nodeDetail.id
+                ? { ...current, composerDraft: draft }
+                : current,
+            );
+          }}
+          onRunNode={runBackendSingleNode}
           onAssetUpdated={(asset) => {
             const normalizedAsset = mergeProjectAssetVersionHistory(
               asset,
@@ -3626,6 +3710,10 @@ type CanvasStartRunInput = {
   onAssetCreated: (asset: ProjectAsset) => void;
   setRunningNode?: RunningNodeSetter;
   requestFlowFeedback?: FlowFeedbackRequester;
+  requestNodeTitle?: (
+    node: SpaceCanvasNode,
+    result: CanvasNodeResultRef,
+  ) => void;
   canvasRun?: CanvasRunRef | null;
 };
 
@@ -4806,8 +4894,48 @@ function applyBackendCanvasRunResults(
     if (patch.asset) {
       input.onAssetCreated(patch.asset);
     }
+    input.requestNodeTitle?.(patchedNode, result);
   }
   return applied;
+}
+
+function shouldGenerateCanvasNodeTitle(
+  node: SpaceCanvasNode,
+  result: CanvasNodeResultRef,
+) {
+  if (
+    node.type !== "power" ||
+    node.titleMode !== "auto" ||
+    node.storyboardItem ||
+    result.status !== "success" ||
+    canvasNodeResultVersionId(result) <= 0 ||
+    !isDefaultCanvasNodeTitle(node)
+  ) {
+    return false;
+  }
+  return (
+    resolvePowerPresentation(node.power, node.kind, node.outputType)
+      .viewMode !== "storyboard"
+  );
+}
+
+function isDefaultCanvasNodeTitle(node: SpaceCanvasNode) {
+  const nodeNo = Number(node.nodeNo || 0);
+  return (
+    nodeNo > 0 &&
+    node.title.trim() === defaultCanvasNodeTitle(node, nodeNo).trim()
+  );
+}
+
+function canvasNodeResultVersionId(result: CanvasNodeResultRef) {
+  return Number(
+    result.version?.id ||
+      result.asset?.version?.id ||
+      result.asset?.version_id ||
+      (result.result as any)?.version?.id ||
+      (result.result as any)?.asset?.version?.id ||
+      0,
+  );
 }
 
 function canvasNodeResultApplyKey(result: CanvasNodeResultRef) {
@@ -7636,6 +7764,12 @@ function NodeSelectionOverlays({
   if (node.type === "function") {
     return resizer;
   }
+  if (
+    node.type === "power" &&
+    isVideoComposePowerType(node.power, node.kind, node.outputType)
+  ) {
+    return resizer;
+  }
   if (!selected && node.type !== "flow") {
     return resizer;
   }
@@ -8532,7 +8666,19 @@ function NodeBottomSettings({
     files: File[],
     param: PowerParam,
   ): Promise<UploadPreview[]> {
-    return uploadSpaceFiles(projectId, files, param.upload_rule_id);
+    const previews = await uploadSpaceFiles({
+      projectID: projectId,
+      teamID: Number(space?.project.team_id || 0),
+      files,
+      ruleID: param.upload_rule_id,
+    });
+    for (const preview of previews) {
+      const asset = normalizeProjectAsset(preview.asset);
+      if (asset.id) {
+        onAssetCreated?.(asset);
+      }
+    }
+    return previews;
   }
 
   async function selectPowerSource(targetId: number) {
@@ -9360,8 +9506,15 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
       ? resolvePowerPresentation(node.power, node.kind, node.outputType)
       : null;
   const isStoryboardPower = powerPresentation?.viewMode === "storyboard";
+  const isVideoComposePower = powerPresentation?.viewMode === "video_compose";
   const canvasReferenceItems = ((data as any).canvasReferenceItems ||
     []) as ComposerAssetItem[];
+  const onNodeDraftChange = (data as any).onNodeDraftChange as
+    | NodeDraftSetter
+    | undefined;
+  const onRunBackendNode = (data as any).onRunBackendNode as
+    | BackendNodeRunner
+    | undefined;
 
   if (node.type === "group") {
     const members = ((data as any).groupMembers || []) as SpaceCanvasNode[];
@@ -10029,6 +10182,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
             : "empty";
     const showStreamText = Boolean(
       !isStoryboardPower &&
+      !isVideoComposePower &&
       runningNode?.streamStarted &&
       runningNode.streamText &&
       runningNode.status !== "success",
@@ -10046,9 +10200,13 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
       ? { text: runningNode?.streamText || "" }
       : nodeEnergonOutput(node);
     const hasPowerContent =
-      isStoryboardPower || showStreamText || storyboardHasResult;
+      isStoryboardPower ||
+      isVideoComposePower ||
+      showStreamText ||
+      storyboardHasResult;
     const hasPowerMedia =
       !isStoryboardPower &&
+      !isVideoComposePower &&
       Boolean(
         preview.imageUrl ||
         preview.videoUrl ||
@@ -10062,6 +10220,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
       selected ? "is-selected" : "",
       isPowerRunning ? "is-running" : "",
       isStoryboardPower ? "is-storyboard" : "",
+      isVideoComposePower ? "is-video-compose" : "",
       hasPowerContent ? "has-content" : "",
       hasPowerMedia ? "has-media" : "",
     ]
@@ -10112,7 +10271,44 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
               />
             </svg>
           ) : null}
-          {isStoryboardPower ? (
+          {isVideoComposePower ? (
+            <VideoComposeView
+              composition={node.composerDraft?.videoComposition}
+              referenceItems={canvasReferenceItems.filter(
+                (item) => item.source !== "current" || item.id !== node.id,
+              )}
+              running={isPowerRunning}
+              onChange={
+                onNodeDraftChange
+                  ? (videoComposition) =>
+                      onNodeDraftChange(node.id, {
+                        ...(node.composerDraft || {}),
+                        videoComposition,
+                      })
+                  : undefined
+              }
+              onRun={
+                onRunBackendNode
+                  ? (videoComposition) => {
+                      void onRunBackendNode({
+                        ...node,
+                        composerDraft: {
+                          ...(node.composerDraft || {}),
+                          videoComposition,
+                        },
+                      }).catch((error) =>
+                        toast.error(
+                          error instanceof Error ? error.message : "视频合成失败",
+                        ),
+                      );
+                    }
+                  : undefined
+              }
+              onOpenDetail={
+                onShowNodeDetail ? () => onShowNodeDetail(node) : undefined
+              }
+            />
+          ) : isStoryboardPower ? (
             <StoryboardNodeContent
               output={
                 isPowerRunning
@@ -10170,7 +10366,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
           position={Position.Right}
           className="is-out"
         />
-        {isStoryboardPower ? null : (
+        {isStoryboardPower || isVideoComposePower ? null : (
           <NodeQuickDetailButton
             node={node}
             onShowNodeDetail={onShowNodeDetail}

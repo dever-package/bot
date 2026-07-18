@@ -9,6 +9,7 @@ import type {
   AgentChatInteractionResponse,
   AgentChatSuggestion,
 } from "./interaction";
+import { AgentChatTooltip } from "./tooltip";
 
 export function AgentChatInteractionView({
   interaction,
@@ -56,20 +57,20 @@ export function AgentChatSuggestions({
   return (
     <div className="agent-chat-suggestions mt-5 flex flex-wrap gap-2">
       {suggestions.map((suggestion) => (
-        <button
-          key={suggestion.prompt}
-          type="button"
-          disabled={disabled}
-          title={suggestion.prompt}
-          className={cn(
-            "group inline-flex min-h-9 max-w-full items-center gap-1.5 rounded-lg border bg-background px-3 py-2 text-left text-sm leading-5 text-foreground shadow-sm transition-colors",
-            "hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50",
-          )}
-          onClick={() => onSelect(suggestion)}
-        >
-          <span className="truncate">{suggestion.label}</span>
-          <ArrowRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-        </button>
+        <AgentChatTooltip key={suggestion.prompt} label={suggestion.prompt}>
+          <button
+            type="button"
+            disabled={disabled}
+            className={cn(
+              "group inline-flex min-h-9 max-w-full items-center gap-1.5 rounded-lg border bg-background px-3 py-2 text-left text-sm leading-5 text-foreground shadow-sm transition-colors",
+              "hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50",
+            )}
+            onClick={() => onSelect(suggestion)}
+          >
+            <span className="truncate">{suggestion.label}</span>
+            <ArrowRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+          </button>
+        </AgentChatTooltip>
       ))}
     </div>
   );

@@ -15,11 +15,19 @@ type indexStageResult struct {
 
 type indexStageDetail map[string]indexStageResult
 
-func markDocumentIndexStage(ctx context.Context, docID uint64, stage string, status string, message string) {
-	if docID == 0 {
+func markDocumentIndexStage(ctx context.Context, docID uint64, indexVersion int, stage string, status string, message string) {
+	if docID == 0 || indexVersion <= 0 {
 		return
 	}
-	detail := currentDocumentStageDetail(ctx, docID)
+	doc := agentmodel.NewKnowledgeDocModel().Find(ctx, map[string]any{
+		"id":            docID,
+		"index_version": indexVersion,
+		"index_status":  agentmodel.KnowledgeIndexStatusRunning,
+	})
+	if doc == nil {
+		return
+	}
+	detail := parseIndexStageDetail(doc.IndexStageDetail)
 	stage = strings.TrimSpace(stage)
 	if stage == "" {
 		stage = agentmodel.KnowledgeIndexStagePending
@@ -32,7 +40,11 @@ func markDocumentIndexStage(ctx context.Context, docID uint64, stage string, sta
 		"index_stage":        stage,
 		"index_stage_detail": jsonText(detail),
 	}
-	agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": docID}, values)
+	agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{
+		"id":            docID,
+		"index_version": indexVersion,
+		"index_status":  agentmodel.KnowledgeIndexStatusRunning,
+	}, values)
 }
 
 func currentDocumentStageDetail(ctx context.Context, docID uint64) indexStageDetail {
@@ -68,10 +80,7 @@ func beginKnowledgeDocIndex(ctx context.Context, doc *agentmodel.KnowledgeDoc) (
 	if doc == nil || doc.ID == 0 {
 		return 1, false
 	}
-	indexVersion := normalizedDocIndexVersion(doc.IndexVersion)
-	if doc.IndexStatus != agentmodel.KnowledgeIndexStatusPending {
-		indexVersion = nextDocIndexVersion(doc.IndexVersion)
-	}
+	indexVersion := nextDocIndexVersion(doc.IndexVersion)
 	doc.IndexVersion = indexVersion
 	updated := agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{
 		"id":           doc.ID,
@@ -86,40 +95,15 @@ func beginKnowledgeDocIndex(ctx context.Context, doc *agentmodel.KnowledgeDoc) (
 	return indexVersion, updated > 0
 }
 
-func markKnowledgeDocPending(ctx context.Context, docID uint64, values map[string]any) {
-	if docID == 0 {
-		return
+func isKnowledgeDocIndexActive(ctx context.Context, docID uint64, indexVersion int) bool {
+	if docID == 0 || indexVersion <= 0 || ctx.Err() != nil {
+		return false
 	}
-	if values == nil {
-		values = map[string]any{}
-	}
-	values["index_status"] = agentmodel.KnowledgeIndexStatusPending
-	values["index_stage"] = agentmodel.KnowledgeIndexStagePending
-	values["index_stage_detail"] = ""
-	values["error_message"] = ""
-	values["node_count"] = 0
-	if _, exists := values["index_version"]; !exists {
-		values["index_version"] = incrementDocIndexVersion(ctx, docID)
-	}
-	agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": docID}, values)
-}
-
-func incrementDocIndexVersion(ctx context.Context, docID uint64) int {
-	doc := agentmodel.NewKnowledgeDocModel().Find(ctx, map[string]any{"id": docID})
-	if doc == nil {
-		return 1
-	}
-	if doc.IndexStatus == agentmodel.KnowledgeIndexStatusPending {
-		return normalizedDocIndexVersion(doc.IndexVersion)
-	}
-	return nextDocIndexVersion(doc.IndexVersion)
-}
-
-func normalizedDocIndexVersion(current int) int {
-	if current <= 0 {
-		return 1
-	}
-	return current
+	return agentmodel.NewKnowledgeDocModel().Find(ctx, map[string]any{
+		"id":            docID,
+		"index_version": indexVersion,
+		"index_status":  agentmodel.KnowledgeIndexStatusRunning,
+	}) != nil
 }
 
 func nextDocIndexVersion(current int) int {
@@ -130,15 +114,16 @@ func nextDocIndexVersion(current int) int {
 }
 
 func appendIndexWarning(current string, message string) string {
+	const maxIndexWarningChars = 4000
 	message = strings.TrimSpace(message)
 	if message == "" {
 		return strings.TrimSpace(current)
 	}
 	current = strings.TrimSpace(current)
 	if current == "" {
-		return message
+		return truncateText(message, maxIndexWarningChars)
 	}
-	return current + "；" + message
+	return truncateText(current+"；"+message, maxIndexWarningChars)
 }
 
 func firstFailedIndexStage(ctx context.Context, docID uint64) string {

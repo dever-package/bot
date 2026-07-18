@@ -486,12 +486,29 @@ export function AssetReferenceDialog({
     setUploading(true);
     setUploadError("");
     try {
-      const previews = onUploadFiles
-        ? await onUploadFiles(files, param)
-        : files.map(fileToUploadPreview);
-      onLocalUpload(previews);
-      setTab("asset");
-      setRoleFilter("material");
+      const previews: UploadPreview[] = [];
+      const errors: string[] = [];
+      if (onUploadFiles) {
+        for (const file of files) {
+          try {
+            previews.push(...(await onUploadFiles([file], param)));
+          } catch (error) {
+            errors.push(
+              `${file.name}：${error instanceof Error ? error.message : "上传失败"}`,
+            );
+          }
+        }
+      } else {
+        previews.push(...files.map(fileToUploadPreview));
+      }
+      if (previews.length > 0) {
+        onLocalUpload(previews);
+        setTab("asset");
+        setRoleFilter("material");
+      }
+      if (errors.length > 0) {
+        setUploadError(errors.join("；"));
+      }
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "上传失败");
     } finally {

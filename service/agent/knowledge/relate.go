@@ -23,7 +23,6 @@ const (
 )
 
 // autoDiscoverRelations discovers implicit relations across the knowledge base.
-// Runs as goroutine after document indexing.
 func (s Service) autoDiscoverRelations(ctx context.Context, base agentmodel.KnowledgeBase) {
 	if base.ID == 0 || base.Status != 1 {
 		return
@@ -61,8 +60,12 @@ func discoverKeywordSimilarDocs(ctx context.Context, base agentmodel.KnowledgeBa
 		Keywords map[string]struct{}
 	}
 	entries := make([]docEntry, 0, len(docs))
+	invalidDocs := unavailableKnowledgeDocIDs(ctx, knowledgeDocIDs(docs))
 	for _, doc := range docs {
 		if doc == nil || doc.ID == 0 {
+			continue
+		}
+		if _, invalid := invalidDocs[doc.ID]; invalid {
 			continue
 		}
 		kw := parseKeywordSet(doc.Keywords)
@@ -78,6 +81,11 @@ func discoverKeywordSimilarDocs(ctx context.Context, base agentmodel.KnowledgeBa
 	if len(entries) < 2 {
 		return
 	}
+	entryDocIDs := make([]uint64, 0, len(entries))
+	for _, entry := range entries {
+		entryDocIDs = append(entryDocIDs, entry.DocID)
+	}
+	rootNodeIDs := relationRootNodeIDs(ctx, base.ID, entryDocIDs)
 	edgesCreated := 0
 	for i := 0; i < len(entries) && edgesCreated < maxAutoRelations; i++ {
 		for j := i + 1; j < len(entries) && edgesCreated < maxAutoRelations; j++ {
@@ -85,8 +93,8 @@ func discoverKeywordSimilarDocs(ctx context.Context, base agentmodel.KnowledgeBa
 			if sim < minKeywordSimilarity {
 				continue
 			}
-			fromNodeID := docRootNodeID(ctx, entries[i].DocID)
-			toNodeID := docRootNodeID(ctx, entries[j].DocID)
+			fromNodeID := rootNodeIDs[entries[i].DocID]
+			toNodeID := rootNodeIDs[entries[j].DocID]
 			if fromNodeID == 0 || toNodeID == 0 || fromNodeID == toNodeID {
 				continue
 			}
@@ -108,6 +116,42 @@ func discoverKeywordSimilarDocs(ctx context.Context, base agentmodel.KnowledgeBa
 			edgesCreated++
 		}
 	}
+}
+
+func knowledgeDocIDs(rows []*agentmodel.KnowledgeDoc) []uint64 {
+	result := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		if row != nil && row.ID > 0 {
+			result = append(result, row.ID)
+		}
+	}
+	return result
+}
+
+func relationRootNodeIDs(ctx context.Context, baseID uint64, docIDs []uint64) map[uint64]uint64 {
+	docIDs = uniqueUint64s(docIDs, 0)
+	result := make(map[uint64]uint64, len(docIDs))
+	if baseID == 0 || len(docIDs) == 0 {
+		return result
+	}
+	rows := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{
+		"knowledge_base_id": baseID,
+		"doc_id":            docIDs,
+		"node_key":          "doc",
+		"node_type":         agentmodel.KnowledgeNodeTypeDoc,
+		"index_status":      agentmodel.KnowledgeIndexStatusSuccess,
+		"status":            1,
+	}, map[string]any{
+		"field":    "main.id, main.doc_id, main.index_status, main.status",
+		"page":     1,
+		"pageSize": len(docIDs),
+	})
+	for _, row := range filterAvailableKnowledgeNodes(ctx, rows) {
+		if row != nil && row.DocID > 0 {
+			result[row.DocID] = row.ID
+		}
+	}
+	return result
 }
 
 // jaccardSimilarity computes Jaccard similarity between two string sets.
@@ -178,6 +222,11 @@ func discoverCooccurrenceRelations(ctx context.Context, base agentmodel.Knowledg
 	if len(pairCount) == 0 {
 		return
 	}
+	pairNodeIDs := make([]uint64, 0, len(pairCount)*2)
+	for pair := range pairCount {
+		pairNodeIDs = append(pairNodeIDs, pair.a, pair.b)
+	}
+	nodeMap := knowledgeGraphNodeMap(ctx, base.ID, pairNodeIDs)
 	edgesCreated := 0
 	for pair, count := range pairCount {
 		if edgesCreated >= maxAutoRelations {
@@ -197,14 +246,8 @@ func discoverCooccurrenceRelations(ctx context.Context, base agentmodel.Knowledg
 		if rate < cooccurrenceMinRate {
 			continue
 		}
-		fromNode := agentmodel.NewKnowledgeNodeModel().Find(ctx, map[string]any{
-			"id":     pair.a,
-			"status": 1,
-		})
-		toNode := agentmodel.NewKnowledgeNodeModel().Find(ctx, map[string]any{
-			"id":     pair.b,
-			"status": 1,
-		})
+		fromNode := nodeMap[pair.a]
+		toNode := nodeMap[pair.b]
 		if fromNode == nil || toNode == nil || fromNode.NodeType != toNode.NodeType {
 			continue
 		}

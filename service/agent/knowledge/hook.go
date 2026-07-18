@@ -15,6 +15,11 @@ import (
 
 type KnowledgeHook struct{}
 
+const (
+	knowledgeIndexConfigChangedKey     = "_knowledge_index_config_changed"
+	knowledgePreviousEmbeddingPowerKey = "_knowledge_previous_embedding_power_id"
+)
+
 func (KnowledgeHook) ProviderBeforeSaveKnowledgeCate(_ *server.Context, params []any) any {
 	record := cloneRecord(params)
 	keepRecordFields(record, knowledgeCateSaveFields)
@@ -100,6 +105,9 @@ func (KnowledgeHook) ProviderBeforeSaveKnowledgeBase(c *server.Context, params [
 	}
 	existingBase := existingKnowledgeBase(c.Context(), util.ToUint64(record["id"]))
 	cateID := knowledgeBaseCateID(record, existingBase)
+	if existingBase != nil && existingBase.CateID != cateID {
+		panic(frontaction.NewFieldError("form.cate_id", "知识库创建后不能修改分类；如需调整，请新建知识库并迁移文件。"))
+	}
 	if !partial || shouldNormalize(record, "cate_id", partial) || shouldNormalize(record, "collection", partial) {
 		record["collection"] = knowledgeCollectionName(cateID)
 	}
@@ -115,6 +123,9 @@ func (KnowledgeHook) ProviderBeforeSaveKnowledgeBase(c *server.Context, params [
 	}
 	if shouldNormalize(record, "concept_graph_enabled", partial) {
 		record["concept_graph_enabled"] = normalizeKnowledgeMode(record["concept_graph_enabled"])
+	}
+	if shouldNormalize(record, "review_required", partial) {
+		record["review_required"] = util.ToBool(record["review_required"])
 	}
 	knowledgeMode := knowledgeModeValue(record, existingBase)
 	applyKnowledgeMode := !partial || shouldNormalize(record, "concept_graph_enabled", partial)
@@ -145,6 +156,14 @@ func (KnowledgeHook) ProviderBeforeSaveKnowledgeBase(c *server.Context, params [
 			}
 		}
 	}
+	if err := validateKnowledgeCategoryEmbeddingPower(
+		c.Context(),
+		cateID,
+		util.ToUint64(record["id"]),
+		knowledgeEmbeddingPowerIDValue(record, existingBase),
+	); err != nil {
+		panic(frontaction.NewFieldError("form.embedding_power_id", err.Error()))
+	}
 	defaultInt16(record, "concept_graph_enabled", int16(agentmodel.KnowledgeModeLight), partial)
 	if shouldNormalize(record, "node_max_length", partial) {
 		record["node_max_length"] = normalizeNodeMaxLength(record["node_max_length"])
@@ -173,6 +192,15 @@ func (KnowledgeHook) ProviderBeforeSaveKnowledgeBase(c *server.Context, params [
 	}
 	defaultInt16(record, "status", 1, partial)
 	defaultInt(record, "sort", 100, partial)
+	if existingBase != nil && knowledgeBaseIndexConfigChanged(record, existingBase) {
+		if activeKnowledgeIndexLease(c.Context(), existingBase.ID) {
+			panic(frontaction.NewFieldError("form.concept_graph_enabled", "知识库正在索引中，请完成后再修改索引配置。"))
+		}
+		record[knowledgeIndexConfigChangedKey] = true
+	}
+	if existingBase != nil && knowledgeEmbeddingPowerIDValue(record, existingBase) != existingBase.EmbeddingPowerID {
+		record[knowledgePreviousEmbeddingPowerKey] = existingBase.EmbeddingPowerID
+	}
 	return record
 }
 
@@ -203,6 +231,81 @@ func knowledgeIndexPowerIDValue(record map[string]any, existing *agentmodel.Know
 		return existing.IndexPowerID
 	}
 	return 0
+}
+
+func knowledgeEmbeddingPowerIDValue(record map[string]any, existing *agentmodel.KnowledgeBase) uint64 {
+	if value, exists := record["embedding_power_id"]; exists {
+		return util.ToUint64(value)
+	}
+	if existing != nil {
+		return existing.EmbeddingPowerID
+	}
+	return 0
+}
+
+func validateKnowledgeCategoryEmbeddingPower(ctx context.Context, cateID uint64, baseID uint64, powerID uint64) error {
+	if cateID == 0 || powerID == 0 {
+		return nil
+	}
+	filters := map[string]any{
+		"cate_id":            cateID,
+		"embedding_power_id": map[string]any{"gt": 0},
+	}
+	if baseID > 0 {
+		filters["id"] = map[string]any{"neq": baseID}
+	}
+	other := agentmodel.NewKnowledgeBaseModel().Find(ctx, filters)
+	if other != nil && other.EmbeddingPowerID != powerID {
+		return fmt.Errorf("同一知识库分类共享向量集合，必须使用相同的向量能力。")
+	}
+	return nil
+}
+
+func knowledgeBaseIndexConfigChanged(record map[string]any, existing *agentmodel.KnowledgeBase) bool {
+	if existing == nil {
+		return false
+	}
+	return recordUint64(record, "parser_service_id", existing.ParserServiceID) != existing.ParserServiceID ||
+		recordUint64(record, "index_power_id", existing.IndexPowerID) != existing.IndexPowerID ||
+		recordInt16(record, "concept_graph_enabled", existing.ConceptGraphEnabled) != existing.ConceptGraphEnabled ||
+		recordUint64(record, "embedding_power_id", existing.EmbeddingPowerID) != existing.EmbeddingPowerID ||
+		recordInt(record, "node_max_length", existing.NodeMaxLength) != existing.NodeMaxLength ||
+		recordInt(record, "node_split_overlap", existing.NodeSplitOverlap) != existing.NodeSplitOverlap
+}
+
+func recordUint64(record map[string]any, field string, fallback uint64) uint64 {
+	if value, exists := record[field]; exists {
+		return util.ToUint64(value)
+	}
+	return fallback
+}
+
+func recordInt(record map[string]any, field string, fallback int) int {
+	if value, exists := record[field]; exists {
+		return util.ToIntDefault(value, fallback)
+	}
+	return fallback
+}
+
+func recordInt16(record map[string]any, field string, fallback int16) int16 {
+	return int16(recordInt(record, field, int(fallback)))
+}
+
+func markKnowledgeBaseIndexPending(ctx context.Context, baseID uint64) {
+	if baseID == 0 {
+		return
+	}
+	agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{
+		"knowledge_base_id": baseID,
+		"status":            1,
+	}, map[string]any{
+		"index_status":  agentmodel.KnowledgeIndexStatusPending,
+		"error_message": "",
+	})
+	agentmodel.NewKnowledgeBaseModel().Update(ctx, map[string]any{"id": baseID}, map[string]any{
+		"index_status":  agentmodel.KnowledgeIndexStatusPending,
+		"error_message": "",
+	})
 }
 
 func normalizeParserProvider(value any) string {
@@ -366,6 +469,23 @@ func (KnowledgeHook) ProviderAfterSaveKnowledgeBase(c *server.Context, params []
 		return nil
 	}
 	syncKnowledgeBaseVectorConfig(c.Context(), baseID, payload)
+	record, hasRecord := firstPayloadRecord(payload)
+	if hasRecord && util.ToBool(record[knowledgeIndexConfigChangedKey]) {
+		markKnowledgeBaseIndexPending(c.Context(), baseID)
+	}
+	if hasRecord {
+		if previousPowerID, changed := record[knowledgePreviousEmbeddingPowerKey]; changed {
+			base := existingKnowledgeBase(c.Context(), baseID)
+			if base != nil {
+				if err := resetKnowledgeBaseVectorsForEmbeddingChange(c.Context(), *base, util.ToUint64(previousPowerID)); err != nil {
+					agentmodel.NewKnowledgeBaseModel().Update(c.Context(), map[string]any{"id": baseID}, map[string]any{
+						"error_message": "清理旧向量索引失败: " + err.Error(),
+					})
+				}
+			}
+		}
+	}
+	StartLightPendingIndex(c.Context(), baseID)
 	return nil
 }
 
@@ -485,6 +605,7 @@ var (
 		"parser_service_id",
 		"index_power_id",
 		"concept_graph_enabled",
+		"review_required",
 		"embedding_power_id",
 		"node_max_length",
 		"node_split_overlap",

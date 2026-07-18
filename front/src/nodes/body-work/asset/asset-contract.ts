@@ -7,6 +7,7 @@ export const assetSourceSpecs: ReadonlyArray<{
   { key: "project", label: "项目" },
   { key: "tool", label: "工具" },
   { key: "dialogue", label: "对话" },
+  { key: "upload", label: "上传" },
 ];
 
 export const assetRoleSpecs: ReadonlyArray<{

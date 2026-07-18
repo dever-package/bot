@@ -82,8 +82,8 @@ func graphCacheSet(baseID uint64, query string, plan retrievalPlan) {
 
 func graphCacheDelete(key uint64) {
 	graphCacheMu.Lock()
+	defer graphCacheMu.Unlock()
 	delete(graphCache, key)
-	graphCacheMu.Unlock()
 	for i, k := range graphCacheKeys {
 		if k == key {
 			graphCacheKeys = append(graphCacheKeys[:i], graphCacheKeys[i+1:]...)

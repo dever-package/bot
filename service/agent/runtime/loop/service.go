@@ -15,6 +15,7 @@ import (
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
 	runtimecontext "github.com/dever-package/bot/service/agent/runtime/context"
 	runtimeinput "github.com/dever-package/bot/service/agent/runtime/input"
+	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
 	runtimereference "github.com/dever-package/bot/service/agent/runtime/reference"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
@@ -58,22 +59,12 @@ type Service struct {
 	chat       runtimechat.Service
 	streams    frontstream.Service
 	runs       *runRegistry
-	dispatcher RunDispatcher
+	dispatcher runtimequeue.Dispatcher
 }
 
 func NewService() Service {
-	return NewServiceWithDispatcherFactory(defaultRunDispatcher)
-}
-
-// NewServiceWithDispatcherFactory gives an adapter both stable runtime
-// contracts it needs: the executor activity and the durable backlog used for
-// startup reconciliation. Passing nil keeps the built-in database scheduler.
-func NewServiceWithDispatcherFactory(factory RunDispatcherFactory) Service {
 	service := newService()
-	if factory == nil {
-		factory = defaultRunDispatcher
-	}
-	service.dispatcher = factory(service, NewRunBacklog())
+	service.dispatcher = defaultRunDispatcher(service, newRunBacklog())
 	return service
 }
 

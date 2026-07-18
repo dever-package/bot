@@ -30,10 +30,14 @@ import {
   useAgentChatMediaInspector,
 } from "./media-inspector";
 import type {
+  AgentChatArtifactActionRenderer,
   AgentChatMessageActionContext,
   AgentChatRuntimeApis,
 } from "./types";
-import type { ReferenceProvider } from "./reference";
+import type {
+  ReferenceProvider,
+  ReferenceUploadedFile,
+} from "./reference";
 import { AGENT_CHAT_LAYER_CLASS, AGENT_CHAT_LAYER_Z_INDEX } from "./layers";
 
 export type AgentChatPanelProps = {
@@ -46,7 +50,15 @@ export type AgentChatPanelProps = {
   fullScreen?: boolean;
   lazySession?: boolean;
   mobileSessionNavigation?: boolean;
+  appearance?: "default" | "body";
+  sidebarTitle?: ReactNode;
   clipboardImageUploadRuleId?: number;
+  uploadBizKey?: string;
+  uploadBizName?: string;
+  allowResourceLibrary?: boolean;
+  onUploadedFiles?: (
+    files: ReferenceUploadedFile[],
+  ) => void | Promise<void>;
   blockMs?: number;
   assistantApi: AgentChatApi;
   runtimeApi: AgentChatRuntimeApis;
@@ -55,6 +67,7 @@ export type AgentChatPanelProps = {
   renderMessageActions?: (
     message: AgentChatMessageActionContext,
   ) => ReactNode;
+  renderArtifactActions?: AgentChatArtifactActionRenderer;
   onClose?: () => void;
 };
 
@@ -164,13 +177,20 @@ export function AgentChatPanel({
   fullScreen = false,
   lazySession = false,
   mobileSessionNavigation = false,
+  appearance = "default",
+  sidebarTitle,
   clipboardImageUploadRuleId = 0,
+  uploadBizKey,
+  uploadBizName,
+  allowResourceLibrary = true,
+  onUploadedFiles,
   blockMs = 1000,
   assistantApi,
   runtimeApi,
   requestScope,
   referenceProviders,
   renderMessageActions,
+  renderArtifactActions,
   onClose,
 }: AgentChatPanelProps) {
   const controller = useAgentChatStore({
@@ -214,6 +234,7 @@ export function AgentChatPanel({
     <AgentChatMediaPreviewProvider controller={mediaInspector}>
       <div
         data-agent-chat-layer="true"
+        data-agent-chat-appearance={appearance}
         data-media-inspector-open={mediaInspector.open ? "true" : undefined}
         className={cn(
           "relative flex min-h-0 w-full flex-col overflow-hidden bg-background md:flex-row",
@@ -225,6 +246,7 @@ export function AgentChatPanel({
       >
         <Sidebar
           agentName={agentName}
+          title={sidebarTitle}
           agentReady={Boolean(agentKey)}
           controller={controller}
           collapsed={mediaInspector.open}
@@ -234,6 +256,7 @@ export function AgentChatPanel({
           <Sidebar
             mobile
             agentName={agentName}
+            title={sidebarTitle}
             agentReady={Boolean(agentKey)}
             controller={controller}
             onOpenSession={openMobileSession}
@@ -251,7 +274,7 @@ export function AgentChatPanel({
               "md:w-[38vw] md:min-w-[360px] md:max-w-[640px] md:flex-none",
           )}
         >
-          <header className="flex h-12 shrink-0 items-center gap-2 px-3 md:h-14 md:px-6">
+          <header className="agent-chat-header flex h-12 shrink-0 items-center gap-2 px-3 md:h-14 md:px-6">
             {mobileSessionNavigation ? (
               <Button
                 type="button"
@@ -304,13 +327,21 @@ export function AgentChatPanel({
             <Thread
               controller={controller}
               clipboardImageUploadRuleId={clipboardImageUploadRuleId}
+              uploadBizKey={uploadBizKey}
+              uploadBizName={uploadBizName}
+              allowResourceLibrary={allowResourceLibrary}
+              onUploadedFiles={onUploadedFiles}
               referenceProviders={referenceProviders}
               renderMessageActions={renderMessageActions}
+              renderArtifactActions={renderArtifactActions}
             />
           </RuntimeProvider>
         </section>
 
-        <AgentChatMediaInspector controller={mediaInspector} />
+        <AgentChatMediaInspector
+          controller={mediaInspector}
+          renderArtifactActions={renderArtifactActions}
+        />
       </div>
     </AgentChatMediaPreviewProvider>
   );

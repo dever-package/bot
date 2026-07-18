@@ -5,13 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimecontext "github.com/dever-package/bot/service/agent/runtime/context"
 	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
 	energonservice "github.com/dever-package/bot/service/energon"
-	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 func (s Service) generateSessionTitleAsync(sessionID uint64) {
@@ -35,24 +32,13 @@ func (s Service) generateSessionTitle(ctx context.Context, sessionID uint64) {
 	if err != nil {
 		return
 	}
-	power, err := runtimecontext.ResolveTextPower(ctx, agent.LLMPowerID)
-	if err != nil {
-		return
-	}
-	response := s.gateway.Request(ctx, energonservice.GatewayRequest{
-		RequestID: uuid.NewString(),
-		Body: map[string]any{
-			"power":   power.Key,
-			"set":     map[string]any{"role": sessionTitleRole()},
-			"input":   energonservice.PromptInput(source),
-			"options": map[string]any{"stream": false, "temperature": 0},
-		},
+	title, err := s.gateway.GenerateShortTitle(ctx, energonservice.ShortTitleRequest{
+		PowerID:  agent.LLMPowerID,
+		Role:     sessionTitleRole(),
+		Source:   source,
+		MaxRunes: 24,
 	})
-	if response.Status == botprotocol.ResponseStatusFail {
-		return
-	}
-	title := normalizeGeneratedTitle(botprotocol.AsText(botprotocol.ExtractOutput(response.Payload())["text"]))
-	if title == "" {
+	if err != nil {
 		return
 	}
 	latest := agentmodel.NewSessionModel().Find(ctx, map[string]any{
@@ -103,16 +89,4 @@ func sessionTitleRole() string {
 		"要求：6到16个汉字；不要标点；不要解释。",
 		"只输出标题文本。",
 	}, "\n")
-}
-
-func normalizeGeneratedTitle(text string) string {
-	text = strings.TrimSpace(text)
-	text = strings.Trim(text, "`\"'“”‘’")
-	text = strings.ReplaceAll(text, "\n", " ")
-	text = strings.Join(strings.Fields(text), "")
-	text = strings.Trim(text, "。.!！?？、，,：:")
-	if text == "" {
-		return ""
-	}
-	return limitText(text, 24)
 }

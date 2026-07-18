@@ -77,7 +77,7 @@ func (s Service) WorkbenchCatalog(ctx context.Context, teamID uint64) (map[strin
 	}
 	roles := make([]map[string]any, 0, len(graph.Roles))
 	for _, role := range graph.Roles {
-		if role.Status != teammodel.StatusEnabled {
+		if !isWorkbenchExecutionRole(role) {
 			continue
 		}
 		agent, exists := agents[role.AgentID]
@@ -155,7 +155,7 @@ func (s Service) ResolveWorkbenchRole(ctx context.Context, teamID uint64, roleID
 		agents[agent.ID] = agent
 	}
 	for _, role := range graph.Roles {
-		if role.ID != roleID || role.Status != teammodel.StatusEnabled {
+		if role.ID != roleID || !isWorkbenchExecutionRole(role) {
 			continue
 		}
 		agent, agentExists := agents[role.AgentID]
@@ -168,7 +168,11 @@ func (s Service) ResolveWorkbenchRole(ctx context.Context, teamID uint64, roleID
 			AgentID: agent.ID, AgentKey: agent.Key, Name: role.Name, Assignment: role.Assignment,
 		}, nil
 	}
-	return WorkbenchRoleBinding{}, fmt.Errorf("当前团队发布版本中不存在该角色")
+	return WorkbenchRoleBinding{}, fmt.Errorf("当前团队发布版本中不存在该执行角色")
+}
+
+func isWorkbenchExecutionRole(role teammodel.Role) bool {
+	return role.Status == teammodel.StatusEnabled && role.RoleType == teammodel.RoleTypeWorker
 }
 
 func (s Service) workbenchPowerBinding(ctx context.Context, releaseID uint64, graph runtimeGraph, teamPowerID uint64) (WorkbenchPowerBinding, error) {

@@ -11,6 +11,7 @@ import type {
   TeamFlow,
   TeamRole,
 } from "./types";
+import { normalizeVideoComposition } from "./space-video-compose";
 
 export type PersistedCanvasState = {
   asset_cate_id: number;
@@ -277,6 +278,12 @@ function persistedComposerDraft(value: unknown) {
   );
   if (paramValues) {
     result.param_values = paramValues;
+  }
+  const videoComposition = normalizeVideoComposition(
+    value.videoComposition ?? value.video_composition,
+  );
+  if (videoComposition && isJSONValue(videoComposition)) {
+    result.video_composition = videoComposition;
   }
   return Object.keys(result).length ? result : null;
 }

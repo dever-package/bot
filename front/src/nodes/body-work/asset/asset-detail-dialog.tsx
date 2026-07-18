@@ -272,7 +272,9 @@ function uniqueVersions(versions: AssetVersion[]) {
 
 function sourceLabel(asset: AssetRecord) {
   const prefix = assetSourceLabel(asset.sourceType);
-  return asset.sourceName ? `${prefix} / ${asset.sourceName}` : prefix;
+  return asset.sourceName && asset.sourceName !== prefix
+    ? `${prefix} / ${asset.sourceName}`
+    : prefix;
 }
 
 function isContinuable(asset: AssetRecord) {

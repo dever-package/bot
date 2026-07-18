@@ -1,19 +1,31 @@
-import { useEffect, useMemo, useState } from "react";
-import { Check, Loader2, MessagesSquare, Save } from "lucide-react";
-import { request } from "@dever/front-plugin";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { MessagesSquare } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   AgentChatPanel,
   type AgentChatPanelProps,
 } from "../../show/agent-chat/index";
 import type { AgentChatMessageActionContext } from "../../show/agent-chat/types";
-import { AssetDetailDialog } from "../asset/asset-detail-dialog";
+import type { AgentChatArtifact } from "../../show/agent-chat/artifact";
 import type { AssetRecord } from "../asset/asset-types";
+import { SaveAssetAction } from "../asset/save-asset-action";
+import {
+  BODY_UPLOAD_BIZ_KEY,
+  BODY_UPLOAD_BIZ_NAME,
+  saveBodyUploadedAssets,
+  type BodyUploadedFile,
+} from "../asset/upload-asset-api";
 import { useAssetReferenceProvider } from "../asset/asset-reference-provider";
-import { isSuccessResponse } from "../shared/api-response";
 import { WorkbenchEmpty } from "./function-page";
 import {
+  saveWorkbenchDialogueAsset,
   scopedWorkbenchApi,
-  workbenchApi,
   type WorkbenchRole,
 } from "./workbench-api";
 import { AssetContinuationNotice } from "./asset-continuation";
@@ -34,6 +46,12 @@ export function WorkbenchDialoguePage({
   const referenceProviders = useMemo(
     () => [assetReferenceProvider],
     [assetReferenceProvider],
+  );
+  const saveUploadedFiles = useCallback(
+    async (files: BodyUploadedFile[]) => {
+      await saveBodyUploadedAssets({ teamID, files });
+    },
+    [teamID],
   );
   const continuationRequestScope = useMemo(
     () =>
@@ -92,39 +110,25 @@ export function WorkbenchDialoguePage({
 
   if (!role || !chatConfig) {
     return (
-      <WorkbenchEmpty icon={MessagesSquare} title="当前团队没有可对话角色" />
+      <WorkbenchEmpty
+        icon={MessagesSquare}
+        title="当前团队没有可对话的执行角色"
+      />
     );
   }
 
+  const selectRole = (nextID: number) => {
+    setSelectedID(nextID);
+    if (
+      continuationAsset?.sourceType === "dialogue" &&
+      continuationAsset.sourceID !== nextID
+    ) {
+      onClearContinuation();
+    }
+  };
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-white">
-      <div className="flex h-14 shrink-0 items-center border-b border-[#e2e6e4] px-4 md:px-6">
-        <label className="flex min-w-0 items-center gap-3">
-          <span className="shrink-0 text-xs font-medium text-[#68716d]">
-            角色
-          </span>
-          <select
-            value={selectedID}
-            onChange={(event) => {
-              const nextID = Number(event.target.value);
-              setSelectedID(nextID);
-              if (
-                continuationAsset?.sourceType === "dialogue" &&
-                continuationAsset.sourceID !== nextID
-              ) {
-                onClearContinuation();
-              }
-            }}
-            className="h-9 min-w-0 max-w-[320px] rounded-md border border-[#d8ddda] bg-white px-3 text-sm font-medium text-[#17201c] outline-none focus:border-[#799184]"
-          >
-            {roles.map((current) => (
-              <option key={current.id} value={current.id}>
-                {roleOptionLabel(current)}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+    <div className="workbench-page workbench-dialogue-page flex h-full min-h-0 flex-col">
       {continuationAsset?.sourceType === "dialogue" ? (
         <AssetContinuationNotice
           asset={continuationAsset}
@@ -139,10 +143,44 @@ export function WorkbenchDialoguePage({
           agentName={role.name}
           contextKey={chatConfig.contextKey}
           open
+          appearance="body"
+          sidebarTitle={
+            <div className="workbench-role-picker">
+              <Select
+                value={String(selectedID)}
+                onValueChange={(value) => selectRole(Number(value))}
+              >
+                <SelectTrigger
+                  aria-label="选择执行角色"
+                  className="workbench-role-select-trigger"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent
+                  align="start"
+                  className="workbench-role-select-content"
+                >
+                  {roles.map((current) => (
+                    <SelectItem
+                      key={current.id}
+                      className="workbench-role-select-item"
+                      value={String(current.id)}
+                    >
+                      {current.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          }
           height="100%"
           minHeight="0"
           lazySession
           mobileSessionNavigation
+          uploadBizKey={BODY_UPLOAD_BIZ_KEY}
+          uploadBizName={BODY_UPLOAD_BIZ_NAME}
+          allowResourceLibrary={false}
+          onUploadedFiles={saveUploadedFiles}
           assistantApi={chatConfig.assistantApi}
           runtimeApi={chatConfig.runtimeApi}
           requestScope={
@@ -172,10 +210,37 @@ export function WorkbenchDialoguePage({
               />
             ) : null
           }
+          renderArtifactActions={({ messageID, artifact, placement }) => (
+            <SaveAssetAction
+              teamID={teamID}
+              resetKey={`${messageID}:${artifact.id}`}
+              appearance={placement === "preview" ? "inspector" : "media"}
+              confirmDescription={`确认将“${artifactDisplayName(artifact)}”保存为独立${artifactKindLabel(artifact.kind)}素材吗？`}
+              save={() =>
+                saveWorkbenchDialogueAsset({
+                  teamID,
+                  roleID: role.id,
+                  messageID,
+                  artifactID: artifact.id,
+                })
+              }
+            />
+          )}
         />
       </div>
     </div>
   );
+}
+
+function artifactDisplayName(artifact: AgentChatArtifact) {
+  return artifact.name || artifact.label || `素材 ${artifact.id}`;
+}
+
+function artifactKindLabel(kind: AgentChatArtifact["kind"]) {
+  if (kind === "image") return "图片";
+  if (kind === "video") return "视频";
+  if (kind === "audio") return "音频";
+  return "文件";
 }
 
 function SaveDialogueMaterialButton({
@@ -191,84 +256,28 @@ function SaveDialogueMaterialButton({
   targetAssetID: number;
   onSaved: () => void;
 }) {
-  const [saving, setSaving] = useState(false);
-  const [savedAssetID, setSavedAssetID] = useState(0);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [error, setError] = useState("");
-
-  async function save() {
-    if (savedAssetID) {
-      setDetailOpen(true);
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      const result = await request(workbenchApi("chat_save_asset"), "post", {
-        team_id: teamID,
-        role_id: roleID,
-        message_id: message.recordID,
-        target_asset_id: targetAssetID || undefined,
-      });
-      if (!isSuccessResponse(result)) {
-        throw new Error(
-          String(result?.message || result?.msg || "保存素材失败"),
-        );
-      }
-      const assetID = Number(result?.data?.asset?.id || 0);
-      if (!assetID) {
-        throw new Error("保存素材结果为空");
-      }
-      setSavedAssetID(assetID);
-      if (targetAssetID) {
-        onSaved();
-      }
-    } catch (currentError) {
-      setError(
-        currentError instanceof Error ? currentError.message : "保存素材失败",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
-    <>
-      <button
-        type="button"
-        className="agent-chat-message-action"
-        disabled={saving}
-        title={error || (savedAssetID ? "查看已保存素材" : "保存为素材")}
-        aria-label={savedAssetID ? "查看已保存素材" : "保存为素材"}
-        onClick={() => void save()}
-      >
-        {saving ? (
-          <Loader2 className="animate-spin" />
-        ) : savedAssetID ? (
-          <Check />
-        ) : (
-          <Save />
-        )}
-      </button>
-      {detailOpen && savedAssetID ? (
-        <AssetDetailDialog
-          teamID={teamID}
-          assetID={savedAssetID}
-          onClose={() => setDetailOpen(false)}
-        />
-      ) : null}
-    </>
+    <SaveAssetAction
+      teamID={teamID}
+      resetKey={`${message.recordID}:${targetAssetID}`}
+      confirmDescription={
+        targetAssetID
+          ? "确认将这条智能体回复保存为当前素材的新版本吗？"
+          : "确认将这条智能体回复保存为当前团队的素材吗？"
+      }
+      disabled={message.hasPendingArtifacts}
+      disabledLabel="回复中的素材仍在生成，完成后才能保存整条回复"
+      save={() =>
+        saveWorkbenchDialogueAsset({
+          teamID,
+          roleID,
+          messageID: message.recordID,
+          targetAssetID,
+        })
+      }
+      onSaved={() => {
+        if (targetAssetID) onSaved();
+      }}
+    />
   );
 }
-
-function roleOptionLabel(role: WorkbenchRole) {
-  const typeLabel = roleTypeLabels[role.roleType];
-  return typeLabel ? `${role.name} · ${typeLabel}` : role.name;
-}
-
-const roleTypeLabels: Record<string, string> = {
-  chat: "沟通",
-  planner: "规划",
-  worker: "执行",
-  reviewer: "审核",
-};

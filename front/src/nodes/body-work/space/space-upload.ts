@@ -4,6 +4,7 @@ import {
   initSpaceUpload,
   uploadSpacePart,
 } from "./space-api";
+import { saveBodyUploadedAssets } from "../asset/upload-asset-api";
 import type { UploadPreview } from "./space-prompt-composer";
 
 const { digestUploadFile, uploadFileDirect } = getCompatModule("@/lib/upload") as {
@@ -16,19 +17,22 @@ const { digestUploadFile, uploadFileDirect } = getCompatModule("@/lib/upload") a
 };
 
 export async function uploadSpaceFiles(
-  projectId: number,
-  files: File[],
-  ruleId?: number,
+  input: {
+    projectID: number;
+    teamID: number;
+    files: File[];
+    ruleID?: number;
+  },
 ): Promise<UploadPreview[]> {
-  const uploadRuleId = Number(ruleId || 0);
+  const uploadRuleId = Number(input.ruleID || 0);
   if (uploadRuleId <= 0) {
     throw new Error("当前节点未配置上传规则");
   }
   const previews: UploadPreview[] = [];
-  for (const file of files) {
+  for (const file of input.files) {
     const hash = await computeSpaceUploadHash(file);
     const init = await initSpaceUpload({
-      projectId,
+      projectId: input.projectID,
       ruleId: uploadRuleId,
       name: file.name,
       size: file.size,
@@ -51,7 +55,7 @@ export async function uploadSpaceFiles(
         const start = index * chunkSize;
         const end = Math.min(file.size, start + chunkSize);
         await uploadSpacePart({
-          projectId,
+          projectId: input.projectID,
           sessionId: Number(init.session_id || 0),
           partNumber: index + 1,
           file: file.slice(start, end),
@@ -59,31 +63,17 @@ export async function uploadSpaceFiles(
       }
     }
     const completed = await completeSpaceUpload({
-      projectId,
+      projectId: input.projectID,
       sessionId: Number(init.session_id || 0),
     });
-    previews.push(uploadPreviewFromPayload(completed, file));
+    const [asset] = await saveBodyUploadedAssets({
+      teamID: input.teamID,
+      projectID: input.projectID,
+      files: [completed],
+    });
+    previews.push(uploadPreviewFromPayload(completed, file, asset));
   }
   return previews;
-}
-
-export function uploadAssetContent(preview: UploadPreview) {
-  const kind = String(preview.kind || "").toLowerCase();
-  const output = preview.output || {};
-  if (kind === "image") {
-    return { image: preview.url, images: [output] };
-  }
-  if (kind === "video") {
-    return { video: preview.url, videos: [output] };
-  }
-  if (kind === "audio") {
-    return { audio: preview.url, audios: [output] };
-  }
-  return {
-    file: preview.url,
-    files: [output],
-    text: preview.text || preview.name || preview.url,
-  };
 }
 
 async function computeSpaceUploadHash(file: File) {
@@ -102,7 +92,11 @@ function uploadKindFromFile(file: File) {
   return "file";
 }
 
-function uploadPreviewFromPayload(payload: any, file: File): UploadPreview {
+function uploadPreviewFromPayload(
+  payload: any,
+  file: File,
+  asset: Record<string, unknown>,
+): UploadPreview {
   const url = String(
     payload?.url || payload?.open_url || payload?.download || "",
   );
@@ -116,5 +110,6 @@ function uploadPreviewFromPayload(payload: any, file: File): UploadPreview {
     url,
     text: String(payload?.name || file.name),
     output: payload,
+    asset,
   };
 }

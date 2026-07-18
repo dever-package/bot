@@ -25,11 +25,12 @@ const (
 	knowledgeStorageRoot             = "data/knowledge"
 	maxEditableFileBytes             = 5 * 1024 * 1024
 	maxKnowledgeUploadPartBytes      = 10 * 1024 * 1024
-	maxKnowledgeUploadTotalBytes     = 100 * 1024 * 1024
-	maxKnowledgeUploadParts          = 200
-	maxKnowledgeZipEntries           = 2000
-	maxKnowledgeZipUncompressedBytes = 100 * 1024 * 1024
+	maxKnowledgeUploadTotalBytes     = 200 * 1024 * 1024
+	maxKnowledgeUploadParts          = 400
+	maxKnowledgeZipEntries           = 10000
+	maxKnowledgeZipUncompressedBytes = 200 * 1024 * 1024
 	knowledgeUploadTempDirName       = ".upload"
+	knowledgeUploadTempRetention     = 24 * time.Hour
 )
 
 var editableKnowledgeFileExts = map[string]bool{
@@ -155,13 +156,23 @@ func (s Service) KnowledgeFileData(ctx context.Context, baseID uint64) (Knowledg
 	if err := ensureDatabaseDirsOnDisk(ctx, base.ID, root); err != nil {
 		return KnowledgeFileData{}, err
 	}
-	if err := syncKnowledgeFilesystem(ctx, base, root); err != nil {
-		return KnowledgeFileData{}, err
-	}
-	files, used, err := walkKnowledgeFileNodes(ctx, base.ID, root)
+	data, err := s.syncKnowledgeFileData(ctx, base, root)
 	if err != nil {
 		return KnowledgeFileData{}, err
 	}
+	StartLightPendingIndex(ctx, base.ID)
+	return data, nil
+}
+
+func (s Service) syncKnowledgeFileData(ctx context.Context, base *agentmodel.KnowledgeBase, root string) (KnowledgeFileData, error) {
+	files, used, err := syncKnowledgeFilesystemNodes(ctx, base, root)
+	if err != nil {
+		return KnowledgeFileData{}, err
+	}
+	return knowledgeFileData(base, root, files, used), nil
+}
+
+func knowledgeFileData(base *agentmodel.KnowledgeBase, root string, files []KnowledgeFileNode, used int64) KnowledgeFileData {
 	return KnowledgeFileData{
 		Base: map[string]any{
 			"id":                    base.ID,
@@ -175,7 +186,7 @@ func (s Service) KnowledgeFileData(ctx context.Context, baseID uint64) (Knowledg
 		Drive: map[string]any{
 			"used": used,
 		},
-	}, nil
+	}
 }
 
 func (s Service) ReadKnowledgeFileNode(ctx context.Context, baseID uint64, id string) (KnowledgeFileContent, error) {
@@ -259,7 +270,7 @@ func (s Service) CreateKnowledgeFileNode(ctx context.Context, input KnowledgeCre
 			return KnowledgeFileOperationResult{}, fmt.Errorf("创建父目录失败: %w", err)
 		}
 		if isKnowledgeZipUpload(name, raw) {
-			if err := extractKnowledgeZip(root, parentPath, raw); err != nil {
+			if err := extractKnowledgeZipBytes(root, parentPath, raw); err != nil {
 				return KnowledgeFileOperationResult{}, err
 			}
 			newID = knowledgeFileID(parentRel)
@@ -267,15 +278,12 @@ func (s Service) CreateKnowledgeFileNode(ctx context.Context, input KnowledgeCre
 			return KnowledgeFileOperationResult{}, fmt.Errorf("创建文件失败: %w", err)
 		}
 	}
-	if err := syncKnowledgeFilesystem(ctx, base, root); err != nil {
+	data, err := s.syncKnowledgeFileData(ctx, base, root)
+	if err != nil {
 		return KnowledgeFileOperationResult{}, err
 	}
 	if !isFolder {
 		StartLightPendingIndex(ctx, base.ID)
-	}
-	data, err := s.KnowledgeFileData(ctx, base.ID)
-	if err != nil {
-		return KnowledgeFileOperationResult{}, err
 	}
 	return KnowledgeFileOperationResult{KnowledgeFileData: data, NewID: newID}, nil
 }
@@ -308,6 +316,9 @@ func (s Service) SaveKnowledgeUploadPart(ctx context.Context, input KnowledgeUpl
 	name, err := normalizeFileName(input.Name)
 	if err != nil {
 		return KnowledgeUploadPartResult{}, err
+	}
+	if input.PartNumber == 1 {
+		prepareKnowledgeUpload(root, uploadID)
 	}
 	if err := saveKnowledgeUploadPart(root, uploadID, input.PartNumber, input.Source); err != nil {
 		return KnowledgeUploadPartResult{}, err
@@ -369,13 +380,12 @@ func (s Service) RenameKnowledgeFileNode(ctx context.Context, input KnowledgeRen
 		return KnowledgeFileOperationResult{}, fmt.Errorf("重命名失败: %w", err)
 	}
 	if err := migrateRenamedKnowledgeRecords(ctx, base.ID, root, oldPath, newPath, oldInfo.IsDir()); err != nil {
+		rollbackKnowledgeRename(ctx, base, root, oldPath, newPath, oldInfo.IsDir())
 		return KnowledgeFileOperationResult{}, err
 	}
-	if err := syncKnowledgeFilesystem(ctx, base, root); err != nil {
-		return KnowledgeFileOperationResult{}, err
-	}
-	data, err := s.KnowledgeFileData(ctx, base.ID)
+	data, err := s.syncKnowledgeFileData(ctx, base, root)
 	if err != nil {
+		rollbackKnowledgeRename(ctx, base, root, oldPath, newPath, oldInfo.IsDir())
 		return KnowledgeFileOperationResult{}, err
 	}
 	return KnowledgeFileOperationResult{KnowledgeFileData: data, NewID: idFromFilePath(root, newPath)}, nil
@@ -446,6 +456,10 @@ func migrateRenamedKnowledgeDir(ctx context.Context, baseID uint64, oldRel strin
 	rows := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
 		"knowledge_base_id": baseID,
 		"status":            1,
+		"or": []any{
+			map[string]any{"storage_path": oldRel},
+			map[string]any{"storage_path": map[string]any{"like": oldRel + "/%"}},
+		},
 	})
 	for _, doc := range rows {
 		if doc == nil {
@@ -483,22 +497,34 @@ func (s Service) DeleteKnowledgeFileNodes(ctx context.Context, baseID uint64, id
 	if err != nil {
 		return KnowledgeFileData{}, err
 	}
-	for _, id := range ids {
-		filePath, _, err := knowledgeIDPath(root, id)
-		if err != nil {
-			return KnowledgeFileData{}, err
-		}
-		if sameCleanPath(filePath, root) {
-			return KnowledgeFileData{}, fmt.Errorf("不能删除知识库根目录")
-		}
-		if err := os.RemoveAll(filePath); err != nil {
-			return KnowledgeFileData{}, fmt.Errorf("删除失败: %w", err)
-		}
-	}
-	if err := syncKnowledgeFilesystem(ctx, base, root); err != nil {
+	plans, err := planKnowledgeSourcePaths(root, ids, "删除")
+	if err != nil {
 		return KnowledgeFileData{}, err
 	}
-	return s.KnowledgeFileData(ctx, base.ID)
+	trashRoot := filepath.Join(root, knowledgeUploadTempDirName)
+	if err := os.MkdirAll(trashRoot, 0o755); err != nil {
+		return KnowledgeFileData{}, fmt.Errorf("创建删除暂存目录失败: %w", err)
+	}
+	trashDir, err := os.MkdirTemp(trashRoot, "delete-")
+	if err != nil {
+		return KnowledgeFileData{}, fmt.Errorf("创建删除暂存目录失败: %w", err)
+	}
+	defer os.RemoveAll(trashDir)
+	for index := range plans {
+		plans[index].Target = filepath.Join(trashDir, fmt.Sprintf("%06d-%s", index, filepath.Base(plans[index].Source)))
+	}
+	completed, err := moveKnowledgePaths(plans)
+	if err != nil {
+		rollbackMovedKnowledgePaths(completed)
+		return KnowledgeFileData{}, err
+	}
+	data, err := s.syncKnowledgeFileData(ctx, base, root)
+	if err != nil {
+		rollbackMovedKnowledgePaths(completed)
+		_ = syncKnowledgeFilesystem(ctx, base, root)
+		return KnowledgeFileData{}, err
+	}
+	return data, nil
 }
 
 func (s Service) MoveKnowledgeFileNodes(ctx context.Context, input KnowledgeMoveInput) (KnowledgeFileOperationResult, error) {
@@ -514,37 +540,22 @@ func (s Service) MoveKnowledgeFileNodes(ctx context.Context, input KnowledgeMove
 	if err != nil || !targetInfo.IsDir() {
 		return KnowledgeFileOperationResult{}, fmt.Errorf("目标文件夹不存在")
 	}
-	newIDs := make([]string, 0, len(input.IDs))
-	for _, id := range input.IDs {
-		sourcePath, _, err := knowledgeIDPath(root, id)
-		if err != nil {
-			return KnowledgeFileOperationResult{}, err
-		}
-		if sameCleanPath(sourcePath, root) {
-			return KnowledgeFileOperationResult{}, fmt.Errorf("不能移动知识库根目录")
-		}
-		targetFile := filepath.Join(targetPath, filepath.Base(sourcePath))
-		if err := ensureInsideKnowledgeRoot(root, targetFile); err != nil {
-			return KnowledgeFileOperationResult{}, err
-		}
-		if isPathAncestor(sourcePath, targetFile) {
-			return KnowledgeFileOperationResult{}, fmt.Errorf("不能移动到自身或子目录下")
-		}
-		if _, err := os.Stat(targetFile); err == nil {
-			return KnowledgeFileOperationResult{}, fmt.Errorf("目标文件夹下已存在同名文件")
-		}
-		if err := os.Rename(sourcePath, targetFile); err != nil {
-			return KnowledgeFileOperationResult{}, fmt.Errorf("移动失败: %w", err)
-		}
-		newIDs = append(newIDs, idFromFilePath(root, targetFile))
-	}
-	if err := syncKnowledgeFilesystem(ctx, base, root); err != nil {
-		return KnowledgeFileOperationResult{}, err
-	}
-	data, err := s.KnowledgeFileData(ctx, base.ID)
+	plans, err := planKnowledgeTargetPaths(root, targetPath, input.IDs, "移动")
 	if err != nil {
 		return KnowledgeFileOperationResult{}, err
 	}
+	completed, err := moveKnowledgePaths(plans)
+	if err != nil {
+		rollbackMovedKnowledgePaths(completed)
+		return KnowledgeFileOperationResult{}, err
+	}
+	data, err := s.syncKnowledgeFileData(ctx, base, root)
+	if err != nil {
+		rollbackMovedKnowledgePaths(completed)
+		_ = syncKnowledgeFilesystem(ctx, base, root)
+		return KnowledgeFileOperationResult{}, err
+	}
+	newIDs := knowledgeTargetIDs(root, plans)
 	return KnowledgeFileOperationResult{KnowledgeFileData: data, NewIDs: newIDs}, nil
 }
 
@@ -561,37 +572,22 @@ func (s Service) CopyKnowledgeFileNodes(ctx context.Context, input KnowledgeMove
 	if err != nil || !targetInfo.IsDir() {
 		return KnowledgeFileOperationResult{}, fmt.Errorf("目标文件夹不存在")
 	}
-	newIDs := make([]string, 0, len(input.IDs))
-	for _, id := range input.IDs {
-		sourcePath, _, err := knowledgeIDPath(root, id)
-		if err != nil {
-			return KnowledgeFileOperationResult{}, err
-		}
-		if sameCleanPath(sourcePath, root) {
-			return KnowledgeFileOperationResult{}, fmt.Errorf("不能复制知识库根目录")
-		}
-		targetFile := filepath.Join(targetPath, filepath.Base(sourcePath))
-		if err := ensureInsideKnowledgeRoot(root, targetFile); err != nil {
-			return KnowledgeFileOperationResult{}, err
-		}
-		if isPathAncestor(sourcePath, targetFile) {
-			return KnowledgeFileOperationResult{}, fmt.Errorf("不能复制到自身或子目录下")
-		}
-		if _, err := os.Stat(targetFile); err == nil {
-			return KnowledgeFileOperationResult{}, fmt.Errorf("目标文件夹下已存在同名文件")
-		}
-		if err := copyKnowledgePath(sourcePath, targetFile); err != nil {
-			return KnowledgeFileOperationResult{}, err
-		}
-		newIDs = append(newIDs, idFromFilePath(root, targetFile))
-	}
-	if err := syncKnowledgeFilesystem(ctx, base, root); err != nil {
-		return KnowledgeFileOperationResult{}, err
-	}
-	data, err := s.KnowledgeFileData(ctx, base.ID)
+	plans, err := planKnowledgeTargetPaths(root, targetPath, input.IDs, "复制")
 	if err != nil {
 		return KnowledgeFileOperationResult{}, err
 	}
+	completed, err := copyKnowledgePaths(plans)
+	if err != nil {
+		removeKnowledgeTargets(completed)
+		return KnowledgeFileOperationResult{}, err
+	}
+	data, err := s.syncKnowledgeFileData(ctx, base, root)
+	if err != nil {
+		removeKnowledgeTargets(completed)
+		_ = syncKnowledgeFilesystem(ctx, base, root)
+		return KnowledgeFileOperationResult{}, err
+	}
+	newIDs := knowledgeTargetIDs(root, plans)
 	return KnowledgeFileOperationResult{KnowledgeFileData: data, NewIDs: newIDs}, nil
 }
 
@@ -625,13 +621,6 @@ func (s Service) SaveKnowledgeFileNode(ctx context.Context, input KnowledgeSaveI
 	}
 	doc := findDocByStoragePath(ctx, base.ID, relPath)
 	if doc != nil {
-		clearKnowledgeDocumentIndex(ctx, base.ID, doc.ID)
-		markKnowledgeDocPending(ctx, doc.ID, map[string]any{
-			"content":      input.Content,
-			"summary":      "",
-			"keywords":     "",
-			"content_hash": contentHash(input.Content),
-		})
 		StartLightPendingIndex(ctx, base.ID)
 	}
 	return s.ReadKnowledgeFileNode(ctx, base.ID, knowledgeFileID(relPath))
@@ -685,14 +674,195 @@ func stableKnowledgeStorageRoot(cateID uint64, baseID uint64) string {
 }
 
 func syncKnowledgeFilesystem(ctx context.Context, base *agentmodel.KnowledgeBase, root string) error {
+	_, _, err := syncKnowledgeFilesystemNodes(ctx, base, root)
+	return err
+}
+
+type knowledgeFilesystemState struct {
+	dirs map[string]*agentmodel.KnowledgeDir
+	docs map[string]*agentmodel.KnowledgeDoc
+}
+
+func loadKnowledgeFilesystemState(ctx context.Context, baseID uint64) knowledgeFilesystemState {
+	state := knowledgeFilesystemState{
+		dirs: make(map[string]*agentmodel.KnowledgeDir),
+		docs: make(map[string]*agentmodel.KnowledgeDoc),
+	}
+	for _, row := range agentmodel.NewKnowledgeDirModel().Select(ctx, map[string]any{"knowledge_base_id": baseID}, map[string]any{
+		"field": "main.id, main.knowledge_base_id, main.parent_id, main.name, main.path, main.depth, main.doc_count, main.status, main.sort",
+	}) {
+		if row == nil {
+			continue
+		}
+		path := NormalizeDirPath(row.Path)
+		if path != "" {
+			state.dirs[path] = row
+		}
+	}
+	for _, row := range agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{"knowledge_base_id": baseID}, map[string]any{
+		"field": "main.id, main.knowledge_base_id, main.dir_id, main.title, main.file_name, main.storage_path, main.mime_type, main.size, main.file_modified_at, main.content_hash, main.node_count, main.index_status, main.index_stage, main.index_stage_detail, main.source_type, main.index_version, main.error_message, main.status, main.review_status, main.reviewed_at, main.reviewer_id, main.expires_at",
+	}) {
+		if row == nil {
+			continue
+		}
+		path := NormalizeDirPath(row.StoragePath)
+		if path != "" {
+			state.docs[path] = row
+		}
+	}
+	return state
+}
+
+func (state *knowledgeFilesystemState) ensureDir(ctx context.Context, baseID uint64, path string) (uint64, error) {
+	path = NormalizeDirPath(path)
+	if path == "" {
+		return 0, nil
+	}
+	name := filepath.Base(path)
+	if err := ValidateDirName(name); err != nil {
+		return 0, err
+	}
+	parentPath := NormalizeDirPath(filepath.ToSlash(filepath.Dir(path)))
+	if parentPath == "." {
+		parentPath = ""
+	}
+	parentID, err := state.ensureDir(ctx, baseID, parentPath)
+	if err != nil {
+		return 0, err
+	}
+	depth := strings.Count(path, "/") + 1
+	if row := state.dirs[path]; row != nil {
+		if row.ParentID != parentID || row.Name != name || row.Path != path || row.Depth != depth || row.Status != 1 {
+			agentmodel.NewKnowledgeDirModel().Update(ctx, map[string]any{"id": row.ID}, map[string]any{
+				"parent_id": parentID,
+				"name":      name,
+				"path":      path,
+				"depth":     depth,
+				"status":    1,
+			})
+			row.ParentID = parentID
+			row.Name = name
+			row.Path = path
+			row.Depth = depth
+			row.Status = 1
+		}
+		return row.ID, nil
+	}
+	if row := agentmodel.NewKnowledgeDirModel().Find(ctx, map[string]any{
+		"knowledge_base_id": baseID,
+		"parent_id":         parentID,
+		"name":              name,
+	}); row != nil {
+		agentmodel.NewKnowledgeDirModel().Update(ctx, map[string]any{"id": row.ID}, map[string]any{
+			"path":   path,
+			"depth":  depth,
+			"status": 1,
+		})
+		row.Path = path
+		row.Depth = depth
+		row.Status = 1
+		state.dirs[path] = row
+		return row.ID, nil
+	}
+	now := time.Now()
+	id := util.ToUint64(agentmodel.NewKnowledgeDirModel().Insert(ctx, withCreatedAt(map[string]any{
+		"knowledge_base_id": baseID,
+		"parent_id":         parentID,
+		"name":              name,
+		"path":              path,
+		"depth":             depth,
+		"doc_count":         0,
+		"status":            1,
+		"sort":              100,
+	})))
+	if id == 0 {
+		return 0, fmt.Errorf("创建目录失败")
+	}
+	state.dirs[path] = &agentmodel.KnowledgeDir{
+		ID:              id,
+		KnowledgeBaseID: baseID,
+		ParentID:        parentID,
+		Name:            name,
+		Path:            path,
+		Depth:           depth,
+		Status:          1,
+		Sort:            100,
+		CreatedAt:       now,
+	}
+	return id, nil
+}
+
+func (state knowledgeFilesystemState) deleteMissing(ctx context.Context, baseID uint64, activeDocs map[string]uint64, activeDirs map[string]uint64) {
+	for path, row := range state.docs {
+		if row == nil {
+			continue
+		}
+		if _, exists := activeDocs[path]; exists {
+			continue
+		}
+		clearKnowledgeDocumentIndex(ctx, baseID, row.ID)
+		agentmodel.NewKnowledgeDocModel().Delete(ctx, map[string]any{"id": row.ID})
+	}
+	dirs := make([]*agentmodel.KnowledgeDir, 0, len(state.dirs))
+	for _, row := range state.dirs {
+		if row != nil {
+			dirs = append(dirs, row)
+		}
+	}
+	sort.SliceStable(dirs, func(left int, right int) bool {
+		if dirs[left].Depth == dirs[right].Depth {
+			return dirs[left].ID > dirs[right].ID
+		}
+		return dirs[left].Depth > dirs[right].Depth
+	})
+	for _, row := range dirs {
+		path := NormalizeDirPath(row.Path)
+		if _, exists := activeDirs[path]; exists {
+			continue
+		}
+		agentmodel.NewKnowledgeDirModel().Delete(ctx, map[string]any{"id": row.ID})
+	}
+}
+
+func (state knowledgeFilesystemState) refreshCounts(ctx context.Context, baseID uint64, activeDocs map[string]uint64, activeDirs map[string]uint64, docCounts map[uint64]int) {
+	for path, row := range state.dirs {
+		if row == nil {
+			continue
+		}
+		if _, exists := activeDirs[path]; !exists {
+			continue
+		}
+		count := docCounts[row.ID]
+		if row.DocCount == count {
+			continue
+		}
+		agentmodel.NewKnowledgeDirModel().Update(ctx, map[string]any{"id": row.ID}, map[string]any{"doc_count": count})
+		row.DocCount = count
+		state.dirs[path] = row
+	}
+	nodeCount := agentmodel.NewKnowledgeNodeModel().Count(ctx, map[string]any{
+		"knowledge_base_id": baseID,
+		"status":            1,
+	})
+	agentmodel.NewKnowledgeBaseModel().Update(ctx, map[string]any{"id": baseID}, map[string]any{
+		"doc_count":  len(activeDocs),
+		"node_count": nodeCount,
+	})
+}
+
+func syncKnowledgeFilesystemNodes(ctx context.Context, base *agentmodel.KnowledgeBase, root string) ([]KnowledgeFileNode, int64, error) {
 	if base == nil {
-		return fmt.Errorf("知识库不存在")
+		return nil, 0, fmt.Errorf("知识库不存在")
 	}
 	if err := os.MkdirAll(root, 0o755); err != nil {
-		return err
+		return nil, 0, err
 	}
+	state := loadKnowledgeFilesystemState(ctx, base.ID)
 	activeDirs := map[string]uint64{}
 	activeDocs := map[string]uint64{}
+	docCounts := map[uint64]int{}
+	files := make([]KnowledgeFileNode, 0)
+	var used int64
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -710,40 +880,80 @@ func syncKnowledgeFilesystem(ctx context.Context, base *agentmodel.KnowledgeBase
 		if err != nil {
 			return err
 		}
-		rel = filepath.ToSlash(rel)
-		if entry.IsDir() {
-			dirID, _, err := EnsureDirPath(ctx, base.ID, filepath.ToSlash(rel))
-			if err != nil {
-				return err
-			}
-			activeDirs[filepath.ToSlash(rel)] = dirID
+		rel = NormalizeDirPath(filepath.ToSlash(rel))
+		if rel == "" {
 			return nil
 		}
 		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
-		doc, err := ensureKnowledgeFileDoc(ctx, base.ID, root, filepath.ToSlash(rel), info)
+		item := KnowledgeFileNode{
+			ID:   knowledgeFileID(rel),
+			Name: filepath.Base(path),
+			Type: "file",
+			Size: info.Size(),
+			Date: info.ModTime(),
+			Ext:  fileExtension(path),
+		}
+		if entry.IsDir() {
+			dirID, err := state.ensureDir(ctx, base.ID, rel)
+			if err != nil {
+				return err
+			}
+			activeDirs[rel] = dirID
+			item.Type = "folder"
+			item.Size = 0
+			item.DirID = dirID
+			files = append(files, item)
+			return nil
+		}
+		dirPath := NormalizeDirPath(filepath.ToSlash(filepath.Dir(rel)))
+		if dirPath == "." {
+			dirPath = ""
+		}
+		dirID := uint64(0)
+		if dirPath != "" {
+			dirID = activeDirs[dirPath]
+			if dirID == 0 {
+				dirID, err = state.ensureDir(ctx, base.ID, dirPath)
+				if err != nil {
+					return err
+				}
+				activeDirs[dirPath] = dirID
+			}
+		}
+		doc, err := ensureKnowledgeFileDoc(ctx, base.ID, root, rel, dirID, info, state.docs[rel])
 		if err != nil {
 			return err
 		}
-		activeDocs[filepath.ToSlash(rel)] = doc.ID
+		state.docs[rel] = doc
+		activeDocs[rel] = doc.ID
+		docCounts[doc.DirID]++
+		item.DocID = doc.ID
+		item.Status = strings.TrimSpace(doc.IndexStatus)
+		item.SourceType = strings.TrimSpace(doc.SourceType)
+		used += info.Size()
+		files = append(files, item)
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
-	deleteMissingDocs(ctx, base.ID, activeDocs)
-	deleteMissingDirs(ctx, base.ID, activeDirs)
-	refreshDirDocCounts(ctx, base.ID)
-	refreshBaseDocCount(ctx, base.ID)
-	return nil
+	state.deleteMissing(ctx, base.ID, activeDocs, activeDirs)
+	state.refreshCounts(ctx, base.ID, activeDocs, activeDirs, docCounts)
+	sort.SliceStable(files, func(left int, right int) bool {
+		return files[left].ID < files[right].ID
+	})
+	return files, used, nil
 }
 
 func ensureDatabaseDirsOnDisk(ctx context.Context, baseID uint64, root string) error {
 	rows := agentmodel.NewKnowledgeDirModel().Select(ctx, map[string]any{
 		"knowledge_base_id": baseID,
 		"status":            1,
+	}, map[string]any{
+		"field": "main.id, main.knowledge_base_id, main.parent_id, main.name, main.path",
 	})
 	dirsByID := make(map[uint64]*agentmodel.KnowledgeDir, len(rows))
 	for _, row := range rows {
@@ -801,32 +1011,42 @@ func knowledgeDirStoragePath(
 	return NormalizeDirPath(strings.Join(names, "/"))
 }
 
-func ensureKnowledgeFileDoc(ctx context.Context, baseID uint64, root string, relPath string, info os.FileInfo) (*agentmodel.KnowledgeDoc, error) {
+func ensureKnowledgeFileDoc(
+	ctx context.Context,
+	baseID uint64,
+	root string,
+	relPath string,
+	dirID uint64,
+	info os.FileInfo,
+	doc *agentmodel.KnowledgeDoc,
+) (*agentmodel.KnowledgeDoc, error) {
 	relPath = NormalizeDirPath(relPath)
 	if relPath == "" {
 		return nil, fmt.Errorf("文件路径不能为空")
 	}
-	dirPath := NormalizeDirPath(filepath.ToSlash(filepath.Dir(relPath)))
-	if dirPath == "." {
-		dirPath = ""
-	}
-	dirID, _, err := EnsureDirPath(ctx, baseID, dirPath)
-	if err != nil {
-		return nil, err
-	}
 	name := filepath.Base(relPath)
-	content := ""
-	contentHashValue := ""
 	filePath := filepath.Join(root, filepath.FromSlash(relPath))
-	editable := isEditableKnowledgeFile(filePath, detectMimeType(filePath, nil), info.Size())
+	mimeType := detectMimeType(filePath, nil)
+	modifiedAt := info.ModTime().UnixNano()
+	if knowledgeFileMetadataMatches(doc, relPath, dirID, name, mimeType, info.Size(), modifiedAt) {
+		if doc.Status != 1 {
+			agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": doc.ID}, map[string]any{"status": 1})
+			doc.Status = 1
+		}
+		return doc, nil
+	}
+	content := ""
+	editable := isEditableKnowledgeFile(filePath, mimeType, info.Size())
 	if editable {
 		raw, err := os.ReadFile(filePath)
 		if err == nil && utf8.Valid(raw) {
 			content = string(raw)
-			contentHashValue = contentHash(content)
 		}
 	}
-	mimeType := detectMimeType(filePath, nil)
+	contentHashValue := fileMetadataHash(filePath, info)
+	if editable {
+		contentHashValue = fileContentHash(filePath, info)
+	}
 	values := map[string]any{
 		"knowledge_base_id":  baseID,
 		"dir_id":             dirID,
@@ -835,6 +1055,7 @@ func ensureKnowledgeFileDoc(ctx context.Context, baseID uint64, root string, rel
 		"storage_path":       relPath,
 		"mime_type":          mimeType,
 		"size":               info.Size(),
+		"file_modified_at":   modifiedAt,
 		"summary":            "",
 		"keywords":           "",
 		"index_status":       agentmodel.KnowledgeIndexStatusPending,
@@ -850,9 +1071,8 @@ func ensureKnowledgeFileDoc(ctx context.Context, baseID uint64, root string, rel
 		values["content_hash"] = contentHashValue
 	} else {
 		values["content"] = ""
-		values["content_hash"] = ""
+		values["content_hash"] = contentHashValue
 	}
-	doc := findDocByStoragePath(ctx, baseID, relPath)
 	if doc == nil {
 		id := util.ToUint64(agentmodel.NewKnowledgeDocModel().Insert(ctx, withCreatedAt(values)))
 		if id == 0 {
@@ -860,18 +1080,11 @@ func ensureKnowledgeFileDoc(ctx context.Context, baseID uint64, root string, rel
 		}
 		return agentmodel.NewKnowledgeDocModel().Find(ctx, map[string]any{"id": id}), nil
 	}
-	needsIndex := strings.TrimSpace(doc.StoragePath) != relPath
-	if editable {
-		needsIndex = needsIndex || strings.TrimSpace(doc.ContentHash) != contentHashValue
-	} else {
-		needsIndex = needsIndex || doc.Size != info.Size()
-		if !needsIndex {
-			delete(values, "content")
-			delete(values, "content_hash")
-		} else {
-			values["content"] = ""
-			values["content_hash"] = ""
-		}
+	contentChanged := strings.TrimSpace(doc.ContentHash) != contentHashValue
+	needsIndex := strings.TrimSpace(doc.StoragePath) != relPath || contentChanged
+	if !editable && !needsIndex {
+		delete(values, "content")
+		delete(values, "content_hash")
 	}
 	if !needsIndex {
 		delete(values, "index_status")
@@ -883,167 +1096,50 @@ func ensureKnowledgeFileDoc(ctx context.Context, baseID uint64, root string, rel
 		delete(values, "summary")
 		delete(values, "keywords")
 	} else {
-		clearKnowledgeDocumentIndex(ctx, baseID, doc.ID)
-		values["index_version"] = nextDocIndexVersion(doc.IndexVersion)
+		delete(values, "index_version")
+		if doc.NodeCount > 0 {
+			if snapshot := agentmodel.NewKnowledgeDocModel().Find(ctx, map[string]any{"id": doc.ID}); snapshot != nil {
+				saveDocumentVersionSnapshot(ctx, agentmodel.KnowledgeBase{ID: baseID}, *snapshot)
+			}
+			// Keep the last successful index until the replacement transaction
+			// commits. The new source hash is written by IndexDocument on success.
+			delete(values, "content_hash")
+			delete(values, "file_modified_at")
+			delete(values, "summary")
+			delete(values, "keywords")
+			delete(values, "node_count")
+			delete(values, "index_stage")
+			delete(values, "index_stage_detail")
+			delete(values, "error_message")
+		}
+		if contentChanged {
+			values["review_status"] = agentmodel.KnowledgeReviewStatusPending
+			values["reviewed_at"] = nil
+			values["reviewer_id"] = uint64(0)
+		}
 	}
 	values["status"] = 1
 	agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": doc.ID}, values)
 	return agentmodel.NewKnowledgeDocModel().Find(ctx, map[string]any{"id": doc.ID}), nil
 }
 
-func walkKnowledgeFileNodes(ctx context.Context, baseID uint64, root string) ([]KnowledgeFileNode, int64, error) {
-	dirs := map[string]*agentmodel.KnowledgeDir{}
-	dirRows := agentmodel.NewKnowledgeDirModel().Select(ctx, map[string]any{"knowledge_base_id": baseID})
-	dirsByID := make(map[uint64]*agentmodel.KnowledgeDir, len(dirRows))
-	for _, dir := range dirRows {
-		if dir == nil {
-			continue
-		}
-		dirsByID[dir.ID] = dir
-	}
-	for _, dir := range dirRows {
-		dirPath := knowledgeDirStoragePath(dir, dirsByID, baseID)
-		if dirPath != "" {
-			dirs[dirPath] = dir
-		}
-	}
-	docs := map[string]*agentmodel.KnowledgeDoc{}
-	for _, doc := range agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{"knowledge_base_id": baseID}) {
-		if doc != nil {
-			docs[docStoragePath(ctx, doc)] = doc
-		}
-	}
-	files := make([]KnowledgeFileNode, 0)
-	seen := make(map[string]bool)
-	var used int64
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if sameCleanPath(path, root) {
-			return nil
-		}
-		if entry.IsDir() && sameCleanPath(path, filepath.Join(root, knowledgeUploadTempDirName)) {
-			return filepath.SkipDir
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		rel = NormalizeDirPath(rel)
-		if rel == "" {
-			return nil
-		}
-		seen[rel] = true
-		item := KnowledgeFileNode{
-			ID:   knowledgeFileID(rel),
-			Name: filepath.Base(path),
-			Type: "file",
-			Size: info.Size(),
-			Date: info.ModTime(),
-			Ext:  fileExtension(path),
-		}
-		if entry.IsDir() {
-			item.Type = "folder"
-			item.Size = 0
-			if dir := dirs[rel]; dir != nil {
-				item.DirID = dir.ID
-			}
-		} else {
-			used += info.Size()
-			if doc := docs[rel]; doc != nil {
-				item.DocID = doc.ID
-				item.Status = strings.TrimSpace(doc.IndexStatus)
-				item.SourceType = strings.TrimSpace(doc.SourceType)
-			}
-		}
-		files = append(files, item)
-		return nil
-	})
-	for rel, dir := range dirs {
-		if seen[rel] {
-			continue
-		}
-		files = append(files, KnowledgeFileNode{
-			ID:    knowledgeFileID(rel),
-			Name:  strings.TrimSpace(dir.Name),
-			Type:  "folder",
-			Size:  0,
-			Date:  dir.CreatedAt,
-			DirID: dir.ID,
-		})
-	}
-	sort.SliceStable(files, func(i, j int) bool {
-		return files[i].ID < files[j].ID
-	})
-	return files, used, err
-}
-
-func deleteMissingDocs(ctx context.Context, baseID uint64, activeDocs map[string]uint64) {
-	rows := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{"knowledge_base_id": baseID})
-	for _, row := range rows {
-		if row == nil {
-			continue
-		}
-		path := docStoragePath(ctx, row)
-		if path != "" {
-			if _, ok := activeDocs[path]; ok {
-				continue
-			}
-		}
-		clearKnowledgeDocumentIndex(ctx, baseID, row.ID)
-		agentmodel.NewKnowledgeDocModel().Delete(ctx, map[string]any{"id": row.ID})
-	}
-}
-
-func deleteMissingDirs(ctx context.Context, baseID uint64, activeDirs map[string]uint64) {
-	rows := agentmodel.NewKnowledgeDirModel().Select(ctx, map[string]any{"knowledge_base_id": baseID}, map[string]any{
-		"order": "main.depth desc, main.id desc",
-	})
-	for _, row := range rows {
-		if row == nil || strings.TrimSpace(row.Path) == "" {
-			continue
-		}
-		if _, ok := activeDirs[strings.TrimSpace(row.Path)]; ok {
-			continue
-		}
-		agentmodel.NewKnowledgeDirModel().Delete(ctx, map[string]any{"id": row.ID})
-	}
-}
-
-func refreshDirDocCounts(ctx context.Context, baseID uint64) {
-	counts := docCountsByDir(ctx, baseID)
-	for _, dir := range agentmodel.NewKnowledgeDirModel().Select(ctx, map[string]any{"knowledge_base_id": baseID}) {
-		if dir == nil {
-			continue
-		}
-		agentmodel.NewKnowledgeDirModel().Update(ctx, map[string]any{"id": dir.ID}, map[string]any{
-			"doc_count": counts[dir.ID],
-		})
-	}
-}
-
-func refreshBaseDocCount(ctx context.Context, baseID uint64) {
-	docCount := agentmodel.NewKnowledgeDocModel().Count(ctx, map[string]any{
-		"knowledge_base_id": baseID,
-		"status":            1,
-	})
-	nodeCount := agentmodel.NewKnowledgeNodeModel().Count(ctx, map[string]any{
-		"knowledge_base_id": baseID,
-		"status":            1,
-	})
-	agentmodel.NewKnowledgeBaseModel().Update(ctx, map[string]any{"id": baseID}, map[string]any{
-		"doc_count":  docCount,
-		"node_count": nodeCount,
-	})
+func knowledgeFileMetadataMatches(
+	doc *agentmodel.KnowledgeDoc,
+	relPath string,
+	dirID uint64,
+	name string,
+	mimeType string,
+	size int64,
+	modifiedAt int64,
+) bool {
+	return doc != nil &&
+		doc.StoragePath == relPath &&
+		doc.DirID == dirID &&
+		doc.Title == name &&
+		doc.FileName == name &&
+		doc.MimeType == mimeType &&
+		doc.Size == size &&
+		doc.FileModifiedAt == modifiedAt
 }
 
 func docStoragePath(_ context.Context, doc *agentmodel.KnowledgeDoc) string {
@@ -1209,13 +1305,36 @@ func isKnowledgeZipUpload(name string, raw []byte) bool {
 	return len(raw) > 0 && strings.EqualFold(filepath.Ext(name), ".zip")
 }
 
-func extractKnowledgeZip(root string, parentPath string, raw []byte) error {
+func extractKnowledgeZipBytes(root string, parentPath string, raw []byte) error {
 	if int64(len(raw)) > maxKnowledgeUploadTotalBytes {
 		return fmt.Errorf("zip 文件超过 %d MB 限制", maxKnowledgeUploadTotalBytes/1024/1024)
 	}
 	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
 	if err != nil {
 		return fmt.Errorf("解压 zip 失败: %w", err)
+	}
+	return extractKnowledgeZipReader(root, parentPath, reader)
+}
+
+func extractKnowledgeZipFile(root string, parentPath string, path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("读取上传 zip 失败: %w", err)
+	}
+	if info.Size() > maxKnowledgeUploadTotalBytes {
+		return fmt.Errorf("zip 文件超过 %d MB 限制", maxKnowledgeUploadTotalBytes/1024/1024)
+	}
+	reader, err := zip.OpenReader(path)
+	if err != nil {
+		return fmt.Errorf("解压 zip 失败: %w", err)
+	}
+	defer reader.Close()
+	return extractKnowledgeZipReader(root, parentPath, &reader.Reader)
+}
+
+func extractKnowledgeZipReader(root string, parentPath string, reader *zip.Reader) error {
+	if reader == nil {
+		return fmt.Errorf("解压 zip 失败: 文件为空")
 	}
 	if len(reader.File) > maxKnowledgeZipEntries {
 		return fmt.Errorf("zip 条目超过 %d 个限制", maxKnowledgeZipEntries)
@@ -1335,11 +1454,7 @@ func (s Service) completeKnowledgeUploadParts(
 
 	newID := knowledgeFileID(joinDirPath(parentRel, name))
 	if isKnowledgeUploadZip(name, merged) {
-		raw, err := os.ReadFile(merged)
-		if err != nil {
-			return KnowledgeFileData{}, "", fmt.Errorf("读取上传 zip 失败: %w", err)
-		}
-		if err := extractKnowledgeZip(root, parentPath, raw); err != nil {
+		if err := extractKnowledgeZipFile(root, parentPath, merged); err != nil {
 			return KnowledgeFileData{}, "", err
 		}
 		newID = knowledgeFileID(parentRel)
@@ -1350,14 +1465,11 @@ func (s Service) completeKnowledgeUploadParts(
 		return KnowledgeFileData{}, "", fmt.Errorf("清理上传临时文件失败: %w", err)
 	}
 
-	if err := syncKnowledgeFilesystem(ctx, base, root); err != nil {
-		return KnowledgeFileData{}, "", err
-	}
-	StartLightPendingIndex(ctx, base.ID)
-	data, err := s.KnowledgeFileData(ctx, base.ID)
+	data, err := s.syncKnowledgeFileData(ctx, base, root)
 	if err != nil {
 		return KnowledgeFileData{}, "", err
 	}
+	StartLightPendingIndex(ctx, base.ID)
 	return data, newID, nil
 }
 
@@ -1377,6 +1489,26 @@ func normalizeKnowledgeUploadID(uploadID string) (string, error) {
 
 func knowledgeUploadDir(root string, uploadID string) string {
 	return filepath.Join(root, knowledgeUploadTempDirName, uploadID)
+}
+
+func prepareKnowledgeUpload(root string, uploadID string) {
+	tempRoot := filepath.Join(root, knowledgeUploadTempDirName)
+	_ = os.RemoveAll(knowledgeUploadDir(root, uploadID))
+	entries, err := os.ReadDir(tempRoot)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-knowledgeUploadTempRetention)
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == uploadID {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(tempRoot, entry.Name()))
+	}
 }
 
 func knowledgeUploadPartPath(root string, uploadID string, partNumber int) string {

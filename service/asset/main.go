@@ -176,6 +176,34 @@ func normalizeSaveVersionRequest(ctx context.Context, req SaveVersionRequest) (S
 		if req.SourceName == "" {
 			return SaveVersionRequest{}, fmt.Errorf("工作区资产缺少来源名称")
 		}
+	case assetmodel.SourceUpload:
+		if req.SourceID == 0 {
+			return SaveVersionRequest{}, fmt.Errorf("上传资产缺少文件")
+		}
+		if req.SourceName == "" {
+			return SaveVersionRequest{}, fmt.Errorf("上传资产缺少来源名称")
+		}
+		if req.ProjectID > 0 {
+			project := projectmodel.NewProjectModel().Find(ctx, map[string]any{
+				"id":      req.ProjectID,
+				"team_id": req.TeamID,
+				"status":  projectmodel.StatusEnabled,
+			})
+			if project == nil {
+				return SaveVersionRequest{}, fmt.Errorf("上传资产所属项目不存在")
+			}
+			if project.BodyID == 0 {
+				return SaveVersionRequest{}, fmt.Errorf("上传资产所属项目缺少载体")
+			}
+			if req.BodyID == 0 {
+				req.BodyID = project.BodyID
+			}
+			if req.BodyID != project.BodyID {
+				return SaveVersionRequest{}, fmt.Errorf("上传资产载体与项目不匹配")
+			}
+		} else if req.BodyID == 0 {
+			return SaveVersionRequest{}, fmt.Errorf("上传资产缺少工作区")
+		}
 	default:
 		return SaveVersionRequest{}, fmt.Errorf("资产来源不合法")
 	}
@@ -477,10 +505,14 @@ func NormalizeRole(role string) string {
 
 func NormalizeSourceType(sourceType string) string {
 	switch strings.ToLower(strings.TrimSpace(sourceType)) {
+	case assetmodel.SourceProject:
+		return assetmodel.SourceProject
 	case assetmodel.SourceTool:
 		return assetmodel.SourceTool
 	case assetmodel.SourceDialogue:
 		return assetmodel.SourceDialogue
+	case assetmodel.SourceUpload:
+		return assetmodel.SourceUpload
 	default:
 		return assetmodel.SourceProject
 	}

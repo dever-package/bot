@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	dlog "github.com/shemic/dever/log"
+
 	memorymodel "github.com/dever-package/bot/model/memory"
 )
 
@@ -36,18 +38,25 @@ func (Service) Save(ctx context.Context, req SaveRequest) uint64 {
 	if ownerType == "" {
 		ownerType = memorymodel.OwnerTypeTeam
 	}
-	kind := strings.TrimSpace(req.Kind)
+	kind := normalizeMemoryKind(req.Kind)
 	if kind == "" {
 		kind = "episodic"
 	}
-	tags := strings.TrimSpace(req.Tags)
-	if tags == "" {
-		tags = "[]"
+	title, content, tags, err := prepareMemoryFields(req.Title, req.Content, storedMemoryTags(req.Tags))
+	if err != nil || title == "" || content == "" {
+		logMemoryWriteFailure("团队记忆未保存", req, err)
+		return 0
 	}
 	importance := req.Importance
 	if importance <= 0 {
 		importance = 50
+	} else if importance > 100 {
+		importance = 100
 	}
+	req.OwnerType = ownerType
+	req.Title = title
+	req.Content = content
+	dedupeKey := sourceMemoryDedupeKey(req, title, content)
 	record := map[string]any{
 		"owner_type":  ownerType,
 		"owner_id":    req.OwnerID,
@@ -59,12 +68,47 @@ func (Service) Save(ctx context.Context, req SaveRequest) uint64 {
 		"asset_id":    req.AssetID,
 		"version_id":  req.VersionID,
 		"kind":        kind,
-		"title":       strings.TrimSpace(req.Title),
-		"content":     req.Content,
-		"tags":        tags,
+		"dedupe_key":  memoryDedupeColumn(dedupeKey),
+		"title":       title,
+		"content":     content,
+		"tags":        encodeMemoryJSON(tags, "[]"),
 		"importance":  importance,
 		"status":      memorymodel.StatusEnabled,
 		"created_at":  time.Now(),
+		"updated_at":  time.Now(),
 	}
-	return uint64(memorymodel.NewMemoryModel().Insert(ctx, record))
+	existing := findMemoryByDedupeKey(ctx, dedupeKey)
+	if existing == nil {
+		existing = findMemoryBySource(ctx, req)
+	}
+	if existing != nil {
+		delete(record, "created_at")
+		if _, updateErr := updateMemoryRecord(ctx, existing.ID, record); updateErr != nil {
+			logMemoryWriteFailure("团队记忆更新失败", req, updateErr)
+			return 0
+		}
+		return existing.ID
+	}
+	id, insertErr := insertMemoryRecord(ctx, record)
+	if insertErr == nil && id > 0 {
+		return id
+	}
+	if existing := findMemoryByDedupeKey(ctx, dedupeKey); existing != nil {
+		return existing.ID
+	}
+	logMemoryWriteFailure("团队记忆保存失败", req, insertErr)
+	return 0
+}
+
+func logMemoryWriteFailure(message string, request SaveRequest, err error) {
+	fields := dlog.Fields{
+		"owner_type":  request.OwnerType,
+		"owner_id":    request.OwnerID,
+		"run_id":      request.RunID,
+		"node_run_id": request.NodeRunID,
+	}
+	if err != nil {
+		fields["error"] = err.Error()
+	}
+	dlog.ErrorFields("memory_write", message, fields)
 }

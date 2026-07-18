@@ -11,11 +11,15 @@ import (
 )
 
 const (
-	defaultRuntimeMemoryLimit   = 20
-	maxRuntimeMemoryLimit       = 50
-	runtimeMemoryCandidateLimit = 300
-	runtimeMemoryCoreLimit      = 3
-	runtimeMemoryMinRelevance   = 0.25
+	defaultRuntimeMemoryLimit           = 20
+	maxRuntimeMemoryLimit               = 50
+	runtimeMemoryCoreCandidateLimit     = 20
+	runtimeMemoryPriorityCandidateLimit = 80
+	runtimeMemoryRecentCandidateLimit   = 40
+	runtimeMemoryKeywordCandidateLimit  = 200
+	runtimeMemoryCoreLimit              = 3
+	runtimeMemorySearchTermLimit        = 8
+	runtimeMemoryMinRelevance           = 0.25
 )
 
 type RuntimeRequest struct {
@@ -98,15 +102,124 @@ func (Service) RuntimeRows(ctx context.Context, req RuntimeRequest) []*memorymod
 	if len(filter) == 0 {
 		return []*memorymodel.Memory{}
 	}
-	rows := memorymodel.NewMemoryModel().Select(
-		ctx,
-		filter,
-		map[string]any{
-			"order": "main.importance desc,main.id desc",
-			"limit": runtimeMemoryCandidateLimit,
-		},
-	)
+	model := memorymodel.NewMemoryModel()
+	rows := make([]*memorymodel.Memory, 0, runtimeMemoryCoreCandidateLimit+runtimeMemoryPriorityCandidateLimit+runtimeMemoryRecentCandidateLimit)
+	coreFilter := cloneRuntimeMemoryFilter(filter)
+	coreFilter["kind"] = []any{"persona", "procedural"}
+	coreFilter["importance"] = map[string]any{"gte": 85}
+	coreFilter["confidence"] = map[string]any{"gte": 0.8}
+	rows = appendUniqueRuntimeMemories(rows, model.Select(ctx, coreFilter, map[string]any{
+		"order": "main.importance desc,main.id desc", "limit": runtimeMemoryCoreCandidateLimit,
+	}))
+	rows = appendUniqueRuntimeMemories(rows, model.Select(ctx, filter, map[string]any{
+		"order": "main.importance desc,main.id desc", "limit": runtimeMemoryPriorityCandidateLimit,
+	}))
+	rows = appendUniqueRuntimeMemories(rows, model.Select(ctx, filter, map[string]any{
+		"order": "main.id desc", "limit": runtimeMemoryRecentCandidateLimit,
+	}))
+	if keywordFilter := runtimeMemoryKeywordFilter(filter, req.Query); len(keywordFilter) > 0 {
+		rows = appendUniqueRuntimeMemories(rows, model.Select(ctx, keywordFilter, map[string]any{
+			"order": "main.importance desc,main.id desc", "limit": runtimeMemoryKeywordCandidateLimit,
+		}))
+	}
 	return rankRuntimeMemoryRows(rows, req, limit)
+}
+
+func appendUniqueRuntimeMemories(current []*memorymodel.Memory, rows []*memorymodel.Memory) []*memorymodel.Memory {
+	seen := make(map[uint64]struct{}, len(current)+len(rows))
+	for _, row := range current {
+		if row != nil {
+			seen[row.ID] = struct{}{}
+		}
+	}
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		if _, exists := seen[row.ID]; exists {
+			continue
+		}
+		seen[row.ID] = struct{}{}
+		current = append(current, row)
+	}
+	return current
+}
+
+func cloneRuntimeMemoryFilter(filter map[string]any) map[string]any {
+	result := make(map[string]any, len(filter))
+	for key, value := range filter {
+		result[key] = value
+	}
+	return result
+}
+
+func runtimeMemoryKeywordFilter(filter map[string]any, query string) map[string]any {
+	terms := runtimeMemorySearchTerms(query)
+	if len(terms) == 0 {
+		return nil
+	}
+	keywordConditions := make([]any, 0, len(terms)*3)
+	for _, term := range terms {
+		pattern := "%" + term + "%"
+		for _, field := range []string{"main.title", "main.content", "main.tags"} {
+			keywordConditions = append(keywordConditions, map[string]any{field: map[string]any{"LIKE": pattern}})
+		}
+	}
+	result := cloneRuntimeMemoryFilter(filter)
+	scopeConditions := result["or"]
+	delete(result, "or")
+	result["and"] = []any{
+		map[string]any{"or": scopeConditions},
+		map[string]any{"or": keywordConditions},
+	}
+	return result
+}
+
+func runtimeMemorySearchTerms(query string) []string {
+	tokens := strings.FieldsFunc(strings.TrimSpace(query), func(current rune) bool {
+		return !unicode.IsLetter(current) && !unicode.IsDigit(current)
+	})
+	result := make([]string, 0, runtimeMemorySearchTermLimit)
+	seen := map[string]struct{}{}
+	add := func(value string) bool {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return false
+		}
+		if _, exists := seen[value]; exists {
+			return false
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+		return len(result) >= runtimeMemorySearchTermLimit
+	}
+	for _, token := range tokens {
+		runes := []rune(token)
+		if add(token) {
+			break
+		}
+		if len(runes) <= 2 || !containsHanRune(runes) {
+			continue
+		}
+		for start := 0; start+2 <= len(runes); start++ {
+			if add(string(runes[start : start+2])) {
+				break
+			}
+		}
+		if len(result) >= runtimeMemorySearchTermLimit {
+			break
+		}
+	}
+	return result
+}
+
+func containsHanRune(runes []rune) bool {
+	for _, current := range runes {
+		if unicode.Is(unicode.Han, current) {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeMemoryFilter(req RuntimeRequest) map[string]any {
@@ -116,27 +229,27 @@ func runtimeMemoryFilter(req RuntimeRequest) map[string]any {
 	}
 	conditions := make([]any, 0, 5)
 	if req.IncludeGlobal {
-		conditions = append(conditions, map[string]any{"main.scope": memorymodel.ScopeGlobal})
+		conditions = append(conditions, memoryScopeCondition(map[string]any{"main.scope": memorymodel.ScopeGlobal}))
 	}
 	agentKey := strings.TrimSpace(req.AgentKey)
 	if req.IncludeAgent && agentKey != "" {
-		conditions = append(conditions, map[string]any{
+		conditions = append(conditions, memoryScopeCondition(map[string]any{
 			"main.scope": memorymodel.ScopeAgent, "main.agent_key": agentKey,
-		})
+		}))
 	}
 	if agentKey != "" {
-		conditions = append(conditions, map[string]any{
+		conditions = append(conditions, memoryScopeCondition(map[string]any{
 			"main.scope": memorymodel.ScopeContext, "main.agent_key": agentKey,
 			"main.context_key": NormalizeContextKey(req.ContextKey, agentKey),
-		})
+		}))
 	}
 	if req.SessionID > 0 {
-		conditions = append(conditions, map[string]any{
+		conditions = append(conditions, memoryScopeCondition(map[string]any{
 			"main.scope": memorymodel.ScopeSession, "main.session_id": req.SessionID,
-		})
+		}))
 	}
 	if req.IncludeUnscoped {
-		conditions = append(conditions, map[string]any{"main.scope": ""})
+		conditions = append(conditions, memoryScopeCondition(map[string]any{"main.scope": ""}))
 	}
 	if len(conditions) == 0 {
 		return nil
@@ -153,9 +266,11 @@ func rankRuntimeMemoryRows(rows []*memorymodel.Memory, req RuntimeRequest, limit
 	core := make([]scoredRuntimeMemory, 0, runtimeMemoryCoreLimit)
 	relevant := make([]scoredRuntimeMemory, 0, len(rows))
 	for _, row := range rows {
-		if row == nil || !memoryMatchesRuntimeRequest(*row, req) {
+		if row == nil || !memoryMatchesRuntimeRequest(*row, req) ||
+			memoryFieldsContainSensitiveData(row.Title, row.Content, []string{row.Tags}) {
 			continue
 		}
+		row.Content = limitMemoryText(row.Content, memoryContentLimit)
 		item := scoredRuntimeMemory{
 			row: row, score: runtimeMemoryScore(*row, query),
 			relevance: runtimeMemoryRelevance(*row, query),
@@ -229,7 +344,7 @@ func runtimeMemoryRelevance(row memorymodel.Memory, query string) float64 {
 	}
 	title := memoryTextScore(query, row.Title)
 	content := memoryTextScore(query, row.Content)
-	tags := memoryTextScore(query, row.Tags)
+	tags := memoryTextScore(query, limitMemoryText(row.Tags, memoryTagCount*memoryTagLimit))
 	return title*0.3 + content*0.6 + tags*0.1
 }
 

@@ -28,7 +28,7 @@ type Candidate struct {
 
 func CanAnalyzeInput(text string) bool {
 	text = normalizeAutoMemoryContent(text)
-	return text != "" && len([]rune(text)) <= 1200 && !hasSensitiveMemoryContent(text)
+	return text != "" && !hasSensitiveMemoryContent(text)
 }
 
 func normalizeAutoMemoryContent(text string) string {

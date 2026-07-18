@@ -3,6 +3,10 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { loadAssetDetail } from "./asset-api";
 import { AssetBrowser } from "./asset-browser";
+import {
+  assetPreviewOutput,
+  findAssetMediaURL,
+} from "./asset-content";
 import type {
   ReferenceOption,
   ReferencePreviewRequest,
@@ -58,13 +62,20 @@ export function useAssetReferenceProvider({
         ) {
           throw new Error("资产当前版本已变化，请重新选择");
         }
+        const media = assetReferenceMedia(detail.asset);
         return {
           refType: "asset" as const,
           refId: detail.asset.id,
           title: detail.asset.name,
           text: detail.asset.summary,
-          media: [] as [],
-          content: detail.asset.version?.content,
+          media,
+          content:
+            media.length > 0
+              ? undefined
+              : assetPreviewOutput(
+                  detail.asset.kind,
+                  detail.asset.version?.content,
+                ),
         };
       },
       renderPicker: (props) => (
@@ -145,6 +156,7 @@ function AssetReferencePicker({
 }
 
 function assetReferenceOption(asset: AssetRecord): WorkbenchReferenceOption {
+  const media = assetReferenceMedia(asset);
   return {
     key: `asset:${asset.id}:${asset.versionID}`,
     refType: "asset",
@@ -153,6 +165,36 @@ function assetReferenceOption(asset: AssetRecord): WorkbenchReferenceOption {
     trigger: "@",
     label: asset.name,
     description: asset.summary,
-    preview: { text: asset.summary, kind: asset.kind },
+    preview: {
+      text: asset.summary,
+      kind: asset.kind,
+      url: media[0]?.url,
+    },
   };
+}
+
+const referenceMediaKinds = new Set<AssetKind>([
+  "image",
+  "video",
+  "audio",
+  "file",
+]);
+
+function assetReferenceMedia(asset: AssetRecord) {
+  if (!referenceMediaKinds.has(asset.kind)) {
+    return [];
+  }
+  const url = findAssetMediaURL(asset.version?.content, asset.kind);
+  if (!url) {
+    return [];
+  }
+  return [
+    {
+      refType: "asset" as const,
+      refId: asset.id,
+      kind: asset.kind,
+      label: asset.name,
+      url,
+    },
+  ];
 }

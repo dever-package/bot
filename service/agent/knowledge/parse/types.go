@@ -1,6 +1,9 @@
 package parse
 
+import "context"
+
 type Request struct {
+	Context       context.Context
 	Path          string
 	Name          string
 	MimeType      string

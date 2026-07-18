@@ -1,11 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
-import { Check, Loader2, Save, Zap } from "lucide-react";
-import { request } from "@dever/front-plugin";
-import { AssetDetailDialog } from "../asset/asset-detail-dialog";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Zap } from "lucide-react";
 import type { AssetRecord } from "../asset/asset-types";
-import { StreamPowerRunner } from "../../show/stream-request";
-import { isSuccessResponse } from "../shared/api-response";
+import { SaveAssetAction } from "../asset/save-asset-action";
 import {
+  BODY_UPLOAD_BIZ_KEY,
+  BODY_UPLOAD_BIZ_NAME,
+  saveBodyUploadedAssets,
+  type BodyUploadedFile,
+} from "../asset/upload-asset-api";
+import { StreamPowerRunner } from "../../show/stream-request";
+import {
+  saveWorkbenchPowerAsset,
   scopedWorkbenchApi,
   workbenchApi,
   type WorkbenchPower,
@@ -25,6 +30,12 @@ export function WorkbenchFunctionPage({
 }) {
   const [selectedID, setSelectedID] = useState(0);
   const [visitedIDs, setVisitedIDs] = useState<number[]>([]);
+  const saveUploadedFiles = useCallback(
+    async (files: BodyUploadedFile[]) => {
+      await saveBodyUploadedAssets({ teamID, files });
+    },
+    [teamID],
+  );
   useEffect(() => {
     setSelectedID((current) =>
       powers.some((power) => power.id === current)
@@ -77,13 +88,12 @@ export function WorkbenchFunctionPage({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#f7f8f8]">
-      <div className="flex h-14 shrink-0 items-center border-b border-[#e2e6e4] bg-white px-4 md:px-6">
-        <label className="flex min-w-0 items-center gap-3">
-          <span className="shrink-0 text-xs font-medium text-[#68716d]">
-            工具
-          </span>
+    <div className="workbench-page workbench-function-page flex h-full min-h-0 flex-col">
+      <div className="workbench-selector-bar">
+        <label className="workbench-selector-field">
+          <span>工具</span>
           <select
+            aria-label="选择工具"
             value={selectedID}
             onChange={(event) => {
               const nextID = Number(event.target.value);
@@ -95,7 +105,6 @@ export function WorkbenchFunctionPage({
                 onClearContinuation();
               }
             }}
-            className="h-9 min-w-0 max-w-[320px] rounded-md border border-[#d8ddda] bg-white px-3 text-sm font-medium text-[#17201c] outline-none focus:border-[#799184]"
           >
             {powers.map((power) => (
               <option key={power.id} value={power.id}>
@@ -113,7 +122,7 @@ export function WorkbenchFunctionPage({
         />
       ) : null}
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3 md:overflow-hidden md:p-5">
+      <div className="workbench-function-content min-h-0 flex-1 overflow-y-auto md:overflow-hidden">
         {visitedIDs.map((powerID) => {
           const power = powers.find((current) => current.id === powerID);
           if (!power) {
@@ -127,6 +136,7 @@ export function WorkbenchFunctionPage({
             >
               <StreamPowerRunner
                 powerKey={power.key}
+                appearance="body"
                 requestApi={workbenchApi("power_run")}
                 paramApi={workbenchApi("power_form")}
                 streamApi={scopedWorkbenchApi("power_stream", { teamID })}
@@ -136,6 +146,10 @@ export function WorkbenchFunctionPage({
                 height="100%"
                 resultTitle="运行结果"
                 assetReferenceTeamID={teamID}
+                uploadBizKey={BODY_UPLOAD_BIZ_KEY}
+                uploadBizName={BODY_UPLOAD_BIZ_NAME}
+                allowResourceLibrary={false}
+                onUploadedFiles={saveUploadedFiles}
                 renderResultActions={({ requestID, successful }) =>
                   successful ? (
                     <SaveToolMaterialButton
@@ -174,76 +188,28 @@ function SaveToolMaterialButton({
   targetAssetID: number;
   onSaved: () => void;
 }) {
-  const [saving, setSaving] = useState(false);
-  const [savedAssetID, setSavedAssetID] = useState(0);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    setSaving(false);
-    setSavedAssetID(0);
-    setDetailOpen(false);
-    setError("");
-  }, [requestID]);
-
-  async function save() {
-    if (savedAssetID) {
-      setDetailOpen(true);
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      const result = await request(workbenchApi("power_save_asset"), "post", {
-        team_id: teamID,
-        team_power_id: teamPowerID,
-        request_id: requestID,
-        target_asset_id: targetAssetID || undefined,
-      });
-      if (!isSuccessResponse(result)) {
-        throw new Error(String(result?.message || result?.msg || "保存素材失败"));
-      }
-      const assetID = Number(result?.data?.asset?.id || 0);
-      if (!assetID) {
-        throw new Error("保存素材结果为空");
-      }
-      setSavedAssetID(assetID);
-      if (targetAssetID) {
-        onSaved();
-      }
-    } catch (currentError) {
-      setError(currentError instanceof Error ? currentError.message : "保存素材失败");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
-    <>
-      <button
-        type="button"
-        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[#cfd8d3] bg-white px-2.5 text-xs font-medium text-[#365447] hover:bg-[#eef3f0] disabled:opacity-60"
-        disabled={saving}
-        title={error || (savedAssetID ? "查看已保存素材" : "保存为素材")}
-        onClick={() => void save()}
-      >
-        {saving ? (
-          <Loader2 className="size-3.5 animate-spin" />
-        ) : savedAssetID ? (
-          <Check className="size-3.5" />
-        ) : (
-          <Save className="size-3.5" />
-        )}
-        {saving ? "保存中" : savedAssetID ? "已保存" : "保存素材"}
-      </button>
-      {detailOpen && savedAssetID ? (
-        <AssetDetailDialog
-          teamID={teamID}
-          assetID={savedAssetID}
-          onClose={() => setDetailOpen(false)}
-        />
-      ) : null}
-    </>
+    <SaveAssetAction
+      teamID={teamID}
+      resetKey={`${requestID}:${targetAssetID}`}
+      appearance="toolbar"
+      confirmDescription={
+        targetAssetID
+          ? "确认将本次工具结果保存为当前素材的新版本吗？"
+          : "确认将本次工具结果保存为当前团队的素材吗？"
+      }
+      save={() =>
+        saveWorkbenchPowerAsset({
+          teamID,
+          teamPowerID,
+          requestID,
+          targetAssetID,
+        })
+      }
+      onSaved={() => {
+        if (targetAssetID) onSaved();
+      }}
+    />
   );
 }
 
