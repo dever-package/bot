@@ -9,6 +9,7 @@ export function CanvasGroupNodeView({
   runnableCount,
   completedCount,
   failedCount,
+  staleCount,
   status,
   selected,
   onRename,
@@ -20,6 +21,7 @@ export function CanvasGroupNodeView({
   runnableCount: number;
   completedCount: number;
   failedCount: number;
+  staleCount: number;
   status: CanvasGroupRunStatus;
   selected?: boolean;
   onRename?: (title: string) => void;
@@ -112,6 +114,10 @@ export function CanvasGroupNodeView({
             <CheckCircle2 size={12} />
             已完成
           </span>
+        ) : staleCount > 0 ? (
+          <span className="ws-node-group-status is-stale">
+            待更新 {staleCount}
+          </span>
         ) : null}
         <button
           type="button"
@@ -123,9 +129,19 @@ export function CanvasGroupNodeView({
             onRun?.();
           }}
           aria-label="运行分组"
-          title={runnableCount === 0 ? "分组内暂无可运行节点" : "运行分组"}
+          title={
+            runnableCount === 0
+              ? "分组内暂无可运行节点"
+              : staleCount > 0
+                ? `更新 ${staleCount} 个变更节点`
+                : "运行分组"
+          }
         >
-          {running ? <Loader2 size={14} className="ws-spin" /> : <Play size={14} />}
+          {running ? (
+            <Loader2 size={14} className="ws-spin" />
+          ) : (
+            <Play size={14} />
+          )}
         </button>
       </header>
       <div className="ws-node-group-surface" aria-hidden="true" />

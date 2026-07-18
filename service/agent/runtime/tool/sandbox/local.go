@@ -47,8 +47,8 @@ func runCommand(ctx context.Context, input runCommandInput) (Result, error) {
 	command.Dir = input.WorkDir
 	command.Env = input.Env
 
-	stdout := &limitedBuffer{limit: input.OutputMaxBytes}
-	stderr := &limitedBuffer{limit: input.OutputMaxBytes}
+	stdout := NewOutputBuffer(input.OutputMaxBytes)
+	stderr := NewOutputBuffer(input.OutputMaxBytes)
 	command.Stdout = stdout
 	command.Stderr = stderr
 
@@ -74,7 +74,7 @@ func runCommand(ctx context.Context, input runCommandInput) (Result, error) {
 		DurationMS: duration,
 		Stdout:     stdout.String(),
 		Stderr:     stderr.String(),
-		Truncated:  stdout.truncated || stderr.truncated,
+		Truncated:  stdout.Truncated() || stderr.Truncated(),
 	}
 	if err != nil {
 		result.Error = err.Error()

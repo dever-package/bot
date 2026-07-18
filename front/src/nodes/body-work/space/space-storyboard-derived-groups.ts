@@ -441,6 +441,13 @@ function mergeExistingDerivedNode(
   if (!metadata) {
     return node;
   }
+  const previousSourceSignature =
+    metadata.sourceSignature ||
+    storyboardDerivedSourceSignature({
+      ...item,
+      prompt: metadata.generatedPrompt,
+      promptContent: node.composerDraft?.promptContent,
+    });
   const currentPrompt = String(node.composerDraft?.prompt || "");
   const frameReference =
     item.type === "shot"
@@ -478,7 +485,6 @@ function mergeExistingDerivedNode(
           referenceLabels,
         )
       : currentPrompt;
-  const nextMetadata = storyboardItemMetadata(metadata.sourceNodeId, item);
   const promptChanged = nextPrompt !== currentPrompt;
   const nextParamValues = promptChanged
     ? replaceGeneratedPromptParamValues(
@@ -506,10 +512,21 @@ function mergeExistingDerivedNode(
   const promptContentChanged =
     JSON.stringify(node.composerDraft?.promptContent || null) !==
     JSON.stringify(nextPromptContent || null);
+  const nextMetadata = storyboardItemMetadata(metadata.sourceNodeId, item);
+  const hasGeneratedResult = derivedNodeHasGeneratedResult(node);
+  const resultSourceSignature =
+    metadata.resultSourceSignature ||
+    (hasGeneratedResult ? previousSourceSignature : "");
+  if (resultSourceSignature) {
+    nextMetadata.resultSourceSignature = resultSourceSignature;
+  }
+  nextMetadata.stale = Boolean(
+    hasGeneratedResult &&
+      resultSourceSignature !== nextMetadata.sourceSignature,
+  );
   const titleChanged = node.title !== item.title;
   if (
     node.groupId === groupId &&
-    !metadata.stale &&
     !promptChanged &&
     !paramValuesChanged &&
     !promptContentChanged &&
@@ -534,6 +551,14 @@ function mergeExistingDerivedNode(
         : node.composerDraft,
     storyboardItem: nextMetadata,
   };
+}
+
+function derivedNodeHasGeneratedResult(node: SpaceCanvasNode) {
+  return Boolean(
+    Number(node.resultRef?.version_id || 0) > 0 ||
+      Number(node.asset?.version_id || node.asset?.version?.id || 0) > 0 ||
+      node.resultOutput != null,
+  );
 }
 
 function promptWithFrameReference(
@@ -592,8 +617,15 @@ function storyboardItemMetadata(
     itemType: item.type,
     itemId: item.id,
     generatedPrompt: item.prompt,
+    sourceSignature: storyboardDerivedSourceSignature(item),
     stale: false,
   };
+}
+
+function storyboardDerivedSourceSignature(item: StoryboardDerivedItem) {
+  return stableToken(
+    JSON.stringify([item.prompt, item.promptContent || null]),
+  );
 }
 
 function sameItemMetadata(
@@ -605,6 +637,8 @@ function sameItemMetadata(
     left.itemType === right.itemType &&
     left.itemId === right.itemId &&
     left.generatedPrompt === right.generatedPrompt &&
+    left.sourceSignature === right.sourceSignature &&
+    left.resultSourceSignature === right.resultSourceSignature &&
     Boolean(left.stale) === Boolean(right.stale)
   );
 }

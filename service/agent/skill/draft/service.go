@@ -2,30 +2,25 @@ package draft
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
-	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
 	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 	"github.com/dever-package/bot/service/agent/runtime/tool/sandbox"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
-	"github.com/shemic/dever/orm"
 )
 
 const (
 	maxDraftFileBytes  = 256 * 1024
 	maxDraftTotalBytes = 2 * 1024 * 1024
+	maxDraftFiles      = 1000
 	defaultStatus      = int16(1)
 	defaultSort        = 100
 )
@@ -121,12 +116,12 @@ func (Service) Test(ctx context.Context, req Request) Result {
 		return failResult(err.Error(), nil)
 	}
 	testHash := draftSnapshotHash(snapshot)
-	if err := installDraftDependencies(ctx, skillRoot, snapshot.Files); err != nil {
+	runtimeConfig := runtimeconfig.Load(ctx)
+	sandboxConfig := runtimetool.SandboxConfig(runtimeConfig)
+	if _, err := agentskill.PrepareDependencies(ctx, sandboxConfig, skillRoot); err != nil {
 		return failResult(err.Error(), nil)
 	}
-	runtimeConfig := runtimeconfig.WithDefaults(runtimeConfig(ctx))
-	sandboxConfig := runtimetool.SandboxConfig(runtimeConfig)
-	configEnv, err := agentskill.LoadConfigEnv(ctx, draftConfigSkillID(ctx, snapshot), req.Target)
+	configEnv, err := agentskill.LoadConfigEnv(ctx, draftConfigSkillID(ctx, snapshot), agentskill.JSONText(snapshot.Manifest), req.Target)
 	if err != nil {
 		return failResult(err.Error(), nil)
 	}
@@ -322,206 +317,6 @@ func draftResultData(draft *agentmodel.SkillDraft, sourceSkillID uint64, created
 	}
 }
 
-func (Service) ImportSource(ctx context.Context, req SourceRequest) Result {
-	req = normalizeSourceRequest(req)
-	if req.SourceURL == "" {
-		return failResult("来源地址不能为空", nil)
-	}
-	tempRoot, err := os.MkdirTemp("", "dever-skill-source-*")
-	if err != nil {
-		return failResult(err.Error(), nil)
-	}
-	defer os.RemoveAll(tempRoot)
-
-	repoDir := filepath.Join(tempRoot, "repo")
-	if err := cloneSource(ctx, req, repoDir); err != nil {
-		return failResult(err.Error(), nil)
-	}
-	commit := gitCommit(ctx, repoDir)
-	files, usedFiles, err := sourceReferenceFiles(repoDir, req.UsedFiles)
-	if err != nil {
-		return failResult(err.Error(), nil)
-	}
-	manifest := map[string]any{
-		"key":         req.Key,
-		"name":        req.Name,
-		"description": req.Description,
-		"triggers":    []any{},
-		"source_url":  req.SourceURL,
-		"config":      []any{},
-		"scripts":     []any{},
-		"source_refs": []any{
-			map[string]any{
-				"source_url": req.SourceURL,
-				"ref":        req.Ref,
-				"commit":     commit,
-				"license":    req.License,
-				"used_files": usedFiles,
-				"notes":      req.Notes,
-			},
-		},
-	}
-	draftID := uint64(agentmodel.NewSkillDraftModel().Insert(ctx, map[string]any{
-		"pack_id":           req.PackID,
-		"cate_id":           req.CateID,
-		"key":               req.Key,
-		"name":              req.Name,
-		"description":       req.Description,
-		"status":            agentmodel.SkillDraftStatusDraft,
-		"skill_md":          defaultSourceSkillMD(req),
-		"files_json":        agentskill.JSONText(files),
-		"manifest":          agentskill.JSONText(manifest),
-		"validation_result": agentskill.JSONText(map[string]any{"source_imported": true}),
-		"created_at":        time.Now(),
-	}))
-	if draftID == 0 {
-		return failResult("创建来源草稿失败", nil)
-	}
-	return okResult("已基于开源代码创建草稿", map[string]any{
-		"draft_id":   draftID,
-		"source_url": req.SourceURL,
-		"commit":     commit,
-	})
-}
-
-func (Service) ApplyPatch(ctx context.Context, req PatchRequest) Result {
-	values, err := draftPatchValues(ctx, req)
-	if err != nil {
-		return failResult(err.Error(), nil)
-	}
-	if draftPatchInvalidatesValidation(values) {
-		values["validation_result"] = agentskill.JSONText(map[string]any{
-			"assistant_patch": true,
-			"content_changed": true,
-		})
-	}
-	if req.ID > 0 {
-		row := agentmodel.NewSkillDraftModel().Find(ctx, map[string]any{"id": req.ID})
-		if row == nil {
-			return failResult("技能草稿不存在", nil)
-		}
-		if len(values) == 0 {
-			data := applyPatchResultData(ctx, req.ID)
-			if warning := rebindDraftAssistantSession(ctx, req, req.ID); warning != "" {
-				data["assistant_session_warning"] = warning
-			}
-			return okResult("没有需要更新的草稿内容", data)
-		}
-		agentmodel.NewSkillDraftModel().Update(ctx, map[string]any{"id": req.ID}, values)
-		validation := validateAndSaveDraft(ctx, req.ID)
-		data := applyPatchResultData(ctx, req.ID)
-		if validation != nil {
-			data["validation"] = validation
-		}
-		if warning := rebindDraftAssistantSession(ctx, req, req.ID); warning != "" {
-			data["assistant_session_warning"] = warning
-		}
-		return okResult(draftPatchMessage("技能草稿已更新", validation), data)
-	}
-
-	if _, exists := values["key"]; !exists {
-		return failResult("创建草稿时技能标识不能为空", nil)
-	}
-	if _, exists := values["name"]; !exists {
-		values["name"] = values["key"]
-	}
-	if _, exists := values["pack_id"]; !exists {
-		if req.PackID > 0 {
-			values["pack_id"] = req.PackID
-		} else {
-			values["pack_id"] = agentmodel.DefaultSkillPackID
-		}
-	}
-	if _, exists := values["cate_id"]; !exists {
-		values["cate_id"] = defaultCateID(req.CateID)
-	}
-	values["status"] = agentmodel.SkillDraftStatusDraft
-	values["created_at"] = time.Now()
-	draftID := uint64(agentmodel.NewSkillDraftModel().Insert(ctx, values))
-	if draftID == 0 {
-		return failResult("创建技能草稿失败", nil)
-	}
-	validation := validateAndSaveDraft(ctx, draftID)
-	data := applyPatchResultData(ctx, draftID)
-	if validation != nil {
-		data["validation"] = validation
-	}
-	if warning := rebindDraftAssistantSession(ctx, req, draftID); warning != "" {
-		data["assistant_session_warning"] = warning
-	}
-	return okResult(draftPatchMessage("技能草稿已创建", validation), data)
-}
-
-func draftPatchInvalidatesValidation(values map[string]any) bool {
-	for _, key := range []string{"key", "name", "description", "skill_md", "files_json", "manifest"} {
-		if _, exists := values[key]; exists {
-			return true
-		}
-	}
-	return false
-}
-
-func validateAndSaveDraft(ctx context.Context, draftID uint64) map[string]any {
-	if draftID == 0 {
-		return nil
-	}
-	_, issues, err := loadAndValidate(ctx, draftID)
-	if err != nil {
-		return map[string]any{
-			"valid":  false,
-			"issues": []string{err.Error()},
-		}
-	}
-	payload := validationPayload(issues)
-	saveValidationResult(ctx, draftID, payload)
-	return payload
-}
-
-func draftPatchMessage(defaultMessage string, validation map[string]any) string {
-	if validation == nil || agentskill.Truthy(validation["valid"]) {
-		return defaultMessage
-	}
-	return defaultMessage + "，但内容检查未通过"
-}
-
-func applyPatchResultData(ctx context.Context, draftID uint64) map[string]any {
-	data := map[string]any{"draft_id": draftID}
-	if row := agentmodel.NewSkillDraftModel().Find(ctx, map[string]any{"id": draftID}); row != nil {
-		if draft, ok := draftResultData(row, row.SourceSkillID, false)["draft"]; ok {
-			data["draft"] = draft
-		}
-	}
-	return data
-}
-
-func rebindDraftAssistantSession(ctx context.Context, req PatchRequest, draftID uint64) string {
-	if req.AssistantSessionID == 0 || draftID == 0 {
-		return ""
-	}
-	fromContextKey := strings.TrimSpace(req.AssistantContextKey)
-	toContextKey := fmt.Sprintf("skill_draft:%d", draftID)
-	if fromContextKey == "" || fromContextKey == toContextKey {
-		return ""
-	}
-	if !isNewDraftAssistantContext(fromContextKey) {
-		return ""
-	}
-	err := runtimechat.NewService().RebindSessionContext(ctx, runtimechat.RebindSessionContextRequest{
-		SessionID:      req.AssistantSessionID,
-		AgentKey:       req.AssistantAgentKey,
-		FromContextKey: fromContextKey,
-		ToContextKey:   toContextKey,
-	})
-	if err != nil {
-		return err.Error()
-	}
-	return ""
-}
-
-func isNewDraftAssistantContext(contextKey string) bool {
-	return contextKey == "skill_draft:new" || strings.HasPrefix(contextKey, "skill_draft:new:")
-}
-
 func loadAndValidate(ctx context.Context, id uint64) (draftSnapshot, []string, error) {
 	row := agentmodel.NewSkillDraftModel().Find(ctx, map[string]any{"id": id})
 	if row == nil {
@@ -570,6 +365,10 @@ func parseDraftManifest(raw string) (map[string]any, []string) {
 		return manifest, []string{"manifest 必须是 JSON 对象"}
 	}
 	issues := make([]string, 0)
+	if _, exists := manifest["builtin_methods"]; exists {
+		issues = append(issues, "manifest 不能声明平台内置方法")
+		delete(manifest, "builtin_methods")
+	}
 	for _, key := range []string{"value", "value_encrypted", "secret", "api_key", "cookie", "token"} {
 		if _, exists := manifest[key]; exists {
 			issues = append(issues, "manifest 顶层不能包含真实配置值: "+key)
@@ -609,8 +408,16 @@ func parseDraftFiles(raw string) (map[string]string, []string) {
 	}
 	values = normalizeDraftFiles(values)
 	issues := make([]string, 0)
+	if len(values) > maxDraftFiles {
+		issues = append(issues, fmt.Sprintf("草稿文件数量不能超过 %d 个", maxDraftFiles))
+	}
 	totalBytes := 0
+	validatedFiles := 0
 	for path, content := range values {
+		if validatedFiles >= maxDraftFiles {
+			break
+		}
+		validatedFiles++
 		if err := validateDraftFilePath(path); err != nil {
 			issues = append(issues, err.Error())
 			continue
@@ -639,29 +446,84 @@ func readPublishedSkillFiles(skill agentmodel.Skill) (string, string, error) {
 	if entryFile == "" {
 		entryFile = agentskill.EntryFile
 	}
-	raw, err := os.ReadFile(filepath.Join(root, entryFile))
+	entryPath, _, err := agentskill.ResolveRelativePath(root, entryFile)
+	if err != nil {
+		return "", "", fmt.Errorf("技能入口路径不安全: %w", err)
+	}
+	raw, err := os.ReadFile(entryPath)
 	if err != nil {
 		return "", "", fmt.Errorf("读取正式技能入口失败: %w", err)
 	}
+	if len(raw) > maxDraftFileBytes {
+		return "", "", fmt.Errorf("正式技能入口过大，不能创建草稿")
+	}
 	files := map[string]string{}
+	totalBytes := len(raw)
+	for _, file := range []string{"requirements.txt", "package.json"} {
+		if err := readPublishedSkillFile(root, file, files, &totalBytes, true); err != nil {
+			return "", "", err
+		}
+	}
 	for _, dir := range []string{"scripts", "references"} {
-		if err := readPublishedSkillDir(root, dir, files); err != nil {
+		if err := readPublishedSkillDir(root, dir, files, &totalBytes); err != nil {
 			return "", "", err
 		}
 	}
 	return string(raw), agentskill.JSONText(files), nil
 }
 
-func readPublishedSkillDir(root string, dir string, files map[string]string) error {
-	fullDir := filepath.Join(root, dir)
-	info, err := os.Stat(fullDir)
-	if err != nil || !info.IsDir() {
+func readPublishedSkillFile(root string, relative string, files map[string]string, totalBytes *int, optional bool) error {
+	path, normalized, err := agentskill.ResolveRelativePath(root, relative)
+	if err != nil {
+		return fmt.Errorf("正式技能文件路径不安全 %s: %w", relative, err)
+	}
+	info, err := os.Stat(path)
+	if optional && os.IsNotExist(err) {
 		return nil
 	}
-	totalBytes := 0
+	if err != nil {
+		return fmt.Errorf("读取正式技能文件失败 %s: %w", relative, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("正式技能文件不是普通文件: %s", relative)
+	}
+	if info.Size() > maxDraftFileBytes {
+		return fmt.Errorf("正式技能文件过大，不能创建草稿: %s", relative)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("读取正式技能文件失败 %s: %w", relative, err)
+	}
+	*totalBytes += len(raw)
+	if *totalBytes > maxDraftTotalBytes {
+		return fmt.Errorf("正式技能文件总大小过大，不能创建草稿")
+	}
+	normalized = filepath.ToSlash(normalized)
+	if _, exists := files[normalized]; !exists && len(files) >= maxDraftFiles {
+		return fmt.Errorf("正式技能文件数量超过 %d 个，不能创建草稿", maxDraftFiles)
+	}
+	files[normalized] = string(raw)
+	return nil
+}
+
+func readPublishedSkillDir(root string, dir string, files map[string]string, totalBytes *int) error {
+	fullDir, _, resolveErr := agentskill.ResolveRelativePath(root, dir)
+	if resolveErr != nil {
+		return resolveErr
+	}
+	info, err := os.Stat(fullDir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("读取正式技能目录失败 %s: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("正式技能路径不是目录: %s", dir)
+	}
 	return filepath.WalkDir(fullDir, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			return err
 		}
 		if path == fullDir {
 			return nil
@@ -675,652 +537,14 @@ func readPublishedSkillDir(root string, dir string, files map[string]string) err
 		}
 		relative, err := filepath.Rel(root, path)
 		if err != nil {
-			return nil
+			return err
 		}
 		relative = filepath.ToSlash(relative)
 		if err := validateDraftFilePath(relative); err != nil {
-			return nil
+			return err
 		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		if len(raw) > maxDraftFileBytes {
-			return fmt.Errorf("正式技能文件过大，不能创建草稿: %s", relative)
-		}
-		totalBytes += len(raw)
-		if totalBytes > maxDraftTotalBytes {
-			return fmt.Errorf("正式技能文件总大小过大，不能创建草稿")
-		}
-		files[relative] = string(raw)
-		return nil
+		return readPublishedSkillFile(root, relative, files, totalBytes, false)
 	})
-}
-
-func normalizeSourceRequest(req SourceRequest) SourceRequest {
-	req.Key = agentskill.NormalizeKey(req.Key)
-	if req.Key == "" {
-		req.Key = agentskill.NormalizeKey(sourceBaseName(req.SourceURL))
-	}
-	req.Name = strings.TrimSpace(req.Name)
-	if req.Name == "" {
-		req.Name = req.Key
-	}
-	req.Description = strings.TrimSpace(req.Description)
-	req.SourceURL = strings.TrimSpace(req.SourceURL)
-	req.Ref = strings.TrimSpace(req.Ref)
-	req.License = strings.TrimSpace(req.License)
-	req.Notes = strings.TrimSpace(req.Notes)
-	if req.CateID == 0 {
-		req.CateID = agentmodel.DefaultSkillCateID
-	}
-	return req
-}
-
-func cloneSource(ctx context.Context, req SourceRequest, target string) error {
-	if err := validateSourceURL(req.SourceURL); err != nil {
-		return err
-	}
-	args := []string{"clone", "--depth", "1"}
-	if req.Ref != "" {
-		args = append(args, "--branch", req.Ref)
-	}
-	args = append(args, req.SourceURL, target)
-	timeoutCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	command := exec.CommandContext(timeoutCtx, "git", args...)
-	output, err := command.CombinedOutput()
-	if timeoutCtx.Err() == context.DeadlineExceeded {
-		return fmt.Errorf("拉取来源仓库超时")
-	}
-	if err != nil {
-		return fmt.Errorf("拉取来源仓库失败: %s", strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
-func validateSourceURL(raw string) error {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return fmt.Errorf("来源地址不能为空")
-	}
-	if strings.HasPrefix(raw, "git@") {
-		hostPart := strings.TrimPrefix(raw, "git@")
-		host, _, ok := strings.Cut(hostPart, ":")
-		if ok && trustedSourceHost(host) {
-			return nil
-		}
-		return fmt.Errorf("只允许从可信 Git 托管站点引用源码")
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Hostname() == "" {
-		return fmt.Errorf("来源地址不是合法 URL")
-	}
-	switch strings.ToLower(parsed.Scheme) {
-	case "https", "ssh":
-	default:
-		return fmt.Errorf("来源地址只允许 https 或 ssh")
-	}
-	if !trustedSourceHost(parsed.Hostname()) {
-		return fmt.Errorf("只允许从可信 Git 托管站点引用源码")
-	}
-	return nil
-}
-
-func trustedSourceHost(host string) bool {
-	host = strings.ToLower(strings.TrimSpace(host))
-	switch host {
-	case "github.com", "gitlab.com", "gitee.com":
-		return true
-	default:
-		return false
-	}
-}
-
-func gitCommit(ctx context.Context, repoDir string) string {
-	command := exec.CommandContext(ctx, "git", "-C", repoDir, "rev-parse", "HEAD")
-	output, err := command.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(output))
-}
-
-func sourceReferenceFiles(repoDir string, selected []string) (map[string]string, []string, error) {
-	if len(selected) == 0 {
-		tree, err := sourceTree(repoDir)
-		if err != nil {
-			return nil, nil, err
-		}
-		return map[string]string{"references/source-tree.txt": tree}, []string{}, nil
-	}
-	files := map[string]string{}
-	usedFiles := make([]string, 0, len(selected))
-	totalBytes := 0
-	for _, item := range selected {
-		relative := cleanSourceRelativePath(item)
-		if relative == "" {
-			continue
-		}
-		fullPath := filepath.Join(repoDir, filepath.FromSlash(relative))
-		if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(repoDir)+string(filepath.Separator)) {
-			return nil, nil, fmt.Errorf("来源文件路径不安全: %s", item)
-		}
-		info, err := os.Stat(fullPath)
-		if err != nil || info.IsDir() {
-			return nil, nil, fmt.Errorf("来源文件不存在: %s", relative)
-		}
-		if info.Size() > maxDraftFileBytes {
-			return nil, nil, fmt.Errorf("来源文件过大: %s", relative)
-		}
-		totalBytes += int(info.Size())
-		if totalBytes > maxDraftTotalBytes {
-			return nil, nil, fmt.Errorf("来源文件总大小超过限制")
-		}
-		raw, err := os.ReadFile(fullPath)
-		if err != nil {
-			return nil, nil, err
-		}
-		target := "references/source/" + relative
-		files[target] = string(raw)
-		usedFiles = append(usedFiles, relative)
-	}
-	sort.Strings(usedFiles)
-	return files, usedFiles, nil
-}
-
-func sourceTree(repoDir string) (string, error) {
-	paths := make([]string, 0, 200)
-	err := filepath.WalkDir(repoDir, func(path string, entry os.DirEntry, err error) error {
-		if err != nil || path == repoDir {
-			return nil
-		}
-		relative, err := filepath.Rel(repoDir, path)
-		if err != nil {
-			return nil
-		}
-		relative = filepath.ToSlash(relative)
-		if entry.IsDir() {
-			if sourceDirSkipped(entry.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if len(paths) >= 200 {
-			return nil
-		}
-		paths = append(paths, relative)
-		return nil
-	})
-	if err != nil {
-		return "", err
-	}
-	sort.Strings(paths)
-	return strings.Join(paths, "\n"), nil
-}
-
-func sourceDirSkipped(name string) bool {
-	switch name {
-	case ".git", "node_modules", "dist", "build", ".venv", "venv", "__pycache__":
-		return true
-	default:
-		return strings.HasPrefix(name, ".")
-	}
-}
-
-func cleanSourceRelativePath(path string) string {
-	path = filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
-	if path == "." || path == "" || strings.HasPrefix(path, "../") || strings.HasPrefix(path, "/") || strings.Contains(path, "/.") {
-		return ""
-	}
-	return path
-}
-
-func sourceBaseName(sourceURL string) string {
-	sourceURL = strings.TrimSuffix(strings.TrimSpace(sourceURL), "/")
-	sourceURL = strings.TrimSuffix(sourceURL, ".git")
-	if sourceURL == "" {
-		return "source-skill"
-	}
-	parts := strings.FieldsFunc(sourceURL, func(char rune) bool {
-		return char == '/' || char == ':'
-	})
-	if len(parts) == 0 {
-		return "source-skill"
-	}
-	return parts[len(parts)-1]
-}
-
-func draftPatchValues(ctx context.Context, req PatchRequest) (map[string]any, error) {
-	patch := normalizePatchMap(req.Patch)
-	if len(patch) == 0 {
-		return nil, fmt.Errorf("草稿 patch 不能为空")
-	}
-	values := map[string]any{}
-	if req.PackID > 0 {
-		values["pack_id"] = req.PackID
-	}
-	if req.CateID > 0 {
-		values["cate_id"] = req.CateID
-	}
-	if key := agentskill.NormalizeKey(patchText(patch, "key")); key != "" {
-		values["key"] = key
-	}
-	if name := patchText(patch, "name"); name != "" {
-		values["name"] = name
-	}
-	if description := patchText(patch, "description", "desc"); description != "" {
-		values["description"] = description
-	}
-	if packID := patchUint64(patch, "pack_id", "packId"); packID > 0 {
-		values["pack_id"] = packID
-	}
-	if cateID := patchUint64(patch, "cate_id", "cateId"); cateID > 0 {
-		values["cate_id"] = cateID
-	}
-	if skillMD := patchText(patch, "skill_md", "skillMd", "skill", "content", "markdown"); skillMD != "" {
-		values["skill_md"] = normalizeDraftMarkdownContent(skillMD)
-	}
-	if filesJSON, ok, err := patchFilesJSONText(patch, "files_json", "filesJson", "files"); err != nil {
-		return nil, err
-	} else if ok {
-		values["files_json"] = filesJSON
-	}
-	if manifest, ok, err := patchJSONText(patch, "manifest", "runtime_config", "runtimeConfig"); err != nil {
-		return nil, err
-	} else if ok {
-		values["manifest"] = manifest
-	}
-
-	if req.ID > 0 {
-		return values, nil
-	}
-	applyDraftPatchDefaults(ctx, values)
-	return values, nil
-}
-
-func normalizePatchMap(raw map[string]any) map[string]any {
-	if raw == nil {
-		return map[string]any{}
-	}
-	if nested, ok := raw["patch"].(map[string]any); ok {
-		return nested
-	}
-	if draft, ok := raw["draft"].(map[string]any); ok {
-		return draft
-	}
-	return raw
-}
-
-func applyDraftPatchDefaults(ctx context.Context, values map[string]any) {
-	key := strings.TrimSpace(fmt.Sprint(values["key"]))
-	name := strings.TrimSpace(fmt.Sprint(values["name"]))
-	description := strings.TrimSpace(fmt.Sprint(values["description"]))
-	if key == "" {
-		key = agentskill.NormalizeKey(name)
-		if key != "" {
-			values["key"] = key
-		}
-	}
-	if name == "" && key != "" {
-		name = key
-		values["name"] = name
-	}
-	if _, exists := values["cate_id"]; !exists {
-		values["cate_id"] = defaultCateID(0)
-	}
-	if _, exists := values["files_json"]; !exists {
-		values["files_json"] = "{}"
-	}
-	if _, exists := values["skill_md"]; !exists {
-		values["skill_md"] = defaultDraftSkillMD(name, description)
-	}
-	if _, exists := values["manifest"]; !exists {
-		values["manifest"] = defaultDraftManifest(ctx, key, name, description)
-	}
-	values["validation_result"] = agentskill.JSONText(map[string]any{
-		"assistant_patch": true,
-	})
-}
-
-func defaultCateID(value uint64) uint64 {
-	if value > 0 {
-		return value
-	}
-	return agentmodel.DefaultSkillCateID
-}
-
-func defaultDraftSkillMD(name string, description string) string {
-	lines := []string{
-		"---",
-		"name: " + strings.TrimSpace(name),
-		"description: " + strings.TrimSpace(description),
-		"---",
-		"",
-		"# " + strings.TrimSpace(name),
-	}
-	if strings.TrimSpace(description) != "" {
-		lines = append(lines, "", strings.TrimSpace(description))
-	}
-	lines = append(lines, "", "## Usage", "", "按用户输入选择是否使用该技能。")
-	return strings.Join(lines, "\n")
-}
-
-func defaultDraftManifest(_ context.Context, key string, name string, description string) string {
-	return agentskill.JSONText(map[string]any{
-		"key":         key,
-		"name":        name,
-		"description": description,
-		"triggers":    []any{},
-		"config":      []any{},
-		"scripts":     []any{},
-		"source_refs": []any{},
-	})
-}
-
-func patchText(patch map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if value, exists := patch[key]; exists {
-			return strings.TrimSpace(fmt.Sprint(value))
-		}
-	}
-	return ""
-}
-
-func patchUint64(patch map[string]any, keys ...string) uint64 {
-	for _, key := range keys {
-		if value, exists := patch[key]; exists {
-			switch typed := value.(type) {
-			case float64:
-				return uint64(typed)
-			case int:
-				return uint64(typed)
-			case uint64:
-				return typed
-			case string:
-				var parsed uint64
-				_, _ = fmt.Sscanf(strings.TrimSpace(typed), "%d", &parsed)
-				return parsed
-			}
-		}
-	}
-	return 0
-}
-
-func patchJSONText(patch map[string]any, keys ...string) (string, bool, error) {
-	for _, key := range keys {
-		value, exists := patch[key]
-		if !exists {
-			continue
-		}
-		switch typed := value.(type) {
-		case string:
-			text := cleanPatchJSONText(typed)
-			if text == "" {
-				return "", false, nil
-			}
-			if !json.Valid([]byte(text)) {
-				return "", false, fmt.Errorf("%s 必须是 JSON", key)
-			}
-			return text, true, nil
-		default:
-			return agentskill.JSONText(typed), true, nil
-		}
-	}
-	return "", false, nil
-}
-
-func patchFilesJSONText(patch map[string]any, keys ...string) (string, bool, error) {
-	for _, key := range keys {
-		value, exists := patch[key]
-		if !exists {
-			continue
-		}
-		files, empty, err := patchFilesMap(value)
-		if err != nil {
-			return "", false, fmt.Errorf("%s 必须是路径到文本内容的 JSON 对象", key)
-		}
-		if empty {
-			return "", false, nil
-		}
-		return agentskill.JSONText(normalizeDraftFiles(files)), true, nil
-	}
-	return "", false, nil
-}
-
-func patchFilesMap(value any) (map[string]string, bool, error) {
-	switch typed := value.(type) {
-	case string:
-		text := cleanPatchJSONText(typed)
-		if text == "" {
-			return nil, true, nil
-		}
-		files := map[string]string{}
-		if err := json.Unmarshal([]byte(text), &files); err != nil {
-			return nil, false, err
-		}
-		return files, false, nil
-	default:
-		raw, err := json.Marshal(typed)
-		if err != nil {
-			return nil, false, err
-		}
-		files := map[string]string{}
-		if err := json.Unmarshal(raw, &files); err != nil {
-			return nil, false, err
-		}
-		return files, false, nil
-	}
-}
-
-func cleanPatchJSONText(text string) string {
-	text = normalizeTextNewlines(strings.TrimPrefix(text, "\ufeff"))
-	text = unwrapWholeFencedBlock(text)
-	return strings.TrimSpace(text)
-}
-
-func normalizeDraftMarkdownContent(content string) string {
-	content = normalizeTextNewlines(strings.TrimPrefix(content, "\ufeff"))
-	content = unwrapWholeFencedBlock(content)
-	return strings.TrimSpace(content)
-}
-
-func normalizeDraftFiles(files map[string]string) map[string]string {
-	if len(files) == 0 {
-		return map[string]string{}
-	}
-	normalized := make(map[string]string, len(files))
-	for path, content := range files {
-		cleanPath := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
-		if cleanPath == "." {
-			cleanPath = strings.TrimSpace(path)
-		}
-		normalized[cleanPath] = normalizeDraftFileContent(cleanPath, content)
-	}
-	return normalized
-}
-
-func normalizeDraftFileContent(path string, content string) string {
-	content = normalizeTextNewlines(strings.TrimPrefix(content, "\ufeff"))
-	content = unwrapWholeFencedBlock(content)
-	if isDraftSourceFile(path) {
-		content = normalizeLikelyEscapedSourceText(path, content)
-		content = unwrapWholeFencedBlock(content)
-		content = normalizeScriptTypography(content)
-		return strings.TrimSpace(content)
-	}
-	if path == "requirements.txt" || path == "package.json" {
-		return strings.TrimSpace(content)
-	}
-	return content
-}
-
-func normalizeTextNewlines(text string) string {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
-	return text
-}
-
-func unwrapWholeFencedBlock(text string) string {
-	trimmed := strings.TrimSpace(text)
-	if !strings.HasPrefix(trimmed, "```") {
-		return text
-	}
-	firstLineEnd := strings.Index(trimmed, "\n")
-	if firstLineEnd < 0 {
-		return text
-	}
-	body := strings.TrimSpace(trimmed[firstLineEnd+1:])
-	if !strings.HasSuffix(body, "```") {
-		return text
-	}
-	body = strings.TrimSpace(strings.TrimSuffix(body, "```"))
-	return body
-}
-
-func isDraftSourceFile(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".py", ".js", ".sh", ".bash":
-		return strings.HasPrefix(filepath.ToSlash(path), "scripts/")
-	default:
-		return false
-	}
-}
-
-func normalizeLikelyEscapedSourceText(path string, content string) string {
-	if strings.Contains(content, "\n") || !strings.Contains(content, `\n`) {
-		return content
-	}
-	candidate := strings.ReplaceAll(content, `\r\n`, "\n")
-	candidate = strings.ReplaceAll(candidate, `\n`, "\n")
-	candidate = strings.ReplaceAll(candidate, `\t`, "\t")
-	if sourceContentLooksStructured(path, candidate) {
-		return candidate
-	}
-	if strings.HasSuffix(content, `\n`) {
-		return strings.TrimSuffix(content, `\n`) + "\n"
-	}
-	return content
-}
-
-func sourceContentLooksStructured(path string, content string) bool {
-	if !strings.Contains(content, "\n") {
-		return false
-	}
-	trimmed := strings.TrimSpace(content)
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".py":
-		return strings.HasPrefix(trimmed, "import ") ||
-			strings.HasPrefix(trimmed, "from ") ||
-			strings.HasPrefix(trimmed, "def ") ||
-			strings.HasPrefix(trimmed, "class ") ||
-			strings.HasPrefix(trimmed, "if __name__") ||
-			strings.HasPrefix(trimmed, "try:") ||
-			containsAny(content, "\nimport ", "\nfrom ", "\ndef ", "\nclass ", "\nif __name__", "\ntry:", "\nexcept ", ":\n    ")
-	case ".js":
-		return strings.HasPrefix(trimmed, "import ") ||
-			strings.HasPrefix(trimmed, "const ") ||
-			strings.HasPrefix(trimmed, "let ") ||
-			strings.HasPrefix(trimmed, "var ") ||
-			strings.HasPrefix(trimmed, "function ") ||
-			strings.HasPrefix(trimmed, "export ") ||
-			containsAny(content, "\nimport ", "\nconst ", "\nlet ", "\nvar ", "\nfunction ", "\nexport ", "=>\n", "{\n")
-	case ".sh", ".bash":
-		return strings.HasPrefix(trimmed, "#!/") ||
-			strings.HasPrefix(trimmed, "set ") ||
-			strings.HasPrefix(trimmed, "if ") ||
-			strings.HasPrefix(trimmed, "for ") ||
-			strings.HasPrefix(trimmed, "while ") ||
-			containsAny(content, "\necho ", "\nif ", "\nfor ", "\nwhile ", "\ncase ", "\nset ")
-	default:
-		return false
-	}
-}
-
-func containsAny(text string, needles ...string) bool {
-	for _, needle := range needles {
-		if strings.Contains(text, needle) {
-			return true
-		}
-	}
-	return false
-}
-
-func normalizeScriptTypography(content string) string {
-	content = strings.ReplaceAll(content, "\u00a0", " ")
-	content = strings.ReplaceAll(content, "\u3000", " ")
-	content = replaceStandaloneQuotePairs(content, '“', '”', '"')
-	content = replaceStandaloneQuotePairs(content, '‘', '’', '\'')
-	return content
-}
-
-func replaceStandaloneQuotePairs(text string, open rune, close rune, replacement rune) string {
-	runes := []rune(text)
-	var builder strings.Builder
-	for index := 0; index < len(runes); index++ {
-		if runes[index] != open {
-			builder.WriteRune(runes[index])
-			continue
-		}
-		end := nextRuneIndex(runes, close, index+1)
-		if end < 0 || !quoteStartBoundary(runes, index) || !quoteEndBoundary(runes, end) {
-			builder.WriteRune(runes[index])
-			continue
-		}
-		builder.WriteRune(replacement)
-		for inner := index + 1; inner < end; inner++ {
-			builder.WriteRune(runes[inner])
-		}
-		builder.WriteRune(replacement)
-		index = end
-	}
-	return builder.String()
-}
-
-func nextRuneIndex(runes []rune, target rune, start int) int {
-	for index := start; index < len(runes); index++ {
-		if runes[index] == target {
-			return index
-		}
-	}
-	return -1
-}
-
-func quoteStartBoundary(runes []rune, index int) bool {
-	if index == 0 {
-		return true
-	}
-	prev := runes[index-1]
-	return prev == '\n' || prev == '\t' || prev == ' ' || strings.ContainsRune("([{=,:+-*/%!<>", prev)
-}
-
-func quoteEndBoundary(runes []rune, index int) bool {
-	if index >= len(runes)-1 {
-		return true
-	}
-	next := runes[index+1]
-	return next == '\n' || next == '\t' || next == ' ' || strings.ContainsRune(")]},.;:+-*/%!<>", next)
-}
-
-func defaultSourceSkillMD(req SourceRequest) string {
-	return strings.Join([]string{
-		"---",
-		"name: " + req.Name,
-		"description: " + req.Description,
-		"---",
-		"",
-		"# " + req.Name,
-		"",
-		req.Description,
-		"",
-		"## Source",
-		"",
-		req.SourceURL,
-		"",
-		"## Notes",
-		"",
-		"该草稿只引用开源代码到 references/source/，不会直接执行来源仓库脚本。需要执行能力时，请审查后包装到 scripts/ 并通过测试再发布。",
-	}, "\n")
 }
 
 func validateDraftFilePath(path string) error {
@@ -1384,409 +608,6 @@ func firstDraftScript(snapshot draftSnapshot) string {
 	}
 	sort.Strings(paths)
 	return paths[0]
-}
-
-func writeDraftFiles(root string, snapshot draftSnapshot) error {
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(root, agentskill.EntryFile), []byte(normalizeDraftMarkdownContent(snapshot.Row.SkillMD)), 0o644); err != nil {
-		return err
-	}
-	for path, content := range snapshot.Files {
-		if err := validateDraftFilePath(path); err != nil {
-			return err
-		}
-		target := filepath.Join(root, filepath.FromSlash(filepath.ToSlash(path)))
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		mode := os.FileMode(0o644)
-		if strings.HasPrefix(filepath.ToSlash(path), "scripts/") {
-			mode = 0o755
-		}
-		if err := os.WriteFile(target, []byte(normalizeDraftFileContent(path, content)), mode); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func publishSnapshot(ctx context.Context, snapshot draftSnapshot) (uint64, error) {
-	tempDir, err := os.MkdirTemp(agentskill.Root, ".publish-"+snapshot.Row.Key+"-")
-	if err != nil {
-		return 0, err
-	}
-	defer os.RemoveAll(tempDir)
-	if err := writeDraftFiles(tempDir, snapshot); err != nil {
-		return 0, err
-	}
-	applyDependencyManifest(snapshot.Manifest, snapshot.Files)
-	if err := installDraftDependencies(ctx, tempDir, snapshot.Files); err != nil {
-		return 0, err
-	}
-	target := filepath.Join(agentskill.Root, snapshot.Row.Key)
-	if !agentskill.IsSafePath(target) {
-		return 0, fmt.Errorf("技能安装目录不安全: %s", target)
-	}
-	replacement, err := replaceSkillDir(tempDir, target)
-	if err != nil {
-		return 0, err
-	}
-	skillID, err := upsertPublishedSkillWithRollback(ctx, snapshot, target, replacement)
-	if err != nil {
-		return 0, err
-	}
-	replacement.commit()
-	return skillID, nil
-}
-
-func applyDependencyManifest(manifest map[string]any, files map[string]string) {
-	if manifest == nil {
-		return
-	}
-	if _, exists := manifest["dependencies"]; exists {
-		return
-	}
-	dependencies := make([]any, 0, 2)
-	if _, exists := files["requirements.txt"]; exists {
-		dependencies = append(dependencies, map[string]any{
-			"type": "python",
-			"file": "requirements.txt",
-			"path": ".dever/deps/python",
-		})
-	}
-	if _, exists := files["package.json"]; exists {
-		dependencies = append(dependencies, map[string]any{
-			"type": "node",
-			"file": "package.json",
-			"path": ".dever/deps/node",
-		})
-	}
-	if len(dependencies) > 0 {
-		manifest["dependencies"] = dependencies
-	}
-}
-
-func installDraftDependencies(ctx context.Context, root string, files map[string]string) error {
-	if _, exists := files["requirements.txt"]; exists {
-		target := filepath.Join(root, ".dever", "deps", "python")
-		if err := os.MkdirAll(target, 0o755); err != nil {
-			return err
-		}
-		if err := runDependencyCommand(ctx, root, "python3", "-m", "pip", "install", "--disable-pip-version-check", "-r", "requirements.txt", "-t", target); err != nil {
-			return fmt.Errorf("安装 Python 依赖失败: %w", err)
-		}
-	}
-	if _, exists := files["package.json"]; exists {
-		target := filepath.Join(root, ".dever", "deps", "node")
-		if err := os.MkdirAll(target, 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(target, "package.json"), []byte(files["package.json"]), 0o644); err != nil {
-			return err
-		}
-		if err := runDependencyCommand(ctx, root, "npm", "install", "--ignore-scripts", "--omit=dev", "--prefix", target); err != nil {
-			return fmt.Errorf("安装 Node 依赖失败: %w", err)
-		}
-	}
-	return nil
-}
-
-func runDependencyCommand(ctx context.Context, workDir string, name string, args ...string) error {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-	command := exec.CommandContext(timeoutCtx, name, args...)
-	command.Dir = workDir
-	output, err := command.CombinedOutput()
-	if timeoutCtx.Err() == context.DeadlineExceeded {
-		return fmt.Errorf("依赖安装超时")
-	}
-	if err != nil {
-		return fmt.Errorf("%s", strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
-type skillDirReplacement struct {
-	target    string
-	backup    string
-	committed bool
-}
-
-func replaceSkillDir(source string, target string) (*skillDirReplacement, error) {
-	replacement := &skillDirReplacement{target: target}
-	if _, err := os.Stat(target); err == nil {
-		replacement.backup = target + ".bak-" + time.Now().Format("20060102150405.000000000")
-		if err := os.Rename(target, replacement.backup); err != nil {
-			return nil, err
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, err
-	}
-	if err := os.Rename(source, target); err != nil {
-		if replacement.backup != "" {
-			if restoreErr := os.Rename(replacement.backup, target); restoreErr != nil {
-				return nil, fmt.Errorf("%w；恢复旧技能目录失败: %v", err, restoreErr)
-			}
-		}
-		return nil, err
-	}
-	return replacement, nil
-}
-
-func (replacement *skillDirReplacement) commit() {
-	if replacement == nil || replacement.committed {
-		return
-	}
-	replacement.committed = true
-	if replacement.backup != "" {
-		_ = os.RemoveAll(replacement.backup)
-	}
-}
-
-func (replacement *skillDirReplacement) rollback() error {
-	if replacement == nil || replacement.committed {
-		return nil
-	}
-	replacement.committed = true
-	if err := os.RemoveAll(replacement.target); err != nil {
-		return fmt.Errorf("清理新技能目录失败: %w", err)
-	}
-	if replacement.backup == "" {
-		return nil
-	}
-	if err := os.Rename(replacement.backup, replacement.target); err != nil {
-		return fmt.Errorf("恢复旧技能目录失败: %w", err)
-	}
-	return nil
-}
-
-func upsertPublishedSkillWithRollback(ctx context.Context, snapshot draftSnapshot, target string, replacement *skillDirReplacement) (skillID uint64, err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			if recoveredErr, ok := recovered.(error); ok {
-				err = recoveredErr
-			} else {
-				err = fmt.Errorf("%v", recovered)
-			}
-		}
-		if err != nil {
-			if rollbackErr := replacement.rollback(); rollbackErr != nil {
-				err = fmt.Errorf("%w；目录回滚失败: %v", err, rollbackErr)
-			}
-		}
-	}()
-	err = orm.Transaction(ctx, func(txCtx context.Context) error {
-		var txErr error
-		skillID, txErr = upsertPublishedSkill(txCtx, snapshot, target)
-		if txErr != nil {
-			return txErr
-		}
-		return markDraftPublished(txCtx, snapshot, skillID)
-	})
-	return skillID, err
-}
-
-func upsertPublishedSkill(ctx context.Context, snapshot draftSnapshot, target string) (uint64, error) {
-	skillModel := agentmodel.NewSkillModel()
-	manifest := snapshot.Manifest
-	manifest["key"] = snapshot.Row.Key
-	manifest["name"] = snapshot.Row.Name
-	manifest["description"] = snapshot.Row.Description
-	if _, exists := manifest["triggers"]; !exists {
-		manifest["triggers"] = []any{}
-	}
-	manifest["source_url"] = fmt.Sprintf("dever:draft/%d", snapshot.Row.ID)
-	record := map[string]any{
-		"cate_id":       snapshot.Row.CateID,
-		"key":           snapshot.Row.Key,
-		"name":          snapshot.Row.Name,
-		"description":   snapshot.Row.Description,
-		"source_type":   agentmodel.SkillSourceTypeCustom,
-		"source_url":    manifest["source_url"],
-		"install_input": "",
-		"install_path":  filepath.ToSlash(target),
-		"entry_file":    agentskill.EntryFile,
-		"manifest":      agentskill.JSONText(manifest),
-		"content_hash":  publishedContentHash(snapshot),
-		"status":        defaultStatus,
-	}
-	existing := skillModel.Find(ctx, map[string]any{"key": snapshot.Row.Key})
-	var skillID uint64
-	if existing != nil {
-		sourceType := agentmodel.NormalizeSkillSourceType(existing.SourceType, existing.SourceURL, existing.InstallInput)
-		if sourceType != agentmodel.SkillSourceTypeCustom {
-			return 0, fmt.Errorf("已存在同标识的安装来源技能，不能用自建技能覆盖: %s", snapshot.Row.Key)
-		}
-		if snapshot.Row.SourceSkillID == 0 {
-			return 0, fmt.Errorf("技能标识已存在，请从已有技能走升级流程: %s", snapshot.Row.Key)
-		}
-		if existing.ID != snapshot.Row.SourceSkillID {
-			return 0, fmt.Errorf("技能标识已被其他自创技能使用: %s", snapshot.Row.Key)
-		}
-		skillID = existing.ID
-		skillModel.Update(ctx, map[string]any{"id": skillID}, record)
-	} else {
-		record["display_name"] = snapshot.Row.Name
-		record["sort"] = defaultSort
-		record["created_at"] = time.Now()
-		skillID = uint64(skillModel.Insert(ctx, record))
-	}
-	if skillID == 0 {
-		return 0, fmt.Errorf("写入正式技能失败")
-	}
-	ensureConfigRows(ctx, skillID, manifest)
-	if snapshot.Row.PackID > 0 {
-		ensurePackItem(ctx, snapshot.Row.PackID, skillID)
-	}
-	return skillID, nil
-}
-
-func ensureConfigRows(ctx context.Context, skillID uint64, manifest map[string]any) {
-	items, ok := manifest["config"].([]any)
-	if !ok || len(items) == 0 {
-		return
-	}
-	model := agentmodel.NewSkillConfigModel()
-	for _, item := range items {
-		mapped, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		key := agentskill.ConfigEnvName(manifestString(mapped, "key", ""))
-		if key == "" {
-			continue
-		}
-		existing := model.Find(ctx, map[string]any{"skill_id": skillID, "target_key": "", "key": key})
-		if existing != nil {
-			if strings.TrimSpace(existing.Name) == "" {
-				model.Update(ctx, map[string]any{"id": existing.ID}, map[string]any{
-					"name": manifestString(mapped, "name", key),
-				})
-			}
-			continue
-		}
-		model.Insert(ctx, map[string]any{
-			"skill_id":   skillID,
-			"target_key": "",
-			"key":        key,
-			"name":       manifestString(mapped, "name", key),
-			"type":       agentmodel.SkillConfigTypeText,
-			"required":   agentmodel.SkillConfigRequiredNo,
-			"status":     defaultStatus,
-			"created_at": time.Now(),
-		})
-	}
-}
-
-func manifestString(values map[string]any, key string, fallback string) string {
-	if values == nil {
-		return fallback
-	}
-	value, exists := values[key]
-	if !exists || value == nil {
-		return fallback
-	}
-	text := strings.TrimSpace(fmt.Sprint(value))
-	if text == "" || text == "<nil>" {
-		return fallback
-	}
-	return text
-}
-
-func ensurePackItem(ctx context.Context, packID uint64, skillID uint64) {
-	model := agentmodel.NewSkillPackItemModel()
-	if model.Find(ctx, map[string]any{"pack_id": packID, "skill_id": skillID}) != nil {
-		return
-	}
-	model.Insert(ctx, map[string]any{
-		"pack_id":    packID,
-		"skill_id":   skillID,
-		"status":     defaultStatus,
-		"sort":       defaultSort,
-		"created_at": time.Now(),
-	})
-}
-
-func firstSkillPackID(ctx context.Context, skillID uint64) uint64 {
-	row := agentmodel.NewSkillPackItemModel().Find(ctx, map[string]any{
-		"skill_id": skillID,
-		"status":   defaultStatus,
-	})
-	if row == nil {
-		return 0
-	}
-	return row.PackID
-}
-
-func runtimeConfig(ctx context.Context) agentmodel.RuntimeConfig {
-	row := agentmodel.NewRuntimeConfigModel().Find(ctx, map[string]any{"id": agentmodel.DefaultRuntimeConfigID})
-	if row == nil {
-		return agentmodel.DefaultRuntimeConfig()
-	}
-	return *row
-}
-
-func draftConfigSkillID(ctx context.Context, snapshot draftSnapshot) uint64 {
-	if snapshot.Row.SourceSkillID > 0 {
-		return snapshot.Row.SourceSkillID
-	}
-	key := agentskill.NormalizeKey(snapshot.Row.Key)
-	if key == "" {
-		return 0
-	}
-	row := agentmodel.NewSkillModel().Find(ctx, map[string]any{"key": key})
-	if row == nil {
-		return 0
-	}
-	return row.ID
-}
-
-func publishedContentHash(snapshot draftSnapshot) string {
-	hashInput := snapshot.Row.SkillMD + "\n" + agentskill.JSONText(snapshot.Files)
-	sum := sha256.Sum256([]byte(hashInput))
-	return hex.EncodeToString(sum[:])
-}
-
-func draftSnapshotHash(snapshot draftSnapshot) string {
-	hashInput := snapshot.Row.SkillMD + "\n" + agentskill.JSONText(snapshot.Files) + "\n" + agentskill.JSONText(snapshot.Manifest)
-	sum := sha256.Sum256([]byte(hashInput))
-	return hex.EncodeToString(sum[:])
-}
-
-func draftTestPassed(snapshot draftSnapshot) bool {
-	result := validationResultMap(snapshot.Row.ValidationResult)
-	if !agentskill.Truthy(result["test_passed"]) {
-		return false
-	}
-	if strings.TrimSpace(fmt.Sprint(result["test_hash"])) != draftSnapshotHash(snapshot) {
-		return false
-	}
-	test, ok := result["test"].(map[string]any)
-	if !ok {
-		return false
-	}
-	return intFromAny(test["exit_code"]) == 0
-}
-
-func draftRequiresSandboxTest(snapshot draftSnapshot) bool {
-	return firstDraftScript(snapshot) != ""
-}
-
-func markDraftPublished(ctx context.Context, snapshot draftSnapshot, skillID uint64) error {
-	result := validationResultMap(snapshot.Row.ValidationResult)
-	result["published_skill_id"] = skillID
-	result["published_at"] = time.Now().Format(time.RFC3339Nano)
-	affected := agentmodel.NewSkillDraftModel().Update(ctx, map[string]any{"id": snapshot.Row.ID}, map[string]any{
-		"status":            agentmodel.SkillDraftStatusPublished,
-		"source_skill_id":   skillID,
-		"validation_result": agentskill.JSONText(result),
-	})
-	if affected == 0 {
-		return fmt.Errorf("更新技能草稿发布状态失败")
-	}
-	return nil
 }
 
 func validationPayload(issues []string) map[string]any {

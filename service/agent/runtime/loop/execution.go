@@ -29,6 +29,7 @@ type executionSpec struct {
 	Scope              runtimescope.Scope
 	RequestedAt        time.Time
 	PriorKnowledgeUsed bool
+	PriorLoadedSkills  []string
 }
 
 func (s Service) createExecution(ctx context.Context, requestID string, spec executionSpec) (_ execution, resultErr error) {
@@ -67,6 +68,7 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 		priorKnowledgeUsed: spec.PriorKnowledgeUsed,
 	}
 	current.checkpoint = initialCheckpoint(current)
+	current.checkpoint.LoadedSkills = append([]string(nil), spec.PriorLoadedSkills...)
 	snapshot, err := encodeSnapshot(snapshotFromExecution(current))
 	if err != nil {
 		current.close()

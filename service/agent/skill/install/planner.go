@@ -76,7 +76,7 @@ func plannerInput(execInfo *skillInstallExecution) string {
 }
 
 func probeInstallCapabilities() map[string]bool {
-	names := []string{"bash", "curl", "git", "node", "npm", "npx", "pnpm", "yarn", "bunx", "skillhub", "unzip", "tar"}
+	names := []string{"curl", "git", "node", "npm", "npx", "pnpm", "yarn", "bun", "bunx", "skillhub", "unzip", "tar"}
 	result := make(map[string]bool, len(names))
 	for _, name := range names {
 		_, err := exec.LookPath(name)

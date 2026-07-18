@@ -90,6 +90,7 @@ import {
   AgentContentOutputView,
   readableAssistantText,
 } from "./agent-content-output";
+import { resolveSkillDraftPatchPayload } from "./skill-draft-patch";
 
 type AgentRole = "user" | "assistant";
 
@@ -2457,40 +2458,6 @@ function resolvePrefixedAssistantSessionContext(
   return valueText(value.fallback).trim();
 }
 
-function resolveSkillDraftPatchPayload(output: Record<string, unknown>) {
-  const source = skillDraftPatchSource(output);
-  if (!source) {
-    return null;
-  }
-  const patchSource = skillDraftPatchPayloadSource(source);
-  if (!patchSource) {
-    return null;
-  }
-  const patch = isPlainObject(patchSource.patch)
-    ? patchSource.patch
-    : isPlainObject(patchSource.draft)
-      ? patchSource.draft
-      : null;
-  if (!patch) {
-    return null;
-  }
-  const draftID =
-    skillDraftPatchNumber(patchSource, "draft_id", "draftId", "id") ||
-    skillDraftPatchNumber(source, "draft_id", "draftId", "id");
-  const packID =
-    skillDraftPatchNumber(patchSource, "pack_id", "packId") ||
-    skillDraftPatchNumber(source, "pack_id", "packId");
-  const cateID =
-    skillDraftPatchNumber(patchSource, "cate_id", "cateId") ||
-    skillDraftPatchNumber(source, "cate_id", "cateId");
-  return {
-    ...(draftID > 0 ? { id: draftID } : {}),
-    ...(packID > 0 ? { pack_id: packID } : {}),
-    ...(cateID > 0 ? { cate_id: cateID } : {}),
-    patch,
-  };
-}
-
 function buildSkillDraftPatchAssistantContext(
   sessionEnabled: boolean,
   sessionID: number,
@@ -2511,25 +2478,6 @@ function buildSkillDraftPatchAssistantContext(
     payload.assistant_context_key = sessionContext;
   }
   return payload;
-}
-
-function skillDraftPatchPayloadSource(source: Record<string, unknown>) {
-  const result = isPlainObject(source.result) ? source.result : null;
-  const content = isPlainObject(source.content) ? source.content : null;
-  const candidates = [
-    source,
-    isPlainObject(source.json) ? source.json : null,
-    content && isPlainObject(content.json) ? content.json : null,
-    result,
-    result && isPlainObject(result.json) ? result.json : null,
-  ];
-  return (
-    candidates.find(
-      (candidate): candidate is Record<string, unknown> =>
-        isPlainObject(candidate) &&
-        (isPlainObject(candidate.patch) || isPlainObject(candidate.draft)),
-    ) || null
-  );
 }
 
 function syncSkillDraftPatchStore(
@@ -2787,155 +2735,6 @@ function firstSkillDraftPatchValue(
     }
   }
   return undefined;
-}
-
-function skillDraftPatchSource(output: Record<string, unknown>) {
-  const candidates = [
-    output,
-    isPlainObject(output.json) ? output.json : null,
-    isPlainObject(output.content) && isPlainObject(output.content.json)
-      ? output.content.json
-      : null,
-    isPlainObject(output.result) ? output.result : null,
-    isPlainObject(output.result) && isPlainObject(output.result.json)
-      ? output.result.json
-      : null,
-  ];
-  for (const candidate of candidates) {
-    if (!isPlainObject(candidate)) {
-      continue;
-    }
-    if (isSkillDraftPatchObject(candidate)) {
-      return candidate;
-    }
-  }
-  return skillDraftPatchSourceFromText(output);
-}
-
-function isSkillDraftPatchObject(candidate: Record<string, unknown>) {
-  const kind = valueText(candidate.kind || candidate.type || candidate.event)
-    .trim()
-    .toLowerCase();
-  return (
-    kind === "skill_draft_patch" ||
-    isPlainObject(candidate.patch) ||
-    isPlainObject(candidate.draft)
-  );
-}
-
-function skillDraftPatchSourceFromText(output: Record<string, unknown>) {
-  for (const text of skillDraftPatchTextCandidates(output)) {
-    for (const block of extractJSONBlocks(text)) {
-      const parsed = parseSkillDraftPatchJSON(block);
-      if (parsed) {
-        return parsed;
-      }
-    }
-  }
-  return null;
-}
-
-function skillDraftPatchTextCandidates(output: Record<string, unknown>) {
-  const candidates: string[] = [];
-  const pushText = (value: unknown) => {
-    const text = valueText(value).trim();
-    if (text && !candidates.includes(text)) {
-      candidates.push(text);
-    }
-  };
-  pushText(output.text);
-  pushText(output.markdown);
-  pushText(output.message);
-  const content = isPlainObject(output.content) ? output.content : null;
-  if (content) {
-    pushText(content.text);
-    pushText(content.markdown);
-    pushText(content.message);
-  }
-  return candidates;
-}
-
-function extractJSONBlocks(text: string) {
-  const blocks: string[] = [];
-  for (const match of text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)) {
-    const block = match[1]?.trim();
-    if (block) {
-      blocks.push(block);
-    }
-  }
-  blocks.push(...extractBalancedJSONObjects(text));
-  if (blocks.length === 0) {
-    blocks.push(text);
-  }
-  return [...new Set(blocks)];
-}
-
-function extractBalancedJSONObjects(text: string) {
-  const results: string[] = [];
-  for (let start = 0; start < text.length; start += 1) {
-    if (text[start] !== "{") {
-      continue;
-    }
-    const block = readBalancedJSONObject(text, start);
-    if (block) {
-      results.push(block);
-      start += block.length - 1;
-    }
-  }
-  return results;
-}
-
-function readBalancedJSONObject(text: string, start: number) {
-  let depth = 0;
-  let inString = false;
-  let escaping = false;
-  for (let index = start; index < text.length; index += 1) {
-    const char = text[index];
-    if (escaping) {
-      escaping = false;
-      continue;
-    }
-    if (char === "\\") {
-      escaping = true;
-      continue;
-    }
-    if (char === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) {
-      continue;
-    }
-    if (char === "{") {
-      depth += 1;
-    } else if (char === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return text.slice(start, index + 1);
-      }
-    }
-  }
-  return "";
-}
-
-function parseSkillDraftPatchJSON(text: string) {
-  try {
-    const parsed = JSON.parse(text);
-    if (Array.isArray(parsed)) {
-      return (
-        parsed.find(
-          (item): item is Record<string, unknown> =>
-            isPlainObject(item) && isSkillDraftPatchObject(item),
-        ) || null
-      );
-    }
-    if (isPlainObject(parsed) && isSkillDraftPatchObject(parsed)) {
-      return parsed;
-    }
-  } catch {
-    return null;
-  }
-  return null;
 }
 
 function normalizeAssistantSessionMessages(value: unknown): AgentMessage[] {

@@ -87,6 +87,44 @@ func bwrapArgs(config Config, req Request, commandName string, commandArgs []str
 		return nil, err
 	}
 
+	args := baseBwrapArgs(config)
+	args = append(args,
+		"--ro-bind", skillRoot, "/skill",
+		"--bind", tempRoot, "/work",
+	)
+	args = append(args,
+		"--setenv", "HOME", "/work",
+		"--setenv", "TMPDIR", "/work",
+		"--setenv", "AGENT_TEMP_DIR", "/work",
+		"--setenv", "PYTHONPATH", "/skill/.dever/deps/python",
+		"--setenv", "NODE_PATH", "/skill/.dever/deps/node/node_modules",
+	)
+	args = appendBwrapEnv(args, req.Env)
+	args = append(args,
+		"--chdir", "/skill",
+		"--",
+		commandName,
+	)
+	return append(args, commandArgs...), nil
+}
+
+func workspaceBwrapArgs(config Config, workspace string, env []string, commandName string, commandArgs []string) ([]string, error) {
+	workRoot, err := filepath.Abs(filepath.Clean(workspace))
+	if err != nil {
+		return nil, err
+	}
+	if info, err := os.Stat(workRoot); err != nil {
+		return nil, err
+	} else if !info.IsDir() {
+		return nil, fmt.Errorf("工作区不是目录: %s", workspace)
+	}
+	args := append(baseBwrapArgs(config), "--bind", workRoot, "/work")
+	args = appendBwrapEnv(args, env)
+	args = append(args, "--chdir", "/work", "--", commandName)
+	return append(args, commandArgs...), nil
+}
+
+func baseBwrapArgs(config Config) []string {
 	args := []string{
 		"--die-with-parent",
 		"--new-session",
@@ -96,10 +134,6 @@ func bwrapArgs(config Config, req Request, commandName string, commandArgs []str
 	if config.NetworkMode == NetworkHost {
 		args = append(args, "--share-net")
 	}
-	args = append(args,
-		"--ro-bind", skillRoot, "/skill",
-		"--bind", tempRoot, "/work",
-	)
 	args = appendReadOnlyBinds(args, []string{
 		"/usr",
 		"/bin",
@@ -117,26 +151,14 @@ func bwrapArgs(config Config, req Request, commandName string, commandArgs []str
 		"/etc/ca-certificates",
 	})
 	args = appendResolvedReadOnlyBind(args, "/etc/resolv.conf", "/etc/resolv.conf")
-	args = append(args,
+	return append(args,
 		"--proc", "/proc",
 		"--dev", "/dev",
 		"--tmpfs", "/tmp",
-		"--setenv", "HOME", "/work",
-		"--setenv", "TMPDIR", "/work",
-		"--setenv", "AGENT_TEMP_DIR", "/work",
 		"--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin",
 		"--setenv", "LANG", "C.UTF-8",
 		"--setenv", "LC_ALL", "C.UTF-8",
-		"--setenv", "PYTHONPATH", "/skill/.dever/deps/python",
-		"--setenv", "NODE_PATH", "/skill/.dever/deps/node/node_modules",
 	)
-	args = appendBwrapEnv(args, req.Env)
-	args = append(args,
-		"--chdir", "/skill",
-		"--",
-		commandName,
-	)
-	return append(args, commandArgs...), nil
 }
 
 func appendBwrapEnv(args []string, env []string) []string {

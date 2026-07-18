@@ -139,6 +139,16 @@
   overflow: hidden;
 }
 
+.ws-canvas-selection-marquee {
+  position: absolute;
+  z-index: 75;
+  box-sizing: border-box;
+  border: 1px solid rgba(99, 82, 222, 0.72);
+  border-radius: 3px;
+  background: rgba(99, 82, 222, 0.08);
+  pointer-events: none;
+}
+
 .ws-canvas-wrap.is-passive {
   pointer-events: none;
 }
@@ -2151,19 +2161,47 @@ button.ws-node-detail-save-state.is-error {
 
 .ws-node-detail-media {
   box-sizing: border-box;
-  width: min(1120px, calc(100% - 64px));
+  display: flex;
+  width: 100%;
   min-height: 100%;
-  margin: 0 auto;
-  padding: 30px 0 72px;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 42px clamp(28px, 5vw, 96px) 72px;
+}
+
+.ws-node-detail-media > * {
+  width: min(1280px, 100%);
+}
+
+.ws-node-detail-media :where(.grid) {
+  width: 100%;
+  justify-items: center;
+}
+
+.ws-node-detail-media :where(.grid > *) {
+  width: min(1180px, 100%);
+}
+
+.ws-node-detail-media :where(button:has(img), button:has(video)) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .ws-node-detail-media :where(img, video) {
-  max-height: calc(100dvh - 180px);
+  display: block;
+  width: auto !important;
+  max-width: 100%;
+  max-height: calc(100dvh - 150px);
+  margin: 0 auto;
+  border-radius: 8px;
   object-fit: contain;
 }
 
 .ws-node-detail-media audio {
-  width: 100%;
+  display: block;
+  width: min(920px, 100%);
+  margin: 0 auto;
 }
 
 .ws-node-detail-rich-editor {
@@ -6967,6 +7005,19 @@ button.ws-node-detail-save-state.is-error {
   text-transform: none;
 }
 
+.ws-node-stale-badge {
+  display: inline-flex;
+  min-height: 18px;
+  align-items: center;
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: rgba(217, 119, 6, 0.12);
+  color: #b45309;
+  font-size: 9px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .ws-node-power-desc,
 .ws-canvas-content-view {
   color: #27302d;
@@ -8258,6 +8309,10 @@ button.ws-node-detail-save-state.is-error {
   color: #86efac;
 }
 
+.ws-node-group-status.is-stale {
+  color: #fbbf24;
+}
+
 .ws-node-group-run {
   display: inline-flex;
   width: 28px;
@@ -8329,6 +8384,10 @@ button.ws-node-detail-save-state.is-error {
 
 .ws-page.is-light .ws-node-group-status.is-complete {
   color: #15803d;
+}
+
+.ws-page.is-light .ws-node-group-status.is-stale {
+  color: #b45309;
 }
 
 .ws-page.is-light .ws-node-group-run {

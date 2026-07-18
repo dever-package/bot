@@ -11,13 +11,23 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/dever-package/bot/service/agent/runtime/tool/sandbox"
 )
 
 const skillHubInstallScriptURL = "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/install/install.sh"
 
+const maxCommandOutputLineBytes = 1024 * 1024
+
+var (
+	installShellControlPattern = regexp.MustCompile("[\\r\\n;|&<>`]")
+	ansiControlPattern         = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+	ansiCharsetPattern         = regexp.MustCompile(`\x1b[()][A-Za-z0-9]`)
+)
+
 type commandOutputFunc func(string)
 
-func runInstallCommand(ctx context.Context, workDir string, command string, onOutput commandOutputFunc) (string, error) {
+func runInstallCommand(ctx context.Context, sandboxConfig sandbox.Config, workDir string, command string, onOutput commandOutputFunc) (string, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return "", fmt.Errorf("安装命令不能为空")
@@ -31,9 +41,25 @@ func runInstallCommand(ctx context.Context, workDir string, command string, onOu
 		return "", err
 	}
 
-	cmd := osexec.CommandContext(ctx, "bash", "-lc", installCommandScript(command))
-	cmd.Dir = workDir
-	cmd.Env = installCommandEnv(workDir, homeDir)
+	commandRoot := workDir
+	commandHome := homeDir
+	if sandbox.NormalizeConfig(sandboxConfig).Driver == sandbox.DriverBwrap {
+		commandRoot = "/work"
+		commandHome = "/work/.home"
+	}
+	process, err := sandbox.PrepareWorkspaceProcess(
+		sandboxConfig,
+		workDir,
+		installCommandEnv(commandRoot, commandHome),
+		"bash",
+		[]string{"-lc", installCommandScript(command)},
+	)
+	if err != nil {
+		return "", err
+	}
+	cmd := osexec.CommandContext(ctx, process.CommandName, process.CommandArgs...)
+	cmd.Dir = process.WorkDir
+	cmd.Env = process.Env
 
 	text, err := runCommandWithOutput(ctx, cmd, onOutput)
 	if ctx.Err() != nil {
@@ -84,14 +110,23 @@ func runCommandWithOutput(ctx context.Context, cmd *osexec.Cmd, onOutput command
 	}
 
 	var readers sync.WaitGroup
+	readErrors := make(chan error, 2)
 	readers.Add(2)
-	go scanCommandOutput(stdout, appendOutput, &readers)
-	go scanCommandOutput(stderr, appendOutput, &readers)
+	go scanCommandOutput(stdout, appendOutput, &readers, readErrors)
+	go scanCommandOutput(stderr, appendOutput, &readers, readErrors)
 	readers.Wait()
+	close(readErrors)
 
 	err = cmd.Wait()
 	if ctx.Err() != nil {
 		err = ctx.Err()
+	} else if err == nil {
+		for readErr := range readErrors {
+			if readErr != nil {
+				err = readErr
+				break
+			}
+		}
 	}
 
 	outputMu.Lock()
@@ -100,12 +135,41 @@ func runCommandWithOutput(ctx context.Context, cmd *osexec.Cmd, onOutput command
 	return text, err
 }
 
-func scanCommandOutput(reader io.Reader, onLine func(string), wg *sync.WaitGroup) {
+func scanCommandOutput(reader io.Reader, onLine func(string), wg *sync.WaitGroup, errors chan<- error) {
 	defer wg.Done()
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		onLine(scanner.Text())
+	buffered := bufio.NewReaderSize(reader, 64*1024)
+	var line strings.Builder
+	truncated := false
+	for {
+		fragment, prefix, err := buffered.ReadLine()
+		if len(fragment) > 0 {
+			remaining := maxCommandOutputLineBytes - line.Len()
+			if remaining > 0 {
+				if len(fragment) > remaining {
+					line.Write(fragment[:remaining])
+					truncated = true
+				} else {
+					line.Write(fragment)
+				}
+			} else {
+				truncated = true
+			}
+		}
+		if !prefix && (line.Len() > 0 || truncated) {
+			text := line.String()
+			if truncated {
+				text += " [单行输出已截断]"
+			}
+			onLine(text)
+			line.Reset()
+			truncated = false
+		}
+		if err != nil {
+			if err != io.EOF {
+				errors <- err
+			}
+			return
+		}
 	}
 }
 
@@ -117,7 +181,7 @@ func installCommandScript(command string) string {
 }
 
 func usesSkillHubCommand(command string) bool {
-	return regexp.MustCompile(`(?i)\bskillhub\b`).MatchString(command)
+	return installCommandName(command) == "skillhub"
 }
 
 func skillHubCommandPrelude() string {
@@ -141,23 +205,27 @@ func skillHubCommandPrelude() string {
 }
 
 func validateInstallCommand(command string) error {
-	lower := strings.ToLower(command)
-	for _, forbidden := range []string{"sudo ", " su ", "mkfs", ":(){", "shutdown", "reboot"} {
-		if strings.Contains(lower, forbidden) {
-			return fmt.Errorf("安装命令包含不允许的操作: %s", strings.TrimSpace(forbidden))
-		}
+	if installShellControlPattern.MatchString(command) || strings.Contains(command, "$(") {
+		return fmt.Errorf("安装命令只允许单条命令，不支持 shell 组合、重定向或命令替换")
 	}
-	dangerous := []*regexp.Regexp{
-		regexp.MustCompile(`(?i)\brm\s+-[^\n;&|]*r[^\n;&|]*f[^\n;&|]*(/|\$HOME|~)`),
-		regexp.MustCompile(`(?i)>\s*/etc/`),
-		regexp.MustCompile(`(?i)\bchmod\s+777\s+/`),
-	}
-	for _, pattern := range dangerous {
-		if pattern.MatchString(command) {
-			return fmt.Errorf("安装命令包含危险文件操作")
-		}
+	name := installCommandName(command)
+	if _, allowed := allowedInstallCommands[name]; !allowed {
+		return fmt.Errorf("不支持的技能安装命令: %s", name)
 	}
 	return nil
+}
+
+var allowedInstallCommands = map[string]struct{}{
+	"bun": {}, "bunx": {}, "curl": {}, "git": {}, "node": {}, "npm": {},
+	"npx": {}, "pnpm": {}, "skillhub": {}, "tar": {}, "unzip": {}, "yarn": {},
+}
+
+func installCommandName(command string) string {
+	fields := strings.Fields(strings.TrimSpace(command))
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.ToLower(filepath.Base(fields[0]))
 }
 
 func installCommandEnv(workDir string, homeDir string) []string {
@@ -191,9 +259,9 @@ func installCommandPaths(workDir string, homeDir string) []string {
 
 func trimCommandOutput(output string) string {
 	if len(output) > 32*1024 {
-		return output[len(output)-32*1024:]
+		output = output[len(output)-32*1024:]
 	}
-	return output
+	return strings.ToValidUTF8(output, "")
 }
 
 func commandErrorOutput(output string) string {
@@ -209,7 +277,7 @@ func commandErrorOutput(output string) string {
 }
 
 func stripANSI(output string) string {
-	output = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`).ReplaceAllString(output, "")
-	output = regexp.MustCompile(`\x1b[()][A-Za-z0-9]`).ReplaceAllString(output, "")
+	output = ansiControlPattern.ReplaceAllString(output, "")
+	output = ansiCharsetPattern.ReplaceAllString(output, "")
 	return output
 }

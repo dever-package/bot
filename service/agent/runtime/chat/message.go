@@ -40,6 +40,7 @@ type RunTurn struct {
 	AssistantMessageID uint64
 	InteractionResumed bool
 	PriorKnowledgeUsed bool
+	PriorLoadedSkills  []string
 }
 
 type RunTurnCompletion struct {
@@ -149,14 +150,15 @@ func (s Service) BeginRunTurn(ctx context.Context, request RunTurnRequest) (RunT
 			return fmt.Errorf("当前会话正在生成，请等待完成或先停止")
 		}
 		if strings.TrimSpace(request.InteractionID) != "" {
-			knowledgeUsed, interactionErr := resolveInteractionResponse(
+			resumeState, interactionErr := resolveInteractionResponse(
 				tx, session.ID, request.InteractionID, request.InteractionData,
 			)
 			if interactionErr != nil {
 				return interactionErr
 			}
 			turn.InteractionResumed = true
-			turn.PriorKnowledgeUsed = knowledgeUsed
+			turn.PriorKnowledgeUsed = resumeState.knowledgeUsed
+			turn.PriorLoadedSkills = append([]string(nil), resumeState.loadedSkills...)
 		}
 		now := time.Now()
 		turn.UserMessageID = uint64(messageModel.Insert(tx, map[string]any{

@@ -1,9 +1,6 @@
 package skill
 
-import (
-	"path/filepath"
-	"strings"
-)
+import "strings"
 
 func NormalizeKey(value string) string {
 	value = strings.TrimSpace(value)
@@ -24,10 +21,4 @@ func NormalizeKey(value string) string {
 		}
 	}
 	return strings.Trim(builder.String(), "-_")
-}
-
-func IsSafePath(path string) bool {
-	cleaned := filepath.Clean(path)
-	root := filepath.Clean(Root)
-	return cleaned == root || strings.HasPrefix(cleaned, root+string(filepath.Separator))
 }

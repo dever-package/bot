@@ -25,15 +25,26 @@ func writeTempFileTool(loaded map[string]agentskill.Entry, runtime SkillRuntime)
 			if err != nil {
 				return Result{}, err
 			}
+			if err := requireSkillCapability(entry, agentskill.CapabilityTemp); err != nil {
+				return Result{}, err
+			}
 			content := argumentText(call.Arguments, "content")
 			if len([]byte(content)) > maxTempFileBytes {
 				return Result{}, fmt.Errorf("临时文件超过 %d 字节", maxTempFileBytes)
 			}
-			path, relative, err := safeRelativePath(runtime.TempRoot, argumentText(call.Arguments, "path"))
+			root, err := skillTempRoot(runtime, entry)
+			if err != nil {
+				return Result{}, err
+			}
+			path, relative, err := safeRelativePath(root, argumentText(call.Arguments, "path"))
 			if err != nil {
 				return Result{}, err
 			}
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				return Result{}, err
+			}
+			path, relative, err = safeRelativePath(root, relative)
+			if err != nil {
 				return Result{}, err
 			}
 			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -61,7 +72,14 @@ func readTempFileTool(loaded map[string]agentskill.Entry, runtime SkillRuntime) 
 			if err != nil {
 				return Result{}, err
 			}
-			path, relative, err := safeRelativePath(runtime.TempRoot, argumentText(call.Arguments, "path"))
+			if err := requireSkillCapability(entry, agentskill.CapabilityTemp); err != nil {
+				return Result{}, err
+			}
+			root, err := skillTempRoot(runtime, entry)
+			if err != nil {
+				return Result{}, err
+			}
+			path, relative, err := safeRelativePath(root, argumentText(call.Arguments, "path"))
 			if err != nil {
 				return Result{}, err
 			}

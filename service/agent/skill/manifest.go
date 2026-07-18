@@ -5,12 +5,132 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
 type ScriptSpec struct {
 	Key       string
 	Path      string
 	TargetKey string
+}
+
+const (
+	CapabilityFiles   = "files"
+	CapabilityTemp    = "temp"
+	CapabilityScript  = "script"
+	CapabilityHTTP    = "http"
+	CapabilityMCP     = "mcp"
+	CapabilityNetwork = "network"
+)
+
+var capabilityOrder = []string{
+	CapabilityFiles,
+	CapabilityTemp,
+	CapabilityScript,
+	CapabilityHTTP,
+	CapabilityMCP,
+	CapabilityNetwork,
+}
+
+type CapabilitySet map[string]struct{}
+
+func (set CapabilitySet) Has(capability string) bool {
+	_, exists := set[strings.ToLower(strings.TrimSpace(capability))]
+	return exists
+}
+
+func ManifestCapabilities(entry Entry) CapabilitySet {
+	if entry.SourceType == agentmodel.SkillSourceTypeBuiltin {
+		return CapabilitySet{}
+	}
+	payload, valid := parseCapabilityManifest(entry.Manifest)
+	if !valid {
+		return CapabilitySet{}
+	}
+	NormalizeManifestCapabilities(payload)
+	return parseCapabilitySet(payload["capabilities"])
+}
+
+func parseCapabilityManifest(raw string) (map[string]any, bool) {
+	payload := map[string]any{}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return payload, true
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return map[string]any{}, false
+	}
+	return payload, true
+}
+
+func NormalizeManifestCapabilities(manifest map[string]any) {
+	if manifest == nil {
+		return
+	}
+	raw, explicit := manifest["capabilities"]
+	set := parseCapabilitySet(raw)
+	if !explicit {
+		set = CapabilitySet{CapabilityFiles: {}, CapabilityTemp: {}}
+		if manifestValuePresent(manifest["scripts"]) {
+			set[CapabilityScript] = struct{}{}
+			set[CapabilityNetwork] = struct{}{}
+		}
+		if manifestValuePresent(manifest["mcp"]) {
+			set[CapabilityMCP] = struct{}{}
+			set[CapabilityNetwork] = struct{}{}
+		}
+	}
+	values := make([]any, 0, len(set))
+	for _, capability := range capabilityOrder {
+		if set.Has(capability) {
+			values = append(values, capability)
+		}
+	}
+	manifest["capabilities"] = values
+}
+
+func parseCapabilitySet(value any) CapabilitySet {
+	set := CapabilitySet{}
+	appendValue := func(raw any) {
+		name := strings.ToLower(strings.TrimSpace(fmt.Sprint(raw)))
+		for _, allowed := range capabilityOrder {
+			if name == allowed {
+				set[name] = struct{}{}
+				return
+			}
+		}
+	}
+	switch current := value.(type) {
+	case []any:
+		for _, item := range current {
+			appendValue(item)
+		}
+	case []string:
+		for _, item := range current {
+			appendValue(item)
+		}
+	case string:
+		for _, item := range strings.Split(current, ",") {
+			appendValue(item)
+		}
+	}
+	return set
+}
+
+func manifestValuePresent(value any) bool {
+	switch current := value.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(current) != ""
+	case []any:
+		return len(current) > 0
+	case map[string]any:
+		return len(current) > 0
+	default:
+		return true
+	}
 }
 
 func ManifestDomains(manifest string) []string {
@@ -52,7 +172,7 @@ func MissingRequiredConfig(ctx context.Context, skillID uint64, manifest string,
 	if !ok || len(raw) == 0 {
 		return nil
 	}
-	rows := SkillConfigRows(ctx, skillID, true)
+	rows := SkillConfigRowsForTarget(ctx, skillID, targetKey, true)
 	configured := map[string]struct{}{}
 	for _, row := range rows {
 		if row == nil || strings.TrimSpace(row.ValueEncrypted) == "" {
@@ -113,8 +233,4 @@ func manifestTargetMatches(rowTarget string, requestTarget string) bool {
 	rowTarget = strings.TrimSpace(rowTarget)
 	requestTarget = strings.TrimSpace(requestTarget)
 	return rowTarget == "" || (requestTarget != "" && rowTarget == requestTarget)
-}
-
-func configKey(targetKey string, key string) string {
-	return strings.TrimSpace(targetKey) + "\x00" + ConfigEnvName(key)
 }

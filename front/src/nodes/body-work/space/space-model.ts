@@ -780,6 +780,12 @@ function normalizeCanvasStoryboardItem(value: unknown) {
     generatedPrompt: stringValue(
       firstDefined(row.generated_prompt, row.generatedPrompt),
     ),
+    sourceSignature: stringValue(
+      firstDefined(row.source_signature, row.sourceSignature),
+    ),
+    resultSourceSignature: stringValue(
+      firstDefined(row.result_source_signature, row.resultSourceSignature),
+    ),
     stale:
       row.stale === true ||
       row.stale === 1 ||
@@ -867,7 +873,7 @@ function normalizeCanvasFunctionOption(value: unknown) {
   };
 }
 
-function normalizeCanvasComposerDraft(value: unknown) {
+export function normalizeCanvasComposerDraft(value: unknown) {
   const row = asRecord(value);
   if (!Object.keys(row).length) {
     return undefined;

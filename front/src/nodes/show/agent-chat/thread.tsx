@@ -595,7 +595,7 @@ function NextStepIndicator() {
       aria-label="智能体正在执行下一步"
       className="agent-chat-next-step-indicator"
     >
-      <span className="agent-chat-next-step-dot" />
+      <span className="agent-chat-pulse-dot" />
     </div>
   );
 }
@@ -922,7 +922,7 @@ const threadStyles = `
   color: var(--foreground);
 }
 
-.agent-chat-next-step-dot {
+.agent-chat-pulse-dot {
   display: block;
   width: 6px;
   height: 6px;

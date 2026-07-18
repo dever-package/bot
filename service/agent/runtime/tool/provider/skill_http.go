@@ -49,6 +49,9 @@ func httpRequestTool(loaded map[string]agentskill.Entry) Tool {
 			if err != nil {
 				return Result{}, err
 			}
+			if err := requireSkillCapability(entry, agentskill.CapabilityHTTP); err != nil {
+				return Result{}, err
+			}
 			spec, err := httpSpec(call.Arguments)
 			if err != nil {
 				return Result{}, err

@@ -47,6 +47,7 @@ import {
   paramFilesRequestValue,
   validateMainParams,
   type ParamFileMap,
+  type ParamFileLibraryRenderer,
   type ParamUploadedFile,
   type ParamValueMap,
   type PowerParamSource,
@@ -68,6 +69,7 @@ import type {
   ReferenceProvider,
 } from './agent-chat/reference'
 import { useAssetReferenceProvider } from '../body-work/asset/asset-reference-provider'
+import { AssetParamPicker } from '../body-work/asset/asset-param-picker'
 
 type ReferenceEditorProps = {
   value: string
@@ -222,6 +224,10 @@ export function StreamPowerRunner({
   const sourceReady =
     sourceRule !== SOURCE_RULE_PICK || activeSelectedSourceID.length > 0
   const nowMs = useStreamClock(timing?.status === 'running')
+  const renderParamFileLibrary: ParamFileLibraryRenderer | undefined =
+    appearance === 'body' && assetReferenceTeamID > 0
+      ? (props) => <AssetParamPicker {...props} teamID={assetReferenceTeamID} />
+      : undefined
 
   const canSend = useMemo(
     () =>
@@ -552,6 +558,32 @@ export function StreamPowerRunner({
       />
     </>
   )
+  const showRunActions = appearance === 'body' ? Boolean(powerKey) : hasConfiguredParams
+  const runActions = showRunActions ? (
+    <>
+      {running ? (
+        <StreamStopButton
+          cancelable={cancelable}
+          stopping={stopping}
+          onStop={stop}
+        />
+      ) : null}
+      <Button
+        type="button"
+        size="sm"
+        className="stream-power-generate-action"
+        disabled={!canSend}
+        onClick={() => void send()}
+      >
+        {running ? (
+          <Loader2 className="mr-2 size-4 animate-spin" />
+        ) : (
+          <Send className="mr-2 size-4" />
+        )}
+        {running ? '生成中...' : '生成'}
+      </Button>
+    </>
+  ) : null
 
   return (
     <div
@@ -583,8 +615,17 @@ export function StreamPowerRunner({
         </div>
       ) : null}
       <div className="stream-power-form-column flex min-h-[360px] w-full max-w-md shrink-0 flex-col gap-3 md:h-full md:min-h-0">
-        {formHeader ? (
-          <div className="stream-power-form-header shrink-0">{formHeader}</div>
+        {formHeader || (appearance === 'body' && runActions) ? (
+          <div className="stream-power-form-header shrink-0">
+            {formHeader ? (
+              <div className="stream-power-form-header-content">{formHeader}</div>
+            ) : null}
+            {appearance === 'body' && runActions ? (
+              <div className="stream-power-header-actions stream-power-run-actions">
+                {runActions}
+              </div>
+            ) : null}
+          </div>
         ) : null}
         <div className="stream-power-form min-h-0 flex-1 overflow-y-auto rounded-xl bg-background/70 p-3">
           {paramsLoading ? (
@@ -649,6 +690,8 @@ export function StreamPowerRunner({
                       uploadBizKey={uploadBizKey}
                       uploadBizName={uploadBizName}
                       allowResourceLibrary={allowResourceLibrary}
+                      fileLibraryLabel={renderParamFileLibrary ? '资产库' : undefined}
+                      renderFileLibrary={renderParamFileLibrary}
                       onUploadedFiles={onUploadedFiles}
                       onChange={(nextValue) => setParamValue(param, nextValue)}
                       onFilesChange={(nextFiles) => setParamFileValue(param, nextFiles)}
@@ -678,6 +721,8 @@ export function StreamPowerRunner({
                     uploadBizKey={uploadBizKey}
                     uploadBizName={uploadBizName}
                     allowResourceLibrary={allowResourceLibrary}
+                    fileLibraryLabel={renderParamFileLibrary ? '资产库' : undefined}
+                    renderFileLibrary={renderParamFileLibrary}
                     onUploadedFiles={onUploadedFiles}
                     onChange={(nextValue) => setParamValue(param, nextValue)}
                     onFilesChange={(nextFiles) => setParamFileValue(param, nextFiles)}
@@ -694,29 +739,9 @@ export function StreamPowerRunner({
           ) : null}
         </div>
 
-        {hasConfiguredParams ? (
-          <div className="stream-power-actions flex shrink-0 items-center justify-center gap-2 rounded-xl bg-background px-3 py-3">
-            {running ? (
-              <StreamStopButton
-                cancelable={cancelable}
-                stopping={stopping}
-                onStop={stop}
-              />
-            ) : null}
-            <Button
-              type="button"
-              size="sm"
-              className="stream-power-generate-action"
-              disabled={!canSend}
-              onClick={() => void send()}
-            >
-              {running ? (
-                <Loader2 className="mr-2 size-4 animate-spin" />
-              ) : (
-                <Send className="mr-2 size-4" />
-              )}
-              {running ? '生成中...' : '生成'}
-            </Button>
+        {appearance !== 'body' && runActions ? (
+          <div className="stream-power-actions stream-power-run-actions flex shrink-0 items-center justify-center gap-2 rounded-xl bg-background px-3 py-3">
+            {runActions}
           </div>
         ) : null}
       </div>
@@ -821,9 +846,12 @@ function PowerPromptReferenceField({
 
   return (
     <div className='stream-power-param-field stream-power-prompt-field space-y-2 rounded-xl bg-muted/30 p-3'>
-      <div className='text-sm font-medium text-foreground'>
-        {param.name}
-        {param.required ? <span className='ml-0.5 text-destructive'>*</span> : null}
+      <div className='stream-power-prompt-heading'>
+        <span className='text-sm font-medium text-foreground'>
+          {param.name}
+          {param.required ? <span className='ml-0.5 text-destructive'>*</span> : null}
+        </span>
+        <small>输入 @ 引用资产</small>
       </div>
       <ReferenceEditor
         value={value}

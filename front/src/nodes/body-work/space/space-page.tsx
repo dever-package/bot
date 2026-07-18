@@ -10,6 +10,7 @@ import {
   type DragEvent,
   type FormEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type SetStateAction,
 } from "react";
 import { createPortal } from "react-dom";
@@ -97,7 +98,6 @@ import {
   reconcileCanvasGroupEdges,
   withCanvasNodeGroupAtPosition,
   withMovedCanvasNode,
-  withoutCanvasGroupAndMembers,
 } from "./space-group-model";
 import { PowerIcon } from "./space-power-icon";
 import {
@@ -148,6 +148,7 @@ import {
 } from "./space-runner";
 import {
   canvasExecutionNodeIds,
+  canvasNodeRunsInBackend,
   canvasNodeStopsExecution,
 } from "./space-execution-plan";
 import { watchSpaceCanvasStream, type SpaceStreamFrame } from "./space-stream";
@@ -178,6 +179,7 @@ import {
   isExecutionRole,
   looseRichJSONText,
   nextCanvasNodeNo,
+  normalizeCanvasComposerDraft,
   normalizeCanvasNodeIdentities,
   normalizeProjectAsset,
   relatedFlows,
@@ -307,6 +309,23 @@ function omitRecordKeys<T>(
   return next || values;
 }
 
+function collectCanvasNodeRemovalIds(
+  canvasNodes: SpaceCanvasNode[],
+  targetNodes: SpaceCanvasNode[],
+) {
+  const removedNodeIds = new Set<string>();
+  for (const node of targetNodes) {
+    removedNodeIds.add(node.id);
+    if (node.type !== "group") {
+      continue;
+    }
+    for (const member of canvasGroupMembers(canvasNodes, node.id)) {
+      removedNodeIds.add(member.id);
+    }
+  }
+  return removedNodeIds;
+}
+
 function hasRunningCanvasNode(nodes: RunningNodeMap) {
   return Object.values(nodes).some(isActiveRunningNode);
 }
@@ -338,6 +357,73 @@ type AddConfiguredNodeHandler = (
   },
 ) => void;
 type CanvasPoint = { x: number; y: number };
+type CanvasSelectionRect = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+type CanvasRightSelectionGesture = {
+  pointerId: number;
+  start: CanvasPoint;
+  baseNodeIds: string[];
+  moved: boolean;
+};
+
+function isCanvasPaneTarget(target: EventTarget | null) {
+  return target instanceof Element && target.classList.contains("react-flow__pane");
+}
+
+function selectionRectFromScreenPoints(
+  start: CanvasPoint,
+  end: CanvasPoint,
+  bounds: DOMRect,
+): CanvasSelectionRect {
+  return {
+    left: Math.min(start.x, end.x) - bounds.left,
+    top: Math.min(start.y, end.y) - bounds.top,
+    width: Math.abs(end.x - start.x),
+    height: Math.abs(end.y - start.y),
+  };
+}
+
+function canvasNodeIdsInsideSelection(
+  nodes: SpaceCanvasNode[],
+  start: CanvasPoint,
+  end: CanvasPoint,
+) {
+  const selection = {
+    left: Math.min(start.x, end.x),
+    top: Math.min(start.y, end.y),
+    right: Math.max(start.x, end.x),
+    bottom: Math.max(start.y, end.y),
+  };
+  return nodes
+    .filter((node) => {
+      const size = canvasNodeStyleSize(node);
+      const nodeRight = node.x + size.width;
+      const nodeBottom = node.y + size.height;
+      if (node.type === "group") {
+        return (
+          selection.left <= node.x &&
+          selection.top <= node.y &&
+          selection.right >= nodeRight &&
+          selection.bottom >= nodeBottom
+        );
+      }
+      return (
+        selection.left <= nodeRight &&
+        selection.right >= node.x &&
+        selection.top <= nodeBottom &&
+        selection.bottom >= node.y
+      );
+    })
+    .map((node) => node.id);
+}
+
+function mergeCanvasNodeSelection(baseNodeIds: string[], hitNodeIds: string[]) {
+  return [...new Set([...baseNodeIds, ...hitNodeIds])];
+}
 type GeneratedNodePreview = CanvasContentPreview;
 type NodeInputContext = {
   text: string;
@@ -390,7 +476,8 @@ export function WorkSpacePage() {
   const catalogCache = useMemo(() => new SpaceCatalogCache(), []);
   const [space, setSpace] = useState<SpaceBootstrap | null>(null);
   const [activeCateId, setActiveCateId] = useState(0);
-  const [selectedNodeId, setSelectedNodeId] = useState("");
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const selectedNodeId = selectedNodeIds[selectedNodeIds.length - 1] || "";
   const [canvasStates, setCanvasStates] = useState<
     Record<string, SpaceCanvasState>
   >({});
@@ -1171,7 +1258,7 @@ export function WorkSpacePage() {
 
   function switchCate(cateId: number) {
     setActiveCateId(cateId);
-    setSelectedNodeId("");
+    setSelectedNodeIds([]);
     setFocusNodeRequest(null);
     setNodeMenu(null);
     setRunStatus("");
@@ -1440,7 +1527,7 @@ export function WorkSpacePage() {
       });
     }
     if (options?.selectCreated !== false) {
-      setSelectedNodeId(selectedCreatedNodeId);
+      setSelectedNodeIds([selectedCreatedNodeId]);
       focusCanvasNode(selectedCreatedNodeId);
     }
     setWorkMode("create");
@@ -1474,28 +1561,22 @@ export function WorkSpacePage() {
       const patch = current[node.id];
       return patch ? { ...current, [clone.id]: patch } : current;
     });
-    setSelectedNodeId(clone.id);
+    setSelectedNodeIds([clone.id]);
     focusCanvasNode(clone.id);
     setNodeMenu(null);
     toast.success("已复制节点");
   }
 
-  function deleteCanvasNode(node: SpaceCanvasNode) {
-    const removedNodeIds = new Set(
-      node.type === "group"
-        ? [
-            node.id,
-            ...canvasGroupMembers(activeCanvas.nodes, node.id).map(
-              (member) => member.id,
-            ),
-          ]
-        : [node.id],
+  function deleteCanvasNodes(targetNodes: SpaceCanvasNode[]) {
+    const removedNodeIds = collectCanvasNodeRemovalIds(
+      activeCanvas.nodes,
+      targetNodes,
     );
+    if (removedNodeIds.size === 0) {
+      return;
+    }
     updateActiveCanvas((canvas) => {
-      const nodes =
-        node.type === "group"
-          ? withoutCanvasGroupAndMembers(canvas.nodes, node.id)
-          : canvas.nodes.filter((item) => !removedNodeIds.has(item.id));
+      const nodes = canvas.nodes.filter((item) => !removedNodeIds.has(item.id));
       return {
         ...canvas,
         nodes,
@@ -1506,7 +1587,7 @@ export function WorkSpacePage() {
       omitRecordKeys(current, removedNodeIds),
     );
     setRunningNodes((current) => omitRecordKeys(current, removedNodeIds));
-    setSelectedNodeId("");
+    setSelectedNodeIds([]);
     setFocusNodeRequest((current) =>
       current && removedNodeIds.has(current.nodeId) ? null : current,
     );
@@ -1523,10 +1604,14 @@ export function WorkSpacePage() {
       pendingImportNodeRef.current = null;
     }
     toast.success(
-      node.type === "group"
-        ? "已删除分组及 " + (removedNodeIds.size - 1) + " 个节点"
+      targetNodes.length > 1 || removedNodeIds.size > 1
+        ? `已删除 ${removedNodeIds.size} 个节点`
         : "已删除节点",
     );
+  }
+
+  function deleteCanvasNode(node: SpaceCanvasNode) {
+    deleteCanvasNodes([node]);
   }
 
   function addAssetNode(asset: ProjectAsset, position?: CanvasPoint) {
@@ -1758,14 +1843,16 @@ export function WorkSpacePage() {
         edges={canvasModel.edges}
         viewport={activeCanvas.viewport}
         selectedNodeId={selectedNodeId}
-        onSelectNode={(nodeId) => {
-          setSelectedNodeId(nodeId);
+        selectedNodeIds={selectedNodeIds}
+        onSelectNodes={(nodeIds) => {
+          setSelectedNodeIds(nodeIds);
           setNodeMenu(null);
         }}
         onOpenNodeMenu={openNodeMenu}
         onAddConfiguredNode={addConfiguredNode}
         onCopyNode={copyCanvasNode}
         onDeleteNode={deleteCanvasNode}
+        onDeleteNodes={deleteCanvasNodes}
         onShowNodeDetail={setNodeDetail}
         onNodesCommit={(nodes) =>
           updateActiveCanvas((canvas) => ({ ...canvas, nodes }))
@@ -2248,11 +2335,13 @@ function CanvasWorkbench({
   edges,
   viewport,
   selectedNodeId,
-  onSelectNode,
+  selectedNodeIds,
+  onSelectNodes,
   onOpenNodeMenu,
   onAddConfiguredNode,
   onCopyNode,
   onDeleteNode,
+  onDeleteNodes,
   onShowNodeDetail,
   onNodesCommit,
   onEdgesCommit,
@@ -2283,7 +2372,8 @@ function CanvasWorkbench({
   edges: { id: string; from: string; to: string }[];
   viewport: SpaceCanvasState["viewport"];
   selectedNodeId: string;
-  onSelectNode: (id: string) => void;
+  selectedNodeIds: string[];
+  onSelectNodes: (ids: string[]) => void;
   onOpenNodeMenu: (
     screen: CanvasPoint,
     position: CanvasPoint,
@@ -2292,6 +2382,7 @@ function CanvasWorkbench({
   onAddConfiguredNode?: AddConfiguredNodeHandler;
   onCopyNode: (node: SpaceCanvasNode, position?: CanvasPoint) => void;
   onDeleteNode: (node: SpaceCanvasNode) => void;
+  onDeleteNodes: (nodes: SpaceCanvasNode[]) => void;
   onShowNodeDetail: (node: SpaceCanvasNode) => void;
   onNodesCommit: (nodes: SpaceCanvasNode[]) => void;
   onEdgesCommit: (edges: SpaceCanvasEdge[]) => void;
@@ -2332,11 +2423,20 @@ function CanvasWorkbench({
   const [showMiniMap, setShowMiniMap] = useState(true);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [viewportZoom, setViewportZoom] = useState(1);
+  const [selectionRect, setSelectionRect] =
+    useState<CanvasSelectionRect | null>(null);
+  const selectedNodeIdSet = useMemo(
+    () => new Set(selectedNodeIds),
+    [selectedNodeIds],
+  );
+  const canvasWrapRef = useRef<HTMLElement | null>(null);
   const flowNodeCache = useRef<Map<string, Node>>(new Map());
   const pendingConnectionRef = useRef<PendingNodeConnection | null>(null);
   const connectionCompletedRef = useRef(false);
   const skipNextPaneClickRef = useRef(false);
   const skipNextNodeClickRef = useRef(false);
+  const rightSelectionRef = useRef<CanvasRightSelectionGesture | null>(null);
+  const suppressNextPaneContextMenuRef = useRef(false);
   const resizeNode: CanvasNodeResizeHandler = (nodeId, bounds) => {
     setResizingNodeId("");
     if (!interactive) {
@@ -2455,7 +2555,7 @@ function CanvasWorkbench({
     const nextNodes = nodes.map((node) => {
       activeIds.add(node.id);
       const position = { x: node.x, y: node.y };
-      const selected = node.id === selectedNodeId;
+      const selected = selectedNodeIdSet.has(node.id);
       const className = `ws-flow-node ws-flow-node-${node.type}`;
 
       const runningNode = runningNodes[node.id] || null;
@@ -2545,6 +2645,7 @@ function CanvasWorkbench({
     projectId,
     runningNodes,
     selectedNodeId,
+    selectedNodeIdSet,
     setRunningNode,
     space,
     catalogCache,
@@ -2678,26 +2779,25 @@ function CanvasWorkbench({
         return nextNodes;
       });
 
-      let hasSelect = false;
-      let selectedId = "";
-      let hasDeselect = false;
+      const nextSelectedNodeIds = new Set(selectedNodeIds);
+      let hasSelectionChange = false;
       for (const change of changes) {
-        if (change.type === "select") {
-          if (change.selected) {
-            hasSelect = true;
-            selectedId = change.id;
-          } else {
-            hasDeselect = true;
-          }
+        if (change.type !== "select") {
+          continue;
+        }
+        hasSelectionChange = true;
+        if (change.selected) {
+          nextSelectedNodeIds.delete(change.id);
+          nextSelectedNodeIds.add(change.id);
+        } else {
+          nextSelectedNodeIds.delete(change.id);
         }
       }
-      if (hasSelect) {
-        onSelectNode(selectedId);
-      } else if (hasDeselect) {
-        onSelectNode("");
+      if (hasSelectionChange) {
+        onSelectNodes([...nextSelectedNodeIds]);
       }
     },
-    [interactive, onSelectNode],
+    [interactive, onSelectNodes, selectedNodeIds],
   );
 
   const handleEdgesChange = useCallback(
@@ -2762,7 +2862,7 @@ function CanvasWorkbench({
       const nodeId = String(params?.nodeId || "");
       if (nodeId) {
         skipNextNodeClickRef.current = true;
-        onSelectNode("");
+        onSelectNodes([]);
         setNodeActionMenu(null);
       }
       pendingConnectionRef.current = nodeId
@@ -2775,7 +2875,7 @@ function CanvasWorkbench({
       connectionCompletedRef.current = false;
       setSelectedEdgeId("");
     },
-    [interactive, onSelectNode],
+    [interactive, onSelectNodes],
   );
 
   const handleConnectEnd = useCallback(
@@ -2821,10 +2921,10 @@ function CanvasWorkbench({
       event.preventDefault();
       event.stopPropagation();
       setNodeActionMenu(null);
-      onSelectNode("");
+      onSelectNodes([]);
       setSelectedEdgeId(edge.id);
     },
-    [interactive, onSelectNode],
+    [interactive, onSelectNodes],
   );
 
   useEffect(() => {
@@ -2847,6 +2947,41 @@ function CanvasWorkbench({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [deleteEdge, interactive, selectedEdgeId]);
+
+  useEffect(() => {
+    if (
+      selectedNodeIds.length === 0 ||
+      selectedEdgeId ||
+      typeof window === "undefined"
+    ) {
+      return;
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Delete" && event.key !== "Backspace") {
+        return;
+      }
+      if (!interactive || isEditableEventTarget(event.target)) {
+        return;
+      }
+      const selectedNodes = nodes.filter((node) =>
+        selectedNodeIdSet.has(node.id),
+      );
+      if (selectedNodes.length === 0) {
+        return;
+      }
+      event.preventDefault();
+      onDeleteNodes(selectedNodes);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    interactive,
+    nodes,
+    onDeleteNodes,
+    selectedEdgeId,
+    selectedNodeIds.length,
+    selectedNodeIdSet,
+  ]);
 
   const updateProximityEdge = useCallback((nextEdge: Edge | null) => {
     setProximityEdge((current: Edge | null) =>
@@ -2999,6 +3134,96 @@ function CanvasWorkbench({
     ],
   );
 
+  const handleCanvasPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      if (
+        !interactive ||
+        event.button !== 2 ||
+        !isCanvasPaneTarget(event.target)
+      ) {
+        return;
+      }
+      rightSelectionRef.current = {
+        pointerId: event.pointerId,
+        start: { x: event.clientX, y: event.clientY },
+        baseNodeIds:
+          event.ctrlKey || event.metaKey ? [...selectedNodeIds] : [],
+        moved: false,
+      };
+      suppressNextPaneContextMenuRef.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    },
+    [interactive, selectedNodeIds],
+  );
+
+  const handleCanvasPointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      const gesture = rightSelectionRef.current;
+      if (
+        !gesture ||
+        gesture.pointerId !== event.pointerId ||
+        !flowInstance ||
+        !canvasWrapRef.current
+      ) {
+        return;
+      }
+      const deltaX = event.clientX - gesture.start.x;
+      const deltaY = event.clientY - gesture.start.y;
+      if (!gesture.moved && Math.hypot(deltaX, deltaY) < 5) {
+        return;
+      }
+      gesture.moved = true;
+      event.preventDefault();
+      event.stopPropagation();
+      const bounds = canvasWrapRef.current.getBoundingClientRect();
+      setSelectionRect(
+        selectionRectFromScreenPoints(
+          gesture.start,
+          {
+            x: event.clientX,
+            y: event.clientY,
+          },
+          bounds,
+        ),
+      );
+      const hitNodeIds = canvasNodeIdsInsideSelection(
+        nodes,
+        flowPositionFromScreen(flowInstance, gesture.start),
+        flowPositionFromScreen(flowInstance, {
+          x: event.clientX,
+          y: event.clientY,
+        }),
+      );
+      onSelectNodes(mergeCanvasNodeSelection(gesture.baseNodeIds, hitNodeIds));
+      setSelectedEdgeId("");
+      setNodeActionMenu(null);
+    },
+    [flowInstance, nodes, onSelectNodes],
+  );
+
+  const finishCanvasPointerSelection = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      const gesture = rightSelectionRef.current;
+      if (!gesture || gesture.pointerId !== event.pointerId) {
+        return;
+      }
+      rightSelectionRef.current = null;
+      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      setSelectionRect(null);
+      if (!gesture.moved) {
+        return;
+      }
+      suppressNextPaneContextMenuRef.current = true;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    [],
+  );
+
   const handlePaneClick = useCallback(
     (event: ReactMouseEvent | MouseEvent) => {
       if (!interactive) {
@@ -3008,7 +3233,7 @@ function CanvasWorkbench({
         skipNextPaneClickRef.current = false;
         return;
       }
-      onSelectNode("");
+      onSelectNodes([]);
       setSelectedEdgeId("");
       setNodeActionMenu(null);
       if (!("detail" in event) || event.detail !== 2) {
@@ -3019,7 +3244,7 @@ function CanvasWorkbench({
       const screen = { x: event.clientX, y: event.clientY };
       onOpenNodeMenu(screen, flowPositionFromScreen(flowInstance, screen));
     },
-    [flowInstance, interactive, onOpenNodeMenu, onSelectNode],
+    [flowInstance, interactive, onOpenNodeMenu, onSelectNodes],
   );
 
   const handlePaneContextMenu = useCallback(
@@ -3029,6 +3254,10 @@ function CanvasWorkbench({
       }
       event.preventDefault();
       event.stopPropagation();
+      if (suppressNextPaneContextMenuRef.current) {
+        suppressNextPaneContextMenuRef.current = false;
+        return;
+      }
       const screen = { x: event.clientX, y: event.clientY };
       onOpenNodeMenu(screen, flowPositionFromScreen(flowInstance, screen));
     },
@@ -3043,14 +3272,16 @@ function CanvasWorkbench({
       event.preventDefault();
       event.stopPropagation();
       setSelectedEdgeId("");
-      onSelectNode(node.id);
+      if (!selectedNodeIdSet.has(node.id)) {
+        onSelectNodes([node.id]);
+      }
       setNodeActionMenu({
         nodeId: node.id,
         x: event.clientX,
         y: event.clientY,
       });
     },
-    [interactive, onSelectNode],
+    [interactive, onSelectNodes, selectedNodeIdSet],
   );
 
   const actionNode = nodeActionMenu
@@ -3087,7 +3318,7 @@ function CanvasWorkbench({
       title: `删除「${targetNode.title}」`,
       description:
         targetNode.type === "group"
-          ? "只删除分组容器，组内节点会保留；分组边界上的连线会移除。"
+          ? "会同时删除组内节点，并移除与这些节点相连的连线。"
           : "会同时移除与该节点相连的连线。",
       confirmText: "删除",
       tone: "danger",
@@ -3198,7 +3429,14 @@ function CanvasWorkbench({
     .join(" ");
 
   return (
-    <section className={canvasWrapClassName}>
+    <section
+      ref={canvasWrapRef}
+      className={canvasWrapClassName}
+      onPointerDownCapture={handleCanvasPointerDown}
+      onPointerMoveCapture={handleCanvasPointerMove}
+      onPointerUpCapture={finishCanvasPointerSelection}
+      onPointerCancelCapture={finishCanvasPointerSelection}
+    >
       <ReactFlow
         nodes={flowNodes}
         edges={renderedEdges}
@@ -3227,7 +3465,6 @@ function CanvasWorkbench({
           }
           setSelectedEdgeId("");
           setNodeActionMenu(null);
-          onSelectNode(node.id);
         }}
         onNodeContextMenu={handleNodeContextMenu}
         onNodeDragStart={(_, node: Node) => {
@@ -3278,6 +3515,8 @@ function CanvasWorkbench({
         nodesFocusable={interactive}
         edgesFocusable={interactive}
         elementsSelectable={interactive}
+        deleteKeyCode={null}
+        multiSelectionKeyCode={["Control", "Meta"]}
         panOnDrag={interactive}
         panOnScroll={false}
         zoomOnScroll={interactive}
@@ -3305,6 +3544,14 @@ function CanvasWorkbench({
           />
         ) : null}
       </ReactFlow>
+
+      {selectionRect ? (
+        <div
+          className="ws-canvas-selection-marquee"
+          style={selectionRect}
+          aria-hidden="true"
+        />
+      ) : null}
 
       {interactive ? (
         <CanvasViewControls
@@ -3529,27 +3776,13 @@ function buildAssetVersionNodePatch(
 }
 
 function normalizeComposerDraft(value: unknown): ComposerDraft {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { prompt: "", paramValues: {}, selectedTargetId: 0 };
-  }
-  const row = value as Record<string, unknown>;
-  const paramValues =
-    row.paramValues &&
-    typeof row.paramValues === "object" &&
-    !Array.isArray(row.paramValues)
-      ? (row.paramValues as Record<string, unknown>)
-      : {};
-  return {
-    prompt: typeof row.prompt === "string" ? row.prompt : "",
-    promptContent:
-      row.promptContent && typeof row.promptContent === "object"
-        ? (row.promptContent as CanvasReferenceContent)
-        : row.prompt_content && typeof row.prompt_content === "object"
-          ? (row.prompt_content as CanvasReferenceContent)
-          : undefined,
-    paramValues,
-    selectedTargetId: numericDraftValue(row.selectedTargetId),
-  };
+  return (
+    normalizeCanvasComposerDraft(value) || {
+      prompt: "",
+      paramValues: {},
+      selectedTargetId: 0,
+    }
+  );
 }
 
 function readNodeComposerDraft(node: SpaceCanvasNode): ComposerDraft {
@@ -3619,11 +3852,6 @@ function mergeSavedComposerParamValues(
     values[promptParam.key] = draft.prompt;
   }
   return values;
-}
-
-function numericDraftValue(value: unknown) {
-  const number = Number(value || 0);
-  return Number.isFinite(number) ? number : 0;
 }
 
 function safeJSONString(value: unknown) {
@@ -3720,7 +3948,7 @@ type CanvasStartRunInput = {
   canvasRun?: CanvasRunRef | null;
 };
 
-const canvasRunStreamTimeoutMs = 5 * 60 * 1000;
+const canvasRunStreamTimeoutMs = 60 * 60 * 1000;
 
 async function runCanvasFromStartNode(input: CanvasStartRunInput) {
   const requestId = createCanvasRunRequestId(input.startNode.id);
@@ -4971,7 +5199,10 @@ function buildBackendCanvasNodePatch(
     previousAssets: input.space.assets,
   });
   const withFeedbackRecords = (patch: Partial<SpaceCanvasNode>) =>
-    mergeNodeFeedbackRecordsIntoPatch(node, patch);
+    mergeNodeFeedbackRecordsIntoPatch(
+      node,
+      clearStoryboardNodeStaleState(node, patch),
+    );
   if (asset) {
     return withFeedbackRecords(
       buildGeneratedNodeResultPatch(
@@ -4984,6 +5215,25 @@ function buildBackendCanvasNodePatch(
   return withFeedbackRecords(
     buildGeneratedNodeResultPatch(node, normalizedResult, "后端执行结果"),
   );
+}
+
+function clearStoryboardNodeStaleState(
+  node: SpaceCanvasNode,
+  patch: Partial<SpaceCanvasNode>,
+) {
+  if (!node.storyboardItem?.stale) {
+    return patch;
+  }
+  return {
+    ...patch,
+    storyboardItem: {
+      ...node.storyboardItem,
+      resultSourceSignature:
+        node.storyboardItem.sourceSignature ||
+        node.storyboardItem.resultSourceSignature,
+      stale: false,
+    },
+  };
 }
 
 function mergeNodeFeedbackRecordsIntoPatch(
@@ -9482,6 +9732,39 @@ function NodeSettingButton({
   );
 }
 
+async function runCanvasGroupNodeTargets(
+  group: SpaceCanvasNode,
+  sourceNode: SpaceCanvasNode,
+  members: SpaceCanvasNode[],
+  runNode: BackendNodeRunner,
+) {
+  const staleMembers =
+    group.group?.origin === "script"
+      ? members.filter(
+          (member) =>
+            member.storyboardItem?.stale && canvasNodeRunsInBackend(member),
+        )
+      : [];
+  if (staleMembers.length === 0) {
+    await runNode(sourceNode);
+    return;
+  }
+  const results = await Promise.allSettled(
+    staleMembers.map((member) => runNode(member)),
+  );
+  const firstFailure = results.find((result) => result.status === "rejected");
+  if (!firstFailure || firstFailure.status !== "rejected") {
+    return;
+  }
+  const failedCount = results.filter(
+    (result) => result.status === "rejected",
+  ).length;
+  const firstError = firstFailure.reason;
+  const message =
+    firstError instanceof Error ? firstError.message : "节点更新失败";
+  throw new Error(`${failedCount} 个节点更新失败：${message}`);
+}
+
 function SpaceNodeView({ data, selected }: NodeProps<any>) {
   const node = data as SpaceCanvasNode;
   const sourceNode = ((data as any).sourceNode || node) as SpaceCanvasNode;
@@ -9542,7 +9825,12 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
               status: "running",
             },
           }));
-          void onRunBackendNode(sourceNode)
+          void runCanvasGroupNodeTargets(
+            node,
+            sourceNode,
+            members,
+            onRunBackendNode,
+          )
             .then(() => {
               setRunningNode?.((current) =>
                 omitRunningNode(current, node.id),
@@ -9579,6 +9867,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
         runnableCount={groupRuntime.runnableCount}
         completedCount={groupRuntime.completedCount}
         failedCount={groupRuntime.failedCount}
+        staleCount={groupRuntime.staleCount}
         status={groupRuntime.status}
         selected={selected}
         onRename={
@@ -10248,6 +10537,11 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
                 : undefined
             }
           />
+          {node.storyboardItem?.stale ? (
+            <span className="ws-node-stale-badge">
+              {node.groupId ? "待更新" : "已从脚本移除"}
+            </span>
+          ) : null}
         </div>
         <div className="ws-node-power-card">
           {isPowerRunning ? (

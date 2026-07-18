@@ -47,3 +47,40 @@ func PrepareProcess(config Config, req Request, commandName string, commandArgs 
 		return PreparedProcess{}, fmt.Errorf("不支持的脚本沙箱模式: %s", config.Driver)
 	}
 }
+
+// PrepareWorkspaceProcess runs a command with one writable workspace and no
+// mounted skill source. Installers and dependency preparation use this path.
+func PrepareWorkspaceProcess(config Config, workspace string, env []string, commandName string, commandArgs []string) (PreparedProcess, error) {
+	config = NormalizeConfig(config)
+	if workspace == "" {
+		return PreparedProcess{}, fmt.Errorf("进程沙箱缺少工作目录")
+	}
+	switch config.Driver {
+	case DriverDisabled:
+		return PreparedProcess{}, fmt.Errorf("工作区命令已被运行沙箱配置禁用")
+	case DriverLocal:
+		return PreparedProcess{
+			Runner:      DriverLocal,
+			CommandName: commandName,
+			CommandArgs: commandArgs,
+			WorkDir:     workspace,
+			Env:         env,
+		}, nil
+	case DriverBwrap:
+		bwrapPath, err := resolveBwrapPath(config.BwrapPath)
+		if err != nil {
+			return PreparedProcess{}, err
+		}
+		args, err := workspaceBwrapArgs(config, workspace, env, commandName, commandArgs)
+		if err != nil {
+			return PreparedProcess{}, err
+		}
+		return PreparedProcess{
+			Runner:      DriverBwrap,
+			CommandName: bwrapPath,
+			CommandArgs: args,
+		}, nil
+	default:
+		return PreparedProcess{}, fmt.Errorf("不支持的脚本沙箱模式: %s", config.Driver)
+	}
+}

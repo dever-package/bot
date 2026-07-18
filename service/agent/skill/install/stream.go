@@ -12,6 +12,7 @@ import (
 )
 
 func (s Service) ReadStream(ctx context.Context, requestID string, lastID string, count int64, block time.Duration) ([]frontstream.Entry, error) {
+	recoverInterruptedInstalls()
 	entries, err := s.streams.Read(ctx, requestID, lastID, count, block)
 	if err != nil || len(entries) > 0 {
 		return entries, err

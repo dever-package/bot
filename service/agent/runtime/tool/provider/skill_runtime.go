@@ -2,8 +2,10 @@ package provider
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
+	"github.com/dever-package/bot/service/agent/runtime/tool/sandbox"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
@@ -17,16 +19,64 @@ const (
 )
 
 func runtimeSkillTools(loaded map[string]agentskill.Entry, runtime SkillRuntime) []Tool {
-	return skillActivityTools([]Tool{
-		listSkillFilesTool(loaded),
-		readSkillFileTool(loaded),
-		writeTempFileTool(loaded, runtime),
-		readTempFileTool(loaded, runtime),
-		runSkillScriptTool(loaded, runtime),
-		httpRequestTool(loaded),
-		curlRequestTool(loaded),
-		mcpCallTool(loaded, runtime),
-	})
+	tools := make([]Tool, 0, 8)
+	capabilities := loadedSkillCapabilities(loaded)
+	if capabilities.Has(agentskill.CapabilityFiles) {
+		tools = append(tools, listSkillFilesTool(loaded), readSkillFileTool(loaded))
+	}
+	if capabilities.Has(agentskill.CapabilityTemp) {
+		tools = append(tools, writeTempFileTool(loaded, runtime), readTempFileTool(loaded, runtime))
+	}
+	if capabilities.Has(agentskill.CapabilityScript) {
+		tools = append(tools, runSkillScriptTool(loaded, runtime))
+	}
+	if capabilities.Has(agentskill.CapabilityHTTP) {
+		tools = append(tools, httpRequestTool(loaded), curlRequestTool(loaded))
+	}
+	if capabilities.Has(agentskill.CapabilityMCP) {
+		tools = append(tools, mcpCallTool(loaded, runtime))
+	}
+	return skillActivityTools(tools)
+}
+
+func loadedSkillCapabilities(loaded map[string]agentskill.Entry) agentskill.CapabilitySet {
+	result := agentskill.CapabilitySet{}
+	for _, entry := range loaded {
+		for capability := range agentskill.ManifestCapabilities(entry) {
+			result[capability] = struct{}{}
+		}
+	}
+	return result
+}
+
+func requireSkillCapability(entry agentskill.Entry, capability string) error {
+	if agentskill.ManifestCapabilities(entry).Has(capability) {
+		return nil
+	}
+	return fmt.Errorf("技能 %s 未声明 %s 能力", entry.Key, capability)
+}
+
+func skillTempRoot(runtime SkillRuntime, entry agentskill.Entry) (string, error) {
+	key := agentskill.NormalizeKey(entry.Key)
+	if key == "" {
+		return "", fmt.Errorf("技能临时目录缺少有效标识")
+	}
+	root, _, err := agentskill.ResolveRelativePath(runtime.TempRoot, key)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", err
+	}
+	root, _, err = agentskill.ResolveRelativePath(runtime.TempRoot, key)
+	return root, err
+}
+
+func skillSandboxConfig(entry agentskill.Entry, config sandbox.Config) sandbox.Config {
+	if !agentskill.ManifestCapabilities(entry).Has(agentskill.CapabilityNetwork) {
+		config.NetworkMode = sandbox.NetworkNone
+	}
+	return config
 }
 
 func skillActivityTools(tools []Tool) []Tool {

@@ -2,6 +2,8 @@ package install
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -48,12 +50,19 @@ type skillInstallExecution struct {
 	StartedAt     time.Time
 	Log           strings.Builder
 	LogMu         sync.Mutex
+	PersistMu     sync.Mutex
+	LastPersisted time.Time
 }
 
 type installedSkillSource struct {
 	Directory string
 	FilePath  string
 	SourceURL string
+}
+
+type sourceProvenance struct {
+	Root string
+	URL  string
 }
 
 type parsedSkillSource struct {
@@ -68,12 +77,28 @@ func NewService() Service {
 }
 
 func (s Service) Run(ctx context.Context, req RunRequest) map[string]any {
+	recoverInterruptedInstalls()
 	parsed, err := parseSkillInstallRequest(ctx, req.Body)
 	if err != nil {
 		return frontstream.ResponsePayload("", "result", map[string]any{}, err.Error(), 2)
 	}
 
 	requestID := resolveRequestID(req)
+	release, err := agentskill.Lock(ctx, installRequestLockKey(requestID))
+	if err != nil {
+		return frontstream.ResponsePayload(requestID, "result", map[string]any{}, err.Error(), 2)
+	}
+	defer release()
+	if existing := agentmodel.NewSkillInstallModel().Find(ctx, map[string]any{"request_id": requestID}); existing != nil {
+		if isFinalInstallStatus(existing.Status) {
+			status := 1
+			if existing.Status == agentmodel.SkillInstallStatusFail {
+				status = 2
+			}
+			return frontstream.ResponsePayload(requestID, "result", installResultOutput(existing), existing.Error, status)
+		}
+		return installStartPayload(requestID, existing.ID, "技能安装任务已存在")
+	}
 	now := time.Now()
 	installID := uint64(agentmodel.NewSkillInstallModel().Insert(ctx, map[string]any{
 		"cate_id":          parsed.CateID,
@@ -88,14 +113,7 @@ func (s Service) Run(ctx context.Context, req RunRequest) map[string]any {
 		return frontstream.ResponsePayload(requestID, "result", map[string]any{}, "创建技能安装记录失败", 2)
 	}
 
-	startPayload := frontstream.ResponsePayload(requestID, "stream", map[string]any{
-		"event": "start",
-		"text":  "技能安装已开始",
-		"meta": map[string]any{
-			"cancelable": false,
-			"install_id": installID,
-		},
-	}, "", 1)
+	startPayload := installStartPayload(requestID, installID, "技能安装已开始")
 	_, _ = s.streams.WritePayload(ctx, requestID, startPayload)
 
 	go s.execute(skillInstallExecution{
@@ -112,6 +130,22 @@ func (s Service) Run(ctx context.Context, req RunRequest) map[string]any {
 	return startPayload
 }
 
+func installRequestLockKey(requestID string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(requestID)))
+	return fmt.Sprintf("install-request-%02x", sum[0])
+}
+
+func installStartPayload(requestID string, installID uint64, text string) map[string]any {
+	return frontstream.ResponsePayload(requestID, "stream", map[string]any{
+		"event": "start",
+		"text":  text,
+		"meta": map[string]any{
+			"cancelable": false,
+			"install_id": installID,
+		},
+	}, "", 1)
+}
+
 func (s Service) Stop(_ context.Context, requestID string) map[string]any {
 	return frontstream.ResponsePayload(requestID, "result", map[string]any{
 		"event": "final",
@@ -125,8 +159,17 @@ func resolveRequestID(req RunRequest) string {
 		agentskill.HeaderValue(req.Headers, "X-Request-ID"),
 	} {
 		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
+			return normalizeInstallRequestID(value)
 		}
 	}
 	return uuid.NewString()
+}
+
+func normalizeInstallRequestID(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 64 {
+		return value
+	}
+	sum := sha256.Sum256([]byte(value))
+	return fmt.Sprintf("request-%x", sum[:28])
 }

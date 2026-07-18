@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -48,9 +47,9 @@ func ReadContent(entry Entry, limits Limits) (string, []string) {
 	if entryFile == "" {
 		entryFile = EntryFile
 	}
-	path := filepath.Join(installPath, entryFile)
-	if !IsSafePath(path) {
-		return "", []string{fmt.Sprintf("技能 %s 安装目录不安全", entry.Key)}
+	path, _, err := ResolveRelativePath(installPath, entryFile)
+	if err != nil {
+		return "", []string{fmt.Sprintf("技能 %s 安装目录不安全: %s", entry.Key, err.Error())}
 	}
 	raw, truncated, err := readLimitedFile(path, limits.SkillFileMaxBytes)
 	if err != nil {

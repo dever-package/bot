@@ -29,6 +29,9 @@ func runSkillScriptTool(loaded map[string]agentskill.Entry, runtime SkillRuntime
 			if err != nil {
 				return Result{}, err
 			}
+			if err := requireSkillCapability(entry, agentskill.CapabilityScript); err != nil {
+				return Result{}, err
+			}
 			script, err := resolveSkillScript(entry, argumentText(call.Arguments, "script"), argumentText(call.Arguments, "target"))
 			if err != nil {
 				return Result{}, err
@@ -55,13 +58,17 @@ func runSkillScriptTool(loaded map[string]agentskill.Entry, runtime SkillRuntime
 			if info.IsDir() {
 				return Result{}, fmt.Errorf("不能执行目录: %s", relative)
 			}
-			configEnv, err := agentskill.LoadConfigEnv(ctx, entry.ID, target)
+			configEnv, err := agentskill.LoadConfigEnv(ctx, entry.ID, entry.Manifest, target)
 			if err != nil {
 				return Result{}, err
 			}
 			timeout := time.Duration(ArgumentInt(call.Arguments, "timeout_seconds", 0)) * time.Second
-			runResult, err := sandbox.Run(ctx, runtime.Sandbox, sandbox.Request{
-				SkillRoot: entry.InstallPath, TempRoot: runtime.TempRoot, ScriptRelative: relative,
+			tempRoot, err := skillTempRoot(runtime, entry)
+			if err != nil {
+				return Result{}, err
+			}
+			runResult, err := sandbox.Run(ctx, skillSandboxConfig(entry, runtime.Sandbox), sandbox.Request{
+				SkillRoot: entry.InstallPath, TempRoot: tempRoot, ScriptRelative: relative,
 				Args: args, Env: configEnv.Env, Timeout: timeout,
 			})
 			if err != nil {

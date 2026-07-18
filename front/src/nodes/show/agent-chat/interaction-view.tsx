@@ -30,6 +30,16 @@ export function AgentChatInteractionView({
         interaction.presentation === "stepper" ? "w-full" : "max-w-2xl",
       )}
     >
+      {!response ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="mb-3 flex items-center gap-2 text-sm text-muted-foreground"
+        >
+          <span className="agent-chat-pulse-dot" />
+          <span>等待补充信息</span>
+        </div>
+      ) : null}
       <AgentInteractionPanel
         interaction={interaction}
         disabled={disabled}

@@ -18,6 +18,8 @@ import (
 
 const mcpTimeout = 60 * time.Second
 
+const maxMCPMessageBytes = 1024 * 1024
+
 type mcpServer struct {
 	Key     string
 	Command string
@@ -52,6 +54,9 @@ func mcpCallTool(loaded map[string]agentskill.Entry, runtime SkillRuntime) Tool 
 			if err != nil {
 				return Result{}, err
 			}
+			if err := requireSkillCapability(entry, agentskill.CapabilityMCP); err != nil {
+				return Result{}, err
+			}
 			server, err := resolveMCPServer(entry, argumentText(call.Arguments, "server"), argumentText(call.Arguments, "tool"))
 			if err != nil {
 				return Result{}, err
@@ -63,10 +68,16 @@ func mcpCallTool(loaded map[string]agentskill.Entry, runtime SkillRuntime) Tool 
 					"kind": "missing_config", "skill": entry.Key, "target": target, "required": missing,
 				}}, nil
 			}
-			configEnv, err := agentskill.LoadConfigEnv(ctx, entry.ID, target)
+			configEnv, err := agentskill.LoadConfigEnv(ctx, entry.ID, entry.Manifest, target)
 			if err != nil {
 				return Result{}, err
 			}
+			tempRoot, err := skillTempRoot(runtime, entry)
+			if err != nil {
+				return Result{}, err
+			}
+			runtime.TempRoot = tempRoot
+			runtime.Sandbox = skillSandboxConfig(entry, runtime.Sandbox)
 			result, err := callMCP(ctx, runtime, entry, server, argumentText(call.Arguments, "tool"), argumentMap(call.Arguments, "arguments"), configEnv.Env)
 			if err != nil {
 				return Result{}, fmt.Errorf("%s", agentskill.RedactSecrets(err.Error(), configEnv.Secrets))
@@ -147,7 +158,8 @@ func callMCP(ctx context.Context, runtime SkillRuntime, entry agentskill.Entry, 
 	if err != nil {
 		return nil, err
 	}
-	stderr := &bytes.Buffer{}
+	outputLimit := mcpOutputLimit(runtime.Sandbox.OutputMaxBytes)
+	stderr := sandbox.NewOutputBuffer(outputLimit)
 	command.Stderr = stderr
 	if err := command.Start(); err != nil {
 		return nil, err
@@ -158,7 +170,7 @@ func callMCP(ctx context.Context, runtime SkillRuntime, entry agentskill.Entry, 
 		}
 		_ = command.Wait()
 	}()
-	reader := bufio.NewReader(stdout)
+	reader := bufio.NewReaderSize(stdout, 64*1024)
 	if err := writeMCPMessage(stdin, mcpMessage{
 		JSONRPC: "2.0", ID: 1, Method: "initialize",
 		Params: map[string]any{
@@ -169,7 +181,7 @@ func callMCP(ctx context.Context, runtime SkillRuntime, entry agentskill.Entry, 
 	}); err != nil {
 		return nil, err
 	}
-	if _, err := readMCPResult(reader, 1); err != nil {
+	if _, err := readMCPResult(reader, 1, outputLimit); err != nil {
 		return nil, appendMCPStderr(err, stderr)
 	}
 	_ = writeMCPMessage(stdin, mcpMessage{JSONRPC: "2.0", Method: "notifications/initialized", Params: map[string]any{}})
@@ -179,7 +191,7 @@ func callMCP(ctx context.Context, runtime SkillRuntime, entry agentskill.Entry, 
 	}); err != nil {
 		return nil, err
 	}
-	result, err := readMCPResult(reader, 2)
+	result, err := readMCPResult(reader, 2, outputLimit)
 	if err != nil {
 		return nil, appendMCPStderr(err, stderr)
 	}
@@ -217,9 +229,9 @@ func writeMCPMessage(writer io.Writer, message mcpMessage) error {
 	return err
 }
 
-func readMCPResult(reader *bufio.Reader, id int) (any, error) {
+func readMCPResult(reader *bufio.Reader, id int, maxBytes int) (any, error) {
 	for {
-		line, err := reader.ReadBytes('\n')
+		line, err := readMCPLine(reader, maxBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -234,8 +246,45 @@ func readMCPResult(reader *bufio.Reader, id int) (any, error) {
 	}
 }
 
-func appendMCPStderr(err error, stderr *bytes.Buffer) error {
+func readMCPLine(reader *bufio.Reader, maxBytes int) ([]byte, error) {
+	line := make([]byte, 0, min(maxBytes, 64*1024))
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		if len(line)+len(fragment) > maxBytes {
+			return nil, fmt.Errorf("MCP 消息超过 %d 字节限制", maxBytes)
+		}
+		line = append(line, fragment...)
+		switch err {
+		case nil:
+			return line, nil
+		case bufio.ErrBufferFull:
+			continue
+		case io.EOF:
+			if len(line) > 0 {
+				return line, nil
+			}
+			return nil, err
+		default:
+			return nil, err
+		}
+	}
+}
+
+func mcpOutputLimit(configured int) int {
+	if configured <= 0 {
+		configured = sandbox.DefaultOutputMaxBytes
+	}
+	if configured > maxMCPMessageBytes {
+		return maxMCPMessageBytes
+	}
+	return configured
+}
+
+func appendMCPStderr(err error, stderr *sandbox.OutputBuffer) error {
 	if text := strings.TrimSpace(stderr.String()); text != "" {
+		if stderr.Truncated() {
+			text += "\n[MCP stderr 已截断]"
+		}
 		return fmt.Errorf("%s: %s", err.Error(), text)
 	}
 	return err

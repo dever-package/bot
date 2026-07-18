@@ -8,6 +8,9 @@ import (
 	"time"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
+	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
+	"github.com/dever-package/bot/service/agent/runtime/tool/sandbox"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 	frontstream "github.com/dever-package/front/service/stream"
 )
@@ -46,12 +49,12 @@ func (s Service) execute(execInfo skillInstallExecution) {
 		"log":  execInfo.logText(),
 	})
 
-	sourceURL, err := s.executePlan(ctx, &execInfo, tmpDir, plan)
+	provenance, err := s.executePlan(ctx, &execInfo, tmpDir, plan)
 	if err != nil {
 		s.fail(ctx, &execInfo, err)
 		return
 	}
-	sources, err := collectSkillSources(tmpDir, plan, sourceURL)
+	sources, err := collectSkillSources(tmpDir, plan, provenance, firstHTTPURL(execInfo.Input))
 	if err != nil {
 		s.fail(ctx, &execInfo, err)
 		return
@@ -61,27 +64,46 @@ func (s Service) execute(execInfo skillInstallExecution) {
 		s.fail(ctx, &execInfo, err)
 		return
 	}
+	if err := validateInstallConflicts(ctx, installs); err != nil {
+		s.fail(ctx, &execInfo, err)
+		return
+	}
+	sandboxConfig := runtimetool.SandboxConfig(runtimeconfig.Load(ctx))
+	for index := range installs {
+		dependencies, prepareErr := agentskill.PrepareDependencies(ctx, sandboxConfig, installs[index].Source.Directory)
+		if prepareErr != nil {
+			s.fail(ctx, &execInfo, prepareErr)
+			return
+		}
+		if len(dependencies) > 0 {
+			installs[index].Parsed.Manifest["dependencies"] = dependencies
+		} else {
+			installs[index].Parsed.Manifest["dependencies"] = []any{}
+		}
+		if validateErr := agentskill.ValidateTree(installs[index].Source.Directory); validateErr != nil {
+			s.fail(ctx, &execInfo, fmt.Errorf("技能依赖目录检查失败: %w", validateErr))
+			return
+		}
+	}
 	if err := os.MkdirAll(agentskill.Root, 0o755); err != nil {
 		s.fail(ctx, &execInfo, err)
 		return
 	}
 
-	installedSkills := make([]map[string]any, 0, len(installs))
+	installedSkills, err := s.saveInstalledSkills(ctx, &execInfo, installs)
+	if err != nil {
+		s.fail(ctx, &execInfo, err)
+		return
+	}
 	skillIDs := make([]uint64, 0, len(installs))
 	targetPaths := make([]string, 0, len(installs))
-	for _, install := range installs {
-		skill, err := s.saveInstalledSkill(ctx, &execInfo, install)
-		if err != nil {
-			s.fail(ctx, &execInfo, err)
-			return
-		}
+	for _, skill := range installedSkills {
 		if id := skillUint64(skill, "id"); id > 0 {
 			skillIDs = append(skillIDs, id)
 		}
 		if path := skillValue(skill, "path"); path != "" {
 			targetPaths = append(targetPaths, path)
 		}
-		installedSkills = append(installedSkills, skill)
 	}
 
 	result := skillInstallResult(execInfo.ID, installedSkills)
@@ -98,42 +120,40 @@ func (s Service) execute(execInfo skillInstallExecution) {
 	_, _ = s.streams.WritePayload(ctx, execInfo.RequestID, frontstream.ResponsePayload(execInfo.RequestID, "result", result, "", 1))
 }
 
-func (s Service) executePlan(ctx context.Context, execInfo *skillInstallExecution, workDir string, plan installPlan) (string, error) {
-	sourceURL := ""
+func (s Service) executePlan(ctx context.Context, execInfo *skillInstallExecution, workDir string, plan installPlan) ([]sourceProvenance, error) {
+	sandboxConfig := runtimetool.SandboxConfig(runtimeconfig.Load(ctx))
+	// Installation requires network access but remains isolated from the host filesystem.
+	sandboxConfig.NetworkMode = sandbox.NetworkHost
+	provenance := make([]sourceProvenance, 0)
 	for index, step := range plan.Steps {
 		s.status(ctx, execInfo, fmt.Sprintf("正在执行安装计划 %d/%d：%s", index+1, len(plan.Steps), planStepLabel(step)))
 		switch step.Type {
 		case stepTypeDownload:
-			downloadedURL, err := downloadPlanStep(ctx, workDir, step)
+			downloaded, err := downloadPlanStep(ctx, workDir, index, step)
 			if err != nil {
-				return sourceURL, err
+				return nil, err
 			}
-			if sourceURL == "" {
-				sourceURL = downloadedURL
-			}
-			s.log(execInfo, "下载完成: %s", downloadedURL)
+			provenance = append(provenance, downloaded)
+			s.log(execInfo, "下载完成: %s", downloaded.URL)
 		case stepTypeCommand:
 			commandDir, err := safeWorkPath(workDir, step.Dir)
 			if err != nil {
-				return sourceURL, err
+				return nil, err
 			}
 			s.status(ctx, execInfo, "正在执行安装命令，命令输出会实时显示")
 			stopHeartbeat := s.heartbeat(ctx, execInfo, "仍在执行安装命令，请稍后")
-			_, err = runInstallCommand(ctx, commandDir, step.Command, func(line string) {
+			_, err = runInstallCommand(ctx, sandboxConfig, commandDir, step.Command, func(line string) {
 				s.commandOutput(ctx, execInfo, line)
 			})
 			stopHeartbeat()
 			if err != nil {
-				return sourceURL, err
+				return nil, err
 			}
 		default:
-			return sourceURL, fmt.Errorf("不支持的安装步骤: %s", step.Type)
+			return nil, fmt.Errorf("不支持的安装步骤: %s", step.Type)
 		}
 	}
-	if sourceURL == "" {
-		sourceURL = firstHTTPURL(execInfo.Input)
-	}
-	return sourceURL, nil
+	return provenance, nil
 }
 
 func planStepLabel(step installPlanStep) string {
@@ -171,7 +191,7 @@ func (s Service) fail(ctx context.Context, execInfo *skillInstallExecution, err 
 
 func (s Service) status(ctx context.Context, execInfo *skillInstallExecution, text string) {
 	s.log(execInfo, "%s", text)
-	s.updateInstall(ctx, execInfo.ID, map[string]any{"log": execInfo.logText()})
+	s.persistLog(ctx, execInfo, true)
 	s.pushStatus(ctx, execInfo, "status", text)
 }
 
@@ -224,6 +244,11 @@ func (s Service) log(execInfo *skillInstallExecution, format string, args ...any
 	execInfo.Log.WriteString(" ")
 	execInfo.Log.WriteString(line)
 	execInfo.Log.WriteString("\n")
+	if execInfo.Log.Len() > 32*1024 {
+		text := trimCommandOutput(execInfo.Log.String())
+		execInfo.Log.Reset()
+		execInfo.Log.WriteString(text)
+	}
 }
 
 func (s Service) commandOutput(ctx context.Context, execInfo *skillInstallExecution, line string) {
@@ -232,11 +257,25 @@ func (s Service) commandOutput(ctx context.Context, execInfo *skillInstallExecut
 		return
 	}
 	s.log(execInfo, "%s", line)
-	s.updateInstall(ctx, execInfo.ID, map[string]any{"log": execInfo.logText()})
+	s.persistLog(ctx, execInfo, false)
 	_, _ = s.streams.WritePayload(ctx, execInfo.RequestID, frontstream.ResponsePayload(execInfo.RequestID, "stream", map[string]any{
 		"event": "log",
 		"text":  line,
 	}, "", 1))
+}
+
+func (s Service) persistLog(ctx context.Context, execInfo *skillInstallExecution, force bool) {
+	if execInfo == nil {
+		return
+	}
+	execInfo.PersistMu.Lock()
+	defer execInfo.PersistMu.Unlock()
+	now := time.Now()
+	if !force && !execInfo.LastPersisted.IsZero() && now.Sub(execInfo.LastPersisted) < 250*time.Millisecond {
+		return
+	}
+	s.updateInstall(ctx, execInfo.ID, map[string]any{"log": execInfo.logText()})
+	execInfo.LastPersisted = now
 }
 
 func (execInfo *skillInstallExecution) logText() string {

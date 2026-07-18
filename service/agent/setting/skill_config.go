@@ -42,9 +42,10 @@ func (AgentHook) ProviderBeforeSaveSkillConfig(c *server.Context, params []any) 
 		}
 		record["skill_id"] = skillID
 	}
-	record["target_key"] = ""
+	if _, exists := record["target_key"]; exists {
+		record["target_key"] = util.ToStringTrimmed(record["target_key"])
+	}
 	normalizeSkillConfigType(record, partial)
-	record["required"] = agentmodel.SkillConfigRequiredNo
 	normalizeSkillConfigValue(c.Context(), record)
 	if _, exists := record["status"]; exists {
 		defaultInt16Field(record, "status", defaultAgentStatus, partial)

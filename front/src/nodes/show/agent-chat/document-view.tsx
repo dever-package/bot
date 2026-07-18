@@ -211,7 +211,7 @@ function DocumentTail() {
       aria-label="正在继续生成图文内容"
       className="agent-chat-next-step-indicator"
     >
-      <span className="agent-chat-next-step-dot" />
+      <span className="agent-chat-pulse-dot" />
     </div>
   );
 }

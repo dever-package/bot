@@ -6,16 +6,18 @@ import type { AssetRecord } from "./asset-types";
 export function AssetCard({
   asset,
   selectable = false,
+  selected = false,
   onOpen,
   onSelect,
 }: {
   asset: AssetRecord;
   selectable?: boolean;
+  selected?: boolean;
   onOpen: (asset: AssetRecord) => void;
   onSelect?: (asset: AssetRecord) => void;
 }) {
   return (
-    <article className="wb-asset-card">
+    <article className={`wb-asset-card ${selected ? "is-selected" : ""}`.trim()}>
       <button
         type="button"
         className="wb-asset-card-main"
@@ -45,11 +47,11 @@ export function AssetCard({
         {selectable && onSelect ? (
           <button
             type="button"
-            className="is-primary"
+            className={`is-primary ${selected ? "is-selected" : ""}`.trim()}
             onClick={() => onSelect(asset)}
           >
             <Check aria-hidden="true" />
-            使用
+            {selected ? "已选" : "使用"}
           </button>
         ) : null}
       </div>

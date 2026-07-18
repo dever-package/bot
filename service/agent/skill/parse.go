@@ -5,19 +5,27 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 func ParseFile(path string) (ParsedFile, error) {
-	raw, err := os.ReadFile(path)
+	maxBytes := DefaultLimits().SkillFileMaxBytes
+	raw, truncated, err := readLimitedFile(path, maxBytes)
 	if err != nil {
 		return ParsedFile{}, err
 	}
+	if truncated {
+		return ParsedFile{}, fmt.Errorf("%s 超过 %d 字节限制", EntryFile, maxBytes)
+	}
 	content := string(raw)
 	metadata, body := SplitFrontMatter(content)
-	entry := ParseMetadata(metadata)
+	entry, err := parseMetadata(metadata)
+	if err != nil {
+		return ParsedFile{}, fmt.Errorf("解析 SKILL.md frontmatter 失败: %w", err)
+	}
 	if entry.Key == "" {
 		entry.Key = NormalizeKey(entry.Name)
 	}
@@ -58,72 +66,43 @@ func ParseFile(path string) (ParsedFile, error) {
 
 func SplitFrontMatter(content string) (string, string) {
 	trimmed := strings.TrimLeft(content, "\ufeff\r\n\t ")
-	if !strings.HasPrefix(trimmed, "---") {
+	normalized := strings.ReplaceAll(trimmed, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
 		return "", strings.TrimSpace(content)
 	}
-	rest := strings.TrimPrefix(trimmed, "---")
-	rest = strings.TrimLeft(rest, "\r\n")
-	marker := "\n---"
-	index := strings.Index(rest, marker)
-	if index < 0 {
-		return "", strings.TrimSpace(content)
+	for index := 1; index < len(lines); index++ {
+		marker := strings.TrimSpace(lines[index])
+		if marker != "---" && marker != "..." {
+			continue
+		}
+		metadata := strings.TrimSpace(strings.Join(lines[1:index], "\n"))
+		body := strings.TrimSpace(strings.Join(lines[index+1:], "\n"))
+		return metadata, body
 	}
-	metadata := strings.TrimSpace(rest[:index])
-	body := strings.TrimLeft(rest[index+len(marker):], "\r\n")
-	return metadata, strings.TrimSpace(body)
+	return "", strings.TrimSpace(content)
 }
 
 func ParseMetadata(metadata string) Entry {
-	entry := Entry{}
-	currentKey := ""
-	blockKey := ""
-	blockLines := make([]string, 0)
-	flushBlock := func() {
-		if blockKey == "description" {
-			entry.Description = strings.TrimSpace(strings.Join(blockLines, "\n"))
-		}
-		blockKey = ""
-		blockLines = blockLines[:0]
-	}
-	for _, rawLine := range strings.Split(metadata, "\n") {
-		line := strings.TrimSpace(rawLine)
-		if blockKey != "" {
-			if line == "" || strings.HasPrefix(rawLine, " ") || strings.HasPrefix(rawLine, "\t") {
-				blockLines = append(blockLines, line)
-				continue
-			}
-			flushBlock()
-		}
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if strings.HasPrefix(line, "- ") && currentKey == "triggers" {
-			entry.Triggers = append(entry.Triggers, trimYAMLValue(strings.TrimPrefix(line, "- ")))
-			continue
-		}
-		key, value, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		currentKey = strings.ToLower(strings.TrimSpace(key))
-		value = trimYAMLValue(value)
-		switch currentKey {
-		case "key":
-			entry.Key = NormalizeKey(value)
-		case "name":
-			entry.Name = value
-		case "description":
-			if value == "|" || value == ">" {
-				blockKey = currentKey
-				continue
-			}
-			entry.Description = value
-		case "triggers":
-			entry.Triggers = append(entry.Triggers, splitTriggerList(value)...)
-		}
-	}
-	flushBlock()
+	entry, _ := parseMetadata(metadata)
 	return entry
+}
+
+func parseMetadata(metadata string) (Entry, error) {
+	entry := Entry{}
+	metadata = strings.TrimSpace(metadata)
+	if metadata == "" {
+		return entry, nil
+	}
+	payload := map[string]any{}
+	if err := yaml.Unmarshal([]byte(metadata), &payload); err != nil {
+		return entry, err
+	}
+	entry.Key = NormalizeKey(metadataText(payload["key"]))
+	entry.Name = metadataText(payload["name"])
+	entry.Description = metadataText(payload["description"])
+	entry.Triggers = metadataStringList(payload["triggers"])
+	return entry, nil
 }
 
 func ManifestTriggers(manifest string) []string {
@@ -135,39 +114,38 @@ func ManifestTriggers(manifest string) []string {
 	if err := json.Unmarshal([]byte(manifest), &payload); err != nil {
 		return nil
 	}
-	raw, ok := payload["triggers"].([]any)
-	if !ok {
-		return nil
-	}
-	triggers := make([]string, 0, len(raw))
-	for _, item := range raw {
-		if text := strings.TrimSpace(fmt.Sprint(item)); text != "" {
-			triggers = append(triggers, text)
-		}
-	}
-	return triggers
+	return metadataStringList(payload["triggers"])
 }
 
-func trimYAMLValue(value string) string {
-	value = strings.TrimSpace(value)
-	value = strings.Trim(value, `"'`)
-	return strings.TrimSpace(value)
+func metadataText(value any) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
 }
 
-func splitTriggerList(value string) []string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	value = strings.TrimPrefix(strings.TrimSuffix(value, "]"), "[")
-	parts := strings.FieldsFunc(value, func(char rune) bool {
-		return char == ',' || char == '，' || char == '、'
-	})
-	triggers := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if trigger := trimYAMLValue(part); trigger != "" {
-			triggers = append(triggers, trigger)
+func metadataStringList(value any) []string {
+	result := make([]string, 0)
+	appendText := func(item any) {
+		if text := metadataText(item); text != "" {
+			result = append(result, text)
 		}
 	}
-	return triggers
+	switch current := value.(type) {
+	case []any:
+		for _, item := range current {
+			appendText(item)
+		}
+	case []string:
+		for _, item := range current {
+			appendText(item)
+		}
+	case string:
+		for _, item := range strings.FieldsFunc(current, func(char rune) bool {
+			return char == ',' || char == '，' || char == '、'
+		}) {
+			appendText(item)
+		}
+	}
+	return result
 }

@@ -1,8 +1,6 @@
-import { useEffect, useMemo } from "react";
-import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { useMemo } from "react";
 import { loadAssetDetail } from "./asset-api";
-import { AssetBrowser } from "./asset-browser";
+import { AssetPickerDialog } from "./asset-picker-dialog";
 import {
   assetPreviewOutput,
   findAssetMediaURL,
@@ -106,52 +104,20 @@ function AssetReferencePicker({
   onSelect: (option: ReferenceOption) => void;
   onClose: () => void;
 }) {
-  useEffect(() => {
-    if (!open) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose, open]);
-
-  if (!open || typeof document === "undefined") {
-    return null;
-  }
-  return createPortal(
-    <div
-      className="wb-asset-reference-backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-label="选择资产"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+  return (
+    <AssetPickerDialog
+      open={open}
+      teamID={teamID}
+      title="选择资产"
+      description="插入资产当前版本"
+      initialFilters={initialFilters}
+      allowedKinds={allowedKinds}
+      onClose={onClose}
+      onConfirm={(assets) => {
+        const asset = assets[0];
+        if (asset) onSelect(assetReferenceOption(asset));
       }}
-    >
-      <div className="wb-asset-reference-dialog">
-        <header>
-          <div>
-            <h2>选择资产</h2>
-            <p>插入资产当前版本</p>
-          </div>
-          <button type="button" title="关闭" onClick={onClose}>
-            <X aria-hidden="true" />
-            <span className="sr-only">关闭</span>
-          </button>
-        </header>
-        <AssetBrowser
-          teamID={teamID}
-          initialFilters={initialFilters}
-          allowedKinds={allowedKinds}
-          selectable
-          onSelect={(asset) => {
-            onSelect(assetReferenceOption(asset));
-            onClose();
-          }}
-        />
-      </div>
-    </div>,
-    document.body,
+    />
   );
 }
 

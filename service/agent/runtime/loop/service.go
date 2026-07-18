@@ -198,6 +198,7 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 		Scope:              runtimescope.FromSession(ctx, *session),
 		RequestedAt:        requestedAt,
 		PriorKnowledgeUsed: turn.PriorKnowledgeUsed,
+		PriorLoadedSkills:  turn.PriorLoadedSkills,
 	})
 	if err != nil {
 		return botprotocol.BuildErrorResponse(requestID, err).Payload()

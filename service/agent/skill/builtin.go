@@ -1,7 +1,6 @@
 package skill
 
 import (
-	"fmt"
 	"strings"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
@@ -87,18 +86,6 @@ func BuiltinByKey(key string) (BuiltinDefinition, bool) {
 	return BuiltinDefinition{}, false
 }
 
-func builtinMethodByKey(key string) (BuiltinMethod, bool) {
-	key = strings.TrimSpace(key)
-	for _, definition := range BuiltinDefinitions() {
-		for _, method := range definition.Methods {
-			if method.Key == key {
-				return method, true
-			}
-		}
-	}
-	return BuiltinMethod{}, false
-}
-
 func BuiltinContent(entry Entry) string {
 	if entry.SourceType != agentmodel.SkillSourceTypeBuiltin {
 		return ""
@@ -113,7 +100,14 @@ func LoadedBuiltinMethods(entries []Entry) []BuiltinMethod {
 	result := make([]BuiltinMethod, 0)
 	seen := map[string]struct{}{}
 	for _, entry := range entries {
-		for _, method := range manifestBuiltinMethods(entry.Manifest) {
+		if entry.SourceType != agentmodel.SkillSourceTypeBuiltin {
+			continue
+		}
+		definition, exists := BuiltinByKey(entry.Key)
+		if !exists {
+			continue
+		}
+		for _, method := range definition.Methods {
 			if _, exists := seen[method.Key]; exists {
 				continue
 			}
@@ -122,37 +116,6 @@ func LoadedBuiltinMethods(entries []Entry) []BuiltinMethod {
 		}
 	}
 	return result
-}
-
-func manifestBuiltinMethods(manifest string) []BuiltinMethod {
-	payload := ParseManifestMap(manifest)
-	raw, ok := payload["builtin_methods"].([]any)
-	if !ok || len(raw) == 0 {
-		return nil
-	}
-	methods := make([]BuiltinMethod, 0, len(raw))
-	for _, item := range raw {
-		mapped, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		method := BuiltinMethod{
-			Key:         strings.TrimSpace(fmt.Sprint(FirstPresent(mapped, "key", "name"))),
-			Service:     strings.TrimSpace(fmt.Sprint(FirstPresent(mapped, "service", "provider"))),
-			Description: strings.TrimSpace(fmt.Sprint(FirstPresent(mapped, "description", "summary"))),
-		}
-		if method.Key == "" || method.Service == "" {
-			continue
-		}
-		method.Parameters, _ = mapped["parameters"].(map[string]any)
-		if len(method.Parameters) == 0 {
-			if builtin, exists := builtinMethodByKey(method.Key); exists {
-				method.Parameters = builtin.Parameters
-			}
-		}
-		methods = append(methods, method)
-	}
-	return methods
 }
 
 func objectSchema(properties map[string]any, required ...string) map[string]any {

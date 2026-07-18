@@ -154,7 +154,6 @@ export function WorkbenchFunctionPage({
                     <SaveToolMaterialButton
                       teamID={teamID}
                       teamPowerID={power.id}
-                      powerName={power.name}
                       requestID={requestID}
                       targetAssetID={powerContinuation?.id || 0}
                       targetAssetName={powerContinuation?.name || ""}
@@ -174,7 +173,6 @@ export function WorkbenchFunctionPage({
 function SaveToolMaterialButton({
   teamID,
   teamPowerID,
-  powerName,
   requestID,
   targetAssetID,
   targetAssetName,
@@ -182,7 +180,6 @@ function SaveToolMaterialButton({
 }: {
   teamID: number;
   teamPowerID: number;
-  powerName: string;
   requestID: string;
   targetAssetID: number;
   targetAssetName: string;
@@ -192,7 +189,7 @@ function SaveToolMaterialButton({
     <SaveAssetAction
       teamID={teamID}
       resetKey={`${requestID}:${targetAssetID}`}
-      defaultName={targetAssetName || `${powerName} 结果`}
+      defaultName={targetAssetID ? targetAssetName : ""}
       appearance="toolbar"
       confirmDescription={
         targetAssetID

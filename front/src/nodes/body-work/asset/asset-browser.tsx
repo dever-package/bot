@@ -48,6 +48,7 @@ export function AssetBrowser({
   teamID,
   initialFilters,
   selectable = false,
+  selectedAssetIDs,
   allowedKinds,
   onSelect,
   onContinue,
@@ -58,6 +59,7 @@ export function AssetBrowser({
   teamID: number;
   initialFilters?: Partial<AssetFilters>;
   selectable?: boolean;
+  selectedAssetIDs?: number[];
   allowedKinds?: AssetKind[];
   onSelect?: (asset: AssetRecord) => void;
   onContinue?: (asset: AssetRecord) => void;
@@ -84,6 +86,11 @@ export function AssetBrowser({
   const [error, setError] = useState("");
   const [reloadVersion, setReloadVersion] = useState(0);
   const loadRequestRef = useRef(0);
+  const selectedAssetIDKey = JSON.stringify(selectedAssetIDs || []);
+  const selectedAssetIDSet = useMemo(
+    () => new Set(JSON.parse(selectedAssetIDKey) as number[]),
+    [selectedAssetIDKey],
+  );
 
   useEffect(() => {
     loadRequestRef.current += 1;
@@ -189,6 +196,7 @@ export function AssetBrowser({
                 key={asset.id}
                 asset={asset}
                 selectable={selectable}
+                selected={selectedAssetIDSet.has(asset.id)}
                 onOpen={(current) => setSelectedAssetID(current.id)}
                 onSelect={onSelect}
               />
@@ -227,7 +235,14 @@ export function AssetBrowser({
           assetID={selectedAssetID}
           selectable={selectable}
           onClose={() => setSelectedAssetID(0)}
-          onSelect={onSelect}
+          onSelect={
+            onSelect
+              ? (asset) => {
+                  setSelectedAssetID(0);
+                  onSelect(asset);
+                }
+              : undefined
+          }
           onContinue={
             onContinue
               ? (asset) => {

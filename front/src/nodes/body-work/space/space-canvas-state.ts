@@ -54,6 +54,8 @@ type PersistedCanvasNode = {
     item_type: string;
     item_id: string;
     generated_prompt?: string;
+    source_signature?: string;
+    result_source_signature?: string;
     stale?: boolean;
   };
   asset_cate_id?: number;
@@ -151,6 +153,12 @@ function persistedCanvasNode(
       item_id: item.itemId,
       ...(item.generatedPrompt
         ? { generated_prompt: item.generatedPrompt }
+        : {}),
+      ...(item.sourceSignature
+        ? { source_signature: item.sourceSignature }
+        : {}),
+      ...(item.resultSourceSignature
+        ? { result_source_signature: item.resultSourceSignature }
         : {}),
       ...(item.stale ? { stale: true } : {}),
     };

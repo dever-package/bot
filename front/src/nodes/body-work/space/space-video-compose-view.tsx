@@ -123,12 +123,12 @@ export function VideoComposeView({
 
   const editor = (
     <section
-      className={`ws-video-compose nodrag nopan nowheel ${
+      className={`ws-video-compose ${
         fullScreen ? "is-fullscreen" : "is-compact"
       }`}
     >
       <header className="ws-video-compose-head">
-        <div>
+        <div className="ws-video-compose-actions nodrag">
           <span>
             <Clapperboard size={14} />
             视频合成
@@ -171,7 +171,7 @@ export function VideoComposeView({
 
       <div
         ref={gridRef}
-        className="ws-video-compose-grid nowheel"
+        className="ws-video-compose-grid nodrag nowheel"
         onDragOver={(event) => {
           if (!draggedId || !gridRef.current) {
             return;
@@ -325,7 +325,7 @@ function VideoComposeClipInspector({
   onChooseVoice: () => void;
 }) {
   return (
-    <div className="ws-video-compose-inspector">
+    <div className="ws-video-compose-inspector nodrag nowheel">
       <strong>
         {panel === "subtitle"
           ? "字幕"
@@ -478,7 +478,7 @@ function VideoComposeGlobalSettings({
   onChooseBackground: () => void;
 }) {
   return (
-    <div className="ws-video-compose-global">
+    <div className="ws-video-compose-global nodrag">
       <label>
         <span>分辨率</span>
         <select

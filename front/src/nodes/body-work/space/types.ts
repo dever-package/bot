@@ -331,6 +331,8 @@ export type CanvasStoryboardItemConfig = {
   itemType: CanvasStoryboardItemType;
   itemId: string;
   generatedPrompt: string;
+  sourceSignature?: string;
+  resultSourceSignature?: string;
   stale?: boolean;
 };
 

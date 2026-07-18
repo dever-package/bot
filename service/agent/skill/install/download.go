@@ -19,30 +19,50 @@ import (
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
-const maxDownloadBytes = 64 * 1024 * 1024
+const (
+	maxDownloadBytes        = 64 * 1024 * 1024
+	maxArchiveEntries       = 5000
+	maxArchiveDepth         = 32
+	maxArchiveFileBytes     = 64 * 1024 * 1024
+	maxArchiveExpandedBytes = 512 * 1024 * 1024
+)
 
-func downloadPlanStep(ctx context.Context, workDir string, step installPlanStep) (string, error) {
-	targetDir := filepath.Join(workDir, "download")
+type archiveBudget struct {
+	entries int
+	total   int64
+}
+
+func downloadPlanStep(ctx context.Context, workDir string, stepIndex int, step installPlanStep) (sourceProvenance, error) {
+	targetDir := filepath.Join(workDir, "download", fmt.Sprintf("step-%d", stepIndex+1))
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return "", err
+		return sourceProvenance{}, err
 	}
 	var lastErr error
-	for _, candidate := range downloadCandidates(step.URL) {
-		filePath, err := downloadFile(ctx, candidate, targetDir)
+	for index, candidate := range downloadCandidates(step.URL) {
+		candidateDir := filepath.Join(targetDir, fmt.Sprintf("candidate-%d", index+1))
+		if err := os.RemoveAll(candidateDir); err != nil {
+			return sourceProvenance{}, err
+		}
+		if err := os.MkdirAll(candidateDir, 0o755); err != nil {
+			return sourceProvenance{}, err
+		}
+		filePath, err := downloadFile(ctx, candidate, candidateDir)
 		if err != nil {
 			lastErr = err
+			_ = os.RemoveAll(candidateDir)
 			continue
 		}
-		if err := unpackDownloadedFile(filePath, targetDir, step.Extract); err != nil {
+		if err := unpackDownloadedFile(filePath, candidateDir, step.Extract); err != nil {
 			lastErr = err
+			_ = os.RemoveAll(candidateDir)
 			continue
 		}
-		return candidate, nil
+		return sourceProvenance{Root: candidateDir, URL: candidate}, nil
 	}
 	if lastErr != nil {
-		return "", lastErr
+		return sourceProvenance{}, lastErr
 	}
-	return "", fmt.Errorf("下载地址无效")
+	return sourceProvenance{}, fmt.Errorf("下载地址无效")
 }
 
 func downloadCandidates(rawURL string) []string {
@@ -172,7 +192,11 @@ func extractZip(filePath string, targetDir string) error {
 		return err
 	}
 	defer reader.Close()
+	budget := &archiveBudget{}
 	for _, file := range reader.File {
+		if err := budget.checkEntry(file.Name, int64(file.UncompressedSize64)); err != nil {
+			return err
+		}
 		targetPath, err := safeExtractPath(targetDir, file.Name)
 		if err != nil {
 			return err
@@ -183,6 +207,9 @@ func extractZip(filePath string, targetDir string) error {
 			}
 			continue
 		}
+		if !file.Mode().IsRegular() {
+			return fmt.Errorf("压缩包包含不支持的链接或特殊文件: %s", file.Name)
+		}
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 			return err
 		}
@@ -190,7 +217,7 @@ func extractZip(filePath string, targetDir string) error {
 		if err != nil {
 			return err
 		}
-		if err := writeExtractedFile(input, targetPath, file.Mode()); err != nil {
+		if err := writeExtractedFile(input, targetPath, file.Mode(), budget); err != nil {
 			_ = input.Close()
 			return err
 		}
@@ -224,12 +251,16 @@ func extractTar(filePath string, targetDir string) error {
 
 func extractTarReader(reader io.Reader, targetDir string) error {
 	tarReader := tar.NewReader(reader)
+	budget := &archiveBudget{}
 	for {
 		header, err := tarReader.Next()
 		if err == io.EOF {
 			return nil
 		}
 		if err != nil {
+			return err
+		}
+		if err := budget.checkEntry(header.Name, header.Size); err != nil {
 			return err
 		}
 		targetPath, err := safeExtractPath(targetDir, header.Name)
@@ -245,9 +276,13 @@ func extractTarReader(reader io.Reader, targetDir string) error {
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 				return err
 			}
-			if err := writeExtractedFile(tarReader, targetPath, os.FileMode(header.Mode)); err != nil {
+			if err := writeExtractedFile(tarReader, targetPath, os.FileMode(header.Mode), budget); err != nil {
 				return err
 			}
+		case tar.TypeXHeader, tar.TypeXGlobalHeader:
+			continue
+		default:
+			return fmt.Errorf("压缩包包含不支持的链接或特殊文件: %s", header.Name)
 		}
 	}
 }
@@ -266,12 +301,55 @@ func safeExtractPath(root string, name string) (string, error) {
 	return target, nil
 }
 
-func writeExtractedFile(reader io.Reader, targetPath string, mode os.FileMode) error {
+func (budget *archiveBudget) checkEntry(name string, declaredSize int64) error {
+	budget.entries++
+	if budget.entries > maxArchiveEntries {
+		return fmt.Errorf("压缩包文件数量超过 %d", maxArchiveEntries)
+	}
+	cleanName := filepath.ToSlash(filepath.Clean(name))
+	depth := 0
+	for _, part := range strings.Split(cleanName, "/") {
+		if part != "" && part != "." {
+			depth++
+		}
+	}
+	if depth > maxArchiveDepth {
+		return fmt.Errorf("压缩包目录层级超过 %d: %s", maxArchiveDepth, name)
+	}
+	if declaredSize < 0 || declaredSize > maxArchiveFileBytes {
+		return fmt.Errorf("压缩包单个文件超过 %d 字节: %s", maxArchiveFileBytes, name)
+	}
+	return nil
+}
+
+func writeExtractedFile(reader io.Reader, targetPath string, mode os.FileMode, budget *archiveBudget) (err error) {
 	output, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}
-	defer output.Close()
-	_, err = io.Copy(output, reader)
-	return err
+	defer func() {
+		if closeErr := output.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			_ = os.Remove(targetPath)
+		}
+	}()
+	remaining := int64(maxArchiveExpandedBytes) - budget.total
+	if remaining <= 0 {
+		return fmt.Errorf("压缩包解压后总大小超过 %d 字节", maxArchiveExpandedBytes)
+	}
+	limit := int64(maxArchiveFileBytes)
+	if remaining < limit {
+		limit = remaining
+	}
+	written, copyErr := io.Copy(output, io.LimitReader(reader, limit+1))
+	if copyErr != nil {
+		return copyErr
+	}
+	if written > limit {
+		return fmt.Errorf("压缩包解压内容超过允许大小")
+	}
+	budget.total += written
+	return nil
 }

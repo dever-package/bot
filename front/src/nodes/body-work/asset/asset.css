@@ -183,6 +183,11 @@
   box-shadow: 0 5px 16px rgba(21, 36, 29, 0.08);
 }
 
+.wb-asset-card.is-selected {
+  border-color: #315f4d;
+  box-shadow: 0 0 0 2px rgba(49, 95, 77, 0.12);
+}
+
 .wb-asset-card-main {
   display: block;
   width: 100%;
@@ -277,7 +282,8 @@
 }
 
 .wb-asset-card:hover .wb-asset-card-actions,
-.wb-asset-card:focus-within .wb-asset-card-actions {
+.wb-asset-card:focus-within .wb-asset-card-actions,
+.wb-asset-card.is-selected .wb-asset-card-actions {
   opacity: 1;
   transform: translateY(0);
 }
@@ -310,6 +316,11 @@
   border-color: #315f4d;
   background: #315f4d;
   color: #fff;
+}
+
+.wb-asset-card-actions button.is-primary.is-selected {
+  border-color: #244b3b;
+  background: #244b3b;
 }
 
 .wb-asset-card-actions svg {
@@ -446,6 +457,60 @@
 .wb-asset-reference-dialog > .wb-asset-browser {
   min-height: 0;
   flex: 1;
+}
+
+.wb-asset-picker-message {
+  flex: 0 0 auto;
+  margin: 0;
+  border-bottom: 1px solid #ead7d7;
+  background: #fff7f7;
+  color: #a43d3d;
+  padding: 9px 18px;
+  font-size: 12px;
+}
+
+.wb-asset-picker-footer {
+  display: flex;
+  min-height: 58px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid #e2e6e4;
+  background: #fff;
+  padding: 10px 16px 10px 18px;
+  color: #6e7873;
+  font-size: 12px;
+}
+
+.wb-asset-picker-footer > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-asset-picker-footer button {
+  min-width: 72px;
+  height: 36px;
+  border: 1px solid #d8ddda;
+  border-radius: 5px;
+  background: #fff;
+  color: #25312b;
+  cursor: pointer;
+  padding: 0 14px;
+  font: inherit;
+  font-weight: 600;
+}
+
+.wb-asset-picker-footer button.is-primary {
+  border-color: #245b47;
+  background: #245b47;
+  color: #fff;
+}
+
+.wb-asset-picker-footer button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .wb-asset-dialog {

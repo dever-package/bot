@@ -19,6 +19,9 @@ export function summarizeCanvasGroupRuntime({
   hasResult: (node: SpaceCanvasNode) => boolean;
 }) {
   const runnableMembers = members.filter(canvasNodeRunsInBackend);
+  const staleCount = runnableMembers.filter(
+    (member) => member.storyboardItem?.stale,
+  ).length;
   const memberStates = runnableMembers
     .map((member) => runningNodes[member.id])
     .filter((state): state is CanvasNodeRunState => Boolean(state));
@@ -27,7 +30,9 @@ export function summarizeCanvasGroupRuntime({
   const completedCount =
     groupActive || memberStates.length > 0
       ? memberStates.filter((state) => state.status === "success").length
-      : runnableMembers.filter(hasResult).length;
+      : runnableMembers.filter(
+          (member) => !member.storyboardItem?.stale && hasResult(member),
+        ).length;
   const failedCount = memberStates.filter(
     (state) => state.status === "error",
   ).length;
@@ -37,6 +42,7 @@ export function summarizeCanvasGroupRuntime({
     runnableCount: runnableMembers.length,
     completedCount,
     failedCount,
+    staleCount,
     status: canvasGroupRunStatus(groupState, memberStates, failedCount),
   };
 }

@@ -197,24 +197,49 @@ func isVisibleToolProgress(output map[string]any) bool {
 }
 
 func toolStatusText(definition runtimeprovider.Definition, status string) string {
-	if strings.EqualFold(strings.TrimSpace(definition.Kind), "knowledge") {
+	kind := strings.ToLower(strings.TrimSpace(definition.Kind))
+	if kind == "knowledge" {
 		if status == "succeeded" {
 			return "知识库读取完成"
 		}
 		return "正在读取知识库"
 	}
-	if strings.EqualFold(strings.TrimSpace(definition.Kind), "skill") {
+	if kind == "skill" {
 		title := toolTitle(definition, "技能调用")
 		if status == "succeeded" {
 			return title + "完成"
 		}
 		return title + "中"
 	}
-	label := botprotocol.MediaOutputLabel(definition.Kind)
-	if status == "succeeded" {
-		return label + "生成完成"
+	if isGeneratedMediaKind(kind) {
+		label := botprotocol.MediaOutputLabel(kind)
+		if status == "succeeded" {
+			return label + "生成完成"
+		}
+		return label + "生成中，请稍后"
 	}
-	return label + "生成中，请稍后"
+	powerTool := strings.HasPrefix(strings.ToLower(strings.TrimSpace(definition.Name)), "power_")
+	fallback := "工具"
+	if powerTool {
+		fallback = "能力"
+	}
+	label := toolTitle(definition, fallback)
+	if powerTool && !strings.HasSuffix(label, "能力") {
+		label += "能力"
+	}
+	if status == "succeeded" {
+		return label + "调用完成"
+	}
+	return label + "调用中"
+}
+
+func isGeneratedMediaKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "image", "video", "audio", "file":
+		return true
+	default:
+		return false
+	}
 }
 
 func isCompactToolActivity(kind string) bool {

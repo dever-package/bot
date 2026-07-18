@@ -42,17 +42,22 @@ type installPlanCollect struct {
 }
 
 func parseInstallPlanResult(output map[string]any, summary string) (installPlan, error) {
+	var rejection error
 	for _, raw := range planCandidates(output, summary) {
 		if plan, ok := raw.(installPlan); ok {
 			if err := plan.NormalizeAndValidate(); err == nil {
 				return plan, nil
 			}
+			rejection = installPlanRejection(plan, rejection)
 			continue
 		}
 		if mapped, ok := raw.(map[string]any); ok {
 			plan, err := decodeInstallPlan(mapped)
-			if err == nil && plan.NormalizeAndValidate() == nil {
-				return plan, nil
+			if err == nil {
+				if plan.NormalizeAndValidate() == nil {
+					return plan, nil
+				}
+				rejection = installPlanRejection(plan, rejection)
 			}
 		}
 		text := strings.TrimSpace(frontstream.InputText(raw))
@@ -61,9 +66,29 @@ func parseInstallPlanResult(output map[string]any, summary string) (installPlan,
 		}
 		if plan, err := parseInstallPlanText(text); err == nil {
 			return plan, nil
+		} else {
+			rejection = installPlanRejection(plan, rejection)
 		}
 	}
+	if rejection != nil {
+		return installPlan{}, rejection
+	}
 	return installPlan{}, fmt.Errorf("技能安装规划器未返回有效安装计划")
+}
+
+func installPlanRejection(plan installPlan, fallback error) error {
+	if plan.Kind != planKind || plan.Version != 1 || len(plan.Steps) != 0 {
+		return fallback
+	}
+	reason := strings.TrimSpace(plan.Summary)
+	if reason == "" {
+		return fallback
+	}
+	runes := []rune(reason)
+	if len(runes) > 500 {
+		reason = string(runes[:500]) + "..."
+	}
+	return fmt.Errorf("技能安装规划器未生成安全计划: %s", reason)
 }
 
 func planCandidates(output map[string]any, summary string) []any {
@@ -83,17 +108,32 @@ func planCandidates(output map[string]any, summary string) []any {
 }
 
 func parseInstallPlanText(text string) (installPlan, error) {
+	var invalidPlan installPlan
+	var invalidErr error
 	for _, block := range fencedJSONBlocks(text) {
 		plan, err := decodeInstallPlanBytes([]byte(block))
 		if err == nil {
-			return plan, plan.NormalizeAndValidate()
+			if validateErr := plan.NormalizeAndValidate(); validateErr == nil {
+				return plan, nil
+			} else if invalidErr == nil {
+				invalidPlan = plan
+				invalidErr = validateErr
+			}
 		}
 	}
 	if jsonText := firstJSONObject(text); jsonText != "" {
 		plan, err := decodeInstallPlanBytes([]byte(jsonText))
 		if err == nil {
-			return plan, plan.NormalizeAndValidate()
+			if validateErr := plan.NormalizeAndValidate(); validateErr == nil {
+				return plan, nil
+			} else if invalidErr == nil {
+				invalidPlan = plan
+				invalidErr = validateErr
+			}
 		}
+	}
+	if invalidErr != nil {
+		return invalidPlan, invalidErr
 	}
 	return installPlan{}, fmt.Errorf("未识别到 skill_install_plan JSON")
 }
@@ -146,6 +186,9 @@ func normalizePlanStep(step *installPlanStep) error {
 	case stepTypeCommand:
 		if step.Command == "" {
 			return fmt.Errorf("command 不能为空")
+		}
+		if err := validateInstallCommand(step.Command); err != nil {
+			return err
 		}
 	case stepTypeDownload:
 		if step.URL == "" {
