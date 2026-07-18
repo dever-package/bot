@@ -3069,6 +3069,72 @@ button.ws-node-detail-save-state.is-error {
   inset: 0;
   z-index: 9999;
 }
+
+.ws-loading-state {
+  display: flex;
+  width: min(280px, calc(100vw - 48px));
+  flex-direction: column;
+  align-items: center;
+  color: var(--ws-text);
+  text-align: center;
+  transform: translateY(-2vh);
+  animation: ws-loading-enter 320ms ease-out both;
+}
+
+.ws-loading-state strong {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 26px;
+}
+
+.ws-loading-state > span {
+  margin-top: 5px;
+  color: var(--ws-muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+.ws-loading-progress {
+  width: 160px;
+  height: 2px;
+  margin-top: 20px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ws-border-strong);
+}
+
+.ws-loading-progress span {
+  display: block;
+  width: 42px;
+  height: 100%;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.58;
+  animation: ws-loading-progress 1.25s cubic-bezier(0.4, 0, 0.2, 1)
+    infinite;
+}
+
+@keyframes ws-loading-enter {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-2vh + 6px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-2vh);
+  }
+}
+
+@keyframes ws-loading-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(381%);
+  }
+}
+
 .ws-loading-card {
   display: flex;
   align-items: center;
@@ -3093,6 +3159,12 @@ button.ws-node-detail-save-state.is-error {
 
 .ws-spin {
   animation: ws-spin 800ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-loading-state {
+    animation: none;
+  }
 }
 
 @keyframes ws-spin {

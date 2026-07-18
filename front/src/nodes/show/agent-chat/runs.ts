@@ -43,6 +43,7 @@ type SessionRun = {
   requestID: string;
   userMessageID: string;
   assistantMessageID: string;
+  createdAt: string;
   input: string;
   content?: ReferenceContent;
   buffer: StreamTextBuffer;
@@ -308,6 +309,7 @@ export function useAgentChatRuns({
       requestID?: string;
       userMessageID: string;
       assistantMessageID: string;
+      createdAt?: string;
       text?: string;
       prompt?: string;
       replayPending?: boolean;
@@ -327,6 +329,7 @@ export function useAgentChatRuns({
         requestID: input.requestID || "",
         userMessageID: input.userMessageID,
         assistantMessageID: input.assistantMessageID,
+        createdAt: input.createdAt || new Date().toISOString(),
         input: input.prompt || "",
         content: input.content,
         buffer,
@@ -387,6 +390,7 @@ export function useAgentChatRuns({
         requestID,
         userMessageID: "",
         assistantMessageID: assistantMessage.id,
+        createdAt: assistantMessage.createdAt,
         text: assistantMessage.text,
         replayPending: Boolean(assistantMessage.text),
       });
@@ -495,10 +499,12 @@ export function useAgentChatRuns({
         return;
       }
       const now = Date.now();
+      const createdAt = new Date(now).toISOString();
       const userMessage: ChatMessage = {
         id: `${activeSessionID}-user-${now}`,
         role: "user",
         text,
+        createdAt,
         content: input.content,
       };
       const assistantMessageID = `${activeSessionID}-assistant-${now}`;
@@ -506,6 +512,7 @@ export function useAgentChatRuns({
         sessionID: activeSessionID,
         userMessageID: userMessage.id,
         assistantMessageID,
+        createdAt,
         prompt: text,
         content: input.content,
       });
@@ -524,6 +531,7 @@ export function useAgentChatRuns({
           id: assistantMessageID,
           role: "assistant",
           text: "",
+          createdAt,
           running: true,
         },
       ]);
@@ -750,6 +758,7 @@ function mergeRunMessages(messages: ChatMessage[], run?: SessionRun) {
             id: run.userMessageID,
             role: "user" as const,
             text: run.input,
+            createdAt: run.createdAt,
             content: run.content,
           },
         ]
@@ -758,6 +767,7 @@ function mergeRunMessages(messages: ChatMessage[], run?: SessionRun) {
       id: run.assistantMessageID,
       role: "assistant" as const,
       text: run.buffer.text,
+      createdAt: run.createdAt,
       requestID: run.requestID || undefined,
       running: true,
       error: false,

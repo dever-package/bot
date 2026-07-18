@@ -34,6 +34,9 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 	referenceStore := newMediaReferenceStore(toolReferences)
 	prepareCall := func(arguments map[string]any) (int, map[string]any, error) {
 		currentReferences := referenceStore.Snapshot()
+		if err := validateMediaArtifactTitle(power, arguments); err != nil {
+			return 0, nil, err
+		}
 		count, err := mediaExecutionCount(power, arguments, countPlan)
 		if err != nil {
 			return 0, nil, err

@@ -31,6 +31,7 @@ export type AgentChatMessageRecord = {
   output: AgentChatOutput;
   requestID: string;
   status: number;
+  createdAt: string;
   document?: AgentChatDocument;
 };
 
@@ -248,6 +249,7 @@ function normalizeMessages(value: unknown): AgentChatMessageRecord[] {
         output: normalizeAgentChatOutput(row.output),
         requestID: textValue(row.request_id),
         status: Number(row.status || 1),
+        createdAt: textValue(row.created_at),
         document: normalizeAgentChatDocument(row.document),
       } satisfies AgentChatMessageRecord;
     })

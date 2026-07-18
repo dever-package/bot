@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/shemic/dever/orm"
 	"github.com/shemic/dever/util"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
@@ -48,21 +49,34 @@ type extractedRelation struct {
 
 func (s Service) extractDocumentConceptGraph(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc) error {
 	sourceNodes := conceptSourceNodes(ctx, doc.ID)
-	if len(sourceNodes) == 0 {
-		return nil
-	}
-	result, err := s.generateConceptGraph(ctx, base, doc, sourceNodes)
-	if err != nil {
-		return err
-	}
-	if len(result.Concepts) == 0 && len(result.Relations) == 0 {
-		return nil
+	result := conceptExtractionResult{}
+	if len(sourceNodes) > 0 {
+		var err error
+		result, err = s.generateConceptGraph(ctx, base, doc, sourceNodes)
+		if err != nil {
+			return err
+		}
 	}
 	result.Concepts = mergeRelationConcepts(result.Concepts, result.Relations)
-	sourceNodeByKey := mapConceptSourceNodes(sourceNodes)
-	conceptIDs := upsertConceptNodes(ctx, base, doc, result.Concepts, sourceNodeByKey)
-	insertConceptEdges(ctx, base, doc, result, conceptIDs, sourceNodeByKey)
-	return nil
+	unlock := lockKnowledgeConceptMutation(base.ID)
+	defer unlock()
+	return orm.Transaction(ctx, func(txCtx context.Context) error {
+		previousConceptIDs := knowledgeConceptIDsForDoc(txCtx, base.ID, doc.ID)
+		legacyConceptIDs := clearLegacyKnowledgeConceptSourceForDoc(txCtx, base.ID, doc.ID)
+		migrateLegacyKnowledgeConceptSourcesForIDs(txCtx, base.ID, legacyConceptIDs)
+		agentmodel.NewKnowledgeEdgeModel().Delete(txCtx, map[string]any{"doc_id": doc.ID})
+		agentmodel.NewKnowledgeConceptSourceModel().Delete(txCtx, map[string]any{"doc_id": doc.ID})
+		previousConceptIDs = append(previousConceptIDs, legacyConceptIDs...)
+		if len(result.Concepts) == 0 && len(result.Relations) == 0 {
+			pruneOrphanKnowledgeConcepts(txCtx, base.ID, previousConceptIDs)
+			return nil
+		}
+		sourceNodeByKey := mapConceptSourceNodes(sourceNodes)
+		conceptIDs := upsertConceptNodes(txCtx, base, doc, result.Concepts, sourceNodeByKey)
+		insertConceptEdges(txCtx, base, doc, result, conceptIDs, sourceNodeByKey)
+		pruneOrphanKnowledgeConcepts(txCtx, base.ID, previousConceptIDs)
+		return nil
+	})
 }
 
 func (s Service) extractDocumentConceptGraphWithStage(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc) error {
@@ -341,12 +355,18 @@ func mergeRelationConcepts(concepts []extractedConcept, relations []extractedRel
 func upsertConceptNodes(ctx context.Context, base agentmodel.KnowledgeBase, doc agentmodel.KnowledgeDoc, concepts []extractedConcept, sourceNodeByKey map[string]*agentmodel.KnowledgeNode) map[string]uint64 {
 	result := map[string]uint64{}
 	for _, concept := range concepts {
-		nodeID := upsertConceptNode(ctx, base, concept, doc.ID)
+		nodeID := upsertConceptNode(ctx, base, concept)
 		if nodeID == 0 {
 			continue
 		}
 		result[concept.Name] = nodeID
-		if sourceNode := sourceNodeByKey[concept.SourceNode]; sourceNode != nil {
+		sourceNode := sourceNodeByKey[concept.SourceNode]
+		sourceNodeID := uint64(0)
+		if sourceNode != nil {
+			sourceNodeID = sourceNode.ID
+		}
+		upsertKnowledgeConceptSource(ctx, base.ID, nodeID, doc.ID, sourceNodeID, concept)
+		if sourceNode != nil {
 			edgeType := agentmodel.KnowledgeEdgeTypeMentions
 			if strings.EqualFold(concept.Type, "definition") || strings.Contains(concept.Description, "定义") {
 				edgeType = agentmodel.KnowledgeEdgeTypeDefines
@@ -373,7 +393,7 @@ func upsertConceptNodes(ctx context.Context, base agentmodel.KnowledgeBase, doc 
 	return result
 }
 
-func upsertConceptNode(ctx context.Context, base agentmodel.KnowledgeBase, concept extractedConcept, docID uint64) uint64 {
+func upsertConceptNode(ctx context.Context, base agentmodel.KnowledgeBase, concept extractedConcept) uint64 {
 	nodeKey := conceptNodeKey(concept.Name)
 	if nodeKey == "" {
 		return 0
@@ -393,31 +413,17 @@ func upsertConceptNode(ctx context.Context, base agentmodel.KnowledgeBase, conce
 		})
 	}
 	aliases := uniqueSummaryKeywords(append([]string{concept.Name}, concept.Keywords...), 10)
-	nowHash := contentHash(concept.Name + concept.Description + concept.Evidence)
+	nowHash := contentHash(concept.Name + concept.Description)
 
 	if existing != nil {
+		migrateLegacyKnowledgeConceptSources(ctx, base.ID, existing.ID, existing)
 		existingMeta := parseMetadataMap(existing.Metadata)
-		sources := uint64SliceFromMeta(existingMeta, "sources")
-		if docID > 0 {
-			hasDoc := false
-			for _, sid := range sources {
-				if sid == docID {
-					hasDoc = true
-					break
-				}
-			}
-			if !hasDoc {
-				sources = append(sources, docID)
-			}
-		}
 		allKeywords := uniqueSummaryKeywords(append(concept.Keywords, concept.Name, concept.Type), 20)
 		allKeywords = uniqueSummaryKeywords(append(allKeywords, aliases...), 20)
 		existingMeta["aliases"] = aliases
 		existingMeta["concept_type"] = concept.Type
-		existingMeta["sources"] = sources
-		if existingMeta["description"] == nil {
-			existingMeta["description"] = concept.Description
-		}
+		existingMeta["description"] = concept.Description
+		delete(existingMeta, "sources")
 
 		aliasText := ""
 		if len(aliases) > 0 {
@@ -426,7 +432,10 @@ func upsertConceptNode(ctx context.Context, base agentmodel.KnowledgeBase, conce
 		values := map[string]any{
 			"node_type":    agentmodel.KnowledgeNodeTypeConcept,
 			"title":        truncateText(concept.Name, 255),
-			"search_text":  searchableNodeText("", "", "概念/"+concept.Name, concept.Name, concept.Description, concept.Evidence) + "\n" + aliasText,
+			"summary":      concept.Description,
+			"content":      concept.Description,
+			"plain_text":   concept.Description,
+			"search_text":  searchableNodeText("", "", "概念/"+concept.Name, concept.Name, concept.Description) + "\n" + aliasText,
 			"keywords":     strings.Join(allKeywords, " "),
 			"path":         truncateText("概念/"+concept.Name, 1024),
 			"metadata":     jsonText(existingMeta),
@@ -453,12 +462,12 @@ func upsertConceptNode(ctx context.Context, base agentmodel.KnowledgeBase, conce
 		"node_type":     agentmodel.KnowledgeNodeTypeConcept,
 		"title":         truncateText(concept.Name, 255),
 		"summary":       concept.Description,
-		"content":       concept.Evidence,
-		"plain_text":    concept.Evidence,
-		"search_text":   searchableNodeText("", "", "概念/"+concept.Name, concept.Name, concept.Description, concept.Evidence) + "\n" + aliasText,
+		"content":       concept.Description,
+		"plain_text":    concept.Description,
+		"search_text":   searchableNodeText("", "", "概念/"+concept.Name, concept.Name, concept.Description) + "\n" + aliasText,
 		"keywords":      strings.Join(allKeywords, " "),
 		"path":          truncateText("概念/"+concept.Name, 1024),
-		"metadata":      jsonText(map[string]any{"aliases": aliases, "concept_type": concept.Type, "description": concept.Description, "sources": []uint64{docID}}),
+		"metadata":      jsonText(map[string]any{"aliases": aliases, "concept_type": concept.Type, "description": concept.Description}),
 		"content_hash":  nowHash,
 		"index_status":  agentmodel.KnowledgeIndexStatusSuccess,
 		"error_message": "",

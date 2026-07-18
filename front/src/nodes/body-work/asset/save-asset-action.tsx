@@ -1,6 +1,7 @@
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useId, useState, type MouseEvent } from "react";
 import { Check, Loader2, Save } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { Input } from "@/components/ui/input";
 import { AgentChatTooltip } from "../../show/agent-chat/tooltip";
 import { AssetDetailDialog } from "./asset-detail-dialog";
 
@@ -10,9 +11,12 @@ type SaveAssetActionAppearance =
   | "media"
   | "inspector";
 
+const MAX_ASSET_NAME_LENGTH = 128;
+
 export function SaveAssetAction({
   teamID,
   resetKey,
+  defaultName,
   save,
   confirmDescription,
   onSaved,
@@ -23,7 +27,8 @@ export function SaveAssetAction({
 }: {
   teamID: number;
   resetKey: string | number;
-  save: () => Promise<number>;
+  defaultName: string;
+  save: (name: string) => Promise<number>;
   confirmDescription: string;
   onSaved?: (assetID: number) => void;
   appearance?: SaveAssetActionAppearance;
@@ -31,10 +36,14 @@ export function SaveAssetAction({
   disabledLabel?: string;
   className?: string;
 }) {
+  const nameInputID = useId();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAssetID, setSavedAssetID] = useState(0);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [assetName, setAssetName] = useState(() =>
+    normalizeAssetName(defaultName),
+  );
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -42,8 +51,9 @@ export function SaveAssetAction({
     setSaving(false);
     setSavedAssetID(0);
     setDetailOpen(false);
+    setAssetName(normalizeAssetName(defaultName));
     setError("");
-  }, [resetKey]);
+  }, [defaultName, resetKey]);
 
   const label = disabled
     ? disabledLabel
@@ -57,15 +67,21 @@ export function SaveAssetAction({
       setDetailOpen(true);
       return;
     }
+    setAssetName(normalizeAssetName(defaultName));
     setError("");
     setConfirmOpen(true);
   }
 
   async function confirmSave() {
+    const name = normalizeAssetName(assetName);
+    if (!name) {
+      setError("请输入资产标题");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
-      const assetID = await save();
+      const assetID = await save(name);
       setSavedAssetID(assetID);
       setConfirmOpen(false);
       onSaved?.(assetID);
@@ -107,16 +123,33 @@ export function SaveAssetAction({
           if (!saving) setConfirmOpen(open);
         }}
         title="保存到资产"
-        desc={
-          <div className="space-y-2">
-            <p className="m-0">{confirmDescription}</p>
-            {error ? <p className="m-0 text-sm text-red-600">{error}</p> : null}
-          </div>
-        }
+        desc={confirmDescription}
         confirmText="保存"
+        disabled={!assetName.trim()}
         handleConfirm={() => void confirmSave()}
         isLoading={saving}
-      />
+      >
+        <div className="space-y-2">
+          <label
+            htmlFor={nameInputID}
+            className="text-sm font-medium text-foreground"
+          >
+            资产标题
+          </label>
+          <Input
+            id={nameInputID}
+            value={assetName}
+            maxLength={MAX_ASSET_NAME_LENGTH}
+            placeholder="请输入资产标题"
+            autoFocus
+            onChange={(event) => {
+              setAssetName(event.target.value);
+              if (error) setError("");
+            }}
+          />
+          {error ? <p className="m-0 text-sm text-red-600">{error}</p> : null}
+        </div>
+      </ConfirmDialog>
 
       {detailOpen && savedAssetID ? (
         <AssetDetailDialog
@@ -127,6 +160,10 @@ export function SaveAssetAction({
       ) : null}
     </>
   );
+}
+
+function normalizeAssetName(value: string) {
+  return String(value || "").trim().slice(0, MAX_ASSET_NAME_LENGTH);
 }
 
 function saveActionClassName(appearance: SaveAssetActionAppearance) {

@@ -16,8 +16,10 @@ import (
 )
 
 const (
-	mediaCountArgument = "__runtime_count"
-	maxMediaCount      = 8
+	MediaArtifactTitleArgument = "__runtime_artifact_title"
+	mediaCountArgument         = "__runtime_count"
+	maxMediaCount              = 8
+	mediaArtifactTitleMaxRunes = 16
 )
 
 type mediaCountPlan struct {
@@ -80,6 +82,10 @@ func mediaToolParameters(parameters map[string]any, plan mediaCountPlan) map[str
 	}
 	result := clonePowerParameters(parameters)
 	properties, _ := result["properties"].(map[string]any)
+	properties[MediaArtifactTitleArgument] = map[string]any{
+		"type":        "string",
+		"description": "本次生成素材的简短中文标题，要求6到16个汉字，不含序号、扩展名或解释",
+	}
 	properties[plan.key] = map[string]any{
 		"type":        "integer",
 		"description": "生成独立结果的数量",
@@ -87,7 +93,11 @@ func mediaToolParameters(parameters map[string]any, plan mediaCountPlan) map[str
 		"maximum":     maxMediaCount,
 	}
 	result["properties"] = properties
-	result["required"] = appendRequiredParameter(result["required"], plan.key)
+	result["required"] = appendRequiredParameter(
+		result["required"],
+		MediaArtifactTitleArgument,
+		plan.key,
+	)
 	return result
 }
 
@@ -204,7 +214,7 @@ func clonePowerParameters(parameters map[string]any) map[string]any {
 	return result
 }
 
-func appendRequiredParameter(value any, key string) []any {
+func appendRequiredParameter(value any, keys ...string) []any {
 	result := make([]any, 0)
 	switch current := value.(type) {
 	case []any:
@@ -214,12 +224,19 @@ func appendRequiredParameter(value any, key string) []any {
 			result = append(result, item)
 		}
 	}
-	for _, item := range result {
-		if strings.TrimSpace(fmt.Sprint(item)) == key {
-			return result
+	for _, key := range keys {
+		exists := false
+		for _, item := range result {
+			if strings.TrimSpace(fmt.Sprint(item)) == key {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			result = append(result, key)
 		}
 	}
-	return append(result, key)
+	return result
 }
 
 func mediaExecutionCount(power energonmodel.Power, arguments map[string]any, plan mediaCountPlan) (int, error) {
@@ -236,10 +253,24 @@ func mediaExecutionCount(power energonmodel.Power, arguments map[string]any, pla
 	return count, nil
 }
 
+func MediaArtifactTitle(arguments map[string]any) string {
+	return energonservice.NormalizeShortTitle(
+		botprotocol.AsText(arguments[MediaArtifactTitleArgument]),
+		mediaArtifactTitleMaxRunes,
+	)
+}
+
+func validateMediaArtifactTitle(power energonmodel.Power, arguments map[string]any) error {
+	if !isMediaPower(power) || MediaArtifactTitle(arguments) != "" {
+		return nil
+	}
+	return fmt.Errorf("%s生成参数 %s 不能为空", mediaPowerLabel(power), MediaArtifactTitleArgument)
+}
+
 func mediaProviderArguments(arguments map[string]any, plan mediaCountPlan) map[string]any {
 	result := make(map[string]any, len(arguments))
 	for key, value := range arguments {
-		if key == MediaReferencesArgument || key == MediaSeriesModeArgument {
+		if key == MediaReferencesArgument || key == MediaSeriesModeArgument || key == MediaArtifactTitleArgument {
 			continue
 		}
 		if plan.key != "" && key == plan.key {

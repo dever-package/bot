@@ -2,6 +2,7 @@ package parse
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -27,7 +28,10 @@ type streamedTextParser struct {
 	freshRunes   int
 	line         int
 	lineStart    int
-	nodes        []Node
+	nodeFile     *os.File
+	nodeWriter   *bufio.Writer
+	nodeEncoder  *json.Encoder
+	nodeCount    int
 	aggregate    representativeRunes
 }
 
@@ -38,14 +42,22 @@ func parseStreamedTextFile(req Request) (Result, error) {
 	}
 	defer file.Close()
 
-	parser := newStreamedTextParser(req)
+	parser, err := newStreamedTextParser(req)
+	if err != nil {
+		return Result{}, err
+	}
 	if err := parser.read(file); err != nil {
+		parser.cleanup()
+		return Result{}, err
+	}
+	if err := parser.close(); err != nil {
+		parser.cleanup()
 		return Result{}, err
 	}
 	return parser.result(), nil
 }
 
-func newStreamedTextParser(req Request) *streamedTextParser {
+func newStreamedTextParser(req Request) (*streamedTextParser, error) {
 	chunkRunes := req.MaxNodeLength
 	if chunkRunes < streamNodeMinRunes {
 		chunkRunes = streamNodeMinRunes
@@ -58,6 +70,11 @@ func newStreamedTextParser(req Request) *streamedTextParser {
 		nodeType = NodeTypeCode
 		language = codeLanguage(req.Name)
 	}
+	nodeFile, err := os.CreateTemp("", "bot-knowledge-stream-*.jsonl")
+	if err != nil {
+		return nil, fmt.Errorf("创建长文档解析缓存失败: %w", err)
+	}
+	nodeWriter := bufio.NewWriterSize(nodeFile, streamReadBufferBytes)
 	return &streamedTextParser{
 		req:          req,
 		nodeType:     nodeType,
@@ -66,9 +83,11 @@ func newStreamedTextParser(req Request) *streamedTextParser {
 		overlapRunes: overlapRunes,
 		line:         1,
 		lineStart:    1,
-		nodes:        make([]Node, 0),
+		nodeFile:     nodeFile,
+		nodeWriter:   nodeWriter,
+		nodeEncoder:  json.NewEncoder(nodeWriter),
 		aggregate:    newRepresentativeRunes(streamAggregateSectionRunes),
-	}
+	}, nil
 }
 
 func (p *streamedTextParser) read(source io.Reader) error {
@@ -91,13 +110,14 @@ func (p *streamedTextParser) read(source io.Reader) error {
 		if r == utf8.RuneError && size == 1 {
 			return fmt.Errorf("文档不是有效的 UTF-8 文本")
 		}
-		p.appendRune(r)
+		if err := p.appendRune(r); err != nil {
+			return err
+		}
 	}
-	p.flush(true)
-	return nil
+	return p.flush(true)
 }
 
-func (p *streamedTextParser) appendRune(r rune) {
+func (p *streamedTextParser) appendRune(r rune) error {
 	p.current = append(p.current, r)
 	p.freshRunes++
 	p.aggregate.add(r)
@@ -105,17 +125,18 @@ func (p *streamedTextParser) appendRune(r rune) {
 		p.line++
 	}
 	if len(p.current) >= p.chunkRunes {
-		p.flush(false)
+		return p.flush(false)
 	}
+	return nil
 }
 
-func (p *streamedTextParser) flush(final bool) {
+func (p *streamedTextParser) flush(final bool) error {
 	if p.freshRunes == 0 {
-		return
+		return nil
 	}
 	content := normalizeText(string(p.current))
 	if content != "" {
-		index := len(p.nodes) + 1
+		index := p.nodeCount + 1
 		title := paragraphTitle(content, index)
 		metadata := map[string]any{"parser": "stream"}
 		if p.nodeType == NodeTypeCode {
@@ -128,7 +149,7 @@ func (p *streamedTextParser) flush(final bool) {
 			}
 			metadata["language"] = p.language
 		}
-		p.nodes = append(p.nodes, Node{
+		if err := p.nodeEncoder.Encode(Node{
 			Type:      p.nodeType,
 			Title:     title,
 			Content:   content,
@@ -136,7 +157,10 @@ func (p *streamedTextParser) flush(final bool) {
 			LineStart: p.lineStart,
 			LineEnd:   p.line,
 			Metadata:  metadata,
-		})
+		}); err != nil {
+			return fmt.Errorf("写入长文档解析缓存失败: %w", err)
+		}
+		p.nodeCount++
 	}
 	if final || p.overlapRunes <= 0 {
 		p.current = p.current[:0]
@@ -153,21 +177,45 @@ func (p *streamedTextParser) flush(final bool) {
 		}
 	}
 	p.freshRunes = 0
+	return nil
 }
 
 func (p *streamedTextParser) result() Result {
 	aggregate := p.aggregate.text()
 	return Result{
-		PlainText: aggregate,
-		Markdown:  aggregate,
-		Outline:   p.nodes,
+		PlainText:      aggregate,
+		Markdown:       aggregate,
+		StreamNodeFile: p.nodeFile.Name(),
+		StreamNodes:    p.nodeCount,
 		Raw: map[string]any{
 			"parser":         "stream",
 			"streamed":       true,
 			"source_runes":   p.aggregate.total,
-			"content_chunks": len(p.nodes),
+			"content_chunks": p.nodeCount,
 		},
 	}
+}
+
+func (p *streamedTextParser) close() error {
+	if p == nil || p.nodeFile == nil {
+		return nil
+	}
+	if err := p.nodeWriter.Flush(); err != nil {
+		_ = p.nodeFile.Close()
+		return fmt.Errorf("写入长文档解析缓存失败: %w", err)
+	}
+	if err := p.nodeFile.Close(); err != nil {
+		return fmt.Errorf("关闭长文档解析缓存失败: %w", err)
+	}
+	return nil
+}
+
+func (p *streamedTextParser) cleanup() {
+	if p == nil || p.nodeFile == nil {
+		return
+	}
+	_ = p.nodeFile.Close()
+	_ = os.Remove(p.nodeFile.Name())
 }
 
 func runeLineBreaks(value []rune) int {

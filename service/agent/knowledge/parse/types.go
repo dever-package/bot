@@ -1,6 +1,9 @@
 package parse
 
-import "context"
+import (
+	"context"
+	"os"
+)
 
 type Request struct {
 	Context       context.Context
@@ -13,12 +16,20 @@ type Request struct {
 }
 
 type Result struct {
-	PlainText string
-	Markdown  string
-	Outline   []Node
-	Pages     []Page
-	Assets    []Asset
-	Raw       map[string]any
+	PlainText      string
+	Markdown       string
+	Outline        []Node
+	StreamNodeFile string
+	StreamNodes    int
+	Pages          []Page
+	Assets         []Asset
+	Raw            map[string]any
+}
+
+func (r Result) Cleanup() {
+	if r.StreamNodeFile != "" {
+		_ = os.Remove(r.StreamNodeFile)
+	}
 }
 
 type Node struct {

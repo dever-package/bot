@@ -72,7 +72,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { getCompatModule, useNavigate } from "@dever/front-plugin";
+import { getCompatModule, useNavigate, useTheme } from "@dever/front-plugin";
 import {
   fetchSpaceAssetDetail,
   fetchSpaceBootstrap,
@@ -397,7 +397,7 @@ export function WorkSpacePage() {
   const [prompt, setPrompt] = useState("");
   const [workMode, setWorkMode] = useState<WorkMode>("create");
   const [assistantOpen, setAssistantOpen] = useState(false);
-  const [theme, setTheme] = useState<WorkSpaceTheme>(() => readStoredTheme());
+  const { resolvedTheme: theme, setTheme } = useTheme();
   const [nodeMenu, setNodeMenu] = useState<AddNodeMenuState | null>(null);
   const [powers, setPowers] = useState<PowerOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1679,11 +1679,7 @@ export function WorkSpacePage() {
   }
 
   function toggleTheme() {
-    setTheme((current: WorkSpaceTheme) => {
-      const next = current === "dark" ? "light" : "dark";
-      persistTheme(next);
-      return next;
-    });
+    setTheme(theme === "dark" ? "light" : "dark");
   }
 
   async function loadPowerCatalog(force = false) {
@@ -1727,9 +1723,16 @@ export function WorkSpacePage() {
   if (loading) {
     return (
       <main className={`ws-page is-${theme} ws-loading-screen`}>
-        <div className="ws-loading-card">
-          <Loader2 size={20} className="ws-spin" />
-          <span>正在加载创作空间...</span>
+        <div
+          className="ws-loading-state"
+          role="status"
+          aria-live="polite"
+        >
+          <strong>正在加载创作空间</strong>
+          <span>正在恢复画布与项目内容</span>
+          <div className="ws-loading-progress" aria-hidden="true">
+            <span />
+          </div>
         </div>
       </main>
     );
@@ -10558,34 +10561,6 @@ function miniMapNodeColor(node: SpaceCanvasNode) {
   if (node.type === "agent") return "#f59e0b";
   if (node.type === "flow") return "#3b82f6";
   return "#e85d75";
-}
-
-function readStoredTheme(): WorkSpaceTheme {
-  if (typeof window === "undefined") {
-    return "light";
-  }
-  try {
-    const homeTheme = window.localStorage.getItem("work-theme");
-    if (homeTheme === "dark" || homeTheme === "light") {
-      return homeTheme;
-    }
-    const spaceTheme = window.localStorage.getItem("work-space-theme");
-    return spaceTheme === "dark" ? "dark" : "light";
-  } catch {
-    return "light";
-  }
-}
-
-function persistTheme(theme: WorkSpaceTheme) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  try {
-    window.localStorage.setItem("work-space-theme", theme);
-    window.localStorage.setItem("work-theme", theme);
-  } catch {
-    // localStorage may be unavailable in embedded previews.
-  }
 }
 
 function runStatusText(value: any, prefix: string) {

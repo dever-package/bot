@@ -1,20 +1,26 @@
-import type { ReactElement } from "react";
+import type { ReactNode } from "react";
 import { HoverTip } from "@/page/nodes/show/tooltip";
+import { AGENT_CHAT_CHILD_LAYER_Z_INDEX } from "./layers";
+import "./tooltip.css";
 
 export function AgentChatTooltip({
   label,
+  triggerClassName = "inline-flex shrink-0",
   children,
 }: {
   label: string;
-  children: ReactElement;
+  triggerClassName?: string;
+  children: ReactNode;
 }) {
   return (
     <HoverTip
       content={label}
-      sideOffset={8}
-      className="z-[2100] max-w-64"
+      side="top"
+      sideOffset={7}
+      layerZIndex={AGENT_CHAT_CHILD_LAYER_Z_INDEX}
+      className="agent-chat-tooltip-content max-w-64"
     >
-      {children}
+      <span className={triggerClassName}>{children}</span>
     </HoverTip>
   );
 }

@@ -17,6 +17,7 @@ export type ChatMessage = {
   recordID?: number;
   role: "user" | "assistant";
   text: string;
+  createdAt: string;
   content?: ReferenceContent;
   output?: AgentChatOutput;
   activities?: AgentChatActivity[];
@@ -30,6 +31,8 @@ export type AgentChatMessageActionContext = {
   role: "user" | "assistant";
   recordID: number;
   requestID: string;
+  sessionTitle: string;
+  createdAt: string;
   running: boolean;
   error: boolean;
   hasPendingArtifacts: boolean;
@@ -115,6 +118,7 @@ export function mapChatMessages(
     recordID: message.id || undefined,
     role: message.role,
     text: message.text,
+    createdAt: message.createdAt,
     content: message.content,
     output: message.output,
     activities: readAgentChatActivities(message.output),

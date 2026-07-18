@@ -173,9 +173,24 @@ func clearKnowledgeDocumentDatabaseIndex(ctx context.Context, baseID uint64, doc
 	if docID == 0 {
 		return
 	}
+	clearKnowledgeDocumentConceptGraph(ctx, baseID, docID)
+	replaceKnowledgeDocumentDatabaseIndex(ctx, baseID, docID)
+}
+
+func clearKnowledgeDocumentConceptGraph(ctx context.Context, baseID uint64, docID uint64) {
+	if docID == 0 {
+		return
+	}
+	clearKnowledgeConceptSourcesForDoc(ctx, baseID, docID)
+	agentmodel.NewKnowledgeEdgeModel().Delete(ctx, map[string]any{"doc_id": docID})
+}
+
+func replaceKnowledgeDocumentDatabaseIndex(ctx context.Context, baseID uint64, docID uint64) {
+	if docID == 0 {
+		return
+	}
 	clearKnowledgeDocumentNodeEdges(ctx, baseID, docID)
 	agentmodel.NewKnowledgeVectorModel().Delete(ctx, map[string]any{"doc_id": docID})
-	agentmodel.NewKnowledgeEdgeModel().Delete(ctx, map[string]any{"doc_id": docID})
 	agentmodel.NewKnowledgeNodeModel().Delete(ctx, map[string]any{"doc_id": docID})
 	agentmodel.NewKnowledgeParseModel().Delete(ctx, map[string]any{"doc_id": docID})
 }

@@ -194,7 +194,7 @@ func inferGraphRelations(ctx context.Context, baseID uint64, edges []*agentmodel
 		"index_status":      agentmodel.KnowledgeIndexStatusSuccess,
 		"status":            1,
 	}, map[string]any{
-		"field":    "main.id, main.doc_id, main.title, main.index_status, main.status",
+		"field":    "main.id, main.knowledge_base_id, main.doc_id, main.node_type, main.title, main.metadata, main.index_status, main.status",
 		"page":     1,
 		"pageSize": len(nodeIDs),
 	})
@@ -251,7 +251,7 @@ func nodeGraphMatches(ctx context.Context, baseID uint64, terms []string) *nodeG
 		"status":       1,
 		"or":           conditions,
 	}, map[string]any{
-		"field":    "main.id, main.doc_id, main.title, main.index_status, main.status",
+		"field":    "main.id, main.knowledge_base_id, main.doc_id, main.node_type, main.title, main.metadata, main.index_status, main.status",
 		"order":    "main.id desc",
 		"page":     1,
 		"pageSize": 15,

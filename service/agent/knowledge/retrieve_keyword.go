@@ -8,7 +8,10 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
-const keywordScanPageSize = 250
+const (
+	keywordScanPageSize = 250
+	keywordScanMaxRows  = 10000
+)
 
 type scoredKeywordNode struct {
 	node  *agentmodel.KnowledgeNode
@@ -26,14 +29,16 @@ func (s Service) retrieveKeywordBinding(ctx context.Context, binding agentKnowle
 	candidateLimit := keywordCandidateLimit(limit, len(dirIDs) > 0, query)
 	candidates := make([]scoredKeywordNode, 0, candidateLimit)
 	var afterID uint64
+	scanned := 0
 	for {
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || scanned >= keywordScanMaxRows {
 			break
 		}
 		rows := keywordNodePage(ctx, binding.BaseID, query, afterID, dirIDs...)
 		if len(rows) == 0 {
 			break
 		}
+		scanned += len(rows)
 		afterID = rows[len(rows)-1].ID
 		for _, row := range filterAvailableKnowledgeNodes(ctx, rows) {
 			if row == nil {
@@ -88,7 +93,7 @@ func keywordNodePage(ctx context.Context, baseID uint64, query string, afterID u
 		filters["id"] = map[string]any{"gt": afterID}
 	}
 	return agentmodel.NewKnowledgeNodeModel().Select(ctx, filters, map[string]any{
-		"field":    "main.id, main.dir_id, main.doc_id, main.title, main.summary, main.content, main.plain_text, main.search_text, main.keywords, main.path, main.sort, main.node_type, main.hit_count, main.weight",
+		"field":    "main.id, main.knowledge_base_id, main.dir_id, main.doc_id, main.title, main.summary, main.content, main.plain_text, main.search_text, main.keywords, main.path, main.sort, main.node_type, main.metadata, main.index_status, main.hit_count, main.weight, main.status",
 		"order":    "main.id asc",
 		"page":     1,
 		"pageSize": keywordScanPageSize,

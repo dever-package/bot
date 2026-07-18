@@ -80,6 +80,7 @@ function messageMetadata(message: ChatMessage) {
     output: message.output,
     activities: message.activities || [],
     sourceText: message.text,
+    createdAt: message.createdAt,
     content: message.content,
     document: message.document,
   };

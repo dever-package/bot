@@ -129,6 +129,7 @@ export type StreamPowerRunnerProps = {
   paramScope?: Record<string, unknown>
   height?: string
   resultTitle?: string
+  formHeader?: ReactNode
   renderResultActions?: (result: StreamPowerResult) => ReactNode
   referenceProviders?: ReferenceProvider[]
   assetReferenceTeamID?: number
@@ -157,6 +158,7 @@ export function StreamPowerRunner({
   paramScope = requestScope,
   height = 'min(60vh, 600px)',
   resultTitle = '测试结果',
+  formHeader,
   renderResultActions,
   referenceProviders = [],
   assetReferenceTeamID = 0,
@@ -186,6 +188,7 @@ export function StreamPowerRunner({
     Record<string, ReferenceContent>
   >({})
   const [requestIDCopied, setRequestIDCopied] = useState(false)
+  const [mobileView, setMobileView] = useState<'input' | 'result'>('input')
   const runTokenRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
   const requestIDCopyTimerRef = useRef<number | null>(null)
@@ -237,6 +240,10 @@ export function StreamPowerRunner({
       clearRequestIDCopyTimer(requestIDCopyTimerRef)
     }
   }, [])
+
+  useEffect(() => {
+    setMobileView('input')
+  }, [powerKey])
 
   useEffect(() => {
     let cancelled = false
@@ -348,6 +355,9 @@ export function StreamPowerRunner({
 
     const token = runTokenRef.current + 1
     runTokenRef.current = token
+    if (appearance === 'body') {
+      setMobileView('result')
+    }
     setRunning(true)
     setError('')
     setResultFailed(false)
@@ -512,23 +522,80 @@ export function StreamPowerRunner({
     }
   }
 
+  const successful = Boolean(
+    requestID && output.finalOutput && !running && !resultFailed && !error
+  )
+  const resultStatus = resolveStreamPowerResultStatus({
+    running,
+    stopping,
+    failed: Boolean(error || resultFailed),
+    canceled: timing?.status === 'canceled',
+    successful,
+  })
+  const resultContent = (
+    <>
+      {timing ? (
+        <div className="stream-power-timing mb-3">
+          <StreamTimingBadge timing={timing} now={nowMs} />
+        </div>
+      ) : null}
+      <EnergonContentView
+        output={buildContentViewOutput(output)}
+        streaming={running && !output.finalOutput}
+        emptyText={
+          appearance === 'body'
+            ? '生成结果会显示在这里。'
+            : 'AI 返回内容会显示在这里。'
+        }
+        className={appearance === 'body' ? 'stream-power-content-view' : undefined}
+        markdownClassName={appearance === 'body' ? 'stream-power-markdown' : undefined}
+      />
+    </>
+  )
+
   return (
     <div
       data-stream-power-appearance={appearance}
+      data-mobile-view={appearance === 'body' ? mobileView : undefined}
       className="stream-power-runner flex h-full min-h-0 flex-col gap-4 overflow-y-auto md:flex-row md:overflow-hidden"
       style={{ height }}
     >
+      {appearance === 'body' ? (
+        <div className="stream-power-mobile-tabs" role="tablist" aria-label="工具运行视图">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mobileView === 'input'}
+            data-active={mobileView === 'input'}
+            onClick={() => setMobileView('input')}
+          >
+            输入
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mobileView === 'result'}
+            data-active={mobileView === 'result'}
+            onClick={() => setMobileView('result')}
+          >
+            结果
+          </button>
+        </div>
+      ) : null}
       <div className="stream-power-form-column flex min-h-[360px] w-full max-w-md shrink-0 flex-col gap-3 md:h-full md:min-h-0">
+        {formHeader ? (
+          <div className="stream-power-form-header shrink-0">{formHeader}</div>
+        ) : null}
         <div className="stream-power-form min-h-0 flex-1 overflow-y-auto rounded-xl bg-background/70 p-3">
           {paramsLoading ? (
-            <span className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
+            <span className="stream-power-loading mb-3 inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
               <Loader2 className="size-3 animate-spin" />
               读取参数
             </span>
           ) : null}
 
           {sourceRule === SOURCE_RULE_PICK && powerSources.length > 0 ? (
-            <div className="mb-3">
+            <div className="stream-power-source mb-3">
               <SearchableOptionPicker
                 value={activeSelectedSourceID || undefined}
                 options={sourcePickerOptions}
@@ -544,7 +611,7 @@ export function StreamPowerRunner({
           ) : null}
 
           {mainPowerParams.length > 0 ? (
-            <div className="space-y-3">
+            <div className="stream-power-param-list space-y-3">
               {mainPowerParams.map((param) => {
                 const key = inputKeyForParam(param)
                 if (
@@ -572,31 +639,32 @@ export function StreamPowerRunner({
                   )
                 }
                 return (
-                  <PowerParamField
-                    key={`${param.id}-${key}`}
-                    param={param}
-                    value={paramValues[key]}
-                    files={paramFiles[key] || []}
-                    uploadRuleMeta={uploadRuleMetas.get(Number(param.upload_rule_id || 0))}
-                    disabled={running}
-                    uploadBizKey={uploadBizKey}
-                    uploadBizName={uploadBizName}
-                    allowResourceLibrary={allowResourceLibrary}
-                    onUploadedFiles={onUploadedFiles}
-                    onChange={(nextValue) => setParamValue(param, nextValue)}
-                    onFilesChange={(nextFiles) => setParamFileValue(param, nextFiles)}
-                  />
+                  <div key={`${param.id}-${key}`} className="stream-power-param-field">
+                    <PowerParamField
+                      param={param}
+                      value={paramValues[key]}
+                      files={paramFiles[key] || []}
+                      uploadRuleMeta={uploadRuleMetas.get(Number(param.upload_rule_id || 0))}
+                      disabled={running}
+                      uploadBizKey={uploadBizKey}
+                      uploadBizName={uploadBizName}
+                      allowResourceLibrary={allowResourceLibrary}
+                      onUploadedFiles={onUploadedFiles}
+                      onChange={(nextValue) => setParamValue(param, nextValue)}
+                      onFilesChange={(nextFiles) => setParamFileValue(param, nextFiles)}
+                    />
+                  </div>
                 )
               })}
             </div>
           ) : !paramsLoading ? (
-            <div className="rounded-lg px-3 py-8 text-center text-sm text-muted-foreground">
+            <div className="stream-power-empty rounded-lg px-3 py-8 text-center text-sm text-muted-foreground">
               暂无参数配置。
             </div>
           ) : null}
 
           {toolbarPowerParams.length > 0 ? (
-            <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
+            <div className="stream-power-toolbar-params mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
               {toolbarPowerParams.map((param) => {
                 const key = inputKeyForParam(param)
                 return (
@@ -620,7 +688,7 @@ export function StreamPowerRunner({
           ) : null}
 
           {error ? (
-            <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <div className="stream-power-error mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {error}
             </div>
           ) : null}
@@ -629,22 +697,19 @@ export function StreamPowerRunner({
         {hasConfiguredParams ? (
           <div className="stream-power-actions flex shrink-0 items-center justify-center gap-2 rounded-xl bg-background px-3 py-3">
             {running ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!cancelable || stopping}
-                onClick={() => void stop()}
-              >
-                {stopping ? (
-                  <Loader2 className="mr-2 size-3.5 animate-spin" />
-                ) : (
-                  <Square className="mr-2 size-3.5" />
-                )}
-                {cancelable ? '停止' : '不可停止'}
-              </Button>
+              <StreamStopButton
+                cancelable={cancelable}
+                stopping={stopping}
+                onStop={stop}
+              />
             ) : null}
-            <Button type="button" size="sm" disabled={!canSend} onClick={() => void send()}>
+            <Button
+              type="button"
+              size="sm"
+              className="stream-power-generate-action"
+              disabled={!canSend}
+              onClick={() => void send()}
+            >
               {running ? (
                 <Loader2 className="mr-2 size-4 animate-spin" />
               ) : (
@@ -660,34 +725,49 @@ export function StreamPowerRunner({
 
       <div className="stream-power-result flex min-h-[360px] min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-background md:h-full md:min-h-0">
         <div className="stream-power-result-header flex shrink-0 items-center justify-between gap-3 border-b px-3 py-2">
-          <span className="text-sm font-medium text-foreground">{resultTitle}</span>
-          <div className="flex min-w-0 items-center justify-end gap-2">
+          {appearance === 'body' ? (
+            <div className="stream-power-result-heading">
+              <span>{resultTitle}</span>
+              <small data-status={resultStatus}>{resultStatus}</small>
+            </div>
+          ) : (
+            <span className="text-sm font-medium text-foreground">{resultTitle}</span>
+          )}
+          <div className="stream-power-result-actions flex min-w-0 items-center justify-end gap-2">
+            {appearance === 'body' && running ? (
+              <StreamStopButton
+                className="stream-power-mobile-stop"
+                cancelable={cancelable}
+                stopping={stopping}
+                onStop={stop}
+              />
+            ) : null}
             {renderResultActions?.({
               requestID,
               output: output.finalOutput,
               running,
-              successful: Boolean(
-                requestID && output.finalOutput && !running && !resultFailed && !error
-              ),
+              successful,
             })}
-            {requestID ? (
-              <button
-                type="button"
-                className="flex min-w-0 max-w-[70%] items-center justify-end rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
-                title={`双击复制完整 RequestID：${requestID}${
-                  lastStreamID !== '0-0' ? ` / StreamID: ${lastStreamID}` : ''
-                }`}
-                onDoubleClick={() => void copyRequestID()}
-              >
-                <span className="mr-1 shrink-0">RequestID:</span>
-                <span className="min-w-0 truncate font-mono">{requestID}</span>
-                {requestIDCopied ? (
-                  <span className="ml-2 shrink-0 text-primary">已复制</span>
-                ) : null}
-              </button>
-            ) : (
-              <span className="text-xs text-muted-foreground">暂无 RequestID</span>
-            )}
+            {appearance !== 'body' ? (
+              requestID ? (
+                <button
+                  type="button"
+                  className="flex min-w-0 max-w-[70%] items-center justify-end rounded-md px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                  title={`双击复制完整 RequestID：${requestID}${
+                    lastStreamID !== '0-0' ? ` / StreamID: ${lastStreamID}` : ''
+                  }`}
+                  onDoubleClick={() => void copyRequestID()}
+                >
+                  <span className="mr-1 shrink-0">RequestID:</span>
+                  <span className="min-w-0 truncate font-mono">{requestID}</span>
+                  {requestIDCopied ? (
+                    <span className="ml-2 shrink-0 text-primary">已复制</span>
+                  ) : null}
+                </button>
+              ) : (
+                <span className="text-xs text-muted-foreground">暂无 RequestID</span>
+              )
+            ) : null}
           </div>
         </div>
         <div
@@ -696,16 +776,11 @@ export function StreamPowerRunner({
           style={{ scrollbarGutter: 'stable' }}
           className="stream-power-result-body h-0 min-h-0 flex-1 overflow-y-auto p-3"
         >
-          {timing ? (
-            <div className="mb-3">
-              <StreamTimingBadge timing={timing} now={nowMs} />
-            </div>
-          ) : null}
-          <EnergonContentView
-            output={buildContentViewOutput(output)}
-            streaming={running && !output.finalOutput}
-            emptyText="AI 返回内容会显示在这里。"
-          />
+          {appearance === 'body' ? (
+            <div className="stream-power-result-content">{resultContent}</div>
+          ) : (
+            resultContent
+          )}
         </div>
       </div>
     </div>
@@ -745,7 +820,7 @@ function PowerPromptReferenceField({
   )
 
   return (
-    <div className='stream-power-prompt-field space-y-2 rounded-xl bg-muted/30 p-3'>
+    <div className='stream-power-param-field stream-power-prompt-field space-y-2 rounded-xl bg-muted/30 p-3'>
       <div className='text-sm font-medium text-foreground'>
         {param.name}
         {param.required ? <span className='ml-0.5 text-destructive'>*</span> : null}
@@ -761,6 +836,64 @@ function PowerPromptReferenceField({
       />
     </div>
   )
+}
+
+function StreamStopButton({
+  cancelable,
+  stopping,
+  className,
+  onStop,
+}: {
+  cancelable: boolean
+  stopping: boolean
+  className?: string
+  onStop: () => void | Promise<void>
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className={`stream-power-stop-action ${className || ''}`.trim()}
+      disabled={!cancelable || stopping}
+      onClick={() => void onStop()}
+    >
+      {stopping ? (
+        <Loader2 className="mr-2 size-3.5 animate-spin" />
+      ) : (
+        <Square className="mr-2 size-3.5" />
+      )}
+      {cancelable ? '停止' : '不可停止'}
+    </Button>
+  )
+}
+
+function resolveStreamPowerResultStatus({
+  running,
+  stopping,
+  failed,
+  canceled,
+  successful,
+}: {
+  running: boolean
+  stopping: boolean
+  failed: boolean
+  canceled: boolean
+  successful: boolean
+}) {
+  if (stopping) {
+    return '正在停止'
+  }
+  if (running) {
+    return '生成中'
+  }
+  if (failed) {
+    return '生成失败'
+  }
+  if (canceled) {
+    return '已停止'
+  }
+  return successful ? '已完成' : '等待生成'
 }
 
 function isScrolledToBottom(element: HTMLElement) {

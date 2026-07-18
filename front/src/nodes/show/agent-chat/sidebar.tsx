@@ -97,7 +97,10 @@ export function Sidebar({
                       : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
                   )}
                 >
-                  <AgentChatTooltip label={session.title}>
+                  <AgentChatTooltip
+                    label={session.title}
+                    triggerClassName="flex min-w-0 flex-1"
+                  >
                     <button
                       type="button"
                       className="agent-chat-session-trigger flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left text-sm"

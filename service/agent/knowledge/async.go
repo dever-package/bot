@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 )
@@ -306,6 +307,66 @@ func StartBaseIndex(ctx context.Context, baseID uint64) error {
 	}
 	go runBaseIndex(baseID, workerID)
 	return nil
+}
+
+type KnowledgeIndexRecoveryResult struct {
+	Scanned   int `json:"scanned"`
+	Resumed   int `json:"resumed"`
+	Finalized int `json:"finalized"`
+}
+
+// RecoverInterruptedIndexes 恢复进程中断后租约已过期的索引任务。
+func RecoverInterruptedIndexes(ctx context.Context) KnowledgeIndexRecoveryResult {
+	result := KnowledgeIndexRecoveryResult{}
+	const recoveryBatchSize = 20
+	bases := agentmodel.NewKnowledgeBaseModel().Select(ctx, map[string]any{
+		"index_status": agentmodel.KnowledgeIndexStatusRunning,
+		"status":       1,
+		"or": []any{
+			map[string]any{"index_lease_expires_at": nil},
+			map[string]any{"index_lease_expires_at": map[string]any{"lte": time.Now()}},
+		},
+	}, map[string]any{
+		"field":    "main.id, main.index_status, main.status",
+		"order":    "main.id asc",
+		"page":     1,
+		"pageSize": recoveryBatchSize,
+	})
+	for _, base := range bases {
+		if ctx.Err() != nil || base == nil || base.ID == 0 {
+			continue
+		}
+		result.Scanned++
+		interruptedDocs := runningKnowledgeDocs(ctx, base.ID)
+		workerID, claimed := claimKnowledgeIndexLease(ctx, base.ID)
+		if !claimed {
+			continue
+		}
+		if len(interruptedDocs) == 0 {
+			finishKnowledgeIndexLease(ctx, base.ID, workerID, finalBaseIndexStatus(ctx, base.ID, ""), "")
+			result.Finalized++
+			continue
+		}
+		result.Resumed++
+		go NewService().runBatchReindex(base.ID, workerID, interruptedDocs)
+	}
+	return result
+}
+
+func runningKnowledgeDocs(ctx context.Context, baseID uint64) []*agentmodel.KnowledgeDoc {
+	if baseID == 0 {
+		return nil
+	}
+	return agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
+		"knowledge_base_id": baseID,
+		"index_status":      agentmodel.KnowledgeIndexStatusRunning,
+		"status":            1,
+	}, map[string]any{
+		"field":    "main.id, main.size",
+		"order":    "main.id asc",
+		"page":     1,
+		"pageSize": maxBatchReindex,
+	})
 }
 
 func runBaseIndex(baseID uint64, workerID string) {

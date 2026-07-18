@@ -121,15 +121,10 @@ func (s Service) CompleteBatch(ctx context.Context, pending []agentmodel.Artifac
 	}
 	rows := make([]agentmodel.Artifact, 0, len(pending))
 	for index, current := range pending {
-		file := files[index]
-		name := textValue(file["name"])
 		values := map[string]any{
 			"file_id": fileIDs[index],
 			"status":  agentmodel.ArtifactStatusReady,
 			"error":   "",
-		}
-		if name != "" {
-			values["name"] = name
 		}
 		updated := s.repository.update(ctx, current.ID, values)
 		if updated.ID == 0 || updated.FileID != fileIDs[index] || updated.Status != agentmodel.ArtifactStatusReady {

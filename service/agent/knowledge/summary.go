@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	dlog "github.com/shemic/dever/log"
 	"github.com/shemic/dever/util"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
@@ -18,7 +20,20 @@ import (
 
 const maxConcurrentDirectorySummaries = 3
 
-var directorySummarySemaphore = make(chan struct{}, maxConcurrentDirectorySummaries)
+type directorySummaryTask struct {
+	baseID uint64
+	dirID  uint64
+}
+
+type directorySummaryQueue struct {
+	once    sync.Once
+	mutex   sync.Mutex
+	pending map[directorySummaryTask]struct{}
+	order   []directorySummaryTask
+	wake    chan struct{}
+}
+
+var pendingDirectorySummaries directorySummaryQueue
 
 func (s Service) refreshDirectorySummaries(ctx context.Context, baseID uint64, dirID uint64) {
 	base := agentmodel.NewKnowledgeBaseModel().Find(ctx, map[string]any{"id": baseID, "status": 1})
@@ -95,14 +110,109 @@ func refreshDirectorySummary(ctx context.Context, base *agentmodel.KnowledgeBase
 	if base.IndexPowerID <= 0 || len(docs) < 3 {
 		return
 	}
+	pendingDirectorySummaries.enqueue(directorySummaryTask{baseID: base.ID, dirID: dirID})
+}
+
+func (q *directorySummaryQueue) enqueue(task directorySummaryTask) {
+	if task.baseID == 0 || task.dirID == 0 {
+		return
+	}
+	q.start()
+	q.mutex.Lock()
+	if _, exists := q.pending[task]; exists {
+		q.mutex.Unlock()
+		return
+	}
+	q.pending[task] = struct{}{}
+	q.order = append(q.order, task)
+	q.mutex.Unlock()
+	q.notify()
+}
+
+func (q *directorySummaryQueue) start() {
+	q.once.Do(func() {
+		q.pending = make(map[directorySummaryTask]struct{})
+		q.wake = make(chan struct{}, 1)
+		for range maxConcurrentDirectorySummaries {
+			go q.run()
+		}
+	})
+}
+
+func (q *directorySummaryQueue) notify() {
 	select {
-	case directorySummarySemaphore <- struct{}{}:
-		go func() {
-			defer func() { <-directorySummarySemaphore }()
-			generateLLMDirectorySummary(context.Background(), base, dirID, childDirs, docs, summary, keywordText)
-		}()
+	case q.wake <- struct{}{}:
 	default:
 	}
+}
+
+func (q *directorySummaryQueue) next() (directorySummaryTask, bool) {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	if len(q.order) == 0 {
+		return directorySummaryTask{}, false
+	}
+	task := q.order[0]
+	q.order[0] = directorySummaryTask{}
+	q.order = q.order[1:]
+	delete(q.pending, task)
+	return task, true
+}
+
+func (q *directorySummaryQueue) run() {
+	for {
+		task, ok := q.next()
+		if !ok {
+			<-q.wake
+			continue
+		}
+		q.notify()
+		runQueuedDirectorySummary(task)
+	}
+}
+
+func runQueuedDirectorySummary(task directorySummaryTask) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			dlog.ErrorFields("knowledge_directory_summary_failed", "知识库目录摘要任务失败", dlog.Fields{
+				"knowledge_base_id": task.baseID,
+				"dir_id":            task.dirID,
+				"error":             fmt.Sprintf("%v", recovered),
+			})
+		}
+	}()
+	generateQueuedDirectorySummary(context.Background(), task)
+}
+
+func generateQueuedDirectorySummary(ctx context.Context, task directorySummaryTask) {
+	base := agentmodel.NewKnowledgeBaseModel().Find(ctx, map[string]any{
+		"id":     task.baseID,
+		"status": 1,
+	})
+	if base == nil || base.IndexPowerID <= 0 {
+		return
+	}
+	dir := agentmodel.NewKnowledgeDirModel().Find(ctx, map[string]any{
+		"id":                task.dirID,
+		"knowledge_base_id": task.baseID,
+		"status":            1,
+	})
+	if dir == nil {
+		return
+	}
+	childDirs := agentmodel.NewKnowledgeDirModel().Select(ctx, map[string]any{
+		"knowledge_base_id": task.baseID,
+		"parent_id":         task.dirID,
+		"status":            1,
+	}, map[string]any{
+		"field": "main.id, main.name, main.summary, main.keywords",
+		"order": "main.sort asc, main.id asc",
+	})
+	docs := representativeDirectorySummaryDocs(ctx, base, task.dirID, 40)
+	if len(docs) < 3 {
+		return
+	}
+	generateLLMDirectorySummary(ctx, base, task.dirID, childDirs, docs, strings.TrimSpace(dir.Summary), strings.TrimSpace(dir.Keywords))
 }
 
 func representativeDirectorySummaryDocs(ctx context.Context, base *agentmodel.KnowledgeBase, dirID uint64, limit int) []*agentmodel.KnowledgeDoc {
@@ -131,7 +241,7 @@ func representativeDirectorySummaryDocs(ctx context.Context, base *agentmodel.Kn
 			pageFilters["id"] = map[string]any{"gt": afterID}
 		}
 		rows := agentmodel.NewKnowledgeDocModel().Select(ctx, pageFilters, map[string]any{
-			"field":    "main.id, main.title, main.summary, main.keywords, main.status, main.index_status, main.expires_at, main.review_status",
+			"field":    "main.id, main.title, main.summary, main.keywords, main.node_count, main.status, main.index_status, main.expires_at, main.review_status",
 			"order":    "main.id asc",
 			"page":     1,
 			"pageSize": pageSize,

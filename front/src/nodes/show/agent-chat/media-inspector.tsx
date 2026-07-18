@@ -31,6 +31,7 @@ import {
   findAgentChatMediaArtifact,
   readAgentChatMediaPreviewContext,
 } from "./artifact-actions";
+import { AgentChatTooltip } from "./tooltip";
 import type { AgentChatArtifactActionRenderer } from "./types";
 
 const MediaPreviewContext = createContext<EnergonMediaPreviewHandler | null>(
@@ -426,18 +427,19 @@ function InspectorButton({
   onClick: () => void;
 }>) {
   return (
-    <Button
-      type="button"
-      size="icon"
-      variant="ghost"
-      className="size-9"
-      title={label}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      <span className="[&>svg]:size-4">{children}</span>
-    </Button>
+    <AgentChatTooltip label={label}>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="size-9"
+        aria-label={label}
+        disabled={disabled}
+        onClick={onClick}
+      >
+        <span className="[&>svg]:size-4">{children}</span>
+      </Button>
+    </AgentChatTooltip>
   );
 }
 

@@ -19,6 +19,24 @@
   letter-spacing: 0;
 }
 
+.dark .bot-work-login-page,
+.dark .hb-laper-app {
+  --body-work-bg: #111513;
+  --body-work-canvas: #151a17;
+  --body-work-surface: #1b211e;
+  --body-work-text: #edf2ef;
+  --body-work-muted: #9ca8a2;
+  --body-work-line: #303934;
+  --body-work-active: #27302c;
+  --body-work-green: #58a57d;
+  --body-work-green-deep: #397b5b;
+  --body-work-green-bright: #56bd86;
+  --body-work-green-soft: #243b30;
+  --body-work-blue: #7798bb;
+  --body-work-indigo: #8c8fd6;
+  --body-work-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+}
+
 .bot-work-toaster [data-sonner-toast] {
   border-color: var(--body-work-line);
   border-radius: 6px;

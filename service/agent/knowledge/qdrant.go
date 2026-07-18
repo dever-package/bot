@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const maxQdrantResponseBytes = 16 * 1024 * 1024
+
 type qdrantClient struct {
 	config qdrantConfig
 	http   *http.Client
@@ -271,9 +273,12 @@ func (c qdrantClient) request(ctx context.Context, method string, path string, b
 		return err
 	}
 	defer resp.Body.Close()
-	payload, err := io.ReadAll(resp.Body)
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxQdrantResponseBytes+1))
 	if err != nil {
 		return fmt.Errorf("读取向量数据库响应失败: %w", err)
+	}
+	if len(payload) > maxQdrantResponseBytes {
+		return fmt.Errorf("向量数据库响应超过 %d MB 上限", maxQdrantResponseBytes/(1024*1024))
 	}
 	if resp.StatusCode >= 400 {
 		return &qdrantRequestError{

@@ -22,7 +22,7 @@ func unavailableKnowledgeDocIDs(ctx context.Context, docIDs []uint64) map[uint64
 	rows := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
 		"id": docIDs,
 	}, map[string]any{
-		"field":    "main.id, main.knowledge_base_id, main.status, main.index_status, main.expires_at, main.review_status",
+		"field":    "main.id, main.knowledge_base_id, main.status, main.index_status, main.node_count, main.expires_at, main.review_status",
 		"page":     1,
 		"pageSize": len(docIDs),
 	})
@@ -54,8 +54,13 @@ func unavailableKnowledgeDocIDs(ctx context.Context, docIDs []uint64) map[uint64
 }
 
 func knowledgeDocAvailableAt(row *agentmodel.KnowledgeDoc, reviewRequired bool, now time.Time) bool {
-	return knowledgeDocGovernanceAvailableAt(row, reviewRequired, now) &&
-		row.IndexStatus == agentmodel.KnowledgeIndexStatusSuccess
+	if !knowledgeDocGovernanceAvailableAt(row, reviewRequired, now) {
+		return false
+	}
+	if row.IndexStatus == agentmodel.KnowledgeIndexStatusSuccess {
+		return true
+	}
+	return row.IndexStatus == agentmodel.KnowledgeIndexStatusRunning && row.NodeCount > 0
 }
 
 func knowledgeDocGovernanceAvailableAt(row *agentmodel.KnowledgeDoc, reviewRequired bool, now time.Time) bool {
@@ -135,6 +140,7 @@ func filterAvailableKnowledgeNodes(ctx context.Context, rows []*agentmodel.Knowl
 	if len(rows) == 0 {
 		return rows
 	}
+	rows = hydrateKnowledgeNodeAvailabilityFields(ctx, rows)
 	docIDs := make([]uint64, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
@@ -144,7 +150,9 @@ func filterAvailableKnowledgeNodes(ctx context.Context, rows []*agentmodel.Knowl
 			docIDs = append(docIDs, row.DocID)
 		}
 	}
+	docIDs = append(docIDs, legacyKnowledgeConceptDocIDs(rows)...)
 	invalidDocs := unavailableKnowledgeDocIDs(ctx, docIDs)
+	conceptSources := availableKnowledgeConceptSources(ctx, rows)
 	result := make([]*agentmodel.KnowledgeNode, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
@@ -156,10 +164,70 @@ func filterAvailableKnowledgeNodes(ctx context.Context, rows []*agentmodel.Knowl
 		if row.IndexStatus != agentmodel.KnowledgeIndexStatusSuccess {
 			continue
 		}
+		if row.DocID == 0 && row.NodeType == agentmodel.KnowledgeNodeTypeConcept {
+			if source := conceptSources.available[row.ID]; source != nil {
+				result = append(result, applyKnowledgeConceptSource(row, source))
+				continue
+			}
+			if _, recorded := conceptSources.recorded[row.ID]; recorded {
+				continue
+			}
+			if legacyKnowledgeConceptAvailable(row, invalidDocs) {
+				result = append(result, sanitizedLegacyKnowledgeConcept(row))
+			}
+			continue
+		}
 		if _, invalid := invalidDocs[row.DocID]; invalid {
 			continue
 		}
 		result = append(result, row)
+	}
+	return result
+}
+
+func hydrateKnowledgeNodeAvailabilityFields(ctx context.Context, rows []*agentmodel.KnowledgeNode) []*agentmodel.KnowledgeNode {
+	ids := make([]uint64, 0)
+	for _, row := range rows {
+		if row == nil || row.ID == 0 {
+			continue
+		}
+		if row.Status == 0 || row.IndexStatus == "" || (row.DocID == 0 && row.NodeType == "") {
+			ids = append(ids, row.ID)
+		}
+	}
+	ids = uniqueUint64s(ids, 0)
+	if len(ids) == 0 {
+		return rows
+	}
+	loaded := agentmodel.NewKnowledgeNodeModel().Select(ctx, map[string]any{"id": ids}, map[string]any{
+		"field":    "main.id, main.knowledge_base_id, main.doc_id, main.node_type, main.metadata, main.index_status, main.status",
+		"page":     1,
+		"pageSize": len(ids),
+	})
+	byID := make(map[uint64]*agentmodel.KnowledgeNode, len(loaded))
+	for _, row := range loaded {
+		if row != nil {
+			byID[row.ID] = row
+		}
+	}
+	result := make([]*agentmodel.KnowledgeNode, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		availability := byID[row.ID]
+		if availability == nil {
+			result = append(result, row)
+			continue
+		}
+		copyRow := *row
+		copyRow.KnowledgeBaseID = availability.KnowledgeBaseID
+		copyRow.DocID = availability.DocID
+		copyRow.NodeType = availability.NodeType
+		copyRow.Metadata = availability.Metadata
+		copyRow.IndexStatus = availability.IndexStatus
+		copyRow.Status = availability.Status
+		result = append(result, &copyRow)
 	}
 	return result
 }
@@ -214,7 +282,7 @@ func availableKnowledgeNodeIDSet(ctx context.Context, nodeIDs []uint64) map[uint
 		"index_status": agentmodel.KnowledgeIndexStatusSuccess,
 		"status":       1,
 	}, map[string]any{
-		"field":    "main.id, main.doc_id, main.index_status, main.status",
+		"field":    "main.id, main.doc_id, main.node_type, main.metadata, main.index_status, main.status",
 		"page":     1,
 		"pageSize": len(nodeIDs),
 	})

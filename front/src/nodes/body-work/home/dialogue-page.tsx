@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MessagesSquare } from "lucide-react";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   AgentChatPanel,
   type AgentChatPanelProps,
 } from "../../show/agent-chat/index";
@@ -29,6 +22,7 @@ import {
   type WorkbenchRole,
 } from "./workbench-api";
 import { AssetContinuationNotice } from "./asset-continuation";
+import { WorkbenchPicker } from "./workbench-picker";
 
 export function WorkbenchDialoguePage({
   teamID,
@@ -116,6 +110,11 @@ export function WorkbenchDialoguePage({
       />
     );
   }
+  const roleContinuation =
+    continuationAsset?.sourceType === "dialogue" &&
+    continuationAsset.sourceID === role.id
+      ? continuationAsset
+      : null;
 
   const selectRole = (nextID: number) => {
     setSelectedID(nextID);
@@ -145,33 +144,12 @@ export function WorkbenchDialoguePage({
           open
           appearance="body"
           sidebarTitle={
-            <div className="workbench-role-picker">
-              <Select
-                value={String(selectedID)}
-                onValueChange={(value) => selectRole(Number(value))}
-              >
-                <SelectTrigger
-                  aria-label="选择执行角色"
-                  className="workbench-role-select-trigger"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent
-                  align="start"
-                  className="workbench-role-select-content"
-                >
-                  {roles.map((current) => (
-                    <SelectItem
-                      key={current.id}
-                      className="workbench-role-select-item"
-                      value={String(current.id)}
-                    >
-                      {current.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <WorkbenchPicker
+              value={selectedID}
+              options={roles}
+              ariaLabel="选择执行角色"
+              onValueChange={selectRole}
+            />
           }
           height="100%"
           minHeight="0"
@@ -183,12 +161,7 @@ export function WorkbenchDialoguePage({
           onUploadedFiles={saveUploadedFiles}
           assistantApi={chatConfig.assistantApi}
           runtimeApi={chatConfig.runtimeApi}
-          requestScope={
-            continuationAsset?.sourceType === "dialogue" &&
-            continuationAsset.sourceID === role.id
-              ? continuationRequestScope
-              : undefined
-          }
+          requestScope={roleContinuation ? continuationRequestScope : undefined}
           referenceProviders={referenceProviders}
           renderMessageActions={(message) =>
             message.role === "assistant" &&
@@ -199,13 +172,10 @@ export function WorkbenchDialoguePage({
                 key={message.recordID}
                 teamID={teamID}
                 roleID={role.id}
+                roleName={role.name}
                 message={message}
-                targetAssetID={
-                  continuationAsset?.sourceType === "dialogue" &&
-                  continuationAsset.sourceID === role.id
-                    ? continuationAsset.id
-                    : 0
-                }
+                targetAssetID={roleContinuation?.id || 0}
+                targetAssetName={roleContinuation?.name || ""}
                 onSaved={onClearContinuation}
               />
             ) : null
@@ -214,14 +184,16 @@ export function WorkbenchDialoguePage({
             <SaveAssetAction
               teamID={teamID}
               resetKey={`${messageID}:${artifact.id}`}
+              defaultName={artifactAssetName(role.name, artifact)}
               appearance={placement === "preview" ? "inspector" : "media"}
-              confirmDescription={`确认将“${artifactDisplayName(artifact)}”保存为独立${artifactKindLabel(artifact.kind)}素材吗？`}
-              save={() =>
+              confirmDescription={`保存后将作为当前团队的独立${artifactKindLabel(artifact.kind)}素材。`}
+              save={(name) =>
                 saveWorkbenchDialogueAsset({
                   teamID,
                   roleID: role.id,
                   messageID,
                   artifactID: artifact.id,
+                  name,
                 })
               }
             />
@@ -232,8 +204,17 @@ export function WorkbenchDialoguePage({
   );
 }
 
-function artifactDisplayName(artifact: AgentChatArtifact) {
-  return artifact.name || artifact.label || `素材 ${artifact.id}`;
+function artifactAssetName(roleName: string, artifact: AgentChatArtifact) {
+  const name = artifact.name.trim();
+  if (name) {
+    return name;
+  }
+  const label = artifact.label.trim();
+  if (label && label !== `素材 ${artifact.id}`) {
+    return label;
+  }
+  const sequence = artifact.displayNo > 0 ? `-${artifact.displayNo}` : "";
+  return `${roleName} ${artifactKindLabel(artifact.kind)}${sequence}`.trim();
 }
 
 function artifactKindLabel(kind: AgentChatArtifact["kind"]) {
@@ -246,33 +227,41 @@ function artifactKindLabel(kind: AgentChatArtifact["kind"]) {
 function SaveDialogueMaterialButton({
   teamID,
   roleID,
+  roleName,
   message,
   targetAssetID,
+  targetAssetName,
   onSaved,
 }: {
   teamID: number;
   roleID: number;
+  roleName: string;
   message: AgentChatMessageActionContext;
   targetAssetID: number;
+  targetAssetName: string;
   onSaved: () => void;
 }) {
   return (
     <SaveAssetAction
       teamID={teamID}
       resetKey={`${message.recordID}:${targetAssetID}`}
+      defaultName={
+        targetAssetName || dialogueAssetName(roleName, message)
+      }
       confirmDescription={
         targetAssetID
-          ? "确认将这条智能体回复保存为当前素材的新版本吗？"
-          : "确认将这条智能体回复保存为当前团队的素材吗？"
+          ? "保存后将作为当前素材的新版本。"
+          : "保存后将作为当前团队的素材。"
       }
       disabled={message.hasPendingArtifacts}
       disabledLabel="回复中的素材仍在生成，完成后才能保存整条回复"
-      save={() =>
+      save={(name) =>
         saveWorkbenchDialogueAsset({
           teamID,
           roleID,
           messageID: message.recordID,
           targetAssetID,
+          name,
         })
       }
       onSaved={() => {
@@ -280,4 +269,23 @@ function SaveDialogueMaterialButton({
       }}
     />
   );
+}
+
+function dialogueAssetName(
+  roleName: string,
+  message: AgentChatMessageActionContext,
+) {
+  const sessionTitle = message.sessionTitle.trim() || "新会话";
+  const agentName = roleName.trim() || "智能体";
+  const messageTime = formatDialogueAssetTime(message.createdAt);
+  return [sessionTitle, agentName, messageTime].filter(Boolean).join(" · ");
+}
+
+function formatDialogueAssetTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const twoDigits = (number: number) => String(number).padStart(2, "0");
+  return `${twoDigits(date.getMonth() + 1)}-${twoDigits(date.getDate())} ${twoDigits(date.getHours())}:${twoDigits(date.getMinutes())}`;
 }

@@ -30,6 +30,7 @@ const (
 	maxStoredParseTextChars    = 120000
 	maxDocumentRootTextChars   = 6000
 	maxStoredParseListItems    = 200
+	knowledgeMetricCASAttempts = 8
 )
 
 func NewService() Service {
@@ -89,6 +90,7 @@ func (s Service) indexDocument(ctx context.Context, docID uint64, refreshSummary
 		result.FinishedAt = time.Now()
 		return result, err
 	}
+	defer parseResult.Cleanup()
 	markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageParse, agentmodel.KnowledgeIndexStatusSuccess, "")
 	if previousDoc.NodeCount > 0 || previousDoc.ContentHash != "" {
 		saveDocumentVersionSnapshot(ctx, *base, previousDoc)
@@ -108,7 +110,7 @@ func (s Service) indexDocument(ctx context.Context, docID uint64, refreshSummary
 		if updated == 0 {
 			return fmt.Errorf("文档索引任务已失效")
 		}
-		clearKnowledgeDocumentDatabaseIndex(txCtx, base.ID, doc.ID)
+		replaceKnowledgeDocumentDatabaseIndex(txCtx, base.ID, doc.ID)
 		parseID = saveKnowledgeParse(txCtx, *base, *doc, parseResult, sourceHash)
 		var txErr error
 		nodeCount, txErr = s.saveDocumentNodes(txCtx, *base, *doc, parseID, parseResult)
@@ -138,6 +140,7 @@ func (s Service) indexDocument(ctx context.Context, docID uint64, refreshSummary
 			errorMessage = appendIndexWarning(errorMessage, "概念图谱失败: "+graphErr.Error())
 		}
 	} else {
+		clearKnowledgeDocumentConceptGraph(ctx, base.ID, doc.ID)
 		markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageGraph, agentmodel.KnowledgeIndexStatusSuccess, "")
 	}
 	markDocumentIndexStage(ctx, doc.ID, doc.IndexVersion, agentmodel.KnowledgeIndexStageSummary, agentmodel.KnowledgeIndexStatusRunning, "")
@@ -467,6 +470,7 @@ func compactKnowledgeParseRaw(raw map[string]any) map[string]any {
 	for _, key := range []string{
 		"parser", "batch_id", "file_name", "data_id", "full_zip_url",
 		"model_version", "markdown_file", "content_list_file", "content_list_count",
+		"streamed", "source_runes", "content_chunks",
 	} {
 		if value := compactKnowledgeParseScalar(raw[key]); value != nil {
 			result[key] = value
@@ -579,11 +583,70 @@ func (s Service) saveDocumentNodes(ctx context.Context, base agentmodel.Knowledg
 		}
 		count += insertParseNodeTree(ctx, base, doc, dirPath, parseID, docNodeID, docPath, node, 1, index+1, fmt.Sprintf("n%d", index+1), conceptNodes)
 	}
+	streamCount, err := insertStreamedParseNodes(ctx, base, doc, dirPath, parseID, docNodeID, docPath, result.StreamNodeFile, conceptNodes)
+	if err != nil {
+		return count, err
+	}
+	count += streamCount
 	count += insertParsePages(ctx, base, doc, dirPath, parseID, docNodeID, docPath, result.Pages)
 	count += insertParseAssets(ctx, base, doc, dirPath, parseID, docNodeID, docPath, result.Assets)
-	expected := 1 + parseOutlineNodeCount(result.Outline) + indexableParsePageCount(result.Pages) + len(result.Assets)
+	expected := 1 + parseOutlineNodeCount(result.Outline) + result.StreamNodes + indexableParsePageCount(result.Pages) + len(result.Assets)
 	if count != expected {
 		return count, fmt.Errorf("保存文档节点不完整: 已保存 %d/%d", count, expected)
+	}
+	return count, nil
+}
+
+func insertStreamedParseNodes(
+	ctx context.Context,
+	base agentmodel.KnowledgeBase,
+	doc agentmodel.KnowledgeDoc,
+	dirPath string,
+	parseID uint64,
+	parentID uint64,
+	parentPath string,
+	nodeFile string,
+	conceptNodes map[string]uint64,
+) (int, error) {
+	if strings.TrimSpace(nodeFile) == "" {
+		return 0, nil
+	}
+	file, err := os.Open(nodeFile)
+	if err != nil {
+		return 0, fmt.Errorf("读取长文档解析缓存失败: %w", err)
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	count := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return count, err
+		}
+		node := knowledgeparse.Node{}
+		if err := decoder.Decode(&node); err == io.EOF {
+			break
+		} else if err != nil {
+			return count, fmt.Errorf("解析长文档节点失败: %w", err)
+		}
+		index := count + 1
+		inserted := insertParseNodeTree(
+			ctx,
+			base,
+			doc,
+			dirPath,
+			parseID,
+			parentID,
+			parentPath,
+			node,
+			1,
+			index,
+			fmt.Sprintf("s%d", index),
+			conceptNodes,
+		)
+		if inserted != 1 {
+			return count, fmt.Errorf("保存长文档节点失败: 第 %d 个分块", index)
+		}
+		count++
 	}
 	return count, nil
 }
@@ -1492,9 +1555,35 @@ func (s Service) incrementHitCounts(ctx context.Context, snippets []RetrievedSni
 		if delta <= 0 {
 			continue
 		}
-		nodeModel.Update(ctx, map[string]any{"id": row.ID, "knowledge_base_id": row.KnowledgeBaseID}, map[string]any{
-			"hit_count": row.HitCount + delta,
-		})
+		incrementKnowledgeNodeHitCount(ctx, nodeModel, row, delta)
+	}
+}
+
+func incrementKnowledgeNodeHitCount(ctx context.Context, model *orm.Model[agentmodel.KnowledgeNode], row *agentmodel.KnowledgeNode, delta int) {
+	if model == nil || row == nil || delta <= 0 {
+		return
+	}
+	current := row.HitCount
+	for range knowledgeMetricCASAttempts {
+		if model.Update(ctx, map[string]any{
+			"id":                row.ID,
+			"knowledge_base_id": row.KnowledgeBaseID,
+			"hit_count":         current,
+		}, map[string]any{
+			"hit_count": current + delta,
+		}) == 1 {
+			return
+		}
+		latest := model.Find(ctx, map[string]any{
+			"id":                row.ID,
+			"knowledge_base_id": row.KnowledgeBaseID,
+			"index_status":      agentmodel.KnowledgeIndexStatusSuccess,
+			"status":            1,
+		}, map[string]any{"field": "main.id, main.knowledge_base_id, main.hit_count"})
+		if latest == nil {
+			return
+		}
+		current = latest.HitCount
 	}
 }
 
@@ -1511,20 +1600,42 @@ func (s Service) FeedbackNode(ctx context.Context, baseID uint64, nodeID uint64,
 	default:
 		return fmt.Errorf("反馈值无效: %s（仅支持 useful/useless）", feedback)
 	}
-	node := agentmodel.NewKnowledgeNodeModel().Find(ctx, map[string]any{"id": nodeID, "knowledge_base_id": baseID})
+	nodeModel := agentmodel.NewKnowledgeNodeModel()
+	node := nodeModel.Find(ctx, map[string]any{"id": nodeID, "knowledge_base_id": baseID})
 	if node == nil {
 		return fmt.Errorf("节点不存在")
 	}
-	newWeight := node.Weight + delta
-	if newWeight < -1 {
-		newWeight = -1
-	} else if newWeight > 1 {
-		newWeight = 1
+	return updateKnowledgeNodeWeight(ctx, nodeModel, node, delta)
+}
+
+func updateKnowledgeNodeWeight(ctx context.Context, model *orm.Model[agentmodel.KnowledgeNode], node *agentmodel.KnowledgeNode, delta float64) error {
+	current := node.Weight
+	for range knowledgeMetricCASAttempts {
+		next := current + delta
+		if next < -1 {
+			next = -1
+		} else if next > 1 {
+			next = 1
+		}
+		if model.Update(ctx, map[string]any{
+			"id":                node.ID,
+			"knowledge_base_id": node.KnowledgeBaseID,
+			"weight":            current,
+		}, map[string]any{
+			"weight": next,
+		}) == 1 {
+			return nil
+		}
+		latest := model.Find(ctx, map[string]any{
+			"id":                node.ID,
+			"knowledge_base_id": node.KnowledgeBaseID,
+		}, map[string]any{"field": "main.id, main.knowledge_base_id, main.weight"})
+		if latest == nil {
+			return fmt.Errorf("节点不存在")
+		}
+		current = latest.Weight
 	}
-	agentmodel.NewKnowledgeNodeModel().Update(ctx, map[string]any{"id": nodeID, "knowledge_base_id": baseID}, map[string]any{
-		"weight": newWeight,
-	})
-	return nil
+	return fmt.Errorf("节点反馈更新冲突，请重试")
 }
 
 func (s Service) DebugRetrieve(ctx context.Context, req RetrieveDebugRequest) (RetrieveDebugResult, error) {
@@ -1730,7 +1841,7 @@ func retrievePlanDocNodes(ctx context.Context, binding agentKnowledgeBinding, do
 		"index_status":      agentmodel.KnowledgeIndexStatusSuccess,
 		"status":            1,
 	}, map[string]any{
-		"field":    "main.id, main.dir_id, main.doc_id, main.title, main.content, main.plain_text, main.summary, main.path, main.sort, main.node_type, main.hit_count, main.weight",
+		"field":    "main.id, main.knowledge_base_id, main.dir_id, main.doc_id, main.title, main.content, main.plain_text, main.summary, main.path, main.sort, main.node_type, main.metadata, main.index_status, main.hit_count, main.weight, main.status",
 		"order":    "main.doc_id asc, main.depth asc, main.sort asc, main.id asc",
 		"page":     1,
 		"pageSize": keywordCandidateLimit(limit, true, query),

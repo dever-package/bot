@@ -12,6 +12,17 @@ export type BodySiteConfig = {
   favicon: string;
   loginTitle: string;
   loginDescription: string;
+  filing: BodyFilingInfo;
+};
+
+export type BodyFilingInfo = {
+  companyName: string;
+  companyAddress: string;
+  businessLicenseURL: string;
+  icpRecord: string;
+  icpRecordURL: string;
+  publicSecurityRecord: string;
+  publicSecurityRecordURL: string;
 };
 
 export type BodyLoginLink = {
@@ -123,6 +134,17 @@ function normalizeLoginConfig(value: unknown): BodyLoginConfig {
       )
         ? textValue(config.login_description)
         : fallback.site.loginDescription,
+      filing: {
+        companyName: textValue(config.company_name),
+        companyAddress: textValue(config.company_address),
+        businessLicenseURL: safeExternalURL(config.business_license_url),
+        icpRecord: textValue(config.icp_record),
+        icpRecordURL: safeExternalURL(config.icp_record_url),
+        publicSecurityRecord: textValue(config.public_security_record),
+        publicSecurityRecordURL: safeExternalURL(
+          config.public_security_record_url,
+        ),
+      },
     },
     links: rowsValue(root.links).map(normalizeLink).filter(validLink),
     accounts: rowsValue(root.accounts)
@@ -140,6 +162,7 @@ function fallbackLoginConfig(): BodyLoginConfig {
       favicon: mediaURL(site.favicon),
       loginTitle: DEFAULT_LOGIN_TITLE,
       loginDescription: DEFAULT_LOGIN_DESCRIPTION,
+      filing: emptyFilingInfo(),
     },
     links: [],
     accounts: [
@@ -182,18 +205,43 @@ function validAccount(account: BodyLoginAccount) {
 }
 
 function safeLinkURL(value: unknown) {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return safeURL(
+    value,
+    ["http:", "https:", "mailto:"],
+    window.location.origin,
+  );
+}
+
+function safeExternalURL(value: unknown) {
+  return safeURL(value, ["http:", "https:"]);
+}
+
+function safeURL(value: unknown, protocols: string[], base?: string) {
   const text = textValue(value);
-  if (!text || typeof window === "undefined") {
+  if (!text) {
     return "";
   }
   try {
-    const url = new URL(text, window.location.origin);
-    return ["http:", "https:", "mailto:"].includes(url.protocol)
-      ? url.href
-      : "";
+    const url = base ? new URL(text, base) : new URL(text);
+    return protocols.includes(url.protocol) ? url.href : "";
   } catch {
     return "";
   }
+}
+
+function emptyFilingInfo(): BodyFilingInfo {
+  return {
+    companyName: "",
+    companyAddress: "",
+    businessLicenseURL: "",
+    icpRecord: "",
+    icpRecordURL: "",
+    publicSecurityRecord: "",
+    publicSecurityRecordURL: "",
+  };
 }
 
 function mediaURL(value: unknown): string {

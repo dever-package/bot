@@ -34,6 +34,11 @@ func (Knowledge) GetFileManagerData(c *server.Context) error {
 	return knowledgeJSON(c, data, err)
 }
 
+func (Knowledge) PostSyncFiles(c *server.Context) error {
+	data, err := knowledgeRunner.ReconcileKnowledgeFiles(c.Context(), inputBaseID(c))
+	return knowledgeJSON(c, data, err)
+}
+
 func (Knowledge) GetFileContent(c *server.Context) error {
 	return readKnowledgeFile(c)
 }

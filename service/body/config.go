@@ -32,11 +32,18 @@ func (Service) LoginConfig(ctx context.Context) (map[string]any, error) {
 
 func loginConfigPayload(config *bodymodel.Config) map[string]any {
 	return map[string]any{
-		"site_name":         firstBodyConfigText(config.SiteName, bodymodel.DefaultSiteName),
-		"logo":              firstBodyConfigText(config.Logo, bodymodel.DefaultLogo),
-		"favicon":           firstBodyConfigText(config.Favicon, bodymodel.DefaultFavicon),
-		"login_title":       firstBodyConfigText(config.LoginTitle, bodymodel.DefaultLoginTitle),
-		"login_description": strings.TrimSpace(config.LoginDescription),
+		"site_name":                  firstBodyConfigText(config.SiteName, bodymodel.DefaultSiteName),
+		"logo":                       firstBodyConfigText(config.Logo, bodymodel.DefaultLogo),
+		"favicon":                    firstBodyConfigText(config.Favicon, bodymodel.DefaultFavicon),
+		"login_title":                firstBodyConfigText(config.LoginTitle, bodymodel.DefaultLoginTitle),
+		"login_description":          strings.TrimSpace(config.LoginDescription),
+		"company_name":               strings.TrimSpace(config.CompanyName),
+		"company_address":            strings.TrimSpace(config.CompanyAddress),
+		"business_license_url":       strings.TrimSpace(config.BusinessLicenseURL),
+		"icp_record":                 strings.TrimSpace(config.ICPRecord),
+		"icp_record_url":             strings.TrimSpace(config.ICPRecordURL),
+		"public_security_record":     strings.TrimSpace(config.PublicSecurityRecord),
+		"public_security_record_url": strings.TrimSpace(config.PublicSecurityRecordURL),
 	}
 }
 

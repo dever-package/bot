@@ -16,6 +16,7 @@ import {
   type WorkbenchPower,
 } from "./workbench-api";
 import { AssetContinuationNotice } from "./asset-continuation";
+import { WorkbenchPicker } from "./workbench-picker";
 
 export function WorkbenchFunctionPage({
   teamID,
@@ -87,33 +88,18 @@ export function WorkbenchFunctionPage({
     return <WorkbenchEmpty icon={Zap} title="当前团队没有可用工具" />;
   }
 
+  const selectPower = (nextID: number) => {
+    setSelectedID(nextID);
+    if (
+      continuationAsset?.sourceType === "tool" &&
+      continuationAsset.sourceID !== nextID
+    ) {
+      onClearContinuation();
+    }
+  };
+
   return (
     <div className="workbench-page workbench-function-page flex h-full min-h-0 flex-col">
-      <div className="workbench-selector-bar">
-        <label className="workbench-selector-field">
-          <span>工具</span>
-          <select
-            aria-label="选择工具"
-            value={selectedID}
-            onChange={(event) => {
-              const nextID = Number(event.target.value);
-              setSelectedID(nextID);
-              if (
-                continuationAsset?.sourceType === "tool" &&
-                continuationAsset.sourceID !== nextID
-              ) {
-                onClearContinuation();
-              }
-            }}
-          >
-            {powers.map((power) => (
-              <option key={power.id} value={power.id}>
-                {power.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
       {continuationAsset?.sourceType === "tool" ? (
         <AssetContinuationNotice
           asset={continuationAsset}
@@ -129,6 +115,11 @@ export function WorkbenchFunctionPage({
             return null;
           }
           const scope = scopes.get(powerID);
+          const powerContinuation =
+            continuationAsset?.sourceType === "tool" &&
+            continuationAsset.sourceID === power.id
+              ? continuationAsset
+              : null;
           return (
             <div
               key={powerID}
@@ -144,7 +135,15 @@ export function WorkbenchFunctionPage({
                 requestScope={scope}
                 paramScope={scope}
                 height="100%"
-                resultTitle="运行结果"
+                resultTitle="结果"
+                formHeader={
+                  <WorkbenchPicker
+                    value={selectedID}
+                    options={powers}
+                    ariaLabel="选择工具"
+                    onValueChange={selectPower}
+                  />
+                }
                 assetReferenceTeamID={teamID}
                 uploadBizKey={BODY_UPLOAD_BIZ_KEY}
                 uploadBizName={BODY_UPLOAD_BIZ_NAME}
@@ -155,13 +154,10 @@ export function WorkbenchFunctionPage({
                     <SaveToolMaterialButton
                       teamID={teamID}
                       teamPowerID={power.id}
+                      powerName={power.name}
                       requestID={requestID}
-                      targetAssetID={
-                        continuationAsset?.sourceType === "tool" &&
-                        continuationAsset.sourceID === power.id
-                          ? continuationAsset.id
-                          : 0
-                      }
+                      targetAssetID={powerContinuation?.id || 0}
+                      targetAssetName={powerContinuation?.name || ""}
                       onSaved={onClearContinuation}
                     />
                   ) : null
@@ -178,32 +174,38 @@ export function WorkbenchFunctionPage({
 function SaveToolMaterialButton({
   teamID,
   teamPowerID,
+  powerName,
   requestID,
   targetAssetID,
+  targetAssetName,
   onSaved,
 }: {
   teamID: number;
   teamPowerID: number;
+  powerName: string;
   requestID: string;
   targetAssetID: number;
+  targetAssetName: string;
   onSaved: () => void;
 }) {
   return (
     <SaveAssetAction
       teamID={teamID}
       resetKey={`${requestID}:${targetAssetID}`}
+      defaultName={targetAssetName || `${powerName} 结果`}
       appearance="toolbar"
       confirmDescription={
         targetAssetID
-          ? "确认将本次工具结果保存为当前素材的新版本吗？"
-          : "确认将本次工具结果保存为当前团队的素材吗？"
+          ? "保存后将作为当前素材的新版本。"
+          : "保存后将作为当前团队的素材。"
       }
-      save={() =>
+      save={(name) =>
         saveWorkbenchPowerAsset({
           teamID,
           teamPowerID,
           requestID,
           targetAssetID,
+          name,
         })
       }
       onSaved={() => {

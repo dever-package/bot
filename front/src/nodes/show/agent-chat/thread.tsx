@@ -255,6 +255,7 @@ function UserMessage({
       </div>
       <MessageActions
         role="user"
+        sessionTitle={controller.sessionTitle}
         renderMessageActions={renderMessageActions}
       />
     </MessagePrimitive.Root>
@@ -380,6 +381,7 @@ function AssistantMessage({
         />
         <MessageActions
           role="assistant"
+          sessionTitle={controller.sessionTitle}
           renderMessageActions={renderMessageActions}
         />
       </AgentChatArtifactActionsProvider>
@@ -389,9 +391,11 @@ function AssistantMessage({
 
 function MessageActions({
   role,
+  sessionTitle,
   renderMessageActions,
 }: {
   role: "user" | "assistant";
+  sessionTitle: string;
   renderMessageActions?: (
     message: AgentChatMessageActionContext,
   ) => ReactNode;
@@ -402,6 +406,9 @@ function MessageActions({
   );
   const requestID = String(
     useAuiState((state) => state.message.metadata.custom?.requestID) || "",
+  );
+  const createdAt = String(
+    useAuiState((state) => state.message.metadata.custom?.createdAt) || "",
   );
   const sourceText = useAuiState(
     (state) => state.message.metadata.custom?.sourceText,
@@ -497,6 +504,8 @@ function MessageActions({
         role,
         recordID,
         requestID,
+        sessionTitle,
+        createdAt,
         running: status?.type === "running",
         error: status?.type === "incomplete",
         hasPendingArtifacts,

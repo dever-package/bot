@@ -153,6 +153,7 @@ func (s Service) beginToolArtifactBatch(
 	profile := cloneToolArguments(arguments)
 	delete(profile, runtimeprovider.MediaReferencesArgument)
 	delete(profile, runtimeprovider.MediaSeriesModeArgument)
+	delete(profile, runtimeprovider.MediaArtifactTitleArgument)
 	if key := strings.TrimSpace(definition.ActivityCountKey); key != "" {
 		delete(profile, key)
 	}
@@ -283,6 +284,9 @@ func appendMediaReferences(current []runtimeprovider.MediaReference, values []ru
 }
 
 func toolArtifactName(arguments map[string]any, definition runtimeprovider.Definition) string {
+	if value := runtimeprovider.MediaArtifactTitle(arguments); value != "" {
+		return value
+	}
 	if key := strings.TrimSpace(definition.ActivityPromptKey); key != "" {
 		if value := strings.TrimSpace(botprotocol.AsText(arguments[key])); value != "" {
 			return value

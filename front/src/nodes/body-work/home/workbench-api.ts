@@ -98,6 +98,7 @@ export async function saveWorkbenchDialogueAsset(input: {
   messageID: number;
   artifactID?: number;
   targetAssetID?: number;
+  name?: string;
 }) {
   return saveWorkbenchAsset("chat_save_asset", {
     team_id: input.teamID,
@@ -105,6 +106,7 @@ export async function saveWorkbenchDialogueAsset(input: {
     message_id: input.messageID,
     artifact_id: input.artifactID || undefined,
     target_asset_id: input.targetAssetID || undefined,
+    name: input.name?.trim() || undefined,
   });
 }
 
@@ -113,12 +115,14 @@ export async function saveWorkbenchPowerAsset(input: {
   teamPowerID: number;
   requestID: string;
   targetAssetID?: number;
+  name?: string;
 }) {
   return saveWorkbenchAsset("power_save_asset", {
     team_id: input.teamID,
     team_power_id: input.teamPowerID,
     request_id: input.requestID,
     target_asset_id: input.targetAssetID || undefined,
+    name: input.name?.trim() || undefined,
   });
 }
 
