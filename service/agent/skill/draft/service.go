@@ -6,24 +6,31 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
-	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
-	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
-	"github.com/dever-package/bot/service/agent/runtime/tool/sandbox"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
 const (
-	maxDraftFileBytes  = 256 * 1024
-	maxDraftTotalBytes = 2 * 1024 * 1024
-	maxDraftFiles      = 1000
-	defaultStatus      = int16(1)
-	defaultSort        = 100
+	maxDraftFileBytes      = 256 * 1024
+	maxDraftManifestBytes  = agentskill.MaxManifestBytes
+	maxDraftFilesJSONBytes = 3 * 1024 * 1024
+	maxDraftTotalBytes     = 2 * 1024 * 1024
+	maxDraftFiles          = 1000
+	defaultStatus          = int16(1)
+	defaultSort            = 100
 )
+
+var draftDependencyFiles = []string{
+	"requirements.txt",
+	"pyproject.toml",
+	"package.json",
+	"package-lock.json",
+	"npm-shrinkwrap.json",
+}
 
 type Service struct{}
 
@@ -33,16 +40,24 @@ type Request struct {
 	Args    []string
 	Target  string
 	Timeout time.Duration
+	Config  []TestConfigValue
+}
+
+type TestConfigValue struct {
+	Key       string
+	TargetKey string
+	Value     string
 }
 
 type PublishRequest struct {
-	ID             uint64
-	Name           string
-	NameSet        bool
-	Description    string
-	DescriptionSet bool
-	PackID         uint64
-	CateID         uint64
+	ID              uint64
+	ExpectedVersion uint64
+	Name            string
+	NameSet         bool
+	Description     string
+	DescriptionSet  bool
+	PackID          uint64
+	CateID          uint64
 }
 
 type SourceRequest struct {
@@ -60,6 +75,7 @@ type SourceRequest struct {
 
 type PatchRequest struct {
 	ID                  uint64
+	ExpectedVersion     uint64
 	PackID              uint64
 	CateID              uint64
 	Patch               map[string]any
@@ -84,94 +100,23 @@ func NewService() Service {
 	return Service{}
 }
 
-func (Service) Test(ctx context.Context, req Request) Result {
-	snapshot, issues, err := loadAndValidate(ctx, req.ID)
-	if err != nil {
-		return failResult(err.Error(), nil)
-	}
-	if len(issues) > 0 {
-		result := validationPayload(issues)
-		saveValidationResult(ctx, req.ID, result)
-		return failResult("技能内容检查未通过，不能测试", result)
-	}
-	script := strings.TrimSpace(req.Script)
-	if script == "" {
-		script = firstDraftScript(snapshot)
-	}
-	if script == "" {
-		return failResult("草稿没有可测试的 scripts/ 脚本", nil)
-	}
-	if err := validateDraftScriptPath(script); err != nil {
-		return failResult(err.Error(), nil)
-	}
-
-	tempRoot, err := os.MkdirTemp("", "dever-skill-draft-test-*")
-	if err != nil {
-		return failResult(err.Error(), nil)
-	}
-	defer os.RemoveAll(tempRoot)
-
-	skillRoot := filepath.Join(tempRoot, "skill")
-	if err := writeDraftFiles(skillRoot, snapshot); err != nil {
-		return failResult(err.Error(), nil)
-	}
-	testHash := draftSnapshotHash(snapshot)
-	runtimeConfig := runtimeconfig.Load(ctx)
-	sandboxConfig := runtimetool.SandboxConfig(runtimeConfig)
-	if _, err := agentskill.PrepareDependencies(ctx, sandboxConfig, skillRoot); err != nil {
-		return failResult(err.Error(), nil)
-	}
-	configEnv, err := agentskill.LoadConfigEnv(ctx, draftConfigSkillID(ctx, snapshot), agentskill.JSONText(snapshot.Manifest), req.Target)
-	if err != nil {
-		return failResult(err.Error(), nil)
-	}
-	runResult, err := sandbox.Run(ctx, sandboxConfig, sandbox.Request{
-		SkillRoot:      skillRoot,
-		TempRoot:       tempRoot,
-		ScriptRelative: filepath.ToSlash(script),
-		Args:           req.Args,
-		Env:            configEnv.Env,
-		Timeout:        req.Timeout,
-	})
-	if err != nil {
-		return failResult(err.Error(), nil)
-	}
-	runResult.Stdout = agentskill.RedactSecrets(runResult.Stdout, configEnv.Secrets)
-	runResult.Stderr = agentskill.RedactSecrets(runResult.Stderr, configEnv.Secrets)
-	runResult.Error = agentskill.RedactSecrets(runResult.Error, configEnv.Secrets)
-	payload := map[string]any{
-		"test": map[string]any{
-			"script":      runResult.Script,
-			"runner":      runResult.Runner,
-			"exit_code":   runResult.ExitCode,
-			"duration_ms": runResult.DurationMS,
-			"stdout":      runResult.Stdout,
-			"stderr":      runResult.Stderr,
-			"error":       runResult.Error,
-			"truncated":   runResult.Truncated,
-		},
-		"test_passed": runResult.ExitCode == 0,
-		"test_hash":   testHash,
-	}
-	saveValidationResult(ctx, req.ID, payload)
-	if runResult.ExitCode != 0 {
-		return failResult("技能脚本测试未通过", payload)
-	}
-	return okResult("技能脚本测试通过", payload)
-}
-
 func (s Service) Publish(ctx context.Context, req PublishRequest) Result {
 	if err := s.applyPublishMetadata(ctx, req); err != nil {
 		return failResult(err.Error(), nil)
 	}
-	snapshot, issues, err := loadAndValidate(ctx, req.ID)
+	snapshot, issues, err := loadAndValidateExecutable(ctx, req.ID)
 	if err != nil {
 		return failResult(err.Error(), nil)
 	}
 	if len(issues) > 0 {
 		result := validationPayload(issues)
-		saveValidationResult(ctx, req.ID, result)
+		if err := saveValidationResult(ctx, snapshot, result); err != nil {
+			return failResult(err.Error(), result)
+		}
 		return failResult("技能内容检查未通过，不能发布", result)
+	}
+	if err := agentskill.ValidateAssignment(ctx, snapshot.Row.PackID, snapshot.Row.CateID); err != nil {
+		return failResult(err.Error(), nil)
 	}
 	if draftRequiresSandboxTest(snapshot) && !draftTestPassed(snapshot) {
 		return failResult("技能草稿必须先通过当前内容的沙箱测试后才能发布", map[string]any{
@@ -192,9 +137,12 @@ func (Service) applyPublishMetadata(ctx context.Context, req PublishRequest) err
 	if req.ID == 0 {
 		return fmt.Errorf("技能草稿不存在")
 	}
-	row := agentmodel.NewSkillDraftModel().Find(ctx, map[string]any{"id": req.ID})
-	if row == nil {
-		return fmt.Errorf("技能草稿不存在")
+	row, err := loadEditableDraft(ctx, req.ID)
+	if err != nil {
+		return err
+	}
+	if err := requireDraftVersion(row, req.ExpectedVersion); err != nil {
+		return err
 	}
 	values := map[string]any{}
 	if req.NameSet {
@@ -213,13 +161,13 @@ func (Service) applyPublishMetadata(ctx context.Context, req PublishRequest) err
 	if req.CateID > 0 {
 		values["cate_id"] = req.CateID
 	}
+	if err := validateDraftUpdate(ctx, row, values); err != nil {
+		return err
+	}
 	if len(values) == 0 {
 		return nil
 	}
-	if affected := agentmodel.NewSkillDraftModel().Update(ctx, map[string]any{"id": req.ID}, values); affected == 0 {
-		return fmt.Errorf("保存发布设置失败")
-	}
-	return nil
+	return updateDraftRow(ctx, row, values)
 }
 
 func (Service) CreateFromSkill(ctx context.Context, skillID uint64, packID uint64) Result {
@@ -238,11 +186,22 @@ func (Service) CreateFromSkill(ctx context.Context, skillID uint64, packID uint6
 	if packID == 0 {
 		packID = firstSkillPackID(ctx, skillID)
 	}
-	if draft := findEditableDraft(ctx, skill.ID, packID); draft != nil {
+	if err := agentskill.ValidateAssignment(ctx, packID, skill.CateID); err != nil {
+		return failResult(err.Error(), nil)
+	}
+	release, err := agentskill.Lock(ctx, skill.Key)
+	if err != nil {
+		return failResult(err.Error(), nil)
+	}
+	defer release()
+	if draft := findEditableDraft(ctx, skill.ID); draft != nil {
 		return okResult("已打开未发布版本", draftResultData(draft, skill.ID, false))
 	}
 	skillMD, filesJSON, err := readPublishedSkillFiles(*skill)
 	if err != nil {
+		return failResult(err.Error(), nil)
+	}
+	if err := agentskill.ValidateAssignment(ctx, packID, skill.CateID); err != nil {
 		return failResult(err.Error(), nil)
 	}
 	draftID := uint64(agentmodel.NewSkillDraftModel().Insert(ctx, map[string]any{
@@ -259,7 +218,9 @@ func (Service) CreateFromSkill(ctx context.Context, skillID uint64, packID uint6
 		"validation_result": agentskill.JSONText(map[string]any{
 			"source_skill_id": skill.ID,
 		}),
+		"version":    1,
 		"created_at": time.Now(),
+		"updated_at": time.Now(),
 	}))
 	if draftID == 0 {
 		return failResult("创建修改草稿失败", nil)
@@ -268,7 +229,7 @@ func (Service) CreateFromSkill(ctx context.Context, skillID uint64, packID uint6
 	return okResult("已创建未发布版本", draftResultData(draft, skill.ID, true))
 }
 
-func findEditableDraft(ctx context.Context, sourceSkillID uint64, packID uint64) *agentmodel.SkillDraft {
+func findEditableDraft(ctx context.Context, sourceSkillID uint64) *agentmodel.SkillDraft {
 	if sourceSkillID == 0 {
 		return nil
 	}
@@ -276,10 +237,45 @@ func findEditableDraft(ctx context.Context, sourceSkillID uint64, packID uint64)
 		"source_skill_id": sourceSkillID,
 		"status":          agentmodel.SkillDraftStatusDraft,
 	}
-	if packID > 0 {
-		filters["pack_id"] = packID
-	}
 	rows := agentmodel.NewSkillDraftModel().Select(ctx, filters)
+	for _, row := range rows {
+		if row != nil {
+			return row
+		}
+	}
+	return nil
+}
+
+func reserveNewDraftKey(ctx context.Context, key string) (func(), error) {
+	key = agentskill.NormalizeKey(key)
+	if key == "" {
+		return nil, fmt.Errorf("技能标识不能为空")
+	}
+	// 与安装、发布共用技能 key 锁，避免检查后被并发写入同名正式技能。
+	release, err := agentskill.Lock(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if skill := agentmodel.NewSkillModel().Find(ctx, map[string]any{"key": key}); skill != nil {
+		release()
+		if agentmodel.NormalizeSkillSourceType(skill.SourceType, skill.SourceURL, skill.InstallInput) == agentmodel.SkillSourceTypeCustom {
+			return nil, fmt.Errorf("技能标识已存在，请从正式技能创建修改草稿: %s", key)
+		}
+		return nil, fmt.Errorf("技能标识已被安装或内置技能使用，不能创建自建技能: %s", key)
+	}
+	if draft := findEditableNewDraft(ctx, key); draft != nil {
+		release()
+		return nil, fmt.Errorf("已存在同标识的未发布草稿（ID: %d）", draft.ID)
+	}
+	return release, nil
+}
+
+func findEditableNewDraft(ctx context.Context, key string) *agentmodel.SkillDraft {
+	rows := agentmodel.NewSkillDraftModel().Select(ctx, map[string]any{
+		"key":             agentskill.NormalizeKey(key),
+		"source_skill_id": uint64(0),
+		"status":          agentmodel.SkillDraftStatusDraft,
+	})
 	for _, row := range rows {
 		if row != nil {
 			return row
@@ -312,15 +308,17 @@ func draftResultData(draft *agentmodel.SkillDraft, sourceSkillID uint64, created
 			"files_json":        draft.FilesJSON,
 			"manifest":          draft.Manifest,
 			"validation_result": draft.ValidationResult,
+			"version":           draft.Version,
 			"created_at":        draft.CreatedAt,
+			"updated_at":        draft.UpdatedAt,
 		},
 	}
 }
 
 func loadAndValidate(ctx context.Context, id uint64) (draftSnapshot, []string, error) {
-	row := agentmodel.NewSkillDraftModel().Find(ctx, map[string]any{"id": id})
-	if row == nil {
-		return draftSnapshot{}, nil, fmt.Errorf("技能草稿不存在")
+	row, err := loadEditableDraft(ctx, id)
+	if err != nil {
+		return draftSnapshot{}, nil, err
 	}
 	snapshot := draftSnapshot{Row: *row}
 	issues := validateBase(row)
@@ -329,10 +327,87 @@ func loadAndValidate(ctx context.Context, id uint64) (draftSnapshot, []string, e
 	issues = append(issues, manifestIssues...)
 	issues = append(issues, fileIssues...)
 	issues = append(issues, validateDraftManifestScripts(manifest, files)...)
-	issues = append(issues, validateDraftScriptSyntax(ctx, files)...)
 	snapshot.Manifest = manifest
 	snapshot.Files = files
 	return snapshot, issues, nil
+}
+
+func loadAndValidateExecutable(ctx context.Context, id uint64) (draftSnapshot, []string, error) {
+	snapshot, issues, err := loadAndValidate(ctx, id)
+	if err != nil {
+		return draftSnapshot{}, nil, err
+	}
+	issues = append(issues, validateDraftScriptSyntax(ctx, snapshot.Files)...)
+	return snapshot, issues, nil
+}
+
+func loadEditableDraft(ctx context.Context, id uint64) (*agentmodel.SkillDraft, error) {
+	if id == 0 {
+		return nil, fmt.Errorf("技能草稿不存在")
+	}
+	row := agentmodel.NewSkillDraftModel().Find(ctx, map[string]any{"id": id})
+	if row == nil {
+		return nil, fmt.Errorf("技能草稿不存在")
+	}
+	if row.Status != agentmodel.SkillDraftStatusDraft {
+		return nil, fmt.Errorf("技能草稿已发布或已丢弃，不能继续修改")
+	}
+	return row, nil
+}
+
+func validateDraftUpdate(ctx context.Context, row *agentmodel.SkillDraft, values map[string]any) error {
+	key := row.Key
+	name := row.Name
+	description := row.Description
+	if value, exists := values["key"]; exists {
+		key = strings.TrimSpace(fmt.Sprint(value))
+	}
+	if value, exists := values["name"]; exists {
+		name = strings.TrimSpace(fmt.Sprint(value))
+	}
+	if value, exists := values["description"]; exists {
+		description = strings.TrimSpace(fmt.Sprint(value))
+	}
+	if err := agentskill.ValidateMetadata(key, name, description); err != nil {
+		return err
+	}
+	packID := row.PackID
+	cateID := row.CateID
+	if value := patchUint64(values, "pack_id"); value > 0 {
+		packID = value
+	}
+	if value := patchUint64(values, "cate_id"); value > 0 {
+		cateID = value
+	}
+	return agentskill.ValidateAssignment(ctx, packID, cateID)
+}
+
+func updateDraftRow(ctx context.Context, row *agentmodel.SkillDraft, values map[string]any) error {
+	if row == nil || row.ID == 0 {
+		return fmt.Errorf("技能草稿不存在")
+	}
+	values["version"] = row.Version + 1
+	values["updated_at"] = time.Now()
+	affected := agentmodel.NewSkillDraftModel().Update(ctx, map[string]any{
+		"id": row.ID, "status": agentmodel.SkillDraftStatusDraft, "version": row.Version,
+	}, values)
+	if affected == 0 {
+		return fmt.Errorf("技能草稿已发生变化，请刷新后重试")
+	}
+	return nil
+}
+
+func requireDraftVersion(row *agentmodel.SkillDraft, expected uint64) error {
+	if row == nil || row.ID == 0 {
+		return fmt.Errorf("技能草稿不存在")
+	}
+	if expected == 0 {
+		return fmt.Errorf("缺少技能草稿版本，请刷新后重试")
+	}
+	if row.Version != expected {
+		return fmt.Errorf("技能草稿已发生变化，请刷新后重试")
+	}
+	return nil
 }
 
 func validateBase(row *agentmodel.SkillDraft) []string {
@@ -340,14 +415,14 @@ func validateBase(row *agentmodel.SkillDraft) []string {
 	if row == nil {
 		return append(issues, "草稿不存在")
 	}
-	if strings.TrimSpace(row.Key) == "" {
-		issues = append(issues, "技能标识不能为空")
-	}
-	if strings.TrimSpace(row.Name) == "" {
-		issues = append(issues, "技能名称不能为空")
+	if err := agentskill.ValidateMetadata(row.Key, row.Name, row.Description); err != nil {
+		issues = append(issues, err.Error())
 	}
 	if strings.TrimSpace(row.SkillMD) == "" {
 		issues = append(issues, "SKILL.md 不能为空")
+	}
+	if len([]byte(row.SkillMD)) > maxDraftFileBytes {
+		issues = append(issues, fmt.Sprintf("SKILL.md 不能超过 %d 字节", maxDraftFileBytes))
 	}
 	if containsSecretLikeContent(row.SkillMD) {
 		issues = append(issues, "SKILL.md 中疑似包含真实密钥")
@@ -361,40 +436,13 @@ func parseDraftManifest(raw string) (map[string]any, []string) {
 	if raw == "" {
 		return manifest, nil
 	}
+	if len([]byte(raw)) > maxDraftManifestBytes {
+		return manifest, []string{fmt.Sprintf("manifest 不能超过 %d 字节", maxDraftManifestBytes)}
+	}
 	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
 		return manifest, []string{"manifest 必须是 JSON 对象"}
 	}
-	issues := make([]string, 0)
-	if _, exists := manifest["builtin_methods"]; exists {
-		issues = append(issues, "manifest 不能声明平台内置方法")
-		delete(manifest, "builtin_methods")
-	}
-	for _, key := range []string{"value", "value_encrypted", "secret", "api_key", "cookie", "token"} {
-		if _, exists := manifest[key]; exists {
-			issues = append(issues, "manifest 顶层不能包含真实配置值: "+key)
-		}
-	}
-	if configItems, ok := manifest["config"].([]any); ok {
-		for index, item := range configItems {
-			itemMap, ok := item.(map[string]any)
-			if !ok {
-				issues = append(issues, fmt.Sprintf("manifest.config[%d] 必须是对象", index))
-				continue
-			}
-			configKey := strings.TrimSpace(fmt.Sprint(itemMap["key"]))
-			if configKey == "" {
-				issues = append(issues, fmt.Sprintf("manifest.config[%d].key 不能为空", index))
-			} else if !agentskill.IsValidConfigEnvName(configKey) {
-				issues = append(issues, fmt.Sprintf("manifest.config[%d].key 只能包含字母、数字和下划线，且不能使用系统保留变量名", index))
-			}
-			for _, key := range []string{"value", "value_encrypted", "secret_value"} {
-				if _, exists := itemMap[key]; exists {
-					issues = append(issues, fmt.Sprintf("manifest.config[%d] 不能包含真实配置值: %s", index, key))
-				}
-			}
-		}
-	}
-	return manifest, issues
+	return manifest, agentskill.ManifestIssues(manifest)
 }
 
 func parseDraftFiles(raw string) (map[string]string, []string) {
@@ -402,12 +450,19 @@ func parseDraftFiles(raw string) (map[string]string, []string) {
 	if raw == "" {
 		return map[string]string{}, nil
 	}
+	if len([]byte(raw)) > maxDraftFilesJSONBytes {
+		return map[string]string{}, []string{fmt.Sprintf("files_json 不能超过 %d 字节", maxDraftFilesJSONBytes)}
+	}
 	values := map[string]string{}
 	if err := json.Unmarshal([]byte(raw), &values); err != nil {
 		return values, []string{"files_json 必须是路径到文本内容的 JSON 对象"}
 	}
-	values = normalizeDraftFiles(values)
 	issues := make([]string, 0)
+	normalized := normalizeDraftFiles(values)
+	if len(normalized) != len(values) {
+		issues = append(issues, "files_json 包含规范化后重复的文件路径")
+	}
+	values = normalized
 	if len(values) > maxDraftFiles {
 		issues = append(issues, fmt.Sprintf("草稿文件数量不能超过 %d 个", maxDraftFiles))
 	}
@@ -439,8 +494,8 @@ func parseDraftFiles(raw string) (map[string]string, []string) {
 
 func readPublishedSkillFiles(skill agentmodel.Skill) (string, string, error) {
 	root := filepath.Clean(strings.TrimSpace(skill.InstallPath))
-	if !agentskill.IsSafePath(root) {
-		return "", "", fmt.Errorf("技能安装目录不安全")
+	if err := agentskill.ValidateInstallRoot(root); err != nil {
+		return "", "", fmt.Errorf("技能安装目录不安全: %w", err)
 	}
 	entryFile := strings.TrimSpace(skill.EntryFile)
 	if entryFile == "" {
@@ -457,9 +512,12 @@ func readPublishedSkillFiles(skill agentmodel.Skill) (string, string, error) {
 	if len(raw) > maxDraftFileBytes {
 		return "", "", fmt.Errorf("正式技能入口过大，不能创建草稿")
 	}
+	if !utf8.Valid(raw) {
+		return "", "", fmt.Errorf("正式技能入口不是 UTF-8 文本")
+	}
 	files := map[string]string{}
 	totalBytes := len(raw)
-	for _, file := range []string{"requirements.txt", "package.json"} {
+	for _, file := range draftDependencyFiles {
 		if err := readPublishedSkillFile(root, file, files, &totalBytes, true); err != nil {
 			return "", "", err
 		}
@@ -493,6 +551,9 @@ func readPublishedSkillFile(root string, relative string, files map[string]strin
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("读取正式技能文件失败 %s: %w", relative, err)
+	}
+	if !utf8.Valid(raw) {
+		return fmt.Errorf("正式技能文件不是 UTF-8 文本: %s", relative)
 	}
 	*totalBytes += len(raw)
 	if *totalBytes > maxDraftTotalBytes {
@@ -548,29 +609,47 @@ func readPublishedSkillDir(root string, dir string, files map[string]string, tot
 }
 
 func validateDraftFilePath(path string) error {
+	normalized, err := agentskill.NormalizeRelativePath(path)
+	if err != nil {
+		return fmt.Errorf("草稿文件路径不安全 %s: %w", path, err)
+	}
+	if isDraftDependencyFile(normalized) {
+		return nil
+	}
+	if strings.HasPrefix(normalized, "scripts/") {
+		return validateDraftResourcePath(normalized, "scripts/", "脚本资源")
+	}
+	if strings.HasPrefix(normalized, "references/") {
+		return validateDraftResourcePath(normalized, "references/", "参考资料")
+	}
+	return fmt.Errorf("草稿文件只能放在 scripts/ 或 references/: %s", normalized)
+}
+
+func isDraftDependencyFile(path string) bool {
 	path = filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
-	if path == "" || path == "." || strings.HasPrefix(path, "../") || strings.HasPrefix(path, "/") {
-		return fmt.Errorf("草稿文件路径不安全: %s", path)
+	for _, allowed := range draftDependencyFiles {
+		if path == allowed {
+			return true
+		}
 	}
-	if path == "requirements.txt" || path == "package.json" {
-		return nil
+	return false
+}
+
+func validateDraftResourcePath(path string, prefix string, label string) error {
+	path = filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+	if !strings.HasPrefix(path, prefix) || path == strings.TrimSuffix(prefix, "/") || strings.Contains(path, "/.") {
+		return fmt.Errorf("%s路径不安全: %s", label, path)
 	}
-	if strings.HasPrefix(path, "scripts/") {
-		return validateDraftScriptPath(path)
-	}
-	if strings.HasPrefix(path, "references/") {
-		return nil
-	}
-	return fmt.Errorf("草稿文件只能放在 scripts/ 或 references/: %s", path)
+	return nil
 }
 
 func validateDraftScriptPath(path string) error {
-	path = filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
-	if !strings.HasPrefix(path, "scripts/") || strings.Contains(path, "/.") {
+	normalized, err := agentskill.NormalizeRelativePath(path)
+	if err != nil || !strings.HasPrefix(normalized, "scripts/") || strings.Contains(normalized, "/.") {
 		return fmt.Errorf("脚本路径不安全: %s", path)
 	}
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".py", ".js", ".sh", ".bash":
+	switch strings.ToLower(filepath.Ext(normalized)) {
+	case ".py", ".js", ".mjs", ".sh", ".bash":
 		return nil
 	default:
 		return fmt.Errorf("脚本扩展名不允许: %s", path)
@@ -587,29 +666,6 @@ func containsSecretLikeContent(content string) bool {
 	return false
 }
 
-func firstDraftScript(snapshot draftSnapshot) string {
-	if scripts, ok := snapshot.Manifest["scripts"].([]any); ok {
-		for _, item := range scripts {
-			if mapped, ok := item.(map[string]any); ok {
-				if path := strings.TrimSpace(fmt.Sprint(mapped["path"])); path != "" {
-					return filepath.ToSlash(path)
-				}
-			}
-		}
-	}
-	paths := make([]string, 0, len(snapshot.Files))
-	for path := range snapshot.Files {
-		if strings.HasPrefix(filepath.ToSlash(path), "scripts/") {
-			paths = append(paths, filepath.ToSlash(path))
-		}
-	}
-	if len(paths) == 0 {
-		return ""
-	}
-	sort.Strings(paths)
-	return paths[0]
-}
-
 func validationPayload(issues []string) map[string]any {
 	return map[string]any{
 		"valid":  len(issues) == 0,
@@ -617,20 +673,20 @@ func validationPayload(issues []string) map[string]any {
 	}
 }
 
-func saveValidationResult(ctx context.Context, id uint64, payload map[string]any) {
-	if id == 0 {
-		return
-	}
-	current := map[string]any{}
-	if row := agentmodel.NewSkillDraftModel().Find(ctx, map[string]any{"id": id}); row != nil {
-		current = validationResultMap(row.ValidationResult)
-	}
+func saveValidationResult(ctx context.Context, snapshot draftSnapshot, payload map[string]any) error {
+	current := validationResultMap(snapshot.Row.ValidationResult)
 	for key, value := range payload {
 		current[key] = value
 	}
-	agentmodel.NewSkillDraftModel().Update(ctx, map[string]any{"id": id}, map[string]any{
+	affected := agentmodel.NewSkillDraftModel().Update(ctx, map[string]any{
+		"id": snapshot.Row.ID, "status": agentmodel.SkillDraftStatusDraft, "version": snapshot.Row.Version,
+	}, map[string]any{
 		"validation_result": agentskill.JSONText(current),
 	})
+	if affected == 0 {
+		return fmt.Errorf("技能草稿已发生变化，请刷新后重试")
+	}
+	return nil
 }
 
 func validationResultMap(raw string) map[string]any {

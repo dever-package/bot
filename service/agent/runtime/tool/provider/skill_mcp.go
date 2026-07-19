@@ -36,6 +36,15 @@ type mcpMessage struct {
 	Error   any            `json:"error,omitempty"`
 }
 
+type mcpSession struct {
+	cancel      context.CancelFunc
+	command     *exec.Cmd
+	stdin       io.WriteCloser
+	reader      *bufio.Reader
+	stderr      *sandbox.OutputBuffer
+	outputLimit int
+}
+
 func mcpCallTool(loaded map[string]agentskill.Entry, runtime SkillRuntime) Tool {
 	return Tool{
 		Definition: Definition{
@@ -76,9 +85,13 @@ func mcpCallTool(loaded map[string]agentskill.Entry, runtime SkillRuntime) Tool 
 			if err != nil {
 				return Result{}, err
 			}
-			runtime.TempRoot = tempRoot
-			runtime.Sandbox = skillSandboxConfig(entry, runtime.Sandbox)
-			result, err := callMCP(ctx, runtime, entry, server, argumentText(call.Arguments, "tool"), argumentMap(call.Arguments, "arguments"), configEnv.Env)
+			currentRuntime := runtime
+			currentRuntime.TempRoot = tempRoot
+			currentRuntime.Sandbox, err = skillSandboxConfig(entry, runtime.Sandbox)
+			if err != nil {
+				return Result{}, err
+			}
+			result, err := callMCP(ctx, currentRuntime, entry, server, argumentText(call.Arguments, "tool"), argumentMap(call.Arguments, "arguments"), configEnv.Env)
 			if err != nil {
 				return Result{}, fmt.Errorf("%s", agentskill.RedactSecrets(err.Error(), configEnv.Secrets))
 			}
@@ -135,16 +148,54 @@ func manifestMCPServers(manifest string) []mcpServer {
 }
 
 func callMCP(ctx context.Context, runtime SkillRuntime, entry agentskill.Entry, server mcpServer, toolName string, arguments map[string]any, env []string) (any, error) {
+	session, err := startMCPSession(ctx, runtime, entry, server, env)
+	if err != nil {
+		return nil, err
+	}
+	defer session.Close()
+	return session.request(2, "tools/call", map[string]any{"name": toolName, "arguments": arguments})
+}
+
+// SmokeTestMCPServers starts every declared server through the same runtime
+// path used by mcp_call and verifies its advertised tool allowlist.
+func SmokeTestMCPServers(ctx context.Context, runtime SkillRuntime, entry agentskill.Entry, env []string) ([]any, error) {
+	servers := manifestMCPServers(entry.Manifest)
+	results := make([]any, 0, len(servers))
+	for _, server := range servers {
+		session, err := startMCPSession(ctx, runtime, entry, server, env)
+		if err != nil {
+			return results, fmt.Errorf("MCP server %s 启动失败: %w", server.Key, err)
+		}
+		listed, listErr := session.request(2, "tools/list", map[string]any{})
+		session.Close()
+		if listErr != nil {
+			return results, fmt.Errorf("MCP server %s 读取工具失败: %w", server.Key, listErr)
+		}
+		available := mcpToolNames(listed)
+		for _, toolName := range server.Tools {
+			if !containsString(available, toolName) {
+				return results, fmt.Errorf("MCP server %s 未提供声明的 tool: %s", server.Key, toolName)
+			}
+		}
+		results = append(results, map[string]any{
+			"server": server.Key, "declared_tools": append([]string(nil), server.Tools...), "available_tools": available,
+		})
+	}
+	return results, nil
+}
+
+func startMCPSession(ctx context.Context, runtime SkillRuntime, entry agentskill.Entry, server mcpServer, env []string) (*mcpSession, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, mcpTimeout)
-	defer cancel()
 	commandName, commandArgs, err := mcpCommand(entry, server, runtime.Sandbox.Driver)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	process, err := sandbox.PrepareProcess(runtime.Sandbox, sandbox.Request{
 		SkillRoot: entry.InstallPath, TempRoot: runtime.TempRoot, Env: env, Timeout: mcpTimeout,
 	}, commandName, commandArgs)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	command := exec.CommandContext(timeoutCtx, process.CommandName, process.CommandArgs...)
@@ -152,25 +203,25 @@ func callMCP(ctx context.Context, runtime SkillRuntime, entry agentskill.Entry, 
 	command.Env = process.Env
 	stdin, err := command.StdinPipe()
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	stdout, err := command.StdoutPipe()
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	outputLimit := mcpOutputLimit(runtime.Sandbox.OutputMaxBytes)
 	stderr := sandbox.NewOutputBuffer(outputLimit)
 	command.Stderr = stderr
 	if err := command.Start(); err != nil {
+		cancel()
 		return nil, err
 	}
-	defer func() {
-		if command.Process != nil {
-			_ = command.Process.Kill()
-		}
-		_ = command.Wait()
-	}()
-	reader := bufio.NewReaderSize(stdout, 64*1024)
+	session := &mcpSession{
+		cancel: cancel, command: command, stdin: stdin,
+		reader: bufio.NewReaderSize(stdout, 64*1024), stderr: stderr, outputLimit: outputLimit,
+	}
 	if err := writeMCPMessage(stdin, mcpMessage{
 		JSONRPC: "2.0", ID: 1, Method: "initialize",
 		Params: map[string]any{
@@ -179,24 +230,60 @@ func callMCP(ctx context.Context, runtime SkillRuntime, entry agentskill.Entry, 
 			"clientInfo":      map[string]any{"name": "dever-bot", "version": "0.1.0"},
 		},
 	}); err != nil {
+		session.Close()
 		return nil, err
 	}
-	if _, err := readMCPResult(reader, 1, outputLimit); err != nil {
+	if _, err := readMCPResult(session.reader, 1, outputLimit); err != nil {
+		session.Close()
 		return nil, appendMCPStderr(err, stderr)
 	}
-	_ = writeMCPMessage(stdin, mcpMessage{JSONRPC: "2.0", Method: "notifications/initialized", Params: map[string]any{}})
-	if err := writeMCPMessage(stdin, mcpMessage{
-		JSONRPC: "2.0", ID: 2, Method: "tools/call",
-		Params: map[string]any{"name": toolName, "arguments": arguments},
-	}); err != nil {
+	if err := writeMCPMessage(stdin, mcpMessage{JSONRPC: "2.0", Method: "notifications/initialized", Params: map[string]any{}}); err != nil {
+		session.Close()
 		return nil, err
 	}
-	result, err := readMCPResult(reader, 2, outputLimit)
+	return session, nil
+}
+
+func (session *mcpSession) request(id int, method string, params map[string]any) (any, error) {
+	if session == nil || session.stdin == nil || session.reader == nil {
+		return nil, fmt.Errorf("MCP session 未启动")
+	}
+	if err := writeMCPMessage(session.stdin, mcpMessage{JSONRPC: "2.0", ID: id, Method: method, Params: params}); err != nil {
+		return nil, err
+	}
+	result, err := readMCPResult(session.reader, id, session.outputLimit)
 	if err != nil {
-		return nil, appendMCPStderr(err, stderr)
+		return nil, appendMCPStderr(err, session.stderr)
 	}
-	_ = stdin.Close()
 	return result, nil
+}
+
+func (session *mcpSession) Close() {
+	if session == nil || session.cancel == nil {
+		return
+	}
+	_ = session.stdin.Close()
+	session.cancel()
+	if session.command != nil && session.command.Process != nil {
+		_ = session.command.Process.Kill()
+	}
+	if session.command != nil {
+		_ = session.command.Wait()
+	}
+	session.cancel = nil
+}
+
+func mcpToolNames(result any) []string {
+	payload, _ := result.(map[string]any)
+	items, _ := payload["tools"].([]any)
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		tool, _ := item.(map[string]any)
+		if name := cleanManifestText(tool["name"]); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 func mcpCommand(entry agentskill.Entry, server mcpServer, sandboxDriver string) (string, []string, error) {
@@ -224,6 +311,9 @@ func writeMCPMessage(writer io.Writer, message mcpMessage) error {
 	raw, err := json.Marshal(message)
 	if err != nil {
 		return err
+	}
+	if len(raw) > maxMCPMessageBytes {
+		return fmt.Errorf("MCP 请求超过 %d 字节限制", maxMCPMessageBytes)
 	}
 	_, err = writer.Write(append(raw, '\n'))
 	return err

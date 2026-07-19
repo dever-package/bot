@@ -58,8 +58,6 @@ func NormalizeScriptSandboxDriver(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case agentmodel.RuntimeScriptSandboxDriverDisabled:
 		return agentmodel.RuntimeScriptSandboxDriverDisabled
-	case agentmodel.RuntimeScriptSandboxDriverLocal:
-		return agentmodel.RuntimeScriptSandboxDriverLocal
 	case agentmodel.RuntimeScriptSandboxDriverBwrap:
 		return agentmodel.RuntimeScriptSandboxDriverBwrap
 	default:

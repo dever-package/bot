@@ -12,6 +12,7 @@ const (
 	modelOutputReserveRunes         = 8000
 	historyStringRuneLimit          = 6000
 	emergencyHistoryStringRuneLimit = 2400
+	skillHistoryStringRuneLimit     = 14000
 	inputStringRuneLimit            = 16000
 	emergencyInputStringRuneLimit   = 8000
 )
@@ -81,7 +82,7 @@ func compactHistoryGroup(group []any, stringLimit int) []any {
 func historyMessageGroups(history []any, stringLimit int) [][]any {
 	groups := make([][]any, 0, len(history))
 	for index := 0; index < len(history); {
-		message := compactModelValue(history[index], stringLimit)
+		message := compactHistoryMessage(history[index], stringLimit)
 		group := []any{message}
 		index++
 		if !historyMessageHasToolCalls(message) {
@@ -89,7 +90,7 @@ func historyMessageGroups(history []any, stringLimit int) [][]any {
 			continue
 		}
 		for index < len(history) {
-			toolMessage := compactModelValue(history[index], stringLimit)
+			toolMessage := compactHistoryMessage(history[index], stringLimit)
 			if historyMessageRole(toolMessage) != "tool" {
 				break
 			}
@@ -99,6 +100,28 @@ func historyMessageGroups(history []any, stringLimit int) [][]any {
 		groups = append(groups, group)
 	}
 	return groups
+}
+
+func compactHistoryMessage(message any, defaultLimit int) any {
+	limit := defaultLimit
+	if defaultLimit == historyStringRuneLimit && isSkillContentHistoryMessage(message) {
+		limit = skillHistoryStringRuneLimit
+	}
+	return compactModelValue(message, limit)
+}
+
+func isSkillContentHistoryMessage(value any) bool {
+	message, ok := value.(map[string]any)
+	if !ok || historyMessageRole(message) != "tool" {
+		return false
+	}
+	name, _ := message["name"].(string)
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "load_skill", "read_skill_file":
+		return true
+	default:
+		return false
+	}
 }
 
 func historyMessageHasToolCalls(value any) bool {

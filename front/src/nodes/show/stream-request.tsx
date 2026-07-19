@@ -27,6 +27,7 @@ import { getStoreValueByPath } from '@/lib/store'
 import { getCompatModule } from '@dever/front-plugin'
 import {
   isEmptyRuntimeOutput,
+  isPlainRecord,
   normalizeRuntimeFrameOutput,
   resolveRuntimeFrameCancelable,
   runtimeErrorMessage,
@@ -40,6 +41,8 @@ import {
   buildDefaultParamValues,
   buildRequestInput,
   inputKeyForParam,
+  isFileParam,
+  isFilesParam,
   isHiddenParam,
   isMainParam,
   isToolbarParam,
@@ -70,6 +73,14 @@ import type {
 } from './agent-chat/reference'
 import { useAssetReferenceProvider } from '../body-work/asset/asset-reference-provider'
 import { AssetParamPicker } from '../body-work/asset/asset-param-picker'
+import {
+  StreamPowerHistoryPanel,
+  StreamPowerHistoryTrigger,
+  isRunningHistoryStatus,
+  streamPowerHistoryStatusLabel,
+  useStreamPowerHistory,
+  type StreamPowerHistoryAdapter,
+} from './stream-power-history'
 
 type ReferenceEditorProps = {
   value: string
@@ -140,13 +151,20 @@ export type StreamPowerRunnerProps = {
   uploadBizName?: string
   allowResourceLibrary?: boolean
   onUploadedFiles?: (files: ParamUploadedFile[]) => void | Promise<void>
+  history?: StreamPowerHistoryAdapter
 }
 
 export type StreamPowerResult = {
+  historyID: number
+  runID: number
   requestID: string
+  title: string
+  targetAssetID: number
   output: EnergonOutput | null
   running: boolean
   successful: boolean
+  status: string
+  error: string
 }
 
 export function StreamPowerRunner({
@@ -169,6 +187,7 @@ export function StreamPowerRunner({
   uploadBizName,
   allowResourceLibrary = true,
   onUploadedFiles,
+  history,
 }: StreamPowerRunnerProps) {
   const [requestID, setRequestID] = useState('')
   const [lastStreamID, setLastStreamID] = useState('0-0')
@@ -193,11 +212,24 @@ export function StreamPowerRunner({
   const [mobileView, setMobileView] = useState<'input' | 'result'>('input')
   const runTokenRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
+  const pendingHistoryInputRef = useRef<Record<string, unknown>>({})
+  const appliedHistoryInputRef = useRef('')
   const requestIDCopyTimerRef = useRef<number | null>(null)
   const outputScrollRef = useRef<HTMLDivElement | null>(null)
   const autoScrollRef = useRef(true)
+  const historyController = useStreamPowerHistory(history)
+  const liveHistoryID = historyController.liveRun?.historyID || 0
+  const showingLiveResult =
+    !historyController.enabled ||
+    historyController.selectedID === 0 ||
+    historyController.selectedID === liveHistoryID
 
   const activeSelectedSourceID = selectedSource.power === powerKey ? selectedSource.id : ''
+
+  useEffect(() => {
+    setSelectedSource({ power: '', id: '' })
+  }, [history?.scopeKey])
+
   const paramUploadRuleIds = useMemo(
     () =>
       powerParams
@@ -258,6 +290,8 @@ export function StreamPowerRunner({
     setParamValues({})
     setParamFiles({})
     setParamReferenceContents({})
+    pendingHistoryInputRef.current = {}
+    appliedHistoryInputRef.current = ''
     setError('')
     setResultFailed(false)
 
@@ -286,8 +320,12 @@ export function StreamPowerRunner({
         return
       }
 
+      const configData = isPlainRecord(result.data) ? result.data : {}
       const config = normalizePowerParamConfig(result.data)
       const rows = config.params
+      const initialInput = isPlainRecord(configData.initial_input)
+        ? configData.initial_input
+        : {}
       setSourceRule(config.sourceRule)
       setPowerSources(config.sources)
       if (
@@ -297,7 +335,11 @@ export function StreamPowerRunner({
         setSelectedSource({ power: powerKey, id: config.selectedSourceID })
       }
       setPowerParams(rows)
-      setParamValues(buildDefaultParamValues(rows))
+      setParamValues(
+        mergePowerParamValues(rows, buildDefaultParamValues(rows), initialInput)
+      )
+      setParamFiles(buildReplayParamFiles(rows, initialInput))
+      setParamReferenceContents(replayReferenceContents(initialInput))
       setParamsLoading(false)
     }
 
@@ -308,6 +350,9 @@ export function StreamPowerRunner({
   }, [activeSelectedSourceID, paramApi, paramScope, powerKey])
 
   useEffect(() => {
+    if (!showingLiveResult) {
+      return
+    }
     const element = outputScrollRef.current
     if (!element || !autoScrollRef.current) {
       return
@@ -317,7 +362,19 @@ export function StreamPowerRunner({
     return () => {
       window.clearTimeout(timer)
     }
-  }, [output, running])
+  }, [output, running, showingLiveResult])
+
+  useEffect(() => {
+    const element = outputScrollRef.current
+    if (!element) {
+      return
+    }
+    if (showingLiveResult) {
+      scrollOutputToBottom(element)
+      return
+    }
+    element.scrollTop = 0
+  }, [historyController.selectedID, showingLiveResult])
 
   const handleOutputScroll = () => {
     const element = outputScrollRef.current
@@ -341,6 +398,7 @@ export function StreamPowerRunner({
       setRunning(false)
       setCancelable(false)
       setTiming((current) => cancelStreamTiming(current))
+      historyController.finishLiveRun()
     } catch (currentError: unknown) {
       setError(runtimeErrorMessage(currentError, '停止任务失败。'))
     } finally {
@@ -361,6 +419,7 @@ export function StreamPowerRunner({
 
     const token = runTokenRef.current + 1
     runTokenRef.current = token
+    historyController.beginRun()
     if (appearance === 'body') {
       setMobileView('result')
     }
@@ -383,10 +442,12 @@ export function StreamPowerRunner({
       if (Object.keys(paramReferenceContents).length > 0) {
         requestInput._reference_contents = paramReferenceContents
       }
+      pendingHistoryInputRef.current = { ...requestInput }
       const body: Record<string, unknown> = {
         ...requestScope,
         power: powerKey,
         input: requestInput,
+        params_complete: true,
         history: [],
         options: {
           stream: true,
@@ -420,6 +481,7 @@ export function StreamPowerRunner({
       if (runTokenRef.current === token) {
         setError(runtimeErrorMessage(currentError, '测试失败。'))
         setTiming((current) => finishStreamTiming(current, 'failed'))
+        historyController.finishLiveRun()
       }
     } finally {
       if (runTokenRef.current === token) {
@@ -441,6 +503,25 @@ export function StreamPowerRunner({
       setCancelable(frameCancelable)
     }
     const event = valueText(frameOutput.event).toLowerCase()
+    if (event === 'start') {
+      const historyOutput = frameOutput as EnergonOutput & Record<string, unknown>
+      const historyMeta = isPlainRecord(historyOutput.meta)
+        ? historyOutput.meta
+        : {}
+      const historyID = positiveStreamNumber(historyMeta.history_id)
+      if (historyID > 0) {
+        historyController.registerLiveRun({
+          historyID,
+          runID: positiveStreamNumber(historyMeta.run_id),
+          requestID: valueText(frame?.request_id),
+          title: valueText(historyMeta.history_title) || '未命名运行',
+          inputSummary: valueText(historyMeta.history_input_summary),
+          input: { ...pendingHistoryInputRef.current },
+          targetAssetID: positiveStreamNumber(historyMeta.target_asset_id),
+          sourceTargetID: positiveStreamNumber(historyMeta.source_target_id),
+        })
+      }
+    }
     if (isStreamTimingStatusOutput(frameOutput)) {
       setTiming((current) => updateStreamTimingFromOutput(current, frameOutput))
     }
@@ -452,6 +533,7 @@ export function StreamPowerRunner({
           Number(frame.status) === 2 ? 'failed' : 'done'
         )
       )
+      historyController.finishLiveRun()
     }
 
     setOutput((current) => {
@@ -528,28 +610,146 @@ export function StreamPowerRunner({
     }
   }
 
-  const successful = Boolean(
+  const liveSuccessful = Boolean(
     requestID && output.finalOutput && !running && !resultFailed && !error
   )
-  const resultStatus = resolveStreamPowerResultStatus({
+  const liveResultStatus = resolveStreamPowerResultStatus({
     running,
     stopping,
     failed: Boolean(error || resultFailed),
     canceled: timing?.status === 'canceled',
-    successful,
+    successful: liveSuccessful,
   })
+  const liveHistoryStatus = resolveStreamPowerHistoryStatus({
+    running,
+    stopping,
+    failed: Boolean(error || resultFailed),
+    canceled: timing?.status === 'canceled',
+    successful: liveSuccessful,
+  })
+  useEffect(() => {
+    if (liveHistoryID > 0) {
+      historyController.syncLiveRun(liveHistoryID, liveHistoryStatus, error)
+    }
+  }, [error, historyController.syncLiveRun, liveHistoryID, liveHistoryStatus])
+
+  const historicalDetail = showingLiveResult
+    ? null
+    : historyController.selectedDetail
+  const selectedHistoryInput = showingLiveResult
+    ? historyController.liveRun?.input
+    : historicalDetail?.input
+  const selectedHistorySourceTargetID = showingLiveResult
+    ? historyController.liveRun?.sourceTargetID || 0
+    : historicalDetail?.sourceTargetID || 0
+  useEffect(() => {
+    const selectedID = historyController.selectedID
+    if (
+      !historyController.enabled ||
+      selectedID <= 0 ||
+      !selectedHistoryInput ||
+      powerParams.length === 0
+    ) {
+      return
+    }
+    const selectionKey = `${history?.scopeKey || ''}:${selectedID}`
+    if (appliedHistoryInputRef.current === selectionKey) {
+      return
+    }
+    appliedHistoryInputRef.current = selectionKey
+    if (
+      selectedHistorySourceTargetID > 0 &&
+      String(selectedHistorySourceTargetID) !== activeSelectedSourceID
+    ) {
+      setSelectedSource({
+        power: powerKey,
+        id: String(selectedHistorySourceTargetID),
+      })
+    }
+    setParamValues(
+      mergePowerParamValues(
+        powerParams,
+        buildDefaultParamValues(powerParams),
+        selectedHistoryInput
+      )
+    )
+    setParamFiles(buildReplayParamFiles(powerParams, selectedHistoryInput))
+    setParamReferenceContents(replayReferenceContents(selectedHistoryInput))
+  }, [
+    activeSelectedSourceID,
+    history?.scopeKey,
+    historyController.enabled,
+    historyController.selectedID,
+    powerKey,
+    powerParams,
+    selectedHistoryInput,
+    selectedHistorySourceTargetID,
+  ])
+  const activeHistoryItem = historyController.selectedItem
+  const activeStatus = showingLiveResult
+    ? liveHistoryStatus
+    : historicalDetail?.status || activeHistoryItem?.status || 'pending'
+  const resultStatus = showingLiveResult
+    ? liveResultStatus
+    : streamPowerHistoryStatusLabel(activeStatus)
+  const activeOutput = showingLiveResult
+    ? output.finalOutput
+    : historicalDetail?.output || null
+  const activeResult: StreamPowerResult = {
+    historyID: showingLiveResult
+      ? liveHistoryID
+      : historicalDetail?.id || activeHistoryItem?.id || 0,
+    runID: showingLiveResult
+      ? historyController.liveRun?.runID || 0
+      : historicalDetail?.runID || activeHistoryItem?.runID || 0,
+    requestID: showingLiveResult
+      ? requestID
+      : historicalDetail?.requestID || activeHistoryItem?.requestID || '',
+    title: showingLiveResult
+      ? activeHistoryItem?.title || historyController.liveRun?.title || ''
+      : historicalDetail?.title || activeHistoryItem?.title || '',
+    targetAssetID: showingLiveResult
+      ? historyController.liveRun?.targetAssetID || 0
+      : historicalDetail?.targetAssetID || 0,
+    output: activeOutput,
+    running: showingLiveResult ? running : isRunningHistoryStatus(activeStatus),
+    successful: showingLiveResult
+      ? liveSuccessful
+      : Boolean(historicalDetail && activeStatus === 'success'),
+    status: activeStatus,
+    error: showingLiveResult
+      ? error
+      : historicalDetail?.error || activeHistoryItem?.error || '',
+  }
   const resultContent = (
     <>
-      {timing ? (
+      {showingLiveResult && timing ? (
         <div className="stream-power-timing mb-3">
           <StreamTimingBadge timing={timing} now={nowMs} />
         </div>
       ) : null}
+      {!showingLiveResult && historyController.detailError ? (
+        <div className="stream-power-history-detail-error">
+          <span>{historyController.detailError}</span>
+          <button type="button" onClick={historyController.retryDetail}>
+            重试
+          </button>
+        </div>
+      ) : null}
+      {!showingLiveResult &&
+      !historyController.detailError &&
+      activeResult.error ? (
+        <div className="stream-power-history-detail-error">
+          <span>{activeResult.error}</span>
+        </div>
+      ) : null}
       <EnergonContentView
-        output={buildContentViewOutput(output)}
-        streaming={running && !output.finalOutput}
+        output={showingLiveResult ? buildContentViewOutput(output) : activeOutput}
+        streaming={showingLiveResult && running && !output.finalOutput}
         emptyText={
-          appearance === 'body'
+          !showingLiveResult && historyController.detailLoading
+            ? '正在读取历史结果。'
+            : appearance === 'body'
             ? '生成结果会显示在这里。'
             : 'AI 返回内容会显示在这里。'
         }
@@ -748,7 +948,7 @@ export function StreamPowerRunner({
 
       <div className="stream-power-divider hidden w-px shrink-0 bg-border md:block" aria-hidden="true" />
 
-      <div className="stream-power-result flex min-h-[360px] min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-background md:h-full md:min-h-0">
+      <div className="stream-power-result relative flex min-h-[360px] min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-background md:h-full md:min-h-0">
         <div className="stream-power-result-header flex shrink-0 items-center justify-between gap-3 border-b px-3 py-2">
           {appearance === 'body' ? (
             <div className="stream-power-result-heading">
@@ -767,12 +967,8 @@ export function StreamPowerRunner({
                 onStop={stop}
               />
             ) : null}
-            {renderResultActions?.({
-              requestID,
-              output: output.finalOutput,
-              running,
-              successful,
-            })}
+            {renderResultActions?.(activeResult)}
+            <StreamPowerHistoryTrigger controller={historyController} />
             {appearance !== 'body' ? (
               requestID ? (
                 <button
@@ -807,6 +1003,7 @@ export function StreamPowerRunner({
             resultContent
           )}
         </div>
+        <StreamPowerHistoryPanel controller={historyController} />
       </div>
     </div>
   )
@@ -924,6 +1121,31 @@ function resolveStreamPowerResultStatus({
   return successful ? '已完成' : '等待生成'
 }
 
+function resolveStreamPowerHistoryStatus({
+  running,
+  stopping,
+  failed,
+  canceled,
+  successful,
+}: {
+  running: boolean
+  stopping: boolean
+  failed: boolean
+  canceled: boolean
+  successful: boolean
+}) {
+  if (stopping || running) {
+    return 'running'
+  }
+  if (failed) {
+    return 'fail'
+  }
+  if (canceled) {
+    return 'canceled'
+  }
+  return successful ? 'success' : 'pending'
+}
+
 function isScrolledToBottom(element: HTMLElement) {
   return element.scrollHeight - element.scrollTop - element.clientHeight <= 24
 }
@@ -953,4 +1175,107 @@ function clearRequestIDCopyTimer(timerRef: { current: number | null }) {
   }
   window.clearTimeout(timerRef.current)
   timerRef.current = null
+}
+
+function positiveStreamNumber(value: unknown) {
+  const number = Number(value || 0)
+  return Number.isFinite(number) && number > 0 ? number : 0
+}
+
+function mergePowerParamValues(
+  params: PowerParam[],
+  current: ParamValueMap,
+  input: Record<string, unknown>
+) {
+  let next = current
+  for (const param of params) {
+    const key = inputKeyForParam(param)
+    if (!key || !Object.prototype.hasOwnProperty.call(input, key)) {
+      continue
+    }
+    const value = replayParamValue(input[key])
+    if (Object.is(next[key], value)) {
+      continue
+    }
+    if (next === current) {
+      next = { ...current }
+    }
+    next[key] = value
+  }
+  return next
+}
+
+function replayParamValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return [...value]
+  }
+  if (isPlainRecord(value)) {
+    return { ...value }
+  }
+  return value
+}
+
+function replayReferenceContents(input: Record<string, unknown>) {
+  const raw = isPlainRecord(input._reference_contents)
+    ? input._reference_contents
+    : {}
+  const result: Record<string, ReferenceContent> = {}
+  for (const [key, value] of Object.entries(raw)) {
+    if (isPlainRecord(value)) {
+      result[key] = value as ReferenceContent
+    }
+  }
+  return result
+}
+
+function buildReplayParamFiles(
+  params: PowerParam[],
+  input: Record<string, unknown>
+): ParamFileMap {
+  const result: ParamFileMap = {}
+  for (const param of params) {
+    if (!isFileParam(param)) {
+      continue
+    }
+    const key = inputKeyForParam(param)
+    if (!key || !Object.prototype.hasOwnProperty.call(input, key)) {
+      continue
+    }
+    const urls = replayFileURLs(input[key])
+    const selected = isFilesParam(param) ? urls : urls.slice(0, 1)
+    if (selected.length === 0) {
+      continue
+    }
+    result[key] = selected.map((url, index) => {
+      const kind = param.asset_kinds?.[0]
+      return {
+        id: `replay:${key}:${index}`,
+        name: replayFileName(url, index),
+        kind,
+        url,
+        thumbnail: kind === 'image' ? url : undefined,
+      }
+    })
+  }
+  return result
+}
+
+function replayFileURLs(value: unknown) {
+  const values = Array.isArray(value) ? value : [value]
+  return values
+    .map((item) => valueText(item))
+    .filter((item) => item.length > 0)
+}
+
+function replayFileName(url: string, index: number) {
+  const path = url.split(/[?#]/, 1)[0] || ''
+  const name = path.split('/').pop() || ''
+  if (name) {
+    try {
+      return decodeURIComponent(name)
+    } catch {
+      return name
+    }
+  }
+  return `历史文件 ${index + 1}`
 }

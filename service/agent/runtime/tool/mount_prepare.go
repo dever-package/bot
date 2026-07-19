@@ -121,9 +121,10 @@ func loadMountPreparationData(ctx context.Context, request MountRequest) (mountP
 	}
 	if request.Agent.SkillPackID > 0 {
 		group.Go("读取智能体技能方案", func() error {
-			prepared.skillEntries = agentskill.EntriesByPack(ctx, request.Agent.SkillPackID)
+			var err error
+			prepared.skillEntries, err = agentskill.EntriesByPack(ctx, request.Agent.SkillPackID)
 			prepared.skillConfig = runtimeConfig(ctx)
-			return nil
+			return err
 		})
 	}
 	if request.Agent.PowerCateID > 0 {

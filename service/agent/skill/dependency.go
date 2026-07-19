@@ -12,7 +12,19 @@ import (
 	"github.com/dever-package/bot/service/agent/runtime/tool/sandbox"
 )
 
-const dependencyInstallTimeout = 5 * time.Minute
+const (
+	dependencyInstallTimeout = 5 * time.Minute
+	dependencyCheckInterval  = 500 * time.Millisecond
+	maxDependencyFiles       = 50_000
+	maxDependencyBytes       = int64(512 * 1024 * 1024)
+	maxDependencyDepth       = 32
+)
+
+var dependencyTreeLimits = TreeLimits{
+	MaxFiles: maxDependencyFiles,
+	MaxBytes: maxDependencyBytes,
+	MaxDepth: maxDependencyDepth,
+}
 
 func PrepareDependencies(ctx context.Context, config sandbox.Config, root string) ([]any, error) {
 	root = strings.TrimSpace(root)
@@ -31,8 +43,10 @@ func PrepareDependencies(ctx context.Context, config sandbox.Config, root string
 		return nil, fmt.Errorf("技能依赖目录不是普通目录: %s", root)
 	}
 	root = absoluteRoot
-	config = sandbox.NormalizeConfig(config)
-	config.NetworkMode = sandbox.NetworkHost
+	config, err = sandbox.IsolatedConfig(config, true)
+	if err != nil {
+		return nil, err
+	}
 	dependencies := make([]any, 0, 2)
 	managedRoot, _, err := ResolveRelativePath(root, ".dever")
 	if err != nil {
@@ -43,20 +57,34 @@ func PrepareDependencies(ctx context.Context, config sandbox.Config, root string
 	}
 	defer os.RemoveAll(filepath.Join(managedRoot, "home"))
 
-	hasPython, err := regularDependencyFile(root, "requirements.txt")
+	hasRequirements, err := regularDependencyFile(root, "requirements.txt")
 	if err != nil {
 		return nil, err
 	}
-	if hasPython {
+	hasPyproject, err := regularDependencyFile(root, "pyproject.toml")
+	if err != nil {
+		return nil, err
+	}
+	if hasRequirements || hasPyproject {
 		target := filepath.Join(root, ".dever", "deps", "python")
 		if err := resetDependencyDirectory(target); err != nil {
 			return nil, err
 		}
-		if err := runDependencyCommand(ctx, config, root, "python3", "-m", "pip", "install", "--disable-pip-version-check", "-r", "requirements.txt", "-t", ".dever/deps/python"); err != nil {
+		dependencyFile := "pyproject.toml"
+		args := []string{"-m", "pip", "install", "--disable-pip-version-check", ".", "-t", ".dever/deps/python"}
+		if hasRequirements {
+			dependencyFile = "requirements.txt"
+			args = []string{"-m", "pip", "install", "--disable-pip-version-check", "-r", dependencyFile, "-t", ".dever/deps/python"}
+		}
+		if err := runDependencyCommand(ctx, config, root, managedRoot, "python3", args...); err != nil {
 			return nil, fmt.Errorf("安装 Python 依赖失败: %w", err)
 		}
+		digest, err := DirectoryContentHash(target)
+		if err != nil {
+			return nil, err
+		}
 		dependencies = append(dependencies, map[string]any{
-			"type": "python", "file": "requirements.txt", "path": ".dever/deps/python",
+			"type": "python", "file": dependencyFile, "path": ".dever/deps/python", "digest": digest,
 		})
 	}
 
@@ -69,23 +97,43 @@ func PrepareDependencies(ctx context.Context, config sandbox.Config, root string
 		if err := resetDependencyDirectory(target); err != nil {
 			return nil, err
 		}
-		packageJSON, _, err := ResolveRelativePath(root, "package.json")
-		if err != nil {
+		if err := copyDependencyFile(root, target, "package.json"); err != nil {
 			return nil, err
 		}
-		raw, err := os.ReadFile(packageJSON)
-		if err != nil {
-			return nil, err
+		lockFile := ""
+		for _, candidate := range []string{"npm-shrinkwrap.json", "package-lock.json"} {
+			exists, fileErr := regularDependencyFile(root, candidate)
+			if fileErr != nil {
+				return nil, fileErr
+			}
+			if !exists {
+				continue
+			}
+			lockFile = candidate
+			if err := copyDependencyFile(root, target, candidate); err != nil {
+				return nil, err
+			}
+			break
 		}
-		if err := os.WriteFile(filepath.Join(target, "package.json"), raw, 0o644); err != nil {
-			return nil, err
+		npmCommand := "install"
+		if lockFile != "" {
+			npmCommand = "ci"
 		}
-		if err := runDependencyCommand(ctx, config, root, "npm", "install", "--ignore-scripts", "--omit=dev", "--prefix", ".dever/deps/node"); err != nil {
+		if err := runDependencyCommand(ctx, config, root, managedRoot, "npm", npmCommand, "--ignore-scripts", "--omit=dev", "--prefix", ".dever/deps/node"); err != nil {
 			return nil, fmt.Errorf("安装 Node 依赖失败: %w", err)
 		}
-		dependencies = append(dependencies, map[string]any{
+		dependency := map[string]any{
 			"type": "node", "file": "package.json", "path": ".dever/deps/node",
-		})
+		}
+		if lockFile != "" {
+			dependency["lock_file"] = lockFile
+		}
+		digest, err := DirectoryContentHash(target)
+		if err != nil {
+			return nil, err
+		}
+		dependency["digest"] = digest
+		dependencies = append(dependencies, dependency)
 	}
 	return dependencies, nil
 }
@@ -118,7 +166,23 @@ func resetDependencyDirectory(path string) error {
 	return os.MkdirAll(path, 0o755)
 }
 
-func runDependencyCommand(ctx context.Context, config sandbox.Config, workDir string, name string, args ...string) error {
+func copyDependencyFile(root string, target string, name string) error {
+	path, _, err := ResolveRelativePath(root, name)
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(target, name), raw, 0o644)
+}
+
+func validateDependencyTree(root string) error {
+	return ValidateTreeLimits(root, dependencyTreeLimits)
+}
+
+func runDependencyCommand(ctx context.Context, config sandbox.Config, workDir string, limitRoot string, name string, args ...string) error {
 	home := filepath.Join(workDir, ".dever", "home")
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		return err
@@ -135,21 +199,50 @@ func runDependencyCommand(ctx context.Context, config sandbox.Config, workDir st
 	output := sandbox.NewOutputBuffer(sandbox.DefaultOutputMaxBytes)
 	command.Stdout = output
 	command.Stderr = output
-	err = command.Run()
-	if timeoutCtx.Err() == context.DeadlineExceeded {
-		return fmt.Errorf("依赖安装超时")
+	if err := command.Start(); err != nil {
+		return err
 	}
-	if err != nil {
-		message := strings.TrimSpace(output.String())
-		if message == "" {
-			message = err.Error()
+	wait := make(chan error, 1)
+	go func() {
+		wait <- command.Wait()
+	}()
+	ticker := time.NewTicker(dependencyCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case err := <-wait:
+			if timeoutCtx.Err() == context.DeadlineExceeded {
+				return fmt.Errorf("依赖安装超时")
+			}
+			if err != nil {
+				return dependencyCommandError(err, output)
+			}
+			return validateDependencyTree(limitRoot)
+		case <-ticker.C:
+			if err := validateDependencyTree(limitRoot); err != nil {
+				cancel()
+				<-wait
+				return fmt.Errorf("依赖目录超过资源限制: %w", err)
+			}
+		case <-timeoutCtx.Done():
+			<-wait
+			if timeoutCtx.Err() == context.DeadlineExceeded {
+				return fmt.Errorf("依赖安装超时")
+			}
+			return timeoutCtx.Err()
 		}
-		if output.Truncated() {
-			message += "\n[依赖安装输出已截断]"
-		}
-		return fmt.Errorf("%s", message)
 	}
-	return nil
+}
+
+func dependencyCommandError(err error, output *sandbox.OutputBuffer) error {
+	message := strings.TrimSpace(output.String())
+	if message == "" {
+		message = err.Error()
+	}
+	if output.Truncated() {
+		message += "\n[依赖安装输出已截断]"
+	}
+	return fmt.Errorf("%s", message)
 }
 
 func dependencyCommandEnv(config sandbox.Config, workDir string) []string {

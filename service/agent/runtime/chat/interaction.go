@@ -11,7 +11,7 @@ import (
 
 type interactionResumeState struct {
 	knowledgeUsed bool
-	loadedSkills  []string
+	loadedSkills  []agentmodel.LoadedSkillRef
 }
 
 func resolveInteractionResponse(
@@ -52,7 +52,7 @@ func resolveInteractionResponse(
 	}, nil
 }
 
-func interactionLoadedSkills(ctx context.Context, requestID string) []string {
+func interactionLoadedSkills(ctx context.Context, requestID string) []agentmodel.LoadedSkillRef {
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
 		return nil
@@ -61,24 +61,7 @@ func interactionLoadedSkills(ctx context.Context, requestID string) []string {
 	if run == nil {
 		return nil
 	}
-	values, ok := decodeJSON(run.Skills).([]any)
-	if !ok {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(values))
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		key := strings.TrimSpace(interactionText(value))
-		if key == "" {
-			continue
-		}
-		if _, exists := seen[key]; exists {
-			continue
-		}
-		seen[key] = struct{}{}
-		result = append(result, key)
-	}
-	return result
+	return agentmodel.DecodeLoadedSkillRefs(run.Skills)
 }
 
 func interactionFields(value any) []any {

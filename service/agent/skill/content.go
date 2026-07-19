@@ -5,43 +5,31 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode/utf8"
 )
 
-func LoadContents(entries []Entry, limits Limits) ([]Entry, []string) {
-	limits = normalizeLimits(limits)
-	loaded := make([]Entry, 0, len(entries))
-	warnings := make([]string, 0)
-	remaining := limits.LoadedContentMaxRunes
-	for _, entry := range entries {
-		if remaining <= 0 {
-			warnings = append(warnings, "已加载技能正文达到总长度上限，后续技能未继续读取。")
-			break
-		}
-		content, entryWarnings := ReadContent(entry, limits)
-		warnings = append(warnings, entryWarnings...)
-		if strings.TrimSpace(content) == "" {
-			continue
-		}
-		content, truncated := truncateRunes(content, remaining)
-		if truncated {
-			warnings = append(warnings, fmt.Sprintf("技能 %s 正文超过剩余总长度上限，已截断。", entry.Key))
-		}
-		entry.Content = strings.TrimSpace(content)
-		loaded = append(loaded, entry)
-		remaining -= runeLen(entry.Content)
-	}
-	return loaded, warnings
+const DefaultContentPageRunes = 12000
+
+type TextPage struct {
+	Content    string
+	Offset     int
+	NextOffset int
+	TotalRunes int
+	EOF        bool
 }
 
-func ReadContent(entry Entry, limits Limits) (string, []string) {
+func ReadContent(entry Entry, limits Limits) (string, []string, error) {
 	limits = normalizeLimits(limits)
 	warnings := make([]string, 0)
 	if content := BuiltinContent(entry); strings.TrimSpace(content) != "" {
-		return strings.TrimSpace(content), warnings
+		return strings.TrimSpace(content), warnings, nil
 	}
 	installPath := strings.TrimSpace(entry.InstallPath)
 	if installPath == "" {
-		return "", []string{fmt.Sprintf("技能 %s 未配置安装目录", entry.Key)}
+		return "", nil, fmt.Errorf("技能 %s 未配置安装目录", entry.Key)
+	}
+	if err := ValidateInstallRoot(installPath); err != nil {
+		return "", nil, fmt.Errorf("技能 %s 安装目录不安全: %w", entry.Key, err)
 	}
 	entryFile := strings.TrimSpace(entry.EntryFile)
 	if entryFile == "" {
@@ -49,20 +37,66 @@ func ReadContent(entry Entry, limits Limits) (string, []string) {
 	}
 	path, _, err := ResolveRelativePath(installPath, entryFile)
 	if err != nil {
-		return "", []string{fmt.Sprintf("技能 %s 安装目录不安全: %s", entry.Key, err.Error())}
+		return "", nil, fmt.Errorf("技能 %s 入口路径不安全: %w", entry.Key, err)
 	}
 	raw, truncated, err := readLimitedFile(path, limits.SkillFileMaxBytes)
 	if err != nil {
-		return "", []string{fmt.Sprintf("技能 %s 读取失败: %s", entry.Key, err.Error())}
+		return "", nil, fmt.Errorf("技能 %s 读取失败: %w", entry.Key, err)
 	}
 	if truncated {
 		warnings = append(warnings, fmt.Sprintf("技能 %s 文件超过 %d 字节，已按上限读取。", entry.Key, limits.SkillFileMaxBytes))
+	}
+	raw, valid := UTF8Prefix(raw, truncated)
+	if !valid {
+		return "", warnings, fmt.Errorf("技能 %s 入口文件不是 UTF-8 文本", entry.Key)
 	}
 	_, body := SplitFrontMatter(string(raw))
 	if strings.TrimSpace(body) == "" {
 		body = string(raw)
 	}
-	return strings.TrimSpace(body), warnings
+	return strings.TrimSpace(body), warnings, nil
+}
+
+// UTF8Prefix permits a size-limited read to end in the middle of one UTF-8
+// rune, while still rejecting genuinely invalid text.
+func UTF8Prefix(raw []byte, truncated bool) ([]byte, bool) {
+	if utf8.Valid(raw) {
+		return raw, true
+	}
+	if !truncated {
+		return raw, false
+	}
+	for trim := 1; trim < utf8.UTFMax && trim < len(raw); trim++ {
+		if prefix := raw[:len(raw)-trim]; utf8.Valid(prefix) {
+			return prefix, true
+		}
+	}
+	return raw, false
+}
+
+func PaginateText(value string, offset int, limit int) (TextPage, error) {
+	value = strings.TrimSpace(value)
+	if offset < 0 {
+		return TextPage{}, fmt.Errorf("读取偏移不能小于 0")
+	}
+	if limit <= 0 || limit > DefaultContentPageRunes {
+		limit = DefaultContentPageRunes
+	}
+	runes := []rune(value)
+	if offset > len(runes) {
+		return TextPage{}, fmt.Errorf("读取偏移 %d 超出正文长度 %d", offset, len(runes))
+	}
+	end := offset + limit
+	if end > len(runes) {
+		end = len(runes)
+	}
+	return TextPage{
+		Content:    string(runes[offset:end]),
+		Offset:     offset,
+		NextOffset: end,
+		TotalRunes: len(runes),
+		EOF:        end >= len(runes),
+	}, nil
 }
 
 func readLimitedFile(path string, maxBytes int64) ([]byte, bool, error) {
@@ -94,8 +128,4 @@ func truncateRunes(value string, limit int) (string, bool) {
 		return string(runes[:limit]), true
 	}
 	return string(runes[:limit-3]) + "...", true
-}
-
-func runeLen(value string) int {
-	return len([]rune(strings.TrimSpace(value)))
 }

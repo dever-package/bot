@@ -209,8 +209,13 @@ type CanvasPowerRunRequest struct {
 	Params         map[string]any
 	PersistResult  bool
 	OnStream       func(payload map[string]any)
-	OnRunCreated   func(runID uint64, requestID string)
+	OnRunCreated   func(runID uint64, requestID string) error
 }
+
+const (
+	CanvasPowerMetaTeamPowerID    = "_team_power_id"
+	CanvasPowerMetaSourceTargetID = "_source_target_id"
+)
 
 type PublishedTeamBinding struct {
 	TeamID    uint64

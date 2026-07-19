@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -18,6 +19,32 @@ type Response struct {
 	StatusCode int
 	Headers    map[string]string
 	Body       any
+}
+
+type BinaryPayload struct {
+	MIME    string         `json:"mime"`
+	Content []byte         `json:"-"`
+	Meta    map[string]any `json:"meta,omitempty"`
+}
+
+func (payload BinaryPayload) String() string {
+	mimeType := strings.TrimSpace(payload.MIME)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	return fmt.Sprintf("[binary payload mime=%s size=%d]", mimeType, len(payload.Content))
+}
+
+func AsBinaryPayload(value any) (BinaryPayload, bool) {
+	switch current := value.(type) {
+	case BinaryPayload:
+		return current, true
+	case *BinaryPayload:
+		if current != nil {
+			return *current, true
+		}
+	}
+	return BinaryPayload{}, false
 }
 
 type StreamChunk struct {

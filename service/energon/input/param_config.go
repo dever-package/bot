@@ -15,6 +15,7 @@ type PowerParam struct {
 	Key          string             `json:"key"`
 	Icon         string             `json:"icon,omitempty"`
 	Type         string             `json:"type"`
+	PreviewType  string             `json:"preview_type,omitempty"`
 	Usage        int16              `json:"usage"`
 	ValueType    string             `json:"value_type"`
 	DefaultValue string             `json:"default_value"`
@@ -31,6 +32,7 @@ type PowerParamOption struct {
 	Name        string `json:"name"`
 	Value       string `json:"value"`
 	NativeValue string `json:"native_value"`
+	PreviewURL  string `json:"preview_url,omitempty"`
 	Sort        int    `json:"sort"`
 }
 
@@ -164,6 +166,7 @@ func buildPowerParamRow(
 		Key:          strings.TrimSpace(config.Key),
 		Icon:         strings.TrimSpace(param.Icon),
 		Type:         NormalizeParamControlType(param.Type),
+		PreviewType:  NormalizeParamPreviewType(param.PreviewType),
 		Usage:        normalizeParamUsage(param.Usage),
 		ValueType:    NormalizeParamValueType(param.ValueType),
 		DefaultValue: strings.TrimSpace(param.DefaultValue),
@@ -300,6 +303,7 @@ func powerParamOptions(
 			Name:        option.Name,
 			Value:       optionLabel(option),
 			NativeValue: option.Value,
+			PreviewURL:  strings.TrimSpace(option.PreviewURL),
 			Sort:        option.Sort,
 		})
 	}

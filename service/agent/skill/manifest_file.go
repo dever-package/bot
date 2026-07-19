@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -59,14 +58,6 @@ func mergeManifestFile(directory string, manifest map[string]any) (map[string]an
 // one authoritative database snapshot.
 func ResolveEntryManifest(entry Entry) Entry {
 	manifest := ParseManifestMap(entry.Manifest)
-	directory := strings.TrimSpace(entry.InstallPath)
-	if directory == "" && strings.TrimSpace(entry.Key) != "" {
-		candidate := filepath.Join(Root, NormalizeKey(entry.Key))
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			directory = candidate
-			entry.InstallPath = candidate
-		}
-	}
 	entry.Manifest = JSONText(manifest)
 	entry.Triggers = ManifestTriggers(entry.Manifest)
 	entry.Domains = ManifestDomains(entry.Manifest)

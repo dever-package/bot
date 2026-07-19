@@ -14,10 +14,12 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 	assetmodel "github.com/dever-package/bot/model/asset"
 	projectmodel "github.com/dever-package/bot/model/project"
+	teammodel "github.com/dever-package/bot/model/team"
 	workspacemodel "github.com/dever-package/bot/model/workspace"
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
 	assetservice "github.com/dever-package/bot/service/asset"
 	bodyservice "github.com/dever-package/bot/service/body"
+	energonservice "github.com/dever-package/bot/service/energon"
 	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	teamservice "github.com/dever-package/bot/service/team"
@@ -34,11 +36,22 @@ type Service struct {
 
 var teamWorkspaceCreateMu sync.Mutex
 
+const (
+	powerReplayInputKey   = "_replay_input"
+	powerTargetAssetIDKey = "_target_asset_id"
+)
+
+type powerContinuationContext struct {
+	Reference assetservice.CurrentReference
+	RunInput  map[string]any
+}
+
 type PowerRunRequest struct {
 	TeamID         uint64
 	TeamPowerID    uint64
 	SourceTargetID uint64
 	TargetAssetID  uint64
+	ParamsComplete bool
 	Input          map[string]any
 	Params         map[string]any
 }
@@ -98,11 +111,124 @@ func (s Service) Catalog(ctx context.Context, teamID uint64) (map[string]any, er
 	return payload, nil
 }
 
-func (s Service) PowerForm(ctx context.Context, teamID uint64, teamPowerID uint64, targetID uint64) (map[string]any, error) {
+func (s Service) PowerForm(
+	ctx context.Context,
+	teamID uint64,
+	teamPowerID uint64,
+	sourceTargetID uint64,
+	targetAssetID uint64,
+) (map[string]any, error) {
 	if _, err := userservice.RequireActor(ctx); err != nil {
 		return nil, err
 	}
-	return s.team.WorkbenchPowerForm(ctx, teamID, teamPowerID, targetID)
+	var continuation powerContinuationContext
+	if targetAssetID > 0 {
+		binding, err := s.team.ResolveWorkbenchPower(ctx, teamID, teamPowerID)
+		if err != nil {
+			return nil, err
+		}
+		workspace, err := s.requireWorkspace(ctx, binding.TeamID)
+		if err != nil {
+			return nil, err
+		}
+		continuation, err = s.resolvePowerContinuation(ctx, *workspace, binding, targetAssetID)
+		if err != nil {
+			return nil, err
+		}
+		if sourceTargetID == 0 {
+			sourceTargetID = nestedUint64(continuation.RunInput, teamservice.CanvasPowerMetaSourceTargetID)
+		}
+	}
+	form, err := s.team.WorkbenchPowerForm(ctx, teamID, teamPowerID, sourceTargetID)
+	if err != nil {
+		return nil, err
+	}
+	if targetAssetID == 0 || len(continuation.RunInput) == 0 {
+		return form, nil
+	}
+	params, ok := form["params"].([]energoninput.PowerParam)
+	if !ok {
+		return nil, fmt.Errorf("能力参数配置无效")
+	}
+	form["initial_input"] = powerReplayParamInput(params, continuation.RunInput)
+	return form, nil
+}
+
+func (s Service) resolvePowerContinuation(
+	ctx context.Context,
+	workspace workspacemodel.TeamWorkspace,
+	binding teamservice.WorkbenchPowerBinding,
+	assetID uint64,
+) (powerContinuationContext, error) {
+	target, err := s.asset.RequireContinuationTarget(
+		ctx,
+		binding.TeamID,
+		assetID,
+		assetmodel.SourceTool,
+		binding.TeamPowerID,
+	)
+	if err != nil {
+		return powerContinuationContext{}, err
+	}
+	reference, err := s.asset.RequireCurrentReference(ctx, binding.TeamID, target.ID, target.VersionID)
+	if err != nil {
+		return powerContinuationContext{}, err
+	}
+	result := powerContinuationContext{Reference: reference}
+	if reference.Version.RunID == 0 {
+		return result, nil
+	}
+	run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": reference.Version.RunID})
+	if run == nil {
+		return result, nil
+	}
+	runInput := recordValue(run.Input)
+	if run.BodyID != workspace.BodyID ||
+		run.TeamID != binding.TeamID ||
+		nestedUint64(runInput, teamservice.CanvasPowerMetaTeamPowerID) != binding.TeamPowerID ||
+		(strings.TrimSpace(reference.Version.RequestID) != "" &&
+			strings.TrimSpace(run.RequestID) != strings.TrimSpace(reference.Version.RequestID)) {
+		return powerContinuationContext{}, fmt.Errorf("素材原运行记录与当前工具不匹配")
+	}
+	result.RunInput = runInput
+	if nestedUint64(runInput, teamservice.CanvasPowerMetaSourceTargetID) == 0 {
+		if targetID := energonservice.PowerTargetIDByRequestID(ctx, run.RequestID); targetID > 0 {
+			runInput[teamservice.CanvasPowerMetaSourceTargetID] = targetID
+		}
+	}
+	return result, nil
+}
+
+func attachPreviousPowerOutput(
+	params []energoninput.PowerParam,
+	input map[string]any,
+	previousOutput any,
+) map[string]any {
+	result := cloneMap(input)
+	content, isText := previousOutput.(string)
+	if !isText {
+		if raw, err := json.Marshal(previousOutput); err == nil {
+			content = string(raw)
+		}
+	}
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return result
+	}
+	for _, param := range params {
+		if !energoninput.IsPromptParamType(param.Type) {
+			continue
+		}
+		key := powerParamInputKey(param)
+		if key == "" {
+			continue
+		}
+		prompt := strings.TrimSpace(nestedText(result, key))
+		result[key] = strings.TrimSpace(prompt + "\n\n上一版内容：\n" + content)
+		return result
+	}
+	result["previous_output"] = previousOutput
+	return result
 }
 
 func (s Service) StartPower(ctx context.Context, request PowerRunRequest) (map[string]any, error) {
@@ -114,32 +240,60 @@ func (s Service) StartPower(ctx context.Context, request PowerRunRequest) (map[s
 	if err != nil {
 		return nil, err
 	}
+	request.Input = cloneMap(request.Input)
+	var continuation powerContinuationContext
 	if request.TargetAssetID > 0 {
-		if _, err = s.asset.RequireContinuationTarget(
-			ctx,
-			binding.TeamID,
-			request.TargetAssetID,
-			assetmodel.SourceTool,
-			binding.TeamPowerID,
-		); err != nil {
+		continuation, err = s.resolvePowerContinuation(
+			ctx, *workspace, binding, request.TargetAssetID,
+		)
+		if err != nil {
 			return nil, err
 		}
-		request.Input = cloneMap(request.Input)
-		request.Input["_target_asset_id"] = request.TargetAssetID
+		request.Input[powerTargetAssetIDKey] = request.TargetAssetID
+		if request.SourceTargetID == 0 {
+			request.SourceTargetID = nestedUint64(
+				continuation.RunInput,
+				teamservice.CanvasPowerMetaSourceTargetID,
+			)
+		}
 	}
-	resolvedParams, err := s.resolvePowerAssetReferences(
-		ctx,
-		binding.TeamID,
-		binding.TeamPowerID,
-		request.SourceTargetID,
-		request.Params,
+	form, err := s.team.WorkbenchPowerForm(
+		ctx, binding.TeamID, binding.TeamPowerID, request.SourceTargetID,
 	)
 	if err != nil {
 		return nil, err
 	}
+	request.SourceTargetID = nestedUint64(form, "selected_target_id")
+	powerParams, ok := form["params"].([]energoninput.PowerParam)
+	if !ok {
+		return nil, fmt.Errorf("能力参数配置无效")
+	}
+	request.Params = powerConfiguredParamInput(powerParams, request.Params)
+	if len(continuation.RunInput) > 0 && !request.ParamsComplete {
+		replayParams := powerReplayParamInput(powerParams, continuation.RunInput)
+		for key, value := range request.Params {
+			replayParams[key] = value
+		}
+		request.Params = replayParams
+	}
+	request.Params = energonservice.ApplyPowerParamDefaults(request.Params, powerParams)
+	request.Input[powerReplayInputKey] = cloneMap(request.Params)
+	historyPrompt := powerHistoryPrompt(powerParams, request.Params)
+	historySummary := powerHistoryInputSummary(powerParams, request.Params)
+	resolvedParams, err := s.resolvePowerAssetReferences(
+		ctx, binding.TeamID, request.Params, powerParams,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if request.TargetAssetID > 0 && continuation.Reference.Content != nil {
+		resolvedParams = attachPreviousPowerOutput(
+			powerParams, resolvedParams, continuation.Reference.Content,
+		)
+	}
 	request.Params = resolvedParams
 	requestID := uuid.NewString()
-	created := make(chan uint64, 1)
+	created := make(chan powerHistoryCreated, 1)
 	finished := make(chan error, 1)
 	runContext := context.WithoutCancel(ctx)
 	go func() {
@@ -156,23 +310,38 @@ func (s Service) StartPower(ctx context.Context, request PowerRunRequest) (map[s
 			Input:          cloneMap(request.Input),
 			Params:         cloneMap(request.Params),
 			PersistResult:  false,
-			OnRunCreated: func(runID uint64, _ string) {
+			OnRunCreated: func(runID uint64, createdRequestID string) error {
+				history, historyErr := s.createPowerHistory(
+					runContext, *workspace, binding, runID, createdRequestID,
+					historyPrompt, historySummary,
+				)
+				if historyErr != nil {
+					return historyErr
+				}
 				select {
-				case created <- runID:
+				case created <- history:
 				default:
 				}
+				return nil
 			},
 		})
 		finished <- runErr
 	}()
 
 	select {
-	case runID := <-created:
+	case current := <-created:
 		return botprotocol.BuildStreamResponse(requestID, botprotocol.Output{
-			"event":      "start",
-			"text":       "能力已开始运行",
-			"run_id":     runID,
-			"cancelable": true,
+			"event": "start",
+			"text":  "能力已开始运行",
+			"meta": map[string]any{
+				"run_id":                current.RunID,
+				"history_id":            current.HistoryID,
+				"history_title":         current.Title,
+				"history_input_summary": current.InputSummary,
+				"target_asset_id":       request.TargetAssetID,
+				"source_target_id":      request.SourceTargetID,
+				"cancelable":            true,
+			},
 		}).Payload(), nil
 	case runErr := <-finished:
 		if runErr == nil {
@@ -187,23 +356,14 @@ func (s Service) StartPower(ctx context.Context, request PowerRunRequest) (map[s
 func (s Service) resolvePowerAssetReferences(
 	ctx context.Context,
 	teamID uint64,
-	teamPowerID uint64,
-	targetID uint64,
 	input map[string]any,
+	params []energoninput.PowerParam,
 ) (map[string]any, error) {
 	result := cloneMap(input)
 	contents := recordValue(result["_reference_contents"])
 	delete(result, "_reference_contents")
 	if len(contents) == 0 {
 		return result, nil
-	}
-	form, err := s.team.WorkbenchPowerForm(ctx, teamID, teamPowerID, targetID)
-	if err != nil {
-		return nil, err
-	}
-	params, ok := form["params"].([]energoninput.PowerParam)
-	if !ok {
-		return nil, fmt.Errorf("能力参数配置无效")
 	}
 	allReferences := make([]any, 0)
 	for paramKey, rawContent := range contents {
@@ -305,10 +465,10 @@ func (s Service) SavePowerAsset(ctx context.Context, request SavePowerAssetReque
 		return nil, fmt.Errorf("工具运行不属于当前团队工作区")
 	}
 	runInput, _ := run["input"].(map[string]any)
-	if nestedUint64(runInput, "_team_power_id") != binding.TeamPowerID {
+	if nestedUint64(runInput, teamservice.CanvasPowerMetaTeamPowerID) != binding.TeamPowerID {
 		return nil, fmt.Errorf("工具运行与当前能力不匹配")
 	}
-	if request.TargetAsset > 0 && nestedUint64(runInput, "_target_asset_id") != request.TargetAsset {
+	if request.TargetAsset > 0 && nestedUint64(runInput, powerTargetAssetIDKey) != request.TargetAsset {
 		return nil, fmt.Errorf("请先从目标素材发起一次新的工具运行")
 	}
 	output, _ := run["output"].(map[string]any)
@@ -329,7 +489,7 @@ func (s Service) SavePowerAsset(ctx context.Context, request SavePowerAssetReque
 		}
 	}
 	if name == "" {
-		name = binding.Name + " 结果"
+		return nil, fmt.Errorf("请输入资产标题")
 	}
 	nodeKey := fmt.Sprintf("tool:%d:%s", binding.TeamPowerID, requestID)
 	asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{

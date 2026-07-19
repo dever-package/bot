@@ -2,20 +2,21 @@ package skill
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
-func SyncManifestConfig(ctx context.Context, skillID uint64, manifest map[string]any) {
+func SyncManifestConfig(ctx context.Context, skillID uint64, manifest map[string]any) error {
 	if skillID == 0 {
-		return
+		return fmt.Errorf("同步技能配置缺少技能 ID")
 	}
-	rawItems, declared := manifest["config"]
-	if !declared {
-		return
+	if err := ValidateManifest(manifest); err != nil {
+		return err
 	}
+	rawItems := manifest["config"]
 	items, _ := rawItems.([]any)
 	model := agentmodel.NewSkillConfigModel()
 	existingRows := model.Select(ctx, map[string]any{"skill_id": skillID})
@@ -50,21 +51,28 @@ func SyncManifestConfig(ctx context.Context, skillID uint64, manifest map[string
 		activeKeys[identity] = struct{}{}
 		existing := existingByKey[identity]
 		if existing != nil {
-			values := map[string]any{"required": required, "status": activeStatus}
-			if strings.TrimSpace(existing.Name) == "" {
-				values["name"] = name
+			values := map[string]any{
+				"name": name, "type": configType, "required": required, "status": activeStatus,
 			}
-			if strings.TrimSpace(existing.ValueEncrypted) == "" {
-				values["type"] = configType
+			currentType := agentmodel.NormalizeSkillConfigType(strings.TrimSpace(existing.Type))
+			if currentType != configType {
+				// A stored text value must never become an exposed secret (or vice
+				// versa). Require an explicit re-entry under the new definition.
+				values["value_encrypted"] = ""
+				values["value_hint"] = ""
 			}
-			model.Update(ctx, map[string]any{"id": existing.ID}, values)
+			if affected := model.Update(ctx, map[string]any{"id": existing.ID}, values); affected == 0 {
+				return fmt.Errorf("同步技能配置失败: %s", key)
+			}
 			continue
 		}
-		model.Insert(ctx, map[string]any{
+		if id := model.Insert(ctx, map[string]any{
 			"skill_id": skillID, "target_key": targetKey, "key": key, "name": name,
 			"type": configType, "required": required,
 			"status": activeStatus, "created_at": time.Now(),
-		})
+		}); id == 0 {
+			return fmt.Errorf("同步技能配置失败: %s", key)
+		}
 	}
 	for identity, row := range existingByKey {
 		if row == nil || row.Status != activeStatus {
@@ -73,8 +81,11 @@ func SyncManifestConfig(ctx context.Context, skillID uint64, manifest map[string
 		if _, exists := activeKeys[identity]; exists {
 			continue
 		}
-		model.Update(ctx, map[string]any{"id": row.ID}, map[string]any{"status": inactiveStatus})
+		if affected := model.Update(ctx, map[string]any{"id": row.ID}, map[string]any{"status": inactiveStatus}); affected == 0 {
+			return fmt.Errorf("停用已移除的技能配置失败: %s", row.Key)
+		}
 	}
+	return nil
 }
 
 func manifestConfigIdentity(targetKey string, key string) string {

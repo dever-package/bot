@@ -112,6 +112,28 @@
       },
       {
         "type": "form-radio",
+        "value": "form.preview_type",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "预览类型不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[320px]",
+          "showWhen": [
+            {
+              "path": "form.type",
+              "operator": "equals",
+              "value": "option"
+            }
+          ]
+        }
+      },
+      {
+        "type": "form-radio",
         "value": "form.value_type",
         "mode": "form",
         "validate": [
@@ -327,6 +349,7 @@
       "cate_id": 1,
       "usage": 1,
       "type": "textarea",
+      "preview_type": "none",
       "value_type": "string",
       "upload_rule_id": 1,
       "max_files": 5,

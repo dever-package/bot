@@ -1,6 +1,5 @@
 import {
   Bot,
-  Download,
   Eye,
   FileText,
   Image as ImageIcon,
@@ -9,10 +8,10 @@ import {
   RotateCw,
   Video,
   Workflow,
-  X,
   type LucideIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { DetailDialogHeader } from "../../shared/detail-dialog";
 import { PowerIcon } from "../space-power-icon";
 import { resolvePowerPresentation } from "../space-power-presentation";
 import type { SpaceCanvasNode } from "../types";
@@ -48,24 +47,17 @@ export function NodeDetailHeader({
       ? `${powerPresentation.outputName} · ${contentLabel}`
       : powerPresentation?.outputName || contentLabel;
   return (
-    <header className="ws-node-detail-head">
-      <div className="ws-node-detail-heading">
-        <span className="ws-node-detail-kind-icon" aria-hidden="true">
-          <DetailNodeIcon node={node} />
-        </span>
-        <div>
-          <strong>{node.title || "节点详情"}</strong>
-          <span>{detailLabel}</span>
-        </div>
-      </div>
-
-      <div className="ws-node-detail-meta">
-        {versionSelect}
-        {!readonly ? (
+    <DetailDialogHeader
+      icon={<DetailNodeIcon node={node} />}
+      title={node.title || "节点详情"}
+      subtitle={detailLabel}
+      versionSelect={versionSelect}
+      state={
+        !readonly ? (
           status === "error" ? (
             <button
               type="button"
-              className="ws-node-detail-save-state is-error"
+              className="wb-detail-state is-error"
               onClick={onRetry}
               title="重试保存"
             >
@@ -73,40 +65,21 @@ export function NodeDetailHeader({
               保存失败
             </button>
           ) : (
-            <span className={`ws-node-detail-save-state is-${status}`}>
+            <span className={`wb-detail-state is-${status}`}>
               {status === "saving" ? (
-                <Loader2 size={12} className="ws-spin" />
+                <Loader2 size={12} className="wb-detail-spin" />
               ) : null}
               {saveStatusLabel(status)}
             </span>
           )
         ) : (
-          <span className="ws-node-detail-save-state">只读预览</span>
-        )}
-        {updatedAt ? <time>{updatedAt}</time> : null}
-      </div>
-
-      <div className="ws-node-detail-actions">
-        {downloadUrl ? (
-          <a
-            href={downloadUrl}
-            download
-            aria-label="下载内容"
-            title="下载内容"
-          >
-            <Download size={17} />
-          </a>
-        ) : null}
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="关闭详情"
-          title="关闭"
-        >
-          <X size={18} />
-        </button>
-      </div>
-    </header>
+          <span className="wb-detail-state">只读预览</span>
+        )
+      }
+      updatedAt={updatedAt}
+      downloadUrl={downloadUrl}
+      onClose={onClose}
+    />
   );
 }
 

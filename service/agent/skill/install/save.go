@@ -2,7 +2,6 @@ package install
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -24,6 +23,9 @@ func parseSkillSources(sources []installedSkillSource) ([]parsedSkillSource, err
 		if err := agentskill.ValidateTree(source.Directory); err != nil {
 			return nil, fmt.Errorf("技能目录检查失败: %w", err)
 		}
+		if err := agentskill.ValidateTreeLimits(source.Directory, installSkillSourceLimits); err != nil {
+			return nil, fmt.Errorf("技能目录超过资源限制: %w", err)
+		}
 		parsed, err := agentskill.ParseFile(source.FilePath)
 		if err != nil {
 			return nil, err
@@ -31,27 +33,33 @@ func parseSkillSources(sources []installedSkillSource) ([]parsedSkillSource, err
 		if parsed.Key == "" {
 			return nil, fmt.Errorf("技能标识不能为空，请检查 SKILL.md frontmatter")
 		}
+		if err := agentskill.ValidateManifest(parsed.Manifest); err != nil {
+			return nil, fmt.Errorf("技能 %s 的 %w", parsed.Key, err)
+		}
 		if parsed.Name == "" {
 			parsed.Name = parsed.Key
+		}
+		if err := agentskill.ValidateMetadata(parsed.Key, parsed.Name, parsed.Description); err != nil {
+			return nil, fmt.Errorf("技能 %s 的元信息无效: %w", parsed.Key, err)
+		}
+		if err := agentskill.ValidateStoredText("技能来源地址", source.SourceURL, agentskill.MaxSourceURLRunes); err != nil {
+			return nil, err
 		}
 		if _, exists := seen[parsed.Key]; exists {
 			return nil, fmt.Errorf("发现重复技能标识: %s", parsed.Key)
 		}
 		seen[parsed.Key] = struct{}{}
 
-		finalDir := filepath.Join(agentskill.Root, parsed.Key)
-		if !agentskill.IsSafePath(finalDir) {
-			return nil, fmt.Errorf("技能安装目录不安全: %s", finalDir)
-		}
-
 		entryFile := filepath.Base(source.FilePath)
 		if entryFile == "" || entryFile == "." {
 			entryFile = agentskill.EntryFile
 		}
+		if err := agentskill.ValidateStoredText("技能入口文件", entryFile, agentskill.MaxEntryFileRunes); err != nil {
+			return nil, err
+		}
 		installs = append(installs, parsedSkillSource{
 			Source:    source,
 			Parsed:    parsed,
-			FinalDir:  finalDir,
 			EntryFile: entryFile,
 		})
 	}
@@ -73,6 +81,25 @@ func validateInstallConflicts(ctx context.Context, installs []parsedSkillSource)
 	return nil
 }
 
+func selectTargetSkill(ctx context.Context, targetSkillID uint64, installs []parsedSkillSource) ([]parsedSkillSource, error) {
+	if targetSkillID == 0 {
+		return installs, nil
+	}
+	target := agentmodel.NewSkillModel().Find(ctx, map[string]any{"id": targetSkillID})
+	if target == nil {
+		return nil, fmt.Errorf("更新目标技能不存在或已被删除")
+	}
+	if agentmodel.NormalizeSkillSourceType(target.SourceType, target.SourceURL, target.InstallInput) != agentmodel.SkillSourceTypeInstalled {
+		return nil, fmt.Errorf("只有安装来源技能可以通过安装流程更新")
+	}
+	for _, install := range installs {
+		if agentskill.NormalizeKey(install.Parsed.Key) == agentskill.NormalizeKey(target.Key) {
+			return []parsedSkillSource{install}, nil
+		}
+	}
+	return nil, fmt.Errorf("安装来源中未找到更新目标技能: %s", target.Key)
+}
+
 type savedInstalledSkill struct {
 	Result   map[string]any
 	OldPath  string
@@ -88,6 +115,13 @@ func (s Service) saveInstalledSkills(ctx context.Context, execInfo *skillInstall
 	}
 	saved := make([]savedInstalledSkill, 0, len(installs))
 	err := agentskill.ActivateDirectories(ctx, activations, func(txCtx context.Context) error {
+		packID := uint64(0)
+		if execInfo.AutoAddToPack {
+			packID = execInfo.TargetPackID
+		}
+		if err := agentskill.ValidateAssignment(txCtx, packID, execInfo.CateID); err != nil {
+			return err
+		}
 		for _, install := range installs {
 			item, saveErr := s.saveInstalledSkillRecord(txCtx, execInfo, install)
 			if saveErr != nil {
@@ -95,33 +129,64 @@ func (s Service) saveInstalledSkills(ctx context.Context, execInfo *skillInstall
 			}
 			saved = append(saved, item)
 		}
+		results := savedInstallResults(saved)
+		result := skillInstallResult(execInfo.ID, results)
+		finishedAt := time.Now()
+		affected := agentmodel.NewSkillInstallModel().Update(txCtx, map[string]any{
+			"id": execInfo.ID, "status": agentmodel.SkillInstallStatusFinalizing,
+		}, map[string]any{
+			"status":      agentmodel.SkillInstallStatusSuccess,
+			"skill_id":    firstSkillUint64(results, "id"),
+			"target_path": firstSkillValue(results, "path"),
+			"result":      agentskill.JSONText(result),
+			"log":         execInfo.logText(),
+			"finished_at": finishedAt,
+			"error":       "",
+		})
+		if affected == 0 {
+			return fmt.Errorf("技能安装状态已变化，不能提交安装结果")
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	results := make([]map[string]any, 0, len(saved))
+	results := savedInstallResults(saved)
 	for index, item := range saved {
-		agentskill.RemoveObsoletePath(item.OldPath, installs[index].FinalDir)
+		agentskill.RemoveObsoletePath(installs[index].Parsed.Key, item.OldPath, installs[index].FinalDir)
+		agentskill.PruneSkillReleases(installs[index].Parsed.Key, installs[index].FinalDir)
 		if item.Existing {
 			s.log(execInfo, "技能已存在，已刷新安装内容: %s (%s)", installs[index].Parsed.Name, installs[index].Parsed.Key)
 		} else {
 			s.log(execInfo, "安装成功: %s (%s)", installs[index].Parsed.Name, installs[index].Parsed.Key)
 		}
+	}
+	persistCtx, cancel := installFinalizeContext()
+	s.persistLog(persistCtx, execInfo, true)
+	cancel()
+	return results, nil
+}
+
+func savedInstallResults(saved []savedInstalledSkill) []map[string]any {
+	results := make([]map[string]any, 0, len(saved))
+	for _, item := range saved {
 		results = append(results, item.Result)
 	}
-	return results, nil
+	return results
 }
 
 func (s Service) saveInstalledSkillRecord(ctx context.Context, execInfo *skillInstallExecution, install parsedSkillSource) (savedInstalledSkill, error) {
 	model := agentmodel.NewSkillModel()
 
 	if existing := model.Find(ctx, map[string]any{"key": install.Parsed.Key}); existing != nil {
+		if execInfo.TargetSkillID > 0 && existing.ID != execInfo.TargetSkillID {
+			return savedInstalledSkill{}, fmt.Errorf("更新目标技能已变化，请重新发起更新")
+		}
 		sourceType := agentmodel.NormalizeSkillSourceType(existing.SourceType, existing.SourceURL, existing.InstallInput)
 		if sourceType != agentmodel.SkillSourceTypeInstalled {
 			return savedInstalledSkill{}, fmt.Errorf("已存在同标识的%s技能，安装来源不能覆盖: %s", agentmodel.SkillSourceTypeLabel(sourceType), install.Parsed.Key)
 		}
-		manifest := installedSkillManifest(install.Parsed.Manifest, install.Source.SourceURL, existing.Manifest)
+		manifest := installedSkillManifest(install.Parsed.Manifest, install.Source.SourceURL)
 		oldPath := strings.TrimSpace(existing.InstallPath)
 		if affected := model.Update(ctx, map[string]any{"id": existing.ID}, map[string]any{
 			"cate_id":       execInfo.CateID,
@@ -138,17 +203,24 @@ func (s Service) saveInstalledSkillRecord(ctx context.Context, execInfo *skillIn
 		}); affected == 0 {
 			return savedInstalledSkill{}, fmt.Errorf("更新技能记录失败: %s", install.Parsed.Key)
 		}
-		agentskill.SyncManifestConfig(ctx, existing.ID, manifest)
+		if err := agentskill.SyncManifestConfig(ctx, existing.ID, manifest); err != nil {
+			return savedInstalledSkill{}, err
+		}
 		if execInfo.AutoAddToPack && execInfo.TargetPackID > 0 {
-			agentskill.EnsurePackItem(ctx, execInfo.TargetPackID, existing.ID)
+			if err := agentskill.EnsurePackItem(ctx, execInfo.TargetPackID, existing.ID); err != nil {
+				return savedInstalledSkill{}, err
+			}
 		}
 		return savedInstalledSkill{Result: map[string]any{
 			"id": existing.ID, "key": install.Parsed.Key, "name": install.Parsed.Name,
 			"path": filepath.ToSlash(install.FinalDir),
 		}, OldPath: oldPath, Existing: true}, nil
 	}
+	if execInfo.TargetSkillID > 0 {
+		return savedInstalledSkill{}, fmt.Errorf("更新目标技能不存在，不能创建同名新技能")
+	}
 
-	manifest := installedSkillManifest(install.Parsed.Manifest, install.Source.SourceURL, "")
+	manifest := installedSkillManifest(install.Parsed.Manifest, install.Source.SourceURL)
 	skillID := uint64(model.Insert(ctx, map[string]any{
 		"cate_id":       execInfo.CateID,
 		"key":           install.Parsed.Key,
@@ -169,9 +241,13 @@ func (s Service) saveInstalledSkillRecord(ctx context.Context, execInfo *skillIn
 	if skillID == 0 {
 		return savedInstalledSkill{}, fmt.Errorf("写入技能记录失败: %s", install.Parsed.Key)
 	}
-	agentskill.SyncManifestConfig(ctx, skillID, manifest)
+	if err := agentskill.SyncManifestConfig(ctx, skillID, manifest); err != nil {
+		return savedInstalledSkill{}, err
+	}
 	if execInfo.AutoAddToPack && execInfo.TargetPackID > 0 {
-		agentskill.EnsurePackItem(ctx, execInfo.TargetPackID, skillID)
+		if err := agentskill.EnsurePackItem(ctx, execInfo.TargetPackID, skillID); err != nil {
+			return savedInstalledSkill{}, err
+		}
 	}
 	return savedInstalledSkill{Result: map[string]any{
 		"id": skillID, "key": install.Parsed.Key, "name": install.Parsed.Name,
@@ -179,69 +255,18 @@ func (s Service) saveInstalledSkillRecord(ctx context.Context, execInfo *skillIn
 	}}, nil
 }
 
-func installedSkillManifest(parsed map[string]any, sourceURL string, existingManifest string) map[string]any {
+func installedSkillManifest(parsed map[string]any, sourceURL string) map[string]any {
 	manifest := agentskill.CloneMap(parsed)
-	declared := make(map[string]struct{}, len(manifest))
-	for key := range manifest {
-		declared[key] = struct{}{}
-	}
 	manifest["source_url"] = sourceURL
 	for _, key := range []string{"config", "scripts", "source_refs"} {
 		if _, exists := manifest[key]; !exists {
 			manifest[key] = []any{}
 		}
 	}
-
-	existingManifest = strings.TrimSpace(existingManifest)
-	if existingManifest == "" {
-		agentskill.NormalizeManifestCapabilities(manifest)
-		return manifest
-	}
-	existing := map[string]any{}
-	if err := json.Unmarshal([]byte(existingManifest), &existing); err != nil {
-		agentskill.NormalizeManifestCapabilities(manifest)
-		return manifest
-	}
-	for _, key := range []string{
-		"capabilities",
-		"config",
-		"scripts",
-		"source_refs",
-		"mcp",
-		"dependencies",
-		"targets",
-		"domains",
-	} {
-		if _, exists := declared[key]; exists {
-			continue
-		}
-		value, exists := existing[key]
-		if !exists {
-			continue
-		}
-		if key != "capabilities" && isEmptyManifestValue(value) {
-			continue
-		}
-		manifest[key] = value
-	}
 	agentskill.NormalizeManifestCapabilities(manifest)
 	return manifest
 }
 
-func isEmptyManifestValue(value any) bool {
-	switch typed := value.(type) {
-	case nil:
-		return true
-	case string:
-		return strings.TrimSpace(typed) == ""
-	case []any:
-		return len(typed) == 0
-	case map[string]any:
-		return len(typed) == 0
-	default:
-		return false
-	}
-}
 func skillInstallResult(installID uint64, skills []map[string]any) map[string]any {
 	return map[string]any{
 		"event":      "final",
@@ -294,18 +319,4 @@ func skillValue(skill map[string]any, field string) string {
 
 func skillUint64(skill map[string]any, field string) uint64 {
 	return util.ToUint64(skill[field])
-}
-
-func firstUint64(values []uint64) uint64 {
-	if len(values) == 0 {
-		return 0
-	}
-	return values[0]
-}
-
-func firstString(values []string) string {
-	if len(values) == 0 {
-		return ""
-	}
-	return values[0]
 }

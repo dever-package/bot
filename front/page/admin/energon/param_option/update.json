@@ -49,11 +49,78 @@
         "meta": {
           "controlClassName": "min-w-[10rem]"
         }
+      },
+      {
+        "type": "form-upload",
+        "name": "预览图片",
+        "value": "form.preview_url",
+        "mode": "form",
+        "placeholder": "上传图片或从资源库选择",
+        "meta": {
+          "uploadType": "input",
+          "kind": "image",
+          "saveMode": "url",
+          "ruleId": 1,
+          "maxCount": 1,
+          "bizKey": "bot.energon.param-option.preview",
+          "showWhen": [
+            {
+              "path": "parent.data.form.preview_type",
+              "operator": "equals",
+              "value": "image"
+            }
+          ]
+        }
+      },
+      {
+        "type": "form-upload",
+        "name": "预览音频",
+        "value": "form.preview_url",
+        "mode": "form",
+        "placeholder": "上传音频或从资源库选择",
+        "meta": {
+          "uploadType": "input",
+          "kind": "audio",
+          "saveMode": "url",
+          "ruleId": 3,
+          "maxCount": 1,
+          "bizKey": "bot.energon.param-option.preview",
+          "showWhen": [
+            {
+              "path": "parent.data.form.preview_type",
+              "operator": "equals",
+              "value": "audio"
+            }
+          ]
+        }
+      },
+      {
+        "type": "form-upload",
+        "name": "预览视频",
+        "value": "form.preview_url",
+        "mode": "form",
+        "placeholder": "上传视频或从资源库选择",
+        "meta": {
+          "uploadType": "input",
+          "kind": "video",
+          "saveMode": "url",
+          "ruleId": 2,
+          "maxCount": 1,
+          "bizKey": "bot.energon.param-option.preview",
+          "showWhen": [
+            {
+              "path": "parent.data.form.preview_type",
+              "operator": "equals",
+              "value": "video"
+            }
+          ]
+        }
       }
     ]
   },
   "data": {
     "form": {
+      "preview_url": "",
       "sort": 100
     }
   },

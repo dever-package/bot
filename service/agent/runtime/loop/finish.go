@@ -8,6 +8,7 @@ import (
 	dlog "github.com/shemic/dever/log"
 	"github.com/shemic/dever/orm"
 
+	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
@@ -24,7 +25,7 @@ type runState struct {
 	lastText               string
 	artifacts              map[string]any
 	activities             []map[string]any
-	loaded                 []string
+	loaded                 []agentmodel.LoadedSkillRef
 	toolReceipts           []toolReceipt
 	activeToolExecution    *toolExecutionMarker
 	pendingTools           []botprotocol.ToolCall
@@ -58,7 +59,7 @@ func newRunState(execution execution) runState {
 		lastText:               checkpoint.LastText,
 		artifacts:              cloneMap(checkpoint.Artifacts),
 		activities:             append([]map[string]any(nil), checkpoint.Activities...),
-		loaded:                 append([]string(nil), checkpoint.LoadedSkills...),
+		loaded:                 agentmodel.NormalizeLoadedSkillRefs(checkpoint.LoadedSkills),
 		toolReceipts:           append([]toolReceipt(nil), checkpoint.ToolReceipts...),
 		activeToolExecution:    cloneToolExecutionMarker(checkpoint.ActiveToolExecution),
 		pendingTools:           append([]botprotocol.ToolCall(nil), checkpoint.PendingTools...),
@@ -90,7 +91,7 @@ func (state *runState) Checkpoint(seq int) runCheckpoint {
 		LastText:               state.lastText,
 		Artifacts:              cloneMap(state.artifacts),
 		Activities:             append([]map[string]any(nil), state.activities...),
-		LoadedSkills:           append([]string(nil), state.loaded...),
+		LoadedSkills:           agentmodel.NormalizeLoadedSkillRefs(state.loaded),
 		ToolReceipts:           append([]toolReceipt(nil), state.toolReceipts...),
 		ActiveToolExecution:    cloneToolExecutionMarker(state.activeToolExecution),
 		MediaDelta:             mediaCheckpointDelta(state),
@@ -166,17 +167,19 @@ func (state *runState) continueAfterTools() bool {
 	return hadVisibleText
 }
 
-func (state *runState) AddLoadedSkill(key string) {
-	key = strings.TrimSpace(key)
-	if key == "" {
+func (state *runState) AddLoadedSkill(reference agentmodel.LoadedSkillRef) {
+	reference.Key = strings.TrimSpace(reference.Key)
+	reference.ContentHash = strings.TrimSpace(reference.ContentHash)
+	if reference.Key == "" {
 		return
 	}
-	for _, current := range state.loaded {
-		if current == key {
+	for index, current := range state.loaded {
+		if strings.EqualFold(current.Key, reference.Key) {
+			state.loaded[index] = reference
 			return
 		}
 	}
-	state.loaded = append(state.loaded, key)
+	state.loaded = append(state.loaded, reference)
 }
 
 func (state *runState) Step(stepType string, title string, content string, payload any, status string) error {

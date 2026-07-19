@@ -40,7 +40,7 @@ type RunTurn struct {
 	AssistantMessageID uint64
 	InteractionResumed bool
 	PriorKnowledgeUsed bool
-	PriorLoadedSkills  []string
+	PriorLoadedSkills  []agentmodel.LoadedSkillRef
 }
 
 type RunTurnCompletion struct {
@@ -158,7 +158,7 @@ func (s Service) BeginRunTurn(ctx context.Context, request RunTurnRequest) (RunT
 			}
 			turn.InteractionResumed = true
 			turn.PriorKnowledgeUsed = resumeState.knowledgeUsed
-			turn.PriorLoadedSkills = append([]string(nil), resumeState.loadedSkills...)
+			turn.PriorLoadedSkills = agentmodel.NormalizeLoadedSkillRefs(resumeState.loadedSkills)
 		}
 		now := time.Now()
 		turn.UserMessageID = uint64(messageModel.Insert(tx, map[string]any{

@@ -25,13 +25,16 @@ type SkillDraft struct {
 	FilesJSON        string    `dorm:"type:text;not null;default:'';comment:草稿文件"`
 	Manifest         string    `dorm:"type:text;not null;default:'';comment:运行配置"`
 	ValidationResult string    `dorm:"type:text;not null;default:'';comment:测试结果"`
+	Version          uint64    `dorm:"type:bigint;not null;default:1;comment:草稿版本"`
 	CreatedAt        time.Time `dorm:"comment:创建时间"`
+	UpdatedAt        time.Time `dorm:"comment:更新时间"`
 }
 
 type SkillDraftIndex struct {
 	StatusSort    struct{} `index:"status,id"`
 	PackStatus    struct{} `index:"pack_id,status,id"`
 	SourceSkillID struct{} `index:"source_skill_id,status,id"`
+	KeyStatus     struct{} `index:"key,status,source_skill_id,id"`
 }
 
 var (

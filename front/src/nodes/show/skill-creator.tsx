@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { NodeItemProps } from '@/page/nodes'
 import { useStore } from 'zustand'
-import { request } from '@dever/front-plugin'
 import { getStoreValueByPath } from '@/lib/store'
 import { ShowAgent } from './agent'
+import { assistantApiRequest, isPlainRecord } from './assistant-api'
 
 const DEFAULT_DRAFT_PATH = 'data.actionTarget.draftAgent'
-const DEFAULT_NEW_DRAFT_SESSION_CONTEXT = 'skill_draft:new'
-
 export function ShowSkillCreator({ item, store }: NodeItemProps) {
   const draftPath = String(item.meta?.draftPath || DEFAULT_DRAFT_PATH)
   const openPath = String(item.meta?.openPath || '')
@@ -38,9 +36,24 @@ export function ShowSkillCreator({ item, store }: NodeItemProps) {
   const [ensureError, setEnsureError] = useState('')
   const [ensureLoading, setEnsureLoading] = useState(false)
   const ensureKeyRef = useRef('')
-  const newDraftSessionContext =
-    String(item.meta?.newDraftSessionContext || '').trim() ||
-    DEFAULT_NEW_DRAFT_SESSION_CONTEXT
+  const configuredNewDraftContext = String(
+    item.meta?.newDraftSessionContext || ''
+  ).trim()
+  const [newDraftSessionContext, setNewDraftSessionContext] = useState(
+    () => configuredNewDraftContext || createNewDraftSessionContext()
+  )
+  const wasModalOpenRef = useRef(modalOpen)
+
+  useEffect(() => {
+    if (configuredNewDraftContext) {
+      setNewDraftSessionContext(configuredNewDraftContext)
+      return
+    }
+    if (!modalOpen && wasModalOpenRef.current) {
+      setNewDraftSessionContext(createNewDraftSessionContext())
+    }
+    wasModalOpenRef.current = modalOpen
+  }, [configuredNewDraftContext, modalOpen])
 
   useEffect(() => {
     if (!modalOpen || draftID > 0 || sourceSkillID <= 0 || !ensureDraftApi) {
@@ -53,26 +66,41 @@ export function ShowSkillCreator({ item, store }: NodeItemProps) {
     ensureKeyRef.current = ensureKey
     setEnsureLoading(true)
     setEnsureError('')
-    void request(ensureDraftApi, 'post', {
+    let canceled = false
+    void assistantApiRequest(ensureDraftApi, {
       skill_id: sourceSkillID,
       pack_id: packID,
     })
       .then((response) => {
-        const data = normalizeApiData(response)
-        const draft = isPlainRecord(data.draft) ? data.draft : null
+        if (canceled || ensureKeyRef.current !== ensureKey) {
+          return
+        }
+        const draft = isPlainRecord(response.draft) ? response.draft : null
         if (draft) {
           store.getState().setValueByPath(draftPath, draft)
         }
       })
       .catch((error: unknown) => {
+        if (canceled || ensureKeyRef.current !== ensureKey) {
+          return
+        }
         ensureKeyRef.current = ''
         setEnsureError(
           error instanceof Error ? error.message : '创建未发布版本失败。'
         )
       })
       .finally(() => {
-        setEnsureLoading(false)
+        if (!canceled && ensureKeyRef.current === ensureKey) {
+          setEnsureLoading(false)
+        }
       })
+    return () => {
+      canceled = true
+      if (ensureKeyRef.current === ensureKey) {
+        ensureKeyRef.current = ''
+        setEnsureLoading(false)
+      }
+    }
   }, [
     draftID,
     draftPath,
@@ -128,25 +156,12 @@ export function ShowSkillCreator({ item, store }: NodeItemProps) {
   return <ShowAgent item={creatorItem} store={store} />
 }
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
 function normalizedPositiveNumber(value: unknown) {
   const number = Number(value || 0)
   return Number.isFinite(number) && number > 0 ? number : 0
 }
 
-function normalizeApiData(response: unknown) {
-  if (!isPlainRecord(response)) {
-    return {}
-  }
-  const status = Number(response.status || 0)
-  const code = Number(response.code || 0)
-  if (status === 2 || code === 401) {
-    throw new Error(
-      String(response.msg || response.message || '请求失败').trim()
-    )
-  }
-  return isPlainRecord(response.data) ? response.data : {}
+function createNewDraftSessionContext() {
+  const randomID = globalThis.crypto?.randomUUID?.()
+  return `skill_draft:new:${randomID || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
 }

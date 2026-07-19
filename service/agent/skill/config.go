@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/shemic/dever/config"
@@ -21,6 +22,8 @@ import (
 )
 
 const encryptedSecretPrefix = "v1:"
+
+const MaxConfigValueBytes = 16 * 1024
 
 var reservedConfigEnvNames = map[string]struct{}{
 	"PATH":           {},
@@ -97,15 +100,15 @@ func RedactSecrets(text string, secrets []string) string {
 	if text == "" || len(secrets) == 0 {
 		return text
 	}
-	result := text
-	for _, secret := range secrets {
-		secret = strings.TrimSpace(secret)
-		if len([]rune(secret)) < 4 {
-			continue
-		}
-		result = strings.ReplaceAll(result, secret, "[REDACTED]")
+	values := uniqueConfigSecrets(secrets)
+	sort.SliceStable(values, func(i, j int) bool {
+		return len([]rune(values[i])) > len([]rune(values[j]))
+	})
+	replacements := make([]string, 0, len(values)*2)
+	for _, secret := range values {
+		replacements = append(replacements, secret, "[REDACTED]")
 	}
-	return result
+	return strings.NewReplacer(replacements...).Replace(text)
 }
 
 func ConfigEnvName(key string) string {
@@ -118,10 +121,13 @@ func ConfigEnvName(key string) string {
 
 func IsValidConfigEnvName(key string) bool {
 	key = strings.TrimSpace(key)
-	if key == "" {
+	if key == "" || len([]rune(key)) > MaxKeyRunes {
 		return false
 	}
-	for _, char := range key {
+	for index, char := range key {
+		if index == 0 && !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || char == '_') {
+			return false
+		}
 		if (char >= 'a' && char <= 'z') ||
 			(char >= 'A' && char <= 'Z') ||
 			(char >= '0' && char <= '9') ||
@@ -137,59 +143,25 @@ func IsValidConfigEnvName(key string) bool {
 }
 
 func SkillConfigRows(ctx context.Context, skillID uint64, activeOnly bool) []*agentmodel.SkillConfig {
-	result := []*agentmodel.SkillConfig{}
 	if skillID == 0 {
-		return result
+		return []*agentmodel.SkillConfig{}
 	}
-
-	seen := map[uint64]struct{}{}
-	directFilters := map[string]any{
+	filters := map[string]any{
 		"skill_id": skillID,
 	}
 	if activeOnly {
-		directFilters["status"] = 1
+		filters["status"] = 1
 	}
-	directRows := agentmodel.NewSkillConfigModel().Select(ctx, directFilters)
-	for _, row := range directRows {
-		if row == nil || row.ID == 0 {
-			continue
-		}
-		seen[row.ID] = struct{}{}
-		result = append(result, row)
-	}
-
-	bindRows := agentmodel.NewSkillConfigBindModel().Select(ctx, map[string]any{
-		"skill_id": skillID,
-	})
-	configIDs := make([]uint64, 0, len(bindRows))
-	for _, bind := range bindRows {
-		if bind == nil || bind.ConfigID == 0 {
-			continue
-		}
-		configIDs = append(configIDs, bind.ConfigID)
-	}
-	configByID := skillConfigRowsByID(ctx, configIDs, activeOnly)
-	for _, configID := range configIDs {
-		row := configByID[configID]
-		if row == nil {
-			continue
-		}
-		if _, exists := seen[row.ID]; exists {
-			continue
-		}
-		seen[row.ID] = struct{}{}
-		result = append(result, row)
-	}
-	return result
+	return agentmodel.NewSkillConfigModel().Select(ctx, filters)
 }
 
 func SkillConfigRowsForTarget(ctx context.Context, skillID uint64, targetKey string, activeOnly bool) []*agentmodel.SkillConfig {
 	rows := SkillConfigRows(ctx, skillID, activeOnly)
 	targetKey = strings.TrimSpace(targetKey)
 	result := make([]*agentmodel.SkillConfig, 0, len(rows))
-	appendMatches := func(direct bool, exact bool) {
+	appendMatches := func(exact bool) {
 		for _, row := range rows {
-			if row == nil || (row.SkillID > 0) != direct {
+			if row == nil {
 				continue
 			}
 			rowTarget := strings.TrimSpace(row.TargetKey)
@@ -203,32 +175,8 @@ func SkillConfigRowsForTarget(ctx context.Context, skillID uint64, targetKey str
 			result = append(result, row)
 		}
 	}
-	appendMatches(true, true)
-	appendMatches(true, false)
-	appendMatches(false, true)
-	appendMatches(false, false)
-	return result
-}
-
-func skillConfigRowsByID(ctx context.Context, configIDs []uint64, activeOnly bool) map[uint64]*agentmodel.SkillConfig {
-	result := map[uint64]*agentmodel.SkillConfig{}
-	if len(configIDs) == 0 {
-		return result
-	}
-	filters := map[string]any{
-		"id":       configIDs,
-		"skill_id": uint64(0),
-	}
-	if activeOnly {
-		filters["status"] = 1
-	}
-	rows := agentmodel.NewSkillConfigModel().Select(ctx, filters)
-	for _, row := range rows {
-		if row == nil || row.ID == 0 {
-			continue
-		}
-		result[row.ID] = row
-	}
+	appendMatches(true)
+	appendMatches(false)
 	return result
 }
 
@@ -248,10 +196,8 @@ func LoadConfigEnv(ctx context.Context, skillID uint64, manifest string, targetK
 		if envName == "" {
 			continue
 		}
-		if row.SkillID > 0 {
-			if _, declared := declaredDirectKeys[envName]; !declared {
-				continue
-			}
+		if _, declared := declaredDirectKeys[envName]; !declared {
+			continue
 		}
 		if _, exists := seen[envName]; exists {
 			continue

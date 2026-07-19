@@ -115,6 +115,7 @@ func buildAgentParam(
 		Key:          strings.TrimSpace(param.Key),
 		Icon:         strings.TrimSpace(param.Icon),
 		Type:         energoninput.NormalizeParamControlType(param.Type),
+		PreviewType:  energoninput.NormalizeParamPreviewType(param.PreviewType),
 		Usage:        normalizeUsage(param.Usage),
 		ValueType:    energoninput.NormalizeParamValueType(param.ValueType),
 		DefaultValue: strings.TrimSpace(param.DefaultValue),

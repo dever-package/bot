@@ -12,6 +12,7 @@ type Param struct {
 	Key           string    `dorm:"type:varchar(128);not null;comment:参数标识"`
 	Icon          string    `dorm:"type:varchar(64);not null;default:'';comment:图标"`
 	Type          string    `dorm:"type:varchar(32);not null;comment:类型"`
+	PreviewType   string    `dorm:"type:varchar(32);not null;default:none;comment:预览类型"`
 	Usage         int16     `dorm:"type:smallint;not null;default:1;comment:用途"`
 	ValueType     string    `dorm:"type:varchar(32);not null;default:string;comment:值类型"`
 	CateID        uint64    `dorm:"type:bigint;not null;default:0;comment:参数分类"`
@@ -269,6 +270,13 @@ var (
 		{"id": 2, "value": "工具栏参数"},
 	}
 
+	paramPreviewTypeOptions = []map[string]any{
+		{"id": "none", "value": "无预览"},
+		{"id": "image", "value": "图片"},
+		{"id": "audio", "value": "音频"},
+		{"id": "video", "value": "视频"},
+	}
+
 	paramValueTypeOptions = []map[string]any{
 		{"id": "string", "value": "字符串"},
 		{"id": "number", "value": "数字"},
@@ -301,10 +309,11 @@ func NewParamModel() *orm.Model[Param] {
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{
-			"type":       paramTypeOptions,
-			"usage":      paramUsageOptions,
-			"value_type": paramValueTypeOptions,
-			"status":     statusOptions,
+			"type":         paramTypeOptions,
+			"preview_type": paramPreviewTypeOptions,
+			"usage":        paramUsageOptions,
+			"value_type":   paramValueTypeOptions,
+			"status":       statusOptions,
 		},
 		Relations: []orm.Relation{
 			paramCateRelation,

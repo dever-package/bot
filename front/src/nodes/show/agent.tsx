@@ -90,6 +90,7 @@ import {
   AgentContentOutputView,
   readableAssistantText,
 } from "./agent-content-output";
+import { assistantApiRequest } from "./assistant-api";
 import { resolveSkillDraftPatchPayload } from "./skill-draft-patch";
 
 type AgentRole = "user" | "assistant";
@@ -1524,8 +1525,8 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       store,
     );
     const requestPayload = {
-      ...context,
       ...payload,
+      ...context,
       ...buildSkillDraftPatchAssistantContext(
         sessionEnabled,
         sessionID || sessionIDRef.current,
@@ -1612,8 +1613,8 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       store,
     );
     const requestPayload = {
-      ...context,
       ...payload,
+      ...context,
       ...buildSkillDraftPatchAssistantContext(
         sessionEnabled,
         sessionID || sessionIDRef.current,
@@ -2126,22 +2127,6 @@ function scheduleAgentMessagesScrollToBottom(element: HTMLElement) {
   };
 }
 
-async function assistantApiRequest(
-  api: string,
-  payload: Record<string, unknown>,
-) {
-  const result = await request(api, "post", payload);
-  if (!isPlainObject(result)) {
-    return {};
-  }
-  const status = Number(result.status || 0);
-  const code = Number(result.code || 0);
-  if (status === 2 || code === 401) {
-    throw new Error(valueText(result.msg || result.message) || "请求失败");
-  }
-  return isPlainObject(result.data) ? result.data : {};
-}
-
 async function fetchAgentRunStatus(
   api: string,
   requestID: string,
@@ -2495,9 +2480,13 @@ function syncSkillDraftPatchStore(
   const currentDraft = isPlainObject(current)
     ? (current as Record<string, unknown>)
     : {};
+  const responseDraft = isPlainObject(responseData.draft)
+    ? (responseData.draft as Record<string, unknown>)
+    : {};
   const nextDraft = {
     ...currentDraft,
     ...skillDraftPatchStoreValues(patch),
+    ...responseDraft,
   };
 
   const draftID =

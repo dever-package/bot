@@ -5,7 +5,51 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 )
+
+const (
+	MaxRelativePathRunes = 512
+	MaxRelativePathDepth = 64
+)
+
+// NormalizeRelativePath is the shared contract for paths persisted by a skill
+// manifest or draft. Runtime filesystem checks still resolve symlinks against
+// the concrete root before reading or writing.
+func NormalizeRelativePath(path string) (string, error) {
+	raw := strings.TrimSpace(path)
+	if raw == "" || filepath.IsAbs(raw) || strings.ContainsRune(raw, '\x00') || strings.Contains(raw, "\\") {
+		return "", fmt.Errorf("路径必须是安全的相对路径")
+	}
+	if utf8.RuneCountInString(raw) > MaxRelativePathRunes {
+		return "", fmt.Errorf("路径不能超过 %d 个字符", MaxRelativePathRunes)
+	}
+	normalized := filepath.ToSlash(filepath.Clean(raw))
+	if normalized == "." || normalized == ".." || strings.HasPrefix(normalized, "../") || strings.HasPrefix(normalized, "/") {
+		return "", fmt.Errorf("路径必须是安全的相对路径")
+	}
+	if len(strings.Split(normalized, "/")) > MaxRelativePathDepth {
+		return "", fmt.Errorf("路径层级不能超过 %d 层", MaxRelativePathDepth)
+	}
+	return normalized, nil
+}
+
+// EnsureRoot creates the managed skill root and rejects a pre-existing link or
+// non-directory before any lock or release path is created below it.
+func EnsureRoot() error {
+	root := filepath.Clean(Root)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return err
+	}
+	info, err := os.Lstat(root)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("技能根目录必须是普通目录: %s", Root)
+	}
+	return nil
+}
 
 func IsSafePath(path string) bool {
 	root, err := filepath.Abs(filepath.Clean(Root))
@@ -17,6 +61,66 @@ func IsSafePath(path string) bool {
 		return false
 	}
 	return pathWithin(root, target)
+}
+
+// ValidateInstallRoot verifies that an existing skill directory is physically
+// contained by Root, including all resolved parent symlinks.
+func ValidateInstallRoot(path string) error {
+	if err := validateInstallPath(path); err != nil {
+		return err
+	}
+	info, err := os.Lstat(filepath.Clean(path))
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("技能安装目录必须是普通目录: %s", path)
+	}
+	return nil
+}
+
+// ValidateInstallTarget applies the same containment check to a target that
+// may not exist yet.
+func ValidateInstallTarget(path string) error {
+	return validateInstallPath(path)
+}
+
+func validateInstallPath(path string) error {
+	root, err := filepath.Abs(filepath.Clean(Root))
+	if err != nil {
+		return err
+	}
+	rootInfo, err := os.Lstat(root)
+	if err != nil {
+		return err
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
+		return fmt.Errorf("技能根目录必须是普通目录: %s", Root)
+	}
+	target, err := filepath.Abs(filepath.Clean(strings.TrimSpace(path)))
+	if err != nil {
+		return err
+	}
+	if !pathWithin(root, target) {
+		return fmt.Errorf("路径超出技能根目录: %s", path)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return err
+	}
+	resolvedAncestor, err := resolveNearestExistingPath(root, target)
+	if err != nil {
+		return err
+	}
+	if !pathWithin(resolvedRoot, resolvedAncestor) {
+		return fmt.Errorf("路径通过符号链接超出技能根目录: %s", path)
+	}
+	if info, statErr := os.Lstat(target); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("技能路径不能是符号链接: %s", path)
+	} else if statErr != nil && !os.IsNotExist(statErr) {
+		return statErr
+	}
+	return nil
 }
 
 // ResolveRelativePath validates both lexical and symlink-resolved containment.
@@ -85,6 +189,13 @@ func ValidateTree(root string) error {
 		if walkErr != nil {
 			return walkErr
 		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0 {
+			return fmt.Errorf("技能目录包含特殊权限位: %s", path)
+		}
 		if path == cleanRoot || entry.IsDir() {
 			return nil
 		}
@@ -104,10 +215,6 @@ func ValidateTree(root string) error {
 				return fmt.Errorf("技能目录符号链接越界: %s", path)
 			}
 			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
 		}
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("技能目录包含不支持的特殊文件: %s", path)

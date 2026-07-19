@@ -1,12 +1,25 @@
-import { Check, Loader2, MessageSquareMore, RotateCcw, X } from "lucide-react";
+import {
+  Check,
+  FileText,
+  History,
+  Loader2,
+  MessageSquareMore,
+  RotateCcw,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import {
+  DetailDialogFrame,
+  DetailDialogHeader,
+  DetailVersionSelect,
+  formatDetailVersionTime,
+} from "../shared/detail-dialog";
 import {
   loadAssetDetail,
   loadAssetVersion,
   loadAssetVersions,
   setAssetCurrentVersion,
 } from "./asset-api";
-import { AssetPreview } from "./asset-preview";
+import { AssetKindIcon, AssetPreview } from "./asset-preview";
 import {
   assetKindLabel,
   assetRoleLabel,
@@ -39,12 +52,14 @@ export function AssetDetailDialog({
   const [versionLoading, setVersionLoading] = useState(0);
   const [savingCurrent, setSavingCurrent] = useState(false);
   const [error, setError] = useState("");
+  const [versionsError, setVersionsError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
+    setVersionsError("");
     try {
-      const next = await loadAssetDetail(teamID, assetID);
+      const next = withCurrentVersion(await loadAssetDetail(teamID, assetID));
       setDetail(next);
       setPreviewVersion(next.asset.version);
     } catch (currentError) {
@@ -58,8 +73,21 @@ export function AssetDetailDialog({
     void load();
   }, [load]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   async function preview(version: AssetVersion) {
+    if (versionLoading || version.id === previewVersion?.id) return;
     if (version.id === detail?.asset.versionID && detail.asset.version) {
+      setError("");
       setPreviewVersion(detail.asset.version);
       return;
     }
@@ -77,9 +105,10 @@ export function AssetDetailDialog({
   }
 
   async function loadMoreVersions() {
-    if (!detail) return;
+    if (!detail || !detail.hasMore || versionLoading) return;
     const page = Math.floor(detail.versions.length / 20) + 1;
     setVersionLoading(-1);
+    setVersionsError("");
     try {
       const result = await loadAssetVersions({
         teamID,
@@ -87,21 +116,28 @@ export function AssetDetailDialog({
         page,
         pageSize: 20,
       });
-      setDetail({
-        ...detail,
-        versions: uniqueVersions([...detail.versions, ...result.items]),
-        versionTotal: result.total,
-        hasMore: result.hasMore,
-      });
+      setDetail((current) =>
+        current
+          ? {
+              ...current,
+              versions: uniqueVersions([
+                ...current.versions,
+                ...result.items,
+              ]),
+              versionTotal: result.total,
+              hasMore: result.hasMore,
+            }
+          : current,
+      );
     } catch (currentError) {
-      setError(errorText(currentError, "加载资产版本失败"));
+      setVersionsError(errorText(currentError, "加载资产版本失败"));
     } finally {
       setVersionLoading(0);
     }
   }
 
   async function makeCurrent() {
-    if (!detail || !previewVersion) return;
+    if (!detail || !previewVersion || savingCurrent) return;
     setSavingCurrent(true);
     setError("");
     try {
@@ -110,7 +146,8 @@ export function AssetDetailDialog({
         assetID,
         versionID: previewVersion.id,
       });
-      setDetail({ ...detail, asset });
+      const nextDetail = withCurrentVersion({ ...detail, asset });
+      setDetail(nextDetail);
       setPreviewVersion(asset.version);
       onAssetChanged?.(asset);
     } catch (currentError) {
@@ -126,148 +163,202 @@ export function AssetDetailDialog({
   );
 
   return (
-    <div
-      className="wb-asset-dialog-backdrop"
-      role="dialog"
-      aria-modal="true"
-      onMouseDown={onClose}
+    <DetailDialogFrame
+      ariaLabel={`${asset?.name || "资产"}详情`}
+      onRequestClose={onClose}
+      header={
+        <DetailDialogHeader
+          icon={
+            asset ? <AssetKindIcon kind={asset.kind} /> : <FileText size={16} />
+          }
+          title={asset?.name || "资产详情"}
+          subtitle={
+            asset
+              ? `${sourceLabel(asset)} · ${assetKindLabel(asset.kind)} · ${assetRoleLabel(asset.role)}`
+              : ""
+          }
+          versionSelect={
+            detail && asset && previewVersion ? (
+              <DetailVersionSelect
+                options={detail.versions.map((version) => ({
+                  id: version.id,
+                  version: version.version,
+                  updatedAt: version.updatedAt || version.createdAt,
+                  value: version,
+                }))}
+                currentVersionId={asset.versionID}
+                selectedVersionId={previewVersion.id}
+                total={detail.versionTotal}
+                hasMore={detail.hasMore}
+                loading={versionLoading > 0}
+                loadingMore={versionLoading === -1}
+                error={versionsError}
+                disabled={savingCurrent}
+                onSelect={(version) => void preview(version)}
+                onLoadMore={() => void loadMoreVersions()}
+                onRetry={() => void loadMoreVersions()}
+              />
+            ) : undefined
+          }
+          state={
+            versionLoading > 0 ? (
+              <span className="wb-detail-state is-saving">
+                <Loader2 size={12} className="wb-detail-spin" />
+                读取中
+              </span>
+            ) : (
+              <span className="wb-detail-state">只读预览</span>
+            )
+          }
+          updatedAt={formatDetailVersionTime(
+            previewVersion?.updatedAt || previewVersion?.createdAt,
+          )}
+          actions={
+            asset && isCurrent ? (
+              <AssetDetailActions
+                asset={asset}
+                selectable={selectable}
+                onSelect={onSelect}
+                onContinue={onContinue}
+                canContinue={canContinue}
+              />
+            ) : undefined
+          }
+          onClose={onClose}
+        />
+      }
     >
-      <section
-        className="wb-asset-dialog"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header className="wb-asset-dialog-head">
-          <div>
-            <h2>{asset?.name || "资产详情"}</h2>
-            {asset ? (
-              <p>
-                {sourceLabel(asset)} · {assetKindLabel(asset.kind)} ·{" "}
-                {assetRoleLabel(asset.role)}
-              </p>
-            ) : null}
+      <main className="wb-detail-workspace">
+        {asset && previewVersion && !isCurrent ? (
+          <div className="wb-detail-history-bar">
+            <span>
+              <History size={14} />
+              正在查看第 {previewVersion.version} 版
+            </span>
+            <div>
+              {asset.version ? (
+                <button
+                  type="button"
+                  className="wb-detail-command"
+                  disabled={Boolean(versionLoading) || savingCurrent}
+                  onClick={() => void preview(asset.version as AssetVersion)}
+                >
+                  <RotateCcw size={13} />
+                  返回当前版本
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="wb-detail-command is-primary"
+                disabled={Boolean(versionLoading) || savingCurrent}
+                onClick={() => void makeCurrent()}
+              >
+                {savingCurrent ? (
+                  <Loader2 size={13} className="wb-detail-spin" />
+                ) : (
+                  <Check size={13} />
+                )}
+                {savingCurrent ? "设置中" : "设为当前版本"}
+              </button>
+            </div>
           </div>
-          <button type="button" onClick={onClose} title="关闭">
-            <X aria-hidden="true" />
-            <span className="sr-only">关闭</span>
-          </button>
-        </header>
+        ) : null}
 
-        {loading ? (
-          <div className="wb-asset-dialog-state">
-            <Loader2 className="is-spinning" />
-          </div>
-        ) : !asset || !previewVersion ? (
-          <div className="wb-asset-dialog-state">{error || "资产不存在"}</div>
-        ) : (
-          <div className="wb-asset-dialog-body">
-            <main className="wb-asset-dialog-preview">
-              <div className="wb-asset-version-bar">
-                <div>
-                  <strong>版本 {previewVersion.version}</strong>
-                  <span>{formatDate(previewVersion.updatedAt)}</span>
-                </div>
-                <div>
-                  {!isCurrent ? (
-                    <button
-                      type="button"
-                      className="wb-asset-current-button"
-                      disabled={savingCurrent}
-                      onClick={() => void makeCurrent()}
-                    >
-                      {savingCurrent ? (
-                        <Loader2 className="is-spinning" />
-                      ) : (
-                        <Check />
-                      )}
-                      设为当前
-                    </button>
-                  ) : (
-                    <span className="wb-asset-current-label">
-                      <Check /> 当前版本
-                    </span>
-                  )}
-                  {selectable && onSelect && isCurrent ? (
-                    <button
-                      type="button"
-                      className="wb-asset-use-button"
-                      onClick={() => onSelect(asset)}
-                    >
-                      使用
-                    </button>
-                  ) : null}
-                  {onContinue &&
-                  isCurrent &&
-                  isContinuable(asset) &&
-                  (canContinue?.(asset) ?? true) ? (
-                    <button
-                      type="button"
-                      className="wb-asset-continue-button"
-                      onClick={() => onContinue(asset)}
-                    >
-                      {asset.sourceType === "dialogue" ? (
-                        <MessageSquareMore />
-                      ) : (
-                        <RotateCcw />
-                      )}
-                      {asset.sourceType === "dialogue" ? "继续对话" : "重新生成"}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-              {error ? <p className="wb-asset-error">{error}</p> : null}
+        <div className="wb-detail-scroll">
+          {loading ? (
+            <div className="wb-detail-content-state">
+              <Loader2 size={18} className="wb-detail-spin" />
+              <span>正在读取资产</span>
+            </div>
+          ) : !asset || !previewVersion ? (
+            <div className="wb-detail-content-state is-error">
+              <span>{error || "资产不存在"}</span>
+              <button type="button" onClick={() => void load()}>
+                <RotateCcw size={13} />
+                重试
+              </button>
+            </div>
+          ) : (
+            <div className={`wb-detail-readonly-content is-${asset.kind}`}>
+              {error ? <p className="wb-detail-error-banner">{error}</p> : null}
               <AssetPreview
+                key={previewVersion.id}
                 kind={asset.kind}
                 content={previewVersion.content}
                 summary={previewVersion.summary || asset.summary}
               />
-            </main>
-
-            <aside className="wb-asset-version-list" aria-label="资产版本">
-              <div className="wb-asset-version-list-head">
-                <strong>版本</strong>
-                <span>{detail.versionTotal}</span>
-              </div>
-              <div className="wb-asset-version-items">
-                {detail.versions.map((version) => (
-                  <button
-                    key={version.id}
-                    type="button"
-                    className={
-                      previewVersion.id === version.id ? "is-active" : ""
-                    }
-                    onClick={() => void preview(version)}
-                  >
-                    <span>v{version.version}</span>
-                    <small>
-                      {version.id === asset.versionID ? "当前 · " : ""}
-                      {formatDate(version.updatedAt)}
-                    </small>
-                    {versionLoading === version.id ? (
-                      <Loader2 className="is-spinning" />
-                    ) : null}
-                  </button>
-                ))}
-              </div>
-              {detail.hasMore ? (
-                <button
-                  type="button"
-                  className="wb-asset-more"
-                  disabled={versionLoading === -1}
-                  onClick={() => void loadMoreVersions()}
-                >
-                  {versionLoading === -1 ? "加载中" : "加载更多"}
-                </button>
-              ) : null}
-            </aside>
-          </div>
-        )}
-      </section>
-    </div>
+            </div>
+          )}
+        </div>
+      </main>
+    </DetailDialogFrame>
   );
 }
 
+function AssetDetailActions({
+  asset,
+  selectable,
+  onSelect,
+  onContinue,
+  canContinue,
+}: {
+  asset: AssetRecord;
+  selectable: boolean;
+  onSelect?: (asset: AssetRecord) => void;
+  onContinue?: (asset: AssetRecord) => void;
+  canContinue?: (asset: AssetRecord) => boolean;
+}) {
+  return (
+    <>
+      {onContinue &&
+      isContinuable(asset) &&
+      (canContinue?.(asset) ?? true) ? (
+        <button
+          type="button"
+          className="wb-detail-command"
+          onClick={() => onContinue(asset)}
+        >
+          {asset.sourceType === "dialogue" ? (
+            <MessageSquareMore size={14} />
+          ) : (
+            <RotateCcw size={14} />
+          )}
+          <span>
+            {asset.sourceType === "dialogue" ? "继续对话" : "重新生成"}
+          </span>
+        </button>
+      ) : null}
+      {selectable && onSelect ? (
+        <button
+          type="button"
+          className="wb-detail-command is-primary"
+          onClick={() => onSelect(asset)}
+        >
+          <Check size={14} />
+          <span>使用</span>
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+function withCurrentVersion(detail: AssetDetail): AssetDetail {
+  const versions = uniqueVersions(
+    detail.asset.version
+      ? [detail.asset.version, ...detail.versions]
+      : detail.versions,
+  );
+  return {
+    ...detail,
+    versions,
+    versionTotal: Math.max(detail.versionTotal, versions.length),
+  };
+}
+
 function uniqueVersions(versions: AssetVersion[]) {
-  return Array.from(new Map(versions.map((version) => [version.id, version])).values());
+  return Array.from(
+    new Map(versions.map((version) => [version.id, version])).values(),
+  );
 }
 
 function sourceLabel(asset: AssetRecord) {
@@ -282,18 +373,6 @@ function isContinuable(asset: AssetRecord) {
     asset.role === "material" &&
     (asset.sourceType === "tool" || asset.sourceType === "dialogue")
   );
-}
-
-function formatDate(value: string) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
 }
 
 function errorText(error: unknown, fallback: string) {

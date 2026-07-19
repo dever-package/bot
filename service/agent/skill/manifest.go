@@ -74,11 +74,9 @@ func NormalizeManifestCapabilities(manifest map[string]any) {
 		set = CapabilitySet{CapabilityFiles: {}, CapabilityTemp: {}}
 		if manifestValuePresent(manifest["scripts"]) {
 			set[CapabilityScript] = struct{}{}
-			set[CapabilityNetwork] = struct{}{}
 		}
 		if manifestValuePresent(manifest["mcp"]) {
 			set[CapabilityMCP] = struct{}{}
-			set[CapabilityNetwork] = struct{}{}
 		}
 	}
 	values := make([]any, 0, len(set))
@@ -164,6 +162,39 @@ func ManifestScripts(manifest string) []ScriptSpec {
 		})
 	}
 	return scripts
+}
+
+// ManifestExecutablePaths returns every skill-local executable referenced by
+// scripts or MCP. Validation and file materialization must use the same list.
+func ManifestExecutablePaths(manifest string) []string {
+	payload := ParseManifestMap(manifest)
+	paths := make([]string, 0)
+	seen := map[string]struct{}{}
+	appendPath := func(path string) {
+		path = strings.TrimPrefix(strings.TrimSpace(path), "/")
+		if path == "" {
+			return
+		}
+		if _, exists := seen[path]; exists {
+			return
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+	for _, script := range ManifestScripts(manifest) {
+		appendPath(script.Path)
+	}
+	for _, item := range manifestMCPItems(payload["mcp"]) {
+		command := FirstText(FirstPresent(item, "command", "cmd"))
+		if strings.Contains(command, "/") || strings.HasPrefix(command, ".") {
+			appendPath(command)
+		}
+	}
+	return paths
+}
+
+func ManifestMCPCount(manifest string) int {
+	return len(manifestMCPItems(ParseManifestMap(manifest)["mcp"]))
 }
 
 func MissingRequiredConfig(ctx context.Context, skillID uint64, manifest string, targetKey string) []string {

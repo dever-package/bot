@@ -130,6 +130,7 @@ export type PowerParamOption = {
   name: string;
   value: string;
   native_value?: string;
+  preview_url?: string;
   sort?: number;
 };
 
@@ -150,6 +151,7 @@ export type PowerParam = {
     | "hidden"
     | "description"
     | string;
+  preview_type?: "none" | "image" | "audio" | "video" | string;
   usage?: number;
   value_type?: "string" | "number" | string;
   default_value?: string;

@@ -125,8 +125,7 @@
 }
 
 .wb-asset-browser-actions > button,
-.wb-asset-pagination button,
-.wb-asset-dialog-head > button {
+.wb-asset-pagination button {
   display: inline-flex;
   width: 34px;
   height: 34px;
@@ -140,15 +139,13 @@
 }
 
 .wb-asset-browser-actions > button:hover,
-.wb-asset-pagination button:hover:not(:disabled),
-.wb-asset-dialog-head > button:hover {
+.wb-asset-pagination button:hover:not(:disabled) {
   background: #eef1ef;
   color: #17201c;
 }
 
 .wb-asset-browser-actions svg,
-.wb-asset-pagination svg,
-.wb-asset-dialog-head svg {
+.wb-asset-pagination svg {
   width: 17px;
   height: 17px;
 }
@@ -371,17 +368,6 @@
   opacity: 0.35;
 }
 
-.wb-asset-dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(20, 25, 23, 0.54);
-  padding: 24px;
-}
-
 .wb-asset-reference-backdrop {
   position: fixed;
   inset: 0;
@@ -513,159 +499,9 @@
   opacity: 0.45;
 }
 
-.wb-asset-dialog {
-  display: flex;
-  width: min(1120px, 96vw);
-  height: min(780px, 92vh);
-  min-width: 0;
-  min-height: 0;
-  flex-direction: column;
-  overflow: hidden;
-  border-radius: 7px;
-  background: #fff;
-  box-shadow: 0 22px 60px rgba(13, 20, 17, 0.24);
-}
-
-.wb-asset-dialog-head {
-  display: flex;
-  min-height: 64px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  border-bottom: 1px solid #e2e6e4;
-  padding: 10px 14px 10px 20px;
-}
-
-.wb-asset-dialog-head > div {
-  min-width: 0;
-}
-
-.wb-asset-dialog-head h2,
-.wb-asset-dialog-head p {
-  overflow: hidden;
-  margin: 0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wb-asset-dialog-head h2 {
-  color: #17201c;
-  font-size: 16px;
-  font-weight: 650;
-}
-
-.wb-asset-dialog-head p {
-  margin-top: 4px;
-  color: #77817c;
-  font-size: 11px;
-}
-
-.wb-asset-dialog-state {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  align-items: center;
-  justify-content: center;
-  color: #737d78;
-  font-size: 13px;
-}
-
-.wb-asset-dialog-state svg {
-  width: 22px;
-  height: 22px;
-}
-
-.wb-asset-dialog-body {
-  display: grid;
-  min-height: 0;
-  flex: 1;
-  grid-template-columns: minmax(0, 1fr) 250px;
-}
-
-.wb-asset-dialog-preview {
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 18px 22px 28px;
-}
-
-.wb-asset-version-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 18px;
-}
-
-.wb-asset-version-bar > div {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 9px;
-}
-
-.wb-asset-version-bar strong {
-  color: #243029;
-  font-size: 13px;
-}
-
-.wb-asset-version-bar span {
-  color: #7b857f;
-  font-size: 11px;
-}
-
-.wb-asset-current-button,
-.wb-asset-use-button,
-.wb-asset-continue-button,
-.wb-asset-current-label {
-  display: inline-flex;
-  min-height: 32px;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border-radius: 5px;
-  padding: 0 10px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.wb-asset-current-button {
-  border: 1px solid #cad5d0;
-  background: #fff;
-  color: #345345;
-  cursor: pointer;
-}
-
-.wb-asset-use-button {
-  border: 1px solid #315f4d;
-  background: #315f4d;
-  color: #fff;
-  cursor: pointer;
-}
-
-.wb-asset-continue-button {
-  border: 1px solid #315f4d;
-  background: #315f4d;
-  color: #fff;
-  cursor: pointer;
-}
-
-.wb-asset-current-label {
-  background: #edf3f0;
-  color: #426353;
-}
-
-.wb-asset-current-button svg,
-.wb-asset-continue-button svg,
-.wb-asset-current-label svg {
-  width: 14px;
-  height: 14px;
-}
-
 .wb-asset-preview-content {
   min-width: 0;
-  color: #27312c;
+  color: inherit;
   overflow-wrap: anywhere;
 }
 
@@ -673,97 +509,6 @@
 .wb-asset-preview-content video {
   max-width: 100%;
   height: auto;
-}
-
-.wb-asset-version-list {
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
-  border-left: 1px solid #e2e6e4;
-  background: #f7f8f8;
-}
-
-.wb-asset-version-list-head {
-  display: flex;
-  min-height: 48px;
-  flex: 0 0 48px;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid #e2e6e4;
-  padding: 0 14px;
-}
-
-.wb-asset-version-list-head strong {
-  font-size: 12px;
-}
-
-.wb-asset-version-list-head span {
-  color: #7a847f;
-  font-size: 11px;
-}
-
-.wb-asset-version-items {
-  min-height: 0;
-  flex: 1;
-  overflow-y: auto;
-  padding: 7px;
-}
-
-.wb-asset-version-items button {
-  position: relative;
-  display: flex;
-  width: 100%;
-  min-height: 48px;
-  flex-direction: column;
-  justify-content: center;
-  gap: 3px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: #39463f;
-  cursor: pointer;
-  padding: 7px 32px 7px 10px;
-  text-align: left;
-}
-
-.wb-asset-version-items button:hover,
-.wb-asset-version-items button.is-active {
-  background: #e9eeeb;
-}
-
-.wb-asset-version-items button span {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.wb-asset-version-items button small {
-  color: #7a847f;
-  font-size: 10px;
-}
-
-.wb-asset-version-items button svg {
-  position: absolute;
-  top: 16px;
-  right: 10px;
-  width: 15px;
-  height: 15px;
-}
-
-.wb-asset-more {
-  min-height: 38px;
-  flex: 0 0 38px;
-  border: 0;
-  border-top: 1px solid #e2e6e4;
-  background: #fff;
-  color: #516159;
-  cursor: pointer;
-  font-size: 11px;
-}
-
-.wb-asset-error {
-  margin: 0 0 12px;
-  color: #b14343;
-  font-size: 12px;
 }
 
 .is-spinning {
@@ -820,42 +565,6 @@
     gap: 10px;
   }
 
-  .wb-asset-dialog-backdrop {
-    padding: 0;
-  }
-
-  .wb-asset-dialog {
-    width: 100vw;
-    height: 100dvh;
-    border-radius: 0;
-  }
-
-  .wb-asset-dialog-body {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .wb-asset-dialog-preview {
-    flex: 1;
-    padding: 14px;
-  }
-
-  .wb-asset-version-list {
-    max-height: 230px;
-    border-top: 1px solid #e2e6e4;
-    border-left: 0;
-  }
-
-  .wb-asset-version-items {
-    display: flex;
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
-
-  .wb-asset-version-items button {
-    width: 150px;
-    flex: 0 0 150px;
-  }
 }
 
 @media (max-width: 480px) {
@@ -877,12 +586,4 @@
     transform: none;
   }
 
-  .wb-asset-version-bar {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .wb-asset-version-bar > div:last-child {
-    width: 100%;
-  }
 }

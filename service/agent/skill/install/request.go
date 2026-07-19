@@ -31,6 +31,9 @@ func parseSkillInstallRequest(ctx context.Context, body map[string]any) (skillIn
 	if text == "" {
 		return skillInstallRequest{}, fmt.Errorf("安装输入不能为空")
 	}
+	if err := agentskill.ValidateStoredBytes("安装输入", text, agentskill.MaxInstallInputBytes); err != nil {
+		return skillInstallRequest{}, err
+	}
 
 	cateID := util.ToUint64(agentskill.FirstPresent(installContext, "cate_id", "cateId"))
 	if cateID == 0 {
@@ -52,11 +55,20 @@ func parseSkillInstallRequest(ctx context.Context, body map[string]any) (skillIn
 	if value, ok := agentskill.FirstPresentOK(installContext, "auto_add_to_pack", "autoAddToPack"); ok {
 		autoAdd = agentskill.Truthy(value)
 	}
+	if err := agentskill.ValidateAssignment(ctx, packID, cateID); err != nil {
+		return skillInstallRequest{}, err
+	}
 	return skillInstallRequest{
 		Input:         text,
 		CateID:        cateID,
 		TargetPackID:  packID,
 		AutoAddToPack: autoAdd,
+		TargetSkillID: func() uint64 {
+			if refreshSkill != nil {
+				return refreshSkill.ID
+			}
+			return 0
+		}(),
 	}, nil
 }
 
@@ -82,6 +94,9 @@ func findRefreshSkill(ctx context.Context, body map[string]any, installContext m
 	if skill == nil {
 		return nil, fmt.Errorf("技能不存在或已被删除")
 	}
+	if agentmodel.NormalizeSkillSourceType(skill.SourceType, skill.SourceURL, skill.InstallInput) != agentmodel.SkillSourceTypeInstalled {
+		return nil, fmt.Errorf("只有安装来源技能可以通过安装流程更新")
+	}
 	return skill, nil
 }
 
@@ -89,10 +104,10 @@ func refreshInstallInput(ctx context.Context, skill *agentmodel.Skill) (string, 
 	if skill == nil {
 		return "", fmt.Errorf("技能不存在或已被删除")
 	}
-	if input := latestInstallInput(ctx, skill.ID); input != "" {
+	if input := strings.TrimSpace(skill.InstallInput); input != "" {
 		return input, nil
 	}
-	if input := strings.TrimSpace(skill.InstallInput); input != "" {
+	if input := latestInstallInput(ctx, skill.ID); input != "" {
 		return input, nil
 	}
 	if input := strings.TrimSpace(skill.SourceURL); input != "" {
@@ -105,7 +120,10 @@ func latestInstallInput(ctx context.Context, skillID uint64) string {
 	if skillID == 0 {
 		return ""
 	}
-	rows := agentmodel.NewSkillInstallModel().Select(ctx, map[string]any{"skill_id": skillID})
+	rows := agentmodel.NewSkillInstallModel().Select(ctx, map[string]any{
+		"skill_id": skillID,
+		"status":   agentmodel.SkillInstallStatusSuccess,
+	}, map[string]any{"order": "main.created_at desc,main.id desc", "limit": 1})
 	for _, row := range rows {
 		if row == nil {
 			continue

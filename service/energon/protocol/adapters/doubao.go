@@ -64,6 +64,9 @@ func (adapter DoubaoAdapter) BuildNativeRequest(input botprotocol.NativeInput) (
 	case "image":
 		input.Request.Kind = doubaoKindImage
 		return adapter.buildImageRequest(input)
+	case "audio":
+		input.Request.Kind = doubaoKindAudio
+		return adapter.buildAudioRequest(input)
 	case "video":
 		input.Request.Kind = doubaoKindVideo
 		return adapter.buildVideoRequest(input)
@@ -282,6 +285,8 @@ func (adapter DoubaoAdapter) BuildClientResponse(req *botprotocol.ShemicRequest,
 		return doubaoEmbeddingOutput(resp.Body), nil
 	case doubaoKindImage:
 		return doubaoImageOutput(resp.Body), nil
+	case doubaoKindAudio:
+		return doubaoAudioOutput(resp)
 	case doubaoKindVideo:
 		return doubaoVideoOutput(resp.Body), nil
 	default:
@@ -291,7 +296,7 @@ func (adapter DoubaoAdapter) BuildClientResponse(req *botprotocol.ShemicRequest,
 
 func (adapter DoubaoAdapter) SupportsCancel(input botprotocol.NativeInput) bool {
 	switch doubaoServiceType(input) {
-	case "text", "llm", "chat", "llm.chat", "embeddings", "embedding", "image", "video":
+	case "text", "llm", "chat", "llm.chat", "embeddings", "embedding", "image", "audio", "video":
 		return true
 	default:
 		return false
@@ -309,6 +314,12 @@ func (DoubaoAdapter) StreamTaskSpec(input botprotocol.NativeInput) (bottask.Stre
 		return bottask.StreamTaskSpec{
 			Kind:         bottask.StreamKindRequest,
 			OutputType:   botprotocol.MediaTypeImage,
+			PlainRequest: true,
+		}, true
+	case doubaoKindAudio:
+		return bottask.StreamTaskSpec{
+			Kind:         bottask.StreamKindRequest,
+			OutputType:   botprotocol.MediaTypeAudio,
 			PlainRequest: true,
 		}, true
 	case doubaoKindVideo:

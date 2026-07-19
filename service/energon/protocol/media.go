@@ -460,20 +460,29 @@ func normalizeBase64ImageURL(value string) string {
 	return "data:" + detectBase64ImageMIME(value) + ";base64," + value
 }
 
+func DecodeBase64Content(value string) ([]byte, error) {
+	value = compactBase64Content(value)
+	if content, err := base64.StdEncoding.DecodeString(value); err == nil {
+		return content, nil
+	}
+	return base64.RawStdEncoding.DecodeString(strings.TrimRight(value, "="))
+}
+
 func detectBase64ImageMIME(value string) string {
-	prefix := strings.NewReplacer("\n", "", "\r", "", " ", "", "\t", "").Replace(value)
+	prefix := compactBase64Content(value)
 	if len(prefix) > 684 {
 		prefix = prefix[:684]
 	}
 	prefix = prefix[:len(prefix)-len(prefix)%4]
-	decoded, err := base64.StdEncoding.DecodeString(prefix)
-	if err != nil {
-		decoded, err = base64.RawStdEncoding.DecodeString(strings.TrimRight(prefix, "="))
-	}
+	decoded, err := DecodeBase64Content(prefix)
 	if err == nil {
 		if mimeType := strings.ToLower(strings.TrimSpace(http.DetectContentType(decoded))); strings.HasPrefix(mimeType, "image/") {
 			return mimeType
 		}
 	}
 	return "image/jpeg"
+}
+
+func compactBase64Content(value string) string {
+	return strings.NewReplacer("\n", "", "\r", "", " ", "", "\t", "").Replace(value)
 }

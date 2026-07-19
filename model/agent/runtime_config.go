@@ -22,7 +22,6 @@ const (
 	DefaultRuntimeSkillLoadedContentMaxLength        = 30000
 
 	RuntimeScriptSandboxDriverDisabled = "disabled"
-	RuntimeScriptSandboxDriverLocal    = "local"
 	RuntimeScriptSandboxDriverBwrap    = "bwrap"
 
 	RuntimeScriptSandboxNetworkNone = "none"
@@ -58,7 +57,6 @@ type RuntimeConfig struct {
 var (
 	runtimeScriptSandboxDriverOptions = []map[string]any{
 		{"id": RuntimeScriptSandboxDriverDisabled, "value": "禁用脚本"},
-		{"id": RuntimeScriptSandboxDriverLocal, "value": "本地受控执行"},
 		{"id": RuntimeScriptSandboxDriverBwrap, "value": "bubblewrap 沙箱"},
 	}
 

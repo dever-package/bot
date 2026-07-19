@@ -30,6 +30,8 @@ func (registry *Registry) Add(tools ...runtimeprovider.Tool) error {
 	if registry.items == nil {
 		registry.items = map[string]runtimeprovider.Tool{}
 	}
+	normalized := make([]runtimeprovider.Tool, 0, len(tools))
+	batchNames := make(map[string]struct{}, len(tools))
 	for _, current := range tools {
 		name := strings.TrimSpace(current.Definition.Name)
 		if name == "" || current.Handle == nil {
@@ -38,7 +40,15 @@ func (registry *Registry) Add(tools ...runtimeprovider.Tool) error {
 		if _, exists := registry.items[name]; exists {
 			return fmt.Errorf("工具名称重复: %s", name)
 		}
+		if _, exists := batchNames[name]; exists {
+			return fmt.Errorf("工具名称重复: %s", name)
+		}
+		batchNames[name] = struct{}{}
 		current.Definition.Name = name
+		normalized = append(normalized, current)
+	}
+	for _, current := range normalized {
+		name := current.Definition.Name
 		registry.items[name] = current
 		registry.order = append(registry.order, name)
 	}
@@ -154,13 +164,19 @@ func (registry *Registry) Execute(ctx context.Context, call botprotocol.ToolCall
 	if err != nil {
 		return runtimeprovider.Result{}, err
 	}
+	pending := make([]runtimeprovider.Tool, 0, len(result.Tools))
 	for _, added := range result.Tools {
-		if registry.Has(added.Definition.Name) {
-			continue
+		name := strings.TrimSpace(added.Definition.Name)
+		if existing, exists := registry.items[name]; exists {
+			if existing.CurrentDefinition().Kind == "skill" && added.CurrentDefinition().Kind == "skill" {
+				continue
+			}
+			return runtimeprovider.Result{}, fmt.Errorf("动态工具名称与已挂载工具冲突: %s", name)
 		}
-		if err := registry.Add(added); err != nil {
-			return runtimeprovider.Result{}, err
-		}
+		pending = append(pending, added)
+	}
+	if err := registry.Add(pending...); err != nil {
+		return runtimeprovider.Result{}, err
 	}
 	return result, nil
 }

@@ -195,6 +195,13 @@
                     "variant": "outline",
                     "size": "sm",
                     "description": "继续编辑",
+                    "hiddenWhen": [
+                      {
+                        "path": "status",
+                        "operator": "notEquals",
+                        "value": 1
+                      }
+                    ],
                     "action": {
                       "click": [
                         {
@@ -223,6 +230,13 @@
                     "variant": "outline",
                     "size": "sm",
                     "description": "测试与发布",
+                    "hiddenWhen": [
+                      {
+                        "path": "status",
+                        "operator": "notEquals",
+                        "value": 1
+                      }
+                    ],
                     "action": {
                       "click": [
                         {
@@ -244,6 +258,13 @@
                     "size": "sm",
                     "description": "删除",
                     "className": "text-destructive hover:text-destructive",
+                    "hiddenWhen": [
+                      {
+                        "path": "status",
+                        "operator": "equals",
+                        "value": 2
+                      }
+                    ],
                     "action": {
                       "click": [
                         {
@@ -295,6 +316,7 @@
           "skillDraftPatchCloseOnSave": true,
           "skillDraftPatchContext": {
             "id": "data.actionTarget.draftAgent.id",
+            "expected_version": "data.actionTarget.draftAgent.version",
             "pack_id": "data.actionTarget.draftAgent.pack_id",
             "cate_id": "data.actionTarget.draftAgent.cate_id"
           },
@@ -389,7 +411,10 @@
           "confirm": {
             "type": "delete",
             "model": "bot.agent.NewSkillDraftModel",
-            "params": "actionTarget.deleteDraft"
+            "params": "actionTarget.deleteDraft",
+            "before": {
+              "service": "bot.agent.setting.AgentHook.BeforeDeleteSkillDraft"
+            }
           }
         }
       }

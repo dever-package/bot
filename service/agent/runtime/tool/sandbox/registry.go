@@ -14,8 +14,6 @@ func Run(ctx context.Context, config Config, req Request) (Result, error) {
 	switch config.Driver {
 	case DriverDisabled:
 		return disabledRunner{}.Run(ctx, config, req)
-	case DriverLocal:
-		return localRunner{}.Run(ctx, config, req)
 	case DriverBwrap:
 		return bwrapRunner{}.Run(ctx, config, req)
 	default:

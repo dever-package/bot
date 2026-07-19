@@ -15,6 +15,10 @@ import {
   workbenchApi,
   type WorkbenchPower,
 } from "./workbench-api";
+import {
+  loadWorkbenchPowerHistory,
+  loadWorkbenchPowerHistoryDetail,
+} from "./workbench-power-history";
 import { AssetContinuationNotice } from "./asset-continuation";
 import { WorkbenchPicker } from "./workbench-picker";
 
@@ -80,6 +84,34 @@ export function WorkbenchFunctionPage({
               : {}),
           },
         ]),
+      ),
+    [continuationAsset, powers, teamID],
+  );
+  const histories = useMemo(
+    () =>
+      new Map(
+        powers.map((power) => {
+          const targetAssetID =
+            continuationAsset?.sourceType === "tool" &&
+            continuationAsset.sourceID === power.id
+              ? continuationAsset.id
+              : 0;
+          return [
+            power.id,
+            {
+              scopeKey: `${teamID}:${power.id}:${targetAssetID}`,
+              selectLatest: targetAssetID === 0,
+              loadPage: (beforeID?: number) =>
+                loadWorkbenchPowerHistory({
+                  teamID,
+                  teamPowerID: power.id,
+                  beforeID,
+                }),
+              loadDetail: (historyID: number) =>
+                loadWorkbenchPowerHistoryDetail({ teamID, historyID }),
+            },
+          ] as const;
+        }),
       ),
     [continuationAsset, powers, teamID],
   );
@@ -149,13 +181,20 @@ export function WorkbenchFunctionPage({
                 uploadBizName={BODY_UPLOAD_BIZ_NAME}
                 allowResourceLibrary={false}
                 onUploadedFiles={saveUploadedFiles}
-                renderResultActions={({ requestID, successful }) =>
-                  successful ? (
+                history={histories.get(power.id)}
+                renderResultActions={(result) =>
+                  result.successful ? (
                     <SaveToolMaterialButton
                       teamID={teamID}
                       teamPowerID={power.id}
-                      requestID={requestID}
-                      targetAssetID={powerContinuation?.id || 0}
+                      requestID={result.requestID}
+                      defaultTitle={result.title}
+                      targetAssetID={
+                        powerContinuation &&
+                        result.targetAssetID === powerContinuation.id
+                          ? powerContinuation.id
+                          : 0
+                      }
                       targetAssetName={powerContinuation?.name || ""}
                       onSaved={onClearContinuation}
                     />
@@ -174,6 +213,7 @@ function SaveToolMaterialButton({
   teamID,
   teamPowerID,
   requestID,
+  defaultTitle,
   targetAssetID,
   targetAssetName,
   onSaved,
@@ -181,6 +221,7 @@ function SaveToolMaterialButton({
   teamID: number;
   teamPowerID: number;
   requestID: string;
+  defaultTitle: string;
   targetAssetID: number;
   targetAssetName: string;
   onSaved: () => void;
@@ -189,7 +230,7 @@ function SaveToolMaterialButton({
     <SaveAssetAction
       teamID={teamID}
       resetKey={`${requestID}:${targetAssetID}`}
-      defaultName={targetAssetID ? targetAssetName : ""}
+      defaultName={targetAssetID ? targetAssetName : defaultTitle}
       appearance="toolbar"
       confirmDescription={
         targetAssetID

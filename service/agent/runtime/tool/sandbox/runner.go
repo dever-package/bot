@@ -4,29 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"time"
 )
-
-type localRunner struct{}
-
-func (localRunner) Run(ctx context.Context, config Config, req Request) (Result, error) {
-	scriptPath := filepath.Join(req.SkillRoot, filepath.FromSlash(req.ScriptRelative))
-	commandName, commandArgs, err := scriptCommand(scriptPath, req.Args)
-	if err != nil {
-		return Result{}, err
-	}
-	return runCommand(ctx, runCommandInput{
-		Runner:         DriverLocal,
-		Script:         req.ScriptRelative,
-		CommandName:    commandName,
-		CommandArgs:    commandArgs,
-		WorkDir:        req.SkillRoot,
-		Env:            scriptEnv(req.TempRoot, req.SkillRoot, req.Env),
-		Timeout:        requestTimeout(req, config),
-		OutputMaxBytes: config.OutputMaxBytes,
-	})
-}
 
 type runCommandInput struct {
 	Runner         string

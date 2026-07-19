@@ -27,6 +27,7 @@ func (SkillDraft) PostTest(c *server.Context) error {
 		Args:    skillDraftArgs(body["args"]),
 		Target:  util.ToStringTrimmed(body["target"]),
 		Timeout: time.Duration(util.ToIntDefault(body["timeout_seconds"], 0)) * time.Second,
+		Config:  skillDraftTestConfig(body["config"]),
 	})
 	return skillDraftResponse(c, resp)
 }
@@ -37,13 +38,14 @@ func (SkillDraft) PostPublish(c *server.Context) error {
 		return c.Error(err)
 	}
 	resp := skillDraftService.Publish(c.Context(), skilldraft.PublishRequest{
-		ID:             util.ToUint64(body["id"]),
-		Name:           util.ToStringTrimmed(body["name"]),
-		NameSet:        skillDraftBodyHas(body, "name"),
-		Description:    util.ToStringTrimmed(body["description"]),
-		DescriptionSet: skillDraftBodyHas(body, "description"),
-		PackID:         util.ToUint64(firstSkillDraftBodyValue(body, "pack_id", "packId")),
-		CateID:         util.ToUint64(firstSkillDraftBodyValue(body, "cate_id", "cateId")),
+		ID:              util.ToUint64(body["id"]),
+		ExpectedVersion: util.ToUint64(firstSkillDraftBodyValue(body, "expected_version", "expectedVersion", "version")),
+		Name:            util.ToStringTrimmed(body["name"]),
+		NameSet:         skillDraftBodyHas(body, "name"),
+		Description:     util.ToStringTrimmed(body["description"]),
+		DescriptionSet:  skillDraftBodyHas(body, "description"),
+		PackID:          util.ToUint64(firstSkillDraftBodyValue(body, "pack_id", "packId")),
+		CateID:          util.ToUint64(firstSkillDraftBodyValue(body, "cate_id", "cateId")),
 	})
 	return skillDraftResponse(c, resp)
 }
@@ -97,11 +99,16 @@ func (SkillDraft) PostApplyPatch(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
+	patch := skillDraftMap(firstSkillDraftBodyValue(body, "patch", "draft"))
+	if len(patch) == 0 {
+		patch = body
+	}
 	resp := skillDraftService.ApplyPatch(c.Context(), skilldraft.PatchRequest{
 		ID:                  util.ToUint64(firstSkillDraftBodyValue(body, "id", "draft_id", "draftId")),
+		ExpectedVersion:     util.ToUint64(firstSkillDraftBodyValue(body, "expected_version", "expectedVersion", "version")),
 		PackID:              util.ToUint64(firstSkillDraftBodyValue(body, "pack_id", "packId")),
 		CateID:              util.ToUint64(firstSkillDraftBodyValue(body, "cate_id", "cateId")),
-		Patch:               skillDraftMap(firstSkillDraftBodyValue(body, "patch", "draft")),
+		Patch:               patch,
 		AssistantSessionID:  util.ToUint64(firstSkillDraftBodyValue(body, "assistant_session_id", "assistantSessionId")),
 		AssistantAgentKey:   util.ToStringTrimmed(firstSkillDraftBodyValue(body, "assistant_agent_key", "assistantAgentKey")),
 		AssistantContextKey: util.ToStringTrimmed(firstSkillDraftBodyValue(body, "assistant_context_key", "assistantContextKey")),
@@ -165,6 +172,30 @@ func skillDraftArgs(raw any) []string {
 	default:
 		return nil
 	}
+}
+
+func skillDraftTestConfig(raw any) []skilldraft.TestConfigValue {
+	items, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]skilldraft.TestConfigValue, 0, len(items))
+	for _, item := range items {
+		mapped, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		key := util.ToStringTrimmed(mapped["key"])
+		if key == "" {
+			continue
+		}
+		result = append(result, skilldraft.TestConfigValue{
+			Key:       key,
+			TargetKey: util.ToStringTrimmed(firstSkillDraftBodyValue(mapped, "target_key", "targetKey", "target")),
+			Value:     util.ToString(mapped["value"]),
+		})
+	}
+	return result
 }
 
 func skillDraftPackOptions(ctx context.Context) []map[string]any {

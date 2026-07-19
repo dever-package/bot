@@ -74,16 +74,20 @@ func (AgentHook) ProviderBeforeSaveAgentCate(_ *server.Context, params []any) an
 }
 
 func ensureBaseAgentCates(ctx context.Context) {
-	// Seeds 只在建表时写入；这里保证内置分类 ID 存在，但不限制用户维护自定义分类。
-	agentModel := agentmodel.NewAgentModel()
+	// Seeds 只在建表时写入；运行期同步保证升级后的内置定义完整。
+	ensureBaseAgentCate(ctx, agentmodel.DefaultAgentCateID, "默认分类", 100)
+	ensureBaseAgentCate(ctx, agentmodel.SystemAgentCateID, "系统内置", 110)
 	ensureBuiltinAgent(ctx, agentmodel.FrontAssistantAgentID, agentmodel.FrontAssistantAgentKey)
 	ensureBuiltinAgent(ctx, agentmodel.SkillInstallerAgentID, agentmodel.SkillInstallerAgentKey)
 	ensureBuiltinAgent(ctx, agentmodel.SkillCreatorAgentID, agentmodel.SkillCreatorAgentKey)
+	agentModel := agentmodel.NewAgentModel()
 	agentModel.Update(ctx, map[string]any{"kind": agentmodel.AgentKindInternal}, map[string]any{
 		"cate_id": agentmodel.SystemAgentCateID,
 	})
-	ensureBaseAgentCate(ctx, agentmodel.DefaultAgentCateID, "默认分类", 100)
-	ensureBaseAgentCate(ctx, agentmodel.SystemAgentCateID, "系统内置", 110)
+}
+
+func EnsureBuiltinAgents(ctx context.Context) {
+	ensureBaseAgentCates(ctx)
 }
 
 func ensureBaseAgentCate(ctx context.Context, id uint64, name string, sort int) {
@@ -100,53 +104,51 @@ func ensureBaseAgentCate(ctx context.Context, id uint64, name string, sort int) 
 }
 
 func ensureBuiltinAgent(ctx context.Context, id uint64, key string) {
-	name, ok := builtinAgentNameForKey(key)
+	record, ok := agentmodel.BuiltinAgentRecord(key)
 	if !ok {
 		return
 	}
 
 	model := agentmodel.NewAgentModel()
 	if existing := model.Find(ctx, map[string]any{"key": key}); existing != nil {
-		model.Update(ctx, map[string]any{"id": existing.ID}, builtinAgentUpdateRecord())
+		model.Update(ctx, map[string]any{"id": existing.ID}, builtinAgentUpdateRecord(record, existing))
 		return
 	}
 
-	record := builtinAgentUpdateRecord()
-	record["key"] = key
 	if existing := model.Find(ctx, map[string]any{"id": id}); existing != nil {
-		if canUseBuiltinAgentID(existing, name) {
-			record = builtinAgentUpdateRecord()
-			record["key"] = key
-			model.Update(ctx, map[string]any{"id": id}, record)
+		name, _ := record["name"].(string)
+		if canUseBuiltinAgentID(existing, key, strings.TrimSpace(name)) {
+			model.Update(ctx, map[string]any{"id": id}, builtinAgentUpdateRecord(record, existing))
+			return
 		}
 	}
-}
-
-func builtinAgentUpdateRecord() map[string]any {
-	return map[string]any{
-		"kind":    agentmodel.AgentKindInternal,
-		"cate_id": agentmodel.SystemAgentCateID,
+	if model.Find(ctx, map[string]any{"id": id}) != nil {
+		delete(record, "id")
 	}
+	model.Insert(ctx, record)
 }
 
-func builtinAgentNameForKey(key string) (string, bool) {
-	switch key {
-	case agentmodel.FrontAssistantAgentKey:
-		return "AI助理", true
-	case agentmodel.SkillInstallerAgentKey:
-		return "技能安装规划器", true
-	case agentmodel.SkillCreatorAgentKey:
-		return "技能创建工程师", true
-	default:
-		return "", false
+func builtinAgentUpdateRecord(definition map[string]any, existing *agentmodel.Agent) map[string]any {
+	record := map[string]any{}
+	for _, field := range []string{
+		"name", "key", "kind", "cate_id", "description", "prompt", "power_cate_id",
+		"knowledge_cate_id", "skill_pack_id", "memory_enabled", "temperature",
+		"timeout_seconds", "max_auto_steps", "status", "sort",
+	} {
+		record[field] = definition[field]
 	}
+	if existing != nil && existing.LLMPowerID == 0 {
+		record["llm_power_id"] = definition["llm_power_id"]
+	}
+	return record
 }
 
-func canUseBuiltinAgentID(row *agentmodel.Agent, name string) bool {
+func canUseBuiltinAgentID(row *agentmodel.Agent, key string, name string) bool {
 	if row == nil {
 		return false
 	}
-	return normalizeAgentKind(row.Kind) == agentmodel.AgentKindInternal || strings.TrimSpace(row.Name) == name
+	rowKey := strings.TrimSpace(row.Key)
+	return strings.EqualFold(rowKey, strings.TrimSpace(key)) || (rowKey == "" && strings.TrimSpace(row.Name) == name)
 }
 
 func (AgentHook) ProviderBeforeDeleteAgent(c *server.Context, params []any) any {

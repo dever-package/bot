@@ -249,13 +249,18 @@ function normalizeFeedbackField(value: any, index: number): PowerParam {
     name: String(value?.name || value?.label || value?.title || value?.key || ""),
     key: String(value?.key || value?.name || `field_${index + 1}`),
     type: String(value?.type || "input"),
+    preview_type: String(value?.preview_type || value?.previewType || "none"),
     value_type: value?.value_type || value?.valueType || "string",
     default_value: String(value?.default_value || value?.defaultValue || ""),
     required: Boolean(value?.required),
     options: options.map((option: any, optionIndex: number) => ({
       id: Number(option?.id || optionIndex + 1),
       name: String(option?.name || option?.label || option?.value || ""),
-      value: String(option?.value || option?.id || option?.label || option?.name || ""),
+      value: String(
+        option?.value || option?.id || option?.label || option?.name || "",
+      ),
+      native_value: String(option?.native_value || option?.nativeValue || ""),
+      preview_url: String(option?.preview_url || option?.previewUrl || ""),
       sort: Number(option?.sort || optionIndex + 1),
     })),
   };

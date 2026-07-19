@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"time"
 
 	"github.com/shemic/dever/orm"
@@ -16,8 +17,8 @@ const (
 
 type SkillConfig struct {
 	ID             uint64    `dorm:"primaryKey;autoIncrement;comment:环境变量ID"`
-	SkillID        uint64    `dorm:"type:bigint;not null;default:0;comment:保留技能"`
-	TargetKey      string    `dorm:"type:varchar(128);not null;default:'';comment:保留目标"`
+	SkillID        uint64    `dorm:"type:bigint;not null;default:0;comment:技能"`
+	TargetKey      string    `dorm:"type:varchar(128);not null;default:'';comment:配置目标"`
 	Key            string    `dorm:"type:varchar(128);not null;comment:变量标识"`
 	Name           string    `dorm:"type:varchar(128);not null;default:'';comment:变量名称"`
 	Type           string    `dorm:"type:varchar(32);not null;default:'text';comment:变量类型"`
@@ -56,7 +57,7 @@ func NewSkillConfigModel() *orm.Model[SkillConfig] {
 }
 
 func NormalizeSkillConfigType(value string) string {
-	switch value {
+	switch strings.ToLower(strings.TrimSpace(value)) {
 	case SkillConfigTypeSecret:
 		return SkillConfigTypeSecret
 	default:

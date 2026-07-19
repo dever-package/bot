@@ -7,7 +7,6 @@ import (
 
 const (
 	DriverDisabled = "disabled"
-	DriverLocal    = "local"
 	DriverBwrap    = "bwrap"
 
 	NetworkNone = "none"
@@ -23,7 +22,7 @@ const (
 
 const BwrapInstallGuide = "请安装 bubblewrap 后重试。安装指引: Debian/Ubuntu 执行 apt-get update && apt-get install -y bubblewrap；CentOS/RHEL/Fedora 执行 dnf install -y bubblewrap 或 yum install -y bubblewrap；Alpine 执行 apk add --no-cache bubblewrap。检测命令: which bwrap && bwrap --version"
 
-const BwrapRuntimeGuide = "请检查 bubblewrap 是否可正常创建命名空间；若系统禁用了非特权 user namespace，需要在部署环境开启对应内核配置，或临时切换脚本沙箱模式为 disabled/local。"
+const BwrapRuntimeGuide = "请检查 bubblewrap 是否可正常创建命名空间；若系统禁用了非特权 user namespace，需要在部署环境开启对应内核配置，或临时禁用技能脚本。"
 
 type Config struct {
 	Driver         string
@@ -64,12 +63,20 @@ func NormalizeConfig(config Config) Config {
 	return config
 }
 
+// IsolatedConfig applies the execution policy shared by installed skills,
+// draft tests and dependency preparation.
+func IsolatedConfig(config Config, allowNetwork bool) (Config, error) {
+	config = NormalizeConfig(config)
+	if !allowNetwork {
+		config.NetworkMode = NetworkNone
+	}
+	return config, nil
+}
+
 func normalizeDriver(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case DriverDisabled:
 		return DriverDisabled
-	case DriverLocal:
-		return DriverLocal
 	case DriverBwrap:
 		return DriverBwrap
 	default:

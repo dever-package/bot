@@ -11,12 +11,17 @@ import (
 )
 
 const (
-	planKind         = "skill_install_plan"
-	maxPlanSteps     = 8
-	collectModeAll   = "all"
-	collectModeOne   = "single"
-	stepTypeCommand  = "command"
-	stepTypeDownload = "download"
+	planKind                = "skill_install_plan"
+	maxPlanSteps            = 8
+	maxPlanSummaryRunes     = 2000
+	maxPlanCommandBytes     = 16 * 1024
+	maxPlanURLRunes         = 4096
+	maxPlanDirectoryRunes   = 512
+	maxPlanCollectRootRunes = 512
+	collectModeAll          = "all"
+	collectModeOne          = "single"
+	stepTypeCommand         = "command"
+	stepTypeDownload        = "download"
 )
 
 type installPlan struct {
@@ -47,17 +52,19 @@ func parseInstallPlanResult(output map[string]any, summary string) (installPlan,
 		if plan, ok := raw.(installPlan); ok {
 			if err := plan.NormalizeAndValidate(); err == nil {
 				return plan, nil
+			} else {
+				rejection = installPlanRejection(plan, err)
 			}
-			rejection = installPlanRejection(plan, rejection)
 			continue
 		}
 		if mapped, ok := raw.(map[string]any); ok {
 			plan, err := decodeInstallPlan(mapped)
 			if err == nil {
-				if plan.NormalizeAndValidate() == nil {
+				if validateErr := plan.NormalizeAndValidate(); validateErr == nil {
 					return plan, nil
+				} else {
+					rejection = installPlanRejection(plan, validateErr)
 				}
-				rejection = installPlanRejection(plan, rejection)
 			}
 		}
 		text := strings.TrimSpace(frontstream.InputText(raw))
@@ -67,7 +74,7 @@ func parseInstallPlanResult(output map[string]any, summary string) (installPlan,
 		if plan, err := parseInstallPlanText(text); err == nil {
 			return plan, nil
 		} else {
-			rejection = installPlanRejection(plan, rejection)
+			rejection = installPlanRejection(plan, err)
 		}
 	}
 	if rejection != nil {
@@ -162,6 +169,10 @@ func (plan *installPlan) NormalizeAndValidate() error {
 	if plan.Version != 1 {
 		return fmt.Errorf("安装计划 version 必须是 1")
 	}
+	plan.Summary = strings.TrimSpace(plan.Summary)
+	if err := agentskill.ValidateStoredText("安装计划摘要", plan.Summary, maxPlanSummaryRunes); err != nil {
+		return err
+	}
 	if len(plan.Steps) == 0 {
 		return fmt.Errorf("安装计划 steps 不能为空")
 	}
@@ -173,8 +184,7 @@ func (plan *installPlan) NormalizeAndValidate() error {
 			return fmt.Errorf("安装计划第 %d 步无效: %w", index+1, err)
 		}
 	}
-	normalizeCollect(&plan.Collect)
-	return nil
+	return normalizeCollect(&plan.Collect)
 }
 
 func normalizePlanStep(step *installPlanStep) error {
@@ -182,6 +192,9 @@ func normalizePlanStep(step *installPlanStep) error {
 	step.Command = strings.TrimSpace(step.Command)
 	step.URL = strings.TrimSpace(step.URL)
 	step.Dir = strings.TrimSpace(step.Dir)
+	if err := agentskill.ValidateStoredText("安装目录", step.Dir, maxPlanDirectoryRunes); err != nil {
+		return err
+	}
 	switch step.Type {
 	case stepTypeCommand:
 		if step.Command == "" {
@@ -190,35 +203,63 @@ func normalizePlanStep(step *installPlanStep) error {
 		if err := validateInstallCommand(step.Command); err != nil {
 			return err
 		}
+		if err := agentskill.ValidateStoredBytes("安装命令", step.Command, maxPlanCommandBytes); err != nil {
+			return err
+		}
+		step.URL = ""
+		step.Extract = false
 	case stepTypeDownload:
 		if step.URL == "" {
 			return fmt.Errorf("url 不能为空")
 		}
-		if _, err := url.ParseRequestURI(step.URL); err != nil {
+		if err := agentskill.ValidateStoredText("下载地址", step.URL, maxPlanURLRunes); err != nil {
+			return err
+		}
+		parsed, err := url.Parse(step.URL)
+		if err != nil || parsed.Hostname() == "" || (strings.ToLower(parsed.Scheme) != "http" && strings.ToLower(parsed.Scheme) != "https") {
 			return fmt.Errorf("url 不合法")
 		}
+		if parsed.User != nil {
+			return fmt.Errorf("url 不能包含账号或凭据")
+		}
+		step.Command = ""
+		step.Dir = ""
 	default:
 		return fmt.Errorf("不支持的 step type: %s", step.Type)
 	}
 	return nil
 }
 
-func normalizeCollect(collect *installPlanCollect) {
+func normalizeCollect(collect *installPlanCollect) error {
 	collect.Entry = agentskill.EntryFile
 	if len(collect.Roots) == 0 {
 		collect.Roots = []string{"."}
 	}
-	for index, root := range collect.Roots {
+	if len(collect.Roots) > maxCollectRoots {
+		return fmt.Errorf("技能发现目录不能超过 %d 个", maxCollectRoots)
+	}
+	roots := make([]string, 0, len(collect.Roots))
+	seen := make(map[string]struct{}, len(collect.Roots))
+	for _, root := range collect.Roots {
 		root = strings.TrimSpace(root)
 		if root == "" {
 			root = "."
 		}
-		collect.Roots[index] = root
+		if err := agentskill.ValidateStoredText("技能发现目录", root, maxPlanCollectRootRunes); err != nil {
+			return err
+		}
+		if _, exists := seen[root]; exists {
+			continue
+		}
+		seen[root] = struct{}{}
+		roots = append(roots, root)
 	}
+	collect.Roots = roots
 	collect.Mode = strings.ToLower(strings.TrimSpace(collect.Mode))
 	if collect.Mode != collectModeOne {
 		collect.Mode = collectModeAll
 	}
+	return nil
 }
 
 func fencedJSONBlocks(text string) []string {

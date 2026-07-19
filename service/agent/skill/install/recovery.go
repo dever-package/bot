@@ -9,25 +9,31 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
-const interruptedInstallAge = 10 * time.Minute
+const (
+	installRecoveryInterval = 30 * time.Second
+	activeInstallStaleAge   = skillInstallTimeout + skillInstallFinalizeTimeout + time.Minute
+)
 
 var (
 	installRecoveryMu   sync.Mutex
 	lastInstallRecovery time.Time
 )
 
-func recoverInterruptedInstalls() {
+func RecoverInterruptedInstalls(ctx context.Context) {
 	installRecoveryMu.Lock()
 	defer installRecoveryMu.Unlock()
-	if time.Since(lastInstallRecovery) < 30*time.Second {
+	if time.Since(lastInstallRecovery) < installRecoveryInterval {
 		return
 	}
 	lastInstallRecovery = time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	for _, status := range []string{
-		agentmodel.SkillInstallStatusPending,
 		agentmodel.SkillInstallStatusInstalling,
+		agentmodel.SkillInstallStatusFinalizing,
 	} {
 		recoverInstallStatus(ctx, status)
 	}
@@ -37,7 +43,7 @@ func recoverInstallStatus(ctx context.Context, status string) {
 	model := agentmodel.NewSkillInstallModel()
 	now := time.Now()
 	for _, row := range model.Select(ctx, map[string]any{"status": status}) {
-		if row == nil || now.Sub(installReferenceTime(row)) < interruptedInstallAge {
+		if row == nil || now.Sub(installReferenceTime(row)) < activeInstallStaleAge {
 			continue
 		}
 		message := "技能安装进程已中断，请重新发起安装"

@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type MouseEvent } from "react";
+import { useEffect, useId, useRef, useState, type MouseEvent } from "react";
 import { Check, Loader2, Save } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Input } from "@/components/ui/input";
@@ -45,15 +45,17 @@ export function SaveAssetAction({
     normalizeAssetName(defaultName),
   );
   const [error, setError] = useState("");
+  const defaultNameRef = useRef(defaultName);
+  defaultNameRef.current = defaultName;
 
   useEffect(() => {
     setConfirmOpen(false);
     setSaving(false);
     setSavedAssetID(0);
     setDetailOpen(false);
-    setAssetName(normalizeAssetName(defaultName));
+    setAssetName(normalizeAssetName(defaultNameRef.current));
     setError("");
-  }, [defaultName, resetKey]);
+  }, [resetKey]);
 
   const label = disabled
     ? disabledLabel
@@ -67,7 +69,7 @@ export function SaveAssetAction({
       setDetailOpen(true);
       return;
     }
-    setAssetName(normalizeAssetName(defaultName));
+    setAssetName(normalizeAssetName(defaultNameRef.current));
     setError("");
     setConfirmOpen(true);
   }

@@ -7,72 +7,86 @@ import (
 	"strings"
 	"time"
 
+	dlog "github.com/shemic/dever/log"
+
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
-	"github.com/dever-package/bot/service/agent/runtime/tool/sandbox"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
-func (s Service) execute(execInfo skillInstallExecution) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
+const (
+	skillInstallTimeout         = 5 * time.Minute
+	skillInstallFinalizeTimeout = 10 * time.Second
+)
 
+func (s Service) execute(ctx context.Context, execInfo *skillInstallExecution) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			s.fail(context.Background(), &execInfo, fmt.Errorf("%v", recovered))
+			s.fail(execInfo, fmt.Errorf("%v", recovered))
 		}
 	}()
 
-	startedAt := time.Now()
-	s.updateInstall(ctx, execInfo.ID, map[string]any{
-		"status":     agentmodel.SkillInstallStatusInstalling,
-		"started_at": startedAt,
-	})
-	s.status(ctx, &execInfo, "正在准备技能安装任务")
+	s.status(ctx, execInfo, "正在准备技能安装任务")
 
 	tmpDir, err := os.MkdirTemp("", fmt.Sprintf("bot-skill-install-%d-", execInfo.ID))
 	if err != nil {
-		s.fail(ctx, &execInfo, err)
+		s.fail(execInfo, err)
 		return
 	}
 	defer os.RemoveAll(tmpDir)
 
-	plan, err := s.buildInstallPlan(ctx, &execInfo)
+	plan, err := s.buildInstallPlan(ctx, execInfo)
 	if err != nil {
-		s.fail(ctx, &execInfo, plannerError(execInfo.Input, err))
+		s.fail(execInfo, fmt.Errorf("生成技能安装计划失败: %w", err))
 		return
 	}
-	s.updateInstall(ctx, execInfo.ID, map[string]any{
+	if err := s.updateInstall(ctx, execInfo.ID, map[string]any{
 		"plan": agentskill.JSONText(plan),
 		"log":  execInfo.logText(),
-	})
+	}); err != nil {
+		s.fail(execInfo, err)
+		return
+	}
 
-	provenance, err := s.executePlan(ctx, &execInfo, tmpDir, plan)
+	provenance, err := s.executePlan(ctx, execInfo, tmpDir, plan)
 	if err != nil {
-		s.fail(ctx, &execInfo, err)
+		s.fail(execInfo, err)
+		return
+	}
+	if err := agentskill.ValidateTreeLimits(tmpDir, installWorkspaceLimits); err != nil {
+		s.fail(execInfo, fmt.Errorf("技能安装工作区超过资源限制: %w", err))
 		return
 	}
 	sources, err := collectSkillSources(tmpDir, plan, provenance, firstHTTPURL(execInfo.Input))
 	if err != nil {
-		s.fail(ctx, &execInfo, err)
+		s.fail(execInfo, err)
 		return
 	}
 	installs, err := parseSkillSources(sources)
 	if err != nil {
-		s.fail(ctx, &execInfo, err)
+		s.fail(execInfo, err)
+		return
+	}
+	installs, err = selectTargetSkill(ctx, execInfo.TargetSkillID, installs)
+	if err != nil {
+		s.fail(execInfo, err)
 		return
 	}
 	if err := validateInstallConflicts(ctx, installs); err != nil {
-		s.fail(ctx, &execInfo, err)
+		s.fail(execInfo, err)
+		return
+	}
+	if err := agentskill.EnsureRoot(); err != nil {
+		s.fail(execInfo, err)
 		return
 	}
 	sandboxConfig := runtimetool.SandboxConfig(runtimeconfig.Load(ctx))
 	for index := range installs {
 		dependencies, prepareErr := agentskill.PrepareDependencies(ctx, sandboxConfig, installs[index].Source.Directory)
 		if prepareErr != nil {
-			s.fail(ctx, &execInfo, prepareErr)
+			s.fail(execInfo, prepareErr)
 			return
 		}
 		if len(dependencies) > 0 {
@@ -80,50 +94,48 @@ func (s Service) execute(execInfo skillInstallExecution) {
 		} else {
 			installs[index].Parsed.Manifest["dependencies"] = []any{}
 		}
-		if validateErr := agentskill.ValidateTree(installs[index].Source.Directory); validateErr != nil {
-			s.fail(ctx, &execInfo, fmt.Errorf("技能依赖目录检查失败: %w", validateErr))
+		installs[index].Parsed.Manifest = installedSkillManifest(
+			installs[index].Parsed.Manifest,
+			installs[index].Source.SourceURL,
+		)
+		if validateErr := agentskill.ValidateManifestFiles(installs[index].Source.Directory, installs[index].Parsed.Manifest); validateErr != nil {
+			s.fail(execInfo, fmt.Errorf("技能 %s 的 %w", installs[index].Parsed.Key, validateErr))
 			return
 		}
+		contentHash, hashErr := agentskill.SkillContentHash(installs[index].Source.Directory, installs[index].Parsed.Manifest)
+		if hashErr != nil {
+			s.fail(execInfo, fmt.Errorf("计算技能 %s 版本失败: %w", installs[index].Parsed.Key, hashErr))
+			return
+		}
+		finalDir, pathErr := agentskill.VersionedInstallPath(installs[index].Parsed.Key, contentHash)
+		if pathErr != nil {
+			s.fail(execInfo, pathErr)
+			return
+		}
+		installs[index].Parsed.Hash = contentHash
+		installs[index].FinalDir = finalDir
 	}
-	if err := os.MkdirAll(agentskill.Root, 0o755); err != nil {
-		s.fail(ctx, &execInfo, err)
+	if ok, transitionErr := s.updateInstallStatus(ctx, execInfo.ID, agentmodel.SkillInstallStatusInstalling, map[string]any{
+		"status": agentmodel.SkillInstallStatusFinalizing,
+	}); transitionErr != nil {
+		s.fail(execInfo, transitionErr)
+		return
+	} else if !ok {
 		return
 	}
-
-	installedSkills, err := s.saveInstalledSkills(ctx, &execInfo, installs)
+	installedSkills, err := s.saveInstalledSkills(ctx, execInfo, installs)
 	if err != nil {
-		s.fail(ctx, &execInfo, err)
+		s.fail(execInfo, err)
 		return
 	}
-	skillIDs := make([]uint64, 0, len(installs))
-	targetPaths := make([]string, 0, len(installs))
-	for _, skill := range installedSkills {
-		if id := skillUint64(skill, "id"); id > 0 {
-			skillIDs = append(skillIDs, id)
-		}
-		if path := skillValue(skill, "path"); path != "" {
-			targetPaths = append(targetPaths, path)
-		}
-	}
-
 	result := skillInstallResult(execInfo.ID, installedSkills)
-	finishedAt := time.Now()
-	s.updateInstall(ctx, execInfo.ID, map[string]any{
-		"status":      agentmodel.SkillInstallStatusSuccess,
-		"skill_id":    firstUint64(skillIDs),
-		"target_path": firstString(targetPaths),
-		"result":      agentskill.JSONText(result),
-		"log":         execInfo.logText(),
-		"finished_at": finishedAt,
-		"error":       "",
-	})
-	_, _ = s.streams.WritePayload(ctx, execInfo.RequestID, frontstream.ResponsePayload(execInfo.RequestID, "result", result, "", 1))
+	streamCtx, streamCancel := installFinalizeContext()
+	defer streamCancel()
+	_, _ = s.streams.WritePayload(streamCtx, execInfo.RequestID, frontstream.ResponsePayload(execInfo.RequestID, "result", result, "", 1))
 }
 
 func (s Service) executePlan(ctx context.Context, execInfo *skillInstallExecution, workDir string, plan installPlan) ([]sourceProvenance, error) {
 	sandboxConfig := runtimetool.SandboxConfig(runtimeconfig.Load(ctx))
-	// Installation requires network access but remains isolated from the host filesystem.
-	sandboxConfig.NetworkMode = sandbox.NetworkHost
 	provenance := make([]sourceProvenance, 0)
 	for index, step := range plan.Steps {
 		s.status(ctx, execInfo, fmt.Sprintf("正在执行安装计划 %d/%d：%s", index+1, len(plan.Steps), planStepLabel(step)))
@@ -141,11 +153,14 @@ func (s Service) executePlan(ctx context.Context, execInfo *skillInstallExecutio
 				return nil, err
 			}
 			s.status(ctx, execInfo, "正在执行安装命令，命令输出会实时显示")
-			stopHeartbeat := s.heartbeat(ctx, execInfo, "仍在执行安装命令，请稍后")
-			_, err = runInstallCommand(ctx, sandboxConfig, commandDir, step.Command, func(line string) {
-				s.commandOutput(ctx, execInfo, line)
-			})
-			stopHeartbeat()
+			err = func() error {
+				stopHeartbeat := s.heartbeat(ctx, execInfo, "仍在执行安装命令，请稍后")
+				defer stopHeartbeat()
+				_, runErr := runInstallCommand(ctx, sandboxConfig, commandDir, step.Command, func(line string) {
+					s.commandOutput(ctx, execInfo, line)
+				})
+				return runErr
+			}()
 			if err != nil {
 				return nil, err
 			}
@@ -167,20 +182,39 @@ func planStepLabel(step installPlanStep) string {
 	}
 }
 
-func (s Service) fail(ctx context.Context, execInfo *skillInstallExecution, err error) {
+func (s Service) fail(execInfo *skillInstallExecution, err error) {
+	if execInfo == nil {
+		return
+	}
 	message := "技能安装失败"
 	if err != nil {
 		message = err.Error()
 	}
 	finishedAt := time.Now()
 	s.log(execInfo, "安装失败: %s", message)
-	s.updateInstall(ctx, execInfo.ID, map[string]any{
+	ctx, cancel := installFinalizeContext()
+	defer cancel()
+	row := agentmodel.NewSkillInstallModel().Find(ctx, map[string]any{"id": execInfo.ID})
+	if row == nil || row.Status == agentmodel.SkillInstallStatusCanceled || isFinalInstallStatus(row.Status) {
+		return
+	}
+	updated, updateErr := s.updateInstallStatus(ctx, execInfo.ID, row.Status, map[string]any{
 		"status":      agentmodel.SkillInstallStatusFail,
 		"log":         execInfo.logText(),
 		"error":       message,
 		"finished_at": finishedAt,
 	})
-	_, _ = s.streams.WritePayload(ctx, execInfo.RequestID, frontstream.ResponsePayload(execInfo.RequestID, "result", map[string]any{
+	if updateErr != nil {
+		dlog.ErrorFields("skill_install_finalize", "保存技能安装失败状态失败", dlog.Fields{
+			"install_id": execInfo.ID, "request_id": execInfo.RequestID, "error": updateErr.Error(),
+		})
+	}
+	if !updated {
+		return
+	}
+	streamCtx, streamCancel := installFinalizeContext()
+	defer streamCancel()
+	_, _ = s.streams.WritePayload(streamCtx, execInfo.RequestID, frontstream.ResponsePayload(execInfo.RequestID, "result", map[string]any{
 		"event":      "final",
 		"kind":       "skill_install",
 		"text":       "技能安装失败：" + message,
@@ -274,7 +308,7 @@ func (s Service) persistLog(ctx context.Context, execInfo *skillInstallExecution
 	if !force && !execInfo.LastPersisted.IsZero() && now.Sub(execInfo.LastPersisted) < 250*time.Millisecond {
 		return
 	}
-	s.updateInstall(ctx, execInfo.ID, map[string]any{"log": execInfo.logText()})
+	_ = s.updateInstall(ctx, execInfo.ID, map[string]any{"log": execInfo.logText()})
 	execInfo.LastPersisted = now
 }
 
@@ -287,12 +321,34 @@ func (execInfo *skillInstallExecution) logText() string {
 	return execInfo.Log.String()
 }
 
-func (s Service) updateInstall(ctx context.Context, id uint64, record map[string]any) {
+func installFinalizeContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), skillInstallFinalizeTimeout)
+}
+
+func (s Service) updateInstall(ctx context.Context, id uint64, record map[string]any) (err error) {
 	if id == 0 || len(record) == 0 {
-		return
+		return nil
 	}
 	defer func() {
-		_ = recover()
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("更新技能安装记录失败: %v", recovered)
+		}
 	}()
-	agentmodel.NewSkillInstallModel().Update(ctx, map[string]any{"id": id}, record)
+	if affected := agentmodel.NewSkillInstallModel().Update(ctx, map[string]any{"id": id}, record); affected == 0 {
+		return fmt.Errorf("更新技能安装记录失败: %d", id)
+	}
+	return nil
+}
+
+func (s Service) updateInstallStatus(ctx context.Context, id uint64, status string, record map[string]any) (updated bool, err error) {
+	if id == 0 || len(record) == 0 {
+		return false, nil
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("更新技能安装状态失败: %v", recovered)
+		}
+	}()
+	affected := agentmodel.NewSkillInstallModel().Update(ctx, map[string]any{"id": id, "status": status}, record)
+	return affected > 0, nil
 }

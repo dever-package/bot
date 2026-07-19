@@ -12,7 +12,8 @@ import (
 )
 
 func (s Service) ReadStream(ctx context.Context, requestID string, lastID string, count int64, block time.Duration) ([]frontstream.Entry, error) {
-	recoverInterruptedInstalls()
+	StartInstallScheduler()
+	RecoverInterruptedInstalls(ctx)
 	entries, err := s.streams.Read(ctx, requestID, lastID, count, block)
 	if err != nil || len(entries) > 0 {
 		return entries, err
@@ -48,7 +49,7 @@ func (s Service) finalEntryFromInstall(ctx context.Context, requestID string) (f
 
 func isFinalInstallStatus(status string) bool {
 	switch strings.TrimSpace(status) {
-	case agentmodel.SkillInstallStatusSuccess, agentmodel.SkillInstallStatusFail:
+	case agentmodel.SkillInstallStatusSuccess, agentmodel.SkillInstallStatusFail, agentmodel.SkillInstallStatusCanceled:
 		return true
 	default:
 		return false
@@ -71,6 +72,9 @@ func installResultOutput(install *agentmodel.SkillInstall) map[string]any {
 			"skill_id":   install.SkillID,
 		}
 	}
+	if install.Status == agentmodel.SkillInstallStatusCanceled {
+		return canceledInstallOutput(install.ID)
+	}
 
 	message := strings.TrimSpace(install.Error)
 	if message == "" {
@@ -82,6 +86,12 @@ func installResultOutput(install *agentmodel.SkillInstall) map[string]any {
 		"text":       message,
 		"install_id": install.ID,
 		"error":      message,
+	}
+}
+
+func canceledInstallOutput(installID uint64) map[string]any {
+	return map[string]any{
+		"event": "final", "kind": "skill_install", "text": "技能安装已取消。", "install_id": installID,
 	}
 }
 

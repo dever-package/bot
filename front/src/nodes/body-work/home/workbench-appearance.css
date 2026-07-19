@@ -721,12 +721,12 @@
   border: 0;
   border-radius: 7px;
   background: #ffffff;
-  box-shadow: 0 1px 2px rgba(24, 37, 30, 0.04),
-    0 8px 24px rgba(24, 37, 30, 0.06);
+  box-shadow: none;
 }
 
 .hb-laper-app [data-stream-power-appearance="body"] .reference-text-editor:focus-within {
-  box-shadow: 0 10px 28px rgba(24, 37, 30, 0.08);
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .hb-laper-app [data-stream-power-appearance="body"] .reference-text-editor-content {
@@ -735,7 +735,9 @@
 
 .hb-laper-app [data-stream-power-appearance="body"] .reference-text-editor-input {
   min-height: 92px;
+  border: 0;
   outline: none;
+  box-shadow: none;
   color: var(--body-work-text);
   font-size: 12.8px;
   line-height: 1.65;
@@ -865,6 +867,278 @@
   color: var(--body-work-text);
   font-size: 13px;
   line-height: 1.72;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-trigger {
+  display: inline-flex;
+  min-width: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  padding: 0 7px;
+  color: #647169;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-trigger:hover {
+  background: #eef2ef;
+  color: var(--body-work-green-deep);
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-trigger svg {
+  width: 15px;
+  height: 15px;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-trigger span {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-layer {
+  position: absolute;
+  z-index: 24;
+  inset: 0;
+  background: rgba(247, 248, 248, 0.46);
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  width: 280px;
+  max-width: 88%;
+  flex-direction: column;
+  border-left: 1px solid var(--body-work-line);
+  background: #ffffff;
+  box-shadow: -14px 0 34px rgba(24, 37, 30, 0.12);
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-header {
+  display: flex;
+  min-height: 54px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px 8px 14px;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-header > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-header strong {
+  color: var(--body-work-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-header small {
+  color: #849089;
+  font-size: 10.8px;
+  font-weight: 400;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-header button {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #6d7972;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-header button:hover {
+  background: #eef2ef;
+  color: var(--body-work-text);
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-header svg {
+  width: 15px;
+  height: 15px;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-list {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+  padding: 5px 8px 10px;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item {
+  display: flex;
+  width: 100%;
+  min-height: 68px;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  padding: 9px 10px;
+  color: var(--body-work-text);
+  text-align: left;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item:hover {
+  background: #f0f3f1;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item[data-active="true"] {
+  background: #e8efeb;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item-title,
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item-summary {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 19px;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item-summary {
+  color: #7b8780;
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  color: #89938e;
+  font-size: 10.5px;
+  line-height: 16px;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item-meta i {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: #9da6a1;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item-meta i[data-status="running"],
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item-meta i[data-status="waiting"] {
+  background: #3f966f;
+  box-shadow: 0 0 0 3px rgba(63, 150, 111, 0.12);
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item-meta i[data-status="success"] {
+  background: #3f966f;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item-meta i[data-status="fail"] {
+  background: #c85a55;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item-meta time {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-more {
+  display: inline-flex;
+  min-height: 34px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  background: #f5f7f6;
+  color: #65716a;
+  font-size: 11.5px;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-more:hover:not(:disabled) {
+  background: #edf1ef;
+  color: var(--body-work-text);
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-more svg,
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-state svg {
+  width: 15px;
+  height: 15px;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-state {
+  display: flex;
+  min-height: 180px;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 18px;
+  color: #7d8982;
+  font-size: 11.5px;
+  text-align: center;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-state button,
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-detail-error button {
+  border: 0;
+  border-radius: 5px;
+  background: #e9efeb;
+  padding: 6px 10px;
+  color: var(--body-work-green-deep);
+  font-size: 11.5px;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-detail-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  border-radius: 5px;
+  background: #fff3f1;
+  padding: 9px 11px;
+  color: #a84f49;
+  font-size: 12px;
+}
+
+.dark .hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-layer {
+  background: rgba(16, 20, 18, 0.5);
+}
+
+.dark .hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-panel {
+  border-color: var(--body-work-line);
+  background: var(--body-work-surface);
+  box-shadow: -14px 0 34px rgba(0, 0, 0, 0.3);
+}
+
+.dark .hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item:hover,
+.dark .hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-more,
+.dark .hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-header button:hover {
+  background: var(--body-work-active);
+}
+
+.dark .hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-item[data-active="true"] {
+  background: #27342e;
 }
 
 @media (max-width: 767px) {
@@ -1010,5 +1284,10 @@
     height: 0;
     min-height: 0;
     padding: 14px 14px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .hb-laper-app [data-stream-power-appearance="body"] .stream-power-history-panel {
+    width: 85%;
+    max-width: 320px;
   }
 }

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,9 +27,15 @@ func (Service) ApplyPatch(ctx context.Context, req PatchRequest) Result {
 		})
 	}
 	if req.ID > 0 {
-		row := agentmodel.NewSkillDraftModel().Find(ctx, map[string]any{"id": req.ID})
-		if row == nil {
-			return failResult("技能草稿不存在", nil)
+		row, err := loadEditableDraft(ctx, req.ID)
+		if err != nil {
+			return failResult(err.Error(), nil)
+		}
+		if err := requireDraftVersion(row, req.ExpectedVersion); err != nil {
+			return failResult(err.Error(), applyPatchResultData(ctx, req.ID))
+		}
+		if err := validateDraftUpdate(ctx, row, values); err != nil {
+			return failResult(err.Error(), nil)
 		}
 		if len(values) == 0 {
 			data := applyPatchResultData(ctx, req.ID)
@@ -36,7 +44,9 @@ func (Service) ApplyPatch(ctx context.Context, req PatchRequest) Result {
 			}
 			return okResult("没有需要更新的草稿内容", data)
 		}
-		agentmodel.NewSkillDraftModel().Update(ctx, map[string]any{"id": req.ID}, values)
+		if err := updateDraftRow(ctx, row, values); err != nil {
+			return failResult(err.Error(), nil)
+		}
 		validation := validateAndSaveDraft(ctx, req.ID)
 		data := applyPatchResultData(ctx, req.ID)
 		if validation != nil {
@@ -54,18 +64,19 @@ func (Service) ApplyPatch(ctx context.Context, req PatchRequest) Result {
 	if _, exists := values["name"]; !exists {
 		values["name"] = values["key"]
 	}
-	if _, exists := values["pack_id"]; !exists {
-		if req.PackID > 0 {
-			values["pack_id"] = req.PackID
-		} else {
-			values["pack_id"] = agentmodel.DefaultSkillPackID
-		}
+	release, err := reserveNewDraftKey(ctx, fmt.Sprint(values["key"]))
+	if err != nil {
+		return failResult(err.Error(), nil)
 	}
-	if _, exists := values["cate_id"]; !exists {
-		values["cate_id"] = defaultCateID(req.CateID)
+	defer release()
+	if err := validateDraftAssignmentValues(ctx, values); err != nil {
+		return failResult(err.Error(), nil)
 	}
+	now := time.Now()
 	values["status"] = agentmodel.SkillDraftStatusDraft
-	values["created_at"] = time.Now()
+	values["version"] = 1
+	values["created_at"] = now
+	values["updated_at"] = now
 	draftID := uint64(agentmodel.NewSkillDraftModel().Insert(ctx, values))
 	if draftID == 0 {
 		return failResult("创建技能草稿失败", nil)
@@ -94,7 +105,7 @@ func validateAndSaveDraft(ctx context.Context, draftID uint64) map[string]any {
 	if draftID == 0 {
 		return nil
 	}
-	_, issues, err := loadAndValidate(ctx, draftID)
+	snapshot, issues, err := loadAndValidate(ctx, draftID)
 	if err != nil {
 		return map[string]any{
 			"valid":  false,
@@ -102,7 +113,11 @@ func validateAndSaveDraft(ctx context.Context, draftID uint64) map[string]any {
 		}
 	}
 	payload := validationPayload(issues)
-	saveValidationResult(ctx, draftID, payload)
+	if err := saveValidationResult(ctx, snapshot, payload); err != nil {
+		payload["valid"] = false
+		payload["save_error"] = err.Error()
+		payload["issues"] = append(issues, err.Error())
+	}
 	return payload
 }
 
@@ -163,40 +178,93 @@ func draftPatchValues(ctx context.Context, req PatchRequest) (map[string]any, er
 	if req.CateID > 0 {
 		values["cate_id"] = req.CateID
 	}
-	if key := agentskill.NormalizeKey(patchText(patch, "key")); key != "" {
-		values["key"] = key
+	if patchHasAnyKey(patch, "key") {
+		rawKey := patchText(patch, "key")
+		key := agentskill.NormalizeKey(rawKey)
+		if rawKey != "" && key == "" {
+			return nil, fmt.Errorf("技能标识只能包含字母、数字、横线或下划线")
+		}
+		if req.ID > 0 && key == "" {
+			return nil, fmt.Errorf("技能标识不能为空")
+		}
+		if key != "" {
+			values["key"] = key
+		}
 	}
-	if name := patchText(patch, "name"); name != "" {
-		values["name"] = name
+	if patchHasAnyKey(patch, "name") {
+		name := patchText(patch, "name")
+		if req.ID > 0 && name == "" {
+			return nil, fmt.Errorf("技能名称不能为空")
+		}
+		if name != "" {
+			values["name"] = name
+		}
 	}
 	if description := patchText(patch, "description", "desc"); description != "" {
 		values["description"] = description
+	} else if patchHasAnyKey(patch, "description", "desc") {
+		values["description"] = ""
 	}
-	if packID := patchUint64(patch, "pack_id", "packId"); packID > 0 {
+	if patchHasAnyKey(patch, "pack_id", "packId") {
+		packID, err := patchPositiveUint64(patch, "技能方案", "pack_id", "packId")
+		if err != nil {
+			return nil, err
+		}
 		values["pack_id"] = packID
 	}
-	if cateID := patchUint64(patch, "cate_id", "cateId"); cateID > 0 {
+	if patchHasAnyKey(patch, "cate_id", "cateId") {
+		cateID, err := patchPositiveUint64(patch, "技能分类", "cate_id", "cateId")
+		if err != nil {
+			return nil, err
+		}
 		values["cate_id"] = cateID
 	}
-	if skillMD := patchText(patch, "skill_md", "skillMd", "skill", "content", "markdown"); skillMD != "" {
-		values["skill_md"] = normalizeDraftMarkdownContent(skillMD)
+	if patchHasAnyKey(patch, "skill_md", "skillMd", "skill", "content", "markdown") {
+		skillMD := normalizeDraftMarkdownContent(patchText(patch, "skill_md", "skillMd", "skill", "content", "markdown"))
+		if req.ID > 0 && skillMD == "" {
+			return nil, fmt.Errorf("SKILL.md 不能为空")
+		}
+		if skillMD != "" {
+			values["skill_md"] = skillMD
+		}
 	}
 	if filesJSON, ok, err := patchFilesJSONText(patch, "files_json", "filesJson", "files"); err != nil {
 		return nil, err
 	} else if ok {
 		values["files_json"] = filesJSON
 	}
-	if manifest, ok, err := patchJSONText(patch, "manifest", "runtime_config", "runtimeConfig"); err != nil {
+	if manifest, ok, err := patchJSONObjectText(patch, "manifest", "runtime_config", "runtimeConfig"); err != nil {
 		return nil, err
 	} else if ok {
 		values["manifest"] = manifest
+	}
+	if err := validateDraftPatchSize(values); err != nil {
+		return nil, err
 	}
 
 	if req.ID > 0 {
 		return values, nil
 	}
-	applyDraftPatchDefaults(ctx, values)
+	applyDraftPatchDefaults(values)
+	if err := agentskill.ValidateMetadata(
+		patchText(values, "key"),
+		patchText(values, "name"),
+		patchText(values, "description"),
+	); err != nil {
+		return nil, err
+	}
+	if err := validateDraftAssignmentValues(ctx, values); err != nil {
+		return nil, err
+	}
 	return values, nil
+}
+
+func validateDraftAssignmentValues(ctx context.Context, values map[string]any) error {
+	return agentskill.ValidateAssignment(
+		ctx,
+		patchUint64(values, "pack_id"),
+		patchUint64(values, "cate_id"),
+	)
 }
 
 func normalizePatchMap(raw map[string]any) map[string]any {
@@ -212,10 +280,10 @@ func normalizePatchMap(raw map[string]any) map[string]any {
 	return raw
 }
 
-func applyDraftPatchDefaults(ctx context.Context, values map[string]any) {
-	key := strings.TrimSpace(fmt.Sprint(values["key"]))
-	name := strings.TrimSpace(fmt.Sprint(values["name"]))
-	description := strings.TrimSpace(fmt.Sprint(values["description"]))
+func applyDraftPatchDefaults(values map[string]any) {
+	key := patchText(values, "key")
+	name := patchText(values, "name")
+	description := patchText(values, "description")
 	if key == "" {
 		key = agentskill.NormalizeKey(name)
 		if key != "" {
@@ -226,6 +294,9 @@ func applyDraftPatchDefaults(ctx context.Context, values map[string]any) {
 		name = key
 		values["name"] = name
 	}
+	if _, exists := values["pack_id"]; !exists {
+		values["pack_id"] = agentmodel.DefaultSkillPackID
+	}
 	if _, exists := values["cate_id"]; !exists {
 		values["cate_id"] = defaultCateID(0)
 	}
@@ -233,14 +304,44 @@ func applyDraftPatchDefaults(ctx context.Context, values map[string]any) {
 		values["files_json"] = "{}"
 	}
 	if _, exists := values["skill_md"]; !exists {
-		values["skill_md"] = defaultDraftSkillMD(name, description)
+		values["skill_md"] = defaultDraftSkillMD(key, name, description)
 	}
 	if _, exists := values["manifest"]; !exists {
-		values["manifest"] = defaultDraftManifest(ctx, key, name, description)
+		values["manifest"] = defaultDraftManifest(key, name, description)
 	}
 	values["validation_result"] = agentskill.JSONText(map[string]any{
 		"assistant_patch": true,
 	})
+}
+
+func validateDraftPatchSize(values map[string]any) error {
+	limits := []struct {
+		field string
+		limit int
+	}{
+		{field: "skill_md", limit: maxDraftFileBytes},
+		{field: "manifest", limit: maxDraftManifestBytes},
+		{field: "files_json", limit: maxDraftFilesJSONBytes},
+	}
+	for _, current := range limits {
+		value, exists := values[current.field]
+		if !exists {
+			continue
+		}
+		if len([]byte(fmt.Sprint(value))) > current.limit {
+			return fmt.Errorf("%s 不能超过 %d 字节", current.field, current.limit)
+		}
+	}
+	return nil
+}
+
+func patchHasAnyKey(patch map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		if _, exists := patch[key]; exists {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultCateID(value uint64) uint64 {
@@ -250,12 +351,9 @@ func defaultCateID(value uint64) uint64 {
 	return agentmodel.DefaultSkillCateID
 }
 
-func defaultDraftSkillMD(name string, description string) string {
+func defaultDraftSkillMD(key string, name string, description string) string {
 	lines := []string{
-		"---",
-		"name: " + strings.TrimSpace(name),
-		"description: " + strings.TrimSpace(description),
-		"---",
+		agentskill.MarkdownFrontMatter(key, name, description),
 		"",
 		"# " + strings.TrimSpace(name),
 	}
@@ -266,7 +364,7 @@ func defaultDraftSkillMD(name string, description string) string {
 	return strings.Join(lines, "\n")
 }
 
-func defaultDraftManifest(_ context.Context, key string, name string, description string) string {
+func defaultDraftManifest(key string, name string, description string) string {
 	return agentskill.JSONText(map[string]any{
 		"key":         key,
 		"name":        name,
@@ -281,6 +379,9 @@ func defaultDraftManifest(_ context.Context, key string, name string, descriptio
 func patchText(patch map[string]any, keys ...string) string {
 	for _, key := range keys {
 		if value, exists := patch[key]; exists {
+			if value == nil {
+				return ""
+			}
 			return strings.TrimSpace(fmt.Sprint(value))
 		}
 	}
@@ -288,44 +389,82 @@ func patchText(patch map[string]any, keys ...string) string {
 }
 
 func patchUint64(patch map[string]any, keys ...string) uint64 {
+	value, _ := patchUint64Value(patch, keys...)
+	return value
+}
+
+func patchPositiveUint64(patch map[string]any, label string, keys ...string) (uint64, error) {
+	value, valid := patchUint64Value(patch, keys...)
+	if !valid || value == 0 {
+		return 0, fmt.Errorf("%s必须是正整数", label)
+	}
+	return value, nil
+}
+
+func patchUint64Value(patch map[string]any, keys ...string) (uint64, bool) {
 	for _, key := range keys {
 		if value, exists := patch[key]; exists {
 			switch typed := value.(type) {
 			case float64:
-				return uint64(typed)
+				const maxExactJSONInteger = float64(1<<53 - 1)
+				if typed < 0 || typed != math.Trunc(typed) || typed > maxExactJSONInteger {
+					return 0, false
+				}
+				return uint64(typed), true
 			case int:
-				return uint64(typed)
+				if typed < 0 {
+					return 0, false
+				}
+				return uint64(typed), true
+			case int64:
+				if typed < 0 {
+					return 0, false
+				}
+				return uint64(typed), true
 			case uint64:
-				return typed
+				return typed, true
+			case json.Number:
+				parsed, err := strconv.ParseUint(strings.TrimSpace(typed.String()), 10, 64)
+				return parsed, err == nil
 			case string:
-				var parsed uint64
-				_, _ = fmt.Sscanf(strings.TrimSpace(typed), "%d", &parsed)
-				return parsed
+				parsed, err := strconv.ParseUint(strings.TrimSpace(typed), 10, 64)
+				return parsed, err == nil
 			}
+			return 0, false
 		}
 	}
-	return 0
+	return 0, false
 }
 
-func patchJSONText(patch map[string]any, keys ...string) (string, bool, error) {
+func patchJSONObjectText(patch map[string]any, keys ...string) (string, bool, error) {
 	for _, key := range keys {
 		value, exists := patch[key]
 		if !exists {
 			continue
 		}
+		if value == nil {
+			return "", false, nil
+		}
+		var raw []byte
+		var err error
 		switch typed := value.(type) {
 		case string:
 			text := cleanPatchJSONText(typed)
 			if text == "" {
 				return "", false, nil
 			}
-			if !json.Valid([]byte(text)) {
-				return "", false, fmt.Errorf("%s 必须是 JSON", key)
-			}
-			return text, true, nil
+			raw = []byte(text)
 		default:
-			return agentskill.JSONText(typed), true, nil
+			raw, err = json.Marshal(typed)
+			if err != nil {
+				return "", false, fmt.Errorf("%s 无法序列化为 JSON: %w", key, err)
+			}
 		}
+		object := map[string]any{}
+		if err := json.Unmarshal(raw, &object); err != nil || object == nil {
+			return "", false, fmt.Errorf("%s 必须是 JSON 对象", key)
+		}
+		return string(raw), true, nil
 	}
 	return "", false, nil
 }
@@ -336,6 +475,9 @@ func patchFilesJSONText(patch map[string]any, keys ...string) (string, bool, err
 		if !exists {
 			continue
 		}
+		if value == nil {
+			return "", false, nil
+		}
 		files, empty, err := patchFilesMap(value)
 		if err != nil {
 			return "", false, fmt.Errorf("%s 必须是路径到文本内容的 JSON 对象", key)
@@ -343,7 +485,11 @@ func patchFilesJSONText(patch map[string]any, keys ...string) (string, bool, err
 		if empty {
 			return "", false, nil
 		}
-		return agentskill.JSONText(normalizeDraftFiles(files)), true, nil
+		normalized := normalizeDraftFiles(files)
+		if len(normalized) != len(files) {
+			return "", false, fmt.Errorf("%s 包含规范化后重复的文件路径", key)
+		}
+		return agentskill.JSONText(normalized), true, nil
 	}
 	return "", false, nil
 }
@@ -403,13 +549,7 @@ func normalizeDraftFiles(files map[string]string) map[string]string {
 func normalizeDraftFileContent(path string, content string) string {
 	content = normalizeTextNewlines(strings.TrimPrefix(content, "\ufeff"))
 	content = unwrapWholeFencedBlock(content)
-	if isDraftSourceFile(path) {
-		content = normalizeLikelyEscapedSourceText(path, content)
-		content = unwrapWholeFencedBlock(content)
-		content = normalizeScriptTypography(content)
-		return strings.TrimSpace(content)
-	}
-	if path == "requirements.txt" || path == "package.json" {
+	if isDraftDependencyFile(path) {
 		return strings.TrimSpace(content)
 	}
 	return content
@@ -436,128 +576,4 @@ func unwrapWholeFencedBlock(text string) string {
 	}
 	body = strings.TrimSpace(strings.TrimSuffix(body, "```"))
 	return body
-}
-
-func isDraftSourceFile(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".py", ".js", ".sh", ".bash":
-		return strings.HasPrefix(filepath.ToSlash(path), "scripts/")
-	default:
-		return false
-	}
-}
-
-func normalizeLikelyEscapedSourceText(path string, content string) string {
-	if strings.Contains(content, "\n") || !strings.Contains(content, `\n`) {
-		return content
-	}
-	candidate := strings.ReplaceAll(content, `\r\n`, "\n")
-	candidate = strings.ReplaceAll(candidate, `\n`, "\n")
-	candidate = strings.ReplaceAll(candidate, `\t`, "\t")
-	if sourceContentLooksStructured(path, candidate) {
-		return candidate
-	}
-	if strings.HasSuffix(content, `\n`) {
-		return strings.TrimSuffix(content, `\n`) + "\n"
-	}
-	return content
-}
-
-func sourceContentLooksStructured(path string, content string) bool {
-	if !strings.Contains(content, "\n") {
-		return false
-	}
-	trimmed := strings.TrimSpace(content)
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".py":
-		return strings.HasPrefix(trimmed, "import ") ||
-			strings.HasPrefix(trimmed, "from ") ||
-			strings.HasPrefix(trimmed, "def ") ||
-			strings.HasPrefix(trimmed, "class ") ||
-			strings.HasPrefix(trimmed, "if __name__") ||
-			strings.HasPrefix(trimmed, "try:") ||
-			containsAny(content, "\nimport ", "\nfrom ", "\ndef ", "\nclass ", "\nif __name__", "\ntry:", "\nexcept ", ":\n    ")
-	case ".js":
-		return strings.HasPrefix(trimmed, "import ") ||
-			strings.HasPrefix(trimmed, "const ") ||
-			strings.HasPrefix(trimmed, "let ") ||
-			strings.HasPrefix(trimmed, "var ") ||
-			strings.HasPrefix(trimmed, "function ") ||
-			strings.HasPrefix(trimmed, "export ") ||
-			containsAny(content, "\nimport ", "\nconst ", "\nlet ", "\nvar ", "\nfunction ", "\nexport ", "=>\n", "{\n")
-	case ".sh", ".bash":
-		return strings.HasPrefix(trimmed, "#!/") ||
-			strings.HasPrefix(trimmed, "set ") ||
-			strings.HasPrefix(trimmed, "if ") ||
-			strings.HasPrefix(trimmed, "for ") ||
-			strings.HasPrefix(trimmed, "while ") ||
-			containsAny(content, "\necho ", "\nif ", "\nfor ", "\nwhile ", "\ncase ", "\nset ")
-	default:
-		return false
-	}
-}
-
-func containsAny(text string, needles ...string) bool {
-	for _, needle := range needles {
-		if strings.Contains(text, needle) {
-			return true
-		}
-	}
-	return false
-}
-
-func normalizeScriptTypography(content string) string {
-	content = strings.ReplaceAll(content, "\u00a0", " ")
-	content = strings.ReplaceAll(content, "\u3000", " ")
-	content = replaceStandaloneQuotePairs(content, '“', '”', '"')
-	content = replaceStandaloneQuotePairs(content, '‘', '’', '\'')
-	return content
-}
-
-func replaceStandaloneQuotePairs(text string, open rune, close rune, replacement rune) string {
-	runes := []rune(text)
-	var builder strings.Builder
-	for index := 0; index < len(runes); index++ {
-		if runes[index] != open {
-			builder.WriteRune(runes[index])
-			continue
-		}
-		end := nextRuneIndex(runes, close, index+1)
-		if end < 0 || !quoteStartBoundary(runes, index) || !quoteEndBoundary(runes, end) {
-			builder.WriteRune(runes[index])
-			continue
-		}
-		builder.WriteRune(replacement)
-		for inner := index + 1; inner < end; inner++ {
-			builder.WriteRune(runes[inner])
-		}
-		builder.WriteRune(replacement)
-		index = end
-	}
-	return builder.String()
-}
-
-func nextRuneIndex(runes []rune, target rune, start int) int {
-	for index := start; index < len(runes); index++ {
-		if runes[index] == target {
-			return index
-		}
-	}
-	return -1
-}
-
-func quoteStartBoundary(runes []rune, index int) bool {
-	if index == 0 {
-		return true
-	}
-	prev := runes[index-1]
-	return prev == '\n' || prev == '\t' || prev == ' ' || strings.ContainsRune("([{=,:+-*/%!<>", prev)
-}
-
-func quoteEndBoundary(runes []rune, index int) bool {
-	if index >= len(runes)-1 {
-		return true
-	}
-	next := runes[index+1]
-	return next == '\n' || next == '\t' || next == ' ' || strings.ContainsRune(")]},.;:+-*/%!<>", next)
 }

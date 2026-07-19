@@ -7,6 +7,7 @@ import (
 	dlog "github.com/shemic/dever/log"
 	"github.com/shemic/dever/server"
 
+	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 )
 
@@ -17,7 +18,7 @@ func (s Service) mountExecutionTools(
 	ctx context.Context,
 	execution *execution,
 	currentServer *server.Context,
-	loadedSkills []string,
+	loadedSkills []agentmodel.LoadedSkillRef,
 ) error {
 	serverContext, err := execution.scope.Server(ctx, currentServer)
 	if err != nil {
@@ -44,10 +45,15 @@ func (s Service) mountExecutionTools(
 	if err != nil {
 		return err
 	}
-	if err := restoreLoadedSkills(mountCtx, mounted.Registry, loadedSkills, execution.requestID); err != nil {
+	restored, history, err := restoreLoadedSkills(
+		mountCtx, mounted.Registry, loadedSkills, execution.history, execution.requestID,
+	)
+	if err != nil {
 		mounted.Close()
 		return err
 	}
+	execution.history = append(execution.history, history...)
+	execution.checkpoint.LoadedSkills = restored
 	execution.registry = mounted.Registry
 	execution.cleanup = mounted.Close
 	if len(mounted.Warnings) > 0 {

@@ -24,33 +24,62 @@ func (AgentHook) ProviderBeforeSaveSkillConfig(c *server.Context, params []any) 
 	if shouldNormalizeField(record, "key", partial) {
 		rawKey := util.ToStringTrimmed(record["key"])
 		envName := skillservice.ConfigEnvName(rawKey)
-		if rawKey != "" && envName == "" {
-			panicAgentField("form.key", "变量标识只能包含字母、数字和下划线，且不能使用 PATH、HOME 等系统保留变量名。")
+		if envName == "" {
+			panicAgentField("form.key", "变量标识必须以字母或下划线开头，只能包含字母、数字和下划线，且不能使用 PATH、HOME 等系统保留变量名。")
 		}
 		record["key"] = envName
 	}
 	if shouldNormalizeField(record, "name", partial) && util.ToStringTrimmed(record["name"]) == "" {
 		record["name"] = util.ToStringTrimmed(record["key"])
 	}
+	if shouldNormalizeField(record, "name", partial) && util.ToStringTrimmed(record["name"]) == "" {
+		panicAgentField("form.name", "变量名称不能为空。")
+	}
 	if !partial && util.ToStringTrimmed(record["key"]) == "" {
 		panicAgentField("form.key", "变量标识不能为空。")
 	}
 	if shouldNormalizeField(record, "skill_id", partial) {
 		skillID := util.ToUint64(record["skill_id"])
-		if skillID == 0 {
+		if skillID == 0 && c != nil {
 			skillID = util.ToUint64(c.Input("skill_id"))
+		}
+		if c != nil && skillID > 0 {
+			if err := skillservice.RequireActiveSkill(c.Context(), skillID); err != nil {
+				panicAgentField("form.skill_id", err.Error())
+			}
 		}
 		record["skill_id"] = skillID
 	}
 	if _, exists := record["target_key"]; exists {
 		record["target_key"] = util.ToStringTrimmed(record["target_key"])
 	}
+	validateSkillConfigField(record, partial, "key", "变量标识", 128)
+	validateSkillConfigField(record, partial, "name", "变量名称", 128)
+	validateSkillConfigField(record, partial, "target_key", "配置目标", 128)
+	if value := util.ToStringTrimmed(record["value_plain"]); value != "" {
+		if err := skillservice.ValidateStoredBytes("环境变量值", value, skillservice.MaxConfigValueBytes); err != nil {
+			panicAgentField("form.value_plain", err.Error())
+		}
+	}
 	normalizeSkillConfigType(record, partial)
-	normalizeSkillConfigValue(c.Context(), record)
+	ctx := context.Background()
+	if c != nil {
+		ctx = c.Context()
+	}
+	normalizeSkillConfigValue(ctx, record)
 	if _, exists := record["status"]; exists {
 		defaultInt16Field(record, "status", defaultAgentStatus, partial)
 	}
 	return record
+}
+
+func validateSkillConfigField(record map[string]any, partial bool, field string, label string, limit int) {
+	if !shouldNormalizeField(record, field, partial) {
+		return
+	}
+	if err := skillservice.ValidateStoredText(label, util.ToStringTrimmed(record[field]), limit); err != nil {
+		panicAgentField("form."+field, err.Error())
+	}
 }
 
 func (AgentHook) ProviderBeforeDeleteSkillConfig(c *server.Context, params []any) any {
@@ -59,9 +88,6 @@ func (AgentHook) ProviderBeforeDeleteSkillConfig(c *server.Context, params []any
 	if len(ids) == 0 {
 		return record
 	}
-	agentmodel.NewSkillConfigBindModel().Delete(c.Context(), map[string]any{
-		"config_id": uint64IDsToAny(ids),
-	})
 	record["id"] = uint64IDsToAny(ids)
 	return record
 }

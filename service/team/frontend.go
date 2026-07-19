@@ -266,12 +266,15 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		requestID = newRequestID()
 	}
 	now := time.Now()
-	input := mergeMaps(req.Input, req.Params)
-	runInput := cloneInput(input)
+	runInput := mergeMaps(req.Input, req.Params)
+	if req.SourceTargetID > 0 {
+		runInput[CanvasPowerMetaSourceTargetID] = req.SourceTargetID
+	}
 	if workspaceRun {
 		runInput["_mode"] = "workspace_power"
-		runInput["_team_power_id"] = req.TeamPowerID
+		runInput[CanvasPowerMetaTeamPowerID] = req.TeamPowerID
 	}
+	input := executionInput(runInput)
 	runID := s.repo.InsertRun(ctx, map[string]any{
 		"request_id": requestID,
 		"project_id": req.ProjectID,
@@ -307,7 +310,10 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		},
 	})
 	if req.OnRunCreated != nil {
-		req.OnRunCreated(run.ID, requestID)
+		if err := req.OnRunCreated(run.ID, requestID); err != nil {
+			s.finishRun(ctx, run.ID, teammodel.RunStatusFail, nil, err)
+			return nil, err
+		}
 	}
 	var flowRunID uint64
 	var flowRun *teammodel.FlowRun

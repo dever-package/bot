@@ -50,6 +50,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { AgentContentOutputView } from "./agent-content-output";
+import { assistantApiRequest, isPlainRecord } from "./assistant-api";
 import { resolveSkillDraftPatchPayload } from "./skill-draft-patch";
 
 type SkillTestMessage = {
@@ -89,6 +90,21 @@ type PublishForm = {
   cateID: string;
 };
 
+type SkillTestConfigField = {
+  id: string;
+  key: string;
+  targetKey: string;
+  name: string;
+  type: "text" | "secret";
+  required: boolean;
+};
+
+type SkillTestConfigValue = {
+  key: string;
+  target_key: string;
+  value: string;
+};
+
 const DEFAULT_DRAFT_PATH = "data.actionTarget.testDraft";
 const DEFAULT_TEST_API = "/bot/admin/skill_draft/test";
 const DEFAULT_PUBLISH_API = "/bot/admin/skill_draft/publish";
@@ -123,7 +139,13 @@ export function ShowSkillTest({ item, store }: NodeItemProps) {
     openPath ? Boolean(getStoreValueByPath(store, openPath)) : true,
   );
   const draftID = positiveNumber(draft.id || draft.draft_id || draft.draftId);
+  const draftEditable = Number(draft.status || 0) === 1;
+  const draftPublished = Number(draft.status || 0) === 2;
+  const testConfigFields = useMemo(() => draftTestConfigFields(draft), [draft]);
   const [input, setInput] = useState("");
+  const [testConfigValues, setTestConfigValues] = useState<
+    Record<string, string>
+  >({});
   const [messages, setMessages] = useState<SkillTestMessage[]>([]);
   const [running, setRunning] = useState(false);
   const [repairing, setRepairing] = useState(false);
@@ -133,7 +155,7 @@ export function ShowSkillTest({ item, store }: NodeItemProps) {
     useState<SkillTestResponse | null>(null);
   const [repairSaved, setRepairSaved] = useState(false);
   const [publishing, setPublishing] = useState(false);
-  const [published, setPublished] = useState(false);
+  const [published, setPublished] = useState(draftPublished);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [publishForm, setPublishForm] = useState<PublishForm>(() =>
     draftPublishForm({}),
@@ -194,14 +216,15 @@ export function ShowSkillTest({ item, store }: NodeItemProps) {
     item.meta?.emptyText ||
       "输入一次测试参数开始测试。系统会先检查技能内容，再在沙箱中运行脚本。",
   );
-  const canStart = draftID > 0 && !running && !tested;
+  const canStart = draftID > 0 && draftEditable && !running && !tested;
   const canPublish =
     draftID > 0 &&
     tested &&
     testPassed &&
     !running &&
     !publishing &&
-    !published;
+    !published &&
+    draftEditable;
   const publishTitle = published
     ? "当前技能已发布。"
     : testPassed
@@ -214,7 +237,8 @@ export function ShowSkillTest({ item, store }: NodeItemProps) {
     tested &&
     !testPassed &&
     !running &&
-    !publishing;
+    !publishing &&
+    draftEditable;
 
   useEffect(() => {
     if (!modalOpen) {
@@ -280,7 +304,7 @@ export function ShowSkillTest({ item, store }: NodeItemProps) {
     setTestPassed(false);
     setLatestTestResult(null);
     setRepairSaved(false);
-    setPublished(false);
+    setPublished(draftPublished);
     setError("");
     setRequestID("");
     setLastStreamID("0-0");
@@ -304,7 +328,12 @@ export function ShowSkillTest({ item, store }: NodeItemProps) {
     ]);
 
     try {
-      const testResult = await runSkillDraftTest(testApi, draftID, inputArgs);
+      const testResult = await runSkillDraftTest(
+        testApi,
+        draftID,
+        inputArgs,
+        draftTestConfigPayload(testConfigFields, testConfigValues),
+      );
       if (runTokenRef.current !== token) {
         return;
       }
@@ -395,7 +424,7 @@ export function ShowSkillTest({ item, store }: NodeItemProps) {
     await runAgentStream<AgentOutput>({
       agent: agentKey,
       input: {
-        text: buildTestAnalysisPrompt(draft, testResult, args),
+        text: "请根据这次真实技能测试结果判断是否通过；失败时说明原因和修改建议。",
         draft: compactDraft(draft),
         skill_test: testResult.data,
         test_status: testResult.status,
@@ -547,7 +576,7 @@ export function ShowSkillTest({ item, store }: NodeItemProps) {
       await runAgentStream<AgentOutput>({
         agent: agentKey,
         input: {
-          text: buildRepairPrompt(draft, latestTestResult, inputArgs),
+          text: userText,
           draft: repairDraftPayload(draft),
           skill_test: latestTestResult.data,
           test_status: latestTestResult.status,
@@ -853,6 +882,7 @@ export function ShowSkillTest({ item, store }: NodeItemProps) {
       const result = normalizeActionResponse(
         await request(publishApi, "post", {
           id: draftID,
+          expected_version: positiveNumber(draft.version),
           name,
           description: publishForm.description.trim(),
           pack_id: positiveNumber(publishForm.packID),
@@ -917,6 +947,7 @@ export function ShowSkillTest({ item, store }: NodeItemProps) {
     runTokenRef.current += 1;
     autoRepairKeyRef.current = "";
     setInput("");
+    setTestConfigValues({});
     setMessages([]);
     setRunning(false);
     setRepairing(false);
@@ -925,7 +956,7 @@ export function ShowSkillTest({ item, store }: NodeItemProps) {
     setLatestTestResult(null);
     setRepairSaved(false);
     setPublishing(false);
-    setPublished(false);
+    setPublished(draftPublished);
     setPublishDialogOpen(false);
     setPublishForm(draftPublishForm({}));
     setPublishError("");
@@ -983,6 +1014,39 @@ export function ShowSkillTest({ item, store }: NodeItemProps) {
       ) : null}
 
       <div className="shrink-0 overflow-hidden rounded-md border bg-background shadow-xs transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20">
+        {testConfigFields.length > 0 ? (
+          <div className="grid max-h-48 gap-3 overflow-y-auto border-b p-3 sm:grid-cols-2">
+            {testConfigFields.map((field) => (
+              <label key={field.id} className="grid min-w-0 gap-1.5 text-xs">
+                <span className="truncate font-medium text-foreground">
+                  {field.name}
+                  {field.targetKey ? (
+                    <span className="ml-1 font-normal text-muted-foreground">
+                      ({field.targetKey})
+                    </span>
+                  ) : null}
+                  {field.required ? (
+                    <span className="ml-1 text-destructive">*</span>
+                  ) : null}
+                </span>
+                <Input
+                  type={field.type === "secret" ? "password" : "text"}
+                  value={testConfigValues[field.id] || ""}
+                  disabled={running || publishing || tested || draftID <= 0}
+                  autoComplete="off"
+                  className="h-9"
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setTestConfigValues((current) => ({
+                      ...current,
+                      [field.id]: value,
+                    }));
+                  }}
+                />
+              </label>
+            ))}
+          </div>
+        ) : null}
         <Textarea
           value={input}
           disabled={running || publishing || tested || draftID <= 0}
@@ -1300,13 +1364,11 @@ function SkillTestMessageContent({ message }: { message: SkillTestMessage }) {
 function SkillTestResultView({ result }: { result: SkillTestResponse }) {
   const passed = result.status === 1;
   const data = result.data;
-  const test = isPlainRecord(data.test) ? data.test : {};
+  const tests = recordArray(data.tests);
+  if (tests.length === 0 && isPlainRecord(data.test)) {
+    tests.push(data.test);
+  }
   const issues = arrayText(data.issues);
-  const stdout = valueText(test.stdout);
-  const stderr = valueText(test.stderr);
-  const runError = valueText(test.error);
-  const exitCode = valueText(test.exit_code);
-  const duration = valueText(test.duration_ms);
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 font-medium">
@@ -1324,16 +1386,35 @@ function SkillTestResultView({ result }: { result: SkillTestResponse }) {
           ))}
         </div>
       ) : null}
-      {Object.keys(test).length > 0 ? (
-        <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
-          <div>脚本：{valueText(test.script) || "自动选择"}</div>
-          <div>退出码：{exitCode || "0"}</div>
-          <div>耗时：{duration ? `${duration}ms` : "-"}</div>
-        </div>
-      ) : null}
-      <TestOutputBlock title="输出" value={stdout} />
-      <TestOutputBlock title="错误输出" value={stderr} />
-      <TestOutputBlock title="异常" value={runError} />
+      {tests.map((test, index) => (
+        <SkillTestRunView
+          key={`${valueText(test.target)}:${valueText(test.script)}:${index}`}
+          test={test}
+          showDivider={index > 0}
+        />
+      ))}
+    </div>
+  );
+}
+
+function SkillTestRunView({
+  test,
+  showDivider,
+}: {
+  test: Record<string, unknown>;
+  showDivider: boolean;
+}) {
+  const duration = valueText(test.duration_ms);
+  return (
+    <div className={cn("space-y-2", showDivider && "border-t pt-2")}>
+      <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+        <div>脚本：{valueText(test.script) || "自动选择"}</div>
+        <div>退出码：{valueText(test.exit_code) || "0"}</div>
+        <div>耗时：{duration ? `${duration}ms` : "-"}</div>
+      </div>
+      <TestOutputBlock title="输出" value={valueText(test.stdout)} />
+      <TestOutputBlock title="错误输出" value={valueText(test.stderr)} />
+      <TestOutputBlock title="异常" value={valueText(test.error)} />
     </div>
   );
 }
@@ -1352,10 +1433,16 @@ function TestOutputBlock({ title, value }: { title: string; value: string }) {
   );
 }
 
-async function runSkillDraftTest(api: string, draftID: number, args: string[]) {
+async function runSkillDraftTest(
+  api: string,
+  draftID: number,
+  args: string[],
+  config: SkillTestConfigValue[],
+) {
   const response = await silentJsonRequest(api, {
     id: draftID,
     args,
+    config,
     timeout_seconds: DEFAULT_TIMEOUT_SECONDS,
   });
   return normalizeTestResponse(response);
@@ -1418,41 +1505,13 @@ function shouldAutoRepairTestFailure(result: SkillTestResponse) {
   if (result.status === 1) {
     return false;
   }
-  const text = autoRepairDiagnosticText(result).toLowerCase();
-  return [
-    "语法",
-    "syntaxerror",
-    "indentationerror",
-    "taberror",
-    "py_compile",
-    "node --check",
-    "sh -n",
-    "bash -n",
-    "manifest.scripts",
-    "脚本未在 manifest.scripts",
-  ].some((marker) => text.includes(marker));
+  const data = isPlainRecord(result.data) ? result.data : {};
+  return truthyConfigValue(data.repairable);
 }
 
 function autoRepairSignature(draftID: number, result: SkillTestResponse) {
-  const text = autoRepairDiagnosticText(result);
-  if (!text) {
-    return "";
-  }
-  return `${draftID}:${result.msg}:${text.slice(0, 1000)}`;
-}
-
-function autoRepairDiagnosticText(result: SkillTestResponse) {
-  const data = isPlainRecord(result.data) ? result.data : {};
-  const test = isPlainRecord(data.test) ? data.test : {};
-  return [
-    result.msg,
-    ...arrayText(data.issues),
-    valueText(test.stdout),
-    valueText(test.stderr),
-    valueText(test.error),
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const detail = safeJSONStringify({ message: result.msg, data: result.data });
+  return detail ? `${draftID}:${detail.slice(0, 1000)}` : "";
 }
 
 function skillDraftValidationError(data: Record<string, unknown>) {
@@ -1554,27 +1613,6 @@ function draftPublishForm(draft: Record<string, unknown>): PublishForm {
   };
 }
 
-function buildTestAnalysisPrompt(
-  draft: Record<string, unknown>,
-  result: SkillTestResponse,
-  args: string[],
-) {
-  return [
-    "你是技能创建工程师。下面是真实沙箱测试结果，请只分析这次测试。",
-    "要求：",
-    "1. 先明确测试是否通过。",
-    "2. 如果失败，指出最可能的原因和下一步修改建议。",
-    "3. 不要生成技能草稿 patch，不要发布技能，不要编造未出现的输出。",
-    "",
-    `技能：${valueText(draft.name) || valueText(draft.key) || "未命名技能"}`,
-    `测试参数：${args.length > 0 ? args.join(", ") : "无"}`,
-    `测试状态：${result.status === 1 ? "通过" : "失败"}`,
-    `测试消息：${result.msg}`,
-    "测试数据：",
-    safeJSONStringify(result.data),
-  ].join("\n");
-}
-
 function buildRepairUserMessage(
   draft: Record<string, unknown>,
   result: SkillTestResponse,
@@ -1588,36 +1626,10 @@ function buildRepairUserMessage(
   ].join("\n");
 }
 
-function buildRepairPrompt(
-  draft: Record<string, unknown>,
-  result: SkillTestResponse,
-  args: string[],
-) {
-  return [
-    "你是技能创建工程师。下面是真实沙箱测试失败结果，请修复当前技能草稿。",
-    "要求：",
-    "1. 必须基于当前 draft 内容修复，不要重建无关技能。",
-    "2. 只输出可保存的 skill_draft_patch，用于更新当前草稿。",
-    "3. 不要发布技能，不要要求用户手工修改代码。",
-    "4. 如果是 Python/Node 脚本错误，优先修复对应 scripts/ 文件和依赖声明。",
-    "5. 修复脚本必须是完整文件，Python 等价通过 python3 -m py_compile，Node 等价通过 node --check，Shell 等价通过 sh/bash -n。",
-    "6. 如果只是语法错误，不要输出原因分析，直接返回包含完整修复后脚本内容的 skill_draft_patch。",
-    "7. 保留技能 key，不要更改技能标识。",
-    "",
-    `技能：${valueText(draft.name) || valueText(draft.key) || "未命名技能"}`,
-    `技能标识：${valueText(draft.key) || "未设置"}`,
-    `测试参数：${args.length > 0 ? args.join(", ") : "无"}`,
-    `测试消息：${result.msg}`,
-    "当前草稿：",
-    safeJSONStringify(repairDraftPayload(draft)),
-    "测试数据：",
-    safeJSONStringify(result.data),
-  ].join("\n");
-}
-
 function repairDraftPayload(draft: Record<string, unknown>) {
   return {
     id: draft.id || draft.draft_id || draft.draftId,
+    version: draft.version,
     key: draft.key,
     name: draft.name,
     description: draft.description,
@@ -1706,22 +1718,6 @@ async function saveAssistantMessage({
   });
 }
 
-async function assistantApiRequest(
-  api: string,
-  payload: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  const result = await request(api, "post", payload);
-  if (!isPlainRecord(result)) {
-    return {};
-  }
-  const status = Number(result.status || 0);
-  const code = Number(result.code || 0);
-  if (status === 2 || code === 401) {
-    throw new Error(valueText(result.msg || result.message) || "请求失败");
-  }
-  return isPlainRecord(result.data) ? result.data : {};
-}
-
 function assistantSessionHistory(rows: unknown[]): Record<string, unknown>[] {
   return rows
     .map((row) => assistantSessionHistoryRow(row))
@@ -1772,6 +1768,7 @@ function buildRepairPatchRequest({
   return {
     ...patchPayload,
     id: draftID,
+    expected_version: positiveNumber(draft.version),
     pack_id:
       positiveNumber(patchPayload.pack_id || patchPayload.packId) ||
       positiveNumber(draft.pack_id || draft.packId),
@@ -1823,6 +1820,84 @@ function compactDraft(draft: Record<string, unknown>) {
   };
 }
 
+function draftTestConfigFields(
+  draft: Record<string, unknown>,
+): SkillTestConfigField[] {
+  const manifest = recordFromJSON(draft.manifest);
+  const configs = Array.isArray(manifest.config) ? manifest.config : [];
+  const fields: SkillTestConfigField[] = [];
+  const seen = new Set<string>();
+  configs.forEach((value) => {
+    if (!isPlainRecord(value)) {
+      return;
+    }
+    const key = valueText(value.key).trim();
+    if (!key) {
+      return;
+    }
+    const targetKey = valueText(
+      value.target_key || value.targetKey || value.target,
+    ).trim();
+    const id = JSON.stringify([targetKey, key]);
+    if (seen.has(id)) {
+      return;
+    }
+    seen.add(id);
+    fields.push({
+      id,
+      key,
+      targetKey,
+      name: valueText(value.name).trim() || key,
+      type:
+        valueText(value.type).trim().toLowerCase() === "secret"
+          ? "secret"
+          : "text",
+      required: truthyConfigValue(value.required),
+    });
+  });
+  return fields;
+}
+
+function draftTestConfigPayload(
+  fields: SkillTestConfigField[],
+  values: Record<string, string>,
+): SkillTestConfigValue[] {
+  return fields.flatMap((field) => {
+    const value = values[field.id] || "";
+    if (!value.trim()) {
+      return [];
+    }
+    return [{ key: field.key, target_key: field.targetKey, value }];
+  });
+}
+
+function recordFromJSON(value: unknown): Record<string, unknown> {
+  if (isPlainRecord(value)) {
+    return value;
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return {};
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isPlainRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function truthyConfigValue(value: unknown) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value === 1;
+  }
+  return ["1", "true", "yes", "on"].includes(
+    valueText(value).trim().toLowerCase(),
+  );
+}
+
 function splitArgs(value: string) {
   return value
     .split(/\r?\n|,/)
@@ -1834,6 +1909,13 @@ function arrayText(value: unknown) {
   return Array.isArray(value)
     ? value.map((item) => valueText(item)).filter(Boolean)
     : [];
+}
+
+function recordArray(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isPlainRecord);
 }
 
 function safeJSONStringify(value: unknown) {
@@ -1848,8 +1930,4 @@ function safeJSONStringify(value: unknown) {
 function positiveNumber(value: unknown) {
   const number = Number(value || 0);
   return Number.isFinite(number) && number > 0 ? number : 0;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

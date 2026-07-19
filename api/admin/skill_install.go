@@ -17,9 +17,6 @@ func (SkillInstall) PostRun(c *server.Context) error {
 		return c.Error(err)
 	}
 	resp := skillInstaller.Run(c.Context(), skillinstall.RunRequest{
-		Method:  c.Method(),
-		Host:    c.Header("Host"),
-		Path:    c.Path(),
 		Headers: botapi.RequestHeaders(c),
 		Body:    body,
 	})

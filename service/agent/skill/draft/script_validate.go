@@ -9,59 +9,26 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
 const (
-	maxDraftScriptSyntaxFiles = 64
+	maxDraftScriptSyntaxFiles = 256
 	scriptSyntaxCheckTimeout  = 10 * time.Second
+	scriptSyntaxTotalTimeout  = 30 * time.Second
 )
 
 func validateDraftManifestScripts(manifest map[string]any, files map[string]string) []string {
-	scriptFiles := sortedDraftScriptFiles(files)
-	if len(scriptFiles) == 0 {
-		return nil
-	}
-	rawScripts, hasScripts := manifest["scripts"]
-	if !hasScripts {
-		return []string{"存在 scripts/ 脚本，但 manifest.scripts 未声明可执行入口"}
-	}
-	scripts, ok := rawScripts.([]any)
-	if !ok {
-		return []string{"manifest.scripts 必须是数组"}
-	}
-	if len(scripts) == 0 {
-		return []string{"存在 scripts/ 脚本，但 manifest.scripts 为空"}
-	}
-	if len(scripts) > maxDraftScriptSyntaxFiles {
-		return []string{fmt.Sprintf("manifest.scripts 数量超过限制: %d > %d", len(scripts), maxDraftScriptSyntaxFiles)}
-	}
-
 	issues := make([]string, 0)
-	declared := map[string]bool{}
-	for index, item := range scripts {
-		values, ok := item.(map[string]any)
-		if !ok {
-			issues = append(issues, fmt.Sprintf("manifest.scripts[%d] 必须是对象", index))
-			continue
-		}
-		path := cleanDraftScriptPath(manifestString(values, "path", ""))
-		if path == "" {
-			issues = append(issues, fmt.Sprintf("manifest.scripts[%d].path 不能为空", index))
-			continue
-		}
+	for _, executable := range agentskill.ManifestExecutablePaths(agentskill.JSONText(manifest)) {
+		path := cleanDraftScriptPath(executable)
 		if err := validateDraftScriptPath(path); err != nil {
-			issues = append(issues, fmt.Sprintf("manifest.scripts[%d].path 无效: %s", index, err.Error()))
+			// ManifestIssues already reports malformed declarations.
 			continue
 		}
 		if _, exists := files[path]; !exists {
-			issues = append(issues, fmt.Sprintf("manifest.scripts[%d].path 对应脚本不存在: %s", index, path))
-			continue
-		}
-		declared[path] = true
-	}
-	for _, path := range scriptFiles {
-		if !declared[path] {
-			issues = append(issues, "脚本未在 manifest.scripts 声明: "+path)
+			issues = append(issues, "manifest 引用的可执行文件不存在: "+path)
 		}
 	}
 	return issues
@@ -81,9 +48,15 @@ func validateDraftScriptSyntax(ctx context.Context, files map[string]string) []s
 		return []string{"创建脚本语法检查目录失败: " + err.Error()}
 	}
 	defer os.RemoveAll(tempRoot)
+	syntaxCtx, cancel := context.WithTimeout(ctx, scriptSyntaxTotalTimeout)
+	defer cancel()
 
 	issues := make([]string, 0)
 	for _, path := range paths {
+		if err := syntaxCtx.Err(); err != nil {
+			issues = append(issues, "草稿脚本语法检查未完成: "+err.Error())
+			break
+		}
 		content := files[path]
 		target := filepath.Join(tempRoot, filepath.FromSlash(path))
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
@@ -94,7 +67,7 @@ func validateDraftScriptSyntax(ctx context.Context, files map[string]string) []s
 			issues = append(issues, fmt.Sprintf("写入脚本语法检查文件失败: %s: %v", path, err))
 			continue
 		}
-		if issue := validateDraftScriptSyntaxFile(ctx, path, target); issue != "" {
+		if issue := validateDraftScriptSyntaxFile(syntaxCtx, path, target); issue != "" {
 			issues = append(issues, issue)
 		}
 	}
@@ -141,10 +114,10 @@ func scriptSyntaxCommand(relativePath string, fullPath string) (string, []string
 	switch strings.ToLower(filepath.Ext(relativePath)) {
 	case ".py":
 		return "python3", []string{"-m", "py_compile", fullPath}, "Python 脚本 " + relativePath
-	case ".js":
+	case ".js", ".mjs":
 		return "node", []string{"--check", fullPath}, "Node 脚本 " + relativePath
 	case ".sh":
-		return "/bin/sh", []string{"-n", fullPath}, "Shell 脚本 " + relativePath
+		return "/bin/bash", []string{"-n", fullPath}, "Shell 脚本 " + relativePath
 	case ".bash":
 		return "/bin/bash", []string{"-n", fullPath}, "Bash 脚本 " + relativePath
 	default:

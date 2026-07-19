@@ -509,7 +509,10 @@ func (s Service) runToolStep(ctx context.Context, controller *runController, sta
 	}
 	if completed.err == nil && call.Name == "load_skill" {
 		if arguments, parseErr := botprotocol.ToolCallArguments(call); parseErr == nil {
-			state.AddLoadedSkill(botprotocol.AsText(arguments["key"]))
+			state.AddLoadedSkill(agentmodel.LoadedSkillRef{
+				Key:         botprotocol.AsText(arguments["key"]),
+				ContentHash: toolResultText(completed.result.Content, "content_hash"),
+			})
 		}
 	}
 	state.history = append(state.history, toolHistoryMessage(call, completed.content))

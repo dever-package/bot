@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -161,7 +162,9 @@ func FunctionName(prefix string, value string) string {
 	}
 	runes := []rune(name)
 	if len(runes) > 64 {
-		name = string(runes[:64])
+		sum := sha256.Sum256([]byte(name))
+		suffix := fmt.Sprintf("_%x", sum[:6])
+		name = string(runes[:64-len(suffix)]) + suffix
 	}
 	return name
 }

@@ -126,7 +126,7 @@ func (repository) CommitStep(
 	ctx context.Context,
 	record stepRecord,
 	checkpoint string,
-	skills []string,
+	skills []agentmodel.LoadedSkillRef,
 	workerID string,
 	leaseUntil time.Time,
 ) (err error) {
@@ -162,7 +162,7 @@ func (repository) CommitCheckpoint(
 	ctx context.Context,
 	runID uint64,
 	checkpoint string,
-	skills []string,
+	skills []agentmodel.LoadedSkillRef,
 	workerID string,
 	leaseUntil time.Time,
 ) (err error) {

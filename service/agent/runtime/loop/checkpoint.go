@@ -54,7 +54,7 @@ type runCheckpoint struct {
 	LastText               string                           `json:"last_text,omitempty"`
 	Artifacts              map[string]any                   `json:"artifacts,omitempty"`
 	Activities             []map[string]any                 `json:"activities,omitempty"`
-	LoadedSkills           []string                         `json:"loaded_skills,omitempty"`
+	LoadedSkills           []agentmodel.LoadedSkillRef      `json:"loaded_skills,omitempty"`
 	ToolReceipts           []toolReceipt                    `json:"tool_receipts,omitempty"`
 	ActiveToolExecution    *toolExecutionMarker             `json:"active_tool_execution,omitempty"`
 	MediaDelta             []runtimeprovider.MediaReference `json:"media_delta,omitempty"`

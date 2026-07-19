@@ -7,10 +7,6 @@ import (
 	"strings"
 )
 
-func scriptCommand(path string, args []string) (string, []string, error) {
-	return ScriptCommandForPath(path, path, args)
-}
-
 // ScriptCommandForPath resolves a script command while checking permissions on
 // the host path. runPath may point to the same file inside a sandbox.
 func ScriptCommandForPath(runPath string, checkPath string, args []string) (string, []string, error) {
@@ -20,7 +16,7 @@ func ScriptCommandForPath(runPath string, checkPath string, args []string) (stri
 		return "/bin/bash", append([]string{runPath}, args...), nil
 	case ".bash":
 		return "/bin/bash", append([]string{runPath}, args...), nil
-	case ".js":
+	case ".js", ".mjs":
 		return "node", append([]string{runPath}, args...), nil
 	case ".py":
 		return "python3", append([]string{runPath}, args...), nil
@@ -38,23 +34,4 @@ func executableScriptCommand(runPath string, checkPath string, args []string) (s
 		return "", nil, fmt.Errorf("不支持的脚本类型: %s", strings.ToLower(filepath.Ext(runPath)))
 	}
 	return runPath, args, nil
-}
-
-func scriptEnv(tempRoot string, skillRoot string, extraEnv []string) []string {
-	env := []string{
-		"PATH=/usr/local/bin:/usr/bin:/bin",
-		"LANG=C.UTF-8",
-		"LC_ALL=C.UTF-8",
-	}
-	if tempRoot != "" {
-		env = append(env, "HOME="+tempRoot, "TMPDIR="+tempRoot, "AGENT_TEMP_DIR="+tempRoot)
-	}
-	if skillRoot != "" {
-		env = append(env,
-			"PYTHONPATH="+filepath.Join(skillRoot, ".dever", "deps", "python"),
-			"NODE_PATH="+filepath.Join(skillRoot, ".dever", "deps", "node", "node_modules"),
-		)
-	}
-	env = append(env, extraEnv...)
-	return env
 }

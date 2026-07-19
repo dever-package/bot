@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { ArrowLeft, History, Loader2, RotateCw } from "lucide-react";
 import { toast } from "sonner";
+import { DetailDialogFrame } from "../../shared/detail-dialog";
 import {
   fetchSpaceAssetDetail,
   fetchSpaceAssetVersionDetail,
@@ -472,19 +472,11 @@ export function NodeDetailDialog({
   const activeContent = draft.draft;
   const showHistoryState =
     !isCurrentVersion && (historyLoading || historyError);
-  const modal = (
-    <div
-      className="ws-node-detail-backdrop"
-      role="presentation"
-      onMouseDown={() => void closeDialog()}
-    >
-      <section
-        className="ws-node-detail-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${node.title || "节点"}详情`}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+  return (
+    <DetailDialogFrame
+      ariaLabel={`${node.title || "节点"}详情`}
+      onRequestClose={closeDialog}
+      header={
         <NodeDetailHeader
           node={node}
           contentLabel={detailContentLabel(activeContent, node)}
@@ -514,10 +506,11 @@ export function NodeDetailDialog({
           onRetry={() => void draft.retry()}
           onClose={() => void closeDialog()}
         />
-
-        <main className="ws-node-detail-workspace">
+      }
+    >
+      <main className="wb-detail-workspace">
           {!isCurrentVersion ? (
-            <div className="ws-node-detail-history-bar">
+            <div className="wb-detail-history-bar">
               <span>
                 <History size={14} />
                 正在查看第 {historyVersion?.version || "-"} 版
@@ -525,6 +518,7 @@ export function NodeDetailDialog({
               <div>
                 <button
                   type="button"
+                  className="wb-detail-command"
                   onClick={() =>
                     void selectVersion(
                       asset?.version ||
@@ -537,14 +531,14 @@ export function NodeDetailDialog({
                 </button>
                 <button
                   type="button"
-                  className="is-primary"
+                  className="wb-detail-command is-primary"
                   disabled={
                     restoring || historyLoading || Boolean(historyError)
                   }
                   onClick={() => void restoreVersion()}
                 >
                   {restoring ? (
-                    <Loader2 size={13} className="ws-spin" />
+                    <Loader2 size={13} className="wb-detail-spin" />
                   ) : (
                     <RotateCw size={13} />
                   )}
@@ -554,12 +548,12 @@ export function NodeDetailDialog({
             </div>
           ) : null}
 
-          <div className="ws-node-detail-editor-scroll">
+          <div className="wb-detail-scroll">
             {showHistoryState ? (
-              <div className="ws-node-detail-content-state">
+              <div className="wb-detail-content-state">
                 {historyLoading ? (
                   <>
-                    <Loader2 size={18} className="ws-spin" />
+                    <Loader2 size={18} className="wb-detail-spin" />
                     <span>正在读取历史内容</span>
                   </>
                 ) : (
@@ -634,39 +628,34 @@ export function NodeDetailDialog({
               </CanvasAssetReferenceProviderContext.Provider>
             )}
           </div>
-        </main>
+      </main>
 
-        {showDiscardConfirm ? (
-          <div className="ws-node-detail-discard-backdrop">
-            <div
-              className="ws-node-detail-discard-dialog"
-              role="alertdialog"
-              aria-modal="true"
-              aria-label="未保存内容"
-            >
-              <strong>当前修改尚未保存</strong>
-              <p>保存请求失败。可以继续编辑并重试，或放弃本次修改。</p>
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setShowDiscardConfirm(false)}
-                >
-                  继续编辑
-                </button>
-                <button type="button" className="is-danger" onClick={onClose}>
-                  放弃修改
-                </button>
-              </div>
+      {showDiscardConfirm ? (
+        <div className="ws-node-detail-discard-backdrop">
+          <div
+            className="ws-node-detail-discard-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="未保存内容"
+          >
+            <strong>当前修改尚未保存</strong>
+            <p>保存请求失败。可以继续编辑并重试，或放弃本次修改。</p>
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowDiscardConfirm(false)}
+              >
+                继续编辑
+              </button>
+              <button type="button" className="is-danger" onClick={onClose}>
+                放弃修改
+              </button>
             </div>
           </div>
-        ) : null}
-      </section>
-    </div>
+        </div>
+      ) : null}
+    </DetailDialogFrame>
   );
-
-  return typeof document === "undefined"
-    ? null
-    : createPortal(modal, document.body);
 }
 
 function initialVersionItems(asset?: ProjectAsset) {

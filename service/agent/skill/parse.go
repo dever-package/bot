@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,6 +20,9 @@ func ParseFile(path string) (ParsedFile, error) {
 	}
 	if truncated {
 		return ParsedFile{}, fmt.Errorf("%s 超过 %d 字节限制", EntryFile, maxBytes)
+	}
+	if !utf8.Valid(raw) {
+		return ParsedFile{}, fmt.Errorf("%s 必须是 UTF-8 文本", EntryFile)
 	}
 	content := string(raw)
 	metadata, body := SplitFrontMatter(content)
@@ -81,11 +85,6 @@ func SplitFrontMatter(content string) (string, string) {
 		return metadata, body
 	}
 	return "", strings.TrimSpace(content)
-}
-
-func ParseMetadata(metadata string) Entry {
-	entry, _ := parseMetadata(metadata)
-	return entry
 }
 
 func parseMetadata(metadata string) (Entry, error) {

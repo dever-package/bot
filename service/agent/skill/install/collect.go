@@ -44,7 +44,7 @@ func collectSkillSources(workDir string, plan installPlan, provenance []sourcePr
 	}
 	filePaths = filterNestedSkillFiles(filePaths)
 	if plan.Collect.Mode == collectModeOne && len(filePaths) > 1 {
-		filePaths = filePaths[:1]
+		return nil, fmt.Errorf("发现多个技能，请在安装计划中缩小 collect.roots 后重试")
 	}
 	if len(filePaths) == 0 {
 		return nil, fmt.Errorf("未找到 %s，请确认安装计划把技能安装到了任务目录", agentskill.EntryFile)
@@ -147,7 +147,7 @@ func sourceURLForPath(filePath string, provenance []sourceProvenance, fallbackUR
 		selected = strings.TrimSpace(source.URL)
 		selectedRootLength = len(root)
 	}
-	return selected
+	return publicSourceURL(selected)
 }
 
 func pathContains(root string, target string) bool {

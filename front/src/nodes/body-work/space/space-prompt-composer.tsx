@@ -21,8 +21,14 @@ import {
 } from "lucide-react";
 import {
   defaultPowerParamValue,
+  isPowerParamOptionSelected,
   normalizePowerParamValue,
+  powerParamOptionValue,
 } from "./space-power-param";
+import {
+  PowerParamOptionDialog,
+  normalizeParamPreviewType,
+} from "@/components/agent/stream-request-params";
 import { PowerParamIcon } from "./space-power-icon";
 import { CanvasReferenceEditor } from "./space-reference-editor";
 import { useAssetReferenceProvider } from "../asset/asset-reference-provider";
@@ -866,6 +872,54 @@ function ParamMenu({
   onToggle: (key: string) => void;
   onChange: (value: unknown) => void;
 }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const previewType = normalizeParamPreviewType(param.preview_type);
+
+  useEffect(() => {
+    if (disabled || previewType === "none") {
+      setPreviewOpen(false);
+    }
+  }, [disabled, previewType]);
+
+  if (
+    (param.type === "option" || param.type === "select") &&
+    previewType !== "none"
+  ) {
+    const label = paramControlLabel(param, value);
+    return (
+      <>
+        <span className="ws-prompt-tool-wrap">
+          <button
+            type="button"
+            className="ws-prompt-tool"
+            disabled={disabled}
+            aria-label={label}
+            onClick={() => {
+              onToggle("");
+              setPreviewOpen(true);
+            }}
+          >
+            <PowerParamIcon name={param.icon} size={15} />
+            <span>{label}</span>
+            <ChevronDown size={14} />
+          </button>
+        </span>
+        <PowerParamOptionDialog
+          open={previewOpen}
+          title={param.name || param.key}
+          previewType={previewType}
+          options={param.options || []}
+          value={value}
+          disabled={disabled}
+          onOpenChange={setPreviewOpen}
+          onConfirm={(nextValue) =>
+            onChange(normalizePowerParamValue(param, nextValue))
+          }
+        />
+      </>
+    );
+  }
+
   return (
     <ComposerMenu
       id={param.key}
@@ -957,14 +1011,18 @@ function ParamEditor({
     return (
       <div className="ws-prompt-menu-list">
         {(param.options || []).map((option) => {
-          const active = String(value ?? "") === option.value;
+          const active = isPowerParamOptionSelected(option, [
+            String(value ?? ""),
+          ]);
           return (
             <button
               key={option.id || option.value}
               type="button"
               className={`ws-prompt-menu-item ${active ? "is-active" : ""}`}
               onClick={() => {
-                onChange(normalizePowerParamValue(param, option.value));
+                onChange(
+                  normalizePowerParamValue(param, powerParamOptionValue(option)),
+                );
                 onClose();
               }}
             >
@@ -978,24 +1036,27 @@ function ParamEditor({
   }
 
   if (param.type === "multi_option") {
-    const selected = new Set(valueAsList(value));
+    const selected = valueAsList(value);
     return (
       <div className="ws-prompt-menu-list">
         {(param.options || []).map((option) => {
-          const active = selected.has(option.value);
+          const active = isPowerParamOptionSelected(option, selected);
           return (
             <button
               key={option.id || option.value}
               type="button"
               className={`ws-prompt-menu-item ${active ? "is-active" : ""}`}
               onClick={() => {
-                const next = new Set(selected);
+                let next = [...selected];
                 if (active) {
-                  next.delete(option.value);
+                  next = next.filter(
+                    (current) =>
+                      !isPowerParamOptionSelected(option, [current]),
+                  );
                 } else {
-                  next.add(option.value);
+                  next.push(powerParamOptionValue(option));
                 }
-                onChange(normalizePowerParamValue(param, Array.from(next)));
+                onChange(normalizePowerParamValue(param, next));
               }}
             >
               <span>{option.name || option.value}</span>
@@ -1079,7 +1140,7 @@ function paramControlLabel(param: PowerParam, value: unknown) {
   }
   if (param.type === "option" || param.type === "select") {
     const option = param.options?.find(
-      (item) => item.value === String(value ?? ""),
+      (item) => isPowerParamOptionSelected(item, [String(value ?? "")]),
     );
     return option?.name || param.name;
   }

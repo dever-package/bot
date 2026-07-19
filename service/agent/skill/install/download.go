@@ -57,7 +57,7 @@ func downloadPlanStep(ctx context.Context, workDir string, stepIndex int, step i
 			_ = os.RemoveAll(candidateDir)
 			continue
 		}
-		return sourceProvenance{Root: candidateDir, URL: candidate}, nil
+		return sourceProvenance{Root: candidateDir, URL: publicSourceURL(candidate)}, nil
 	}
 	if lastErr != nil {
 		return sourceProvenance{}, lastErr
@@ -108,6 +108,17 @@ func githubArchiveCandidates(rawURL string) []string {
 	}
 }
 
+func publicSourceURL(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
 func downloadFile(ctx context.Context, rawURL string, dir string) (string, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -153,9 +164,10 @@ func downloadFileName(rawURL string, contentType string) string {
 	parsed, err := url.Parse(rawURL)
 	if err == nil {
 		name := path.Base(parsed.Path)
-		if name != "" && name != "." && name != "/" {
+		if name != "" && name != "." && name != "/" && len([]byte(name)) <= 180 && !strings.ContainsRune(name, 0) {
 			return name
 		}
+		contentType += " " + strings.ToLower(parsed.Path)
 	}
 	if strings.Contains(contentType, "zip") {
 		return "download.zip"
@@ -202,7 +214,7 @@ func extractZip(filePath string, targetDir string) error {
 			return err
 		}
 		if file.FileInfo().IsDir() {
-			if err := os.MkdirAll(targetPath, file.Mode()); err != nil {
+			if err := os.MkdirAll(targetPath, safeArchiveMode(file.Mode(), true)); err != nil {
 				return err
 			}
 			continue
@@ -217,7 +229,7 @@ func extractZip(filePath string, targetDir string) error {
 		if err != nil {
 			return err
 		}
-		if err := writeExtractedFile(input, targetPath, file.Mode(), budget); err != nil {
+		if err := writeExtractedFile(input, targetPath, safeArchiveMode(file.Mode(), false), budget); err != nil {
 			_ = input.Close()
 			return err
 		}
@@ -269,14 +281,14 @@ func extractTarReader(reader io.Reader, targetDir string) error {
 		}
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(targetPath, os.FileMode(header.Mode)); err != nil {
+			if err := os.MkdirAll(targetPath, safeArchiveMode(os.FileMode(header.Mode), true)); err != nil {
 				return err
 			}
 		case tar.TypeReg, tar.TypeRegA:
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 				return err
 			}
-			if err := writeExtractedFile(tarReader, targetPath, os.FileMode(header.Mode), budget); err != nil {
+			if err := writeExtractedFile(tarReader, targetPath, safeArchiveMode(os.FileMode(header.Mode), false), budget); err != nil {
 				return err
 			}
 		case tar.TypeXHeader, tar.TypeXGlobalHeader:
@@ -285,6 +297,16 @@ func extractTarReader(reader io.Reader, targetDir string) error {
 			return fmt.Errorf("压缩包包含不支持的链接或特殊文件: %s", header.Name)
 		}
 	}
+}
+
+func safeArchiveMode(mode os.FileMode, directory bool) os.FileMode {
+	if directory {
+		return 0o755
+	}
+	if mode.Perm()&0o111 != 0 {
+		return 0o755
+	}
+	return 0o644
 }
 
 func safeExtractPath(root string, name string) (string, error) {

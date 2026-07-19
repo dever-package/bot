@@ -266,10 +266,6 @@
             "value": "禁用脚本"
           },
           {
-            "id": "local",
-            "value": "本地受控执行"
-          },
-          {
             "id": "bwrap",
             "value": "bubblewrap 沙箱"
           }
@@ -292,12 +288,6 @@
                 "runtime-script-sandbox-network-mode",
                 "runtime-script-sandbox-timeout",
                 "runtime-script-sandbox-output"
-              ]
-            },
-            {
-              "value": "local",
-              "hide": [
-                "runtime-script-sandbox-network-mode"
               ]
             }
           ]

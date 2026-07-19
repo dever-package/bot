@@ -67,12 +67,16 @@ func runSkillScriptTool(loaded map[string]agentskill.Entry, runtime SkillRuntime
 			if err != nil {
 				return Result{}, err
 			}
-			runResult, err := sandbox.Run(ctx, skillSandboxConfig(entry, runtime.Sandbox), sandbox.Request{
+			sandboxConfig, err := skillSandboxConfig(entry, runtime.Sandbox)
+			if err != nil {
+				return Result{}, err
+			}
+			runResult, err := sandbox.Run(ctx, sandboxConfig, sandbox.Request{
 				SkillRoot: entry.InstallPath, TempRoot: tempRoot, ScriptRelative: relative,
 				Args: args, Env: configEnv.Env, Timeout: timeout,
 			})
 			if err != nil {
-				return Result{}, err
+				return Result{}, fmt.Errorf("技能脚本执行失败: %s", agentskill.RedactSecrets(err.Error(), configEnv.Secrets))
 			}
 			runResult.Stdout = agentskill.RedactSecrets(runResult.Stdout, configEnv.Secrets)
 			runResult.Stderr = agentskill.RedactSecrets(runResult.Stderr, configEnv.Secrets)

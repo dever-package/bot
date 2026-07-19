@@ -3,7 +3,6 @@ package loop
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,17 +15,18 @@ import (
 )
 
 type InternalRequest struct {
-	AgentID      uint64
-	RequestID    string
-	Method       string
-	Host         string
-	Path         string
-	Headers      map[string]string
-	Input        map[string]any
-	History      []any
-	Server       *server.Context
-	OnRunCreated func(runID uint64, requestID string)
-	OnStream     func(payload map[string]any)
+	AgentID       uint64
+	AgentIdentity string
+	RequestID     string
+	Method        string
+	Host          string
+	Path          string
+	Headers       map[string]string
+	Input         map[string]any
+	History       []any
+	Server        *server.Context
+	OnRunCreated  func(runID uint64, requestID string)
+	OnStream      func(payload map[string]any)
 }
 
 type InternalResult struct {
@@ -41,11 +41,15 @@ func (s Service) RunInternal(ctx context.Context, request InternalRequest) (Inte
 	if requestID == "" {
 		requestID = uuid.NewString()
 	}
+	agentIdentity := strings.TrimSpace(request.AgentIdentity)
+	if agentIdentity == "" {
+		agentIdentity = fmt.Sprintf("%d", request.AgentID)
+	}
 	completion := make(chan runCompletion, 1)
 	execution, err := s.prepareStatelessExecution(ctx, statelessRequest{
 		RequestID: requestID,
 		TaskRequest: TaskRequest{
-			AgentIdentity: strconv.FormatUint(request.AgentID, 10),
+			AgentIdentity: agentIdentity,
 			Input:         request.Input,
 			History:       request.History,
 			Method:        request.Method,

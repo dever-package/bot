@@ -59,6 +59,16 @@ func NormalizeParamValueType(value string) string {
 	}
 }
 
+func NormalizeParamPreviewType(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "image", "audio", "video":
+		return normalized
+	default:
+		return "none"
+	}
+}
+
 func NormalizeEndpointParamMode(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case endpointParamModeAny:

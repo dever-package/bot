@@ -32,7 +32,11 @@ export function SpaceAnimatedEdge({
   const isSelected = Boolean(edgeData.isSelected);
   const isHighlighted = Boolean(edgeData.isHighlighted || isSelected);
   const highlightColor = edgeData.highlightColor || "#0ea5e9";
-  const stroke = isSelected ? "var(--ws-edge-selected)" : isHighlighted ? highlightColor : "rgba(148, 163, 184, 0.52)";
+  const stroke = isSelected
+    ? "var(--ws-edge-selected)"
+    : isHighlighted
+      ? highlightColor
+      : "var(--ws-edge)";
   const strokeWidth = isSelected ? 2.8 : isHighlighted ? 2.4 : 1.45;
   const opacity = isHighlighted ? 0.96 : 0.62;
 

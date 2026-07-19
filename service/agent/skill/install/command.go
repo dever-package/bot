@@ -5,19 +5,28 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/dever-package/bot/service/agent/netguard"
 	"github.com/dever-package/bot/service/agent/runtime/tool/sandbox"
+	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
 const skillHubInstallScriptURL = "https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/install/install.sh"
 
-const maxCommandOutputLineBytes = 1024 * 1024
+const (
+	maxCommandOutputLineBytes   = 1024 * 1024
+	maxCommandStreamOutputBytes = 512 * 1024
+)
+
+const installWorkspaceCheckInterval = 500 * time.Millisecond
 
 var (
 	installShellControlPattern = regexp.MustCompile("[\\r\\n;|&<>`]")
@@ -33,6 +42,9 @@ func runInstallCommand(ctx context.Context, sandboxConfig sandbox.Config, workDi
 		return "", fmt.Errorf("安装命令不能为空")
 	}
 	if err := validateInstallCommand(command); err != nil {
+		return "", err
+	}
+	if err := validateInstallCommandNetwork(ctx, command); err != nil {
 		return "", err
 	}
 
@@ -57,11 +69,23 @@ func runInstallCommand(ctx context.Context, sandboxConfig sandbox.Config, workDi
 	if err != nil {
 		return "", err
 	}
-	cmd := osexec.CommandContext(ctx, process.CommandName, process.CommandArgs...)
+	if err := agentskill.ValidateTreeLimits(workDir, installWorkspaceLimits); err != nil {
+		return "", fmt.Errorf("技能安装工作区超过资源限制: %w", err)
+	}
+	commandCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := osexec.CommandContext(commandCtx, process.CommandName, process.CommandArgs...)
 	cmd.Dir = process.WorkDir
 	cmd.Env = process.Env
 
+	monitorStop := make(chan struct{})
+	monitorResult := make(chan error, 1)
+	go monitorInstallWorkspace(commandCtx, workDir, monitorStop, monitorResult, cancel)
 	text, err := runCommandWithOutput(ctx, cmd, onOutput)
+	close(monitorStop)
+	if monitorErr := <-monitorResult; monitorErr != nil {
+		return text, monitorErr
+	}
 	if ctx.Err() != nil {
 		return text, fmt.Errorf("安装命令执行超时")
 	}
@@ -72,6 +96,27 @@ func runInstallCommand(ctx context.Context, sandboxConfig sandbox.Config, workDi
 		return text, fmt.Errorf("安装命令执行失败: %w", err)
 	}
 	return text, nil
+}
+
+func monitorInstallWorkspace(ctx context.Context, root string, stop <-chan struct{}, result chan<- error, cancel context.CancelFunc) {
+	ticker := time.NewTicker(installWorkspaceCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			result <- nil
+			return
+		case <-ctx.Done():
+			result <- nil
+			return
+		case <-ticker.C:
+			if err := agentskill.ValidateTreeLimits(root, installWorkspaceLimits); err != nil {
+				cancel()
+				result <- fmt.Errorf("技能安装工作区超过资源限制: %w", err)
+				return
+			}
+		}
+	}
 }
 
 func runCommandWithOutput(ctx context.Context, cmd *osexec.Cmd, onOutput commandOutputFunc) (string, error) {
@@ -86,11 +131,14 @@ func runCommandWithOutput(ctx context.Context, cmd *osexec.Cmd, onOutput command
 
 	var output strings.Builder
 	var outputMu sync.Mutex
+	streamedBytes := 0
+	streamTruncated := false
 	appendOutput := func(line string) {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			return
 		}
+		streamLine := ""
 		outputMu.Lock()
 		if output.Len() > 0 {
 			output.WriteByte('\n')
@@ -99,9 +147,22 @@ func runCommandWithOutput(ctx context.Context, cmd *osexec.Cmd, onOutput command
 		text := trimCommandOutput(output.String())
 		output.Reset()
 		output.WriteString(text)
+		if onOutput != nil && !streamTruncated {
+			nextBytes := len(line)
+			if streamedBytes > 0 {
+				nextBytes++
+			}
+			if streamedBytes+nextBytes <= maxCommandStreamOutputBytes {
+				streamedBytes += nextBytes
+				streamLine = line
+			} else {
+				streamTruncated = true
+				streamLine = "安装命令输出过多，后续输出已省略"
+			}
+		}
 		outputMu.Unlock()
-		if onOutput != nil {
-			onOutput(line)
+		if streamLine != "" {
+			onOutput(streamLine)
 		}
 	}
 
@@ -212,12 +273,64 @@ func validateInstallCommand(command string) error {
 	if _, allowed := allowedInstallCommands[name]; !allowed {
 		return fmt.Errorf("不支持的技能安装命令: %s", name)
 	}
+	fields := strings.Fields(command)
+	if name == "git" && (len(fields) < 3 || strings.ToLower(fields[1]) != "clone") {
+		return fmt.Errorf("安装命令只允许使用 git clone")
+	}
+	if err := validateInstallCommandAction(name, fields); err != nil {
+		return err
+	}
 	return nil
 }
 
 var allowedInstallCommands = map[string]struct{}{
-	"bun": {}, "bunx": {}, "curl": {}, "git": {}, "node": {}, "npm": {},
-	"npx": {}, "pnpm": {}, "skillhub": {}, "tar": {}, "unzip": {}, "yarn": {},
+	"bun": {}, "bunx": {}, "git": {}, "npm": {}, "npx": {}, "pnpm": {}, "skillhub": {}, "yarn": {},
+}
+
+func validateInstallCommandAction(name string, fields []string) error {
+	if len(fields) < 2 {
+		return fmt.Errorf("安装命令缺少操作参数")
+	}
+	action := strings.ToLower(strings.TrimSpace(fields[1]))
+	allowed := map[string]map[string]struct{}{
+		"npm":      {"install": {}, "i": {}, "add": {}, "exec": {}},
+		"pnpm":     {"install": {}, "i": {}, "add": {}, "dlx": {}, "exec": {}},
+		"yarn":     {"install": {}, "add": {}, "dlx": {}, "exec": {}},
+		"bun":      {"install": {}, "add": {}, "x": {}},
+		"skillhub": {"install": {}, "add": {}},
+	}
+	if actions, exists := allowed[name]; exists {
+		if _, ok := actions[action]; !ok {
+			return fmt.Errorf("不支持的 %s 安装操作: %s", name, action)
+		}
+	}
+	if (name == "npx" || name == "bunx") && strings.HasPrefix(action, "-") {
+		return fmt.Errorf("%s 必须直接指定安装工具包", name)
+	}
+	return nil
+}
+
+func validateInstallCommandNetwork(ctx context.Context, command string) error {
+	fields := strings.Fields(command)
+	foundURL := false
+	for _, field := range fields {
+		candidate := strings.Trim(field, " \t\r\n\"'()[]{}<>,;")
+		if !strings.HasPrefix(candidate, "http://") && !strings.HasPrefix(candidate, "https://") {
+			continue
+		}
+		parsed, err := url.Parse(candidate)
+		if err != nil {
+			return fmt.Errorf("安装命令包含无效外部地址")
+		}
+		if err := netguard.ValidateURL(ctx, parsed); err != nil {
+			return err
+		}
+		foundURL = true
+	}
+	if installCommandName(command) == "git" && !foundURL {
+		return fmt.Errorf("git clone 只允许使用经过校验的 http/https 地址")
+	}
+	return nil
 }
 
 func installCommandName(command string) string {

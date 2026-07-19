@@ -342,6 +342,9 @@ func normalizeRequestTaskData(spec StreamTaskSpec, data any) any {
 	if strings.TrimSpace(spec.OutputType) == "" {
 		return data
 	}
+	if _, ok := botprovider.AsBinaryPayload(data); ok {
+		return data
+	}
 	return map[string]any{
 		"output": botprotocol.ExtractMediaOutput(data, spec.OutputType),
 	}

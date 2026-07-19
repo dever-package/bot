@@ -28,7 +28,7 @@ type Entry struct {
 	InstallPath string
 	EntryFile   string
 	Manifest    string
-	Content     string
+	ContentHash string
 }
 
 type ParsedFile struct {

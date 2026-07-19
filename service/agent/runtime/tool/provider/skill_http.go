@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,8 +17,16 @@ import (
 )
 
 const (
-	defaultHTTPTimeout = 10
-	maxHTTPTimeout     = 60
+	defaultHTTPTimeout      = 10
+	maxHTTPTimeout          = 60
+	maxHTTPRequestURLRunes  = 4096
+	maxHTTPRequestHeaders   = 64
+	maxHTTPHeaderNameRunes  = 128
+	maxHTTPHeaderValueBytes = 8192
+	maxHTTPQueryItems       = 128
+	maxHTTPQueryKeyRunes    = 128
+	maxHTTPQueryValueRunes  = 4096
+	maxHTTPResponseHeaders  = 64
 )
 
 type httpRequestSpec struct {
@@ -78,7 +87,9 @@ func httpSpec(arguments map[string]any) (httpRequestSpec, error) {
 	if err != nil {
 		return httpRequestSpec{}, err
 	}
-	applyHTTPQuery(parsed, argumentMap(arguments, "query"))
+	if err := applyHTTPQuery(parsed, argumentMap(arguments, "query")); err != nil {
+		return httpRequestSpec{}, err
+	}
 	headers := requestHeaders(argumentMap(arguments, "headers"))
 	body, contentType, err := requestBody(arguments)
 	if err != nil {
@@ -92,13 +103,20 @@ func httpSpec(arguments map[string]any) (httpRequestSpec, error) {
 	if len(body) > 0 && method == http.MethodGet {
 		method = http.MethodPost
 	}
-	return httpRequestSpec{
+	spec := httpRequestSpec{
 		Method: method, URL: parsed.String(), Headers: headers, Body: body,
 		Timeout: clampHTTPTimeout(ArgumentInt(arguments, "timeout_seconds", defaultHTTPTimeout)),
-	}, nil
+	}
+	if err := validateHTTPRequestSpec(spec); err != nil {
+		return httpRequestSpec{}, err
+	}
+	return spec, nil
 }
 
 func performHTTP(ctx context.Context, spec httpRequestSpec) (map[string]any, error) {
+	if err := validateHTTPRequestSpec(spec); err != nil {
+		return nil, err
+	}
 	parsed, err := url.Parse(spec.URL)
 	if err != nil {
 		return nil, err
@@ -154,6 +172,9 @@ func normalizeHTTPURL(raw string) (*url.URL, error) {
 	if raw == "" {
 		return nil, fmt.Errorf("HTTP URL 不能为空")
 	}
+	if err := agentskill.ValidateStoredText("HTTP URL", raw, maxHTTPRequestURLRunes); err != nil {
+		return nil, err
+	}
 	if !strings.Contains(raw, "://") {
 		raw = "https://" + raw
 	}
@@ -170,23 +191,44 @@ func normalizeHTTPURL(raw string) (*url.URL, error) {
 	return parsed, nil
 }
 
-func applyHTTPQuery(parsed *url.URL, query map[string]any) {
+func applyHTTPQuery(parsed *url.URL, query map[string]any) error {
+	if len(query) > maxHTTPQueryItems {
+		return fmt.Errorf("HTTP 查询参数不能超过 %d 项", maxHTTPQueryItems)
+	}
 	values := parsed.Query()
+	items := 0
 	for key, raw := range query {
 		key = strings.TrimSpace(key)
 		if key == "" {
 			continue
 		}
+		if err := agentskill.ValidateStoredText("HTTP 查询参数名", key, maxHTTPQueryKeyRunes); err != nil {
+			return err
+		}
 		switch current := raw.(type) {
 		case []any:
 			for _, item := range current {
-				values.Add(key, strings.TrimSpace(fmt.Sprint(item)))
+				items++
+				if items > maxHTTPQueryItems {
+					return fmt.Errorf("HTTP 查询参数值不能超过 %d 项", maxHTTPQueryItems)
+				}
+				value := strings.TrimSpace(fmt.Sprint(item))
+				if err := agentskill.ValidateStoredText("HTTP 查询参数值", value, maxHTTPQueryValueRunes); err != nil {
+					return err
+				}
+				values.Add(key, value)
 			}
 		default:
-			values.Set(key, strings.TrimSpace(fmt.Sprint(raw)))
+			items++
+			value := strings.TrimSpace(fmt.Sprint(raw))
+			if err := agentskill.ValidateStoredText("HTTP 查询参数值", value, maxHTTPQueryValueRunes); err != nil {
+				return err
+			}
+			values.Set(key, value)
 		}
 	}
 	parsed.RawQuery = values.Encode()
+	return agentskill.ValidateStoredText("HTTP URL", parsed.String(), maxHTTPRequestURLRunes)
 }
 
 func requestHeaders(raw map[string]any) map[string]string {
@@ -223,15 +265,56 @@ func requestBody(arguments map[string]any) ([]byte, string, error) {
 	return nil, "", nil
 }
 
+func validateHTTPRequestSpec(spec httpRequestSpec) error {
+	if err := agentskill.ValidateStoredText("HTTP URL", strings.TrimSpace(spec.URL), maxHTTPRequestURLRunes); err != nil {
+		return err
+	}
+	if len(spec.Headers) > maxHTTPRequestHeaders {
+		return fmt.Errorf("HTTP 请求头不能超过 %d 项", maxHTTPRequestHeaders)
+	}
+	for key, value := range spec.Headers {
+		key = strings.TrimSpace(key)
+		if key == "" || strings.ContainsAny(key, "\r\n:") {
+			return fmt.Errorf("HTTP 请求头名称不合法")
+		}
+		if err := agentskill.ValidateStoredText("HTTP 请求头名称", key, maxHTTPHeaderNameRunes); err != nil {
+			return err
+		}
+		if strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("HTTP 请求头 %s 包含换行符", key)
+		}
+		if err := agentskill.ValidateStoredBytes("HTTP 请求头值", value, maxHTTPHeaderValueBytes); err != nil {
+			return err
+		}
+	}
+	if len(spec.Body) > agentskill.HTTPMaxLen {
+		return fmt.Errorf("HTTP 请求正文超过 %d 字节", agentskill.HTTPMaxLen)
+	}
+	return nil
+}
+
 func responseHeaders(headers http.Header) map[string]string {
 	result := map[string]string{}
-	for key, values := range headers {
+	keys := make([]string, 0, len(headers))
+	for key := range headers {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		values := headers.Values(key)
 		switch strings.ToLower(strings.TrimSpace(key)) {
 		case "set-cookie", "authorization", "proxy-authorization", "cookie":
 			continue
 		}
 		if len(values) > 0 {
-			result[key] = strings.Join(values, ", ")
+			value := strings.Join(values, ", ")
+			if len(value) > maxHTTPHeaderValueBytes {
+				value = value[:maxHTTPHeaderValueBytes]
+			}
+			result[key] = value
+			if len(result) >= maxHTTPResponseHeaders {
+				break
+			}
 		}
 	}
 	return result

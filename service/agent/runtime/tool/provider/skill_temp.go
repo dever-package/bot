@@ -94,6 +94,10 @@ func readTempFileTool(loaded map[string]agentskill.Entry, runtime SkillRuntime) 
 			if err != nil {
 				return Result{}, err
 			}
+			content, valid := agentskill.UTF8Prefix(content, truncated)
+			if !valid {
+				return Result{}, fmt.Errorf("临时文件不是 UTF-8 文本: %s", relative)
+			}
 			text := string(content)
 			return Result{Text: text, Content: map[string]any{
 				"skill": entry.Key, "path": relative, "size": info.Size(), "content": text, "truncated": truncated,

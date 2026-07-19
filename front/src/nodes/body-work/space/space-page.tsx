@@ -217,6 +217,7 @@ import {
 } from "./space-prompt-composer";
 import {
   defaultPowerParamValues,
+  isPowerParamOptionSelected,
   normalizePowerParamValue,
 } from "./space-power-param";
 import {
@@ -765,34 +766,6 @@ export function WorkSpacePage() {
     },
     [activeCanvas.nodes],
   );
-
-  useEffect(() => {
-    if (
-      !space ||
-      !activeCate ||
-      activeFlows.length === 0
-    ) {
-      return;
-    }
-    const key = String(activeCate.id);
-    if (Object.prototype.hasOwnProperty.call(canvasStates, key)) {
-      return;
-    }
-    const seededCanvas = createSeedCanvasFromFlows(activeCate, activeFlows);
-    if (seededCanvas.nodes.length === 0) {
-      return;
-    }
-    setCanvasStates((current) => {
-      if (Object.prototype.hasOwnProperty.call(current, key)) {
-        return current;
-      }
-      changedCanvasKeysRef.current.add(activeCate.id);
-      return {
-        ...current,
-        [key]: seededCanvas,
-      };
-    });
-  }, [activeCate, activeFlows, canvasStates, space]);
 
   const updateActiveCanvas = useCallback(
     (updater: (canvas: SpaceCanvasState) => SpaceCanvasState) => {
@@ -6701,34 +6674,6 @@ function flowPositionFromScreen(
   return screen;
 }
 
-function createSeedCanvasFromFlows(
-  activeCate: AssetCate,
-  flows: TeamFlow[],
-): SpaceCanvasState {
-  const nodes = flows.map((flow, index) =>
-    createLocalNode("flow", activeCate, index, seedFlowNodePosition(index), {
-      flow,
-    }),
-  );
-  return normalizeCanvasForState(
-    {
-      assetCateId: activeCate.id,
-      nextNodeNo: 1,
-      nodes,
-      edges: [],
-      viewport: {},
-    },
-    activeCate.id,
-  );
-}
-
-function seedFlowNodePosition(index: number): CanvasPoint {
-  return {
-    x: 420 + (index % 3) * 260,
-    y: 320 + Math.floor(index / 3) * 210,
-  };
-}
-
 function cloneCanvasNode(
   node: SpaceCanvasNode,
   assetCateId: number,
@@ -7856,7 +7801,7 @@ function nodeHighlightColor(node?: SpaceCanvasNode) {
   if (node?.type === "power") return "#8b5cf6";
   if (node?.type === "agent") return "#f59e0b";
   if (node?.type === "flow") return "#3b82f6";
-  if (node?.type === "function") return "#f43f5e";
+  if (node?.type === "function" || node?.type === "group") return "#f43f5e";
   return "#3b82f6";
 }
 
@@ -8580,18 +8525,23 @@ function canPreservePowerParamValue(
     return false;
   }
   if (param.type === "option" || param.type === "select") {
-    const optionValues = new Set(
-      (param.options || []).map((option) => option.value),
+    const options = param.options || [];
+    return (
+      options.length === 0 ||
+      options.some((option) =>
+        isPowerParamOptionSelected(option, [String(value ?? "")]),
+      )
     );
-    return optionValues.size === 0 || optionValues.has(String(value ?? ""));
   }
   if (param.type === "multi_option") {
-    const optionValues = new Set(
-      (param.options || []).map((option) => option.value),
-    );
+    const options = param.options || [];
     return (
-      optionValues.size === 0 ||
-      valueAsParamList(value).every((item) => optionValues.has(item))
+      options.length === 0 ||
+      valueAsParamList(value).every((item) =>
+        options.some((option) =>
+          isPowerParamOptionSelected(option, [item]),
+        ),
+      )
     );
   }
   if (param.value_type === "number") {

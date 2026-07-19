@@ -209,3 +209,17 @@ func NewAgentModel() *orm.Model[Agent] {
 		},
 	})
 }
+
+func BuiltinAgentRecord(key string) (map[string]any, bool) {
+	for _, record := range agentSeed {
+		if record["kind"] != AgentKindInternal || record["key"] != key {
+			continue
+		}
+		result := make(map[string]any, len(record))
+		for field, value := range record {
+			result[field] = value
+		}
+		return result, true
+	}
+	return nil, false
+}

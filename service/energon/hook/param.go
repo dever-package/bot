@@ -27,6 +27,11 @@ func (ParamHook) ProviderBeforeSaveParam(c *server.Context, params []any) any {
 	}
 	paramType := botinput.NormalizeParamControlType(util.ToStringTrimmed(record["type"]))
 	record["type"] = paramType
+	previewType := botinput.NormalizeParamPreviewType(util.ToStringTrimmed(record["preview_type"]))
+	if paramType != "option" {
+		previewType = "none"
+	}
+	record["preview_type"] = previewType
 	valueType := botinput.NormalizeParamValueType(util.ToStringTrimmed(record["value_type"]))
 	if botinput.IsPromptParamType(paramType) {
 		valueType = "string"
@@ -159,6 +164,7 @@ func normalizeParamOptionRows(c *server.Context, paramID uint64, value any) []an
 		next := util.CloneMap(row)
 		next["name"] = name
 		next["value"] = optionValue
+		next["preview_url"] = normalizeParamOptionPreviewURL(c, row["preview_url"])
 		if util.ToIntDefault(next["sort"], 0) <= 0 {
 			next["sort"] = defaultRecordSort
 		}
@@ -171,6 +177,29 @@ func normalizeParamOptionRows(c *server.Context, paramID uint64, value any) []an
 	}
 	assignNaturalKeyedChildIDs(naturalRows, existingIDs)
 	return anyChildRows(items)
+}
+
+func normalizeParamOptionPreviewURL(c *server.Context, value any) string {
+	parsed := value
+	if text, ok := value.(string); ok {
+		parsed = botinput.ParseJSONValue(text)
+	}
+	normalized := botinput.FileValue(c.Context(), parsed)
+	for _, item := range botinput.List(normalized) {
+		switch current := item.(type) {
+		case string:
+			if url := util.ToStringTrimmed(current); url != "" {
+				return url
+			}
+		case map[string]any:
+			for _, field := range []string{"url", "src", "path", "download", "open_url"} {
+				if url := util.ToStringTrimmed(current[field]); url != "" {
+					return url
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func existingParamOptionIDsByValue(c *server.Context, paramID uint64) map[string]uint64 {

@@ -109,29 +109,50 @@ func rollbackDirectories(replacements []*directoryReplacement) error {
 	return errors.Join(errorsList...)
 }
 
-func EnsurePackItem(ctx context.Context, packID uint64, skillID uint64) {
+func EnsurePackItem(ctx context.Context, packID uint64, skillID uint64) error {
 	if packID == 0 || skillID == 0 {
-		return
+		return fmt.Errorf("技能方案和技能不能为空")
+	}
+	if err := RequireActivePack(ctx, packID); err != nil {
+		return err
+	}
+	if err := RequireActiveSkill(ctx, skillID); err != nil {
+		return err
 	}
 	model := agentmodel.NewSkillPackItemModel()
 	existing := model.Find(ctx, map[string]any{"pack_id": packID, "skill_id": skillID})
 	if existing != nil {
 		if existing.Status != activeStatus {
-			model.Update(ctx, map[string]any{"id": existing.ID}, map[string]any{"status": activeStatus})
+			if affected := model.Update(ctx, map[string]any{"id": existing.ID}, map[string]any{"status": activeStatus}); affected == 0 {
+				return fmt.Errorf("启用技能方案条目失败")
+			}
 		}
-		return
+		return nil
 	}
-	model.Insert(ctx, map[string]any{
+	if id := model.Insert(ctx, map[string]any{
 		"pack_id": packID, "skill_id": skillID, "status": activeStatus,
 		"sort": nextPackItemSort(ctx, packID), "created_at": time.Now(),
-	})
+	}); id == 0 {
+		return fmt.Errorf("添加技能到方案失败")
+	}
+	return nil
 }
 
-func RemoveObsoletePath(oldPath string, currentPath string) {
+func RemoveObsoletePath(key string, oldPath string, currentPath string) {
+	key = NormalizeKey(key)
 	oldPath = filepath.Clean(strings.TrimSpace(oldPath))
 	currentPath = filepath.Clean(strings.TrimSpace(currentPath))
-	root := filepath.Clean(Root)
-	if oldPath == "" || oldPath == "." || oldPath == currentPath || oldPath == root || !IsSafePath(oldPath) {
+	skillRoot := filepath.Clean(filepath.Join(Root, key))
+	if key == "" || oldPath == "" || oldPath == "." || oldPath == currentPath || oldPath == skillRoot {
+		return
+	}
+	if !IsSafePath(skillRoot) || !pathWithin(skillRoot, oldPath) || !pathWithin(skillRoot, currentPath) {
+		return
+	}
+	if err := ValidateInstallRoot(oldPath); err != nil {
+		return
+	}
+	if isVersionedInstallPath(oldPath) {
 		return
 	}
 	oldAbsolute, oldErr := filepath.Abs(oldPath)
@@ -143,8 +164,8 @@ func RemoveObsoletePath(oldPath string, currentPath string) {
 }
 
 func replaceDirectory(source string, target string) (*directoryReplacement, error) {
-	if !IsSafePath(target) {
-		return nil, fmt.Errorf("技能安装目录不安全: %s", target)
+	if err := ValidateInstallTarget(target); err != nil {
+		return nil, fmt.Errorf("技能安装目录不安全: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return nil, err

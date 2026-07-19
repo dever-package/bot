@@ -142,14 +142,6 @@
           "formLayout": "horizontal",
           "rows": 8
         }
-      },
-      {
-        "type": "form-radio",
-        "value": "form.status",
-        "mode": "form",
-        "meta": {
-          "formLayout": "horizontal"
-        }
       }
     ]
   },
@@ -167,18 +159,17 @@
       "files_json": "{}",
       "manifest": "",
       "validation_result": "{}",
+      "version": 0,
       "status": 1
     }
   },
   "state": {},
   "action": {
     "submit": {
-      "type": "save",
-      "model": "bot.agent.NewSkillDraftModel",
-      "params": "form",
-      "before": {
-        "service": "bot.agent.setting.AgentHook.BeforeSaveSkillDraft"
-      }
+      "type": "request",
+      "api": "/bot/admin/skill_draft/apply_patch",
+      "method": "post",
+      "params": "form"
     }
   }
 }

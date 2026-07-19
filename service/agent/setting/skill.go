@@ -1,10 +1,12 @@
 package setting
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 
+	dlog "github.com/shemic/dever/log"
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
@@ -13,61 +15,6 @@ import (
 )
 
 const skillDeletePathsKey = "_skill_delete_paths"
-
-func (AgentHook) ProviderBeforeSaveSkill(_ *server.Context, params []any) any {
-	record := cloneAgentRecord(params)
-	if len(record) == 0 {
-		return record
-	}
-	partial := isPartialAgentRecord(record)
-
-	trimStringField(record, "key", partial)
-	trimStringField(record, "name", partial)
-	trimStringField(record, "description", partial)
-	trimStringField(record, "display_name", partial)
-	trimStringField(record, "display_icon", partial)
-	trimStringField(record, "display_description", partial)
-	trimStringField(record, "source_type", partial)
-	trimStringField(record, "source_url", partial)
-	trimStringField(record, "install_input", partial)
-	trimStringField(record, "install_path", partial)
-	trimStringField(record, "entry_file", partial)
-	trimStringField(record, "manifest", partial)
-	trimStringField(record, "content_hash", partial)
-	if shouldNormalizeField(record, "cate_id", partial) && util.ToUint64(record["cate_id"]) == 0 {
-		record["cate_id"] = defaultSkillCateID
-	}
-	if shouldNormalizeField(record, "key", partial) {
-		record["key"] = skillservice.NormalizeKey(util.ToStringTrimmed(record["key"]))
-	}
-	if shouldNormalizeField(record, "entry_file", partial) && util.ToStringTrimmed(record["entry_file"]) == "" {
-		record["entry_file"] = "SKILL.md"
-	}
-	if shouldNormalizeField(record, "source_type", partial) {
-		record["source_type"] = agentmodel.NormalizeSkillSourceType(
-			util.ToStringTrimmed(record["source_type"]),
-			util.ToStringTrimmed(record["source_url"]),
-			util.ToStringTrimmed(record["install_input"]),
-		)
-	}
-	if !partial && util.ToStringTrimmed(record["key"]) == "" {
-		panicAgentField("form.key", "技能标识不能为空。")
-	}
-	if !partial && util.ToStringTrimmed(record["name"]) == "" {
-		panicAgentField("form.name", "技能名称不能为空。")
-	}
-	if !partial && util.ToStringTrimmed(record["display_name"]) == "" {
-		record["display_name"] = util.ToStringTrimmed(record["name"])
-	}
-	if !partial &&
-		util.ToStringTrimmed(record["install_path"]) == "" &&
-		util.ToStringTrimmed(record["source_type"]) != agentmodel.SkillSourceTypeBuiltin {
-		panicAgentField("form.install_path", "安装目录不能为空。")
-	}
-	defaultInt16Field(record, "status", defaultAgentStatus, partial)
-	defaultIntField(record, "sort", defaultAgentSort, partial)
-	return record
-}
 
 func (AgentHook) ProviderBeforeSaveSkillDisplay(c *server.Context, params []any) any {
 	record := cloneAgentRecord(params)
@@ -82,12 +29,20 @@ func (AgentHook) ProviderBeforeSaveSkillDisplay(c *server.Context, params []any)
 	if cateID == 0 {
 		panicAgentField("form.cate_id", "技能分类不能为空。")
 	}
+	if c != nil {
+		if err := skillservice.RequireActiveCate(c.Context(), cateID); err != nil {
+			panicAgentField("form.cate_id", err.Error())
+		}
+	}
 	displayName := util.ToStringTrimmed(record["display_name"])
 	if displayName == "" && c != nil {
 		if skill := agentmodel.NewSkillModel().Find(c.Context(), map[string]any{"id": id}); skill != nil {
 			displayName = strings.TrimSpace(skill.Name)
 		}
 	}
+	validateSkillDisplayField("form.display_name", "展示标题", displayName, 128)
+	validateSkillDisplayField("form.display_icon", "展示图标", util.ToStringTrimmed(record["display_icon"]), 64)
+	validateSkillDisplayField("form.display_description", "展示描述", util.ToStringTrimmed(record["display_description"]), 512)
 	result := map[string]any{
 		"_partial":            true,
 		"id":                  id,
@@ -97,6 +52,25 @@ func (AgentHook) ProviderBeforeSaveSkillDisplay(c *server.Context, params []any)
 		"display_description": util.ToStringTrimmed(record["display_description"]),
 	}
 	return result
+}
+
+func (AgentHook) ProviderBeforeSaveSkillCate(_ *server.Context, params []any) any {
+	record := cloneAgentRecord(params)
+	if len(record) == 0 {
+		return record
+	}
+	partial := isPartialAgentRecord(record)
+	trimStringField(record, "name", partial)
+	if shouldNormalizeField(record, "name", partial) {
+		name := util.ToStringTrimmed(record["name"])
+		if name == "" {
+			panicAgentField("form.name", "技能分类名称不能为空。")
+		}
+		validateSkillDisplayField("form.name", "技能分类名称", name, 128)
+	}
+	defaultInt16Field(record, "status", defaultAgentStatus, partial)
+	defaultIntField(record, "sort", defaultAgentSort, partial)
+	return record
 }
 
 func (AgentHook) ProviderBeforeDeleteSkill(c *server.Context, params []any) any {
@@ -117,19 +91,62 @@ func (AgentHook) ProviderBeforeDeleteSkill(c *server.Context, params []any) any 
 			panicAgentField("table.id", "内置技能不能删除。")
 		}
 	}
+	if pending := agentmodel.NewSkillDraftModel().Find(c.Context(), map[string]any{
+		"source_skill_id": idValues,
+		"status":          agentmodel.SkillDraftStatusDraft,
+	}); pending != nil {
+		panicAgentField("table.id", "技能存在未发布版本，请先发布或删除对应草稿。")
+	}
+	if hasActiveSkillInstall(c.Context(), idValues) {
+		panicAgentField("table.id", "技能正在安装或更新，请等待任务结束或先取消安装。")
+	}
 	record["id"] = idValues
 	record[skillDeletePathsKey] = skillInstallPaths(skills)
-	agentmodel.NewSkillPackItemModel().Delete(c.Context(), map[string]any{"skill_id": idValues})
-	agentmodel.NewSkillConfigBindModel().Delete(c.Context(), map[string]any{"skill_id": idValues})
-	agentmodel.NewSkillConfigModel().Delete(c.Context(), map[string]any{"skill_id": idValues})
 	return record
 }
 
-func (AgentHook) ProviderAfterDeleteSkill(_ *server.Context, params []any) any {
+func (AgentHook) ProviderBeforeDeleteSkillDraft(c *server.Context, params []any) any {
+	record := cloneAgentRecord(params)
+	ids := normalizeAgentUint64List(record["id"])
+	if len(ids) == 0 {
+		return record
+	}
+	idValues := uint64IDsToAny(ids)
+	if c != nil && agentmodel.NewSkillDraftModel().Find(c.Context(), map[string]any{
+		"id": idValues, "status": agentmodel.SkillDraftStatusPublished,
+	}) != nil {
+		panicAgentField("table.id", "已发布草稿是正式技能的来源记录，不能删除。")
+	}
+	record["id"] = idValues
+	return record
+}
+
+func hasActiveSkillInstall(ctx context.Context, skillIDs []any) bool {
+	statuses := []any{
+		agentmodel.SkillInstallStatusPending,
+		agentmodel.SkillInstallStatusInstalling,
+		agentmodel.SkillInstallStatusFinalizing,
+	}
+	model := agentmodel.NewSkillInstallModel()
+	for _, field := range []string{"target_skill_id", "skill_id"} {
+		if model.Find(ctx, map[string]any{field: skillIDs, "status": statuses}) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (AgentHook) ProviderAfterDeleteSkill(c *server.Context, params []any) any {
 	payload := cloneAgentRecord(params)
 	record, _ := payload["payload"].(map[string]any)
 	if len(record) == 0 {
 		record = payload
+	}
+	skillIDs := normalizeAgentUint64List(record["id"])
+	if c != nil && len(skillIDs) > 0 {
+		idValues := uint64IDsToAny(skillIDs)
+		agentmodel.NewSkillPackItemModel().Delete(c.Context(), map[string]any{"skill_id": idValues})
+		agentmodel.NewSkillConfigModel().Delete(c.Context(), map[string]any{"skill_id": idValues})
 	}
 	removeSkillInstallPaths(normalizeAgentStringList(record[skillDeletePathsKey]))
 	return nil
@@ -147,6 +164,18 @@ func (AgentHook) ProviderBeforeSaveSkillPack(_ *server.Context, params []any) an
 	if !partial && record["name"] == "" {
 		panicAgentField("form.name", "技能方案名称不能为空。")
 	}
+	if shouldNormalizeField(record, "name", partial) {
+		name := util.ToStringTrimmed(record["name"])
+		if name == "" {
+			panicAgentField("form.name", "技能方案名称不能为空。")
+		}
+		validateSkillDisplayField("form.name", "技能方案名称", name, 128)
+	}
+	if shouldNormalizeField(record, "description", partial) {
+		if err := skillservice.ValidateStoredBytes("技能方案描述", util.ToStringTrimmed(record["description"]), 16*1024); err != nil {
+			panicAgentField("form.description", err.Error())
+		}
+	}
 	defaultInt16FieldOnCreateOrPresent(record, "status", defaultAgentStatus, partial)
 	defaultIntFieldOnCreateOrPresent(record, "sort", defaultAgentSort, partial)
 	if rawItems, exists := record["items"]; exists {
@@ -155,7 +184,13 @@ func (AgentHook) ProviderBeforeSaveSkillPack(_ *server.Context, params []any) an
 	return record
 }
 
-func (AgentHook) ProviderBeforeSaveSkillPackItem(_ *server.Context, params []any) any {
+func validateSkillDisplayField(field string, label string, value string, limit int) {
+	if err := skillservice.ValidateStoredText(label, value, limit); err != nil {
+		panicAgentField(field, err.Error())
+	}
+}
+
+func (AgentHook) ProviderBeforeSaveSkillPackItem(c *server.Context, params []any) any {
 	record := cloneAgentRecord(params)
 	if len(record) == 0 {
 		return record
@@ -167,9 +202,55 @@ func (AgentHook) ProviderBeforeSaveSkillPackItem(_ *server.Context, params []any
 	if !partial && util.ToUint64(record["skill_id"]) == 0 {
 		panicAgentField("form.skill_id", "技能不能为空。")
 	}
+	if c != nil && shouldValidateSkillPackItem(record, partial) {
+		packID, skillID := skillPackItemIdentity(c, record)
+		if err := skillservice.RequireActivePack(c.Context(), packID); err != nil {
+			panicAgentField("form.pack_id", err.Error())
+		}
+		if err := skillservice.RequireActiveSkill(c.Context(), skillID); err != nil {
+			panicAgentField("form.skill_id", err.Error())
+		}
+	}
 	defaultInt16Field(record, "status", defaultAgentStatus, partial)
 	defaultIntField(record, "sort", defaultAgentSort, partial)
 	return record
+}
+
+func shouldValidateSkillPackItem(record map[string]any, partial bool) bool {
+	if !partial {
+		return true
+	}
+	if _, exists := record["pack_id"]; exists {
+		return true
+	}
+	if _, exists := record["skill_id"]; exists {
+		return true
+	}
+	status, exists := record["status"]
+	return exists && int16(util.ToInt64(status)) == defaultAgentStatus
+}
+
+func skillPackItemIdentity(c *server.Context, record map[string]any) (uint64, uint64) {
+	packID := util.ToUint64(record["pack_id"])
+	skillID := util.ToUint64(record["skill_id"])
+	if packID > 0 && skillID > 0 {
+		return packID, skillID
+	}
+	id := util.ToUint64(record["id"])
+	if id == 0 {
+		return packID, skillID
+	}
+	row := agentmodel.NewSkillPackItemModel().Find(c.Context(), map[string]any{"id": id})
+	if row == nil {
+		return packID, skillID
+	}
+	if packID == 0 {
+		packID = row.PackID
+	}
+	if skillID == 0 {
+		skillID = row.SkillID
+	}
+	return packID, skillID
 }
 
 func (AgentHook) ProviderAttachSkillPackItemList(c *server.Context, params []any) any {
@@ -326,7 +407,9 @@ func skillDraftRowMap(row *agentmodel.SkillDraft) map[string]any {
 		"files_json":        row.FilesJSON,
 		"manifest":          row.Manifest,
 		"validation_result": row.ValidationResult,
+		"version":           row.Version,
 		"created_at":        row.CreatedAt,
+		"updated_at":        row.UpdatedAt,
 	}
 }
 
@@ -368,11 +451,10 @@ func skillInstallPaths(skills []*agentmodel.Skill) []string {
 func skillInstallPath(skill *agentmodel.Skill) string {
 	path := strings.TrimSpace(skill.InstallPath)
 	if path == "" {
-		key := skillservice.NormalizeKey(skill.Key)
-		if key == "" {
-			return ""
-		}
-		path = filepath.Join(skillservice.Root, key)
+		return ""
+	}
+	if root := skillservice.SkillRemovalPath(skill.Key, path); root != "" {
+		path = root
 	}
 	return cleanSkillInstallPath(path)
 }
@@ -384,7 +466,9 @@ func removeSkillInstallPaths(paths []string) {
 			continue
 		}
 		if err := os.RemoveAll(path); err != nil {
-			panic("删除技能目录失败: " + err.Error())
+			dlog.ErrorFields("skill_directory_cleanup", "删除技能目录失败", dlog.Fields{
+				"path": path, "error": err.Error(),
+			})
 		}
 	}
 }
@@ -395,7 +479,7 @@ func cleanSkillInstallPath(path string) string {
 		return ""
 	}
 	cleaned := filepath.Clean(path)
-	if cleaned == filepath.Clean(skillservice.Root) || !skillservice.IsSafePath(cleaned) {
+	if cleaned == filepath.Clean(skillservice.Root) || skillservice.ValidateInstallRoot(cleaned) != nil {
 		return ""
 	}
 	return cleaned

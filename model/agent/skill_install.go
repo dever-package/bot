@@ -9,8 +9,10 @@ import (
 const (
 	SkillInstallStatusPending    = "pending"
 	SkillInstallStatusInstalling = "installing"
+	SkillInstallStatusFinalizing = "finalizing"
 	SkillInstallStatusSuccess    = "success"
 	SkillInstallStatusFail       = "failed"
+	SkillInstallStatusCanceled   = "canceled"
 )
 
 type SkillInstall struct {
@@ -21,6 +23,7 @@ type SkillInstall struct {
 	InstallInput  string     `dorm:"type:text;not null;comment:安装输入"`
 	Status        string     `dorm:"type:varchar(32);not null;default:'pending';comment:安装状态"`
 	SkillID       uint64     `dorm:"type:bigint;not null;default:0;comment:技能"`
+	TargetSkillID uint64     `dorm:"type:bigint;not null;default:0;comment:更新目标技能"`
 	RequestID     string     `dorm:"type:varchar(64);not null;default:'';comment:请求ID"`
 	TargetPath    string     `dorm:"type:varchar(512);not null;default:'';comment:目标目录"`
 	Plan          string     `dorm:"type:text;not null;default:'';comment:安装计划"`
@@ -36,6 +39,7 @@ type SkillInstallIndex struct {
 	StatusCreated struct{} `index:"status,created_at"`
 	RequestID     struct{} `index:"request_id"`
 	SkillCreated  struct{} `index:"skill_id,created_at"`
+	TargetSkill   struct{} `index:"target_skill_id,created_at"`
 	PackCreated   struct{} `index:"target_pack_id,created_at"`
 }
 
@@ -43,8 +47,10 @@ var (
 	skillInstallStatusOptions = []map[string]any{
 		{"id": SkillInstallStatusPending, "value": "等待安装"},
 		{"id": SkillInstallStatusInstalling, "value": "安装中"},
+		{"id": SkillInstallStatusFinalizing, "value": "提交中"},
 		{"id": SkillInstallStatusSuccess, "value": "成功"},
 		{"id": SkillInstallStatusFail, "value": "失败"},
+		{"id": SkillInstallStatusCanceled, "value": "已取消"},
 	}
 
 	skillInstallCateRelation = orm.Relation{

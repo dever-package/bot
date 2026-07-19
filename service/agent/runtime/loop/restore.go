@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
+	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
@@ -122,23 +124,78 @@ func (s Service) Execute(ctx context.Context, lease runtimequeue.Lease) error {
 	return nil
 }
 
-func restoreLoadedSkills(ctx context.Context, registry *runtimetool.Registry, keys []string, requestID string) error {
-	for _, key := range keys {
-		key = strings.TrimSpace(key)
+func restoreLoadedSkills(
+	ctx context.Context,
+	registry *runtimetool.Registry,
+	references []agentmodel.LoadedSkillRef,
+	history []any,
+	requestID string,
+) ([]agentmodel.LoadedSkillRef, []any, error) {
+	restored := make([]agentmodel.LoadedSkillRef, 0, len(references))
+	addedHistory := make([]any, 0, len(references)*2)
+	for _, reference := range agentmodel.NormalizeLoadedSkillRefs(references) {
+		key := strings.TrimSpace(reference.Key)
 		if key == "" {
 			continue
 		}
+		arguments := map[string]any{"key": key}
+		if loadedSkillHistoryCurrent(history, reference) {
+			arguments[runtimeprovider.SkillRestoreContentHashArgument] = reference.ContentHash
+		}
 		call := botprotocol.ToolCall{
-			ID:        "restore_" + strings.ReplaceAll(uuid.NewSHA1(uuid.NameSpaceOID, []byte(requestID+":"+key)).String(), "-", ""),
+			ID:        "restore_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
 			Type:      "function",
 			Name:      "load_skill",
-			Arguments: encodeJSON(map[string]any{"key": key}, "{}"),
+			Arguments: encodeJSON(arguments, "{}"),
 		}
-		if _, err := registry.Execute(ctx, call, call.ID, nil); err != nil {
-			return fmt.Errorf("恢复技能 %s 失败: %w", key, err)
+		result, err := registry.Execute(ctx, call, requestID, nil)
+		if err != nil {
+			return nil, nil, fmt.Errorf("恢复技能 %s 失败: %w", key, err)
 		}
+		current := agentmodel.LoadedSkillRef{
+			Key:         key,
+			ContentHash: toolResultText(result.Content, "content_hash"),
+		}
+		restored = append(restored, current)
+		if loadedSkillHistoryCurrent(history, current) {
+			continue
+		}
+		historyCall := call
+		historyCall.Arguments = encodeJSON(map[string]any{"key": key}, "{}")
+		addedHistory = append(addedHistory,
+			assistantToolHistoryMessage("", []botprotocol.ToolCall{historyCall}),
+			toolHistoryMessage(historyCall, result.ModelContent()),
+		)
 	}
-	return nil
+	return agentmodel.NormalizeLoadedSkillRefs(restored), addedHistory, nil
+}
+
+func loadedSkillHistoryCurrent(history []any, reference agentmodel.LoadedSkillRef) bool {
+	if strings.TrimSpace(reference.ContentHash) == "" {
+		return false
+	}
+	for index := len(history) - 1; index >= 0; index-- {
+		message, ok := history[index].(map[string]any)
+		if !ok || historyMessageRole(message) != "tool" || toolResultText(message, "name") != "load_skill" {
+			continue
+		}
+		content := toolResultText(message, "content")
+		var payload map[string]any
+		if json.Unmarshal([]byte(content), &payload) != nil {
+			continue
+		}
+		result, _ := payload["result"].(map[string]any)
+		if !strings.EqualFold(toolResultText(result, "key"), reference.Key) {
+			continue
+		}
+		return toolResultText(result, "content_hash") == reference.ContentHash
+	}
+	return false
+}
+
+func toolResultText(value any, key string) string {
+	mapped, _ := value.(map[string]any)
+	return strings.TrimSpace(botprotocol.AsText(mapped[key]))
 }
 
 func (s Service) heartbeatRun(controller *runController, execution execution, done <-chan struct{}) {

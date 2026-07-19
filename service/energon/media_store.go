@@ -2,7 +2,6 @@ package energon
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"mime"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 	"strings"
 
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
 	frontupload "github.com/dever-package/front/service/upload"
 	uploadrepo "github.com/dever-package/front/service/upload/repository"
 )
@@ -47,10 +47,22 @@ func (s GatewayService) storeGeneratedMediaOutput(
 	if !exists {
 		return value, nil
 	}
-	output := botprotocol.ExtractOutput(value)
-	media := botprotocol.NormalizeMediaList(output[rule.key], rule.kind)
-	if len(media) == 0 {
-		return value, nil
+	binaryPayload, hasBinaryPayload := botprovider.AsBinaryPayload(value)
+	output := botprotocol.Output{}
+	media := []string(nil)
+	if hasBinaryPayload {
+		if len(binaryPayload.Content) == 0 {
+			return nil, fmt.Errorf("生成%s为空", botprotocol.MediaOutputLabel(rule.kind))
+		}
+		if len(binaryPayload.Meta) > 0 {
+			output["meta"] = binaryPayload.Meta
+		}
+	} else {
+		output = botprotocol.ExtractOutput(value)
+		media = botprotocol.NormalizeMediaList(output[rule.key], rule.kind)
+		if len(media) == 0 {
+			return value, nil
+		}
 	}
 	if onOutput != nil {
 		if err := onOutput(botprotocol.Output{
@@ -61,13 +73,34 @@ func (s GatewayService) storeGeneratedMediaOutput(
 		}
 	}
 
-	stored := make([]string, 0, len(media))
-	files := make([]map[string]any, 0, len(media))
-	for index, source := range media {
-		payload, err := storeGeneratedMedia(ctx, requestID, rule, source, index)
+	payloadCapacity := len(media)
+	if payloadCapacity == 0 {
+		payloadCapacity = 1
+	}
+	payloads := make([]map[string]any, 0, payloadCapacity)
+	if hasBinaryPayload {
+		payload, err := storeGeneratedBinaryMedia(ctx, requestID, rule, binaryPayload, 0)
 		if err != nil {
 			return nil, fmt.Errorf("保存%s失败: %w", botprotocol.MediaOutputLabel(rule.kind), err)
 		}
+		payloads = append(payloads, payload)
+	} else {
+		for index, source := range media {
+			payload, err := storeGeneratedMedia(ctx, requestID, rule, source, index)
+			if err != nil {
+				return nil, fmt.Errorf("保存%s失败: %w", botprotocol.MediaOutputLabel(rule.kind), err)
+			}
+			payloads = append(payloads, payload)
+		}
+	}
+
+	return buildStoredMediaOutput(output, rule, payloads)
+}
+
+func buildStoredMediaOutput(output botprotocol.Output, rule generatedMediaRule, payloads []map[string]any) (botprotocol.Output, error) {
+	stored := make([]string, 0, len(payloads))
+	files := make([]map[string]any, 0, len(payloads))
+	for _, payload := range payloads {
 		fileURL := strings.TrimSpace(botprotocol.AsText(payload["url"]))
 		if fileURL == "" {
 			return nil, fmt.Errorf("保存%s后未返回文件地址", botprotocol.MediaOutputLabel(rule.kind))
@@ -97,6 +130,14 @@ func generatedMediaRuleForKind(kind string) (generatedMediaRule, bool) {
 	return rule, exists
 }
 
+func storeGeneratedBinaryMedia(ctx context.Context, requestID string, rule generatedMediaRule, payload botprovider.BinaryPayload, index int) (map[string]any, error) {
+	if len(payload.Content) == 0 {
+		return nil, fmt.Errorf("生成结果为空")
+	}
+	mimeType := detectGeneratedMediaMIME(payload.Content, payload.MIME)
+	return importGeneratedMediaContent(ctx, requestID, rule, payload.Content, mimeType, index)
+}
+
 func storeGeneratedMedia(ctx context.Context, requestID string, rule generatedMediaRule, value string, index int) (map[string]any, error) {
 	content, mimeType, decoded, err := decodeGeneratedMedia(value)
 	if err != nil {
@@ -104,19 +145,7 @@ func storeGeneratedMedia(ctx context.Context, requestID string, rule generatedMe
 	}
 	if decoded {
 		mimeType = detectGeneratedMediaMIME(content, mimeType)
-		file, err := frontupload.ImportFile(ctx, frontupload.ImportFileInput{
-			RuleID:  rule.ruleID,
-			Kind:    rule.kind,
-			Name:    generatedMediaName(requestID, rule.kind, mimeType, index),
-			Mime:    mimeType,
-			Content: content,
-			BizKey:  generatedMediaBizKey,
-			BizName: "AI生成",
-		})
-		if err != nil {
-			return nil, err
-		}
-		return uploadrepo.BuildUploadFilePayload(file), nil
+		return importGeneratedMediaContent(ctx, requestID, rule, content, mimeType, index)
 	}
 
 	parsed, err := url.Parse(strings.TrimSpace(value))
@@ -137,6 +166,22 @@ func storeGeneratedMedia(ctx context.Context, requestID string, rule generatedMe
 	})
 }
 
+func importGeneratedMediaContent(ctx context.Context, requestID string, rule generatedMediaRule, content []byte, mimeType string, index int) (map[string]any, error) {
+	file, err := frontupload.ImportFile(ctx, frontupload.ImportFileInput{
+		RuleID:  rule.ruleID,
+		Kind:    rule.kind,
+		Name:    generatedMediaName(requestID, rule.kind, mimeType, index),
+		Mime:    mimeType,
+		Content: content,
+		BizKey:  generatedMediaBizKey,
+		BizName: "AI生成",
+	})
+	if err != nil {
+		return nil, err
+	}
+	return uploadrepo.BuildUploadFilePayload(file), nil
+}
+
 func decodeGeneratedMedia(value string) ([]byte, string, bool, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -147,7 +192,7 @@ func decodeGeneratedMedia(value string) ([]byte, string, bool, error) {
 		if !found || !strings.Contains(strings.ToLower(header), ";base64") {
 			return nil, "", true, fmt.Errorf("不支持的 data URL")
 		}
-		content, err := decodeBase64Content(encoded)
+		content, err := botprotocol.DecodeBase64Content(encoded)
 		if err != nil {
 			return nil, "", true, fmt.Errorf("素材数据格式错误: %w", err)
 		}
@@ -157,19 +202,11 @@ func decodeGeneratedMedia(value string) ([]byte, string, bool, error) {
 	if strings.Contains(value, "://") || len(value) < 256 {
 		return nil, "", false, nil
 	}
-	content, err := decodeBase64Content(value)
+	content, err := botprotocol.DecodeBase64Content(value)
 	if err != nil {
 		return nil, "", false, nil
 	}
 	return content, "", true, nil
-}
-
-func decodeBase64Content(value string) ([]byte, error) {
-	value = strings.NewReplacer("\n", "", "\r", "", " ", "", "\t", "").Replace(value)
-	if content, err := base64.StdEncoding.DecodeString(value); err == nil {
-		return content, nil
-	}
-	return base64.RawStdEncoding.DecodeString(strings.TrimRight(value, "="))
 }
 
 func detectGeneratedMediaMIME(content []byte, fallback string) string {
@@ -205,7 +242,7 @@ func generatedMediaExtension(mimeType string) string {
 		return ".mp4"
 	case "audio/mpeg":
 		return ".mp3"
-	case "audio/wav", "audio/x-wav":
+	case "audio/wav", "audio/wave", "audio/x-wav":
 		return ".wav"
 	}
 	extensions, _ := mime.ExtensionsByType(mimeType)

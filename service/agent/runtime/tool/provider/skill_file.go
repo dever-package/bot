@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,7 @@ func listSkillFilesTool(loaded map[string]agentskill.Entry) Tool {
 				return Result{}, err
 			}
 			files := make([]map[string]any, 0)
+			truncated := false
 			rootDepth := pathDepth(base)
 			err = filepath.WalkDir(base, func(path string, item os.DirEntry, walkErr error) error {
 				if walkErr != nil {
@@ -49,7 +51,11 @@ func listSkillFilesTool(loaded map[string]agentskill.Entry) Tool {
 					}
 					return nil
 				}
-				if pathDepth(path)-rootDepth > maxSkillListDepth || len(files) >= maxSkillFiles {
+				if len(files) >= maxSkillFiles {
+					truncated = true
+					return fs.SkipAll
+				}
+				if pathDepth(path)-rootDepth > maxSkillListDepth {
 					if item.IsDir() {
 						return filepath.SkipDir
 					}
@@ -70,21 +76,32 @@ func listSkillFilesTool(loaded map[string]agentskill.Entry) Tool {
 				return Result{}, err
 			}
 			content := map[string]any{
-				"skill": entry.Key, "path": relativeBase, "files": files, "truncated": len(files) >= maxSkillFiles,
+				"skill": entry.Key, "path": relativeBase, "files": files, "truncated": truncated,
 			}
 			return Result{Text: fmt.Sprintf("已列出 %d 个技能文件", len(files)), Content: content}, nil
 		},
 	}
 }
 
-func readSkillFileTool(loaded map[string]agentskill.Entry) Tool {
+func readSkillFileTool(loaded map[string]agentskill.Entry, maxBytes int64, budget *skillContentBudget) Tool {
+	if maxBytes <= 0 {
+		maxBytes = maxSkillFileBytes
+	}
 	return Tool{
 		Definition: Definition{
 			Name:        "read_skill_file",
-			Description: "读取已加载技能目录中的文本文件。",
+			Description: "按字符分页读取已加载技能的文本文件；eof=false 时使用返回的 next_offset 继续读取。",
 			Parameters: objectParameters(map[string]any{
 				"skill": skillProperty(),
 				"path":  map[string]any{"type": "string", "description": "文件相对路径"},
+				"offset": map[string]any{
+					"type": "integer", "minimum": 0,
+					"description": "字符偏移，首次为 0，后续使用上次返回的 next_offset",
+				},
+				"limit": map[string]any{
+					"type": "integer", "minimum": 1, "maximum": agentskill.DefaultContentPageRunes,
+					"description": "本次最多读取字符数",
+				},
 			}, "path"),
 		},
 		Handle: func(_ context.Context, call Call) (Result, error) {
@@ -109,13 +126,36 @@ func readSkillFileTool(loaded map[string]agentskill.Entry) Tool {
 			if info.IsDir() {
 				return Result{}, fmt.Errorf("不能读取目录: %s", relative)
 			}
-			content, truncated, err := readLimitedFile(path, maxSkillFileBytes)
+			content, truncated, err := readLimitedFile(path, maxBytes)
 			if err != nil {
 				return Result{}, err
 			}
+			content, valid := agentskill.UTF8Prefix(content, truncated)
+			if !valid {
+				return Result{}, fmt.Errorf("技能文件不是 UTF-8 文本: %s", relative)
+			}
 			text := string(content)
-			return Result{Text: text, Content: map[string]any{
-				"skill": entry.Key, "path": relative, "size": info.Size(), "content": text, "truncated": truncated,
+			if filepath.ToSlash(relative) == skillEntryFile(entry) {
+				_, body := agentskill.SplitFrontMatter(text)
+				if strings.TrimSpace(body) != "" {
+					text = body
+				}
+			}
+			page, remaining, err := budget.paginate(
+				text,
+				ArgumentInt(call.Arguments, "offset", 0),
+				ArgumentInt(call.Arguments, "limit", agentskill.DefaultContentPageRunes),
+			)
+			if err != nil {
+				return Result{}, err
+			}
+			return Result{Text: fmt.Sprintf("已读取技能文件 %s（%d/%d）", relative, page.NextOffset, page.TotalRunes), Content: map[string]any{
+				"skill": entry.Key, "content_hash": entry.ContentHash,
+				"path": relative, "size": info.Size(), "content": page.Content,
+				"offset": page.Offset, "next_offset": page.NextOffset,
+				"total_runes": page.TotalRunes, "eof": page.EOF,
+				"remaining_runes":  remaining,
+				"source_truncated": truncated,
 			}}, nil
 		},
 	}
@@ -125,6 +165,9 @@ func safeSkillPath(entry agentskill.Entry, requested string) (string, string, er
 	root := strings.TrimSpace(entry.InstallPath)
 	if root == "" {
 		return "", "", fmt.Errorf("技能 %s 没有安装目录", entry.Key)
+	}
+	if err := agentskill.ValidateInstallRoot(root); err != nil {
+		return "", "", fmt.Errorf("技能 %s 安装目录不安全: %w", entry.Key, err)
 	}
 	return safeRelativePath(root, requested)
 }

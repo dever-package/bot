@@ -16,12 +16,18 @@ func Lock(ctx context.Context, key string) (func(), error) {
 	if key == "" {
 		return nil, fmt.Errorf("技能标识不能为空")
 	}
+	if err := EnsureRoot(); err != nil {
+		return nil, err
+	}
 	lockDir := filepath.Join(Root, ".locks")
-	if !IsSafePath(lockDir) {
-		return nil, fmt.Errorf("技能锁目录不安全")
+	if err := ValidateInstallTarget(lockDir); err != nil {
+		return nil, fmt.Errorf("技能锁目录不安全: %w", err)
 	}
 	if err := os.MkdirAll(lockDir, 0o755); err != nil {
 		return nil, err
+	}
+	if err := ValidateInstallRoot(lockDir); err != nil {
+		return nil, fmt.Errorf("技能锁目录不安全: %w", err)
 	}
 	file, err := os.OpenFile(filepath.Join(lockDir, key+".lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {

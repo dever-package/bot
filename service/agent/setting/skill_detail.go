@@ -3,6 +3,7 @@ package setting
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -84,8 +85,8 @@ func scanSkillInstallFiles(installPath string) (string, []map[string]any) {
 	if root == "" || root == "." {
 		return "", []map[string]any{}
 	}
-	if !skillservice.IsSafePath(root) {
-		return "安装目录不在 data/skills 下，已跳过扫描。", []map[string]any{}
+	if err := skillservice.ValidateInstallRoot(root); err != nil {
+		return "安装目录不安全，已跳过扫描。", []map[string]any{}
 	}
 	info, err := os.Stat(root)
 	if err != nil {
@@ -117,11 +118,11 @@ func scanSkillInstallFiles(installPath string) (string, []map[string]any) {
 
 func readSkillSourceMeta(installPath string) string {
 	root := filepath.Clean(strings.TrimSpace(installPath))
-	if root == "" || root == "." || !skillservice.IsSafePath(root) {
+	if root == "" || root == "." || skillservice.ValidateInstallRoot(root) != nil {
 		return ""
 	}
-	path := filepath.Join(root, "_meta.json")
-	if !skillservice.IsSafePath(path) {
+	path, _, err := skillservice.ResolveRelativePath(root, "_meta.json")
+	if err != nil {
 		return ""
 	}
 	info, err := os.Stat(path)
@@ -175,7 +176,10 @@ func (scanner *skillFileScanner) walkKnownDirs() {
 }
 
 func (scanner *skillFileScanner) walkDir(relative string, kind string) {
-	dir := filepath.Join(scanner.root, relative)
+	dir, _, resolveErr := skillservice.ResolveRelativePath(scanner.root, relative)
+	if resolveErr != nil {
+		return
+	}
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() {
 		return
@@ -186,6 +190,9 @@ func (scanner *skillFileScanner) walkDir(relative string, kind string) {
 		}
 		if path == dir {
 			return nil
+		}
+		if scanner.truncated {
+			return fs.SkipAll
 		}
 		name := entry.Name()
 		if entry.IsDir() {
@@ -199,6 +206,9 @@ func (scanner *skillFileScanner) walkDir(relative string, kind string) {
 			return nil
 		}
 		scanner.add(rel, kind)
+		if scanner.truncated {
+			return fs.SkipAll
+		}
 		return nil
 	})
 }
@@ -212,15 +222,15 @@ func (scanner *skillFileScanner) add(relative string, kind string) {
 	if relative == "" || relative == "." || strings.HasPrefix(relative, "..") {
 		return
 	}
-	path := filepath.Join(scanner.root, relative)
-	if !skillservice.IsSafePath(path) {
+	path, normalized, err := skillservice.ResolveRelativePath(scanner.root, relative)
+	if err != nil {
 		return
 	}
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
 		return
 	}
-	displayPath := filepath.ToSlash(relative)
+	displayPath := filepath.ToSlash(normalized)
 	if _, exists := scanner.seen[displayPath]; exists {
 		return
 	}

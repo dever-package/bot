@@ -30,6 +30,7 @@ func (Workbench) GetPowerForm(c *server.Context) error {
 		botapi.QueryUint64(c, "team_id", "teamId"),
 		botapi.QueryUint64(c, "team_power_id", "teamPowerId", "id"),
 		botapi.QueryUint64(c, "source_target_id", "sourceTargetId", "target_id", "targetId"),
+		botapi.QueryUint64(c, "target_asset_id", "targetAssetId"),
 	)
 	return botapi.WriteJSON(c, data, err)
 }
@@ -44,6 +45,7 @@ func (Workbench) PostPowerRun(c *server.Context) error {
 		TeamPowerID:    botapi.Uint64FromBody(body, "team_power_id", "teamPowerId", "id"),
 		SourceTargetID: botapi.Uint64FromBody(body, "source_target_id", "sourceTargetId", "target_id", "targetId"),
 		TargetAssetID:  botapi.Uint64FromBody(body, "target_asset_id", "targetAssetId"),
+		ParamsComplete: botapi.BoolFromBody(body, "params_complete", "paramsComplete"),
 		Input:          map[string]any{},
 		Params:         botapi.MapFromBody(body, "input"),
 	})
@@ -97,6 +99,25 @@ func (Workbench) GetPowerStatus(c *server.Context) error {
 		botapi.QueryUint64(c, "team_id", "teamId"),
 		botapi.QueryUint64(c, "run_id", "runId", "id"),
 		botapi.QueryText(c, "request_id", "requestId"),
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Workbench) GetPowerHistory(c *server.Context) error {
+	data, err := workbenchRunner.PowerHistory(c.Context(), workbenchservice.PowerHistoryListRequest{
+		TeamID:      botapi.QueryUint64(c, "team_id", "teamId"),
+		TeamPowerID: botapi.QueryUint64(c, "team_power_id", "teamPowerId"),
+		BeforeID:    botapi.QueryUint64(c, "before_id", "beforeId"),
+		Limit:       int(botapi.QueryUint64(c, "limit")),
+	})
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Workbench) GetPowerHistoryDetail(c *server.Context) error {
+	data, err := workbenchRunner.PowerHistoryDetail(
+		c.Context(),
+		botapi.QueryUint64(c, "team_id", "teamId"),
+		botapi.QueryUint64(c, "history_id", "historyId", "id"),
 	)
 	return botapi.WriteJSON(c, data, err)
 }

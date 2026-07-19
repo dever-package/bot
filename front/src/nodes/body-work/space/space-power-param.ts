@@ -1,4 +1,4 @@
-import type { PowerParam } from "./types";
+import type { PowerParam, PowerParamOption } from "./types";
 
 export function defaultPowerParamValue(param: PowerParam) {
   const raw = param.default_value ?? "";
@@ -14,7 +14,7 @@ export function defaultPowerParamValue(param: PowerParam) {
   if (param.type === "option" || param.type === "select") {
     return normalizePowerParamScalarValue(
       param,
-      raw || param.options?.[0]?.value || "",
+      raw || powerParamOptionValue(param.options?.[0]) || "",
     );
   }
   return normalizePowerParamScalarValue(param, raw);
@@ -48,6 +48,31 @@ export function normalizePowerParamValue(param: PowerParam, value: unknown) {
         normalizePowerParamScalarValue(param, item),
       )
     : normalizePowerParamScalarValue(param, value);
+}
+
+export function powerParamOptionValue(option?: PowerParamOption) {
+  if (!option) {
+    return "";
+  }
+  return (
+    String(option.native_value || "").trim() ||
+    String(option.value || "").trim() ||
+    String(option.name || "").trim() ||
+    String(option.id || "")
+  );
+}
+
+export function isPowerParamOptionSelected(
+  option: PowerParamOption,
+  values: string[],
+) {
+  const candidates = [
+    String(option.id || ""),
+    String(option.native_value || "").trim(),
+    String(option.value || "").trim(),
+    String(option.name || "").trim(),
+  ].filter(Boolean);
+  return values.some((value) => candidates.includes(String(value).trim()));
 }
 
 function parseJSONValue(value: unknown) {

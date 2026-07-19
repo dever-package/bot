@@ -9,6 +9,11 @@ import (
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
+const (
+	maxCurlCommandBytes = 64 * 1024
+	maxCurlFields       = 256
+)
+
 func curlRequestTool(loaded map[string]agentskill.Entry) Tool {
 	return Tool{
 		Definition: Definition{
@@ -42,6 +47,9 @@ func curlRequestTool(loaded map[string]agentskill.Entry) Tool {
 }
 
 func parseCurl(raw string) (httpRequestSpec, error) {
+	if len([]byte(raw)) > maxCurlCommandBytes {
+		return httpRequestSpec{}, fmt.Errorf("curl 命令超过 %d 字节", maxCurlCommandBytes)
+	}
 	fields, err := splitCurl(raw)
 	if err != nil {
 		return httpRequestSpec{}, err
@@ -112,6 +120,9 @@ func parseCurl(raw string) (httpRequestSpec, error) {
 		return httpRequestSpec{}, err
 	}
 	spec.URL = parsed.String()
+	if err := validateHTTPRequestSpec(spec); err != nil {
+		return httpRequestSpec{}, err
+	}
 	return spec, nil
 }
 
@@ -132,14 +143,17 @@ func splitCurl(raw string) ([]string, error) {
 	var builder strings.Builder
 	var quote rune
 	escaped := false
+	tokenStarted := false
 	for _, current := range strings.TrimSpace(raw) {
 		if escaped {
 			builder.WriteRune(current)
 			escaped = false
+			tokenStarted = true
 			continue
 		}
 		if current == '\\' && quote != '\'' {
 			escaped = true
+			tokenStarted = true
 			continue
 		}
 		if quote != 0 {
@@ -153,15 +167,21 @@ func splitCurl(raw string) ([]string, error) {
 		switch current {
 		case '\'', '"':
 			quote = current
+			tokenStarted = true
 		case '|', ';', '<', '>', '`', '&':
 			return nil, fmt.Errorf("curl 命令包含不允许的 shell 操作符")
 		case ' ', '\t', '\r', '\n':
-			if builder.Len() > 0 {
+			if tokenStarted {
 				fields = append(fields, builder.String())
+				if len(fields) > maxCurlFields {
+					return nil, fmt.Errorf("curl 参数不能超过 %d 项", maxCurlFields)
+				}
 				builder.Reset()
+				tokenStarted = false
 			}
 		default:
 			builder.WriteRune(current)
+			tokenStarted = true
 		}
 	}
 	if escaped {
@@ -170,8 +190,11 @@ func splitCurl(raw string) ([]string, error) {
 	if quote != 0 {
 		return nil, fmt.Errorf("curl 命令引号未闭合")
 	}
-	if builder.Len() > 0 {
+	if tokenStarted {
 		fields = append(fields, builder.String())
+		if len(fields) > maxCurlFields {
+			return nil, fmt.Errorf("curl 参数不能超过 %d 项", maxCurlFields)
+		}
 	}
 	return fields, nil
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/dever-package/bot/service/agent/runtime/tool/sandbox"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
@@ -18,11 +19,40 @@ const (
 	maxScriptArgRunes = 512
 )
 
-func runtimeSkillTools(loaded map[string]agentskill.Entry, runtime SkillRuntime) []Tool {
+type skillContentBudget struct {
+	mu        sync.Mutex
+	remaining int
+}
+
+func newSkillContentBudget(limit int) *skillContentBudget {
+	if limit <= 0 {
+		limit = agentskill.DefaultLimits().LoadedContentMaxRunes
+	}
+	return &skillContentBudget{remaining: limit}
+}
+
+func (budget *skillContentBudget) paginate(content string, offset int, limit int) (agentskill.TextPage, int, error) {
+	budget.mu.Lock()
+	defer budget.mu.Unlock()
+	if budget.remaining <= 0 {
+		return agentskill.TextPage{}, 0, fmt.Errorf("本轮技能正文读取已达到累计上限")
+	}
+	if limit <= 0 || limit > budget.remaining {
+		limit = budget.remaining
+	}
+	page, err := agentskill.PaginateText(content, offset, limit)
+	if err != nil {
+		return agentskill.TextPage{}, budget.remaining, err
+	}
+	budget.remaining -= len([]rune(page.Content))
+	return page, budget.remaining, nil
+}
+
+func runtimeSkillTools(loaded map[string]agentskill.Entry, runtime SkillRuntime, limits agentskill.Limits, budget *skillContentBudget) []Tool {
 	tools := make([]Tool, 0, 8)
 	capabilities := loadedSkillCapabilities(loaded)
 	if capabilities.Has(agentskill.CapabilityFiles) {
-		tools = append(tools, listSkillFilesTool(loaded), readSkillFileTool(loaded))
+		tools = append(tools, listSkillFilesTool(loaded), readSkillFileTool(loaded, limits.SkillFileMaxBytes, budget))
 	}
 	if capabilities.Has(agentskill.CapabilityTemp) {
 		tools = append(tools, writeTempFileTool(loaded, runtime), readTempFileTool(loaded, runtime))
@@ -72,11 +102,11 @@ func skillTempRoot(runtime SkillRuntime, entry agentskill.Entry) (string, error)
 	return root, err
 }
 
-func skillSandboxConfig(entry agentskill.Entry, config sandbox.Config) sandbox.Config {
-	if !agentskill.ManifestCapabilities(entry).Has(agentskill.CapabilityNetwork) {
-		config.NetworkMode = sandbox.NetworkNone
-	}
-	return config
+func skillSandboxConfig(entry agentskill.Entry, config sandbox.Config) (sandbox.Config, error) {
+	return sandbox.IsolatedConfig(
+		config,
+		agentskill.ManifestCapabilities(entry).Has(agentskill.CapabilityNetwork),
+	)
 }
 
 func skillActivityTools(tools []Tool) []Tool {
@@ -110,6 +140,8 @@ func skillActivityTitle(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "load_skill":
 		return "技能加载"
+	case "search_skills":
+		return "技能查找"
 	case "list_skill_files":
 		return "技能目录读取"
 	case "read_skill_file", "read_temp_file":
@@ -128,21 +160,32 @@ func skillActivityTitle(name string) string {
 }
 
 func loadedSkill(loaded map[string]agentskill.Entry, arguments map[string]any) (agentskill.Entry, error) {
-	identity := agentskill.NormalizeKey(argumentText(arguments, "skill"))
-	if identity == "" && len(loaded) == 1 {
+	rawIdentity := strings.TrimSpace(argumentText(arguments, "skill"))
+	if rawIdentity == "" && len(loaded) == 1 {
 		for _, entry := range loaded {
 			return entry, nil
 		}
 	}
+	if entry, exists := loaded[rawIdentity]; exists {
+		return entry, nil
+	}
+	identity := agentskill.NormalizeKey(rawIdentity)
 	if identity == "" {
 		return agentskill.Entry{}, fmt.Errorf("工具调用需要指定已加载技能 skill")
 	}
+	matches := make([]agentskill.Entry, 0, 1)
 	for _, entry := range loaded {
 		if agentskill.NormalizeKey(entry.Key) == identity || agentskill.NormalizeKey(entry.Name) == identity {
-			return entry, nil
+			matches = append(matches, entry)
 		}
 	}
-	return agentskill.Entry{}, fmt.Errorf("技能未在本轮加载: %s", identity)
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		return agentskill.Entry{}, fmt.Errorf("技能名称存在歧义，请使用完整技能 key: %s", rawIdentity)
+	}
+	return agentskill.Entry{}, fmt.Errorf("技能未在本轮加载: %s", rawIdentity)
 }
 
 func skillProperty() map[string]any {

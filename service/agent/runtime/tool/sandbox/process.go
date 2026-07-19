@@ -21,14 +21,6 @@ func PrepareProcess(config Config, req Request, commandName string, commandArgs 
 	switch config.Driver {
 	case DriverDisabled:
 		return PreparedProcess{}, fmt.Errorf("脚本执行已被运行沙箱配置禁用")
-	case DriverLocal:
-		return PreparedProcess{
-			Runner:      DriverLocal,
-			CommandName: commandName,
-			CommandArgs: commandArgs,
-			WorkDir:     req.SkillRoot,
-			Env:         scriptEnv(req.TempRoot, req.SkillRoot, req.Env),
-		}, nil
 	case DriverBwrap:
 		bwrapPath, err := resolveBwrapPath(config.BwrapPath)
 		if err != nil {
@@ -58,14 +50,6 @@ func PrepareWorkspaceProcess(config Config, workspace string, env []string, comm
 	switch config.Driver {
 	case DriverDisabled:
 		return PreparedProcess{}, fmt.Errorf("工作区命令已被运行沙箱配置禁用")
-	case DriverLocal:
-		return PreparedProcess{
-			Runner:      DriverLocal,
-			CommandName: commandName,
-			CommandArgs: commandArgs,
-			WorkDir:     workspace,
-			Env:         env,
-		}, nil
 	case DriverBwrap:
 		bwrapPath, err := resolveBwrapPath(config.BwrapPath)
 		if err != nil {
