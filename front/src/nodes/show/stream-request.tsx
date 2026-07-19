@@ -41,8 +41,6 @@ import {
   buildDefaultParamValues,
   buildRequestInput,
   inputKeyForParam,
-  isFileParam,
-  isFilesParam,
   isHiddenParam,
   isMainParam,
   isToolbarParam,
@@ -1234,7 +1232,7 @@ function buildReplayParamFiles(
 ): ParamFileMap {
   const result: ParamFileMap = {}
   for (const param of params) {
-    if (!isFileParam(param)) {
+    if (param.type !== 'file' && param.type !== 'files') {
       continue
     }
     const key = inputKeyForParam(param)
@@ -1242,7 +1240,7 @@ function buildReplayParamFiles(
       continue
     }
     const urls = replayFileURLs(input[key])
-    const selected = isFilesParam(param) ? urls : urls.slice(0, 1)
+    const selected = param.type === 'files' ? urls : urls.slice(0, 1)
     if (selected.length === 0) {
       continue
     }
