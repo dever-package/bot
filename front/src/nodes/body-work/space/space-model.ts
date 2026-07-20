@@ -24,6 +24,7 @@ import type {
 import { assetKindLabel } from "../asset/asset-contract";
 import { DEFAULT_GROUP_NODE_SIZE } from "./space-group-model";
 import {
+  isAudioPowerType,
   isStoryboardPowerType,
   powerKindLabel,
   resolvePowerPresentation,
@@ -42,6 +43,7 @@ const freeAssetCate: AssetCate = {
 };
 
 const DEFAULT_POWER_NODE_SIZE = { width: 180, height: 180 } as const;
+const DEFAULT_AUDIO_POWER_NODE_SIZE = { width: 360, height: 64 } as const;
 const DEFAULT_STORYBOARD_NODE_SIZE = { width: 620, height: 360 } as const;
 
 export function normalizeSpaceBootstrap(value: unknown): SpaceBootstrap {
@@ -605,7 +607,7 @@ function hydrateCanvasPowers(
       }
       const outputType =
         node.outputType || node.power.outputType || current.outputType;
-      return normalizeStoryboardNodeSize({
+      return normalizePowerNodeSize({
         ...node,
         outputType,
         power: {
@@ -697,7 +699,13 @@ function normalizeCanvasNode(
     node.power = power;
     node.outputType = node.outputType || power.outputType;
   }
-  return normalizeStoryboardNodeSize(node);
+  return normalizePowerNodeSize(node);
+}
+
+function normalizePowerNodeSize(node: SpaceCanvasNode) {
+  const storyboardNode = normalizeStoryboardNodeSize(node);
+  const sizeUpgrade = audioPowerNodeSizeUpgrade(storyboardNode);
+  return sizeUpgrade ? { ...storyboardNode, ...sizeUpgrade } : storyboardNode;
 }
 
 function normalizeStoryboardNodeSize(node: SpaceCanvasNode) {
@@ -1046,21 +1054,47 @@ function nodeDefaultSize(
     case "group":
       return { ...DEFAULT_GROUP_NODE_SIZE };
     case "power":
-      if (
-        Number(power?.output?.defaultWidth || 0) > 0 &&
-        Number(power?.output?.defaultHeight || 0) > 0
-      ) {
-        return {
-          width: Number(power?.output?.defaultWidth),
-          height: Number(power?.output?.defaultHeight),
-        };
-      }
-      return isStoryboardPowerType(power)
-        ? { ...DEFAULT_STORYBOARD_NODE_SIZE }
-        : { ...DEFAULT_POWER_NODE_SIZE };
+      return powerNodeDefaultSize(power);
     default:
       return { width: 250, height: 170 };
   }
+}
+
+export function powerNodeDefaultSize(
+  power?: Pick<PowerOption, "kind" | "outputType" | "output">,
+) {
+  if (isAudioPowerType(power)) {
+    return { ...DEFAULT_AUDIO_POWER_NODE_SIZE };
+  }
+  const configuredSize = configuredPowerNodeSize(power);
+  if (configuredSize) {
+    return configuredSize;
+  }
+  return isStoryboardPowerType(power)
+    ? { ...DEFAULT_STORYBOARD_NODE_SIZE }
+    : { ...DEFAULT_POWER_NODE_SIZE };
+}
+
+export function audioPowerNodeSizeUpgrade(
+  node: Pick<
+    SpaceCanvasNode,
+    "type" | "width" | "height" | "kind" | "power"
+  >,
+) {
+  if (node.type !== "power" || !isAudioPowerType(node.power, node.kind)) {
+    return null;
+  }
+  const legacySize =
+    configuredPowerNodeSize(node.power) || DEFAULT_POWER_NODE_SIZE;
+  return node.width === legacySize.width && node.height === legacySize.height
+    ? { ...DEFAULT_AUDIO_POWER_NODE_SIZE }
+    : null;
+}
+
+function configuredPowerNodeSize(power?: Pick<PowerOption, "output">) {
+  const width = Number(power?.output?.defaultWidth || 0);
+  const height = Number(power?.output?.defaultHeight || 0);
+  return width > 0 && height > 0 ? { width, height } : null;
 }
 
 export function hasDefaultCanvasNodeSize(

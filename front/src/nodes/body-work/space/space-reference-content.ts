@@ -91,6 +91,10 @@ export function canvasReferenceTargetsFromContent(
     );
 }
 
+export function normalizeCanvasReferenceLabel(value: string) {
+  return value.trim().replace(/^[@#]+/, "").trim();
+}
+
 function referenceMatches(targets: CanvasReferenceTarget[]) {
   const matches = new Map<string, CanvasReferenceMatch>();
   for (const target of targets) {
@@ -98,7 +102,7 @@ function referenceMatches(targets: CanvasReferenceTarget[]) {
       continue;
     }
     const trigger = target.trigger || "@";
-    const label = target.label.trim().replace(/^[@#]+/, "");
+    const label = normalizeCanvasReferenceLabel(target.label);
     if (!label) {
       continue;
     }

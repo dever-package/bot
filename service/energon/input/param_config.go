@@ -105,7 +105,7 @@ func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serv
 			rows = append(rows, buildPowerParamRow(ctx, repo, param, powerParam, powerParamRow{
 				ID:     serviceParam.ID,
 				Name:   ServiceParamDisplayName(serviceParam, param),
-				Key:    powerParamInputKey(serviceParam, param),
+				Key:    powerParamInputKey(serviceParam, param, len(powerParamsByParamID[param.ID]) == 1),
 				Sort:   powerParamSort(powerParam.Sort, serviceParam.Sort),
 				Filter: optionFilters[param.ID],
 			}))
@@ -143,13 +143,105 @@ func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serv
 		}
 	}
 
+	sortPowerParams(rows)
+	return rows
+}
+
+// BuildPowerParamsForServices returns the union used by automatic source
+// selection. A capability parameter is presented once even when several
+// services map it, while source-specific options are merged.
+func BuildPowerParamsForServices(
+	ctx context.Context,
+	repo Repository,
+	powerID uint64,
+	serviceIDs []uint64,
+) []PowerParam {
+	serviceIDs = uniqueServiceIDs(serviceIDs)
+	if len(serviceIDs) == 0 {
+		return BuildPowerParams(ctx, repo, powerID, 0)
+	}
+
+	powerParamSorts := map[uint64]int{}
+	for _, powerParam := range repo.PowerParamsByPower(ctx, powerID) {
+		powerParamSorts[powerParam.ID] = powerParam.Sort
+	}
+
+	rows := make([]PowerParam, 0)
+	rowIndexes := map[uint64]int{}
+	rowServiceCounts := map[uint64]int{}
+	for _, serviceID := range serviceIDs {
+		seenInService := map[uint64]struct{}{}
+		for _, row := range BuildPowerParams(ctx, repo, powerID, serviceID) {
+			if configuredSort, exists := powerParamSorts[row.PowerParamID]; exists {
+				row.Sort = configuredSort
+			}
+			if _, counted := seenInService[row.PowerParamID]; !counted {
+				seenInService[row.PowerParamID] = struct{}{}
+				rowServiceCounts[row.PowerParamID]++
+			}
+			if index, exists := rowIndexes[row.PowerParamID]; exists {
+				rows[index].Options = mergePowerParamOptions(rows[index].Options, row.Options)
+				continue
+			}
+			rowIndexes[row.PowerParamID] = len(rows)
+			rows = append(rows, row)
+		}
+	}
+	for index := range rows {
+		if rowServiceCounts[rows[index].PowerParamID] < len(serviceIDs) {
+			rows[index].Required = false
+		}
+	}
+
+	sortPowerParams(rows)
+	return rows
+}
+
+func uniqueServiceIDs(values []uint64) []uint64 {
+	result := make([]uint64, 0, len(values))
+	seen := map[uint64]struct{}{}
+	for _, value := range values {
+		if value == 0 {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func mergePowerParamOptions(current []PowerParamOption, incoming []PowerParamOption) []PowerParamOption {
+	result := append([]PowerParamOption(nil), current...)
+	seen := make(map[uint64]struct{}, len(result)+len(incoming))
+	for _, option := range result {
+		seen[option.ID] = struct{}{}
+	}
+	for _, option := range incoming {
+		if _, exists := seen[option.ID]; exists {
+			continue
+		}
+		seen[option.ID] = struct{}{}
+		result = append(result, option)
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Sort != result[j].Sort {
+			return result[i].Sort < result[j].Sort
+		}
+		return result[i].ID < result[j].ID
+	})
+	return result
+}
+
+func sortPowerParams(rows []PowerParam) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].Sort != rows[j].Sort {
 			return rows[i].Sort < rows[j].Sort
 		}
 		return rows[i].ID < rows[j].ID
 	})
-	return rows
 }
 
 func buildPowerParamRow(
@@ -322,12 +414,18 @@ func BuildParamOptions(ctx context.Context, repo Repository, paramID uint64) []P
 
 func NormalizePowerParamInput(input map[string]any, params []PowerParam) map[string]any {
 	result := map[string]any{}
+	configuredKeys := map[string]struct{}{}
+	for _, param := range params {
+		if key := strings.ToLower(strings.TrimSpace(param.Key)); key != "" {
+			configuredKeys[key] = struct{}{}
+		}
+	}
 	for _, param := range params {
 		key := strings.TrimSpace(param.Key)
 		if key == "" {
 			continue
 		}
-		value, ok := powerParamInputValue(input, param)
+		value, ok := powerParamInputValue(input, param, configuredKeys)
 		if ok {
 			result[key] = normalizePowerParamValue(param, value)
 		}
@@ -411,8 +509,8 @@ func powerParamOptionNativeValue(option PowerParamOption) string {
 	return strings.TrimSpace(option.Value)
 }
 
-func powerParamInputValue(input map[string]any, param PowerParam) (any, bool) {
-	for _, key := range powerParamLookupKeys(param) {
+func powerParamInputValue(input map[string]any, param PowerParam, configuredKeys map[string]struct{}) (any, bool) {
+	for _, key := range powerParamLookupKeys(param, configuredKeys) {
 		if value, exists := input[key]; exists && !IsMissing(value) {
 			return value, true
 		}
@@ -420,9 +518,14 @@ func powerParamInputValue(input map[string]any, param PowerParam) (any, bool) {
 	return nil, false
 }
 
-func powerParamLookupKeys(param PowerParam) []string {
+func powerParamLookupKeys(param PowerParam, configuredKeys map[string]struct{}) []string {
 	keys := make([]string, 0, 1)
-	keys = appendUniqueInputKey(keys, strings.TrimSpace(param.Key))
+	key := strings.TrimSpace(param.Key)
+	keys = appendUniqueInputKey(keys, key)
+	alias := paramInputAlias(key)
+	if _, configured := configuredKeys[strings.ToLower(alias)]; alias != "" && !configured {
+		keys = appendUniqueInputKey(keys, alias)
+	}
 	return keys
 }
 
@@ -447,8 +550,8 @@ func powerParamName(param botmodel.Param, serviceParamName string) string {
 	return param.Name
 }
 
-func powerParamInputKey(serviceParam botmodel.ServiceParam, param botmodel.Param) string {
-	if IsPromptParam(param) || serviceParam.ParamRule == paramRuleComboMap {
+func powerParamInputKey(serviceParam botmodel.ServiceParam, param botmodel.Param, useCanonicalKey bool) string {
+	if useCanonicalKey || IsPromptParam(param) || serviceParam.ParamRule == paramRuleComboMap {
 		return strings.TrimSpace(param.Key)
 	}
 	return ServiceParamInputKey(serviceParam)

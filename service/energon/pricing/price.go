@@ -58,15 +58,11 @@ func Calculate(ctx context.Context, endpointID uint64, usage Usage) Quote {
 		"status":              1,
 	})
 	if price == nil || price.ID == 0 {
+		source := "unconfigured_price"
 		if isLocalServiceEndpoint(ctx, endpointID) {
-			return ApplySettlement(ctx, localServiceQuote())
+			source = "local_processor"
 		}
-		return Quote{
-			Currency: botmodel.ServicePriceCurrencyCNY,
-			Status:   botmodel.CostPricingMissingPrice,
-			Snapshot: "{}",
-			Error:    "当前服务接口未配置启用的成本价格",
-		}
+		return ApplySettlement(ctx, zeroCostQuote(source))
 	}
 
 	items := botmodel.NewServicePriceItemModel().Select(ctx, map[string]any{
@@ -93,9 +89,9 @@ func isLocalServiceEndpoint(ctx context.Context, endpointID uint64) bool {
 	return provider != nil && strings.EqualFold(strings.TrimSpace(provider.Protocol), "local")
 }
 
-func localServiceQuote() Quote {
+func zeroCostQuote(source string) Quote {
 	snapshot, err := json.Marshal(priceSnapshot{
-		Source:   "local_processor",
+		Source:   source,
 		Mode:     botmodel.ServicePriceModeRequest,
 		Currency: botmodel.ServicePriceCurrencyCNY,
 		MaxCost:  "0",

@@ -83,9 +83,8 @@ func ResolveChargeRule(ctx context.Context, userID uint64, powerID uint64) (Char
 func identityChargeRuleCandidates(ctx context.Context, userID uint64, powerID uint64) ([]ruleCandidate, error) {
 	now := time.Now()
 	userIdentities := usermodel.NewUserIdentityModel().SelectMap(ctx, map[string]any{
-		"user_id":    userID,
-		"status":     1,
-		"expires_at": map[string]any{"gt": now},
+		"user_id": userID,
+		"status":  1,
 	}, map[string]any{"order": "level desc,id asc"})
 	active := activeBillingUserIdentities(ctx, userIdentities, now)
 	if len(active) == 0 {

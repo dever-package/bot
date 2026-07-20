@@ -429,12 +429,13 @@ func (s GatewayService) finishStreamResult(ctx context.Context, input streamFini
 	}
 
 	resultResp := botprotocol.BuildSuccessResponse(input.Request.RequestID, input.Data)
+	// The terminal frame lets callers settle billing immediately, so persist the
+	// successful provider attempt and its cost before making that frame visible.
+	logItem := s.recordCallLogInternal(ctx, input.Request, input.Selected, StatusSuccess, time.Since(input.StartedAt), encodeLogJSON(resultResp.Payload()), input.Usage, input.CostAttempted, input.NativeRequest)
 	if err := s.writeStream(ctx, input.Request.RequestID, resultResp); err != nil {
-		logItem := s.recordCallLogInternal(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("stream_result", err.Error()), input.Usage, input.CostAttempted, input.NativeRequest)
-		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err
+		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusSuccess, logItem, nil)}, err
 	}
 
-	logItem := s.recordCallLogInternal(ctx, input.Request, input.Selected, StatusSuccess, time.Since(input.StartedAt), encodeLogJSON(resultResp.Payload()), input.Usage, input.CostAttempted, input.NativeRequest)
 	return callResult{
 		NativeRequest: input.NativeRequest,
 		Response:      input.Response,

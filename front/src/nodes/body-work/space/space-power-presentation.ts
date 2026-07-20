@@ -86,6 +86,14 @@ export function isVideoComposePowerType(
   );
 }
 
+export function isAudioPowerType(
+  power?: PowerLike,
+  fallbackKind: unknown = "",
+) {
+  const kind = normalizedValue(power?.kind || fallbackKind);
+  return kind === "audio" || kind === "music";
+}
+
 export function powerKindLabel(kind: unknown) {
   const normalizedKind = normalizedValue(kind) || "text";
   return POWER_KIND_LABELS[normalizedKind] || "文本";

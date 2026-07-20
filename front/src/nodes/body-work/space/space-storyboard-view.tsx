@@ -53,6 +53,7 @@ import {
   type CanvasReferenceAdapter,
 } from "./space-reference-editor";
 import { SequenceCard } from "./space-sequence-card";
+import "./space.css";
 
 export type StoryboardSaveStatus = "saved" | "typing" | "saving" | "error";
 export type StoryboardWorkflowAction = "" | "confirming" | "revising";

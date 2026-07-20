@@ -214,6 +214,7 @@ export function StreamPowerRunner({
   const abortRef = useRef<AbortController | null>(null)
   const pendingHistoryInputRef = useRef<Record<string, unknown>>({})
   const appliedHistoryInputRef = useRef('')
+  const appliedHistorySourceRef = useRef('')
   const requestIDCopyTimerRef = useRef<number | null>(null)
   const outputScrollRef = useRef<HTMLDivElement | null>(null)
   const autoScrollRef = useRef(true)
@@ -228,7 +229,9 @@ export function StreamPowerRunner({
 
   useEffect(() => {
     setSelectedSource({ power: '', id: '' })
-  }, [history?.scopeKey])
+    appliedHistoryInputRef.current = ''
+    appliedHistorySourceRef.current = ''
+  }, [history?.scopeKey, powerKey])
 
   const paramUploadRuleIds = useMemo(
     () =>
@@ -661,14 +664,19 @@ export function StreamPowerRunner({
       return
     }
     appliedHistoryInputRef.current = selectionKey
-    if (
-      selectedHistorySourceTargetID > 0 &&
-      String(selectedHistorySourceTargetID) !== activeSelectedSourceID
-    ) {
-      setSelectedSource({
-        power: powerKey,
-        id: String(selectedHistorySourceTargetID),
-      })
+    // Parameter reloads may replay input, but must not restore a history
+    // source over the user's explicit model selection.
+    if (appliedHistorySourceRef.current !== selectionKey) {
+      appliedHistorySourceRef.current = selectionKey
+      if (
+        selectedHistorySourceTargetID > 0 &&
+        String(selectedHistorySourceTargetID) !== activeSelectedSourceID
+      ) {
+        setSelectedSource({
+          power: powerKey,
+          id: String(selectedHistorySourceTargetID),
+        })
+      }
     }
     setParamValues(
       mergePowerParamValues(

@@ -7,11 +7,12 @@ import {
   useRef,
   useState,
 } from "react";
-import type {
-  EnergonMediaKind,
-  EnergonMediaPreviewHandler,
-  EnergonMediaPreviewItem,
-  EnergonMediaPreviewRequest,
+import {
+  EnergonAudioPlayer,
+  type EnergonMediaKind,
+  type EnergonMediaPreviewHandler,
+  type EnergonMediaPreviewItem,
+  type EnergonMediaPreviewRequest,
 } from "@/components/energon/content-view";
 import {
   Download,
@@ -353,20 +354,16 @@ function MediaStage({
         )
       ) : null}
       {kind === "audio" ? (
-        <div className="flex w-full max-w-xl flex-col items-center gap-5 px-4">
-          <span className="flex size-16 items-center justify-center rounded-full bg-background text-muted-foreground shadow-sm">
-            <Music4 className="size-7" />
-          </span>
-          {item.url ? (
-            <audio
-              key={item.url}
-              src={item.url}
-              controls
-              preload="metadata"
-              className="w-full"
-            />
-          ) : null}
-        </div>
+        item.url ? (
+          <EnergonAudioPlayer
+            key={item.url}
+            src={item.url}
+            detailed
+            className="max-w-3xl"
+          />
+        ) : (
+          <EmptyPreview kind={kind} />
+        )
       ) : null}
       {kind === "file" ? (
         <div className="flex max-w-md flex-col items-center gap-4 text-center">

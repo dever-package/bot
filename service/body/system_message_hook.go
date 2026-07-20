@@ -40,9 +40,29 @@ func (SystemMessageHook) ProviderBeforeSaveSystemMessage(c *server.Context, para
 	}
 
 	defaultBodyInt16Field(record, "pinned", bodymodel.SystemMessagePinnedNo, partial)
-	defaultBodyInt16Field(record, "status", bodymodel.StatusEnabled, partial)
-	defaultBodyIntField(record, "sort", defaultSort, partial)
+	normalizeSystemMessageListFields(record, partial)
 	return record
+}
+
+func normalizeSystemMessageListFields(record map[string]any, partial bool) {
+	if partial {
+		defaultBodyInt16Field(record, "status", bodymodel.StatusEnabled, true)
+		if _, ok := record["sort"]; ok {
+			sort := util.ToIntDefault(record["sort"], defaultSort)
+			if sort < 0 {
+				sort = 0
+			}
+			record["sort"] = sort
+		}
+		return
+	}
+	if util.ToUint64(record["id"]) == 0 {
+		defaultBodyInt16Field(record, "status", bodymodel.StatusEnabled, false)
+		defaultBodyIntField(record, "sort", defaultSort, false)
+		return
+	}
+	delete(record, "status")
+	delete(record, "sort")
 }
 
 func normalizeSystemMessageURL(value any) string {

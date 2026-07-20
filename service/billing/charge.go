@@ -478,10 +478,7 @@ func normalizedChargeCurrency(value string) string {
 
 func releaseFailedPowerCharge(ctx context.Context, charge billingmodel.PowerCharge, totalCost int64, request FinishPowerChargeRequest) error {
 	if charge.PointHoldID > 0 {
-		if _, err := userservice.ReleasePoints(ctx, userservice.PointReleaseRequest{
-			BusinessKey: charge.BusinessKey,
-			Remark:      firstChargeError(request.Error, "能力调用未成功，释放预占积分"),
-		}); err != nil {
+		if err := releaseChargePointHold(ctx, charge, firstChargeError(request.Error, "能力调用未成功，释放预占积分")); err != nil {
 			return recordChargeSettlementError(ctx, charge, err)
 		}
 	}
@@ -500,10 +497,7 @@ func releaseFailedPowerCharge(ctx context.Context, charge billingmodel.PowerChar
 
 func failChargePricing(ctx context.Context, charge billingmodel.PowerCharge, totalCost int64, pricingErr error) error {
 	if charge.PointHoldID > 0 {
-		if _, err := userservice.ReleasePoints(ctx, userservice.PointReleaseRequest{
-			BusinessKey: charge.BusinessKey,
-			Remark:      "能力调用计价失败，释放预占积分",
-		}); err != nil {
+		if err := releaseChargePointHold(ctx, charge, "能力调用计价失败，释放预占积分"); err != nil {
 			return recordChargeSettlementError(ctx, charge, fmt.Errorf("计价失败且释放积分预占失败: %w", err))
 		}
 	}
@@ -549,6 +543,23 @@ func recordChargeSettlementError(ctx context.Context, charge billingmodel.PowerC
 		"updated_at": time.Now(),
 	}, false)
 	return settleErr
+}
+
+func releaseChargePointHold(ctx context.Context, charge billingmodel.PowerCharge, remark string) error {
+	hold, err := userservice.ReleasePoints(ctx, userservice.PointReleaseRequest{
+		BusinessKey: charge.BusinessKey,
+		Remark:      remark,
+	})
+	if err != nil {
+		return err
+	}
+	if hold.Status == usermodel.PointHoldStatusSettled {
+		return fmt.Errorf("积分预占已经结算，不能按失败释放")
+	}
+	if hold.Status != usermodel.PointHoldStatusReleased && hold.Status != usermodel.PointHoldStatusExpired {
+		return fmt.Errorf("积分预占释放后状态异常: %d", hold.Status)
+	}
+	return nil
 }
 
 func chargePointAmount(costMicros int64, saleRatioBasisPoints int64, exchangeRate int) (int, error) {

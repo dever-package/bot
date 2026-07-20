@@ -1,0 +1,872 @@
+.hb-account-layer > [data-slot="dialog-overlay"] {
+  background: var(--background, #ffffff);
+}
+
+.hb-account-dialog,
+.hb-account-confirm {
+  --body-work-bg: var(--background, #f7f8f7);
+  --body-work-surface: var(--card, var(--background, #ffffff));
+  --body-work-text: var(--foreground, #171a19);
+  --body-work-muted: var(--muted-foreground, #6b7370);
+  --body-work-line: var(--border, #e0e5e2);
+  --body-work-active: var(--muted, #eef1ef);
+}
+
+.hb-account-dialog {
+  display: flex;
+  background: var(--body-work-bg);
+  color: var(--body-work-text);
+  letter-spacing: 0;
+}
+
+.hb-account-confirm {
+  border-radius: 8px;
+  letter-spacing: 0;
+}
+
+.hb-account-confirm-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  border-top: 1px solid var(--body-work-line);
+  border-bottom: 1px solid var(--body-work-line);
+  padding: 20px 0;
+}
+
+.hb-account-confirm-detail > strong {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.hb-account-confirm-detail dl {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+}
+
+.hb-account-confirm-detail dl > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.hb-account-confirm-detail dt {
+  color: var(--body-work-muted);
+  font-size: 12px;
+}
+
+.hb-account-confirm-detail dd {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.hb-account-shell {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--body-work-bg);
+}
+
+.hb-account-header {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  min-height: 82px;
+  flex: 0 0 82px;
+  grid-template-columns: minmax(240px, 1fr) auto minmax(240px, 1fr);
+  align-items: center;
+  gap: 32px;
+  border-bottom: 1px solid var(--body-work-line);
+  background: var(--body-work-surface);
+  padding: 0 clamp(24px, 3vw, 54px);
+}
+
+.hb-account-user {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.hb-account-avatar {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--body-work-line);
+  border-radius: 50%;
+  background: var(--body-work-active);
+  color: var(--body-work-text);
+}
+
+.hb-account-avatar svg {
+  width: 19px;
+  height: 19px;
+}
+
+.hb-account-user > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hb-account-user strong {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hb-account-user-meta,
+.hb-account-user-placeholder {
+  overflow: hidden;
+  color: var(--body-work-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hb-account-user-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: visible;
+}
+
+.hb-account-user-meta > span {
+  flex: 0 0 auto;
+}
+
+.hb-account-subscription-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.hb-account-subscription-trigger {
+  display: inline-flex;
+  height: 24px;
+  cursor: pointer;
+  align-items: center;
+  gap: 3px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--body-work-muted);
+  padding: 0 3px;
+  font: inherit;
+  letter-spacing: 0;
+  list-style: none;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.hb-account-subscription-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.hb-account-subscription-trigger:hover,
+.hb-account-subscription-menu[open] .hb-account-subscription-trigger {
+  background: var(--body-work-active);
+  color: var(--body-work-text);
+}
+
+.hb-account-subscription-trigger svg {
+  width: 12px;
+  height: 12px;
+  transition: transform 120ms ease;
+}
+
+.hb-account-subscription-menu[open]
+  .hb-account-subscription-trigger
+  svg {
+  transform: rotate(180deg);
+}
+
+.hb-account-subscription-popover {
+  position: absolute;
+  z-index: 70;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 300px;
+  border-color: var(--border, #e0e5e2);
+  border-style: solid;
+  border-width: 1px;
+  border-radius: 8px;
+  background: var(--body-work-surface);
+  color: var(--body-work-text);
+  padding: 0;
+  letter-spacing: 0;
+  overflow: hidden;
+  box-shadow: 0 12px 28px rgba(28, 43, 35, 0.14);
+}
+
+.hb-account-subscription-popover > strong {
+  display: block;
+  padding: 15px 16px 12px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.hb-account-subscription-list {
+  border-top: 1px solid var(--border, #e0e5e2);
+}
+
+.hb-account-subscription-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 13px 16px;
+}
+
+.hb-account-subscription-row + .hb-account-subscription-row {
+  border-top: 1px solid var(--border, #e0e5e2);
+}
+
+.hb-account-subscription-row > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hb-account-subscription-row strong,
+.hb-account-subscription-row span,
+.hb-account-subscription-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hb-account-subscription-row strong {
+  font-size: 12.5px;
+  font-weight: 620;
+}
+
+.hb-account-subscription-row span,
+.hb-account-subscription-row small {
+  color: var(--muted-foreground, #6b7370);
+  font-size: 11px;
+}
+
+.hb-account-subscription-row small {
+  flex: 0 0 auto;
+}
+
+.hb-account-user-expiry {
+  color: var(--body-work-muted);
+}
+
+.hb-account-point-picker {
+  min-width: 0;
+  max-width: 180px;
+}
+
+.hb-account-point-picker .workbench-picker {
+  width: auto;
+}
+
+.hb-account-point-picker .workbench-picker-trigger {
+  width: auto;
+  min-width: 92px;
+  max-width: 180px;
+  height: 24px;
+  cursor: pointer;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #176f52;
+  padding: 0 22px 0 3px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 24px;
+  box-shadow: none;
+}
+
+.hb-account-point-picker .workbench-picker-trigger:hover,
+.hb-account-point-picker .workbench-picker-trigger[data-state="open"] {
+  background: var(--body-work-active);
+}
+
+.hb-account-point-picker
+  .workbench-picker-trigger
+  .select-trigger-chevron {
+  right: 2px;
+  color: currentColor;
+}
+
+.hb-account-nav {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 8px;
+  background: var(--body-work-active);
+  padding: 4px;
+}
+
+.hb-account-nav button,
+.hb-account-identity-switch button,
+.hb-account-close {
+  appearance: none;
+  border: 0;
+  font: inherit;
+  letter-spacing: 0;
+}
+
+.hb-account-nav button {
+  display: inline-flex;
+  height: 36px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--body-work-muted);
+  padding: 0 15px;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hb-account-nav button:hover,
+.hb-account-nav button.is-active {
+  background: var(--body-work-surface);
+  color: var(--body-work-text);
+  box-shadow: 0 1px 3px rgba(24, 33, 29, 0.08);
+}
+
+.hb-account-nav svg {
+  width: 15px;
+  height: 15px;
+}
+
+.hb-account-close {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--body-work-muted);
+}
+
+.hb-account-close:hover {
+  background: var(--body-work-active);
+  color: var(--body-work-text);
+}
+
+.hb-account-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.hb-account-main {
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 40px clamp(32px, 6vw, 120px) 72px;
+}
+
+.hb-account-section {
+  width: min(1240px, 100%);
+  margin: 0 auto;
+}
+
+.hb-account-section-heading {
+  display: flex;
+  min-height: 60px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 30px;
+}
+
+.hb-account-section-heading h2 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 680;
+  line-height: 1.2;
+}
+
+.hb-account-section-heading p {
+  margin: 9px 0 0;
+  color: var(--body-work-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.hb-account-identity-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  border-radius: 8px;
+  background: var(--body-work-active);
+  padding: 4px;
+}
+
+.hb-account-identity-switch button {
+  min-height: 34px;
+  cursor: pointer;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--body-work-muted);
+  padding: 0 14px;
+  font-size: 12.5px;
+  font-weight: 560;
+  white-space: nowrap;
+}
+
+.hb-account-identity-switch button.is-active {
+  background: var(--body-work-surface);
+  color: var(--body-work-text);
+  box-shadow: 0 1px 3px rgba(24, 33, 29, 0.08);
+}
+
+.hb-account-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 320px));
+  justify-content: center;
+  gap: 18px;
+}
+
+.hb-account-plan {
+  display: flex;
+  min-width: 0;
+  min-height: 400px;
+  flex-direction: column;
+  border: 1px solid var(--body-work-line);
+  border-radius: 8px;
+  background: var(--body-work-surface);
+  padding: 26px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.hb-account-plan:hover,
+.hb-account-plan.is-current {
+  border-color: color-mix(in srgb, #176f52 45%, var(--body-work-line));
+  box-shadow: 0 10px 30px rgba(24, 33, 29, 0.08);
+}
+
+.hb-account-plan-head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hb-account-plan-head > div {
+  min-width: 0;
+}
+
+.hb-account-plan-head span {
+  color: var(--body-work-muted);
+  font-size: 11px;
+}
+
+.hb-account-plan-head h3,
+.hb-account-package h3 {
+  margin: 5px 0 0;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.hb-account-plan-head em {
+  flex: 0 0 auto;
+  border-radius: 4px;
+  background: rgba(23, 111, 82, 0.1);
+  color: #176f52;
+  padding: 4px 7px;
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 650;
+}
+
+.hb-account-plan-price {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 30px;
+}
+
+.hb-account-plan-price strong {
+  font-size: 36px;
+  font-weight: 680;
+  line-height: 1;
+}
+
+.hb-account-plan-price span,
+.hb-account-plan-cash {
+  color: var(--body-work-muted);
+  font-size: 12px;
+}
+
+.hb-account-plan-cash {
+  margin: 9px 0 0;
+}
+
+.hb-account-plan-benefits {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 11px;
+  margin: 30px 0 26px;
+  border-top: 1px solid var(--body-work-line);
+  padding-top: 20px;
+}
+
+.hb-account-plan-benefits span {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--body-work-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.hb-account-plan-benefits svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  margin-top: 1px;
+  color: #176f52;
+}
+
+.hb-account-plan > button {
+  border-color: #176f52;
+  background: #176f52;
+  color: #ffffff;
+}
+
+.hb-account-plan > button:hover:not(:disabled) {
+  border-color: #125c44;
+  background: #125c44;
+  color: #ffffff;
+}
+
+.hb-account-package-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 284px));
+  justify-content: center;
+  gap: 16px;
+}
+
+.hb-account-package {
+  display: flex;
+  min-height: 250px;
+  flex-direction: column;
+  align-items: flex-start;
+  border: 1px solid var(--body-work-line);
+  border-radius: 8px;
+  background: var(--body-work-surface);
+  padding: 24px;
+}
+
+.hb-account-package > svg {
+  width: 21px;
+  height: 21px;
+  color: #176f52;
+}
+
+.hb-account-package > strong {
+  margin-top: 24px;
+  font-size: 20px;
+  font-weight: 650;
+}
+
+.hb-account-package > p {
+  flex: 1;
+  margin: 7px 0 20px;
+  color: var(--body-work-muted);
+  font-size: 11.5px;
+}
+
+.hb-account-package > button {
+  width: 100%;
+}
+
+.hb-account-record-list {
+  border-top: 1px solid var(--body-work-line);
+}
+
+.hb-account-record {
+  display: flex;
+  min-width: 0;
+  min-height: 82px;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid var(--body-work-line);
+  padding: 14px 8px;
+}
+
+.hb-account-record-mark {
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--body-work-active);
+  color: var(--body-work-muted);
+}
+
+.hb-account-record-mark.is-identity,
+.hb-account-record-mark.is-increase {
+  background: rgba(23, 111, 82, 0.1);
+  color: #176f52;
+}
+
+.hb-account-record-mark.is-point {
+  background: rgba(37, 99, 235, 0.09);
+  color: #2563eb;
+}
+
+.hb-account-record-mark.is-consume {
+  background: rgba(190, 52, 52, 0.08);
+  color: #a63434;
+}
+
+.hb-account-record-mark svg {
+  width: 17px;
+  height: 17px;
+}
+
+.hb-account-record-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.hb-account-record-copy > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.hb-account-record-copy strong {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hb-account-record-copy p,
+.hb-account-record-copy small {
+  display: block;
+  margin: 5px 0 0;
+  color: var(--body-work-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.hb-account-record-copy small {
+  color: #a63434;
+}
+
+.hb-account-record-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.hb-account-record-actions svg {
+  width: 14px;
+  height: 14px;
+}
+
+.hb-account-status {
+  flex: 0 0 auto;
+  border-radius: 4px;
+  background: var(--body-work-active);
+  color: var(--body-work-muted);
+  padding: 3px 6px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.hb-account-status.is-completed {
+  background: rgba(23, 111, 82, 0.1);
+  color: #176f52;
+}
+
+.hb-account-status.is-failed {
+  background: rgba(190, 52, 52, 0.08);
+  color: #a63434;
+}
+
+.hb-account-status.is-paying,
+.hb-account-status.is-paid,
+.hb-account-status.is-fulfilling {
+  background: rgba(37, 99, 235, 0.09);
+  color: #2563eb;
+}
+
+.hb-account-positive,
+.hb-account-negative {
+  flex: 0 0 auto;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.hb-account-positive {
+  color: #176f52;
+}
+
+.hb-account-negative {
+  color: #a63434;
+}
+
+.hb-account-load-more {
+  display: flex;
+  justify-content: center;
+  padding-top: 22px;
+}
+
+.hb-account-load-more svg {
+  width: 14px;
+  height: 14px;
+}
+
+.hb-account-inline-error {
+  margin: 14px 0 0;
+  color: #a63434;
+  font-size: 11.5px;
+  text-align: center;
+}
+
+.hb-account-state,
+.hb-account-empty {
+  display: flex;
+  min-height: 360px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--body-work-muted);
+  text-align: center;
+}
+
+.hb-account-state.is-compact {
+  min-height: 220px;
+}
+
+.hb-account-state > svg,
+.hb-account-empty > svg {
+  width: 24px;
+  height: 24px;
+}
+
+.hb-account-state span,
+.hb-account-empty span {
+  max-width: 420px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.hb-account-state.is-error > svg,
+.hb-account-state.is-error strong {
+  color: #a63434;
+}
+
+@media (max-width: 900px) {
+  .hb-account-header {
+    min-height: 116px;
+    flex-basis: 116px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 56px 52px;
+    gap: 0 12px;
+    padding: 0 18px;
+  }
+
+  .hb-account-nav {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: stretch;
+    overflow-x: auto;
+  }
+
+  .hb-account-nav button {
+    min-width: max-content;
+    flex: 1;
+  }
+
+  .hb-account-close {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .hb-account-main {
+    padding: 24px 18px 48px;
+  }
+
+  .hb-account-section-heading {
+    flex-direction: column;
+  }
+
+  .hb-account-identity-switch {
+    width: 100%;
+  }
+
+  .hb-account-identity-switch button {
+    flex: 1;
+  }
+}
+
+@media (max-width: 620px) {
+  .hb-account-nav svg {
+    display: none;
+  }
+
+  .hb-account-user-meta > span[aria-hidden="true"] {
+    display: none;
+  }
+
+  .hb-account-nav button {
+    padding: 0 10px;
+    font-size: 11px;
+  }
+
+  .hb-account-plan-grid,
+  .hb-account-package-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hb-account-record {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .hb-account-record-copy {
+    width: calc(100% - 54px);
+  }
+
+  .hb-account-record-actions {
+    width: 100%;
+    justify-content: flex-end;
+    padding-left: 52px;
+  }
+}

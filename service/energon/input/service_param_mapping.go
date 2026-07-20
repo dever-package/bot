@@ -2,6 +2,7 @@ package input
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/shemic/dever/util"
@@ -20,6 +21,26 @@ type ServiceParamComboMapping struct {
 type ServiceParamComboRow struct {
 	Values      map[uint64]uint64
 	NativeValue string
+}
+
+func DecodeServiceParamAttachmentIndexes(value any) ([]int, error) {
+	items := decodeMappingArray(value)
+	if len(items) == 0 {
+		items = List(ParseJSONValue(ValueText(value)))
+	}
+	if len(items) == 0 {
+		return nil, fmt.Errorf("附件映射为空")
+	}
+
+	indexes := make([]int, 0, len(items))
+	for _, item := range items {
+		index := util.ToIntDefault(item, 0)
+		if index < 1 {
+			return nil, fmt.Errorf("附件映射序号必须从 1 开始")
+		}
+		indexes = append(indexes, index)
+	}
+	return indexes, nil
 }
 
 func DecodeServiceParamOptionMappings(value any) []ServiceParamOptionMapping {

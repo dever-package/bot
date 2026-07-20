@@ -158,7 +158,7 @@ async function saveWorkbenchAsset(
   return assetID;
 }
 
-function responseData(result: any, fallback: string): Record<string, any> {
+export function responseData(result: any, fallback: string): Record<string, any> {
   if (!isSuccessResponse(result)) {
     throw new Error(String(result?.message || result?.msg || fallback));
   }
@@ -226,20 +226,20 @@ function isExecutionRole(role: WorkbenchRole) {
   return role.roleType === "worker";
 }
 
-function toRows(value: unknown): any[] {
+export function toRows(value: unknown): any[] {
   return Array.isArray(value) ? value : [];
 }
 
-function isRecord(value: unknown): value is Record<string, any> {
+export function isRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function numberValue(value: unknown) {
+export function numberValue(value: unknown) {
   const number = Number(value || 0);
   return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
-function textValue(value: unknown) {
+export function textValue(value: unknown) {
   return value == null ? "" : String(value).trim();
 }
 

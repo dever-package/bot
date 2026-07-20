@@ -747,7 +747,13 @@ func (s Service) AssetFilters(ctx context.Context, teamID uint64) (map[string]an
 }
 
 func (s Service) AssetDetail(ctx context.Context, teamID uint64, assetID uint64) (map[string]any, error) {
-	return s.asset.TeamDetail(ctx, teamID, assetID)
+	result, err := s.asset.TeamDetail(ctx, teamID, assetID)
+	if err != nil {
+		return nil, err
+	}
+	asset := recordValue(result["asset"])
+	prepareAssetVersionDetail(ctx, teamID, recordValue(asset["version"]))
+	return result, nil
 }
 
 func (s Service) AssetVersions(ctx context.Context, teamID uint64, assetID uint64, page int, pageSize int) (map[string]any, error) {
@@ -758,11 +764,22 @@ func (s Service) AssetVersions(ctx context.Context, teamID uint64, assetID uint6
 }
 
 func (s Service) AssetVersion(ctx context.Context, teamID uint64, assetID uint64, versionID uint64) (map[string]any, error) {
-	return s.asset.TeamVersionDetail(ctx, teamID, assetID, versionID)
+	result, err := s.asset.TeamVersionDetail(ctx, teamID, assetID, versionID)
+	if err != nil {
+		return nil, err
+	}
+	prepareAssetVersionDetail(ctx, teamID, recordValue(result["version"]))
+	return result, nil
 }
 
 func (s Service) SetAssetCurrentVersion(ctx context.Context, teamID uint64, assetID uint64, versionID uint64) (map[string]any, error) {
-	return s.asset.SetTeamCurrentVersion(ctx, teamID, assetID, versionID)
+	result, err := s.asset.SetTeamCurrentVersion(ctx, teamID, assetID, versionID)
+	if err != nil {
+		return nil, err
+	}
+	asset := recordValue(result["asset"])
+	prepareAssetVersionDetail(ctx, teamID, recordValue(asset["version"]))
+	return result, nil
 }
 
 func (s Service) RenameAsset(ctx context.Context, teamID uint64, assetID uint64, name string) (map[string]any, error) {

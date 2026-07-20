@@ -20,6 +20,7 @@ import {
   setAssetCurrentVersion,
 } from "./asset-api";
 import { AssetKindIcon, AssetPreview } from "./asset-preview";
+import { assetVersionPrompt } from "./asset-content";
 import { AssetRenameDialog } from "./asset-rename-dialog";
 import {
   assetKindLabel,
@@ -272,6 +273,7 @@ export function AssetDetailDialog({
                 kind={asset.kind}
                 content={previewVersion.content}
                 summary={previewVersion.summary || asset.summary}
+                prompt={assetVersionPrompt(previewVersion)}
               />
             </div>
           )}

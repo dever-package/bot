@@ -1,16 +1,10 @@
 import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Sparkles } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@dever/front-plugin";
 import { BodySiteBrand } from "../auth/site-brand";
 import type { BodySiteConfig } from "../auth/site-config";
 import type { WorkbenchTeam } from "./workbench-api";
+import { WorkbenchAccountCenter } from "./workbench-account-center";
 import { WorkbenchSystemMessagePanel } from "./workbench-system-message-panel";
 import { WorkbenchUserMenu } from "./workbench-user-menu";
 
@@ -87,7 +81,7 @@ export function WorkbenchSidebar({
             label="积分"
             onClick={() => setPointsOpen(true)}
           />
-          <WorkbenchSystemMessagePanel />
+          <WorkbenchSystemMessagePanel site={site} />
           <WorkbenchUserMenu
             teams={teams}
             teamID={teamID}
@@ -98,14 +92,7 @@ export function WorkbenchSidebar({
         </div>
       </aside>
 
-      <Dialog open={pointsOpen} onOpenChange={setPointsOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>敬请期待</DialogTitle>
-            <DialogDescription>该功能正在准备中，后续开放。</DialogDescription>
-          </DialogHeader>
-        </DialogContent>
-      </Dialog>
+      <WorkbenchAccountCenter open={pointsOpen} onOpenChange={setPointsOpen} />
     </>
   );
 }

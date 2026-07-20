@@ -45,6 +45,23 @@ func (Service) CreateCanvasBody(ctx context.Context, projectID uint64, name stri
 	return bodyID, nil
 }
 
+func (Service) RenameCanvasBody(ctx context.Context, bodyID uint64, projectID uint64, name string) error {
+	name = strings.TrimSpace(name)
+	if bodyID == 0 || projectID == 0 || name == "" {
+		return fmt.Errorf("作品载体信息不完整")
+	}
+	affected := bodymodel.NewBodyModel().Update(ctx, map[string]any{
+		"id":         bodyID,
+		"project_id": projectID,
+		"type":       bodymodel.TypeCanvas,
+		"status":     bodymodel.StatusEnabled,
+	}, map[string]any{"name": name})
+	if affected == 0 {
+		return fmt.Errorf("作品载体不存在")
+	}
+	return nil
+}
+
 func (Service) CreateTeamWorkspaceBody(ctx context.Context, name string) (uint64, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {

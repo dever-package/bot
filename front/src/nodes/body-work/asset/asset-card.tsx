@@ -1,5 +1,5 @@
 import { Check, ExternalLink, Pencil } from "lucide-react";
-import { AssetPreview } from "./asset-preview";
+import { AssetKindIcon, AssetPreview } from "./asset-preview";
 import { assetKindLabel, assetSourceLabel } from "./asset-contract";
 import type { AssetRecord } from "./asset-types";
 
@@ -18,31 +18,45 @@ export function AssetCard({
   onRename: (asset: AssetRecord) => void;
   onSelect?: (asset: AssetRecord) => void;
 }) {
+  const preview = (
+    <AssetPreview
+      kind={asset.kind}
+      content={asset.version?.content}
+      summary={asset.summary}
+      compact
+    />
+  );
+
   return (
     <article
       className={`wb-asset-card ${selected ? "is-selected" : ""}`.trim()}
     >
-      <button
-        type="button"
-        className="wb-asset-card-main"
-        onClick={() => onOpen(asset)}
-      >
+      <div className="wb-asset-card-main">
         <div className="wb-asset-card-preview">
-          <AssetPreview
-            kind={asset.kind}
-            content={asset.version?.content}
-            summary={asset.summary}
-            compact
-          />
+          {preview}
+          {asset.kind !== "audio" ? (
+            <button
+              type="button"
+              className="wb-asset-card-preview-open"
+              onClick={() => onOpen(asset)}
+              aria-label={`查看${asset.name}`}
+            />
+          ) : null}
         </div>
-        <div className="wb-asset-card-copy">
+        <button
+          type="button"
+          className="wb-asset-card-copy"
+          onClick={() => onOpen(asset)}
+        >
           <strong title={asset.name}>{asset.name}</strong>
           <span>
-            {assetSourceLabel(asset.sourceType)} · {assetKindLabel(asset.kind)}{" "}
-            · v{asset.version?.version || 1}
+            {assetSourceLabel(asset.sourceType)} · {assetKindLabel(asset.kind)}
           </span>
-        </div>
-      </button>
+        </button>
+      </div>
+      <span className="wb-asset-card-kind-icon">
+        <AssetKindIcon kind={asset.kind} />
+      </span>
       <div className="wb-asset-card-actions">
         <button type="button" onClick={() => onRename(asset)} title="修改标题">
           <Pencil aria-hidden="true" />

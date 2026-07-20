@@ -33,7 +33,7 @@ import {
 
 const TEAM_STORAGE_KEY = "bot.body.workbench.team";
 const pageItems = [
-  { key: "works", label: "项目", icon: FileStack },
+  { key: "works", label: "创作", icon: FileStack },
   { key: "dialogue", label: "对话", icon: MessagesSquare },
   { key: "function", label: "工具", icon: Zap },
   { key: "assets", label: "资产", icon: Archive },

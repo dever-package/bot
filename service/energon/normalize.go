@@ -10,6 +10,7 @@ import (
 	"github.com/shemic/dever/util"
 
 	botmodel "github.com/dever-package/bot/model/energon"
+	botinput "github.com/dever-package/bot/service/energon/input"
 	botlog "github.com/dever-package/bot/service/energon/log"
 	botpricing "github.com/dever-package/bot/service/energon/pricing"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
@@ -63,11 +64,19 @@ func (s GatewayService) resolveNormalizePlan(ctx context.Context, req *botprotoc
 	}
 
 	targets := orderActivePowerTargets(s.repo.ListTargetsByPower(ctx, power.ID))
-	if targetID := requestedSourceTargetID(req); targetID > 0 && normalizePowerSourceRule(int(power.SourceRule)) == powerSourceRulePick {
-		targets = filterRequestedPowerTarget(targets, targetID)
-		if len(targets) == 0 {
-			return normalizePlan{}, fmt.Errorf("指定来源不属于当前能力: %d", targetID)
+	if normalizePowerSourceRule(int(power.SourceRule)) == powerSourceRulePick {
+		if targetID := requestedSourceTargetID(req); targetID > 0 {
+			targets = filterRequestedPowerTarget(targets, targetID)
+			if len(targets) == 0 {
+				return normalizePlan{}, fmt.Errorf("指定来源不属于当前能力: %d", targetID)
+			}
 		}
+	} else {
+		compatible, reasons := s.compatiblePowerTargets(ctx, req, power, targets)
+		if len(compatible) == 0 && len(targets) > 0 {
+			return normalizePlan{}, fmt.Errorf("当前参数没有兼容的能力来源: %s", strings.Join(reasons, "；"))
+		}
+		targets = compatible
 	}
 	if len(targets) == 0 {
 		return normalizePlan{}, fmt.Errorf("能力没有可用实现: %s", req.Name)
@@ -77,6 +86,33 @@ func (s GatewayService) resolveNormalizePlan(ctx context.Context, req *botprotoc
 		power:   power,
 		targets: targets,
 	}, nil
+}
+
+func (s GatewayService) compatiblePowerTargets(
+	ctx context.Context,
+	req *botprotocol.ShemicRequest,
+	power botmodel.Power,
+	targets []botmodel.PowerTarget,
+) ([]botmodel.PowerTarget, []string) {
+	compatible := make([]botmodel.PowerTarget, 0, len(targets))
+	reasons := make([]string, 0, len(targets))
+	for _, target := range targets {
+		err := botinput.ValidateTargetCompatibility(ctx, s.repo, req, botinput.Target{
+			PowerID:   power.ID,
+			ServiceID: target.ServiceID,
+		})
+		if err == nil {
+			compatible = append(compatible, target)
+			continue
+		}
+
+		name := fmt.Sprintf("来源 %d", target.ID)
+		if service, exists := s.repo.FindService(ctx, target.ServiceID); exists && strings.TrimSpace(service.Name) != "" {
+			name = strings.TrimSpace(service.Name)
+		}
+		reasons = append(reasons, name+"："+err.Error())
+	}
+	return compatible, reasons
 }
 
 func requestedSourceTargetID(req *botprotocol.ShemicRequest) uint64 {

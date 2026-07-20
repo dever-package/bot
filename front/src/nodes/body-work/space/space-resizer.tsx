@@ -15,6 +15,7 @@ import {
   MAX_GROUP_NODE_SIZE,
   MIN_GROUP_NODE_SIZE,
 } from "./space-group-model";
+import { isAudioPowerType } from "./space-power-presentation";
 
 export type CanvasNodeBounds = Pick<
   SpaceCanvasNode,
@@ -88,6 +89,7 @@ const RESIZE_CORNERS: ResizeCorner[] = [
 export const MIN_RESULT_WIDTH = 140;
 export const MIN_RESULT_HEIGHT = 100;
 export const MAX_RESULT_SIZE = 720;
+const MIN_AUDIO_NODE_SIZE = { width: 280, height: 64 } as const;
 
 export function withResizedCanvasNode(
   nodes: SpaceCanvasNode[],
@@ -136,6 +138,8 @@ export function CanvasNodeResizer({
     return null;
   }
   const isGroup = node.type === "group";
+  const isAudioPower =
+    node.type === "power" && isAudioPowerType(node.power, node.kind);
   return (
     <>
       {RESIZE_CORNERS.map((corner) => (
@@ -143,11 +147,23 @@ export function CanvasNodeResizer({
           key={corner.position}
           position={corner.position}
           className={`ws-resize-control ws-node-resize-control ${corner.className} nodrag nopan`}
-          minWidth={isGroup ? MIN_GROUP_NODE_SIZE.width : MIN_RESULT_WIDTH}
-          minHeight={isGroup ? MIN_GROUP_NODE_SIZE.height : MIN_RESULT_HEIGHT}
+          minWidth={
+            isGroup
+              ? MIN_GROUP_NODE_SIZE.width
+              : isAudioPower
+                ? MIN_AUDIO_NODE_SIZE.width
+                : MIN_RESULT_WIDTH
+          }
+          minHeight={
+            isGroup
+              ? MIN_GROUP_NODE_SIZE.height
+              : isAudioPower
+                ? MIN_AUDIO_NODE_SIZE.height
+                : MIN_RESULT_HEIGHT
+          }
           maxWidth={isGroup ? MAX_GROUP_NODE_SIZE.width : MAX_RESULT_SIZE}
           maxHeight={isGroup ? MAX_GROUP_NODE_SIZE.height : MAX_RESULT_SIZE}
-          keepAspectRatio={!isGroup}
+          keepAspectRatio={!isGroup && !isAudioPower}
           onResizeStart={() => onResizeStart?.(node.id)}
           onResizeEnd={(_event, params: ResizeParams) =>
             onResizeEnd(node.id, normalizeCanvasNodeBounds(params))

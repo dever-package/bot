@@ -6,6 +6,10 @@ import {
   Paperclip,
 } from "lucide-react";
 import { CanvasNodeContentView } from "../space/space-content-view";
+import { AssetAudioPreview } from "./asset-audio-preview";
+import { AssetFilePreview } from "./asset-file-preview";
+import { AssetLazyCover } from "./asset-lazy-cover";
+import { AssetTextCardPreview } from "./asset-text-card-preview";
 import type { AssetKind } from "./asset-types";
 import { assetKindLabel } from "./asset-contract";
 import {
@@ -18,14 +22,23 @@ export function AssetPreview({
   kind,
   content,
   summary,
+  prompt,
   compact = false,
 }: {
   kind: AssetKind;
   content: unknown;
   summary?: string;
+  prompt?: string;
   compact?: boolean;
 }) {
+  const mediaURL = findAssetMediaURL(content, kind);
   if (!compact) {
+    if (kind === "audio") {
+      return <AssetAudioPreview src={mediaURL} prompt={prompt} detailed />;
+    }
+    if (kind === "file") {
+      return <AssetFilePreview content={content} summary={summary} />;
+    }
     const output = assetPreviewOutput(kind, content);
     return (
       <CanvasNodeContentView
@@ -40,16 +53,29 @@ export function AssetPreview({
     );
   }
 
-  const mediaURL = findAssetMediaURL(content, kind);
   if (kind === "image" && mediaURL) {
-    return <img src={mediaURL} alt="" loading="lazy" />;
+    return <AssetLazyCover kind="image" src={mediaURL} />;
   }
   if (kind === "video" && mediaURL) {
-    return <video src={mediaURL} muted preload="metadata" />;
+    return <AssetLazyCover kind="video" src={mediaURL} />;
+  }
+  if (kind === "audio") {
+    return <AssetAudioPreview src={mediaURL} />;
+  }
+  if (kind === "file") {
+    return <AssetFilePreview content={content} summary={summary} compact />;
+  }
+  if (kind === "text" || kind === "richtext") {
+    return (
+      <AssetTextCardPreview
+        kind={kind}
+        content={content}
+        summary={summary}
+      />
+    );
   }
   return (
     <div className="wb-asset-card-fallback">
-      <AssetKindIcon kind={kind} />
       <p>{summary || assetPreviewText(content) || assetKindLabel(kind)}</p>
     </div>
   );

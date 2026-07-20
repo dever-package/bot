@@ -1506,6 +1506,16 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 	if !assetservice.HasContent(output) {
 		return payload, nil
 	}
+	source := map[string]any{
+		"source_request_id": firstText(payload["request_id"], canvasChildRequestID(run.RequestID, node.ID)),
+		"source_run_id":     uint64Value(payload["run_id"]),
+		"source_node_key":   node.ID,
+		"source_node_type":  node.Type,
+		"source_status":     canvasRunStatus(payload),
+	}
+	if prompt := strings.TrimSpace(node.ComposerPrompt); prompt != "" {
+		source["prompt"] = prompt
+	}
 	result, err := s.project.SaveAsset(ctx, projectID, SaveAssetRequest{
 		AssetCateID: firstUint64(node.AssetCateID, req.AssetCateID),
 		FlowID:      node.FlowID,
@@ -1514,17 +1524,11 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 		ReleaseID:   run.ReleaseID,
 		RequestID:   run.RequestID,
 		NodeKey:     node.ID,
-		Source: map[string]any{
-			"source_request_id": firstText(payload["request_id"], canvasChildRequestID(run.RequestID, node.ID)),
-			"source_run_id":     uint64Value(payload["run_id"]),
-			"source_node_key":   node.ID,
-			"source_node_type":  node.Type,
-			"source_status":     canvasRunStatus(payload),
-		},
-		Name:    workspaceCanvasAssetName(canvasRunNodeTitle(node), node.ID),
-		Kind:    firstText(node.Kind, node.PowerKind, assetmodel.KindRichText),
-		Role:    assetmodel.RoleMaterial,
-		Content: output,
+		Source:      source,
+		Name:        workspaceCanvasAssetName(canvasRunNodeTitle(node), node.ID),
+		Kind:        firstText(node.Kind, node.PowerKind, assetmodel.KindRichText),
+		Role:        assetmodel.RoleMaterial,
+		Content:     output,
 	})
 	if err != nil {
 		return payload, err

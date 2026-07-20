@@ -21,7 +21,7 @@ func mapServiceParamValue(
 	case paramRuleOptionMap:
 		return mapOptionParamValue(ctx, repo, serviceParam, param, value)
 	case paramRuleFileMap:
-		return mapFileParamValue(value), true, nil
+		return mapAttachmentParamValue(value, serviceParam.Mapping)
 	case paramRuleDirect, 0:
 		return mapDirectOptionParamValue(ctx, repo, serviceParam, param, value)
 	default:
@@ -236,15 +236,31 @@ func appendUniqueInputKey(keys []string, key string) []string {
 	return append(keys, key)
 }
 
-func mapFileParamValue(value any) any {
+func mapAttachmentParamValue(value any, mapping string) (any, bool, error) {
 	items := StringList(value)
 	if len(items) == 0 {
-		return value
+		return nil, false, nil
 	}
-	if len(items) == 1 {
-		return items[0]
+
+	indexes, err := DecodeServiceParamAttachmentIndexes(mapping)
+	if err != nil {
+		return nil, false, err
 	}
-	return items
+
+	selected := make([]string, 0, len(indexes))
+	for _, index := range indexes {
+		if index > len(items) {
+			continue
+		}
+		selected = append(selected, items[index-1])
+	}
+	if len(selected) == 0 {
+		return nil, false, nil
+	}
+	if len(indexes) == 1 {
+		return selected[0], true, nil
+	}
+	return selected, true, nil
 }
 
 func matchParamOption(ctx context.Context, repo Repository, paramID uint64, value any) (botmodel.ParamOption, bool) {

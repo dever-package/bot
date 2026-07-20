@@ -16,6 +16,11 @@ func (Project) GetList(c *server.Context) error {
 	return botapi.WriteJSON(c, data, err)
 }
 
+func (Project) GetTrash(c *server.Context) error {
+	data, err := projectRunner.Trash(c.Context(), botapi.QueryUint64(c, "team_id", "teamId"))
+	return botapi.WriteJSON(c, data, err)
+}
+
 func (Project) PostCreate(c *server.Context) error {
 	body, err := botapi.BindBody(c)
 	if err != nil {
@@ -35,12 +40,37 @@ func (Project) GetDetail(c *server.Context) error {
 	return botapi.WriteJSON(c, data, err)
 }
 
+func (Project) PostUpdate(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := projectRunner.Update(
+		c.Context(),
+		botapi.Uint64FromBody(body, "id", "project_id", "projectId"),
+		projectservice.UpdateRequest{
+			Name:        botapi.TextFromBody(body, "name"),
+			Description: botapi.TextFromBody(body, "description"),
+		},
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
 func (Project) PostDelete(c *server.Context) error {
 	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
 	data, err := projectRunner.Delete(c.Context(), botapi.Uint64FromBody(body, "id", "project_id", "projectId"))
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Project) PostRestore(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := projectRunner.Restore(c.Context(), botapi.Uint64FromBody(body, "id", "project_id", "projectId"))
 	return botapi.WriteJSON(c, data, err)
 }
 

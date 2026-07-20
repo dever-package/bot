@@ -23,7 +23,7 @@ const (
 	powerParamShowSource int16  = 2
 	powerParamRequired   int16  = 1
 	powerParamOptional   int16  = 2
-	powerSourceRuleFirst int16  = 1
+	powerSourceRuleAuto  int16  = 1
 	powerSourceRulePick  int16  = 2
 	defaultMaxFiles             = 5
 	defaultUploadRuleID  uint64 = 1

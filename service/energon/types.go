@@ -15,8 +15,8 @@ const (
 	StatusSuccess        = "success"
 	StatusFail           = "fail"
 
-	powerSourceRuleFirst int16 = 1
-	powerSourceRulePick  int16 = 2
+	powerSourceRuleAuto int16 = 1
+	powerSourceRulePick int16 = 2
 
 	DefaultProxyPower = "shemic.proxy.openai"
 )
@@ -29,7 +29,7 @@ func normalizePowerSourceRule(value int) int16 {
 	if int16(value) == powerSourceRulePick {
 		return powerSourceRulePick
 	}
-	return powerSourceRuleFirst
+	return powerSourceRuleAuto
 }
 
 type GatewayRequest struct {

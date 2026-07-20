@@ -1,4 +1,5 @@
 import { plainMarkdownTextFromRichOutput } from "./space-content-output";
+import { normalizeCanvasReferenceLabel } from "./space-reference-content";
 import { embeddedJSONValues } from "./space-structured-json";
 import type { CanvasReferenceContent } from "./types";
 
@@ -442,12 +443,16 @@ function prefixMaterialNames(value: string, names: string[]) {
   let cursor = 0;
   while (cursor < value.length) {
     if (value[cursor] === "@") {
+      let mentionStart = cursor + 1;
+      while (value[mentionStart] === "@") {
+        mentionStart += 1;
+      }
       const mentioned = names.find((name) =>
-        value.startsWith(name, cursor + 1),
+        value.startsWith(name, mentionStart),
       );
       if (mentioned) {
         result += `@${mentioned}`;
-        cursor += mentioned.length + 1;
+        cursor = mentionStart + mentioned.length;
         continue;
       }
     }
@@ -510,7 +515,9 @@ function normalizeMaterialList(value: unknown, type: StoryboardMaterialType) {
   const usedIds = new Set<string>();
   return values.map((value, index) => {
     const row = isRecord(value) ? value : { name: value };
-    const name = stringValue(firstDefined(row.name, row.title, row.label));
+    const name = normalizeMaterialName(
+      firstDefined(row.name, row.title, row.label),
+    );
     const requestedId = stringValue(firstDefined(row.id, row.key));
     const baseId = requestedId || fallbackMaterialId(type, name, index);
     const id = uniqueMaterialId(baseId, usedIds);
@@ -534,6 +541,10 @@ function normalizeMaterialList(value: unknown, type: StoryboardMaterialType) {
       ),
     };
   });
+}
+
+function normalizeMaterialName(value: unknown) {
+  return normalizeCanvasReferenceLabel(stringValue(value));
 }
 
 function normalizeShotIds(value: unknown) {

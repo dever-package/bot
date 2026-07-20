@@ -194,6 +194,12 @@ func (s Service) runModelStep(ctx context.Context, controller *runController, st
 	if len(calls) == 0 {
 		return s.finishModelOutput(ctx, controller, state, result, stepLimits)
 	}
+	if shouldReviewPresentSuggestions(state, calls) {
+		accepted, keepRunning := s.reviewPresentSuggestions(ctx, controller, state, result)
+		if !accepted {
+			return keepRunning
+		}
+	}
 
 	maxSteps := stepLimits.withDelivery
 	if state.modelStep >= maxSteps && !endsWithTerminalToolCall(calls) {

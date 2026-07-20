@@ -425,9 +425,12 @@ func formatServicePriceSummary(prices []map[string]any, localService bool) strin
 		if localService {
 			return "本地零成本"
 		}
-		return "未配置"
+		return "未配置 · 零成本"
 	}
 	price := prices[0]
+	if !isActive(int16(util.ToIntDefault(price["status"], 0))) {
+		return "已停用 · 零成本"
+	}
 	mode := "按次"
 	if botpricing.NormalizeMode(util.ToStringTrimmed(price["mode"])) == botmodel.ServicePriceModeToken {
 		mode = "按 Token"

@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import {
-  Building2,
+  BriefcaseBusiness,
   Check,
   ChevronRight,
   LogOut,
@@ -32,6 +32,8 @@ import {
 } from "@dever/front-plugin";
 import type { BodyFilingInfo } from "../auth/site-config";
 import type { WorkbenchTeam } from "./workbench-api";
+import { WorkbenchAvatar } from "./workbench-avatar";
+import { WorkbenchProfileDialog } from "./workbench-profile-dialog";
 
 type MenuPanel = "team" | "theme" | null;
 
@@ -138,15 +140,22 @@ export function WorkbenchUserMenu({
           title={user?.name || user?.account || "用户菜单"}
           onClick={() => setOpen((current) => !current)}
         >
-          <span>{avatarText(user?.name || user?.account)}</span>
+          <WorkbenchAvatar
+            src={user?.avatar}
+            name={user?.name}
+            account={user?.account}
+          />
         </button>
 
         {open ? (
           <div className="hb-user-menu" role="menu">
             <div className="hb-user-summary">
-              <span className="hb-user-summary-avatar">
-                {avatarText(user?.name || user?.account)}
-              </span>
+              <WorkbenchAvatar
+                src={user?.avatar}
+                name={user?.name}
+                account={user?.account}
+                className="hb-user-summary-avatar"
+              />
               <span>
                 <strong>{user?.name || "未命名用户"}</strong>
                 <small>{user?.account || "暂无账号信息"}</small>
@@ -163,25 +172,25 @@ export function WorkbenchUserMenu({
                 }}
               />
               <SubmenuButton
-                icon={Building2}
-                label="团队切换"
-                detail={selectedTeam?.name || "暂无团队"}
+                icon={BriefcaseBusiness}
+                label="工作切换"
+                detail={selectedTeam?.name || "暂无工作"}
                 active={activePanel === "team"}
                 onActivate={() => activatePanel("team")}
                 onDeactivate={schedulePanelClose}
               >
                 <div className="hb-user-submenu-head">
-                  <strong>切换团队</strong>
-                  <span>{teams.length} 个团队</span>
+                  <strong>切换工作</strong>
+                  <span>{teams.length} 个工作</span>
                 </div>
                 <div className="hb-user-team-list">
                   {teams.length === 0 ? (
-                    <span className="hb-user-team-empty">暂无可用团队</span>
+                    <span className="hb-user-team-empty">暂无可用工作</span>
                   ) : (
                     teams.map((team) => (
                       <SubmenuChoice
                         key={team.id}
-                        icon={Building2}
+                        icon={BriefcaseBusiness}
                         label={team.name}
                         active={team.id === teamID}
                         disabled={disabled}
@@ -254,19 +263,12 @@ export function WorkbenchUserMenu({
         ) : null}
       </div>
 
-      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>个人信息</DialogTitle>
-            <DialogDescription>查看当前登录账户的基本信息。</DialogDescription>
-          </DialogHeader>
-          <div className="hb-profile-dialog">
-            <ProfileRow label="用户名称" value={user?.name || "未设置"} />
-            <ProfileRow label="登录账号" value={user?.account || "未设置"} />
-            <ProfileRow label="账号角色" value={roleLabel} />
-          </div>
-        </DialogContent>
-      </Dialog>
+      <WorkbenchProfileDialog
+        open={profileOpen}
+        roleLabel={roleLabel}
+        onOpenChange={setProfileOpen}
+        onPasswordChanged={signOut}
+      />
 
       <Dialog open={signOutOpen} onOpenChange={setSignOutOpen}>
         <DialogContent className="sm:max-w-sm">
@@ -296,7 +298,7 @@ function MenuButton({
   tone,
   onClick,
 }: {
-  icon: typeof UserRound;
+  icon: LucideIcon;
   label: string;
   tone?: "danger";
   onClick: () => void;
@@ -323,7 +325,7 @@ function SubmenuButton({
   onDeactivate,
   children,
 }: {
-  icon: typeof UserRound;
+  icon: LucideIcon;
   label: string;
   detail: string;
   active: boolean;
@@ -380,20 +382,6 @@ function SubmenuChoice({
       {active ? <Check className="hb-submenu-choice-check" /> : null}
     </button>
   );
-}
-
-function ProfileRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function avatarText(value: unknown) {
-  const text = String(value || "用").trim();
-  return (text || "用").slice(0, 1).toUpperCase();
 }
 
 function createFilingRows(filing: BodyFilingInfo) {

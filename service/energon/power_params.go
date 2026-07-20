@@ -62,14 +62,30 @@ func (s GatewayService) PowerParamConfig(ctx context.Context, powerKey string, t
 		targetID = 0
 	}
 	sources, selectedTargetID := s.powerSources(ctx, power, targetID)
-	serviceID := s.powerTargetServiceID(ctx, power.ID, selectedTargetID)
-	params := botinput.BuildPowerParams(ctx, s.repo, power.ID, serviceID)
+	params := []PowerParam{}
+	if sourceRule == powerSourceRulePick {
+		serviceID := s.powerTargetServiceID(ctx, power.ID, selectedTargetID)
+		params = botinput.BuildPowerParams(ctx, s.repo, power.ID, serviceID)
+	} else {
+		selectedTargetID = 0
+		params = botinput.BuildPowerParamsForServices(ctx, s.repo, power.ID, powerSourceServiceIDs(sources))
+	}
 	return PowerParamConfig{
 		SourceRule:       sourceRule,
 		SelectedTargetID: selectedTargetID,
 		Sources:          sources,
 		Params:           params,
 	}, nil
+}
+
+func powerSourceServiceIDs(sources []PowerSource) []uint64 {
+	serviceIDs := make([]uint64, 0, len(sources))
+	for _, source := range sources {
+		if source.ServiceID > 0 {
+			serviceIDs = append(serviceIDs, source.ServiceID)
+		}
+	}
+	return serviceIDs
 }
 
 func (s GatewayService) powerTargetServiceID(ctx context.Context, powerID uint64, targetID uint64) uint64 {

@@ -169,9 +169,11 @@ func nativeRootKey(path string) string {
 }
 
 type nativePathSegment struct {
-	Key     string
-	Index   int
-	IsIndex bool
+	Key      string
+	Index    int
+	EndIndex int
+	IsIndex  bool
+	IsRange  bool
 }
 
 func parseNativePath(path string) []nativePathSegment {
@@ -191,11 +193,11 @@ func parseNativePath(path string) []nativePathSegment {
 				return nil
 			}
 			rawIndex := strings.TrimSpace(path[index+1 : index+end])
-			value, err := strconv.Atoi(rawIndex)
-			if err != nil || value < 0 {
+			segment, ok := parseNativeIndexSegment(rawIndex)
+			if !ok {
 				return nil
 			}
-			segments = append(segments, nativePathSegment{Index: value, IsIndex: true})
+			segments = append(segments, segment)
 			index += end + 1
 		default:
 			end := index
@@ -223,6 +225,30 @@ func parseNativePath(path string) []nativePathSegment {
 	return segments
 }
 
+func parseNativeIndexSegment(value string) (nativePathSegment, bool) {
+	startValue, endValue, hasRange := strings.Cut(value, "-")
+	start, err := strconv.Atoi(strings.TrimSpace(startValue))
+	if err != nil || start < 0 {
+		return nativePathSegment{}, false
+	}
+	if !hasRange {
+		return nativePathSegment{Index: start, EndIndex: start, IsIndex: true}, true
+	}
+	if strings.Contains(endValue, "-") {
+		return nativePathSegment{}, false
+	}
+	end, err := strconv.Atoi(strings.TrimSpace(endValue))
+	if err != nil || end < start {
+		return nativePathSegment{}, false
+	}
+	return nativePathSegment{
+		Index:    start,
+		EndIndex: end,
+		IsIndex:  true,
+		IsRange:  true,
+	}, true
+}
+
 func assignNativePathValue(container any, segments []nativePathSegment, value any) any {
 	if len(segments) == 0 {
 		return value
@@ -231,6 +257,9 @@ func assignNativePathValue(container any, segments []nativePathSegment, value an
 	segment := segments[0]
 	if segment.IsIndex {
 		items, _ := container.([]any)
+		if segment.IsRange {
+			return assignNativeRangeValue(items, segment, segments[1:], value)
+		}
 		items = ensureNativeArrayLength(items, segment.Index+1)
 		if len(segments) == 1 {
 			items[segment.Index] = value
@@ -260,6 +289,43 @@ func assignNativePathValue(container any, segments []nativePathSegment, value an
 	}
 	mapped[segment.Key] = assignNativePathValue(child, segments[1:], value)
 	return mapped
+}
+
+// Range segments broadcast scalar values and map list values by position.
+func assignNativeRangeValue(items []any, segment nativePathSegment, segments []nativePathSegment, value any) []any {
+	values, isList := nativeRangeValues(value)
+	for index := segment.Index; index <= segment.EndIndex; index++ {
+		currentValue := value
+		if isList {
+			offset := index - segment.Index
+			if offset >= len(values) {
+				break
+			}
+			currentValue = values[offset]
+		}
+
+		items = ensureNativeArrayLength(items, index+1)
+		if len(segments) == 0 {
+			items[index] = currentValue
+			continue
+		}
+
+		child := items[index]
+		if !nativeContainerMatches(child, segments[0]) {
+			child = newNativeContainer(segments[0])
+		}
+		items[index] = assignNativePathValue(child, segments, currentValue)
+	}
+	return items
+}
+
+func nativeRangeValues(value any) ([]any, bool) {
+	switch value.(type) {
+	case []any, []string, []map[string]any:
+		return normalizeAnyList(value), true
+	default:
+		return nil, false
+	}
 }
 
 func ensureNativeArrayLength(items []any, length int) []any {

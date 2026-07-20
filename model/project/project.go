@@ -7,33 +7,38 @@ import (
 )
 
 const (
-	StatusEnabled  int16 = 1
-	StatusDisabled int16 = 2
+	StatusEnabled int16 = 1
+	StatusDeleted int16 = 2
+
+	// StatusDisabled is kept for callers compiled against the previous status name.
+	StatusDisabled = StatusDeleted
 )
 
 var statusOptions = []map[string]any{
 	{"id": StatusEnabled, "value": "开启", "label": "开启", "color": "#0f766e"},
-	{"id": StatusDisabled, "value": "停用", "label": "停用", "color": "#737373"},
+	{"id": StatusDeleted, "value": "回收站", "label": "回收站", "color": "#737373"},
 }
 
 type Project struct {
-	ID          uint64    `dorm:"primaryKey;autoIncrement;comment:项目ID"`
-	UserID      uint64    `dorm:"type:bigint;not null;default:0;comment:用户"`
-	BodyID      uint64    `dorm:"type:bigint;not null;default:0;comment:载体"`
-	TeamID      uint64    `dorm:"type:bigint;not null;default:0;comment:团队"`
-	ReleaseID   uint64    `dorm:"type:bigint;not null;default:0;comment:发布版本"`
-	Name        string    `dorm:"type:varchar(128);not null;comment:项目名称"`
-	Description string    `dorm:"type:text;not null;default:'';comment:项目描述"`
-	Cover       string    `dorm:"type:varchar(255);not null;default:'';comment:封面"`
-	Status      int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	CreatedAt   time.Time `dorm:"comment:创建时间"`
-	UpdatedAt   time.Time `dorm:"comment:更新时间"`
+	ID          uint64     `dorm:"primaryKey;autoIncrement;comment:项目ID"`
+	UserID      uint64     `dorm:"type:bigint;not null;default:0;comment:用户"`
+	BodyID      uint64     `dorm:"type:bigint;not null;default:0;comment:载体"`
+	TeamID      uint64     `dorm:"type:bigint;not null;default:0;comment:团队"`
+	ReleaseID   uint64     `dorm:"type:bigint;not null;default:0;comment:发布版本"`
+	Name        string     `dorm:"type:varchar(128);not null;comment:项目名称"`
+	Description string     `dorm:"type:text;not null;default:'';comment:项目描述"`
+	Cover       string     `dorm:"type:varchar(255);not null;default:'';comment:封面"`
+	Status      int16      `dorm:"type:smallint;not null;default:1;comment:状态"`
+	CreatedAt   time.Time  `dorm:"comment:创建时间"`
+	UpdatedAt   time.Time  `dorm:"comment:更新时间"`
+	DeletedAt   *time.Time `dorm:"type:timestamp;null;comment:删除时间"`
 }
 
 type ProjectIndex struct {
-	UserStatus struct{} `index:"user_id,status,created_at,id"`
-	Body       struct{} `index:"body_id"`
-	Team       struct{} `index:"team_id,release_id,status,id"`
+	UserTeamStatus struct{} `index:"user_id,team_id,status,id"`
+	UserTeamTrash  struct{} `index:"user_id,team_id,status,deleted_at,id"`
+	Body           struct{} `index:"body_id"`
+	Team           struct{} `index:"team_id,release_id,status,id"`
 }
 
 var projectUserRelation = orm.Relation{

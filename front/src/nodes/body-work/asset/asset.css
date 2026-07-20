@@ -193,15 +193,13 @@
 .wb-asset-card-main {
   display: block;
   width: 100%;
-  border: 0;
   background: transparent;
   color: inherit;
-  cursor: pointer;
-  padding: 0;
   text-align: left;
 }
 
 .wb-asset-card-preview {
+  position: relative;
   width: 100%;
   aspect-ratio: 4 / 3;
   overflow: hidden;
@@ -209,28 +207,441 @@
   background: #f1f3f2;
 }
 
-.wb-asset-card-preview > img,
-.wb-asset-card-preview > video {
+.wb-asset-card-preview-open {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.wb-asset-card-preview-open:focus-visible {
+  box-shadow: inset 0 0 0 2px #416b5a;
+}
+
+.wb-asset-lazy-cover {
+  position: relative;
   width: 100%;
   height: 100%;
+  overflow: hidden;
+  background: #e8ecea;
+}
+
+.wb-asset-lazy-cover::before {
+  position: absolute;
+  inset: 0;
+  background: #e8ecea;
+  content: "";
+  opacity: 1;
+  transition: opacity 160ms ease;
+}
+
+.wb-asset-lazy-cover.is-pending::before {
+  animation: wb-asset-cover-pulse 1.3s ease-in-out infinite alternate;
+}
+
+.wb-asset-lazy-cover.is-loaded::before {
+  opacity: 0;
+}
+
+.wb-asset-lazy-cover > :where(img, video) {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
   object-fit: cover;
+  transition: opacity 160ms ease;
+}
+
+.wb-asset-lazy-cover.is-loaded > :where(img, video) {
+  opacity: 1;
+}
+
+.wb-asset-lazy-cover.is-failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wb-asset-lazy-cover.is-failed::before {
+  animation: none;
+  background: #edf0ee;
+}
+
+.wb-asset-lazy-cover.is-failed > span {
+  position: relative;
+  z-index: 1;
+  color: #7a857f;
+  font-size: 11px;
 }
 
 .wb-asset-card-fallback {
+  width: 100%;
+  height: 100%;
+  padding: 15px 16px;
+}
+
+.wb-asset-card-text-preview {
+  --wb-asset-card-paper: #f4f6f5;
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--wb-asset-card-paper);
+  padding: 15px 16px 24px;
+  pointer-events: none;
+}
+
+.wb-asset-card-text-preview.is-richtext {
+  --wb-asset-card-paper: #f5f5f2;
+}
+
+.wb-asset-card-text-preview::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 30px;
+  background: linear-gradient(
+    to bottom,
+    rgba(244, 246, 245, 0),
+    var(--wb-asset-card-paper) 72%
+  );
+  content: "";
+}
+
+.wb-asset-card-text-content,
+.wb-asset-card-text-content > div,
+.wb-asset-card-text-content > div > div {
+  min-width: 0;
+  margin: 0;
+}
+
+.wb-asset-card-text-content > div > * + * {
+  margin-top: 0;
+}
+
+.wb-asset-card-prose {
+  color: #425149;
+  font-size: 12px;
+  line-height: 1.72;
+  overflow-wrap: anywhere;
+}
+
+.wb-asset-card-prose > :first-child {
+  margin-top: 0;
+}
+
+.wb-asset-card-prose :where(p, ul, ol, blockquote, pre, table, figure) {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.wb-asset-card-prose :where(h1, h2, h3, h4, h5, h6) {
+  margin: 0 0 7px;
+  color: #202b25;
+  font-weight: 700;
+  line-height: 1.38;
+  letter-spacing: 0;
+}
+
+.wb-asset-card-prose h1 {
+  font-size: 15px;
+}
+
+.wb-asset-card-prose :where(h2, h3) {
+  font-size: 13px;
+}
+
+.wb-asset-card-prose :where(h4, h5, h6) {
+  font-size: 12px;
+}
+
+.wb-asset-card-prose :where(ul, ol) {
+  padding-left: 18px;
+}
+
+.wb-asset-card-prose li {
+  margin: 2px 0;
+}
+
+.wb-asset-card-prose li::marker {
+  color: #6c887a;
+}
+
+.wb-asset-card-prose blockquote {
+  border-left: 2px solid #8ba095;
+  color: #637069;
+  padding-left: 9px;
+}
+
+.wb-asset-card-prose a {
+  color: #315f4d;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.wb-asset-card-prose :not(pre) > code {
+  border-radius: 3px;
+  background: #e8ece9;
+  padding: 1px 3px;
+  color: #315f4d;
+  font-size: 0.9em;
+}
+
+.wb-asset-card-prose pre {
+  overflow: hidden;
+  border-radius: 4px;
+  background: #2b3630;
+  color: #eef2ef;
+  padding: 8px 9px;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.wb-asset-card-prose pre code {
+  background: transparent;
+  color: inherit;
+}
+
+.wb-asset-card-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+
+.wb-asset-card-prose :where(th, td) {
+  border: 1px solid #d8dfdb;
+  padding: 3px 5px;
+  text-align: left;
+}
+
+.wb-asset-card-prose :where(img, video) {
+  display: block;
+  max-width: 100%;
+  max-height: 82px;
+  margin: 8px 0;
+  border-radius: 3px;
+  object-fit: cover;
+}
+
+.wb-asset-audio-preview {
   display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 18px;
+  padding: 24px 17px 17px;
+  background: #edf1ef;
+  color: #28483b;
+}
+
+.wb-asset-audio-detail {
+  width: 100%;
+}
+
+.wb-asset-audio-preview.is-detail {
+  width: min(920px, 100%);
+  height: auto;
+  min-height: 210px;
+  margin: 0 auto;
+  gap: 24px;
+  border: 1px solid #dce4df;
+  border-radius: 8px;
+  background: #f2f5f3;
+  padding: 30px 34px 24px;
+  box-shadow: 0 10px 30px rgba(25, 43, 35, 0.06);
+}
+
+.wb-asset-audio-prompt {
+  width: min(920px, 100%);
+  margin: 34px auto 0;
+  border-top: 1px solid #e0e5e2;
+  padding: 24px 4px 0;
+}
+
+.wb-asset-audio-prompt header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #627069;
+}
+
+.wb-asset-audio-prompt header svg {
+  width: 16px;
+  height: 16px;
+}
+
+.wb-asset-audio-prompt header strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.wb-asset-audio-prompt p {
+  max-width: 760px;
+  margin: 14px 0 0;
+  color: #17201c;
+  font-size: 18px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.wb-detail-readonly-content.is-audio {
+  background: #fbfcfb;
+}
+
+.wb-detail-readonly-content.is-file {
+  background: #fbfcfb;
+}
+
+.wb-asset-file-preview {
+  display: grid;
+  box-sizing: border-box;
+  width: min(820px, 100%);
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  margin: 16px auto 0;
+  border: 1px solid #dce3df;
+  border-radius: 8px;
+  background: #fff;
+  padding: 22px 24px;
+  box-shadow: 0 8px 24px rgba(27, 45, 37, 0.05);
+}
+
+.wb-asset-file-icon {
+  display: inline-flex;
+  width: 64px;
+  height: 64px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: #edf2ef;
+  color: #315f4d;
+}
+
+.wb-asset-file-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.wb-asset-file-copy {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.wb-asset-file-copy strong {
+  overflow: hidden;
+  color: #17201c;
+  font-size: 16px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-asset-file-copy span,
+.wb-asset-file-unavailable {
+  color: #7a857f;
+  font-size: 12px;
+}
+
+.wb-asset-file-preview > a {
+  display: inline-flex;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #cfd9d3;
+  border-radius: 5px;
+  background: #fff;
+  color: #245b47;
+  padding: 0 13px;
+  font-size: 12px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.wb-asset-file-preview > a:hover {
+  border-color: #aebfb6;
+  background: #f2f5f3;
+}
+
+.wb-asset-file-preview > a:focus-visible {
+  outline: 2px solid rgba(49, 95, 77, 0.32);
+  outline-offset: 2px;
+}
+
+.wb-asset-file-preview > a svg {
+  width: 14px;
+  height: 14px;
+}
+
+.wb-asset-file-card-preview {
+  display: flex;
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
   flex-direction: column;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 18px;
+  justify-content: center;
+  gap: 7px;
+  background: #f2f4f3;
+  padding: 22px 18px;
 }
 
-.wb-asset-card-fallback svg {
-  width: 24px;
-  height: 24px;
-  color: #60736a;
+.wb-asset-file-card-preview > strong {
+  color: #52685d;
+  font-size: 26px;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.wb-asset-file-card-preview > p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  margin: 3px 0 0;
+  color: #34423b;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.wb-asset-file-card-preview > span {
+  color: #87918c;
+  font-size: 10px;
+}
+
+.wb-asset-card-kind-icon {
+  position: absolute;
+  right: 13px;
+  bottom: 11px;
+  z-index: 1;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  color: #718078;
+  pointer-events: none;
+}
+
+.wb-asset-card-kind-icon svg {
+  width: 18px;
+  height: 18px;
 }
 
 .wb-asset-card-fallback p {
@@ -238,17 +649,24 @@
   max-width: 100%;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
+  -webkit-line-clamp: 8;
   margin: 0;
   color: #59635e;
   font-size: 12px;
   line-height: 1.65;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .wb-asset-card-copy {
   display: block;
-  padding: 12px 13px 13px;
+  width: 100%;
+  border: 0;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+  padding: 12px 44px 13px 13px;
+  text-align: left;
 }
 
 .wb-asset-card-copy strong,
@@ -276,6 +694,7 @@
   position: absolute;
   top: 9px;
   right: 9px;
+  z-index: 3;
   display: flex;
   gap: 6px;
   opacity: 0;
@@ -696,6 +1115,20 @@
   }
 }
 
+@keyframes wb-asset-cover-pulse {
+  to {
+    background: #f1f3f2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wb-asset-lazy-cover::before,
+  .wb-asset-lazy-cover > :where(img, video) {
+    animation: none;
+    transition: none;
+  }
+}
+
 @media (max-width: 860px) {
   .wb-asset-reference-backdrop {
     padding: 0;
@@ -740,6 +1173,39 @@
     gap: 10px;
   }
 
+  .wb-asset-audio-preview.is-detail {
+    min-height: 180px;
+    padding: 24px 20px 20px;
+  }
+
+  .wb-asset-audio-prompt {
+    margin-top: 26px;
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  .wb-asset-file-preview {
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 14px;
+    margin-top: 0;
+    padding: 18px;
+  }
+
+  .wb-asset-file-icon {
+    width: 52px;
+    height: 52px;
+  }
+
+  .wb-asset-file-preview > a,
+  .wb-asset-file-unavailable {
+    grid-column: 1 / -1;
+  }
+
+  .wb-asset-file-preview > a {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
 }
 
 @media (max-width: 480px) {
@@ -759,6 +1225,14 @@
   .wb-asset-card-actions {
     opacity: 1;
     transform: none;
+  }
+
+  .wb-asset-detail-prose h1 {
+    font-size: 24px;
+  }
+
+  .wb-asset-detail-prose h2 {
+    font-size: 20px;
   }
 
 }

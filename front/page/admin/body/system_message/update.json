@@ -114,28 +114,6 @@
           "trueValue": 1,
           "falseValue": 2
         }
-      },
-      {
-        "type": "form-switch",
-        "name": "状态",
-        "value": "form.status",
-        "mode": "form",
-        "meta": {
-          "formLayout": "horizontal",
-          "trueValue": 1,
-          "falseValue": 2
-        }
-      },
-      {
-        "type": "form-number",
-        "name": "排序",
-        "value": "form.sort",
-        "mode": "form",
-        "info": "置顶状态相同时，数值越小越靠前。",
-        "meta": {
-          "formLayout": "horizontal",
-          "controlClassName": "max-w-[180px]"
-        }
       }
     ]
   },
@@ -147,9 +125,7 @@
       "url": "",
       "published_at": "",
       "expires_at": "",
-      "pinned": 2,
-      "status": 1,
-      "sort": 100
+      "pinned": 2
     }
   },
   "state": {},

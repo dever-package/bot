@@ -66,26 +66,7 @@ func NewService() Service {
 }
 
 func (s Service) List(ctx context.Context, teamID uint64) (map[string]any, error) {
-	userID, err := currentUserID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if teamID == 0 {
-		return nil, fmt.Errorf("团队不能为空")
-	}
-	rows := projectmodel.NewProjectModel().Select(ctx, map[string]any{
-		"user_id": userID,
-		"team_id": teamID,
-		"status":  projectmodel.StatusEnabled,
-	})
-	builder := newPayloadBuilder(ctx)
-	items := make([]map[string]any, 0, len(rows))
-	for _, row := range rows {
-		if row != nil {
-			items = append(items, builder.Project(*row))
-		}
-	}
-	return map[string]any{"items": items}, nil
+	return s.listByStatus(ctx, teamID, projectmodel.StatusEnabled, "main.id desc")
 }
 
 func (s Service) Create(ctx context.Context, req CreateRequest) (map[string]any, error) {
@@ -93,10 +74,11 @@ func (s Service) Create(ctx context.Context, req CreateRequest) (map[string]any,
 	if err != nil {
 		return nil, err
 	}
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		return nil, fmt.Errorf("项目名称不能为空")
+	name, err := normalizeProjectName(req.Name)
+	if err != nil {
+		return nil, err
 	}
+	description := normalizeProjectDescription(req.Description)
 	binding, err := s.team.ResolveProjectRelease(ctx, req.TeamID)
 	if err != nil {
 		return nil, err
@@ -110,7 +92,7 @@ func (s Service) Create(ctx context.Context, req CreateRequest) (map[string]any,
 			"team_id":     binding.TeamID,
 			"release_id":  binding.ReleaseID,
 			"name":        name,
-			"description": strings.TrimSpace(req.Description),
+			"description": description,
 			"cover":       strings.TrimSpace(req.Cover),
 			"status":      projectmodel.StatusEnabled,
 			"created_at":  now,
@@ -161,18 +143,6 @@ func (s Service) Detail(ctx context.Context, projectID uint64) (map[string]any, 
 		"team":    teamDetail,
 		"assets":  assets,
 	}, nil
-}
-
-func (s Service) Delete(ctx context.Context, projectID uint64) (map[string]any, error) {
-	project, err := requireProject(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	projectmodel.NewProjectModel().Update(ctx, map[string]any{"id": project.ID}, map[string]any{
-		"status":     projectmodel.StatusDisabled,
-		"updated_at": time.Now(),
-	})
-	return map[string]any{"id": project.ID}, nil
 }
 
 func (s Service) TeamList(ctx context.Context) (map[string]any, error) {

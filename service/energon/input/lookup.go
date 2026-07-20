@@ -62,6 +62,29 @@ func paramInputKeys(param botmodel.Param) []string {
 	return keys
 }
 
+func paramInputAlias(key string) string {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "image":
+		return "images"
+	case "images":
+		return "image"
+	case "video":
+		return "videos"
+	case "videos":
+		return "video"
+	case "audio":
+		return "audios"
+	case "audios":
+		return "audio"
+	case "file":
+		return "files"
+	case "files":
+		return "file"
+	default:
+		return ""
+	}
+}
+
 func resolveServiceParamInputValue(
 	input map[string]any,
 	serviceParam botmodel.ServiceParam,

@@ -233,6 +233,7 @@ import {
 } from "./space-content-view";
 import { plainMarkdownTextFromRichOutput } from "./space-content-output";
 import {
+  isAudioPowerType,
   isVideoComposePowerType,
   resolvePowerPresentation,
 } from "./space-power-presentation";
@@ -1577,10 +1578,6 @@ export function WorkSpacePage() {
     );
   }
 
-  function deleteCanvasNode(node: SpaceCanvasNode) {
-    deleteCanvasNodes([node]);
-  }
-
   function addAssetNode(asset: ProjectAsset, position?: CanvasPoint) {
     addConfiguredNode("asset", position, { asset });
   }
@@ -1823,7 +1820,6 @@ export function WorkSpacePage() {
         onOpenNodeMenu={openNodeMenu}
         onAddConfiguredNode={addConfiguredNode}
         onCopyNode={copyCanvasNode}
-        onDeleteNode={deleteCanvasNode}
         onDeleteNodes={deleteCanvasNodes}
         onShowNodeDetail={setNodeDetail}
         onNodesCommit={(nodes) =>
@@ -1912,7 +1908,6 @@ export function WorkSpacePage() {
           sourceType: "project",
           projectID: space.project.id,
         }}
-        allowedKinds={["image", "audio", "video", "file"]}
         confirmSelection
         validateAsset={(asset) =>
           asset.versionID > 0
@@ -2313,7 +2308,6 @@ function CanvasWorkbench({
   onOpenNodeMenu,
   onAddConfiguredNode,
   onCopyNode,
-  onDeleteNode,
   onDeleteNodes,
   onShowNodeDetail,
   onNodesCommit,
@@ -2354,7 +2348,6 @@ function CanvasWorkbench({
   ) => void;
   onAddConfiguredNode?: AddConfiguredNodeHandler;
   onCopyNode: (node: SpaceCanvasNode, position?: CanvasPoint) => void;
-  onDeleteNode: (node: SpaceCanvasNode) => void;
   onDeleteNodes: (nodes: SpaceCanvasNode[]) => void;
   onShowNodeDetail: (node: SpaceCanvasNode) => void;
   onNodesCommit: (nodes: SpaceCanvasNode[]) => void;
@@ -2643,6 +2636,53 @@ function CanvasWorkbench({
     [edges, interactive, onEdgesCommit],
   );
 
+  const requestDeleteEdge = useCallback(
+    (edgeId: string) => {
+      if (!interactive || !edges.some((edge) => edge.id === edgeId)) {
+        return;
+      }
+      requestConfirm({
+        title: "删除连线",
+        description: "删除后，上下游节点将不再通过这条连线传递内容。",
+        confirmText: "删除",
+        tone: "danger",
+        onConfirm: () => deleteEdge(edgeId),
+      });
+    },
+    [deleteEdge, edges, interactive, requestConfirm],
+  );
+
+  const requestDeleteNodes = useCallback(
+    (targetNodes: SpaceCanvasNode[]) => {
+      if (!interactive || targetNodes.length === 0) {
+        return;
+      }
+      const removedNodeIds = collectCanvasNodeRemovalIds(nodes, targetNodes);
+      if (removedNodeIds.size === 0) {
+        return;
+      }
+      const singleTarget = targetNodes.length === 1 ? targetNodes[0] : null;
+      const includesGroup = targetNodes.some((node) => node.type === "group");
+      requestConfirm({
+        title: singleTarget
+          ? `删除「${singleTarget.title}」`
+          : `删除 ${removedNodeIds.size} 个节点`,
+        description: includesGroup
+          ? "会同时删除组内节点，并移除与这些节点相连的连线。"
+          : singleTarget
+            ? "会同时移除与该节点相连的连线。"
+            : "会同时移除与这些节点相连的连线。",
+        confirmText: "删除",
+        tone: "danger",
+        onConfirm: () => {
+          setSelectedEdgeId("");
+          onDeleteNodes(targetNodes);
+        },
+      });
+    },
+    [interactive, nodes, onDeleteNodes, requestConfirm],
+  );
+
   const flowEdges = useMemo<Edge[]>(() => {
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
     const selectedPathEdges = highlightedCanvasPathEdges(
@@ -2690,10 +2730,17 @@ function CanvasWorkbench({
           selectedEdgeId,
           highlightedPathEdges,
           highlightedPathSourceNodeId,
-          deleteEdge,
+          requestDeleteEdge,
         ),
       );
-  }, [deleteEdge, edges, hoveredNodeId, nodes, selectedEdgeId, selectedNodeId]);
+  }, [
+    edges,
+    hoveredNodeId,
+    nodes,
+    requestDeleteEdge,
+    selectedEdgeId,
+    selectedNodeId,
+  ]);
 
   const renderedEdges = useMemo(
     () => (proximityEdge ? [...flowEdges, proximityEdge] : flowEdges),
@@ -2905,21 +2952,15 @@ function CanvasWorkbench({
       return;
     }
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Delete" && event.key !== "Backspace") {
-        return;
-      }
-      if (!interactive) {
-        return;
-      }
-      if (isEditableEventTarget(event.target)) {
+      if (!interactive || !isCanvasDeleteShortcut(event)) {
         return;
       }
       event.preventDefault();
-      deleteEdge(selectedEdgeId);
+      requestDeleteEdge(selectedEdgeId);
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [deleteEdge, interactive, selectedEdgeId]);
+  }, [interactive, requestDeleteEdge, selectedEdgeId]);
 
   useEffect(() => {
     if (
@@ -2930,10 +2971,7 @@ function CanvasWorkbench({
       return;
     }
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Delete" && event.key !== "Backspace") {
-        return;
-      }
-      if (!interactive || isEditableEventTarget(event.target)) {
+      if (!interactive || !isCanvasDeleteShortcut(event)) {
         return;
       }
       const selectedNodes = nodes.filter((node) =>
@@ -2943,14 +2981,14 @@ function CanvasWorkbench({
         return;
       }
       event.preventDefault();
-      onDeleteNodes(selectedNodes);
+      requestDeleteNodes(selectedNodes);
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     interactive,
     nodes,
-    onDeleteNodes,
+    requestDeleteNodes,
     selectedEdgeId,
     selectedNodeIds.length,
     selectedNodeIdSet,
@@ -3287,19 +3325,7 @@ function CanvasWorkbench({
     }
     const targetNode = actionNode;
     closeNodeActionMenu();
-    requestConfirm({
-      title: `删除「${targetNode.title}」`,
-      description:
-        targetNode.type === "group"
-          ? "会同时删除组内节点，并移除与这些节点相连的连线。"
-          : "会同时移除与该节点相连的连线。",
-      confirmText: "删除",
-      tone: "danger",
-      onConfirm: () => {
-        setSelectedEdgeId("");
-        onDeleteNode(targetNode);
-      },
-    });
+    requestDeleteNodes([targetNode]);
   }
 
   function detailActionNode() {
@@ -7863,6 +7889,14 @@ function isEditableEventTarget(target: EventTarget | null) {
   );
 }
 
+function isCanvasDeleteShortcut(event: KeyboardEvent) {
+  return (
+    !event.repeat &&
+    (event.key === "Delete" || event.key === "Backspace") &&
+    !isEditableEventTarget(event.target)
+  );
+}
+
 function functionIcon(key: string): LucideIcon {
   if (key === "start") return Play;
   if (key === "import") return Upload;
@@ -10282,6 +10316,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
   // 5. Power Nodes
   if (node.type === "power") {
     const isPowerRunning = isActiveRunningNode(runningNode);
+    const isAudioPower = isAudioPowerType(node.power, node.kind);
     const storyboardHasResult = nodeHasResultContent(node);
     const storyboardStatus: StoryboardNodeStatus = isPowerRunning
       ? "running"
@@ -10335,6 +10370,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
       isPowerRunning ? "is-running" : "",
       isStoryboardPower ? "is-storyboard" : "",
       isVideoComposePower ? "is-video-compose" : "",
+      isAudioPower ? "is-audio" : "",
       hasPowerContent ? "has-content" : "",
       hasPowerMedia ? "has-media" : "",
     ]
@@ -10594,7 +10630,6 @@ function PowerNodeGeneratedContent({
           autoPlay={streaming}
           preload={streaming ? "auto" : "metadata"}
         />
-        {caption ? <p>{caption}</p> : null}
       </div>
     );
   }

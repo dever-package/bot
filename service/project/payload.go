@@ -30,13 +30,14 @@ func (b payloadBuilder) Project(project projectmodel.Project) map[string]any {
 		"team_id":     project.TeamID,
 		"release_id":  project.ReleaseID,
 		"name":        project.Name,
-		"description": strings.TrimSpace(project.Description),
+		"description": normalizeProjectDescription(project.Description),
 		"cover":       strings.TrimSpace(project.Cover),
 		"mode":        projectMode(project),
 		"status":      project.Status,
 		"team":        b.Team(project.TeamID, project.ReleaseID),
 		"created_at":  project.CreatedAt,
 		"updated_at":  project.UpdatedAt,
+		"deleted_at":  project.DeletedAt,
 	}
 }
 

@@ -71,12 +71,14 @@ func NormalizeManifestCapabilities(manifest map[string]any) {
 	raw, explicit := manifest["capabilities"]
 	set := parseCapabilitySet(raw)
 	if !explicit {
-		set = CapabilitySet{CapabilityFiles: {}, CapabilityTemp: {}}
-		if manifestValuePresent(manifest["scripts"]) {
-			set[CapabilityScript] = struct{}{}
-		}
-		if manifestValuePresent(manifest["mcp"]) {
-			set[CapabilityMCP] = struct{}{}
+		// Legacy third-party manifests predate capability declarations and keep the original full tool set.
+		set = CapabilitySet{
+			CapabilityFiles:   {},
+			CapabilityTemp:    {},
+			CapabilityScript:  {},
+			CapabilityHTTP:    {},
+			CapabilityMCP:     {},
+			CapabilityNetwork: {},
 		}
 	}
 	values := make([]any, 0, len(set))
@@ -114,21 +116,6 @@ func parseCapabilitySet(value any) CapabilitySet {
 		}
 	}
 	return set
-}
-
-func manifestValuePresent(value any) bool {
-	switch current := value.(type) {
-	case nil:
-		return false
-	case string:
-		return strings.TrimSpace(current) != ""
-	case []any:
-		return len(current) > 0
-	case map[string]any:
-		return len(current) > 0
-	default:
-		return true
-	}
 }
 
 func ManifestDomains(manifest string) []string {

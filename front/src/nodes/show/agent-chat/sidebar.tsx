@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { SessionActions } from "./session-actions";
-import { AgentChatTooltip } from "./tooltip";
 import type { AgentChatController } from "./types";
 
 export function Sidebar({
@@ -97,29 +96,24 @@ export function Sidebar({
                       : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
                   )}
                 >
-                  <AgentChatTooltip
-                    label={session.title}
-                    triggerClassName="flex min-w-0 flex-1"
+                  <button
+                    type="button"
+                    className="agent-chat-session-trigger flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left text-sm"
+                    onClick={() =>
+                      void (onOpenSession
+                        ? onOpenSession(session.id)
+                        : controller.openSession(session.id))
+                    }
                   >
-                    <button
-                      type="button"
-                      className="agent-chat-session-trigger flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left text-sm"
-                      onClick={() =>
-                        void (onOpenSession
-                          ? onOpenSession(session.id)
-                          : controller.openSession(session.id))
-                      }
-                    >
-                      {session.running ? (
-                        <Loader2 className="size-3.5 shrink-0 animate-spin" />
-                      ) : (
-                        <MessageSquare className="size-3.5 shrink-0" />
-                      )}
-                      <span className="min-w-0 flex-1 truncate">
-                        {session.title}
-                      </span>
-                    </button>
-                  </AgentChatTooltip>
+                    {session.running ? (
+                      <Loader2 className="size-3.5 shrink-0 animate-spin" />
+                    ) : (
+                      <MessageSquare className="size-3.5 shrink-0" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate">
+                      {session.title}
+                    </span>
+                  </button>
                   <SessionActions
                     session={session}
                     active={session.id === controller.sessionID}

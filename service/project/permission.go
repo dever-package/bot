@@ -21,20 +21,28 @@ func currentUserID(ctx context.Context) (uint64, error) {
 }
 
 func requireProject(ctx context.Context, projectID uint64) (*projectmodel.Project, error) {
+	return requireProjectWithStatus(ctx, projectID, projectmodel.StatusEnabled)
+}
+
+func requireDeletedProject(ctx context.Context, projectID uint64) (*projectmodel.Project, error) {
+	return requireProjectWithStatus(ctx, projectID, projectmodel.StatusDeleted)
+}
+
+func requireProjectWithStatus(ctx context.Context, projectID uint64, status int16) (*projectmodel.Project, error) {
 	userID, err := currentUserID(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if projectID == 0 {
-		return nil, fmt.Errorf("项目不能为空")
+		return nil, fmt.Errorf("作品不能为空")
 	}
 	project := projectmodel.NewProjectModel().Find(ctx, map[string]any{
 		"id":      projectID,
 		"user_id": userID,
-		"status":  projectmodel.StatusEnabled,
+		"status":  status,
 	})
 	if project == nil {
-		return nil, fmt.Errorf("项目不存在")
+		return nil, fmt.Errorf("作品不存在")
 	}
 	return project, nil
 }

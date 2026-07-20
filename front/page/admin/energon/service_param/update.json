@@ -141,7 +141,7 @@
           "valueField": "id",
           "labelField": "value"
         },
-        "info": "选择要映射的文件序号。单文件参数只会使用第 1 个文件；多文件参数保存时会校验最大数量。",
+        "info": "选择要映射的文件序号。单文件参数只会使用第 1 个文件；多文件参数保存时会校验最大数量。字段标识使用数组区间时，多个文件会按顺序一一映射。",
         "meta": {
           "orientation": "horizontal",
           "optionParams": {
@@ -272,7 +272,7 @@
         "type": "form-input",
         "value": "form.key",
         "mode": "form",
-        "info": "不填则使用内部参数的标识。支持对象/数组路径，例如 content[1].image_url.url。ComfyUI 工作流需要加上节点ID，比如 10.text。",
+        "info": "不填则使用内部参数的标识。支持对象/数组路径，例如 content[1].image_url.url；content[1-5].image_url.url 表示数组区间，标量会广播，列表会按顺序一一映射。ComfyUI 工作流需要加上节点ID，比如 10.text。",
         "meta": {
           "controlClassName": "min-w-[10rem]"
         }

@@ -58,8 +58,8 @@ var (
 	}
 
 	sourceRuleOptions = []map[string]any{
-		{"id": 1, "value": "仅调用第一个可用来源"},
-		{"id": 2, "value": "可以选择来源"},
+		{"id": 1, "value": "自动选择来源"},
+		{"id": 2, "value": "手动选择来源"},
 	}
 
 	powerCateRelation = orm.Relation{

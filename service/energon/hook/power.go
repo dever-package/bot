@@ -24,7 +24,7 @@ func (PowerHook) ProviderBeforeSavePower(c *server.Context, params []any) any {
 	trimEnergonStringField(record, "icon", partial)
 	normalizePowerTypeFields(c, record, partial)
 	if shouldNormalizeEnergonField(record, "source_rule", partial) {
-		record["source_rule"] = normalizePowerSourceRule(util.ToIntDefault(record["source_rule"], int(powerSourceRuleFirst)))
+		record["source_rule"] = normalizePowerSourceRule(util.ToIntDefault(record["source_rule"], int(powerSourceRuleAuto)))
 	}
 	ensureDefaultCategory(record, partial)
 	ensureDefaultRecordStatus(record, partial)
@@ -83,7 +83,7 @@ func normalizePowerSourceRule(value int) int16 {
 	if int16(value) == powerSourceRulePick {
 		return powerSourceRulePick
 	}
-	return powerSourceRuleFirst
+	return powerSourceRuleAuto
 }
 
 func normalizePowerParamShow(value int) int16 {

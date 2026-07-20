@@ -13,7 +13,6 @@ const (
 )
 
 var askUserFieldTypes = map[string]struct{}{
-	"input": {}, "textarea": {}, "switch": {},
 	"option": {}, "multi_option": {}, "file": {}, "files": {},
 }
 
@@ -23,13 +22,13 @@ func AskUserTool() Tool {
 			Name:        AskUserToolName,
 			Title:       "等待用户输入",
 			Kind:        "interaction",
-			Description: "继续任务所必需且无法合理推断的信息，必须调用此工具收集；可安全采用默认值时直接执行。禁止在正文中提问或列出待确认项后结束。",
+			Description: "继续任务所必需且无法合理推断的信息，必须调用此工具收集；可安全采用默认值时直接执行。所有文本信息必须使用 option 或 multi_option 并提供常用候选项，用户可在选项下自定义补充；禁止使用输入框或文本域。需要上传时使用 file 或 files。禁止在正文中提问或列出待确认项后结束。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"fields": map[string]any{
 						"type":        "array",
-						"description": "需要用户确认的信息",
+						"description": "需要用户确认的信息；文本字段只能是带候选项的单选或多选，自由内容由用户通过选项下的自定义补充填写",
 						"minItems":    1,
 						"maxItems":    maxAskUserFields,
 						"items": map[string]any{
@@ -38,16 +37,13 @@ func AskUserTool() Tool {
 								"key":   map[string]any{"type": "string", "description": "字段标识"},
 								"label": map[string]any{"type": "string", "description": "字段名称"},
 								"type": map[string]any{
-									"type": "string",
-									"enum": []any{"input", "textarea", "switch", "option", "multi_option", "file", "files"},
-								},
-								"placeholder": map[string]any{
 									"type":        "string",
-									"description": "输入提示；仅用于输入类字段",
+									"description": "单选使用 option，多选使用 multi_option；上传使用 file 或 files",
+									"enum":        []any{"option", "multi_option", "file", "files"},
 								},
 								"options": map[string]any{
 									"type":        "array",
-									"description": "可选项",
+									"description": "option 或 multi_option 必须提供的常用答案；无法穷举时概括 2-8 个典型选项，用户仍可补充自定义值",
 									"minItems":    2,
 									"maxItems":    maxAskUserOptions,
 									"items":       map[string]any{"type": "string"},
@@ -130,9 +126,6 @@ func normalizeAskUserFields(value any) ([]map[string]any, error) {
 			"type":     fieldType,
 			"required": true,
 			"sort":     index + 1,
-		}
-		if placeholder := argumentText(field, "placeholder"); placeholder != "" {
-			normalized["placeholder"] = placeholder
 		}
 		if fieldType == "option" || fieldType == "multi_option" {
 			options := normalizeAskUserOptions(field["options"])

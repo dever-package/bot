@@ -2,6 +2,7 @@ package input
 
 import (
 	"context"
+	"strings"
 
 	botmodel "github.com/dever-package/bot/model/energon"
 )
@@ -45,6 +46,9 @@ func normalizeServiceParamInputKeys(
 			continue
 		}
 		for _, key := range serviceParamInputKeys(serviceParam, param) {
+			if value, tracked := normalized[key]; tracked && IsMissing(value) {
+				continue
+			}
 			value, exists := input[key]
 			if !exists {
 				continue
@@ -62,7 +66,19 @@ func normalizeParamInputKeys(
 	params map[uint64]botmodel.Param,
 	normalized map[string]any,
 ) {
-	for _, powerParam := range repo.PowerParamsByPower(ctx, powerID) {
+	powerParams := repo.PowerParamsByPower(ctx, powerID)
+	configuredKeys := map[string]struct{}{}
+	for _, powerParam := range powerParams {
+		param, ok := params[powerParam.ParamID]
+		if !ok || !IsActive(param.Status) {
+			continue
+		}
+		if key := strings.ToLower(strings.TrimSpace(param.Key)); key != "" {
+			configuredKeys[key] = struct{}{}
+		}
+	}
+
+	for _, powerParam := range powerParams {
 		param, ok := params[powerParam.ParamID]
 		if !ok || !IsActive(param.Status) {
 			continue
@@ -74,7 +90,41 @@ func normalizeParamInputKeys(
 			}
 			normalized[key] = normalizeParamInputValue(ctx, param, value)
 		}
+		normalizeParamInputAlias(ctx, input, param, configuredKeys, normalized)
 	}
+}
+
+func normalizeParamInputAlias(
+	ctx context.Context,
+	input map[string]any,
+	param botmodel.Param,
+	configuredKeys map[string]struct{},
+	normalized map[string]any,
+) {
+	if controlType := NormalizeParamControlType(param.Type); controlType != "file" && controlType != "files" {
+		return
+	}
+	key := strings.TrimSpace(param.Key)
+	alias := paramInputAlias(key)
+	if key == "" || alias == "" {
+		return
+	}
+	if _, configured := configuredKeys[strings.ToLower(alias)]; configured {
+		return
+	}
+	if _, exactExists := input[key]; exactExists {
+		if _, aliasExists := input[alias]; aliasExists {
+			normalized[alias] = nil
+		}
+		return
+	}
+	value, exists := input[alias]
+	if !exists || IsMissing(value) {
+		return
+	}
+	normalized[key] = normalizeParamInputValue(ctx, param, value)
+	// The alias is an input spelling, not an additional provider field.
+	normalized[alias] = nil
 }
 
 func normalizeParamInputValue(ctx context.Context, param botmodel.Param, value any) any {

@@ -21,6 +21,8 @@ type dialogueAssetProjection struct {
 	Source        map[string]any
 }
 
+const dialogueActivityAnchorContentOrder = "activity_anchor"
+
 func projectDialogueAsset(
 	ctx context.Context,
 	message runtimechat.CompletedAssistantMessage,
@@ -113,9 +115,40 @@ func projectWholeDialogueMessage(
 		DefaultName:   "",
 		RequestSuffix: ":whole",
 		Source: map[string]any{
-			"artifact_ids": dialogueArtifactIDs(ready),
+			"artifact_ids":  dialogueArtifactIDs(ready),
+			"content_order": dialogueActivityAnchorContentOrder,
 		},
 	}, nil
+}
+
+func reprojectDialogueVersionContent(ctx context.Context, teamID uint64, version map[string]any) {
+	requestID := nestedText(version, "request_id")
+	source := recordValue(version["source"])
+	if !strings.HasSuffix(requestID, ":whole") ||
+		nestedText(source, "content_order") == dialogueActivityAnchorContentOrder {
+		return
+	}
+
+	messageID := nestedUint64(source, "message_id")
+	roleID := nestedUint64(source, "role_id")
+	agentKey := nestedText(source, "agent_key")
+	if messageID == 0 || roleID == 0 || agentKey == "" {
+		return
+	}
+	message, err := runtimechat.NewService().RequireCompletedAssistantMessage(
+		ctx,
+		messageID,
+		agentKey,
+		RoleContextKey(teamID, roleID),
+	)
+	if err != nil {
+		return
+	}
+	projection, err := projectDialogueAsset(ctx, message, 0)
+	if err != nil {
+		return
+	}
+	version["content"] = projection.Content
 }
 
 func wholeDialogueAssetKind(
@@ -165,7 +198,7 @@ func dialogueMessageDocument(
 			}
 		}
 	} else {
-		nodes = append(nodes, dialogueTextNodes(message.Text)...)
+		nodes = append(nodes, dialogueAnchoredMessageNodes(message, artifacts, usedArtifacts)...)
 	}
 	for _, artifact := range artifacts {
 		if !usedArtifacts[dialogueArtifactID(artifact)] {
@@ -176,6 +209,77 @@ func dialogueMessageDocument(
 		nodes = append(nodes, dialogueTextNodes(message.Text)...)
 	}
 	return map[string]any{"type": "doc", "content": nodes}
+}
+
+func dialogueAnchoredMessageNodes(
+	message runtimechat.CompletedAssistantMessage,
+	artifacts []map[string]any,
+	usedArtifacts map[uint64]bool,
+) []map[string]any {
+	activities := dialogueRecordList(message.Output["activities"])
+	if len(activities) == 0 {
+		return dialogueTextNodes(message.Text)
+	}
+
+	artifactByID := make(map[uint64]map[string]any, len(artifacts))
+	for _, artifact := range artifacts {
+		if id := dialogueArtifactID(artifact); id > 0 {
+			artifactByID[id] = artifact
+		}
+	}
+
+	nodes := make([]map[string]any, 0, len(activities)+2)
+	cursor := 0
+	for _, activity := range activities {
+		anchorEnd := dialogueAnchorEnd(message.Text, nestedText(activity, "anchor_text"), cursor)
+		nodes = append(nodes, dialogueTextNodes(message.Text[cursor:anchorEnd])...)
+		for _, activityArtifact := range dialogueRecordList(activity["artifacts"]) {
+			artifactID := dialogueArtifactID(activityArtifact)
+			artifact := artifactByID[artifactID]
+			if artifactID == 0 || artifact == nil || usedArtifacts[artifactID] {
+				continue
+			}
+			nodes = append(nodes, dialogueArtifactNode(artifact))
+			usedArtifacts[artifactID] = true
+		}
+		cursor = anchorEnd
+	}
+	nodes = append(nodes, dialogueTextNodes(message.Text[cursor:])...)
+	return nodes
+}
+
+func dialogueAnchorEnd(text string, anchor string, cursor int) int {
+	anchor = strings.TrimSpace(anchor)
+	if anchor == "" {
+		return cursor
+	}
+	if strings.HasPrefix(text, anchor) {
+		if len(anchor) > cursor {
+			return len(anchor)
+		}
+		return cursor
+	}
+	if position := strings.Index(text[cursor:], anchor); position >= 0 {
+		return cursor + position + len(anchor)
+	}
+	return cursor
+}
+
+func dialogueRecordList(value any) []map[string]any {
+	switch rows := value.(type) {
+	case []map[string]any:
+		return rows
+	case []any:
+		result := make([]map[string]any, 0, len(rows))
+		for _, row := range rows {
+			if current, ok := row.(map[string]any); ok {
+				result = append(result, current)
+			}
+		}
+		return result
+	default:
+		return nil
+	}
 }
 
 func dialogueHeadingNode(text string) map[string]any {

@@ -2,7 +2,11 @@ import {
   contentOutputHasMedia,
   normalizeEnergonOutput,
 } from "../space-content-view";
-import { plainMarkdownTextFromRichOutput } from "../space-content-output";
+import {
+  looksLikeMarkdownSyntax,
+  markdownCompatibleRichContent,
+  plainMarkdownTextFromRichOutput,
+} from "../space-content-output";
 import { documentText, richDocument } from "../space-model";
 import {
   parseStoryboardOutput,
@@ -46,11 +50,14 @@ export function resolveNodeDetailContent(
 
   const directRich = directRichDocument(raw);
   if (directRich) {
-    const plainMarkdown = isExplicitRichJSON(raw)
-      ? ""
-      : plainMarkdownTextFromRichOutput(directRich);
-    if (plainMarkdown && looksLikeMarkdownSyntax(plainMarkdown)) {
-      return markdownContent(plainMarkdown);
+    const markdown = isExplicitRichJSON(raw)
+      ? null
+      : markdownCompatibleRichContent(directRich);
+    if (
+      markdown &&
+      (node.kind === "text" || looksLikeMarkdownSyntax(markdown.plainText))
+    ) {
+      return markdownContent(markdown.markdown);
     }
     return richContent(directRich);
   }
@@ -583,15 +590,6 @@ function looksLikeStructuredJSON(value: string) {
   return (
     (text.startsWith("{") && text.endsWith("}")) ||
     (text.startsWith("[") && text.endsWith("]"))
-  );
-}
-
-function looksLikeMarkdownSyntax(value: string) {
-  return (
-    /(^|\n)\s*(#{1,6}\s|[-*+]\s|>\s|\d+\.\s|```)/m.test(value) ||
-    /(\*\*[^*]+\*\*|__[^_]+__|!\[[^\]]*\]\(|\[[^\]]+\]\([^)]+\)|`[^`]+`)/.test(
-      value,
-    )
   );
 }
 

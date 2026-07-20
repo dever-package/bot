@@ -19,6 +19,7 @@ const (
 )
 
 type completionReview struct {
+	Delivery   string
 	Status     string
 	NextAction string
 	NextTool   string
@@ -37,6 +38,16 @@ func shouldReviewCompletion(state *runState) bool {
 		return true
 	}
 	return state.modelStep == 1 && runtimeEventType(state.execution.input) == "interaction_resumed"
+}
+
+func shouldReviewPresentSuggestions(state *runState, calls []botprotocol.ToolCall) bool {
+	if !shouldReviewCompletion(state) || len(calls) == 0 {
+		return false
+	}
+	return strings.EqualFold(
+		strings.TrimSpace(calls[len(calls)-1].Name),
+		runtimeprovider.PresentSuggestionsToolName,
+	)
 }
 
 func hasQueuedArtifactDelivery(state *runState) bool {
@@ -111,27 +122,82 @@ func resolveCompletionReview(decision completionReviewDecision) (completionRevie
 	switch decision.Interaction {
 	case runtimeprovider.AskUserToolName:
 		return completionReview{
+			Delivery:   decision.Delivery,
 			Status:     "continue",
 			NextAction: "收集候选响应要求用户提供的必要信息",
 			NextTool:   runtimeprovider.AskUserToolName,
 		}, nil
+	case runtimeprovider.PresentSuggestionsToolName, "none":
+	default:
+		return completionReview{}, fmt.Errorf("完成检查交互状态无效")
+	}
+	// Optional suggestions cannot replace the delivery promised by the current task.
+	if decision.Delivery == "incomplete" {
+		return completionReview{
+			Delivery:   decision.Delivery,
+			Status:     "continue",
+			NextAction: "继续完成候选响应中尚未交付的任务",
+		}, nil
+	}
+	switch decision.Interaction {
 	case runtimeprovider.PresentSuggestionsToolName:
 		return completionReview{
+			Delivery:   decision.Delivery,
 			Status:     "continue",
 			NextAction: "将候选响应中的可选下一步转为可点击建议",
 			NextTool:   runtimeprovider.PresentSuggestionsToolName,
 		}, nil
 	case "none":
-	default:
-		return completionReview{}, fmt.Errorf("完成检查交互状态无效")
+		return completionReview{Delivery: decision.Delivery, Status: "complete"}, nil
 	}
-	if decision.Delivery == "complete" {
-		return completionReview{Status: "complete"}, nil
+	return completionReview{}, fmt.Errorf("完成检查交互状态无效")
+}
+
+func (s Service) reviewPresentSuggestions(
+	ctx context.Context,
+	controller *runController,
+	state *runState,
+	result modelStepResult,
+) (bool, bool) {
+	if hasQueuedArtifactDelivery(state) {
+		return true, true
 	}
-	return completionReview{
-		Status:     "continue",
-		NextAction: "继续完成候选响应中尚未交付的任务",
-	}, nil
+	review, err := s.inspectCompletion(ctx, controller, state, result)
+	if ctx.Err() != nil {
+		s.finishContext(controller, state)
+		return false, false
+	}
+	if err != nil {
+		logCompletionReviewError(state, err)
+		review = completionReview{
+			Delivery:   "incomplete",
+			Status:     "continue",
+			NextAction: "继续完成当前任务",
+		}
+	}
+	if review.Delivery == "complete" && review.NextTool != runtimeprovider.AskUserToolName {
+		return true, true
+	}
+	state.completionReviews++
+	if state.completionReviews >= maxCompletionReviews {
+		s.finish(state, finishOutcome{
+			status: runStatusFail, text: state.lastText,
+			message:    "模型连续未完成当前任务",
+			stepType:   "error",
+			stepTitle:  "任务未完成",
+			stepStatus: stepStatusFail,
+		})
+		return false, false
+	}
+	state.requiredToolName = review.NextTool
+	state.awaitingDelivery = review.NextTool == ""
+	return false, s.continueModelOutput(
+		state,
+		result,
+		completionContinuationInput(review.NextAction, review.NextTool),
+		"completion_terminal_rejected",
+		stepStatusWarning,
+	)
 }
 
 func completionReviewTool() map[string]any {

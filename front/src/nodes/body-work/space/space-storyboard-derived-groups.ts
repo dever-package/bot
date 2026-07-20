@@ -1,5 +1,10 @@
 import { reconcileCanvasGroupEdges } from "./space-group-model";
-import { createLocalNode, nextCanvasNodeNo } from "./space-model";
+import {
+  audioPowerNodeSizeUpgrade,
+  createLocalNode,
+  nextCanvasNodeNo,
+  powerNodeDefaultSize,
+} from "./space-model";
 import { isStoryboardPowerType } from "./space-power-presentation";
 import {
   canvasReferenceContentFromText,
@@ -9,6 +14,7 @@ import {
   expandStoryboardDerivedGroup,
   nextStoryboardDerivedNodePosition,
   planStoryboardDerivedGroupLayout,
+  storyboardDerivedLayoutUpgradeMemberOffsets,
   type StoryboardDerivedGroupLayout,
 } from "./space-storyboard-derived-layout";
 import {
@@ -134,10 +140,12 @@ export function syncStoryboardDerivedGroups(input: {
       layoutIndex: spec.layoutIndex,
       itemCount: items.length,
       power,
+      powerKind: spec.powerKind,
       direction: spec.direction,
       currentSize: existing
         ? { width: existing.width, height: existing.height }
         : undefined,
+      currentLayoutKey: existing?.group?.layoutKey,
     })),
   });
   const storyboardReferenceLabels = storyboardMaterialReferenceNames(
@@ -157,6 +165,7 @@ export function syncStoryboardDerivedGroups(input: {
       spec,
       layout,
       assetCate: input.assetCate,
+      power,
     });
     changed = changed || group.changed;
 
@@ -403,6 +412,7 @@ function ensureDerivedGroup(input: {
   spec: StoryboardDerivedGroupSpec;
   layout: StoryboardDerivedGroupLayout;
   assetCate: AssetCate;
+  power?: PowerOption | null;
 }) {
   const existing = findDerivedGroup(
     input.nodes,
@@ -419,6 +429,19 @@ function ensureDerivedGroup(input: {
       input.nodes[input.nodes.indexOf(existing)] = renamed;
       return { node: renamed, changed: true };
     }
+    const memberOffsets = storyboardDerivedLayoutUpgradeMemberOffsets({
+      currentLayoutKey: existing.group?.layoutKey,
+      nextLayoutKey: input.layout.layoutKey,
+      group: existing,
+      members: input.nodes.filter((node) => node.groupId === existing.id),
+      nodeSize: powerNodeDefaultSize(
+        input.power || {
+          kind: input.spec.powerKind,
+          outputType: input.spec.outputType,
+        },
+      ),
+      powerKind: input.spec.powerKind,
+    });
     const deltaX = input.layout.bounds.x - existing.x;
     const deltaY = input.layout.bounds.y - existing.y;
     let movedGroup = existing;
@@ -428,8 +451,21 @@ function ensureDerivedGroup(input: {
       }
       const moved = {
         ...node,
-        x: node.x + deltaX,
-        y: node.y + deltaY,
+        ...(node.groupId === existing.id
+          ? audioPowerNodeSizeUpgrade(node) || {}
+          : {}),
+        x:
+          node.x +
+          deltaX +
+          (node.groupId === existing.id
+            ? memberOffsets?.get(node.id)?.x || 0
+            : 0),
+        y:
+          node.y +
+          deltaY +
+          (node.groupId === existing.id
+            ? memberOffsets?.get(node.id)?.y || 0
+            : 0),
         ...(node.id === existing.id
           ? {
               title: input.spec.title,
@@ -516,6 +552,15 @@ function createDerivedNode(input: {
   node.description = input.item.prompt;
   node.kind = input.spec.powerKind;
   node.outputType = input.spec.outputType;
+  if (!input.power) {
+    Object.assign(
+      node,
+      powerNodeDefaultSize({
+        kind: input.spec.powerKind,
+        outputType: input.spec.outputType,
+      }),
+    );
+  }
   if (!input.power) {
     node.subtitle = `未配置${derivedPowerLabel(input.spec)}能力`;
     node.description = `${node.subtitle}。配置并启用能力后可运行此条目。`;

@@ -454,18 +454,10 @@ func (adapter DoubaoAdapter) buildVideoRequest(input botprotocol.NativeInput) (b
 		return botprovider.Request{}, fmt.Errorf("豆包视频服务缺少模型名")
 	}
 
+	// Video content is defined entirely by service parameter mappings.
 	normalizeDoubaoVideoBodyContent(body)
-	content := mergeDoubaoVideoContent(
-		botprotocol.NormalizeAnyList(body["content"]),
-		doubaoVideoContent(input, body),
-	)
-	if len(content) > 0 {
-		body["content"] = content
-	} else {
-		delete(body, "content")
-	}
 	if len(botprotocol.NormalizeAnyList(body["content"])) == 0 {
-		return botprovider.Request{}, fmt.Errorf("豆包视频服务缺少 content")
+		return botprovider.Request{}, fmt.Errorf("豆包视频服务缺少 content，请检查服务参数映射")
 	}
 
 	return doubaoJSONRequest(input, resolveConfiguredPath(input, doubaoVideoTaskPath), body), nil
@@ -506,149 +498,6 @@ func doubaoMappedInput(input botprotocol.NativeInput) botprotocol.MappedInput {
 		return botprotocol.NewMappedInput(input.Request.Input, nil)
 	}
 	return input.Mapped
-}
-
-func doubaoVideoContent(input botprotocol.NativeInput, body map[string]any) []any {
-	mapped := doubaoMappedInput(input)
-	prompt := botprotocol.BuildPromptContent(mapped.PromptInput(mapped.InputKeySet()), mapped.PromptOptions("用户输入"))
-	text := strings.TrimSpace(botprotocol.AsText(body["prompt"]))
-	if text == "" {
-		text = strings.TrimSpace(botprotocol.AsText(body["text"]))
-	}
-	delete(body, "prompt")
-	delete(body, "text")
-	if text == "" {
-		text = prompt.TextWithMediaReferences(botprotocol.MediaReferenceOptions{
-			Files: true,
-		})
-	}
-
-	images := append(botprotocol.NormalizeStringList(body["image"]), botprotocol.NormalizeStringList(body["images"])...)
-	videos := append(botprotocol.NormalizeStringList(body["video"]), botprotocol.NormalizeStringList(body["videos"])...)
-	audios := append(botprotocol.NormalizeStringList(body["audio"]), botprotocol.NormalizeStringList(body["audios"])...)
-	images = append(images, doubaoOriginalMediaURLs(mapped, "image", "images", botprotocol.MediaTypeImage)...)
-	videos = append(videos, doubaoOriginalMediaURLs(mapped, "video", "videos", botprotocol.MediaTypeVideo)...)
-	audios = append(audios, doubaoOriginalMediaURLs(mapped, "audio", "audios", botprotocol.MediaTypeAudio)...)
-	delete(body, "image")
-	delete(body, "images")
-	delete(body, "video")
-	delete(body, "videos")
-	delete(body, "audio")
-	delete(body, "audios")
-	images = uniqueDoubaoMediaURLs(append(images, prompt.Images...))
-	videos = uniqueDoubaoMediaURLs(append(videos, prompt.Videos...))
-	audios = uniqueDoubaoMediaURLs(append(audios, prompt.Audios...))
-
-	content := make([]any, 0, 1+len(images)+len(videos)+len(audios))
-	if text != "" {
-		content = append(content, map[string]any{
-			"type": "text",
-			"text": text,
-		})
-	}
-	imageRoles := doubaoVideoImageRoles(body, len(images))
-	for index, url := range images {
-		item := map[string]any{
-			"type": "image_url",
-			"image_url": map[string]any{
-				"url": url,
-			},
-		}
-		if role := doubaoIndexedRole(imageRoles, index); role != "" {
-			item["role"] = role
-		}
-		content = append(content, item)
-	}
-	for _, url := range videos {
-		content = append(content, map[string]any{
-			"type": "video_url",
-			"video_url": map[string]any{
-				"url": url,
-			},
-			"role": "reference_video",
-		})
-	}
-	for _, url := range audios {
-		content = append(content, map[string]any{
-			"type": "audio_url",
-			"audio_url": map[string]any{
-				"url": url,
-			},
-			"role": "reference_audio",
-		})
-	}
-	return content
-}
-
-func doubaoOriginalMediaURLs(
-	mapped botprotocol.MappedInput,
-	singular string,
-	plural string,
-	mediaType string,
-) []string {
-	values := botprotocol.NormalizeMediaList(mapped.Original[singular], mediaType)
-	return append(values, botprotocol.NormalizeMediaList(mapped.Original[plural], mediaType)...)
-}
-
-func mergeDoubaoVideoContent(existing []any, incoming []any) []any {
-	result := make([]any, 0, len(existing)+len(incoming))
-	seen := map[string]bool{}
-	hasText := false
-	appendItems := func(items []any) {
-		for _, item := range items {
-			mapped, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			normalized, valid := normalizeDoubaoContentItem(mapped)
-			if !valid {
-				continue
-			}
-			if strings.EqualFold(strings.TrimSpace(botprotocol.AsText(normalized["type"])), "text") {
-				if hasText {
-					continue
-				}
-				hasText = true
-			}
-			key := doubaoVideoContentItemKey(normalized)
-			if key != "" && seen[key] {
-				continue
-			}
-			if key != "" {
-				seen[key] = true
-			}
-			result = append(result, normalized)
-		}
-	}
-	appendItems(existing)
-	appendItems(incoming)
-	return result
-}
-
-func doubaoVideoContentItemKey(item map[string]any) string {
-	contentType := strings.ToLower(strings.TrimSpace(botprotocol.AsText(item["type"])))
-	switch contentType {
-	case "text":
-		return contentType + ":" + strings.TrimSpace(botprotocol.AsText(item["text"]))
-	case "image_url", "video_url", "audio_url":
-		return contentType + ":" + doubaoContentMediaURL(item[contentType]) + ":" + strings.TrimSpace(botprotocol.AsText(item["role"]))
-	default:
-		return ""
-	}
-}
-
-func uniqueDoubaoMediaURLs(values []string) []string {
-	result := make([]string, 0, len(values))
-	seen := map[string]bool{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" || seen[value] {
-			continue
-		}
-		seen[value] = true
-		result = append(result, value)
-	}
-	return result
 }
 
 func normalizeDoubaoVideoBodyContent(body map[string]any) {
@@ -764,72 +613,6 @@ func doubaoContentMediaURL(value any) string {
 	default:
 		return strings.TrimSpace(botprotocol.AsText(value))
 	}
-}
-
-func doubaoVideoImageRoles(body map[string]any, imageCount int) []string {
-	if imageCount <= 0 {
-		return nil
-	}
-
-	defer delete(body, "image_role")
-	defer delete(body, "image_roles")
-
-	if roles := normalizeDoubaoRoleList(body["image_roles"]); len(roles) > 0 {
-		return roles
-	}
-	if role := strings.TrimSpace(botprotocol.AsText(body["image_role"])); role != "" {
-		return repeatRole(role, imageCount)
-	}
-
-	switch strings.ToLower(strings.TrimSpace(botprotocol.AsText(body["task_type"]))) {
-	case "r2v", "reference_image", "reference_images":
-		return repeatRole("reference_image", imageCount)
-	}
-
-	if imageCount == 1 {
-		return []string{"first_frame"}
-	}
-	if imageCount == 2 {
-		return []string{"first_frame", "last_frame"}
-	}
-	return repeatRole("reference_image", imageCount)
-}
-
-func normalizeDoubaoRoleList(value any) []string {
-	roles := botprotocol.NormalizeStringList(value)
-	if len(roles) == 0 {
-		raw := strings.TrimSpace(botprotocol.AsText(value))
-		if raw != "" {
-			roles = strings.Split(raw, ",")
-		}
-	}
-
-	result := make([]string, 0, len(roles))
-	for _, role := range roles {
-		if role = strings.TrimSpace(role); role != "" {
-			result = append(result, role)
-		}
-	}
-	return result
-}
-
-func repeatRole(role string, count int) []string {
-	role = strings.TrimSpace(role)
-	if role == "" || count <= 0 {
-		return nil
-	}
-	roles := make([]string, count)
-	for index := range roles {
-		roles[index] = role
-	}
-	return roles
-}
-
-func doubaoIndexedRole(roles []string, index int) string {
-	if index < 0 || index >= len(roles) {
-		return ""
-	}
-	return strings.TrimSpace(roles[index])
 }
 
 func doubaoJSONRequest(input botprotocol.NativeInput, path string, body map[string]any) botprovider.Request {

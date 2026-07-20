@@ -1,23 +1,36 @@
 import type { PowerOption, SpaceCanvasNode } from "./types";
+import { powerNodeDefaultSize } from "./space-model";
 
 export type StoryboardGroupDirection = "upstream" | "downstream";
 
 const GROUP_OFFSET_X = 160;
 const GROUP_GAP_X = 72;
 const GROUP_GAP_Y = 72;
-const GROUP_HEADER_HEIGHT = 58;
+const GROUP_CONTENT_TOP = 72;
+const LEGACY_GROUP_CONTENT_TOP = 58;
 const GROUP_PADDING = 24;
-const NODE_GAP = 24;
+const NODE_GAP_X = 24;
+const NODE_GAP_Y = 40;
+const LEGACY_NODE_GAP_Y = 24;
 const NODE_COLUMNS = 2;
 const DEFAULT_NODE_SIZE = { width: 180, height: 180 };
+const LAYOUT_VERSION = "storyboard-derived-layout-v6";
+const LEGACY_LAYOUT_VERSIONS = [
+  "storyboard-derived-layout-v2",
+  "storyboard-derived-layout-v3",
+  "storyboard-derived-layout-v4",
+  "storyboard-derived-layout-v5",
+] as const;
 
 export type StoryboardDerivedLayoutGroup = {
   key: string;
   layoutIndex: number;
   itemCount: number;
   power?: PowerOption | null;
+  powerKind: string;
   direction: StoryboardGroupDirection;
   currentSize?: { width: number; height: number };
+  currentLayoutKey?: string;
 };
 
 export type StoryboardDerivedGroupLayout = {
@@ -92,14 +105,19 @@ export function nextStoryboardDerivedNodePosition(
   node: SpaceCanvasNode,
 ) {
   const members = nodes.filter((candidate) => candidate.groupId === group.id);
-  const cellWidth = Math.max(DEFAULT_NODE_SIZE.width, node.width);
-  const cellHeight = Math.max(DEFAULT_NODE_SIZE.height, node.height);
+  const isAudioNode = node.kind === "audio";
+  const cellWidth = isAudioNode
+    ? node.width
+    : Math.max(DEFAULT_NODE_SIZE.width, node.width);
+  const cellHeight = isAudioNode
+    ? node.height
+    : Math.max(DEFAULT_NODE_SIZE.height, node.height);
   for (let slot = 0; slot < members.length + 100; slot += 1) {
     const column = slot % NODE_COLUMNS;
     const row = Math.floor(slot / NODE_COLUMNS);
     const position = {
-      x: group.x + GROUP_PADDING + column * (cellWidth + NODE_GAP),
-      y: group.y + GROUP_HEADER_HEIGHT + row * (cellHeight + NODE_GAP),
+      x: group.x + GROUP_PADDING + column * (cellWidth + NODE_GAP_X),
+      y: group.y + GROUP_CONTENT_TOP + row * (cellHeight + NODE_GAP_Y),
     };
     if (
       members.every(
@@ -115,8 +133,68 @@ export function nextStoryboardDerivedNodePosition(
   }
   return {
     x: group.x + GROUP_PADDING,
-    y: group.y + GROUP_HEADER_HEIGHT,
+    y: group.y + GROUP_CONTENT_TOP,
   };
+}
+
+export function storyboardDerivedLayoutUpgradeMemberOffsets(input: {
+  currentLayoutKey?: string;
+  nextLayoutKey?: string;
+  group: SpaceCanvasNode;
+  members: SpaceCanvasNode[];
+  nodeSize: { width: number; height: number };
+  powerKind: string;
+}) {
+  const currentVersion = LEGACY_LAYOUT_VERSIONS.find((version) =>
+    input.currentLayoutKey?.startsWith(`${version}|`),
+  );
+  if (
+    !currentVersion ||
+    !input.nextLayoutKey?.startsWith(`${LAYOUT_VERSION}|`)
+  ) {
+    return null;
+  }
+  const contentOffset = currentVersion.endsWith("v2")
+    ? GROUP_CONTENT_TOP - LEGACY_GROUP_CONTENT_TOP
+    : 0;
+  const rowGapOffset =
+    currentVersion.endsWith("v2") || currentVersion.endsWith("v3")
+      ? NODE_GAP_Y - LEGACY_NODE_GAP_Y
+      : 0;
+  const sortedMembers = [...input.members].sort(
+    (left, right) =>
+      left.y - right.y || left.x - right.x || left.id.localeCompare(right.id),
+  );
+  if (sortedMembers.length === 0) {
+    return new Map<string, { x: number; y: number }>();
+  }
+  const offsets = new Map<string, { x: number; y: number }>();
+  if (input.powerKind === "audio") {
+    sortedMembers.forEach((member, index) => {
+      const column = index % NODE_COLUMNS;
+      const row = Math.floor(index / NODE_COLUMNS);
+      offsets.set(member.id, {
+        x:
+          input.group.x +
+          GROUP_PADDING +
+          column * (input.nodeSize.width + NODE_GAP_X) -
+          member.x,
+        y:
+          input.group.y +
+          GROUP_CONTENT_TOP +
+          row * (input.nodeSize.height + NODE_GAP_Y) -
+          member.y,
+      });
+    });
+    return offsets;
+  }
+  sortedMembers.forEach((member, index) => {
+    offsets.set(member.id, {
+      x: 0,
+      y: contentOffset + Math.floor(index / NODE_COLUMNS) * rowGapOffset,
+    });
+  });
+  return offsets;
 }
 
 export function expandStoryboardDerivedGroup(
@@ -138,31 +216,46 @@ export function expandStoryboardDerivedGroup(
   return { ...group, width: requiredWidth, height: requiredHeight };
 }
 
-function derivedNodeSize(power?: PowerOption | null) {
-  const width = Number(power?.output?.defaultWidth || 0);
-  const height = Number(power?.output?.defaultHeight || 0);
-  return {
-    width: width > 0 ? width : DEFAULT_NODE_SIZE.width,
-    height: height > 0 ? height : DEFAULT_NODE_SIZE.height,
-  };
+function derivedNodeSize(
+  power?: Pick<PowerOption, "kind" | "outputType" | "output"> | null,
+) {
+  return powerNodeDefaultSize(power || undefined);
 }
 
 function storyboardDerivedGroupSize(group: StoryboardDerivedLayoutGroup) {
-  const nodeSize = derivedNodeSize(group.power);
+  const nodeSize = derivedNodeSize(
+    group.power || { kind: group.powerKind, outputType: "" },
+  );
   const rows = Math.max(1, Math.ceil(group.itemCount / NODE_COLUMNS));
   const naturalWidth =
     GROUP_PADDING * 2 +
     nodeSize.width * NODE_COLUMNS +
-    NODE_GAP * (NODE_COLUMNS - 1);
+    NODE_GAP_X * (NODE_COLUMNS - 1);
   const naturalHeight =
-    GROUP_HEADER_HEIGHT +
+    GROUP_CONTENT_TOP +
     GROUP_PADDING +
     rows * nodeSize.height +
-    (rows - 1) * NODE_GAP;
+    (rows - 1) * NODE_GAP_Y;
+  const keepCurrentSize = !isLegacyAudioGroupLayout(group);
   return {
-    width: Math.max(naturalWidth, group.currentSize?.width || 0),
-    height: Math.max(naturalHeight, group.currentSize?.height || 0),
+    width: Math.max(
+      naturalWidth,
+      keepCurrentSize ? group.currentSize?.width || 0 : 0,
+    ),
+    height: Math.max(
+      naturalHeight,
+      keepCurrentSize ? group.currentSize?.height || 0 : 0,
+    ),
   };
+}
+
+function isLegacyAudioGroupLayout(group: StoryboardDerivedLayoutGroup) {
+  return (
+    group.powerKind === "audio" &&
+    LEGACY_LAYOUT_VERSIONS.some((version) =>
+      group.currentLayoutKey?.startsWith(`${version}|`),
+    )
+  );
 }
 
 function storyboardDerivedLayoutKey(
@@ -174,7 +267,7 @@ function storyboardDerivedLayoutKey(
   >,
 ) {
   return [
-    "storyboard-derived-layout-v2",
+    LAYOUT_VERSION,
     direction,
     ...groups.map(
       (group) =>
@@ -197,9 +290,9 @@ function rectanglesOverlap(
   right: { x: number; y: number; width: number; height: number },
 ) {
   return !(
-    left.x + left.width + NODE_GAP <= right.x ||
-    right.x + right.width + NODE_GAP <= left.x ||
-    left.y + left.height + NODE_GAP <= right.y ||
-    right.y + right.height + NODE_GAP <= left.y
+    left.x + left.width + NODE_GAP_X <= right.x ||
+    right.x + right.width + NODE_GAP_X <= left.x ||
+    left.y + left.height + NODE_GAP_Y <= right.y ||
+    right.y + right.height + NODE_GAP_Y <= left.y
   );
 }
