@@ -190,6 +190,7 @@ func collectMediaMap(output Output, mapped map[string]any, defaultType string, e
 
 func collectKnownMediaFields(output Output, mapped map[string]any, currentType string) {
 	appendOutputText(output, mapped["text"], mapped["lyrics"], mapped["lyric"], mapped["lrc"], mapped["song_lyrics"], mapped["songLyrics"])
+	appendTextMediaReference(output, mapped["text"], currentType)
 	collectEmbeddedMediaJSON(output, mapped["text"], currentType)
 	appendMediaFieldValues(output, MediaTypeImage, mapped["images"], mapped["image"])
 	appendMediaFieldValues(output, MediaTypeVideo, mapped["videos"], mapped["video"])
@@ -217,6 +218,29 @@ func collectKnownMediaFields(output Output, mapped map[string]any, currentType s
 	if urls := collectURLValues(mapped["src"]); len(urls) > 0 {
 		appendMediaByType(output, currentType, urls)
 	}
+}
+
+func appendTextMediaReference(output Output, value any, mediaType string) {
+	if mediaOutputKey(mediaType) == "" {
+		return
+	}
+	text, ok := value.(string)
+	if !ok {
+		return
+	}
+	text = strings.TrimSpace(text)
+	if !isMediaReferenceURL(text) {
+		return
+	}
+	appendMediaByType(output, mediaType, []string{text})
+}
+
+func isMediaReferenceURL(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return strings.HasPrefix(value, "http://") ||
+		strings.HasPrefix(value, "https://") ||
+		strings.HasPrefix(value, "/") ||
+		strings.HasPrefix(value, "data:")
 }
 
 func collectEmbeddedMediaJSON(output Output, value any, defaultType string) {

@@ -23,24 +23,37 @@
         "type": "main",
         "className": "flex flex-1 flex-col gap-5 sm:gap-6",
         "children": {
-          "tabs-row": {
-            "type": "container"
-          },
-          "site-panel": {
+          "config-shell": {
             "type": "container",
-            "className": "w-full max-w-4xl"
-          },
-          "filing-panel": {
-            "type": "container",
-            "className": "w-full max-w-4xl"
-          },
-          "links-panel": {
-            "type": "container",
-            "className": "overflow-hidden rounded-md border bg-background"
-          },
-          "accounts-panel": {
-            "type": "container",
-            "className": "overflow-hidden rounded-md border bg-background"
+            "className": "flex min-w-0 flex-col items-stretch gap-6 lg:flex-row",
+            "children": {
+              "tabs-column": {
+                "type": "container",
+                "className": "w-44 shrink-0"
+              },
+              "content-column": {
+                "type": "container",
+                "className": "min-w-0 flex-1 rounded-md border bg-background p-6",
+                "children": {
+                  "site-panel": {
+                    "type": "container",
+                    "className": "w-full"
+                  },
+                  "filing-panel": {
+                    "type": "container",
+                    "className": "w-full"
+                  },
+                  "links-panel": {
+                    "type": "container",
+                    "className": "min-w-0 overflow-hidden"
+                  },
+                  "accounts-panel": {
+                    "type": "container",
+                    "className": "min-w-0 overflow-hidden"
+                  }
+                }
+              }
+            }
           },
           "feedback-shell": {
             "type": "container"
@@ -93,7 +106,7 @@
       },
       {
         "type": "show-button",
-        "name": "新增链接",
+        "name": "新增菜单",
         "className": "shrink-0",
         "meta": {
           "tab": "links",
@@ -128,12 +141,12 @@
         }
       }
     ],
-    "tabs-row": [
+    "tabs-column": [
       {
         "type": "nav-tab",
         "meta": {
           "target": "state.currentTab",
-          "variant": "line",
+          "variant": "sidebar",
           "tabs": [
             {
               "label": "站点设置",
@@ -144,7 +157,7 @@
               "value": "filing"
             },
             {
-              "label": "登录链接",
+              "label": "自定义菜单",
               "value": "links"
             },
             {
@@ -345,18 +358,22 @@
           "rowKey": "id",
           "columns": [
             {
+              "name": "名称",
               "value": "name",
               "type": "show-base"
             },
             {
+              "name": "链接地址",
               "value": "url",
               "type": "show-base"
             },
             {
+              "name": "打开方式",
               "value": "target",
               "type": "show-tag"
             },
             {
+              "name": "状态",
               "value": "status",
               "type": "form-switch",
               "meta": {
@@ -365,12 +382,14 @@
               }
             },
             {
+              "name": "排序",
               "value": "sort",
               "type": "show-base",
               "editor": "form-number",
               "trigger": "doubleClick"
             },
             {
+              "name": "创建时间",
               "value": "created_at",
               "type": "show-date"
             },
@@ -384,7 +403,7 @@
                     "icon": "square-pen",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "编辑链接",
+                    "description": "编辑菜单",
                     "action": {
                       "click": [
                         {
@@ -404,7 +423,7 @@
                     "icon": "trash-2",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "删除链接",
+                    "description": "删除菜单",
                     "action": {
                       "click": [
                         {
@@ -450,10 +469,12 @@
           "rowKey": "id",
           "columns": [
             {
+              "name": "账号标识",
               "value": "provider",
               "type": "show-base"
             },
             {
+              "name": "按钮名称",
               "value": "name",
               "type": "show-base"
             },
@@ -463,6 +484,7 @@
               "type": "show-base"
             },
             {
+              "name": "状态",
               "value": "status",
               "type": "form-switch",
               "meta": {
@@ -471,12 +493,14 @@
               }
             },
             {
+              "name": "排序",
               "value": "sort",
               "type": "show-base",
               "editor": "form-number",
               "trigger": "doubleClick"
             },
             {
+              "name": "创建时间",
               "value": "created_at",
               "type": "show-date"
             },
@@ -526,7 +550,7 @@
         "meta": {
           "stateKey": "dialog.createLink",
           "pageRoute": "/bot/body/link/update",
-          "title": "新增登录链接",
+          "title": "新增自定义菜单",
           "size": "lg",
           "footer": {
             "confirm": true,
@@ -542,7 +566,7 @@
           "pageRouteQuery": {
             "id": "data.actionTarget.editLinkId"
           },
-          "title": "编辑登录链接",
+          "title": "编辑自定义菜单",
           "size": "lg",
           "footer": {
             "confirm": true,
@@ -552,8 +576,8 @@
       },
       {
         "type": "feedback-confirm",
-        "name": "删除登录链接",
-        "info": "确认删除当前登录链接吗？",
+        "name": "删除自定义菜单",
+        "info": "确认删除当前自定义菜单吗？",
         "meta": {
           "stateKey": "confirm.deleteLink"
         },
@@ -599,7 +623,7 @@
   "data": {
     "page": {
       "title": "基础配置",
-      "description": "维护 Body 站点品牌、备案信息、登录页链接和第三方账号入口。"
+      "description": "维护 Body 站点品牌、备案信息、自定义菜单和第三方账号入口。"
     },
     "form": {
       "id": 1,

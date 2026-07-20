@@ -11,6 +11,7 @@ import (
 
 	botmodel "github.com/dever-package/bot/model/energon"
 	botlog "github.com/dever-package/bot/service/energon/log"
+	botpricing "github.com/dever-package/bot/service/energon/pricing"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
 	botruntime "github.com/dever-package/bot/service/energon/runtime"
@@ -32,7 +33,7 @@ func (s GatewayService) handleNormalize(ctx context.Context, req *botprotocol.Sh
 			continue
 		}
 
-		result, err := s.callNormalizeTarget(ctx, req, selected)
+		result, err := s.callNormalizePowerTarget(ctx, req, selected)
 		attempts = append(attempts, result.Attempt)
 		if err == nil {
 			result.Attempts = attempts
@@ -118,16 +119,17 @@ func buildTargetSelectAttempt(target botmodel.PowerTarget, err error) GatewayAtt
 
 func buildCallAttempt(selected selectedTarget, status string, logItem botmodel.Log, err error) GatewayAttempt {
 	attempt := GatewayAttempt{
-		PowerTargetID: selected.PowerTarget.ID,
-		ServiceID:     selected.Service.ID,
-		ServiceName:   selected.Service.Name,
-		ProviderID:    selected.Provider.ID,
-		ProviderName:  selected.Provider.Name,
-		AccountID:     selected.Account.ID,
-		AccountName:   selected.Account.Name,
-		Status:        status,
-		LogID:         logItem.ID,
-		Latency:       logItem.Latency,
+		PowerTargetID:     selected.PowerTarget.ID,
+		ServiceID:         selected.Service.ID,
+		ServiceName:       selected.Service.Name,
+		ServiceEndpointID: selected.ServiceEndpoint.ID,
+		ProviderID:        selected.Provider.ID,
+		ProviderName:      selected.Provider.Name,
+		AccountID:         selected.Account.ID,
+		AccountName:       selected.Account.Name,
+		Status:            status,
+		LogID:             logItem.ID,
+		Latency:           logItem.Latency,
 	}
 	if err != nil {
 		attempt.Error = err.Error()
@@ -144,7 +146,19 @@ func (s GatewayService) recordCallLog(
 	result string,
 	nativeRequests ...botprovider.Request,
 ) botmodel.Log {
-	return s.recordCallLogWithUsage(ctx, req, selected, status, latency, result, tokenUsage{}, nativeRequests...)
+	return s.recordCallLogInternal(ctx, req, selected, status, latency, result, tokenUsage{}, false, nativeRequests...)
+}
+
+func (s GatewayService) recordProviderCallLog(
+	ctx context.Context,
+	req *botprotocol.ShemicRequest,
+	selected selectedTarget,
+	status string,
+	latency time.Duration,
+	result string,
+	nativeRequests ...botprovider.Request,
+) botmodel.Log {
+	return s.recordCallLogInternal(ctx, req, selected, status, latency, result, tokenUsage{}, true, nativeRequests...)
 }
 
 func (s GatewayService) recordCallLogWithUsage(
@@ -157,36 +171,62 @@ func (s GatewayService) recordCallLogWithUsage(
 	usage tokenUsage,
 	nativeRequests ...botprovider.Request,
 ) botmodel.Log {
+	return s.recordCallLogInternal(ctx, req, selected, status, latency, result, usage, true, nativeRequests...)
+}
+
+func (s GatewayService) recordCallLogInternal(
+	ctx context.Context,
+	req *botprotocol.ShemicRequest,
+	selected selectedTarget,
+	status string,
+	latency time.Duration,
+	result string,
+	usage tokenUsage,
+	costAttempted bool,
+	nativeRequests ...botprovider.Request,
+) botmodel.Log {
 	powerParams := buildPowerParamsLog(req, nativeRequests...)
 	if !usage.IsZero() {
 		powerParams["usage"] = usage.Map()
 	}
 	record := botlog.Record(ctx, botmodel.Log{
-		RequestID:        req.RequestID,
-		Mode:             req.Mode,
-		Protocol:         req.Protocol,
-		PowerID:          selected.Power.ID,
-		PowerKey:         selected.Power.Key,
-		PowerName:        selected.Power.Name,
-		PowerTargetID:    selected.PowerTarget.ID,
-		PowerParams:      encodeLogJSON(sanitizeLogValue(powerParams, "")),
-		ServiceID:        selected.Service.ID,
-		ServiceName:      selected.Service.Name,
-		ProviderID:       selected.Provider.ID,
-		ProviderName:     selected.Provider.Name,
-		AccountID:        selected.Account.ID,
-		AccountName:      selected.Account.Name,
-		ServiceApi:       selected.ServiceAPI,
-		Status:           status,
-		Latency:          latency.Milliseconds(),
-		PromptTokens:     usage.PromptTokens,
-		CompletionTokens: usage.CompletionTokens,
-		TotalTokens:      usage.TotalTokens,
-		CachedTokens:     usage.CachedTokens,
-		Result:           sanitizeLogJSON(result),
+		RequestID:         req.RequestID,
+		Mode:              req.Mode,
+		Protocol:          req.Protocol,
+		PowerID:           selected.Power.ID,
+		PowerKey:          selected.Power.Key,
+		PowerName:         selected.Power.Name,
+		PowerTargetID:     selected.PowerTarget.ID,
+		PowerParams:       encodeLogJSON(sanitizeLogValue(powerParams, "")),
+		ServiceID:         selected.Service.ID,
+		ServiceName:       selected.Service.Name,
+		ServiceEndpointID: selected.ServiceEndpoint.ID,
+		ProviderID:        selected.Provider.ID,
+		ProviderName:      selected.Provider.Name,
+		AccountID:         selected.Account.ID,
+		AccountName:       selected.Account.Name,
+		ServiceApi:        selected.ServiceAPI,
+		Status:            status,
+		Latency:           latency.Milliseconds(),
+		PromptTokens:      usage.PromptTokens,
+		CompletionTokens:  usage.CompletionTokens,
+		TotalTokens:       usage.TotalTokens,
+		CachedTokens:      usage.CachedTokens,
+		Result:            sanitizeLogJSON(result),
 	})
 	if status == StatusSuccess {
 		botruntime.Record(ctx, selected.Service.ID, latency)
+	}
+	if costAttempted && record.ID > 0 && selected.ServiceEndpoint.ID > 0 {
+		botpricing.RecordAttempt(ctx, botpricing.AttemptRecordRequest{
+			Log:               record,
+			Billing:           req.Billing,
+			ServiceEndpointID: selected.ServiceEndpoint.ID,
+			CallStatus:        status,
+			Usage: botpricing.Usage{
+				PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens, CachedTokens: usage.CachedTokens,
+			},
+		})
 	}
 	return record
 }

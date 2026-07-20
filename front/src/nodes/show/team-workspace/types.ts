@@ -189,6 +189,7 @@ export type DebugTarget = "team" | "flow";
 export type DebugPendingApproval = {
   id: string | number;
   title: string;
+  runID?: string | number;
   nodeRunID?: string | number;
   nodeKey?: string;
   kind?: string;

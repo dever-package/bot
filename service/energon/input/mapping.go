@@ -18,6 +18,10 @@ func BuildMapped(
 	labels := inputParamLabels(ctx, repo, target.PowerID, target.ServiceID)
 	params := repo.ParamMap(ctx)
 	normalized := NormalizeParamInput(ctx, repo, target.PowerID, target.ServiceID, req.Input, params)
+	normalized = ApplyPowerParamDefaults(
+		normalized,
+		BuildPowerParams(ctx, repo, target.PowerID, target.ServiceID),
+	)
 	mapped := botprotocol.NewMappedInput(normalized, labels)
 
 	if err := validatePowerMainParams(ctx, repo, req, target.PowerID, target.ServiceID, normalized, params); err != nil {

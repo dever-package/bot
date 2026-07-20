@@ -204,6 +204,10 @@ export function AgentChatPanel({
     requestScope,
   });
   const mediaInspector = useAgentChatMediaInspector();
+  const dockedMediaInspector =
+    mediaInspector.open &&
+    mediaInspector.request?.kind !== "audio" &&
+    mediaInspector.request?.kind !== "file";
   const [mobilePane, setMobilePane] = useState<"sessions" | "chat">("chat");
 
   useEffect(() => {
@@ -235,7 +239,7 @@ export function AgentChatPanel({
       <div
         data-agent-chat-layer="true"
         data-agent-chat-appearance={appearance}
-        data-media-inspector-open={mediaInspector.open ? "true" : undefined}
+        data-media-inspector-open={dockedMediaInspector ? "true" : undefined}
         className={cn(
           "relative flex min-h-0 w-full flex-col overflow-hidden bg-background md:flex-row",
           fullScreen ? "h-full flex-1" : "border-y",
@@ -249,7 +253,7 @@ export function AgentChatPanel({
           title={sidebarTitle}
           agentReady={Boolean(agentKey)}
           controller={controller}
-          collapsed={mediaInspector.open}
+          collapsed={dockedMediaInspector}
         />
 
         {mobileSessionNavigation && mobilePane === "sessions" ? (
@@ -270,7 +274,7 @@ export function AgentChatPanel({
             mobileSessionNavigation && mobilePane === "sessions"
               ? "hidden md:flex"
               : "flex",
-            mediaInspector.open &&
+            dockedMediaInspector &&
               "md:w-[38vw] md:min-w-[360px] md:max-w-[640px] md:flex-none",
           )}
         >

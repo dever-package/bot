@@ -1,6 +1,5 @@
 import {
   FileText,
-  GripVertical,
   Shuffle,
   Trash2,
   Volume2,
@@ -8,6 +7,7 @@ import {
 import type { DragEvent, ReactNode } from "react";
 import type { ComposerAssetItem } from "./space-prompt-composer";
 import type { VideoComposeClip } from "./space-video-compose";
+import { SequenceCard } from "./space-sequence-card";
 
 export type VideoComposeClipPanel = "subtitle" | "sound" | "transition";
 
@@ -45,38 +45,27 @@ export function VideoComposeClipCard({
   const transitionActive =
     !last && clip.transitionToNext.type !== "none";
   const soundActive = Boolean(
-    clip.sound.voice || !clip.sound.keepOriginal || clip.sound.originalVolume !== 1,
+    clip.originalAudioSource || clip.speechTracks.length > 0,
   );
   return (
-    <article
-      className={`ws-video-compose-card ${selected ? "is-selected" : ""}`}
-      onClick={onSelect}
-      onDragOver={readonly ? undefined : onDragOver}
-      onDrop={readonly ? undefined : (event) => {
-        event.preventDefault();
-        onDrop();
-      }}
-    >
-      <header>
-        <button
-          type="button"
-          className="ws-video-compose-drag"
-          draggable={!readonly}
-          disabled={readonly}
-          title="拖动排序"
-          aria-label={`拖动镜头 ${index + 1} 排序`}
-          onDragStart={(event) => {
-            event.dataTransfer.effectAllowed = "move";
-            event.dataTransfer.setData("text/plain", clip.id);
-            onDragStart();
-          }}
-          onDragEnd={onDragEnd}
-        >
-          <GripVertical size={13} />
-        </button>
-        <strong>{String(index + 1).padStart(2, "0")}</strong>
-        <span>{clip.duration > 0 ? `${formatDuration(clip.duration)}秒` : "待读取"}</span>
-        {!readonly ? (
+    <SequenceCard
+      itemId={clip.id}
+      index={index}
+      durationLabel={
+        clip.duration > 0 ? `${formatDuration(clip.duration)}秒` : "待读取"
+      }
+      className="ws-video-compose-card"
+      dragClassName="ws-video-compose-drag"
+      selected={selected}
+      readonly={readonly}
+      ariaLabel={`镜头 ${index + 1}`}
+      onSelect={onSelect}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      headerActions={
+        !readonly ? (
           <button
             type="button"
             className="ws-video-compose-remove"
@@ -89,8 +78,9 @@ export function VideoComposeClipCard({
           >
             <Trash2 size={12} />
           </button>
-        ) : null}
-      </header>
+        ) : undefined
+      }
+    >
       <div className="ws-video-compose-card-preview">
         {item?.preview.videoUrl ? (
           <video
@@ -116,6 +106,11 @@ export function VideoComposeClipCard({
       <strong className="ws-video-compose-card-title">
         {clip.title || item?.title || `镜头 ${index + 1}`}
       </strong>
+      {clip.blockingIssues.length ? (
+        <small className="ws-video-compose-card-blocking">
+          {clip.blockingIssues[0]}
+        </small>
+      ) : null}
       <footer>
         <CardAction
           active={Boolean(clip.subtitle)}
@@ -140,7 +135,7 @@ export function VideoComposeClipCard({
           <span />
         )}
       </footer>
-    </article>
+    </SequenceCard>
   );
 }
 

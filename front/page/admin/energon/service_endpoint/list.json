@@ -54,6 +54,7 @@
               "value": {
                 "param_mode": "all",
                 "param_ids": [],
+				"prices": [],
                 "status": 1,
                 "sort": 100
               }
@@ -84,6 +85,11 @@
               "value": "param_mode",
               "type": "show-tag"
             },
+			{
+			  "name": "成本价格",
+			  "value": "price_summary",
+			  "type": "show-base"
+			},
             {
               "name": "启用",
               "value": "status",
@@ -254,6 +260,7 @@
     "serviceEndpointForm": {
       "param_mode": "all",
       "param_ids": [],
+	  "prices": [],
       "status": 1,
       "sort": 100
     },

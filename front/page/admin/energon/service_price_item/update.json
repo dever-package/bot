@@ -1,0 +1,97 @@
+{
+  "page": {
+    "name": "价格项编辑",
+    "parent": "bot/energon/service_price/update",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "form-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "form-shell": [
+      {
+        "type": "form-select",
+        "name": "价格项",
+        "value": "form.type",
+        "mode": "form",
+        "option": [
+          {
+            "id": "request",
+            "value": "单次请求"
+          },
+          {
+            "id": "input_token",
+            "value": "输入 Token"
+          },
+          {
+            "id": "cached_token",
+            "value": "缓存输入 Token"
+          },
+          {
+            "id": "output_token",
+            "value": "输出 Token"
+          }
+        ],
+        "validate": [
+          {
+            "type": "required",
+            "message": "请选择价格项。"
+          }
+        ]
+      },
+      {
+        "type": "form-input",
+        "name": "单位价格",
+        "value": "form.unit_price",
+        "mode": "form",
+        "placeholder": "例如：2.5",
+        "info": "单次请求填写每次成本；Token 价格填写每百万 Token 成本。金额最多支持 6 位小数。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "单位价格不能为空。"
+          }
+        ]
+      },
+      {
+        "type": "form-switch",
+        "name": "启用",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "type": "request",
+      "unit_price": "0",
+      "unit_size": 1,
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}

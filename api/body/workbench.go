@@ -243,3 +243,17 @@ func (Workbench) PostAssetSetCurrent(c *server.Context) error {
 	)
 	return botapi.WriteJSON(c, data, err)
 }
+
+func (Workbench) PostAssetRename(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := workbenchRunner.RenameAsset(
+		c.Context(),
+		botapi.Uint64FromBody(body, "team_id", "teamId"),
+		botapi.Uint64FromBody(body, "asset_id", "assetId", "id"),
+		botapi.TextFromBody(body, "name", "title"),
+	)
+	return botapi.WriteJSON(c, data, err)
+}

@@ -8,6 +8,8 @@ import (
 	"github.com/google/uuid"
 
 	energonmodel "github.com/dever-package/bot/model/energon"
+	teammodel "github.com/dever-package/bot/model/team"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
@@ -188,6 +190,7 @@ type RunRequest struct {
 	RequestID string
 	Input     map[string]any
 	Mode      string
+	Billing   botprotocol.BillingContext
 }
 
 type CanvasPowerRunRequest struct {
@@ -207,6 +210,7 @@ type CanvasPowerRunRequest struct {
 	SourceTargetID uint64
 	Input          map[string]any
 	Params         map[string]any
+	Billing        botprotocol.BillingContext
 	PersistResult  bool
 	OnStream       func(payload map[string]any)
 	OnRunCreated   func(runID uint64, requestID string) error
@@ -215,6 +219,9 @@ type CanvasPowerRunRequest struct {
 const (
 	CanvasPowerMetaTeamPowerID    = "_team_power_id"
 	CanvasPowerMetaSourceTargetID = "_source_target_id"
+	CanvasPowerMetaResumeMode     = "_resume_mode"
+	CanvasPowerMetaContext        = "_canvas_power"
+	CanvasPowerResumeMode         = "canvas_power"
 )
 
 type PublishedTeamBinding struct {
@@ -261,6 +268,36 @@ func jsonValue(text string) any {
 	var result any
 	if err := json.Unmarshal([]byte(text), &result); err != nil {
 		return text
+	}
+	return result
+}
+
+func attachRunBilling(input map[string]any, billing botprotocol.BillingContext) {
+	if input == nil || !billing.Billable {
+		return
+	}
+	input["_billing"] = billing
+}
+
+func runBillingContext(run teammodel.Run) botprotocol.BillingContext {
+	input := jsonMap(run.Input)
+	raw, exists := input["_billing"]
+	if !exists {
+		return botprotocol.BillingContext{}
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return botprotocol.BillingContext{}
+	}
+	result := botprotocol.BillingContext{}
+	if json.Unmarshal(encoded, &result) != nil || !result.Billable {
+		return botprotocol.BillingContext{}
+	}
+	if result.TeamID == 0 {
+		result.TeamID = run.TeamID
+	}
+	if result.ProjectID == 0 {
+		result.ProjectID = run.ProjectID
 	}
 	return result
 }

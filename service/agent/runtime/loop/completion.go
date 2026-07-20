@@ -39,6 +39,18 @@ func shouldReviewCompletion(state *runState) bool {
 	return state.modelStep == 1 && runtimeEventType(state.execution.input) == "interaction_resumed"
 }
 
+func hasQueuedArtifactDelivery(state *runState) bool {
+	if state == nil {
+		return false
+	}
+	for _, artifact := range artifactValues(state.artifacts["artifacts"]) {
+		if strings.EqualFold(strings.TrimSpace(botprotocol.AsText(artifact["status"])), "generating") {
+			return true
+		}
+	}
+	return false
+}
+
 func runtimeEventType(input map[string]any) string {
 	event, _ := input["runtime_event"].(map[string]any)
 	return strings.ToLower(strings.TrimSpace(botprotocol.AsText(event["type"])))
@@ -69,6 +81,8 @@ func (s Service) inspectCompletion(
 		[]any{completionReviewTool()},
 		botprotocol.ForcedFunctionToolChoice(completionReviewToolName),
 		false,
+		"completion_review",
+		state.completionReviews+1,
 	)
 	if err != nil {
 		return completionReview{}, err

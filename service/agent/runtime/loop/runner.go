@@ -16,6 +16,7 @@ import (
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
+	billingservice "github.com/dever-package/bot/service/billing"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botstream "github.com/dever-package/bot/service/energon/stream"
@@ -48,6 +49,7 @@ type execution struct {
 	snapshotHistoryLen int
 	snapshotMediaLen   int
 	scope              runtimescope.Scope
+	billing            botprotocol.BillingContext
 	scopedContext      context.Context
 	checkpoint         runCheckpoint
 }
@@ -162,7 +164,7 @@ func (s Service) runModelStep(ctx context.Context, controller *runController, st
 	if requiredToolName != "" {
 		toolChoice = botprotocol.ForcedFunctionToolChoice(requiredToolName)
 	}
-	result, err := s.callModel(ctx, controller, state.execution, state.input, state.history, toolChoice)
+	result, err := s.callModel(ctx, controller, state.execution, state.input, state.history, toolChoice, state.modelStep)
 	calls := normalizeToolCallIDs(result.ToolCalls)
 	result.ToolCalls = calls
 	state.AppendVisibleText(result.Text)
@@ -239,6 +241,7 @@ func (s Service) finishModelOutput(
 	if state.awaitingDelivery && !modelStepHasDelivery(state, result) {
 		return s.continueMissingDelivery(state, result, stepLimits)
 	}
+	queuedArtifactDelivery := hasQueuedArtifactDelivery(state)
 	if shouldReviewCompletion(state) {
 		review, err := s.inspectCompletion(ctx, controller, state, result)
 		if ctx.Err() != nil {
@@ -247,6 +250,9 @@ func (s Service) finishModelOutput(
 		}
 		if err != nil {
 			logCompletionReviewError(state, err)
+			if queuedArtifactDelivery {
+				return s.finishImplicitModelOutput(state, result)
+			}
 			state.completionReviews++
 			if state.completionReviews >= maxCompletionReviews {
 				s.finish(state, finishOutcome{
@@ -267,6 +273,10 @@ func (s Service) finishModelOutput(
 				stepStatusWarning,
 			)
 		} else if review.Status == "continue" {
+			// 异步素材成功入队即完成本轮交付；显式交互仍按审查结果继续执行。
+			if queuedArtifactDelivery && review.NextTool == "" {
+				return s.finishImplicitModelOutput(state, result)
+			}
 			state.completionReviews++
 			state.requiredToolName = review.NextTool
 			if review.NextTool == "" {
@@ -501,6 +511,9 @@ func (s Service) runToolStep(ctx context.Context, controller *runController, sta
 	definition, _ := state.execution.registry.Definition(call.Name)
 	state.AbsorbToolOutput(completed.result.Content, definition)
 	state.recordToolReceipt(call, definition, completed)
+	if completed.err != nil && isTerminalToolName(call.Name) {
+		state.requiredToolName = call.Name
+	}
 	if completed.err == nil && strings.EqualFold(strings.TrimSpace(definition.Kind), "knowledge") {
 		if !state.knowledgeUsed && state.knowledgeContinuations > 0 {
 			s.resetVisibleOutput(ctx, state)
@@ -757,7 +770,7 @@ func (s Service) commitRuntimeStepState(
 	return true
 }
 
-func (s Service) callModel(ctx context.Context, controller *runController, execution execution, input map[string]any, history []any, toolChoice any) (modelStepResult, error) {
+func (s Service) callModel(ctx context.Context, controller *runController, execution execution, input map[string]any, history []any, toolChoice any, modelStep int) (modelStepResult, error) {
 	return s.callModelRequest(
 		ctx,
 		controller,
@@ -767,6 +780,8 @@ func (s Service) callModel(ctx context.Context, controller *runController, execu
 		execution.registry.Definitions(),
 		toolChoice,
 		true,
+		"model",
+		modelStep,
 	)
 }
 
@@ -779,6 +794,8 @@ func (s Service) callModelRequest(
 	tools []any,
 	toolChoice any,
 	publish bool,
+	chargeKind string,
+	chargeIndex int,
 ) (modelStepResult, error) {
 	return s.callModelRequestWithRole(
 		ctx,
@@ -790,10 +807,46 @@ func (s Service) callModelRequest(
 		tools,
 		toolChoice,
 		publish,
+		chargeKind,
+		chargeIndex,
 	)
 }
 
 func (s Service) callModelRequestWithRole(
+	ctx context.Context,
+	controller *runController,
+	execution execution,
+	role string,
+	input map[string]any,
+	history []any,
+	tools []any,
+	toolChoice any,
+	publish bool,
+	chargeKind string,
+	chargeIndex int,
+) (modelStepResult, error) {
+	parentKey := strings.TrimSpace(execution.billing.BusinessKey)
+	if parentKey == "" {
+		parentKey = execution.requestID
+	}
+	businessKey := modelPowerChargeBusinessKey(parentKey, execution.runID, chargeKind, chargeIndex)
+	billing := execution.billing
+	billing.BusinessKey = businessKey
+	return billingservice.Execute(ctx, billingservice.PowerExecutionRequest{
+		Prepare: billingservice.PreparePowerChargeRequest{
+			Billing:   billing,
+			RequestID: businessKey,
+			PowerID:   execution.power.ID,
+			PowerName: execution.power.Name,
+		},
+		RunID: execution.runID,
+	}, func(ctx context.Context, charged botprotocol.BillingContext) (modelStepResult, error) {
+		execution.billing = charged
+		return s.callModelRequestAttempts(ctx, controller, execution, role, input, history, tools, toolChoice, publish)
+	})
+}
+
+func (s Service) callModelRequestAttempts(
 	ctx context.Context,
 	controller *runController,
 	execution execution,
@@ -827,6 +880,11 @@ func (s Service) callModelRequestWithRole(
 	}
 	retried.Attempts = 2
 	return retried, retryErr
+}
+
+func modelPowerChargeBusinessKey(parent string, runID uint64, kind string, index int) string {
+	value := fmt.Sprintf("agent-model:%s:%d:%s:%d", strings.TrimSpace(parent), runID, strings.TrimSpace(kind), index)
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(value)).String()
 }
 
 func isContextOverflowError(err error) bool {
@@ -872,6 +930,7 @@ func (s Service) callModelOnce(
 		Path:      execution.transport.Path,
 		Headers:   execution.transport.Headers,
 		Body:      buildGatewayBody(execution.agent, execution.power, role, input, history, tools, toolChoice, false),
+		Billing:   execution.billing,
 	})
 	payload := response.Payload()
 	if int(frontstream.InputInt64(payload["status"], 0)) == botprotocol.ResponseStatusFail {

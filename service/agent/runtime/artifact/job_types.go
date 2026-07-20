@@ -12,6 +12,7 @@ type JobSnapshot struct {
 	Transport       JobTransport                     `json:"transport"`
 	MediaReferences []runtimeprovider.MediaReference `json:"media_references"`
 	Scope           runtimescope.Scope               `json:"scope,omitempty"`
+	Billing         botprotocol.BillingContext       `json:"billing,omitempty"`
 }
 
 // JobTransport deliberately excludes request headers. Persistent jobs must not

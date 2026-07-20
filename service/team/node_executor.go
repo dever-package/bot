@@ -6,14 +6,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	assetmodel "github.com/dever-package/bot/model/asset"
 	memorymodel "github.com/dever-package/bot/model/memory"
 	teammodel "github.com/dever-package/bot/model/team"
 	knowledgeservice "github.com/dever-package/bot/service/agent/knowledge"
-	runtimeloop "github.com/dever-package/bot/service/agent/runtime/loop"
 	assetservice "github.com/dever-package/bot/service/asset"
 	memoryservice "github.com/dever-package/bot/service/memory"
 	"github.com/dever-package/bot/service/stream"
@@ -50,6 +48,7 @@ func (s Service) executeNodeDAG(ctx context.Context, run teammodel.Run, flowRun 
 		}
 		blackboard := s.repo.ListBlackboard(ctx, flowRun.ID)
 		ready := make([]teammodel.FlowNode, 0)
+		hasWaiting := false
 		for _, node := range nodes {
 			if completed[node.ID] {
 				continue
@@ -58,13 +57,17 @@ func (s Service) executeNodeDAG(ctx context.Context, run teammodel.Run, flowRun 
 				continue
 			}
 			if nodeRun := s.repo.FindNodeRunByNode(ctx, flowRun.ID, node.ID); nodeRun != nil && nodeRun.Status == teammodel.RunStatusWaiting {
-				return teammodel.RunStatusWaiting, blackboard, runWaitError{message: "等待人工确认"}
+				hasWaiting = true
+				continue
 			}
 			if nodeReady(node.ID, incoming, completed, skipped, blackboard, nodeByID) {
 				ready = append(ready, node)
 			}
 		}
 		if len(ready) == 0 {
+			if hasWaiting {
+				return teammodel.RunStatusWaiting, blackboard, runWaitError{message: "等待交互"}
+			}
 			marked := markSkippedNodes(nodes, incoming, completed, skipped, blackboard, nodeByID)
 			if marked {
 				continue
@@ -79,7 +82,7 @@ func (s Service) executeNodeDAG(ctx context.Context, run teammodel.Run, flowRun 
 		}
 		for _, result := range results {
 			if result.status == teammodel.RunStatusWaiting {
-				return result.status, s.repo.ListBlackboard(ctx, flowRun.ID), result.err
+				continue
 			}
 			if result.err != nil {
 				return result.status, s.repo.ListBlackboard(ctx, flowRun.ID), result.err
@@ -238,7 +241,6 @@ func (s Service) executeNode(ctx context.Context, run teammodel.Run, flowRun tea
 	blackboard := s.repo.ListBlackboard(ctx, flowRun.ID)
 	config := jsonMap(node.Config)
 	input := s.nodeInput(ctx, flowRun.ID, config, blackboard, incoming, nodeByID)
-	attachNodeInteractionFeedback(input, blackboard, node)
 	nodeRunID := s.repo.FindOrCreateNodeRun(ctx, run, flowRun, node, input)
 	nodeRun := s.repo.FindNodeRun(ctx, nodeRunID)
 	if nodeRun == nil {
@@ -248,6 +250,7 @@ func (s Service) executeNode(ctx context.Context, run teammodel.Run, flowRun tea
 	s.repo.UpdateNodeRun(ctx, nodeRun.ID, map[string]any{
 		"status":     teammodel.RunStatusRunning,
 		"input":      jsonText(input),
+		"error":      "",
 		"started_at": startedAt,
 	})
 	nodeRun.Status = teammodel.RunStatusRunning
@@ -257,19 +260,30 @@ func (s Service) executeNode(ctx context.Context, run teammodel.Run, flowRun tea
 	})
 
 	output, status, agentRunID, err := s.runNodeByType(ctx, run, flowRun, team, roles, flow, node, config, input, blackboard, incoming, nodeByID)
+	if s.runCanceled(ctx, run.ID) {
+		status = teammodel.RunStatusCanceled
+		err = context.Canceled
+	}
 	finishedAt := time.Now()
 	record := map[string]any{
 		"status":       status,
 		"output":       jsonText(output),
 		"agent_run_id": agentRunID,
+		"error":        "",
 	}
 	if status != teammodel.RunStatusWaiting {
 		record["finished_at"] = finishedAt
 	}
-	if err != nil {
+	if err != nil && status != teammodel.RunStatusWaiting {
 		record["error"] = err.Error()
 	}
-	s.repo.UpdateNodeRun(ctx, nodeRun.ID, record)
+	if !s.repo.UpdateNodeRunUnlessCanceled(ctx, nodeRun.ID, record) {
+		current := s.repo.FindNodeRun(ctx, nodeRun.ID)
+		if current != nil && current.Status == teammodel.RunStatusCanceled {
+			status = teammodel.RunStatusCanceled
+			err = context.Canceled
+		}
+	}
 	nodeRun.Status = status
 	nodeRun.AgentRunID = agentRunID
 	if status == teammodel.RunStatusSuccess {
@@ -284,7 +298,7 @@ func (s Service) executeNode(ctx context.Context, run teammodel.Run, flowRun tea
 	fields := map[string]any{
 		"output":       output,
 		"agent_run_id": agentRunID,
-		"error":        errorText(err),
+		"error":        nodeExecutionError(status, err),
 	}
 	if status != teammodel.RunStatusWaiting {
 		fields["finished_at"] = finishedAt.Format(time.RFC3339Nano)
@@ -307,6 +321,13 @@ func (s Service) executeNode(ctx context.Context, run teammodel.Run, flowRun tea
 		})
 	}
 	return status, err
+}
+
+func nodeExecutionError(status string, err error) string {
+	if status == teammodel.RunStatusWaiting {
+		return ""
+	}
+	return errorText(err)
 }
 
 func (s Service) nodeInput(ctx context.Context, flowRunID uint64, config map[string]any, blackboard map[string]any, incoming []teammodel.FlowNodeEdge, nodeByID map[uint64]teammodel.FlowNode) map[string]any {
@@ -337,28 +358,12 @@ func (s Service) nodeInput(ctx context.Context, flowRunID uint64, config map[str
 	return result
 }
 
-func attachNodeInteractionFeedback(input map[string]any, blackboard map[string]any, node teammodel.FlowNode) {
-	feedback, exists := blackboard[nodeInteractionFeedbackKey(node.NodeKey, node.ID)]
-	if !exists {
-		return
-	}
-	input["user_feedback"] = feedback
-}
-
-func nodeInteractionFeedbackKey(nodeKey string, nodeID uint64) string {
-	key := strings.TrimSpace(nodeKey)
-	if key == "" {
-		key = fmt.Sprintf("node_%d", nodeID)
-	}
-	return key + "_feedback"
-}
-
 func (s Service) runNodeByType(ctx context.Context, run teammodel.Run, flowRun teammodel.FlowRun, team teammodel.Team, roles []teammodel.Role, flow teammodel.Flow, node teammodel.FlowNode, config map[string]any, input map[string]any, blackboard map[string]any, incoming []teammodel.FlowNodeEdge, nodeByID map[uint64]teammodel.FlowNode) (map[string]any, string, uint64, error) {
 	switch node.Type {
 	case teammodel.NodeTypeAgent, teammodel.NodeTypeRole:
 		return s.runAgentNode(ctx, run, flowRun, team, roles, flow, node, config, input)
 	case teammodel.NodeTypePower:
-		return s.waitPowerNode(ctx, run, flowRun, team, flow, node, config, input)
+		return s.runPowerNode(ctx, run, flowRun, flow, node, config, input)
 	case teammodel.NodeTypeTeam:
 		return s.runSubTeamNode(ctx, run, flowRun, team, flow, node, config, input)
 	case teammodel.NodeTypeContext:
@@ -383,60 +388,7 @@ func (s Service) runAgentNode(ctx context.Context, run teammodel.Run, flowRun te
 	if err != nil {
 		return nil, teammodel.RunStatusFail, 0, err
 	}
-	goal := firstText(config["goal"], config["task"], node.Name)
-	memories := s.roleRuntimeMemories(ctx, team, executor.Role, input)
-	prompt := buildAgentPrompt(team, flow, node, executor, goal, input, memories)
-	nodeRunID := s.currentNodeRunID(ctx, flowRun.ID, node.ID)
-	nodeRun := s.repo.FindNodeRun(ctx, nodeRunID)
-	var agentRunID atomic.Uint64
-	result, err := s.agent.RunInternal(ctx, runtimeloop.InternalRequest{
-		AgentID:   executor.AgentID,
-		RequestID: newRequestID(),
-		Method:    "POST",
-		Path:      "/bot/team/run",
-		Input: map[string]any{
-			"text":       prompt,
-			"task":       goal,
-			"goal":       goal,
-			"team":       team.Name,
-			"flow":       flow.Name,
-			"node":       node.Name,
-			"role":       roleInputPayload(executor.Role),
-			"blackboard": input,
-		},
-		OnRunCreated: func(createdAgentRunID uint64, requestID string) {
-			if nodeRunID == 0 {
-				return
-			}
-			if createdAgentRunID > 0 {
-				agentRunID.Store(createdAgentRunID)
-			}
-			s.repo.UpdateNodeRun(context.Background(), nodeRunID, map[string]any{
-				"agent_run_id": createdAgentRunID,
-			})
-		},
-		OnStream: func(payload map[string]any) {
-			s.forwardAgentNodeStream(context.Background(), run, flowRun, flow, node, nodeRun, agentRunID.Load(), payload)
-		},
-	})
-	if err != nil {
-		return nil, teammodel.RunStatusFail, 0, err
-	}
-	if interaction := agentNodeInteraction(result.Output); len(interaction) > 0 {
-		approvalID := s.insertAgentInteractionApproval(ctx, run, flowRun, team, flow, node, nodeRunID, input, result.Output, interaction)
-		return map[string]any{
-			"approval_id": approvalID,
-			"interaction": interaction,
-			"text":        firstText(result.Summary, result.Output["text"]),
-			"pending":     true,
-		}, teammodel.RunStatusWaiting, result.RunID, runWaitError{message: "等待用户反馈"}
-	}
-	return map[string]any{
-		"summary":      result.Summary,
-		"output":       result.Output,
-		"agent_run_id": result.RunID,
-		"role":         roleInputPayload(executor.Role),
-	}, teammodel.RunStatusSuccess, result.RunID, nil
+	return s.executeAgentNode(ctx, run, flowRun, team, flow, node, config, input, executor)
 }
 
 func (s Service) runKnowledgeNode(ctx context.Context, node teammodel.FlowNode, config map[string]any, input map[string]any) (map[string]any, string, uint64, error) {
@@ -748,27 +700,6 @@ func agentNodeInteraction(output map[string]any) map[string]any {
 	return interaction
 }
 
-func (s Service) insertAgentInteractionApproval(ctx context.Context, run teammodel.Run, flowRun teammodel.FlowRun, team teammodel.Team, flow teammodel.Flow, node teammodel.FlowNode, nodeRunID uint64, input map[string]any, output map[string]any, interaction map[string]any) uint64 {
-	return s.repo.InsertApproval(ctx, map[string]any{
-		"run_id":      run.ID,
-		"flow_run_id": flowRun.ID,
-		"node_run_id": nodeRunID,
-		"team_id":     team.ID,
-		"flow_id":     flow.ID,
-		"node_id":     node.ID,
-		"title":       firstText(interaction["title"], node.Name),
-		"content": jsonText(map[string]any{
-			"kind":        "agent_interaction",
-			"input":       input,
-			"output":      output,
-			"interaction": interaction,
-		}),
-		"comment":  "",
-		"decision": "pending",
-		"status":   teammodel.RunStatusPending,
-	})
-}
-
 func (s Service) resolveNodeAgent(ctx context.Context, teamID uint64, roles []teammodel.Role, node teammodel.FlowNode, config map[string]any) (resolvedNodeAgent, error) {
 	if node.Type == teammodel.NodeTypeAgent && node.AgentID > 0 {
 		return resolvedNodeAgent{AgentID: node.AgentID}, nil
@@ -854,32 +785,6 @@ func findRuntimeRole(roles []teammodel.Role, roleID uint64, roleKey string, role
 	return first, first != nil
 }
 
-func buildAgentPrompt(team teammodel.Team, flow teammodel.Flow, node teammodel.FlowNode, executor resolvedNodeAgent, goal string, input map[string]any, memories []memoryservice.RuntimeMemory) string {
-	parts := []string{
-		"你正在作为 Team 编排中的一个智能体节点执行任务。",
-		fmt.Sprintf("团队：%s", team.Name),
-	}
-	appendPromptText(&parts, "团队说明", team.Description)
-	parts = append(parts, fmt.Sprintf("当前工作流：%s", flow.Name))
-	appendPromptText(&parts, "工作流目标", flow.Goal)
-	parts = append(parts, fmt.Sprintf("当前节点：%s", node.Name))
-	if executor.Role != nil {
-		parts = append(parts, fmt.Sprintf("当前角色：%s（%s / %s）", executor.Role.Name, executor.Role.RoleType, executor.Role.RoleKey))
-		appendPromptText(&parts, "角色职责", executor.Role.Assignment)
-	}
-	if memoryPrompt := teamRoleMemoryPrompt(memories); memoryPrompt != "" {
-		parts = append(parts, memoryPrompt)
-	}
-	appendPromptText(&parts, "节点目标", goal)
-	parts = append(
-		parts,
-		"请严格基于输入黑板执行当前节点任务，输出清晰、可被下游节点继续使用的结果。",
-		"用户交互规则：如果节点目标或输入要求用户选择、确认、补充信息、补充素材或给出反馈，或者当前信息不足以可靠执行，必须按 agent-interaction 协议发起表单交互，不能替用户做决定；用户提交后会以 user_feedback 写回输入黑板，你必须基于 user_feedback 继续完成当前节点，不能再次要求用户填写同一批信息。能枚举选项时优先使用 option 或 multi_option，缺少图片、视频、音频、文件等素材时使用 file 或 files。只有信息足够且不需要用户决策时，才输出最终结果。",
-		fmt.Sprintf("输入黑板：%s", jsonText(input)),
-	)
-	return strings.Join(parts, "\n\n")
-}
-
 func roleInputPayload(role *teammodel.Role) map[string]any {
 	if role == nil {
 		return map[string]any{}
@@ -892,14 +797,6 @@ func roleInputPayload(role *teammodel.Role) map[string]any {
 		"agent_id":   role.AgentID,
 		"assignment": role.Assignment,
 	}
-}
-
-func appendPromptText(parts *[]string, label string, value string) {
-	text := strings.TrimSpace(value)
-	if text == "" {
-		return
-	}
-	*parts = append(*parts, fmt.Sprintf("%s：%s", label, text))
 }
 
 func runConditionNode(config map[string]any, input map[string]any) map[string]any {
@@ -1189,7 +1086,7 @@ func sortedAnyMapKeys(row map[string]any) []string {
 
 func isMergeNodeControlKey(key string) bool {
 	key = strings.TrimSpace(key)
-	return key == "" || key == "user_feedback" || strings.HasSuffix(key, "_feedback")
+	return key == ""
 }
 
 func isMergeNodeStructuralKey(key string) bool {
@@ -1229,56 +1126,6 @@ func (s Service) waitHumanNode(ctx context.Context, run teammodel.Run, flowRun t
 		"status":      teammodel.RunStatusPending,
 	})
 	return map[string]any{"approval_id": approvalID, "pending": true}, teammodel.RunStatusWaiting, 0, runWaitError{message: "等待人工确认"}
-}
-
-func (s Service) waitPowerNode(ctx context.Context, run teammodel.Run, flowRun teammodel.FlowRun, team teammodel.Team, flow teammodel.Flow, node teammodel.FlowNode, config map[string]any, input map[string]any) (map[string]any, string, uint64, error) {
-	nodeRun := s.repo.FindNodeRunByNode(ctx, flowRun.ID, node.ID)
-	if nodeRun == nil {
-		return nil, teammodel.RunStatusFail, 0, fmt.Errorf("能力节点运行记录不存在")
-	}
-	if approval := s.repo.FindPendingApprovalByNodeRun(ctx, nodeRun.ID); approval != nil {
-		return map[string]any{"approval_id": approval.ID, "pending": true}, teammodel.RunStatusWaiting, 0, runWaitError{message: "等待能力参数"}
-	}
-	powerKey := firstText(config["power_key"], config["power"])
-	if powerKey == "" && node.PowerID > 0 {
-		if power, ok := s.repo.FindPowerOption(ctx, node.PowerID, ""); ok {
-			powerKey = power.Key
-		}
-	}
-	if powerKey == "" {
-		return nil, teammodel.RunStatusFail, 0, fmt.Errorf("能力节点未绑定能力: %s", node.Name)
-	}
-	interaction := map[string]any{
-		"id":          fmt.Sprintf("team-power-%d", node.ID),
-		"type":        "power_params",
-		"title":       node.Name,
-		"description": "补充能力参数后继续执行流程。",
-		"power":       powerKey,
-		"values":      input,
-	}
-	approvalID := s.repo.InsertApproval(ctx, map[string]any{
-		"run_id":      run.ID,
-		"flow_run_id": flowRun.ID,
-		"node_run_id": nodeRun.ID,
-		"team_id":     team.ID,
-		"flow_id":     flow.ID,
-		"node_id":     node.ID,
-		"title":       node.Name,
-		"content": jsonText(map[string]any{
-			"kind":        "power",
-			"power":       powerKey,
-			"input":       input,
-			"interaction": interaction,
-		}),
-		"comment":  "",
-		"decision": "pending",
-		"status":   teammodel.RunStatusPending,
-	})
-	return map[string]any{
-		"approval_id": approvalID,
-		"interaction": interaction,
-		"pending":     true,
-	}, teammodel.RunStatusWaiting, 0, runWaitError{message: "等待能力参数"}
 }
 
 func (s Service) runSubTeamNode(ctx context.Context, run teammodel.Run, flowRun teammodel.FlowRun, team teammodel.Team, flow teammodel.Flow, node teammodel.FlowNode, config map[string]any, input map[string]any) (map[string]any, string, uint64, error) {

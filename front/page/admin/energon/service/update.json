@@ -48,6 +48,42 @@
         }
       },
       {
+        "id": "service-account",
+        "type": "form-select",
+        "name": "鉴权账号",
+        "value": "form.account_id",
+        "mode": "form",
+        "placeholder": "使用来源通用账号",
+        "option": {
+          "model": "bot.energon.NewAccountModel",
+          "parentField": "provider_id",
+          "valueField": "id",
+          "labelField": "name",
+          "extraFields": [
+            "scope",
+            "status",
+            "host"
+          ],
+          "filters": {
+            "status": "1"
+          },
+          "order": "scope asc,sort asc,id asc",
+          "pageSize": 200
+        },
+        "info": "留空时按排序使用当前来源的启用通用账号；选择后固定使用该账号。",
+        "meta": {
+          "optionParams": {
+            "parentId": "form.provider_id"
+          },
+          "emptyValues": [
+            0,
+            "0",
+            ""
+          ],
+          "controlClassName": "max-w-[320px]"
+        }
+      },
+      {
         "type": "form-input",
         "value": "form.name",
         "mode": "form",
@@ -77,14 +113,16 @@
         "value": "form.path",
         "mode": "form",
         "placeholder": "例如：/chat/completions、images/generations；留空使用协议默认路径",
-        "info": "来源服务的接口路径。留空时按协议默认路径调用；填写后会用 来源 host + 当前路径 + 服务接口标识 组装请求。"
+        "info": "支持相对路径或完整 HTTP(S) 地址。相对路径会与账号主机组合，账号未配置主机时使用来源主机；完整地址直接使用；留空使用协议默认路径。"
       }
     ]
   },
   "data": {
     "form": {
+      "service": "bot.energon.hook.ServiceHook.AttachServicePricingForm",
       "_fields": [
         "provider_id",
+        "account_id",
         "name",
         "type",
         "path",
@@ -94,6 +132,7 @@
         "params"
       ],
       "provider_id": "",
+      "account_id": 0,
       "type": "text",
       "path": "",
       "sort": 100,

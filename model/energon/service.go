@@ -9,6 +9,7 @@ import (
 type Service struct {
 	ID         uint64    `dorm:"primaryKey;autoIncrement;comment:服务ID"`
 	ProviderID uint64    `dorm:"type:bigint;not null;default:0;comment:来源"`
+	AccountID  uint64    `dorm:"type:bigint;not null;default:0;comment:鉴权账号"`
 	Name       string    `dorm:"type:varchar(128);not null;comment:名称"`
 	Type       string    `dorm:"type:varchar(64);not null;comment:类型"`
 	Path       string    `dorm:"type:varchar(255);not null;default:'';comment:接口路径"`
@@ -19,6 +20,7 @@ type Service struct {
 
 type ServiceIndex struct {
 	ProviderStatus struct{} `index:"provider_id,status,sort"`
+	AccountStatus  struct{} `index:"account_id,status"`
 }
 
 const (
@@ -124,6 +126,12 @@ var (
 		OptionKeys: []string{"name", "host", "protocol", "processor"},
 	}
 
+	serviceAccountRelation = orm.Relation{
+		Field:      "account_id",
+		Option:     "bot.energon.NewAccountModel",
+		OptionKeys: []string{"name", "provider_id", "scope", "status"},
+	}
+
 	serviceParamRelation = orm.Relation{
 		Field:      "params",
 		Through:    "bot.energon.NewServiceParamModel",
@@ -158,6 +166,7 @@ func NewServiceModel() *orm.Model[Service] {
 		},
 		Relations: []orm.Relation{
 			serviceProviderRelation,
+			serviceAccountRelation,
 			serviceEndpointRelation,
 			serviceParamRelation,
 			serviceRuntimeStatRelation,

@@ -1,0 +1,176 @@
+{
+  "page": {
+    "name": "系统消息编辑",
+    "parent": "bot/body/system_message/list",
+    "type": 2,
+    "auth": [
+      {
+        "key": "bot/body/system_message/create",
+        "name": "系统消息新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/body/system_message/update",
+        "name": "系统消息编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "name": "标题",
+        "placeholder": "请输入系统消息标题",
+        "value": "form.title",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "系统消息标题不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "name": "内容",
+        "placeholder": "请输入简短消息内容",
+        "value": "form.content",
+        "mode": "form",
+        "info": "内容会直接展示在窄消息列表中，建议保持简短。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "系统消息内容不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 5
+        }
+      },
+      {
+        "type": "form-input",
+        "name": "外链地址",
+        "placeholder": "https://example.com/notice",
+        "value": "form.url",
+        "mode": "form",
+        "info": "可选。填写后用户点击消息将在新窗口打开该地址。",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-date",
+        "name": "发布时间",
+        "placeholder": "留空则立即发布",
+        "value": "form.published_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "inputType": "datetime-local"
+        }
+      },
+      {
+        "type": "form-date",
+        "name": "结束时间",
+        "placeholder": "不限制结束时间",
+        "value": "form.expires_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "inputType": "datetime-local"
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "置顶",
+        "value": "form.pinned",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "状态",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      },
+      {
+        "type": "form-number",
+        "name": "排序",
+        "value": "form.sort",
+        "mode": "form",
+        "info": "置顶状态相同时，数值越小越靠前。",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[180px]"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "id": 0,
+      "title": "",
+      "content": "",
+      "url": "",
+      "published_at": "",
+      "expires_at": "",
+      "pinned": 2,
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "data": {
+        "id": "$form.id",
+        "title": "$form.title",
+        "content": "$form.content",
+        "url": "$form.url",
+        "published_at": "$form.published_at",
+        "expires_at": "$form.expires_at",
+        "pinned": "$form.pinned",
+        "status": "$form.status",
+        "sort": "$form.sort"
+      },
+      "before": {
+        "service": "bot.body.SystemMessageHook.BeforeSaveSystemMessage"
+      }
+    }
+  }
+}

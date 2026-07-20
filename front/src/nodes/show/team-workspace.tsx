@@ -105,6 +105,9 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
   const runFlowApi = String(meta.runFlowApi || "/bot/admin/team/run_flow");
   const streamApi = String(meta.streamApi || "/bot/admin/team/stream");
   const approvalApi = String(meta.approvalApi || "/bot/admin/team/submit_approval");
+  const interactionApi = String(
+    meta.interactionApi || "/bot/admin/team/submit_interaction",
+  );
   const paramApi = String(meta.paramApi || "/bot/admin/energon/power_params");
 
   const publishStatus = normalizeTeamPublishStatus(
@@ -358,7 +361,7 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
     const input = buildDebugInput(prompt, references);
     setDebugTarget(target);
     setDebugPrompt(prompt);
-    setDebugOpen(false);
+    setDebugOpen(target === "team");
     setEditorOpen(false);
     setDeleteTarget(null);
     setConnect(null);
@@ -448,17 +451,24 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
     setDebugResult(optimisticStatus);
     setDebugRunning(true);
     try {
-      const response = await request(approvalApi, "post", {
-        approval_id: approval.id,
-        decision,
-        comment,
-        data: {
-          ...result.data,
-          params: result.data,
-          text: result.text,
-          interaction: approval.interaction,
-        },
-      });
+      const interaction = approval.kind === "interaction";
+      const response = await request(
+        interaction ? interactionApi : approvalApi,
+        "post",
+        interaction
+          ? {
+              run_id: approval.runID,
+              node_run_id: approval.nodeRunID,
+              interaction_id: approval.id,
+              data: result.data,
+            }
+          : {
+              approval_id: approval.id,
+              decision,
+              comment,
+              data: result.data,
+            },
+      );
       if (response.code !== 0) {
         throw new Error(response.message || "提交反馈失败");
       }

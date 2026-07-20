@@ -3,10 +3,8 @@ import {
   Clapperboard,
   Loader2,
   Maximize2,
-  Music2,
   Play,
   Plus,
-  Trash2,
   Volume2,
 } from "lucide-react";
 import type { ComposerAssetItem } from "./space-prompt-composer";
@@ -14,10 +12,13 @@ import { moveOrderedItemById } from "./space-ordered-list";
 import {
   emptyVideoComposition,
   VIDEO_COMPOSE_TRANSITIONS,
+  videoComposeReferenceKey,
   videoCompositionDuration,
+  videoCompositionBlockingIssues,
   type CanvasVideoComposition,
   type VideoComposeAssetReference,
   type VideoComposeClip,
+  type VideoComposeSpeechTrack,
 } from "./space-video-compose";
 import {
   VideoComposeClipCard,
@@ -29,7 +30,7 @@ import {
   hasCanvasContent,
 } from "./space-content-view";
 
-type PickerTarget = "clip" | "voice" | "background";
+type PickerTarget = "clip" | "original" | "speech";
 
 export function VideoComposeView({
   composition,
@@ -66,9 +67,10 @@ export function VideoComposeView({
   const selectedClip =
     value.clips.find((clip) => clip.id === selectedClipId) || value.clips[0];
   const selectedItem = selectedClip
-    ? findReferenceItem(referenceItems, selectedClip.video)
+    ? findReferenceItem(referenceItems, selectedClip.visualVideo)
     : undefined;
   const totalDuration = videoCompositionDuration(value);
+  const blockingIssues = videoCompositionBlockingIssues(value);
 
   const referenceMap = useMemo(() => {
     const result = new Map<string, ComposerAssetItem>();
@@ -108,14 +110,14 @@ export function VideoComposeView({
       const clip = createVideoComposeClip(reference);
       update({ ...value, clips: [...value.clips, clip] });
       setSelectedClipId(clip.id);
-    } else if (pickerTarget === "voice" && selectedClip) {
+    } else if (pickerTarget === "original" && selectedClip) {
       updateClip(selectedClip.id, {
-        sound: { ...selectedClip.sound, voice: reference },
+        originalAudioSource: reference,
       });
-    } else if (pickerTarget === "background") {
-      update({
-        ...value,
-        settings: { ...value.settings, backgroundMusic: reference },
+    } else if (pickerTarget === "speech" && selectedClip) {
+      const track = createVideoComposeSpeechTrack(reference);
+      updateClip(selectedClip.id, {
+        speechTracks: [...selectedClip.speechTracks, track],
       });
     }
     setPickerTarget("");
@@ -136,6 +138,7 @@ export function VideoComposeView({
           <small>
             {value.clips.length} 个镜头
             {totalDuration > 0 ? ` · ${formatDuration(totalDuration)} 秒` : ""}
+            {blockingIssues.length ? ` · ${blockingIssues.length} 项待处理` : ""}
           </small>
         </div>
         <div>
@@ -155,7 +158,13 @@ export function VideoComposeView({
             <button
               type="button"
               className="is-primary"
-              disabled={running || readonly || value.clips.length === 0}
+              disabled={
+                running ||
+                readonly ||
+                value.clips.length === 0 ||
+                blockingIssues.length > 0
+              }
+              title={blockingIssues[0] || "开始合成"}
               onClick={() => onRun(value)}
             >
               {running ? (
@@ -192,7 +201,7 @@ export function VideoComposeView({
               index={index}
               last={index === value.clips.length - 1}
               item={referenceMap.get(
-                `${clip.video.assetId}:${clip.video.versionId}`,
+                videoComposeReferenceKey(clip.visualVideo),
               )}
               selected={clip.id === selectedClip?.id}
               readonly={readonly}
@@ -207,7 +216,7 @@ export function VideoComposeView({
                 }
               }}
               onDuration={(duration) => {
-                if (Math.abs(duration - clip.duration) > 0.05) {
+                if (clip.duration <= 0 && duration > 0) {
                   updateClip(clip.id, { duration });
                 }
               }}
@@ -263,7 +272,8 @@ export function VideoComposeView({
           panel={activePanel}
           readonly={readonly}
           onChange={(patch) => updateClip(selectedClip.id, patch)}
-          onChooseVoice={() => setPickerTarget("voice")}
+          onChooseOriginal={() => setPickerTarget("original")}
+          onChooseSpeech={() => setPickerTarget("speech")}
         />
       ) : null}
 
@@ -272,7 +282,6 @@ export function VideoComposeView({
           composition={value}
           readonly={readonly}
           onChange={update}
-          onChooseBackground={() => setPickerTarget("background")}
         />
       ) : null}
     </section>
@@ -297,9 +306,9 @@ export function VideoComposeView({
           title={
             pickerTarget === "clip"
               ? "添加镜头"
-              : pickerTarget === "voice"
-                ? "选择配音"
-                : "选择背景音乐"
+              : pickerTarget === "original"
+                ? "选择原声来源"
+                : "添加语音轨"
           }
           kind={pickerTarget === "clip" ? "video" : "audio"}
           items={referenceItems}
@@ -316,13 +325,15 @@ function VideoComposeClipInspector({
   panel,
   readonly,
   onChange,
-  onChooseVoice,
+  onChooseOriginal,
+  onChooseSpeech,
 }: {
   clip: VideoComposeClip;
   panel: VideoComposeClipPanel;
   readonly: boolean;
   onChange: (patch: Partial<VideoComposeClip>) => void;
-  onChooseVoice: () => void;
+  onChooseOriginal: () => void;
+  onChooseSpeech: () => void;
 }) {
   return (
     <div className="ws-video-compose-inspector nodrag nowheel">
@@ -342,22 +353,10 @@ function VideoComposeClipInspector({
         />
       ) : panel === "sound" ? (
         <div className="ws-video-compose-sound-fields">
-          <label>
-            <input
-              type="checkbox"
-              checked={clip.sound.keepOriginal}
-              disabled={readonly}
-              onChange={(event) =>
-                onChange({
-                  sound: {
-                    ...clip.sound,
-                    keepOriginal: event.target.checked,
-                  },
-                })
-              }
-            />
-            保留原声
-          </label>
+          <button type="button" disabled={readonly} onClick={onChooseOriginal}>
+            <Volume2 size={13} />
+            {clip.originalAudioSource?.label || "选择原声来源"}
+          </button>
           <label>
             <span>原声音量</span>
             <input
@@ -365,55 +364,103 @@ function VideoComposeClipInspector({
               min="0"
               max="1"
               step="0.05"
-              value={clip.sound.originalVolume}
-              disabled={readonly || !clip.sound.keepOriginal}
+              value={clip.originalVolume}
+              disabled={readonly || !clip.originalAudioSource}
               onChange={(event) =>
                 onChange({
-                  sound: {
-                    ...clip.sound,
-                    originalVolume: Number(event.target.value),
-                  },
+                  originalVolume: Number(event.target.value),
                 })
               }
             />
-            <small>{Math.round(clip.sound.originalVolume * 100)}%</small>
+            <small>{Math.round(clip.originalVolume * 100)}%</small>
           </label>
-          <button type="button" disabled={readonly} onClick={onChooseVoice}>
+          {clip.originalAudioSource ? (
+            <button
+              type="button"
+              disabled={readonly}
+              onClick={() => onChange({ originalAudioSource: undefined })}
+            >
+              移除原声
+            </button>
+          ) : null}
+          <button type="button" disabled={readonly} onClick={onChooseSpeech}>
             <Volume2 size={13} />
-            {clip.sound.voice ? clip.sound.voice.label || "更换配音" : "选择配音"}
+            添加语音轨
           </button>
-          {clip.sound.voice ? (
-            <>
+          {clip.speechTracks.map((track, index) => (
+            <div className="ws-video-compose-speech-track" key={track.id}>
+              <strong>{track.audio?.label || `语音 ${index + 1}`}</strong>
               <label>
-                <span>配音音量</span>
+                <span>开始时间</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={track.startTime}
+                  readOnly={readonly}
+                  onChange={(event) =>
+                    onChange({
+                      speechTracks: updateSpeechTrack(
+                        clip.speechTracks,
+                        track.id,
+                        { startTime: Number(event.target.value) },
+                      ),
+                    })
+                  }
+                />
+                秒
+              </label>
+              <label>
+                <span>音量</span>
                 <input
                   type="range"
                   min="0"
                   max="1"
                   step="0.05"
-                  value={clip.sound.voiceVolume}
+                  value={track.volume}
                   disabled={readonly}
                   onChange={(event) =>
                     onChange({
-                      sound: {
-                        ...clip.sound,
-                        voiceVolume: Number(event.target.value),
-                      },
+                      speechTracks: updateSpeechTrack(
+                        clip.speechTracks,
+                        track.id,
+                        { volume: Number(event.target.value) },
+                      ),
                     })
                   }
                 />
-                <small>{Math.round(clip.sound.voiceVolume * 100)}%</small>
+                <small>{Math.round(track.volume * 100)}%</small>
               </label>
               <button
                 type="button"
                 disabled={readonly}
                 onClick={() =>
-                  onChange({ sound: { ...clip.sound, voice: undefined } })
+                  onChange({
+                    speechTracks: clip.speechTracks.filter(
+                      (item) => item.id !== track.id,
+                    ),
+                  })
                 }
               >
-                移除配音
+                移除
               </button>
-            </>
+            </div>
+          ))}
+          {clip.blockingIssues.length ? (
+            <div className="ws-video-compose-blocking">
+              {clip.blockingIssues.map((issue) => (
+                <span key={issue}>{issue}</span>
+              ))}
+              {clip.lipSyncRequired && !clip.useOriginalVideo ? (
+                <button
+                  type="button"
+                  disabled={readonly}
+                  onClick={() => onChange({ useOriginalVideo: true })}
+                >
+                  使用原视频
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       ) : (
@@ -470,12 +517,10 @@ function VideoComposeGlobalSettings({
   composition,
   readonly,
   onChange,
-  onChooseBackground,
 }: {
   composition: CanvasVideoComposition;
   readonly: boolean;
   onChange: (composition: CanvasVideoComposition) => void;
-  onChooseBackground: () => void;
 }) {
   return (
     <div className="ws-video-compose-global nodrag">
@@ -521,54 +566,6 @@ function VideoComposeGlobalSettings({
           ))}
         </select>
       </label>
-      <button type="button" disabled={readonly} onClick={onChooseBackground}>
-        <Music2 size={13} />
-        {composition.settings.backgroundMusic?.label || "选择背景音乐"}
-      </button>
-      {composition.settings.backgroundMusic ? (
-        <>
-          <label>
-            <span>背景音乐音量</span>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              value={composition.settings.backgroundMusicVolume}
-              disabled={readonly}
-              onChange={(event) =>
-                onChange({
-                  ...composition,
-                  settings: {
-                    ...composition.settings,
-                    backgroundMusicVolume: Number(event.target.value),
-                  },
-                })
-              }
-            />
-            <small>
-              {Math.round(composition.settings.backgroundMusicVolume * 100)}%
-            </small>
-          </label>
-          <button
-            type="button"
-            disabled={readonly}
-            title="移除背景音乐"
-            onClick={() =>
-              onChange({
-                ...composition,
-                settings: {
-                  ...composition.settings,
-                  backgroundMusic: undefined,
-                },
-              })
-            }
-          >
-            <Trash2 size={13} />
-            移除
-          </button>
-        </>
-      ) : null}
     </div>
   );
 }
@@ -648,14 +645,15 @@ function createVideoComposeClip(
   return {
     id: uniqueClipId(),
     title: reference.label || "镜头",
-    video: reference,
+    visualVideo: reference,
+    originalAudioSource: reference,
     duration: 0,
     subtitle: "",
-    sound: {
-      keepOriginal: true,
-      originalVolume: 1,
-      voiceVolume: 1,
-    },
+    originalVolume: 1,
+    speechTracks: [],
+    lipSyncRequired: false,
+    useOriginalVideo: false,
+    blockingIssues: [],
     transitionToNext: {
       type: "none",
       durationMs: 500,
@@ -676,12 +674,38 @@ function referenceFromItem(
 
 function findReferenceItem(
   items: ComposerAssetItem[],
-  reference: VideoComposeAssetReference,
+  reference?: VideoComposeAssetReference,
 ) {
+  if (!reference) {
+    return undefined;
+  }
   return items.find(
     (item) =>
       Number(item.refId || 0) === reference.assetId &&
       Number(item.versionID || 0) === reference.versionId,
+  );
+}
+
+function createVideoComposeSpeechTrack(
+  audio: VideoComposeAssetReference,
+): VideoComposeSpeechTrack {
+  return {
+    id: uniqueTrackId(),
+    audio,
+    startTime: 0,
+    kind: "dialogue",
+    text: "",
+    volume: 1,
+  };
+}
+
+function updateSpeechTrack(
+  tracks: VideoComposeSpeechTrack[],
+  trackId: string,
+  patch: Partial<VideoComposeSpeechTrack>,
+) {
+  return tracks.map((track) =>
+    track.id === trackId ? { ...track, ...patch } : track,
   );
 }
 
@@ -690,6 +714,13 @@ function uniqueClipId() {
     return `clip-${crypto.randomUUID()}`;
   }
   return `clip-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function uniqueTrackId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `speech-${crypto.randomUUID()}`;
+  }
+  return `speech-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function formatDuration(value: number) {

@@ -6,18 +6,28 @@ export type VideoComposeAssetReference = {
   label: string;
 };
 
+export type VideoComposeSpeechTrack = {
+  id: string;
+  audio?: VideoComposeAssetReference;
+  startTime: number;
+  kind: "dialogue" | "narration";
+  characterId?: string;
+  text: string;
+  volume: number;
+};
+
 export type VideoComposeClip = {
   id: string;
   title: string;
-  video: VideoComposeAssetReference;
+  visualVideo?: VideoComposeAssetReference;
+  originalAudioSource?: VideoComposeAssetReference;
   duration: number;
   subtitle: string;
-  sound: {
-    keepOriginal: boolean;
-    originalVolume: number;
-    voice?: VideoComposeAssetReference;
-    voiceVolume: number;
-  };
+  originalVolume: number;
+  speechTracks: VideoComposeSpeechTrack[];
+  lipSyncRequired: boolean;
+  useOriginalVideo: boolean;
+  blockingIssues: string[];
   transitionToNext: {
     type: VideoComposeTransitionType;
     durationMs: number;
@@ -25,13 +35,11 @@ export type VideoComposeClip = {
 };
 
 export type CanvasVideoComposition = {
-  version: 1;
+  version: 2;
   clips: VideoComposeClip[];
   settings: {
     resolution: string;
     fps: number;
-    backgroundMusic?: VideoComposeAssetReference;
-    backgroundMusicVolume: number;
   };
 };
 
@@ -46,12 +54,11 @@ export const VIDEO_COMPOSE_TRANSITIONS: Array<{
 
 export function emptyVideoComposition(): CanvasVideoComposition {
   return {
-    version: 1,
+    version: 2,
     clips: [],
     settings: {
       resolution: "1920x1080",
       fps: 25,
-      backgroundMusicVolume: 0.2,
     },
   };
 }
@@ -60,29 +67,19 @@ export function normalizeVideoComposition(
   value: unknown,
 ): CanvasVideoComposition | undefined {
   const row = recordValue(value);
-  if (Number(row.version || 0) !== 1) {
+  if (Number(row.version || 0) !== 2) {
     return undefined;
   }
   const clips = Array.isArray(row.clips)
     ? row.clips.map(normalizeVideoComposeClip).filter(Boolean)
     : [];
   const settings = recordValue(row.settings);
-  const backgroundMusic = normalizeVideoComposeReference(
-    settings.backgroundMusic ?? settings.background_music,
-  );
   return {
-    version: 1,
+    version: 2,
     clips: clips as VideoComposeClip[],
     settings: {
       resolution: stringValue(settings.resolution) || "1920x1080",
       fps: clampNumber(settings.fps, 1, 120, 25),
-      ...(backgroundMusic ? { backgroundMusic } : {}),
-      backgroundMusicVolume: clampNumber(
-        settings.backgroundMusicVolume ?? settings.background_music_volume,
-        0,
-        1,
-        0.2,
-      ),
     },
   };
 }
@@ -104,47 +101,63 @@ export function videoCompositionDuration(composition: CanvasVideoComposition) {
   return Math.max(0, clipDuration - transitionDuration);
 }
 
-export function videoComposeReferenceKey(reference: VideoComposeAssetReference) {
-  return `${reference.assetId}:${reference.versionId}`;
+export function videoCompositionBlockingIssues(
+  composition: CanvasVideoComposition,
+) {
+  return composition.clips.flatMap((clip, index) =>
+    clip.blockingIssues.map(
+      (issue) => `${clip.title || `镜头 ${index + 1}`}：${issue}`,
+    ),
+  );
+}
+
+export function videoComposeReferenceKey(reference?: VideoComposeAssetReference) {
+  return reference ? `${reference.assetId}:${reference.versionId}` : "";
 }
 
 function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
   const row = recordValue(value);
-  const video = normalizeVideoComposeReference(row.video);
   const id = stringValue(row.id);
-  if (!id || !video) {
+  if (!id) {
     return null;
   }
-  const sound = recordValue(row.sound);
-  const voice = normalizeVideoComposeReference(sound.voice);
+  const visualVideo = normalizeVideoComposeReference(
+    row.visualVideo ?? row.visual_video,
+  );
+  const originalAudioSource = normalizeVideoComposeReference(
+    row.originalAudioSource ?? row.original_audio_source,
+  );
   const transition = recordValue(
     row.transitionToNext ?? row.transition_to_next,
   );
+  const speechTracks = Array.isArray(row.speechTracks ?? row.speech_tracks)
+    ? (row.speechTracks ?? row.speech_tracks)
+        .map(normalizeVideoComposeSpeechTrack)
+        .filter(Boolean)
+    : [];
   return {
     id,
-    title: stringValue(row.title) || video.label || "镜头",
-    video,
+    title: stringValue(row.title) || visualVideo?.label || "镜头",
+    ...(visualVideo ? { visualVideo } : {}),
+    ...(originalAudioSource ? { originalAudioSource } : {}),
     duration: Math.max(0, numberValue(row.duration)),
     subtitle: stringValue(row.subtitle),
-    sound: {
-      keepOriginal: booleanValue(
-        sound.keepOriginal ?? sound.keep_original,
-        true,
-      ),
-      originalVolume: clampNumber(
-        sound.originalVolume ?? sound.original_volume,
-        0,
-        1,
-        1,
-      ),
-      ...(voice ? { voice } : {}),
-      voiceVolume: clampNumber(
-        sound.voiceVolume ?? sound.voice_volume,
-        0,
-        1,
-        1,
-      ),
-    },
+    originalVolume: clampNumber(
+      row.originalVolume ?? row.original_volume,
+      0,
+      1,
+      1,
+    ),
+    speechTracks: speechTracks as VideoComposeSpeechTrack[],
+    lipSyncRequired: booleanValue(
+      row.lipSyncRequired ?? row.lip_sync_required,
+    ),
+    useOriginalVideo: booleanValue(
+      row.useOriginalVideo ?? row.use_original_video,
+    ),
+    blockingIssues: stringArray(
+      row.blockingIssues ?? row.blocking_issues,
+    ),
     transitionToNext: {
       type: normalizeTransitionType(transition.type),
       durationMs: clampNumber(
@@ -154,6 +167,28 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
         500,
       ),
     },
+  };
+}
+
+function normalizeVideoComposeSpeechTrack(
+  value: unknown,
+): VideoComposeSpeechTrack | null {
+  const row = recordValue(value);
+  const id = stringValue(row.id);
+  if (!id) {
+    return null;
+  }
+  const audio = normalizeVideoComposeReference(row.audio);
+  const kind = stringValue(row.kind) === "narration" ? "narration" : "dialogue";
+  const characterId = stringValue(row.characterId ?? row.character_id);
+  return {
+    id,
+    ...(audio ? { audio } : {}),
+    startTime: Math.max(0, numberValue(row.startTime ?? row.start_time)),
+    kind,
+    ...(characterId ? { characterId } : {}),
+    text: stringValue(row.text),
+    volume: clampNumber(row.volume, 0, 1, 1),
   };
 }
 
@@ -190,6 +225,12 @@ function stringValue(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function stringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map(stringValue).filter(Boolean)
+    : [];
+}
+
 function numberValue(value: unknown) {
   const number = Number(value || 0);
   return Number.isFinite(number) ? number : 0;
@@ -208,9 +249,6 @@ function clampNumber(
   return Math.min(max, Math.max(min, number));
 }
 
-function booleanValue(value: unknown, fallback: boolean) {
-  if (value == null || value === "") {
-    return fallback;
-  }
+function booleanValue(value: unknown) {
   return value === true || value === 1 || value === "1" || value === "true";
 }

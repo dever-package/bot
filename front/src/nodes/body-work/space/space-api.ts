@@ -46,7 +46,7 @@ export async function sendSpaceMessage(
 ) {
   const result = await request(joinSiteApi("run/team"), "post", {
     project_id: projectId,
-    mode: "conversation",
+    mode: "team",
     input: {
       goal: message,
       prompt: message,
@@ -247,6 +247,26 @@ export async function submitSpaceApproval(input: {
   return result.data;
 }
 
+export async function submitSpaceInteraction(input: {
+  projectId: number;
+  runId: number;
+  nodeRunId?: number;
+  interactionId: string;
+  data: Record<string, unknown>;
+}) {
+  const result = await request(joinSiteApi("run/interaction"), "post", {
+    project_id: input.projectId,
+    run_id: input.runId,
+    node_run_id: input.nodeRunId || 0,
+    interaction_id: input.interactionId,
+    data: input.data,
+  });
+  if (!isSuccessResponse(result)) {
+    throw new Error(result.message || result.msg || "提交信息失败");
+  }
+  return result.data;
+}
+
 export async function saveSpaceAssetEditVersion(input: {
   projectId: number;
   assetId: number;
@@ -297,6 +317,58 @@ export async function restoreSpaceAssetVersion(input: {
   const asset = (result.data as any)?.asset;
   if (!asset) {
     throw new Error("资产版本恢复结果为空");
+  }
+  return normalizeProjectAsset(asset);
+}
+
+export async function confirmSpaceStoryboard(input: {
+  projectId: number;
+  assetId: number;
+  versionId: number;
+}): Promise<ProjectAsset> {
+  const result = await request(
+    joinSiteApi("project/confirm_storyboard"),
+    "post",
+    {
+      project_id: input.projectId,
+      asset_id: input.assetId,
+      version_id: input.versionId,
+    },
+  );
+  if (!isSuccessResponse(result)) {
+    throw new Error(result.message || result.msg || "确认分镜失败");
+  }
+  const asset = (result.data as any)?.asset;
+  if (!asset) {
+    throw new Error("确认分镜结果为空");
+  }
+  return normalizeProjectAsset(asset);
+}
+
+export async function createSpaceStoryboardRevision(input: {
+  projectId: number;
+  assetId: number;
+  versionId: number;
+  requestId: string;
+  nodeKey: string;
+}): Promise<ProjectAsset> {
+  const result = await request(
+    joinSiteApi("project/create_storyboard_revision"),
+    "post",
+    {
+      project_id: input.projectId,
+      asset_id: input.assetId,
+      version_id: input.versionId,
+      request_id: input.requestId,
+      node_key: input.nodeKey,
+    },
+  );
+  if (!isSuccessResponse(result)) {
+    throw new Error(result.message || result.msg || "创建分镜修订稿失败");
+  }
+  const asset = (result.data as any)?.asset;
+  if (!asset) {
+    throw new Error("创建分镜修订稿结果为空");
   }
   return normalizeProjectAsset(asset);
 }

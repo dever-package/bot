@@ -54,6 +54,16 @@ type PersistedCanvasNode = {
     item_type: string;
     item_id: string;
     generated_prompt?: string;
+    source_node_ids?: string[];
+    shot_id?: string;
+    frame_role?: "start" | "end";
+    speech_id?: string;
+    speech_ids?: string[];
+    character_id?: string;
+    speech_kind?: string;
+    speaker_mode?: string;
+    start_time?: number;
+    shot_duration?: number;
     source_signature?: string;
     result_source_signature?: string;
     stale?: boolean;
@@ -153,6 +163,22 @@ function persistedCanvasNode(
       item_id: item.itemId,
       ...(item.generatedPrompt
         ? { generated_prompt: item.generatedPrompt }
+        : {}),
+      ...(item.sourceNodeIds?.length
+        ? { source_node_ids: item.sourceNodeIds }
+        : {}),
+      ...(item.shotId ? { shot_id: item.shotId } : {}),
+      ...(item.frameRole ? { frame_role: item.frameRole } : {}),
+      ...(item.speechId ? { speech_id: item.speechId } : {}),
+      ...(item.speechIds?.length ? { speech_ids: item.speechIds } : {}),
+      ...(item.characterId ? { character_id: item.characterId } : {}),
+      ...(item.speechKind ? { speech_kind: item.speechKind } : {}),
+      ...(item.speakerMode ? { speaker_mode: item.speakerMode } : {}),
+      ...(Number.isFinite(item.startTime)
+        ? { start_time: item.startTime }
+        : {}),
+      ...(Number.isFinite(item.shotDuration)
+        ? { shot_duration: item.shotDuration }
         : {}),
       ...(item.sourceSignature
         ? { source_signature: item.sourceSignature }

@@ -108,7 +108,7 @@ func (m MappedInput) PromptInput(excludedKeys map[string]bool) map[string]any {
 	input := map[string]any{}
 	for key, value := range m.Original {
 		key = strings.TrimSpace(key)
-		if key == "" || IsInternalInputKey(key) {
+		if key == "" || isNativeInputKeyExcluded(key) {
 			continue
 		}
 		if excludedKeys != nil && excludedKeys[key] {

@@ -210,6 +210,7 @@ func (executor jobExecutor) executeTool(ctx context.Context, job agentmodel.Arti
 		Agent:      snapshot.Agent,
 		Gateway:    executor.gateway,
 		References: snapshot.MediaReferences,
+		Billing:    snapshot.Billing,
 		Method:     snapshot.Transport.Method,
 		Host:       snapshot.Transport.Host,
 		Path:       snapshot.Transport.Path,

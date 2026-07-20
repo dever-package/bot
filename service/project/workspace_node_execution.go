@@ -239,10 +239,28 @@ func workspaceNodeResultPayload(row workspacemodel.NodeExecution) map[string]any
 	if approval := workspaceNodeResultApproval(row, nodeRun, output); approval != nil {
 		result["approval"] = approval
 	}
+	if interaction := workspaceNodeResultInteraction(nodeRun, output); interaction != nil {
+		result["interaction"] = interaction
+	}
 	if textValue(result["node_key"]) == "" {
 		return nil
 	}
 	return result
+}
+
+func workspaceNodeResultInteraction(nodeRun map[string]any, output map[string]any) map[string]any {
+	for _, raw := range []any{
+		nodeRun["interaction"],
+		valueAtPath(nodeRun, "result", "interaction"),
+		output["interaction"],
+		valueAtPath(output, "result", "interaction"),
+		valueAtPath(output, "pending_node", "interaction"),
+	} {
+		if interaction := mapValue(raw); interaction != nil {
+			return interaction
+		}
+	}
+	return nil
 }
 
 func workspaceNodeResultApproval(row workspacemodel.NodeExecution, nodeRun map[string]any, output map[string]any) map[string]any {

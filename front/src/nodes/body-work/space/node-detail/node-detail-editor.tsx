@@ -1,7 +1,10 @@
 import type { ComponentType } from "react";
 import { Download, FileText } from "lucide-react";
 import { getCompatModule } from "@dever/front-plugin";
-import { StoryboardView } from "../space-storyboard-view";
+import {
+  StoryboardView,
+  type StoryboardWorkflowAction,
+} from "../space-storyboard-view";
 import type { StoryboardDocument } from "../space-storyboard";
 import type { ComposerAssetItem } from "../space-prompt-composer";
 import { CanvasNodeContentView } from "../space-content-view";
@@ -30,12 +33,20 @@ export function NodeDetailEditor({
   mediaOutput,
   readonly,
   referenceItems,
+  storyboardWorkflowAction,
+  lipSyncEnabled,
+  onConfirmStoryboard,
+  onCreateStoryboardRevision,
   onChange,
 }: {
   content: NodeDetailEditableContent;
   mediaOutput?: unknown;
   readonly: boolean;
   referenceItems?: ComposerAssetItem[];
+  storyboardWorkflowAction?: StoryboardWorkflowAction;
+  lipSyncEnabled?: boolean;
+  onConfirmStoryboard?: (storyboard: StoryboardDocument) => void | Promise<void>;
+  onCreateStoryboardRevision?: () => void | Promise<void>;
   onChange: (content: NodeDetailEditableContent) => void;
 }) {
   if (mediaOutput !== undefined) {
@@ -56,6 +67,10 @@ export function NodeDetailEditor({
           storyboard={content.value as StoryboardDocument}
           editable={!readonly}
           referenceItems={referenceItems}
+          workflowAction={storyboardWorkflowAction}
+          lipSyncEnabled={lipSyncEnabled}
+          onConfirm={onConfirmStoryboard}
+          onCreateRevision={onCreateStoryboardRevision}
           onChange={(storyboard) =>
             onChange(nodeDetailContentWithValue(content, storyboard))
           }

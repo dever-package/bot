@@ -319,6 +319,12 @@ func workspaceChildNodeResult(ctx context.Context, projectID uint64, parentRun *
 			"approval":     approval,
 		}
 	}
+	if interaction := pendingWorkspaceInteraction(childStatus, uint64Value(nodeRun["id"])); interaction != nil {
+		result["interaction"] = interaction
+		result["result"] = mergeMap(mapValue(result["result"]), map[string]any{
+			"interaction": interaction,
+		})
+	}
 	return result
 }
 
@@ -340,17 +346,37 @@ func latestWorkspaceChildNodeRun(childStatus map[string]any) map[string]any {
 }
 
 func pendingWorkspaceApproval(childStatus map[string]any, nodeRunID uint64) map[string]any {
+	var fallback map[string]any
 	for _, raw := range sliceValue(childStatus["approvals"]) {
 		row := mapValue(raw)
 		if row == nil || textValue(row["status"]) != teammodel.RunStatusPending {
 			continue
 		}
-		if nodeRunID > 0 && uint64Value(row["node_run_id"]) != nodeRunID {
+		if fallback == nil {
+			fallback = row
+		}
+		if nodeRunID == 0 || uint64Value(row["node_run_id"]) == nodeRunID {
+			return row
+		}
+	}
+	return fallback
+}
+
+func pendingWorkspaceInteraction(childStatus map[string]any, nodeRunID uint64) map[string]any {
+	var fallback map[string]any
+	for _, raw := range sliceValue(childStatus["interactions"]) {
+		row := mapValue(raw)
+		if row == nil || mapValue(row["interaction"]) == nil {
 			continue
 		}
-		return row
+		if fallback == nil {
+			fallback = row
+		}
+		if nodeRunID == 0 || uint64Value(row["node_run_id"]) == nodeRunID {
+			return row
+		}
 	}
-	return nil
+	return fallback
 }
 
 func latestWorkspaceChildAsset(ctx context.Context, projectID uint64, nodeRunID uint64) (map[string]any, map[string]any) {

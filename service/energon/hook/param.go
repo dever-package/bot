@@ -16,10 +16,16 @@ func (ParamHook) ProviderBeforeSaveParam(c *server.Context, params []any) any {
 		return record
 	}
 	paramID := util.ToUint64(record["id"])
+	partial := isPartialEnergonRecord(record)
 
-	record["name"] = util.ToStringTrimmed(record["name"])
-	record["key"] = util.ToStringTrimmed(record["key"])
-	record["default_value"] = util.ToStringTrimmed(record["default_value"])
+	trimEnergonStringField(record, "name", partial)
+	trimEnergonStringField(record, "key", partial)
+	trimEnergonStringField(record, "default_value", partial)
+	ensureDefaultRecordSort(record, partial)
+	ensureDefaultRecordStatus(record, partial)
+	if partial {
+		return record
+	}
 	if paramID == botmodel.ParamPromptID {
 		record["name"] = "提示词"
 		record["key"] = "prompt"
@@ -37,7 +43,7 @@ func (ParamHook) ProviderBeforeSaveParam(c *server.Context, params []any) any {
 		valueType = "string"
 	}
 	record["value_type"] = valueType
-	ensureDefaultCategory(record)
+	ensureDefaultCategory(record, false)
 
 	usage := int16(util.ToIntDefault(record["usage"], int(paramUsageMain)))
 	if usage != paramUsageMain && usage != paramUsageToolbar {
@@ -48,13 +54,6 @@ func (ParamHook) ProviderBeforeSaveParam(c *server.Context, params []any) any {
 		normalizePromptAssetKinds(record)
 	}
 	record["usage"] = usage
-
-	if util.ToIntDefault(record["sort"], 0) <= 0 {
-		record["sort"] = defaultRecordSort
-	}
-	if util.ToIntDefault(record["status"], 0) <= 0 {
-		record["status"] = defaultRecordStatus
-	}
 
 	switch paramType {
 	case "file":

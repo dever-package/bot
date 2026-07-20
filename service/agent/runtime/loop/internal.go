@@ -12,6 +12,7 @@ import (
 	"github.com/shemic/dever/server"
 
 	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 type InternalRequest struct {
@@ -24,6 +25,7 @@ type InternalRequest struct {
 	Headers       map[string]string
 	Input         map[string]any
 	History       []any
+	Billing       botprotocol.BillingContext
 	Server        *server.Context
 	OnRunCreated  func(runID uint64, requestID string)
 	OnStream      func(payload map[string]any)
@@ -52,6 +54,7 @@ func (s Service) RunInternal(ctx context.Context, request InternalRequest) (Inte
 			AgentIdentity: agentIdentity,
 			Input:         request.Input,
 			History:       request.History,
+			Billing:       request.Billing,
 			Method:        request.Method,
 			Host:          request.Host,
 			Path:          request.Path,

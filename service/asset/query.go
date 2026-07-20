@@ -145,9 +145,6 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 		}
 		version := versions[row.VersionID]
 		item := s.AssetDetailMap(ctx, *row, version)
-		if version != nil {
-			item["summary"] = versionContentSummary(jsonValue(version.Content), row.Kind)
-		}
 		items = append(items, item)
 	}
 	return map[string]any{

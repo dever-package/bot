@@ -1,0 +1,220 @@
+{
+  "page": {
+    "name": "计费详情",
+    "parent": "bot/billing/charge/list",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-col gap-4 p-0",
+        "children": {
+          "call-card": {
+            "type": "container",
+            "className": "rounded-md border bg-background p-4"
+          },
+          "rule-card": {
+            "type": "container",
+            "className": "rounded-md border bg-background p-4"
+          },
+          "amount-card": {
+            "type": "container",
+            "className": "rounded-md border bg-background p-4"
+          },
+          "snapshot-card": {
+            "type": "container",
+            "className": "rounded-md border bg-background p-4"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "call-card": [
+      {
+        "type": "show-title",
+        "name": "调用信息",
+        "meta": { "variant": "section" }
+      },
+      {
+        "type": "show-base",
+        "value": "form.request_id",
+        "mode": "form",
+        "meta": { "formLayout": "horizontal" }
+      },
+      {
+        "type": "show-base",
+        "value": "form.business_key",
+        "mode": "form",
+        "meta": { "formLayout": "horizontal" }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.scene",
+        "mode": "form",
+        "meta": { "formLayout": "horizontal" }
+      },
+      {
+        "type": "show-base",
+        "name": "用户 / 团队 / 项目",
+        "value": "form.user_id",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.user_id} / {form.team_id} / {form.project_id}"
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "会话 / 运行",
+        "value": "form.session_id",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.session_id} / {form.run_id}"
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "能力",
+        "value": "form.power_name",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.power_name}（ID：{form.power_id}）"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.status",
+        "mode": "form",
+        "meta": { "formLayout": "horizontal" }
+      },
+      {
+        "type": "show-base",
+        "value": "form.error",
+        "mode": "form",
+        "meta": { "formLayout": "horizontal" }
+      }
+    ],
+    "rule-card": [
+      {
+        "type": "show-title",
+        "name": "计费规则",
+        "meta": { "variant": "section" }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.rule_source",
+        "mode": "form",
+        "meta": { "formLayout": "horizontal" }
+      },
+      {
+        "type": "show-base",
+        "name": "身份 / 等级",
+        "value": "form.identity_name",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.identity_name} / {form.level_name}"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.scope",
+        "mode": "form",
+        "meta": { "formLayout": "horizontal" }
+      },
+      {
+        "type": "show-base",
+        "value": "form.sale_ratio",
+        "mode": "form",
+        "meta": { "formLayout": "horizontal" }
+      },
+      {
+        "type": "show-base",
+        "name": "扣费积分",
+        "value": "form.point_name",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.point_name}（汇率：{form.point_exchange_rate}）"
+        }
+      }
+    ],
+    "amount-card": [
+      {
+        "type": "show-title",
+        "name": "成本与结算",
+        "meta": { "variant": "section" }
+      },
+      {
+        "type": "show-base",
+        "name": "预授权成本 / 成功成本 / 尝试总成本",
+        "value": "form.reserved_cost_micros",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.reserved_cost_micros} / {form.success_cost_micros} / {form.total_cost_micros} 微单位"
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "售价 / 利润",
+        "value": "form.sale_micros",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.sale_micros} / {form.profit_micros} 微单位（{form.currency}）"
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "预占 / 应扣 / 实扣 / 未收",
+        "value": "form.reserved_points",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.reserved_points} / {form.requested_points} / {form.settled_points} / {form.uncollected_points} {form.point_symbol}"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.config_breach",
+        "mode": "form",
+        "meta": { "formLayout": "horizontal" }
+      },
+      {
+        "type": "show-date",
+        "value": "form.created_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "format": "datetime-second"
+        }
+      }
+    ],
+    "snapshot-card": [
+      {
+        "type": "show-title",
+        "name": "规则快照",
+        "meta": { "variant": "section" }
+      },
+      {
+        "type": "show-code",
+        "value": "form.rule_snapshot",
+        "meta": { "language": "json" }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "model": "bot.billing.NewPowerChargeModel"
+    }
+  },
+  "state": {},
+  "action": {}
+}

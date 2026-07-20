@@ -1,6 +1,6 @@
 {
   "page": {
-    "name": "调用日志",
+    "name": "调用记录",
     "icon": "list-checks",
     "parent": "bot-energon",
     "sort": 4
@@ -15,16 +15,15 @@
         "type": "main",
         "className": "flex flex-1 flex-col gap-5 sm:gap-6",
         "children": {
-          "toolbar-row": {
-            "type": "row",
-            "className": "flex-wrap items-center gap-3"
-          },
-          "table-row": {
-            "type": "container",
-            "className": "overflow-hidden rounded-md border bg-background"
-          },
-          "feedback-shell": {
+          "record-tabs": {
             "type": "container"
+          },
+          "record-page": {
+            "type": "container",
+            "path": "state.recordPage",
+            "meta": {
+              "updateDocumentTitle": false
+            }
           }
         }
       }
@@ -38,230 +37,48 @@
         "className": "min-w-0 flex-1"
       }
     ],
-    "toolbar-row": [
+    "record-tabs": [
       {
-        "type": "form-input",
-        "placeholder": "搜索 RequestID、能力、服务或来源...",
-        "value": "search.keyword",
-        "mode": "search"
-      },
-      {
-        "type": "form-select",
-        "placeholder": "能力",
-        "value": "search.power_id",
-        "mode": "search",
-        "option": {
-          "model": "bot.energon.NewPowerModel",
-          "labelField": "name",
-          "searchFields": [
-            "name",
-            "key"
-          ],
-          "pageSize": 20
-        },
+        "type": "nav-tab",
         "meta": {
-          "searchPlaceholder": "输入能力名称或标识搜索..."
-        }
-      },
-      {
-        "type": "form-select",
-        "placeholder": "调用方式",
-        "value": "search.mode",
-        "mode": "search"
-      },
-      {
-        "type": "form-select",
-        "placeholder": "协议",
-        "value": "search.protocol",
-        "mode": "search"
-      },
-      {
-        "type": "form-select",
-        "placeholder": "状态",
-        "value": "search.status",
-        "mode": "search"
-      },
-      {
-        "type": "form-date",
-        "placeholder": "创建时间",
-        "value": "search.created_at_start",
-        "mode": "search",
-        "meta": {
-          "searchWidth": "select",
-          "range": true,
-          "endValue": "search.created_at_end",
-          "inputType": "datetime-local"
-        }
-      },
-      {
-        "type": "show-button",
-        "name": "搜索",
-        "meta": {
-          "variant": "default",
-          "size": "sm",
-          "searchSubmit": true,
-          "loadingText": "搜索中..."
-        }
-      },
-      {
-        "type": "show-button",
-        "name": "重置",
-        "meta": {
-          "variant": "outline",
-          "size": "sm",
-          "to": "/bot/energon/log/list"
-        }
-      }
-    ],
-    "table-row": [
-      {
-        "type": "show-table",
-        "value": "table.list",
-        "meta": {
-          "pagePath": "data.table.page",
-          "pageSizePath": "data.table.pageSize",
-          "totalPath": "data.table.total",
-          "remote": true,
-          "externalPagination": true,
-          "rowKey": "id",
-          "columns": [
+          "target": "state.recordPage",
+          "variant": "line",
+          "tabs": [
             {
-              "value": "request_id",
-              "type": "show-base"
+              "label": "运行日志",
+              "value": "runtime",
+              "targetValue": "/bot/energon/log/runtime_list",
+              "action": "showRuntime"
             },
             {
-              "value": "mode",
-              "type": "show-tag"
-            },
-            {
-              "value": "protocol",
-              "type": "show-tag"
-            },
-            {
-              "value": "power_name",
-              "type": "show-base"
-            },
-            {
-              "value": "status",
-              "type": "show-tag"
-            },
-            {
-              "value": "latency",
-              "type": "show-base",
-              "meta": {
-                "format": "duration-ms"
-              }
-            },
-            {
-              "name": "总Token",
-              "value": "total_tokens",
-              "type": "show-base"
-            },
-            {
-              "name": "缓存Token",
-              "value": "cached_tokens",
-              "type": "show-base"
-            },
-            {
-              "value": "created_at",
-              "type": "show-date"
-            },
-            {
-              "name": "操作",
-              "type": "show-button",
-              "className": "w-[1%] whitespace-nowrap px-3 text-center",
-              "meta": {
-                "buttons": [
-                  {
-                    "icon": "eye",
-                    "variant": "outline",
-                    "size": "sm",
-                    "action": {
-                      "click": [
-                        {
-                          "type": "data",
-                          "key": "actionTarget.viewLogId",
-                          "value": "$row.id"
-                        },
-                        {
-                          "type": "modal",
-                          "key": "dialog.view",
-                          "value": true
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
+              "label": "成本明细",
+              "value": "cost",
+              "targetValue": "/bot/energon/cost/list",
+              "action": "showCost"
             }
           ]
-        }
-      },
-      {
-        "type": "show-page"
-      }
-    ],
-    "feedback-shell": [
-      {
-        "type": "feedback-modal",
-        "meta": {
-          "stateKey": "dialog.view",
-          "pageRoute": "/bot/energon/log/view",
-          "description": "查看本次请求的能力、来源、参数与响应数据。",
-          "size": "xl",
-          "bodyClassName": "max-h-[65vh] overflow-y-auto px-6 py-2",
-          "pageRouteQuery": {
-            "id": "data.actionTarget.viewLogId"
-          }
         }
       }
     ]
   },
   "data": {
     "page": {
-      "description": "记录每次能力调用实际命中的来源、账号、能力来源、参数与耗时。"
-    },
-    "search": {
-      "keyword": "",
-      "power_id": "",
-      "mode": "",
-      "protocol": "",
-      "status": "",
-      "created_at_start": "",
-      "created_at_end": ""
-    },
-    "table": {
-      "field": "main.id,main.request_id,main.mode,main.protocol,main.power_id,main.power_key,main.power_name,main.provider_id,main.provider_name,main.account_id,main.account_name,main.service_id,main.service_name,main.status,main.latency,main.prompt_tokens,main.completion_tokens,main.total_tokens,main.cached_tokens,main.created_at",
-      "searchFields": [
-        "request_id",
-        "power_key",
-        "power_name",
-        "provider_name",
-        "account_name",
-        "service_name"
-      ],
-      "filterFields": [
-        "power_id",
-        "mode",
-        "protocol",
-        "status",
-        {
-          "field": "created_at",
-          "type": "date-range",
-          "startKey": "created_at_start",
-          "endKey": "created_at_end",
-          "valueType": "datetime"
-        }
-      ]
-    },
-    "actionTarget": {
-      "viewLogId": ""
+      "description": "统一查看能力调用的运行过程与供应商成本；用户扣费仍在计费记录中独立核算。"
     }
   },
   "state": {
-    "dialog": {
-      "view": false
-    }
+    "recordPage": "/bot/energon/log/runtime_list"
   },
-  "action": {}
+  "action": {
+    "showRuntime": {
+      "type": "page",
+      "target": "state.recordPage",
+      "value": "/bot/energon/log/runtime_list"
+    },
+    "showCost": {
+      "type": "page",
+      "target": "state.recordPage",
+      "value": "/bot/energon/cost/list"
+    }
+  }
 }

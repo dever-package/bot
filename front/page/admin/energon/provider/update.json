@@ -13,7 +13,14 @@
         "children": {
           "dialog-shell": {
             "type": "container",
-            "className": "w-full"
+            "className": "w-full",
+            "children": {
+              "provider-account-page": {
+                "type": "container",
+                "path": "/bot/energon/account/list",
+                "className": "mt-5"
+              }
+            }
           }
         }
       }
@@ -97,33 +104,23 @@
             }
           ]
         }
-      },
-      {
-        "id": "provider-accounts",
-        "type": "form-array",
-        "value": "form.accounts",
-        "mode": "form",
-        "info": "账号随来源一起保存，调用时按排序从小到大选择开启账号。",
-        "meta": {
-          "pageRoute": "/bot/energon/account/update",
-          "addText": "添加账号",
-          "drag": "sort",
-          "hiddenWhen": [
-            {
-              "path": "form.protocol",
-              "operator": "equals",
-              "value": "local"
-            }
-          ]
-        }
       }
     ]
   },
   "data": {
     "form": {
+      "_fields": [
+        "cate_id",
+        "name",
+        "protocol",
+        "processor",
+        "host",
+        "accounts"
+      ],
       "cate_id": 1,
       "protocol": "openai",
-      "processor": "ffmpeg"
+      "processor": "ffmpeg",
+      "accounts": []
     }
   },
   "state": {},

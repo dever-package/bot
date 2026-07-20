@@ -34,6 +34,7 @@ func (s Service) RunTeam(ctx context.Context, req RunRequest) (map[string]any, e
 	}
 	runInput := cloneInput(req.Input)
 	runInput["_mode"] = mode
+	attachRunBilling(runInput, req.Billing)
 	releaseID := uint64(0)
 	version := 0
 	if release != nil {
@@ -41,7 +42,7 @@ func (s Service) RunTeam(ctx context.Context, req RunRequest) (map[string]any, e
 		version = release.Version
 	}
 	now := time.Now()
-	runID := s.repo.InsertRun(ctx, map[string]any{
+	runRecord := map[string]any{
 		"request_id": requestID,
 		"project_id": req.ProjectID,
 		"team_id":    team.ID,
@@ -53,7 +54,9 @@ func (s Service) RunTeam(ctx context.Context, req RunRequest) (map[string]any, e
 		"started_at": now,
 		"created_at": now,
 		"updated_at": now,
-	})
+	}
+	attachRunScope(ctx, runRecord)
+	runID := s.repo.InsertRun(ctx, runRecord)
 	if runID == 0 {
 		return nil, fmt.Errorf("创建团队运行失败")
 	}
@@ -146,8 +149,9 @@ func (s Service) RunFlow(ctx context.Context, req RunRequest) (map[string]any, e
 	runInput := cloneInput(req.Input)
 	runInput["_mode"] = mode
 	runInput["_flow_id"] = flow.ID
+	attachRunBilling(runInput, req.Billing)
 	now := time.Now()
-	runID := s.repo.InsertRun(ctx, map[string]any{
+	runRecord := map[string]any{
 		"request_id": requestID,
 		"project_id": req.ProjectID,
 		"team_id":    team.ID,
@@ -159,7 +163,9 @@ func (s Service) RunFlow(ctx context.Context, req RunRequest) (map[string]any, e
 		"started_at": now,
 		"created_at": now,
 		"updated_at": now,
-	})
+	}
+	attachRunScope(ctx, runRecord)
+	runID := s.repo.InsertRun(ctx, runRecord)
 	if runID == 0 {
 		return nil, fmt.Errorf("创建工作流运行失败")
 	}
@@ -197,30 +203,6 @@ func (s Service) RunFlow(ctx context.Context, req RunRequest) (map[string]any, e
 	}, nil
 }
 
-func (s Service) ResumeRun(ctx context.Context, runID uint64) (map[string]any, error) {
-	run := s.repo.FindRun(ctx, runID)
-	if run == nil {
-		return nil, fmt.Errorf("运行不存在")
-	}
-	if run.Status != teammodel.RunStatusWaiting {
-		return nil, fmt.Errorf("只有等待人工反馈的运行可以继续")
-	}
-	now := time.Now()
-	record := map[string]any{
-		"status":     teammodel.RunStatusRunning,
-		"error":      "",
-		"updated_at": now,
-	}
-	requestID := renewRunRequestID(record, run)
-	s.repo.UpdateRun(ctx, run.ID, record)
-	s.continueWaitingRun(context.Background(), *run, nil)
-	return map[string]any{
-		"run_id":     run.ID,
-		"request_id": requestID,
-		"status":     teammodel.RunStatusRunning,
-	}, nil
-}
-
 func (s Service) continueWaitingRun(ctx context.Context, run teammodel.Run, flowRun *teammodel.FlowRun) {
 	runInput := jsonMap(run.Input)
 	if isSingleFlowRunMode(runInput) {
@@ -245,13 +227,6 @@ func isSingleFlowRunMode(input map[string]any) bool {
 	return mode == "flow" || mode == "debug_flow" || mode == "sub_flow"
 }
 
-func renewRunRequestID(record map[string]any, run *teammodel.Run) string {
-	requestID := newRequestID()
-	record["request_id"] = requestID
-	run.RequestID = requestID
-	return requestID
-}
-
 func (s Service) StopRun(ctx context.Context, runID uint64, requestID string) (map[string]any, error) {
 	run := s.resolveRun(ctx, runID, requestID)
 	return s.stopResolvedRun(ctx, run)
@@ -274,6 +249,28 @@ func (s Service) StopBodyRun(ctx context.Context, bodyID uint64, runID uint64, r
 func (s Service) stopResolvedRun(ctx context.Context, run *teammodel.Run) (map[string]any, error) {
 	if run == nil {
 		return nil, fmt.Errorf("运行不存在")
+	}
+	if run.ChildRequestID != "" {
+		s.agent.StopTask(run.ChildRequestID)
+		_ = s.gateway.StopStream(ctx, run.ChildRequestID)
+	}
+	for _, nodeRun := range s.repo.ListNodeRuns(ctx, run.ID) {
+		if nodeRun.Status != teammodel.RunStatusPending && nodeRun.Status != teammodel.RunStatusRunning && nodeRun.Status != teammodel.RunStatusWaiting {
+			continue
+		}
+		if nodeRun.ChildRequestID != "" {
+			switch nodeRun.NodeType {
+			case teammodel.NodeTypeAgent, teammodel.NodeTypeRole:
+				s.agent.StopTask(nodeRun.ChildRequestID)
+			case teammodel.NodeTypePower:
+				_ = s.gateway.StopStream(ctx, nodeRun.ChildRequestID)
+			}
+		}
+		s.repo.UpdateNodeRun(ctx, nodeRun.ID, map[string]any{
+			"status":      teammodel.RunStatusCanceled,
+			"error":       "运行已取消",
+			"finished_at": time.Now(),
+		})
 	}
 	now := time.Now()
 	s.repo.UpdateRun(ctx, run.ID, map[string]any{
@@ -315,14 +312,19 @@ func (s Service) resolvedRunStatus(ctx context.Context, run *teammodel.Run) (map
 	nodeRuns := s.repo.ListNodeRuns(ctx, run.ID)
 	flowNames := s.flowNameMap(ctx, flowRuns, nodeRuns)
 	nodeNames := s.nodeNameMap(ctx, nodeRuns)
+	interactions := nodeInteractionsToMaps(nodeRuns, flowNames, nodeNames)
+	if interaction := runInteractionToMap(*run); len(interaction) > 0 {
+		interactions = append(interactions, interaction)
+	}
 	return map[string]any{
-		"run":        runToMap(*run),
-		"flow_runs":  flowRunsToMaps(flowRuns, flowNames),
-		"node_runs":  nodeRunsToMaps(nodeRuns, flowNames, nodeNames),
-		"agent_runs": s.agent.RunTraces(ctx, agentRunIDsFromNodeRuns(nodeRuns)),
-		"blackboard": blackboardRowsToMaps(s.repo.ListBlackboardRows(ctx, run.ID)),
-		"messages":   messagesToMaps(s.repo.ListMessages(ctx, run.ID)),
-		"approvals":  approvalsToMaps(s.repo.ListApprovals(ctx, run.ID)),
+		"run":          runToMap(*run),
+		"flow_runs":    flowRunsToMaps(flowRuns, flowNames),
+		"node_runs":    nodeRunsToMaps(nodeRuns, flowNames, nodeNames),
+		"interactions": interactions,
+		"agent_runs":   s.agent.RunTraces(ctx, agentRunIDs(*run, nodeRuns)),
+		"blackboard":   blackboardRowsToMaps(s.repo.ListBlackboardRows(ctx, run.ID)),
+		"messages":     messagesToMaps(s.repo.ListMessages(ctx, run.ID)),
+		"approvals":    approvalsToMaps(s.repo.ListApprovals(ctx, run.ID)),
 	}, nil
 }
 
@@ -353,8 +355,11 @@ func (s Service) nodeNameMap(ctx context.Context, nodeRuns []teammodel.NodeRun) 
 	return result
 }
 
-func agentRunIDsFromNodeRuns(rows []teammodel.NodeRun) []uint64 {
-	result := make([]uint64, 0, len(rows))
+func agentRunIDs(run teammodel.Run, rows []teammodel.NodeRun) []uint64 {
+	result := make([]uint64, 0, len(rows)+1)
+	if run.AgentRunID > 0 {
+		result = append(result, run.AgentRunID)
+	}
 	for _, row := range rows {
 		if row.AgentRunID > 0 {
 			result = append(result, row.AgentRunID)
@@ -405,11 +410,6 @@ func (s Service) executeTeamRun(ctx context.Context, runID uint64) {
 	}
 	runInput := jsonMap(run.Input)
 	input := executionInput(runInput)
-	if textValue(runInput["_mode"]) == "conversation" {
-		status, output, err := s.executeConversationRun(ctx, *run, graph, runInput)
-		s.finishRun(ctx, run.ID, status, output, err)
-		return
-	}
 	if issues := validateFlowGraph(graph.Flows, graph.FlowEdges); len(issues) > 0 {
 		s.finishRun(ctx, run.ID, teammodel.RunStatusFail, nil, errors.New(strings.Join(issues, "；")))
 		return
@@ -470,6 +470,7 @@ func (s Service) executeFlowDAG(ctx context.Context, run teammodel.Run, graph ru
 			return teammodel.RunStatusCanceled, completedOutput(completed), fmt.Errorf("运行已取消")
 		}
 		ready := make([]teammodel.Flow, 0)
+		hasWaiting := false
 		for _, flow := range graph.Flows {
 			if _, ok := completed[flow.ID]; ok {
 				continue
@@ -487,13 +488,17 @@ func (s Service) executeFlowDAG(ctx context.Context, run teammodel.Run, graph ru
 				continue
 			}
 			if current != nil && current.Status == teammodel.RunStatusWaiting {
-				return teammodel.RunStatusWaiting, completedOutput(completed), runWaitError{message: "等待人工确认"}
+				hasWaiting = true
+				continue
 			}
 			if flowReady(flow.ID, incoming, completed, skipped) {
 				ready = append(ready, flow)
 			}
 		}
 		if len(ready) == 0 {
+			if hasWaiting {
+				return teammodel.RunStatusWaiting, completedOutput(completed), runWaitError{message: "等待交互"}
+			}
 			if markSkippedFlows(graph.Flows, incoming, completed, skipped) {
 				continue
 			}
@@ -507,7 +512,7 @@ func (s Service) executeFlowDAG(ctx context.Context, run teammodel.Run, graph ru
 		}
 		for _, result := range results {
 			if result.status == teammodel.RunStatusWaiting {
-				return result.status, completedOutput(completed), result.err
+				continue
 			}
 			if result.err != nil {
 				failed[result.flowID] = true
@@ -615,16 +620,19 @@ func (s Service) executeFlowWithGraph(ctx context.Context, run teammodel.Run, te
 
 	status, output, err := s.executeNodeDAG(ctx, run, *flowRun, team, roles, flow, nodes, edges)
 	if status == teammodel.RunStatusWaiting {
+		if !s.repo.UpdateRunUnlessCanceled(ctx, run.ID, map[string]any{
+			"status": teammodel.RunStatusWaiting,
+		}) {
+			return teammodel.RunStatusCanceled, output, context.Canceled
+		}
 		s.repo.UpdateFlowRun(ctx, flowRun.ID, map[string]any{
 			"status": teammodel.RunStatusWaiting,
-		})
-		s.repo.UpdateRun(ctx, run.ID, map[string]any{
-			"status": teammodel.RunStatusWaiting,
+			"error":  "",
 		})
 		flowRun.Status = teammodel.RunStatusWaiting
 		s.writeFlowEvent(ctx, run, *flowRun, flow, stream.EventWaiting, map[string]any{
 			"output": output,
-			"error":  errorText(err),
+			"error":  "",
 		})
 		return status, output, err
 	}
@@ -633,7 +641,7 @@ func (s Service) executeFlowWithGraph(ctx context.Context, run teammodel.Run, te
 		"output":      jsonText(output),
 		"finished_at": time.Now(),
 	}
-	if err != nil {
+	if err != nil && status != teammodel.RunStatusWaiting {
 		record["error"] = err.Error()
 	}
 	s.repo.UpdateFlowRun(ctx, flowRun.ID, record)
@@ -657,7 +665,9 @@ func (s Service) finishRun(ctx context.Context, runID uint64, status string, out
 	if err != nil {
 		record["error"] = err.Error()
 	}
-	s.repo.UpdateRun(ctx, runID, record)
+	if !s.repo.UpdateRunUnlessCanceled(ctx, runID, record) {
+		return
+	}
 	if run := s.repo.FindRun(ctx, runID); run != nil {
 		run.Status = status
 		event := stream.EventRunFinished
@@ -667,7 +677,7 @@ func (s Service) finishRun(ctx context.Context, runID uint64, status string, out
 		s.writeRunEvent(ctx, *run, event, map[string]any{
 			"scope":  "run",
 			"output": output,
-			"error":  errorText(err),
+			"error":  nodeExecutionError(status, err),
 		})
 		s.writeRunResult(ctx, *run)
 	}

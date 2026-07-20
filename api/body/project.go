@@ -151,6 +151,40 @@ func (Project) PostRestoreAssetVersion(c *server.Context) error {
 	return botapi.WriteJSON(c, data, err)
 }
 
+func (Project) PostConfirmStoryboard(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := projectRunner.ConfirmStoryboard(
+		c.Context(),
+		botapi.Uint64FromBody(body, "project_id", "projectId"),
+		projectservice.ConfirmStoryboardRequest{
+			AssetID:   botapi.Uint64FromBody(body, "asset_id", "assetId"),
+			VersionID: botapi.Uint64FromBody(body, "version_id", "versionId"),
+		},
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Project) PostCreateStoryboardRevision(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := projectRunner.CreateStoryboardRevision(
+		c.Context(),
+		botapi.Uint64FromBody(body, "project_id", "projectId"),
+		projectservice.CreateStoryboardRevisionRequest{
+			AssetID:   botapi.Uint64FromBody(body, "asset_id", "assetId"),
+			VersionID: botapi.Uint64FromBody(body, "version_id", "versionId"),
+			RequestID: botapi.TextFromBody(body, "request_id", "requestId"),
+			NodeKey:   botapi.TextFromBody(body, "node_key", "nodeKey"),
+		},
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
 func (Project) GetCanvasConfig(c *server.Context) error {
 	data, err := projectRunner.CanvasConfig(
 		c.Context(),

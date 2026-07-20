@@ -65,7 +65,10 @@ export function canvasNodeStopsExecution(node: SpaceCanvasNode) {
 }
 
 export function canvasNodeRunsInBackend(node: SpaceCanvasNode) {
-  if (["asset", "power", "agent", "flow"].includes(node.type)) {
+  if (node.type === "power") {
+    return Boolean(Number(node.power?.id || 0) > 0 || node.power?.key);
+  }
+  if (["asset", "agent", "flow"].includes(node.type)) {
     return true;
   }
   return (

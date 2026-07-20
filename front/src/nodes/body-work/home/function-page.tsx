@@ -1,13 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Zap } from "lucide-react";
 import type { AssetRecord } from "../asset/asset-types";
 import { SaveAssetAction } from "../asset/save-asset-action";
-import {
-  BODY_UPLOAD_BIZ_KEY,
-  BODY_UPLOAD_BIZ_NAME,
-  saveBodyUploadedAssets,
-  type BodyUploadedFile,
-} from "../asset/upload-asset-api";
 import { StreamPowerRunner } from "../../show/stream-request";
 import {
   saveWorkbenchPowerAsset,
@@ -35,12 +29,6 @@ export function WorkbenchFunctionPage({
 }) {
   const [selectedID, setSelectedID] = useState(0);
   const [visitedIDs, setVisitedIDs] = useState<number[]>([]);
-  const saveUploadedFiles = useCallback(
-    async (files: BodyUploadedFile[]) => {
-      await saveBodyUploadedAssets({ teamID, files });
-    },
-    [teamID],
-  );
   useEffect(() => {
     setSelectedID((current) =>
       powers.some((power) => power.id === current)
@@ -177,10 +165,7 @@ export function WorkbenchFunctionPage({
                   />
                 }
                 assetReferenceTeamID={teamID}
-                uploadBizKey={BODY_UPLOAD_BIZ_KEY}
-                uploadBizName={BODY_UPLOAD_BIZ_NAME}
                 allowResourceLibrary={false}
-                onUploadedFiles={saveUploadedFiles}
                 history={histories.get(power.id)}
                 renderResultActions={(result) =>
                   result.successful ? (

@@ -676,6 +676,12 @@ const threadStyles = `
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.agent-chat-media-grid[data-kind="audio"],
+.agent-chat-media-grid[data-kind="file"] {
+  max-width: 560px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .agent-chat-media-placeholder {
   isolation: isolate;
   background-color: color-mix(in oklab, var(--muted) 34%, transparent);

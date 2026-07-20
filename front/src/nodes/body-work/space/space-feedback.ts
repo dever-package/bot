@@ -16,7 +16,14 @@ export type FlowRunSnapshot = {
   output: unknown;
   error: string;
   approvals: FlowApproval[];
+  interactions: FlowInteraction[];
   raw: any;
+};
+
+export type FlowInteraction = {
+  runId: number;
+  nodeRunId: number;
+  interaction: Record<string, any>;
 };
 
 export type FlowApproval = {
@@ -29,6 +36,7 @@ export type FlowApproval = {
 
 export type FlowFeedbackPrompt = {
   approval: FlowApproval;
+  interaction?: FlowInteraction;
   title: string;
   description: string;
   fields: PowerParam[];
@@ -134,6 +142,11 @@ export function normalizeFlowRunSnapshot(value: any): FlowRunSnapshot {
     : Array.isArray(value?.data?.approvals)
       ? value.data.approvals
       : [];
+  const interactions = Array.isArray(value?.interactions)
+    ? value.interactions
+    : Array.isArray(value?.data?.interactions)
+      ? value.data.interactions
+      : [];
   return {
     runId: Number(run?.id || value?.run_id || 0),
     requestId: String(run?.request_id || value?.request_id || ""),
@@ -141,6 +154,7 @@ export function normalizeFlowRunSnapshot(value: any): FlowRunSnapshot {
     output: firstDefined(run?.output, value?.output, value?.data?.output),
     error: String(run?.error || value?.error || ""),
     approvals: approvals.map(normalizeFlowApproval).filter(Boolean),
+    interactions: interactions.map(normalizeFlowInteraction).filter(Boolean),
     raw: value,
   };
 }
@@ -148,6 +162,12 @@ export function normalizeFlowRunSnapshot(value: any): FlowRunSnapshot {
 export function flowFeedbackFromSnapshot(
   snapshot: FlowRunSnapshot,
 ): FlowFeedbackPrompt | null {
+  const pendingInteraction = snapshot.interactions.find(
+    (value) => Boolean(value.interaction?.id && value.interaction?.type),
+  );
+  if (pendingInteraction) {
+    return flowFeedbackFromInteraction(pendingInteraction);
+  }
   const approval = snapshot.approvals.find(isPendingFlowApproval);
   if (!approval?.id) {
     return null;
@@ -163,11 +183,45 @@ export function flowFeedbackFromSnapshot(
   };
 }
 
+export function flowFeedbackFromInteraction(
+  value: FlowInteraction,
+): FlowFeedbackPrompt {
+  const interaction = value.interaction;
+  const fields = flowFeedbackFields(interaction);
+  return {
+    approval: {
+      id: 0,
+      title: String(interaction.title || ""),
+      status: "pending",
+      decision: "pending",
+      content: {},
+    },
+    interaction: value,
+    title: firstText(interaction.title, "补充信息"),
+    description: firstText(interaction.description, "补充信息后继续执行流程。"),
+    fields,
+    values: flowFeedbackInitialValues(interaction, fields),
+  };
+}
+
 export function isFlowWaitingSnapshot(snapshot: FlowRunSnapshot) {
   return (
     snapshot.status === "waiting" ||
+    snapshot.interactions.length > 0 ||
     snapshot.approvals.some(isPendingFlowApproval)
   );
+}
+
+function normalizeFlowInteraction(value: any): FlowInteraction {
+  const interaction =
+    value?.interaction && typeof value.interaction === "object"
+      ? value.interaction
+      : {};
+  return {
+    runId: Number(value?.run_id || 0),
+    nodeRunId: Number(value?.node_run_id || 0),
+    interaction,
+  };
 }
 
 export function flowFeedbackFields(interaction: Record<string, any>): PowerParam[] {
@@ -185,15 +239,22 @@ export function flowFeedbackInitialValues(
   interaction: Record<string, any>,
   fields: PowerParam[],
 ) {
-  const values = defaultPowerParamValues(fields);
+  const defaultValues = defaultPowerParamValues(fields);
   const source =
     interaction.values && typeof interaction.values === "object"
       ? interaction.values
       : {};
-  return {
-    ...values,
+  const values: Record<string, unknown> = {
+    ...defaultValues,
     ...source,
   };
+  const sourceTargetID = Number(
+    interaction.source_target_id || interaction.sourceTargetId || 0,
+  );
+  if (sourceTargetID > 0) {
+    values.source_target_id = sourceTargetID;
+  }
+  return values;
 }
 
 export function agentFeedbackFromResult(

@@ -1,0 +1,247 @@
+{
+  "page": {
+    "name": "成本明细",
+    "parent": "bot/energon/log/list",
+    "type": 2,
+    "sort": 2
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 p-0 sm:gap-6",
+        "children": {
+          "toolbar-row": {
+            "type": "row",
+            "className": "flex-wrap items-center gap-3"
+          },
+          "table-row": {
+            "type": "container",
+            "className": "overflow-hidden rounded-md border bg-background"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "toolbar-row": [
+      {
+        "type": "form-input",
+        "placeholder": "搜索请求、业务键、能力、来源或服务...",
+        "value": "search.keyword",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "调用场景",
+        "value": "search.scene",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "计价状态",
+        "value": "search.pricing_status",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "调用状态",
+        "value": "search.call_status",
+        "mode": "search"
+      },
+      {
+        "type": "form-date",
+        "placeholder": "创建时间",
+        "value": "search.created_at_start",
+        "mode": "search",
+        "meta": {
+          "searchWidth": "select",
+          "range": true,
+          "endValue": "search.created_at_end",
+          "inputType": "datetime-local"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "重置",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/energon/log/list"
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "request_id",
+              "type": "show-base"
+            },
+            {
+              "value": "scene",
+              "type": "show-tag"
+            },
+            {
+              "name": "能力",
+              "value": "power_name",
+              "type": "show-base"
+            },
+            {
+              "name": "服务",
+              "value": "service_name",
+              "type": "show-base"
+            },
+            {
+              "value": "call_status",
+              "type": "show-tag"
+            },
+            {
+              "value": "pricing_status",
+              "type": "show-tag"
+            },
+            {
+              "value": "pricing_mode",
+              "type": "show-tag"
+            },
+            {
+              "name": "原币成本微单位",
+              "value": "source_cost_micros",
+              "type": "show-base"
+            },
+            {
+              "name": "原币",
+              "value": "source_currency",
+              "type": "show-base"
+            },
+            {
+              "name": "CNY 结算成本微单位",
+              "value": "cost_micros",
+              "type": "show-base"
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "eye",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看成本详情",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.id",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.view",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.view",
+          "pageRoute": "/bot/energon/cost/view",
+          "description": "查看本次供应商尝试的用量、价格快照与实际成本。",
+          "size": "xl",
+          "bodyClassName": "max-h-[70vh] overflow-y-auto px-6 py-2",
+          "pageRouteQuery": {
+            "id": "data.actionTarget.id"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "description": "每次真实供应商请求独立记录成本；用户是否扣费由计费记录另行结算。"
+    },
+    "search": {
+      "keyword": "",
+      "scene": "",
+      "pricing_status": "",
+      "call_status": "",
+      "created_at_start": "",
+      "created_at_end": ""
+    },
+    "table": {
+      "model": "bot.energon.NewCostRecordModel",
+      "field": "main.id,main.request_id,main.business_key,main.scene,main.billable,main.power_name,main.service_name,main.call_status,main.pricing_status,main.pricing_mode,main.source_currency,main.source_cost_micros,main.exchange_rate,main.currency,main.cost_micros,main.created_at",
+      "searchFields": [
+        "request_id",
+        "business_key",
+        "power_name",
+        "provider_name",
+        "service_name",
+        "service_api"
+      ],
+      "filterFields": [
+        "scene",
+        "pricing_status",
+        "call_status",
+        {
+          "field": "created_at",
+          "type": "date-range",
+          "startKey": "created_at_start",
+          "endKey": "created_at_end",
+          "valueType": "datetime"
+        }
+      ]
+    },
+    "actionTarget": {
+      "id": ""
+    }
+  },
+  "state": {
+    "dialog": {
+      "view": false
+    }
+  },
+  "action": {}
+}

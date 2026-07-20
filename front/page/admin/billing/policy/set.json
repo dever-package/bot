@@ -1,0 +1,83 @@
+{
+  "page": {
+    "name": "成本结算",
+    "parent": "bot/energon/power/list",
+    "type": 2
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "show-title",
+        "name": "成本结算",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-text",
+        "name": "结算币种",
+        "value": "settlement_currency",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "name": "美元兑人民币汇率",
+        "placeholder": "例如：7.2",
+        "value": "form.usd_to_cny_rate",
+        "mode": "form",
+        "info": "手工维护成本换算汇率。填写 7.2 表示 1 USD = 7.2 CNY；修改后只影响后续调用，历史成本使用各自保存的汇率快照。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "美元兑人民币汇率不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[200px]"
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "成本结算",
+      "description": "配置供应商成本统一折算为人民币时使用的汇率。用户扣费由用户中心的身份计费权益决定。"
+    },
+    "settlement_currency": "人民币（CNY）",
+    "form": {
+      "id": 1,
+      "usd_to_cny_rate": "0",
+      "model": "bot.billing.NewPolicyModel"
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "service": "bot.billing.BillingHook.BeforeSavePolicy"
+      },
+      "model": "bot.billing.NewPolicyModel"
+    }
+  }
+}

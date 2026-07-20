@@ -148,7 +148,61 @@ func rhapiBody(input botprotocol.NativeInput) map[string]any {
 	)
 	ensureRhApiPrompt(body, prompt)
 	ensureRhApiImages(body)
-	return body
+	return rhapiEndpointBody(input, body)
+}
+
+func rhapiEndpointBody(input botprotocol.NativeInput, body map[string]any) map[string]any {
+	endpoint := strings.ToLower(strings.TrimSpace(input.Service.Path))
+	if endpoint == "" {
+		endpoint = strings.ToLower(strings.TrimSpace(input.ServiceAPI))
+	}
+	switch {
+	case strings.Contains(endpoint, "kling-lip-sync/identify-face"):
+		return rhapiPickBodyFields(body, "videoUrl", "videoId")
+	case strings.Contains(endpoint, "kling-lip-sync/lip-sync-video"):
+		return rhapiLipSyncVideoBody(body)
+	default:
+		return body
+	}
+}
+
+func rhapiLipSyncVideoBody(body map[string]any) map[string]any {
+	result := rhapiPickBodyFields(
+		body,
+		"sessionId",
+		"faceId",
+		"audioId",
+		"audioUrl",
+		"soundStartTime",
+		"soundEndTime",
+		"soundInsertTime",
+		"soundVolume",
+		"originalAudioVolume",
+	)
+	for key, value := range map[string]any{
+		"soundStartTime":      0,
+		"soundEndTime":        0,
+		"soundInsertTime":     0,
+		"soundVolume":         1,
+		"originalAudioVolume": 1,
+	} {
+		if _, exists := result[key]; !exists {
+			result[key] = value
+		}
+	}
+	return result
+}
+
+func rhapiPickBodyFields(body map[string]any, fields ...string) map[string]any {
+	result := make(map[string]any, len(fields))
+	for _, field := range fields {
+		value, exists := body[field]
+		if !exists || !rhapiHasValue(value) {
+			continue
+		}
+		result[field] = value
+	}
+	return result
 }
 
 func rhapiMappedNativeBody(mapped botprotocol.MappedInput) map[string]any {

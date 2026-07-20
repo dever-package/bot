@@ -7,21 +7,25 @@ import (
 )
 
 type NodeRun struct {
-	ID         uint64 `dorm:"primaryKey;autoIncrement;comment:节点运行ID"`
-	RunID      uint64 `dorm:"type:bigint;not null;default:0;comment:团队运行"`
-	FlowRunID  uint64 `dorm:"type:bigint;not null;default:0;comment:工作流运行"`
-	RequestID  string `dorm:"type:varchar(64);not null;comment:请求ID"`
-	ProjectID  uint64 `dorm:"type:bigint;not null;default:0;comment:项目"`
-	TeamID     uint64 `dorm:"type:bigint;not null;default:0;comment:团队"`
-	FlowID     uint64 `dorm:"type:bigint;not null;default:0;comment:工作流"`
-	NodeID     uint64 `dorm:"type:bigint;not null;default:0;comment:节点"`
-	NodeKey    string `dorm:"type:varchar(128);not null;default:'';comment:节点标识"`
-	NodeType   string `dorm:"type:varchar(32);not null;default:'';comment:节点类型"`
-	Input      string `dorm:"type:text;not null;default:'{}';comment:输入"`
-	Output     string `dorm:"type:text;not null;default:'{}';comment:输出"`
-	Error      string `dorm:"type:text;not null;default:'';comment:错误"`
-	Status     string `dorm:"type:varchar(32);not null;default:'pending';comment:状态"`
-	AgentRunID uint64 `dorm:"type:bigint;not null;default:0;comment:智能体运行"`
+	ID                  uint64 `dorm:"primaryKey;autoIncrement;comment:节点运行ID"`
+	RunID               uint64 `dorm:"type:bigint;not null;default:0;comment:团队运行"`
+	FlowRunID           uint64 `dorm:"type:bigint;not null;default:0;comment:工作流运行"`
+	RequestID           string `dorm:"type:varchar(64);not null;comment:请求ID"`
+	ProjectID           uint64 `dorm:"type:bigint;not null;default:0;comment:项目"`
+	TeamID              uint64 `dorm:"type:bigint;not null;default:0;comment:团队"`
+	FlowID              uint64 `dorm:"type:bigint;not null;default:0;comment:工作流"`
+	NodeID              uint64 `dorm:"type:bigint;not null;default:0;comment:节点"`
+	NodeKey             string `dorm:"type:varchar(128);not null;default:'';comment:节点标识"`
+	NodeType            string `dorm:"type:varchar(32);not null;default:'';comment:节点类型"`
+	Input               string `dorm:"type:text;not null;default:'{}';comment:输入"`
+	Output              string `dorm:"type:text;not null;default:'{}';comment:输出"`
+	Error               string `dorm:"type:text;not null;default:'';comment:错误"`
+	Status              string `dorm:"type:varchar(32);not null;default:'pending';comment:状态"`
+	AgentRunID          uint64 `dorm:"type:bigint;not null;default:0;comment:智能体运行"`
+	AgentSessionID      uint64 `dorm:"type:bigint;not null;default:0;comment:智能体会话"`
+	ChildRequestID      string `dorm:"type:varchar(64);not null;default:'';comment:子运行请求"`
+	Interaction         string `dorm:"type:text;not null;default:'{}';comment:待处理交互"`
+	InteractionResponse string `dorm:"type:text;not null;default:'{}';comment:交互回答"`
 
 	StartedAt  *time.Time `dorm:"null;comment:开始时间"`
 	FinishedAt *time.Time `dorm:"null;comment:结束时间"`
@@ -36,6 +40,8 @@ type NodeRunIndex struct {
 	FlowStatus    struct{} `index:"flow_id,status"`
 	NodeStatus    struct{} `index:"node_id,status"`
 	RequestStatus struct{} `index:"request_id,status"`
+	ChildRequest  struct{} `index:"child_request_id"`
+	AgentSession  struct{} `index:"agent_session_id"`
 }
 
 func NewNodeRunModel() *orm.Model[NodeRun] {

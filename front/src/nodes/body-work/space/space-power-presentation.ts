@@ -17,6 +17,8 @@ const OUTPUT_TYPE_FALLBACKS: Record<
 > = {
   general: { name: "通用", viewMode: "content" },
   storyboard: { name: "分镜脚本", viewMode: "storyboard" },
+  speech: { name: "语音合成", viewMode: "content" },
+  lip_sync: { name: "口型同步", viewMode: "content" },
   video_compose: { name: "视频合成", viewMode: "video_compose" },
 };
 

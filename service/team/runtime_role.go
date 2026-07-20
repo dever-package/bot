@@ -7,6 +7,7 @@ import (
 
 	teammodel "github.com/dever-package/bot/model/team"
 	runtimeloop "github.com/dever-package/bot/service/agent/runtime/loop"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	"github.com/dever-package/bot/service/stream"
 )
 
@@ -37,8 +38,9 @@ func (s Service) RunRole(ctx context.Context, req RunRequest) (map[string]any, e
 	runInput := cloneInput(req.Input)
 	runInput["_mode"] = "role"
 	runInput["_role_id"] = roleID
+	attachRunBilling(runInput, req.Billing)
 	now := time.Now()
-	runID := s.repo.InsertRun(ctx, map[string]any{
+	runRecord := map[string]any{
 		"request_id": requestID,
 		"project_id": req.ProjectID,
 		"team_id":    team.ID,
@@ -50,7 +52,9 @@ func (s Service) RunRole(ctx context.Context, req RunRequest) (map[string]any, e
 		"started_at": now,
 		"created_at": now,
 		"updated_at": now,
-	})
+	}
+	attachRunScope(ctx, runRecord)
+	runID := s.repo.InsertRun(ctx, runRecord)
 	if runID == 0 {
 		return nil, fmt.Errorf("创建角色运行失败")
 	}
@@ -114,83 +118,124 @@ func (s Service) executeStandaloneRole(ctx context.Context, run teammodel.Run, t
 	if role.AgentID == 0 {
 		return teammodel.RunStatusFail, nil, fmt.Errorf("角色未绑定智能体")
 	}
-	flow := teammodel.Flow{Name: "角色"}
-	node := teammodel.FlowNode{
-		Name:    role.Name,
-		Type:    teammodel.NodeTypeRole,
-		RoleID:  role.ID,
-		RoleKey: role.RoleKey,
-		AgentID: role.AgentID,
+	runContext, serverContext, err := restoreRunScope(ctx, run)
+	if err != nil {
+		return teammodel.RunStatusFail, nil, err
 	}
-	executor := resolvedNodeAgent{AgentID: role.AgentID, Role: &role}
-	goal := firstText(input["goal"], input["task"], input["prompt"], role.Name)
-	memories := s.roleRuntimeMemories(ctx, team, &role, input)
-	prompt := buildAgentPrompt(team, flow, node, executor, goal, input, memories)
-	result, err := s.agent.RunInternal(ctx, runtimeloop.InternalRequest{
-		AgentID:   role.AgentID,
-		RequestID: newRequestID(),
-		Method:    "POST",
-		Path:      "/bot/team/role/run",
-		Input: map[string]any{
-			"text":       prompt,
-			"task":       goal,
-			"goal":       goal,
-			"team":       team.Name,
-			"role":       roleInputPayload(&role),
-			"blackboard": input,
+	contextKey := fmt.Sprintf("team:%d:role:%d:run:%d", team.ID, role.ID, run.ID)
+	session, err := s.agent.EnsureSession(runContext, runtimeloop.AgentSessionRequest{
+		AgentIdentity: fmt.Sprintf("%d", role.AgentID),
+		SessionID:     run.AgentSessionID,
+		ContextKey:    contextKey,
+		Title:         role.Name,
+	})
+	if err != nil {
+		return teammodel.RunStatusFail, nil, err
+	}
+	agentInput, err := teamAgentInput(
+		agentNodeTask(map[string]any{}, input, role.Name),
+		map[string]any{
+			"team":  map[string]any{"id": team.ID, "name": team.Name},
+			"role":  roleInputPayload(&role),
+			"input": input,
 		},
-		OnRunCreated: func(agentRunID uint64, requestID string) {
-			s.writeStandaloneRoleEvent(context.Background(), run, role, stream.EventNodeStarted, teammodel.RunStatusRunning, map[string]any{
-				"agent_run_id":     agentRunID,
-				"agent_request_id": requestID,
-				"started_at":       time.Now().Format(time.RFC3339Nano),
-			})
-		},
-		OnStream: func(payload map[string]any) {
+		jsonMap(run.Interaction),
+		jsonMap(run.InteractionResponse),
+	)
+	if err != nil {
+		return teammodel.RunStatusFail, nil, err
+	}
+	billing := runBillingContext(run)
+	billing.RunID = run.ID
+	start := s.agent.RunChat(runContext, runtimeloop.ChatRequest{
+		AgentIdentity: fmt.Sprintf("%d", role.AgentID),
+		SessionID:     session.ID,
+		ContextKey:    contextKey,
+		Input:         agentInput,
+		Billing:       billing,
+		Method:        "POST",
+		Path:          "/bot/team/role/run",
+		Server:        serverContext,
+	})
+	requestID := textValue(start["request_id"])
+	if intValue(start["status"], botprotocol.ResponseStatusSuccess) != botprotocol.ResponseStatusSuccess {
+		return teammodel.RunStatusFail, nil, fmt.Errorf("%s", firstText(start["msg"], "智能体运行启动失败"))
+	}
+	if requestID == "" {
+		return teammodel.RunStatusFail, nil, fmt.Errorf("智能体运行请求ID为空")
+	}
+	agentRunID := agentRunIDFromPayload(start)
+	s.repo.UpdateRun(runContext, run.ID, map[string]any{
+		"agent_session_id": session.ID,
+		"agent_run_id":     agentRunID,
+		"child_request_id": requestID,
+	})
+	s.writeStandaloneRoleEvent(runContext, run, role, stream.EventNodeStarted, teammodel.RunStatusRunning, map[string]any{
+		"agent_run_id":     agentRunID,
+		"agent_request_id": requestID,
+		"started_at":       time.Now().Format(time.RFC3339Nano),
+	})
+	result, err := s.agent.ObserveRun(runContext, runtimeloop.ObserveRunRequest{
+		RequestID: requestID,
+		Block:     time.Second,
+		OnPayload: func(payload map[string]any) {
+			if current := agentRunIDFromPayload(payload); current > 0 {
+				agentRunID = current
+			}
 			if textValue(payload["type"]) == "result" {
 				return
 			}
 			output := mapValue(payload["output"])
-			if len(output) == 0 {
-				return
+			if len(output) > 0 {
+				s.writeStandaloneRoleEvent(context.WithoutCancel(runContext), run, role, stream.EventNodeOutput, teammodel.RunStatusRunning, map[string]any{
+					"output":            output,
+					"agent_run_id":      agentRunID,
+					"agent_request_id":  requestID,
+					"agent_stream_type": textValue(payload["type"]),
+				})
 			}
-			s.writeStandaloneRoleEvent(context.Background(), run, role, stream.EventNodeOutput, teammodel.RunStatusRunning, map[string]any{
-				"output":            output,
-				"agent_request_id":  textValue(payload["request_id"]),
-				"agent_stream_type": textValue(payload["type"]),
-			})
 		},
 	})
+	if result.RunID > 0 {
+		agentRunID = result.RunID
+	}
 	if err != nil {
-		s.writeStandaloneRoleEvent(ctx, run, role, stream.EventNodeFinished, teammodel.RunStatusFail, map[string]any{
+		s.writeStandaloneRoleEvent(runContext, run, role, stream.EventNodeFinished, teammodel.RunStatusFail, map[string]any{
 			"error":       err.Error(),
 			"finished_at": time.Now().Format(time.RFC3339Nano),
 		})
 		return teammodel.RunStatusFail, nil, err
 	}
 	if interaction := agentNodeInteraction(result.Output); len(interaction) > 0 {
-		approvalID := s.insertRoleInteractionApproval(ctx, run, team, role, input, result.Output, interaction)
+		s.repo.UpdateRun(runContext, run.ID, map[string]any{
+			"interaction":          jsonText(interaction),
+			"interaction_response": "{}",
+			"agent_run_id":         agentRunID,
+		})
 		output := map[string]any{
-			"approval_id": approvalID,
 			"interaction": interaction,
-			"text":        firstText(result.Summary, result.Output["text"]),
+			"text":        firstText(result.Output["text"]),
 			"pending":     true,
 		}
 		s.writeStandaloneRoleEvent(ctx, run, role, stream.EventWaiting, teammodel.RunStatusWaiting, map[string]any{
 			"output": output,
-			"error":  "等待用户反馈",
 		})
 		return teammodel.RunStatusWaiting, output, runWaitError{message: "等待用户反馈"}
 	}
+	s.repo.UpdateRun(runContext, run.ID, map[string]any{
+		"interaction":          "{}",
+		"interaction_response": "{}",
+		"agent_run_id":         agentRunID,
+	})
 	output := map[string]any{
-		"summary":      result.Summary,
-		"output":       result.Output,
-		"agent_run_id": result.RunID,
-		"role":         roleInputPayload(&role),
+		"output":           result.Output,
+		"agent_run_id":     agentRunID,
+		"agent_session_id": session.ID,
+		"role":             roleInputPayload(&role),
 	}
 	s.writeStandaloneRoleEvent(ctx, run, role, stream.EventNodeFinished, teammodel.RunStatusSuccess, map[string]any{
 		"output":       output,
-		"agent_run_id": result.RunID,
+		"agent_run_id": agentRunID,
 		"finished_at":  time.Now().Format(time.RFC3339Nano),
 	})
 	return teammodel.RunStatusSuccess, output, nil
@@ -211,24 +256,6 @@ func (s Service) writeStandaloneRoleEvent(ctx context.Context, run teammodel.Run
 	fields["agent_id"] = role.AgentID
 	fields["status"] = status
 	s.writeRunEvent(ctx, run, event, fields)
-}
-
-func (s Service) insertRoleInteractionApproval(ctx context.Context, run teammodel.Run, team teammodel.Team, role teammodel.Role, input map[string]any, output map[string]any, interaction map[string]any) uint64 {
-	return s.repo.InsertApproval(ctx, map[string]any{
-		"run_id":  run.ID,
-		"team_id": team.ID,
-		"title":   firstText(interaction["title"], role.Name),
-		"content": jsonText(map[string]any{
-			"kind":        "role_interaction",
-			"input":       input,
-			"output":      output,
-			"interaction": interaction,
-			"role":        roleInputPayload(&role),
-		}),
-		"comment":  "",
-		"decision": "pending",
-		"status":   teammodel.RunStatusPending,
-	})
 }
 
 func findRoleByID(roles []teammodel.Role, roleID uint64) (teammodel.Role, bool) {

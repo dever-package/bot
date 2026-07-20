@@ -208,6 +208,7 @@ func canvasRunNodeInput(node canvasRunNode) map[string]any {
 		"role_id":          node.RoleID,
 		"asset_id":         node.AssetID,
 		"asset_version_id": node.AssetVersionID,
+		"storyboard_item":  node.StoryboardItem,
 		"persists_result":  node.PersistsResult,
 	}
 }
@@ -225,12 +226,12 @@ func canvasRunNodeTitle(node canvasRunNode) string {
 func canvasRunTrackedNodes(plan canvasExecutionPlan) []canvasRunNode {
 	result := make([]canvasRunNode, 0, len(plan.Nodes)+1)
 	seen := map[string]bool{}
-	if strings.TrimSpace(plan.Start.ID) != "" && !isCanvasStartNode(plan.Start) && plan.Start.Type != "group" {
+	if strings.TrimSpace(plan.Start.ID) != "" && !isCanvasStartNode(plan.Start) && plan.Start.Type != "group" && isRunnableCanvasNode(plan.Start) {
 		result = append(result, plan.Start)
 		seen[plan.Start.ID] = true
 	}
 	for _, node := range plan.Nodes {
-		if strings.TrimSpace(node.ID) == "" || seen[node.ID] || node.Type == "group" {
+		if strings.TrimSpace(node.ID) == "" || seen[node.ID] || node.Type == "group" || !isRunnableCanvasNode(node) {
 			continue
 		}
 		result = append(result, node)

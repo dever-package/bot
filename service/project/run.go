@@ -11,6 +11,7 @@ import (
 	projectmodel "github.com/dever-package/bot/model/project"
 	runtimeloop "github.com/dever-package/bot/service/agent/runtime/loop"
 	assetservice "github.com/dever-package/bot/service/asset"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	teamservice "github.com/dever-package/bot/service/team"
 	frontstream "github.com/dever-package/front/service/stream"
 )
@@ -42,6 +43,11 @@ func (s Service) RunCanvasPower(ctx context.Context, projectID uint64, req teams
 	req.BodyID = project.BodyID
 	req.TeamID = project.TeamID
 	req.ReleaseID = project.ReleaseID
+	req.Billing.Billable = true
+	req.Billing.Scene = "project_power"
+	req.Billing.UserID = project.UserID
+	req.Billing.TeamID = project.TeamID
+	req.Billing.ProjectID = project.ID
 	return s.team.RunCanvasPower(ctx, req)
 }
 
@@ -69,6 +75,7 @@ func (s Service) RunCanvasAgent(ctx context.Context, projectID uint64, req Canva
 		RequestID: req.RequestID,
 		Input:     cloneInput(req.Input),
 		History:   req.History,
+		Billing:   projectAgentBilling(project, project.TeamID),
 		OnStream:  req.OnStream,
 	})
 	if err != nil {
@@ -140,6 +147,7 @@ func (s Service) RunFlow(ctx context.Context, projectID uint64, req teamservice.
 	req.ProjectID = project.ID
 	req.TeamID = teamID
 	req.ReleaseID = releaseID
+	req.Billing = projectAgentBilling(project, teamID)
 	return s.team.RunFlow(ctx, req)
 }
 
@@ -159,6 +167,7 @@ func (s Service) RunTeam(ctx context.Context, projectID uint64, req teamservice.
 	req.ProjectID = project.ID
 	req.TeamID = teamID
 	req.ReleaseID = releaseID
+	req.Billing = projectAgentBilling(project, teamID)
 	return s.team.RunTeam(ctx, req)
 }
 
@@ -177,7 +186,21 @@ func (s Service) RunRole(ctx context.Context, projectID uint64, req teamservice.
 	req.ProjectID = project.ID
 	req.TeamID = project.TeamID
 	req.ReleaseID = project.ReleaseID
+	req.Billing = projectAgentBilling(project, project.TeamID)
 	return s.team.RunRole(ctx, req)
+}
+
+func projectAgentBilling(project *projectmodel.Project, teamID uint64) botprotocol.BillingContext {
+	if project == nil {
+		return botprotocol.BillingContext{}
+	}
+	return botprotocol.BillingContext{
+		Billable:  true,
+		Scene:     "agent_power",
+		UserID:    project.UserID,
+		TeamID:    teamID,
+		ProjectID: project.ID,
+	}
 }
 
 func (s Service) RunStatus(ctx context.Context, projectID uint64, runID uint64, requestID string) (map[string]any, error) {
@@ -223,6 +246,30 @@ func (s Service) SubmitApproval(ctx context.Context, projectID uint64, approvalI
 		return nil, err
 	}
 	go NewWorkspaceService().watchWorkspaceApproval(detachedWorkspaceContext(ctx), projectID, approvalID)
+	return result, nil
+}
+
+func (s Service) SubmitInteraction(ctx context.Context, projectID uint64, nodeRunID uint64, interactionID string, data map[string]any) (map[string]any, error) {
+	if _, err := requireProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	result, err := s.team.SubmitProjectInteraction(ctx, projectID, nodeRunID, interactionID, data)
+	if err != nil {
+		return nil, err
+	}
+	go NewWorkspaceService().watchWorkspaceInteraction(detachedWorkspaceContext(ctx), projectID, uint64Value(result["run_id"]))
+	return result, nil
+}
+
+func (s Service) SubmitRunInteraction(ctx context.Context, projectID uint64, runID uint64, interactionID string, data map[string]any) (map[string]any, error) {
+	if _, err := requireProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	result, err := s.team.SubmitProjectRunInteraction(ctx, projectID, runID, interactionID, data)
+	if err != nil {
+		return nil, err
+	}
+	go NewWorkspaceService().watchWorkspaceInteraction(detachedWorkspaceContext(ctx), projectID, uint64Value(result["run_id"]))
 	return result, nil
 }
 

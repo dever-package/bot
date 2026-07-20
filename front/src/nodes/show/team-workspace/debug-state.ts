@@ -103,6 +103,7 @@ export function buildDebugPreparingStatus(input: Record<string, any>) {
     agent_runs: [],
     blackboard: [],
     approvals: [],
+    interactions: [],
   };
 }
 
@@ -125,6 +126,7 @@ export function buildDebugStartStatus(
     agent_runs: [],
     blackboard: [],
     approvals: [],
+    interactions: [],
   };
 }
 
@@ -274,6 +276,7 @@ export function cloneDebugRunStatus(value: any) {
     agent_runs: arrayValue(value?.agent_runs),
     blackboard: arrayValue(value?.blackboard),
     approvals: arrayValue(value?.approvals),
+    interactions: arrayValue(value?.interactions),
     messages: arrayValue(value?.messages),
   };
 }
@@ -507,6 +510,21 @@ export function buildPendingDebugApprovalsByNodeKey(
     }
   }
 
+  for (const value of arrayValue(result?.interactions)) {
+    const pending = pendingDebugInteraction(value);
+    if (!pending || hiddenApprovalIds.has(String(pending.id))) {
+      continue;
+    }
+    const nodeKey = firstDebugText(
+      pending.nodeKey,
+      value?.node_key,
+      nodeKeyByRunID.get(String(pending.nodeRunID || "")),
+    );
+    if (nodeKey) {
+      pendingByNodeKey[nodeKey] = { ...pending, nodeKey };
+    }
+  }
+
   for (const row of arrayValue(result?.node_runs)) {
     const pending = pendingDebugApprovalFromNodeRun(row);
     if (pending && hiddenApprovalIds.has(String(pending.id))) {
@@ -522,6 +540,25 @@ export function buildPendingDebugApprovalsByNodeKey(
   }
 
   return pendingByNodeKey;
+}
+
+export function pendingDebugInteraction(
+  value: any,
+): DebugPendingApproval | null {
+  const interaction = debugRecord(value?.interaction);
+  const interactionID = firstDebugText(interaction.id);
+  if (!interactionID || !firstDebugText(interaction.type)) {
+    return null;
+  }
+  return {
+    id: interactionID,
+    title: firstDebugText(interaction.title, value?.node_name, "补充信息"),
+    runID: value?.run_id,
+    nodeRunID: value?.node_run_id,
+    nodeKey: firstDebugText(value?.node_key),
+    kind: "interaction",
+    interaction: interaction as AgentInteraction,
+  };
 }
 
 export function pendingDebugApprovalFromApproval(
@@ -544,7 +581,7 @@ export function pendingDebugApprovalFromApproval(
     title: firstDebugText(approval?.title, interaction.title),
     nodeRunID: approval.node_run_id,
     nodeKey: firstDebugText(approval?.node_key),
-    kind: firstDebugText(content.kind, content.type),
+    kind: "human_approval",
     interaction,
   };
 }
@@ -554,6 +591,19 @@ export function pendingDebugApprovalFromNodeRun(
 ): DebugPendingApproval | null {
   if (String(row?.status || "") !== RUN_STATUS_WAITING) {
     return null;
+  }
+  const directInteraction = debugRecord(row?.interaction);
+  if (
+    firstDebugText(directInteraction.id) &&
+    firstDebugText(directInteraction.type)
+  ) {
+    return pendingDebugInteraction({
+      run_id: row?.run_id,
+      node_run_id: row?.id,
+      node_key: row?.node_key,
+      node_name: row?.node_name,
+      interaction: directInteraction,
+    });
   }
   const output = debugRecord(row?.output);
   const approvalID = output.approval_id || output.approvalId;
@@ -570,23 +620,9 @@ export function pendingDebugApprovalFromNodeRun(
     title: firstDebugText(row?.node_name, row?.name, interaction.title),
     nodeRunID: row.id,
     nodeKey: String(row?.node_key || ""),
-    kind: debugApprovalKindFromNodeRun(row, interaction),
+    kind: "human_approval",
     interaction,
   };
-}
-
-export function debugApprovalKindFromNodeRun(
-  row: any,
-  interaction: AgentInteraction,
-) {
-  const nodeType = String(row?.node_type || "");
-  if (nodeType === "human_approval") {
-    return "human_approval";
-  }
-  if (String(interaction?.type || "") === "power_params") {
-    return "power";
-  }
-  return "agent_interaction";
 }
 
 export function normalizeDebugApprovalInteraction(
@@ -633,6 +669,11 @@ export function markDebugApprovalSubmitted(
   result: AgentInteractionSubmitResult,
 ) {
   const next = cloneDebugRunStatus(current);
+  if (approval.kind === "interaction") {
+    next.interactions = arrayValue(next.interactions).filter(
+      (row) => String(row?.interaction?.id || "") !== String(approval.id),
+    );
+  }
   next.approvals = arrayValue(next.approvals).map((row) =>
     String(row?.id || "") === String(approval.id)
       ? {
@@ -653,17 +694,13 @@ export function markDebugApprovalSubmitted(
     if (!sameRunID && !sameNodeKey) {
       return row;
     }
-    if (approval.kind === "agent_interaction") {
+    if (approval.kind === "interaction") {
       return {
         ...row,
         status: RUN_STATUS_RUNNING,
+        interaction: {},
         output: {
-          approval_id: approval.id,
           text: "已提交反馈，继续执行当前节点。",
-          feedback: {
-            text: result.text,
-            data: result.data,
-          },
         },
       };
     }
@@ -1207,9 +1244,8 @@ export function debugSubmittedApprovalOutput(value: any) {
     return undefined;
   }
   const content = debugRecord(value.content);
-  const approvalKind = firstDebugText(content.kind, content.type).toLowerCase();
   const approvalText = debugApprovalDecisionText(value);
-  if (approvalText && approvalKind !== "agent_interaction") {
+  if (approvalText) {
     return { text: approvalText };
   }
   const data = debugRecord(value.data);

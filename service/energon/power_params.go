@@ -30,6 +30,22 @@ func ApplyPowerParamDefaults(values map[string]any, params []PowerParam) map[str
 	return botinput.ApplyPowerParamDefaults(values, params)
 }
 
+func PreparePowerParamInput(input map[string]any, params []PowerParam) (map[string]any, []string) {
+	values := ApplyPowerParamDefaults(NormalizePowerParamInput(input, params), params)
+	missing := make([]string, 0)
+	for _, param := range params {
+		if !param.Required || !botinput.IsMissing(values[param.Key]) {
+			continue
+		}
+		name := strings.TrimSpace(param.Name)
+		if name == "" {
+			name = strings.TrimSpace(param.Key)
+		}
+		missing = append(missing, name)
+	}
+	return values, missing
+}
+
 func (s GatewayService) PowerParamConfig(ctx context.Context, powerKey string, targetID uint64) (PowerParamConfig, error) {
 	powerKey = strings.TrimSpace(powerKey)
 	if powerKey == "" {

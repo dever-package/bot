@@ -23,9 +23,10 @@ type Log struct {
 	AccountID    uint64 `dorm:"type:bigint;not null;default:0;comment:账号ID"`
 	AccountName  string `dorm:"type:varchar(128);not null;default:'';comment:账号"`
 
-	ServiceID   uint64 `dorm:"type:bigint;not null;default:0;comment:服务ID"`
-	ServiceName string `dorm:"type:varchar(128);not null;default:'';comment:服务名称"`
-	ServiceApi  string `dorm:"type:varchar(128);not null;comment:服务地址"`
+	ServiceID         uint64 `dorm:"type:bigint;not null;default:0;comment:服务ID"`
+	ServiceName       string `dorm:"type:varchar(128);not null;default:'';comment:服务名称"`
+	ServiceEndpointID uint64 `dorm:"type:bigint;not null;default:0;comment:服务接口ID"`
+	ServiceApi        string `dorm:"type:varchar(128);not null;comment:服务地址"`
 
 	Status           string    `dorm:"type:varchar(32);not null;comment:状态"`
 	Latency          int64     `dorm:"type:bigint;not null;default:0;comment:耗时"`
@@ -42,6 +43,7 @@ type LogIndex struct {
 	Status    struct{} `index:"status,created_at"`
 	Power     struct{} `index:"power_id,created_at"`
 	Service   struct{} `index:"service_id,created_at"`
+	Endpoint  struct{} `index:"service_endpoint_id,created_at"`
 	Provider  struct{} `index:"provider_id,created_at"`
 }
 

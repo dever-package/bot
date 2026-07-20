@@ -144,6 +144,11 @@
   color: #17201c;
 }
 
+.wb-asset-browser-actions > button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .wb-asset-browser-actions svg,
 .wb-asset-pagination svg {
   width: 17px;
@@ -371,7 +376,7 @@
 .wb-asset-reference-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 2400;
+  z-index: 10020;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -509,6 +514,176 @@
 .wb-asset-preview-content video {
   max-width: 100%;
   height: auto;
+}
+
+.wb-asset-rename-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10030;
+  display: grid;
+  place-items: center;
+  background: rgba(20, 25, 23, 0.52);
+  padding: 20px;
+}
+
+.wb-asset-rename-dialog {
+  width: min(460px, calc(100vw - 40px));
+  overflow: hidden;
+  border: 1px solid #dce2df;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(13, 20, 17, 0.26);
+  color: #17201c;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.wb-asset-rename-dialog button,
+.wb-asset-rename-dialog input {
+  font: inherit;
+  letter-spacing: 0;
+}
+
+.wb-asset-rename-dialog > header,
+.wb-asset-rename-dialog > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.wb-asset-rename-dialog > header {
+  border-bottom: 1px solid #e3e7e5;
+}
+
+.wb-asset-rename-dialog > header > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+}
+
+.wb-asset-rename-dialog h2,
+.wb-asset-rename-dialog p {
+  margin: 0;
+}
+
+.wb-asset-rename-dialog h2 {
+  font-size: 15px;
+}
+
+.wb-asset-rename-dialog header p {
+  margin-top: 2px;
+  color: #77817c;
+  font-size: 11px;
+}
+
+.wb-asset-rename-icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: #eaf1ed;
+  color: #245b47;
+}
+
+.wb-asset-rename-icon svg,
+.wb-asset-rename-dialog > header > button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.wb-asset-rename-dialog > header > button {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #5e6964;
+  cursor: pointer;
+}
+
+.wb-asset-rename-dialog > header > button:hover:not(:disabled) {
+  background: #eef1ef;
+}
+
+.wb-asset-rename-dialog > label {
+  display: grid;
+  gap: 7px;
+  padding: 18px 16px 10px;
+  color: #39463f;
+  font-weight: 600;
+}
+
+.wb-asset-rename-dialog > label input {
+  width: 100%;
+  height: 40px;
+  box-sizing: border-box;
+  border: 1px solid #d5dcd8;
+  border-radius: 5px;
+  outline: none;
+  background: #fff;
+  color: #17201c;
+  padding: 0 11px;
+  font-weight: 400;
+}
+
+.wb-asset-rename-dialog > label input:focus {
+  border-color: #628271;
+  box-shadow: 0 0 0 3px rgba(49, 95, 77, 0.1);
+}
+
+.wb-asset-rename-error {
+  margin: 0 16px;
+  border-radius: 5px;
+  background: #fff2f2;
+  color: #a43d3d;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.wb-asset-rename-dialog > footer {
+  justify-content: flex-end;
+  padding-top: 12px;
+}
+
+.wb-asset-rename-dialog > footer button {
+  display: inline-flex;
+  min-width: 70px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #d5dcd8;
+  border-radius: 5px;
+  background: #fff;
+  color: #25312b;
+  cursor: pointer;
+  padding: 0 14px;
+  font-weight: 600;
+}
+
+.wb-asset-rename-dialog > footer button.is-primary {
+  border-color: #245b47;
+  background: #245b47;
+  color: #fff;
+}
+
+.wb-asset-rename-dialog button:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.wb-asset-rename-dialog > footer svg {
+  width: 14px;
+  height: 14px;
 }
 
 .is-spinning {

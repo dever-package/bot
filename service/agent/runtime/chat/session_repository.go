@@ -9,6 +9,7 @@ import (
 	deverjwt "github.com/shemic/dever/auth/jwt"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	frontauthcontext "github.com/dever-package/front/service/authcontext"
 	userservice "github.com/dever-package/user/service"
 )
 
@@ -130,10 +131,13 @@ func currentOwner(ctx context.Context) (ownerScope, error) {
 		return ownerScope{OwnerType: agentmodel.SessionOwnerTypeBodyUser, OwnerID: actor.UserID}, nil
 	}
 	uid, ok := deverjwt.ActiveInt64(ctx)
-	if !ok || uid <= 0 {
-		return ownerScope{}, fmt.Errorf("登录账号无效")
+	if ok && uid > 0 {
+		return ownerScope{OwnerType: agentmodel.SessionOwnerTypeAdmin, OwnerID: uint64(uid)}, nil
 	}
-	return ownerScope{OwnerType: agentmodel.SessionOwnerTypeAdmin, OwnerID: uint64(uid)}, nil
+	if actorID, exists := frontauthcontext.AdminID(ctx); exists {
+		return ownerScope{OwnerType: agentmodel.SessionOwnerTypeAdmin, OwnerID: actorID}, nil
+	}
+	return ownerScope{}, fmt.Errorf("登录账号无效")
 }
 
 func normalizeContextKey(contextKey string, agentKey string) string {

@@ -160,9 +160,27 @@ func (Run) PostApproval(c *server.Context) error {
 	return botapi.WriteJSON(c, data, err)
 }
 
+func (Run) PostInteraction(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	projectID := botapi.Uint64FromBody(body, "project_id", "projectId")
+	nodeRunID := botapi.Uint64FromBody(body, "node_run_id", "nodeRunId")
+	interactionID := botapi.TextFromBody(body, "interaction_id", "interactionId")
+	interactionData := botapi.MapFromBody(body, "data")
+	var data map[string]any
+	if nodeRunID > 0 {
+		data, err = projectRunner.SubmitInteraction(c.Context(), projectID, nodeRunID, interactionID, interactionData)
+	} else {
+		data, err = projectRunner.SubmitRunInteraction(c.Context(), projectID, botapi.Uint64FromBody(body, "run_id", "runId", "id"), interactionID, interactionData)
+	}
+	return botapi.WriteJSON(c, data, err)
+}
+
 func runModeOrDefault(mode string, fallback string) string {
 	switch mode {
-	case "team", "conversation":
+	case "team":
 		return mode
 	default:
 		return fallback

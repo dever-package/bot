@@ -45,6 +45,7 @@ type ChatRequest struct {
 	SessionID     uint64
 	ContextKey    string
 	Input         map[string]any
+	Billing       botprotocol.BillingContext
 	Method        string
 	Host          string
 	Path          string
@@ -84,6 +85,15 @@ func newService() Service {
 func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]any {
 	requestedAt := time.Now()
 	requestID := uuid.NewString()
+	billing := request.Billing
+	if billing.Billable {
+		if strings.TrimSpace(billing.Scene) == "" {
+			billing.Scene = "agent_power"
+		}
+		if strings.TrimSpace(billing.BusinessKey) == "" {
+			billing.BusinessKey = requestID
+		}
+	}
 	input := agentskill.CloneMap(request.Input)
 	parsedInput, err := runtimereference.ParseInput(input)
 	if err != nil {
@@ -132,6 +142,7 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 	if prepareErr := prepareGroup.Wait(); prepareErr != nil {
 		return botprotocol.BuildErrorResponse(requestID, prepareErr).Payload()
 	}
+	billing.SessionID = session.ID
 	parsedInput.Params = normalizedParams
 	parsedInput.Content.Params = normalizedParams
 	runTurn := baseRunTurn
@@ -196,6 +207,7 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 		PersistChat:        true,
 		MediaReferences:    toolReferences,
 		Scope:              runtimescope.FromSession(ctx, *session),
+		Billing:            billing,
 		RequestedAt:        requestedAt,
 		PriorKnowledgeUsed: turn.PriorKnowledgeUsed,
 		PriorLoadedSkills:  turn.PriorLoadedSkills,

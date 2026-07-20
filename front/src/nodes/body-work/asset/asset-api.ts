@@ -27,9 +27,7 @@ export async function loadAssetFilterOptions(
   const catalog = responseData(catalogResult, "加载团队资产配置失败");
   const filters = responseData(filtersResult, "加载资产筛选项失败");
   return {
-    projects: toRows(filters.projects)
-      .map(normalizeSimpleOption)
-      .filter(hasID),
+    projects: toRows(filters.projects).map(normalizeSimpleOption).filter(hasID),
     tools: mergeSimpleOptions(catalog.powers, filters.tools),
     dialogues: mergeSimpleOptions(catalog.roles, filters.dialogues),
     assetCates: toRows(catalog.asset_cates)
@@ -59,7 +57,7 @@ export async function loadAssetPage(input: {
   });
   const data = responseData(result, "加载资产失败");
   return {
-    items: toRows(data.items).map(normalizeAsset).filter(hasID),
+    items: toRows(data.items).map(normalizeAssetRecord).filter(hasID),
     page: positiveNumber(data.page, input.page),
     pageSize: positiveNumber(data.page_size, input.pageSize || 24),
     total: nonNegativeNumber(data.total),
@@ -84,16 +82,12 @@ export async function loadAssetVersions(input: {
   page: number;
   pageSize?: number;
 }) {
-  const result = await request(
-    joinSiteApi("workbench/asset_versions"),
-    "get",
-    {
-      team_id: input.teamID,
-      asset_id: input.assetID,
-      page: input.page,
-      page_size: input.pageSize || 20,
-    },
-  );
+  const result = await request(joinSiteApi("workbench/asset_versions"), "get", {
+    team_id: input.teamID,
+    asset_id: input.assetID,
+    page: input.page,
+    page_size: input.pageSize || 20,
+  });
   const data = responseData(result, "加载资产版本失败");
   return {
     items: toRows(data.items).map(normalizeVersion).filter(hasID),
@@ -107,15 +101,11 @@ export async function loadAssetVersion(input: {
   assetID: number;
   versionID: number;
 }) {
-  const result = await request(
-    joinSiteApi("workbench/asset_version"),
-    "get",
-    {
-      team_id: input.teamID,
-      asset_id: input.assetID,
-      version_id: input.versionID,
-    },
-  );
+  const result = await request(joinSiteApi("workbench/asset_version"), "get", {
+    team_id: input.teamID,
+    asset_id: input.assetID,
+    version_id: input.versionID,
+  });
   const data = responseData(result, "加载资产版本失败");
   return normalizeVersion(data.version);
 }
@@ -135,19 +125,33 @@ export async function setAssetCurrentVersion(input: {
     },
   );
   const data = responseData(result, "设置当前版本失败");
-  return normalizeAsset(data.asset);
+  return normalizeAssetRecord(data.asset);
+}
+
+export async function renameAsset(input: {
+  teamID: number;
+  assetID: number;
+  name: string;
+}) {
+  const result = await request(joinSiteApi("workbench/asset_rename"), "post", {
+    team_id: input.teamID,
+    asset_id: input.assetID,
+    name: input.name,
+  });
+  const data = responseData(result, "修改资产标题失败");
+  return normalizeAssetRecord(data.asset);
 }
 
 function normalizeDetail(value: Record<string, any>): AssetDetail {
   return {
-    asset: normalizeAsset(value.asset),
+    asset: normalizeAssetRecord(value.asset),
     versions: toRows(value.versions).map(normalizeVersion).filter(hasID),
     versionTotal: nonNegativeNumber(value.version_total),
     hasMore: Boolean(value.has_more),
   };
 }
 
-function normalizeAsset(value: any): AssetRecord {
+export function normalizeAssetRecord(value: any): AssetRecord {
   const version = isRecord(value?.version)
     ? normalizeVersion(value.version)
     : null;
@@ -163,6 +167,7 @@ function normalizeAsset(value: any): AssetRecord {
     sourceID: numberValue(value?.source_id),
     sourceName: textValue(value?.source_name),
     name: textValue(value?.name) || "未命名资产",
+    nameMode: textValue(value?.name_mode) === "manual" ? "manual" : "auto",
     kind: (textValue(value?.kind) || "text") as AssetKind,
     role: (textValue(value?.role) || "material") as AssetRole,
     versionID: numberValue(value?.version_id),

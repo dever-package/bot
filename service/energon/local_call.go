@@ -24,7 +24,7 @@ func (s GatewayService) callLocalTarget(
 	req.Protocol = botprocessor.ProtocolLocal
 	if !localServiceMatchesProcessor(selected.Service.Path, selected.Provider.Processor) {
 		err := fmt.Errorf("本地来源服务与处理器配置不一致，请重新保存来源")
-		return s.localCallFailure(ctx, req, selected, startedAt, "local_service", err, botprovider.Request{})
+		return s.localCallFailure(ctx, req, selected, startedAt, "local_service", err, botprovider.Request{}, false)
 	}
 
 	mappedInput, err := botinput.BuildMapped(ctx, s.repo, req, botinput.Target{
@@ -32,11 +32,11 @@ func (s GatewayService) callLocalTarget(
 		ServiceID: selected.Service.ID,
 	})
 	if err != nil {
-		return s.localCallFailure(ctx, req, selected, startedAt, "map_local_input", err, botprovider.Request{})
+		return s.localCallFailure(ctx, req, selected, startedAt, "map_local_input", err, botprovider.Request{}, false)
 	}
 	selected, err = s.applyServiceEndpoint(ctx, selected, mappedInput)
 	if err != nil {
-		return s.localCallFailure(ctx, req, selected, startedAt, "select_local_endpoint", err, botprovider.Request{})
+		return s.localCallFailure(ctx, req, selected, startedAt, "select_local_endpoint", err, botprovider.Request{}, false)
 	}
 
 	nativeRequest := botprovider.Request{
@@ -59,7 +59,7 @@ func (s GatewayService) callLocalTarget(
 	writeOutput := s.streamOutputWriter(ctx, req.RequestID, selected.Power)
 	progress, err := botruntime.StartProgress(ctx, selected.Service, selected.Power, writeOutput)
 	if err != nil {
-		return s.localCallFailure(ctx, req, selected, startedAt, "local_stream_progress", err, nativeRequest)
+		return s.localCallFailure(ctx, req, selected, startedAt, "local_stream_progress", err, nativeRequest, false)
 	}
 	defer progress.Stop()
 
@@ -81,7 +81,7 @@ func (s GatewayService) executeLocalTarget(
 ) (callResult, error) {
 	if s.processors == nil {
 		err := fmt.Errorf("本地处理器注册表未初始化")
-		return s.localCallFailure(ctx, req, selected, startedAt, "local_registry", err, nativeRequest)
+		return s.localCallFailure(ctx, req, selected, startedAt, "local_registry", err, nativeRequest, false)
 	}
 	data, err := s.processors.Execute(ctx, selected.Provider.Processor, botprocessor.ExecuteRequest{
 		RequestID: req.RequestID,
@@ -90,8 +90,9 @@ func (s GatewayService) executeLocalTarget(
 		Write:     writeOutput,
 	})
 	if err != nil {
-		return s.localCallFailure(ctx, req, selected, startedAt, "local_processor", err, nativeRequest)
+		return s.localCallFailure(ctx, req, selected, startedAt, "local_processor", err, nativeRequest, true)
 	}
+	usage := extractTokenUsage(data)
 
 	if writeOutput != nil {
 		return s.finishStreamResult(ctx, streamFinishInput{
@@ -100,18 +101,21 @@ func (s GatewayService) executeLocalTarget(
 			StartedAt:      startedAt,
 			NativeRequest:  nativeRequest,
 			Data:           data,
+			Usage:          usage,
 			Progress:       progress,
 			WriteEnd:       true,
 			SkipMediaStore: true,
+			CostAttempted:  true,
 		})
 	}
-	logItem := s.recordCallLog(
+	logItem := s.recordCallLogWithUsage(
 		ctx,
 		req,
 		selected,
 		StatusSuccess,
 		time.Since(startedAt),
 		encodeLogJSON(data),
+		usage,
 		nativeRequest,
 	)
 	return callResult{
@@ -131,18 +135,21 @@ func (s GatewayService) localCallFailure(
 	stage string,
 	err error,
 	nativeRequest botprovider.Request,
+	costAttempted bool,
 ) (callResult, error) {
 	requests := []botprovider.Request{}
 	if strings.TrimSpace(nativeRequest.URL) != "" {
 		requests = append(requests, nativeRequest)
 	}
-	logItem := s.recordCallLog(
+	logItem := s.recordCallLogInternal(
 		ctx,
 		req,
 		selected,
 		StatusFail,
 		time.Since(startedAt),
 		encodeFailureLogResult(stage, err.Error()),
+		tokenUsage{},
+		costAttempted,
 		requests...,
 	)
 	return callResult{

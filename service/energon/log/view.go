@@ -7,6 +7,7 @@ import (
 	"github.com/shemic/dever/util"
 
 	botmodel "github.com/dever-package/bot/model/energon"
+	frontmeta "github.com/dever-package/front/service/meta"
 )
 
 type LogViewService struct{}
@@ -15,6 +16,7 @@ const (
 	logRequestIDSelectFields   = "main.request_id"
 	logPowerParamsSelectFields = "main.power_params"
 	logAttemptsSelectFields    = "main.id,main.power_target_id,main.service_id,main.service_name,main.provider_id,main.provider_name,main.account_id,main.account_name,main.status,main.latency,main.prompt_tokens,main.completion_tokens,main.total_tokens,main.cached_tokens,main.result,main.created_at"
+	logCostSelectFields        = "main.id,main.log_id,main.call_status,main.pricing_status,main.pricing_mode,main.source_currency,main.source_cost_micros,main.exchange_rate,main.currency,main.cost_micros,main.error,main.created_at"
 )
 
 func (LogViewService) ProviderLoadRequestParams(c *server.Context, _ []any) any {
@@ -92,6 +94,28 @@ func (LogViewService) ProviderLoadAttempts(c *server.Context, _ []any) any {
 		})
 	}
 	return attempts
+}
+
+func (LogViewService) ProviderLoadCost(c *server.Context, _ []any) any {
+	if c == nil {
+		return map[string]any{}
+	}
+
+	result := map[string]any{
+		"options": frontmeta.ResolveModelOptions(c.Context(), "bot.energon.NewCostRecordModel"),
+	}
+	logID := util.ToUint64(c.Input("id"))
+	if logID == 0 {
+		return result
+	}
+
+	record := botmodel.NewCostRecordModel().FindMap(c.Context(), map[string]any{"log_id": logID}, map[string]any{
+		"field": logCostSelectFields,
+	})
+	for key, value := range record {
+		result[key] = value
+	}
+	return result
 }
 
 func loadLogPowerParams(c *server.Context) (map[string]any, string) {

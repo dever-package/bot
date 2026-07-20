@@ -1,0 +1,244 @@
+{
+  "page": {
+    "name": "成本价格",
+    "parent": "bot/energon/service_endpoint/update",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "className": "rounded-md border bg-background",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4 border-b px-4 py-3",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "table-row": {
+        "type": "container",
+        "className": "overflow-hidden"
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "配置成本价格",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "hiddenWhen": [
+            {
+              "path": "parent.data.form.prices",
+              "operator": "notEmpty"
+            }
+          ]
+        },
+        "action": {
+          "click": [
+            {
+              "type": "state",
+              "key": "servicePriceIndex",
+              "value": -1
+            },
+            {
+              "type": "state",
+              "key": "servicePriceForm",
+              "value": {
+                "mode": "request",
+                "currency": "CNY",
+                "max_cost": "0",
+                "items": [],
+                "status": 1
+              }
+            },
+            {
+              "type": "modal",
+              "key": "dialog.servicePrice",
+              "value": true
+            }
+          ]
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "parent.data.form.prices",
+        "meta": {
+          "rowKey": "id",
+          "columns": [
+            {
+              "name": "计价方式",
+              "value": "mode",
+              "type": "show-tag"
+            },
+            {
+              "name": "币种",
+              "value": "currency",
+              "type": "show-tag"
+            },
+            {
+              "name": "单次预授权成本上限",
+              "value": "max_cost",
+              "type": "show-base"
+            },
+            {
+              "name": "启用",
+              "value": "status",
+              "type": "form-switch",
+              "action": {
+                "change": {
+                  "type": "array",
+                  "key": "parent.data.form.prices",
+                  "op": "patch",
+                  "index": "$rowIndex",
+                  "value": {
+                    "status": "$value"
+                  }
+                }
+              },
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑成本价格",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "state",
+                          "key": "servicePriceIndex",
+                          "value": "$rowIndex"
+                        },
+                        {
+                          "type": "state",
+                          "key": "servicePriceForm",
+                          "value": "$row"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.servicePrice",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "trash-2",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "删除成本价格",
+                    "className": "text-destructive hover:text-destructive",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "state",
+                          "key": "deletePriceIndex",
+                          "value": "$rowIndex"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.deletePrice",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.servicePrice",
+          "pageRoute": "/bot/energon/service_price/update",
+          "title": "成本价格",
+          "description": "配置当前服务接口的供应商成本。币种支持人民币和美元，系统统一按人民币结算。",
+          "size": "xl",
+          "width": "56rem",
+          "footer": {
+            "confirm": true,
+            "confirmText": "确定"
+          },
+          "pageDataPatches": {
+            "form": "state.servicePriceForm"
+          }
+        },
+        "action": {
+          "submit": {
+            "type": "array",
+            "key": "parent.data.form.prices",
+            "op": "upsert",
+            "index": "state.servicePriceIndex",
+            "value": "$modalForm"
+          }
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "删除成本价格",
+        "info": "确认删除当前服务接口的成本价格吗？",
+        "meta": {
+          "stateKey": "dialog.deletePrice",
+          "successMessage": "成本价格已删除"
+        },
+        "action": {
+          "confirm": {
+            "type": "array",
+            "key": "parent.data.form.prices",
+            "op": "remove",
+            "index": "state.deletePriceIndex"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "description": "按实际供应商服务配置成本价格；一个服务接口最多配置一套。"
+    }
+  },
+  "state": {
+    "servicePriceIndex": -1,
+    "deletePriceIndex": -1,
+    "servicePriceForm": {
+      "mode": "request",
+      "currency": "CNY",
+      "max_cost": "0",
+      "items": [],
+      "status": 1
+    },
+    "dialog": {
+      "servicePrice": false,
+      "deletePrice": false
+    }
+  },
+  "action": {}
+}

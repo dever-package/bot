@@ -88,7 +88,7 @@
         "name": "输出类型",
         "value": "form.output_type",
         "mode": "form",
-        "info": "输出类型决定画布中的展示和编辑方式：文本可使用分镜脚本，视频可使用视频合成器。",
+        "info": "输出类型决定能力语义和画布展示方式，例如分镜脚本、语音合成、口型同步和视频合成。",
         "meta": {
           "hiddenCondition": "all",
           "optionFilter": [
@@ -104,7 +104,12 @@
                 ],
                 "video": [
                   "general",
+                  "lip_sync",
                   "video_compose"
+                ],
+                "audio": [
+                  "general",
+                  "speech"
                 ]
               }
             }
@@ -119,6 +124,11 @@
               "path": "form.kind",
               "operator": "notEquals",
               "value": "video"
+            },
+            {
+              "path": "form.kind",
+              "operator": "notEquals",
+              "value": "audio"
             }
           ]
         },

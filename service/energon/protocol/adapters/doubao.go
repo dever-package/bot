@@ -318,9 +318,8 @@ func (DoubaoAdapter) StreamTaskSpec(input botprotocol.NativeInput) (bottask.Stre
 		}, true
 	case doubaoKindAudio:
 		return bottask.StreamTaskSpec{
-			Kind:         bottask.StreamKindRequest,
-			OutputType:   botprotocol.MediaTypeAudio,
-			PlainRequest: true,
+			Kind:       bottask.StreamKindRequest,
+			OutputType: botprotocol.MediaTypeAudio,
 		}, true
 	case doubaoKindVideo:
 		return bottask.StreamTaskSpec{
@@ -527,6 +526,9 @@ func doubaoVideoContent(input botprotocol.NativeInput, body map[string]any) []an
 	images := append(botprotocol.NormalizeStringList(body["image"]), botprotocol.NormalizeStringList(body["images"])...)
 	videos := append(botprotocol.NormalizeStringList(body["video"]), botprotocol.NormalizeStringList(body["videos"])...)
 	audios := append(botprotocol.NormalizeStringList(body["audio"]), botprotocol.NormalizeStringList(body["audios"])...)
+	images = append(images, doubaoOriginalMediaURLs(mapped, "image", "images", botprotocol.MediaTypeImage)...)
+	videos = append(videos, doubaoOriginalMediaURLs(mapped, "video", "videos", botprotocol.MediaTypeVideo)...)
+	audios = append(audios, doubaoOriginalMediaURLs(mapped, "audio", "audios", botprotocol.MediaTypeAudio)...)
 	delete(body, "image")
 	delete(body, "images")
 	delete(body, "video")
@@ -578,9 +580,20 @@ func doubaoVideoContent(input botprotocol.NativeInput, body map[string]any) []an
 	return content
 }
 
+func doubaoOriginalMediaURLs(
+	mapped botprotocol.MappedInput,
+	singular string,
+	plural string,
+	mediaType string,
+) []string {
+	values := botprotocol.NormalizeMediaList(mapped.Original[singular], mediaType)
+	return append(values, botprotocol.NormalizeMediaList(mapped.Original[plural], mediaType)...)
+}
+
 func mergeDoubaoVideoContent(existing []any, incoming []any) []any {
 	result := make([]any, 0, len(existing)+len(incoming))
 	seen := map[string]bool{}
+	hasText := false
 	appendItems := func(items []any) {
 		for _, item := range items {
 			mapped, ok := item.(map[string]any)
@@ -590,6 +603,12 @@ func mergeDoubaoVideoContent(existing []any, incoming []any) []any {
 			normalized, valid := normalizeDoubaoContentItem(mapped)
 			if !valid {
 				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(botprotocol.AsText(normalized["type"])), "text") {
+				if hasText {
+					continue
+				}
+				hasText = true
 			}
 			key := doubaoVideoContentItemKey(normalized)
 			if key != "" && seen[key] {

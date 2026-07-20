@@ -31,6 +31,23 @@ func (s WorkspaceService) watchWorkspaceApproval(ctx context.Context, projectID 
 	s.watchWorkspaceRun(ctx, nodeExecution.RunID, approvalID)
 }
 
+func (s WorkspaceService) watchWorkspaceInteraction(ctx context.Context, projectID uint64, childRunID uint64) {
+	if projectID == 0 || childRunID == 0 {
+		return
+	}
+	nodeExecution := workspacemodel.NewNodeExecutionModel().Find(ctx, map[string]any{
+		"project_id":   projectID,
+		"child_run_id": childRunID,
+	})
+	if nodeExecution == nil || nodeExecution.RunID == 0 {
+		return
+	}
+	if workspaceRunCanceled(ctx, nodeExecution.RunID) || !markWorkspaceApprovalNodeRunning(ctx, nodeExecution) {
+		return
+	}
+	s.watchWorkspaceRun(ctx, nodeExecution.RunID, 0)
+}
+
 func (s WorkspaceService) watchWorkspaceRun(ctx context.Context, runID uint64, submittedApprovalID uint64) {
 	if runID == 0 {
 		return

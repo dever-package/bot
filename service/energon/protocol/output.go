@@ -17,6 +17,19 @@ func StripOutputProgress(output Output) {
 	}
 }
 
+func IsStreamingAudioOutput(output Output) bool {
+	if strings.EqualFold(strings.TrimSpace(asText(output["event"])), "audio_ready") {
+		return true
+	}
+	meta := normalizeMap(output["meta"])
+	switch strings.ToLower(strings.TrimSpace(asText(meta["streaming_audio"]))) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 var (
 	scalarOutputKeys     = []string{"event", "title", "text", "reasoning", "progress", "error", "error_code", "json", "rich", "finish_reason", "interaction"}
 	structuredOutputKeys = []string{"media_files"}

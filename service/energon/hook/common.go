@@ -35,9 +35,48 @@ func isActive(status int16) bool {
 	return status == defaultRecordStatus
 }
 
-func ensureDefaultCategory(record map[string]any) {
+func isPartialEnergonRecord(record map[string]any) bool {
+	return util.ToBool(record["_partial"])
+}
+
+func shouldNormalizeEnergonField(record map[string]any, field string, partial bool) bool {
+	if !partial {
+		return true
+	}
+	_, exists := record[field]
+	return exists
+}
+
+func trimEnergonStringField(record map[string]any, field string, partial bool) {
+	if shouldNormalizeEnergonField(record, field, partial) {
+		record[field] = util.ToStringTrimmed(record[field])
+	}
+}
+
+func ensureDefaultCategory(record map[string]any, partial bool) {
+	if !shouldNormalizeEnergonField(record, "cate_id", partial) {
+		return
+	}
 	if util.ToUint64(record["cate_id"]) == 0 {
 		record["cate_id"] = defaultCategoryID
+	}
+}
+
+func ensureDefaultRecordStatus(record map[string]any, partial bool) {
+	if !shouldNormalizeEnergonField(record, "status", partial) {
+		return
+	}
+	if util.ToIntDefault(record["status"], 0) <= 0 {
+		record["status"] = defaultRecordStatus
+	}
+}
+
+func ensureDefaultRecordSort(record map[string]any, partial bool) {
+	if !shouldNormalizeEnergonField(record, "sort", partial) {
+		return
+	}
+	if util.ToIntDefault(record["sort"], 0) <= 0 {
+		record["sort"] = defaultRecordSort
 	}
 }
 

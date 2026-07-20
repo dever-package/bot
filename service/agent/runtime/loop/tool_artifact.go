@@ -105,8 +105,9 @@ func (s Service) enqueueArtifactJob(
 		Arguments:     arguments,
 		DeferDispatch: deferDispatch,
 		Snapshot: runtimeartifact.JobSnapshot{
-			Agent: state.execution.agent,
-			Scope: state.execution.scope,
+			Agent:   state.execution.agent,
+			Scope:   state.execution.scope,
+			Billing: state.execution.billing,
 			Transport: runtimeartifact.JobTransport{
 				Method: state.execution.transport.Method,
 				Host:   state.execution.transport.Host,

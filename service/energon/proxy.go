@@ -54,12 +54,12 @@ func (s GatewayService) callProxyTarget(ctx context.Context, req *botprotocol.Sh
 	nativeReq := buildProxyRequest(req, selected)
 	resp, err := s.client.Do(ctx, nativeReq)
 	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_error", err.Error()), nativeReq)
+		logItem := s.recordProviderCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_error", err.Error()), nativeReq)
 		return callResult{NativeRequest: nativeReq, Log: logItem}, err
 	}
 	if resp.StatusCode >= 400 {
 		errorMessage := formatProviderStatusError(nativeReq.Method, nativeReq.URL, resp)
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_status", errorMessage), nativeReq)
+		logItem := s.recordProviderCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_status", errorMessage), nativeReq)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem}, newProviderStatusError(nativeReq.Method, nativeReq.URL, resp)
 	}
 

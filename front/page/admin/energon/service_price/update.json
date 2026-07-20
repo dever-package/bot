@@ -1,0 +1,105 @@
+{
+  "page": {
+    "name": "成本价格编辑",
+    "parent": "bot/energon/service_price/list",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "form-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "form-shell": [
+      {
+        "type": "form-select",
+        "name": "计价方式",
+        "value": "form.mode",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "请选择计价方式。"
+          }
+        ]
+      },
+      {
+        "type": "form-select",
+        "name": "币种",
+        "value": "form.currency",
+        "mode": "form",
+        "placeholder": "请选择币种",
+        "validate": [
+          {
+            "type": "required",
+            "message": "币种不能为空。"
+          }
+        ]
+      },
+      {
+        "type": "form-input",
+        "name": "单次预授权成本上限",
+        "value": "form.max_cost",
+        "mode": "form",
+        "placeholder": "例如：0.5",
+        "info": "按 Token 计价用于调用前冻结积分；按次计价通常填写与单次价格相同的金额。最多支持 6 位小数。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "请填写单次预授权成本上限。"
+          }
+        ]
+      },
+      {
+        "type": "form-array",
+        "name": "价格项",
+        "value": "form.items",
+        "mode": "form",
+        "info": "按次只配置“单次请求”；按 Token 必须配置输入和输出，缓存输入不配置时按普通输入价格计算。",
+        "meta": {
+          "pageRoute": "/bot/energon/service_price_item/update",
+          "addText": "添加价格项",
+          "drag": "sort",
+          "itemName": "价格项"
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "启用",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "mode": "request",
+      "currency": "CNY",
+      "max_cost": "0",
+      "items": [],
+      "status": 1
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}

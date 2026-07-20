@@ -36,6 +36,7 @@ export type AssetRecord = {
   sourceID: number;
   sourceName: string;
   name: string;
+  nameMode: "auto" | "manual";
   kind: AssetKind;
   role: AssetRole;
   versionID: number;

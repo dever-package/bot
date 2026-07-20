@@ -69,6 +69,7 @@ func newStreamJob(raw GatewayRequest) bottask.Job {
 		Path:      raw.Path,
 		Headers:   raw.Headers,
 		Body:      raw.Body,
+		Billing:   raw.Billing,
 	}
 }
 
@@ -80,6 +81,7 @@ func streamJobRequest(job bottask.Job) GatewayRequest {
 		Path:      job.Path,
 		Headers:   cloneStringMap(job.Headers),
 		Body:      cloneAnyMap(job.Body),
+		Billing:   job.Billing,
 	}
 }
 

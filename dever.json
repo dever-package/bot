@@ -10,6 +10,9 @@
     "skills/SKILL.md"
   ],
   "front": {
+    "public": [
+      "/bot/speech/audio"
+    ],
     "sites": {
       "admin": {
         "api": "bot/admin",

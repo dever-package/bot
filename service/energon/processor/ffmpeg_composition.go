@@ -8,12 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
 
 const (
-	ffmpegCompositionVersion  = 1
+	ffmpegCompositionVersion  = 2
 	ffmpegCompositionMaxClips = 50
 	ffmpegDefaultResolution   = "1920x1080"
 )
@@ -27,18 +28,23 @@ type ffmpegComposition struct {
 type ffmpegCompositionClip struct {
 	ID               string                      `json:"id"`
 	Title            string                      `json:"title"`
-	Video            string                      `json:"video"`
+	VisualVideo      string                      `json:"visual_video"`
+	OriginalAudio    string                      `json:"original_audio_source"`
 	Duration         float64                     `json:"duration"`
 	Subtitle         string                      `json:"subtitle"`
-	Sound            ffmpegCompositionSound      `json:"sound"`
+	OriginalVolume   float64                     `json:"original_volume"`
+	SpeechTracks     []ffmpegCompositionSpeech   `json:"speech_tracks"`
 	TransitionToNext ffmpegCompositionTransition `json:"transition_to_next"`
 }
 
-type ffmpegCompositionSound struct {
-	KeepOriginal   bool    `json:"keep_original"`
-	OriginalVolume float64 `json:"original_volume"`
-	Voice          string  `json:"voice"`
-	VoiceVolume    float64 `json:"voice_volume"`
+type ffmpegCompositionSpeech struct {
+	ID          string  `json:"id"`
+	Audio       string  `json:"audio"`
+	StartTime   float64 `json:"start_time"`
+	Kind        string  `json:"kind"`
+	CharacterID string  `json:"character_id"`
+	Text        string  `json:"text"`
+	Volume      float64 `json:"volume"`
 }
 
 type ffmpegCompositionTransition struct {
@@ -47,10 +53,8 @@ type ffmpegCompositionTransition struct {
 }
 
 type ffmpegCompositionSettings struct {
-	Resolution            string  `json:"resolution"`
-	FPS                   int     `json:"fps"`
-	BackgroundMusic       string  `json:"background_music"`
-	BackgroundMusicVolume float64 `json:"background_music_volume"`
+	Resolution string `json:"resolution"`
+	FPS        int    `json:"fps"`
 }
 
 type ffmpegMediaProbe struct {
@@ -60,11 +64,18 @@ type ffmpegMediaProbe struct {
 }
 
 type ffmpegPreparedClip struct {
-	Clip             ffmpegCompositionClip
-	VideoInputIndex  int
-	VoiceInputIndex  int
-	Duration         float64
-	HasOriginalAudio bool
+	Clip                    ffmpegCompositionClip
+	VisualVideoInputIndex   int
+	OriginalAudioInputIndex int
+	Duration                float64
+	HasOriginalAudio        bool
+	SpeechTracks            []ffmpegPreparedSpeech
+}
+
+type ffmpegPreparedSpeech struct {
+	Track      ffmpegCompositionSpeech
+	InputIndex int
+	Duration   float64
 }
 
 func parseFFmpegComposition(value any) (ffmpegComposition, bool, error) {
@@ -118,42 +129,23 @@ func buildFFmpegCompositionArgs(
 	if err != nil {
 		return nil, err
 	}
-	if err := validateFFmpegCompositionVolume("背景音乐", composition.Settings.BackgroundMusicVolume); err != nil {
-		return nil, err
-	}
-
 	args := []string{"-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats"}
 	prepared := make([]ffmpegPreparedClip, 0, len(composition.Clips))
+	nextInputIndex := 0
 	for index, clip := range composition.Clips {
-		current, currentArgs, prepareErr := prepareFFmpegCompositionClip(
+		current, currentArgs, nextIndex, prepareErr := prepareFFmpegCompositionClip(
 			ctx,
 			ffprobePath,
 			index,
 			clip,
-			ffmpegCompositionInputCount(prepared),
+			nextInputIndex,
 		)
 		if prepareErr != nil {
 			return nil, prepareErr
 		}
 		args = append(args, currentArgs...)
 		prepared = append(prepared, current)
-	}
-
-	backgroundInputIndex := -1
-	if strings.TrimSpace(composition.Settings.BackgroundMusic) != "" {
-		backgroundPath, resolveErr := resolveLocalMediaPath(composition.Settings.BackgroundMusic)
-		if resolveErr != nil {
-			return nil, fmt.Errorf("读取背景音乐失败: %w", resolveErr)
-		}
-		probe, probeErr := probeFFmpegMedia(ctx, ffprobePath, backgroundPath)
-		if probeErr != nil {
-			return nil, fmt.Errorf("读取背景音乐信息失败: %w", probeErr)
-		}
-		if !probe.HasAudio {
-			return nil, fmt.Errorf("背景音乐不是有效音频")
-		}
-		backgroundInputIndex = ffmpegCompositionInputCount(prepared)
-		args = append(args, "-stream_loop", "-1", "-i", backgroundPath)
+		nextInputIndex = nextIndex
 	}
 
 	filters, videoLabel, audioLabel, totalDuration, err := buildFFmpegCompositionFilters(
@@ -161,8 +153,6 @@ func buildFFmpegCompositionArgs(
 		prepared,
 		resolution,
 		fps,
-		backgroundInputIndex,
-		composition.Settings.BackgroundMusicVolume,
 	)
 	if err != nil {
 		return nil, err
@@ -187,77 +177,157 @@ func prepareFFmpegCompositionClip(
 	ffprobePath string,
 	index int,
 	clip ffmpegCompositionClip,
-	videoInputIndex int,
-) (ffmpegPreparedClip, []string, error) {
+	inputIndex int,
+) (ffmpegPreparedClip, []string, int, error) {
 	label := fmt.Sprintf("第 %d 个镜头", index+1)
-	videoPath, err := resolveLocalMediaPath(clip.Video)
+	videoPath, err := resolveLocalMediaPath(clip.VisualVideo)
 	if err != nil {
-		return ffmpegPreparedClip{}, nil, fmt.Errorf("读取%s失败: %w", label, err)
+		return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf("读取%s画面失败: %w", label, err)
 	}
 	probe, err := probeFFmpegMedia(ctx, ffprobePath, videoPath)
 	if err != nil {
-		return ffmpegPreparedClip{}, nil, fmt.Errorf("读取%s信息失败: %w", label, err)
+		return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf("读取%s画面信息失败: %w", label, err)
 	}
 	if !probe.HasVideo || probe.Duration <= 0 {
-		return ffmpegPreparedClip{}, nil, fmt.Errorf("%s不是有效视频", label)
+		return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf("%s画面不是有效视频", label)
 	}
 	duration := clip.Duration
-	if duration <= 0 || duration > probe.Duration {
+	if duration <= 0 {
 		duration = probe.Duration
+	} else if duration > probe.Duration+0.05 {
+		return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf(
+			"%s画面只有 %.2f 秒，短于脚本要求的 %.2f 秒",
+			label,
+			probe.Duration,
+			duration,
+		)
 	}
 	if duration < 0.1 {
-		return ffmpegPreparedClip{}, nil, fmt.Errorf("%s时长过短", label)
+		return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf("%s时长过短", label)
 	}
-	if err := validateFFmpegCompositionVolume(label+"原声", clip.Sound.OriginalVolume); err != nil {
-		return ffmpegPreparedClip{}, nil, err
-	}
-	if err := validateFFmpegCompositionVolume(label+"配音", clip.Sound.VoiceVolume); err != nil {
-		return ffmpegPreparedClip{}, nil, err
+	if err := validateFFmpegCompositionVolume(label+"原声", clip.OriginalVolume); err != nil {
+		return ffmpegPreparedClip{}, nil, inputIndex, err
 	}
 	transitionType := strings.ToLower(strings.TrimSpace(clip.TransitionToNext.Type))
 	if transitionType == "" {
 		transitionType = "none"
 	}
 	if transitionType != "none" && transitionType != "fade" && transitionType != "crossfade" {
-		return ffmpegPreparedClip{}, nil, fmt.Errorf("%s使用了不支持的转场", label)
+		return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf("%s使用了不支持的转场", label)
 	}
 	clip.TransitionToNext.Type = transitionType
 
 	prepared := ffmpegPreparedClip{
-		Clip:             clip,
-		VideoInputIndex:  videoInputIndex,
-		VoiceInputIndex:  -1,
-		Duration:         duration,
-		HasOriginalAudio: probe.HasAudio,
+		Clip:                    clip,
+		VisualVideoInputIndex:   inputIndex,
+		OriginalAudioInputIndex: -1,
+		Duration:                duration,
 	}
 	args := []string{"-i", videoPath}
-	if strings.TrimSpace(clip.Sound.Voice) == "" {
-		return prepared, args, nil
-	}
-	voicePath, err := resolveLocalMediaPath(clip.Sound.Voice)
-	if err != nil {
-		return ffmpegPreparedClip{}, nil, fmt.Errorf("读取%s配音失败: %w", label, err)
-	}
-	voiceProbe, err := probeFFmpegMedia(ctx, ffprobePath, voicePath)
-	if err != nil {
-		return ffmpegPreparedClip{}, nil, fmt.Errorf("读取%s配音信息失败: %w", label, err)
-	}
-	if !voiceProbe.HasAudio {
-		return ffmpegPreparedClip{}, nil, fmt.Errorf("%s配音不是有效音频", label)
-	}
-	prepared.VoiceInputIndex = videoInputIndex + 1
-	args = append(args, "-i", voicePath)
-	return prepared, args, nil
-}
-
-func ffmpegCompositionInputCount(clips []ffmpegPreparedClip) int {
-	count := len(clips)
-	for _, clip := range clips {
-		if clip.VoiceInputIndex >= 0 {
-			count++
+	nextInputIndex := inputIndex + 1
+	if strings.TrimSpace(clip.OriginalAudio) != "" {
+		originalPath, resolveErr := resolveLocalMediaPath(clip.OriginalAudio)
+		if resolveErr != nil {
+			return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf("读取%s原声失败: %w", label, resolveErr)
+		}
+		if originalPath == videoPath {
+			if probe.HasAudio {
+				prepared.OriginalAudioInputIndex = inputIndex
+				prepared.HasOriginalAudio = true
+			}
+		} else {
+			originalProbe, probeErr := probeFFmpegMedia(ctx, ffprobePath, originalPath)
+			if probeErr != nil {
+				return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf("读取%s原声信息失败: %w", label, probeErr)
+			}
+			if !originalProbe.HasAudio {
+				return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf("%s原声来源不包含音频", label)
+			}
+			prepared.OriginalAudioInputIndex = nextInputIndex
+			prepared.HasOriginalAudio = true
+			nextInputIndex++
+			args = append(args, "-i", originalPath)
 		}
 	}
-	return count
+
+	for speechIndex, track := range clip.SpeechTracks {
+		preparedTrack, audioPath, prepareErr := prepareFFmpegCompositionSpeech(
+			ctx,
+			ffprobePath,
+			label,
+			speechIndex,
+			track,
+			duration,
+			nextInputIndex,
+		)
+		if prepareErr != nil {
+			return ffmpegPreparedClip{}, nil, inputIndex, prepareErr
+		}
+		prepared.SpeechTracks = append(prepared.SpeechTracks, preparedTrack)
+		args = append(args, "-i", audioPath)
+		nextInputIndex++
+	}
+	if err := validateFFmpegSpeechTimeline(label, prepared.SpeechTracks); err != nil {
+		return ffmpegPreparedClip{}, nil, inputIndex, err
+	}
+	return prepared, args, nextInputIndex, nil
+}
+
+func prepareFFmpegCompositionSpeech(
+	ctx context.Context,
+	ffprobePath string,
+	clipLabel string,
+	index int,
+	track ffmpegCompositionSpeech,
+	clipDuration float64,
+	inputIndex int,
+) (ffmpegPreparedSpeech, string, error) {
+	label := fmt.Sprintf("%s第 %d 条语音", clipLabel, index+1)
+	if strings.TrimSpace(track.ID) == "" || strings.TrimSpace(track.Audio) == "" {
+		return ffmpegPreparedSpeech{}, "", fmt.Errorf("%s配置不完整", label)
+	}
+	if track.StartTime < 0 || track.StartTime >= clipDuration {
+		return ffmpegPreparedSpeech{}, "", fmt.Errorf("%s开始时间超出镜头范围", label)
+	}
+	if err := validateFFmpegCompositionVolume(label, track.Volume); err != nil {
+		return ffmpegPreparedSpeech{}, "", err
+	}
+	audioPath, err := resolveLocalMediaPath(track.Audio)
+	if err != nil {
+		return ffmpegPreparedSpeech{}, "", fmt.Errorf("读取%s失败: %w", label, err)
+	}
+	probe, err := probeFFmpegMedia(ctx, ffprobePath, audioPath)
+	if err != nil {
+		return ffmpegPreparedSpeech{}, "", fmt.Errorf("读取%s信息失败: %w", label, err)
+	}
+	if !probe.HasAudio || probe.Duration <= 0 {
+		return ffmpegPreparedSpeech{}, "", fmt.Errorf("%s不是有效音频", label)
+	}
+	if track.StartTime+probe.Duration > clipDuration+0.02 {
+		return ffmpegPreparedSpeech{}, "", fmt.Errorf(
+			"%s在 %.2f 秒结束，超过镜头 %.2f 秒时长",
+			label,
+			track.StartTime+probe.Duration,
+			clipDuration,
+		)
+	}
+	return ffmpegPreparedSpeech{
+		Track:      track,
+		InputIndex: inputIndex,
+		Duration:   probe.Duration,
+	}, audioPath, nil
+}
+
+func validateFFmpegSpeechTimeline(label string, tracks []ffmpegPreparedSpeech) error {
+	intervals := make([]ffmpegSpeechInterval, 0, len(tracks))
+	for _, track := range tracks {
+		intervals = append(intervals, ffmpegSpeechInterval{
+			ID:        track.Track.ID,
+			StartTime: track.Track.StartTime,
+			Duration:  track.Duration,
+		})
+	}
+	return validateFFmpegSpeechIntervals(label, intervals)
 }
 
 func buildFFmpegCompositionFilters(
@@ -265,15 +335,13 @@ func buildFFmpegCompositionFilters(
 	clips []ffmpegPreparedClip,
 	resolution string,
 	fps int,
-	backgroundInputIndex int,
-	backgroundVolume float64,
 ) ([]string, string, string, float64, error) {
 	width, height, _ := strings.Cut(resolution, "x")
 	filters := make([]string, 0, len(clips)*4+8)
 	for index, clip := range clips {
 		filters = append(filters, fmt.Sprintf(
 			"[%d:v:0]trim=duration=%s,setpts=PTS-STARTPTS,scale=%s:%s:force_original_aspect_ratio=decrease,pad=%s:%s:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=%d,settb=AVTB,format=yuv420p[v%d]",
-			clip.VideoInputIndex,
+			clip.VisualVideoInputIndex,
 			formatFFmpegSeconds(clip.Duration),
 			width,
 			height,
@@ -284,7 +352,7 @@ func buildFFmpegCompositionFilters(
 		))
 		baseLabel := fmt.Sprintf("abase%d", index)
 		finalLabel := fmt.Sprintf("a%d", index)
-		if clip.VoiceInputIndex < 0 {
+		if len(clip.SpeechTracks) == 0 {
 			baseLabel = finalLabel
 		}
 		baseFilter := fmt.Sprintf(
@@ -292,33 +360,40 @@ func buildFFmpegCompositionFilters(
 			formatFFmpegSeconds(clip.Duration),
 			baseLabel,
 		)
-		if clip.Clip.Sound.KeepOriginal && clip.HasOriginalAudio {
+		if clip.OriginalAudioInputIndex >= 0 && clip.HasOriginalAudio {
 			baseFilter = fmt.Sprintf(
 				"[%d:a:0]atrim=duration=%s,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=%s,apad,atrim=duration=%s[%s]",
-				clip.VideoInputIndex,
+				clip.OriginalAudioInputIndex,
 				formatFFmpegSeconds(clip.Duration),
-				formatFFmpegVolume(clip.Clip.Sound.OriginalVolume),
+				formatFFmpegVolume(clip.Clip.OriginalVolume),
 				formatFFmpegSeconds(clip.Duration),
 				baseLabel,
 			)
 		}
 		filters = append(filters, baseFilter)
-		if clip.VoiceInputIndex < 0 {
+		if len(clip.SpeechTracks) == 0 {
 			continue
 		}
-		voiceLabel := fmt.Sprintf("voice%d", index)
+		mixInputs := []string{"[" + baseLabel + "]"}
+		for speechIndex, speech := range clip.SpeechTracks {
+			speechLabel := fmt.Sprintf("speech%d_%d", index, speechIndex)
+			delayMS := int64(math.Round(speech.Track.StartTime * 1000))
+			filters = append(filters, fmt.Sprintf(
+				"[%d:a:0]atrim=duration=%s,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=%s,adelay=%d|%d,apad,atrim=duration=%s[%s]",
+				speech.InputIndex,
+				formatFFmpegSeconds(speech.Duration),
+				formatFFmpegVolume(speech.Track.Volume),
+				delayMS,
+				delayMS,
+				formatFFmpegSeconds(clip.Duration),
+				speechLabel,
+			))
+			mixInputs = append(mixInputs, "["+speechLabel+"]")
+		}
 		filters = append(filters, fmt.Sprintf(
-			"[%d:a:0]atrim=duration=%s,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=%s,apad,atrim=duration=%s[%s]",
-			clip.VoiceInputIndex,
-			formatFFmpegSeconds(clip.Duration),
-			formatFFmpegVolume(clip.Clip.Sound.VoiceVolume),
-			formatFFmpegSeconds(clip.Duration),
-			voiceLabel,
-		))
-		filters = append(filters, fmt.Sprintf(
-			"[%s][%s]amix=inputs=2:duration=longest:dropout_transition=0,atrim=duration=%s[%s]",
-			baseLabel,
-			voiceLabel,
+			"%samix=inputs=%d:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95,atrim=duration=%s[%s]",
+			strings.Join(mixInputs, ""),
+			len(mixInputs),
 			formatFFmpegSeconds(clip.Duration),
 			finalLabel,
 		))
@@ -391,27 +466,6 @@ func buildFFmpegCompositionFilters(
 		))
 		videoLabel = outputVideoLabel
 	}
-	if backgroundInputIndex >= 0 {
-		backgroundLabel := "background"
-		outputAudioLabel := "aout"
-		filters = append(filters,
-			fmt.Sprintf(
-				"[%d:a:0]atrim=duration=%s,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=%s,apad,atrim=duration=%s[%s]",
-				backgroundInputIndex,
-				formatFFmpegSeconds(totalDuration),
-				formatFFmpegVolume(backgroundVolume),
-				formatFFmpegSeconds(totalDuration),
-				backgroundLabel,
-			),
-			fmt.Sprintf(
-				"[%s][%s]amix=inputs=2:duration=first:dropout_transition=0[%s]",
-				audioLabel,
-				backgroundLabel,
-				outputAudioLabel,
-			),
-		)
-		audioLabel = outputAudioLabel
-	}
 	return filters, videoLabel, audioLabel, totalDuration, nil
 }
 
@@ -440,17 +494,38 @@ func writeFFmpegCompositionSubtitles(
 	sequence := 0
 	start := 0.0
 	for index, clip := range clips {
-		subtitle := strings.TrimSpace(strings.ReplaceAll(clip.Clip.Subtitle, "\r", ""))
-		if subtitle != "" {
+		hasSpeechSubtitle := false
+		orderedSpeech := append([]ffmpegPreparedSpeech(nil), clip.SpeechTracks...)
+		sort.SliceStable(orderedSpeech, func(left, right int) bool {
+			return orderedSpeech[left].Track.StartTime < orderedSpeech[right].Track.StartTime
+		})
+		for _, speech := range orderedSpeech {
+			text := strings.TrimSpace(strings.ReplaceAll(speech.Track.Text, "\r", ""))
+			if text == "" {
+				continue
+			}
+			hasSpeechSubtitle = true
 			sequence++
-			content.WriteString(strconv.Itoa(sequence))
-			content.WriteByte('\n')
-			content.WriteString(formatFFmpegSRTTime(start))
-			content.WriteString(" --> ")
-			content.WriteString(formatFFmpegSRTTime(start + clip.Duration))
-			content.WriteByte('\n')
-			content.WriteString(subtitle)
-			content.WriteString("\n\n")
+			writeFFmpegSRTEntry(
+				&content,
+				sequence,
+				start+speech.Track.StartTime,
+				start+speech.Track.StartTime+speech.Duration,
+				text,
+			)
+		}
+		if !hasSpeechSubtitle {
+			subtitle := strings.TrimSpace(strings.ReplaceAll(clip.Clip.Subtitle, "\r", ""))
+			if subtitle != "" {
+				sequence++
+				writeFFmpegSRTEntry(
+					&content,
+					sequence,
+					start,
+					start+clip.Duration,
+					subtitle,
+				)
+			}
 		}
 		start += clip.Duration
 		if index < len(transitionDurations) {
@@ -465,6 +540,23 @@ func writeFFmpegCompositionSubtitles(
 		return "", fmt.Errorf("写入合成字幕失败: %w", err)
 	}
 	return path, nil
+}
+
+func writeFFmpegSRTEntry(
+	content *strings.Builder,
+	sequence int,
+	start float64,
+	end float64,
+	text string,
+) {
+	content.WriteString(strconv.Itoa(sequence))
+	content.WriteByte('\n')
+	content.WriteString(formatFFmpegSRTTime(start))
+	content.WriteString(" --> ")
+	content.WriteString(formatFFmpegSRTTime(end))
+	content.WriteByte('\n')
+	content.WriteString(text)
+	content.WriteString("\n\n")
 }
 
 func probeFFmpegMedia(ctx context.Context, ffprobePath string, path string) (ffmpegMediaProbe, error) {

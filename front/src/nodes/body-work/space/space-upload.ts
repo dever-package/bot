@@ -7,7 +7,9 @@ import {
 import { saveBodyUploadedAssets } from "../asset/upload-asset-api";
 import type { UploadPreview } from "./space-prompt-composer";
 
-const { digestUploadFile, uploadFileDirect } = getCompatModule("@/lib/upload") as {
+const { digestUploadFile, uploadFileDirect } = getCompatModule(
+  "@/lib/upload",
+) as {
   digestUploadFile?: (file: File) => Promise<string>;
   uploadFileDirect?: (
     file: File,
@@ -16,24 +18,21 @@ const { digestUploadFile, uploadFileDirect } = getCompatModule("@/lib/upload") a
   ) => Promise<void>;
 };
 
-export async function uploadSpaceFiles(
-  input: {
-    projectID: number;
-    teamID: number;
-    files: File[];
-    ruleID?: number;
-  },
-): Promise<UploadPreview[]> {
-  const uploadRuleId = Number(input.ruleID || 0);
-  if (uploadRuleId <= 0) {
-    throw new Error("当前节点未配置上传规则");
-  }
+export async function uploadSpaceFiles(input: {
+  projectID: number;
+  teamID: number;
+  files: File[];
+  ruleID?: number;
+}): Promise<UploadPreview[]> {
+  const configuredRuleID = Number(input.ruleID || 0);
   const previews: UploadPreview[] = [];
   for (const file of input.files) {
+    const uploadRuleID =
+      configuredRuleID > 0 ? configuredRuleID : uploadRuleIDFromFile(file);
     const hash = await computeSpaceUploadHash(file);
     const init = await initSpaceUpload({
       projectId: input.projectID,
-      ruleId: uploadRuleId,
+      ruleId: uploadRuleID,
       name: file.name,
       size: file.size,
       mime: file.type,
@@ -74,6 +73,14 @@ export async function uploadSpaceFiles(
     previews.push(uploadPreviewFromPayload(completed, file, asset));
   }
   return previews;
+}
+
+function uploadRuleIDFromFile(file: File) {
+  const kind = uploadKindFromFile(file);
+  if (kind === "image") return 1;
+  if (kind === "video") return 2;
+  if (kind === "audio") return 3;
+  return 4;
 }
 
 async function computeSpaceUploadHash(file: File) {

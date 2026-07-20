@@ -36,6 +36,11 @@ func FromContext(ctx context.Context) Scope {
 	if current, ok := deverjwt.ActiveInt64(ctx); ok && current > 0 {
 		actorID = uint64(current)
 	}
+	if actorID == 0 {
+		if current, ok := frontauthcontext.AdminID(ctx); ok {
+			actorID = current
+		}
+	}
 	return New(ctx, agentmodel.SessionOwnerTypeAdmin, actorID)
 }
 
@@ -68,10 +73,17 @@ func (current Scope) Server(ctx context.Context, existing *server.Context) (*ser
 		ctx = context.Background()
 	}
 	if current.ActorID > 0 {
-		ctx = frontauthcontext.WithActor(ctx, frontauthcontext.Actor{
-			Type: current.ActorType,
-			ID:   current.ActorID,
-		})
+		if strings.EqualFold(strings.TrimSpace(current.ActorType), agentmodel.SessionOwnerTypeBodyUser) {
+			ctx = userservice.WithActor(ctx, userservice.Actor{
+				Type:   userservice.ActorTypeUser,
+				UserID: current.ActorID,
+			})
+		} else {
+			ctx = frontauthcontext.WithActor(ctx, frontauthcontext.Actor{
+				Type: frontauthcontext.ActorTypeAdmin,
+				ID:   current.ActorID,
+			})
+		}
 	}
 	siteKey := strings.TrimSpace(current.SiteKey)
 	if siteKey != "" {

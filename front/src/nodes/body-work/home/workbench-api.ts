@@ -35,6 +35,15 @@ export type WorkbenchAssetCate = {
   cardinality: string;
 };
 
+export type WorkbenchSystemMessage = {
+  id: number;
+  title: string;
+  content: string;
+  url: string;
+  pinned: boolean;
+  publishedAt: string;
+};
+
 export type WorkbenchCatalog = {
   teams: WorkbenchTeam[];
   team: WorkbenchTeam | null;
@@ -74,6 +83,16 @@ export async function loadWorkbenchCatalog(teamID = 0) {
       .map(normalizeAssetCate)
       .filter(hasID),
   } satisfies WorkbenchCatalog;
+}
+
+export async function loadWorkbenchSystemMessages(limit = 20) {
+  const result = await request(joinSiteApi("system_message/list"), "get", {
+    limit,
+  });
+  const data = responseData(result, "加载系统消息失败");
+  return toRows(data.items)
+    .map(normalizeSystemMessage)
+    .filter(hasID) satisfies WorkbenchSystemMessage[];
 }
 
 export function workbenchApi(path: string) {
@@ -185,6 +204,17 @@ function normalizeAssetCate(value: any): WorkbenchAssetCate {
     name: textValue(value?.name) || "未命名分类",
     kind: textValue(value?.kind) || "text",
     cardinality: textValue(value?.cardinality) || "single",
+  };
+}
+
+function normalizeSystemMessage(value: any): WorkbenchSystemMessage {
+  return {
+    id: numberValue(value?.id),
+    title: textValue(value?.title) || "系统消息",
+    content: textValue(value?.content),
+    url: textValue(value?.url),
+    pinned: Boolean(value?.pinned),
+    publishedAt: textValue(value?.published_at),
   };
 }
 

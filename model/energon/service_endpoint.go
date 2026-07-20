@@ -126,6 +126,13 @@ var (
 		Option:     "bot.energon.NewServiceModel",
 		OptionKeys: []string{"name"},
 	}
+
+	serviceEndpointPriceRelation = orm.Relation{
+		Field:      "prices",
+		Through:    "bot.energon.NewServicePriceModel",
+		OwnerField: "service_endpoint_id",
+		Order:      "id asc",
+	}
 )
 
 func NewServiceEndpointModel() *orm.Model[ServiceEndpoint] {
@@ -140,6 +147,7 @@ func NewServiceEndpointModel() *orm.Model[ServiceEndpoint] {
 		},
 		Relations: []orm.Relation{
 			serviceEndpointServiceRelation,
+			serviceEndpointPriceRelation,
 		},
 	})
 }

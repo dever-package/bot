@@ -63,6 +63,9 @@ func (s Service) startStreamRequest(ctx context.Context, spec StreamTaskSpec, jo
 	if !ok {
 		return s.runPlainRequest(ctx, spec, job)
 	}
+	if decoder, ok := newBinaryStreamDecoder(job); ok {
+		return s.startBinaryStreamRequest(ctx, spec, job, streamClient, decoder)
+	}
 
 	rawChunks := make([]string, 0)
 	resp, err := streamClient.Stream(ctx, job.Request, func(chunk botprovider.StreamChunk) error {
@@ -96,6 +99,49 @@ func (s Service) startStreamRequest(ctx context.Context, spec StreamTaskSpec, jo
 		return StreamResult{Response: resp, Handled: true}, err
 	}
 
+	data, err := job.Adapter.BuildClientResponse(job.Input.Request, resp)
+	if err != nil {
+		return StreamResult{Response: resp, Handled: true}, err
+	}
+	data = normalizeRequestTaskData(spec, data)
+	return StreamResult{Response: resp, Data: data, Handled: true}, nil
+}
+
+func (s Service) startBinaryStreamRequest(
+	ctx context.Context,
+	spec StreamTaskSpec,
+	job StreamJob,
+	streamClient botprovider.StreamClient,
+	decoder BinaryStreamDecoder,
+) (StreamResult, error) {
+	if job.CommitBinary != nil {
+		job.CommitBinary()
+	}
+	resp, err := streamClient.Stream(ctx, job.Request, func(chunk botprovider.StreamChunk) error {
+		payload, decodeErr := decoder.Decode(chunk)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		if len(payload.Content) == 0 || job.WriteBinary == nil {
+			return nil
+		}
+		return job.WriteBinary(payload)
+	})
+	if err != nil {
+		return StreamResult{Response: resp, Handled: true}, err
+	}
+	if resp == nil {
+		return StreamResult{Handled: true}, fmt.Errorf("来源流式返回为空")
+	}
+	if err := ensureProviderOK(taskActionText(spec, job), resp); err != nil {
+		return StreamResult{Response: resp, Handled: true}, err
+	}
+
+	payload, err := decoder.Result(resp)
+	if err != nil {
+		return StreamResult{Response: resp, Handled: true}, err
+	}
+	resp.Body = payload
 	data, err := job.Adapter.BuildClientResponse(job.Input.Request, resp)
 	if err != nil {
 		return StreamResult{Response: resp, Handled: true}, err
@@ -217,6 +263,14 @@ func streamTaskSpec(adapter botprotocol.Adapter, input botprotocol.NativeInput) 
 		return StreamTaskSpec{}, false
 	}
 	return normalizeStreamTaskSpec(spec), true
+}
+
+func newBinaryStreamDecoder(job StreamJob) (BinaryStreamDecoder, bool) {
+	adapter, ok := job.Adapter.(BinaryStreamAdapter)
+	if !ok {
+		return nil, false
+	}
+	return adapter.NewBinaryStreamDecoder(job.Input, job.Request)
 }
 
 func normalizeStreamTaskSpec(spec StreamTaskSpec) StreamTaskSpec {

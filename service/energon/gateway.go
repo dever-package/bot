@@ -22,6 +22,7 @@ type GatewayService struct {
 	repo          Repo
 	streams       frontstream.Service
 	streamCancels *botstream.CancelRegistry
+	audioStreams  *botstream.AudioRelay
 	tasks         bottask.Service
 	client        botprovider.Client
 	registry      *botprotocol.Registry
@@ -43,6 +44,7 @@ func NewGatewayServiceWithClient(client botprovider.Client) GatewayService {
 		repo:          repo,
 		streams:       frontstream.New(botstream.Namespace),
 		streamCancels: botstream.NewCancelRegistry(),
+		audioStreams:  botstream.SharedAudioRelay(),
 		client:        client,
 		registry:      botadapters.DefaultRegistry(),
 		processors:    botprocessor.DefaultRegistry(),
@@ -73,6 +75,7 @@ func (s GatewayService) Handle(ctx context.Context, raw GatewayRequest) (*Gatewa
 			Kind:      "proxy.protocol",
 			Name:      resolveProxyPower(raw),
 			Raw:       buildRawProtocolRequest(raw, mode),
+			Billing:   raw.Billing,
 		}
 		return s.handleProxy(ctx, req)
 	default:
@@ -86,6 +89,7 @@ func (s GatewayService) Handle(ctx context.Context, raw GatewayRequest) (*Gatewa
 		}
 		req.RequestID = raw.RequestID
 		req.Mode = mode
+		req.Billing = raw.Billing
 		return s.handleNormalize(ctx, req)
 	}
 }
@@ -122,10 +126,11 @@ func (s GatewayService) selectTarget(ctx context.Context, power botmodel.Power, 
 	account := botmodel.Account{}
 	if !isLocalProvider(provider) {
 		var err error
-		account, err = selectProviderAccount(ctx, s.repo, provider)
+		account, err = selectServiceAccount(ctx, s.repo, provider, service)
 		if err != nil {
 			return selectedTarget{}, err
 		}
+		provider = withAccountHost(provider, account)
 	}
 	return selectedTarget{
 		Provider:    provider,

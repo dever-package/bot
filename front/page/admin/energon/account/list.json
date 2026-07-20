@@ -1,0 +1,265 @@
+{
+  "page": {
+    "name": "来源账号",
+    "parent": "bot/energon/provider/update",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "className": "rounded-md border bg-background",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4 border-b px-4 py-3",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "table-row": {
+        "type": "container",
+        "className": "overflow-hidden"
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "添加账号",
+        "meta": {
+          "variant": "outline",
+          "size": "sm"
+        },
+        "action": {
+          "click": [
+            {
+              "type": "state",
+              "key": "accountIndex",
+              "value": -1
+            },
+            {
+              "type": "state",
+              "key": "accountForm",
+              "value": {
+                "scope": 1,
+                "host": "",
+                "key": "",
+                "status": 1,
+                "sort": 100
+              }
+            },
+            {
+              "type": "modal",
+              "key": "dialog.account",
+              "value": true
+            }
+          ]
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "parent.data.form.accounts",
+        "meta": {
+          "rowKey": "id",
+          "columns": [
+            {
+              "name": "账号名称",
+              "value": "name",
+              "type": "show-base"
+            },
+            {
+              "name": "账号范围",
+              "value": "scope",
+              "type": "show-tag"
+            },
+            {
+              "name": "启用",
+              "value": "status",
+              "type": "form-switch",
+              "action": {
+                "change": {
+                  "type": "array",
+                  "key": "parent.data.form.accounts",
+                  "op": "patch",
+                  "index": "$rowIndex",
+                  "value": {
+                    "status": "$value"
+                  }
+                }
+              },
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "name": "排序",
+              "value": "sort",
+              "type": "show-base",
+              "editor": "form-number",
+              "trigger": "doubleClick",
+              "action": {
+                "change": {
+                  "type": "array",
+                  "key": "parent.data.form.accounts",
+                  "op": "patch",
+                  "index": "$rowIndex",
+                  "value": {
+                    "sort": "$value"
+                  }
+                }
+              },
+              "meta": {
+                "controlClassName": "w-24"
+              }
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑来源账号",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "state",
+                          "key": "accountIndex",
+                          "value": "$rowIndex"
+                        },
+                        {
+                          "type": "state",
+                          "key": "accountForm",
+                          "value": "$row"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.account",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "trash-2",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "删除来源账号",
+                    "className": "text-destructive hover:text-destructive",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "state",
+                          "key": "deleteAccountIndex",
+                          "value": "$rowIndex"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.deleteAccount",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.account",
+          "pageRoute": "/bot/energon/account/update",
+          "title": "来源账号",
+          "description": "配置账号名称、使用范围、可选主机和调用密钥。",
+          "size": "lg",
+          "footer": {
+            "confirm": true,
+            "confirmText": "确定"
+          },
+          "pageDataPatches": {
+            "form": "state.accountForm"
+          }
+        },
+        "action": {
+          "submit": {
+            "type": "array",
+            "key": "parent.data.form.accounts",
+            "op": "upsert",
+            "index": "state.accountIndex",
+            "value": "$modalForm"
+          }
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "删除来源账号",
+        "info": "确认删除这一条来源账号吗？已被服务绑定的账号无法随来源保存删除。",
+        "meta": {
+          "stateKey": "dialog.deleteAccount",
+          "successMessage": "来源账号已删除"
+        },
+        "action": {
+          "confirm": {
+            "type": "array",
+            "key": "parent.data.form.accounts",
+            "op": "remove",
+            "index": "state.deleteAccountIndex"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "description": "通用账号供服务自动选择，专用账号需要在来源服务中明确绑定。"
+    },
+    "option": {
+      "scope": [
+        {
+          "id": 1,
+          "value": "通用"
+        },
+        {
+          "id": 2,
+          "value": "专用"
+        }
+      ]
+    }
+  },
+  "state": {
+    "accountIndex": -1,
+    "deleteAccountIndex": -1,
+    "accountForm": {
+      "scope": 1,
+      "host": "",
+      "key": "",
+      "status": 1,
+      "sort": 100
+    },
+    "dialog": {
+      "account": false,
+      "deleteAccount": false
+    }
+  },
+  "action": {}
+}

@@ -1,0 +1,253 @@
+{
+  "page": {
+    "name": "计费记录",
+    "icon": "receipt-text",
+    "parent": "user-benefit-assign",
+    "sort": 3
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header"
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "toolbar-row": {
+            "type": "row",
+            "className": "flex-wrap items-center gap-3"
+          },
+          "table-row": {
+            "type": "container",
+            "className": "overflow-hidden rounded-md border bg-background"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "toolbar-row": [
+      {
+        "type": "form-input",
+        "placeholder": "搜索请求、业务键、能力或身份...",
+        "value": "search.keyword",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "调用场景",
+        "value": "search.scene",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "计费状态",
+        "value": "search.status",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "规则来源",
+        "value": "search.rule_source",
+        "mode": "search"
+      },
+      {
+        "type": "form-date",
+        "placeholder": "创建时间",
+        "value": "search.created_at_start",
+        "mode": "search",
+        "meta": {
+          "searchWidth": "select",
+          "range": true,
+          "endValue": "search.created_at_end",
+          "inputType": "datetime-local"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "重置",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/billing/charge/list"
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "request_id",
+              "type": "show-base"
+            },
+            {
+              "value": "scene",
+              "type": "show-tag"
+            },
+            {
+              "name": "能力",
+              "value": "power_name",
+              "type": "show-base"
+            },
+            {
+              "name": "命中规则",
+              "value": "rule_source",
+              "type": "show-tag"
+            },
+            {
+              "name": "身份等级",
+              "value": "level_name",
+              "type": "show-base"
+            },
+            {
+              "name": "售价系数",
+              "value": "sale_ratio",
+              "type": "show-base"
+            },
+            {
+              "name": "应扣积分",
+              "value": "requested_points",
+              "type": "show-base"
+            },
+            {
+              "name": "实扣积分",
+              "value": "settled_points",
+              "type": "show-base"
+            },
+            {
+              "value": "status",
+              "type": "show-tag"
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "eye",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看计费详情",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.id",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.view",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.view",
+          "pageRoute": "/bot/billing/charge/view",
+          "description": "查看规则命中、成本、售价、积分预占与结算快照。",
+          "size": "xl",
+          "bodyClassName": "max-h-[70vh] overflow-y-auto px-6 py-2",
+          "pageRouteQuery": {
+            "id": "data.actionTarget.id"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "description": "每条记录对应一次前台逻辑能力调用；供应商每次实际尝试请在能力成本中查看。"
+    },
+    "search": {
+      "keyword": "",
+      "scene": "",
+      "status": "",
+      "rule_source": "",
+      "created_at_start": "",
+      "created_at_end": ""
+    },
+    "table": {
+      "model": "bot.billing.NewPowerChargeModel",
+      "field": "main.id,main.request_id,main.business_key,main.scene,main.power_name,main.rule_source,main.identity_name,main.level_name,main.point_symbol,main.sale_ratio,main.requested_points,main.settled_points,main.status,main.created_at",
+      "searchFields": [
+        "request_id",
+        "business_key",
+        "power_name",
+        "identity_name",
+        "level_name"
+      ],
+      "filterFields": [
+        "scene",
+        "status",
+        "rule_source",
+        {
+          "field": "created_at",
+          "type": "date-range",
+          "startKey": "created_at_start",
+          "endKey": "created_at_end",
+          "valueType": "datetime"
+        }
+      ]
+    },
+    "actionTarget": {
+      "id": ""
+    }
+  },
+  "state": {
+    "dialog": {
+      "view": false
+    }
+  },
+  "action": {}
+}

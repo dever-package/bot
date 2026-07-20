@@ -27,6 +27,15 @@ type RestoreVersionRequest struct {
 	NodeKey   string
 }
 
+type CloneProjectVersionRequest struct {
+	ProjectID uint64
+	AssetID   uint64
+	VersionID uint64
+	RequestID string
+	NodeKey   string
+	Content   any
+}
+
 func (s Service) ProjectVersionPage(ctx context.Context, projectID uint64, assetID uint64, req VersionPageRequest) (map[string]any, error) {
 	asset := s.FindProjectAsset(ctx, projectID, assetID)
 	if asset == nil {
@@ -86,6 +95,50 @@ func (s Service) RestoreProjectVersion(ctx context.Context, req RestoreVersionRe
 		return nil, nil, fmt.Errorf("读取资产失败")
 	}
 	return asset, version, nil
+}
+
+func (s Service) CloneProjectVersion(ctx context.Context, req CloneProjectVersionRequest) (*assetmodel.Asset, *assetmodel.Version, error) {
+	asset := s.FindProjectAsset(ctx, req.ProjectID, req.AssetID)
+	if asset == nil {
+		return nil, nil, fmt.Errorf("资产不存在")
+	}
+	version := s.FindVersion(ctx, req.VersionID)
+	if version == nil || version.AssetID != asset.ID {
+		return nil, nil, fmt.Errorf("资产版本不存在")
+	}
+	requestID := strings.TrimSpace(req.RequestID)
+	if requestID == "" {
+		return nil, nil, fmt.Errorf("创建版本缺少请求标识")
+	}
+	nodeKey := strings.TrimSpace(req.NodeKey)
+	if nodeKey == "" {
+		nodeKey = strings.TrimSpace(asset.NodeKey)
+	}
+	content := req.Content
+	if content == nil {
+		content = jsonValue(version.Content)
+	}
+	source, _ := jsonValue(version.Source).(map[string]any)
+	return s.SaveVersion(ctx, SaveVersionRequest{
+		AssetID:     asset.ID,
+		ProjectID:   asset.ProjectID,
+		BodyID:      asset.BodyID,
+		TeamID:      asset.TeamID,
+		FlowID:      asset.FlowID,
+		AssetCateID: asset.AssetCateID,
+		ReleaseID:   version.ReleaseID,
+		RequestID:   requestID,
+		NodeKey:     nodeKey,
+		SourceType:  asset.SourceType,
+		SourceID:    asset.SourceID,
+		SourceName:  asset.SourceName,
+		Source:      source,
+		Name:        asset.Name,
+		Kind:        asset.Kind,
+		Role:        NormalizeRole(asset.Role),
+		Content:     content,
+		Sort:        asset.Sort,
+	})
 }
 
 func VersionSummaryToMap(row assetmodel.Version, kind string) map[string]any {
@@ -152,7 +205,7 @@ func collectVersionSummaryText(value any, parts *[]string, depth int) {
 				collectVersionSummaryText(item, parts, depth+1)
 			}
 		}
-		for _, key := range []string{"content", "rich", "storyboard", "shots", "output", "result", "data", "body", "value"} {
+		for _, key := range []string{"content", "rich", "storyboard", "shots", "speech", "output", "result", "data", "body", "value"} {
 			if item, exists := current[key]; exists {
 				collectVersionSummaryText(item, parts, depth+1)
 			}

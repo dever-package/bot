@@ -1,22 +1,14 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type ReactNode,
-} from "react";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { getCompatModule } from "@dever/front-plugin";
 import {
   ArrowUp,
   CheckCircle2,
   ChevronDown,
   Download,
   FileText,
-  Image as ImageIcon,
   Loader2,
   Plus,
-  Search,
-  Upload,
   X,
 } from "lucide-react";
 import {
@@ -25,14 +17,17 @@ import {
   normalizePowerParamValue,
   powerParamOptionValue,
 } from "./space-power-param";
-import {
-  PowerParamOptionDialog,
-  normalizeParamPreviewType,
-} from "@/components/agent/stream-request-params";
 import { PowerParamIcon } from "./space-power-icon";
 import { CanvasReferenceEditor } from "./space-reference-editor";
+import { findAssetMediaURL } from "../asset/asset-content";
+import { assetKindsAccept } from "../asset/asset-contract";
+import { normalizeAssetRecord } from "../asset/asset-api";
+import { AssetPickerDialog } from "../asset/asset-picker-dialog";
 import { useAssetReferenceProvider } from "../asset/asset-reference-provider";
-import { assetKindLabel } from "../asset/asset-contract";
+import type {
+  AssetKind as LibraryAssetKind,
+  AssetRecord,
+} from "../asset/asset-types";
 import type {
   CanvasContentPreview,
   CanvasReferenceContent,
@@ -44,6 +39,29 @@ import type {
 export { defaultPowerParamValue } from "./space-power-param";
 
 export type ComposerAssetPreview = CanvasContentPreview;
+
+type ParamPreviewType = "none" | "image" | "audio" | "video";
+
+type ParamOptionDialogProps = {
+  open: boolean;
+  title: string;
+  previewType: ParamPreviewType;
+  options: NonNullable<PowerParam["options"]>;
+  value: unknown;
+  disabled?: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: (value: string) => void;
+};
+
+const streamRequestParamsModule = getCompatModule(
+  "@/components/agent/stream-request-params",
+);
+const PowerParamOptionDialog =
+  streamRequestParamsModule.PowerParamOptionDialog as ComponentType<ParamOptionDialogProps>;
+const normalizeParamPreviewType =
+  streamRequestParamsModule.normalizeParamPreviewType as (
+    value: unknown,
+  ) => ParamPreviewType;
 
 export type ComposerAssetItem = {
   id: string;
@@ -64,14 +82,12 @@ type PromptComposerProps = {
   placeholder: string;
   running?: boolean;
   disabled?: boolean;
-  openAssetPickerSignal?: number;
   sourceOptions?: PowerParamSource[];
   selectedSourceId?: number;
   params?: PowerParam[];
   paramValues?: Record<string, unknown>;
   assetLibrary?: {
     current: ComposerAssetItem[];
-    assets: ComposerAssetItem[];
   };
   referenceContent?: CanvasReferenceContent;
   assetReference?: {
@@ -88,7 +104,6 @@ type PromptComposerProps = {
     param: PowerParam,
     alias: string,
   ) => void;
-  onAssetPickerClose?: () => void;
   onLocalUpload?: (
     files: File[],
     param: PowerParam,
@@ -118,19 +133,17 @@ export function PromptComposer({
   placeholder,
   running = false,
   disabled = false,
-  openAssetPickerSignal = 0,
   sourceOptions = [],
   selectedSourceId = 0,
   params = [],
   paramValues = {},
-  assetLibrary = { current: [], assets: [] },
+  assetLibrary = { current: [] },
   referenceContent,
   assetReference,
   onChange,
   onParamChange,
   onSourceChange,
   onAssetReference,
-  onAssetPickerClose,
   onLocalUpload,
   onSubmit,
 }: PromptComposerProps) {
@@ -155,7 +168,6 @@ export function PromptComposer({
   const [assetPickerParam, setAssetPickerParam] = useState<PowerParam | null>(
     null,
   );
-  const openedAssetPickerSignalRef = useRef(0);
   const uploadParams = params.filter(isUploadPowerParam);
   const optionParams = params.filter(isToolbarPowerParam);
   const selectedSource = sourceOptions.find(
@@ -169,20 +181,6 @@ export function PromptComposer({
       setOpenKey("");
     }
   }, [disabled, running]);
-
-  useEffect(() => {
-    if (
-      !openAssetPickerSignal ||
-      openedAssetPickerSignalRef.current === openAssetPickerSignal ||
-      disabled ||
-      running ||
-      uploadParams.length === 0
-    ) {
-      return;
-    }
-    openedAssetPickerSignalRef.current = openAssetPickerSignal;
-    setAssetPickerParam(uploadParams[0]);
-  }, [disabled, openAssetPickerSignal, running, uploadParams]);
 
   function setUploadValue(param: PowerParam, previews: UploadPreview[]) {
     setUploadPreviews((current) => ({
@@ -311,53 +309,82 @@ export function PromptComposer({
             document.body,
           )
         : null}
-      {assetPickerParam && typeof document !== "undefined"
-        ? createPortal(
-            <AssetReferenceDialog
-              param={assetPickerParam}
-              library={assetLibrary}
-              currentPreviews={
-                uploadPreviews[assetPickerParam.key] ||
-                previewsFromValue(paramValues[assetPickerParam.key])
-              }
-              onClose={() => {
-                setAssetPickerParam(null);
-                onAssetPickerClose?.();
-              }}
-              onPick={(asset) => {
-                const current =
-                  uploadPreviews[assetPickerParam.key] ||
-                  previewsFromValue(paramValues[assetPickerParam.key]);
-                const alias = nextReferenceAlias(
-                  assetPickerParam,
-                  current.length + 1,
-                );
-                const nextPreview = uploadPreviewFromAsset(asset, alias);
-                const next = appendUploadPreview(
-                  assetPickerParam,
-                  current,
-                  nextPreview,
-                );
-                setUploadValue(assetPickerParam, next);
-                onChange(appendReferenceMention(value, alias));
-                onAssetReference?.(asset, assetPickerParam, alias);
-                setAssetPickerParam(null);
-                onAssetPickerClose?.();
-              }}
-              onLocalUpload={(previews) => {
-                const current =
-                  uploadPreviews[assetPickerParam.key] ||
-                  previewsFromValue(paramValues[assetPickerParam.key]);
-                setUploadValue(
-                  assetPickerParam,
-                  appendUploadPreviews(assetPickerParam, current, previews),
-                );
-              }}
-              onUploadFiles={onLocalUpload}
-            />,
-            document.body,
-          )
-        : null}
+      {assetPickerParam ? (
+        <AssetPickerDialog
+          open
+          teamID={Number(assetReference?.teamID || 0)}
+          title={`${assetPickerParam.name || "参数"}资产库`}
+          description="选择已有资产或上传本地文件，确认后用于当前参数。"
+          initialFilters={
+            assetReference?.projectID
+              ? {
+                  sourceType: "project",
+                  projectID: assetReference.projectID,
+                }
+              : undefined
+          }
+          allowedKinds={acceptedAssetKinds(assetPickerParam)}
+          initialSelectedAssetIDs={selectedAssetIDsFromPreviews(
+            uploadPreviews[assetPickerParam.key] ||
+              previewsFromValue(paramValues[assetPickerParam.key]),
+          )}
+          multiple={assetPickerParam.type === "files"}
+          maxSelection={assetPickerParam.max_files || 8}
+          confirmSelection
+          validateAsset={(asset) =>
+            findAssetMediaURL(asset.version?.content, asset.kind)
+              ? ""
+              : "该资产当前版本没有可用文件，无法用于此参数。"
+          }
+          uploadAccept={assetKindsAccept(acceptedAssetKinds(assetPickerParam))}
+          onUpload={
+            onLocalUpload
+              ? async (files) => {
+                  const previews = await onLocalUpload(files, assetPickerParam);
+                  const assets = previews
+                    .map((preview) => normalizeAssetRecord(preview.asset))
+                    .filter((asset) => asset.id > 0);
+                  if (assets.length === 0) {
+                    throw new Error("上传成功，但没有生成可用资产");
+                  }
+                  return assets;
+                }
+              : undefined
+          }
+          onClose={() => setAssetPickerParam(null)}
+          onConfirm={(assets, selectedAssetIDs) => {
+            const current =
+              uploadPreviews[assetPickerParam.key] ||
+              previewsFromValue(paramValues[assetPickerParam.key]);
+            const currentByAssetID = new Map(
+              current
+                .map(
+                  (preview) => [assetIDFromPreview(preview), preview] as const,
+                )
+                .filter(([assetID]) => assetID > 0),
+            );
+            const selectedByID = new Map(
+              assets.map((asset) => [asset.id, asset]),
+            );
+            let nextPrompt = value;
+            const next = selectedAssetIDs
+              .map((assetID, index) => {
+                const existing = currentByAssetID.get(assetID);
+                if (existing) return existing;
+                const asset = selectedByID.get(assetID);
+                if (!asset) return null;
+                const alias = nextReferenceAlias(assetPickerParam, index + 1);
+                const composerAsset = composerAssetFromRecord(asset);
+                nextPrompt = appendReferenceMention(nextPrompt, alias);
+                onAssetReference?.(composerAsset, assetPickerParam, alias);
+                return uploadPreviewFromAsset(composerAsset, alias);
+              })
+              .filter((preview): preview is UploadPreview => Boolean(preview));
+            setUploadValue(assetPickerParam, next);
+            if (nextPrompt !== value) onChange(nextPrompt);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -448,247 +475,6 @@ function UploadParamStrip({
   );
 }
 
-export function AssetReferenceDialog({
-  param,
-  library,
-  currentPreviews,
-  onClose,
-  onPick,
-  onLocalUpload,
-  onUploadFiles,
-}: {
-  param: PowerParam;
-  library: { current: ComposerAssetItem[]; assets: ComposerAssetItem[] };
-  currentPreviews: UploadPreview[];
-  onClose: () => void;
-  onPick: (asset: ComposerAssetItem) => void;
-  onLocalUpload: (previews: UploadPreview[]) => void;
-  onUploadFiles?: (
-    files: File[],
-    param: PowerParam,
-  ) => Promise<UploadPreview[]>;
-}) {
-  const [tab, setTab] = useState<"current" | "asset">("current");
-  const [roleFilter, setRoleFilter] = useState<"all" | "work" | "material">(
-    "all",
-  );
-  const [query, setQuery] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState("");
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const acceptedKinds = acceptedAssetKinds(param);
-  const items = filterComposerAssets(
-    library[tab] || [],
-    acceptedKinds,
-    roleFilter,
-    query,
-  );
-
-  async function handleFiles(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files || []);
-    if (files.length === 0) {
-      return;
-    }
-    setUploading(true);
-    setUploadError("");
-    try {
-      const previews: UploadPreview[] = [];
-      const errors: string[] = [];
-      if (onUploadFiles) {
-        for (const file of files) {
-          try {
-            previews.push(...(await onUploadFiles([file], param)));
-          } catch (error) {
-            errors.push(
-              `${file.name}：${error instanceof Error ? error.message : "上传失败"}`,
-            );
-          }
-        }
-      } else {
-        previews.push(...files.map(fileToUploadPreview));
-      }
-      if (previews.length > 0) {
-        onLocalUpload(previews);
-        setTab("asset");
-        setRoleFilter("material");
-      }
-      if (errors.length > 0) {
-        setUploadError(errors.join("；"));
-      }
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "上传失败");
-    } finally {
-      setUploading(false);
-      event.target.value = "";
-    }
-  }
-
-  return (
-    <div
-      className="ws-asset-picker-backdrop"
-      role="dialog"
-      aria-modal="true"
-      onMouseDown={onClose}
-    >
-      <section
-        className="ws-asset-picker"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <header className="ws-asset-picker-head">
-          <div className="ws-asset-picker-tabs">
-            <button
-              type="button"
-              className={tab === "current" ? "is-active" : ""}
-              onClick={() => setTab("current")}
-            >
-              当前
-            </button>
-            <button
-              type="button"
-              className={tab === "asset" ? "is-active" : ""}
-              onClick={() => setTab("asset")}
-            >
-              全部
-            </button>
-          </div>
-          <label className="ws-asset-picker-search">
-            <Search size={15} />
-            <input
-              value={query}
-              placeholder="搜索名称"
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </label>
-          <button
-            type="button"
-            className="ws-asset-picker-close"
-            onClick={onClose}
-            aria-label="关闭"
-          >
-            <X size={18} />
-          </button>
-        </header>
-
-        <div className="ws-asset-kind-row">
-          <span>
-            {acceptedKinds.length > 0
-              ? acceptedKinds.map(kindLabel).join(" / ")
-              : "全部类型"}
-          </span>
-          <div className="ws-asset-role-tabs" aria-label="内容筛选">
-            {[
-              ["all", "全部"],
-              ["work", "作品"],
-              ["material", "素材"],
-            ].map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                className={roleFilter === key ? "is-active" : ""}
-                onClick={() =>
-                  setRoleFilter(key as "all" | "work" | "material")
-                }
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            disabled={uploading}
-            onClick={() => inputRef.current?.click()}
-          >
-            {uploading ? (
-              <Loader2 size={14} className="ws-spin" />
-            ) : (
-              <Upload size={14} />
-            )}
-            本地上传
-          </button>
-          <input
-            ref={inputRef}
-            type="file"
-            hidden
-            multiple={param.type === "files"}
-            onChange={handleFiles}
-          />
-        </div>
-
-        <div className="ws-asset-picker-grid custom-scrollbar">
-          {uploadError ? (
-            <div className="ws-asset-picker-error">{uploadError}</div>
-          ) : null}
-          {items.length > 0 ? (
-            items.map((asset) => (
-              <button
-                key={`${asset.source}-${asset.id}`}
-                type="button"
-                className="ws-asset-picker-card"
-                onClick={() => onPick(asset)}
-              >
-                <AssetThumb asset={asset} />
-                <span>{asset.title}</span>
-                <small>{kindLabel(asset.kind)}</small>
-              </button>
-            ))
-          ) : (
-            <div className="ws-asset-picker-empty">
-              <ImageIcon size={28} />
-              <span>暂无可引用内容</span>
-            </div>
-          )}
-        </div>
-        {currentPreviews.length > 0 ? (
-          <footer className="ws-asset-picker-foot">
-            {currentPreviews.length} 个引用已添加
-          </footer>
-        ) : null}
-      </section>
-    </div>
-  );
-}
-
-function AssetThumb({ asset }: { asset: ComposerAssetItem }) {
-  const preview = asset.preview;
-  if (preview.imageUrl) {
-    return <img src={preview.imageUrl} alt={asset.title} />;
-  }
-  if (preview.videoUrl) {
-    return (
-      <video src={preview.videoUrl} muted playsInline preload="metadata" />
-    );
-  }
-  return (
-    <i>
-      {asset.kind === "text" ? <FileText size={20} /> : <ImageIcon size={20} />}
-    </i>
-  );
-}
-
-function appendUploadPreview(
-  param: PowerParam,
-  previews: UploadPreview[],
-  preview: UploadPreview,
-) {
-  return appendUploadPreviews(param, previews, [preview]);
-}
-
-function appendUploadPreviews(
-  param: PowerParam,
-  previews: UploadPreview[],
-  nextPreviews: UploadPreview[],
-) {
-  const multiple = param.type === "files";
-  const maxFiles = param.max_files || (multiple ? 8 : 1);
-  const mergedPreviews = multiple
-    ? [...previews, ...nextPreviews]
-    : nextPreviews;
-  const limitedPreviews = mergedPreviews.slice(0, multiple ? maxFiles : 1);
-  const droppedPreviews = multiple ? mergedPreviews.slice(maxFiles) : previews;
-  droppedPreviews.forEach(revokeUploadPreviewUrl);
-  return limitedPreviews;
-}
-
 function uploadPreviewFromAsset(
   asset: ComposerAssetItem,
   alias: string,
@@ -719,6 +505,41 @@ function uploadPreviewFromAsset(
   };
 }
 
+function composerAssetFromRecord(asset: AssetRecord): ComposerAssetItem {
+  const content = asset.version?.content;
+  const mediaURL = findAssetMediaURL(content, asset.kind);
+  const preview = emptyComposerPreview();
+  preview.text = asset.summary || asset.name;
+  if (asset.kind === "image") preview.imageUrl = mediaURL;
+  if (asset.kind === "video") preview.videoUrl = mediaURL;
+  if (asset.kind === "audio") preview.audioUrl = mediaURL;
+  if (asset.kind === "file") preview.fileUrl = mediaURL;
+  return {
+    id: String(asset.id),
+    title: asset.name,
+    kind: asset.kind,
+    role: asset.role,
+    source: "asset",
+    refType: "asset",
+    refId: asset.id,
+    versionID: asset.versionID,
+    output: content,
+    preview,
+    asset,
+  };
+}
+
+function selectedAssetIDsFromPreviews(previews: UploadPreview[]) {
+  return Array.from(
+    new Set(previews.map(assetIDFromPreview).filter((assetID) => assetID > 0)),
+  );
+}
+
+function assetIDFromPreview(preview: UploadPreview) {
+  if (!preview.asset || typeof preview.asset !== "object") return 0;
+  return Number((preview.asset as Record<string, unknown>).id || 0);
+}
+
 function nextReferenceAlias(param: PowerParam, index: number) {
   const name =
     `${param.name || param.key || ""}${param.key || ""}`.toLowerCase();
@@ -746,58 +567,39 @@ function appendReferenceMention(value: string, alias: string) {
   return `${value}${separator}${mention}`;
 }
 
-function acceptedAssetKinds(param: PowerParam) {
+function acceptedAssetKinds(param: PowerParam): LibraryAssetKind[] {
+  const configured = Array.from(
+    new Set(
+      (param.asset_kinds || [])
+        .map(normalizeAssetKind)
+        .filter((kind): kind is LibraryAssetKind => Boolean(kind)),
+    ),
+  );
+  if (configured.length > 0) return configured;
+
   const name = `${param.name || ""} ${param.key || ""}`.toLowerCase();
   if (/video|视频/.test(name)) {
     return ["video"];
   }
   if (/audio|music|音频|音乐/.test(name)) {
-    return ["audio", "music"];
+    return ["audio"];
   }
   if (/image|img|photo|picture|图片|图像|参考图/.test(name)) {
     return ["image"];
   }
   if (/text|文本|提示词|文案/.test(name)) {
-    return ["text"];
+    return ["file"];
   }
-  return [];
+  return ["image", "audio", "video", "file"];
 }
 
-function filterComposerAssets(
-  items: ComposerAssetItem[],
-  acceptedKinds: string[],
-  roleFilter: "all" | "work" | "material",
-  query: string,
-) {
-  const normalizedQuery = query.trim().toLowerCase();
-  return items.filter((item) => {
-    if (
-      roleFilter !== "all" &&
-      item.source === "asset" &&
-      String(item.role || "").toLowerCase() !== roleFilter
-    ) {
-      return false;
-    }
-    if (
-      acceptedKinds.length > 0 &&
-      !acceptedKinds.includes(String(item.kind || "").toLowerCase())
-    ) {
-      return false;
-    }
-    if (!normalizedQuery) {
-      return true;
-    }
-    return `${item.title} ${item.preview?.text || ""}`
-      .toLowerCase()
-      .includes(normalizedQuery);
-  });
-}
-
-function kindLabel(kind: string) {
-  const normalized = String(kind || "").toLowerCase();
-  if (normalized === "music") return assetKindLabel("audio");
-  if (normalized === "rich") return assetKindLabel("richtext");
-  return assetKindLabel(normalized);
+function normalizeAssetKind(value: unknown): LibraryAssetKind | undefined {
+  const kind = String(value || "").toLowerCase();
+  if (kind === "rich") return "richtext";
+  if (kind === "music") return "audio";
+  return ["text", "image", "audio", "video", "richtext", "file"].includes(kind)
+    ? (kind as LibraryAssetKind)
+    : undefined;
 }
 
 function UploadPreviewDialog({
@@ -1021,7 +823,10 @@ function ParamEditor({
               className={`ws-prompt-menu-item ${active ? "is-active" : ""}`}
               onClick={() => {
                 onChange(
-                  normalizePowerParamValue(param, powerParamOptionValue(option)),
+                  normalizePowerParamValue(
+                    param,
+                    powerParamOptionValue(option),
+                  ),
                 );
                 onClose();
               }}
@@ -1050,8 +855,7 @@ function ParamEditor({
                 let next = [...selected];
                 if (active) {
                   next = next.filter(
-                    (current) =>
-                      !isPowerParamOptionSelected(option, [current]),
+                    (current) => !isPowerParamOptionSelected(option, [current]),
                   );
                 } else {
                   next.push(powerParamOptionValue(option));
@@ -1139,21 +943,13 @@ function paramControlLabel(param: PowerParam, value: unknown) {
     return count > 0 ? `${param.name} ${count}` : param.name;
   }
   if (param.type === "option" || param.type === "select") {
-    const option = param.options?.find(
-      (item) => isPowerParamOptionSelected(item, [String(value ?? "")]),
+    const option = param.options?.find((item) =>
+      isPowerParamOptionSelected(item, [String(value ?? "")]),
     );
     return option?.name || param.name;
   }
   const text = valueAsText(value);
   return text ? `${param.name}: ${text}` : param.name;
-}
-
-function fileToUploadPreview(file: File): UploadPreview {
-  return {
-    name: file.name,
-    type: file.type,
-    url: URL.createObjectURL(file),
-  };
 }
 
 function isImagePreview(preview: UploadPreview) {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Bell, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -11,6 +11,7 @@ import {
 import { BodySiteBrand } from "../auth/site-brand";
 import type { BodySiteConfig } from "../auth/site-config";
 import type { WorkbenchTeam } from "./workbench-api";
+import { WorkbenchSystemMessagePanel } from "./workbench-system-message-panel";
 import { WorkbenchUserMenu } from "./workbench-user-menu";
 
 export type WorkbenchPageKey = "function" | "dialogue" | "works" | "assets";
@@ -40,7 +41,7 @@ export function WorkbenchSidebar({
   onNavigate: (page: WorkbenchPageKey) => void;
   onTeamChange: (teamID: number) => void;
 }) {
-  const [noticeOpen, setNoticeOpen] = useState(false);
+  const [pointsOpen, setPointsOpen] = useState(false);
 
   return (
     <>
@@ -84,13 +85,9 @@ export function WorkbenchSidebar({
           <RailAction
             icon={Sparkles}
             label="积分"
-            onClick={() => setNoticeOpen(true)}
+            onClick={() => setPointsOpen(true)}
           />
-          <RailAction
-            icon={Bell}
-            label="消息"
-            onClick={() => setNoticeOpen(true)}
-          />
+          <WorkbenchSystemMessagePanel />
           <WorkbenchUserMenu
             teams={teams}
             teamID={teamID}
@@ -101,7 +98,7 @@ export function WorkbenchSidebar({
         </div>
       </aside>
 
-      <Dialog open={noticeOpen} onOpenChange={setNoticeOpen}>
+      <Dialog open={pointsOpen} onOpenChange={setPointsOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>敬请期待</DialogTitle>

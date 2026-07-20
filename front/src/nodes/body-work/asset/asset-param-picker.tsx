@@ -1,18 +1,29 @@
 import { useMemo } from "react";
+import { getCompatModule } from "@dever/front-plugin";
 import type {
   ParamFileLibraryRenderProps,
   ParamUploadedFile,
 } from "@/components/agent/stream-request-params";
 import { findAssetMediaURL } from "./asset-content";
+import { assetKindsAccept } from "./asset-contract";
+import { normalizeAssetRecord } from "./asset-api";
+import {
+  BODY_UPLOAD_BIZ_KEY,
+  BODY_UPLOAD_BIZ_NAME,
+  saveBodyUploadedAssets,
+} from "./upload-asset-api";
 import { AssetPickerDialog } from "./asset-picker-dialog";
 import type { AssetKind, AssetRecord } from "./asset-types";
 
-const fileAssetKinds = new Set<AssetKind>([
-  "image",
-  "audio",
-  "video",
-  "file",
-]);
+const fileAssetKinds = new Set<AssetKind>(["image", "audio", "video", "file"]);
+
+const { uploadFileByRule } = getCompatModule("@/lib/upload") as {
+  uploadFileByRule?: (
+    ruleID: number,
+    file: File,
+    options?: Record<string, unknown>,
+  ) => Promise<ParamUploadedFile>;
+};
 
 export function AssetParamPicker({
   teamID,
@@ -53,6 +64,15 @@ export function AssetParamPicker({
       multiple={multiple}
       maxSelection={Math.max(availableAssetSlots, 1)}
       confirmSelection
+      uploadAccept={assetKindsAccept(allowedKinds)}
+      onUpload={(selectedFiles) =>
+        uploadParamAssets({
+          teamID,
+          ruleID: Number(param.upload_rule_id || 0),
+          kind: resourceKind,
+          files: selectedFiles,
+        })
+      }
       validateAsset={(asset) => {
         if (availableAssetSlots <= 0) {
           return `当前参数最多只能选择 ${maxSelection} 个文件。`;
@@ -66,11 +86,15 @@ export function AssetParamPicker({
       }}
       onClose={() => onOpenChange(false)}
       onConfirm={(assets, selectedAssetIDs) => {
-        const selectedAssets = new Map(assets.map((asset) => [asset.id, asset]));
+        const selectedAssets = new Map(
+          assets.map((asset) => [asset.id, asset]),
+        );
         const selectedFiles = selectedAssetIDs
           .map((assetID) => {
             const asset = selectedAssets.get(assetID);
-            return asset ? assetParamFile(asset) : currentAssetFiles.get(assetID);
+            return asset
+              ? assetParamFile(asset)
+              : currentAssetFiles.get(assetID);
           })
           .filter((file): file is ParamUploadedFile => Boolean(file));
         const nextFiles = multiple
@@ -146,4 +170,34 @@ function allowedKindDescription(kinds: AssetKind[]) {
     file: "文件",
   };
   return kinds.map((kind) => labels[kind]).join("、");
+}
+
+async function uploadParamAssets(input: {
+  teamID: number;
+  ruleID: number;
+  kind?: string;
+  files: File[];
+}): Promise<AssetRecord[]> {
+  if (!uploadFileByRule) {
+    throw new Error("当前页面缺少上传能力");
+  }
+  if (!Number.isFinite(input.ruleID) || input.ruleID <= 0) {
+    throw new Error("当前参数未配置上传规则");
+  }
+  const assets: AssetRecord[] = [];
+  for (const file of input.files) {
+    const uploaded = await uploadFileByRule(input.ruleID, file, {
+      kind: input.kind,
+      bizKey: BODY_UPLOAD_BIZ_KEY,
+      bizName: BODY_UPLOAD_BIZ_NAME,
+    });
+    const saved = await saveBodyUploadedAssets({
+      teamID: input.teamID,
+      files: [uploaded],
+    });
+    assets.push(
+      ...saved.map(normalizeAssetRecord).filter((asset) => asset.id > 0),
+    );
+  }
+  return assets;
 }

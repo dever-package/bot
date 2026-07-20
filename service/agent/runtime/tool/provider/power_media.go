@@ -25,6 +25,7 @@ const (
 type mediaCountPlan struct {
 	key       string
 	promptKey string
+	maximum   int
 }
 
 type mediaSeriesPlan struct {
@@ -40,7 +41,15 @@ func buildMediaCountPlan(power energonmodel.Power, params []energonservice.Power
 	return mediaCountPlan{
 		key:       mediaCountArgument,
 		promptKey: mediaPromptParameterKey(params),
+		maximum:   mediaCountLimit(power),
 	}
+}
+
+func mediaCountLimit(power energonmodel.Power) int {
+	if energonmodel.IsLipSyncPower(power) {
+		return 1
+	}
+	return maxMediaCount
 }
 
 func buildMediaSeriesPlan(power energonmodel.Power, params []energonservice.PowerParam, references []MediaReference) mediaSeriesPlan {
@@ -90,7 +99,7 @@ func mediaToolParameters(parameters map[string]any, plan mediaCountPlan) map[str
 		"type":        "integer",
 		"description": "生成独立结果的数量",
 		"minimum":     1,
-		"maximum":     maxMediaCount,
+		"maximum":     plan.maximum,
 	}
 	result["properties"] = properties
 	result["required"] = appendRequiredParameter(
@@ -247,8 +256,8 @@ func mediaExecutionCount(power energonmodel.Power, arguments map[string]any, pla
 		return 0, fmt.Errorf("%s生成参数 %s 不能为空", mediaPowerLabel(power), plan.key)
 	}
 	count := ArgumentInt(arguments, plan.key, 0)
-	if count < 1 || count > maxMediaCount {
-		return 0, fmt.Errorf("%s生成参数 %s 必须在 1-%d 之间", mediaPowerLabel(power), plan.key, maxMediaCount)
+	if count < 1 || count > plan.maximum {
+		return 0, fmt.Errorf("%s生成参数 %s 必须在 1-%d 之间", mediaPowerLabel(power), plan.key, plan.maximum)
 	}
 	return count, nil
 }
@@ -291,10 +300,11 @@ func executeMediaPower(
 	targetID uint64,
 	gateway energonservice.GatewayService,
 	transport Transport,
+	billing botprotocol.BillingContext,
 	onOutput OutputHandler,
 ) (botprotocol.Output, error) {
 	if count <= 1 {
-		return executePower(ctx, requestID, power.Key, input, targetID, gateway, transport, onOutput)
+		return executePower(ctx, requestID, power, input, targetID, gateway, transport, billing, onOutput)
 	}
 
 	batchCtx, cancel := context.WithCancel(ctx)
@@ -308,7 +318,11 @@ func executeMediaPower(
 		currentIndex := index
 		group.Go("并行生成素材", func() error {
 			currentInput := mediaVariantInput(power, input, promptKey, currentIndex, count)
-			output, err := executePower(batchCtx, uuid.NewString(), power.Key, currentInput, targetID, gateway, transport, serializedOutput)
+			childRequestID := uuid.NewSHA1(
+				uuid.NameSpaceOID,
+				[]byte(fmt.Sprintf("media:%s:%d", requestID, currentIndex)),
+			).String()
+			output, err := executePower(batchCtx, childRequestID, power, currentInput, targetID, gateway, transport, billing, serializedOutput)
 			if err != nil {
 				resultMutex.Lock()
 				if firstErr == nil {

@@ -326,13 +326,26 @@ export type CanvasStoryboardItemType =
   | "scene"
   | "prop"
   | "shot_frame"
-  | "shot";
+  | "shot"
+  | "speech"
+  | "lip_sync"
+  | "video_compose";
 
 export type CanvasStoryboardItemConfig = {
   sourceNodeId: string;
   itemType: CanvasStoryboardItemType;
   itemId: string;
   generatedPrompt: string;
+  sourceNodeIds?: string[];
+  shotId?: string;
+  frameRole?: "start" | "end";
+  speechId?: string;
+  speechIds?: string[];
+  characterId?: string;
+  speechKind?: "dialogue" | "narration";
+  speakerMode?: "visible" | "offscreen";
+  startTime?: number;
+  shotDuration?: number;
   sourceSignature?: string;
   resultSourceSignature?: string;
   stale?: boolean;

@@ -15,6 +15,7 @@ type Job struct {
 	Path      string
 	Headers   map[string]string
 	Body      map[string]any
+	Billing   botprotocol.BillingContext
 }
 
 type Handler interface {
@@ -28,6 +29,8 @@ func (fn HandlerFunc) HandleTask(ctx context.Context, job Job) error {
 }
 
 type StreamWriter func(output botprotocol.Output) error
+
+type BinaryStreamWriter func(payload botprovider.BinaryPayload) error
 
 type StreamKind string
 
@@ -63,6 +66,15 @@ type StreamTaskAdapter interface {
 	StreamTaskSpec(input botprotocol.NativeInput) (StreamTaskSpec, bool)
 }
 
+type BinaryStreamAdapter interface {
+	NewBinaryStreamDecoder(input botprotocol.NativeInput, request botprovider.Request) (BinaryStreamDecoder, bool)
+}
+
+type BinaryStreamDecoder interface {
+	Decode(chunk botprovider.StreamChunk) (botprovider.BinaryPayload, error)
+	Result(response *botprovider.Response) (botprovider.BinaryPayload, error)
+}
+
 type CancelSupportAdapter interface {
 	SupportsCancel(input botprotocol.NativeInput) bool
 }
@@ -83,6 +95,8 @@ type StreamJob struct {
 	Client         botprovider.Client
 	Request        botprovider.Request
 	Write          StreamWriter
+	WriteBinary    BinaryStreamWriter
+	CommitBinary   func()
 	RegisterCancel func(func(context.Context) error)
 }
 

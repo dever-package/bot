@@ -33,6 +33,9 @@ export function AssetPreview({
         fallback={summary || ""}
         emptyText="该版本暂无可预览内容"
         className="wb-asset-preview-content"
+        markdownClassName="wb-asset-detail-prose"
+        richClassName="wb-asset-detail-prose"
+        mediaLayout="detail"
       />
     );
   }

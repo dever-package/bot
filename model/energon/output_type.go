@@ -5,6 +5,8 @@ import "strings"
 const (
 	OutputTypeGeneral      = "general"
 	OutputTypeStoryboard   = "storyboard"
+	OutputTypeSpeech       = "speech"
+	OutputTypeLipSync      = "lip_sync"
 	OutputTypeVideoCompose = "video_compose"
 )
 
@@ -40,13 +42,31 @@ var outputTypeSpecs = []OutputTypeSpec{
 		Sort:          20,
 	},
 	{
+		Key:           OutputTypeSpeech,
+		Name:          "语音合成",
+		AllowedKinds:  []string{"audio"},
+		ViewMode:      "content",
+		DefaultWidth:  420,
+		DefaultHeight: 300,
+		Sort:          30,
+	},
+	{
+		Key:           OutputTypeLipSync,
+		Name:          "口型同步",
+		AllowedKinds:  []string{"video"},
+		ViewMode:      "content",
+		DefaultWidth:  520,
+		DefaultHeight: 360,
+		Sort:          40,
+	},
+	{
 		Key:           OutputTypeVideoCompose,
 		Name:          "视频合成",
 		AllowedKinds:  []string{"video"},
 		ViewMode:      "video_compose",
 		DefaultWidth:  680,
 		DefaultHeight: 440,
-		Sort:          30,
+		Sort:          50,
 	},
 }
 
@@ -123,6 +143,16 @@ func IsStoryboardPower(power Power) bool {
 func IsVideoComposePower(power Power) bool {
 	return NormalizePowerKind(power.Kind) == "video" &&
 		NormalizeOutputType(power.OutputType) == OutputTypeVideoCompose
+}
+
+func IsSpeechPower(power Power) bool {
+	return NormalizePowerKind(power.Kind) == "audio" &&
+		NormalizeOutputType(power.OutputType) == OutputTypeSpeech
+}
+
+func IsLipSyncPower(power Power) bool {
+	return NormalizePowerKind(power.Kind) == "video" &&
+		NormalizeOutputType(power.OutputType) == OutputTypeLipSync
 }
 
 func RequiresStructuredOutput(power Power) bool {

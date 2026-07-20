@@ -263,7 +263,11 @@ func (s Service) UpdateAssetVersion(ctx context.Context, projectID uint64, req U
 		return nil, err
 	}
 	return withWorkspaceAssetLock(ctx, projectID, []string{"update", fmt.Sprintf("%d", req.AssetID), fmt.Sprintf("%d", req.VersionID)}, func() (map[string]any, error) {
-		asset, version, err := s.asset.UpdateVersionContent(ctx, projectID, req.AssetID, req.VersionID, req.Content)
+		content, err := s.editableAssetVersionContent(ctx, projectID, req)
+		if err != nil {
+			return nil, err
+		}
+		asset, version, err := s.asset.UpdateVersionContent(ctx, projectID, req.AssetID, req.VersionID, content)
 		if err != nil {
 			return nil, err
 		}

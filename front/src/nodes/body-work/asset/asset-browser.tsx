@@ -16,6 +16,7 @@ import {
 import { loadAssetFilterOptions, loadAssetPage } from "./asset-api";
 import { AssetCard } from "./asset-card";
 import { AssetDetailDialog } from "./asset-detail-dialog";
+import { AssetRenameDialog } from "./asset-rename-dialog";
 import { AssetSourceFilters } from "./asset-source-filters";
 import {
   emptyAssetFilters,
@@ -53,7 +54,9 @@ export function AssetBrowser({
   onSelect,
   onContinue,
   canContinue,
+  onAssetChanged,
   headerAction,
+  reloadSignal = 0,
   className = "",
 }: {
   teamID: number;
@@ -64,7 +67,9 @@ export function AssetBrowser({
   onSelect?: (asset: AssetRecord) => void;
   onContinue?: (asset: AssetRecord) => void;
   canContinue?: (asset: AssetRecord) => boolean;
+  onAssetChanged?: (asset: AssetRecord) => void;
   headerAction?: ReactNode;
+  reloadSignal?: number;
   className?: string;
 }) {
   const allowedKindKey = JSON.stringify(allowedKinds || []);
@@ -81,6 +86,7 @@ export function AssetBrowser({
   const [options, setOptions] = useState<AssetFilterOptions>(emptyOptions);
   const [page, setPage] = useState<AssetPage>(emptyPage);
   const [selectedAssetID, setSelectedAssetID] = useState(0);
+  const [renameTarget, setRenameTarget] = useState<AssetRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -149,7 +155,7 @@ export function AssetBrowser({
 
   useEffect(() => {
     void load(1);
-  }, [load, reloadVersion]);
+  }, [load, reloadSignal, reloadVersion]);
 
   function changeFilters(next: AssetFilters) {
     setFilters(next);
@@ -198,6 +204,7 @@ export function AssetBrowser({
                 selectable={selectable}
                 selected={selectedAssetIDSet.has(asset.id)}
                 onOpen={(current) => setSelectedAssetID(current.id)}
+                onRename={setRenameTarget}
                 onSelect={onSelect}
               />
             ))}
@@ -252,9 +259,28 @@ export function AssetBrowser({
               : undefined
           }
           canContinue={canContinue}
-          onAssetChanged={() => refresh()}
+          onAssetChanged={(asset) => {
+            refresh();
+            onAssetChanged?.(asset);
+          }}
         />
       ) : null}
+
+      <AssetRenameDialog
+        teamID={teamID}
+        asset={renameTarget}
+        onClose={() => setRenameTarget(null)}
+        onRenamed={(asset) => {
+          setPage((current) => ({
+            ...current,
+            items: current.items.map((item) =>
+              item.id === asset.id ? asset : item,
+            ),
+          }));
+          onAssetChanged?.(asset);
+          refresh();
+        }}
+      />
     </section>
   );
 }
@@ -281,7 +307,10 @@ function normalizeInitialFilters(
   allowedKinds: AssetKind[],
 ): AssetFilters {
   const next = { ...emptyAssetFilters, ...(input || {}) };
-  if (allowedKinds.length > 0 && !allowedKinds.includes(next.kind as AssetKind)) {
+  if (
+    allowedKinds.length > 0 &&
+    !allowedKinds.includes(next.kind as AssetKind)
+  ) {
     next.kind = allowedKinds[0];
   }
   if (next.projectID) {

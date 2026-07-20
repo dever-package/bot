@@ -102,6 +102,7 @@ type StreamFrame = RuntimeStreamFrame<EnergonOutput>
 type StreamOutput = {
   text: string
   reasoning: string
+  liveOutput: EnergonOutput | null
   finalOutput: EnergonOutput | null
 }
 
@@ -110,6 +111,7 @@ const SOURCE_RULE_PICK = 2
 const EMPTY_OUTPUT: StreamOutput = {
   text: '',
   reasoning: '',
+  liveOutput: null,
   finalOutput: null,
 }
 
@@ -550,9 +552,13 @@ export function StreamPowerRunner({
       const next: StreamOutput = {
         text: current.text,
         reasoning: current.reasoning,
+        liveOutput: current.liveOutput,
         finalOutput: current.finalOutput,
       }
 
+      if (event === 'audio_ready') {
+        next.liveOutput = frameOutput
+      }
       if (event === 'delta' || (!event && frameOutput.text)) {
         next.text += valueText(frameOutput.text)
       }
@@ -888,7 +894,8 @@ export function StreamPowerRunner({
                       uploadBizKey={uploadBizKey}
                       uploadBizName={uploadBizName}
                       allowResourceLibrary={allowResourceLibrary}
-                      fileLibraryLabel={renderParamFileLibrary ? '资产库' : undefined}
+                      fileLibraryOnly={Boolean(renderParamFileLibrary)}
+                      fileLibraryLabel={renderParamFileLibrary ? '添加' : undefined}
                       renderFileLibrary={renderParamFileLibrary}
                       onUploadedFiles={onUploadedFiles}
                       onChange={(nextValue) => setParamValue(param, nextValue)}
@@ -919,7 +926,8 @@ export function StreamPowerRunner({
                     uploadBizKey={uploadBizKey}
                     uploadBizName={uploadBizName}
                     allowResourceLibrary={allowResourceLibrary}
-                    fileLibraryLabel={renderParamFileLibrary ? '资产库' : undefined}
+                    fileLibraryOnly={Boolean(renderParamFileLibrary)}
+                    fileLibraryLabel={renderParamFileLibrary ? '添加' : undefined}
                     renderFileLibrary={renderParamFileLibrary}
                     onUploadedFiles={onUploadedFiles}
                     onChange={(nextValue) => setParamValue(param, nextValue)}
@@ -1158,6 +1166,9 @@ function buildContentViewOutput(output: StreamOutput): EnergonOutput[] | Energon
   }
 
   const items: EnergonOutput[] = []
+  if (output.liveOutput) {
+    items.push(output.liveOutput)
+  }
   if (output.reasoning) {
     items.push({ event: 'reasoning', reasoning: output.reasoning })
   }

@@ -711,6 +711,21 @@ func (Repo) InsertRun(ctx context.Context, record map[string]any) uint64 {
 	return uint64(teammodel.NewRunModel().Insert(ctx, record))
 }
 
+func (Repo) ClaimRunInteraction(ctx context.Context, id uint64, response map[string]any) bool {
+	if id == 0 {
+		return false
+	}
+	return teammodel.NewRunModel().Update(ctx, map[string]any{
+		"id":     id,
+		"status": teammodel.RunStatusWaiting,
+	}, map[string]any{
+		"status":               teammodel.RunStatusRunning,
+		"interaction_response": jsonText(response),
+		"error":                "",
+		"updated_at":           time.Now(),
+	}) == 1
+}
+
 func (Repo) InsertTeamRelease(ctx context.Context, record map[string]any) uint64 {
 	record["created_at"] = time.Now()
 	return uint64(teammodel.NewTeamReleaseModel().Insert(ctx, record))
@@ -811,7 +826,81 @@ func (Repo) UpdateRun(ctx context.Context, id uint64, record map[string]any) {
 		return
 	}
 	record["updated_at"] = time.Now()
-	teammodel.NewRunModel().Update(ctx, map[string]any{"id": id}, record)
+	filters := map[string]any{"id": id}
+	applyRunExecutionFilter(ctx, filters)
+	teammodel.NewRunModel().Update(ctx, filters, record)
+}
+
+func (Repo) UpdateRunUnlessCanceled(ctx context.Context, id uint64, record map[string]any) bool {
+	if id == 0 || len(record) == 0 {
+		return false
+	}
+	record["updated_at"] = time.Now()
+	filters := map[string]any{
+		"id":     id,
+		"status": map[string]any{"neq": teammodel.RunStatusCanceled},
+	}
+	applyRunExecutionFilter(ctx, filters)
+	return teammodel.NewRunModel().Update(ctx, filters, record) == 1
+}
+
+func (Repo) ClaimRunExecution(ctx context.Context, id uint64, owner string, now time.Time, leaseUntil time.Time) (*teammodel.Run, bool) {
+	owner = strings.TrimSpace(owner)
+	if id == 0 || owner == "" {
+		return nil, false
+	}
+	run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": id})
+	if run == nil || teamRunTerminal(run.Status) {
+		return run, false
+	}
+	if run.ExecutionExpiresAt != nil && run.ExecutionExpiresAt.After(now) {
+		return run, false
+	}
+	updated := teammodel.NewRunModel().Update(ctx, map[string]any{
+		"id":                run.ID,
+		"status":            run.Status,
+		"execution_version": run.ExecutionVersion,
+		"or": []any{
+			map[string]any{"execution_expires_at": nil},
+			map[string]any{"execution_expires_at": map[string]any{"lte": now}},
+		},
+	}, map[string]any{
+		"execution_owner":        owner,
+		"execution_version":      run.ExecutionVersion + 1,
+		"execution_heartbeat_at": now,
+		"execution_expires_at":   leaseUntil,
+	})
+	return run, updated == 1
+}
+
+func (Repo) RenewRunExecution(ctx context.Context, id uint64, owner string, now time.Time, leaseUntil time.Time) bool {
+	owner = strings.TrimSpace(owner)
+	if id == 0 || owner == "" {
+		return false
+	}
+	return teammodel.NewRunModel().Update(ctx, map[string]any{
+		"id":                   id,
+		"status":               map[string]any{"neq": teammodel.RunStatusCanceled},
+		"execution_owner":      owner,
+		"execution_expires_at": map[string]any{"gt": now},
+	}, map[string]any{
+		"execution_heartbeat_at": now,
+		"execution_expires_at":   leaseUntil,
+	}) == 1
+}
+
+func (Repo) ReleaseRunExecution(ctx context.Context, id uint64, owner string) {
+	owner = strings.TrimSpace(owner)
+	if id == 0 || owner == "" {
+		return
+	}
+	teammodel.NewRunModel().Update(ctx, map[string]any{
+		"id":              id,
+		"execution_owner": owner,
+	}, map[string]any{
+		"execution_owner":      "",
+		"execution_expires_at": nil,
+	})
 }
 
 func (Repo) FindOrCreateFlowRun(ctx context.Context, run teammodel.Run, flow teammodel.Flow, input map[string]any) uint64 {
@@ -955,6 +1044,32 @@ func (Repo) UpdateNodeRun(ctx context.Context, id uint64, record map[string]any)
 	teammodel.NewNodeRunModel().Update(ctx, map[string]any{"id": id}, record)
 }
 
+func (Repo) UpdateNodeRunUnlessCanceled(ctx context.Context, id uint64, record map[string]any) bool {
+	if id == 0 || len(record) == 0 {
+		return false
+	}
+	record["updated_at"] = time.Now()
+	return teammodel.NewNodeRunModel().Update(ctx, map[string]any{
+		"id":     id,
+		"status": map[string]any{"neq": teammodel.RunStatusCanceled},
+	}, record) == 1
+}
+
+func (Repo) ClaimNodeInteraction(ctx context.Context, id uint64, response map[string]any) bool {
+	if id == 0 {
+		return false
+	}
+	return teammodel.NewNodeRunModel().Update(ctx, map[string]any{
+		"id":     id,
+		"status": teammodel.RunStatusWaiting,
+	}, map[string]any{
+		"status":               teammodel.RunStatusPending,
+		"interaction_response": jsonText(response),
+		"error":                "",
+		"updated_at":           time.Now(),
+	}) == 1
+}
+
 func (Repo) UpsertBlackboard(ctx context.Context, record map[string]any) {
 	flowRunID := uint64Value(record["flow_run_id"])
 	key := strings.TrimSpace(textValue(record["key"]))
@@ -1045,12 +1160,15 @@ func (Repo) ListApprovals(ctx context.Context, runID uint64) []teammodel.Approva
 	return result
 }
 
-func (Repo) UpdateApproval(ctx context.Context, id uint64, record map[string]any) {
+func (Repo) ClaimApproval(ctx context.Context, id uint64, record map[string]any) bool {
 	if id == 0 || len(record) == 0 {
-		return
+		return false
 	}
 	record["updated_at"] = time.Now()
-	teammodel.NewApprovalModel().Update(ctx, map[string]any{"id": id}, record)
+	return teammodel.NewApprovalModel().Update(ctx, map[string]any{
+		"id":     id,
+		"status": teammodel.RunStatusPending,
+	}, record) == 1
 }
 
 func uint64FilterValues(ids []uint64) []any {

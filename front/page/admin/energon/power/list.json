@@ -64,6 +64,24 @@
     "header-actions": [
       {
         "type": "show-button",
+        "name": "成本结算",
+        "className": "shrink-0",
+        "meta": {
+          "icon": "badge-dollar-sign",
+          "variant": "outline",
+          "size": "sm"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.billingPolicy",
+            "value": true
+          }
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "新增能力",
         "meta": {
           "variant": "default",
           "size": "sm"
@@ -198,6 +216,24 @@
     "feedback-shell": [
       {
         "type": "feedback-modal",
+        "name": "成本结算",
+        "info": "配置供应商成本统一折算为人民币时使用的汇率。",
+        "meta": {
+          "stateKey": "dialog.billingPolicy",
+          "pageRoute": "/bot/billing/policy/set",
+          "description": "用户扣费由用户中心的身份计费权益决定；未配置匹配权益时只记录供应商成本。",
+          "size": "lg",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": 1
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
         "meta": {
           "stateKey": "dialog.edit",
           "pageRoute": "/bot/energon/power/update",
@@ -292,6 +328,7 @@
   },
   "state": {
     "dialog": {
+      "billingPolicy": false,
       "edit": false,
       "create": false,
       "run": false

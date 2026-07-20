@@ -42,6 +42,26 @@ export function assetKindLabel(kind: string) {
   return optionLabel(assetKindSpecs, kind, "资产");
 }
 
+export function assetKindsAccept(kinds: readonly AssetKind[]) {
+  if (
+    kinds.length === 0 ||
+    kinds.some((kind) => ["text", "richtext", "file"].includes(kind))
+  ) {
+    return undefined;
+  }
+  const mimeByKind: Partial<Record<AssetKind, string>> = {
+    image: "image/*",
+    audio: "audio/*",
+    video: "video/*",
+  };
+  const accepts = kinds
+    .map((kind) => mimeByKind[kind])
+    .filter((accept): accept is string => Boolean(accept));
+  return accepts.length > 0
+    ? Array.from(new Set(accepts)).join(",")
+    : undefined;
+}
+
 function optionLabel(
   options: ReadonlyArray<{ key: string; label: string }>,
   key: string,

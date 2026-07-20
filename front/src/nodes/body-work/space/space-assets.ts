@@ -14,14 +14,23 @@ export function runResultAsset(input: {
   if (!resultVersion?.id) {
     return null;
   }
-  const previousAsset =
-    input.previousAsset ||
-    input.previousAssets?.find((item) => item.id === Number(asset.id || 0)) ||
-    null;
+  const storedAsset = input.previousAssets?.find(
+    (item) => item.id === Number(asset.id || 0),
+  );
+  const previousAsset = storedAsset
+    ? mergeProjectAssetVersionHistory(storedAsset, input.previousAsset)
+    : input.previousAsset || null;
   const normalizedAsset = mergeProjectAssetVersionHistory(
     asset as ProjectAsset,
     previousAsset,
   );
+  if (
+    previousAsset?.version?.content != null &&
+    Number(previousAsset.version.id || 0) ===
+      Number(normalizedAsset.version?.id || 0)
+  ) {
+    return mergeProjectAssetVersionHistory(previousAsset, normalizedAsset);
+  }
   return normalizedAsset.version?.id ? normalizedAsset : null;
 }
 

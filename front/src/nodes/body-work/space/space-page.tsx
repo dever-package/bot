@@ -5,10 +5,8 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type ChangeEvent,
   type Dispatch,
   type DragEvent,
-  type FormEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type SetStateAction,
@@ -75,6 +73,10 @@ import {
 import { toast } from "sonner";
 import { getCompatModule, useNavigate, useTheme } from "@dever/front-plugin";
 import {
+  AgentInteractionPanel,
+  type AgentInteraction,
+} from "@/components/agent/interaction-panel";
+import {
   fetchSpaceAssetDetail,
   fetchSpaceBootstrap,
   fetchSpaceCanvasExecutions,
@@ -83,6 +85,7 @@ import {
   fetchSpaceRunStatus,
   generateSpaceCanvasNodeTitle,
   submitSpaceCanvasFeedback,
+  submitSpaceInteraction,
   runSpaceCanvas,
   saveSpaceCanvasContent,
   sendSpaceMessage,
@@ -126,6 +129,9 @@ import {
 } from "./space-agent-runtime";
 import type { ReferenceInput } from "../../show/agent-chat/reference";
 import { AssetBrowser } from "../asset/asset-browser";
+import { normalizeAssetRecord } from "../asset/asset-api";
+import { AssetPickerDialog } from "../asset/asset-picker-dialog";
+import type { AssetRecord } from "../asset/asset-types";
 import {
   mergeProjectAssetVersionHistory,
   resultAssetKind,
@@ -135,7 +141,6 @@ import {
 import { buildNodeResultRef, canvasResultSourceFromNode } from "./space-result";
 import {
   WorkspaceSurface,
-  assetRoleForView,
 } from "./space-asset-viewer";
 import {
   buildCanvasAssetIndex,
@@ -157,6 +162,7 @@ import {
   agentFeedbackFromResult,
   createNodeFeedbackRecord,
   currentNodeFeedbackRecords,
+  flowFeedbackFromInteraction,
   flowFeedbackFromSnapshot,
   isFeedbackReplacedError,
   isReadonlyFeedbackRecord,
@@ -230,10 +236,7 @@ import {
   isVideoComposePowerType,
   resolvePowerPresentation,
 } from "./space-power-presentation";
-import {
-  firstAvailablePower,
-  syncCanvasStoryboardDerivedGroups,
-} from "./space-storyboard-derived-groups";
+import { syncCanvasStoryboardDerivedGroups } from "./space-storyboard-derived-groups";
 import { parseStoryboardOutput } from "./space-storyboard";
 import {
   parseMaybeEmbeddedJSON,
@@ -261,6 +264,7 @@ type RunningNodeState = {
   progress: number;
   status: "running" | "waiting" | "success" | "error";
   streamText?: string;
+  streamOutput?: Record<string, unknown>;
   streamStarted?: boolean;
   generatedCount?: number;
   agent?: CanvasAgentRuntimeState;
@@ -500,7 +504,7 @@ export function WorkSpacePage() {
   );
   const [focusNodeRequest, setFocusNodeRequest] =
     useState<NodeFocusRequest | null>(null);
-  const [importPickerSignal, setImportPickerSignal] = useState(0);
+  const [importPickerOpen, setImportPickerOpen] = useState(false);
   const [pendingImportNodeId, setPendingImportNodeId] = useState("");
   const [error, setError] = useState("");
   const [runStatus, setRunStatus] = useState("");
@@ -676,14 +680,6 @@ export function WorkSpacePage() {
     return (space.roles || []).filter(isExecutionRole);
   }, [space]);
   const menuFlows = useMemo(() => activeFlows, [activeFlows]);
-  const imagePower = useMemo(
-    () => firstAvailablePower(powers, "image"),
-    [powers],
-  );
-  const videoPower = useMemo(
-    () => firstAvailablePower(powers, "video"),
-    [powers],
-  );
   const activeCanvas = useMemo(
     () =>
       activeCate
@@ -735,8 +731,7 @@ export function WorkSpacePage() {
         const synced = syncCanvasStoryboardDerivedGroups({
           canvas,
           assetCate: assetCateById(space, assetCateId),
-          imagePower,
-          videoPower,
+          powers,
         });
         const normalized = normalizeCanvasForState(synced, assetCateId);
         if (isSameCanvasState(canvas, normalized)) {
@@ -750,7 +745,7 @@ export function WorkSpacePage() {
       }
       return next;
     });
-  }, [imagePower, space, videoPower]);
+  }, [powers, space]);
 
   const openImportPickerByNodeId = useCallback(
     (nodeId = "") => {
@@ -762,7 +757,7 @@ export function WorkSpacePage() {
           : null);
       setNodeMenu(null);
       setWorkMode("create");
-      setImportPickerSignal((current) => current + 1);
+      setImportPickerOpen(true);
     },
     [activeCanvas.nodes],
   );
@@ -814,8 +809,7 @@ export function WorkSpacePage() {
           ? syncCanvasStoryboardDerivedGroups({
               canvas: patchedCanvas,
               assetCate: assetCateById(space, assetCateId),
-              imagePower,
-              videoPower,
+              powers,
             })
           : patchedCanvas;
         const nextCanvas = normalizeCanvasForState(syncedCanvas, assetCateId);
@@ -829,7 +823,7 @@ export function WorkSpacePage() {
         };
       });
     },
-    [imagePower, space, videoPower],
+    [powers, space],
   );
 
   const updateNodeResult = useCallback<NodeResultSetter>(
@@ -1671,6 +1665,12 @@ export function WorkSpacePage() {
     patchImportNodeResult(importNodeId, asset);
   }
 
+  function closeImportPicker() {
+    setImportPickerOpen(false);
+    setPendingImportNodeId("");
+    pendingImportNodeRef.current = null;
+  }
+
   function addPowerNode(power: PowerOption, position?: CanvasPoint) {
     addConfiguredNode("power", position, { power });
   }
@@ -1679,23 +1679,22 @@ export function WorkSpacePage() {
     openImportPickerByNodeId(nodeId);
   }
 
-  async function uploadLocalFiles(
-    files: File[],
-    param: PowerParam,
-  ): Promise<UploadPreview[]> {
+  async function uploadImportAssets(files: File[]): Promise<AssetRecord[]> {
     const previews = await uploadSpaceFiles({
       projectID: projectId,
       teamID: Number(space?.project.team_id || 0),
       files,
-      ruleID: param.upload_rule_id,
     });
+    const assets: AssetRecord[] = [];
     for (const preview of previews) {
       const asset = normalizeProjectAsset(preview.asset);
       if (asset.id) {
         upsertSpaceAsset(asset);
       }
+      const record = normalizeAssetRecord(preview.asset);
+      if (record.id) assets.push(record);
     }
-    return previews;
+    return assets;
   }
 
   function addAgentNode(role: TeamRole, position?: CanvasPoint) {
@@ -1904,28 +1903,29 @@ export function WorkSpacePage() {
         }}
       />
 
-      <div className="ws-import-composer-host" aria-hidden="true">
-        <PromptComposer
-          value=""
-          placeholder=""
-          openAssetPickerSignal={importPickerSignal}
-          params={agentComposerParams}
-          assetLibrary={buildComposerAssetLibrary(space, null)}
-          onChange={() => undefined}
-          onParamChange={() => undefined}
-          onAssetReference={(asset) => {
-            if (asset.source === "asset" && asset.asset) {
-              useImportedAsset(asset.asset as ProjectAsset);
-            }
-          }}
-          onAssetPickerClose={() => {
-            setPendingImportNodeId("");
-            pendingImportNodeRef.current = null;
-          }}
-          onLocalUpload={uploadLocalFiles}
-          onSubmit={() => undefined}
-        />
-      </div>
+      <AssetPickerDialog
+        open={importPickerOpen}
+        teamID={space.project.team_id}
+        title="导入资产"
+        description="选择已有资产或上传本地文件，确认后加入当前画布。"
+        initialFilters={{
+          sourceType: "project",
+          projectID: space.project.id,
+        }}
+        allowedKinds={["image", "audio", "video", "file"]}
+        confirmSelection
+        validateAsset={(asset) =>
+          asset.versionID > 0
+            ? ""
+            : "该资产没有可用版本，无法导入。"
+        }
+        onUpload={uploadImportAssets}
+        onClose={closeImportPicker}
+        onConfirm={(assets) => {
+          const asset = assets[0];
+          if (asset) useImportedAsset(normalizeProjectAsset(asset));
+        }}
+      />
 
       {workMode === "result" ? (
         <WorkspaceSurface className="ws-asset-workspace">
@@ -3855,6 +3855,10 @@ function nodeFeedbackRecordStableId(
   if (approvalId > 0) {
     return `${node.id}:${approvalId}`;
   }
+  const interactionId = String(prompt.interaction?.interaction?.id || "");
+  if (interactionId) {
+    return `${node.id}:${interactionId}`;
+  }
   const promptKey = safeJSONString({
     title: prompt.title,
     fields: (prompt.fields || []).map((field) => field.key),
@@ -3922,13 +3926,14 @@ type CanvasStartRunInput = {
 };
 
 const canvasRunStreamTimeoutMs = 60 * 60 * 1000;
+const canvasRunStatusPollIntervalMs = 2000;
+const canvasRunStatusPollFailureLimit = 3;
 
 async function runCanvasFromStartNode(input: CanvasStartRunInput) {
   const requestId = createCanvasRunRequestId(input.startNode.id);
   const appliedNodeResults = new Set<string>();
   let hasAppliedNodeResult = false;
   let streamLastId = "0-0";
-  let resumeParentRun: CanvasRunRef | null = null;
   let rawCanvasRun = await runSpaceCanvas({
     projectId: input.projectId,
     assetCateId: Number(input.assetCate.id || 0),
@@ -3968,20 +3973,8 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
     );
     input.canvasRun = canvasRun;
     syncBackendCanvasFeedbackRecord(input, canvasRun);
-    if (resumeParentRun) {
-      rawCanvasRun = await fetchSpaceRunStatus({
-        projectId: input.projectId,
-        runId: Number(resumeParentRun.run_id || 0),
-        requestId: String(resumeParentRun.request_id || ""),
-      });
-      resumeParentRun = null;
-      streamLastId = "0-0";
-      continue;
-    }
     if (
-      input.singleNode &&
-      !isGroupCanvasRunInput(input) &&
-      hasAppliedNodeResult &&
+      canvasRunCanReturnAppliedSingleNodeResult(input, hasAppliedNodeResult) &&
       (canvasRun.status === "running" || canvasRun.status === "pending")
     ) {
       toast.info("节点结果已返回，后台运行仍在收尾");
@@ -4001,9 +3994,12 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
       finishBackendCanvasRunningNodes(input, canvasRun);
       return;
     }
-    resumeParentRun = shouldResumeCanvasParentRun(input) ? canvasRun : null;
-    rawCanvasRun = await resumeBackendCanvasRun(input, canvasRun);
-    streamLastId = "0-0";
+    await resumeBackendCanvasRun(input, canvasRun);
+    rawCanvasRun = {
+      ...canvasRun,
+      status: "running",
+      pending_node: null,
+    };
   }
   throw new Error("画布运行多次等待反馈，请稍后继续");
 }
@@ -4031,7 +4027,9 @@ async function waitForCanvasRun(
   }
   const requestId = String(canvasRun.request_id || "");
   const controller = new AbortController();
+  const waitDeadline = Date.now() + canvasRunStreamTimeoutMs;
   let streamTimedOut = false;
+  let streamError: unknown = null;
   const streamTimer = window.setTimeout(() => {
     streamTimedOut = true;
     controller.abort();
@@ -4067,60 +4065,110 @@ async function waitForCanvasRun(
       syncBackendCanvasFeedbackRecord(input, canvasRun);
     }
     applyNodeResults(canvasRun.node_results || []);
-    canvasRun = normalizeCanvasRunTerminalStatus(input, canvasRun);
-    if (canvasRunNeedsStatusConvergence(input, canvasRun)) {
-      canvasRun = await convergeCanvasRunStatus(
-        input,
-        canvasRun,
-        requestId,
-        applyNodeResults,
-        hasAppliedNodeResult() ? 4 : 2,
-      );
-    }
-    return canvasRun;
   } catch (error) {
-    try {
-      canvasRun = await convergeCanvasRunStatus(
-        input,
-        canvasRun,
-        requestId,
-        applyNodeResults,
-        hasAppliedNodeResult() ? 4 : 2,
-      );
-      if (
-        !canvasRunNeedsStatusConvergence(input, canvasRun) ||
-        (input.singleNode && hasAppliedNodeResult())
-      ) {
-        finishBackendCanvasRunningNodes(input, canvasRun);
-        return canvasRun;
-      }
-    } catch {
-      if (!input.singleNode || !hasAppliedNodeResult()) {
-        throw error instanceof Error && !streamTimedOut
-          ? error
-          : new Error("画布仍在运行，请稍后刷新查看结果");
-      }
-    }
-    if (input.singleNode && hasAppliedNodeResult()) {
-      finishBackendCanvasRunningNodes(input, canvasRun);
-      return canvasRun;
-    }
-    throw error instanceof Error && !streamTimedOut
-      ? error
-      : new Error("画布仍在运行，请稍后刷新查看结果");
+    streamError = error;
   } finally {
     window.clearTimeout(streamTimer);
     controller.abort();
   }
-  throw new Error("画布流异常结束");
+
+  canvasRun = normalizeCanvasRunTerminalStatus(input, canvasRun);
+  if (
+    canvasRunNeedsStatusConvergence(input, canvasRun) &&
+    !canvasRunCanReturnAppliedSingleNodeResult(
+      input,
+      hasAppliedNodeResult(),
+    )
+  ) {
+    try {
+      canvasRun = await waitForCanvasRunTerminalStatus(
+        input,
+        canvasRun,
+        requestId,
+        applyNodeResults,
+        hasAppliedNodeResult,
+        waitDeadline,
+      );
+    } catch (statusError) {
+      if (streamError instanceof Error && !streamTimedOut) {
+        throw streamError;
+      }
+      throw statusError;
+    }
+  }
+  if (
+    !canvasRunNeedsStatusConvergence(input, canvasRun) ||
+    canvasRunCanReturnAppliedSingleNodeResult(
+      input,
+      hasAppliedNodeResult(),
+    )
+  ) {
+    return canvasRun;
+  }
+  throw streamError instanceof Error && !streamTimedOut
+    ? streamError
+    : new Error("画布仍在运行，请稍后刷新查看结果");
 }
 
-async function convergeCanvasRunStatus(
+async function waitForCanvasRunTerminalStatus(
   input: CanvasStartRunInput,
   currentRun: CanvasRunRef,
   fallbackRequestId: string,
   applyNodeResults: (results: CanvasNodeResultRef[]) => void,
-  attempts: number,
+  hasAppliedNodeResult: () => boolean,
+  deadline: number,
+) {
+  let canvasRun = currentRun;
+  let consecutiveFailures = 0;
+  for (;;) {
+    if (Date.now() >= deadline) {
+      throw new Error("画布仍在运行，请稍后刷新查看结果");
+    }
+    try {
+      canvasRun = await fetchCanvasRunStatusSnapshot(
+        input,
+        canvasRun,
+        fallbackRequestId,
+        applyNodeResults,
+      );
+      consecutiveFailures = 0;
+    } catch (error) {
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= canvasRunStatusPollFailureLimit) {
+        throw error;
+      }
+    }
+    if (
+      !canvasRunNeedsStatusConvergence(input, canvasRun) ||
+      canvasRunCanReturnAppliedSingleNodeResult(
+        input,
+        hasAppliedNodeResult(),
+      )
+    ) {
+      return canvasRun;
+    }
+    await waitForCanvasConvergence(
+      Math.min(canvasRunStatusPollIntervalMs, deadline - Date.now()),
+    );
+  }
+}
+
+function canvasRunCanReturnAppliedSingleNodeResult(
+  input: CanvasStartRunInput,
+  hasAppliedNodeResult: boolean,
+) {
+  return Boolean(
+    input.singleNode &&
+      !isGroupCanvasRunInput(input) &&
+      hasAppliedNodeResult,
+  );
+}
+
+async function fetchCanvasRunStatusSnapshot(
+  input: CanvasStartRunInput,
+  currentRun: CanvasRunRef,
+  fallbackRequestId: string,
+  applyNodeResults: (results: CanvasNodeResultRef[]) => void,
 ) {
   let canvasRun = currentRun;
   const runId = Number(canvasRun.run_id || 0);
@@ -4128,27 +4176,18 @@ async function convergeCanvasRunStatus(
   if (!runId && !requestId) {
     return canvasRun;
   }
-  const maxAttempts = Math.max(1, attempts);
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const status = await fetchSpaceRunStatus({
-      projectId: input.projectId,
-      runId,
-      requestId,
-    });
-    canvasRun = normalizeSingleNodeCanvasRun(
-      input,
-      mergeCanvasRunRef(canvasRun, normalizeCanvasRunRef(status)),
-    );
-    canvasRun = normalizeCanvasRunTerminalStatus(input, canvasRun);
-    applyNodeResults(canvasRun.node_results || []);
-    syncBackendCanvasFeedbackRecord(input, canvasRun);
-    if (!canvasRunNeedsStatusConvergence(input, canvasRun)) {
-      return canvasRun;
-    }
-    if (attempt < maxAttempts - 1) {
-      await waitForCanvasConvergence(650);
-    }
-  }
+  const status = await fetchSpaceRunStatus({
+    projectId: input.projectId,
+    runId,
+    requestId,
+  });
+  canvasRun = normalizeSingleNodeCanvasRun(
+    input,
+    mergeCanvasRunRef(canvasRun, normalizeCanvasRunRef(status)),
+  );
+  canvasRun = normalizeCanvasRunTerminalStatus(input, canvasRun);
+  applyNodeResults(canvasRun.node_results || []);
+  syncBackendCanvasFeedbackRecord(input, canvasRun);
   return canvasRun;
 }
 
@@ -4331,10 +4370,6 @@ function normalizeSingleNodeCanvasRun(
 
 function isGroupCanvasRunInput(input: CanvasStartRunInput) {
   return input.singleNode && input.startNode.type === "group";
-}
-
-function shouldResumeCanvasParentRun(input: CanvasStartRunInput) {
-  return !input.singleNode || isGroupCanvasRunInput(input);
 }
 
 function firstPendingApprovalFromCanvasRun(canvasRun: CanvasRunRef) {
@@ -4551,6 +4586,10 @@ function applyCanvasStreamNodeFrame(
         (streamEvent === "delta" || !streamEvent)
           ? nodeOutput.text
           : "";
+      const streamOutput =
+        isPowerStream && streamEvent === "audio_ready"
+          ? nodeOutput
+          : running.streamOutput;
       return {
         ...current,
         [nodeId]: {
@@ -4559,7 +4598,9 @@ function applyCanvasStreamNodeFrame(
           streamText: deltaText
             ? `${running.streamText || ""}${deltaText}`
             : running.streamText,
-          streamStarted: running.streamStarted || Boolean(deltaText),
+          streamOutput,
+          streamStarted:
+            running.streamStarted || Boolean(deltaText) || Boolean(streamOutput),
           ...(isStructuredStatus
             ? { streamStarted: true, generatedCount }
             : {}),
@@ -5026,6 +5067,15 @@ async function resumeBackendCanvasRun(
     throw new Error(`${node.title} 需要补充信息，请单独处理后继续`);
   }
   const values = await input.requestFlowFeedback({ node, prompt });
+  if (prompt.interaction) {
+    return submitSpaceInteraction({
+      projectId: input.projectId,
+      runId: Number(prompt.interaction.runId || pending.child_run_id || 0),
+      nodeRunId: Number(prompt.interaction.nodeRunId || 0),
+      interactionId: String(prompt.interaction.interaction.id || ""),
+      data: values,
+    });
+  }
   return submitSpaceCanvasFeedback({
     projectId: input.projectId,
     runId: Number(canvasRun.run_id || 0),
@@ -5040,6 +5090,17 @@ function backendCanvasFeedbackPrompt(
   pending: CanvasNodeResultRef,
   node: SpaceCanvasNode,
 ): FlowFeedbackPrompt | null {
+  const interactionValue =
+    pending.interaction && typeof pending.interaction === "object"
+      ? pending.interaction
+      : null;
+  if (interactionValue?.interaction?.id) {
+    return flowFeedbackFromInteraction({
+      runId: Number(interactionValue.run_id || pending.child_run_id || 0),
+      nodeRunId: Number(interactionValue.node_run_id || 0),
+      interaction: interactionValue.interaction,
+    });
+  }
   const nodeType = pending.node_type || node.type;
   if (nodeType === "flow") {
     const source =
@@ -5359,8 +5420,8 @@ function nodeEnergonOutput(node: SpaceCanvasNode) {
 
 function storyboardNodeOutput(node: SpaceCanvasNode) {
   return [
-    node.resultOutput,
     node.asset?.version?.content,
+    node.resultOutput,
     nodeEnergonOutput(node),
   ];
 }
@@ -7196,11 +7257,10 @@ function looksLikeStructuredJSONSnippet(value: string) {
   );
 }
 
-function buildComposerAssetLibrary(
-  space: SpaceBootstrap | null,
+function buildComposerReferenceLibrary(
   inputContext: NodeInputContext | null,
   canvasItems: ComposerAssetItem[] = [],
-): { current: ComposerAssetItem[]; assets: ComposerAssetItem[] } {
+): { current: ComposerAssetItem[] } {
   const current = mergeComposerAssetItems([
     ...canvasItems,
     ...(inputContext?.sources || []).map((source) => ({
@@ -7212,32 +7272,7 @@ function buildComposerAssetLibrary(
       preview: source.preview,
     })),
   ]);
-  const assets = (space?.assets || [])
-    .filter((asset) => String(asset.status || "") !== "archived")
-    .map((asset) => {
-      const output = asset.version?.content ?? asset.name;
-      const preview = generatedPreviewFromValue(
-        output,
-        String(asset.kind || ""),
-      );
-      if (!hasGeneratedPreview(preview)) {
-        preview.text = asset.name;
-      }
-      return {
-        id: String(asset.id),
-        title: asset.name || `资产 ${asset.id}`,
-        kind: composerKindFromPreview(preview, String(asset.kind || "")),
-        role: assetRoleForView(asset),
-        source: "asset" as const,
-        refType: "asset" as const,
-        refId: asset.id,
-        versionID: asset.version?.id || asset.version_id,
-        output,
-        preview,
-        asset,
-      };
-    });
-  return { current, assets };
+  return { current };
 }
 
 function buildCanvasReferenceItems(entries: CanvasAssetEntry[]) {
@@ -8660,12 +8695,11 @@ function NodeBottomSettings({
   const nodeAssetCate = space ? assetCateById(space, nodeAssetCateId) : null;
   const assetLibrary = useMemo(
     () =>
-      buildComposerAssetLibrary(
-        space,
+      buildComposerReferenceLibrary(
         inputContext,
         canvasReferenceItems.filter((item) => item.id !== node.id),
       ),
-    [canvasReferenceItems, inputContext, node.id, nodeAssetCateId, space],
+    [canvasReferenceItems, inputContext, node.id],
   );
 
   useEffect(() => {
@@ -8854,11 +8888,13 @@ function NodeBottomSettings({
     if (asset.source !== "asset" || !asset.asset || !onAddConfiguredNode) {
       return;
     }
+    const selectedAsset = normalizeProjectAsset(asset.asset);
+    if (!selectedAsset.id) return;
     onAddConfiguredNode(
       "asset",
       { x: Number(node.x || 0) - 320, y: Number(node.y || 0) },
       {
-        asset: asset.asset as ProjectAsset,
+        asset: selectedAsset,
         connectToNodeId: node.id,
         selectCreated: false,
       },
@@ -9338,28 +9374,10 @@ function FlowFeedbackDialog({
   onClose: () => void;
   onSubmit: (values: Record<string, unknown>) => void;
 }) {
-  const [values, setValues] = useState<Record<string, unknown>>(
-    () => prompt.values || defaultPowerParamValues(prompt.fields),
+  const interaction = useMemo(
+    () => flowFeedbackPanelInteraction(prompt),
+    [prompt],
   );
-
-  useEffect(() => {
-    setValues(prompt.values || defaultPowerParamValues(prompt.fields));
-  }, [prompt]);
-
-  function setValue(key: string, value: unknown) {
-    setValues((current) => ({
-      ...current,
-      [key]: value,
-    }));
-  }
-
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    if (running || readonly) {
-      return;
-    }
-    onSubmit(values);
-  }
 
   if (typeof document === "undefined") {
     return null;
@@ -9367,9 +9385,8 @@ function FlowFeedbackDialog({
 
   return createPortal(
     <div className="ws-flow-feedback-backdrop" onMouseDown={onClose}>
-      <form
+      <div
         className="ws-flow-feedback-modal"
-        onSubmit={submit}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="ws-flow-feedback-head">
@@ -9407,33 +9424,23 @@ function FlowFeedbackDialog({
           </div>
         ) : null}
         <div className="ws-flow-feedback-body custom-scrollbar">
-          {prompt.fields.length > 0 ? (
-            prompt.fields.map((field) => (
-              <FlowFeedbackField
-                key={field.key || field.id}
-                field={field}
-                value={values[field.key]}
-                disabled={running || Boolean(readonly)}
-                onChange={(value) => setValue(field.key, value)}
-              />
-            ))
-          ) : (
-            <FlowFeedbackField
-              field={{
-                id: 0,
-                key: "text",
-                name: "补充信息",
-                type: "textarea",
-                required: true,
-              }}
-              value={values.text}
-              disabled={running || Boolean(readonly)}
-              onChange={(value) => setValue("text", value)}
-            />
-          )}
+          <AgentInteractionPanel
+            interaction={interaction}
+            disabled={running}
+            readonly={readonly}
+            hideHeader
+            layout="dialog"
+            initialData={readonly ? prompt.values : undefined}
+            onSubmit={(result) =>
+              onSubmit({
+                ...(prompt.values || {}),
+                ...result.data,
+              })
+            }
+          />
         </div>
-        <footer className="ws-flow-feedback-foot">
-          {readonly ? (
+        {readonly ? (
+          <footer className="ws-flow-feedback-foot">
             <button
               type="button"
               className="ws-flow-feedback-submit"
@@ -9442,181 +9449,44 @@ function FlowFeedbackDialog({
               <CheckCircle2 size={16} />
               <span>知道了</span>
             </button>
-          ) : (
-            <button
-              type="submit"
-              className="ws-flow-feedback-submit"
-              disabled={running}
-            >
-              {running ? (
-                <Loader2 size={16} className="ws-spin" />
-              ) : (
-                <Send size={16} />
-              )}
-              <span>{running ? "提交中" : "提交并继续"}</span>
-            </button>
-          )}
-        </footer>
-      </form>
+          </footer>
+        ) : null}
+      </div>
     </div>,
     document.body,
   );
 }
 
-function FlowFeedbackField({
-  field,
-  value,
-  disabled,
-  onChange,
-}: {
-  field: PowerParam;
-  value: unknown;
-  disabled: boolean;
-  onChange: (value: unknown) => void;
-}) {
-  const required = field.required ? <i>*</i> : null;
-  const optionItems = field.options || [];
-  if (field.type === "option" || field.type === "select") {
-    if (optionItems.length > 0 && optionItems.length <= 6) {
-      return (
-        <fieldset className="ws-flow-feedback-field is-radio">
-          <legend>
-            {field.name}
-            {required}
-          </legend>
-          <div className="ws-flow-feedback-radios">
-            {optionItems.map((option) => {
-              const optionValue = String(option.value);
-              const active = String(value ?? "") === optionValue;
-              return (
-                <label
-                  key={option.id || option.value}
-                  className={active ? "is-active" : ""}
-                >
-                  <input
-                    type="radio"
-                    name={`flow-feedback-${field.key}`}
-                    value={optionValue}
-                    checked={active}
-                    disabled={disabled}
-                    onChange={() => onChange(optionValue)}
-                  />
-                  <span>{option.name || option.value}</span>
-                </label>
-              );
-            })}
-          </div>
-        </fieldset>
-      );
-    }
-    return (
-      <label className="ws-flow-feedback-field">
-        <span>
-          {field.name}
-          {required}
-        </span>
-        <select
-          value={String(value ?? "")}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.value)}
-        >
-          {optionItems.map((option) => (
-            <option key={option.id || option.value} value={option.value}>
-              {option.name || option.value}
-            </option>
-          ))}
-        </select>
-      </label>
-    );
-  }
-  if (field.type === "multi_option") {
-    const selected = new Set(valueAsParamList(value));
-    return (
-      <fieldset className="ws-flow-feedback-field is-choice">
-        <legend>
-          {field.name}
-          {required}
-        </legend>
-        <div className="ws-flow-feedback-options">
-          {(field.options || []).map((option) => {
-            const active = selected.has(option.value);
-            return (
-              <button
-                key={option.id || option.value}
-                type="button"
-                className={active ? "is-active" : ""}
-                disabled={disabled}
-                onClick={() => {
-                  const next = new Set(selected);
-                  if (active) {
-                    next.delete(option.value);
-                  } else {
-                    next.add(option.value);
-                  }
-                  onChange(Array.from(next));
-                }}
-              >
-                {option.name || option.value}
-              </button>
-            );
-          })}
-        </div>
-      </fieldset>
-    );
-  }
-  if (field.type === "prompt" || field.type === "textarea") {
-    return (
-      <label className="ws-flow-feedback-field">
-        <span>
-          {field.name}
-          {required}
-        </span>
-        <textarea
-          value={String(value ?? "")}
-          disabled={disabled}
-          placeholder={field.name}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      </label>
-    );
-  }
-  if (field.type === "switch") {
-    return (
-      <label className="ws-flow-feedback-switch">
-        <span>
-          {field.name}
-          {required}
-        </span>
-        <input
-          type="checkbox"
-          checked={Boolean(value)}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.checked)}
-        />
-      </label>
-    );
-  }
-  return (
-    <label className="ws-flow-feedback-field">
-      <span>
-        {field.name}
-        {required}
-      </span>
-      <input
-        type={field.value_type === "number" ? "number" : "text"}
-        value={String(value ?? "")}
-        disabled={disabled}
-        placeholder={field.name}
-        onChange={(event: ChangeEvent<HTMLInputElement>) =>
-          onChange(
-            field.value_type === "number"
-              ? Number(event.target.value)
-              : event.target.value,
-          )
-        }
-      />
-    </label>
-  );
+function flowFeedbackPanelInteraction(
+  prompt: FlowFeedbackPrompt,
+): AgentInteraction {
+  const current = prompt.interaction?.interaction || {};
+  const fields = Array.isArray(current.fields)
+    ? current.fields
+    : prompt.fields.length > 0
+      ? prompt.fields
+      : [
+          {
+            id: 0,
+            key: "text",
+            name: "补充信息",
+            type: "textarea",
+            required: true,
+          },
+        ];
+  return {
+    ...current,
+    id: String(current.id || `flow-feedback-${prompt.approval?.id || 0}`),
+    type:
+      String(current.type || "").toLowerCase() === "power_params" &&
+      fields.length > 0
+        ? "form"
+        : String(current.type || "form"),
+    title: String(current.title || prompt.title || "补充信息"),
+    description: String(current.description || prompt.description || ""),
+    fields,
+    values: prompt.values,
+  };
 }
 
 function stableNodeOverlayStyle(zoom: number): CSSProperties {
@@ -10422,29 +10292,31 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
           : storyboardHasResult
             ? "complete"
             : "empty";
-    const showStreamText = Boolean(
+    const showStreamOutput = Boolean(
       !isStoryboardPower &&
       !isVideoComposePower &&
       runningNode?.streamStarted &&
-      runningNode.streamText &&
+      (runningNode.streamText || runningNode.streamOutput) &&
       runningNode.status !== "success",
     );
-    const preview = showStreamText
-      ? {
-          text: runningNode?.streamText || "",
-          imageUrl: "",
-          videoUrl: "",
-          audioUrl: "",
-          fileUrl: "",
-        }
+    const preview = showStreamOutput
+      ? runningNode?.streamOutput
+        ? generatedPreviewFromValue(runningNode.streamOutput, "audio")
+        : {
+            text: runningNode?.streamText || "",
+            imageUrl: "",
+            videoUrl: "",
+            audioUrl: "",
+            fileUrl: "",
+          }
       : generatedNodePreview(node);
-    const contentOutput = showStreamText
-      ? { text: runningNode?.streamText || "" }
+    const contentOutput = showStreamOutput
+      ? runningNode?.streamOutput || { text: runningNode?.streamText || "" }
       : nodeEnergonOutput(node);
     const hasPowerContent =
       isStoryboardPower ||
       isVideoComposePower ||
-      showStreamText ||
+      showStreamOutput ||
       storyboardHasResult;
     const hasPowerMedia =
       !isStoryboardPower &&
@@ -10579,7 +10451,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
               preview={preview}
               output={contentOutput}
               fallback={node.description}
-              streaming={isPowerRunning && showStreamText}
+              streaming={isPowerRunning && showStreamOutput}
               onMediaSize={
                 canAdoptGeneratedMediaSize
                   ? (width, height) => {
@@ -10716,7 +10588,12 @@ function PowerNodeGeneratedContent({
   if (!useContentView && preview.audioUrl) {
     return (
       <div className="ws-node-power-media is-audio">
-        <audio src={preview.audioUrl} controls preload="metadata" />
+        <audio
+          src={preview.audioUrl}
+          controls
+          autoPlay={streaming}
+          preload={streaming ? "auto" : "metadata"}
+        />
         {caption ? <p>{caption}</p> : null}
       </div>
     );

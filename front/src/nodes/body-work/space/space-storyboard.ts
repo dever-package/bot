@@ -24,16 +24,35 @@ export type StoryboardMaterialReference = Pick<
   type: StoryboardMaterialType;
 };
 
+export type StoryboardWorkflowStatus = "draft" | "confirmed";
+
+export type StoryboardWorkflow = {
+  status: StoryboardWorkflowStatus;
+  confirmed_at: string;
+};
+
+export type StoryboardSpeechKind = "dialogue" | "narration";
+
+export type StoryboardSpeakerMode = "visible" | "offscreen";
+
+export type StoryboardSpeech = Record<string, unknown> & {
+  id: string;
+  kind: StoryboardSpeechKind;
+  text: string;
+  start_time: number;
+  character_id?: string;
+  speaker_mode?: StoryboardSpeakerMode;
+};
+
 export type StoryboardShot = Record<string, unknown> & {
   id: string;
   order: number;
   duration: number;
   visual: string;
+  end_visual: string;
   camera_movement: string;
-  dialogue: string;
-  narration: string;
-  sound_music: string;
   prompt: string;
+  speech: StoryboardSpeech[];
   reference_contents?: Partial<
     Record<StoryboardReferenceField, CanvasReferenceContent>
   >;
@@ -41,15 +60,14 @@ export type StoryboardShot = Record<string, unknown> & {
 
 export type StoryboardReferenceField =
   | "visual"
+  | "end_visual"
   | "camera_movement"
-  | "dialogue"
-  | "narration"
-  | "sound_music"
   | "prompt";
 
 export type StoryboardDocument = Record<string, unknown> & {
   type: "storyboard";
   version: number;
+  workflow: StoryboardWorkflow;
   title: string;
   style_prompt: string;
   shots: StoryboardShot[];
@@ -78,17 +96,6 @@ const CAMERA_MOVEMENT_ALIASES = [
   "camera",
   "movement",
   "运镜",
-] as const;
-
-const SOUND_MUSIC_ALIASES = [
-  "soundMusic",
-  "sound",
-  "music",
-  "audio",
-  "bgm",
-  "音效/配乐",
-  "音效",
-  "配乐",
 ] as const;
 
 const SHOT_PROMPT_ALIASES = [
@@ -144,11 +151,32 @@ export function createStoryboardShot(index: number): StoryboardShot {
     order: index + 1,
     duration: 4,
     visual: "",
+    end_visual: "",
     camera_movement: "",
-    dialogue: "",
-    narration: "",
-    sound_music: "",
     prompt: "",
+    speech: [],
+  };
+}
+
+export function createStoryboardSpeech(
+  shot: StoryboardShot,
+  kind: StoryboardSpeechKind = "dialogue",
+): StoryboardSpeech {
+  const usedIds = new Set(shot.speech.map((speech) => speech.id));
+  let sequence = shot.speech.length + 1;
+  let id = `${shot.id}-speech-${sequence}`;
+  while (usedIds.has(id)) {
+    sequence += 1;
+    id = `${shot.id}-speech-${sequence}`;
+  }
+  return {
+    id,
+    kind,
+    text: "",
+    start_time: 0,
+    ...(kind === "dialogue"
+      ? { character_id: "", speaker_mode: "offscreen" as const }
+      : {}),
   };
 }
 
@@ -157,12 +185,53 @@ export function normalizeStoryboardOrder(
 ): StoryboardDocument {
   return {
     ...storyboard,
+    version: 2,
+    workflow: normalizeStoryboardWorkflow(storyboard.workflow),
     shots: storyboard.shots.map((shot, index) => ({
       ...shot,
       id: shot.id || `shot-${index + 1}`,
       order: index + 1,
     })),
   };
+}
+
+export function isStoryboardConfirmed(storyboard: StoryboardDocument) {
+  return storyboard.workflow.status === "confirmed";
+}
+
+export function storyboardSpeechCount(storyboard: StoryboardDocument) {
+  return storyboard.shots.reduce(
+    (total, shot) => total + shot.speech.filter(hasSpeechText).length,
+    0,
+  );
+}
+
+export function storyboardSpeechLabel(speech: StoryboardSpeech) {
+  if (speech.kind === "narration") {
+    return "旁白";
+  }
+  return speech.speaker_mode === "visible" ? "出镜对白" : "画外音";
+}
+
+export function isStoryboardVisibleDialogue(speech: StoryboardSpeech) {
+  return (
+    speech.kind === "dialogue" &&
+    speech.speaker_mode === "visible" &&
+    Boolean(speech.text.trim())
+  );
+}
+
+export function storyboardHasVisibleDialogue(shot: StoryboardShot) {
+  return shot.speech.some(isStoryboardVisibleDialogue);
+}
+
+export function storyboardVisibleSpeakerIds(shot: StoryboardShot) {
+  return new Set(
+    shot.speech
+      .filter(isStoryboardVisibleDialogue)
+      .map((speech) => speech.character_id?.trim())
+      .filter((characterId): characterId is string => Boolean(characterId)),
+  );
 }
 
 export function storyboardSummary(storyboard: StoryboardDocument) {
@@ -268,9 +337,7 @@ function isStoryboardShotRecord(value: unknown) {
   return [
     "visual",
     "camera_movement",
-    "dialogue",
-    "narration",
-    "sound_music",
+    "speech",
     "prompt",
     "duration",
     "order",
@@ -290,7 +357,8 @@ function normalizeStoryboard(row: Record<string, unknown>): StoryboardDocument {
   return {
     ...row,
     type: "storyboard",
-    version: positiveInteger(row.version, 1),
+    version: 2,
+    workflow: normalizeStoryboardWorkflow(row.workflow),
     title: stringValue(row.title),
     style_prompt: stringValue(
       firstDefined(
@@ -337,14 +405,12 @@ function normalizeStoryboardMaterialMentions(
     return {
       ...shot,
       visual: normalizeMaterialMentions(shot.visual, names, true),
+      end_visual: normalizeMaterialMentions(shot.end_visual, names, true),
       camera_movement: normalizeMaterialMentions(
         shot.camera_movement,
         names,
         false,
       ),
-      dialogue: normalizeMaterialMentions(shot.dialogue, names, false),
-      narration: normalizeMaterialMentions(shot.narration, names, false),
-      sound_music: normalizeMaterialMentions(shot.sound_music, names, false),
       prompt: normalizeMaterialMentions(shot.prompt, names, true),
     };
   });
@@ -543,27 +609,20 @@ function normalizeStoryboardShot(
     order: index + 1,
     duration: positiveInteger(row.duration, 4),
     visual: stringValue(row.visual),
+    end_visual: stringValue(row.end_visual),
     camera_movement: stringValue(
       firstDefined(
         row.camera_movement,
         ...CAMERA_MOVEMENT_ALIASES.map((key) => row[key]),
       ),
     ),
-    dialogue: stringValue(row.dialogue),
-    narration: stringValue(row.narration),
-    sound_music: stringValue(
-      firstDefined(
-        row.sound_music,
-        ...SOUND_MUSIC_ALIASES.map((key) => row[key]),
-      ),
-    ),
     prompt: stringValue(
       firstDefined(row.prompt, ...SHOT_PROMPT_ALIASES.map((key) => row[key])),
     ),
+    speech: normalizeStoryboardSpeech(row.speech, stringValue(row.id) || `shot-${index + 1}`),
   };
   for (const key of [
     ...CAMERA_MOVEMENT_ALIASES,
-    ...SOUND_MUSIC_ALIASES,
     ...SHOT_PROMPT_ALIASES,
   ]) {
     delete normalized[key];
@@ -574,15 +633,69 @@ function normalizeStoryboardShot(
 }
 
 export function storyboardShotFallbackPrompt(shot: StoryboardShot) {
+  const speech = shot.speech
+    .filter(hasSpeechText)
+    .map((item) => `${storyboardSpeechLabel(item)}：${item.text.trim()}`)
+    .join("；");
   const parts = [
-    shot.visual,
+    shot.visual ? `首帧：${shot.visual}` : "",
+    shot.end_visual ? `尾帧：${shot.end_visual}` : "",
     shot.camera_movement ? `运镜：${shot.camera_movement}` : "",
-    shot.dialogue ? `对白：${shot.dialogue}` : "",
-    shot.narration ? `旁白：${shot.narration}` : "",
-    shot.sound_music ? `声音：${shot.sound_music}` : "",
+    speech,
     shot.duration > 0 ? `时长：${shot.duration} 秒` : "",
   ].filter(Boolean);
   return parts.join("。") || `镜头 ${shot.order} 视频生成提示词`;
+}
+
+function normalizeStoryboardWorkflow(value: unknown): StoryboardWorkflow {
+  const row = isRecord(value) ? value : {};
+  const status =
+    String(row.status || "").trim().toLowerCase() === "confirmed"
+      ? "confirmed"
+      : "draft";
+  return {
+    status,
+    confirmed_at: status === "confirmed" ? stringValue(row.confirmed_at) : "",
+  };
+}
+
+function normalizeStoryboardSpeech(value: unknown, shotID: string) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const usedIDs = new Set<string>();
+  return value.map((item, index) => {
+    const row = isRecord(item) ? item : {};
+    const kind: StoryboardSpeechKind =
+      String(row.kind || "").trim().toLowerCase() === "narration"
+        ? "narration"
+        : "dialogue";
+    const requestedID = stringValue(row.id) || `${shotID}-speech-${index + 1}`;
+    const id = uniqueValueID(requestedID, usedIDs);
+    usedIDs.add(id);
+    const speech: StoryboardSpeech = {
+      ...row,
+      id,
+      kind,
+      text: stringValue(row.text),
+      start_time: nonNegativeNumber(row.start_time, 0),
+    };
+    if (kind === "dialogue") {
+      speech.character_id = stringValue(row.character_id);
+      speech.speaker_mode =
+        String(row.speaker_mode || "").trim().toLowerCase() === "visible"
+          ? "visible"
+          : "offscreen";
+    } else {
+      delete speech.character_id;
+      delete speech.speaker_mode;
+    }
+    return speech;
+  });
+}
+
+function hasSpeechText(speech: StoryboardSpeech) {
+  return speech.text.trim().length > 0;
 }
 
 function richDocumentText(value: unknown) {
@@ -631,6 +744,11 @@ function positiveInteger(value: unknown, fallback: number) {
     : fallback;
 }
 
+function nonNegativeNumber(value: unknown, fallback: number) {
+  const number = Number.parseFloat(String(value ?? ""));
+  return Number.isFinite(number) && number >= 0 ? number : fallback;
+}
+
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : value == null ? "" : String(value);
 }
@@ -653,6 +771,17 @@ function uniqueShotId(
     suffix += 1;
   }
   return `${baseId}-${suffix}`;
+}
+
+function uniqueValueID(requestedID: string, usedIDs: Set<string>) {
+  if (!usedIDs.has(requestedID)) {
+    return requestedID;
+  }
+  let suffix = 2;
+  while (usedIDs.has(`${requestedID}-${suffix}`)) {
+    suffix += 1;
+  }
+  return `${requestedID}-${suffix}`;
 }
 
 function isRecord(value: unknown): value is Record<string, any> {

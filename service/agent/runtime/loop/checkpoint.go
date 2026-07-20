@@ -36,6 +36,7 @@ type executionSnapshot struct {
 	PersistChat        bool                             `json:"persist_chat"`
 	MediaReferences    []runtimeprovider.MediaReference `json:"media_references,omitempty"`
 	Scope              runtimescope.Scope               `json:"scope,omitempty"`
+	Billing            botprotocol.BillingContext       `json:"billing,omitempty"`
 }
 
 type persistedTransport struct {
@@ -94,6 +95,7 @@ func snapshotFromExecution(execution execution) executionSnapshot {
 		PersistChat:     execution.persistChat,
 		MediaReferences: append([]runtimeprovider.MediaReference(nil), execution.mediaReferences...),
 		Scope:           execution.scope,
+		Billing:         execution.billing,
 	}
 }
 

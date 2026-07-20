@@ -62,12 +62,12 @@ func (s GatewayService) callNormalizeTarget(
 
 	resp, err := s.client.Do(ctx, nativeReq)
 	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_error", err.Error()), nativeReq)
+		logItem := s.recordProviderCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_error", err.Error()), nativeReq)
 		return callResult{NativeRequest: nativeReq, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 	if resp.StatusCode >= 400 {
 		errorMessage := formatProviderStatusError(nativeReq.Method, nativeReq.URL, resp)
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_status", errorMessage), nativeReq)
+		logItem := s.recordProviderCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_status", errorMessage), nativeReq)
 		err := newProviderStatusError(nativeReq.Method, nativeReq.URL, resp)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
@@ -84,17 +84,20 @@ func (s GatewayService) callNormalizeTarget(
 		data, err = adapter.BuildClientResponse(req, resp)
 	}
 	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("parse_response", err.Error()), nativeReq)
+		usage := extractResponseTokenUsage(resp, data)
+		logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("parse_response", err.Error()), usage, nativeReq)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 	data, err = normalizePowerOutput(selected.Power, data)
 	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("normalize_output", err.Error()), nativeReq)
+		usage := extractResponseTokenUsage(resp, data)
+		logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("normalize_output", err.Error()), usage, nativeReq)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 	data, err = s.storeGeneratedMediaOutput(ctx, req.RequestID, selected.Power.Kind, data, nil)
 	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("store_media", err.Error()), nativeReq)
+		usage := extractResponseTokenUsage(resp, data)
+		logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("store_media", err.Error()), usage, nativeReq)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 
@@ -121,6 +124,7 @@ func (s GatewayService) handleStream(ctx context.Context, raw GatewayRequest) er
 	}
 	req.RequestID = raw.RequestID
 	req.Mode = ModeNormalize
+	req.Billing = raw.Billing
 
 	plan, err := s.resolveNormalizePlan(ctx, req)
 	if err != nil {
@@ -136,11 +140,14 @@ func (s GatewayService) handleStream(ctx context.Context, raw GatewayRequest) er
 			continue
 		}
 
-		_, err = s.callStreamTarget(ctx, req, selected)
+		_, err = s.callStreamPowerTarget(ctx, req, selected)
 		if err == nil {
 			return nil
 		}
 		if s.streamCancels.IsCancelled(req.RequestID) {
+			return err
+		}
+		if s.audioRelay().Committed(req.RequestID) {
 			return err
 		}
 		lastErr = err
@@ -216,22 +223,30 @@ func (s GatewayService) callStreamTarget(
 	defer progress.Stop()
 
 	if result, err := s.tasks.ResolveStream(ctx, bottask.StreamJob{
-		Input:   nativeInput,
-		Adapter: adapter,
-		Client:  s.client,
-		Request: nativeReq,
-		Write:   writeOutput,
+		Input:       nativeInput,
+		Adapter:     adapter,
+		Client:      s.client,
+		Request:     nativeReq,
+		Write:       writeOutput,
+		WriteBinary: s.audioStreamWriter(ctx, req.RequestID, writeOutput),
+		CommitBinary: func() {
+			s.audioRelay().Commit(req.RequestID)
+		},
 		RegisterCancel: func(cancel func(context.Context) error) {
 			s.streamCancels.SetRemoteCancel(req.RequestID, cancel)
 		},
 	}); result.Handled {
 		if err != nil {
+			s.audioRelay().Fail(req.RequestID, err)
+			usage := extractResponseTokenUsage(result.Response, result.Data)
 			if s.streamCancels.IsCancelled(req.RequestID) {
-				return callResult{NativeRequest: nativeReq, Response: result.Response}, err
+				logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_stream_cancelled", err.Error()), usage, nativeReq)
+				return callResult{NativeRequest: nativeReq, Response: result.Response, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 			}
-			logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_stream", err.Error()), nativeReq)
+			logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_stream", err.Error()), usage, nativeReq)
 			return callResult{NativeRequest: nativeReq, Response: result.Response, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 		}
+		s.audioRelay().Complete(req.RequestID)
 
 		return s.finishStreamResult(ctx, streamFinishInput{
 			Request:       req,
@@ -243,6 +258,7 @@ func (s GatewayService) callStreamTarget(
 			Usage:         extractResponseTokenUsage(result.Response, result.Data),
 			Progress:      progress,
 			WriteEnd:      true,
+			CostAttempted: true,
 		})
 	}
 
@@ -273,20 +289,21 @@ func (s GatewayService) callStreamTarget(
 	})
 	if err != nil {
 		if s.streamCancels.IsCancelled(req.RequestID) {
-			return callResult{NativeRequest: nativeReq, Response: resp}, err
+			logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_stream_cancelled", err.Error()), streamUsage, nativeReq)
+			return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 		}
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_stream", err.Error()), nativeReq)
+		logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_stream", err.Error()), streamUsage, nativeReq)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 	if resp == nil {
 		err := fmt.Errorf("来源流式返回为空")
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_stream", err.Error()), nativeReq)
+		logItem := s.recordProviderCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_stream", err.Error()), nativeReq)
 		return callResult{NativeRequest: nativeReq, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 	if resp.StatusCode >= 400 {
 		errorMessage := formatProviderStatusError(nativeReq.Method, nativeReq.URL, resp)
 		err := newProviderStatusError(nativeReq.Method, nativeReq.URL, resp)
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_status", errorMessage), nativeReq)
+		logItem := s.recordProviderCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_status", errorMessage), nativeReq)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 
@@ -306,6 +323,7 @@ func (s GatewayService) callStreamTarget(
 		Usage:         streamUsage.Prefer(extractResponseTokenUsage(resp, data)),
 		Progress:      progress,
 		WriteEnd:      writeEnd,
+		CostAttempted: true,
 	})
 }
 
@@ -347,7 +365,7 @@ func (s GatewayService) streamOutputWriter(ctx context.Context, requestID string
 		if suppressStructuredOutputStream(power, output) {
 			return nil
 		}
-		if _, generated := generatedMediaRuleForKind(power.Kind); generated && botprotocol.HasMediaOutput(output) {
+		if _, generated := generatedMediaRuleForKind(power.Kind); generated && botprotocol.HasMediaOutput(output) && !botprotocol.IsStreamingAudioOutput(output) {
 			return nil
 		}
 		return s.writeStreamOutput(ctx, requestID, output)
@@ -372,12 +390,13 @@ type streamFinishInput struct {
 	Progress       *botruntime.ProgressTracker
 	WriteEnd       bool
 	SkipMediaStore bool
+	CostAttempted  bool
 }
 
 func (s GatewayService) finishStreamResult(ctx context.Context, input streamFinishInput) (callResult, error) {
 	normalizedData, err := normalizePowerOutput(input.Selected.Power, input.Data)
 	if err != nil {
-		logItem := s.recordCallLogWithUsage(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("normalize_output", err.Error()), input.Usage, input.NativeRequest)
+		logItem := s.recordCallLogInternal(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("normalize_output", err.Error()), input.Usage, input.CostAttempted, input.NativeRequest)
 		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err
 	}
 	input.Data = normalizedData
@@ -394,27 +413,28 @@ func (s GatewayService) finishStreamResult(ctx context.Context, input streamFini
 		)
 	}
 	if err != nil {
-		logItem := s.recordCallLogWithUsage(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("store_media", err.Error()), input.Usage, input.NativeRequest)
+		logItem := s.recordCallLogInternal(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("store_media", err.Error()), input.Usage, input.CostAttempted, input.NativeRequest)
 		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err
 	}
 	input.Data = storedData
 	if err := input.Progress.Complete(); err != nil {
-		logItem := s.recordCallLogWithUsage(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("stream_progress", err.Error()), input.Usage, input.NativeRequest)
+		logItem := s.recordCallLogInternal(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("stream_progress", err.Error()), input.Usage, input.CostAttempted, input.NativeRequest)
 		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err
 	}
 	if input.WriteEnd {
 		if err := s.writeStreamOutput(ctx, input.Request.RequestID, botprotocol.Output{"event": "end"}); err != nil {
-			return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data}, err
+			logItem := s.recordCallLogInternal(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("stream_end", err.Error()), input.Usage, input.CostAttempted, input.NativeRequest)
+			return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err
 		}
 	}
 
 	resultResp := botprotocol.BuildSuccessResponse(input.Request.RequestID, input.Data)
 	if err := s.writeStream(ctx, input.Request.RequestID, resultResp); err != nil {
-		logItem := s.recordCallLogWithUsage(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("stream_result", err.Error()), input.Usage, input.NativeRequest)
+		logItem := s.recordCallLogInternal(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("stream_result", err.Error()), input.Usage, input.CostAttempted, input.NativeRequest)
 		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err
 	}
 
-	logItem := s.recordCallLogWithUsage(ctx, input.Request, input.Selected, StatusSuccess, time.Since(input.StartedAt), encodeLogJSON(resultResp.Payload()), input.Usage, input.NativeRequest)
+	logItem := s.recordCallLogInternal(ctx, input.Request, input.Selected, StatusSuccess, time.Since(input.StartedAt), encodeLogJSON(resultResp.Payload()), input.Usage, input.CostAttempted, input.NativeRequest)
 	return callResult{
 		NativeRequest: input.NativeRequest,
 		Response:      input.Response,

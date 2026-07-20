@@ -47,6 +47,7 @@ type canvasRunNode struct {
 	AssetVersionID   uint64
 	ComposerPrompt   string
 	VideoComposition map[string]any
+	StoryboardItem   map[string]any
 	SelectedTarget   uint64
 	ParamValues      map[string]any
 	PersistsResult   bool
@@ -489,7 +490,23 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 	}
 	input := mergeCanvasPromptInput(req.Input, previousOutput, node.ComposerPrompt)
 	params := cloneInput(node.ParamValues)
-	if energonmodel.NormalizeOutputType(node.OutputType) == energonmodel.OutputTypeVideoCompose {
+	outputType := energonmodel.NormalizeOutputType(node.OutputType)
+	if outputType == energonmodel.OutputTypeLipSync {
+		var err error
+		input, params, err = prepareCanvasLipSyncInput(
+			ctx,
+			projectID,
+			req,
+			node,
+			previousOutput,
+			input,
+			params,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if outputType == energonmodel.OutputTypeVideoCompose {
 		composition, err := resolveCanvasVideoComposition(ctx, projectID, node.VideoComposition)
 		if err != nil {
 			return nil, err
@@ -690,6 +707,12 @@ func (s WorkspaceService) canvasFlowStatusPayload(ctx context.Context, projectID
 			"approval":     approval,
 		}
 	}
+	if interaction := pendingWorkspaceInteraction(status, uint64Value(nodeRun["id"])); interaction != nil {
+		nodeResult["interaction"] = interaction
+		nodeResult["result"] = mergeMap(mapValue(nodeResult["result"]), map[string]any{
+			"interaction": interaction,
+		})
+	}
 	return map[string]any{
 		"run_id":           firstUint64(parentRunID(parentRun), runID),
 		"request_id":       firstText(parentRequestID(parentRun), requestID),
@@ -794,6 +817,7 @@ func parseCanvasRunGraph(canvas map[string]any) ([]canvasRunNode, []canvasRunEdg
 			AssetVersionID:   uint64Value(valueAtPath(row, "asset", "version_id")),
 			ComposerPrompt:   textValue(valueAtPath(row, "composer_draft", "prompt")),
 			VideoComposition: mapValue(valueAtPath(row, "composer_draft", "video_composition")),
+			StoryboardItem:   mapValue(firstPresent(row["storyboard_item"], row["storyboardItem"])),
 			SelectedTarget:   uint64Value(valueAtPath(row, "composer_draft", "selected_target_id")),
 			ParamValues:      mapValue(valueAtPath(row, "composer_draft", "param_values")),
 		}
@@ -836,7 +860,9 @@ func filterRunnableCanvasNodes(nodes []canvasRunNode) []canvasRunNode {
 
 func isRunnableCanvasNode(node canvasRunNode) bool {
 	switch node.Type {
-	case "asset", "power", "agent", "flow":
+	case "power":
+		return node.PowerID > 0 || strings.TrimSpace(node.PowerKey) != ""
+	case "asset", "agent", "flow":
 		return true
 	case "function":
 		return node.FunctionKey == "save" || node.FunctionKey == "display"
@@ -926,27 +952,89 @@ func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasR
 	}
 	if req.SingleNode {
 		if manualContext := manualCanvasInputContext(req.Input); manualContext != nil {
+			allowedSourceNodeIDs := canvasNodeSourceNodeIDs(nodeID, req.Canvas)
+			manualContext = filterCanvasContextSources(manualContext, allowedSourceNodeIDs)
 			startNode := canvasNodeByID(req.StartNodeID, req.Canvas)
 			excludedUpstreamIDs := manualCanvasContextNodeIDs(manualContext)
 			if textValue(startNode["type"]) == "group" {
 				excludedUpstreamIDs[req.StartNodeID] = true
 			}
+			previousOutput := previousCanvasOutputExcluding(
+				ctx,
+				projectID,
+				nodeID,
+				results,
+				req.Canvas,
+				excludedUpstreamIDs,
+			)
 			return mergeCanvasContextOutputs(
 				manualContext,
 				referenceOutput,
-				previousCanvasOutputExcluding(
-					ctx,
-					projectID,
-					nodeID,
-					results,
-					req.Canvas,
-					excludedUpstreamIDs,
-				),
+				filterCanvasContextSources(previousOutput, allowedSourceNodeIDs),
 			), nil
 		}
 	}
 	output := previousCanvasOutput(ctx, projectID, nodeID, results, req.Canvas)
+	output = filterCanvasContextSources(output, canvasNodeSourceNodeIDs(nodeID, req.Canvas))
 	return mergeCanvasContextOutputs(referenceOutput, output), nil
+}
+
+func canvasNodeSourceNodeIDs(nodeID string, canvas map[string]any) map[string]bool {
+	node := canvasNodeByID(nodeID, canvas)
+	metadata := mapValue(firstPresent(node["storyboard_item"], node["storyboardItem"]))
+	result := map[string]bool{}
+	for _, raw := range sliceValue(firstPresent(metadata["source_node_ids"], metadata["sourceNodeIds"])) {
+		if sourceNodeID := textValue(raw); sourceNodeID != "" {
+			result[sourceNodeID] = true
+		}
+	}
+	return result
+}
+
+func filterCanvasContextSources(value any, allowedNodeIDs map[string]bool) any {
+	if value == nil || len(allowedNodeIDs) == 0 {
+		return value
+	}
+	filtered, keep := filterCanvasContextValue(value, allowedNodeIDs)
+	if !keep {
+		return nil
+	}
+	return filtered
+}
+
+func filterCanvasContextValue(value any, allowedNodeIDs map[string]bool) (any, bool) {
+	if row := mapValue(value); row != nil {
+		if nodeID := firstText(row["node_id"], row["nodeId"]); nodeID != "" {
+			return row, allowedNodeIDs[nodeID]
+		}
+		if _, hasSources := row["sources"]; hasSources {
+			filteredSources := make([]any, 0)
+			for _, source := range sliceValue(row["sources"]) {
+				filtered, keep := filterCanvasContextValue(source, allowedNodeIDs)
+				if keep {
+					filteredSources = append(filteredSources, filtered)
+				}
+			}
+			if len(filteredSources) == 0 {
+				return nil, false
+			}
+			filteredRow := cloneInput(row)
+			filteredRow["sources"] = filteredSources
+			return filteredRow, true
+		}
+		return row, true
+	}
+	if values := sliceValue(value); values != nil {
+		filteredValues := make([]any, 0, len(values))
+		for _, current := range values {
+			filtered, keep := filterCanvasContextValue(current, allowedNodeIDs)
+			if keep {
+				filteredValues = append(filteredValues, filtered)
+			}
+		}
+		return filteredValues, len(filteredValues) > 0
+	}
+	return value, true
 }
 
 func canvasPromptReferenceOutput(

@@ -11,6 +11,7 @@ import (
 
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
+	bottask "github.com/dever-package/bot/service/energon/task"
 )
 
 const (
@@ -56,6 +57,7 @@ func (adapter DoubaoAdapter) buildAudioRequest(input botprotocol.NativeInput) (b
 }
 
 func doubaoAudioRequestParams(input botprotocol.NativeInput, body map[string]any) map[string]any {
+	mapped := doubaoMappedInput(input)
 	requestParams := cloneBody(botprotocol.NormalizeMap(body["req_params"]))
 	if strings.TrimSpace(botprotocol.AsText(requestParams["text"])) == "" {
 		text := firstNonEmptyText(
@@ -76,7 +78,13 @@ func doubaoAudioRequestParams(input botprotocol.NativeInput, body map[string]any
 		}
 	}
 	if strings.TrimSpace(botprotocol.AsText(requestParams["speaker"])) == "" {
-		if speaker := firstNonEmptyText(requestParams["voice"], body["speaker"], body["voice"]); speaker != "" {
+		if speaker := firstNonEmptyText(
+			requestParams["voice"],
+			body["speaker"],
+			body["voice"],
+			mapped.Original["speaker"],
+			mapped.Original["voice"],
+		); speaker != "" {
 			requestParams["speaker"] = speaker
 		}
 	}
@@ -151,6 +159,55 @@ type doubaoAudioResponseAccumulator struct {
 	content    []byte
 	meta       map[string]any
 	recognized bool
+}
+
+type doubaoAudioStreamDecoder struct {
+	accumulator doubaoAudioResponseAccumulator
+	mime        string
+}
+
+func (DoubaoAdapter) NewBinaryStreamDecoder(
+	input botprotocol.NativeInput,
+	request botprovider.Request,
+) (bottask.BinaryStreamDecoder, bool) {
+	if input.Request == nil || strings.TrimSpace(input.Request.Kind) != doubaoKindAudio {
+		return nil, false
+	}
+	return &doubaoAudioStreamDecoder{mime: doubaoAudioRequestMIME(request)}, true
+}
+
+func (decoder *doubaoAudioStreamDecoder) Decode(chunk botprovider.StreamChunk) (botprovider.BinaryPayload, error) {
+	before := len(decoder.accumulator.content)
+	if err := decoder.accumulator.appendText(chunk.Data); err != nil {
+		return botprovider.BinaryPayload{}, err
+	}
+	if len(decoder.accumulator.content) <= before {
+		return botprovider.BinaryPayload{}, nil
+	}
+	return botprovider.BinaryPayload{
+		MIME:    decoder.mime,
+		Content: decoder.accumulator.content[before:],
+	}, nil
+}
+
+func (decoder *doubaoAudioStreamDecoder) Result(resp *botprovider.Response) (botprovider.BinaryPayload, error) {
+	if !decoder.accumulator.recognized {
+		return botprovider.BinaryPayload{}, fmt.Errorf("豆包语音合成未返回可识别的音频数据")
+	}
+	if len(decoder.accumulator.content) == 0 {
+		return botprovider.BinaryPayload{}, fmt.Errorf("豆包语音合成未返回音频数据")
+	}
+	meta := cloneBody(decoder.accumulator.meta)
+	if resp != nil {
+		if logID := doubaoResponseHeader(resp.Headers, "X-Tt-Logid"); logID != "" {
+			meta["provider_log_id"] = logID
+		}
+	}
+	return botprovider.BinaryPayload{
+		MIME:    decoder.mime,
+		Content: decoder.accumulator.content,
+		Meta:    meta,
+	}, nil
 }
 
 func decodeDoubaoAudioResponse(value any) ([]byte, map[string]any, bool, error) {
@@ -261,6 +318,25 @@ func doubaoAudioMIME(content []byte) string {
 		return "audio/ogg"
 	}
 	return "audio/mpeg"
+}
+
+func doubaoAudioRequestMIME(request botprovider.Request) string {
+	requestParams := botprotocol.NormalizeMap(request.Body["req_params"])
+	audioParams := botprotocol.NormalizeMap(requestParams["audio_params"])
+	switch strings.ToLower(strings.TrimSpace(botprotocol.AsText(audioParams["format"]))) {
+	case "wav", "wave":
+		return "audio/wav"
+	case "ogg", "opus":
+		return "audio/ogg"
+	case "aac":
+		return "audio/aac"
+	case "flac":
+		return "audio/flac"
+	case "pcm", "s16le", "pcm_s16le":
+		return "audio/L16"
+	default:
+		return "audio/mpeg"
+	}
 }
 
 func doubaoResponseHeader(headers map[string]string, key string) string {

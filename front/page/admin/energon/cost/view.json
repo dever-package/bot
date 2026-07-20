@@ -1,0 +1,281 @@
+{
+  "page": {
+    "name": "成本详情",
+    "parent": "bot/energon/cost/list",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-col gap-4 p-0",
+        "children": {
+          "basic-card": {
+            "type": "container",
+            "className": "rounded-md border bg-background p-4"
+          },
+          "usage-card": {
+            "type": "container",
+            "className": "rounded-md border bg-background p-4"
+          },
+          "snapshot-card": {
+            "type": "container",
+            "className": "rounded-md border bg-background p-4"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "basic-card": [
+      {
+        "type": "show-title",
+        "name": "调用与计价",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "查看运行日志",
+        "className": "mb-2 w-fit",
+        "meta": {
+          "icon": "list-checks",
+          "variant": "outline",
+          "size": "sm",
+          "hiddenCondition": "any",
+          "hiddenWhen": [
+            {
+              "path": "form.log_id",
+              "operator": "empty"
+            },
+            {
+              "path": "state.route.query.source",
+              "operator": "equals",
+              "value": "log"
+            }
+          ]
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.log",
+            "value": true
+          }
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.request_id",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "运行日志ID",
+        "value": "form.log_id",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.business_key",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.scene",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.billable",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "能力",
+        "value": "form.power_name",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.power_name}（ID：{form.power_id}）"
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "来源服务",
+        "value": "form.service_name",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.service_name} / {form.service_api}"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.call_status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.pricing_status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-tag",
+        "value": "form.pricing_mode",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "原币成本",
+        "value": "form.source_cost_micros",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.source_cost_micros} 微单位（{form.source_currency}）"
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "结算汇率",
+        "value": "form.exchange_rate",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "1 {form.source_currency} = {form.exchange_rate} {form.currency}"
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "结算成本",
+        "value": "form.cost_micros",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{form.cost_micros} 微单位（{form.currency}）"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.error",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-date",
+        "value": "form.created_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "format": "datetime-second"
+        }
+      }
+    ],
+    "usage-card": [
+      {
+        "type": "show-title",
+        "name": "用量",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.prompt_tokens",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.cached_tokens",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "form.completion_tokens",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      }
+    ],
+    "snapshot-card": [
+      {
+        "type": "show-title",
+        "name": "价格快照",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-code",
+        "value": "form.pricing_snapshot",
+        "meta": {
+          "language": "json"
+        }
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.log",
+          "pageRoute": "/bot/energon/log/view",
+          "description": "查看这条成本记录对应的供应商调用过程。",
+          "size": "xl",
+          "bodyClassName": "max-h-[65vh] overflow-y-auto px-6 py-2",
+          "pageRouteQuery": {
+            "id": "data.form.log_id"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "model": "bot.energon.NewCostRecordModel"
+    }
+  },
+  "state": {
+    "dialog": {
+      "log": false
+    }
+  },
+  "action": {}
+}

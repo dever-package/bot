@@ -10,6 +10,7 @@ import (
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	workbenchservice "github.com/dever-package/bot/service/workbench"
 	frontstream "github.com/dever-package/front/service/stream"
+	userservice "github.com/dever-package/user/service"
 )
 
 var workbenchChatSessions = runtimechat.NewService()
@@ -122,6 +123,10 @@ func (Workbench) PostChatRun(c *server.Context) error {
 	if err != nil {
 		return c.JSONPayload(200, botprotocol.BuildErrorResponse("", err).Payload())
 	}
+	actor, err := userservice.RequireActor(c.Context())
+	if err != nil {
+		return c.JSONPayload(200, botprotocol.BuildErrorResponse("", err).Payload())
+	}
 	targetAssetID := botapi.Uint64FromBody(body, "target_asset_id", "targetAssetId")
 	if err = workbenchRunner.RequireDialogueContinuation(c.Context(), scope, targetAssetID); err != nil {
 		return c.JSONPayload(200, botprotocol.BuildErrorResponse("", err).Payload())
@@ -135,11 +140,17 @@ func (Workbench) PostChatRun(c *server.Context) error {
 		SessionID:     botapi.Uint64FromBody(body, "session_id", "sessionId"),
 		ContextKey:    scope.ContextKey,
 		Input:         input,
-		Method:        c.Method(),
-		Host:          c.Header("Host"),
-		Path:          c.Path(),
-		Headers:       botapi.RequestHeaders(c),
-		Server:        c,
+		Billing: botprotocol.BillingContext{
+			Billable: true,
+			Scene:    "agent_power",
+			UserID:   actor.UserID,
+			TeamID:   scope.TeamID,
+		},
+		Method:  c.Method(),
+		Host:    c.Header("Host"),
+		Path:    c.Path(),
+		Headers: botapi.RequestHeaders(c),
+		Server:  c,
 	})
 	return c.JSONPayload(200, response)
 }

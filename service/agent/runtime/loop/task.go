@@ -21,6 +21,7 @@ type TaskRequest struct {
 	SessionID     uint64
 	Input         map[string]any
 	History       []any
+	Billing       botprotocol.BillingContext
 	Method        string
 	Host          string
 	Path          string
@@ -64,6 +65,18 @@ func (s Service) prepareStatelessExecution(ctx context.Context, request stateles
 	if requestID == "" {
 		requestID = uuid.NewString()
 	}
+	billing := request.Billing
+	if billing.Billable {
+		if strings.TrimSpace(billing.Scene) == "" {
+			billing.Scene = "agent_power"
+		}
+		if strings.TrimSpace(billing.BusinessKey) == "" {
+			billing.BusinessKey = requestID
+		}
+	}
+	if billing.SessionID == 0 {
+		billing.SessionID = request.SessionID
+	}
 	input := agentskill.CloneMap(request.Input)
 	delete(input, "assistant_session_id")
 	delete(input, "assistantSessionId")
@@ -100,6 +113,7 @@ func (s Service) prepareStatelessExecution(ctx context.Context, request stateles
 		},
 		OnStream:    request.OnStream,
 		Scope:       runtimescope.FromContext(requestContext(ctx, request.Server)),
+		Billing:     billing,
 		RequestedAt: requestedAt,
 	})
 }

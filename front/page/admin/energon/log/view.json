@@ -24,6 +24,10 @@
             "type": "container",
             "className": "rounded-lg border bg-background p-4"
           },
+          "cost-card": {
+            "type": "container",
+            "className": "rounded-lg border bg-background p-4"
+          },
           "detail-card": {
             "type": "container",
             "className": "rounded-lg border bg-background p-4",
@@ -289,6 +293,167 @@
         }
       }
     ],
+    "cost-card": [
+      {
+        "type": "show-title",
+        "value": "page.costTitle",
+        "meta": {
+          "variant": "section"
+        }
+      },
+      {
+        "type": "show-base",
+        "value": "page.costEmptyMessage",
+        "className": "rounded-md bg-muted/30 px-4 py-3 text-sm text-muted-foreground",
+        "meta": {
+          "hiddenWhen": [
+            {
+              "path": "cost.id",
+              "operator": "notEmpty"
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-tag",
+        "name": "调用状态",
+        "value": "cost.call_status",
+        "option": "cost.options.call_status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "hiddenWhen": [
+            {
+              "path": "cost.id",
+              "operator": "empty"
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-tag",
+        "name": "计价状态",
+        "value": "cost.pricing_status",
+        "option": "cost.options.pricing_status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "hiddenWhen": [
+            {
+              "path": "cost.id",
+              "operator": "empty"
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-tag",
+        "name": "计价方式",
+        "value": "cost.pricing_mode",
+        "option": "cost.options.pricing_mode",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "hiddenWhen": [
+            {
+              "path": "cost.id",
+              "operator": "empty"
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "原币成本",
+        "value": "cost.source_cost_micros",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{cost.source_cost_micros} 微单位（{cost.source_currency}）",
+          "hiddenWhen": [
+            {
+              "path": "cost.id",
+              "operator": "empty"
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "结算成本",
+        "value": "cost.cost_micros",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "template": "{cost.cost_micros} 微单位（{cost.currency}）",
+          "hiddenWhen": [
+            {
+              "path": "cost.id",
+              "operator": "empty"
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-base",
+        "name": "计价错误",
+        "value": "cost.error",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "hiddenCondition": "any",
+          "hiddenWhen": [
+            {
+              "path": "cost.id",
+              "operator": "empty"
+            },
+            {
+              "path": "cost.error",
+              "operator": "empty"
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-date",
+        "name": "成本记录时间",
+        "value": "cost.created_at",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "format": "datetime-second",
+          "hiddenWhen": [
+            {
+              "path": "cost.id",
+              "operator": "empty"
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "查看成本详情",
+        "className": "mt-2 w-fit",
+        "meta": {
+          "icon": "coins",
+          "variant": "outline",
+          "size": "sm",
+          "hiddenWhen": [
+            {
+              "path": "cost.id",
+              "operator": "empty"
+            }
+          ]
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.cost",
+            "value": true
+          }
+        }
+      }
+    ],
     "detail-card": [
       {
         "type": "show-title",
@@ -358,6 +523,20 @@
       }
     ],
     "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.cost",
+          "pageRoute": "/bot/energon/cost/view",
+          "description": "查看这次供应商调用的用量、价格快照与成本。",
+          "size": "xl",
+          "bodyClassName": "max-h-[70vh] overflow-y-auto px-6 py-2",
+          "pageRouteQuery": {
+            "id": "data.cost.id",
+            "source": "log"
+          }
+        }
+      },
       {
         "type": "feedback-modal",
         "meta": {
@@ -464,6 +643,11 @@
         "title": "调用尝试",
         "description": "同一个 RequestID 下按实际调用顺序展示所有能力来源，前一个失败后才会尝试后一个。"
       },
+      "costTitle": {
+        "title": "供应商成本",
+        "description": "成本按真实供应商尝试记录，与用户最终扣费分开核算。"
+      },
+      "costEmptyMessage": "本次调用没有成本记录，可能发生在成本功能启用前，或请求尚未进入供应商计价阶段。",
       "detailTitle": {
         "title": "完整内容",
         "description": "长参数和响应按需打开，页面只保留便于排查的摘要。"
@@ -471,6 +655,9 @@
     },
     "attempts": {
       "service": "bot.energon.log.LogViewService.LoadAttempts"
+    },
+    "cost": {
+      "service": "bot.energon.log.LogViewService.LoadCost"
     },
     "requestParams": {
       "service": "bot.energon.log.LogViewService.LoadRequestParams"
@@ -485,6 +672,7 @@
   },
   "state": {
     "dialog": {
+      "cost": false,
       "attemptError": false,
       "requestParams": false,
       "channelRequest": false,

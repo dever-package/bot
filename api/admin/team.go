@@ -75,9 +75,6 @@ func (Team) PostRunTeam(c *server.Context) error {
 	}
 	mode := "team"
 	releaseID := botapi.Uint64FromBody(body, "release_id", "releaseId")
-	if requestedMode := strings.TrimSpace(botapi.TextFromBody(body, "mode")); requestedMode == "conversation" {
-		mode = requestedMode
-	}
 	if botapi.BoolFromBody(body, "debug_current_graph", "debugCurrentGraph") {
 		mode = "debug_team"
 		releaseID = 0
@@ -222,5 +219,22 @@ func (Team) PostSubmitApproval(c *server.Context) error {
 		botapi.TextFromBody(body, "comment"),
 		botapi.MapFromBody(body, "data"),
 	)
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Team) PostSubmitInteraction(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	nodeRunID := botapi.Uint64FromBody(body, "node_run_id", "nodeRunId")
+	interactionID := botapi.TextFromBody(body, "interaction_id", "interactionId")
+	interactionData := botapi.MapFromBody(body, "data")
+	var data map[string]any
+	if nodeRunID > 0 {
+		data, err = teamRunner.SubmitInteraction(c.Context(), nodeRunID, interactionID, interactionData)
+	} else {
+		data, err = teamRunner.SubmitRunInteraction(c.Context(), botapi.Uint64FromBody(body, "run_id", "runId", "id"), interactionID, interactionData)
+	}
 	return botapi.WriteJSON(c, data, err)
 }

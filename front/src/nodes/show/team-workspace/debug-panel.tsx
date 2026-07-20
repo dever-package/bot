@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -90,6 +91,9 @@ export function DebugDialog({
       >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
+          <DialogDescription className="sr-only">
+            {submitHint}
+          </DialogDescription>
         </DialogHeader>
         <div className="flex min-h-0 flex-1 flex-col gap-4">
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border bg-muted/20">
@@ -369,6 +373,9 @@ export function DebugNodeResultDialog({
           <DialogTitle className="min-w-0 truncate pr-7">
             {node?.name || row?.node_name || nodeKey || "节点结果"}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            查看当前节点的执行状态和输出结果。
+          </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-background px-6 py-4">
           {timing || row ? (

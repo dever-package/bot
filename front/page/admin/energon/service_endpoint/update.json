@@ -14,7 +14,14 @@
         "children": {
           "dialog-shell": {
             "type": "container",
-            "className": "w-full"
+            "className": "w-full",
+            "children": {
+              "service-price-page": {
+                "type": "container",
+                "path": "/bot/energon/service_price/list",
+                "className": "mt-5"
+              }
+            }
           }
         }
       }
@@ -64,6 +71,7 @@
     "form": {
       "param_mode": "all",
       "param_ids": [],
+      "prices": [],
       "status": 1,
       "sort": 100
     },

@@ -45,7 +45,12 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AgentInteractionPanel } from "@/components/agent/interaction-panel";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -1539,6 +1544,12 @@ function DebugNodeApprovalDialog({
         onPointerDown={(event) => event.stopPropagation()}
         onWheel={(event) => event.stopPropagation()}
       >
+        <DialogTitle className="sr-only">
+          {approval.title || "需要补充信息"}
+        </DialogTitle>
+        <DialogDescription className="sr-only">
+          填写并提交后，团队工作流会从当前节点继续执行。
+        </DialogDescription>
         <AgentInteractionPanel
           interaction={approval.interaction}
           paramApi={paramApi}

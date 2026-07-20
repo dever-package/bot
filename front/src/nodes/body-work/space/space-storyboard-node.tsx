@@ -6,10 +6,11 @@ import {
   Maximize2,
 } from "lucide-react";
 import {
+  isStoryboardConfirmed,
   parseStoryboardOutput,
+  storyboardSpeechCount,
   storyboardTotalDuration,
 } from "./space-storyboard";
-import { StoryboardView } from "./space-storyboard-view";
 import type { ComposerAssetItem } from "./space-prompt-composer";
 
 export type StoryboardNodeStatus = "empty" | "running" | "complete" | "error";
@@ -28,7 +29,6 @@ export function StoryboardNodeContent({
   status,
   started = false,
   generatedShotCount = 0,
-  referenceItems,
   onOpenDetail,
 }: StoryboardNodeContentProps) {
   if (status === "running") {
@@ -66,7 +66,7 @@ export function StoryboardNodeContent({
       <StoryboardNodeMessage
         icon={<Clapperboard size={28} />}
         title="分镜等待生成"
-        description="运行后展示镜头表格，详情中可以编辑"
+        description="运行后展示镜头卡片，详情中可以编辑"
       />
     );
   }
@@ -84,24 +84,48 @@ export function StoryboardNodeContent({
     );
   }
 
+  const confirmed = isStoryboardConfirmed(storyboard);
+
   return (
     <section className="ws-storyboard-node is-complete">
       <header className="ws-storyboard-node-summary">
         <span className="ws-storyboard-node-complete">
           <CheckCircle2 size={14} />
-          分镜已生成
+          {confirmed ? "分镜已确认" : "分镜草稿"}
         </span>
         <span>
           {storyboard.shots.length} 个镜头 ·{" "}
           {storyboardTotalDuration(storyboard)} 秒
+          {storyboardSpeechCount(storyboard) > 0
+            ? ` · ${storyboardSpeechCount(storyboard)} 条语音`
+            : ""}
         </span>
       </header>
       <div className="ws-storyboard-node-body nowheel">
-        <StoryboardView
-          storyboard={storyboard}
-          showMetrics={false}
-          referenceItems={referenceItems}
-        />
+        <ol className="ws-storyboard-node-shots">
+          {storyboard.shots.slice(0, 3).map((shot, index) => (
+            <li key={shot.id}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <div>
+                <strong>
+                  {shot.visual || `镜头 ${index + 1}`}
+                  {shot.end_visual ? ` / ${shot.end_visual}` : ""}
+                </strong>
+                <small>
+                  {shot.duration} 秒
+                  {shot.speech.filter((speech) => speech.text.trim()).length > 0
+                    ? ` · ${shot.speech.filter((speech) => speech.text.trim()).length} 条语音`
+                    : " · 无语音"}
+                </small>
+              </div>
+            </li>
+          ))}
+        </ol>
+        {storyboard.shots.length > 3 ? (
+          <span className="ws-storyboard-node-more">
+            还有 {storyboard.shots.length - 3} 个镜头
+          </span>
+        ) : null}
       </div>
       {onOpenDetail ? (
         <footer className="ws-storyboard-node-actions">

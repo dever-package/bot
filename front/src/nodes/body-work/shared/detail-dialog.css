@@ -405,32 +405,41 @@ button.wb-detail-state.is-error {
 }
 
 .wb-detail-readonly-content > .wb-asset-preview-content {
-  width: min(920px, 100%);
+  width: min(880px, 100%);
   margin: 0 auto;
   overflow-wrap: anywhere;
-  font-size: 14px;
-  line-height: 1.78;
+  font-size: 15px;
+  line-height: 1.82;
 }
 
-.wb-detail-readonly-content:is(.is-image, .is-video, .is-audio)
+.wb-detail-readonly-content:is(.is-image, .is-video, .is-audio, .is-file)
   > .wb-asset-preview-content {
   width: min(1280px, 100%);
 }
 
+.wb-detail-readonly-content .wb-asset-detail-prose {
+  font-size: 15px;
+  line-height: 1.82;
+}
+
 .wb-detail-readonly-content :where(img, video) {
   display: block;
-  width: auto !important;
   max-width: 100%;
   max-height: calc(100dvh - 150px);
   margin: 0 auto;
-  border-radius: 8px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   object-fit: contain;
 }
 
 .wb-detail-readonly-content audio {
   display: block;
-  width: min(920px, 100%);
+  width: min(768px, 100%);
   margin: 0 auto;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .wb-detail-version-select {

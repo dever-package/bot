@@ -259,6 +259,7 @@
           "pageRouteQuery": {
             "cate_id": "data.search.cate_id"
           },
+          "size": "2xl",
           "bodyClassName": "py-2"
         }
       },
@@ -275,6 +276,7 @@
           "pageRouteQuery": {
             "id": "data.actionTarget.id"
           },
+          "size": "2xl",
           "bodyClassName": "py-2"
         }
       },

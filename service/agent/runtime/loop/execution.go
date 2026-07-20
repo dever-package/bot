@@ -10,6 +10,7 @@ import (
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 type executionSpec struct {
@@ -27,6 +28,7 @@ type executionSpec struct {
 	OnStream           func(map[string]any)
 	MediaReferences    []runtimeprovider.MediaReference
 	Scope              runtimescope.Scope
+	Billing            botprotocol.BillingContext
 	RequestedAt        time.Time
 	PriorKnowledgeUsed bool
 	PriorLoadedSkills  []agentmodel.LoadedSkillRef
@@ -65,6 +67,7 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 		snapshotHistoryLen: len(spec.History),
 		snapshotMediaLen:   len(spec.MediaReferences),
 		scope:              spec.Scope,
+		billing:            spec.Billing,
 		priorKnowledgeUsed: spec.PriorKnowledgeUsed,
 	}
 	current.checkpoint = initialCheckpoint(current)
@@ -108,6 +111,7 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 		return execution{}, err
 	}
 	current.runID = runID
+	current.billing.RunID = runID
 	return current, nil
 }
 

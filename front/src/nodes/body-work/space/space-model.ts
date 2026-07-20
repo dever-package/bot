@@ -71,7 +71,7 @@ export function normalizeSpaceBootstrap(value: unknown): SpaceBootstrap {
       firstDefined(row.nodes_by_flow, asRecord(row.team).nodes_by_flow),
     ),
     canvases,
-    assets: asRecords(firstDefined(row.assets, asRecord(row.assets).items)).map(
+    assets: asRecords(firstDefined(asRecord(row.assets).items, row.assets)).map(
       normalizeAsset,
     ),
     powers,
@@ -514,19 +514,21 @@ function normalizeAsset(value: Record<string, unknown>): ProjectAsset {
   const versions = normalizeAssetVersions(value.versions);
   return {
     id: numberValue(value.id),
-    project_id: numberValue(value.project_id),
-    body_id: numberValue(value.body_id),
-    team_id: numberValue(value.team_id),
-    flow_id: numberValue(value.flow_id),
-    asset_cate_id: numberValue(value.asset_cate_id),
-    node_key: stringValue(value.node_key),
+    project_id: numberValue(firstDefined(value.project_id, value.projectID)),
+    body_id: numberValue(firstDefined(value.body_id, value.bodyID)),
+    team_id: numberValue(firstDefined(value.team_id, value.teamID)),
+    flow_id: numberValue(firstDefined(value.flow_id, value.flowID)),
+    asset_cate_id: numberValue(
+      firstDefined(value.asset_cate_id, value.assetCateID),
+    ),
+    node_key: stringValue(firstDefined(value.node_key, value.nodeKey)),
     name: stringValue(value.name),
     kind: (stringValue(value.kind) || "text") as AssetKind,
     role: stringValue(value.role),
-    version_id: numberValue(value.version_id),
+    version_id: numberValue(firstDefined(value.version_id, value.versionID)),
     status: stringValue(value.status),
     sort: numberValue(value.sort),
-    created_at: stringValue(value.created_at),
+    created_at: stringValue(firstDefined(value.created_at, value.createdAt)),
     version,
     versions: versions.length ? versions : undefined,
   };
@@ -541,18 +543,18 @@ export function normalizeAssetVersion(
   }
   return {
     id,
-    asset_id: numberValue(value.asset_id),
-    run_id: numberValue(value.run_id),
-    node_run_id: numberValue(value.node_run_id),
-    release_id: numberValue(value.release_id),
-    request_id: stringValue(value.request_id),
-    node_key: stringValue(value.node_key),
+    asset_id: numberValue(firstDefined(value.asset_id, value.assetID)),
+    run_id: numberValue(firstDefined(value.run_id, value.runID)),
+    node_run_id: numberValue(firstDefined(value.node_run_id, value.nodeRunID)),
+    release_id: numberValue(firstDefined(value.release_id, value.releaseID)),
+    request_id: stringValue(firstDefined(value.request_id, value.requestID)),
+    node_key: stringValue(firstDefined(value.node_key, value.nodeKey)),
     source: asRecord(value.source),
     version: numberValue(value.version),
     summary: stringValue(value.summary),
     content: value.content,
-    created_at: stringValue(value.created_at),
-    updated_at: stringValue(value.updated_at),
+    created_at: stringValue(firstDefined(value.created_at, value.createdAt)),
+    updated_at: stringValue(firstDefined(value.updated_at, value.updatedAt)),
   };
 }
 
@@ -764,7 +766,16 @@ function normalizeCanvasStoryboardItem(value: unknown) {
   if (
     !sourceNodeId ||
     !itemId ||
-    !["character", "scene", "prop", "shot_frame", "shot"].includes(itemType)
+    ![
+      "character",
+      "scene",
+      "prop",
+      "shot_frame",
+      "shot",
+      "speech",
+      "lip_sync",
+      "video_compose",
+    ].includes(itemType)
   ) {
     return undefined;
   }
@@ -775,10 +786,35 @@ function normalizeCanvasStoryboardItem(value: unknown) {
       | "scene"
       | "prop"
       | "shot_frame"
-      | "shot",
+      | "shot"
+      | "speech"
+      | "lip_sync"
+      | "video_compose",
     itemId,
     generatedPrompt: stringValue(
       firstDefined(row.generated_prompt, row.generatedPrompt),
+    ),
+    sourceNodeIds: stringArray(
+      firstDefined(row.source_node_ids, row.sourceNodeIds),
+    ),
+    shotId: stringValue(firstDefined(row.shot_id, row.shotId)),
+    frameRole: stringValue(
+      firstDefined(row.frame_role, row.frameRole),
+    ) as "start" | "end",
+    speechId: stringValue(firstDefined(row.speech_id, row.speechId)),
+    speechIds: stringArray(firstDefined(row.speech_ids, row.speechIds)),
+    characterId: stringValue(
+      firstDefined(row.character_id, row.characterId),
+    ),
+    speechKind: stringValue(
+      firstDefined(row.speech_kind, row.speechKind),
+    ) as "dialogue" | "narration",
+    speakerMode: stringValue(
+      firstDefined(row.speaker_mode, row.speakerMode),
+    ) as "visible" | "offscreen",
+    startTime: finiteNumber(firstDefined(row.start_time, row.startTime)),
+    shotDuration: finiteNumber(
+      firstDefined(row.shot_duration, row.shotDuration),
     ),
     sourceSignature: stringValue(
       firstDefined(row.source_signature, row.sourceSignature),

@@ -14,6 +14,18 @@ type RawRequest struct {
 	Body    map[string]any
 }
 
+type BillingContext struct {
+	Billable    bool   `json:"billable,omitempty"`
+	ChargeID    uint64 `json:"charge_id,omitempty"`
+	Scene       string `json:"scene,omitempty"`
+	BusinessKey string `json:"business_key,omitempty"`
+	UserID      uint64 `json:"user_id,omitempty"`
+	TeamID      uint64 `json:"team_id,omitempty"`
+	ProjectID   uint64 `json:"project_id,omitempty"`
+	SessionID   uint64 `json:"session_id,omitempty"`
+	RunID       uint64 `json:"run_id,omitempty"`
+}
+
 type ShemicRequest struct {
 	RequestID   string
 	Mode        string
@@ -26,6 +38,7 @@ type ShemicRequest struct {
 	History     []any
 	Options     map[string]any
 	Raw         RawRequest
+	Billing     BillingContext
 }
 
 type NativeInput struct {

@@ -173,6 +173,7 @@ export function AgentChatMediaInspector({
 
   const multiple = request.items.length > 1;
   const title = mediaKindLabel(request.kind);
+  const compact = request.kind === "audio" || request.kind === "file";
   const previewContext = readAgentChatMediaPreviewContext(request.context);
   const activeArtifact = previewContext
     ? findAgentChatMediaArtifact(
@@ -183,12 +184,16 @@ export function AgentChatMediaInspector({
       )
     : null;
 
-  return (
+  const inspector = (
     <aside
       className={cn(
-        "absolute inset-0 z-30 flex min-h-0 min-w-0 flex-col bg-background",
-        "md:static md:z-auto md:flex-1 md:border-l",
+        "flex min-h-0 min-w-0 flex-col bg-background",
+        compact
+          ? "relative max-h-[min(80dvh,480px)] w-full max-w-2xl overflow-hidden rounded-lg border shadow-xl"
+          : "absolute inset-0 z-30 md:static md:z-auto md:flex-1 md:border-l",
       )}
+      role={compact ? "dialog" : undefined}
+      aria-modal={compact ? "true" : undefined}
       aria-label={`${title}预览`}
     >
       <style>{mediaInspectorStyles}</style>
@@ -251,7 +256,12 @@ export function AgentChatMediaInspector({
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+      <div
+        className={cn(
+          "flex min-h-0 flex-col md:flex-row",
+          compact ? "flex-none" : "flex-1",
+        )}
+      >
         <MediaStage kind={request.kind} item={activeItem} zoom={zoom} />
         {multiple ? (
           <MediaThumbnailRail
@@ -273,6 +283,24 @@ export function AgentChatMediaInspector({
       ) : null}
     </aside>
   );
+
+  if (!compact) {
+    return inspector;
+  }
+
+  return (
+    <div
+      className="absolute inset-0 z-30 flex items-center justify-center bg-foreground/20 p-4 backdrop-blur-[1px]"
+      role="presentation"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) {
+          closePreview();
+        }
+      }}
+    >
+      {inspector}
+    </div>
+  );
 }
 
 function MediaStage({
@@ -284,8 +312,17 @@ function MediaStage({
   item: EnergonMediaPreviewItem;
   zoom: number;
 }) {
+  const compact = kind === "audio" || kind === "file";
+
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto bg-muted/20 p-4 md:p-8">
+    <div
+      className={cn(
+        "relative flex min-h-0 min-w-0 items-center justify-center overflow-auto",
+        compact
+          ? "min-h-56 w-full flex-1 bg-background px-6 py-8"
+          : "flex-1 bg-muted/20 p-4 md:p-8",
+      )}
+    >
       {kind === "image" ? (
         item.url ? (
           <img
@@ -316,13 +353,10 @@ function MediaStage({
         )
       ) : null}
       {kind === "audio" ? (
-        <div className="flex w-full max-w-xl flex-col items-center gap-6 px-4">
+        <div className="flex w-full max-w-xl flex-col items-center gap-5 px-4">
           <span className="flex size-16 items-center justify-center rounded-full bg-background text-muted-foreground shadow-sm">
             <Music4 className="size-7" />
           </span>
-          <div className="max-w-full truncate text-sm font-medium text-foreground">
-            {item.name}
-          </div>
           {item.url ? (
             <audio
               key={item.url}

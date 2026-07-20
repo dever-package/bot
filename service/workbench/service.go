@@ -232,6 +232,10 @@ func attachPreviousPowerOutput(
 }
 
 func (s Service) StartPower(ctx context.Context, request PowerRunRequest) (map[string]any, error) {
+	actor, err := userservice.RequireActor(ctx)
+	if err != nil {
+		return nil, err
+	}
 	binding, err := s.team.ResolveWorkbenchPower(ctx, request.TeamID, request.TeamPowerID)
 	if err != nil {
 		return nil, err
@@ -309,7 +313,14 @@ func (s Service) StartPower(ctx context.Context, request PowerRunRequest) (map[s
 			SourceTargetID: request.SourceTargetID,
 			Input:          cloneMap(request.Input),
 			Params:         cloneMap(request.Params),
-			PersistResult:  false,
+			Billing: botprotocol.BillingContext{
+				Billable:    true,
+				Scene:       "body_tool",
+				BusinessKey: requestID,
+				UserID:      actor.UserID,
+				TeamID:      binding.TeamID,
+			},
+			PersistResult: false,
 			OnRunCreated: func(runID uint64, createdRequestID string) error {
 				history, historyErr := s.createPowerHistory(
 					runContext, *workspace, binding, runID, createdRequestID,
@@ -752,6 +763,10 @@ func (s Service) AssetVersion(ctx context.Context, teamID uint64, assetID uint64
 
 func (s Service) SetAssetCurrentVersion(ctx context.Context, teamID uint64, assetID uint64, versionID uint64) (map[string]any, error) {
 	return s.asset.SetTeamCurrentVersion(ctx, teamID, assetID, versionID)
+}
+
+func (s Service) RenameAsset(ctx context.Context, teamID uint64, assetID uint64, name string) (map[string]any, error) {
+	return s.asset.RenameTeamAsset(ctx, teamID, assetID, name)
 }
 
 func (s Service) ResolveRole(ctx context.Context, teamID uint64, roleID uint64) (ChatRoleBinding, error) {

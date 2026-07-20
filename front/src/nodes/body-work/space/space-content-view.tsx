@@ -11,7 +11,9 @@ type SharedContentViewProps = {
   streaming?: boolean;
   emptyText?: string;
   className?: string;
-  mediaLayout?: "default" | "chat";
+  markdownClassName?: string;
+  richClassName?: string;
+  mediaLayout?: "default" | "chat" | "detail";
 };
 
 type CanvasContentMediaPreview = {
@@ -49,6 +51,8 @@ export function CanvasNodeContentView({
   streaming = false,
   emptyText = "暂无内容",
   className,
+  markdownClassName,
+  richClassName,
   mediaLayout = "default",
   storyboardEditable = false,
   storyboardDisabled = false,
@@ -105,6 +109,8 @@ export function CanvasNodeContentView({
           output={resolvedOutput}
           streaming={streaming}
           emptyText={emptyText}
+          markdownClassName={markdownClassName}
+          richClassName={richClassName}
           mediaLayout={mediaLayout}
         />
       </div>

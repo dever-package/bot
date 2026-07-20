@@ -1,19 +1,19 @@
 {
   "page": {
-    "name": "登录链接编辑",
+    "name": "自定义菜单编辑",
     "parent": "bot/body/config/set",
     "type": 2,
     "auth": [
       {
         "key": "bot/body/link/create",
-        "name": "登录链接新增",
+        "name": "自定义菜单新增",
         "query": {
           "id": "empty"
         }
       },
       {
         "key": "bot/body/link/update",
-        "name": "登录链接编辑",
+        "name": "自定义菜单编辑",
         "query": {
           "id": "required"
         }
@@ -70,35 +70,13 @@
         }
       },
       {
-        "type": "form-select",
+        "type": "form-radio",
         "name": "打开方式",
         "value": "form.target",
         "mode": "form",
         "meta": {
           "formLayout": "horizontal",
-          "controlClassName": "max-w-[220px]"
-        }
-      },
-      {
-        "type": "form-switch",
-        "name": "状态",
-        "value": "form.status",
-        "mode": "form",
-        "meta": {
-          "formLayout": "horizontal",
-          "trueValue": 1,
-          "falseValue": 2
-        }
-      },
-      {
-        "type": "form-number",
-        "name": "排序",
-        "value": "form.sort",
-        "mode": "form",
-        "info": "数值越小越靠前。",
-        "meta": {
-          "formLayout": "horizontal",
-          "controlClassName": "max-w-[180px]"
+          "controlClassName": "gap-x-5"
         }
       }
     ]
@@ -108,9 +86,7 @@
       "id": 0,
       "name": "",
       "url": "",
-      "target": "_self",
-      "status": 1,
-      "sort": 100
+      "target": "_self"
     }
   },
   "state": {},

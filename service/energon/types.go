@@ -2,6 +2,7 @@ package energon
 
 import (
 	botmodel "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
 )
 
@@ -38,6 +39,7 @@ type GatewayRequest struct {
 	Path      string
 	Headers   map[string]string
 	Body      map[string]any
+	Billing   botprotocol.BillingContext
 }
 
 type GatewayResponse struct {
@@ -56,26 +58,28 @@ type GatewayResponse struct {
 }
 
 type GatewayAttempt struct {
-	PowerTargetID uint64 `json:"power_target_id"`
-	ServiceID     uint64 `json:"service_id,omitempty"`
-	ServiceName   string `json:"service_name,omitempty"`
-	ProviderID    uint64 `json:"provider_id,omitempty"`
-	ProviderName  string `json:"provider_name,omitempty"`
-	AccountID     uint64 `json:"account_id,omitempty"`
-	AccountName   string `json:"account_name,omitempty"`
-	Status        string `json:"status"`
-	Error         string `json:"error,omitempty"`
-	LogID         uint64 `json:"log_id,omitempty"`
-	Latency       int64  `json:"latency,omitempty"`
+	PowerTargetID     uint64 `json:"power_target_id"`
+	ServiceID         uint64 `json:"service_id,omitempty"`
+	ServiceName       string `json:"service_name,omitempty"`
+	ServiceEndpointID uint64 `json:"service_endpoint_id,omitempty"`
+	ProviderID        uint64 `json:"provider_id,omitempty"`
+	ProviderName      string `json:"provider_name,omitempty"`
+	AccountID         uint64 `json:"account_id,omitempty"`
+	AccountName       string `json:"account_name,omitempty"`
+	Status            string `json:"status"`
+	Error             string `json:"error,omitempty"`
+	LogID             uint64 `json:"log_id,omitempty"`
+	Latency           int64  `json:"latency,omitempty"`
 }
 
 type selectedTarget struct {
-	Provider    botmodel.Provider
-	Account     botmodel.Account
-	Power       botmodel.Power
-	PowerTarget botmodel.PowerTarget
-	Service     botmodel.Service
-	ServiceAPI  string
+	Provider        botmodel.Provider
+	Account         botmodel.Account
+	Power           botmodel.Power
+	PowerTarget     botmodel.PowerTarget
+	Service         botmodel.Service
+	ServiceEndpoint botmodel.ServiceEndpoint
+	ServiceAPI      string
 }
 
 type callResult struct {

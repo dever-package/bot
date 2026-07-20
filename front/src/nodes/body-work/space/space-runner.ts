@@ -10,6 +10,7 @@ export type CanvasRunRef = {
   executed?: number;
   output?: unknown;
   approvals?: any[];
+  interactions?: any[];
   node_results?: CanvasNodeResultRef[];
   pending_node?: CanvasNodeResultRef | null;
   node_runs?: CanvasNodeRunRef[];
@@ -40,6 +41,7 @@ export type CanvasNodeResultRef = {
   version?: any;
   result?: any;
   approval?: any;
+  interaction?: any;
   persists_result?: boolean;
   agent_run_id?: number;
 };
@@ -90,6 +92,11 @@ export function normalizeCanvasRunRef(value: any): CanvasRunRef {
       : Array.isArray(value?.data?.approvals)
         ? value.data.approvals
         : [],
+    interactions: Array.isArray(value?.interactions)
+      ? value.interactions
+      : Array.isArray(value?.data?.interactions)
+        ? value.data.interactions
+        : [],
     node_results: Array.isArray(value?.node_results || output.node_results)
       ? (value.node_results || output.node_results)
           .map(normalizeCanvasNodeResultRef)
@@ -128,6 +135,7 @@ function normalizeCanvasNodeResultRef(value: any): CanvasNodeResultRef | null {
     version: value.version,
     result: value.result,
     approval: value.approval,
+    interaction: value.interaction,
     persists_result: Boolean(value.persists_result),
     agent_run_id: Number(value.agent_run_id || 0),
   };

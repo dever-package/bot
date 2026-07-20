@@ -17,33 +17,17 @@ func (PowerHook) ProviderBeforeSavePower(c *server.Context, params []any) any {
 	if len(record) == 0 {
 		return record
 	}
+	partial := isPartialEnergonRecord(record)
 
-	record["name"] = util.ToStringTrimmed(record["name"])
-	record["key"] = util.ToStringTrimmed(record["key"])
-	record["icon"] = util.ToStringTrimmed(record["icon"])
-	kind := strings.ToLower(strings.TrimSpace(util.ToString(record["kind"])))
-	kind = botmodel.NormalizePowerKind(kind)
-	if kind == "" {
-		kind = "text"
+	trimEnergonStringField(record, "name", partial)
+	trimEnergonStringField(record, "key", partial)
+	trimEnergonStringField(record, "icon", partial)
+	normalizePowerTypeFields(c, record, partial)
+	if shouldNormalizeEnergonField(record, "source_rule", partial) {
+		record["source_rule"] = normalizePowerSourceRule(util.ToIntDefault(record["source_rule"], int(powerSourceRuleFirst)))
 	}
-	outputType := botmodel.OutputTypeGeneral
-	if kind == "text" {
-		outputType = botmodel.NormalizeOutputType(util.ToString(record["output_type"]))
-	}
-	_, exists := botmodel.FindOutputTypeSpec(outputType)
-	if !exists {
-		panicParamField("form.output_type", "输出类型无效。")
-	}
-	if !botmodel.IsOutputKindAllowed(outputType, kind) {
-		panicParamField("form.kind", "当前输出类型不支持所选技术类型。")
-	}
-	record["output_type"] = outputType
-	record["kind"] = kind
-	record["source_rule"] = normalizePowerSourceRule(util.ToIntDefault(record["source_rule"], int(powerSourceRuleFirst)))
-	ensureDefaultCategory(record)
-	if util.ToIntDefault(record["status"], 0) <= 0 {
-		record["status"] = defaultRecordStatus
-	}
+	ensureDefaultCategory(record, partial)
+	ensureDefaultRecordStatus(record, partial)
 
 	powerID := util.ToUint64(record["id"])
 	if rawTargets, exists := record["targets"]; exists {
@@ -54,6 +38,45 @@ func (PowerHook) ProviderBeforeSavePower(c *server.Context, params []any) any {
 	}
 
 	return record
+}
+
+func normalizePowerTypeFields(c *server.Context, record map[string]any, partial bool) {
+	_, hasKind := record["kind"]
+	_, hasOutputType := record["output_type"]
+	if partial && !hasKind && !hasOutputType {
+		return
+	}
+
+	kindValue := record["kind"]
+	outputTypeValue := record["output_type"]
+	if partial && (!hasKind || !hasOutputType) && c != nil {
+		current := botmodel.NewPowerModel().FindMap(c.Context(), map[string]any{"id": util.ToUint64(record["id"])})
+		if !hasKind {
+			kindValue = current["kind"]
+		}
+		if !hasOutputType {
+			outputTypeValue = current["output_type"]
+		}
+	}
+
+	kind := strings.ToLower(strings.TrimSpace(util.ToString(kindValue)))
+	kind = botmodel.NormalizePowerKind(kind)
+	if kind == "" {
+		kind = "text"
+	}
+	outputType := botmodel.OutputTypeGeneral
+	if strings.TrimSpace(util.ToString(outputTypeValue)) != "" {
+		outputType = botmodel.NormalizeOutputType(util.ToString(outputTypeValue))
+	}
+	_, exists := botmodel.FindOutputTypeSpec(outputType)
+	if !exists {
+		panicParamField("form.output_type", "输出类型无效。")
+	}
+	if !botmodel.IsOutputKindAllowed(outputType, kind) {
+		panicParamField("form.kind", "当前输出类型不支持所选技术类型。")
+	}
+	record["output_type"] = outputType
+	record["kind"] = kind
 }
 
 func normalizePowerSourceRule(value int) int16 {

@@ -89,7 +89,12 @@ func (s Service) Execute(ctx context.Context, lease runtimequeue.Lease) error {
 		snapshotHistoryLen: len(snapshot.History),
 		snapshotMediaLen:   len(snapshotReferences),
 		scope:              runtimescope.RestoreSession(prepareCtx, snapshot.Scope, snapshot.SessionID),
+		billing:            snapshot.Billing,
 		checkpoint:         checkpoint,
+	}
+	execution.billing.RunID = row.ID
+	if execution.billing.SessionID == 0 {
+		execution.billing.SessionID = snapshot.SessionID
 	}
 	prepareCancel()
 	controller := s.runs.Start(row.RequestID, context.Background(), remainingChatTimeout(row.StartedAt, snapshot.Agent.TimeoutSeconds))

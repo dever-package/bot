@@ -1,9 +1,9 @@
 import {
   Check,
   FileText,
-  History,
   Loader2,
   MessageSquareMore,
+  Pencil,
   RotateCcw,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -20,6 +20,7 @@ import {
   setAssetCurrentVersion,
 } from "./asset-api";
 import { AssetKindIcon, AssetPreview } from "./asset-preview";
+import { AssetRenameDialog } from "./asset-rename-dialog";
 import {
   assetKindLabel,
   assetRoleLabel,
@@ -47,10 +48,13 @@ export function AssetDetailDialog({
   onAssetChanged?: (asset: AssetRecord) => void;
 }) {
   const [detail, setDetail] = useState<AssetDetail | null>(null);
-  const [previewVersion, setPreviewVersion] = useState<AssetVersion | null>(null);
+  const [previewVersion, setPreviewVersion] = useState<AssetVersion | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [versionLoading, setVersionLoading] = useState(0);
   const [savingCurrent, setSavingCurrent] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const [error, setError] = useState("");
   const [versionsError, setVersionsError] = useState("");
 
@@ -120,10 +124,7 @@ export function AssetDetailDialog({
         current
           ? {
               ...current,
-              versions: uniqueVersions([
-                ...current.versions,
-                ...result.items,
-              ]),
+              versions: uniqueVersions([...current.versions, ...result.items]),
               versionTotal: result.total,
               hasMore: result.hasMore,
             }
@@ -214,14 +215,34 @@ export function AssetDetailDialog({
             previewVersion?.updatedAt || previewVersion?.createdAt,
           )}
           actions={
-            asset && isCurrent ? (
-              <AssetDetailActions
-                asset={asset}
-                selectable={selectable}
-                onSelect={onSelect}
-                onContinue={onContinue}
-                canContinue={canContinue}
-              />
+            asset && previewVersion ? (
+              <>
+                <button
+                  type="button"
+                  className="wb-detail-command"
+                  onClick={() => setRenaming(true)}
+                >
+                  <Pencil size={13} />
+                  <span>修改标题</span>
+                </button>
+                {isCurrent ? (
+                  <AssetDetailActions
+                    asset={asset}
+                    selectable={selectable}
+                    onSelect={onSelect}
+                    onContinue={onContinue}
+                    canContinue={canContinue}
+                  />
+                ) : (
+                  <AssetVersionActions
+                    currentVersion={asset.version}
+                    loading={Boolean(versionLoading)}
+                    saving={savingCurrent}
+                    onReturn={(version) => void preview(version)}
+                    onMakeCurrent={() => void makeCurrent()}
+                  />
+                )}
+              </>
             ) : undefined
           }
           onClose={onClose}
@@ -229,41 +250,6 @@ export function AssetDetailDialog({
       }
     >
       <main className="wb-detail-workspace">
-        {asset && previewVersion && !isCurrent ? (
-          <div className="wb-detail-history-bar">
-            <span>
-              <History size={14} />
-              正在查看第 {previewVersion.version} 版
-            </span>
-            <div>
-              {asset.version ? (
-                <button
-                  type="button"
-                  className="wb-detail-command"
-                  disabled={Boolean(versionLoading) || savingCurrent}
-                  onClick={() => void preview(asset.version as AssetVersion)}
-                >
-                  <RotateCcw size={13} />
-                  返回当前版本
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="wb-detail-command is-primary"
-                disabled={Boolean(versionLoading) || savingCurrent}
-                onClick={() => void makeCurrent()}
-              >
-                {savingCurrent ? (
-                  <Loader2 size={13} className="wb-detail-spin" />
-                ) : (
-                  <Check size={13} />
-                )}
-                {savingCurrent ? "设置中" : "设为当前版本"}
-              </button>
-            </div>
-          </div>
-        ) : null}
-
         <div className="wb-detail-scroll">
           {loading ? (
             <div className="wb-detail-content-state">
@@ -291,7 +277,62 @@ export function AssetDetailDialog({
           )}
         </div>
       </main>
+      <AssetRenameDialog
+        teamID={teamID}
+        asset={renaming ? asset || null : null}
+        onClose={() => setRenaming(false)}
+        onRenamed={(renamed) => {
+          setDetail((current) =>
+            current ? { ...current, asset: renamed } : current,
+          );
+          onAssetChanged?.(renamed);
+        }}
+      />
     </DetailDialogFrame>
+  );
+}
+
+function AssetVersionActions({
+  currentVersion,
+  loading,
+  saving,
+  onReturn,
+  onMakeCurrent,
+}: {
+  currentVersion: AssetVersion | null;
+  loading: boolean;
+  saving: boolean;
+  onReturn: (version: AssetVersion) => void;
+  onMakeCurrent: () => void;
+}) {
+  const disabled = loading || saving;
+  return (
+    <>
+      {currentVersion ? (
+        <button
+          type="button"
+          className="wb-detail-command"
+          disabled={disabled}
+          onClick={() => onReturn(currentVersion)}
+        >
+          <RotateCcw size={13} />
+          <span>返回当前版本</span>
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="wb-detail-command is-primary"
+        disabled={disabled}
+        onClick={onMakeCurrent}
+      >
+        {saving ? (
+          <Loader2 size={13} className="wb-detail-spin" />
+        ) : (
+          <Check size={13} />
+        )}
+        <span>{saving ? "设置中" : "设为当前版本"}</span>
+      </button>
+    </>
   );
 }
 
@@ -310,9 +351,7 @@ function AssetDetailActions({
 }) {
   return (
     <>
-      {onContinue &&
-      isContinuable(asset) &&
-      (canContinue?.(asset) ?? true) ? (
+      {onContinue && isContinuable(asset) && (canContinue?.(asset) ?? true) ? (
         <button
           type="button"
           className="wb-detail-command"

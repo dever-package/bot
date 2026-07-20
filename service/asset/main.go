@@ -257,6 +257,7 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 			"source_id":     req.SourceID,
 			"source_name":   req.SourceName,
 			"name":          req.Name,
+			"name_mode":     assetmodel.NameModeAuto,
 			"kind":          req.Kind,
 			"role":          req.Role,
 			"version_id":    0,
@@ -276,17 +277,7 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 		if current := (Service{}).FindVersion(ctx, asset.VersionID); current != nil && current.Version > version.Version {
 			return asset, current, nil
 		}
-		assetModel.Update(ctx, map[string]any{"id": asset.ID}, map[string]any{
-			"name":        req.Name,
-			"kind":        req.Kind,
-			"role":        req.Role,
-			"node_key":    req.NodeKey,
-			"source_type": req.SourceType,
-			"source_id":   req.SourceID,
-			"source_name": req.SourceName,
-			"version_id":  version.ID,
-			"status":      assetmodel.StatusCurrent,
-		})
+		updateAssetVersionPointer(ctx, asset.ID, req, version.ID)
 		asset = assetModel.Find(ctx, map[string]any{"id": asset.ID})
 		if asset == nil {
 			return nil, nil, fmt.Errorf("读取资产失败")
@@ -297,8 +288,23 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 	if versionID == 0 {
 		return nil, nil, fmt.Errorf("创建资产版本失败")
 	}
-	assetModel.Update(ctx, map[string]any{"id": asset.ID}, map[string]any{
-		"name":        req.Name,
+	updateAssetVersionPointer(ctx, asset.ID, req, versionID)
+	asset = assetModel.Find(ctx, map[string]any{"id": asset.ID})
+	version := Service{}.FindVersion(ctx, versionID)
+	if asset == nil || version == nil {
+		return nil, nil, fmt.Errorf("读取资产版本失败")
+	}
+	return asset, version, nil
+}
+
+func updateAssetVersionPointer(
+	ctx context.Context,
+	assetID uint64,
+	req SaveVersionRequest,
+	versionID uint64,
+) {
+	assetModel := assetmodel.NewAssetModel()
+	assetModel.Update(ctx, map[string]any{"id": assetID}, map[string]any{
 		"kind":        req.Kind,
 		"role":        req.Role,
 		"node_key":    req.NodeKey,
@@ -308,12 +314,10 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 		"version_id":  versionID,
 		"status":      assetmodel.StatusCurrent,
 	})
-	asset = assetModel.Find(ctx, map[string]any{"id": asset.ID})
-	version := Service{}.FindVersion(ctx, versionID)
-	if asset == nil || version == nil {
-		return nil, nil, fmt.Errorf("读取资产版本失败")
-	}
-	return asset, version, nil
+	assetModel.Update(ctx, map[string]any{
+		"id":        assetID,
+		"name_mode": map[string]any{"neq": assetmodel.NameModeManual},
+	}, map[string]any{"name": req.Name})
 }
 
 func assetIdentityFilter(req SaveVersionRequest) map[string]any {
@@ -468,6 +472,7 @@ func (s Service) AssetDetailMap(ctx context.Context, row assetmodel.Asset, curre
 	}
 	if current != nil {
 		item["version"] = VersionToMap(*current)
+		item["summary"] = versionContentSummary(jsonValue(current.Content), row.Kind)
 	}
 	return item
 }
@@ -485,6 +490,7 @@ func AssetToMap(row assetmodel.Asset) map[string]any {
 		"source_id":     row.SourceID,
 		"source_name":   row.SourceName,
 		"name":          row.Name,
+		"name_mode":     NormalizeNameMode(row.NameMode),
 		"kind":          row.Kind,
 		"role":          NormalizeRole(row.Role),
 		"version_id":    row.VersionID,
@@ -501,6 +507,13 @@ func NormalizeRole(role string) string {
 	default:
 		return assetmodel.RoleMaterial
 	}
+}
+
+func NormalizeNameMode(mode string) string {
+	if strings.EqualFold(strings.TrimSpace(mode), assetmodel.NameModeManual) {
+		return assetmodel.NameModeManual
+	}
+	return assetmodel.NameModeAuto
 }
 
 func NormalizeSourceType(sourceType string) string {
@@ -663,22 +676,15 @@ func EnsureDocument(raw any, kind string) map[string]any {
 	if document, ok := raw.(map[string]any); ok && isStructuredAssetDocument(document) {
 		return document
 	}
+	normalizedKind := NormalizeKind(kind)
+	if len(mediaContentKeys(normalizedKind)) > 0 {
+		if mediaURL := contentMediaURL(raw, normalizedKind, 0); mediaURL != "" {
+			return mediaDocument(normalizedKind, mediaURL)
+		}
+	}
 	text := contentText(raw)
 	if text == "" {
 		text = "{}"
-	}
-	if NormalizeKind(kind) == assetmodel.KindImage && isURL(text) {
-		return map[string]any{
-			"type": "doc",
-			"content": []map[string]any{
-				{
-					"type": "image",
-					"attrs": map[string]any{
-						"src": text,
-					},
-				},
-			},
-		}
 	}
 	return map[string]any{
 		"type": "doc",
@@ -688,6 +694,82 @@ func EnsureDocument(raw any, kind string) map[string]any {
 				"content": []map[string]any{
 					{"type": "text", "text": text},
 				},
+			},
+		},
+	}
+}
+
+func contentMediaURL(value any, kind string, depth int) string {
+	if depth > 12 || value == nil {
+		return ""
+	}
+	switch current := value.(type) {
+	case string:
+		current = strings.TrimSpace(current)
+		if isURL(current) {
+			return current
+		}
+		return ""
+	case []string:
+		for _, item := range current {
+			if mediaURL := contentMediaURL(item, kind, depth+1); mediaURL != "" {
+				return mediaURL
+			}
+		}
+	case []any:
+		for _, item := range current {
+			if mediaURL := contentMediaURL(item, kind, depth+1); mediaURL != "" {
+				return mediaURL
+			}
+		}
+	case map[string]any:
+		for _, key := range mediaContentKeys(kind) {
+			if mediaURL := contentMediaURL(current[key], kind, depth+1); mediaURL != "" {
+				return mediaURL
+			}
+		}
+		for _, key := range []string{"output", "result", "data", "content", "media_files", "attrs"} {
+			if mediaURL := contentMediaURL(current[key], kind, depth+1); mediaURL != "" {
+				return mediaURL
+			}
+		}
+	}
+	return ""
+}
+
+func mediaContentKeys(kind string) []string {
+	switch kind {
+	case assetmodel.KindImage:
+		return []string{"image", "images", "image_url", "src", "url", "thumbnail"}
+	case assetmodel.KindAudio:
+		return []string{"audio", "audios", "audio_url", "src", "url"}
+	case assetmodel.KindVideo:
+		return []string{"video", "videos", "video_url", "src", "url"}
+	case assetmodel.KindFile:
+		return []string{"file", "files", "file_url", "src", "url"}
+	default:
+		return nil
+	}
+}
+
+func mediaDocument(kind string, url string) map[string]any {
+	if kind == assetmodel.KindFile {
+		return map[string]any{
+			"type":     "file",
+			"file_url": url,
+		}
+	}
+	nodeType := map[string]string{
+		assetmodel.KindImage: "editorMediaImage",
+		assetmodel.KindAudio: "editorMediaAudio",
+		assetmodel.KindVideo: "editorMediaVideo",
+	}[kind]
+	return map[string]any{
+		"type": "doc",
+		"content": []map[string]any{
+			{
+				"type":  nodeType,
+				"attrs": map[string]any{"src": url},
 			},
 		},
 	}

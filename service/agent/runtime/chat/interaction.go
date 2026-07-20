@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimeinteraction "github.com/dever-package/bot/service/agent/runtime/interaction"
 	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
 )
 
@@ -42,7 +43,7 @@ func resolveInteractionResponse(
 	if !ok || strings.TrimSpace(interactionText(interaction["id"])) != interactionID {
 		return interactionResumeState{}, fmt.Errorf("交互已失效，请重新提交当前需求")
 	}
-	if err := validateInteractionData(interactionFields(interaction["fields"]), data); err != nil {
+	if err := runtimeinteraction.ValidateResponse(interaction, data); err != nil {
 		return interactionResumeState{}, err
 	}
 	knowledgeUsed, _ := output["knowledge_used"].(bool)
@@ -62,49 +63,6 @@ func interactionLoadedSkills(ctx context.Context, requestID string) []agentmodel
 		return nil
 	}
 	return agentmodel.DecodeLoadedSkillRefs(run.Skills)
-}
-
-func interactionFields(value any) []any {
-	switch fields := value.(type) {
-	case []any:
-		return fields
-	case []map[string]any:
-		result := make([]any, 0, len(fields))
-		for _, field := range fields {
-			result = append(result, field)
-		}
-		return result
-	default:
-		return nil
-	}
-}
-
-func validateInteractionData(fields []any, data map[string]any) error {
-	if len(fields) == 0 {
-		return fmt.Errorf("交互字段为空")
-	}
-	if data == nil {
-		return fmt.Errorf("交互回答不能为空")
-	}
-	for _, value := range fields {
-		field, ok := value.(map[string]any)
-		if !ok {
-			return fmt.Errorf("交互字段格式无效")
-		}
-		key := strings.TrimSpace(interactionText(field["key"]))
-		if key == "" {
-			return fmt.Errorf("交互字段缺少 key")
-		}
-		if runtimemessageoutput.HasValue(data[key]) {
-			continue
-		}
-		name := strings.TrimSpace(interactionText(field["name"]))
-		if name == "" {
-			name = key
-		}
-		return fmt.Errorf("请补充必填信息：%s", name)
-	}
-	return nil
 }
 
 func interactionText(value any) string {

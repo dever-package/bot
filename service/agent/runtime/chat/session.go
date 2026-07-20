@@ -90,6 +90,28 @@ func (s Service) StartSession(ctx context.Context, request SessionRequest) (map[
 	return s.ResolveSession(ctx, request)
 }
 
+func (s Service) EnsureSession(ctx context.Context, request SessionRequest) (agentmodel.Session, error) {
+	owner, err := currentOwner(ctx)
+	if err != nil {
+		return agentmodel.Session{}, err
+	}
+	if request.SessionID > 0 {
+		session, currentErr := requireSession(ctx, owner, request.SessionID)
+		if currentErr != nil {
+			return agentmodel.Session{}, currentErr
+		}
+		if currentErr = validateSessionScope(*session, request.AgentKey, request.ContextKey); currentErr != nil {
+			return agentmodel.Session{}, currentErr
+		}
+		return *session, nil
+	}
+	session := resolveSession(ctx, owner, request)
+	if session.ID == 0 {
+		return agentmodel.Session{}, fmt.Errorf("创建会话失败")
+	}
+	return session, nil
+}
+
 func (Service) ReviewSessions(ctx context.Context, request SessionRequest) (map[string]any, error) {
 	owner, err := currentOwner(ctx)
 	if err != nil {

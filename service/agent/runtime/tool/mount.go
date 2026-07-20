@@ -13,6 +13,7 @@ import (
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 	energonservice "github.com/dever-package/bot/service/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 type MountRequest struct {
@@ -20,6 +21,7 @@ type MountRequest struct {
 	Gateway        energonservice.GatewayService
 	PreparationKey string
 	References     []runtimeprovider.MediaReference
+	Billing        botprotocol.BillingContext
 	EnableDocument bool
 	Method         string
 	Host           string
@@ -107,7 +109,7 @@ func mountPowerTools(request MountRequest, registry *Registry, candidates []powe
 		}
 		current := runtimeprovider.PowerTool(candidate.row, candidate.config, powerParametersSchema(candidate.config.Params), request.Gateway, runtimeprovider.Transport{
 			Method: request.Method, Host: request.Host, Path: request.Path, Headers: request.Headers,
-		}, request.References)
+		}, request.References, request.Billing)
 		if err := registry.Add(current); err != nil {
 			warnings = append(warnings, fmt.Sprintf("能力 %s 未挂载: %s", candidate.row.Name, err.Error()))
 		}

@@ -8,11 +8,12 @@ import (
 
 const (
 	AskUserToolName   = "ask_user"
-	maxAskUserFields  = 4
-	maxAskUserOptions = 16
+	maxAskUserFields  = 16
+	maxAskUserOptions = 32
 )
 
 var askUserFieldTypes = map[string]struct{}{
+	"input": {}, "textarea": {}, "switch": {},
 	"option": {}, "multi_option": {}, "file": {}, "files": {},
 }
 
@@ -38,7 +39,11 @@ func AskUserTool() Tool {
 								"label": map[string]any{"type": "string", "description": "字段名称"},
 								"type": map[string]any{
 									"type": "string",
-									"enum": []any{"option", "multi_option", "file", "files"},
+									"enum": []any{"input", "textarea", "switch", "option", "multi_option", "file", "files"},
+								},
+								"placeholder": map[string]any{
+									"type":        "string",
+									"description": "输入提示；仅用于输入类字段",
 								},
 								"options": map[string]any{
 									"type":        "array",
@@ -125,6 +130,9 @@ func normalizeAskUserFields(value any) ([]map[string]any, error) {
 			"type":     fieldType,
 			"required": true,
 			"sort":     index + 1,
+		}
+		if placeholder := argumentText(field, "placeholder"); placeholder != "" {
+			normalized["placeholder"] = placeholder
 		}
 		if fieldType == "option" || fieldType == "multi_option" {
 			options := normalizeAskUserOptions(field["options"])

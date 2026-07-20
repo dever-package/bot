@@ -21,6 +21,10 @@ func FrameType(frame map[string]any) string {
 	return strings.ToLower(strings.TrimSpace(frontstream.InputText(frame["type"])))
 }
 
+func FrameStatus(frame map[string]any) int {
+	return int(frontstream.InputInt64(frame["status"], botprotocol.ResponseStatusSuccess))
+}
+
 func FrameOutput(frame map[string]any) botprotocol.Output {
 	if frame == nil {
 		return botprotocol.Output{}

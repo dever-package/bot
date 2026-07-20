@@ -62,6 +62,7 @@ type NodeExecutionIndex struct {
 	NodeRun       struct{} `index:"node_run_id"`
 	AgentRun      struct{} `index:"agent_run_id"`
 	Approval      struct{} `index:"approval_id"`
+	ChildRun      struct{} `index:"child_run_id"`
 }
 
 func NewNodeExecutionModel() *orm.Model[NodeExecution] {

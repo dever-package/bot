@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	canvasVideoCompositionVersion  = 1
+	canvasVideoCompositionVersion  = 2
 	canvasVideoCompositionMaxClips = 50
 )
 
@@ -43,21 +43,19 @@ func resolveCanvasVideoComposition(
 		}
 		clips = append(clips, clip)
 	}
-	settings, err := resolveCanvasVideoCompositionSettings(ctx, projectID, mapValue(raw["settings"]))
-	if err != nil {
-		return nil, err
-	}
 	return map[string]any{
-		"version":  canvasVideoCompositionVersion,
-		"clips":    clips,
-		"settings": settings,
+		"version": canvasVideoCompositionVersion,
+		"clips":   clips,
+		"settings": resolveCanvasVideoCompositionSettings(
+			mapValue(raw["settings"]),
+		),
 	}, nil
 }
 
 func canvasVideoCompositionURLs(composition map[string]any) []string {
 	result := make([]string, 0, len(sliceValue(composition["clips"])))
 	for _, value := range sliceValue(composition["clips"]) {
-		if videoURL := textValue(mapValue(value)["video"]); videoURL != "" {
+		if videoURL := textValue(mapValue(value)["visual_video"]); videoURL != "" {
 			result = append(result, videoURL)
 		}
 	}
@@ -71,87 +69,133 @@ func resolveCanvasVideoClip(
 	raw map[string]any,
 ) (map[string]any, error) {
 	label := fmt.Sprintf("第 %d 个镜头", index+1)
-	videoURL, err := resolveCanvasCompositionMediaURL(
+	if issues := canvasTextList(firstPresent(raw["blocking_issues"], raw["blockingIssues"])); len(issues) > 0 {
+		return nil, fmt.Errorf("%s尚不能合成: %s", label, strings.Join(issues, "；"))
+	}
+	visualVideo, err := resolveCanvasCompositionMediaURL(
 		ctx,
 		projectID,
-		mapValue(raw["video"]),
+		mapValue(firstPresent(raw["visual_video"], raw["visualVideo"])),
 		botprotocol.MediaTypeVideo,
-		label,
+		label+"画面",
 	)
 	if err != nil {
 		return nil, err
 	}
-	soundRaw := mapValue(raw["sound"])
-	sound := map[string]any{
-		"keep_original":   canvasBoolValue(firstPresent(soundRaw["keep_original"], soundRaw["keepOriginal"]), true),
-		"original_volume": boundedCanvasVolume(firstPresent(soundRaw["original_volume"], soundRaw["originalVolume"]), 1),
-		"voice_volume":    boundedCanvasVolume(firstPresent(soundRaw["voice_volume"], soundRaw["voiceVolume"]), 1),
+	transition, err := resolveCanvasVideoTransition(
+		label,
+		mapValue(firstPresent(raw["transition_to_next"], raw["transitionToNext"])),
+	)
+	if err != nil {
+		return nil, err
 	}
-	if voiceRaw := mapValue(soundRaw["voice"]); len(voiceRaw) > 0 {
-		voiceURL, voiceErr := resolveCanvasCompositionMediaURL(
+
+	clip := map[string]any{
+		"id":                 textValue(raw["id"]),
+		"title":              firstText(raw["title"], label),
+		"visual_video":       visualVideo,
+		"duration":           canvasFloat64Value(raw["duration"]),
+		"subtitle":           textValue(raw["subtitle"]),
+		"original_volume":    boundedCanvasVolume(firstPresent(raw["original_volume"], raw["originalVolume"]), 1),
+		"speech_tracks":      []any{},
+		"transition_to_next": transition,
+	}
+	if originalRaw := mapValue(firstPresent(raw["original_audio_source"], raw["originalAudioSource"])); len(originalRaw) > 0 {
+		originalAudio, originalErr := resolveCanvasCompositionMediaURL(
 			ctx,
 			projectID,
-			voiceRaw,
-			botprotocol.MediaTypeAudio,
-			label+"配音",
+			originalRaw,
+			botprotocol.MediaTypeVideo,
+			label+"原声来源",
 		)
-		if voiceErr != nil {
-			return nil, voiceErr
+		if originalErr != nil {
+			return nil, originalErr
 		}
-		sound["voice"] = voiceURL
+		clip["original_audio_source"] = originalAudio
 	}
-	transitionRaw := mapValue(firstPresent(raw["transition_to_next"], raw["transitionToNext"]))
-	transitionType := strings.ToLower(textValue(transitionRaw["type"]))
+
+	tracks, err := resolveCanvasVideoSpeechTracks(
+		ctx,
+		projectID,
+		label,
+		sliceValue(firstPresent(raw["speech_tracks"], raw["speechTracks"])),
+	)
+	if err != nil {
+		return nil, err
+	}
+	clip["speech_tracks"] = tracks
+	return clip, nil
+}
+
+func resolveCanvasVideoSpeechTracks(
+	ctx context.Context,
+	projectID uint64,
+	clipLabel string,
+	rawTracks []any,
+) ([]any, error) {
+	tracks := make([]any, 0, len(rawTracks))
+	usedIDs := map[string]bool{}
+	for index, value := range rawTracks {
+		raw := mapValue(value)
+		trackID := textValue(raw["id"])
+		if trackID == "" || usedIDs[trackID] {
+			return nil, fmt.Errorf("%s第 %d 条语音轨标识无效", clipLabel, index+1)
+		}
+		usedIDs[trackID] = true
+		audioURL, err := resolveCanvasCompositionMediaURL(
+			ctx,
+			projectID,
+			mapValue(raw["audio"]),
+			botprotocol.MediaTypeAudio,
+			fmt.Sprintf("%s第 %d 条语音", clipLabel, index+1),
+		)
+		if err != nil {
+			return nil, err
+		}
+		startTime := canvasFloat64Value(firstPresent(raw["start_time"], raw["startTime"]))
+		if startTime < 0 {
+			return nil, fmt.Errorf("%s第 %d 条语音开始时间不能小于 0", clipLabel, index+1)
+		}
+		kind := strings.ToLower(textValue(raw["kind"]))
+		if kind != "dialogue" && kind != "narration" {
+			return nil, fmt.Errorf("%s第 %d 条语音类型无效", clipLabel, index+1)
+		}
+		tracks = append(tracks, map[string]any{
+			"id":           trackID,
+			"audio":        audioURL,
+			"start_time":   startTime,
+			"kind":         kind,
+			"character_id": textValue(firstPresent(raw["character_id"], raw["characterId"])),
+			"text":         textValue(raw["text"]),
+			"volume":       boundedCanvasVolume(raw["volume"], 1),
+		})
+	}
+	return tracks, nil
+}
+
+func resolveCanvasVideoTransition(label string, raw map[string]any) (map[string]any, error) {
+	transitionType := strings.ToLower(textValue(raw["type"]))
+	if transitionType == "" {
+		transitionType = "none"
+	}
 	if !canvasVideoTransitionTypes[transitionType] {
 		return nil, fmt.Errorf("%s使用了不支持的转场", label)
 	}
-	durationMS := int(uint64Value(firstPresent(transitionRaw["duration_ms"], transitionRaw["durationMs"])))
+	durationMS := int(uint64Value(firstPresent(raw["duration_ms"], raw["durationMs"])))
 	if transitionType != "none" && (durationMS < 100 || durationMS > 5000) {
 		return nil, fmt.Errorf("%s的转场时长必须在 0.1 到 5 秒之间", label)
 	}
 	return map[string]any{
-		"id":       textValue(raw["id"]),
-		"title":    firstText(raw["title"], label),
-		"video":    videoURL,
-		"duration": canvasFloat64Value(raw["duration"]),
-		"subtitle": textValue(raw["subtitle"]),
-		"sound":    sound,
-		"transition_to_next": map[string]any{
-			"type":        transitionType,
-			"duration_ms": durationMS,
-		},
+		"type":        transitionType,
+		"duration_ms": durationMS,
 	}, nil
 }
 
-func resolveCanvasVideoCompositionSettings(
-	ctx context.Context,
-	projectID uint64,
-	raw map[string]any,
-) (map[string]any, error) {
-	settings := map[string]any{
+func resolveCanvasVideoCompositionSettings(raw map[string]any) map[string]any {
+	return map[string]any{
 		"resolution": firstText(raw["resolution"], "1920x1080"),
 		"fps":        firstPresent(raw["fps"], 25),
-		"background_music_volume": boundedCanvasVolume(
-			firstPresent(raw["background_music_volume"], raw["backgroundMusicVolume"]),
-			0.2,
-		),
 	}
-	backgroundRaw := mapValue(firstPresent(raw["background_music"], raw["backgroundMusic"]))
-	if len(backgroundRaw) == 0 {
-		return settings, nil
-	}
-	backgroundURL, err := resolveCanvasCompositionMediaURL(
-		ctx,
-		projectID,
-		backgroundRaw,
-		botprotocol.MediaTypeAudio,
-		"背景音乐",
-	)
-	if err != nil {
-		return nil, err
-	}
-	settings["background_music"] = backgroundURL
-	return settings, nil
 }
 
 func resolveCanvasCompositionMediaURL(
@@ -209,21 +253,12 @@ func canvasFloat64Value(value any) float64 {
 	}
 }
 
-func canvasBoolValue(value any, fallback bool) bool {
-	switch current := value.(type) {
-	case bool:
-		return current
-	case int:
-		return current != 0
-	case float64:
-		return current != 0
-	case string:
-		switch strings.ToLower(strings.TrimSpace(current)) {
-		case "1", "true", "yes", "on":
-			return true
-		case "0", "false", "no", "off":
-			return false
+func canvasTextList(value any) []string {
+	result := []string{}
+	for _, raw := range sliceValue(value) {
+		if text := textValue(raw); text != "" {
+			result = append(result, text)
 		}
 	}
-	return fallback
+	return result
 }

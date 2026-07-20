@@ -17,6 +17,9 @@ const (
 	RoleWork     = "work"
 	RoleMaterial = "material"
 
+	NameModeAuto   = "auto"
+	NameModeManual = "manual"
+
 	SourceProject  = "project"
 	SourceTool     = "tool"
 	SourceDialogue = "dialogue"
@@ -120,6 +123,7 @@ type Asset struct {
 	SourceID    uint64    `dorm:"type:bigint;not null;default:0;comment:来源对象"`
 	SourceName  string    `dorm:"type:varchar(512);not null;default:'';comment:来源路径"`
 	Name        string    `dorm:"type:varchar(128);not null;comment:名称"`
+	NameMode    string    `dorm:"type:varchar(16);not null;default:'auto';comment:名称模式"`
 	Kind        string    `dorm:"type:varchar(32);not null;default:'text';comment:产物类型"`
 	Role        string    `dorm:"type:varchar(32);not null;default:'material';comment:资产角色"`
 	VersionID   uint64    `dorm:"type:bigint;not null;default:0;comment:当前版本"`

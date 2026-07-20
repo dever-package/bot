@@ -12,8 +12,6 @@ import (
 	assetservice "github.com/dever-package/bot/service/asset"
 	energonservice "github.com/dever-package/bot/service/energon"
 	energoninput "github.com/dever-package/bot/service/energon/input"
-	botprotocol "github.com/dever-package/bot/service/energon/protocol"
-	energonstream "github.com/dever-package/bot/service/energon/stream"
 	"github.com/dever-package/bot/service/stream"
 )
 
@@ -265,17 +263,40 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	if requestID == "" {
 		requestID = newRequestID()
 	}
+	nodeKey := normalizeKey("node", req.NodeKey)
+	if workspaceRun {
+		nodeKey = fmt.Sprintf("function:%d:%s", req.TeamPowerID, requestID)
+	}
+	nodeName := strings.TrimSpace(req.NodeName)
+	if nodeName == "" {
+		nodeName = power.Name
+	}
+	req.Billing.TeamID = teamID
+	req.Billing.ProjectID = req.ProjectID
 	now := time.Now()
 	runInput := mergeMaps(req.Input, req.Params)
 	if req.SourceTargetID > 0 {
 		runInput[CanvasPowerMetaSourceTargetID] = req.SourceTargetID
 	}
+	runInput[CanvasPowerMetaResumeMode] = CanvasPowerResumeMode
+	runInput[CanvasPowerMetaContext] = map[string]any{
+		"power_id":         power.ID,
+		"power_key":        power.Key,
+		"source_target_id": req.SourceTargetID,
+		"flow_id":          flow.ID,
+		"asset_cate_id":    req.AssetCateID,
+		"node_key":         nodeKey,
+		"node_name":        nodeName,
+		"kind":             power.Kind,
+		"persist_result":   req.PersistResult,
+	}
 	if workspaceRun {
 		runInput["_mode"] = "workspace_power"
 		runInput[CanvasPowerMetaTeamPowerID] = req.TeamPowerID
 	}
+	attachRunBilling(runInput, req.Billing)
 	input := executionInput(runInput)
-	runID := s.repo.InsertRun(ctx, map[string]any{
+	runRecord := map[string]any{
 		"request_id": requestID,
 		"project_id": req.ProjectID,
 		"body_id":    req.BodyID,
@@ -288,7 +309,9 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		"started_at": now,
 		"created_at": now,
 		"updated_at": now,
-	})
+	}
+	attachRunScope(ctx, runRecord)
+	runID := s.repo.InsertRun(ctx, runRecord)
 	if runID == 0 {
 		return nil, fmt.Errorf("创建画布能力运行失败")
 	}
@@ -296,6 +319,7 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	if run == nil {
 		return nil, fmt.Errorf("画布能力运行不存在")
 	}
+	req.Billing.RunID = run.ID
 	s.writeRunEvent(ctx, *run, stream.EventRunStarted, map[string]any{
 		"feature": stream.FeaturePower,
 		"scope":   "run",
@@ -333,14 +357,6 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 			"started_at": now.Format(time.RFC3339Nano),
 		})
 	}
-	nodeKey := normalizeKey("node", req.NodeKey)
-	if workspaceRun {
-		nodeKey = fmt.Sprintf("function:%d:%s", req.TeamPowerID, requestID)
-	}
-	nodeName := strings.TrimSpace(req.NodeName)
-	if nodeName == "" {
-		nodeName = power.Name
-	}
 	var nodeRunID uint64
 	if flow.ID > 0 && flowRun != nil {
 		nodeRunID = s.repo.FindOrCreateDynamicNodeRun(ctx, *run, *flowRun, flow, 0, nodeKey, nodeName, teammodel.NodeTypePower, input)
@@ -369,7 +385,7 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 			req.OnStream(payload)
 		}
 	}
-	output, err := s.callCanvasPower(ctx, requestID, power, input, req.SourceTargetID, onStream)
+	output, err := s.executePower(ctx, requestID, power, input, req.SourceTargetID, req.Billing, onStream)
 	status := teammodel.RunStatusSuccess
 	if err != nil {
 		status = teammodel.RunStatusFail
@@ -377,6 +393,22 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	if current := s.repo.FindRun(ctx, run.ID); current != nil && current.Status == teammodel.RunStatusCanceled {
 		status = teammodel.RunStatusCanceled
 		err = nil
+	}
+	if status == teammodel.RunStatusSuccess {
+		if interaction := canvasPowerInteraction(output); len(interaction) > 0 {
+			return s.waitCanvasPowerInteraction(
+				ctx,
+				*run,
+				flowRun,
+				flow,
+				dynamicNode,
+				nodeRun,
+				flowRunID,
+				nodeRunID,
+				output,
+				interaction,
+			), nil
+		}
 	}
 	finishedAt := time.Now()
 	nodeRecord := map[string]any{
@@ -415,22 +447,6 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 			"finished_at": finishedAt.Format(time.RFC3339Nano),
 		})
 	}
-	assetRequest := assetservice.SaveVersionRequest{
-		ProjectID:   req.ProjectID,
-		BodyID:      req.BodyID,
-		TeamID:      teamID,
-		FlowID:      flow.ID,
-		AssetCateID: req.AssetCateID,
-		RunID:       run.ID,
-		NodeRunID:   nodeRunID,
-		ReleaseID:   releaseID,
-		RequestID:   requestID,
-		NodeKey:     nodeKey,
-		Name:        nodeName,
-		Kind:        power.Kind,
-		Role:        assetmodel.RoleMaterial,
-		Content:     output,
-	}
 	var asset *assetmodel.Asset
 	var version *assetmodel.Version
 	s.finishRun(ctx, run.ID, status, output, err)
@@ -465,7 +481,14 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	}
 
 	if asset == nil || version == nil {
-		asset, version, err = s.asset.SaveVersion(ctx, assetRequest)
+		asset, version, err = s.saveCanvasPowerResult(
+			ctx,
+			*run,
+			mapValue(runInput[CanvasPowerMetaContext]),
+			nodeRunID,
+			requestID,
+			output,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -526,52 +549,6 @@ func (s Service) runtimeGraphByRelease(ctx context.Context, teamID uint64, relea
 	return release, graph, err
 }
 
-func (s Service) callCanvasPower(ctx context.Context, requestID string, power PowerOption, input map[string]any, sourceTargetID uint64, onStream func(map[string]any)) (map[string]any, error) {
-	sourceTargetID = resolveSourceTargetID(sourceTargetID, input)
-	body := map[string]any{
-		"protocol": "shemic",
-		"power":    power.Key,
-		"input":    input,
-		"history":  []any{},
-		"options":  map[string]any{"stream": true},
-	}
-	if sourceTargetID > 0 {
-		body["source_target_id"] = sourceTargetID
-	}
-	start := s.gateway.Request(ctx, energonservice.GatewayRequest{
-		RequestID: requestID,
-		Method:    "POST",
-		Path:      "/bot/admin/energon/request",
-		Body:      body,
-	})
-	if start.Status != 1 {
-		return nil, fmt.Errorf("%s", firstText(start.Msg, "能力运行失败"))
-	}
-
-	collected := s.gateway.CollectStream(ctx, energonstream.CollectOptions{
-		RequestID:        requestID,
-		Block:            time.Second,
-		CollectDeltaText: true,
-		OnOutput: func(_ context.Context, output botprotocol.Output) error {
-			if onStream != nil {
-				onStream(botprotocol.BuildStreamResponse(requestID, output).Payload())
-			}
-			return nil
-		},
-	})
-	output := mapValue(collected.Frame["output"])
-	if collected.State.Text != "" && textValue(output["text"]) == "" {
-		output["text"] = collected.State.Text
-	}
-	if collected.Err != nil {
-		return powerOutputValue(output, power.Kind), collected.Err
-	}
-	if intValue(collected.Frame["status"], 1) != 1 {
-		return powerOutputValue(output, power.Kind), fmt.Errorf("%s", firstText(collected.Frame["msg"], "能力运行失败"))
-	}
-	return powerOutputValue(output, power.Kind), nil
-}
-
 func powerOutputValue(raw any, kind string) map[string]any {
 	if row := mapValue(raw); len(row) > 0 {
 		return row
@@ -601,6 +578,35 @@ func powerOutputScalarKey(kind string) string {
 	default:
 		return "text"
 	}
+}
+
+func (s Service) saveCanvasPowerResult(
+	ctx context.Context,
+	run teammodel.Run,
+	metadata map[string]any,
+	nodeRunID uint64,
+	requestID string,
+	content map[string]any,
+) (*assetmodel.Asset, *assetmodel.Version, error) {
+	if !boolValue(metadata["persist_result"]) {
+		return nil, nil, nil
+	}
+	return s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
+		ProjectID:   run.ProjectID,
+		BodyID:      run.BodyID,
+		TeamID:      run.TeamID,
+		FlowID:      uint64Value(metadata["flow_id"]),
+		AssetCateID: uint64Value(metadata["asset_cate_id"]),
+		RunID:       run.ID,
+		NodeRunID:   nodeRunID,
+		ReleaseID:   run.ReleaseID,
+		RequestID:   requestID,
+		NodeKey:     firstText(metadata["node_key"]),
+		Name:        firstText(metadata["node_name"]),
+		Kind:        firstText(metadata["kind"]),
+		Role:        assetmodel.RoleMaterial,
+		Content:     content,
+	})
 }
 
 func powerOutputListKey(kind string) string {
