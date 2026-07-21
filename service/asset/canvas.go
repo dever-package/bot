@@ -31,6 +31,7 @@ func (s Service) SyncCanvasMaterialSlots(ctx context.Context, projectID uint64, 
 		"project_id":    projectID,
 		"asset_cate_id": assetCateID,
 		"role":          assetmodel.RoleMaterial,
+		"status":        map[string]any{"neq": assetmodel.StatusDeleted},
 	})
 	for _, row := range rows {
 		if row == nil {
@@ -55,11 +56,15 @@ func (s Service) SyncCanvasMaterialSlots(ctx context.Context, projectID uint64, 
 		} else {
 			changes["status"] = assetmodel.StatusArchive
 		}
-		assetModel.Update(ctx, map[string]any{"id": row.ID}, changes)
+		assetModel.Update(ctx, map[string]any{
+			"id":     row.ID,
+			"status": map[string]any{"neq": assetmodel.StatusDeleted},
+		}, changes)
 		if slot, exists := activeSlots[nodeKey]; exists && slot.Name != "" {
 			assetModel.Update(ctx, map[string]any{
 				"id":        row.ID,
 				"name_mode": map[string]any{"neq": assetmodel.NameModeManual},
+				"status":    map[string]any{"neq": assetmodel.StatusDeleted},
 			}, map[string]any{"name": slot.Name})
 		}
 	}

@@ -186,6 +186,8 @@ func (Workbench) GetAssets(c *server.Context) error {
 		NodeKey:     botapi.QueryText(c, "node_key", "nodeKey"),
 		Role:        botapi.QueryText(c, "role"),
 		Kind:        botapi.QueryText(c, "kind", "type"),
+		View:        botapi.QueryText(c, "view"),
+		ContentMode: botapi.QueryText(c, "content_mode", "contentMode"),
 		Page:        int(botapi.QueryUint64(c, "page")),
 		PageSize:    int(botapi.QueryUint64(c, "page_size", "pageSize")),
 	})
@@ -254,6 +256,32 @@ func (Workbench) PostAssetRename(c *server.Context) error {
 		botapi.Uint64FromBody(body, "team_id", "teamId"),
 		botapi.Uint64FromBody(body, "asset_id", "assetId", "id"),
 		botapi.TextFromBody(body, "name", "title"),
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Workbench) PostAssetDelete(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := workbenchRunner.DeleteAsset(
+		c.Context(),
+		botapi.Uint64FromBody(body, "team_id", "teamId"),
+		botapi.Uint64FromBody(body, "asset_id", "assetId", "id"),
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Workbench) PostAssetRestore(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := workbenchRunner.RestoreAsset(
+		c.Context(),
+		botapi.Uint64FromBody(body, "team_id", "teamId"),
+		botapi.Uint64FromBody(body, "asset_id", "assetId", "id"),
 	)
 	return botapi.WriteJSON(c, data, err)
 }

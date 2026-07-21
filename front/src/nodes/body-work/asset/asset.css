@@ -58,6 +58,46 @@
   gap: 8px;
 }
 
+.wb-asset-view-switch {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  border-radius: 5px;
+  background: #f3f5f4;
+  padding: 2px;
+}
+
+.wb-asset-view-switch button {
+  display: inline-flex;
+  height: 26px;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #7a847f;
+  cursor: pointer;
+  padding: 0 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.wb-asset-view-switch button:hover {
+  color: #25312b;
+}
+
+.wb-asset-view-switch button.is-active {
+  background: #fff;
+  color: #36443d;
+  box-shadow: 0 1px 2px rgba(19, 34, 27, 0.08);
+}
+
+.wb-asset-view-switch svg {
+  width: 13px;
+  height: 13px;
+}
+
 .wb-asset-segments {
   display: flex;
   flex: 0 0 auto;
@@ -696,9 +736,17 @@
 }
 
 .wb-asset-card-copy strong {
+  display: -webkit-box;
+  min-height: 40px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   color: #17201c;
   font-size: 14px;
   font-weight: 650;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .wb-asset-card-copy span {
@@ -759,6 +807,23 @@
 .wb-asset-card-actions button.is-primary.is-selected {
   border-color: #244b3b;
   background: #244b3b;
+}
+
+.wb-asset-card-actions button.is-danger:hover:not(:disabled) {
+  border-color: #efc7c7;
+  background: #fff4f4;
+  color: #b4232a;
+}
+
+.wb-asset-card-actions button.is-restore:hover:not(:disabled) {
+  border-color: #b9d5c8;
+  background: #f0f8f4;
+  color: #176845;
+}
+
+.wb-asset-card-actions button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .wb-asset-card-actions svg {

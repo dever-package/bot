@@ -26,8 +26,10 @@ import {
   assetKindLabel,
   assetRoleLabel,
   assetSourceLabel,
+  type AssetSourceLabels,
 } from "./asset-contract";
 import type { AssetDetail, AssetRecord, AssetVersion } from "./asset-types";
+import { useAssetSourceLabels } from "./asset-source-labels";
 
 export function AssetDetailDialog({
   teamID,
@@ -48,6 +50,7 @@ export function AssetDetailDialog({
   canContinue?: (asset: AssetRecord) => boolean;
   onAssetChanged?: (asset: AssetRecord) => void;
 }) {
+  const sourceLabels = useAssetSourceLabels();
   const [detail, setDetail] = useState<AssetDetail | null>(null);
   const [previewVersion, setPreviewVersion] = useState<AssetVersion | null>(
     null,
@@ -160,6 +163,7 @@ export function AssetDetailDialog({
   }
 
   const asset = detail?.asset;
+  const isDeleted = asset?.status === "deleted";
   const isCurrent = Boolean(
     asset && previewVersion && asset.versionID === previewVersion.id,
   );
@@ -176,7 +180,7 @@ export function AssetDetailDialog({
           title={asset?.name || "资产详情"}
           subtitle={
             asset
-              ? `${sourceLabel(asset)} · ${assetKindLabel(asset.kind)} · ${assetRoleLabel(asset.role)}`
+              ? `${sourceLabel(asset, sourceLabels)} · ${assetKindLabel(asset.kind)} · ${assetRoleLabel(asset.role)}`
               : ""
           }
           versionSelect={
@@ -203,7 +207,9 @@ export function AssetDetailDialog({
             ) : undefined
           }
           state={
-            versionLoading > 0 ? (
+            isDeleted ? (
+              <span className="wb-detail-state">回收站</span>
+            ) : versionLoading > 0 ? (
               <span className="wb-detail-state is-saving">
                 <Loader2 size={12} className="wb-detail-spin" />
                 读取中
@@ -216,7 +222,7 @@ export function AssetDetailDialog({
             previewVersion?.updatedAt || previewVersion?.createdAt,
           )}
           actions={
-            asset && previewVersion ? (
+            asset && previewVersion && !isDeleted ? (
               <>
                 <button
                   type="button"
@@ -402,8 +408,11 @@ function uniqueVersions(versions: AssetVersion[]) {
   );
 }
 
-function sourceLabel(asset: AssetRecord) {
-  const prefix = assetSourceLabel(asset.sourceType);
+function sourceLabel(
+  asset: AssetRecord,
+  labels: AssetSourceLabels,
+) {
+  const prefix = assetSourceLabel(asset.sourceType, labels);
   return asset.sourceName && asset.sourceName !== prefix
     ? `${prefix} / ${asset.sourceName}`
     : prefix;

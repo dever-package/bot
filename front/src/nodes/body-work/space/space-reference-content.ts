@@ -51,6 +51,16 @@ export function canvasReferenceContentFromText(
   return { version: 1, parts };
 }
 
+export function canvasReferenceContentFromUnambiguousText(
+  value: string,
+  targets: CanvasReferenceTarget[],
+) {
+  return canvasReferenceContentFromText(
+    value,
+    unambiguousReferenceTargets(targets),
+  );
+}
+
 export function canvasReferenceContentFromTargets(
   value: string,
   targets: CanvasReferenceTarget[],
@@ -388,18 +398,52 @@ function uniqueReferenceTargets(
   return result;
 }
 
+function unambiguousReferenceTargets(targets: CanvasReferenceTarget[]) {
+  const targetsByMention = new Map<
+    string,
+    {
+      target: CanvasReferenceTarget;
+      targetKey: string;
+      ambiguous: boolean;
+    }
+  >();
+  for (const target of targets) {
+    const label = normalizeCanvasReferenceLabel(target.label);
+    if (target.refId <= 0 || !label) {
+      continue;
+    }
+    const mention = `${target.trigger || "@"}${label}`;
+    const targetKey = canvasReferenceContentTargetKey(target);
+    const current = targetsByMention.get(mention);
+    if (!current) {
+      targetsByMention.set(mention, {
+        target,
+        targetKey,
+        ambiguous: false,
+      });
+      continue;
+    }
+    if (current.targetKey !== targetKey) {
+      current.ambiguous = true;
+    }
+  }
+  return [...targetsByMention.values()]
+    .filter((entry) => !entry.ambiguous)
+    .map((entry) => entry.target);
+}
+
 function canvasReferenceContentTargetKey(target: CanvasReferenceTarget) {
   return `${canvasReferenceTargetKey(target)}:${target.usage || ""}`;
 }
 
 function canvasReferenceTargetKey(target: CanvasReferenceTarget) {
-  return `${target.refType}:${target.refId}:${target.versionId || 0}`;
+  return `${target.refType}:${target.refId}`;
 }
 
 function canvasReferencePartKey(
   part: Extract<CanvasReferenceContent["parts"][number], { type: "reference" }>,
 ) {
-  return `${part.ref_type}:${part.ref_id}:${part.ref_version_id || 0}`;
+  return `${part.ref_type}:${part.ref_id}`;
 }
 
 function appendReferenceTarget(

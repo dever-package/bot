@@ -38,20 +38,19 @@
   "nodes": {
     "dialog-shell": [
       {
-        "type": "form-input",
-        "name": "账号标识",
-        "placeholder": "例如：feishu",
+        "type": "form-radio",
+        "name": "类型",
         "value": "form.provider",
         "mode": "form",
-        "info": "使用小写字母、数字和中划线，接入真实登录后作为稳定识别值。",
         "validate": [
           {
             "type": "required",
-            "message": "账号标识不能为空。"
+            "message": "请选择账号类型。"
           }
         ],
         "meta": {
-          "formLayout": "horizontal"
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[260px]"
         }
       },
       {
@@ -71,6 +70,19 @@
         }
       },
       {
+        "type": "form-array",
+        "name": "账号配置",
+        "value": "form.configs",
+        "mode": "form",
+        "info": "按 Key / Value 维护当前账号类型所需配置。App Secret 会加密保存，编辑时留空表示保留原值。",
+        "meta": {
+          "pageRoute": "/bot/body/account_config/update",
+          "addText": "添加配置",
+          "itemName": "配置项",
+          "formLayout": "horizontal"
+        }
+      },
+      {
         "type": "form-upload",
         "name": "按钮图标",
         "value": "form.icon",
@@ -86,46 +98,47 @@
           "bizName": "Body三方账号图标",
           "maxCount": 1
         }
-      },
-      {
-        "type": "form-switch",
-        "name": "状态",
-        "value": "form.status",
-        "mode": "form",
-        "meta": {
-          "formLayout": "horizontal",
-          "trueValue": 1,
-          "falseValue": 2
-        }
-      },
-      {
-        "type": "form-number",
-        "name": "排序",
-        "value": "form.sort",
-        "mode": "form",
-        "info": "数值越小越靠前。",
-        "meta": {
-          "formLayout": "horizontal",
-          "controlClassName": "max-w-[180px]"
-        }
       }
     ]
   },
   "data": {
     "form": {
+      "model": "bot.body.NewAccountModel",
+      "service": "bot.body.AccountHook.AttachAccountForm",
+      "_fields": [
+        "provider",
+        "name",
+        "icon",
+        "configs"
+      ],
       "id": 0,
-      "provider": "",
+      "provider": "feishu",
       "name": "",
       "icon": "",
-      "status": 1,
-      "sort": 100
+      "configs": [
+        {
+          "id": 0,
+          "account_id": 0,
+          "key": "app_id",
+          "value": ""
+        },
+        {
+          "id": 0,
+          "account_id": 0,
+          "key": "app_secret",
+          "value": ""
+        }
+      ]
     }
   },
   "state": {},
   "action": {
     "submit": {
       "type": "save",
-      "params": "form"
+      "params": "form",
+      "before": {
+        "service": "bot.body.AccountHook.BeforeSaveAccount"
+      }
     }
   }
 }

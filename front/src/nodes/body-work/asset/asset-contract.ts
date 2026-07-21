@@ -1,10 +1,14 @@
 import type { AssetKind, AssetRole, AssetSourceType } from "./asset-types";
 
+export type AssetSourceLabels = Partial<Record<AssetSourceType, string>> & {
+  fallback?: string;
+};
+
 export const assetSourceSpecs: ReadonlyArray<{
   key: AssetSourceType;
   label: string;
 }> = [
-  { key: "project", label: "项目" },
+  { key: "project", label: "创作" },
   { key: "tool", label: "工具" },
   { key: "dialogue", label: "对话" },
   { key: "upload", label: "上传" },
@@ -30,8 +34,13 @@ export const assetKindSpecs: ReadonlyArray<{
   { key: "file", label: "文件" },
 ];
 
-export function assetSourceLabel(source: string) {
-  return optionLabel(assetSourceSpecs, source, "资产");
+export function assetSourceLabel(
+  source: string,
+  labels: AssetSourceLabels = {},
+) {
+  const fallback = labels.fallback || "资产";
+  const defaultLabel = optionLabel(assetSourceSpecs, source, fallback);
+  return labels[source as AssetSourceType] || defaultLabel;
 }
 
 export function assetRoleLabel(role: string) {

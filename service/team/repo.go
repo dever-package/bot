@@ -748,6 +748,55 @@ func (Repo) FindCurrentTeamRelease(ctx context.Context, teamID uint64) *teammode
 	})
 }
 
+func (Repo) CurrentTeamReleases(ctx context.Context, teams []teammodel.Team) map[uint64]teammodel.TeamRelease {
+	result := make(map[uint64]teammodel.TeamRelease, len(teams))
+	currentTeamByReleaseID := make(map[uint64]uint64, len(teams))
+	currentReleaseIDs := make([]uint64, 0, len(teams))
+	for _, team := range teams {
+		if team.ID == 0 || team.CurrentReleaseID == 0 {
+			continue
+		}
+		currentTeamByReleaseID[team.CurrentReleaseID] = team.ID
+		currentReleaseIDs = append(currentReleaseIDs, team.CurrentReleaseID)
+	}
+	if ids := uint64FilterValues(currentReleaseIDs); len(ids) > 0 {
+		rows := teammodel.NewTeamReleaseModel().Select(ctx, map[string]any{
+			"id":     ids,
+			"status": teammodel.TeamReleaseStatusCurrent,
+		})
+		for _, row := range rows {
+			if row == nil || currentTeamByReleaseID[row.ID] != row.TeamID {
+				continue
+			}
+			result[row.TeamID] = *row
+		}
+	}
+
+	unresolvedTeamIDs := make([]uint64, 0, len(teams)-len(result))
+	for _, team := range teams {
+		if team.ID > 0 {
+			if _, exists := result[team.ID]; !exists {
+				unresolvedTeamIDs = append(unresolvedTeamIDs, team.ID)
+			}
+		}
+	}
+	if ids := uint64FilterValues(unresolvedTeamIDs); len(ids) > 0 {
+		rows := teammodel.NewTeamReleaseModel().Select(ctx, map[string]any{
+			"team_id": ids,
+			"status":  teammodel.TeamReleaseStatusCurrent,
+		})
+		for _, row := range rows {
+			if row == nil {
+				continue
+			}
+			if _, exists := result[row.TeamID]; !exists {
+				result[row.TeamID] = *row
+			}
+		}
+	}
+	return result
+}
+
 func (Repo) ArchiveOtherTeamReleases(ctx context.Context, teamID uint64, keepID uint64) {
 	if teamID == 0 || keepID == 0 {
 		return

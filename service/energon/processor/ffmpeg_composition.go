@@ -14,9 +14,11 @@ import (
 )
 
 const (
-	ffmpegCompositionVersion  = 2
-	ffmpegCompositionMaxClips = 50
-	ffmpegDefaultResolution   = "1920x1080"
+	ffmpegCompositionVersion       = 2
+	ffmpegCompositionMaxClips      = 50
+	ffmpegCompositionVideoPadFloor = 1.0
+	ffmpegCompositionVideoPadRatio = 0.1
+	ffmpegDefaultResolution        = "1920x1080"
 )
 
 type ffmpegComposition struct {
@@ -68,6 +70,7 @@ type ffmpegPreparedClip struct {
 	VisualVideoInputIndex   int
 	OriginalAudioInputIndex int
 	Duration                float64
+	VideoPadDuration        float64
 	HasOriginalAudio        bool
 	SpeechTracks            []ffmpegPreparedSpeech
 }
@@ -192,15 +195,23 @@ func prepareFFmpegCompositionClip(
 		return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf("%s画面不是有效视频", label)
 	}
 	duration := clip.Duration
+	videoPadDuration := 0.0
 	if duration <= 0 {
 		duration = probe.Duration
-	} else if duration > probe.Duration+0.05 {
-		return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf(
-			"%s画面只有 %.2f 秒，短于脚本要求的 %.2f 秒",
-			label,
-			probe.Duration,
-			duration,
+	} else if duration > probe.Duration {
+		videoPadDuration = duration - probe.Duration
+		maxPadDuration := math.Max(
+			ffmpegCompositionVideoPadFloor,
+			duration*ffmpegCompositionVideoPadRatio,
 		)
+		if videoPadDuration > maxPadDuration+0.01 {
+			return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf(
+				"%s画面只有 %.2f 秒，明显短于脚本要求的 %.2f 秒，请重新生成该镜头",
+				label,
+				probe.Duration,
+				duration,
+			)
+		}
 	}
 	if duration < 0.1 {
 		return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf("%s时长过短", label)
@@ -222,6 +233,7 @@ func prepareFFmpegCompositionClip(
 		VisualVideoInputIndex:   inputIndex,
 		OriginalAudioInputIndex: -1,
 		Duration:                duration,
+		VideoPadDuration:        videoPadDuration,
 	}
 	args := []string{"-i", videoPath}
 	nextInputIndex := inputIndex + 1
@@ -339,9 +351,17 @@ func buildFFmpegCompositionFilters(
 	width, height, _ := strings.Cut(resolution, "x")
 	filters := make([]string, 0, len(clips)*4+8)
 	for index, clip := range clips {
+		videoPadFilter := ""
+		if clip.VideoPadDuration > 0 {
+			videoPadFilter = fmt.Sprintf(
+				"tpad=stop_mode=clone:stop_duration=%s,",
+				formatFFmpegSeconds(clip.VideoPadDuration),
+			)
+		}
 		filters = append(filters, fmt.Sprintf(
-			"[%d:v:0]trim=duration=%s,setpts=PTS-STARTPTS,scale=%s:%s:force_original_aspect_ratio=decrease,pad=%s:%s:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=%d,settb=AVTB,format=yuv420p[v%d]",
+			"[%d:v:0]%strim=duration=%s,setpts=PTS-STARTPTS,scale=%s:%s:force_original_aspect_ratio=decrease,pad=%s:%s:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=%d,settb=AVTB,format=yuv420p[v%d]",
 			clip.VisualVideoInputIndex,
+			videoPadFilter,
 			formatFFmpegSeconds(clip.Duration),
 			width,
 			height,

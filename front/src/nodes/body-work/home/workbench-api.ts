@@ -1,5 +1,6 @@
 import { joinSiteApi, request } from "@dever/front-plugin";
 import { isSuccessResponse } from "../shared/api-response";
+import { createInFlightRequestLoader } from "../shared/in-flight-request";
 
 export type WorkbenchTeam = {
   id: number;
@@ -55,34 +56,38 @@ export type WorkbenchCatalog = {
   assetCates: WorkbenchAssetCate[];
 };
 
-export async function loadWorkbenchCatalog(teamID = 0) {
-  const result = await request(joinSiteApi("workbench/catalog"), "get", {
-    team_id: teamID || undefined,
+const loadCatalogRequest = createInFlightRequestLoader<WorkbenchCatalog>();
+
+export function loadWorkbenchCatalog(teamID = 0) {
+  return loadCatalogRequest(String(teamID), async () => {
+    const result = await request(joinSiteApi("workbench/catalog"), "get", {
+      team_id: teamID || undefined,
+    });
+    const data = responseData(result, "加载团队工作区失败");
+    const teams = toRows(data.teams).map(normalizeTeam).filter(hasID);
+    const currentTeamValue = normalizeTeam(data.team);
+    const currentTeam = currentTeamValue.id
+      ? {
+          ...currentTeamValue,
+          projectEnabled: Boolean(data.project_enabled),
+        }
+      : null;
+    return {
+      teams,
+      team: currentTeam,
+      releaseID: numberValue(data.release?.id),
+      workspaceBodyID: numberValue(data.workspace?.body_id),
+      projectEnabled: Boolean(data.project_enabled),
+      powers: toRows(data.powers).map(normalizePower).filter(hasID),
+      roles: toRows(data.roles)
+        .map(normalizeRole)
+        .filter(hasID)
+        .filter(isExecutionRole),
+      assetCates: toRows(data.asset_cates)
+        .map(normalizeAssetCate)
+        .filter(hasID),
+    } satisfies WorkbenchCatalog;
   });
-  const data = responseData(result, "加载团队工作区失败");
-  const teams = toRows(data.teams).map(normalizeTeam).filter(hasID);
-  const currentTeamValue = normalizeTeam(data.team);
-  const currentTeam = currentTeamValue.id
-    ? {
-        ...currentTeamValue,
-        projectEnabled: Boolean(data.project_enabled),
-      }
-    : null;
-  return {
-    teams,
-    team: currentTeam,
-    releaseID: numberValue(data.release?.id),
-    workspaceBodyID: numberValue(data.workspace?.body_id),
-    projectEnabled: Boolean(data.project_enabled),
-    powers: toRows(data.powers).map(normalizePower).filter(hasID),
-    roles: toRows(data.roles)
-      .map(normalizeRole)
-      .filter(hasID)
-      .filter(isExecutionRole),
-    assetCates: toRows(data.asset_cates)
-      .map(normalizeAssetCate)
-      .filter(hasID),
-  } satisfies WorkbenchCatalog;
 }
 
 export async function loadWorkbenchSystemMessages(limit = 20) {

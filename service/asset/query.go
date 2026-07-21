@@ -14,6 +14,11 @@ import (
 const (
 	defaultAssetPageSize = 24
 	maxAssetPageSize     = 60
+
+	QueryViewAssets     = "assets"
+	QueryViewTrash      = "trash"
+	QueryContentFull    = "full"
+	QueryContentPreview = "preview"
 )
 
 type QueryRequest struct {
@@ -25,6 +30,8 @@ type QueryRequest struct {
 	NodeKey     string
 	Role        string
 	Kind        string
+	View        string
+	ContentMode string
 	Page        int
 	PageSize    int
 }
@@ -56,7 +63,9 @@ func (s Service) RequireContinuationTarget(
 	return asset, nil
 }
 
-func (s Service) RequireCurrentReference(ctx context.Context, teamID uint64, assetID uint64, versionID uint64) (CurrentReference, error) {
+// RequireCurrentReference resolves the asset's current version. The supplied
+// version is a client snapshot, not an immutable version pin.
+func (s Service) RequireCurrentReference(ctx context.Context, teamID uint64, assetID uint64, _ uint64) (CurrentReference, error) {
 	asset, err := s.requireTeamAsset(ctx, teamID, assetID)
 	if err != nil {
 		return CurrentReference{}, err
@@ -64,15 +73,12 @@ func (s Service) RequireCurrentReference(ctx context.Context, teamID uint64, ass
 	if asset.Status != assetmodel.StatusCurrent {
 		return CurrentReference{}, fmt.Errorf("资产已不可用")
 	}
-	if versionID == 0 {
-		return CurrentReference{}, fmt.Errorf("资产引用缺少版本")
+	if asset.VersionID == 0 {
+		return CurrentReference{}, fmt.Errorf("资产当前版本不可用")
 	}
-	if asset.VersionID != versionID {
-		return CurrentReference{}, fmt.Errorf("资产当前版本已变化，请重新选择")
-	}
-	version := s.FindVersion(ctx, versionID)
+	version := s.FindVersion(ctx, asset.VersionID)
 	if version == nil || version.AssetID != asset.ID {
-		return CurrentReference{}, fmt.Errorf("资产版本不存在")
+		return CurrentReference{}, fmt.Errorf("资产当前版本不存在")
 	}
 	return CurrentReference{Asset: *asset, Version: *version, Content: jsonValue(version.Content)}, nil
 }
@@ -99,9 +105,10 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 	if scopeFilter == nil {
 		return emptyAssetPage(page, pageSize), nil
 	}
+	status, order := assetQueryState(normalized.View)
 	filter := map[string]any{
 		"team_id":    normalized.TeamID,
-		"status":     assetmodel.StatusCurrent,
+		"status":     status,
 		"version_id": map[string]any{"gt": 0},
 		"or":         scopeFilter["or"],
 	}
@@ -133,18 +140,18 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 	assetModel := assetmodel.NewAssetModel()
 	total := int(assetModel.Count(ctx, filter))
 	rows := assetModel.Select(ctx, filter, map[string]any{
-		"order":    "main.id desc",
+		"order":    order,
 		"page":     page,
 		"pageSize": pageSize,
 	})
-	versions := currentVersionsByID(ctx, rows)
+	versions := currentVersionsByID(ctx, rows, normalized.ContentMode)
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		if row == nil || row.VersionID == 0 {
 			continue
 		}
 		version := versions[row.VersionID]
-		item := s.AssetDetailMap(ctx, *row, version)
+		item := assetListMap(*row, version, normalized.ContentMode)
 		items = append(items, item)
 	}
 	return map[string]any{
@@ -164,14 +171,7 @@ func (s Service) Filters(ctx context.Context, teamID uint64) (map[string]any, er
 	if err != nil {
 		return nil, err
 	}
-	projectRows := make([]projectmodel.Project, 0, len(scope.ProjectIDs))
-	if projectIDs := scope.projectIDs(); len(projectIDs) > 0 {
-		for _, project := range projectmodel.NewProjectModel().Select(ctx, map[string]any{"id": projectIDs}) {
-			if project != nil {
-				projectRows = append(projectRows, *project)
-			}
-		}
-	}
+	projectRows := append([]projectmodel.Project(nil), scope.Projects...)
 	sort.Slice(projectRows, func(i, j int) bool {
 		return projectRows[i].ID > projectRows[j].ID
 	})
@@ -192,17 +192,24 @@ func (s Service) Filters(ctx context.Context, teamID uint64) (map[string]any, er
 			"nodes":     nodes,
 		}, nil
 	}
-	filter := map[string]any{
-		"team_id":    teamID,
-		"status":     assetmodel.StatusCurrent,
-		"version_id": map[string]any{"gt": 0},
-		"or":         scopeFilter["or"],
-	}
-	assetRows := assetmodel.NewAssetModel().Select(ctx, filter, map[string]any{"order": "main.id desc"})
-	tools = savedSourceOptions(assetRows, assetmodel.SourceTool)
-	dialogues = savedSourceOptions(assetRows, assetmodel.SourceDialogue)
-	nodeNames := flowNodeNames(ctx, assetRows)
-	for _, asset := range assetRows {
+	sourceFilter := scopedAssetFilter(teamID, scopeFilter)
+	sourceFilter["source_type"] = []string{assetmodel.SourceTool, assetmodel.SourceDialogue}
+	sourceRows := assetmodel.NewAssetModel().Select(ctx, sourceFilter, map[string]any{
+		"field": "main.id,main.source_type,main.source_id,main.source_name,main.name",
+		"order": "main.id desc",
+	})
+	tools = savedSourceOptions(sourceRows, assetmodel.SourceTool)
+	dialogues = savedSourceOptions(sourceRows, assetmodel.SourceDialogue)
+
+	nodeFilter := scopedAssetFilter(teamID, scopeFilter)
+	nodeFilter["source_type"] = assetmodel.SourceProject
+	nodeFilter["node_key"] = map[string]any{"neq": ""}
+	nodeRows := assetmodel.NewAssetModel().Select(ctx, nodeFilter, map[string]any{
+		"field": "main.id,main.project_id,main.flow_id,main.asset_cate_id,main.node_key,main.name,main.version_id",
+		"order": "main.id desc",
+	})
+	nodeNames := flowNodeNames(ctx, nodeRows)
+	for _, asset := range nodeRows {
 		if asset == nil || asset.SourceType != assetmodel.SourceProject ||
 			asset.VersionID == 0 || strings.TrimSpace(asset.NodeKey) == "" {
 			continue
@@ -251,6 +258,15 @@ func savedSourceOptions(assets []*assetmodel.Asset, sourceType string) []map[str
 		})
 	}
 	return result
+}
+
+func scopedAssetFilter(teamID uint64, scopeFilter map[string]any) map[string]any {
+	return map[string]any{
+		"team_id":    teamID,
+		"status":     []string{assetmodel.StatusCurrent, assetmodel.StatusDeleted},
+		"version_id": map[string]any{"gt": 0},
+		"or":         scopeFilter["or"],
+	}
 }
 
 func (s Service) TeamDetail(ctx context.Context, teamID uint64, assetID uint64) (map[string]any, error) {
@@ -308,10 +324,20 @@ func (s Service) SetTeamCurrentVersion(ctx context.Context, teamID uint64, asset
 }
 
 func (s Service) setCurrentVersion(ctx context.Context, asset assetmodel.Asset, version assetmodel.Version) (map[string]any, error) {
-	assetmodel.NewAssetModel().Update(ctx, map[string]any{"id": asset.ID}, map[string]any{
+	if err := ensureAssetMutable(&asset); err != nil {
+		return nil, err
+	}
+	affected := assetmodel.NewAssetModel().Update(ctx, map[string]any{
+		"id":     asset.ID,
+		"status": map[string]any{"neq": assetmodel.StatusDeleted},
+	}, map[string]any{
 		"version_id": version.ID,
 		"status":     assetmodel.StatusCurrent,
+		"deleted_at": nil,
 	})
+	if affected == 0 {
+		return nil, fmt.Errorf("资产已移入回收站")
+	}
 	updated := s.Find(ctx, asset.ID)
 	if updated == nil {
 		return nil, fmt.Errorf("读取资产失败")
@@ -339,6 +365,20 @@ func normalizeQueryRequest(req QueryRequest) (QueryRequest, error) {
 	req.NodeKey = strings.TrimSpace(req.NodeKey)
 	req.Role = strings.ToLower(strings.TrimSpace(req.Role))
 	req.Kind = strings.ToLower(strings.TrimSpace(req.Kind))
+	req.View = strings.ToLower(strings.TrimSpace(req.View))
+	req.ContentMode = strings.ToLower(strings.TrimSpace(req.ContentMode))
+	if req.View == "" {
+		req.View = QueryViewAssets
+	}
+	if req.View != QueryViewAssets && req.View != QueryViewTrash {
+		return QueryRequest{}, fmt.Errorf("资产视图不合法")
+	}
+	if req.ContentMode == "" {
+		req.ContentMode = QueryContentFull
+	}
+	if req.ContentMode != QueryContentFull && req.ContentMode != QueryContentPreview {
+		return QueryRequest{}, fmt.Errorf("资产内容模式不合法")
+	}
 	if req.SourceType != "" {
 		switch req.SourceType {
 		case assetmodel.SourceProject, assetmodel.SourceTool, assetmodel.SourceDialogue, assetmodel.SourceUpload:
@@ -374,6 +414,13 @@ func normalizeQueryRequest(req QueryRequest) (QueryRequest, error) {
 	return req, nil
 }
 
+func assetQueryState(view string) (string, string) {
+	if view == QueryViewTrash {
+		return assetmodel.StatusDeleted, "main.deleted_at desc,main.id desc"
+	}
+	return assetmodel.StatusCurrent, "main.id desc"
+}
+
 func normalizeAssetPage(page int, pageSize int) (int, int) {
 	if page < 1 {
 		page = 1
@@ -404,7 +451,7 @@ func teamHasEnabledAssetCates(ctx context.Context, teamID uint64) bool {
 	}) > 0
 }
 
-func currentVersionsByID(ctx context.Context, assets []*assetmodel.Asset) map[uint64]*assetmodel.Version {
+func currentVersionsByID(ctx context.Context, assets []*assetmodel.Asset, contentMode string) map[uint64]*assetmodel.Version {
 	versionIDs := make([]uint64, 0, len(assets))
 	for _, asset := range assets {
 		if asset != nil && asset.VersionID > 0 {
@@ -415,7 +462,11 @@ func currentVersionsByID(ctx context.Context, assets []*assetmodel.Asset) map[ui
 	if len(versionIDs) == 0 {
 		return result
 	}
-	for _, version := range assetmodel.NewVersionModel().Select(ctx, map[string]any{"id": versionIDs}) {
+	options := map[string]any{}
+	if contentMode == QueryContentPreview {
+		options["field"] = "main.id,main.asset_id,main.version,main.content,main.created_at,main.updated_at"
+	}
+	for _, version := range assetmodel.NewVersionModel().Select(ctx, map[string]any{"id": versionIDs}, options) {
 		if version != nil {
 			result[version.ID] = version
 		}
@@ -423,24 +474,76 @@ func currentVersionsByID(ctx context.Context, assets []*assetmodel.Asset) map[ui
 	return result
 }
 
+func assetListMap(row assetmodel.Asset, current *assetmodel.Version, contentMode string) map[string]any {
+	item := AssetToMap(row)
+	if current == nil {
+		return item
+	}
+	content := jsonValue(current.Content)
+	summary := versionContentSummary(content, row.Kind)
+	item["summary"] = summary
+	if contentMode == QueryContentFull {
+		item["version"] = VersionToMap(*current)
+		return item
+	}
+	updatedAt := current.CreatedAt
+	if current.UpdatedAt != nil && !current.UpdatedAt.IsZero() {
+		updatedAt = *current.UpdatedAt
+	}
+	item["version"] = map[string]any{
+		"id":         current.ID,
+		"asset_id":   current.AssetID,
+		"version":    current.Version,
+		"content":    assetPreviewContent(content, row.Kind),
+		"summary":    summary,
+		"created_at": current.CreatedAt,
+		"updated_at": updatedAt,
+	}
+	return item
+}
+
+func assetPreviewContent(content any, kind string) any {
+	kind = NormalizeKind(kind)
+	if len(mediaContentKeys(kind)) == 0 {
+		return nil
+	}
+	url := contentMediaURL(content, kind, 0)
+	if url == "" {
+		return nil
+	}
+	return mediaDocument(kind, url)
+}
+
 func flowNodeNames(ctx context.Context, assets []*assetmodel.Asset) map[string]string {
 	flowIDs := make([]uint64, 0)
-	seen := map[uint64]struct{}{}
+	nodeKeys := make([]string, 0)
+	seenFlows := map[uint64]struct{}{}
+	seenNodeKeys := map[string]struct{}{}
 	for _, asset := range assets {
 		if asset == nil || asset.FlowID == 0 || strings.TrimSpace(asset.NodeKey) == "" {
 			continue
 		}
-		if _, exists := seen[asset.FlowID]; exists {
-			continue
+		if _, exists := seenFlows[asset.FlowID]; !exists {
+			seenFlows[asset.FlowID] = struct{}{}
+			flowIDs = append(flowIDs, asset.FlowID)
 		}
-		seen[asset.FlowID] = struct{}{}
-		flowIDs = append(flowIDs, asset.FlowID)
+		nodeKey := strings.TrimSpace(asset.NodeKey)
+		if _, exists := seenNodeKeys[nodeKey]; !exists {
+			seenNodeKeys[nodeKey] = struct{}{}
+			nodeKeys = append(nodeKeys, nodeKey)
+		}
 	}
 	result := map[string]string{}
 	if len(flowIDs) == 0 {
 		return result
 	}
-	for _, node := range teammodel.NewFlowNodeModel().Select(ctx, map[string]any{"flow_id": flowIDs}) {
+	for _, node := range teammodel.NewFlowNodeModel().Select(ctx, map[string]any{
+		"flow_id":  flowIDs,
+		"node_key": nodeKeys,
+	}, map[string]any{
+		"field": "main.flow_id,main.node_key,main.name",
+		"order": "",
+	}) {
 		if node != nil {
 			result[flowNodeIdentity(node.FlowID, node.NodeKey)] = strings.TrimSpace(node.Name)
 		}

@@ -1,4 +1,3 @@
-import * as LucideIcons from "lucide-react";
 import {
   Brain,
   Clapperboard,
@@ -13,7 +12,7 @@ import {
   Workflow,
   type LucideIcon,
 } from "lucide-react";
-import { getCompatModule } from "@dever/front-plugin";
+import { resolveConfiguredLucideIcon } from "../shared/configured-icon";
 import { resolvePowerPresentation } from "./space-power-presentation";
 import type { PowerOption } from "./types";
 
@@ -34,7 +33,7 @@ export function PowerIcon({
   const FallbackIcon =
     powerOutputIcon(presentation.outputType) ||
     powerKindIcon(power?.kind || kind || "");
-  const Icon = resolveConfiguredIcon(power?.icon, FallbackIcon);
+  const Icon = resolveConfiguredLucideIcon(power?.icon, FallbackIcon);
 
   return <Icon size={size} className={className} />;
 }
@@ -56,69 +55,9 @@ export function PowerParamIcon({
   size: number;
   className?: string;
 }) {
-  const Icon = resolveConfiguredIcon(name, Settings2);
+  const Icon = resolveConfiguredLucideIcon(name, Settings2);
 
   return <Icon size={size} className={className} />;
-}
-
-function resolveConfiguredIcon(
-  iconName: string | undefined,
-  FallbackIcon: LucideIcon,
-) {
-  return (
-    resolveSharedLucideIcon(normalizePowerIconName(iconName)) || FallbackIcon
-  );
-}
-
-function resolveSharedLucideIcon(iconName?: string): LucideIcon | null {
-  if (!iconName) {
-    return null;
-  }
-  try {
-    const resolver = getCompatModule("@/lib/icon").resolveLucideIcon as
-      | ((name?: string) => LucideIcon | null)
-      | undefined;
-    const Icon = resolver?.(iconName);
-    if (Icon) {
-      return Icon;
-    }
-  } catch {
-    // Older host sessions may not expose the shared icon resolver.
-  }
-  return resolveLocalLucideIcon(iconName);
-}
-
-function resolveLocalLucideIcon(iconName?: string): LucideIcon | null {
-  if (!iconName) {
-    return null;
-  }
-  const exportName = iconName
-    .split("-")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join("");
-  return (
-    (LucideIcons as unknown as Record<string, LucideIcon | undefined>)[
-      exportName
-    ] || null
-  );
-}
-
-function normalizePowerIconName(icon?: string) {
-  const text = String(icon || "").trim();
-  if (!text || text === "-") {
-    return "";
-  }
-  return text
-    .replace(/^i-lucide-/i, "")
-    .replace(/^lucide[:/\\-]/i, "")
-    .replace(/Icon$/i, "")
-    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
-    .replace(/[_\s]+/g, "-")
-    .replace(/[^a-zA-Z0-9-]/g, "")
-    .replace(/--+/g, "-")
-    .replace(/^-|-$/g, "")
-    .toLowerCase();
 }
 
 function powerKindIcon(kind: string): LucideIcon {

@@ -1,7 +1,10 @@
 import { joinSiteApi, request } from "@dever/front-plugin";
 import { isSuccessResponse } from "../shared/api-response";
+import { createInFlightRequestLoader } from "../shared/in-flight-request";
 import type {
+  AssetCatalogOptions,
   AssetCateOption,
+  AssetContentMode,
   AssetDetail,
   AssetFilterOption,
   AssetFilterOptions,
@@ -12,57 +15,93 @@ import type {
   AssetRecord,
   AssetRole,
   AssetSourceType,
+  AssetView,
   AssetVersion,
 } from "./asset-types";
 
-export async function loadAssetFilterOptions(
+const loadFilterOptionsRequest =
+  createInFlightRequestLoader<AssetFilterOptions>();
+const loadAssetPageRequest = createInFlightRequestLoader<AssetPage>();
+
+export function loadAssetFilterOptions(
   teamID: number,
+  catalogOptions?: AssetCatalogOptions,
 ): Promise<AssetFilterOptions> {
-  const [catalogResult, filtersResult] = await Promise.all([
-    request(joinSiteApi("workbench/catalog"), "get", { team_id: teamID }),
-    request(joinSiteApi("workbench/asset_filters"), "get", {
-      team_id: teamID,
-    }),
-  ]);
-  const catalog = responseData(catalogResult, "加载团队资产配置失败");
-  const filters = responseData(filtersResult, "加载资产筛选项失败");
-  return {
-    projects: toRows(filters.projects).map(normalizeSimpleOption).filter(hasID),
-    tools: mergeSimpleOptions(catalog.powers, filters.tools),
-    dialogues: mergeSimpleOptions(catalog.roles, filters.dialogues),
-    assetCates: toRows(catalog.asset_cates)
-      .map(normalizeAssetCate)
-      .filter(hasID),
-    nodes: toRows(filters.nodes).map(normalizeNode).filter(hasNodeKey),
-  };
+  const key = JSON.stringify({ teamID, catalogOptions: catalogOptions || null });
+  return loadFilterOptionsRequest(key, async () => {
+    const filtersPromise = request(
+      joinSiteApi("workbench/asset_filters"),
+      "get",
+      { team_id: teamID },
+    );
+    const [catalogResult, filtersResult] = catalogOptions
+      ? [null, await filtersPromise]
+      : await Promise.all([
+          request(joinSiteApi("workbench/catalog"), "get", {
+            team_id: teamID,
+          }),
+          filtersPromise,
+        ]);
+    const catalog = catalogOptions
+      ? {
+          powers: catalogOptions.tools,
+          roles: catalogOptions.dialogues,
+          asset_cates: catalogOptions.assetCates,
+        }
+      : responseData(catalogResult, "加载团队资产配置失败");
+    const filters = responseData(filtersResult, "加载资产筛选项失败");
+    return {
+      projects: toRows(filters.projects)
+        .map(normalizeSimpleOption)
+        .filter(hasID),
+      tools: mergeSimpleOptions(catalog.powers, filters.tools),
+      dialogues: mergeSimpleOptions(catalog.roles, filters.dialogues),
+      assetCates: toRows(catalog.asset_cates)
+        .map(normalizeAssetCate)
+        .filter(hasID),
+      nodes: toRows(filters.nodes).map(normalizeNode).filter(hasNodeKey),
+    };
+  });
 }
 
-export async function loadAssetPage(input: {
+export function loadAssetPage(input: {
   teamID: number;
   filters: AssetFilters;
   page: number;
   pageSize?: number;
+  view?: AssetView;
+  contentMode?: AssetContentMode;
 }): Promise<AssetPage> {
-  const result = await request(joinSiteApi("workbench/assets"), "get", {
-    team_id: input.teamID,
-    source_type: input.filters.sourceType || undefined,
-    source_id: input.filters.sourceID || undefined,
-    project_id: input.filters.projectID || undefined,
-    asset_cate_id: input.filters.assetCateID || undefined,
-    node_key: input.filters.nodeKey || undefined,
-    role: input.filters.role || undefined,
-    kind: input.filters.kind || undefined,
-    page: input.page,
-    page_size: input.pageSize || 24,
-  });
-  const data = responseData(result, "加载资产失败");
-  return {
-    items: toRows(data.items).map(normalizeAssetRecord).filter(hasID),
-    page: positiveNumber(data.page, input.page),
-    pageSize: positiveNumber(data.page_size, input.pageSize || 24),
-    total: nonNegativeNumber(data.total),
-    hasMore: Boolean(data.has_more),
+  const normalizedInput = {
+    ...input,
+    pageSize: input.pageSize || 24,
+    view: input.view || ("assets" as const),
+    contentMode: input.contentMode || ("preview" as const),
   };
+  return loadAssetPageRequest(JSON.stringify(normalizedInput), async () => {
+    const result = await request(joinSiteApi("workbench/assets"), "get", {
+      team_id: normalizedInput.teamID,
+      source_type: normalizedInput.filters.sourceType || undefined,
+      source_id: normalizedInput.filters.sourceID || undefined,
+      project_id: normalizedInput.filters.projectID || undefined,
+      asset_cate_id: normalizedInput.filters.assetCateID || undefined,
+      node_key: normalizedInput.filters.nodeKey || undefined,
+      role: normalizedInput.filters.role || undefined,
+      kind: normalizedInput.filters.kind || undefined,
+      view: normalizedInput.view,
+      content_mode: normalizedInput.contentMode,
+      page: normalizedInput.page,
+      page_size: normalizedInput.pageSize,
+    });
+    const data = responseData(result, "加载资产失败");
+    return {
+      items: toRows(data.items).map(normalizeAssetRecord).filter(hasID),
+      page: positiveNumber(data.page, normalizedInput.page),
+      pageSize: positiveNumber(data.page_size, normalizedInput.pageSize),
+      total: nonNegativeNumber(data.total),
+      hasMore: Boolean(data.has_more),
+    };
+  });
 }
 
 export async function loadAssetDetail(
@@ -142,6 +181,26 @@ export async function renameAsset(input: {
   return normalizeAssetRecord(data.asset);
 }
 
+export async function moveAssetToTrash(input: {
+  teamID: number;
+  assetID: number;
+}) {
+  const result = await request(joinSiteApi("workbench/asset_delete"), "post", {
+    team_id: input.teamID,
+    asset_id: input.assetID,
+  });
+  responseData(result, "删除资产失败");
+}
+
+export async function restoreAsset(input: { teamID: number; assetID: number }) {
+  const result = await request(joinSiteApi("workbench/asset_restore"), "post", {
+    team_id: input.teamID,
+    asset_id: input.assetID,
+  });
+  const data = responseData(result, "恢复资产失败");
+  return normalizeAssetRecord(data.asset);
+}
+
 function normalizeDetail(value: Record<string, any>): AssetDetail {
   return {
     asset: normalizeAssetRecord(value.asset),
@@ -174,6 +233,7 @@ export function normalizeAssetRecord(value: any): AssetRecord {
     status: textValue(value?.status),
     summary: textValue(value?.summary || version?.summary),
     createdAt: textValue(value?.created_at),
+    deletedAt: textValue(value?.deleted_at),
     version,
   };
 }

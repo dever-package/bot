@@ -265,6 +265,11 @@
   background: #f4f6f5;
 }
 
+.bot-work-login-third-party button:disabled {
+  cursor: not-allowed;
+  opacity: 0.64;
+}
+
 .bot-work-login-third-party button svg {
   color: #0f9657;
 }

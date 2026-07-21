@@ -86,7 +86,7 @@ type Memory struct {
 	SourceMessageID uint64    `dorm:"type:bigint;not null;default:0;comment:来源消息"`
 	Status          int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	CreatedAt       time.Time `dorm:"comment:创建时间"`
-	UpdatedAt       time.Time `dorm:"comment:更新时间"`
+	UpdatedAt       time.Time `dorm:"not null;default:CURRENT_TIMESTAMP;comment:更新时间"`
 }
 
 type MemoryIndex struct {

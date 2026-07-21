@@ -12,12 +12,20 @@ type Project struct{}
 var projectRunner = projectservice.NewService()
 
 func (Project) GetList(c *server.Context) error {
-	data, err := projectRunner.List(c.Context(), botapi.QueryUint64(c, "team_id", "teamId"))
+	data, err := projectRunner.List(c.Context(), projectservice.ListRequest{
+		TeamID:   botapi.QueryUint64(c, "team_id", "teamId"),
+		Page:     int(botapi.QueryUint64(c, "page")),
+		PageSize: int(botapi.QueryUint64(c, "page_size", "pageSize")),
+	})
 	return botapi.WriteJSON(c, data, err)
 }
 
 func (Project) GetTrash(c *server.Context) error {
-	data, err := projectRunner.Trash(c.Context(), botapi.QueryUint64(c, "team_id", "teamId"))
+	data, err := projectRunner.Trash(c.Context(), projectservice.ListRequest{
+		TeamID:   botapi.QueryUint64(c, "team_id", "teamId"),
+		Page:     int(botapi.QueryUint64(c, "page")),
+		PageSize: int(botapi.QueryUint64(c, "page_size", "pageSize")),
+	})
 	return botapi.WriteJSON(c, data, err)
 }
 

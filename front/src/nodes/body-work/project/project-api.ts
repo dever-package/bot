@@ -1,5 +1,6 @@
 import { joinSiteApi, request } from "@dever/front-plugin";
 import { isSuccessResponse } from "../shared/api-response";
+import { createInFlightRequestLoader } from "../shared/in-flight-request";
 
 export type ProjectView = "works" | "trash";
 
@@ -12,19 +13,43 @@ export type ProjectItem = {
   deletedAt: string;
 };
 
+export type ProjectPage = {
+  items: ProjectItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+};
+
+const loadProjectPageRequest = createInFlightRequestLoader<ProjectPage>();
+
 export type ProjectMetadataInput = {
   name: string;
   description: string;
 };
 
-export async function loadProjectList(teamID: number, view: ProjectView) {
-  const data = await projectRequest(
-    view === "trash" ? "trash" : "list",
-    "get",
-    { team_id: teamID },
-    view === "trash" ? "加载回收站失败" : "加载作品失败",
-  );
-  return toRows(data.items).map(normalizeProject).filter(hasProjectID);
+export function loadProjectList(
+  teamID: number,
+  view: ProjectView,
+  page = 1,
+  pageSize = 24,
+) {
+  const key = JSON.stringify({ teamID, view, page, pageSize });
+  return loadProjectPageRequest(key, async () => {
+    const data = await projectRequest(
+      view === "trash" ? "trash" : "list",
+      "get",
+      { team_id: teamID, page, page_size: pageSize },
+      view === "trash" ? "加载回收站失败" : "加载作品失败",
+    );
+    return {
+      items: toRows(data.items).map(normalizeProject).filter(hasProjectID),
+      page: positiveNumber(data.page, page),
+      pageSize: positiveNumber(data.page_size, pageSize),
+      total: nonNegativeNumber(data.total),
+      hasMore: Boolean(data.has_more),
+    };
+  });
 }
 
 export async function createProject(
@@ -107,6 +132,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function numberValue(value: unknown) {
   const parsed = Number(value || 0);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function positiveNumber(value: unknown, fallback: number) {
+  return numberValue(value) || fallback;
+}
+
+function nonNegativeNumber(value: unknown) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
 function textValue(value: unknown) {

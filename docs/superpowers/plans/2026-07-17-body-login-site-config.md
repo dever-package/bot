@@ -1,5 +1,7 @@
 # Body Login And Site Configuration Implementation Plan
 
+> 2026-07-21 更新：本文中的飞书占位按钮已由 [Body 飞书登录实施计划](2026-07-21-body-feishu-login.md) 接续替换为真实 OAuth 登录。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Restore a dedicated Body login page and add typed Body site, login-link, and third-party-account configuration managed from one admin page.

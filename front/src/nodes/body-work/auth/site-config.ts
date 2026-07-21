@@ -10,9 +10,26 @@ export type BodySiteConfig = {
   siteName: string;
   logo: string;
   favicon: string;
+  loginImage: string;
   loginTitle: string;
   loginDescription: string;
+  homeMenu: BodyHomeMenuConfig;
   filing: BodyFilingInfo;
+};
+
+export type BodyHomeMenuItem = {
+  name: string;
+  icon: string;
+  enabled: boolean;
+};
+
+export type BodyHomeMenuConfig = {
+  works: BodyHomeMenuItem;
+  dialogue: BodyHomeMenuItem;
+  function: BodyHomeMenuItem;
+  assets: BodyHomeMenuItem;
+  points: BodyHomeMenuItem;
+  messages: BodyHomeMenuItem;
 };
 
 export type BodyFilingInfo = {
@@ -37,6 +54,8 @@ export type BodyLoginAccount = {
   provider: string;
   name: string;
   icon: string;
+  appID: string;
+  configured: boolean;
 };
 
 export type BodyLoginConfig = {
@@ -48,6 +67,14 @@ export type BodyLoginConfig = {
 const DEFAULT_LOGIN_TITLE = "把想法变成作品";
 const DEFAULT_LOGIN_DESCRIPTION =
   "调用团队能力，与智能体协作，把每一次创作沉淀为可复用的项目资产。";
+const HOME_MENU_DEFAULTS = [
+  ["works", "创作", "file-stack"],
+  ["dialogue", "对话", "messages-square"],
+  ["function", "工具", "zap"],
+  ["assets", "资产", "archive"],
+  ["points", "积分", "sparkles"],
+  ["messages", "消息", "bell"],
+] as const;
 
 let cachedLoginConfig: BodyLoginConfig | null = null;
 let pendingLoginConfig: Promise<BodyLoginConfig> | null = null;
@@ -127,6 +154,7 @@ function normalizeLoginConfig(value: unknown): BodyLoginConfig {
       siteName: textValue(config.site_name) || fallback.site.siteName,
       logo: mediaURL(config.logo) || fallback.site.logo,
       favicon: mediaURL(config.favicon) || fallback.site.favicon,
+      loginImage: mediaURL(config.login_image) || fallback.site.loginImage,
       loginTitle: textValue(config.login_title) || fallback.site.loginTitle,
       loginDescription: Object.prototype.hasOwnProperty.call(
         config,
@@ -134,6 +162,7 @@ function normalizeLoginConfig(value: unknown): BodyLoginConfig {
       )
         ? textValue(config.login_description)
         : fallback.site.loginDescription,
+      homeMenu: normalizeHomeMenu(config.home_menu, fallback.site.homeMenu),
       filing: {
         companyName: textValue(config.company_name),
         companyAddress: textValue(config.company_address),
@@ -160,8 +189,10 @@ function fallbackLoginConfig(): BodyLoginConfig {
       siteName: textValue(site.name) || "神创工作台",
       logo: mediaURL(site.logo),
       favicon: mediaURL(site.favicon),
+      loginImage: "",
       loginTitle: DEFAULT_LOGIN_TITLE,
       loginDescription: DEFAULT_LOGIN_DESCRIPTION,
+      homeMenu: defaultHomeMenu(),
       filing: emptyFilingInfo(),
     },
     links: [],
@@ -171,9 +202,43 @@ function fallbackLoginConfig(): BodyLoginConfig {
         provider: "feishu",
         name: "使用飞书账户继续",
         icon: "",
+        appID: "",
+        configured: false,
       },
     ],
   };
+}
+
+function normalizeHomeMenu(
+  value: unknown,
+  fallback: BodyHomeMenuConfig,
+): BodyHomeMenuConfig {
+  const root = recordValue(value);
+  return Object.fromEntries(
+    HOME_MENU_DEFAULTS.map(([key]) => {
+      const current = recordValue(root[key]);
+      return [
+        key,
+        {
+          name: textValue(current.name) || fallback[key].name,
+          icon: textValue(current.icon) || fallback[key].icon,
+          enabled:
+            current.enabled == null
+              ? fallback[key].enabled
+              : booleanValue(current.enabled),
+        },
+      ];
+    }),
+  ) as BodyHomeMenuConfig;
+}
+
+function defaultHomeMenu(): BodyHomeMenuConfig {
+  return Object.fromEntries(
+    HOME_MENU_DEFAULTS.map(([key, name, icon]) => [
+      key,
+      { name, icon, enabled: true },
+    ]),
+  ) as BodyHomeMenuConfig;
 }
 
 function normalizeLink(value: unknown): BodyLoginLink {
@@ -193,6 +258,8 @@ function normalizeAccount(value: unknown): BodyLoginAccount {
     provider: textValue(row.provider).toLowerCase(),
     name: textValue(row.name),
     icon: mediaURL(row.icon),
+    appID: textValue(row.app_id || row.appId),
+    configured: booleanValue(row.configured),
   };
 }
 
@@ -281,4 +348,13 @@ function positiveNumber(value: unknown) {
 
 function textValue(value: unknown) {
   return value == null ? "" : String(value).trim();
+}
+
+function booleanValue(value: unknown) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  return ["1", "true", "yes", "on"].includes(
+    textValue(value).toLowerCase(),
+  );
 }

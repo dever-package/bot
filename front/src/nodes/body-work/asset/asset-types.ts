@@ -1,4 +1,6 @@
 export type AssetSourceType = "project" | "tool" | "dialogue" | "upload";
+export type AssetView = "assets" | "trash";
+export type AssetContentMode = "preview" | "full";
 export type AssetRole = "work" | "material";
 export type AssetKind =
   | "text"
@@ -43,6 +45,7 @@ export type AssetRecord = {
   status: string;
   summary: string;
   createdAt: string;
+  deletedAt: string;
   version: AssetVersion | null;
 };
 
@@ -80,6 +83,11 @@ export type AssetFilterOptions = {
   assetCates: AssetCateOption[];
   nodes: AssetNodeOption[];
 };
+
+export type AssetCatalogOptions = Pick<
+  AssetFilterOptions,
+  "tools" | "dialogues" | "assetCates"
+>;
 
 export type AssetPage = {
   items: AssetRecord[];

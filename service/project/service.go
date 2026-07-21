@@ -65,8 +65,8 @@ func NewService() Service {
 	}
 }
 
-func (s Service) List(ctx context.Context, teamID uint64) (map[string]any, error) {
-	return s.listByStatus(ctx, teamID, projectmodel.StatusEnabled, "main.id desc")
+func (s Service) List(ctx context.Context, req ListRequest) (map[string]any, error) {
+	return s.listByStatus(ctx, req, projectmodel.StatusEnabled, "main.id desc")
 }
 
 func (s Service) Create(ctx context.Context, req CreateRequest) (map[string]any, error) {

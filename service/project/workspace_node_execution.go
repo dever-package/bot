@@ -231,6 +231,12 @@ func workspaceNodeResultPayload(row workspacemodel.NodeExecution) map[string]any
 		"persists_result": boolValue(firstPresent(nodeRun["persists_result"], row.AssetID > 0 || row.VersionID > 0 || mapValue(output["asset"]) != nil || mapValue(output["version"]) != nil)),
 		"agent_run_id":    firstUint64(row.AgentRunID, uint64Value(nodeRun["agent_run_id"])),
 	}
+	if sourceSignature := firstText(
+		nodeRun["source_signature"],
+		workspaceNodeExecutionSourceSignature(row),
+	); sourceSignature != "" {
+		result["source_signature"] = sourceSignature
+	}
 	if row.AssetID > 0 {
 		result["asset_id"] = row.AssetID
 	}
@@ -247,6 +253,23 @@ func workspaceNodeResultPayload(row workspacemodel.NodeExecution) map[string]any
 		return nil
 	}
 	return result
+}
+
+func workspaceNodeExecutionSourceSignature(row workspacemodel.NodeExecution) string {
+	input := mapValue(jsonValue(row.Input, map[string]any{}))
+	node := mapValue(input["node"])
+	if node == nil {
+		return ""
+	}
+	storyboardItem := mapValue(firstPresent(
+		node["storyboard_item"],
+		node["storyboardItem"],
+		node["StoryboardItem"],
+	))
+	return firstText(
+		storyboardItem["source_signature"],
+		storyboardItem["sourceSignature"],
+	)
 }
 
 func workspaceNodeResultInteraction(nodeRun map[string]any, output map[string]any) map[string]any {

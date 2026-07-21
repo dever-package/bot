@@ -43,11 +43,15 @@
                     "type": "container",
                     "className": "w-full"
                   },
-                  "links-panel": {
+                  "accounts-panel": {
                     "type": "container",
                     "className": "min-w-0 overflow-hidden"
                   },
-                  "accounts-panel": {
+                  "home-menu-panel": {
+                    "type": "container",
+                    "className": "w-full"
+                  },
+                  "links-panel": {
                     "type": "container",
                     "className": "min-w-0 overflow-hidden"
                   }
@@ -90,6 +94,23 @@
       },
       {
         "type": "show-button",
+        "name": "保存首页菜单",
+        "className": "shrink-0",
+        "meta": {
+          "tab": "home_menu",
+          "variant": "default",
+          "size": "sm",
+          "icon": "save",
+          "validateForm": true,
+          "loadingText": "保存中...",
+          "successMessage": "首页菜单已保存"
+        },
+        "action": {
+          "click": "submit"
+        }
+      },
+      {
+        "type": "show-button",
         "name": "保存备案信息",
         "className": "shrink-0",
         "meta": {
@@ -106,7 +127,7 @@
       },
       {
         "type": "show-button",
-        "name": "新增菜单",
+        "name": "新增登录页菜单",
         "className": "shrink-0",
         "meta": {
           "tab": "links",
@@ -157,12 +178,16 @@
               "value": "filing"
             },
             {
-              "label": "自定义菜单",
-              "value": "links"
-            },
-            {
               "label": "三方账号",
               "value": "accounts"
+            },
+            {
+              "label": "首页菜单",
+              "value": "home_menu"
+            },
+            {
+              "label": "登录页菜单",
+              "value": "links"
             }
           ]
         }
@@ -224,6 +249,24 @@
         }
       },
       {
+        "type": "form-upload",
+        "name": "登录页图片",
+        "value": "form.login_image",
+        "mode": "form",
+        "info": "用于登录页左侧展示；未上传时使用系统默认图片。",
+        "meta": {
+          "tab": "site",
+          "formLayout": "horizontal",
+          "uploadType": "pic",
+          "kind": "image",
+          "saveMode": "url",
+          "ruleId": 1,
+          "bizKey": "body.config.login_image",
+          "bizName": "Body登录页图片",
+          "maxCount": 1
+        }
+      },
+      {
         "type": "form-input",
         "name": "登录页标题",
         "placeholder": "例如：把想法变成作品",
@@ -252,6 +295,14 @@
           "formLayout": "horizontal",
           "controlClassName": "max-w-xl",
           "rows": 4
+        }
+      }
+    ],
+    "home-menu-panel": [
+      {
+        "type": "bot-body-home-menu-editor",
+        "meta": {
+          "tab": "home_menu"
         }
       }
     ],
@@ -385,6 +436,7 @@
               "name": "排序",
               "value": "sort",
               "type": "show-base",
+              "description": "双击数值可编辑；数值越小越靠前。",
               "editor": "form-number",
               "trigger": "doubleClick"
             },
@@ -403,7 +455,7 @@
                     "icon": "square-pen",
                     "variant": "outline",
                     "size": "sm",
-                    "description": "编辑菜单",
+                    "description": "编辑登录页菜单",
                     "action": {
                       "click": [
                         {
@@ -469,9 +521,9 @@
           "rowKey": "id",
           "columns": [
             {
-              "name": "账号标识",
+              "name": "类型",
               "value": "provider",
-              "type": "show-base"
+              "type": "show-tag"
             },
             {
               "name": "按钮名称",
@@ -496,6 +548,7 @@
               "name": "排序",
               "value": "sort",
               "type": "show-base",
+              "description": "双击数值可编辑；数值越小越靠前。",
               "editor": "form-number",
               "trigger": "doubleClick"
             },
@@ -550,7 +603,7 @@
         "meta": {
           "stateKey": "dialog.createLink",
           "pageRoute": "/bot/body/link/update",
-          "title": "新增自定义菜单",
+          "title": "新增登录页菜单",
           "size": "lg",
           "footer": {
             "confirm": true,
@@ -566,7 +619,7 @@
           "pageRouteQuery": {
             "id": "data.actionTarget.editLinkId"
           },
-          "title": "编辑自定义菜单",
+          "title": "编辑登录页菜单",
           "size": "lg",
           "footer": {
             "confirm": true,
@@ -576,8 +629,8 @@
       },
       {
         "type": "feedback-confirm",
-        "name": "删除自定义菜单",
-        "info": "确认删除当前自定义菜单吗？",
+        "name": "删除登录页菜单",
+        "info": "确认删除当前登录页菜单吗？",
         "meta": {
           "stateKey": "confirm.deleteLink"
         },
@@ -623,15 +676,67 @@
   "data": {
     "page": {
       "title": "基础配置",
-      "description": "维护 Body 站点品牌、备案信息、自定义菜单和第三方账号入口。"
+      "description": "维护 Body 站点品牌、备案信息、第三方账号、首页菜单和登录页菜单。"
     },
     "form": {
       "id": 1,
+      "_fields": [
+        "site_name",
+        "logo",
+        "favicon",
+        "login_image",
+        "login_title",
+        "login_description",
+        "company_name",
+        "company_address",
+        "business_license_url",
+        "icp_record",
+        "icp_record_url",
+        "public_security_record",
+        "public_security_record_url",
+        "home_works_name",
+        "home_works_icon",
+        "home_works_status",
+        "home_dialogue_name",
+        "home_dialogue_icon",
+        "home_dialogue_status",
+        "home_function_name",
+        "home_function_icon",
+        "home_function_status",
+        "home_assets_name",
+        "home_assets_icon",
+        "home_assets_status",
+        "home_points_name",
+        "home_points_icon",
+        "home_points_status",
+        "home_messages_name",
+        "home_messages_icon",
+        "home_messages_status"
+      ],
       "site_name": "神创工作台",
       "logo": "",
       "favicon": "",
+      "login_image": "",
       "login_title": "把想法变成作品",
       "login_description": "调用团队能力，与智能体协作，把每一次创作沉淀为可复用的项目资产。",
+      "home_works_name": "创作",
+      "home_works_icon": "file-stack",
+      "home_works_status": 1,
+      "home_dialogue_name": "对话",
+      "home_dialogue_icon": "messages-square",
+      "home_dialogue_status": 1,
+      "home_function_name": "工具",
+      "home_function_icon": "zap",
+      "home_function_status": 1,
+      "home_assets_name": "资产",
+      "home_assets_icon": "archive",
+      "home_assets_status": 1,
+      "home_points_name": "积分",
+      "home_points_icon": "sparkles",
+      "home_points_status": 1,
+      "home_messages_name": "消息",
+      "home_messages_icon": "bell",
+      "home_messages_status": 1,
       "company_name": "",
       "company_address": "",
       "business_license_url": "",
@@ -649,7 +754,8 @@
     "accounts": {
       "model": "bot.body.NewAccountModel",
       "pageSize": 100,
-      "order": "sort asc,id asc"
+      "order": "sort asc,id asc",
+      "relationFields": []
     },
     "actionTarget": {
       "editLinkId": "",

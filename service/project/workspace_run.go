@@ -31,6 +31,8 @@ type canvasRunNode struct {
 	ID               string
 	Type             string
 	Title            string
+	StoryboardTitle  string
+	GroupTitle       string
 	Kind             string
 	OutputType       string
 	GroupID          string
@@ -435,7 +437,7 @@ func (s WorkspaceService) recordCanvasNodeRunResult(ctx context.Context, req Can
 		NodeType:       node.Type,
 		FunctionKey:    node.FunctionKey,
 		Status:         executionStatus,
-		Input:          map[string]any{"input": req.Input, "node": node},
+		Input:          map[string]any{"input": req.Input, "node": canvasRunNodeInput(node)},
 		Output:         payload,
 		Error:          errorText,
 		AssetID:        assetID,
@@ -769,7 +771,7 @@ func (s WorkspaceService) runCanvasFunctionNode(ctx context.Context, projectID u
 				"source_node_type":  node.Type,
 				"source_status":     "success",
 			},
-			Name:    workspaceCanvasAssetName(canvasRunNodeTitle(node), node.ID),
+			Name:    workspaceCanvasAssetName(node),
 			Kind:    firstText(node.Kind, assetmodel.KindRichText),
 			Role:    assetmodel.RoleWork,
 			Content: previousOutput,
@@ -832,6 +834,7 @@ func parseCanvasRunGraph(canvas map[string]any) ([]canvasRunNode, []canvasRunEdg
 		}
 		nodes = append(nodes, node)
 	}
+	enrichCanvasRunNodeContext(nodes)
 	edges := make([]canvasRunEdge, 0, len(edgesRaw))
 	for _, raw := range edgesRaw {
 		row := mapValue(raw)
@@ -848,6 +851,23 @@ func parseCanvasRunGraph(canvas map[string]any) ([]canvasRunNode, []canvasRunEdg
 		}
 	}
 	return nodes, edges, nil
+}
+
+func enrichCanvasRunNodeContext(nodes []canvasRunNode) {
+	nodesByID := canvasRunNodeMap(nodes)
+	for index := range nodes {
+		node := &nodes[index]
+		if group := nodesByID[strings.TrimSpace(node.GroupID)]; group.ID != "" {
+			node.GroupTitle = canvasRunNodeTitle(group)
+		}
+		sourceNodeID := firstText(
+			node.StoryboardItem["source_node_id"],
+			node.StoryboardItem["sourceNodeId"],
+		)
+		if storyboard := nodesByID[sourceNodeID]; storyboard.ID != "" {
+			node.StoryboardTitle = canvasRunNodeTitle(storyboard)
+		}
+	}
 }
 
 func filterRunnableCanvasNodes(nodes []canvasRunNode) []canvasRunNode {
@@ -1052,6 +1072,11 @@ func canvasPromptReferenceOutput(
 	if err != nil {
 		return nil, nil, err
 	}
+	dependencies, err := canvasStoryboardSourceReferences(node, canvas)
+	if err != nil {
+		return nil, nil, err
+	}
+	structured = mergeCanvasPromptReferences(dependencies, structured)
 	if len(structured) == 0 {
 		return nil, nil, nil
 	}
@@ -1078,7 +1103,7 @@ func canvasPromptReferenceOutput(
 				textValue(asset["kind"]),
 				"",
 				reference.AssetID,
-				reference.VersionID,
+				uint64Value(asset["version_id"]),
 				output,
 			))
 			continue
@@ -1091,6 +1116,83 @@ func canvasPromptReferenceOutput(
 		"type":    "reference_output",
 		"sources": sources,
 	}, mediaReferences, nil
+}
+
+func canvasStoryboardSourceReferences(node map[string]any, canvas map[string]any) ([]canvasPromptReference, error) {
+	metadata := mapValue(firstPresent(node["storyboard_item"], node["storyboardItem"]))
+	itemType := firstText(metadata["item_type"], metadata["itemType"])
+	if itemType != "shot_image" && itemType != "shot" {
+		return nil, nil
+	}
+
+	result := []canvasPromptReference{}
+	for _, sourceNodeID := range canvasStringList(firstPresent(
+		metadata["source_node_ids"],
+		metadata["sourceNodeIds"],
+	)) {
+		sourceNode := canvasNodeByID(sourceNodeID, canvas)
+		if sourceNode == nil {
+			return nil, fmt.Errorf("分镜来源节点不存在: %s", sourceNodeID)
+		}
+		resultRef := mapValue(firstPresent(sourceNode["result_ref"], sourceNode["resultRef"]))
+		asset := mapValue(sourceNode["asset"])
+		assetID := firstUint64(
+			uint64Value(resultRef["asset_id"]),
+			uint64Value(resultRef["assetId"]),
+			uint64Value(asset["id"]),
+		)
+		versionID := firstUint64(
+			uint64Value(resultRef["version_id"]),
+			uint64Value(resultRef["versionId"]),
+			uint64Value(asset["version_id"]),
+			uint64Value(asset["versionId"]),
+			uint64Value(valueAtPath(asset, "version", "id")),
+		)
+		if assetID == 0 || versionID == 0 {
+			return nil, fmt.Errorf(
+				"分镜来源“%s”尚未生成",
+				firstText(sourceNode["title"], sourceNodeID),
+			)
+		}
+		result = append(result, canvasPromptReference{
+			AssetID:   assetID,
+			VersionID: versionID,
+			Label:     firstText(sourceNode["title"], sourceNodeID),
+		})
+	}
+	return result, nil
+}
+
+func mergeCanvasPromptReferences(dependencies []canvasPromptReference, explicit []canvasPromptReference) []canvasPromptReference {
+	if len(dependencies) == 0 {
+		return explicit
+	}
+	result := make([]canvasPromptReference, 0, len(dependencies)+len(explicit))
+	usedExplicit := make([]bool, len(explicit))
+	for _, dependency := range dependencies {
+		matched := false
+		for index, reference := range explicit {
+			if reference.AssetID != dependency.AssetID {
+				continue
+			}
+			reference.VersionID = dependency.VersionID
+			if reference.Label == "" {
+				reference.Label = dependency.Label
+			}
+			result = append(result, reference)
+			usedExplicit[index] = true
+			matched = true
+		}
+		if !matched {
+			result = append(result, dependency)
+		}
+	}
+	for index, reference := range explicit {
+		if !usedExplicit[index] {
+			result = append(result, reference)
+		}
+	}
+	return result
 }
 
 type canvasPromptReference struct {
@@ -1139,9 +1241,6 @@ func canvasStructuredPromptReferences(content map[string]any) ([]canvasPromptRef
 }
 
 func resolveCanvasReferenceAsset(ctx context.Context, projectID uint64, reference canvasPromptReference) (map[string]any, any, error) {
-	if reference.VersionID == 0 {
-		return nil, nil, fmt.Errorf("资产引用缺少版本")
-	}
 	project, err := requireProject(ctx, projectID)
 	if err != nil {
 		return nil, nil, err
@@ -1520,7 +1619,7 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 		RequestID:   run.RequestID,
 		NodeKey:     node.ID,
 		Source:      source,
-		Name:        workspaceCanvasAssetName(canvasRunNodeTitle(node), node.ID),
+		Name:        workspaceCanvasAssetName(node),
 		Kind:        firstText(node.Kind, node.PowerKind, assetmodel.KindRichText),
 		Role:        assetmodel.RoleMaterial,
 		Content:     output,
@@ -1539,20 +1638,32 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 	return payload, nil
 }
 
-func workspaceCanvasAssetName(name string, nodeID string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = "画布结果"
+func workspaceCanvasAssetName(node canvasRunNode) string {
+	nodeTitle := canvasRunNodeTitle(node)
+	if nodeTitle == "" {
+		nodeTitle = "画布结果"
 	}
-	return truncateWorkspaceAssetName(name)
+	if strings.TrimSpace(node.StoryboardTitle) == "" {
+		return truncateWorkspaceAssetName(nodeTitle)
+	}
+	parts := make([]string, 0, 3)
+	for _, part := range []string{node.StoryboardTitle, node.GroupTitle, nodeTitle} {
+		part = strings.TrimSpace(part)
+		if part == "" || (len(parts) > 0 && parts[len(parts)-1] == part) {
+			continue
+		}
+		parts = append(parts, part)
+	}
+	return truncateWorkspaceAssetName(strings.Join(parts, " · "))
 }
 
 func truncateWorkspaceAssetName(name string) string {
 	const maxLen = 128
-	if len(name) <= maxLen {
+	runes := []rune(name)
+	if len(runes) <= maxLen {
 		return name
 	}
-	return name[:maxLen]
+	return string(runes[:maxLen])
 }
 
 func canvasAssetRunPayload(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64) map[string]any {
@@ -1607,6 +1718,12 @@ func canvasNodeRunPayload(req CanvasRunRequest, run *teammodel.Run, node canvasR
 		"result":           mergeMap(payload, map[string]any{"output": output}),
 		"persists_result":  node.PersistsResult || mapValue(firstPresent(payload["asset"], childNodeResult["asset"])) != nil || mapValue(firstPresent(payload["version"], childNodeResult["version"])) != nil,
 		"agent_run_id":     uint64Value(firstPresent(payload["agent_run_id"], childNodeResult["agent_run_id"])),
+	}
+	if sourceSignature := firstText(
+		node.StoryboardItem["source_signature"],
+		node.StoryboardItem["sourceSignature"],
+	); sourceSignature != "" {
+		nodeResult["source_signature"] = sourceSignature
 	}
 	if approval := canvasPayloadApproval(payload); approval != nil {
 		nodeResult["approval"] = approval

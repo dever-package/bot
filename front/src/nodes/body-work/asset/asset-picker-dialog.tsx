@@ -2,7 +2,12 @@ import { Loader2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 import { AssetBrowser } from "./asset-browser";
-import type { AssetFilters, AssetKind, AssetRecord } from "./asset-types";
+import type {
+  AssetContentMode,
+  AssetFilters,
+  AssetKind,
+  AssetRecord,
+} from "./asset-types";
 
 export function AssetPickerDialog({
   open,
@@ -15,6 +20,7 @@ export function AssetPickerDialog({
   multiple = false,
   maxSelection = 1,
   confirmSelection = false,
+  contentMode = "preview",
   validateAsset,
   uploadAccept,
   onUpload,
@@ -31,6 +37,7 @@ export function AssetPickerDialog({
   multiple?: boolean;
   maxSelection?: number;
   confirmSelection?: boolean;
+  contentMode?: AssetContentMode;
   validateAsset?: (asset: AssetRecord) => string;
   uploadAccept?: string;
   onUpload?: (files: File[]) => Promise<AssetRecord[]>;
@@ -237,6 +244,7 @@ export function AssetPickerDialog({
           teamID={teamID}
           initialFilters={browserFilters}
           allowedKinds={allowedKinds}
+          contentMode={contentMode}
           selectable
           selectedAssetIDs={selectedAssetIDs}
           reloadSignal={reloadSignal}
@@ -246,6 +254,16 @@ export function AssetPickerDialog({
                 new Map(current).set(asset.id, asset),
               );
             }
+          }}
+          onAssetRemoved={(assetID) => {
+            setSelectedAssetIDs((current) =>
+              current.filter((id) => id !== assetID),
+            );
+            setSelectedAssets((current) => {
+              const next = new Map(current);
+              next.delete(assetID);
+              return next;
+            });
           }}
           headerAction={
             onUpload ? (

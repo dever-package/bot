@@ -100,7 +100,7 @@
       },
       {
         "type": "form-switch",
-        "name": "启用项目",
+        "name": "启用创作",
         "value": "form.project_enabled",
         "mode": "form",
         "info": "开启后，用户可在该团队工作区创建项目并进入画布编辑。关闭只隐藏项目入口，不影响团队能力、角色和流程配置。",

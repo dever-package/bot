@@ -244,7 +244,10 @@ import {
   isVideoComposePowerType,
   resolvePowerPresentation,
 } from "./space-power-presentation";
-import { syncCanvasStoryboardDerivedGroups } from "./space-storyboard-derived-groups";
+import {
+  canvasStoryboardReferenceSourceSignature,
+  syncCanvasStoryboardDerivedGroups,
+} from "./space-storyboard-derived-groups";
 import {
   moveStoryboardFrameNodes,
   storyboardFrameDisplayBounds,
@@ -549,6 +552,8 @@ export function WorkSpacePage() {
   const requestedNodeTitlesRef = useRef<Set<string>>(new Set());
   const appliedCanvasRunsRef = useRef<Set<string>>(new Set());
   const changedCanvasKeysRef = useRef<Set<number>>(new Set());
+  const canvasExecutionRefreshInFlightRef = useRef(false);
+  const canvasExecutionPollRef = useRef<(() => void) | null>(null);
   const startFlowFeedbackRef = useRef<{
     nodeId: string;
     recordId: string;
@@ -724,6 +729,16 @@ export function WorkSpacePage() {
     () => Object.values(canvasStates).flatMap((canvas) => canvas.nodes),
     [canvasStates],
   );
+  const storyboardReferenceSourceSignature = useMemo(
+    () =>
+      Object.entries(canvasStates)
+        .map(
+          ([key, canvas]) =>
+            `${key}:${canvasStoryboardReferenceSourceSignature(canvas)}`,
+        )
+        .join("|"),
+    [canvasStates],
+  );
   const canvasModel = useMemo(
     () => applyNodeResultOverrides(activeCanvas, nodeResultOverrides),
     [activeCanvas, nodeResultOverrides],
@@ -782,7 +797,7 @@ export function WorkSpacePage() {
       }
       return next;
     });
-  }, [powers, space]);
+  }, [powers, space, storyboardReferenceSourceSignature]);
 
   const openImportPickerByNodeId = useCallback(
     (nodeId = "") => {
@@ -1326,8 +1341,15 @@ export function WorkSpacePage() {
     nextProjectId: number,
     nextSpace: SpaceBootstrap,
     canvases: Record<string, SpaceCanvasState>,
+    options: { silent?: boolean } = {},
   ) {
-    setCanvasRunRecordsLoading(true);
+    if (canvasExecutionRefreshInFlightRef.current) {
+      return;
+    }
+    canvasExecutionRefreshInFlightRef.current = true;
+    if (!options.silent) {
+      setCanvasRunRecordsLoading(true);
+    }
     setCanvasRunRecordsError("");
     try {
       const canvasExecutions = await fetchSpaceCanvasExecutions(nextProjectId);
@@ -1337,21 +1359,45 @@ export function WorkSpacePage() {
           Boolean(item.run_id || item.request_id),
         );
       setCanvasRunRecords(items);
-      const cateId = defaultAssetCateId(nextSpace);
-      applyCanvasRunRecordsToCanvas(
-        items,
-        canvases[String(cateId)] || emptyCanvasState(cateId),
-        cateId,
-        nextSpace,
-      );
+      for (const [key, canvas] of Object.entries(canvases)) {
+        const cateId = Number(canvas.assetCateId || key || 0);
+        applyCanvasRunRecordsToCanvas(items, canvas, cateId, nextSpace);
+      }
     } catch (err) {
       setCanvasRunRecordsError(
         err instanceof Error ? err.message : "读取画布运行记录失败",
       );
     } finally {
-      setCanvasRunRecordsLoading(false);
+      canvasExecutionRefreshInFlightRef.current = false;
+      if (!options.silent) {
+        setCanvasRunRecordsLoading(false);
+      }
     }
   }
+
+  const hasRecoverableCanvasRuns = canvasRunRecordsHaveActiveLatestNodes(
+    canvasRunRecords,
+  );
+  canvasExecutionPollRef.current = space
+    ? () => {
+        void loadWorkspaceCanvasExecutions(
+          projectId,
+          space,
+          canvasStatesRef.current,
+          { silent: true },
+        );
+      }
+    : null;
+
+  useEffect(() => {
+    if (!space || !hasRecoverableCanvasRuns) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      canvasExecutionPollRef.current?.();
+    }, canvasRunStatusPollIntervalMs);
+    return () => window.clearInterval(timer);
+  }, [hasRecoverableCanvasRuns, projectId, space]);
 
   function applyCanvasRunRecordsToCanvas(
     runs: WorkspaceCanvasRunRef[],
@@ -1366,16 +1412,39 @@ export function WorkSpacePage() {
       return;
     }
     const appliedNodeKeys = new Set<string>();
+    const claimedNodeKeys = new Set<string>();
     for (const run of relatedRuns) {
+      const managedNodeKeys = new Set(
+        canvasRunNodeIds(run).filter((nodeId) => {
+          if (claimedNodeKeys.has(nodeId)) {
+            return false;
+          }
+          claimedNodeKeys.add(nodeId);
+          return true;
+        }),
+      );
+      if (managedNodeKeys.size === 0) {
+        continue;
+      }
       const latestResults = (run.node_results || []).filter((result) => {
         const nodeKey = result.node_key;
-        if (!nodeKey || appliedNodeKeys.has(nodeKey)) {
+        if (
+          !nodeKey ||
+          !managedNodeKeys.has(nodeKey) ||
+          appliedNodeKeys.has(nodeKey)
+        ) {
           return false;
         }
         appliedNodeKeys.add(nodeKey);
         return true;
       });
-      applyCanvasRunRecord(run, canvas, targetSpace, latestResults);
+      applyCanvasRunRecord(
+        run,
+        canvas,
+        targetSpace,
+        latestResults,
+        managedNodeKeys,
+      );
     }
   }
 
@@ -1384,6 +1453,7 @@ export function WorkSpacePage() {
     canvas: SpaceCanvasState,
     targetSpace: SpaceBootstrap,
     results: CanvasNodeResultRef[] = run.node_results || [],
+    managedNodeIds?: ReadonlySet<string>,
   ) {
     const startNode = canvasRunRecordStartNode(run, canvas.nodes);
     if (!startNode) {
@@ -1417,8 +1487,10 @@ export function WorkSpacePage() {
       return true;
     });
     applyBackendCanvasRunResults(input, newResults);
+    markBackendCanvasNodeResultsDone(input, newResults);
     syncBackendCanvasFeedbackRecord(input, run);
-    markCanvasRunRecordRunningNodes(input, run);
+    markCanvasRunRecordRunningNodes(input, run, managedNodeIds);
+    finishBackendCanvasRunningNodes(input, run, managedNodeIds);
   }
 
   function addConfiguredNode(
@@ -2022,6 +2094,7 @@ export function WorkSpacePage() {
           projectID: space.project.id,
         }}
         confirmSelection
+        contentMode="full"
         validateAsset={(asset) =>
           asset.versionID > 0 ? "" : "该资产没有可用版本，无法导入。"
         }
@@ -4227,13 +4300,26 @@ function normalizeComposerDraft(value: unknown): ComposerDraft {
   );
 }
 
-function readNodeComposerDraft(node: SpaceCanvasNode): ComposerDraft {
-  const draft = normalizeComposerDraft((node as any).composerDraft);
+function composerDraftSyncSignature(draft: ComposerDraft) {
+  return JSON.stringify([
+    draft.prompt,
+    draft.promptContent || null,
+    draft.paramValues || {},
+    draft.selectedTargetId || 0,
+  ]);
+}
+
+function readComposerDraft(value: unknown): ComposerDraft {
+  const draft = normalizeComposerDraft(value);
   const contentPrompt = composerPromptFromReferenceContent(draft.promptContent);
   if (contentPrompt) {
     return { ...draft, prompt: contentPrompt };
   }
   return draft;
+}
+
+function readNodeComposerDraft(node: SpaceCanvasNode): ComposerDraft {
+  return readComposerDraft(node.composerDraft);
 }
 
 function composerPromptFromReferenceContent(
@@ -5199,6 +5285,7 @@ function markCanvasNodeResultsDoneState(
 function finishBackendCanvasRunningNodes(
   input: CanvasStartRunInput,
   canvasRun: CanvasRunRef,
+  managedNodeIds?: ReadonlySet<string>,
 ) {
   if (
     !input.setRunningNode ||
@@ -5215,7 +5302,12 @@ function finishBackendCanvasRunningNodes(
   input.setRunningNode((current) => {
     let changed = false;
     const next = { ...current };
-    const nodeIds = backendCanvasRunActiveNodeIds(input, canvasRun, current);
+    const nodeIds = backendCanvasRunActiveNodeIds(
+      input,
+      canvasRun,
+      current,
+      managedNodeIds,
+    );
     for (const nodeId of nodeIds) {
       const running = next[nodeId];
       if (!running) {
@@ -5240,6 +5332,7 @@ function finishBackendCanvasRunningNodes(
           input,
           canvasRun,
           current,
+          managedNodeIds,
         );
         for (const nodeId of nodeIds) {
           const running = next[nodeId];
@@ -5263,37 +5356,103 @@ function backendCanvasRunActiveNodeIds(
   input: CanvasStartRunInput,
   canvasRun: CanvasRunRef,
   current: RunningNodeMap,
+  managedNodeIds?: ReadonlySet<string>,
 ) {
-  const allowed = new Set(backendCanvasRunNodeIds(input, canvasRun));
+  const allowed = new Set(
+    backendCanvasRunNodeIds(input, canvasRun).filter(
+      (nodeId) => !managedNodeIds || managedNodeIds.has(nodeId),
+    ),
+  );
   return Object.keys(current).filter((nodeId) => allowed.has(nodeId));
 }
 
 function markCanvasRunRecordRunningNodes(
   input: CanvasStartRunInput,
   canvasRun: CanvasRunRef,
+  managedNodeIds?: ReadonlySet<string>,
 ) {
-  if (!input.setRunningNode || canvasRun.status !== "waiting") {
+  if (!input.setRunningNode) {
     return;
   }
-  const pendingNodeId = canvasRun.pending_node?.node_key || "";
-  if (!pendingNodeId) {
+  const runStatus = String(canvasRun.status || "")
+    .trim()
+    .toLowerCase();
+  if (!["running", "pending", "waiting"].includes(runStatus)) {
     return;
   }
-  input.setRunningNode((current) => {
-    const node = input.nodes.find((item) => item.id === pendingNodeId);
-    if (!node) {
-      return current;
+  const activeNodeStatuses = new Map<
+    string,
+    RunningNodeState["status"]
+  >();
+  let hasManagedNodeRun = false;
+  let firstPendingNodeId = "";
+  for (const nodeRun of canvasRun.node_runs || []) {
+    const nodeId = String(nodeRun.node_key || "");
+    if (!nodeId || (managedNodeIds && !managedNodeIds.has(nodeId))) {
+      continue;
     }
-    return {
-      ...current,
-      [pendingNodeId]: {
-        nodeId: pendingNodeId,
+    hasManagedNodeRun = true;
+    const status = String(nodeRun.status || "")
+      .trim()
+      .toLowerCase();
+    if (status === "running") {
+      activeNodeStatuses.set(nodeId, "running");
+    } else if (status === "waiting") {
+      activeNodeStatuses.set(nodeId, "waiting");
+    } else if (status === "pending" && !firstPendingNodeId) {
+      firstPendingNodeId = nodeId;
+    }
+  }
+  const pendingNodeId = String(canvasRun.pending_node?.node_key || "");
+  if (
+    pendingNodeId &&
+    (!managedNodeIds || managedNodeIds.has(pendingNodeId))
+  ) {
+    activeNodeStatuses.set(pendingNodeId, "waiting");
+  }
+  if (activeNodeStatuses.size === 0 && firstPendingNodeId) {
+    activeNodeStatuses.set(firstPendingNodeId, "running");
+  }
+  if (activeNodeStatuses.size === 0 && !hasManagedNodeRun) {
+    const fallbackNodeId = String(canvasRun.start_node_id || "");
+    if (
+      fallbackNodeId &&
+      (!managedNodeIds || managedNodeIds.has(fallbackNodeId))
+    ) {
+      activeNodeStatuses.set(
+        fallbackNodeId,
+        runStatus === "waiting" ? "waiting" : "running",
+      );
+    }
+  }
+  if (activeNodeStatuses.size === 0) {
+    return;
+  }
+  const startedAt = Date.parse(String(canvasRun.created_at || ""));
+  input.setRunningNode((current) => {
+    let changed = false;
+    const next = { ...current };
+    for (const [nodeId, status] of activeNodeStatuses) {
+      const node = input.nodes.find((item) => item.id === nodeId);
+      if (!node) {
+        continue;
+      }
+      const existing = current[nodeId];
+      if (existing?.status === status) {
+        continue;
+      }
+      next[nodeId] = {
+        nodeId,
         title: node.title,
-        startedAt: current[pendingNodeId]?.startedAt || Date.now(),
-        progress: 92,
-        status: "waiting",
-      },
-    };
+        startedAt:
+          existing?.startedAt ||
+          (Number.isFinite(startedAt) ? startedAt : Date.now()),
+        progress: status === "waiting" ? 92 : existing?.progress || 0,
+        status,
+      };
+      changed = true;
+    }
+    return changed ? next : current;
   });
 }
 
@@ -5301,24 +5460,9 @@ function backendCanvasRunNodeIds(
   input: CanvasStartRunInput,
   canvasRun: CanvasRunRef,
 ) {
-  const result = new Set<string>();
+  const result = new Set(canvasRunNodeIds(canvasRun));
   if (input.singleNode) {
     result.add(input.startNode.id);
-  }
-  for (const nodeRun of canvasRun.node_runs || []) {
-    if (nodeRun.node_key) {
-      result.add(nodeRun.node_key);
-    }
-  }
-  for (const nodeResult of canvasRun.node_results || []) {
-    if (nodeResult.node_key) {
-      result.add(nodeResult.node_key);
-    }
-  }
-  if (canvasRun.execution_plan?.nodes) {
-    for (const node of canvasRun.execution_plan.nodes) {
-      result.add(node.id);
-    }
   }
   return [...result];
 }
@@ -5329,6 +5473,56 @@ function canvasRunRecordMatchesCate(
 ) {
   const runCateId = Number(run.asset_cate_id || 0);
   return runCateId === 0 || runCateId === Number(cateId || 0);
+}
+
+function canvasRunNodeIds(run: CanvasRunRef) {
+  const nodeIds = new Set<string>();
+  const startNodeId = String(run.start_node_id || "");
+  if (startNodeId) {
+    nodeIds.add(startNodeId);
+  }
+  for (const nodeRun of run.node_runs || []) {
+    if (nodeRun.node_key) {
+      nodeIds.add(nodeRun.node_key);
+    }
+  }
+  for (const nodeResult of run.node_results || []) {
+    if (nodeResult.node_key) {
+      nodeIds.add(nodeResult.node_key);
+    }
+  }
+  for (const node of run.execution_plan?.nodes || []) {
+    if (node.id) {
+      nodeIds.add(node.id);
+    }
+  }
+  return [...nodeIds];
+}
+
+function canvasRunRecordsHaveActiveLatestNodes(
+  runs: WorkspaceCanvasRunRef[],
+) {
+  const claimedNodeIds = new Set<string>();
+  for (const run of runs) {
+    let ownsLatestNode = false;
+    for (const nodeId of canvasRunNodeIds(run)) {
+      if (claimedNodeIds.has(nodeId)) {
+        continue;
+      }
+      claimedNodeIds.add(nodeId);
+      ownsLatestNode = true;
+    }
+    if (!ownsLatestNode) {
+      continue;
+    }
+    const status = String(run.status || "")
+      .trim()
+      .toLowerCase();
+    if (status === "running" || status === "pending") {
+      return true;
+    }
+  }
+  return false;
 }
 
 function canvasRunRecordHasCompleteTerminalResults(run: WorkspaceCanvasRunRef) {
@@ -5698,6 +5892,7 @@ function canvasNodeResultApplyKey(result: CanvasNodeResultRef) {
     result.node_run_id || "",
     result.child_run_id || "",
     result.status || "",
+    result.source_signature || "",
     Number(
       result.version?.id ||
         result.asset?.version?.id ||
@@ -5735,7 +5930,11 @@ function buildBackendCanvasNodePatch(
   const withFeedbackRecords = (patch: Partial<SpaceCanvasNode>) =>
     mergeNodeFeedbackRecordsIntoPatch(
       node,
-      clearStoryboardNodeStaleState(node, patch),
+      applyStoryboardNodeResultSourceState(
+        node,
+        patch,
+        result.source_signature,
+      ),
     );
   if (asset) {
     return withFeedbackRecords({
@@ -5757,21 +5956,25 @@ function buildBackendCanvasNodePatch(
   });
 }
 
-function clearStoryboardNodeStaleState(
+function applyStoryboardNodeResultSourceState(
   node: SpaceCanvasNode,
   patch: Partial<SpaceCanvasNode>,
+  resultSourceSignature?: string,
 ) {
-  if (!node.storyboardItem?.stale) {
+  const storyboardItem = node.storyboardItem;
+  const resultSignature = String(resultSourceSignature || "").trim();
+  if (!storyboardItem || !resultSignature) {
     return patch;
   }
+  const sourceSignature = String(storyboardItem.sourceSignature || "").trim();
   return {
     ...patch,
     storyboardItem: {
-      ...node.storyboardItem,
-      resultSourceSignature:
-        node.storyboardItem.sourceSignature ||
-        node.storyboardItem.resultSourceSignature,
-      stale: false,
+      ...storyboardItem,
+      resultSourceSignature: resultSignature,
+      stale: sourceSignature
+        ? resultSignature !== sourceSignature
+        : Boolean(storyboardItem.stale),
     },
   };
 }
@@ -8800,12 +9003,10 @@ function NodeResultBubble({
 function FunctionResultCard({
   node,
   running = false,
-  progress = 0,
   onShowNodeDetail,
 }: {
   node: SpaceCanvasNode;
   running?: boolean;
-  progress?: number;
   onShowNodeDetail?: (node: SpaceCanvasNode) => void;
 }) {
   const preview = generatedNodePreview(node);
@@ -8851,7 +9052,6 @@ function FunctionResultCard({
           output={contentOutput}
           fallback={displayText}
           generating={running}
-          generationProgress={progress}
           showMediaCaption={false}
           onMediaSize={
             canAdoptGeneratedMediaSize
@@ -9236,19 +9436,40 @@ function NodeBottomSettings({
   requestConfirm?: ConfirmRequester;
   onRunBackendNode?: BackendNodeRunner;
 }) {
-  const [prompt, setPrompt] = useState("");
+  const nodeComposerDraft = node.composerDraft;
+  const latestNodeDraft = useMemo(
+    () => readComposerDraft(nodeComposerDraft),
+    [nodeComposerDraft],
+  );
+  const latestNodeDraftSignature = useMemo(
+    () => composerDraftSyncSignature(latestNodeDraft),
+    [latestNodeDraft],
+  );
+  const nodeDraftRef = useRef(latestNodeDraft);
+  const [prompt, setPrompt] = useState(latestNodeDraft.prompt || "");
   const [promptContent, setPromptContent] = useState<
     CanvasReferenceContent | undefined
-  >(undefined);
+  >(latestNodeDraft.promptContent);
   const [running, setRunning] = useState(false);
   const [powerForm, setPowerForm] = useState<PowerForm | null>(null);
   const [powerFormLoading, setPowerFormLoading] = useState(false);
-  const [selectedTargetId, setSelectedTargetId] = useState<number>(0);
-  const [paramValues, setParamValues] = useState<Record<string, unknown>>({});
-  const initialDraftRef = useRef<ComposerDraft>(readNodeComposerDraft(node));
-  const savedDraft = initialDraftRef.current;
+  const [selectedTargetId, setSelectedTargetId] = useState<number>(
+    latestNodeDraft.selectedTargetId || 0,
+  );
+  const [paramValues, setParamValues] = useState<Record<string, unknown>>(
+    latestNodeDraft.paramValues || {},
+  );
+  const powerFormRef = useRef(powerForm);
   const inputContext = ((node as any).inputContext ||
     null) as NodeInputContext | null;
+
+  useEffect(() => {
+    nodeDraftRef.current = latestNodeDraft;
+  }, [latestNodeDraft]);
+
+  useEffect(() => {
+    powerFormRef.current = powerForm;
+  }, [powerForm]);
 
   const nodeRunning = running || isActiveRunningNode(runningNode);
   const selectedNodeType = node.type;
@@ -9281,7 +9502,7 @@ function NodeBottomSettings({
 
   useEffect(() => {
     if (selectedNodeType === "power" && (selectedPowerId || selectedPowerKey)) {
-      const draftTargetId = savedDraft.selectedTargetId || 0;
+      const draftTargetId = nodeDraftRef.current.selectedTargetId || 0;
       let canceled = false;
       setPowerFormLoading(true);
       catalogCache
@@ -9307,6 +9528,7 @@ function NodeBottomSettings({
           if (canceled) {
             return;
           }
+          const savedDraft = nodeDraftRef.current;
           setPowerForm(form);
           setSelectedTargetId(
             powerFormAllowsSourceSelection(form)
@@ -9337,7 +9559,8 @@ function NodeBottomSettings({
     }
     setPowerForm(null);
     if (selectedNodeType === "agent") {
-      setParamValues(savedDraft.paramValues);
+      const savedDraft = nodeDraftRef.current;
+      setParamValues(savedDraft.paramValues || {});
       setPrompt(savedDraft.prompt || "");
       setPromptContent(savedDraft.promptContent);
       setSelectedTargetId(0);
@@ -9379,14 +9602,39 @@ function NodeBottomSettings({
   const canSelectPowerSource = powerFormAllowsSourceSelection(powerForm);
   const effectiveSelectedTargetId = canSelectPowerSource ? selectedTargetId : 0;
 
-  function saveComposerDraft(draft: ComposerDraft) {
-    onNodeDraftChange(
-      node.id,
-      normalizeComposerDraft({
-        ...draft,
-        promptContent: draft.promptContent ?? promptContent,
-      }),
+  useEffect(() => {
+    if (selectedNodeType !== "power" && selectedNodeType !== "agent") {
+      return;
+    }
+    const savedDraft = nodeDraftRef.current;
+    const currentPowerForm = powerFormRef.current;
+    setPrompt(savedDraft.prompt || "");
+    setPromptContent(savedDraft.promptContent);
+    setSelectedTargetId(
+      selectedNodeType === "power" &&
+        powerFormAllowsSourceSelection(currentPowerForm)
+        ? savedDraft.selectedTargetId ||
+            currentPowerForm?.selected_target_id ||
+            0
+        : 0,
     );
+    setParamValues(
+      selectedNodeType === "power" && currentPowerForm
+        ? mergeSavedComposerParamValues(
+            currentPowerForm.params || [],
+            savedDraft,
+          )
+        : savedDraft.paramValues || {},
+    );
+  }, [latestNodeDraftSignature, selectedNodeType]);
+
+  function saveComposerDraft(draft: ComposerDraft) {
+    const normalized = normalizeComposerDraft({
+      ...draft,
+      promptContent: draft.promptContent ?? promptContent,
+    });
+    nodeDraftRef.current = normalized;
+    onNodeDraftChange(node.id, normalized);
   }
 
   function setPowerPrompt(
@@ -10572,7 +10820,6 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
           <FunctionResultCard
             node={node}
             running={nodeRunning}
-            progress={runningNode?.progress}
             onShowNodeDetail={onShowNodeDetail}
           />
         ) : null}
@@ -11001,7 +11248,6 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
               fallback={node.description}
               streaming={isPowerRunning && showStreamOutput}
               generating={isPowerRunning && hasPowerMedia && !showStreamOutput}
-              generationProgress={runningNode?.progress}
               onMediaSize={
                 canAdoptGeneratedMediaSize
                   ? (width, height) => {
@@ -11110,7 +11356,6 @@ function CanvasGeneratedNodeContent({
   fallback,
   streaming,
   generating = false,
-  generationProgress = 0,
   onMediaSize,
   showMediaCaption = true,
 }: {
@@ -11119,7 +11364,6 @@ function CanvasGeneratedNodeContent({
   fallback: string;
   streaming?: boolean;
   generating?: boolean;
-  generationProgress?: number;
   onMediaSize?: (width: number, height: number) => void;
   showMediaCaption?: boolean;
 }) {
@@ -11156,10 +11400,7 @@ function CanvasGeneratedNodeContent({
           }
         />
         {caption ? <p>{caption}</p> : null}
-        <CanvasMediaGenerationOverlay
-          active={generating}
-          progress={generationProgress}
-        />
+        <CanvasMediaGenerationOverlay active={generating} />
       </div>
     );
   }
@@ -11182,10 +11423,7 @@ function CanvasGeneratedNodeContent({
           }
         />
         {caption ? <p>{caption}</p> : null}
-        <CanvasMediaGenerationOverlay
-          active={generating}
-          progress={generationProgress}
-        />
+        <CanvasMediaGenerationOverlay active={generating} />
       </div>
     );
   }
@@ -11195,10 +11433,7 @@ function CanvasGeneratedNodeContent({
         className={`ws-node-generated-media is-audio ${generating ? "is-generating" : ""}`}
       >
         <AssetAudioPreview src={preview.audioUrl} autoPlay={streaming} />
-        <CanvasMediaGenerationOverlay
-          active={generating}
-          progress={generationProgress}
-        />
+        <CanvasMediaGenerationOverlay active={generating} />
       </div>
     );
   }
@@ -11230,19 +11465,10 @@ function CanvasGeneratedNodeContent({
   );
 }
 
-function CanvasMediaGenerationOverlay({
-  active,
-  progress,
-}: {
-  active: boolean;
-  progress: number;
-}) {
+function CanvasMediaGenerationOverlay({ active }: { active: boolean }) {
   if (!active) {
     return null;
   }
-  const normalizedProgress = Number.isFinite(progress)
-    ? Math.max(0, Math.min(99, Math.round(progress)))
-    : 0;
   return (
     <div
       className="ws-node-media-generating nodrag nopan nowheel"
@@ -11252,9 +11478,7 @@ function CanvasMediaGenerationOverlay({
       onClick={(event) => event.stopPropagation()}
     >
       <Loader2 size={18} className="ws-spin" />
-      <span>
-        生成中{normalizedProgress > 0 ? ` ${normalizedProgress}%` : ""}
-      </span>
+      <span>生成中</span>
     </div>
   );
 }

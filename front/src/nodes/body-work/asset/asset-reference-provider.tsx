@@ -54,12 +54,6 @@ export function useAssetReferenceProvider({
       referenceTypes: ["asset"] as ["asset"],
       loadPreview: async (request: ReferencePreviewRequest) => {
         const detail = await loadAssetDetail(teamID, request.refId);
-        if (
-          request.versionId &&
-          detail.asset.versionID !== request.versionId
-        ) {
-          throw new Error("资产当前版本已变化，请重新选择");
-        }
         const media = assetReferenceMedia(detail.asset);
         return {
           refType: "asset" as const,

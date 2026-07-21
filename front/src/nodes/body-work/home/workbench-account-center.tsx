@@ -6,7 +6,6 @@ import {
   FileClock,
   LoaderCircle,
   ReceiptText,
-  UserRound,
   WalletCards,
   X,
   type LucideIcon,
@@ -19,6 +18,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  useAuthStore,
 } from "@dever/front-plugin";
 import {
   checkoutPointPackage,
@@ -44,6 +44,7 @@ import {
   AccountPointLogsView,
 } from "./workbench-account-records";
 import { AccountError, AccountLoading } from "./workbench-account-state";
+import { WorkbenchAvatar } from "./workbench-avatar";
 import { WorkbenchPicker } from "./workbench-picker";
 import "./workbench-account.css";
 
@@ -196,27 +197,7 @@ export function WorkbenchAccountCenter({
       <DialogContent
         showCloseButton={false}
         layerClassName="hb-account-layer"
-        className="hb-account-dialog !fixed !left-0 !top-0 !h-[100dvh] !max-h-[100dvh] !w-screen !max-w-none !translate-x-0 !translate-y-0 !gap-0 !overflow-hidden !rounded-none !border-0 !p-0 shadow-none sm:!max-w-none"
-        style={{
-          position: "fixed",
-          inset: 0,
-          left: 0,
-          top: 0,
-          width: "100vw",
-          maxWidth: "none",
-          height: "100dvh",
-          maxHeight: "100dvh",
-          transform: "none",
-          translate: "0 0",
-          display: "flex",
-          flexDirection: "column",
-          gap: 0,
-          padding: 0,
-          border: 0,
-          borderRadius: 0,
-          boxSizing: "border-box",
-          pointerEvents: "auto",
-        }}
+        className="hb-account-dialog"
       >
         <DialogHeader className="sr-only">
           <DialogTitle>积分与订阅中心</DialogTitle>
@@ -347,6 +328,9 @@ function AccountHeader({
   onPointConfigChange: (pointConfigID: number) => void;
   onClose: () => void;
 }) {
+  const auth = useAuthStore((state: any) => state.auth);
+  const user = auth.user;
+  const userName = user?.name || overview?.user.name || "账户中心";
   const views: Array<{ key: AccountView; label: string; icon: LucideIcon }> = [
     { key: "plans", label: "订阅计划", icon: BadgeCheck },
     { key: "points", label: `购买${pointName}`, icon: WalletCards },
@@ -357,11 +341,14 @@ function AccountHeader({
   return (
     <header className="hb-account-header">
       <div className="hb-account-user">
-        <span className="hb-account-avatar" aria-hidden="true">
-          <UserRound />
-        </span>
+        <WorkbenchAvatar
+          src={user?.avatar}
+          name={userName}
+          account={user?.account}
+          className="hb-account-avatar"
+        />
         <div>
-          <strong>{overview?.user.name || "账户中心"}</strong>
+          <strong>{userName}</strong>
           {overview ? (
             <div className="hb-account-user-meta">
               {overview.pointAccounts.length > 0 ? (

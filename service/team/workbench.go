@@ -31,14 +31,11 @@ type WorkbenchRoleBinding struct {
 }
 
 func (s Service) WorkbenchCatalog(ctx context.Context, teamID uint64) (map[string]any, error) {
-	teamsPayload, err := s.TeamList(ctx)
-	if err != nil {
-		return nil, err
-	}
-	teamID = selectedWorkbenchTeamID(teamID, teamsPayload)
+	teams, releases := s.teamListRows(ctx)
+	teamID = selectedWorkbenchTeamID(teamID, teams)
 	if teamID == 0 {
 		return map[string]any{
-			"teams":           teamsPayload["items"],
+			"teams":           teams,
 			"team":            map[string]any{},
 			"release":         map[string]any{},
 			"powers":          []map[string]any{},
@@ -47,28 +44,36 @@ func (s Service) WorkbenchCatalog(ctx context.Context, teamID uint64) (map[strin
 			"project_enabled": false,
 		}, nil
 	}
-	release, graph, err := s.runtimeGraphByRelease(ctx, teamID, 0)
+	release, exists := releases[teamID]
+	if !exists {
+		return nil, fmt.Errorf("团队尚未发布，不能运行")
+	}
+	graph, err := runtimeGraphFromRelease(release)
 	if err != nil {
 		return nil, err
 	}
+	powerByID := make(map[uint64]PowerOption)
+	for _, power := range s.repo.ListPowers(ctx) {
+		powerByID[power.ID] = power
+	}
 	powers := make([]map[string]any, 0, len(graph.TeamPowers))
 	for _, teamPower := range graph.TeamPowers {
-		if normalizeTeamPowerHomeStatus(teamPower.HomeStatus) != teammodel.StatusEnabled {
+		if !isWorkbenchPowerAvailable(teamPower) {
 			continue
 		}
-		binding, currentErr := s.workbenchPowerBinding(ctx, release.ID, graph, teamPower.ID)
-		if currentErr != nil {
+		power, powerExists := powerByID[teamPower.PowerID]
+		if !powerExists {
 			continue
 		}
 		powers = append(powers, map[string]any{
-			"id":          binding.TeamPowerID,
-			"power_id":    binding.Power.ID,
-			"name":        binding.Name,
-			"key":         binding.Power.Key,
-			"icon":        binding.Power.Icon,
-			"kind":        binding.Power.Kind,
-			"output_type": binding.Power.OutputType,
-			"output":      binding.Power.Output,
+			"id":          teamPower.ID,
+			"power_id":    power.ID,
+			"name":        power.Name,
+			"key":         power.Key,
+			"icon":        power.Icon,
+			"kind":        power.Kind,
+			"output_type": power.OutputType,
+			"output":      power.Output,
 		})
 	}
 	agents := make(map[uint64]AgentOption)
@@ -95,7 +100,7 @@ func (s Service) WorkbenchCatalog(ctx context.Context, teamID uint64) (map[strin
 		})
 	}
 	return map[string]any{
-		"teams": teamsPayload["items"],
+		"teams": teams,
 		"team": map[string]any{
 			"id":          graph.Team.ID,
 			"name":        graph.Team.Name,
@@ -175,11 +180,14 @@ func isWorkbenchExecutionRole(role teammodel.Role) bool {
 	return role.Status == teammodel.StatusEnabled && role.RoleType == teammodel.RoleTypeWorker
 }
 
+func isWorkbenchPowerAvailable(teamPower teammodel.TeamPower) bool {
+	return teamPower.Status == teammodel.StatusEnabled &&
+		normalizeTeamPowerHomeStatus(teamPower.HomeStatus) == teammodel.StatusEnabled
+}
+
 func (s Service) workbenchPowerBinding(ctx context.Context, releaseID uint64, graph runtimeGraph, teamPowerID uint64) (WorkbenchPowerBinding, error) {
 	for _, teamPower := range graph.TeamPowers {
-		if teamPower.ID != teamPowerID ||
-			teamPower.Status != teammodel.StatusEnabled ||
-			normalizeTeamPowerHomeStatus(teamPower.HomeStatus) != teammodel.StatusEnabled {
+		if teamPower.ID != teamPowerID || !isWorkbenchPowerAvailable(teamPower) {
 			continue
 		}
 		power, exists := s.repo.FindPowerOption(ctx, teamPower.PowerID, "")
@@ -196,8 +204,7 @@ func (s Service) workbenchPowerBinding(ctx context.Context, releaseID uint64, gr
 	return WorkbenchPowerBinding{}, fmt.Errorf("当前团队发布版本中不存在该能力")
 }
 
-func selectedWorkbenchTeamID(requested uint64, payload map[string]any) uint64 {
-	rows, _ := payload["items"].([]map[string]any)
+func selectedWorkbenchTeamID(requested uint64, rows []map[string]any) uint64 {
 	for _, row := range rows {
 		id := uint64Value(row["id"])
 		if id == requested {

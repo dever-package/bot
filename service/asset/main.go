@@ -277,7 +277,9 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 		if current := (Service{}).FindVersion(ctx, asset.VersionID); current != nil && current.Version > version.Version {
 			return asset, current, nil
 		}
-		updateAssetVersionPointer(ctx, asset.ID, req, version.ID)
+		if !updateAssetVersionPointer(ctx, asset.ID, req, version.ID) {
+			return nil, nil, fmt.Errorf("资产已移入回收站")
+		}
 		asset = assetModel.Find(ctx, map[string]any{"id": asset.ID})
 		if asset == nil {
 			return nil, nil, fmt.Errorf("读取资产失败")
@@ -288,7 +290,9 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 	if versionID == 0 {
 		return nil, nil, fmt.Errorf("创建资产版本失败")
 	}
-	updateAssetVersionPointer(ctx, asset.ID, req, versionID)
+	if !updateAssetVersionPointer(ctx, asset.ID, req, versionID) {
+		return nil, nil, fmt.Errorf("资产已移入回收站")
+	}
 	asset = assetModel.Find(ctx, map[string]any{"id": asset.ID})
 	version := Service{}.FindVersion(ctx, versionID)
 	if asset == nil || version == nil {
@@ -302,9 +306,12 @@ func updateAssetVersionPointer(
 	assetID uint64,
 	req SaveVersionRequest,
 	versionID uint64,
-) {
+) bool {
 	assetModel := assetmodel.NewAssetModel()
-	assetModel.Update(ctx, map[string]any{"id": assetID}, map[string]any{
+	affected := assetModel.Update(ctx, map[string]any{
+		"id":     assetID,
+		"status": map[string]any{"neq": assetmodel.StatusDeleted},
+	}, map[string]any{
 		"kind":        req.Kind,
 		"role":        req.Role,
 		"node_key":    req.NodeKey,
@@ -313,11 +320,17 @@ func updateAssetVersionPointer(
 		"source_name": req.SourceName,
 		"version_id":  versionID,
 		"status":      assetmodel.StatusCurrent,
+		"deleted_at":  nil,
 	})
+	if affected == 0 {
+		return false
+	}
 	assetModel.Update(ctx, map[string]any{
 		"id":        assetID,
 		"name_mode": map[string]any{"neq": assetmodel.NameModeManual},
+		"status":    map[string]any{"neq": assetmodel.StatusDeleted},
 	}, map[string]any{"name": req.Name})
+	return true
 }
 
 func assetIdentityFilter(req SaveVersionRequest) map[string]any {
@@ -327,6 +340,7 @@ func assetIdentityFilter(req SaveVersionRequest) map[string]any {
 		"source_type": req.SourceType,
 		"source_id":   req.SourceID,
 		"role":        req.Role,
+		"status":      map[string]any{"neq": assetmodel.StatusDeleted},
 	}
 	if req.SourceType == assetmodel.SourceProject {
 		filter["asset_cate_id"] = req.AssetCateID
@@ -440,6 +454,9 @@ func (s Service) updateVersionContent(ctx context.Context, projectID uint64, ass
 	if asset == nil {
 		return nil, nil, fmt.Errorf("资产不存在")
 	}
+	if err := ensureAssetMutable(asset); err != nil {
+		return nil, nil, err
+	}
 	if versionID == 0 {
 		versionID = asset.VersionID
 	}
@@ -450,12 +467,18 @@ func (s Service) updateVersionContent(ctx context.Context, projectID uint64, ass
 	if version.ID != asset.VersionID {
 		return nil, nil, fmt.Errorf("历史版本不可编辑，请先恢复为新版本")
 	}
+	affected := assetmodel.NewAssetModel().Update(ctx, map[string]any{
+		"id":     asset.ID,
+		"status": map[string]any{"neq": assetmodel.StatusDeleted},
+	}, map[string]any{
+		"status": assetmodel.StatusCurrent,
+	})
+	if affected == 0 {
+		return nil, nil, fmt.Errorf("资产已移入回收站")
+	}
 	assetmodel.NewVersionModel().Update(ctx, map[string]any{"id": version.ID}, map[string]any{
 		"content":    jsonText(EnsureDocument(content, asset.Kind)),
 		"updated_at": time.Now(),
-	})
-	assetmodel.NewAssetModel().Update(ctx, map[string]any{"id": asset.ID}, map[string]any{
-		"status": assetmodel.StatusCurrent,
 	})
 	asset = s.FindProjectAsset(ctx, projectID, assetID)
 	version = s.FindVersion(ctx, versionID)
@@ -497,6 +520,7 @@ func AssetToMap(row assetmodel.Asset) map[string]any {
 		"status":        row.Status,
 		"sort":          row.Sort,
 		"created_at":    row.CreatedAt,
+		"deleted_at":    row.DeletedAt,
 	}
 }
 

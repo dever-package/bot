@@ -1,6 +1,7 @@
 package body
 
 import (
+	"strings"
 	"time"
 
 	"github.com/shemic/dever/orm"
@@ -11,9 +12,13 @@ const (
 	AccountProviderFeishu        = "feishu"
 )
 
+var accountProviderOptions = []map[string]any{
+	{"id": AccountProviderFeishu, "value": "飞书"},
+}
+
 type Account struct {
 	ID        uint64    `dorm:"primaryKey;autoIncrement;comment:账号入口ID"`
-	Provider  string    `dorm:"type:varchar(32);not null;comment:账号标识"`
+	Provider  string    `dorm:"type:varchar(32);not null;comment:账号类型"`
 	Name      string    `dorm:"type:varchar(96);not null;comment:按钮名称"`
 	Icon      string    `dorm:"type:text;not null;default:'';comment:按钮图标"`
 	Status    int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
@@ -24,6 +29,13 @@ type Account struct {
 type AccountIndex struct {
 	Provider   struct{} `unique:"provider"`
 	StatusSort struct{} `index:"status,sort,id"`
+}
+
+var accountConfigRelation = orm.Relation{
+	Field:      "configs",
+	Through:    "bot.body.NewAccountConfigModel",
+	OwnerField: "account_id",
+	Order:      "id asc",
 }
 
 var accountSeed = []map[string]any{
@@ -44,7 +56,18 @@ func NewAccountModel() *orm.Model[Account] {
 		Seeds:    accountSeed,
 		Database: "default",
 		Options: map[string]any{
-			"status": statusOptions,
+			"provider": accountProviderOptions,
+			"status":   statusOptions,
 		},
+		Relations: []orm.Relation{accountConfigRelation},
 	})
+}
+
+func NormalizeAccountProvider(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case AccountProviderFeishu:
+		return AccountProviderFeishu
+	default:
+		return ""
+	}
 }

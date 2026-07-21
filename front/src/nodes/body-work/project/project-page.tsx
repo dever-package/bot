@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArchiveRestore, FolderOpen } from "lucide-react";
+import {
+  ArchiveRestore,
+  ChevronLeft,
+  ChevronRight,
+  FolderOpen,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "@dever/front-plugin";
 import {
@@ -10,6 +15,7 @@ import {
   updateProject,
   type ProjectItem,
   type ProjectMetadataInput,
+  type ProjectPage,
   type ProjectView,
 } from "./project-api";
 import { CreateProjectCard, ProjectCard, ProjectLoading } from "./project-card";
@@ -21,6 +27,14 @@ type MetadataDialogState = {
   project?: ProjectItem;
 };
 
+const emptyProjectPage: ProjectPage = {
+  items: [],
+  page: 1,
+  pageSize: 24,
+  total: 0,
+  hasMore: false,
+};
+
 export function WorkProjectPage({
   teamID = 0,
   onRequireAuth,
@@ -30,7 +44,9 @@ export function WorkProjectPage({
 }) {
   const navigate = useNavigate();
   const [activeView, setActiveView] = useState<ProjectView>("works");
-  const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [projectPage, setProjectPage] =
+    useState<ProjectPage>(emptyProjectPage);
+  const [pageNumber, setPageNumber] = useState(1);
   const [loading, setLoading] = useState(teamID > 0);
   const [metadataDialog, setMetadataDialog] =
     useState<MetadataDialogState | null>(null);
@@ -41,16 +57,16 @@ export function WorkProjectPage({
   const loadWorkspace = useCallback(async () => {
     const requestID = ++loadRequestRef.current;
     if (!teamID) {
-      setProjects([]);
+      setProjectPage(emptyProjectPage);
       setLoading(false);
       return;
     }
-    setProjects([]);
+    setProjectPage((current) => ({ ...current, items: [] }));
     setLoading(true);
     try {
-      const nextProjects = await loadProjectList(teamID, activeView);
+      const nextPage = await loadProjectList(teamID, activeView, pageNumber);
       if (requestID === loadRequestRef.current) {
-        setProjects(nextProjects);
+        setProjectPage(nextPage);
       }
     } catch (error: unknown) {
       if (requestID === loadRequestRef.current) {
@@ -61,7 +77,7 @@ export function WorkProjectPage({
         setLoading(false);
       }
     }
-  }, [activeView, teamID]);
+  }, [activeView, pageNumber, teamID]);
 
   useEffect(() => {
     void loadWorkspace();
@@ -83,17 +99,22 @@ export function WorkProjectPage({
       if (metadataDialog?.mode === "edit" && metadataDialog.project) {
         await updateProject(metadataDialog.project.id, input);
         toast.success("作品信息已更新");
+        await loadWorkspace();
       } else {
         if (!teamID) {
           throw new Error("当前创作空间不可用");
         }
         await createProject(teamID, input);
         toast.success("作品已创建");
+        if (pageNumber === 1) {
+          await loadWorkspace();
+        } else {
+          setPageNumber(1);
+        }
       }
-      await loadWorkspace();
       setMetadataDialog(null);
     },
-    [loadWorkspace, metadataDialog, teamID],
+    [loadWorkspace, metadataDialog, pageNumber, teamID],
   );
 
   const confirmDelete = useCallback(async () => {
@@ -102,9 +123,13 @@ export function WorkProjectPage({
     }
     await moveProjectToTrash(deleteTarget.id);
     toast.success("作品已移入回收站");
-    await loadWorkspace();
+    if (projectPage.items.length === 1 && pageNumber > 1) {
+      setPageNumber((current) => current - 1);
+    } else {
+      await loadWorkspace();
+    }
     setDeleteTarget(null);
-  }, [deleteTarget, loadWorkspace]);
+  }, [deleteTarget, loadWorkspace, pageNumber, projectPage.items.length]);
 
   const handleRestore = useCallback(
     async (project: ProjectItem) => {
@@ -115,21 +140,26 @@ export function WorkProjectPage({
       try {
         await restoreProject(project.id);
         toast.success("作品已恢复");
-        await loadWorkspace();
+        if (projectPage.items.length === 1 && pageNumber > 1) {
+          setPageNumber((current) => current - 1);
+        } else {
+          await loadWorkspace();
+        }
       } catch (error: unknown) {
         toast.error(errorMessage(error, "恢复作品失败"));
       } finally {
         setRestoringID(0);
       }
     },
-    [loadWorkspace, restoringID],
+    [loadWorkspace, pageNumber, projectPage.items.length, restoringID],
   );
 
   function changeView(view: ProjectView) {
     if (view === activeView) {
       return;
     }
-    setProjects([]);
+    setProjectPage(emptyProjectPage);
+    setPageNumber(1);
     setLoading(true);
     setActiveView(view);
   }
@@ -166,7 +196,7 @@ export function WorkProjectPage({
       ) : activeView === "works" ? (
         <div className="hb-script-grid">
           <CreateProjectCard onCreate={openCreateDialog} />
-          {projects.map((project) => (
+          {projectPage.items.map((project) => (
             <ProjectCard
               key={project.id}
               project={project}
@@ -182,9 +212,9 @@ export function WorkProjectPage({
             />
           ))}
         </div>
-      ) : projects.length > 0 ? (
+      ) : projectPage.items.length > 0 ? (
         <div className="hb-script-grid">
-          {projects.map((project) => (
+          {projectPage.items.map((project) => (
             <ProjectCard
               key={project.id}
               project={project}
@@ -197,6 +227,31 @@ export function WorkProjectPage({
       ) : (
         <ProjectTrashEmpty />
       )}
+
+      {projectPage.total > projectPage.pageSize ? (
+        <footer className="hb-script-pagination">
+          <button
+            type="button"
+            title="上一页"
+            disabled={pageNumber <= 1 || loading}
+            onClick={() => setPageNumber((current) => current - 1)}
+          >
+            <ChevronLeft />
+          </button>
+          <span>
+            {projectPage.page} /{" "}
+            {Math.max(1, Math.ceil(projectPage.total / projectPage.pageSize))}
+          </span>
+          <button
+            type="button"
+            title="下一页"
+            disabled={!projectPage.hasMore || loading}
+            onClick={() => setPageNumber((current) => current + 1)}
+          >
+            <ChevronRight />
+          </button>
+        </footer>
+      ) : null}
 
       {metadataDialog ? (
         <ProjectMetadataDialog

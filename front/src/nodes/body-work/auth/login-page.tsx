@@ -1,7 +1,9 @@
 import {
   type FormEvent,
   type ReactNode,
+  useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import {
@@ -16,6 +18,7 @@ import {
 import { toast } from "sonner";
 import {
   Input,
+  joinSiteApi,
   loadMainInfo,
   request,
   resetFrontRuntimeCache,
@@ -27,6 +30,10 @@ import { isSuccessResponse } from "../shared/api-response";
 import { BodyToaster } from "../shared/body-toaster";
 import "../shared/body-theme.css";
 import { BodyConfiguredImage, BodySiteBrand } from "./site-brand";
+import {
+  consumeFeishuAuthCallback,
+  startFeishuAuthorization,
+} from "./feishu-auth";
 import {
   applyBodySiteMetadata,
   type BodyLoginAccount,
@@ -48,6 +55,12 @@ type AuthPayload = {
   name?: string;
 };
 
+type CompleteLoginOptions = {
+  fallbackName: string;
+  redirectTo: string;
+  successMessage?: string;
+};
+
 export function WorkLoginPage() {
   const config = useBodyLoginConfig();
   const navigate = useNavigate();
@@ -58,8 +71,30 @@ export function WorkLoginPage() {
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [thirdPartyLoadingID, setThirdPartyLoadingID] = useState<number | null>(
+    null,
+  );
   const [showPassword, setShowPassword] = useState(false);
   const [mobileLinksOpen, setMobileLinksOpen] = useState(false);
+  const feishuCallbackHandled = useRef(false);
+  const busy = loading || thirdPartyLoadingID !== null;
+
+  const completeLogin = useCallback(
+    async (data: any, options: CompleteLoginOptions) => {
+      if (!data?.token) {
+        throw new Error("登录返回缺少 token");
+      }
+      resetFrontRuntimeCache();
+      auth.setUser(data.user);
+      auth.setAccessToken(data.token);
+      toast.success(
+        options.successMessage ||
+          `欢迎回来，${data.user?.name || options.fallbackName}`,
+      );
+      await navigateAfterLogin(navigate, options.redirectTo);
+    },
+    [auth, navigate],
+  );
 
   useEffect(() => {
     applyBodySiteMetadata(config.site);
@@ -78,8 +113,60 @@ export function WorkLoginPage() {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [mobileLinksOpen]);
 
+  useEffect(() => {
+    if (feishuCallbackHandled.current) {
+      return;
+    }
+
+    let callback: ReturnType<typeof consumeFeishuAuthCallback>;
+    try {
+      callback = consumeFeishuAuthCallback();
+    } catch (currentError: unknown) {
+      feishuCallbackHandled.current = true;
+      const errorMessage =
+        currentError instanceof Error && currentError.message
+          ? currentError.message
+          : "飞书登录失败，请重新尝试";
+      setMessage(errorMessage);
+      toast.error(errorMessage);
+      return;
+    }
+    if (!callback) {
+      return;
+    }
+    const authCallback = callback;
+
+    feishuCallbackHandled.current = true;
+    setThirdPartyLoadingID(authCallback.accountID);
+    setMessage("");
+    void (async () => {
+      try {
+        const result = await request(joinSiteApi("login/feishu"), "post", {
+          account_id: authCallback.accountID,
+          code: authCallback.code,
+        });
+        if (!isSuccessResponse(result) || !result.data?.token) {
+          throw new Error(result?.message || result?.msg || "飞书登录失败");
+        }
+        await completeLogin(result.data, {
+          fallbackName: "飞书用户",
+          redirectTo: authCallback.redirectTo,
+        });
+      } catch (currentError: unknown) {
+        const errorMessage =
+          currentError instanceof Error && currentError.message
+            ? currentError.message
+            : "飞书登录失败，请稍后重试";
+        setMessage(errorMessage);
+        toast.error(errorMessage);
+      } finally {
+        setThirdPartyLoadingID(null);
+      }
+    })();
+  }, [completeLogin]);
+
   function switchMode() {
-    if (loading) {
+    if (busy) {
       return;
     }
     setMode((current) => (current === "login" ? "register" : "login"));
@@ -88,7 +175,7 @@ export function WorkLoginPage() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (loading) {
+    if (busy) {
       return;
     }
 
@@ -107,19 +194,15 @@ export function WorkLoginPage() {
         payload.data,
       );
       if (!isSuccessResponse(result) || !result.data?.token) {
-        setMessage(result.message || result.msg || "操作失败");
+        setMessage(result?.message || result?.msg || "操作失败");
         return;
       }
 
-      resetFrontRuntimeCache();
-      auth.setUser(result.data.user);
-      auth.setAccessToken(result.data.token);
-      toast.success(
-        mode === "login"
-          ? `欢迎回来，${result.data.user?.name || payload.data.account}`
-          : "账号已创建",
-      );
-      await navigateAfterLogin(navigate, readRedirectParam());
+      await completeLogin(result.data, {
+        fallbackName: payload.data.account,
+        redirectTo: readRedirectParam(),
+        successMessage: mode === "register" ? "账号已创建" : undefined,
+      });
     } catch (currentError: unknown) {
       setMessage(
         currentError instanceof Error && currentError.message
@@ -128,6 +211,30 @@ export function WorkLoginPage() {
       );
     } finally {
       setLoading(false);
+    }
+  }
+
+  function startThirdPartyLogin(account: BodyLoginAccount) {
+    if (busy) {
+      return;
+    }
+    if (account.provider !== "feishu") {
+      toast.info(`${account.name}暂未开放`);
+      return;
+    }
+
+    setMessage("");
+    setThirdPartyLoadingID(account.id);
+    try {
+      startFeishuAuthorization(account, readRedirectParam());
+    } catch (currentError: unknown) {
+      const errorMessage =
+        currentError instanceof Error && currentError.message
+          ? currentError.message
+          : "飞书登录发起失败";
+      setMessage(errorMessage);
+      setThirdPartyLoadingID(null);
+      toast.error(errorMessage);
     }
   }
 
@@ -143,6 +250,11 @@ export function WorkLoginPage() {
 
       <div className="bot-work-login-stage">
         <div className="bot-work-login-layout">
+          <LoginArtwork
+            image={config.site.loginImage}
+            siteName={config.site.siteName}
+          />
+
           <section className="bot-work-login-auth" aria-labelledby="login-title">
             <div className="bot-work-login-copy">
               <h1 id="login-title">{config.site.loginTitle}</h1>
@@ -152,7 +264,12 @@ export function WorkLoginPage() {
             </div>
 
             <section className="bot-work-login-form-panel">
-              <ThirdPartyAccounts accounts={config.accounts} />
+              <ThirdPartyAccounts
+                accounts={config.accounts}
+                disabled={busy}
+                loadingID={thirdPartyLoadingID}
+                onSelect={startThirdPartyLogin}
+              />
 
               {config.accounts.length > 0 ? (
                 <div className="bot-work-login-divider">
@@ -222,7 +339,7 @@ export function WorkLoginPage() {
                 <button
                   type="submit"
                   className="bot-work-login-submit"
-                  disabled={loading}
+                  disabled={busy}
                 >
                   {loading ? (
                     <Loader2 className="bot-work-login-spin" />
@@ -239,7 +356,7 @@ export function WorkLoginPage() {
 
               <p className="bot-work-login-mode-switch">
                 <span>{mode === "login" ? "还没有账号？" : "已经有账号？"}</span>
-                <button type="button" disabled={loading} onClick={switchMode}>
+                <button type="button" disabled={busy} onClick={switchMode}>
                   {mode === "login" ? "注册" : "登录"}
                 </button>
               </p>
@@ -250,8 +367,6 @@ export function WorkLoginPage() {
               </p>
             </section>
           </section>
-
-          <LoginArtwork siteName={config.site.siteName} />
         </div>
       </div>
     </main>
@@ -335,15 +450,36 @@ function LoginHeader({
   );
 }
 
-function LoginArtwork({ siteName }: { siteName: string }) {
+function LoginArtwork({
+  image,
+  siteName,
+}: {
+  image: string;
+  siteName: string;
+}) {
+  const alt = `${siteName} 登录页展示图`;
   return (
     <section className="bot-work-login-artwork" aria-label="创作灵感">
-      <img src={LOGIN_ARTWORK_SRC} alt={`${siteName} 创作灵感插画`} />
+      <BodyConfiguredImage
+        src={image}
+        alt={alt}
+        fallback={<img src={LOGIN_ARTWORK_SRC} alt={alt} />}
+      />
     </section>
   );
 }
 
-function ThirdPartyAccounts({ accounts }: { accounts: BodyLoginAccount[] }) {
+function ThirdPartyAccounts({
+  accounts,
+  disabled,
+  loadingID,
+  onSelect,
+}: {
+  accounts: BodyLoginAccount[];
+  disabled: boolean;
+  loadingID: number | null;
+  onSelect: (account: BodyLoginAccount) => void;
+}) {
   if (accounts.length === 0) {
     return null;
   }
@@ -354,19 +490,18 @@ function ThirdPartyAccounts({ accounts }: { accounts: BodyLoginAccount[] }) {
         <button
           key={account.id}
           type="button"
-          onClick={() =>
-            toast.info(
-              account.provider === "feishu"
-                ? "飞书账户登录将在接入配置后开放"
-                : `${account.name}暂未开放`,
-            )
-          }
+          disabled={disabled}
+          onClick={() => onSelect(account)}
         >
-          <BodyConfiguredImage
-            src={account.icon}
-            alt=""
-            fallback={<PanelsTopLeft size={19} strokeWidth={1.9} />}
-          />
+          {loadingID === account.id ? (
+            <Loader2 className="bot-work-login-spin" size={19} />
+          ) : (
+            <BodyConfiguredImage
+              src={account.icon}
+              alt=""
+              fallback={<PanelsTopLeft size={19} strokeWidth={1.9} />}
+            />
+          )}
           <span>{account.name}</span>
         </button>
       ))}

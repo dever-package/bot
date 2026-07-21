@@ -473,6 +473,9 @@
 }
 
 .hb-laper-app [data-agent-chat-appearance="body"] .reference-composer-action {
+  flex: 0 0 30px;
+  min-width: 30px;
+  max-width: 30px;
   background: var(--body-work-green-deep);
   color: #ffffff;
 }

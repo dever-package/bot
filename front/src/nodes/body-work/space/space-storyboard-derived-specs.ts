@@ -131,7 +131,7 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
         title: `镜头 ${shot.order || index + 1}`,
         prompt: storyboardVideoPrompt(storyboard, shot, options),
         sourceItems: storyboardShotVideoSourceItems(storyboard, shot, index),
-        paramValues: storyboardVideoParamValues(storyboard),
+        paramValues: storyboardVideoParamValues(storyboard, shot),
         shotId: shot.id,
         shotDuration: shot.duration,
       })),
@@ -368,8 +368,14 @@ function storyboardShotImageParamValues(storyboard: StoryboardDocument) {
   return { aspectRatio: storyboard.aspect_ratio, resolution: "2k" };
 }
 
-function storyboardVideoParamValues(storyboard: StoryboardDocument) {
-  return { aspectRatio: storyboard.aspect_ratio };
+function storyboardVideoParamValues(
+  storyboard: StoryboardDocument,
+  shot: StoryboardShot,
+) {
+  return {
+    aspectRatio: storyboard.aspect_ratio,
+    duration: shot.duration,
+  };
 }
 
 function storyboardVisibleFaceConstraint(

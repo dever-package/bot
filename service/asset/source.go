@@ -14,6 +14,7 @@ type teamAssetScope struct {
 	TeamID     uint64
 	BodyID     uint64
 	ProjectIDs map[uint64]struct{}
+	Projects   []projectmodel.Project
 }
 
 func resolveTeamAssetScope(ctx context.Context, teamID uint64) (teamAssetScope, error) {
@@ -24,6 +25,7 @@ func resolveTeamAssetScope(ctx context.Context, teamID uint64) (teamAssetScope, 
 	scope := teamAssetScope{
 		TeamID:     teamID,
 		ProjectIDs: map[uint64]struct{}{},
+		Projects:   []projectmodel.Project{},
 	}
 	if workspace := workspacemodel.NewTeamWorkspaceModel().Find(ctx, map[string]any{
 		"user_id": actor.UserID,
@@ -36,9 +38,12 @@ func resolveTeamAssetScope(ctx context.Context, teamID uint64) (teamAssetScope, 
 		"user_id": actor.UserID,
 		"team_id": teamID,
 		"status":  projectmodel.StatusEnabled,
+	}, map[string]any{
+		"field": "main.id,main.name",
 	}) {
 		if project != nil {
 			scope.ProjectIDs[project.ID] = struct{}{}
+			scope.Projects = append(scope.Projects, *project)
 		}
 	}
 	return scope, nil
@@ -75,13 +80,4 @@ func (scope teamAssetScope) queryFilter() map[string]any {
 		return nil
 	}
 	return map[string]any{"or": branches}
-}
-
-func (scope teamAssetScope) projectIDs() []uint64 {
-	result := make([]uint64, 0, len(scope.ProjectIDs))
-	for projectID := range scope.ProjectIDs {
-		result = append(result, projectID)
-	}
-	sort.Slice(result, func(i, j int) bool { return result[i] > result[j] })
-	return result
 }

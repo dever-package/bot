@@ -28,6 +28,7 @@ const (
 	StatusDraft   = "draft"
 	StatusCurrent = "current"
 	StatusArchive = "archived"
+	StatusDeleted = "deleted"
 )
 
 var kindOptions = []map[string]any{
@@ -43,6 +44,7 @@ var statusOptions = []map[string]any{
 	{"id": StatusDraft, "value": "草稿"},
 	{"id": StatusCurrent, "value": "当前"},
 	{"id": StatusArchive, "value": "归档"},
+	{"id": StatusDeleted, "value": "回收站"},
 }
 
 var roleOptions = []map[string]any{
@@ -112,24 +114,25 @@ var releaseRelation = orm.Relation{
 }
 
 type Asset struct {
-	ID          uint64    `dorm:"primaryKey;autoIncrement;comment:资产ID"`
-	ProjectID   uint64    `dorm:"type:bigint;not null;default:0;comment:项目"`
-	BodyID      uint64    `dorm:"type:bigint;not null;default:0;comment:载体"`
-	TeamID      uint64    `dorm:"type:bigint;not null;default:0;comment:团队"`
-	FlowID      uint64    `dorm:"type:bigint;not null;default:0;comment:工作流"`
-	AssetCateID uint64    `dorm:"type:bigint;not null;default:0;comment:资产分类"`
-	NodeKey     string    `dorm:"type:varchar(128);not null;default:'';comment:画布节点"`
-	SourceType  string    `dorm:"type:varchar(32);not null;default:'project';comment:来源类型"`
-	SourceID    uint64    `dorm:"type:bigint;not null;default:0;comment:来源对象"`
-	SourceName  string    `dorm:"type:varchar(512);not null;default:'';comment:来源路径"`
-	Name        string    `dorm:"type:varchar(128);not null;comment:名称"`
-	NameMode    string    `dorm:"type:varchar(16);not null;default:'auto';comment:名称模式"`
-	Kind        string    `dorm:"type:varchar(32);not null;default:'text';comment:产物类型"`
-	Role        string    `dorm:"type:varchar(32);not null;default:'material';comment:资产角色"`
-	VersionID   uint64    `dorm:"type:bigint;not null;default:0;comment:当前版本"`
-	Status      string    `dorm:"type:varchar(32);not null;default:'draft';comment:状态"`
-	Sort        int       `dorm:"type:int;not null;default:100;comment:排序"`
-	CreatedAt   time.Time `dorm:"comment:创建时间"`
+	ID          uint64     `dorm:"primaryKey;autoIncrement;comment:资产ID"`
+	ProjectID   uint64     `dorm:"type:bigint;not null;default:0;comment:项目"`
+	BodyID      uint64     `dorm:"type:bigint;not null;default:0;comment:载体"`
+	TeamID      uint64     `dorm:"type:bigint;not null;default:0;comment:团队"`
+	FlowID      uint64     `dorm:"type:bigint;not null;default:0;comment:工作流"`
+	AssetCateID uint64     `dorm:"type:bigint;not null;default:0;comment:资产分类"`
+	NodeKey     string     `dorm:"type:varchar(128);not null;default:'';comment:画布节点"`
+	SourceType  string     `dorm:"type:varchar(32);not null;default:'project';comment:来源类型"`
+	SourceID    uint64     `dorm:"type:bigint;not null;default:0;comment:来源对象"`
+	SourceName  string     `dorm:"type:varchar(512);not null;default:'';comment:来源路径"`
+	Name        string     `dorm:"type:varchar(128);not null;comment:名称"`
+	NameMode    string     `dorm:"type:varchar(16);not null;default:'auto';comment:名称模式"`
+	Kind        string     `dorm:"type:varchar(32);not null;default:'text';comment:产物类型"`
+	Role        string     `dorm:"type:varchar(32);not null;default:'material';comment:资产角色"`
+	VersionID   uint64     `dorm:"type:bigint;not null;default:0;comment:当前版本"`
+	Status      string     `dorm:"type:varchar(32);not null;default:'draft';comment:状态"`
+	Sort        int        `dorm:"type:int;not null;default:100;comment:排序"`
+	CreatedAt   time.Time  `dorm:"comment:创建时间"`
+	DeletedAt   *time.Time `dorm:"type:timestamp;null;comment:删除时间"`
 }
 
 type AssetIndex struct {
@@ -137,6 +140,7 @@ type AssetIndex struct {
 	ProjectFlow     struct{} `index:"project_id,flow_id,status,sort,id"`
 	BodyStatus      struct{} `index:"body_id,status,sort,id"`
 	TeamStatus      struct{} `index:"team_id,status,sort,id"`
+	TeamTrash       struct{} `index:"team_id,status,deleted_at,id"`
 	TeamSource      struct{} `index:"team_id,source_type,source_id,status,sort,id"`
 	TeamRole        struct{} `index:"team_id,role,status,sort,id"`
 	TeamKind        struct{} `index:"team_id,kind,status,sort,id"`

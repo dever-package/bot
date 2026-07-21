@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, type ComponentType } from "react";
 import { getCompatModule } from "@dever/front-plugin";
 import type { ComposerAssetItem } from "./space-prompt-composer";
 import {
-  canvasReferenceContentFromText,
+  canvasReferenceContentFromUnambiguousText,
   normalizeCanvasReferenceLabel,
 } from "./space-reference-content";
 import type { CanvasReferenceContent } from "./types";
@@ -166,6 +166,9 @@ export function CanvasReferenceEditorWithAdapter({
     CanvasAssetReferenceProviderContext,
   );
   const activeAssetProvider = assetReferenceProvider || contextualAssetProvider;
+  const resolvedContent =
+    content ||
+    canvasReferenceContentFromUnambiguousText(value, adapter.options);
   if (!ReferenceEditor) {
     return (
       <textarea
@@ -190,7 +193,7 @@ export function CanvasReferenceEditorWithAdapter({
   return (
     <ReferenceEditor
       value={value}
-      content={content}
+      content={resolvedContent}
       references={adapter.options}
       placeholder={placeholder}
       disabled={disabled}
@@ -251,7 +254,7 @@ export function CanvasReferenceTextWithAdapter({
   );
   const resolvedContent = content
     ? hydrateReferenceLabels(content, adapter.options)
-    : canvasReferenceContentFromText(value, adapter.options);
+    : canvasReferenceContentFromUnambiguousText(value, adapter.options);
   if (!ReferenceContentView || !resolvedContent?.parts.length) {
     return <span className={className}>{value || placeholder}</span>;
   }
@@ -277,7 +280,7 @@ function hydrateReferenceLabels(
 ): CanvasReferenceContent {
   const labels = new Map(
     options.map((option) => [
-      referenceTargetKey(option.refType, option.refId, option.versionID),
+      referenceTargetKey(option.refType, option.refId),
       option.label,
     ]),
   );
@@ -288,13 +291,8 @@ function hydrateReferenceLabels(
         ? {
             ...part,
             label: normalizeCanvasReferenceLabel(
-              labels.get(
-                referenceTargetKey(
-                  part.ref_type,
-                  part.ref_id,
-                  part.ref_version_id,
-                ),
-              ) || part.label,
+              labels.get(referenceTargetKey(part.ref_type, part.ref_id)) ||
+                part.label,
             ),
           }
         : part,
@@ -324,7 +322,7 @@ export function useCanvasReferenceAdapter(
       }
       const option = referenceOption(item, refId);
       itemByReference.set(
-        referenceTargetKey(option.refType, option.refId, option.versionID),
+        referenceTargetKey(option.refType, option.refId),
         item,
       );
       return [option];
@@ -340,11 +338,7 @@ export function useCanvasReferenceAdapter(
       loadPreview: async (request: ReferencePreviewRequest) =>
         referencePreview(
           itemByReference.get(
-            referenceTargetKey(
-              request.refType,
-              request.refId,
-              request.versionId,
-            ),
+            referenceTargetKey(request.refType, request.refId),
           ),
           request,
         ),
@@ -413,12 +407,8 @@ function referencePreview(
   };
 }
 
-function referenceTargetKey(
-  refType: ReferenceType,
-  refId: number,
-  versionId = 0,
-) {
-  return `${refType}:${refId}:${versionId}`;
+function referenceTargetKey(refType: ReferenceType, refId: number) {
+  return `${refType}:${refId}`;
 }
 
 function referenceMedia(item: ComposerAssetItem) {

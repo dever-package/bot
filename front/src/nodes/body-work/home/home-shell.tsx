@@ -10,13 +10,19 @@ import {
 } from "lucide-react";
 import {
   applyBodySiteMetadata,
+  type BodyHomeMenuConfig,
   useBodyLoginConfig,
 } from "../auth/site-config";
 import { WorkProjectPage } from "../project/project-page";
 import { BodyToaster } from "../shared/body-toaster";
+import { resolveConfiguredLucideIcon } from "../shared/configured-icon";
 import "../shared/body-theme.css";
 import "./workbench-appearance.css";
-import type { AssetRecord } from "../asset/asset-types";
+import type {
+  AssetCatalogOptions,
+  AssetKind,
+  AssetRecord,
+} from "../asset/asset-types";
 import { WorkbenchAssetPage } from "./asset-page";
 import { WorkbenchDialoguePage } from "./dialogue-page";
 import { WorkbenchFunctionPage } from "./function-page";
@@ -32,12 +38,16 @@ import {
 } from "./workbench-api";
 
 const TEAM_STORAGE_KEY = "bot.body.workbench.team";
-const pageItems = [
-  { key: "works", label: "创作", icon: FileStack },
-  { key: "dialogue", label: "对话", icon: MessagesSquare },
-  { key: "function", label: "工具", icon: Zap },
-  { key: "assets", label: "资产", icon: Archive },
-] satisfies WorkbenchNavigationItem[];
+const pageSpecs: ReadonlyArray<{
+  key: WorkbenchPageKey;
+  menuKey: keyof BodyHomeMenuConfig;
+  fallbackIcon: WorkbenchNavigationItem["icon"];
+}> = [
+  { key: "works", menuKey: "works", fallbackIcon: FileStack },
+  { key: "dialogue", menuKey: "dialogue", fallbackIcon: MessagesSquare },
+  { key: "function", menuKey: "function", fallbackIcon: Zap },
+  { key: "assets", menuKey: "assets", fallbackIcon: Archive },
+];
 
 export function WorkHomeShell({ item }: { item?: any }) {
   const loginConfig = useBodyLoginConfig();
@@ -94,10 +104,22 @@ export function WorkHomeShell({ item }: { item?: any }) {
 
   const navigation = useMemo(
     () =>
-      pageItems.filter(
-        (page) => page.key !== "works" || !catalog || catalog.projectEnabled,
-      ),
-    [catalog],
+      pageSpecs
+        .filter(
+          (page) => loginConfig.site.homeMenu[page.menuKey].enabled,
+        )
+        .map((page) => {
+          const menu = loginConfig.site.homeMenu[page.menuKey];
+          return {
+            key: page.key,
+            label: menu.name,
+            icon: resolveConfiguredLucideIcon(menu.icon, page.fallbackIcon),
+          };
+        })
+        .filter(
+          (page) => page.key !== "works" || !catalog || catalog.projectEnabled,
+        ),
+    [catalog, loginConfig.site.homeMenu],
   );
   const currentPage =
     navigation.find((page) => page.key === activePage) || navigation[0];
@@ -150,9 +172,11 @@ export function WorkHomeShell({ item }: { item?: any }) {
               />
             ) : !catalog?.team ? (
               <NoTeam />
+            ) : !currentPage ? (
+              <NoVisibleHomeMenu />
             ) : (
               <PageContent
-                page={currentPage?.key || "assets"}
+                page={currentPage.key}
                 catalog={catalog}
                 continuationAsset={continuationAsset}
                 onContinueAsset={continueAsset}
@@ -184,6 +208,25 @@ function PageContent({
 }) {
   const teamID = catalog.team?.id || 0;
   const [visitedPages, setVisitedPages] = useState<WorkbenchPageKey[]>([page]);
+  const assetCatalogOptions = useMemo<AssetCatalogOptions>(
+    () => ({
+      tools: catalog.powers.map((power) => ({
+        id: power.id,
+        name: power.name,
+      })),
+      dialogues: catalog.roles.map((role) => ({
+        id: role.id,
+        name: role.name,
+      })),
+      assetCates: catalog.assetCates.map((assetCate) => ({
+        id: assetCate.id,
+        name: assetCate.name,
+        kind: assetCate.kind as AssetKind,
+        cardinality: assetCate.cardinality,
+      })),
+    }),
+    [catalog.assetCates, catalog.powers, catalog.roles],
+  );
 
   useEffect(() => {
     setVisitedPages((current) =>
@@ -215,7 +258,7 @@ function PageContent({
       ) : null}
       {page === "works" ? (
         <div className="h-full overflow-y-auto">
-          <WorkProjectPage teamID={teamID} />
+          <WorkProjectPage key={teamID} teamID={teamID} />
         </div>
       ) : null}
       {page === "assets" ? (
@@ -223,6 +266,7 @@ function PageContent({
           teamID={teamID}
           onContinue={onContinueAsset}
           canContinue={canContinueAsset}
+          catalogOptions={assetCatalogOptions}
         />
       ) : null}
     </div>
@@ -270,6 +314,16 @@ function NoTeam() {
           暂无已发布团队
         </p>
       </div>
+    </div>
+  );
+}
+
+function NoVisibleHomeMenu() {
+  return (
+    <div className="flex h-full items-center justify-center px-6 text-center">
+      <p className="m-0 text-sm text-[var(--body-work-muted)]">
+        暂无可用首页菜单
+      </p>
     </div>
   );
 }

@@ -74,7 +74,8 @@
         "entry": "bot/work",
         "public": [
           "login",
-          "login/config"
+          "login/config",
+          "login/feishu"
         ]
       }
     }

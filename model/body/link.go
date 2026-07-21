@@ -31,7 +31,7 @@ type LinkIndex struct {
 }
 
 func NewLinkModel() *orm.Model[Link] {
-	return orm.LoadModel[Link]("Body自定义菜单", "bot_body_link", orm.ModelConfig{
+	return orm.LoadModel[Link]("Body登录页菜单", "bot_body_link", orm.ModelConfig{
 		Index:    LinkIndex{},
 		Order:    "sort asc,id asc",
 		Database: "default",

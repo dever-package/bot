@@ -25,6 +25,7 @@ import {
 } from "@dever/front-plugin";
 import { BodySiteBrand } from "../auth/site-brand";
 import type { BodySiteConfig } from "../auth/site-config";
+import { resolveConfiguredLucideIcon } from "../shared/configured-icon";
 import {
   loadWorkbenchSystemMessages,
   type WorkbenchSystemMessage,
@@ -58,6 +59,8 @@ export function WorkbenchSystemMessagePanel({
   const [selectedMessage, setSelectedMessage] =
     useState<WorkbenchSystemMessage | null>(null);
   const messages = useSystemMessages(open);
+  const messageMenu = site.homeMenu.messages;
+  const MessageIcon = resolveConfiguredLucideIcon(messageMenu.icon, Bell);
 
   useEffect(() => {
     if (!open) {
@@ -90,13 +93,13 @@ export function WorkbenchSystemMessagePanel({
         <button
           type="button"
           className="hb-rail-action"
-          title="消息"
-          aria-label="打开消息中心"
+          title={messageMenu.name}
+          aria-label={`打开${messageMenu.name}`}
           aria-expanded={open}
           onClick={() => setOpen((current) => !current)}
         >
-          <Bell strokeWidth={1.8} />
-          <span>消息</span>
+          <MessageIcon strokeWidth={1.8} />
+          <span>{messageMenu.name}</span>
         </button>
 
         {open ? (

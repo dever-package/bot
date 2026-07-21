@@ -4,6 +4,7 @@ import { Sparkles } from "lucide-react";
 import { BodySiteBrand } from "../auth/site-brand";
 import type { BodySiteConfig } from "../auth/site-config";
 import type { WorkbenchTeam } from "./workbench-api";
+import { resolveConfiguredLucideIcon } from "../shared/configured-icon";
 import { WorkbenchAccountCenter } from "./workbench-account-center";
 import { WorkbenchSystemMessagePanel } from "./workbench-system-message-panel";
 import { WorkbenchUserMenu } from "./workbench-user-menu";
@@ -36,6 +37,8 @@ export function WorkbenchSidebar({
   onTeamChange: (teamID: number) => void;
 }) {
   const [pointsOpen, setPointsOpen] = useState(false);
+  const pointsMenu = site.homeMenu.points;
+  const PointsIcon = resolveConfiguredLucideIcon(pointsMenu.icon, Sparkles);
 
   return (
     <>
@@ -76,12 +79,16 @@ export function WorkbenchSidebar({
         </nav>
 
         <div className="hb-laper-sidebar-foot">
-          <RailAction
-            icon={Sparkles}
-            label="积分"
-            onClick={() => setPointsOpen(true)}
-          />
-          <WorkbenchSystemMessagePanel site={site} />
+          {pointsMenu.enabled ? (
+            <RailAction
+              icon={PointsIcon}
+              label={pointsMenu.name}
+              onClick={() => setPointsOpen(true)}
+            />
+          ) : null}
+          {site.homeMenu.messages.enabled ? (
+            <WorkbenchSystemMessagePanel site={site} />
+          ) : null}
           <WorkbenchUserMenu
             teams={teams}
             teamID={teamID}

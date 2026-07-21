@@ -193,13 +193,16 @@ function findStoryboardItemNode(
 function assetReference(
   node?: SpaceCanvasNode,
 ): VideoComposeAssetReference | undefined {
-  const assetId = Number(node?.asset?.id || node?.resultRef?.asset_id || 0);
-  const versionId = Number(
-    node?.asset?.version_id ||
-      node?.asset?.version?.id ||
-      node?.resultRef?.version_id ||
-      0,
-  );
+  const resultAssetId = Number(node?.resultRef?.asset_id || 0);
+  const resultVersionId = Number(node?.resultRef?.version_id || 0);
+  const assetId =
+    resultAssetId && resultVersionId
+      ? resultAssetId
+      : Number(node?.asset?.id || 0);
+  const versionId =
+    resultAssetId && resultVersionId
+      ? resultVersionId
+      : Number(node?.asset?.version_id || node?.asset?.version?.id || 0);
   if (!assetId || !versionId) {
     return undefined;
   }

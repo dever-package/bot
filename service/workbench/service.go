@@ -803,6 +803,14 @@ func (s Service) RenameAsset(ctx context.Context, teamID uint64, assetID uint64,
 	return s.asset.RenameTeamAsset(ctx, teamID, assetID, name)
 }
 
+func (s Service) DeleteAsset(ctx context.Context, teamID uint64, assetID uint64) (map[string]any, error) {
+	return s.asset.MoveTeamAssetToTrash(ctx, teamID, assetID)
+}
+
+func (s Service) RestoreAsset(ctx context.Context, teamID uint64, assetID uint64) (map[string]any, error) {
+	return s.asset.RestoreTeamAsset(ctx, teamID, assetID)
+}
+
 func (s Service) ResolveRole(ctx context.Context, teamID uint64, roleID uint64) (ChatRoleBinding, error) {
 	role, err := s.team.ResolveWorkbenchRole(ctx, teamID, roleID)
 	if err != nil {

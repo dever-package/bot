@@ -1,19 +1,19 @@
 {
   "page": {
-    "name": "自定义菜单编辑",
+    "name": "登录页菜单编辑",
     "parent": "bot/body/config/set",
     "type": 2,
     "auth": [
       {
         "key": "bot/body/link/create",
-        "name": "自定义菜单新增",
+        "name": "登录页菜单新增",
         "query": {
           "id": "empty"
         }
       },
       {
         "key": "bot/body/link/update",
-        "name": "自定义菜单编辑",
+        "name": "登录页菜单编辑",
         "query": {
           "id": "required"
         }

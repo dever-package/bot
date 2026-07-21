@@ -14,16 +14,24 @@ import (
 
 const (
 	defaultProjectDescription = "记录灵感、素材与创作成果。"
+	defaultProjectPageSize    = 24
+	maxProjectPageSize        = 60
 	maxProjectNameRunes       = 128
 )
+
+type ListRequest struct {
+	TeamID   uint64
+	Page     int
+	PageSize int
+}
 
 type UpdateRequest struct {
 	Name        string
 	Description string
 }
 
-func (s Service) Trash(ctx context.Context, teamID uint64) (map[string]any, error) {
-	return s.listByStatus(ctx, teamID, projectmodel.StatusDeleted, "main.deleted_at desc,main.id desc")
+func (s Service) Trash(ctx context.Context, req ListRequest) (map[string]any, error) {
+	return s.listByStatus(ctx, req, projectmodel.StatusDeleted, "main.deleted_at desc,main.id desc")
 }
 
 func (s Service) Update(ctx context.Context, projectID uint64, req UpdateRequest) (map[string]any, error) {
@@ -99,27 +107,65 @@ func (s Service) Restore(ctx context.Context, projectID uint64) (map[string]any,
 	return s.projectResult(ctx, project.ID)
 }
 
-func (s Service) listByStatus(ctx context.Context, teamID uint64, status int16, order string) (map[string]any, error) {
+func (s Service) listByStatus(ctx context.Context, req ListRequest, status int16, order string) (map[string]any, error) {
 	userID, err := currentUserID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if teamID == 0 {
+	if req.TeamID == 0 {
 		return nil, fmt.Errorf("团队不能为空")
 	}
-	rows := projectmodel.NewProjectModel().Select(ctx, map[string]any{
+	page, pageSize := normalizeProjectPage(req.Page, req.PageSize)
+	filter := map[string]any{
 		"user_id": userID,
-		"team_id": teamID,
+		"team_id": req.TeamID,
 		"status":  status,
-	}, map[string]any{"order": order})
-	builder := newPayloadBuilder(ctx)
+	}
+	model := projectmodel.NewProjectModel()
+	total := int(model.Count(ctx, filter))
+	rows := model.Select(ctx, filter, map[string]any{
+		"field":    "main.id,main.name,main.description,main.created_at,main.updated_at,main.deleted_at",
+		"order":    order,
+		"page":     page,
+		"pageSize": pageSize,
+	})
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		if row != nil {
-			items = append(items, builder.Project(*row))
+			items = append(items, projectListItem(*row))
 		}
 	}
-	return map[string]any{"items": items}, nil
+	return map[string]any{
+		"items":     items,
+		"page":      page,
+		"page_size": pageSize,
+		"total":     total,
+		"has_more":  page*pageSize < total,
+	}, nil
+}
+
+func projectListItem(project projectmodel.Project) map[string]any {
+	return map[string]any{
+		"id":          project.ID,
+		"name":        project.Name,
+		"description": normalizeProjectDescription(project.Description),
+		"created_at":  project.CreatedAt,
+		"updated_at":  project.UpdatedAt,
+		"deleted_at":  project.DeletedAt,
+	}
+}
+
+func normalizeProjectPage(page int, pageSize int) (int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = defaultProjectPageSize
+	}
+	if pageSize > maxProjectPageSize {
+		pageSize = maxProjectPageSize
+	}
+	return page, pageSize
 }
 
 func (s Service) projectResult(ctx context.Context, projectID uint64) (map[string]any, error) {

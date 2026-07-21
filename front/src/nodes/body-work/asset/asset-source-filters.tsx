@@ -1,3 +1,4 @@
+import { ArchiveRestore, Images } from "lucide-react";
 import type { ReactNode } from "react";
 import type {
   AssetFilterOptions,
@@ -5,17 +6,14 @@ import type {
   AssetKind,
   AssetRole,
   AssetSourceType,
+  AssetView,
 } from "./asset-types";
 import {
   assetKindSpecs,
   assetRoleSpecs,
   assetSourceSpecs,
+  type AssetSourceLabels,
 } from "./asset-contract";
-
-const sourceOptions: Array<{ key: "" | AssetSourceType; label: string }> = [
-  { key: "", label: "全部" },
-  ...assetSourceSpecs,
-];
 
 const roleOptions: Array<{ key: "" | AssetRole; label: string }> = [
   { key: "", label: "全部" },
@@ -30,14 +28,27 @@ const kindOptions: Array<{ key: "" | AssetKind; label: string }> = [
 export function AssetSourceFilters({
   filters,
   options,
+  sourceLabels = {},
   allowedKinds = [],
+  view,
   onChange,
+  onViewChange,
 }: {
   filters: AssetFilters;
   options: AssetFilterOptions;
+  sourceLabels?: AssetSourceLabels;
   allowedKinds?: AssetKind[];
+  view: AssetView;
   onChange: (filters: AssetFilters) => void;
+  onViewChange: (view: AssetView) => void;
 }) {
+  const sourceOptions: Array<{ key: "" | AssetSourceType; label: string }> = [
+    { key: "", label: "全部" },
+    ...assetSourceSpecs.map((option) => ({
+      ...option,
+      label: sourceLabels[option.key] || option.label,
+    })),
+  ];
   const hasAssetCates = options.assetCates.length > 0;
   const visibleKindOptions =
     allowedKinds.length > 0
@@ -74,7 +85,7 @@ export function AssetSourceFilters({
         {filters.sourceType === "project" ? (
           <>
             <FilterSelect
-              label="项目"
+              label={sourceLabels.project || "创作"}
               value={filters.projectID}
               options={options.projects}
               onChange={(projectID) =>
@@ -121,7 +132,7 @@ export function AssetSourceFilters({
         ) : null}
         {filters.sourceType === "tool" ? (
           <FilterSelect
-            label="工具"
+            label={sourceLabels.tool || "工具"}
             value={filters.sourceID}
             options={options.tools}
             onChange={(sourceID) => onChange({ ...filters, sourceID })}
@@ -147,7 +158,10 @@ export function AssetSourceFilters({
         </FilterRow>
       ) : null}
 
-      <FilterRow label="类型">
+      <FilterRow
+        label="类型"
+        trailing={<AssetViewSwitch view={view} onChange={onViewChange} />}
+      >
         <SegmentedOptions
           options={visibleKindOptions}
           value={filters.kind}
@@ -161,14 +175,52 @@ export function AssetSourceFilters({
 function FilterRow({
   label,
   children,
+  trailing,
 }: {
   label: string;
   children: ReactNode;
+  trailing?: ReactNode;
 }) {
   return (
     <div className="wb-asset-filter-row">
       <strong>{label}</strong>
-      <div className="wb-asset-filter-controls">{children}</div>
+      <div className="wb-asset-filter-controls">
+        {children}
+        {trailing}
+      </div>
+    </div>
+  );
+}
+
+function AssetViewSwitch({
+  view,
+  onChange,
+}: {
+  view: AssetView;
+  onChange: (view: AssetView) => void;
+}) {
+  return (
+    <div className="wb-asset-view-switch" role="tablist" aria-label="资产视图">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={view === "assets"}
+        className={view === "assets" ? "is-active" : ""}
+        onClick={() => onChange("assets")}
+      >
+        <Images aria-hidden="true" />
+        <span>资产</span>
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={view === "trash"}
+        className={view === "trash" ? "is-active" : ""}
+        onClick={() => onChange("trash")}
+      >
+        <ArchiveRestore aria-hidden="true" />
+        <span>回收站</span>
+      </button>
     </div>
   );
 }

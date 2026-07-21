@@ -1,10 +1,12 @@
 import {
   Archive,
+  ArchiveRestore,
   ChevronLeft,
   ChevronRight,
   Loader2,
   RefreshCw,
 } from "lucide-react";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   useCallback,
   useEffect,
@@ -13,18 +15,28 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { loadAssetFilterOptions, loadAssetPage } from "./asset-api";
+import { toast } from "sonner";
+import {
+  loadAssetFilterOptions,
+  loadAssetPage,
+  moveAssetToTrash,
+  restoreAsset,
+} from "./asset-api";
 import { AssetCard } from "./asset-card";
 import { AssetDetailDialog } from "./asset-detail-dialog";
 import { AssetRenameDialog } from "./asset-rename-dialog";
 import { AssetSourceFilters } from "./asset-source-filters";
+import { useAssetSourceLabels } from "./asset-source-labels";
 import {
   emptyAssetFilters,
+  type AssetCatalogOptions,
+  type AssetContentMode,
   type AssetFilterOptions,
   type AssetFilters,
   type AssetKind,
   type AssetPage,
   type AssetRecord,
+  type AssetView,
 } from "./asset-types";
 import { assetKindSpecs } from "./asset-contract";
 import "./asset.css";
@@ -55,8 +67,11 @@ export function AssetBrowser({
   onContinue,
   canContinue,
   onAssetChanged,
+  onAssetRemoved,
   headerAction,
   reloadSignal = 0,
+  catalogOptions,
+  contentMode = "preview",
   className = "",
 }: {
   teamID: number;
@@ -68,10 +83,14 @@ export function AssetBrowser({
   onContinue?: (asset: AssetRecord) => void;
   canContinue?: (asset: AssetRecord) => boolean;
   onAssetChanged?: (asset: AssetRecord) => void;
+  onAssetRemoved?: (assetID: number) => void;
   headerAction?: ReactNode;
   reloadSignal?: number;
+  catalogOptions?: AssetCatalogOptions;
+  contentMode?: AssetContentMode;
   className?: string;
 }) {
+  const sourceLabels = useAssetSourceLabels();
   const allowedKindKey = JSON.stringify(allowedKinds || []);
   const normalizedAllowedKinds = useMemo(
     () => normalizeAllowedKinds(allowedKinds),
@@ -83,10 +102,13 @@ export function AssetBrowser({
     [initialKey],
   );
   const [filters, setFilters] = useState<AssetFilters>(resolvedInitialFilters);
+  const [view, setView] = useState<AssetView>("assets");
   const [options, setOptions] = useState<AssetFilterOptions>(emptyOptions);
   const [page, setPage] = useState<AssetPage>(emptyPage);
   const [selectedAssetID, setSelectedAssetID] = useState(0);
   const [renameTarget, setRenameTarget] = useState<AssetRecord | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AssetRecord | null>(null);
+  const [operationAssetID, setOperationAssetID] = useState(0);
   const [loading, setLoading] = useState(true);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -101,16 +123,19 @@ export function AssetBrowser({
   useEffect(() => {
     loadRequestRef.current += 1;
     setFilters(resolvedInitialFilters);
+    setView("assets");
     setOptions(emptyOptions);
     setPage(emptyPage);
     setSelectedAssetID(0);
+    setRenameTarget(null);
+    setDeleteTarget(null);
     setError("");
   }, [resolvedInitialFilters, teamID]);
 
   useEffect(() => {
     let active = true;
     setOptionsLoading(true);
-    loadAssetFilterOptions(teamID)
+    loadAssetFilterOptions(teamID, catalogOptions)
       .then((next) => {
         if (active) setOptions(next);
       })
@@ -123,7 +148,7 @@ export function AssetBrowser({
     return () => {
       active = false;
     };
-  }, [teamID]);
+  }, [catalogOptions, teamID]);
 
   const load = useCallback(
     async (targetPage: number) => {
@@ -134,6 +159,8 @@ export function AssetBrowser({
         const nextPage = await loadAssetPage({
           teamID,
           filters,
+          view,
+          contentMode,
           page: targetPage,
           pageSize: 24,
         });
@@ -150,7 +177,7 @@ export function AssetBrowser({
         }
       }
     },
-    [filters, teamID],
+    [contentMode, filters, teamID, view],
   );
 
   useEffect(() => {
@@ -166,14 +193,61 @@ export function AssetBrowser({
     setReloadVersion((current) => current + 1);
   }
 
+  function changeView(nextView: AssetView) {
+    if (nextView === view || operationAssetID) return;
+    loadRequestRef.current += 1;
+    setView(nextView);
+    setPage(emptyPage);
+    setSelectedAssetID(0);
+    setRenameTarget(null);
+    setDeleteTarget(null);
+    setError("");
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget || operationAssetID) return;
+    const assetID = deleteTarget.id;
+    setOperationAssetID(assetID);
+    try {
+      await moveAssetToTrash({ teamID, assetID });
+      setDeleteTarget(null);
+      if (selectedAssetID === assetID) setSelectedAssetID(0);
+      onAssetRemoved?.(assetID);
+      toast.success("资产已移入回收站");
+      refresh();
+    } catch (currentError) {
+      toast.error(errorText(currentError, "删除资产失败"));
+    } finally {
+      setOperationAssetID(0);
+    }
+  }
+
+  async function restore(current: AssetRecord) {
+    if (operationAssetID) return;
+    setOperationAssetID(current.id);
+    try {
+      const asset = await restoreAsset({ teamID, assetID: current.id });
+      onAssetChanged?.(asset);
+      toast.success("资产已恢复");
+      refresh();
+    } catch (currentError) {
+      toast.error(errorText(currentError, "恢复资产失败"));
+    } finally {
+      setOperationAssetID(0);
+    }
+  }
+
   return (
     <section className={`wb-asset-browser ${className}`.trim()}>
       <header className="wb-asset-browser-head">
         <AssetSourceFilters
           filters={filters}
           options={options}
+          sourceLabels={sourceLabels}
           allowedKinds={normalizedAllowedKinds}
+          view={view}
           onChange={changeFilters}
+          onViewChange={changeView}
         />
         <div className="wb-asset-browser-actions">
           <span>{loading ? "正在加载" : `${page.total} 项`}</span>
@@ -192,8 +266,14 @@ export function AssetBrowser({
           <AssetState text={error} error />
         ) : page.items.length === 0 ? (
           <AssetState
-            icon={<Archive />}
-            text={optionsLoading ? "正在读取资产配置" : "暂无符合条件的资产"}
+            icon={view === "trash" ? <ArchiveRestore /> : <Archive />}
+            text={
+              optionsLoading
+                ? "正在读取资产配置"
+                : view === "trash"
+                  ? "回收站为空"
+                  : "暂无符合条件的资产"
+            }
           />
         ) : (
           <div className="wb-asset-grid">
@@ -201,10 +281,15 @@ export function AssetBrowser({
               <AssetCard
                 key={asset.id}
                 asset={asset}
-                selectable={selectable}
-                selected={selectedAssetIDSet.has(asset.id)}
+                sourceLabels={sourceLabels}
+                view={view}
+                selectable={selectable && view === "assets"}
+                selected={view === "assets" && selectedAssetIDSet.has(asset.id)}
+                busy={operationAssetID === asset.id}
                 onOpen={(current) => setSelectedAssetID(current.id)}
                 onRename={setRenameTarget}
+                onDelete={view === "assets" ? setDeleteTarget : undefined}
+                onRestore={view === "trash" ? restore : undefined}
                 onSelect={onSelect}
               />
             ))}
@@ -240,7 +325,7 @@ export function AssetBrowser({
         <AssetDetailDialog
           teamID={teamID}
           assetID={selectedAssetID}
-          selectable={selectable}
+          selectable={selectable && view === "assets"}
           onClose={() => setSelectedAssetID(0)}
           onSelect={
             onSelect
@@ -280,6 +365,19 @@ export function AssetBrowser({
           onAssetChanged?.(asset);
           refresh();
         }}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open && !operationAssetID) setDeleteTarget(null);
+        }}
+        title="移入回收站？"
+        desc={`“${deleteTarget?.name || "该资产"}”将从资产列表移除，你可以稍后在回收站中恢复。`}
+        confirmText="移入回收站"
+        destructive
+        isLoading={Boolean(operationAssetID)}
+        handleConfirm={() => void confirmDelete()}
       />
     </section>
   );

@@ -16,13 +16,20 @@ import (
 )
 
 func (s Service) TeamList(ctx context.Context) (map[string]any, error) {
+	rows, _ := s.teamListRows(ctx)
+	return map[string]any{"items": rows}, nil
+}
+
+func (s Service) teamListRows(ctx context.Context) ([]map[string]any, map[uint64]teammodel.TeamRelease) {
 	teams := s.repo.ListEnabledTeams(ctx)
+	releases := s.repo.CurrentTeamReleases(ctx, teams)
 	rows := make([]map[string]any, 0, len(teams))
 	for _, team := range teams {
-		release := s.currentTeamRelease(ctx, team)
-		if release == nil {
+		release, exists := releases[team.ID]
+		if !exists {
 			continue
 		}
+		projectEnabled := releaseProjectEnabled(&release)
 		rows = append(rows, map[string]any{
 			"id":              team.ID,
 			"name":            team.Name,
@@ -30,12 +37,12 @@ func (s Service) TeamList(ctx context.Context) (map[string]any, error) {
 			"publish_status":  normalizeTeamPublishStatus(team.PublishStatus),
 			"release_id":      release.ID,
 			"version":         release.Version,
-			"project_enabled": releaseProjectEnabled(release),
-			"can_create":      releaseProjectEnabled(release),
+			"project_enabled": projectEnabled,
+			"can_create":      projectEnabled,
 			"created_at":      team.CreatedAt,
 		})
 	}
-	return map[string]any{"items": rows}, nil
+	return rows, releases
 }
 
 func releaseProjectEnabled(release *teammodel.TeamRelease) bool {

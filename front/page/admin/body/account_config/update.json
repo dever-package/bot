@@ -1,0 +1,108 @@
+{
+  "page": {
+    "name": "账号配置",
+    "parent": "bot/body/account/update",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "name": "Key",
+        "placeholder": "例如：app_id",
+        "value": "form.key",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "配置 Key 不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-input",
+        "name": "Value",
+        "placeholder": "请输入配置值",
+        "value": "form.value",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "配置 Value 不能为空。",
+            "when": [
+              {
+                "path": "form.key",
+                "operator": "notEquals",
+                "value": "app_secret"
+              }
+            ]
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "hiddenWhen": [
+            {
+              "path": "form.key",
+              "operator": "equals",
+              "value": "app_secret"
+            }
+          ]
+        }
+      },
+      {
+        "type": "form-input",
+        "name": "Value",
+        "placeholder": "编辑时留空表示保留原密钥",
+        "value": "form.value",
+        "mode": "form",
+        "info": "密钥只在保存时提交，服务端加密存储且不会回显。",
+        "meta": {
+          "formLayout": "horizontal",
+          "inputType": "password",
+          "autoComplete": "new-password",
+          "showWhen": [
+            {
+              "path": "form.key",
+              "operator": "equals",
+              "value": "app_secret"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "id": 0,
+      "account_id": 0,
+      "key": "",
+      "value": ""
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}

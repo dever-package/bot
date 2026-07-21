@@ -73,9 +73,6 @@ func (r Resolver) resolveAsset(ctx context.Context, session agentmodel.Session, 
 	if teamID == 0 {
 		return Resolved{}, fmt.Errorf("当前会话不支持团队资产引用")
 	}
-	if reference.VersionID == 0 {
-		return Resolved{}, fmt.Errorf("资产引用缺少版本")
-	}
 	resolved, err := r.assets.RequireCurrentReference(ctx, teamID, reference.ID, reference.VersionID)
 	if err != nil {
 		return Resolved{}, err

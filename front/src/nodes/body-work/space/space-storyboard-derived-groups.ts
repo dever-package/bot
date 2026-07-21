@@ -103,6 +103,31 @@ export function syncCanvasStoryboardDerivedGroups(input: {
   return canvas;
 }
 
+export function canvasStoryboardReferenceSourceSignature(
+  canvas: SpaceCanvasState,
+) {
+  return JSON.stringify(
+    canvas.nodes
+      .filter(
+        (node) =>
+          Boolean(node.storyboardItem) ||
+          (node.type === "power" &&
+            isStoryboardPowerType(
+              node.power,
+              node.kind,
+              node.outputType,
+            )),
+      )
+      .map((node) => [
+        node.id,
+        Number(node.resultRef?.asset_id || 0),
+        Number(node.resultRef?.version_id || 0),
+        Number(node.asset?.id || 0),
+        Number(node.asset?.version_id || node.asset?.version?.id || 0),
+      ]),
+  );
+}
+
 export function syncStoryboardDerivedGroups(input: {
   canvas: SpaceCanvasState;
   storyboardNode: SpaceCanvasNode;
