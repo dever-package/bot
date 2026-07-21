@@ -1,6 +1,25 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useStore } from "zustand";
+import { Pencil } from "lucide-react";
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@dever/front-plugin";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Select,
   SelectContent,
@@ -20,8 +39,7 @@ const HOME_MENU_ROWS = [
   { key: "messages", label: "消息" },
 ] as const;
 
-const HOME_MENU_GRID_CLASS =
-  "grid grid-cols-[minmax(7rem,0.65fr)_minmax(13rem,1.35fr)_minmax(13rem,1.15fr)_5rem] items-center gap-4";
+type HomeMenuRowSpec = (typeof HOME_MENU_ROWS)[number];
 
 const MENU_ICON_OPTIONS = [
   "file-stack",
@@ -56,31 +74,52 @@ const MENU_ICON_OPTIONS = [
 ] as const;
 
 export function BodyHomeMenuEditor({ store }: NodeItemProps) {
+  const [editingRow, setEditingRow] = useState<HomeMenuRowSpec | null>(null);
+
   return (
-    <div className="w-full min-w-0 overflow-x-auto">
-      <div className="min-w-[700px] overflow-hidden rounded-md border border-border bg-background">
-        <div
-          className={`${HOME_MENU_GRID_CLASS} border-b border-border bg-muted/40 px-4 py-2.5 text-xs font-semibold text-muted-foreground`}
-        >
-          <span>固定入口</span>
-          <span>显示名称</span>
-          <span>菜单图标</span>
-          <span className="text-center">显示</span>
-        </div>
-        {HOME_MENU_ROWS.map((row) => (
-          <HomeMenuRow key={row.key} store={store} row={row} />
-        ))}
-      </div>
-    </div>
+    <>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-[18%] px-4">固定入口</TableHead>
+            <TableHead className="w-[24%] px-4">显示名称</TableHead>
+            <TableHead className="px-4">菜单图标</TableHead>
+            <TableHead className="w-24 px-4 text-center">状态</TableHead>
+            <TableHead className="w-20 px-4 text-center">操作</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {HOME_MENU_ROWS.map((row) => (
+            <HomeMenuRow
+              key={row.key}
+              store={store}
+              row={row}
+              onEdit={() => setEditingRow(row)}
+            />
+          ))}
+        </TableBody>
+      </Table>
+
+      {editingRow ? (
+        <HomeMenuEditDialog
+          key={editingRow.key}
+          store={store}
+          row={editingRow}
+          onClose={() => setEditingRow(null)}
+        />
+      ) : null}
+    </>
   );
 }
 
 function HomeMenuRow({
   store,
   row,
+  onEdit,
 }: {
   store: NodeItemProps["store"];
-  row: (typeof HOME_MENU_ROWS)[number];
+  row: HomeMenuRowSpec;
+  onEdit: () => void;
 }) {
   const namePath = `form.home_${row.key}_name`;
   const iconPath = `form.home_${row.key}_icon`;
@@ -89,45 +128,135 @@ function HomeMenuRow({
   const icon = useStore(store, (state) => state.getValueByPath(iconPath));
   const status = useStore(store, (state) => state.getValueByPath(statusPath));
   const iconName = icon == null ? "" : String(icon);
-  const iconOptions = useMemo(
-    () => Array.from(new Set([iconName, ...MENU_ICON_OPTIONS])).filter(Boolean),
-    [iconName],
-  );
+  const CurrentIcon = resolveLucideIcon(iconName);
 
   return (
-    <div
-      className={`${HOME_MENU_GRID_CLASS} border-b border-border px-4 py-3 last:border-b-0`}
-    >
-      <strong className="text-sm font-medium text-foreground">
+    <TableRow className="h-12">
+      <TableCell className="px-4 font-medium text-foreground">
         {row.label}
-      </strong>
-      <Input
-        value={name == null ? "" : String(name)}
-        maxLength={64}
-        aria-label={`${row.label}菜单名称`}
-        className="h-9 rounded-md shadow-none"
-        onChange={(event) =>
-          store.getState().setValueByPath(namePath, event.target.value)
-        }
-      />
-      <MenuIconSelect
-        value={iconName}
-        options={iconOptions}
-        label={`${row.label}菜单图标`}
-        onChange={(nextIcon) =>
-          store.getState().setValueByPath(iconPath, nextIcon)
-        }
-      />
-      <div className="flex justify-center">
-        <MenuVisibilitySwitch
+      </TableCell>
+      <TableCell className="px-4 text-foreground">
+        {name == null || String(name).trim() === "" ? row.label : String(name)}
+      </TableCell>
+      <TableCell className="px-4 text-muted-foreground">
+        <span className="inline-flex items-center gap-2">
+          {CurrentIcon ? <CurrentIcon className="size-4 shrink-0" /> : null}
+          <span>{iconName || "未设置"}</span>
+        </span>
+      </TableCell>
+      <TableCell className="px-4 text-center">
+        <Switch
           checked={status == null || Number(status) === 1}
-          label={`显示${row.label}菜单`}
-          onChange={(checked) =>
+          aria-label={`显示${row.label}菜单`}
+          onCheckedChange={(checked) =>
             store.getState().setValueByPath(statusPath, checked ? 1 : 2)
           }
         />
-      </div>
-    </div>
+      </TableCell>
+      <TableCell className="px-4 text-center">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          title={`编辑${row.label}菜单`}
+          aria-label={`编辑${row.label}菜单`}
+          className="size-8"
+          onClick={onEdit}
+        >
+          <Pencil className="size-4" />
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function HomeMenuEditDialog({
+  store,
+  row,
+  onClose,
+}: {
+  store: NodeItemProps["store"];
+  row: HomeMenuRowSpec;
+  onClose: () => void;
+}) {
+  const namePath = `form.home_${row.key}_name`;
+  const iconPath = `form.home_${row.key}_icon`;
+  const storedName = useStore(store, (state) => state.getValueByPath(namePath));
+  const storedIcon = useStore(store, (state) => state.getValueByPath(iconPath));
+  const [name, setName] = useState(
+    storedName == null ? row.label : String(storedName),
+  );
+  const [icon, setIcon] = useState(
+    storedIcon == null ? "" : String(storedIcon),
+  );
+  const [error, setError] = useState("");
+  const iconOptions = useMemo(
+    () => Array.from(new Set([icon, ...MENU_ICON_OPTIONS])).filter(Boolean),
+    [icon],
+  );
+
+  function applyChanges() {
+    const normalizedName = name.trim();
+    if (!normalizedName) {
+      setError("显示名称不能为空。");
+      return;
+    }
+    if (!icon) {
+      setError("请选择菜单图标。");
+      return;
+    }
+    store.getState().setValueByPath(namePath, normalizedName);
+    store.getState().setValueByPath(iconPath, icon);
+    onClose();
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>编辑{row.label}菜单</DialogTitle>
+          <DialogDescription>
+            修改首页菜单中的显示名称和图标。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-5 py-2">
+          <label className="grid gap-2 text-sm font-medium text-foreground">
+            显示名称
+            <Input
+              value={name}
+              maxLength={64}
+              placeholder={row.label}
+              aria-invalid={Boolean(error && !name.trim())}
+              onChange={(event) => {
+                setName(event.target.value);
+                setError("");
+              }}
+            />
+          </label>
+          <div className="grid gap-2 text-sm font-medium text-foreground">
+            <span>菜单图标</span>
+            <MenuIconSelect
+              value={icon}
+              options={iconOptions}
+              label={`${row.label}菜单图标`}
+              onChange={(nextIcon) => {
+                setIcon(nextIcon);
+                setError("");
+              }}
+            />
+          </div>
+          {error ? <p className="m-0 text-sm text-destructive">{error}</p> : null}
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            取消
+          </Button>
+          <Button type="button" onClick={applyChanges}>
+            确定
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -165,34 +294,5 @@ function MenuIconSelect({
         })}
       </SelectContent>
     </Select>
-  );
-}
-
-function MenuVisibilitySwitch({
-  checked,
-  label,
-  onChange,
-}: {
-  checked: boolean;
-  label: string;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
-        checked ? "bg-primary" : "bg-input"
-      }`}
-      onClick={() => onChange(!checked)}
-    >
-      <span
-        className={`pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-transform ${
-          checked ? "translate-x-[18px]" : "translate-x-0.5"
-        }`}
-      />
-    </button>
   );
 }

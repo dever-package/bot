@@ -94,8 +94,6 @@ function storyboardVideoClip(input: {
     issues.push("未配置镜头视频能力");
   } else if (!originalVideo) {
     issues.push("镜头视频尚未生成");
-  } else if (originalNode.storyboardItem?.stale) {
-    issues.push("镜头视频需要更新");
   }
 
   if (lipSyncRequired && !useOriginalVideo) {
@@ -103,8 +101,6 @@ function storyboardVideoClip(input: {
       issues.push("未配置口型同步能力");
     } else if (!lipSyncVideo) {
       issues.push("口型同步尚未完成");
-    } else if (lipSyncNode.storyboardItem?.stale) {
-      issues.push("口型同步需要更新");
     }
   }
 
@@ -162,8 +158,6 @@ function storyboardSpeechTrack(
     issues.push(`语音“${speech.text}”未配置语音合成能力`);
   } else if (!audio) {
     issues.push(`语音“${speech.text}”尚未生成`);
-  } else if (node.storyboardItem?.stale) {
-    issues.push(`语音“${speech.text}”需要更新`);
   }
   return {
     id: speech.id,
