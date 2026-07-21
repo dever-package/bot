@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
@@ -32,6 +33,7 @@ type executionSpec struct {
 	RequestedAt        time.Time
 	PriorKnowledgeUsed bool
 	PriorLoadedSkills  []agentmodel.LoadedSkillRef
+	RequiredToolName   string
 }
 
 func (s Service) createExecution(ctx context.Context, requestID string, spec executionSpec) (_ execution, resultErr error) {
@@ -71,6 +73,7 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 		priorKnowledgeUsed: spec.PriorKnowledgeUsed,
 	}
 	current.checkpoint = initialCheckpoint(current)
+	current.checkpoint.RequiredToolName = strings.TrimSpace(spec.RequiredToolName)
 	current.checkpoint.LoadedSkills = agentmodel.NormalizeLoadedSkillRefs(spec.PriorLoadedSkills)
 	snapshot, err := encodeSnapshot(snapshotFromExecution(current))
 	if err != nil {

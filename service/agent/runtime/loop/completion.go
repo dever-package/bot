@@ -40,8 +40,11 @@ func shouldReviewCompletion(state *runState) bool {
 	return state.modelStep == 1 && runtimeEventType(state.execution.input) == "interaction_resumed"
 }
 
-func shouldReviewPresentSuggestions(state *runState, calls []botprotocol.ToolCall) bool {
+func shouldReviewPresentSuggestions(state *runState, calls []botprotocol.ToolCall, requiredToolName string) bool {
 	if !shouldReviewCompletion(state) || len(calls) == 0 {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(requiredToolName), runtimeprovider.PresentSuggestionsToolName) {
 		return false
 	}
 	return strings.EqualFold(
@@ -77,17 +80,22 @@ func (s Service) inspectCompletion(
 	if state.modelStep == 1 {
 		reviewHistory = append(reviewHistory, userHistoryMessage(state.execution.input))
 	}
+	reviewInput := map[string]any{
+		"candidate_text":   strings.TrimSpace(result.Text),
+		"candidate_output": result.Output,
+	}
+	if toolCalls := botprotocol.ToolCallsValue(result.ToolCalls); len(toolCalls) > 0 {
+		reviewInput["candidate_tool_calls"] = toolCalls
+	}
+	structuredInteraction := completionInteractionFromToolCalls(result.ToolCalls)
 	reviewCtx, cancel := operationContext(ctx, completionReviewTimeout)
 	defer cancel()
 	reviewResult, err := s.callModelRequestWithRole(
 		reviewCtx,
 		controller,
 		state.execution,
-		modelRolePrompt(""),
-		runtimeEventInput("completion_review", map[string]any{
-			"candidate_text":   strings.TrimSpace(result.Text),
-			"candidate_output": result.Output,
-		}),
+		modelRolePrompt(state.execution.prompt),
+		runtimeEventInput("completion_review", reviewInput),
 		reviewHistory,
 		[]any{completionReviewTool()},
 		botprotocol.ForcedFunctionToolChoice(completionReviewToolName),
@@ -110,9 +118,26 @@ func (s Service) inspectCompletion(
 			Delivery:    strings.ToLower(strings.TrimSpace(botprotocol.AsText(arguments["delivery"]))),
 			Interaction: strings.ToLower(strings.TrimSpace(botprotocol.AsText(arguments["interaction"]))),
 		}
+		if structuredInteraction != "" {
+			decision.Interaction = structuredInteraction
+		}
 		return resolveCompletionReview(decision)
 	}
 	return completionReview{}, fmt.Errorf("模型未提交完成检查结果")
+}
+
+func completionInteractionFromToolCalls(calls []botprotocol.ToolCall) string {
+	if len(calls) == 0 {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(calls[len(calls)-1].Name)) {
+	case runtimeprovider.AskUserToolName:
+		return runtimeprovider.AskUserToolName
+	case runtimeprovider.PresentSuggestionsToolName:
+		return runtimeprovider.PresentSuggestionsToolName
+	default:
+		return ""
+	}
 }
 
 func resolveCompletionReview(decision completionReviewDecision) (completionReview, error) {
@@ -203,18 +228,18 @@ func (s Service) reviewPresentSuggestions(
 func completionReviewTool() map[string]any {
 	return botprotocol.FunctionToolDefinition(
 		completionReviewToolName,
-		"只审查 runtime_event.candidate_text。分别判断交付和交互，二者互不覆盖。",
+		"按照当前智能体设定和用户要求，审查 runtime_event 中的 candidate_text、candidate_output 和 candidate_tool_calls。结构化终态工具参数属于实际交付，不是正文预告。分别判断交付和交互，二者互不覆盖。",
 		map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"delivery": map[string]any{
 					"type":        "string",
-					"description": "当前要求已实际交付为 complete；仅有计划、预告、进度或未兑现承诺为 incomplete",
+					"description": "当前要求已实际交付为 complete；仅有计划、预告、进度或未兑现承诺为 incomplete。若当前步骤就是收集用户选择，有效的 present_suggestions 或 ask_user 参数即为结构化交付，不得仅因前置正文使用将来时判为 incomplete",
 					"enum":        []any{"complete", "incomplete"},
 				},
 				"interaction": map[string]any{
 					"type":        "string",
-					"description": "正文要求用户补充、确认、选择或上传必要信息为 ask_user；正文提供可选下一步、选项列表、询问是否继续或表示愿意后可继续为 present_suggestions；确实没有用户交互才为 none",
+					"description": "优先按 candidate_tool_calls 判断：存在 ask_user 为 ask_user，存在 present_suggestions 为 present_suggestions；没有结构化交互工具时，再根据正文判断。确实没有用户交互才为 none",
 					"enum":        []any{"none", runtimeprovider.AskUserToolName, runtimeprovider.PresentSuggestionsToolName},
 				},
 			},

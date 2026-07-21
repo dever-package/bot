@@ -11,17 +11,17 @@ import (
 )
 
 const (
-	planKind                = "skill_install_plan"
-	maxPlanSteps            = 8
+	planKind                = agentskill.InstallPlanKind
+	maxPlanSteps            = agentskill.InstallPlanMaxSteps
 	maxPlanSummaryRunes     = 2000
 	maxPlanCommandBytes     = 16 * 1024
 	maxPlanURLRunes         = 4096
 	maxPlanDirectoryRunes   = 512
 	maxPlanCollectRootRunes = 512
-	collectModeAll          = "all"
-	collectModeOne          = "single"
-	stepTypeCommand         = "command"
-	stepTypeDownload        = "download"
+	collectModeAll          = agentskill.InstallPlanCollectModeAll
+	collectModeOne          = agentskill.InstallPlanCollectModeSingle
+	stepTypeCommand         = agentskill.InstallPlanStepCommand
+	stepTypeDownload        = agentskill.InstallPlanStepDownload
 )
 
 type installPlan struct {
@@ -84,7 +84,7 @@ func parseInstallPlanResult(output map[string]any, summary string) (installPlan,
 }
 
 func installPlanRejection(plan installPlan, fallback error) error {
-	if plan.Kind != planKind || plan.Version != 1 || len(plan.Steps) != 0 {
+	if plan.Kind != planKind || plan.Version != agentskill.InstallPlanVersion || len(plan.Steps) != 0 {
 		return fallback
 	}
 	reason := strings.TrimSpace(plan.Summary)
@@ -104,9 +104,11 @@ func planCandidates(output map[string]any, summary string) []any {
 		output["plan"],
 		output["json"],
 		output["value"],
+		output["result"],
 		content["plan"],
 		content["json"],
 		content["value"],
+		content["result"],
 		output["text"],
 		content["text"],
 		summary,
@@ -166,8 +168,8 @@ func (plan *installPlan) NormalizeAndValidate() error {
 	if plan.Kind != planKind {
 		return fmt.Errorf("安装计划 kind 必须是 %s", planKind)
 	}
-	if plan.Version != 1 {
-		return fmt.Errorf("安装计划 version 必须是 1")
+	if plan.Version != agentskill.InstallPlanVersion {
+		return fmt.Errorf("安装计划 version 必须是 %d", agentskill.InstallPlanVersion)
 	}
 	plan.Summary = strings.TrimSpace(plan.Summary)
 	if err := agentskill.ValidateStoredText("安装计划摘要", plan.Summary, maxPlanSummaryRunes); err != nil {
@@ -197,6 +199,7 @@ func normalizePlanStep(step *installPlanStep) error {
 	}
 	switch step.Type {
 	case stepTypeCommand:
+		step.Command = normalizeInstallCommand(step.Command)
 		if step.Command == "" {
 			return fmt.Errorf("command 不能为空")
 		}
@@ -211,6 +214,18 @@ func normalizePlanStep(step *installPlanStep) error {
 	case stepTypeDownload:
 		if step.URL == "" {
 			return fmt.Errorf("url 不能为空")
+		}
+		if isSkillHubInstallInstructionURL(step.URL) {
+			return fmt.Errorf("SkillHub 安装说明页面不能作为技能下载地址")
+		}
+		if isGitHubTreeURL(step.URL) {
+			return fmt.Errorf("GitHub 技能子目录不能直接下载，请使用安装命令")
+		}
+		if rawURL := githubBlobSkillURL(step.URL); rawURL != "" {
+			step.URL = rawURL
+			step.Extract = false
+		} else if isSingleSkillFileURL(step.URL) {
+			step.Extract = false
 		}
 		if err := agentskill.ValidateStoredText("下载地址", step.URL, maxPlanURLRunes); err != nil {
 			return err

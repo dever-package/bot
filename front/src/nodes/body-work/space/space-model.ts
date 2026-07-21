@@ -43,7 +43,11 @@ const freeAssetCate: AssetCate = {
 };
 
 const DEFAULT_POWER_NODE_SIZE = { width: 180, height: 180 } as const;
-const DEFAULT_AUDIO_POWER_NODE_SIZE = { width: 360, height: 64 } as const;
+const DEFAULT_AUDIO_POWER_NODE_SIZE = { width: 240, height: 160 } as const;
+const LEGACY_AUDIO_POWER_NODE_SIZES = [
+  { width: 360, height: 64 },
+  { width: 280, height: 210 },
+] as const;
 const DEFAULT_STORYBOARD_NODE_SIZE = { width: 620, height: 360 } as const;
 
 export function normalizeSpaceBootstrap(value: unknown): SpaceBootstrap {
@@ -670,6 +674,7 @@ function normalizeCanvasNode(
     resultView: normalizeCanvasResultView(
       firstDefined(value.result_view, value.resultView),
     ),
+    runError: stringValue(firstDefined(value.run_error, value.runError)),
     local: value.local !== false,
   };
   const kind = stringValue(value.kind) as SpaceCanvasNode["kind"];
@@ -778,7 +783,7 @@ function normalizeCanvasStoryboardItem(value: unknown) {
       "character",
       "scene",
       "prop",
-      "shot_frame",
+      "shot_image",
       "shot",
       "speech",
       "lip_sync",
@@ -793,7 +798,7 @@ function normalizeCanvasStoryboardItem(value: unknown) {
       | "character"
       | "scene"
       | "prop"
-      | "shot_frame"
+      | "shot_image"
       | "shot"
       | "speech"
       | "lip_sync"
@@ -806,9 +811,6 @@ function normalizeCanvasStoryboardItem(value: unknown) {
       firstDefined(row.source_node_ids, row.sourceNodeIds),
     ),
     shotId: stringValue(firstDefined(row.shot_id, row.shotId)),
-    frameRole: stringValue(
-      firstDefined(row.frame_role, row.frameRole),
-    ) as "start" | "end",
     speechId: stringValue(firstDefined(row.speech_id, row.speechId)),
     speechIds: stringArray(firstDefined(row.speech_ids, row.speechIds)),
     characterId: stringValue(
@@ -1086,7 +1088,12 @@ export function audioPowerNodeSizeUpgrade(
   }
   const legacySize =
     configuredPowerNodeSize(node.power) || DEFAULT_POWER_NODE_SIZE;
-  return node.width === legacySize.width && node.height === legacySize.height
+  const usesLegacySize =
+    (node.width === legacySize.width && node.height === legacySize.height) ||
+    LEGACY_AUDIO_POWER_NODE_SIZES.some(
+      (size) => node.width === size.width && node.height === size.height,
+    );
+  return usesLegacySize
     ? { ...DEFAULT_AUDIO_POWER_NODE_SIZE }
     : null;
 }

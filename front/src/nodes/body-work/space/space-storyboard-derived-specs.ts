@@ -1,12 +1,15 @@
 import type { StoryboardGroupDirection } from "./space-storyboard-derived-layout";
 import {
+  STORYBOARD_MATERIAL_LABELS,
   isStoryboardVisibleDialogue,
   storyboardHasVisibleDialogue,
-  storyboardMaterialReferenceNames,
   storyboardPromptWithStyle,
   storyboardShotFallbackPrompt,
+  storyboardShotMaterials,
+  storyboardVisibleSpeakerIds,
   type StoryboardDocument,
   type StoryboardMaterial,
+  type StoryboardMaterialType,
   type StoryboardShot,
   type StoryboardSpeech,
 } from "./space-storyboard";
@@ -32,8 +35,8 @@ export type StoryboardDerivedItem = {
   sourceItems?: StoryboardDerivedSourceItem[];
   sourceNodeIds?: string[];
   sourceSignatureParts?: string[];
+  paramValues?: Record<string, unknown>;
   shotId?: string;
-  frameRole?: "start" | "end";
   speechId?: string;
   speechIds?: string[];
   characterId?: string;
@@ -47,7 +50,7 @@ export type StoryboardDerivedGroupKey =
   | "characters"
   | "scenes"
   | "props"
-  | "shot_frames"
+  | "shot_images"
   | "shots"
   | "speech"
   | "lip_sync";
@@ -71,10 +74,19 @@ export type StoryboardDerivedGroupSpec = {
   ) => StoryboardDerivedItem[];
 };
 
-const MATERIAL_LABELS: Record<"character" | "scene" | "prop", string> = {
-  character: "角色",
-  scene: "场景",
-  prop: "道具",
+const MATERIAL_GROUP_KEYS: StoryboardDerivedGroupKey[] = [
+  "characters",
+  "scenes",
+  "props",
+];
+
+const MATERIAL_REFERENCE_RULES: Record<StoryboardMaterialType, string> = {
+  character:
+    "生成纯角色设定图，只展示当前角色的正面、侧面、背面和关键细节，不得出现其他人物、文字、水印或界面元素",
+  scene:
+    "生成纯场景设定图，只展示固定空间的外观、内部结构、光线和关键区域，不得出现任何人物、角色、动物、文字、水印或界面元素",
+  prop:
+    "生成纯道具设定图，只展示当前道具的多角度造型、比例、材质和关键细节，不得出现人物、手持者、文字、水印或界面元素",
 };
 
 export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
@@ -82,31 +94,25 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
   materialGroupSpec("scenes", "场景组", "scene", 1),
   materialGroupSpec("props", "道具组", "prop", 2),
   {
-    key: "shot_frames",
-    title: "镜头画面组",
-    itemType: "shot_frame",
+    key: "shot_images",
+    title: "镜头参考图组",
+    itemType: "shot_image",
     powerKind: "image",
     outputType: "general",
     direction: "downstream",
+    sourceGroupKeys: MATERIAL_GROUP_KEYS,
     layoutIndex: 0,
     enabled: () => true,
     items: (storyboard, options) =>
-      storyboard.shots.flatMap((shot, index) =>
-        (["start", "end"] as const).map((frameRole) => ({
-          type: "shot_frame" as const,
-          id: shotFrameItemId(shot.id, frameRole),
-          title: shotFrameTitle(shot, index, frameRole),
-          prompt: storyboardShotFramePrompt(
-            storyboard,
-            shot,
-            frameRole,
-            options,
-          ),
-          sourceItems: storyboardShotMaterialSourceItems(storyboard, shot.id),
-          shotId: shot.id,
-          frameRole,
-        })),
-      ),
+      storyboard.shots.map((shot, index) => ({
+        type: "shot_image" as const,
+        id: shot.id,
+        title: `镜头 ${shot.order || index + 1} 参考图`,
+        prompt: storyboardShotImagePrompt(storyboard, shot, options),
+        sourceItems: storyboardShotMaterialSourceItems(storyboard, shot),
+        paramValues: storyboardShotImageParamValues(storyboard),
+        shotId: shot.id,
+      })),
   },
   {
     key: "shots",
@@ -115,23 +121,20 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
     powerKind: "video",
     outputType: "general",
     direction: "downstream",
-    sourceGroupKeys: ["shot_frames"],
+    sourceGroupKeys: ["shot_images"],
     layoutIndex: 1,
     enabled: () => true,
     items: (storyboard, options) =>
-      storyboard.shots.map((shot, index) => {
-        const prompt = storyboardVideoPrompt(storyboard, shot, options);
-        return {
-          type: "shot",
-          id: shot.id,
-          title: `镜头 ${shot.order || index + 1}`,
-          prompt,
-          sourceItems: (["start", "end"] as const).map((frameRole) => ({
-            type: "shot_frame" as const,
-            id: shotFrameItemId(shot.id, frameRole),
-          })),
-        };
-      }),
+      storyboard.shots.map((shot, index) => ({
+        type: "shot" as const,
+        id: shot.id,
+        title: `镜头 ${shot.order || index + 1}`,
+        prompt: storyboardVideoPrompt(storyboard, shot, options),
+        sourceItems: storyboardShotVideoSourceItems(storyboard, shot, index),
+        paramValues: storyboardVideoParamValues(storyboard),
+        shotId: shot.id,
+        shotDuration: shot.duration,
+      })),
   },
   {
     key: "speech",
@@ -163,7 +166,7 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
 function materialGroupSpec(
   key: "characters" | "scenes" | "props",
   title: string,
-  itemType: "character" | "scene" | "prop",
+  itemType: StoryboardMaterialType,
   layoutIndex: number,
 ): StoryboardDerivedGroupSpec {
   return {
@@ -174,14 +177,17 @@ function materialGroupSpec(
     outputType: "general",
     direction: "upstream",
     layoutIndex,
-    enabled: (storyboard) => Boolean(storyboard.materials),
+    enabled: (storyboard) =>
+      storyboard.materials.some((material) => material.type === itemType),
     items: (storyboard) =>
-      (storyboard.materials?.[key] || []).map((material) => ({
-        type: itemType,
-        id: material.id,
-        title: material.name,
-        prompt: storyboardMaterialPrompt(storyboard, material, itemType),
-      })),
+      storyboard.materials
+        .filter((material) => material.type === itemType)
+        .map((material) => ({
+          type: itemType,
+          id: material.id,
+          title: material.name,
+          prompt: storyboardMaterialPrompt(storyboard, material),
+        })),
   };
 }
 
@@ -249,8 +255,8 @@ function storyboardSpeechTitle(
   if (speech.kind === "narration") {
     return `镜头 ${shotOrder} 旁白 ${speechIndex + 1}`;
   }
-  const character = storyboard.materials?.characters.find(
-    (item) => item.id === speech.character_id,
+  const character = storyboard.materials.find(
+    (item) => item.type === "character" && item.id === speech.character_id,
   );
   return `镜头 ${shotOrder} ${character?.name || "角色"}配音`;
 }
@@ -262,76 +268,80 @@ function hasStoryboardSpeech(shot: StoryboardShot) {
 function storyboardMaterialPrompt(
   storyboard: StoryboardDocument,
   material: StoryboardMaterial,
-  itemType: "character" | "scene" | "prop",
 ) {
   const prompt = material.prompt.trim();
   if (prompt) {
-    return storyboardPromptWithStyle(storyboard, prompt);
+    return storyboardPromptWithStyle(
+      storyboard,
+      `${prompt}。${MATERIAL_REFERENCE_RULES[material.type]}`,
+    );
   }
-  const relatedVisuals = storyboard.shots
-    .filter((shot) => material.shot_ids.includes(shot.id))
-    .flatMap((shot) => [shot.visual.trim(), shot.end_visual.trim()])
+  const relatedDescriptions = storyboard.shots
+    .filter((shot) => shot.material_ids.includes(material.id))
+    .map((shot) => shot.description.trim())
     .filter(Boolean);
-  const context = relatedVisuals.length
-    ? `相关镜头：${relatedVisuals.join("；")}`
-    : "保持整部故事的统一视觉风格";
+  const context = relatedDescriptions.length
+    ? `相关镜头：${relatedDescriptions.join("；")}`
+    : "保持整部作品的统一视觉风格";
   return storyboardPromptWithStyle(
     storyboard,
-    `${MATERIAL_LABELS[itemType]}“${material.name}”的素材生成图。${context}`,
+    `${STORYBOARD_MATERIAL_LABELS[material.type]}“${material.name}”的素材生成图。${context}。${MATERIAL_REFERENCE_RULES[material.type]}`,
   );
 }
 
 function storyboardShotMaterialSourceItems(
   storyboard: StoryboardDocument,
-  shotId: string,
-) {
-  return (
-    [
-      ["character", storyboard.materials?.characters || []],
-      ["scene", storyboard.materials?.scenes || []],
-      ["prop", storyboard.materials?.props || []],
-    ] as const
-  ).flatMap(([type, materials]) =>
-    materials
-      .filter((material) => material.shot_ids.includes(shotId))
-      .map((material) => ({ type, id: material.id })),
-  );
-}
-
-function shotFrameItemId(shotId: string, frameRole: "start" | "end") {
-  return `${shotId}:${frameRole}`;
-}
-
-function shotFrameTitle(
   shot: StoryboardShot,
-  index: number,
-  frameRole: "start" | "end",
 ) {
-  const roleLabel = frameRole === "start" ? "首帧" : "尾帧";
-  return `镜头 ${shot.order || index + 1} ${roleLabel}`;
+  return storyboardShotMaterials(storyboard, shot).map((material) => ({
+    type: material.type,
+    id: material.id,
+  }));
 }
 
-function storyboardShotFramePrompt(
+function storyboardShotVideoSourceItems(
   storyboard: StoryboardDocument,
   shot: StoryboardShot,
-  frameRole: "start" | "end",
+  index: number,
+) {
+  const previousShot = index > 0 ? storyboard.shots[index - 1] : undefined;
+  return [
+    { type: "shot_image" as const, id: shot.id },
+    ...(shot.continue_previous && previousShot
+      ? [{ type: "shot" as const, id: previousShot.id }]
+      : []),
+  ];
+}
+
+function storyboardShotImagePrompt(
+  storyboard: StoryboardDocument,
+  shot: StoryboardShot,
   options: StoryboardDerivedOptions,
 ) {
-  const visual = frameRole === "start" ? shot.visual : shot.end_visual;
-  const roleLabel = frameRole === "start" ? "首帧" : "尾帧";
-  const prompt = [
-    visual.trim(),
-    shot.camera_movement.trim()
-      ? `${roleLabel}构图与机位参考：${shot.camera_movement.trim()}`
+  const referenceOrder = storyboardShotMaterials(storyboard, shot)
+    .map(
+      (material, index) =>
+        `参考图${index + 1}是${STORYBOARD_MATERIAL_LABELS[material.type]}“${material.name}”`,
+    )
+    .join("，");
+  const parts = [
+    `镜头 ${shot.order} 的单张参考画面`,
+    referenceOrder ? `图片顺序说明：${referenceOrder}` : "",
+    referenceOrder
+      ? "必须严格按照上述图片顺序识别素材，不得交换、合并或忽略参考对象"
       : "",
-    storyboardLipSyncFacePrompt(shot, options),
-  ]
-    .filter(Boolean)
-    .join("。");
-  return storyboardPromptWithStyle(
-    storyboard,
-    prompt || storyboardShotFallbackPrompt(shot),
-  );
+    "严格保持参考角色的五官、发型、服装、配色和体型，保持场景结构、道具造型以及整部作品画风一致",
+    "不同参考对象必须保持各自独立的轮廓、材质和尺度，不得把角色与道具融合、机械化、穿戴化或互换材质",
+    "角色必须保留参考图中的发饰数量与位置以及完整服装，道具必须保持参考图中的原始尺寸比例",
+    shot.description.trim(),
+    shot.camera_instruction.trim()
+      ? `镜头语言：${shot.camera_instruction.trim()}`
+      : "",
+    storyboardVisibleFaceConstraint(shot, options),
+    `画幅：${storyboard.aspect_ratio}`,
+    "画面中不要出现字幕、对白文字、水印或界面元素",
+  ].filter(Boolean);
+  return storyboardPromptWithStyle(storyboard, parts.join("。"));
 }
 
 function storyboardVideoPrompt(
@@ -339,27 +349,39 @@ function storyboardVideoPrompt(
   shot: StoryboardShot,
   options: StoryboardDerivedOptions,
 ) {
-  const prompt = storyboardPromptWithStyle(
-    storyboard,
-    shot.prompt.trim() || storyboardShotFallbackPrompt(shot),
-  );
-  const content = storyboardMaterialReferenceNames(storyboard).reduce(
-    (current, name) => current.split(`@${name}`).join(name),
-    prompt,
-  );
-  const requirements = [
-    storyboardLipSyncFacePrompt(shot, options),
-    "声音要求：仅保留环境声和动作声，不生成对白、旁白或背景音乐",
+  const basePrompt =
+    shot.video_prompt.trim() || storyboardShotFallbackPrompt(shot);
+  const parts = [
+    basePrompt,
+    shot.continue_previous
+      ? "承接上一镜头的结束状态，保持人物、服装、道具、场景光线和动作方向一致，但不要重复上一镜头内容"
+      : "这是新的镜头段落，按当前镜头素材和描述建立画面",
+    storyboardVisibleFaceConstraint(shot, options),
+    `画幅：${storyboard.aspect_ratio}`,
+    "不生成可辨识对白、旁白、字幕或背景音乐，只保留环境声、动作声和不可辨识的人物声音",
+    `时长 ${shot.duration} 秒`,
   ].filter(Boolean);
-  return `${content}${/[。！？!?；;]$/.test(content) ? "" : "。"}${requirements.join("。")}。`;
+  return storyboardPromptWithStyle(storyboard, parts.join("。"));
 }
 
-function storyboardLipSyncFacePrompt(
+function storyboardShotImageParamValues(storyboard: StoryboardDocument) {
+  return { aspectRatio: storyboard.aspect_ratio, resolution: "2k" };
+}
+
+function storyboardVideoParamValues(storyboard: StoryboardDocument) {
+  return { aspectRatio: storyboard.aspect_ratio };
+}
+
+function storyboardVisibleFaceConstraint(
   shot: StoryboardShot,
   options: StoryboardDerivedOptions,
 ) {
   if (!options.enableLipSync || !storyboardHasVisibleDialogue(shot)) {
     return "";
   }
-  return "口型要求：说话角色是画面中唯一清晰可识别的正脸，其他人物不得露出第二张清晰正脸";
+  const speakerID = [...storyboardVisibleSpeakerIds(shot)][0];
+  if (!speakerID) {
+    return "";
+  }
+  return "出镜说话角色是画面中唯一清晰可识别的正脸，其他人物使用背面、侧后方、远景或遮挡构图";
 }

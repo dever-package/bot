@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	dlog "github.com/shemic/dever/log"
@@ -55,6 +56,10 @@ func (s Service) mountExecutionTools(
 	}
 	execution.history = append(execution.history, history...)
 	execution.checkpoint.LoadedSkills = restored
+	if required := strings.TrimSpace(execution.checkpoint.RequiredToolName); required != "" && !mounted.Registry.Has(required) {
+		mounted.Close()
+		return fmt.Errorf("当前智能体未挂载必要工具: %s", required)
+	}
 	execution.registry = mounted.Registry
 	execution.cleanup = mounted.Close
 	if len(mounted.Warnings) > 0 {

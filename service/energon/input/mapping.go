@@ -27,6 +27,9 @@ func BuildMapped(
 	if err := validatePowerMainParams(ctx, repo, req, target.PowerID, target.ServiceID, normalized, params); err != nil {
 		return mapped, err
 	}
+	if err := validatePowerAttachmentCounts(ctx, repo, target.PowerID, normalized, params); err != nil {
+		return mapped, err
+	}
 
 	serviceParams := repo.ServiceParamsByService(ctx, target.ServiceID)
 	if len(serviceParams) == 0 {
@@ -126,6 +129,38 @@ func BuildMapped(
 	applyPromptMappedParams(&mapped)
 
 	return mapped, nil
+}
+
+func validatePowerAttachmentCounts(
+	ctx context.Context,
+	repo Repository,
+	powerID uint64,
+	input map[string]any,
+	params map[uint64]botmodel.Param,
+) error {
+	checked := map[uint64]struct{}{}
+	for _, powerParam := range repo.PowerParamsByPower(ctx, powerID) {
+		if _, exists := checked[powerParam.ParamID]; exists {
+			continue
+		}
+		checked[powerParam.ParamID] = struct{}{}
+		param, ok := params[powerParam.ParamID]
+		if !ok || !IsActive(param.Status) || param.MaxFiles <= 0 {
+			continue
+		}
+		controlType := NormalizeParamControlType(param.Type)
+		if controlType != "file" && controlType != "files" {
+			continue
+		}
+		_, value, exists := ResolveParamValue(input, param)
+		if !exists {
+			continue
+		}
+		if count := len(StringList(value)); count > param.MaxFiles {
+			return fmt.Errorf("参数“%s”最多允许 %d 个文件，当前传入 %d 个", param.Name, param.MaxFiles, count)
+		}
+	}
+	return nil
 }
 
 func fixedServiceParamValue(serviceParam botmodel.ServiceParam) (any, error) {

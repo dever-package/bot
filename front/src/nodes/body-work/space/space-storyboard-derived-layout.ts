@@ -14,12 +14,13 @@ const NODE_GAP_Y = 40;
 const LEGACY_NODE_GAP_Y = 24;
 const NODE_COLUMNS = 2;
 const DEFAULT_NODE_SIZE = { width: 180, height: 180 };
-const LAYOUT_VERSION = "storyboard-derived-layout-v6";
+const LAYOUT_VERSION = "storyboard-derived-layout-v7";
 const LEGACY_LAYOUT_VERSIONS = [
   "storyboard-derived-layout-v2",
   "storyboard-derived-layout-v3",
   "storyboard-derived-layout-v4",
   "storyboard-derived-layout-v5",
+  "storyboard-derived-layout-v6",
 ] as const;
 
 export type StoryboardDerivedLayoutGroup = {
@@ -47,21 +48,35 @@ export function planStoryboardDerivedGroupLayout(input: {
     size: storyboardDerivedGroupSize(group),
   }));
   const layouts = new Map<string, StoryboardDerivedGroupLayout>();
+  const sortedGroups = [...groups].sort(compareLayoutGroups);
+  const workspaceLayoutKey = storyboardDerivedLayoutKey(
+    "workspace",
+    sortedGroups,
+  );
   const upstreamGroups = groups
     .filter((group) => group.direction === "upstream")
     .sort(compareLayoutGroups);
-  const upstreamLayoutKey = storyboardDerivedLayoutKey(
-    "upstream",
-    upstreamGroups,
-  );
-  const upstreamHeight = upstreamGroups.reduce(
-    (height, group, index) =>
-      height + group.size.height + (index > 0 ? GROUP_GAP_Y : 0),
+  const productionGroups = groups
+    .filter(
+      (group) =>
+        group.direction === "downstream" && group.powerKind !== "audio",
+    )
+    .sort(compareLayoutGroups);
+  const audioGroups = groups
+    .filter(
+      (group) =>
+        group.direction === "downstream" && group.powerKind === "audio",
+    )
+    .sort(compareLayoutGroups);
+  const productionHeight = productionGroups.reduce(
+    (height, group) => Math.max(height, group.size.height),
     0,
   );
+  const productionY = productionGroups.length
+    ? input.sourceNode.y - productionHeight - GROUP_GAP_Y
+    : input.sourceNode.y;
   const upstreamRight = input.sourceNode.x - GROUP_OFFSET_X;
-  let upstreamY =
-    input.sourceNode.y + input.sourceNode.height / 2 - upstreamHeight / 2;
+  let upstreamY = productionY;
   for (const group of upstreamGroups) {
     layouts.set(group.key, {
       bounds: {
@@ -70,31 +85,37 @@ export function planStoryboardDerivedGroupLayout(input: {
         width: group.size.width,
         height: group.size.height,
       },
-      layoutKey: `${upstreamLayoutKey}:${group.key}`,
+      layoutKey: `${workspaceLayoutKey}:${group.key}`,
     });
     upstreamY += group.size.height + GROUP_GAP_Y;
   }
 
-  const downstreamGroups = groups
-    .filter((group) => group.direction === "downstream")
-    .sort(compareLayoutGroups);
-  const downstreamLayoutKey = storyboardDerivedLayoutKey(
-    "downstream",
-    downstreamGroups,
-  );
-  let downstreamX =
-    input.sourceNode.x + input.sourceNode.width + GROUP_OFFSET_X;
-  for (const group of downstreamGroups) {
+  let productionX = input.sourceNode.x;
+  for (const group of productionGroups) {
     layouts.set(group.key, {
       bounds: {
-        x: downstreamX,
+        x: productionX,
+        y: productionY,
+        width: group.size.width,
+        height: group.size.height,
+      },
+      layoutKey: `${workspaceLayoutKey}:${group.key}`,
+    });
+    productionX += group.size.width + GROUP_GAP_X;
+  }
+
+  let audioX = input.sourceNode.x + input.sourceNode.width + GROUP_OFFSET_X;
+  for (const group of audioGroups) {
+    layouts.set(group.key, {
+      bounds: {
+        x: audioX,
         y: input.sourceNode.y,
         width: group.size.width,
         height: group.size.height,
       },
-      layoutKey: `${downstreamLayoutKey}:${group.key}`,
+      layoutKey: `${workspaceLayoutKey}:${group.key}`,
     });
-    downstreamX += group.size.width + GROUP_GAP_X;
+    audioX += group.size.width + GROUP_GAP_X;
   }
   return layouts;
 }
@@ -259,7 +280,7 @@ function isLegacyAudioGroupLayout(group: StoryboardDerivedLayoutGroup) {
 }
 
 function storyboardDerivedLayoutKey(
-  direction: StoryboardGroupDirection,
+  scope: string,
   groups: Array<
     StoryboardDerivedLayoutGroup & {
       size: { width: number; height: number };
@@ -268,7 +289,7 @@ function storyboardDerivedLayoutKey(
 ) {
   return [
     LAYOUT_VERSION,
-    direction,
+    scope,
     ...groups.map(
       (group) =>
         `${group.key}:${group.itemCount}:${group.size.width}x${group.size.height}`,

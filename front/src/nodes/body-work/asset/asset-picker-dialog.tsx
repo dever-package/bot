@@ -252,6 +252,7 @@ export function AssetPickerDialog({
               <>
                 <button
                   type="button"
+                  className="wb-asset-local-upload"
                   disabled={uploading}
                   title="本地上传"
                   onClick={() => uploadInputRef.current?.click()}
@@ -261,9 +262,7 @@ export function AssetPickerDialog({
                   ) : (
                     <Upload aria-hidden="true" />
                   )}
-                  <span className="sr-only">
-                    {uploading ? "上传中" : "本地上传"}
-                  </span>
+                  <span>{uploading ? "上传中" : "本地上传"}</span>
                 </button>
                 <input
                   ref={uploadInputRef}

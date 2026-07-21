@@ -1,12 +1,10 @@
-import {
-  createContext,
-  useContext,
-  useMemo,
-  type ComponentType,
-} from "react";
+import { createContext, useContext, useMemo, type ComponentType } from "react";
 import { getCompatModule } from "@dever/front-plugin";
 import type { ComposerAssetItem } from "./space-prompt-composer";
-import { canvasReferenceContentFromText } from "./space-reference-content";
+import {
+  canvasReferenceContentFromText,
+  normalizeCanvasReferenceLabel,
+} from "./space-reference-content";
 import type { CanvasReferenceContent } from "./types";
 import type { WorkbenchReferenceProvider } from "../asset/asset-reference-provider";
 
@@ -26,6 +24,7 @@ type ReferenceOption = {
     kind?: string;
     url?: string;
   };
+  usage?: string;
 };
 
 type ReferenceLoadRequest = {
@@ -81,6 +80,7 @@ const referenceComposerModule = getCompatModule(
   ReferenceContentView?: ComponentType<{
     content?: CanvasReferenceContent;
     fallback?: string;
+    references?: ReferenceOption[];
     loadPreview?: (
       request: ReferencePreviewRequest,
     ) => Promise<ReferencePreview>;
@@ -90,8 +90,9 @@ const referenceComposerModule = getCompatModule(
 const ReferenceEditor = referenceComposerModule.ReferenceEditor;
 const ReferenceContentView = referenceComposerModule.ReferenceContentView;
 
-export const CanvasAssetReferenceProviderContext =
-  createContext<WorkbenchReferenceProvider | undefined>(undefined);
+export const CanvasAssetReferenceProviderContext = createContext<
+  WorkbenchReferenceProvider | undefined
+>(undefined);
 
 export function CanvasReferenceEditor({
   value,
@@ -164,8 +165,7 @@ export function CanvasReferenceEditorWithAdapter({
   const contextualAssetProvider = useContext(
     CanvasAssetReferenceProviderContext,
   );
-  const activeAssetProvider =
-    assetReferenceProvider || contextualAssetProvider;
+  const activeAssetProvider = assetReferenceProvider || contextualAssetProvider;
   if (!ReferenceEditor) {
     return (
       <textarea
@@ -191,7 +191,7 @@ export function CanvasReferenceEditorWithAdapter({
     <ReferenceEditor
       value={value}
       content={content}
-      references={activeAssetProvider ? [] : adapter.options}
+      references={adapter.options}
       placeholder={placeholder}
       disabled={disabled}
       autoFocus={autoFocus}
@@ -260,6 +260,7 @@ export function CanvasReferenceTextWithAdapter({
       <ReferenceContentView
         content={resolvedContent}
         fallback={value || placeholder}
+        references={adapter.options}
         loadPreview={(request) =>
           request.refType === "asset" && assetReferenceProvider?.loadPreview
             ? assetReferenceProvider.loadPreview(request)
@@ -286,15 +287,15 @@ function hydrateReferenceLabels(
       part.type === "reference"
         ? {
             ...part,
-            label:
+            label: normalizeCanvasReferenceLabel(
               labels.get(
                 referenceTargetKey(
                   part.ref_type,
                   part.ref_id,
                   part.ref_version_id,
                 ),
-              ) ||
-              part.label,
+              ) || part.label,
+            ),
           }
         : part,
     ),
@@ -378,7 +379,7 @@ function referenceOption(
     refType: "asset",
     refId,
     versionID: Number(item.versionID || 0) || undefined,
-    label: `@${referenceTitle(item.title)}`,
+    label: referenceTitle(item.title),
     description: referenceDescription(item),
     preview: {
       text: referenceDescription(item),

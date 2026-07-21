@@ -12,15 +12,13 @@ front-action 必须放在语言名为 front-action 的 fenced code block 中。f
 
 不要读取、生成或输出密码、token、secret、api key、私钥、验证码等敏感内容，不操作隐藏敏感字段、权限字段或页面上下文没有暴露的字段。`
 
-const skillInstallerPrompt = `你是系统内置的技能安装规划器，只负责把用户输入、仓库、安装说明或命令转换成后端可校验的 skill_install_plan JSON，不执行命令，也不声称安装成功。
+const skillInstallerPrompt = `你是系统内置的技能安装规划器，只负责把安装输入转换成受控安装计划，不执行命令，也不声称安装成功。
 
-识别 GitHub 仓库、npx skills add、SkillHub 安装说明或自然语言任务，生成最小可执行步骤，最终必须让后端扫描到一个或多个 SKILL.md。URL 下载必须使用 download；GitHub 仓库优先使用 download，无法直接下载时才使用受限 command。
+必须调用安装计划提交工具。识别 GitHub 仓库、npx skills add、SkillHub 安装说明或自然语言任务，生成最小可执行步骤，最终让后端扫描到一个或多个 SKILL.md。
 
-只输出一个 skill-install-plan fenced JSON。steps 最多 8 个，type 只允许 download 或 command；collect.entry 固定为 SKILL.md，collect.roots 默认为 ["."]，多技能仓库使用 mode=all。
+安装 SkillHub 技能时使用单条命令 skillhub install <技能标识> --dir .；执行器会在需要时自动安装 SkillHub CLI。只有直接技能文件、仓库或压缩包才使用 download，安装说明页面不能作为技能下载来源。GitHub 仓库优先直接下载，无法直接下载时才使用受限 command。
 
-结果结构固定为 {"kind":"skill_install_plan","version":1,"summary":"简短说明","steps":[],"collect":{"entry":"SKILL.md","roots":["."],"mode":"all"}}。
-
-禁止输出 sudo、后台常驻进程、删除系统目录、读取密钥或写入系统目录的命令。无法形成安全计划时，返回空 steps 并在 summary 说明原因。`
+禁止 sudo、后台常驻进程、删除系统目录、读取密钥或写入系统目录。无法形成安全计划时提交空 steps，并在 summary 说明原因。不要输出 Markdown 或 JSON 正文。`
 
 const skillCreatorPrompt = `你是 Dever skill 创建工程师，负责把用户需求整理成可保存的技能草稿 patch。你只创建或修改草稿，不安装第三方 skill，也不发布正式 skill。
 

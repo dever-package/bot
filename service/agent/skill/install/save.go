@@ -30,9 +30,15 @@ func parseSkillSources(sources []installedSkillSource) ([]parsedSkillSource, err
 		if err != nil {
 			return nil, err
 		}
+		if source.SourceURL == "" {
+			source.SourceURL = publicSourceURL(agentskill.FirstText(parsed.Manifest["source_url"]))
+		}
 		if parsed.Key == "" {
 			return nil, fmt.Errorf("技能标识不能为空，请检查 SKILL.md frontmatter")
 		}
+		// Third-party skills commonly predate manifest capability declarations.
+		// Persist the inferred declarations before applying the strict validator.
+		agentskill.NormalizeManifestCapabilities(parsed.Manifest)
 		if err := agentskill.ValidateManifest(parsed.Manifest); err != nil {
 			return nil, fmt.Errorf("技能 %s 的 %w", parsed.Key, err)
 		}
@@ -257,7 +263,7 @@ func (s Service) saveInstalledSkillRecord(ctx context.Context, execInfo *skillIn
 
 func installedSkillManifest(parsed map[string]any, sourceURL string) map[string]any {
 	manifest := agentskill.CloneMap(parsed)
-	manifest["source_url"] = sourceURL
+	manifest["source_url"] = strings.TrimSpace(sourceURL)
 	for _, key := range []string{"config", "scripts", "source_refs"} {
 		if _, exists := manifest[key]; !exists {
 			manifest[key] = []any{}

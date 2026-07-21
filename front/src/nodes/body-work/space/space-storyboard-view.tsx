@@ -1,11 +1,11 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ChangeEvent,
-  type ComponentProps,
-  type MouseEvent,
+  type DragEvent,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -15,22 +15,22 @@ import {
   BookOpenText,
   Check,
   Copy,
-  Edit3,
   Loader2,
   MessageSquareText,
+  Pencil,
   Plus,
   Trash2,
-  UserRound,
   X,
 } from "lucide-react";
 import {
+  MIN_STORYBOARD_SHOT_DURATION,
+  STORYBOARD_MATERIAL_LABELS,
   createStoryboardShot,
   createStoryboardSpeech,
   isStoryboardConfirmed,
+  isStoryboardShotDurationValid,
   normalizeStoryboardOrder,
-  storyboardHasVisibleDialogue,
   storyboardSpeechCount,
-  storyboardSpeechLabel,
   storyboardTotalDuration,
   storyboardVisibleSpeakerIds,
   type StoryboardDocument,
@@ -40,7 +40,11 @@ import {
   type StoryboardSpeech,
   type StoryboardSpeechKind,
 } from "./space-storyboard";
-import { moveOrderedItemById } from "./space-ordered-list";
+import {
+  moveOrderedItemById,
+  orderItemsByIds,
+  sameOrderedIds,
+} from "./space-ordered-list";
 import type { ComposerAssetItem } from "./space-prompt-composer";
 import {
   reconcileCanvasReferenceContent,
@@ -52,7 +56,8 @@ import {
   useCanvasReferenceAdapter,
   type CanvasReferenceAdapter,
 } from "./space-reference-editor";
-import { SequenceCard } from "./space-sequence-card";
+import { StoryboardShotCard } from "./space-storyboard-shot-card";
+import { StoryboardMaterialDialog } from "./space-storyboard-material-dialog";
 import "./space.css";
 
 export type StoryboardSaveStatus = "saved" | "typing" | "saving" | "error";
@@ -96,11 +101,18 @@ export function StoryboardView({
   const [internalDraft, setInternalDraft] = useState(storyboard);
   const [saveStatus, setSaveStatus] = useState<StoryboardSaveStatus>("saved");
   const [editingShotId, setEditingShotId] = useState("");
+  const [editingMaterialId, setEditingMaterialId] = useState("");
   const [draggedShotId, setDraggedShotId] = useState("");
+  const [dragOverShotId, setDragOverShotId] = useState("");
+  const [dragOrder, setDragOrder] = useState<string[]>([]);
   const [dragPlacement, setDragPlacement] = useState<"before" | "after">(
     "before",
   );
   const storyboardRootRef = useRef<HTMLElement>(null);
+  const draggedShotIdRef = useRef("");
+  const dragOrderRef = useRef<string[]>([]);
+  const shotRectsRef = useRef<Map<string, DOMRect>>(new Map());
+  const reorderAnimationsRef = useRef<Map<string, Animation>>(new Map());
   const draftRef = useRef(storyboard);
   const dirtyRef = useRef(false);
   const revisionRef = useRef(0);
@@ -120,6 +132,13 @@ export function StoryboardView({
   const canAutoSave = canEdit && !controlled && Boolean(onSave);
   const referenceAdapter = useCanvasReferenceAdapter(referenceItems);
   const editingShot = draft.shots.find((shot) => shot.id === editingShotId);
+  const editingMaterial = draft.materials.find(
+    (material) => material.id === editingMaterialId,
+  );
+  const visibleShots = useMemo(
+    () => orderItemsByIds(draft.shots, dragOrder, (shot) => shot.id),
+    [draft.shots, dragOrder],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -130,6 +149,65 @@ export function StoryboardView({
       }
     };
   }, []);
+
+  useEffect(
+    () => () => {
+      for (const animation of reorderAnimationsRef.current.values()) {
+        animation.cancel();
+      }
+      reorderAnimationsRef.current.clear();
+    },
+    [],
+  );
+
+  useLayoutEffect(() => {
+    const previousRects = shotRectsRef.current;
+    const root = storyboardRootRef.current;
+    if (!root || previousRects.size === 0) {
+      return;
+    }
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    root
+      .querySelectorAll<HTMLElement>(
+        ".ws-storyboard-card[data-sequence-item-id]",
+      )
+      .forEach((element) => {
+        if (element.classList.contains("is-dragging")) {
+          return;
+        }
+        const itemId = element.dataset.sequenceItemId || "";
+        const previous = previousRects.get(itemId);
+        if (!previous || reduceMotion) {
+          return;
+        }
+        const current = element.getBoundingClientRect();
+        const offsetX = previous.left - current.left;
+        const offsetY = previous.top - current.top;
+        if (Math.abs(offsetX) < 1 && Math.abs(offsetY) < 1) {
+          return;
+        }
+        reorderAnimationsRef.current.get(itemId)?.cancel();
+        const animation = element.animate(
+          [
+            { transform: `translate3d(${offsetX}px, ${offsetY}px, 0)` },
+            { transform: "translate3d(0, 0, 0)" },
+          ],
+          {
+            duration: 190,
+            easing: "cubic-bezier(0.2, 0.75, 0.25, 1)",
+          },
+        );
+        reorderAnimationsRef.current.set(itemId, animation);
+        animation.onfinish = () => {
+          if (reorderAnimationsRef.current.get(itemId) === animation) {
+            reorderAnimationsRef.current.delete(itemId);
+          }
+        };
+      });
+    previousRects.clear();
+  }, [dragOrder]);
 
   useEffect(() => {
     if (externalSignatureRef.current === externalSignature) {
@@ -149,6 +227,12 @@ export function StoryboardView({
       setEditingShotId("");
     }
   }, [editingShot, editingShotId]);
+
+  useEffect(() => {
+    if (editingMaterialId && !editingMaterial) {
+      setEditingMaterialId("");
+    }
+  }, [editingMaterial, editingMaterialId]);
 
   useEffect(() => {
     if (!canAutoSave || !dirtyRef.current || !onSave) {
@@ -212,24 +296,107 @@ export function StoryboardView({
     setSaveStatus("typing");
   };
 
-  const reorderShot = (
-    sourceId: string,
-    targetId: string,
-    placement: "before" | "after",
-  ) => {
-    if (!sourceId || !targetId || sourceId === targetId) {
+  const captureShotRects = () => {
+    const root = storyboardRootRef.current;
+    if (!root) {
       return;
     }
-    updateDraft((current) => {
-      const shots = moveOrderedItemById(
-        current.shots,
-        sourceId,
-        targetId,
-        placement,
-        (shot) => shot.id,
-      );
-      return shots === current.shots ? current : { ...current, shots };
-    });
+    const rects = new Map<string, DOMRect>();
+    root
+      .querySelectorAll<HTMLElement>(
+        ".ws-storyboard-card[data-sequence-item-id]",
+      )
+      .forEach((element) => {
+        const itemId = element.dataset.sequenceItemId || "";
+        if (itemId) {
+          rects.set(itemId, element.getBoundingClientRect());
+        }
+      });
+    shotRectsRef.current = rects;
+  };
+
+  const beginShotDrag = (shotId: string) => {
+    const order = draft.shots.map((shot) => shot.id);
+    draggedShotIdRef.current = shotId;
+    dragOrderRef.current = order;
+    setDraggedShotId(shotId);
+    setDragOverShotId("");
+    setDragOrder(order);
+  };
+
+  const previewShotOrder = (
+    targetId: string,
+    event: DragEvent<HTMLElement>,
+  ) => {
+    const sourceId = draggedShotIdRef.current;
+    const currentOrder = dragOrderRef.current;
+    if (
+      !sourceId ||
+      !targetId ||
+      sourceId === targetId ||
+      !currentOrder.length
+    ) {
+      return;
+    }
+    if (!currentOrder.includes(sourceId) || !currentOrder.includes(targetId)) {
+      return;
+    }
+    const targetRect = event.currentTarget.getBoundingClientRect();
+    const gridRect = event.currentTarget.parentElement?.getBoundingClientRect();
+    const hasMultipleColumns = Boolean(
+      gridRect && targetRect.width * 1.5 < gridRect.width,
+    );
+    const placement = hasMultipleColumns
+      ? event.clientX < targetRect.left + targetRect.width / 2
+        ? "before"
+        : "after"
+      : event.clientY < targetRect.top + targetRect.height / 2
+        ? "before"
+        : "after";
+    const nextOrder = moveOrderedItemById(
+      currentOrder,
+      sourceId,
+      targetId,
+      placement,
+      (itemId) => itemId,
+    );
+    setDragOverShotId(targetId);
+    setDragPlacement(placement);
+    if (sameOrderedIds(currentOrder, nextOrder)) {
+      return;
+    }
+    captureShotRects();
+    dragOrderRef.current = nextOrder;
+    setDragOrder(nextOrder);
+  };
+
+  const resetShotDrag = () => {
+    const currentOrder = dragOrderRef.current;
+    const savedOrder = draft.shots.map((shot) => shot.id);
+    if (currentOrder.length > 0 && !sameOrderedIds(currentOrder, savedOrder)) {
+      captureShotRects();
+    }
+    draggedShotIdRef.current = "";
+    dragOrderRef.current = [];
+    setDraggedShotId("");
+    setDragOverShotId("");
+    setDragOrder([]);
+  };
+
+  const commitShotOrder = () => {
+    const order = dragOrderRef.current;
+    if (order.length > 0) {
+      updateDraft((current) => {
+        const shots = orderItemsByIds(current.shots, order, (shot) => shot.id);
+        return sameOrderedIds(
+          current.shots.map((shot) => shot.id),
+          shots.map((shot) => shot.id),
+        )
+          ? current
+          : { ...current, shots };
+      });
+    }
+    resetShotDrag();
   };
 
   const saveShot = (shot: StoryboardShot) => {
@@ -238,6 +405,16 @@ export function StoryboardView({
       shots: current.shots.map((item) => (item.id === shot.id ? shot : item)),
     }));
     setEditingShotId("");
+  };
+
+  const saveMaterial = (material: StoryboardMaterial) => {
+    updateDraft((current) => ({
+      ...current,
+      materials: current.materials.map((item) =>
+        item.id === material.id ? material : item,
+      ),
+    }));
+    setEditingMaterialId("");
   };
 
   const removeShot = (shotId: string) => {
@@ -270,45 +447,56 @@ export function StoryboardView({
       className={`ws-storyboard ${canEdit ? "is-editable" : "is-readonly"}`}
       aria-label="分镜脚本"
     >
-      <header className="ws-storyboard-head">
-        <div className="ws-storyboard-heading">
+      <header className="ws-storyboard-toolbar">
+        <div className="ws-storyboard-style">
+          <strong>统一视觉风格</strong>
           {canEdit ? (
             <input
-              className="ws-storyboard-title nodrag nopan"
-              value={draft.title}
-              placeholder="分镜脚本标题"
+              className="nodrag nopan"
+              value={draft.style_prompt}
+              placeholder="整部作品保持一致的画面风格"
               disabled={disabled}
               onChange={(event) =>
                 updateDraft((current) => ({
                   ...current,
-                  title: event.target.value,
+                  style_prompt: event.target.value,
                 }))
               }
             />
           ) : (
-            <strong>{draft.title || "分镜脚本"}</strong>
+            <span title={draft.style_prompt}>
+              {draft.style_prompt || "未设置统一视觉风格"}
+            </span>
           )}
-          <span className={`ws-storyboard-workflow is-${draft.workflow.status}`}>
-            {confirmed ? "已确认" : "草稿"}
-          </span>
         </div>
-        <div className="ws-storyboard-head-end">
+        <div className="ws-storyboard-toolbar-end">
           {showMetrics || (canEdit && showSaveStatus) ? (
-            <div className="ws-storyboard-head-meta">
+            <div className="ws-storyboard-toolbar-meta">
               {showMetrics ? (
                 <span>
-                  {draft.shots.length} 个镜头 · {storyboardTotalDuration(draft)} 秒
-                  {storyboardSpeechCount(draft) > 0
-                    ? ` · ${storyboardSpeechCount(draft)} 条语音`
-                    : ""}
+                  {draft.shots.length} 个镜头 · {storyboardTotalDuration(draft)}{" "}
+                  秒 · {storyboardSpeechCount(draft)} 条语音
                 </span>
               ) : null}
               {canEdit && showSaveStatus ? (
                 <StoryboardSaveState
-                  status={controlled ? externalSaveStatus || "saved" : saveStatus}
+                  status={
+                    controlled ? externalSaveStatus || "saved" : saveStatus
+                  }
                 />
               ) : null}
             </div>
+          ) : null}
+          {canEdit ? (
+            <button
+              type="button"
+              className="ws-storyboard-command nodrag nopan"
+              disabled={disabled}
+              onClick={addShot}
+            >
+              <Plus size={13} />
+              <span>添加镜头</span>
+            </button>
           ) : null}
           {confirmed && onCreateRevision ? (
             <button
@@ -328,7 +516,9 @@ export function StoryboardView({
             <button
               type="button"
               className="ws-storyboard-command is-primary"
-              disabled={disabled || Boolean(workflowAction) || !draft.shots.length}
+              disabled={
+                disabled || Boolean(workflowAction) || !draft.shots.length
+              }
               onClick={() => void onConfirm(draft)}
             >
               {workflowAction === "confirming" ? (
@@ -342,9 +532,17 @@ export function StoryboardView({
         </div>
       </header>
 
+      {draft.materials.length ? (
+        <StoryboardMaterialSettings
+          materials={draft.materials}
+          editable={canEdit}
+          onOpen={setEditingMaterialId}
+        />
+      ) : null}
+
       <div className="ws-storyboard-grid nowheel">
         {draft.shots.length ? (
-          draft.shots.map((shot, index) => (
+          visibleShots.map((shot, index) => (
             <StoryboardShotCard
               key={shot.id}
               shot={shot}
@@ -352,32 +550,20 @@ export function StoryboardView({
               storyboard={draft}
               selected={editingShotId === shot.id}
               editable={canEdit}
+              dragging={draggedShotId === shot.id}
+              dropPlacement={
+                dragOverShotId === shot.id && draggedShotId !== shot.id
+                  ? dragPlacement
+                  : undefined
+              }
               lipSyncEnabled={lipSyncEnabled}
               onOpen={() => setEditingShotId(shot.id)}
               onDuplicate={() => duplicateShot(shot)}
               onRemove={() => removeShot(shot.id)}
-              onDragStart={() => setDraggedShotId(shot.id)}
-              onDragOver={(event) => {
-                event.preventDefault();
-                const bounds = event.currentTarget.getBoundingClientRect();
-                const horizontal =
-                  Math.abs(event.clientY - (bounds.top + bounds.height / 2)) <
-                  bounds.height / 3;
-                setDragPlacement(
-                  horizontal
-                    ? event.clientX < bounds.left + bounds.width / 2
-                      ? "before"
-                      : "after"
-                    : event.clientY < bounds.top + bounds.height / 2
-                      ? "before"
-                      : "after",
-                );
-              }}
-              onDrop={() => {
-                reorderShot(draggedShotId, shot.id, dragPlacement);
-                setDraggedShotId("");
-              }}
-              onDragEnd={() => setDraggedShotId("")}
+              onDragStart={() => beginShotDrag(shot.id)}
+              onDragOver={(event) => previewShotOrder(shot.id, event)}
+              onDrop={commitShotOrder}
+              onDragEnd={resetShotDrag}
             />
           ))
         ) : (
@@ -389,26 +575,12 @@ export function StoryboardView({
         )}
       </div>
 
-      {canEdit ? (
-        <footer className="ws-storyboard-footer">
-          <button
-            type="button"
-            className="nodrag nopan"
-            disabled={disabled}
-            onClick={addShot}
-          >
-            <Plus size={14} />
-            <span>添加镜头</span>
-          </button>
-        </footer>
-      ) : null}
-
       {editingShot ? (
         <StoryboardShotDialog
           key={editingShot.id}
           shot={editingShot}
           index={draft.shots.findIndex((shot) => shot.id === editingShot.id)}
-          characters={draft.materials?.characters || []}
+          materials={draft.materials}
           lipSyncEnabled={lipSyncEnabled}
           readonly={!canEdit}
           referenceAdapter={referenceAdapter}
@@ -417,160 +589,106 @@ export function StoryboardView({
               ".wb-detail-backdrop, .ws-page",
             ) || null
           }
+          onEditMaterial={setEditingMaterialId}
           onSave={saveShot}
           onClose={() => setEditingShotId("")}
+        />
+      ) : null}
+
+      {editingMaterial ? (
+        <StoryboardMaterialDialog
+          key={editingMaterial.id}
+          material={editingMaterial}
+          readonly={!canEdit}
+          portalContainer={
+            storyboardRootRef.current?.closest(
+              ".wb-detail-backdrop, .ws-page",
+            ) || null
+          }
+          onSave={saveMaterial}
+          onClose={() => setEditingMaterialId("")}
         />
       ) : null}
     </section>
   );
 }
 
-function StoryboardShotCard({
-  shot,
-  index,
-  storyboard,
-  selected,
+function StoryboardMaterialSettings({
+  materials,
   editable,
-  lipSyncEnabled,
   onOpen,
-  onDuplicate,
-  onRemove,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
 }: {
-  shot: StoryboardShot;
-  index: number;
-  storyboard: StoryboardDocument;
-  selected: boolean;
+  materials: StoryboardMaterial[];
   editable: boolean;
-  lipSyncEnabled: boolean;
-  onOpen: () => void;
-  onDuplicate: () => void;
-  onRemove: () => void;
-  onDragStart: () => void;
-  onDragOver: ComponentProps<typeof SequenceCard>["onDragOver"];
-  onDrop: () => void;
-  onDragEnd: () => void;
+  onOpen: (materialId: string) => void;
 }) {
-  const speech = shot.speech.filter((item) => item.text.trim());
-  const primarySpeech = speech[0];
-  const characterNames = new Map(
-    (storyboard.materials?.characters || []).map((item) => [item.id, item.name]),
-  );
-  const labels = [...new Set(speech.map(storyboardSpeechLabel))];
-  const lipSyncCandidate = lipSyncEnabled && storyboardHasVisibleDialogue(shot);
   return (
-    <SequenceCard
-      itemId={shot.id}
-      index={index}
-      durationLabel={`${shot.duration}秒`}
-      className="ws-storyboard-card"
-      dragClassName="ws-storyboard-card-drag"
-      selected={selected}
-      readonly={!editable}
-      ariaLabel={`镜头 ${index + 1}`}
-      onSelect={onOpen}
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      onDragEnd={onDragEnd}
-      headerActions={
-        <span className="ws-storyboard-card-count">
-          {speech.length ? `${speech.length} 条语音` : "无语音"}
-        </span>
-      }
-    >
-      <div className="ws-storyboard-card-preview">
-        <span>镜头 {String(index + 1).padStart(2, "0")}</span>
-        <p>
-          首帧：{shot.visual || "等待补充"}；尾帧：
-          {shot.end_visual || "等待补充"}
-        </p>
+    <section className="ws-storyboard-material-settings" aria-label="素材设定">
+      <strong>素材设定</strong>
+      <div>
+        {(["character", "scene", "prop"] as const).map((type) => {
+          const typedMaterials = materials.filter(
+            (material) => material.type === type,
+          );
+          if (!typedMaterials.length) {
+            return null;
+          }
+          return (
+            <div className="ws-storyboard-material-setting-group" key={type}>
+              <span>{STORYBOARD_MATERIAL_LABELS[type]}</span>
+              {typedMaterials.map((material) => (
+                <button
+                  type="button"
+                  className="nodrag nopan"
+                  key={material.id}
+                  title={`${editable ? "编辑" : "查看"}${STORYBOARD_MATERIAL_LABELS[type]}提示词：${material.name}`}
+                  onClick={() => onOpen(material.id)}
+                >
+                  <span>{material.name}</span>
+                  {editable ? <Pencil size={11} /> : null}
+                </button>
+              ))}
+            </div>
+          );
+        })}
       </div>
-      <div className="ws-storyboard-card-body">
-        <div className="ws-storyboard-card-tags">
-          {labels.length ? (
-            labels.map((label) => <span key={label}>{label}</span>)
-          ) : (
-            <span>无语音</span>
-          )}
-          {lipSyncCandidate ? <span className="is-lip-sync">口型候选</span> : null}
-        </div>
-        <p className="ws-storyboard-card-camera">
-          {shot.camera_movement || "未设置运镜"}
-        </p>
-        {primarySpeech ? (
-          <p className="ws-storyboard-card-speech">
-            {primarySpeech.kind === "dialogue" ? (
-              <UserRound size={12} />
-            ) : (
-              <BookOpenText size={12} />
-            )}
-            <strong>
-              {primarySpeech.kind === "dialogue"
-                ? characterNames.get(primarySpeech.character_id || "") || "待选角色"
-                : "旁白"}
-            </strong>
-            <span>{primarySpeech.text}</span>
-          </p>
-        ) : (
-          <p className="ws-storyboard-card-speech is-empty">
-            <MessageSquareText size={12} />
-            当前镜头没有对白或旁白
-          </p>
-        )}
-      </div>
-      <footer>
-        <button type="button" title={editable ? "编辑镜头" : "查看镜头"} onClick={stopAnd(onOpen)}>
-          <Edit3 size={13} />
-          {editable ? "编辑" : "查看"}
-        </button>
-        {editable ? (
-          <>
-            <button type="button" title="复制镜头" onClick={stopAnd(onDuplicate)}>
-              <Copy size={13} />
-              复制
-            </button>
-            <button
-              type="button"
-              className="is-danger"
-              title="删除镜头"
-              onClick={stopAnd(onRemove)}
-            >
-              <Trash2 size={13} />
-              删除
-            </button>
-          </>
-        ) : null}
-      </footer>
-    </SequenceCard>
+    </section>
   );
 }
 
 function StoryboardShotDialog({
   shot,
   index,
-  characters,
+  materials,
   lipSyncEnabled,
   readonly,
   referenceAdapter,
   portalContainer,
+  onEditMaterial,
   onSave,
   onClose,
 }: {
   shot: StoryboardShot;
   index: number;
-  characters: StoryboardMaterial[];
+  materials: StoryboardMaterial[];
   lipSyncEnabled: boolean;
   readonly: boolean;
   referenceAdapter: CanvasReferenceAdapter;
   portalContainer: Element | null;
+  onEditMaterial: (materialId: string) => void;
   onSave: (shot: StoryboardShot) => void;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState(() => cloneStoryboardShot(shot));
+  const characters = materials.filter(
+    (material) => material.type === "character",
+  );
+  const speechCharacterIDs = new Set(
+    draft.speech
+      .filter((speech) => speech.kind === "dialogue")
+      .map((speech) => speech.character_id || "")
+      .filter(Boolean),
+  );
   const visibleSpeakers = storyboardVisibleSpeakerIds(draft);
   const invalidStartTimes = draft.speech.some(
     (speech) => speech.start_time < 0 || speech.start_time >= draft.duration,
@@ -586,16 +704,43 @@ function StoryboardShotDialog({
     }));
   };
   const updateSpeech = (speechId: string, patch: Partial<StoryboardSpeech>) => {
-    setDraft((current) => ({
-      ...current,
-      speech: current.speech.map((speech) =>
-        speech.id === speechId ? normalizeSpeechPatch(speech, patch) : speech,
-      ),
-    }));
+    setDraft((current) => {
+      const speech = current.speech.map((item) =>
+        item.id === speechId ? normalizeSpeechPatch(item, patch) : item,
+      );
+      const characterIDs = speech
+        .filter((item) => item.kind === "dialogue")
+        .map((item) => item.character_id || "")
+        .filter(Boolean);
+      return {
+        ...current,
+        material_ids: [...new Set([...current.material_ids, ...characterIDs])],
+        speech,
+      };
+    });
+  };
+  const toggleMaterial = (materialID: string) => {
+    setDraft((current) => {
+      if (current.material_ids.includes(materialID)) {
+        if (speechCharacterIDs.has(materialID)) {
+          return current;
+        }
+        return {
+          ...current,
+          material_ids: current.material_ids.filter((id) => id !== materialID),
+        };
+      }
+      return {
+        ...current,
+        material_ids: [...current.material_ids, materialID],
+      };
+    });
   };
   const moveSpeech = (speechId: string, offset: number) => {
     setDraft((current) => {
-      const index = current.speech.findIndex((speech) => speech.id === speechId);
+      const index = current.speech.findIndex(
+        (speech) => speech.id === speechId,
+      );
       const target = index + offset;
       if (index < 0 || target < 0 || target >= current.speech.length) {
         return current;
@@ -617,10 +762,20 @@ function StoryboardShotDialog({
       >
         <header>
           <div>
-            <strong>{readonly ? "查看镜头" : "编辑镜头"} {String(index + 1).padStart(2, "0")}</strong>
-            <span>{readonly ? "当前分镜已经确认" : "修改会保存到当前分镜草稿"}</span>
+            <strong>
+              {readonly ? "查看镜头" : "编辑镜头"}{" "}
+              {String(index + 1).padStart(2, "0")}
+            </strong>
+            <span>
+              {readonly ? "当前分镜已经确认" : "修改会保存到当前分镜草稿"}
+            </span>
           </div>
-          <button type="button" title="关闭" aria-label="关闭" onClick={onClose}>
+          <button
+            type="button"
+            title="关闭"
+            aria-label="关闭"
+            onClick={onClose}
+          >
             <X size={18} />
           </button>
         </header>
@@ -629,70 +784,152 @@ function StoryboardShotDialog({
           <section className="ws-storyboard-shot-section">
             <div className="ws-storyboard-shot-section-head">
               <strong>镜头内容</strong>
-              <label>
-                时长
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={draft.duration}
-                  disabled={readonly}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      duration: positiveDuration(event, current.duration),
-                    }))
-                  }
-                />
-                秒
-              </label>
+              <div>
+                <label className="ws-storyboard-continuity-input">
+                  <input
+                    type="checkbox"
+                    checked={index > 0 && draft.continue_previous}
+                    disabled={readonly || index === 0}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        continue_previous: index > 0 && event.target.checked,
+                      }))
+                    }
+                  />
+                  承接上一镜头
+                </label>
+                <label>
+                  时长
+                  <input
+                    type="number"
+                    min={MIN_STORYBOARD_SHOT_DURATION}
+                    step={1}
+                    value={draft.duration}
+                    disabled={readonly}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        duration: storyboardDurationFromInput(
+                          event,
+                          current.duration,
+                        ),
+                      }))
+                    }
+                  />
+                  秒
+                </label>
+              </div>
             </div>
-            <div className="ws-storyboard-shot-field-row">
+            <div className="ws-storyboard-shot-field-row is-single">
               <StoryboardDialogField
-                label="首帧画面"
-                value={draft.visual}
-                content={draft.reference_contents?.visual}
-                placeholder="描述镜头开始时的场景、人物、动作和构图"
+                label="镜头描述"
+                value={draft.description}
+                content={draft.reference_contents?.description}
+                placeholder="描述开场状态、核心内容或动作，以及结束状态"
                 readonly={readonly}
                 referenceAdapter={referenceAdapter}
                 onChange={(value, content) =>
-                  updateField("visual", value, content)
-                }
-              />
-              <StoryboardDialogField
-                label="尾帧画面"
-                value={draft.end_visual}
-                content={draft.reference_contents?.end_visual}
-                placeholder="描述镜头结束时的场景、人物、动作和构图"
-                readonly={readonly}
-                referenceAdapter={referenceAdapter}
-                onChange={(value, content) =>
-                  updateField("end_visual", value, content)
+                  updateField("description", value, content)
                 }
               />
             </div>
             <div className="ws-storyboard-shot-field-row">
               <StoryboardDialogField
-                label="运镜"
-                value={draft.camera_movement}
-                content={draft.reference_contents?.camera_movement}
+                label="镜头语言"
+                value={draft.camera_instruction}
+                content={draft.reference_contents?.camera_instruction}
                 placeholder="景别、机位和运动方式"
                 readonly={readonly}
                 referenceAdapter={referenceAdapter}
                 onChange={(value, content) =>
-                  updateField("camera_movement", value, content)
+                  updateField("camera_instruction", value, content)
                 }
               />
               <StoryboardDialogField
                 label="视频提示词"
-                value={draft.prompt}
-                content={draft.reference_contents?.prompt}
+                value={draft.video_prompt}
+                content={draft.reference_contents?.video_prompt}
                 placeholder="完整描述动作、运镜、光线与风格"
                 readonly={readonly}
                 referenceAdapter={referenceAdapter}
-                onChange={(value, content) => updateField("prompt", value, content)}
+                onChange={(value, content) =>
+                  updateField("video_prompt", value, content)
+                }
               />
             </div>
+          </section>
+
+          <section className="ws-storyboard-shot-section">
+            <div className="ws-storyboard-shot-section-head">
+              <div>
+                <strong>关联素材</strong>
+                <span>{draft.material_ids.length} 个素材</span>
+              </div>
+            </div>
+            {materials.length ? (
+              <div className="ws-storyboard-material-groups">
+                {(["character", "scene", "prop"] as const).map((type) => {
+                  const typedMaterials = materials.filter(
+                    (material) => material.type === type,
+                  );
+                  if (!typedMaterials.length) {
+                    return null;
+                  }
+                  return (
+                    <fieldset key={type}>
+                      <legend>{STORYBOARD_MATERIAL_LABELS[type]}</legend>
+                      <div>
+                        {typedMaterials.map((material) => {
+                          const selected = draft.material_ids.includes(
+                            material.id,
+                          );
+                          const required = speechCharacterIDs.has(material.id);
+                          return (
+                            <div
+                              className="ws-storyboard-material-option"
+                              key={material.id}
+                            >
+                              <label
+                                title={
+                                  selected && required
+                                    ? "该角色已用于对白，不能取消关联"
+                                    : selected
+                                      ? "取消关联"
+                                      : "关联素材"
+                                }
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selected}
+                                  disabled={readonly || (selected && required)}
+                                  onChange={() => toggleMaterial(material.id)}
+                                />
+                                <span className="sr-only">
+                                  关联 {material.name}
+                                </span>
+                              </label>
+                              <button
+                                type="button"
+                                title={`${readonly ? "查看" : "编辑"}${STORYBOARD_MATERIAL_LABELS[type]}提示词：${material.name}`}
+                                onClick={() => onEditMaterial(material.id)}
+                              >
+                                <span>{material.name}</span>
+                                {!readonly ? <Pencil size={11} /> : null}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="ws-storyboard-material-empty">
+                当前脚本没有角色、场景或道具素材
+              </div>
+            )}
           </section>
 
           <section className="ws-storyboard-shot-section">
@@ -973,10 +1210,9 @@ function withStoryboardReferenceContents(
 }
 
 const STORYBOARD_REFERENCE_FIELDS: StoryboardReferenceField[] = [
-  "visual",
-  "end_visual",
-  "camera_movement",
-  "prompt",
+  "description",
+  "camera_instruction",
+  "video_prompt",
 ];
 
 function storyboardReferenceFieldPatch(
@@ -1058,12 +1294,12 @@ function normalizeSpeechPatch(
   return next;
 }
 
-function positiveDuration(
+function storyboardDurationFromInput(
   event: ChangeEvent<HTMLInputElement>,
   fallback: number,
 ) {
-  const value = Number.parseInt(event.target.value, 10);
-  return Number.isFinite(value) && value > 0 ? value : fallback;
+  const value = Number(event.target.value);
+  return isStoryboardShotDurationValid(value) ? value : fallback;
 }
 
 function nonNegativeTime(event: ChangeEvent<HTMLInputElement>) {
@@ -1082,7 +1318,10 @@ function createUniqueShot(shots: StoryboardShot[]) {
   return shot;
 }
 
-function duplicateStoryboardShot(shots: StoryboardShot[], shot: StoryboardShot) {
+function duplicateStoryboardShot(
+  shots: StoryboardShot[],
+  shot: StoryboardShot,
+) {
   const duplicate = createUniqueShot(shots);
   return {
     ...cloneStoryboardShot(shot),
@@ -1098,14 +1337,8 @@ function duplicateStoryboardShot(shots: StoryboardShot[], shot: StoryboardShot) 
 function cloneStoryboardShot(shot: StoryboardShot): StoryboardShot {
   return {
     ...shot,
+    material_ids: [...shot.material_ids],
     speech: shot.speech.map((speech) => ({ ...speech })),
     reference_contents: { ...(shot.reference_contents || {}) },
-  };
-}
-
-function stopAnd(action: () => void) {
-  return (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    action();
   };
 }

@@ -24,12 +24,7 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 	name := FunctionName("power_", power.Key)
 	countPlan := buildMediaCountPlan(power, config.Params)
 	seriesPlan := buildMediaSeriesPlan(power, config.Params, references)
-	toolReferences := references
-	if !isMediaPower(power) {
-		toolReferences = nil
-	} else {
-		toolReferences = supportedMediaReferences(references, config.Params)
-	}
+	toolReferences := supportedMediaReferences(references, config.Params)
 	referenceStore := newMediaReferenceStore(toolReferences)
 	prepareCall := func(arguments map[string]any) (int, map[string]any, error) {
 		currentReferences := referenceStore.Snapshot()

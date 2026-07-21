@@ -7,15 +7,17 @@ import (
 	"strings"
 	"time"
 
+	botmodel "github.com/dever-package/bot/model/energon"
 	assetservice "github.com/dever-package/bot/service/asset"
 )
 
 const (
 	storyboardType            = "storyboard"
-	storyboardVersion         = 2
+	storyboardVersion         = botmodel.StoryboardVersion
 	storyboardWorkflowDraft   = "draft"
 	storyboardWorkflowConfirm = "confirmed"
 	storyboardMaxSearchDepth  = 12
+	storyboardDefaultAspect   = "16:9"
 )
 
 var storyboardWrapperKeys = [...]string{
@@ -130,6 +132,9 @@ func (s Service) CreateStoryboardRevision(ctx context.Context, projectID uint64,
 		if storyboardStatus(document) != storyboardWorkflowConfirm {
 			return nil, fmt.Errorf("只有已确认分镜才能创建修订稿")
 		}
+		if err := validateStoryboard(document); err != nil {
+			return nil, err
+		}
 		document["workflow"] = map[string]any{
 			"status":       storyboardWorkflowDraft,
 			"confirmed_at": "",
@@ -175,7 +180,19 @@ func (s Service) editableAssetVersionContent(ctx context.Context, projectID uint
 	if !ok {
 		return nil, fmt.Errorf("分镜版本内容格式无效")
 	}
-	incoming["version"] = storyboardVersion
+	if version, ok := storyboardNumber(incoming["version"]); !ok || int(version) != storyboardVersion {
+		return nil, fmt.Errorf("分镜版本必须为 %d", storyboardVersion)
+	}
+	visualMode := botmodel.NormalizeStoryboardVisualMode(storyboardText(incoming["visual_mode"]))
+	if !botmodel.IsStoryboardVisualMode(visualMode) {
+		return nil, fmt.Errorf("分镜视觉模式必须是 photoreal 或 stylized")
+	}
+	aspectRatio, ok := storyboardAspectRatio(incoming["aspect_ratio"])
+	if !ok {
+		return nil, fmt.Errorf("分镜画幅必须是 16:9、9:16、1:1、4:3、3:4 或 21:9")
+	}
+	incoming["visual_mode"] = visualMode
+	incoming["aspect_ratio"] = aspectRatio
 	incoming["workflow"] = map[string]any{
 		"status":       storyboardWorkflowDraft,
 		"confirmed_at": "",
@@ -210,7 +227,7 @@ func findStoryboardDocument(value any, depth int) (map[string]any, bool) {
 	if !ok {
 		return nil, false
 	}
-	if strings.ToLower(strings.TrimSpace(fmt.Sprint(document["type"]))) == storyboardType {
+	if strings.ToLower(storyboardText(document["type"])) == storyboardType {
 		return cloneStoryboardDocument(document)
 	}
 	for _, key := range storyboardWrapperKeys {
@@ -239,7 +256,7 @@ func cloneStoryboardDocument(document map[string]any) (map[string]any, bool) {
 
 func storyboardStatus(document map[string]any) string {
 	workflow, _ := document["workflow"].(map[string]any)
-	if strings.ToLower(strings.TrimSpace(fmt.Sprint(workflow["status"]))) == storyboardWorkflowConfirm {
+	if strings.ToLower(storyboardText(workflow["status"])) == storyboardWorkflowConfirm {
 		return storyboardWorkflowConfirm
 	}
 	return storyboardWorkflowDraft
@@ -249,13 +266,29 @@ func validateStoryboard(document map[string]any) error {
 	if version, ok := storyboardNumber(document["version"]); !ok || int(version) != storyboardVersion {
 		return fmt.Errorf("分镜版本必须为 %d", storyboardVersion)
 	}
+	if storyboardText(document["title"]) == "" {
+		return fmt.Errorf("分镜标题不能为空")
+	}
+	if storyboardText(document["style_prompt"]) == "" {
+		return fmt.Errorf("分镜统一视觉风格不能为空")
+	}
+	visualMode := botmodel.NormalizeStoryboardVisualMode(storyboardText(document["visual_mode"]))
+	if !botmodel.IsStoryboardVisualMode(visualMode) {
+		return fmt.Errorf("分镜视觉模式必须是 photoreal 或 stylized")
+	}
+	document["visual_mode"] = visualMode
+	aspectRatio, ok := storyboardAspectRatio(document["aspect_ratio"])
+	if !ok {
+		return fmt.Errorf("分镜画幅必须是 16:9、9:16、1:1、4:3、3:4 或 21:9")
+	}
+	document["aspect_ratio"] = aspectRatio
+	materialTypes, err := storyboardMaterialTypes(document["materials"])
+	if err != nil {
+		return err
+	}
 	shots, ok := document["shots"].([]any)
 	if !ok || len(shots) == 0 {
 		return fmt.Errorf("分镜至少需要一个镜头")
-	}
-	characterShots, err := storyboardCharacterShots(document["materials"])
-	if err != nil {
-		return err
 	}
 	shotIDs := map[string]struct{}{}
 	speechIDs := map[string]struct{}{}
@@ -264,7 +297,7 @@ func validateStoryboard(document map[string]any) error {
 		if !ok {
 			return fmt.Errorf("镜头 %d 格式无效", shotIndex+1)
 		}
-		shotID := strings.TrimSpace(fmt.Sprint(shot["id"]))
+		shotID := storyboardText(shot["id"])
 		if shotID == "" {
 			return fmt.Errorf("镜头 %d 缺少稳定 ID", shotIndex+1)
 		}
@@ -272,52 +305,106 @@ func validateStoryboard(document map[string]any) error {
 			return fmt.Errorf("镜头 ID %s 重复", shotID)
 		}
 		shotIDs[shotID] = struct{}{}
+		order, ok := storyboardNumber(shot["order"])
+		if !ok || order != float64(shotIndex+1) {
+			return fmt.Errorf("镜头 %d 排序无效", shotIndex+1)
+		}
 		duration, ok := storyboardNumber(shot["duration"])
-		if !ok || duration <= 0 {
-			return fmt.Errorf("镜头 %d 时长必须大于 0", shotIndex+1)
+		if !ok || !botmodel.IsStoryboardShotDurationValid(duration) {
+			return fmt.Errorf("镜头 %d 时长必须是不小于 %d 秒的整数", shotIndex+1, botmodel.StoryboardMinShotDuration)
 		}
-		if strings.TrimSpace(fmt.Sprint(shot["visual"])) == "" {
-			return fmt.Errorf("镜头 %d 缺少首帧画面描述", shotIndex+1)
+		if storyboardText(shot["description"]) == "" {
+			return fmt.Errorf("镜头 %d 缺少镜头描述", shotIndex+1)
 		}
-		if strings.TrimSpace(fmt.Sprint(shot["end_visual"])) == "" {
-			return fmt.Errorf("镜头 %d 缺少尾帧画面描述", shotIndex+1)
+		if _, ok := shot["camera_instruction"].(string); !ok {
+			return fmt.Errorf("镜头 %d 的镜头语言格式无效", shotIndex+1)
 		}
-		if strings.TrimSpace(fmt.Sprint(shot["prompt"])) == "" {
+		if storyboardText(shot["video_prompt"]) == "" {
 			return fmt.Errorf("镜头 %d 缺少视频提示词", shotIndex+1)
 		}
-		if err := validateStoryboardSpeech(shot, shotIndex, shotID, duration, speechIDs, characterShots); err != nil {
+		continuePrevious, ok := shot["continue_previous"].(bool)
+		if !ok {
+			return fmt.Errorf("镜头 %d 的连续性配置无效", shotIndex+1)
+		}
+		if shotIndex == 0 && continuePrevious {
+			return fmt.Errorf("第一个镜头不能承接上一镜头")
+		}
+		materialIDs, err := storyboardShotMaterialIDs(shot["material_ids"], shotIndex, materialTypes)
+		if err != nil {
+			return err
+		}
+		if err := validateStoryboardSpeech(shot, shotIndex, duration, speechIDs, materialTypes, materialIDs); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func storyboardCharacterShots(value any) (map[string]map[string]struct{}, error) {
-	materials, ok := value.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("分镜缺少素材清单")
+func storyboardAspectRatio(value any) (string, bool) {
+	text := storyboardText(value)
+	if text == "" {
+		return storyboardDefaultAspect, true
 	}
-	characters, ok := materials["characters"].([]any)
-	if !ok {
-		return nil, fmt.Errorf("分镜角色清单格式无效")
+	switch text {
+	case "16:9", "9:16", "1:1", "4:3", "3:4", "21:9":
+		return text, true
+	default:
+		return "", false
 	}
-	result := make(map[string]map[string]struct{}, len(characters))
-	for index, value := range characters {
-		character, ok := value.(map[string]any)
+}
+
+func storyboardMaterialTypes(value any) (map[string]string, error) {
+	materials, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("分镜素材清单格式无效")
+	}
+	result := make(map[string]string, len(materials))
+	for index, value := range materials {
+		material, ok := value.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("角色 %d 格式无效", index+1)
+			return nil, fmt.Errorf("素材 %d 格式无效", index+1)
 		}
-		id := strings.TrimSpace(fmt.Sprint(character["id"]))
+		id := storyboardText(material["id"])
 		if id == "" {
-			return nil, fmt.Errorf("角色 %d 缺少稳定 ID", index+1)
+			return nil, fmt.Errorf("素材 %d 缺少稳定 ID", index+1)
 		}
-		shots := map[string]struct{}{}
-		if references, ok := character["shot_ids"].([]any); ok {
-			for _, reference := range references {
-				shots[strings.TrimSpace(fmt.Sprint(reference))] = struct{}{}
-			}
+		if _, exists := result[id]; exists {
+			return nil, fmt.Errorf("素材 ID %s 重复", id)
 		}
-		result[id] = shots
+		materialType := strings.ToLower(storyboardText(material["type"]))
+		if materialType != "character" && materialType != "scene" && materialType != "prop" {
+			return nil, fmt.Errorf("素材 %d 类型无效", index+1)
+		}
+		if storyboardText(material["name"]) == "" {
+			return nil, fmt.Errorf("素材 %d 名称不能为空", index+1)
+		}
+		if storyboardText(material["prompt"]) == "" {
+			return nil, fmt.Errorf("素材 %d 提示词不能为空", index+1)
+		}
+		result[id] = materialType
+	}
+	return result, nil
+}
+
+func storyboardShotMaterialIDs(value any, shotIndex int, materialTypes map[string]string) (map[string]struct{}, error) {
+	items, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("镜头 %d 的素材引用必须是数组", shotIndex+1)
+	}
+	result := make(map[string]struct{}, len(items))
+	for materialIndex, value := range items {
+		id, ok := value.(string)
+		id = strings.TrimSpace(id)
+		if !ok || id == "" {
+			return nil, fmt.Errorf("镜头 %d 的素材引用 %d 格式无效", shotIndex+1, materialIndex+1)
+		}
+		if _, exists := materialTypes[id]; !exists {
+			return nil, fmt.Errorf("镜头 %d 引用了不存在的素材 %s", shotIndex+1, id)
+		}
+		if _, exists := result[id]; exists {
+			return nil, fmt.Errorf("镜头 %d 重复引用素材 %s", shotIndex+1, id)
+		}
+		result[id] = struct{}{}
 	}
 	return result, nil
 }
@@ -325,10 +412,10 @@ func storyboardCharacterShots(value any) (map[string]map[string]struct{}, error)
 func validateStoryboardSpeech(
 	shot map[string]any,
 	shotIndex int,
-	shotID string,
 	duration float64,
 	usedIDs map[string]struct{},
-	characterShots map[string]map[string]struct{},
+	materialTypes map[string]string,
+	shotMaterialIDs map[string]struct{},
 ) error {
 	speech, ok := shot["speech"].([]any)
 	if !ok {
@@ -340,7 +427,7 @@ func validateStoryboardSpeech(
 		if !ok {
 			return fmt.Errorf("镜头 %d 的语音 %d 格式无效", shotIndex+1, speechIndex+1)
 		}
-		id := strings.TrimSpace(fmt.Sprint(item["id"]))
+		id := storyboardText(item["id"])
 		if id == "" {
 			return fmt.Errorf("镜头 %d 的语音 %d 缺少稳定 ID", shotIndex+1, speechIndex+1)
 		}
@@ -348,11 +435,11 @@ func validateStoryboardSpeech(
 			return fmt.Errorf("语音 ID %s 重复", id)
 		}
 		usedIDs[id] = struct{}{}
-		kind := strings.ToLower(strings.TrimSpace(fmt.Sprint(item["kind"])))
+		kind := strings.ToLower(storyboardText(item["kind"]))
 		if kind != "dialogue" && kind != "narration" {
 			return fmt.Errorf("镜头 %d 的语音 %d 类型无效", shotIndex+1, speechIndex+1)
 		}
-		if strings.TrimSpace(fmt.Sprint(item["text"])) == "" {
+		if storyboardText(item["text"]) == "" {
 			return fmt.Errorf("镜头 %d 的语音 %d 文本不能为空", shotIndex+1, speechIndex+1)
 		}
 		startTime, ok := storyboardNumber(item["start_time"])
@@ -362,20 +449,19 @@ func validateStoryboardSpeech(
 		if kind != "dialogue" {
 			continue
 		}
-		characterID := strings.TrimSpace(fmt.Sprint(item["character_id"]))
-		characterShotIDs, exists := characterShots[characterID]
-		if !exists {
+		characterID := storyboardText(item["character_id"])
+		if materialTypes[characterID] != "character" {
 			return fmt.Errorf("镜头 %d 的语音 %d 未选择有效角色", shotIndex+1, speechIndex+1)
 		}
-		speakerMode := strings.ToLower(strings.TrimSpace(fmt.Sprint(item["speaker_mode"])))
+		if _, exists := shotMaterialIDs[characterID]; !exists {
+			return fmt.Errorf("镜头 %d 的语音 %d 角色未包含在镜头素材中", shotIndex+1, speechIndex+1)
+		}
+		speakerMode := strings.ToLower(storyboardText(item["speaker_mode"]))
 		if speakerMode != "visible" && speakerMode != "offscreen" {
 			return fmt.Errorf("镜头 %d 的语音 %d 说话方式无效", shotIndex+1, speechIndex+1)
 		}
 		if speakerMode != "visible" {
 			continue
-		}
-		if _, exists := characterShotIDs[shotID]; !exists {
-			return fmt.Errorf("镜头 %d 的出镜说话角色未引用当前镜头", shotIndex+1)
 		}
 		if visibleCharacterID != "" && visibleCharacterID != characterID {
 			return fmt.Errorf("镜头 %d 最多只能有一个出镜说话角色", shotIndex+1)
@@ -383,6 +469,14 @@ func validateStoryboardSpeech(
 		visibleCharacterID = characterID
 	}
 	return nil
+}
+
+func storyboardText(value any) string {
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(text)
 }
 
 func storyboardNumber(value any) (float64, bool) {

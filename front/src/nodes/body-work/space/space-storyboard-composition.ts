@@ -1,9 +1,11 @@
 import {
   storyboardHasVisibleDialogue,
+  type StoryboardAspectRatio,
   type StoryboardDocument,
   type StoryboardShot,
   type StoryboardSpeech,
 } from "./space-storyboard";
+import { orderItemsByIds } from "./space-ordered-list";
 import type { SpaceCanvasNode } from "./types";
 import type {
   CanvasVideoComposition,
@@ -22,21 +24,40 @@ export function storyboardVideoComposition(input: {
   const currentClips = new Map(
     (input.current?.clips || []).map((clip) => [clip.id, clip]),
   );
+  const clips = input.storyboard.shots.map((shot, index) =>
+    storyboardVideoClip({
+      ...input,
+      shot,
+      index,
+      current: currentClips.get(shot.id),
+    }),
+  );
   return {
     version: 2,
-    clips: input.storyboard.shots.map((shot, index) =>
-      storyboardVideoClip({
-        ...input,
-        shot,
-        index,
-        current: currentClips.get(shot.id),
-      }),
+    clips: orderItemsByIds(
+      clips,
+      (input.current?.clips || []).map((clip) => clip.id),
+      (clip) => clip.id,
     ),
-    settings: input.current?.settings || {
-      resolution: "1920x1080",
-      fps: 25,
+    settings: {
+      resolution: storyboardCompositionResolution(
+        input.storyboard.aspect_ratio,
+      ),
+      fps: input.current?.settings.fps || 25,
     },
   };
+}
+
+function storyboardCompositionResolution(aspectRatio: StoryboardAspectRatio) {
+  const resolutions: Record<StoryboardAspectRatio, string> = {
+    "16:9": "1920x1080",
+    "9:16": "1080x1920",
+    "1:1": "1080x1080",
+    "4:3": "1440x1080",
+    "3:4": "1080x1440",
+    "21:9": "2520x1080",
+  };
+  return resolutions[aspectRatio];
 }
 
 function storyboardVideoClip(input: {
@@ -135,12 +156,7 @@ function storyboardSpeechTrack(
   current: VideoComposeSpeechTrack | undefined,
   issues: string[],
 ): VideoComposeSpeechTrack {
-  const node = findStoryboardItemNode(
-    nodes,
-    sourceNodeId,
-    "speech",
-    speech.id,
-  );
+  const node = findStoryboardItemNode(nodes, sourceNodeId, "speech", speech.id);
   const audio = assetReference(node);
   if (!node?.power) {
     issues.push(`语音“${speech.text}”未配置语音合成能力`);

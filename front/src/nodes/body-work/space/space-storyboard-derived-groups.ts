@@ -7,8 +7,12 @@ import {
 } from "./space-model";
 import { isStoryboardPowerType } from "./space-power-presentation";
 import {
-  canvasReferenceContentFromText,
+  canvasReferenceContentFromTargets,
   canvasReferenceContentHasReferences,
+  canvasReferenceContentText,
+  canvasReferenceTargetsFromContent,
+  normalizeCanvasReferenceLabel,
+  type CanvasReferenceTarget,
 } from "./space-reference-content";
 import {
   expandStoryboardDerivedGroup,
@@ -27,12 +31,12 @@ import {
 import {
   isStoryboardConfirmed,
   parseStoryboardOutput,
-  storyboardMaterialReferenceNames,
   type StoryboardDocument,
 } from "./space-storyboard";
 import { storyboardVideoComposition } from "./space-storyboard-composition";
 import type {
   AssetCate,
+  CanvasReferenceContent,
   CanvasStoryboardItemConfig,
   CanvasStoryboardItemType,
   PowerOption,
@@ -117,20 +121,12 @@ export function syncStoryboardDerivedGroups(input: {
   );
   syncedItemTypes.add("video_compose");
   activeItemKeys.add(
-    storyboardItemKey(
-      input.storyboardNode.id,
-      "video_compose",
-      "composition",
-    ),
+    storyboardItemKey(input.storyboardNode.id, "video_compose", "composition"),
   );
   const derivedGroups = enabledSpecs.map((spec) => ({
     spec,
     items: spec.items(input.storyboard, options),
-    power: firstAvailablePower(
-      input.powers,
-      spec.powerKind,
-      spec.outputType,
-    ),
+    power: firstAvailablePower(input.powers, spec.powerKind, spec.outputType),
     existing: findDerivedGroup(nodes, input.storyboardNode.id, spec.key),
   }));
   const layouts = planStoryboardDerivedGroupLayout({
@@ -148,9 +144,6 @@ export function syncStoryboardDerivedGroups(input: {
       currentLayoutKey: existing?.group?.layoutKey,
     })),
   });
-  const storyboardReferenceLabels = storyboardMaterialReferenceNames(
-    input.storyboard,
-  );
   let nextNodeNo = nextCanvasNodeNo(nodes, input.canvas.nextNodeNo);
   let changed = nextNodeNo !== input.canvas.nextNodeNo;
 
@@ -192,7 +185,6 @@ export function syncStoryboardDerivedGroups(input: {
           existing,
           group.node.id,
           item,
-          storyboardReferenceLabels,
           spec,
           power,
         );
@@ -289,6 +281,7 @@ export function syncStoryboardDerivedGroups(input: {
     input.storyboardNode.id,
     enabledSpecs,
   );
+  edges = ensureStoryboardItemEdges(edges, nodes, input.storyboardNode.id);
   edges = ensureStoryboardCompositionEdges(
     edges,
     nodes,
@@ -309,15 +302,8 @@ function withStoryboardItemContext(
 ) {
   const sourceNodes = (item.sourceItems || [])
     .map((source) =>
-      nodes.find(
-        (node) =>
-          !node.storyboardItem?.stale &&
-          isMatchingDerivedNode(
-            node,
-            sourceNodeId,
-            source.type,
-            source.id,
-          ),
+      nodes.find((node) =>
+        isMatchingDerivedNode(node, sourceNodeId, source.type, source.id),
       ),
     )
     .filter((node): node is SpaceCanvasNode => Boolean(node));
@@ -329,81 +315,70 @@ function withStoryboardItemContext(
         sourceSignatureParts: sourceNodes.map(storyboardSourceNodeSignature),
       }
     : item;
-  if (item.type === "lip_sync") {
-    const referenceNodes = sourceNodes.filter(
-      (node) =>
-        Number(node.asset?.id || 0) > 0 &&
-        Number(node.asset?.version_id || node.asset?.version?.id || 0) > 0,
-    );
-    if (!referenceNodes.length) {
-      return withSources;
-    }
-    const prompt = `${referenceNodes
-      .map((node) => `@${node.title}`)
-      .join(" ")} ${item.prompt}`.trim();
-    const content = canvasReferenceContentFromText(
-      prompt,
-      referenceNodes.map((node) => ({
-        refType: "asset" as const,
-        refId: Number(node.asset?.id),
-        versionId: Number(node.asset?.version_id || node.asset?.version?.id),
-        label: node.title,
-      })),
-    );
-    return canvasReferenceContentHasReferences(content)
-      ? { ...withSources, prompt, promptContent: content }
-      : { ...withSources, prompt };
-  }
-  if (item.type === "shot_frame") {
-    const content = canvasReferenceContentFromText(
-      item.prompt,
-      sourceNodes
-        .filter(
-          (node) =>
-            ["character", "scene", "prop"].includes(
-              node.storyboardItem?.itemType || "",
-            ) &&
-            Number(node.asset?.id || 0) > 0 &&
-            Number(node.asset?.version_id || node.asset?.version?.id || 0) > 0,
-        )
-        .map((node) => ({
-          refType: "asset" as const,
-          refId: Number(node.asset?.id),
-          versionId: Number(node.asset?.version_id || node.asset?.version?.id),
-          label: node.title,
-        })),
-    );
-    return canvasReferenceContentHasReferences(content)
-      ? { ...withSources, promptContent: content }
-      : withSources;
-  }
-  if (item.type !== "shot") {
+  if (!["shot_image", "shot", "lip_sync"].includes(item.type)) {
     return withSources;
   }
-  const frameNodes = sourceNodes.filter(
-    (node) =>
-      node.storyboardItem?.itemType === "shot_frame" &&
-      Number(node.asset?.id || 0) > 0 &&
-      Number(node.asset?.version_id || node.asset?.version?.id || 0) > 0,
+  const promptWithMentions = storyboardPromptWithSourceMentions(
+    item.prompt,
+    sourceNodes,
   );
-  if (!frameNodes.length) {
-    return withSources;
+  const withMentions =
+    promptWithMentions === item.prompt
+      ? withSources
+      : { ...withSources, prompt: promptWithMentions };
+  const referenceTargets = sourceNodes
+    .map(storyboardSourceReferenceTarget)
+    .filter((target): target is CanvasReferenceTarget => Boolean(target));
+  if (!referenceTargets.length) {
+    return withMentions;
   }
-  const prompt = `${frameNodes
-    .map((node) => `@${node.title}`)
-    .join(" ")} ${item.prompt}`.trim();
-  const content = canvasReferenceContentFromText(
-    prompt,
-    frameNodes.map((node) => ({
-      refType: "asset" as const,
-      refId: Number(node.asset?.id),
-      versionId: Number(node.asset?.version_id || node.asset?.version?.id),
-      label: node.title,
-    })),
+  const content = canvasReferenceContentFromTargets(
+    promptWithMentions,
+    referenceTargets,
   );
+  const prompt = canvasReferenceContentText(content);
   return canvasReferenceContentHasReferences(content)
     ? { ...withSources, prompt, promptContent: content }
-    : { ...withSources, prompt };
+    : { ...withMentions, prompt };
+}
+
+function storyboardPromptWithSourceMentions(
+  prompt: string,
+  sourceNodes: SpaceCanvasNode[],
+) {
+  const mentions: string[] = [];
+  const seen = new Set<string>();
+  for (const node of sourceNodes) {
+    const label = normalizeCanvasReferenceLabel(node.title);
+    const mention = label ? `@${label}` : "";
+    if (!mention || seen.has(mention) || prompt.includes(mention)) {
+      continue;
+    }
+    seen.add(mention);
+    mentions.push(mention);
+  }
+  return [mentions.join(" "), prompt].filter(Boolean).join(" ").trim();
+}
+
+function storyboardSourceReferenceTarget(
+  node: SpaceCanvasNode,
+): CanvasReferenceTarget | null {
+  const refId = Number(node.resultRef?.asset_id || node.asset?.id || 0);
+  const versionId = Number(
+    node.resultRef?.version_id ||
+      node.asset?.version_id ||
+      node.asset?.version?.id ||
+      0,
+  );
+  if (!refId || !versionId) {
+    return null;
+  }
+  return {
+    refType: "asset",
+    refId,
+    versionId,
+    label: node.title,
+  };
 }
 
 function ensureDerivedGroup(input: {
@@ -569,6 +544,7 @@ function createDerivedNode(input: {
   node.composerDraft = {
     prompt: input.item.prompt,
     promptContent: input.item.promptContent,
+    paramValues: input.item.paramValues,
   };
   node.storyboardItem = storyboardItemMetadata(
     input.storyboardNode.id,
@@ -588,7 +564,6 @@ function mergeExistingDerivedNode(
   node: SpaceCanvasNode,
   groupId: string,
   item: StoryboardDerivedItem,
-  referenceLabels: string[],
   spec: StoryboardDerivedGroupSpec,
   power?: PowerOption | null,
 ) {
@@ -604,66 +579,25 @@ function mergeExistingDerivedNode(
       promptContent: node.composerDraft?.promptContent,
     });
   const currentPrompt = String(node.composerDraft?.prompt || "");
-  const frameReference =
-    item.type === "shot"
-      ? item.promptContent?.parts.find((part) => part.type === "reference")
-      : undefined;
-  const hasFrameReference = Boolean(
-    frameReference &&
-    node.composerDraft?.promptContent?.parts.some(
-      (part) =>
-        part.type === "reference" &&
-        part.ref_type === frameReference.ref_type &&
-        part.ref_id === frameReference.ref_id,
-    ),
-  );
-  const migrateFrameReference = Boolean(frameReference && !hasFrameReference);
-  const lostGeneratedReferences =
-    metadata.itemType === "shot" &&
-    metadata.generatedPrompt.includes("@") &&
-    currentPrompt ===
-      promptWithoutMaterialReferences(
-        metadata.generatedPrompt,
-        referenceLabels,
-      ) &&
-    node.description === metadata.generatedPrompt;
   const shouldRefreshPrompt =
-    !currentPrompt.trim() ||
-    currentPrompt === metadata.generatedPrompt ||
-    lostGeneratedReferences;
-  const nextPrompt = shouldRefreshPrompt
-    ? item.prompt
-    : migrateFrameReference && frameReference
-      ? promptWithFrameReference(
-          currentPrompt,
-          frameReference.label,
-          referenceLabels,
-        )
-      : currentPrompt;
+    !currentPrompt.trim() || currentPrompt === metadata.generatedPrompt;
+  const nextPrompt = shouldRefreshPrompt ? item.prompt : currentPrompt;
   const promptChanged = nextPrompt !== currentPrompt;
-  const nextParamValues = promptChanged
-    ? replaceGeneratedPromptParamValues(
-        node.composerDraft?.paramValues,
-        currentPrompt,
-        nextPrompt,
-      )
-    : node.composerDraft?.paramValues;
+  const nextParamValues = mergeGeneratedParamValues(
+    node.composerDraft?.paramValues,
+    currentPrompt,
+    nextPrompt,
+    item.paramValues,
+  );
   const paramValuesChanged =
     nextParamValues !== node.composerDraft?.paramValues;
-  const nextPromptContent =
-    shouldRefreshPrompt || !migrateFrameReference || !frameReference
-      ? shouldRefreshPrompt
-        ? item.promptContent
-        : node.composerDraft?.promptContent
-      : canvasReferenceContentFromText(nextPrompt, [
-          {
-            refType: frameReference.ref_type,
-            refId: frameReference.ref_id,
-            label: frameReference.label,
-            trigger: "@",
-            versionId: frameReference.ref_version_id,
-          },
-        ]);
+  const nextPromptContent = shouldRefreshPrompt
+    ? item.promptContent
+    : mergeManualPromptReferenceContent(
+        currentPrompt,
+        node.composerDraft?.promptContent,
+        item.promptContent,
+      );
   const promptContentChanged =
     JSON.stringify(node.composerDraft?.promptContent || null) !==
     JSON.stringify(nextPromptContent || null);
@@ -677,7 +611,7 @@ function mergeExistingDerivedNode(
   }
   nextMetadata.stale = Boolean(
     hasGeneratedResult &&
-      resultSourceSignature !== nextMetadata.sourceSignature,
+    resultSourceSignature !== nextMetadata.sourceSignature,
   );
   const titleChanged = node.title !== item.title;
   const attachPower = !node.power && Boolean(power);
@@ -704,8 +638,7 @@ function mergeExistingDerivedNode(
     ...(attachPower
       ? {
           power: power || undefined,
-          subtitle:
-            power?.output?.name || power?.name || node.subtitle,
+          subtitle: power?.output?.name || power?.name || node.subtitle,
         }
       : {}),
     description: promptChanged || attachPower ? nextPrompt : node.description,
@@ -726,36 +659,8 @@ function mergeExistingDerivedNode(
 function derivedNodeHasGeneratedResult(node: SpaceCanvasNode) {
   return Boolean(
     Number(node.resultRef?.version_id || 0) > 0 ||
-      Number(node.asset?.version_id || node.asset?.version?.id || 0) > 0 ||
-      node.resultOutput != null,
-  );
-}
-
-function promptWithFrameReference(
-  prompt: string,
-  frameLabel: string,
-  materialLabels: string[],
-) {
-  const label = frameLabel.trim().replace(/^@+/, "");
-  const mention = label ? `@${label}` : "";
-  const content = materialLabels.reduce(
-    (current, materialLabel) =>
-      current.split(`@${materialLabel}`).join(materialLabel),
-    prompt,
-  );
-  if (!mention || content.includes(mention)) {
-    return content;
-  }
-  return `${mention} ${content}`.trim();
-}
-
-function promptWithoutMaterialReferences(
-  prompt: string,
-  referenceLabels: string[],
-) {
-  return referenceLabels.reduce(
-    (current, label) => current.split(`@${label}`).join(""),
-    prompt,
+    Number(node.asset?.version_id || node.asset?.version?.id || 0) > 0 ||
+    node.resultOutput != null,
   );
 }
 
@@ -778,6 +683,40 @@ function replaceGeneratedPromptParamValues(
   return next || values;
 }
 
+function mergeGeneratedParamValues(
+  values: Record<string, unknown> | undefined,
+  currentPrompt: string,
+  nextPrompt: string,
+  generatedValues: Record<string, unknown> | undefined,
+) {
+  let next = replaceGeneratedPromptParamValues(
+    values,
+    currentPrompt,
+    nextPrompt,
+  );
+  for (const [key, value] of Object.entries(generatedValues || {})) {
+    if (next?.[key] === value) {
+      continue;
+    }
+    next = { ...(next || {}), [key]: value };
+  }
+  return next;
+}
+
+function mergeManualPromptReferenceContent(
+  prompt: string,
+  current: CanvasReferenceContent | undefined,
+  generated: CanvasReferenceContent | undefined,
+) {
+  if (!generated || !canvasReferenceContentHasReferences(generated)) {
+    return current;
+  }
+  return canvasReferenceContentFromTargets(
+    prompt,
+    canvasReferenceTargetsFromContent(generated),
+  );
+}
+
 function storyboardItemMetadata(
   sourceNodeId: string,
   item: StoryboardDerivedItem,
@@ -789,7 +728,6 @@ function storyboardItemMetadata(
     generatedPrompt: item.prompt,
     sourceNodeIds: item.sourceNodeIds,
     shotId: item.shotId,
-    frameRole: item.frameRole,
     speechId: item.speechId,
     speechIds: item.speechIds,
     characterId: item.characterId,
@@ -807,9 +745,9 @@ function storyboardDerivedSourceSignature(item: StoryboardDerivedItem) {
     JSON.stringify([
       item.prompt,
       item.promptContent || null,
+      item.paramValues || null,
       item.sourceSignatureParts || [],
       item.shotId || "",
-      item.frameRole || "",
       item.speechId || "",
       item.speechIds || [],
       item.characterId || "",
@@ -832,7 +770,6 @@ function sameItemMetadata(
     left.generatedPrompt === right.generatedPrompt &&
     sameStringList(left.sourceNodeIds, right.sourceNodeIds) &&
     left.shotId === right.shotId &&
-    left.frameRole === right.frameRole &&
     left.speechId === right.speechId &&
     sameStringList(left.speechIds, right.speechIds) &&
     left.characterId === right.characterId &&
@@ -925,6 +862,42 @@ function ensureDerivedGroupEdges(
   return sameEdges(edges, reconciled) ? edges : reconciled;
 }
 
+function ensureStoryboardItemEdges(
+  edges: SpaceCanvasEdge[],
+  nodes: SpaceCanvasNode[],
+  storyboardNodeId: string,
+) {
+  const prefix = `script-item-edge-${stableToken(storyboardNodeId)}-`;
+  const next = edges.filter((edge) => !edge.id.startsWith(prefix));
+  const derivedNodes = nodes.filter(
+    (node) =>
+      node.storyboardItem?.sourceNodeId === storyboardNodeId &&
+      (Boolean(node.groupId) ||
+        node.storyboardItem.itemType === "video_compose"),
+  );
+  const byID = new Map(derivedNodes.map((node) => [node.id, node]));
+  for (const target of derivedNodes) {
+    for (const sourceID of target.storyboardItem?.sourceNodeIds || []) {
+      const source = byID.get(sourceID);
+      if (!source || source.id === target.id) {
+        continue;
+      }
+      next.push({
+        id: uniqueEdgeId(
+          next,
+          `${prefix}${stableToken(source.id)}-${stableToken(target.id)}`,
+        ),
+        from: source.id,
+        to: target.id,
+        logicalFrom: source.id,
+        logicalTo: target.id,
+        executionMode: "manual",
+      });
+    }
+  }
+  return reconcileCanvasGroupEdges(nodes, next);
+}
+
 function syncStoryboardCompositionNode(input: {
   nodes: SpaceCanvasNode[];
   storyboardNode: SpaceCanvasNode;
@@ -953,10 +926,8 @@ function syncStoryboardCompositionNode(input: {
     .filter(
       (node) =>
         node.storyboardItem?.sourceNodeId === input.storyboardNode.id &&
-        ["shot", "speech", "lip_sync"].includes(
-          node.storyboardItem.itemType,
-        ) &&
-        !node.storyboardItem.stale,
+        Boolean(node.groupId) &&
+        ["shot", "speech", "lip_sync"].includes(node.storyboardItem.itemType),
     )
     .map((node) => node.id);
   const sourceSignature = stableToken(JSON.stringify(videoComposition));
@@ -1071,18 +1042,21 @@ function storyboardCompositionPosition(
   nodes: SpaceCanvasNode[],
   storyboardNode: SpaceCanvasNode,
 ) {
-  const downstreamRight = nodes
-    .filter(
-      (node) =>
-        node.type === "group" &&
-        node.group?.origin === "script" &&
-        node.group.sourceNodeId === storyboardNode.id,
-    )
-    .reduce(
-      (right, group) => Math.max(right, group.x + group.width),
-      storyboardNode.x + storyboardNode.width + 160,
-    );
-  return { x: downstreamRight + 72, y: storyboardNode.y };
+  const derivedGroups = nodes.filter(
+    (node) =>
+      node.type === "group" &&
+      node.group?.origin === "script" &&
+      node.group.sourceNodeId === storyboardNode.id,
+  );
+  const downstreamRight = derivedGroups.reduce(
+    (right, group) => Math.max(right, group.x + group.width),
+    storyboardNode.x + storyboardNode.width + 160,
+  );
+  const productionTop = derivedGroups.reduce(
+    (top, group) => Math.min(top, group.y),
+    storyboardNode.y,
+  );
+  return { x: downstreamRight + 72, y: productionTop };
 }
 
 function ensureStoryboardCompositionEdges(
@@ -1197,7 +1171,11 @@ function storyboardDerivedOptions(
 }
 
 function normalizeOutputType(value: unknown) {
-  return String(value || "general").trim().toLowerCase() || "general";
+  return (
+    String(value || "general")
+      .trim()
+      .toLowerCase() || "general"
+  );
 }
 
 function derivedPowerLabel(spec: StoryboardDerivedGroupSpec) {

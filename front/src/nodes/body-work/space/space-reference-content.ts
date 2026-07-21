@@ -4,6 +4,7 @@ export type CanvasReferenceTarget = {
   refType: "asset";
   refId: number;
   label: string;
+  usage?: string;
   trigger?: "@" | "#";
   versionId?: number;
 };
@@ -40,7 +41,8 @@ export function canvasReferenceContentFromText(
       type: "reference",
       ref_type: match.target.refType,
       ref_id: match.target.refId,
-      label: match.target.mention,
+      label: normalizeCanvasReferenceLabel(match.target.label),
+      usage: match.target.usage,
       ref_trigger: match.target.trigger || "@",
       ref_version_id: match.target.versionId,
     });
@@ -49,12 +51,42 @@ export function canvasReferenceContentFromText(
   return { version: 1, parts };
 }
 
+export function canvasReferenceContentFromTargets(
+  value: string,
+  targets: CanvasReferenceTarget[],
+): CanvasReferenceContent {
+  const selected = uniqueReferenceTargets(
+    targets,
+    canvasReferenceContentTargetKey,
+  );
+  const content = canvasReferenceContentFromText(value, selected);
+  const referencedTargets = new Set(
+    canvasReferenceTargetsFromContent(content).map(
+      canvasReferenceContentTargetKey,
+    ),
+  );
+  const missingTargets = selected.filter(
+    (target) => !referencedTargets.has(canvasReferenceContentTargetKey(target)),
+  );
+  if (!missingTargets.length) {
+    return content;
+  }
+
+  const parts: CanvasReferenceContent["parts"] = [];
+  for (let index = 0; index < missingTargets.length; index += 1) {
+    appendReferenceTargetWithTrailingSpace(
+      parts,
+      missingTargets[index],
+      index === missingTargets.length - 1 ? content.parts[0] : undefined,
+    );
+  }
+  return { version: 1, parts: [...parts, ...content.parts] };
+}
+
 export function canvasReferenceContentHasReferences(
   content: CanvasReferenceContent | undefined,
 ) {
-  return Boolean(
-    content?.parts.some((part) => part.type === "reference"),
-  );
+  return Boolean(content?.parts.some((part) => part.type === "reference"));
 }
 
 export function reconcileCanvasReferenceContent(
@@ -66,8 +98,8 @@ export function reconcileCanvasReferenceContent(
     return content;
   }
   const derived = canvasReferenceContentFromText(value, [
-    ...targets,
     ...canvasReferenceTargetsFromContent(content),
+    ...targets,
   ]);
   return canvasReferenceContentHasReferences(derived) ? derived : content;
 }
@@ -84,15 +116,195 @@ export function canvasReferenceTargetsFromContent(
       (part): CanvasReferenceTarget => ({
         refType: part.ref_type,
         refId: part.ref_id,
-        label: part.label,
+        label: normalizeCanvasReferenceLabel(part.label),
+        usage: part.usage,
         trigger: part.ref_trigger === "#" ? "#" : "@",
         versionId: part.ref_version_id,
       }),
     );
 }
 
+export function canvasReferenceContentText(
+  content: CanvasReferenceContent | undefined,
+) {
+  if (!content) {
+    return "";
+  }
+  return content.parts
+    .map((part) =>
+      part.type === "text"
+        ? part.text
+        : `${part.ref_trigger === "#" ? "#" : "@"}${normalizeCanvasReferenceLabel(part.label)}`,
+    )
+    .join("");
+}
+
+export function canvasReferenceIDsForUsage(
+  content: CanvasReferenceContent | undefined,
+  usage: string,
+) {
+  return canvasReferenceTargetsForUsage(content, usage).map(
+    (target) => target.refId,
+  );
+}
+
+export function canvasReferenceTargetsForUsage(
+  content: CanvasReferenceContent | undefined,
+  usage: string,
+) {
+  const normalizedUsage = usage.trim();
+  if (!content || !normalizedUsage) {
+    return [];
+  }
+  return uniqueReferenceTargets(
+    content.parts.flatMap((part) =>
+      part.type === "reference" &&
+      part.ref_type === "asset" &&
+      part.usage === normalizedUsage
+        ? [
+            {
+              refType: part.ref_type,
+              refId: part.ref_id,
+              label: part.label,
+              usage: part.usage,
+              trigger:
+                part.ref_trigger === "#" ? ("#" as const) : ("@" as const),
+              versionId: part.ref_version_id,
+            },
+          ]
+        : [],
+    ),
+  );
+}
+
+export function replaceCanvasReferenceUsage(
+  value: string,
+  content: CanvasReferenceContent | undefined,
+  usage: string,
+  targets: CanvasReferenceTarget[],
+) {
+  const normalizedUsage = usage.trim();
+  if (!normalizedUsage) {
+    return {
+      value,
+      content:
+        content ||
+        ({
+          version: 1,
+          parts: value ? [{ type: "text", text: value }] : [],
+        } as CanvasReferenceContent),
+    };
+  }
+
+  const selected = uniqueReferenceTargets(
+    targets.map((target) => ({ ...target, usage: normalizedUsage })),
+  );
+  const selectedByKey = new Map(
+    selected.map((target) => [canvasReferenceTargetKey(target), target]),
+  );
+  const inserted = new Set<string>();
+  const sourceParts =
+    content?.version === 1
+      ? content.parts
+      : value
+        ? ([{ type: "text", text: value }] as CanvasReferenceContent["parts"])
+        : [];
+  const parts: CanvasReferenceContent["parts"] = [];
+  let insertionAnchorIndex = -1;
+
+  for (let index = 0; index < sourceParts.length; index += 1) {
+    const part = sourceParts[index];
+    if (part.type !== "reference") {
+      continue;
+    }
+    const key = canvasReferencePartKey(part);
+    if (
+      part.usage === normalizedUsage ||
+      (!part.usage && selectedByKey.has(key))
+    ) {
+      insertionAnchorIndex = index;
+    }
+  }
+
+  const appendUninsertedTargets = (
+    followingPart?: CanvasReferenceContent["parts"][number],
+  ) => {
+    const uninserted = selected.filter(
+      (target) => !inserted.has(canvasReferenceTargetKey(target)),
+    );
+    for (let index = 0; index < uninserted.length; index += 1) {
+      const target = uninserted[index];
+      const key = canvasReferenceTargetKey(target);
+      appendReferenceSeparator(parts);
+      appendReferenceTargetWithTrailingSpace(
+        parts,
+        target,
+        index === uninserted.length - 1 ? followingPart : undefined,
+      );
+      inserted.add(key);
+    }
+    return uninserted.length > 0;
+  };
+
+  for (let index = 0; index < sourceParts.length; index += 1) {
+    const part = sourceParts[index];
+    if (part.type === "text") {
+      appendReferenceText(parts, part.text);
+      continue;
+    }
+
+    const key = canvasReferencePartKey(part);
+    const selectedTarget = selectedByKey.get(key);
+    const replacesUsage = part.usage === normalizedUsage;
+    const upgradesUnassignedReference = !part.usage && Boolean(selectedTarget);
+    const isInsertionAnchor = index === insertionAnchorIndex;
+    let appendedAnchorReference = false;
+
+    if (replacesUsage || upgradesUnassignedReference) {
+      if (selectedTarget && !inserted.has(key)) {
+        if (isInsertionAnchor) {
+          appendReferenceTarget(parts, selectedTarget);
+          appendedAnchorReference = true;
+        } else {
+          appendReferenceTargetWithTrailingSpace(
+            parts,
+            selectedTarget,
+            sourceParts[index + 1],
+          );
+        }
+        inserted.add(key);
+      }
+    } else {
+      parts.push({
+        ...part,
+        label: normalizeCanvasReferenceLabel(part.label),
+      });
+    }
+
+    if (isInsertionAnchor) {
+      const appendedTargets = appendUninsertedTargets(sourceParts[index + 1]);
+      if (appendedAnchorReference && !appendedTargets) {
+        appendReferenceTrailingSpace(parts, sourceParts[index + 1]);
+      }
+    }
+  }
+
+  if (insertionAnchorIndex < 0) {
+    appendUninsertedTargets();
+  }
+
+  const nextContent: CanvasReferenceContent = { version: 1, parts };
+  return {
+    value: canvasReferenceContentText(nextContent),
+    content: nextContent,
+  };
+}
+
 export function normalizeCanvasReferenceLabel(value: string) {
-  return value.trim().replace(/^[@#]+/, "").trim();
+  return value
+    .trim()
+    .replace(/^[@#]+/, "")
+    .trim();
 }
 
 function referenceMatches(targets: CanvasReferenceTarget[]) {
@@ -121,9 +333,7 @@ function nextReferenceMatch(
   cursor: number,
   matches: CanvasReferenceMatch[],
 ) {
-  let selected:
-    | { index: number; target: CanvasReferenceMatch }
-    | undefined;
+  let selected: { index: number; target: CanvasReferenceMatch } | undefined;
   for (const target of matches) {
     const index = text.indexOf(target.mention, cursor);
     if (index < 0) {
@@ -154,4 +364,85 @@ function appendReferenceText(
     return;
   }
   parts.push({ type: "text", text });
+}
+
+function uniqueReferenceTargets(
+  targets: CanvasReferenceTarget[],
+  targetKey: (
+    target: CanvasReferenceTarget,
+  ) => string = canvasReferenceTargetKey,
+) {
+  const result: CanvasReferenceTarget[] = [];
+  const seen = new Set<string>();
+  for (const target of targets) {
+    if (target.refId <= 0 || !normalizeCanvasReferenceLabel(target.label)) {
+      continue;
+    }
+    const key = targetKey(target);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(target);
+  }
+  return result;
+}
+
+function canvasReferenceContentTargetKey(target: CanvasReferenceTarget) {
+  return `${canvasReferenceTargetKey(target)}:${target.usage || ""}`;
+}
+
+function canvasReferenceTargetKey(target: CanvasReferenceTarget) {
+  return `${target.refType}:${target.refId}:${target.versionId || 0}`;
+}
+
+function canvasReferencePartKey(
+  part: Extract<CanvasReferenceContent["parts"][number], { type: "reference" }>,
+) {
+  return `${part.ref_type}:${part.ref_id}:${part.ref_version_id || 0}`;
+}
+
+function appendReferenceTarget(
+  parts: CanvasReferenceContent["parts"],
+  target: CanvasReferenceTarget,
+) {
+  parts.push({
+    type: "reference",
+    ref_type: target.refType,
+    ref_id: target.refId,
+    label: normalizeCanvasReferenceLabel(target.label),
+    usage: target.usage,
+    ref_trigger: target.trigger || "@",
+    ref_version_id: target.versionId,
+  });
+}
+
+function appendReferenceTargetWithTrailingSpace(
+  parts: CanvasReferenceContent["parts"],
+  target: CanvasReferenceTarget,
+  followingPart?: CanvasReferenceContent["parts"][number],
+) {
+  appendReferenceTarget(parts, target);
+  appendReferenceTrailingSpace(parts, followingPart);
+}
+
+function appendReferenceTrailingSpace(
+  parts: CanvasReferenceContent["parts"],
+  followingPart?: CanvasReferenceContent["parts"][number],
+) {
+  if (followingPart?.type === "text" && /^\s/.test(followingPart.text)) {
+    return;
+  }
+  appendReferenceText(parts, " ");
+}
+
+function appendReferenceSeparator(parts: CanvasReferenceContent["parts"]) {
+  const previous = parts[parts.length - 1];
+  if (!previous) {
+    return;
+  }
+  if (previous.type === "text" && /\s$/.test(previous.text)) {
+    return;
+  }
+  appendReferenceText(parts, " ");
 }

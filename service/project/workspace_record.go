@@ -106,6 +106,7 @@ func (s WorkspaceService) workspaceRunPayload(ctx context.Context, projectID uin
 	payload["request_id"] = strings.TrimSpace(run.RequestID)
 	payload["release_id"] = run.ReleaseID
 	payload["status"] = strings.TrimSpace(run.Status)
+	payload["error"] = strings.TrimSpace(run.Error)
 	input := mapValue(jsonValue(run.Input, map[string]any{}))
 	if input != nil {
 		if plan := mapValue(input["execution_plan"]); plan != nil {

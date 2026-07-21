@@ -12,23 +12,26 @@ import (
 	"github.com/shemic/dever/server"
 
 	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
+	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 type InternalRequest struct {
-	AgentID       uint64
-	AgentIdentity string
-	RequestID     string
-	Method        string
-	Host          string
-	Path          string
-	Headers       map[string]string
-	Input         map[string]any
-	History       []any
-	Billing       botprotocol.BillingContext
-	Server        *server.Context
-	OnRunCreated  func(runID uint64, requestID string)
-	OnStream      func(payload map[string]any)
+	AgentID          uint64
+	AgentIdentity    string
+	RequestID        string
+	RequiredToolName string
+	Method           string
+	Host             string
+	Path             string
+	Headers          map[string]string
+	Input            map[string]any
+	MediaReferences  []energoninput.MediaReference
+	History          []any
+	Billing          botprotocol.BillingContext
+	Server           *server.Context
+	OnRunCreated     func(runID uint64, requestID string)
+	OnStream         func(payload map[string]any)
 }
 
 type InternalResult struct {
@@ -49,17 +52,19 @@ func (s Service) RunInternal(ctx context.Context, request InternalRequest) (Inte
 	}
 	completion := make(chan runCompletion, 1)
 	execution, err := s.prepareStatelessExecution(ctx, statelessRequest{
-		RequestID: requestID,
+		RequestID:        requestID,
+		RequiredToolName: strings.TrimSpace(request.RequiredToolName),
 		TaskRequest: TaskRequest{
-			AgentIdentity: agentIdentity,
-			Input:         request.Input,
-			History:       request.History,
-			Billing:       request.Billing,
-			Method:        request.Method,
-			Host:          request.Host,
-			Path:          request.Path,
-			Headers:       request.Headers,
-			Server:        request.Server,
+			AgentIdentity:   agentIdentity,
+			Input:           request.Input,
+			MediaReferences: request.MediaReferences,
+			History:         request.History,
+			Billing:         request.Billing,
+			Method:          request.Method,
+			Host:            request.Host,
+			Path:            request.Path,
+			Headers:         request.Headers,
+			Server:          request.Server,
 		},
 		OnStream: request.OnStream,
 	})

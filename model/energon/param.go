@@ -77,7 +77,7 @@ var (
 			"value_type":     "string",
 			"cate_id":        paramCateCommonID,
 			"upload_rule_id": 1,
-			"max_files":      5,
+			"max_files":      9,
 			"default_value":  "",
 			"status":         1,
 			"sort":           100,

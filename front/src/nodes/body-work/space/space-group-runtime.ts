@@ -7,6 +7,8 @@ type CanvasNodeRunState = {
   status: "running" | "waiting" | "success" | "error";
 };
 
+type CanvasNodeRunner = (node: SpaceCanvasNode) => Promise<void>;
+
 export function summarizeCanvasGroupRuntime({
   members,
   runningNodes,
@@ -45,6 +47,87 @@ export function summarizeCanvasGroupRuntime({
     staleCount,
     status: canvasGroupRunStatus(groupState, memberStates, failedCount),
   };
+}
+
+export async function runCanvasGroupMembers(
+  members: SpaceCanvasNode[],
+  runNode: CanvasNodeRunner,
+) {
+  const pending = new Map(
+    members
+      .filter(canvasNodeRunsInBackend)
+      .map((member) => [member.id, member]),
+  );
+  const completed = new Set<string>();
+  const failures = new Map<string, unknown>();
+
+  while (pending.size > 0) {
+    blockFailedDependents(pending, failures);
+    if (pending.size === 0) {
+      break;
+    }
+
+    const ready = [...pending.values()].filter((member) =>
+      storyboardDependencies(member).every(
+        (sourceID) => !pending.has(sourceID) || completed.has(sourceID),
+      ),
+    );
+    if (ready.length === 0) {
+      for (const member of pending.values()) {
+        failures.set(member.id, new Error("节点依赖关系存在循环"));
+      }
+      pending.clear();
+      break;
+    }
+
+    const results = await Promise.allSettled(
+      ready.map(async (member) => {
+        await runNode(member);
+        return member.id;
+      }),
+    );
+    results.forEach((result, index) => {
+      const member = ready[index];
+      pending.delete(member.id);
+      if (result.status === "fulfilled") {
+        completed.add(member.id);
+        return;
+      }
+      failures.set(member.id, result.reason);
+    });
+  }
+
+  if (failures.size > 0) {
+    const firstError = failures.values().next().value;
+    const message =
+      firstError instanceof Error ? firstError.message : "节点更新失败";
+    throw new Error(`${failures.size} 个节点更新失败：${message}`);
+  }
+}
+
+function blockFailedDependents(
+  pending: Map<string, SpaceCanvasNode>,
+  failures: Map<string, unknown>,
+) {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const member of pending.values()) {
+      const failedSourceID = storyboardDependencies(member).find((sourceID) =>
+        failures.has(sourceID),
+      );
+      if (!failedSourceID) {
+        continue;
+      }
+      pending.delete(member.id);
+      failures.set(member.id, new Error("上游节点更新失败"));
+      changed = true;
+    }
+  }
+}
+
+function storyboardDependencies(node: SpaceCanvasNode) {
+  return node.storyboardItem?.sourceNodeIds || [];
 }
 
 function canvasGroupRunStatus(

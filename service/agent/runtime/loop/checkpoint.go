@@ -46,34 +46,34 @@ type persistedTransport struct {
 }
 
 type runCheckpoint struct {
-	Version                int                              `json:"version"`
-	Phase                  string                           `json:"phase"`
-	ModelStep              int                              `json:"model_step"`
-	Seq                    int                              `json:"seq"`
-	Input                  map[string]any                   `json:"input"`
-	HistoryDelta           []any                            `json:"history_delta,omitempty"`
-	LastText               string                           `json:"last_text,omitempty"`
-	Artifacts              map[string]any                   `json:"artifacts,omitempty"`
-	Activities             []map[string]any                 `json:"activities,omitempty"`
-	LoadedSkills           []agentmodel.LoadedSkillRef      `json:"loaded_skills,omitempty"`
-	ToolReceipts           []toolReceipt                    `json:"tool_receipts,omitempty"`
-	ActiveToolExecution    *toolExecutionMarker             `json:"active_tool_execution,omitempty"`
-	MediaDelta             []runtimeprovider.MediaReference `json:"media_delta,omitempty"`
-	PendingTools           []botprotocol.ToolCall           `json:"pending_tools,omitempty"`
-	PendingIndex           int                              `json:"pending_index,omitempty"`
-	PendingModelText       string                           `json:"pending_model_text,omitempty"`
-	AwaitingDelivery       bool                             `json:"awaiting_delivery,omitempty"`
-	DeliveryContinuations  int                              `json:"delivery_continuations,omitempty"`
-	CompletionReviews      int                              `json:"completion_reviews,omitempty"`
-	RequiredToolName       string                           `json:"required_tool_name,omitempty"`
-	DocumentID             uint64                           `json:"document_id,omitempty"`
-	KnowledgeUsed          bool                             `json:"knowledge_used,omitempty"`
-	KnowledgeContinuations int                              `json:"knowledge_continuations,omitempty"`
-	FinalStatus            string                           `json:"final_status,omitempty"`
-	FinalText              string                           `json:"final_text,omitempty"`
-	FinalMessage           string                           `json:"final_message,omitempty"`
-	FinalOutput            map[string]any                   `json:"final_output,omitempty"`
-	FinalCommitted         bool                             `json:"final_committed,omitempty"`
+	Version               int                              `json:"version"`
+	Phase                 string                           `json:"phase"`
+	ModelStep             int                              `json:"model_step"`
+	Seq                   int                              `json:"seq"`
+	Input                 map[string]any                   `json:"input"`
+	HistoryDelta          []any                            `json:"history_delta,omitempty"`
+	LastText              string                           `json:"last_text,omitempty"`
+	Artifacts             map[string]any                   `json:"artifacts,omitempty"`
+	Activities            []map[string]any                 `json:"activities,omitempty"`
+	LoadedSkills          []agentmodel.LoadedSkillRef      `json:"loaded_skills,omitempty"`
+	ToolReceipts          []toolReceipt                    `json:"tool_receipts,omitempty"`
+	ActiveToolExecution   *toolExecutionMarker             `json:"active_tool_execution,omitempty"`
+	MediaDelta            []runtimeprovider.MediaReference `json:"media_delta,omitempty"`
+	PendingTools          []botprotocol.ToolCall           `json:"pending_tools,omitempty"`
+	PendingIndex          int                              `json:"pending_index,omitempty"`
+	PendingModelText      string                           `json:"pending_model_text,omitempty"`
+	AwaitingDelivery      bool                             `json:"awaiting_delivery,omitempty"`
+	DeliveryContinuations int                              `json:"delivery_continuations,omitempty"`
+	CompletionReviews     int                              `json:"completion_reviews,omitempty"`
+	RequiredToolName      string                           `json:"required_tool_name,omitempty"`
+	DocumentID            uint64                           `json:"document_id,omitempty"`
+	KnowledgeUsed         bool                             `json:"knowledge_used,omitempty"`
+	KnowledgeNodeIDs      []uint64                         `json:"knowledge_node_ids,omitempty"`
+	FinalStatus           string                           `json:"final_status,omitempty"`
+	FinalText             string                           `json:"final_text,omitempty"`
+	FinalMessage          string                           `json:"final_message,omitempty"`
+	FinalOutput           map[string]any                   `json:"final_output,omitempty"`
+	FinalCommitted        bool                             `json:"final_committed,omitempty"`
 }
 
 func snapshotFromExecution(execution execution) executionSnapshot {
@@ -162,9 +162,6 @@ func normalizeCheckpoint(value runCheckpoint) runCheckpoint {
 	}
 	if value.CompletionReviews < 0 {
 		value.CompletionReviews = 0
-	}
-	if value.KnowledgeContinuations < 0 {
-		value.KnowledgeContinuations = 0
 	}
 	return value
 }

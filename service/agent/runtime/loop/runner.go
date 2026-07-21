@@ -194,7 +194,7 @@ func (s Service) runModelStep(ctx context.Context, controller *runController, st
 	if len(calls) == 0 {
 		return s.finishModelOutput(ctx, controller, state, result, stepLimits)
 	}
-	if shouldReviewPresentSuggestions(state, calls) {
+	if shouldReviewPresentSuggestions(state, calls, requiredToolName) {
 		accepted, keepRunning := s.reviewPresentSuggestions(ctx, controller, state, result)
 		if !accepted {
 			return keepRunning
@@ -240,9 +240,6 @@ func (s Service) finishModelOutput(
 ) bool {
 	if isLengthLimitedFinish(result.FinishMode) {
 		return s.continueLengthLimitedOutput(state, result, stepLimits)
-	}
-	if state.execution.agent.KnowledgeCateID > 0 && !state.knowledgeUsed {
-		return s.continueMissingKnowledge(state, result, stepLimits)
 	}
 	if state.awaitingDelivery && !modelStepHasDelivery(state, result) {
 		return s.continueMissingDelivery(state, result, stepLimits)
@@ -339,24 +336,6 @@ func (s Service) finishImplicitModelOutput(state *runState, result modelStepResu
 	}
 	s.finishCheckpoint(state)
 	return false
-}
-
-const maxKnowledgeContinuations = 1
-
-func (s Service) continueMissingKnowledge(state *runState, result modelStepResult, stepLimits modelStepLimits) bool {
-	maxSteps := stepLimits.current(state.awaitingDelivery)
-	if state.modelStep >= maxSteps || state.knowledgeContinuations >= maxKnowledgeContinuations {
-		s.finish(state, finishOutcome{
-			status: runStatusFail, text: state.lastText,
-			message:  "模型未按要求读取绑定知识库",
-			stepType: "error", stepTitle: "缺少知识依据", stepStatus: stepStatusFail,
-		})
-		return false
-	}
-	state.knowledgeContinuations++
-	return s.continueModelOutput(
-		state, result, knowledgeContinuationInput(), "knowledge_required", stepStatusWarning,
-	)
 }
 
 func isLengthLimitedFinish(value string) bool {
@@ -517,13 +496,14 @@ func (s Service) runToolStep(ctx context.Context, controller *runController, sta
 	definition, _ := state.execution.registry.Definition(call.Name)
 	state.AbsorbToolOutput(completed.result.Content, definition)
 	state.recordToolReceipt(call, definition, completed)
+	knowledgeResultResolved := completed.err == nil && knowledgeResultCountsAsUsed(completed.result)
+	if knowledgeResultResolved {
+		state.addKnowledgeNodeReferences(call.Name, completed.result.Content)
+	}
 	if completed.err != nil && isTerminalToolName(call.Name) {
 		state.requiredToolName = call.Name
 	}
-	if completed.err == nil && strings.EqualFold(strings.TrimSpace(definition.Kind), "knowledge") {
-		if !state.knowledgeUsed && state.knowledgeContinuations > 0 {
-			s.resetVisibleOutput(ctx, state)
-		}
+	if knowledgeResultResolved && strings.EqualFold(strings.TrimSpace(definition.Kind), "knowledge") {
 		state.knowledgeUsed = true
 	}
 	if completed.err == nil && call.Name == "load_skill" {
@@ -592,6 +572,9 @@ func (s Service) executeToolStep(ctx context.Context, controller *runController,
 				"error":     validationErr.Error(),
 			},
 		}, false
+	}
+	if recovered, ok := recoverUnknownKnowledgeNodeReference(state, call, definition); ok {
+		return recovered, false
 	}
 	if reused, ok := state.reusableToolStep(call, definition); ok {
 		return reused, false

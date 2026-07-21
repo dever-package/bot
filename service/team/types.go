@@ -9,6 +9,7 @@ import (
 
 	energonmodel "github.com/dever-package/bot/model/energon"
 	teammodel "github.com/dever-package/bot/model/team"
+	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	frontstream "github.com/dever-package/front/service/stream"
 )
@@ -194,26 +195,27 @@ type RunRequest struct {
 }
 
 type CanvasPowerRunRequest struct {
-	ProjectID      uint64
-	BodyID         uint64
-	TeamID         uint64
-	ReleaseID      uint64
-	FlowID         uint64
-	RequestID      string
-	AssetCateID    uint64
-	NodeKey        string
-	NodeName       string
-	Kind           string
-	PowerID        uint64
-	TeamPowerID    uint64
-	PowerKey       string
-	SourceTargetID uint64
-	Input          map[string]any
-	Params         map[string]any
-	Billing        botprotocol.BillingContext
-	PersistResult  bool
-	OnStream       func(payload map[string]any)
-	OnRunCreated   func(runID uint64, requestID string) error
+	ProjectID       uint64
+	BodyID          uint64
+	TeamID          uint64
+	ReleaseID       uint64
+	FlowID          uint64
+	RequestID       string
+	AssetCateID     uint64
+	NodeKey         string
+	NodeName        string
+	Kind            string
+	PowerID         uint64
+	TeamPowerID     uint64
+	PowerKey        string
+	SourceTargetID  uint64
+	Input           map[string]any
+	Params          map[string]any
+	MediaReferences []energoninput.MediaReference
+	Billing         botprotocol.BillingContext
+	PersistResult   bool
+	OnStream        func(payload map[string]any)
+	OnRunCreated    func(runID uint64, requestID string) error
 }
 
 const (

@@ -53,6 +53,18 @@ func (Energon) GetPowerParams(c *server.Context) error {
 	return c.JSON(rows)
 }
 
+func (Energon) PostCopyService(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := energonservice.DuplicateServiceConfiguration(
+		c.Context(),
+		botapi.Uint64FromBody(body, "service_id", "serviceId", "id"),
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
 func (Energon) GetStream(c *server.Context) error {
 	return botapi.HandleStreamRead(c, gateway.ReadStream)
 }

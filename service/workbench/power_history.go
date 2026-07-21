@@ -186,7 +186,7 @@ func (s Service) PowerHistoryDetail(ctx context.Context, teamID uint64, historyI
 	params := s.powerHistoryParams(ctx, binding, sourceTargetID)
 	item := powerHistoryItem(*history, run, params)
 	item["error"] = strings.TrimSpace(run.Error)
-	item["input"] = powerReplayParamInput(params, input)
+	item["input"] = powerHistoryReplayInput(params, input)
 	item["output"] = recordValue(run.Output)
 	item["target_asset_id"] = nestedUint64(input, powerTargetAssetIDKey)
 	item["source_target_id"] = sourceTargetID
@@ -277,6 +277,13 @@ func powerHistoryRunMatches(history workspacemodel.PowerHistory, run *teammodel.
 
 func powerReplayParamInput(params []energoninput.PowerParam, runInput map[string]any) map[string]any {
 	return powerConfiguredParamInput(params, powerReplayInput(runInput))
+}
+
+func powerHistoryReplayInput(params []energoninput.PowerParam, runInput map[string]any) map[string]any {
+	if snapshot := recordValue(runInput[powerReplayInputKey]); len(snapshot) > 0 {
+		return cloneMap(snapshot)
+	}
+	return powerConfiguredParamInput(params, runInput)
 }
 
 func powerConfiguredParamInput(params []energoninput.PowerParam, source map[string]any) map[string]any {

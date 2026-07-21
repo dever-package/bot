@@ -115,7 +115,7 @@ func skillSourcesFromFiles(filePaths []string, provenance []sourceProvenance, fa
 
 func skillDiscoveryDirectorySkipped(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case ".git", ".dever", ".venv", "venv", "node_modules", "__pycache__", "dist", "build":
+	case ".git", ".dever", ".skillhub", ".npm", ".cache", ".venv", "venv", "node_modules", "__pycache__", "dist", "build":
 		return true
 	default:
 		return false

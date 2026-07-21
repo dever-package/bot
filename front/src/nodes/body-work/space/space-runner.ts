@@ -7,7 +7,12 @@ export type CanvasRunRef = {
   flow_run_id?: number;
   release_id?: number;
   status?: string;
+  error?: string;
   executed?: number;
+  total?: number;
+  single_node?: boolean;
+  created_at?: string;
+  updated_at?: string;
   output?: unknown;
   approvals?: any[];
   interactions?: any[];
@@ -36,6 +41,7 @@ export type CanvasNodeResultRef = {
   child_run_id?: number;
   child_request_id?: string;
   status?: string;
+  error?: string;
   output?: unknown;
   asset?: any;
   version?: any;
@@ -74,7 +80,8 @@ export type CanvasExecutionPlanEdgeRef = {
 };
 
 export function normalizeCanvasRunRef(value: any): CanvasRunRef {
-  const output = value?.output && typeof value.output === "object" ? value.output : {};
+  const output =
+    value?.output && typeof value.output === "object" ? value.output : {};
   const run = value?.run && typeof value.run === "object" ? value.run : {};
   return {
     execution_id: Number(value?.execution_id || 0),
@@ -85,7 +92,12 @@ export function normalizeCanvasRunRef(value: any): CanvasRunRef {
     flow_run_id: Number(value?.flow_run_id || run.flow_run_id || 0),
     release_id: Number(value?.release_id || run.release_id || 0),
     status: String(value?.status || run.status || ""),
+    error: canvasErrorText(value?.error || run.error),
     executed: Number(value?.executed || value?.output?.executed || 0),
+    total: Number(value?.total || value?.output?.total || 0),
+    single_node: Boolean(value?.single_node),
+    created_at: String(value?.created_at || ""),
+    updated_at: String(value?.updated_at || ""),
     output: value?.output || run.output,
     approvals: Array.isArray(value?.approvals)
       ? value.approvals
@@ -102,7 +114,9 @@ export function normalizeCanvasRunRef(value: any): CanvasRunRef {
           .map(normalizeCanvasNodeResultRef)
           .filter((item): item is CanvasNodeResultRef => Boolean(item))
       : [],
-    pending_node: normalizeCanvasNodeResultRef(value?.pending_node || output.pending_node),
+    pending_node: normalizeCanvasNodeResultRef(
+      value?.pending_node || output.pending_node,
+    ),
     execution_plan: normalizeCanvasExecutionPlanRef(value?.execution_plan),
     node_runs: Array.isArray(value?.node_runs)
       ? value.node_runs
@@ -130,6 +144,7 @@ function normalizeCanvasNodeResultRef(value: any): CanvasNodeResultRef | null {
     child_run_id: Number(value.child_run_id || 0),
     child_request_id: String(value.child_request_id || ""),
     status: String(value.status || ""),
+    error: canvasErrorText(value.error),
     output: value.output,
     asset: value.asset,
     version: value.version,
@@ -139,6 +154,107 @@ function normalizeCanvasNodeResultRef(value: any): CanvasNodeResultRef | null {
     persists_result: Boolean(value.persists_result),
     agent_run_id: Number(value.agent_run_id || 0),
   };
+}
+
+export function canvasNodeResultRawError(
+  result?: CanvasNodeResultRef | null,
+) {
+  if (!result) {
+    return "";
+  }
+  return firstCanvasErrorText(
+    result.error,
+    (result.result as any)?.error,
+    (result.output as any)?.error,
+  );
+}
+
+export function canvasRunRawError(run?: CanvasRunRef | null) {
+  if (!run) {
+    return "";
+  }
+  const failedResult = [...(run.node_results || [])]
+    .reverse()
+    .find((result) => {
+      const status = String(
+        result.status || (result.result as any)?.status || "",
+      )
+        .trim()
+        .toLowerCase();
+      return status === "fail" || status === "error";
+    });
+  return firstCanvasErrorText(
+    run.error,
+    canvasNodeResultRawError(failedResult),
+    (run.output as any)?.error,
+  );
+}
+
+export function canvasNodeResultErrorMessage(
+  result?: CanvasNodeResultRef | null,
+  fallback = "节点运行失败",
+) {
+  return canvasExecutionErrorMessage(
+    canvasNodeResultRawError(result),
+    fallback,
+  );
+}
+
+export function canvasRunErrorMessage(
+  run?: CanvasRunRef | null,
+  fallback = "画布运行失败",
+) {
+  return canvasExecutionErrorMessage(canvasRunRawError(run), fallback);
+}
+
+export function canvasExecutionErrorMessage(
+  error: unknown,
+  fallback = "运行失败",
+) {
+  const raw = canvasErrorText(error);
+  if (!raw) {
+    return fallback;
+  }
+  if (
+    raw.includes("InputImageSensitiveContentDetected") ||
+    raw.includes("PrivacyInformation")
+  ) {
+    return "参考图片可能包含真人或隐私信息，请更换参考图后重试。";
+  }
+  if (raw.includes("资产当前版本已变化")) {
+    return "引用的资产版本已变化，请刷新画布后重试。";
+  }
+  return raw.length > 500 ? `${raw.slice(0, 497)}...` : raw;
+}
+
+function firstCanvasErrorText(...values: unknown[]) {
+  for (const value of values) {
+    const text = canvasErrorText(value);
+    if (text) {
+      return text;
+    }
+  }
+  return "";
+}
+
+function canvasErrorText(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (value instanceof Error) {
+    return value.message.trim();
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "";
+  }
+  const record = value as Record<string, unknown>;
+  const nested = firstCanvasErrorText(record.error, record.message, record.msg);
+  if (nested) {
+    return nested;
+  }
+  const code = canvasErrorText(record.code);
+  const message = canvasErrorText(record.detail);
+  return [code, message].filter(Boolean).join(": ");
 }
 
 function normalizeCanvasExecutionPlanRef(

@@ -29,6 +29,7 @@ export function useTransientFlowNodes(
 export function NodeActionMenu({
   point,
   canShowDetail,
+  canCopy = true,
   onClose,
   onCopy,
   onDelete,
@@ -36,6 +37,7 @@ export function NodeActionMenu({
 }: {
   point: { x: number; y: number };
   canShowDetail: boolean;
+  canCopy?: boolean;
   onClose: () => void;
   onCopy: () => void;
   onDelete: () => void;
@@ -55,10 +57,12 @@ export function NodeActionMenu({
             <span>详情</span>
           </button>
         ) : null}
-        <button type="button" onClick={onCopy}>
-          <Copy size={15} />
-          <span>复制</span>
-        </button>
+        {canCopy ? (
+          <button type="button" onClick={onCopy}>
+            <Copy size={15} />
+            <span>复制</span>
+          </button>
+        ) : null}
         <button type="button" className="is-danger" onClick={onDelete}>
           <Trash2 size={15} />
           <span>删除</span>

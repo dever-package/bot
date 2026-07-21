@@ -82,8 +82,13 @@ func (m MappedInput) NativeBody() map[string]any {
 	body := map[string]any{}
 	mappedKeys := map[string]bool{}
 	mappedNativeKeys := map[string]bool{}
-	for _, param := range m.Params {
-		assignNativeValue(body, param.NativeKey, param.Value)
+	for _, param := range nativeMappedParamOrder(m.Params) {
+		assignNativeValue(
+			body,
+			param.NativeKey,
+			param.Value,
+			isFixedNativeRangeParam(param),
+		)
 		for _, key := range param.InputKeys() {
 			mappedKeys[key] = true
 		}
@@ -99,9 +104,36 @@ func (m MappedInput) NativeBody() map[string]any {
 		if key == "" || isNativeInputKeyExcluded(key) || mappedKeys[key] || mappedNativeKeys[key] || isEmptyNativeValue(value) {
 			continue
 		}
-		assignNativeValue(body, key, value)
+		assignNativeValue(body, key, value, false)
 	}
 	return body
+}
+
+func nativeMappedParamOrder(params []MappedParam) []MappedParam {
+	ordered := make([]MappedParam, 0, len(params))
+	for _, param := range params {
+		if !isFixedNativeRangeParam(param) {
+			ordered = append(ordered, param)
+		}
+	}
+	for _, param := range params {
+		if isFixedNativeRangeParam(param) {
+			ordered = append(ordered, param)
+		}
+	}
+	return ordered
+}
+
+func isFixedNativeRangeParam(param MappedParam) bool {
+	if !strings.EqualFold(strings.TrimSpace(param.ParamType), "fixed") {
+		return false
+	}
+	for _, segment := range parseNativePath(param.NativeKey) {
+		if segment.IsRange {
+			return true
+		}
+	}
+	return false
 }
 
 func (m MappedInput) PromptInput(excludedKeys map[string]bool) map[string]any {
@@ -146,7 +178,7 @@ func (m MappedInput) PromptOptions(textTitle string) PromptOptions {
 	}
 }
 
-func assignNativeValue(body map[string]any, key string, value any) {
+func assignNativeValue(body map[string]any, key string, value any, onlyExistingRange bool) {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return
@@ -157,7 +189,7 @@ func assignNativeValue(body map[string]any, key string, value any) {
 		body[key] = value
 		return
 	}
-	assignNativePathValue(body, segments, value)
+	assignNativePathValue(body, segments, value, onlyExistingRange)
 }
 
 func nativeRootKey(path string) string {
@@ -249,7 +281,12 @@ func parseNativeIndexSegment(value string) (nativePathSegment, bool) {
 	}, true
 }
 
-func assignNativePathValue(container any, segments []nativePathSegment, value any) any {
+func assignNativePathValue(
+	container any,
+	segments []nativePathSegment,
+	value any,
+	onlyExistingRange bool,
+) any {
 	if len(segments) == 0 {
 		return value
 	}
@@ -258,7 +295,13 @@ func assignNativePathValue(container any, segments []nativePathSegment, value an
 	if segment.IsIndex {
 		items, _ := container.([]any)
 		if segment.IsRange {
-			return assignNativeRangeValue(items, segment, segments[1:], value)
+			return assignNativeRangeValue(
+				items,
+				segment,
+				segments[1:],
+				value,
+				onlyExistingRange,
+			)
 		}
 		items = ensureNativeArrayLength(items, segment.Index+1)
 		if len(segments) == 1 {
@@ -270,7 +313,12 @@ func assignNativePathValue(container any, segments []nativePathSegment, value an
 		if !nativeContainerMatches(child, segments[1]) {
 			child = newNativeContainer(segments[1])
 		}
-		items[segment.Index] = assignNativePathValue(child, segments[1:], value)
+		items[segment.Index] = assignNativePathValue(
+			child,
+			segments[1:],
+			value,
+			onlyExistingRange,
+		)
 		return items
 	}
 
@@ -287,12 +335,25 @@ func assignNativePathValue(container any, segments []nativePathSegment, value an
 	if !nativeContainerMatches(child, segments[1]) {
 		child = newNativeContainer(segments[1])
 	}
-	mapped[segment.Key] = assignNativePathValue(child, segments[1:], value)
+	mapped[segment.Key] = assignNativePathValue(
+		child,
+		segments[1:],
+		value,
+		onlyExistingRange,
+	)
 	return mapped
 }
 
 // Range segments broadcast scalar values and map list values by position.
-func assignNativeRangeValue(items []any, segment nativePathSegment, segments []nativePathSegment, value any) []any {
+// Fixed structural fields are applied after attachment values and only decorate
+// native items that the attachment mapping actually created.
+func assignNativeRangeValue(
+	items []any,
+	segment nativePathSegment,
+	segments []nativePathSegment,
+	value any,
+	onlyExistingRange bool,
+) []any {
 	values, isList := nativeRangeValues(value)
 	for index := segment.Index; index <= segment.EndIndex; index++ {
 		currentValue := value
@@ -302,6 +363,9 @@ func assignNativeRangeValue(items []any, segment nativePathSegment, segments []n
 				break
 			}
 			currentValue = values[offset]
+		}
+		if onlyExistingRange && len(segments) > 0 && (index >= len(items) || items[index] == nil) {
+			continue
 		}
 
 		items = ensureNativeArrayLength(items, index+1)
@@ -314,7 +378,12 @@ func assignNativeRangeValue(items []any, segment nativePathSegment, segments []n
 		if !nativeContainerMatches(child, segments[0]) {
 			child = newNativeContainer(segments[0])
 		}
-		items[index] = assignNativePathValue(child, segments, currentValue)
+		items[index] = assignNativePathValue(
+			child,
+			segments,
+			currentValue,
+			onlyExistingRange,
+		)
 	}
 	return items
 }

@@ -21,3 +21,32 @@ export function moveOrderedItemById<T>(
   next.splice(targetIndex + (placement === "after" ? 1 : 0), 0, source);
   return next;
 }
+
+export function orderItemsByIds<T>(
+  items: T[],
+  orderedIds: string[],
+  itemId: (item: T) => string,
+) {
+  if (!orderedIds.length) {
+    return items;
+  }
+  const itemsById = new Map(items.map((item) => [itemId(item), item]));
+  const orderedItems: T[] = [];
+  for (const id of orderedIds) {
+    if (itemsById.has(id)) {
+      orderedItems.push(itemsById.get(id) as T);
+    }
+  }
+  const includedIds = new Set(orderedItems.map(itemId));
+  return [
+    ...orderedItems,
+    ...items.filter((item) => !includedIds.has(itemId(item))),
+  ];
+}
+
+export function sameOrderedIds(left: string[], right: string[]) {
+  return (
+    left.length === right.length &&
+    left.every((itemId, index) => itemId === right[index])
+  );
+}

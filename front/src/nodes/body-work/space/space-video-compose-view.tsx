@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import {
   Clapperboard,
   Loader2,
@@ -8,7 +8,11 @@ import {
   Volume2,
 } from "lucide-react";
 import type { ComposerAssetItem } from "./space-prompt-composer";
-import { moveOrderedItemById } from "./space-ordered-list";
+import {
+  moveOrderedItemById,
+  orderItemsByIds,
+  sameOrderedIds,
+} from "./space-ordered-list";
 import {
   emptyVideoComposition,
   VIDEO_COMPOSE_TRANSITIONS,
@@ -25,10 +29,13 @@ import {
   type VideoComposeClipPanel,
 } from "./space-video-compose-card";
 import { VideoComposeAssetPicker } from "./space-video-compose-picker";
-import {
-  CanvasNodeContentView,
-  hasCanvasContent,
-} from "./space-content-view";
+import { CanvasNodeContentView, hasCanvasContent } from "./space-content-view";
+
+const VIDEO_COMPOSE_RESOLUTION_OPTIONS = [
+  { value: "1280x720", label: "720P" },
+  { value: "1920x1080", label: "1080P" },
+  { value: "3840x2160", label: "4K" },
+] as const;
 
 type PickerTarget = "clip" | "original" | "speech";
 
@@ -57,13 +64,23 @@ export function VideoComposeView({
   const [selectedClipId, setSelectedClipId] = useState(
     value.clips[0]?.id || "",
   );
-  const [activePanel, setActivePanel] = useState<VideoComposeClipPanel | "">("");
+  const [activePanel, setActivePanel] = useState<VideoComposeClipPanel | "">(
+    "",
+  );
   const [pickerTarget, setPickerTarget] = useState<PickerTarget | "">("");
   const [draggedId, setDraggedId] = useState("");
+  const [dragOverId, setDragOverId] = useState("");
+  const [dragOrder, setDragOrder] = useState<string[]>([]);
   const [dragPlacement, setDragPlacement] = useState<"before" | "after">(
     "before",
   );
   const gridRef = useRef<HTMLDivElement>(null);
+  const draggedIdRef = useRef("");
+  const dragOrderRef = useRef<string[]>([]);
+  const visibleClips = useMemo(
+    () => orderItemsByIds(value.clips, dragOrder, (clip) => clip.id),
+    [dragOrder, value.clips],
+  );
   const selectedClip =
     value.clips.find((clip) => clip.id === selectedClipId) || value.clips[0];
   const selectedItem = selectedClip
@@ -122,6 +139,79 @@ export function VideoComposeView({
     }
     setPickerTarget("");
   };
+  const beginClipDrag = (clipId: string) => {
+    const order = value.clips.map((clip) => clip.id);
+    draggedIdRef.current = clipId;
+    dragOrderRef.current = order;
+    setDraggedId(clipId);
+    setDragOverId("");
+    setDragOrder(order);
+  };
+  const previewClipOrder = (
+    targetId: string,
+    event: DragEvent<HTMLElement>,
+  ) => {
+    const sourceId = draggedIdRef.current;
+    const currentOrder = dragOrderRef.current;
+    if (
+      !sourceId ||
+      !targetId ||
+      sourceId === targetId ||
+      !currentOrder.includes(sourceId) ||
+      !currentOrder.includes(targetId)
+    ) {
+      return;
+    }
+    const targetRect = event.currentTarget.getBoundingClientRect();
+    const gridRect = event.currentTarget.parentElement?.getBoundingClientRect();
+    const hasMultipleColumns = Boolean(
+      gridRect && targetRect.width * 1.5 < gridRect.width,
+    );
+    const placement = hasMultipleColumns
+      ? event.clientX < targetRect.left + targetRect.width / 2
+        ? "before"
+        : "after"
+      : event.clientY < targetRect.top + targetRect.height / 2
+        ? "before"
+        : "after";
+    const nextOrder = moveOrderedItemById(
+      currentOrder,
+      sourceId,
+      targetId,
+      placement,
+      (itemId) => itemId,
+    );
+    setDragOverId(targetId);
+    setDragPlacement(placement);
+    if (sameOrderedIds(currentOrder, nextOrder)) {
+      return;
+    }
+    dragOrderRef.current = nextOrder;
+    setDragOrder(nextOrder);
+  };
+  const resetClipDrag = () => {
+    draggedIdRef.current = "";
+    dragOrderRef.current = [];
+    setDraggedId("");
+    setDragOverId("");
+    setDragOrder([]);
+  };
+  const commitClipOrder = () => {
+    const clips = orderItemsByIds(
+      value.clips,
+      dragOrderRef.current,
+      (clip) => clip.id,
+    );
+    if (
+      !sameOrderedIds(
+        value.clips.map((clip) => clip.id),
+        clips.map((clip) => clip.id),
+      )
+    ) {
+      update({ ...value, clips });
+    }
+    resetClipDrag();
+  };
 
   const editor = (
     <section
@@ -138,7 +228,9 @@ export function VideoComposeView({
           <small>
             {value.clips.length} 个镜头
             {totalDuration > 0 ? ` · ${formatDuration(totalDuration)} 秒` : ""}
-            {blockingIssues.length ? ` · ${blockingIssues.length} 项待处理` : ""}
+            {blockingIssues.length
+              ? ` · ${blockingIssues.length} 项待处理`
+              : ""}
           </small>
         </div>
         <div>
@@ -182,7 +274,7 @@ export function VideoComposeView({
         ref={gridRef}
         className="ws-video-compose-grid nodrag nowheel"
         onDragOver={(event) => {
-          if (!draggedId || !gridRef.current) {
+          if (!draggedIdRef.current || !gridRef.current) {
             return;
           }
           const bounds = gridRef.current.getBoundingClientRect();
@@ -194,17 +286,24 @@ export function VideoComposeView({
         }}
       >
         {value.clips.length ? (
-          value.clips.map((clip, index) => (
+          visibleClips.map((clip, index) => (
             <VideoComposeClipCard
               key={clip.id}
               clip={clip}
               index={index}
-              last={index === value.clips.length - 1}
+              last={index === visibleClips.length - 1}
               item={referenceMap.get(
                 videoComposeReferenceKey(clip.visualVideo),
               )}
               selected={clip.id === selectedClip?.id}
               readonly={readonly}
+              wholeCardDraggable={fullScreen}
+              dragging={draggedId === clip.id}
+              dropPlacement={
+                dragOverId === clip.id && draggedId !== clip.id
+                  ? dragPlacement
+                  : undefined
+              }
               onSelect={() => setSelectedClipId(clip.id)}
               onPanel={(panel) => openPanel(clip.id, panel)}
               onRemove={() => {
@@ -220,36 +319,10 @@ export function VideoComposeView({
                   updateClip(clip.id, { duration });
                 }
               }}
-              onDragStart={() => setDraggedId(clip.id)}
-              onDragOver={(event) => {
-                event.preventDefault();
-                const bounds = event.currentTarget.getBoundingClientRect();
-                const sameRow = Math.abs(event.clientY - (bounds.top + bounds.height / 2)) <
-                  bounds.height / 3;
-                setDragPlacement(
-                  sameRow
-                    ? event.clientX < bounds.left + bounds.width / 2
-                      ? "before"
-                      : "after"
-                    : event.clientY < bounds.top + bounds.height / 2
-                      ? "before"
-                      : "after",
-                );
-              }}
-              onDrop={() => {
-                const clips = moveOrderedItemById(
-                  value.clips,
-                  draggedId,
-                  clip.id,
-                  dragPlacement,
-                  (item) => item.id,
-                );
-                if (clips !== value.clips) {
-                  update({ ...value, clips });
-                }
-                setDraggedId("");
-              }}
-              onDragEnd={() => setDraggedId("")}
+              onDragStart={() => beginClipDrag(clip.id)}
+              onDragOver={(event) => previewClipOrder(clip.id, event)}
+              onDrop={commitClipOrder}
+              onDragEnd={resetClipDrag}
             />
           ))
         ) : (
@@ -338,11 +411,7 @@ function VideoComposeClipInspector({
   return (
     <div className="ws-video-compose-inspector nodrag nowheel">
       <strong>
-        {panel === "subtitle"
-          ? "字幕"
-          : panel === "sound"
-            ? "声音"
-            : "转场"}
+        {panel === "subtitle" ? "字幕" : panel === "sound" ? "声音" : "转场"}
       </strong>
       {panel === "subtitle" ? (
         <textarea
@@ -522,6 +591,9 @@ function VideoComposeGlobalSettings({
   readonly: boolean;
   onChange: (composition: CanvasVideoComposition) => void;
 }) {
+  const knownResolution = VIDEO_COMPOSE_RESOLUTION_OPTIONS.some(
+    (option) => option.value === composition.settings.resolution,
+  );
   return (
     <div className="ws-video-compose-global nodrag">
       <label>
@@ -539,9 +611,16 @@ function VideoComposeGlobalSettings({
             })
           }
         >
-          <option value="1280x720">720P</option>
-          <option value="1920x1080">1080P</option>
-          <option value="3840x2160">4K</option>
+          {!knownResolution ? (
+            <option value={composition.settings.resolution}>
+              {composition.settings.resolution.replace("x", " × ")}
+            </option>
+          ) : null}
+          {VIDEO_COMPOSE_RESOLUTION_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
         </select>
       </label>
       <label>
@@ -625,7 +704,13 @@ function VideoComposePreview({
             className="ws-video-compose-final-output"
           />
         ) : videoUrl ? (
-          <video key={videoUrl} src={videoUrl} controls playsInline preload="metadata" />
+          <video
+            key={videoUrl}
+            src={videoUrl}
+            controls
+            playsInline
+            preload="metadata"
+          />
         ) : item?.preview.imageUrl ? (
           <img src={item.preview.imageUrl} alt="" />
         ) : (
@@ -710,14 +795,20 @@ function updateSpeechTrack(
 }
 
 function uniqueClipId() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return `clip-${crypto.randomUUID()}`;
   }
   return `clip-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function uniqueTrackId() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return `speech-${crypto.randomUUID()}`;
   }
   return `speech-${Date.now()}-${Math.random().toString(36).slice(2)}`;

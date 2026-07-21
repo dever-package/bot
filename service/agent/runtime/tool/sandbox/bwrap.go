@@ -125,6 +125,7 @@ func workspaceBwrapArgs(config Config, workspace string, env []string, commandNa
 }
 
 func baseBwrapArgs(config Config) []string {
+	runtime := discoverHostRuntime()
 	args := []string{
 		"--die-with-parent",
 		"--new-session",
@@ -150,12 +151,13 @@ func baseBwrapArgs(config Config) []string {
 		"/etc/ssl/certs",
 		"/etc/ca-certificates",
 	})
+	args = appendReadOnlyBinds(args, runtime.roots)
 	args = appendResolvedReadOnlyBind(args, "/etc/resolv.conf", "/etc/resolv.conf")
 	return append(args,
 		"--proc", "/proc",
 		"--dev", "/dev",
 		"--tmpfs", "/tmp",
-		"--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin",
+		"--setenv", "PATH", strings.Join(runtime.paths, string(filepath.ListSeparator)),
 		"--setenv", "LANG", "C.UTF-8",
 		"--setenv", "LC_ALL", "C.UTF-8",
 	)

@@ -158,6 +158,7 @@ export type PowerParam = {
   required?: boolean;
   upload_rule_id?: number;
   max_files?: number;
+  accepted_kinds?: AssetKind[];
   sort?: number;
   options?: PowerParamOption[];
   asset_kinds?: AssetKind[];
@@ -325,7 +326,7 @@ export type CanvasStoryboardItemType =
   | "character"
   | "scene"
   | "prop"
-  | "shot_frame"
+  | "shot_image"
   | "shot"
   | "speech"
   | "lip_sync"
@@ -338,7 +339,6 @@ export type CanvasStoryboardItemConfig = {
   generatedPrompt: string;
   sourceNodeIds?: string[];
   shotId?: string;
-  frameRole?: "start" | "end";
   speechId?: string;
   speechIds?: string[];
   characterId?: string;
@@ -381,6 +381,7 @@ export type SpaceCanvasNode = {
   resultRef?: CanvasResultRef;
   resultOutput?: unknown;
   resultView?: CanvasResultViewState;
+  runError?: string;
   local?: boolean;
 };
 

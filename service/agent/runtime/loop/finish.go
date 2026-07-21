@@ -15,101 +15,101 @@ import (
 )
 
 type runState struct {
-	execution              execution
-	repository             repository
-	seq                    int
-	phase                  string
-	modelStep              int
-	input                  map[string]any
-	history                []any
-	lastText               string
-	artifacts              map[string]any
-	activities             []map[string]any
-	loaded                 []agentmodel.LoadedSkillRef
-	toolReceipts           []toolReceipt
-	activeToolExecution    *toolExecutionMarker
-	pendingTools           []botprotocol.ToolCall
-	pendingIndex           int
-	pendingModelText       string
-	awaitingDelivery       bool
-	deliveryContinuations  int
-	completionReviews      int
-	requiredToolName       string
-	documentID             uint64
-	knowledgeUsed          bool
-	knowledgeContinuations int
-	finalStatus            string
-	finalText              string
-	finalMessage           string
-	finalOutput            map[string]any
-	finalCommitted         bool
-	completed              bool
+	execution             execution
+	repository            repository
+	seq                   int
+	phase                 string
+	modelStep             int
+	input                 map[string]any
+	history               []any
+	lastText              string
+	artifacts             map[string]any
+	activities            []map[string]any
+	loaded                []agentmodel.LoadedSkillRef
+	toolReceipts          []toolReceipt
+	activeToolExecution   *toolExecutionMarker
+	pendingTools          []botprotocol.ToolCall
+	pendingIndex          int
+	pendingModelText      string
+	awaitingDelivery      bool
+	deliveryContinuations int
+	completionReviews     int
+	requiredToolName      string
+	documentID            uint64
+	knowledgeUsed         bool
+	knowledgeNodeIDs      map[uint64]struct{}
+	finalStatus           string
+	finalText             string
+	finalMessage          string
+	finalOutput           map[string]any
+	finalCommitted        bool
+	completed             bool
 }
 
 func newRunState(execution execution) runState {
 	checkpoint := normalizeCheckpoint(execution.checkpoint)
 	return runState{
-		execution:              execution,
-		repository:             newRepository(),
-		seq:                    checkpoint.Seq,
-		phase:                  checkpoint.Phase,
-		modelStep:              checkpoint.ModelStep,
-		input:                  cloneMap(checkpoint.Input),
-		history:                append([]any(nil), execution.history...),
-		lastText:               checkpoint.LastText,
-		artifacts:              cloneMap(checkpoint.Artifacts),
-		activities:             append([]map[string]any(nil), checkpoint.Activities...),
-		loaded:                 agentmodel.NormalizeLoadedSkillRefs(checkpoint.LoadedSkills),
-		toolReceipts:           append([]toolReceipt(nil), checkpoint.ToolReceipts...),
-		activeToolExecution:    cloneToolExecutionMarker(checkpoint.ActiveToolExecution),
-		pendingTools:           append([]botprotocol.ToolCall(nil), checkpoint.PendingTools...),
-		pendingIndex:           checkpoint.PendingIndex,
-		pendingModelText:       checkpoint.PendingModelText,
-		awaitingDelivery:       checkpoint.AwaitingDelivery,
-		deliveryContinuations:  checkpoint.DeliveryContinuations,
-		completionReviews:      checkpoint.CompletionReviews,
-		requiredToolName:       checkpoint.RequiredToolName,
-		documentID:             checkpoint.DocumentID,
-		knowledgeUsed:          checkpoint.KnowledgeUsed,
-		knowledgeContinuations: checkpoint.KnowledgeContinuations,
-		finalStatus:            checkpoint.FinalStatus,
-		finalText:              checkpoint.FinalText,
-		finalMessage:           checkpoint.FinalMessage,
-		finalOutput:            cloneMap(checkpoint.FinalOutput),
-		finalCommitted:         checkpoint.FinalCommitted,
+		execution:             execution,
+		repository:            newRepository(),
+		seq:                   checkpoint.Seq,
+		phase:                 checkpoint.Phase,
+		modelStep:             checkpoint.ModelStep,
+		input:                 cloneMap(checkpoint.Input),
+		history:               append([]any(nil), execution.history...),
+		lastText:              checkpoint.LastText,
+		artifacts:             cloneMap(checkpoint.Artifacts),
+		activities:            append([]map[string]any(nil), checkpoint.Activities...),
+		loaded:                agentmodel.NormalizeLoadedSkillRefs(checkpoint.LoadedSkills),
+		toolReceipts:          append([]toolReceipt(nil), checkpoint.ToolReceipts...),
+		activeToolExecution:   cloneToolExecutionMarker(checkpoint.ActiveToolExecution),
+		pendingTools:          append([]botprotocol.ToolCall(nil), checkpoint.PendingTools...),
+		pendingIndex:          checkpoint.PendingIndex,
+		pendingModelText:      checkpoint.PendingModelText,
+		awaitingDelivery:      checkpoint.AwaitingDelivery,
+		deliveryContinuations: checkpoint.DeliveryContinuations,
+		completionReviews:     checkpoint.CompletionReviews,
+		requiredToolName:      checkpoint.RequiredToolName,
+		documentID:            checkpoint.DocumentID,
+		knowledgeUsed:         checkpoint.KnowledgeUsed,
+		knowledgeNodeIDs:      knowledgeNodeIDSet(checkpoint.KnowledgeNodeIDs),
+		finalStatus:           checkpoint.FinalStatus,
+		finalText:             checkpoint.FinalText,
+		finalMessage:          checkpoint.FinalMessage,
+		finalOutput:           cloneMap(checkpoint.FinalOutput),
+		finalCommitted:        checkpoint.FinalCommitted,
 	}
 }
 
 func (state *runState) Checkpoint(seq int) runCheckpoint {
 	return runCheckpoint{
-		Version:                runtimeSnapshotVersion,
-		Phase:                  state.phase,
-		ModelStep:              state.modelStep,
-		Seq:                    seq,
-		Input:                  cloneMap(state.input),
-		HistoryDelta:           historyCheckpointDelta(state),
-		LastText:               state.lastText,
-		Artifacts:              cloneMap(state.artifacts),
-		Activities:             append([]map[string]any(nil), state.activities...),
-		LoadedSkills:           agentmodel.NormalizeLoadedSkillRefs(state.loaded),
-		ToolReceipts:           append([]toolReceipt(nil), state.toolReceipts...),
-		ActiveToolExecution:    cloneToolExecutionMarker(state.activeToolExecution),
-		MediaDelta:             mediaCheckpointDelta(state),
-		PendingTools:           append([]botprotocol.ToolCall(nil), state.pendingTools...),
-		PendingIndex:           state.pendingIndex,
-		PendingModelText:       state.pendingModelText,
-		AwaitingDelivery:       state.awaitingDelivery,
-		DeliveryContinuations:  state.deliveryContinuations,
-		CompletionReviews:      state.completionReviews,
-		RequiredToolName:       state.requiredToolName,
-		DocumentID:             state.documentID,
-		KnowledgeUsed:          state.knowledgeUsed,
-		KnowledgeContinuations: state.knowledgeContinuations,
-		FinalStatus:            state.finalStatus,
-		FinalText:              state.finalText,
-		FinalMessage:           state.finalMessage,
-		FinalOutput:            cloneMap(state.finalOutput),
-		FinalCommitted:         state.finalCommitted,
+		Version:               runtimeSnapshotVersion,
+		Phase:                 state.phase,
+		ModelStep:             state.modelStep,
+		Seq:                   seq,
+		Input:                 cloneMap(state.input),
+		HistoryDelta:          historyCheckpointDelta(state),
+		LastText:              state.lastText,
+		Artifacts:             cloneMap(state.artifacts),
+		Activities:            append([]map[string]any(nil), state.activities...),
+		LoadedSkills:          agentmodel.NormalizeLoadedSkillRefs(state.loaded),
+		ToolReceipts:          append([]toolReceipt(nil), state.toolReceipts...),
+		ActiveToolExecution:   cloneToolExecutionMarker(state.activeToolExecution),
+		MediaDelta:            mediaCheckpointDelta(state),
+		PendingTools:          append([]botprotocol.ToolCall(nil), state.pendingTools...),
+		PendingIndex:          state.pendingIndex,
+		PendingModelText:      state.pendingModelText,
+		AwaitingDelivery:      state.awaitingDelivery,
+		DeliveryContinuations: state.deliveryContinuations,
+		CompletionReviews:     state.completionReviews,
+		RequiredToolName:      state.requiredToolName,
+		DocumentID:            state.documentID,
+		KnowledgeUsed:         state.knowledgeUsed,
+		KnowledgeNodeIDs:      sortedKnowledgeNodeIDs(state.knowledgeNodeIDs),
+		FinalStatus:           state.finalStatus,
+		FinalText:             state.finalText,
+		FinalMessage:          state.finalMessage,
+		FinalOutput:           cloneMap(state.finalOutput),
+		FinalCommitted:        state.finalCommitted,
 	}
 }
 

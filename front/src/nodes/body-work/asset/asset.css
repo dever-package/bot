@@ -144,6 +144,23 @@
   color: #17201c;
 }
 
+.wb-asset-browser-actions > button.wb-asset-local-upload {
+  width: auto;
+  min-width: 92px;
+  gap: 6px;
+  border: 1px solid #d8ddda;
+  background: #fff;
+  color: #25312b;
+  padding: 0 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.wb-asset-browser-actions > button.wb-asset-local-upload:hover:not(:disabled) {
+  border-color: #b6c0bb;
+  background: #f4f6f5;
+}
+
 .wb-asset-browser-actions > button:disabled {
   cursor: default;
   opacity: 0.45;

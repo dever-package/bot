@@ -59,7 +59,7 @@ func (s Service) execute(ctx context.Context, execInfo *skillInstallExecution) {
 		s.fail(execInfo, fmt.Errorf("技能安装工作区超过资源限制: %w", err))
 		return
 	}
-	sources, err := collectSkillSources(tmpDir, plan, provenance, firstHTTPURL(execInfo.Input))
+	sources, err := collectSkillSources(tmpDir, plan, provenance, installFallbackSourceURL(execInfo.Input))
 	if err != nil {
 		s.fail(execInfo, err)
 		return

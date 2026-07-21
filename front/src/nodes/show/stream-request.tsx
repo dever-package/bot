@@ -337,12 +337,13 @@ export function StreamPowerRunner({
       ) {
         setSelectedSource({ power: powerKey, id: config.selectedSourceID })
       }
+
+      const replayState = buildPowerParamReplayState(rows, initialInput)
+      appliedHistoryInputRef.current = ''
       setPowerParams(rows)
-      setParamValues(
-        mergePowerParamValues(rows, buildDefaultParamValues(rows), initialInput)
-      )
-      setParamFiles(buildReplayParamFiles(rows, initialInput))
-      setParamReferenceContents(replayReferenceContents(initialInput))
+      setParamValues(replayState.values)
+      setParamFiles(replayState.files)
+      setParamReferenceContents(replayState.referenceContents)
       setParamsLoading(false)
     }
 
@@ -660,33 +661,35 @@ export function StreamPowerRunner({
       return
     }
     const selectionKey = `${history?.scopeKey || ''}:${selectedID}`
-    if (appliedHistoryInputRef.current === selectionKey) {
-      return
-    }
-    appliedHistoryInputRef.current = selectionKey
-    // Parameter reloads may replay input, but must not restore a history
-    // source over the user's explicit model selection.
     if (appliedHistorySourceRef.current !== selectionKey) {
       appliedHistorySourceRef.current = selectionKey
       if (
+        sourceRule === SOURCE_RULE_PICK &&
         selectedHistorySourceTargetID > 0 &&
+        powerSources.some(
+          (source) => source.id === String(selectedHistorySourceTargetID)
+        ) &&
         String(selectedHistorySourceTargetID) !== activeSelectedSourceID
       ) {
         setSelectedSource({
           power: powerKey,
           id: String(selectedHistorySourceTargetID),
         })
+        return
       }
     }
-    setParamValues(
-      mergePowerParamValues(
-        powerParams,
-        buildDefaultParamValues(powerParams),
-        selectedHistoryInput
-      )
+    if (appliedHistoryInputRef.current === selectionKey) {
+      return
+    }
+
+    const replayState = buildPowerParamReplayState(
+      powerParams,
+      selectedHistoryInput
     )
-    setParamFiles(buildReplayParamFiles(powerParams, selectedHistoryInput))
-    setParamReferenceContents(replayReferenceContents(selectedHistoryInput))
+    appliedHistoryInputRef.current = selectionKey
+    setParamValues(replayState.values)
+    setParamFiles(replayState.files)
+    setParamReferenceContents(replayState.referenceContents)
   }, [
     activeSelectedSourceID,
     history?.scopeKey,
@@ -694,8 +697,10 @@ export function StreamPowerRunner({
     historyController.selectedID,
     powerKey,
     powerParams,
+    powerSources,
     selectedHistoryInput,
     selectedHistorySourceTargetID,
+    sourceRule,
   ])
   const activeHistoryItem = historyController.selectedItem
   const activeStatus = showingLiveResult
@@ -1220,6 +1225,17 @@ function mergePowerParamValues(
     next[key] = value
   }
   return next
+}
+
+function buildPowerParamReplayState(
+  params: PowerParam[],
+  input: Record<string, unknown>
+) {
+  return {
+    values: mergePowerParamValues(params, buildDefaultParamValues(params), input),
+    files: buildReplayParamFiles(params, input),
+    referenceContents: replayReferenceContents(input),
+  }
 }
 
 function replayParamValue(value: unknown) {

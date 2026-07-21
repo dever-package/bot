@@ -596,6 +596,7 @@
           "requestApi": "/bot/admin/skill_install/run",
           "streamApi": "/bot/admin/skill_install/stream",
           "stopApi": "/bot/admin/skill_install/stop",
+          "runStatusApi": "",
           "sessionEnabled": false,
           "historyEnabled": false,
           "newSessionEnabled": false,

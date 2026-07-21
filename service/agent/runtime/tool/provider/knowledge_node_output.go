@@ -8,11 +8,9 @@ import (
 )
 
 type knowledgeNodeView struct {
-	ID            uint64              `json:"id"`
+	NodeID        uint64              `json:"node_id"`
 	BaseID        uint64              `json:"knowledge_base_id"`
-	DirID         uint64              `json:"dir_id,omitempty"`
 	DirPath       string              `json:"dir_path,omitempty"`
-	DocID         uint64              `json:"doc_id,omitempty"`
 	ParentID      uint64              `json:"parent_id,omitempty"`
 	NodeType      string              `json:"node_type,omitempty"`
 	Title         string              `json:"title,omitempty"`
@@ -52,11 +50,9 @@ func knowledgeNodeViews(nodes []knowledgeservice.KnowledgeNodeResult, previewRun
 func knowledgeNodeViewFromResult(node knowledgeservice.KnowledgeNodeResult, previewRunes int, includeText bool) knowledgeNodeView {
 	text := firstKnowledgeNodeText(node.PlainText, node.Content)
 	view := knowledgeNodeView{
-		ID:        node.ID,
+		NodeID:    node.ID,
 		BaseID:    node.BaseID,
-		DirID:     node.DirID,
 		DirPath:   strings.TrimSpace(node.DirPath),
-		DocID:     node.DocID,
 		ParentID:  node.ParentID,
 		NodeType:  strings.TrimSpace(node.NodeType),
 		Title:     strings.TrimSpace(node.Title),

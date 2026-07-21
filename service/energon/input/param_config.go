@@ -9,22 +9,23 @@ import (
 )
 
 type PowerParam struct {
-	ID           uint64             `json:"id"`
-	PowerParamID uint64             `json:"power_param_id"`
-	Name         string             `json:"name"`
-	Key          string             `json:"key"`
-	Icon         string             `json:"icon,omitempty"`
-	Type         string             `json:"type"`
-	PreviewType  string             `json:"preview_type,omitempty"`
-	Usage        int16              `json:"usage"`
-	ValueType    string             `json:"value_type"`
-	DefaultValue string             `json:"default_value"`
-	Required     bool               `json:"required"`
-	UploadRuleID uint64             `json:"upload_rule_id,omitempty"`
-	MaxFiles     int                `json:"max_files,omitempty"`
-	AssetKinds   []string           `json:"asset_kinds,omitempty"`
-	Sort         int                `json:"sort"`
-	Options      []PowerParamOption `json:"options,omitempty"`
+	ID            uint64             `json:"id"`
+	PowerParamID  uint64             `json:"power_param_id"`
+	Name          string             `json:"name"`
+	Key           string             `json:"key"`
+	Icon          string             `json:"icon,omitempty"`
+	Type          string             `json:"type"`
+	PreviewType   string             `json:"preview_type,omitempty"`
+	Usage         int16              `json:"usage"`
+	ValueType     string             `json:"value_type"`
+	DefaultValue  string             `json:"default_value"`
+	Required      bool               `json:"required"`
+	UploadRuleID  uint64             `json:"upload_rule_id,omitempty"`
+	MaxFiles      int                `json:"max_files,omitempty"`
+	AcceptedKinds []string           `json:"accepted_kinds,omitempty"`
+	AssetKinds    []string           `json:"asset_kinds,omitempty"`
+	Sort          int                `json:"sort"`
+	Options       []PowerParamOption `json:"options,omitempty"`
 }
 
 type PowerParamOption struct {
@@ -226,12 +227,8 @@ func mergePowerParamOptions(current []PowerParamOption, incoming []PowerParamOpt
 		seen[option.ID] = struct{}{}
 		result = append(result, option)
 	}
-	sort.SliceStable(result, func(i, j int) bool {
-		if result[i].Sort != result[j].Sort {
-			return result[i].Sort < result[j].Sort
-		}
-		return result[i].ID < result[j].ID
-	})
+	// Inputs are already ordered within each service. Keeping append order makes
+	// the highest-priority source's options drive the automatic default.
 	return result
 }
 

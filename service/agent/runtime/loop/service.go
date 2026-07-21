@@ -183,6 +183,22 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 	toolReferences := attachBoundUploads(mediaReferences(resolvedReferences.Media), boundUploads)
 	toolReferences = withActiveSeriesReference(ctx, *session, toolReferences)
 	modelInput := runtimereference.ModelInput(input, parsedInput, resolvedReferences.Context)
+	if len(resolvedReferences.Media) > 0 {
+		powerConfig, configErr := s.gateway.PowerParamConfig(ctx, power.Key, 0)
+		if configErr == nil {
+			modelInput, configErr = bindResolvedMediaInput(
+				modelInput,
+				powerConfig.Params,
+				resolvedReferences.Media,
+			)
+		}
+		if configErr != nil {
+			_ = s.chat.CompleteRunTurn(ctx, runtimechat.RunTurnCompletion{
+				RequestID: requestID, Status: runStatusFail, Error: configErr.Error(),
+			})
+			return botprotocol.BuildErrorResponse(requestID, configErr).Payload()
+		}
+	}
 	if len(assembled.Context) > 0 {
 		modelInput["runtime_context"] = assembled.Context
 	}

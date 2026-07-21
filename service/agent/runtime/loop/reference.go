@@ -8,6 +8,7 @@ import (
 	runtimeartifact "github.com/dever-package/bot/service/agent/runtime/artifact"
 	runtimereference "github.com/dever-package/bot/service/agent/runtime/reference"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
+	energoninput "github.com/dever-package/bot/service/energon/input"
 )
 
 func mediaReferences(values []runtimereference.Media) []runtimeprovider.MediaReference {
@@ -25,6 +26,52 @@ func mediaReferences(values []runtimereference.Media) []runtimeprovider.MediaRef
 			URL:           current.URL,
 			ParameterKey:  current.Usage,
 		})
+	}
+	return result
+}
+
+func bindResolvedMediaInput(
+	input map[string]any,
+	params []energoninput.PowerParam,
+	values []runtimereference.Media,
+) (map[string]any, error) {
+	references := make([]energoninput.MediaReference, 0, len(values))
+	for _, current := range values {
+		references = append(references, energoninput.MediaReference{
+			ReferenceType: current.ReferenceType,
+			ReferenceID:   current.ReferenceID,
+			Kind:          current.Kind,
+			URL:           current.URL,
+			Usage:         current.Usage,
+		})
+	}
+	bound, err := energoninput.BindMediaReferences(input, params, references)
+	if err != nil {
+		return nil, err
+	}
+	return bound.Values, nil
+}
+
+func runtimeMediaReferences(values []energoninput.MediaReference) []runtimeprovider.MediaReference {
+	result := make([]runtimeprovider.MediaReference, 0, len(values))
+	for _, current := range values {
+		result = append(result, runtimeprovider.MediaReference{
+			ReferenceType: current.ReferenceType,
+			ReferenceID:   current.ReferenceID,
+			Kind:          current.Kind,
+			URL:           current.URL,
+			ParameterKey:  current.Usage,
+		})
+	}
+	return result
+}
+
+func modelMediaReferences(values []energoninput.MediaReference) []energoninput.MediaReference {
+	result := append([]energoninput.MediaReference(nil), values...)
+	for index := range result {
+		// Agent attachment usage describes the semantic agent parameter. The
+		// underlying text model may expose a different compatible media key.
+		result[index].StrictUsage = false
 	}
 	return result
 }

@@ -8,6 +8,12 @@ import (
 )
 
 const (
+	KnowledgeTreeToolName        = "list_knowledge_tree"
+	KnowledgeNodeSearchToolName  = "search_knowledge_nodes"
+	KnowledgeNodeOpenToolName    = "open_knowledge_node"
+	KnowledgeNodeExpandToolName  = "expand_knowledge_node"
+	KnowledgeNodeRelatedToolName = "find_related_knowledge"
+
 	knowledgeSearchPreviewRunes = 360
 	knowledgeOpenTextRunes      = 4000
 )
@@ -30,11 +36,11 @@ func knowledgeNodeTools(
 func knowledgeTreeTool(service knowledgeservice.Service, allowed map[uint64]knowledgeservice.KnowledgeBaseRuntime, baseProperty map[string]any, required []any) Tool {
 	return Tool{
 		Definition: knowledgeToolDefinition(
-			"list_knowledge_tree",
+			KnowledgeTreeToolName,
 			"知识库结构",
-			"浏览知识库节点结构。",
+			"浏览知识库节点结构；结果的 node_id 用于其他节点工具。",
 			knowledgeParameters(baseProperty, required, map[string]any{
-				"parent_id": integerProperty("父节点 ID"),
+				"parent_id": integerProperty("父知识节点 ID，使用节点结果的 node_id"),
 				"depth":     integerProperty("展开层数"),
 				"limit":     integerProperty("最多返回数量"),
 			}),
@@ -69,9 +75,9 @@ func knowledgeNodeSearchTool(service knowledgeservice.Service, allowed map[uint6
 	required = appendRequired(required, "query")
 	return Tool{
 		Definition: knowledgeToolDefinition(
-			"search_knowledge_nodes",
+			KnowledgeNodeSearchToolName,
 			"知识库搜索",
-			"检索与当前问题相关的知识节点。",
+			"检索与当前问题相关的知识节点；结果的 node_id 用于其他节点工具。",
 			knowledgeParameters(baseProperty, required, map[string]any{
 				"query": map[string]any{"type": "string", "description": "检索内容"},
 				"limit": integerProperty("最多返回数量"),
@@ -106,11 +112,11 @@ func knowledgeNodeOpenTool(service knowledgeservice.Service, allowed map[uint64]
 	required = appendRequired(required, "node_id")
 	return Tool{
 		Definition: knowledgeToolDefinition(
-			"open_knowledge_node",
+			KnowledgeNodeOpenToolName,
 			"知识库节点",
 			"读取指定知识节点正文及关系。",
 			knowledgeParameters(baseProperty, required, map[string]any{
-				"node_id": integerProperty("知识节点 ID"),
+				"node_id": integerProperty("节点搜索或知识树返回的 node_id"),
 			}),
 		),
 		Handle: func(ctx context.Context, call Call) (Result, error) {

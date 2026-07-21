@@ -153,6 +153,7 @@ func workspaceExecutionPayload(ctx context.Context, execution *workspacemodel.Ex
 	payload["start_node_id"] = strings.TrimSpace(execution.StartNodeID)
 	payload["single_node"] = execution.SingleNode == 1
 	payload["status"] = strings.TrimSpace(execution.Status)
+	payload["error"] = strings.TrimSpace(execution.Error)
 	payload["executed"] = execution.Executed
 	payload["total"] = execution.Total
 	if plan := mapValue(jsonValue(execution.Plan, map[string]any{})); plan != nil {
@@ -181,6 +182,7 @@ func workspaceExecutionListPayload(ctx context.Context, execution *workspacemode
 		"start_node_id": strings.TrimSpace(execution.StartNodeID),
 		"single_node":   execution.SingleNode == 1,
 		"status":        strings.TrimSpace(execution.Status),
+		"error":         strings.TrimSpace(execution.Error),
 		"executed":      execution.Executed,
 		"total":         execution.Total,
 		"pending_node":  firstWorkspaceWaitingNode(nodeResults),

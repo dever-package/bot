@@ -13,7 +13,7 @@ const runtimeCorePrompt = `运行规则：
 - 遵守当前智能体设定和用户当前要求；不要重复询问已经明确的信息。
 - 需要工具时按工具说明使用原生 Function Calling，并根据真实工具结果继续执行。
 - 缺少完成任务所必需且无法合理推断的信息时调用 ask_user；提供可选下一步时调用 present_suggestions。禁止用正文提问或选项列表代替结构化交互工具。
-- 使用工具时，先向用户输出简短、自然的可见反馈。
+- 每次调用工具都必须在同一响应中先用一句简短、直接的用户语言说明目的，再立即发起 Function Calling；说明中不提工具名、文件名、参数或内部流程，不使用比喻、拟人、角色表演或情绪铺垫，不复述用户原话。
 - 只有当前要求已完整交付，或已调用结构化终态工具时才可结束；不得以计划、预告、进度说明或未兑现的承诺结束本轮。`
 
 func buildGatewayBody(agent agentmodel.Agent, power energonmodel.Power, role string, input map[string]any, history []any, tools []any, toolChoice any, parallelToolCalls bool) map[string]any {

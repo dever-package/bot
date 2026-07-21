@@ -11,23 +11,25 @@ import (
 	projectmodel "github.com/dever-package/bot/model/project"
 	runtimeloop "github.com/dever-package/bot/service/agent/runtime/loop"
 	assetservice "github.com/dever-package/bot/service/asset"
+	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	teamservice "github.com/dever-package/bot/service/team"
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
 type CanvasAgentRunRequest struct {
-	FlowID        uint64
-	AssetCateID   uint64
-	NodeKey       string
-	NodeName      string
-	RoleID        uint64
-	AgentID       uint64
-	RequestID     string
-	Input         map[string]any
-	History       []any
-	OnStream      func(map[string]any)
-	PersistResult bool
+	FlowID          uint64
+	AssetCateID     uint64
+	NodeKey         string
+	NodeName        string
+	RoleID          uint64
+	AgentID         uint64
+	RequestID       string
+	Input           map[string]any
+	MediaReferences []energoninput.MediaReference
+	History         []any
+	OnStream        func(map[string]any)
+	PersistResult   bool
 }
 
 func (s Service) RunCanvasPower(ctx context.Context, projectID uint64, req teamservice.CanvasPowerRunRequest) (map[string]any, error) {
@@ -71,12 +73,13 @@ func (s Service) RunCanvasAgent(ctx context.Context, projectID uint64, req Canva
 		return nil, fmt.Errorf("智能体不存在或未开启")
 	}
 	result, err := runtimeloop.NewService().RunInternal(ctx, runtimeloop.InternalRequest{
-		AgentID:   req.AgentID,
-		RequestID: req.RequestID,
-		Input:     cloneInput(req.Input),
-		History:   req.History,
-		Billing:   projectAgentBilling(project, project.TeamID),
-		OnStream:  req.OnStream,
+		AgentID:         req.AgentID,
+		RequestID:       req.RequestID,
+		Input:           cloneInput(req.Input),
+		MediaReferences: req.MediaReferences,
+		History:         req.History,
+		Billing:         projectAgentBilling(project, project.TeamID),
+		OnStream:        req.OnStream,
 	})
 	if err != nil {
 		return map[string]any{

@@ -37,7 +37,7 @@ func knowledgeInitTool(service knowledgeservice.Service, allowed map[uint64]know
 		Definition: knowledgeToolDefinition(
 			"open_knowledge_init",
 			"知识库说明",
-			"读取知识库入口说明。",
+			"当前任务需要知识库内容时，读取知识库入口说明。",
 			knowledgeParameters(baseProperty, required, map[string]any{
 				"max_chars": integerProperty("最多读取字符数"),
 			}),
@@ -58,7 +58,7 @@ func knowledgeInitTool(service knowledgeservice.Service, allowed map[uint64]know
 			if !exists {
 				return Result{Text: "知识库没有 init.md", Content: map[string]any{"knowledge_base": knowledgeBaseRef(base), "exists": false}}, nil
 			}
-			return Result{Text: "已读取知识库初始化说明", Content: map[string]any{"knowledge_base": knowledgeBaseRef(base), "file": content}}, nil
+			return Result{Text: "已读取知识库初始化说明", Content: map[string]any{"knowledge_base": knowledgeBaseRef(base), "file": knowledgeFileContentViewFromRuntime(content)}}, nil
 		},
 	}
 }
@@ -82,7 +82,7 @@ func knowledgeListTool(service knowledgeservice.Service, allowed map[uint64]know
 			if err != nil {
 				return Result{}, err
 			}
-			return Result{Text: fmt.Sprintf("找到 %d 个知识库文件", len(files)), Content: map[string]any{"knowledge_base": knowledgeBaseRef(base), "files": files}}, nil
+			return Result{Text: fmt.Sprintf("找到 %d 个知识库文件", len(files)), Content: map[string]any{"knowledge_base": knowledgeBaseRef(base), "files": knowledgeFileViews(files)}}, nil
 		},
 	}
 }
@@ -93,7 +93,7 @@ func knowledgeSearchTool(service knowledgeservice.Service, allowed map[uint64]kn
 		Definition: knowledgeToolDefinition(
 			"search_knowledge_files",
 			"知识库搜索",
-			"按关键词搜索知识库文件。",
+			"按关键词搜索知识库文件；使用结果的 path 读取文件。",
 			knowledgeParameters(baseProperty, required, map[string]any{
 				"query": map[string]any{"type": "string", "description": "搜索内容"},
 				"limit": integerProperty("最多返回数量"),
@@ -109,7 +109,7 @@ func knowledgeSearchTool(service knowledgeservice.Service, allowed map[uint64]kn
 			if err != nil {
 				return Result{}, err
 			}
-			return Result{Text: fmt.Sprintf("找到 %d 条知识库匹配", len(hits)), Content: map[string]any{"knowledge_base": knowledgeBaseRef(base), "query": query, "matches": hits}}, nil
+			return Result{Text: fmt.Sprintf("找到 %d 条知识库匹配", len(hits)), Content: map[string]any{"knowledge_base": knowledgeBaseRef(base), "query": query, "matches": knowledgeFileSearchViews(hits)}}, nil
 		},
 	}
 }
@@ -122,7 +122,7 @@ func knowledgeReadTool(service knowledgeservice.Service, allowed map[uint64]know
 			"知识库文件",
 			"读取指定知识库文件正文。",
 			knowledgeParameters(baseProperty, required, map[string]any{
-				"path":         map[string]any{"type": "string", "description": "文件 ID 或相对路径"},
+				"path":         map[string]any{"type": "string", "description": "文件搜索或列表返回的 path"},
 				"offset_bytes": integerProperty("字节偏移，首次为 0，后续使用上次返回的 next_offset_bytes"),
 				"max_chars":    integerProperty("本次最多读取字符数"),
 			}),
@@ -143,7 +143,7 @@ func knowledgeReadTool(service knowledgeservice.Service, allowed map[uint64]know
 			if err != nil {
 				return Result{}, err
 			}
-			return Result{Text: "已读取知识库文件: " + content.Path, Content: map[string]any{"knowledge_base": knowledgeBaseRef(base), "file": content}}, nil
+			return Result{Text: "已读取知识库文件: " + content.Path, Content: map[string]any{"knowledge_base": knowledgeBaseRef(base), "file": knowledgeFileContentViewFromRuntime(content)}}, nil
 		},
 	}
 }

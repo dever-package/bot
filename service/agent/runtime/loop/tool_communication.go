@@ -22,10 +22,6 @@ func lengthContinuationInput() map[string]any {
 	return runtimeEventInput("output_truncated", nil)
 }
 
-func knowledgeContinuationInput() map[string]any {
-	return runtimeEventInput("knowledge_required", nil)
-}
-
 func deliveryContinuationInput() map[string]any {
 	return runtimeEventInput("delivery_required", nil)
 }

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	botmodel "github.com/dever-package/bot/model/energon"
+	botrichtext "github.com/dever-package/bot/service/agent/richtext"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
@@ -14,10 +15,10 @@ func applyPowerPrompt(req *botprotocol.ShemicRequest, power botmodel.Power, outp
 
 	promptOwner := consumePromptOwner(req)
 	parts := make([]string, 0, 3)
-	if prompt := strings.TrimSpace(power.Prompt); prompt != "" && !strings.EqualFold(promptOwner, botprotocol.PromptOwnerAgentRuntime) {
+	if prompt := powerPromptText(power.Prompt); prompt != "" && !strings.EqualFold(promptOwner, botprotocol.PromptOwnerAgentRuntime) {
 		parts = append(parts, prompt)
 	}
-	if prompt := strings.TrimSpace(botprotocol.AsText(req.Set["role"])); prompt != "" {
+	if prompt := powerPromptText(req.Set["role"]); prompt != "" {
 		parts = append(parts, prompt)
 	}
 	if prompt := strings.TrimSpace(outputPrompt); prompt != "" {
@@ -35,6 +36,10 @@ func applyPowerPrompt(req *botprotocol.ShemicRequest, power botmodel.Power, outp
 		req.Raw.Body = map[string]any{}
 	}
 	req.Raw.Body["set"] = cloneAnyMap(set)
+}
+
+func powerPromptText(value any) string {
+	return strings.TrimSpace(botrichtext.PlainText(botprotocol.AsText(value)))
 }
 
 func consumePromptOwner(req *botprotocol.ShemicRequest) string {

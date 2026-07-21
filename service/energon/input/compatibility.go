@@ -52,6 +52,10 @@ func validateConfiguredTargetInput(
 			continue
 		}
 		if !serviceParamIDs[param.ID] {
+			controlType := NormalizeParamControlType(param.Type)
+			if controlType == "file" || controlType == "files" {
+				return fmt.Errorf("附件参数“%s”未配置服务映射", param.Name)
+			}
 			if normalizePowerParamShow(int(powerParam.Show)) == powerParamShowAlways {
 				continue
 			}

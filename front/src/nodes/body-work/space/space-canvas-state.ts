@@ -56,7 +56,6 @@ type PersistedCanvasNode = {
     generated_prompt?: string;
     source_node_ids?: string[];
     shot_id?: string;
-    frame_role?: "start" | "end";
     speech_id?: string;
     speech_ids?: string[];
     character_id?: string;
@@ -91,6 +90,7 @@ type PersistedCanvasNode = {
   result_ref?: Record<string, unknown>;
   result_output?: unknown;
   result_view?: PersistedCanvasResultView;
+  run_error?: string;
   local?: boolean;
 };
 
@@ -168,7 +168,6 @@ function persistedCanvasNode(
         ? { source_node_ids: item.sourceNodeIds }
         : {}),
       ...(item.shotId ? { shot_id: item.shotId } : {}),
-      ...(item.frameRole ? { frame_role: item.frameRole } : {}),
       ...(item.speechId ? { speech_id: item.speechId } : {}),
       ...(item.speechIds?.length ? { speech_ids: item.speechIds } : {}),
       ...(item.characterId ? { character_id: item.characterId } : {}),
@@ -261,6 +260,7 @@ function persistedCanvasNode(
   if (resultView) {
     result.result_view = resultView;
   }
+  assignText(result, "run_error", node.runError);
   if (node.local != null) {
     result.local = node.local;
   }

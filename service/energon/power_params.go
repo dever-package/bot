@@ -7,6 +7,7 @@ import (
 
 	botmodel "github.com/dever-package/bot/model/energon"
 	botinput "github.com/dever-package/bot/service/energon/input"
+	uploadrepo "github.com/dever-package/front/service/upload/repository"
 )
 
 type PowerParam = botinput.PowerParam
@@ -70,12 +71,65 @@ func (s GatewayService) PowerParamConfig(ctx context.Context, powerKey string, t
 		selectedTargetID = 0
 		params = botinput.BuildPowerParamsForServices(ctx, s.repo, power.ID, powerSourceServiceIDs(sources))
 	}
+	params = hydratePowerParamAcceptedKinds(ctx, params)
 	return PowerParamConfig{
 		SourceRule:       sourceRule,
 		SelectedTargetID: selectedTargetID,
 		Sources:          sources,
 		Params:           params,
 	}, nil
+}
+
+func hydratePowerParamAcceptedKinds(ctx context.Context, params []PowerParam) []PowerParam {
+	result := append([]PowerParam(nil), params...)
+	kindsByRule := map[uint64][]string{}
+	loadedRules := map[uint64]bool{}
+	for index := range result {
+		param := result[index]
+		controlType := botinput.NormalizeParamControlType(param.Type)
+		if (controlType != "file" && controlType != "files") || param.UploadRuleID == 0 {
+			continue
+		}
+		if !loadedRules[param.UploadRuleID] {
+			loadedRules[param.UploadRuleID] = true
+			if rule, err := uploadrepo.FindUploadRule(ctx, param.UploadRuleID); err == nil {
+				kindsByRule[param.UploadRuleID] = uploadRuleAcceptedKinds(rule.Accept)
+			}
+		}
+		result[index].AcceptedKinds = append([]string(nil), kindsByRule[param.UploadRuleID]...)
+	}
+	return result
+}
+
+func uploadRuleAcceptedKinds(accept string) []string {
+	tokens := uploadrepo.SplitAccept(accept)
+	if len(tokens) == 0 {
+		return []string{"image", "video", "audio", "file"}
+	}
+	result := make([]string, 0, 4)
+	seen := map[string]struct{}{}
+	appendKind := func(kind string) {
+		if _, exists := seen[kind]; exists {
+			return
+		}
+		seen[kind] = struct{}{}
+		result = append(result, kind)
+	}
+	for _, token := range tokens {
+		switch {
+		case token == "*" || token == "*/*":
+			return []string{"image", "video", "audio", "file"}
+		case strings.HasPrefix(token, "image/"):
+			appendKind("image")
+		case strings.HasPrefix(token, "video/"):
+			appendKind("video")
+		case strings.HasPrefix(token, "audio/"):
+			appendKind("audio")
+		default:
+			appendKind("file")
+		}
+	}
+	return result
 }
 
 func powerSourceServiceIDs(sources []PowerSource) []uint64 {

@@ -253,7 +253,7 @@ func dependencyCommandEnv(config sandbox.Config, workDir string) []string {
 	return []string{
 		"HOME=" + home,
 		"TMPDIR=" + home,
-		"PATH=/usr/local/bin:/usr/bin:/bin",
+		"PATH=" + sandbox.CommandPath(),
 		"LANG=C.UTF-8",
 		"LC_ALL=C.UTF-8",
 		"CI=true",

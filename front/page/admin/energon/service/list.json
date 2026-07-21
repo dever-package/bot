@@ -183,6 +183,33 @@
                         }
                       ]
                     }
+                  },
+                  {
+                    "icon": "copy",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "复制服务",
+                    "hiddenWhen": [
+                      {
+                        "path": "provider.protocol",
+                        "operator": "equals",
+                        "value": "local"
+                      }
+                    ],
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.copyService.id",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "confirm.copy",
+                          "value": true
+                        }
+                      ]
+                    }
                   }
                 ]
               }
@@ -239,6 +266,24 @@
             "provider_id": "data.search.provider_id"
           }
         }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "复制服务",
+        "info": "确认复制当前服务吗？服务接口、成本价格和服务参数都会生成独立副本，名称自动增加“-复制”。",
+        "meta": {
+          "stateKey": "confirm.copy",
+          "successMessage": "服务已复制",
+          "errorMessage": "复制服务失败。"
+        },
+        "action": {
+          "confirm": {
+            "type": "request",
+            "api": "/bot/admin/energon/copy_service",
+            "method": "post",
+            "params": "actionTarget.copyService"
+          }
+        }
       }
     ]
   },
@@ -256,7 +301,8 @@
       ]
     },
     "actionTarget": {
-      "id": ""
+      "id": "",
+      "copyService": {}
     }
   },
   "state": {
@@ -264,6 +310,9 @@
       "view": false,
       "edit": false,
       "create": false
+    },
+    "confirm": {
+      "copy": false
     }
   },
   "action": {}

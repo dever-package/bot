@@ -1,6 +1,9 @@
 package energon
 
-import "strings"
+import (
+	"math"
+	"strings"
+)
 
 const (
 	OutputTypeGeneral      = "general"
@@ -8,6 +11,13 @@ const (
 	OutputTypeSpeech       = "speech"
 	OutputTypeLipSync      = "lip_sync"
 	OutputTypeVideoCompose = "video_compose"
+)
+
+const (
+	StoryboardVersion             = 4
+	StoryboardMinShotDuration     = 4
+	StoryboardVisualModePhotoreal = "photoreal"
+	StoryboardVisualModeStylized  = "stylized"
 )
 
 type OutputTypeSpec struct {
@@ -111,6 +121,26 @@ func NormalizeOutputType(value string) string {
 		return OutputTypeGeneral
 	}
 	return value
+}
+
+func NormalizeStoryboardVisualMode(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func IsStoryboardVisualMode(value string) bool {
+	switch NormalizeStoryboardVisualMode(value) {
+	case StoryboardVisualModePhotoreal, StoryboardVisualModeStylized:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsStoryboardShotDurationValid(value float64) bool {
+	return !math.IsNaN(value) &&
+		!math.IsInf(value, 0) &&
+		value >= StoryboardMinShotDuration &&
+		math.Trunc(value) == value
 }
 
 func NormalizePowerKind(kind string) string {

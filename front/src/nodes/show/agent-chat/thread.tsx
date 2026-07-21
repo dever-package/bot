@@ -296,7 +296,7 @@ function AssistantMessage({
     : undefined;
   const suggestions = readAgentChatSuggestions(output);
   const error = status?.type === "incomplete" && status.reason === "error";
-  const waitingForNextStep = isWaitingAfterKnowledge(
+  const waitingForNextStep = isWaitingAfterCompactActivity(
     status?.type === "running",
     visibleActivities,
     sourceText,
@@ -600,7 +600,7 @@ function NextStepIndicator() {
   );
 }
 
-function isWaitingAfterKnowledge(
+function isWaitingAfterCompactActivity(
   running: boolean,
   activities: AgentChatActivity[],
   sourceText: unknown,
@@ -611,7 +611,7 @@ function isWaitingAfterKnowledge(
   const lastActivity = activities.at(-1);
   if (
     !lastActivity ||
-    lastActivity.kind !== "knowledge" ||
+    (lastActivity.kind !== "knowledge" && lastActivity.kind !== "skill") ||
     lastActivity.status === "running"
   ) {
     return false;

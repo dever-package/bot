@@ -284,7 +284,7 @@ func (s Service) StartPower(ctx context.Context, request PowerRunRequest) (map[s
 	request.Input[powerReplayInputKey] = cloneMap(request.Params)
 	historyPrompt := powerHistoryPrompt(powerParams, request.Params)
 	historySummary := powerHistoryInputSummary(powerParams, request.Params)
-	resolvedParams, err := s.resolvePowerAssetReferences(
+	resolvedParams, mediaReferences, err := s.resolvePowerAssetReferences(
 		ctx, binding.TeamID, request.Params, powerParams,
 	)
 	if err != nil {
@@ -302,17 +302,18 @@ func (s Service) StartPower(ctx context.Context, request PowerRunRequest) (map[s
 	runContext := context.WithoutCancel(ctx)
 	go func() {
 		_, runErr := s.team.RunCanvasPower(runContext, teamservice.CanvasPowerRunRequest{
-			BodyID:         workspace.BodyID,
-			TeamID:         binding.TeamID,
-			ReleaseID:      binding.ReleaseID,
-			RequestID:      requestID,
-			TeamPowerID:    binding.TeamPowerID,
-			PowerID:        binding.Power.ID,
-			PowerKey:       binding.Power.Key,
-			NodeName:       binding.Name,
-			SourceTargetID: request.SourceTargetID,
-			Input:          cloneMap(request.Input),
-			Params:         cloneMap(request.Params),
+			BodyID:          workspace.BodyID,
+			TeamID:          binding.TeamID,
+			ReleaseID:       binding.ReleaseID,
+			RequestID:       requestID,
+			TeamPowerID:     binding.TeamPowerID,
+			PowerID:         binding.Power.ID,
+			PowerKey:        binding.Power.Key,
+			NodeName:        binding.Name,
+			SourceTargetID:  request.SourceTargetID,
+			Input:           cloneMap(request.Input),
+			Params:          cloneMap(request.Params),
+			MediaReferences: mediaReferences,
 			Billing: botprotocol.BillingContext{
 				Billable:    true,
 				Scene:       "body_tool",
@@ -369,22 +370,22 @@ func (s Service) resolvePowerAssetReferences(
 	teamID uint64,
 	input map[string]any,
 	params []energoninput.PowerParam,
-) (map[string]any, error) {
+) (map[string]any, []energoninput.MediaReference, error) {
 	result := cloneMap(input)
 	contents := recordValue(result["_reference_contents"])
 	delete(result, "_reference_contents")
 	if len(contents) == 0 {
-		return result, nil
+		return result, nil, nil
 	}
 	allReferences := make([]any, 0)
+	mediaReferences := make([]energoninput.MediaReference, 0)
 	for paramKey, rawContent := range contents {
-		allowedKinds, exists := energoninput.PromptParamAssetKinds(params, paramKey)
-		if !exists {
-			return nil, fmt.Errorf("参数“%s”不是可引用资产的提示词参数", paramKey)
+		if !powerPromptParamExists(params, paramKey) {
+			return nil, nil, fmt.Errorf("参数“%s”不是提示词参数", paramKey)
 		}
 		content := recordValue(rawContent)
 		if nestedUint64(content, "version") != 1 {
-			return nil, fmt.Errorf("参数“%s”的资产引用协议无效", paramKey)
+			return nil, nil, fmt.Errorf("参数“%s”的资产引用协议无效", paramKey)
 		}
 		references := make([]any, 0)
 		for _, rawPart := range listValue(content["parts"]) {
@@ -393,19 +394,16 @@ func (s Service) resolvePowerAssetReferences(
 				continue
 			}
 			if nestedText(part, "ref_type") != "asset" {
-				return nil, fmt.Errorf("工具提示词只支持引用已保存资产")
+				return nil, nil, fmt.Errorf("工具提示词只支持引用已保存资产")
 			}
 			if trigger := nestedText(part, "ref_trigger"); trigger != "" && trigger != "@" {
-				return nil, fmt.Errorf("工具资产引用必须使用 @ 触发符")
+				return nil, nil, fmt.Errorf("工具资产引用必须使用 @ 触发符")
 			}
 			assetID := nestedUint64(part, "ref_id")
 			versionID := nestedUint64(part, "ref_version_id")
 			resolved, err := s.asset.RequireCurrentReference(ctx, teamID, assetID, versionID)
 			if err != nil {
-				return nil, err
-			}
-			if _, allowed := allowedKinds[resolved.Asset.Kind]; !allowed {
-				return nil, fmt.Errorf("参数“%s”不支持引用%s资产", paramKey, resolved.Asset.Kind)
+				return nil, nil, err
 			}
 			item := map[string]any{
 				"asset_id":   resolved.Asset.ID,
@@ -416,6 +414,15 @@ func (s Service) resolvePowerAssetReferences(
 			}
 			references = append(references, item)
 			allReferences = append(allReferences, item)
+			if reference, ok := energoninput.MediaReferenceFromContent(
+				"asset",
+				resolved.Asset.ID,
+				resolved.Asset.Kind,
+				resolved.Content,
+				nestedText(part, "usage"),
+			); ok {
+				mediaReferences = append(mediaReferences, reference)
+			}
 		}
 		if len(references) == 0 {
 			continue
@@ -427,7 +434,17 @@ func (s Service) resolvePowerAssetReferences(
 	if len(allReferences) > 0 {
 		result["_asset_references"] = allReferences
 	}
-	return result, nil
+	return result, mediaReferences, nil
+}
+
+func powerPromptParamExists(params []energoninput.PowerParam, key string) bool {
+	for _, param := range params {
+		if strings.TrimSpace(param.Key) == strings.TrimSpace(key) &&
+			strings.EqualFold(strings.TrimSpace(param.Type), "prompt") {
+			return true
+		}
+	}
+	return false
 }
 
 func (s Service) ReadPowerStream(ctx context.Context, teamID uint64, requestID string, lastID string, count int64, block time.Duration) ([]frontstream.Entry, error) {

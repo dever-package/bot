@@ -335,7 +335,7 @@ func (s WorkspaceService) executeCanvasRunnableNode(
 	if workspaceRunCanceled(ctx, run.ID) {
 		return s.canceledCanvasRunnableNodeResult(ctx, req, run, node, nodeRunID)
 	}
-	inputContext, _ := canvasNodePreviousOutput(ctx, run.ProjectID, req, node.ID, results)
+	inputContext, _, _ := canvasNodePreviousOutput(ctx, run.ProjectID, req, node.ID, results)
 	markWorkspaceNodeRun(ctx, nodeRunID, teammodel.RunStatusRunning, map[string]any{
 		"input":            req.Input,
 		"node":             canvasRunNodeInput(node),
@@ -464,7 +464,7 @@ func (s WorkspaceService) recordCanvasNodeRunResult(ctx context.Context, req Can
 }
 
 func (s WorkspaceService) runCanvasNode(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, results []canvasNodeResult) (map[string]any, error) {
-	previousOutput, err := canvasNodePreviousOutput(ctx, projectID, req, node.ID, results)
+	previousOutput, mediaReferences, err := canvasNodePreviousOutput(ctx, projectID, req, node.ID, results)
 	if err != nil {
 		return nil, err
 	}
@@ -472,9 +472,9 @@ func (s WorkspaceService) runCanvasNode(ctx context.Context, projectID uint64, r
 	case "asset":
 		return canvasAssetRunPayload(ctx, projectID, req, run, node, nodeRunID), nil
 	case "power":
-		return s.runCanvasPowerNode(ctx, projectID, req, run, node, nodeRunID, previousOutput)
+		return s.runCanvasPowerNode(ctx, projectID, req, run, node, nodeRunID, previousOutput, mediaReferences)
 	case "agent":
-		return s.runCanvasAgentNode(ctx, projectID, req, run, node, nodeRunID, previousOutput)
+		return s.runCanvasAgentNode(ctx, projectID, req, run, node, nodeRunID, previousOutput, mediaReferences)
 	case "flow":
 		return s.runCanvasFlowNode(ctx, projectID, req, run, node, nodeRunID, previousOutput)
 	case "function":
@@ -484,7 +484,7 @@ func (s WorkspaceService) runCanvasNode(ctx context.Context, projectID uint64, r
 	}
 }
 
-func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, previousOutput any) (map[string]any, error) {
+func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, previousOutput any, mediaReferences []energoninput.MediaReference) (map[string]any, error) {
 	if node.PowerID == 0 && node.PowerKey == "" {
 		return nil, fmt.Errorf("能力节点未配置能力")
 	}
@@ -520,17 +520,18 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 		delete(params, "prompt")
 	}
 	result, err := s.project.RunCanvasPower(ctx, projectID, teamservice.CanvasPowerRunRequest{
-		FlowID:         node.FlowID,
-		AssetCateID:    firstUint64(node.AssetCateID, req.AssetCateID),
-		NodeKey:        node.ID,
-		NodeName:       node.Title,
-		Kind:           node.Kind,
-		PowerID:        node.PowerID,
-		PowerKey:       node.PowerKey,
-		SourceTargetID: node.SelectedTarget,
-		RequestID:      canvasChildRequestID(req.RequestID, node.ID),
-		Input:          input,
-		Params:         params,
+		FlowID:          node.FlowID,
+		AssetCateID:     firstUint64(node.AssetCateID, req.AssetCateID),
+		NodeKey:         node.ID,
+		NodeName:        node.Title,
+		Kind:            node.Kind,
+		PowerID:         node.PowerID,
+		PowerKey:        node.PowerKey,
+		SourceTargetID:  node.SelectedTarget,
+		RequestID:       canvasChildRequestID(req.RequestID, node.ID),
+		Input:           input,
+		Params:          params,
+		MediaReferences: mediaReferences,
 		OnStream: func(payload map[string]any) {
 			s.forwardWorkspaceNodeStream(ctx, run, node, nodeRunID, payload)
 		},
@@ -542,7 +543,7 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 	return canvasNodeRunPayload(req, run, node, nodeRunID, result), err
 }
 
-func (s WorkspaceService) runCanvasAgentNode(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, previousOutput any) (map[string]any, error) {
+func (s WorkspaceService) runCanvasAgentNode(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, previousOutput any, mediaReferences []energoninput.MediaReference) (map[string]any, error) {
 	if node.AgentID == 0 {
 		return nil, fmt.Errorf("智能体节点未配置智能体")
 	}
@@ -555,15 +556,16 @@ func (s WorkspaceService) runCanvasAgentNode(ctx context.Context, projectID uint
 	assetCateID := firstUint64(node.AssetCateID, req.AssetCateID)
 	history := workspaceAgentHistory(ctx, projectID, assetCateID, node.ID, node.AgentID)
 	result, err := s.project.RunCanvasAgent(ctx, projectID, CanvasAgentRunRequest{
-		FlowID:      node.FlowID,
-		AssetCateID: assetCateID,
-		NodeKey:     node.ID,
-		NodeName:    node.Title,
-		RoleID:      node.RoleID,
-		AgentID:     node.AgentID,
-		RequestID:   canvasChildRequestID(req.RequestID, node.ID),
-		Input:       input,
-		History:     history,
+		FlowID:          node.FlowID,
+		AssetCateID:     assetCateID,
+		NodeKey:         node.ID,
+		NodeName:        node.Title,
+		RoleID:          node.RoleID,
+		AgentID:         node.AgentID,
+		RequestID:       canvasChildRequestID(req.RequestID, node.ID),
+		Input:           input,
+		MediaReferences: mediaReferences,
+		History:         history,
 		OnStream: func(payload map[string]any) {
 			s.forwardWorkspaceNodeStream(ctx, run, node, nodeRunID, payload)
 		},
@@ -945,10 +947,10 @@ func previousCanvasOutputExcluding(
 	return map[string]any{"sources": outputs}
 }
 
-func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasRunRequest, nodeID string, results []canvasNodeResult) (any, error) {
-	referenceOutput, err := canvasPromptReferenceOutput(ctx, projectID, nodeID, results, req.Canvas)
+func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasRunRequest, nodeID string, results []canvasNodeResult) (any, []energoninput.MediaReference, error) {
+	referenceOutput, mediaReferences, err := canvasPromptReferenceOutput(ctx, projectID, nodeID, results, req.Canvas)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if req.SingleNode {
 		if manualContext := manualCanvasInputContext(req.Input); manualContext != nil {
@@ -971,12 +973,12 @@ func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasR
 				manualContext,
 				referenceOutput,
 				filterCanvasContextSources(previousOutput, allowedSourceNodeIDs),
-			), nil
+			), mediaReferences, nil
 		}
 	}
 	output := previousCanvasOutput(ctx, projectID, nodeID, results, req.Canvas)
 	output = filterCanvasContextSources(output, canvasNodeSourceNodeIDs(nodeID, req.Canvas))
-	return mergeCanvasContextOutputs(referenceOutput, output), nil
+	return mergeCanvasContextOutputs(referenceOutput, output), mediaReferences, nil
 }
 
 func canvasNodeSourceNodeIDs(nodeID string, canvas map[string]any) map[string]bool {
@@ -1043,37 +1045,32 @@ func canvasPromptReferenceOutput(
 	nodeID string,
 	_ []canvasNodeResult,
 	canvas map[string]any,
-) (any, error) {
+) (any, []energoninput.MediaReference, error) {
 	node := canvasNodeByID(nodeID, canvas)
 	content := mapValue(valueAtPath(node, "composer_draft", "prompt_content"))
 	structured, err := canvasStructuredPromptReferences(content)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(structured) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	sources := make([]any, 0, len(structured))
-	allowedAssetKinds, restrictAssetKinds, err := canvasPromptAssetKindPolicy(
-		ctx,
-		projectID,
-		node,
-		structured,
-	)
-	if err != nil {
-		return nil, err
-	}
+	mediaReferences := make([]energoninput.MediaReference, 0, len(structured))
 	for _, reference := range structured {
 		if reference.AssetID > 0 {
 			asset, output, err := resolveCanvasReferenceAsset(ctx, projectID, reference)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-			if restrictAssetKinds {
-				kind := textValue(asset["kind"])
-				if _, allowed := allowedAssetKinds[kind]; !allowed {
-					return nil, fmt.Errorf("当前提示词参数不支持引用%s资产", kind)
-				}
+			if mediaReference, ok := energoninput.MediaReferenceFromContent(
+				"asset",
+				reference.AssetID,
+				textValue(asset["kind"]),
+				output,
+				reference.Usage,
+			); ok {
+				mediaReferences = append(mediaReferences, mediaReference)
 			}
 			sources = append(sources, newCanvasGroupOutputSource(
 				fmt.Sprintf("asset:%d", reference.AssetID),
@@ -1088,57 +1085,19 @@ func canvasPromptReferenceOutput(
 		}
 	}
 	if len(sources) == 0 {
-		return nil, nil
+		return nil, mediaReferences, nil
 	}
 	return map[string]any{
 		"type":    "reference_output",
 		"sources": sources,
-	}, nil
-}
-
-func canvasPromptAssetKindPolicy(
-	ctx context.Context,
-	projectID uint64,
-	node map[string]any,
-	references []canvasPromptReference,
-) (map[string]struct{}, bool, error) {
-	hasAsset := false
-	for _, reference := range references {
-		if reference.AssetID > 0 {
-			hasAsset = true
-			break
-		}
-	}
-	if !hasAsset || textValue(node["type"]) != "power" {
-		return nil, false, nil
-	}
-	form, err := NewService().CanvasPowerForm(
-		ctx,
-		projectID,
-		uint64Value(valueAtPath(node, "flow", "id")),
-		uint64Value(valueAtPath(node, "power", "id")),
-		textValue(valueAtPath(node, "power", "key")),
-		uint64Value(valueAtPath(node, "composer_draft", "selected_target_id")),
-	)
-	if err != nil {
-		return nil, false, err
-	}
-	params, ok := form["params"].([]energoninput.PowerParam)
-	if !ok {
-		return nil, false, fmt.Errorf("能力参数配置无效")
-	}
-	key := textValue(form["primary_param_key"])
-	allowedKinds, exists := energoninput.PromptParamAssetKinds(params, key)
-	if !exists {
-		return nil, false, fmt.Errorf("能力没有可引用资产的提示词参数")
-	}
-	return allowedKinds, true, nil
+	}, mediaReferences, nil
 }
 
 type canvasPromptReference struct {
 	AssetID   uint64
 	VersionID uint64
 	Label     string
+	Usage     string
 }
 
 func canvasStructuredPromptReferences(content map[string]any) ([]canvasPromptReference, error) {
@@ -1163,7 +1122,8 @@ func canvasStructuredPromptReferences(content map[string]any) ([]canvasPromptRef
 		if refID == 0 {
 			return nil, fmt.Errorf("资产引用缺少资产标识")
 		}
-		key := fmt.Sprintf("%s:%d", refType, refID)
+		usage := textValue(part["usage"])
+		key := fmt.Sprintf("%s:%d:%s", refType, refID, usage)
 		if used[key] {
 			continue
 		}
@@ -1172,6 +1132,7 @@ func canvasStructuredPromptReferences(content map[string]any) ([]canvasPromptRef
 			AssetID:   refID,
 			VersionID: uint64Value(part["ref_version_id"]),
 			Label:     textValue(part["label"]),
+			Usage:     usage,
 		})
 	}
 	return result, nil
@@ -1366,7 +1327,9 @@ func mergeCanvasInput(base map[string]any, previousOutput any, prompt string, pr
 	}
 	if previousOutput != nil {
 		input["previous_output"] = previousOutput
-		mergeCanvasContextMedia(input, previousOutput)
+		if mediaContext, keep := canvasExecutionMediaContext(previousOutput); keep {
+			mergeCanvasContextMedia(input, mediaContext)
+		}
 	}
 	prompt = strings.TrimSpace(prompt)
 	if prompt != "" {
@@ -1377,6 +1340,38 @@ func mergeCanvasInput(base map[string]any, previousOutput any, prompt string, pr
 		}
 	}
 	return input
+}
+
+func canvasExecutionMediaContext(value any) (any, bool) {
+	if row := mapValue(value); row != nil {
+		if strings.EqualFold(textValue(row["type"]), "reference_output") {
+			return nil, false
+		}
+		if _, hasSources := row["sources"]; hasSources {
+			filtered := make([]any, 0)
+			for _, source := range sliceValue(row["sources"]) {
+				current, keep := canvasExecutionMediaContext(source)
+				if keep {
+					filtered = append(filtered, current)
+				}
+			}
+			next := cloneInput(row)
+			next["sources"] = filtered
+			return next, len(filtered) > 0 || len(row) > 1
+		}
+		return row, true
+	}
+	if values := sliceValue(value); values != nil {
+		filtered := make([]any, 0, len(values))
+		for _, current := range values {
+			next, keep := canvasExecutionMediaContext(current)
+			if keep {
+				filtered = append(filtered, next)
+			}
+		}
+		return filtered, len(filtered) > 0
+	}
+	return value, value != nil
 }
 
 var canvasContextMediaFields = []struct {

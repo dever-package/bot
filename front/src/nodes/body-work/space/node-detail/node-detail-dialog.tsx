@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Copy, History, Loader2, RotateCw } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  Copy,
+  History,
+  Loader2,
+  RotateCw,
+} from "lucide-react";
 import { toast } from "sonner";
 import { DetailDialogFrame } from "../../shared/detail-dialog";
 import {
@@ -43,6 +50,10 @@ import {
   isStoryboardConfirmed,
   type StoryboardDocument,
 } from "../space-storyboard";
+import {
+  contentOutputMediaKinds,
+  type CanvasContentMediaKind,
+} from "../space-content-view";
 
 export function NodeDetailDialog({
   projectId,
@@ -245,6 +256,14 @@ export function NodeDetailDialog({
     () => resolveNodeDetailMediaOutput(node, activeVersion),
     [activeVersion, node],
   );
+  const mediaKind = useMemo(() => {
+    const kinds = contentOutputMediaKinds(mediaOutput);
+    return kinds.length === 1 ? kinds[0] : undefined;
+  }, [mediaOutput]);
+  const mediaPrompt =
+    typeof activeVersion?.source?.prompt === "string"
+      ? activeVersion.source.prompt.trim()
+      : String(node.composerDraft?.prompt || "").trim();
 
   const saveDraft = useCallback(
     async (content: NodeDetailEditableContent) => {
@@ -599,7 +618,7 @@ export function NodeDetailDialog({
       header={
         <NodeDetailHeader
           node={node}
-          contentLabel={detailContentLabel(activeContent, node)}
+          contentLabel={detailContentLabel(activeContent, node, mediaKind)}
           versionSelect={
             assetId ? (
               <NodeDetailVersionSelect
@@ -629,146 +648,156 @@ export function NodeDetailDialog({
       }
     >
       <main className="wb-detail-workspace">
-          {!isCurrentVersion ? (
-            <div className="wb-detail-history-bar">
-              <span>
-                <History size={14} />
-                正在查看第 {historyVersion?.version || "-"} 版
-              </span>
+        {!isCurrentVersion ? (
+          <div className="wb-detail-history-bar">
+            <span>
+              <History size={14} />
+              正在查看第 {historyVersion?.version || "-"} 版
+            </span>
+            <div>
+              <button
+                type="button"
+                className="wb-detail-command"
+                onClick={() =>
+                  void selectVersion(
+                    asset?.version ||
+                      ({ id: currentVersionId } as AssetVersion),
+                  )
+                }
+              >
+                <ArrowLeft size={13} />
+                返回当前版本
+              </button>
+              <button
+                type="button"
+                className="wb-detail-command is-primary"
+                disabled={
+                  restoring ||
+                  Boolean(storyboardWorkflowAction) ||
+                  historyLoading ||
+                  Boolean(historyError)
+                }
+                onClick={() =>
+                  activeContent.mode === "storyboard"
+                    ? void createStoryboardRevision()
+                    : void restoreVersion()
+                }
+              >
+                {restoring || storyboardWorkflowAction === "revising" ? (
+                  <Loader2 size={13} className="wb-detail-spin" />
+                ) : activeContent.mode === "storyboard" ? (
+                  <Copy size={13} />
+                ) : (
+                  <RotateCw size={13} />
+                )}
+                {activeContent.mode === "storyboard"
+                  ? storyboardWorkflowAction === "revising"
+                    ? "创建中"
+                    : "基于此版本创建修订稿"
+                  : restoring
+                    ? "切换中"
+                    : "切换到此版本"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="wb-detail-scroll">
+          {node.runError ? (
+            <div
+              className="wb-detail-error-banner is-run-error"
+              role="alert"
+            >
+              <AlertCircle size={17} />
               <div>
-                <button
-                  type="button"
-                  className="wb-detail-command"
-                  onClick={() =>
-                    void selectVersion(
-                      asset?.version ||
-                        ({ id: currentVersionId } as AssetVersion),
-                    )
-                  }
-                >
-                  <ArrowLeft size={13} />
-                  返回当前版本
-                </button>
-                <button
-                  type="button"
-                  className="wb-detail-command is-primary"
-                  disabled={
-                    restoring ||
-                    Boolean(storyboardWorkflowAction) ||
-                    historyLoading ||
-                    Boolean(historyError)
-                  }
-                  onClick={() =>
-                    activeContent.mode === "storyboard"
-                      ? void createStoryboardRevision()
-                      : void restoreVersion()
-                  }
-                >
-                  {restoring || storyboardWorkflowAction === "revising" ? (
-                    <Loader2 size={13} className="wb-detail-spin" />
-                  ) : activeContent.mode === "storyboard" ? (
-                    <Copy size={13} />
-                  ) : (
-                    <RotateCw size={13} />
-                  )}
-                  {activeContent.mode === "storyboard"
-                    ? storyboardWorkflowAction === "revising"
-                      ? "创建中"
-                      : "基于此版本创建修订稿"
-                    : restoring
-                      ? "切换中"
-                      : "切换到此版本"}
-                </button>
+                <strong>最近一次运行失败</strong>
+                <p>{node.runError}</p>
               </div>
             </div>
           ) : null}
-
-          <div className="wb-detail-scroll">
-            {showHistoryState ? (
-              <div className="wb-detail-content-state">
-                {historyLoading ? (
-                  <>
-                    <Loader2 size={18} className="wb-detail-spin" />
-                    <span>正在读取历史内容</span>
-                  </>
-                ) : (
-                  <>
-                    <span>{historyError}</span>
-                    <button
-                      type="button"
-                      onClick={() => void loadHistoryVersion(selectedVersionId)}
-                    >
-                      <RotateCw size={13} />
-                      重试
-                    </button>
-                  </>
-                )}
-              </div>
-            ) : (
-              <CanvasAssetReferenceProviderContext.Provider
-                value={assetReferenceProvider}
-              >
-                {isVideoCompose ? (
-                  <VideoComposeView
-                    composition={videoComposition}
-                    referenceItems={canvasReferenceItems || []}
-                    readonly={
-                      !isCurrentVersion || closing || videoComposeRunning
-                    }
-                    running={videoComposeRunning}
-                    fullScreen
-                    finalOutput={mediaOutput}
-                    onChange={(next) => {
-                      setVideoComposition(next);
-                      onNodeDraftChange?.({
-                        ...(node.composerDraft || {}),
-                        videoComposition: next,
-                      });
-                    }}
-                    onRun={
-                      onRunNode
-                        ? (nextComposition) => {
-                            setVideoComposeRunning(true);
-                            void onRunNode({
-                              ...node,
-                              composerDraft: {
-                                ...(node.composerDraft || {}),
-                                videoComposition: nextComposition,
-                              },
-                            })
-                              .then(() =>
-                                assetId ? loadDetail() : undefined,
-                              )
-                              .catch((error) =>
-                                toast.error(
-                                  error instanceof Error
-                                    ? error.message
-                                    : "视频合成失败",
-                                ),
-                              )
-                              .finally(() => setVideoComposeRunning(false));
-                          }
-                        : undefined
-                    }
-                  />
-                ) : (
-                  <NodeDetailEditor
-                    content={activeContent}
-                    mediaOutput={mediaOutput}
-                    readonly={editorReadonly}
-                    referenceItems={canvasReferenceItems}
-                    storyboardWorkflowAction={storyboardWorkflowAction}
-                    lipSyncEnabled={booleanParamValue(
-                      node.composerDraft?.paramValues?.enable_lip_sync,
-                    )}
-                    onConfirmStoryboard={confirmStoryboard}
-                    onCreateStoryboardRevision={createStoryboardRevision}
-                    onChange={draft.setDraft}
-                  />
-                )}
-              </CanvasAssetReferenceProviderContext.Provider>
-            )}
-          </div>
+          {showHistoryState ? (
+            <div className="wb-detail-content-state">
+              {historyLoading ? (
+                <>
+                  <Loader2 size={18} className="wb-detail-spin" />
+                  <span>正在读取历史内容</span>
+                </>
+              ) : (
+                <>
+                  <span>{historyError}</span>
+                  <button
+                    type="button"
+                    onClick={() => void loadHistoryVersion(selectedVersionId)}
+                  >
+                    <RotateCw size={13} />
+                    重试
+                  </button>
+                </>
+              )}
+            </div>
+          ) : (
+            <CanvasAssetReferenceProviderContext.Provider
+              value={assetReferenceProvider}
+            >
+              {isVideoCompose ? (
+                <VideoComposeView
+                  composition={videoComposition}
+                  referenceItems={canvasReferenceItems || []}
+                  readonly={!isCurrentVersion || closing || videoComposeRunning}
+                  running={videoComposeRunning}
+                  fullScreen
+                  finalOutput={mediaOutput}
+                  onChange={(next) => {
+                    setVideoComposition(next);
+                    onNodeDraftChange?.({
+                      ...(node.composerDraft || {}),
+                      videoComposition: next,
+                    });
+                  }}
+                  onRun={
+                    onRunNode
+                      ? (nextComposition) => {
+                          setVideoComposeRunning(true);
+                          void onRunNode({
+                            ...node,
+                            composerDraft: {
+                              ...(node.composerDraft || {}),
+                              videoComposition: nextComposition,
+                            },
+                          })
+                            .then(() => (assetId ? loadDetail() : undefined))
+                            .catch((error) =>
+                              toast.error(
+                                error instanceof Error
+                                  ? error.message
+                                  : "视频合成失败",
+                              ),
+                            )
+                            .finally(() => setVideoComposeRunning(false));
+                        }
+                      : undefined
+                  }
+                />
+              ) : (
+                <NodeDetailEditor
+                  content={activeContent}
+                  mediaOutput={mediaOutput}
+                  mediaKind={mediaKind}
+                  mediaPrompt={mediaPrompt}
+                  readonly={editorReadonly}
+                  referenceItems={canvasReferenceItems}
+                  storyboardWorkflowAction={storyboardWorkflowAction}
+                  lipSyncEnabled={booleanParamValue(
+                    node.composerDraft?.paramValues?.enable_lip_sync,
+                  )}
+                  onConfirmStoryboard={confirmStoryboard}
+                  onCreateStoryboardRevision={createStoryboardRevision}
+                  onChange={draft.setDraft}
+                />
+              )}
+            </CanvasAssetReferenceProviderContext.Provider>
+          )}
+        </div>
       </main>
 
       {showDiscardConfirm ? (
@@ -813,12 +842,22 @@ function currentAssetVersionId(asset?: ProjectAsset) {
 function detailContentLabel(
   content: NodeDetailEditableContent,
   node: SpaceCanvasNode,
+  mediaKind?: CanvasContentMediaKind,
 ) {
   if (content.mode === "storyboard") {
     return "分镜脚本";
   }
   if (isVideoComposePowerType(node.power, node.kind, node.outputType)) {
     return "视频合成";
+  }
+  if (mediaKind === "image") {
+    return "图片内容";
+  }
+  if (mediaKind === "video") {
+    return "视频内容";
+  }
+  if (mediaKind === "audio") {
+    return "音频内容";
   }
   if (content.mode === "file") {
     return "文件";
@@ -847,7 +886,9 @@ function booleanParamValue(value: unknown) {
   if (typeof value === "boolean") {
     return value;
   }
-  const text = String(value ?? "").trim().toLowerCase();
+  const text = String(value ?? "")
+    .trim()
+    .toLowerCase();
   return text === "1" || text === "true" || text === "yes" || text === "on";
 }
 

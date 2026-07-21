@@ -29,6 +29,7 @@ export function CanvasResultView({
   onOpen,
   resizeControls,
   children,
+  customContentIsPureMedia = false,
   followContent = false,
   followKey,
 }: {
@@ -41,6 +42,7 @@ export function CanvasResultView({
   onOpen?: () => void;
   resizeControls?: ReactNode;
   children?: ReactNode;
+  customContentIsPureMedia?: boolean;
   followContent?: boolean;
   followKey?: unknown;
 }) {
@@ -49,7 +51,10 @@ export function CanvasResultView({
   const useContentView = contentOutputNeedsRenderer(output, preview);
   const hasCustomContent = children != null;
   const hasPureMedia =
-    !hasCustomContent && !useContentView && hasResultPreviewMedia(preview);
+    customContentIsPureMedia ||
+    (!hasCustomContent && !useContentView && hasResultPreviewMedia(preview));
+  const canOpenFromKeyboard =
+    Boolean(onOpen) && (!hasCustomContent || customContentIsPureMedia);
   const classes = [
     "ws-result-view",
     "nodrag",
@@ -99,8 +104,8 @@ export function CanvasResultView({
 
   return (
     <div
-      role={onOpen && !hasCustomContent ? "button" : undefined}
-      tabIndex={onOpen && !hasCustomContent ? 0 : undefined}
+      role={canOpenFromKeyboard ? "button" : undefined}
+      tabIndex={canOpenFromKeyboard ? 0 : undefined}
       className={classes}
       style={style}
       onPointerDown={(event) => event.stopPropagation()}
@@ -122,17 +127,16 @@ export function CanvasResultView({
             16;
         }}
       >
-        {hasCustomContent ? children : useContentView ? (
+        {hasCustomContent ? (
+          children
+        ) : useContentView ? (
           <CanvasNodeContentView
             output={output}
             fallback={fallback}
             className="ws-canvas-content-view ws-result-content-view"
           />
         ) : (
-          <PureResultPreview
-            preview={preview}
-            label={mediaLabel || fallback}
-          />
+          <PureResultPreview preview={preview} label={mediaLabel ?? fallback} />
         )}
       </div>
       {resizeControls}
@@ -205,10 +209,7 @@ function outputFromFallback(fallback: string) {
 
 function hasResultPreviewMedia(preview: CanvasResultPreview) {
   return Boolean(
-    preview.imageUrl ||
-      preview.videoUrl ||
-      preview.audioUrl ||
-      preview.fileUrl,
+    preview.imageUrl || preview.videoUrl || preview.audioUrl || preview.fileUrl,
   );
 }
 
@@ -220,7 +221,7 @@ function isInteractiveResultTarget(
     return false;
   }
   const interactive = target.closest(
-    "a, button, input, textarea, select, audio, video, [role='button'], .ws-resize-control",
+    "a, button, input, textarea, select, audio, video[controls], [role='button'], .ws-resize-control",
   );
   return Boolean(interactive && interactive !== boundary);
 }

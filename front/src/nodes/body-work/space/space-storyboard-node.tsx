@@ -12,6 +12,7 @@ import {
   storyboardTotalDuration,
 } from "./space-storyboard";
 import type { ComposerAssetItem } from "./space-prompt-composer";
+import { StoryboardCompactShotCard } from "./space-storyboard-shot-card";
 
 export type StoryboardNodeStatus = "empty" | "running" | "complete" | "error";
 
@@ -89,10 +90,13 @@ export function StoryboardNodeContent({
   return (
     <section className="ws-storyboard-node is-complete">
       <header className="ws-storyboard-node-summary">
-        <span className="ws-storyboard-node-complete">
-          <CheckCircle2 size={14} />
-          {confirmed ? "分镜已确认" : "分镜草稿"}
-        </span>
+        <div>
+          <strong>{storyboard.title || "分镜脚本"}</strong>
+          <span className="ws-storyboard-node-complete">
+            <CheckCircle2 size={14} />
+            {confirmed ? "已确认" : "草稿"}
+          </span>
+        </div>
         <span>
           {storyboard.shots.length} 个镜头 ·{" "}
           {storyboardTotalDuration(storyboard)} 秒
@@ -102,28 +106,20 @@ export function StoryboardNodeContent({
         </span>
       </header>
       <div className="ws-storyboard-node-body nowheel">
-        <ol className="ws-storyboard-node-shots">
-          {storyboard.shots.slice(0, 3).map((shot, index) => (
-            <li key={shot.id}>
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              <div>
-                <strong>
-                  {shot.visual || `镜头 ${index + 1}`}
-                  {shot.end_visual ? ` / ${shot.end_visual}` : ""}
-                </strong>
-                <small>
-                  {shot.duration} 秒
-                  {shot.speech.filter((speech) => speech.text.trim()).length > 0
-                    ? ` · ${shot.speech.filter((speech) => speech.text.trim()).length} 条语音`
-                    : " · 无语音"}
-                </small>
-              </div>
-            </li>
+        <div className="ws-storyboard-node-cards">
+          {storyboard.shots.slice(0, 4).map((shot, index) => (
+            <StoryboardCompactShotCard
+              key={shot.id}
+              shot={shot}
+              index={index}
+              storyboard={storyboard}
+              onOpen={onOpenDetail}
+            />
           ))}
-        </ol>
-        {storyboard.shots.length > 3 ? (
+        </div>
+        {storyboard.shots.length > 4 ? (
           <span className="ws-storyboard-node-more">
-            还有 {storyboard.shots.length - 3} 个镜头
+            还有 {storyboard.shots.length - 4} 个镜头
           </span>
         ) : null}
       </div>

@@ -1,15 +1,12 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import { getCompatModule } from "@dever/front-plugin";
 import {
   ArrowUp,
   CheckCircle2,
   ChevronDown,
-  Download,
   FileText,
   Loader2,
-  Plus,
-  X,
+  Paperclip,
 } from "lucide-react";
 import {
   defaultPowerParamValue,
@@ -20,18 +17,20 @@ import {
 import { PowerParamIcon } from "./space-power-icon";
 import { CanvasReferenceEditor } from "./space-reference-editor";
 import { findAssetMediaURL } from "../asset/asset-content";
-import { assetKindsAccept } from "../asset/asset-contract";
+import { assetKindLabel, assetKindsAccept } from "../asset/asset-contract";
+import { AssetKindIcon } from "../asset/asset-preview";
 import { normalizeAssetRecord } from "../asset/asset-api";
 import { AssetPickerDialog } from "../asset/asset-picker-dialog";
 import { useAssetReferenceProvider } from "../asset/asset-reference-provider";
-import type {
-  AssetKind as LibraryAssetKind,
-  AssetRecord,
-} from "../asset/asset-types";
+import type { AssetKind as LibraryAssetKind } from "../asset/asset-types";
+import {
+  canvasReferenceIDsForUsage,
+  canvasReferenceTargetsForUsage,
+  replaceCanvasReferenceUsage,
+} from "./space-reference-content";
 import type {
   CanvasContentPreview,
   CanvasReferenceContent,
-  AssetKind,
   PowerParam,
   PowerParamSource,
 } from "./types";
@@ -94,16 +93,10 @@ type PromptComposerProps = {
     teamID: number;
     projectID: number;
     assetCateID?: number;
-    allowedKinds?: AssetKind[];
   };
   onChange: (value: string, content?: CanvasReferenceContent) => void;
   onParamChange?: (key: string, value: unknown) => void;
   onSourceChange?: (sourceId: number) => void;
-  onAssetReference?: (
-    asset: ComposerAssetItem,
-    param: PowerParam,
-    alias: string,
-  ) => void;
   onLocalUpload?: (
     files: File[],
     param: PowerParam,
@@ -123,11 +116,6 @@ export type UploadPreview = {
   asset?: unknown;
 };
 
-type UploadPreviewState = {
-  groupName: string;
-  file: UploadPreview;
-};
-
 export function PromptComposer({
   value,
   placeholder,
@@ -143,7 +131,6 @@ export function PromptComposer({
   onChange,
   onParamChange,
   onSourceChange,
-  onAssetReference,
   onLocalUpload,
   onSubmit,
 }: PromptComposerProps) {
@@ -156,15 +143,8 @@ export function PromptComposer({
           assetCateID: Number(assetReference.assetCateID || 0),
         }
       : undefined,
-    allowedKinds: assetReference?.allowedKinds,
   });
   const [openKey, setOpenKey] = useState("");
-  const [uploadPreviews, setUploadPreviews] = useState<
-    Record<string, UploadPreview[]>
-  >({});
-  const [activePreview, setActivePreview] = useState<UploadPreviewState | null>(
-    null,
-  );
   const [assetPickerParam, setAssetPickerParam] = useState<PowerParam | null>(
     null,
   );
@@ -182,41 +162,11 @@ export function PromptComposer({
     }
   }, [disabled, running]);
 
-  function setUploadValue(param: PowerParam, previews: UploadPreview[]) {
-    setUploadPreviews((current) => ({
-      ...current,
-      [param.key]: previews,
-    }));
-    onParamChange?.(param.key, uploadParamValue(param, previews));
-  }
-
   return (
-    <div className={`ws-prompt-composer ${running ? "is-running" : ""}`}>
+    <div
+      className={`ws-prompt-composer nowheel ${running ? "is-running" : ""}`}
+    >
       <div className="ws-prompt-main">
-        {uploadParams.length > 0 ? (
-          <div className="ws-prompt-inline-uploads">
-            {uploadParams.map((param) => (
-              <UploadParamStrip
-                key={param.key}
-                param={param}
-                previews={
-                  uploadPreviews[param.key] ||
-                  previewsFromValue(paramValues[param.key])
-                }
-                disabled={disabled || running}
-                onChange={(nextPreviews) => setUploadValue(param, nextPreviews)}
-                onPreview={(file) =>
-                  setActivePreview({
-                    groupName: param.name || "上传文件",
-                    file,
-                  })
-                }
-                onOpenAssetPicker={() => setAssetPickerParam(param)}
-              />
-            ))}
-          </div>
-        ) : null}
-
         <div className="ws-prompt-editor-shell">
           <CanvasReferenceEditor
             className="ws-prompt-reference-editor nodrag nopan"
@@ -235,6 +185,39 @@ export function PromptComposer({
       </div>
       <div className="ws-prompt-toolbar">
         <div className="ws-prompt-tools">
+          {uploadParams.length > 0 ? (
+            <ComposerMenu
+              id="attachments"
+              openKey={openKey}
+              label="添加素材"
+              icon={<Paperclip size={17} />}
+              iconOnly
+              variant="attachments"
+              disabled={disabled || running}
+              onToggle={setOpenKey}
+            >
+              <div className="ws-prompt-menu-list is-attachments" role="menu">
+                {uploadParams.map((param) => (
+                  <button
+                    key={param.key}
+                    type="button"
+                    className="ws-prompt-menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setOpenKey("");
+                      setAssetPickerParam(param);
+                    }}
+                  >
+                    <span className="ws-prompt-menu-kind-icon">
+                      <AssetKindIcon kind={uploadParamKind(param)} />
+                    </span>
+                    <span>{uploadParamLabel(param)}</span>
+                  </button>
+                ))}
+              </div>
+            </ComposerMenu>
+          ) : null}
+
           {sourceOptions.length > 0 ? (
             <ComposerMenu
               id="source"
@@ -299,16 +282,6 @@ export function PromptComposer({
           </button>
         </div>
       </div>
-      {activePreview && typeof document !== "undefined"
-        ? createPortal(
-            <UploadPreviewDialog
-              title={activePreview.groupName}
-              preview={activePreview.file}
-              onClose={() => setActivePreview(null)}
-            />,
-            document.body,
-          )
-        : null}
       {assetPickerParam ? (
         <AssetPickerDialog
           open
@@ -324,9 +297,9 @@ export function PromptComposer({
               : undefined
           }
           allowedKinds={acceptedAssetKinds(assetPickerParam)}
-          initialSelectedAssetIDs={selectedAssetIDsFromPreviews(
-            uploadPreviews[assetPickerParam.key] ||
-              previewsFromValue(paramValues[assetPickerParam.key]),
+          initialSelectedAssetIDs={canvasReferenceIDsForUsage(
+            referenceContent,
+            assetPickerParam.key,
           )}
           multiple={assetPickerParam.type === "files"}
           maxSelection={assetPickerParam.max_files || 8}
@@ -353,35 +326,40 @@ export function PromptComposer({
           }
           onClose={() => setAssetPickerParam(null)}
           onConfirm={(assets, selectedAssetIDs) => {
-            const current =
-              uploadPreviews[assetPickerParam.key] ||
-              previewsFromValue(paramValues[assetPickerParam.key]);
-            const currentByAssetID = new Map(
-              current
-                .map(
-                  (preview) => [assetIDFromPreview(preview), preview] as const,
-                )
-                .filter(([assetID]) => assetID > 0),
-            );
             const selectedByID = new Map(
               assets.map((asset) => [asset.id, asset]),
             );
-            let nextPrompt = value;
-            const next = selectedAssetIDs
-              .map((assetID, index) => {
-                const existing = currentByAssetID.get(assetID);
-                if (existing) return existing;
-                const asset = selectedByID.get(assetID);
-                if (!asset) return null;
-                const alias = nextReferenceAlias(assetPickerParam, index + 1);
-                const composerAsset = composerAssetFromRecord(asset);
-                nextPrompt = appendReferenceMention(nextPrompt, alias);
-                onAssetReference?.(composerAsset, assetPickerParam, alias);
-                return uploadPreviewFromAsset(composerAsset, alias);
-              })
-              .filter((preview): preview is UploadPreview => Boolean(preview));
-            setUploadValue(assetPickerParam, next);
-            if (nextPrompt !== value) onChange(nextPrompt);
+            const currentByID = new Map(
+              canvasReferenceTargetsForUsage(
+                referenceContent,
+                assetPickerParam.key,
+              ).map((target) => [target.refId, target]),
+            );
+            const targets = selectedAssetIDs.flatMap((assetID) => {
+              const asset = selectedByID.get(assetID);
+              if (!asset) {
+                const current = currentByID.get(assetID);
+                return current ? [current] : [];
+              }
+              return [
+                {
+                  refType: "asset" as const,
+                  refId: asset.id,
+                  label: asset.name,
+                  usage: assetPickerParam.key,
+                  trigger: "@" as const,
+                  versionId: asset.versionID,
+                },
+              ];
+            });
+            const next = replaceCanvasReferenceUsage(
+              value,
+              referenceContent,
+              assetPickerParam.key,
+              targets,
+            );
+            onChange(next.value, next.content);
+            setAssetPickerParam(null);
           }}
         />
       ) : null}
@@ -389,188 +367,10 @@ export function PromptComposer({
   );
 }
 
-function UploadParamStrip({
-  param,
-  previews,
-  disabled,
-  onChange,
-  onPreview,
-  onOpenAssetPicker,
-}: {
-  param: PowerParam;
-  previews: UploadPreview[];
-  disabled?: boolean;
-  onChange: (previews: UploadPreview[]) => void;
-  onPreview: (preview: UploadPreview) => void;
-  onOpenAssetPicker: () => void;
-}) {
-  function removeAt(index: number) {
-    revokeUploadPreviewUrl(previews[index]);
-    onChange(previews.filter((_, currentIndex) => currentIndex !== index));
-  }
-
-  return (
-    <div
-      className={`ws-prompt-upload-group ${previews.length > 0 ? "has-previews" : "is-empty"}`}
-    >
-      {previews.map((preview, index) => (
-        <span
-          key={`${preview.name}-${index}`}
-          className="ws-prompt-upload-card"
-          style={{ zIndex: previews.length - index + 1 }}
-          role="button"
-          tabIndex={0}
-          aria-label={`查看${preview.name}`}
-          onClick={() => onPreview(preview)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              onPreview(preview);
-            }
-          }}
-        >
-          {isImagePreview(preview) ? (
-            <img
-              className="ws-prompt-upload-thumb"
-              src={preview.url}
-              alt={preview.name}
-            />
-          ) : (
-            <span className="ws-prompt-upload-file">
-              <FileText size={16} />
-            </span>
-          )}
-          <span className="ws-prompt-upload-name">{preview.name}</span>
-          <span className="ws-prompt-upload-hover">
-            <strong>{preview.alias || preview.name}</strong>
-            <small>
-              {preview.text || preview.url || preview.type || "引用内容"}
-            </small>
-          </span>
-          <button
-            type="button"
-            className="ws-prompt-upload-remove"
-            disabled={disabled}
-            aria-label="移除上传文件"
-            onClick={(event) => {
-              event.stopPropagation();
-              removeAt(index);
-            }}
-          >
-            <X size={12} />
-          </button>
-        </span>
-      ))}
-      <button
-        type="button"
-        className="ws-prompt-upload-add"
-        disabled={disabled}
-        aria-label={param.name || "添加"}
-        onClick={onOpenAssetPicker}
-      >
-        <Plus size={16} />
-        <span>添加</span>
-      </button>
-    </div>
-  );
-}
-
-function uploadPreviewFromAsset(
-  asset: ComposerAssetItem,
-  alias: string,
-): UploadPreview {
-  const preview = asset.preview || emptyComposerPreview();
-  const url =
-    preview.imageUrl ||
-    preview.videoUrl ||
-    preview.audioUrl ||
-    preview.fileUrl ||
-    "";
-  return {
-    name: alias,
-    alias,
-    kind: asset.kind,
-    source: asset.source,
-    type: preview.imageUrl
-      ? "image/url"
-      : preview.videoUrl
-        ? "video/url"
-        : preview.audioUrl
-          ? "audio/url"
-          : "asset/reference",
-    url,
-    text: preview.text || asset.title,
-    output: asset.output,
-    asset: asset.asset,
-  };
-}
-
-function composerAssetFromRecord(asset: AssetRecord): ComposerAssetItem {
-  const content = asset.version?.content;
-  const mediaURL = findAssetMediaURL(content, asset.kind);
-  const preview = emptyComposerPreview();
-  preview.text = asset.summary || asset.name;
-  if (asset.kind === "image") preview.imageUrl = mediaURL;
-  if (asset.kind === "video") preview.videoUrl = mediaURL;
-  if (asset.kind === "audio") preview.audioUrl = mediaURL;
-  if (asset.kind === "file") preview.fileUrl = mediaURL;
-  return {
-    id: String(asset.id),
-    title: asset.name,
-    kind: asset.kind,
-    role: asset.role,
-    source: "asset",
-    refType: "asset",
-    refId: asset.id,
-    versionID: asset.versionID,
-    output: content,
-    preview,
-    asset,
-  };
-}
-
-function selectedAssetIDsFromPreviews(previews: UploadPreview[]) {
-  return Array.from(
-    new Set(previews.map(assetIDFromPreview).filter((assetID) => assetID > 0)),
-  );
-}
-
-function assetIDFromPreview(preview: UploadPreview) {
-  if (!preview.asset || typeof preview.asset !== "object") return 0;
-  return Number((preview.asset as Record<string, unknown>).id || 0);
-}
-
-function nextReferenceAlias(param: PowerParam, index: number) {
-  const name =
-    `${param.name || param.key || ""}${param.key || ""}`.toLowerCase();
-  if (/video|视频/.test(name)) {
-    return `视频${index}`;
-  }
-  if (/audio|music|音频|音乐/.test(name)) {
-    return `音频${index}`;
-  }
-  if (/text|文本|提示词|文案/.test(name)) {
-    return `文本${index}`;
-  }
-  if (/image|img|photo|picture|图片|图像|参考图/.test(name)) {
-    return `图片${index}`;
-  }
-  return `引用${index}`;
-}
-
-function appendReferenceMention(value: string, alias: string) {
-  const mention = `@${alias}`;
-  if (value.includes(mention)) {
-    return value;
-  }
-  const separator = value.trim() ? " " : "";
-  return `${value}${separator}${mention}`;
-}
-
 function acceptedAssetKinds(param: PowerParam): LibraryAssetKind[] {
   const configured = Array.from(
     new Set(
-      (param.asset_kinds || [])
+      (param.accepted_kinds || param.asset_kinds || [])
         .map(normalizeAssetKind)
         .filter((kind): kind is LibraryAssetKind => Boolean(kind)),
     ),
@@ -600,63 +400,6 @@ function normalizeAssetKind(value: unknown): LibraryAssetKind | undefined {
   return ["text", "image", "audio", "video", "richtext", "file"].includes(kind)
     ? (kind as LibraryAssetKind)
     : undefined;
-}
-
-function UploadPreviewDialog({
-  title,
-  preview,
-  onClose,
-}: {
-  title: string;
-  preview: UploadPreview;
-  onClose: () => void;
-}) {
-  const canDownload = Boolean(preview.url);
-
-  return (
-    <div
-      className="ws-upload-preview-backdrop"
-      role="dialog"
-      aria-modal="true"
-      onMouseDown={onClose}
-    >
-      <div
-        className="ws-upload-preview-shell"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="ws-upload-preview-title">
-          <span>{title}</span>
-          <strong>{preview.name}</strong>
-        </div>
-        <div className="ws-upload-preview-body">
-          {isImagePreview(preview) ? (
-            <img src={preview.url} alt={preview.name} />
-          ) : preview.text && !preview.url ? (
-            <div className="ws-upload-preview-text">
-              <FileText size={30} />
-              <p>{preview.text}</p>
-            </div>
-          ) : (
-            <div className="ws-upload-preview-file">
-              <FileText size={44} />
-              <span>{preview.name}</span>
-              <small>{preview.type || "文件"}</small>
-            </div>
-          )}
-        </div>
-        <div className="ws-upload-preview-actions">
-          <button type="button" aria-label="关闭预览" onClick={onClose}>
-            <X size={20} />
-          </button>
-          {canDownload ? (
-            <a href={preview.url} download={preview.name} aria-label="下载文件">
-              <Download size={20} />
-            </a>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function ParamMenu({
@@ -746,6 +489,8 @@ function ComposerMenu({
   openKey,
   label,
   icon,
+  iconOnly = false,
+  variant = "default",
   disabled,
   children,
   onToggle,
@@ -754,14 +499,17 @@ function ComposerMenu({
   openKey: string;
   label: string;
   icon: ReactNode;
+  iconOnly?: boolean;
+  variant?: "default" | "attachments";
   disabled?: boolean;
   children: ReactNode;
   onToggle: (key: string) => void;
 }) {
   const open = !disabled && openKey === id;
+  const variantClass = variant === "attachments" ? "is-attachments" : "";
   return (
     <span
-      className={`ws-prompt-tool-wrap ${open ? "is-open" : ""}`}
+      className={`ws-prompt-tool-wrap ${variantClass} ${open ? "is-open" : ""}`}
       onMouseEnter={() => {
         if (!disabled) {
           onToggle(id);
@@ -775,9 +523,12 @@ function ComposerMenu({
     >
       <button
         type="button"
-        className={`ws-prompt-tool ${open ? "is-open" : ""}`}
+        className={`ws-prompt-tool ${iconOnly ? "is-icon-only" : ""} ${open ? "is-open" : ""}`}
         disabled={disabled}
         aria-label={label}
+        aria-expanded={variant === "attachments" ? open : undefined}
+        aria-haspopup={variant === "attachments" ? "menu" : undefined}
+        title={iconOnly ? label : undefined}
         onFocus={() => {
           if (!disabled) {
             onToggle(id);
@@ -790,10 +541,12 @@ function ComposerMenu({
         }}
       >
         {icon}
-        <span>{label}</span>
-        <ChevronDown size={14} />
+        {!iconOnly ? <span>{label}</span> : null}
+        {!iconOnly ? <ChevronDown size={14} /> : null}
       </button>
-      {open ? <div className="ws-prompt-popover">{children}</div> : null}
+      {open ? (
+        <div className={`ws-prompt-popover ${variantClass}`}>{children}</div>
+      ) : null}
     </span>
   );
 }
@@ -952,44 +705,20 @@ function paramControlLabel(param: PowerParam, value: unknown) {
   return text ? `${param.name}: ${text}` : param.name;
 }
 
-function isImagePreview(preview: UploadPreview) {
-  return Boolean(preview.url && preview.type?.startsWith("image/"));
+function uploadParamLabel(param: PowerParam) {
+  const kinds = acceptedAssetKinds(param);
+  if (kinds.length === 1) {
+    return assetKindLabel(kinds[0]);
+  }
+  const name = String(param.name || "")
+    .replace(/^(上传|添加|选择)/, "")
+    .trim();
+  return name || "文件";
 }
 
-function revokeUploadPreviewUrl(preview?: UploadPreview) {
-  if (preview?.url?.startsWith("blob:")) {
-    URL.revokeObjectURL(preview.url);
-  }
-}
-
-function previewsFromValue(value: unknown): UploadPreview[] {
-  if (Array.isArray(value)) {
-    return value
-      .map(storedUploadPreview)
-      .filter((preview): preview is UploadPreview => Boolean(preview));
-  }
-  if (value && typeof value === "object") {
-    const preview = storedUploadPreview(value);
-    return preview ? [preview] : [];
-  }
-  return valueAsList(value)
-    .map(storedUploadPreview)
-    .filter((preview): preview is UploadPreview => Boolean(preview));
-}
-
-function uploadParamValue(param: PowerParam, previews: UploadPreview[]) {
-  const values = previews.map((preview) => ({
-    name: preview.alias || preview.name,
-    alias: preview.alias || preview.name,
-    type: preview.type || preview.kind || "",
-    kind: preview.kind || "",
-    url: preview.url || "",
-    text: preview.text || "",
-    source: preview.source || "upload",
-    output: preview.output,
-    asset: preview.asset,
-  }));
-  return param.type === "files" ? values : values[0] || "";
+function uploadParamKind(param: PowerParam): LibraryAssetKind {
+  const kinds = acceptedAssetKinds(param);
+  return kinds.length === 1 ? kinds[0] : "file";
 }
 
 function valueAsText(value: unknown) {
@@ -1035,77 +764,4 @@ function parseJSONValue(value: string) {
   } catch {
     return value;
   }
-}
-
-function storedUploadPreview(value: unknown): UploadPreview | null {
-  if (value && typeof value === "object") {
-    const row = value as Record<string, unknown>;
-    const url = String(row.url || "");
-    const text = String(row.text || "");
-    return {
-      name: String(
-        row.name || row.alias || uploadNameFromUrl(url) || text || "引用内容",
-      ),
-      alias: String(row.alias || row.name || ""),
-      kind: String(row.kind || ""),
-      source: String(row.source || "upload") as UploadPreview["source"],
-      type: String(row.type || imageTypeFromUrl(url) || ""),
-      url,
-      text,
-      output: row.output,
-      asset: row.asset,
-    };
-  }
-  const text = String(value || "");
-  if (!text) {
-    return null;
-  }
-  if (!isUrlLike(text)) {
-    return { name: text };
-  }
-  return {
-    name: uploadNameFromUrl(text),
-    type: imageTypeFromUrl(text),
-    url: text,
-  };
-}
-
-function isUrlLike(value: string) {
-  return /^(blob:|data:|https?:\/\/)/i.test(value);
-}
-
-function uploadNameFromUrl(value: string) {
-  if (value.startsWith("data:")) {
-    return "上传文件";
-  }
-  try {
-    const url = new URL(value);
-    const name = url.pathname.split("/").filter(Boolean).pop();
-    return name ? decodeURIComponent(name) : value;
-  } catch {
-    const name = value.split("/").filter(Boolean).pop();
-    return name || value;
-  }
-}
-
-function imageTypeFromUrl(value: string) {
-  if (value.startsWith("data:image/")) {
-    return value.slice(
-      5,
-      value.indexOf(";") > 0 ? value.indexOf(";") : undefined,
-    );
-  }
-  return /\.(png|jpe?g|gif|webp|bmp|svg)(\?|#|$)/i.test(value)
-    ? "image/url"
-    : "";
-}
-
-function emptyComposerPreview(): ComposerAssetPreview {
-  return {
-    text: "",
-    imageUrl: "",
-    videoUrl: "",
-    audioUrl: "",
-    fileUrl: "",
-  };
 }

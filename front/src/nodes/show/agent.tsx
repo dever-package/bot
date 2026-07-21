@@ -98,6 +98,8 @@ type AgentRole = "user" | "assistant";
 const ASSISTANT_DIALOG_LAYER_CLASS = "z-[100]";
 const ASSISTANT_DIALOG_LAYER_Z_INDEX = 1000;
 const ASSISTANT_MESSAGE_STATUS_RUNNING = 3;
+const DEFAULT_AGENT_REQUEST_API = "/bot/admin/agent/run";
+const DEFAULT_AGENT_RUN_STATUS_API = "/bot/admin/agent/run_status";
 const AssistantSessionHistoryDialog = resolveCompatComponent(
   "@/components/assistant/session-history-dialog",
   "AssistantSessionHistoryDialog",
@@ -283,12 +285,18 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   const modalOpen = useStore(store, () =>
     openPath ? Boolean(getStoreValueByPath(store, openPath)) : true,
   );
-  const requestApi = String(item.meta?.requestApi || "/bot/admin/agent/run");
+  const requestApi = String(item.meta?.requestApi || DEFAULT_AGENT_REQUEST_API);
   const streamApi = String(item.meta?.streamApi || "/bot/admin/agent/stream");
   const stopApi = String(item.meta?.stopApi || "/bot/admin/agent/stop");
-  const runStatusApi = String(
-    item.meta?.runStatusApi || "/bot/admin/agent/run_status",
+  const hasConfiguredRunStatusApi = Object.prototype.hasOwnProperty.call(
+    item.meta || {},
+    "runStatusApi",
   );
+  const runStatusApi = hasConfiguredRunStatusApi
+    ? String(item.meta?.runStatusApi || "")
+    : requestApi === DEFAULT_AGENT_REQUEST_API
+      ? DEFAULT_AGENT_RUN_STATUS_API
+      : "";
   const paramApi = String(
     item.meta?.paramApi || "/bot/admin/energon/power_params",
   );
@@ -1208,35 +1216,37 @@ export function ShowAgent({ item, store }: NodeItemProps) {
       });
     } catch (currentError: unknown) {
       if (runTokenRef.current === token) {
-        const recovered = await recoverAssistantFinalAfterStreamError({
-          assistantID,
-          activeSessionID,
-          assistantMessage,
-          requestID: activeRequestID || requestID,
-          lastID: activeLastStreamID,
-          streamApi,
-          runStatusApi,
-          blockMs,
-          token,
-          isAlreadySaved: () => assistantSaved,
-          markSaved: () => {
-            assistantSaved = true;
-          },
-          applyFrame: (frame) => {
-            const streamID = valueText(frame?.stream_id);
-            if (streamID) {
-              activeLastStreamID = streamID;
-              setLastStreamID(streamID);
-            }
-            applyFrameToMessage(assistantID, frame);
-            handleFinalFrameSideEffects(frame, assistantID);
-          },
-          saveFinal: saveAssistantFinalMessage,
-        });
+        const message = runtimeErrorMessage(currentError, "智能体测试失败。");
+        const recovered = isRecoverableAgentStreamErrorMessage(message)
+          ? await recoverAssistantFinalAfterStreamError({
+              assistantID,
+              activeSessionID,
+              assistantMessage,
+              requestID: activeRequestID || requestID,
+              lastID: activeLastStreamID,
+              streamApi,
+              runStatusApi,
+              blockMs,
+              token,
+              isAlreadySaved: () => assistantSaved,
+              markSaved: () => {
+                assistantSaved = true;
+              },
+              applyFrame: (frame) => {
+                const streamID = valueText(frame?.stream_id);
+                if (streamID) {
+                  activeLastStreamID = streamID;
+                  setLastStreamID(streamID);
+                }
+                applyFrameToMessage(assistantID, frame);
+                handleFinalFrameSideEffects(frame, assistantID);
+              },
+              saveFinal: saveAssistantFinalMessage,
+            })
+          : false;
         if (recovered) {
           return;
         }
-        const message = runtimeErrorMessage(currentError, "智能体测试失败。");
         setError(message);
         markAssistantError(assistantID, message);
         if (
@@ -1345,15 +1355,18 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         transport: "poll",
         stopOnResult: true,
         recoverOnError: true,
+        acceptErrorResult: true,
         onFrame: (frame) => {
           if (runTokenRef.current !== token) {
             return false;
           }
-          if (frame?.type !== "result" || Number(frame.status) === 2) {
+          if (frame?.type !== "result") {
             applyFrame(frame);
             return;
           }
-          recovered = saveResultFrame(frame);
+          saveResultFrame(frame);
+          recovered = true;
+          return false;
         },
       });
     } catch {
@@ -1361,6 +1374,9 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     }
     if (recovered) {
       return true;
+    }
+    if (!runStatusApi) {
+      return false;
     }
 
     return await recoverAssistantFinalFromRunStatus({

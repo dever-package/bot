@@ -338,6 +338,36 @@ button.wb-detail-state.is-error {
   scrollbar-width: thin;
 }
 
+.wb-detail-error-banner.is-run-error {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0;
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0;
+  padding: 10px 16px;
+}
+
+.wb-detail-error-banner.is-run-error > svg {
+  margin-top: 1px;
+  flex: 0 0 auto;
+}
+
+.wb-detail-error-banner.is-run-error strong {
+  display: block;
+  font-size: 12px;
+}
+
+.wb-detail-error-banner.is-run-error p {
+  margin: 3px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
 .wb-detail-scroll::-webkit-scrollbar,
 .wb-detail-version-options::-webkit-scrollbar {
   width: 5px;
@@ -435,6 +465,19 @@ button.wb-detail-state.is-error {
 .wb-detail-readonly-content:is(.is-text, .is-richtext)
   > .wb-asset-preview-content {
   width: min(840px, 100%);
+}
+
+.wb-detail-readonly-content:has(
+  > .wb-asset-preview-content > .ws-storyboard
+) {
+  background: var(--wb-detail-surface);
+  padding: 24px 28px 56px;
+}
+
+.wb-detail-readonly-content:is(.is-text, .is-richtext)
+  > .wb-asset-preview-content:has(> .ws-storyboard) {
+  width: 100%;
+  margin: 0;
 }
 
 .wb-asset-detail-prose > :first-child {
@@ -827,6 +870,12 @@ button.wb-detail-state.is-error {
 
   .wb-detail-readonly-content {
     padding: 24px 14px 48px;
+  }
+
+  .wb-detail-readonly-content:has(
+    > .wb-asset-preview-content > .ws-storyboard
+  ) {
+    padding: 16px 14px 40px;
   }
 
   .wb-detail-version-menu {

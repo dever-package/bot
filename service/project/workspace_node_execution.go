@@ -223,6 +223,7 @@ func workspaceNodeResultPayload(row workspacemodel.NodeExecution) map[string]any
 		"release_id":      firstUint64(uint64Value(nodeRun["release_id"]), uint64Value(output["release_id"]), uint64Value(valueAtPath(nodeRun, "result", "release_id"))),
 		"child_run_id":    firstUint64(row.ChildRunID, uint64Value(nodeRun["child_run_id"]), uint64Value(output["child_run_id"]), uint64Value(valueAtPath(nodeRun, "result", "child_run_id"))),
 		"status":          status,
+		"error":           strings.TrimSpace(row.Error),
 		"output":          firstPresent(nodeRun["output"], output["output"], output),
 		"asset":           firstPresent(nodeRun["asset"], output["asset"]),
 		"version":         firstPresent(nodeRun["version"], valueAtPath(output, "asset", "version"), output["version"]),

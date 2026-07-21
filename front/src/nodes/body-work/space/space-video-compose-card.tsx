@@ -1,9 +1,4 @@
-import {
-  FileText,
-  Shuffle,
-  Trash2,
-  Volume2,
-} from "lucide-react";
+import { FileText, Shuffle, Trash2, Volume2 } from "lucide-react";
 import type { DragEvent, ReactNode } from "react";
 import type { ComposerAssetItem } from "./space-prompt-composer";
 import type { VideoComposeClip } from "./space-video-compose";
@@ -18,6 +13,9 @@ export function VideoComposeClipCard({
   item,
   selected,
   readonly,
+  wholeCardDraggable,
+  dragging,
+  dropPlacement,
   onSelect,
   onPanel,
   onRemove,
@@ -33,6 +31,9 @@ export function VideoComposeClipCard({
   item?: ComposerAssetItem;
   selected: boolean;
   readonly?: boolean;
+  wholeCardDraggable?: boolean;
+  dragging?: boolean;
+  dropPlacement?: "before" | "after";
   onSelect: () => void;
   onPanel: (panel: VideoComposeClipPanel) => void;
   onRemove: () => void;
@@ -42,8 +43,7 @@ export function VideoComposeClipCard({
   onDrop: () => void;
   onDragEnd: () => void;
 }) {
-  const transitionActive =
-    !last && clip.transitionToNext.type !== "none";
+  const transitionActive = !last && clip.transitionToNext.type !== "none";
   const soundActive = Boolean(
     clip.originalAudioSource || clip.speechTracks.length > 0,
   );
@@ -58,6 +58,9 @@ export function VideoComposeClipCard({
       dragClassName="ws-video-compose-drag"
       selected={selected}
       readonly={readonly}
+      wholeCardDraggable={wholeCardDraggable}
+      dragging={dragging}
+      dropPlacement={dropPlacement}
       ariaLabel={`镜头 ${index + 1}`}
       onSelect={onSelect}
       onDragStart={onDragStart}
@@ -103,14 +106,16 @@ export function VideoComposeClipCard({
           </div>
         )}
       </div>
-      <strong className="ws-video-compose-card-title">
-        {clip.title || item?.title || `镜头 ${index + 1}`}
-      </strong>
-      {clip.blockingIssues.length ? (
-        <small className="ws-video-compose-card-blocking">
-          {clip.blockingIssues[0]}
-        </small>
-      ) : null}
+      <div className="ws-video-compose-card-meta">
+        <strong className="ws-video-compose-card-title">
+          {clip.title || item?.title || `镜头 ${index + 1}`}
+        </strong>
+        {clip.blockingIssues.length ? (
+          <small className="ws-video-compose-card-blocking">
+            {clip.blockingIssues[0]}
+          </small>
+        ) : null}
+      </div>
       <footer>
         <CardAction
           active={Boolean(clip.subtitle)}

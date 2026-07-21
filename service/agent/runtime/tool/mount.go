@@ -51,6 +51,9 @@ func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
 		runtimeprovider.AskUserTool(),
 		runtimeprovider.PresentSuggestionsTool(),
 	}
+	if request.Agent.Key == agentmodel.SkillInstallerAgentKey {
+		tools = append(tools, runtimeprovider.SkillInstallPlanTool())
+	}
 	registry, err := NewRegistry(tools...)
 	if err != nil {
 		return MountResult{}, err

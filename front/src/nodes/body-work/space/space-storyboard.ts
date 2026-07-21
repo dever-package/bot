@@ -1,28 +1,44 @@
 import { plainMarkdownTextFromRichOutput } from "./space-content-output";
-import { normalizeCanvasReferenceLabel } from "./space-reference-content";
 import { embeddedJSONValues } from "./space-structured-json";
 import type { CanvasReferenceContent } from "./types";
 
+export const STORYBOARD_VERSION = 4;
+export const MIN_STORYBOARD_SHOT_DURATION = 4;
+
+export const STORYBOARD_VISUAL_MODES = ["photoreal", "stylized"] as const;
+
+export type StoryboardVisualMode =
+  (typeof STORYBOARD_VISUAL_MODES)[number];
+
+export const STORYBOARD_ASPECT_RATIOS = [
+  "16:9",
+  "9:16",
+  "1:1",
+  "4:3",
+  "3:4",
+  "21:9",
+] as const;
+
+export type StoryboardAspectRatio = (typeof STORYBOARD_ASPECT_RATIOS)[number];
+
+export const DEFAULT_STORYBOARD_ASPECT_RATIO: StoryboardAspectRatio = "16:9";
+
 export type StoryboardMaterialType = "character" | "scene" | "prop";
+
+export const STORYBOARD_MATERIAL_LABELS: Record<
+  StoryboardMaterialType,
+  string
+> = {
+  character: "角色",
+  scene: "场景",
+  prop: "道具",
+};
 
 export type StoryboardMaterial = Record<string, unknown> & {
   id: string;
+  type: StoryboardMaterialType;
   name: string;
   prompt: string;
-  shot_ids: string[];
-};
-
-export type StoryboardMaterials = {
-  characters: StoryboardMaterial[];
-  scenes: StoryboardMaterial[];
-  props: StoryboardMaterial[];
-};
-
-export type StoryboardMaterialReference = Pick<
-  StoryboardMaterial,
-  "id" | "name" | "shot_ids"
-> & {
-  type: StoryboardMaterialType;
 };
 
 export type StoryboardWorkflowStatus = "draft" | "confirmed";
@@ -45,34 +61,36 @@ export type StoryboardSpeech = Record<string, unknown> & {
   speaker_mode?: StoryboardSpeakerMode;
 };
 
+export type StoryboardReferenceField =
+  | "description"
+  | "camera_instruction"
+  | "video_prompt";
+
 export type StoryboardShot = Record<string, unknown> & {
   id: string;
   order: number;
   duration: number;
-  visual: string;
-  end_visual: string;
-  camera_movement: string;
-  prompt: string;
+  description: string;
+  camera_instruction: string;
+  video_prompt: string;
+  material_ids: string[];
+  continue_previous: boolean;
   speech: StoryboardSpeech[];
   reference_contents?: Partial<
     Record<StoryboardReferenceField, CanvasReferenceContent>
   >;
 };
 
-export type StoryboardReferenceField =
-  | "visual"
-  | "end_visual"
-  | "camera_movement"
-  | "prompt";
-
 export type StoryboardDocument = Record<string, unknown> & {
   type: "storyboard";
-  version: number;
+  version: typeof STORYBOARD_VERSION;
   workflow: StoryboardWorkflow;
   title: string;
   style_prompt: string;
+  visual_mode: StoryboardVisualMode;
+  aspect_ratio: StoryboardAspectRatio;
+  materials: StoryboardMaterial[];
   shots: StoryboardShot[];
-  materials?: StoryboardMaterials;
 };
 
 const STORYBOARD_WRAPPER_KEYS = [
@@ -90,42 +108,6 @@ const STORYBOARD_WRAPPER_KEYS = [
   "rich",
 ] as const;
 
-const CAMERA_MOVEMENT_ALIASES = [
-  "cameraMovement",
-  "camera_motion",
-  "cameraMotion",
-  "camera",
-  "movement",
-  "运镜",
-] as const;
-
-const SHOT_PROMPT_ALIASES = [
-  "video_prompt",
-  "videoPrompt",
-  "generation_prompt",
-  "generationPrompt",
-  "视频提示词",
-] as const;
-
-const STYLE_PROMPT_ALIASES = [
-  "stylePrompt",
-  "visual_style",
-  "visualStyle",
-  "style",
-] as const;
-
-const MATERIAL_LIST_ALIASES = {
-  characters: ["characters", "roles", "people", "角色", "人物"],
-  scenes: ["scenes", "locations", "places", "场景", "地点"],
-  props: ["props", "items", "objects", "道具", "物品"],
-} as const;
-
-const MATERIAL_COLLECTIONS = [
-  { key: "characters", type: "character" },
-  { key: "scenes", type: "scene" },
-  { key: "props", type: "prop" },
-] as const;
-
 export function parseStoryboardOutput(value: unknown) {
   return findStoryboard(value, new Set(), 0);
 }
@@ -137,24 +119,39 @@ export function storyboardTotalDuration(storyboard: StoryboardDocument) {
   );
 }
 
-export function storyboardMaterialReferenceNames(
+export function isStoryboardShotDurationValid(value: number) {
+  return Number.isInteger(value) && value >= MIN_STORYBOARD_SHOT_DURATION;
+}
+
+export function storyboardMaterialsByType(
   storyboard: StoryboardDocument,
+  type: StoryboardMaterialType,
 ) {
-  return storyboardMaterialReferences(storyboard.materials)
-    .map((material) => material.name.trim())
-    .filter(Boolean)
-    .sort((left, right) => right.length - left.length);
+  return storyboard.materials.filter((material) => material.type === type);
+}
+
+export function storyboardShotMaterials(
+  storyboard: StoryboardDocument,
+  shot: StoryboardShot,
+) {
+  const materials = new Map(
+    storyboard.materials.map((material) => [material.id, material]),
+  );
+  return shot.material_ids
+    .map((id) => materials.get(id))
+    .filter((material): material is StoryboardMaterial => Boolean(material));
 }
 
 export function createStoryboardShot(index: number): StoryboardShot {
   return {
     id: `shot-${index + 1}`,
     order: index + 1,
-    duration: 4,
-    visual: "",
-    end_visual: "",
-    camera_movement: "",
-    prompt: "",
+    duration: MIN_STORYBOARD_SHOT_DURATION,
+    description: "",
+    camera_instruction: "",
+    video_prompt: "",
+    material_ids: [],
+    continue_previous: index > 0,
     speech: [],
   };
 }
@@ -184,14 +181,22 @@ export function createStoryboardSpeech(
 export function normalizeStoryboardOrder(
   storyboard: StoryboardDocument,
 ): StoryboardDocument {
+  const materialIDs = new Set(
+    storyboard.materials.map((material) => material.id),
+  );
   return {
     ...storyboard,
-    version: 2,
+    version: STORYBOARD_VERSION,
     workflow: normalizeStoryboardWorkflow(storyboard.workflow),
+    aspect_ratio: normalizeStoryboardAspectRatio(storyboard.aspect_ratio),
     shots: storyboard.shots.map((shot, index) => ({
       ...shot,
       id: shot.id || `shot-${index + 1}`,
       order: index + 1,
+      material_ids: uniqueStrings(shot.material_ids).filter((id) =>
+        materialIDs.has(id),
+      ),
+      continue_previous: index > 0 && Boolean(shot.continue_previous),
     })),
   };
 }
@@ -245,7 +250,7 @@ export function storyboardPromptWithStyle(
   prompt: string,
 ) {
   const basePrompt = prompt.trim();
-  const stylePrompt = String(storyboard.style_prompt || "").trim();
+  const stylePrompt = storyboard.style_prompt.trim();
   if (!stylePrompt || basePrompt.includes(stylePrompt)) {
     return basePrompt;
   }
@@ -254,6 +259,29 @@ export function storyboardPromptWithStyle(
   }
   const separator = /[。！？!?；;，,：:]$/.test(basePrompt) ? "" : "。";
   return `${basePrompt}${separator}统一视觉风格：${stylePrompt}`;
+}
+
+export function normalizeStoryboardAspectRatio(
+  value: unknown,
+): StoryboardAspectRatio {
+  const normalized = stringValue(value) as StoryboardAspectRatio;
+  return STORYBOARD_ASPECT_RATIOS.includes(normalized)
+    ? normalized
+    : DEFAULT_STORYBOARD_ASPECT_RATIO;
+}
+
+export function storyboardShotFallbackPrompt(shot: StoryboardShot) {
+  const speech = shot.speech
+    .filter(hasSpeechText)
+    .map((item) => `${storyboardSpeechLabel(item)}：${item.text.trim()}`)
+    .join("；");
+  const parts = [
+    shot.description,
+    shot.camera_instruction ? `镜头语言：${shot.camera_instruction}` : "",
+    speech,
+    shot.duration > 0 ? `时长：${shot.duration} 秒` : "",
+  ].filter(Boolean);
+  return parts.join("。") || `镜头 ${shot.order} 视频生成提示词`;
 }
 
 function findStoryboard(
@@ -273,10 +301,7 @@ function findStoryboard(
     }
     return null;
   }
-  if (typeof value !== "object") {
-    return null;
-  }
-  if (seen.has(value)) {
+  if (typeof value !== "object" || seen.has(value)) {
     return null;
   }
   seen.add(value);
@@ -292,15 +317,16 @@ function findStoryboard(
   }
 
   const row = value as Record<string, unknown>;
-  if (isStoryboardRecord(row)) {
-    return normalizeStoryboard(row);
+  const storyboard = decodeStoryboard(row);
+  if (storyboard) {
+    return storyboard;
   }
 
   const richText = richDocumentText(row);
   if (richText) {
-    const storyboard = findStoryboard(richText, seen, depth + 1);
-    if (storyboard) {
-      return storyboard;
+    const richStoryboard = findStoryboard(richText, seen, depth + 1);
+    if (richStoryboard) {
+      return richStoryboard;
     }
   }
 
@@ -309,404 +335,204 @@ function findStoryboard(
     if (candidate == null || candidate === value) {
       continue;
     }
-    const storyboard = findStoryboard(candidate, seen, depth + 1);
-    if (storyboard) {
-      return storyboard;
+    const nested = findStoryboard(candidate, seen, depth + 1);
+    if (nested) {
+      return nested;
     }
   }
   return null;
 }
 
-function isStoryboardRecord(row: Record<string, unknown>) {
-  if (!Array.isArray(row.shots)) {
-    return false;
-  }
+function decodeStoryboard(
+  row: Record<string, unknown>,
+): StoryboardDocument | null {
+  const visualMode = stringValue(row.visual_mode).toLowerCase();
   if (
-    String(row.type || "")
-      .trim()
-      .toLowerCase() === "storyboard"
+    stringValue(row.type).toLowerCase() !== "storyboard" ||
+    numberValue(row.version) !== STORYBOARD_VERSION ||
+    typeof row.title !== "string" ||
+    typeof row.style_prompt !== "string" ||
+    !isStoryboardVisualMode(visualMode) ||
+    !Array.isArray(row.materials) ||
+    !Array.isArray(row.shots)
   ) {
-    return true;
+    return null;
   }
-  return row.shots.some(isStoryboardShotRecord);
-}
 
-function isStoryboardShotRecord(value: unknown) {
-  if (!isRecord(value)) {
-    return false;
+  const materials = row.materials.map(decodeStoryboardMaterial);
+  if (materials.some((material) => !material)) {
+    return null;
   }
-  return [
-    "visual",
-    "camera_movement",
-    "speech",
-    "prompt",
-    "duration",
-    "order",
-  ].some((key) => key in value);
-}
+  const normalizedMaterials = materials as StoryboardMaterial[];
+  const materialIDs = new Set<string>();
+  for (const material of normalizedMaterials) {
+    if (materialIDs.has(material.id)) {
+      return null;
+    }
+    materialIDs.add(material.id);
+  }
 
-function normalizeStoryboard(row: Record<string, unknown>): StoryboardDocument {
-  const shots = Array.isArray(row.shots) ? row.shots : [];
-  const usedShotIds = new Set<string>();
-  const materials = normalizeStoryboardMaterials(row);
-  const normalizedShots = shots.map((shot, index) => {
-    const normalized = normalizeStoryboardShot(shot, index);
-    normalized.id = uniqueShotId(normalized.id, index, usedShotIds);
-    usedShotIds.add(normalized.id);
-    return normalized;
-  });
+  const usedShotIDs = new Set<string>();
+  const shots = row.shots.map((shot, index) =>
+    decodeStoryboardShot(shot, index, materialIDs),
+  );
+  if (shots.some((shot) => !shot)) {
+    return null;
+  }
+  const normalizedShots = shots as StoryboardShot[];
+  for (const shot of normalizedShots) {
+    if (usedShotIDs.has(shot.id)) {
+      return null;
+    }
+    usedShotIDs.add(shot.id);
+  }
+
   return {
     ...row,
     type: "storyboard",
-    version: 2,
+    version: STORYBOARD_VERSION,
     workflow: normalizeStoryboardWorkflow(row.workflow),
-    title: stringValue(row.title),
-    style_prompt: stringValue(
-      firstDefined(
-        row.style_prompt,
-        ...STYLE_PROMPT_ALIASES.map((key) => row[key]),
-      ),
-    ),
-    shots: materials
-      ? normalizeStoryboardMaterialMentions(normalizedShots, materials)
-      : normalizedShots,
-    ...(materials ? { materials } : {}),
+    title: row.title,
+    style_prompt: row.style_prompt,
+    visual_mode: visualMode,
+    aspect_ratio: normalizeStoryboardAspectRatio(row.aspect_ratio),
+    materials: normalizedMaterials,
+    shots: normalizedShots,
   };
 }
 
-function storyboardMaterialReferences(
-  materials?: StoryboardMaterials,
-): StoryboardMaterialReference[] {
-  if (!materials) {
-    return [];
-  }
-  return MATERIAL_COLLECTIONS.flatMap(({ key, type }) =>
-    materials[key].map((material) => ({
-      type,
-      id: material.id,
-      name: material.name,
-      shot_ids: material.shot_ids,
-    })),
-  );
+function isStoryboardVisualMode(value: string): value is StoryboardVisualMode {
+  return STORYBOARD_VISUAL_MODES.includes(value as StoryboardVisualMode);
 }
 
-function normalizeStoryboardMaterialMentions(
-  shots: StoryboardShot[],
-  materials: StoryboardMaterials,
-) {
-  const references = storyboardMaterialReferences(materials);
-  return shots.map((shot) => {
-    const names = references
-      .filter((material) => material.shot_ids.includes(shot.id))
-      .map((material) => material.name.trim())
-      .filter(Boolean);
-    if (!names.length) {
-      return shot;
-    }
-    return {
-      ...shot,
-      visual: normalizeMaterialMentions(shot.visual, names, true),
-      end_visual: normalizeMaterialMentions(shot.end_visual, names, true),
-      camera_movement: normalizeMaterialMentions(
-        shot.camera_movement,
-        names,
-        false,
-      ),
-      prompt: normalizeMaterialMentions(shot.prompt, names, true),
-    };
-  });
-}
-
-function normalizeMaterialMentions(
-  value: string,
-  materialNames: string[],
-  appendMissing: boolean,
-) {
-  const names = [...new Set(materialNames)].sort(
-    (left, right) => right.length - left.length,
-  );
-  let result = prefixMaterialNames(value, names);
-  if (!appendMissing) {
-    return result;
+function decodeStoryboardMaterial(value: unknown): StoryboardMaterial | null {
+  if (!isRecord(value)) {
+    return null;
   }
-  const missing = names.filter((name) => !result.includes(`@${name}`));
-  if (!missing.length) {
-    return result;
-  }
-  const mentions = missing.map((name) => `@${name}`).join(" ");
-  result = result.trim();
-  return result ? `${result}；${mentions}` : mentions;
-}
-
-function prefixMaterialNames(value: string, names: string[]) {
-  let result = "";
-  let cursor = 0;
-  while (cursor < value.length) {
-    if (value[cursor] === "@") {
-      let mentionStart = cursor + 1;
-      while (value[mentionStart] === "@") {
-        mentionStart += 1;
-      }
-      const mentioned = names.find((name) =>
-        value.startsWith(name, mentionStart),
-      );
-      if (mentioned) {
-        result += `@${mentioned}`;
-        cursor = mentionStart + mentioned.length;
-        continue;
-      }
-    }
-    const matched = names.find((name) => value.startsWith(name, cursor));
-    if (matched) {
-      result += `@${matched}`;
-      cursor += matched.length;
-      continue;
-    }
-    result += value[cursor];
-    cursor += 1;
-  }
-  return result;
-}
-
-function normalizeStoryboardMaterials(
-  row: Record<string, unknown>,
-): StoryboardMaterials | undefined {
-  const nested = isRecord(row.materials)
-    ? row.materials
-    : isRecord(row.material_manifest)
-      ? row.material_manifest
-      : null;
-  const source = nested || row;
-  const hasManifest = Boolean(
-    nested ||
-    Object.values(MATERIAL_LIST_ALIASES).some((aliases) =>
-      aliases.some((key) => source[key] != null),
-    ),
-  );
-  if (!hasManifest) {
-    return undefined;
+  const type = stringValue(value.type).toLowerCase();
+  if (
+    !isStoryboardMaterialType(type) ||
+    typeof value.id !== "string" ||
+    !value.id.trim() ||
+    typeof value.name !== "string" ||
+    typeof value.prompt !== "string"
+  ) {
+    return null;
   }
   return {
-    characters: normalizeMaterialList(
-      firstDefined(
-        ...MATERIAL_LIST_ALIASES.characters.map((key) => source[key]),
-      ),
-      "character",
-    ),
-    scenes: normalizeMaterialList(
-      firstDefined(...MATERIAL_LIST_ALIASES.scenes.map((key) => source[key])),
-      "scene",
-    ),
-    props: normalizeMaterialList(
-      firstDefined(...MATERIAL_LIST_ALIASES.props.map((key) => source[key])),
-      "prop",
-    ),
+    ...value,
+    id: value.id.trim(),
+    type,
+    name: value.name.trim().replace(/^[@#]+/, ""),
+    prompt: value.prompt.trim(),
   };
 }
 
-function normalizeMaterialList(value: unknown, type: StoryboardMaterialType) {
-  const values = Array.isArray(value)
-    ? value
-    : isRecord(value)
-      ? Object.entries(value).map(([key, item]) =>
-          isRecord(item) ? { id: key, ...item } : { id: key, name: item },
-        )
-      : [];
-  const usedIds = new Set<string>();
-  return values.map((value, index) => {
-    const row = isRecord(value) ? value : { name: value };
-    const name = normalizeMaterialName(
-      firstDefined(row.name, row.title, row.label),
-    );
-    const requestedId = stringValue(firstDefined(row.id, row.key));
-    const baseId = requestedId || fallbackMaterialId(type, name, index);
-    const id = uniqueMaterialId(baseId, usedIds);
-    usedIds.add(id);
-    return {
-      ...row,
-      id,
-      name: name || materialFallbackName(type, index),
-      prompt: stringValue(
-        firstDefined(
-          row.prompt,
-          row.image_prompt,
-          row.imagePrompt,
-          row.description,
-          row.visual,
-          row.appearance,
-        ),
-      ),
-      shot_ids: normalizeShotIds(
-        firstDefined(row.shot_ids, row.shotIds, row.shots),
-      ),
-    };
-  });
-}
-
-function normalizeMaterialName(value: unknown) {
-  return normalizeCanvasReferenceLabel(stringValue(value));
-}
-
-function normalizeShotIds(value: unknown) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const seen = new Set<string>();
-  return value
-    .map((item) => stringValue(isRecord(item) ? item.id : item).trim())
-    .filter((id) => {
-      if (!id || seen.has(id)) {
-        return false;
-      }
-      seen.add(id);
-      return true;
-    });
-}
-
-function fallbackMaterialId(
-  type: StoryboardMaterialType,
-  name: string,
-  index: number,
-) {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-  return `${type}-${slug || stableTextHash(name) || index + 1}`;
-}
-
-function stableTextHash(value: string) {
-  const text = value.trim();
-  if (!text) {
-    return "";
-  }
-  let hash = 2166136261;
-  for (const char of text) {
-    hash ^= char.codePointAt(0) || 0;
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-}
-
-function uniqueMaterialId(requestedId: string, usedIds: Set<string>) {
-  if (!usedIds.has(requestedId)) {
-    return requestedId;
-  }
-  let suffix = 2;
-  while (usedIds.has(`${requestedId}-${suffix}`)) {
-    suffix += 1;
-  }
-  return `${requestedId}-${suffix}`;
-}
-
-function materialFallbackName(type: StoryboardMaterialType, index: number) {
-  const labels: Record<StoryboardMaterialType, string> = {
-    character: "角色",
-    scene: "场景",
-    prop: "道具",
-  };
-  return `${labels[type]} ${index + 1}`;
-}
-
-function normalizeStoryboardShot(
+function decodeStoryboardShot(
   value: unknown,
   index: number,
-): StoryboardShot {
-  const row = isRecord(value) ? value : {};
-  const normalized: StoryboardShot = {
-    ...row,
-    id: stringValue(row.id) || `shot-${index + 1}`,
-    order: index + 1,
-    duration: positiveInteger(row.duration, 4),
-    visual: stringValue(row.visual),
-    end_visual: stringValue(row.end_visual),
-    camera_movement: stringValue(
-      firstDefined(
-        row.camera_movement,
-        ...CAMERA_MOVEMENT_ALIASES.map((key) => row[key]),
-      ),
-    ),
-    prompt: stringValue(
-      firstDefined(row.prompt, ...SHOT_PROMPT_ALIASES.map((key) => row[key])),
-    ),
-    speech: normalizeStoryboardSpeech(row.speech, stringValue(row.id) || `shot-${index + 1}`),
-  };
-  for (const key of [
-    ...CAMERA_MOVEMENT_ALIASES,
-    ...SHOT_PROMPT_ALIASES,
-  ]) {
-    delete normalized[key];
+  materialIDs: Set<string>,
+): StoryboardShot | null {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    !value.id.trim() ||
+    typeof value.description !== "string" ||
+    typeof value.camera_instruction !== "string" ||
+    typeof value.video_prompt !== "string" ||
+    typeof value.continue_previous !== "boolean" ||
+    !Array.isArray(value.material_ids) ||
+    !Array.isArray(value.speech)
+  ) {
+    return null;
   }
-  normalized.prompt =
-    normalized.prompt.trim() || storyboardShotFallbackPrompt(normalized);
-  return normalized;
+  const duration = numberValue(value.duration);
+  if (duration == null || !isStoryboardShotDurationValid(duration)) {
+    return null;
+  }
+  const materialIdList = value.material_ids.map(stringValue);
+  if (
+    materialIdList.some((id) => !id || !materialIDs.has(id)) ||
+    new Set(materialIdList).size !== materialIdList.length
+  ) {
+    return null;
+  }
+  const speech = value.speech.map(decodeStoryboardSpeech);
+  if (speech.some((item) => !item)) {
+    return null;
+  }
+  return {
+    ...value,
+    id: value.id.trim(),
+    order: index + 1,
+    duration,
+    description: value.description,
+    camera_instruction: value.camera_instruction,
+    video_prompt: value.video_prompt,
+    material_ids: materialIdList,
+    continue_previous: index > 0 && value.continue_previous,
+    speech: speech as StoryboardSpeech[],
+  };
 }
 
-export function storyboardShotFallbackPrompt(shot: StoryboardShot) {
-  const speech = shot.speech
-    .filter(hasSpeechText)
-    .map((item) => `${storyboardSpeechLabel(item)}：${item.text.trim()}`)
-    .join("；");
-  const parts = [
-    shot.visual ? `首帧：${shot.visual}` : "",
-    shot.end_visual ? `尾帧：${shot.end_visual}` : "",
-    shot.camera_movement ? `运镜：${shot.camera_movement}` : "",
-    speech,
-    shot.duration > 0 ? `时长：${shot.duration} 秒` : "",
-  ].filter(Boolean);
-  return parts.join("。") || `镜头 ${shot.order} 视频生成提示词`;
+function decodeStoryboardSpeech(value: unknown): StoryboardSpeech | null {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    !value.id.trim() ||
+    typeof value.text !== "string"
+  ) {
+    return null;
+  }
+  const kind = stringValue(value.kind).toLowerCase();
+  const startTime = numberValue(value.start_time);
+  if (
+    (kind !== "dialogue" && kind !== "narration") ||
+    startTime == null ||
+    startTime < 0
+  ) {
+    return null;
+  }
+  if (kind === "narration") {
+    const narration: StoryboardSpeech = {
+      ...value,
+      id: value.id.trim(),
+      kind,
+      text: value.text,
+      start_time: startTime,
+    };
+    delete narration.character_id;
+    delete narration.speaker_mode;
+    return narration;
+  }
+  const speakerMode = stringValue(value.speaker_mode).toLowerCase();
+  if (
+    typeof value.character_id !== "string" ||
+    (speakerMode !== "visible" && speakerMode !== "offscreen")
+  ) {
+    return null;
+  }
+  return {
+    ...value,
+    id: value.id.trim(),
+    kind,
+    text: value.text,
+    start_time: startTime,
+    character_id: value.character_id.trim(),
+    speaker_mode: speakerMode,
+  };
 }
 
 function normalizeStoryboardWorkflow(value: unknown): StoryboardWorkflow {
   const row = isRecord(value) ? value : {};
   const status =
-    String(row.status || "").trim().toLowerCase() === "confirmed"
+    stringValue(row.status).toLowerCase() === "confirmed"
       ? "confirmed"
       : "draft";
   return {
     status,
     confirmed_at: status === "confirmed" ? stringValue(row.confirmed_at) : "",
   };
-}
-
-function normalizeStoryboardSpeech(value: unknown, shotID: string) {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const usedIDs = new Set<string>();
-  return value.map((item, index) => {
-    const row = isRecord(item) ? item : {};
-    const kind: StoryboardSpeechKind =
-      String(row.kind || "").trim().toLowerCase() === "narration"
-        ? "narration"
-        : "dialogue";
-    const requestedID = stringValue(row.id) || `${shotID}-speech-${index + 1}`;
-    const id = uniqueValueID(requestedID, usedIDs);
-    usedIDs.add(id);
-    const speech: StoryboardSpeech = {
-      ...row,
-      id,
-      kind,
-      text: stringValue(row.text),
-      start_time: nonNegativeNumber(row.start_time, 0),
-    };
-    if (kind === "dialogue") {
-      speech.character_id = stringValue(row.character_id);
-      speech.speaker_mode =
-        String(row.speaker_mode || "").trim().toLowerCase() === "visible"
-          ? "visible"
-          : "offscreen";
-    } else {
-      delete speech.character_id;
-      delete speech.speaker_mode;
-    }
-    return speech;
-  });
-}
-
-function hasSpeechText(speech: StoryboardSpeech) {
-  return speech.text.trim().length > 0;
 }
 
 function richDocumentText(value: unknown) {
@@ -748,51 +574,27 @@ function collectRichText(value: unknown): string {
   return value.content.map(collectRichText).join(separator);
 }
 
-function positiveInteger(value: unknown, fallback: number) {
-  const number = Number.parseFloat(String(value ?? ""));
-  return Number.isFinite(number) && number > 0
-    ? Math.max(1, Math.round(number))
-    : fallback;
+function isStoryboardMaterialType(
+  value: string,
+): value is StoryboardMaterialType {
+  return value === "character" || value === "scene" || value === "prop";
 }
 
-function nonNegativeNumber(value: unknown, fallback: number) {
-  const number = Number.parseFloat(String(value ?? ""));
-  return Number.isFinite(number) && number >= 0 ? number : fallback;
+function hasSpeechText(speech: StoryboardSpeech) {
+  return speech.text.trim().length > 0;
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function numberValue(value: unknown) {
+  const number = typeof value === "number" ? value : Number.NaN;
+  return Number.isFinite(number) ? number : null;
 }
 
 function stringValue(value: unknown) {
-  return typeof value === "string" ? value : value == null ? "" : String(value);
-}
-
-function firstDefined(...values: unknown[]) {
-  return values.find((value) => value !== undefined && value !== null);
-}
-
-function uniqueShotId(
-  requestedId: string,
-  index: number,
-  usedIds: Set<string>,
-) {
-  const baseId = requestedId || `shot-${index + 1}`;
-  if (!usedIds.has(baseId)) {
-    return baseId;
-  }
-  let suffix = 2;
-  while (usedIds.has(`${baseId}-${suffix}`)) {
-    suffix += 1;
-  }
-  return `${baseId}-${suffix}`;
-}
-
-function uniqueValueID(requestedID: string, usedIDs: Set<string>) {
-  if (!usedIDs.has(requestedID)) {
-    return requestedID;
-  }
-  let suffix = 2;
-  while (usedIDs.has(`${requestedID}-${suffix}`)) {
-    suffix += 1;
-  }
-  return `${requestedID}-${suffix}`;
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function isRecord(value: unknown): value is Record<string, any> {

@@ -46,7 +46,7 @@ func normalizeServiceParamInputKeys(
 			continue
 		}
 		for _, key := range serviceParamInputKeys(serviceParam, param) {
-			if value, tracked := normalized[key]; tracked && IsMissing(value) {
+			if value, tracked := normalized[key]; tracked && !IsMissing(value) {
 				continue
 			}
 			value, exists := input[key]
@@ -112,7 +112,7 @@ func normalizeParamInputAlias(
 	if _, configured := configuredKeys[strings.ToLower(alias)]; configured {
 		return
 	}
-	if _, exactExists := input[key]; exactExists {
+	if exactValue, exactExists := input[key]; exactExists && !IsMissing(exactValue) {
 		if _, aliasExists := input[alias]; aliasExists {
 			normalized[alias] = nil
 		}

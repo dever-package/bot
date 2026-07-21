@@ -11,11 +11,11 @@ func knowledgeNodeExpandTool(service knowledgeservice.Service, allowed map[uint6
 	required = appendRequired(required, "node_id")
 	return Tool{
 		Definition: knowledgeToolDefinition(
-			"expand_knowledge_node",
+			KnowledgeNodeExpandToolName,
 			"知识库节点",
 			"展开指定知识节点的子级。",
 			knowledgeParameters(baseProperty, required, map[string]any{
-				"node_id": integerProperty("知识节点 ID"),
+				"node_id": integerProperty("节点搜索或知识树返回的 node_id"),
 				"depth":   integerProperty("展开层数"),
 			}),
 		),
@@ -47,11 +47,11 @@ func knowledgeNodeRelatedTool(service knowledgeservice.Service, allowed map[uint
 	required = appendRequired(required, "node_id")
 	return Tool{
 		Definition: knowledgeToolDefinition(
-			"find_related_knowledge",
+			KnowledgeNodeRelatedToolName,
 			"关联知识",
 			"查找指定知识节点的关联内容。",
 			knowledgeParameters(baseProperty, required, map[string]any{
-				"node_id": integerProperty("知识节点 ID"),
+				"node_id": integerProperty("节点搜索或知识树返回的 node_id"),
 				"edge_types": map[string]any{
 					"type":        "array",
 					"description": "关联类型",

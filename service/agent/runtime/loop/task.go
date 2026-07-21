@@ -13,26 +13,29 @@ import (
 	runtimecontext "github.com/dever-package/bot/service/agent/runtime/context"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
+	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 type TaskRequest struct {
-	AgentIdentity string
-	SessionID     uint64
-	Input         map[string]any
-	History       []any
-	Billing       botprotocol.BillingContext
-	Method        string
-	Host          string
-	Path          string
-	Headers       map[string]string
-	Server        *server.Context
+	AgentIdentity   string
+	SessionID       uint64
+	Input           map[string]any
+	MediaReferences []energoninput.MediaReference
+	History         []any
+	Billing         botprotocol.BillingContext
+	Method          string
+	Host            string
+	Path            string
+	Headers         map[string]string
+	Server          *server.Context
 }
 
 type statelessRequest struct {
 	TaskRequest
-	RequestID string
-	OnStream  func(map[string]any)
+	RequestID        string
+	RequiredToolName string
+	OnStream         func(map[string]any)
 }
 
 func (s Service) RunTask(ctx context.Context, request TaskRequest) map[string]any {
@@ -94,17 +97,34 @@ func (s Service) prepareStatelessExecution(ctx context.Context, request stateles
 	if err != nil {
 		return execution{}, err
 	}
+	if len(request.MediaReferences) > 0 {
+		powerConfig, configErr := s.gateway.PowerParamConfig(ctx, power.Key, 0)
+		if configErr != nil {
+			return execution{}, configErr
+		}
+		bound, bindErr := energoninput.BindMediaReferences(
+			input,
+			powerConfig.Params,
+			modelMediaReferences(request.MediaReferences),
+		)
+		if bindErr != nil {
+			return execution{}, bindErr
+		}
+		input = bound.Values
+	}
 	assembled, err := s.assembleTaskContext(ctx, request, agent, inputText)
 	if err != nil {
 		return execution{}, err
 	}
 	return s.createExecution(ctx, requestID, executionSpec{
-		Agent:     agent,
-		Power:     power,
-		Prompt:    assembled.Prompt,
-		Input:     input,
-		InputText: inputText,
-		History:   assembled.History,
+		Agent:            agent,
+		Power:            power,
+		Prompt:           assembled.Prompt,
+		Input:            input,
+		InputText:        inputText,
+		History:          assembled.History,
+		MediaReferences:  runtimeMediaReferences(request.MediaReferences),
+		RequiredToolName: strings.TrimSpace(request.RequiredToolName),
 		Transport: modelTransport{
 			Method:  request.Method,
 			Host:    request.Host,

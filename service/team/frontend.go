@@ -257,7 +257,11 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		return nil, err
 	}
 	req.SourceTargetID = form.SelectedTargetID
-	req.Params = energonservice.ApplyPowerParamDefaults(req.Params, form.Params)
+	boundReferences, err := energoninput.BindMediaReferences(req.Params, form.Params, req.MediaReferences)
+	if err != nil {
+		return nil, err
+	}
+	req.Params = energonservice.ApplyPowerParamDefaults(boundReferences.Values, form.Params)
 
 	requestID := strings.TrimSpace(req.RequestID)
 	if requestID == "" {

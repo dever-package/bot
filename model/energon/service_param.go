@@ -259,6 +259,30 @@ var (
 			"status":           1,
 			"sort":             2,
 		},
+		{
+			"id":               17,
+			"service_id":       serviceDoubaoImageID,
+			"param_id":         paramImageID,
+			"param_rule":       serviceParamRuleDirect,
+			"key":              "image",
+			"name":             "",
+			"mapping":          "",
+			"fixed_value_type": fixedValueTypeString,
+			"status":           1,
+			"sort":             3,
+		},
+		{
+			"id":               18,
+			"service_id":       serviceDoubaoImageID,
+			"param_id":         0,
+			"param_rule":       serviceParamRuleFixed,
+			"key":              "sequential_image_generation",
+			"name":             "",
+			"mapping":          "disabled",
+			"fixed_value_type": fixedValueTypeString,
+			"status":           1,
+			"sort":             4,
+		},
 	}
 
 	paramRuleOptions = []map[string]any{

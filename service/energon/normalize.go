@@ -64,16 +64,23 @@ func (s GatewayService) resolveNormalizePlan(ctx context.Context, req *botprotoc
 	}
 
 	targets := orderActivePowerTargets(s.repo.ListTargetsByPower(ctx, power.ID))
-	if normalizePowerSourceRule(int(power.SourceRule)) == powerSourceRulePick {
+	sourceRule := normalizePowerSourceRule(int(power.SourceRule))
+	requestedTargetID := uint64(0)
+	if sourceRule == powerSourceRulePick {
 		if targetID := requestedSourceTargetID(req); targetID > 0 {
+			requestedTargetID = targetID
 			targets = filterRequestedPowerTarget(targets, targetID)
 			if len(targets) == 0 {
 				return normalizePlan{}, fmt.Errorf("指定来源不属于当前能力: %d", targetID)
 			}
 		}
-	} else {
+	}
+	if len(targets) > 0 {
 		compatible, reasons := s.compatiblePowerTargets(ctx, req, power, targets)
-		if len(compatible) == 0 && len(targets) > 0 {
+		if len(compatible) == 0 {
+			if sourceRule == powerSourceRulePick && requestedTargetID > 0 {
+				return normalizePlan{}, fmt.Errorf("指定来源与当前参数不兼容: %s", strings.Join(reasons, "；"))
+			}
 			return normalizePlan{}, fmt.Errorf("当前参数没有兼容的能力来源: %s", strings.Join(reasons, "；"))
 		}
 		targets = compatible

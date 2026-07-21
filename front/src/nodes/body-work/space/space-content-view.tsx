@@ -23,6 +23,14 @@ type CanvasContentMediaPreview = {
   fileUrl?: string;
 };
 
+export type CanvasContentMediaKind = "image" | "video" | "audio";
+
+const CANVAS_CONTENT_MEDIA_KINDS: CanvasContentMediaKind[] = [
+  "image",
+  "video",
+  "audio",
+];
+
 type ContentViewModule = {
   ContentView?: ComponentType<SharedContentViewProps>;
   EnergonContentView?: ComponentType<SharedContentViewProps>;
@@ -35,8 +43,7 @@ const contentViewModule = getCompatModule(
 const SharedContentView =
   contentViewModule.ContentView || contentViewModule.EnergonContentView;
 
-export const normalizeEnergonOutput =
-  contentViewModule.normalizeEnergonOutput;
+export const normalizeEnergonOutput = contentViewModule.normalizeEnergonOutput;
 
 type CanvasNodeContentViewProps = SharedContentViewProps & {
   fallback?: string;
@@ -202,9 +209,16 @@ function standaloneOutputText(
 }
 
 export function contentOutputHasMedia(output: unknown) {
-  return normalizedContentItems(output).some((item) =>
-    mediaContentExists(item, new Set(), 0),
-  );
+  return contentOutputMediaKinds(output).length > 0;
+}
+
+export function contentOutputMediaKinds(output: unknown) {
+  const kinds = new Set<CanvasContentMediaKind>();
+  const seen = new Set<object>();
+  for (const item of normalizedContentItems(output)) {
+    collectContentMediaKinds(item, kinds, seen, 0);
+  }
+  return CANVAS_CONTENT_MEDIA_KINDS.filter((kind) => kinds.has(kind));
 }
 
 function normalizedContentItems(output: unknown): unknown[] {
@@ -215,39 +229,106 @@ function normalizedContentItems(output: unknown): unknown[] {
   return Array.isArray(output) ? output : [output];
 }
 
-function mediaContentExists(
+function collectContentMediaKinds(
   value: unknown,
+  kinds: Set<CanvasContentMediaKind>,
   seen: Set<object>,
   depth: number,
-): boolean {
+): void {
   if (value == null || depth > 12) {
-    return false;
+    return;
   }
   if (Array.isArray(value)) {
-    return value.some((item) => mediaContentExists(item, seen, depth + 1));
+    value.forEach((item) =>
+      collectContentMediaKinds(item, kinds, seen, depth + 1),
+    );
+    return;
+  }
+  if (typeof value === "string") {
+    const kind = contentMediaKindFromURL(value);
+    if (kind) {
+      kinds.add(kind);
+    }
+    return;
   }
   if (typeof value !== "object") {
-    return false;
+    return;
   }
   if (seen.has(value)) {
-    return false;
+    return;
   }
   seen.add(value);
 
   const record = value as Record<string, unknown>;
+  const fields: Record<CanvasContentMediaKind, unknown[]> = {
+    image: [record.image, record.image_url, record.imageUrl, record.images],
+    video: [record.video, record.video_url, record.videoUrl, record.videos],
+    audio: [record.audio, record.audio_url, record.audioUrl, record.audios],
+  };
+  for (const kind of CANVAS_CONTENT_MEDIA_KINDS) {
+    if (fields[kind].some(hasCanvasContent)) {
+      kinds.add(kind);
+    }
+  }
+
+  const explicitKind = contentMediaKindFromType(record.type);
+  const attrs =
+    record.attrs && typeof record.attrs === "object"
+      ? (record.attrs as Record<string, unknown>)
+      : undefined;
   if (
-    ["editorMediaImage", "editorMediaVideo", "editorMediaAudio"].includes(
-      String(record.type || ""),
+    explicitKind &&
+    [record.url, record.src, attrs?.src, attrs?.url].some(hasCanvasContent)
+  ) {
+    kinds.add(explicitKind);
+  }
+
+  for (const nested of [
+    record.rich,
+    record.content,
+    record.output,
+    record.result,
+    record.data,
+    record.body,
+    record.value,
+  ]) {
+    collectContentMediaKinds(nested, kinds, seen, depth + 1);
+  }
+}
+
+function contentMediaKindFromType(value: unknown) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+  if (["image", "mediaimage", "editormediaimage"].includes(normalized)) {
+    return "image" as const;
+  }
+  if (["video", "mediavideo", "editormediavideo"].includes(normalized)) {
+    return "video" as const;
+  }
+  if (
+    ["audio", "music", "voice", "mediaaudio", "editormediaaudio"].includes(
+      normalized,
     )
   ) {
-    return true;
+    return "audio" as const;
   }
-  if ([record.images, record.videos, record.audios].some(hasCanvasContent)) {
-    return true;
+  return undefined;
+}
+
+function contentMediaKindFromURL(value: string) {
+  const url = value.trim();
+  if (/\.(png|jpe?g|gif|webp|avif|svg)(?:[?#].*)?$/i.test(url)) {
+    return "image" as const;
   }
-  return [record.rich, record.content, record.output, record.result].some(
-    (item) => mediaContentExists(item, seen, depth + 1),
-  );
+  if (/\.(mp4|webm|mov|m4v)(?:[?#].*)?$/i.test(url)) {
+    return "video" as const;
+  }
+  if (/\.(mp3|wav|ogg|m4a|aac)(?:[?#].*)?$/i.test(url)) {
+    return "audio" as const;
+  }
+  return undefined;
 }
 
 export function hasCanvasContent(value: unknown) {

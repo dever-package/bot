@@ -5,10 +5,12 @@ export function AssetAudioPreview({
   src,
   prompt = "",
   detailed = false,
+  autoPlay = false,
 }: {
   src: string;
   prompt?: string;
   detailed?: boolean;
+  autoPlay?: boolean;
 }) {
   const player = (
     <div
@@ -22,6 +24,7 @@ export function AssetAudioPreview({
       <EnergonAudioPlayer
         src={src}
         detailed={detailed}
+        autoPlay={autoPlay}
         className="h-full min-h-0 border-0 bg-transparent p-0 shadow-none"
       />
     </div>

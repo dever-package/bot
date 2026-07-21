@@ -7,7 +7,11 @@ import {
 } from "../space-storyboard-view";
 import type { StoryboardDocument } from "../space-storyboard";
 import type { ComposerAssetItem } from "../space-prompt-composer";
-import { CanvasNodeContentView } from "../space-content-view";
+import {
+  CanvasNodeContentView,
+  type CanvasContentMediaKind,
+} from "../space-content-view";
+import { AssetPreview } from "../../asset/asset-preview";
 import {
   nodeDetailContentWithValue,
   type NodeDetailEditableContent,
@@ -31,6 +35,8 @@ const { RichTextEditor } = getCompatModule("@/components/rich-text-editor") as {
 export function NodeDetailEditor({
   content,
   mediaOutput,
+  mediaKind,
+  mediaPrompt,
   readonly,
   referenceItems,
   storyboardWorkflowAction,
@@ -41,14 +47,26 @@ export function NodeDetailEditor({
 }: {
   content: NodeDetailEditableContent;
   mediaOutput?: unknown;
+  mediaKind?: CanvasContentMediaKind;
+  mediaPrompt?: string;
   readonly: boolean;
   referenceItems?: ComposerAssetItem[];
   storyboardWorkflowAction?: StoryboardWorkflowAction;
   lipSyncEnabled?: boolean;
-  onConfirmStoryboard?: (storyboard: StoryboardDocument) => void | Promise<void>;
+  onConfirmStoryboard?: (
+    storyboard: StoryboardDocument,
+  ) => void | Promise<void>;
   onCreateStoryboardRevision?: () => void | Promise<void>;
   onChange: (content: NodeDetailEditableContent) => void;
 }) {
+  if (mediaOutput !== undefined && mediaKind === "audio") {
+    return (
+      <div className="wb-detail-readonly-content is-audio">
+        <AssetPreview kind="audio" content={mediaOutput} prompt={mediaPrompt} />
+      </div>
+    );
+  }
+
   if (mediaOutput !== undefined) {
     return (
       <CanvasNodeContentView

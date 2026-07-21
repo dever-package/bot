@@ -3,6 +3,7 @@ package install
 import (
 	"archive/tar"
 	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"fmt"
@@ -57,7 +58,7 @@ func downloadPlanStep(ctx context.Context, workDir string, stepIndex int, step i
 			_ = os.RemoveAll(candidateDir)
 			continue
 		}
-		return sourceProvenance{Root: candidateDir, URL: publicSourceURL(candidate)}, nil
+		return sourceProvenance{Root: candidateDir, URL: publicSourceURL(step.URL)}, nil
 	}
 	if lastErr != nil {
 		return sourceProvenance{}, lastErr
@@ -102,6 +103,7 @@ func githubArchiveCandidates(rawURL string) []string {
 		return []string{fmt.Sprintf("https://github.com/%s/%s/archive/refs/heads/%s.zip", owner, repo, branch)}
 	}
 	return []string{
+		fmt.Sprintf("https://github.com/%s/%s/archive/HEAD.zip", owner, repo),
 		fmt.Sprintf("https://github.com/%s/%s/archive/refs/heads/main.zip", owner, repo),
 		fmt.Sprintf("https://github.com/%s/%s/archive/refs/heads/master.zip", owner, repo),
 		rawURL,
@@ -110,7 +112,7 @@ func githubArchiveCandidates(rawURL string) []string {
 
 func publicSourceURL(rawURL string) string {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil || parsed.Host == "" {
+	if err != nil || parsed.Host == "" || (strings.ToLower(parsed.Scheme) != "http" && strings.ToLower(parsed.Scheme) != "https") {
 		return ""
 	}
 	parsed.User = nil
@@ -161,41 +163,89 @@ func downloadFile(ctx context.Context, rawURL string, dir string) (string, error
 }
 
 func downloadFileName(rawURL string, contentType string) string {
+	contentType = strings.ToLower(strings.TrimSpace(contentType))
 	parsed, err := url.Parse(rawURL)
 	if err == nil {
 		name := path.Base(parsed.Path)
-		if name != "" && name != "." && name != "/" && len([]byte(name)) <= 180 && !strings.ContainsRune(name, 0) {
+		if validDownloadFileName(name) && (isArchivePath(strings.ToLower(name)) || !archiveContentType(contentType)) {
 			return name
 		}
-		contentType += " " + strings.ToLower(parsed.Path)
 	}
 	if strings.Contains(contentType, "zip") {
 		return "download.zip"
 	}
-	if strings.Contains(contentType, "gzip") || strings.Contains(contentType, "tar") {
+	if strings.Contains(contentType, "gzip") || strings.Contains(contentType, "tgz") {
 		return "download.tar.gz"
+	}
+	if strings.Contains(contentType, "tar") {
+		return "download.tar"
 	}
 	return agentskill.EntryFile
 }
 
+func archiveContentType(contentType string) bool {
+	return strings.Contains(contentType, "zip") || strings.Contains(contentType, "gzip") ||
+		strings.Contains(contentType, "tgz") || strings.Contains(contentType, "tar")
+}
+
+func validDownloadFileName(name string) bool {
+	return name != "" && name != "." && name != "/" && len([]byte(name)) <= 180 && !strings.ContainsRune(name, 0)
+}
+
 func unpackDownloadedFile(filePath string, targetDir string, extract bool) error {
+	switch downloadedArchiveFormat(filePath) {
+	case "zip":
+		return extractZip(filePath, targetDir)
+	case "gzip":
+		return extractTarGzip(filePath, targetDir)
+	case "tar":
+		return extractTar(filePath, targetDir)
+	case "":
+		if !extract {
+			break
+		}
+		return fmt.Errorf("不支持的压缩格式: %s", filepath.Base(filePath))
+	}
+	skillDir := filepath.Join(targetDir, "single-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		return err
+	}
+	return os.Rename(filePath, filepath.Join(skillDir, agentskill.EntryFile))
+}
+
+func downloadedArchiveFormat(filePath string) string {
+	file, err := os.Open(filePath)
+	if err == nil {
+		defer file.Close()
+		header := make([]byte, 512)
+		read, _ := io.ReadFull(file, header)
+		header = header[:read]
+		switch {
+		case hasZipHeader(header):
+			return "zip"
+		case len(header) >= 2 && header[0] == 0x1f && header[1] == 0x8b:
+			return "gzip"
+		case len(header) >= 262 && bytes.Equal(header[257:262], []byte("ustar")):
+			return "tar"
+		}
+	}
 	lower := strings.ToLower(filePath)
 	switch {
 	case strings.HasSuffix(lower, ".zip"):
-		return extractZip(filePath, targetDir)
+		return "zip"
 	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"):
-		return extractTarGzip(filePath, targetDir)
+		return "gzip"
 	case strings.HasSuffix(lower, ".tar"):
-		return extractTar(filePath, targetDir)
-	case extract:
-		return fmt.Errorf("不支持的压缩格式: %s", filepath.Base(filePath))
+		return "tar"
 	default:
-		skillDir := filepath.Join(targetDir, "single-skill")
-		if err := os.MkdirAll(skillDir, 0o755); err != nil {
-			return err
-		}
-		return os.Rename(filePath, filepath.Join(skillDir, agentskill.EntryFile))
+		return ""
 	}
+}
+
+func hasZipHeader(header []byte) bool {
+	return len(header) >= 4 && bytes.Equal(header[:2], []byte{'P', 'K'}) &&
+		((header[2] == 3 && header[3] == 4) || (header[2] == 5 && header[3] == 6) ||
+			(header[2] == 7 && header[3] == 8))
 }
 
 func extractZip(filePath string, targetDir string) error {

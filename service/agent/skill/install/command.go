@@ -49,8 +49,10 @@ func runInstallCommand(ctx context.Context, sandboxConfig sandbox.Config, workDi
 	}
 
 	homeDir := filepath.Join(workDir, ".home")
-	if err := os.MkdirAll(homeDir, 0o755); err != nil {
-		return "", err
+	if !gitClonesIntoWorkspace(command) {
+		if err := os.MkdirAll(homeDir, 0o755); err != nil {
+			return "", err
+		}
 	}
 
 	commandRoot := workDir
@@ -247,6 +249,7 @@ func usesSkillHubCommand(command string) bool {
 
 func skillHubCommandPrelude() string {
 	return strings.Join([]string{
+		`export TAR_OPTIONS="${TAR_OPTIONS:+$TAR_OPTIONS }--no-same-owner"`,
 		`export PATH="$HOME/.skillhub/bin:$HOME/.skillhub:$HOME/.local/bin:$HOME/bin:$PWD/.bin:$PWD/bin:$PWD/node_modules/.bin:$PATH"`,
 		`skillhub() {`,
 		`  local bin`,
@@ -291,6 +294,9 @@ func validateInstallCommandAction(name string, fields []string) error {
 	if len(fields) < 2 {
 		return fmt.Errorf("安装命令缺少操作参数")
 	}
+	if name == "npx" {
+		return validateNpxPackage(fields[1:])
+	}
 	action := strings.ToLower(strings.TrimSpace(fields[1]))
 	allowed := map[string]map[string]struct{}{
 		"npm":      {"install": {}, "i": {}, "add": {}, "exec": {}},
@@ -304,8 +310,18 @@ func validateInstallCommandAction(name string, fields []string) error {
 			return fmt.Errorf("不支持的 %s 安装操作: %s", name, action)
 		}
 	}
-	if (name == "npx" || name == "bunx") && strings.HasPrefix(action, "-") {
+	if name == "bunx" && strings.HasPrefix(action, "-") {
 		return fmt.Errorf("%s 必须直接指定安装工具包", name)
+	}
+	return nil
+}
+
+func validateNpxPackage(fields []string) error {
+	for len(fields) > 0 && (fields[0] == "-y" || fields[0] == "--yes") {
+		fields = fields[1:]
+	}
+	if len(fields) == 0 || strings.HasPrefix(fields[0], "-") {
+		return fmt.Errorf("npx 必须直接指定安装工具包")
 	}
 	return nil
 }
@@ -341,6 +357,16 @@ func installCommandName(command string) string {
 	return strings.ToLower(filepath.Base(fields[0]))
 }
 
+func gitClonesIntoWorkspace(command string) bool {
+	fields := strings.Fields(strings.TrimSpace(command))
+	destination := ""
+	if len(fields) > 0 {
+		destination = strings.Trim(fields[len(fields)-1], "\"'")
+	}
+	return len(fields) >= 4 && installCommandName(command) == "git" &&
+		strings.EqualFold(fields[1], "clone") && destination != "" && filepath.Clean(destination) == "."
+}
+
 func installCommandEnv(workDir string, homeDir string) []string {
 	commandPath := strings.Join(installCommandPaths(workDir, homeDir), string(os.PathListSeparator))
 
@@ -352,6 +378,7 @@ func installCommandEnv(workDir string, homeDir string) []string {
 		"SKILLS_HOME=" + workDir,
 		"SKILLS_DIR=" + workDir,
 		"CI=true",
+		"npm_config_yes=true",
 		"NO_COLOR=1",
 		"PATH=" + commandPath,
 	}
@@ -366,7 +393,7 @@ func installCommandPaths(workDir string, homeDir string) []string {
 		filepath.Join(workDir, ".bin"),
 		filepath.Join(workDir, "bin"),
 		filepath.Join(workDir, "node_modules", ".bin"),
-		os.Getenv("PATH"),
+		sandbox.CommandPath(),
 	}
 }
 
