@@ -13,12 +13,6 @@ const (
 	canvasVideoCompositionMaxClips = 50
 )
 
-var canvasVideoTransitionTypes = map[string]bool{
-	"none":      true,
-	"fade":      true,
-	"crossfade": true,
-}
-
 func refreshCanvasVideoCompositionReferences(
 	node canvasRunNode,
 	raw map[string]any,
@@ -335,15 +329,12 @@ func resolveCanvasVideoSubtitleTracks(
 }
 
 func resolveCanvasVideoTransition(label string, raw map[string]any) (map[string]any, error) {
-	transitionType := strings.ToLower(textValue(raw["type"]))
-	if transitionType == "" {
-		transitionType = "none"
-	}
-	if !canvasVideoTransitionTypes[transitionType] {
+	transitionType, ok := botprotocol.NormalizeVideoTransitionType(textValue(raw["type"]))
+	if !ok {
 		return nil, fmt.Errorf("%s使用了不支持的转场", label)
 	}
 	durationMS := int(uint64Value(firstPresent(raw["duration_ms"], raw["durationMs"])))
-	if transitionType != "none" && (durationMS < 100 || durationMS > 5000) {
+	if transitionType != botprotocol.VideoTransitionNone && (durationMS < 100 || durationMS > 5000) {
 		return nil, fmt.Errorf("%s的转场时长必须在 0.1 到 5 秒之间", label)
 	}
 	return map[string]any{
@@ -354,8 +345,8 @@ func resolveCanvasVideoTransition(label string, raw map[string]any) (map[string]
 
 func resolveCanvasVideoCompositionSettings(raw map[string]any) map[string]any {
 	return map[string]any{
-		"resolution": firstText(raw["resolution"], "1920x1080"),
-		"fps":        firstPresent(raw["fps"], 25),
+		"resolution": firstText(raw["resolution"], "auto"),
+		"fps":        firstPresent(raw["fps"], 0),
 	}
 }
 

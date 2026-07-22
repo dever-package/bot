@@ -72,6 +72,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { getCompatModule, useNavigate, useTheme } from "@dever/front-plugin";
+import { useBodyLoginConfig } from "../auth/site-config";
+import { bodyAppearanceStyle } from "../shared/body-appearance";
+import "../shared/body-theme.css";
 import {
   AgentInteractionPanel,
   type AgentInteraction,
@@ -581,6 +584,7 @@ const SHOW_CANVAS_ASSISTANT = false;
 
 export function WorkSpacePage() {
   const navigate = useNavigate();
+  const loginConfig = useBodyLoginConfig();
   const projectId = useMemo(() => readProjectId(), []);
   const catalogCache = useMemo(() => new SpaceCatalogCache(), []);
   const [space, setSpace] = useState<SpaceBootstrap | null>(null);
@@ -598,6 +602,10 @@ export function WorkSpacePage() {
   const [workMode, setWorkMode] = useState<WorkMode>("create");
   const [assistantOpen, setAssistantOpen] = useState(false);
   const { resolvedTheme: theme, setTheme } = useTheme();
+  const pageAppearanceProps = {
+    "data-body-theme": loginConfig.site.appearance.themePreset,
+    style: bodyAppearanceStyle(loginConfig.site.appearance, theme),
+  };
   const [nodeMenu, setNodeMenu] = useState<AddNodeMenuState | null>(null);
   const [powers, setPowers] = useState<PowerOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2288,7 +2296,10 @@ export function WorkSpacePage() {
 
   if (loading) {
     return (
-      <main className={`ws-page is-${theme} ws-loading-screen`}>
+      <main
+        className={`ws-page is-${theme} ws-loading-screen`}
+        {...pageAppearanceProps}
+      >
         <div className="ws-loading-state" role="status" aria-live="polite">
           <strong>正在加载创作空间</strong>
           <span>正在恢复画布与项目内容</span>
@@ -2302,7 +2313,10 @@ export function WorkSpacePage() {
 
   if (error || !space || !activeCate) {
     return (
-      <main className={`ws-page is-${theme} ws-loading-screen`}>
+      <main
+        className={`ws-page is-${theme} ws-loading-screen`}
+        {...pageAppearanceProps}
+      >
         <div className="ws-loading-card ws-error-card">
           <span>{error || "创作空间不存在"}</span>
         </div>
@@ -2311,7 +2325,10 @@ export function WorkSpacePage() {
   }
 
   return (
-    <main className={`ws-page is-${theme} is-${workMode}-view`}>
+    <main
+      className={`ws-page is-${theme} is-${workMode}-view`}
+      {...pageAppearanceProps}
+    >
       <CanvasWorkbench
         activeCate={activeCate}
         mode={workMode}

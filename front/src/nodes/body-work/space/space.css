@@ -3624,6 +3624,40 @@
   overflow-wrap: anywhere;
 }
 
+.ws-page[data-body-theme] {
+  --ws-canvas: var(--body-work-canvas);
+  --ws-panel: var(--body-work-surface);
+  --ws-panel-strong: var(--body-work-surface);
+  --ws-text: var(--body-work-text);
+  --ws-muted: var(--body-work-muted);
+  --ws-border: var(--body-work-line);
+  --ws-on-accent: var(--body-work-on-primary);
+  --ws-accent-solid: var(--body-work-primary-strong);
+  --ws-accent-solid-hover: var(--body-work-primary);
+  --ws-accent-text: var(--body-work-primary-strong);
+  --ws-accent-muted: color-mix(
+    in srgb,
+    var(--body-work-primary) 72%,
+    var(--body-work-muted)
+  );
+  --ws-accent-border: color-mix(
+    in srgb,
+    var(--body-work-primary) 45%,
+    var(--body-work-line)
+  );
+  --ws-accent-border-soft: color-mix(
+    in srgb,
+    var(--body-work-primary) 22%,
+    var(--body-work-line)
+  );
+  --ws-accent-soft: var(--body-work-primary-soft);
+}
+
+.ws-page.is-dark[data-body-theme] {
+  --ws-accent-text: var(--body-work-primary-bright);
+  --ws-accent-muted: var(--body-work-primary);
+}
+
 .ws-canvas-content-view
   :where(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, table) {
   margin-top: 0;
@@ -8375,8 +8409,7 @@
   gap: 6px;
 }
 
-.ws-video-compose-sound-fields button,
-.ws-video-compose-transition-fields button {
+.ws-video-compose-sound-fields button {
   display: inline-flex;
   min-height: 26px;
   align-items: center;
@@ -8439,19 +8472,21 @@
   color: #b2384f;
 }
 
-.ws-video-compose-transition-fields button.is-active {
-  border-color: var(--ws-accent-muted);
-  background: var(--ws-accent-soft);
-  color: var(--ws-accent-text);
-}
-
-.ws-video-compose-transition-fields input {
+.ws-video-compose-transition-fields input,
+.ws-video-compose-transition-fields select {
   width: 56px;
   height: 25px;
   border: 1px solid var(--ws-border-soft);
   border-radius: 4px;
+  background: var(--ws-card);
+  color: var(--ws-text-strong);
   padding: 0 5px;
   font: inherit;
+}
+
+.ws-video-compose-transition-fields select {
+  width: 116px;
+  cursor: pointer;
 }
 
 .ws-video-compose-global {

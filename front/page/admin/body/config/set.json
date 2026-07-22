@@ -232,6 +232,80 @@
         }
       },
       {
+        "type": "form-radio",
+        "name": "主题方案",
+        "value": "form.theme_preset",
+        "mode": "form",
+        "info": "控制 Body 登录页、工作台和画布的基础色彩；自定义品牌主色只覆盖强调色。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "请选择主题方案。"
+          }
+        ],
+        "meta": {
+          "tab": "site",
+          "formLayout": "horizontal",
+          "controlClassName": "gap-x-5"
+        }
+      },
+      {
+        "type": "form-input",
+        "name": "品牌主色",
+        "placeholder": "例如：#1c6548",
+        "value": "form.brand_primary_color",
+        "mode": "form",
+        "info": "可选。填写 6 位十六进制颜色后覆盖主题强调色；留空使用主题默认值。",
+        "validate": [
+          {
+            "type": "pattern",
+            "pattern": "^$|^#[0-9a-fA-F]{6}$",
+            "message": "品牌主色必须是 # 开头的 6 位十六进制颜色。"
+          }
+        ],
+        "meta": {
+          "tab": "site",
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[220px]"
+        }
+      },
+      {
+        "type": "form-radio",
+        "name": "登录页模板",
+        "value": "form.login_template",
+        "mode": "form",
+        "info": "切换登录页外层布局，账号、三方登录和站点菜单保持不变。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "请选择登录页模板。"
+          }
+        ],
+        "meta": {
+          "tab": "site",
+          "formLayout": "horizontal",
+          "controlClassName": "gap-x-5"
+        }
+      },
+      {
+        "type": "form-radio",
+        "name": "工作台模板",
+        "value": "form.workbench_template",
+        "mode": "form",
+        "info": "只调整工作台导航与内容框架，创作、对话、工具和资产功能继续复用。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "请选择工作台模板。"
+          }
+        ],
+        "meta": {
+          "tab": "site",
+          "formLayout": "horizontal",
+          "controlClassName": "gap-x-5"
+        }
+      },
+      {
         "type": "form-upload",
         "name": "登录页图片",
         "value": "form.login_image",
@@ -770,6 +844,10 @@
         "login_image",
         "login_title",
         "login_description",
+        "theme_preset",
+        "brand_primary_color",
+        "login_template",
+        "workbench_template",
         "company_name",
         "company_address",
         "business_license_url",
@@ -784,6 +862,10 @@
       "login_image": "",
       "login_title": "把想法变成作品",
       "login_description": "调用团队能力，与智能体协作，把每一次创作沉淀为可复用的项目资产。",
+      "theme_preset": "forest",
+      "brand_primary_color": "",
+      "login_template": "split",
+      "workbench_template": "rail",
       "company_name": "",
       "company_address": "",
       "business_license_url": "",

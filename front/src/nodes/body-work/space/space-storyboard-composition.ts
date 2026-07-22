@@ -1,5 +1,4 @@
 import {
-  type StoryboardAspectRatio,
   type StoryboardDocument,
   type StoryboardShot,
   type StoryboardSpeech,
@@ -39,24 +38,10 @@ export function storyboardVideoComposition(input: {
       (clip) => clip.id,
     ),
     settings: {
-      resolution: storyboardCompositionResolution(
-        input.storyboard.aspect_ratio,
-      ),
-      fps: input.current?.settings.fps || 25,
+      resolution: input.current?.settings.resolution || "auto",
+      fps: input.current?.settings.fps ?? 0,
     },
   };
-}
-
-function storyboardCompositionResolution(aspectRatio: StoryboardAspectRatio) {
-  const resolutions: Record<StoryboardAspectRatio, string> = {
-    "16:9": "1920x1080",
-    "9:16": "1080x1920",
-    "1:1": "1080x1080",
-    "4:3": "1440x1080",
-    "3:4": "1080x1440",
-    "21:9": "2520x1080",
-  };
-  return resolutions[aspectRatio];
 }
 
 function storyboardVideoClip(input: {

@@ -1,10 +1,10 @@
 .bot-work-login-page {
-  --login-bg: #fcfdfc;
-  --login-surface: #fcfdfc;
-  --login-line: #e4e8e6;
-  --login-text: #171a19;
-  --login-muted: #6b7370;
-  --login-green: #1c6548;
+  --login-bg: var(--body-work-canvas);
+  --login-surface: var(--body-work-surface);
+  --login-line: var(--body-work-line);
+  --login-text: var(--body-work-text);
+  --login-muted: var(--body-work-muted);
+  --login-green: var(--body-work-primary);
   --login-control-height: 44px;
   --login-control-radius: 24px;
   --login-control-font-size: 13px;
@@ -43,7 +43,7 @@
   z-index: 20;
   height: 48px;
   border-bottom: 1px solid var(--login-line);
-  background: rgba(252, 253, 252, 0.95);
+  background: color-mix(in srgb, var(--login-surface) 95%, transparent);
   backdrop-filter: blur(24px);
 }
 
@@ -92,7 +92,7 @@
 
 .bot-work-login-links a,
 .bot-work-login-mobile-links a {
-  color: #303632;
+  color: var(--login-text);
   font-size: 12px;
   font-weight: 400;
   line-height: 18px;
@@ -142,7 +142,7 @@
 }
 
 .bot-work-login-menu-button:hover {
-  background: #f4f6f5;
+  background: var(--body-work-active);
 }
 
 .bot-work-login-mobile-links {
@@ -168,7 +168,7 @@
 }
 
 .bot-work-login-mobile-links a:hover {
-  background: #f1f4f2;
+  background: var(--body-work-active);
 }
 
 .bot-work-login-stage {
@@ -262,7 +262,7 @@
 }
 
 .bot-work-login-third-party button:hover {
-  background: #f4f6f5;
+  background: var(--body-work-active);
 }
 
 .bot-work-login-third-party button:disabled {
@@ -271,7 +271,7 @@
 }
 
 .bot-work-login-third-party button svg {
-  color: #0f9657;
+  color: var(--body-work-primary-bright);
 }
 
 .bot-work-login-third-party img {
@@ -334,7 +334,7 @@
   height: var(--login-control-height) !important;
   border: 1px solid var(--login-line) !important;
   border-radius: var(--login-control-radius) !important;
-  background: #ffffff !important;
+  background: var(--login-surface) !important;
   color: var(--login-text) !important;
   font-family: inherit !important;
   font-size: var(--login-control-font-size) !important;
@@ -345,8 +345,8 @@
 }
 
 .bot-work-login-input:focus {
-  border-color: #9fb4a9 !important;
-  box-shadow: 0 0 0 2px rgba(54, 98, 76, 0.12) !important;
+  border-color: var(--body-work-primary) !important;
+  box-shadow: 0 0 0 2px var(--body-work-ring) !important;
 }
 
 .bot-work-login-input::placeholder {
@@ -407,8 +407,12 @@
   gap: 8px;
   border: 0;
   border-radius: var(--login-control-radius);
-  background: linear-gradient(90deg, #205b43 0%, #12a35e 100%);
-  color: #ffffff;
+  background: linear-gradient(
+    90deg,
+    var(--body-work-primary-strong) 0%,
+    var(--body-work-primary-bright) 100%
+  );
+  color: var(--body-work-on-primary);
   font: inherit;
   font-size: var(--login-control-font-size);
   font-weight: 500;
@@ -423,7 +427,11 @@
   left: 8%;
   width: 42%;
   border-radius: 50%;
-  background: rgba(52, 198, 119, 0.48);
+  background: color-mix(
+    in srgb,
+    var(--body-work-primary-bright) 48%,
+    transparent
+  );
   content: "";
   filter: blur(13px);
 }
@@ -457,7 +465,7 @@
   cursor: pointer;
   border: 0;
   background: transparent;
-  color: #215f45;
+  color: var(--body-work-primary-strong);
   font: inherit;
   padding: 0;
 }
@@ -508,6 +516,103 @@
 
 @keyframes bot-work-login-spin {
   to { transform: rotate(360deg); }
+}
+
+@media (min-width: 1024px) {
+  .bot-work-login-page[data-login-template="focus"]
+    .bot-work-login-layout {
+    width: min(620px, 100%);
+    gap: 0;
+    padding-right: 40px;
+    padding-left: 40px;
+  }
+
+  .bot-work-login-page[data-login-template="focus"]
+    .bot-work-login-artwork {
+    display: none;
+  }
+
+  .bot-work-login-page[data-login-template="focus"] .bot-work-login-auth {
+    max-width: 440px;
+    flex-basis: 440px;
+  }
+
+  .bot-work-login-page[data-login-template="focus"]
+    .bot-work-login-form-panel {
+    box-shadow: var(--body-work-shadow);
+  }
+
+  .bot-work-login-page[data-login-template="showcase"]
+    .bot-work-login-stage {
+    padding: 64px 24px 24px;
+  }
+
+  .bot-work-login-page[data-login-template="showcase"]
+    .bot-work-login-layout {
+    position: relative;
+    width: min(1440px, 100%);
+    min-height: calc(100svh - 88px);
+    justify-content: flex-end;
+    overflow: hidden;
+    border-radius: 24px;
+    padding: 44px 6%;
+  }
+
+  .bot-work-login-page[data-login-template="showcase"]
+    .bot-work-login-artwork {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    flex: none;
+    border-radius: 24px;
+  }
+
+  .bot-work-login-page[data-login-template="showcase"]
+    .bot-work-login-artwork::after {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      rgba(8, 16, 13, 0.06) 18%,
+      rgba(8, 16, 13, 0.2) 58%,
+      rgba(8, 16, 13, 0.48) 100%
+    );
+    content: "";
+  }
+
+  .bot-work-login-page[data-login-template="showcase"]
+    .bot-work-login-auth {
+    position: relative;
+    z-index: 1;
+    max-width: 430px;
+    flex-basis: 430px;
+    border: 1px solid color-mix(in srgb, var(--login-line) 72%, transparent);
+    border-radius: 20px;
+    background: color-mix(in srgb, var(--login-surface) 94%, transparent);
+    padding: 28px;
+    box-shadow: 0 24px 70px rgba(12, 20, 17, 0.2);
+    backdrop-filter: blur(18px);
+  }
+
+  .bot-work-login-page[data-login-template="showcase"]
+    .bot-work-login-copy h1 {
+    font-size: 38px;
+    line-height: 48px;
+  }
+
+  .bot-work-login-page[data-login-template="showcase"]
+    .bot-work-login-copy p {
+    margin-top: 14px;
+  }
+
+  .bot-work-login-page[data-login-template="showcase"]
+    .bot-work-login-form-panel {
+    border: 0;
+    background: transparent;
+    padding: 16px 0 0;
+    box-shadow: none;
+  }
 }
 
 @media (max-width: 1199px) {

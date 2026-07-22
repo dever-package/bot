@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 const (
@@ -18,7 +20,6 @@ const (
 	ffmpegCompositionMaxClips      = 50
 	ffmpegCompositionVideoPadFloor = 1.0
 	ffmpegCompositionVideoPadRatio = 0.1
-	ffmpegDefaultResolution        = "1920x1080"
 )
 
 type ffmpegComposition struct {
@@ -68,18 +69,14 @@ type ffmpegCompositionSettings struct {
 	FPS        int    `json:"fps"`
 }
 
-type ffmpegMediaProbe struct {
-	Duration float64
-	HasVideo bool
-	HasAudio bool
-}
-
 type ffmpegPreparedClip struct {
 	Clip                    ffmpegCompositionClip
 	VisualVideoInputIndex   int
 	OriginalAudioInputIndex int
 	Duration                float64
 	VideoPadDuration        float64
+	VisualVideoPath         string
+	VisualProbe             ffmpegMediaProbe
 	HasOriginalAudio        bool
 	SpeechTracks            []ffmpegPreparedSpeech
 }
@@ -125,23 +122,20 @@ func buildFFmpegCompositionArgs(
 	workspace string,
 	outputPath string,
 	composition ffmpegComposition,
-) ([]string, error) {
+) ([]string, bool, error) {
 	ffprobePath, err := exec.LookPath("ffprobe")
 	if err != nil {
-		return nil, fmt.Errorf("当前服务器未安装 ffprobe，无法读取镜头信息")
+		return nil, false, fmt.Errorf("当前服务器未安装 ffprobe，无法读取镜头信息")
 	}
 	resolution, err := normalizeFFmpegResolution(composition.Settings.Resolution)
 	if err != nil {
-		return nil, err
-	}
-	if resolution == "" {
-		resolution = ffmpegDefaultResolution
+		return nil, false, err
 	}
 	fps, err := normalizeFFmpegFPS(composition.Settings.FPS)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	args := []string{"-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats"}
+	inputArgs := ffmpegCommandArgs()
 	prepared := make([]ffmpegPreparedClip, 0, len(composition.Clips))
 	nextInputIndex := 0
 	for index, clip := range composition.Clips {
@@ -153,11 +147,33 @@ func buildFFmpegCompositionArgs(
 			nextInputIndex,
 		)
 		if prepareErr != nil {
-			return nil, prepareErr
+			return nil, false, prepareErr
 		}
-		args = append(args, currentArgs...)
+		inputArgs = append(inputArgs, currentArgs...)
 		prepared = append(prepared, current)
 		nextInputIndex = nextIndex
+	}
+	if resolution == "" {
+		resolution, err = ffmpegCompositionAutoResolution(prepared[0])
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	fastArgs, fastConcat, err := buildFFmpegFastConcatArgs(
+		workspace,
+		outputPath,
+		prepared,
+		resolution,
+		fps,
+	)
+	if err != nil || fastConcat {
+		return fastArgs, fastConcat, err
+	}
+	if fps == 0 {
+		fps, err = ffmpegCompositionAutoFPS(prepared[0])
+		if err != nil {
+			return nil, false, err
+		}
 	}
 
 	filters, videoLabel, audioLabel, totalDuration, err := buildFFmpegCompositionFilters(
@@ -167,21 +183,42 @@ func buildFFmpegCompositionArgs(
 		fps,
 	)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	args = append(args,
+	args := append(inputArgs,
 		"-filter_complex", strings.Join(filters, ";"),
 		"-map", "["+videoLabel+"]",
 		"-map", "["+audioLabel+"]",
 		"-t", formatFFmpegSeconds(totalDuration),
 		"-r", strconv.Itoa(fps),
-		"-c:v", "libx264",
-		"-pix_fmt", "yuv420p",
+	)
+	args = appendFFmpegVideoEncodingArgs(args)
+	args = append(args,
 		"-c:a", "aac",
 		"-movflags", "+faststart",
 		"-y", outputPath,
 	)
-	return args, nil
+	return args, false, nil
+}
+
+func ffmpegCompositionAutoResolution(clip ffmpegPreparedClip) (string, error) {
+	width := clip.VisualProbe.Width - clip.VisualProbe.Width%2
+	height := clip.VisualProbe.Height - clip.VisualProbe.Height%2
+	if width < 2 || height < 2 {
+		return "", fmt.Errorf("无法读取首个镜头的画面尺寸，请手动选择输出分辨率")
+	}
+	if width > ffmpegMaxDimension || height > ffmpegMaxDimension || width*height > ffmpegMaxPixels {
+		return "", fmt.Errorf("首个镜头分辨率超过 4K 像素规模，请手动选择较低的输出分辨率")
+	}
+	return fmt.Sprintf("%dx%d", width, height), nil
+}
+
+func ffmpegCompositionAutoFPS(clip ffmpegPreparedClip) (int, error) {
+	fps := int(math.Round(clip.VisualProbe.VideoFrameRate))
+	if fps < 1 || fps > 120 {
+		return 0, fmt.Errorf("无法读取首个镜头的帧率，请手动选择输出帧率")
+	}
+	return fps, nil
 }
 
 func prepareFFmpegCompositionClip(
@@ -228,11 +265,8 @@ func prepareFFmpegCompositionClip(
 	if err := validateFFmpegCompositionVolume(label+"原声", clip.OriginalVolume); err != nil {
 		return ffmpegPreparedClip{}, nil, inputIndex, err
 	}
-	transitionType := strings.ToLower(strings.TrimSpace(clip.TransitionToNext.Type))
-	if transitionType == "" {
-		transitionType = "none"
-	}
-	if transitionType != "none" && transitionType != "fade" && transitionType != "crossfade" {
+	transitionType, ok := botprotocol.NormalizeVideoTransitionType(clip.TransitionToNext.Type)
+	if !ok {
 		return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf("%s使用了不支持的转场", label)
 	}
 	clip.TransitionToNext.Type = transitionType
@@ -243,6 +277,8 @@ func prepareFFmpegCompositionClip(
 		OriginalAudioInputIndex: -1,
 		Duration:                duration,
 		VideoPadDuration:        videoPadDuration,
+		VisualVideoPath:         videoPath,
+		VisualProbe:             probe,
 	}
 	args := []string{"-i", videoPath}
 	nextInputIndex := inputIndex + 1
@@ -357,7 +393,7 @@ func buildFFmpegCompositionFilters(
 	resolution string,
 	fps int,
 ) ([]string, string, string, float64, error) {
-	width, height, _ := strings.Cut(resolution, "x")
+	scalePadFilter := ffmpegScalePadFilter(resolution)
 	filters := make([]string, 0, len(clips)*4+8)
 	for index, clip := range clips {
 		videoPadFilter := ""
@@ -368,14 +404,11 @@ func buildFFmpegCompositionFilters(
 			)
 		}
 		filters = append(filters, fmt.Sprintf(
-			"[%d:v:0]%strim=duration=%s,setpts=PTS-STARTPTS,scale=%s:%s:force_original_aspect_ratio=decrease,pad=%s:%s:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=%d,settb=AVTB,format=yuv420p[v%d]",
+			"[%d:v:0]%strim=duration=%s,setpts=PTS-STARTPTS,%s,setsar=1,fps=%d,settb=AVTB,format=yuv420p[v%d]",
 			clip.VisualVideoInputIndex,
 			videoPadFilter,
 			formatFFmpegSeconds(clip.Duration),
-			width,
-			height,
-			width,
-			height,
+			scalePadFilter,
 			fps,
 			index,
 		))
@@ -453,9 +486,9 @@ func buildFFmpegCompositionFilters(
 			))
 			totalDuration += clips[index].Duration
 		} else {
-			xfadeType := "fade"
-			if previous.Clip.TransitionToNext.Type == "crossfade" {
-				xfadeType = "dissolve"
+			xfadeType, ok := botprotocol.FFmpegVideoTransitionName(previous.Clip.TransitionToNext.Type)
+			if !ok || xfadeType == "" {
+				return nil, "", "", 0, fmt.Errorf("镜头“%s”的转场配置无效", previous.Clip.Title)
 			}
 			filters = append(filters,
 				fmt.Sprintf(
@@ -525,7 +558,7 @@ func validateFFmpegCompositionSpeechTimeline(
 
 func normalizeFFmpegTransitionDuration(previous ffmpegPreparedClip, next ffmpegPreparedClip) (float64, error) {
 	transition := previous.Clip.TransitionToNext
-	if transition.Type == "none" {
+	if transition.Type == botprotocol.VideoTransitionNone {
 		return 0, nil
 	}
 	duration := float64(transition.DurationMS) / 1000
@@ -616,48 +649,6 @@ func writeFFmpegSRTEntry(
 	content.WriteByte('\n')
 	content.WriteString(text)
 	content.WriteString("\n\n")
-}
-
-func probeFFmpegMedia(ctx context.Context, ffprobePath string, path string) (ffmpegMediaProbe, error) {
-	command := exec.CommandContext(
-		ctx,
-		ffprobePath,
-		"-v", "error",
-		"-show_entries", "format=duration:stream=codec_type,duration",
-		"-of", "json",
-		path,
-	)
-	payload, err := command.Output()
-	if err != nil {
-		return ffmpegMediaProbe{}, err
-	}
-	result := struct {
-		Streams []struct {
-			CodecType string `json:"codec_type"`
-			Duration  string `json:"duration"`
-		} `json:"streams"`
-		Format struct {
-			Duration string `json:"duration"`
-		} `json:"format"`
-	}{}
-	if err := json.Unmarshal(payload, &result); err != nil {
-		return ffmpegMediaProbe{}, err
-	}
-	probe := ffmpegMediaProbe{}
-	probe.Duration, _ = strconv.ParseFloat(strings.TrimSpace(result.Format.Duration), 64)
-	for _, stream := range result.Streams {
-		streamDuration, _ := strconv.ParseFloat(strings.TrimSpace(stream.Duration), 64)
-		if streamDuration > probe.Duration {
-			probe.Duration = streamDuration
-		}
-		switch strings.ToLower(strings.TrimSpace(stream.CodecType)) {
-		case "video":
-			probe.HasVideo = true
-		case "audio":
-			probe.HasAudio = true
-		}
-	}
-	return probe, nil
 }
 
 func validateFFmpegCompositionVolume(label string, value float64) error {

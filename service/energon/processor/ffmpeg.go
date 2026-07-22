@@ -26,6 +26,9 @@ const (
 	ffmpegVideoRuleID      = uint64(2)
 	ffmpegMaxDimension     = 8192
 	ffmpegMaxPixels        = 3840 * 2160
+	ffmpegVideoEncoder     = "libx264"
+	ffmpegVideoPreset      = "veryfast"
+	ffmpegVideoCRF         = "22"
 )
 
 var ffmpegResolutionPattern = regexp.MustCompile(`^\d{2,5}x\d{2,5}$`)
@@ -124,10 +127,15 @@ func (FFmpegProcessor) Execute(ctx context.Context, request ExecuteRequest) (any
 		return nil, err
 	}
 	var args []string
+	fastConcat := false
 	statusText := "正在合成视频"
 	if hasComposition {
-		args, err = buildFFmpegCompositionArgs(ctx, workspace, outputPath, composition)
-		statusText = "正在按镜头清单合成视频"
+		args, fastConcat, err = buildFFmpegCompositionArgs(ctx, workspace, outputPath, composition)
+		if fastConcat {
+			statusText = "正在快速拼接视频"
+		} else {
+			statusText = "正在按镜头清单合成视频"
+		}
 	} else {
 		args, err = buildSimpleFFmpegComposeArgs(workspace, outputPath, request.Input)
 	}
@@ -185,6 +193,7 @@ func (FFmpegProcessor) Execute(ctx context.Context, request ExecuteRequest) (any
 			"processor":      ffmpegProcessorKey,
 			"operation":      ffmpegComposeOperation,
 			"composition":    hasComposition,
+			"fast_concat":    fastConcat,
 		},
 	}
 	if err := notifyProcessorOutput(request.Write, output); err != nil {
@@ -220,9 +229,9 @@ func buildSimpleFFmpegComposeArgs(workspace string, outputPath string, input map
 	if err != nil {
 		return nil, err
 	}
-	concatPath := filepath.Join(workspace, "videos.txt")
-	if err := os.WriteFile(concatPath, []byte(ffmpegConcatList(videoPaths)), 0600); err != nil {
-		return nil, fmt.Errorf("写入视频合成清单失败: %w", err)
+	concatPath, err := writeFFmpegConcatList(workspace, "videos.txt", videoPaths)
+	if err != nil {
+		return nil, err
 	}
 	return buildFFmpegComposeArgs(concatPath, outputPath, audioPath, subtitlePath, resolution, fps), nil
 }
@@ -310,7 +319,7 @@ func normalizeFFmpegResolution(value any) (string, error) {
 		return "3840x2160", nil
 	default:
 		if !ffmpegResolutionPattern.MatchString(text) {
-			return "", fmt.Errorf("输出分辨率必须是 1k、2k、4k 或 宽x高")
+			return "", fmt.Errorf("输出分辨率必须是自动、1k、2k、4k 或 宽x高")
 		}
 		widthText, heightText, _ := strings.Cut(text, "x")
 		width, _ := strconv.Atoi(widthText)
@@ -330,9 +339,12 @@ func normalizeFFmpegFPS(value any) (int, error) {
 	if text == "" {
 		return 25, nil
 	}
+	if strings.EqualFold(text, "auto") || text == "0" {
+		return 0, nil
+	}
 	number, err := strconv.Atoi(text)
 	if err != nil || number < 1 || number > 120 {
-		return 0, fmt.Errorf("输出帧率必须是 1 到 120 之间的整数")
+		return 0, fmt.Errorf("输出帧率必须是自动或 1 到 120 之间的整数")
 	}
 	return number, nil
 }
@@ -347,6 +359,18 @@ func ffmpegConcatList(paths []string) string {
 	return result.String()
 }
 
+func writeFFmpegConcatList(workspace string, name string, paths []string) (string, error) {
+	concatPath := filepath.Join(workspace, name)
+	if err := os.WriteFile(concatPath, []byte(ffmpegConcatList(paths)), 0600); err != nil {
+		return "", fmt.Errorf("写入视频合成清单失败: %w", err)
+	}
+	return concatPath, nil
+}
+
+func ffmpegCommandArgs() []string {
+	return []string{"-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats"}
+}
+
 func buildFFmpegComposeArgs(
 	concatPath string,
 	outputPath string,
@@ -355,25 +379,17 @@ func buildFFmpegComposeArgs(
 	resolution string,
 	fps int,
 ) []string {
-	args := []string{
-		"-hide_banner",
-		"-loglevel", "error",
-		"-progress", "pipe:1",
-		"-nostats",
+	args := append(ffmpegCommandArgs(),
 		"-f", "concat",
 		"-safe", "0",
 		"-i", concatPath,
-	}
+	)
 	if audioPath != "" {
 		args = append(args, "-stream_loop", "-1", "-i", audioPath)
 	}
 	filters := []string{}
 	if resolution != "" {
-		width, height, _ := strings.Cut(resolution, "x")
-		filters = append(filters, fmt.Sprintf(
-			"scale=%s:%s:force_original_aspect_ratio=decrease,pad=%s:%s:(ow-iw)/2:(oh-ih)/2",
-			width, height, width, height,
-		))
+		filters = append(filters, ffmpegScalePadFilter(resolution))
 	}
 	if subtitlePath != "" {
 		filters = append(filters, "subtitles='"+escapeFFmpegFilterPath(subtitlePath)+"'")
@@ -387,15 +403,36 @@ func buildFFmpegComposeArgs(
 	} else {
 		args = append(args, "-map", "0:a?")
 	}
+	if fps > 0 {
+		args = append(args, "-r", strconv.Itoa(fps))
+	}
+	args = appendFFmpegVideoEncodingArgs(args)
 	args = append(args,
-		"-r", strconv.Itoa(fps),
-		"-c:v", "libx264",
-		"-pix_fmt", "yuv420p",
 		"-c:a", "aac",
 		"-movflags", "+faststart",
 		"-y", outputPath,
 	)
 	return args
+}
+
+func appendFFmpegVideoEncodingArgs(args []string) []string {
+	return append(args,
+		"-c:v", ffmpegVideoEncoder,
+		"-preset", ffmpegVideoPreset,
+		"-crf", ffmpegVideoCRF,
+		"-pix_fmt", "yuv420p",
+	)
+}
+
+func ffmpegScalePadFilter(resolution string) string {
+	width, height, _ := strings.Cut(resolution, "x")
+	return fmt.Sprintf(
+		"scale=%s:%s:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=%s:%s:(ow-iw)/2:(oh-ih)/2",
+		width,
+		height,
+		width,
+		height,
+	)
 }
 
 func escapeFFmpegFilterPath(value string) string {

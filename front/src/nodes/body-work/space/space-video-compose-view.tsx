@@ -15,7 +15,7 @@ import {
 } from "./space-ordered-list";
 import {
   emptyVideoComposition,
-  VIDEO_COMPOSE_TRANSITIONS,
+  VIDEO_COMPOSE_TRANSITION_GROUPS,
   videoComposeReferenceKey,
   videoCompositionDuration,
   videoCompositionBlockingIssues,
@@ -23,6 +23,7 @@ import {
   type VideoComposeAssetReference,
   type VideoComposeClip,
   type VideoComposeSpeechTrack,
+  type VideoComposeTransitionType,
 } from "./space-video-compose";
 import {
   VideoComposeClipCard,
@@ -33,6 +34,7 @@ import { CanvasNodeContentView, hasCanvasContent } from "./space-content-view";
 import { SpaceTooltip } from "./space-tooltip";
 
 const VIDEO_COMPOSE_RESOLUTION_OPTIONS = [
+  { value: "auto", label: "跟随首个镜头" },
   { value: "1280x720", label: "720P" },
   { value: "1920x1080", label: "1080P" },
   { value: "3840x2160", label: "4K" },
@@ -522,26 +524,31 @@ function VideoComposeClipInspector({
         </div>
       ) : (
         <div className="ws-video-compose-transition-fields">
-          {VIDEO_COMPOSE_TRANSITIONS.map((option) => (
-            <button
-              key={option.key}
-              type="button"
-              className={
-                clip.transitionToNext.type === option.key ? "is-active" : ""
-              }
+          <label>
+            <span>转场</span>
+            <select
+              value={clip.transitionToNext.type}
               disabled={readonly}
-              onClick={() =>
+              onChange={(event) =>
                 onChange({
                   transitionToNext: {
                     ...clip.transitionToNext,
-                    type: option.key,
+                    type: event.target.value as VideoComposeTransitionType,
                   },
                 })
               }
             >
-              {option.name}
-            </button>
-          ))}
+              {VIDEO_COMPOSE_TRANSITION_GROUPS.map((group) => (
+                <optgroup key={group.name} label={group.name}>
+                  {group.options.map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
           {clip.transitionToNext.type !== "none" ? (
             <label>
               <span>时长</span>
@@ -626,6 +633,7 @@ function VideoComposeGlobalSettings({
             })
           }
         >
+          <option value={0}>跟随首个镜头</option>
           {[24, 25, 30, 50, 60].map((fps) => (
             <option key={fps} value={fps}>
               {fps} 帧/秒

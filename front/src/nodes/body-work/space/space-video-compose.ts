@@ -1,4 +1,71 @@
-export type VideoComposeTransitionType = "none" | "fade" | "crossfade";
+export const VIDEO_COMPOSE_TRANSITION_GROUPS = [
+  {
+    name: "基础",
+    options: [
+      { key: "none", name: "无转场" },
+      { key: "fade", name: "淡化" },
+      { key: "crossfade", name: "交叉溶解" },
+      { key: "fadeblack", name: "黑场淡化" },
+      { key: "fadewhite", name: "白场淡化" },
+    ],
+  },
+  {
+    name: "擦除",
+    options: [
+      { key: "wipeleft", name: "向左擦除" },
+      { key: "wiperight", name: "向右擦除" },
+      { key: "wipeup", name: "向上擦除" },
+      { key: "wipedown", name: "向下擦除" },
+    ],
+  },
+  {
+    name: "滑动",
+    options: [
+      { key: "slideleft", name: "向左滑动" },
+      { key: "slideright", name: "向右滑动" },
+      { key: "slideup", name: "向上滑动" },
+      { key: "slidedown", name: "向下滑动" },
+    ],
+  },
+  {
+    name: "平滑",
+    options: [
+      { key: "smoothleft", name: "向左平滑" },
+      { key: "smoothright", name: "向右平滑" },
+      { key: "smoothup", name: "向上平滑" },
+      { key: "smoothdown", name: "向下平滑" },
+    ],
+  },
+  {
+    name: "镜头",
+    options: [
+      { key: "zoomin", name: "放大切换" },
+      { key: "circleopen", name: "圆形展开" },
+      { key: "circleclose", name: "圆形收拢" },
+    ],
+  },
+  {
+    name: "覆盖",
+    options: [
+      { key: "coverleft", name: "向左覆盖" },
+      { key: "coverright", name: "向右覆盖" },
+      { key: "coverup", name: "向上覆盖" },
+      { key: "coverdown", name: "向下覆盖" },
+    ],
+  },
+  {
+    name: "揭示",
+    options: [
+      { key: "revealleft", name: "向左揭示" },
+      { key: "revealright", name: "向右揭示" },
+      { key: "revealup", name: "向上揭示" },
+      { key: "revealdown", name: "向下揭示" },
+    ],
+  },
+] as const;
+
+export type VideoComposeTransitionType =
+  (typeof VIDEO_COMPOSE_TRANSITION_GROUPS)[number]["options"][number]["key"];
 
 export type VideoComposeAssetReference = {
   assetId: number;
@@ -51,22 +118,13 @@ export type CanvasVideoComposition = {
   };
 };
 
-export const VIDEO_COMPOSE_TRANSITIONS: Array<{
-  key: VideoComposeTransitionType;
-  name: string;
-}> = [
-  { key: "none", name: "无转场" },
-  { key: "fade", name: "淡化" },
-  { key: "crossfade", name: "交叉溶解" },
-];
-
 export function emptyVideoComposition(): CanvasVideoComposition {
   return {
     version: 3,
     clips: [],
     settings: {
-      resolution: "1920x1080",
-      fps: 25,
+      resolution: "auto",
+      fps: 0,
     },
   };
 }
@@ -86,8 +144,8 @@ export function normalizeVideoComposition(
     version: 3,
     clips: clips as VideoComposeClip[],
     settings: {
-      resolution: stringValue(settings.resolution) || "1920x1080",
-      fps: clampNumber(settings.fps, 1, 120, 25),
+      resolution: stringValue(settings.resolution) || "auto",
+      fps: clampNumber(settings.fps, 0, 120, 0),
     },
   };
 }
@@ -244,7 +302,9 @@ function normalizeVideoComposeReference(
 
 function normalizeTransitionType(value: unknown): VideoComposeTransitionType {
   const type = stringValue(value) as VideoComposeTransitionType;
-  return VIDEO_COMPOSE_TRANSITIONS.some((option) => option.key === type)
+  return VIDEO_COMPOSE_TRANSITION_GROUPS.some((group) =>
+    group.options.some((option) => option.key === type),
+  )
     ? type
     : "none";
 }

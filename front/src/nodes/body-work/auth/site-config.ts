@@ -5,6 +5,11 @@ import {
   request,
 } from "@dever/front-plugin";
 import { isSuccessResponse } from "../shared/api-response";
+import {
+  DEFAULT_BODY_APPEARANCE,
+  normalizeBodyAppearance,
+  type BodyAppearanceConfig,
+} from "../shared/body-appearance";
 
 export type BodySiteConfig = {
   siteName: string;
@@ -13,6 +18,7 @@ export type BodySiteConfig = {
   loginImage: string;
   loginTitle: string;
   loginDescription: string;
+  appearance: BodyAppearanceConfig;
   homeMenu: BodyHomeMenuConfig;
   filing: BodyFilingInfo;
 };
@@ -164,6 +170,15 @@ function normalizeLoginConfig(value: unknown): BodyLoginConfig {
       )
         ? textValue(config.login_description)
         : fallback.site.loginDescription,
+      appearance: normalizeBodyAppearance(
+        {
+          themePreset: config.theme_preset,
+          brandPrimaryColor: config.brand_primary_color,
+          loginTemplate: config.login_template,
+          workbenchTemplate: config.workbench_template,
+        },
+        fallback.site.appearance,
+      ),
       homeMenu: normalizeHomeMenu(config.home_menu, fallback.site.homeMenu),
       filing: {
         companyName: textValue(config.company_name),
@@ -194,6 +209,7 @@ function fallbackLoginConfig(): BodyLoginConfig {
       loginImage: "",
       loginTitle: DEFAULT_LOGIN_TITLE,
       loginDescription: DEFAULT_LOGIN_DESCRIPTION,
+      appearance: DEFAULT_BODY_APPEARANCE,
       homeMenu: defaultHomeMenu(),
       filing: emptyFilingInfo(),
     },

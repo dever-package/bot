@@ -25,8 +25,10 @@ import {
   resolvePostLoginTarget,
   useAuthStore,
   useNavigate,
+  useTheme,
 } from "@dever/front-plugin";
 import { isSuccessResponse } from "../shared/api-response";
+import { bodyAppearanceStyle } from "../shared/body-appearance";
 import { BodyToaster } from "../shared/body-toaster";
 import "../shared/body-theme.css";
 import { BodyConfiguredImage, BodySiteBrand } from "./site-brand";
@@ -65,6 +67,7 @@ export function WorkLoginPage() {
   const config = useBodyLoginConfig();
   const navigate = useNavigate();
   const { auth } = useAuthStore();
+  const { resolvedTheme } = useTheme();
   const [mode, setMode] = useState<AuthMode>("login");
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
@@ -239,7 +242,12 @@ export function WorkLoginPage() {
   }
 
   return (
-    <main className="bot-work-login-page">
+    <main
+      className="bot-work-login-page"
+      data-body-theme={config.site.appearance.themePreset}
+      data-login-template={config.site.appearance.loginTemplate}
+      style={bodyAppearanceStyle(config.site.appearance, resolvedTheme)}
+    >
       <BodyToaster />
       <LoginHeader
         config={config}

@@ -20,9 +20,9 @@
   --accent-foreground: var(--body-work-text);
   --border: var(--body-work-line);
   --input: #d8ddda;
-  --ring: #799184;
+  --ring: var(--body-work-primary);
   --primary: var(--body-work-green-deep);
-  --primary-foreground: #ffffff;
+  --primary-foreground: var(--body-work-on-primary);
   border: 0;
   background: var(--body-work-surface);
   color: var(--body-work-text);
@@ -89,7 +89,7 @@
 .hb-laper-app .workbench-picker-trigger:focus-visible,
 .hb-laper-app .workbench-picker-trigger[data-state="open"] {
   border: 0;
-  box-shadow: 0 0 0 2px rgba(28, 101, 72, 0.08);
+  box-shadow: 0 0 0 2px var(--body-work-ring);
 }
 
 .hb-laper-app .workbench-picker-trigger .select-trigger-chevron {
@@ -101,8 +101,8 @@
   min-width: var(--radix-select-trigger-width);
   border: 0;
   border-radius: 6px;
-  background: #ffffff;
-  color: #17201c;
+  background: var(--body-work-surface);
+  color: var(--body-work-text);
   box-shadow: 0 12px 28px rgba(28, 43, 35, 0.14);
 }
 
@@ -111,19 +111,19 @@
   cursor: pointer;
   border-radius: 4px;
   padding-left: 10px;
-  color: #4f5b55;
+  color: var(--body-work-muted);
   font-size: 12.8px;
   line-height: 20px;
 }
 
 .workbench-picker-item[data-highlighted] {
-  background: #edf1ef;
-  color: #17201c;
+  background: var(--body-work-active);
+  color: var(--body-work-text);
 }
 
 .workbench-picker-item[data-state="checked"] {
-  background: #e7eee9;
-  color: #174d38;
+  background: var(--body-work-primary-soft);
+  color: var(--body-work-primary-strong);
   font-weight: 600;
 }
 
@@ -133,7 +133,7 @@
   border-radius: 6px;
   background: var(--body-work-green-deep);
   padding: 0 11px;
-  color: #ffffff;
+  color: var(--body-work-on-primary);
   font-size: 12.8px;
   font-weight: 600;
   box-shadow: none;
@@ -141,11 +141,11 @@
 
 .hb-laper-app [data-agent-chat-appearance="body"] .agent-chat-new-session:hover {
   background: var(--body-work-green);
-  color: #ffffff;
+  color: var(--body-work-on-primary);
 }
 
 .hb-laper-app [data-agent-chat-appearance="body"] .agent-chat-new-session:focus-visible {
-  box-shadow: 0 0 0 2px rgba(28, 101, 72, 0.16);
+  box-shadow: 0 0 0 2px var(--body-work-ring);
 }
 
 .hb-laper-app [data-agent-chat-appearance="body"] .agent-chat-new-session-icon {
@@ -156,7 +156,7 @@
   align-items: center;
   justify-content: center;
   background: transparent;
-  color: #ffffff;
+  color: var(--body-work-on-primary);
 }
 
 .hb-laper-app [data-agent-chat-appearance="body"] .agent-chat-new-session-icon svg {

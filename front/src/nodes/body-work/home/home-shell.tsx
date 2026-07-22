@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Zap,
 } from "lucide-react";
+import { useTheme } from "@dever/front-plugin";
 import {
   applyBodySiteMetadata,
   type BodyHomeMenuConfig,
@@ -15,6 +16,7 @@ import {
 } from "../auth/site-config";
 import { WorkProjectPage } from "../project/project-page";
 import { BodyToaster } from "../shared/body-toaster";
+import { bodyAppearanceStyle } from "../shared/body-appearance";
 import "../shared/body-theme.css";
 import "./workbench-appearance.css";
 import type {
@@ -50,6 +52,7 @@ const pageSpecs: ReadonlyArray<{
 
 export function WorkHomeShell({ item }: { item?: any }) {
   const loginConfig = useBodyLoginConfig();
+  const { resolvedTheme } = useTheme();
   const [activePage, setActivePage] = useState<WorkbenchPageKey>(() =>
     resolveInitialPage(
       typeof item?.value === "string" ? item.value : item?.value?.page,
@@ -153,7 +156,12 @@ export function WorkHomeShell({ item }: { item?: any }) {
   const clearContinuation = useCallback(() => setContinuationAsset(null), []);
 
   return (
-    <main className="hb-laper-app">
+    <main
+      className="hb-laper-app"
+      data-body-theme={loginConfig.site.appearance.themePreset}
+      data-workbench-template={loginConfig.site.appearance.workbenchTemplate}
+      style={bodyAppearanceStyle(loginConfig.site.appearance, resolvedTheme)}
+    >
       <BodyToaster />
       <WorkbenchSidebar
         site={loginConfig.site}
