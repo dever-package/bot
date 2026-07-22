@@ -97,6 +97,7 @@ import { AddNodeMenu } from "./space-add-node-menu";
 import { CanvasGroupNodeView } from "./space-group-node";
 import {
   runCanvasGroupMembers,
+  storyboardRunBlockedReason,
   summarizeCanvasGroupRuntime,
 } from "./space-group-runtime";
 import {
@@ -182,6 +183,7 @@ import {
 import { uploadSpaceFiles } from "./space-upload";
 import {
   assetCateById,
+  assetCateFromList,
   createLocalNode,
   defaultAssetCateId,
   defaultCanvasNodeTitle,
@@ -249,12 +251,18 @@ import {
 } from "./space-power-presentation";
 import {
   canvasStoryboardReferenceSourceSignature,
+  isStoryboardDerivedPromptOverridden,
+  restoredStoryboardDerivedPrompt,
   syncCanvasStoryboardDerivedGroups,
 } from "./space-storyboard-derived-groups";
+import { storyboardEditorFocusFromNode } from "./space-storyboard-focus";
 import {
   moveStoryboardFrameNodes,
+  markStoryboardFrameResultsCurrent,
   storyboardFrameDisplayBounds,
+  storyboardFrameId,
   storyboardFrameMoveDelta,
+  storyboardFrameRunSummary,
   storyboardFrameScopes,
   storyboardManagedNodeIds,
   storyboardSourceNodeIdForNode,
@@ -264,7 +272,10 @@ import {
   StoryboardFrameNode,
   type StoryboardFrameNodeData,
 } from "./space-storyboard-frame-node";
-import { parseStoryboardOutput } from "./space-storyboard";
+import {
+  parseStoryboardOutput,
+  type StoryboardEditorFocus,
+} from "./space-storyboard";
 import {
   parseMaybeEmbeddedJSON,
   parseMaybeJSON,
@@ -318,6 +329,7 @@ type NodeResultSetter = (
 type NodeDraftSetter = (nodeId: string, draft: CanvasComposerDraft) => void;
 type ComposerDraft = CanvasComposerDraft;
 type NodeStartRunner = (node: SpaceCanvasNode) => Promise<void>;
+type StoryboardFrameRunner = (sourceNodeId: string) => Promise<void>;
 type BackendNodeRunOptions = {
   agentInput?: ReferenceInput;
 };
@@ -596,6 +608,8 @@ export function WorkSpacePage() {
     Record<string, Partial<SpaceCanvasNode>>
   >({});
   const [nodeDetail, setNodeDetail] = useState<SpaceCanvasNode | null>(null);
+  const [storyboardDetailFocus, setStoryboardDetailFocus] =
+    useState<StoryboardEditorFocus>();
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(
     null,
   );
@@ -806,6 +820,7 @@ export function WorkSpacePage() {
     void loadSpace();
   }, [loadSpace]);
 
+  const canvasAssetCates = space?.assetCates;
   const cates = useMemo(() => (space ? visibleAssetCates(space) : []), [space]);
   const hasAssetCates = space ? space.assetCates.length > 0 : false;
   const activeCate = useMemo(
@@ -872,7 +887,7 @@ export function WorkSpacePage() {
   );
 
   useEffect(() => {
-    if (!space) {
+    if (!canvasAssetCates) {
       return;
     }
     setCanvasStates((current) => {
@@ -881,7 +896,7 @@ export function WorkSpacePage() {
         const assetCateId = Number(key || canvas.assetCateId || 0);
         const synced = syncCanvasStoryboardDerivedGroups({
           canvas,
-          assetCate: assetCateById(space, assetCateId),
+          assetCate: assetCateFromList(canvasAssetCates, assetCateId),
           powers,
         });
         const normalized = normalizeCanvasForState(synced, assetCateId);
@@ -896,7 +911,7 @@ export function WorkSpacePage() {
       }
       return next;
     });
-  }, [powers, space, storyboardReferenceSourceSignature]);
+  }, [canvasAssetCates, powers, storyboardReferenceSourceSignature]);
 
   const openImportPickerByNodeId = useCallback(
     (nodeId = "") => {
@@ -956,10 +971,10 @@ export function WorkSpacePage() {
             node.id === nodeId ? { ...node, ...patch } : node,
           ),
         };
-        const syncedCanvas = space
+        const syncedCanvas = canvasAssetCates
           ? syncCanvasStoryboardDerivedGroups({
               canvas: patchedCanvas,
-              assetCate: assetCateById(space, assetCateId),
+              assetCate: assetCateFromList(canvasAssetCates, assetCateId),
               powers,
             })
           : patchedCanvas;
@@ -985,7 +1000,7 @@ export function WorkSpacePage() {
         return next;
       });
     },
-    [powers, space],
+    [canvasAssetCates, powers],
   );
 
   const updateNodeResult = useCallback<NodeResultSetter>(
@@ -1043,6 +1058,14 @@ export function WorkSpacePage() {
       }));
     },
     [updateActiveCanvas],
+  );
+
+  const showNodeDetail = useCallback(
+    (node: SpaceCanvasNode, focus?: StoryboardEditorFocus) => {
+      setStoryboardDetailFocus(focus);
+      setNodeDetail(node);
+    },
+    [],
   );
 
   const patchNodeFeedbackRecords = useCallback(
@@ -1171,6 +1194,7 @@ export function WorkSpacePage() {
       if (!space || !activeCate) {
         return;
       }
+      let runInput: CanvasStartRunInput | null = null;
       try {
         clearNodeFeedbackRecords(
           canvasExecutionNodeIds(
@@ -1179,7 +1203,7 @@ export function WorkSpacePage() {
             canvasModel.edges,
           ),
         );
-        const runInput: CanvasStartRunInput = {
+        runInput = {
           projectId,
           assetCate: activeCate,
           space,
@@ -1223,7 +1247,7 @@ export function WorkSpacePage() {
           space,
           canvasStatesRef.current,
           "recovery",
-          { runIds: [Number(runInput.canvasRun?.run_id || 0)] },
+          { runIds: [Number(runInput?.canvasRun?.run_id || 0)] },
         );
       }
     },
@@ -1241,6 +1265,138 @@ export function WorkSpacePage() {
       persistCanvasRunSnapshot,
       setRunningNodes,
       space,
+      updateNodeResult,
+      upsertSpaceAsset,
+    ],
+  );
+
+  const runStoryboardFrame = useCallback<StoryboardFrameRunner>(
+    async (sourceNodeId) => {
+      if (!space || !activeCate) {
+        return;
+      }
+      const cateId = Number(activeCate.id || 0);
+      const currentCanvas =
+        canvasStatesRef.current[String(cateId)] || activeCanvas;
+      const sourceNode = currentCanvas.nodes.find(
+        (node) => node.id === sourceNodeId,
+      );
+      if (!sourceNode) {
+        toast.error("分镜脚本节点不存在");
+        return;
+      }
+      const frame = storyboardFrameScopes(
+        currentCanvas.nodes,
+        nodeHasResultContent,
+      ).find((current) => current.sourceNodeId === sourceNodeId);
+      if (!frame) {
+        toast.error("当前分镜脚本尚未生成制作组");
+        return;
+      }
+      const runSummary = storyboardFrameRunSummary(
+        frame,
+        currentCanvas.nodes,
+        nodeHasResultContent,
+      );
+      if (runSummary.blockedReason) {
+        toast.error(runSummary.blockedReason);
+        return;
+      }
+
+      const frameId = storyboardFrameId(sourceNodeId);
+      const runInput: CanvasStartRunInput = {
+        projectId,
+        assetCate: activeCate,
+        space,
+        startNode: sourceNode,
+        executionScope: "storyboard_frame",
+        patchStartNodeResult: false,
+        nodes: currentCanvas.nodes,
+        edges: currentCanvas.edges,
+        viewport: currentCanvas.viewport,
+        onNodeResult: updateNodeResult,
+        onAssetCreated: upsertSpaceAsset,
+        setRunningNode: setRunningNodes,
+        runningNodeBatcher,
+        requestFlowFeedback: requestStartFlowFeedback,
+        requestNodeTitle: (node, result) =>
+          requestGeneratedNodeTitle(cateId, node, result),
+      };
+      clearNodeFeedbackRecords(runSummary.pendingNodeIds);
+      setRunningNodes((current) => ({
+        ...current,
+        [frameId]: {
+          nodeId: frameId,
+          title: `${sourceNode.title || "分镜脚本"}制作区`,
+          startedAt: Date.now(),
+          progress: 0,
+          status: "running",
+        },
+      }));
+      let cleanupDelay = 650;
+      try {
+        await runCanvasFromStartNode(runInput);
+        toast.success("制作区执行完成");
+      } catch (err) {
+        cleanupDelay = 1400;
+        const message =
+          err instanceof Error ? err.message : "制作区执行失败";
+        setRunningNodes((current) => ({
+          ...current,
+          [frameId]: {
+            ...(current[frameId] || {
+              nodeId: frameId,
+              title: `${sourceNode.title || "分镜脚本"}制作区`,
+              startedAt: Date.now(),
+              progress: 0,
+            }),
+            status: "error",
+          },
+        }));
+        toast.error(message);
+      } finally {
+        const successfulNodeIds = new Set(
+          (runInput.canvasRun?.node_results || [])
+            .filter(
+              (result) => canvasRunNodeResultStatus(result) === "success",
+            )
+            .map((result) => result.node_key)
+            .filter(Boolean),
+        );
+        if (successfulNodeIds.size > 0) {
+          updateActiveCanvas((canvas) => ({
+            ...canvas,
+            nodes: markStoryboardFrameResultsCurrent(
+              canvas.nodes,
+              sourceNodeId,
+              successfulNodeIds,
+            ),
+          }));
+          await persistCanvasRunSnapshot(runInput);
+        }
+        window.setTimeout(() => {
+          setRunningNodes((current) => omitRunningNode(current, frameId));
+        }, cleanupDelay);
+        await loadWorkspaceCanvasRuntimeExecutions(
+          projectId,
+          space,
+          canvasStatesRef.current,
+          "recovery",
+          { runIds: [Number(runInput.canvasRun?.run_id || 0)] },
+        );
+      }
+    },
+    [
+      activeCanvas,
+      activeCate,
+      clearNodeFeedbackRecords,
+      persistCanvasRunSnapshot,
+      projectId,
+      requestGeneratedNodeTitle,
+      requestStartFlowFeedback,
+      runningNodeBatcher,
+      space,
+      updateActiveCanvas,
       updateNodeResult,
       upsertSpaceAsset,
     ],
@@ -2173,7 +2329,7 @@ export function WorkSpacePage() {
         onAddConfiguredNode={addConfiguredNode}
         onCopyNode={copyCanvasNode}
         onDeleteNodes={deleteCanvasNodes}
-        onShowNodeDetail={setNodeDetail}
+        onShowNodeDetail={showNodeDetail}
         onNodesCommit={(nodes) =>
           updateActiveCanvas((canvas) => ({ ...canvas, nodes }))
         }
@@ -2200,6 +2356,7 @@ export function WorkSpacePage() {
         onNodeDraftChange={updateNodeComposerDraft}
         onAssetCreated={upsertSpaceAsset}
         onRunStartNode={runStartNode}
+        onRunStoryboardFrame={runStoryboardFrame}
         onRunFunctionNode={runFunctionNodeAction}
         onRunBackendNode={runBackendSingleNode}
         onOpenImportPicker={openImportPicker}
@@ -2428,6 +2585,7 @@ export function WorkSpacePage() {
               0,
           )}
           node={nodeDetail}
+          storyboardFocus={storyboardDetailFocus}
           canvasReferenceItems={canvasReferenceItems.filter(
             (item) => item.source !== "current" || item.id !== nodeDetail.id,
           )}
@@ -2465,7 +2623,10 @@ export function WorkSpacePage() {
                 : current,
             );
           }}
-          onClose={() => setNodeDetail(null)}
+          onClose={() => {
+            setNodeDetail(null);
+            setStoryboardDetailFocus(undefined);
+          }}
         />
       ) : null}
     </main>
@@ -2735,6 +2896,7 @@ function CanvasWorkbench({
   onNodeDraftChange,
   onAssetCreated,
   onRunStartNode,
+  onRunStoryboardFrame,
   onRunFunctionNode,
   onRunBackendNode,
   onOpenImportPicker,
@@ -2762,7 +2924,10 @@ function CanvasWorkbench({
     nodes: SpaceCanvasNode[],
     options?: DeleteCanvasNodeOptions,
   ) => void;
-  onShowNodeDetail: (node: SpaceCanvasNode) => void;
+  onShowNodeDetail: (
+    node: SpaceCanvasNode,
+    focus?: StoryboardEditorFocus,
+  ) => void;
   onNodesCommit: (nodes: SpaceCanvasNode[]) => void;
   onEdgesCommit: (edges: SpaceCanvasEdge[]) => void;
   onViewportCommit: (viewport: SpaceCanvasState["viewport"]) => void;
@@ -2778,6 +2943,7 @@ function CanvasWorkbench({
   onNodeDraftChange: NodeDraftSetter;
   onAssetCreated: (asset: ProjectAsset) => void;
   onRunStartNode: NodeStartRunner;
+  onRunStoryboardFrame: StoryboardFrameRunner;
   onRunFunctionNode: FunctionNodeRunner;
   onOpenImportPicker: (nodeId: string) => void;
   onClearFeedbackRecords: (nodeIds: string[]) => void;
@@ -2901,8 +3067,10 @@ function CanvasWorkbench({
         node: SpaceCanvasNode,
         record: NodeFeedbackRecord,
       ) => nodeActionsRef.current.onOpenFeedbackRecord(node, record),
-      onShowNodeDetail: (node: SpaceCanvasNode) =>
-        nodeActionsRef.current.onShowNodeDetail(node),
+      onShowNodeDetail: (
+        node: SpaceCanvasNode,
+        focus?: StoryboardEditorFocus,
+      ) => nodeActionsRef.current.onShowNodeDetail(node, focus),
       requestConfirm: (request: ConfirmRequest) =>
         nodeActionsRef.current.requestConfirm(request),
       onRunBackendNode: (
@@ -3072,6 +3240,11 @@ function CanvasWorkbench({
             : EMPTY_RUNNING_NODE_MAP;
         const inputContext =
           canvasRenderIndex.inputContextByNodeId.get(node.id) || null;
+        const runBlockedReason = storyboardRunBlockedReason({
+          targets: node.type === "group" ? groupMembers : [node],
+          nodesByID: canvasRenderIndex.nodeById,
+          hasResult: nodeHasResultContent,
+        });
         const cached = flowNodeCache.current.get(node.id);
         const cachedData = cached?.data as any;
         const canReuseData =
@@ -3085,6 +3258,7 @@ function CanvasWorkbench({
           cachedData.interactive === interactive &&
           cachedData.structureLocked === structureLocked &&
           cachedData.storyboardSourceNode === storyboardSourceNode &&
+          cachedData.runBlockedReason === runBlockedReason &&
           cachedData.showNodeSettings === showNodeSettings &&
           sameNodeInputContext(cachedData.inputContext, inputContext);
         const nodeData = canReuseData
@@ -3102,6 +3276,7 @@ function CanvasWorkbench({
               interactive,
               structureLocked,
               storyboardSourceNode,
+              runBlockedReason,
               showNodeSettings,
               setRunningNode,
               ...stableNodeActions,
@@ -3154,13 +3329,28 @@ function CanvasWorkbench({
     const frameNodes = storyboardFrames.map((frame): Node => {
       const collapsed = collapsedStoryboardFrameIds.has(frame.id);
       const bounds = storyboardFrameDisplayBounds(frame, collapsed);
+      const runSummary = storyboardFrameRunSummary(
+        frame,
+        nodes,
+        nodeHasResultContent,
+      );
+      const frameRunning =
+        isActiveRunningNode(runningNodes[frame.id]) ||
+        frame.workNodeIds.some((nodeId) =>
+          isActiveRunningNode(runningNodes[nodeId]),
+        );
       const data: StoryboardFrameNodeData = {
         type: "storyboardFrame",
         title: frame.title,
         groupCount: frame.groupCount,
         workNodeCount: frame.workNodeCount,
         completedCount: frame.completedCount,
+        running: frameRunning,
+        runBlockedReason: runSummary.blockedReason,
         collapsed,
+        onRun: () => {
+          void onRunStoryboardFrame(frame.sourceNodeId);
+        },
         onFocus: () => focusStoryboardFrame(frame.id),
         onToggleCollapsed: () => toggleStoryboardFrame(frame.id),
       };
@@ -3190,6 +3380,7 @@ function CanvasWorkbench({
     interactive,
     managedStoryboardNodeIds,
     nodes,
+    onRunStoryboardFrame,
     projectId,
     runningNodes,
     selectedNodeId,
@@ -4123,7 +4314,24 @@ function CanvasWorkbench({
     if (!actionStoryboardSourceNode) {
       return;
     }
-    onShowNodeDetail(actionStoryboardSourceNode);
+    onShowNodeDetail(
+      actionStoryboardSourceNode,
+      storyboardEditorFocusFromNode(actionNode),
+    );
+    closeNodeActionMenu();
+  }
+
+  function resetStoryboardPromptActionNode() {
+    if (!actionNode) {
+      return;
+    }
+    const restoredDraft = restoredStoryboardDerivedPrompt(actionNode, nodes);
+    if (!restoredDraft) {
+      closeNodeActionMenu();
+      return;
+    }
+    onNodeDraftChange(actionNode.id, restoredDraft);
+    toast.success("已恢复脚本生成的提示词");
     closeNodeActionMenu();
   }
 
@@ -4389,11 +4597,15 @@ function CanvasWorkbench({
             actionStoryboardSourceNode &&
               actionStoryboardSourceNode.id !== actionNode?.id,
           )}
+          canResetStoryboardPrompt={Boolean(
+            actionNode && isStoryboardDerivedPromptOverridden(actionNode),
+          )}
           onClose={closeNodeActionMenu}
           onCopy={copyActionNode}
           onDelete={deleteActionNode}
           onDetail={detailActionNode}
           onEditStructure={editStoryboardStructureActionNode}
+          onResetStoryboardPrompt={resetStoryboardPromptActionNode}
         />
       ) : null}
     </section>
@@ -4757,6 +4969,8 @@ type CanvasStartRunInput = {
   space: SpaceBootstrap;
   startNode: SpaceCanvasNode;
   singleNode?: boolean;
+  executionScope?: "storyboard_frame";
+  patchStartNodeResult?: boolean;
   nodes: SpaceCanvasNode[];
   edges: SpaceCanvasEdge[];
   viewport: SpaceCanvasState["viewport"];
@@ -4788,6 +5002,7 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
     startNodeId: input.startNode.id,
     requestId,
     singleNode: input.singleNode,
+    executionScope: input.executionScope,
     canvas: {
       assetCateId: Number(input.assetCate.id || 0),
       nextNodeNo: nextCanvasNodeNo(input.nodes),
@@ -4829,7 +5044,7 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
       return;
     }
     const executed = Number(canvasRun.executed || 0);
-    if (!input.singleNode) {
+    if (!input.singleNode && input.patchStartNodeResult !== false) {
       input.onNodeResult(
         input.startNode.id,
         buildFunctionRunPatch(
@@ -9907,6 +10122,7 @@ function NodeBottomSettings({
   const powerFormRef = useRef(powerForm);
   const inputContext = ((node as any).inputContext ||
     null) as NodeInputContext | null;
+  const runBlockedReason = String((node as any).runBlockedReason || "");
 
   useEffect(() => {
     nodeDraftRef.current = latestNodeDraft;
@@ -10374,6 +10590,10 @@ function NodeBottomSettings({
     if (nodeRunning || running) {
       return;
     }
+    if (runBlockedReason) {
+      toast.error(runBlockedReason);
+      return;
+    }
     if (requestConfirm && shouldConfirmNodeRun(node)) {
       requestConfirm({
         title:
@@ -10441,6 +10661,8 @@ function NodeBottomSettings({
               assetCateID: nodeAssetCateId,
             }}
             disabled={powerFormLoading}
+            submitDisabled={Boolean(runBlockedReason)}
+            submitDisabledReason={runBlockedReason}
             onChange={setPowerPrompt}
             onParamChange={setParamValue}
             onSourceChange={
@@ -10828,7 +11050,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
     | RunningNodeSetter
     | undefined;
   const onShowNodeDetail = (data as any).onShowNodeDetail as
-    | ((node: SpaceCanvasNode) => void)
+    | ((node: SpaceCanvasNode, focus?: StoryboardEditorFocus) => void)
     | undefined;
   const onNodeResult = (data as any).onNodeResult as
     | NodeResultSetter
@@ -10869,7 +11091,8 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
     const onRunBackendNode = (data as any).onRunBackendNode as
       | BackendNodeRunner
       | undefined;
-    const runGroup = onRunBackendNode
+    const runBlockedReason = String((data as any).runBlockedReason || "");
+    const runGroup = onRunBackendNode && !runBlockedReason
       ? () => {
           setRunningNode?.((current) => ({
             ...current,
@@ -10932,10 +11155,15 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
         }
         onEditStructure={
           storyboardSourceNode && onShowNodeDetail
-            ? () => onShowNodeDetail(storyboardSourceNode)
+            ? () =>
+                onShowNodeDetail(
+                  storyboardSourceNode,
+                  storyboardEditorFocusFromNode(node),
+                )
             : undefined
         }
         onRun={runGroup}
+        runBlockedReason={runBlockedReason}
       >
         <NodeHandle
           id="input-0"
@@ -11616,8 +11844,11 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
           />
           {node.storyboardItem?.stale ? (
             <span className="ws-node-stale-badge">
-              {node.groupId ? "待更新" : "已从脚本移除"}
+              待更新
             </span>
+          ) : null}
+          {isStoryboardDerivedPromptOverridden(node) ? (
+            <span className="ws-node-prompt-override-badge">提示词已修改</span>
           ) : null}
         </div>
         <div className="ws-node-power-card">

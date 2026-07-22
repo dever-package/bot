@@ -4,11 +4,18 @@ import (
 	"context"
 	"strings"
 
+	"github.com/shemic/dever/orm"
+
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeartifact "github.com/dever-package/bot/service/agent/runtime/artifact"
+	runtimedocument "github.com/dever-package/bot/service/agent/runtime/document"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
+
+func isDocumentArtifactTool(state *runState, definition runtimeprovider.Definition) bool {
+	return state != nil && state.documentID > 0 && runtimeartifact.IsSupportedKind(definition.Kind)
+}
 
 type toolArtifactBatch struct {
 	service runtimeartifact.Service
@@ -78,6 +85,83 @@ func (s Service) enqueueMessageArtifact(
 	_ = s.writeExecutionOutput(ctx, state.execution, queuedEvent)
 	result := buildToolStepResult(state.execution.registry, call, definition, toolResult, nil)
 	result.title = "后台生成素材: " + toolTitle(definition, call.Name)
+	return result
+}
+
+func (s Service) enqueueDocumentArtifact(
+	ctx context.Context,
+	state *runState,
+	call botprotocol.ToolCall,
+	definition runtimeprovider.Definition,
+) toolStepResult {
+	arguments, err := botprotocol.ToolCallArguments(call)
+	if err != nil {
+		return buildToolStepResult(state.execution.registry, call, definition, runtimeprovider.Result{}, err)
+	}
+	if err = state.execution.registry.ValidateArguments(call.Name, arguments); err != nil {
+		return buildToolStepResult(state.execution.registry, call, definition, runtimeprovider.Result{}, err)
+	}
+
+	documents := runtimedocument.NewService()
+	block := agentmodel.DocumentBlock{}
+	batch := toolArtifactBatch{}
+	job := agentmodel.ArtifactJob{}
+	err = orm.Transaction(ctx, func(tx context.Context) error {
+		tx = runtimedocument.DeferStream(tx)
+		block, err = documents.AppendMedia(tx, runtimedocument.AppendMediaRequest{
+			DocumentID: state.documentID,
+			SourceKey:  "tool:" + strings.TrimSpace(call.ID),
+			Kind:       definition.Kind,
+			Meta: map[string]any{
+				"tool_name":  call.Name,
+				"tool_title": toolTitle(definition, call.Name),
+				"arguments":  arguments,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		batch, err = s.beginToolArtifactBatch(tx, state.execution, call, definition, state.documentID, block.ID)
+		if err != nil {
+			return err
+		}
+		job, err = s.enqueueArtifactJob(tx, state, call, definition, state.documentID, block.ID, true)
+		return err
+	})
+	if err != nil {
+		return buildToolStepResult(state.execution.registry, call, definition, runtimeprovider.Result{}, err)
+	}
+
+	started := batch.startedOutput(ctx)
+	if started == nil {
+		started = map[string]any{}
+	}
+	started["document_id"] = state.documentID
+	started["block_id"] = block.ID
+	started["job_id"] = job.ID
+	started["status"] = "generating"
+	blockPayload := runtimedocument.BuildBlockPayload(block, artifactValues(started["artifacts"]))
+	documents.Publish(ctx, state.documentID, "media_block_append", map[string]any{
+		"block":     blockPayload,
+		"artifacts": started["artifacts"],
+	})
+	_ = s.writeExecutionOutput(ctx, state.execution, map[string]any{
+		"event":       "media_block_append",
+		"document_id": state.documentID,
+		"block":       blockPayload,
+		"artifacts":   started["artifacts"],
+		"meta":        toolEventMeta(call, definition, "running", started),
+	})
+	runtimeartifact.NewService().DispatchJob(job.ID)
+
+	modelResult := runtimeartifact.ModelOutput(started)
+	modelResult["document_id"] = state.documentID
+	modelResult["block_id"] = block.ID
+	modelResult["job_id"] = job.ID
+	modelResult["status"] = "generating"
+	toolResult := runtimeprovider.Result{Content: started, ModelResult: modelResult}
+	result := buildToolStepResult(state.execution.registry, call, definition, toolResult, nil)
+	result.title = "后台生成文档素材: " + toolTitle(definition, call.Name)
 	return result
 }
 

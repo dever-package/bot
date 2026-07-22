@@ -17,6 +17,13 @@ type AppendTextRequest struct {
 	Meta       map[string]any
 }
 
+type TextDelta struct {
+	DocumentID uint64
+	BlockID    uint64
+	Revision   int
+	Delta      string
+}
+
 type AppendMediaRequest struct {
 	DocumentID uint64
 	SourceKey  string

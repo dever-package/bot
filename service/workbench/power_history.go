@@ -186,7 +186,7 @@ func (s Service) PowerHistoryDetail(ctx context.Context, teamID uint64, historyI
 	params := s.powerHistoryParams(ctx, binding, sourceTargetID)
 	item := powerHistoryItem(*history, run, params)
 	item["error"] = strings.TrimSpace(run.Error)
-	item["input"] = powerHistoryReplayInput(params, input)
+	item["input"] = powerHistoryReplayInput(input)
 	item["output"] = recordValue(run.Output)
 	item["target_asset_id"] = nestedUint64(input, powerTargetAssetIDKey)
 	item["source_target_id"] = sourceTargetID
@@ -279,11 +279,22 @@ func powerReplayParamInput(params []energoninput.PowerParam, runInput map[string
 	return powerConfiguredParamInput(params, powerReplayInput(runInput))
 }
 
-func powerHistoryReplayInput(params []energoninput.PowerParam, runInput map[string]any) map[string]any {
+func powerHistoryReplayInput(runInput map[string]any) map[string]any {
 	if snapshot := recordValue(runInput[powerReplayInputKey]); len(snapshot) > 0 {
 		return cloneMap(snapshot)
 	}
-	return powerConfiguredParamInput(params, runInput)
+	return powerLegacyReplayInput(runInput)
+}
+
+func powerLegacyReplayInput(runInput map[string]any) map[string]any {
+	result := make(map[string]any, len(runInput))
+	for key, value := range runInput {
+		if strings.HasPrefix(key, "_") && key != "_reference_contents" {
+			continue
+		}
+		result[key] = value
+	}
+	return result
 }
 
 func powerConfiguredParamInput(params []energoninput.PowerParam, source map[string]any) map[string]any {

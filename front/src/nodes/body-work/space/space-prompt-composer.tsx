@@ -82,6 +82,8 @@ type PromptComposerProps = {
   placeholder: string;
   running?: boolean;
   disabled?: boolean;
+  submitDisabled?: boolean;
+  submitDisabledReason?: string;
   sourceOptions?: PowerParamSource[];
   selectedSourceId?: number;
   params?: PowerParam[];
@@ -122,6 +124,8 @@ export function PromptComposer({
   placeholder,
   running = false,
   disabled = false,
+  submitDisabled = false,
+  submitDisabledReason = "",
   sourceOptions = [],
   selectedSourceId = 0,
   params = [],
@@ -180,7 +184,7 @@ export function PromptComposer({
               assetReference?.teamID ? assetReferenceProvider : undefined
             }
             onChange={onChange}
-            onSubmit={!running ? onSubmit : undefined}
+            onSubmit={!running && !submitDisabled ? onSubmit : undefined}
           />
         </div>
       </div>
@@ -268,19 +272,21 @@ export function PromptComposer({
         </div>
 
         <div className="ws-prompt-submit-group">
-          <button
-            type="button"
-            className="ws-prompt-submit"
-            disabled={disabled || running}
-            onClick={onSubmit}
-            aria-label="发送"
-          >
-            {running ? (
-              <Loader2 size={17} className="ws-spin" />
-            ) : (
-              <ArrowUp size={18} />
-            )}
-          </button>
+          <SpaceTooltip label={submitDisabledReason || undefined}>
+            <button
+              type="button"
+              className="ws-prompt-submit"
+              disabled={disabled || running || submitDisabled}
+              onClick={onSubmit}
+              aria-label={submitDisabledReason || "发送"}
+            >
+              {running ? (
+                <Loader2 size={17} className="ws-spin" />
+              ) : (
+                <ArrowUp size={18} />
+              )}
+            </button>
+          </SpaceTooltip>
         </div>
       </div>
       {assetPickerParam ? (

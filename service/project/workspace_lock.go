@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	workspaceRunLockTTL             = 2 * time.Minute
+	workspaceRunLockTTL             = workspaceRunLeaseDuration
+	workspaceAssetLockTTL           = 2 * time.Minute
 	workspaceAssetLockRetryInterval = 80 * time.Millisecond
 	workspaceAssetLockWaitTimeout   = 5 * time.Second
 )
@@ -98,6 +99,19 @@ func releaseWorkspaceRunLock(ctx context.Context, runID uint64) {
 	})
 }
 
+func renewWorkspaceRunLock(ctx context.Context, runID uint64, now time.Time) {
+	if runID == 0 {
+		return
+	}
+	workspacemodel.NewRunLockModel().Update(ctx, map[string]any{
+		"run_id": runID,
+		"owner":  workspaceRunLockOwner,
+	}, map[string]any{
+		"expires_at": now.Add(workspaceRunLockTTL),
+		"updated_at": now,
+	})
+}
+
 func acquireWorkspaceAssetLock(ctx context.Context, projectID uint64, lockKey string, owner string) (func(), error) {
 	deadline := time.Now().Add(workspaceAssetLockWaitTimeout)
 	for {
@@ -120,7 +134,7 @@ func acquireWorkspaceAssetLock(ctx context.Context, projectID uint64, lockKey st
 func claimWorkspaceAssetLockOnce(ctx context.Context, projectID uint64, lockKey string, owner string) bool {
 	model := workspacemodel.NewAssetLockModel()
 	now := time.Now()
-	expiresAt := now.Add(workspaceRunLockTTL)
+	expiresAt := now.Add(workspaceAssetLockTTL)
 	if row := model.Find(ctx, map[string]any{"lock_key": lockKey}); row != nil {
 		return claimWorkspaceAssetLock(ctx, row, projectID, owner, expiresAt, now)
 	}

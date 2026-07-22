@@ -185,7 +185,7 @@ func (s Service) editableAssetVersionContent(ctx context.Context, projectID uint
 	}
 	visualMode := botmodel.NormalizeStoryboardVisualMode(storyboardText(incoming["visual_mode"]))
 	if !botmodel.IsStoryboardVisualMode(visualMode) {
-		return nil, fmt.Errorf("分镜视觉模式必须是 photoreal 或 stylized")
+		return nil, fmt.Errorf("分镜画面类型必须是 photoreal 或 stylized")
 	}
 	aspectRatio, ok := storyboardAspectRatio(incoming["aspect_ratio"])
 	if !ok {
@@ -274,7 +274,7 @@ func validateStoryboard(document map[string]any) error {
 	}
 	visualMode := botmodel.NormalizeStoryboardVisualMode(storyboardText(document["visual_mode"]))
 	if !botmodel.IsStoryboardVisualMode(visualMode) {
-		return fmt.Errorf("分镜视觉模式必须是 photoreal 或 stylized")
+		return fmt.Errorf("分镜画面类型必须是 photoreal 或 stylized")
 	}
 	document["visual_mode"] = visualMode
 	aspectRatio, ok := storyboardAspectRatio(document["aspect_ratio"])
@@ -294,7 +294,7 @@ func validateStoryboard(document map[string]any) error {
 	speechIDs := map[string]struct{}{}
 	captionIDs := map[string]struct{}{}
 	shotDescriptions := make([]string, 0, len(shots))
-	var previousSceneIDs map[string]struct{}
+	var previousMaterialIDs map[string]struct{}
 	previousVisibleDialogue := false
 	continuityChainLength := 0
 	for shotIndex, value := range shots {
@@ -357,9 +357,8 @@ func validateStoryboard(document map[string]any) error {
 		if err != nil {
 			return err
 		}
-		sceneIDs := storyboardMaterialIDsOfType(materialIDs, materialTypes, "scene")
-		if continuePrevious && !sameStoryboardMaterialIDSet(previousSceneIDs, sceneIDs) {
-			return fmt.Errorf("镜头 %d 更换了场景素材，不能承接上一镜头", shotIndex+1)
+		if continuePrevious && !sameStoryboardMaterialIDSet(previousMaterialIDs, materialIDs) {
+			return fmt.Errorf("镜头 %d 连续镜头不能新增、移除或更换角色、场景或道具", shotIndex+1)
 		}
 		visibleDialogue, err := validateStoryboardSpeech(shot, shotIndex, duration, speechIDs, materialTypes, materialIDs)
 		if err != nil {
@@ -371,7 +370,7 @@ func validateStoryboard(document map[string]any) error {
 		if err := validateStoryboardCaptions(shot, shotIndex, duration, captionIDs); err != nil {
 			return err
 		}
-		previousSceneIDs = sceneIDs
+		previousMaterialIDs = materialIDs
 		previousVisibleDialogue = visibleDialogue
 	}
 	if storyboardText(document["summary"]) == "" {
@@ -399,6 +398,7 @@ func storyboardMaterialTypes(value any) (map[string]string, error) {
 		return nil, fmt.Errorf("分镜素材清单格式无效")
 	}
 	result := make(map[string]string, len(materials))
+	materialNames := make(map[string]struct{}, len(materials))
 	for index, value := range materials {
 		material, ok := value.(map[string]any)
 		if !ok {
@@ -415,9 +415,15 @@ func storyboardMaterialTypes(value any) (map[string]string, error) {
 		if materialType != "character" && materialType != "scene" && materialType != "prop" {
 			return nil, fmt.Errorf("素材 %d 类型无效", index+1)
 		}
-		if storyboardText(material["name"]) == "" {
+		materialName := storyboardText(material["name"])
+		if materialName == "" {
 			return nil, fmt.Errorf("素材 %d 名称不能为空", index+1)
 		}
+		nameKey := strings.ToLower(materialName)
+		if _, exists := materialNames[nameKey]; exists {
+			return nil, fmt.Errorf("素材名称 %s 重复", materialName)
+		}
+		materialNames[nameKey] = struct{}{}
 		if storyboardText(material["prompt"]) == "" {
 			return nil, fmt.Errorf("素材 %d 提示词不能为空", index+1)
 		}
@@ -447,20 +453,6 @@ func storyboardShotMaterialIDs(value any, shotIndex int, materialTypes map[strin
 		result[id] = struct{}{}
 	}
 	return result, nil
-}
-
-func storyboardMaterialIDsOfType(
-	materialIDs map[string]struct{},
-	materialTypes map[string]string,
-	materialType string,
-) map[string]struct{} {
-	result := make(map[string]struct{})
-	for id := range materialIDs {
-		if materialTypes[id] == materialType {
-			result[id] = struct{}{}
-		}
-	}
-	return result
 }
 
 func sameStoryboardMaterialIDSet(left map[string]struct{}, right map[string]struct{}) bool {

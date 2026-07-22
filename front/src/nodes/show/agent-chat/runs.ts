@@ -195,6 +195,9 @@ export function useAgentChatRuns({
       run.buffer.flush();
       updateRunMessage(run, (message) => {
         const persistedActivities = readAgentChatActivities(result.output);
+        const incomingDocument = normalizeAgentChatDocument(
+          result.output?.document,
+        );
         const patch: Partial<ChatMessage> = {
           text: result.text,
           requestID: result.requestID || run.requestID || undefined,
@@ -210,8 +213,11 @@ export function useAgentChatRuns({
         }
         patch.document = mergeAgentChatDocument(
           message.document,
-          normalizeAgentChatDocument(result.output?.document),
+          incomingDocument,
         );
+        if (incomingDocument && message.document?.id !== incomingDocument.id) {
+          patch.autoOpenDocument = true;
+        }
         return patch;
       });
       remove(run);
@@ -246,16 +252,22 @@ export function useAgentChatRuns({
         publish(run);
       }
       if (isDocumentFrame(next.event, next.output)) {
-        if (next.event === "document_start") {
-          run.replayPending = false;
-          run.buffer.reset();
-          run.buffer.flush();
-        }
-        updateRunMessage(run, (message) => ({
-          document: mergeAgentChatDocumentEvent(message.document, next.output),
-          requestID: next.requestID || run.requestID || undefined,
-          running: true,
-        }));
+        updateRunMessage(run, (message) => {
+          const document = mergeAgentChatDocumentEvent(
+            message.document,
+            next.output,
+          );
+          return {
+            document,
+            autoOpenDocument:
+              message.autoOpenDocument ||
+              (next.event === "document_start" &&
+                Boolean(document) &&
+                message.document?.id !== document?.id),
+            requestID: next.requestID || run.requestID || undefined,
+            running: true,
+          };
+        });
       }
       if (next.event === "reset") {
         run.replayPending = false;
@@ -719,6 +731,7 @@ function isDocumentFrame(event: string, output: AgentChatOutput) {
     [
       "document_start",
       "block_commit",
+      "text_delta",
       "media_block_append",
       "artifact_progress",
       "artifact_ready",

@@ -57,6 +57,11 @@ export function mergeLatestMessages(
   current: ChatMessage[],
   incoming: ChatMessage[],
 ) {
+  const currentByRecordID = new Map(
+    current
+      .filter((message) => Boolean(message.recordID))
+      .map((message) => [message.recordID!, message]),
+  );
   const incomingRecordIDs = new Set(
     incoming
       .map((message) => message.recordID)
@@ -66,5 +71,13 @@ export function mergeLatestMessages(
     (message) =>
       Boolean(message.recordID) && !incomingRecordIDs.has(message.recordID!),
   );
-  return [...preservedMessages, ...incoming];
+  return [
+    ...preservedMessages,
+    ...incoming.map((message) => ({
+      ...message,
+      autoOpenDocument:
+        message.autoOpenDocument ||
+        currentByRecordID.get(message.recordID || 0)?.autoOpenDocument,
+    })),
+  ];
 }

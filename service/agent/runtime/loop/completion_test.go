@@ -111,3 +111,10 @@ func TestInteractionResumeStartsPendingStopGate(t *testing.T) {
 		t.Fatalf("interaction resume checkpoint did not require delivery review: %#v", checkpoint)
 	}
 }
+
+func TestInitialTurnStartsPendingStopGateWithoutForcingDelivery(t *testing.T) {
+	checkpoint := initialCheckpoint(execution{input: map[string]any{"prompt": "你好"}})
+	if checkpoint.AwaitingDelivery || !checkpoint.CompletionReviewPending {
+		t.Fatalf("initial checkpoint should review a natural stop without predeclaring missing delivery: %#v", checkpoint)
+	}
+}

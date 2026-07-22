@@ -7,21 +7,12 @@ const GROUP_OFFSET_X = 160;
 const GROUP_GAP_X = 72;
 const GROUP_GAP_Y = 72;
 const GROUP_CONTENT_TOP = 72;
-const LEGACY_GROUP_CONTENT_TOP = 58;
 const GROUP_PADDING = 24;
 const NODE_GAP_X = 24;
 const NODE_GAP_Y = 40;
-const LEGACY_NODE_GAP_Y = 24;
 const NODE_COLUMNS = 2;
 const DEFAULT_NODE_SIZE = { width: 180, height: 180 };
 const LAYOUT_VERSION = "storyboard-derived-layout-v7";
-const LEGACY_LAYOUT_VERSIONS = [
-  "storyboard-derived-layout-v2",
-  "storyboard-derived-layout-v3",
-  "storyboard-derived-layout-v4",
-  "storyboard-derived-layout-v5",
-  "storyboard-derived-layout-v6",
-] as const;
 
 export type StoryboardDerivedLayoutGroup = {
   key: string;
@@ -30,8 +21,6 @@ export type StoryboardDerivedLayoutGroup = {
   power?: PowerOption | null;
   powerKind: string;
   direction: StoryboardGroupDirection;
-  currentSize?: { width: number; height: number };
-  currentLayoutKey?: string;
 };
 
 export type StoryboardDerivedGroupLayout = {
@@ -158,83 +147,34 @@ export function nextStoryboardDerivedNodePosition(
   };
 }
 
-export function storyboardDerivedLayoutUpgradeMemberOffsets(input: {
-  currentLayoutKey?: string;
-  nextLayoutKey?: string;
-  group: SpaceCanvasNode;
-  members: SpaceCanvasNode[];
-  nodeSize: { width: number; height: number };
-  powerKind: string;
-}) {
-  const currentVersion = LEGACY_LAYOUT_VERSIONS.find((version) =>
-    input.currentLayoutKey?.startsWith(`${version}|`),
-  );
-  if (
-    !currentVersion ||
-    !input.nextLayoutKey?.startsWith(`${LAYOUT_VERSION}|`)
-  ) {
-    return null;
-  }
-  const contentOffset = currentVersion.endsWith("v2")
-    ? GROUP_CONTENT_TOP - LEGACY_GROUP_CONTENT_TOP
-    : 0;
-  const rowGapOffset =
-    currentVersion.endsWith("v2") || currentVersion.endsWith("v3")
-      ? NODE_GAP_Y - LEGACY_NODE_GAP_Y
-      : 0;
-  const sortedMembers = [...input.members].sort(
-    (left, right) =>
-      left.y - right.y || left.x - right.x || left.id.localeCompare(right.id),
-  );
-  if (sortedMembers.length === 0) {
-    return new Map<string, { x: number; y: number }>();
-  }
-  const offsets = new Map<string, { x: number; y: number }>();
-  if (input.powerKind === "audio") {
-    sortedMembers.forEach((member, index) => {
-      const column = index % NODE_COLUMNS;
-      const row = Math.floor(index / NODE_COLUMNS);
-      offsets.set(member.id, {
-        x:
-          input.group.x +
-          GROUP_PADDING +
-          column * (input.nodeSize.width + NODE_GAP_X) -
-          member.x,
-        y:
-          input.group.y +
-          GROUP_CONTENT_TOP +
-          row * (input.nodeSize.height + NODE_GAP_Y) -
-          member.y,
-      });
-    });
-    return offsets;
-  }
-  sortedMembers.forEach((member, index) => {
-    offsets.set(member.id, {
-      x: 0,
-      y: contentOffset + Math.floor(index / NODE_COLUMNS) * rowGapOffset,
+export function storyboardDerivedGroupMemberLayout(
+  group: SpaceCanvasNode,
+  members: SpaceCanvasNode[],
+) {
+  const isAudioGroup = members.some((member) => member.kind === "audio");
+  const nodeSize = {
+    width: Math.max(
+      isAudioGroup ? 0 : DEFAULT_NODE_SIZE.width,
+      ...members.map((member) => member.width),
+    ),
+    height: Math.max(
+      isAudioGroup ? 0 : DEFAULT_NODE_SIZE.height,
+      ...members.map((member) => member.height),
+    ),
+  };
+  const positions = new Map<string, { x: number; y: number }>();
+  members.forEach((member, index) => {
+    const column = index % NODE_COLUMNS;
+    const row = Math.floor(index / NODE_COLUMNS);
+    positions.set(member.id, {
+      x: group.x + GROUP_PADDING + column * (nodeSize.width + NODE_GAP_X),
+      y: group.y + GROUP_CONTENT_TOP + row * (nodeSize.height + NODE_GAP_Y),
     });
   });
-  return offsets;
-}
-
-export function expandStoryboardDerivedGroup(
-  group: SpaceCanvasNode,
-  nodes: SpaceCanvasNode[],
-) {
-  const members = nodes.filter((node) => node.groupId === group.id);
-  const requiredWidth = Math.max(
-    group.width,
-    ...members.map((node) => node.x + node.width - group.x + GROUP_PADDING),
-  );
-  const requiredHeight = Math.max(
-    group.height,
-    ...members.map((node) => node.y + node.height - group.y + GROUP_PADDING),
-  );
-  if (requiredWidth === group.width && requiredHeight === group.height) {
-    return group;
-  }
-  return { ...group, width: requiredWidth, height: requiredHeight };
+  return {
+    ...storyboardDerivedGridSize(members.length, nodeSize),
+    positions,
+  };
 }
 
 function derivedNodeSize(
@@ -247,36 +187,25 @@ function storyboardDerivedGroupSize(group: StoryboardDerivedLayoutGroup) {
   const nodeSize = derivedNodeSize(
     group.power || { kind: group.powerKind, outputType: "" },
   );
-  const rows = Math.max(1, Math.ceil(group.itemCount / NODE_COLUMNS));
-  const naturalWidth =
-    GROUP_PADDING * 2 +
-    nodeSize.width * NODE_COLUMNS +
-    NODE_GAP_X * (NODE_COLUMNS - 1);
-  const naturalHeight =
-    GROUP_CONTENT_TOP +
-    GROUP_PADDING +
-    rows * nodeSize.height +
-    (rows - 1) * NODE_GAP_Y;
-  const keepCurrentSize = !isLegacyAudioGroupLayout(group);
-  return {
-    width: Math.max(
-      naturalWidth,
-      keepCurrentSize ? group.currentSize?.width || 0 : 0,
-    ),
-    height: Math.max(
-      naturalHeight,
-      keepCurrentSize ? group.currentSize?.height || 0 : 0,
-    ),
-  };
+  return storyboardDerivedGridSize(group.itemCount, nodeSize);
 }
 
-function isLegacyAudioGroupLayout(group: StoryboardDerivedLayoutGroup) {
-  return (
-    group.powerKind === "audio" &&
-    LEGACY_LAYOUT_VERSIONS.some((version) =>
-      group.currentLayoutKey?.startsWith(`${version}|`),
-    )
-  );
+function storyboardDerivedGridSize(
+  itemCount: number,
+  nodeSize: { width: number; height: number },
+) {
+  const rows = Math.max(1, Math.ceil(itemCount / NODE_COLUMNS));
+  return {
+    width:
+      GROUP_PADDING * 2 +
+      nodeSize.width * NODE_COLUMNS +
+      NODE_GAP_X * (NODE_COLUMNS - 1),
+    height:
+      GROUP_CONTENT_TOP +
+      GROUP_PADDING +
+      rows * nodeSize.height +
+      (rows - 1) * NODE_GAP_Y,
+  };
 }
 
 function storyboardDerivedLayoutKey(

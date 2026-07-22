@@ -252,7 +252,7 @@ function ContinuityBadge({ continues }: { continues: boolean }) {
       className={`ws-storyboard-continuity ${continues ? "is-linked" : "is-cut"}`}
     >
       {continues ? <Link2 size={11} /> : <Scissors size={11} />}
-      {continues ? "承接上镜" : "新场景"}
+      {continues ? "承接上镜" : "切镜"}
     </span>
   );
 }

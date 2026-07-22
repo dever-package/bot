@@ -21,16 +21,16 @@ var storyboardOutputPrompt = fmt.Sprintf(`你是专业的分镜脚本编排器�
 - style_prompt 是整部作品唯一的视觉风格锚点；用户明确指定风格时必须采用，否则根据故事确定一种明确风格。
 - visual_mode 必须根据最终画面表现填写：真人实拍、摄影感、超写实或足以被识别为真实人物影像时使用 photoreal；动画、插画、漫画、黏土、卡通 3D 等明显非摄影画面使用 stylized。半写实人物或无法确定时按 photoreal 处理，并且必须与 style_prompt 保持一致。
 - aspect_ratio 是整部作品唯一画幅，只能是 16:9、9:16、1:1、4:3、3:4 或 21:9；用户明确指定时必须采用，否则默认 16:9。
-- 所有素材 prompt 和镜头 video_prompt 必须完整复用同一个 style_prompt，不得混用写实、二次元等不同视觉体系。
+- 素材 prompt 和镜头 video_prompt 只描述各自的内容、动作、构图、光线和材质，不得复制 style_prompt；系统会在派生执行时统一追加当前 style_prompt。
 - materials 是整部脚本共享的素材清单，type 只能是 character、scene 或 prop；name 只填写名称，不得包含 @ 或 #，prompt 必须能独立生成素材参考图。
 - 每个镜头通过 material_ids 精确引用本镜头使用的角色、场景和道具；只能引用 materials 中存在的 id，不要在描述或提示词中书写 @素材名。
-- description 必须用完整中文描述“开场状态、核心内容或动作、结束状态”。复杂动作和战斗必须拆成多个短镜头，每个镜头只表达一个清晰动作。
+- description 必须用完整中文描述“开场状态、一个主要可见动作、结束状态”。单个镜头最多包含一个主要动作和一个简短反应，不得使用“先、随后、然后、再”等词串联多个动作；复杂动作、战斗和多人交互必须拆成多个短镜头。
 - camera_instruction 包含景别、机位和运镜；没有时使用空字符串。
-- video_prompt 是可直接用于视频生成的完整提示词，必须融合镜头内容、动作、运镜、光线、风格和时长。
+- video_prompt 是可直接用于视频生成的语义提示词，必须明确主体的起始姿态、一个主要动作、结束姿态、运镜、光线和时长，不得写成剧情概述或连续动作清单，也不要重复 style_prompt。
 - duration 是视频生成秒数，必须是不小于 %d 的整数，禁止输出小数；用户指定的小数或低于最小时长的单镜头时长必须调整为合法整数，并重新核对总时长。
 - video_prompt 不要求生成可辨识对白、旁白或背景音乐；这些音轨由后续配音和合成环节处理，镜头原声只保留环境声、动作声和不可辨识的人物声音。
 - continue_previous 只表示同一时间、同一场景、同一主体中的画面状态或动作直接连续，不能仅因为属于同一段剧情就填写 true；正反打、景别或角度切换、换场、时间跳跃和蒙太奇必须为 false。
-- continue_previous=true 时 continuity_anchor 必须明确写出上一镜头结束状态中需要延续的主体位置、姿态、动作方向、道具状态和光线；否则使用空字符串。连续链最多包含 3 个镜头。
+- continue_previous=true 时 material_ids 必须与上一镜头完全一致，不得新增、移除或更换角色、场景和道具；continuity_anchor 必须明确写出上一镜头结束状态中需要延续的主体位置、姿态、动作方向、道具状态和光线。否则使用空字符串。连续链最多包含 3 个镜头。
 - 出镜对白不得跨越连续镜头边界；需要切换说话者、展示口型或改变构图时拆成新的非连续镜头。
 - 每个镜头使用 speech 数组表达对白和旁白；没有语音时使用空数组。
 - speech.kind 只能是 dialogue 或 narration；每条语音必须有稳定唯一 id、非空 text 和镜头内 start_time。
@@ -164,11 +164,11 @@ func normalizeStoryboardOutput(input map[string]any) (map[string]any, error) {
 		return nil, fmt.Errorf("aspect_ratio 必须是 16:9、9:16、1:1、4:3、3:4 或 21:9")
 	}
 
-	materials, materialTypes, err := normalizeStoryboardMaterials(input["materials"], stylePrompt)
+	materials, materialTypes, err := normalizeStoryboardMaterials(input["materials"])
 	if err != nil {
 		return nil, err
 	}
-	shots, err := normalizeStoryboardShots(input["shots"], stylePrompt, materialTypes)
+	shots, err := normalizeStoryboardShots(input["shots"], materialTypes)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ func isStoryboardAspectRatio(value string) bool {
 	}
 }
 
-func normalizeStoryboardShots(value any, stylePrompt string, materialTypes map[string]string) ([]any, error) {
+func normalizeStoryboardShots(value any, materialTypes map[string]string) ([]any, error) {
 	items, ok := value.([]any)
 	if !ok || len(items) == 0 {
 		return nil, fmt.Errorf("shots 至少需要一个镜头")
@@ -207,7 +207,7 @@ func normalizeStoryboardShots(value any, stylePrompt string, materialTypes map[s
 	shotIDs := make(map[string]struct{}, len(items))
 	speechIDs := make(map[string]struct{})
 	captionIDs := make(map[string]struct{})
-	var previousSceneIDs map[string]struct{}
+	var previousMaterialIDs map[string]struct{}
 	previousVisibleDialogue := false
 	continuityChainLength := 0
 	for index, item := range items {
@@ -256,10 +256,9 @@ func normalizeStoryboardShots(value any, stylePrompt string, materialTypes map[s
 		if index == 0 && continuePrevious {
 			return nil, fmt.Errorf("shots[0].continue_previous 必须为 false")
 		}
-		sceneIDs := storyboardMaterialIDsByType(materialIDSet, materialTypes, "scene")
 		continuesPrevious := index > 0 && continuePrevious
-		if continuesPrevious && storyboardMaterialSetChanged(previousSceneIDs, sceneIDs) {
-			return nil, fmt.Errorf("shots[%d] 更换了场景素材，不能承接上一镜头", index)
+		if continuesPrevious && storyboardMaterialSetChanged(previousMaterialIDs, materialIDSet) {
+			return nil, fmt.Errorf("shots[%d] 连续镜头不能新增、移除或更换角色、场景或道具", index)
 		}
 		continuityAnchor, ok := stringField(row, "continuity_anchor")
 		if !ok {
@@ -304,14 +303,14 @@ func normalizeStoryboardShots(value any, stylePrompt string, materialTypes map[s
 			"duration":           duration,
 			"description":        description,
 			"camera_instruction": cameraInstruction,
-			"video_prompt":       appendStoryboardStyle(videoPrompt, stylePrompt),
+			"video_prompt":       videoPrompt,
 			"material_ids":       materialIDs,
 			"continue_previous":  continuesPrevious,
 			"continuity_anchor":  continuityAnchor,
 			"speech":             speech,
 			"captions":           captions,
 		})
-		previousSceneIDs = sceneIDs
+		previousMaterialIDs = materialIDSet
 		previousVisibleDialogue = visibleDialogue
 	}
 	return shots, nil
@@ -457,13 +456,14 @@ func storyboardSpeechHasVisibleDialogue(values []any) bool {
 	return false
 }
 
-func normalizeStoryboardMaterials(value any, stylePrompt string) ([]any, map[string]string, error) {
+func normalizeStoryboardMaterials(value any) ([]any, map[string]string, error) {
 	items, ok := value.([]any)
 	if !ok {
 		return nil, nil, fmt.Errorf("materials 必须是数组")
 	}
 	result := make([]any, 0, len(items))
 	materialTypes := make(map[string]string, len(items))
+	materialNames := make(map[string]struct{}, len(items))
 	for index, item := range items {
 		row, ok := item.(map[string]any)
 		if !ok {
@@ -482,12 +482,17 @@ func normalizeStoryboardMaterials(value any, stylePrompt string) ([]any, map[str
 		if _, exists := materialTypes[id]; exists {
 			return nil, nil, fmt.Errorf("materials[%d].id 重复", index)
 		}
+		nameKey := strings.ToLower(name)
+		if _, exists := materialNames[nameKey]; exists {
+			return nil, nil, fmt.Errorf("materials[%d].name 重复", index)
+		}
+		materialNames[nameKey] = struct{}{}
 		materialTypes[id] = materialType
 		result = append(result, map[string]any{
 			"id":     id,
 			"type":   materialType,
 			"name":   name,
-			"prompt": appendStoryboardStyle(prompt, stylePrompt),
+			"prompt": prompt,
 		})
 	}
 	return result, materialTypes, nil
@@ -522,20 +527,6 @@ func normalizeStoryboardMaterialIDs(
 	return result, seen, nil
 }
 
-func storyboardMaterialIDsByType(
-	materialIDs map[string]struct{},
-	materialTypes map[string]string,
-	materialType string,
-) map[string]struct{} {
-	result := make(map[string]struct{})
-	for id := range materialIDs {
-		if materialTypes[id] == materialType {
-			result[id] = struct{}{}
-		}
-	}
-	return result
-}
-
 func storyboardMaterialSetChanged(previous map[string]struct{}, current map[string]struct{}) bool {
 	if len(previous) != len(current) {
 		return true
@@ -550,25 +541,6 @@ func storyboardMaterialSetChanged(previous map[string]struct{}, current map[stri
 
 func normalizeStoryboardMaterialName(value string) string {
 	return strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(value), "@#"))
-}
-
-func appendStoryboardStyle(prompt string, stylePrompt string) string {
-	prompt = strings.TrimSpace(prompt)
-	stylePrompt = strings.TrimSpace(stylePrompt)
-	if stylePrompt == "" || strings.Contains(prompt, stylePrompt) {
-		return prompt
-	}
-	if prompt == "" {
-		return "统一视觉风格：" + stylePrompt
-	}
-	separator := "。"
-	for _, suffix := range []string{"。", "！", "？", "!", "?", "；", ";", "，", ",", "：", ":"} {
-		if strings.HasSuffix(prompt, suffix) {
-			separator = ""
-			break
-		}
-	}
-	return prompt + separator + "统一视觉风格：" + stylePrompt
 }
 
 func requiredString(row map[string]any, key string) string {

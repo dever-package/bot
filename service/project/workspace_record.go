@@ -32,20 +32,26 @@ func createWorkspaceRun(ctx context.Context, projectID uint64, teamID uint64, re
 		"team_id":    teamID,
 		"release_id": releaseID,
 		"input": jsonText(map[string]any{
-			"_mode":          workspaceCanvasRunMode,
-			"_asset_cate_id": req.AssetCateID,
-			"_start_node_id": strings.TrimSpace(req.StartNodeID),
-			"_single_node":   req.SingleNode,
-			"input":          cloneInput(req.Input),
-			"canvas":         req.Canvas,
-			"execution_plan": plan,
+			"_mode":                  workspaceCanvasRunMode,
+			"_asset_cate_id":         req.AssetCateID,
+			"_start_node_id":         strings.TrimSpace(req.StartNodeID),
+			"_display_start_node_id": canvasRunDisplayStartNodeID(req),
+			"_single_node":           req.SingleNode,
+			"_execution_scope":       strings.TrimSpace(req.ExecutionScope),
+			"input":                  cloneInput(req.Input),
+			"canvas":                 req.Canvas,
+			"execution_plan":         plan,
 		}, "{}"),
-		"output":     "{}",
-		"error":      "",
-		"status":     teammodel.RunStatusRunning,
-		"started_at": now,
-		"created_at": now,
-		"updated_at": now,
+		"output":                 "{}",
+		"error":                  "",
+		"status":                 teammodel.RunStatusRunning,
+		"execution_owner":        workspaceRunLockOwner,
+		"execution_version":      1,
+		"execution_heartbeat_at": now,
+		"execution_expires_at":   now.Add(workspaceRunLeaseDuration),
+		"started_at":             now,
+		"created_at":             now,
+		"updated_at":             now,
 	}))
 	if runID == 0 {
 		return nil, fmt.Errorf("创建画布运行失败")
@@ -119,7 +125,8 @@ func (s WorkspaceService) workspaceRunPayload(ctx context.Context, projectID uin
 			payload["execution_plan"] = plan
 		}
 		payload["asset_cate_id"] = uint64Value(input["_asset_cate_id"])
-		payload["start_node_id"] = strings.TrimSpace(textValue(input["_start_node_id"]))
+		payload["start_node_id"] = workspaceRunDisplayStartNodeID(input)
+		payload["execution_scope"] = strings.TrimSpace(textValue(input["_execution_scope"]))
 	}
 	nodeResults := workspaceNodeResults(ctx, projectID, run.ID)
 	payload["node_results"] = nodeResults
@@ -342,20 +349,31 @@ func finishWorkspaceRun(ctx context.Context, runID uint64, status string, output
 		output["status"] = teammodel.RunStatusCanceled
 		errorText = ""
 	}
+	now := time.Now()
 	record := map[string]any{
 		"status":     status,
 		"output":     jsonText(output, "{}"),
 		"error":      strings.TrimSpace(errorText),
-		"updated_at": time.Now(),
+		"updated_at": now,
 	}
 	if status != teammodel.RunStatusRunning && status != teammodel.RunStatusPending && status != teammodel.RunStatusWaiting {
-		record["finished_at"] = time.Now()
+		record["finished_at"] = now
+	}
+	if status != teammodel.RunStatusRunning && status != teammodel.RunStatusPending {
+		record["execution_owner"] = ""
+		record["execution_expires_at"] = nil
 	}
 	filters := map[string]any{"id": runID}
 	if status != teammodel.RunStatusCanceled {
-		filters["status"] = map[string]any{"neq": teammodel.RunStatusCanceled}
+		filters["status"] = []string{
+			teammodel.RunStatusPending,
+			teammodel.RunStatusRunning,
+			teammodel.RunStatusWaiting,
+		}
 	}
-	teammodel.NewRunModel().Update(ctx, filters, record)
+	if teammodel.NewRunModel().Update(ctx, filters, record) == 0 {
+		return
+	}
 	finishWorkspaceExecution(ctx, runID, status, output, errorText)
 }
 

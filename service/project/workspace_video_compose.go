@@ -19,6 +19,117 @@ var canvasVideoTransitionTypes = map[string]bool{
 	"crossfade": true,
 }
 
+func refreshCanvasVideoCompositionReferences(
+	node canvasRunNode,
+	raw map[string]any,
+	results []canvasNodeResult,
+	canvas map[string]any,
+) map[string]any {
+	sourceNodeID := canvasStoryboardSourceNodeID(node)
+	if sourceNodeID == "" || raw == nil {
+		return raw
+	}
+	itemNodeIDs := canvasStoryboardItemNodeIDs(canvas, sourceNodeID)
+	composition := cloneInput(raw)
+	clips := make([]any, 0, len(sliceValue(raw["clips"])))
+	for _, value := range sliceValue(raw["clips"]) {
+		clip := cloneInput(mapValue(value))
+		clipID := textValue(clip["id"])
+		shotReference, hasShot := canvasStoryboardItemAssetReference(
+			itemNodeIDs,
+			"shot",
+			clipID,
+			results,
+			canvas,
+		)
+		lipSyncReference, hasLipSync := canvasStoryboardItemAssetReference(
+			itemNodeIDs,
+			"lip_sync",
+			clipID,
+			results,
+			canvas,
+		)
+		if hasLipSync && canvasStoryboardItemNodeStale(itemNodeIDs, "lip_sync", clipID, canvas) {
+			hasLipSync = false
+		}
+		if hasShot {
+			clip["original_audio_source"] = canvasVideoCompositionReference(shotReference)
+			if boolValue(firstPresent(clip["use_original_video"], clip["useOriginalVideo"])) || !hasLipSync {
+				clip["visual_video"] = canvasVideoCompositionReference(shotReference)
+			}
+		}
+		if hasLipSync && !boolValue(firstPresent(clip["use_original_video"], clip["useOriginalVideo"])) {
+			clip["visual_video"] = canvasVideoCompositionReference(lipSyncReference)
+		}
+
+		tracks := make([]any, 0, len(sliceValue(firstPresent(clip["speech_tracks"], clip["speechTracks"]))))
+		for _, trackValue := range sliceValue(firstPresent(clip["speech_tracks"], clip["speechTracks"])) {
+			track := cloneInput(mapValue(trackValue))
+			if reference, ok := canvasStoryboardItemAssetReference(
+				itemNodeIDs,
+				"speech",
+				textValue(track["id"]),
+				results,
+				canvas,
+			); ok {
+				track["audio"] = canvasVideoCompositionReference(reference)
+			}
+			tracks = append(tracks, track)
+		}
+		clip["speech_tracks"] = tracks
+		clip["blocking_issues"] = []any{}
+		clips = append(clips, clip)
+	}
+	composition["clips"] = clips
+	return composition
+}
+
+func canvasStoryboardItemNodeIDs(canvas map[string]any, sourceNodeID string) map[string]string {
+	result := map[string]string{}
+	for _, value := range sliceValue(canvas["nodes"]) {
+		node := mapValue(value)
+		metadata := mapValue(firstPresent(node["storyboard_item"], node["storyboardItem"]))
+		if firstText(metadata["source_node_id"], metadata["sourceNodeId"]) != sourceNodeID {
+			continue
+		}
+		itemType := firstText(metadata["item_type"], metadata["itemType"])
+		itemID := firstText(metadata["item_id"], metadata["itemId"])
+		if itemType == "" || itemID == "" {
+			continue
+		}
+		result[itemType+"\x00"+itemID] = textValue(node["id"])
+	}
+	return result
+}
+
+func canvasStoryboardItemAssetReference(
+	itemNodeIDs map[string]string,
+	itemType string,
+	itemID string,
+	results []canvasNodeResult,
+	canvas map[string]any,
+) (canvasPromptReference, bool) {
+	nodeID := itemNodeIDs[itemType+"\x00"+itemID]
+	if nodeID == "" {
+		return canvasPromptReference{}, false
+	}
+	return canvasNodeCurrentAssetReference(nodeID, results, canvas)
+}
+
+func canvasStoryboardItemNodeStale(itemNodeIDs map[string]string, itemType string, itemID string, canvas map[string]any) bool {
+	node := canvasNodeByID(itemNodeIDs[itemType+"\x00"+itemID], canvas)
+	metadata := mapValue(firstPresent(node["storyboard_item"], node["storyboardItem"]))
+	return boolValue(metadata["stale"])
+}
+
+func canvasVideoCompositionReference(reference canvasPromptReference) map[string]any {
+	return map[string]any{
+		"asset_id":   reference.AssetID,
+		"version_id": reference.VersionID,
+		"label":      reference.Label,
+	}
+}
+
 func resolveCanvasVideoComposition(
 	ctx context.Context,
 	projectID uint64,

@@ -13,31 +13,20 @@ import { readAgentChatAspectRatio } from "./media";
 
 export function AgentChatDocumentView({
   document,
-  sourceText,
   running,
   error,
 }: {
   document: AgentChatDocument;
-  sourceText: string;
   running: boolean;
   error: boolean;
 }) {
-  const intro = documentIntro(document);
-  const bodySource = stripDocumentIntro(sourceText, intro);
-  const pendingText = running
-    ? resolvePendingDocumentText(bodySource, document.blocks)
-    : "";
   const waitingForBlock =
     running &&
     document.status === "writing" &&
-    !pendingText &&
     document.blocks.length > 0;
 
   return (
     <div className="agent-chat-document min-w-0">
-      {intro ? (
-        <AgentChatMarkdown text={intro} error={error} className="mb-5" />
-      ) : null}
       {document.title ? (
         <h1 className="mb-5 text-xl font-semibold leading-tight">
           {document.title}
@@ -55,15 +44,7 @@ export function AgentChatDocumentView({
           />
         ),
       )}
-      {pendingText ? (
-        <AgentChatMarkdown
-          text={pendingText}
-          streaming
-          error={error}
-          className="agent-chat-document-text"
-        />
-      ) : null}
-      {document.blocks.length === 0 && !pendingText && running ? (
+      {document.blocks.length === 0 && running ? (
         <DocumentWaitingIndicator />
       ) : null}
       {waitingForBlock ? <DocumentTail /> : null}
@@ -72,24 +53,6 @@ export function AgentChatDocumentView({
       ) : null}
     </div>
   );
-}
-
-function documentIntro(document: AgentChatDocument) {
-  return typeof document.meta.intro === "string"
-    ? document.meta.intro.trim()
-    : "";
-}
-
-function stripDocumentIntro(sourceText: string, intro: string) {
-  const source = String(sourceText || "");
-  if (!intro) {
-    return source;
-  }
-  const position = source.indexOf(intro);
-  if (position < 0) {
-    return source;
-  }
-  return `${source.slice(0, position)}${source.slice(position + intro.length)}`.trimStart();
 }
 
 function DocumentTextBlock({
@@ -106,11 +69,13 @@ function DocumentTextBlock({
     return null;
   }
   return (
-    <AgentChatMarkdown
-      text={text}
-      error={error}
-      className="agent-chat-document-text"
-    />
+    <div data-agent-document-block-id={block.id}>
+      <AgentChatMarkdown
+        text={text}
+        error={error}
+        className="agent-chat-document-text"
+      />
+    </div>
   );
 }
 
@@ -153,30 +118,6 @@ function documentBlockActivity(
     anchorText: "",
     output: { artifacts: block.artifacts },
   };
-}
-
-function resolvePendingDocumentText(
-  sourceText: string,
-  blocks: AgentChatDocumentBlock[],
-) {
-  const source = String(sourceText || "");
-  if (!source) {
-    return "";
-  }
-  let cursor = 0;
-  let foundTextBlock = false;
-  for (const block of blocks) {
-    if (block.type !== "text" || !block.text) {
-      continue;
-    }
-    const position = source.indexOf(block.text, cursor);
-    if (position < 0) {
-      return "";
-    }
-    foundTextBlock = true;
-    cursor = position + block.text.length;
-  }
-  return (foundTextBlock ? source.slice(cursor) : source).trimStart();
 }
 
 function mediaLabel(kind: AgentChatDocumentBlock["mediaKind"]) {

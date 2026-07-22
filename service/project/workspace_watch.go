@@ -52,6 +52,13 @@ func (s WorkspaceService) watchWorkspaceRun(ctx context.Context, runID uint64, s
 	if runID == 0 {
 		return
 	}
+	leaseContext, stopLease, claimed := startWorkspaceRunLease(ctx, runID)
+	if !claimed {
+		return
+	}
+	defer stopLease()
+	ctx = leaseContext
+
 	for attempt := 0; attempt < workspaceRunWatchAttempts; attempt++ {
 		run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": runID})
 		if run == nil || !workspaceRunWatchShouldContinue(ctx, run, submittedApprovalID) {

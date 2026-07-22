@@ -19,6 +19,20 @@ func (s WorkspaceService) StopCanvasRun(ctx context.Context, run *teammodel.Run)
 		return nil, err
 	}
 
+	s.finishWorkspaceActiveNodes(ctx, run, teammodel.RunStatusCanceled, "")
+	finishWorkspaceFlowRun(ctx, workspaceFlowRunID(ctx, run.ID), teammodel.RunStatusCanceled, map[string]any{
+		"run_id":     run.ID,
+		"request_id": run.RequestID,
+		"status":     teammodel.RunStatusCanceled,
+	}, "")
+	updateWorkspaceExecutionStatus(ctx, run.ID, teammodel.RunStatusCanceled, "")
+	return result, nil
+}
+
+func (s WorkspaceService) finishWorkspaceActiveNodes(ctx context.Context, run *teammodel.Run, status string, errorText string) {
+	if run == nil {
+		return
+	}
 	now := time.Now()
 	nodeExecutions := workspacemodel.NewNodeExecutionModel().Select(ctx, map[string]any{
 		"project_id": run.ProjectID,
@@ -39,26 +53,40 @@ func (s WorkspaceService) StopCanvasRun(ctx context.Context, run *teammodel.Run)
 			)
 		}
 		workspacemodel.NewNodeExecutionModel().Update(ctx, map[string]any{"id": execution.ID}, map[string]any{
-			"status":      teammodel.RunStatusCanceled,
-			"error":       "",
+			"status":      status,
+			"error":       strings.TrimSpace(errorText),
 			"finished_at": now,
 			"updated_at":  now,
 		})
-		markWorkspaceNodeRun(ctx, execution.NodeRunID, teammodel.RunStatusCanceled, nil, nil, "", execution.AgentRunID)
+		markWorkspaceNodeRun(ctx, execution.NodeRunID, status, nil, nil, errorText, execution.AgentRunID)
 	}
 
 	for _, nodeRun := range teammodel.NewNodeRunModel().Select(ctx, map[string]any{"run_id": run.ID}) {
 		if nodeRun != nil && canvasRunStatusActive(nodeRun.Status) {
-			markWorkspaceNodeRun(ctx, nodeRun.ID, teammodel.RunStatusCanceled, nil, nil, "", nodeRun.AgentRunID)
+			markWorkspaceNodeRun(ctx, nodeRun.ID, status, nil, nil, errorText, nodeRun.AgentRunID)
 		}
 	}
-	finishWorkspaceFlowRun(ctx, workspaceFlowRunID(ctx, run.ID), teammodel.RunStatusCanceled, map[string]any{
-		"run_id":     run.ID,
-		"request_id": run.RequestID,
-		"status":     teammodel.RunStatusCanceled,
-	}, "")
-	updateWorkspaceExecutionStatus(ctx, run.ID, teammodel.RunStatusCanceled, "")
-	return result, nil
+}
+
+func (s WorkspaceService) failInterruptedWorkspaceRun(ctx context.Context, run *teammodel.Run) {
+	if !workspaceRunCanSyncProgress(run) {
+		return
+	}
+	s.finishWorkspaceActiveNodes(ctx, run, teammodel.RunStatusFail, workspaceRunInterruptedError)
+	nodeResults := workspaceNodeResults(ctx, run.ProjectID, run.ID)
+	output := map[string]any{
+		"run_id":       run.ID,
+		"request_id":   run.RequestID,
+		"release_id":   run.ReleaseID,
+		"status":       teammodel.RunStatusFail,
+		"error":        workspaceRunInterruptedError,
+		"executed":     len(nodeResults),
+		"node_results": nodeResults,
+		"node_runs":    workspaceNodeRunPayloads(ctx, run.ID),
+	}
+	finishWorkspaceFlowRun(ctx, workspaceFlowRunID(ctx, run.ID), teammodel.RunStatusFail, output, workspaceRunInterruptedError)
+	finishWorkspaceRun(ctx, run.ID, teammodel.RunStatusFail, output, workspaceRunInterruptedError)
+	s.writeWorkspaceRunResult(ctx, run, output, workspaceRunInterruptedError, 2)
 }
 
 func canvasRunStatusActive(status string) bool {

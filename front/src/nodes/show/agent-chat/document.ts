@@ -45,6 +45,12 @@ export type AgentChatDocument = {
   completedAt: string;
 };
 
+export function agentChatDocumentIntro(document?: AgentChatDocument) {
+  return document && typeof document.meta.intro === "string"
+    ? document.meta.intro.trim()
+    : "";
+}
+
 export function normalizeAgentChatDocumentBlockText(
   text: string,
   title: string,
@@ -66,18 +72,11 @@ export function normalizeAgentChatDocumentBlockText(
     .join("\n\n");
 }
 
-export function agentChatDocumentMarkdown(document: AgentChatDocument) {
-  return agentChatDocumentText(document, false);
-}
-
 export function agentChatDocumentCopyText(document: AgentChatDocument) {
-  return agentChatDocumentText(document, true);
+  return agentChatDocumentText(document);
 }
 
-function agentChatDocumentText(
-  document: AgentChatDocument,
-  includeArtifacts: boolean,
-) {
+function agentChatDocumentText(document: AgentChatDocument) {
   const content = document.blocks.flatMap((block) => {
     if (block.type === "text") {
       const text = normalizeAgentChatDocumentBlockText(
@@ -85,9 +84,6 @@ function agentChatDocumentText(
         document.title,
       );
       return text ? [text] : [];
-    }
-    if (!includeArtifacts) {
-      return [];
     }
     return block.artifacts
       .map(agentChatArtifactMarkdown)
@@ -213,6 +209,12 @@ export function mergeAgentChatDocumentEvent(
   const blockID = positiveNumber(value.block_id) || block?.id || 0;
   const artifacts = normalizeArtifacts(value.artifacts);
   const event = textValue(value.event).toLowerCase();
+  if (event === "text_delta" && blockID) {
+    document = appendDocumentTextDelta(document, blockID, {
+      revision: nonNegativeNumber(value.revision),
+      delta: textValue(value.delta, false),
+    });
+  }
   if (blockID) {
     document = updateDocumentBlock(document, blockID, (currentBlock) => ({
       ...currentBlock,
@@ -227,7 +229,9 @@ export function mergeAgentChatDocumentEvent(
       meta: {
         ...currentBlock.meta,
         ...(value.progress == null ? {} : { progress: value.progress }),
-        ...(textValue(value.text) ? { progress_text: textValue(value.text) } : {}),
+        ...(textValue(value.text)
+          ? { progress_text: textValue(value.text) }
+          : {}),
       },
     }));
   }
@@ -286,7 +290,14 @@ export function isAgentChatDocumentMediaReady(
 }
 
 export function needsAgentChatDocumentSync(document?: AgentChatDocument) {
-  return Boolean(document && (!document.hydrated || isAgentChatDocumentPending(document)));
+  return Boolean(
+    document &&
+      (!document.hydrated ||
+        isAgentChatDocumentPending(document) ||
+        document.blocks.some(
+          (block) => block.meta.stream_out_of_sync === true,
+        )),
+  );
 }
 
 function normalizeAgentChatDocumentBlock(
@@ -304,7 +315,9 @@ function normalizeAgentChatDocumentBlock(
     id,
     seq: nonNegativeNumber(value.seq),
     type,
-    format: textValue(value.format) || (type === "media" ? "artifact" : "markdown"),
+    format:
+      textValue(value.format) ||
+      (type === "media" ? "artifact" : "markdown"),
     mediaKind: mediaKind(value.media_kind),
     text: textValue(value.text, false),
     status: blockStatus(value.status, type),
@@ -320,6 +333,9 @@ function mergeDocumentBlocks(
   const blocks = new Map(current.map((block) => [block.id, block]));
   for (const block of incoming) {
     const existing = blocks.get(block.id);
+    const meta = existing
+      ? mergeDocumentBlockMeta(existing.meta, block.meta)
+      : block.meta;
     blocks.set(
       block.id,
       existing
@@ -328,13 +344,54 @@ function mergeDocumentBlocks(
             ...block,
             text: block.text || existing.text,
             status: mergeBlockStatus(existing.status, block.status),
-            meta: { ...existing.meta, ...block.meta },
+            meta,
             artifacts: mergeArtifacts(existing.artifacts, block.artifacts),
           }
         : block,
     );
   }
   return Array.from(blocks.values()).sort(compareBlocks);
+}
+
+function appendDocumentTextDelta(
+  document: AgentChatDocument,
+  blockID: number,
+  input: { revision: number; delta: string },
+) {
+  if (!input.revision || !input.delta) {
+    return document;
+  }
+  return updateDocumentBlock(document, blockID, (block) => {
+    if (block.type !== "text") {
+      return block;
+    }
+    const currentRevision = nonNegativeNumber(block.meta.stream_revision);
+    if (input.revision <= currentRevision) {
+      return block;
+    }
+    if (input.revision !== currentRevision + 1) {
+      return {
+        ...block,
+        meta: { ...block.meta, stream_out_of_sync: true },
+      };
+    }
+    const meta = { ...block.meta, stream_revision: input.revision };
+    delete meta.stream_out_of_sync;
+    return { ...block, text: `${block.text}${input.delta}`, meta };
+  });
+}
+
+function mergeDocumentBlockMeta(
+  current: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+) {
+  const meta = { ...current, ...incoming };
+  const currentRevision = nonNegativeNumber(current.stream_revision);
+  const incomingRevision = nonNegativeNumber(incoming.stream_revision);
+  if (incomingRevision >= currentRevision && incomingRevision > 0) {
+    delete meta.stream_out_of_sync;
+  }
+  return meta;
 }
 
 function updateDocumentBlock(

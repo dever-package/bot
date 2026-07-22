@@ -101,7 +101,9 @@
         "_partial": true,
         "name": "$form.name",
         "icon": "$form.icon",
-        "icon_image": "$form.icon_image"
+        "icon_image": "$form.icon_image",
+        "status": "$form.status",
+        "sort": "$form.sort"
       }
     }
   }

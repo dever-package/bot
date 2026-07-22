@@ -18,13 +18,15 @@ import (
 )
 
 type CanvasRunRequest struct {
-	ProjectID   uint64
-	AssetCateID uint64
-	StartNodeID string
-	RequestID   string
-	SingleNode  bool
-	Canvas      map[string]any
-	Input       map[string]any
+	ProjectID          uint64
+	AssetCateID        uint64
+	StartNodeID        string
+	DisplayStartNodeID string
+	RequestID          string
+	SingleNode         bool
+	ExecutionScope     string
+	Canvas             map[string]any
+	Input              map[string]any
 }
 
 type canvasRunNode struct {
@@ -102,6 +104,11 @@ func (s WorkspaceService) runCanvasWithProject(ctx context.Context, req CanvasRu
 		}
 		return s.workspaceRunPayload(ctx, projectID, existing), nil
 	}
+	var err error
+	req, err = prepareCanvasExecutionScope(ctx, projectID, req)
+	if err != nil {
+		return nil, err
+	}
 	nodes, edges, err := parseCanvasRunGraph(req.Canvas)
 	if err != nil {
 		return nil, err
@@ -168,7 +175,7 @@ func (s WorkspaceService) runCanvasWithProject(ctx context.Context, req CanvasRu
 		RunID:       run.ID,
 		FlowRunID:   flowRunID,
 		RequestID:   run.RequestID,
-		StartNodeID: req.StartNodeID,
+		StartNodeID: canvasRunDisplayStartNodeID(req),
 		SingleNode:  req.SingleNode,
 		Status:      teammodel.RunStatusRunning,
 		Input:       map[string]any{"input": cloneInput(req.Input), "canvas": req.Canvas},
@@ -198,6 +205,13 @@ func (s WorkspaceService) executeCanvasRun(ctx context.Context, req CanvasRunReq
 }
 
 func (s WorkspaceService) executeCanvasRunAsync(ctx context.Context, req CanvasRunRequest, runID uint64, plan canvasExecutionPlan, flowRunID uint64, nodeRuns map[string]uint64) {
+	leaseContext, stopLease, claimed := startWorkspaceRunLease(ctx, runID)
+	if !claimed {
+		return
+	}
+	defer stopLease()
+	ctx = leaseContext
+
 	run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": runID})
 	if run == nil {
 		return
@@ -474,7 +488,7 @@ func (s WorkspaceService) runCanvasNode(ctx context.Context, projectID uint64, r
 	case "asset":
 		return canvasAssetRunPayload(ctx, projectID, req, run, node, nodeRunID), nil
 	case "power":
-		return s.runCanvasPowerNode(ctx, projectID, req, run, node, nodeRunID, previousOutput, mediaReferences)
+		return s.runCanvasPowerNode(ctx, projectID, req, run, node, nodeRunID, previousOutput, mediaReferences, results)
 	case "agent":
 		return s.runCanvasAgentNode(ctx, projectID, req, run, node, nodeRunID, previousOutput, mediaReferences)
 	case "flow":
@@ -486,7 +500,7 @@ func (s WorkspaceService) runCanvasNode(ctx context.Context, projectID uint64, r
 	}
 }
 
-func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, previousOutput any, mediaReferences []energoninput.MediaReference) (map[string]any, error) {
+func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, previousOutput any, mediaReferences []energoninput.MediaReference, results []canvasNodeResult) (map[string]any, error) {
 	if node.PowerID == 0 && node.PowerKey == "" {
 		return nil, fmt.Errorf("能力节点未配置能力")
 	}
@@ -523,7 +537,13 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 		mediaReferences = nil
 	}
 	if outputType == energonmodel.OutputTypeVideoCompose {
-		composition, err := resolveCanvasVideoComposition(ctx, projectID, node.VideoComposition)
+		compositionDraft := refreshCanvasVideoCompositionReferences(
+			node,
+			node.VideoComposition,
+			results,
+			req.Canvas,
+		)
+		composition, err := resolveCanvasVideoComposition(ctx, projectID, compositionDraft)
 		if err != nil {
 			return nil, err
 		}
@@ -1092,7 +1112,7 @@ func canvasPromptReferenceOutput(
 	ctx context.Context,
 	projectID uint64,
 	nodeID string,
-	_ []canvasNodeResult,
+	results []canvasNodeResult,
 	canvas map[string]any,
 ) (any, []energoninput.MediaReference, error) {
 	node := canvasNodeByID(nodeID, canvas)
@@ -1101,7 +1121,7 @@ func canvasPromptReferenceOutput(
 	if err != nil {
 		return nil, nil, err
 	}
-	storyboardReferences, err := canvasStoryboardSourceReferences(node, canvas)
+	storyboardReferences, err := canvasStoryboardSourceReferences(node, results, canvas)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1147,7 +1167,7 @@ func canvasPromptReferenceOutput(
 	}, mediaReferences, nil
 }
 
-func canvasStoryboardSourceReferences(node map[string]any, canvas map[string]any) ([]canvasPromptReference, error) {
+func canvasStoryboardSourceReferences(node map[string]any, results []canvasNodeResult, canvas map[string]any) ([]canvasPromptReference, error) {
 	metadata := mapValue(firstPresent(node["storyboard_item"], node["storyboardItem"]))
 	itemType := firstText(metadata["item_type"], metadata["itemType"])
 	if itemType != "shot_image" && itemType != "shot" {
@@ -1163,33 +1183,52 @@ func canvasStoryboardSourceReferences(node map[string]any, canvas map[string]any
 		if sourceNode == nil {
 			return nil, fmt.Errorf("分镜来源节点不存在: %s", sourceNodeID)
 		}
-		resultRef := mapValue(firstPresent(sourceNode["result_ref"], sourceNode["resultRef"]))
-		asset := mapValue(sourceNode["asset"])
-		assetID := firstUint64(
-			uint64Value(resultRef["asset_id"]),
-			uint64Value(resultRef["assetId"]),
-			uint64Value(asset["id"]),
-		)
-		versionID := firstUint64(
-			uint64Value(resultRef["version_id"]),
-			uint64Value(resultRef["versionId"]),
-			uint64Value(asset["version_id"]),
-			uint64Value(asset["versionId"]),
-			uint64Value(valueAtPath(asset, "version", "id")),
-		)
-		if assetID == 0 || versionID == 0 {
+		reference, ok := canvasNodeCurrentAssetReference(sourceNodeID, results, canvas)
+		if !ok {
 			return nil, fmt.Errorf(
 				"分镜来源“%s”尚未生成",
 				firstText(sourceNode["title"], sourceNodeID),
 			)
 		}
-		result = append(result, canvasPromptReference{
-			AssetID:   assetID,
-			VersionID: versionID,
-			Label:     firstText(sourceNode["title"], sourceNodeID),
-		})
+		result = append(result, reference)
 	}
 	return result, nil
+}
+
+func canvasNodeCurrentAssetReference(nodeID string, results []canvasNodeResult, canvas map[string]any) (canvasPromptReference, bool) {
+	node := canvasNodeByID(nodeID, canvas)
+	if node == nil {
+		return canvasPromptReference{}, false
+	}
+	result := lastCanvasNodeResult(results, nodeID)
+	resultRef := mapValue(firstPresent(node["result_ref"], node["resultRef"]))
+	asset := mapValue(node["asset"])
+	assetID := firstUint64(
+		uint64Value(valueAtPath(result, "asset", "id")),
+		uint64Value(valueAtPath(result, "result", "asset", "id")),
+		uint64Value(resultRef["asset_id"]),
+		uint64Value(resultRef["assetId"]),
+		uint64Value(asset["id"]),
+	)
+	versionID := firstUint64(
+		uint64Value(valueAtPath(result, "version", "id")),
+		uint64Value(valueAtPath(result, "asset", "version", "id")),
+		uint64Value(valueAtPath(result, "asset", "version_id")),
+		uint64Value(valueAtPath(result, "result", "version", "id")),
+		uint64Value(resultRef["version_id"]),
+		uint64Value(resultRef["versionId"]),
+		uint64Value(asset["version_id"]),
+		uint64Value(asset["versionId"]),
+		uint64Value(valueAtPath(asset, "version", "id")),
+	)
+	if assetID == 0 || versionID == 0 {
+		return canvasPromptReference{}, false
+	}
+	return canvasPromptReference{
+		AssetID:   assetID,
+		VersionID: versionID,
+		Label:     firstText(node["title"], nodeID),
+	}, true
 }
 
 func mergeCanvasPromptReferences(generated []canvasPromptReference, explicit []canvasPromptReference) []canvasPromptReference {

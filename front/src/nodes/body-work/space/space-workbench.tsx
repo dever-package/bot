@@ -9,6 +9,7 @@ import {
   MousePointer2,
   Pencil,
   Plus,
+  RotateCcw,
   Trash2,
 } from "lucide-react";
 import { SpaceTooltip } from "./space-tooltip";
@@ -34,22 +35,26 @@ export function NodeActionMenu({
   canCopy = true,
   canDelete = true,
   canEditStructure = false,
+  canResetStoryboardPrompt = false,
   onClose,
   onCopy,
   onDelete,
   onDetail,
   onEditStructure,
+  onResetStoryboardPrompt,
 }: {
   point: { x: number; y: number };
   canShowDetail: boolean;
   canCopy?: boolean;
   canDelete?: boolean;
   canEditStructure?: boolean;
+  canResetStoryboardPrompt?: boolean;
   onClose: () => void;
   onCopy: () => void;
   onDelete: () => void;
   onDetail: () => void;
   onEditStructure?: () => void;
+  onResetStoryboardPrompt?: () => void;
 }) {
   return (
     <>
@@ -69,6 +74,12 @@ export function NodeActionMenu({
           <button type="button" onClick={onEditStructure}>
             <Pencil size={15} />
             <span>编辑分镜</span>
+          </button>
+        ) : null}
+        {canResetStoryboardPrompt && onResetStoryboardPrompt ? (
+          <button type="button" onClick={onResetStoryboardPrompt}>
+            <RotateCcw size={15} />
+            <span>恢复脚本提示词</span>
           </button>
         ) : null}
         {canCopy ? (

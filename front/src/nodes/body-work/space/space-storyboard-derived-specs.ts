@@ -102,24 +102,28 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
     layoutIndex: 0,
     enabled: () => true,
     items: (storyboard) =>
-      storyboard.shots.flatMap((shot, index) =>
-        shot.continue_previous
-          ? []
-          : [
-              {
-                type: "shot_image" as const,
-                id: shot.id,
-                title: `镜头 ${shot.order || index + 1} 参考图`,
-                prompt: storyboardShotImagePrompt(storyboard, shot),
-                referenceItems: storyboardShotMaterialSourceItems(
-                  storyboard,
-                  shot,
-                ),
-                paramValues: storyboardShotImageParamValues(storyboard),
-                shotId: shot.id,
-              },
-            ],
-      ),
+      storyboard.shots.flatMap((shot, index) => {
+        if (shot.continue_previous) {
+          return [];
+        }
+        const sources = storyboardShotImageSources(storyboard, shot, index);
+        return [
+          {
+            type: "shot_image" as const,
+            id: shot.id,
+            title: `镜头 ${shot.order || index + 1} 参考图`,
+            prompt: storyboardShotImagePrompt(
+              storyboard,
+              shot,
+              sources.previousShot,
+            ),
+            dependencyItems: sources.dependencyItems,
+            referenceItems: sources.referenceItems,
+            paramValues: storyboardShotImageParamValues(storyboard),
+            shotId: shot.id,
+          },
+        ];
+      }),
   },
   {
     key: "shots",
@@ -350,6 +354,62 @@ function storyboardShotMaterialSourceItems(
   }));
 }
 
+function storyboardShotImageSources(
+  storyboard: StoryboardDocument,
+  shot: StoryboardShot,
+  index: number,
+) {
+  const materialItems = storyboardShotMaterialSourceItems(storyboard, shot);
+  const previousShot = storyboardPreviousReferenceShot(storyboard, index);
+  if (
+    !previousShot ||
+    !storyboardShotsShareMaterial(storyboard, previousShot, shot)
+  ) {
+    return {
+      previousShot: undefined,
+      dependencyItems: [],
+      referenceItems: materialItems,
+    };
+  }
+  const previousItem = {
+    type: "shot_image" as const,
+    id: previousShot.id,
+  };
+  return {
+    previousShot,
+    dependencyItems: [previousItem],
+    referenceItems: [previousItem, ...materialItems],
+  };
+}
+
+function storyboardPreviousReferenceShot(
+  storyboard: StoryboardDocument,
+  index: number,
+) {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const candidate = storyboard.shots[cursor];
+    if (!candidate.continue_previous) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function storyboardShotsShareMaterial(
+  storyboard: StoryboardDocument,
+  previousShot: StoryboardShot,
+  shot: StoryboardShot,
+) {
+  const previousMaterialIDs = new Set(
+    storyboardShotMaterials(storyboard, previousShot).map(
+      (material) => material.id,
+    ),
+  );
+  return storyboardShotMaterials(storyboard, shot).some((material) =>
+    previousMaterialIDs.has(material.id),
+  );
+}
+
 function storyboardShotVideoSources(
   storyboard: StoryboardDocument,
   shot: StoryboardShot,
@@ -371,18 +431,27 @@ function storyboardShotVideoSources(
 function storyboardShotImagePrompt(
   storyboard: StoryboardDocument,
   shot: StoryboardShot,
+  previousShot?: StoryboardShot,
 ) {
-  const referenceOrder = storyboardShotMaterials(storyboard, shot)
-    .map(
+  const referenceOrder = [
+    previousShot
+      ? `参考图1是前序镜头 ${previousShot.order} 的参考画面`
+      : "",
+    ...storyboardShotMaterials(storyboard, shot).map(
       (material, index) =>
-        `参考图${index + 1}是${STORYBOARD_MATERIAL_LABELS[material.type]}“${material.name}”`,
-    )
+        `参考图${index + (previousShot ? 2 : 1)}是${STORYBOARD_MATERIAL_LABELS[material.type]}“${material.name}”`,
+    ),
+  ]
+    .filter(Boolean)
     .join("，");
   const parts = [
     `镜头 ${shot.order} 的单张参考画面`,
     referenceOrder ? `图片顺序说明：${referenceOrder}` : "",
     referenceOrder
       ? "必须严格按照上述图片顺序识别素材，不得交换、合并或忽略参考对象"
+      : "",
+    previousShot
+      ? "前序镜头参考画面只用于延续共同角色、场景和道具的身份、状态、光线与空间关系；当前镜头素材清单中不存在的对象不得继续保留"
       : "",
     "严格保持参考角色的五官、发型、服装、配色和体型，保持场景结构、道具造型以及整部作品画风一致",
     "不同参考对象必须保持各自独立的轮廓、材质和尺度，不得把角色与道具融合、机械化、穿戴化或互换材质",
@@ -408,7 +477,7 @@ function storyboardVideoPrompt(
     basePrompt,
     shot.continue_previous
       ? `使用上一镜头真实尾帧继续生成。连续性锚点：${shot.continuity_anchor}。保持人物、服装、道具、场景光线和动作方向一致，但不要重复上一镜头内容`
-      : "这是新的镜头段落，按当前镜头素材和描述建立画面",
+      : "这是新的镜头段落，以当前镜头参考图为画面锚点建立画面",
     storyboardVisibleFaceConstraint(shot),
     `画幅：${storyboard.aspect_ratio}`,
     "不生成可辨识对白、旁白、字幕或背景音乐，只保留环境声、动作声和不可辨识的人物声音",

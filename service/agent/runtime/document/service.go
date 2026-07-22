@@ -69,6 +69,92 @@ func (s Service) AppendText(ctx context.Context, request AppendTextRequest) (age
 	})
 }
 
+// BeginTextStream creates the text block for one model step. Replaying the same
+// step replaces its partial text instead of duplicating content after recovery.
+func (s Service) BeginTextStream(ctx context.Context, request AppendTextRequest) (agentmodel.DocumentBlock, int, error) {
+	if request.DocumentID == 0 || strings.TrimSpace(request.SourceKey) == "" {
+		return agentmodel.DocumentBlock{}, 0, fmt.Errorf("开始文档正文流缺少文档或来源标识")
+	}
+	text := normalizeDocumentText(request.Text)
+	if strings.TrimSpace(text) == "" {
+		return agentmodel.DocumentBlock{}, 0, fmt.Errorf("开始文档正文流缺少正文")
+	}
+	if existing := s.repository.blockBySource(ctx, request.DocumentID, request.SourceKey); existing != nil {
+		revision := textStreamRevision(existing.Meta) + 1
+		meta := mergeTextStreamMeta(existing.Meta, request.Meta, revision)
+		block := s.repository.updateBlock(ctx, existing.ID, map[string]any{
+			"text":   text,
+			"status": agentmodel.DocumentBlockStatusReady,
+			"meta":   encodeJSON(meta, "{}"),
+		})
+		if block == nil {
+			return agentmodel.DocumentBlock{}, 0, fmt.Errorf("重置文档正文流失败")
+		}
+		if err := s.streams.write(ctx, request.DocumentID, "block_commit", map[string]any{
+			"block": blockPayload(*block, nil),
+		}); err != nil {
+			return agentmodel.DocumentBlock{}, 0, err
+		}
+		return *block, revision, nil
+	}
+
+	revision := 1
+	request.Meta = mergeTextStreamMeta("", request.Meta, revision)
+	block, err := s.appendBlock(ctx, request.DocumentID, request.SourceKey, map[string]any{
+		"type":       agentmodel.DocumentBlockTypeText,
+		"format":     "markdown",
+		"media_kind": "",
+		"text":       text,
+		"status":     agentmodel.DocumentBlockStatusReady,
+		"meta":       encodeJSON(request.Meta, "{}"),
+	})
+	return block, revision, err
+}
+
+func (s Service) SaveTextStream(ctx context.Context, blockID uint64, text string, revision int) (*agentmodel.DocumentBlock, error) {
+	block := s.repository.findBlock(ctx, blockID)
+	if block == nil || block.Type != agentmodel.DocumentBlockTypeText {
+		return nil, fmt.Errorf("文档正文块不存在")
+	}
+	if revision < textStreamRevision(block.Meta) {
+		return block, nil
+	}
+	meta := mergeTextStreamMeta(block.Meta, nil, revision)
+	block = s.repository.updateBlock(ctx, blockID, map[string]any{
+		"text":   normalizeDocumentText(text),
+		"status": agentmodel.DocumentBlockStatusReady,
+		"meta":   encodeJSON(meta, "{}"),
+	})
+	if block == nil {
+		return nil, fmt.Errorf("保存文档正文流失败")
+	}
+	return block, nil
+}
+
+func (s Service) CommitTextStream(ctx context.Context, blockID uint64, text string, revision int) (*agentmodel.DocumentBlock, error) {
+	block, err := s.SaveTextStream(ctx, blockID, text, revision)
+	if err != nil || block == nil {
+		return block, err
+	}
+	if err = s.streams.write(ctx, block.DocumentID, "block_commit", map[string]any{
+		"block": blockPayload(*block, nil),
+	}); err != nil {
+		return nil, err
+	}
+	return block, nil
+}
+
+func (s Service) PublishTextDelta(ctx context.Context, delta TextDelta) error {
+	if delta.DocumentID == 0 || delta.BlockID == 0 || delta.Revision <= 0 || delta.Delta == "" {
+		return nil
+	}
+	return s.streams.write(ctx, delta.DocumentID, "text_delta", map[string]any{
+		"block_id": delta.BlockID,
+		"revision": delta.Revision,
+		"delta":    delta.Delta,
+	})
+}
+
 func (s Service) AppendMedia(ctx context.Context, request AppendMediaRequest) (agentmodel.DocumentBlock, error) {
 	kind := normalizeMediaKind(request.Kind)
 	return s.appendBlock(ctx, request.DocumentID, request.SourceKey, map[string]any{
@@ -300,6 +386,33 @@ func normalizeMediaKind(kind string) string {
 	default:
 		return "file"
 	}
+}
+
+func normalizeDocumentText(value string) string {
+	return strings.ReplaceAll(value, "\r\n", "\n")
+}
+
+func textStreamRevision(metaJSON string) int {
+	meta := decodeMap(metaJSON)
+	switch value := meta["stream_revision"].(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	default:
+		return 0
+	}
+}
+
+func mergeTextStreamMeta(current string, values map[string]any, revision int) map[string]any {
+	meta := decodeMap(current)
+	for key, value := range values {
+		meta[key] = value
+	}
+	meta["stream_revision"] = revision
+	return meta
 }
 
 func publicError(_ string) string {

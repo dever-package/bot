@@ -124,6 +124,7 @@ export async function runSpaceCanvas(input: {
   startNodeId: string;
   requestId?: string;
   singleNode?: boolean;
+  executionScope?: "storyboard_frame";
   canvas: SpaceCanvasState;
   runInput?: Record<string, unknown>;
 }) {
@@ -133,6 +134,7 @@ export async function runSpaceCanvas(input: {
     start_node_id: input.startNodeId,
     request_id: input.requestId || "",
     single_node: Boolean(input.singleNode),
+    execution_scope: input.executionScope || "",
     canvas: persistedCanvasState(input.canvas),
     input: input.runInput || {},
   });

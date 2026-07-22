@@ -204,12 +204,20 @@ export function defaultAssetCateId(space: SpaceBootstrap) {
   return visibleAssetCates(space)[0]?.id ?? 0;
 }
 
-export function assetCateById(space: SpaceBootstrap, assetCateId: number) {
+export function assetCateFromList(
+  assetCates: AssetCate[],
+  assetCateId: number,
+) {
+  const visibleCates = assetCates.length > 0 ? assetCates : [freeAssetCate];
   return (
-    visibleAssetCates(space).find((item) => item.id === assetCateId) ||
-    visibleAssetCates(space)[0] ||
+    visibleCates.find((item) => item.id === assetCateId) ||
+    visibleCates[0] ||
     freeAssetCate
   );
+}
+
+export function assetCateById(space: SpaceBootstrap, assetCateId: number) {
+  return assetCateFromList(space.assetCates, assetCateId);
 }
 
 export function assetsForCate(space: SpaceBootstrap, assetCateId: number) {

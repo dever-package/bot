@@ -1,4 +1,6 @@
 import type { SpaceCanvasNode } from "./types";
+import { canvasNodeRunsInBackend } from "./space-execution-plan";
+import { storyboardRunBlockedReason } from "./space-group-runtime";
 
 const FRAME_PADDING_X = 52;
 const FRAME_PADDING_TOP = 72;
@@ -14,6 +16,7 @@ export type StoryboardFrameScope = {
   sourceNodeId: string;
   title: string;
   memberNodeIds: string[];
+  workNodeIds: string[];
   groupCount: number;
   workNodeCount: number;
   completedCount: number;
@@ -113,6 +116,7 @@ export function storyboardFrameScopes(
       sourceNodeId,
       title: sourceNode.title || "分镜脚本",
       memberNodeIds: members.map((node) => node.id),
+      workNodeIds: workNodes.map((node) => node.id),
       groupCount: groups.length,
       workNodeCount: workNodes.length,
       completedCount: workNodes.filter(
@@ -125,6 +129,102 @@ export function storyboardFrameScopes(
     (left, right) =>
       left.bounds.y - right.bounds.y || left.bounds.x - right.bounds.x,
   );
+}
+
+export function storyboardFrameRunSummary(
+  scope: StoryboardFrameScope,
+  nodes: SpaceCanvasNode[],
+  hasResult: (node: SpaceCanvasNode) => boolean,
+) {
+  const nodesByID = new Map(nodes.map((node) => [node.id, node]));
+  const workNodes = scope.workNodeIds
+    .map((nodeId) => nodesByID.get(nodeId))
+    .filter((node): node is SpaceCanvasNode => Boolean(node));
+  const pendingNodeIDs = new Set(
+    workNodes
+      .filter((node) => node.storyboardItem?.stale || !hasResult(node))
+      .map((node) => node.id),
+  );
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of workNodes) {
+      if (
+        pendingNodeIDs.has(node.id) ||
+        node.storyboardItem?.itemType === "video_compose"
+      ) {
+        continue;
+      }
+      if (
+        storyboardDependencyNodeIds(node).some((nodeId) =>
+          pendingNodeIDs.has(nodeId),
+        )
+      ) {
+        pendingNodeIDs.add(node.id);
+        changed = true;
+      }
+    }
+  }
+
+  const composition = workNodes.find(
+    (node) => node.storyboardItem?.itemType === "video_compose",
+  );
+  if (pendingNodeIDs.size > 0 && composition) {
+    pendingNodeIDs.add(composition.id);
+  }
+  const pendingNodes = workNodes.filter((node) =>
+    pendingNodeIDs.has(node.id),
+  );
+  if (pendingNodes.length === 0) {
+    return { pendingNodeIds: [] as string[], blockedReason: "制作区已完成" };
+  }
+  const unavailable = pendingNodes.find(
+    (node) => !canvasNodeRunsInBackend(node),
+  );
+  if (unavailable) {
+    return {
+      pendingNodeIds: pendingNodes.map((node) => node.id),
+      blockedReason: `“${unavailable.title || "未命名节点"}”未配置可用能力`,
+    };
+  }
+  return {
+    pendingNodeIds: pendingNodes.map((node) => node.id),
+    blockedReason: storyboardRunBlockedReason({
+      targets: pendingNodes,
+      nodesByID,
+      hasResult,
+    }),
+  };
+}
+
+export function markStoryboardFrameResultsCurrent(
+  nodes: SpaceCanvasNode[],
+  sourceNodeId: string,
+  successfulNodeIds: ReadonlySet<string>,
+) {
+  let changed = false;
+  const next = nodes.map((node) => {
+    const item = node.storyboardItem;
+    if (
+      !item ||
+      item.sourceNodeId !== sourceNodeId ||
+      !successfulNodeIds.has(node.id)
+    ) {
+      return node;
+    }
+    changed = true;
+    return {
+      ...node,
+      storyboardItem: {
+        ...item,
+        resultSourceSignature:
+          item.sourceSignature || item.resultSourceSignature,
+        stale: false,
+      },
+    };
+  });
+  return changed ? next : nodes;
 }
 
 export function storyboardFrameDisplayBounds(
@@ -167,8 +267,15 @@ export function storyboardFrameMoveDelta(
   };
 }
 
-function storyboardFrameId(sourceNodeId: string) {
+export function storyboardFrameId(sourceNodeId: string) {
   return `storyboard-frame:${sourceNodeId}`;
+}
+
+function storyboardDependencyNodeIds(node: SpaceCanvasNode) {
+  return [
+    ...(node.storyboardItem?.dependencyNodeIds || []),
+    ...(node.storyboardItem?.referenceNodeIds || []),
+  ];
 }
 
 function storyboardSourceNodeIds(nodes: SpaceCanvasNode[]) {

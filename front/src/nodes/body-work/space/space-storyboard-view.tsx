@@ -24,8 +24,12 @@ import {
 } from "lucide-react";
 import {
   MIN_STORYBOARD_SHOT_DURATION,
+  STORYBOARD_ASPECT_RATIOS,
   STORYBOARD_MATERIAL_LABELS,
+  STORYBOARD_VISUAL_MODES,
+  STORYBOARD_VISUAL_MODE_LABELS,
   createStoryboardCaption,
+  createStoryboardMaterial,
   createStoryboardShot,
   createStoryboardSpeech,
   isStoryboardConfirmed,
@@ -33,14 +37,18 @@ import {
   normalizeStoryboardOrder,
   reconcileStoryboardContinuity,
   storyboardContentSummary,
+  storyboardMaterialUsage,
   storyboardSpeechCount,
   storyboardSubtitleCount,
   storyboardTotalDuration,
   storyboardVisibleSpeakerIds,
+  withStoryboardStylePrompt,
   type StoryboardDocument,
   type StoryboardCaption,
   type StoryboardCaptionType,
   type StoryboardMaterial,
+  type StoryboardMaterialType,
+  type StoryboardEditorFocus,
   type StoryboardReferenceField,
   type StoryboardShot,
   type StoryboardSpeech,
@@ -64,6 +72,8 @@ import {
 } from "./space-reference-editor";
 import { StoryboardShotCard } from "./space-storyboard-shot-card";
 import { StoryboardMaterialDialog } from "./space-storyboard-material-dialog";
+import { storyboardValidationIssues } from "./space-storyboard-validation";
+import { StoryboardValidationPanel } from "./space-storyboard-validation-panel";
 import { SpaceTooltip } from "./space-tooltip";
 import "./space.css";
 
@@ -85,6 +95,7 @@ export function StoryboardView({
   showSaveStatus = true,
   showMetrics = true,
   referenceItems = EMPTY_REFERENCE_ITEMS,
+  focus,
 }: {
   storyboard: StoryboardDocument;
   editable?: boolean;
@@ -98,6 +109,7 @@ export function StoryboardView({
   showSaveStatus?: boolean;
   showMetrics?: boolean;
   referenceItems?: ComposerAssetItem[];
+  focus?: StoryboardEditorFocus;
 }) {
   const externalSignature = useMemo(
     () => JSON.stringify(storyboard),
@@ -107,6 +119,8 @@ export function StoryboardView({
   const [saveStatus, setSaveStatus] = useState<StoryboardSaveStatus>("saved");
   const [editingShotId, setEditingShotId] = useState("");
   const [editingMaterialId, setEditingMaterialId] = useState("");
+  const [creatingMaterial, setCreatingMaterial] =
+    useState<StoryboardMaterial | null>(null);
   const [draggedShotId, setDraggedShotId] = useState("");
   const [dragOverShotId, setDragOverShotId] = useState("");
   const [dragOrder, setDragOrder] = useState<string[]>([]);
@@ -140,9 +154,20 @@ export function StoryboardView({
   const editingMaterial = draft.materials.find(
     (material) => material.id === editingMaterialId,
   );
+  const activeMaterial = editingMaterial || creatingMaterial;
+  const activeMaterialUsage = activeMaterial
+    ? storyboardMaterialUsage(draft, activeMaterial.id)
+    : undefined;
   const visibleShots = useMemo(
     () => orderItemsByIds(draft.shots, dragOrder, (shot) => shot.id),
     [draft.shots, dragOrder],
+  );
+  const validationIssues = useMemo(
+    () => storyboardValidationIssues(draft),
+    [draft],
+  );
+  const hasBlockingIssues = validationIssues.some(
+    (issue) => issue.severity === "error",
   );
 
   useEffect(() => {
@@ -238,6 +263,43 @@ export function StoryboardView({
       setEditingMaterialId("");
     }
   }, [editingMaterial, editingMaterialId]);
+
+  useEffect(() => {
+    if (!focus) {
+      return;
+    }
+    if (
+      focus.materialId &&
+      draft.materials.some((material) => material.id === focus.materialId)
+    ) {
+      setCreatingMaterial(null);
+      setEditingShotId("");
+      setEditingMaterialId(focus.materialId);
+      return;
+    }
+    if (focus.shotId && draft.shots.some((shot) => shot.id === focus.shotId)) {
+      setCreatingMaterial(null);
+      setEditingMaterialId("");
+      setEditingShotId(focus.shotId);
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const selector = focus.materialType
+        ? `[data-storyboard-material-type="${focus.materialType}"]`
+        : focus.section === "materials"
+          ? ".ws-storyboard-material-settings"
+          : ".ws-storyboard-grid";
+      storyboardRootRef.current
+        ?.querySelector<HTMLElement>(selector)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    focus?.materialId,
+    focus?.materialType,
+    focus?.section,
+    focus?.shotId,
+  ]);
 
   useEffect(() => {
     if (!canAutoSave || !dirtyRef.current || !onSave) {
@@ -414,13 +476,37 @@ export function StoryboardView({
   };
 
   const saveMaterial = (material: StoryboardMaterial) => {
+    updateDraft((current) => {
+      const exists = current.materials.some((item) => item.id === material.id);
+      return {
+        ...current,
+        materials: exists
+          ? current.materials.map((item) =>
+              item.id === material.id ? material : item,
+            )
+          : [...current.materials, material],
+      };
+    });
+    setEditingMaterialId("");
+    setCreatingMaterial(null);
+  };
+
+  const addMaterial = (type: StoryboardMaterialType) => {
+    setEditingMaterialId("");
+    setCreatingMaterial(createStoryboardMaterial(draft.materials, type));
+  };
+
+  const removeMaterial = (materialId: string) => {
+    const usage = storyboardMaterialUsage(draft, materialId);
+    if (usage.shotIds.length || usage.speechIds.length) {
+      return;
+    }
     updateDraft((current) => ({
       ...current,
-      materials: current.materials.map((item) =>
-        item.id === material.id ? material : item,
-      ),
+      materials: current.materials.filter((item) => item.id !== materialId),
     }));
     setEditingMaterialId("");
+    setCreatingMaterial(null);
   };
 
   const removeShot = (shotId: string) => {
@@ -478,26 +564,81 @@ export function StoryboardView({
       </section>
 
       <header className="ws-storyboard-toolbar">
-        <div className="ws-storyboard-style">
-          <strong>统一视觉风格</strong>
-          {canEdit ? (
-            <input
-              className="nodrag nopan"
-              value={draft.style_prompt}
-              placeholder="整部作品保持一致的画面风格"
-              disabled={disabled}
-              onChange={(event) =>
-                updateDraft((current) => ({
-                  ...current,
-                  style_prompt: event.target.value,
-                }))
-              }
-            />
-          ) : (
-            <SpaceTooltip label={draft.style_prompt}>
-              <span>{draft.style_prompt || "未设置统一视觉风格"}</span>
-            </SpaceTooltip>
-          )}
+        <div className="ws-storyboard-global-settings">
+          <label>
+            <strong>
+              <SpaceTooltip label="写实影像包含真人、摄影和超写实；非写实影像包含动画、插画、漫画、卡通 3D、水墨等">
+                <span>画面类型</span>
+              </SpaceTooltip>
+            </strong>
+            {canEdit ? (
+              <select
+                className="nodrag nopan"
+                value={draft.visual_mode}
+                disabled={disabled}
+                onChange={(event) =>
+                  updateDraft((current) => ({
+                    ...current,
+                    visual_mode: event.target
+                      .value as StoryboardDocument["visual_mode"],
+                  }))
+                }
+              >
+                {STORYBOARD_VISUAL_MODES.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {STORYBOARD_VISUAL_MODE_LABELS[mode]}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span>{STORYBOARD_VISUAL_MODE_LABELS[draft.visual_mode]}</span>
+            )}
+          </label>
+          <label>
+            <strong>画幅</strong>
+            {canEdit ? (
+              <select
+                className="nodrag nopan"
+                value={draft.aspect_ratio}
+                disabled={disabled}
+                onChange={(event) =>
+                  updateDraft((current) => ({
+                    ...current,
+                    aspect_ratio: event.target
+                      .value as StoryboardDocument["aspect_ratio"],
+                  }))
+                }
+              >
+                {STORYBOARD_ASPECT_RATIOS.map((ratio) => (
+                  <option key={ratio} value={ratio}>
+                    {ratio}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span>{draft.aspect_ratio}</span>
+            )}
+          </label>
+          <div className="ws-storyboard-style">
+            <strong>统一视觉风格</strong>
+            {canEdit ? (
+              <input
+                className="nodrag nopan"
+                value={draft.style_prompt}
+                placeholder="整部作品保持一致的画面风格"
+                disabled={disabled}
+                onChange={(event) =>
+                  updateDraft((current) =>
+                    withStoryboardStylePrompt(current, event.target.value),
+                  )
+                }
+              />
+            ) : (
+              <SpaceTooltip label={draft.style_prompt}>
+                <span>{draft.style_prompt || "未设置统一视觉风格"}</span>
+              </SpaceTooltip>
+            )}
+          </div>
         </div>
         <div className="ws-storyboard-toolbar-end">
           {showMetrics || (canEdit && showSaveStatus) ? (
@@ -549,8 +690,7 @@ export function StoryboardView({
               disabled={
                 disabled ||
                 Boolean(workflowAction) ||
-                !draft.summary.trim() ||
-                !draft.shots.length
+                hasBlockingIssues
               }
               onClick={() => void onConfirm(draft)}
             >
@@ -565,11 +705,31 @@ export function StoryboardView({
         </div>
       </header>
 
-      {draft.materials.length ? (
+      {draft.materials.length || canEdit ? (
         <StoryboardMaterialSettings
           materials={draft.materials}
           editable={canEdit}
           onOpen={setEditingMaterialId}
+          onCreate={addMaterial}
+        />
+      ) : null}
+
+      {canEdit && validationIssues.length ? (
+        <StoryboardValidationPanel
+          issues={validationIssues}
+          onOpen={(issue) => {
+            if (issue.materialId) {
+              setEditingShotId("");
+              setCreatingMaterial(null);
+              setEditingMaterialId(issue.materialId);
+              return;
+            }
+            if (issue.shotId) {
+              setEditingMaterialId("");
+              setCreatingMaterial(null);
+              setEditingShotId(issue.shotId);
+            }
+          }}
         />
       ) : null}
 
@@ -626,18 +786,27 @@ export function StoryboardView({
         />
       ) : null}
 
-      {editingMaterial ? (
+      {activeMaterial ? (
         <StoryboardMaterialDialog
-          key={editingMaterial.id}
-          material={editingMaterial}
+          key={`${creatingMaterial ? "create" : "edit"}:${activeMaterial.id}`}
+          material={activeMaterial}
+          creating={Boolean(creatingMaterial)}
           readonly={!canEdit}
+          usage={activeMaterialUsage}
+          existingNames={draft.materials
+            .filter((material) => material.id !== activeMaterial.id)
+            .map((material) => material.name)}
           portalContainer={
             storyboardRootRef.current?.closest(
               ".wb-detail-backdrop, .ws-page",
             ) || null
           }
           onSave={saveMaterial}
-          onClose={() => setEditingMaterialId("")}
+          onRemove={removeMaterial}
+          onClose={() => {
+            setEditingMaterialId("");
+            setCreatingMaterial(null);
+          }}
         />
       ) : null}
     </section>
@@ -648,15 +817,34 @@ function StoryboardMaterialSettings({
   materials,
   editable,
   onOpen,
+  onCreate,
 }: {
   materials: StoryboardMaterial[];
   editable: boolean;
   onOpen: (materialId: string) => void;
+  onCreate: (type: StoryboardMaterialType) => void;
 }) {
   return (
     <section className="ws-storyboard-material-settings" aria-label="素材设定">
-      <strong>素材设定</strong>
-      <div>
+      <header>
+        <strong>素材设定</strong>
+        {editable ? (
+          <div className="ws-storyboard-material-add-actions">
+            {(["character", "scene", "prop"] as const).map((type) => (
+              <button
+                key={type}
+                type="button"
+                className="nodrag nopan"
+                onClick={() => onCreate(type)}
+              >
+                <Plus size={11} />
+                {STORYBOARD_MATERIAL_LABELS[type]}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </header>
+      <div className="ws-storyboard-material-setting-list">
         {(["character", "scene", "prop"] as const).map((type) => {
           const typedMaterials = materials.filter(
             (material) => material.type === type,
@@ -665,7 +853,11 @@ function StoryboardMaterialSettings({
             return null;
           }
           return (
-            <div className="ws-storyboard-material-setting-group" key={type}>
+            <div
+              className="ws-storyboard-material-setting-group"
+              data-storyboard-material-type={type}
+              key={type}
+            >
               <span>{STORYBOARD_MATERIAL_LABELS[type]}</span>
               {typedMaterials.map((material) => (
                 <SpaceTooltip
@@ -685,6 +877,11 @@ function StoryboardMaterialSettings({
             </div>
           );
         })}
+        {!materials.length ? (
+          <span className="ws-storyboard-material-setting-empty">
+            暂无角色、场景或道具
+          </span>
+        ) : null}
       </div>
     </section>
   );

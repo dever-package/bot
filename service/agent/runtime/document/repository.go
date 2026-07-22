@@ -84,6 +84,13 @@ func (repository) updateBlock(ctx context.Context, id uint64, values map[string]
 	return agentmodel.NewDocumentBlockModel().Find(ctx, map[string]any{"id": id})
 }
 
+func (repository) findBlock(ctx context.Context, id uint64) *agentmodel.DocumentBlock {
+	if id == 0 {
+		return nil
+	}
+	return agentmodel.NewDocumentBlockModel().Find(ctx, map[string]any{"id": id})
+}
+
 func (repository) blockBySource(ctx context.Context, documentID uint64, sourceKey string) *agentmodel.DocumentBlock {
 	if documentID == 0 || strings.TrimSpace(sourceKey) == "" {
 		return nil

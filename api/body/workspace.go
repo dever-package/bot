@@ -51,13 +51,14 @@ func (Workspace) PostCanvasExecute(c *server.Context) error {
 	data, err := workspaceRunner.RunCanvas(
 		c.Context(),
 		projectservice.CanvasRunRequest{
-			ProjectID:   botapi.Uint64FromBody(body, "project_id", "projectId"),
-			AssetCateID: botapi.Uint64FromBody(body, "asset_cate_id", "assetCateId"),
-			StartNodeID: botapi.TextFromBody(body, "start_node_id", "startNodeId", "node_id", "nodeId"),
-			RequestID:   botapi.TextFromBody(body, "request_id", "requestId"),
-			SingleNode:  botapi.BoolFromBody(body, "single_node", "singleNode"),
-			Canvas:      botapi.MapFromBody(body, "canvas"),
-			Input:       botapi.MapFromBody(body, "input"),
+			ProjectID:      botapi.Uint64FromBody(body, "project_id", "projectId"),
+			AssetCateID:    botapi.Uint64FromBody(body, "asset_cate_id", "assetCateId"),
+			StartNodeID:    botapi.TextFromBody(body, "start_node_id", "startNodeId", "node_id", "nodeId"),
+			RequestID:      botapi.TextFromBody(body, "request_id", "requestId"),
+			SingleNode:     botapi.BoolFromBody(body, "single_node", "singleNode"),
+			ExecutionScope: botapi.TextFromBody(body, "execution_scope", "executionScope"),
+			Canvas:         botapi.MapFromBody(body, "canvas"),
+			Input:          botapi.MapFromBody(body, "input"),
 		},
 	)
 	return botapi.WriteJSON(c, data, err)

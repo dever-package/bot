@@ -49,6 +49,7 @@ import {
 import {
   isStoryboardConfirmed,
   type StoryboardDocument,
+  type StoryboardEditorFocus,
 } from "../space-storyboard";
 import {
   contentOutputMediaKinds,
@@ -61,6 +62,7 @@ export function NodeDetailDialog({
   assetCateId,
   node,
   canvasReferenceItems,
+  storyboardFocus,
   onNodeDraftChange,
   onRunNode,
   onAssetUpdated,
@@ -71,6 +73,7 @@ export function NodeDetailDialog({
   assetCateId: number;
   node: SpaceCanvasNode;
   canvasReferenceItems?: ComposerAssetItem[];
+  storyboardFocus?: StoryboardEditorFocus;
   onNodeDraftChange?: (draft: SpaceCanvasNode["composerDraft"]) => void;
   onRunNode?: (node: SpaceCanvasNode) => Promise<void>;
   onAssetUpdated?: (asset: ProjectAsset) => void;
@@ -779,6 +782,7 @@ export function NodeDetailDialog({
                   mediaPrompt={mediaPrompt}
                   readonly={editorReadonly}
                   referenceItems={canvasReferenceItems}
+                  storyboardFocus={storyboardFocus}
                   storyboardWorkflowAction={storyboardWorkflowAction}
                   onConfirmStoryboard={confirmStoryboard}
                   onCreateStoryboardRevision={createStoryboardRevision}

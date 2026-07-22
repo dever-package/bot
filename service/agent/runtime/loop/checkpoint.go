@@ -115,7 +115,7 @@ func initialCheckpoint(execution execution) runCheckpoint {
 		Seq:                     1,
 		Input:                   gatewayInput(execution.input),
 		AwaitingDelivery:        interactionResumed,
-		CompletionReviewPending: interactionResumed,
+		CompletionReviewPending: true,
 	}
 	checkpoint.KnowledgeUsed = execution.priorKnowledgeUsed
 	return checkpoint

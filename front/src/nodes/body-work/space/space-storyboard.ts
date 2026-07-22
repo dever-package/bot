@@ -10,6 +10,14 @@ export const STORYBOARD_VISUAL_MODES = ["photoreal", "stylized"] as const;
 export type StoryboardVisualMode =
   (typeof STORYBOARD_VISUAL_MODES)[number];
 
+export const STORYBOARD_VISUAL_MODE_LABELS: Record<
+  StoryboardVisualMode,
+  string
+> = {
+  photoreal: "写实影像",
+  stylized: "非写实影像",
+};
+
 export const STORYBOARD_ASPECT_RATIOS = [
   "16:9",
   "9:16",
@@ -39,6 +47,18 @@ export type StoryboardMaterial = Record<string, unknown> & {
   type: StoryboardMaterialType;
   name: string;
   prompt: string;
+};
+
+export type StoryboardMaterialUsage = {
+  shotIds: string[];
+  speechIds: string[];
+};
+
+export type StoryboardEditorFocus = {
+  section?: "materials" | "shots";
+  materialType?: StoryboardMaterialType;
+  materialId?: string;
+  shotId?: string;
 };
 
 export type StoryboardWorkflowStatus = "draft" | "confirmed";
@@ -180,6 +200,44 @@ export function createStoryboardShot(index: number): StoryboardShot {
     speech: [],
     captions: [],
   };
+}
+
+export function createStoryboardMaterial(
+  materials: StoryboardMaterial[],
+  type: StoryboardMaterialType,
+): StoryboardMaterial {
+  const usedIds = new Set(materials.map((material) => material.id));
+  let sequence = materials.filter((material) => material.type === type).length + 1;
+  let id = `${type}-${sequence}`;
+  while (usedIds.has(id)) {
+    sequence += 1;
+    id = `${type}-${sequence}`;
+  }
+  return {
+    id,
+    type,
+    name: "",
+    prompt: "",
+  };
+}
+
+export function storyboardMaterialUsage(
+  storyboard: StoryboardDocument,
+  materialId: string,
+): StoryboardMaterialUsage {
+  const shotIds: string[] = [];
+  const speechIds: string[] = [];
+  for (const shot of storyboard.shots) {
+    if (shot.material_ids.includes(materialId)) {
+      shotIds.push(shot.id);
+    }
+    for (const speech of shot.speech) {
+      if (speech.character_id === materialId) {
+        speechIds.push(speech.id);
+      }
+    }
+  }
+  return { shotIds, speechIds };
 }
 
 export function createStoryboardSpeech(
@@ -367,20 +425,81 @@ export function storyboardContentSummary(storyboard: StoryboardDocument) {
   );
 }
 
+export function withStoryboardStylePrompt(
+  storyboard: StoryboardDocument,
+  stylePrompt: string,
+): StoryboardDocument {
+  const previousStylePrompt = storyboard.style_prompt.trim();
+  const nextStoryboard = { ...storyboard, style_prompt: stylePrompt };
+  if (
+    !previousStylePrompt ||
+    previousStylePrompt === stylePrompt.trim()
+  ) {
+    return nextStoryboard;
+  }
+  return {
+    ...nextStoryboard,
+    materials: storyboard.materials.map((material) => ({
+      ...material,
+      prompt: withoutStoryboardStyleClause(
+        material.prompt,
+        previousStylePrompt,
+      ),
+    })),
+    shots: storyboard.shots.map((shot) => ({
+      ...shot,
+      video_prompt: withoutStoryboardStyleClause(
+        shot.video_prompt,
+        previousStylePrompt,
+      ),
+    })),
+  };
+}
+
 export function storyboardPromptWithStyle(
   storyboard: StoryboardDocument,
   prompt: string,
 ) {
-  const basePrompt = prompt.trim();
+  const visualModePrompt =
+    storyboard.visual_mode === "photoreal"
+      ? "画面类型：写实影像，人物五官、身体比例、光线和材质保持真实自然"
+      : "画面类型：非写实影像，保持统一造型语言，不得漂移为真人摄影";
+  let basePrompt = appendStoryboardPromptClause(prompt.trim(), visualModePrompt);
   const stylePrompt = storyboard.style_prompt.trim();
-  if (!stylePrompt || basePrompt.includes(stylePrompt)) {
+  if (!stylePrompt) {
     return basePrompt;
   }
-  if (!basePrompt) {
-    return `统一视觉风格：${stylePrompt}`;
+  const styleClause = `统一视觉风格：${stylePrompt}`;
+  basePrompt = appendStoryboardPromptClause(basePrompt, styleClause);
+  return basePrompt;
+}
+
+function withoutStoryboardStyleClause(prompt: string, stylePrompt: string) {
+  const clause = `统一视觉风格：${stylePrompt}`;
+  const normalizedPrompt = prompt
+    .trimEnd()
+    .replace(/[。！？!?；;，,\s]+$/g, "");
+  if (!normalizedPrompt.endsWith(clause)) {
+    return prompt;
   }
-  const separator = /[。！？!?；;，,：:]$/.test(basePrompt) ? "" : "。";
-  return `${basePrompt}${separator}统一视觉风格：${stylePrompt}`;
+  return normalizedPrompt
+    .slice(0, -clause.length)
+    .replace(/[。！？!?；;，,：:\s]+$/g, "")
+    .trimEnd();
+}
+
+function appendStoryboardPromptClause(
+  prompt: string,
+  clause: string,
+) {
+  if (!clause || prompt.includes(clause)) {
+    return prompt;
+  }
+  if (!prompt) {
+    return clause;
+  }
+  const separator = /[。！？!?；;，,：:]$/.test(prompt) ? "" : "。";
+  return `${prompt}${separator}${clause}`;
 }
 
 export function normalizeStoryboardAspectRatio(

@@ -13,10 +13,15 @@ import (
 )
 
 const (
-	completionReviewToolName  = "submit_completion_review"
-	completionReviewTimeout   = 8 * time.Second
-	completionReviewMaxTokens = 512
-	maxCompletionReviews      = 1
+	completionReviewToolName           = "submit_completion_review"
+	completionReviewTimeout            = 8 * time.Second
+	completionReviewMaxTokens          = 512
+	completionReviewGoalMaxTokens      = 2000
+	completionReviewCandidateMaxTokens = 8000
+	completionReviewOutputMaxTokens    = 2000
+	completionReviewHistoryMaxTokens   = 8000
+	completionReviewPriorHistoryGroups = 4
+	maxCompletionReviews               = 1
 )
 
 type completionReview struct {
@@ -78,21 +83,19 @@ func (s Service) inspectCompletion(
 	reviewExecution.billing.Billable = false
 	reviewExecution.billing.ChargeID = 0
 	reviewInput := map[string]any{
-		"goal":             compactModelValue(state.execution.input, 4000),
+		"goal":             compactModelValue(state.execution.input, completionReviewGoalMaxTokens),
 		"candidate_text":   completionCandidateText(state, result),
-		"candidate_output": compactModelValue(result.Output, 4000),
+		"candidate_output": compactModelValue(result.Output, completionReviewOutputMaxTokens),
 		"runtime_state": map[string]any{
 			"model_step":        state.modelStep,
 			"tool_receipts":     len(state.toolReceipts),
 			"knowledge_used":    state.knowledgeUsed,
 			"document_id":       state.documentID,
 			"awaiting_delivery": state.awaitingDelivery,
+			"available_tools":   state.execution.registry.Names(),
 		},
 	}
-	reviewHistory := append([]any(nil), state.history...)
-	if state.modelStep == 1 {
-		reviewHistory = append(reviewHistory, userHistoryMessage(state.execution.input))
-	}
+	reviewHistory := completionReviewHistory(state)
 	reviewCtx, cancel := operationContext(ctx, completionReviewTimeout)
 	defer cancel()
 	reviewResult, err := s.callModelRequestWithRole(
@@ -131,9 +134,33 @@ func (s Service) inspectCompletion(
 
 func completionCandidateText(state *runState, result modelStepResult) string {
 	if state != nil && strings.TrimSpace(state.lastText) != "" {
-		return compactModelString(state.lastText, 12000)
+		return compactModelString(state.lastText, completionReviewCandidateMaxTokens)
 	}
-	return compactModelString(result.Text, 12000)
+	return compactModelString(result.Text, completionReviewCandidateMaxTokens)
+}
+
+func completionReviewHistory(state *runState) []any {
+	if state == nil {
+		return nil
+	}
+	// Tool stops only need the current run. Interaction resumes have no current
+	// run history yet, so retain a bounded tail containing the prior form context.
+	priorHistory, currentRunHistory := splitCurrentRunHistory(state.execution, state.history)
+	selected := append([]any(nil), currentRunHistory...)
+	if len(selected) == 0 {
+		groups := historyMessageGroups(priorHistory, emergencyHistoryStringMaxTokens)
+		start := len(groups) - completionReviewPriorHistoryGroups
+		if start < 0 {
+			start = 0
+		}
+		for _, group := range groups[start:] {
+			selected = append(selected, group...)
+		}
+		if state.modelStep == 1 {
+			selected = append(selected, userHistoryMessage(state.execution.input))
+		}
+	}
+	return compactHistoryGroupToBudget(selected, completionReviewHistoryMaxTokens)
 }
 
 func resolveCompletionReview(delivery string, missing string, interaction string) (completionReview, error) {
@@ -169,13 +196,13 @@ func resolveCompletionReview(delivery string, missing string, interaction string
 func completionReviewTool() map[string]any {
 	return botprotocol.FunctionToolDefinition(
 		completionReviewToolName,
-		"分别判断候选响应是否已经交付当前要求，以及是否仍需要结构化用户交互。两个结论相互独立，只依据完整语义和结构化结果，不使用固定词语、句式或正文格式作为判断规则。",
+		"分别判断候选响应是否已经实际交付当前要求，以及是否仍需要结构化用户交互。判断必须同时服从智能体设定和用户当前要求：智能体设定已定义固定业务目标时，问候或模糊输入不解除该目标；只有没有固定业务目标的普通问候、闲聊或完整回答才可直接完成。计划、预告或要求用户继续输入不能代替交付。不使用固定词语、句式或正文格式作判断。",
 		map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"delivery": map[string]any{
 					"type":        "string",
-					"description": "当前用户要求已实际交付为 complete；仍有未交付内容为 incomplete",
+					"description": "智能体固定业务目标、用户当前要求及其明确输出形式均已实际交付为 complete；只给计划、承诺、进度，或尚未进入固定业务目标时为 incomplete。没有固定业务目标的普通聊天不因自然追问而视为未完成",
 					"enum":        []any{"complete", "incomplete"},
 				},
 				"missing": map[string]any{
@@ -183,7 +210,7 @@ func completionReviewTool() map[string]any {
 				},
 				"interaction": map[string]any{
 					"type":        "string",
-					"description": "缺少完成任务所必需的用户信息时为 ask_user；任务已完成且候选响应提供可供用户选择的后续方向时为 present_suggestions；无需结构化交互时为 none",
+					"description": "完成任务依赖用户补充、确认、选择或上传信息，而候选只在正文中索要这些信息时为 ask_user；任务已完成且候选响应提供可供用户选择的后续方向时为 present_suggestions；无需结构化交互时为 none",
 					"enum":        []any{"none", runtimeprovider.AskUserToolName, runtimeprovider.PresentSuggestionsToolName},
 				},
 			},

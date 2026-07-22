@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -8,7 +9,7 @@ import (
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
-func validateTerminalCall(state *runState, call botprotocol.ToolCall) error {
+func validateTerminalCall(ctx context.Context, state *runState, call botprotocol.ToolCall) error {
 	if state == nil {
 		return nil
 	}
@@ -18,14 +19,20 @@ func validateTerminalCall(state *runState, call botprotocol.ToolCall) error {
 	}
 	switch name {
 	case runtimeprovider.AskUserToolName:
+		if state.documentID > 0 {
+			return fmt.Errorf("图文文档已开始生成，不能在文档中途等待用户补充信息")
+		}
 		return nil
 	case runtimeprovider.SkillInstallPlanToolName:
 		return nil
 	case runtimeprovider.PresentSuggestionsToolName:
-		if state.documentID > 0 {
-			return fmt.Errorf("当前任务已经进入图文模式，请完成图文文档后再结束")
+		if state.documentID > 0 && !documentHasText(ctx, state.documentID) {
+			return fmt.Errorf("图文正文尚未生成，不能先展示后续建议")
 		}
 	case runtimeprovider.ComposeDocumentToolName:
+		if state.documentID > 0 {
+			return fmt.Errorf("当前运行已经开始生成图文文档")
+		}
 	default:
 		return nil
 	}
@@ -36,7 +43,6 @@ func isTerminalToolName(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case runtimeprovider.AskUserToolName,
 		runtimeprovider.PresentSuggestionsToolName,
-		runtimeprovider.ComposeDocumentToolName,
 		runtimeprovider.SkillInstallPlanToolName:
 		return true
 	default:

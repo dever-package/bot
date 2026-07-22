@@ -88,9 +88,8 @@ func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
 	}
 
 	warnings := mountPowerTools(request, registry, prepared.powerCandidates)
-	artifactTools := registry.DefinitionsByKind("image", "video", "audio", "file")
-	if request.EnableDocument && len(artifactTools) > 0 {
-		if err := registry.Add(runtimeprovider.ComposeDocumentTool(artifactTools)); err != nil {
+	if request.EnableDocument {
+		if err := registry.Add(runtimeprovider.ComposeDocumentTool()); err != nil {
 			result.Close()
 			return MountResult{}, err
 		}

@@ -15,15 +15,16 @@ import {
 import { getCompatModule } from "@dever/front-plugin";
 import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "../clipboard";
-import { StreamingMarkdown } from "./markdown";
+import { AgentChatMarkdown, StreamingMarkdown } from "./markdown";
 import { AgentChatActivityView } from "./activity-view";
 import type { AgentChatActivity } from "./activity";
 import { AgentChatMessageOutput } from "./message-output";
-import { AgentChatDocumentView } from "./document-view";
+import { AgentChatDocumentEntry } from "./document-pane";
 import { AgentChatTooltip } from "./tooltip";
 import { AgentChatArtifactActionsProvider } from "./artifact-actions";
 import { readAgentChatArtifacts } from "./artifact";
 import {
+  agentChatDocumentIntro,
   agentChatDocumentCopyText,
   isAgentChatDocumentPending,
   type AgentChatDocument,
@@ -77,6 +78,7 @@ export function Thread({
   onUploadedFiles,
   renderMessageActions,
   renderArtifactActions,
+  onOpenDocument,
   referenceProviders = [],
 }: {
   controller: AgentChatController;
@@ -91,6 +93,7 @@ export function Thread({
     message: AgentChatMessageActionContext,
   ) => ReactNode;
   renderArtifactActions?: AgentChatArtifactActionRenderer;
+  onOpenDocument: (document: AgentChatDocument) => void;
   referenceProviders?: ReferenceProvider[];
 }) {
   const providers = [
@@ -151,6 +154,7 @@ export function Thread({
                       loadPreview={loadPreview}
                       renderMessageActions={renderMessageActions}
                       renderArtifactActions={renderArtifactActions}
+                      onOpenDocument={onOpenDocument}
                     />
                   )}
                 </ThreadPrimitive.Messages>
@@ -202,6 +206,7 @@ function Message({
   loadPreview,
   renderMessageActions,
   renderArtifactActions,
+  onOpenDocument,
 }: {
   controller: AgentChatController;
   loadPreview: ReferencePreviewLoader;
@@ -209,6 +214,7 @@ function Message({
     message: AgentChatMessageActionContext,
   ) => ReactNode;
   renderArtifactActions?: AgentChatArtifactActionRenderer;
+  onOpenDocument: (document: AgentChatDocument) => void;
 }) {
   const role = useAuiState((state) => state.message.role);
   return role === "user" ? (
@@ -223,6 +229,7 @@ function Message({
       loadPreview={loadPreview}
       renderMessageActions={renderMessageActions}
       renderArtifactActions={renderArtifactActions}
+      onOpenDocument={onOpenDocument}
     />
   );
 }
@@ -267,6 +274,7 @@ function AssistantMessage({
   loadPreview: _loadPreview,
   renderMessageActions,
   renderArtifactActions,
+  onOpenDocument,
 }: {
   controller: AgentChatController;
   loadPreview: ReferencePreviewLoader;
@@ -274,6 +282,7 @@ function AssistantMessage({
     message: AgentChatMessageActionContext,
   ) => ReactNode;
   renderArtifactActions?: AgentChatArtifactActionRenderer;
+  onOpenDocument: (document: AgentChatDocument) => void;
 }) {
   const status = useAuiState((state) => state.message.status);
   const output = useAuiState((state) => state.message.metadata.custom?.output);
@@ -286,6 +295,7 @@ function AssistantMessage({
   const document = useAuiState(
     (state) => state.message.metadata.custom?.document,
   ) as AgentChatDocument | undefined;
+  const documentIntro = agentChatDocumentIntro(document);
   const recordID = Number(
     useAuiState((state) => state.message.metadata.custom?.recordID) || 0,
   );
@@ -313,12 +323,15 @@ function AssistantMessage({
         render={renderArtifactActions}
       >
         {document ? (
-          <AgentChatDocumentView
-            document={document}
-            sourceText={typeof sourceText === "string" ? sourceText : ""}
-            running={status?.type === "running"}
-            error={error}
-          />
+          <>
+            {documentIntro ? (
+              <AgentChatMarkdown text={documentIntro} error={error} />
+            ) : null}
+            <AgentChatDocumentEntry
+              document={document}
+              onOpen={onOpenDocument}
+            />
+          </>
         ) : (
           <>
             <MessagePrimitive.Parts>

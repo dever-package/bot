@@ -9,6 +9,45 @@ type CanvasNodeRunState = {
 
 type CanvasNodeRunner = (node: SpaceCanvasNode) => Promise<void>;
 
+export function storyboardRunBlockedReason({
+  targets,
+  nodesByID,
+  hasResult,
+}: {
+  targets: SpaceCanvasNode[];
+  nodesByID: Map<string, SpaceCanvasNode>;
+  hasResult: (node: SpaceCanvasNode) => boolean;
+}) {
+  const scheduledNodeIDs = new Set(targets.map((node) => node.id));
+  for (const target of targets) {
+    const metadata = target.storyboardItem;
+    if (!metadata) {
+      continue;
+    }
+    const sourceNodeIDs = new Set([
+      ...(metadata.dependencyNodeIds || []),
+      ...(metadata.referenceNodeIds || []),
+    ]);
+    for (const sourceNodeID of sourceNodeIDs) {
+      if (scheduledNodeIDs.has(sourceNodeID)) {
+        continue;
+      }
+      const sourceNode = nodesByID.get(sourceNodeID);
+      if (!sourceNode) {
+        return "前置素材节点不存在，请重新同步分镜脚本";
+      }
+      const sourceTitle = sourceNode.title || "未命名素材";
+      if (sourceNode.storyboardItem?.stale) {
+        return `请先更新前置素材“${sourceTitle}”`;
+      }
+      if (!hasResult(sourceNode)) {
+        return `请先生成前置素材“${sourceTitle}”`;
+      }
+    }
+  }
+  return "";
+}
+
 export function summarizeCanvasGroupRuntime({
   members,
   runningNodes,

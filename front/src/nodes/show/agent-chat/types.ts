@@ -25,6 +25,7 @@ export type ChatMessage = {
   running?: boolean;
   error?: boolean;
   document?: AgentChatDocument;
+  autoOpenDocument?: boolean;
 };
 
 export type AgentChatMessageActionContext = {

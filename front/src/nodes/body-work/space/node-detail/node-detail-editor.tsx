@@ -5,7 +5,10 @@ import {
   StoryboardView,
   type StoryboardWorkflowAction,
 } from "../space-storyboard-view";
-import type { StoryboardDocument } from "../space-storyboard";
+import type {
+  StoryboardDocument,
+  StoryboardEditorFocus,
+} from "../space-storyboard";
 import type { ComposerAssetItem } from "../space-prompt-composer";
 import {
   CanvasNodeContentView,
@@ -40,6 +43,7 @@ export function NodeDetailEditor({
   mediaPrompt,
   readonly,
   referenceItems,
+  storyboardFocus,
   storyboardWorkflowAction,
   onConfirmStoryboard,
   onCreateStoryboardRevision,
@@ -51,6 +55,7 @@ export function NodeDetailEditor({
   mediaPrompt?: string;
   readonly: boolean;
   referenceItems?: ComposerAssetItem[];
+  storyboardFocus?: StoryboardEditorFocus;
   storyboardWorkflowAction?: StoryboardWorkflowAction;
   onConfirmStoryboard?: (
     storyboard: StoryboardDocument,
@@ -84,6 +89,7 @@ export function NodeDetailEditor({
           storyboard={content.value as StoryboardDocument}
           editable={!readonly}
           referenceItems={referenceItems}
+          focus={storyboardFocus}
           workflowAction={storyboardWorkflowAction}
           onConfirm={onConfirmStoryboard}
           onCreateRevision={onCreateStoryboardRevision}

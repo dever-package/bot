@@ -1,4 +1,11 @@
-import { ChevronDown, ChevronUp, Clapperboard, Focus } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Clapperboard,
+  Focus,
+  Loader2,
+  Play,
+} from "lucide-react";
 import type { MouseEvent } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { SpaceTooltip } from "./space-tooltip";
@@ -9,7 +16,10 @@ export type StoryboardFrameNodeData = {
   groupCount: number;
   workNodeCount: number;
   completedCount: number;
+  running: boolean;
+  runBlockedReason: string;
   collapsed: boolean;
+  onRun: () => void;
   onFocus: () => void;
   onToggleCollapsed: () => void;
 };
@@ -30,6 +40,27 @@ export function StoryboardFrameNode({ data }: NodeProps<any>) {
           {frame.groupCount} 组 · {frame.completedCount}/{frame.workNodeCount}{" "}
           完成
         </span>
+        <SpaceTooltip
+          label={
+            frame.running
+              ? "制作区正在执行"
+              : frame.runBlockedReason || "按依赖顺序执行制作区"
+          }
+        >
+          <button
+            type="button"
+            className="nodrag nopan ws-storyboard-frame-run"
+            aria-label="执行制作区"
+            disabled={frame.running || Boolean(frame.runBlockedReason)}
+            onClick={stopAnd(frame.onRun)}
+          >
+            {frame.running ? (
+              <Loader2 size={14} className="ws-spin" />
+            ) : (
+              <Play size={14} fill="currentColor" />
+            )}
+          </button>
+        </SpaceTooltip>
         <SpaceTooltip label="聚焦制作区">
           <button
             type="button"

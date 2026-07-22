@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	assetmodel "github.com/dever-package/bot/model/asset"
 	teammodel "github.com/dever-package/bot/model/team"
@@ -109,9 +110,13 @@ func (s WorkspaceService) SyncCanvasRunProgress(ctx context.Context, projectID u
 	if !workspaceRunCanSyncProgress(run) {
 		return run
 	}
+	now := time.Now()
+	if workspaceRunLeaseAlive(run, now) || !workspaceRunExecutionOrphaned(run, now) {
+		return run
+	}
 	_, _ = withWorkspaceRunLock(ctx, run.ProjectID, run.ID, func() (struct{}, error) {
-		if refreshed := teammodel.NewRunModel().Find(ctx, map[string]any{"id": run.ID}); workspaceRunCanSyncProgress(refreshed) {
-			s.refreshWorkspaceRun(ctx, refreshed)
+		if refreshed := teammodel.NewRunModel().Find(ctx, map[string]any{"id": run.ID}); workspaceRunExecutionOrphaned(refreshed, time.Now()) {
+			s.failInterruptedWorkspaceRun(ctx, refreshed)
 		}
 		return struct{}{}, nil
 	})
@@ -441,7 +446,8 @@ func (s WorkspaceService) finishWorkspaceRunFromNodeResults(ctx context.Context,
 	}
 	if input != nil {
 		output["asset_cate_id"] = uint64Value(input["_asset_cate_id"])
-		output["start_node_id"] = strings.TrimSpace(textValue(input["_start_node_id"]))
+		output["start_node_id"] = workspaceRunDisplayStartNodeID(input)
+		output["execution_scope"] = strings.TrimSpace(textValue(input["_execution_scope"]))
 	}
 	errorText := workspaceRunErrorFromNodeResults(nodeResults)
 	finishWorkspaceRun(ctx, run.ID, status, output, errorText)

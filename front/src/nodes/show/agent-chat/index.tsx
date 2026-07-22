@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -24,6 +25,8 @@ import { RuntimeProvider } from "./provider";
 import { Sidebar } from "./sidebar";
 import { useAgentChatStore } from "./store";
 import { Thread } from "./thread";
+import { AgentChatDocumentPane } from "./document-pane";
+import type { AgentChatDocument } from "./document";
 import {
   AgentChatMediaInspector,
   AgentChatMediaPreviewProvider,
@@ -209,6 +212,21 @@ export function AgentChatPanel({
     mediaInspector.request?.kind !== "audio" &&
     mediaInspector.request?.kind !== "file";
   const [mobilePane, setMobilePane] = useState<"sessions" | "chat">("chat");
+  const chatLayerRef = useRef<HTMLDivElement>(null);
+  const [activeDocumentID, setActiveDocumentID] = useState(0);
+  const [documentPaneOpen, setDocumentPaneOpen] = useState(false);
+  const autoOpenedDocumentsRef = useRef(new Set<string>());
+  const activeDocumentMessage = useMemo(
+    () =>
+      controller.messages.find(
+        (message) => message.document?.id === activeDocumentID,
+      ),
+    [activeDocumentID, controller.messages],
+  );
+  const activeDocument = activeDocumentMessage?.document;
+  const documentPaneVisible = Boolean(
+    documentPaneOpen && activeDocument && !dockedMediaInspector,
+  );
 
   useEffect(() => {
     mediaInspector.closePreview();
@@ -217,6 +235,34 @@ export function AgentChatPanel({
   useEffect(() => {
     setMobilePane("chat");
   }, [agentKey, contextKey, mobileSessionNavigation]);
+
+  useEffect(() => {
+    setActiveDocumentID(0);
+    setDocumentPaneOpen(false);
+  }, [agentKey, contextKey, controller.sessionID]);
+
+  useEffect(() => {
+    autoOpenedDocumentsRef.current.clear();
+  }, [agentKey, contextKey]);
+
+  useEffect(() => {
+    const message = [...controller.messages]
+      .reverse()
+      .find((current) => current.autoOpenDocument && current.document);
+    const documentID = message?.document?.id || 0;
+    const documentKey = `${controller.sessionID}:${documentID}`;
+    if (!documentID || autoOpenedDocumentsRef.current.has(documentKey)) {
+      return;
+    }
+    autoOpenedDocumentsRef.current.add(documentKey);
+    setActiveDocumentID(documentID);
+    setDocumentPaneOpen(true);
+  }, [controller.messages, controller.sessionID]);
+
+  const openDocument = useCallback((document: AgentChatDocument) => {
+    setActiveDocumentID(document.id);
+    setDocumentPaneOpen(true);
+  }, []);
 
   const openMobileSession = useCallback(
     async (sessionID: number) => {
@@ -237,6 +283,7 @@ export function AgentChatPanel({
   const chatContent = (
     <AgentChatMediaPreviewProvider controller={mediaInspector}>
       <div
+        ref={chatLayerRef}
         data-agent-chat-layer="true"
         data-agent-chat-appearance={appearance}
         data-media-inspector-open={dockedMediaInspector ? "true" : undefined}
@@ -244,9 +291,7 @@ export function AgentChatPanel({
           "relative flex min-h-0 w-full flex-col overflow-hidden bg-background md:flex-row",
           fullScreen ? "h-full flex-1" : "border-y",
         )}
-        style={
-          fullScreen ? undefined : { height, minHeight }
-        }
+        style={fullScreen ? undefined : { height, minHeight }}
       >
         <Sidebar
           agentName={agentName}
@@ -338,9 +383,23 @@ export function AgentChatPanel({
               referenceProviders={referenceProviders}
               renderMessageActions={renderMessageActions}
               renderArtifactActions={renderArtifactActions}
+              onOpenDocument={openDocument}
             />
           </RuntimeProvider>
         </section>
+
+        {activeDocument ? (
+          <AgentChatDocumentPane
+            open={documentPaneVisible}
+            portalContainer={chatLayerRef.current}
+            document={activeDocument}
+            messageID={activeDocumentMessage?.recordID || 0}
+            running={Boolean(activeDocumentMessage?.running)}
+            error={Boolean(activeDocumentMessage?.error)}
+            renderArtifactActions={renderArtifactActions}
+            onClose={() => setDocumentPaneOpen(false)}
+          />
+        ) : null}
 
         <AgentChatMediaInspector
           controller={mediaInspector}

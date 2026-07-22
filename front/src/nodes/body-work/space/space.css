@@ -5667,6 +5667,18 @@
   font-family: inherit;
 }
 
+.ws-page
+  input:not([type="button"]):not([type="submit"]):not([type="reset"]):not(
+    [type="checkbox"]
+  ):not([type="radio"]):not([type="range"]):not([type="file"]):not(
+    [type="color"]
+  ):not(:disabled),
+.ws-page textarea:not(:disabled),
+.ws-page [contenteditable="true"],
+.ws-page [role="textbox"]:not([aria-disabled="true"]) {
+  cursor: text;
+}
+
 .ws-glass-panel,
 .ws-page.is-light .ws-glass-panel {
   background: var(--ws-card) !important;
@@ -6447,6 +6459,19 @@
   padding: 1px 5px;
   background: rgba(217, 119, 6, 0.12);
   color: #b45309;
+  font-size: 9px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ws-node-prompt-override-badge {
+  display: inline-flex;
+  min-height: 18px;
+  align-items: center;
+  border-radius: 4px;
+  background: rgba(68, 98, 82, 0.1);
+  color: var(--ws-accent-text);
+  padding: 1px 5px;
   font-size: 9px;
   font-weight: 600;
   white-space: nowrap;
@@ -7585,7 +7610,7 @@
   box-sizing: border-box;
   width: min(520px, 100%);
   height: 44px;
-  grid-template-columns: 26px minmax(0, 1fr) auto 28px 28px;
+  grid-template-columns: 26px minmax(0, 1fr) auto 28px 28px 28px;
   align-items: center;
   gap: 7px;
   border-bottom: 1px solid rgba(93, 123, 108, 0.18);
@@ -7659,6 +7684,16 @@
   color: #bbf7d0;
 }
 
+.ws-storyboard-frame-header button:disabled {
+  background: transparent;
+  color: rgba(220, 252, 231, 0.32);
+  cursor: not-allowed;
+}
+
+.ws-storyboard-frame-header .ws-storyboard-frame-run:not(:disabled) {
+  color: #bbf7d0;
+}
+
 .ws-storyboard-frame-surface {
   position: absolute;
   inset: 44px 0 0;
@@ -7705,6 +7740,17 @@
 
 .ws-page.is-light .ws-storyboard-frame-header button:hover {
   background: rgba(22, 101, 52, 0.07);
+  color: #166534;
+}
+
+.ws-page.is-light .ws-storyboard-frame-header button:disabled {
+  background: transparent;
+  color: rgba(23, 60, 43, 0.3);
+}
+
+.ws-page.is-light
+  .ws-storyboard-frame-header
+  .ws-storyboard-frame-run:not(:disabled) {
   color: #166534;
 }
 
@@ -9022,10 +9068,61 @@
   padding: 0 1px 11px;
 }
 
+.ws-storyboard-global-settings {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 560px;
+  align-items: center;
+  gap: 10px;
+}
+
+.ws-storyboard-global-settings > label {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.ws-storyboard-global-settings > label > strong {
+  color: var(--ws-accent-muted);
+  font-size: 9.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.ws-storyboard-global-settings > label > select {
+  height: 30px;
+  border: 1px solid var(--ws-border-soft);
+  border-radius: 4px;
+  outline: 0;
+  background: var(--ws-card);
+  color: var(--ws-text-strong);
+  padding: 0 25px 0 8px;
+  font: inherit;
+  font-size: 10px;
+}
+
+.ws-storyboard-global-settings > label > select:focus {
+  border-color: var(--ws-accent-border);
+  box-shadow: 0 0 0 2px rgba(145, 167, 154, 0.12);
+}
+
+.ws-storyboard-global-settings > label > span {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  border-radius: 3px;
+  background: var(--ws-surface-raised);
+  color: var(--ws-text-secondary);
+  padding: 0 7px;
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+
 .ws-storyboard-style {
   display: flex;
   min-width: 0;
-  flex: 1 1 420px;
+  flex: 1 1 320px;
   align-items: center;
   gap: 8px;
 }
@@ -9073,7 +9170,13 @@
   padding: 0 1px 12px;
 }
 
-.ws-storyboard-material-settings > strong {
+.ws-storyboard-material-settings > header {
+  display: grid;
+  flex: none;
+  gap: 5px;
+}
+
+.ws-storyboard-material-settings > header > strong {
   flex: none;
   color: var(--ws-accent-muted);
   font-size: 9.5px;
@@ -9082,12 +9185,44 @@
   white-space: nowrap;
 }
 
-.ws-storyboard-material-settings > div {
+.ws-storyboard-material-setting-list {
   display: flex;
   min-width: 0;
   flex: 1 1 auto;
   flex-wrap: wrap;
   gap: 7px 14px;
+}
+
+.ws-storyboard-material-add-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.ws-storyboard-material-add-actions > button {
+  display: inline-flex;
+  height: 23px;
+  align-items: center;
+  gap: 3px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--ws-text-secondary);
+  padding: 0 5px;
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.ws-storyboard-material-add-actions > button:hover {
+  background: var(--ws-surface-hover);
+  color: var(--ws-accent-text);
+}
+
+.ws-storyboard-material-setting-empty {
+  color: var(--ws-text-subtle);
+  font-size: 9.5px;
+  line-height: 26px;
 }
 
 .ws-storyboard-material-setting-group {
@@ -9135,6 +9270,77 @@
 
 .ws-storyboard-material-setting-group > button > svg {
   flex: none;
+}
+
+.ws-storyboard-validation {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  margin-bottom: 14px;
+  border-left: 2px solid #d58a28;
+  background: rgba(213, 138, 40, 0.07);
+  padding: 9px 11px;
+}
+
+.ws-storyboard-validation.is-error {
+  border-left-color: #be3450;
+  background: rgba(190, 52, 80, 0.06);
+}
+
+.ws-storyboard-validation > header {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #9c631d;
+  line-height: 25px;
+  white-space: nowrap;
+}
+
+.ws-storyboard-validation.is-error > header {
+  color: #be3450;
+}
+
+.ws-storyboard-validation > header strong {
+  font-size: 10px;
+}
+
+.ws-storyboard-validation > header span {
+  color: var(--ws-text-subtle);
+  font-size: 9px;
+}
+
+.ws-storyboard-validation > div {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.ws-storyboard-validation > div > button {
+  max-width: min(100%, 330px);
+  height: 25px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 3px;
+  background: var(--ws-card);
+  color: var(--ws-text-secondary);
+  padding: 0 8px;
+  font: inherit;
+  font-size: 9.5px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ws-storyboard-validation > div > button:not(:disabled):hover {
+  background: var(--ws-surface-hover);
+  color: var(--ws-text-strong);
+}
+
+.ws-storyboard-validation > div > button:disabled {
+  cursor: default;
 }
 
 .ws-storyboard-toolbar-meta {
@@ -10435,10 +10641,10 @@
   font-weight: 650;
 }
 
+.ws-storyboard-material-form input,
 .ws-storyboard-material-form textarea {
+  box-sizing: border-box;
   width: 100%;
-  min-height: 190px;
-  resize: vertical;
   border: 1px solid var(--ws-border-soft);
   border-radius: 5px;
   outline: 0;
@@ -10449,14 +10655,64 @@
   line-height: 1.65;
 }
 
+.ws-storyboard-material-form input {
+  height: 38px;
+}
+
+.ws-storyboard-material-form textarea {
+  min-height: 170px;
+  resize: vertical;
+}
+
+.ws-storyboard-material-form input:not([readonly]):focus,
 .ws-storyboard-material-form textarea:not([readonly]):focus {
   border-color: var(--ws-accent-border);
   box-shadow: 0 0 0 2px rgba(145, 167, 154, 0.12);
 }
 
+.ws-storyboard-material-form input[readonly],
 .ws-storyboard-material-form textarea[readonly] {
   background: var(--ws-surface-raised);
   color: var(--ws-text-secondary);
+}
+
+.ws-storyboard-material-form > label + label {
+  margin-top: 15px;
+}
+
+.ws-storyboard-material-usage {
+  display: grid;
+  gap: 3px;
+  margin-top: 12px;
+  border-left: 2px solid #d58a28;
+  background: rgba(213, 138, 40, 0.08);
+  padding: 9px 11px;
+}
+
+.ws-storyboard-material-usage strong {
+  color: #9c631d;
+  font-size: 10px;
+}
+
+.ws-storyboard-material-usage span {
+  color: var(--ws-text-secondary);
+  font-size: 9.5px;
+  line-height: 1.55;
+}
+
+.ws-storyboard-material-dialog > footer > div {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ws-storyboard-material-dialog > footer {
+  justify-content: space-between;
+}
+
+.ws-storyboard-material-dialog > footer button.is-danger {
+  border-color: rgba(190, 52, 80, 0.28);
+  color: #be3450;
 }
 
 .ws-storyboard-material-form > p {
@@ -10470,6 +10726,21 @@
   .ws-storyboard-toolbar-end {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .ws-storyboard-global-settings {
+    width: 100%;
+    flex-basis: auto;
+    flex-wrap: wrap;
+  }
+
+  .ws-storyboard-validation {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
+
+  .ws-storyboard-validation > header {
+    white-space: normal;
   }
 
   .ws-storyboard-toolbar-end {
@@ -10486,7 +10757,7 @@
     gap: 7px;
   }
 
-  .ws-storyboard-material-settings > strong {
+  .ws-storyboard-material-settings > header > strong {
     line-height: 1.4;
   }
 

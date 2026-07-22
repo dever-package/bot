@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -208,12 +209,12 @@ export function StreamPowerRunner({
   const [paramReferenceContents, setParamReferenceContents] = useState<
     Record<string, ReferenceContent>
   >({})
+  const [paramInputRevision, setParamInputRevision] = useState(0)
   const [requestIDCopied, setRequestIDCopied] = useState(false)
   const [mobileView, setMobileView] = useState<'input' | 'result'>('input')
   const runTokenRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
   const pendingHistoryInputRef = useRef<Record<string, unknown>>({})
-  const powerParamsReadyRef = useRef(false)
   const appliedHistoryInputRef = useRef('')
   const appliedHistorySourceRef = useRef('')
   const requestIDCopyTimerRef = useRef<number | null>(null)
@@ -228,9 +229,19 @@ export function StreamPowerRunner({
 
   const activeSelectedSourceID = selectedSource.power === powerKey ? selectedSource.id : ''
 
+  const applyParamInput = useCallback(
+    (params: PowerParam[], input: Record<string, unknown>) => {
+      const replayState = buildPowerParamReplayState(params, input)
+      setParamValues(replayState.values)
+      setParamFiles(replayState.files)
+      setParamReferenceContents(replayState.referenceContents)
+      setParamInputRevision((revision) => revision + 1)
+    },
+    []
+  )
+
   useEffect(() => {
     setSelectedSource({ power: '', id: '' })
-    powerParamsReadyRef.current = false
     appliedHistoryInputRef.current = ''
     appliedHistorySourceRef.current = ''
   }, [history?.scopeKey, powerKey])
@@ -290,7 +301,6 @@ export function StreamPowerRunner({
 
   useEffect(() => {
     let cancelled = false
-    powerParamsReadyRef.current = false
     setPowerParams([])
     setPowerSources([])
     setParamValues({})
@@ -341,13 +351,9 @@ export function StreamPowerRunner({
         setSelectedSource({ power: powerKey, id: config.selectedSourceID })
       }
 
-      const replayState = buildPowerParamReplayState(rows, initialInput)
-      powerParamsReadyRef.current = true
       appliedHistoryInputRef.current = ''
       setPowerParams(rows)
-      setParamValues(replayState.values)
-      setParamFiles(replayState.files)
-      setParamReferenceContents(replayState.referenceContents)
+      applyParamInput(rows, initialInput)
       setParamsLoading(false)
     }
 
@@ -355,7 +361,7 @@ export function StreamPowerRunner({
     return () => {
       cancelled = true
     }
-  }, [activeSelectedSourceID, paramApi, paramScope, powerKey])
+  }, [activeSelectedSourceID, applyParamInput, paramApi, paramScope, powerKey])
 
   useEffect(() => {
     if (!showingLiveResult) {
@@ -660,7 +666,6 @@ export function StreamPowerRunner({
       !historyController.enabled ||
       selectedID <= 0 ||
       !selectedHistoryInput ||
-      !powerParamsReadyRef.current ||
       powerParams.length === 0
     ) {
       return
@@ -691,16 +696,11 @@ export function StreamPowerRunner({
       return
     }
 
-    const replayState = buildPowerParamReplayState(
-      powerParams,
-      selectedHistoryInput
-    )
     appliedHistoryInputRef.current = selectionKey
-    setParamValues(replayState.values)
-    setParamFiles(replayState.files)
-    setParamReferenceContents(replayState.referenceContents)
+    applyParamInput(powerParams, selectedHistoryInput)
   }, [
     activeSelectedSourceID,
+    applyParamInput,
     history?.scopeKey,
     historyController.enabled,
     historyController.selectedID,
@@ -879,7 +879,10 @@ export function StreamPowerRunner({
           ) : null}
 
           {mainPowerParams.length > 0 ? (
-            <div className="stream-power-param-list space-y-3">
+            <div
+              key={`main-${paramInputRevision}`}
+              className="stream-power-param-list space-y-3"
+            >
               {mainPowerParams.map((param) => {
                 const key = inputKeyForParam(param)
                 if (
@@ -935,7 +938,10 @@ export function StreamPowerRunner({
           ) : null}
 
           {toolbarPowerParams.length > 0 ? (
-            <div className="stream-power-toolbar-params mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
+            <div
+              key={`toolbar-${paramInputRevision}`}
+              className="stream-power-toolbar-params mt-3 flex flex-wrap items-center gap-2 border-t pt-3"
+            >
               {toolbarPowerParams.map((param) => {
                 const key = inputKeyForParam(param)
                 return (

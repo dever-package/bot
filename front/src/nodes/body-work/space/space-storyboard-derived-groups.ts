@@ -15,10 +15,9 @@ import {
   type CanvasReferenceTarget,
 } from "./space-reference-content";
 import {
-  expandStoryboardDerivedGroup,
   nextStoryboardDerivedNodePosition,
   planStoryboardDerivedGroupLayout,
-  storyboardDerivedLayoutUpgradeMemberOffsets,
+  storyboardDerivedGroupMemberLayout,
   type StoryboardDerivedGroupLayout,
 } from "./space-storyboard-derived-layout";
 import {
@@ -35,6 +34,7 @@ import {
 import { storyboardVideoComposition } from "./space-storyboard-composition";
 import type {
   AssetCate,
+  CanvasComposerDraft,
   CanvasReferenceContent,
   CanvasStoryboardItemConfig,
   CanvasStoryboardItemType,
@@ -43,6 +43,48 @@ import type {
   SpaceCanvasNode,
   SpaceCanvasState,
 } from "./types";
+
+export function isStoryboardDerivedPromptOverridden(node: SpaceCanvasNode) {
+  const generatedPrompt = String(
+    node.storyboardItem?.generatedPrompt || "",
+  ).trim();
+  const currentPrompt = String(node.composerDraft?.prompt || "").trim();
+  return Boolean(
+    generatedPrompt && currentPrompt && currentPrompt !== generatedPrompt,
+  );
+}
+
+export function restoredStoryboardDerivedPrompt(
+  node: SpaceCanvasNode,
+  canvasNodes: SpaceCanvasNode[],
+): CanvasComposerDraft | null {
+  const generatedPrompt = String(
+    node.storyboardItem?.generatedPrompt || "",
+  ).trim();
+  const currentPrompt = String(node.composerDraft?.prompt || "");
+  if (!generatedPrompt || currentPrompt.trim() === generatedPrompt) {
+    return null;
+  }
+  const referenceNodeIds = new Set(
+    node.storyboardItem?.referenceNodeIds || [],
+  );
+  const referenceTargets = canvasNodes
+    .filter((candidate) => referenceNodeIds.has(candidate.id))
+    .map(storyboardSourceReferenceTarget)
+    .filter((target): target is CanvasReferenceTarget => Boolean(target));
+  return {
+    ...(node.composerDraft || {}),
+    prompt: generatedPrompt,
+    promptContent: referenceTargets.length
+      ? canvasReferenceContentFromTargets(generatedPrompt, referenceTargets)
+      : undefined,
+    paramValues: replaceGeneratedPromptParamValues(
+      node.composerDraft?.paramValues,
+      currentPrompt,
+      generatedPrompt,
+    ),
+  };
+}
 
 export function firstAvailablePower(
   powers: PowerOption[],
@@ -152,25 +194,47 @@ export function syncStoryboardDerivedGroups(input: {
     power: spec.local
       ? null
       : firstAvailablePower(input.powers, spec.powerKind, spec.outputType),
-    existing: findDerivedGroup(nodes, input.storyboardNode.id, spec.key),
   }));
+  for (const { items } of derivedGroups) {
+    for (const item of items) {
+      activeItemKeys.add(
+        storyboardItemKey(input.storyboardNode.id, item.type, item.id),
+      );
+    }
+  }
+  let changed = false;
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    const metadata = nodes[index].storyboardItem;
+    if (
+      !metadata ||
+      metadata.sourceNodeId !== input.storyboardNode.id ||
+      !syncedItemTypes.has(metadata.itemType) ||
+      activeItemKeys.has(
+        storyboardItemKey(
+          metadata.sourceNodeId,
+          metadata.itemType,
+          metadata.itemId,
+        ),
+      )
+    ) {
+      continue;
+    }
+    nodes.splice(index, 1);
+    changed = true;
+  }
   const layouts = planStoryboardDerivedGroupLayout({
     sourceNode: input.storyboardNode,
-    groups: derivedGroups.map(({ spec, items, power, existing }) => ({
+    groups: derivedGroups.map(({ spec, items, power }) => ({
       key: spec.key,
       layoutIndex: spec.layoutIndex,
       itemCount: items.length,
       power,
       powerKind: spec.powerKind,
       direction: spec.direction,
-      currentSize: existing
-        ? { width: existing.width, height: existing.height }
-        : undefined,
-      currentLayoutKey: existing?.group?.layoutKey,
     })),
   });
   let nextNodeNo = nextCanvasNodeNo(nodes, input.canvas.nextNodeNo);
-  let changed = nextNodeNo !== input.canvas.nextNodeNo;
+  changed = changed || nextNodeNo !== input.canvas.nextNodeNo;
 
   for (const { spec, items, power } of derivedGroups) {
     const layout = layouts.get(spec.key);
@@ -192,9 +256,6 @@ export function syncStoryboardDerivedGroups(input: {
         sourceItem,
         nodes,
         input.storyboardNode.id,
-      );
-      activeItemKeys.add(
-        storyboardItemKey(input.storyboardNode.id, item.type, item.id),
       );
       const existingIndex = nodes.findIndex((node) =>
         isMatchingDerivedNode(
@@ -233,41 +294,46 @@ export function syncStoryboardDerivedGroups(input: {
       changed = true;
     }
 
-    const resizedGroup = expandStoryboardDerivedGroup(group.node, nodes);
-    if (resizedGroup !== group.node) {
-      const groupNodeIndex = nodes.findIndex(
-        (node) => node.id === group.node.id,
-      );
-      nodes[groupNodeIndex] = resizedGroup;
-      changed = true;
-    }
-  }
-
-  for (const [index, node] of nodes.entries()) {
-    const metadata = node.storyboardItem;
-    if (
-      !metadata ||
-      metadata.sourceNodeId !== input.storyboardNode.id ||
-      !syncedItemTypes.has(metadata.itemType) ||
-      activeItemKeys.has(
-        storyboardItemKey(
-          metadata.sourceNodeId,
-          metadata.itemType,
-          metadata.itemId,
+    const orderedMembers = items
+      .map((item) =>
+        nodes.find(
+          (node) =>
+            node.groupId === group.node.id &&
+            isMatchingDerivedNode(
+              node,
+              input.storyboardNode.id,
+              item.type,
+              item.id,
+            ),
         ),
       )
+      .filter((node): node is SpaceCanvasNode => Boolean(node));
+    const memberLayout = storyboardDerivedGroupMemberLayout(
+      group.node,
+      orderedMembers,
+    );
+    for (const member of orderedMembers) {
+      const position = memberLayout.positions.get(member.id);
+      if (!position || (member.x === position.x && member.y === position.y)) {
+        continue;
+      }
+      const memberIndex = nodes.indexOf(member);
+      nodes[memberIndex] = { ...member, ...position };
+      changed = true;
+    }
+    const groupNodeIndex = nodes.findIndex((node) => node.id === group.node.id);
+    const currentGroup = nodes[groupNodeIndex];
+    if (
+      currentGroup.width !== memberLayout.width ||
+      currentGroup.height !== memberLayout.height
     ) {
-      continue;
+      nodes[groupNodeIndex] = {
+        ...currentGroup,
+        width: memberLayout.width,
+        height: memberLayout.height,
+      };
+      changed = true;
     }
-    if (metadata.stale && !node.groupId) {
-      continue;
-    }
-    nodes[index] = {
-      ...node,
-      groupId: undefined,
-      storyboardItem: { ...metadata, stale: true },
-    };
-    changed = true;
   }
 
   const enabledGroupKeys = new Set(enabledSpecs.map((spec) => spec.key));
@@ -430,19 +496,6 @@ function ensureDerivedGroup(input: {
       input.nodes[input.nodes.indexOf(existing)] = renamed;
       return { node: renamed, changed: true };
     }
-    const memberOffsets = storyboardDerivedLayoutUpgradeMemberOffsets({
-      currentLayoutKey: existing.group?.layoutKey,
-      nextLayoutKey: input.layout.layoutKey,
-      group: existing,
-      members: input.nodes.filter((node) => node.groupId === existing.id),
-      nodeSize: powerNodeDefaultSize(
-        input.power || {
-          kind: input.spec.powerKind,
-          outputType: input.spec.outputType,
-        },
-      ),
-      powerKind: input.spec.powerKind,
-    });
     const deltaX = input.layout.bounds.x - existing.x;
     const deltaY = input.layout.bounds.y - existing.y;
     let movedGroup = existing;
@@ -457,16 +510,10 @@ function ensureDerivedGroup(input: {
           : {}),
         x:
           node.x +
-          deltaX +
-          (node.groupId === existing.id
-            ? memberOffsets?.get(node.id)?.x || 0
-            : 0),
+          deltaX,
         y:
           node.y +
-          deltaY +
-          (node.groupId === existing.id
-            ? memberOffsets?.get(node.id)?.y || 0
-            : 0),
+          deltaY,
         ...(node.id === existing.id
           ? {
               title: input.spec.title,

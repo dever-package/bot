@@ -23,6 +23,7 @@ export function CanvasGroupNodeView({
   onRename,
   onEditStructure,
   onRun,
+  runBlockedReason = "",
   children,
 }: {
   node: SpaceCanvasNode;
@@ -37,6 +38,7 @@ export function CanvasGroupNodeView({
   onRename?: (title: string) => void;
   onEditStructure?: () => void;
   onRun?: () => void;
+  runBlockedReason?: string;
   children?: ReactNode;
 }) {
   const [editing, setEditing] = useState(false);
@@ -128,6 +130,10 @@ export function CanvasGroupNodeView({
           <span className="ws-node-group-status">
             {failedCount > 0 ? `失败 ${failedCount}` : "运行失败"}
           </span>
+        ) : runBlockedReason ? (
+          <SpaceTooltip label={runBlockedReason}>
+            <span className="ws-node-group-status">等待前置</span>
+          </SpaceTooltip>
         ) : runnableCount > 0 && completedCount === runnableCount ? (
           <span className="ws-node-group-status is-complete">
             <CheckCircle2 size={12} />
@@ -156,17 +162,23 @@ export function CanvasGroupNodeView({
         ) : null}
         <SpaceTooltip
           label={
-            runnableCount === 0
+            runBlockedReason ||
+            (runnableCount === 0
               ? "分组内暂无可运行节点"
               : staleCount > 0
                 ? `更新 ${staleCount} 个变更节点`
-                : "运行分组"
+                : "运行分组")
           }
         >
           <button
             type="button"
             className="ws-node-group-run nodrag nopan"
-            disabled={!onRun || runnableCount === 0 || running}
+            disabled={
+              !onRun ||
+              runnableCount === 0 ||
+              running ||
+              Boolean(runBlockedReason)
+            }
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();

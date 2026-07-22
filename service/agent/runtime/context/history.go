@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	recentMessageLimit     = summaryBatchLimit
+	recentMessageLimit     = 200
 	historyMessageMaxRunes = 64000
 )
 
