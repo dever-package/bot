@@ -25,15 +25,21 @@ import {
 import {
   MIN_STORYBOARD_SHOT_DURATION,
   STORYBOARD_MATERIAL_LABELS,
+  createStoryboardCaption,
   createStoryboardShot,
   createStoryboardSpeech,
   isStoryboardConfirmed,
   isStoryboardShotDurationValid,
   normalizeStoryboardOrder,
+  reconcileStoryboardContinuity,
+  storyboardContentSummary,
   storyboardSpeechCount,
+  storyboardSubtitleCount,
   storyboardTotalDuration,
   storyboardVisibleSpeakerIds,
   type StoryboardDocument,
+  type StoryboardCaption,
+  type StoryboardCaptionType,
   type StoryboardMaterial,
   type StoryboardReferenceField,
   type StoryboardShot,
@@ -75,7 +81,6 @@ export function StoryboardView({
   onConfirm,
   onCreateRevision,
   workflowAction = "",
-  lipSyncEnabled = false,
   saveStatus: externalSaveStatus,
   showSaveStatus = true,
   showMetrics = true,
@@ -89,7 +94,6 @@ export function StoryboardView({
   onConfirm?: (storyboard: StoryboardDocument) => void | Promise<void>;
   onCreateRevision?: () => void | Promise<void>;
   workflowAction?: StoryboardWorkflowAction;
-  lipSyncEnabled?: boolean;
   saveStatus?: StoryboardSaveStatus;
   showSaveStatus?: boolean;
   showMetrics?: boolean;
@@ -282,8 +286,9 @@ export function StoryboardView({
       return;
     }
     const current = controlled ? storyboard : draftRef.current;
+    const updated = updater(current);
     const next = withStoryboardReferenceContents(
-      normalizeStoryboardOrder(updater(current)),
+      normalizeStoryboardOrder(reconcileStoryboardContinuity(current, updated)),
       referenceAdapter.options,
     );
     draftRef.current = next;
@@ -448,6 +453,30 @@ export function StoryboardView({
       className={`ws-storyboard ${canEdit ? "is-editable" : "is-readonly"}`}
       aria-label="分镜脚本"
     >
+      <section className="ws-storyboard-overview">
+        <header>
+          <BookOpenText size={14} />
+          <strong>内容简介</strong>
+        </header>
+        {canEdit ? (
+          <textarea
+            className="nodrag nopan nowheel"
+            value={draft.summary}
+            rows={3}
+            placeholder="概括故事背景、核心事件和结局走向"
+            disabled={disabled}
+            onChange={(event) =>
+              updateDraft((current) => ({
+                ...current,
+                summary: event.target.value,
+              }))
+            }
+          />
+        ) : (
+          <p>{storyboardContentSummary(draft)}</p>
+        )}
+      </section>
+
       <header className="ws-storyboard-toolbar">
         <div className="ws-storyboard-style">
           <strong>统一视觉风格</strong>
@@ -476,7 +505,7 @@ export function StoryboardView({
               {showMetrics ? (
                 <span>
                   {draft.shots.length} 个镜头 · {storyboardTotalDuration(draft)}{" "}
-                  秒 · {storyboardSpeechCount(draft)} 条语音
+                  秒 · {storyboardSpeechCount(draft)} 条语音 · {storyboardSubtitleCount(draft)} 条字幕
                 </span>
               ) : null}
               {canEdit && showSaveStatus ? (
@@ -518,7 +547,10 @@ export function StoryboardView({
               type="button"
               className="ws-storyboard-command is-primary"
               disabled={
-                disabled || Boolean(workflowAction) || !draft.shots.length
+                disabled ||
+                Boolean(workflowAction) ||
+                !draft.summary.trim() ||
+                !draft.shots.length
               }
               onClick={() => void onConfirm(draft)}
             >
@@ -557,7 +589,6 @@ export function StoryboardView({
                   ? dragPlacement
                   : undefined
               }
-              lipSyncEnabled={lipSyncEnabled}
               onOpen={() => setEditingShotId(shot.id)}
               onDuplicate={() => duplicateShot(shot)}
               onRemove={() => removeShot(shot.id)}
@@ -582,7 +613,6 @@ export function StoryboardView({
           shot={editingShot}
           index={draft.shots.findIndex((shot) => shot.id === editingShot.id)}
           materials={draft.materials}
-          lipSyncEnabled={lipSyncEnabled}
           readonly={!canEdit}
           referenceAdapter={referenceAdapter}
           portalContainer={
@@ -664,7 +694,6 @@ function StoryboardShotDialog({
   shot,
   index,
   materials,
-  lipSyncEnabled,
   readonly,
   referenceAdapter,
   portalContainer,
@@ -675,7 +704,6 @@ function StoryboardShotDialog({
   shot: StoryboardShot;
   index: number;
   materials: StoryboardMaterial[];
-  lipSyncEnabled: boolean;
   readonly: boolean;
   referenceAdapter: CanvasReferenceAdapter;
   portalContainer: Element | null;
@@ -696,6 +724,17 @@ function StoryboardShotDialog({
   const visibleSpeakers = storyboardVisibleSpeakerIds(draft);
   const invalidStartTimes = draft.speech.some(
     (speech) => speech.start_time < 0 || speech.start_time >= draft.duration,
+  );
+  const invalidContinuity =
+    index > 0 &&
+    draft.continue_previous &&
+    !draft.continuity_anchor.trim();
+  const invalidCaptions = draft.captions.some(
+    (caption) =>
+      !caption.text.trim() ||
+      caption.start_time < 0 ||
+      caption.end_time <= caption.start_time ||
+      caption.end_time > draft.duration,
   );
   const updateField = (
     field: StoryboardReferenceField,
@@ -755,6 +794,32 @@ function StoryboardShotDialog({
       return { ...current, speech };
     });
   };
+  const updateCaption = (
+    captionId: string,
+    patch: Partial<StoryboardCaption>,
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      captions: current.captions.map((caption) =>
+        caption.id === captionId ? { ...caption, ...patch } : caption,
+      ),
+    }));
+  };
+  const moveCaption = (captionId: string, offset: number) => {
+    setDraft((current) => {
+      const index = current.captions.findIndex(
+        (caption) => caption.id === captionId,
+      );
+      const target = index + offset;
+      if (index < 0 || target < 0 || target >= current.captions.length) {
+        return current;
+      }
+      const captions = [...current.captions];
+      const [moved] = captions.splice(index, 1);
+      captions.splice(target, 0, moved);
+      return { ...current, captions };
+    });
+  };
   const dialog = (
     <div className="ws-storyboard-shot-backdrop" onMouseDown={onClose}>
       <section
@@ -795,6 +860,10 @@ function StoryboardShotDialog({
                       setDraft((current) => ({
                         ...current,
                         continue_previous: index > 0 && event.target.checked,
+                        continuity_anchor:
+                          index > 0 && event.target.checked
+                            ? current.continuity_anchor
+                            : "",
                       }))
                     }
                   />
@@ -822,6 +891,27 @@ function StoryboardShotDialog({
                 </label>
               </div>
             </div>
+            {index > 0 && draft.continue_previous ? (
+              <label className="ws-storyboard-continuity-anchor">
+                <span>连续性锚点</span>
+                <textarea
+                  value={draft.continuity_anchor}
+                  readOnly={readonly}
+                  placeholder="写明上一镜头结束时需要延续的主体位置、姿态、动作方向、道具状态和光线"
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      continuity_anchor: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            ) : null}
+            {invalidContinuity ? (
+              <p className="ws-storyboard-form-error">
+                承接上一镜头时必须填写连续性锚点。
+              </p>
+            ) : null}
             <div className="ws-storyboard-shot-field-row is-single">
               <StoryboardDialogField
                 label="镜头描述"
@@ -1109,6 +1199,33 @@ function StoryboardShotDialog({
                         }
                       />
                     </label>
+                    <div className="ws-storyboard-speech-subtitle">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={speech.subtitle_enabled}
+                          disabled={readonly}
+                          onChange={(event) =>
+                            updateSpeech(speech.id, {
+                              subtitle_enabled: event.target.checked,
+                            })
+                          }
+                        />
+                        加入字幕
+                      </label>
+                      {speech.subtitle_enabled ? (
+                        <input
+                          value={speech.subtitle_text}
+                          readOnly={readonly}
+                          placeholder="可选：填写精简字幕；留空使用原文"
+                          onChange={(event) =>
+                            updateSpeech(speech.id, {
+                              subtitle_text: event.target.value,
+                            })
+                          }
+                        />
+                      ) : null}
+                    </div>
                   </div>
                 ))
               ) : (
@@ -1120,13 +1237,160 @@ function StoryboardShotDialog({
             </div>
             {visibleSpeakers.size > 1 ? (
               <p className="ws-storyboard-form-error">
-                一个镜头最多只能有一个出镜说话角色，请拆分镜头或改为画外音
-                {lipSyncEnabled ? "，否则无法确定对口型角色" : ""}。
+                一个镜头最多只能有一个出镜说话角色，请拆分镜头或改为画外音。
               </p>
             ) : null}
             {invalidStartTimes ? (
               <p className="ws-storyboard-form-error">
                 语音开始时间必须小于当前镜头时长。
+              </p>
+            ) : null}
+          </section>
+
+          <section className="ws-storyboard-shot-section">
+            <div className="ws-storyboard-shot-section-head">
+              <div>
+                <strong>附加字幕文案</strong>
+                <span>{draft.captions.length} 条文案</span>
+              </div>
+              {!readonly ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDraft((current) => ({
+                      ...current,
+                      captions: [
+                        ...current.captions,
+                        createStoryboardCaption(current),
+                      ],
+                    }))
+                  }
+                >
+                  <Plus size={13} />
+                  添加文案
+                </button>
+              ) : null}
+            </div>
+            <div className="ws-storyboard-speech-list">
+              {draft.captions.length ? (
+                draft.captions.map((caption, captionIndex) => (
+                  <div className="ws-storyboard-speech-row" key={caption.id}>
+                    <div className="ws-storyboard-speech-row-head">
+                      <strong>文案 {captionIndex + 1}</strong>
+                      {!readonly ? (
+                        <div>
+                          <StoryboardIconButton
+                            label="上移文案"
+                            disabled={captionIndex === 0}
+                            onClick={() => moveCaption(caption.id, -1)}
+                          >
+                            <ArrowUp size={13} />
+                          </StoryboardIconButton>
+                          <StoryboardIconButton
+                            label="下移文案"
+                            disabled={captionIndex === draft.captions.length - 1}
+                            onClick={() => moveCaption(caption.id, 1)}
+                          >
+                            <ArrowDown size={13} />
+                          </StoryboardIconButton>
+                          <StoryboardIconButton
+                            label="删除文案"
+                            danger
+                            onClick={() =>
+                              setDraft((current) => ({
+                                ...current,
+                                captions: current.captions.filter(
+                                  (item) => item.id !== caption.id,
+                                ),
+                              }))
+                            }
+                          >
+                            <Trash2 size={13} />
+                          </StoryboardIconButton>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="ws-storyboard-speech-fields">
+                      <label>
+                        类型
+                        <select
+                          value={caption.type}
+                          disabled={readonly}
+                          onChange={(event) =>
+                            updateCaption(caption.id, {
+                              type: event.target.value as StoryboardCaptionType,
+                            })
+                          }
+                        >
+                          <option value="caption">说明</option>
+                          <option value="title">标题</option>
+                          <option value="highlight">重点</option>
+                        </select>
+                      </label>
+                      <label>
+                        开始时间
+                        <span className="ws-storyboard-time-input">
+                          <input
+                            type="number"
+                            min={0}
+                            max={draft.duration}
+                            step={0.1}
+                            value={caption.start_time}
+                            disabled={readonly}
+                            onChange={(event) =>
+                              updateCaption(caption.id, {
+                                start_time: nonNegativeTime(event),
+                              })
+                            }
+                          />
+                          秒
+                        </span>
+                      </label>
+                      <label>
+                        结束时间
+                        <span className="ws-storyboard-time-input">
+                          <input
+                            type="number"
+                            min={0.1}
+                            max={draft.duration}
+                            step={0.1}
+                            value={caption.end_time}
+                            disabled={readonly}
+                            onChange={(event) =>
+                              updateCaption(caption.id, {
+                                end_time: nonNegativeTime(event),
+                              })
+                            }
+                          />
+                          秒
+                        </span>
+                      </label>
+                    </div>
+                    <label className="ws-storyboard-speech-text">
+                      文本
+                      <textarea
+                        value={caption.text}
+                        readOnly={readonly}
+                        placeholder="输入不对应语音的标题、说明或重点文字"
+                        onChange={(event) =>
+                          updateCaption(caption.id, {
+                            text: event.target.value,
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                ))
+              ) : (
+                <div className="ws-storyboard-speech-empty">
+                  <BookOpenText size={24} />
+                  <span>当前镜头没有附加字幕文案</span>
+                </div>
+              )}
+            </div>
+            {invalidCaptions ? (
+              <p className="ws-storyboard-form-error">
+                字幕文案必须填写文本，并设置在镜头时长内的有效起止时间。
               </p>
             ) : null}
           </section>
@@ -1140,7 +1404,12 @@ function StoryboardShotDialog({
             <button
               type="button"
               className="is-primary"
-              disabled={visibleSpeakers.size > 1 || invalidStartTimes}
+              disabled={
+                visibleSpeakers.size > 1 ||
+                invalidStartTimes ||
+                invalidContinuity ||
+                invalidCaptions
+              }
               onClick={() => onSave(draft)}
             >
               <Check size={14} />
@@ -1298,6 +1567,8 @@ function normalizeSpeechPatch(
     delete next.character_id;
     delete next.speaker_mode;
   }
+  next.subtitle_enabled = Boolean(next.subtitle_enabled);
+  next.subtitle_text ||= "";
   return next;
 }
 
@@ -1338,6 +1609,10 @@ function duplicateStoryboardShot(
       ...speech,
       id: `${duplicate.id}-speech-${index + 1}`,
     })),
+    captions: shot.captions.map((caption, index) => ({
+      ...caption,
+      id: `${duplicate.id}-caption-${index + 1}`,
+    })),
   };
 }
 
@@ -1346,6 +1621,7 @@ function cloneStoryboardShot(shot: StoryboardShot): StoryboardShot {
     ...shot,
     material_ids: [...shot.material_ids],
     speech: shot.speech.map((speech) => ({ ...speech })),
+    captions: shot.captions.map((caption) => ({ ...caption })),
     reference_contents: { ...(shot.reference_contents || {}) },
   };
 }

@@ -136,6 +136,7 @@ type CanvasExecutionQuery struct {
 	RunIDs      string
 	BeforeID    uint64
 	Limit       int
+	SummaryOnly bool
 }
 
 func (s WorkspaceService) CanvasExecutionList(ctx context.Context, query CanvasExecutionQuery) (map[string]any, error) {
@@ -194,7 +195,7 @@ func (s WorkspaceService) CanvasExecutionList(ctx context.Context, query CanvasE
 		selected = append(selected, row)
 	}
 
-	includeDetails := scope != canvasExecutionScopeHistory
+	includeDetails := scope != canvasExecutionScopeHistory && !query.SummaryOnly
 	resultsByRunID := map[uint64][]map[string]any{}
 	nodeRunsByRunID := map[uint64][]map[string]any{}
 	if includeDetails {

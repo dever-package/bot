@@ -3,6 +3,7 @@ export type AssetView = "assets" | "trash";
 export type AssetContentMode = "preview" | "full";
 export type AssetRole = "work" | "material";
 export type AssetKind =
+  | "collection"
   | "text"
   | "image"
   | "audio"
@@ -33,6 +34,7 @@ export type AssetRecord = {
   teamID: number;
   flowID: number;
   assetCateID: number;
+  collectionID: number;
   nodeKey: string;
   sourceType: AssetSourceType;
   sourceID: number;
@@ -44,9 +46,17 @@ export type AssetRecord = {
   versionID: number;
   status: string;
   summary: string;
+  collectionCount: number;
+  collectionPreviews: AssetCollectionPreview[];
   createdAt: string;
   deletedAt: string;
   version: AssetVersion | null;
+};
+
+export type AssetCollectionPreview = {
+  id: number;
+  kind: "image" | "video";
+  content: unknown;
 };
 
 export type AssetFilters = {

@@ -40,7 +40,10 @@ export function AssetCard({
   onSelect?: (asset: AssetRecord) => void;
 }) {
   const inTrash = view === "trash";
-  const preview = (
+  const collection = asset.kind === "collection";
+  const preview = collection ? (
+    <AssetCollectionPreview asset={asset} />
+  ) : (
     <AssetPreview
       kind={asset.kind}
       content={asset.version?.content}
@@ -51,7 +54,7 @@ export function AssetCard({
 
   return (
     <article
-      className={`wb-asset-card ${selected ? "is-selected" : ""} ${inTrash ? "is-trash" : ""}`.trim()}
+      className={`wb-asset-card ${collection ? "is-collection" : ""} ${selected ? "is-selected" : ""} ${inTrash ? "is-trash" : ""}`.trim()}
     >
       <div className="wb-asset-card-main">
         <div className="wb-asset-card-preview">
@@ -61,7 +64,7 @@ export function AssetCard({
               type="button"
               className="wb-asset-card-preview-open"
               onClick={() => onOpen(asset)}
-              aria-label={`查看${asset.name}`}
+              aria-label={`${collection ? "打开集合" : "查看"}${asset.name}`}
             />
           ) : null}
         </div>
@@ -73,8 +76,9 @@ export function AssetCard({
           >
             <strong>{asset.name}</strong>
             <span>
-              {assetSourceLabel(asset.sourceType, sourceLabels)} ·{" "}
-              {assetKindLabel(asset.kind)}
+              {collection
+                ? `集合 · ${asset.collectionCount} 项素材`
+                : `${assetSourceLabel(asset.sourceType, sourceLabels)} · ${assetKindLabel(asset.kind)}`}
             </span>
           </button>
         </BodyWorkTooltip>
@@ -128,7 +132,7 @@ export function AssetCard({
             </button>
           </BodyWorkTooltip>
         ) : null}
-        {!inTrash && selectable && onSelect ? (
+        {!collection && !inTrash && selectable && onSelect ? (
           <button
             type="button"
             className={`is-primary ${selected ? "is-selected" : ""}`.trim()}
@@ -141,5 +145,27 @@ export function AssetCard({
         ) : null}
       </div>
     </article>
+  );
+}
+
+function AssetCollectionPreview({ asset }: { asset: AssetRecord }) {
+  const previews = asset.collectionPreviews.slice(0, 4);
+  if (previews.length === 0) {
+    return (
+      <div className="wb-asset-collection-empty">
+        <AssetKindIcon kind="collection" />
+        <span>{asset.collectionCount > 0 ? `${asset.collectionCount} 项素材` : "空集合"}</span>
+      </div>
+    );
+  }
+  return (
+    <div className={`wb-asset-collection-preview has-${previews.length}`}>
+      {previews.map((preview) => (
+        <div key={preview.id}>
+          <AssetPreview kind={preview.kind} content={preview.content} compact />
+        </div>
+      ))}
+      <span>{asset.collectionCount} 项</span>
+    </div>
   );
 }

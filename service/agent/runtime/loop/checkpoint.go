@@ -10,6 +10,7 @@ import (
 	energonmodel "github.com/dever-package/bot/model/energon"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
+	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
@@ -23,20 +24,22 @@ const (
 // executionSnapshot contains only durable business input. Process-local callbacks,
 // server contexts and credentials deliberately stay outside the persisted payload.
 type executionSnapshot struct {
-	Version            int                              `json:"version"`
-	RequestedAt        time.Time                        `json:"requested_at"`
-	Agent              agentmodel.Agent                 `json:"agent"`
-	Power              energonmodel.Power               `json:"power"`
-	SessionID          uint64                           `json:"session_id,omitempty"`
-	AssistantMessageID uint64                           `json:"assistant_message_id,omitempty"`
-	Prompt             string                           `json:"prompt"`
-	Input              map[string]any                   `json:"input"`
-	History            []any                            `json:"history"`
-	Transport          persistedTransport               `json:"transport"`
-	PersistChat        bool                             `json:"persist_chat"`
-	MediaReferences    []runtimeprovider.MediaReference `json:"media_references,omitempty"`
-	Scope              runtimescope.Scope               `json:"scope,omitempty"`
-	Billing            botprotocol.BillingContext       `json:"billing,omitempty"`
+	Version              int                              `json:"version"`
+	RequestedAt          time.Time                        `json:"requested_at"`
+	Agent                agentmodel.Agent                 `json:"agent"`
+	Power                energonmodel.Power               `json:"power"`
+	ModelLimits          energonservice.ModelLimits       `json:"model_limits"`
+	WorkingContextTokens int                              `json:"working_context_tokens"`
+	SessionID            uint64                           `json:"session_id,omitempty"`
+	AssistantMessageID   uint64                           `json:"assistant_message_id,omitempty"`
+	Prompt               string                           `json:"prompt"`
+	Input                map[string]any                   `json:"input"`
+	History              []any                            `json:"history"`
+	Transport            persistedTransport               `json:"transport"`
+	PersistChat          bool                             `json:"persist_chat"`
+	MediaReferences      []runtimeprovider.MediaReference `json:"media_references,omitempty"`
+	Scope                runtimescope.Scope               `json:"scope,omitempty"`
+	Billing              botprotocol.BillingContext       `json:"billing,omitempty"`
 }
 
 type persistedTransport struct {
@@ -46,47 +49,51 @@ type persistedTransport struct {
 }
 
 type runCheckpoint struct {
-	Version               int                              `json:"version"`
-	Phase                 string                           `json:"phase"`
-	ModelStep             int                              `json:"model_step"`
-	Seq                   int                              `json:"seq"`
-	Input                 map[string]any                   `json:"input"`
-	HistoryDelta          []any                            `json:"history_delta,omitempty"`
-	LastText              string                           `json:"last_text,omitempty"`
-	Artifacts             map[string]any                   `json:"artifacts,omitempty"`
-	Activities            []map[string]any                 `json:"activities,omitempty"`
-	LoadedSkills          []agentmodel.LoadedSkillRef      `json:"loaded_skills,omitempty"`
-	ToolReceipts          []toolReceipt                    `json:"tool_receipts,omitempty"`
-	ActiveToolExecution   *toolExecutionMarker             `json:"active_tool_execution,omitempty"`
-	MediaDelta            []runtimeprovider.MediaReference `json:"media_delta,omitempty"`
-	PendingTools          []botprotocol.ToolCall           `json:"pending_tools,omitempty"`
-	PendingIndex          int                              `json:"pending_index,omitempty"`
-	PendingModelText      string                           `json:"pending_model_text,omitempty"`
-	AwaitingDelivery      bool                             `json:"awaiting_delivery,omitempty"`
-	DeliveryContinuations int                              `json:"delivery_continuations,omitempty"`
-	CompletionReviews     int                              `json:"completion_reviews,omitempty"`
-	RequiredToolName      string                           `json:"required_tool_name,omitempty"`
-	DocumentID            uint64                           `json:"document_id,omitempty"`
-	KnowledgeUsed         bool                             `json:"knowledge_used,omitempty"`
-	KnowledgeNodeIDs      []uint64                         `json:"knowledge_node_ids,omitempty"`
-	FinalStatus           string                           `json:"final_status,omitempty"`
-	FinalText             string                           `json:"final_text,omitempty"`
-	FinalMessage          string                           `json:"final_message,omitempty"`
-	FinalOutput           map[string]any                   `json:"final_output,omitempty"`
-	FinalCommitted        bool                             `json:"final_committed,omitempty"`
+	Version                 int                              `json:"version"`
+	Phase                   string                           `json:"phase"`
+	ModelStep               int                              `json:"model_step"`
+	Seq                     int                              `json:"seq"`
+	Input                   map[string]any                   `json:"input"`
+	HistoryDelta            []any                            `json:"history_delta,omitempty"`
+	LastText                string                           `json:"last_text,omitempty"`
+	Artifacts               map[string]any                   `json:"artifacts,omitempty"`
+	Activities              []map[string]any                 `json:"activities,omitempty"`
+	LoadedSkills            []agentmodel.LoadedSkillRef      `json:"loaded_skills,omitempty"`
+	ToolReceipts            []toolReceipt                    `json:"tool_receipts,omitempty"`
+	ActiveToolExecution     *toolExecutionMarker             `json:"active_tool_execution,omitempty"`
+	MediaDelta              []runtimeprovider.MediaReference `json:"media_delta,omitempty"`
+	PendingTools            []botprotocol.ToolCall           `json:"pending_tools,omitempty"`
+	PendingIndex            int                              `json:"pending_index,omitempty"`
+	PendingModelText        string                           `json:"pending_model_text,omitempty"`
+	AwaitingDelivery        bool                             `json:"awaiting_delivery,omitempty"`
+	DeliveryContinuations   int                              `json:"delivery_continuations,omitempty"`
+	LengthContinuations     int                              `json:"length_continuations,omitempty"`
+	CompletionReviewPending bool                             `json:"completion_review_pending,omitempty"`
+	CompletionReviews       int                              `json:"completion_reviews,omitempty"`
+	RequiredToolName        string                           `json:"required_tool_name,omitempty"`
+	DocumentID              uint64                           `json:"document_id,omitempty"`
+	KnowledgeUsed           bool                             `json:"knowledge_used,omitempty"`
+	KnowledgeNodeIDs        []uint64                         `json:"knowledge_node_ids,omitempty"`
+	FinalStatus             string                           `json:"final_status,omitempty"`
+	FinalText               string                           `json:"final_text,omitempty"`
+	FinalMessage            string                           `json:"final_message,omitempty"`
+	FinalOutput             map[string]any                   `json:"final_output,omitempty"`
+	FinalCommitted          bool                             `json:"final_committed,omitempty"`
 }
 
 func snapshotFromExecution(execution execution) executionSnapshot {
 	return executionSnapshot{
-		Version:            runtimeSnapshotVersion,
-		RequestedAt:        execution.requestedAt,
-		Agent:              execution.agent,
-		Power:              execution.power,
-		SessionID:          execution.sessionID,
-		AssistantMessageID: execution.assistantMessageID,
-		Prompt:             execution.prompt,
-		Input:              cloneMap(execution.input),
-		History:            append([]any(nil), execution.history...),
+		Version:              runtimeSnapshotVersion,
+		RequestedAt:          execution.requestedAt,
+		Agent:                execution.agent,
+		Power:                execution.power,
+		ModelLimits:          execution.modelLimits,
+		WorkingContextTokens: execution.workingContextTokens,
+		SessionID:            execution.sessionID,
+		AssistantMessageID:   execution.assistantMessageID,
+		Prompt:               execution.prompt,
+		Input:                cloneMap(execution.input),
+		History:              append([]any(nil), execution.history...),
 		Transport: persistedTransport{
 			Method: execution.transport.Method,
 			Host:   execution.transport.Host,
@@ -100,12 +107,15 @@ func snapshotFromExecution(execution execution) executionSnapshot {
 }
 
 func initialCheckpoint(execution execution) runCheckpoint {
+	interactionResumed := runtimeEventType(execution.input) == "interaction_resumed"
 	checkpoint := runCheckpoint{
-		Version:   runtimeSnapshotVersion,
-		Phase:     runPhaseModel,
-		ModelStep: 1,
-		Seq:       1,
-		Input:     gatewayInput(execution.input),
+		Version:                 runtimeSnapshotVersion,
+		Phase:                   runPhaseModel,
+		ModelStep:               1,
+		Seq:                     1,
+		Input:                   gatewayInput(execution.input),
+		AwaitingDelivery:        interactionResumed,
+		CompletionReviewPending: interactionResumed,
 	}
 	checkpoint.KnowledgeUsed = execution.priorKnowledgeUsed
 	return checkpoint
@@ -159,6 +169,9 @@ func normalizeCheckpoint(value runCheckpoint) runCheckpoint {
 	}
 	if value.DeliveryContinuations < 0 {
 		value.DeliveryContinuations = 0
+	}
+	if value.LengthContinuations < 0 {
+		value.LengthContinuations = 0
 	}
 	if value.CompletionReviews < 0 {
 		value.CompletionReviews = 0

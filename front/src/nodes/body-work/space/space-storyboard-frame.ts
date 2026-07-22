@@ -25,22 +25,62 @@ export type StoryboardFrameScope = {
   };
 };
 
+export function storyboardManagedNodeIds(nodes: SpaceCanvasNode[]) {
+  const sourceNodeIds = storyboardSourceNodeIds(nodes);
+  const scriptGroupIds = new Set(
+    nodes
+      .filter(
+        (node) =>
+          node.type === "group" &&
+          node.group?.origin === "script" &&
+          Boolean(node.group.sourceNodeId),
+      )
+      .map((node) => node.id),
+  );
+  const managedNodeIds = new Set(sourceNodeIds);
+  for (const node of nodes) {
+    if (
+      node.storyboardItem?.sourceNodeId ||
+      (node.type === "group" && node.group?.origin === "script") ||
+      Boolean(node.groupId && scriptGroupIds.has(node.groupId))
+    ) {
+      managedNodeIds.add(node.id);
+    }
+  }
+  return managedNodeIds;
+}
+
+export function storyboardSourceNodeIdForNode(
+  nodes: SpaceCanvasNode[],
+  node: SpaceCanvasNode,
+) {
+  if (node.storyboardItem?.sourceNodeId) {
+    return node.storyboardItem.sourceNodeId;
+  }
+  if (node.type === "group" && node.group?.origin === "script") {
+    return node.group.sourceNodeId || "";
+  }
+  const sourceNodeIds = storyboardSourceNodeIds(nodes);
+  if (sourceNodeIds.has(node.id)) {
+    return node.id;
+  }
+  if (!node.groupId) {
+    return "";
+  }
+  const group = nodes.find((candidate) => candidate.id === node.groupId);
+  return group?.group?.origin === "script"
+    ? group.group.sourceNodeId || ""
+    : "";
+}
+
 export function storyboardFrameScopes(
   nodes: SpaceCanvasNode[],
   hasResult: (node: SpaceCanvasNode) => boolean,
 ) {
-  const sourceNodeIds = new Set<string>();
-  for (const node of nodes) {
-    if (node.group?.origin === "script" && node.group.sourceNodeId) {
-      sourceNodeIds.add(node.group.sourceNodeId);
-    }
-    if (node.storyboardItem?.sourceNodeId) {
-      sourceNodeIds.add(node.storyboardItem.sourceNodeId);
-    }
-  }
+  const storyboardNodeIds = storyboardSourceNodeIds(nodes);
 
   const scopes: StoryboardFrameScope[] = [];
-  for (const sourceNodeId of sourceNodeIds) {
+  for (const sourceNodeId of storyboardNodeIds) {
     const sourceNode = nodes.find((node) => node.id === sourceNodeId);
     if (!sourceNode) {
       continue;
@@ -63,7 +103,9 @@ export function storyboardFrameScopes(
       continue;
     }
     const workNodes = members.filter(
-      (node) => node.storyboardItem?.sourceNodeId === sourceNodeId,
+      (node) =>
+        node.storyboardItem?.sourceNodeId === sourceNodeId &&
+        !node.storyboardItem.optional,
     );
     const bounds = storyboardFrameBounds(members);
     scopes.push({
@@ -127,6 +169,19 @@ export function storyboardFrameMoveDelta(
 
 function storyboardFrameId(sourceNodeId: string) {
   return `storyboard-frame:${sourceNodeId}`;
+}
+
+function storyboardSourceNodeIds(nodes: SpaceCanvasNode[]) {
+  const sourceNodeIds = new Set<string>();
+  for (const node of nodes) {
+    if (node.group?.origin === "script" && node.group.sourceNodeId) {
+      sourceNodeIds.add(node.group.sourceNodeId);
+    }
+    if (node.storyboardItem?.sourceNodeId) {
+      sourceNodeIds.add(node.storyboardItem.sourceNodeId);
+    }
+  }
+  return sourceNodeIds;
 }
 
 function storyboardFrameBounds(nodes: SpaceCanvasNode[]) {

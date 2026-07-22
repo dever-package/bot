@@ -15,6 +15,13 @@ type PowerParamOption = botinput.PowerParamOption
 type PowerParamConfig = botinput.PowerParamConfig
 type PowerSource = botinput.PowerSource
 
+type powerParamConfigMode uint8
+
+const (
+	powerParamConfigForm powerParamConfigMode = iota
+	powerParamConfigRuntime
+)
+
 func (s GatewayService) PowerParams(ctx context.Context, powerKey string) ([]PowerParam, error) {
 	config, err := s.PowerParamConfig(ctx, powerKey, 0)
 	if err != nil {
@@ -48,6 +55,22 @@ func PreparePowerParamInput(input map[string]any, params []PowerParam) (map[stri
 }
 
 func (s GatewayService) PowerParamConfig(ctx context.Context, powerKey string, targetID uint64) (PowerParamConfig, error) {
+	return s.powerParamConfig(ctx, powerKey, targetID, powerParamConfigForm)
+}
+
+// RuntimePowerParamConfig returns the parameter contract used by callers that
+// cannot expose a source picker. Without an explicit target, all active source
+// parameters are merged and the gateway selects a compatible source at run time.
+func (s GatewayService) RuntimePowerParamConfig(ctx context.Context, powerKey string, targetID uint64) (PowerParamConfig, error) {
+	return s.powerParamConfig(ctx, powerKey, targetID, powerParamConfigRuntime)
+}
+
+func (s GatewayService) powerParamConfig(
+	ctx context.Context,
+	powerKey string,
+	targetID uint64,
+	mode powerParamConfigMode,
+) (PowerParamConfig, error) {
 	powerKey = strings.TrimSpace(powerKey)
 	if powerKey == "" {
 		return PowerParamConfig{}, fmt.Errorf("能力不能为空")
@@ -58,13 +81,23 @@ func (s GatewayService) PowerParamConfig(ctx context.Context, powerKey string, t
 		return PowerParamConfig{}, fmt.Errorf("未匹配到能力: %s", powerKey)
 	}
 
+	requestedTargetID := targetID
 	sourceRule := normalizePowerSourceRule(int(power.SourceRule))
 	if sourceRule != powerSourceRulePick {
 		targetID = 0
 	}
 	sources, selectedTargetID := s.powerSources(ctx, power, targetID)
+	selectedTargetID, mergeSources, err := resolvePowerParamSelection(
+		sourceRule,
+		requestedTargetID,
+		selectedTargetID,
+		mode,
+	)
+	if err != nil {
+		return PowerParamConfig{}, err
+	}
 	params := []PowerParam{}
-	if sourceRule == powerSourceRulePick {
+	if !mergeSources {
 		serviceID := s.powerTargetServiceID(ctx, power.ID, selectedTargetID)
 		params = botinput.BuildPowerParams(ctx, s.repo, power.ID, serviceID)
 	} else {
@@ -78,6 +111,27 @@ func (s GatewayService) PowerParamConfig(ctx context.Context, powerKey string, t
 		Sources:          sources,
 		Params:           params,
 	}, nil
+}
+
+func resolvePowerParamSelection(
+	sourceRule int16,
+	requestedTargetID uint64,
+	resolvedTargetID uint64,
+	mode powerParamConfigMode,
+) (uint64, bool, error) {
+	if sourceRule != powerSourceRulePick {
+		return 0, true, nil
+	}
+	if requestedTargetID > 0 {
+		if resolvedTargetID != requestedTargetID {
+			return 0, false, fmt.Errorf("指定来源不存在或不可用: %d", requestedTargetID)
+		}
+		return requestedTargetID, false, nil
+	}
+	if mode == powerParamConfigRuntime {
+		return 0, true, nil
+	}
+	return resolvedTargetID, false, nil
 }
 
 func hydratePowerParamAcceptedKinds(ctx context.Context, params []PowerParam) []PowerParam {

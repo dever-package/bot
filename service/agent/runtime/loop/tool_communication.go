@@ -26,13 +26,13 @@ func deliveryContinuationInput() map[string]any {
 	return runtimeEventInput("delivery_required", nil)
 }
 
-func completionContinuationInput(nextAction string, nextTool string) map[string]any {
+func completionContinuationInput(missing string, requiredTool string) map[string]any {
 	values := map[string]any{}
-	if nextAction = strings.TrimSpace(nextAction); nextAction != "" {
-		values["next_action"] = nextAction
+	if missing = strings.TrimSpace(missing); missing != "" {
+		values["missing"] = missing
 	}
-	if nextTool = strings.TrimSpace(nextTool); nextTool != "" {
-		values["next_tool"] = nextTool
+	if requiredTool = strings.TrimSpace(requiredTool); requiredTool != "" {
+		values["required_tool"] = requiredTool
 	}
 	return runtimeEventInput("completion_required", values)
 }

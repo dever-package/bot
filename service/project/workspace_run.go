@@ -492,6 +492,19 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 	}
 	input := mergeCanvasPromptInput(req.Input, previousOutput, node.ComposerPrompt)
 	params := cloneInput(node.ParamValues)
+	input, params, mediaReferences, err := prepareCanvasStoryboardShotInput(
+		ctx,
+		projectID,
+		req,
+		node,
+		previousOutput,
+		input,
+		params,
+		mediaReferences,
+	)
+	if err != nil {
+		return nil, err
+	}
 	outputType := energonmodel.NormalizeOutputType(node.OutputType)
 	if outputType == energonmodel.OutputTypeLipSync {
 		var err error
@@ -507,6 +520,7 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 		if err != nil {
 			return nil, err
 		}
+		mediaReferences = nil
 	}
 	if outputType == energonmodel.OutputTypeVideoCompose {
 		composition, err := resolveCanvasVideoComposition(ctx, projectID, node.VideoComposition)
@@ -974,8 +988,8 @@ func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasR
 	}
 	if req.SingleNode {
 		if manualContext := manualCanvasInputContext(req.Input); manualContext != nil {
-			allowedSourceNodeIDs := canvasNodeSourceNodeIDs(nodeID, req.Canvas)
-			manualContext = filterCanvasContextSources(manualContext, allowedSourceNodeIDs)
+			allowedSourceNodeIDs, referencesConfigured := canvasNodeReferenceSelection(nodeID, req.Canvas)
+			manualContext = filterConfiguredCanvasContextSources(manualContext, allowedSourceNodeIDs, referencesConfigured)
 			startNode := canvasNodeByID(req.StartNodeID, req.Canvas)
 			excludedUpstreamIDs := manualCanvasContextNodeIDs(manualContext)
 			if textValue(startNode["type"]) == "group" {
@@ -992,25 +1006,40 @@ func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasR
 			return mergeCanvasContextOutputs(
 				manualContext,
 				referenceOutput,
-				filterCanvasContextSources(previousOutput, allowedSourceNodeIDs),
+				filterConfiguredCanvasContextSources(previousOutput, allowedSourceNodeIDs, referencesConfigured),
 			), mediaReferences, nil
 		}
 	}
 	output := previousCanvasOutput(ctx, projectID, nodeID, results, req.Canvas)
-	output = filterCanvasContextSources(output, canvasNodeSourceNodeIDs(nodeID, req.Canvas))
+	allowedSourceNodeIDs, referencesConfigured := canvasNodeReferenceSelection(nodeID, req.Canvas)
+	output = filterConfiguredCanvasContextSources(output, allowedSourceNodeIDs, referencesConfigured)
 	return mergeCanvasContextOutputs(referenceOutput, output), mediaReferences, nil
 }
 
-func canvasNodeSourceNodeIDs(nodeID string, canvas map[string]any) map[string]bool {
+func canvasNodeReferenceSelection(nodeID string, canvas map[string]any) (map[string]bool, bool) {
 	node := canvasNodeByID(nodeID, canvas)
 	metadata := mapValue(firstPresent(node["storyboard_item"], node["storyboardItem"]))
 	result := map[string]bool{}
-	for _, raw := range sliceValue(firstPresent(metadata["source_node_ids"], metadata["sourceNodeIds"])) {
+	raw, configured := metadata["reference_node_ids"]
+	if !configured {
+		raw, configured = metadata["referenceNodeIds"]
+	}
+	for _, raw := range sliceValue(raw) {
 		if sourceNodeID := textValue(raw); sourceNodeID != "" {
 			result[sourceNodeID] = true
 		}
 	}
-	return result
+	return result, configured
+}
+
+func filterConfiguredCanvasContextSources(value any, allowedNodeIDs map[string]bool, configured bool) any {
+	if !configured {
+		return value
+	}
+	if len(allowedNodeIDs) == 0 {
+		return value
+	}
+	return filterCanvasContextSources(value, allowedNodeIDs)
 }
 
 func filterCanvasContextSources(value any, allowedNodeIDs map[string]bool) any {
@@ -1072,11 +1101,11 @@ func canvasPromptReferenceOutput(
 	if err != nil {
 		return nil, nil, err
 	}
-	dependencies, err := canvasStoryboardSourceReferences(node, canvas)
+	storyboardReferences, err := canvasStoryboardSourceReferences(node, canvas)
 	if err != nil {
 		return nil, nil, err
 	}
-	structured = mergeCanvasPromptReferences(dependencies, structured)
+	structured = mergeCanvasPromptReferences(storyboardReferences, structured)
 	if len(structured) == 0 {
 		return nil, nil, nil
 	}
@@ -1127,8 +1156,8 @@ func canvasStoryboardSourceReferences(node map[string]any, canvas map[string]any
 
 	result := []canvasPromptReference{}
 	for _, sourceNodeID := range canvasStringList(firstPresent(
-		metadata["source_node_ids"],
-		metadata["sourceNodeIds"],
+		metadata["reference_node_ids"],
+		metadata["referenceNodeIds"],
 	)) {
 		sourceNode := canvasNodeByID(sourceNodeID, canvas)
 		if sourceNode == nil {
@@ -1163,28 +1192,28 @@ func canvasStoryboardSourceReferences(node map[string]any, canvas map[string]any
 	return result, nil
 }
 
-func mergeCanvasPromptReferences(dependencies []canvasPromptReference, explicit []canvasPromptReference) []canvasPromptReference {
-	if len(dependencies) == 0 {
+func mergeCanvasPromptReferences(generated []canvasPromptReference, explicit []canvasPromptReference) []canvasPromptReference {
+	if len(generated) == 0 {
 		return explicit
 	}
-	result := make([]canvasPromptReference, 0, len(dependencies)+len(explicit))
+	result := make([]canvasPromptReference, 0, len(generated)+len(explicit))
 	usedExplicit := make([]bool, len(explicit))
-	for _, dependency := range dependencies {
+	for _, reference := range generated {
 		matched := false
-		for index, reference := range explicit {
-			if reference.AssetID != dependency.AssetID {
+		for index, current := range explicit {
+			if current.AssetID != reference.AssetID {
 				continue
 			}
-			reference.VersionID = dependency.VersionID
-			if reference.Label == "" {
-				reference.Label = dependency.Label
+			current.VersionID = reference.VersionID
+			if current.Label == "" {
+				current.Label = reference.Label
 			}
-			result = append(result, reference)
+			result = append(result, current)
 			usedExplicit[index] = true
 			matched = true
 		}
 		if !matched {
-			result = append(result, dependency)
+			result = append(result, reference)
 		}
 	}
 	for index, reference := range explicit {
@@ -1600,6 +1629,26 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 	if !assetservice.HasContent(output) {
 		return payload, nil
 	}
+	assetCateID := firstUint64(node.AssetCateID, req.AssetCateID)
+	collectionID := uint64(0)
+	collectionSourceNodeKey, collectionName := workspaceCanvasCollection(node, output)
+	if collectionSourceNodeKey != "" {
+		collection, err := s.project.asset.EnsureProjectCollection(ctx, assetservice.EnsureProjectCollectionRequest{
+			ProjectID:     projectID,
+			BodyID:        run.BodyID,
+			TeamID:        run.TeamID,
+			AssetCateID:   assetCateID,
+			RunID:         run.ID,
+			NodeRunID:     nodeRunID,
+			ReleaseID:     run.ReleaseID,
+			SourceNodeKey: collectionSourceNodeKey,
+			Name:          collectionName,
+		})
+		if err != nil {
+			return payload, err
+		}
+		collectionID = collection.ID
+	}
 	source := map[string]any{
 		"source_request_id": firstText(payload["request_id"], canvasChildRequestID(run.RequestID, node.ID)),
 		"source_run_id":     uint64Value(payload["run_id"]),
@@ -1607,22 +1656,27 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 		"source_node_type":  node.Type,
 		"source_status":     canvasRunStatus(payload),
 	}
+	if collectionID > 0 {
+		source["collection_id"] = collectionID
+		source["collection_source_node_key"] = collectionSourceNodeKey
+	}
 	if prompt := strings.TrimSpace(node.ComposerPrompt); prompt != "" {
 		source["prompt"] = prompt
 	}
 	result, err := s.project.SaveAsset(ctx, projectID, SaveAssetRequest{
-		AssetCateID: firstUint64(node.AssetCateID, req.AssetCateID),
-		FlowID:      node.FlowID,
-		RunID:       run.ID,
-		NodeRunID:   nodeRunID,
-		ReleaseID:   run.ReleaseID,
-		RequestID:   run.RequestID,
-		NodeKey:     node.ID,
-		Source:      source,
-		Name:        workspaceCanvasAssetName(node),
-		Kind:        firstText(node.Kind, node.PowerKind, assetmodel.KindRichText),
-		Role:        assetmodel.RoleMaterial,
-		Content:     output,
+		AssetCateID:  assetCateID,
+		CollectionID: collectionID,
+		FlowID:       node.FlowID,
+		RunID:        run.ID,
+		NodeRunID:    nodeRunID,
+		ReleaseID:    run.ReleaseID,
+		RequestID:    run.RequestID,
+		NodeKey:      node.ID,
+		Source:       source,
+		Name:         workspaceCanvasAssetName(node),
+		Kind:         firstText(node.Kind, node.PowerKind, assetmodel.KindRichText),
+		Role:         assetmodel.RoleMaterial,
+		Content:      output,
 	})
 	if err != nil {
 		return payload, err
@@ -1636,6 +1690,28 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 		payload["output"] = output
 	}
 	return payload, nil
+}
+
+func workspaceCanvasCollection(node canvasRunNode, output any) (string, string) {
+	sourceNodeKey := firstText(
+		node.StoryboardItem["source_node_id"],
+		node.StoryboardItem["sourceNodeId"],
+	)
+	if sourceNodeKey != "" {
+		return sourceNodeKey, ""
+	}
+	if energonmodel.NormalizeOutputType(node.OutputType) != energonmodel.OutputTypeStoryboard {
+		return "", ""
+	}
+	sourceNodeKey = strings.TrimSpace(node.ID)
+	name := ""
+	if document, found := findStoryboardDocument(output, 0); found {
+		name = storyboardText(document["title"])
+	}
+	if name == "" {
+		name = canvasRunNodeTitle(node)
+	}
+	return sourceNodeKey, name
 }
 
 func workspaceCanvasAssetName(node canvasRunNode) string {

@@ -14,6 +14,7 @@ func WithDefaults(config agentmodel.RuntimeConfig) agentmodel.RuntimeConfig {
 	}
 	config.DefaultMaxAutoSteps = positiveInt(config.DefaultMaxAutoSteps, defaults.DefaultMaxAutoSteps)
 	config.HardMaxAutoSteps = positiveInt(config.HardMaxAutoSteps, defaults.HardMaxAutoSteps)
+	config.WorkingContextTokens = positiveInt(config.WorkingContextTokens, defaults.WorkingContextTokens)
 	config.RunWorkerConcurrency = boundedPositiveInt(
 		config.RunWorkerConcurrency,
 		defaults.RunWorkerConcurrency,

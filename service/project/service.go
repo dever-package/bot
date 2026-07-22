@@ -30,18 +30,19 @@ type CreateRequest struct {
 }
 
 type SaveAssetRequest struct {
-	AssetCateID uint64
-	FlowID      uint64
-	RunID       uint64
-	NodeRunID   uint64
-	ReleaseID   uint64
-	RequestID   string
-	NodeKey     string
-	Source      map[string]any
-	Name        string
-	Kind        string
-	Role        string
-	Content     any
+	AssetCateID  uint64
+	CollectionID uint64
+	FlowID       uint64
+	RunID        uint64
+	NodeRunID    uint64
+	ReleaseID    uint64
+	RequestID    string
+	NodeKey      string
+	Source       map[string]any
+	Name         string
+	Kind         string
+	Role         string
+	Content      any
 }
 
 type UpdateAssetVersionRequest struct {
@@ -212,21 +213,22 @@ func (s Service) SaveAsset(ctx context.Context, projectID uint64, req SaveAssetR
 		fmt.Sprintf("%d", req.AssetCateID),
 	}, func() (map[string]any, error) {
 		asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
-			ProjectID:   project.ID,
-			BodyID:      project.BodyID,
-			TeamID:      project.TeamID,
-			FlowID:      req.FlowID,
-			AssetCateID: req.AssetCateID,
-			RunID:       req.RunID,
-			NodeRunID:   req.NodeRunID,
-			ReleaseID:   firstUint64(req.ReleaseID, project.ReleaseID),
-			RequestID:   req.RequestID,
-			NodeKey:     req.NodeKey,
-			Source:      req.Source,
-			Name:        req.Name,
-			Kind:        req.Kind,
-			Role:        req.Role,
-			Content:     req.Content,
+			ProjectID:    project.ID,
+			BodyID:       project.BodyID,
+			TeamID:       project.TeamID,
+			FlowID:       req.FlowID,
+			AssetCateID:  req.AssetCateID,
+			CollectionID: req.CollectionID,
+			RunID:        req.RunID,
+			NodeRunID:    req.NodeRunID,
+			ReleaseID:    firstUint64(req.ReleaseID, project.ReleaseID),
+			RequestID:    req.RequestID,
+			NodeKey:      req.NodeKey,
+			Source:       req.Source,
+			Name:         req.Name,
+			Kind:         req.Kind,
+			Role:         req.Role,
+			Content:      req.Content,
 		})
 		if err != nil {
 			return nil, err

@@ -292,6 +292,11 @@ func validateStoryboard(document map[string]any) error {
 	}
 	shotIDs := map[string]struct{}{}
 	speechIDs := map[string]struct{}{}
+	captionIDs := map[string]struct{}{}
+	shotDescriptions := make([]string, 0, len(shots))
+	var previousSceneIDs map[string]struct{}
+	previousVisibleDialogue := false
+	continuityChainLength := 0
 	for shotIndex, value := range shots {
 		shot, ok := value.(map[string]any)
 		if !ok {
@@ -313,9 +318,11 @@ func validateStoryboard(document map[string]any) error {
 		if !ok || !botmodel.IsStoryboardShotDurationValid(duration) {
 			return fmt.Errorf("镜头 %d 时长必须是不小于 %d 秒的整数", shotIndex+1, botmodel.StoryboardMinShotDuration)
 		}
-		if storyboardText(shot["description"]) == "" {
+		shotDescription := storyboardText(shot["description"])
+		if shotDescription == "" {
 			return fmt.Errorf("镜头 %d 缺少镜头描述", shotIndex+1)
 		}
+		shotDescriptions = append(shotDescriptions, shotDescription)
 		if _, ok := shot["camera_instruction"].(string); !ok {
 			return fmt.Errorf("镜头 %d 的镜头语言格式无效", shotIndex+1)
 		}
@@ -329,13 +336,46 @@ func validateStoryboard(document map[string]any) error {
 		if shotIndex == 0 && continuePrevious {
 			return fmt.Errorf("第一个镜头不能承接上一镜头")
 		}
+		continuityAnchor, ok := shot["continuity_anchor"].(string)
+		if !ok {
+			return fmt.Errorf("镜头 %d 的连续性锚点格式无效", shotIndex+1)
+		}
+		continuityAnchor = strings.TrimSpace(continuityAnchor)
+		if continuePrevious && continuityAnchor == "" {
+			return fmt.Errorf("镜头 %d 承接上一镜头时必须填写连续性锚点", shotIndex+1)
+		}
+		if continuePrevious {
+			continuityChainLength++
+			if continuityChainLength >= 3 {
+				return fmt.Errorf("镜头 %d 所在连续镜头链不能超过 3 个镜头", shotIndex+1)
+			}
+		} else {
+			shot["continuity_anchor"] = ""
+			continuityChainLength = 0
+		}
 		materialIDs, err := storyboardShotMaterialIDs(shot["material_ids"], shotIndex, materialTypes)
 		if err != nil {
 			return err
 		}
-		if err := validateStoryboardSpeech(shot, shotIndex, duration, speechIDs, materialTypes, materialIDs); err != nil {
+		sceneIDs := storyboardMaterialIDsOfType(materialIDs, materialTypes, "scene")
+		if continuePrevious && !sameStoryboardMaterialIDSet(previousSceneIDs, sceneIDs) {
+			return fmt.Errorf("镜头 %d 更换了场景素材，不能承接上一镜头", shotIndex+1)
+		}
+		visibleDialogue, err := validateStoryboardSpeech(shot, shotIndex, duration, speechIDs, materialTypes, materialIDs)
+		if err != nil {
 			return err
 		}
+		if continuePrevious && (previousVisibleDialogue || visibleDialogue) {
+			return fmt.Errorf("镜头 %d 的出镜对白不能跨越连续镜头边界", shotIndex+1)
+		}
+		if err := validateStoryboardCaptions(shot, shotIndex, duration, captionIDs); err != nil {
+			return err
+		}
+		previousSceneIDs = sceneIDs
+		previousVisibleDialogue = visibleDialogue
+	}
+	if storyboardText(document["summary"]) == "" {
+		document["summary"] = strings.Join(shotDescriptions, "；")
 	}
 	return nil
 }
@@ -409,6 +449,32 @@ func storyboardShotMaterialIDs(value any, shotIndex int, materialTypes map[strin
 	return result, nil
 }
 
+func storyboardMaterialIDsOfType(
+	materialIDs map[string]struct{},
+	materialTypes map[string]string,
+	materialType string,
+) map[string]struct{} {
+	result := make(map[string]struct{})
+	for id := range materialIDs {
+		if materialTypes[id] == materialType {
+			result[id] = struct{}{}
+		}
+	}
+	return result
+}
+
+func sameStoryboardMaterialIDSet(left map[string]struct{}, right map[string]struct{}) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for id := range left {
+		if _, exists := right[id]; !exists {
+			return false
+		}
+	}
+	return true
+}
+
 func validateStoryboardSpeech(
 	shot map[string]any,
 	shotIndex int,
@@ -416,57 +482,102 @@ func validateStoryboardSpeech(
 	usedIDs map[string]struct{},
 	materialTypes map[string]string,
 	shotMaterialIDs map[string]struct{},
-) error {
+) (bool, error) {
 	speech, ok := shot["speech"].([]any)
 	if !ok {
-		return fmt.Errorf("镜头 %d 的语音必须是数组", shotIndex+1)
+		return false, fmt.Errorf("镜头 %d 的语音必须是数组", shotIndex+1)
 	}
 	visibleCharacterID := ""
 	for speechIndex, value := range speech {
 		item, ok := value.(map[string]any)
 		if !ok {
-			return fmt.Errorf("镜头 %d 的语音 %d 格式无效", shotIndex+1, speechIndex+1)
+			return false, fmt.Errorf("镜头 %d 的语音 %d 格式无效", shotIndex+1, speechIndex+1)
 		}
 		id := storyboardText(item["id"])
 		if id == "" {
-			return fmt.Errorf("镜头 %d 的语音 %d 缺少稳定 ID", shotIndex+1, speechIndex+1)
+			return false, fmt.Errorf("镜头 %d 的语音 %d 缺少稳定 ID", shotIndex+1, speechIndex+1)
 		}
 		if _, exists := usedIDs[id]; exists {
-			return fmt.Errorf("语音 ID %s 重复", id)
+			return false, fmt.Errorf("语音 ID %s 重复", id)
 		}
 		usedIDs[id] = struct{}{}
 		kind := strings.ToLower(storyboardText(item["kind"]))
 		if kind != "dialogue" && kind != "narration" {
-			return fmt.Errorf("镜头 %d 的语音 %d 类型无效", shotIndex+1, speechIndex+1)
+			return false, fmt.Errorf("镜头 %d 的语音 %d 类型无效", shotIndex+1, speechIndex+1)
 		}
 		if storyboardText(item["text"]) == "" {
-			return fmt.Errorf("镜头 %d 的语音 %d 文本不能为空", shotIndex+1, speechIndex+1)
+			return false, fmt.Errorf("镜头 %d 的语音 %d 文本不能为空", shotIndex+1, speechIndex+1)
 		}
 		startTime, ok := storyboardNumber(item["start_time"])
 		if !ok || startTime < 0 || startTime >= duration {
-			return fmt.Errorf("镜头 %d 的语音 %d 开始时间超出镜头范围", shotIndex+1, speechIndex+1)
+			return false, fmt.Errorf("镜头 %d 的语音 %d 开始时间超出镜头范围", shotIndex+1, speechIndex+1)
+		}
+		if _, ok := item["subtitle_enabled"].(bool); !ok {
+			return false, fmt.Errorf("镜头 %d 的语音 %d 字幕开关格式无效", shotIndex+1, speechIndex+1)
+		}
+		if _, ok := item["subtitle_text"].(string); !ok {
+			return false, fmt.Errorf("镜头 %d 的语音 %d 字幕文本格式无效", shotIndex+1, speechIndex+1)
 		}
 		if kind != "dialogue" {
 			continue
 		}
 		characterID := storyboardText(item["character_id"])
 		if materialTypes[characterID] != "character" {
-			return fmt.Errorf("镜头 %d 的语音 %d 未选择有效角色", shotIndex+1, speechIndex+1)
+			return false, fmt.Errorf("镜头 %d 的语音 %d 未选择有效角色", shotIndex+1, speechIndex+1)
 		}
 		if _, exists := shotMaterialIDs[characterID]; !exists {
-			return fmt.Errorf("镜头 %d 的语音 %d 角色未包含在镜头素材中", shotIndex+1, speechIndex+1)
+			return false, fmt.Errorf("镜头 %d 的语音 %d 角色未包含在镜头素材中", shotIndex+1, speechIndex+1)
 		}
 		speakerMode := strings.ToLower(storyboardText(item["speaker_mode"]))
 		if speakerMode != "visible" && speakerMode != "offscreen" {
-			return fmt.Errorf("镜头 %d 的语音 %d 说话方式无效", shotIndex+1, speechIndex+1)
+			return false, fmt.Errorf("镜头 %d 的语音 %d 说话方式无效", shotIndex+1, speechIndex+1)
 		}
 		if speakerMode != "visible" {
 			continue
 		}
 		if visibleCharacterID != "" && visibleCharacterID != characterID {
-			return fmt.Errorf("镜头 %d 最多只能有一个出镜说话角色", shotIndex+1)
+			return false, fmt.Errorf("镜头 %d 最多只能有一个出镜说话角色", shotIndex+1)
 		}
 		visibleCharacterID = characterID
+	}
+	return visibleCharacterID != "", nil
+}
+
+func validateStoryboardCaptions(
+	shot map[string]any,
+	shotIndex int,
+	duration float64,
+	usedIDs map[string]struct{},
+) error {
+	captions, ok := shot["captions"].([]any)
+	if !ok {
+		return fmt.Errorf("镜头 %d 的字幕文案必须是数组", shotIndex+1)
+	}
+	for captionIndex, value := range captions {
+		caption, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("镜头 %d 的字幕文案 %d 格式无效", shotIndex+1, captionIndex+1)
+		}
+		id := storyboardText(caption["id"])
+		if id == "" {
+			return fmt.Errorf("镜头 %d 的字幕文案 %d 缺少稳定 ID", shotIndex+1, captionIndex+1)
+		}
+		if _, exists := usedIDs[id]; exists {
+			return fmt.Errorf("字幕文案 ID %s 重复", id)
+		}
+		usedIDs[id] = struct{}{}
+		captionType := strings.ToLower(storyboardText(caption["type"]))
+		if captionType != "caption" && captionType != "title" && captionType != "highlight" {
+			return fmt.Errorf("镜头 %d 的字幕文案 %d 类型无效", shotIndex+1, captionIndex+1)
+		}
+		if storyboardText(caption["text"]) == "" {
+			return fmt.Errorf("镜头 %d 的字幕文案 %d 文本不能为空", shotIndex+1, captionIndex+1)
+		}
+		startTime, startOK := storyboardNumber(caption["start_time"])
+		endTime, endOK := storyboardNumber(caption["end_time"])
+		if !startOK || !endOK || startTime < 0 || endTime <= startTime || endTime > duration {
+			return fmt.Errorf("镜头 %d 的字幕文案 %d 时间范围必须位于镜头内", shotIndex+1, captionIndex+1)
+		}
 	}
 	return nil
 }

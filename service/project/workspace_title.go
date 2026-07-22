@@ -42,6 +42,7 @@ func (s WorkspaceService) GenerateCanvasNodeTitle(ctx context.Context, req Canva
 		"project_id": req.ProjectID,
 		"node_key":   nodeKey,
 		"role":       assetmodel.RoleMaterial,
+		"kind":       map[string]any{"neq": assetmodel.KindCollection},
 		"status":     assetmodel.StatusCurrent,
 	})
 	if asset == nil || asset.VersionID == 0 {

@@ -340,22 +340,16 @@
         }
       },
       {
-        "type": "form-number",
-        "name": "单次模型最大输出 Token 数",
-        "placeholder": "0 表示使用模型服务默认值",
+        "type": "form-input",
+        "name": "单次模型输出偏好",
+        "placeholder": "0 表示使用 runtime 常规预算",
         "value": "form.max_output_tokens",
         "mode": "form",
-        "info": "限制一次模型请求的最大输出长度。0 表示不由智能体覆盖模型服务默认值；长文场景可按所用模型上限配置。",
+        "info": "限制该智能体一次模型响应的期望长度，支持 K、M 简写。0 表示内部按 16K 预留但不主动覆盖渠道默认值；显式配置时仍受来源服务硬上限约束。",
         "validate": [
           {
-            "type": "min",
-            "min": 0,
-            "message": "单次模型最大输出 Token 数不能小于 0。"
-          },
-          {
-            "type": "max",
-            "max": 131072,
-            "message": "单次模型最大输出 Token 数不能超过 131072。"
+            "type": "required",
+            "message": "单次模型输出偏好不能为空。"
           }
         ],
         "meta": {
@@ -368,6 +362,7 @@
   },
   "data": {
     "form": {
+      "service": "bot.agent.setting.AgentHook.AttachAgentForm",
       "id": 0,
       "cate_id": 1,
       "name": "",
@@ -384,7 +379,7 @@
       "temperature": 0.7,
       "timeout_seconds": 3600,
       "max_auto_steps": 0,
-      "max_output_tokens": 0
+      "max_output_tokens": "0"
     }
   },
   "state": {

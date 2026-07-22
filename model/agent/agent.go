@@ -53,8 +53,6 @@ const (
 
 	AgentKindNormal   = "normal"
 	AgentKindInternal = "internal"
-
-	MaxAgentOutputTokens = 131072
 )
 
 var (

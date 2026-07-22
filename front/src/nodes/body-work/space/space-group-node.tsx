@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, FolderTree, Loader2, Play } from "lucide-react";
+import {
+  CheckCircle2,
+  FolderTree,
+  Loader2,
+  Pencil,
+  Play,
+} from "lucide-react";
 import type { CanvasGroupRunStatus } from "./space-group-runtime";
 import { SpaceTooltip } from "./space-tooltip";
 import type { SpaceCanvasNode } from "./types";
@@ -13,7 +19,9 @@ export function CanvasGroupNodeView({
   staleCount,
   status,
   selected,
+  managed = false,
   onRename,
+  onEditStructure,
   onRun,
   children,
 }: {
@@ -25,7 +33,9 @@ export function CanvasGroupNodeView({
   staleCount: number;
   status: CanvasGroupRunStatus;
   selected?: boolean;
+  managed?: boolean;
   onRename?: (title: string) => void;
+  onEditStructure?: () => void;
   onRun?: () => void;
   children?: ReactNode;
 }) {
@@ -60,7 +70,9 @@ export function CanvasGroupNodeView({
     <div
       className={`ws-node-group-wrap ${selected ? "is-selected" : ""} ${
         running ? "is-running" : ""
-      } ${status === "error" ? "is-error" : ""}`}
+      } ${status === "error" ? "is-error" : ""} ${
+        managed ? "is-managed" : ""
+      }`}
     >
       <header className="ws-node-group-header">
         <span className="ws-node-group-icon" aria-hidden="true">
@@ -87,12 +99,17 @@ export function CanvasGroupNodeView({
             }}
           />
         ) : (
-          <SpaceTooltip label="双击重命名">
+          <SpaceTooltip
+            label={managed ? "名称由分镜脚本管理" : "双击重命名"}
+          >
             <strong
               className="ws-node-group-title"
               onDoubleClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
+                if (managed || !onRename) {
+                  return;
+                }
                 setEditing(true);
               }}
             >
@@ -120,6 +137,22 @@ export function CanvasGroupNodeView({
           <span className="ws-node-group-status is-stale">
             待更新 {staleCount}
           </span>
+        ) : null}
+        {managed && onEditStructure ? (
+          <SpaceTooltip label="编辑分镜结构">
+            <button
+              type="button"
+              className="ws-node-group-edit nodrag nopan"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onEditStructure();
+              }}
+              aria-label="编辑分镜结构"
+            >
+              <Pencil size={13} />
+            </button>
+          </SpaceTooltip>
         ) : null}
         <SpaceTooltip
           label={

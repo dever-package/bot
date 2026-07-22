@@ -148,8 +148,8 @@ func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serv
 	return rows
 }
 
-// BuildPowerParamsForServices returns the union used by automatic source
-// selection. A capability parameter is presented once even when several
+// BuildPowerParamsForServices returns the union used by automatic and headless
+// source selection. A capability parameter is presented once even when several
 // services map it, while source-specific options are merged.
 func BuildPowerParamsForServices(
 	ctx context.Context,

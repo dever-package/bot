@@ -97,8 +97,12 @@ func (s Service) prepareStatelessExecution(ctx context.Context, request stateles
 	if err != nil {
 		return execution{}, err
 	}
+	modelLimits, err := s.gateway.ResolveModelLimits(ctx, power.Key)
+	if err != nil {
+		return execution{}, err
+	}
 	if len(request.MediaReferences) > 0 {
-		powerConfig, configErr := s.gateway.PowerParamConfig(ctx, power.Key, 0)
+		powerConfig, configErr := s.gateway.RuntimePowerParamConfig(ctx, power.Key, 0)
 		if configErr != nil {
 			return execution{}, configErr
 		}
@@ -119,6 +123,7 @@ func (s Service) prepareStatelessExecution(ctx context.Context, request stateles
 	return s.createExecution(ctx, requestID, executionSpec{
 		Agent:            agent,
 		Power:            power,
+		ModelLimits:      modelLimits,
 		Prompt:           assembled.Prompt,
 		Input:            input,
 		InputText:        inputText,

@@ -10,6 +10,7 @@ const (
 	DefaultRuntimeConfigID                    uint64 = 1
 	DefaultRuntimeMaxAutoSteps                       = 5
 	DefaultRuntimeHardMaxAutoSteps                   = 8
+	DefaultRuntimeWorkingContextTokens               = 128000
 	DefaultRuntimeRunWorkerConcurrency               = 16
 	MaxRuntimeRunWorkerConcurrency                   = 64
 	DefaultRuntimeArtifactWorkerConcurrency          = 8
@@ -39,6 +40,7 @@ type RuntimeConfig struct {
 	ID                          uint64    `dorm:"primaryKey;autoIncrement;comment:配置ID"`
 	DefaultMaxAutoSteps         int       `dorm:"type:int;not null;default:5;comment:默认最大自动步骤数"`
 	HardMaxAutoSteps            int       `dorm:"type:int;not null;default:8;comment:强制最大自动步骤数"`
+	WorkingContextTokens        int       `dorm:"type:int;not null;default:128000;comment:日常工作上下文Token数"`
 	RunWorkerConcurrency        int       `dorm:"type:int;not null;default:16;comment:并行运行数"`
 	ArtifactWorkerConcurrency   int       `dorm:"type:int;not null;default:8;comment:素材任务并行数"`
 	ArtifactPerToolConcurrency  int       `dorm:"type:int;not null;default:4;comment:单项素材能力并行数"`
@@ -71,6 +73,7 @@ var runtimeConfigSeed = []map[string]any{
 		"id":                              DefaultRuntimeConfigID,
 		"default_max_auto_steps":          DefaultRuntimeMaxAutoSteps,
 		"hard_max_auto_steps":             DefaultRuntimeHardMaxAutoSteps,
+		"working_context_tokens":          DefaultRuntimeWorkingContextTokens,
 		"run_worker_concurrency":          DefaultRuntimeRunWorkerConcurrency,
 		"artifact_worker_concurrency":     DefaultRuntimeArtifactWorkerConcurrency,
 		"artifact_per_tool_concurrency":   DefaultRuntimeArtifactPerToolConcurrency,
@@ -102,6 +105,7 @@ func DefaultRuntimeConfig() RuntimeConfig {
 		ID:                          DefaultRuntimeConfigID,
 		DefaultMaxAutoSteps:         DefaultRuntimeMaxAutoSteps,
 		HardMaxAutoSteps:            DefaultRuntimeHardMaxAutoSteps,
+		WorkingContextTokens:        DefaultRuntimeWorkingContextTokens,
 		RunWorkerConcurrency:        DefaultRuntimeRunWorkerConcurrency,
 		ArtifactWorkerConcurrency:   DefaultRuntimeArtifactWorkerConcurrency,
 		ArtifactPerToolConcurrency:  DefaultRuntimeArtifactPerToolConcurrency,

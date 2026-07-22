@@ -811,6 +811,7 @@ function normalizeCanvasStoryboardItem(value: unknown) {
       "shot_image",
       "shot",
       "speech",
+      "subtitle",
       "lip_sync",
       "video_compose",
     ].includes(itemType)
@@ -826,14 +827,18 @@ function normalizeCanvasStoryboardItem(value: unknown) {
       | "shot_image"
       | "shot"
       | "speech"
+      | "subtitle"
       | "lip_sync"
       | "video_compose",
     itemId,
     generatedPrompt: stringValue(
       firstDefined(row.generated_prompt, row.generatedPrompt),
     ),
-    sourceNodeIds: stringArray(
-      firstDefined(row.source_node_ids, row.sourceNodeIds),
+    dependencyNodeIds: stringArray(
+      firstDefined(row.dependency_node_ids, row.dependencyNodeIds),
+    ),
+    referenceNodeIds: stringArray(
+      firstDefined(row.reference_node_ids, row.referenceNodeIds),
     ),
     shotId: stringValue(firstDefined(row.shot_id, row.shotId)),
     speechId: stringValue(firstDefined(row.speech_id, row.speechId)),
@@ -851,6 +856,13 @@ function normalizeCanvasStoryboardItem(value: unknown) {
     shotDuration: finiteNumber(
       firstDefined(row.shot_duration, row.shotDuration),
     ),
+    continuityAnchor: stringValue(
+      firstDefined(row.continuity_anchor, row.continuityAnchor),
+    ),
+    optional:
+      row.optional === true ||
+      row.optional === 1 ||
+      String(row.optional || "").toLowerCase() === "true",
     sourceSignature: stringValue(
       firstDefined(row.source_signature, row.sourceSignature),
     ),

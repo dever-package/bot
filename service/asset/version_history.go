@@ -120,24 +120,25 @@ func (s Service) CloneProjectVersion(ctx context.Context, req CloneProjectVersio
 	}
 	source, _ := jsonValue(version.Source).(map[string]any)
 	return s.SaveVersion(ctx, SaveVersionRequest{
-		AssetID:     asset.ID,
-		ProjectID:   asset.ProjectID,
-		BodyID:      asset.BodyID,
-		TeamID:      asset.TeamID,
-		FlowID:      asset.FlowID,
-		AssetCateID: asset.AssetCateID,
-		ReleaseID:   version.ReleaseID,
-		RequestID:   requestID,
-		NodeKey:     nodeKey,
-		SourceType:  asset.SourceType,
-		SourceID:    asset.SourceID,
-		SourceName:  asset.SourceName,
-		Source:      source,
-		Name:        asset.Name,
-		Kind:        asset.Kind,
-		Role:        NormalizeRole(asset.Role),
-		Content:     content,
-		Sort:        asset.Sort,
+		AssetID:      asset.ID,
+		ProjectID:    asset.ProjectID,
+		BodyID:       asset.BodyID,
+		TeamID:       asset.TeamID,
+		FlowID:       asset.FlowID,
+		AssetCateID:  asset.AssetCateID,
+		CollectionID: asset.CollectionID,
+		ReleaseID:    version.ReleaseID,
+		RequestID:    requestID,
+		NodeKey:      nodeKey,
+		SourceType:   asset.SourceType,
+		SourceID:     asset.SourceID,
+		SourceName:   asset.SourceName,
+		Source:       source,
+		Name:         asset.Name,
+		Kind:         asset.Kind,
+		Role:         NormalizeRole(asset.Role),
+		Content:      content,
+		Sort:         asset.Sort,
 	})
 }
 
@@ -174,6 +175,8 @@ func versionContentSummary(value any, kind string) string {
 			text = "音频内容"
 		case assetmodel.KindFile:
 			text = "文件内容"
+		case assetmodel.KindCollection:
+			text = "资产集合"
 		default:
 			text = "暂无内容"
 		}

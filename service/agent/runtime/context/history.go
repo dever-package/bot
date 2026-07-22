@@ -13,10 +13,8 @@ import (
 )
 
 const (
-	recentMessageLimit     = 40
-	historyMessageMaxRunes = 6000
-	historyTotalMaxRunes   = 24000
-	historyMinimumMessages = 2
+	recentMessageLimit     = summaryBatchLimit
+	historyMessageMaxRunes = 64000
 )
 
 type persistedHistoryCheckpoint struct {
@@ -132,18 +130,14 @@ func persistedHistoryComplete(history []any, output map[string]any) bool {
 func normalizeHistory(history []any) []any {
 	groups := historyGroups(normalizeHistoryMessages(history))
 	selected := make([][]any, 0, len(groups))
-	totalRunes := 0
 	messageCount := 0
 	for index := len(groups) - 1; index >= 0; index-- {
 		group := groups[index]
-		cost := historyValueRunes(group)
-		if messageCount >= historyMinimumMessages &&
-			(messageCount+len(group) > recentMessageLimit || totalRunes+cost > historyTotalMaxRunes) {
+		if messageCount > 0 && messageCount+len(group) > recentMessageLimit {
 			break
 		}
 		selected = append(selected, group)
 		messageCount += len(group)
-		totalRunes += cost
 	}
 	result := make([]any, 0, messageCount)
 	for index := len(selected) - 1; index >= 0; index-- {
@@ -287,12 +281,4 @@ func lastHistoryRole(history []any) string {
 		return ""
 	}
 	return historyMessageRole(history[len(history)-1])
-}
-
-func historyValueRunes(value any) int {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return 0
-	}
-	return runeCount(string(encoded))
 }

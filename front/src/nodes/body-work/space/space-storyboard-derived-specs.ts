@@ -4,6 +4,7 @@ import {
   isStoryboardVisibleDialogue,
   storyboardHasVisibleDialogue,
   storyboardPromptWithStyle,
+  storyboardShotSubtitleTracks,
   storyboardShotFallbackPrompt,
   storyboardShotMaterials,
   storyboardVisibleSpeakerIds,
@@ -15,11 +16,7 @@ import {
 } from "./space-storyboard";
 import type { CanvasReferenceContent, CanvasStoryboardItemType } from "./types";
 
-export type StoryboardPowerKind = "image" | "video" | "audio";
-
-export type StoryboardDerivedOptions = {
-  enableLipSync: boolean;
-};
+export type StoryboardPowerKind = "text" | "image" | "video" | "audio";
 
 export type StoryboardDerivedSourceItem = {
   type: CanvasStoryboardItemType;
@@ -32,9 +29,12 @@ export type StoryboardDerivedItem = {
   title: string;
   prompt: string;
   promptContent?: CanvasReferenceContent;
-  sourceItems?: StoryboardDerivedSourceItem[];
-  sourceNodeIds?: string[];
+  dependencyItems?: StoryboardDerivedSourceItem[];
+  referenceItems?: StoryboardDerivedSourceItem[];
+  dependencyNodeIds?: string[];
+  referenceNodeIds?: string[];
   sourceSignatureParts?: string[];
+  localOutput?: unknown;
   paramValues?: Record<string, unknown>;
   shotId?: string;
   speechId?: string;
@@ -44,6 +44,8 @@ export type StoryboardDerivedItem = {
   speakerMode?: "visible" | "offscreen";
   startTime?: number;
   shotDuration?: number;
+  continuityAnchor?: string;
+  optional?: boolean;
 };
 
 export type StoryboardDerivedGroupKey =
@@ -53,6 +55,7 @@ export type StoryboardDerivedGroupKey =
   | "shot_images"
   | "shots"
   | "speech"
+  | "subtitles"
   | "lip_sync";
 
 export type StoryboardDerivedGroupSpec = {
@@ -61,17 +64,12 @@ export type StoryboardDerivedGroupSpec = {
   itemType: CanvasStoryboardItemType;
   powerKind: StoryboardPowerKind;
   outputType: string;
+  local?: boolean;
   direction: StoryboardGroupDirection;
   sourceGroupKeys?: StoryboardDerivedGroupKey[];
   layoutIndex: number;
-  enabled: (
-    storyboard: StoryboardDocument,
-    options: StoryboardDerivedOptions,
-  ) => boolean;
-  items: (
-    storyboard: StoryboardDocument,
-    options: StoryboardDerivedOptions,
-  ) => StoryboardDerivedItem[];
+  enabled: (storyboard: StoryboardDocument) => boolean;
+  items: (storyboard: StoryboardDocument) => StoryboardDerivedItem[];
 };
 
 const MATERIAL_GROUP_KEYS: StoryboardDerivedGroupKey[] = [
@@ -103,16 +101,25 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
     sourceGroupKeys: MATERIAL_GROUP_KEYS,
     layoutIndex: 0,
     enabled: () => true,
-    items: (storyboard, options) =>
-      storyboard.shots.map((shot, index) => ({
-        type: "shot_image" as const,
-        id: shot.id,
-        title: `镜头 ${shot.order || index + 1} 参考图`,
-        prompt: storyboardShotImagePrompt(storyboard, shot, options),
-        sourceItems: storyboardShotMaterialSourceItems(storyboard, shot),
-        paramValues: storyboardShotImageParamValues(storyboard),
-        shotId: shot.id,
-      })),
+    items: (storyboard) =>
+      storyboard.shots.flatMap((shot, index) =>
+        shot.continue_previous
+          ? []
+          : [
+              {
+                type: "shot_image" as const,
+                id: shot.id,
+                title: `镜头 ${shot.order || index + 1} 参考图`,
+                prompt: storyboardShotImagePrompt(storyboard, shot),
+                referenceItems: storyboardShotMaterialSourceItems(
+                  storyboard,
+                  shot,
+                ),
+                paramValues: storyboardShotImageParamValues(storyboard),
+                shotId: shot.id,
+              },
+            ],
+      ),
   },
   {
     key: "shots",
@@ -124,16 +131,17 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
     sourceGroupKeys: ["shot_images"],
     layoutIndex: 1,
     enabled: () => true,
-    items: (storyboard, options) =>
+    items: (storyboard) =>
       storyboard.shots.map((shot, index) => ({
         type: "shot" as const,
         id: shot.id,
         title: `镜头 ${shot.order || index + 1}`,
-        prompt: storyboardVideoPrompt(storyboard, shot, options),
-        sourceItems: storyboardShotVideoSourceItems(storyboard, shot, index),
+        prompt: storyboardVideoPrompt(storyboard, shot),
+        ...storyboardShotVideoSources(storyboard, shot, index),
         paramValues: storyboardVideoParamValues(storyboard, shot),
         shotId: shot.id,
         shotDuration: shot.duration,
+        continuityAnchor: shot.continuity_anchor,
       })),
   },
   {
@@ -148,6 +156,21 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
     items: storyboardSpeechItems,
   },
   {
+    key: "subtitles",
+    title: "字幕组",
+    itemType: "subtitle",
+    powerKind: "text",
+    outputType: "general",
+    local: true,
+    direction: "downstream",
+    layoutIndex: 3,
+    enabled: (storyboard) =>
+      storyboard.shots.some(
+        (shot) => storyboardShotSubtitleTracks(shot).length > 0,
+      ),
+    items: storyboardSubtitleItems,
+  },
+  {
     key: "lip_sync",
     title: "口型同步组",
     itemType: "lip_sync",
@@ -155,9 +178,8 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
     outputType: "lip_sync",
     direction: "downstream",
     sourceGroupKeys: ["shots", "speech"],
-    layoutIndex: 3,
-    enabled: (storyboard, options) =>
-      options.enableLipSync &&
+    layoutIndex: 4,
+    enabled: (storyboard) =>
       storyboard.shots.some(storyboardHasVisibleDialogue),
     items: storyboardLipSyncItems,
   },
@@ -216,6 +238,30 @@ function storyboardSpeechItems(storyboard: StoryboardDocument) {
   );
 }
 
+function storyboardSubtitleItems(storyboard: StoryboardDocument) {
+  return storyboard.shots.flatMap((shot, index) => {
+    const tracks = storyboardShotSubtitleTracks(shot);
+    if (!tracks.length) {
+      return [];
+    }
+    return [
+      {
+        type: "subtitle" as const,
+        id: shot.id,
+        title: `镜头 ${shot.order || index + 1} 字幕`,
+        prompt: tracks.map((track) => track.text).join(" / "),
+        localOutput: {
+          type: "storyboard_subtitles",
+          shot_id: shot.id,
+          tracks,
+        },
+        shotId: shot.id,
+        shotDuration: shot.duration,
+      },
+    ];
+  });
+}
+
 function storyboardLipSyncItems(storyboard: StoryboardDocument) {
   return storyboard.shots.flatMap((shot, index) => {
     const visibleSpeech = shot.speech.filter(isStoryboardVisibleDialogue);
@@ -233,7 +279,11 @@ function storyboardLipSyncItems(storyboard: StoryboardDocument) {
         id: shot.id,
         title: `镜头 ${shot.order || index + 1} 口型`,
         prompt: `同步镜头 ${shot.order || index + 1} 的角色口型`,
-        sourceItems: [
+        dependencyItems: [
+          { type: "shot" as const, id: shot.id },
+          ...sourceSpeechIds.map((id) => ({ type: "speech" as const, id })),
+        ],
+        referenceItems: [
           { type: "shot" as const, id: shot.id },
           ...sourceSpeechIds.map((id) => ({ type: "speech" as const, id })),
         ],
@@ -241,6 +291,7 @@ function storyboardLipSyncItems(storyboard: StoryboardDocument) {
         speechIds,
         characterId,
         shotDuration: shot.duration,
+        optional: true,
       },
     ];
   });
@@ -299,24 +350,27 @@ function storyboardShotMaterialSourceItems(
   }));
 }
 
-function storyboardShotVideoSourceItems(
+function storyboardShotVideoSources(
   storyboard: StoryboardDocument,
   shot: StoryboardShot,
   index: number,
 ) {
   const previousShot = index > 0 ? storyboard.shots[index - 1] : undefined;
-  return [
-    { type: "shot_image" as const, id: shot.id },
-    ...(shot.continue_previous && previousShot
-      ? [{ type: "shot" as const, id: previousShot.id }]
-      : []),
-  ];
+  if (shot.continue_previous && previousShot) {
+    return {
+      dependencyItems: [{ type: "shot" as const, id: previousShot.id }],
+      referenceItems: [],
+    };
+  }
+  return {
+    dependencyItems: [],
+    referenceItems: [{ type: "shot_image" as const, id: shot.id }],
+  };
 }
 
 function storyboardShotImagePrompt(
   storyboard: StoryboardDocument,
   shot: StoryboardShot,
-  options: StoryboardDerivedOptions,
 ) {
   const referenceOrder = storyboardShotMaterials(storyboard, shot)
     .map(
@@ -337,31 +391,37 @@ function storyboardShotImagePrompt(
     shot.camera_instruction.trim()
       ? `镜头语言：${shot.camera_instruction.trim()}`
       : "",
-    storyboardVisibleFaceConstraint(shot, options),
+    storyboardVisibleFaceConstraint(shot),
     `画幅：${storyboard.aspect_ratio}`,
     "画面中不要出现字幕、对白文字、水印或界面元素",
   ].filter(Boolean);
-  return storyboardPromptWithStyle(storyboard, parts.join("。"));
+  return storyboardPromptWithStyle(storyboard, joinStoryboardPromptParts(parts));
 }
 
 function storyboardVideoPrompt(
   storyboard: StoryboardDocument,
   shot: StoryboardShot,
-  options: StoryboardDerivedOptions,
 ) {
   const basePrompt =
     shot.video_prompt.trim() || storyboardShotFallbackPrompt(shot);
   const parts = [
     basePrompt,
     shot.continue_previous
-      ? "承接上一镜头的结束状态，保持人物、服装、道具、场景光线和动作方向一致，但不要重复上一镜头内容"
+      ? `使用上一镜头真实尾帧继续生成。连续性锚点：${shot.continuity_anchor}。保持人物、服装、道具、场景光线和动作方向一致，但不要重复上一镜头内容`
       : "这是新的镜头段落，按当前镜头素材和描述建立画面",
-    storyboardVisibleFaceConstraint(shot, options),
+    storyboardVisibleFaceConstraint(shot),
     `画幅：${storyboard.aspect_ratio}`,
     "不生成可辨识对白、旁白、字幕或背景音乐，只保留环境声、动作声和不可辨识的人物声音",
     `时长 ${shot.duration} 秒`,
   ].filter(Boolean);
-  return storyboardPromptWithStyle(storyboard, parts.join("。"));
+  return storyboardPromptWithStyle(storyboard, joinStoryboardPromptParts(parts));
+}
+
+function joinStoryboardPromptParts(parts: string[]) {
+  return parts
+    .map((part) => part.trim().replace(/[。！？!?；;，,：:]+$/g, ""))
+    .filter(Boolean)
+    .join("。");
 }
 
 function storyboardShotImageParamValues(storyboard: StoryboardDocument) {
@@ -380,9 +440,8 @@ function storyboardVideoParamValues(
 
 function storyboardVisibleFaceConstraint(
   shot: StoryboardShot,
-  options: StoryboardDerivedOptions,
 ) {
-  if (!options.enableLipSync || !storyboardHasVisibleDialogue(shot)) {
+  if (!storyboardHasVisibleDialogue(shot)) {
     return "";
   }
   const speakerID = [...storyboardVisibleSpeakerIds(shot)][0];

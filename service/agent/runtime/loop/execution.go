@@ -9,14 +9,17 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 	energonmodel "github.com/dever-package/bot/model/energon"
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
+	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
+	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 type executionSpec struct {
 	Agent              agentmodel.Agent
 	Power              energonmodel.Power
+	ModelLimits        energonservice.ModelLimits
 	SessionID          uint64
 	AssistantMessageID uint64
 	Prompt             string
@@ -48,29 +51,32 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 		requestedAt = startedAt
 	}
 	runtimeAgent := spec.Agent
+	runtimeConfig := runtimeconfig.Load(ctx)
 	// The assembled prompt is persisted separately and is the only prompt used
 	// after preparation. Avoid copying the original setting into every snapshot.
 	runtimeAgent.Prompt = ""
 	current := execution{
-		requestID:          requestID,
-		requestedAt:        requestedAt,
-		startedAt:          startedAt,
-		agent:              runtimeAgent,
-		power:              spec.Power,
-		sessionID:          spec.SessionID,
-		assistantMessageID: spec.AssistantMessageID,
-		prompt:             spec.Prompt,
-		input:              spec.Input,
-		history:            spec.History,
-		transport:          spec.Transport,
-		persistChat:        spec.PersistChat,
-		onStream:           spec.OnStream,
-		mediaReferences:    append([]runtimeprovider.MediaReference(nil), spec.MediaReferences...),
-		snapshotHistoryLen: len(spec.History),
-		snapshotMediaLen:   len(spec.MediaReferences),
-		scope:              spec.Scope,
-		billing:            spec.Billing,
-		priorKnowledgeUsed: spec.PriorKnowledgeUsed,
+		requestID:            requestID,
+		requestedAt:          requestedAt,
+		startedAt:            startedAt,
+		agent:                runtimeAgent,
+		power:                spec.Power,
+		modelLimits:          spec.ModelLimits,
+		workingContextTokens: runtimeConfig.WorkingContextTokens,
+		sessionID:            spec.SessionID,
+		assistantMessageID:   spec.AssistantMessageID,
+		prompt:               spec.Prompt,
+		input:                spec.Input,
+		history:              spec.History,
+		transport:            spec.Transport,
+		persistChat:          spec.PersistChat,
+		onStream:             spec.OnStream,
+		mediaReferences:      append([]runtimeprovider.MediaReference(nil), spec.MediaReferences...),
+		snapshotHistoryLen:   len(spec.History),
+		snapshotMediaLen:     len(spec.MediaReferences),
+		scope:                spec.Scope,
+		billing:              spec.Billing,
+		priorKnowledgeUsed:   spec.PriorKnowledgeUsed,
 	}
 	current.checkpoint = initialCheckpoint(current)
 	current.checkpoint.RequiredToolName = strings.TrimSpace(spec.RequiredToolName)

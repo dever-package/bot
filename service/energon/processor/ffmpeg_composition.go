@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	ffmpegCompositionVersion       = 2
+	ffmpegCompositionVersion       = 3
 	ffmpegCompositionMaxClips      = 50
 	ffmpegCompositionVideoPadFloor = 1.0
 	ffmpegCompositionVideoPadRatio = 0.1
@@ -33,9 +33,9 @@ type ffmpegCompositionClip struct {
 	VisualVideo      string                      `json:"visual_video"`
 	OriginalAudio    string                      `json:"original_audio_source"`
 	Duration         float64                     `json:"duration"`
-	Subtitle         string                      `json:"subtitle"`
 	OriginalVolume   float64                     `json:"original_volume"`
 	SpeechTracks     []ffmpegCompositionSpeech   `json:"speech_tracks"`
+	SubtitleTracks   []ffmpegCompositionSubtitle `json:"subtitle_tracks"`
 	TransitionToNext ffmpegCompositionTransition `json:"transition_to_next"`
 }
 
@@ -47,6 +47,15 @@ type ffmpegCompositionSpeech struct {
 	CharacterID string  `json:"character_id"`
 	Text        string  `json:"text"`
 	Volume      float64 `json:"volume"`
+}
+
+type ffmpegCompositionSubtitle struct {
+	ID        string  `json:"id"`
+	Text      string  `json:"text"`
+	StartTime float64 `json:"start_time"`
+	EndTime   float64 `json:"end_time"`
+	SpeechID  string  `json:"speech_id"`
+	Source    string  `json:"source"`
 }
 
 type ffmpegCompositionTransition struct {
@@ -471,6 +480,9 @@ func buildFFmpegCompositionFilters(
 		videoLabel = nextVideoLabel
 		audioLabel = nextAudioLabel
 	}
+	if err := validateFFmpegCompositionSpeechTimeline(clips, transitionDurations); err != nil {
+		return nil, "", "", 0, err
+	}
 
 	subtitlePath, err := writeFFmpegCompositionSubtitles(workspace, clips, transitionDurations)
 	if err != nil {
@@ -487,6 +499,28 @@ func buildFFmpegCompositionFilters(
 		videoLabel = outputVideoLabel
 	}
 	return filters, videoLabel, audioLabel, totalDuration, nil
+}
+
+func validateFFmpegCompositionSpeechTimeline(
+	clips []ffmpegPreparedClip,
+	transitionDurations []float64,
+) error {
+	intervals := make([]ffmpegSpeechInterval, 0)
+	clipStart := 0.0
+	for index, clip := range clips {
+		for _, speech := range clip.SpeechTracks {
+			intervals = append(intervals, ffmpegSpeechInterval{
+				ID:        clip.Clip.ID + ":" + speech.Track.ID,
+				StartTime: clipStart + speech.Track.StartTime,
+				Duration:  speech.Duration,
+			})
+		}
+		clipStart += clip.Duration
+		if index < len(transitionDurations) {
+			clipStart -= transitionDurations[index]
+		}
+	}
+	return validateFFmpegSpeechIntervals("整部视频", intervals)
 }
 
 func normalizeFFmpegTransitionDuration(previous ffmpegPreparedClip, next ffmpegPreparedClip) (float64, error) {
@@ -514,38 +548,43 @@ func writeFFmpegCompositionSubtitles(
 	sequence := 0
 	start := 0.0
 	for index, clip := range clips {
-		hasSpeechSubtitle := false
-		orderedSpeech := append([]ffmpegPreparedSpeech(nil), clip.SpeechTracks...)
-		sort.SliceStable(orderedSpeech, func(left, right int) bool {
-			return orderedSpeech[left].Track.StartTime < orderedSpeech[right].Track.StartTime
+		orderedSubtitles := append([]ffmpegCompositionSubtitle(nil), clip.Clip.SubtitleTracks...)
+		sort.SliceStable(orderedSubtitles, func(left, right int) bool {
+			return orderedSubtitles[left].StartTime < orderedSubtitles[right].StartTime
 		})
-		for _, speech := range orderedSpeech {
-			text := strings.TrimSpace(strings.ReplaceAll(speech.Track.Text, "\r", ""))
+		for _, subtitle := range orderedSubtitles {
+			text := strings.TrimSpace(strings.ReplaceAll(subtitle.Text, "\r", ""))
 			if text == "" {
-				continue
+				return "", fmt.Errorf("镜头“%s”的字幕文本不能为空", clip.Clip.Title)
 			}
-			hasSpeechSubtitle = true
+			startTime := subtitle.StartTime
+			endTime := subtitle.EndTime
+			if strings.TrimSpace(subtitle.SpeechID) != "" {
+				matched := false
+				for _, speech := range clip.SpeechTracks {
+					if speech.Track.ID != subtitle.SpeechID {
+						continue
+					}
+					startTime = speech.Track.StartTime
+					endTime = startTime + speech.Duration
+					matched = true
+					break
+				}
+				if !matched {
+					return "", fmt.Errorf("镜头“%s”的字幕未找到对应语音 %s", clip.Clip.Title, subtitle.SpeechID)
+				}
+			}
+			if startTime < 0 || endTime <= startTime || endTime > clip.Duration+0.02 {
+				return "", fmt.Errorf("镜头“%s”的字幕时间范围无效", clip.Clip.Title)
+			}
 			sequence++
 			writeFFmpegSRTEntry(
 				&content,
 				sequence,
-				start+speech.Track.StartTime,
-				start+speech.Track.StartTime+speech.Duration,
+				start+startTime,
+				start+endTime,
 				text,
 			)
-		}
-		if !hasSpeechSubtitle {
-			subtitle := strings.TrimSpace(strings.ReplaceAll(clip.Clip.Subtitle, "\r", ""))
-			if subtitle != "" {
-				sequence++
-				writeFFmpegSRTEntry(
-					&content,
-					sequence,
-					start,
-					start+clip.Duration,
-					subtitle,
-				)
-			}
 		}
 		start += clip.Duration
 		if index < len(transitionDurations) {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	assetmodel "github.com/dever-package/bot/model/asset"
+	"github.com/shemic/dever/orm"
 )
 
 func ensureAssetMutable(asset *assetmodel.Asset) error {
@@ -25,16 +26,31 @@ func (s Service) MoveTeamAssetToTrash(ctx context.Context, teamID uint64, assetI
 	}
 
 	deletedAt := time.Now()
-	affected := assetmodel.NewAssetModel().Update(ctx, map[string]any{
-		"id":      asset.ID,
-		"team_id": teamID,
-		"status":  assetmodel.StatusCurrent,
-	}, map[string]any{
-		"status":     assetmodel.StatusDeleted,
-		"deleted_at": deletedAt,
-	})
-	if affected == 0 {
-		return nil, fmt.Errorf("资产不存在或已不可用")
+	if err := orm.Transaction(ctx, func(tx context.Context) error {
+		assetModel := assetmodel.NewAssetModel()
+		if asset.Kind == assetmodel.KindCollection {
+			assetModel.Update(tx, map[string]any{
+				"collection_id": asset.ID,
+				"team_id":       teamID,
+				"status":        assetmodel.StatusCurrent,
+			}, map[string]any{
+				"status":     assetmodel.StatusDeleted,
+				"deleted_at": deletedAt,
+			})
+		}
+		if assetModel.Update(tx, map[string]any{
+			"id":      asset.ID,
+			"team_id": teamID,
+			"status":  assetmodel.StatusCurrent,
+		}, map[string]any{
+			"status":     assetmodel.StatusDeleted,
+			"deleted_at": deletedAt,
+		}) == 0 {
+			return fmt.Errorf("资产不存在或已不可用")
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return map[string]any{"id": asset.ID, "deleted_at": deletedAt}, nil
 }
@@ -51,16 +67,32 @@ func (s Service) RestoreTeamAsset(ctx context.Context, teamID uint64, assetID ui
 		return nil, fmt.Errorf("相同来源已有新资产，无法恢复当前资产")
 	}
 
-	affected := assetmodel.NewAssetModel().Update(ctx, map[string]any{
-		"id":      asset.ID,
-		"team_id": teamID,
-		"status":  assetmodel.StatusDeleted,
-	}, map[string]any{
-		"status":     assetmodel.StatusCurrent,
-		"deleted_at": nil,
-	})
-	if affected == 0 {
-		return nil, fmt.Errorf("资产不在回收站")
+	if err := orm.Transaction(ctx, func(tx context.Context) error {
+		assetModel := assetmodel.NewAssetModel()
+		if assetModel.Update(tx, map[string]any{
+			"id":      asset.ID,
+			"team_id": teamID,
+			"status":  assetmodel.StatusDeleted,
+		}, map[string]any{
+			"status":     assetmodel.StatusCurrent,
+			"deleted_at": nil,
+		}) == 0 {
+			return fmt.Errorf("资产不在回收站")
+		}
+		if asset.Kind == assetmodel.KindCollection && asset.DeletedAt != nil {
+			assetModel.Update(tx, map[string]any{
+				"collection_id": asset.ID,
+				"team_id":       teamID,
+				"status":        assetmodel.StatusDeleted,
+				"deleted_at":    *asset.DeletedAt,
+			}, map[string]any{
+				"status":     assetmodel.StatusCurrent,
+				"deleted_at": nil,
+			})
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	updated := s.Find(ctx, asset.ID)
 	if updated == nil {
@@ -71,16 +103,18 @@ func (s Service) RestoreTeamAsset(ctx context.Context, teamID uint64, assetID ui
 
 func hasAssetIdentityConflict(ctx context.Context, asset *assetmodel.Asset) bool {
 	filter := assetIdentityFilter(SaveVersionRequest{
-		ProjectID:   asset.ProjectID,
-		BodyID:      asset.BodyID,
-		TeamID:      asset.TeamID,
-		FlowID:      asset.FlowID,
-		AssetCateID: asset.AssetCateID,
-		NodeKey:     asset.NodeKey,
-		SourceType:  asset.SourceType,
-		SourceID:    asset.SourceID,
-		Name:        asset.Name,
-		Role:        NormalizeRole(asset.Role),
+		ProjectID:    asset.ProjectID,
+		BodyID:       asset.BodyID,
+		TeamID:       asset.TeamID,
+		FlowID:       asset.FlowID,
+		AssetCateID:  asset.AssetCateID,
+		CollectionID: asset.CollectionID,
+		NodeKey:      asset.NodeKey,
+		SourceType:   asset.SourceType,
+		SourceID:     asset.SourceID,
+		Name:         asset.Name,
+		Kind:         asset.Kind,
+		Role:         NormalizeRole(asset.Role),
 	})
 	filter["id"] = map[string]any{"neq": asset.ID}
 	return assetmodel.NewAssetModel().Find(ctx, filter) != nil

@@ -99,6 +99,25 @@
         }
       },
       {
+        "type": "form-input",
+        "name": "日常工作上下文",
+        "placeholder": "例如：128K",
+        "value": "form.working_context_tokens",
+        "mode": "form",
+        "info": "所有智能体日常请求共用的软窗口。实际值不会超过来源服务硬窗口；单次必要输入更大时，runtime 只为该次请求临时扩容。支持 K、M 简写。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "日常工作上下文不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "basic",
+          "controlClassName": "max-w-[220px]"
+        }
+      },
+      {
         "type": "form-number",
         "name": "并行运行数",
         "placeholder": "例如：16",
@@ -385,9 +404,11 @@
   },
   "data": {
     "form": {
+      "service": "bot.agent.setting.AgentHook.AttachRuntimeConfigForm",
       "id": 1,
       "default_max_auto_steps": 5,
       "hard_max_auto_steps": 8,
+      "working_context_tokens": "128K",
       "run_worker_concurrency": 16,
       "artifact_worker_concurrency": 8,
       "artifact_per_tool_concurrency": 4,

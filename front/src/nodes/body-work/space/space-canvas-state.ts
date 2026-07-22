@@ -54,7 +54,8 @@ type PersistedCanvasNode = {
     item_type: string;
     item_id: string;
     generated_prompt?: string;
-    source_node_ids?: string[];
+    dependency_node_ids?: string[];
+    reference_node_ids?: string[];
     shot_id?: string;
     speech_id?: string;
     speech_ids?: string[];
@@ -63,6 +64,8 @@ type PersistedCanvasNode = {
     speaker_mode?: string;
     start_time?: number;
     shot_duration?: number;
+    continuity_anchor?: string;
+    optional?: boolean;
     source_signature?: string;
     result_source_signature?: string;
     stale?: boolean;
@@ -164,9 +167,8 @@ function persistedCanvasNode(
       ...(item.generatedPrompt
         ? { generated_prompt: item.generatedPrompt }
         : {}),
-      ...(item.sourceNodeIds?.length
-        ? { source_node_ids: item.sourceNodeIds }
-        : {}),
+      dependency_node_ids: item.dependencyNodeIds || [],
+      reference_node_ids: item.referenceNodeIds || [],
       ...(item.shotId ? { shot_id: item.shotId } : {}),
       ...(item.speechId ? { speech_id: item.speechId } : {}),
       ...(item.speechIds?.length ? { speech_ids: item.speechIds } : {}),
@@ -179,6 +181,10 @@ function persistedCanvasNode(
       ...(Number.isFinite(item.shotDuration)
         ? { shot_duration: item.shotDuration }
         : {}),
+      ...(item.continuityAnchor
+        ? { continuity_anchor: item.continuityAnchor }
+        : {}),
+      ...(item.optional ? { optional: true } : {}),
       ...(item.sourceSignature
         ? { source_signature: item.sourceSignature }
         : {}),

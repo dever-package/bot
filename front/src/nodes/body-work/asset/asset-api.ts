@@ -71,6 +71,7 @@ export function loadAssetPage(input: {
   pageSize?: number;
   view?: AssetView;
   contentMode?: AssetContentMode;
+  collectionID?: number;
 }): Promise<AssetPage> {
   const normalizedInput = {
     ...input,
@@ -85,6 +86,7 @@ export function loadAssetPage(input: {
       source_id: normalizedInput.filters.sourceID || undefined,
       project_id: normalizedInput.filters.projectID || undefined,
       asset_cate_id: normalizedInput.filters.assetCateID || undefined,
+      collection_id: normalizedInput.collectionID || undefined,
       node_key: normalizedInput.filters.nodeKey || undefined,
       role: normalizedInput.filters.role || undefined,
       kind: normalizedInput.filters.kind || undefined,
@@ -221,6 +223,7 @@ export function normalizeAssetRecord(value: any): AssetRecord {
     teamID: numberValue(value?.team_id),
     flowID: numberValue(value?.flow_id),
     assetCateID: numberValue(value?.asset_cate_id),
+    collectionID: numberValue(value?.collection_id),
     nodeKey: textValue(value?.node_key),
     sourceType: textValue(value?.source_type) as AssetSourceType,
     sourceID: numberValue(value?.source_id),
@@ -232,10 +235,26 @@ export function normalizeAssetRecord(value: any): AssetRecord {
     versionID: numberValue(value?.version_id),
     status: textValue(value?.status),
     summary: textValue(value?.summary || version?.summary),
+    collectionCount: nonNegativeNumber(value?.collection_count),
+    collectionPreviews: toRows(value?.collection_previews)
+      .map(normalizeCollectionPreview)
+      .filter((preview): preview is NonNullable<typeof preview> => Boolean(preview)),
     createdAt: textValue(value?.created_at),
     deletedAt: textValue(value?.deleted_at),
     version,
   };
+}
+
+function normalizeCollectionPreview(value: any) {
+  const kind = textValue(value?.kind);
+  if ((kind !== "image" && kind !== "video") || !value?.content) {
+    return null;
+  }
+  return {
+    id: numberValue(value?.id),
+    kind,
+    content: value.content,
+  } as const;
 }
 
 function normalizeVersion(value: any): AssetVersion {

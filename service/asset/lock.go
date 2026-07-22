@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	assetmodel "github.com/dever-package/bot/model/asset"
 	workspacemodel "github.com/dever-package/bot/model/workspace"
 )
 
@@ -115,6 +116,10 @@ func assetSaveLockKey(req SaveVersionRequest) string {
 	} else if strings.TrimSpace(req.Name) == "" {
 		return ""
 	}
+	kindScope := "asset"
+	if req.Kind == assetmodel.KindCollection {
+		kindScope = "collection"
+	}
 	parts := []string{
 		"asset_save",
 		fmt.Sprintf("asset:%d", req.AssetID),
@@ -126,6 +131,7 @@ func assetSaveLockKey(req SaveVersionRequest) string {
 		"source_type:" + strings.TrimSpace(req.SourceType),
 		fmt.Sprintf("source_id:%d", req.SourceID),
 		"role:" + strings.TrimSpace(req.Role),
+		"kind_scope:" + kindScope,
 		identity,
 	}
 	sum := sha1.Sum([]byte(strings.Join(parts, "\x1f")))

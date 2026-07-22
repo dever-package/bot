@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	canvasVideoCompositionVersion  = 2
+	canvasVideoCompositionVersion  = 3
 	canvasVideoCompositionMaxClips = 50
 )
 
@@ -90,14 +90,15 @@ func resolveCanvasVideoClip(
 		return nil, err
 	}
 
+	duration := canvasFloat64Value(raw["duration"])
 	clip := map[string]any{
 		"id":                 textValue(raw["id"]),
 		"title":              firstText(raw["title"], label),
 		"visual_video":       visualVideo,
-		"duration":           canvasFloat64Value(raw["duration"]),
-		"subtitle":           textValue(raw["subtitle"]),
+		"duration":           duration,
 		"original_volume":    boundedCanvasVolume(firstPresent(raw["original_volume"], raw["originalVolume"]), 1),
 		"speech_tracks":      []any{},
+		"subtitle_tracks":    []any{},
 		"transition_to_next": transition,
 	}
 	if originalRaw := mapValue(firstPresent(raw["original_audio_source"], raw["originalAudioSource"])); len(originalRaw) > 0 {
@@ -124,6 +125,15 @@ func resolveCanvasVideoClip(
 		return nil, err
 	}
 	clip["speech_tracks"] = tracks
+	subtitleTracks, err := resolveCanvasVideoSubtitleTracks(
+		label,
+		duration,
+		sliceValue(firstPresent(raw["subtitle_tracks"], raw["subtitleTracks"])),
+	)
+	if err != nil {
+		return nil, err
+	}
+	clip["subtitle_tracks"] = subtitleTracks
 	return clip, nil
 }
 
@@ -168,6 +178,46 @@ func resolveCanvasVideoSpeechTracks(
 			"character_id": textValue(firstPresent(raw["character_id"], raw["characterId"])),
 			"text":         textValue(raw["text"]),
 			"volume":       boundedCanvasVolume(raw["volume"], 1),
+		})
+	}
+	return tracks, nil
+}
+
+func resolveCanvasVideoSubtitleTracks(
+	clipLabel string,
+	clipDuration float64,
+	rawTracks []any,
+) ([]any, error) {
+	tracks := make([]any, 0, len(rawTracks))
+	usedIDs := map[string]bool{}
+	for index, value := range rawTracks {
+		raw := mapValue(value)
+		trackID := textValue(raw["id"])
+		text := textValue(raw["text"])
+		if trackID == "" || usedIDs[trackID] || text == "" {
+			return nil, fmt.Errorf("%s第 %d 条字幕轨配置无效", clipLabel, index+1)
+		}
+		usedIDs[trackID] = true
+		startTime := canvasFloat64Value(firstPresent(raw["start_time"], raw["startTime"]))
+		endTime := canvasFloat64Value(firstPresent(raw["end_time"], raw["endTime"]))
+		speechID := firstText(raw["speech_id"], raw["speechId"])
+		if startTime < 0 || startTime >= clipDuration {
+			return nil, fmt.Errorf("%s第 %d 条字幕开始时间超出镜头范围", clipLabel, index+1)
+		}
+		if speechID == "" && (endTime <= startTime || endTime > clipDuration) {
+			return nil, fmt.Errorf("%s第 %d 条字幕结束时间超出镜头范围", clipLabel, index+1)
+		}
+		source := strings.ToLower(textValue(raw["source"]))
+		if source != "speech" && source != "caption" {
+			return nil, fmt.Errorf("%s第 %d 条字幕来源无效", clipLabel, index+1)
+		}
+		tracks = append(tracks, map[string]any{
+			"id":         trackID,
+			"text":       text,
+			"start_time": startTime,
+			"end_time":   endTime,
+			"speech_id":  speechID,
+			"source":     source,
 		})
 	}
 	return tracks, nil

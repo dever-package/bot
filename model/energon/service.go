@@ -7,15 +7,17 @@ import (
 )
 
 type Service struct {
-	ID         uint64    `dorm:"primaryKey;autoIncrement;comment:服务ID"`
-	ProviderID uint64    `dorm:"type:bigint;not null;default:0;comment:来源"`
-	AccountID  uint64    `dorm:"type:bigint;not null;default:0;comment:鉴权账号"`
-	Name       string    `dorm:"type:varchar(128);not null;comment:名称"`
-	Type       string    `dorm:"type:varchar(64);not null;comment:类型"`
-	Path       string    `dorm:"type:varchar(255);not null;default:'';comment:接口路径"`
-	Sort       int       `dorm:"type:int;not null;default:100;comment:排序"`
-	Status     int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	CreatedAt  time.Time `dorm:"comment:创建时间"`
+	ID                  uint64    `dorm:"primaryKey;autoIncrement;comment:服务ID"`
+	ProviderID          uint64    `dorm:"type:bigint;not null;default:0;comment:来源"`
+	AccountID           uint64    `dorm:"type:bigint;not null;default:0;comment:鉴权账号"`
+	Name                string    `dorm:"type:varchar(128);not null;comment:名称"`
+	Type                string    `dorm:"type:varchar(64);not null;comment:类型"`
+	ContextWindowTokens int       `dorm:"type:int;not null;default:0;comment:上下文窗口Token数"`
+	MaxOutputTokens     int       `dorm:"type:int;not null;default:0;comment:单次最大输出Token数"`
+	Path                string    `dorm:"type:varchar(255);not null;default:'';comment:接口路径"`
+	Sort                int       `dorm:"type:int;not null;default:100;comment:排序"`
+	Status              int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	CreatedAt           time.Time `dorm:"comment:创建时间"`
 }
 
 type ServiceIndex struct {

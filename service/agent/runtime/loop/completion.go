@@ -13,61 +13,55 @@ import (
 )
 
 const (
-	completionReviewToolName = "submit_completion_review"
-	maxCompletionReviews     = 2
-	completionReviewTimeout  = 20 * time.Second
+	completionReviewToolName  = "submit_completion_review"
+	completionReviewTimeout   = 8 * time.Second
+	completionReviewMaxTokens = 512
+	maxCompletionReviews      = 1
 )
 
 type completionReview struct {
-	Delivery   string
-	Status     string
-	NextAction string
-	NextTool   string
-}
-
-type completionReviewDecision struct {
 	Delivery    string
+	Missing     string
 	Interaction string
 }
 
-func shouldReviewCompletion(state *runState) bool {
-	if state == nil || state.completionReviews >= maxCompletionReviews {
-		return false
-	}
-	if state.awaitingDelivery {
-		return true
-	}
-	return state.modelStep == 1 && runtimeEventType(state.execution.input) == "interaction_resumed"
+func (review completionReview) needsContinuation() bool {
+	return review.Delivery != "complete" || review.Interaction != ""
 }
 
-func shouldReviewPresentSuggestions(state *runState, calls []botprotocol.ToolCall, requiredToolName string) bool {
-	if !shouldReviewCompletion(state) || len(calls) == 0 {
+func shouldReviewCompletion(state *runState, result modelStepResult) bool {
+	if state == nil || !state.completionReviewPending || state.completionReviews >= maxCompletionReviews {
 		return false
 	}
-	if strings.EqualFold(strings.TrimSpace(requiredToolName), runtimeprovider.PresentSuggestionsToolName) {
+	if hasStructuredCompletionDelivery(state, result.Output) {
 		return false
 	}
-	return strings.EqualFold(
-		strings.TrimSpace(calls[len(calls)-1].Name),
-		runtimeprovider.PresentSuggestionsToolName,
-	)
-}
-
-func hasQueuedArtifactDelivery(state *runState) bool {
-	if state == nil {
-		return false
-	}
-	for _, artifact := range artifactValues(state.artifacts["artifacts"]) {
-		if strings.EqualFold(strings.TrimSpace(botprotocol.AsText(artifact["status"])), "generating") {
-			return true
-		}
-	}
-	return false
+	return true
 }
 
 func runtimeEventType(input map[string]any) string {
 	event, _ := input["runtime_event"].(map[string]any)
 	return strings.ToLower(strings.TrimSpace(botprotocol.AsText(event["type"])))
+}
+
+func hasStructuredCompletionDelivery(state *runState, output map[string]any) bool {
+	if state == nil {
+		return false
+	}
+	if state.documentID > 0 || hasDeliverableArtifacts(state.artifacts["artifacts"]) {
+		return true
+	}
+	for _, key := range []string{"images", "videos", "audios", "files", "rich"} {
+		if hasDeliverableArtifacts(state.artifacts[key]) {
+			return true
+		}
+	}
+	for _, key := range []string{"interaction", "document", "artifacts", "images", "videos", "audios", "files", "rich"} {
+		if hasDeliverableArtifacts(output[key]) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s Service) inspectCompletion(
@@ -76,24 +70,35 @@ func (s Service) inspectCompletion(
 	state *runState,
 	result modelStepResult,
 ) (completionReview, error) {
+	reviewExecution := state.execution
+	reviewExecution.agent.MaxOutputTokens = completionReviewMaxTokens
+	reviewExecution.agent.Temperature = 0
+	// Completion review is runtime safety work. The provider cost remains in the
+	// Energon log, but the user is not charged a second fixed ability invocation.
+	reviewExecution.billing.Billable = false
+	reviewExecution.billing.ChargeID = 0
+	reviewInput := map[string]any{
+		"goal":             compactModelValue(state.execution.input, 4000),
+		"candidate_text":   completionCandidateText(state, result),
+		"candidate_output": compactModelValue(result.Output, 4000),
+		"runtime_state": map[string]any{
+			"model_step":        state.modelStep,
+			"tool_receipts":     len(state.toolReceipts),
+			"knowledge_used":    state.knowledgeUsed,
+			"document_id":       state.documentID,
+			"awaiting_delivery": state.awaitingDelivery,
+		},
+	}
 	reviewHistory := append([]any(nil), state.history...)
 	if state.modelStep == 1 {
 		reviewHistory = append(reviewHistory, userHistoryMessage(state.execution.input))
 	}
-	reviewInput := map[string]any{
-		"candidate_text":   strings.TrimSpace(result.Text),
-		"candidate_output": result.Output,
-	}
-	if toolCalls := botprotocol.ToolCallsValue(result.ToolCalls); len(toolCalls) > 0 {
-		reviewInput["candidate_tool_calls"] = toolCalls
-	}
-	structuredInteraction := completionInteractionFromToolCalls(result.ToolCalls)
 	reviewCtx, cancel := operationContext(ctx, completionReviewTimeout)
 	defer cancel()
 	reviewResult, err := s.callModelRequestWithRole(
 		reviewCtx,
 		controller,
-		state.execution,
+		reviewExecution,
 		modelRolePrompt(state.execution.prompt),
 		runtimeEventInput("completion_review", reviewInput),
 		reviewHistory,
@@ -101,7 +106,7 @@ func (s Service) inspectCompletion(
 		botprotocol.ForcedFunctionToolChoice(completionReviewToolName),
 		false,
 		"completion_review",
-		state.completionReviews+1,
+		state.completionReviews,
 	)
 	if err != nil {
 		return completionReview{}, err
@@ -114,136 +119,75 @@ func (s Service) inspectCompletion(
 		if parseErr != nil {
 			return completionReview{}, parseErr
 		}
-		decision := completionReviewDecision{
-			Delivery:    strings.ToLower(strings.TrimSpace(botprotocol.AsText(arguments["delivery"]))),
-			Interaction: strings.ToLower(strings.TrimSpace(botprotocol.AsText(arguments["interaction"]))),
-		}
-		if structuredInteraction != "" {
-			decision.Interaction = structuredInteraction
-		}
-		return resolveCompletionReview(decision)
+		review, resolveErr := resolveCompletionReview(
+			strings.ToLower(strings.TrimSpace(botprotocol.AsText(arguments["delivery"]))),
+			strings.TrimSpace(botprotocol.AsText(arguments["missing"])),
+			strings.ToLower(strings.TrimSpace(botprotocol.AsText(arguments["interaction"]))),
+		)
+		return review, resolveErr
 	}
 	return completionReview{}, fmt.Errorf("模型未提交完成检查结果")
 }
 
-func completionInteractionFromToolCalls(calls []botprotocol.ToolCall) string {
-	if len(calls) == 0 {
-		return ""
+func completionCandidateText(state *runState, result modelStepResult) string {
+	if state != nil && strings.TrimSpace(state.lastText) != "" {
+		return compactModelString(state.lastText, 12000)
 	}
-	switch strings.ToLower(strings.TrimSpace(calls[len(calls)-1].Name)) {
-	case runtimeprovider.AskUserToolName:
-		return runtimeprovider.AskUserToolName
-	case runtimeprovider.PresentSuggestionsToolName:
-		return runtimeprovider.PresentSuggestionsToolName
-	default:
-		return ""
-	}
+	return compactModelString(result.Text, 12000)
 }
 
-func resolveCompletionReview(decision completionReviewDecision) (completionReview, error) {
-	if decision.Delivery != "complete" && decision.Delivery != "incomplete" {
+func resolveCompletionReview(delivery string, missing string, interaction string) (completionReview, error) {
+	if delivery != "complete" && delivery != "incomplete" {
 		return completionReview{}, fmt.Errorf("完成检查交付状态无效")
 	}
-	switch decision.Interaction {
-	case runtimeprovider.AskUserToolName:
-		return completionReview{
-			Delivery:   decision.Delivery,
-			Status:     "continue",
-			NextAction: "收集候选响应要求用户提供的必要信息",
-			NextTool:   runtimeprovider.AskUserToolName,
-		}, nil
-	case runtimeprovider.PresentSuggestionsToolName, "none":
+	switch interaction {
+	case "", "none":
+		interaction = ""
+	case runtimeprovider.AskUserToolName, runtimeprovider.PresentSuggestionsToolName:
 	default:
 		return completionReview{}, fmt.Errorf("完成检查交互状态无效")
 	}
-	// Optional suggestions cannot replace the delivery promised by the current task.
-	if decision.Delivery == "incomplete" {
-		return completionReview{
-			Delivery:   decision.Delivery,
-			Status:     "continue",
-			NextAction: "继续完成候选响应中尚未交付的任务",
-		}, nil
+	// ask_user blocks delivery; optional suggestions can only follow completed delivery.
+	if interaction == runtimeprovider.AskUserToolName {
+		delivery = "incomplete"
 	}
-	switch decision.Interaction {
-	case runtimeprovider.PresentSuggestionsToolName:
-		return completionReview{
-			Delivery:   decision.Delivery,
-			Status:     "continue",
-			NextAction: "将候选响应中的可选下一步转为可点击建议",
-			NextTool:   runtimeprovider.PresentSuggestionsToolName,
-		}, nil
-	case "none":
-		return completionReview{Delivery: decision.Delivery, Status: "complete"}, nil
+	if delivery == "incomplete" && interaction == runtimeprovider.PresentSuggestionsToolName {
+		interaction = ""
 	}
-	return completionReview{}, fmt.Errorf("完成检查交互状态无效")
-}
-
-func (s Service) reviewPresentSuggestions(
-	ctx context.Context,
-	controller *runController,
-	state *runState,
-	result modelStepResult,
-) (bool, bool) {
-	if hasQueuedArtifactDelivery(state) {
-		return true, true
+	if delivery == "incomplete" && missing == "" {
+		missing = "当前要求尚未完整交付"
+	} else if delivery == "complete" {
+		missing = ""
 	}
-	review, err := s.inspectCompletion(ctx, controller, state, result)
-	if ctx.Err() != nil {
-		s.finishContext(controller, state)
-		return false, false
-	}
-	if err != nil {
-		logCompletionReviewError(state, err)
-		review = completionReview{
-			Delivery:   "incomplete",
-			Status:     "continue",
-			NextAction: "继续完成当前任务",
-		}
-	}
-	if review.Delivery == "complete" && review.NextTool != runtimeprovider.AskUserToolName {
-		return true, true
-	}
-	state.completionReviews++
-	if state.completionReviews >= maxCompletionReviews {
-		s.finish(state, finishOutcome{
-			status: runStatusFail, text: state.lastText,
-			message:    "模型连续未完成当前任务",
-			stepType:   "error",
-			stepTitle:  "任务未完成",
-			stepStatus: stepStatusFail,
-		})
-		return false, false
-	}
-	state.requiredToolName = review.NextTool
-	state.awaitingDelivery = review.NextTool == ""
-	return false, s.continueModelOutput(
-		state,
-		result,
-		completionContinuationInput(review.NextAction, review.NextTool),
-		"completion_terminal_rejected",
-		stepStatusWarning,
-	)
+	return completionReview{
+		Delivery:    delivery,
+		Missing:     missing,
+		Interaction: interaction,
+	}, nil
 }
 
 func completionReviewTool() map[string]any {
 	return botprotocol.FunctionToolDefinition(
 		completionReviewToolName,
-		"按照当前智能体设定和用户要求，审查 runtime_event 中的 candidate_text、candidate_output 和 candidate_tool_calls。结构化终态工具参数属于实际交付，不是正文预告。分别判断交付和交互，二者互不覆盖。",
+		"分别判断候选响应是否已经交付当前要求，以及是否仍需要结构化用户交互。两个结论相互独立，只依据完整语义和结构化结果，不使用固定词语、句式或正文格式作为判断规则。",
 		map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"delivery": map[string]any{
 					"type":        "string",
-					"description": "当前要求已实际交付为 complete；仅有计划、预告、进度或未兑现承诺为 incomplete。若当前步骤就是收集用户选择，有效的 present_suggestions 或 ask_user 参数即为结构化交付，不得仅因前置正文使用将来时判为 incomplete",
+					"description": "当前用户要求已实际交付为 complete；仍有未交付内容为 incomplete",
 					"enum":        []any{"complete", "incomplete"},
+				},
+				"missing": map[string]any{
+					"type": "string", "description": "incomplete 时说明尚未交付的具体内容；complete 时留空",
 				},
 				"interaction": map[string]any{
 					"type":        "string",
-					"description": "优先按 candidate_tool_calls 判断：存在 ask_user 为 ask_user，存在 present_suggestions 为 present_suggestions；没有结构化交互工具时，再根据正文判断。确实没有用户交互才为 none",
+					"description": "缺少完成任务所必需的用户信息时为 ask_user；任务已完成且候选响应提供可供用户选择的后续方向时为 present_suggestions；无需结构化交互时为 none",
 					"enum":        []any{"none", runtimeprovider.AskUserToolName, runtimeprovider.PresentSuggestionsToolName},
 				},
 			},
-			"required":             []any{"delivery", "interaction"},
+			"required":             []any{"delivery", "missing", "interaction"},
 			"additionalProperties": false,
 		},
 		false,
@@ -254,9 +198,7 @@ func logCompletionReviewError(state *runState, err error) {
 	if state == nil || err == nil {
 		return
 	}
-	dlog.ErrorFields("agent_completion_review", "主模型完成检查失败，执行一次保守续跑", dlog.Fields{
-		"run_id":     state.execution.runID,
-		"request_id": state.execution.requestID,
-		"error":      err.Error(),
+	dlog.ErrorFields("agent_completion_review", "主模型完成检查失败，接受当前候选输出", dlog.Fields{
+		"run_id": state.execution.runID, "request_id": state.execution.requestID, "error": err.Error(),
 	})
 }

@@ -415,16 +415,9 @@ function VideoComposeClipInspector({
   return (
     <div className="ws-video-compose-inspector nodrag nowheel">
       <strong>
-        {panel === "subtitle" ? "字幕" : panel === "sound" ? "声音" : "转场"}
+        {panel === "sound" ? "声音" : "转场"}
       </strong>
-      {panel === "subtitle" ? (
-        <textarea
-          value={clip.subtitle}
-          readOnly={readonly}
-          placeholder="输入当前镜头字幕..."
-          onChange={(event) => onChange({ subtitle: event.target.value })}
-        />
-      ) : panel === "sound" ? (
+      {panel === "sound" ? (
         <div className="ws-video-compose-sound-fields">
           <button type="button" disabled={readonly} onClick={onChooseOriginal}>
             <Volume2 size={13} />
@@ -524,15 +517,6 @@ function VideoComposeClipInspector({
               {clip.blockingIssues.map((issue) => (
                 <span key={issue}>{issue}</span>
               ))}
-              {clip.lipSyncRequired && !clip.useOriginalVideo ? (
-                <button
-                  type="button"
-                  disabled={readonly}
-                  onClick={() => onChange({ useOriginalVideo: true })}
-                >
-                  使用原视频
-                </button>
-              ) : null}
             </div>
           ) : null}
         </div>
@@ -742,10 +726,9 @@ function createVideoComposeClip(
     visualVideo: reference,
     originalAudioSource: reference,
     duration: 0,
-    subtitle: "",
     originalVolume: 1,
     speechTracks: [],
-    lipSyncRequired: false,
+    subtitleTracks: [],
     useOriginalVideo: false,
     blockingIssues: [],
     transitionToNext: {

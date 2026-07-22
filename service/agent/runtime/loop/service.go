@@ -151,6 +151,7 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 	var (
 		resolvedReferences runtimereference.Result
 		assembled          runtimecontext.Result
+		modelLimits        energonservice.ModelLimits
 		contextGroup       runtimeasync.Group
 	)
 	contextGroup.Go("解析输入引用", func() (currentErr error) {
@@ -164,6 +165,10 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 			Input:         inputText,
 			IncludeMemory: agent.MemoryEnabled,
 		})
+		return currentErr
+	})
+	contextGroup.Go("读取模型容量", func() (currentErr error) {
+		modelLimits, currentErr = s.gateway.ResolveModelLimits(ctx, power.Key)
 		return currentErr
 	})
 	if prepareErr := contextGroup.Wait(); prepareErr != nil {
@@ -184,7 +189,7 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 	toolReferences = withActiveSeriesReference(ctx, *session, toolReferences)
 	modelInput := runtimereference.ModelInput(input, parsedInput, resolvedReferences.Context)
 	if len(resolvedReferences.Media) > 0 {
-		powerConfig, configErr := s.gateway.PowerParamConfig(ctx, power.Key, 0)
+		powerConfig, configErr := s.gateway.RuntimePowerParamConfig(ctx, power.Key, 0)
 		if configErr == nil {
 			modelInput, configErr = bindResolvedMediaInput(
 				modelInput,
@@ -210,6 +215,7 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 	execution, err := s.createExecution(ctx, requestID, executionSpec{
 		Agent:              agent,
 		Power:              power,
+		ModelLimits:        modelLimits,
 		SessionID:          session.ID,
 		AssistantMessageID: turn.AssistantMessageID,
 		Prompt:             assembled.Prompt,

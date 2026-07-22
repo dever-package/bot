@@ -178,18 +178,19 @@ func (Workbench) PostUploadSaveAsset(c *server.Context) error {
 
 func (Workbench) GetAssets(c *server.Context) error {
 	data, err := workbenchRunner.Assets(c.Context(), assetservice.QueryRequest{
-		TeamID:      botapi.QueryUint64(c, "team_id", "teamId"),
-		SourceType:  botapi.QueryText(c, "source_type", "sourceType", "source"),
-		SourceID:    botapi.QueryUint64(c, "source_id", "sourceId"),
-		ProjectID:   botapi.QueryUint64(c, "project_id", "projectId"),
-		AssetCateID: botapi.QueryUint64(c, "asset_cate_id", "assetCateId"),
-		NodeKey:     botapi.QueryText(c, "node_key", "nodeKey"),
-		Role:        botapi.QueryText(c, "role"),
-		Kind:        botapi.QueryText(c, "kind", "type"),
-		View:        botapi.QueryText(c, "view"),
-		ContentMode: botapi.QueryText(c, "content_mode", "contentMode"),
-		Page:        int(botapi.QueryUint64(c, "page")),
-		PageSize:    int(botapi.QueryUint64(c, "page_size", "pageSize")),
+		TeamID:       botapi.QueryUint64(c, "team_id", "teamId"),
+		SourceType:   botapi.QueryText(c, "source_type", "sourceType", "source"),
+		SourceID:     botapi.QueryUint64(c, "source_id", "sourceId"),
+		ProjectID:    botapi.QueryUint64(c, "project_id", "projectId"),
+		AssetCateID:  botapi.QueryUint64(c, "asset_cate_id", "assetCateId"),
+		CollectionID: botapi.QueryUint64(c, "collection_id", "collectionId"),
+		NodeKey:      botapi.QueryText(c, "node_key", "nodeKey"),
+		Role:         botapi.QueryText(c, "role"),
+		Kind:         botapi.QueryText(c, "kind", "type"),
+		View:         botapi.QueryText(c, "view"),
+		ContentMode:  botapi.QueryText(c, "content_mode", "contentMode"),
+		Page:         int(botapi.QueryUint64(c, "page")),
+		PageSize:     int(botapi.QueryUint64(c, "page_size", "pageSize")),
 	})
 	return botapi.WriteJSON(c, data, err)
 }

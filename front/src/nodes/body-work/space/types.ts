@@ -332,6 +332,7 @@ export type CanvasStoryboardItemType =
   | "shot_image"
   | "shot"
   | "speech"
+  | "subtitle"
   | "lip_sync"
   | "video_compose";
 
@@ -340,7 +341,8 @@ export type CanvasStoryboardItemConfig = {
   itemType: CanvasStoryboardItemType;
   itemId: string;
   generatedPrompt: string;
-  sourceNodeIds?: string[];
+  dependencyNodeIds?: string[];
+  referenceNodeIds?: string[];
   shotId?: string;
   speechId?: string;
   speechIds?: string[];
@@ -349,6 +351,8 @@ export type CanvasStoryboardItemConfig = {
   speakerMode?: "visible" | "offscreen";
   startTime?: number;
   shotDuration?: number;
+  continuityAnchor?: string;
+  optional?: boolean;
   sourceSignature?: string;
   resultSourceSignature?: string;
   stale?: boolean;

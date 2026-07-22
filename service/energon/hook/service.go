@@ -9,6 +9,7 @@ import (
 	"github.com/shemic/dever/util"
 
 	botmodel "github.com/dever-package/bot/model/energon"
+	botcapacity "github.com/dever-package/bot/service/energon/capacity"
 	botinput "github.com/dever-package/bot/service/energon/input"
 	botpricing "github.com/dever-package/bot/service/energon/pricing"
 )
@@ -16,7 +17,9 @@ import (
 type ServiceHook struct{}
 
 func (ServiceHook) ProviderAttachServicePricingForm(c *server.Context, params []any) any {
-	record := cloneEnergonRecord(params)
+	record := serviceFormRecord(params)
+	record["context_window_tokens"] = botcapacity.Format(util.ToIntDefault(record["context_window_tokens"], 0))
+	record["max_output_tokens"] = botcapacity.Format(util.ToIntDefault(record["max_output_tokens"], 0))
 	endpoints := normalizeChildRecordRows(record["endpoints"])
 	if len(endpoints) == 0 {
 		return record
@@ -82,6 +85,7 @@ func (ServiceHook) ProviderBeforeSaveService(c *server.Context, params []any) an
 	if shouldNormalizeEnergonField(record, "path", partial) {
 		record["path"] = strings.TrimSpace(util.ToString(record["path"]))
 	}
+	normalizeServiceModelLimits(c, record, partial)
 	ensureDefaultRecordSort(record, partial)
 	ensureDefaultRecordStatus(record, partial)
 
@@ -100,6 +104,68 @@ func (ServiceHook) ProviderBeforeSaveService(c *server.Context, params []any) an
 	}
 
 	return record
+}
+
+func serviceFormRecord(params []any) map[string]any {
+	payload := cloneEnergonRecord(params)
+	if record, ok := payload["record"].(map[string]any); ok {
+		return util.CloneMap(record)
+	}
+	return payload
+}
+
+func normalizeServiceModelLimits(c *server.Context, record map[string]any, partial bool) {
+	serviceID := util.ToUint64(record["id"])
+	current := map[string]any{}
+	if serviceID > 0 {
+		current = botmodel.NewServiceModel().FindMap(c.Context(), map[string]any{"id": serviceID})
+	}
+	serviceType := strings.ToLower(util.ToStringTrimmed(record["type"]))
+	if serviceType == "" {
+		serviceType = strings.ToLower(util.ToStringTrimmed(current["type"]))
+	}
+	_, typeProvided := record["type"]
+	currentType := strings.ToLower(util.ToStringTrimmed(current["type"]))
+	typeChanged := typeProvided && currentType != "" && serviceType != currentType
+	if serviceType != "text" {
+		if !partial || typeChanged || shouldNormalizeEnergonField(record, "context_window_tokens", partial) {
+			record["context_window_tokens"] = 0
+		}
+		if !partial || typeChanged || shouldNormalizeEnergonField(record, "max_output_tokens", partial) {
+			record["max_output_tokens"] = 0
+		}
+		return
+	}
+	if partial && typeChanged {
+		if _, exists := record["context_window_tokens"]; !exists {
+			record["context_window_tokens"] = 0
+		}
+		if _, exists := record["max_output_tokens"]; !exists {
+			record["max_output_tokens"] = 0
+		}
+	}
+
+	contextTokens := util.ToIntDefault(current["context_window_tokens"], 0)
+	if shouldNormalizeEnergonField(record, "context_window_tokens", partial) {
+		parsed, err := botcapacity.Parse(record["context_window_tokens"])
+		if err != nil {
+			panicParamField("form.context_window_tokens", err.Error()+"。")
+		}
+		contextTokens = parsed
+		record["context_window_tokens"] = parsed
+	}
+	outputTokens := util.ToIntDefault(current["max_output_tokens"], 0)
+	if shouldNormalizeEnergonField(record, "max_output_tokens", partial) {
+		parsed, err := botcapacity.Parse(record["max_output_tokens"])
+		if err != nil {
+			panicParamField("form.max_output_tokens", err.Error()+"。")
+		}
+		outputTokens = parsed
+		record["max_output_tokens"] = parsed
+	}
+	if contextTokens > 0 && outputTokens > 0 && outputTokens >= contextTokens {
+		panicParamField("form.max_output_tokens", "单次最大输出 Token 数必须小于上下文窗口。")
+	}
 }
 
 func normalizeServiceAccount(c *server.Context, record map[string]any, partial bool) {

@@ -127,7 +127,7 @@ function blockFailedDependents(
 }
 
 function storyboardDependencies(node: SpaceCanvasNode) {
-  return node.storyboardItem?.sourceNodeIds || [];
+  return node.storyboardItem?.dependencyNodeIds || [];
 }
 
 function canvasGroupRunStatus(

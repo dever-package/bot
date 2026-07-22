@@ -24,34 +24,36 @@ import (
 )
 
 type execution struct {
-	runID              uint64
-	version            int
-	workerID           string
-	requestID          string
-	requestedAt        time.Time
-	startedAt          time.Time
-	claimedAt          time.Time
-	agent              agentmodel.Agent
-	power              energonmodel.Power
-	sessionID          uint64
-	assistantMessageID uint64
-	prompt             string
-	input              map[string]any
-	history            []any
-	registry           *runtimetool.Registry
-	transport          modelTransport
-	persistChat        bool
-	onStream           func(map[string]any)
-	completion         chan runCompletion
-	cleanup            func()
-	mediaReferences    []runtimeprovider.MediaReference
-	priorKnowledgeUsed bool
-	snapshotHistoryLen int
-	snapshotMediaLen   int
-	scope              runtimescope.Scope
-	billing            botprotocol.BillingContext
-	scopedContext      context.Context
-	checkpoint         runCheckpoint
+	runID                uint64
+	version              int
+	workerID             string
+	requestID            string
+	requestedAt          time.Time
+	startedAt            time.Time
+	claimedAt            time.Time
+	agent                agentmodel.Agent
+	power                energonmodel.Power
+	modelLimits          energonservice.ModelLimits
+	workingContextTokens int
+	sessionID            uint64
+	assistantMessageID   uint64
+	prompt               string
+	input                map[string]any
+	history              []any
+	registry             *runtimetool.Registry
+	transport            modelTransport
+	persistChat          bool
+	onStream             func(map[string]any)
+	completion           chan runCompletion
+	cleanup              func()
+	mediaReferences      []runtimeprovider.MediaReference
+	priorKnowledgeUsed   bool
+	snapshotHistoryLen   int
+	snapshotMediaLen     int
+	scope                runtimescope.Scope
+	billing              botprotocol.BillingContext
+	scopedContext        context.Context
+	checkpoint           runCheckpoint
 }
 
 type modelTransport struct {
@@ -76,6 +78,7 @@ type modelStepResult struct {
 	FirstDeltaAt        time.Time
 	ProviderFinishedAt  time.Time
 	Attempts            int
+	Budget              modelRequestBudget
 }
 
 type modelCallError struct {
@@ -194,13 +197,7 @@ func (s Service) runModelStep(ctx context.Context, controller *runController, st
 	if len(calls) == 0 {
 		return s.finishModelOutput(ctx, controller, state, result, stepLimits)
 	}
-	if shouldReviewPresentSuggestions(state, calls, requiredToolName) {
-		accepted, keepRunning := s.reviewPresentSuggestions(ctx, controller, state, result)
-		if !accepted {
-			return keepRunning
-		}
-	}
-
+	state.lengthContinuations = 0
 	maxSteps := stepLimits.withDelivery
 	if state.modelStep >= maxSteps && !endsWithTerminalToolCall(calls) {
 		state.MarkFinal(runStatusFail, state.lastText, nil, fmt.Sprintf("智能体达到最大步骤数 %d", maxSteps))
@@ -241,11 +238,13 @@ func (s Service) finishModelOutput(
 	if isLengthLimitedFinish(result.FinishMode) {
 		return s.continueLengthLimitedOutput(state, result, stepLimits)
 	}
+	state.lengthContinuations = 0
 	if state.awaitingDelivery && !modelStepHasDelivery(state, result) {
 		return s.continueMissingDelivery(state, result, stepLimits)
 	}
-	queuedArtifactDelivery := hasQueuedArtifactDelivery(state)
-	if shouldReviewCompletion(state) {
+	if shouldReviewCompletion(state, result) {
+		state.completionReviews++
+		state.completionReviewPending = false
 		review, err := s.inspectCompletion(ctx, controller, state, result)
 		if ctx.Err() != nil {
 			s.finishContext(controller, state)
@@ -253,52 +252,15 @@ func (s Service) finishModelOutput(
 		}
 		if err != nil {
 			logCompletionReviewError(state, err)
-			if queuedArtifactDelivery {
-				return s.finishImplicitModelOutput(state, result)
-			}
-			state.completionReviews++
-			if state.completionReviews >= maxCompletionReviews {
-				s.finish(state, finishOutcome{
-					status: runStatusFail, text: state.lastText,
-					message:    "模型完成检查连续失败",
-					stepType:   "error",
-					stepTitle:  "完成检查失败",
-					stepStatus: stepStatusFail,
-				})
-				return false
-			}
+			return s.finishImplicitModelOutput(state, result)
+		}
+		if review.needsContinuation() {
+			state.requiredToolName = review.Interaction
 			state.awaitingDelivery = true
 			return s.continueModelOutput(
 				state,
 				result,
-				completionContinuationInput("", ""),
-				"completion_continuation_fallback",
-				stepStatusWarning,
-			)
-		} else if review.Status == "continue" {
-			// 异步素材成功入队即完成本轮交付；显式交互仍按审查结果继续执行。
-			if queuedArtifactDelivery && review.NextTool == "" {
-				return s.finishImplicitModelOutput(state, result)
-			}
-			state.completionReviews++
-			state.requiredToolName = review.NextTool
-			if review.NextTool == "" {
-				if state.completionReviews >= maxCompletionReviews {
-					s.finish(state, finishOutcome{
-						status: runStatusFail, text: state.lastText,
-						message:    "模型连续未完成当前任务",
-						stepType:   "error",
-						stepTitle:  "任务未完成",
-						stepStatus: stepStatusFail,
-					})
-					return false
-				}
-				state.awaitingDelivery = true
-			}
-			return s.continueModelOutput(
-				state,
-				result,
-				completionContinuationInput(review.NextAction, review.NextTool),
+				completionContinuationInput(review.Missing, review.Interaction),
 				"completion_continuation",
 				stepStatusWarning,
 			)
@@ -327,6 +289,8 @@ func (s Service) finishImplicitModelOutput(state *runState, result modelStepResu
 	output["knowledge_used"] = state.knowledgeUsed
 	state.awaitingDelivery = false
 	state.deliveryContinuations = 0
+	state.lengthContinuations = 0
+	state.completionReviewPending = false
 	state.MarkFinal(runStatusSuccess, text, output, "")
 	if !s.commitFinalRuntimeStep(state, "model", modelStepTitle(result), result.Text, map[string]any{
 		"finish_reason": result.FinishMode,
@@ -347,11 +311,16 @@ func isLengthLimitedFinish(value string) bool {
 	}
 }
 
+const maxLengthContinuations = 2
+
 func (s Service) continueLengthLimitedOutput(state *runState, result modelStepResult, stepLimits modelStepLimits) bool {
 	currentStep := state.modelStep
-	maxSteps := stepLimits.current(state.awaitingDelivery)
-	if currentStep >= maxSteps {
-		message := fmt.Sprintf("模型输出因长度限制仍未完成，已达到最大步骤数 %d", maxSteps)
+	maxSteps := stepLimits.withDelivery
+	if currentStep >= maxSteps || state.lengthContinuations >= maxLengthContinuations {
+		message := fmt.Sprintf("模型输出因长度限制仍未完成，已达到自动续写上限 %d", maxLengthContinuations)
+		if currentStep >= maxSteps {
+			message = fmt.Sprintf("模型输出因长度限制仍未完成，已达到最大步骤数 %d", maxSteps)
+		}
 		output := map[string]any(result.Output)
 		if output == nil {
 			output = map[string]any{}
@@ -368,6 +337,8 @@ func (s Service) continueLengthLimitedOutput(state *runState, result modelStepRe
 		s.finishCheckpoint(state)
 		return false
 	}
+	state.lengthContinuations++
+	state.awaitingDelivery = true
 	return s.continueModelOutput(
 		state, result, lengthContinuationInput(), "length_continuation", stepStatusSuccess,
 	)
@@ -500,9 +471,6 @@ func (s Service) runToolStep(ctx context.Context, controller *runController, sta
 	if knowledgeResultResolved {
 		state.addKnowledgeNodeReferences(call.Name, completed.result.Content)
 	}
-	if completed.err != nil && isTerminalToolName(call.Name) {
-		state.requiredToolName = call.Name
-	}
 	if knowledgeResultResolved && strings.EqualFold(strings.TrimSpace(definition.Kind), "knowledge") {
 		state.knowledgeUsed = true
 	}
@@ -562,11 +530,12 @@ func (s Service) executeToolStep(ctx context.Context, controller *runController,
 	definition, _ := state.execution.registry.Definition(call.Name)
 	if validationErr := validateTerminalCall(state, call); validationErr != nil {
 		return toolStepResult{
-			err:     validationErr,
-			content: toolErrorContent(validationErr.Error()),
-			typeKey: "control",
-			title:   "终态工具调用无效",
-			status:  stepStatusWarning,
+			err:         validationErr,
+			receiptable: true,
+			content:     toolErrorContent(validationErr.Error()),
+			typeKey:     "control",
+			title:       "终态工具调用无效",
+			status:      stepStatusWarning,
 			payload: map[string]any{
 				"tool_call": firstToolCallValue(call),
 				"error":     validationErr.Error(),
@@ -846,10 +815,15 @@ func (s Service) callModelRequestAttempts(
 	toolChoice any,
 	publish bool,
 ) (modelStepResult, error) {
-	preparedInput := compactModelInput(input, false)
-	preparedHistory := compactModelHistory(role, preparedInput, history, tools, false)
+	preparedInput, preparedHistory, budget, prepareErr := prepareModelRequestWithFallback(
+		execution, role, input, history, tools,
+	)
+	if prepareErr != nil {
+		return modelStepResult{}, modelBudgetError(prepareErr)
+	}
 	result, err := s.callModelOnce(ctx, controller, execution, preparedInput, preparedHistory, role, tools, toolChoice, publish)
 	result.Attempts = 1
+	result.Budget = budget
 	if ctx.Err() != nil {
 		return result, err
 	}
@@ -860,14 +834,19 @@ func (s Service) callModelRequestAttempts(
 		return result, nil
 	}
 	if isContextOverflowError(err) {
-		preparedInput = compactModelInput(input, true)
-		preparedHistory = compactModelHistory(role, preparedInput, history, tools, true)
+		preparedInput, preparedHistory, budget, prepareErr = prepareModelRequest(
+			execution, role, input, history, tools, true,
+		)
+		if prepareErr != nil {
+			return result, modelBudgetError(prepareErr)
+		}
 	}
 	retried, retryErr := s.callModelOnce(ctx, controller, execution, preparedInput, preparedHistory, role, tools, toolChoice, publish)
 	if !result.ProviderRequestedAt.IsZero() {
 		retried.ProviderRequestedAt = result.ProviderRequestedAt
 	}
 	retried.Attempts = 2
+	retried.Budget = budget
 	return retried, retryErr
 }
 
@@ -909,6 +888,7 @@ func (s Service) callModelOnce(
 	defer cancel()
 	providerRequestedAt := time.Now()
 	childRequestID := uuid.NewString()
+	modelLimits := normalizedExecutionModelLimits(execution.modelLimits)
 	controller.SetChild(childRequestID)
 	defer controller.ClearChild(childRequestID)
 
@@ -918,8 +898,18 @@ func (s Service) callModelOnce(
 		Host:      execution.transport.Host,
 		Path:      execution.transport.Path,
 		Headers:   execution.transport.Headers,
-		Body:      buildGatewayBody(execution.agent, execution.power, role, input, history, tools, toolChoice, false),
-		Billing:   execution.billing,
+		Body: buildGatewayBody(
+			execution.agent,
+			execution.power,
+			modelLimits.MaxOutputTokens,
+			role,
+			input,
+			history,
+			tools,
+			toolChoice,
+			false,
+		),
+		Billing: execution.billing,
 	})
 	payload := response.Payload()
 	if int(frontstream.InputInt64(payload["status"], 0)) == botprotocol.ResponseStatusFail {
@@ -1076,11 +1066,7 @@ func loadModelStepLimits(ctx context.Context, agent agentmodel.Agent) modelStepL
 	if standard > hard {
 		standard = hard
 	}
-	withDelivery := standard
-	if withDelivery < hard {
-		withDelivery++
-	}
-	return modelStepLimits{standard: standard, withDelivery: withDelivery}
+	return modelStepLimits{standard: standard, withDelivery: hard}
 }
 
 func (s Service) finishContext(controller *runController, state *runState) {

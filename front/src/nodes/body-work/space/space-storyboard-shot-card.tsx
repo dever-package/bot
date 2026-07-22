@@ -15,6 +15,7 @@ import {
   STORYBOARD_MATERIAL_LABELS,
   storyboardHasVisibleDialogue,
   storyboardShotMaterials,
+  storyboardShotSubtitleTracks,
   storyboardSpeechLabel,
   type StoryboardDocument,
   type StoryboardMaterialType,
@@ -29,7 +30,6 @@ export function StoryboardShotCard({
   editable = false,
   dragging = false,
   dropPlacement,
-  lipSyncEnabled = false,
   onOpen,
   onDuplicate,
   onRemove,
@@ -45,7 +45,6 @@ export function StoryboardShotCard({
   editable?: boolean;
   dragging?: boolean;
   dropPlacement?: "before" | "after";
-  lipSyncEnabled?: boolean;
   onOpen: () => void;
   onDuplicate?: () => void;
   onRemove?: () => void;
@@ -82,7 +81,6 @@ export function StoryboardShotCard({
       <StoryboardShotCardBody
         shot={shot}
         storyboard={storyboard}
-        lipSyncEnabled={lipSyncEnabled}
       />
       <footer>
         <SpaceTooltip label={editable ? "编辑镜头" : "查看镜头"}>
@@ -160,14 +158,9 @@ export function StoryboardCompactShotCard({
   );
 }
 
-function StoryboardShotCardBody({
-  shot,
-  storyboard,
-  lipSyncEnabled,
-}: {
+function StoryboardShotCardBody({ shot, storyboard }: {
   shot: StoryboardShot;
   storyboard: StoryboardDocument;
-  lipSyncEnabled: boolean;
 }) {
   const speech = shot.speech.filter((item) => item.text.trim());
   const primarySpeech = speech[0];
@@ -177,7 +170,8 @@ function StoryboardShotCardBody({
       .map((material) => [material.id, material.name]),
   );
   const labels = [...new Set(speech.map(storyboardSpeechLabel))];
-  const lipSyncCandidate = lipSyncEnabled && storyboardHasVisibleDialogue(shot);
+  const subtitleCount = storyboardShotSubtitleTracks(shot).length;
+  const lipSyncCandidate = storyboardHasVisibleDialogue(shot);
   return (
     <>
       <div className="ws-storyboard-card-preview">
@@ -192,8 +186,9 @@ function StoryboardShotCardBody({
           {labels.map((label) => (
             <span key={label}>{label}</span>
           ))}
+          {subtitleCount ? <span>{subtitleCount} 条字幕</span> : null}
           {lipSyncCandidate ? (
-            <span className="is-lip-sync">口型候选</span>
+            <span className="is-lip-sync">可选口型</span>
           ) : null}
         </div>
         <p className="ws-storyboard-card-camera">

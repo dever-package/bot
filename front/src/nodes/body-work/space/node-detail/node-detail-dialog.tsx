@@ -780,9 +780,6 @@ export function NodeDetailDialog({
                   readonly={editorReadonly}
                   referenceItems={canvasReferenceItems}
                   storyboardWorkflowAction={storyboardWorkflowAction}
-                  lipSyncEnabled={booleanParamValue(
-                    node.composerDraft?.paramValues?.enable_lip_sync,
-                  )}
                   onConfirmStoryboard={confirmStoryboard}
                   onCreateStoryboardRevision={createStoryboardRevision}
                   onChange={draft.setDraft}
@@ -873,16 +870,6 @@ function createVersionRequestId(action: string, versionId: number) {
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return `${action}-${versionId}-${random}`.slice(0, 64);
-}
-
-function booleanParamValue(value: unknown) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-  const text = String(value ?? "")
-    .trim()
-    .toLowerCase();
-  return text === "1" || text === "true" || text === "yes" || text === "on";
 }
 
 function errorMessage(error: unknown, fallback: string) {

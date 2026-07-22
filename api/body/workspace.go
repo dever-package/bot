@@ -86,6 +86,7 @@ func (Workspace) GetCanvasExecutionList(c *server.Context) error {
 		RunIDs:      botapi.QueryText(c, "run_ids", "runIds"),
 		BeforeID:    botapi.QueryUint64(c, "before_id", "beforeId"),
 		Limit:       botapi.QueryInt(c, "limit"),
+		SummaryOnly: botapi.QueryText(c, "summary_only", "summaryOnly") == "1",
 	})
 	return botapi.WriteJSON(c, data, err)
 }

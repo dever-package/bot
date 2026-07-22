@@ -14,6 +14,7 @@ type MediaReference struct {
 	URL           string
 	Usage         string
 	StrictUsage   bool
+	Required      bool
 }
 
 type MediaReferenceBinding struct {
@@ -79,12 +80,21 @@ func BindMediaReferences(
 		reference.URL = strings.TrimSpace(reference.URL)
 		reference.Usage = strings.TrimSpace(reference.Usage)
 		if reference.Kind == "" || reference.URL == "" {
+			if reference.Required {
+				return MediaReferenceBindResult{}, fmt.Errorf("必需的媒体引用无效")
+			}
 			result.Unbound = append(result.Unbound, reference)
 			continue
 		}
 
 		param, explicit, matched := mediaReferenceTarget(paramByKey, params, reference)
 		if !matched {
+			if reference.Required {
+				return MediaReferenceBindResult{}, fmt.Errorf(
+					"当前能力未配置唯一可接收%s素材的参数",
+					mediaKindLabel(reference.Kind),
+				)
+			}
 			if reference.StrictUsage {
 				return MediaReferenceBindResult{}, fmt.Errorf(
 					"当前能力参数 %s 不支持引用%s素材",
@@ -106,7 +116,7 @@ func BindMediaReferences(
 			continue
 		}
 		if capacity := mediaParamCapacity(param); capacity > 0 && len(current) >= capacity {
-			if explicit || reference.StrictUsage {
+			if explicit || reference.StrictUsage || reference.Required {
 				return MediaReferenceBindResult{}, fmt.Errorf(
 					"当前能力的%s参数一次最多使用 %d 个素材",
 					mediaParamLabel(param),

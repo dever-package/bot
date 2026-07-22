@@ -11,7 +11,14 @@ import (
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	energonmodel "github.com/dever-package/bot/model/energon"
+	botcapacity "github.com/dever-package/bot/service/energon/capacity"
 )
+
+func (AgentHook) ProviderAttachAgentForm(_ *server.Context, params []any) any {
+	record := agentFormRecord(params)
+	record["max_output_tokens"] = botcapacity.Format(util.ToIntDefault(record["max_output_tokens"], 0))
+	return record
+}
 
 func (AgentHook) ProviderBeforeSaveAgent(c *server.Context, params []any) any {
 	record := cloneAgentRecord(params)
@@ -390,9 +397,9 @@ func normalizeAgentTemperature(value any) float64 {
 }
 
 func normalizeAgentMaxOutputTokens(value any) int {
-	tokens := normalizeNonNegativeInt(value, defaultAgentMaxOutputTokens)
-	if tokens > agentmodel.MaxAgentOutputTokens {
-		panicAgentField("form.max_output_tokens", "单次模型最大输出 Token 数不能超过 131072。")
+	tokens, err := botcapacity.Parse(value)
+	if err != nil {
+		panicAgentField("form.max_output_tokens", err.Error()+"。")
 	}
 	return tokens
 }

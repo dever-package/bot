@@ -109,6 +109,46 @@
         }
       },
       {
+        "id": "service-context-window-tokens",
+        "type": "form-input",
+        "name": "上下文窗口",
+        "placeholder": "例如：64K、128K、1.05M",
+        "value": "form.context_window_tokens",
+        "mode": "form",
+        "info": "当前渠道和模型实际可用的输入与输出总窗口；0 表示使用 runtime 的 64K 安全默认值。支持 K、M 简写。",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[220px]",
+          "showWhen": [
+            {
+              "path": "form.type",
+              "operator": "equals",
+              "value": "text"
+            }
+          ]
+        }
+      },
+      {
+        "id": "service-max-output-tokens",
+        "type": "form-input",
+        "name": "单次最大输出",
+        "placeholder": "例如：8K、16K、128K",
+        "value": "form.max_output_tokens",
+        "mode": "form",
+        "info": "当前渠道和模型一次响应允许的硬上限；0 表示使用 runtime 的 16K 安全默认值。必须小于上下文窗口。",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[220px]",
+          "showWhen": [
+            {
+              "path": "form.type",
+              "operator": "equals",
+              "value": "text"
+            }
+          ]
+        }
+      },
+      {
         "type": "form-input",
         "value": "form.path",
         "mode": "form",
@@ -125,6 +165,8 @@
         "account_id",
         "name",
         "type",
+        "context_window_tokens",
+        "max_output_tokens",
         "path",
         "sort",
         "status",
@@ -134,6 +176,8 @@
       "provider_id": "",
       "account_id": 0,
       "type": "text",
+      "context_window_tokens": "0",
+      "max_output_tokens": "0",
       "path": "",
       "sort": 100,
       "status": 1,

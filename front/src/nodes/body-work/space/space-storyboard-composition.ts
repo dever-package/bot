@@ -1,5 +1,4 @@
 import {
-  storyboardHasVisibleDialogue,
   type StoryboardAspectRatio,
   type StoryboardDocument,
   type StoryboardShot,
@@ -12,13 +11,13 @@ import type {
   VideoComposeAssetReference,
   VideoComposeClip,
   VideoComposeSpeechTrack,
+  VideoComposeSubtitleTrack,
 } from "./space-video-compose";
 
 export function storyboardVideoComposition(input: {
   storyboard: StoryboardDocument;
   sourceNodeId: string;
   nodes: SpaceCanvasNode[];
-  enableLipSync: boolean;
   current?: CanvasVideoComposition;
 }): CanvasVideoComposition {
   const currentClips = new Map(
@@ -33,7 +32,7 @@ export function storyboardVideoComposition(input: {
     }),
   );
   return {
-    version: 2,
+    version: 3,
     clips: orderItemsByIds(
       clips,
       (input.current?.clips || []).map((clip) => clip.id),
@@ -64,7 +63,6 @@ function storyboardVideoClip(input: {
   storyboard: StoryboardDocument;
   sourceNodeId: string;
   nodes: SpaceCanvasNode[];
-  enableLipSync: boolean;
   shot: StoryboardShot;
   index: number;
   current?: VideoComposeClip;
@@ -82,26 +80,16 @@ function storyboardVideoClip(input: {
     input.shot.id,
   );
   const originalVideo = assetReference(originalNode);
-  const lipSyncVideo = assetReference(lipSyncNode);
-  const lipSyncRequired =
-    input.enableLipSync && storyboardHasVisibleDialogue(input.shot);
-  const useOriginalVideo = lipSyncRequired
-    ? Boolean(input.current?.useOriginalVideo)
-    : false;
+  const lipSyncVideo = lipSyncNode?.storyboardItem?.stale
+    ? undefined
+    : assetReference(lipSyncNode);
+  const useOriginalVideo = Boolean(input.current?.useOriginalVideo);
   const issues: string[] = [];
 
   if (!originalNode?.power) {
     issues.push("未配置镜头视频能力");
   } else if (!originalVideo) {
     issues.push("镜头视频尚未生成");
-  }
-
-  if (lipSyncRequired && !useOriginalVideo) {
-    if (!lipSyncNode?.power) {
-      issues.push("未配置口型同步能力");
-    } else if (!lipSyncVideo) {
-      issues.push("口型同步尚未完成");
-    }
   }
 
   const currentTracks = new Map(
@@ -118,24 +106,24 @@ function storyboardVideoClip(input: {
         issues,
       ),
     );
+  const subtitleTracks = storyboardSubtitleTracks(
+    input.nodes,
+    input.sourceNodeId,
+    input.shot.id,
+  );
+  const visualVideo =
+    !useOriginalVideo && lipSyncVideo ? lipSyncVideo : originalVideo;
 
   return {
     id: input.shot.id,
     title: `镜头 ${input.shot.order || input.index + 1}`,
-    ...((lipSyncRequired && !useOriginalVideo ? lipSyncVideo : originalVideo)
-      ? {
-          visualVideo: (lipSyncRequired && !useOriginalVideo
-            ? lipSyncVideo
-            : originalVideo)!,
-        }
-      : {}),
+    ...(visualVideo ? { visualVideo } : {}),
     ...(originalVideo ? { originalAudioSource: originalVideo } : {}),
     duration: input.shot.duration,
-    subtitle: input.current?.subtitle || "",
     originalVolume:
       input.current?.originalVolume ?? (speechTracks.length ? 0.45 : 1),
     speechTracks,
-    lipSyncRequired,
+    subtitleTracks,
     useOriginalVideo,
     blockingIssues: uniqueStrings(issues),
     transitionToNext: input.current?.transitionToNext || {
@@ -143,6 +131,44 @@ function storyboardVideoClip(input: {
       durationMs: 500,
     },
   };
+}
+
+function storyboardSubtitleTracks(
+  nodes: SpaceCanvasNode[],
+  sourceNodeId: string,
+  shotId: string,
+): VideoComposeSubtitleTrack[] {
+  const node = findStoryboardItemNode(
+    nodes,
+    sourceNodeId,
+    "subtitle",
+    shotId,
+  );
+  const output = recordValue(node?.resultOutput);
+  const tracks = Array.isArray(output.tracks) ? output.tracks : [];
+  return tracks.flatMap((value): VideoComposeSubtitleTrack[] => {
+    const track = recordValue(value);
+    const id = textValue(track.id);
+    const text = textValue(track.text);
+    if (!id || !text) {
+      return [];
+    }
+    const endTime = numberValue(track.end_time ?? track.endTime);
+    const speechId = textValue(track.speech_id ?? track.speechId);
+    return [
+      {
+        id,
+        text,
+        startTime: Math.max(
+          0,
+          numberValue(track.start_time ?? track.startTime),
+        ),
+        ...(endTime > 0 ? { endTime } : {}),
+        ...(speechId ? { speechId } : {}),
+        source: textValue(track.source) === "speech" ? "speech" : "caption",
+      },
+    ];
+  });
 }
 
 function storyboardSpeechTrack(
@@ -173,7 +199,7 @@ function storyboardSpeechTrack(
 function findStoryboardItemNode(
   nodes: SpaceCanvasNode[],
   sourceNodeId: string,
-  itemType: "shot" | "speech" | "lip_sync",
+  itemType: "shot" | "speech" | "subtitle" | "lip_sync",
   itemId: string,
 ) {
   return nodes.find(
@@ -209,4 +235,19 @@ function assetReference(
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function recordValue(value: unknown): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, any>)
+    : {};
+}
+
+function textValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function numberValue(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
 }

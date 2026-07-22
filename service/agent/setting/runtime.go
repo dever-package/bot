@@ -6,7 +6,17 @@ import (
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
+	botcapacity "github.com/dever-package/bot/service/energon/capacity"
 )
+
+func (AgentHook) ProviderAttachRuntimeConfigForm(_ *server.Context, params []any) any {
+	record := agentFormRecord(params)
+	record["working_context_tokens"] = botcapacity.Format(util.ToIntDefault(
+		record["working_context_tokens"],
+		agentmodel.DefaultRuntimeWorkingContextTokens,
+	))
+	return record
+}
 
 func (AgentHook) ProviderBeforeSaveRuntimeConfig(_ *server.Context, params []any) any {
 	record := cloneAgentRecord(params)
@@ -22,6 +32,15 @@ func (AgentHook) ProviderBeforeSaveRuntimeConfig(_ *server.Context, params []any
 	}
 	record["default_max_auto_steps"] = defaultMax
 	record["hard_max_auto_steps"] = hardMax
+	workingContextTokens, err := botcapacity.Parse(record["working_context_tokens"])
+	if err != nil || workingContextTokens <= 0 {
+		message := "日常工作上下文必须大于 0。"
+		if err != nil {
+			message = err.Error() + "。"
+		}
+		panicAgentField("form.working_context_tokens", message)
+	}
+	record["working_context_tokens"] = workingContextTokens
 	record["run_worker_concurrency"] = normalizeRuntimeWorkerConcurrency(record["run_worker_concurrency"])
 	record["artifact_worker_concurrency"] = normalizeArtifactWorkerConcurrency(record["artifact_worker_concurrency"])
 	record["artifact_per_tool_concurrency"] = normalizeArtifactPerToolConcurrency(record["artifact_per_tool_concurrency"])

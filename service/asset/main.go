@@ -15,26 +15,27 @@ import (
 type Service struct{}
 
 type SaveVersionRequest struct {
-	AssetID     uint64
-	ProjectID   uint64
-	BodyID      uint64
-	TeamID      uint64
-	FlowID      uint64
-	AssetCateID uint64
-	RunID       uint64
-	NodeRunID   uint64
-	ReleaseID   uint64
-	RequestID   string
-	NodeKey     string
-	SourceType  string
-	SourceID    uint64
-	SourceName  string
-	Source      map[string]any
-	Name        string
-	Kind        string
-	Role        string
-	Content     any
-	Sort        int
+	AssetID      uint64
+	ProjectID    uint64
+	BodyID       uint64
+	TeamID       uint64
+	FlowID       uint64
+	AssetCateID  uint64
+	CollectionID uint64
+	RunID        uint64
+	NodeRunID    uint64
+	ReleaseID    uint64
+	RequestID    string
+	NodeKey      string
+	SourceType   string
+	SourceID     uint64
+	SourceName   string
+	Source       map[string]any
+	Name         string
+	Kind         string
+	Role         string
+	Content      any
+	Sort         int
 }
 
 func NewService() Service {
@@ -207,6 +208,32 @@ func normalizeSaveVersionRequest(ctx context.Context, req SaveVersionRequest) (S
 	default:
 		return SaveVersionRequest{}, fmt.Errorf("资产来源不合法")
 	}
+	if req.Kind == assetmodel.KindCollection {
+		if req.CollectionID > 0 {
+			return SaveVersionRequest{}, fmt.Errorf("集合不能归入其他集合")
+		}
+		if req.Role != assetmodel.RoleMaterial {
+			return SaveVersionRequest{}, fmt.Errorf("集合必须使用素材角色")
+		}
+		if req.SourceType != assetmodel.SourceProject || req.ProjectID == 0 {
+			return SaveVersionRequest{}, fmt.Errorf("集合必须属于项目")
+		}
+	} else if req.CollectionID > 0 {
+		collection := assetmodel.NewAssetModel().Find(ctx, map[string]any{
+			"id":            req.CollectionID,
+			"team_id":       req.TeamID,
+			"project_id":    req.ProjectID,
+			"kind":          assetmodel.KindCollection,
+			"collection_id": uint64(0),
+			"status":        assetmodel.StatusCurrent,
+		})
+		if collection == nil {
+			return SaveVersionRequest{}, fmt.Errorf("资产集合不存在或已不可用")
+		}
+		if collection.AssetCateID != req.AssetCateID {
+			return SaveVersionRequest{}, fmt.Errorf("资产与集合的项目分类不匹配")
+		}
+	}
 	if req.Role == assetmodel.RoleWork && (req.SourceType != assetmodel.SourceProject || req.AssetCateID == 0) {
 		return SaveVersionRequest{}, fmt.Errorf("作品必须绑定项目资产分类")
 	}
@@ -252,6 +279,7 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 			"team_id":       req.TeamID,
 			"flow_id":       req.FlowID,
 			"asset_cate_id": req.AssetCateID,
+			"collection_id": req.CollectionID,
 			"node_key":      req.NodeKey,
 			"source_type":   req.SourceType,
 			"source_id":     req.SourceID,
@@ -312,15 +340,16 @@ func updateAssetVersionPointer(
 		"id":     assetID,
 		"status": map[string]any{"neq": assetmodel.StatusDeleted},
 	}, map[string]any{
-		"kind":        req.Kind,
-		"role":        req.Role,
-		"node_key":    req.NodeKey,
-		"source_type": req.SourceType,
-		"source_id":   req.SourceID,
-		"source_name": req.SourceName,
-		"version_id":  versionID,
-		"status":      assetmodel.StatusCurrent,
-		"deleted_at":  nil,
+		"kind":          req.Kind,
+		"role":          req.Role,
+		"collection_id": req.CollectionID,
+		"node_key":      req.NodeKey,
+		"source_type":   req.SourceType,
+		"source_id":     req.SourceID,
+		"source_name":   req.SourceName,
+		"version_id":    versionID,
+		"status":        assetmodel.StatusCurrent,
+		"deleted_at":    nil,
 	})
 	if affected == 0 {
 		return false
@@ -341,6 +370,11 @@ func assetIdentityFilter(req SaveVersionRequest) map[string]any {
 		"source_id":   req.SourceID,
 		"role":        req.Role,
 		"status":      map[string]any{"neq": assetmodel.StatusDeleted},
+	}
+	if req.Kind == assetmodel.KindCollection {
+		filter["kind"] = assetmodel.KindCollection
+	} else {
+		filter["kind"] = map[string]any{"neq": assetmodel.KindCollection}
 	}
 	if req.SourceType == assetmodel.SourceProject {
 		filter["asset_cate_id"] = req.AssetCateID
@@ -375,7 +409,11 @@ func assetMatchesSaveRequest(asset *assetmodel.Asset, req SaveVersionRequest) bo
 		asset.ProjectID != req.ProjectID ||
 		asset.SourceType != req.SourceType ||
 		asset.SourceID != req.SourceID ||
+		asset.CollectionID != req.CollectionID ||
 		NormalizeRole(asset.Role) != req.Role {
+		return false
+	}
+	if (asset.Kind == assetmodel.KindCollection) != (req.Kind == assetmodel.KindCollection) {
 		return false
 	}
 	if req.SourceType == assetmodel.SourceProject && asset.AssetCateID != req.AssetCateID {
@@ -429,19 +467,20 @@ func (s Service) UpdateVersionContent(ctx context.Context, projectID uint64, ass
 		return nil, nil, fmt.Errorf("资产不存在")
 	}
 	result, err := withAssetSaveLock(ctx, SaveVersionRequest{
-		AssetID:     asset.ID,
-		ProjectID:   asset.ProjectID,
-		BodyID:      asset.BodyID,
-		TeamID:      asset.TeamID,
-		FlowID:      asset.FlowID,
-		AssetCateID: asset.AssetCateID,
-		SourceType:  asset.SourceType,
-		SourceID:    asset.SourceID,
-		SourceName:  asset.SourceName,
-		Name:        asset.Name,
-		Kind:        asset.Kind,
-		Role:        NormalizeRole(asset.Role),
-		NodeKey:     asset.NodeKey,
+		AssetID:      asset.ID,
+		ProjectID:    asset.ProjectID,
+		BodyID:       asset.BodyID,
+		TeamID:       asset.TeamID,
+		FlowID:       asset.FlowID,
+		AssetCateID:  asset.AssetCateID,
+		CollectionID: asset.CollectionID,
+		SourceType:   asset.SourceType,
+		SourceID:     asset.SourceID,
+		SourceName:   asset.SourceName,
+		Name:         asset.Name,
+		Kind:         asset.Kind,
+		Role:         NormalizeRole(asset.Role),
+		NodeKey:      asset.NodeKey,
 	}, func() (saveVersionResult, error) {
 		asset, version, err := s.updateVersionContent(ctx, projectID, assetID, versionID, content)
 		return saveVersionResult{Asset: asset, Version: version}, err
@@ -508,6 +547,7 @@ func AssetToMap(row assetmodel.Asset) map[string]any {
 		"team_id":       row.TeamID,
 		"flow_id":       row.FlowID,
 		"asset_cate_id": row.AssetCateID,
+		"collection_id": row.CollectionID,
 		"node_key":      strings.TrimSpace(row.NodeKey),
 		"source_type":   row.SourceType,
 		"source_id":     row.SourceID,
@@ -591,7 +631,7 @@ func VersionsToMaps(rows []assetmodel.Version) []map[string]any {
 
 func NormalizeKind(kind string) string {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case assetmodel.KindImage, assetmodel.KindAudio, assetmodel.KindVideo, assetmodel.KindRichText, assetmodel.KindFile:
+	case assetmodel.KindImage, assetmodel.KindAudio, assetmodel.KindVideo, assetmodel.KindRichText, assetmodel.KindFile, assetmodel.KindCollection:
 		return strings.ToLower(strings.TrimSpace(kind))
 	case "llm", "text":
 		return assetmodel.KindText
@@ -804,6 +844,8 @@ func isStructuredAssetDocument(document map[string]any) bool {
 	switch typeName {
 	case "doc":
 		return true
+	case "collection":
+		return true
 	case "storyboard":
 		return document["shots"] != nil
 	case "file":
@@ -826,6 +868,8 @@ func listProjectAssets(ctx context.Context, projectID uint64, flowID uint64, kin
 	}
 	if kind != "" {
 		filter["kind"] = kind
+	} else {
+		filter["kind"] = map[string]any{"neq": assetmodel.KindCollection}
 	}
 	rows := assetmodel.NewAssetModel().Select(ctx, filter)
 	result := make([]assetmodel.Asset, 0, len(rows))
@@ -908,6 +952,7 @@ func versionSource(req SaveVersionRequest) map[string]any {
 	source["team_id"] = req.TeamID
 	source["flow_id"] = req.FlowID
 	source["asset_cate_id"] = req.AssetCateID
+	source["collection_id"] = req.CollectionID
 	source["run_id"] = req.RunID
 	source["node_run_id"] = req.NodeRunID
 	source["release_id"] = req.ReleaseID

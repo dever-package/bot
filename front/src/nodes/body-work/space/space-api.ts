@@ -206,6 +206,7 @@ export async function fetchSpaceCanvasExecutions(input: {
   runIds?: number[];
   beforeId?: number;
   limit?: number;
+  summaryOnly?: boolean;
 }) {
   const result = await request(
     joinSiteApi("workspace/canvas_execution_list"),
@@ -217,6 +218,7 @@ export async function fetchSpaceCanvasExecutions(input: {
       run_ids: (input.runIds || []).filter((runId) => runId > 0).join(","),
       before_id: input.beforeId || 0,
       limit: input.limit || 20,
+      summary_only: input.summaryOnly ? 1 : 0,
     },
   );
   if (!isSuccessResponse(result)) {

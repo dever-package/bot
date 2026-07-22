@@ -57,6 +57,9 @@ func modelTiming(execution execution, modelStep int, result modelStepResult) map
 	if modelStep == 1 {
 		timing["total_ttft_ms"] = durationMilliseconds(execution.requestedAt, result.FirstDeltaAt)
 	}
+	if result.Budget.HardContextTokens > 0 {
+		timing["model_budget"] = result.Budget.metadata()
+	}
 	return timing
 }
 

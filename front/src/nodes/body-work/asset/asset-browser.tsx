@@ -103,6 +103,9 @@ export function AssetBrowser({
     [initialKey],
   );
   const [filters, setFilters] = useState<AssetFilters>(resolvedInitialFilters);
+  const [activeCollection, setActiveCollection] = useState<AssetRecord | null>(
+    null,
+  );
   const [view, setView] = useState<AssetView>("assets");
   const [options, setOptions] = useState<AssetFilterOptions>(emptyOptions);
   const [page, setPage] = useState<AssetPage>(emptyPage);
@@ -115,6 +118,8 @@ export function AssetBrowser({
   const [error, setError] = useState("");
   const [reloadVersion, setReloadVersion] = useState(0);
   const loadRequestRef = useRef(0);
+  const rootFiltersRef = useRef<AssetFilters>(resolvedInitialFilters);
+  const rootViewRef = useRef<AssetView>("assets");
   const selectedAssetIDKey = JSON.stringify(selectedAssetIDs || []);
   const selectedAssetIDSet = useMemo(
     () => new Set(JSON.parse(selectedAssetIDKey) as number[]),
@@ -124,7 +129,10 @@ export function AssetBrowser({
   useEffect(() => {
     loadRequestRef.current += 1;
     setFilters(resolvedInitialFilters);
+    rootFiltersRef.current = resolvedInitialFilters;
+    setActiveCollection(null);
     setView("assets");
+    rootViewRef.current = "assets";
     setOptions(emptyOptions);
     setPage(emptyPage);
     setSelectedAssetID(0);
@@ -164,6 +172,7 @@ export function AssetBrowser({
           contentMode,
           page: targetPage,
           pageSize: 24,
+          collectionID: activeCollection?.id,
         });
         if (requestID === loadRequestRef.current) {
           setPage(nextPage);
@@ -178,7 +187,7 @@ export function AssetBrowser({
         }
       }
     },
-    [contentMode, filters, teamID, view],
+    [activeCollection?.id, contentMode, filters, teamID, view],
   );
 
   useEffect(() => {
@@ -187,6 +196,7 @@ export function AssetBrowser({
 
   function changeFilters(next: AssetFilters) {
     setFilters(next);
+    if (!activeCollection) rootFiltersRef.current = next;
     setPage((current) => ({ ...current, page: 1 }));
   }
 
@@ -194,10 +204,43 @@ export function AssetBrowser({
     setReloadVersion((current) => current + 1);
   }
 
+  function openAsset(asset: AssetRecord) {
+    if (asset.kind !== "collection") {
+      setSelectedAssetID(asset.id);
+      return;
+    }
+    rootFiltersRef.current = filters;
+    rootViewRef.current = view;
+    setActiveCollection(asset);
+    setFilters({
+      ...emptyAssetFilters,
+      kind:
+        filters.kind === "collection"
+          ? normalizedAllowedKinds.length === 1
+            ? normalizedAllowedKinds[0]
+            : ""
+          : filters.kind,
+    });
+    setPage(emptyPage);
+    setSelectedAssetID(0);
+    setError("");
+  }
+
+  function closeCollection() {
+    loadRequestRef.current += 1;
+    setActiveCollection(null);
+    setFilters(rootFiltersRef.current);
+    setView(rootViewRef.current);
+    setPage(emptyPage);
+    setSelectedAssetID(0);
+    setError("");
+  }
+
   function changeView(nextView: AssetView) {
     if (nextView === view || operationAssetID) return;
     loadRequestRef.current += 1;
     setView(nextView);
+    if (!activeCollection) rootViewRef.current = nextView;
     setPage(emptyPage);
     setSelectedAssetID(0);
     setRenameTarget(null);
@@ -247,6 +290,8 @@ export function AssetBrowser({
           sourceLabels={sourceLabels}
           allowedKinds={normalizedAllowedKinds}
           view={view}
+          collectionName={activeCollection?.name}
+          onCollectionBack={activeCollection ? closeCollection : undefined}
           onChange={changeFilters}
           onViewChange={changeView}
         />
@@ -258,7 +303,7 @@ export function AssetBrowser({
               <span className="sr-only">刷新资产</span>
             </button>
           </BodyWorkTooltip>
-          {headerAction}
+          {!activeCollection ? headerAction : null}
         </div>
       </header>
 
@@ -275,7 +320,9 @@ export function AssetBrowser({
                 ? "正在读取资产配置"
                 : view === "trash"
                   ? "回收站为空"
-                  : "暂无符合条件的资产"
+                  : activeCollection
+                    ? "集合内暂无符合条件的资产"
+                    : "暂无符合条件的资产"
             }
           />
         ) : (
@@ -286,10 +333,12 @@ export function AssetBrowser({
                 asset={asset}
                 sourceLabels={sourceLabels}
                 view={view}
-                selectable={selectable && view === "assets"}
+                selectable={
+                  asset.kind !== "collection" && selectable && view === "assets"
+                }
                 selected={view === "assets" && selectedAssetIDSet.has(asset.id)}
                 busy={operationAssetID === asset.id}
-                onOpen={(current) => setSelectedAssetID(current.id)}
+                onOpen={openAsset}
                 onRename={setRenameTarget}
                 onDelete={view === "assets" ? setDeleteTarget : undefined}
                 onRestore={view === "trash" ? restore : undefined}
@@ -378,7 +427,11 @@ export function AssetBrowser({
           if (!open && !operationAssetID) setDeleteTarget(null);
         }}
         title="移入回收站？"
-        desc={`“${deleteTarget?.name || "该资产"}”将从资产列表移除，你可以稍后在回收站中恢复。`}
+        desc={
+          deleteTarget?.kind === "collection"
+            ? `“${deleteTarget.name}”及集合内素材将移入回收站，你可以稍后恢复。`
+            : `“${deleteTarget?.name || "该资产"}”将从资产列表移除，你可以稍后在回收站中恢复。`
+        }
         confirmText="移入回收站"
         destructive
         isLoading={Boolean(operationAssetID)}
@@ -430,10 +483,13 @@ function normalizeInitialFilters(
 }
 
 function normalizeAllowedKinds(input?: AssetKind[]) {
-  const allowed = assetKindSpecs
+  const selectableKinds = assetKindSpecs.filter(
+    (option) => option.key !== "collection",
+  );
+  const allowed = selectableKinds
     .map((option) => option.key)
     .filter((kind) => input?.includes(kind));
-  return allowed.length === assetKindSpecs.length ? [] : allowed;
+  return allowed.length === selectableKinds.length ? [] : allowed;
 }
 
 function errorText(error: unknown, fallback: string) {

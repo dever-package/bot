@@ -162,6 +162,7 @@ function assetParamFile(asset: AssetRecord): ParamUploadedFile | undefined {
 
 function allowedKindDescription(kinds: AssetKind[]) {
   const labels: Record<AssetKind, string> = {
+    collection: "集合",
     text: "文本",
     image: "图片",
     audio: "音频",

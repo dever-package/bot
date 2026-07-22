@@ -35,7 +35,7 @@ func (s Service) runPowerNode(
 		uint64Value(config["source_target_id"]),
 		uint64Value(input["source_target_id"]),
 	)
-	form, err := s.gateway.PowerParamConfig(ctx, power.Key, targetID)
+	form, err := s.gateway.RuntimePowerParamConfig(ctx, power.Key, targetID)
 	if err != nil {
 		return nil, teammodel.RunStatusFail, 0, err
 	}

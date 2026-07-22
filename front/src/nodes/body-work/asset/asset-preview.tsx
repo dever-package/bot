@@ -2,6 +2,7 @@ import {
   FileAudio,
   FileText,
   Film,
+  FolderOpen,
   Image as ImageIcon,
   Paperclip,
 } from "lucide-react";
@@ -83,6 +84,8 @@ export function AssetPreview({
 
 export function AssetKindIcon({ kind }: { kind: AssetKind }) {
   switch (kind) {
+    case "collection":
+      return <FolderOpen aria-hidden="true" />;
     case "image":
       return <ImageIcon aria-hidden="true" />;
     case "audio":

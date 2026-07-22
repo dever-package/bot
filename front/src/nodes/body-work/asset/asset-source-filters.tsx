@@ -1,4 +1,4 @@
-import { ArchiveRestore, Images } from "lucide-react";
+import { ArchiveRestore, ArrowLeft, FolderOpen, Images } from "lucide-react";
 import type { ReactNode } from "react";
 import type {
   AssetFilterOptions,
@@ -31,6 +31,8 @@ export function AssetSourceFilters({
   sourceLabels = {},
   allowedKinds = [],
   view,
+  collectionName,
+  onCollectionBack,
   onChange,
   onViewChange,
 }: {
@@ -39,6 +41,8 @@ export function AssetSourceFilters({
   sourceLabels?: AssetSourceLabels;
   allowedKinds?: AssetKind[];
   view: AssetView;
+  collectionName?: string;
+  onCollectionBack?: () => void;
   onChange: (filters: AssetFilters) => void;
   onViewChange: (view: AssetView) => void;
 }) {
@@ -76,79 +80,93 @@ export function AssetSourceFilters({
 
   return (
     <div className="wb-asset-filters">
-      <FilterRow label="来源">
-        <SegmentedOptions
-          options={sourceOptions}
-          value={filters.sourceType}
-          onChange={selectSource}
-        />
-        {filters.sourceType === "project" ? (
-          <>
-            <FilterSelect
-              label={sourceLabels.project || "创作"}
-              value={filters.projectID}
-              options={options.projects}
-              onChange={(projectID) =>
-                onChange({
-                  ...filters,
-                  projectID,
-                  sourceID: projectID,
-                  assetCateID: 0,
-                  nodeKey: "",
-                })
-              }
-            />
-            {hasAssetCates ? (
+      {collectionName && onCollectionBack ? (
+        <FilterRow label="集合">
+          <button
+            type="button"
+            className="wb-asset-collection-back"
+            onClick={onCollectionBack}
+          >
+            <ArrowLeft aria-hidden="true" />
+            <FolderOpen aria-hidden="true" />
+            <span>{collectionName}</span>
+          </button>
+        </FilterRow>
+      ) : (
+        <FilterRow label="来源">
+          <SegmentedOptions
+            options={sourceOptions}
+            value={filters.sourceType}
+            onChange={selectSource}
+          />
+          {filters.sourceType === "project" ? (
+            <>
               <FilterSelect
-                label="资产分类"
-                value={filters.assetCateID}
-                options={options.assetCates}
-                onChange={(assetCateID) =>
-                  onChange({ ...filters, assetCateID, nodeKey: "" })
+                label={sourceLabels.project || "创作"}
+                value={filters.projectID}
+                options={options.projects}
+                onChange={(projectID) =>
+                  onChange({
+                    ...filters,
+                    projectID,
+                    sourceID: projectID,
+                    assetCateID: 0,
+                    nodeKey: "",
+                  })
                 }
               />
-            ) : null}
-            <label className="wb-asset-select">
-              <span className="sr-only">节点</span>
-              <select
-                value={filters.nodeKey}
-                disabled={!filters.projectID}
-                onChange={(event) =>
-                  onChange({ ...filters, nodeKey: event.target.value })
-                }
-              >
-                <option value="">全部节点</option>
-                {nodes.map((node) => (
-                  <option
-                    key={`${node.projectID}:${node.assetCateID}:${node.nodeKey}`}
-                    value={node.nodeKey}
-                  >
-                    {node.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
-        ) : null}
-        {filters.sourceType === "tool" ? (
-          <FilterSelect
-            label={sourceLabels.tool || "工具"}
-            value={filters.sourceID}
-            options={options.tools}
-            onChange={(sourceID) => onChange({ ...filters, sourceID })}
-          />
-        ) : null}
-        {filters.sourceType === "dialogue" ? (
-          <FilterSelect
-            label="角色"
-            value={filters.sourceID}
-            options={options.dialogues}
-            onChange={(sourceID) => onChange({ ...filters, sourceID })}
-          />
-        ) : null}
-      </FilterRow>
+              {hasAssetCates ? (
+                <FilterSelect
+                  label="资产分类"
+                  value={filters.assetCateID}
+                  options={options.assetCates}
+                  onChange={(assetCateID) =>
+                    onChange({ ...filters, assetCateID, nodeKey: "" })
+                  }
+                />
+              ) : null}
+              <label className="wb-asset-select">
+                <span className="sr-only">节点</span>
+                <select
+                  value={filters.nodeKey}
+                  disabled={!filters.projectID}
+                  onChange={(event) =>
+                    onChange({ ...filters, nodeKey: event.target.value })
+                  }
+                >
+                  <option value="">全部节点</option>
+                  {nodes.map((node) => (
+                    <option
+                      key={`${node.projectID}:${node.assetCateID}:${node.nodeKey}`}
+                      value={node.nodeKey}
+                    >
+                      {node.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          ) : null}
+          {filters.sourceType === "tool" ? (
+            <FilterSelect
+              label={sourceLabels.tool || "工具"}
+              value={filters.sourceID}
+              options={options.tools}
+              onChange={(sourceID) => onChange({ ...filters, sourceID })}
+            />
+          ) : null}
+          {filters.sourceType === "dialogue" ? (
+            <FilterSelect
+              label="角色"
+              value={filters.sourceID}
+              options={options.dialogues}
+              onChange={(sourceID) => onChange({ ...filters, sourceID })}
+            />
+          ) : null}
+        </FilterRow>
+      )}
 
-      {filters.sourceType === "project" && hasAssetCates ? (
+      {!collectionName && filters.sourceType === "project" && hasAssetCates ? (
         <FilterRow label="资产">
           <SegmentedOptions
             options={roleOptions}

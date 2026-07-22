@@ -10,14 +10,13 @@ import (
 )
 
 const (
-	defaultAgentCateID          = uint64(1)
-	defaultSkillPackID          = agentmodel.DefaultSkillPackID
-	defaultAgentStatus          = int16(1)
-	defaultAgentSort            = 100
-	defaultAgentTemperature     = 0.7
-	defaultAgentTimeout         = 3600
-	defaultAgentMaxAutoSteps    = 0
-	defaultAgentMaxOutputTokens = 0
+	defaultAgentCateID       = uint64(1)
+	defaultSkillPackID       = agentmodel.DefaultSkillPackID
+	defaultAgentStatus       = int16(1)
+	defaultAgentSort         = 100
+	defaultAgentTemperature  = 0.7
+	defaultAgentTimeout      = 3600
+	defaultAgentMaxAutoSteps = 0
 )
 
 type AgentHook struct{}
@@ -30,6 +29,14 @@ func cloneAgentRecord(params []any) map[string]any {
 		return util.CloneMap(row)
 	}
 	return map[string]any{}
+}
+
+func agentFormRecord(params []any) map[string]any {
+	payload := cloneAgentRecord(params)
+	if record, ok := payload["record"].(map[string]any); ok {
+		return util.CloneMap(record)
+	}
+	return payload
 }
 
 func trimStringField(record map[string]any, field string, partial bool) {

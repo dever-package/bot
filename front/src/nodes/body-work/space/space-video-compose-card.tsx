@@ -1,11 +1,11 @@
-import { FileText, Shuffle, Trash2, Volume2 } from "lucide-react";
+import { Shuffle, Trash2, Volume2 } from "lucide-react";
 import type { DragEvent, ReactNode } from "react";
 import type { ComposerAssetItem } from "./space-prompt-composer";
 import type { VideoComposeClip } from "./space-video-compose";
 import { SequenceCard } from "./space-sequence-card";
 import { SpaceTooltip } from "./space-tooltip";
 
-export type VideoComposeClipPanel = "subtitle" | "sound" | "transition";
+export type VideoComposeClipPanel = "sound" | "transition";
 
 export function VideoComposeClipCard({
   clip,
@@ -124,12 +124,6 @@ export function VideoComposeClipCard({
         ) : null}
       </div>
       <footer>
-        <CardAction
-          active={Boolean(clip.subtitle)}
-          label="字幕"
-          icon={<FileText size={12} />}
-          onClick={() => onPanel("subtitle")}
-        />
         <CardAction
           active={soundActive}
           label="声音"

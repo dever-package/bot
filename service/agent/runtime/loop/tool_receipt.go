@@ -58,12 +58,13 @@ func (state *runState) repeatedFailureStep(call botprotocol.ToolCall) (toolStepR
 	}
 	err := fmt.Errorf("相同参数的工具调用已经连续失败，请根据原错误修改参数: %s", receipt.LastError)
 	return toolStepResult{
+		result:  runtimeprovider.Result{Terminal: true},
 		err:     err,
 		content: toolErrorContent(err.Error()),
 		typeKey: "tool",
-		title:   "阻止重复失败工具调用",
+		title:   "终止重复失败工具调用",
 		status:  stepStatusWarning,
-		payload: map[string]any{"tool_call": firstToolCallValue(call), "error": err.Error(), "reused": true},
+		payload: map[string]any{"tool_call": firstToolCallValue(call), "error": err.Error(), "circuit_open": true},
 	}, true
 }
 
@@ -105,12 +106,16 @@ func (state *runState) recordToolReceipt(call botprotocol.ToolCall, definition r
 	}
 	receipt.Succeeded = false
 	receipt.ModelContent = ""
+	lastError := strings.TrimSpace(completed.err.Error())
+	if receipt.LastError != "" && receipt.LastError != lastError {
+		receipt.FailureCount = 0
+	}
 	if completed.blockRetry {
 		receipt.FailureCount = maxIdenticalToolFailures
 	} else {
 		receipt.FailureCount++
 	}
-	receipt.LastError = strings.TrimSpace(completed.err.Error())
+	receipt.LastError = lastError
 }
 
 func (state *runState) markToolExecution(call botprotocol.ToolCall) error {

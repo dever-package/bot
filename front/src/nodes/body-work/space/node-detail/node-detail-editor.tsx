@@ -41,7 +41,6 @@ export function NodeDetailEditor({
   readonly,
   referenceItems,
   storyboardWorkflowAction,
-  lipSyncEnabled,
   onConfirmStoryboard,
   onCreateStoryboardRevision,
   onChange,
@@ -53,7 +52,6 @@ export function NodeDetailEditor({
   readonly: boolean;
   referenceItems?: ComposerAssetItem[];
   storyboardWorkflowAction?: StoryboardWorkflowAction;
-  lipSyncEnabled?: boolean;
   onConfirmStoryboard?: (
     storyboard: StoryboardDocument,
   ) => void | Promise<void>;
@@ -87,7 +85,6 @@ export function NodeDetailEditor({
           editable={!readonly}
           referenceItems={referenceItems}
           workflowAction={storyboardWorkflowAction}
-          lipSyncEnabled={lipSyncEnabled}
           onConfirm={onConfirmStoryboard}
           onCreateRevision={onCreateStoryboardRevision}
           onChange={(storyboard) =>

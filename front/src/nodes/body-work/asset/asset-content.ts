@@ -57,6 +57,7 @@ export function findAssetMediaURL(
   if (typeof value !== "object") return "";
   const record = value as Record<string, unknown>;
   const keysByKind: Record<AssetKind, string[]> = {
+    collection: [],
     text: [],
     image: ["src", "url", "image", "image_url", "file_url"],
     audio: ["src", "url", "audio", "audio_url", "file_url"],

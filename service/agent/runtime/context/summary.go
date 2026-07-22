@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
 	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
 	runtimesessionstate "github.com/dever-package/bot/service/agent/runtime/sessionstate"
 	energonservice "github.com/dever-package/bot/service/energon"
@@ -18,14 +19,22 @@ import (
 )
 
 const (
-	softSummaryMessageLimit = 20
-	summaryKeepRecent       = 10
-	summaryBatchLimit       = 100
-	maxSummaryLength        = 8000
-	summaryMessageMaxRunes  = 800
-	summaryStructuredRunes  = 1200
-	softSummaryMaxRunes     = 18000
+	summaryKeepRecentGroups   = 10
+	summaryBatchLimit         = 200
+	maxSummaryLength          = 8000
+	summaryMessageMaxRunes    = 800
+	summaryStructuredRunes    = 1200
+	summaryTriggerPercent     = 70
+	summaryTargetPercent      = 50
+	summaryMinimumInputTokens = 1024
 )
+
+type summaryBudget struct {
+	triggerTokens int
+	targetTokens  int
+	sourceTokens  int
+	outputTokens  int
+}
 
 type Compactor struct {
 	gateway energonservice.GatewayService
@@ -45,10 +54,14 @@ func NewCompactor(gateway energonservice.GatewayService) Compactor {
 	return Compactor{gateway: gateway}
 }
 
-func (c Compactor) Compact(ctx context.Context, sessionID uint64, powerKey string) bool {
-	threshold := softSummaryMessageLimit
-	runeThreshold := softSummaryMaxRunes
-	if strings.TrimSpace(powerKey) == "" || !needsCompaction(ctx, sessionID, threshold, runeThreshold) {
+func (c Compactor) Compact(
+	ctx context.Context,
+	sessionID uint64,
+	powerKey string,
+	agentOutputTokens int,
+) bool {
+	budget, err := c.resolveSummaryBudget(ctx, powerKey, agentOutputTokens)
+	if err != nil || !needsCompaction(ctx, sessionID, budget.triggerTokens) {
 		return false
 	}
 
@@ -63,10 +76,14 @@ func (c Compactor) Compact(ctx context.Context, sessionID uint64, powerKey strin
 		return false
 	}
 	rows := unsummarizedMessages(ctx, *session)
-	if !messagesNeedCompaction(rows, threshold, runeThreshold) || len(rows) <= summaryKeepRecent {
+	batchFull := len(rows) >= summaryBatchLimit
+	if !batchFull && !messagesNeedCompaction(rows, budget.triggerTokens) {
 		return false
 	}
-	rows = rows[:len(rows)-summaryKeepRecent]
+	rows = summaryRowsToCompact(rows, session.ContextSummary, budget, batchFull)
+	if len(rows) == 0 {
+		return false
+	}
 	source := summarySource(session.ContextSummary, rows)
 	if source == "" {
 		return false
@@ -74,10 +91,12 @@ func (c Compactor) Compact(ctx context.Context, sessionID uint64, powerKey strin
 	response := c.gateway.Request(ctx, energonservice.GatewayRequest{
 		RequestID: uuid.NewString(),
 		Body: map[string]any{
-			"power":   powerKey,
-			"set":     map[string]any{"role": summaryRole()},
-			"input":   energonservice.PromptInput(source),
-			"options": map[string]any{"stream": false, "temperature": 0},
+			"power": powerKey,
+			"set":   map[string]any{"role": summaryRole()},
+			"input": energonservice.PromptInput(source),
+			"options": map[string]any{
+				"stream": false, "temperature": 0, "max_tokens": budget.outputTokens,
+			},
 		},
 	})
 	summary := ""
@@ -107,8 +126,62 @@ func (c Compactor) Compact(ctx context.Context, sessionID uint64, powerKey strin
 	return updated > 0
 }
 
-func needsCompaction(ctx context.Context, sessionID uint64, threshold int, runeThreshold int) bool {
-	if sessionID == 0 || threshold <= 0 {
+func (c Compactor) resolveSummaryBudget(
+	ctx context.Context,
+	powerKey string,
+	agentOutputTokens int,
+) (summaryBudget, error) {
+	if strings.TrimSpace(powerKey) == "" {
+		return summaryBudget{}, fmt.Errorf("摘要文本能力不能为空")
+	}
+	limits, err := c.gateway.ResolveModelLimits(ctx, powerKey)
+	if err != nil {
+		return summaryBudget{}, err
+	}
+	config := runtimeconfig.Load(ctx)
+	runtimeOutputTokens := agentOutputTokens
+	if runtimeOutputTokens <= 0 {
+		runtimeOutputTokens = energonservice.DefaultModelMaxOutputTokens
+	}
+	if runtimeOutputTokens > limits.MaxOutputTokens {
+		runtimeOutputTokens = limits.MaxOutputTokens
+	}
+	runtimeBudget, err := ResolveTokenBudget(
+		limits.ContextWindowTokens,
+		config.WorkingContextTokens,
+		runtimeOutputTokens,
+		summaryMinimumInputTokens,
+	)
+	if err != nil {
+		return summaryBudget{}, err
+	}
+	summaryOutputTokens := minSummaryOutputTokens(limits.MaxOutputTokens)
+	summaryCallBudget, err := ResolveTokenBudget(
+		limits.ContextWindowTokens,
+		config.WorkingContextTokens,
+		summaryOutputTokens,
+		summaryMinimumInputTokens,
+	)
+	if err != nil {
+		return summaryBudget{}, err
+	}
+	return summaryBudget{
+		triggerTokens: runtimeBudget.MaxInputTokens * summaryTriggerPercent / 100,
+		targetTokens:  runtimeBudget.MaxInputTokens * summaryTargetPercent / 100,
+		sourceTokens:  summaryCallBudget.MaxInputTokens * summaryTargetPercent / 100,
+		outputTokens:  summaryOutputTokens,
+	}, nil
+}
+
+func minSummaryOutputTokens(maximum int) int {
+	if maximum > 0 && maximum < 2000 {
+		return maximum
+	}
+	return 2000
+}
+
+func needsCompaction(ctx context.Context, sessionID uint64, thresholdTokens int) bool {
+	if sessionID == 0 || thresholdTokens <= 0 {
 		return false
 	}
 	session := agentmodel.NewSessionModel().Find(ctx, map[string]any{
@@ -129,27 +202,105 @@ func needsCompaction(ctx context.Context, sessionID uint64, threshold int, runeT
 		"order": "main.id asc",
 		"limit": summaryBatchLimit,
 	})
-	return messagesNeedCompaction(rows, threshold, runeThreshold)
+	return len(rows) >= summaryBatchLimit || messagesNeedCompaction(rows, thresholdTokens)
 }
 
-func messagesNeedCompaction(rows []*agentmodel.Message, threshold int, runeThreshold int) bool {
-	if len(rows) > threshold {
-		return true
-	}
-	if runeThreshold <= 0 {
+func messagesNeedCompaction(rows []*agentmodel.Message, thresholdTokens int) bool {
+	if thresholdTokens <= 0 {
 		return false
 	}
-	total := 0
+	totalTokens := 0
 	for _, row := range rows {
 		if row == nil {
 			continue
 		}
-		total += runeCount(row.Text) + runeCount(row.Content) + runeCount(row.Output)
-		if total > runeThreshold {
+		totalTokens += summaryMessageTokens(row)
+		if totalTokens > thresholdTokens {
 			return true
 		}
 	}
 	return false
+}
+
+func summaryRowsToCompact(
+	rows []*agentmodel.Message,
+	previous string,
+	budget summaryBudget,
+	batchFull bool,
+) []*agentmodel.Message {
+	groups := summaryMessageGroups(rows)
+	if len(groups) <= summaryKeepRecentGroups {
+		return nil
+	}
+	retainedTokens := 0
+	retainedStart := len(groups)
+	for index := len(groups) - 1; index >= 0; index-- {
+		groupTokens := summaryGroupTokens(groups[index])
+		retainedGroups := len(groups) - retainedStart
+		if retainedGroups >= summaryKeepRecentGroups && retainedTokens+groupTokens > budget.targetTokens {
+			break
+		}
+		retainedTokens += groupTokens
+		retainedStart = index
+	}
+	if retainedStart <= 0 {
+		if !batchFull {
+			return nil
+		}
+		retainedStart = len(groups) - summaryKeepRecentGroups
+	}
+	selectedGroups := append([][]*agentmodel.Message(nil), groups[:retainedStart]...)
+	selected := flattenSummaryGroups(selectedGroups)
+	for len(selectedGroups) > 1 && EstimateTokens(summarySource(previous, selected)) > budget.sourceTokens {
+		selectedGroups = selectedGroups[:len(selectedGroups)-1]
+		selected = flattenSummaryGroups(selectedGroups)
+	}
+	return selected
+}
+
+func summaryMessageGroups(rows []*agentmodel.Message) [][]*agentmodel.Message {
+	groups := make([][]*agentmodel.Message, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		requestID := strings.TrimSpace(row.RequestID)
+		if requestID != "" && len(groups) > 0 {
+			last := groups[len(groups)-1]
+			if len(last) > 0 && strings.TrimSpace(last[0].RequestID) == requestID {
+				groups[len(groups)-1] = append(last, row)
+				continue
+			}
+		}
+		groups = append(groups, []*agentmodel.Message{row})
+	}
+	return groups
+}
+
+func summaryGroupTokens(group []*agentmodel.Message) int {
+	total := 0
+	for _, row := range group {
+		total += summaryMessageTokens(row)
+	}
+	return total
+}
+
+func summaryMessageTokens(row *agentmodel.Message) int {
+	if row == nil {
+		return 0
+	}
+	return EstimateTokens(map[string]any{
+		"role": row.Role, "kind": row.Kind, "text": row.Text,
+		"content": row.Content, "output": row.Output,
+	})
+}
+
+func flattenSummaryGroups(groups [][]*agentmodel.Message) []*agentmodel.Message {
+	result := make([]*agentmodel.Message, 0)
+	for _, group := range groups {
+		result = append(result, group...)
+	}
+	return result
 }
 
 func acquireCompactionLock(sessionID uint64) func() {

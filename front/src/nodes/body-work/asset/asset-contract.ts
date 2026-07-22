@@ -26,6 +26,7 @@ export const assetKindSpecs: ReadonlyArray<{
   key: AssetKind;
   label: string;
 }> = [
+  { key: "collection", label: "集合" },
   { key: "text", label: "文本" },
   { key: "image", label: "图片" },
   { key: "audio", label: "音频" },

@@ -22,18 +22,19 @@ const (
 )
 
 type QueryRequest struct {
-	TeamID      uint64
-	SourceType  string
-	SourceID    uint64
-	ProjectID   uint64
-	AssetCateID uint64
-	NodeKey     string
-	Role        string
-	Kind        string
-	View        string
-	ContentMode string
-	Page        int
-	PageSize    int
+	TeamID       uint64
+	SourceType   string
+	SourceID     uint64
+	ProjectID    uint64
+	AssetCateID  uint64
+	CollectionID uint64
+	NodeKey      string
+	Role         string
+	Kind         string
+	View         string
+	ContentMode  string
+	Page         int
+	PageSize     int
 }
 
 type CurrentReference struct {
@@ -55,6 +56,7 @@ func (s Service) RequireContinuationTarget(
 	}
 	if asset.Status != assetmodel.StatusCurrent ||
 		asset.VersionID == 0 ||
+		asset.Kind == assetmodel.KindCollection ||
 		asset.SourceType != sourceType ||
 		asset.SourceID != sourceID ||
 		NormalizeRole(asset.Role) != assetmodel.RoleMaterial {
@@ -72,6 +74,9 @@ func (s Service) RequireCurrentReference(ctx context.Context, teamID uint64, ass
 	}
 	if asset.Status != assetmodel.StatusCurrent {
 		return CurrentReference{}, fmt.Errorf("资产已不可用")
+	}
+	if asset.Kind == assetmodel.KindCollection {
+		return CurrentReference{}, fmt.Errorf("资产集合不能直接作为引用")
 	}
 	if asset.VersionID == 0 {
 		return CurrentReference{}, fmt.Errorf("资产当前版本不可用")
@@ -100,6 +105,18 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 			return nil, fmt.Errorf("项目不存在或不属于当前用户")
 		}
 	}
+	if normalized.CollectionID > 0 {
+		collection := assetmodel.NewAssetModel().Find(ctx, map[string]any{
+			"id":            normalized.CollectionID,
+			"team_id":       normalized.TeamID,
+			"kind":          assetmodel.KindCollection,
+			"collection_id": uint64(0),
+		})
+		if !scope.contains(collection) ||
+			(collection.Status != assetmodel.StatusCurrent && collection.Status != assetmodel.StatusDeleted) {
+			return nil, fmt.Errorf("资产集合不存在或不属于当前用户")
+		}
+	}
 	scopeFilter := scope.queryFilter()
 	page, pageSize := normalizeAssetPage(normalized.Page, normalized.PageSize)
 	if scopeFilter == nil {
@@ -124,6 +141,7 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 	if normalized.AssetCateID > 0 {
 		filter["asset_cate_id"] = normalized.AssetCateID
 	}
+	filter["collection_id"] = normalized.CollectionID
 	if normalized.NodeKey != "" {
 		filter["node_key"] = normalized.NodeKey
 	}
@@ -134,7 +152,11 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 		filter["role"] = assetmodel.RoleMaterial
 	}
 	if normalized.Kind != "" {
-		filter["kind"] = normalized.Kind
+		if normalized.CollectionID == 0 && normalized.Kind != assetmodel.KindCollection {
+			filter["kind"] = []string{normalized.Kind, assetmodel.KindCollection}
+		} else {
+			filter["kind"] = normalized.Kind
+		}
 	}
 
 	assetModel := assetmodel.NewAssetModel()
@@ -154,6 +176,7 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 		item := assetListMap(*row, version, normalized.ContentMode)
 		items = append(items, item)
 	}
+	attachCollectionListMetadata(ctx, rows, items, status)
 	return map[string]any{
 		"items":     items,
 		"page":      page,
@@ -203,6 +226,8 @@ func (s Service) Filters(ctx context.Context, teamID uint64) (map[string]any, er
 
 	nodeFilter := scopedAssetFilter(teamID, scopeFilter)
 	nodeFilter["source_type"] = assetmodel.SourceProject
+	nodeFilter["collection_id"] = uint64(0)
+	nodeFilter["kind"] = map[string]any{"neq": assetmodel.KindCollection}
 	nodeFilter["node_key"] = map[string]any{"neq": ""}
 	nodeRows := assetmodel.NewAssetModel().Select(ctx, nodeFilter, map[string]any{
 		"field": "main.id,main.project_id,main.flow_id,main.asset_cate_id,main.node_key,main.name,main.version_id",
@@ -406,7 +431,8 @@ func normalizeQueryRequest(req QueryRequest) (QueryRequest, error) {
 			assetmodel.KindAudio,
 			assetmodel.KindVideo,
 			assetmodel.KindRichText,
-			assetmodel.KindFile:
+			assetmodel.KindFile,
+			assetmodel.KindCollection:
 		default:
 			return QueryRequest{}, fmt.Errorf("资产类型不合法")
 		}

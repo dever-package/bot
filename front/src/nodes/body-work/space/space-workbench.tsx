@@ -7,6 +7,7 @@ import {
   Maximize2,
   Minus,
   MousePointer2,
+  Pencil,
   Plus,
   Trash2,
 } from "lucide-react";
@@ -31,18 +32,24 @@ export function NodeActionMenu({
   point,
   canShowDetail,
   canCopy = true,
+  canDelete = true,
+  canEditStructure = false,
   onClose,
   onCopy,
   onDelete,
   onDetail,
+  onEditStructure,
 }: {
   point: { x: number; y: number };
   canShowDetail: boolean;
   canCopy?: boolean;
+  canDelete?: boolean;
+  canEditStructure?: boolean;
   onClose: () => void;
   onCopy: () => void;
   onDelete: () => void;
   onDetail: () => void;
+  onEditStructure?: () => void;
 }) {
   return (
     <>
@@ -58,16 +65,24 @@ export function NodeActionMenu({
             <span>详情</span>
           </button>
         ) : null}
+        {canEditStructure && onEditStructure ? (
+          <button type="button" onClick={onEditStructure}>
+            <Pencil size={15} />
+            <span>编辑分镜</span>
+          </button>
+        ) : null}
         {canCopy ? (
           <button type="button" onClick={onCopy}>
             <Copy size={15} />
             <span>复制</span>
           </button>
         ) : null}
-        <button type="button" className="is-danger" onClick={onDelete}>
-          <Trash2 size={15} />
-          <span>删除</span>
-        </button>
+        {canDelete ? (
+          <button type="button" className="is-danger" onClick={onDelete}>
+            <Trash2 size={15} />
+            <span>删除</span>
+          </button>
+        ) : null}
       </section>
     </>
   );

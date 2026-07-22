@@ -296,7 +296,7 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	if !powerAllowedByScope(teamPowers, power.ID) {
 		return nil, fmt.Errorf("当前团队不允许使用该能力")
 	}
-	form, err := s.gateway.PowerParamConfig(ctx, power.Key, req.SourceTargetID)
+	form, err := s.gateway.RuntimePowerParamConfig(ctx, power.Key, req.SourceTargetID)
 	if err != nil {
 		return nil, err
 	}

@@ -275,7 +275,7 @@ func loadPowerConfigs(ctx context.Context, gateway energonservice.GatewayService
 				candidates[current].err = ctx.Err()
 				return nil
 			}
-			candidates[current].config, candidates[current].err = gateway.PowerParamConfig(
+			candidates[current].config, candidates[current].err = gateway.RuntimePowerParamConfig(
 				ctx,
 				candidates[current].row.Key,
 				0,

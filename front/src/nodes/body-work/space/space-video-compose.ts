@@ -16,16 +16,24 @@ export type VideoComposeSpeechTrack = {
   volume: number;
 };
 
+export type VideoComposeSubtitleTrack = {
+  id: string;
+  text: string;
+  startTime: number;
+  endTime?: number;
+  speechId?: string;
+  source: "speech" | "caption";
+};
+
 export type VideoComposeClip = {
   id: string;
   title: string;
   visualVideo?: VideoComposeAssetReference;
   originalAudioSource?: VideoComposeAssetReference;
   duration: number;
-  subtitle: string;
   originalVolume: number;
   speechTracks: VideoComposeSpeechTrack[];
-  lipSyncRequired: boolean;
+  subtitleTracks: VideoComposeSubtitleTrack[];
   useOriginalVideo: boolean;
   blockingIssues: string[];
   transitionToNext: {
@@ -35,7 +43,7 @@ export type VideoComposeClip = {
 };
 
 export type CanvasVideoComposition = {
-  version: 2;
+  version: 3;
   clips: VideoComposeClip[];
   settings: {
     resolution: string;
@@ -54,7 +62,7 @@ export const VIDEO_COMPOSE_TRANSITIONS: Array<{
 
 export function emptyVideoComposition(): CanvasVideoComposition {
   return {
-    version: 2,
+    version: 3,
     clips: [],
     settings: {
       resolution: "1920x1080",
@@ -67,7 +75,7 @@ export function normalizeVideoComposition(
   value: unknown,
 ): CanvasVideoComposition | undefined {
   const row = recordValue(value);
-  if (Number(row.version || 0) !== 2) {
+  if (Number(row.version || 0) !== 3) {
     return undefined;
   }
   const clips = Array.isArray(row.clips)
@@ -75,7 +83,7 @@ export function normalizeVideoComposition(
     : [];
   const settings = recordValue(row.settings);
   return {
-    version: 2,
+    version: 3,
     clips: clips as VideoComposeClip[],
     settings: {
       resolution: stringValue(settings.resolution) || "1920x1080",
@@ -135,13 +143,19 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
         .map(normalizeVideoComposeSpeechTrack)
         .filter(Boolean)
     : [];
+  const subtitleTracks = Array.isArray(
+    row.subtitleTracks ?? row.subtitle_tracks,
+  )
+    ? (row.subtitleTracks ?? row.subtitle_tracks)
+        .map(normalizeVideoComposeSubtitleTrack)
+        .filter(Boolean)
+    : [];
   return {
     id,
     title: stringValue(row.title) || visualVideo?.label || "镜头",
     ...(visualVideo ? { visualVideo } : {}),
     ...(originalAudioSource ? { originalAudioSource } : {}),
     duration: Math.max(0, numberValue(row.duration)),
-    subtitle: stringValue(row.subtitle),
     originalVolume: clampNumber(
       row.originalVolume ?? row.original_volume,
       0,
@@ -149,9 +163,7 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
       1,
     ),
     speechTracks: speechTracks as VideoComposeSpeechTrack[],
-    lipSyncRequired: booleanValue(
-      row.lipSyncRequired ?? row.lip_sync_required,
-    ),
+    subtitleTracks: subtitleTracks as VideoComposeSubtitleTrack[],
     useOriginalVideo: booleanValue(
       row.useOriginalVideo ?? row.use_original_video,
     ),
@@ -167,6 +179,28 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
         500,
       ),
     },
+  };
+}
+
+function normalizeVideoComposeSubtitleTrack(
+  value: unknown,
+): VideoComposeSubtitleTrack | null {
+  const row = recordValue(value);
+  const id = stringValue(row.id);
+  const text = stringValue(row.text);
+  if (!id || !text) {
+    return null;
+  }
+  const source = stringValue(row.source) === "speech" ? "speech" : "caption";
+  const speechId = stringValue(row.speechId ?? row.speech_id);
+  const endTime = numberValue(row.endTime ?? row.end_time);
+  return {
+    id,
+    text,
+    startTime: Math.max(0, numberValue(row.startTime ?? row.start_time)),
+    ...(endTime > 0 ? { endTime } : {}),
+    ...(speechId ? { speechId } : {}),
+    source,
   };
 }
 

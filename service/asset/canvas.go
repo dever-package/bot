@@ -25,6 +25,7 @@ func (s Service) CanvasReferences(ctx context.Context, projectID uint64, assetCa
 		for _, row := range assetModel.Select(ctx, map[string]any{
 			"id":         ids,
 			"project_id": projectID,
+			"kind":       map[string]any{"neq": assetmodel.KindCollection},
 			"status":     assetmodel.StatusCurrent,
 			"version_id": map[string]any{"gt": 0},
 		}) {
@@ -39,6 +40,7 @@ func (s Service) CanvasReferences(ctx context.Context, projectID uint64, assetCa
 			"asset_cate_id": assetCateID,
 			"node_key":      keys,
 			"role":          assetmodel.RoleMaterial,
+			"kind":          map[string]any{"neq": assetmodel.KindCollection},
 			"status":        assetmodel.StatusCurrent,
 			"version_id":    map[string]any{"gt": 0},
 		}) {

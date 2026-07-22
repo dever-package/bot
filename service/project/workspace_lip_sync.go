@@ -41,8 +41,8 @@ func prepareCanvasLipSyncInput(
 	videoURL := ""
 	tracks := make([]botprocessor.SpeechTimelineTrack, 0)
 	for _, sourceNodeID := range canvasStringList(firstPresent(
-		node.StoryboardItem["source_node_ids"],
-		node.StoryboardItem["sourceNodeIds"],
+		node.StoryboardItem["reference_node_ids"],
+		node.StoryboardItem["referenceNodeIds"],
 	)) {
 		sourceNode := canvasNodeByID(sourceNodeID, req.Canvas)
 		if sourceNode == nil {
