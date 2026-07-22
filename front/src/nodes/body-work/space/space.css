@@ -706,6 +706,7 @@
   flex: 0 0 calc((100% - 4px) / var(--ws-cate-total, 1));
   align-items: center;
   justify-content: center;
+  gap: 4px;
   border: 0;
   border-radius: 9999px;
   background: transparent;
@@ -715,6 +716,10 @@
   cursor: pointer;
   transition: color 200ms ease;
   min-width: 0;
+}
+
+.ws-cate:disabled {
+  cursor: wait;
 }
 
 .ws-cate:hover,
@@ -737,7 +742,6 @@
   justify-content: flex-end;
 }
 
-.ws-team-pill,
 .ws-action {
   display: inline-flex;
   height: 34px;
@@ -758,13 +762,6 @@
     background-color 0.2s,
     border-color 0.2s,
     color 0.2s;
-}
-.ws-team-pill {
-  cursor: default;
-  background: transparent;
-  border-color: transparent;
-  color: var(--ws-muted);
-  box-shadow: none;
 }
 
 .ws-action:hover {
@@ -5801,7 +5798,6 @@
   gap: 6px;
 }
 
-.ws-team-pill,
 .ws-action {
   height: 28px;
   border: 1px solid var(--ws-border);
@@ -5815,34 +5811,10 @@
   backdrop-filter: none;
 }
 
-.ws-team-pill {
-  background: transparent;
-  border-color: transparent;
-}
-
 .ws-action:hover {
   border-color: var(--ws-card-border);
   background: var(--ws-card-muted);
   color: var(--ws-text);
-}
-
-.ws-run-history-count {
-  display: inline-flex;
-  min-width: 16px;
-  height: 16px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: var(--ws-card-muted);
-  padding: 0 4px;
-  color: var(--ws-muted);
-  font-size: 9px;
-  line-height: 1;
-}
-
-.ws-run-history-count.is-error {
-  background: rgba(225, 29, 72, 0.1);
-  color: #be123c;
 }
 
 .ws-node-power-wrap.is-error .ws-node-power-card {
@@ -5869,6 +5841,7 @@
   font-size: 10px;
   line-height: 1.35;
   backdrop-filter: blur(8px);
+  text-align: left;
 }
 
 .ws-node-run-error > svg {
@@ -5883,14 +5856,8 @@
   white-space: nowrap;
 }
 
-.ws-node-run-error > button {
-  flex: 0 0 auto;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  padding: 0;
+.ws-node-run-error.is-action {
   font: inherit;
-  font-weight: 600;
   cursor: pointer;
 }
 
@@ -8065,6 +8032,10 @@
 .ws-video-compose-global button:disabled {
   cursor: default;
   opacity: 0.52;
+}
+
+.ws-video-compose-tooltip-trigger {
+  display: inline-flex;
 }
 
 .ws-video-compose-grid {

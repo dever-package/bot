@@ -20,7 +20,9 @@ export type BodySiteConfig = {
 export type BodyHomeMenuItem = {
   name: string;
   icon: string;
+  iconImage: string;
   enabled: boolean;
+  sort: number;
 };
 
 export type BodyHomeMenuConfig = {
@@ -222,10 +224,12 @@ function normalizeHomeMenu(
         {
           name: textValue(current.name) || fallback[key].name,
           icon: textValue(current.icon) || fallback[key].icon,
+          iconImage: mediaURL(current.icon_image),
           enabled:
             current.enabled == null
               ? fallback[key].enabled
               : booleanValue(current.enabled),
+          sort: finiteNumber(current.sort, fallback[key].sort),
         },
       ];
     }),
@@ -234,9 +238,9 @@ function normalizeHomeMenu(
 
 function defaultHomeMenu(): BodyHomeMenuConfig {
   return Object.fromEntries(
-    HOME_MENU_DEFAULTS.map(([key, name, icon]) => [
+    HOME_MENU_DEFAULTS.map(([key, name, icon], index) => [
       key,
-      { name, icon, enabled: true },
+      { name, icon, iconImage: "", enabled: true, sort: (index + 1) * 10 },
     ]),
   ) as BodyHomeMenuConfig;
 }
@@ -344,6 +348,11 @@ function rowsValue(value: unknown): unknown[] {
 function positiveNumber(value: unknown) {
   const number = Number(value || 0);
   return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function finiteNumber(value: unknown, fallback: number) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function textValue(value: unknown) {

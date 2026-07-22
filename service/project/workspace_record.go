@@ -12,7 +12,13 @@ import (
 	workspacemodel "github.com/dever-package/bot/model/workspace"
 )
 
-const workspaceCanvasRunMode = "workspace_canvas"
+const (
+	workspaceCanvasRunMode       = "workspace_canvas"
+	canvasExecutionScopeRecovery = "recovery"
+	canvasExecutionScopeActive   = "active"
+	canvasExecutionScopeHistory  = "history"
+	workspaceExecutionListFields = "main.id,main.project_id,main.asset_cate_id,main.release_id,main.run_id,main.flow_run_id,main.request_id,main.start_node_id,main.single_node,main.status,main.executed,main.total,main.plan,main.error,main.updated_at,main.created_at"
+)
 
 func createWorkspaceRun(ctx context.Context, projectID uint64, teamID uint64, releaseID uint64, requestID string, req CanvasRunRequest, plan map[string]any) (*teammodel.Run, error) {
 	requestID = normalizeWorkspaceRequestID(requestID)
@@ -126,6 +132,9 @@ type CanvasExecutionQuery struct {
 	ProjectID   uint64
 	AssetCateID uint64
 	Status      string
+	Scope       string
+	RunIDs      string
+	BeforeID    uint64
 	Limit       int
 }
 
@@ -135,35 +144,103 @@ func (s WorkspaceService) CanvasExecutionList(ctx context.Context, query CanvasE
 		return nil, err
 	}
 	filter := map[string]any{"project_id": project.ID}
+	scope := normalizeCanvasExecutionScope(query.Scope)
 	if query.AssetCateID > 0 {
 		filter["asset_cate_id"] = query.AssetCateID
 	}
 	if strings.TrimSpace(query.Status) != "" {
 		filter["status"] = strings.TrimSpace(query.Status)
+	} else if scope == canvasExecutionScopeActive {
+		filter["status"] = []string{
+			teammodel.RunStatusPending,
+			teammodel.RunStatusRunning,
+			teammodel.RunStatusWaiting,
+		}
+	}
+	if runIDs := normalizeCanvasExecutionRunIDs(query.RunIDs); scope != canvasExecutionScopeHistory && len(runIDs) > 0 {
+		filter["run_id"] = runIDs
+	}
+	if scope == canvasExecutionScopeHistory && query.BeforeID > 0 {
+		filter["id"] = map[string]any{"lt": query.BeforeID}
 	}
 	limit := query.Limit
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
+	queryLimit := limit
+	if scope == canvasExecutionScopeHistory {
+		queryLimit++
+	}
 	rows := workspacemodel.NewExecutionModel().Select(ctx, filter, map[string]any{
+		"field": workspaceExecutionListFields,
 		"order": "main.id desc",
-		"limit": limit,
+		"limit": queryLimit,
 	})
-	items := make([]map[string]any, 0, len(rows))
+	hasMore := scope == canvasExecutionScopeHistory && len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	selected := make([]*workspacemodel.Execution, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
 			continue
 		}
-		row = s.syncWorkspaceExecutionRow(ctx, row)
+		if scope == canvasExecutionScopeActive {
+			row = s.syncWorkspaceExecutionRow(ctx, row)
+		}
 		if strings.TrimSpace(query.Status) != "" && strings.TrimSpace(row.Status) != strings.TrimSpace(query.Status) {
 			continue
 		}
-		items = append(items, workspaceExecutionListPayload(ctx, row))
+		selected = append(selected, row)
+	}
+
+	includeDetails := scope != canvasExecutionScopeHistory
+	resultsByRunID := map[uint64][]map[string]any{}
+	nodeRunsByRunID := map[uint64][]map[string]any{}
+	if includeDetails {
+		runIDs := workspaceExecutionRunIDs(selected)
+		resultsByRunID = workspaceNodeResultsByRunIDs(ctx, project.ID, runIDs)
+		nodeRunsByRunID = workspaceNodeRunPayloadsByRunIDs(ctx, runIDs)
+	}
+	items := make([]map[string]any, 0, len(selected))
+	var beforeID uint64
+	for _, row := range selected {
+		items = append(items, workspaceExecutionListPayload(
+			row,
+			resultsByRunID[row.RunID],
+			nodeRunsByRunID[row.RunID],
+			includeDetails,
+		))
+		beforeID = row.ID
 	}
 	return map[string]any{
-		"count": len(items),
-		"items": items,
+		"count":     len(items),
+		"items":     items,
+		"has_more":  hasMore,
+		"before_id": beforeID,
 	}, nil
+}
+
+func normalizeCanvasExecutionRunIDs(raw string) []uint64 {
+	parts := strings.Split(raw, ",")
+	runIDs := make([]uint64, 0, len(parts))
+	for _, part := range parts {
+		if runID := uint64Value(strings.TrimSpace(part)); runID > 0 {
+			runIDs = append(runIDs, runID)
+		}
+	}
+	return uniqueWorkspaceRunIDs(runIDs)
+}
+
+func normalizeCanvasExecutionScope(scope string) string {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case canvasExecutionScopeActive:
+		return canvasExecutionScopeActive
+	case canvasExecutionScopeHistory:
+		return canvasExecutionScopeHistory
+	default:
+		return canvasExecutionScopeRecovery
+	}
 }
 
 func (s WorkspaceService) CanvasExecution(ctx context.Context, projectID uint64, executionID uint64, runID uint64, requestID string) (map[string]any, error) {

@@ -1,4 +1,5 @@
 import { ExternalLink, FileText } from "lucide-react";
+import { BodyWorkTooltip } from "../shared/body-work-tooltip";
 import { assetFileInfo } from "./asset-content";
 
 export function AssetFilePreview({
@@ -19,7 +20,9 @@ export function AssetFilePreview({
     return (
       <div className="wb-asset-file-card-preview">
         <strong>{extension}</strong>
-        <p title={name}>{name}</p>
+        <BodyWorkTooltip label={name}>
+          <p>{name}</p>
+        </BodyWorkTooltip>
         <span>文件</span>
       </div>
     );
@@ -31,7 +34,9 @@ export function AssetFilePreview({
         <FileText aria-hidden="true" />
       </span>
       <div className="wb-asset-file-copy">
-        <strong title={name}>{name}</strong>
+        <BodyWorkTooltip label={name}>
+          <strong>{name}</strong>
+        </BodyWorkTooltip>
         <span>{type}</span>
       </div>
       {file.url ? (

@@ -13,6 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { BodyWorkTooltip } from "./body-work-tooltip";
 import "./detail-dialog.css";
 
 export type DetailVersionOption<T> = {
@@ -99,25 +100,27 @@ export function DetailDialogHeader({
       <div className="wb-detail-actions">
         {actions}
         {downloadUrl ? (
-          <a
-            href={downloadUrl}
-            download
-            className="wb-detail-icon-button"
-            aria-label="下载内容"
-            title="下载内容"
-          >
-            <Download size={17} />
-          </a>
+          <BodyWorkTooltip label="下载内容">
+            <a
+              href={downloadUrl}
+              download
+              className="wb-detail-icon-button"
+              aria-label="下载内容"
+            >
+              <Download size={17} />
+            </a>
+          </BodyWorkTooltip>
         ) : null}
-        <button
-          type="button"
-          className="wb-detail-icon-button"
-          onClick={onClose}
-          aria-label="关闭详情"
-          title="关闭"
-        >
-          <X size={18} />
-        </button>
+        <BodyWorkTooltip label="关闭">
+          <button
+            type="button"
+            className="wb-detail-icon-button"
+            onClick={onClose}
+            aria-label="关闭详情"
+          >
+            <X size={18} />
+          </button>
+        </BodyWorkTooltip>
       </div>
     </header>
   );

@@ -89,17 +89,22 @@ func DuplicateServiceConfiguration(ctx context.Context, serviceID uint64) (Dupli
 			if param == nil {
 				continue
 			}
+			fileValueFormat := strings.TrimSpace(param.FileValueFormat)
+			if fileValueFormat == "" {
+				fileValueFormat = botmodel.ServiceParamFileValueFormatURL
+			}
 			paramID := uint64(botmodel.NewServiceParamModel().Insert(tx, map[string]any{
-				"service_id":       result.ID,
-				"param_id":         param.ParamID,
-				"param_rule":       param.ParamRule,
-				"key":              param.Key,
-				"name":             param.Name,
-				"mapping":          param.Mapping,
-				"fixed_value_type": param.FixedValueType,
-				"status":           param.Status,
-				"sort":             param.Sort,
-				"created_at":       now,
+				"service_id":        result.ID,
+				"param_id":          param.ParamID,
+				"param_rule":        param.ParamRule,
+				"key":               param.Key,
+				"name":              param.Name,
+				"mapping":           param.Mapping,
+				"fixed_value_type":  param.FixedValueType,
+				"file_value_format": fileValueFormat,
+				"status":            param.Status,
+				"sort":              param.Sort,
+				"created_at":        now,
 			}))
 			if paramID == 0 {
 				return fmt.Errorf("复制服务参数“%s”失败", param.Key)

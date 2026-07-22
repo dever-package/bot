@@ -121,7 +121,19 @@
               "type": "show-base"
             },
             {
-              "value": "status",
+              "value": "chat_status",
+              "name": "对话",
+              "description": "开启后在 Body 的对话中展示该角色。",
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "value": "create_status",
+              "name": "创作",
+              "description": "开启后在创作画布的角色列表中展示该角色。",
               "type": "form-switch",
               "meta": {
                 "trueValue": 1,
@@ -132,7 +144,8 @@
               "value": "sort",
               "type": "show-base",
               "editor": "form-number",
-              "trigger": "doubleClick"
+              "trigger": "doubleClick",
+              "tip": "正序排序，数值越小越靠前。双击可修改。"
             },
             {
               "value": "created_at",
@@ -191,7 +204,7 @@
           "stateKey": "dialog.create",
           "pageRoute": "/bot/team/role/update",
           "title": "新增角色",
-          "description": "为团队配置沟通、规划、执行或审核角色，并绑定具体智能体。",
+          "description": "为团队配置执行、沟通、规划或审核角色，并绑定具体智能体。",
           "size": "lg",
           "footer": {
             "confirm": true,
@@ -241,10 +254,14 @@
     },
     "search": {
       "team_id": "",
-      "role_type": "chat"
+      "role_type": "worker"
     },
     "option": {
       "role_type": [
+        {
+          "id": "worker",
+          "value": "执行"
+        },
         {
           "id": "chat",
           "value": "沟通"
@@ -252,10 +269,6 @@
         {
           "id": "planner",
           "value": "规划"
-        },
-        {
-          "id": "worker",
-          "value": "执行"
         },
         {
           "id": "reviewer",

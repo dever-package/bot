@@ -154,7 +154,12 @@ function PureResultPreview({
   if (preview.imageUrl) {
     return (
       <figure className="ws-result-view-media">
-        <img src={preview.imageUrl} alt={label || "图片结果"} />
+        <img
+          src={preview.imageUrl}
+          alt={label || "图片结果"}
+          loading="lazy"
+          decoding="async"
+        />
         {label ? <figcaption>{label}</figcaption> : null}
       </figure>
     );

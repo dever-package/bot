@@ -9,6 +9,9 @@ import (
 
 func (Service) LoginConfig(ctx context.Context) (map[string]any, error) {
 	config := loadBodyConfig(ctx)
+	functions := bodymodel.NewFunctionModel().Select(ctx, map[string]any{}, map[string]any{
+		"order": "sort asc,id asc",
+	})
 
 	links := bodymodel.NewLinkModel().Select(ctx, map[string]any{
 		"status": bodymodel.StatusEnabled,
@@ -18,7 +21,7 @@ func (Service) LoginConfig(ctx context.Context) (map[string]any, error) {
 	}, map[string]any{"order": "sort asc,id asc"})
 
 	return map[string]any{
-		"config":   loginConfigPayload(config),
+		"config":   loginConfigPayload(config, functions),
 		"links":    loginLinkPayloads(links),
 		"accounts": loginAccountPayloads(ctx, accounts),
 	}, nil
@@ -35,7 +38,7 @@ func loadBodyConfig(ctx context.Context) *bodymodel.Config {
 	return &fallback
 }
 
-func loginConfigPayload(config *bodymodel.Config) map[string]any {
+func loginConfigPayload(config *bodymodel.Config, functions []*bodymodel.Function) map[string]any {
 	return map[string]any{
 		"site_name":                  firstBodyConfigText(config.SiteName, bodymodel.DefaultSiteName),
 		"logo":                       bodyConfigMediaURL(firstBodyConfigText(config.Logo, bodymodel.DefaultLogo)),
@@ -43,7 +46,7 @@ func loginConfigPayload(config *bodymodel.Config) map[string]any {
 		"login_image":                bodyConfigMediaURL(firstBodyConfigText(config.LoginImage, bodymodel.DefaultLoginImage)),
 		"login_title":                firstBodyConfigText(config.LoginTitle, bodymodel.DefaultLoginTitle),
 		"login_description":          strings.TrimSpace(config.LoginDescription),
-		"home_menu":                  homeMenuConfigPayload(config),
+		"home_menu":                  homeMenuConfigPayload(functions),
 		"company_name":               strings.TrimSpace(config.CompanyName),
 		"company_address":            strings.TrimSpace(config.CompanyAddress),
 		"business_license_url":       strings.TrimSpace(config.BusinessLicenseURL),
@@ -54,22 +57,36 @@ func loginConfigPayload(config *bodymodel.Config) map[string]any {
 	}
 }
 
-func homeMenuConfigPayload(config *bodymodel.Config) map[string]any {
-	return map[string]any{
-		"works":    homeMenuItemPayload(config.HomeWorksName, bodymodel.DefaultHomeWorksName, config.HomeWorksIcon, bodymodel.DefaultHomeWorksIcon, config.HomeWorksStatus),
-		"dialogue": homeMenuItemPayload(config.HomeDialogueName, bodymodel.DefaultHomeDialogueName, config.HomeDialogueIcon, bodymodel.DefaultHomeDialogueIcon, config.HomeDialogueStatus),
-		"function": homeMenuItemPayload(config.HomeFunctionName, bodymodel.DefaultHomeFunctionName, config.HomeFunctionIcon, bodymodel.DefaultHomeFunctionIcon, config.HomeFunctionStatus),
-		"assets":   homeMenuItemPayload(config.HomeAssetsName, bodymodel.DefaultHomeAssetsName, config.HomeAssetsIcon, bodymodel.DefaultHomeAssetsIcon, config.HomeAssetsStatus),
-		"points":   homeMenuItemPayload(config.HomePointsName, bodymodel.DefaultHomePointsName, config.HomePointsIcon, bodymodel.DefaultHomePointsIcon, config.HomePointsStatus),
-		"messages": homeMenuItemPayload(config.HomeMessagesName, bodymodel.DefaultHomeMessagesName, config.HomeMessagesIcon, bodymodel.DefaultHomeMessagesIcon, config.HomeMessagesStatus),
+func homeMenuConfigPayload(rows []*bodymodel.Function) map[string]any {
+	defaults := bodymodel.DefaultFunctions()
+	functions := make(map[string]bodymodel.Function, len(defaults))
+	for _, item := range defaults {
+		functions[item.Code] = item
 	}
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		if _, exists := functions[row.Code]; !exists {
+			continue
+		}
+		functions[row.Code] = *row
+	}
+
+	result := make(map[string]any, len(defaults))
+	for _, fallback := range defaults {
+		result[fallback.Code] = homeMenuItemPayload(functions[fallback.Code], fallback)
+	}
+	return result
 }
 
-func homeMenuItemPayload(name string, defaultName string, icon string, defaultIcon string, status int16) map[string]any {
+func homeMenuItemPayload(item bodymodel.Function, fallback bodymodel.Function) map[string]any {
 	return map[string]any{
-		"name":    firstBodyConfigText(name, defaultName),
-		"icon":    firstBodyConfigText(icon, defaultIcon),
-		"enabled": status == bodymodel.StatusEnabled,
+		"name":       firstBodyConfigText(item.Name, fallback.Name),
+		"icon":       firstBodyConfigText(item.Icon, fallback.Icon),
+		"icon_image": bodyConfigMediaURL(item.IconImage),
+		"enabled":    item.Status == bodymodel.StatusEnabled,
+		"sort":       item.Sort,
 	}
 }
 

@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronUp, Clapperboard, Focus } from "lucide-react";
 import type { MouseEvent } from "react";
 import type { NodeProps } from "@xyflow/react";
+import { SpaceTooltip } from "./space-tooltip";
 
 export type StoryboardFrameNodeData = {
   type: "storyboardFrame";
@@ -29,28 +30,30 @@ export function StoryboardFrameNode({ data }: NodeProps<any>) {
           {frame.groupCount} 组 · {frame.completedCount}/{frame.workNodeCount}{" "}
           完成
         </span>
-        <button
-          type="button"
-          className="nodrag nopan"
-          title="聚焦制作区"
-          aria-label="聚焦制作区"
-          onClick={stopAnd(frame.onFocus)}
-        >
-          <Focus size={14} />
-        </button>
-        <button
-          type="button"
-          className="nodrag nopan"
-          title={frame.collapsed ? "展开制作区" : "折叠制作区"}
-          aria-label={frame.collapsed ? "展开制作区" : "折叠制作区"}
-          onClick={stopAnd(frame.onToggleCollapsed)}
-        >
-          {frame.collapsed ? (
-            <ChevronDown size={15} />
-          ) : (
-            <ChevronUp size={15} />
-          )}
-        </button>
+        <SpaceTooltip label="聚焦制作区">
+          <button
+            type="button"
+            className="nodrag nopan"
+            aria-label="聚焦制作区"
+            onClick={stopAnd(frame.onFocus)}
+          >
+            <Focus size={14} />
+          </button>
+        </SpaceTooltip>
+        <SpaceTooltip label={frame.collapsed ? "展开制作区" : "折叠制作区"}>
+          <button
+            type="button"
+            className="nodrag nopan"
+            aria-label={frame.collapsed ? "展开制作区" : "折叠制作区"}
+            onClick={stopAnd(frame.onToggleCollapsed)}
+          >
+            {frame.collapsed ? (
+              <ChevronDown size={15} />
+            ) : (
+              <ChevronUp size={15} />
+            )}
+          </button>
+        </SpaceTooltip>
       </header>
       {frame.collapsed ? null : (
         <div className="ws-storyboard-frame-surface" aria-hidden="true" />

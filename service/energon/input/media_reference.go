@@ -132,8 +132,7 @@ func BindMediaReferences(
 }
 
 func MediaParamSupports(param PowerParam, kind string) bool {
-	controlType := NormalizeParamControlType(param.Type)
-	if controlType != "file" && controlType != "files" {
+	if !IsFileParamType(param.Type) {
 		return false
 	}
 	kind = normalizeMediaKind(kind)

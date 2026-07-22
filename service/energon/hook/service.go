@@ -227,6 +227,7 @@ func normalizeServiceParamRows(c *server.Context, serviceID uint64, value any) [
 		if util.ToStringTrimmed(next["key"]) == "" {
 			panicServiceParamField("服务参数必须填写字段标识")
 		}
+		next["file_value_format"] = normalizeServiceParamFileValueFormat(paramRow, next["file_value_format"])
 		naturalKey := serviceParamNaturalKey(paramID, util.ToStringTrimmed(next["key"]))
 		if _, exists := seen[naturalKey]; exists {
 			panicServiceParamField("服务参数不能重复配置同一个内部参数和字段标识")

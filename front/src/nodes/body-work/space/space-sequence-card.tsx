@@ -1,5 +1,6 @@
 import { GripVertical } from "lucide-react";
 import { useRef, type DragEvent, type ReactNode } from "react";
+import { SpaceTooltip } from "./space-tooltip";
 
 export function SequenceCard({
   itemId,
@@ -110,27 +111,26 @@ export function SequenceCard({
     >
       <header>
         {wholeCardDraggable ? (
-          <span
-            className={dragClassName}
-            title={readonly ? undefined : "拖动卡片排序"}
-            aria-hidden="true"
-          >
-            <GripVertical size={13} />
-          </span>
+          <SpaceTooltip label={readonly ? undefined : "拖动卡片排序"}>
+            <span className={dragClassName} aria-hidden="true">
+              <GripVertical size={13} />
+            </span>
+          </SpaceTooltip>
         ) : (
-          <button
-            type="button"
-            className={dragClassName}
-            draggable={!readonly}
-            disabled={readonly}
-            title="拖动排序"
-            aria-label={`拖动${ariaLabel}排序`}
-            onClick={(event) => event.stopPropagation()}
-            onDragStart={startDrag}
-            onDragEnd={finishDrag}
-          >
-            <GripVertical size={13} />
-          </button>
+          <SpaceTooltip label={readonly ? undefined : "拖动排序"}>
+            <button
+              type="button"
+              className={dragClassName}
+              draggable={!readonly}
+              disabled={readonly}
+              aria-label={`拖动${ariaLabel}排序`}
+              onClick={(event) => event.stopPropagation()}
+              onDragStart={startDrag}
+              onDragEnd={finishDrag}
+            >
+              <GripVertical size={13} />
+            </button>
+          </SpaceTooltip>
         )}
         <strong>{String(index + 1).padStart(2, "0")}</strong>
         <span>{durationLabel}</span>

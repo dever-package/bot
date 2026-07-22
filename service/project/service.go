@@ -128,7 +128,18 @@ func (s Service) Detail(ctx context.Context, projectID uint64) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
+	detail, err := s.detailPayload(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	assets, _ := s.asset.ListProject(ctx, project.ID, 0, "")
+	detail["assets"] = assets
+	return detail, nil
+}
+
+func (s Service) detailPayload(ctx context.Context, project *projectmodel.Project) (map[string]any, error) {
 	var teamDetail map[string]any
+	var err error
 	if project.TeamID > 0 {
 		teamDetail, err = s.team.TeamDetail(ctx, project.TeamID, project.ReleaseID)
 		if err != nil {
@@ -137,11 +148,9 @@ func (s Service) Detail(ctx context.Context, projectID uint64) (map[string]any, 
 	} else {
 		teamDetail = map[string]any{}
 	}
-	assets, _ := s.asset.ListProject(ctx, project.ID, 0, "")
 	return map[string]any{
 		"project": newPayloadBuilder(ctx).Project(*project),
 		"team":    teamDetail,
-		"assets":  assets,
 	}, nil
 }
 

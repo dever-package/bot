@@ -112,11 +112,13 @@
     "form": {
       "id": 0,
       "team_id": 0,
-      "role_type": "chat",
+      "role_type": "worker",
       "name": "",
       "agent_id": 0,
       "assignment": "",
       "config": "{}",
+      "chat_status": 1,
+      "create_status": 1,
       "status": 1,
       "sort": 100
     }

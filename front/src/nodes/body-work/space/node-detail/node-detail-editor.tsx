@@ -12,6 +12,7 @@ import {
   type CanvasContentMediaKind,
 } from "../space-content-view";
 import { AssetPreview } from "../../asset/asset-preview";
+import { SpaceTooltip } from "../space-tooltip";
 import {
   nodeDetailContentWithValue,
   type NodeDetailEditableContent,
@@ -172,9 +173,11 @@ function FileDetailEditor({
           )}
           <small>{file.url}</small>
         </div>
-        <a href={file.url} download title="下载文件" aria-label="下载文件">
-          <Download size={17} />
-        </a>
+        <SpaceTooltip label="下载文件">
+          <a href={file.url} download aria-label="下载文件">
+            <Download size={17} />
+          </a>
+        </SpaceTooltip>
       </div>
       {readonly ? (
         <p>{file.description || "暂无文件说明"}</p>

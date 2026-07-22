@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { DragEvent, MouseEvent } from "react";
 import { SequenceCard } from "./space-sequence-card";
+import { SpaceTooltip } from "./space-tooltip";
 import {
   STORYBOARD_MATERIAL_LABELS,
   storyboardHasVisibleDialogue,
@@ -84,34 +85,37 @@ export function StoryboardShotCard({
         lipSyncEnabled={lipSyncEnabled}
       />
       <footer>
-        <button
-          type="button"
-          title={editable ? "编辑镜头" : "查看镜头"}
-          aria-label={editable ? "编辑镜头" : "查看镜头"}
-          onClick={stopAnd(onOpen)}
-        >
-          <Edit3 size={13} />
-        </button>
-        {editable && onDuplicate ? (
+        <SpaceTooltip label={editable ? "编辑镜头" : "查看镜头"}>
           <button
             type="button"
-            title="复制镜头"
-            aria-label="复制镜头"
-            onClick={stopAnd(onDuplicate)}
+            aria-label={editable ? "编辑镜头" : "查看镜头"}
+            onClick={stopAnd(onOpen)}
           >
-            <Copy size={13} />
+            <Edit3 size={13} />
           </button>
+        </SpaceTooltip>
+        {editable && onDuplicate ? (
+          <SpaceTooltip label="复制镜头">
+            <button
+              type="button"
+              aria-label="复制镜头"
+              onClick={stopAnd(onDuplicate)}
+            >
+              <Copy size={13} />
+            </button>
+          </SpaceTooltip>
         ) : null}
         {editable && onRemove ? (
-          <button
-            type="button"
-            className="is-danger"
-            title="删除镜头"
-            aria-label="删除镜头"
-            onClick={stopAnd(onRemove)}
-          >
-            <Trash2 size={13} />
-          </button>
+          <SpaceTooltip label="删除镜头">
+            <button
+              type="button"
+              className="is-danger"
+              aria-label="删除镜头"
+              onClick={stopAnd(onRemove)}
+            >
+              <Trash2 size={13} />
+            </button>
+          </SpaceTooltip>
         ) : null}
       </footer>
     </SequenceCard>

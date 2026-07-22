@@ -15,7 +15,6 @@ import {
 } from "../auth/site-config";
 import { WorkProjectPage } from "../project/project-page";
 import { BodyToaster } from "../shared/body-toaster";
-import { resolveConfiguredLucideIcon } from "../shared/configured-icon";
 import "../shared/body-theme.css";
 import "./workbench-appearance.css";
 import type {
@@ -41,7 +40,7 @@ const TEAM_STORAGE_KEY = "bot.body.workbench.team";
 const pageSpecs: ReadonlyArray<{
   key: WorkbenchPageKey;
   menuKey: keyof BodyHomeMenuConfig;
-  fallbackIcon: WorkbenchNavigationItem["icon"];
+  fallbackIcon: WorkbenchNavigationItem["fallbackIcon"];
 }> = [
   { key: "works", menuKey: "works", fallbackIcon: FileStack },
   { key: "dialogue", menuKey: "dialogue", fallbackIcon: MessagesSquare },
@@ -104,16 +103,23 @@ export function WorkHomeShell({ item }: { item?: any }) {
 
   const navigation = useMemo(
     () =>
-      pageSpecs
+      [...pageSpecs]
         .filter(
           (page) => loginConfig.site.homeMenu[page.menuKey].enabled,
+        )
+        .sort(
+          (left, right) =>
+            loginConfig.site.homeMenu[left.menuKey].sort -
+            loginConfig.site.homeMenu[right.menuKey].sort,
         )
         .map((page) => {
           const menu = loginConfig.site.homeMenu[page.menuKey];
           return {
             key: page.key,
             label: menu.name,
-            icon: resolveConfiguredLucideIcon(menu.icon, page.fallbackIcon),
+            iconName: menu.icon,
+            iconImage: menu.iconImage,
+            fallbackIcon: page.fallbackIcon,
           };
         })
         .filter(
@@ -322,7 +328,7 @@ function NoVisibleHomeMenu() {
   return (
     <div className="flex h-full items-center justify-center px-6 text-center">
       <p className="m-0 text-sm text-[var(--body-work-muted)]">
-        暂无可用首页菜单
+        暂无可用功能
       </p>
     </div>
   );

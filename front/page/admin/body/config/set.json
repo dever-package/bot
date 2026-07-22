@@ -47,9 +47,9 @@
                     "type": "container",
                     "className": "min-w-0 overflow-hidden"
                   },
-                  "home-menu-panel": {
+                  "functions-panel": {
                     "type": "container",
-                    "className": "w-full"
+                    "className": "min-w-0 overflow-hidden"
                   },
                   "links-panel": {
                     "type": "container",
@@ -87,23 +87,6 @@
           "validateForm": true,
           "loadingText": "保存中...",
           "successMessage": "配置已保存"
-        },
-        "action": {
-          "click": "submit"
-        }
-      },
-      {
-        "type": "show-button",
-        "name": "保存首页菜单",
-        "className": "shrink-0",
-        "meta": {
-          "tab": "home_menu",
-          "variant": "default",
-          "size": "sm",
-          "icon": "save",
-          "validateForm": true,
-          "loadingText": "保存中...",
-          "successMessage": "首页菜单已保存"
         },
         "action": {
           "click": "submit"
@@ -182,8 +165,8 @@
               "value": "accounts"
             },
             {
-              "label": "首页菜单",
-              "value": "home_menu"
+              "label": "功能列表",
+              "value": "functions"
             },
             {
               "label": "登录页菜单",
@@ -298,11 +281,95 @@
         }
       }
     ],
-    "home-menu-panel": [
+    "functions-panel": [
       {
-        "type": "bot-body-home-menu-editor",
+        "type": "show-table",
+        "value": "functions.list",
         "meta": {
-          "tab": "home_menu"
+          "tab": "functions",
+          "pagePath": "data.functions.page",
+          "pageSizePath": "data.functions.pageSize",
+          "totalPath": "data.functions.total",
+          "remote": true,
+          "externalPagination": true,
+          "reloadDataKey": "functions",
+          "savePath": "bot/body/function/update",
+          "rowKey": "id",
+          "columns": [
+            {
+              "name": "固定入口",
+              "value": "code",
+              "type": "show-tag"
+            },
+            {
+              "name": "显示名称",
+              "value": "name",
+              "type": "show-base"
+            },
+            {
+              "name": "系统图标",
+              "value": "icon",
+              "type": "show-icon"
+            },
+            {
+              "name": "状态",
+              "value": "status",
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "name": "排序",
+              "value": "sort",
+              "type": "show-base",
+              "description": "双击数值可编辑；数值越小越靠前。",
+              "editor": "form-number",
+              "trigger": "doubleClick"
+            },
+            {
+              "name": "创建时间",
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑功能",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.editFunctionId",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.editFunction",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page",
+        "meta": {
+          "tab": "functions",
+          "reloadDataKey": "functions"
         }
       }
     ],
@@ -601,6 +668,22 @@
       {
         "type": "feedback-modal",
         "meta": {
+          "stateKey": "dialog.editFunction",
+          "pageRoute": "/bot/body/function/update",
+          "pageRouteQuery": {
+            "id": "data.actionTarget.editFunctionId"
+          },
+          "title": "编辑功能",
+          "size": "lg",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
           "stateKey": "dialog.createLink",
           "pageRoute": "/bot/body/link/update",
           "title": "新增登录页菜单",
@@ -676,7 +759,7 @@
   "data": {
     "page": {
       "title": "基础配置",
-      "description": "维护 Body 站点品牌、备案信息、第三方账号、首页菜单和登录页菜单。"
+      "description": "维护 Body 站点品牌、备案信息、第三方账号、功能列表和登录页菜单。"
     },
     "form": {
       "id": 1,
@@ -693,25 +776,7 @@
         "icp_record",
         "icp_record_url",
         "public_security_record",
-        "public_security_record_url",
-        "home_works_name",
-        "home_works_icon",
-        "home_works_status",
-        "home_dialogue_name",
-        "home_dialogue_icon",
-        "home_dialogue_status",
-        "home_function_name",
-        "home_function_icon",
-        "home_function_status",
-        "home_assets_name",
-        "home_assets_icon",
-        "home_assets_status",
-        "home_points_name",
-        "home_points_icon",
-        "home_points_status",
-        "home_messages_name",
-        "home_messages_icon",
-        "home_messages_status"
+        "public_security_record_url"
       ],
       "site_name": "神创工作台",
       "logo": "",
@@ -719,24 +784,6 @@
       "login_image": "",
       "login_title": "把想法变成作品",
       "login_description": "调用团队能力，与智能体协作，把每一次创作沉淀为可复用的项目资产。",
-      "home_works_name": "创作",
-      "home_works_icon": "file-stack",
-      "home_works_status": 1,
-      "home_dialogue_name": "对话",
-      "home_dialogue_icon": "messages-square",
-      "home_dialogue_status": 1,
-      "home_function_name": "工具",
-      "home_function_icon": "zap",
-      "home_function_status": 1,
-      "home_assets_name": "资产",
-      "home_assets_icon": "archive",
-      "home_assets_status": 1,
-      "home_points_name": "积分",
-      "home_points_icon": "sparkles",
-      "home_points_status": 1,
-      "home_messages_name": "消息",
-      "home_messages_icon": "bell",
-      "home_messages_status": 1,
       "company_name": "",
       "company_address": "",
       "business_license_url": "",
@@ -757,10 +804,16 @@
       "order": "sort asc,id asc",
       "relationFields": []
     },
+    "functions": {
+      "model": "bot.body.NewFunctionModel",
+      "pageSize": 100,
+      "order": "sort asc,id asc"
+    },
     "actionTarget": {
       "editLinkId": "",
       "deleteLink": {},
-      "editAccountId": ""
+      "editAccountId": "",
+      "editFunctionId": ""
     }
   },
   "state": {
@@ -769,7 +822,8 @@
       "createLink": false,
       "editLink": false,
       "createAccount": false,
-      "editAccount": false
+      "editAccount": false,
+      "editFunction": false
     },
     "confirm": {
       "deleteLink": false

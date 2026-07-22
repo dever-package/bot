@@ -29,14 +29,40 @@ import type {
 
 export async function fetchSpaceBootstrap(
   projectId: number,
+  assetCateId = 0,
 ): Promise<SpaceBootstrap> {
   const result = await request(joinSiteApi("workspace/bootstrap"), "get", {
     project_id: projectId,
+    asset_cate_id: assetCateId,
   });
   if (!isSuccessResponse(result)) {
     throw new Error(result.message || result.msg || "加载创作空间失败");
   }
   return normalizeSpaceBootstrap(result.data);
+}
+
+export async function fetchSpaceCanvas(input: {
+  projectId: number;
+  assetCateId: number;
+}): Promise<{ canvas: SpaceCanvasState; assets: ProjectAsset[] }> {
+  const result = await request(joinSiteApi("workspace/canvas"), "get", {
+    project_id: input.projectId,
+    asset_cate_id: input.assetCateId,
+  });
+  if (!isSuccessResponse(result)) {
+    throw new Error(result.message || result.msg || "加载分类画布失败");
+  }
+  const data = result.data || {};
+  const assets = data.assets || {};
+  const assetRows = Array.isArray(assets.items)
+    ? assets.items
+    : Array.isArray(assets)
+      ? assets
+      : [];
+  return {
+    canvas: normalizeCanvasState(data.canvas, input.assetCateId),
+    assets: assetRows.map(normalizeProjectAsset),
+  };
 }
 
 export async function sendSpaceMessage(
@@ -171,10 +197,28 @@ export async function fetchSpaceCanvasResults(input: {
   };
 }
 
-export async function fetchSpaceCanvasExecutions(projectId: number) {
-  const result = await request(joinSiteApi("workspace/canvas_execution_list"), "get", {
-    project_id: projectId,
-  });
+export type SpaceCanvasExecutionScope = "recovery" | "active" | "history";
+
+export async function fetchSpaceCanvasExecutions(input: {
+  projectId: number;
+  scope: SpaceCanvasExecutionScope;
+  assetCateId?: number;
+  runIds?: number[];
+  beforeId?: number;
+  limit?: number;
+}) {
+  const result = await request(
+    joinSiteApi("workspace/canvas_execution_list"),
+    "get",
+    {
+      project_id: input.projectId,
+      scope: input.scope,
+      asset_cate_id: input.assetCateId || 0,
+      run_ids: (input.runIds || []).filter((runId) => runId > 0).join(","),
+      before_id: input.beforeId || 0,
+      limit: input.limit || 20,
+    },
+  );
   if (!isSuccessResponse(result)) {
     throw new Error(result.message || result.msg || "读取画布运行记录失败");
   }
@@ -182,7 +226,34 @@ export async function fetchSpaceCanvasExecutions(projectId: number) {
   return {
     count: Number(data.count || 0),
     items: Array.isArray(data.items) ? data.items : [],
+    hasMore: Boolean(data.has_more),
+    beforeId: Number(data.before_id || 0),
   };
+}
+
+export async function fetchSpaceCanvasExecution(input: {
+  projectId: number;
+  executionId?: number;
+  runId?: number;
+  requestId?: string;
+}) {
+  const executionId = Number(input.executionId || 0);
+  const requestId = String(input.requestId || "").trim();
+  const runId = Number(input.runId || 0);
+  const result = await request(
+    joinSiteApi("workspace/canvas_execution"),
+    "get",
+    {
+      project_id: input.projectId,
+      execution_id: executionId,
+      request_id: executionId > 0 ? "" : requestId,
+      run_id: executionId > 0 || requestId ? 0 : runId,
+    },
+  );
+  if (!isSuccessResponse(result)) {
+    throw new Error(result.message || result.msg || "读取画布运行详情失败");
+  }
+  return (result.data || {}) as Record<string, unknown>;
 }
 
 export async function submitSpaceCanvasFeedback(input: {
@@ -538,7 +609,7 @@ export async function saveSpaceCanvas(
   projectId: number,
   assetCateId: number,
   canvas: SpaceCanvasState,
-): Promise<SpaceCanvasState> {
+): Promise<{ assetCateId: number; updatedAt: string }> {
   const result = await request(joinSiteApi("workspace/canvas"), "post", {
     project_id: projectId,
     asset_cate_id: assetCateId,
@@ -548,10 +619,11 @@ export async function saveSpaceCanvas(
   if (!isSuccessResponse(result)) {
     throw new Error(result.message || result.msg || "保存画布失败");
   }
-  return normalizeCanvasState(
-    (result.data as any)?.canvas || canvas,
-    assetCateId,
-  );
+  const data = (result.data || {}) as Record<string, unknown>;
+  return {
+    assetCateId: Number(data.asset_cate_id || assetCateId || 0),
+    updatedAt: String(data.updated_at || canvas.updatedAt || ""),
+  };
 }
 
 export async function initSpaceUpload(input: {

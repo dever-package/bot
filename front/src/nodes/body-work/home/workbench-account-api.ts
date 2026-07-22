@@ -48,6 +48,11 @@ export type AccountBillingBenefit = {
   saleRatio: string;
 };
 
+export type AccountBenefitDescription = {
+  icon: string;
+  text: string;
+};
+
 export type AccountPlan = {
   id: number;
   name: string;
@@ -57,6 +62,7 @@ export type AccountPlan = {
   basePoints: number;
   checkoutPoints: number;
   payAmountMicros: number;
+  benefitDescriptions: AccountBenefitDescription[];
   periodicBenefits: AccountPeriodicBenefit[];
   billingBenefits: AccountBillingBenefit[];
 };
@@ -304,6 +310,12 @@ function normalizePlan(value: any): AccountPlan {
     basePoints: Number(value?.base_points || 0),
     checkoutPoints: Number(value?.checkout_points || 0),
     payAmountMicros: Number(value?.pay_amount_micros || 0),
+    benefitDescriptions: toRows(value?.benefit_descriptions)
+      .map((benefit) => ({
+        icon: textValue(benefit?.icon),
+        text: textValue(benefit?.text),
+      }))
+      .filter((benefit) => Boolean(benefit.text)),
     periodicBenefits: toRows(value?.periodic_benefits).map((benefit) => ({
       pointName: textValue(benefit?.point_name) || "积分",
       pointAmount: Number(benefit?.point_amount || 0),

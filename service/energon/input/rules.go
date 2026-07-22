@@ -87,6 +87,15 @@ func IsOptionParamType(paramType string) bool {
 	}
 }
 
+func IsFileParamType(paramType string) bool {
+	switch NormalizeParamControlType(paramType) {
+	case "file", "files":
+		return true
+	default:
+		return false
+	}
+}
+
 func PowerParamRequiresInput(powerParam botmodel.PowerParam) bool {
 	return normalizePowerParamRequired(int(powerParam.Status)) == powerParamRequired
 }

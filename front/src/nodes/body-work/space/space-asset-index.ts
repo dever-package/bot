@@ -51,7 +51,6 @@ export type BuildCanvasAssetIndexInput = {
   nodePreview: (node: SpaceCanvasNode) => CanvasAssetPreview;
   assetPreview: (asset: ProjectAsset) => CanvasAssetPreview;
   nodeHasResult: (node: SpaceCanvasNode) => boolean;
-  nodeRunStatus?: (node: SpaceCanvasNode) => string;
 };
 
 export const canvasAssetNodeTypeOptions: Array<{
@@ -115,7 +114,6 @@ export function buildCanvasAssetIndex(
           node,
           asset,
           input.nodeHasResult(node),
-          input.nodeRunStatus?.(node),
         ),
         preview: input.nodePreview(node),
         output,
@@ -211,10 +209,9 @@ function canvasMaterialStatus(
   node: SpaceCanvasNode,
   asset: ProjectAsset | undefined,
   hasResult: boolean,
-  runStatus = "",
 ): CanvasAssetStatus {
   const status = String(
-    runStatus || (node as any).running?.status || node.resultRef?.status || "",
+    (node as any).running?.status || node.resultRef?.status || "",
   ).toLowerCase();
   if (
     status === "running" ||

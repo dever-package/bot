@@ -1,6 +1,5 @@
 import {
   Check,
-  ExternalLink,
   Loader2,
   Pencil,
   RotateCcw,
@@ -12,6 +11,7 @@ import {
   assetSourceLabel,
   type AssetSourceLabels,
 } from "./asset-contract";
+import { BodyWorkTooltip } from "../shared/body-work-tooltip";
 import type { AssetRecord, AssetView } from "./asset-types";
 
 export function AssetCard({
@@ -65,67 +65,68 @@ export function AssetCard({
             />
           ) : null}
         </div>
-        <button
-          type="button"
-          className="wb-asset-card-copy"
-          onClick={() => onOpen(asset)}
-        >
-          <strong title={asset.name}>{asset.name}</strong>
-          <span>
-            {assetSourceLabel(asset.sourceType, sourceLabels)} ·{" "}
-            {assetKindLabel(asset.kind)}
-          </span>
-        </button>
+        <BodyWorkTooltip label={asset.name}>
+          <button
+            type="button"
+            className="wb-asset-card-copy"
+            onClick={() => onOpen(asset)}
+          >
+            <strong>{asset.name}</strong>
+            <span>
+              {assetSourceLabel(asset.sourceType, sourceLabels)} ·{" "}
+              {assetKindLabel(asset.kind)}
+            </span>
+          </button>
+        </BodyWorkTooltip>
       </div>
       <span className="wb-asset-card-kind-icon">
         <AssetKindIcon kind={asset.kind} />
       </span>
       <div className="wb-asset-card-actions">
         {!inTrash ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onRename(asset)}
-            title="修改标题"
-          >
-            <Pencil aria-hidden="true" />
-            <span className="sr-only">修改标题</span>
-          </button>
+          <BodyWorkTooltip label="修改标题">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onRename(asset)}
+            >
+              <Pencil aria-hidden="true" />
+              <span className="sr-only">修改标题</span>
+            </button>
+          </BodyWorkTooltip>
         ) : null}
-        <button type="button" onClick={() => onOpen(asset)} title="查看详情">
-          <ExternalLink aria-hidden="true" />
-          <span className="sr-only">查看详情</span>
-        </button>
         {inTrash && onRestore ? (
-          <button
-            type="button"
-            className="is-restore"
-            disabled={busy}
-            onClick={() => onRestore(asset)}
-            title="恢复资产"
-          >
-            {busy ? (
-              <Loader2 className="is-spinning" aria-hidden="true" />
-            ) : (
-              <RotateCcw aria-hidden="true" />
-            )}
-            <span className="sr-only">恢复资产</span>
-          </button>
+          <BodyWorkTooltip label="恢复资产">
+            <button
+              type="button"
+              className="is-restore"
+              disabled={busy}
+              onClick={() => onRestore(asset)}
+            >
+              {busy ? (
+                <Loader2 className="is-spinning" aria-hidden="true" />
+              ) : (
+                <RotateCcw aria-hidden="true" />
+              )}
+              <span className="sr-only">恢复资产</span>
+            </button>
+          </BodyWorkTooltip>
         ) : onDelete ? (
-          <button
-            type="button"
-            className="is-danger"
-            disabled={busy}
-            onClick={() => onDelete(asset)}
-            title="移入回收站"
-          >
-            {busy ? (
-              <Loader2 className="is-spinning" aria-hidden="true" />
-            ) : (
-              <Trash2 aria-hidden="true" />
-            )}
-            <span className="sr-only">移入回收站</span>
-          </button>
+          <BodyWorkTooltip label="移入回收站">
+            <button
+              type="button"
+              className="is-danger"
+              disabled={busy}
+              onClick={() => onDelete(asset)}
+            >
+              {busy ? (
+                <Loader2 className="is-spinning" aria-hidden="true" />
+              ) : (
+                <Trash2 aria-hidden="true" />
+              )}
+              <span className="sr-only">移入回收站</span>
+            </button>
+          </BodyWorkTooltip>
         ) : null}
         {!inTrash && selectable && onSelect ? (
           <button

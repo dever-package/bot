@@ -81,8 +81,7 @@ export function loadWorkbenchCatalog(teamID = 0) {
       powers: toRows(data.powers).map(normalizePower).filter(hasID),
       roles: toRows(data.roles)
         .map(normalizeRole)
-        .filter(hasID)
-        .filter(isExecutionRole),
+        .filter(hasID),
       assetCates: toRows(data.asset_cates)
         .map(normalizeAssetCate)
         .filter(hasID),
@@ -225,10 +224,6 @@ function normalizeSystemMessage(value: any): WorkbenchSystemMessage {
 
 function hasID<T extends { id: number }>(value: T) {
   return value.id > 0;
-}
-
-function isExecutionRole(role: WorkbenchRole) {
-  return role.roleType === "worker";
 }
 
 export function toRows(value: unknown): any[] {

@@ -22,7 +22,7 @@ func NewWorkspaceService() WorkspaceService {
 	return WorkspaceService{project: NewService(), streams: teamservice.StreamStore()}
 }
 
-func (s WorkspaceService) Bootstrap(ctx context.Context, projectID uint64) (map[string]any, error) {
+func (s WorkspaceService) Bootstrap(ctx context.Context, projectID uint64, assetCateID uint64) (map[string]any, error) {
 	project, err := requireProject(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -31,21 +31,26 @@ func (s WorkspaceService) Bootstrap(ctx context.Context, projectID uint64) (map[
 	if err != nil {
 		return nil, err
 	}
-	detail, err := s.project.Detail(ctx, project.ID)
+	payload, err := s.project.team.WorkspaceCanvasBootstrap(ctx, project.TeamID, project.ReleaseID)
 	if err != nil {
 		return nil, err
 	}
-	config, err := s.project.CanvasConfig(ctx, project.ID, 0)
+	assetCates, _ := payload["asset_cates"].([]teamservice.GraphAssetCate)
+	assetCateID = workspaceBootstrapAssetCateID(assetCates, assetCateID)
+	bundle := s.canvasBundle(ctx, project.ID, assetCateID)
+	payload["project"] = newPayloadBuilder(ctx).Project(*project)
+	payload["assets"] = bundle["assets"]
+	payload["canvas"] = map[string]any{canvasKey(assetCateID): bundle["canvas"]}
+	payload["active_asset_cate_id"] = assetCateID
+	return payload, nil
+}
+
+func (s WorkspaceService) Canvas(ctx context.Context, projectID uint64, assetCateID uint64) (map[string]any, error) {
+	project, err := requireProject(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
-		"project":       detail["project"],
-		"team":          detail["team"],
-		"assets":        detail["assets"],
-		"canvas":        s.projectCanvases(ctx, project.ID),
-		"canvas_config": config,
-	}, nil
+	return s.canvasBundle(ctx, project.ID, assetCateID), nil
 }
 
 func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, assetCateID uint64, canvas map[string]any) (map[string]any, error) {
@@ -57,19 +62,29 @@ func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, asse
 	if err != nil {
 		return nil, err
 	}
+	savedAt := time.Now()
 	record := map[string]any{
 		"next_node_no": clean.NextNodeNo,
 		"nodes":        jsonText(clean.Nodes, "[]"),
 		"edges":        jsonText(clean.Edges, "[]"),
 		"viewport":     jsonText(clean.Viewport, "{}"),
-		"updated_at":   time.Now(),
+		"updated_at":   savedAt,
 	}
+	nextMaterialSlots := canvasMaterialSlots(clean.Nodes)
 	if err := orm.Transaction(ctx, func(tx context.Context) error {
 		model := projectmodel.NewCanvasModel()
 		row := model.Find(tx, map[string]any{
 			"project_id":    project.ID,
 			"asset_cate_id": clean.AssetCateID,
 		})
+		syncMaterialSlots := row == nil
+		if row != nil {
+			previousNodes := sliceValue(jsonValue(row.Nodes, []any{}))
+			syncMaterialSlots = !sameCanvasMaterialSlots(
+				canvasMaterialSlots(previousNodes),
+				nextMaterialSlots,
+			)
+		}
 		if row == nil {
 			record["project_id"] = project.ID
 			record["asset_cate_id"] = clean.AssetCateID
@@ -80,13 +95,16 @@ func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, asse
 		} else if model.Update(tx, map[string]any{"id": row.ID}, record) == 0 {
 			return fmt.Errorf("保存画布失败")
 		}
-		s.project.asset.SyncCanvasMaterialSlots(tx, project.ID, clean.AssetCateID, canvasMaterialSlots(clean.Nodes))
+		if syncMaterialSlots {
+			s.project.asset.SyncCanvasMaterialSlots(tx, project.ID, clean.AssetCateID, nextMaterialSlots)
+		}
 		return nil
 	}); err != nil {
 		return nil, err
 	}
 	return map[string]any{
-		"canvas": s.projectCanvas(ctx, project.ID, clean.AssetCateID),
+		"asset_cate_id": clean.AssetCateID,
+		"updated_at":    savedAt,
 	}, nil
 }
 
@@ -111,16 +129,20 @@ func canvasMaterialSlots(nodes []any) []assetservice.CanvasMaterialSlot {
 	return result
 }
 
-func (s WorkspaceService) projectCanvases(ctx context.Context, projectID uint64) map[string]any {
-	rows := projectmodel.NewCanvasModel().Select(ctx, map[string]any{"project_id": projectID})
-	result := map[string]any{}
-	for _, row := range rows {
-		if row == nil {
-			continue
-		}
-		result[canvasKey(row.AssetCateID)] = canvasPayload(*row)
+func sameCanvasMaterialSlots(left []assetservice.CanvasMaterialSlot, right []assetservice.CanvasMaterialSlot) bool {
+	if len(left) != len(right) {
+		return false
 	}
-	return result
+	leftByNodeKey := make(map[string]string, len(left))
+	for _, slot := range left {
+		leftByNodeKey[slot.NodeKey] = slot.Name
+	}
+	for _, slot := range right {
+		if leftByNodeKey[slot.NodeKey] != slot.Name {
+			return false
+		}
+	}
+	return true
 }
 
 func (s WorkspaceService) projectCanvas(ctx context.Context, projectID uint64, assetCateID uint64) map[string]any {
@@ -138,6 +160,84 @@ func (s WorkspaceService) projectCanvas(ctx context.Context, projectID uint64, a
 		}
 	}
 	return canvasPayload(*row)
+}
+
+func (s WorkspaceService) canvasBundle(ctx context.Context, projectID uint64, assetCateID uint64) map[string]any {
+	canvas := s.projectCanvas(ctx, projectID, assetCateID)
+	nodes := sliceValue(canvas["nodes"])
+	slots := canvasMaterialSlots(nodes)
+	nodeKeys := make([]string, 0, len(slots))
+	for _, slot := range slots {
+		nodeKeys = append(nodeKeys, slot.NodeKey)
+	}
+	assets := s.project.asset.CanvasReferences(
+		ctx,
+		projectID,
+		assetCateID,
+		canvasReferencedAssetIDs(nodes),
+		nodeKeys,
+	)
+	return map[string]any{
+		"canvas": canvas,
+		"assets": map[string]any{"items": assets},
+	}
+}
+
+func workspaceBootstrapAssetCateID(assetCates []teamservice.GraphAssetCate, requested uint64) uint64 {
+	if len(assetCates) == 0 {
+		return 0
+	}
+	for _, assetCate := range assetCates {
+		if requested > 0 && assetCate.ID == requested {
+			return requested
+		}
+	}
+	return assetCates[0].ID
+}
+
+func canvasReferencedAssetIDs(nodes []any) []uint64 {
+	seen := map[uint64]struct{}{}
+	for _, node := range nodes {
+		collectCanvasReferencedAssetIDs(node, seen)
+	}
+	result := make([]uint64, 0, len(seen))
+	for assetID := range seen {
+		result = append(result, assetID)
+	}
+	return result
+}
+
+func collectCanvasReferencedAssetIDs(raw any, result map[uint64]struct{}) {
+	switch value := raw.(type) {
+	case map[string]any:
+		if strings.EqualFold(strings.TrimSpace(textValue(value["ref_type"])), "asset") {
+			if assetID := uint64Value(value["ref_id"]); assetID > 0 {
+				result[assetID] = struct{}{}
+			}
+		}
+		if asset := mapValue(value["asset"]); asset != nil {
+			if assetID := uint64Value(asset["id"]); assetID > 0 {
+				result[assetID] = struct{}{}
+			}
+		}
+		for key, child := range value {
+			normalizedKey := strings.ToLower(strings.ReplaceAll(key, "_", ""))
+			if strings.HasSuffix(normalizedKey, "assetid") {
+				if assetID := uint64Value(child); assetID > 0 {
+					result[assetID] = struct{}{}
+				}
+			}
+			collectCanvasReferencedAssetIDs(child, result)
+		}
+	case []any:
+		for _, child := range value {
+			collectCanvasReferencedAssetIDs(child, result)
+		}
+	case []map[string]any:
+		for _, child := range value {
+			collectCanvasReferencedAssetIDs(child, result)
+		}
+	}
 }
 
 func canvasPayload(row projectmodel.Canvas) map[string]any {

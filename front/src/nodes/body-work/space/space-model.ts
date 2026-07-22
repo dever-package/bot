@@ -87,6 +87,7 @@ export function normalizeSpaceBootstrap(value: unknown): SpaceBootstrap {
     outputTypes: asRecords(
       firstDefined(row.output_types, canvasConfig.output_types),
     ).map(normalizeOutputType),
+    initialAssetCateId: numberValue(row.active_asset_cate_id),
   };
 }
 
@@ -229,6 +230,14 @@ export function relatedFlows(space: SpaceBootstrap, assetCateId: number) {
 
 export function isExecutionRole(role: TeamRole) {
   return role.role_type === "worker" || role.role_type === "default_worker";
+}
+
+export function isCreationRole(role: TeamRole) {
+  return role.create_status !== 2;
+}
+
+export function isCreationPower(power: PowerOption) {
+  return power.createStatus !== 2;
 }
 
 export function executionRole(space: SpaceBootstrap) {
@@ -445,6 +454,7 @@ function normalizeRole(value: Record<string, unknown>): TeamRole {
     name: stringValue(value.name),
     agent_id: numberValue(value.agent_id),
     assignment: stringValue(value.assignment),
+    create_status: statusValue(value.create_status),
   };
 }
 
@@ -489,7 +499,12 @@ function normalizePower(value: Record<string, unknown>): PowerOption {
     outputType,
     output: output.key ? output : undefined,
     kind,
+    createStatus: statusValue(value.create_status),
   };
+}
+
+function statusValue(value: unknown) {
+  return Number(value) === 2 ? 2 : 1;
 }
 
 function normalizeOutputType(value: Record<string, unknown>): OutputTypeOption {
@@ -626,6 +641,16 @@ function hydrateCanvasPowers(
     });
   }
   return canvases;
+}
+
+export function hydrateCanvasPowerCatalog(
+  canvas: SpaceCanvasState,
+  powers: PowerOption[],
+) {
+  return hydrateCanvasPowers(
+    { [String(canvas.assetCateId)]: canvas },
+    powers,
+  )[String(canvas.assetCateId)];
 }
 
 function normalizeCanvasNode(

@@ -32,6 +32,10 @@ func (ParamOptionService) ProviderLoadServiceParamRuleOptions(c *server.Context,
 	return loadEnergonModelFieldOptions(c, "bot.energon.NewServiceParamModel", "param_rule")
 }
 
+func (ParamOptionService) ProviderLoadServiceParamFileValueFormatOptions(c *server.Context, _ []any) any {
+	return loadEnergonModelFieldOptions(c, "bot.energon.NewServiceParamModel", "file_value_format")
+}
+
 func (ParamOptionService) ProviderLoadServiceEndpointParamModeOptions(c *server.Context, _ []any) any {
 	return loadEnergonModelFieldOptions(c, "bot.energon.NewServiceEndpointModel", "param_mode")
 }

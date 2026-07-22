@@ -134,7 +134,8 @@
   transition: background-color 120ms ease, color 120ms ease;
 }
 
-.hb-laper-nav-item svg {
+.hb-laper-nav-item svg,
+.hb-laper-nav-item .hb-configured-menu-icon {
   width: 19px;
   height: 19px;
 }
@@ -181,9 +182,15 @@
   color: var(--laper-text);
 }
 
-.hb-rail-action svg {
+.hb-rail-action svg,
+.hb-rail-action .hb-configured-menu-icon {
   width: 18px;
   height: 18px;
+}
+
+.hb-configured-menu-icon {
+  flex: none;
+  object-fit: contain;
 }
 
 .hb-system-message-root {

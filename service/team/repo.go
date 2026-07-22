@@ -413,14 +413,15 @@ func (Repo) ListPowers(ctx context.Context) []PowerOption {
 			continue
 		}
 		result = append(result, PowerOption{
-			ID:         row.ID,
-			CateID:     row.CateID,
-			Name:       strings.TrimSpace(row.Name),
-			Key:        strings.TrimSpace(row.Key),
-			Icon:       strings.TrimSpace(row.Icon),
-			OutputType: energonmodel.NormalizeOutputType(row.OutputType),
-			Output:     outputTypeSpec(row.OutputType),
-			Kind:       energonmodel.NormalizePowerKind(row.Kind),
+			ID:           row.ID,
+			CateID:       row.CateID,
+			Name:         strings.TrimSpace(row.Name),
+			Key:          strings.TrimSpace(row.Key),
+			Icon:         strings.TrimSpace(row.Icon),
+			OutputType:   energonmodel.NormalizeOutputType(row.OutputType),
+			Output:       outputTypeSpec(row.OutputType),
+			Kind:         energonmodel.NormalizePowerKind(row.Kind),
+			CreateStatus: teammodel.StatusEnabled,
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {
@@ -1251,11 +1252,11 @@ func normalizeRoleType(roleType string) string {
 
 func roleTypeOrder(roleType string) int {
 	switch normalizeRoleType(roleType) {
-	case teammodel.RoleTypeChat:
-		return 10
-	case teammodel.RoleTypePlanner:
-		return 20
 	case teammodel.RoleTypeWorker:
+		return 10
+	case teammodel.RoleTypeChat:
+		return 20
+	case teammodel.RoleTypePlanner:
 		return 30
 	case teammodel.RoleTypeReviewer:
 		return 40

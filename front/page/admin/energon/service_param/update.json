@@ -131,6 +131,40 @@
         }
       },
       {
+        "id": "service-param-file-value-format",
+        "type": "form-radio",
+        "name": "文件值格式",
+        "value": "form.file_value_format",
+        "mode": "form",
+        "option": "option.file_value_format",
+        "info": "仅文件参数生效。文件地址保持现有 URL；Base64 只传编码内容；Data URL 会带 MIME 前缀。单文件和多文件结构保持不变。",
+        "meta": {
+          "controlClassName": "min-w-[7rem]",
+          "hiddenCondition": "any",
+          "hiddenWhen": [
+            {
+              "path": "form.param_id",
+              "operator": "empty"
+            },
+            {
+              "path": "form.param_rule",
+              "operator": "equals",
+              "value": 2
+            },
+            {
+              "path": "form.param_rule",
+              "operator": "equals",
+              "value": 4
+            },
+            {
+              "path": "form.param_rule",
+              "operator": "equals",
+              "value": 5
+            }
+          ]
+        }
+      },
+      {
         "id": "mapping-file",
         "type": "form-checkbox",
         "name": "字段值",
@@ -294,11 +328,15 @@
     "form": {
       "param_rule": 1,
       "fixed_value_type": "string",
+      "file_value_format": "url",
       "mapping": ""
     },
     "option": {
       "param_rule": {
         "service": "bot.energon.ParamOptionService.LoadServiceParamRuleOptions"
+      },
+      "file_value_format": {
+        "service": "bot.energon.ParamOptionService.LoadServiceParamFileValueFormatOptions"
       },
       "fixed_value_type": [
         {

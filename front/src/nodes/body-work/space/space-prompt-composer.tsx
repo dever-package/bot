@@ -28,6 +28,7 @@ import {
   canvasReferenceTargetsForUsage,
   replaceCanvasReferenceUsage,
 } from "./space-reference-content";
+import { SpaceTooltip } from "./space-tooltip";
 import type {
   CanvasContentPreview,
   CanvasReferenceContent,
@@ -521,29 +522,30 @@ function ComposerMenu({
         }
       }}
     >
-      <button
-        type="button"
-        className={`ws-prompt-tool ${iconOnly ? "is-icon-only" : ""} ${open ? "is-open" : ""}`}
-        disabled={disabled}
-        aria-label={label}
-        aria-expanded={variant === "attachments" ? open : undefined}
-        aria-haspopup={variant === "attachments" ? "menu" : undefined}
-        title={iconOnly ? label : undefined}
-        onFocus={() => {
-          if (!disabled) {
-            onToggle(id);
-          }
-        }}
-        onClick={() => {
-          if (!disabled) {
-            onToggle(open ? "" : id);
-          }
-        }}
-      >
-        {icon}
-        {!iconOnly ? <span>{label}</span> : null}
-        {!iconOnly ? <ChevronDown size={14} /> : null}
-      </button>
+      <SpaceTooltip label={iconOnly ? label : undefined}>
+        <button
+          type="button"
+          className={`ws-prompt-tool ${iconOnly ? "is-icon-only" : ""} ${open ? "is-open" : ""}`}
+          disabled={disabled}
+          aria-label={label}
+          aria-expanded={variant === "attachments" ? open : undefined}
+          aria-haspopup={variant === "attachments" ? "menu" : undefined}
+          onFocus={() => {
+            if (!disabled) {
+              onToggle(id);
+            }
+          }}
+          onClick={() => {
+            if (!disabled) {
+              onToggle(open ? "" : id);
+            }
+          }}
+        >
+          {icon}
+          {!iconOnly ? <span>{label}</span> : null}
+          {!iconOnly ? <ChevronDown size={14} /> : null}
+        </button>
+      </SpaceTooltip>
       {open ? (
         <div className={`ws-prompt-popover ${variantClass}`}>{children}</div>
       ) : null}

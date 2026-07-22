@@ -1,6 +1,7 @@
 import {
   BadgeCheck,
   CalendarDays,
+  CircleCheck,
   Coins,
   CreditCard,
   LoaderCircle,
@@ -19,6 +20,7 @@ import {
   formatAccountNumber,
 } from "./workbench-account-format";
 import { AccountEmpty } from "./workbench-account-state";
+import { resolveConfiguredLucideIcon } from "../shared/configured-icon";
 
 export function AccountPlansView({
   overview,
@@ -120,24 +122,41 @@ function AccountPlanCard({
         参考价 {formatAccountMoney(plan.payAmountMicros)} · {formatAccountDuration(plan.durationDays)}
       </p>
       <div className="hb-account-plan-benefits">
-        {plan.periodicBenefits.map((benefit, index) => (
-          <span key={`${benefit.pointName}-${index}`}>
-            <Coins />
-            每 {benefit.cycleDays} 天 {formatAccountNumber(benefit.pointAmount)} {benefit.pointName}
-          </span>
-        ))}
-        {plan.billingBenefits.map((benefit, index) => (
-          <span key={`${benefit.scope}-${index}`}>
-            <CreditCard />
-            能力计费系数 {benefit.saleRatio || "1"}
-          </span>
-        ))}
-        {plan.periodicBenefits.length === 0 && plan.billingBenefits.length === 0 ? (
-          <span>
-            <CalendarDays />
-            有效期内享受当前等级权益
-          </span>
-        ) : null}
+        {plan.benefitDescriptions.length > 0
+          ? plan.benefitDescriptions.map((benefit, index) => {
+              const Icon = resolveConfiguredLucideIcon(
+                benefit.icon,
+                CircleCheck,
+              );
+              return (
+                <span key={`${benefit.text}-${index}`}>
+                  <Icon />
+                  {benefit.text}
+                </span>
+              );
+            })
+          : (
+            <>
+              {plan.periodicBenefits.map((benefit, index) => (
+                <span key={`${benefit.pointName}-${index}`}>
+                  <Coins />
+                  每 {benefit.cycleDays} 天 {formatAccountNumber(benefit.pointAmount)} {benefit.pointName}
+                </span>
+              ))}
+              {plan.billingBenefits.map((benefit, index) => (
+                <span key={`${benefit.scope}-${index}`}>
+                  <CreditCard />
+                  能力计费系数 {benefit.saleRatio || "1"}
+                </span>
+              ))}
+              {plan.periodicBenefits.length === 0 && plan.billingBenefits.length === 0 ? (
+                <span>
+                  <CalendarDays />
+                  有效期内享受当前等级权益
+                </span>
+              ) : null}
+            </>
+          )}
       </div>
       <Button className="w-full" disabled={disabled} onClick={onCheckout}>
         {busy ? <LoaderCircle className="animate-spin" /> : null}

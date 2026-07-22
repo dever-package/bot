@@ -99,7 +99,8 @@
             },
             {
               "value": "home_status",
-              "name": "首页",
+              "name": "工具",
+              "description": "开启后在 Body 的工具中展示该能力。",
               "type": "form-switch",
               "meta": {
                 "trueValue": 1,
@@ -107,8 +108,9 @@
               }
             },
             {
-              "value": "status",
-              "name": "状态",
+              "value": "create_status",
+              "name": "创作",
+              "description": "开启后在创作画布的能力列表中展示该能力。",
               "type": "form-switch",
               "meta": {
                 "trueValue": 1,
@@ -119,7 +121,8 @@
               "value": "sort",
               "type": "show-base",
               "editor": "form-number",
-              "trigger": "doubleClick"
+              "trigger": "doubleClick",
+              "tip": "正序排序，数值越小越靠前。双击可修改。"
             },
             {
               "value": "created_at",

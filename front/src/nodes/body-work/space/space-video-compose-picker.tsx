@@ -47,7 +47,12 @@ export function VideoComposeAssetPicker({
               >
                 <span className="ws-video-compose-picker-preview">
                   {item.preview.imageUrl ? (
-                    <img src={item.preview.imageUrl} alt="" />
+                    <img
+                      src={item.preview.imageUrl}
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                    />
                   ) : item.preview.videoUrl ? (
                     <video
                       src={item.preview.videoUrl}

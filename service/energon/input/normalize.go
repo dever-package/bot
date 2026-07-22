@@ -101,7 +101,7 @@ func normalizeParamInputAlias(
 	configuredKeys map[string]struct{},
 	normalized map[string]any,
 ) {
-	if controlType := NormalizeParamControlType(param.Type); controlType != "file" && controlType != "files" {
+	if !IsFileParamType(param.Type) {
 		return
 	}
 	key := strings.TrimSpace(param.Key)

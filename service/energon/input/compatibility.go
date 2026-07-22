@@ -16,7 +16,7 @@ func ValidateTargetCompatibility(
 	req *botprotocol.ShemicRequest,
 	target Target,
 ) error {
-	mapped, err := BuildMapped(ctx, repo, req, target)
+	mapped, err := buildMapped(ctx, repo, req, target, false)
 	if err != nil {
 		return err
 	}
@@ -98,8 +98,7 @@ func validateAttachmentMappingCoverage(
 	value any,
 	serviceParams []botmodel.ServiceParam,
 ) error {
-	controlType := NormalizeParamControlType(param.Type)
-	if controlType != "file" && controlType != "files" {
+	if !IsFileParamType(param.Type) {
 		return nil
 	}
 

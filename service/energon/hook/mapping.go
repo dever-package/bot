@@ -61,6 +61,20 @@ func normalizeServiceParamMapping(c *server.Context, paramRow map[string]any, ru
 	return ""
 }
 
+func normalizeServiceParamFileValueFormat(paramRow map[string]any, value any) string {
+	if !botinput.IsFileParamType(util.ToStringTrimmed(paramRow["type"])) {
+		if format := strings.ToLower(util.ToStringTrimmed(value)); format != "" && format != botmodel.ServiceParamFileValueFormatURL {
+			panicServiceParamField("只有文件参数可以配置 Base64 或 Data URL")
+		}
+		return botmodel.ServiceParamFileValueFormatURL
+	}
+	format, err := botinput.ParseServiceParamFileValueFormat(util.ToStringTrimmed(value))
+	if err != nil {
+		panicServiceParamField(err.Error())
+	}
+	return format
+}
+
 func serviceParamMappingInput(paramID uint64, rule int16, row map[string]any) any {
 	value := row["mapping"]
 	if rule != paramRuleComboMap {

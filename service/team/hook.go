@@ -120,6 +120,7 @@ func (TeamHook) ProviderBeforeSaveTeamPower(c *server.Context, params []any) any
 		record["config"] = "{}"
 	}
 	defaultTeamInt16Field(record, "home_status", teammodel.StatusEnabled, partial)
+	defaultTeamInt16Field(record, "create_status", teammodel.StatusEnabled, partial)
 	defaultTeamInt16Field(record, "status", defaultTeamStatus, partial)
 	defaultTeamIntField(record, "sort", defaultTeamSort, partial)
 	return record
@@ -152,6 +153,8 @@ func (TeamHook) ProviderBeforeSaveRole(c *server.Context, params []any) any {
 	if shouldNormalizeTeamField(record, "config", partial) && record["config"] == "" {
 		record["config"] = "{}"
 	}
+	defaultTeamInt16Field(record, "chat_status", teammodel.StatusEnabled, partial)
+	defaultTeamInt16Field(record, "create_status", teammodel.StatusEnabled, partial)
 	defaultTeamInt16Field(record, "status", defaultTeamStatus, partial)
 	defaultTeamIntField(record, "sort", defaultTeamSort, partial)
 	return record
@@ -258,6 +261,7 @@ func normalizeTeamPowerRows(ctx context.Context, teamID uint64, value any) []any
 			next["config"] = "{}"
 		}
 		defaultTeamInt16Field(next, "home_status", teammodel.StatusEnabled, false)
+		defaultTeamInt16Field(next, "create_status", teammodel.StatusEnabled, false)
 		defaultTeamInt16Field(next, "status", defaultTeamStatus, false)
 		if util.ToIntDefault(next["sort"], 0) <= 0 {
 			next["sort"] = index + 1

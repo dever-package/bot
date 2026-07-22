@@ -86,6 +86,30 @@ export function mergeProjectAssetVersionHistory(
   };
 }
 
+export function mergeProjectAssets(
+  previousAssets: ProjectAsset[],
+  nextAssets: ProjectAsset[],
+) {
+  if (nextAssets.length === 0) {
+    return previousAssets;
+  }
+  const nextByID = new Map(nextAssets.map((asset) => [asset.id, asset]));
+  const merged = previousAssets.map((previous) => {
+    const next = nextByID.get(previous.id);
+    if (!next) {
+      return previous;
+    }
+    nextByID.delete(previous.id);
+    return mergeProjectAssetVersionHistory(next, previous);
+  });
+  return [
+    ...[...nextByID.values()].map((asset) =>
+      mergeProjectAssetVersionHistory(asset),
+    ),
+    ...merged,
+  ];
+}
+
 function stripRunResultVersion(result: any) {
   if (!result || typeof result !== "object" || Array.isArray(result)) {
     return result;

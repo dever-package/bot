@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertCircle,
   ArrowLeft,
   Copy,
   History,
@@ -38,6 +37,7 @@ import {
   formatNodeDetailVersionTime,
   NodeDetailVersionSelect,
 } from "./version-select";
+import { NodeDetailRunError } from "./node-detail-run-error";
 import { useAssetReferenceProvider } from "../../asset/asset-reference-provider";
 import { CanvasAssetReferenceProviderContext } from "../space-reference-editor";
 import { isVideoComposePowerType } from "../space-power-presentation";
@@ -570,8 +570,12 @@ export function NodeDetailDialog({
     closingRef.current = true;
     setClosing(true);
     let saved = true;
+    const currentAsset = assetRef.current;
     if (
-      selectedVersionIdRef.current === currentAssetVersionId(assetRef.current)
+      draft.hasPendingChanges &&
+      currentAsset?.id &&
+      currentAsset?.version?.id &&
+      selectedVersionIdRef.current === currentAssetVersionId(currentAsset)
     ) {
       saved = await draft.flush();
     }
@@ -582,7 +586,7 @@ export function NodeDetailDialog({
       return;
     }
     onClose();
-  }, [draft.flush, onClose]);
+  }, [draft.flush, draft.hasPendingChanges, onClose]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -703,18 +707,7 @@ export function NodeDetailDialog({
         ) : null}
 
         <div className="wb-detail-scroll">
-          {node.runError ? (
-            <div
-              className="wb-detail-error-banner is-run-error"
-              role="alert"
-            >
-              <AlertCircle size={17} />
-              <div>
-                <strong>最近一次运行失败</strong>
-                <p>{node.runError}</p>
-              </div>
-            </div>
-          ) : null}
+          <NodeDetailRunError projectId={projectId} node={node} />
           {showHistoryState ? (
             <div className="wb-detail-content-state">
               {historyLoading ? (

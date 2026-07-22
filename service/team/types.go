@@ -97,26 +97,29 @@ type GraphAssetCate struct {
 }
 
 type GraphTeamPower struct {
-	ID         uint64         `json:"id"`
-	TeamID     uint64         `json:"team_id"`
-	PowerID    uint64         `json:"power_id"`
-	Config     map[string]any `json:"config"`
-	HomeStatus int16          `json:"home_status"`
-	Status     int16          `json:"status"`
-	Sort       int            `json:"sort"`
+	ID           uint64         `json:"id"`
+	TeamID       uint64         `json:"team_id"`
+	PowerID      uint64         `json:"power_id"`
+	Config       map[string]any `json:"config"`
+	HomeStatus   int16          `json:"home_status"`
+	CreateStatus int16          `json:"create_status"`
+	Status       int16          `json:"status"`
+	Sort         int            `json:"sort"`
 }
 
 type GraphRole struct {
-	ID         uint64         `json:"id"`
-	TeamID     uint64         `json:"team_id"`
-	RoleType   string         `json:"role_type"`
-	RoleKey    string         `json:"role_key"`
-	Name       string         `json:"name"`
-	AgentID    uint64         `json:"agent_id"`
-	Assignment string         `json:"assignment"`
-	Config     map[string]any `json:"config"`
-	Status     int16          `json:"status"`
-	Sort       int            `json:"sort"`
+	ID           uint64         `json:"id"`
+	TeamID       uint64         `json:"team_id"`
+	RoleType     string         `json:"role_type"`
+	RoleKey      string         `json:"role_key"`
+	Name         string         `json:"name"`
+	AgentID      uint64         `json:"agent_id"`
+	Assignment   string         `json:"assignment"`
+	Config       map[string]any `json:"config"`
+	ChatStatus   int16          `json:"chat_status"`
+	CreateStatus int16          `json:"create_status"`
+	Status       int16          `json:"status"`
+	Sort         int            `json:"sort"`
 }
 
 type AgentOption struct {
@@ -146,14 +149,15 @@ type TeamOption struct {
 }
 
 type PowerOption struct {
-	ID         uint64                      `json:"id"`
-	CateID     uint64                      `json:"cate_id"`
-	Name       string                      `json:"name"`
-	Key        string                      `json:"key"`
-	Icon       string                      `json:"icon"`
-	OutputType string                      `json:"output_type"`
-	Output     energonmodel.OutputTypeSpec `json:"output"`
-	Kind       string                      `json:"kind"`
+	ID           uint64                      `json:"id"`
+	CateID       uint64                      `json:"cate_id"`
+	Name         string                      `json:"name"`
+	Key          string                      `json:"key"`
+	Icon         string                      `json:"icon"`
+	OutputType   string                      `json:"output_type"`
+	Output       energonmodel.OutputTypeSpec `json:"output"`
+	Kind         string                      `json:"kind"`
+	CreateStatus int16                       `json:"create_status"`
 }
 
 type PowerKindOption struct {

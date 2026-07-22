@@ -1,0 +1,108 @@
+{
+  "page": {
+    "name": "功能编辑",
+    "parent": "bot/body/config/set",
+    "type": 2,
+    "auth": [
+      {
+        "key": "bot/body/function/update",
+        "name": "功能编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "name": "显示名称",
+        "placeholder": "请输入功能名称",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "显示名称不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-icon",
+        "name": "系统图标",
+        "placeholder": "请选择系统图标",
+        "value": "form.icon",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "请选择系统图标。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-upload",
+        "name": "上传图标（可选）",
+        "value": "form.icon_image",
+        "mode": "form",
+        "info": "可选择系统自带图标，也可以上传图片；上传图标存在时优先展示，移除后恢复系统图标。",
+        "meta": {
+          "formLayout": "horizontal",
+          "uploadType": "pic",
+          "kind": "image",
+          "saveMode": "url",
+          "ruleId": 1,
+          "bizKey": "body.function.icon",
+          "bizName": "Body功能图标",
+          "maxCount": 1
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "model": "bot.body.NewFunctionModel",
+      "id": 0,
+      "_partial": true,
+      "name": "",
+      "icon": "",
+      "icon_image": ""
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "data": {
+        "id": "$form.id",
+        "_partial": true,
+        "name": "$form.name",
+        "icon": "$form.icon",
+        "icon_image": "$form.icon_image"
+      }
+    }
+  }
+}

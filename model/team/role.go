@@ -16,9 +16,9 @@ const (
 )
 
 var roleTypeOptions = []map[string]any{
+	{"id": RoleTypeWorker, "value": "执行"},
 	{"id": RoleTypeChat, "value": "沟通"},
 	{"id": RoleTypePlanner, "value": "规划"},
-	{"id": RoleTypeWorker, "value": "执行"},
 	{"id": RoleTypeReviewer, "value": "审核"},
 }
 
@@ -30,17 +30,19 @@ var roleSeed = []map[string]any{
 }
 
 type Role struct {
-	ID         uint64    `dorm:"primaryKey;autoIncrement;comment:角色ID"`
-	TeamID     uint64    `dorm:"type:bigint;not null;default:0;comment:团队"`
-	RoleType   string    `dorm:"type:varchar(32);not null;default:'worker';comment:类型"`
-	RoleKey    string    `dorm:"type:varchar(128);not null;default:'';comment:标识"`
-	Name       string    `dorm:"type:varchar(128);not null;comment:名称"`
-	AgentID    uint64    `dorm:"type:bigint;not null;default:0;comment:智能体"`
-	Assignment string    `dorm:"type:text;not null;default:'';comment:职责说明"`
-	Config     string    `dorm:"type:text;not null;default:'{}';comment:配置"`
-	Status     int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	Sort       int       `dorm:"type:int;not null;default:100;comment:排序"`
-	CreatedAt  time.Time `dorm:"comment:创建时间"`
+	ID           uint64    `dorm:"primaryKey;autoIncrement;comment:角色ID"`
+	TeamID       uint64    `dorm:"type:bigint;not null;default:0;comment:团队"`
+	RoleType     string    `dorm:"type:varchar(32);not null;default:'worker';comment:类型"`
+	RoleKey      string    `dorm:"type:varchar(128);not null;default:'';comment:标识"`
+	Name         string    `dorm:"type:varchar(128);not null;comment:名称"`
+	AgentID      uint64    `dorm:"type:bigint;not null;default:0;comment:智能体"`
+	Assignment   string    `dorm:"type:text;not null;default:'';comment:职责说明"`
+	Config       string    `dorm:"type:text;not null;default:'{}';comment:配置"`
+	ChatStatus   int16     `dorm:"type:smallint;not null;default:1;comment:对话"`
+	CreateStatus int16     `dorm:"type:smallint;not null;default:1;comment:创作"`
+	Status       int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	Sort         int       `dorm:"type:int;not null;default:100;comment:排序"`
+	CreatedAt    time.Time `dorm:"comment:创建时间"`
 }
 
 type RoleIndex struct {
@@ -55,8 +57,10 @@ func NewRoleModel() *orm.Model[Role] {
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{
-			"status":    statusOptions,
-			"role_type": roleTypeOptions,
+			"chat_status":   statusOptions,
+			"create_status": statusOptions,
+			"status":        statusOptions,
+			"role_type":     roleTypeOptions,
 		},
 		Relations: []orm.Relation{
 			teamRelation,
@@ -67,15 +71,17 @@ func NewRoleModel() *orm.Model[Role] {
 
 func defaultRoleSeed(id uint64, roleType string, roleKey string, name string, assignment string, sort int) map[string]any {
 	return map[string]any{
-		"id":         id,
-		"team_id":    DefaultTeamID,
-		"role_type":  roleType,
-		"role_key":   roleKey,
-		"name":       name,
-		"agent_id":   agentmodel.DefaultAgentID,
-		"assignment": assignment,
-		"config":     "{}",
-		"status":     StatusEnabled,
-		"sort":       sort,
+		"id":            id,
+		"team_id":       DefaultTeamID,
+		"role_type":     roleType,
+		"role_key":      roleKey,
+		"name":          name,
+		"agent_id":      agentmodel.DefaultAgentID,
+		"assignment":    assignment,
+		"config":        "{}",
+		"chat_status":   StatusEnabled,
+		"create_status": StatusEnabled,
+		"status":        StatusEnabled,
+		"sort":          sort,
 	}
 }

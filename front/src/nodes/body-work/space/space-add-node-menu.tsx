@@ -12,6 +12,7 @@ import {
 import type { ReactNode } from "react";
 import { PowerIcon } from "./space-power-icon";
 import { resolvePowerPresentation } from "./space-power-presentation";
+import { SpaceTooltip } from "./space-tooltip";
 import type {
   CanvasFunctionOption,
   PowerOption,
@@ -259,25 +260,28 @@ function renderMenuItems<T>({
             : itemClassName;
         const itemDescription = description?.(item) || "";
         return (
-          <button
+          <SpaceTooltip
             key={itemKey(item)}
-            type="button"
-            className={`ws-add-item ${className}`.trim()}
-            title={
+            label={
               itemDescription
                 ? `${label(item)} · ${itemDescription}`
                 : label(item)
             }
-            onClick={() => onSelect(item)}
           >
-            <span className="ws-add-icon">{icon(item)}</span>
-            <span className="ws-add-copy">
-              <span className="ws-add-label">{label(item)}</span>
-              {itemDescription ? (
-                <span className="ws-add-desc">{itemDescription}</span>
-              ) : null}
-            </span>
-          </button>
+            <button
+              type="button"
+              className={`ws-add-item ${className}`.trim()}
+              onClick={() => onSelect(item)}
+            >
+              <span className="ws-add-icon">{icon(item)}</span>
+              <span className="ws-add-copy">
+                <span className="ws-add-label">{label(item)}</span>
+                {itemDescription ? (
+                  <span className="ws-add-desc">{itemDescription}</span>
+                ) : null}
+              </span>
+            </button>
+          </SpaceTooltip>
         );
       })}
     </div>

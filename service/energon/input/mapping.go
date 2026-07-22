@@ -15,6 +15,16 @@ func BuildMapped(
 	req *botprotocol.ShemicRequest,
 	target Target,
 ) (botprotocol.MappedInput, error) {
+	return buildMapped(ctx, repo, req, target, true)
+}
+
+func buildMapped(
+	ctx context.Context,
+	repo Repository,
+	req *botprotocol.ShemicRequest,
+	target Target,
+	formatFileValues bool,
+) (botprotocol.MappedInput, error) {
 	labels := inputParamLabels(ctx, repo, target.PowerID, target.ServiceID)
 	params := repo.ParamMap(ctx)
 	normalized := NormalizeParamInput(ctx, repo, target.PowerID, target.ServiceID, req.Input, params)
@@ -38,6 +48,7 @@ func BuildMapped(
 
 	requiredServiceParamIDs := requiredServiceParamIDs(ctx, repo, target.PowerID, target.ServiceID, params)
 	comboConsumedParamIDs := collectComboConsumedParamIDs(serviceParams)
+	fileValueCache := map[string]serviceParamFileCacheEntry{}
 	for _, serviceParam := range serviceParams {
 		if !IsActive(serviceParam.Status) {
 			continue
@@ -114,6 +125,12 @@ func BuildMapped(
 		if !mappedOK {
 			continue
 		}
+		if formatFileValues {
+			nativeValue, err = formatServiceParamFileValue(ctx, serviceParam, param, nativeValue, fileValueCache)
+			if err != nil {
+				return mapped, fmt.Errorf("服务参数“%s”文件转换失败: %w", ServiceParamDisplayName(serviceParam, param), err)
+			}
+		}
 
 		mapped.Params = append(mapped.Params, botprotocol.MappedParam{
 			ParamID:   param.ID,
@@ -148,8 +165,7 @@ func validatePowerAttachmentCounts(
 		if !ok || !IsActive(param.Status) || param.MaxFiles <= 0 {
 			continue
 		}
-		controlType := NormalizeParamControlType(param.Type)
-		if controlType != "file" && controlType != "files" {
+		if !IsFileParamType(param.Type) {
 			continue
 		}
 		_, value, exists := ResolveParamValue(input, param)

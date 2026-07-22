@@ -43,11 +43,6 @@ const botPlugin = {
         default: mod.WorkLoginPage,
       })),
     ),
-    "bot-body-home-menu-editor": lazyNode(() =>
-      import("./nodes/body-config/home-menu-editor").then((mod) => ({
-        default: mod.BodyHomeMenuEditor,
-      })),
-    ),
     "bot-body-work-home-shell": lazyNode(() =>
       import("./nodes/body-work/home/home-shell").then((mod) => ({
         default: mod.WorkHomeShell,

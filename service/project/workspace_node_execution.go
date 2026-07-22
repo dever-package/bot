@@ -115,17 +115,31 @@ func workspaceNodeResults(ctx context.Context, projectID uint64, runID uint64) [
 	if projectID == 0 || runID == 0 {
 		return []map[string]any{}
 	}
+	return workspaceNodeResultsByRunIDs(ctx, projectID, []uint64{runID})[runID]
+}
+
+func workspaceNodeResultsByRunIDs(ctx context.Context, projectID uint64, runIDs []uint64) map[uint64][]map[string]any {
+	result := make(map[uint64][]map[string]any)
+	runIDs = uniqueWorkspaceRunIDs(runIDs)
+	if projectID == 0 || len(runIDs) == 0 {
+		return result
+	}
+	for _, runID := range runIDs {
+		result[runID] = []map[string]any{}
+	}
 	rows := workspacemodel.NewNodeExecutionModel().Select(ctx, map[string]any{
 		"project_id": projectID,
-		"run_id":     runID,
+		"run_id":     runIDs,
+	}, map[string]any{
+		"field": "main.id,main.execution_id,main.project_id,main.asset_cate_id,main.run_id,main.flow_run_id,main.node_run_id,main.agent_run_id,main.request_id,main.node_key,main.node_type,main.function_key,main.status,main.input,main.output,main.error,main.asset_id,main.version_id,main.child_run_id,main.child_request_id,main.approval_id,main.started_at,main.finished_at,main.created_at,main.updated_at",
+		"order": "main.id asc",
 	})
-	result := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
 			continue
 		}
 		if nodeResult := workspaceNodeResultPayload(*row); nodeResult != nil {
-			result = append(result, nodeResult)
+			result[row.RunID] = append(result[row.RunID], nodeResult)
 		}
 	}
 	return result

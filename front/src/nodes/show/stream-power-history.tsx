@@ -72,6 +72,7 @@ export function useStreamPowerHistory(adapter?: StreamPowerHistoryAdapter) {
   const [total, setTotal] = useState(0)
   const [hasMore, setHasMore] = useState(false)
   const [selectedID, setSelectedID] = useState(0)
+  const [selectionRevision, setSelectionRevision] = useState(0)
   const [selectedDetail, setSelectedDetail] =
     useState<StreamPowerHistoryDetail | null>(null)
   const [liveRun, setLiveRun] = useState<StreamPowerHistoryLiveRun | null>(null)
@@ -185,8 +186,13 @@ export function useStreamPowerHistory(adapter?: StreamPowerHistoryAdapter) {
           selectedIDRef.current === 0 &&
           page.items[0]
         ) {
-          setSelectedID(page.items[0].id)
-          setDetailLoading(true)
+          const latestID = page.items[0].id
+          const cached = detailCacheRef.current.get(latestID) || null
+          selectedIDRef.current = latestID
+          setSelectedID(latestID)
+          setSelectedDetail(cached)
+          setDetailLoading(!cached)
+          setSelectionRevision((revision) => revision + 1)
         }
       } catch (currentError) {
         if (
@@ -221,6 +227,7 @@ export function useStreamPowerHistory(adapter?: StreamPowerHistoryAdapter) {
     setTotal(0)
     setHasMore(false)
     setSelectedID(0)
+    setSelectionRevision(0)
     setSelectedDetail(null)
     setLiveRun(null)
     setPanelOpen(false)
@@ -355,6 +362,7 @@ export function useStreamPowerHistory(adapter?: StreamPowerHistoryAdapter) {
     setSelectedID(historyID)
     selectedIDRef.current = historyID
     setSelectedDetail(cached)
+    setSelectionRevision((revision) => revision + 1)
     setDetailLoading(!cached)
     setPanelOpen(false)
     setDetailError('')
@@ -377,6 +385,7 @@ export function useStreamPowerHistory(adapter?: StreamPowerHistoryAdapter) {
     total,
     hasMore,
     selectedID,
+    selectionRevision,
     selectedItem,
     selectedDetail,
     liveRun,

@@ -4,7 +4,7 @@ import { Sparkles } from "lucide-react";
 import { BodySiteBrand } from "../auth/site-brand";
 import type { BodySiteConfig } from "../auth/site-config";
 import type { WorkbenchTeam } from "./workbench-api";
-import { resolveConfiguredLucideIcon } from "../shared/configured-icon";
+import { ConfiguredMenuIcon } from "../shared/configured-icon";
 import { WorkbenchAccountCenter } from "./workbench-account-center";
 import { WorkbenchSystemMessagePanel } from "./workbench-system-message-panel";
 import { WorkbenchUserMenu } from "./workbench-user-menu";
@@ -14,7 +14,9 @@ export type WorkbenchPageKey = "function" | "dialogue" | "works" | "assets";
 export type WorkbenchNavigationItem = {
   key: WorkbenchPageKey;
   label: string;
-  icon: LucideIcon;
+  iconName: string;
+  iconImage: string;
+  fallbackIcon: LucideIcon;
 };
 
 export function WorkbenchSidebar({
@@ -37,8 +39,11 @@ export function WorkbenchSidebar({
   onTeamChange: (teamID: number) => void;
 }) {
   const [pointsOpen, setPointsOpen] = useState(false);
-  const pointsMenu = site.homeMenu.points;
-  const PointsIcon = resolveConfiguredLucideIcon(pointsMenu.icon, Sparkles);
+  const footerMenuKeys = (["points", "messages"] as const)
+    .filter((key) => site.homeMenu[key].enabled)
+    .sort(
+      (left, right) => site.homeMenu[left].sort - site.homeMenu[right].sort,
+    );
 
   return (
     <>
@@ -59,7 +64,6 @@ export function WorkbenchSidebar({
 
         <nav className="hb-laper-nav" aria-label="工作区导航">
           {navigation.map((page) => {
-            const Icon = page.icon;
             return (
               <button
                 key={page.key}
@@ -71,7 +75,13 @@ export function WorkbenchSidebar({
                 title={page.label}
                 onClick={() => onNavigate(page.key)}
               >
-                <Icon strokeWidth={1.9} />
+                <ConfiguredMenuIcon
+                  iconName={page.iconName}
+                  iconImage={page.iconImage}
+                  fallbackIcon={page.fallbackIcon}
+                  className="hb-configured-menu-icon"
+                  strokeWidth={1.9}
+                />
                 <span>{page.label}</span>
               </button>
             );
@@ -79,16 +89,20 @@ export function WorkbenchSidebar({
         </nav>
 
         <div className="hb-laper-sidebar-foot">
-          {pointsMenu.enabled ? (
-            <RailAction
-              icon={PointsIcon}
-              label={pointsMenu.name}
-              onClick={() => setPointsOpen(true)}
-            />
-          ) : null}
-          {site.homeMenu.messages.enabled ? (
-            <WorkbenchSystemMessagePanel site={site} />
-          ) : null}
+          {footerMenuKeys.map((key) =>
+            key === "points" ? (
+              <RailAction
+                key={key}
+                iconName={site.homeMenu.points.icon}
+                iconImage={site.homeMenu.points.iconImage}
+                fallbackIcon={Sparkles}
+                label={site.homeMenu.points.name}
+                onClick={() => setPointsOpen(true)}
+              />
+            ) : (
+              <WorkbenchSystemMessagePanel key={key} site={site} />
+            ),
+          )}
           <WorkbenchUserMenu
             teams={teams}
             teamID={teamID}
@@ -105,11 +119,15 @@ export function WorkbenchSidebar({
 }
 
 function RailAction({
-  icon: Icon,
+  iconName,
+  iconImage,
+  fallbackIcon,
   label,
   onClick,
 }: {
-  icon: LucideIcon;
+  iconName: string;
+  iconImage: string;
+  fallbackIcon: LucideIcon;
   label: string;
   onClick: () => void;
 }) {
@@ -120,7 +138,13 @@ function RailAction({
       title={label}
       onClick={onClick}
     >
-      <Icon strokeWidth={1.8} />
+      <ConfiguredMenuIcon
+        iconName={iconName}
+        iconImage={iconImage}
+        fallbackIcon={fallbackIcon}
+        className="hb-configured-menu-icon"
+        strokeWidth={1.8}
+      />
       <span>{label}</span>
     </button>
   );

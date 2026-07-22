@@ -156,6 +156,8 @@ func workspaceExecutionPayload(ctx context.Context, execution *workspacemodel.Ex
 	payload["error"] = strings.TrimSpace(execution.Error)
 	payload["executed"] = execution.Executed
 	payload["total"] = execution.Total
+	payload["updated_at"] = execution.UpdatedAt
+	payload["created_at"] = execution.CreatedAt
 	if plan := mapValue(jsonValue(execution.Plan, map[string]any{})); plan != nil {
 		payload["execution_plan"] = plan
 	}
@@ -167,11 +169,15 @@ func workspaceExecutionPayload(ctx context.Context, execution *workspacemodel.Ex
 	return payload
 }
 
-func workspaceExecutionListPayload(ctx context.Context, execution *workspacemodel.Execution) map[string]any {
+func workspaceExecutionListPayload(
+	execution *workspacemodel.Execution,
+	nodeResults []map[string]any,
+	nodeRuns []map[string]any,
+	includeDetails bool,
+) map[string]any {
 	if execution == nil {
 		return map[string]any{}
 	}
-	nodeResults := workspaceNodeResults(ctx, execution.ProjectID, execution.RunID)
 	payload := map[string]any{
 		"execution_id":  execution.ID,
 		"run_id":        execution.RunID,
@@ -185,16 +191,65 @@ func workspaceExecutionListPayload(ctx context.Context, execution *workspacemode
 		"error":         strings.TrimSpace(execution.Error),
 		"executed":      execution.Executed,
 		"total":         execution.Total,
-		"pending_node":  firstWorkspaceWaitingNode(nodeResults),
-		"node_results":  nodeResults,
-		"node_runs":     workspaceNodeRunPayloads(ctx, execution.RunID),
 		"updated_at":    execution.UpdatedAt,
 		"created_at":    execution.CreatedAt,
+		"title":         workspaceExecutionTitle(execution),
 	}
-	if plan := mapValue(jsonValue(execution.Plan, map[string]any{})); plan != nil {
-		payload["execution_plan"] = plan
+	if includeDetails {
+		if plan := mapValue(jsonValue(execution.Plan, map[string]any{})); plan != nil {
+			payload["execution_plan"] = plan
+		}
+		payload["pending_node"] = firstWorkspaceWaitingNode(nodeResults)
+		payload["node_results"] = nodeResults
+		payload["node_runs"] = nodeRuns
 	}
 	return payload
+}
+
+func workspaceExecutionTitle(execution *workspacemodel.Execution) string {
+	if execution == nil {
+		return ""
+	}
+	plan := mapValue(jsonValue(execution.Plan, map[string]any{}))
+	for _, raw := range sliceValue(plan["nodes"]) {
+		node := mapValue(raw)
+		if textValue(node["id"]) != strings.TrimSpace(execution.StartNodeID) {
+			continue
+		}
+		if title := textValue(node["title"]); title != "" {
+			return title
+		}
+	}
+	if execution.SingleNode == 1 {
+		return "节点运行"
+	}
+	return "画布运行"
+}
+
+func workspaceExecutionRunIDs(rows []*workspacemodel.Execution) []uint64 {
+	runIDs := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		if row != nil && row.RunID > 0 {
+			runIDs = append(runIDs, row.RunID)
+		}
+	}
+	return uniqueWorkspaceRunIDs(runIDs)
+}
+
+func uniqueWorkspaceRunIDs(runIDs []uint64) []uint64 {
+	result := make([]uint64, 0, len(runIDs))
+	seen := make(map[uint64]struct{}, len(runIDs))
+	for _, runID := range runIDs {
+		if runID == 0 {
+			continue
+		}
+		if _, exists := seen[runID]; exists {
+			continue
+		}
+		seen[runID] = struct{}{}
+		result = append(result, runID)
+	}
+	return result
 }
 
 func workspaceNodeResultsPayload(ctx context.Context, projectID uint64, runID uint64) map[string]any {

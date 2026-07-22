@@ -95,7 +95,7 @@ export function useCanvasAutosave({
       inFlightRef.current.add(key);
       setStatusByCanvas((current) => ({ ...current, [key]: "saving" }));
       try {
-        const savedCanvas = await saveSpaceCanvas(
+        const saved = await saveSpaceCanvas(
           projectId,
           submittedCanvas.assetCateId,
           submittedCanvas,
@@ -112,7 +112,13 @@ export function useCanvasAutosave({
         if (isLatest) {
           setCanvases((current) =>
             current[key] === submittedCanvas
-              ? { ...current, [key]: savedCanvas }
+              ? {
+                  ...current,
+                  [key]: {
+                    ...submittedCanvas,
+                    updatedAt: saved.updatedAt || submittedCanvas.updatedAt,
+                  },
+                }
               : current,
           );
           setStatusByCanvas((current) => ({ ...current, [key]: "saved" }));

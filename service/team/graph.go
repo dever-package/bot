@@ -289,16 +289,18 @@ func rolePayloads(roles []teammodel.Role) []GraphRole {
 	result := make([]GraphRole, 0, len(roles))
 	for _, role := range roles {
 		result = append(result, GraphRole{
-			ID:         role.ID,
-			TeamID:     role.TeamID,
-			RoleType:   role.RoleType,
-			RoleKey:    role.RoleKey,
-			Name:       role.Name,
-			AgentID:    role.AgentID,
-			Assignment: role.Assignment,
-			Config:     jsonMap(role.Config),
-			Status:     role.Status,
-			Sort:       role.Sort,
+			ID:           role.ID,
+			TeamID:       role.TeamID,
+			RoleType:     role.RoleType,
+			RoleKey:      role.RoleKey,
+			Name:         role.Name,
+			AgentID:      role.AgentID,
+			Assignment:   role.Assignment,
+			Config:       jsonMap(role.Config),
+			ChatStatus:   normalizeEntryStatus(role.ChatStatus),
+			CreateStatus: normalizeEntryStatus(role.CreateStatus),
+			Status:       role.Status,
+			Sort:         role.Sort,
 		})
 	}
 	return result
@@ -324,19 +326,24 @@ func teamPowerPayloads(rows []teammodel.TeamPower) []GraphTeamPower {
 	result := make([]GraphTeamPower, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, GraphTeamPower{
-			ID:         row.ID,
-			TeamID:     row.TeamID,
-			PowerID:    row.PowerID,
-			Config:     jsonMap(row.Config),
-			HomeStatus: normalizeTeamPowerHomeStatus(row.HomeStatus),
-			Status:     row.Status,
-			Sort:       row.Sort,
+			ID:           row.ID,
+			TeamID:       row.TeamID,
+			PowerID:      row.PowerID,
+			Config:       jsonMap(row.Config),
+			HomeStatus:   normalizeEntryStatus(row.HomeStatus),
+			CreateStatus: normalizeEntryStatus(row.CreateStatus),
+			Status:       row.Status,
+			Sort:         row.Sort,
 		})
 	}
 	return result
 }
 
 func normalizeTeamPowerHomeStatus(value int16) int16 {
+	return normalizeEntryStatus(value)
+}
+
+func normalizeEntryStatus(value int16) int16 {
 	if value == teammodel.StatusDisabled {
 		return teammodel.StatusDisabled
 	}
@@ -354,6 +361,7 @@ func scopedPowerOptions(powers []PowerOption, teamPowers []teammodel.TeamPower) 
 	result := make([]PowerOption, 0, len(teamPowers))
 	for _, teamPower := range teamPowers {
 		if power, exists := byID[teamPower.PowerID]; exists {
+			power.CreateStatus = normalizeEntryStatus(teamPower.CreateStatus)
 			result = append(result, power)
 		}
 	}
@@ -478,9 +486,9 @@ func nodeTypes() []map[string]any {
 
 func roleTypes() []map[string]any {
 	return []map[string]any{
+		{"id": teammodel.RoleTypeWorker, "value": "执行"},
 		{"id": teammodel.RoleTypeChat, "value": "沟通"},
 		{"id": teammodel.RoleTypePlanner, "value": "规划"},
-		{"id": teammodel.RoleTypeWorker, "value": "执行"},
 		{"id": teammodel.RoleTypeReviewer, "value": "审核"},
 	}
 }

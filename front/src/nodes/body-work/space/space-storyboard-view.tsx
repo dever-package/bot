@@ -58,6 +58,7 @@ import {
 } from "./space-reference-editor";
 import { StoryboardShotCard } from "./space-storyboard-shot-card";
 import { StoryboardMaterialDialog } from "./space-storyboard-material-dialog";
+import { SpaceTooltip } from "./space-tooltip";
 import "./space.css";
 
 export type StoryboardSaveStatus = "saved" | "typing" | "saving" | "error";
@@ -464,9 +465,9 @@ export function StoryboardView({
               }
             />
           ) : (
-            <span title={draft.style_prompt}>
-              {draft.style_prompt || "未设置统一视觉风格"}
-            </span>
+            <SpaceTooltip label={draft.style_prompt}>
+              <span>{draft.style_prompt || "未设置统一视觉风格"}</span>
+            </SpaceTooltip>
           )}
         </div>
         <div className="ws-storyboard-toolbar-end">
@@ -637,16 +638,19 @@ function StoryboardMaterialSettings({
             <div className="ws-storyboard-material-setting-group" key={type}>
               <span>{STORYBOARD_MATERIAL_LABELS[type]}</span>
               {typedMaterials.map((material) => (
-                <button
-                  type="button"
-                  className="nodrag nopan"
+                <SpaceTooltip
                   key={material.id}
-                  title={`${editable ? "编辑" : "查看"}${STORYBOARD_MATERIAL_LABELS[type]}提示词：${material.name}`}
-                  onClick={() => onOpen(material.id)}
+                  label={`${editable ? "编辑" : "查看"}${STORYBOARD_MATERIAL_LABELS[type]}提示词：${material.name}`}
                 >
-                  <span>{material.name}</span>
-                  {editable ? <Pencil size={11} /> : null}
-                </button>
+                  <button
+                    type="button"
+                    className="nodrag nopan"
+                    onClick={() => onOpen(material.id)}
+                  >
+                    <span>{material.name}</span>
+                    {editable ? <Pencil size={11} /> : null}
+                  </button>
+                </SpaceTooltip>
               ))}
             </div>
           );
@@ -770,14 +774,11 @@ function StoryboardShotDialog({
               {readonly ? "当前分镜已经确认" : "修改会保存到当前分镜草稿"}
             </span>
           </div>
-          <button
-            type="button"
-            title="关闭"
-            aria-label="关闭"
-            onClick={onClose}
-          >
-            <X size={18} />
-          </button>
+          <SpaceTooltip label="关闭">
+            <button type="button" aria-label="关闭" onClick={onClose}>
+              <X size={18} />
+            </button>
+          </SpaceTooltip>
         </header>
 
         <div className="ws-storyboard-shot-form nowheel">
@@ -890,8 +891,8 @@ function StoryboardShotDialog({
                               className="ws-storyboard-material-option"
                               key={material.id}
                             >
-                              <label
-                                title={
+                              <SpaceTooltip
+                                label={
                                   selected && required
                                     ? "该角色已用于对白，不能取消关联"
                                     : selected
@@ -899,24 +900,29 @@ function StoryboardShotDialog({
                                       : "关联素材"
                                 }
                               >
-                                <input
-                                  type="checkbox"
-                                  checked={selected}
-                                  disabled={readonly || (selected && required)}
-                                  onChange={() => toggleMaterial(material.id)}
-                                />
-                                <span className="sr-only">
-                                  关联 {material.name}
-                                </span>
-                              </label>
-                              <button
-                                type="button"
-                                title={`${readonly ? "查看" : "编辑"}${STORYBOARD_MATERIAL_LABELS[type]}提示词：${material.name}`}
-                                onClick={() => onEditMaterial(material.id)}
+                                <label>
+                                  <input
+                                    type="checkbox"
+                                    checked={selected}
+                                    disabled={readonly || (selected && required)}
+                                    onChange={() => toggleMaterial(material.id)}
+                                  />
+                                  <span className="sr-only">
+                                    关联 {material.name}
+                                  </span>
+                                </label>
+                              </SpaceTooltip>
+                              <SpaceTooltip
+                                label={`${readonly ? "查看" : "编辑"}${STORYBOARD_MATERIAL_LABELS[type]}提示词：${material.name}`}
                               >
-                                <span>{material.name}</span>
-                                {!readonly ? <Pencil size={11} /> : null}
-                              </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onEditMaterial(material.id)}
+                                >
+                                  <span>{material.name}</span>
+                                  {!readonly ? <Pencil size={11} /> : null}
+                                </button>
+                              </SpaceTooltip>
                             </div>
                           );
                         })}
@@ -1247,16 +1253,17 @@ function StoryboardIconButton({
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      className={`ws-storyboard-icon-button nodrag nopan ${danger ? "is-danger" : ""}`}
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {children}
-    </button>
+    <SpaceTooltip label={label}>
+      <button
+        type="button"
+        className={`ws-storyboard-icon-button nodrag nopan ${danger ? "is-danger" : ""}`}
+        aria-label={label}
+        disabled={disabled}
+        onClick={onClick}
+      >
+        {children}
+      </button>
+    </SpaceTooltip>
   );
 }
 

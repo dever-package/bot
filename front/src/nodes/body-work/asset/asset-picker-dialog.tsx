@@ -1,6 +1,7 @@
 import { Loader2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
+import { BodyWorkTooltip } from "../shared/body-work-tooltip";
 import { AssetBrowser } from "./asset-browser";
 import type {
   AssetContentMode,
@@ -229,15 +230,12 @@ export function AssetPickerDialog({
             <h2>{title}</h2>
             <p>{description}</p>
           </div>
-          <button
-            type="button"
-            title="关闭"
-            disabled={uploading}
-            onClick={onClose}
-          >
-            <X aria-hidden="true" />
-            <span className="sr-only">关闭</span>
-          </button>
+          <BodyWorkTooltip label="关闭">
+            <button type="button" disabled={uploading} onClick={onClose}>
+              <X aria-hidden="true" />
+              <span className="sr-only">关闭</span>
+            </button>
+          </BodyWorkTooltip>
         </header>
         {message ? <p className="wb-asset-picker-message">{message}</p> : null}
         <AssetBrowser
@@ -268,20 +266,21 @@ export function AssetPickerDialog({
           headerAction={
             onUpload ? (
               <>
-                <button
-                  type="button"
-                  className="wb-asset-local-upload"
-                  disabled={uploading}
-                  title="本地上传"
-                  onClick={() => uploadInputRef.current?.click()}
-                >
-                  {uploading ? (
-                    <Loader2 className="is-spinning" aria-hidden="true" />
-                  ) : (
-                    <Upload aria-hidden="true" />
-                  )}
-                  <span>{uploading ? "上传中" : "本地上传"}</span>
-                </button>
+                <BodyWorkTooltip label="本地上传">
+                  <button
+                    type="button"
+                    className="wb-asset-local-upload"
+                    disabled={uploading}
+                    onClick={() => uploadInputRef.current?.click()}
+                  >
+                    {uploading ? (
+                      <Loader2 className="is-spinning" aria-hidden="true" />
+                    ) : (
+                      <Upload aria-hidden="true" />
+                    )}
+                    <span>{uploading ? "上传中" : "本地上传"}</span>
+                  </button>
+                </BodyWorkTooltip>
                 <input
                   ref={uploadInputRef}
                   type="file"

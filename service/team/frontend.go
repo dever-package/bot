@@ -61,14 +61,55 @@ func (s Service) TeamDetail(ctx context.Context, teamID uint64, releaseID uint64
 	if err != nil {
 		return nil, err
 	}
-	nodesByFlow := map[string]any{}
+	payload := teamRuntimePayload(release, graph)
 	nodeEdgesByFlow := map[string]any{}
 	for _, flow := range graph.Flows {
-		nodesByFlow[flow.Key] = flowNodePayloads(graph.NodesByFlowID[flow.ID])
 		nodeEdgesByFlow[flow.Key] = flowNodeEdgePayloads(
 			graph.NodesByFlowID[flow.ID],
 			graph.NodeEdgesByFlowID[flow.ID],
 		)
+	}
+	payload["type"] = payload["team"]
+	payload["team_powers"] = teamPowerPayloads(graph.TeamPowers)
+	payload["flow_edges"] = flowEdgePayloads(graph.Flows, graph.FlowEdges)
+	payload["node_edges_by_flow"] = nodeEdgesByFlow
+	return payload, nil
+}
+
+// WorkspaceCanvasBootstrap returns only the release catalog required by the
+// project canvas. General team, agent and knowledge options remain lazy-loaded
+// through their existing endpoints.
+func (s Service) WorkspaceCanvasBootstrap(ctx context.Context, teamID uint64, releaseID uint64) (map[string]any, error) {
+	if teamID == 0 {
+		powers := s.repo.ListPowers(ctx)
+		return map[string]any{
+			"team":          map[string]any{},
+			"release":       map[string]any{},
+			"asset_cates":   []GraphAssetCate{},
+			"roles":         []GraphRole{},
+			"flows":         []GraphFlow{},
+			"nodes_by_flow": map[string]any{},
+			"powers":        powers,
+			"power_kinds":   powerKindOptions(powers),
+			"output_types":  energonmodel.OutputTypeSpecs(),
+		}, nil
+	}
+	release, graph, err := s.runtimeGraphByRelease(ctx, teamID, releaseID)
+	if err != nil {
+		return nil, err
+	}
+	payload := teamRuntimePayload(release, graph)
+	powers := scopedPowerOptions(s.repo.ListPowers(ctx), graph.TeamPowers)
+	payload["powers"] = powers
+	payload["power_kinds"] = powerKindOptions(powers)
+	payload["output_types"] = energonmodel.OutputTypeSpecs()
+	return payload, nil
+}
+
+func teamRuntimePayload(release *teammodel.TeamRelease, graph runtimeGraph) map[string]any {
+	nodesByFlow := map[string]any{}
+	for _, flow := range graph.Flows {
+		nodesByFlow[flow.Key] = flowNodePayloads(graph.NodesByFlowID[flow.ID])
 	}
 	teamPayload := map[string]any{
 		"id":              graph.Team.ID,
@@ -78,7 +119,6 @@ func (s Service) TeamDetail(ctx context.Context, teamID uint64, releaseID uint64
 	}
 	return map[string]any{
 		"team": teamPayload,
-		"type": teamPayload,
 		"release": map[string]any{
 			"id":         release.ID,
 			"team_id":    release.TeamID,
@@ -86,14 +126,11 @@ func (s Service) TeamDetail(ctx context.Context, teamID uint64, releaseID uint64
 			"status":     release.Status,
 			"created_at": release.CreatedAt,
 		},
-		"asset_cates":        assetCatePayloads(graph.AssetCates),
-		"team_powers":        teamPowerPayloads(graph.TeamPowers),
-		"roles":              rolePayloads(graph.Roles),
-		"flows":              flowPayloads(graph.Flows),
-		"flow_edges":         flowEdgePayloads(graph.Flows, graph.FlowEdges),
-		"nodes_by_flow":      nodesByFlow,
-		"node_edges_by_flow": nodeEdgesByFlow,
-	}, nil
+		"asset_cates":   assetCatePayloads(graph.AssetCates),
+		"roles":         rolePayloads(graph.Roles),
+		"flows":         flowPayloads(graph.Flows),
+		"nodes_by_flow": nodesByFlow,
+	}
 }
 
 func (s Service) RuntimeGraph(ctx context.Context, teamID uint64, releaseID uint64) (map[string]any, error) {

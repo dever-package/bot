@@ -101,13 +101,29 @@ func workspaceNodeRunPayloads(ctx context.Context, runID uint64) []map[string]an
 	if runID == 0 {
 		return []map[string]any{}
 	}
-	rows := teammodel.NewNodeRunModel().Select(ctx, map[string]any{"run_id": runID})
-	result := make([]map[string]any, 0, len(rows))
+	return workspaceNodeRunPayloadsByRunIDs(ctx, []uint64{runID})[runID]
+}
+
+func workspaceNodeRunPayloadsByRunIDs(ctx context.Context, runIDs []uint64) map[uint64][]map[string]any {
+	result := make(map[uint64][]map[string]any)
+	runIDs = uniqueWorkspaceRunIDs(runIDs)
+	if len(runIDs) == 0 {
+		return result
+	}
+	for _, runID := range runIDs {
+		result[runID] = []map[string]any{}
+	}
+	rows := teammodel.NewNodeRunModel().Select(ctx, map[string]any{
+		"run_id": runIDs,
+	}, map[string]any{
+		"field": "main.id,main.run_id,main.node_id,main.node_key,main.node_type,main.status,main.agent_run_id",
+		"order": "main.id asc",
+	})
 	for _, row := range rows {
 		if row == nil {
 			continue
 		}
-		result = append(result, map[string]any{
+		result[row.RunID] = append(result[row.RunID], map[string]any{
 			"node_run_id":  row.ID,
 			"node_id":      row.NodeID,
 			"node_key":     strings.TrimSpace(row.NodeKey),

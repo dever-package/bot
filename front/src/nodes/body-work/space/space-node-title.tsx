@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { SpaceTooltip } from "./space-tooltip";
 
 export function EditableCanvasNodeTitle({
   title,
@@ -64,20 +65,21 @@ export function EditableCanvasNodeTitle({
   }
 
   return (
-    <span
-      className={className}
-      title={onRename ? "双击重命名" : title}
-      onDoubleClick={
-        onRename
-          ? (event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              setEditing(true);
-            }
-          : undefined
-      }
-    >
-      {title || fallback}
-    </span>
+    <SpaceTooltip label={onRename ? "双击重命名" : title}>
+      <span
+        className={className}
+        onDoubleClick={
+          onRename
+            ? (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setEditing(true);
+              }
+            : undefined
+        }
+      >
+        {title || fallback}
+      </span>
+    </SpaceTooltip>
   );
 }

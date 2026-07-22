@@ -27,6 +27,7 @@ import { AssetDetailDialog } from "./asset-detail-dialog";
 import { AssetRenameDialog } from "./asset-rename-dialog";
 import { AssetSourceFilters } from "./asset-source-filters";
 import { useAssetSourceLabels } from "./asset-source-labels";
+import { BodyWorkTooltip } from "../shared/body-work-tooltip";
 import {
   emptyAssetFilters,
   type AssetCatalogOptions,
@@ -251,10 +252,12 @@ export function AssetBrowser({
         />
         <div className="wb-asset-browser-actions">
           <span>{loading ? "正在加载" : `${page.total} 项`}</span>
-          <button type="button" onClick={refresh} title="刷新资产">
-            <RefreshCw className={loading ? "is-spinning" : ""} />
-            <span className="sr-only">刷新资产</span>
-          </button>
+          <BodyWorkTooltip label="刷新资产">
+            <button type="button" onClick={refresh}>
+              <RefreshCw className={loading ? "is-spinning" : ""} />
+              <span className="sr-only">刷新资产</span>
+            </button>
+          </BodyWorkTooltip>
           {headerAction}
         </div>
       </header>
@@ -299,25 +302,27 @@ export function AssetBrowser({
 
       {page.total > page.pageSize ? (
         <footer className="wb-asset-pagination">
-          <button
-            type="button"
-            disabled={page.page <= 1 || loading}
-            onClick={() => void load(page.page - 1)}
-            title="上一页"
-          >
-            <ChevronLeft />
-          </button>
+          <BodyWorkTooltip label="上一页">
+            <button
+              type="button"
+              disabled={page.page <= 1 || loading}
+              onClick={() => void load(page.page - 1)}
+            >
+              <ChevronLeft />
+            </button>
+          </BodyWorkTooltip>
           <span>
             {page.page} / {Math.max(1, Math.ceil(page.total / page.pageSize))}
           </span>
-          <button
-            type="button"
-            disabled={!page.hasMore || loading}
-            onClick={() => void load(page.page + 1)}
-            title="下一页"
-          >
-            <ChevronRight />
-          </button>
+          <BodyWorkTooltip label="下一页">
+            <button
+              type="button"
+              disabled={!page.hasMore || loading}
+              onClick={() => void load(page.page + 1)}
+            >
+              <ChevronRight />
+            </button>
+          </BodyWorkTooltip>
         </footer>
       ) : null}
 

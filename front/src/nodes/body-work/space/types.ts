@@ -72,6 +72,7 @@ export type TeamRole = {
   name: string;
   agent_id: number;
   assignment: string;
+  create_status: number;
 };
 
 export type TeamFlow = {
@@ -107,6 +108,7 @@ export type PowerOption = {
   outputType: string;
   output?: OutputTypeOption;
   kind: string;
+  createStatus: number;
 };
 
 export type OutputTypeOption = {
@@ -282,6 +284,7 @@ export type SpaceBootstrap = {
   powers: PowerOption[];
   powerKinds: PowerKindOption[];
   outputTypes: OutputTypeOption[];
+  initialAssetCateId: number;
 };
 
 export type CanvasResultViewState = {

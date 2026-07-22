@@ -54,6 +54,7 @@
               "value": {
                 "param_rule": 1,
                 "fixed_value_type": "string",
+                "file_value_format": "url",
                 "mapping": "",
                 "status": 1,
                 "sort": 100
@@ -130,6 +131,7 @@
               "type": "show-base",
               "editor": "form-number",
               "trigger": "doubleClick",
+              "tip": "正序排序，数值越小越靠前；双击数值可编辑。",
               "action": {
                 "change": {
                   "type": "array",
@@ -277,6 +279,7 @@
     "deleteParamIndex": -1,
     "serviceParamForm": {
       "param_rule": 1,
+      "file_value_format": "url",
       "mapping": "",
       "status": 1,
       "sort": 100

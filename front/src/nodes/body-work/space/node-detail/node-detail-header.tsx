@@ -14,6 +14,7 @@ import type { ReactNode } from "react";
 import { DetailDialogHeader } from "../../shared/detail-dialog";
 import { PowerIcon } from "../space-power-icon";
 import { resolvePowerPresentation } from "../space-power-presentation";
+import { SpaceTooltip } from "../space-tooltip";
 import type { SpaceCanvasNode } from "../types";
 import type { NodeDetailDraftStatus } from "./use-node-detail-draft";
 
@@ -55,15 +56,16 @@ export function NodeDetailHeader({
       state={
         !readonly ? (
           status === "error" ? (
-            <button
-              type="button"
-              className="wb-detail-state is-error"
-              onClick={onRetry}
-              title="重试保存"
-            >
-              <RotateCw size={12} />
-              保存失败
-            </button>
+            <SpaceTooltip label="重试保存">
+              <button
+                type="button"
+                className="wb-detail-state is-error"
+                onClick={onRetry}
+              >
+                <RotateCw size={12} />
+                保存失败
+              </button>
+            </SpaceTooltip>
           ) : (
             <span className={`wb-detail-state is-${status}`}>
               {status === "saving" ? (

@@ -3,6 +3,7 @@ import type { DragEvent, ReactNode } from "react";
 import type { ComposerAssetItem } from "./space-prompt-composer";
 import type { VideoComposeClip } from "./space-video-compose";
 import { SequenceCard } from "./space-sequence-card";
+import { SpaceTooltip } from "./space-tooltip";
 
 export type VideoComposeClipPanel = "subtitle" | "sound" | "transition";
 
@@ -69,18 +70,19 @@ export function VideoComposeClipCard({
       onDragEnd={onDragEnd}
       headerActions={
         !readonly ? (
-          <button
-            type="button"
-            className="ws-video-compose-remove"
-            title="删除镜头"
-            aria-label={`删除镜头 ${index + 1}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              onRemove();
-            }}
-          >
-            <Trash2 size={12} />
-          </button>
+          <SpaceTooltip label="删除镜头">
+            <button
+              type="button"
+              className="ws-video-compose-remove"
+              aria-label={`删除镜头 ${index + 1}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRemove();
+              }}
+            >
+              <Trash2 size={12} />
+            </button>
+          </SpaceTooltip>
         ) : undefined
       }
     >
@@ -99,7 +101,12 @@ export function VideoComposeClipCard({
             }}
           />
         ) : item?.preview.imageUrl ? (
-          <img src={item.preview.imageUrl} alt="" />
+          <img
+            src={item.preview.imageUrl}
+            alt=""
+            loading="lazy"
+            decoding="async"
+          />
         ) : (
           <div>
             <span>素材不可用</span>

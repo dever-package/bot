@@ -13,6 +13,7 @@ export type CanvasRunRef = {
   single_node?: boolean;
   created_at?: string;
   updated_at?: string;
+  title?: string;
   output?: unknown;
   approvals?: any[];
   interactions?: any[];
@@ -99,6 +100,7 @@ export function normalizeCanvasRunRef(value: any): CanvasRunRef {
     single_node: Boolean(value?.single_node),
     created_at: String(value?.created_at || ""),
     updated_at: String(value?.updated_at || ""),
+    title: String(value?.title || ""),
     output: value?.output || run.output,
     approvals: Array.isArray(value?.approvals)
       ? value.approvals
@@ -164,7 +166,7 @@ export function canvasNodeResultRawError(
   if (!result) {
     return "";
   }
-  return firstCanvasErrorText(
+  return preferredCanvasErrorText(
     result.error,
     (result.result as any)?.error,
     (result.output as any)?.error,
@@ -183,12 +185,17 @@ export function canvasRunRawError(run?: CanvasRunRef | null) {
       )
         .trim()
         .toLowerCase();
-      return status === "fail" || status === "error";
+      return (
+        status === "fail" ||
+        status === "failed" ||
+        status === "failure" ||
+        status === "error"
+      );
     });
-  return firstCanvasErrorText(
-    run.error,
+  return preferredCanvasErrorText(
     canvasNodeResultRawError(failedResult),
     (run.output as any)?.error,
+    run.error,
   );
 }
 
@@ -237,6 +244,33 @@ function firstCanvasErrorText(...values: unknown[]) {
     }
   }
   return "";
+}
+
+const genericCanvasErrorMessages = new Set([
+  "画布运行失败",
+  "节点运行失败",
+  "节点执行失败",
+  "运行失败",
+  "执行出错",
+]);
+
+export function isGenericCanvasErrorMessage(error: unknown) {
+  return genericCanvasErrorMessages.has(canvasErrorText(error));
+}
+
+function preferredCanvasErrorText(...values: unknown[]) {
+  let fallback = "";
+  for (const value of values) {
+    const text = canvasErrorText(value);
+    if (!text) {
+      continue;
+    }
+    fallback ||= text;
+    if (!genericCanvasErrorMessages.has(text)) {
+      return text;
+    }
+  }
+  return fallback;
 }
 
 function canvasErrorText(value: unknown): string {

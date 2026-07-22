@@ -1,6 +1,35 @@
 import * as LucideIcons from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { createElement } from "react";
 import { getCompatModule } from "@dever/front-plugin";
+
+export function ConfiguredMenuIcon({
+  iconName,
+  iconImage,
+  fallbackIcon,
+  className,
+  strokeWidth,
+}: {
+  iconName?: string;
+  iconImage?: string;
+  fallbackIcon: LucideIcon;
+  className?: string;
+  strokeWidth?: number;
+}) {
+  const uploadedIcon = String(iconImage || "").trim();
+  if (uploadedIcon) {
+    return createElement("img", {
+      src: uploadedIcon,
+      alt: "",
+      "aria-hidden": true,
+      draggable: false,
+      className,
+    });
+  }
+
+  const Icon = resolveConfiguredLucideIcon(iconName, fallbackIcon);
+  return createElement(Icon, { className, strokeWidth });
+}
 
 export function resolveConfiguredLucideIcon(
   iconName: string | undefined,

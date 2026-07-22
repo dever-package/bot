@@ -30,6 +30,7 @@ import {
 } from "./space-video-compose-card";
 import { VideoComposeAssetPicker } from "./space-video-compose-picker";
 import { CanvasNodeContentView, hasCanvasContent } from "./space-content-view";
+import { SpaceTooltip } from "./space-tooltip";
 
 const VIDEO_COMPOSE_RESOLUTION_OPTIONS = [
   { value: "1280x720", label: "720P" },
@@ -88,6 +89,11 @@ export function VideoComposeView({
     : undefined;
   const totalDuration = videoCompositionDuration(value);
   const blockingIssues = videoCompositionBlockingIssues(value);
+  const runDisabled =
+    running ||
+    readonly ||
+    value.clips.length === 0 ||
+    blockingIssues.length > 0;
 
   const referenceMap = useMemo(() => {
     const result = new Map<string, ComposerAssetItem>();
@@ -247,25 +253,23 @@ export function VideoComposeView({
             </button>
           ) : null}
           {onRun ? (
-            <button
-              type="button"
-              className="is-primary"
-              disabled={
-                running ||
-                readonly ||
-                value.clips.length === 0 ||
-                blockingIssues.length > 0
-              }
-              title={blockingIssues[0] || "开始合成"}
-              onClick={() => onRun(value)}
-            >
-              {running ? (
-                <Loader2 size={13} className="ws-spin" />
-              ) : (
-                <Play size={13} fill="currentColor" />
-              )}
-              {running ? "合成中" : "开始合成"}
-            </button>
+            <SpaceTooltip label={blockingIssues[0] || "开始合成"}>
+              <span className="ws-video-compose-tooltip-trigger">
+                <button
+                  type="button"
+                  className="is-primary"
+                  disabled={runDisabled}
+                  onClick={() => onRun(value)}
+                >
+                  {running ? (
+                    <Loader2 size={13} className="ws-spin" />
+                  ) : (
+                    <Play size={13} fill="currentColor" />
+                  )}
+                  {running ? "合成中" : "开始合成"}
+                </button>
+              </span>
+            </SpaceTooltip>
           ) : null}
         </div>
       </header>
@@ -712,7 +716,12 @@ function VideoComposePreview({
             preload="metadata"
           />
         ) : item?.preview.imageUrl ? (
-          <img src={item.preview.imageUrl} alt="" />
+          <img
+            src={item.preview.imageUrl}
+            alt=""
+            loading="lazy"
+            decoding="async"
+          />
         ) : (
           <span>
             <Play size={28} />

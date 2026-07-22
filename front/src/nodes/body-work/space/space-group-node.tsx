@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CheckCircle2, FolderTree, Loader2, Play } from "lucide-react";
 import type { CanvasGroupRunStatus } from "./space-group-runtime";
+import { SpaceTooltip } from "./space-tooltip";
 import type { SpaceCanvasNode } from "./types";
 
 export function CanvasGroupNodeView({
@@ -86,17 +87,18 @@ export function CanvasGroupNodeView({
             }}
           />
         ) : (
-          <strong
-            className="ws-node-group-title"
-            title="双击重命名"
-            onDoubleClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              setEditing(true);
-            }}
-          >
-            {node.title || "未命名分组"}
-          </strong>
+          <SpaceTooltip label="双击重命名">
+            <strong
+              className="ws-node-group-title"
+              onDoubleClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setEditing(true);
+              }}
+            >
+              {node.title || "未命名分组"}
+            </strong>
+          </SpaceTooltip>
         )}
         <span className="ws-node-group-count">
           {running
@@ -119,17 +121,8 @@ export function CanvasGroupNodeView({
             待更新 {staleCount}
           </span>
         ) : null}
-        <button
-          type="button"
-          className="ws-node-group-run nodrag nopan"
-          disabled={!onRun || runnableCount === 0 || running}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onRun?.();
-          }}
-          aria-label="运行分组"
-          title={
+        <SpaceTooltip
+          label={
             runnableCount === 0
               ? "分组内暂无可运行节点"
               : staleCount > 0
@@ -137,12 +130,24 @@ export function CanvasGroupNodeView({
                 : "运行分组"
           }
         >
-          {running ? (
-            <Loader2 size={14} className="ws-spin" />
-          ) : (
-            <Play size={14} />
-          )}
-        </button>
+          <button
+            type="button"
+            className="ws-node-group-run nodrag nopan"
+            disabled={!onRun || runnableCount === 0 || running}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onRun?.();
+            }}
+            aria-label="运行分组"
+          >
+            {running ? (
+              <Loader2 size={14} className="ws-spin" />
+            ) : (
+              <Play size={14} />
+            )}
+          </button>
+        </SpaceTooltip>
       </header>
       <div className="ws-node-group-surface" aria-hidden="true" />
       {children}

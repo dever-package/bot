@@ -1,6 +1,7 @@
 import { Loader2, Pencil, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
+import { BodyWorkTooltip } from "../shared/body-work-tooltip";
 import { renameAsset } from "./asset-api";
 import type { AssetRecord } from "./asset-types";
 
@@ -82,14 +83,11 @@ export function AssetRenameDialog({
               <p>只修改资产库中的显示名称。</p>
             </div>
           </div>
-          <button
-            type="button"
-            title="关闭"
-            disabled={saving}
-            onClick={onClose}
-          >
-            <X aria-hidden="true" />
-          </button>
+          <BodyWorkTooltip label="关闭">
+            <button type="button" disabled={saving} onClick={onClose}>
+              <X aria-hidden="true" />
+            </button>
+          </BodyWorkTooltip>
         </header>
         <label>
           <span>资产标题</span>

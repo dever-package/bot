@@ -1,6 +1,7 @@
 package energon
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -60,8 +61,35 @@ func sanitizeLogString(key string, value string) string {
 		}
 	}
 	key = strings.ToLower(strings.TrimSpace(key))
-	if len(trimmed) > 128 && (strings.Contains(key, "base64") || strings.Contains(key, "b64")) {
+	if len(trimmed) > 128 && (strings.Contains(key, "base64") || strings.Contains(key, "b64") || looksLikeRawBase64LogValue(trimmed)) {
 		return fmt.Sprintf("[base64 omitted: %d chars]", len(trimmed))
 	}
 	return value
+}
+
+func looksLikeRawBase64LogValue(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) > 4096 {
+		value = value[:4096]
+	}
+	value = strings.NewReplacer("\n", "", "\r", "", "\t", "").Replace(value)
+	if len(value) < 128 || strings.Contains(value, " ") || strings.Contains(value, "://") || strings.HasPrefix(value, "/") {
+		return false
+	}
+	for _, current := range value {
+		if (current >= 'a' && current <= 'z') || (current >= 'A' && current <= 'Z') || (current >= '0' && current <= '9') || current == '+' || current == '/' || current == '=' {
+			continue
+		}
+		return false
+	}
+	prefixLength := len(value)
+	if prefixLength > 1024 {
+		prefixLength = 1024
+	}
+	prefixLength -= prefixLength % 4
+	if prefixLength == 0 {
+		return false
+	}
+	_, err := base64.StdEncoding.DecodeString(value[:prefixLength])
+	return err == nil
 }

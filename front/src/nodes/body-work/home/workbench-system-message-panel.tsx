@@ -25,7 +25,7 @@ import {
 } from "@dever/front-plugin";
 import { BodySiteBrand } from "../auth/site-brand";
 import type { BodySiteConfig } from "../auth/site-config";
-import { resolveConfiguredLucideIcon } from "../shared/configured-icon";
+import { ConfiguredMenuIcon } from "../shared/configured-icon";
 import {
   loadWorkbenchSystemMessages,
   type WorkbenchSystemMessage,
@@ -60,7 +60,6 @@ export function WorkbenchSystemMessagePanel({
     useState<WorkbenchSystemMessage | null>(null);
   const messages = useSystemMessages(open);
   const messageMenu = site.homeMenu.messages;
-  const MessageIcon = resolveConfiguredLucideIcon(messageMenu.icon, Bell);
 
   useEffect(() => {
     if (!open) {
@@ -98,7 +97,13 @@ export function WorkbenchSystemMessagePanel({
           aria-expanded={open}
           onClick={() => setOpen((current) => !current)}
         >
-          <MessageIcon strokeWidth={1.8} />
+          <ConfiguredMenuIcon
+            iconName={messageMenu.icon}
+            iconImage={messageMenu.iconImage}
+            fallbackIcon={Bell}
+            className="hb-configured-menu-icon"
+            strokeWidth={1.8}
+          />
           <span>{messageMenu.name}</span>
         </button>
 

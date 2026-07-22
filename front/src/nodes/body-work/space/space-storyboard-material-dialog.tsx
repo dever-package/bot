@@ -5,6 +5,7 @@ import {
   STORYBOARD_MATERIAL_LABELS,
   type StoryboardMaterial,
 } from "./space-storyboard";
+import { SpaceTooltip } from "./space-tooltip";
 
 export function StoryboardMaterialDialog({
   material,
@@ -54,14 +55,11 @@ export function StoryboardMaterialDialog({
               {readonly ? " · 当前版本只读" : " · 修改会保存到当前分镜草稿"}
             </span>
           </div>
-          <button
-            type="button"
-            title="关闭"
-            aria-label="关闭"
-            onClick={onClose}
-          >
-            <X size={18} />
-          </button>
+          <SpaceTooltip label="关闭">
+            <button type="button" aria-label="关闭" onClick={onClose}>
+              <X size={18} />
+            </button>
+          </SpaceTooltip>
         </header>
 
         <div className="ws-storyboard-material-form nowheel">

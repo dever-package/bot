@@ -213,6 +213,7 @@ export function StreamPowerRunner({
   const runTokenRef = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
   const pendingHistoryInputRef = useRef<Record<string, unknown>>({})
+  const powerParamsReadyRef = useRef(false)
   const appliedHistoryInputRef = useRef('')
   const appliedHistorySourceRef = useRef('')
   const requestIDCopyTimerRef = useRef<number | null>(null)
@@ -229,6 +230,7 @@ export function StreamPowerRunner({
 
   useEffect(() => {
     setSelectedSource({ power: '', id: '' })
+    powerParamsReadyRef.current = false
     appliedHistoryInputRef.current = ''
     appliedHistorySourceRef.current = ''
   }, [history?.scopeKey, powerKey])
@@ -288,6 +290,7 @@ export function StreamPowerRunner({
 
   useEffect(() => {
     let cancelled = false
+    powerParamsReadyRef.current = false
     setPowerParams([])
     setPowerSources([])
     setParamValues({})
@@ -339,6 +342,7 @@ export function StreamPowerRunner({
       }
 
       const replayState = buildPowerParamReplayState(rows, initialInput)
+      powerParamsReadyRef.current = true
       appliedHistoryInputRef.current = ''
       setPowerParams(rows)
       setParamValues(replayState.values)
@@ -656,11 +660,16 @@ export function StreamPowerRunner({
       !historyController.enabled ||
       selectedID <= 0 ||
       !selectedHistoryInput ||
+      !powerParamsReadyRef.current ||
       powerParams.length === 0
     ) {
       return
     }
-    const selectionKey = `${history?.scopeKey || ''}:${selectedID}`
+    const selectionKey = [
+      history?.scopeKey || '',
+      selectedID,
+      historyController.selectionRevision,
+    ].join(':')
     if (appliedHistorySourceRef.current !== selectionKey) {
       appliedHistorySourceRef.current = selectionKey
       if (
@@ -695,6 +704,7 @@ export function StreamPowerRunner({
     history?.scopeKey,
     historyController.enabled,
     historyController.selectedID,
+    historyController.selectionRevision,
     powerKey,
     powerParams,
     powerSources,

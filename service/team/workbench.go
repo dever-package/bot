@@ -82,7 +82,7 @@ func (s Service) WorkbenchCatalog(ctx context.Context, teamID uint64) (map[strin
 	}
 	roles := make([]map[string]any, 0, len(graph.Roles))
 	for _, role := range graph.Roles {
-		if !isWorkbenchExecutionRole(role) {
+		if !isWorkbenchDialogueRole(role) {
 			continue
 		}
 		agent, exists := agents[role.AgentID]
@@ -160,7 +160,7 @@ func (s Service) ResolveWorkbenchRole(ctx context.Context, teamID uint64, roleID
 		agents[agent.ID] = agent
 	}
 	for _, role := range graph.Roles {
-		if role.ID != roleID || !isWorkbenchExecutionRole(role) {
+		if role.ID != roleID || !isWorkbenchDialogueRole(role) {
 			continue
 		}
 		agent, agentExists := agents[role.AgentID]
@@ -173,11 +173,12 @@ func (s Service) ResolveWorkbenchRole(ctx context.Context, teamID uint64, roleID
 			AgentID: agent.ID, AgentKey: agent.Key, Name: role.Name, Assignment: role.Assignment,
 		}, nil
 	}
-	return WorkbenchRoleBinding{}, fmt.Errorf("当前团队发布版本中不存在该执行角色")
+	return WorkbenchRoleBinding{}, fmt.Errorf("当前团队发布版本中不存在该对话角色")
 }
 
-func isWorkbenchExecutionRole(role teammodel.Role) bool {
-	return role.Status == teammodel.StatusEnabled && role.RoleType == teammodel.RoleTypeWorker
+func isWorkbenchDialogueRole(role teammodel.Role) bool {
+	return role.Status == teammodel.StatusEnabled &&
+		normalizeEntryStatus(role.ChatStatus) == teammodel.StatusEnabled
 }
 
 func isWorkbenchPowerAvailable(teamPower teammodel.TeamPower) bool {

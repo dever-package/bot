@@ -65,10 +65,10 @@
       },
       {
         "type": "form-switch",
-        "name": "首页",
+        "name": "工具",
         "value": "form.home_status",
         "mode": "form",
-        "info": "开启后在 Body 首页的工具入口展示；关闭后仍可被工作流和团队角色调用。",
+        "info": "开启后在 Body 的工具中展示该能力；关闭只隐藏工具入口，不影响工作流和团队角色调用。",
         "meta": {
           "trueValue": 1,
           "falseValue": 2,
@@ -77,9 +77,10 @@
       },
       {
         "type": "form-switch",
-        "name": "状态",
-        "value": "form.status",
+        "name": "创作",
+        "value": "form.create_status",
         "mode": "form",
+        "info": "开启后在创作画布的能力列表中展示该能力；关闭只隐藏创作入口，不影响已有节点和工作流运行。",
         "meta": {
           "trueValue": 1,
           "falseValue": 2,
@@ -95,6 +96,7 @@
       "power_id": 0,
       "config": "{}",
       "home_status": 1,
+      "create_status": 1,
       "status": 1,
       "sort": 100
     }

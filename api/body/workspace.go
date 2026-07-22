@@ -12,7 +12,20 @@ type Workspace struct{}
 var workspaceRunner = projectservice.NewWorkspaceService()
 
 func (Workspace) GetBootstrap(c *server.Context) error {
-	data, err := workspaceRunner.Bootstrap(c.Context(), botapi.QueryUint64(c, "project_id", "projectId"))
+	data, err := workspaceRunner.Bootstrap(
+		c.Context(),
+		botapi.QueryUint64(c, "project_id", "projectId"),
+		botapi.QueryUint64(c, "asset_cate_id", "assetCateId"),
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Workspace) GetCanvas(c *server.Context) error {
+	data, err := workspaceRunner.Canvas(
+		c.Context(),
+		botapi.QueryUint64(c, "project_id", "projectId"),
+		botapi.QueryUint64(c, "asset_cate_id", "assetCateId"),
+	)
 	return botapi.WriteJSON(c, data, err)
 }
 
@@ -69,6 +82,9 @@ func (Workspace) GetCanvasExecutionList(c *server.Context) error {
 		ProjectID:   botapi.QueryUint64(c, "project_id", "projectId"),
 		AssetCateID: botapi.QueryUint64(c, "asset_cate_id", "assetCateId"),
 		Status:      botapi.QueryText(c, "status"),
+		Scope:       botapi.QueryText(c, "scope"),
+		RunIDs:      botapi.QueryText(c, "run_ids", "runIds"),
+		BeforeID:    botapi.QueryUint64(c, "before_id", "beforeId"),
 		Limit:       botapi.QueryInt(c, "limit"),
 	})
 	return botapi.WriteJSON(c, data, err)
