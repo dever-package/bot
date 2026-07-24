@@ -44,7 +44,7 @@ export function StoryboardFrameNode({ data }: NodeProps<any>) {
           label={
             frame.running
               ? "制作区正在执行"
-              : frame.runBlockedReason || "按依赖顺序执行制作区"
+              : frame.runBlockedReason || "按依赖层级并行执行制作区"
           }
         >
           <button

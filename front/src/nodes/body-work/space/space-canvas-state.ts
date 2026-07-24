@@ -11,6 +11,7 @@ import type {
   TeamFlow,
   TeamRole,
 } from "./types";
+import { normalizeStoryboardReferences } from "./space-storyboard-reference";
 import { normalizeVideoComposition } from "./space-video-compose";
 
 export type PersistedCanvasState = {
@@ -56,6 +57,7 @@ type PersistedCanvasNode = {
     generated_prompt?: string;
     dependency_node_ids?: string[];
     reference_node_ids?: string[];
+    external_reference_asset_ids?: number[];
     shot_id?: string;
     speech_id?: string;
     speech_ids?: string[];
@@ -169,6 +171,7 @@ function persistedCanvasNode(
         : {}),
       dependency_node_ids: item.dependencyNodeIds || [],
       reference_node_ids: item.referenceNodeIds || [],
+      external_reference_asset_ids: item.externalReferenceAssetIds || [],
       ...(item.shotId ? { shot_id: item.shotId } : {}),
       ...(item.speechId ? { speech_id: item.speechId } : {}),
       ...(item.speechIds?.length ? { speech_ids: item.speechIds } : {}),
@@ -324,6 +327,12 @@ function persistedComposerDraft(value: unknown) {
   );
   if (videoComposition && isJSONValue(videoComposition)) {
     result.video_composition = videoComposition;
+  }
+  const storyboardReferences = normalizeStoryboardReferences(
+    value.storyboardReferences ?? value.storyboard_references,
+  );
+  if (storyboardReferences.length > 0 && isJSONValue(storyboardReferences)) {
+    result.storyboard_references = storyboardReferences;
   }
   return Object.keys(result).length ? result : null;
 }

@@ -1,19 +1,19 @@
 {
   "page": {
-    "name": "登录页菜单编辑",
-    "parent": "bot/body/config/set",
+    "name": "单页链接编辑",
+    "parent": "bot/body/link/list",
     "type": 2,
     "auth": [
       {
         "key": "bot/body/link/create",
-        "name": "登录页菜单新增",
+        "name": "单页链接新增",
         "query": {
           "id": "empty"
         }
       },
       {
         "key": "bot/body/link/update",
-        "name": "登录页菜单编辑",
+        "name": "单页链接编辑",
         "query": {
           "id": "required"
         }
@@ -39,8 +39,31 @@
     "dialog-shell": [
       {
         "type": "form-input",
+        "name": "唯一编码",
+        "placeholder": "例如：help_center",
+        "value": "form.code",
+        "mode": "form",
+        "info": "用于稳定读取链接。服务条款使用 terms_of_service，隐私政策使用 privacy_policy。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "唯一编码不能为空。"
+          },
+          {
+            "type": "pattern",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "message": "只能以小写字母开头，并包含小写字母、数字或下划线。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-md"
+        }
+      },
+      {
+        "type": "form-input",
         "name": "名称",
-        "placeholder": "例如：产品文档",
+        "placeholder": "例如：帮助中心",
         "value": "form.name",
         "mode": "form",
         "validate": [
@@ -54,6 +77,80 @@
         }
       },
       {
+        "type": "form-checkbox",
+        "name": "使用场景",
+        "value": "form.scene_ids",
+        "mode": "form",
+        "option": "option.scene",
+        "info": "可多选，也可不选。协议条款由唯一编码识别，不需要选择场景。",
+        "meta": {
+          "formLayout": "horizontal",
+          "orientation": "horizontal"
+        }
+      },
+      {
+        "type": "form-radio",
+        "name": "链接类型",
+        "value": "form.link_type",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "gap-x-5",
+          "clearOnChange": [
+            "form.article_id",
+            "form.url"
+          ]
+        }
+      },
+      {
+        "type": "form-cascader",
+        "name": "内容",
+        "placeholder": "请选择分类和内容",
+        "value": "form.article_id",
+        "mode": "form",
+        "info": "登录页导航和协议条款只能选择公开内容；仅用于工作台时可选择登录后访问内容。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "请选择分类和内容。",
+            "when": [
+              {
+                "path": "form.link_type",
+                "operator": "equals",
+                "value": "article"
+              }
+            ]
+          }
+        ],
+        "meta": {
+          "childParentField": "category_id",
+          "childLabelField": "title",
+          "valueMode": "leaf",
+          "placeholder": [
+            "选择分类",
+            "选择内容"
+          ],
+          "searchPlaceholder": [
+            "搜索分类",
+            "搜索内容"
+          ],
+          "childExtraFields": "title,category_id,visibility,status",
+          "order": "sort asc,id asc",
+          "childOrder": "sort asc,id desc",
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-md",
+          "model": "bot.body.NewContentCategoryModel",
+          "childModel": "bot.body.NewContentArticleModel",
+          "showWhen": [
+            {
+              "path": "form.link_type",
+              "operator": "equals",
+              "value": "article"
+            }
+          ]
+        }
+      },
+      {
         "type": "form-input",
         "name": "链接地址",
         "placeholder": "https://example.com/docs",
@@ -62,11 +159,25 @@
         "validate": [
           {
             "type": "required",
-            "message": "链接地址不能为空。"
+            "message": "链接地址不能为空。",
+            "when": [
+              {
+                "path": "form.link_type",
+                "operator": "equals",
+                "value": "url"
+              }
+            ]
           }
         ],
         "meta": {
-          "formLayout": "horizontal"
+          "formLayout": "horizontal",
+          "showWhen": [
+            {
+              "path": "form.link_type",
+              "operator": "equals",
+              "value": "url"
+            }
+          ]
         }
       },
       {
@@ -76,7 +187,14 @@
         "mode": "form",
         "meta": {
           "formLayout": "horizontal",
-          "controlClassName": "gap-x-5"
+          "controlClassName": "gap-x-5",
+          "showWhen": [
+            {
+              "path": "form.link_type",
+              "operator": "equals",
+              "value": "url"
+            }
+          ]
         }
       }
     ]
@@ -84,16 +202,37 @@
   "data": {
     "form": {
       "id": 0,
+      "code": "",
       "name": "",
+      "scene_ids": [],
+      "link_type": "url",
+      "article_id": 0,
       "url": "",
-      "target": "_self"
+      "target": "_self",
+      "status": 1,
+      "sort": 100
     }
   },
   "state": {},
   "action": {
     "submit": {
       "type": "save",
-      "params": "form"
+      "params": "form",
+      "data": {
+        "id": "$form.id",
+        "code": "$form.code",
+        "name": "$form.name",
+        "scene_ids": "$form.scene_ids",
+        "link_type": "$form.link_type",
+        "article_id": "$form.article_id",
+        "url": "$form.url",
+        "target": "$form.target",
+        "status": "$form.status",
+        "sort": "$form.sort"
+      },
+      "before": {
+        "service": "bot.body.LinkHook.BeforeSaveLink"
+      }
     }
   }
 }

@@ -19,15 +19,17 @@ func validateTerminalCall(ctx context.Context, state *runState, call botprotocol
 	}
 	switch name {
 	case runtimeprovider.AskUserToolName:
-		if state.documentID > 0 {
+		if state.isDocumentWriter() {
 			return fmt.Errorf("图文文档已开始生成，不能在文档中途等待用户补充信息")
 		}
 		return nil
 	case runtimeprovider.SkillInstallPlanToolName:
 		return nil
 	case runtimeprovider.PresentSuggestionsToolName:
-		if state.documentID > 0 && !documentHasText(ctx, state.documentID) {
-			return fmt.Errorf("图文正文尚未生成，不能先展示后续建议")
+		if state.documentID > 0 &&
+			(!documentHasText(ctx, state.documentID) || !state.documentDeliveryReady) &&
+			!documentHasFailed(ctx, state.documentID) {
+			return fmt.Errorf("图文正文尚未完整交付，不能先展示后续建议")
 		}
 	case runtimeprovider.ComposeDocumentToolName:
 		if state.documentID > 0 {

@@ -1,9 +1,40 @@
 import { plainMarkdownTextFromRichOutput } from "./space-content-output";
 import { embeddedJSONValues } from "./space-structured-json";
-import type { CanvasReferenceContent } from "./types";
+import { normalizeStoryboardReferences } from "./space-storyboard-reference";
+import type {
+  CanvasReferenceContent,
+  CanvasStoryboardReference,
+} from "./types";
 
-export const STORYBOARD_VERSION = 5;
+export const STORYBOARD_VERSION = 8;
 export const MIN_STORYBOARD_SHOT_DURATION = 4;
+export const MAX_STORYBOARD_SHOTS = 50;
+
+export const STORYBOARD_TRANSITION_TYPES = [
+  "none",
+  "fade",
+  "crossfade",
+  "fadeblack",
+  "fadewhite",
+  "wipeleft",
+  "wiperight",
+] as const;
+
+export type StoryboardTransitionType =
+  (typeof STORYBOARD_TRANSITION_TYPES)[number];
+
+export const STORYBOARD_TRANSITION_LABELS: Record<
+  StoryboardTransitionType,
+  string
+> = {
+  none: "硬切",
+  fade: "淡化",
+  crossfade: "交叉溶解",
+  fadeblack: "黑场淡化",
+  fadewhite: "白场淡化",
+  wipeleft: "向左擦除",
+  wiperight: "向右擦除",
+};
 
 export const STORYBOARD_VISUAL_MODES = ["photoreal", "stylized"] as const;
 
@@ -47,6 +78,8 @@ export type StoryboardMaterial = Record<string, unknown> & {
   type: StoryboardMaterialType;
   name: string;
   prompt: string;
+  voice: string;
+  reference_keys: string[];
 };
 
 export type StoryboardMaterialUsage = {
@@ -66,6 +99,12 @@ export type StoryboardWorkflowStatus = "draft" | "confirmed";
 export type StoryboardWorkflow = {
   status: StoryboardWorkflowStatus;
   confirmed_at: string;
+};
+
+export type StoryboardStoryline = {
+  setup: string;
+  development: string;
+  payoff: string;
 };
 
 export type StoryboardSpeechKind = "dialogue" | "narration";
@@ -111,10 +150,16 @@ export type StoryboardShot = Record<string, unknown> & {
   id: string;
   order: number;
   duration: number;
+  beat: string;
+  transition: string;
+  transition_type: StoryboardTransitionType;
+  transition_duration_ms: number;
   description: string;
   camera_instruction: string;
   video_prompt: string;
   material_ids: string[];
+  reference_keys: string[];
+  match_previous: boolean;
   continue_previous: boolean;
   continuity_anchor: string;
   speech: StoryboardSpeech[];
@@ -130,9 +175,14 @@ export type StoryboardDocument = Record<string, unknown> & {
   workflow: StoryboardWorkflow;
   title: string;
   summary: string;
+  target_duration: number;
+  target_shot_count: number;
+  narrator_voice: string;
+  storyline: StoryboardStoryline;
   style_prompt: string;
   visual_mode: StoryboardVisualMode;
   aspect_ratio: StoryboardAspectRatio;
+  references: CanvasStoryboardReference[];
   materials: StoryboardMaterial[];
   shots: StoryboardShot[];
 };
@@ -191,10 +241,16 @@ export function createStoryboardShot(index: number): StoryboardShot {
     id: `shot-${index + 1}`,
     order: index + 1,
     duration: MIN_STORYBOARD_SHOT_DURATION,
+    beat: "",
+    transition: "",
+    transition_type: "none",
+    transition_duration_ms: 0,
     description: "",
     camera_instruction: "",
     video_prompt: "",
     material_ids: [],
+    reference_keys: [],
+    match_previous: false,
     continue_previous: false,
     continuity_anchor: "",
     speech: [],
@@ -218,6 +274,8 @@ export function createStoryboardMaterial(
     type,
     name: "",
     prompt: "",
+    voice: "",
+    reference_keys: [],
   };
 }
 
@@ -286,6 +344,8 @@ export function createStoryboardCaption(
 export function normalizeStoryboardOrder(
   storyboard: StoryboardDocument,
 ): StoryboardDocument {
+  const references = normalizeStoryboardReferences(storyboard.references);
+  const referenceKeys = new Set(references.map((reference) => reference.key));
   const materialIDs = new Set(
     storyboard.materials.map((material) => material.id),
   );
@@ -293,14 +353,45 @@ export function normalizeStoryboardOrder(
     ...storyboard,
     version: STORYBOARD_VERSION,
     workflow: normalizeStoryboardWorkflow(storyboard.workflow),
+    target_duration: Math.max(
+      MIN_STORYBOARD_SHOT_DURATION,
+      Math.round(Number(storyboard.target_duration) || 0),
+    ),
+    target_shot_count: Math.min(
+      MAX_STORYBOARD_SHOTS,
+      Math.max(1, Math.round(Number(storyboard.target_shot_count) || 0)),
+    ),
+    narrator_voice: storyboard.narrator_voice.trim(),
     aspect_ratio: normalizeStoryboardAspectRatio(storyboard.aspect_ratio),
+    references,
+    materials: storyboard.materials.map((material) => ({
+      ...material,
+      voice: material.type === "character" ? material.voice.trim() : "",
+      reference_keys: uniqueStrings(material.reference_keys).filter((key) =>
+        referenceKeys.has(key),
+      ),
+    })),
     shots: storyboard.shots.map((shot, index) => ({
       ...shot,
       id: shot.id || `shot-${index + 1}`,
       order: index + 1,
+      transition: index > 0 ? shot.transition.trim() : "",
+      transition_type:
+        index > 0
+          ? normalizeStoryboardTransitionType(shot.transition_type)
+          : "none",
+      transition_duration_ms:
+        index > 0 && shot.transition_type !== "none"
+          ? Math.min(5000, Math.max(100, Math.round(shot.transition_duration_ms)))
+          : 0,
       material_ids: uniqueStrings(shot.material_ids).filter((id) =>
         materialIDs.has(id),
       ),
+      reference_keys: uniqueStrings(shot.reference_keys).filter((key) =>
+        referenceKeys.has(key),
+      ),
+      match_previous:
+        index > 0 && !shot.continue_previous && Boolean(shot.match_previous),
       continue_previous: index > 0 && Boolean(shot.continue_previous),
       continuity_anchor:
         index > 0 && shot.continue_previous
@@ -324,16 +415,25 @@ export function reconcileStoryboardContinuity(
     ...next,
     shots: next.shots.map((shot, index) => {
       const predecessorID = index > 0 ? next.shots[index - 1].id : "";
-      if (
-        !shot.continue_previous ||
-        (predecessorID && previousPredecessors.get(shot.id) === predecessorID)
-      ) {
-        return shot;
-      }
+      const predecessorChanged =
+        index === 0 || previousPredecessors.get(shot.id) !== predecessorID;
       return {
         ...shot,
-        continue_previous: false,
-        continuity_anchor: "",
+        transition: predecessorChanged ? "" : shot.transition,
+        transition_type: predecessorChanged ? "none" : shot.transition_type,
+        transition_duration_ms: predecessorChanged
+          ? 0
+          : shot.transition_duration_ms,
+        match_previous:
+          !predecessorChanged && !shot.continue_previous
+            ? shot.match_previous
+            : false,
+        continue_previous:
+          !predecessorChanged && Boolean(shot.continue_previous),
+        continuity_anchor:
+          !predecessorChanged && shot.continue_previous
+            ? shot.continuity_anchor
+            : "",
       };
     }),
   };
@@ -511,6 +611,15 @@ export function normalizeStoryboardAspectRatio(
     : DEFAULT_STORYBOARD_ASPECT_RATIO;
 }
 
+export function normalizeStoryboardTransitionType(
+  value: unknown,
+): StoryboardTransitionType {
+  const normalized = stringValue(value) as StoryboardTransitionType;
+  return STORYBOARD_TRANSITION_TYPES.includes(normalized)
+    ? normalized
+    : "none";
+}
+
 export function storyboardShotFallbackPrompt(shot: StoryboardShot) {
   const speech = shot.speech
     .filter(hasSpeechText)
@@ -595,11 +704,22 @@ function decodeStoryboard(
     stringValue(row.type).toLowerCase() !== "storyboard" ||
     numberValue(row.version) !== STORYBOARD_VERSION ||
     typeof row.title !== "string" ||
+    typeof row.narrator_voice !== "string" ||
     typeof row.style_prompt !== "string" ||
     !isStoryboardVisualMode(visualMode) ||
+    !Array.isArray(row.references) ||
     !Array.isArray(row.materials) ||
     !Array.isArray(row.shots)
   ) {
+    return null;
+  }
+
+  const storyline = decodeStoryboardStoryline(row.storyline);
+  if (!storyline) {
+    return null;
+  }
+  const references = normalizeStoryboardReferences(row.references);
+  if (references.length !== row.references.length) {
     return null;
   }
 
@@ -631,6 +751,20 @@ function decodeStoryboard(
     usedShotIDs.add(shot.id);
   }
 
+  const targetDuration = numberValue(row.target_duration);
+  const targetShotCount = numberValue(row.target_shot_count);
+  if (
+    targetDuration == null ||
+    !Number.isInteger(targetDuration) ||
+    targetDuration < MIN_STORYBOARD_SHOT_DURATION ||
+    targetShotCount == null ||
+    !Number.isInteger(targetShotCount) ||
+    targetShotCount < 1 ||
+    targetShotCount > MAX_STORYBOARD_SHOTS
+  ) {
+    return null;
+  }
+
   return {
     ...row,
     type: "storyboard",
@@ -641,12 +775,32 @@ function decodeStoryboard(
       stringValue(row.summary),
       normalizedShots,
     ),
+    target_duration: targetDuration,
+    target_shot_count: targetShotCount,
+    narrator_voice: row.narrator_voice.trim(),
+    storyline,
     style_prompt: row.style_prompt,
     visual_mode: visualMode,
     aspect_ratio: normalizeStoryboardAspectRatio(row.aspect_ratio),
+    references,
     materials: normalizedMaterials,
     shots: normalizedShots,
   };
+}
+
+function decodeStoryboardStoryline(
+  value: unknown,
+): StoryboardStoryline | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const setup = stringValue(value.setup);
+  const development = stringValue(value.development);
+  const payoff = stringValue(value.payoff);
+  if (!setup || !development || !payoff) {
+    return null;
+  }
+  return { setup, development, payoff };
 }
 
 function storyboardContentSummaryFromShots(
@@ -679,7 +833,9 @@ function decodeStoryboardMaterial(value: unknown): StoryboardMaterial | null {
     typeof value.id !== "string" ||
     !value.id.trim() ||
     typeof value.name !== "string" ||
-    typeof value.prompt !== "string"
+    typeof value.prompt !== "string" ||
+    typeof value.voice !== "string" ||
+    !Array.isArray(value.reference_keys)
   ) {
     return null;
   }
@@ -689,6 +845,8 @@ function decodeStoryboardMaterial(value: unknown): StoryboardMaterial | null {
     type,
     name: value.name.trim().replace(/^[@#]+/, ""),
     prompt: value.prompt.trim(),
+    voice: type === "character" ? value.voice.trim() : "",
+    reference_keys: uniqueStrings(value.reference_keys.map(stringValue)),
   };
 }
 
@@ -701,12 +859,18 @@ function decodeStoryboardShot(
     !isRecord(value) ||
     typeof value.id !== "string" ||
     !value.id.trim() ||
+    typeof value.beat !== "string" ||
+    !value.beat.trim() ||
+    typeof value.transition !== "string" ||
+    typeof value.transition_type !== "string" ||
+    typeof value.match_previous !== "boolean" ||
     typeof value.description !== "string" ||
     typeof value.camera_instruction !== "string" ||
     typeof value.video_prompt !== "string" ||
     typeof value.continue_previous !== "boolean" ||
     typeof value.continuity_anchor !== "string" ||
     !Array.isArray(value.material_ids) ||
+    !Array.isArray(value.reference_keys) ||
     !Array.isArray(value.speech) ||
     !Array.isArray(value.captions)
   ) {
@@ -736,8 +900,37 @@ function decodeStoryboardShot(
     return null;
   }
   const continuesPrevious = index > 0 && value.continue_previous;
+  if (
+    (index === 0 && (value.match_previous || value.continue_previous)) ||
+    (value.match_previous && value.continue_previous)
+  ) {
+    return null;
+  }
+  const matchesPrevious =
+    index > 0 && !continuesPrevious && value.match_previous;
+  const transition = value.transition.trim();
+  if (index > 0 && !transition) {
+    return null;
+  }
   const continuityAnchor = value.continuity_anchor.trim();
   if (continuesPrevious && !continuityAnchor) {
+    return null;
+  }
+  const transitionType = normalizeStoryboardTransitionType(
+    value.transition_type,
+  );
+  const transitionDuration = numberValue(value.transition_duration_ms);
+  if (
+    transitionType !== value.transition_type ||
+    transitionDuration == null ||
+    !Number.isInteger(transitionDuration) ||
+    transitionDuration < 0 ||
+    transitionDuration > 5000 ||
+    (index === 0 &&
+      (transitionType !== "none" || transitionDuration !== 0)) ||
+    (index > 0 && transitionType === "none" && transitionDuration !== 0) ||
+    (index > 0 && transitionType !== "none" && transitionDuration < 100)
+  ) {
     return null;
   }
   return {
@@ -745,10 +938,17 @@ function decodeStoryboardShot(
     id: value.id.trim(),
     order: index + 1,
     duration,
+    beat: value.beat.trim(),
+    transition: index > 0 ? transition : "",
+    transition_type: index > 0 ? transitionType : "none",
+    transition_duration_ms:
+      index > 0 && transitionType !== "none" ? transitionDuration : 0,
     description: value.description,
     camera_instruction: value.camera_instruction,
     video_prompt: value.video_prompt,
     material_ids: materialIdList,
+    reference_keys: uniqueStrings(value.reference_keys.map(stringValue)),
+    match_previous: matchesPrevious,
     continue_previous: continuesPrevious,
     continuity_anchor: continuesPrevious ? continuityAnchor : "",
     speech: speech as StoryboardSpeech[],

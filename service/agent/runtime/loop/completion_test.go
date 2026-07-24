@@ -2,12 +2,10 @@ package loop
 
 import (
 	"testing"
-
-	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 )
 
 func TestResolveCompletionReview(t *testing.T) {
-	review, err := resolveCompletionReview("complete", "", "none")
+	review, err := resolveCompletionReview("complete", "", completionDependencyNone, completionFollowUpNone)
 	if err != nil {
 		t.Fatalf("resolve complete review returned error: %v", err)
 	}
@@ -15,44 +13,44 @@ func TestResolveCompletionReview(t *testing.T) {
 		t.Fatalf("expected complete review, got %#v", review)
 	}
 
-	review, err = resolveCompletionReview("incomplete", "", runtimeprovider.AskUserToolName)
+	review, err = resolveCompletionReview("incomplete", "", completionDependencyUserInput, completionFollowUpNone)
 	if err != nil {
 		t.Fatalf("resolve incomplete review returned error: %v", err)
 	}
-	if review.Missing == "" || review.Interaction != runtimeprovider.AskUserToolName || !review.needsContinuation() {
+	if review.Missing == "" || review.Dependency != completionDependencyUserInput || !review.needsContinuation() {
 		t.Fatalf("unexpected incomplete review: %#v", review)
 	}
 
-	review, err = resolveCompletionReview("complete", "", runtimeprovider.PresentSuggestionsToolName)
+	review, err = resolveCompletionReview("complete", "", completionDependencyNone, completionFollowUpSuggestions)
 	if err != nil {
 		t.Fatalf("resolve complete review with suggestions returned error: %v", err)
 	}
-	if review.Delivery != "complete" || review.Interaction != runtimeprovider.PresentSuggestionsToolName || !review.needsContinuation() {
+	if review.Delivery != "complete" || review.FollowUp != completionFollowUpSuggestions || !review.needsContinuation() {
 		t.Fatalf("complete delivery should continue into structured suggestions: %#v", review)
 	}
 }
 
 func TestResolveCompletionReviewNormalizesInteractionSemantics(t *testing.T) {
-	if _, err := resolveCompletionReview("unknown", "", "none"); err == nil {
+	if _, err := resolveCompletionReview("unknown", "", completionDependencyNone, completionFollowUpNone); err == nil {
 		t.Fatal("invalid delivery should fail")
 	}
-	if _, err := resolveCompletionReview("incomplete", "missing", "unknown_interaction"); err == nil {
-		t.Fatal("invalid interaction should fail")
+	if _, err := resolveCompletionReview("incomplete", "missing", "unknown_dependency", completionFollowUpNone); err == nil {
+		t.Fatal("invalid dependency should fail")
 	}
 
-	review, err := resolveCompletionReview("complete", "", runtimeprovider.AskUserToolName)
+	review, err := resolveCompletionReview("complete", "", completionDependencyUserInput, completionFollowUpNone)
 	if err != nil {
 		t.Fatalf("ask_user interaction should normalize to incomplete delivery: %v", err)
 	}
-	if review.Delivery != "incomplete" || review.Interaction != runtimeprovider.AskUserToolName {
+	if review.Delivery != "incomplete" || review.Dependency != completionDependencyUserInput {
 		t.Fatalf("unexpected ask_user normalization: %#v", review)
 	}
 
-	review, err = resolveCompletionReview("incomplete", "missing", runtimeprovider.PresentSuggestionsToolName)
+	review, err = resolveCompletionReview("incomplete", "missing", completionDependencyNone, completionFollowUpSuggestions)
 	if err != nil {
 		t.Fatalf("optional suggestions should not invalidate incomplete delivery: %v", err)
 	}
-	if review.Interaction != "" || !review.needsContinuation() {
+	if review.FollowUp != completionFollowUpNone || !review.needsContinuation() {
 		t.Fatalf("incomplete delivery must continue before optional suggestions: %#v", review)
 	}
 }

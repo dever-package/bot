@@ -18,6 +18,7 @@ export function CanvasGroupNodeView({
   failedCount,
   staleCount,
   status,
+  frameRunning = false,
   selected,
   managed = false,
   onRename,
@@ -33,6 +34,7 @@ export function CanvasGroupNodeView({
   failedCount: number;
   staleCount: number;
   status: CanvasGroupRunStatus;
+  frameRunning?: boolean;
   selected?: boolean;
   managed?: boolean;
   onRename?: (title: string) => void;
@@ -45,6 +47,22 @@ export function CanvasGroupNodeView({
   const [title, setTitle] = useState(node.title);
   const inputRef = useRef<HTMLInputElement>(null);
   const running = status === "running" || status === "waiting";
+  const runTooltip = running
+    ? "分组正在执行"
+    : frameRunning
+      ? "制作区正在执行"
+      : runBlockedReason ||
+        (runnableCount === 0
+          ? "分组内暂无可运行节点"
+          : staleCount > 0
+            ? `更新 ${staleCount} 个变更节点`
+            : "运行分组");
+  const runDisabled =
+    !onRun ||
+    runnableCount === 0 ||
+    running ||
+    frameRunning ||
+    Boolean(runBlockedReason);
 
   useEffect(() => {
     if (!editing) {
@@ -139,6 +157,8 @@ export function CanvasGroupNodeView({
             <CheckCircle2 size={12} />
             已完成
           </span>
+        ) : frameRunning ? (
+          <span className="ws-node-group-status">等待调度</span>
         ) : staleCount > 0 ? (
           <span className="ws-node-group-status is-stale">
             待更新 {staleCount}
@@ -160,25 +180,11 @@ export function CanvasGroupNodeView({
             </button>
           </SpaceTooltip>
         ) : null}
-        <SpaceTooltip
-          label={
-            runBlockedReason ||
-            (runnableCount === 0
-              ? "分组内暂无可运行节点"
-              : staleCount > 0
-                ? `更新 ${staleCount} 个变更节点`
-                : "运行分组")
-          }
-        >
+        <SpaceTooltip label={runTooltip}>
           <button
             type="button"
             className="ws-node-group-run nodrag nopan"
-            disabled={
-              !onRun ||
-              runnableCount === 0 ||
-              running ||
-              Boolean(runBlockedReason)
-            }
+            disabled={runDisabled}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();

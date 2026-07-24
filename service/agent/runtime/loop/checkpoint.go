@@ -40,6 +40,8 @@ type executionSnapshot struct {
 	MediaReferences      []runtimeprovider.MediaReference `json:"media_references,omitempty"`
 	Scope                runtimescope.Scope               `json:"scope,omitempty"`
 	Billing              botprotocol.BillingContext       `json:"billing,omitempty"`
+	DocumentID           uint64                           `json:"document_id,omitempty"`
+	DocumentWriter       bool                             `json:"document_writer,omitempty"`
 }
 
 type persistedTransport struct {
@@ -71,7 +73,10 @@ type runCheckpoint struct {
 	CompletionReviewPending bool                             `json:"completion_review_pending,omitempty"`
 	CompletionReviews       int                              `json:"completion_reviews,omitempty"`
 	RequiredToolName        string                           `json:"required_tool_name,omitempty"`
+	RequiredToolFailures    int                              `json:"required_tool_failures,omitempty"`
 	DocumentID              uint64                           `json:"document_id,omitempty"`
+	DocumentDeliveryReady   bool                             `json:"document_delivery_ready,omitempty"`
+	DocumentTextSourceKey   string                           `json:"document_text_source_key,omitempty"`
 	KnowledgeUsed           bool                             `json:"knowledge_used,omitempty"`
 	KnowledgeNodeIDs        []uint64                         `json:"knowledge_node_ids,omitempty"`
 	FinalStatus             string                           `json:"final_status,omitempty"`
@@ -103,11 +108,15 @@ func snapshotFromExecution(execution execution) executionSnapshot {
 		MediaReferences: append([]runtimeprovider.MediaReference(nil), execution.mediaReferences...),
 		Scope:           execution.scope,
 		Billing:         execution.billing,
+		DocumentID:      execution.documentID,
+		DocumentWriter:  execution.documentWriter,
 	}
 }
 
 func initialCheckpoint(execution execution) runCheckpoint {
-	interactionResumed := runtimeEventType(execution.input) == "interaction_resumed"
+	eventType := runtimeEventType(execution.input)
+	interactionResumed := eventType == "interaction_resumed"
+	opening := eventType == runtimeEventSessionStarted
 	checkpoint := runCheckpoint{
 		Version:                 runtimeSnapshotVersion,
 		Phase:                   runPhaseModel,
@@ -115,7 +124,8 @@ func initialCheckpoint(execution execution) runCheckpoint {
 		Seq:                     1,
 		Input:                   gatewayInput(execution.input),
 		AwaitingDelivery:        interactionResumed,
-		CompletionReviewPending: true,
+		CompletionReviewPending: !opening,
+		DocumentID:              execution.documentID,
 	}
 	checkpoint.KnowledgeUsed = execution.priorKnowledgeUsed
 	return checkpoint
@@ -175,6 +185,18 @@ func normalizeCheckpoint(value runCheckpoint) runCheckpoint {
 	}
 	if value.CompletionReviews < 0 {
 		value.CompletionReviews = 0
+	}
+	if value.RequiredToolFailures < 0 {
+		value.RequiredToolFailures = 0
+	}
+	value.RequiredToolName = strings.TrimSpace(value.RequiredToolName)
+	if value.RequiredToolName == "" {
+		value.RequiredToolFailures = 0
+	}
+	value.DocumentTextSourceKey = strings.TrimSpace(value.DocumentTextSourceKey)
+	if value.DocumentID == 0 {
+		value.DocumentDeliveryReady = false
+		value.DocumentTextSourceKey = ""
 	}
 	return value
 }

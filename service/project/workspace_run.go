@@ -30,31 +30,33 @@ type CanvasRunRequest struct {
 }
 
 type canvasRunNode struct {
-	ID               string
-	Type             string
-	Title            string
-	StoryboardTitle  string
-	GroupTitle       string
-	Kind             string
-	OutputType       string
-	GroupID          string
-	AssetCateID      uint64
-	FunctionKey      string
-	FlowID           uint64
-	PowerID          uint64
-	PowerKey         string
-	PowerKind        string
-	AgentID          uint64
-	RoleID           uint64
-	Asset            map[string]any
-	AssetID          uint64
-	AssetVersionID   uint64
-	ComposerPrompt   string
-	VideoComposition map[string]any
-	StoryboardItem   map[string]any
-	SelectedTarget   uint64
-	ParamValues      map[string]any
-	PersistsResult   bool
+	ID                   string
+	Type                 string
+	Title                string
+	StoryboardTitle      string
+	GroupTitle           string
+	Kind                 string
+	OutputType           string
+	GroupID              string
+	AssetCateID          uint64
+	FunctionKey          string
+	FlowID               uint64
+	PowerID              uint64
+	PowerKey             string
+	PowerKind            string
+	AgentID              uint64
+	RoleID               uint64
+	Asset                map[string]any
+	AssetID              uint64
+	AssetVersionID       uint64
+	ComposerPrompt       string
+	PromptContent        map[string]any
+	VideoComposition     map[string]any
+	StoryboardItem       map[string]any
+	StoryboardReferences []canvasStoryboardReference
+	SelectedTarget       uint64
+	ParamValues          map[string]any
+	PersistsResult       bool
 }
 
 type canvasRunEdge struct {
@@ -105,7 +107,7 @@ func (s WorkspaceService) runCanvasWithProject(ctx context.Context, req CanvasRu
 		return s.workspaceRunPayload(ctx, projectID, existing), nil
 	}
 	var err error
-	req, err = prepareCanvasExecutionScope(ctx, projectID, req)
+	req, err = s.prepareCanvasExecutionScope(ctx, projectID, req)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +241,7 @@ func (s WorkspaceService) executeCanvasRunAsync(ctx context.Context, req CanvasR
 }
 
 func (s WorkspaceService) executeCanvasRunnableNodes(ctx context.Context, req CanvasRunRequest, run *teammodel.Run, plan canvasExecutionPlan, runnableNodes []canvasRunNode, flowRunID uint64, nodeRuns map[string]uint64, existingResults []canvasNodeResult) (map[string]any, error) {
-	if plan.Start.Type == "group" {
+	if plan.Start.Type == "group" || req.ExecutionScope == canvasExecutionScopeStoryboardFrame {
 		return s.executeCanvasGroupRunnableNodes(ctx, req, run, plan, runnableNodes, flowRunID, nodeRuns, existingResults)
 	}
 	if len(runnableNodes) == 0 {
@@ -427,15 +429,21 @@ func (s WorkspaceService) recordCanvasNodeRunResult(ctx context.Context, req Can
 	if runErr != nil {
 		executionStatus = teammodel.RunStatusFail
 	}
-	errorText := ""
+	storedPayload := compactWorkspaceNodePayload(node, payload)
+	nodeRun := firstCanvasNodeResult(storedPayload)
+	errorText := firstText(
+		nodeRun["error"],
+		valueAtPath(nodeRun, "result", "error"),
+		storedPayload["error"],
+		payload["error"],
+	)
 	if runErr != nil {
 		errorText = runErr.Error()
 	}
-	nodeRun := firstCanvasNodeResult(payload)
 	if nodeRunID > 0 {
 		nodeRun["node_run_id"] = nodeRunID
 	}
-	markWorkspaceNodeRun(ctx, nodeRunID, executionStatus, nil, payload, errorText, uint64Value(nodeRun["agent_run_id"]))
+	markWorkspaceNodeRun(ctx, nodeRunID, executionStatus, nil, storedPayload, errorText, uint64Value(nodeRun["agent_run_id"]))
 	assetID, versionID := nodeExecutionAssetRefs(payload)
 	approval := canvasPayloadApproval(payload)
 	nodeExecution := workspaceNodeExecution{
@@ -452,7 +460,7 @@ func (s WorkspaceService) recordCanvasNodeRunResult(ctx context.Context, req Can
 		FunctionKey:    node.FunctionKey,
 		Status:         executionStatus,
 		Input:          map[string]any{"input": req.Input, "node": canvasRunNodeInput(node)},
-		Output:         payload,
+		Output:         storedPayload,
 		Error:          errorText,
 		AssetID:        assetID,
 		VersionID:      versionID,
@@ -477,6 +485,58 @@ func (s WorkspaceService) recordCanvasNodeRunResult(ctx context.Context, req Can
 			AgentRunID:  uint64Value(nodeRun["agent_run_id"]),
 		})
 	}
+}
+
+func compactWorkspaceNodePayload(node canvasRunNode, payload map[string]any) map[string]any {
+	if node.Type != "flow" || payload == nil {
+		return payload
+	}
+	nodeResult := firstCanvasNodeResult(payload)
+	output := firstPresent(nodeResult["output"], payload["output"], valueAtPath(payload, "run", "output"))
+	compactNodeResult := map[string]any{
+		"node_key":         firstText(nodeResult["node_key"], node.ID),
+		"node_type":        firstText(nodeResult["node_type"], node.Type),
+		"node_run_id":      uint64Value(nodeResult["node_run_id"]),
+		"run_id":           uint64Value(nodeResult["run_id"]),
+		"request_id":       firstText(nodeResult["request_id"], payload["request_id"]),
+		"flow_run_id":      firstUint64(uint64Value(nodeResult["flow_run_id"]), uint64Value(payload["flow_run_id"])),
+		"release_id":       firstUint64(uint64Value(nodeResult["release_id"]), uint64Value(payload["release_id"])),
+		"child_run_id":     firstUint64(uint64Value(nodeResult["child_run_id"]), uint64Value(payload["child_run_id"])),
+		"child_request_id": firstText(nodeResult["child_request_id"], payload["child_request_id"]),
+		"status":           firstText(nodeResult["status"], payload["status"]),
+		"error":            firstText(nodeResult["error"], payload["error"]),
+		"output":           output,
+		"asset":            firstPresent(nodeResult["asset"], payload["asset"]),
+		"version":          firstPresent(nodeResult["version"], payload["version"], valueAtPath(payload, "asset", "version")),
+		"persists_result":  boolValue(firstPresent(nodeResult["persists_result"], mapValue(payload["asset"]) != nil || mapValue(payload["version"]) != nil)),
+		"agent_run_id":     uint64Value(nodeResult["agent_run_id"]),
+	}
+	if sourceSignature := firstText(nodeResult["source_signature"]); sourceSignature != "" {
+		compactNodeResult["source_signature"] = sourceSignature
+	}
+	if approval := canvasPayloadApproval(payload); approval != nil {
+		compactNodeResult["approval"] = approval
+	}
+	if interaction := canvasPayloadInteraction(payload); interaction != nil {
+		compactNodeResult["interaction"] = interaction
+	}
+	compact := map[string]any{
+		"run_id":           uint64Value(payload["run_id"]),
+		"request_id":       textValue(payload["request_id"]),
+		"flow_run_id":      uint64Value(payload["flow_run_id"]),
+		"release_id":       uint64Value(payload["release_id"]),
+		"child_run_id":     firstUint64(uint64Value(payload["child_run_id"]), uint64Value(compactNodeResult["child_run_id"])),
+		"child_request_id": firstText(payload["child_request_id"], compactNodeResult["child_request_id"]),
+		"status":           firstText(payload["status"], compactNodeResult["status"]),
+		"error":            firstText(payload["error"], compactNodeResult["error"]),
+		"executed":         intValue(firstPresent(payload["executed"], 1)),
+		"output":           output,
+		"node_results":     []map[string]any{compactNodeResult},
+	}
+	if compact["status"] == teammodel.RunStatusWaiting {
+		compact["pending_node"] = compactNodeResult
+	}
+	return compact
 }
 
 func (s WorkspaceService) runCanvasNode(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, results []canvasNodeResult) (map[string]any, error) {
@@ -505,6 +565,7 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 		return nil, fmt.Errorf("能力节点未配置能力")
 	}
 	input := mergeCanvasPromptInput(req.Input, previousOutput, node.ComposerPrompt)
+	applyCanvasStoryboardReferenceInput(input, node)
 	params := cloneInput(node.ParamValues)
 	input, params, mediaReferences, err := prepareCanvasStoryboardShotInput(
 		ctx,
@@ -512,6 +573,7 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 		req,
 		node,
 		previousOutput,
+		results,
 		input,
 		params,
 		mediaReferences,
@@ -528,6 +590,7 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 			req,
 			node,
 			previousOutput,
+			results,
 			input,
 			params,
 		)
@@ -543,7 +606,7 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 			results,
 			req.Canvas,
 		)
-		composition, err := resolveCanvasVideoComposition(ctx, projectID, compositionDraft)
+		composition, err := resolveCanvasVideoComposition(ctx, run.TeamID, compositionDraft)
 		if err != nil {
 			return nil, err
 		}
@@ -679,24 +742,15 @@ func (s WorkspaceService) waitCanvasFlowNodeResult(ctx context.Context, projectI
 	if requestID == "" && runID == 0 {
 		return started
 	}
-	const attempts = 120
-	const interval = 500 * time.Millisecond
-	for attempt := 0; attempt < attempts; attempt++ {
-		status, err := s.project.RunStatus(ctx, projectID, runID, requestID)
-		if err != nil {
-			break
-		}
-		childRun := mapValue(status["run"])
-		runStatus := textValue(childRun["status"])
-		switch runStatus {
-		case teammodel.RunStatusSuccess, teammodel.RunStatusFail, teammodel.RunStatusCanceled, teammodel.RunStatusWaiting:
-			return s.canvasFlowStatusPayload(ctx, projectID, req, run, node, nodeRunID, status, runStatus)
-		}
-		select {
-		case <-ctx.Done():
-			return started
-		case <-time.After(interval):
-		}
+	status, err := s.project.WaitRunStatus(ctx, projectID, runID, requestID, time.Minute)
+	if err != nil {
+		return started
+	}
+	childRun := mapValue(status["run"])
+	runStatus := textValue(childRun["status"])
+	switch runStatus {
+	case teammodel.RunStatusSuccess, teammodel.RunStatusFail, teammodel.RunStatusCanceled, teammodel.RunStatusWaiting:
+		return s.canvasFlowStatusPayload(ctx, projectID, req, run, node, nodeRunID, status, runStatus)
 	}
 	return started
 }
@@ -704,7 +758,7 @@ func (s WorkspaceService) waitCanvasFlowNodeResult(ctx context.Context, projectI
 func (s WorkspaceService) canvasFlowStatusPayload(ctx context.Context, projectID uint64, req CanvasRunRequest, parentRun *teammodel.Run, node canvasRunNode, parentNodeRunID uint64, status map[string]any, runStatus string) map[string]any {
 	run := mapValue(status["run"])
 	nodeRun := latestWorkspaceChildNodeRun(status)
-	output := firstPresent(valueAtPath(run, "output"), status)
+	output := firstPresent(valueAtPath(run, "output"), map[string]any{})
 	asset, version := latestWorkspaceChildAsset(ctx, projectID, uint64Value(nodeRun["id"]))
 	runID := uint64Value(run["id"])
 	requestID := firstText(run["request_id"], canvasChildRequestID(req.RequestID, node.ID))
@@ -835,29 +889,38 @@ func parseCanvasRunGraph(canvas map[string]any) ([]canvasRunNode, []canvasRunEdg
 	nodes := make([]canvasRunNode, 0, len(nodesRaw))
 	for _, raw := range nodesRaw {
 		row := mapValue(raw)
+		storyboardReferences, err := parseCanvasStoryboardReferences(
+			valueAtPath(row, "composer_draft", "storyboard_references"),
+			mapValue(valueAtPath(row, "composer_draft", "prompt_content")),
+		)
+		if err != nil {
+			return nil, nil, err
+		}
 		node := canvasRunNode{
-			ID:               textValue(row["id"]),
-			Type:             textValue(row["type"]),
-			Title:            textValue(row["title"]),
-			Kind:             textValue(row["kind"]),
-			OutputType:       textValue(row["output_type"]),
-			GroupID:          textValue(row["group_id"]),
-			AssetCateID:      uint64Value(row["asset_cate_id"]),
-			FunctionKey:      textValue(valueAtPath(row, "function_option", "key")),
-			FlowID:           uint64Value(valueAtPath(row, "flow", "id")),
-			PowerID:          uint64Value(valueAtPath(row, "power", "id")),
-			PowerKey:         textValue(valueAtPath(row, "power", "key")),
-			PowerKind:        textValue(valueAtPath(row, "power", "kind")),
-			AgentID:          uint64Value(valueAtPath(row, "role", "agent_id")),
-			RoleID:           uint64Value(valueAtPath(row, "role", "id")),
-			Asset:            mapValue(row["asset"]),
-			AssetID:          uint64Value(valueAtPath(row, "asset", "id")),
-			AssetVersionID:   uint64Value(valueAtPath(row, "asset", "version_id")),
-			ComposerPrompt:   textValue(valueAtPath(row, "composer_draft", "prompt")),
-			VideoComposition: mapValue(valueAtPath(row, "composer_draft", "video_composition")),
-			StoryboardItem:   mapValue(firstPresent(row["storyboard_item"], row["storyboardItem"])),
-			SelectedTarget:   uint64Value(valueAtPath(row, "composer_draft", "selected_target_id")),
-			ParamValues:      mapValue(valueAtPath(row, "composer_draft", "param_values")),
+			ID:                   textValue(row["id"]),
+			Type:                 textValue(row["type"]),
+			Title:                textValue(row["title"]),
+			Kind:                 textValue(row["kind"]),
+			OutputType:           textValue(row["output_type"]),
+			GroupID:              textValue(row["group_id"]),
+			AssetCateID:          uint64Value(row["asset_cate_id"]),
+			FunctionKey:          textValue(valueAtPath(row, "function_option", "key")),
+			FlowID:               uint64Value(valueAtPath(row, "flow", "id")),
+			PowerID:              uint64Value(valueAtPath(row, "power", "id")),
+			PowerKey:             textValue(valueAtPath(row, "power", "key")),
+			PowerKind:            textValue(valueAtPath(row, "power", "kind")),
+			AgentID:              uint64Value(valueAtPath(row, "role", "agent_id")),
+			RoleID:               uint64Value(valueAtPath(row, "role", "id")),
+			Asset:                mapValue(row["asset"]),
+			AssetID:              uint64Value(valueAtPath(row, "asset", "id")),
+			AssetVersionID:       uint64Value(valueAtPath(row, "asset", "version_id")),
+			ComposerPrompt:       textValue(valueAtPath(row, "composer_draft", "prompt")),
+			PromptContent:        mapValue(valueAtPath(row, "composer_draft", "prompt_content")),
+			VideoComposition:     mapValue(valueAtPath(row, "composer_draft", "video_composition")),
+			StoryboardItem:       mapValue(firstPresent(row["storyboard_item"], row["storyboardItem"])),
+			StoryboardReferences: storyboardReferences,
+			SelectedTarget:       uint64Value(valueAtPath(row, "composer_draft", "selected_target_id")),
+			ParamValues:          mapValue(valueAtPath(row, "composer_draft", "param_values")),
 		}
 		if node.Type == "power" && node.PowerKind != "" {
 			node.Kind = node.PowerKind
@@ -1137,6 +1200,7 @@ func canvasPromptReferenceOutput(
 			if err != nil {
 				return nil, nil, err
 			}
+			required := reference.Required || canvasExternalReferenceRequired(node, reference.AssetID)
 			if mediaReference, ok := energoninput.MediaReferenceFromContent(
 				"asset",
 				reference.AssetID,
@@ -1144,7 +1208,10 @@ func canvasPromptReferenceOutput(
 				output,
 				reference.Usage,
 			); ok {
+				mediaReference.Required = required
 				mediaReferences = append(mediaReferences, mediaReference)
+			} else if required {
+				return nil, nil, fmt.Errorf("参考素材“%s”没有可用的媒体内容", firstText(asset["name"], reference.Label))
 			}
 			sources = append(sources, newCanvasGroupOutputSource(
 				fmt.Sprintf("asset:%d", reference.AssetID),
@@ -1190,6 +1257,7 @@ func canvasStoryboardSourceReferences(node map[string]any, results []canvasNodeR
 				firstText(sourceNode["title"], sourceNodeID),
 			)
 		}
+		reference.Required = true
 		result = append(result, reference)
 	}
 	return result, nil
@@ -1247,6 +1315,7 @@ func mergeCanvasPromptReferences(generated []canvasPromptReference, explicit []c
 			if current.Label == "" {
 				current.Label = reference.Label
 			}
+			current.Required = current.Required || reference.Required
 			result = append(result, current)
 			usedExplicit[index] = true
 			matched = true
@@ -1268,6 +1337,7 @@ type canvasPromptReference struct {
 	VersionID uint64
 	Label     string
 	Usage     string
+	Required  bool
 }
 
 func canvasStructuredPromptReferences(content map[string]any) ([]canvasPromptReference, error) {
@@ -1372,6 +1442,23 @@ func lastCanvasOutput(results []canvasNodeResult, nodeID string) any {
 		}
 	}
 	return nil
+}
+
+func canvasReferencedNodeOutput(
+	ctx context.Context,
+	projectID uint64,
+	nodeID string,
+	previousOutput any,
+	results []canvasNodeResult,
+	canvas map[string]any,
+) any {
+	if output := lastCanvasOutput(results, nodeID); output != nil {
+		return output
+	}
+	if output := canvasContextOutputsByNode(previousOutput)[nodeID]; output != nil {
+		return output
+	}
+	return staticCanvasNodeOutput(ctx, projectID, nodeID, canvas)
 }
 
 func staticCanvasNodeOutput(ctx context.Context, projectID uint64, nodeID string, canvas map[string]any) any {
@@ -1664,10 +1751,16 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 	if canvasRunStatus(payload) != teammodel.RunStatusSuccess {
 		return payload, nil
 	}
+	var err error
+	payload, err = attachCanvasStoryboardReferences(payload, node)
+	if err != nil {
+		return payload, err
+	}
 	output := firstPresent(payload["output"], valueAtPath(payload, "result", "output"), valueAtPath(payload, "asset", "version", "content"))
 	if !assetservice.HasContent(output) {
 		return payload, nil
 	}
+	assetContent := workspaceCanvasAssetContent(payload, output)
 	assetCateID := firstUint64(node.AssetCateID, req.AssetCateID)
 	collectionID := uint64(0)
 	collectionSourceNodeKey, collectionName := workspaceCanvasCollection(node, output)
@@ -1715,7 +1808,7 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 		Name:         workspaceCanvasAssetName(node),
 		Kind:         firstText(node.Kind, node.PowerKind, assetmodel.KindRichText),
 		Role:         assetmodel.RoleMaterial,
-		Content:      output,
+		Content:      assetContent,
 	})
 	if err != nil {
 		return payload, err
@@ -1729,6 +1822,25 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 		payload["output"] = output
 	}
 	return payload, nil
+}
+
+func workspaceCanvasAssetContent(payload map[string]any, fallback any) any {
+	if content := firstPresent(
+		valueAtPath(payload, "asset", "version", "content"),
+		valueAtPath(payload, "version", "content"),
+	); content != nil {
+		return content
+	}
+	for _, value := range sliceValue(payload["node_results"]) {
+		result := mapValue(value)
+		if content := firstPresent(
+			valueAtPath(result, "asset", "version", "content"),
+			valueAtPath(result, "version", "content"),
+		); content != nil {
+			return content
+		}
+	}
+	return fallback
 }
 
 func workspaceCanvasCollection(node canvasRunNode, output any) (string, string) {
@@ -1843,6 +1955,9 @@ func canvasNodeRunPayload(req CanvasRunRequest, run *teammodel.Run, node canvasR
 	if approval := canvasPayloadApproval(payload); approval != nil {
 		nodeResult["approval"] = approval
 	}
+	if interaction := canvasPayloadInteraction(payload); interaction != nil {
+		nodeResult["interaction"] = interaction
+	}
 	result := map[string]any{
 		"run_id":           runID,
 		"request_id":       requestID,
@@ -1865,7 +1980,12 @@ func canvasRunSummary(req CanvasRunRequest, status string, run *teammodel.Run, l
 	nodeResults := make([]any, 0, len(results))
 	var pendingNode any
 	for _, result := range results {
-		for _, item := range sliceValue(result.Payload["node_results"]) {
+		currentNodeResult := firstCanvasNodeResult(result.Payload)
+		payload := compactWorkspaceNodePayload(canvasRunNode{
+			ID:   result.NodeKey,
+			Type: textValue(currentNodeResult["node_type"]),
+		}, result.Payload)
+		for _, item := range sliceValue(payload["node_results"]) {
 			nodeResults = append(nodeResults, item)
 			if pendingNode == nil {
 				row := mapValue(item)
@@ -1893,7 +2013,7 @@ func canvasRunSummary(req CanvasRunRequest, status string, run *teammodel.Run, l
 		"release_id":     releaseID,
 		"status":         firstText(status, "success"),
 		"executed":       len(nodeResults),
-		"output":         firstPresent(last["output"], last),
+		"output":         canvasRunResultOutput(last),
 		"node_results":   nodeResults,
 		"execution_plan": plan,
 	}
@@ -1901,6 +2021,14 @@ func canvasRunSummary(req CanvasRunRequest, status string, run *teammodel.Run, l
 		summary["pending_node"] = pendingNode
 	}
 	return summary
+}
+
+func canvasRunResultOutput(payload map[string]any) any {
+	if payload == nil {
+		return map[string]any{}
+	}
+	nodeResult := firstCanvasNodeResult(payload)
+	return firstPresent(nodeResult["output"], payload["output"], payload)
 }
 
 func canvasPayloadApproval(payload map[string]any) map[string]any {
@@ -1924,6 +2052,30 @@ func canvasPayloadApproval(payload map[string]any) map[string]any {
 		uint64Value(valueAtPath(childNodeResult, "result", "approval_id")),
 	); approvalID > 0 {
 		return map[string]any{"id": approvalID}
+	}
+	return nil
+}
+
+func canvasPayloadInteraction(payload map[string]any) map[string]any {
+	return nestedCanvasPayloadMap(payload, "interaction", 0)
+}
+
+func nestedCanvasPayloadMap(payload map[string]any, key string, depth int) map[string]any {
+	if payload == nil || depth > 6 {
+		return nil
+	}
+	if value := mapValue(payload[key]); value != nil {
+		return value
+	}
+	for _, containerKey := range []string{"result", "pending_node"} {
+		if value := nestedCanvasPayloadMap(mapValue(payload[containerKey]), key, depth+1); value != nil {
+			return value
+		}
+	}
+	for _, raw := range sliceValue(payload["node_results"]) {
+		if value := nestedCanvasPayloadMap(mapValue(raw), key, depth+1); value != nil {
+			return value
+		}
 	}
 	return nil
 }

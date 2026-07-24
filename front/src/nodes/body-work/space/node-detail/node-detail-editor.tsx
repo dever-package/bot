@@ -46,6 +46,7 @@ export function NodeDetailEditor({
   storyboardFocus,
   storyboardWorkflowAction,
   onConfirmStoryboard,
+  onReviewStoryboard,
   onCreateStoryboardRevision,
   onChange,
 }: {
@@ -58,6 +59,9 @@ export function NodeDetailEditor({
   storyboardFocus?: StoryboardEditorFocus;
   storyboardWorkflowAction?: StoryboardWorkflowAction;
   onConfirmStoryboard?: (
+    storyboard: StoryboardDocument,
+  ) => void | Promise<void>;
+  onReviewStoryboard?: (
     storyboard: StoryboardDocument,
   ) => void | Promise<void>;
   onCreateStoryboardRevision?: () => void | Promise<void>;
@@ -92,6 +96,7 @@ export function NodeDetailEditor({
           focus={storyboardFocus}
           workflowAction={storyboardWorkflowAction}
           onConfirm={onConfirmStoryboard}
+          onReview={onReviewStoryboard}
           onCreateRevision={onCreateStoryboardRevision}
           onChange={(storyboard) =>
             onChange(nodeDetailContentWithValue(content, storyboard))

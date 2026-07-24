@@ -26,6 +26,7 @@ type WorkbenchRoleBinding struct {
 	RoleType        string
 	AgentID         uint64
 	AgentKey        string
+	OpeningEnabled  bool
 	Name            string
 	Assignment      string
 }
@@ -90,13 +91,14 @@ func (s Service) WorkbenchCatalog(ctx context.Context, teamID uint64) (map[strin
 			continue
 		}
 		roles = append(roles, map[string]any{
-			"id":         role.ID,
-			"name":       role.Name,
-			"role_type":  role.RoleType,
-			"assignment": role.Assignment,
-			"agent_id":   agent.ID,
-			"agent_key":  agent.Key,
-			"agent_name": agent.Name,
+			"id":              role.ID,
+			"name":            role.Name,
+			"role_type":       role.RoleType,
+			"assignment":      role.Assignment,
+			"agent_id":        agent.ID,
+			"agent_key":       agent.Key,
+			"agent_name":      agent.Name,
+			"opening_enabled": agent.OpeningEnabled,
 		})
 	}
 	return map[string]any{
@@ -170,7 +172,8 @@ func (s Service) ResolveWorkbenchRole(ctx context.Context, teamID uint64, roleID
 		return WorkbenchRoleBinding{
 			TeamID: graph.Team.ID, TeamName: graph.Team.Name, TeamDescription: graph.Team.Description,
 			ReleaseID: release.ID, RoleID: role.ID, RoleType: role.RoleType,
-			AgentID: agent.ID, AgentKey: agent.Key, Name: role.Name, Assignment: role.Assignment,
+			AgentID: agent.ID, AgentKey: agent.Key, OpeningEnabled: agent.OpeningEnabled,
+			Name: role.Name, Assignment: role.Assignment,
 		}, nil
 	}
 	return WorkbenchRoleBinding{}, fmt.Errorf("当前团队发布版本中不存在该对话角色")

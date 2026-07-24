@@ -26,6 +26,7 @@ export type AgentChatSession = {
 export type AgentChatMessageRecord = {
   id: number;
   role: AgentChatRole;
+  kind: string;
   text: string;
   content?: import("./reference").ReferenceContent;
   output: AgentChatOutput;
@@ -42,6 +43,7 @@ export type AgentChatSessionPayload = {
 
 export type AgentChatSessionListPayload = {
   sessions: AgentChatSession[];
+  hasMore: boolean;
 };
 
 export type AgentChatApi = {
@@ -125,7 +127,12 @@ export async function listAgentChatSessions(
   const sessions = rows
     .map(normalizeSession)
     .filter((session): session is AgentChatSession => Boolean(session));
-  return { sessions };
+  const requestedLimit = scope.limit || 20;
+  const hasMore =
+    data.has_more == null
+      ? sessions.length >= requestedLimit
+      : Boolean(data.has_more);
+  return { sessions, hasMore };
 }
 
 export async function loadAgentChatSessionState(
@@ -244,6 +251,7 @@ function normalizeMessages(value: unknown): AgentChatMessageRecord[] {
       return {
         id: Number(row.id || 0),
         role,
+        kind: textValue(row.kind) || "chat",
         text: textValue(row.text),
         content: normalizeReferenceContent(row.content),
         output: normalizeAgentChatOutput(row.output),

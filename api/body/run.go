@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/shemic/dever/server"
@@ -105,12 +106,16 @@ func (Run) PostRole(c *server.Context) error {
 }
 
 func (Run) GetStatus(c *server.Context) error {
-	data, err := projectRunner.RunStatus(
-		c.Context(),
-		botapi.QueryUint64(c, "project_id", "projectId"),
-		botapi.QueryUint64(c, "run_id", "runId"),
-		botapi.QueryText(c, "request_id", "requestId"),
-	)
+	projectID := botapi.QueryUint64(c, "project_id", "projectId")
+	runID := botapi.QueryUint64(c, "run_id", "runId")
+	requestID := botapi.QueryText(c, "request_id", "requestId")
+	var data map[string]any
+	var err error
+	if strings.EqualFold(strings.TrimSpace(botapi.QueryText(c, "view")), "detail") {
+		data, err = projectRunner.RunDetail(c.Context(), projectID, runID, requestID)
+	} else {
+		data, err = projectRunner.RunStatus(c.Context(), projectID, runID, requestID)
+	}
 	return botapi.WriteJSON(c, data, err)
 }
 

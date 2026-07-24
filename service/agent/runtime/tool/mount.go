@@ -23,6 +23,7 @@ type MountRequest struct {
 	References     []runtimeprovider.MediaReference
 	Billing        botprotocol.BillingContext
 	EnableDocument bool
+	BuiltinOnly    bool
 	Method         string
 	Host           string
 	Path           string
@@ -43,15 +44,11 @@ func (result MountResult) Close() {
 }
 
 func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
-	prepared, err := prepareMount(ctx, request)
-	if err != nil {
-		return MountResult{}, err
-	}
 	tools := []runtimeprovider.Tool{
 		runtimeprovider.AskUserTool(),
 		runtimeprovider.PresentSuggestionsTool(),
 	}
-	if request.Agent.Key == agentmodel.SkillInstallerAgentKey {
+	if !request.BuiltinOnly && request.Agent.Key == agentmodel.SkillInstallerAgentKey {
 		tools = append(tools, runtimeprovider.SkillInstallPlanTool())
 	}
 	registry, err := NewRegistry(tools...)
@@ -59,6 +56,13 @@ func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
 		return MountResult{}, err
 	}
 	result := MountResult{Registry: registry}
+	if request.BuiltinOnly {
+		return result, nil
+	}
+	prepared, err := prepareMount(ctx, request)
+	if err != nil {
+		return MountResult{}, err
+	}
 
 	if len(prepared.knowledgeBases) > 0 {
 		knowledgeTools := runtimeprovider.KnowledgeTools(prepared.knowledgeBases)

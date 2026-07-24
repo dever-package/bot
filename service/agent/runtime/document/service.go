@@ -215,7 +215,7 @@ func (s Service) MarkBlockReady(ctx context.Context, blockID uint64, artifacts [
 func (s Service) MarkBlockFailed(ctx context.Context, blockID uint64, message string) (*agentmodel.DocumentBlock, error) {
 	block := s.repository.updateBlock(ctx, blockID, map[string]any{
 		"status": agentmodel.DocumentBlockStatusFailed,
-		"meta":   encodeJSON(map[string]any{"error": publicError(message)}, "{}"),
+		"meta":   encodeJSON(map[string]any{"error": publicError(message, "素材生成失败")}, "{}"),
 	})
 	if block == nil {
 		return nil, fmt.Errorf("更新素材失败状态失败")
@@ -247,7 +247,9 @@ func (s Service) MarkContentComplete(ctx context.Context, documentID uint64) (*a
 		return s.RefreshStatus(ctx, documentID)
 	}
 	if document.Status == agentmodel.DocumentStatusWriting {
-		document = s.repository.update(ctx, documentID, map[string]any{"status": agentmodel.DocumentStatusGenerating})
+		document, _ = s.repository.updateIfStatus(ctx, documentID, document.Status, map[string]any{
+			"status": agentmodel.DocumentStatusGenerating,
+		})
 	}
 	if document == nil {
 		return nil, fmt.Errorf("更新智能体文档状态失败")
@@ -257,6 +259,27 @@ func (s Service) MarkContentComplete(ctx context.Context, documentID uint64) (*a
 		"status":      document.Status,
 	})
 	return s.RefreshStatus(ctx, documentID)
+}
+
+func (s Service) MarkFailed(ctx context.Context, documentID uint64, message string) (*agentmodel.Document, error) {
+	current := s.repository.find(ctx, documentID)
+	if current == nil {
+		return nil, fmt.Errorf("智能体文档不存在")
+	}
+	meta := decodeMap(current.Meta)
+	meta["error"] = publicError(message, "文档生成失败，请重新生成")
+	document := s.repository.update(ctx, documentID, map[string]any{
+		"status":       agentmodel.DocumentStatusFailed,
+		"completed_at": time.Now(),
+		"meta":         encodeJSON(meta, "{}"),
+	})
+	if document == nil {
+		return nil, fmt.Errorf("标记智能体文档失败状态失败")
+	}
+	if err := s.publishDocumentComplete(ctx, *document); err != nil {
+		return nil, err
+	}
+	return document, nil
 }
 
 func (s Service) RefreshStatus(ctx context.Context, documentID uint64) (*agentmodel.Document, error) {
@@ -281,8 +304,13 @@ func (s Service) RefreshStatus(ctx context.Context, documentID uint64) (*agentmo
 		}
 	}
 	if document.Status == agentmodel.DocumentStatusWriting {
-		updated := s.repository.update(ctx, documentID, map[string]any{"pending_job_count": pending})
+		updated, _ := s.repository.updateIfStatus(ctx, documentID, document.Status, map[string]any{
+			"pending_job_count": pending,
+		})
 		return updated, nil
+	}
+	if document.Status == agentmodel.DocumentStatusFailed {
+		return document, nil
 	}
 	if isTerminalDocumentStatus(document.Status) && pending == 0 {
 		return document, s.publishDocumentComplete(ctx, *document)
@@ -295,22 +323,21 @@ func (s Service) RefreshStatus(ctx context.Context, documentID uint64) (*agentmo
 	} else if failed > 0 {
 		status = agentmodel.DocumentStatusPartialFailed
 	}
-	if status == agentmodel.DocumentStatusReady || status == agentmodel.DocumentStatusPartialFailed {
-		projected := *document
-		projected.Status = status
-		if err := s.publishDocumentComplete(ctx, projected); err != nil {
-			// Keep the durable document non-terminal so periodic reconciliation can
-			// retry a terminal event that did not reach the shared stream.
-			return document, err
-		}
-	}
-	updated := s.repository.update(ctx, documentID, map[string]any{
+	updated, changed := s.repository.updateIfStatus(ctx, documentID, document.Status, map[string]any{
 		"status":            status,
 		"pending_job_count": pending,
 		"completed_at":      completedAt,
 	})
 	if updated == nil {
 		return nil, fmt.Errorf("更新智能体文档状态失败")
+	}
+	if !changed {
+		return updated, nil
+	}
+	if status == agentmodel.DocumentStatusReady || status == agentmodel.DocumentStatusPartialFailed {
+		if err := s.publishDocumentComplete(ctx, *updated); err != nil {
+			return updated, err
+		}
 	}
 	return updated, nil
 }
@@ -323,7 +350,9 @@ func (s Service) publishDocumentComplete(ctx context.Context, document agentmode
 }
 
 func isTerminalDocumentStatus(status string) bool {
-	return status == agentmodel.DocumentStatusReady || status == agentmodel.DocumentStatusPartialFailed
+	return status == agentmodel.DocumentStatusReady ||
+		status == agentmodel.DocumentStatusPartialFailed ||
+		status == agentmodel.DocumentStatusFailed
 }
 
 func (s Service) Find(ctx context.Context, id uint64) *agentmodel.Document {
@@ -415,6 +444,6 @@ func mergeTextStreamMeta(current string, values map[string]any, revision int) ma
 	return meta
 }
 
-func publicError(_ string) string {
-	return "素材生成失败"
+func publicError(_ string, fallback string) string {
+	return strings.TrimSpace(fallback)
 }

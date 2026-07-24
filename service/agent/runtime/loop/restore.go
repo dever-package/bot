@@ -52,12 +52,14 @@ func (s Service) Execute(ctx context.Context, lease runtimequeue.Lease) error {
 	}
 	snapshot, err := decodeSnapshot(row.Snapshot)
 	if err != nil {
-		s.failClaimedRun(row, workerID, err)
+		mode, _ := detectRunFailureMode(prepareCtx, row)
+		s.failClaimedRun(row, workerID, err, mode)
 		return err
 	}
+	failureMode := runFailureModeFromSnapshot(snapshot)
 	checkpoint, err := decodeCheckpoint(row.Checkpoint)
 	if err != nil {
-		s.failClaimedRun(row, workerID, err)
+		s.failClaimedRun(row, workerID, err, failureMode)
 		return err
 	}
 	history := append(append([]any(nil), snapshot.History...), checkpoint.HistoryDelta...)
@@ -93,13 +95,15 @@ func (s Service) Execute(ctx context.Context, lease runtimequeue.Lease) error {
 		scope:              runtimescope.RestoreSession(prepareCtx, snapshot.Scope, snapshot.SessionID),
 		billing:            snapshot.Billing,
 		checkpoint:         checkpoint,
+		documentID:         snapshot.DocumentID,
+		documentWriter:     snapshot.DocumentWriter,
 	}
 	execution.billing.RunID = row.ID
 	if execution.billing.SessionID == 0 {
 		execution.billing.SessionID = snapshot.SessionID
 	}
 	prepareCancel()
-	controller := s.runs.Start(row.RequestID, context.Background(), remainingChatTimeout(row.StartedAt, snapshot.Agent.TimeoutSeconds))
+	controller := s.runs.Start(row.RequestID, ctx, remainingChatTimeout(row.StartedAt, snapshot.Agent.TimeoutSeconds))
 	heartbeatDone := make(chan struct{})
 	runtimeasync.Start("智能体运行租约心跳", func() {
 		s.heartbeatRun(controller, execution, heartbeatDone)
@@ -113,7 +117,7 @@ func (s Service) Execute(ctx context.Context, lease runtimequeue.Lease) error {
 	if err := s.mountExecutionTools(controller.Context(), &execution, nil, checkpoint.LoadedSkills); err != nil {
 		controller.Stop("fail")
 		s.runs.Remove(row.RequestID)
-		s.failClaimedRun(row, workerID, err)
+		s.failClaimedRun(row, workerID, err, failureMode)
 		return err
 	}
 	if row.Attempt > 1 {
@@ -260,7 +264,31 @@ func (s Service) stopRunForLease(controller *runController, reason string) {
 	_ = s.gateway.StopStream(stopCtx, childRequestID)
 }
 
-func (s Service) failClaimedRun(row agentmodel.Run, workerID string, runErr error) {
+type runFailureMode struct {
+	persistChat    bool
+	documentWriter bool
+}
+
+func runFailureModeFromSnapshot(snapshot executionSnapshot) runFailureMode {
+	return runFailureMode{
+		persistChat:    snapshot.PersistChat,
+		documentWriter: snapshot.DocumentWriter,
+	}
+}
+
+func detectRunFailureMode(ctx context.Context, row agentmodel.Run) (mode runFailureMode, err error) {
+	input := map[string]any{}
+	if json.Unmarshal([]byte(row.Input), &input) == nil {
+		mode.documentWriter = runtimeEventType(input) == documentWriterStartedEvent
+	}
+	defer repositoryError(&err)
+	mode.persistChat = agentmodel.NewMessageModel().Find(ctx, map[string]any{
+		"role": "assistant", "request_id": strings.TrimSpace(row.RequestID),
+	}) != nil
+	return mode, nil
+}
+
+func (s Service) failClaimedRun(row agentmodel.Run, workerID string, runErr error, mode runFailureMode) {
 	message := "恢复智能体运行失败"
 	if runErr != nil {
 		message = runErr.Error()
@@ -271,7 +299,10 @@ func (s Service) failClaimedRun(row agentmodel.Run, workerID string, runErr erro
 		"text":  "",
 		"error": message,
 	}
-	execution := execution{runID: row.ID, version: row.Version, requestID: row.RequestID}
+	execution := execution{
+		runID: row.ID, version: row.Version, requestID: row.RequestID,
+		persistChat: mode.persistChat, documentWriter: mode.documentWriter,
+	}
 	resultCtx, resultCancel := maintenanceContext()
 	resultErr := s.writeExecutionResult(resultCtx, execution, output, message, botprotocol.ResponseStatusFail)
 	resultCancel()
@@ -282,7 +313,7 @@ func (s Service) failClaimedRun(row agentmodel.Run, workerID string, runErr erro
 		return
 	}
 	finishCtx, finishCancel := maintenanceContext()
-	finished, finishErr := s.finishRunAndChat(finishCtx, row.ID, workerID, row.SessionID > 0, runResult{
+	finished, finishErr := s.finishRunAndChat(finishCtx, row.ID, workerID, mode.persistChat, runResult{
 		Status:     runStatusFail,
 		Output:     encodeJSON(output, "{}"),
 		Error:      message,

@@ -1,5 +1,7 @@
 package agent
 
+const defaultAgentPrompt = `{"type":"doc","content":[{"type":"paragraph","attrs":{"textAlign":null,"lineHeight":null,"color":null,"backgroundColor":null,"fontFamily":null,"fontSize":null,"textIndent":null,"marginTop":null,"marginRight":null,"marginBottom":null,"marginLeft":null,"paddingTop":null,"paddingRight":null,"paddingBottom":null,"paddingLeft":null,"border":null,"borderTop":null,"borderRight":null,"borderBottom":null,"borderLeft":null,"borderRadius":null,"width":null,"maxWidth":null},"content":[{"type":"text","text":"生成小红书房产图文，带有表情和格式的，当用户未提供信息时，需要先用ask_user工具来收集信息，并用document工具来生成图文。内容格式：先生成正文，然后再根据正文内容生成图片。"}]},{"type":"paragraph","attrs":{"textAlign":null,"lineHeight":null,"color":null,"backgroundColor":null,"fontFamily":null,"fontSize":null,"textIndent":null,"marginTop":null,"marginRight":null,"marginBottom":null,"marginLeft":null,"paddingTop":null,"paddingRight":null,"paddingBottom":null,"paddingLeft":null,"border":null,"borderTop":null,"borderRight":null,"borderBottom":null,"borderLeft":null,"borderRadius":null,"width":null,"maxWidth":null},"content":[{"type":"text","text":"\n\n"}]}]}`
+
 const frontAssistantPrompt = `你是当前 package/front 后台页面的 AI 助理，帮助用户理解页面、生成内容、补全表单和检查配置问题。
 
 只依据用户最新输入、page_context、permission_context、task 和 reference_files 工作，优先处理当前弹窗、抽屉或最近激活区域。不要猜测页面不存在的字段、按钮、接口、权限或数据。

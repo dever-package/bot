@@ -68,24 +68,92 @@ func (s Service) RequireContinuationTarget(
 // RequireCurrentReference resolves the asset's current version. The supplied
 // version is a client snapshot, not an immutable version pin.
 func (s Service) RequireCurrentReference(ctx context.Context, teamID uint64, assetID uint64, _ uint64) (CurrentReference, error) {
-	asset, err := s.requireTeamAsset(ctx, teamID, assetID)
+	if teamID == 0 || assetID == 0 {
+		return CurrentReference{}, fmt.Errorf("团队和资产不能为空")
+	}
+	resolved, err := s.RequireCurrentReferences(ctx, teamID, []uint64{assetID})
 	if err != nil {
 		return CurrentReference{}, err
 	}
-	if asset.Status != assetmodel.StatusCurrent {
-		return CurrentReference{}, fmt.Errorf("资产已不可用")
+	current, ok := resolved[assetID]
+	if !ok {
+		return CurrentReference{}, fmt.Errorf("资产不存在或不属于当前团队")
 	}
-	if asset.Kind == assetmodel.KindCollection {
-		return CurrentReference{}, fmt.Errorf("资产集合不能直接作为引用")
+	return current, nil
+}
+
+// RequireCurrentReferences resolves a set of current asset versions with one
+// team-scope lookup and batched asset/version reads.
+func (s Service) RequireCurrentReferences(
+	ctx context.Context,
+	teamID uint64,
+	assetIDs []uint64,
+) (map[uint64]CurrentReference, error) {
+	if teamID == 0 {
+		return nil, fmt.Errorf("团队不能为空")
 	}
-	if asset.VersionID == 0 {
-		return CurrentReference{}, fmt.Errorf("资产当前版本不可用")
+	uniqueIDs := distinctAssetReferenceIDs(assetIDs)
+	result := make(map[uint64]CurrentReference, len(uniqueIDs))
+	if len(uniqueIDs) == 0 {
+		return result, nil
 	}
-	version := s.FindVersion(ctx, asset.VersionID)
-	if version == nil || version.AssetID != asset.ID {
-		return CurrentReference{}, fmt.Errorf("资产当前版本不存在")
+	scope, err := resolveTeamAssetScope(ctx, teamID)
+	if err != nil {
+		return nil, err
 	}
-	return CurrentReference{Asset: *asset, Version: *version, Content: jsonValue(version.Content)}, nil
+	rows := assetmodel.NewAssetModel().Select(ctx, map[string]any{"id": uniqueIDs})
+	assets := make(map[uint64]*assetmodel.Asset, len(rows))
+	for _, asset := range rows {
+		if asset != nil {
+			assets[asset.ID] = asset
+		}
+	}
+	orderedAssets := make([]*assetmodel.Asset, 0, len(uniqueIDs))
+	for _, assetID := range uniqueIDs {
+		asset := assets[assetID]
+		if !scope.contains(asset) {
+			return nil, fmt.Errorf("资产不存在或不属于当前团队")
+		}
+		if asset.Status != assetmodel.StatusCurrent {
+			return nil, fmt.Errorf("资产已不可用")
+		}
+		if asset.Kind == assetmodel.KindCollection {
+			return nil, fmt.Errorf("资产集合不能直接作为引用")
+		}
+		if asset.VersionID == 0 {
+			return nil, fmt.Errorf("资产当前版本不可用")
+		}
+		orderedAssets = append(orderedAssets, asset)
+	}
+	versions := currentVersionsByID(ctx, orderedAssets, QueryContentFull)
+	for _, asset := range orderedAssets {
+		version := versions[asset.VersionID]
+		if version == nil || version.AssetID != asset.ID {
+			return nil, fmt.Errorf("资产当前版本不存在")
+		}
+		result[asset.ID] = CurrentReference{
+			Asset:   *asset,
+			Version: *version,
+			Content: jsonValue(version.Content),
+		}
+	}
+	return result, nil
+}
+
+func distinctAssetReferenceIDs(assetIDs []uint64) []uint64 {
+	result := make([]uint64, 0, len(assetIDs))
+	seen := make(map[uint64]struct{}, len(assetIDs))
+	for _, assetID := range assetIDs {
+		if assetID == 0 {
+			continue
+		}
+		if _, exists := seen[assetID]; exists {
+			continue
+		}
+		seen[assetID] = struct{}{}
+		result = append(result, assetID)
+	}
+	return result
 }
 
 func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, error) {

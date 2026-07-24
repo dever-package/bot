@@ -314,7 +314,7 @@ func (s WorkspaceService) executeCanvasGroupNodeBatch(
 			}
 			dependencyFailed := false
 			dependenciesReady := true
-			for _, upstreamID := range plan.Incoming[node.ID] {
+			for _, upstreamID := range canvasRunnableNodeDependencyIDs(req, plan, node) {
 				if _, tracked := nodeByID[upstreamID]; !tracked {
 					continue
 				}
@@ -355,6 +355,9 @@ func (s WorkspaceService) executeCanvasGroupNodeBatch(
 				continue
 			}
 			break
+		}
+		if req.ExecutionScope == canvasExecutionScopeStoryboardFrame {
+			ready = interleaveCanvasStoryboardReadyNodes(ready)
 		}
 
 		snapshot := append([]canvasNodeResult{}, results...)

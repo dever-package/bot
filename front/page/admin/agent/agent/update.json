@@ -246,12 +246,25 @@
         }
       },
       {
+        "type": "form-switch",
+        "name": "主动开场",
+        "value": "form.opening_enabled",
+        "mode": "form",
+        "info": "开启后，用户进入全新会话时由智能体主动发出第一条消息；开场内容仍遵循下方智能体设定。",
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "setting",
+          "trueValue": true,
+          "falseValue": false
+        }
+      },
+      {
         "type": "form-editor",
         "name": "设定",
         "placeholder": "填写智能体的身份、职责、边界和工作要求。",
         "value": "form.prompt",
         "mode": "form",
-        "info": "定义该智能体的身份、流程、知识使用要求和输出规则，是唯一的自然语言业务设定。",
+        "info": "定义身份、流程和输出规则。可要求调用已挂载工具：基础 ask_user / present_suggestions，普通会话 compose_document；知识库 open_knowledge_init / list_knowledge_files / search_knowledge_files / read_knowledge_file；技能 search_skills / load_skill；能力 power_<标识>。",
         "meta": {
           "formLayout": "vertical",
           "tab": "setting",
@@ -375,6 +388,7 @@
       "knowledge_cate_id": "",
       "skill_pack_id": "",
       "memory_enabled": false,
+      "opening_enabled": false,
       "params": [],
       "temperature": 0.7,
       "timeout_seconds": 3600,

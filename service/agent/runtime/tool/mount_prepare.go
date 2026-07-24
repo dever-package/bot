@@ -71,6 +71,9 @@ func WarmMount(ctx context.Context, request MountRequest) {
 // The durable worker may outlive that request and should still reuse the
 // preparation result instead of loading knowledge, skills and powers again.
 func WarmMountAsync(request MountRequest) {
+	if request.BuiltinOnly {
+		return
+	}
 	cacheKey := mountPreparationKey(request)
 	if cacheKey == "" {
 		return

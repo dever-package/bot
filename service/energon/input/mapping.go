@@ -225,11 +225,21 @@ func allowsRuntimePromptlessContinuation(req *botprotocol.ShemicRequest, param b
 	if !strings.EqualFold(strings.TrimSpace(req.PromptOwner), botprotocol.PromptOwnerAgentRuntime) {
 		return false
 	}
-	if len(req.History) == 0 {
+	event, ok := req.Input["runtime_event"].(map[string]any)
+	if !ok {
 		return false
 	}
-	event, ok := req.Input["runtime_event"].(map[string]any)
-	return ok && strings.TrimSpace(botprotocol.AsText(event["type"])) != ""
+	eventType := strings.ToLower(strings.TrimSpace(botprotocol.AsText(event["type"])))
+	if eventType == "" {
+		return false
+	}
+	if len(req.History) > 0 || eventType == "session_started" {
+		return true
+	}
+	// A document writer starts from a normalized runtime brief instead of a raw
+	// chat prompt. Requiring that brief keeps other promptless events rejected.
+	return eventType == "document_writer_started" &&
+		strings.TrimSpace(botprotocol.AsText(event["content_requirements"])) != ""
 }
 
 func inputParamLabels(ctx context.Context, repo Repository, powerID uint64, serviceID uint64) map[string]string {

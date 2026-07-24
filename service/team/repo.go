@@ -314,11 +314,12 @@ func (Repo) ListAgents(ctx context.Context) []AgentOption {
 			continue
 		}
 		result = append(result, AgentOption{
-			ID:     row.ID,
-			CateID: row.CateID,
-			Name:   strings.TrimSpace(row.Name),
-			Key:    strings.TrimSpace(row.Key),
-			Sort:   row.Sort,
+			ID:             row.ID,
+			CateID:         row.CateID,
+			Name:           strings.TrimSpace(row.Name),
+			Key:            strings.TrimSpace(row.Key),
+			OpeningEnabled: row.OpeningEnabled,
+			Sort:           row.Sort,
 		})
 	}
 	sort.SliceStable(result, func(i, j int) bool {
@@ -993,6 +994,20 @@ func (Repo) ListFlowRuns(ctx context.Context, runID uint64) []teammodel.FlowRun 
 	return result
 }
 
+func (Repo) ListFlowRunSummaries(ctx context.Context, runID uint64) []teammodel.FlowRun {
+	rows := teammodel.NewFlowRunModel().Select(ctx, map[string]any{"run_id": runID}, map[string]any{
+		"field": "main.id,main.run_id,main.request_id,main.project_id,main.team_id,main.flow_id,main.error,main.status,main.started_at,main.finished_at,main.created_at,main.updated_at",
+		"order": "main.id asc",
+	})
+	result := make([]teammodel.FlowRun, 0, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			result = append(result, *row)
+		}
+	}
+	return result
+}
+
 func (Repo) UpdateFlowRun(ctx context.Context, id uint64, record map[string]any) {
 	if id == 0 || len(record) == 0 {
 		return
@@ -1077,6 +1092,20 @@ func (Repo) FindNodeRunByNode(ctx context.Context, flowRunID uint64, nodeID uint
 
 func (Repo) ListNodeRuns(ctx context.Context, runID uint64) []teammodel.NodeRun {
 	rows := teammodel.NewNodeRunModel().Select(ctx, map[string]any{"run_id": runID})
+	result := make([]teammodel.NodeRun, 0, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			result = append(result, *row)
+		}
+	}
+	return result
+}
+
+func (Repo) ListNodeRunSummaries(ctx context.Context, runID uint64) []teammodel.NodeRun {
+	rows := teammodel.NewNodeRunModel().Select(ctx, map[string]any{"run_id": runID}, map[string]any{
+		"field": "main.id,main.run_id,main.flow_run_id,main.request_id,main.project_id,main.team_id,main.flow_id,main.node_id,main.node_key,main.node_type,main.error,main.status,main.agent_run_id,main.agent_session_id,main.child_request_id,main.interaction,main.started_at,main.finished_at,main.created_at,main.updated_at",
+		"order": "main.id asc",
+	})
 	result := make([]teammodel.NodeRun, 0, len(rows))
 	for _, row := range rows {
 		if row != nil {
@@ -1201,6 +1230,20 @@ func (Repo) FindPendingApprovalByNodeRun(ctx context.Context, nodeRunID uint64) 
 
 func (Repo) ListApprovals(ctx context.Context, runID uint64) []teammodel.Approval {
 	rows := teammodel.NewApprovalModel().Select(ctx, map[string]any{"run_id": runID})
+	result := make([]teammodel.Approval, 0, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			result = append(result, *row)
+		}
+	}
+	return result
+}
+
+func (Repo) ListPendingApprovals(ctx context.Context, runID uint64) []teammodel.Approval {
+	rows := teammodel.NewApprovalModel().Select(ctx, map[string]any{
+		"run_id": runID,
+		"status": teammodel.RunStatusPending,
+	})
 	result := make([]teammodel.Approval, 0, len(rows))
 	for _, row := range rows {
 		if row != nil {

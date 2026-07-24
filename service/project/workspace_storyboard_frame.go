@@ -6,11 +6,13 @@ import (
 	"strings"
 
 	assetservice "github.com/dever-package/bot/service/asset"
+	energoninput "github.com/dever-package/bot/service/energon/input"
+	teamservice "github.com/dever-package/bot/service/team"
 )
 
 const canvasExecutionScopeStoryboardFrame = "storyboard_frame"
 
-func prepareCanvasExecutionScope(ctx context.Context, projectID uint64, req CanvasRunRequest) (CanvasRunRequest, error) {
+func (s WorkspaceService) prepareCanvasExecutionScope(ctx context.Context, projectID uint64, req CanvasRunRequest) (CanvasRunRequest, error) {
 	scope := strings.ToLower(strings.TrimSpace(req.ExecutionScope))
 	if scope == "" {
 		return req, nil
@@ -19,10 +21,10 @@ func prepareCanvasExecutionScope(ctx context.Context, projectID uint64, req Canv
 		return req, fmt.Errorf("不支持的画布执行范围")
 	}
 	req.ExecutionScope = scope
-	return prepareCanvasStoryboardFrameRun(ctx, projectID, req)
+	return s.prepareCanvasStoryboardFrameRun(ctx, projectID, req)
 }
 
-func prepareCanvasStoryboardFrameRun(ctx context.Context, projectID uint64, req CanvasRunRequest) (CanvasRunRequest, error) {
+func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, projectID uint64, req CanvasRunRequest) (CanvasRunRequest, error) {
 	sourceNodeID := strings.TrimSpace(req.StartNodeID)
 	nodes, _, err := parseCanvasRunGraph(req.Canvas)
 	if err != nil {
@@ -96,6 +98,9 @@ func prepareCanvasStoryboardFrameRun(ctx context.Context, projectID uint64, req 
 			}
 		}
 	}
+	if err := s.preflightCanvasStoryboardFrame(ctx, projectID, req, required, nodesByID, selected); err != nil {
+		return req, err
+	}
 
 	runtimeCanvas, err := canvasStoryboardFrameRuntimeCanvas(
 		req.Canvas,
@@ -112,6 +117,128 @@ func prepareCanvasStoryboardFrameRun(ctx context.Context, projectID uint64, req 
 	req.SingleNode = false
 	req.Canvas = runtimeCanvas
 	return req, nil
+}
+
+func (s WorkspaceService) preflightCanvasStoryboardFrame(
+	ctx context.Context,
+	projectID uint64,
+	req CanvasRunRequest,
+	nodes []canvasRunNode,
+	nodesByID map[string]canvasRunNode,
+	selected map[string]bool,
+) error {
+	for _, node := range nodes {
+		if !selected[node.ID] || node.Type != "power" || canvasStoryboardItemType(node) == "video_compose" {
+			continue
+		}
+		if node.PowerID == 0 && node.PowerKey == "" {
+			continue
+		}
+		references, err := s.canvasStoryboardPreflightMediaReferences(ctx, projectID, node, nodesByID)
+		if err != nil {
+			return fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(node), err)
+		}
+		input := mergeCanvasPromptInput(req.Input, nil, node.ComposerPrompt)
+		applyCanvasStoryboardReferenceInput(input, node)
+		params := cloneInput(node.ParamValues)
+		if canvasContextText(input["prompt"]) != "" && canvasContextText(params["prompt"]) == "" {
+			delete(params, "prompt")
+		}
+		if err := s.project.PreflightCanvasPower(ctx, projectID, teamservice.CanvasPowerRunRequest{
+			FlowID:          node.FlowID,
+			AssetCateID:     firstUint64(node.AssetCateID, req.AssetCateID),
+			NodeKey:         node.ID,
+			NodeName:        node.Title,
+			Kind:            node.Kind,
+			PowerID:         node.PowerID,
+			PowerKey:        node.PowerKey,
+			SourceTargetID:  node.SelectedTarget,
+			Input:           input,
+			Params:          params,
+			MediaReferences: references,
+		}); err != nil {
+			return fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(node), err)
+		}
+	}
+	return nil
+}
+
+func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
+	ctx context.Context,
+	projectID uint64,
+	node canvasRunNode,
+	nodesByID map[string]canvasRunNode,
+) ([]energoninput.MediaReference, error) {
+	result := make([]energoninput.MediaReference, 0)
+	used := map[string]bool{}
+	nextID := uint64(1) << 63
+	appendReference := func(kind string, referenceID uint64, usage string, required bool) {
+		kind = strings.ToLower(strings.TrimSpace(kind))
+		if kind != "image" && kind != "video" && kind != "audio" {
+			return
+		}
+		if referenceID == 0 {
+			referenceID = nextID
+			nextID++
+		}
+		key := fmt.Sprintf("%s:%d:%s", kind, referenceID, strings.TrimSpace(usage))
+		if used[key] {
+			return
+		}
+		used[key] = true
+		result = append(result, energoninput.MediaReference{
+			ReferenceType: "preflight",
+			ReferenceID:   referenceID,
+			Kind:          kind,
+			URL:           fmt.Sprintf("https://preflight.invalid/%d.%s", referenceID, kind),
+			Usage:         strings.TrimSpace(usage),
+			StrictUsage:   strings.TrimSpace(usage) != "",
+			Required:      required,
+		})
+	}
+
+	for _, sourceID := range canvasStringList(firstPresent(
+		node.StoryboardItem["reference_node_ids"],
+		node.StoryboardItem["referenceNodeIds"],
+	)) {
+		source, exists := nodesByID[sourceID]
+		if !exists {
+			return nil, fmt.Errorf("前置参考节点不存在: %s", sourceID)
+		}
+		appendReference(source.Kind, 0, "", true)
+	}
+	externalAssetIDs := map[uint64]bool{}
+	for _, value := range sliceValue(firstPresent(
+		node.StoryboardItem["external_reference_asset_ids"],
+		node.StoryboardItem["externalReferenceAssetIds"],
+	)) {
+		if assetID := uint64Value(value); assetID > 0 {
+			externalAssetIDs[assetID] = true
+		}
+	}
+	promptReferences, err := canvasStructuredPromptReferences(node.PromptContent)
+	if err != nil {
+		return nil, err
+	}
+	for _, reference := range promptReferences {
+		asset := s.project.asset.FindProjectAsset(ctx, projectID, reference.AssetID)
+		if asset == nil {
+			return nil, fmt.Errorf("参考资产不存在: %d", reference.AssetID)
+		}
+		appendReference(
+			asset.Kind,
+			reference.AssetID,
+			reference.Usage,
+			reference.Required || externalAssetIDs[reference.AssetID],
+		)
+	}
+	if canvasStoryboardItemType(node) == "shot" && firstText(
+		node.StoryboardItem["continuity_anchor"],
+		node.StoryboardItem["continuityAnchor"],
+	) != "" {
+		appendReference("image", 0, "", true)
+	}
+	return result, nil
 }
 
 func propagateCanvasStoryboardFrameSelection(nodes []canvasRunNode, selected map[string]bool) {
@@ -165,7 +292,7 @@ func canvasStoryboardFrameRuntimeCanvas(
 		"id":          startNodeID,
 		"type":        "function",
 		"title":       "分镜制作区",
-		"subtitle":    "按依赖顺序执行",
+		"subtitle":    "按依赖层级并行执行",
 		"description": "",
 		"x":           0,
 		"y":           0,
@@ -311,6 +438,46 @@ func canvasStoryboardSourceIDs(node canvasRunNode) []string {
 			}
 			seen[nodeID] = true
 			result = append(result, nodeID)
+		}
+	}
+	return result
+}
+
+func canvasRunnableNodeDependencyIDs(
+	req CanvasRunRequest,
+	plan canvasExecutionPlan,
+	node canvasRunNode,
+) []string {
+	if req.ExecutionScope != canvasExecutionScopeStoryboardFrame || canvasStoryboardItemType(node) == "video_compose" {
+		return plan.Incoming[node.ID]
+	}
+	return canvasStoryboardSourceIDs(node)
+}
+
+func interleaveCanvasStoryboardReadyNodes(nodes []canvasRunNode) []canvasRunNode {
+	if len(nodes) < 2 {
+		return nodes
+	}
+	groupOrder := make([]string, 0)
+	groups := make(map[string][]canvasRunNode)
+	for _, node := range nodes {
+		groupID := strings.TrimSpace(node.GroupID)
+		if groupID == "" {
+			groupID = "node:" + node.ID
+		}
+		if _, exists := groups[groupID]; !exists {
+			groupOrder = append(groupOrder, groupID)
+		}
+		groups[groupID] = append(groups[groupID], node)
+	}
+
+	result := make([]canvasRunNode, 0, len(nodes))
+	for index := 0; len(result) < len(nodes); index++ {
+		for _, groupID := range groupOrder {
+			members := groups[groupID]
+			if index < len(members) {
+				result = append(result, members[index])
+			}
 		}
 	}
 	return result

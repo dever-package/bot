@@ -31,13 +31,15 @@ func (s Service) mountExecutionTools(
 	}
 	mountCtx, cancel := operationContext(execution.scopedContext, toolMountTimeout)
 	defer cancel()
+	opening := runtimeEventType(execution.input) == runtimeEventSessionStarted
 	mounted, err := runtimetool.Mount(mountCtx, runtimetool.MountRequest{
 		Agent:          execution.agent,
 		Gateway:        s.gateway,
 		PreparationKey: execution.requestID,
 		References:     execution.mediaReferences,
 		Billing:        execution.billing,
-		EnableDocument: execution.persistChat && execution.assistantMessageID > 0,
+		EnableDocument: execution.persistChat && execution.assistantMessageID > 0 && !opening,
+		BuiltinOnly:    opening,
 		Method:         execution.transport.Method,
 		Host:           execution.transport.Host,
 		Path:           execution.transport.Path,

@@ -27,7 +27,19 @@ type PowerIndex struct {
 	OutputKindStatus struct{} `index:"output_type,kind,status"`
 }
 
-const DefaultLLMPowerID uint64 = 1
+const (
+	DefaultLLMPowerID          uint64 = 1
+	defaultImagePowerID        uint64 = 2
+	defaultVideoPowerID        uint64 = 3
+	defaultClothingPowerID     uint64 = 4
+	defaultMusicPowerID        uint64 = 5
+	defaultStoryboardPowerID   uint64 = 7
+	defaultVideoComposePowerID uint64 = 12
+	defaultSpeechPowerID       uint64 = 13
+	defaultCopywritingPowerID  uint64 = 14
+
+	defaultCopywritingPrompt = `{"type":"doc","content":[{"type":"paragraph","attrs":{"textAlign":null,"lineHeight":null,"color":null,"backgroundColor":null,"fontFamily":null,"fontSize":null,"textIndent":null,"marginTop":null,"marginRight":null,"marginBottom":null,"marginLeft":null,"paddingTop":null,"paddingRight":null,"paddingBottom":null,"paddingLeft":null,"border":null,"borderTop":null,"borderRight":null,"borderBottom":null,"borderLeft":null,"borderRadius":null,"width":null,"maxWidth":null},"content":[{"type":"text","text":"你是“文案”能力的设定提示词。你的职责是根据用户需求生成清晰、准确、可直接使用的文案内容。输出要求：1）优先满足用户目标与场景；2）语言自然、简洁、有重点；3）根据需要调整语气、长度与风格，但避免空话套话；4）如信息不足，先输出最合理的可用版本，不要编造具体事实；5）确保内容符合常见平台表达规范，不包含违规、攻击、歧视、虚假或敏感内容；6）如用户未特别说明，默认输出为中文；7）只输出最终文案结果，不要输出分析过程、解释说明或多余前缀。"}]}]}`
+)
 
 var (
 	powerSeed = []map[string]any{
@@ -35,12 +47,108 @@ var (
 			"id":          DefaultLLMPowerID,
 			"cate_id":     1,
 			"key":         "llm",
-			"name":        "LLM",
-			"icon":        "file-text",
+			"name":        "文本",
+			"icon":        "book",
 			"output_type": OutputTypeGeneral,
 			"kind":        "text",
 			"prompt":      "",
+			"source_rule": 2,
+			"status":      1,
+		},
+		{
+			"id":          defaultImagePowerID,
+			"cate_id":     1,
+			"key":         "image",
+			"name":        "图片",
+			"icon":        "image",
+			"output_type": OutputTypeGeneral,
+			"kind":        "image",
+			"prompt":      "",
+			"source_rule": 2,
+			"status":      1,
+		},
+		{
+			"id":          defaultVideoPowerID,
+			"cate_id":     1,
+			"key":         "video",
+			"name":        "视频",
+			"icon":        "circle-play",
+			"output_type": OutputTypeGeneral,
+			"kind":        "video",
+			"prompt":      "",
+			"source_rule": 2,
+			"status":      1,
+		},
+		{
+			"id":          defaultClothingPowerID,
+			"cate_id":     1,
+			"key":         "huanzhuang",
+			"name":        "换装",
+			"icon":        "lucide-contact2",
+			"output_type": OutputTypeGeneral,
+			"kind":        "image",
+			"prompt":      "",
 			"source_rule": 1,
+			"status":      2,
+		},
+		{
+			"id":          defaultMusicPowerID,
+			"cate_id":     1,
+			"key":         "music",
+			"name":        "音乐",
+			"icon":        "lucide-music4",
+			"output_type": OutputTypeGeneral,
+			"kind":        "audio",
+			"prompt":      "",
+			"source_rule": 1,
+			"status":      1,
+		},
+		{
+			"id":          defaultStoryboardPowerID,
+			"cate_id":     1,
+			"key":         "fenjing",
+			"name":        "分镜脚本",
+			"icon":        "zap",
+			"output_type": OutputTypeStoryboard,
+			"kind":        "text",
+			"prompt":      "",
+			"source_rule": 1,
+			"status":      1,
+		},
+		{
+			"id":          defaultVideoComposePowerID,
+			"cate_id":     1,
+			"key":         "video-compose",
+			"name":        "视频合成",
+			"icon":        "clapperboard",
+			"output_type": OutputTypeVideoCompose,
+			"kind":        "video",
+			"prompt":      "",
+			"source_rule": 1,
+			"status":      1,
+		},
+		{
+			"id":          defaultSpeechPowerID,
+			"cate_id":     1,
+			"key":         "tts",
+			"name":        "语音",
+			"icon":        "lucide-mic",
+			"output_type": OutputTypeSpeech,
+			"kind":        "audio",
+			"prompt":      "",
+			"source_rule": 1,
+			"status":      1,
+		},
+		{
+			"id":          defaultCopywritingPowerID,
+			"cate_id":     1,
+			"key":         "wenan",
+			"name":        "文案",
+			"icon":        "zap",
+			"output_type": OutputTypeGeneral,
+			"kind":        "text",
+			"prompt":      defaultCopywritingPrompt,
+			"source_rule": 2,
 			"status":      1,
 		},
 	}

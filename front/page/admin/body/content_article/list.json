@@ -1,0 +1,447 @@
+{
+  "page": {
+    "name": "内容管理",
+    "icon": "book-open-text",
+    "parent": "bot-body",
+    "type": 1,
+    "sort": 3
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "content-shell": {
+            "type": "container",
+            "className": "front-two-pane-layout",
+            "children": {
+              "category-column": {
+                "type": "container",
+                "className": "min-w-0"
+              },
+              "article-column": {
+                "type": "container",
+                "className": "flex min-w-0 flex-col gap-4",
+                "children": {
+                  "article-title": {
+                    "type": "container",
+                    "className": "min-w-0"
+                  },
+                  "article-toolbar": {
+                    "type": "row",
+                    "className": "flex-wrap items-center gap-2.5"
+                  },
+                  "article-table": {
+                    "type": "container",
+                    "className": "overflow-hidden rounded-md border bg-background"
+                  }
+                }
+              }
+            }
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "新增文章",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "icon": "plus"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.createArticle",
+            "value": true
+          }
+        }
+      }
+    ],
+    "category-column": [
+      {
+        "type": "show-category-list",
+        "id": "body-content-category-list",
+        "value": "search.category_id",
+        "option": {
+          "model": "bot.body.NewContentCategoryModel",
+          "order": "sort asc,id asc",
+          "extraFields": [
+            "status",
+            "sort"
+          ]
+        },
+        "meta": {
+          "title": "内容分类",
+          "description": "左侧维护分类，右侧管理当前分类下的文章。",
+          "remote": true,
+          "defaultFirst": true,
+          "queryKey": "category_id",
+          "sortable": true,
+          "sortField": "sort",
+          "sortChangeAction": {
+            "type": "save",
+            "path": "bot/body/content_category/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "sort": "$value"
+            }
+          },
+          "createButton": {
+            "name": "新增分类",
+            "icon": "plus",
+            "variant": "outline",
+            "size": "sm",
+            "action": {
+              "click": {
+                "type": "modal",
+                "key": "dialog.createCategory",
+                "value": true
+              }
+            }
+          },
+          "statusField": "status",
+          "statusDisplay": "select",
+          "statusChangeAction": {
+            "type": "save",
+            "path": "bot/body/content_category/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "status": "$value"
+            }
+          },
+          "statusCases": [
+            {
+              "value": 1,
+              "text": "启用",
+              "tone": "success"
+            },
+            {
+              "value": 2,
+              "text": "停用",
+              "tone": "muted"
+            }
+          ],
+          "buttons": [
+            {
+              "icon": "square-pen",
+              "variant": "ghost",
+              "size": "sm",
+              "description": "编辑分类",
+              "action": {
+                "click": [
+                  {
+                    "type": "data",
+                    "key": "actionTarget.editCategoryId",
+                    "value": "$row.id"
+                  },
+                  {
+                    "type": "modal",
+                    "key": "dialog.editCategory",
+                    "value": true
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "article-title": [
+      {
+        "type": "show-title",
+        "value": "page.articleTitle",
+        "meta": {
+          "variant": "section"
+        }
+      }
+    ],
+    "article-toolbar": [
+      {
+        "type": "form-input",
+        "placeholder": "搜索文章标题...",
+        "value": "search.keyword",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "状态",
+        "value": "search.status",
+        "mode": "search",
+        "meta": {
+          "controlClassName": "w-[140px]"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "重置",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/body/content_article/list"
+        }
+      }
+    ],
+    "article-table": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "savePath": "bot/body/content_article/update",
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "title",
+              "type": "show-base",
+              "className": "min-w-[240px] font-medium"
+            },
+            {
+              "value": "visibility",
+              "type": "show-tag"
+            },
+            {
+              "value": "status",
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "value": "sort",
+              "type": "show-base",
+              "editor": "form-number",
+              "trigger": "doubleClick",
+              "tip": "正序排序，数值越小越靠前。双击可修改。"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑文章",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.editArticleId",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.editArticle",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "trash-2",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "删除文章",
+                    "className": "text-destructive hover:text-destructive",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.deleteArticle",
+                          "value": "$row"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "confirm.deleteArticle",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.createCategory",
+          "pageRoute": "/bot/body/content_category/update",
+          "title": "新增内容分类",
+          "description": "分类用于组织和筛选内容文章。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "size": "sm",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.editCategory",
+          "pageRoute": "/bot/body/content_category/update",
+          "title": "编辑内容分类",
+          "description": "调整分类名称。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.editCategoryId"
+          },
+          "size": "sm",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.createArticle",
+          "pageRoute": "/bot/body/content_article/update",
+          "title": "新增内容文章",
+          "description": "录入文章标题和正文内容。",
+          "size": "3xl",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "category_id": "data.search.category_id"
+          },
+          "bodyClassName": "px-6 py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.editArticle",
+          "pageRoute": "/bot/body/content_article/update",
+          "title": "编辑内容文章",
+          "description": "更新文章所属分类、标题或正文。",
+          "size": "3xl",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.editArticleId"
+          },
+          "bodyClassName": "px-6 py-2"
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "删除内容文章",
+        "info": "确认删除当前文章吗？删除后无法恢复。",
+        "meta": {
+          "stateKey": "confirm.deleteArticle"
+        },
+        "action": {
+          "confirm": {
+            "type": "delete",
+            "path": "bot/body/content_article/update",
+            "params": "actionTarget.deleteArticle"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "内容管理",
+      "description": "按分类维护站点说明、指南等富文本内容。",
+      "articleTitle": {
+        "title": "文章列表",
+        "description": "维护当前分类下的文章，状态和排序可直接在列表中调整。"
+      }
+    },
+    "search": {
+      "category_id": "",
+      "keyword": "",
+      "status": ""
+    },
+    "table": {
+      "pageSize": 20,
+      "searchFields": [
+        "title"
+      ],
+      "filterFields": [
+        "category_id",
+        "status"
+      ]
+    },
+    "actionTarget": {
+      "editCategoryId": "",
+      "editArticleId": "",
+      "deleteArticle": {}
+    }
+  },
+  "state": {
+    "dialog": {
+      "createCategory": false,
+      "editCategory": false,
+      "createArticle": false,
+      "editArticle": false
+    },
+    "confirm": {
+      "deleteArticle": false
+    }
+  },
+  "action": {}
+}

@@ -3,6 +3,7 @@ package energon
 import (
 	"math"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -14,11 +15,23 @@ const (
 )
 
 const (
-	StoryboardVersion             = 5
+	StoryboardVersion             = 8
 	StoryboardMinShotDuration     = 4
+	StoryboardMaxShots            = 50
 	StoryboardVisualModePhotoreal = "photoreal"
 	StoryboardVisualModeStylized  = "stylized"
+	StoryboardTransitionNone      = "none"
 )
+
+var storyboardTransitionTypes = map[string]struct{}{
+	StoryboardTransitionNone: {},
+	"fade":                   {},
+	"crossfade":              {},
+	"fadeblack":              {},
+	"fadewhite":              {},
+	"wipeleft":               {},
+	"wiperight":              {},
+}
 
 type OutputTypeSpec struct {
 	Key           string   `json:"key"`
@@ -141,6 +154,29 @@ func IsStoryboardShotDurationValid(value float64) bool {
 		!math.IsInf(value, 0) &&
 		value >= StoryboardMinShotDuration &&
 		math.Trunc(value) == value
+}
+
+func NormalizeStoryboardTransitionType(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return StoryboardTransitionNone
+	}
+	return value
+}
+
+func IsStoryboardTransitionType(value string) bool {
+	_, ok := storyboardTransitionTypes[NormalizeStoryboardTransitionType(value)]
+	return ok
+}
+
+func EstimateStoryboardSpeechDuration(text string) float64 {
+	characters := 0
+	for _, character := range text {
+		if !unicode.IsSpace(character) {
+			characters++
+		}
+	}
+	return math.Max(0.6, float64(characters)/3.5)
 }
 
 func NormalizePowerKind(kind string) string {

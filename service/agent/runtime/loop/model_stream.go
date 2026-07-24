@@ -2,7 +2,6 @@ package loop
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -29,12 +28,16 @@ type modelOutputPublisher interface {
 
 func newModelStreamPublisher(service Service, execution execution) modelOutputPublisher {
 	if execution.documentID > 0 {
+		sourceKey := strings.TrimSpace(execution.documentTextSourceKey)
+		if sourceKey == "" {
+			sourceKey = documentModelTextSourceKey(execution.documentModelStep)
+		}
 		return &documentModelStreamPublisher{
 			service:    service,
 			execution:  execution,
 			documents:  runtimedocument.NewService(),
 			documentID: execution.documentID,
-			sourceKey:  fmt.Sprintf("%s%d", documentTextSourceKeyPrefix, execution.documentModelStep),
+			sourceKey:  sourceKey,
 			modelStep:  execution.documentModelStep,
 		}
 	}

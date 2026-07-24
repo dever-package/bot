@@ -26,269 +26,96 @@ type ServiceParamIndex struct {
 	ServiceStatus   struct{} `index:"service_id,status,sort"`
 }
 
+type serviceParamSeedConfig struct {
+	ID              uint64
+	ServiceID       uint64
+	ParamID         uint64
+	ParamRule       int16
+	Key             string
+	Name            string
+	Mapping         string
+	FixedValueType  string
+	FileValueFormat string
+	Sort            int
+}
+
 const (
 	serviceParamRuleDirect     int16 = 1
+	serviceParamRuleOption     int16 = 2
 	serviceParamRuleAttachment int16 = 3
 	serviceParamRuleCombo      int16 = 4
 	serviceParamRuleFixed      int16 = 5
 
 	fixedValueTypeString  = "string"
 	fixedValueTypeBoolean = "boolean"
+	fixedValueTypeJSON    = "json"
 
 	ServiceParamFileValueFormatURL     = "url"
 	ServiceParamFileValueFormatBase64  = "base64"
 	ServiceParamFileValueFormatDataURL = "data_url"
 
-	shemicLabImageSizeMapping = `{
-	"params": [6, 7],
-	"rows": [
-		{"native_value": "1024x1024", "values": {"6": 1, "7": 4}},
-		{"native_value": "1536x1024", "values": {"6": 1, "7": 5}},
-		{"native_value": "1024x1536", "values": {"6": 1, "7": 6}}
-	]
-}`
-	doubaoSeedreamSizeMapping = `{
-	"params": [6, 7],
-	"rows": [
-		{"native_value": "2048x2048", "values": {"6": 2, "7": 4}},
-		{"native_value": "2848x1600", "values": {"6": 2, "7": 5}},
-		{"native_value": "1600x2848", "values": {"6": 2, "7": 6}},
-		{"native_value": "2304x1728", "values": {"6": 2, "7": 7}},
-		{"native_value": "1728x2304", "values": {"6": 2, "7": 8}},
-		{"native_value": "2496x1664", "values": {"6": 2, "7": 9}},
-		{"native_value": "1664x2496", "values": {"6": 2, "7": 10}},
-		{"native_value": "3136x1344", "values": {"6": 2, "7": 13}},
-		{"native_value": "4096x4096", "values": {"6": 3, "7": 4}},
-		{"native_value": "5504x3040", "values": {"6": 3, "7": 5}},
-		{"native_value": "3040x5504", "values": {"6": 3, "7": 6}},
-		{"native_value": "4704x3520", "values": {"6": 3, "7": 7}},
-		{"native_value": "3520x4704", "values": {"6": 3, "7": 8}},
-		{"native_value": "4992x3328", "values": {"6": 3, "7": 9}},
-		{"native_value": "3328x4992", "values": {"6": 3, "7": 10}},
-		{"native_value": "6240x2656", "values": {"6": 3, "7": 13}}
-	]
-}`
+	shemicLabImageSizeMapping        = `{"params":[6,7],"rows":[{"native_value":"1024x1024","values":{"6":1,"7":4}},{"native_value":"1536x1024","values":{"6":1,"7":5}},{"native_value":"1024x1536","values":{"6":1,"7":6}}]}`
+	doubaoSeedreamSizeMapping        = `{"params":[6,7],"rows":[{"native_value":"2048x2048","values":{"6":2,"7":4}},{"native_value":"2848x1600","values":{"6":2,"7":5}},{"native_value":"1600x2848","values":{"6":2,"7":6}},{"native_value":"2304x1728","values":{"6":2,"7":7}},{"native_value":"1728x2304","values":{"6":2,"7":8}},{"native_value":"2496x1664","values":{"6":2,"7":9}},{"native_value":"1664x2496","values":{"6":2,"7":10}},{"native_value":"3136x1344","values":{"6":2,"7":13}},{"native_value":"4096x4096","values":{"6":3,"7":4}},{"native_value":"5504x3040","values":{"6":3,"7":5}},{"native_value":"3040x5504","values":{"6":3,"7":6}},{"native_value":"4704x3520","values":{"6":3,"7":7}},{"native_value":"3520x4704","values":{"6":3,"7":8}},{"native_value":"4992x3328","values":{"6":3,"7":9}},{"native_value":"3328x4992","values":{"6":3,"7":10}},{"native_value":"6240x2656","values":{"6":3,"7":13}}]}`
+	doubaoVideoResolutionMapping     = `[{"native_value":"720p","option_id":1},{"native_value":"1080p","option_id":2}]`
+	doubaoVideoRatioMapping          = `[{"native_value":"","option_id":4},{"native_value":"","option_id":5},{"native_value":"","option_id":6},{"native_value":"","option_id":7},{"native_value":"","option_id":8},{"native_value":"","option_id":13}]`
+	doubaoVoiceMapping               = `[{"native_value":"zh_female_vv_uranus_bigtts","option_id":23},{"native_value":"","option_id":24},{"native_value":"","option_id":25},{"native_value":"","option_id":26},{"native_value":"","option_id":27},{"native_value":"","option_id":28},{"native_value":"","option_id":29},{"native_value":"","option_id":30},{"native_value":"","option_id":31},{"native_value":"","option_id":32},{"native_value":"","option_id":33},{"native_value":"","option_id":34},{"native_value":"","option_id":35}]`
+	doubaoVideoFastResolutionMapping = `[{"native_value":"720p","option_id":1}]`
+	doubaoVideoFastRatioMapping      = `[{"native_value":"1:1","option_id":4},{"native_value":"16:9","option_id":5},{"native_value":"9:16","option_id":6},{"native_value":"4:3","option_id":7},{"native_value":"3:4","option_id":8},{"native_value":"21:9","option_id":13}]`
 )
 
 var (
-	serviceParamSeed = []map[string]any{
-		{
-			"id":               1,
-			"service_id":       serviceShemicLabImageID,
-			"param_id":         ParamPromptID,
-			"param_rule":       serviceParamRuleDirect,
-			"key":              "prompt",
-			"name":             "",
-			"mapping":          "",
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             1,
-		},
-		{
-			"id":               2,
-			"service_id":       serviceShemicLabImageID,
-			"param_id":         paramResolutionID,
-			"param_rule":       serviceParamRuleCombo,
-			"key":              "size",
-			"name":             "",
-			"mapping":          shemicLabImageSizeMapping,
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             2,
-		},
-		{
-			"id":               3,
-			"service_id":       serviceShemicLabImageID,
-			"param_id":         paramImageID,
-			"param_rule":       serviceParamRuleAttachment,
-			"key":              "image",
-			"name":             "",
-			"mapping":          "[1]",
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             3,
-		},
-		{
-			"id":               4,
-			"service_id":       serviceDoubaoImageID,
-			"param_id":         paramResolutionID,
-			"param_rule":       serviceParamRuleCombo,
-			"key":              "size",
-			"name":             "",
-			"mapping":          doubaoSeedreamSizeMapping,
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             1,
-		},
-		{
-			"id":               5,
-			"service_id":       serviceDoubaoImageID,
-			"param_id":         0,
-			"param_rule":       serviceParamRuleFixed,
-			"key":              "watermark",
-			"name":             "",
-			"mapping":          "false",
-			"fixed_value_type": fixedValueTypeBoolean,
-			"status":           1,
-			"sort":             2,
-		},
-		{
-			"id":               6,
-			"service_id":       serviceDoubaoVideoID,
-			"param_id":         0,
-			"param_rule":       serviceParamRuleFixed,
-			"key":              "content[0].type",
-			"name":             "",
-			"mapping":          "text",
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             1,
-		},
-		{
-			"id":               7,
-			"service_id":       serviceDoubaoVideoID,
-			"param_id":         ParamPromptID,
-			"param_rule":       serviceParamRuleDirect,
-			"key":              "content[0].text",
-			"name":             "",
-			"mapping":          "",
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             2,
-		},
-		{
-			"id":               8,
-			"service_id":       serviceDoubaoVideoID,
-			"param_id":         0,
-			"param_rule":       serviceParamRuleFixed,
-			"key":              "content[1].type",
-			"name":             "",
-			"mapping":          "image_url",
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             3,
-		},
-		{
-			"id":               9,
-			"service_id":       serviceDoubaoVideoID,
-			"param_id":         paramImageID,
-			"param_rule":       serviceParamRuleAttachment,
-			"key":              "content[1].image_url.url",
-			"name":             "",
-			"mapping":          "[1]",
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             4,
-		},
-		{
-			"id":               10,
-			"service_id":       serviceDoubaoVideoID,
-			"param_id":         0,
-			"param_rule":       serviceParamRuleFixed,
-			"key":              "content[1].role",
-			"name":             "",
-			"mapping":          "first_frame",
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             5,
-		},
-		{
-			"id":               11,
-			"service_id":       serviceRunningHubImageID,
-			"param_id":         ParamPromptID,
-			"param_rule":       serviceParamRuleDirect,
-			"key":              "prompt",
-			"name":             "",
-			"mapping":          "",
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             1,
-		},
-		{
-			"id":               12,
-			"service_id":       serviceRunningHubImageID,
-			"param_id":         paramImageID,
-			"param_rule":       serviceParamRuleDirect,
-			"key":              "imageUrls",
-			"name":             "",
-			"mapping":          "",
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             2,
-		},
-		{
-			"id":               13,
-			"service_id":       serviceRunningHubMusicID,
-			"param_id":         ParamPromptID,
-			"param_rule":       serviceParamRuleDirect,
-			"key":              "description",
-			"name":             "",
-			"mapping":          "",
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             1,
-		},
-		{
-			"id":               14,
-			"service_id":       serviceRunningHubMusicID,
-			"param_id":         paramSwitchID,
-			"param_rule":       serviceParamRuleDirect,
-			"key":              "make_instrumental",
-			"name":             "是否仅生成背景音乐",
-			"mapping":          "",
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             2,
-		},
-		{
-			"id":               15,
-			"service_id":       serviceRunningHubFlowClothingID,
-			"param_id":         paramImageID,
-			"param_rule":       serviceParamRuleAttachment,
-			"key":              "15.image",
-			"name":             "服装图",
-			"mapping":          "[1]",
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             1,
-		},
-		{
-			"id":               16,
-			"service_id":       serviceRunningHubFlowClothingID,
-			"param_id":         paramImageID,
-			"param_rule":       serviceParamRuleAttachment,
-			"key":              "14.image",
-			"name":             "人物图",
-			"mapping":          "[1]",
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             2,
-		},
-		{
-			"id":               17,
-			"service_id":       serviceDoubaoImageID,
-			"param_id":         paramImageID,
-			"param_rule":       serviceParamRuleDirect,
-			"key":              "image",
-			"name":             "",
-			"mapping":          "",
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             3,
-		},
-		{
-			"id":               18,
-			"service_id":       serviceDoubaoImageID,
-			"param_id":         0,
-			"param_rule":       serviceParamRuleFixed,
-			"key":              "sequential_image_generation",
-			"name":             "",
-			"mapping":          "disabled",
-			"fixed_value_type": fixedValueTypeString,
-			"status":           1,
-			"sort":             4,
-		},
-	}
+	serviceParamSeed = buildServiceParamSeeds([]serviceParamSeedConfig{
+		{ID: 1, ServiceID: serviceRunningHubImageID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "prompt"},
+		{ID: 2, ServiceID: serviceRunningHubImageID, ParamID: ParamImageID, ParamRule: serviceParamRuleDirect, Key: "imageUrls"},
+		{ID: 3, ServiceID: serviceRunningHubMusicID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "description"},
+		{ID: 4, ServiceID: serviceRunningHubMusicID, ParamID: paramSwitchID, ParamRule: serviceParamRuleDirect, Key: "make_instrumental", Name: "是否仅生成背景音乐"},
+		{ID: 5, ServiceID: serviceRunningHubFlowClothingID, ParamID: ParamImageID, ParamRule: serviceParamRuleAttachment, Key: "15.image", Name: "服装图", Mapping: "[1]"},
+		{ID: 6, ServiceID: serviceRunningHubFlowClothingID, ParamID: ParamImageID, ParamRule: serviceParamRuleAttachment, Key: "14.image", Name: "人物图", Mapping: "[1]"},
+		{ID: 7, ServiceID: serviceShemicLabImageID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "prompt"},
+		{ID: 8, ServiceID: serviceShemicLabImageID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: shemicLabImageSizeMapping},
+		{ID: 9, ServiceID: serviceShemicLabImageID, ParamID: ParamImageID, ParamRule: serviceParamRuleAttachment, Key: "image", Mapping: "[1]"},
+		{ID: 10, ServiceID: serviceDoubaoImageID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: doubaoSeedreamSizeMapping},
+		{ID: 11, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[0].type", Mapping: "text"},
+		{ID: 12, ServiceID: serviceDoubaoVideoID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "content[0].text"},
+		{ID: 13, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[1-2].type", Mapping: "image_url"},
+		{ID: 14, ServiceID: serviceDoubaoVideoID, ParamID: ParamImageID, ParamRule: serviceParamRuleAttachment, Key: "content[1-2].image_url.url", Mapping: "[1,2]"},
+		{ID: 15, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[1-2].role", Mapping: `["first_frame","last_frame"]`, FixedValueType: fixedValueTypeJSON},
+		{ID: 19, ServiceID: serviceDoubaoImageID, ParamRule: serviceParamRuleFixed, Key: "watermark", Mapping: "false", FixedValueType: fixedValueTypeBoolean},
+		{ID: 21, ServiceID: serviceDoubaoVideoID, ParamID: paramResolutionID, ParamRule: serviceParamRuleOption, Key: "resolution", Mapping: doubaoVideoResolutionMapping},
+		{ID: 22, ServiceID: serviceDoubaoVideoID, ParamID: paramAspectRatioID, ParamRule: serviceParamRuleOption, Key: "aspectRatio", Mapping: doubaoVideoRatioMapping},
+		{ID: 23, ServiceID: serviceDoubaoVideoID, ParamID: paramDurationID, ParamRule: serviceParamRuleDirect, Key: "duration"},
+		{ID: 24, ServiceID: serviceFFmpegComposeID, ParamID: paramVideosID, ParamRule: serviceParamRuleDirect, Key: "videos", Name: "视频片段", Sort: 10},
+		{ID: 25, ServiceID: serviceFFmpegComposeID, ParamID: paramAudioID, ParamRule: serviceParamRuleDirect, Key: "audio", Name: "背景音频", Sort: 20},
+		{ID: 26, ServiceID: serviceFFmpegComposeID, ParamID: paramSubtitlesID, ParamRule: serviceParamRuleDirect, Key: "subtitles", Name: "字幕文件", Sort: 30},
+		{ID: 27, ServiceID: serviceFFmpegComposeID, ParamID: paramResolutionID, ParamRule: serviceParamRuleDirect, Key: "resolution", Name: "输出分辨率", Sort: 40},
+		{ID: 28, ServiceID: serviceFFmpegComposeID, ParamID: paramFPSID, ParamRule: serviceParamRuleDirect, Key: "fps", Name: "输出帧率", Sort: 50},
+		{ID: 29, ServiceID: serviceDoubaoAudioID, ParamID: paramVoiceID, ParamRule: serviceParamRuleOption, Key: "voice", Mapping: doubaoVoiceMapping},
+		{ID: 30, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[0].type", Mapping: "text", Sort: 1},
+		{ID: 31, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "content[0].text", Name: "提示词", Sort: 2},
+		{ID: 32, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[1-9].type", Mapping: "image_url", Sort: 10},
+		{ID: 33, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamImageID, ParamRule: serviceParamRuleAttachment, Key: "content[1-9].image_url.url", Name: "参考图片", Mapping: "[1,2,3,4,5,6,7,8,9]", Sort: 11},
+		{ID: 34, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[1-9].role", Mapping: "reference_image", Sort: 12},
+		{ID: 47, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[10].type", Mapping: "video_url", Sort: 60},
+		{ID: 48, ServiceID: serviceDoubaoVideoFastID, ParamID: paramVideoID, ParamRule: serviceParamRuleAttachment, Key: "content[10].video_url.url", Name: "参考视频", Mapping: "[1]", Sort: 61},
+		{ID: 49, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[10].role", Mapping: "reference_video", Sort: 62},
+		{ID: 50, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[11].type", Mapping: "audio_url", Sort: 70},
+		{ID: 51, ServiceID: serviceDoubaoVideoFastID, ParamID: paramAudioID, ParamRule: serviceParamRuleAttachment, Key: "content[11].audio_url.url", Name: "参考音频", Mapping: "[1]", Sort: 71},
+		{ID: 52, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[11].role", Mapping: "reference_audio", Sort: 72},
+		{ID: 53, ServiceID: serviceDoubaoVideoFastID, ParamID: paramResolutionID, ParamRule: serviceParamRuleOption, Key: "resolution", Name: "分辨率", Mapping: doubaoVideoFastResolutionMapping, Sort: 80},
+		{ID: 54, ServiceID: serviceDoubaoVideoFastID, ParamID: paramAspectRatioID, ParamRule: serviceParamRuleOption, Key: "ratio", Name: "画面比例", Mapping: doubaoVideoFastRatioMapping, Sort: 81},
+		{ID: 55, ServiceID: serviceDoubaoVideoFastID, ParamID: paramDurationID, ParamRule: serviceParamRuleDirect, Key: "duration", Name: "时长", Sort: 82},
+		{ID: 56, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "generate_audio", Mapping: "true", FixedValueType: fixedValueTypeBoolean, Sort: 90},
+		{ID: 57, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "watermark", Mapping: "false", FixedValueType: fixedValueTypeBoolean, Sort: 91},
+		{ID: 58, ServiceID: serviceDoubaoImageID, ParamID: ParamImageID, ParamRule: serviceParamRuleDirect, Key: "image", Sort: 3},
+		{ID: 59, ServiceID: serviceDoubaoImageID, ParamRule: serviceParamRuleFixed, Key: "sequential_image_generation", Mapping: "disabled", Sort: 4},
+		{ID: 60, ServiceID: serviceDoubaoImage5ID, ParamID: ParamImageID, ParamRule: serviceParamRuleDirect, Key: "image", Sort: 3},
+		{ID: 61, ServiceID: serviceDoubaoImage5ID, ParamRule: serviceParamRuleFixed, Key: "sequential_image_generation", Mapping: "disabled", Sort: 4},
+		{ID: 62, ServiceID: serviceDoubaoImage5ID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: doubaoSeedreamSizeMapping},
+		{ID: 63, ServiceID: serviceDoubaoImage5ID, ParamRule: serviceParamRuleFixed, Key: "watermark", Mapping: "false", FixedValueType: fixedValueTypeBoolean},
+		{ID: 64, ServiceID: serviceRunningHubVideoID, ParamID: ParamImageID, ParamRule: serviceParamRuleAttachment, Key: "firstImageUrl", Mapping: "[1]", FileValueFormat: ServiceParamFileValueFormatDataURL},
+		{ID: 65, ServiceID: serviceRunningHubVideoID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "prompt"},
+		{ID: 66, ServiceID: serviceRunningHubVideoID, ParamRule: serviceParamRuleFixed, Key: "sound", Mapping: "true", FixedValueType: fixedValueTypeBoolean},
+	})
 
 	paramRuleOptions = []map[string]any{
 		{"id": 1, "value": "直接映射"},
@@ -323,6 +150,38 @@ var (
 		OptionKeys: []string{"name", "key", "type"},
 	}
 )
+
+func buildServiceParamSeeds(configs []serviceParamSeedConfig) []map[string]any {
+	seeds := make([]map[string]any, 0, len(configs))
+	for _, config := range configs {
+		fixedValueType := config.FixedValueType
+		if fixedValueType == "" {
+			fixedValueType = fixedValueTypeString
+		}
+		fileValueFormat := config.FileValueFormat
+		if fileValueFormat == "" {
+			fileValueFormat = ServiceParamFileValueFormatURL
+		}
+		sort := config.Sort
+		if sort == 0 {
+			sort = 100
+		}
+		seeds = append(seeds, map[string]any{
+			"id":                config.ID,
+			"service_id":        config.ServiceID,
+			"param_id":          config.ParamID,
+			"param_rule":        config.ParamRule,
+			"key":               config.Key,
+			"name":              config.Name,
+			"mapping":           config.Mapping,
+			"fixed_value_type":  fixedValueType,
+			"file_value_format": fileValueFormat,
+			"status":            1,
+			"sort":              sort,
+		})
+	}
+	return seeds
+}
 
 func NewServiceParamModel() *orm.Model[ServiceParam] {
 	return orm.LoadModel[ServiceParam]("服务参数", "bot_energon_service_param", orm.ModelConfig{

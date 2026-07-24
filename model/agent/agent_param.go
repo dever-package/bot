@@ -3,6 +3,7 @@ package agent
 import (
 	"time"
 
+	energonmodel "github.com/dever-package/bot/model/energon"
 	"github.com/shemic/dever/orm"
 )
 
@@ -21,6 +22,16 @@ type AgentParamIndex struct {
 }
 
 var (
+	agentParamSeed = []map[string]any{
+		{
+			"id":       1,
+			"agent_id": DefaultAgentID,
+			"param_id": energonmodel.ParamImageID,
+			"required": 2,
+			"sort":     1,
+		},
+	}
+
 	agentParamRequiredOptions = []map[string]any{
 		{"id": 1, "value": "必填"},
 		{"id": 2, "value": "选填"},
@@ -42,6 +53,7 @@ var (
 func NewAgentParamModel() *orm.Model[AgentParam] {
 	return orm.LoadModel[AgentParam]("智能体参数", "bot_agent_param", orm.ModelConfig{
 		Index:    AgentParamIndex{},
+		Seeds:    agentParamSeed,
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{

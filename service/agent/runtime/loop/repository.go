@@ -368,16 +368,24 @@ func (repository) FindRunByID(ctx context.Context, runID uint64) (row agentmodel
 }
 
 func (repository) FindRunByRequestID(ctx context.Context, requestID string) (row agentmodel.Run, err error) {
-	requestID = strings.TrimSpace(requestID)
-	if requestID == "" {
-		return agentmodel.Run{}, fmt.Errorf("运行请求ID不能为空")
+	current, err := repository{}.FindRunByRequestIDOptional(ctx, requestID)
+	if err != nil {
+		return agentmodel.Run{}, err
 	}
-	defer repositoryError(&err)
-	current := agentmodel.NewRunModel().Find(ctx, map[string]any{"request_id": requestID})
 	if current == nil {
 		return agentmodel.Run{}, fmt.Errorf("智能体运行不存在")
 	}
 	return *current, nil
+}
+
+func (repository) FindRunByRequestIDOptional(ctx context.Context, requestID string) (row *agentmodel.Run, err error) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return nil, fmt.Errorf("运行请求ID不能为空")
+	}
+	defer repositoryError(&err)
+	current := agentmodel.NewRunModel().Find(ctx, map[string]any{"request_id": requestID})
+	return current, nil
 }
 
 func (repository) ListRuns(ctx context.Context, runIDs []uint64) []agentmodel.Run {

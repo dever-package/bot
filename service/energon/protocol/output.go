@@ -117,6 +117,7 @@ func normalizeOutput(output map[string]any) Output {
 		} else {
 			result["tool_calls"] = ToolCallsValue(calls)
 		}
+		normalizeToolCallOutputText(result, calls)
 	}
 	if meta := normalizeMap(output["meta"]); len(meta) > 0 {
 		result["meta"] = meta
@@ -129,6 +130,19 @@ func normalizeOutput(output map[string]any) Output {
 		appendOutputList(result, field.Target, values...)
 	}
 	return result
+}
+
+func normalizeToolCallOutputText(output Output, calls []ToolCall) {
+	text, exists := output["text"]
+	if !exists {
+		return
+	}
+	visible := ToolCallVisibleText(asText(text), calls)
+	if visible == "" {
+		delete(output, "text")
+		return
+	}
+	output["text"] = visible
 }
 
 func hasOutputField(output map[string]any) bool {

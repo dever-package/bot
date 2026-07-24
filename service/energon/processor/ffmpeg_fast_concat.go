@@ -77,24 +77,52 @@ func canFFmpegFastConcat(clips []ffmpegPreparedClip, resolution string, fps int)
 }
 
 func supportsFFmpegFastConcat(probe ffmpegMediaProbe) bool {
-	return probe.VideoStreams == 1 &&
+	return supportsFFmpegVideoCopy(probe) &&
 		probe.AudioStreams == 1 &&
-		probe.VideoCodec == "h264" &&
-		probe.VideoPixelFormat == "yuv420p" &&
 		probe.AudioCodec == "aac" &&
-		probe.VideoFrameRate > 0 &&
-		probe.VideoTimeBase != "" &&
-		probe.VideoExtradata != "" &&
 		probe.AudioSampleRate > 0 &&
 		probe.AudioChannels > 0 &&
 		probe.AudioTimeBase != "" &&
-		probe.AudioExtradata != "" &&
-		probe.Width > 0 &&
-		probe.Height > 0
+		probe.AudioExtradata != ""
 }
 
 func sameFFmpegFastConcatStreams(left ffmpegMediaProbe, right ffmpegMediaProbe) bool {
 	return supportsFFmpegFastConcat(right) &&
+		sameFFmpegVideoCopyStreams(left, right) &&
+		sameFFmpegConcatAudioStreams(left, right)
+}
+
+func sameFFmpegConcatAudioStreams(left ffmpegMediaProbe, right ffmpegMediaProbe) bool {
+	if left.AudioStreams != right.AudioStreams {
+		return false
+	}
+	if left.AudioStreams == 0 {
+		return true
+	}
+	return left.AudioStreams == 1 &&
+		left.AudioCodec == right.AudioCodec &&
+		left.AudioCodecTag == right.AudioCodecTag &&
+		left.AudioSampleRate == right.AudioSampleRate &&
+		left.AudioChannels == right.AudioChannels &&
+		left.AudioChannelLayout == right.AudioChannelLayout &&
+		left.AudioSampleFormat == right.AudioSampleFormat &&
+		left.AudioTimeBase == right.AudioTimeBase &&
+		left.AudioExtradata == right.AudioExtradata
+}
+
+func supportsFFmpegVideoCopy(probe ffmpegMediaProbe) bool {
+	return probe.VideoStreams == 1 &&
+		probe.VideoCodec == "h264" &&
+		probe.VideoPixelFormat == "yuv420p" &&
+		probe.VideoFrameRate > 0 &&
+		probe.VideoTimeBase != "" &&
+		probe.VideoExtradata != "" &&
+		probe.Width > 0 &&
+		probe.Height > 0
+}
+
+func sameFFmpegVideoCopyStreams(left ffmpegMediaProbe, right ffmpegMediaProbe) bool {
+	return supportsFFmpegVideoCopy(right) &&
 		left.VideoCodec == right.VideoCodec &&
 		left.VideoProfile == right.VideoProfile &&
 		left.VideoLevel == right.VideoLevel &&
@@ -104,13 +132,5 @@ func sameFFmpegFastConcatStreams(left ffmpegMediaProbe, right ffmpegMediaProbe) 
 		left.VideoTimeBase == right.VideoTimeBase &&
 		left.VideoExtradata == right.VideoExtradata &&
 		left.Width == right.Width &&
-		left.Height == right.Height &&
-		left.AudioCodec == right.AudioCodec &&
-		left.AudioCodecTag == right.AudioCodecTag &&
-		left.AudioSampleRate == right.AudioSampleRate &&
-		left.AudioChannels == right.AudioChannels &&
-		left.AudioChannelLayout == right.AudioChannelLayout &&
-		left.AudioSampleFormat == right.AudioSampleFormat &&
-		left.AudioTimeBase == right.AudioTimeBase &&
-		left.AudioExtradata == right.AudioExtradata
+		left.Height == right.Height
 }

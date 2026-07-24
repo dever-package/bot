@@ -77,6 +77,12 @@ func withExecutionStreamMeta(execution execution, output map[string]any) map[str
 }
 
 func (s Service) writeExecutionPayload(ctx context.Context, execution execution, payload map[string]any) error {
+	if execution.documentWriter {
+		// Document writers persist their observable output through DocumentBlock
+		// and the document stream. Their private Run stream has no consumer and
+		// must not become a prerequisite for committing the durable child result.
+		return nil
+	}
 	if _, err := s.streams.WritePayload(ctx, execution.requestID, payload); err != nil {
 		return err
 	}

@@ -14,8 +14,15 @@ import {
   streamTimingPercentFromOutput,
   type StreamTiming,
 } from "@/components/stream-timing";
-import { watchRuntimeStream } from "@/lib/runtime-stream-runner";
+import { request } from "@/lib/request";
 import type { RuntimeStreamFrame } from "@/lib/stream";
+import {
+  mergeRuntimeRunSnapshot,
+  normalizeRuntimeInteraction,
+  normalizeRuntimeRunStatus,
+  runtimeRunStatusFromEvent,
+  watchRuntimeRun,
+} from "../../../runtime/team-run";
 import {
   agentResultPayloadTitle,
   extractAgentResultPayload,
@@ -41,38 +48,6 @@ import {
   RUN_STATUS_SUCCESS,
   RUN_STATUS_WAITING,
 } from "./constants";
-
-const DEBUG_RUNNING_STATUSES = new Set([
-  "running",
-  "run",
-  "started",
-  "starting",
-  "processing",
-  "active",
-  "executing",
-  "execute",
-  "in_progress",
-  "in-progress",
-]);
-
-const DEBUG_SUCCESS_STATUSES = new Set([
-  "success",
-  "succeeded",
-  "done",
-  "completed",
-  "complete",
-]);
-
-const DEBUG_FAIL_STATUSES = new Set([
-  "fail",
-  "failed",
-  "error",
-  "canceled",
-  "cancelled",
-]);
-
-const DEBUG_WAITING_STATUSES = new Set(["waiting", "wait"]);
-const DEBUG_PENDING_STATUSES = new Set(["pending", "queued", "queue"]);
 
 export function buildDebugInput(
   prompt: string,
@@ -132,6 +107,7 @@ export function buildDebugStartStatus(
 
 export async function watchDebugStream(
   streamApi: string,
+  statusApi: string,
   startStatus: any,
   onUpdate?: (result: any) => void,
   signal?: AbortSignal,
@@ -142,28 +118,45 @@ export async function watchDebugStream(
   }
 
   let latest = startStatus;
-  const result = await watchRuntimeStream<any>({
+  const result = await watchRuntimeRun<any>({
     streamApi,
     requestID,
     lastID: String(startStatus?.[DEBUG_STREAM_LAST_ID] || "0-0"),
     blockMs: DEBUG_STREAM_BLOCK_MS,
     signal,
-    stopOnResult: true,
-    onFrame: (frame) => {
-      latest = withDebugStreamCursor(
-        applyDebugStreamFrame(latest, frame),
-        frame,
-      );
-      onUpdate?.(latest);
+    acceptErrorResult: true,
+    initialState: startStatus,
+    reduceFrame: (current, frame) =>
+      withDebugStreamCursor(applyDebugStreamFrame(current, frame), frame),
+    fetchSnapshot: statusApi
+      ? () => fetchDebugRunSnapshot(statusApi, startStatus)
+      : undefined,
+    mergeSnapshot: (current, snapshot) =>
+      mergeDebugRunStatusPayload(current, snapshot),
+    onUpdate: (current) => {
+      latest = current;
+      onUpdate?.(current);
     },
   });
   if (result.lastID) {
     latest = {
-      ...latest,
+      ...result.state,
       [DEBUG_STREAM_LAST_ID]: result.lastID,
     };
   }
   return latest;
+}
+
+async function fetchDebugRunSnapshot(statusApi: string, status: any) {
+  const result = await request(statusApi, "get", {
+    run_id: Number(status?.run?.id || 0),
+    request_id: String(status?.run?.request_id || ""),
+    view: "summary",
+  });
+  if (result.code !== 0) {
+    throw new Error(result.message || "读取运行状态失败");
+  }
+  return result.data;
 }
 
 export function withDebugStreamCursor(
@@ -195,18 +188,23 @@ export function applyDebugStreamFrame(
 }
 
 export function mergeDebugRunStatusPayload(current: any, payload: any) {
+  const merged = mergeRuntimeRunSnapshot(current, payload);
   return {
+    ...current,
     ...payload,
+    run: merged.run,
     node_runs: mergeDebugRowsFromPayload(
       arrayValue(current?.node_runs),
-      arrayValue(payload?.node_runs),
+      arrayValue(merged?.node_runs),
       ["id", "node_key", "node_id"],
     ),
     flow_runs: mergeDebugRowsFromPayload(
       arrayValue(current?.flow_runs),
-      arrayValue(payload?.flow_runs),
+      arrayValue(merged?.flow_runs),
       ["id", "flow_id", "flow_key"],
     ),
+    interactions: merged.interactions,
+    approvals: merged.approvals,
   };
 }
 
@@ -347,32 +345,7 @@ export function debugNodeRunFromEvent(event: Record<string, any>) {
 }
 
 function debugStatusFromEvent(event: Record<string, any>, value: any) {
-  const normalized = normalizeDebugRunStatus(value);
-  if (normalized !== RUN_STATUS_PENDING || hasDebugStreamValue(value)) {
-    return normalized;
-  }
-  const eventName = String(event.event || event.type || "").trim().toLowerCase();
-  if (
-    eventName.includes("start") ||
-    eventName.includes("progress") ||
-    eventName.includes("running")
-  ) {
-    return RUN_STATUS_RUNNING;
-  }
-  if (
-    eventName.includes("finish") ||
-    eventName.includes("success") ||
-    eventName.includes("complete")
-  ) {
-    return RUN_STATUS_SUCCESS;
-  }
-  if (eventName.includes("fail") || eventName.includes("error") || eventName.includes("cancel")) {
-    return RUN_STATUS_FAIL;
-  }
-  if (eventName.includes("wait")) {
-    return RUN_STATUS_WAITING;
-  }
-  return normalized;
+  return runtimeRunStatusFromEvent(event, value);
 }
 
 export function compactDebugRow(row: Record<string, any>) {
@@ -545,17 +518,18 @@ export function buildPendingDebugApprovalsByNodeKey(
 export function pendingDebugInteraction(
   value: any,
 ): DebugPendingApproval | null {
-  const interaction = debugRecord(value?.interaction);
+  const normalized = normalizeRuntimeInteraction(value);
+  const interaction = normalized.interaction;
   const interactionID = firstDebugText(interaction.id);
   if (!interactionID || !firstDebugText(interaction.type)) {
     return null;
   }
   return {
     id: interactionID,
-    title: firstDebugText(interaction.title, value?.node_name, "补充信息"),
-    runID: value?.run_id,
-    nodeRunID: value?.node_run_id,
-    nodeKey: firstDebugText(value?.node_key),
+    title: firstDebugText(interaction.title, normalized.nodeName, "补充信息"),
+    runID: normalized.runId,
+    nodeRunID: normalized.nodeRunId,
+    nodeKey: normalized.nodeKey,
     kind: "interaction",
     interaction: interaction as AgentInteraction,
   };
@@ -928,23 +902,7 @@ export function isDebugActiveStatus(status: any) {
 }
 
 export function normalizeDebugRunStatus(status: any) {
-  const value = String(status || "").trim().toLowerCase();
-  if (DEBUG_RUNNING_STATUSES.has(value)) {
-    return RUN_STATUS_RUNNING;
-  }
-  if (DEBUG_SUCCESS_STATUSES.has(value)) {
-    return RUN_STATUS_SUCCESS;
-  }
-  if (DEBUG_FAIL_STATUSES.has(value)) {
-    return RUN_STATUS_FAIL;
-  }
-  if (DEBUG_WAITING_STATUSES.has(value)) {
-    return RUN_STATUS_WAITING;
-  }
-  if (DEBUG_PENDING_STATUSES.has(value)) {
-    return RUN_STATUS_PENDING;
-  }
-  return value || RUN_STATUS_PENDING;
+  return normalizeRuntimeRunStatus(status);
 }
 
 export function shouldShowRuntimeTiming(nodeType: string) {

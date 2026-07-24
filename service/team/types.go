@@ -123,11 +123,12 @@ type GraphRole struct {
 }
 
 type AgentOption struct {
-	ID     uint64 `json:"id"`
-	CateID uint64 `json:"cate_id"`
-	Name   string `json:"name"`
-	Key    string `json:"key"`
-	Sort   int    `json:"sort"`
+	ID             uint64 `json:"id"`
+	CateID         uint64 `json:"cate_id"`
+	Name           string `json:"name"`
+	Key            string `json:"key"`
+	OpeningEnabled bool   `json:"opening_enabled"`
+	Sort           int    `json:"sort"`
 }
 
 type RoleOption struct {

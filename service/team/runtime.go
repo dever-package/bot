@@ -204,6 +204,10 @@ func (s Service) RunFlow(ctx context.Context, req RunRequest) (map[string]any, e
 }
 
 func (s Service) continueWaitingRun(ctx context.Context, run teammodel.Run, flowRun *teammodel.FlowRun) {
+	s.continueRunExecution(ctx, run, flowRun)
+}
+
+func (s Service) continueRunExecution(ctx context.Context, run teammodel.Run, flowRun *teammodel.FlowRun) {
 	runInput := jsonMap(run.Input)
 	if isSingleFlowRunMode(runInput) {
 		flowID := uint64Value(runInput["_flow_id"])
@@ -292,22 +296,80 @@ func (s Service) stopResolvedRun(ctx context.Context, run *teammodel.Run) (map[s
 
 func (s Service) RunStatus(ctx context.Context, runID uint64, requestID string) (map[string]any, error) {
 	run := s.resolveRun(ctx, runID, requestID)
-	return s.resolvedRunStatus(ctx, run)
+	return s.resolvedRunSnapshot(ctx, run)
 }
 
 func (s Service) ProjectRunStatus(ctx context.Context, projectID uint64, runID uint64, requestID string) (map[string]any, error) {
 	run := s.resolveProjectRun(ctx, projectID, runID, requestID)
-	return s.resolvedRunStatus(ctx, run)
+	return s.resolvedRunSnapshot(ctx, run)
 }
 
 func (s Service) BodyRunStatus(ctx context.Context, bodyID uint64, runID uint64, requestID string) (map[string]any, error) {
+	return s.resolvedRunSnapshot(ctx, s.resolveBodyRun(ctx, bodyID, runID, requestID))
+}
+
+func (s Service) RunDetail(ctx context.Context, runID uint64, requestID string) (map[string]any, error) {
+	return s.resolvedRunStatus(ctx, s.resolveRun(ctx, runID, requestID))
+}
+
+func (s Service) ProjectRunDetail(ctx context.Context, projectID uint64, runID uint64, requestID string) (map[string]any, error) {
+	return s.resolvedRunStatus(ctx, s.resolveProjectRun(ctx, projectID, runID, requestID))
+}
+
+func (s Service) BodyRunDetail(ctx context.Context, bodyID uint64, runID uint64, requestID string) (map[string]any, error) {
 	return s.resolvedRunStatus(ctx, s.resolveBodyRun(ctx, bodyID, runID, requestID))
+}
+
+func (s Service) WaitProjectRunStatus(ctx context.Context, projectID uint64, runID uint64, requestID string, timeout time.Duration) (map[string]any, error) {
+	run := s.resolveProjectRun(ctx, projectID, runID, requestID)
+	if run == nil {
+		return nil, fmt.Errorf("运行不存在")
+	}
+	requestID = run.RequestID
+	if timeout <= 0 {
+		timeout = time.Minute
+	}
+	deadline := time.Now().Add(timeout)
+	lastID := "0-0"
+	for {
+		run = s.resolveProjectRun(ctx, projectID, run.ID, requestID)
+		if run == nil {
+			return nil, fmt.Errorf("运行不存在")
+		}
+		if runReachedBlockingBoundary(run.Status) {
+			return s.resolvedRunSnapshot(ctx, run)
+		}
+		block := remainingRunWait(deadline, 5*time.Second)
+		if block <= 0 {
+			return resolvedRunState(run)
+		}
+		entries, err := s.ReadStream(ctx, requestID, lastID, 100, block)
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return resolvedRunState(run)
+			case <-time.After(remainingRunWait(deadline, time.Second)):
+			}
+			continue
+		}
+		for _, entry := range entries {
+			if entry.ID != "" {
+				lastID = entry.ID
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return resolvedRunState(run)
+		default:
+		}
+	}
 }
 
 func (s Service) resolvedRunStatus(ctx context.Context, run *teammodel.Run) (map[string]any, error) {
 	if run == nil {
 		return nil, fmt.Errorf("运行不存在")
 	}
+	s.recoverRunExecution(run)
 	flowRuns := s.repo.ListFlowRuns(ctx, run.ID)
 	nodeRuns := s.repo.ListNodeRuns(ctx, run.ID)
 	flowNames := s.flowNameMap(ctx, flowRuns, nodeRuns)
@@ -317,6 +379,7 @@ func (s Service) resolvedRunStatus(ctx context.Context, run *teammodel.Run) (map
 		interactions = append(interactions, interaction)
 	}
 	return map[string]any{
+		"view":         runViewDetail,
 		"run":          runToMap(*run),
 		"flow_runs":    flowRunsToMaps(flowRuns, flowNames),
 		"node_runs":    nodeRunsToMaps(nodeRuns, flowNames, nodeNames),
@@ -687,7 +750,7 @@ func (s Service) writeRunResult(ctx context.Context, run teammodel.Run) {
 	if run.RequestID == "" {
 		return
 	}
-	output, err := s.resolvedRunStatus(ctx, &run)
+	output, err := s.resolvedRunSnapshot(ctx, &run)
 	if firstText(jsonMap(run.Input)["_mode"]) == "workspace_power" {
 		output = jsonMap(run.Output)
 	}

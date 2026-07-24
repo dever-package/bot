@@ -2,16 +2,6 @@
   background: transparent;
 }
 
-.hb-account-dialog,
-.hb-account-confirm {
-  --body-work-bg: var(--background, #f7f8f7);
-  --body-work-surface: var(--card, var(--background, #ffffff));
-  --body-work-text: var(--foreground, #171a19);
-  --body-work-muted: var(--muted-foreground, #6b7370);
-  --body-work-line: var(--border, #e0e5e2);
-  --body-work-active: var(--muted, #eef1ef);
-}
-
 .hb-account-dialog {
   position: fixed !important;
   inset: 8px auto 8px 80px !important;
@@ -218,7 +208,7 @@
   border-style: solid;
   border-width: 1px;
   border-radius: 8px;
-  background: var(--body-work-surface);
+  background: var(--body-work-surface-raised);
   color: var(--body-work-text);
   padding: 0;
   letter-spacing: 0;
@@ -302,7 +292,7 @@
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: #176f52;
+  color: var(--body-work-primary-strong);
   padding: 0 22px 0 3px;
   font-size: 12px;
   font-weight: 600;
@@ -362,7 +352,7 @@
 
 .hb-account-nav button:hover,
 .hb-account-nav button.is-active {
-  background: var(--body-work-surface);
+  background: var(--body-work-surface-raised);
   color: var(--body-work-text);
   box-shadow: 0 1px 3px rgba(24, 33, 29, 0.08);
 }
@@ -460,7 +450,7 @@
 }
 
 .hb-account-identity-switch button.is-active {
-  background: var(--body-work-surface);
+  background: var(--body-work-surface-raised);
   color: var(--body-work-text);
   box-shadow: 0 1px 3px rgba(24, 33, 29, 0.08);
 }
@@ -486,7 +476,11 @@
 
 .hb-account-plan:hover,
 .hb-account-plan.is-current {
-  border-color: color-mix(in srgb, #176f52 45%, var(--body-work-line));
+  border-color: color-mix(
+    in srgb,
+    var(--body-work-primary) 45%,
+    var(--body-work-line)
+  );
   box-shadow: 0 10px 30px rgba(24, 33, 29, 0.08);
 }
 
@@ -518,8 +512,8 @@
 .hb-account-plan-head em {
   flex: 0 0 auto;
   border-radius: 4px;
-  background: rgba(23, 111, 82, 0.1);
-  color: #176f52;
+  background: var(--body-work-primary-soft);
+  color: var(--body-work-primary-strong);
   padding: 4px 7px;
   font-size: 10.5px;
   font-style: normal;
@@ -573,19 +567,19 @@
   height: 14px;
   flex: 0 0 14px;
   margin-top: 1px;
-  color: #176f52;
+  color: var(--body-work-primary-strong);
 }
 
 .hb-account-plan > button {
-  border-color: #176f52;
-  background: #176f52;
-  color: #ffffff;
+  border-color: var(--body-work-primary-strong);
+  background: var(--body-work-primary-strong);
+  color: var(--body-work-on-primary);
 }
 
 .hb-account-plan > button:hover:not(:disabled) {
-  border-color: #125c44;
-  background: #125c44;
-  color: #ffffff;
+  border-color: var(--body-work-primary);
+  background: var(--body-work-primary);
+  color: var(--body-work-on-primary);
 }
 
 .hb-account-package-grid {
@@ -609,7 +603,7 @@
 .hb-account-package > svg {
   width: 21px;
   height: 21px;
-  color: #176f52;
+  color: var(--body-work-primary-strong);
 }
 
 .hb-account-package > strong {
@@ -658,8 +652,8 @@
 
 .hb-account-record-mark.is-identity,
 .hb-account-record-mark.is-increase {
-  background: rgba(23, 111, 82, 0.1);
-  color: #176f52;
+  background: var(--body-work-primary-soft);
+  color: var(--body-work-primary-strong);
 }
 
 .hb-account-record-mark.is-point {
@@ -744,8 +738,8 @@
 }
 
 .hb-account-status.is-completed {
-  background: rgba(23, 111, 82, 0.1);
-  color: #176f52;
+  background: var(--body-work-primary-soft);
+  color: var(--body-work-primary-strong);
 }
 
 .hb-account-status.is-failed {
@@ -768,7 +762,7 @@
 }
 
 .hb-account-positive {
-  color: #176f52;
+  color: var(--body-work-primary-strong);
 }
 
 .hb-account-negative {

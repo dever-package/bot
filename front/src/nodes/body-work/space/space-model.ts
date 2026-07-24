@@ -21,6 +21,7 @@ import type {
   WorkRelease,
   WorkTeam,
 } from "./types";
+import { normalizeStoryboardReferences } from "./space-storyboard-reference";
 import { assetKindLabel } from "../asset/asset-contract";
 import { DEFAULT_GROUP_NODE_SIZE } from "./space-group-model";
 import {
@@ -848,6 +849,12 @@ function normalizeCanvasStoryboardItem(value: unknown) {
     referenceNodeIds: stringArray(
       firstDefined(row.reference_node_ids, row.referenceNodeIds),
     ),
+    externalReferenceAssetIds: numberArray(
+      firstDefined(
+        row.external_reference_asset_ids,
+        row.externalReferenceAssetIds,
+      ),
+    ),
     shotId: stringValue(firstDefined(row.shot_id, row.shotId)),
     speechId: stringValue(firstDefined(row.speech_id, row.speechId)),
     speechIds: stringArray(firstDefined(row.speech_ids, row.speechIds)),
@@ -980,6 +987,9 @@ export function normalizeCanvasComposerDraft(value: unknown) {
     ),
     videoComposition: normalizeVideoComposition(
       firstDefined(row.videoComposition, row.video_composition),
+    ),
+    storyboardReferences: normalizeStoryboardReferences(
+      firstDefined(row.storyboardReferences, row.storyboard_references),
     ),
   };
 }
@@ -1170,6 +1180,23 @@ function stringArray(value: unknown) {
     return [];
   }
   return value.map(stringValue).filter(Boolean);
+}
+
+function numberArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const result: number[] = [];
+  const used = new Set<number>();
+  for (const current of value) {
+    const number = numberValue(current);
+    if (!number || number <= 0 || used.has(number)) {
+      continue;
+    }
+    used.add(number);
+    result.push(number);
+  }
+  return result;
 }
 
 export type RichDocumentNode = {

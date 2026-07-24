@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	deverjwt "github.com/shemic/dever/auth/jwt"
@@ -18,7 +19,13 @@ type ownerScope struct {
 	OwnerID   uint64
 }
 
+var reusableSessionResolveMu sync.Mutex
+
 func resolveSession(ctx context.Context, owner ownerScope, request SessionRequest) agentmodel.Session {
+	if !request.NewSession {
+		reusableSessionResolveMu.Lock()
+		defer reusableSessionResolveMu.Unlock()
+	}
 	contextKey := normalizeContextKey(request.ContextKey, request.AgentKey)
 	agentKey := strings.TrimSpace(request.AgentKey)
 	if !request.NewSession {

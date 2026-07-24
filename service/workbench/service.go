@@ -69,6 +69,7 @@ type SaveDialogueAssetRequest struct {
 	RoleID      uint64
 	MessageID   uint64
 	ArtifactID  uint64
+	DocumentID  uint64
 	Name        string
 	TargetAsset uint64
 }
@@ -481,7 +482,7 @@ func (s Service) SavePowerAsset(ctx context.Context, request SavePowerAssetReque
 		return nil, err
 	}
 	requestID := strings.TrimSpace(request.RequestID)
-	status, err := s.team.BodyRunStatus(ctx, workspace.BodyID, 0, requestID)
+	status, err := s.team.BodyRunDetail(ctx, workspace.BodyID, 0, requestID)
 	if err != nil {
 		return nil, err
 	}
@@ -554,7 +555,10 @@ func (s Service) SaveDialogueAsset(ctx context.Context, request SaveDialogueAsse
 	if err != nil {
 		return nil, err
 	}
-	projection, err := projectDialogueAsset(ctx, message, request.ArtifactID)
+	projection, err := projectDialogueAsset(ctx, message, dialogueAssetSelector{
+		ArtifactID: request.ArtifactID,
+		DocumentID: request.DocumentID,
+	})
 	if err != nil {
 		return nil, err
 	}

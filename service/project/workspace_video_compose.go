@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	assetservice "github.com/dever-package/bot/service/asset"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
@@ -126,7 +127,7 @@ func canvasVideoCompositionReference(reference canvasPromptReference) map[string
 
 func resolveCanvasVideoComposition(
 	ctx context.Context,
-	projectID uint64,
+	teamID uint64,
 	raw map[string]any,
 ) (map[string]any, error) {
 	if uint64Value(raw["version"]) != canvasVideoCompositionVersion {
@@ -139,10 +140,25 @@ func resolveCanvasVideoComposition(
 	if len(rawClips) > canvasVideoCompositionMaxClips {
 		return nil, fmt.Errorf("单次视频合成最多支持 %d 个镜头", canvasVideoCompositionMaxClips)
 	}
+	for index, value := range rawClips {
+		clip := mapValue(value)
+		if issues := canvasTextList(firstPresent(clip["blocking_issues"], clip["blockingIssues"])); len(issues) > 0 {
+			return nil, fmt.Errorf("第 %d 个镜头尚不能合成: %s", index+1, strings.Join(issues, "；"))
+		}
+	}
+	resolvedReferences, err := assetservice.NewService().RequireCurrentReferences(
+		ctx,
+		teamID,
+		canvasVideoCompositionAssetIDs(rawClips),
+	)
+	if err != nil {
+		return nil, err
+	}
+	resolver := canvasCompositionReferenceResolver{references: resolvedReferences}
 
 	clips := make([]any, 0, len(rawClips))
 	for index, value := range rawClips {
-		clip, err := resolveCanvasVideoClip(ctx, projectID, index, mapValue(value))
+		clip, err := resolveCanvasVideoClip(resolver, index, mapValue(value))
 		if err != nil {
 			return nil, err
 		}
@@ -157,6 +173,24 @@ func resolveCanvasVideoComposition(
 	}, nil
 }
 
+func canvasVideoCompositionAssetIDs(rawClips []any) []uint64 {
+	assetIDs := make([]uint64, 0, len(rawClips)*2)
+	appendReference := func(raw map[string]any) {
+		if assetID := uint64Value(firstPresent(raw["asset_id"], raw["assetId"])); assetID > 0 {
+			assetIDs = append(assetIDs, assetID)
+		}
+	}
+	for _, value := range rawClips {
+		clip := mapValue(value)
+		appendReference(mapValue(firstPresent(clip["visual_video"], clip["visualVideo"])))
+		appendReference(mapValue(firstPresent(clip["original_audio_source"], clip["originalAudioSource"])))
+		for _, track := range sliceValue(firstPresent(clip["speech_tracks"], clip["speechTracks"])) {
+			appendReference(mapValue(mapValue(track)["audio"]))
+		}
+	}
+	return assetIDs
+}
+
 func canvasVideoCompositionURLs(composition map[string]any) []string {
 	result := make([]string, 0, len(sliceValue(composition["clips"])))
 	for _, value := range sliceValue(composition["clips"]) {
@@ -168,18 +202,12 @@ func canvasVideoCompositionURLs(composition map[string]any) []string {
 }
 
 func resolveCanvasVideoClip(
-	ctx context.Context,
-	projectID uint64,
+	resolver canvasCompositionReferenceResolver,
 	index int,
 	raw map[string]any,
 ) (map[string]any, error) {
 	label := fmt.Sprintf("第 %d 个镜头", index+1)
-	if issues := canvasTextList(firstPresent(raw["blocking_issues"], raw["blockingIssues"])); len(issues) > 0 {
-		return nil, fmt.Errorf("%s尚不能合成: %s", label, strings.Join(issues, "；"))
-	}
-	visualVideo, err := resolveCanvasCompositionMediaURL(
-		ctx,
-		projectID,
+	visualVideo, err := resolver.resolveMediaURL(
 		mapValue(firstPresent(raw["visual_video"], raw["visualVideo"])),
 		botprotocol.MediaTypeVideo,
 		label+"画面",
@@ -207,9 +235,7 @@ func resolveCanvasVideoClip(
 		"transition_to_next": transition,
 	}
 	if originalRaw := mapValue(firstPresent(raw["original_audio_source"], raw["originalAudioSource"])); len(originalRaw) > 0 {
-		originalAudio, originalErr := resolveCanvasCompositionMediaURL(
-			ctx,
-			projectID,
+		originalAudio, originalErr := resolver.resolveMediaURL(
 			originalRaw,
 			botprotocol.MediaTypeVideo,
 			label+"原声来源",
@@ -221,8 +247,7 @@ func resolveCanvasVideoClip(
 	}
 
 	tracks, err := resolveCanvasVideoSpeechTracks(
-		ctx,
-		projectID,
+		resolver,
 		label,
 		sliceValue(firstPresent(raw["speech_tracks"], raw["speechTracks"])),
 	)
@@ -243,8 +268,7 @@ func resolveCanvasVideoClip(
 }
 
 func resolveCanvasVideoSpeechTracks(
-	ctx context.Context,
-	projectID uint64,
+	resolver canvasCompositionReferenceResolver,
 	clipLabel string,
 	rawTracks []any,
 ) ([]any, error) {
@@ -257,9 +281,7 @@ func resolveCanvasVideoSpeechTracks(
 			return nil, fmt.Errorf("%s第 %d 条语音轨标识无效", clipLabel, index+1)
 		}
 		usedIDs[trackID] = true
-		audioURL, err := resolveCanvasCompositionMediaURL(
-			ctx,
-			projectID,
+		audioURL, err := resolver.resolveMediaURL(
 			mapValue(raw["audio"]),
 			botprotocol.MediaTypeAudio,
 			fmt.Sprintf("%s第 %d 条语音", clipLabel, index+1),
@@ -350,9 +372,11 @@ func resolveCanvasVideoCompositionSettings(raw map[string]any) map[string]any {
 	}
 }
 
-func resolveCanvasCompositionMediaURL(
-	ctx context.Context,
-	projectID uint64,
+type canvasCompositionReferenceResolver struct {
+	references map[uint64]assetservice.CurrentReference
+}
+
+func (resolver canvasCompositionReferenceResolver) resolveMediaURL(
 	raw map[string]any,
 	mediaType string,
 	label string,
@@ -365,11 +389,11 @@ func resolveCanvasCompositionMediaURL(
 	if reference.AssetID == 0 || reference.VersionID == 0 {
 		return "", fmt.Errorf("%s缺少有效素材引用", label)
 	}
-	_, output, err := resolveCanvasReferenceAsset(ctx, projectID, reference)
-	if err != nil {
-		return "", fmt.Errorf("%s不可用: %w", label, err)
+	resolved, ok := resolver.references[reference.AssetID]
+	if !ok || resolved.Content == nil {
+		return "", fmt.Errorf("%s不可用", label)
 	}
-	media := botprotocol.ExtractMediaOutput(output, mediaType)
+	media := botprotocol.ExtractMediaOutput(resolved.Content, mediaType)
 	values := botprotocol.NormalizeMediaList(media[mediaType+"s"], mediaType)
 	if len(values) == 0 {
 		return "", fmt.Errorf("%s不是可用的%s素材", label, botprotocol.MediaOutputLabel(mediaType))

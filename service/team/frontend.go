@@ -247,10 +247,19 @@ func (s Service) CanvasPowerForm(ctx context.Context, releaseID uint64, flowID u
 	}, nil
 }
 
-func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) (map[string]any, error) {
+type preparedCanvasPower struct {
+	request      CanvasPowerRunRequest
+	workspaceRun bool
+	releaseID    uint64
+	teamID       uint64
+	flow         teammodel.Flow
+	power        PowerOption
+}
+
+func (s Service) prepareCanvasPower(ctx context.Context, req CanvasPowerRunRequest) (preparedCanvasPower, error) {
 	workspaceRun := req.ProjectID == 0
 	if req.ProjectID == 0 && req.BodyID == 0 {
-		return nil, fmt.Errorf("项目或团队工作区不能为空")
+		return preparedCanvasPower{}, fmt.Errorf("项目或团队工作区不能为空")
 	}
 	var releaseID uint64
 	var teamID uint64
@@ -259,7 +268,7 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	if req.TeamID > 0 || req.ReleaseID > 0 {
 		release, graph, err := s.runtimeGraphByRelease(ctx, req.TeamID, req.ReleaseID)
 		if err != nil {
-			return nil, err
+			return preparedCanvasPower{}, err
 		}
 		releaseID = release.ID
 		teamID = graph.Team.ID
@@ -267,13 +276,13 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		if req.FlowID > 0 {
 			flow = graph.findFlow(req.FlowID)
 			if flow.ID == 0 {
-				return nil, fmt.Errorf("发布版本中不存在当前工作流")
+				return preparedCanvasPower{}, fmt.Errorf("发布版本中不存在当前工作流")
 			}
 		}
 	}
 	if workspaceRun {
 		if req.TeamPowerID == 0 {
-			return nil, fmt.Errorf("团队能力不能为空")
+			return preparedCanvasPower{}, fmt.Errorf("团队能力不能为空")
 		}
 		matched := false
 		for _, teamPower := range teamPowers {
@@ -286,26 +295,47 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 			break
 		}
 		if !matched {
-			return nil, fmt.Errorf("当前团队发布版本中不存在该能力")
+			return preparedCanvasPower{}, fmt.Errorf("当前团队发布版本中不存在该能力")
 		}
 	}
 	power, ok := s.repo.FindPowerOption(ctx, req.PowerID, req.PowerKey)
 	if !ok {
-		return nil, fmt.Errorf("能力不存在")
+		return preparedCanvasPower{}, fmt.Errorf("能力不存在")
 	}
 	if !powerAllowedByScope(teamPowers, power.ID) {
-		return nil, fmt.Errorf("当前团队不允许使用该能力")
+		return preparedCanvasPower{}, fmt.Errorf("当前团队不允许使用该能力")
 	}
 	form, err := s.gateway.RuntimePowerParamConfig(ctx, power.Key, req.SourceTargetID)
 	if err != nil {
-		return nil, err
+		return preparedCanvasPower{}, err
 	}
 	req.SourceTargetID = form.SelectedTargetID
 	boundReferences, err := energoninput.BindMediaReferences(req.Params, form.Params, req.MediaReferences)
 	if err != nil {
-		return nil, err
+		return preparedCanvasPower{}, err
 	}
 	req.Params = energonservice.ApplyPowerParamDefaults(boundReferences.Values, form.Params)
+	return preparedCanvasPower{
+		request:      req,
+		workspaceRun: workspaceRun,
+		releaseID:    releaseID,
+		teamID:       teamID,
+		flow:         flow,
+		power:        power,
+	}, nil
+}
+
+func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) (map[string]any, error) {
+	prepared, err := s.prepareCanvasPower(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	req = prepared.request
+	workspaceRun := prepared.workspaceRun
+	releaseID := prepared.releaseID
+	teamID := prepared.teamID
+	flow := prepared.flow
+	power := prepared.power
 
 	requestID := strings.TrimSpace(req.RequestID)
 	if requestID == "" {

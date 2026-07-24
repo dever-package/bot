@@ -186,7 +186,13 @@ func (Team) PostRunProjectFlow(c *server.Context) error {
 func (Team) GetRunStatus(c *server.Context) error {
 	runID := uint64(frontstream.InputInt64(c.Input("run_id"), 0))
 	requestID := strings.TrimSpace(frontstream.InputText(c.Input("request_id")))
-	data, err := teamRunner.RunStatus(c.Context(), runID, requestID)
+	var data map[string]any
+	var err error
+	if strings.EqualFold(strings.TrimSpace(frontstream.InputText(c.Input("view"))), "detail") {
+		data, err = teamRunner.RunDetail(c.Context(), runID, requestID)
+	} else {
+		data, err = teamRunner.RunStatus(c.Context(), runID, requestID)
+	}
 	return botapi.WriteJSON(c, data, err)
 }
 

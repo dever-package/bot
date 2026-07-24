@@ -103,6 +103,9 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
   const saveNodeApi = String(meta.saveNodeApi || "/bot/admin/team/save_node_graph");
   const runTeamApi = String(meta.runTeamApi || "/bot/admin/team/run_team");
   const runFlowApi = String(meta.runFlowApi || "/bot/admin/team/run_flow");
+  const runStatusApi = String(
+    meta.runStatusApi || "/bot/admin/team/run_status",
+  );
   const streamApi = String(meta.streamApi || "/bot/admin/team/stream");
   const approvalApi = String(meta.approvalApi || "/bot/admin/team/submit_approval");
   const interactionApi = String(
@@ -404,6 +407,7 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
       setDebugResult(startStatus);
       const status = await watchDebugStream(
         streamApi,
+        runStatusApi,
         startStatus,
         setDebugResult,
         signal,
@@ -480,6 +484,7 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
       toast.success("已提交反馈，流程继续执行");
       const status = await watchDebugStream(
         streamApi,
+        runStatusApi,
         submittedStatus,
         setDebugResult,
       );

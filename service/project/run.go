@@ -33,24 +33,40 @@ type CanvasAgentRunRequest struct {
 }
 
 func (s Service) RunCanvasPower(ctx context.Context, projectID uint64, req teamservice.CanvasPowerRunRequest) (map[string]any, error) {
-	project, err := requireProject(ctx, projectID)
+	prepared, project, err := s.prepareProjectCanvasPower(ctx, projectID, req)
 	if err != nil {
 		return nil, err
 	}
+	prepared.Billing.Billable = true
+	prepared.Billing.Scene = "project_power"
+	prepared.Billing.UserID = project.UserID
+	prepared.Billing.TeamID = project.TeamID
+	prepared.Billing.ProjectID = project.ID
+	return s.team.RunCanvasPower(ctx, prepared)
+}
+
+func (s Service) PreflightCanvasPower(ctx context.Context, projectID uint64, req teamservice.CanvasPowerRunRequest) error {
+	prepared, _, err := s.prepareProjectCanvasPower(ctx, projectID, req)
+	if err != nil {
+		return err
+	}
+	return s.team.PreflightCanvasPower(ctx, prepared)
+}
+
+func (s Service) prepareProjectCanvasPower(ctx context.Context, projectID uint64, req teamservice.CanvasPowerRunRequest) (teamservice.CanvasPowerRunRequest, *projectmodel.Project, error) {
+	project, err := requireProject(ctx, projectID)
+	if err != nil {
+		return req, nil, err
+	}
 	project, err = s.SyncTeamRelease(ctx, project)
 	if err != nil {
-		return nil, err
+		return req, nil, err
 	}
 	req.ProjectID = project.ID
 	req.BodyID = project.BodyID
 	req.TeamID = project.TeamID
 	req.ReleaseID = project.ReleaseID
-	req.Billing.Billable = true
-	req.Billing.Scene = "project_power"
-	req.Billing.UserID = project.UserID
-	req.Billing.TeamID = project.TeamID
-	req.Billing.ProjectID = project.ID
-	return s.team.RunCanvasPower(ctx, req)
+	return req, project, nil
 }
 
 func (s Service) RunCanvasAgent(ctx context.Context, projectID uint64, req CanvasAgentRunRequest) (map[string]any, error) {
@@ -218,6 +234,27 @@ func (s Service) RunStatus(ctx context.Context, projectID uint64, runID uint64, 
 		return workspace.workspaceRunPayload(ctx, projectID, run), nil
 	}
 	return s.team.ProjectRunStatus(ctx, projectID, runID, requestID)
+}
+
+func (s Service) RunDetail(ctx context.Context, projectID uint64, runID uint64, requestID string) (map[string]any, error) {
+	if _, err := requireProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	workspace := NewWorkspaceService()
+	if run := workspace.SyncCanvasRunProgress(ctx, projectID, runID, requestID); run != nil {
+		if execution := workspaceExecutionByRunID(ctx, run.ID); execution != nil {
+			return workspaceExecutionPayload(ctx, execution), nil
+		}
+		return workspace.workspaceRunPayload(ctx, projectID, run), nil
+	}
+	return s.team.ProjectRunDetail(ctx, projectID, runID, requestID)
+}
+
+func (s Service) WaitRunStatus(ctx context.Context, projectID uint64, runID uint64, requestID string, timeout time.Duration) (map[string]any, error) {
+	if _, err := requireProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	return s.team.WaitProjectRunStatus(ctx, projectID, runID, requestID, timeout)
 }
 
 func (s Service) ReadStream(ctx context.Context, projectID uint64, requestID string, lastID string, count int64, block time.Duration) ([]frontstream.Entry, error) {

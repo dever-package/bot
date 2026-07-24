@@ -33,6 +33,7 @@ import { MessageNavigator } from "./message-navigator";
 import {
   findAgentChatInteractionResponse,
   readAgentChatInteraction,
+  readAgentChatSuggestionMessage,
   readAgentChatSuggestions,
 } from "./interaction";
 import {
@@ -305,6 +306,9 @@ function AssistantMessage({
     ? findAgentChatInteractionResponse(controller.messages, interaction.id)
     : undefined;
   const suggestions = readAgentChatSuggestions(output);
+  const suggestionMessage = suggestions.length
+    ? readAgentChatSuggestionMessage(output)
+    : "";
   const error = status?.type === "incomplete" && status.reason === "error";
   const waitingForNextStep = isWaitingAfterCompactActivity(
     status?.type === "running",
@@ -331,6 +335,13 @@ function AssistantMessage({
               document={document}
               onOpen={onOpenDocument}
             />
+            {suggestionMessage ? (
+              <AgentChatMarkdown
+                text={suggestionMessage}
+                error={error}
+                className="mt-4"
+              />
+            ) : null}
           </>
         ) : (
           <>
@@ -522,6 +533,7 @@ function MessageActions({
         running: status?.type === "running",
         error: status?.type === "incomplete",
         hasPendingArtifacts,
+        document,
       })}
     </ActionBarPrimitive.Root>
   );

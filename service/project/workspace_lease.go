@@ -13,7 +13,6 @@ const (
 	workspaceRunLeaseDuration     = 45 * time.Second
 	workspaceRunHeartbeatInterval = 10 * time.Second
 	workspaceLegacyRunStaleAfter  = 2 * time.Minute
-	workspaceRunInterruptedError  = "服务重启导致任务中断，请重新执行"
 )
 
 func startWorkspaceRunLease(ctx context.Context, runID uint64) (context.Context, func(), bool) {

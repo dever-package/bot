@@ -1,7 +1,7 @@
 {
   "page": {
     "name": "基础配置",
-    "icon": "settings-2",
+    "icon": "globe",
     "parent": "bot-body",
     "type": 1,
     "sort": 1
@@ -39,19 +39,19 @@
                     "type": "container",
                     "className": "w-full"
                   },
-                  "filing-panel": {
+                  "workbench-panel": {
                     "type": "container",
                     "className": "w-full"
                   },
-                  "accounts-panel": {
+                  "login-panel": {
                     "type": "container",
-                    "className": "min-w-0 overflow-hidden"
+                    "className": "w-full"
                   },
                   "functions-panel": {
                     "type": "container",
-                    "className": "min-w-0 overflow-hidden"
+                    "className": "flex min-w-0 flex-col gap-5 overflow-hidden"
                   },
-                  "links-panel": {
+                  "accounts-panel": {
                     "type": "container",
                     "className": "min-w-0 overflow-hidden"
                   }
@@ -77,53 +77,19 @@
     "header-actions": [
       {
         "type": "show-button",
-        "name": "保存配置",
+        "name": "保存设置",
         "className": "shrink-0",
         "meta": {
-          "tab": "site",
+          "tab": ["site", "workbench", "login", "functions"],
           "variant": "default",
           "size": "sm",
           "icon": "save",
           "validateForm": true,
           "loadingText": "保存中...",
-          "successMessage": "配置已保存"
+          "successMessage": "设置已保存"
         },
         "action": {
           "click": "submit"
-        }
-      },
-      {
-        "type": "show-button",
-        "name": "保存备案信息",
-        "className": "shrink-0",
-        "meta": {
-          "tab": "filing",
-          "variant": "default",
-          "size": "sm",
-          "icon": "save",
-          "loadingText": "保存中...",
-          "successMessage": "备案信息已保存"
-        },
-        "action": {
-          "click": "submit"
-        }
-      },
-      {
-        "type": "show-button",
-        "name": "新增登录页菜单",
-        "className": "shrink-0",
-        "meta": {
-          "tab": "links",
-          "variant": "default",
-          "size": "sm",
-          "icon": "plus"
-        },
-        "action": {
-          "click": {
-            "type": "modal",
-            "key": "dialog.createLink",
-            "value": true
-          }
         }
       },
       {
@@ -153,24 +119,24 @@
           "variant": "sidebar",
           "tabs": [
             {
-              "label": "站点设置",
+              "label": "站点配置",
               "value": "site"
             },
             {
-              "label": "备案信息",
-              "value": "filing"
+              "label": "工作台设置",
+              "value": "workbench"
             },
             {
-              "label": "三方账号",
-              "value": "accounts"
+              "label": "登录页设置",
+              "value": "login"
             },
             {
               "label": "功能列表",
               "value": "functions"
             },
             {
-              "label": "登录页菜单",
-              "value": "links"
+              "label": "三方账号",
+              "value": "accounts"
             }
           ]
         }
@@ -215,10 +181,10 @@
       },
       {
         "type": "form-upload",
-        "name": "站点图标",
+        "name": "站点 Favicon",
         "value": "form.favicon",
         "mode": "form",
-        "info": "用于浏览器标签页，推荐上传正方形 PNG 或 SVG。",
+        "info": "用于浏览器标签页和收藏夹，推荐上传正方形 PNG 或 SVG。",
         "meta": {
           "tab": "site",
           "formLayout": "horizontal",
@@ -232,30 +198,33 @@
         }
       },
       {
-        "type": "form-radio",
-        "name": "主题方案",
-        "value": "form.theme_preset",
+        "type": "form-color",
+        "name": "基础配色",
+        "placeholder": "例如：#96a29c",
+        "value": "form.base_color",
         "mode": "form",
-        "info": "控制 Body 登录页、工作台和画布的基础色彩；自定义品牌主色只覆盖强调色。",
+        "info": "用于生成登录页、工作台和画布的基础背景、表面、边框与文字色；留空使用系统默认值。",
         "validate": [
           {
-            "type": "required",
-            "message": "请选择主题方案。"
+            "type": "pattern",
+            "pattern": "^$|^#[0-9a-fA-F]{6}$",
+            "message": "基础配色必须是 # 开头的 6 位十六进制颜色。"
           }
         ],
         "meta": {
           "tab": "site",
           "formLayout": "horizontal",
-          "controlClassName": "gap-x-5"
+          "controlClassName": "max-w-xs",
+          "pickerDefault": "#96a29c"
         }
       },
       {
-        "type": "form-input",
+        "type": "form-color",
         "name": "品牌主色",
         "placeholder": "例如：#1c6548",
         "value": "form.brand_primary_color",
         "mode": "form",
-        "info": "可选。填写 6 位十六进制颜色后覆盖主题强调色；留空使用主题默认值。",
+        "info": "可选。作为登录页、工作台和画布的统一强调色；留空使用原来的默认墨绿。",
         "validate": [
           {
             "type": "pattern",
@@ -266,27 +235,26 @@
         "meta": {
           "tab": "site",
           "formLayout": "horizontal",
-          "controlClassName": "max-w-[220px]"
+          "controlClassName": "max-w-xs",
+          "pickerDefault": "#1c6548"
         }
       },
       {
-        "type": "form-radio",
-        "name": "登录页模板",
-        "value": "form.login_template",
+        "type": "form-editor",
+        "name": "底部备案内容",
+        "placeholder": "填写企业名称、备案号和相关链接。",
+        "value": "form.filing_content",
         "mode": "form",
-        "info": "切换登录页外层布局，账号、三方登录和站点菜单保持不变。",
-        "validate": [
-          {
-            "type": "required",
-            "message": "请选择登录页模板。"
-          }
-        ],
+        "info": "登录页底部和工作台共用此内容。建议使用一行文字与链接，不要插入图片、音视频或表格。",
         "meta": {
           "tab": "site",
-          "formLayout": "horizontal",
-          "controlClassName": "gap-x-5"
+          "formLayout": "vertical",
+          "minHeight": 180,
+          "maxHeight": 320
         }
-      },
+      }
+    ],
+    "workbench-panel": [
       {
         "type": "form-radio",
         "name": "工作台模板",
@@ -300,29 +268,52 @@
           }
         ],
         "meta": {
-          "tab": "site",
+          "tab": "workbench",
           "formLayout": "horizontal",
           "controlClassName": "gap-x-5"
         }
       },
       {
         "type": "form-upload",
-        "name": "登录页图片",
-        "value": "form.login_image",
+        "name": "工作台背景图",
+        "value": "form.workbench_background_image",
         "mode": "form",
-        "info": "用于登录页左侧展示；未上传时使用系统默认图片。",
+        "info": "用于工作台外层背景，内容区域会保留半透明主题表面以保证可读性。",
         "meta": {
-          "tab": "site",
+          "tab": "workbench",
           "formLayout": "horizontal",
           "uploadType": "pic",
           "kind": "image",
           "saveMode": "url",
           "ruleId": 1,
-          "bizKey": "body.config.login_image",
-          "bizName": "Body登录页图片",
+          "bizKey": "body.config.workbench_background_image",
+          "bizName": "Body工作台背景图",
           "maxCount": 1
         }
       },
+      {
+        "type": "form-color",
+        "name": "工作台底色",
+        "placeholder": "例如：#f4f6f5",
+        "value": "form.workbench_background_color",
+        "mode": "form",
+        "info": "可选。铺满工作台底层，导航和内容区会叠加半透明基础表面；留空使用基础配色。",
+        "validate": [
+          {
+            "type": "pattern",
+            "pattern": "^$|^#[0-9a-fA-F]{6}$",
+            "message": "工作台底色必须是 # 开头的 6 位十六进制颜色。"
+          }
+        ],
+        "meta": {
+          "tab": "workbench",
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-xs",
+          "pickerDefault": "#f4f6f5"
+        }
+      }
+    ],
+    "login-panel": [
       {
         "type": "form-input",
         "name": "登录页标题",
@@ -336,7 +327,7 @@
           }
         ],
         "meta": {
-          "tab": "site",
+          "tab": "login",
           "formLayout": "horizontal",
           "controlClassName": "max-w-xl"
         }
@@ -348,10 +339,119 @@
         "value": "form.login_description",
         "mode": "form",
         "meta": {
-          "tab": "site",
+          "tab": "login",
           "formLayout": "horizontal",
           "controlClassName": "max-w-xl",
           "rows": 4
+        }
+      },
+      {
+        "type": "form-switch",
+        "name": "开放注册",
+        "value": "form.register_status",
+        "mode": "form",
+        "info": "关闭后登录页不显示注册入口，登录页注册请求也会被拒绝。",
+        "meta": {
+          "tab": "login",
+          "trueValue": 1,
+          "falseValue": 2,
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-radio",
+        "name": "登录页模板",
+        "value": "form.login_template",
+        "mode": "form",
+        "info": "切换登录页外层布局，账号、三方登录和单页链接保持不变。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "请选择登录页模板。"
+          }
+        ],
+        "meta": {
+          "tab": "login",
+          "formLayout": "horizontal",
+          "controlClassName": "gap-x-5"
+        }
+      },
+      {
+        "type": "form-color",
+        "name": "登录页文案颜色",
+        "placeholder": "例如：#ffffff",
+        "value": "form.login_text_color",
+        "mode": "form",
+        "info": "可选。控制登录页标题和说明；留空时有背景图自动使用白色，无背景图使用基础配色文字色。",
+        "validate": [
+          {
+            "type": "pattern",
+            "pattern": "^$|^#[0-9a-fA-F]{6}$",
+            "message": "登录页文案颜色必须是 # 开头的 6 位十六进制颜色。"
+          }
+        ],
+        "meta": {
+          "tab": "login",
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-xs",
+          "pickerDefault": "#ffffff"
+        }
+      },
+      {
+        "type": "form-upload",
+        "name": "登录页背景图",
+        "value": "form.login_background_image",
+        "mode": "form",
+        "info": "铺满登录页背景；未上传时不显示背景图。",
+        "meta": {
+          "tab": "login",
+          "formLayout": "horizontal",
+          "uploadType": "pic",
+          "kind": "image",
+          "saveMode": "url",
+          "ruleId": 1,
+          "bizKey": "body.config.login_background_image",
+          "bizName": "Body登录页背景图",
+          "maxCount": 1
+        }
+      },
+      {
+        "type": "form-color",
+        "name": "登录页底色",
+        "placeholder": "例如：#fbfcfb",
+        "value": "form.login_background_color",
+        "mode": "form",
+        "info": "可选。作为登录页底层颜色；与背景图同时设置时用于图片加载前和透明区域。",
+        "validate": [
+          {
+            "type": "pattern",
+            "pattern": "^$|^#[0-9a-fA-F]{6}$",
+            "message": "登录页底色必须是 # 开头的 6 位十六进制颜色。"
+          }
+        ],
+        "meta": {
+          "tab": "login",
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-xs",
+          "pickerDefault": "#fbfcfb"
+        }
+      },
+      {
+        "type": "form-upload",
+        "name": "登录页介绍图",
+        "value": "form.login_image",
+        "mode": "form",
+        "info": "用于分栏和品牌展示模板；未上传时不显示介绍图。",
+        "meta": {
+          "tab": "login",
+          "formLayout": "horizontal",
+          "uploadType": "pic",
+          "kind": "image",
+          "saveMode": "url",
+          "ruleId": 1,
+          "bizKey": "body.config.login_image",
+          "bizName": "Body登录页介绍图",
+          "maxCount": 1
         }
       }
     ],
@@ -444,205 +544,6 @@
         "meta": {
           "tab": "functions",
           "reloadDataKey": "functions"
-        }
-      }
-    ],
-    "filing-panel": [
-      {
-        "type": "form-input",
-        "name": "企业名称",
-        "placeholder": "营业执照上的企业名称",
-        "value": "form.company_name",
-        "mode": "form",
-        "meta": {
-          "tab": "filing",
-          "formLayout": "horizontal",
-          "controlClassName": "max-w-xl"
-        }
-      },
-      {
-        "type": "form-textarea",
-        "name": "企业地址",
-        "placeholder": "企业注册地址或经营地址",
-        "value": "form.company_address",
-        "mode": "form",
-        "meta": {
-          "tab": "filing",
-          "formLayout": "horizontal",
-          "controlClassName": "max-w-xl",
-          "rows": 3
-        }
-      },
-      {
-        "type": "form-input",
-        "name": "营业执照链接",
-        "placeholder": "https://...",
-        "value": "form.business_license_url",
-        "mode": "form",
-        "meta": {
-          "tab": "filing",
-          "formLayout": "horizontal",
-          "controlClassName": "max-w-xl"
-        }
-      },
-      {
-        "type": "form-input",
-        "name": "ICP备案号",
-        "placeholder": "例如：京ICP备XXXXXXXX号",
-        "value": "form.icp_record",
-        "mode": "form",
-        "meta": {
-          "tab": "filing",
-          "formLayout": "horizontal",
-          "controlClassName": "max-w-xl"
-        }
-      },
-      {
-        "type": "form-input",
-        "name": "ICP备案链接",
-        "placeholder": "https://beian.miit.gov.cn/",
-        "value": "form.icp_record_url",
-        "mode": "form",
-        "meta": {
-          "tab": "filing",
-          "formLayout": "horizontal",
-          "controlClassName": "max-w-xl"
-        }
-      },
-      {
-        "type": "form-input",
-        "name": "公安备案号",
-        "placeholder": "例如：京公网安备XXXXXXXXXXXXXX号",
-        "value": "form.public_security_record",
-        "mode": "form",
-        "meta": {
-          "tab": "filing",
-          "formLayout": "horizontal",
-          "controlClassName": "max-w-xl"
-        }
-      },
-      {
-        "type": "form-input",
-        "name": "公安备案链接",
-        "placeholder": "https://www.beian.gov.cn/...",
-        "value": "form.public_security_record_url",
-        "mode": "form",
-        "meta": {
-          "tab": "filing",
-          "formLayout": "horizontal",
-          "controlClassName": "max-w-xl"
-        }
-      }
-    ],
-    "links-panel": [
-      {
-        "type": "show-table",
-        "value": "links.list",
-        "meta": {
-          "tab": "links",
-          "pagePath": "data.links.page",
-          "pageSizePath": "data.links.pageSize",
-          "totalPath": "data.links.total",
-          "remote": true,
-          "externalPagination": true,
-          "reloadDataKey": "links",
-          "savePath": "bot/body/link/update",
-          "rowKey": "id",
-          "columns": [
-            {
-              "name": "名称",
-              "value": "name",
-              "type": "show-base"
-            },
-            {
-              "name": "链接地址",
-              "value": "url",
-              "type": "show-base"
-            },
-            {
-              "name": "打开方式",
-              "value": "target",
-              "type": "show-tag"
-            },
-            {
-              "name": "状态",
-              "value": "status",
-              "type": "form-switch",
-              "meta": {
-                "trueValue": 1,
-                "falseValue": 2
-              }
-            },
-            {
-              "name": "排序",
-              "value": "sort",
-              "type": "show-base",
-              "description": "双击数值可编辑；数值越小越靠前。",
-              "editor": "form-number",
-              "trigger": "doubleClick"
-            },
-            {
-              "name": "创建时间",
-              "value": "created_at",
-              "type": "show-date"
-            },
-            {
-              "name": "操作",
-              "type": "show-button",
-              "className": "w-[1%] whitespace-nowrap px-3 text-center",
-              "meta": {
-                "buttons": [
-                  {
-                    "icon": "square-pen",
-                    "variant": "outline",
-                    "size": "sm",
-                    "description": "编辑登录页菜单",
-                    "action": {
-                      "click": [
-                        {
-                          "type": "data",
-                          "key": "actionTarget.editLinkId",
-                          "value": "$row.id"
-                        },
-                        {
-                          "type": "modal",
-                          "key": "dialog.editLink",
-                          "value": true
-                        }
-                      ]
-                    }
-                  },
-                  {
-                    "icon": "trash-2",
-                    "variant": "outline",
-                    "size": "sm",
-                    "description": "删除菜单",
-                    "action": {
-                      "click": [
-                        {
-                          "type": "data",
-                          "key": "actionTarget.deleteLink",
-                          "value": "$row"
-                        },
-                        {
-                          "type": "modal",
-                          "key": "confirm.deleteLink",
-                          "value": true
-                        }
-                      ]
-                    }
-                  }
-                ]
-              }
-            }
-          ]
-        }
-      },
-      {
-        "type": "show-page",
-        "meta": {
-          "tab": "links",
-          "reloadDataKey": "links"
         }
       }
     ],
@@ -743,6 +644,7 @@
         "type": "feedback-modal",
         "meta": {
           "stateKey": "dialog.editFunction",
+          "reloadDataKey": "functions",
           "pageRoute": "/bot/body/function/update",
           "pageRouteQuery": {
             "id": "data.actionTarget.editFunctionId"
@@ -758,51 +660,8 @@
       {
         "type": "feedback-modal",
         "meta": {
-          "stateKey": "dialog.createLink",
-          "pageRoute": "/bot/body/link/update",
-          "title": "新增登录页菜单",
-          "size": "lg",
-          "footer": {
-            "confirm": true,
-            "confirmText": "保存"
-          }
-        }
-      },
-      {
-        "type": "feedback-modal",
-        "meta": {
-          "stateKey": "dialog.editLink",
-          "pageRoute": "/bot/body/link/update",
-          "pageRouteQuery": {
-            "id": "data.actionTarget.editLinkId"
-          },
-          "title": "编辑登录页菜单",
-          "size": "lg",
-          "footer": {
-            "confirm": true,
-            "confirmText": "保存"
-          }
-        }
-      },
-      {
-        "type": "feedback-confirm",
-        "name": "删除登录页菜单",
-        "info": "确认删除当前登录页菜单吗？",
-        "meta": {
-          "stateKey": "confirm.deleteLink"
-        },
-        "action": {
-          "confirm": {
-            "type": "delete",
-            "model": "bot.body.NewLinkModel",
-            "params": "actionTarget.deleteLink"
-          }
-        }
-      },
-      {
-        "type": "feedback-modal",
-        "meta": {
           "stateKey": "dialog.createAccount",
+          "reloadDataKey": "accounts",
           "pageRoute": "/bot/body/account/update",
           "title": "新增账号入口",
           "size": "lg",
@@ -816,6 +675,7 @@
         "type": "feedback-modal",
         "meta": {
           "stateKey": "dialog.editAccount",
+          "reloadDataKey": "accounts",
           "pageRoute": "/bot/body/account/update",
           "pageRouteQuery": {
             "id": "data.actionTarget.editAccountId"
@@ -833,7 +693,7 @@
   "data": {
     "page": {
       "title": "基础配置",
-      "description": "维护 Body 站点品牌、备案信息、第三方账号、功能列表和登录页菜单。"
+      "description": "统一维护站点、底部备案内容、工作台、登录页、功能入口和三方账号。"
     },
     "form": {
       "id": 1,
@@ -841,44 +701,39 @@
         "site_name",
         "logo",
         "favicon",
-        "login_image",
+        "base_color",
+        "brand_primary_color",
+        "workbench_template",
+        "workbench_background_image",
+        "workbench_background_color",
         "login_title",
         "login_description",
-        "theme_preset",
-        "brand_primary_color",
+        "register_status",
         "login_template",
-        "workbench_template",
-        "company_name",
-        "company_address",
-        "business_license_url",
-        "icp_record",
-        "icp_record_url",
-        "public_security_record",
-        "public_security_record_url"
+        "login_text_color",
+        "login_background_image",
+        "login_background_color",
+        "login_image",
+        "filing_content"
       ],
       "site_name": "神创工作台",
       "logo": "",
       "favicon": "",
-      "login_image": "",
+      "base_color": "#96a29c",
+      "brand_primary_color": "",
+      "workbench_template": "rail",
+      "workbench_background_image": "",
+      "workbench_background_color": "",
       "login_title": "把想法变成作品",
       "login_description": "调用团队能力，与智能体协作，把每一次创作沉淀为可复用的项目资产。",
-      "theme_preset": "forest",
-      "brand_primary_color": "",
+      "register_status": 1,
       "login_template": "split",
-      "workbench_template": "rail",
-      "company_name": "",
-      "company_address": "",
-      "business_license_url": "",
-      "icp_record": "",
-      "icp_record_url": "",
-      "public_security_record": "",
-      "public_security_record_url": "",
+      "login_text_color": "",
+      "login_background_image": "",
+      "login_background_color": "",
+      "login_image": "",
+      "filing_content": "",
       "model": "bot.body.NewConfigModel"
-    },
-    "links": {
-      "model": "bot.body.NewLinkModel",
-      "pageSize": 100,
-      "order": "sort asc,id asc"
     },
     "accounts": {
       "model": "bot.body.NewAccountModel",
@@ -892,8 +747,6 @@
       "order": "sort asc,id asc"
     },
     "actionTarget": {
-      "editLinkId": "",
-      "deleteLink": {},
       "editAccountId": "",
       "editFunctionId": ""
     }
@@ -901,14 +754,9 @@
   "state": {
     "currentTab": "site",
     "dialog": {
-      "createLink": false,
-      "editLink": false,
       "createAccount": false,
       "editAccount": false,
       "editFunction": false
-    },
-    "confirm": {
-      "deleteLink": false
     }
   },
   "action": {

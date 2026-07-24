@@ -1,0 +1,79 @@
+{
+  "page": {
+    "name": "内容分类编辑",
+    "parent": "bot/body/content_article/list",
+    "type": 2,
+    "auth": [
+      {
+        "key": "bot/body/content_category/create",
+        "name": "内容分类新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/body/content_category/update",
+        "name": "内容分类编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-input",
+        "name": "分类名称",
+        "placeholder": "例如：使用指南",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "分类名称不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "id": "",
+      "name": "",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "data": {
+        "id": "$form.id",
+        "name": "$form.name",
+        "status": "$form.status",
+        "sort": "$form.sort"
+      }
+    }
+  }
+}

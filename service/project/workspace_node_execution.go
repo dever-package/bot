@@ -287,18 +287,10 @@ func workspaceNodeExecutionSourceSignature(row workspacemodel.NodeExecution) str
 }
 
 func workspaceNodeResultInteraction(nodeRun map[string]any, output map[string]any) map[string]any {
-	for _, raw := range []any{
-		nodeRun["interaction"],
-		valueAtPath(nodeRun, "result", "interaction"),
-		output["interaction"],
-		valueAtPath(output, "result", "interaction"),
-		valueAtPath(output, "pending_node", "interaction"),
-	} {
-		if interaction := mapValue(raw); interaction != nil {
-			return interaction
-		}
+	if interaction := canvasPayloadInteraction(nodeRun); interaction != nil {
+		return interaction
 	}
-	return nil
+	return canvasPayloadInteraction(output)
 }
 
 func workspaceNodeResultApproval(row workspacemodel.NodeExecution, nodeRun map[string]any, output map[string]any) map[string]any {

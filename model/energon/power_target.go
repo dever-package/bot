@@ -23,26 +23,41 @@ type PowerTargetIndex struct {
 var (
 	powerTargetSeed = []map[string]any{
 		{
-			"id":         1,
+			"id":         20,
+			"power_id":   DefaultLLMPowerID,
+			"service_id": serviceShemicLabGPT54ID,
+			"sort":       1,
+			"status":     1,
+		},
+		{
+			"id":         10,
 			"power_id":   DefaultLLMPowerID,
 			"service_id": serviceShemicLabGPTID,
-			"sort":       1,
+			"sort":       2,
 			"status":     1,
 		},
 		{
 			"id":         2,
 			"power_id":   DefaultLLMPowerID,
-			"service_id": serviceShemicLabGeminiID,
-			"sort":       2,
-			"status":     1,
-		},
-		{
-			"id":         3,
-			"power_id":   DefaultLLMPowerID,
 			"service_id": serviceDoubaoTextID,
 			"sort":       3,
 			"status":     1,
 		},
+		{"id": 23, "power_id": defaultImagePowerID, "service_id": serviceDoubaoImage5ID, "sort": 1, "status": 1},
+		{"id": 4, "power_id": defaultImagePowerID, "service_id": serviceDoubaoImageID, "sort": 2, "status": 1},
+		{"id": 6, "power_id": defaultImagePowerID, "service_id": serviceShemicLabImageID, "sort": 3, "status": 1},
+		{"id": 7, "power_id": defaultVideoPowerID, "service_id": serviceDoubaoVideoID, "sort": 1, "status": 1},
+		{"id": 28, "power_id": defaultVideoPowerID, "service_id": serviceRunningHubVideoID, "sort": 2, "status": 1},
+		{"id": 21, "power_id": defaultVideoPowerID, "service_id": serviceDoubaoVideoFastID, "sort": 3, "status": 1},
+		{"id": 8, "power_id": defaultClothingPowerID, "service_id": serviceRunningHubFlowClothingID, "sort": 1, "status": 1},
+		{"id": 9, "power_id": defaultMusicPowerID, "service_id": serviceRunningHubMusicID, "sort": 1, "status": 1},
+		{"id": 17, "power_id": defaultStoryboardPowerID, "service_id": serviceShemicLabGPT54ID, "sort": 1, "status": 1},
+		{"id": 18, "power_id": defaultVideoComposePowerID, "service_id": serviceFFmpegComposeID, "sort": 1, "status": 1},
+		{"id": 19, "power_id": defaultSpeechPowerID, "service_id": serviceDoubaoAudioID, "sort": 1, "status": 1},
+		{"id": 22, "power_id": defaultCopywritingPowerID, "service_id": serviceShemicLabGPT54ID, "sort": 1, "status": 1},
+		{"id": 24, "power_id": defaultCopywritingPowerID, "service_id": serviceShemicLabGPTID, "sort": 2, "status": 1},
+		{"id": 25, "power_id": defaultCopywritingPowerID, "service_id": serviceDoubaoTextID, "sort": 3, "status": 1},
+		{"id": 27, "power_id": defaultCopywritingPowerID, "service_id": serviceDoubaoGLMID, "sort": 5, "status": 1},
 	}
 
 	powerTargetPowerRelation = orm.Relation{

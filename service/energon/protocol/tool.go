@@ -3,6 +3,7 @@ package protocol
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 )
@@ -173,6 +174,36 @@ func ToolCallArguments(call ToolCall) (map[string]any, error) {
 		return nil, fmt.Errorf("工具 %s 参数不是合法 JSON，可能是参数过长或返回不完整；请删除非必要参数并重新调用: %w", call.Name, err)
 	}
 	return result, nil
+}
+
+// ToolCallVisibleText removes provider output that only repeats native tool arguments.
+func ToolCallVisibleText(text string, calls []ToolCall) string {
+	if strings.TrimSpace(text) == "" || len(calls) == 0 {
+		return text
+	}
+	for _, call := range calls {
+		if sameToolArgumentsText(text, call.Arguments) {
+			return ""
+		}
+	}
+	return text
+}
+
+func sameToolArgumentsText(text string, arguments string) bool {
+	text = strings.TrimSpace(text)
+	arguments = strings.TrimSpace(arguments)
+	if text == "" || arguments == "" {
+		return false
+	}
+	if text == arguments {
+		return true
+	}
+	var textValue any
+	var argumentValue any
+	if json.Unmarshal([]byte(text), &textValue) != nil || json.Unmarshal([]byte(arguments), &argumentValue) != nil {
+		return false
+	}
+	return reflect.DeepEqual(textValue, argumentValue)
 }
 
 func hasToolCallIndex(value any) bool {

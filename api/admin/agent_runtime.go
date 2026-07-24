@@ -40,6 +40,24 @@ func (AgentRuntime) PostRun(c *server.Context) error {
 	return c.JSONPayload(200, response)
 }
 
+func (AgentRuntime) PostOpening(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	response := agentChatRuntime.RunOpening(c.Context(), runtimeloop.ChatRequest{
+		AgentIdentity: botapi.TextFromBody(body, "agent", "agent_key", "agent_id"),
+		SessionID:     botapi.Uint64FromBody(body, "session_id", "sessionId"),
+		ContextKey:    botapi.TextFromBody(body, "context_key", "contextKey"),
+		Method:        c.Method(),
+		Host:          c.Header("Host"),
+		Path:          c.Path(),
+		Headers:       botapi.RequestHeaders(c),
+		Server:        c,
+	})
+	return c.JSONPayload(200, response)
+}
+
 func (AgentRuntime) GetStream(c *server.Context) error {
 	return botapi.HandleStreamRead(c, agentChatRuntime.ReadStream)
 }

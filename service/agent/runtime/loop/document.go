@@ -2,9 +2,12 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeartifact "github.com/dever-package/bot/service/agent/runtime/artifact"
@@ -15,11 +18,29 @@ import (
 	"github.com/shemic/dever/orm"
 )
 
+var errDocumentWriterStatusPersistence = errors.New("文档子运行终态尚未持久化")
+
+const documentWriterStartedEvent = "document_writer_started"
+
+func (state *runState) isDocumentWriter() bool {
+	return state != nil && state.execution.documentWriter && state.documentID > 0
+}
+
+func (state *runState) documentWriteID() uint64 {
+	if !state.isDocumentWriter() {
+		return 0
+	}
+	return state.documentID
+}
+
 func (s Service) executeComposeDocumentStep(
 	ctx context.Context,
 	state *runState,
 	call botprotocol.ToolCall,
 ) toolStepResult {
+	if state.pendingIndex < len(state.pendingTools)-1 {
+		return composeDocumentError(call, fmt.Errorf("compose_document 必须是本轮最后一个工具调用"))
+	}
 	arguments, err := botprotocol.ToolCallArguments(call)
 	if err != nil {
 		return composeDocumentError(call, err)
@@ -60,6 +81,8 @@ func (s Service) executeComposeDocumentStep(
 		return composeDocumentError(call, err)
 	}
 	state.documentID = document.ID
+	state.documentDeliveryReady = false
+	state.documentTextSourceKey = ""
 	payload := documents.Payload(ctx, document, nil)
 	documents.Publish(ctx, document.ID, "document_start", map[string]any{"document": payload})
 	_ = s.writeExecutionOutput(ctx, state.execution, map[string]any{
@@ -67,18 +90,26 @@ func (s Service) executeComposeDocumentStep(
 		"document": payload,
 	})
 
-	content := map[string]any{
-		"document_id":  document.ID,
-		"status":       agentmodel.DocumentStatusWriting,
-		"write_target": "document",
+	writer, writerErr := s.runDocumentWriter(ctx, state, call, input, document)
+	if writerErr != nil {
+		state.documentDeliveryReady = false
+		state.requireTool(runtimeprovider.PresentSuggestionsToolName)
+		return composeDocumentWriterError(call, document.ID, writerErr)
 	}
+	state.documentDeliveryReady = true
+	state.requireTool(runtimeprovider.PresentSuggestionsToolName)
+	content := map[string]any{
+		"document_id":       document.ID,
+		"writer_run_id":     writer.RunID,
+		"title":             document.Title,
+		"status":            writer.Status,
+		"presentation_tool": runtimeprovider.PresentSuggestionsToolName,
+	}
+	modelResult := cloneMap(content)
+	modelResult["document_body"] = writer.Text
 	result := runtimeprovider.Result{
-		Content: content,
-		ModelResult: map[string]any{
-			"document_id":  document.ID,
-			"status":       agentmodel.DocumentStatusWriting,
-			"write_target": "document",
-		},
+		Content:     content,
+		ModelResult: modelResult,
 	}
 	return toolStepResult{
 		result:      result,
@@ -91,14 +122,221 @@ func (s Service) executeComposeDocumentStep(
 	}
 }
 
+type documentWriterResult struct {
+	RunID  uint64
+	Status string
+	Text   string
+}
+
+func (s Service) runDocumentWriter(
+	ctx context.Context,
+	state *runState,
+	call botprotocol.ToolCall,
+	input runtimeprovider.ComposeDocumentInput,
+	document agentmodel.Document,
+) (documentWriterResult, error) {
+	requestID := documentWriterRequestID(state.execution.requestID, call.ID)
+	var row *agentmodel.Run
+	for row == nil {
+		var err error
+		row, err = state.repository.FindRunByRequestIDOptional(ctx, requestID)
+		if err != nil {
+			if waitErr := waitDocumentWriterRetry(ctx); waitErr != nil {
+				return documentWriterResult{}, waitErr
+			}
+			continue
+		}
+		if row != nil {
+			break
+		}
+		execution, createErr := s.createDocumentWriterExecution(ctx, state, input, document, requestID)
+		if createErr != nil {
+			row, err = state.repository.FindRunByRequestIDOptional(ctx, requestID)
+			if err != nil || row == nil {
+				if waitErr := waitDocumentWriterRetry(ctx); waitErr != nil {
+					return documentWriterResult{}, waitErr
+				}
+				continue
+			}
+		} else {
+			if _, err = s.startExecutionStream(ctx, execution); err != nil {
+				s.failExecutionStart(execution, err)
+			} else if err = s.enqueueExecution(ctx, execution); err != nil {
+				s.failExecutionStart(execution, err)
+			}
+			execution.close()
+			row = &agentmodel.Run{ID: execution.runID, RequestID: execution.requestID, Status: runStatusPending}
+		}
+	}
+	return s.waitDocumentWriter(ctx, state, row.ID, document.ID)
+}
+
+func (s Service) createDocumentWriterExecution(
+	ctx context.Context,
+	state *runState,
+	input runtimeprovider.ComposeDocumentInput,
+	document agentmodel.Document,
+	requestID string,
+) (execution, error) {
+	history := documentWriterInheritedHistory(state)
+	inputValue := runtimeEventInput(documentWriterStartedEvent, map[string]any{
+		"document_id":          document.ID,
+		"title":                input.Title,
+		"purpose":              input.Purpose,
+		"content_requirements": input.ContentRequirements,
+		"output_contract":      runtimeprovider.ComposeDocumentOutputContract,
+	})
+	return s.createExecution(ctx, requestID, executionSpec{
+		Agent:                 state.execution.agent,
+		Power:                 state.execution.power,
+		ModelLimits:           state.execution.modelLimits,
+		SessionID:             state.execution.sessionID,
+		AssistantMessageID:    state.execution.assistantMessageID,
+		Prompt:                state.execution.prompt,
+		Input:                 inputValue,
+		RecordInput:           inputValue,
+		InputText:             "生成文档：" + input.Title,
+		History:               history,
+		Transport:             state.execution.transport,
+		PersistChat:           false,
+		MediaReferences:       append([]runtimeprovider.MediaReference(nil), state.execution.mediaReferences...),
+		Scope:                 state.execution.scope,
+		Billing:               state.execution.billing,
+		RequestedAt:           time.Now(),
+		PriorKnowledgeUsed:    state.knowledgeUsed,
+		PriorKnowledgeNodeIDs: sortedKnowledgeNodeIDs(state.knowledgeNodeIDs),
+		PriorLoadedSkills:     append([]agentmodel.LoadedSkillRef(nil), state.loaded...),
+		DocumentID:            document.ID,
+		DocumentWriter:        true,
+	})
+}
+
+func documentWriterInheritedHistory(state *runState) []any {
+	if state == nil {
+		return nil
+	}
+	priorHistory, _ := splitCurrentRunHistory(state.execution, state.history)
+	return append([]any(nil), priorHistory...)
+}
+
+func (s Service) waitDocumentWriter(
+	ctx context.Context,
+	state *runState,
+	runID uint64,
+	documentID uint64,
+) (documentWriterResult, error) {
+	for {
+		row, err := state.repository.FindRunByID(ctx, runID)
+		if err != nil {
+			if waitErr := waitDocumentWriterRetry(ctx); waitErr != nil {
+				return documentWriterResult{}, waitErr
+			}
+			continue
+		}
+		if isTerminalRunStatus(row.Status) {
+			result, resultErr := s.documentWriterTerminalResult(state, row, documentID)
+			if !errors.Is(resultErr, errDocumentWriterStatusPersistence) {
+				return result, resultErr
+			}
+			if waitErr := waitDocumentWriterRetry(ctx); waitErr != nil {
+				return documentWriterResult{}, waitErr
+			}
+			continue
+		}
+		if waitErr := waitDocumentWriterRetry(ctx); waitErr != nil {
+			return documentWriterResult{}, waitErr
+		}
+	}
+}
+
+func (s Service) documentWriterTerminalResult(state *runState, row agentmodel.Run, documentID uint64) (documentWriterResult, error) {
+	ctx, cancel, err := documentMaintenanceContext(state)
+	if err != nil {
+		return documentWriterResult{}, fmt.Errorf("%w: %v", errDocumentWriterStatusPersistence, err)
+	}
+	defer cancel()
+	documents := runtimedocument.NewService()
+	if row.Status != runStatusSuccess {
+		message := strings.TrimSpace(row.Error)
+		if message == "" {
+			message = "文档子运行失败"
+		}
+		if err = persistDocumentWriterFailure(ctx, documents, documentID, message); err != nil {
+			return documentWriterResult{}, err
+		}
+		return documentWriterResult{RunID: row.ID}, fmt.Errorf("%s", message)
+	}
+	text := strings.TrimSpace(documents.Text(ctx, documentID))
+	if text == "" {
+		if err = persistDocumentWriterFailure(ctx, documents, documentID, "文档子运行未生成正文"); err != nil {
+			return documentWriterResult{}, err
+		}
+		return documentWriterResult{RunID: row.ID}, fmt.Errorf("文档子运行未生成正文")
+	}
+	document := documents.Find(ctx, documentID)
+	if document == nil {
+		return documentWriterResult{RunID: row.ID}, fmt.Errorf("%w: 读取文档子运行结果失败", errDocumentWriterStatusPersistence)
+	}
+	if document.Status == agentmodel.DocumentStatusWriting {
+		document, err = documents.MarkContentComplete(ctx, documentID)
+		if err != nil {
+			return documentWriterResult{RunID: row.ID}, fmt.Errorf("%w: 补全文档子运行终态失败: %v", errDocumentWriterStatusPersistence, err)
+		}
+		if document == nil {
+			return documentWriterResult{RunID: row.ID}, fmt.Errorf("%w: 补全文档子运行终态后记录不存在", errDocumentWriterStatusPersistence)
+		}
+	}
+	switch document.Status {
+	case agentmodel.DocumentStatusGenerating,
+		agentmodel.DocumentStatusReady,
+		agentmodel.DocumentStatusPartialFailed:
+		return documentWriterResult{RunID: row.ID, Status: document.Status, Text: text}, nil
+	case agentmodel.DocumentStatusFailed:
+		return documentWriterResult{RunID: row.ID}, fmt.Errorf("文档子运行生成失败")
+	default:
+		return documentWriterResult{RunID: row.ID}, fmt.Errorf("%w: 文档子运行状态无效: %s", errDocumentWriterStatusPersistence, document.Status)
+	}
+}
+
+func persistDocumentWriterFailure(
+	ctx context.Context,
+	documents runtimedocument.Service,
+	documentID uint64,
+	message string,
+) error {
+	if document := documents.Find(ctx, documentID); document != nil && document.Status == agentmodel.DocumentStatusFailed {
+		return nil
+	}
+	if _, err := documents.MarkFailed(ctx, documentID, message); err != nil {
+		return fmt.Errorf("%w: %v", errDocumentWriterStatusPersistence, err)
+	}
+	return nil
+}
+
+func waitDocumentWriterRetry(ctx context.Context) error {
+	timer := time.NewTimer(250 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func documentWriterRequestID(parentRequestID string, toolCallID string) string {
+	value := strings.TrimSpace(parentRequestID) + ":document_writer:" + strings.TrimSpace(toolCallID)
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(value)).String()
+}
+
 func (s Service) persistSynchronousDocumentText(ctx context.Context, state *runState, text string) error {
-	if state == nil || state.documentID == 0 || strings.TrimSpace(text) == "" {
+	if !state.isDocumentWriter() || strings.TrimSpace(text) == "" {
 		return nil
 	}
 	documents := runtimedocument.NewService()
 	block, _, err := documents.BeginTextStream(ctx, runtimedocument.AppendTextRequest{
 		DocumentID: state.documentID,
-		SourceKey:  fmt.Sprintf("%s%d", documentTextSourceKeyPrefix, state.modelStep),
+		SourceKey:  currentDocumentTextSourceKey(state),
 		Text:       text,
 		Meta:       map[string]any{"model_step": state.modelStep},
 	})
@@ -113,7 +351,33 @@ func (s Service) persistSynchronousDocumentText(ctx context.Context, state *runS
 }
 
 func documentHasText(ctx context.Context, documentID uint64) bool {
-	return documentID > 0 && strings.TrimSpace(runtimedocument.NewService().Text(ctx, documentID)) != ""
+	return strings.TrimSpace(currentDocumentText(ctx, documentID)) != ""
+}
+
+func documentHasFailed(ctx context.Context, documentID uint64) bool {
+	document := runtimedocument.NewService().Find(ctx, documentID)
+	return document != nil && document.Status == agentmodel.DocumentStatusFailed
+}
+
+func currentDocumentText(ctx context.Context, documentID uint64) string {
+	if documentID == 0 {
+		return ""
+	}
+	return runtimedocument.NewService().Text(ctx, documentID)
+}
+
+func documentModelTextSourceKey(modelStep int) string {
+	return fmt.Sprintf("%s%d", documentTextSourceKeyPrefix, modelStep)
+}
+
+func currentDocumentTextSourceKey(state *runState) string {
+	if state == nil {
+		return ""
+	}
+	if sourceKey := strings.TrimSpace(state.documentTextSourceKey); sourceKey != "" {
+		return sourceKey
+	}
+	return documentModelTextSourceKey(state.modelStep)
 }
 
 func composeDocumentError(call botprotocol.ToolCall, err error) toolStepResult {
@@ -129,28 +393,46 @@ func composeDocumentError(call botprotocol.ToolCall, err error) toolStepResult {
 	}
 }
 
-func (s Service) finalizeDocument(state *runState) error {
+func composeDocumentWriterError(call botprotocol.ToolCall, documentID uint64, err error) toolStepResult {
+	result := composeDocumentError(call, err)
+	result.content = toolErrorContent(err.Error())
+	result.payload = map[string]any{
+		"tool_call":   firstToolCallValue(call),
+		"document_id": documentID,
+		"error":       err.Error(),
+	}
+	return result
+}
+
+func (s Service) prepareDocumentResult(state *runState, runStatus string, failureMessage string) error {
 	if state == nil || state.documentID == 0 {
 		return nil
 	}
-	ctx, cancel := maintenanceContext()
+	ctx, cancel, err := documentMaintenanceContext(state)
+	if err != nil {
+		return err
+	}
 	defer cancel()
-	serverContext, err := state.execution.scope.Server(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if serverContext != nil {
-		ctx = serverContext.Context()
-	}
 	documents := runtimedocument.NewService()
-	document, err := documents.MarkContentComplete(ctx, state.documentID)
-	if err != nil {
-		return err
+	document := documents.Find(ctx, state.documentID)
+	if state.isDocumentWriter() {
+		if runStatus == runStatusSuccess {
+			document, err = documents.MarkContentComplete(ctx, state.documentID)
+		} else {
+			document, err = documents.MarkFailed(ctx, state.documentID, failureMessage)
+		}
+		if err != nil {
+			return err
+		}
 	}
 	if document == nil {
-		return fmt.Errorf("完成图文文档失败")
+		return fmt.Errorf("读取图文文档失败")
 	}
-	if text := strings.TrimSpace(documents.Text(ctx, state.documentID)); text != "" {
+	if state.isDocumentWriter() && runStatus == runStatusSuccess {
+		text := strings.TrimSpace(documents.Text(ctx, state.documentID))
+		if text == "" {
+			return fmt.Errorf("图文文档正文为空")
+		}
 		state.finalText = text
 	}
 	if state.finalOutput == nil {
@@ -166,6 +448,22 @@ func (s Service) finalizeDocument(state *runState) error {
 		}
 	}
 	return nil
+}
+
+func documentMaintenanceContext(state *runState) (context.Context, context.CancelFunc, error) {
+	ctx, cancel := maintenanceContext()
+	if state == nil {
+		return ctx, cancel, nil
+	}
+	serverContext, err := state.execution.scope.Server(ctx, nil)
+	if err != nil {
+		cancel()
+		return ctx, cancel, err
+	}
+	if serverContext != nil {
+		ctx = serverContext.Context()
+	}
+	return ctx, cancel, nil
 }
 
 func (s Service) documentPayload(ctx context.Context, documentID uint64) any {

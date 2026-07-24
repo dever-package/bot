@@ -1,4 +1,10 @@
-import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import { getCompatModule } from "@dever/front-plugin";
 import {
   ArrowUp,
@@ -21,7 +27,10 @@ import { assetKindLabel, assetKindsAccept } from "../asset/asset-contract";
 import { AssetKindIcon } from "../asset/asset-preview";
 import { normalizeAssetRecord } from "../asset/asset-api";
 import { AssetPickerDialog } from "../asset/asset-picker-dialog";
-import { useAssetReferenceProvider } from "../asset/asset-reference-provider";
+import {
+  useAssetReferenceProvider,
+  type WorkbenchReferenceOption,
+} from "../asset/asset-reference-provider";
 import type { AssetKind as LibraryAssetKind } from "../asset/asset-types";
 import {
   canvasReferenceIDsForUsage,
@@ -139,6 +148,18 @@ export function PromptComposer({
   onLocalUpload,
   onSubmit,
 }: PromptComposerProps) {
+  const rememberSelectedReference = useCallback(
+    (option: WorkbenchReferenceOption) => {
+      const item = composerAssetItemFromReferenceOption(option);
+      assetLibrary.current = [
+        ...assetLibrary.current.filter(
+          (current) => Number(current.refId || 0) !== option.refId,
+        ),
+        item,
+      ];
+    },
+    [assetLibrary],
+  );
   const assetReferenceProvider = useAssetReferenceProvider({
     teamID: Number(assetReference?.teamID || 0),
     initialFilters: assetReference?.projectID
@@ -148,6 +169,7 @@ export function PromptComposer({
           assetCateID: Number(assetReference.assetCateID || 0),
         }
       : undefined,
+    onSelect: rememberSelectedReference,
   });
   const [openKey, setOpenKey] = useState("");
   const [assetPickerParam, setAssetPickerParam] = useState<PowerParam | null>(
@@ -336,6 +358,25 @@ export function PromptComposer({
             const selectedByID = new Map(
               assets.map((asset) => [asset.id, asset]),
             );
+            for (const asset of assets) {
+              rememberSelectedReference({
+                key: `asset:${asset.id}:${asset.versionID}`,
+                refType: "asset",
+                refId: asset.id,
+                versionID: asset.versionID,
+                trigger: "@",
+                label: asset.name,
+                description: asset.summary,
+                preview: {
+                  text: asset.summary,
+                  kind: asset.kind,
+                  url: findAssetMediaURL(
+                    asset.version?.content,
+                    asset.kind,
+                  ),
+                },
+              });
+            }
             const currentByID = new Map(
               canvasReferenceTargetsForUsage(
                 referenceContent,
@@ -372,6 +413,29 @@ export function PromptComposer({
       ) : null}
     </div>
   );
+}
+
+function composerAssetItemFromReferenceOption(
+  option: WorkbenchReferenceOption,
+): ComposerAssetItem {
+  const kind = String(option.preview?.kind || "file");
+  const url = String(option.preview?.url || "");
+  return {
+    id: `asset:${option.refId}`,
+    title: option.label,
+    kind,
+    source: "asset",
+    refType: "asset",
+    refId: option.refId,
+    versionID: option.versionID,
+    preview: {
+      text: option.description || "",
+      imageUrl: kind === "image" ? url : "",
+      videoUrl: kind === "video" ? url : "",
+      audioUrl: kind === "audio" ? url : "",
+      fileUrl: kind === "file" ? url : "",
+    },
+  };
 }
 
 function acceptedAssetKinds(param: PowerParam): LibraryAssetKind[] {

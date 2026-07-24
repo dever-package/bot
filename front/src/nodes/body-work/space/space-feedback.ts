@@ -1,5 +1,9 @@
 import { defaultPowerParamValues } from "./space-power-param";
 import type { PowerParam, SpaceCanvasNode } from "./types";
+import {
+  normalizeRuntimeInteraction,
+  normalizeRuntimeRunStatus,
+} from "../../../runtime/team-run";
 
 export type FlowRunStatus =
   | "running"
@@ -150,7 +154,7 @@ export function normalizeFlowRunSnapshot(value: any): FlowRunSnapshot {
   return {
     runId: Number(run?.id || value?.run_id || 0),
     requestId: String(run?.request_id || value?.request_id || ""),
-    status: String(run?.status || value?.status || "running"),
+    status: normalizeRuntimeRunStatus(run?.status || value?.status || "running"),
     output: firstDefined(run?.output, value?.output, value?.data?.output),
     error: String(run?.error || value?.error || ""),
     approvals: approvals.map(normalizeFlowApproval).filter(Boolean),
@@ -213,14 +217,11 @@ export function isFlowWaitingSnapshot(snapshot: FlowRunSnapshot) {
 }
 
 function normalizeFlowInteraction(value: any): FlowInteraction {
-  const interaction =
-    value?.interaction && typeof value.interaction === "object"
-      ? value.interaction
-      : {};
+  const normalized = normalizeRuntimeInteraction(value);
   return {
-    runId: Number(value?.run_id || 0),
-    nodeRunId: Number(value?.node_run_id || 0),
-    interaction,
+    runId: normalized.runId,
+    nodeRunId: normalized.nodeRunId,
+    interaction: normalized.interaction,
   };
 }
 

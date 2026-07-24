@@ -107,6 +107,10 @@ export type VideoComposeClip = {
     type: VideoComposeTransitionType;
     durationMs: number;
   };
+  storyboardTransitionToNext?: {
+    type: VideoComposeTransitionType;
+    durationMs: number;
+  };
 };
 
 export type CanvasVideoComposition = {
@@ -196,6 +200,9 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
   const transition = recordValue(
     row.transitionToNext ?? row.transition_to_next,
   );
+  const storyboardTransition = recordValue(
+    row.storyboardTransitionToNext ?? row.storyboard_transition_to_next,
+  );
   const speechTracks = Array.isArray(row.speechTracks ?? row.speech_tracks)
     ? (row.speechTracks ?? row.speech_tracks)
         .map(normalizeVideoComposeSpeechTrack)
@@ -208,6 +215,10 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
         .map(normalizeVideoComposeSubtitleTrack)
         .filter(Boolean)
     : [];
+  const normalizedStoryboardTransition = normalizeOptionalVideoTransition(
+    storyboardTransition,
+  );
+  const transitionType = normalizeTransitionType(transition.type);
   return {
     id,
     title: stringValue(row.title) || visualVideo?.label || "镜头",
@@ -229,14 +240,34 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
       row.blockingIssues ?? row.blocking_issues,
     ),
     transitionToNext: {
-      type: normalizeTransitionType(transition.type),
-      durationMs: clampNumber(
-        transition.durationMs ?? transition.duration_ms,
-        100,
-        5000,
-        500,
-      ),
+      type: transitionType,
+      durationMs:
+        transitionType === "none"
+          ? 0
+          : clampNumber(
+              transition.durationMs ?? transition.duration_ms,
+              100,
+              5000,
+              500,
+            ),
     },
+    ...(normalizedStoryboardTransition
+      ? { storyboardTransitionToNext: normalizedStoryboardTransition }
+      : {}),
+  };
+}
+
+function normalizeOptionalVideoTransition(value: Record<string, any>) {
+  if (!Object.keys(value).length) {
+    return undefined;
+  }
+  const type = normalizeTransitionType(value.type);
+  return {
+    type,
+    durationMs:
+      type === "none"
+        ? 0
+        : clampNumber(value.durationMs ?? value.duration_ms, 100, 5000, 500),
   };
 }
 

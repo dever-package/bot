@@ -21,18 +21,61 @@ type dialogueAssetProjection struct {
 	Source        map[string]any
 }
 
-const dialogueActivityAnchorContentOrder = "activity_anchor"
+type dialogueAssetSelector struct {
+	ArtifactID uint64
+	DocumentID uint64
+}
+
+const (
+	dialogueActivityAnchorContentOrder = "activity_anchor"
+	dialogueDocumentBlockContentOrder  = "document_blocks"
+)
 
 func projectDialogueAsset(
 	ctx context.Context,
 	message runtimechat.CompletedAssistantMessage,
-	artifactID uint64,
+	selector dialogueAssetSelector,
 ) (dialogueAssetProjection, error) {
+	if selector.ArtifactID > 0 && selector.DocumentID > 0 {
+		return dialogueAssetProjection{}, fmt.Errorf("不能同时保存单个素材和文档")
+	}
+	if selector.DocumentID > 0 {
+		return projectDialogueDocument(message, selector.DocumentID)
+	}
 	rows := runtimeartifact.NewService().ByMessage(ctx, message.ID)
-	if artifactID > 0 {
-		return projectSingleDialogueArtifact(ctx, message, rows, artifactID)
+	if selector.ArtifactID > 0 {
+		return projectSingleDialogueArtifact(ctx, message, rows, selector.ArtifactID)
 	}
 	return projectWholeDialogueMessage(ctx, message, rows)
+}
+
+func projectDialogueDocument(
+	message runtimechat.CompletedAssistantMessage,
+	documentID uint64,
+) (dialogueAssetProjection, error) {
+	document, ok := message.Document.(runtimedocument.Payload)
+	if !ok || document.ID != documentID || document.MessageID != message.ID {
+		return dialogueAssetProjection{}, fmt.Errorf("回复文档不存在")
+	}
+	if dialogueDocumentPending(document) {
+		return dialogueAssetProjection{}, fmt.Errorf("文档仍在生成，请完成后再保存")
+	}
+	nodes, artifactIDs := dialogueDocumentNodes(document, false, map[uint64]bool{})
+	if len(nodes) == 0 {
+		return dialogueAssetProjection{}, fmt.Errorf("文档内容为空")
+	}
+	return dialogueAssetProjection{
+		Kind:          assetmodel.KindRichText,
+		Content:       map[string]any{"type": "doc", "content": nodes},
+		DefaultName:   strings.TrimSpace(document.Title),
+		RequestSuffix: fmt.Sprintf(":document:%d", document.ID),
+		NodeSuffix:    fmt.Sprintf(":document:%d", document.ID),
+		Source: map[string]any{
+			"document_id":   document.ID,
+			"artifact_ids":  artifactIDs,
+			"content_order": dialogueDocumentBlockContentOrder,
+		},
+	}, nil
 }
 
 func projectSingleDialogueArtifact(
@@ -144,7 +187,7 @@ func reprojectDialogueVersionContent(ctx context.Context, teamID uint64, version
 	if err != nil {
 		return
 	}
-	projection, err := projectDialogueAsset(ctx, message, 0)
+	projection, err := projectDialogueAsset(ctx, message, dialogueAssetSelector{})
 	if err != nil {
 		return
 	}
@@ -178,25 +221,8 @@ func dialogueMessageDocument(
 	nodes := make([]map[string]any, 0, len(artifacts)+2)
 	usedArtifacts := map[uint64]bool{}
 	if document, ok := message.Document.(runtimedocument.Payload); ok {
-		if intro := strings.TrimSpace(fmt.Sprint(document.Meta["intro"])); intro != "" && intro != "<nil>" {
-			nodes = append(nodes, dialogueTextNodes(intro)...)
-		}
-		if title := strings.TrimSpace(document.Title); title != "" {
-			nodes = append(nodes, dialogueHeadingNode(title))
-		}
-		for _, block := range document.Blocks {
-			if block.Type == agentmodel.DocumentBlockTypeText {
-				nodes = append(nodes, dialogueTextNodes(block.Text)...)
-				continue
-			}
-			for _, artifact := range block.Artifacts {
-				if dialogueArtifactStatus(artifact) != "ready" || dialogueArtifactURL(artifact) == "" {
-					continue
-				}
-				nodes = append(nodes, dialogueArtifactNode(artifact))
-				usedArtifacts[dialogueArtifactID(artifact)] = true
-			}
-		}
+		documentNodes, _ := dialogueDocumentNodes(document, true, usedArtifacts)
+		nodes = append(nodes, documentNodes...)
 	} else {
 		nodes = append(nodes, dialogueAnchoredMessageNodes(message, artifacts, usedArtifacts)...)
 	}
@@ -209,6 +235,44 @@ func dialogueMessageDocument(
 		nodes = append(nodes, dialogueTextNodes(message.Text)...)
 	}
 	return map[string]any{"type": "doc", "content": nodes}
+}
+
+func dialogueDocumentNodes(
+	document runtimedocument.Payload,
+	includeIntro bool,
+	usedArtifacts map[uint64]bool,
+) ([]map[string]any, []uint64) {
+	nodes := make([]map[string]any, 0, len(document.Blocks)+2)
+	artifactIDs := make([]uint64, 0)
+	if includeIntro {
+		if intro := strings.TrimSpace(fmt.Sprint(document.Meta["intro"])); intro != "" && intro != "<nil>" {
+			nodes = append(nodes, dialogueTextNodes(intro)...)
+		}
+	}
+	if title := strings.TrimSpace(document.Title); title != "" {
+		nodes = append(nodes, dialogueHeadingNode(title))
+	}
+	for _, block := range document.Blocks {
+		if block.Type == agentmodel.DocumentBlockTypeText {
+			nodes = append(nodes, dialogueTextNodes(block.Text)...)
+			continue
+		}
+		for _, artifact := range block.Artifacts {
+			if dialogueArtifactStatus(artifact) != "ready" || dialogueArtifactURL(artifact) == "" {
+				continue
+			}
+			artifactID := dialogueArtifactID(artifact)
+			if artifactID > 0 && usedArtifacts[artifactID] {
+				continue
+			}
+			nodes = append(nodes, dialogueArtifactNode(artifact))
+			if artifactID > 0 {
+				usedArtifacts[artifactID] = true
+				artifactIDs = append(artifactIDs, artifactID)
+			}
+		}
+	}
+	return nodes, artifactIDs
 }
 
 func dialogueAnchoredMessageNodes(

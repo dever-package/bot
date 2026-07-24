@@ -39,6 +39,7 @@ import type {
 import type { ReferenceContent, ReferenceInput } from "./reference";
 
 type SessionRun = {
+  kind: "chat" | "opening";
   sessionID: number;
   requestID: string;
   userMessageID: string;
@@ -77,6 +78,7 @@ type RunManagerOptions = {
   requestScope?: Record<string, unknown>;
   getActiveSessionID: () => number;
   getSessionTitle: (sessionID: number) => string;
+  getSessionMessages: (sessionID: number) => ChatMessage[];
   updateSessionMessages: (
     sessionID: number,
     update: (messages: ChatMessage[]) => ChatMessage[],
@@ -99,6 +101,7 @@ export function useAgentChatRuns({
   requestScope,
   getActiveSessionID,
   getSessionTitle,
+  getSessionMessages,
   updateSessionMessages,
   updateSessionTitle,
   syncSessionTitle,
@@ -221,7 +224,9 @@ export function useAgentChatRuns({
         return patch;
       });
       remove(run);
-      void syncSessionTitle(run.sessionID);
+      if (run.kind !== "opening") {
+        void syncSessionTitle(run.sessionID);
+      }
     },
     [remove, syncSessionTitle, updateRunMessage],
   );
@@ -296,6 +301,17 @@ export function useAgentChatRuns({
           running: true,
         }));
       }
+      if (
+        run.kind === "opening" &&
+        next.finished &&
+        next.event === "opening_skipped"
+      ) {
+        updateSessionMessages(run.sessionID, (current) =>
+          current.filter((message) => !isRunMessage(message, run)),
+        );
+        remove(run);
+        return false;
+      }
       if (!next.finished) {
         return true;
       }
@@ -312,11 +328,12 @@ export function useAgentChatRuns({
       });
       return false;
     },
-    [finish, publish, updateRunMessage],
+    [finish, publish, remove, updateRunMessage, updateSessionMessages],
   );
 
   const createRun = useCallback(
     (input: {
+      kind?: SessionRun["kind"];
       sessionID: number;
       requestID?: string;
       userMessageID: string;
@@ -337,6 +354,7 @@ export function useAgentChatRuns({
         });
       });
       run = {
+        kind: input.kind || "chat",
         sessionID: input.sessionID,
         requestID: input.requestID || "",
         userMessageID: input.userMessageID,
@@ -398,6 +416,7 @@ export function useAgentChatRuns({
         return;
       }
       const run = createRun({
+        kind: assistantMessage.kind === "opening" ? "opening" : "chat",
         sessionID: activeSessionID,
         requestID,
         userMessageID: "",
@@ -498,6 +517,86 @@ export function useAgentChatRuns({
     }
   }, [messages, modalOpen, recover, sessionID, sessionLoading]);
 
+  const executeRun = useCallback(
+    async (
+      run: SessionRun,
+      requestApi: string,
+      body: Record<string, unknown>,
+    ) => {
+      setError("");
+      try {
+        const result = await runRuntimeStream<ChatStreamOutput>({
+          requestApi,
+          streamApi: runtimeApi.stream,
+          stopApi: runtimeApi.stop,
+          stopOnAbort: false,
+          fallbackToPoll: false,
+          blockMs,
+          signal: run.controller.signal,
+          body,
+          onRequestID: (requestID) => {
+            if (run.detached) {
+              return;
+            }
+            run.requestID = requestID;
+            publish(run);
+            updateRunMessage(run, { requestID });
+          },
+          onFrame: (frame) => {
+            applyFrame(run, frame);
+          },
+        });
+        if (
+          run.detached ||
+          run.stopped ||
+          runsRef.current.get(run.sessionID) !== run
+        ) {
+          return;
+        }
+        const finalOutput = normalizeAgentChatOutput(result.finalOutput);
+        const finalText = valueText(
+          result.finalOutput?.text || result.textOutput || run.buffer.text,
+        ).trim();
+        finish(run, {
+          text: finalText,
+          output: finalOutput,
+          requestID: result.requestID,
+        });
+      } catch (currentError: unknown) {
+        if (
+          run.detached ||
+          run.stopped ||
+          runsRef.current.get(run.sessionID) !== run
+        ) {
+          return;
+        }
+        const message = runtimeErrorMessage(
+          currentError,
+          run.kind === "opening" ? "智能体开场失败。" : "智能体运行失败。",
+        );
+        finish(run, {
+          text: run.buffer.text.trim() || message,
+          error: true,
+          requestID: run.requestID,
+        });
+        if (getActiveSessionID() === run.sessionID) {
+          setError(message);
+        }
+      }
+    },
+    [
+      applyFrame,
+      blockMs,
+      finish,
+      getActiveSessionID,
+      publish,
+      runtimeApi.stop,
+      runtimeApi.stream,
+      setError,
+      updateRunMessage,
+    ],
+  );
+
   const send = useCallback(
     async (input: ReferenceInput) => {
       const text = input.text.trim();
@@ -547,93 +646,98 @@ export function useAgentChatRuns({
           running: true,
         },
       ]);
-      setError("");
-      try {
-        const result = await runRuntimeStream<ChatStreamOutput>({
-          requestApi: runtimeApi.request,
-          streamApi: runtimeApi.stream,
-          stopApi: runtimeApi.stop,
-          stopOnAbort: false,
-          fallbackToPoll: false,
-          blockMs,
-          signal: run.controller.signal,
-          body: {
-            ...requestScope,
-            agent: agentKey,
-            session_id: activeSessionID,
-            context_key: contextKey,
-            input: {
-              text,
-              content: input.content,
-              params: input.params,
-            },
-          },
-          onRequestID: (requestID) => {
-            if (run.detached) {
-              return;
-            }
-            run.requestID = requestID;
-            publish(run);
-            updateRunMessage(run, { requestID });
-          },
-          onFrame: (frame) => {
-            applyFrame(run, frame);
-          },
-        });
-        if (
-          run.detached ||
-          run.stopped ||
-          runsRef.current.get(activeSessionID) !== run
-        ) {
-          return;
-        }
-        const finalOutput = normalizeAgentChatOutput(result.finalOutput);
-        const finalText = valueText(
-          result.finalOutput?.text || result.textOutput || run.buffer.text,
-        ).trim();
-        finish(run, {
-          text: finalText,
-          output: finalOutput,
-          requestID: result.requestID,
-        });
-      } catch (currentError: unknown) {
-        if (
-          run.detached ||
-          run.stopped ||
-          runsRef.current.get(activeSessionID) !== run
-        ) {
-          return;
-        }
-        const message = runtimeErrorMessage(currentError, "智能体运行失败。");
-        finish(run, {
-          text: run.buffer.text.trim() || message,
-          error: true,
-          requestID: run.requestID,
-        });
-        if (getActiveSessionID() === activeSessionID) {
-          setError(message);
-        }
-      }
+      await executeRun(run, runtimeApi.request, {
+        ...requestScope,
+        agent: agentKey,
+        session_id: activeSessionID,
+        context_key: contextKey,
+        input: {
+          text,
+          content: input.content,
+          params: input.params,
+        },
+      });
     },
     [
       agentKey,
-      applyFrame,
-      blockMs,
       contextKey,
       createRun,
-      finish,
+      executeRun,
       getActiveSessionID,
       getSessionTitle,
-      publish,
       register,
       requestScope,
       runtimeApi.request,
-      runtimeApi.stop,
-      runtimeApi.stream,
-      setError,
-      updateRunMessage,
       updateSessionMessages,
       updateSessionTitle,
+    ],
+  );
+
+  const startOpening = useCallback(
+    async (targetSessionID: number) => {
+      const requestApi = runtimeApi.opening?.trim() || "";
+      if (
+        !requestApi ||
+        !agentKey ||
+        !targetSessionID ||
+        runsRef.current.has(targetSessionID)
+      ) {
+        return;
+      }
+      const now = Date.now();
+      const createdAt = new Date(now).toISOString();
+      const existingMessage = getSessionMessages(targetSessionID).find(
+        (message) =>
+          message.role === "assistant" &&
+          message.kind === "opening" &&
+          Boolean(message.requestID),
+      );
+      const assistantMessageID =
+        existingMessage?.id || `${targetSessionID}-opening-${now}`;
+      const run = createRun({
+        kind: "opening",
+        sessionID: targetSessionID,
+        requestID: existingMessage?.requestID,
+        userMessageID: "",
+        assistantMessageID,
+        createdAt: existingMessage?.createdAt || createdAt,
+        text: existingMessage?.text,
+        replayPending: Boolean(existingMessage?.running && existingMessage.text),
+      });
+      if (!register(run)) {
+        run.buffer.dispose();
+        return;
+      }
+      if (!existingMessage) {
+        updateSessionMessages(targetSessionID, (current) => [
+          ...current,
+          {
+            id: assistantMessageID,
+            role: "assistant",
+            kind: "opening",
+            text: "",
+            createdAt,
+            running: true,
+          },
+        ]);
+      }
+      await executeRun(run, requestApi, {
+        ...requestScope,
+        agent: agentKey,
+        session_id: targetSessionID,
+        context_key: contextKey,
+      });
+    },
+    [
+      agentKey,
+      contextKey,
+      createRun,
+      executeRun,
+      getSessionMessages,
+      register,
+      requestScope,
+      runtimeApi.opening,
+      updateSessionMessages,
     ],
   );
 
@@ -714,6 +818,7 @@ export function useAgentChatRuns({
     mergeMessages,
     reset,
     send,
+    startOpening,
     stop,
   };
 }

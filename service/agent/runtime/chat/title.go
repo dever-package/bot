@@ -65,11 +65,11 @@ func sessionNeedsGeneratedTitle(session *agentmodel.Session) bool {
 func titleSourceText(ctx context.Context, sessionID uint64) (string, uint64) {
 	rows := agentmodel.NewMessageModel().Select(ctx, map[string]any{
 		"session_id": sessionID, "status": agentmodel.MessageStatusNormal,
-	}, map[string]any{"order": "main.id asc", "limit": 2})
+	}, map[string]any{"order": "main.id asc", "limit": 3})
 	parts := make([]string, 0, len(rows))
 	var lastMessageID uint64
 	for _, row := range rows {
-		if row == nil || strings.TrimSpace(row.Text) == "" {
+		if row == nil || row.Kind == agentmodel.MessageKindOpening || strings.TrimSpace(row.Text) == "" {
 			continue
 		}
 		role := strings.TrimSpace(row.Role)
@@ -78,6 +78,9 @@ func titleSourceText(ctx context.Context, sessionID uint64) (string, uint64) {
 		}
 		parts = append(parts, role+": "+limitText(runtimemessageoutput.NormalizeText(row.Text), 600))
 		lastMessageID = row.ID
+		if len(parts) == 2 {
+			break
+		}
 	}
 	return strings.Join(parts, "\n"), lastMessageID
 }

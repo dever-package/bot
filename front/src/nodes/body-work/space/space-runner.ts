@@ -1,3 +1,5 @@
+import { normalizeRuntimeRunStatus } from "../../../runtime/team-run";
+
 export type CanvasRunRef = {
   execution_id?: number;
   run_id?: number;
@@ -93,7 +95,7 @@ export function normalizeCanvasRunRef(value: any): CanvasRunRef {
     start_node_id: String(value?.start_node_id || ""),
     flow_run_id: Number(value?.flow_run_id || run.flow_run_id || 0),
     release_id: Number(value?.release_id || run.release_id || 0),
-    status: String(value?.status || run.status || ""),
+    status: normalizeRuntimeRunStatus(value?.status || run.status),
     error: canvasErrorText(value?.error || run.error),
     executed: Number(value?.executed || value?.output?.executed || 0),
     total: Number(value?.total || value?.output?.total || 0),
@@ -146,7 +148,7 @@ function normalizeCanvasNodeResultRef(value: any): CanvasNodeResultRef | null {
     request_id: String(value.request_id || ""),
     child_run_id: Number(value.child_run_id || 0),
     child_request_id: String(value.child_request_id || ""),
-    status: String(value.status || ""),
+    status: normalizeRuntimeRunStatus(value.status),
     error: canvasErrorText(value.error),
     output: value.output,
     asset: value.asset,
@@ -180,17 +182,10 @@ export function canvasRunRawError(run?: CanvasRunRef | null) {
   const failedResult = [...(run.node_results || [])]
     .reverse()
     .find((result) => {
-      const status = String(
-        result.status || (result.result as any)?.status || "",
-      )
-        .trim()
-        .toLowerCase();
-      return (
-        status === "fail" ||
-        status === "failed" ||
-        status === "failure" ||
-        status === "error"
+      const status = normalizeRuntimeRunStatus(
+        result.status || (result.result as any)?.status,
       );
+      return status === "fail";
     });
   return preferredCanvasErrorText(
     canvasNodeResultRawError(failedResult),
@@ -385,7 +380,7 @@ function normalizeCanvasNodeRunRef(value: any): CanvasNodeRunRef | null {
     node_id: Number(value?.node_id || 0),
     node_key: nodeKey,
     node_type: String(value?.node_type || ""),
-    status: String(value?.status || ""),
+    status: normalizeRuntimeRunStatus(value?.status),
     persists_result: Boolean(value?.persists_result),
   };
 }

@@ -8,40 +8,38 @@ import (
 )
 
 const (
-	DefaultConfigID                uint64 = 1
-	DefaultSiteName                       = "神创工作台"
-	DefaultLogo                           = ""
-	DefaultFavicon                        = ""
-	DefaultLoginImage                     = ""
-	DefaultLoginTitle                     = "把想法变成作品"
-	DefaultLoginDescription               = "调用团队能力，与智能体协作，把每一次创作沉淀为可复用的项目资产。"
-	DefaultThemePreset                    = ThemePresetForest
-	DefaultBrandPrimaryColor              = ""
-	DefaultLoginTemplate                  = LoginTemplateSplit
-	DefaultWorkbenchTemplate              = WorkbenchTemplateRail
-	DefaultCompanyName                    = ""
-	DefaultCompanyAddress                 = ""
-	DefaultBusinessLicenseURL             = ""
-	DefaultICPRecord                      = ""
-	DefaultICPRecordURL                   = ""
-	DefaultPublicSecurityRecord           = ""
-	DefaultPublicSecurityRecordURL        = ""
-	ThemePresetForest                     = "forest"
-	ThemePresetOcean                      = "ocean"
-	ThemePresetGraphite                   = "graphite"
-	LoginTemplateSplit                    = "split"
-	LoginTemplateFocus                    = "focus"
-	LoginTemplateShowcase                 = "showcase"
-	WorkbenchTemplateRail                 = "rail"
-	WorkbenchTemplateSidebar              = "sidebar"
-	WorkbenchTemplateTopbar               = "topbar"
+	DefaultConfigID                 uint64 = 1
+	DefaultSiteName                        = "神创工作台"
+	DefaultLogo                            = ""
+	DefaultFavicon                         = ""
+	DefaultLoginImage                      = ""
+	DefaultLoginTitle                      = "把想法变成作品"
+	DefaultLoginDescription                = "调用团队能力，与智能体协作，把每一次创作沉淀为可复用的项目资产。"
+	DefaultLoginTextColor                  = ""
+	DefaultRegisterStatus           int16  = StatusEnabled
+	DefaultLoginBackgroundColor            = ""
+	DefaultLoginBackgroundImage            = ""
+	DefaultBaseColor                       = "#96a29c"
+	DefaultBrandPrimaryColor               = ""
+	DefaultLoginTemplate                   = LoginTemplateSplit
+	DefaultWorkbenchTemplate               = WorkbenchTemplateRail
+	DefaultWorkbenchBackgroundColor        = ""
+	DefaultWorkbenchBackgroundImage        = ""
+	DefaultFilingContent                   = ""
+	DefaultCompanyName                     = ""
+	DefaultCompanyAddress                  = ""
+	DefaultBusinessLicenseURL              = ""
+	DefaultICPRecord                       = ""
+	DefaultICPRecordURL                    = ""
+	DefaultPublicSecurityRecord            = ""
+	DefaultPublicSecurityRecordURL         = ""
+	LoginTemplateSplit                     = "split"
+	LoginTemplateFocus                     = "focus"
+	LoginTemplateShowcase                  = "showcase"
+	WorkbenchTemplateRail                  = "rail"
+	WorkbenchTemplateSidebar               = "sidebar"
+	WorkbenchTemplateTopbar                = "topbar"
 )
-
-var themePresetOptions = []map[string]any{
-	{"id": ThemePresetForest, "value": "默认墨绿"},
-	{"id": ThemePresetOcean, "value": "企业蓝"},
-	{"id": ThemePresetGraphite, "value": "石墨黑"},
-}
 
 var loginTemplateOptions = []map[string]any{
 	{"id": LoginTemplateSplit, "value": "左右分栏"},
@@ -56,26 +54,33 @@ var workbenchTemplateOptions = []map[string]any{
 }
 
 type Config struct {
-	ID                      uint64    `dorm:"primaryKey;autoIncrement;comment:配置ID"`
-	SiteName                string    `dorm:"type:varchar(128);not null;default:'神创工作台';comment:站点名称"`
-	Logo                    string    `dorm:"type:text;not null;default:'';comment:站点Logo"`
-	Favicon                 string    `dorm:"type:text;not null;default:'';comment:站点图标"`
-	LoginImage              string    `dorm:"type:text;not null;default:'';comment:登录页图片"`
-	LoginTitle              string    `dorm:"type:varchar(160);not null;default:'把想法变成作品';comment:登录页标题"`
-	LoginDescription        string    `dorm:"type:text;not null;default:'';comment:登录页说明"`
-	ThemePreset             string    `dorm:"type:varchar(32);not null;default:'forest';comment:主题预设"`
-	BrandPrimaryColor       string    `dorm:"type:varchar(16);not null;default:'';comment:品牌主色"`
-	LoginTemplate           string    `dorm:"type:varchar(32);not null;default:'split';comment:登录页模板"`
-	WorkbenchTemplate       string    `dorm:"type:varchar(32);not null;default:'rail';comment:工作台模板"`
-	CompanyName             string    `dorm:"type:varchar(200);not null;default:'';comment:企业名称"`
-	CompanyAddress          string    `dorm:"type:varchar(500);not null;default:'';comment:企业地址"`
-	BusinessLicenseURL      string    `dorm:"type:text;not null;default:'';comment:营业执照链接"`
-	ICPRecord               string    `dorm:"type:varchar(200);not null;default:'';comment:ICP备案号"`
-	ICPRecordURL            string    `dorm:"type:text;not null;default:'';comment:ICP备案链接"`
-	PublicSecurityRecord    string    `dorm:"type:varchar(200);not null;default:'';comment:公安备案号"`
-	PublicSecurityRecordURL string    `dorm:"type:text;not null;default:'';comment:公安备案链接"`
-	CreatedAt               time.Time `dorm:"not null;default:CURRENT_TIMESTAMP;comment:创建时间"`
-	UpdatedAt               time.Time `dorm:"not null;default:CURRENT_TIMESTAMP;comment:更新时间"`
+	ID                       uint64    `dorm:"primaryKey;autoIncrement;comment:配置ID"`
+	SiteName                 string    `dorm:"type:varchar(128);not null;default:'神创工作台';comment:站点名称"`
+	Logo                     string    `dorm:"type:text;not null;default:'';comment:站点Logo"`
+	Favicon                  string    `dorm:"type:text;not null;default:'';comment:站点Favicon"`
+	LoginImage               string    `dorm:"type:text;not null;default:'';comment:登录页介绍图"`
+	LoginTitle               string    `dorm:"type:varchar(160);not null;default:'把想法变成作品';comment:登录页标题"`
+	LoginDescription         string    `dorm:"type:text;not null;default:'';comment:登录页说明"`
+	LoginTextColor           string    `dorm:"type:varchar(16);not null;default:'';comment:登录页文案颜色"`
+	RegisterStatus           int16     `dorm:"type:smallint;not null;default:1;comment:允许注册"`
+	BaseColor                string    `dorm:"type:varchar(16);not null;default:'#96a29c';comment:基础配色"`
+	BrandPrimaryColor        string    `dorm:"type:varchar(16);not null;default:'';comment:品牌主色"`
+	LoginTemplate            string    `dorm:"type:varchar(32);not null;default:'split';comment:登录页模板"`
+	LoginBackgroundColor     string    `dorm:"type:varchar(16);not null;default:'';comment:登录页背景色"`
+	LoginBackgroundImage     string    `dorm:"type:text;not null;default:'';comment:登录页背景图"`
+	WorkbenchTemplate        string    `dorm:"type:varchar(32);not null;default:'rail';comment:工作台模板"`
+	WorkbenchBackgroundColor string    `dorm:"type:varchar(16);not null;default:'';comment:工作台背景色"`
+	WorkbenchBackgroundImage string    `dorm:"type:text;not null;default:'';comment:工作台背景图"`
+	FilingContent            string    `dorm:"type:text;not null;default:'';comment:底部备案内容"`
+	CompanyName              string    `dorm:"type:varchar(200);not null;default:'';comment:企业名称"`
+	CompanyAddress           string    `dorm:"type:varchar(500);not null;default:'';comment:企业地址"`
+	BusinessLicenseURL       string    `dorm:"type:text;not null;default:'';comment:营业执照链接"`
+	ICPRecord                string    `dorm:"type:varchar(200);not null;default:'';comment:ICP备案号"`
+	ICPRecordURL             string    `dorm:"type:text;not null;default:'';comment:ICP备案链接"`
+	PublicSecurityRecord     string    `dorm:"type:varchar(200);not null;default:'';comment:公安备案号"`
+	PublicSecurityRecordURL  string    `dorm:"type:text;not null;default:'';comment:公安备案链接"`
+	CreatedAt                time.Time `dorm:"not null;default:CURRENT_TIMESTAMP;comment:创建时间"`
+	UpdatedAt                time.Time `dorm:"not null;default:CURRENT_TIMESTAMP;comment:更新时间"`
 }
 
 var configSeed = []map[string]any{
@@ -87,10 +92,17 @@ var configSeed = []map[string]any{
 		"login_image":                DefaultLoginImage,
 		"login_title":                DefaultLoginTitle,
 		"login_description":          DefaultLoginDescription,
-		"theme_preset":               DefaultThemePreset,
+		"login_text_color":           DefaultLoginTextColor,
+		"register_status":            DefaultRegisterStatus,
+		"base_color":                 DefaultBaseColor,
 		"brand_primary_color":        DefaultBrandPrimaryColor,
 		"login_template":             DefaultLoginTemplate,
+		"login_background_color":     DefaultLoginBackgroundColor,
+		"login_background_image":     DefaultLoginBackgroundImage,
 		"workbench_template":         DefaultWorkbenchTemplate,
+		"workbench_background_color": DefaultWorkbenchBackgroundColor,
+		"workbench_background_image": DefaultWorkbenchBackgroundImage,
+		"filing_content":             DefaultFilingContent,
 		"company_name":               DefaultCompanyName,
 		"company_address":            DefaultCompanyAddress,
 		"business_license_url":       DefaultBusinessLicenseURL,
@@ -106,7 +118,6 @@ func NewConfigModel() *orm.Model[Config] {
 		Seeds:    configSeed,
 		Database: "default",
 		Options: map[string]any{
-			"theme_preset":       themePresetOptions,
 			"login_template":     loginTemplateOptions,
 			"workbench_template": workbenchTemplateOptions,
 		},
@@ -115,35 +126,31 @@ func NewConfigModel() *orm.Model[Config] {
 
 func DefaultConfig() Config {
 	return Config{
-		ID:                      DefaultConfigID,
-		SiteName:                DefaultSiteName,
-		Logo:                    DefaultLogo,
-		Favicon:                 DefaultFavicon,
-		LoginImage:              DefaultLoginImage,
-		LoginTitle:              DefaultLoginTitle,
-		LoginDescription:        DefaultLoginDescription,
-		ThemePreset:             DefaultThemePreset,
-		BrandPrimaryColor:       DefaultBrandPrimaryColor,
-		LoginTemplate:           DefaultLoginTemplate,
-		WorkbenchTemplate:       DefaultWorkbenchTemplate,
-		CompanyName:             DefaultCompanyName,
-		CompanyAddress:          DefaultCompanyAddress,
-		BusinessLicenseURL:      DefaultBusinessLicenseURL,
-		ICPRecord:               DefaultICPRecord,
-		ICPRecordURL:            DefaultICPRecordURL,
-		PublicSecurityRecord:    DefaultPublicSecurityRecord,
-		PublicSecurityRecordURL: DefaultPublicSecurityRecordURL,
-	}
-}
-
-func NormalizeThemePreset(value string) string {
-	switch strings.TrimSpace(value) {
-	case ThemePresetOcean:
-		return ThemePresetOcean
-	case ThemePresetGraphite:
-		return ThemePresetGraphite
-	default:
-		return ThemePresetForest
+		ID:                       DefaultConfigID,
+		SiteName:                 DefaultSiteName,
+		Logo:                     DefaultLogo,
+		Favicon:                  DefaultFavicon,
+		LoginImage:               DefaultLoginImage,
+		LoginTitle:               DefaultLoginTitle,
+		LoginDescription:         DefaultLoginDescription,
+		LoginTextColor:           DefaultLoginTextColor,
+		RegisterStatus:           DefaultRegisterStatus,
+		BaseColor:                DefaultBaseColor,
+		BrandPrimaryColor:        DefaultBrandPrimaryColor,
+		LoginTemplate:            DefaultLoginTemplate,
+		LoginBackgroundColor:     DefaultLoginBackgroundColor,
+		LoginBackgroundImage:     DefaultLoginBackgroundImage,
+		WorkbenchTemplate:        DefaultWorkbenchTemplate,
+		WorkbenchBackgroundColor: DefaultWorkbenchBackgroundColor,
+		WorkbenchBackgroundImage: DefaultWorkbenchBackgroundImage,
+		FilingContent:            DefaultFilingContent,
+		CompanyName:              DefaultCompanyName,
+		CompanyAddress:           DefaultCompanyAddress,
+		BusinessLicenseURL:       DefaultBusinessLicenseURL,
+		ICPRecord:                DefaultICPRecord,
+		ICPRecordURL:             DefaultICPRecordURL,
+		PublicSecurityRecord:     DefaultPublicSecurityRecord,
+		PublicSecurityRecordURL:  DefaultPublicSecurityRecordURL,
 	}
 }
 
@@ -170,6 +177,10 @@ func NormalizeWorkbenchTemplate(value string) string {
 }
 
 func NormalizeBrandPrimaryColor(value string) string {
+	return NormalizeAppearanceColor(value)
+}
+
+func NormalizeAppearanceColor(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if len(value) != 7 || value[0] != '#' {
 		return ""

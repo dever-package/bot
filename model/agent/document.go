@@ -11,6 +11,7 @@ const (
 	DocumentStatusGenerating    = "generating"
 	DocumentStatusReady         = "ready"
 	DocumentStatusPartialFailed = "partial_failed"
+	DocumentStatusFailed        = "failed"
 )
 
 var documentStatusOptions = []map[string]any{
@@ -18,6 +19,7 @@ var documentStatusOptions = []map[string]any{
 	{"id": DocumentStatusGenerating, "value": "素材生成中"},
 	{"id": DocumentStatusReady, "value": "已完成"},
 	{"id": DocumentStatusPartialFailed, "value": "部分失败"},
+	{"id": DocumentStatusFailed, "value": "生成失败"},
 }
 
 type Document struct {

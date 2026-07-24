@@ -155,6 +155,28 @@ func (Workbench) PostChatRun(c *server.Context) error {
 	return c.JSONPayload(200, response)
 }
 
+func (Workbench) PostChatOpening(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	scope, err := resolveWorkbenchChatScope(c, body)
+	if err != nil {
+		return c.JSONPayload(200, botprotocol.BuildErrorResponse("", err).Payload())
+	}
+	response := workbenchChatRuntime.RunOpening(c.Context(), runtimeloop.ChatRequest{
+		AgentIdentity: scope.AgentKey,
+		SessionID:     botapi.Uint64FromBody(body, "session_id", "sessionId"),
+		ContextKey:    scope.ContextKey,
+		Method:        c.Method(),
+		Host:          c.Header("Host"),
+		Path:          c.Path(),
+		Headers:       botapi.RequestHeaders(c),
+		Server:        c,
+	})
+	return c.JSONPayload(200, response)
+}
+
 func (Workbench) GetChatStream(c *server.Context) error {
 	scope, err := resolveWorkbenchChatScope(c, nil)
 	if err != nil {

@@ -257,8 +257,10 @@
         "meta": {
           "agentPath": "data.actionTarget.runAgent.key",
           "agentNamePath": "data.actionTarget.runAgent.name",
+          "openingEnabledPath": "data.actionTarget.runAgent.opening_enabled",
           "openPath": "state.dialog.run",
           "requestApi": "/bot/admin/agent_runtime/run",
+          "openingApi": "/bot/admin/agent_runtime/opening",
           "streamApi": "/bot/admin/agent_runtime/stream",
           "documentApi": "/bot/admin/agent_runtime/document",
           "documentStreamApi": "/bot/admin/agent_runtime/document_stream",

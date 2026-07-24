@@ -31,6 +31,7 @@ export function StoryboardMaterialDialog({
 }) {
   const [name, setName] = useState(material.name);
   const [prompt, setPrompt] = useState(material.prompt);
+  const [voice, setVoice] = useState(material.voice);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const normalizedName = name.trim().replace(/^[@#]+/, "");
   const normalizedPrompt = prompt.trim();
@@ -113,6 +114,18 @@ export function StoryboardMaterialDialog({
               onChange={(event) => setPrompt(event.target.value)}
             />
           </label>
+          {material.type === "character" ? (
+            <label>
+              <span>配音音色参数值</span>
+              <input
+                value={voice}
+                readOnly={readonly}
+                placeholder="留空使用语音能力默认音色"
+                onChange={(event) => setVoice(event.target.value)}
+              />
+              <small>填写语音能力实际接受的音色值，不绑定具体供应商。</small>
+            </label>
+          ) : null}
           {!creating && usageCount > 0 ? (
             <div className="ws-storyboard-material-usage" role="note">
               <strong>当前素材正在使用</strong>
@@ -174,6 +187,7 @@ export function StoryboardMaterialDialog({
                     ...material,
                     name: normalizedName,
                     prompt: normalizedPrompt,
+                    voice: material.type === "character" ? voice.trim() : "",
                   })
                 }
               >

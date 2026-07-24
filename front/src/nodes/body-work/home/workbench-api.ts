@@ -27,6 +27,7 @@ export type WorkbenchRole = {
   agentID: number;
   agentKey: string;
   agentName: string;
+  openingEnabled: boolean;
 };
 
 export type WorkbenchAssetCate = {
@@ -120,6 +121,7 @@ export async function saveWorkbenchDialogueAsset(input: {
   roleID: number;
   messageID: number;
   artifactID?: number;
+  documentID?: number;
   targetAssetID?: number;
   name?: string;
 }) {
@@ -128,6 +130,7 @@ export async function saveWorkbenchDialogueAsset(input: {
     role_id: input.roleID,
     message_id: input.messageID,
     artifact_id: input.artifactID || undefined,
+    document_id: input.documentID || undefined,
     target_asset_id: input.targetAssetID || undefined,
     name: input.name?.trim() || undefined,
   });
@@ -199,6 +202,7 @@ function normalizeRole(value: any): WorkbenchRole {
     agentID: numberValue(value?.agent_id),
     agentKey: textValue(value?.agent_key),
     agentName: textValue(value?.agent_name),
+    openingEnabled: Boolean(value?.opening_enabled),
   };
 }
 

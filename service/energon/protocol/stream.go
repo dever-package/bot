@@ -64,6 +64,7 @@ func MergeStreamResult(outputs []Output) Output {
 	if len(toolCalls) > 0 {
 		result["event"] = "tool_call"
 		result["tool_calls"] = ToolCallsValue(toolCalls)
+		normalizeToolCallOutputText(result, toolCalls)
 	}
 	return result
 }
@@ -91,6 +92,7 @@ func MergeStreamFinal(outputs []Output, final Output) Output {
 	if calls := ParseToolCalls(result["tool_calls"]); len(calls) > 0 {
 		result["event"] = "tool_call"
 		result["tool_calls"] = ToolCallsValue(calls)
+		normalizeToolCallOutputText(result, calls)
 	}
 	return result
 }

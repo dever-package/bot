@@ -295,6 +295,7 @@ export async function fetchSpaceRunStatus(input: {
     project_id: input.projectId,
     run_id: input.runId || 0,
     request_id: input.requestId || "",
+    view: "summary",
   });
   if (!isSuccessResponse(result)) {
     throw new Error(result.message || result.msg || "读取流程状态失败");

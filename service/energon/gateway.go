@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	botmodel "github.com/dever-package/bot/model/energon"
+	botinput "github.com/dever-package/bot/service/energon/input"
 	botprocessor "github.com/dever-package/bot/service/energon/processor"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botadapters "github.com/dever-package/bot/service/energon/protocol/adapters"
@@ -56,42 +57,140 @@ func NewGatewayServiceWithClient(client botprovider.Client) GatewayService {
 }
 
 func (s GatewayService) Handle(ctx context.Context, raw GatewayRequest) (*GatewayResponse, error) {
+	prepared, mode, err := prepareGatewayRequest(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	switch mode {
+	case ModeProxy:
+		req := &botprotocol.ShemicRequest{
+			RequestID: prepared.RequestID,
+			Mode:      ModeProxy,
+			Protocol:  detectProtocol(prepared),
+			Kind:      "proxy.protocol",
+			Name:      resolveProxyPower(prepared),
+			Raw:       buildRawProtocolRequest(prepared, mode),
+			Billing:   prepared.Billing,
+		}
+		return s.handleProxy(ctx, req)
+	default:
+		req, err := s.normalizeGatewayRequest(prepared, mode)
+		if err != nil {
+			return nil, err
+		}
+		return s.handleNormalize(ctx, req)
+	}
+}
+
+func (s GatewayService) Validate(ctx context.Context, raw GatewayRequest) error {
+	prepared, mode, err := prepareGatewayRequest(raw)
+	if err != nil {
+		return err
+	}
+	if mode == ModeProxy {
+		return fmt.Errorf("代理请求不支持能力预检")
+	}
+	req, err := s.normalizeGatewayRequest(prepared, mode)
+	if err != nil {
+		return err
+	}
+	plan, err := s.resolveNormalizePlan(ctx, req)
+	if err != nil {
+		return err
+	}
+	var lastErr error
+	for _, target := range plan.targets {
+		if err := s.validateNormalizeTarget(ctx, req, plan.power, target); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("能力没有可用实现: %s", req.Name)
+}
+
+func (s GatewayService) validateNormalizeTarget(
+	ctx context.Context,
+	req *botprotocol.ShemicRequest,
+	power botmodel.Power,
+	target botmodel.PowerTarget,
+) error {
+	selected, err := s.selectTarget(ctx, power, target)
+	if err != nil {
+		return err
+	}
+	targetReq := *req
+	var adapter botprotocol.Adapter
+	if isLocalProvider(selected.Provider) {
+		targetReq.Protocol = botprocessor.ProtocolLocal
+		if !localServiceMatchesProcessor(selected.Service.Path, selected.Provider.Processor) {
+			return fmt.Errorf("本地来源服务与处理器配置不一致，请重新保存来源")
+		}
+	} else {
+		adapter, err = s.adapterForSelected(&targetReq, selected)
+		if err != nil {
+			return err
+		}
+		targetReq.Protocol = adapter.Name()
+	}
+
+	mapped, err := botinput.BuildMapped(ctx, s.repo, &targetReq, botinput.Target{
+		PowerID:   selected.Power.ID,
+		ServiceID: selected.Service.ID,
+	})
+	if err != nil {
+		return err
+	}
+	selected, err = s.applyServiceEndpoint(ctx, selected, mapped)
+	if err != nil {
+		return err
+	}
+	if isLocalProvider(selected.Provider) {
+		return nil
+	}
+	_, err = adapter.BuildNativeRequest(botprotocol.NativeInput{
+		Request:     &targetReq,
+		Provider:    selected.Provider,
+		Account:     selected.Account,
+		Power:       selected.Power,
+		PowerTarget: selected.PowerTarget,
+		Service:     selected.Service,
+		ServiceAPI:  selected.ServiceAPI,
+		Mapped:      mapped,
+	})
+	return err
+}
+
+func prepareGatewayRequest(raw GatewayRequest) (GatewayRequest, string, error) {
 	if raw.Body == nil {
 		raw.Body = map[string]any{}
 	}
 	mode, err := resolveMode(raw)
 	if err != nil {
-		return nil, err
+		return raw, "", err
 	}
 	raw.RequestID = resolveRequestID(raw)
 	raw.Path = resolveRawPath(raw, mode)
+	return raw, mode, nil
+}
 
-	switch mode {
-	case ModeProxy:
-		req := &botprotocol.ShemicRequest{
-			RequestID: raw.RequestID,
-			Mode:      ModeProxy,
-			Protocol:  detectProtocol(raw),
-			Kind:      "proxy.protocol",
-			Name:      resolveProxyPower(raw),
-			Raw:       buildRawProtocolRequest(raw, mode),
-			Billing:   raw.Billing,
-		}
-		return s.handleProxy(ctx, req)
-	default:
-		adapter, err := s.registry.Get(detectProtocol(raw))
-		if err != nil {
-			return nil, err
-		}
-		req, err := adapter.Normalize(buildRawProtocolRequest(raw, mode))
-		if err != nil {
-			return nil, err
-		}
-		req.RequestID = raw.RequestID
-		req.Mode = mode
-		req.Billing = raw.Billing
-		return s.handleNormalize(ctx, req)
+func (s GatewayService) normalizeGatewayRequest(raw GatewayRequest, mode string) (*botprotocol.ShemicRequest, error) {
+	adapter, err := s.registry.Get(detectProtocol(raw))
+	if err != nil {
+		return nil, err
 	}
+	req, err := adapter.Normalize(buildRawProtocolRequest(raw, mode))
+	if err != nil {
+		return nil, err
+	}
+	req.RequestID = raw.RequestID
+	req.Mode = mode
+	req.Billing = raw.Billing
+	return req, nil
 }
 
 func buildRawProtocolRequest(raw GatewayRequest, mode string) botprotocol.RawRequest {

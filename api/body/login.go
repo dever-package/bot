@@ -14,6 +14,19 @@ func (Login) GetConfig(c *server.Context) error {
 	return botapi.WriteJSON(c, data, err)
 }
 
+func (Login) PostRegister(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := bodyservice.NewService().Register(c.Context(), bodyservice.RegisterRequest{
+		Account:  botapi.TextFromBody(body, "account", "username", "mobile"),
+		Password: botapi.TextFromBody(body, "password"),
+		Name:     botapi.TextFromBody(body, "name", "nickname"),
+	})
+	return botapi.WriteJSON(c, data, err)
+}
+
 func (Login) PostFeishu(c *server.Context) error {
 	body, err := botapi.BindBody(c)
 	if err != nil {

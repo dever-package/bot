@@ -15,38 +15,40 @@ import (
 )
 
 type execution struct {
-	runID                uint64
-	version              int
-	workerID             string
-	requestID            string
-	requestedAt          time.Time
-	startedAt            time.Time
-	claimedAt            time.Time
-	agent                agentmodel.Agent
-	power                energonmodel.Power
-	modelLimits          energonservice.ModelLimits
-	workingContextTokens int
-	sessionID            uint64
-	assistantMessageID   uint64
-	prompt               string
-	input                map[string]any
-	history              []any
-	registry             *runtimetool.Registry
-	transport            modelTransport
-	persistChat          bool
-	onStream             func(map[string]any)
-	completion           chan runCompletion
-	cleanup              func()
-	mediaReferences      []runtimeprovider.MediaReference
-	priorKnowledgeUsed   bool
-	snapshotHistoryLen   int
-	snapshotMediaLen     int
-	scope                runtimescope.Scope
-	billing              botprotocol.BillingContext
-	scopedContext        context.Context
-	checkpoint           runCheckpoint
-	documentID           uint64
-	documentModelStep    int
+	runID                 uint64
+	version               int
+	workerID              string
+	requestID             string
+	requestedAt           time.Time
+	startedAt             time.Time
+	claimedAt             time.Time
+	agent                 agentmodel.Agent
+	power                 energonmodel.Power
+	modelLimits           energonservice.ModelLimits
+	workingContextTokens  int
+	sessionID             uint64
+	assistantMessageID    uint64
+	prompt                string
+	input                 map[string]any
+	history               []any
+	registry              *runtimetool.Registry
+	transport             modelTransport
+	persistChat           bool
+	onStream              func(map[string]any)
+	completion            chan runCompletion
+	cleanup               func()
+	mediaReferences       []runtimeprovider.MediaReference
+	priorKnowledgeUsed    bool
+	snapshotHistoryLen    int
+	snapshotMediaLen      int
+	scope                 runtimescope.Scope
+	billing               botprotocol.BillingContext
+	scopedContext         context.Context
+	checkpoint            runCheckpoint
+	documentID            uint64
+	documentWriter        bool
+	documentModelStep     int
+	documentTextSourceKey string
 }
 
 type modelTransport struct {

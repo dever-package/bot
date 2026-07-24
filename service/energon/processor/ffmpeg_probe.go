@@ -6,7 +6,10 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+const ffmpegProbePreloadWorkers = 4
 
 type ffmpegMediaProbe struct {
 	Duration           float64
@@ -32,6 +35,93 @@ type ffmpegMediaProbe struct {
 	AudioExtradata     string
 	Width              int
 	Height             int
+}
+
+type ffmpegProbeResult struct {
+	probe ffmpegMediaProbe
+	err   error
+}
+
+type ffmpegProbeCache struct {
+	ffprobePath string
+	mu          sync.Mutex
+	results     map[string]ffmpegProbeResult
+}
+
+func newFFmpegProbeCache(ffprobePath string) *ffmpegProbeCache {
+	return &ffmpegProbeCache{
+		ffprobePath: ffprobePath,
+		results:     map[string]ffmpegProbeResult{},
+	}
+}
+
+func (cache *ffmpegProbeCache) Probe(ctx context.Context, path string) (ffmpegMediaProbe, error) {
+	cache.mu.Lock()
+	cached, exists := cache.results[path]
+	cache.mu.Unlock()
+	if exists {
+		return cached.probe, cached.err
+	}
+	probe, err := probeFFmpegMedia(ctx, cache.ffprobePath, path)
+	cache.mu.Lock()
+	if cached, exists = cache.results[path]; exists {
+		cache.mu.Unlock()
+		return cached.probe, cached.err
+	}
+	cache.results[path] = ffmpegProbeResult{probe: probe, err: err}
+	cache.mu.Unlock()
+	return probe, err
+}
+
+func (cache *ffmpegProbeCache) Preload(ctx context.Context, paths []string) error {
+	uniquePaths := distinctFFmpegProbePaths(paths)
+	if len(uniquePaths) == 0 {
+		return nil
+	}
+	workerCount := ffmpegProbePreloadWorkers
+	if len(uniquePaths) < workerCount {
+		workerCount = len(uniquePaths)
+	}
+	jobs := make(chan string)
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for index := 0; index < workerCount; index++ {
+		go func() {
+			defer workers.Done()
+			for path := range jobs {
+				_, _ = cache.Probe(ctx, path)
+			}
+		}()
+	}
+	for _, path := range uniquePaths {
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			workers.Wait()
+			return ctx.Err()
+		case jobs <- path:
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	return ctx.Err()
+}
+
+func distinctFFmpegProbePaths(paths []string) []string {
+	result := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		result = append(result, path)
+	}
+	return result
 }
 
 func probeFFmpegMedia(ctx context.Context, ffprobePath string, path string) (ffmpegMediaProbe, error) {

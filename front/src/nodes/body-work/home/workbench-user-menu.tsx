@@ -30,7 +30,12 @@ import {
   useNavigate,
   useTheme,
 } from "@dever/front-plugin";
-import type { BodyFilingInfo } from "../auth/site-config";
+import {
+  BodyFilingContent,
+  createBodyFilingRows,
+  hasBodyFilingRichContent,
+  type BodyFilingInfo,
+} from "../shared/body-filing";
 import type { WorkbenchTeam } from "./workbench-api";
 import { WorkbenchAvatar } from "./workbench-avatar";
 import { WorkbenchProfileDialog } from "./workbench-profile-dialog";
@@ -61,7 +66,11 @@ export function WorkbenchUserMenu({
   const [profileOpen, setProfileOpen] = useState(false);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const selectedTeam = teams.find((team) => team.id === teamID);
-  const filingRows = useMemo(() => createFilingRows(filing), [filing]);
+  const filingRows = useMemo(() => createBodyFilingRows(filing), [filing]);
+  const hasRichFiling = useMemo(
+    () => hasBodyFilingRichContent(filing.content),
+    [filing.content],
+  );
   const roleLabel =
     Array.isArray(user?.role) && user.role.length > 0
       ? user.role.join("、")
@@ -241,22 +250,26 @@ export function WorkbenchUserMenu({
               />
             </div>
 
-            {filingRows.length > 0 ? (
+            {hasRichFiling || filingRows.length > 0 ? (
               <footer className="hb-user-filing">
-                {filingRows.map((row) =>
-                  row.url ? (
-                    <a
-                      key={row.key}
-                      href={row.url}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                    >
-                      {row.label}
-                    </a>
-                  ) : (
-                    <span key={row.key}>{row.label}</span>
-                  ),
-                )}
+                <BodyFilingContent
+                  filing={filing}
+                  className="hb-user-filing-rich"
+                  fallback={filingRows.map((row) =>
+                    row.url ? (
+                      <a
+                        key={row.key}
+                        href={row.url}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                      >
+                        {row.label}
+                      </a>
+                    ) : (
+                      <span key={row.key}>{row.label}</span>
+                    ),
+                  )}
+                />
               </footer>
             ) : null}
           </div>
@@ -382,36 +395,4 @@ function SubmenuChoice({
       {active ? <Check className="hb-submenu-choice-check" /> : null}
     </button>
   );
-}
-
-function createFilingRows(filing: BodyFilingInfo) {
-  const rows: Array<{ key: string; label: string; url?: string }> = [];
-  if (filing.businessLicenseURL) {
-    rows.push({
-      key: "business-license",
-      label: "营业执照",
-      url: filing.businessLicenseURL,
-    });
-  }
-  if (filing.icpRecord) {
-    rows.push({
-      key: "icp-record",
-      label: filing.icpRecord,
-      url: filing.icpRecordURL,
-    });
-  }
-  if (filing.publicSecurityRecord) {
-    rows.push({
-      key: "public-security-record",
-      label: filing.publicSecurityRecord,
-      url: filing.publicSecurityRecordURL,
-    });
-  }
-  if (filing.companyName) {
-    rows.push({ key: "company-name", label: filing.companyName });
-  }
-  if (filing.companyAddress) {
-    rows.push({ key: "company-address", label: filing.companyAddress });
-  }
-  return rows;
 }

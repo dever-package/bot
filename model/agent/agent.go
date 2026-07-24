@@ -21,6 +21,7 @@ type Agent struct {
 	KnowledgeCateID uint64    `dorm:"type:bigint;not null;default:0;comment:知识库分类"`
 	SkillPackID     uint64    `dorm:"type:bigint;not null;default:0;comment:技能方案"`
 	MemoryEnabled   bool      `dorm:"type:boolean;not null;default:false;comment:长期记忆"`
+	OpeningEnabled  bool      `dorm:"type:boolean;not null;default:false;comment:主动开场"`
 	Temperature     float64   `dorm:"type:double precision;not null;default:0.7;comment:温度"`
 	TimeoutSeconds  int       `dorm:"type:int;not null;default:3600;comment:超时时间(秒)"`
 	MaxAutoSteps    int       `dorm:"type:int;not null;default:0;comment:最大自动步骤数"`
@@ -74,18 +75,19 @@ var (
 			"key":               DefaultAgentKey,
 			"kind":              AgentKindNormal,
 			"description":       "默认通用智能体，适合普通文本任务和能力调用。",
-			"prompt":            "",
+			"prompt":            defaultAgentPrompt,
 			"llm_power_id":      energonmodel.DefaultLLMPowerID,
-			"power_cate_id":     0,
+			"power_cate_id":     1,
 			"knowledge_cate_id": 0,
-			"skill_pack_id":     0,
+			"skill_pack_id":     DefaultSkillPackID,
 			"memory_enabled":    false,
-			"temperature":       0.7,
-			"timeout_seconds":   3600,
+			"opening_enabled":   true,
+			"temperature":       0.2,
+			"timeout_seconds":   300,
 			"max_auto_steps":    0,
 			"max_output_tokens": 0,
 			"status":            1,
-			"sort":              10,
+			"sort":              100,
 		},
 		{
 			"id":                FrontAssistantAgentID,
@@ -100,6 +102,7 @@ var (
 			"knowledge_cate_id": 0,
 			"skill_pack_id":     DefaultSkillPackID,
 			"memory_enabled":    true,
+			"opening_enabled":   false,
 			"temperature":       0.4,
 			"timeout_seconds":   3600,
 			"max_auto_steps":    0,
@@ -120,6 +123,7 @@ var (
 			"knowledge_cate_id": 0,
 			"skill_pack_id":     0,
 			"memory_enabled":    false,
+			"opening_enabled":   false,
 			"temperature":       0.2,
 			"timeout_seconds":   180,
 			"max_auto_steps":    1,
@@ -140,6 +144,7 @@ var (
 			"knowledge_cate_id": 0,
 			"skill_pack_id":     0,
 			"memory_enabled":    false,
+			"opening_enabled":   false,
 			"temperature":       0.3,
 			"timeout_seconds":   3600,
 			"max_auto_steps":    0,

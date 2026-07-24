@@ -69,11 +69,18 @@ export function summarizeCanvasGroupRuntime({
   const groupActive =
     groupState?.status === "running" || groupState?.status === "waiting";
   const completedCount =
-    groupActive || memberStates.length > 0
+    groupActive
       ? memberStates.filter((state) => state.status === "success").length
-      : runnableMembers.filter(
-          (member) => !member.storyboardItem?.stale && hasResult(member),
-        ).length;
+      : runnableMembers.filter((member) => {
+          const state = runningNodes[member.id];
+          if (state?.status === "success") {
+            return true;
+          }
+          if (state) {
+            return false;
+          }
+          return !member.storyboardItem?.stale && hasResult(member);
+        }).length;
   const failedCount = memberStates.filter(
     (state) => state.status === "error",
   ).length;

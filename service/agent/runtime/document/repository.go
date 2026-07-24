@@ -32,6 +32,23 @@ func (repository) update(ctx context.Context, id uint64, values map[string]any) 
 	return agentmodel.NewDocumentModel().Find(ctx, map[string]any{"id": id})
 }
 
+func (repository) updateIfStatus(
+	ctx context.Context,
+	id uint64,
+	status string,
+	values map[string]any,
+) (*agentmodel.Document, bool) {
+	if id == 0 || strings.TrimSpace(status) == "" {
+		return nil, false
+	}
+	values["updated_at"] = time.Now()
+	affected := agentmodel.NewDocumentModel().Update(ctx, map[string]any{
+		"id":     id,
+		"status": status,
+	}, values)
+	return agentmodel.NewDocumentModel().Find(ctx, map[string]any{"id": id}), affected > 0
+}
+
 func (repository) find(ctx context.Context, id uint64) *agentmodel.Document {
 	if id == 0 {
 		return nil

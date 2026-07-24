@@ -24,15 +24,7 @@ func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammode
 		return
 	}
 	canvas := mapValue(input["canvas"])
-	req := CanvasRunRequest{
-		ProjectID:   run.ProjectID,
-		AssetCateID: uint64Value(input["_asset_cate_id"]),
-		StartNodeID: textValue(input["_start_node_id"]),
-		RequestID:   run.RequestID,
-		SingleNode:  boolValue(input["_single_node"]),
-		Canvas:      canvas,
-		Input:       mapValue(input["input"]),
-	}
+	req := workspaceCanvasRunRequest(run, input, canvas)
 	fullNodesByID := map[string]canvasRunNode{}
 	if canvas != nil {
 		nodes, _, err := parseCanvasRunGraph(canvas)
@@ -86,6 +78,10 @@ func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammode
 		if childStatus == teammodel.RunStatusSuccess {
 			if saved, err := s.saveWorkspaceCanvasMaterial(ctx, run.ProjectID, req, run, fullNode, parentNodeRunID, payload); err == nil {
 				payload = saved
+			} else {
+				childStatus = teammodel.RunStatusFail
+				payload["status"] = childStatus
+				payload["error"] = err.Error()
 			}
 		}
 		s.recordCanvasNodeRunResult(ctx, req, run, fullNode, parentNodeRunID, childStatus, payload, nil)
@@ -114,12 +110,7 @@ func (s WorkspaceService) SyncCanvasRunProgress(ctx context.Context, projectID u
 	if workspaceRunLeaseAlive(run, now) || !workspaceRunExecutionOrphaned(run, now) {
 		return run
 	}
-	_, _ = withWorkspaceRunLock(ctx, run.ProjectID, run.ID, func() (struct{}, error) {
-		if refreshed := teammodel.NewRunModel().Find(ctx, map[string]any{"id": run.ID}); workspaceRunExecutionOrphaned(refreshed, time.Now()) {
-			s.failInterruptedWorkspaceRun(ctx, refreshed)
-		}
-		return struct{}{}, nil
-	})
+	go s.watchWorkspaceRun(detachedWorkspaceContext(ctx), run.ID, 0)
 	if refreshed := teammodel.NewRunModel().Find(ctx, map[string]any{"id": run.ID}); refreshed != nil {
 		return refreshed
 	}
@@ -189,7 +180,7 @@ func (s WorkspaceService) workspaceChildNodePayload(ctx context.Context, run *te
 		})
 	}
 	childRun := mapValue(childStatus["run"])
-	output := firstPresent(valueAtPath(childRun, "output"), childStatus)
+	output := firstPresent(valueAtPath(childRun, "output"), map[string]any{})
 	nodeResult := workspaceChildNodeResult(ctx, run.ProjectID, run, node, parentNodeRunID, status, childStatus, output)
 	return map[string]any{
 		"run_id":       run.ID,
@@ -267,19 +258,25 @@ func (s WorkspaceService) continueWorkspaceRunAfterBlockedNode(ctx context.Conte
 	if len(pendingNodes) == 0 {
 		return false
 	}
-	req := CanvasRunRequest{
-		ProjectID:   run.ProjectID,
-		AssetCateID: uint64Value(input["_asset_cate_id"]),
-		StartNodeID: textValue(input["_start_node_id"]),
-		RequestID:   run.RequestID,
-		SingleNode:  boolValue(input["_single_node"]),
-		Canvas:      canvas,
-		Input:       mapValue(input["input"]),
-	}
+	req := workspaceCanvasRunRequest(run, input, canvas)
 	flowRunID := workspaceFlowRunID(ctx, run.ID)
 	nodeRuns := workspaceNodeRunIDMap(ctx, run.ID)
 	_, err = s.executeCanvasRunnableNodes(ctx, req, run, execPlan, pendingNodes, flowRunID, nodeRuns, existingResults)
 	return err == nil
+}
+
+func workspaceCanvasRunRequest(run *teammodel.Run, input map[string]any, canvas map[string]any) CanvasRunRequest {
+	return CanvasRunRequest{
+		ProjectID:          run.ProjectID,
+		AssetCateID:        uint64Value(input["_asset_cate_id"]),
+		StartNodeID:        textValue(input["_start_node_id"]),
+		DisplayStartNodeID: textValue(input["_display_start_node_id"]),
+		RequestID:          run.RequestID,
+		SingleNode:         boolValue(input["_single_node"]),
+		ExecutionScope:     textValue(input["_execution_scope"]),
+		Canvas:             canvas,
+		Input:              mapValue(input["input"]),
+	}
 }
 
 func workspaceChildNodeResult(ctx context.Context, projectID uint64, parentRun *teammodel.Run, node canvasRunNode, parentNodeRunID uint64, status string, childStatus map[string]any, output any) map[string]any {
@@ -289,6 +286,7 @@ func workspaceChildNodeResult(ctx context.Context, projectID uint64, parentRun *
 	runID := uint64Value(childRun["id"])
 	requestID := textValue(childRun["request_id"])
 	releaseID := uint64Value(childRun["release_id"])
+	errorText := firstText(childRun["error"], nodeRun["error"], valueAtPath(output, "error"))
 	result := map[string]any{
 		"node_key":     node.ID,
 		"node_type":    node.Type,
@@ -298,12 +296,14 @@ func workspaceChildNodeResult(ctx context.Context, projectID uint64, parentRun *
 		"request_id":   requestID,
 		"release_id":   firstUint64(parentReleaseID(parentRun), releaseID),
 		"status":       status,
+		"error":        errorText,
 		"output":       output,
 		"asset":        asset,
 		"version":      version,
 		"result": map[string]any{
 			"output":       output,
 			"status":       status,
+			"error":        errorText,
 			"run_id":       runID,
 			"child_run_id": runID,
 			"request_id":   requestID,
@@ -317,6 +317,7 @@ func workspaceChildNodeResult(ctx context.Context, projectID uint64, parentRun *
 		result["result"] = map[string]any{
 			"output":       output,
 			"status":       status,
+			"error":        errorText,
 			"run_id":       runID,
 			"child_run_id": runID,
 			"request_id":   requestID,

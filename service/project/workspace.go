@@ -170,16 +170,83 @@ func (s WorkspaceService) canvasBundle(ctx context.Context, projectID uint64, as
 	for _, slot := range slots {
 		nodeKeys = append(nodeKeys, slot.NodeKey)
 	}
+	referencedAssetIDs := canvasReferencedAssetIDs(nodes)
 	assets := s.project.asset.CanvasReferences(
 		ctx,
 		projectID,
 		assetCateID,
-		canvasReferencedAssetIDs(nodes),
+		referencedAssetIDs,
 		nodeKeys,
 	)
+	allReferencedAssetIDs := make(map[uint64]struct{}, len(referencedAssetIDs))
+	for _, assetID := range referencedAssetIDs {
+		allReferencedAssetIDs[assetID] = struct{}{}
+	}
+	collectCanvasReferencedAssetIDs(assets, allReferencedAssetIDs)
+	if len(allReferencedAssetIDs) > len(referencedAssetIDs) {
+		referencedAssetIDs = make([]uint64, 0, len(allReferencedAssetIDs))
+		for assetID := range allReferencedAssetIDs {
+			referencedAssetIDs = append(referencedAssetIDs, assetID)
+		}
+		assets = s.project.asset.CanvasReferences(
+			ctx,
+			projectID,
+			assetCateID,
+			referencedAssetIDs,
+			nodeKeys,
+		)
+	}
+	currentVersions := canvasCurrentAssetVersions(assets)
+	refreshCanvasAssetReferenceVersions(nodes, currentVersions)
+	refreshCanvasAssetReferenceVersions(assets, currentVersions)
+	canvas["nodes"] = nodes
 	return map[string]any{
 		"canvas": canvas,
 		"assets": map[string]any{"items": assets},
+	}
+}
+
+func canvasCurrentAssetVersions(assets []map[string]any) map[uint64]uint64 {
+	result := make(map[uint64]uint64, len(assets))
+	for _, asset := range assets {
+		assetID := uint64Value(asset["id"])
+		versionID := uint64Value(asset["version_id"])
+		if assetID > 0 && versionID > 0 {
+			result[assetID] = versionID
+		}
+	}
+	return result
+}
+
+func refreshCanvasAssetReferenceVersions(raw any, versions map[uint64]uint64) {
+	switch value := raw.(type) {
+	case map[string]any:
+		if strings.EqualFold(strings.TrimSpace(textValue(value["ref_type"])), "asset") {
+			if versionID := versions[uint64Value(value["ref_id"])]; versionID > 0 {
+				value["ref_version_id"] = versionID
+			}
+		}
+		if versionID := versions[uint64Value(value["asset_id"])]; versionID > 0 {
+			if _, exists := value["version_id"]; exists {
+				value["version_id"] = versionID
+			}
+		}
+		if versionID := versions[uint64Value(value["id"])]; versionID > 0 {
+			if _, exists := value["version_id"]; exists {
+				value["version_id"] = versionID
+			}
+		}
+		for _, child := range value {
+			refreshCanvasAssetReferenceVersions(child, versions)
+		}
+	case []any:
+		for _, child := range value {
+			refreshCanvasAssetReferenceVersions(child, versions)
+		}
+	case []map[string]any:
+		for _, child := range value {
+			refreshCanvasAssetReferenceVersions(child, versions)
+		}
 	}
 }
 

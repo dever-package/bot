@@ -34,6 +34,7 @@ import {
 } from "./media-inspector";
 import type {
   AgentChatArtifactActionRenderer,
+  AgentChatDocumentActionRenderer,
   AgentChatMessageActionContext,
   AgentChatRuntimeApis,
 } from "./types";
@@ -52,6 +53,7 @@ export type AgentChatPanelProps = {
   minHeight?: string;
   fullScreen?: boolean;
   lazySession?: boolean;
+  proactiveOpening?: boolean;
   mobileSessionNavigation?: boolean;
   appearance?: "default" | "body";
   sidebarTitle?: ReactNode;
@@ -71,6 +73,7 @@ export type AgentChatPanelProps = {
     message: AgentChatMessageActionContext,
   ) => ReactNode;
   renderArtifactActions?: AgentChatArtifactActionRenderer;
+  renderDocumentActions?: AgentChatDocumentActionRenderer;
   onClose?: () => void;
 };
 
@@ -86,6 +89,12 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
   const openPath = String(item.meta?.openPath || "");
   const open = useStore(store, () =>
     openPath ? Boolean(getStoreValueByPath(store, openPath)) : true,
+  );
+  const openingEnabledPath = String(item.meta?.openingEnabledPath || "");
+  const proactiveOpening = useStore(store, () =>
+    openingEnabledPath
+      ? Boolean(getStoreValueByPath(store, openingEnabledPath))
+      : Boolean(item.meta?.proactiveOpening),
   );
   const assistantApi = useMemo<AgentChatApi>(
     () => ({
@@ -114,6 +123,9 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
   const runtimeApi = useMemo<AgentChatRuntimeApis>(
     () => ({
       request: String(item.meta?.requestApi || "/bot/admin/agent_runtime/run"),
+      opening: String(
+        item.meta?.openingApi || "/bot/admin/agent_runtime/opening",
+      ),
       stream: String(item.meta?.streamApi || "/bot/admin/agent_runtime/stream"),
       stop: String(item.meta?.stopApi || "/bot/admin/agent_runtime/stop"),
       status: String(item.meta?.statusApi || "/bot/admin/agent_runtime/status"),
@@ -136,6 +148,7 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
       item.meta?.documentApi,
       item.meta?.documentStreamApi,
       item.meta?.inputConfigApi,
+      item.meta?.openingApi,
       item.meta?.referencePreviewApi,
       item.meta?.requestApi,
       item.meta?.statusApi,
@@ -163,6 +176,7 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
         item.meta?.clipboardImageUploadRuleId || 0,
       )}
       blockMs={Number(item.meta?.blockMs || 1000)}
+      proactiveOpening={proactiveOpening}
       assistantApi={assistantApi}
       runtimeApi={runtimeApi}
       onClose={close}
@@ -179,6 +193,7 @@ export function AgentChatPanel({
   minHeight = "min(420px, 78dvh)",
   fullScreen = false,
   lazySession = false,
+  proactiveOpening = false,
   mobileSessionNavigation = false,
   appearance = "default",
   sidebarTitle,
@@ -194,6 +209,7 @@ export function AgentChatPanel({
   referenceProviders,
   renderMessageActions,
   renderArtifactActions,
+  renderDocumentActions,
   onClose,
 }: AgentChatPanelProps) {
   const controller = useAgentChatStore({
@@ -202,6 +218,7 @@ export function AgentChatPanel({
     modalOpen: open,
     blockMs,
     lazySession,
+    proactiveOpening,
     assistantApi,
     runtimeApi,
     requestScope,
@@ -394,9 +411,8 @@ export function AgentChatPanel({
             portalContainer={chatLayerRef.current}
             document={activeDocument}
             messageID={activeDocumentMessage?.recordID || 0}
-            running={Boolean(activeDocumentMessage?.running)}
-            error={Boolean(activeDocumentMessage?.error)}
             renderArtifactActions={renderArtifactActions}
+            renderDocumentActions={renderDocumentActions}
             onClose={() => setDocumentPaneOpen(false)}
           />
         ) : null}

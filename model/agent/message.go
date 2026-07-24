@@ -10,6 +10,9 @@ const (
 	MessageStatusNormal  int16 = 1
 	MessageStatusError   int16 = 2
 	MessageStatusRunning int16 = 3
+
+	MessageKindChat    = "chat"
+	MessageKindOpening = "opening"
 )
 
 var messageStatusOptions = []map[string]any{

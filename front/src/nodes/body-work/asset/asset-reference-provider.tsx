@@ -33,10 +33,12 @@ export function useAssetReferenceProvider({
   teamID,
   initialFilters,
   allowedKinds,
+  onSelect,
 }: {
   teamID: number;
   initialFilters?: Partial<AssetFilters>;
   allowedKinds?: string[];
+  onSelect?: (option: WorkbenchReferenceOption) => void;
 }): ReferenceProvider {
   const filterKey = JSON.stringify(initialFilters || {});
   const kindKey = JSON.stringify(allowedKinds || []);
@@ -76,10 +78,11 @@ export function useAssetReferenceProvider({
           teamID={teamID}
           initialFilters={stableFilters}
           allowedKinds={stableKinds}
+          onReferenceSelect={onSelect}
         />
       ),
     }),
-    [stableFilters, stableKinds, teamID],
+    [onSelect, stableFilters, stableKinds, teamID],
   );
 }
 
@@ -88,6 +91,7 @@ function AssetReferencePicker({
   teamID,
   initialFilters,
   allowedKinds,
+  onReferenceSelect,
   onSelect,
   onClose,
 }: {
@@ -95,6 +99,7 @@ function AssetReferencePicker({
   teamID: number;
   initialFilters?: Partial<AssetFilters>;
   allowedKinds?: AssetKind[];
+  onReferenceSelect?: (option: WorkbenchReferenceOption) => void;
   onSelect: (option: ReferenceOption) => void;
   onClose: () => void;
 }) {
@@ -109,7 +114,12 @@ function AssetReferencePicker({
       onClose={onClose}
       onConfirm={(assets) => {
         const asset = assets[0];
-        if (asset) onSelect(assetReferenceOption(asset));
+        if (!asset) {
+          return;
+        }
+        const option = assetReferenceOption(asset);
+        onReferenceSelect?.(option);
+        onSelect(option);
       }}
     />
   );

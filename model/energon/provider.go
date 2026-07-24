@@ -23,10 +23,11 @@ type ProviderIndex struct {
 }
 
 const (
-	providerShemicLabID      uint64 = 1
-	providerDoubaoID         uint64 = 2
 	providerRunningHubAPIID  uint64 = 3
 	providerRunningHubFlowID uint64 = 4
+	providerDoubaoID         uint64 = 6
+	providerShemicLabID      uint64 = 7
+	providerVideoProcessorID uint64 = 10
 	providerShemicLabHost           = "http://t.s.dever.cc:8080/v1"
 	providerDoubaoHost              = "https://ark.cn-beijing.volces.com/api/v3/"
 	providerRunningHubHost          = "https://www.runninghub.cn/openapi/v2/"
@@ -34,6 +35,30 @@ const (
 
 var (
 	providerSeed = []map[string]any{
+		{
+			"id":       providerRunningHubAPIID,
+			"cate_id":  defaultProviderCateID,
+			"name":     "rh-api",
+			"protocol": "rhapi",
+			"host":     providerRunningHubHost,
+			"status":   1,
+		},
+		{
+			"id":       providerRunningHubFlowID,
+			"cate_id":  defaultProviderCateID,
+			"name":     "rh-flow",
+			"protocol": "rhflow",
+			"host":     providerRunningHubHost,
+			"status":   1,
+		},
+		{
+			"id":       providerDoubaoID,
+			"cate_id":  defaultProviderCateID,
+			"name":     "火山方舟",
+			"protocol": "doubao",
+			"host":     providerDoubaoHost,
+			"status":   1,
+		},
 		{
 			"id":       providerShemicLabID,
 			"cate_id":  defaultProviderCateID,
@@ -43,28 +68,13 @@ var (
 			"status":   1,
 		},
 		{
-			"id":       providerDoubaoID,
-			"cate_id":  defaultProviderCateID,
-			"name":     "火山",
-			"protocol": "doubao",
-			"host":     providerDoubaoHost,
-			"status":   1,
-		},
-		{
-			"id":       providerRunningHubAPIID,
-			"cate_id":  defaultProviderCateID,
-			"name":     "runninghubapi",
-			"protocol": "rhapi",
-			"host":     providerRunningHubHost,
-			"status":   1,
-		},
-		{
-			"id":       providerRunningHubFlowID,
-			"cate_id":  defaultProviderCateID,
-			"name":     "runninghubflow",
-			"protocol": "rhflow",
-			"host":     providerRunningHubHost,
-			"status":   1,
+			"id":        providerVideoProcessorID,
+			"cate_id":   defaultProviderCateID,
+			"name":      "视频处理",
+			"protocol":  "local",
+			"processor": "ffmpeg",
+			"host":      "",
+			"status":    1,
 		},
 	}
 

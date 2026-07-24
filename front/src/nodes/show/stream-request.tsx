@@ -266,8 +266,15 @@ export function StreamPowerRunner({
   )
   const hasConfiguredParams = powerParams.length > 0
   const sourcePickerOptions = useMemo(
-    () => powerSources.map((source) => ({ id: source.id, value: source.name })),
-    [powerSources]
+    () =>
+      powerSources.map((source) => ({
+        id: source.id,
+        value:
+          appearance === 'body'
+            ? valueText(source.service_name) || '未命名服务'
+            : source.name,
+      })),
+    [appearance, powerSources]
   )
   const sourceReady =
     sourceRule !== SOURCE_RULE_PICK || activeSelectedSourceID.length > 0
@@ -864,17 +871,23 @@ export function StreamPowerRunner({
 
           {sourceRule === SOURCE_RULE_PICK && powerSources.length > 0 ? (
             <div className="stream-power-source mb-3">
-              <SearchableOptionPicker
-                value={activeSelectedSourceID || undefined}
-                options={sourcePickerOptions}
-                disabled={running || paramsLoading}
-                placeholder="请选择来源"
-                clearable={false}
-                onChange={(nextValue) => {
-                  const sourceID = Array.isArray(nextValue) ? nextValue[0] || '' : nextValue
-                  setSelectedSource({ power: powerKey, id: String(sourceID || '') })
-                }}
-              />
+              {appearance === 'body' ? (
+                <span className="stream-power-source-label">选择模型</span>
+              ) : null}
+              <div className="stream-power-source-picker">
+                <SearchableOptionPicker
+                  value={activeSelectedSourceID || undefined}
+                  options={sourcePickerOptions}
+                  disabled={running || paramsLoading}
+                  placeholder={appearance === 'body' ? '请选择模型' : '请选择来源'}
+                  searchPlaceholder={appearance === 'body' ? '搜索模型...' : undefined}
+                  clearable={false}
+                  onChange={(nextValue) => {
+                    const sourceID = Array.isArray(nextValue) ? nextValue[0] || '' : nextValue
+                    setSelectedSource({ power: powerKey, id: String(sourceID || '') })
+                  }}
+                />
+              </div>
             </div>
           ) : null}
 

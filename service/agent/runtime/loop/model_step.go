@@ -8,25 +8,43 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
 	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
+	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 func (s Service) runModelStep(ctx context.Context, controller *runController, state *runState, stepLimits modelStepLimits) bool {
 	requiredToolName := strings.TrimSpace(state.requiredToolName)
+	requiredPresentationStep := strings.EqualFold(requiredToolName, runtimeprovider.PresentSuggestionsToolName)
+	requiredInteractionStep := strings.EqualFold(requiredToolName, runtimeprovider.AskUserToolName)
 	toolChoice := any("auto")
 	if requiredToolName != "" {
 		toolChoice = botprotocol.ForcedFunctionToolChoice(requiredToolName)
 	}
-	result, err := s.callModel(ctx, controller, state.execution, state.input, state.history, toolChoice, state.documentID, state.modelStep)
+	result, err := s.callModel(
+		ctx,
+		controller,
+		state.execution,
+		state.input,
+		state.history,
+		toolChoice,
+		state.documentWriteID(),
+		state.modelStep,
+		state.documentTextSourceKey,
+		!requiredPresentationStep && !requiredInteractionStep,
+	)
+	if requiredPresentationStep {
+		result.Text = ""
+	}
 	calls := normalizeToolCallIDs(result.ToolCalls)
 	result.ToolCalls = calls
-	if state.documentID == 0 {
+	if !state.isDocumentWriter() {
 		state.AppendVisibleText(result.Text)
-	} else if !result.TextPublished && strings.TrimSpace(result.Text) != "" {
+	} else if !requiredPresentationStep && !result.TextPublished && strings.TrimSpace(result.Text) != "" {
 		if persistErr := s.persistSynchronousDocumentText(ctx, state, result.Text); persistErr != nil && err == nil {
 			err = persistErr
 		}
 	}
+	state.documentTextSourceKey = ""
 	if err != nil {
 		if ctx.Err() != nil {
 			s.finishContext(controller, state)
@@ -38,7 +56,6 @@ func (s Service) runModelStep(ctx context.Context, controller *runController, st
 		})
 		return false
 	}
-	state.requiredToolName = ""
 	if requiredToolName != "" && !hasToolCall(calls, requiredToolName) {
 		s.finish(state, finishOutcome{
 			status: runStatusFail, text: state.lastText,
@@ -49,7 +66,6 @@ func (s Service) runModelStep(ctx context.Context, controller *runController, st
 		})
 		return false
 	}
-
 	if len(calls) == 0 {
 		return s.finishModelOutput(ctx, controller, state, result, stepLimits)
 	}
@@ -95,37 +111,89 @@ func (s Service) finishModelOutput(
 		return s.continueLengthLimitedOutput(state, result, stepLimits)
 	}
 	state.lengthContinuations = 0
-	if state.documentID > 0 && !documentHasText(ctx, state.documentID) {
+	if state.isDocumentWriter() && !documentHasText(ctx, state.documentID) {
 		return s.continueMissingDelivery(state, result, stepLimits)
 	}
 	if state.awaitingDelivery && !modelStepHasDelivery(state, result) {
 		return s.continueMissingDelivery(state, result, stepLimits)
 	}
+	if state.isDocumentWriter() && !state.documentDeliveryReady && state.completionReviews < completionReviewLimit(state) {
+		state.completionReviewPending = true
+	}
 	if shouldReviewCompletion(state, result) {
-		state.completionReviews++
-		state.completionReviewPending = false
-		review, err := s.inspectCompletion(ctx, controller, state, result)
+		review, err := s.runCompletionReview(ctx, controller, state, result)
 		if ctx.Err() != nil {
 			s.finishContext(controller, state)
 			return false
 		}
 		if err != nil {
 			logCompletionReviewError(state, err)
+			if state.isDocumentWriter() {
+				return s.failIncompleteDocument(state, "图文正文完整性检查失败，请重新生成")
+			}
 			return s.finishImplicitModelOutput(state, result)
 		}
+		if state.isDocumentWriter() {
+			state.documentDeliveryReady = review.Delivery == "complete"
+			review.Dependency = completionDependencyNone
+			review.FollowUp = completionFollowUpNone
+		}
 		if review.needsContinuation() {
-			state.requiredToolName = review.Interaction
+			requiredToolName := review.requiredToolName()
+			if state.isDocumentWriter() && review.Delivery != "complete" {
+				requiredToolName = ""
+				if state.completionReviews >= completionReviewLimit(state) {
+					return s.failIncompleteDocument(state, review.Missing)
+				}
+				state.completionReviewPending = true
+				return s.continueRejectedDocumentTerminal(state, result, review.Missing)
+			}
+			state.requireTool(requiredToolName)
 			state.awaitingDelivery = true
 			return s.continueModelOutput(
 				state,
 				result,
-				completionContinuationInput(review.Missing, review.Interaction),
+				completionContinuationInput(review.Missing, review.Dependency, review.FollowUp),
 				"completion_continuation",
 				stepStatusWarning,
 			)
 		}
 	}
+	if state.isDocumentWriter() && !state.documentDeliveryReady {
+		return s.failIncompleteDocument(state, "当前图文正文尚未通过完整性交付检查")
+	}
 	return s.finishImplicitModelOutput(state, result)
+}
+
+func (s Service) continueRejectedDocumentTerminal(state *runState, result modelStepResult, missing string) bool {
+	currentStep := state.modelStep
+	state.phase = runPhaseModel
+	state.modelStep++
+	state.pendingTools = nil
+	state.pendingIndex = 0
+	state.pendingModelText = ""
+	state.deliveryContinuations = 0
+	state.lengthContinuations = 0
+	state.documentTextSourceKey = documentModelTextSourceKey(currentStep)
+	state.input = state.continuationInput(documentRewriteContinuationInput(missing))
+	return s.commitRuntimeStep(state, "model", modelStepTitle(result), result.Text, map[string]any{
+		"finish_reason": result.FinishMode,
+		"tool_calls":    botprotocol.ToolCallsValue(result.ToolCalls),
+		"timing":        modelTiming(state.execution, currentStep, result),
+		"protocol":      "document_completion_required",
+	}, stepStatusWarning)
+}
+
+func (s Service) failIncompleteDocument(state *runState, missing string) bool {
+	message := strings.TrimSpace(missing)
+	if message == "" {
+		message = "图文正文尚未完整交付"
+	}
+	s.finish(state, finishOutcome{
+		status: runStatusFail, text: state.lastText, message: message,
+		stepType: "error", stepTitle: "图文正文未完成", stepStatus: stepStatusWarning,
+	})
+	return false
 }
 
 func (s Service) finishImplicitModelOutput(state *runState, result modelStepResult) bool {
@@ -208,7 +276,7 @@ func (s Service) continueModelOutput(state *runState, result modelStepResult, in
 	appendModelHistory(state, result.Text)
 	state.phase = runPhaseModel
 	state.modelStep++
-	state.input = input
+	state.input = state.continuationInput(input)
 	return s.commitRuntimeStep(state, "model", modelStepTitle(result), result.Text, map[string]any{
 		"finish_reason": result.FinishMode,
 		"timing":        modelTiming(state.execution, currentStep, result),

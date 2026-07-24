@@ -51,6 +51,9 @@ func buildPayload(row agentmodel.Document, blocks []agentmodel.DocumentBlock, ar
 		}
 	}
 	status := projectedDocumentStatus(row.Status, pendingJobs, hasFailedMedia)
+	if status == agentmodel.DocumentStatusFailed {
+		pendingJobs = 0
+	}
 	return Payload{
 		ID:              row.ID,
 		SessionID:       row.SessionID,
@@ -86,6 +89,9 @@ func blockPayload(row agentmodel.DocumentBlock, artifacts []map[string]any) Bloc
 }
 
 func projectedDocumentStatus(status string, pendingJobs int, hasFailedMedia bool) string {
+	if status == agentmodel.DocumentStatusFailed {
+		return status
+	}
 	if status == agentmodel.DocumentStatusWriting {
 		return status
 	}

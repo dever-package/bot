@@ -1,4 +1,5 @@
 import {
+  ArrowDown,
   Check,
   ChevronRight,
   Copy,
@@ -28,9 +29,13 @@ import {
   AgentChatDocumentOutline,
   useAgentChatDocumentOutline,
 } from "./document-outline";
+import { useAgentChatDocumentAutoScroll } from "./document-scroll";
 import { AgentChatDocumentView } from "./document-view";
 import { AGENT_CHAT_CHILD_LAYER_Z_INDEX } from "./layers";
-import type { AgentChatArtifactActionRenderer } from "./types";
+import type {
+  AgentChatArtifactActionRenderer,
+  AgentChatDocumentActionRenderer,
+} from "./types";
 
 export function AgentChatDocumentEntry({
   document,
@@ -73,18 +78,16 @@ export function AgentChatDocumentPane({
   portalContainer,
   document: agentDocument,
   messageID,
-  running,
-  error,
   renderArtifactActions,
+  renderDocumentActions,
   onClose,
 }: {
   open: boolean;
   portalContainer?: HTMLElement | null;
   document: AgentChatDocument;
   messageID: number;
-  running: boolean;
-  error: boolean;
   renderArtifactActions?: AgentChatArtifactActionRenderer;
+  renderDocumentActions?: AgentChatDocumentActionRenderer;
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -92,14 +95,18 @@ export function AgentChatDocumentPane({
   const resetTimerRef = useRef<number | null>(null);
   const outlineTriggerRef = useRef<HTMLButtonElement>(null);
   const outlineMenuRef = useRef<HTMLDivElement>(null);
-  const documentContentRef = useRef<HTMLDivElement>(null);
-  const documentScrollRef = useRef<HTMLDivElement>(null);
-  const pending = running || isAgentChatDocumentPending(agentDocument);
+  const failed = agentDocument.status === "failed";
+  const pending = isAgentChatDocumentPending(agentDocument);
+  const documentScroll = useAgentChatDocumentAutoScroll({
+    documentID: agentDocument.id,
+    enabled: open,
+    pending,
+  });
   const outline = useAgentChatDocumentOutline({
     documentID: agentDocument.id,
     enabled: open,
-    contentRef: documentContentRef,
-    scrollRef: documentScrollRef,
+    contentRef: documentScroll.contentRef,
+    scrollRef: documentScroll.scrollRef,
   });
   const showOutline = outline.items.length >= 2;
 
@@ -200,14 +207,14 @@ export function AgentChatDocumentPane({
             <SheetDescription
               className={cn(
                 "mt-0.5 flex items-center gap-1.5 text-xs",
-                error ? "text-destructive" : "text-muted-foreground",
+                failed ? "text-destructive" : "text-muted-foreground",
               )}
             >
-              {pending && !error ? (
+              {pending && !failed ? (
                 <LoaderCircle className="size-3 animate-spin" />
               ) : null}
               <span>
-                {error
+                {failed
                   ? "生成失败"
                   : pending
                     ? agentDocument.status === "writing"
@@ -233,6 +240,12 @@ export function AgentChatDocumentPane({
               <span className="hidden sm:inline">目录</span>
             </Button>
           ) : null}
+          {renderDocumentActions?.({
+            messageID,
+            document: agentDocument,
+            running: pending,
+            error: failed,
+          })}
           <Button
             type="button"
             size="icon"
@@ -306,25 +319,42 @@ export function AgentChatDocumentPane({
               </div>
             </aside>
           ) : null}
-          <div
-            ref={documentScrollRef}
-            className="h-full min-h-0 overflow-y-auto overscroll-contain"
-          >
+          <div className="relative h-full min-h-0">
             <div
-              ref={documentContentRef}
-              className="mx-auto w-full max-w-3xl px-6 py-8 md:px-9 md:py-10"
+              ref={documentScroll.scrollRef}
+              className="h-full min-h-0 overflow-y-auto overscroll-contain"
+              style={{ scrollbarGutter: "stable" }}
+              onScroll={documentScroll.handleScroll}
             >
-              <AgentChatArtifactActionsProvider
-                messageID={messageID}
-                render={renderArtifactActions}
+              <div
+                ref={documentScroll.contentRef}
+                className="mx-auto w-full max-w-3xl px-6 py-8 md:px-9 md:py-10"
               >
-                <AgentChatDocumentView
-                  document={agentDocument}
-                  running={pending}
-                  error={error}
-                />
-              </AgentChatArtifactActionsProvider>
+                <AgentChatArtifactActionsProvider
+                  messageID={messageID}
+                  render={renderArtifactActions}
+                >
+                  <AgentChatDocumentView
+                    document={agentDocument}
+                    running={pending}
+                    error={failed}
+                  />
+                </AgentChatArtifactActionsProvider>
+              </div>
             </div>
+            {!documentScroll.atBottom ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="outline"
+                className="absolute bottom-4 right-4 z-10 size-9 rounded-full bg-background shadow-sm"
+                title="回到底部"
+                aria-label="回到底部"
+                onClick={() => documentScroll.scrollToBottom("smooth")}
+              >
+                <ArrowDown className="size-4" />
+              </Button>
+            ) : null}
           </div>
         </div>
       </SheetContent>
@@ -333,6 +363,7 @@ export function AgentChatDocumentPane({
 }
 
 function documentStatusLabel(status: AgentChatDocument["status"]) {
+  if (status === "failed") return "生成失败";
   if (status === "partial_failed") return "部分素材生成失败";
   if (status === "ready") return "已生成";
   if (status === "generating") return "素材生成中";

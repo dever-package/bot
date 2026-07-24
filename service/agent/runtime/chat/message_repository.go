@@ -53,6 +53,27 @@ func (Service) RequireRunSession(ctx context.Context, request RunTurnRequest) (*
 	return session, nil
 }
 
+func (Service) InspectOpeningTurn(ctx context.Context, request RunTurnRequest) (RunTurn, error) {
+	owner, err := currentOwner(ctx)
+	if err != nil {
+		return RunTurn{}, err
+	}
+	session, err := requireSession(ctx, owner, request.SessionID)
+	if err != nil {
+		return RunTurn{}, err
+	}
+	if err := validateRunTurnSession(*session, request); err != nil {
+		return RunTurn{}, err
+	}
+	if existing := openingAssistantMessage(ctx, session.ID, strings.TrimSpace(request.RequestID)); existing != nil {
+		return RunTurn{AssistantMessageID: existing.ID, Reused: true}, nil
+	}
+	if session.MessageCount > 0 {
+		return RunTurn{Skipped: true}, nil
+	}
+	return RunTurn{}, nil
+}
+
 func (Service) RequireAgentSession(ctx context.Context, sessionID uint64, agentKey string) (*agentmodel.Session, error) {
 	owner, err := currentOwner(ctx)
 	if err != nil {

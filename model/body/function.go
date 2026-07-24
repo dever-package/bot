@@ -13,6 +13,7 @@ const (
 	FunctionCodeAssets   = "assets"
 	FunctionCodePoints   = "points"
 	FunctionCodeMessages = "messages"
+	FunctionCodeContent  = "content"
 )
 
 var functionCodeOptions = []map[string]any{
@@ -22,6 +23,7 @@ var functionCodeOptions = []map[string]any{
 	{"id": FunctionCodeAssets, "value": "资产"},
 	{"id": FunctionCodePoints, "value": "积分"},
 	{"id": FunctionCodeMessages, "value": "消息"},
+	{"id": FunctionCodeContent, "value": "内容"},
 }
 
 type Function struct {
@@ -47,6 +49,7 @@ var defaultFunctions = []Function{
 	{ID: 4, Code: FunctionCodeAssets, Name: "资产", Icon: "archive", Status: StatusEnabled, Sort: 40},
 	{ID: 5, Code: FunctionCodePoints, Name: "积分", Icon: "sparkles", Status: StatusEnabled, Sort: 50},
 	{ID: 6, Code: FunctionCodeMessages, Name: "消息", Icon: "bell", Status: StatusEnabled, Sort: 60},
+	{ID: 7, Code: FunctionCodeContent, Name: "内容", Icon: "book-open-text", Status: StatusEnabled, Sort: 70},
 }
 
 var functionSeed = buildFunctionSeed(defaultFunctions)

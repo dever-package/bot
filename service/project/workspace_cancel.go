@@ -68,27 +68,6 @@ func (s WorkspaceService) finishWorkspaceActiveNodes(ctx context.Context, run *t
 	}
 }
 
-func (s WorkspaceService) failInterruptedWorkspaceRun(ctx context.Context, run *teammodel.Run) {
-	if !workspaceRunCanSyncProgress(run) {
-		return
-	}
-	s.finishWorkspaceActiveNodes(ctx, run, teammodel.RunStatusFail, workspaceRunInterruptedError)
-	nodeResults := workspaceNodeResults(ctx, run.ProjectID, run.ID)
-	output := map[string]any{
-		"run_id":       run.ID,
-		"request_id":   run.RequestID,
-		"release_id":   run.ReleaseID,
-		"status":       teammodel.RunStatusFail,
-		"error":        workspaceRunInterruptedError,
-		"executed":     len(nodeResults),
-		"node_results": nodeResults,
-		"node_runs":    workspaceNodeRunPayloads(ctx, run.ID),
-	}
-	finishWorkspaceFlowRun(ctx, workspaceFlowRunID(ctx, run.ID), teammodel.RunStatusFail, output, workspaceRunInterruptedError)
-	finishWorkspaceRun(ctx, run.ID, teammodel.RunStatusFail, output, workspaceRunInterruptedError)
-	s.writeWorkspaceRunResult(ctx, run, output, workspaceRunInterruptedError, 2)
-}
-
 func canvasRunStatusActive(status string) bool {
 	switch strings.TrimSpace(status) {
 	case teammodel.RunStatusPending, teammodel.RunStatusRunning, teammodel.RunStatusWaiting:

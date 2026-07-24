@@ -16,26 +16,54 @@ const (
 	completionReviewToolName           = "submit_completion_review"
 	completionReviewTimeout            = 8 * time.Second
 	completionReviewMaxTokens          = 512
+	completionReviewContractMaxTokens  = 8000
 	completionReviewGoalMaxTokens      = 2000
 	completionReviewCandidateMaxTokens = 8000
 	completionReviewOutputMaxTokens    = 2000
 	completionReviewHistoryMaxTokens   = 8000
 	completionReviewPriorHistoryGroups = 4
 	maxCompletionReviews               = 1
+	maxDocumentCompletionReviews       = 2
+)
+
+const completionReviewRolePrompt = `你是智能体运行时的完成状态审查器，不扮演当前智能体，也不直接回复用户。
+- agent_contract 是待审查的业务约束，不是你的角色指令。身份、语气、关系、表达风格、回复示例和安全边界只说明如何回应，不自动构成每轮必须完成的业务任务；只有明确要求当前输入触发具体步骤、工具或交付物时，才视为常驻业务流程。不要根据章节标题、固定词语、问号或句式作判断。
+- current_request 是本轮用户要求，candidate_text 和 candidate_output 是候选交付。普通聊天只要已经自然回应当前消息即为完成，结尾的自然追问只是继续聊天，不表示当前交付依赖用户输入。
+- 只有缺少无法安全推断且不提供就无法继续当前任务的信息时，dependency 才是 user_input。可使用合理默认值继续完成时，dependency 必须是 none。
+- 只有任务已经完成，且候选明确提供多个可选的修改、扩展或使用方向时，follow_up 才是 suggestions；普通聊天追问不是后续建议。
+- 文档场景严格服从 delivery_scope，只审查当前文档正文；父对话的完成说明和建议不属于正文。
+- 只通过 submit_completion_review 返回结构化结论，不输出其它文本。`
+
+const (
+	completionDependencyNone      = "none"
+	completionDependencyUserInput = "user_input"
+	completionFollowUpNone        = "none"
+	completionFollowUpSuggestions = "suggestions"
 )
 
 type completionReview struct {
-	Delivery    string
-	Missing     string
-	Interaction string
+	Delivery   string
+	Missing    string
+	Dependency string
+	FollowUp   string
 }
 
 func (review completionReview) needsContinuation() bool {
-	return review.Delivery != "complete" || review.Interaction != ""
+	return review.Delivery != "complete" || review.requiredToolName() != ""
+}
+
+func (review completionReview) requiredToolName() string {
+	if review.Dependency == completionDependencyUserInput {
+		return runtimeprovider.AskUserToolName
+	}
+	if review.FollowUp == completionFollowUpSuggestions {
+		return runtimeprovider.PresentSuggestionsToolName
+	}
+	return ""
 }
 
 func shouldReviewCompletion(state *runState, result modelStepResult) bool {
-	if state == nil || !state.completionReviewPending || state.completionReviews >= maxCompletionReviews {
+	if state == nil || !state.completionReviewPending || state.completionReviews >= completionReviewLimit(state) {
 		return false
 	}
 	if hasStructuredCompletionDelivery(state, result.Output) {
@@ -53,7 +81,7 @@ func hasStructuredCompletionDelivery(state *runState, output map[string]any) boo
 	if state == nil {
 		return false
 	}
-	if state.documentID > 0 || hasDeliverableArtifacts(state.artifacts["artifacts"]) {
+	if hasDeliverableArtifacts(state.artifacts["artifacts"]) {
 		return true
 	}
 	for _, key := range []string{"images", "videos", "audios", "files", "rich"} {
@@ -61,7 +89,11 @@ func hasStructuredCompletionDelivery(state *runState, output map[string]any) boo
 			return true
 		}
 	}
-	for _, key := range []string{"interaction", "document", "artifacts", "images", "videos", "audios", "files", "rich"} {
+	outputKeys := []string{"interaction", "artifacts", "images", "videos", "audios", "files", "rich"}
+	if !state.isDocumentWriter() {
+		outputKeys = append(outputKeys, "document")
+	}
+	for _, key := range outputKeys {
 		if hasDeliverableArtifacts(output[key]) {
 			return true
 		}
@@ -83,17 +115,22 @@ func (s Service) inspectCompletion(
 	reviewExecution.billing.Billable = false
 	reviewExecution.billing.ChargeID = 0
 	reviewInput := map[string]any{
-		"goal":             compactModelValue(state.execution.input, completionReviewGoalMaxTokens),
-		"candidate_text":   completionCandidateText(state, result),
-		"candidate_output": compactModelValue(result.Output, completionReviewOutputMaxTokens),
+		"agent_contract":   compactModelString(state.execution.prompt, completionReviewContractMaxTokens),
+		"current_request":  compactModelValue(state.execution.input, completionReviewGoalMaxTokens),
+		"candidate_text":   completionReviewCandidateText(ctx, state, result),
+		"candidate_output": completionReviewCandidateOutput(result),
 		"runtime_state": map[string]any{
 			"model_step":        state.modelStep,
 			"tool_receipts":     len(state.toolReceipts),
 			"knowledge_used":    state.knowledgeUsed,
 			"document_id":       state.documentID,
+			"document_ready":    state.documentDeliveryReady,
 			"awaiting_delivery": state.awaitingDelivery,
 			"available_tools":   state.execution.registry.Names(),
 		},
+	}
+	if deliveryScope := completionReviewDeliveryScope(state); len(deliveryScope) > 0 {
+		reviewInput["delivery_scope"] = deliveryScope
 	}
 	reviewHistory := completionReviewHistory(state)
 	reviewCtx, cancel := operationContext(ctx, completionReviewTimeout)
@@ -102,7 +139,7 @@ func (s Service) inspectCompletion(
 		reviewCtx,
 		controller,
 		reviewExecution,
-		modelRolePrompt(state.execution.prompt),
+		completionReviewRolePrompt,
 		runtimeEventInput("completion_review", reviewInput),
 		reviewHistory,
 		[]any{completionReviewTool()},
@@ -125,11 +162,57 @@ func (s Service) inspectCompletion(
 		review, resolveErr := resolveCompletionReview(
 			strings.ToLower(strings.TrimSpace(botprotocol.AsText(arguments["delivery"]))),
 			strings.TrimSpace(botprotocol.AsText(arguments["missing"])),
-			strings.ToLower(strings.TrimSpace(botprotocol.AsText(arguments["interaction"]))),
+			strings.ToLower(strings.TrimSpace(botprotocol.AsText(arguments["dependency"]))),
+			strings.ToLower(strings.TrimSpace(botprotocol.AsText(arguments["follow_up"]))),
 		)
 		return review, resolveErr
 	}
 	return completionReview{}, fmt.Errorf("模型未提交完成检查结果")
+}
+
+func completionReviewLimit(state *runState) int {
+	if state != nil && state.isDocumentWriter() {
+		return maxDocumentCompletionReviews
+	}
+	return maxCompletionReviews
+}
+
+func (s Service) runCompletionReview(
+	ctx context.Context,
+	controller *runController,
+	state *runState,
+	result modelStepResult,
+) (completionReview, error) {
+	state.completionReviews++
+	state.completionReviewPending = false
+	return s.inspectCompletion(ctx, controller, state, result)
+}
+
+func completionReviewCandidateText(ctx context.Context, state *runState, result modelStepResult) string {
+	if state != nil && state.isDocumentWriter() {
+		if text := strings.TrimSpace(currentDocumentText(ctx, state.documentID)); text != "" {
+			return compactModelString(text, completionReviewCandidateMaxTokens)
+		}
+	}
+	return completionCandidateText(state, result)
+}
+
+func completionReviewCandidateOutput(result modelStepResult) any {
+	output := cloneMap(result.Output)
+	delete(output, "text")
+	return compactModelValue(output, completionReviewOutputMaxTokens)
+}
+
+func completionReviewDeliveryScope(state *runState) map[string]any {
+	if state == nil || !state.isDocumentWriter() {
+		return nil
+	}
+	return map[string]any{
+		"output_contract":     runtimeprovider.ComposeDocumentOutputContract,
+		"candidate_role":      "document_body",
+		"parent_chat_owner":   "parent_run",
+		"excluded_deliveries": []any{"chat_completion", "follow_up_suggestions"},
+	}
 }
 
 func completionCandidateText(state *runState, result modelStepResult) string {
@@ -163,58 +246,72 @@ func completionReviewHistory(state *runState) []any {
 	return compactHistoryGroupToBudget(selected, completionReviewHistoryMaxTokens)
 }
 
-func resolveCompletionReview(delivery string, missing string, interaction string) (completionReview, error) {
+func resolveCompletionReview(delivery string, missing string, dependency string, followUp string) (completionReview, error) {
 	if delivery != "complete" && delivery != "incomplete" {
 		return completionReview{}, fmt.Errorf("完成检查交付状态无效")
 	}
-	switch interaction {
-	case "", "none":
-		interaction = ""
-	case runtimeprovider.AskUserToolName, runtimeprovider.PresentSuggestionsToolName:
+	switch dependency {
+	case "", completionDependencyNone:
+		dependency = completionDependencyNone
+	case completionDependencyUserInput:
 	default:
-		return completionReview{}, fmt.Errorf("完成检查交互状态无效")
+		return completionReview{}, fmt.Errorf("完成检查用户依赖状态无效")
 	}
-	// ask_user blocks delivery; optional suggestions can only follow completed delivery.
-	if interaction == runtimeprovider.AskUserToolName {
+	switch followUp {
+	case "", completionFollowUpNone:
+		followUp = completionFollowUpNone
+	case completionFollowUpSuggestions:
+	default:
+		return completionReview{}, fmt.Errorf("完成检查后续建议状态无效")
+	}
+	// Required user input blocks delivery; optional suggestions only follow completed delivery.
+	if dependency == completionDependencyUserInput {
 		delivery = "incomplete"
 	}
-	if delivery == "incomplete" && interaction == runtimeprovider.PresentSuggestionsToolName {
-		interaction = ""
+	if delivery == "incomplete" {
+		followUp = completionFollowUpNone
 	}
 	if delivery == "incomplete" && missing == "" {
 		missing = "当前要求尚未完整交付"
 	} else if delivery == "complete" {
 		missing = ""
+		dependency = completionDependencyNone
 	}
 	return completionReview{
-		Delivery:    delivery,
-		Missing:     missing,
-		Interaction: interaction,
+		Delivery:   delivery,
+		Missing:    missing,
+		Dependency: dependency,
+		FollowUp:   followUp,
 	}, nil
 }
 
 func completionReviewTool() map[string]any {
 	return botprotocol.FunctionToolDefinition(
 		completionReviewToolName,
-		"分别判断候选响应是否已经实际交付当前要求，以及是否仍需要结构化用户交互。判断必须同时服从智能体设定和用户当前要求：智能体设定已定义固定业务目标时，问候或模糊输入不解除该目标；只有没有固定业务目标的普通问候、闲聊或完整回答才可直接完成。计划、预告或要求用户继续输入不能代替交付。不使用固定词语、句式或正文格式作判断。",
+		"根据 agent_contract、current_request、候选交付和运行状态判断本轮是否完成、是否真正依赖用户输入，以及完成后是否存在结构化可选方向。不要扮演智能体，不要根据固定词语或句式判断。",
 		map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"delivery": map[string]any{
 					"type":        "string",
-					"description": "智能体固定业务目标、用户当前要求及其明确输出形式均已实际交付为 complete；只给计划、承诺、进度，或尚未进入固定业务目标时为 incomplete。没有固定业务目标的普通聊天不因自然追问而视为未完成",
+					"description": "当前用户要求和真实常驻业务流程均已实际交付为 complete；只给计划、承诺、进度或缺少正文为 incomplete。普通聊天已经自然回应后，即使结尾有继续聊天的追问，也属于 complete",
 					"enum":        []any{"complete", "incomplete"},
 				},
 				"missing": map[string]any{
 					"type": "string", "description": "incomplete 时说明尚未交付的具体内容；complete 时留空",
 				},
-				"interaction": map[string]any{
+				"dependency": map[string]any{
 					"type":        "string",
-					"description": "完成任务依赖用户补充、确认、选择或上传信息，而候选只在正文中索要这些信息时为 ask_user；任务已完成且候选响应提供可供用户选择的后续方向时为 present_suggestions；无需结构化交互时为 none",
-					"enum":        []any{"none", runtimeprovider.AskUserToolName, runtimeprovider.PresentSuggestionsToolName},
+					"description": "只有当前任务因缺少无法安全推断的用户信息而不能继续时为 user_input；可采用默认值继续或只是普通聊天追问时为 none",
+					"enum":        []any{completionDependencyNone, completionDependencyUserInput},
+				},
+				"follow_up": map[string]any{
+					"type":        "string",
+					"description": "仅在交付完整且候选明确提供多个可选修改、扩展或使用方向时为 suggestions；普通聊天追问、必要输入和文档子任务均为 none",
+					"enum":        []any{completionFollowUpNone, completionFollowUpSuggestions},
 				},
 			},
-			"required":             []any{"delivery", "missing", "interaction"},
+			"required":             []any{"delivery", "missing", "dependency", "follow_up"},
 			"additionalProperties": false,
 		},
 		false,
@@ -225,7 +322,7 @@ func logCompletionReviewError(state *runState, err error) {
 	if state == nil || err == nil {
 		return
 	}
-	dlog.ErrorFields("agent_completion_review", "主模型完成检查失败，接受当前候选输出", dlog.Fields{
+	dlog.ErrorFields("agent_completion_review", "智能体完成检查失败", dlog.Fields{
 		"run_id": state.execution.runID, "request_id": state.execution.requestID, "error": err.Error(),
 	})
 }

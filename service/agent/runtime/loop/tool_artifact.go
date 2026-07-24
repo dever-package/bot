@@ -14,7 +14,7 @@ import (
 )
 
 func isDocumentArtifactTool(state *runState, definition runtimeprovider.Definition) bool {
-	return state != nil && state.documentID > 0 && runtimeartifact.IsSupportedKind(definition.Kind)
+	return state != nil && state.isDocumentWriter() && runtimeartifact.IsSupportedKind(definition.Kind)
 }
 
 type toolArtifactBatch struct {
@@ -23,7 +23,7 @@ type toolArtifactBatch struct {
 }
 
 func shouldEnqueueArtifact(execution execution, definition runtimeprovider.Definition) bool {
-	return execution.persistChat &&
+	return (execution.persistChat || execution.documentWriter) &&
 		execution.sessionID > 0 &&
 		execution.assistantMessageID > 0 &&
 		runtimeartifact.IsSupportedKind(definition.Kind)

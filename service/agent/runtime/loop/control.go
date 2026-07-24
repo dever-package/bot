@@ -8,20 +8,38 @@ import (
 )
 
 type runController struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx           context.Context
+	cancel        context.CancelFunc
+	cancelCause   context.CancelCauseFunc
+	timeoutCancel context.CancelFunc
 
 	mu             sync.Mutex
 	childRequestID string
 	stopReason     string
 }
 
+type runStopCause string
+
+func (cause runStopCause) Error() string {
+	return string(cause)
+}
+
 func newRunController(parent context.Context, timeout time.Duration) *runController {
 	if parent == nil {
 		parent = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(parent, timeout)
-	return &runController{ctx: ctx, cancel: cancel}
+	causeContext, cancelCause := context.WithCancelCause(parent)
+	ctx, timeoutCancel := context.WithTimeout(causeContext, timeout)
+	cancel := func() {
+		cancelCause(context.Canceled)
+		timeoutCancel()
+	}
+	return &runController{
+		ctx:           ctx,
+		cancel:        cancel,
+		cancelCause:   cancelCause,
+		timeoutCancel: timeoutCancel,
+	}
 }
 
 func (controller *runController) Context() context.Context {
@@ -43,13 +61,15 @@ func (controller *runController) ClearChild(requestID string) {
 }
 
 func (controller *runController) Stop(reason string) string {
+	reason = strings.TrimSpace(reason)
 	controller.mu.Lock()
 	if controller.stopReason == "" {
-		controller.stopReason = strings.TrimSpace(reason)
+		controller.stopReason = reason
 	}
 	childRequestID := controller.childRequestID
 	controller.mu.Unlock()
-	controller.cancel()
+	controller.cancelCause(runStopCause(reason))
+	controller.timeoutCancel()
 	return childRequestID
 }
 
@@ -57,6 +77,11 @@ func (controller *runController) StopReason() string {
 	controller.mu.Lock()
 	reason := controller.stopReason
 	controller.mu.Unlock()
+	if reason == "" {
+		if cause, ok := context.Cause(controller.ctx).(runStopCause); ok {
+			reason = string(cause)
+		}
+	}
 	return reason
 }
 

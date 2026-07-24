@@ -15,6 +15,7 @@ const (
 	teamRunLeaseDuration     = 45 * time.Second
 	teamRunHeartbeatInterval = 10 * time.Second
 	teamRunClaimInterval     = 100 * time.Millisecond
+	teamRunLegacyStaleAfter  = 2 * time.Minute
 )
 
 type runExecutionContextKey struct{}
@@ -129,6 +130,39 @@ func teamRunTerminal(status string) bool {
 	default:
 		return false
 	}
+}
+
+func (s Service) recoverRunExecution(run *teammodel.Run) {
+	if !teamRunExecutionOrphaned(run, time.Now()) {
+		return
+	}
+	// Status reads also reconcile work left behind by a replaced server process.
+	s.continueRunExecution(context.Background(), *run, nil)
+}
+
+func teamRunExecutionOrphaned(run *teammodel.Run, now time.Time) bool {
+	if run == nil {
+		return false
+	}
+	switch strings.TrimSpace(run.Status) {
+	case teammodel.RunStatusPending, teammodel.RunStatusRunning:
+	default:
+		return false
+	}
+	if run.ExecutionExpiresAt != nil {
+		return !run.ExecutionExpiresAt.After(now)
+	}
+	if strings.TrimSpace(run.ExecutionOwner) != "" {
+		return true
+	}
+	lastActiveAt := run.UpdatedAt
+	if run.ExecutionHeartbeatAt != nil && run.ExecutionHeartbeatAt.After(lastActiveAt) {
+		lastActiveAt = *run.ExecutionHeartbeatAt
+	}
+	if run.StartedAt.After(lastActiveAt) {
+		lastActiveAt = run.StartedAt
+	}
+	return !lastActiveAt.IsZero() && !lastActiveAt.After(now.Add(-teamRunLegacyStaleAfter))
 }
 
 func runtimePanicError(recovered any) error {

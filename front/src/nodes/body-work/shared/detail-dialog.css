@@ -1,16 +1,24 @@
 .wb-detail-backdrop {
-  --wb-detail-surface: #ffffff;
-  --wb-detail-surface-soft: #f7f9f8;
-  --wb-detail-surface-hover: #f1f5f3;
-  --wb-detail-text: #171a19;
-  --wb-detail-text-strong: #27302d;
-  --wb-detail-muted: #7b8783;
-  --wb-detail-line: #dce3df;
-  --wb-detail-line-soft: #e3e8e5;
-  --wb-detail-accent: #1a4a35;
-  --wb-detail-accent-soft: #eaf1ed;
+  --wb-detail-surface: var(--body-work-surface-raised);
+  --wb-detail-surface-soft: color-mix(
+    in srgb,
+    var(--body-work-active) 72%,
+    var(--body-work-surface)
+  );
+  --wb-detail-surface-hover: var(--body-work-active);
+  --wb-detail-text: var(--body-work-text);
+  --wb-detail-text-strong: var(--body-work-text);
+  --wb-detail-muted: var(--body-work-muted);
+  --wb-detail-line: var(--body-work-line);
+  --wb-detail-line-soft: color-mix(
+    in srgb,
+    var(--body-work-line) 72%,
+    transparent
+  );
+  --wb-detail-accent: var(--body-work-primary-strong);
+  --wb-detail-accent-soft: var(--body-work-primary-soft);
   --wb-detail-danger: #a63a4e;
-  /* Portal content cannot inherit the canvas variables from .ws-page. */
+  /* Portal content inherits the shared Body tokens from the document root. */
   --ws-canvas: var(--wb-detail-surface);
   --ws-panel: var(--wb-detail-surface);
   --ws-panel-strong: var(--wb-detail-surface);
@@ -31,9 +39,9 @@
   --ws-surface-raised: var(--wb-detail-surface-soft);
   --ws-toolbar: var(--wb-detail-surface);
   --ws-toolbar-text: var(--wb-detail-text);
-  --ws-on-accent: #ffffff;
-  --ws-accent-solid: #1a4a35;
-  --ws-accent-solid-hover: #153d2c;
+  --ws-on-accent: var(--body-work-on-primary);
+  --ws-accent-solid: var(--body-work-primary-strong);
+  --ws-accent-solid-hover: var(--body-work-primary);
   --ws-accent-text: var(--wb-detail-accent);
   --ws-accent-muted: var(--wb-detail-accent);
   --ws-accent-border: color-mix(
@@ -48,14 +56,30 @@
   );
   --ws-accent-soft: var(--wb-detail-accent-soft);
   --ws-green: var(--wb-detail-accent);
-  --ws-blue: #4d7194;
+  --ws-blue: var(--body-work-blue);
   --ws-amber: #8a6612;
   --ws-rose: var(--wb-detail-danger);
-  --ws-violet: #68647c;
-  --ws-blue-soft: #eaf0f4;
-  --ws-amber-soft: #f5efe4;
-  --ws-rose-soft: #f5eaec;
-  --ws-violet-soft: #eef1ef;
+  --ws-violet: var(--body-work-indigo);
+  --ws-blue-soft: color-mix(
+    in srgb,
+    var(--ws-blue) 12%,
+    var(--wb-detail-surface)
+  );
+  --ws-amber-soft: color-mix(
+    in srgb,
+    var(--ws-amber) 12%,
+    var(--wb-detail-surface)
+  );
+  --ws-rose-soft: color-mix(
+    in srgb,
+    var(--ws-rose) 12%,
+    var(--wb-detail-surface)
+  );
+  --ws-violet-soft: color-mix(
+    in srgb,
+    var(--ws-violet) 12%,
+    var(--wb-detail-surface)
+  );
   --ws-media-surface: var(--wb-detail-surface-soft);
   --ws-canvas-overlay: color-mix(
     in srgb,
@@ -84,27 +108,8 @@
 }
 
 .dark .wb-detail-backdrop {
-  --wb-detail-surface: #191e1b;
-  --wb-detail-surface-soft: #202622;
-  --wb-detail-surface-hover: #29312d;
-  --wb-detail-text: #edf2ef;
-  --wb-detail-text-strong: #f4f7f5;
-  --wb-detail-muted: #9ca8a2;
-  --wb-detail-line: #36403b;
-  --wb-detail-line-soft: #2b332f;
-  --wb-detail-accent: #8fc4a6;
-  --wb-detail-accent-soft: #243b30;
   --wb-detail-danger: #e08a9a;
-  --ws-on-accent: #ffffff;
-  --ws-accent-solid: #326c50;
-  --ws-accent-solid-hover: #3f7d5f;
-  --ws-blue: #7ca4cc;
   --ws-amber: #d1ac58;
-  --ws-violet: #aaa4c8;
-  --ws-blue-soft: #202e3a;
-  --ws-amber-soft: #342d20;
-  --ws-rose-soft: #38252a;
-  --ws-violet-soft: #2c2b37;
   --ws-shadow-rgb: 0 0 0;
   color-scheme: dark;
 }
@@ -538,14 +543,15 @@ button.wb-detail-state.is-error {
 }
 
 .wb-asset-detail-prose li::marker {
-  color: #557565;
+  color: var(--wb-detail-accent);
 }
 
 .wb-asset-detail-prose blockquote {
-  border-left: 3px solid #739283;
+  border-left: 3px solid
+    color-mix(in srgb, var(--wb-detail-accent) 65%, var(--wb-detail-line));
   border-radius: 0 5px 5px 0;
-  background: #f1f5f2;
-  color: #506057;
+  background: var(--wb-detail-surface-soft);
+  color: var(--wb-detail-text);
   padding: 12px 16px;
 }
 
@@ -554,9 +560,13 @@ button.wb-detail-state.is-error {
 }
 
 .wb-asset-detail-prose a {
-  color: #245b47;
+  color: var(--wb-detail-accent);
   text-decoration: underline;
-  text-decoration-color: #9bb0a5;
+  text-decoration-color: color-mix(
+    in srgb,
+    var(--wb-detail-accent) 45%,
+    transparent
+  );
   text-underline-offset: 3px;
 }
 
@@ -565,11 +575,11 @@ button.wb-detail-state.is-error {
 }
 
 .wb-asset-detail-prose :not(pre) > code {
-  border: 1px solid #e1e6e3;
+  border: 1px solid var(--wb-detail-line);
   border-radius: 4px;
-  background: #f3f5f4;
+  background: var(--wb-detail-surface-soft);
   padding: 1px 5px;
-  color: #315f4d;
+  color: var(--wb-detail-accent);
   font-size: 0.88em;
 }
 

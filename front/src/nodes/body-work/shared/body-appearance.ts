@@ -1,29 +1,34 @@
 import type { CSSProperties } from "react";
 
-export type BodyThemePreset = "forest" | "ocean" | "graphite";
 export type BodyLoginTemplate = "split" | "focus" | "showcase";
 export type BodyWorkbenchTemplate = "rail" | "sidebar" | "topbar";
 export type BodyColorMode = "light" | "dark";
+export type BodyBackgroundScope = "login" | "workbench";
 
 export type BodyAppearanceConfig = {
-  themePreset: BodyThemePreset;
+  baseColor: string;
   brandPrimaryColor: string;
   loginTemplate: BodyLoginTemplate;
+  loginTextColor: string;
+  loginBackgroundColor: string;
+  loginBackgroundImage: string;
   workbenchTemplate: BodyWorkbenchTemplate;
+  workbenchBackgroundColor: string;
+  workbenchBackgroundImage: string;
 };
 
 export const DEFAULT_BODY_APPEARANCE: BodyAppearanceConfig = {
-  themePreset: "forest",
+  baseColor: "#96a29c",
   brandPrimaryColor: "",
   loginTemplate: "split",
+  loginTextColor: "",
+  loginBackgroundColor: "",
+  loginBackgroundImage: "",
   workbenchTemplate: "rail",
+  workbenchBackgroundColor: "",
+  workbenchBackgroundImage: "",
 };
 
-const themePresets = new Set<BodyThemePreset>([
-  "forest",
-  "ocean",
-  "graphite",
-]);
 const loginTemplates = new Set<BodyLoginTemplate>([
   "split",
   "focus",
@@ -35,48 +40,80 @@ const workbenchTemplates = new Set<BodyWorkbenchTemplate>([
   "topbar",
 ]);
 const hexColorPattern = /^#[0-9a-f]{6}$/i;
+const lightCanvasMinimumLightness = 0.82;
+const lightCanvasWhiteRatio = 0.82;
+const lightSurfaceWhiteRatio = 0.55;
+const lightRaisedSurfaceWhiteRatio = 0.82;
+const darkRaisedSurfaceTextRatio = 0.06;
 
 export function normalizeBodyAppearance(
   value: {
-    themePreset?: unknown;
+    baseColor?: unknown;
     brandPrimaryColor?: unknown;
     loginTemplate?: unknown;
+    loginTextColor?: unknown;
+    loginBackgroundColor?: unknown;
+    loginBackgroundImage?: unknown;
     workbenchTemplate?: unknown;
+    workbenchBackgroundColor?: unknown;
+    workbenchBackgroundImage?: unknown;
   },
   fallback: BodyAppearanceConfig = DEFAULT_BODY_APPEARANCE,
 ): BodyAppearanceConfig {
   return {
-    themePreset: allowedValue(
-      value.themePreset,
-      themePresets,
-      fallback.themePreset,
+    baseColor: normalizeBodyAppearanceColor(
+      value.baseColor,
+      fallback.baseColor,
     ),
-    brandPrimaryColor:
-      normalizeBodyBrandColor(value.brandPrimaryColor) ||
+    brandPrimaryColor: normalizeBodyAppearanceColor(
+      value.brandPrimaryColor,
       fallback.brandPrimaryColor,
+    ),
     loginTemplate: allowedValue(
       value.loginTemplate,
       loginTemplates,
       fallback.loginTemplate,
     ),
+    loginTextColor: normalizeBodyAppearanceColor(
+      value.loginTextColor,
+      fallback.loginTextColor,
+    ),
+    loginBackgroundColor: normalizeBodyAppearanceColor(
+      value.loginBackgroundColor,
+      fallback.loginBackgroundColor,
+    ),
+    loginBackgroundImage:
+      normalizeBodyBackgroundImage(value.loginBackgroundImage) ||
+      fallback.loginBackgroundImage,
     workbenchTemplate: allowedValue(
       value.workbenchTemplate,
       workbenchTemplates,
       fallback.workbenchTemplate,
     ),
+    workbenchBackgroundColor: normalizeBodyAppearanceColor(
+      value.workbenchBackgroundColor,
+      fallback.workbenchBackgroundColor,
+    ),
+    workbenchBackgroundImage:
+      normalizeBodyBackgroundImage(value.workbenchBackgroundImage) ||
+      fallback.workbenchBackgroundImage,
   };
 }
 
 export function bodyAppearanceStyle(
   appearance: BodyAppearanceConfig,
-  mode?: BodyColorMode,
+  mode: BodyColorMode,
 ): CSSProperties {
-  const customColor = normalizeBodyBrandColor(appearance.brandPrimaryColor);
-  if (!customColor) {
-    return {};
-  }
-
   const lightMode = mode !== "dark";
+  const baseColor =
+    normalizeHexColor(appearance.baseColor) ||
+    DEFAULT_BODY_APPEARANCE.baseColor;
+  const customColor = normalizeHexColor(appearance.brandPrimaryColor);
+  const baseStyle = bodyBaseColorStyle(baseColor, lightMode);
+
+  if (!customColor) {
+    return baseStyle;
+  }
   const primary = lightMode
     ? customColor
     : mixHexColor(customColor, "#ffffff", 0.32);
@@ -95,18 +132,110 @@ export function bodyAppearanceStyle(
   );
 
   return {
+    ...baseStyle,
     "--body-work-primary": primary,
     "--body-work-primary-strong": primaryStrong,
     "--body-work-primary-bright": primaryBright,
     "--body-work-primary-soft": primarySoft,
-    "--body-work-on-primary": readableForeground(primaryStrong),
+    "--body-work-on-primary": readableForeground(primary, primaryStrong),
     "--body-work-ring": hexColorAlpha(primary, 0.2),
   } as CSSProperties;
 }
 
-export function normalizeBodyBrandColor(value: unknown) {
+function bodyBaseColorStyle(
+  baseColor: string,
+  lightMode: boolean,
+): CSSProperties {
+  const lightCanvas =
+    colorLightness(baseColor) < lightCanvasMinimumLightness
+      ? mixHexColor(baseColor, "#ffffff", lightCanvasWhiteRatio)
+      : baseColor;
+  const canvas = lightMode
+    ? lightCanvas
+    : mixHexColor(baseColor, "#111513", 0.95);
+  const text = lightMode
+    ? mixHexColor(canvas, "#111513", 0.96)
+    : mixHexColor(baseColor, "#f2f5f3", 0.9);
+  const surface = lightMode
+    ? mixHexColor(canvas, "#ffffff", lightSurfaceWhiteRatio)
+    : mixHexColor(baseColor, "#171c19", 0.94);
+  const surfaceRaised = lightMode
+    ? mixHexColor(canvas, "#ffffff", lightRaisedSurfaceWhiteRatio)
+    : mixHexColor(surface, text, darkRaisedSurfaceTextRatio);
+  const background = lightMode
+    ? mixHexColor(canvas, text, 0.035)
+    : mixHexColor(baseColor, "#0c0f0e", 0.96);
+  const muted = mixHexColor(text, background, lightMode ? 0.4 : 0.42);
+  const line = mixHexColor(canvas, text, lightMode ? 0.12 : 0.08);
+  const active = mixHexColor(canvas, text, lightMode ? 0.09 : 0.06);
+
+  return {
+    "--body-work-bg": background,
+    "--body-work-canvas": canvas,
+    "--body-work-surface": surface,
+    "--body-work-surface-raised": surfaceRaised,
+    "--body-work-text": text,
+    "--body-work-muted": muted,
+    "--body-work-line": line,
+    "--body-work-active": active,
+    "--body-work-shadow": lightMode
+      ? `0 14px 34px ${hexColorAlpha(text, 0.08)}`
+      : "0 18px 42px rgba(0, 0, 0, 0.28)",
+  } as CSSProperties;
+}
+
+export function bodyPageBackgroundStyle(
+  appearance: BodyAppearanceConfig,
+  scope: BodyBackgroundScope,
+): CSSProperties {
+  const { color, image } = resolveBodyPageBackground(appearance, scope);
+  const loginTextColor =
+    scope === "login"
+      ? normalizeHexColor(appearance.loginTextColor) ||
+        (image ? "#ffffff" : "")
+      : "";
+
+  return {
+    ...(color ? { backgroundColor: color } : {}),
+    ...(image ? { backgroundImage: `url(${JSON.stringify(image)})` } : {}),
+    ...(loginTextColor ? { "--login-copy-color": loginTextColor } : {}),
+  } as CSSProperties;
+}
+
+export function hasBodyPageBackground(
+  appearance: BodyAppearanceConfig,
+  scope: BodyBackgroundScope,
+) {
+  const { color, image } = resolveBodyPageBackground(appearance, scope);
+  return Boolean(color || image);
+}
+
+function normalizeHexColor(value: unknown) {
   const color = String(value || "").trim().toLowerCase();
   return hexColorPattern.test(color) ? color : "";
+}
+
+function normalizeBodyAppearanceColor(value: unknown, fallback: string) {
+  return normalizeHexColor(value) || normalizeHexColor(fallback);
+}
+
+function normalizeBodyBackgroundImage(value: unknown) {
+  return String(value || "").trim();
+}
+
+function resolveBodyPageBackground(
+  appearance: BodyAppearanceConfig,
+  scope: BodyBackgroundScope,
+) {
+  return scope === "login"
+    ? {
+        color: appearance.loginBackgroundColor,
+        image: appearance.loginBackgroundImage,
+      }
+    : {
+        color: appearance.workbenchBackgroundColor,
+        image: appearance.workbenchBackgroundImage,
+      };
 }
 
 function allowedValue<T extends string>(
@@ -129,13 +258,42 @@ function mixHexColor(source: string, target: string, targetRatio: number) {
   return rgbHex(mix("red"), mix("green"), mix("blue"));
 }
 
-function readableForeground(color: string) {
+function readableForeground(...backgrounds: string[]) {
+  const candidates = ["#111513", "#ffffff"];
+  return candidates.reduce((best, candidate) =>
+    minimumContrast(backgrounds, candidate) > minimumContrast(backgrounds, best)
+      ? candidate
+      : best,
+  );
+}
+
+function minimumContrast(backgrounds: string[], foreground: string) {
+  return Math.min(
+    ...backgrounds.map((background) => contrastRatio(background, foreground)),
+  );
+}
+
+function contrastRatio(left: string, right: string) {
+  const leftLuminance = colorLuminance(left);
+  const rightLuminance = colorLuminance(right);
+  return (
+    (Math.max(leftLuminance, rightLuminance) + 0.05) /
+    (Math.min(leftLuminance, rightLuminance) + 0.05)
+  );
+}
+
+function colorLuminance(color: string) {
   const { red, green, blue } = hexColorRGB(color);
-  const luminance =
+  return (
     0.2126 * linearChannel(red) +
     0.7152 * linearChannel(green) +
-    0.0722 * linearChannel(blue);
-  return luminance > 0.48 ? "#111513" : "#ffffff";
+    0.0722 * linearChannel(blue)
+  );
+}
+
+function colorLightness(color: string) {
+  const { red, green, blue } = hexColorRGB(color);
+  return (Math.max(red, green, blue) + Math.min(red, green, blue)) / 510;
 }
 
 function linearChannel(channel: number) {

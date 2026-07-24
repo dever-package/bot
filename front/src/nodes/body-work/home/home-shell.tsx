@@ -16,8 +16,12 @@ import {
 } from "../auth/site-config";
 import { WorkProjectPage } from "../project/project-page";
 import { BodyToaster } from "../shared/body-toaster";
-import { bodyAppearanceStyle } from "../shared/body-appearance";
+import {
+  bodyPageBackgroundStyle,
+  hasBodyPageBackground,
+} from "../shared/body-appearance";
 import "../shared/body-theme.css";
+import { useBodyAppearance } from "../shared/use-body-appearance";
 import "./workbench-appearance.css";
 import type {
   AssetCatalogOptions,
@@ -27,6 +31,11 @@ import type {
 import { WorkbenchAssetPage } from "./asset-page";
 import { WorkbenchDialoguePage } from "./dialogue-page";
 import { WorkbenchFunctionPage } from "./function-page";
+import {
+  loadBodyContentNavigation,
+  type BodyContentNavigation,
+} from "../content/content-api";
+import { WorkbenchContentPage } from "../content/workbench-content-page";
 import {
   WorkbenchSidebar,
   type WorkbenchNavigationItem,
@@ -39,6 +48,9 @@ import {
 } from "./workbench-api";
 
 const TEAM_STORAGE_KEY = "bot.body.workbench.team";
+const EMPTY_CONTENT_NAVIGATION: BodyContentNavigation = {
+  items: [],
+};
 const pageSpecs: ReadonlyArray<{
   key: WorkbenchPageKey;
   menuKey: keyof BodyHomeMenuConfig;
@@ -53,6 +65,7 @@ const pageSpecs: ReadonlyArray<{
 export function WorkHomeShell({ item }: { item?: any }) {
   const loginConfig = useBodyLoginConfig();
   const { resolvedTheme } = useTheme();
+  useBodyAppearance(loginConfig.site.appearance, resolvedTheme);
   const [activePage, setActivePage] = useState<WorkbenchPageKey>(() =>
     resolveInitialPage(
       typeof item?.value === "string" ? item.value : item?.value?.page,
@@ -61,6 +74,9 @@ export function WorkHomeShell({ item }: { item?: any }) {
   const [catalog, setCatalog] = useState<WorkbenchCatalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [contentNavigation, setContentNavigation] =
+    useState<BodyContentNavigation>(EMPTY_CONTENT_NAVIGATION);
+  const [contentLinkID, setContentLinkID] = useState(0);
   const [continuationAsset, setContinuationAsset] =
     useState<AssetRecord | null>(null);
   const catalogRequestRef = useRef(0);
@@ -104,6 +120,28 @@ export function WorkHomeShell({ item }: { item?: any }) {
     void loadCatalog(readTeamID());
   }, [loadCatalog]);
 
+  useEffect(() => {
+    if (!loginConfig.site.homeMenu.content.enabled) {
+      setContentNavigation(EMPTY_CONTENT_NAVIGATION);
+      return;
+    }
+    let active = true;
+    void loadBodyContentNavigation()
+      .then((next) => {
+        if (active) {
+          setContentNavigation(next);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setContentNavigation(EMPTY_CONTENT_NAVIGATION);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [loginConfig.site.homeMenu.content.enabled]);
+
   const navigation = useMemo(
     () =>
       [...pageSpecs]
@@ -130,8 +168,20 @@ export function WorkHomeShell({ item }: { item?: any }) {
         ),
     [catalog, loginConfig.site.homeMenu],
   );
-  const currentPage =
-    navigation.find((page) => page.key === activePage) || navigation[0];
+  const contentArticleLinks = contentNavigation.items.filter(
+    (contentLink) => contentLink.type === "article",
+  );
+  const contentAvailable = contentArticleLinks.length > 0;
+  const selectedContentLinkID = contentArticleLinks.some(
+    (contentLink) => contentLink.id === contentLinkID,
+  )
+    ? contentLinkID
+    : contentArticleLinks[0]?.id || 0;
+  const currentPageKey =
+    activePage === "content" && contentAvailable
+      ? "content"
+      : navigation.find((page) => page.key === activePage)?.key ||
+        navigation[0]?.key;
 
   const canContinueAsset = useCallback(
     (asset: AssetRecord) =>
@@ -154,30 +204,43 @@ export function WorkHomeShell({ item }: { item?: any }) {
     [canContinueAsset],
   );
   const clearContinuation = useCallback(() => setContinuationAsset(null), []);
+  const openContentLink = useCallback((linkID: number) => {
+    setContentLinkID(linkID);
+    setActivePage("content");
+  }, []);
 
   return (
     <main
       className="hb-laper-app"
-      data-body-theme={loginConfig.site.appearance.themePreset}
       data-workbench-template={loginConfig.site.appearance.workbenchTemplate}
-      style={bodyAppearanceStyle(loginConfig.site.appearance, resolvedTheme)}
+      data-page-background={
+        hasBodyPageBackground(loginConfig.site.appearance, "workbench")
+          ? "custom"
+          : undefined
+      }
+      style={bodyPageBackgroundStyle(loginConfig.site.appearance, "workbench")}
     >
       <BodyToaster />
       <WorkbenchSidebar
         site={loginConfig.site}
         navigation={navigation}
-        activePage={currentPage?.key || "assets"}
+        activePage={currentPageKey || "assets"}
         teams={catalog?.teams || []}
         teamID={catalog?.team?.id || 0}
         loading={loading}
+        contentNavigation={contentNavigation}
+        contentLinkID={selectedContentLinkID}
         onNavigate={setActivePage}
+        onSelectContentLink={openContentLink}
         onTeamChange={(teamID) => void loadCatalog(teamID)}
       />
 
       <section className="hb-laper-main">
         <div className="hb-laper-frame">
           <div className="hb-laper-content">
-            {loading ? (
+            {currentPageKey === "content" ? (
+              <WorkbenchContentPage linkID={selectedContentLinkID} />
+            ) : loading ? (
               <PageLoading />
             ) : error ? (
               <PageError
@@ -186,11 +249,11 @@ export function WorkHomeShell({ item }: { item?: any }) {
               />
             ) : !catalog?.team ? (
               <NoTeam />
-            ) : !currentPage ? (
+            ) : !currentPageKey ? (
               <NoVisibleHomeMenu />
             ) : (
               <PageContent
-                page={currentPage.key}
+                page={currentPageKey}
                 catalog={catalog}
                 continuationAsset={continuationAsset}
                 onContinueAsset={continueAsset}
@@ -351,6 +414,8 @@ function resolveInitialPage(value: unknown): WorkbenchPageKey {
       return "works";
     case "assets":
       return "assets";
+    case "content":
+      return "content";
     default:
       return "works";
   }

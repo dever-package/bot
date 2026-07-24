@@ -58,34 +58,38 @@ func (s Service) executeAgentNode(
 		return nil, teammodel.RunStatusFail, 0, err
 	}
 
-	billing := runBillingContext(run)
-	billing.RunID = run.ID
-	start := s.agent.RunChat(runContext, runtimeloop.ChatRequest{
-		AgentIdentity: fmt.Sprintf("%d", executor.AgentID),
-		SessionID:     session.ID,
-		ContextKey:    contextKey,
-		Input:         agentInput,
-		Billing:       billing,
-		Method:        "POST",
-		Path:          "/bot/team/run",
-		Server:        serverContext,
-	})
-	requestID := textValue(start["request_id"])
-	if intValue(start["status"], botprotocol.ResponseStatusSuccess) != botprotocol.ResponseStatusSuccess {
-		return nil, teammodel.RunStatusFail, 0, fmt.Errorf("%s", firstText(start["msg"], "智能体运行启动失败"))
+	requestID := strings.TrimSpace(nodeRun.ChildRequestID)
+	agentRunID := nodeRun.AgentRunID
+	if requestID == "" || len(jsonMap(nodeRun.InteractionResponse)) > 0 {
+		billing := runBillingContext(run)
+		billing.RunID = run.ID
+		start := s.agent.RunChat(runContext, runtimeloop.ChatRequest{
+			AgentIdentity: fmt.Sprintf("%d", executor.AgentID),
+			SessionID:     session.ID,
+			ContextKey:    contextKey,
+			Input:         agentInput,
+			Billing:       billing,
+			Method:        "POST",
+			Path:          "/bot/team/run",
+			Server:        serverContext,
+		})
+		requestID = textValue(start["request_id"])
+		if intValue(start["status"], botprotocol.ResponseStatusSuccess) != botprotocol.ResponseStatusSuccess {
+			return nil, teammodel.RunStatusFail, 0, fmt.Errorf("%s", firstText(start["msg"], "智能体运行启动失败"))
+		}
+		if requestID == "" {
+			return nil, teammodel.RunStatusFail, 0, fmt.Errorf("智能体运行请求ID为空")
+		}
+		agentRunID = agentRunIDFromPayload(start)
+		s.repo.UpdateNodeRun(runContext, nodeRun.ID, map[string]any{
+			"agent_session_id": session.ID,
+			"agent_run_id":     agentRunID,
+			"child_request_id": requestID,
+		})
+		nodeRun.AgentSessionID = session.ID
+		nodeRun.AgentRunID = agentRunID
+		nodeRun.ChildRequestID = requestID
 	}
-	if requestID == "" {
-		return nil, teammodel.RunStatusFail, 0, fmt.Errorf("智能体运行请求ID为空")
-	}
-	agentRunID := agentRunIDFromPayload(start)
-	s.repo.UpdateNodeRun(runContext, nodeRun.ID, map[string]any{
-		"agent_session_id": session.ID,
-		"agent_run_id":     agentRunID,
-		"child_request_id": requestID,
-	})
-	nodeRun.AgentSessionID = session.ID
-	nodeRun.AgentRunID = agentRunID
-	nodeRun.ChildRequestID = requestID
 
 	result, err := s.agent.ObserveRun(runContext, runtimeloop.ObserveRunRequest{
 		RequestID: requestID,

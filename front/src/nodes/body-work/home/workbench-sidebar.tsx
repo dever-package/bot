@@ -6,10 +6,17 @@ import type { BodySiteConfig } from "../auth/site-config";
 import type { WorkbenchTeam } from "./workbench-api";
 import { ConfiguredMenuIcon } from "../shared/configured-icon";
 import { WorkbenchAccountCenter } from "./workbench-account-center";
+import type { BodyContentNavigation } from "../content/content-api";
+import { WorkbenchContentMenu } from "./workbench-content-menu";
 import { WorkbenchSystemMessagePanel } from "./workbench-system-message-panel";
 import { WorkbenchUserMenu } from "./workbench-user-menu";
 
-export type WorkbenchPageKey = "function" | "dialogue" | "works" | "assets";
+export type WorkbenchPageKey =
+  | "function"
+  | "dialogue"
+  | "works"
+  | "assets"
+  | "content";
 
 export type WorkbenchNavigationItem = {
   key: WorkbenchPageKey;
@@ -26,7 +33,10 @@ export function WorkbenchSidebar({
   teams,
   teamID,
   loading,
+  contentNavigation,
+  contentLinkID,
   onNavigate,
+  onSelectContentLink,
   onTeamChange,
 }: {
   site: BodySiteConfig;
@@ -35,11 +45,14 @@ export function WorkbenchSidebar({
   teams: WorkbenchTeam[];
   teamID: number;
   loading: boolean;
+  contentNavigation: BodyContentNavigation;
+  contentLinkID: number;
   onNavigate: (page: WorkbenchPageKey) => void;
+  onSelectContentLink: (linkID: number) => void;
   onTeamChange: (teamID: number) => void;
 }) {
   const [pointsOpen, setPointsOpen] = useState(false);
-  const footerMenuKeys = (["points", "messages"] as const)
+  const footerMenuKeys = (["points", "messages", "content"] as const)
     .filter((key) => site.homeMenu[key].enabled)
     .sort(
       (left, right) => site.homeMenu[left].sort - site.homeMenu[right].sort,
@@ -89,20 +102,33 @@ export function WorkbenchSidebar({
         </nav>
 
         <div className="hb-laper-sidebar-foot">
-          {footerMenuKeys.map((key) =>
-            key === "points" ? (
-              <RailAction
+          {footerMenuKeys.map((key) => {
+            if (key === "points") {
+              return (
+                <RailAction
+                  key={key}
+                  iconName={site.homeMenu.points.icon}
+                  iconImage={site.homeMenu.points.iconImage}
+                  fallbackIcon={Sparkles}
+                  label={site.homeMenu.points.name}
+                  onClick={() => setPointsOpen(true)}
+                />
+              );
+            }
+            if (key === "messages") {
+              return <WorkbenchSystemMessagePanel key={key} site={site} />;
+            }
+            return (
+              <WorkbenchContentMenu
                 key={key}
-                iconName={site.homeMenu.points.icon}
-                iconImage={site.homeMenu.points.iconImage}
-                fallbackIcon={Sparkles}
-                label={site.homeMenu.points.name}
-                onClick={() => setPointsOpen(true)}
+                menu={site.homeMenu.content}
+                navigation={contentNavigation}
+                selectedLinkID={contentLinkID}
+                active={activePage === "content"}
+                onSelectLink={onSelectContentLink}
               />
-            ) : (
-              <WorkbenchSystemMessagePanel key={key} site={site} />
-            ),
-          )}
+            );
+          })}
           <WorkbenchUserMenu
             teams={teams}
             teamID={teamID}

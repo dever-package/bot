@@ -15,6 +15,7 @@ func prepareCanvasStoryboardShotInput(
 	req CanvasRunRequest,
 	node canvasRunNode,
 	previousOutput any,
+	results []canvasNodeResult,
 	input map[string]any,
 	params map[string]any,
 	mediaReferences []energoninput.MediaReference,
@@ -57,14 +58,14 @@ func prepareCanvasStoryboardShotInput(
 		return nil, nil, nil, fmt.Errorf("连续镜头不能引用其他分镜脚本的镜头")
 	}
 
-	contextOutputs := canvasContextOutputsByNode(previousOutput)
-	output := contextOutputs[dependencyID]
-	if output == nil && len(contextOutputs) == 0 {
-		output = previousOutput
-	}
-	if len(canvasMediaURLs(output, botprotocol.MediaTypeVideo)) == 0 {
-		output = staticCanvasNodeOutput(ctx, projectID, dependencyID, req.Canvas)
-	}
+	output := canvasReferencedNodeOutput(
+		ctx,
+		projectID,
+		dependencyID,
+		previousOutput,
+		results,
+		req.Canvas,
+	)
 	videos := canvasMediaURLs(output, botprotocol.MediaTypeVideo)
 	if len(videos) == 0 {
 		return nil, nil, nil, fmt.Errorf("上一镜头视频尚未生成，无法提取连续尾帧")
@@ -82,12 +83,12 @@ func prepareCanvasStoryboardShotInput(
 	delete(input, "previous_output")
 	clearCanvasStoryboardMedia(input)
 	clearCanvasStoryboardMedia(params)
-	mediaReferences = []energoninput.MediaReference{{
+	mediaReferences = append([]energoninput.MediaReference{{
 		ReferenceType: "storyboard_tail_frame",
 		Kind:          botprotocol.MediaTypeImage,
 		URL:           tailFrame.URL,
 		Required:      true,
-	}}
+	}}, mediaReferences...)
 	return input, params, mediaReferences, nil
 }
 

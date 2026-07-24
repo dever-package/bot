@@ -147,6 +147,7 @@ func (Workbench) PostChatSaveAsset(c *server.Context) error {
 		RoleID:      botapi.Uint64FromBody(body, "role_id", "roleId"),
 		MessageID:   botapi.Uint64FromBody(body, "message_id", "messageId"),
 		ArtifactID:  botapi.Uint64FromBody(body, "artifact_id", "artifactId"),
+		DocumentID:  botapi.Uint64FromBody(body, "document_id", "documentId"),
 		Name:        botapi.TextFromBody(body, "name"),
 		TargetAsset: botapi.Uint64FromBody(body, "target_asset_id", "targetAssetId"),
 	})

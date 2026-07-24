@@ -2,6 +2,8 @@ package loop
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	runtimereference "github.com/dever-package/bot/service/agent/runtime/reference"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
+	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
@@ -38,6 +41,8 @@ const (
 
 	defaultChatTimeout = time.Hour
 	streamReadBlock    = time.Second
+
+	runtimeEventSessionStarted = "session_started"
 )
 
 type ChatRequest struct {
@@ -83,8 +88,26 @@ func newService() Service {
 }
 
 func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]any {
+	return s.runChat(ctx, request, false)
+}
+
+func (s Service) RunOpening(ctx context.Context, request ChatRequest) map[string]any {
+	request.Input = map[string]any{
+		"runtime_event": map[string]any{"type": runtimeEventSessionStarted},
+	}
+	request.Billing = botprotocol.BillingContext{}
+	return s.runChat(ctx, request, true)
+}
+
+func (s Service) runChat(ctx context.Context, request ChatRequest, opening bool) map[string]any {
 	requestedAt := time.Now()
 	requestID := uuid.NewString()
+	if opening {
+		if request.SessionID == 0 {
+			return botprotocol.BuildErrorResponse(requestID, fmt.Errorf("主动开场需要有效会话")).Payload()
+		}
+		requestID = openingRequestID(request.SessionID)
+	}
 	billing := request.Billing
 	if billing.Billable {
 		if strings.TrimSpace(billing.Scene) == "" {
@@ -95,9 +118,13 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 		}
 	}
 	input := agentskill.CloneMap(request.Input)
-	parsedInput, err := runtimereference.ParseInput(input)
-	if err != nil {
-		return botprotocol.BuildErrorResponse(requestID, err).Payload()
+	parsedInput := runtimereference.Input{}
+	var err error
+	if !opening {
+		parsedInput, err = runtimereference.ParseInput(input)
+		if err != nil {
+			return botprotocol.BuildErrorResponse(requestID, err).Payload()
+		}
 	}
 	inputText := parsedInput.Text
 
@@ -105,11 +132,6 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 	if err != nil {
 		return botprotocol.BuildErrorResponse(requestID, err).Payload()
 	}
-	runtimetool.WarmMountAsync(runtimetool.MountRequest{
-		Agent:          agent,
-		Gateway:        s.gateway,
-		PreparationKey: requestID,
-	})
 	baseRunTurn := runtimechat.RunTurnRequest{
 		SessionID:  request.SessionID,
 		AgentKey:   agent.Key,
@@ -117,6 +139,24 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 		RequestID:  requestID,
 		Input:      inputText,
 	}
+	if opening {
+		state, inspectErr := s.chat.InspectOpeningTurn(ctx, baseRunTurn)
+		if inspectErr != nil {
+			return botprotocol.BuildErrorResponse(requestID, inspectErr).Payload()
+		}
+		if state.Reused {
+			return s.existingOpeningPayload(ctx, requestID, state.AssistantMessageID)
+		}
+		if state.Skipped || !agent.OpeningEnabled {
+			return openingSkippedPayload(requestID)
+		}
+	}
+	runtimetool.WarmMountAsync(runtimetool.MountRequest{
+		Agent:          agent,
+		Gateway:        s.gateway,
+		PreparationKey: requestID,
+		BuiltinOnly:    opening,
+	})
 	if response := parsedInput.Content.InteractionResponse; response != nil {
 		baseRunTurn.InteractionID = response.InteractionID
 		baseRunTurn.InteractionData = response.Data
@@ -127,10 +167,12 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 		session          *agentmodel.Session
 		prepareGroup     runtimeasync.Group
 	)
-	prepareGroup.Go("规范化智能体参数", func() (currentErr error) {
-		normalizedParams, currentErr = runtimeinput.Normalize(ctx, agent.ID, parsedInput.Params, parsedInput.References)
-		return currentErr
-	})
+	if !opening {
+		prepareGroup.Go("规范化智能体参数", func() (currentErr error) {
+			normalizedParams, currentErr = runtimeinput.Normalize(ctx, agent.ID, parsedInput.Params, parsedInput.References)
+			return currentErr
+		})
+	}
 	prepareGroup.Go("读取文本模型能力", func() (currentErr error) {
 		power, currentErr = runtimecontext.ResolveTextPower(ctx, agent.LLMPowerID)
 		return currentErr
@@ -143,10 +185,14 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 		return botprotocol.BuildErrorResponse(requestID, prepareErr).Payload()
 	}
 	billing.SessionID = session.ID
-	parsedInput.Params = normalizedParams
-	parsedInput.Content.Params = normalizedParams
+	if !opening {
+		parsedInput.Params = normalizedParams
+		parsedInput.Content.Params = normalizedParams
+	}
 	runTurn := baseRunTurn
-	runTurn.Content = parsedInput.Content.Value()
+	if !opening {
+		runTurn.Content = parsedInput.Content.Value()
+	}
 
 	var (
 		resolvedReferences runtimereference.Result
@@ -154,16 +200,18 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 		modelLimits        energonservice.ModelLimits
 		contextGroup       runtimeasync.Group
 	)
-	contextGroup.Go("解析输入引用", func() (currentErr error) {
-		resolvedReferences, currentErr = runtimereference.NewRequestResolver(request.Server).Resolve(ctx, *session, parsedInput.References)
-		return currentErr
-	})
+	if !opening {
+		contextGroup.Go("解析输入引用", func() (currentErr error) {
+			resolvedReferences, currentErr = runtimereference.NewRequestResolver(request.Server).Resolve(ctx, *session, parsedInput.References)
+			return currentErr
+		})
+	}
 	contextGroup.Go("组装模型上下文", func() (currentErr error) {
 		assembled, currentErr = s.context.Assemble(ctx, runtimecontext.AssembleRequest{
 			Session:       *session,
 			Agent:         agent,
 			Input:         inputText,
-			IncludeMemory: agent.MemoryEnabled,
+			IncludeMemory: agent.MemoryEnabled && !opening,
 		})
 		return currentErr
 	})
@@ -174,21 +222,39 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 	if prepareErr := contextGroup.Wait(); prepareErr != nil {
 		return botprotocol.BuildErrorResponse(requestID, prepareErr).Payload()
 	}
-	turn, err := s.chat.BeginRunTurn(ctx, runTurn)
+	var turn runtimechat.RunTurn
+	if opening {
+		turn, err = s.chat.BeginOpeningTurn(ctx, runTurn)
+	} else {
+		turn, err = s.chat.BeginRunTurn(ctx, runTurn)
+	}
 	if err != nil {
 		return botprotocol.BuildErrorResponse(requestID, err).Payload()
 	}
-	boundUploads, err := bindInputUploads(ctx, *session, turn.UserMessageID, resolvedReferences.Media)
-	if err != nil {
-		_ = s.chat.CompleteRunTurn(ctx, runtimechat.RunTurnCompletion{
-			RequestID: requestID, Status: runStatusFail, Error: err.Error(),
-		})
-		return botprotocol.BuildErrorResponse(requestID, err).Payload()
+	if turn.Skipped {
+		return openingSkippedPayload(requestID)
 	}
-	toolReferences := attachBoundUploads(mediaReferences(resolvedReferences.Media), boundUploads)
-	toolReferences = withActiveSeriesReference(ctx, *session, toolReferences)
-	modelInput := runtimereference.ModelInput(input, parsedInput, resolvedReferences.Context)
-	if len(resolvedReferences.Media) > 0 {
+	if opening && turn.Reused {
+		return s.existingOpeningPayload(ctx, requestID, turn.AssistantMessageID)
+	}
+	boundUploads := []agentmodel.Artifact{}
+	if !opening {
+		boundUploads, err = bindInputUploads(ctx, *session, turn.UserMessageID, resolvedReferences.Media)
+		if err != nil {
+			_ = s.chat.CompleteRunTurn(ctx, runtimechat.RunTurnCompletion{
+				RequestID: requestID, Status: runStatusFail, Error: err.Error(),
+			})
+			return botprotocol.BuildErrorResponse(requestID, err).Payload()
+		}
+	}
+	toolReferences := []runtimeprovider.MediaReference{}
+	modelInput := agentskill.CloneMap(input)
+	if !opening {
+		toolReferences = attachBoundUploads(mediaReferences(resolvedReferences.Media), boundUploads)
+		toolReferences = withActiveSeriesReference(ctx, *session, toolReferences)
+		modelInput = runtimereference.ModelInput(input, parsedInput, resolvedReferences.Context)
+	}
+	if !opening && len(resolvedReferences.Media) > 0 {
 		powerConfig, configErr := s.gateway.RuntimePowerParamConfig(ctx, power.Key, 0)
 		if configErr == nil {
 			modelInput, configErr = bindResolvedMediaInput(
@@ -252,6 +318,63 @@ func (s Service) RunChat(ctx context.Context, request ChatRequest) map[string]an
 	return startPayload
 }
 
+func openingRequestID(sessionID uint64) string {
+	key := "agent-session-opening:" + strconv.FormatUint(sessionID, 10)
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(key)).String()
+}
+
+func openingSkippedPayload(requestID string) map[string]any {
+	return botprotocol.BuildSuccessResponse(requestID, botprotocol.Output{
+		"event": "opening_skipped",
+		"text":  "",
+	}).Payload()
+}
+
+func (s Service) existingOpeningPayload(ctx context.Context, requestID string, assistantMessageID uint64) map[string]any {
+	run, err := s.repository.FindRunByRequestID(ctx, requestID)
+	if err != nil {
+		return openingPendingPayload(requestID, 0, 0, assistantMessageID)
+	}
+	existing := execution{
+		runID:              run.ID,
+		version:            run.Version,
+		requestID:          requestID,
+		assistantMessageID: assistantMessageID,
+	}
+	if !isTerminalRunStatus(run.Status) {
+		return openingPendingPayload(requestID, run.ID, run.Version, assistantMessageID)
+	}
+	output := withExecutionStreamMeta(existing, decodeOutput(run.Output))
+	status := botprotocol.ResponseStatusSuccess
+	message := ""
+	if run.Status == runStatusFail {
+		status = botprotocol.ResponseStatusFail
+		message = strings.TrimSpace(run.Error)
+	}
+	return frontstream.ResponsePayload(
+		requestID, botprotocol.ResponseTypeResult, output, message, status,
+	)
+}
+
+func openingPendingPayload(requestID string, runID uint64, version int, assistantMessageID uint64) map[string]any {
+	return frontstream.ResponsePayload(
+		requestID,
+		botprotocol.ResponseTypeStream,
+		withExecutionStreamMeta(execution{
+			runID:              runID,
+			version:            version,
+			requestID:          requestID,
+			assistantMessageID: assistantMessageID,
+		}, map[string]any{
+			"event": "start",
+			"text":  "",
+			"meta":  map[string]any{"cancelable": true},
+		}),
+		"",
+		botprotocol.ResponseStatusSuccess,
+	)
+}
+
 func (s Service) ReadStream(ctx context.Context, requestID string, lastID string, count int64, block time.Duration) ([]frontstream.Entry, error) {
 	return s.streams.Read(ctx, requestID, lastID, count, block)
 }
@@ -295,9 +418,9 @@ func (s Service) stopTask(requestID string) map[string]any {
 			stopCancel()
 		}
 	}
-	if s.dispatcher != nil {
+	if dispatcher := s.executionDispatcher(); dispatcher != nil {
 		dispatchCtx, dispatchCancel := stopContext()
-		_ = s.dispatcher.Cancel(dispatchCtx, row.ID)
+		_ = dispatcher.Cancel(dispatchCtx, row.ID)
 		dispatchCancel()
 	}
 	execution := execution{runID: row.ID, version: row.Version, requestID: requestID}

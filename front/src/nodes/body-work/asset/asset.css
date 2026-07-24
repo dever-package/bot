@@ -5,8 +5,8 @@
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  background: #f7f8f8;
-  color: #17201c;
+  background: var(--body-work-canvas);
+  color: var(--body-work-text);
   letter-spacing: 0;
 }
 
@@ -22,8 +22,8 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  border-bottom: 1px solid #e2e6e4;
-  background: #fff;
+  border-bottom: 1px solid var(--body-work-line);
+  background: var(--body-work-surface);
   padding: 12px 18px;
 }
 
@@ -88,7 +88,7 @@
 }
 
 .wb-asset-view-switch button.is-active {
-  background: #fff;
+  background: var(--body-work-surface-raised);
   color: #36443d;
   box-shadow: 0 1px 2px rgba(19, 34, 27, 0.08);
 }
@@ -124,7 +124,7 @@
 }
 
 .wb-asset-segments button.is-active {
-  background: #fff;
+  background: var(--body-work-surface-raised);
   color: #17201c;
   font-weight: 600;
   box-shadow: 0 1px 3px rgba(19, 34, 27, 0.1);
@@ -141,7 +141,7 @@
   border: 1px solid #d8ddda;
   border-radius: 5px;
   outline: none;
-  background: #fff;
+  background: var(--body-work-surface-raised);
   color: #25312b;
   padding: 0 28px 0 9px;
 }
@@ -163,7 +163,7 @@
   gap: 7px;
   border: 1px solid #d8ddda;
   border-radius: 5px;
-  background: #fff;
+  background: var(--body-work-surface-raised);
   color: #25312b;
   cursor: pointer;
   padding: 0 11px;
@@ -220,7 +220,7 @@
   min-width: 92px;
   gap: 6px;
   border: 1px solid #d8ddda;
-  background: #fff;
+  background: var(--body-work-surface-raised);
   color: #25312b;
   padding: 0 11px;
   font-weight: 600;
@@ -263,7 +263,7 @@
   overflow: hidden;
   border: 1px solid #dde3e0;
   border-radius: 6px;
-  background: #fff;
+  background: var(--body-work-surface);
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
@@ -274,8 +274,8 @@
 }
 
 .wb-asset-card.is-selected {
-  border-color: #315f4d;
-  box-shadow: 0 0 0 2px rgba(49, 95, 77, 0.12);
+  border-color: var(--body-work-primary);
+  box-shadow: 0 0 0 2px var(--body-work-ring);
 }
 
 .wb-asset-card-main {
@@ -539,7 +539,7 @@
 }
 
 .wb-asset-card-prose a {
-  color: #315f4d;
+  color: var(--body-work-primary-strong);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -548,7 +548,7 @@
   border-radius: 3px;
   background: #e8ece9;
   padding: 1px 3px;
-  color: #315f4d;
+  color: var(--body-work-primary-strong);
   font-size: 0.9em;
 }
 
@@ -672,7 +672,7 @@
   margin: 16px auto 0;
   border: 1px solid #dce3df;
   border-radius: 8px;
-  background: #fff;
+  background: var(--body-work-surface);
   padding: 22px 24px;
   box-shadow: 0 8px 24px rgba(27, 45, 37, 0.05);
 }
@@ -685,7 +685,7 @@
   justify-content: center;
   border-radius: 6px;
   background: #edf2ef;
-  color: #315f4d;
+  color: var(--body-work-primary-strong);
 }
 
 .wb-asset-file-icon svg {
@@ -722,8 +722,8 @@
   gap: 7px;
   border: 1px solid #cfd9d3;
   border-radius: 5px;
-  background: #fff;
-  color: #245b47;
+  background: var(--body-work-surface-raised);
+  color: var(--body-work-primary-strong);
   padding: 0 13px;
   font-size: 12px;
   font-weight: 650;
@@ -736,7 +736,7 @@
 }
 
 .wb-asset-file-preview > a:focus-visible {
-  outline: 2px solid rgba(49, 95, 77, 0.32);
+  outline: 2px solid var(--body-work-ring);
   outline-offset: 2px;
 }
 
@@ -819,7 +819,7 @@
   display: block;
   width: 100%;
   border: 0;
-  background: #fff;
+  background: var(--body-work-surface);
   color: inherit;
   cursor: pointer;
   padding: 12px 44px 13px 13px;
@@ -890,7 +890,11 @@
   gap: 5px;
   border: 1px solid rgba(210, 218, 214, 0.95);
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.96);
+  background: color-mix(
+    in srgb,
+    var(--body-work-surface-raised) 96%,
+    transparent
+  );
   color: #425149;
   cursor: pointer;
   padding: 0 9px;
@@ -899,14 +903,14 @@
 }
 
 .wb-asset-card-actions button.is-primary {
-  border-color: #315f4d;
-  background: #315f4d;
-  color: #fff;
+  border-color: var(--body-work-primary-strong);
+  background: var(--body-work-primary-strong);
+  color: var(--body-work-on-primary);
 }
 
 .wb-asset-card-actions button.is-primary.is-selected {
-  border-color: #244b3b;
-  background: #244b3b;
+  border-color: var(--body-work-primary);
+  background: var(--body-work-primary);
 }
 
 .wb-asset-card-actions button.is-danger:hover:not(:disabled) {
@@ -964,7 +968,7 @@
   justify-content: center;
   gap: 10px;
   border-top: 1px solid #e2e6e4;
-  background: #fff;
+  background: var(--body-work-surface);
   color: #69736e;
   font-size: 12px;
 }
@@ -993,7 +997,7 @@
   flex-direction: column;
   overflow: hidden;
   border-radius: 7px;
-  background: #fff;
+  background: var(--body-work-surface-raised);
   box-shadow: 0 24px 70px rgba(13, 20, 17, 0.28);
 }
 
@@ -1069,7 +1073,7 @@
   justify-content: space-between;
   gap: 16px;
   border-top: 1px solid #e2e6e4;
-  background: #fff;
+  background: var(--body-work-surface);
   padding: 10px 16px 10px 18px;
   color: #6e7873;
   font-size: 12px;
@@ -1086,7 +1090,7 @@
   height: 36px;
   border: 1px solid #d8ddda;
   border-radius: 5px;
-  background: #fff;
+  background: var(--body-work-surface-raised);
   color: #25312b;
   cursor: pointer;
   padding: 0 14px;
@@ -1095,9 +1099,9 @@
 }
 
 .wb-asset-picker-footer button.is-primary {
-  border-color: #245b47;
-  background: #245b47;
-  color: #fff;
+  border-color: var(--body-work-primary-strong);
+  background: var(--body-work-primary-strong);
+  color: var(--body-work-on-primary);
 }
 
 .wb-asset-picker-footer button:disabled {
@@ -1132,7 +1136,7 @@
   overflow: hidden;
   border: 1px solid #dce2df;
   border-radius: 7px;
-  background: #fff;
+  background: var(--body-work-surface-raised);
   box-shadow: 0 24px 70px rgba(13, 20, 17, 0.26);
   color: #17201c;
   font-size: 13px;
@@ -1188,8 +1192,8 @@
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  background: #eaf1ed;
-  color: #245b47;
+  background: var(--body-work-primary-soft);
+  color: var(--body-work-primary-strong);
 }
 
 .wb-asset-rename-icon svg,
@@ -1230,15 +1234,15 @@
   border: 1px solid #d5dcd8;
   border-radius: 5px;
   outline: none;
-  background: #fff;
+  background: var(--body-work-surface);
   color: #17201c;
   padding: 0 11px;
   font-weight: 400;
 }
 
 .wb-asset-rename-dialog > label input:focus {
-  border-color: #628271;
-  box-shadow: 0 0 0 3px rgba(49, 95, 77, 0.1);
+  border-color: var(--body-work-primary);
+  box-shadow: 0 0 0 3px var(--body-work-ring);
 }
 
 .wb-asset-rename-error {
@@ -1264,7 +1268,7 @@
   gap: 6px;
   border: 1px solid #d5dcd8;
   border-radius: 5px;
-  background: #fff;
+  background: var(--body-work-surface);
   color: #25312b;
   cursor: pointer;
   padding: 0 14px;
@@ -1272,9 +1276,9 @@
 }
 
 .wb-asset-rename-dialog > footer button.is-primary {
-  border-color: #245b47;
-  background: #245b47;
-  color: #fff;
+  border-color: var(--body-work-primary-strong);
+  background: var(--body-work-primary-strong);
+  color: var(--body-work-on-primary);
 }
 
 .wb-asset-rename-dialog button:disabled {

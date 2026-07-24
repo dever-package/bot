@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
+	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	billingservice "github.com/dever-package/bot/service/billing"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
@@ -17,18 +18,19 @@ import (
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
-func (s Service) callModel(ctx context.Context, controller *runController, execution execution, input map[string]any, history []any, toolChoice any, documentID uint64, modelStep int) (modelStepResult, error) {
+func (s Service) callModel(ctx context.Context, controller *runController, execution execution, input map[string]any, history []any, toolChoice any, documentID uint64, modelStep int, documentTextSourceKey string, publish bool) (modelStepResult, error) {
 	execution.documentID = documentID
 	execution.documentModelStep = modelStep
+	execution.documentTextSourceKey = strings.TrimSpace(documentTextSourceKey)
 	return s.callModelRequest(
 		ctx,
 		controller,
 		execution,
 		input,
 		history,
-		execution.registry.Definitions(),
+		modelDefinitions(execution),
 		toolChoice,
-		true,
+		publish,
 		"model",
 		modelStep,
 	)
@@ -50,7 +52,7 @@ func (s Service) callModelRequest(
 		ctx,
 		controller,
 		execution,
-		modelRolePrompt(execution.prompt),
+		modelRolePromptForExecution(execution),
 		input,
 		history,
 		tools,
@@ -58,6 +60,21 @@ func (s Service) callModelRequest(
 		publish,
 		chargeKind,
 		chargeIndex,
+	)
+}
+
+func modelDefinitions(execution execution) []any {
+	if execution.registry == nil {
+		return nil
+	}
+	if !execution.documentWriter {
+		return execution.registry.Definitions()
+	}
+	return execution.registry.DefinitionsWithout(
+		runtimeprovider.AskUserToolName,
+		runtimeprovider.PresentSuggestionsToolName,
+		runtimeprovider.ComposeDocumentToolName,
+		runtimeprovider.SkillInstallPlanToolName,
 	)
 }
 
@@ -316,10 +333,17 @@ func isEmptyModelStepResult(result modelStepResult) bool {
 }
 
 func modelResultFromOutput(output botprotocol.Output) modelStepResult {
+	calls := botprotocol.ParseToolCalls(output["tool_calls"])
+	text := botprotocol.ToolCallVisibleText(botprotocol.AsText(output["text"]), calls)
+	if text == "" {
+		delete(output, "text")
+	} else {
+		output["text"] = text
+	}
 	return modelStepResult{
-		Text:       strings.TrimSpace(botprotocol.AsText(output["text"])),
+		Text:       strings.TrimSpace(text),
 		Output:     output,
-		ToolCalls:  botprotocol.ParseToolCalls(output["tool_calls"]),
+		ToolCalls:  calls,
 		FinishMode: strings.TrimSpace(botprotocol.AsText(output["finish_reason"])),
 	}
 }

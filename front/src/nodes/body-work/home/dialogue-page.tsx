@@ -6,6 +6,7 @@ import {
 } from "../../show/agent-chat/index";
 import type { AgentChatMessageActionContext } from "../../show/agent-chat/types";
 import type { AgentChatArtifact } from "../../show/agent-chat/artifact";
+import type { AgentChatDocument } from "../../show/agent-chat/document";
 import type { AssetRecord } from "../asset/asset-types";
 import { SaveAssetAction } from "../asset/save-asset-action";
 import {
@@ -88,6 +89,7 @@ export function WorkbenchDialoguePage({
       },
       runtimeApi: {
         request: api("chat_run"),
+        opening: api("chat_opening"),
         stream: api("chat_stream"),
         stop: api("chat_stop"),
         status: api("chat_status"),
@@ -154,6 +156,7 @@ export function WorkbenchDialoguePage({
           height="100%"
           minHeight="0"
           lazySession
+          proactiveOpening={role.openingEnabled}
           mobileSessionNavigation
           uploadBizKey={BODY_UPLOAD_BIZ_KEY}
           uploadBizName={BODY_UPLOAD_BIZ_NAME}
@@ -180,6 +183,30 @@ export function WorkbenchDialoguePage({
               />
             ) : null
           }
+          renderDocumentActions={({
+            messageID,
+            document,
+            running,
+            error,
+          }) => (
+            <SaveDialogueDocumentAction
+              teamID={teamID}
+              roleID={role.id}
+              roleName={role.name}
+              messageID={messageID}
+              document={document}
+              targetAssetID={roleContinuation?.id || 0}
+              targetAssetName={roleContinuation?.name || ""}
+              appearance="inspector"
+              disabled={running || error || messageID <= 0}
+              disabledLabel={
+                error
+                  ? "生成失败的文档不能保存"
+                  : "文档生成完成后才能保存"
+              }
+              onSaved={onClearContinuation}
+            />
+          )}
           renderArtifactActions={({ messageID, artifact, placement }) => (
             <SaveAssetAction
               teamID={teamID}
@@ -241,6 +268,23 @@ function SaveDialogueMaterialButton({
   targetAssetName: string;
   onSaved: () => void;
 }) {
+  if (message.document) {
+    return (
+      <SaveDialogueDocumentAction
+        teamID={teamID}
+        roleID={roleID}
+        roleName={roleName}
+        messageID={message.recordID}
+        document={message.document}
+        targetAssetID={targetAssetID}
+        targetAssetName={targetAssetName}
+        appearance="message"
+        disabled={message.hasPendingArtifacts}
+        disabledLabel="文档生成完成后才能保存"
+        onSaved={onSaved}
+      />
+    );
+  }
   return (
     <SaveAssetAction
       teamID={teamID}
@@ -260,6 +304,66 @@ function SaveDialogueMaterialButton({
           teamID,
           roleID,
           messageID: message.recordID,
+          targetAssetID,
+          name,
+        })
+      }
+      onSaved={() => {
+        if (targetAssetID) onSaved();
+      }}
+    />
+  );
+}
+
+function SaveDialogueDocumentAction({
+  teamID,
+  roleID,
+  roleName,
+  messageID,
+  document,
+  targetAssetID,
+  targetAssetName,
+  appearance,
+  disabled,
+  disabledLabel,
+  onSaved,
+}: {
+  teamID: number;
+  roleID: number;
+  roleName: string;
+  messageID: number;
+  document: AgentChatDocument;
+  targetAssetID: number;
+  targetAssetName: string;
+  appearance: "message" | "inspector";
+  disabled: boolean;
+  disabledLabel: string;
+  onSaved: () => void;
+}) {
+  return (
+    <SaveAssetAction
+      teamID={teamID}
+      resetKey={`${messageID}:document:${document.id}:${targetAssetID}`}
+      defaultName={
+        targetAssetName ||
+        document.title.trim() ||
+        `${roleName.trim() || "智能体"} 文档`
+      }
+      appearance={appearance}
+      className={appearance === "inspector" ? "!size-8" : ""}
+      confirmDescription={
+        targetAssetID
+          ? "保存后将作为当前素材的新版本。"
+          : "保存后将作为当前团队的富文本文档资产。"
+      }
+      disabled={disabled}
+      disabledLabel={disabledLabel}
+      save={(name) =>
+        saveWorkbenchDialogueAsset({
+          teamID,
+          roleID,
+          messageID,
+          documentID: document.id,
           targetAssetID,
           name,
         })

@@ -1,0 +1,143 @@
+{
+  "page": {
+    "name": "内容文章编辑",
+    "parent": "bot/body/content_article/list",
+    "type": 2,
+    "auth": [
+      {
+        "key": "bot/body/content_article/create",
+        "name": "内容文章新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/body/content_article/update",
+        "name": "内容文章编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-select",
+        "name": "内容分类",
+        "placeholder": "请选择内容分类",
+        "value": "form.category_id",
+        "mode": "form",
+        "option": {
+          "model": "bot.body.NewContentCategoryModel",
+          "order": "sort asc,id asc"
+        },
+        "validate": [
+          {
+            "type": "required",
+            "message": "内容分类不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[320px]"
+        }
+      },
+      {
+        "type": "form-radio",
+        "name": "访问范围",
+        "value": "form.visibility",
+        "mode": "form",
+        "info": "公开文章可从登录页单页链接匿名查看；登录后文章只在工作台内容入口展示。",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "gap-x-5"
+        }
+      },
+      {
+        "type": "form-input",
+        "name": "标题",
+        "placeholder": "请输入文章标题",
+        "value": "form.title",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "文章标题不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-editor",
+        "name": "内容",
+        "placeholder": "请输入文章正文内容。",
+        "value": "form.content",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "文章内容不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "vertical",
+          "minHeight": 360,
+          "maxHeight": 640,
+          "uploadRules": [
+            {
+              "ruleId": 1,
+              "kind": "image",
+              "bizKey": "body.content_article.content",
+              "bizName": "内容文章正文"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "id": "",
+      "category_id": "",
+      "title": "",
+      "content": "",
+      "visibility": "login",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "data": {
+        "id": "$form.id",
+        "category_id": "$form.category_id",
+        "title": "$form.title",
+        "content": "$form.content",
+        "visibility": "$form.visibility",
+        "status": "$form.status",
+        "sort": "$form.sort"
+      }
+    }
+  }
+}

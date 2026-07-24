@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	frontupload "github.com/dever-package/front/service/upload"
@@ -122,18 +123,22 @@ func (FFmpegProcessor) Execute(ctx context.Context, request ExecuteRequest) (any
 	defer os.RemoveAll(workspace)
 
 	outputPath := filepath.Join(workspace, "output.mp4")
+	prepareStartedAt := time.Now()
 	composition, hasComposition, err := parseFFmpegComposition(request.Input["composition"])
 	if err != nil {
 		return nil, err
 	}
 	var args []string
-	fastConcat := false
+	compositionMode := ffmpegCompositionModeTranscode
 	statusText := "正在合成视频"
 	if hasComposition {
-		args, fastConcat, err = buildFFmpegCompositionArgs(ctx, workspace, outputPath, composition)
-		if fastConcat {
+		args, compositionMode, err = buildFFmpegCompositionArgs(ctx, workspace, outputPath, composition)
+		switch compositionMode {
+		case ffmpegCompositionModeStreamCopy:
 			statusText = "正在快速拼接视频"
-		} else {
+		case ffmpegCompositionModeCopyVideoMixAudio:
+			statusText = "正在拼接画面并混合音频"
+		default:
 			statusText = "正在按镜头清单合成视频"
 		}
 	} else {
@@ -142,16 +147,46 @@ func (FFmpegProcessor) Execute(ctx context.Context, request ExecuteRequest) (any
 	if err != nil {
 		return nil, err
 	}
+	prepareDuration := time.Since(prepareStartedAt)
+	queueStartedAt := time.Now()
+	releaseTranscodeSlot := func() {}
+	transcodeSlotHeld := false
+	if compositionMode == ffmpegCompositionModeTranscode {
+		releaseTranscodeSlot, err = acquireFFmpegTranscodeSlot(ctx, func() error {
+			return notifyProcessorOutput(request.Write, botprotocol.Output{
+				"event": "status",
+				"text":  "正在等待视频合成资源",
+			})
+		})
+		if err != nil {
+			return nil, err
+		}
+		transcodeSlotHeld = true
+		defer func() {
+			if transcodeSlotHeld {
+				releaseTranscodeSlot()
+			}
+		}()
+	}
+	queueDuration := time.Since(queueStartedAt)
 	if err := notifyProcessorOutput(request.Write, botprotocol.Output{
 		"event": "status",
 		"text":  statusText,
 	}); err != nil {
 		return nil, err
 	}
-	if err := runFFmpegCommand(ctx, ffmpegPath, args, request.Write); err != nil {
-		return nil, err
+	ffmpegStartedAt := time.Now()
+	ffmpegErr := runFFmpegCommand(ctx, ffmpegPath, args, request.Write)
+	if transcodeSlotHeld {
+		releaseTranscodeSlot()
+		transcodeSlotHeld = false
+	}
+	ffmpegDuration := time.Since(ffmpegStartedAt)
+	if ffmpegErr != nil {
+		return nil, ffmpegErr
 	}
 
+	storeStartedAt := time.Now()
 	file, err := frontupload.ImportFile(ctx, frontupload.ImportFileInput{
 		RuleID:    ffmpegVideoRuleID,
 		Kind:      botprotocol.MediaTypeVideo,
@@ -171,6 +206,7 @@ func (FFmpegProcessor) Execute(ctx context.Context, request ExecuteRequest) (any
 	if err != nil {
 		return nil, fmt.Errorf("保存合成视频失败: %w", err)
 	}
+	storeDuration := time.Since(storeStartedAt)
 	payload := uploadrepo.BuildUploadFilePayload(file)
 	fileURL := strings.TrimSpace(botprotocol.AsText(payload["url"]))
 	if fileURL == "" {
@@ -188,12 +224,18 @@ func (FFmpegProcessor) Execute(ctx context.Context, request ExecuteRequest) (any
 		"videos":      []string{fileURL},
 		"media_files": []map[string]any{mediaFile},
 		"meta": map[string]any{
-			"stored":         true,
-			"upload_rule_id": ffmpegVideoRuleID,
-			"processor":      ffmpegProcessorKey,
-			"operation":      ffmpegComposeOperation,
-			"composition":    hasComposition,
-			"fast_concat":    fastConcat,
+			"stored":           true,
+			"upload_rule_id":   ffmpegVideoRuleID,
+			"processor":        ffmpegProcessorKey,
+			"operation":        ffmpegComposeOperation,
+			"composition":      hasComposition,
+			"composition_mode": compositionMode,
+			"fast_concat":      compositionMode == ffmpegCompositionModeStreamCopy,
+			"prepare_ms":       prepareDuration.Milliseconds(),
+			"queue_ms":         queueDuration.Milliseconds(),
+			"ffmpeg_ms":        ffmpegDuration.Milliseconds(),
+			"store_ms":         storeDuration.Milliseconds(),
+			"total_ms":         time.Since(prepareStartedAt).Milliseconds(),
 		},
 	}
 	if err := notifyProcessorOutput(request.Write, output); err != nil {

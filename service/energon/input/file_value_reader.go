@@ -126,12 +126,31 @@ func readServiceParamUploadFile(ctx context.Context, file uploadrepo.UploadFile,
 	if err != nil {
 		return nil, "", err
 	}
-	target, err := driver.ResolveOpen(ctx, uploadprovider.File{
-		Path:    file.Path,
-		Storage: file.Storage,
+	target, err := uploadprovider.Open(ctx, driver, uploadprovider.OpenInput{
+		File: uploadprovider.File{
+			Path:    file.Path,
+			Storage: file.Storage,
+		},
+		ProviderKey: file.ProviderKey,
+		Name:        file.Name,
+		Mime:        file.Mime,
 	})
 	if err != nil {
 		return nil, "", fmt.Errorf("读取上传文件失败: %w", err)
+	}
+	if target == nil {
+		return nil, "", fmt.Errorf("上传文件没有可读取的内容")
+	}
+	if target.Stream != nil {
+		defer target.Stream.Close()
+		if target.ContentLength > maxBytes {
+			return nil, "", serviceParamFileTooLargeError(maxBytes)
+		}
+		content, readErr := readServiceParamFileContent(target.Stream, maxBytes)
+		if readErr != nil {
+			return nil, "", readErr
+		}
+		return content, normalizeServiceParamMIME(target.Header.Get("Content-Type")), nil
 	}
 	if localPath := strings.TrimSpace(target.LocalPath); localPath != "" {
 		return readServiceParamLocalFile(localPath, file.Mime, maxBytes)

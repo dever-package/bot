@@ -47,6 +47,9 @@ export function AgentChatDocumentView({
       {document.blocks.length === 0 && running ? (
         <DocumentWaitingIndicator />
       ) : null}
+      {document.blocks.length === 0 && document.status === "failed" ? (
+        <DocumentFailure message={documentFailureMessage(document)} />
+      ) : null}
       {waitingForBlock ? <DocumentTail /> : null}
       {!running && isAgentChatDocumentPending(document) ? (
         <DocumentTail />
@@ -143,6 +146,22 @@ function DocumentWaitingIndicator() {
       ))}
     </div>
   );
+}
+
+function DocumentFailure({ message }: { message: string }) {
+  return (
+    <div className="flex items-center gap-2 text-sm text-destructive">
+      <CircleAlert className="size-4 shrink-0" />
+      <span>{message}</span>
+    </div>
+  );
+}
+
+function documentFailureMessage(document: AgentChatDocument) {
+  const message = document.meta.error;
+  return typeof message === "string" && message.trim()
+    ? message.trim()
+    : "文档生成失败，请重新生成。";
 }
 
 function DocumentTail() {

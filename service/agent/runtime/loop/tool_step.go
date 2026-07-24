@@ -12,6 +12,8 @@ import (
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
+const maxRequiredToolFailures = 2
+
 func (s Service) runToolStep(ctx context.Context, controller *runController, state *runState) bool {
 	if state.pendingIndex < 0 || state.pendingIndex >= len(state.pendingTools) {
 		state.continueAfterTools()
@@ -48,6 +50,23 @@ func (s Service) runToolStep(ctx context.Context, controller *runController, sta
 	state.pendingIndex++
 
 	terminal := completed.result.Terminal
+	if state.isRequiredToolCall(call) {
+		if completed.err == nil {
+			state.requireTool("")
+		} else if !terminal {
+			state.requiredToolFailures++
+			if state.requiredToolFailures >= maxRequiredToolFailures {
+				terminal = true
+				completed.result.Terminal = true
+				completed.title = "终止必要工具重试"
+				if completed.payload == nil {
+					completed.payload = map[string]any{}
+				}
+				completed.payload["circuit_open"] = true
+				completed.payload["required_tool_failure_count"] = state.requiredToolFailures
+			}
+		}
+	}
 	if terminal {
 		text := terminalResultText(state.lastText, completed)
 		output := completed.result.Output()
@@ -62,7 +81,7 @@ func (s Service) runToolStep(ctx context.Context, controller *runController, sta
 		}
 		state.MarkFinal(status, text, output, message)
 	} else if state.pendingIndex >= len(state.pendingTools) {
-		if state.continueAfterTools() && state.documentID == 0 {
+		if state.continueAfterTools() && !state.isDocumentWriter() {
 			_ = s.writeExecutionOutput(ctx, state.execution, map[string]any{"event": "delta", "text": "\n\n"})
 		}
 	}
@@ -117,7 +136,7 @@ func (s Service) executeToolStep(ctx context.Context, controller *runController,
 		return s.executeComposeDocumentStep(ctx, state, call), false
 	}
 	if shouldEnqueueArtifact(state.execution, definition) {
-		if state.documentID > 0 {
+		if state.isDocumentWriter() {
 			return s.enqueueDocumentArtifact(ctx, state, call, definition), false
 		}
 		return s.enqueueMessageArtifact(ctx, state, call, definition), false

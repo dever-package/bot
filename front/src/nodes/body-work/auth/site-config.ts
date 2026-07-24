@@ -5,11 +5,18 @@ import {
   request,
 } from "@dever/front-plugin";
 import { isSuccessResponse } from "../shared/api-response";
+import type { BodyFilingInfo } from "../shared/body-filing";
 import {
   DEFAULT_BODY_APPEARANCE,
   normalizeBodyAppearance,
   type BodyAppearanceConfig,
 } from "../shared/body-appearance";
+import { safeBodyExternalURL } from "../shared/safe-body-url";
+import {
+  isValidBodyResolvedLink,
+  normalizeBodyResolvedLink,
+  type BodyResolvedLink,
+} from "../shared/body-link";
 
 export type BodySiteConfig = {
   siteName: string;
@@ -18,10 +25,13 @@ export type BodySiteConfig = {
   loginImage: string;
   loginTitle: string;
   loginDescription: string;
+  registerEnabled: boolean;
   appearance: BodyAppearanceConfig;
   homeMenu: BodyHomeMenuConfig;
   filing: BodyFilingInfo;
 };
+
+export type { BodyFilingInfo } from "../shared/body-filing";
 
 export type BodyHomeMenuItem = {
   name: string;
@@ -38,23 +48,15 @@ export type BodyHomeMenuConfig = {
   assets: BodyHomeMenuItem;
   points: BodyHomeMenuItem;
   messages: BodyHomeMenuItem;
+  content: BodyHomeMenuItem;
 };
 
-export type BodyFilingInfo = {
-  companyName: string;
-  companyAddress: string;
-  businessLicenseURL: string;
-  icpRecord: string;
-  icpRecordURL: string;
-  publicSecurityRecord: string;
-  publicSecurityRecordURL: string;
-};
+export type BodyLoginLink = BodyResolvedLink;
+export type { BodyLinkScene } from "../shared/body-link";
 
-export type BodyLoginLink = {
-  id: number;
-  name: string;
-  url: string;
-  target: "_self" | "_blank";
+export type BodyLoginLegalLinks = {
+  termsOfService: BodyLoginLink | null;
+  privacyPolicy: BodyLoginLink | null;
 };
 
 export type BodyLoginAccount = {
@@ -69,7 +71,13 @@ export type BodyLoginAccount = {
 export type BodyLoginConfig = {
   site: BodySiteConfig;
   links: BodyLoginLink[];
+  legalLinks: BodyLoginLegalLinks;
   accounts: BodyLoginAccount[];
+};
+
+export type BodyLoginConfigState = {
+  config: BodyLoginConfig;
+  loaded: boolean;
 };
 
 const DEFAULT_LOGIN_TITLE = "把想法变成作品";
@@ -82,21 +90,27 @@ const HOME_MENU_DEFAULTS = [
   ["assets", "资产", "archive"],
   ["points", "积分", "sparkles"],
   ["messages", "消息", "bell"],
+  ["content", "内容", "book-open-text"],
 ] as const;
 
 let cachedLoginConfig: BodyLoginConfig | null = null;
 let pendingLoginConfig: Promise<BodyLoginConfig> | null = null;
 
 export function useBodyLoginConfig() {
-  const [config, setConfig] = useState<BodyLoginConfig>(() =>
-    cachedLoginConfig || fallbackLoginConfig(),
-  );
+  return useBodyLoginConfigState().config;
+}
+
+export function useBodyLoginConfigState() {
+  const [state, setState] = useState<BodyLoginConfigState>(() => ({
+    config: cachedLoginConfig || fallbackLoginConfig(),
+    loaded: false,
+  }));
 
   useEffect(() => {
     let active = true;
-    void loadBodyLoginConfig().then((next) => {
+    void loadBodyLoginConfig().then((config) => {
       if (active) {
-        setConfig(next);
+        setState({ config, loaded: true });
       }
     });
     return () => {
@@ -104,13 +118,10 @@ export function useBodyLoginConfig() {
     };
   }, []);
 
-  return config;
+  return state;
 }
 
 export function loadBodyLoginConfig() {
-  if (cachedLoginConfig) {
-    return Promise.resolve(cachedLoginConfig);
-  }
   if (pendingLoginConfig) {
     return pendingLoginConfig;
   }
@@ -123,7 +134,7 @@ export function loadBodyLoginConfig() {
       cachedLoginConfig = normalizeLoginConfig(result?.data);
       return cachedLoginConfig;
     })
-    .catch(() => fallbackLoginConfig())
+    .catch(() => cachedLoginConfig || fallbackLoginConfig())
     .finally(() => {
       pendingLoginConfig = null;
     });
@@ -156,6 +167,9 @@ function normalizeLoginConfig(value: unknown): BodyLoginConfig {
   const fallback = fallbackLoginConfig();
   const root = recordValue(value);
   const config = recordValue(root.config);
+  const normalizedLinks = rowsValue(root.links)
+    .map(normalizeBodyResolvedLink)
+    .filter(isValidBodyResolvedLink);
 
   return {
     site: {
@@ -170,29 +184,51 @@ function normalizeLoginConfig(value: unknown): BodyLoginConfig {
       )
         ? textValue(config.login_description)
         : fallback.site.loginDescription,
+      registerEnabled:
+        config.register_enabled == null
+          ? fallback.site.registerEnabled
+          : booleanValue(config.register_enabled),
       appearance: normalizeBodyAppearance(
         {
-          themePreset: config.theme_preset,
+          baseColor: config.base_color,
           brandPrimaryColor: config.brand_primary_color,
           loginTemplate: config.login_template,
+          loginTextColor: config.login_text_color,
+          loginBackgroundColor: config.login_background_color,
+          loginBackgroundImage: mediaURL(config.login_background_image),
           workbenchTemplate: config.workbench_template,
+          workbenchBackgroundColor: config.workbench_background_color,
+          workbenchBackgroundImage: mediaURL(
+            config.workbench_background_image,
+          ),
         },
         fallback.site.appearance,
       ),
       homeMenu: normalizeHomeMenu(config.home_menu, fallback.site.homeMenu),
       filing: {
+        content: textValue(config.filing_content),
         companyName: textValue(config.company_name),
         companyAddress: textValue(config.company_address),
-        businessLicenseURL: safeExternalURL(config.business_license_url),
+        businessLicenseURL: safeBodyExternalURL(config.business_license_url),
         icpRecord: textValue(config.icp_record),
-        icpRecordURL: safeExternalURL(config.icp_record_url),
+        icpRecordURL: safeBodyExternalURL(config.icp_record_url),
         publicSecurityRecord: textValue(config.public_security_record),
-        publicSecurityRecordURL: safeExternalURL(
+        publicSecurityRecordURL: safeBodyExternalURL(
           config.public_security_record_url,
         ),
       },
     },
-    links: rowsValue(root.links).map(normalizeLink).filter(validLink),
+    links: normalizedLinks.filter(isLoginNavigationLink),
+    legalLinks: {
+      termsOfService: findLoginLinkByCode(
+        normalizedLinks,
+        "terms_of_service",
+      ),
+      privacyPolicy: findLoginLinkByCode(
+        normalizedLinks,
+        "privacy_policy",
+      ),
+    },
     accounts: rowsValue(root.accounts)
       .map(normalizeAccount)
       .filter(validAccount),
@@ -209,11 +245,16 @@ function fallbackLoginConfig(): BodyLoginConfig {
       loginImage: "",
       loginTitle: DEFAULT_LOGIN_TITLE,
       loginDescription: DEFAULT_LOGIN_DESCRIPTION,
+      registerEnabled: true,
       appearance: DEFAULT_BODY_APPEARANCE,
       homeMenu: defaultHomeMenu(),
       filing: emptyFilingInfo(),
     },
     links: [],
+    legalLinks: {
+      termsOfService: null,
+      privacyPolicy: null,
+    },
     accounts: [
       {
         id: 1,
@@ -261,14 +302,15 @@ function defaultHomeMenu(): BodyHomeMenuConfig {
   ) as BodyHomeMenuConfig;
 }
 
-function normalizeLink(value: unknown): BodyLoginLink {
-  const row = recordValue(value);
-  return {
-    id: positiveNumber(row.id),
-    name: textValue(row.name),
-    url: safeLinkURL(row.url),
-    target: textValue(row.target) === "_blank" ? "_blank" : "_self",
-  };
+function isLoginNavigationLink(link: BodyLoginLink) {
+  if (link.scenes.includes("navigation")) {
+    return true;
+  }
+  return !link.code && link.scenes.length === 0;
+}
+
+function findLoginLinkByCode(links: BodyLoginLink[], code: string) {
+  return links.find((link) => link.code === code) || null;
 }
 
 function normalizeAccount(value: unknown): BodyLoginAccount {
@@ -283,44 +325,13 @@ function normalizeAccount(value: unknown): BodyLoginAccount {
   };
 }
 
-function validLink(link: BodyLoginLink) {
-  return Boolean(link.id && link.name && link.url);
-}
-
 function validAccount(account: BodyLoginAccount) {
   return Boolean(account.id && account.provider && account.name);
 }
 
-function safeLinkURL(value: unknown) {
-  if (typeof window === "undefined") {
-    return "";
-  }
-  return safeURL(
-    value,
-    ["http:", "https:", "mailto:"],
-    window.location.origin,
-  );
-}
-
-function safeExternalURL(value: unknown) {
-  return safeURL(value, ["http:", "https:"]);
-}
-
-function safeURL(value: unknown, protocols: string[], base?: string) {
-  const text = textValue(value);
-  if (!text) {
-    return "";
-  }
-  try {
-    const url = base ? new URL(text, base) : new URL(text);
-    return protocols.includes(url.protocol) ? url.href : "";
-  } catch {
-    return "";
-  }
-}
-
 function emptyFilingInfo(): BodyFilingInfo {
   return {
+    content: "",
     companyName: "",
     companyAddress: "",
     businessLicenseURL: "",

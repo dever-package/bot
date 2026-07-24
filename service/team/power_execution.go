@@ -20,16 +20,7 @@ func (s Service) executePower(
 	onStream func(map[string]any),
 ) (map[string]any, error) {
 	sourceTargetID = resolveSourceTargetID(sourceTargetID, input)
-	body := map[string]any{
-		"protocol": "shemic",
-		"power":    power.Key,
-		"input":    input,
-		"history":  []any{},
-		"options":  map[string]any{"stream": true},
-	}
-	if sourceTargetID > 0 {
-		body["source_target_id"] = sourceTargetID
-	}
+	body := canvasPowerGatewayBody(power, input, sourceTargetID)
 	output, err := billingservice.ExecutePower(ctx, billingservice.PowerExecutionRequest{
 		Prepare: billingservice.PreparePowerChargeRequest{
 			Billing:       billing,
@@ -61,4 +52,36 @@ func (s Service) executePower(
 		return result.Output, invokeErr
 	})
 	return powerOutputValue(output, power.Kind), err
+}
+
+func (s Service) PreflightCanvasPower(ctx context.Context, req CanvasPowerRunRequest) error {
+	prepared, err := s.prepareCanvasPower(ctx, req)
+	if err != nil {
+		return err
+	}
+	input := mergeMaps(prepared.request.Input, prepared.request.Params)
+	return s.gateway.Validate(ctx, energonservice.GatewayRequest{
+		Method: "POST",
+		Path:   "/bot/admin/energon/request",
+		Body: canvasPowerGatewayBody(
+			prepared.power,
+			input,
+			prepared.request.SourceTargetID,
+		),
+	})
+}
+
+func canvasPowerGatewayBody(power PowerOption, input map[string]any, sourceTargetID uint64) map[string]any {
+	sourceTargetID = resolveSourceTargetID(sourceTargetID, input)
+	body := map[string]any{
+		"protocol": "shemic",
+		"power":    power.Key,
+		"input":    input,
+		"history":  []any{},
+		"options":  map[string]any{"stream": true},
+	}
+	if sourceTargetID > 0 {
+		body["source_target_id"] = sourceTargetID
+	}
+	return body
 }

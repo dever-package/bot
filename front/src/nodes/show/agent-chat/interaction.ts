@@ -64,6 +64,13 @@ export function readAgentChatSuggestions(
   return suggestions;
 }
 
+export function readAgentChatSuggestionMessage(output: unknown) {
+  if (!isPlainRecord(output)) {
+    return "";
+  }
+  return textValue(output.message);
+}
+
 export function findAgentChatInteractionResponse(
   messages: ChatMessage[],
   interactionID: string,

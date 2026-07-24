@@ -72,11 +72,34 @@ export function restoredStoryboardDerivedPrompt(
     .filter((candidate) => referenceNodeIds.has(candidate.id))
     .map(storyboardSourceReferenceTarget)
     .filter((target): target is CanvasReferenceTarget => Boolean(target));
+  const externalReferenceAssetIDs = new Set(
+    node.storyboardItem?.externalReferenceAssetIds || [],
+  );
+  const externalReferenceTargets = canvasReferenceTargetsFromContent(
+    node.composerDraft?.promptContent,
+  ).filter((target) => externalReferenceAssetIDs.has(target.refId));
+  const sourceStoryboardNode = canvasNodes.find(
+    (candidate) => candidate.id === node.storyboardItem?.sourceNodeId,
+  );
+  const sourceStoryboard = sourceStoryboardNode
+    ? parseStoryboardOutput([
+        sourceStoryboardNode.asset?.version?.content,
+        sourceStoryboardNode.resultOutput,
+      ])
+    : null;
+  const sourceReferenceTargets = (sourceStoryboard?.references || [])
+    .filter((reference) => externalReferenceAssetIDs.has(reference.asset_id))
+    .map(storyboardExternalReferenceTarget);
+  const generatedTargets = [
+    ...referenceTargets,
+    ...externalReferenceTargets,
+    ...sourceReferenceTargets,
+  ];
   return {
     ...(node.composerDraft || {}),
     prompt: generatedPrompt,
-    promptContent: referenceTargets.length
-      ? canvasReferenceContentFromTargets(generatedPrompt, referenceTargets)
+    promptContent: generatedTargets.length
+      ? canvasReferenceContentFromTargets(generatedPrompt, generatedTargets)
       : undefined,
     paramValues: replaceGeneratedPromptParamValues(
       node.composerDraft?.paramValues,
@@ -401,26 +424,41 @@ function withStoryboardItemContext(
   const dependencyNodes = resolveNodes(item.dependencyItems);
   const referenceNodes = resolveNodes(item.referenceItems);
   const signatureNodes = uniqueNodes([...dependencyNodes, ...referenceNodes]);
+  const externalReferences = item.externalReferences || [];
   const withSources = {
     ...item,
     dependencyNodeIds: dependencyNodes.map((node) => node.id),
     referenceNodeIds: referenceNodes.map((node) => node.id),
-    sourceSignatureParts: signatureNodes.map(storyboardSourceNodeSignature),
+    sourceSignatureParts: [
+      ...(item.sourceSignatureParts || []),
+      ...signatureNodes.map(storyboardSourceNodeSignature),
+      ...externalReferences.map(storyboardExternalReferenceSignature),
+    ],
   };
-  if (!["shot_image", "shot", "lip_sync"].includes(item.type)) {
+  if (
+    !["character", "scene", "prop", "shot_image", "shot", "lip_sync"].includes(
+      item.type,
+    )
+  ) {
     return withSources;
   }
   const promptWithMentions = storyboardPromptWithSourceMentions(
     item.prompt,
     referenceNodes,
+    externalReferences,
   );
   const withMentions =
     promptWithMentions === item.prompt
       ? withSources
       : { ...withSources, prompt: promptWithMentions };
-  const referenceTargets = referenceNodes
-    .map(storyboardSourceReferenceTarget)
-    .filter((target): target is CanvasReferenceTarget => Boolean(target));
+  const referenceTargets = externalReferences.map(
+    storyboardExternalReferenceTarget,
+  );
+  referenceTargets.push(
+    ...referenceNodes
+      .map(storyboardSourceReferenceTarget)
+      .filter((target): target is CanvasReferenceTarget => Boolean(target)),
+  );
   if (!referenceTargets.length) {
     return withMentions;
   }
@@ -437,9 +475,19 @@ function withStoryboardItemContext(
 function storyboardPromptWithSourceMentions(
   prompt: string,
   sourceNodes: SpaceCanvasNode[],
+  externalReferences: StoryboardDerivedItem["externalReferences"] = [],
 ) {
   const mentions: string[] = [];
   const seen = new Set<string>();
+  for (const reference of externalReferences) {
+    const label = normalizeCanvasReferenceLabel(reference.label);
+    const mention = label ? `@${label}` : "";
+    if (!mention || seen.has(mention) || prompt.includes(mention)) {
+      continue;
+    }
+    seen.add(mention);
+    mentions.push(mention);
+  }
   for (const node of sourceNodes) {
     const label = normalizeCanvasReferenceLabel(node.title);
     const mention = label ? `@${label}` : "";
@@ -471,6 +519,30 @@ function storyboardSourceReferenceTarget(
     versionId,
     label: node.title,
   };
+}
+
+function storyboardExternalReferenceTarget(
+  reference: NonNullable<StoryboardDerivedItem["externalReferences"]>[number],
+): CanvasReferenceTarget {
+  return {
+    refType: "asset",
+    refId: reference.asset_id,
+    versionId: reference.version_id,
+    label: reference.label,
+  };
+}
+
+function storyboardExternalReferenceSignature(
+  reference: NonNullable<StoryboardDerivedItem["externalReferences"]>[number],
+) {
+  return [
+    "asset",
+    reference.asset_id,
+    reference.version_id || 0,
+    reference.kind,
+    reference.purpose,
+    reference.instruction,
+  ].join(":");
 }
 
 function ensureDerivedGroup(input: {
@@ -814,6 +886,9 @@ function storyboardItemMetadata(
     generatedPrompt: item.prompt,
     dependencyNodeIds: item.dependencyNodeIds,
     referenceNodeIds: item.referenceNodeIds,
+    externalReferenceAssetIds: (item.externalReferences || []).map(
+      (reference) => reference.asset_id,
+    ),
     shotId: item.shotId,
     speechId: item.speechId,
     speechIds: item.speechIds,
@@ -860,11 +935,15 @@ function sameItemMetadata(
     left.itemType === right.itemType &&
     left.itemId === right.itemId &&
     left.generatedPrompt === right.generatedPrompt &&
-    sameStringList(left.dependencyNodeIds, right.dependencyNodeIds) &&
-    sameStringList(left.referenceNodeIds, right.referenceNodeIds) &&
+    sameValueList(left.dependencyNodeIds, right.dependencyNodeIds) &&
+    sameValueList(left.referenceNodeIds, right.referenceNodeIds) &&
+    sameValueList(
+      left.externalReferenceAssetIds,
+      right.externalReferenceAssetIds,
+    ) &&
     left.shotId === right.shotId &&
     left.speechId === right.speechId &&
-    sameStringList(left.speechIds, right.speechIds) &&
+    sameValueList(left.speechIds, right.speechIds) &&
     left.characterId === right.characterId &&
     left.speechKind === right.speechKind &&
     left.speakerMode === right.speakerMode &&
@@ -1018,7 +1097,8 @@ function syncStoryboardCompositionNode(input: {
     nodes: input.nodes,
     current: existing?.composerDraft?.videoComposition,
   });
-  const sourceSignature = stableToken(JSON.stringify(videoComposition));
+  const sourceSignature =
+    storyboardCompositionSourceSignature(videoComposition);
   const metadata: CanvasStoryboardItemConfig = {
     sourceNodeId: input.storyboardNode.id,
     itemType: "video_compose",
@@ -1123,6 +1203,17 @@ function syncStoryboardCompositionNode(input: {
     changed: true,
     nextNodeNo: input.nextNodeNo + 1,
   };
+}
+
+function storyboardCompositionSourceSignature(
+  composition: ReturnType<typeof storyboardVideoComposition>,
+) {
+  const clips = composition.clips.map((clip) => {
+    const current = { ...clip };
+    delete current.storyboardTransitionToNext;
+    return current;
+  });
+  return stableToken(JSON.stringify({ ...composition, clips }));
 }
 
 function storyboardCompositionPosition(
@@ -1265,7 +1356,7 @@ function derivedPowerLabel(spec: StoryboardDerivedGroupSpec) {
   return spec.powerKind === "image" ? "图片" : "视频";
 }
 
-function sameStringList(left?: string[], right?: string[]) {
+function sameValueList<T>(left?: T[], right?: T[]) {
   return JSON.stringify(left || []) === JSON.stringify(right || []);
 }
 

@@ -21,6 +21,7 @@ func runToMap(run teammodel.Run) map[string]any {
 		"started_at":       run.StartedAt,
 		"finished_at":      run.FinishedAt,
 		"created_at":       run.CreatedAt,
+		"updated_at":       run.UpdatedAt,
 	}
 }
 
@@ -42,6 +43,7 @@ func flowRunsToMaps(rows []teammodel.FlowRun, flowNames map[uint64]string) []map
 			"started_at":  row.StartedAt,
 			"finished_at": row.FinishedAt,
 			"created_at":  row.CreatedAt,
+			"updated_at":  row.UpdatedAt,
 		})
 	}
 	return result
@@ -74,6 +76,7 @@ func nodeRunsToMaps(rows []teammodel.NodeRun, flowNames map[uint64]string, nodeN
 			"started_at":       row.StartedAt,
 			"finished_at":      row.FinishedAt,
 			"created_at":       row.CreatedAt,
+			"updated_at":       row.UpdatedAt,
 		})
 	}
 	return result

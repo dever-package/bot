@@ -1,6 +1,7 @@
 .bot-work-login-page {
   --login-bg: var(--body-work-canvas);
   --login-surface: var(--body-work-surface);
+  --login-surface-raised: var(--body-work-surface-raised);
   --login-line: var(--body-work-line);
   --login-text: var(--body-work-text);
   --login-muted: var(--body-work-muted);
@@ -9,6 +10,12 @@
   --login-control-radius: 24px;
   --login-control-font-size: 13px;
   --login-control-line-height: 19.5px;
+  --login-panel-border: rgba(228, 232, 230, 0.6);
+  --login-panel-surface: var(--login-surface);
+  --login-panel-shadow: 0 2px 4px rgba(0, 0, 0, 0.05),
+    0 2px 4px -1px rgba(0, 0, 0, 0.05);
+  --login-panel-focus-shadow: var(--body-work-shadow);
+  --login-panel-backdrop: none;
   position: fixed;
   inset: 0;
   z-index: 1;
@@ -19,7 +26,7 @@
   overflow-x: hidden;
   overflow-y: auto;
   background-color: var(--login-bg);
-  background-image: url("./assets/login-background.png");
+  background-image: none;
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;
@@ -27,6 +34,50 @@
   font-family: Montserrat, -apple-system, BlinkMacSystemFont, "Segoe UI",
     "Helvetica Neue", Arial, "Noto Sans SC", "PingFang SC", "Microsoft YaHei",
     sans-serif;
+}
+
+.bot-work-login-page[data-page-background="custom"] {
+  --login-panel-border: color-mix(
+    in srgb,
+    var(--login-line) 62%,
+    var(--login-surface-raised) 38%
+  );
+  --login-panel-surface: color-mix(
+    in srgb,
+    var(--login-surface) 94%,
+    transparent
+  );
+  --login-panel-shadow: 0 2px 8px rgba(12, 20, 17, 0.1),
+    0 24px 64px rgba(12, 20, 17, 0.18),
+    inset 0 1px 0
+      color-mix(in srgb, var(--login-surface-raised) 72%, transparent);
+  --login-panel-focus-shadow: var(--login-panel-shadow);
+  --login-panel-backdrop: blur(16px) saturate(0.94);
+}
+
+.bot-work-login-page::before {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--login-bg) 18%, transparent);
+  content: "";
+}
+
+.bot-work-login-page-loading {
+  background: #f4f6f5;
+}
+
+.bot-work-login-page-loading::before {
+  content: none;
+}
+
+.dark .bot-work-login-page-loading {
+  background: #111513;
+}
+
+.dark .bot-work-login-page::before {
+  background: color-mix(in srgb, var(--login-bg) 34%, transparent);
 }
 
 .bot-work-login-page *,
@@ -42,17 +93,22 @@
   left: 0;
   z-index: 20;
   height: 48px;
-  border-bottom: 1px solid var(--login-line);
   background: color-mix(in srgb, var(--login-surface) 95%, transparent);
   backdrop-filter: blur(24px);
+}
+
+.bot-work-login-page[data-page-background="custom"] .bot-work-login-header {
+  background: transparent;
+  backdrop-filter: blur(10px) saturate(0.92);
 }
 
 .bot-work-login-header-inner {
   display: grid;
   width: min(1072px, calc(100% - 30px));
   height: 100%;
-  grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
+  column-gap: 32px;
   margin: 0 auto;
 }
 
@@ -86,7 +142,7 @@
 .bot-work-login-links {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 30px;
 }
 
@@ -111,34 +167,20 @@
   gap: 8px;
 }
 
-.bot-work-login-language,
 .bot-work-login-menu-button {
-  display: inline-flex;
+  display: none;
+  width: 30px;
   height: 28px;
+  cursor: pointer;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--login-line);
   border-radius: 24px;
-  background: var(--login-surface);
+  background: var(--login-surface-raised);
   color: var(--login-text);
+  padding: 0;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05),
     0 1px 2px -1px rgba(0, 0, 0, 0.05);
-}
-
-.bot-work-login-language {
-  min-width: 70px;
-  gap: 6px;
-  padding: 0 14px 0 10px;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 17px;
-}
-
-.bot-work-login-menu-button {
-  display: none;
-  width: 30px;
-  cursor: pointer;
-  padding: 0;
 }
 
 .bot-work-login-menu-button:hover {
@@ -154,7 +196,7 @@
   flex-direction: column;
   border: 1px solid var(--login-line);
   border-radius: 16px;
-  background: var(--login-surface);
+  background: var(--login-surface-raised);
   padding: 6px;
   box-shadow: 0 16px 36px rgba(24, 32, 28, 0.12);
 }
@@ -172,6 +214,8 @@
 }
 
 .bot-work-login-stage {
+  position: relative;
+  z-index: 1;
   display: flex;
   width: 100%;
   min-height: 100svh;
@@ -207,7 +251,7 @@
 .bot-work-login-copy h1 {
   width: 100%;
   margin: 0;
-  color: var(--login-text);
+  color: var(--login-copy-color, var(--login-text));
   font-size: 48px;
   font-weight: 400;
   line-height: 60px;
@@ -218,21 +262,32 @@
 .bot-work-login-copy p {
   width: 100%;
   margin: 24px 0 0;
-  color: var(--login-text);
+  color: var(--login-copy-color, var(--login-text));
   font-size: 14px;
   font-weight: 400;
   line-height: 22.75px;
   text-align: center;
 }
 
+.bot-work-login-page[data-login-background-image="true"]
+  .bot-work-login-copy h1 {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.58),
+    0 2px 18px rgba(0, 0, 0, 0.42);
+}
+
+.bot-work-login-page[data-login-background-image="true"]
+  .bot-work-login-copy p {
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.58);
+}
+
 .bot-work-login-form-panel {
   width: 100%;
-  border: 1px solid rgba(228, 232, 230, 0.6);
+  border: 1px solid var(--login-panel-border);
   border-radius: 24px;
-  background: var(--login-surface);
+  background: var(--login-panel-surface);
   padding: 44px 28px 28px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05),
-    0 2px 4px -1px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--login-panel-shadow);
+  backdrop-filter: var(--login-panel-backdrop);
 }
 
 .bot-work-login-third-party {
@@ -250,7 +305,7 @@
   gap: 8px;
   border: 1px solid var(--login-line);
   border-radius: var(--login-control-radius);
-  background: var(--login-surface);
+  background: var(--login-surface-raised);
   color: var(--login-text);
   font: inherit;
   font-size: var(--login-control-font-size);
@@ -334,7 +389,7 @@
   height: var(--login-control-height) !important;
   border: 1px solid var(--login-line) !important;
   border-radius: var(--login-control-radius) !important;
-  background: var(--login-surface) !important;
+  background: var(--login-surface-raised) !important;
   color: var(--login-text) !important;
   font-family: inherit !important;
   font-size: var(--login-control-font-size) !important;
@@ -484,10 +539,95 @@
   text-align: center;
 }
 
-.bot-work-login-legal span {
+.bot-work-login-legal a {
   margin: 0 3px;
+  color: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+.bot-work-login-legal a:hover,
+.bot-work-login-legal a:focus-visible {
+  color: var(--body-work-primary-strong);
+}
+
+.bot-work-login-filing {
+  position: fixed;
+  right: 24px;
+  bottom: 10px;
+  left: 24px;
+  z-index: 10;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--login-copy-color, var(--login-text));
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.bot-work-login-filing-item {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.bot-work-login-filing-item + .bot-work-login-filing-item::before {
+  margin: 0 8px;
+  content: "·";
+  opacity: 0.58;
+}
+
+.bot-work-login-filing .bot-work-login-filing-rich {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-work-login-filing-rich
+  :is(p, div, h1, h2, h3, h4, h5, h6, blockquote, ul, ol, li) {
+  display: inline;
+  margin: 0;
+  padding: 0;
+}
+
+.bot-work-login-filing-rich
+  :is(br, hr, img, video, audio, table, figure) {
+  display: none;
+}
+
+.bot-work-login-filing-rich * {
+  color: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+}
+
+.bot-work-login-filing a {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  text-decoration: none;
+  text-overflow: ellipsis;
+}
+
+.bot-work-login-filing a:hover {
+  color: var(--body-work-primary-bright) !important;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.bot-work-login-page[data-login-background-image="true"]
+  .bot-work-login-filing {
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.62);
 }
 
 .bot-work-login-artwork {
@@ -499,6 +639,10 @@
   border-radius: 24px;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
     0 2px 4px -2px rgba(0, 0, 0, 0.1);
+}
+
+.bot-work-login-artwork:empty {
+  display: none;
 }
 
 .bot-work-login-artwork img {
@@ -539,7 +683,7 @@
 
   .bot-work-login-page[data-login-template="focus"]
     .bot-work-login-form-panel {
-    box-shadow: var(--body-work-shadow);
+    box-shadow: var(--login-panel-focus-shadow);
   }
 
   .bot-work-login-page[data-login-template="showcase"]
@@ -612,6 +756,7 @@
     background: transparent;
     padding: 16px 0 0;
     box-shadow: none;
+    backdrop-filter: none;
   }
 }
 
@@ -628,6 +773,7 @@
 @media (max-width: 1023px) {
   .bot-work-login-header-inner {
     grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 12px;
   }
 
   .bot-work-login-links {
@@ -654,7 +800,6 @@
     --login-control-radius: 22.5px;
     --login-control-font-size: 12.1875px;
     --login-control-line-height: 18.281px;
-    background-image: url("./assets/login-background-mobile.png");
   }
 
   .bot-work-login-brand-logo {
@@ -667,19 +812,6 @@
     max-width: 170px;
     font-size: 18px;
     line-height: 23px;
-  }
-
-  .bot-work-login-language {
-    min-width: 66px;
-    height: 26.25px;
-    padding: 0 13px 0 9px;
-    font-size: 11.25px;
-    line-height: 16px;
-  }
-
-  .bot-work-login-language svg {
-    width: 14px;
-    height: 14px;
   }
 
   .bot-work-login-menu-button {
@@ -759,6 +891,66 @@
     margin-top: 32.8px;
     font-size: 9.375px;
     line-height: 15.234px;
+  }
+}
+
+@media (min-width: 768px) {
+  .bot-work-login-page {
+    overflow-y: hidden;
+  }
+}
+
+@media (min-width: 768px) and (max-height: 720px) {
+  .bot-work-login-stage {
+    padding-top: 48px;
+  }
+
+  .bot-work-login-layout {
+    min-height: calc(100svh - 48px);
+    padding-bottom: 28px;
+  }
+
+  .bot-work-login-auth {
+    gap: 14px;
+  }
+
+  .bot-work-login-copy h1 {
+    font-size: 38px;
+    line-height: 46px;
+  }
+
+  .bot-work-login-copy p {
+    margin-top: 10px;
+  }
+
+  .bot-work-login-form-panel {
+    padding: 28px 28px 22px;
+  }
+
+  .bot-work-login-mode-switch {
+    margin-top: 14px;
+  }
+
+  .bot-work-login-legal {
+    margin-top: 20px;
+  }
+}
+
+@media (max-width: 767px) {
+  .bot-work-login-filing {
+    position: relative;
+    right: auto;
+    bottom: auto;
+    left: auto;
+    width: calc(100% - 36px);
+    flex-wrap: wrap;
+    overflow: visible;
+    margin: -2px auto 14px;
+    white-space: normal;
+  }
+
+  .bot-work-login-filing .bot-work-login-filing-rich {
+    white-space: normal;
   }
 }
 

@@ -1,6 +1,7 @@
 import type { StoryboardGroupDirection } from "./space-storyboard-derived-layout";
 import {
   STORYBOARD_MATERIAL_LABELS,
+  STORYBOARD_TRANSITION_LABELS,
   isStoryboardVisibleDialogue,
   storyboardHasVisibleDialogue,
   storyboardPromptWithStyle,
@@ -14,7 +15,11 @@ import {
   type StoryboardShot,
   type StoryboardSpeech,
 } from "./space-storyboard";
-import type { CanvasReferenceContent, CanvasStoryboardItemType } from "./types";
+import type {
+  CanvasReferenceContent,
+  CanvasStoryboardItemType,
+  CanvasStoryboardReference,
+} from "./types";
 
 export type StoryboardPowerKind = "text" | "image" | "video" | "audio";
 
@@ -33,6 +38,7 @@ export type StoryboardDerivedItem = {
   referenceItems?: StoryboardDerivedSourceItem[];
   dependencyNodeIds?: string[];
   referenceNodeIds?: string[];
+  externalReferences?: CanvasStoryboardReference[];
   sourceSignatureParts?: string[];
   localOutput?: unknown;
   paramValues?: Record<string, unknown>;
@@ -116,9 +122,11 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
               storyboard,
               shot,
               sources.previousShot,
+              sources.externalReferences,
             ),
             dependencyItems: sources.dependencyItems,
             referenceItems: sources.referenceItems,
+            externalReferences: sources.externalReferences,
             paramValues: storyboardShotImageParamValues(storyboard),
             shotId: shot.id,
           },
@@ -136,17 +144,24 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
     layoutIndex: 1,
     enabled: () => true,
     items: (storyboard) =>
-      storyboard.shots.map((shot, index) => ({
-        type: "shot" as const,
-        id: shot.id,
-        title: `镜头 ${shot.order || index + 1}`,
-        prompt: storyboardVideoPrompt(storyboard, shot),
-        ...storyboardShotVideoSources(storyboard, shot, index),
-        paramValues: storyboardVideoParamValues(storyboard, shot),
-        shotId: shot.id,
-        shotDuration: shot.duration,
-        continuityAnchor: shot.continuity_anchor,
-      })),
+      storyboard.shots.map((shot, index) => {
+        const sources = storyboardShotVideoSources(storyboard, shot, index);
+        return {
+          type: "shot" as const,
+          id: shot.id,
+          title: `镜头 ${shot.order || index + 1}`,
+          prompt: storyboardVideoPrompt(
+            storyboard,
+            shot,
+            sources.externalReferences,
+          ),
+          ...sources,
+          paramValues: storyboardVideoParamValues(storyboard, shot),
+          shotId: shot.id,
+          shotDuration: shot.duration,
+          continuityAnchor: shot.continuity_anchor,
+        };
+      }),
   },
   {
     key: "speech",
@@ -208,12 +223,23 @@ function materialGroupSpec(
     items: (storyboard) =>
       storyboard.materials
         .filter((material) => material.type === itemType)
-        .map((material) => ({
-          type: itemType,
-          id: material.id,
-          title: material.name,
-          prompt: storyboardMaterialPrompt(storyboard, material),
-        })),
+        .map((material) => {
+          const externalReferences = storyboardMaterialReferences(
+            storyboard,
+            material,
+          );
+          return {
+            type: itemType,
+            id: material.id,
+            title: material.name,
+            prompt: storyboardMaterialPrompt(
+              storyboard,
+              material,
+              externalReferences,
+            ),
+            externalReferences,
+          };
+        }),
   };
 }
 
@@ -221,25 +247,44 @@ function storyboardSpeechItems(storyboard: StoryboardDocument) {
   return storyboard.shots.flatMap((shot, shotIndex) =>
     shot.speech
       .filter((speech) => speech.text.trim())
-      .map((speech, speechIndex) => ({
-        type: "speech" as const,
-        id: speech.id,
-        title: storyboardSpeechTitle(
-          storyboard,
-          speech,
-          shot.order || shotIndex + 1,
-          speechIndex,
-        ),
-        prompt: speech.text.trim(),
-        shotId: shot.id,
-        speechId: speech.id,
-        characterId: speech.character_id,
-        speechKind: speech.kind,
-        speakerMode: speech.speaker_mode,
-        startTime: speech.start_time,
-        shotDuration: shot.duration,
-      })),
+      .map((speech, speechIndex) => {
+        const voice = storyboardSpeechVoice(storyboard, speech);
+        return {
+          type: "speech" as const,
+          id: speech.id,
+          title: storyboardSpeechTitle(
+            storyboard,
+            speech,
+            shot.order || shotIndex + 1,
+            speechIndex,
+          ),
+          prompt: speech.text.trim(),
+          ...(voice ? { paramValues: { voice } } : {}),
+          shotId: shot.id,
+          speechId: speech.id,
+          characterId: speech.character_id,
+          speechKind: speech.kind,
+          speakerMode: speech.speaker_mode,
+          startTime: speech.start_time,
+          shotDuration: shot.duration,
+        };
+      }),
   );
+}
+
+function storyboardSpeechVoice(
+  storyboard: StoryboardDocument,
+  speech: StoryboardSpeech,
+) {
+  if (speech.kind === "narration") {
+    return storyboard.narrator_voice.trim();
+  }
+  return (
+    storyboard.materials.find(
+      (material) =>
+        material.type === "character" && material.id === speech.character_id,
+    )?.voice || ""
+  ).trim();
 }
 
 function storyboardSubtitleItems(storyboard: StoryboardDocument) {
@@ -323,12 +368,14 @@ function hasStoryboardSpeech(shot: StoryboardShot) {
 function storyboardMaterialPrompt(
   storyboard: StoryboardDocument,
   material: StoryboardMaterial,
+  references: CanvasStoryboardReference[],
 ) {
+  const referenceInstruction = storyboardReferenceInstructions(references);
   const prompt = material.prompt.trim();
   if (prompt) {
     return storyboardPromptWithStyle(
       storyboard,
-      `${prompt}。${MATERIAL_REFERENCE_RULES[material.type]}`,
+      `${referenceInstruction}${prompt}。${MATERIAL_REFERENCE_RULES[material.type]}`,
     );
   }
   const relatedDescriptions = storyboard.shots
@@ -340,7 +387,7 @@ function storyboardMaterialPrompt(
     : "保持整部作品的统一视觉风格";
   return storyboardPromptWithStyle(
     storyboard,
-    `${STORYBOARD_MATERIAL_LABELS[material.type]}“${material.name}”的素材生成图。${context}。${MATERIAL_REFERENCE_RULES[material.type]}`,
+    `${referenceInstruction}${STORYBOARD_MATERIAL_LABELS[material.type]}“${material.name}”的素材生成图。${context}。${MATERIAL_REFERENCE_RULES[material.type]}`,
   );
 }
 
@@ -360,15 +407,16 @@ function storyboardShotImageSources(
   index: number,
 ) {
   const materialItems = storyboardShotMaterialSourceItems(storyboard, shot);
-  const previousShot = storyboardPreviousReferenceShot(storyboard, index);
-  if (
-    !previousShot ||
-    !storyboardShotsShareMaterial(storyboard, previousShot, shot)
-  ) {
+  const externalReferences = storyboardShotImageReferences(storyboard, shot);
+  const previousShot = shot.match_previous
+    ? storyboardPreviousReferenceShot(storyboard, index)
+    : undefined;
+  if (!previousShot) {
     return {
       previousShot: undefined,
       dependencyItems: [],
       referenceItems: materialItems,
+      externalReferences,
     };
   }
   const previousItem = {
@@ -379,6 +427,7 @@ function storyboardShotImageSources(
     previousShot,
     dependencyItems: [previousItem],
     referenceItems: [previousItem, ...materialItems],
+    externalReferences,
   };
 }
 
@@ -395,36 +444,24 @@ function storyboardPreviousReferenceShot(
   return undefined;
 }
 
-function storyboardShotsShareMaterial(
-  storyboard: StoryboardDocument,
-  previousShot: StoryboardShot,
-  shot: StoryboardShot,
-) {
-  const previousMaterialIDs = new Set(
-    storyboardShotMaterials(storyboard, previousShot).map(
-      (material) => material.id,
-    ),
-  );
-  return storyboardShotMaterials(storyboard, shot).some((material) =>
-    previousMaterialIDs.has(material.id),
-  );
-}
-
 function storyboardShotVideoSources(
   storyboard: StoryboardDocument,
   shot: StoryboardShot,
   index: number,
 ) {
+  const externalReferences = storyboardShotVideoReferences(storyboard, shot);
   const previousShot = index > 0 ? storyboard.shots[index - 1] : undefined;
   if (shot.continue_previous && previousShot) {
     return {
       dependencyItems: [{ type: "shot" as const, id: previousShot.id }],
       referenceItems: [],
+      externalReferences,
     };
   }
   return {
     dependencyItems: [],
     referenceItems: [{ type: "shot_image" as const, id: shot.id }],
+    externalReferences,
   };
 }
 
@@ -432,14 +469,20 @@ function storyboardShotImagePrompt(
   storyboard: StoryboardDocument,
   shot: StoryboardShot,
   previousShot?: StoryboardShot,
+  externalReferences: CanvasStoryboardReference[] = [],
 ) {
+  const shotMaterials = storyboardShotMaterials(storyboard, shot);
   const referenceOrder = [
+    ...externalReferences.map(
+      (reference, index) =>
+        `参考图${index + 1}是${storyboardReferenceDescription(reference)}`,
+    ),
     previousShot
-      ? `参考图1是前序镜头 ${previousShot.order} 的参考画面`
+      ? `参考图${externalReferences.length + 1}是前序镜头 ${previousShot.order} 的参考画面`
       : "",
-    ...storyboardShotMaterials(storyboard, shot).map(
+    ...shotMaterials.map(
       (material, index) =>
-        `参考图${index + (previousShot ? 2 : 1)}是${STORYBOARD_MATERIAL_LABELS[material.type]}“${material.name}”`,
+        `参考图${externalReferences.length + index + (previousShot ? 2 : 1)}是${STORYBOARD_MATERIAL_LABELS[material.type]}“${material.name}”`,
     ),
   ]
     .filter(Boolean)
@@ -451,8 +494,9 @@ function storyboardShotImagePrompt(
       ? "必须严格按照上述图片顺序识别素材，不得交换、合并或忽略参考对象"
       : "",
     previousShot
-      ? "前序镜头参考画面只用于延续共同角色、场景和道具的身份、状态、光线与空间关系；当前镜头素材清单中不存在的对象不得继续保留"
+      ? "当前镜头明确要求匹配上一镜画面；前序镜头只用于保持共同主体状态、光线与空间关系，当前素材清单中不存在的对象不得继续保留"
       : "",
+    storyboardNarrativeExecutionContext(storyboard, shot),
     "严格保持参考角色的五官、发型、服装、配色和体型，保持场景结构、道具造型以及整部作品画风一致",
     "不同参考对象必须保持各自独立的轮廓、材质和尺度，不得把角色与道具融合、机械化、穿戴化或互换材质",
     "角色必须保留参考图中的发饰数量与位置以及完整服装，道具必须保持参考图中的原始尺寸比例",
@@ -470,11 +514,14 @@ function storyboardShotImagePrompt(
 function storyboardVideoPrompt(
   storyboard: StoryboardDocument,
   shot: StoryboardShot,
+  references: CanvasStoryboardReference[] = [],
 ) {
   const basePrompt =
     shot.video_prompt.trim() || storyboardShotFallbackPrompt(shot);
   const parts = [
+    storyboardNarrativeExecutionContext(storyboard, shot),
     basePrompt,
+    storyboardReferenceInstructions(references),
     shot.continue_previous
       ? `使用上一镜头真实尾帧继续生成。连续性锚点：${shot.continuity_anchor}。保持人物、服装、道具、场景光线和动作方向一致，但不要重复上一镜头内容`
       : "这是新的镜头段落，以当前镜头参考图为画面锚点建立画面",
@@ -484,6 +531,142 @@ function storyboardVideoPrompt(
     `时长 ${shot.duration} 秒`,
   ].filter(Boolean);
   return storyboardPromptWithStyle(storyboard, joinStoryboardPromptParts(parts));
+}
+
+function storyboardNarrativeExecutionContext(
+  storyboard: StoryboardDocument,
+  shot: StoryboardShot,
+) {
+  const index = storyboard.shots.findIndex((item) => item.id === shot.id);
+  const stage =
+    index <= 0
+      ? storyboard.storyline.setup
+      : index >= storyboard.shots.length - 1
+        ? storyboard.storyline.payoff
+        : storyboard.storyline.development;
+  const nextTransition = storyboard.shots[index + 1]?.transition.trim();
+  return [
+    `故事目标：${storyboard.summary.trim()}`,
+    `当前叙事阶段：${stage.trim()}`,
+    `本镜变化：${shot.beat.trim()}`,
+    shot.transition.trim() ? `从上一镜进入本镜：${shot.transition.trim()}` : "",
+    storyboardShotIncomingTransition(shot, index),
+    nextTransition ? `本镜结束需为下一镜建立：${nextTransition}` : "",
+  ]
+    .filter(Boolean)
+    .join("；");
+}
+
+function storyboardShotIncomingTransition(
+  shot: StoryboardShot,
+  index: number,
+) {
+  if (index <= 0) {
+    return "";
+  }
+  const label = STORYBOARD_TRANSITION_LABELS[shot.transition_type];
+  if (shot.transition_type === "none") {
+    return `进入本镜的剪辑方式：${label}`;
+  }
+  return `进入本镜的剪辑方式：${label}，时长 ${shot.transition_duration_ms} 毫秒；这是后期剪辑信息，画面本身不要生成转场叠影`;
+}
+
+function storyboardMaterialReferences(
+  storyboard: StoryboardDocument,
+  material: StoryboardMaterial,
+) {
+  return uniqueStoryboardReferences([
+    ...storyboard.references.filter(
+      (reference) =>
+        reference.kind === "image" &&
+        material.reference_keys.includes(reference.key),
+    ),
+    ...storyboard.references.filter(
+      (reference) =>
+        reference.kind === "image" && reference.purpose === "visual_style",
+    ),
+  ]);
+}
+
+function storyboardShotImageReferences(
+  storyboard: StoryboardDocument,
+  shot: StoryboardShot,
+) {
+  return uniqueStoryboardReferences([
+    ...storyboard.references.filter(
+      (reference) =>
+        reference.kind === "image" && shot.reference_keys.includes(reference.key),
+    ),
+    ...storyboard.references.filter(
+      (reference) =>
+        reference.kind === "image" && reference.purpose === "visual_style",
+    ),
+  ]);
+}
+
+function storyboardShotVideoReferences(
+  storyboard: StoryboardDocument,
+  shot: StoryboardShot,
+) {
+  return uniqueStoryboardReferences([
+    ...storyboard.references.filter(
+      (reference) =>
+        reference.kind === "video" && shot.reference_keys.includes(reference.key),
+    ),
+    ...storyboard.references.filter(
+      (reference) =>
+        reference.kind === "video" &&
+        (reference.purpose === "motion_style" ||
+          reference.purpose === "visual_style"),
+    ),
+  ]);
+}
+
+function storyboardReferenceInstructions(
+  references: CanvasStoryboardReference[],
+) {
+  const descriptions = references.map(storyboardReferenceDescription);
+  return descriptions.length > 0
+    ? `参考素材：${descriptions.join("；")}。`
+    : "";
+}
+
+const STORYBOARD_REFERENCE_USE_RULES: Record<
+  CanvasStoryboardReference["purpose"],
+  string
+> = {
+  visual_style: "只参考画风、色彩、光线和材质，不复制其中的人物或剧情",
+  motion_style: "只参考运镜、动作和剪辑节奏，不沿用原视频主体、剧情或声音",
+  character: "作为指定角色的外观与身份锚点",
+  scene: "作为指定场景的空间、陈设与光线锚点",
+  prop: "作为指定道具的造型、材质与比例锚点",
+  shot: "作为指定镜头的主体、构图与空间关系锚点",
+};
+
+function storyboardReferenceDescription(
+  reference: CanvasStoryboardReference,
+) {
+  return `${reference.label}（${[
+    STORYBOARD_REFERENCE_USE_RULES[reference.purpose],
+    reference.instruction,
+  ]
+    .filter(Boolean)
+    .join("；")}）`;
+}
+
+function uniqueStoryboardReferences(
+  references: CanvasStoryboardReference[],
+) {
+  const result: CanvasStoryboardReference[] = [];
+  const used = new Set<number>();
+  for (const reference of references) {
+    if (used.has(reference.asset_id)) {
+      continue;
+    }
+    used.add(reference.asset_id);
+    result.push(reference);
+  }
+  return result;
 }
 
 function joinStoryboardPromptParts(parts: string[]) {

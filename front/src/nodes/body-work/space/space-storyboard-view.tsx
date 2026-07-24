@@ -19,13 +19,17 @@ import {
   MessageSquareText,
   Pencil,
   Plus,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
 import {
+  MAX_STORYBOARD_SHOTS,
   MIN_STORYBOARD_SHOT_DURATION,
   STORYBOARD_ASPECT_RATIOS,
   STORYBOARD_MATERIAL_LABELS,
+  STORYBOARD_TRANSITION_LABELS,
+  STORYBOARD_TRANSITION_TYPES,
   STORYBOARD_VISUAL_MODES,
   STORYBOARD_VISUAL_MODE_LABELS,
   createStoryboardCaption,
@@ -53,6 +57,8 @@ import {
   type StoryboardShot,
   type StoryboardSpeech,
   type StoryboardSpeechKind,
+  type StoryboardStoryline,
+  type StoryboardTransitionType,
 } from "./space-storyboard";
 import {
   moveOrderedItemById,
@@ -74,13 +80,40 @@ import { StoryboardShotCard } from "./space-storyboard-shot-card";
 import { StoryboardMaterialDialog } from "./space-storyboard-material-dialog";
 import { storyboardValidationIssues } from "./space-storyboard-validation";
 import { StoryboardValidationPanel } from "./space-storyboard-validation-panel";
+import { StoryboardReferencePanel } from "./space-storyboard-reference-panel";
 import { SpaceTooltip } from "./space-tooltip";
 import "./space.css";
 
 export type StoryboardSaveStatus = "saved" | "typing" | "saving" | "error";
-export type StoryboardWorkflowAction = "" | "confirming" | "revising";
+export type StoryboardWorkflowAction =
+  | ""
+  | "confirming"
+  | "revising"
+  | "reviewing";
 
 const EMPTY_REFERENCE_ITEMS: ComposerAssetItem[] = [];
+
+const STORYBOARD_STORYLINE_FIELDS: Array<{
+  key: keyof StoryboardStoryline;
+  label: string;
+  placeholder: string;
+}> = [
+  {
+    key: "setup",
+    label: "起点",
+    placeholder: "人物、产品或事件开始时处于什么具体状态",
+  },
+  {
+    key: "development",
+    label: "推进",
+    placeholder: "什么触发了变化，核心动作如何推进",
+  },
+  {
+    key: "payoff",
+    label: "落点",
+    placeholder: "最终发生了什么可见结果",
+  },
+];
 
 export function StoryboardView({
   storyboard,
@@ -89,6 +122,7 @@ export function StoryboardView({
   onSave,
   onChange,
   onConfirm,
+  onReview,
   onCreateRevision,
   workflowAction = "",
   saveStatus: externalSaveStatus,
@@ -103,6 +137,7 @@ export function StoryboardView({
   onSave?: (storyboard: StoryboardDocument) => Promise<void>;
   onChange?: (storyboard: StoryboardDocument) => void;
   onConfirm?: (storyboard: StoryboardDocument) => void | Promise<void>;
+  onReview?: (storyboard: StoryboardDocument) => void | Promise<void>;
   onCreateRevision?: () => void | Promise<void>;
   workflowAction?: StoryboardWorkflowAction;
   saveStatus?: StoryboardSaveStatus;
@@ -468,10 +503,12 @@ export function StoryboardView({
   };
 
   const saveShot = (shot: StoryboardShot) => {
-    updateDraft((current) => ({
-      ...current,
-      shots: current.shots.map((item) => (item.id === shot.id ? shot : item)),
-    }));
+    updateDraft((current) =>
+      withStoryboardShotTargets(
+        current,
+        current.shots.map((item) => (item.id === shot.id ? shot : item)),
+      ),
+    );
     setEditingShotId("");
   };
 
@@ -510,27 +547,40 @@ export function StoryboardView({
   };
 
   const removeShot = (shotId: string) => {
-    updateDraft((current) => ({
-      ...current,
-      shots: current.shots.filter((shot) => shot.id !== shotId),
-    }));
+    updateDraft((current) => {
+      if (current.shots.length <= 1) {
+        return current;
+      }
+      return withStoryboardShotTargets(
+        current,
+        current.shots.filter((shot) => shot.id !== shotId),
+      );
+    });
   };
 
   const duplicateShot = (shot: StoryboardShot) => {
     updateDraft((current) => {
+      if (current.shots.length >= MAX_STORYBOARD_SHOTS) {
+        return current;
+      }
       const duplicate = duplicateStoryboardShot(current.shots, shot);
       const index = current.shots.findIndex((item) => item.id === shot.id);
       const shots = [...current.shots];
       shots.splice(index + 1, 0, duplicate);
-      return { ...current, shots };
+      return withStoryboardShotTargets(current, shots);
     });
   };
 
   const addShot = () => {
-    updateDraft((current) => ({
-      ...current,
-      shots: [...current.shots, createUniqueShot(current.shots)],
-    }));
+    updateDraft((current) => {
+      if (current.shots.length >= MAX_STORYBOARD_SHOTS) {
+        return current;
+      }
+      return withStoryboardShotTargets(current, [
+        ...current.shots,
+        createUniqueShot(current.shots),
+      ]);
+    });
   };
 
   return (
@@ -562,6 +612,48 @@ export function StoryboardView({
           <p>{storyboardContentSummary(draft)}</p>
         )}
       </section>
+
+      <section className="ws-storyboard-storyline">
+        <header>
+          <BookOpenText size={14} />
+          <strong>叙事主线</strong>
+        </header>
+        <div>
+          {STORYBOARD_STORYLINE_FIELDS.map((field) => (
+            <label key={field.key}>
+              <strong>{field.label}</strong>
+              {canEdit ? (
+                <textarea
+                  className="nodrag nopan nowheel"
+                  value={draft.storyline[field.key]}
+                  rows={2}
+                  placeholder={field.placeholder}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      storyline: {
+                        ...current.storyline,
+                        [field.key]: event.target.value,
+                      },
+                    }))
+                  }
+                />
+              ) : (
+                <p>{draft.storyline[field.key]}</p>
+              )}
+            </label>
+          ))}
+        </div>
+      </section>
+
+      <StoryboardReferencePanel
+        storyboard={draft}
+        referenceItems={referenceItems}
+        editable={canEdit}
+        disabled={disabled}
+        onChange={(next) => updateDraft(() => next)}
+      />
 
       <header className="ws-storyboard-toolbar">
         <div className="ws-storyboard-global-settings">
@@ -619,6 +711,79 @@ export function StoryboardView({
               <span>{draft.aspect_ratio}</span>
             )}
           </label>
+          <label>
+            <strong>目标时长</strong>
+            {canEdit ? (
+              <input
+                className="nodrag nopan"
+                type="number"
+                min={MIN_STORYBOARD_SHOT_DURATION}
+                step={1}
+                value={draft.target_duration}
+                disabled={disabled}
+                onChange={(event) =>
+                  updateDraft((current) => ({
+                    ...current,
+                    target_duration: positiveIntegerFromInput(
+                      event,
+                      current.target_duration,
+                      MIN_STORYBOARD_SHOT_DURATION,
+                    ),
+                  }))
+                }
+              />
+            ) : (
+              <span>{draft.target_duration} 秒</span>
+            )}
+          </label>
+          <label>
+            <strong>目标镜头</strong>
+            {canEdit ? (
+              <input
+                className="nodrag nopan"
+                type="number"
+                min={1}
+                max={MAX_STORYBOARD_SHOTS}
+                step={1}
+                value={draft.target_shot_count}
+                disabled={disabled}
+                onChange={(event) =>
+                  updateDraft((current) => ({
+                    ...current,
+                    target_shot_count: Math.min(
+                      MAX_STORYBOARD_SHOTS,
+                      positiveIntegerFromInput(
+                        event,
+                        current.target_shot_count,
+                        1,
+                      ),
+                    ),
+                  }))
+                }
+              />
+            ) : (
+              <span>{draft.target_shot_count} 个</span>
+            )}
+          </label>
+          <label>
+            <strong>旁白音色</strong>
+            {canEdit ? (
+              <input
+                className="nodrag nopan"
+                value={draft.narrator_voice}
+                placeholder="能力默认"
+                disabled={disabled}
+                onChange={(event) =>
+                  updateDraft((current) => ({
+                    ...current,
+                    narrator_voice: event.target.value,
+                  }))
+                }
+              />
+            ) : (
+              <span>{draft.narrator_voice || "能力默认"}</span>
+            )}
+          </label>
           <div className="ws-storyboard-style">
             <strong>统一视觉风格</strong>
             {canEdit ? (
@@ -662,7 +827,7 @@ export function StoryboardView({
             <button
               type="button"
               className="ws-storyboard-command nodrag nopan"
-              disabled={disabled}
+              disabled={disabled || draft.shots.length >= MAX_STORYBOARD_SHOTS}
               onClick={addShot}
             >
               <Plus size={13} />
@@ -683,24 +848,43 @@ export function StoryboardView({
               )}
               {workflowAction === "revising" ? "创建中" : "创建修订稿"}
             </button>
-          ) : !confirmed && canEdit && onConfirm ? (
-            <button
-              type="button"
-              className="ws-storyboard-command is-primary"
-              disabled={
-                disabled ||
-                Boolean(workflowAction) ||
-                hasBlockingIssues
-              }
-              onClick={() => void onConfirm(draft)}
-            >
-              {workflowAction === "confirming" ? (
-                <Loader2 size={13} className="ws-spin" />
-              ) : (
-                <Check size={13} />
-              )}
-              {workflowAction === "confirming" ? "确认中" : "确认脚本"}
-            </button>
+          ) : !confirmed && canEdit ? (
+            <>
+              {onReview ? (
+                <button
+                  type="button"
+                  className="ws-storyboard-command"
+                  disabled={disabled || Boolean(workflowAction)}
+                  onClick={() => void onReview(draft)}
+                >
+                  {workflowAction === "reviewing" ? (
+                    <Loader2 size={13} className="ws-spin" />
+                  ) : (
+                    <Sparkles size={13} />
+                  )}
+                  {workflowAction === "reviewing" ? "审查中" : "AI 审查并优化"}
+                </button>
+              ) : null}
+              {onConfirm ? (
+                <button
+                  type="button"
+                  className="ws-storyboard-command is-primary"
+                  disabled={
+                    disabled ||
+                    Boolean(workflowAction) ||
+                    hasBlockingIssues
+                  }
+                  onClick={() => void onConfirm(draft)}
+                >
+                  {workflowAction === "confirming" ? (
+                    <Loader2 size={13} className="ws-spin" />
+                  ) : (
+                    <Check size={13} />
+                  )}
+                  {workflowAction === "confirming" ? "确认中" : "确认脚本"}
+                </button>
+              ) : null}
+            </>
           ) : null}
         </div>
       </header>
@@ -924,8 +1108,10 @@ function StoryboardShotDialog({
   );
   const invalidContinuity =
     index > 0 &&
-    draft.continue_previous &&
-    !draft.continuity_anchor.trim();
+    ((draft.continue_previous && !draft.continuity_anchor.trim()) ||
+      (draft.continue_previous && draft.match_previous));
+  const invalidNarrative =
+    !draft.beat.trim() || (index > 0 && !draft.transition.trim());
   const invalidCaptions = draft.captions.some(
     (caption) =>
       !caption.text.trim() ||
@@ -1051,11 +1237,34 @@ function StoryboardShotDialog({
                 <label className="ws-storyboard-continuity-input">
                   <input
                     type="checkbox"
+                    checked={index > 0 && draft.match_previous}
+                    disabled={readonly || index === 0}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        match_previous: index > 0 && event.target.checked,
+                        continue_previous: event.target.checked
+                          ? false
+                          : current.continue_previous,
+                        continuity_anchor: event.target.checked
+                          ? ""
+                          : current.continuity_anchor,
+                      }))
+                    }
+                  />
+                  匹配上一镜画面
+                </label>
+                <label className="ws-storyboard-continuity-input">
+                  <input
+                    type="checkbox"
                     checked={index > 0 && draft.continue_previous}
                     disabled={readonly || index === 0}
                     onChange={(event) =>
                       setDraft((current) => ({
                         ...current,
+                        match_previous: event.target.checked
+                          ? false
+                          : current.match_previous,
                         continue_previous: index > 0 && event.target.checked,
                         continuity_anchor:
                           index > 0 && event.target.checked
@@ -1106,7 +1315,96 @@ function StoryboardShotDialog({
             ) : null}
             {invalidContinuity ? (
               <p className="ws-storyboard-form-error">
-                承接上一镜头时必须填写连续性锚点。
+                画面匹配和视频延续不能同时启用；延续上一镜头时必须填写连续性锚点。
+              </p>
+            ) : null}
+            <div
+              className={`ws-storyboard-shot-field-row ${index === 0 ? "is-single" : ""}`}
+            >
+              <StoryboardPlainField
+                label="本镜变化"
+                value={draft.beat}
+                placeholder="本镜头带来的一项新信息、动作结果或关系变化"
+                readonly={readonly}
+                onChange={(value) =>
+                  setDraft((current) => ({ ...current, beat: value }))
+                }
+              />
+              {index > 0 ? (
+                <StoryboardPlainField
+                  label="与上镜关系"
+                  value={draft.transition}
+                  placeholder="上一镜头的什么结果触发本镜，或通过什么明确方式转场"
+                  readonly={readonly}
+                  onChange={(value) =>
+                    setDraft((current) => ({
+                      ...current,
+                      transition: value,
+                    }))
+                  }
+                />
+              ) : null}
+            </div>
+            {index > 0 ? (
+              <div className="ws-storyboard-shot-field-row">
+                <label>
+                  <span>剪辑转场</span>
+                  <select
+                    value={draft.transition_type}
+                    disabled={readonly}
+                    onChange={(event) =>
+                      setDraft((current) => {
+                        const transitionType = event.target
+                          .value as StoryboardTransitionType;
+                        return {
+                          ...current,
+                          transition_type: transitionType,
+                          transition_duration_ms:
+                            transitionType === "none"
+                              ? 0
+                              : Math.max(500, current.transition_duration_ms),
+                        };
+                      })
+                    }
+                  >
+                    {STORYBOARD_TRANSITION_TYPES.map((transitionType) => (
+                      <option key={transitionType} value={transitionType}>
+                        {STORYBOARD_TRANSITION_LABELS[transitionType]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {draft.transition_type !== "none" ? (
+                  <label>
+                    <span>转场时长</span>
+                    <input
+                      type="number"
+                      min={100}
+                      max={5000}
+                      step={100}
+                      value={draft.transition_duration_ms}
+                      disabled={readonly}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          transition_duration_ms: Math.min(
+                            5000,
+                            positiveIntegerFromInput(
+                              event,
+                              current.transition_duration_ms,
+                              100,
+                            ),
+                          ),
+                        }))
+                      }
+                    />
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
+            {invalidNarrative ? (
+              <p className="ws-storyboard-form-error">
+                请填写本镜变化；除第一镜外，还需要说明与上一镜头的承接关系。
               </p>
             ) : null}
             <div className="ws-storyboard-shot-field-row is-single">
@@ -1604,6 +1902,7 @@ function StoryboardShotDialog({
               disabled={
                 visibleSpeakers.size > 1 ||
                 invalidStartTimes ||
+                invalidNarrative ||
                 invalidContinuity ||
                 invalidCaptions
               }
@@ -1651,6 +1950,34 @@ function StoryboardDialogField({
         disabled={readonly}
         layerZIndex={2700}
         onChange={onChange}
+      />
+    </label>
+  );
+}
+
+function StoryboardPlainField({
+  label,
+  value,
+  placeholder,
+  readonly,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  readonly: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="ws-storyboard-shot-field">
+      <span>{label}</span>
+      <textarea
+        className="nodrag nopan nowheel ws-storyboard-plain-field"
+        value={value}
+        rows={3}
+        placeholder={placeholder}
+        readOnly={readonly}
+        onChange={(event) => onChange(event.target.value)}
       />
     </label>
   );
@@ -1777,6 +2104,15 @@ function storyboardDurationFromInput(
   return isStoryboardShotDurationValid(value) ? value : fallback;
 }
 
+function positiveIntegerFromInput(
+  event: ChangeEvent<HTMLInputElement>,
+  fallback: number,
+  minimum: number,
+) {
+  const value = Number(event.target.value);
+  return Number.isInteger(value) && value >= minimum ? value : fallback;
+}
+
 function nonNegativeTime(event: ChangeEvent<HTMLInputElement>) {
   const value = Number.parseFloat(event.target.value);
   return Number.isFinite(value) && value >= 0 ? value : 0;
@@ -1791,6 +2127,18 @@ function createUniqueShot(shots: StoryboardShot[]) {
     shot = createStoryboardShot(index);
   }
   return shot;
+}
+
+function withStoryboardShotTargets(
+  storyboard: StoryboardDocument,
+  shots: StoryboardShot[],
+): StoryboardDocument {
+  return {
+    ...storyboard,
+    shots,
+    target_shot_count: shots.length,
+    target_duration: shots.reduce((total, shot) => total + shot.duration, 0),
+  };
 }
 
 function duplicateStoryboardShot(

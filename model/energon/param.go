@@ -37,7 +37,7 @@ type ParamIndex struct {
 
 const (
 	ParamPromptID      uint64 = 1
-	paramImageID       uint64 = 2
+	ParamImageID       uint64 = 2
 	paramAudioID       uint64 = 3
 	paramVideoID       uint64 = 4
 	paramFileID        uint64 = 5
@@ -50,6 +50,8 @@ const (
 	paramVideosID      uint64 = 12
 	paramSubtitlesID   uint64 = 13
 	paramFPSID         uint64 = 14
+	paramVoiceID       uint64 = 15
+	paramSoundID       uint64 = 16
 )
 
 var (
@@ -69,8 +71,8 @@ var (
 			"sort":           100,
 		},
 		{
-			"id":             paramImageID,
-			"name":           "上传图片",
+			"id":             ParamImageID,
+			"name":           "添加图片",
 			"key":            "image",
 			"type":           "files",
 			"usage":          1,
@@ -84,7 +86,7 @@ var (
 		},
 		{
 			"id":             paramAudioID,
-			"name":           "上传音频",
+			"name":           "添加音频",
 			"key":            "audio",
 			"type":           "file",
 			"usage":          1,
@@ -98,7 +100,7 @@ var (
 		},
 		{
 			"id":             paramVideoID,
-			"name":           "上传视频",
+			"name":           "添加视频",
 			"key":            "video",
 			"type":           "file",
 			"usage":          1,
@@ -112,7 +114,7 @@ var (
 		},
 		{
 			"id":             paramFileID,
-			"name":           "上传文件",
+			"name":           "添加文件",
 			"key":            "file",
 			"type":           "file",
 			"usage":          1,
@@ -204,7 +206,7 @@ var (
 			"cate_id":        paramCateCommonID,
 			"upload_rule_id": 0,
 			"max_files":      0,
-			"default_value":  "5",
+			"default_value":  "4",
 			"status":         1,
 			"sort":           100,
 		},
@@ -240,7 +242,7 @@ var (
 			"id":             paramFPSID,
 			"name":           "帧率",
 			"key":            "fps",
-			"type":           "option",
+			"type":           "input",
 			"usage":          2,
 			"value_type":     "number",
 			"cate_id":        paramCateCommonID,
@@ -249,6 +251,35 @@ var (
 			"default_value":  "25",
 			"status":         1,
 			"sort":           130,
+		},
+		{
+			"id":             paramVoiceID,
+			"name":           "音色",
+			"key":            "voice",
+			"icon":           "lucide-volume1",
+			"type":           "option",
+			"usage":          2,
+			"value_type":     "string",
+			"cate_id":        paramCateCommonID,
+			"upload_rule_id": 0,
+			"max_files":      0,
+			"default_value":  "",
+			"status":         1,
+			"sort":           100,
+		},
+		{
+			"id":             paramSoundID,
+			"name":           "声音",
+			"key":            "sound",
+			"type":           "switch",
+			"usage":          1,
+			"value_type":     "string",
+			"cate_id":        paramCateCommonID,
+			"upload_rule_id": 0,
+			"max_files":      0,
+			"default_value":  "true",
+			"status":         1,
+			"sort":           100,
 		},
 	}
 

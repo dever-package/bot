@@ -37,7 +37,10 @@ type runState struct {
 	completionReviewPending bool
 	completionReviews       int
 	requiredToolName        string
+	requiredToolFailures    int
 	documentID              uint64
+	documentDeliveryReady   bool
+	documentTextSourceKey   string
 	knowledgeUsed           bool
 	knowledgeNodeIDs        map[uint64]struct{}
 	finalStatus             string
@@ -73,7 +76,10 @@ func newRunState(execution execution) runState {
 		completionReviewPending: checkpoint.CompletionReviewPending,
 		completionReviews:       checkpoint.CompletionReviews,
 		requiredToolName:        checkpoint.RequiredToolName,
+		requiredToolFailures:    checkpoint.RequiredToolFailures,
 		documentID:              checkpoint.DocumentID,
+		documentDeliveryReady:   checkpoint.DocumentDeliveryReady,
+		documentTextSourceKey:   checkpoint.DocumentTextSourceKey,
 		knowledgeUsed:           checkpoint.KnowledgeUsed,
 		knowledgeNodeIDs:        knowledgeNodeIDSet(checkpoint.KnowledgeNodeIDs),
 		finalStatus:             checkpoint.FinalStatus,
@@ -108,7 +114,10 @@ func (state *runState) Checkpoint(seq int) runCheckpoint {
 		CompletionReviewPending: state.completionReviewPending,
 		CompletionReviews:       state.completionReviews,
 		RequiredToolName:        state.requiredToolName,
+		RequiredToolFailures:    state.requiredToolFailures,
 		DocumentID:              state.documentID,
+		DocumentDeliveryReady:   state.documentDeliveryReady,
+		DocumentTextSourceKey:   state.documentTextSourceKey,
 		KnowledgeUsed:           state.knowledgeUsed,
 		KnowledgeNodeIDs:        sortedKnowledgeNodeIDs(state.knowledgeNodeIDs),
 		FinalStatus:             state.finalStatus,
@@ -117,6 +126,25 @@ func (state *runState) Checkpoint(seq int) runCheckpoint {
 		FinalOutput:             cloneMap(state.finalOutput),
 		FinalCommitted:          state.finalCommitted,
 	}
+}
+
+func (state *runState) requireTool(name string) {
+	if state == nil {
+		return
+	}
+	name = strings.TrimSpace(name)
+	if !strings.EqualFold(state.requiredToolName, name) {
+		state.requiredToolFailures = 0
+	}
+	state.requiredToolName = name
+	if name == "" {
+		state.requiredToolFailures = 0
+	}
+}
+
+func (state *runState) isRequiredToolCall(call botprotocol.ToolCall) bool {
+	return state != nil && state.requiredToolName != "" &&
+		strings.EqualFold(strings.TrimSpace(call.Name), state.requiredToolName)
 }
 
 func historyCheckpointDelta(state *runState) []any {
@@ -165,12 +193,15 @@ func (state *runState) continueAfterTools() bool {
 	hadVisibleText := strings.TrimSpace(state.pendingModelText) != ""
 	state.phase = runPhaseModel
 	state.modelStep++
-	state.input = nextModelInput()
+	state.input = state.continuationInput(nextModelInput())
 	state.pendingTools = nil
 	state.pendingIndex = 0
 	state.pendingModelText = ""
 	state.awaitingDelivery = true
 	state.completionReviewPending = true
+	if state.isDocumentWriter() {
+		state.documentDeliveryReady = false
+	}
 	return hadVisibleText
 }
 
@@ -374,7 +405,7 @@ func (s Service) finish(state *runState, outcome finishOutcome) {
 		if state.finalOutput == nil {
 			state.finalOutput = cloneMap(outcome.output)
 		}
-		if err := s.finalizeDocument(state); err != nil {
+		if err := s.prepareDocumentResult(state, outcome.status, outcome.message); err != nil {
 			logFinishRecovery(state, "document_finalize", err)
 			return
 		}

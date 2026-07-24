@@ -10,6 +10,7 @@ import (
 	energonmodel "github.com/dever-package/bot/model/energon"
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
 	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
+	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	energonservice "github.com/dever-package/bot/service/energon"
@@ -17,26 +18,29 @@ import (
 )
 
 type executionSpec struct {
-	Agent              agentmodel.Agent
-	Power              energonmodel.Power
-	ModelLimits        energonservice.ModelLimits
-	SessionID          uint64
-	AssistantMessageID uint64
-	Prompt             string
-	Input              map[string]any
-	RecordInput        map[string]any
-	InputText          string
-	History            []any
-	Transport          modelTransport
-	PersistChat        bool
-	OnStream           func(map[string]any)
-	MediaReferences    []runtimeprovider.MediaReference
-	Scope              runtimescope.Scope
-	Billing            botprotocol.BillingContext
-	RequestedAt        time.Time
-	PriorKnowledgeUsed bool
-	PriorLoadedSkills  []agentmodel.LoadedSkillRef
-	RequiredToolName   string
+	Agent                 agentmodel.Agent
+	Power                 energonmodel.Power
+	ModelLimits           energonservice.ModelLimits
+	SessionID             uint64
+	AssistantMessageID    uint64
+	Prompt                string
+	Input                 map[string]any
+	RecordInput           map[string]any
+	InputText             string
+	History               []any
+	Transport             modelTransport
+	PersistChat           bool
+	OnStream              func(map[string]any)
+	MediaReferences       []runtimeprovider.MediaReference
+	Scope                 runtimescope.Scope
+	Billing               botprotocol.BillingContext
+	RequestedAt           time.Time
+	PriorKnowledgeUsed    bool
+	PriorKnowledgeNodeIDs []uint64
+	PriorLoadedSkills     []agentmodel.LoadedSkillRef
+	RequiredToolName      string
+	DocumentID            uint64
+	DocumentWriter        bool
 }
 
 func (s Service) createExecution(ctx context.Context, requestID string, spec executionSpec) (_ execution, resultErr error) {
@@ -77,9 +81,12 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 		scope:                spec.Scope,
 		billing:              spec.Billing,
 		priorKnowledgeUsed:   spec.PriorKnowledgeUsed,
+		documentID:           spec.DocumentID,
+		documentWriter:       spec.DocumentWriter,
 	}
 	current.checkpoint = initialCheckpoint(current)
 	current.checkpoint.RequiredToolName = strings.TrimSpace(spec.RequiredToolName)
+	current.checkpoint.KnowledgeNodeIDs = sortedKnowledgeNodeIDs(knowledgeNodeIDSet(spec.PriorKnowledgeNodeIDs))
 	current.checkpoint.LoadedSkills = agentmodel.NormalizeLoadedSkillRefs(spec.PriorLoadedSkills)
 	snapshot, err := encodeSnapshot(snapshotFromExecution(current))
 	if err != nil {
@@ -95,6 +102,10 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 	if recordInput == nil {
 		recordInput = spec.Input
 	}
+	inputStepTitle := "用户输入"
+	if runtimeEventType(spec.Input) == runtimeEventSessionStarted {
+		inputStepTitle = "会话开始"
+	}
 	runID, err := s.repository.CreateRun(ctx, runRecord{
 		RequestID:      requestID,
 		AgentID:        spec.Agent.ID,
@@ -107,7 +118,7 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 	}, stepRecord{
 		Seq:     1,
 		Type:    "input",
-		Title:   "用户输入",
+		Title:   inputStepTitle,
 		Content: spec.InputText,
 		Payload: encodeJSON(map[string]any{
 			"history_count": len(spec.History),
@@ -125,7 +136,8 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 }
 
 func (s Service) enqueueExecution(ctx context.Context, execution execution) error {
-	if s.dispatcher == nil {
+	dispatcher := s.executionDispatcher()
+	if dispatcher == nil {
 		return fmt.Errorf("智能体运行调度器未初始化")
 	}
 	queued, err := s.repository.EnqueueRun(ctx, execution.runID, time.Now())
@@ -135,10 +147,21 @@ func (s Service) enqueueExecution(ctx context.Context, execution execution) erro
 	if !queued {
 		return fmt.Errorf("智能体运行入队失败")
 	}
-	if err := s.dispatcher.Dispatch(ctx, execution.runID); err != nil {
+	if err := dispatcher.Dispatch(ctx, execution.runID); err != nil {
 		logDispatchDeliveryError(execution.runID, err)
 	}
 	return nil
+}
+
+func (s Service) executionDispatcher() runtimequeue.Dispatcher {
+	if s.dispatcher != nil {
+		return s.dispatcher
+	}
+	// The global dispatcher keeps a value copy of Service as its executor. That
+	// copy is created before NewService assigns dispatcher, so child runs must
+	// resolve the already-started durable dispatcher instead of using the empty
+	// copied field.
+	return defaultRunDispatcher(s, newRunBacklog())
 }
 
 func (s Service) failExecutionStart(execution execution, err error) {

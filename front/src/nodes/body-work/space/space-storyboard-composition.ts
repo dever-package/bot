@@ -98,6 +98,20 @@ function storyboardVideoClip(input: {
   );
   const visualVideo =
     !useOriginalVideo && lipSyncVideo ? lipSyncVideo : originalVideo;
+  const nextShot = input.storyboard.shots[input.index + 1];
+  const storyboardTransition = nextShot
+    ? {
+        type: nextShot.transition_type,
+        durationMs:
+          nextShot.transition_type === "none"
+            ? 0
+            : nextShot.transition_duration_ms,
+      }
+    : { type: "none" as const, durationMs: 0 };
+  const transitionToNext = storyboardCompositionTransition(
+    input.current,
+    storyboardTransition,
+  );
 
   return {
     id: input.shot.id,
@@ -111,11 +125,35 @@ function storyboardVideoClip(input: {
     subtitleTracks,
     useOriginalVideo,
     blockingIssues: uniqueStrings(issues),
-    transitionToNext: input.current?.transitionToNext || {
-      type: "none",
-      durationMs: 500,
-    },
+    transitionToNext,
+    storyboardTransitionToNext: storyboardTransition,
   };
+}
+
+function storyboardCompositionTransition(
+  current: VideoComposeClip | undefined,
+  storyboardTransition: VideoComposeClip["transitionToNext"],
+) {
+  if (!current) {
+    return storyboardTransition;
+  }
+  const previousStoryboardTransition = current.storyboardTransitionToNext;
+  if (!previousStoryboardTransition) {
+    return current.transitionToNext;
+  }
+  return sameVideoTransition(
+    current.transitionToNext,
+    previousStoryboardTransition,
+  )
+    ? storyboardTransition
+    : current.transitionToNext;
+}
+
+function sameVideoTransition(
+  left: VideoComposeClip["transitionToNext"],
+  right: VideoComposeClip["transitionToNext"],
+) {
+  return left.type === right.type && left.durationMs === right.durationMs;
 }
 
 function storyboardSubtitleTracks(

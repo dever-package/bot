@@ -15,6 +15,7 @@ func prepareCanvasLipSyncInput(
 	req CanvasRunRequest,
 	node canvasRunNode,
 	previousOutput any,
+	results []canvasNodeResult,
 	input map[string]any,
 	params map[string]any,
 ) (map[string]any, map[string]any, error) {
@@ -37,7 +38,6 @@ func prepareCanvasLipSyncInput(
 		node.StoryboardItem["characterId"],
 	)
 
-	contextOutputs := canvasContextOutputsByNode(previousOutput)
 	videoURL := ""
 	tracks := make([]botprocessor.SpeechTimelineTrack, 0)
 	for _, sourceNodeID := range canvasStringList(firstPresent(
@@ -50,10 +50,14 @@ func prepareCanvasLipSyncInput(
 		}
 		metadata := mapValue(firstPresent(sourceNode["storyboard_item"], sourceNode["storyboardItem"]))
 		itemType := firstText(metadata["item_type"], metadata["itemType"])
-		output := contextOutputs[sourceNodeID]
-		if output == nil {
-			output = staticCanvasNodeOutput(ctx, projectID, sourceNodeID, req.Canvas)
-		}
+		output := canvasReferencedNodeOutput(
+			ctx,
+			projectID,
+			sourceNodeID,
+			previousOutput,
+			results,
+			req.Canvas,
+		)
 		switch itemType {
 		case "shot":
 			videos := canvasMediaURLs(output, botprotocol.MediaTypeVideo)

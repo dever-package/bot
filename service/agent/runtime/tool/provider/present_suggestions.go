@@ -9,6 +9,7 @@ import (
 const (
 	PresentSuggestionsToolName = "present_suggestions"
 	maxSuggestionItems         = 8
+	defaultSuggestionMessage   = "内容已完成，你可以从下面的方向继续。"
 )
 
 func PresentSuggestionsTool() Tool {
@@ -17,13 +18,13 @@ func PresentSuggestionsTool() Tool {
 			Name:        PresentSuggestionsToolName,
 			Title:       "后续建议",
 			Kind:        "presentation",
-			Description: "当前任务已交付且有供用户点击选择的下一步建议时，必须调用此工具。任务继续所必需的信息使用 ask_user；禁止用正文选项列表代替本工具。",
+			Description: "当前任务需要用一句结果说明和可点击下一步收口时，必须调用此工具。任务继续所必需的信息使用 ask_user；禁止用正文选项列表代替本工具。图文场景必须依据 compose_document 的真实结果：成功时说明文档已完成，并给出 2 至 4 个修改、扩展或使用方向；失败时明确说明生成失败，并给出重新生成或调整要求的方向，不得谎报完成。不要在调用前用普通文本复述。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"message": map[string]any{
 						"type":        "string",
-						"description": "按钮上方的引导语",
+						"description": "按钮上方的一句自然结果说明；失败时必须明确说明失败",
 					},
 					"items": map[string]any{
 						"type":     "array",
@@ -60,6 +61,9 @@ func executePresentSuggestions(_ context.Context, call Call) (Result, error) {
 		return Result{}, err
 	}
 	message := strings.TrimSpace(argumentText(call.Arguments, "message"))
+	if message == "" {
+		message = defaultSuggestionMessage
+	}
 	return Result{
 		Text:         message,
 		Content:      map[string]any{"message": message, "suggestions": items},

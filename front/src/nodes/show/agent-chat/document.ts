@@ -9,7 +9,8 @@ export type AgentChatDocumentStatus =
   | "writing"
   | "generating"
   | "ready"
-  | "partial_failed";
+  | "partial_failed"
+  | "failed";
 
 export type AgentChatDocumentBlockStatus =
   | "generating"
@@ -135,6 +136,7 @@ export function normalizeAgentChatDocument(
         .filter((block): block is AgentChatDocumentBlock => Boolean(block))
         .sort(compareBlocks)
     : [];
+  const status = documentStatus(value.status);
   return {
     id,
     hydrated,
@@ -142,9 +144,11 @@ export function normalizeAgentChatDocument(
     messageID: positiveNumber(value.message_id),
     runID: positiveNumber(value.run_id),
     title: textValue(value.title),
-    status: documentStatus(value.status),
+    status,
     blockCount: nonNegativeNumber(value.block_count) || blocks.length,
-    pendingJobCount: nonNegativeNumber(value.pending_job_count),
+    pendingJobCount: isTerminalDocumentStatus(status)
+      ? 0
+      : nonNegativeNumber(value.pending_job_count),
     meta: isPlainRecord(value.meta) ? { ...value.meta } : {},
     blocks,
     createdAt: textValue(value.created_at),
@@ -172,10 +176,9 @@ export function mergeAgentChatDocument(
     runID: incoming.runID || current.runID,
     title: incoming.title || current.title,
     status,
-    pendingJobCount:
-      status === "ready" || status === "partial_failed"
-        ? 0
-        : incoming.pendingJobCount,
+    pendingJobCount: isTerminalDocumentStatus(status)
+      ? 0
+      : incoming.pendingJobCount,
     hydrated: current.hydrated || incoming.hydrated,
     meta: { ...current.meta, ...incoming.meta },
     blocks: mergeDocumentBlocks(current.blocks, incoming.blocks),
@@ -260,6 +263,9 @@ export function mergeAgentChatDocumentEvent(
 
 export function isAgentChatDocumentPending(document?: AgentChatDocument) {
   if (!document) {
+    return false;
+  }
+  if (isTerminalDocumentStatus(document.status)) {
     return false;
   }
   return (
@@ -466,9 +472,16 @@ function mergeDocumentStatus(
 }
 
 function documentStatusRank(status: AgentChatDocumentStatus) {
+  if (status === "failed") return 3;
   if (status === "ready" || status === "partial_failed") return 2;
   if (status === "generating") return 1;
   return 0;
+}
+
+function isTerminalDocumentStatus(status: AgentChatDocumentStatus) {
+  return (
+    status === "ready" || status === "partial_failed" || status === "failed"
+  );
 }
 
 function mergeBlockStatus(
@@ -501,7 +514,12 @@ function isDocumentTitleHeading(line: string, title: string) {
 
 function documentStatus(value: unknown): AgentChatDocumentStatus {
   const status = textValue(value).toLowerCase();
-  if (status === "generating" || status === "ready" || status === "partial_failed") {
+  if (
+    status === "generating" ||
+    status === "ready" ||
+    status === "partial_failed" ||
+    status === "failed"
+  ) {
     return status;
   }
   return "writing";

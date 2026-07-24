@@ -1302,9 +1302,10 @@ func (s Service) runSaveNode(ctx context.Context, run teammodel.Run, flowRun tea
 		return body, teammodel.RunStatusSuccess, 0, nil
 	}
 	assetName := firstText(valueAtPath(body, "title"), flow.Name)
+	assetContent := s.saveNodeContent(ctx, flowRun.ID, body, incoming)
 	nodeRunID := s.currentNodeRunID(ctx, flowRun.ID, node.ID)
 	if isDebugRun(run) {
-		return debugSaveOutput(assetName, firstText(valueAtPath(body, "kind"), assetmodel.KindRichText), node.AssetCateID, body), teammodel.RunStatusSuccess, 0, nil
+		return debugSaveOutput(assetName, firstText(valueAtPath(body, "kind"), assetmodel.KindRichText), node.AssetCateID, assetContent), teammodel.RunStatusSuccess, 0, nil
 	}
 	asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
 		ProjectID:   run.ProjectID,
@@ -1319,7 +1320,7 @@ func (s Service) runSaveNode(ctx context.Context, run teammodel.Run, flowRun tea
 		Name:        assetName,
 		Kind:        firstText(valueAtPath(body, "kind"), assetmodel.KindRichText),
 		Role:        assetmodel.RoleWork,
-		Content:     body,
+		Content:     assetContent,
 	})
 	if err != nil {
 		return nil, teammodel.RunStatusFail, 0, err
@@ -1353,10 +1354,10 @@ func isDebugRun(run teammodel.Run) bool {
 	return strings.HasPrefix(mode, "debug_")
 }
 
-func debugSaveOutput(name string, kind string, assetCateID uint64, body map[string]any) map[string]any {
-	output := make(map[string]any, len(body)+1)
-	for key, value := range body {
-		output[key] = value
+func debugSaveOutput(name string, kind string, assetCateID uint64, content any) map[string]any {
+	output := mapValue(content)
+	if len(output) == 0 {
+		output = map[string]any{"content": content}
 	}
 	output["_debug_asset"] = map[string]any{
 		"name":          name,
@@ -1364,6 +1365,152 @@ func debugSaveOutput(name string, kind string, assetCateID uint64, body map[stri
 		"asset_cate_id": assetCateID,
 	}
 	return output
+}
+
+// saveNodeContent projects the runtime envelope to the business content that
+// the save node owns. The original envelope remains on the blackboard and in
+// run records; it must not become the visible asset body.
+func (s Service) saveNodeContent(ctx context.Context, flowRunID uint64, body map[string]any, incoming []teammodel.FlowNodeEdge) any {
+	if text := saveNodeDocumentText(body, 0); text != "" {
+		return text
+	}
+	currentText := saveNodeOutputText(body, 0)
+	// A directly upstream agent may act only as a reviewer or selector and
+	// return a short completion message. Its persisted input still contains the
+	// business output produced by the preceding node, so preserve the most
+	// substantive content instead of turning the acknowledgement into the work.
+	if len(incoming) == 1 {
+		if nodeRun := s.repo.FindNodeRunByNode(ctx, flowRunID, incoming[0].FromNodeID); nodeRun != nil {
+			input := jsonValue(nodeRun.Input)
+			if text := saveNodeDocumentText(input, 0); text != "" {
+				return text
+			}
+			currentText = longerSaveNodeText(currentText, saveNodeInputOutputText(input, 0))
+		}
+	}
+	if currentText != "" {
+		return currentText
+	}
+	return body
+}
+
+func saveNodeDocumentText(value any, depth int) string {
+	if depth > 8 {
+		return ""
+	}
+	if items, ok := value.([]any); ok {
+		for _, item := range items {
+			if text := saveNodeDocumentText(item, depth+1); text != "" {
+				return text
+			}
+		}
+		return ""
+	}
+	row := mapValue(value)
+	if len(row) == 0 {
+		return ""
+	}
+	if document := mapValue(row["document"]); len(document) > 0 {
+		parts := make([]string, 0)
+		for _, block := range sliceMapValue(document["blocks"]) {
+			if text := strings.TrimSpace(textValue(block["text"])); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "\n\n")
+		}
+	}
+	preferredKeys := []string{"output", "result", "content", "data", "body", "finalOutput"}
+	visited := map[string]bool{"document": true}
+	for _, key := range preferredKeys {
+		visited[key] = true
+		if text := saveNodeDocumentText(row[key], depth+1); text != "" {
+			return text
+		}
+	}
+	for _, key := range sortedAnyMapKeys(row) {
+		if visited[key] {
+			continue
+		}
+		if text := saveNodeDocumentText(row[key], depth+1); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func saveNodeOutputText(value any, depth int) string {
+	if depth > 8 {
+		return ""
+	}
+	if items, ok := value.([]any); ok {
+		best := ""
+		for _, item := range items {
+			best = longerSaveNodeText(best, saveNodeOutputText(item, depth+1))
+		}
+		return best
+	}
+	row := mapValue(value)
+	if len(row) == 0 {
+		if depth == 0 {
+			return strings.TrimSpace(textValue(value))
+		}
+		return ""
+	}
+	best := ""
+	visited := map[string]bool{}
+	for _, key := range []string{"text", "content", "body", "message"} {
+		visited[key] = true
+		if text := strings.TrimSpace(textValue(row[key])); text != "" {
+			best = longerSaveNodeText(best, text)
+		}
+	}
+	for _, key := range []string{"output", "result", "data", "finalOutput"} {
+		visited[key] = true
+		best = longerSaveNodeText(best, saveNodeOutputText(row[key], depth+1))
+	}
+	for _, key := range sortedAnyMapKeys(row) {
+		if visited[key] {
+			continue
+		}
+		best = longerSaveNodeText(best, saveNodeOutputText(row[key], depth+1))
+	}
+	return best
+}
+
+func saveNodeInputOutputText(value any, depth int) string {
+	if depth > 8 {
+		return ""
+	}
+	if items, ok := value.([]any); ok {
+		best := ""
+		for _, item := range items {
+			best = longerSaveNodeText(best, saveNodeInputOutputText(item, depth+1))
+		}
+		return best
+	}
+	row := mapValue(value)
+	if len(row) == 0 {
+		return ""
+	}
+	best := saveNodeOutputText(row["output"], depth+1)
+	for _, key := range sortedAnyMapKeys(row) {
+		if key == "output" {
+			continue
+		}
+		best = longerSaveNodeText(best, saveNodeInputOutputText(row[key], depth+1))
+	}
+	return best
+}
+
+func longerSaveNodeText(current string, candidate string) string {
+	current = strings.TrimSpace(current)
+	candidate = strings.TrimSpace(candidate)
+	if len([]rune(candidate)) > len([]rune(current)) {
+		return candidate
+	}
+	return current
 }
 
 func singleIncomingNodeOutput(label string, incoming []teammodel.FlowNodeEdge, nodeByID map[uint64]teammodel.FlowNode, blackboard map[string]any) (map[string]any, error) {

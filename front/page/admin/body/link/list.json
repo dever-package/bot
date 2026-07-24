@@ -1,0 +1,317 @@
+{
+  "page": {
+    "name": "单页链接",
+    "icon": "link",
+    "parent": "bot-body",
+    "type": 1,
+    "sort": 4
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "toolbar-row": {
+            "type": "row",
+            "className": "flex-wrap items-center gap-2.5"
+          },
+          "table-row": {
+            "type": "container",
+            "className": "overflow-hidden rounded-md border bg-background"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "新增单页链接",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "icon": "plus"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.create",
+            "value": true
+          }
+        }
+      }
+    ],
+    "toolbar-row": [
+      {
+        "type": "form-input",
+        "placeholder": "搜索唯一编码或名称...",
+        "value": "search.keyword",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "链接类型",
+        "value": "search.link_type",
+        "mode": "search",
+        "meta": {
+          "controlClassName": "w-[140px]"
+        }
+      },
+      {
+        "type": "form-select",
+        "placeholder": "状态",
+        "value": "search.status",
+        "mode": "search",
+        "meta": {
+          "controlClassName": "w-[140px]"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "重置",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/body/link/list"
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "savePath": "bot/body/link/update",
+          "rowKey": "id",
+          "columns": [
+            {
+              "name": "唯一编码",
+              "value": "code",
+              "type": "show-base",
+              "className": "min-w-[160px] font-medium"
+            },
+            {
+              "name": "名称",
+              "value": "name",
+              "type": "show-base",
+              "className": "min-w-[160px]"
+            },
+            {
+              "name": "链接类型",
+              "value": "link_type",
+              "type": "show-tag"
+            },
+            {
+              "name": "使用场景",
+              "value": "scenes",
+              "type": "show-tag"
+            },
+            {
+              "name": "打开方式",
+              "value": "target",
+              "type": "show-tag"
+            },
+            {
+              "name": "状态",
+              "value": "status",
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "name": "排序",
+              "value": "sort",
+              "type": "show-base",
+              "editor": "form-number",
+              "trigger": "doubleClick",
+              "tip": "正序排序，数值越小越靠前。双击可修改。"
+            },
+            {
+              "name": "创建时间",
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑单页链接",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.editLinkId",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.edit",
+                          "value": true
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "icon": "trash-2",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "删除单页链接",
+                    "className": "text-destructive hover:text-destructive",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.deleteLink",
+                          "value": "$row"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "confirm.delete",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.create",
+          "pageRoute": "/bot/body/link/update",
+          "title": "新增单页链接",
+          "description": "配置稳定编码、链接类型和使用场景。",
+          "size": "lg",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          }
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.edit",
+          "pageRoute": "/bot/body/link/update",
+          "title": "编辑单页链接",
+          "description": "更新链接内容、使用场景和展示状态。",
+          "size": "lg",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.editLinkId"
+          }
+        }
+      },
+      {
+        "type": "feedback-confirm",
+        "name": "删除单页链接",
+        "info": "确认删除当前单页链接吗？删除后相关入口将无法继续读取。",
+        "meta": {
+          "stateKey": "confirm.delete"
+        },
+        "action": {
+          "confirm": {
+            "type": "delete",
+            "params": "actionTarget.deleteLink"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "单页链接",
+      "description": "维护内容文章和外部地址的统一链接入口。"
+    },
+    "table": {
+      "relationFields": [
+        "scenes"
+      ],
+      "searchFields": [
+        "code",
+        "name"
+      ],
+      "filterFields": [
+        "link_type",
+        "status"
+      ]
+    },
+    "search": {
+      "keyword": "",
+      "link_type": "",
+      "status": ""
+    },
+    "actionTarget": {
+      "editLinkId": "",
+      "deleteLink": {}
+    }
+  },
+  "state": {
+    "dialog": {
+      "create": false,
+      "edit": false
+    },
+    "confirm": {
+      "delete": false
+    }
+  },
+  "action": {}
+}

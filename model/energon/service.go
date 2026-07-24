@@ -26,98 +26,184 @@ type ServiceIndex struct {
 }
 
 const (
-	serviceShemicLabImageID         uint64 = 1
-	serviceShemicLabGeminiID        uint64 = 2
-	serviceShemicLabGPTID           uint64 = 3
-	serviceDoubaoTextID             uint64 = 4
-	serviceDoubaoImageID            uint64 = 5
-	serviceDoubaoVideoID            uint64 = 6
-	serviceRunningHubImageID        uint64 = 7
-	serviceRunningHubMusicID        uint64 = 8
-	serviceRunningHubFlowClothingID uint64 = 9
+	serviceRunningHubImageID        uint64 = 4
+	serviceRunningHubMusicID        uint64 = 5
+	serviceRunningHubFlowClothingID uint64 = 6
+	serviceShemicLabImageID         uint64 = 7
+	serviceDoubaoTextID             uint64 = 8
+	serviceDoubaoImageID            uint64 = 9
+	serviceDoubaoVideoID            uint64 = 10
+	serviceShemicLabGeminiID        uint64 = 11
+	serviceShemicLabGPTID           uint64 = 12
+	serviceShemicLabGPT54ID         uint64 = 15
+	serviceFFmpegComposeID          uint64 = 18
+	serviceDoubaoAudioID            uint64 = 19
+	serviceDoubaoVideoFastID        uint64 = 20
+	serviceDoubaoImage5ID           uint64 = 21
+	serviceDoubaoGLMID              uint64 = 22
+	serviceRunningHubVideoID        uint64 = 23
 )
 
 var (
 	serviceSeed = []map[string]any{
 		{
-			"id":          serviceShemicLabImageID,
-			"provider_id": providerShemicLabID,
-			"name":        "image2生图",
-			"type":        "image",
-			"path":        "images/generations",
-			"sort":        1,
-			"status":      1,
-		},
-		{
-			"id":          serviceShemicLabGeminiID,
-			"provider_id": providerShemicLabID,
-			"name":        "gemini-3-flash",
-			"type":        "text",
-			"path":        "",
-			"sort":        2,
-			"status":      1,
-		},
-		{
-			"id":          serviceShemicLabGPTID,
-			"provider_id": providerShemicLabID,
-			"name":        "gpt-5.5",
-			"type":        "text",
-			"path":        "",
-			"sort":        3,
-			"status":      1,
-		},
-		{
-			"id":          serviceDoubaoTextID,
-			"provider_id": providerDoubaoID,
-			"name":        "doubao-seed-2-0-pro",
-			"type":        "text",
-			"path":        "",
-			"sort":        10,
-			"status":      1,
-		},
-		{
-			"id":          serviceDoubaoImageID,
-			"provider_id": providerDoubaoID,
-			"name":        "doubao-seedream-4-5",
-			"type":        "image",
-			"path":        "",
-			"sort":        11,
-			"status":      1,
-		},
-		{
-			"id":          serviceDoubaoVideoID,
-			"provider_id": providerDoubaoID,
-			"name":        "doubao-seedance-1-5-pro",
-			"type":        "video",
-			"path":        "/contents/generations/tasks",
-			"sort":        12,
-			"status":      1,
-		},
-		{
 			"id":          serviceRunningHubImageID,
 			"provider_id": providerRunningHubAPIID,
+			"account_id":  0,
 			"name":        "生图",
 			"type":        "text",
 			"path":        "",
-			"sort":        20,
+			"sort":        100,
 			"status":      1,
 		},
 		{
 			"id":          serviceRunningHubMusicID,
 			"provider_id": providerRunningHubAPIID,
+			"account_id":  0,
 			"name":        "生成歌曲",
 			"type":        "audio",
 			"path":        "",
-			"sort":        21,
+			"sort":        100,
 			"status":      1,
 		},
 		{
 			"id":          serviceRunningHubFlowClothingID,
 			"provider_id": providerRunningHubFlowID,
+			"account_id":  0,
 			"name":        "换装",
 			"type":        "image",
 			"path":        "",
-			"sort":        30,
+			"sort":        100,
+			"status":      1,
+		},
+		{
+			"id":          serviceShemicLabImageID,
+			"provider_id": providerShemicLabID,
+			"account_id":  0,
+			"name":        "image2生图",
+			"type":        "image",
+			"path":        "images/generations",
+			"sort":        100,
+			"status":      1,
+		},
+		{
+			"id":          serviceDoubaoTextID,
+			"provider_id": providerDoubaoID,
+			"account_id":  0,
+			"name":        "seed-2-0-pro",
+			"type":        "text",
+			"path":        "",
+			"sort":        100,
+			"status":      1,
+		},
+		{
+			"id":          serviceDoubaoImageID,
+			"provider_id": providerDoubaoID,
+			"account_id":  0,
+			"name":        "seedream-4-5",
+			"type":        "image",
+			"path":        "",
+			"sort":        100,
+			"status":      1,
+		},
+		{
+			"id":          serviceDoubaoVideoID,
+			"provider_id": providerDoubaoID,
+			"account_id":  0,
+			"name":        "seedance-1-5-pro",
+			"type":        "video",
+			"path":        "/contents/generations/tasks",
+			"sort":        100,
+			"status":      1,
+		},
+		{
+			"id":          serviceShemicLabGeminiID,
+			"provider_id": providerShemicLabID,
+			"account_id":  0,
+			"name":        "gemini-3-flash",
+			"type":        "text",
+			"path":        "",
+			"sort":        100,
+			"status":      1,
+		},
+		{
+			"id":          serviceShemicLabGPTID,
+			"provider_id": providerShemicLabID,
+			"account_id":  0,
+			"name":        "gpt-5.5",
+			"type":        "text",
+			"path":        "",
+			"sort":        100,
+			"status":      1,
+		},
+		{
+			"id":          serviceShemicLabGPT54ID,
+			"provider_id": providerShemicLabID,
+			"account_id":  0,
+			"name":        "gpt-5.4",
+			"type":        "text",
+			"path":        "",
+			"sort":        100,
+			"status":      1,
+		},
+		{
+			"id":          serviceFFmpegComposeID,
+			"provider_id": providerVideoProcessorID,
+			"account_id":  0,
+			"name":        "FFmpeg 视频合成",
+			"type":        "video",
+			"path":        "local://ffmpeg/compose",
+			"sort":        10,
+			"status":      1,
+		},
+		{
+			"id":          serviceDoubaoAudioID,
+			"provider_id": providerDoubaoID,
+			"account_id":  0,
+			"name":        "音频",
+			"type":        "audio",
+			"path":        "",
+			"sort":        100,
+			"status":      1,
+		},
+		{
+			"id":          serviceDoubaoVideoFastID,
+			"provider_id": providerDoubaoID,
+			"account_id":  0,
+			"name":        "doubao-seedance-2-0-fast",
+			"type":        "video",
+			"path":        "/contents/generations/tasks",
+			"sort":        100,
+			"status":      1,
+		},
+		{
+			"id":          serviceDoubaoImage5ID,
+			"provider_id": providerDoubaoID,
+			"account_id":  0,
+			"name":        "seedream-5",
+			"type":        "image",
+			"path":        "",
+			"sort":        100,
+			"status":      1,
+		},
+		{
+			"id":          serviceDoubaoGLMID,
+			"provider_id": providerDoubaoID,
+			"account_id":  0,
+			"name":        "glm-5.2",
+			"type":        "text",
+			"path":        "",
+			"sort":        100,
+			"status":      1,
+		},
+		{
+			"id":          serviceRunningHubVideoID,
+			"provider_id": providerRunningHubAPIID,
+			"account_id":  0,
+			"name":        "可灵图生视频2.6-pro",
+			"type":        "video",
+			"path":        "",
+			"sort":        100,
 			"status":      1,
 		},
 	}

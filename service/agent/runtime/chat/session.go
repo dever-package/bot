@@ -163,7 +163,10 @@ func reviewSessionsByCursor(ctx context.Context, filter map[string]any, lastSess
 		cursorFilter["id"] = lastSessionID
 		cursor := model.Find(ctx, cursorFilter)
 		if cursor == nil {
-			return map[string]any{"sessions": []map[string]any{}}
+			return map[string]any{
+				"sessions": []map[string]any{},
+				"has_more": false,
+			}
 		}
 		filter["or"] = []map[string]any{
 			{"last_message_at": map[string]any{"lt": cursor.LastMessageAt}},
@@ -173,17 +176,25 @@ func reviewSessionsByCursor(ctx context.Context, filter map[string]any, lastSess
 			},
 		}
 	}
+	limit := clampLimit(requestedLimit, defaultSessionLimit, maxSessionLimit)
 	rows := model.Select(ctx, filter, map[string]any{
 		"order": "main.last_message_at desc,main.id desc",
-		"limit": clampLimit(requestedLimit, defaultSessionLimit, maxSessionLimit),
+		"limit": limit + 1,
 	})
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
 	sessions := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		if row != nil {
 			sessions = append(sessions, sessionSummaryMap(*row))
 		}
 	}
-	return map[string]any{"sessions": sessions}
+	return map[string]any{
+		"sessions": sessions,
+		"has_more": hasMore,
+	}
 }
 
 func (s Service) ClearSession(ctx context.Context, sessionID uint64) (map[string]any, error) {

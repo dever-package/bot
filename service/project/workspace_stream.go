@@ -46,6 +46,9 @@ func (s WorkspaceService) writeWorkspaceNodeEvent(ctx context.Context, run *team
 			fields["approval"] = approval
 			fields["approval_id"] = uint64Value(approval["id"])
 		}
+		if interaction := canvasPayloadInteraction(output); interaction != nil {
+			fields["interaction"] = interaction
+		}
 		if childRunID := uint64Value(output["child_run_id"]); childRunID > 0 {
 			fields["child_run_id"] = childRunID
 		}

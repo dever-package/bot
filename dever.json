@@ -75,7 +75,9 @@
         "public": [
           "login",
           "login/config",
-          "login/feishu"
+          "login/register",
+          "login/feishu",
+          "content/public"
         ]
       }
     }

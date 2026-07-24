@@ -9,7 +9,6 @@ import {
 import {
   Eye,
   EyeOff,
-  Languages,
   Loader2,
   Menu,
   PanelsTopLeft,
@@ -28,9 +27,20 @@ import {
   useTheme,
 } from "@dever/front-plugin";
 import { isSuccessResponse } from "../shared/api-response";
-import { bodyAppearanceStyle } from "../shared/body-appearance";
+import {
+  bodyPageBackgroundStyle,
+  hasBodyPageBackground,
+} from "../shared/body-appearance";
+import {
+  BodyFilingContent,
+  createBodyFilingRows,
+  hasBodyFilingRichContent,
+  type BodyFilingInfo,
+} from "../shared/body-filing";
 import { BodyToaster } from "../shared/body-toaster";
+import { PublicContentPage } from "../content/public-content-page";
 import "../shared/body-theme.css";
+import { useBodyAppearance } from "../shared/use-body-appearance";
 import { BodyConfiguredImage, BodySiteBrand } from "./site-brand";
 import {
   consumeFeishuAuthCallback,
@@ -40,14 +50,10 @@ import {
   applyBodySiteMetadata,
   type BodyLoginAccount,
   type BodyLoginConfig,
-  useBodyLoginConfig,
+  type BodyLoginLink,
+  useBodyLoginConfigState,
 } from "./site-config";
 import "./login-page.css";
-
-const LOGIN_ARTWORK_SRC = new URL(
-  "./assets/login-artwork.png",
-  import.meta.url,
-).href;
 
 type AuthMode = "login" | "register";
 
@@ -64,10 +70,15 @@ type CompleteLoginOptions = {
 };
 
 export function WorkLoginPage() {
-  const config = useBodyLoginConfig();
+  const { config, loaded: configLoaded } = useBodyLoginConfigState();
+  const backgroundImageReady = useConfiguredImageReady(
+    config.site.appearance.loginBackgroundImage,
+    configLoaded,
+  );
   const navigate = useNavigate();
   const { auth } = useAuthStore();
   const { resolvedTheme } = useTheme();
+  useBodyAppearance(config.site.appearance, resolvedTheme);
   const [mode, setMode] = useState<AuthMode>("login");
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
@@ -81,6 +92,7 @@ export function WorkLoginPage() {
   const [mobileLinksOpen, setMobileLinksOpen] = useState(false);
   const feishuCallbackHandled = useRef(false);
   const busy = loading || thirdPartyLoadingID !== null;
+  const publicContentArticleID = readPublicContentArticleID();
 
   const completeLogin = useCallback(
     async (data: any, options: CompleteLoginOptions) => {
@@ -100,8 +112,19 @@ export function WorkLoginPage() {
   );
 
   useEffect(() => {
-    applyBodySiteMetadata(config.site);
-  }, [config.site]);
+    if (configLoaded) {
+      applyBodySiteMetadata(config.site);
+    }
+  }, [configLoaded, config.site]);
+
+  useEffect(() => {
+    if (config.site.registerEnabled || mode !== "register") {
+      return;
+    }
+    setMode("login");
+    setName("");
+    setMessage("");
+  }, [config.site.registerEnabled, mode]);
 
   useEffect(() => {
     if (!mobileLinksOpen) {
@@ -169,7 +192,7 @@ export function WorkLoginPage() {
   }, [completeLogin]);
 
   function switchMode() {
-    if (busy) {
+    if (busy || (!config.site.registerEnabled && mode === "login")) {
       return;
     }
     setMode((current) => (current === "login" ? "register" : "login"));
@@ -179,6 +202,12 @@ export function WorkLoginPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) {
+      return;
+    }
+    if (mode === "register" && !config.site.registerEnabled) {
+      setMode("login");
+      setName("");
+      setMessage("当前站点已关闭注册");
       return;
     }
 
@@ -192,7 +221,9 @@ export function WorkLoginPage() {
     setMessage("");
     try {
       const result = await request(
-        mode === "login" ? "/user/auth/login" : "/user/auth/register",
+        mode === "login"
+          ? "/user/auth/login"
+          : joinSiteApi("login/register"),
         "post",
         payload.data,
       );
@@ -241,12 +272,28 @@ export function WorkLoginPage() {
     }
   }
 
+  if (!configLoaded || !backgroundImageReady) {
+    return (
+      <main
+        className="bot-work-login-page bot-work-login-page-loading"
+        aria-busy="true"
+      />
+    );
+  }
+
   return (
     <main
       className="bot-work-login-page"
-      data-body-theme={config.site.appearance.themePreset}
       data-login-template={config.site.appearance.loginTemplate}
-      style={bodyAppearanceStyle(config.site.appearance, resolvedTheme)}
+      data-login-background-image={
+        config.site.appearance.loginBackgroundImage ? "true" : undefined
+      }
+      data-page-background={
+        hasBodyPageBackground(config.site.appearance, "login")
+          ? "custom"
+          : undefined
+      }
+      style={bodyPageBackgroundStyle(config.site.appearance, "login")}
     >
       <BodyToaster />
       <LoginHeader
@@ -256,129 +303,178 @@ export function WorkLoginPage() {
         onToggleMobileLinks={() => setMobileLinksOpen((open) => !open)}
       />
 
-      <div className="bot-work-login-stage">
-        <div className="bot-work-login-layout">
-          <LoginArtwork
-            image={config.site.loginImage}
-            siteName={config.site.siteName}
-          />
-
-          <section className="bot-work-login-auth" aria-labelledby="login-title">
-            <div className="bot-work-login-copy">
-              <h1 id="login-title">{config.site.loginTitle}</h1>
-              {config.site.loginDescription ? (
-                <p>{config.site.loginDescription}</p>
-              ) : null}
-            </div>
-
-            <section className="bot-work-login-form-panel">
-              <ThirdPartyAccounts
-                accounts={config.accounts}
-                disabled={busy}
-                loadingID={thirdPartyLoadingID}
-                onSelect={startThirdPartyLogin}
+      {publicContentArticleID ? (
+        <PublicContentPage
+          articleID={publicContentArticleID}
+          backHref={publicContentBackHref()}
+        />
+      ) : (
+        <div className="bot-work-login-stage">
+          <div className="bot-work-login-layout">
+            {config.site.loginImage ? (
+              <LoginArtwork
+                image={config.site.loginImage}
+                siteName={config.site.siteName}
               />
+            ) : null}
 
-              {config.accounts.length > 0 ? (
-                <div className="bot-work-login-divider">
-                  <span>或</span>
-                </div>
-              ) : null}
-
-              <form className="bot-work-login-form" onSubmit={submit}>
-                <AuthField label="账号">
-                  <Input
-                    value={account}
-                    autoComplete="username"
-                    placeholder="输入手机号或账号"
-                    aria-label="账号"
-                    className="bot-work-login-input"
-                    onChange={(event) => setAccount(event.target.value)}
-                  />
-                </AuthField>
-
-                {mode === "register" ? (
-                  <AuthField label="昵称">
-                    <Input
-                      value={name}
-                      autoComplete="name"
-                      placeholder="输入昵称"
-                      aria-label="昵称"
-                      className="bot-work-login-input"
-                      onChange={(event) => setName(event.target.value)}
-                    />
-                  </AuthField>
+            <section
+              className="bot-work-login-auth"
+              aria-labelledby="login-title"
+            >
+              <div className="bot-work-login-copy">
+                <h1 id="login-title">{config.site.loginTitle}</h1>
+                {config.site.loginDescription ? (
+                  <p>{config.site.loginDescription}</p>
                 ) : null}
+              </div>
 
-                <AuthField label="密码">
-                  <span className="bot-work-login-password">
-                    <Input
-                      value={password}
-                      type={showPassword ? "text" : "password"}
-                      autoComplete={
-                        mode === "login" ? "current-password" : "new-password"
-                      }
-                      placeholder="至少 6 位"
-                      aria-label="密码"
-                      className="bot-work-login-input"
-                      onChange={(event) => setPassword(event.target.value)}
-                    />
-                    <button
-                      type="button"
-                      aria-label={showPassword ? "隐藏密码" : "显示密码"}
-                      title={showPassword ? "隐藏密码" : "显示密码"}
-                      onClick={() => setShowPassword((show) => !show)}
-                    >
-                      {showPassword ? (
-                        <EyeOff size={17} strokeWidth={1.8} />
-                      ) : (
-                        <Eye size={17} strokeWidth={1.8} />
-                      )}
-                    </button>
-                  </span>
-                </AuthField>
+              <section className="bot-work-login-form-panel">
+                <ThirdPartyAccounts
+                  accounts={config.accounts}
+                  disabled={busy}
+                  loadingID={thirdPartyLoadingID}
+                  onSelect={startThirdPartyLogin}
+                />
 
-                {message ? (
-                  <div className="bot-work-login-message" role="alert">
-                    {message}
+                {config.accounts.length > 0 ? (
+                  <div className="bot-work-login-divider">
+                    <span>或</span>
                   </div>
                 ) : null}
 
-                <button
-                  type="submit"
-                  className="bot-work-login-submit"
-                  disabled={busy}
-                >
-                  {loading ? (
-                    <Loader2 className="bot-work-login-spin" />
+                <form className="bot-work-login-form" onSubmit={submit}>
+                  <AuthField label="账号">
+                    <Input
+                      value={account}
+                      autoComplete="username"
+                      placeholder="输入手机号或账号"
+                      aria-label="账号"
+                      className="bot-work-login-input"
+                      onChange={(event) => setAccount(event.target.value)}
+                    />
+                  </AuthField>
+
+                  {mode === "register" ? (
+                    <AuthField label="昵称">
+                      <Input
+                        value={name}
+                        autoComplete="name"
+                        placeholder="输入昵称"
+                        aria-label="昵称"
+                        className="bot-work-login-input"
+                        onChange={(event) => setName(event.target.value)}
+                      />
+                    </AuthField>
                   ) : null}
-                  <span>
-                    {loading
-                      ? "处理中"
-                      : mode === "login"
-                        ? "登录"
-                        : "注册"}
-                  </span>
-                </button>
-              </form>
 
-              <p className="bot-work-login-mode-switch">
-                <span>{mode === "login" ? "还没有账号？" : "已经有账号？"}</span>
-                <button type="button" disabled={busy} onClick={switchMode}>
-                  {mode === "login" ? "注册" : "登录"}
-                </button>
-              </p>
+                  <AuthField label="密码">
+                    <span className="bot-work-login-password">
+                      <Input
+                        value={password}
+                        type={showPassword ? "text" : "password"}
+                        autoComplete={
+                          mode === "login"
+                            ? "current-password"
+                            : "new-password"
+                        }
+                        placeholder="至少 6 位"
+                        aria-label="密码"
+                        className="bot-work-login-input"
+                        onChange={(event) => setPassword(event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                        title={showPassword ? "隐藏密码" : "显示密码"}
+                        onClick={() => setShowPassword((show) => !show)}
+                      >
+                        {showPassword ? (
+                          <EyeOff size={17} strokeWidth={1.8} />
+                        ) : (
+                          <Eye size={17} strokeWidth={1.8} />
+                        )}
+                      </button>
+                    </span>
+                  </AuthField>
 
-              <p className="bot-work-login-legal">
-                继续即表示您同意 {config.site.siteName} 的
-                <span>服务条款</span>和<span>隐私政策</span>
-              </p>
+                  {message ? (
+                    <div className="bot-work-login-message" role="alert">
+                      {message}
+                    </div>
+                  ) : null}
+
+                  <button
+                    type="submit"
+                    className="bot-work-login-submit"
+                    disabled={busy}
+                  >
+                    {loading ? (
+                      <Loader2 className="bot-work-login-spin" />
+                    ) : null}
+                    <span>
+                      {loading
+                        ? "处理中"
+                        : mode === "login"
+                          ? "登录"
+                          : "注册"}
+                    </span>
+                  </button>
+                </form>
+
+                {config.site.registerEnabled ? (
+                  <p className="bot-work-login-mode-switch">
+                    <span>
+                      {mode === "login" ? "还没有账号？" : "已经有账号？"}
+                    </span>
+                    <button type="button" disabled={busy} onClick={switchMode}>
+                      {mode === "login" ? "注册" : "登录"}
+                    </button>
+                  </p>
+                ) : null}
+
+                <LoginLegalLinks config={config} />
+              </section>
             </section>
-          </section>
+          </div>
         </div>
-      </div>
+      )}
+      <LoginFiling filing={config.site.filing} />
     </main>
   );
+}
+
+function useConfiguredImageReady(source: string, enabled: boolean) {
+  const [readySource, setReadySource] = useState("");
+
+  useEffect(() => {
+    if (!enabled || !source || typeof window === "undefined") {
+      return;
+    }
+
+    let active = true;
+    const image = new window.Image();
+    const settle = () => {
+      if (active) {
+        setReadySource(source);
+      }
+    };
+
+    image.onload = settle;
+    image.onerror = settle;
+    image.src = source;
+    if (image.complete) {
+      settle();
+    }
+
+    return () => {
+      active = false;
+      image.onload = null;
+      image.onerror = null;
+    };
+  }, [enabled, source]);
+
+  return !enabled || !source || readySource === source;
 }
 
 function LoginHeader({
@@ -404,19 +500,12 @@ function LoginHeader({
 
         <nav className="bot-work-login-links" aria-label="站点链接">
           {config.links.map((link) => (
-            <a
-              key={link.id}
-              href={link.url}
-              target={link.target}
-              rel={link.target === "_blank" ? "noreferrer" : undefined}
-            >
-              {link.name}
-            </a>
+            <LoginLinkAnchor key={link.id} link={link} />
           ))}
         </nav>
 
-        <div className="bot-work-login-header-actions">
-          {config.links.length > 0 ? (
+        {config.links.length > 0 ? (
+          <div className="bot-work-login-header-actions">
             <button
               type="button"
               className="bot-work-login-menu-button"
@@ -427,12 +516,8 @@ function LoginHeader({
             >
               {mobileLinksOpen ? <X size={18} /> : <Menu size={18} />}
             </button>
-          ) : null}
-          <span className="bot-work-login-language" aria-label="当前语言：中文">
-            <Languages size={15} strokeWidth={1.8} />
-            中文
-          </span>
-        </div>
+          </div>
+        ) : null}
       </div>
 
       {mobileLinksOpen && config.links.length > 0 ? (
@@ -442,19 +527,118 @@ function LoginHeader({
           aria-label="移动端站点链接"
         >
           {config.links.map((link) => (
-            <a
+            <LoginLinkAnchor
               key={link.id}
-              href={link.url}
-              target={link.target}
-              rel={link.target === "_blank" ? "noreferrer" : undefined}
+              link={link}
               onClick={onCloseMobileLinks}
-            >
-              {link.name}
-            </a>
+            />
           ))}
         </nav>
       ) : null}
     </header>
+  );
+}
+
+function LoginLegalLinks({ config }: { config: BodyLoginConfig }) {
+  const { termsOfService, privacyPolicy } = config.legalLinks;
+  if (!termsOfService && !privacyPolicy) {
+    return null;
+  }
+
+  return (
+    <p className="bot-work-login-legal">
+      继续即表示您同意 {config.site.siteName} 的
+      {termsOfService ? <LoginLinkAnchor link={termsOfService} /> : null}
+      {termsOfService && privacyPolicy ? "和" : null}
+      {privacyPolicy ? <LoginLinkAnchor link={privacyPolicy} /> : null}
+    </p>
+  );
+}
+
+function LoginLinkAnchor({
+  link,
+  onClick,
+}: {
+  link: BodyLoginLink;
+  onClick?: () => void;
+}) {
+  return (
+    <a
+      href={loginLinkHref(link)}
+      target={link.target}
+      rel={link.target === "_blank" ? "noreferrer noopener" : undefined}
+      onClick={onClick}
+    >
+      {link.name}
+    </a>
+  );
+}
+
+const PUBLIC_CONTENT_QUERY_KEY = "content_id";
+
+function readPublicContentArticleID() {
+  if (typeof window === "undefined") {
+    return 0;
+  }
+  const value = Number(
+    new URLSearchParams(window.location.search).get(PUBLIC_CONTENT_QUERY_KEY) ||
+      0,
+  );
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function loginLinkHref(link: BodyLoginLink) {
+  if (link.type !== "article" || link.articleID <= 0) {
+    return link.url;
+  }
+  return currentLoginHref((url) => {
+    url.searchParams.set(PUBLIC_CONTENT_QUERY_KEY, String(link.articleID));
+  });
+}
+
+function publicContentBackHref() {
+  return currentLoginHref((url) => {
+    url.searchParams.delete(PUBLIC_CONTENT_QUERY_KEY);
+  });
+}
+
+function currentLoginHref(update: (url: URL) => void) {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  const url = new URL(window.location.href);
+  update(url);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+function LoginFiling({ filing }: { filing: BodyFilingInfo }) {
+  const rows = createBodyFilingRows(filing);
+  if (!hasBodyFilingRichContent(filing.content) && rows.length === 0) {
+    return null;
+  }
+
+  return (
+    <footer className="bot-work-login-filing" aria-label="站点备案信息">
+      <BodyFilingContent
+        filing={filing}
+        className="bot-work-login-filing-rich"
+        fallback={rows.map((row) => (
+          <span key={row.key} className="bot-work-login-filing-item">
+            {row.url ? (
+              <a
+                href={row.url}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                {row.label}
+              </a>
+            ) : (
+              row.label
+            )}
+          </span>
+        ))}
+      />
+    </footer>
   );
 }
 
@@ -471,7 +655,7 @@ function LoginArtwork({
       <BodyConfiguredImage
         src={image}
         alt={alt}
-        fallback={<img src={LOGIN_ARTWORK_SRC} alt={alt} />}
+        fallback={null}
       />
     </section>
   );

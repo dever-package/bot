@@ -44,6 +44,9 @@ func (AgentHook) ProviderBeforeSaveAgent(c *server.Context, params []any) any {
 	if shouldNormalizeField(record, "memory_enabled", partial) {
 		record["memory_enabled"] = util.ToBool(record["memory_enabled"])
 	}
+	if shouldNormalizeField(record, "opening_enabled", partial) {
+		record["opening_enabled"] = util.ToBool(record["opening_enabled"])
+	}
 	defaultInt16FieldOnCreateOrPresent(record, "status", defaultAgentStatus, partial)
 	defaultIntFieldOnCreateOrPresent(record, "sort", defaultAgentSort, partial)
 	if shouldNormalizeField(record, "temperature", partial) {
@@ -139,7 +142,7 @@ func builtinAgentUpdateRecord(definition map[string]any, existing *agentmodel.Ag
 	record := map[string]any{}
 	for _, field := range []string{
 		"name", "key", "kind", "cate_id", "description", "prompt", "power_cate_id",
-		"knowledge_cate_id", "skill_pack_id", "memory_enabled", "temperature",
+		"knowledge_cate_id", "skill_pack_id", "memory_enabled", "opening_enabled", "temperature",
 		"timeout_seconds", "max_auto_steps", "status", "sort",
 	} {
 		record[field] = definition[field]

@@ -58,6 +58,7 @@ export function useAgentChatStore({
   modalOpen,
   blockMs,
   lazySession = false,
+  proactiveOpening = false,
   assistantApi,
   runtimeApi,
   requestScope,
@@ -116,6 +117,9 @@ export function useAgentChatStore({
   const getActiveSessionID = useCallback(() => sessionIDRef.current, []);
   const getSessionTitle = useCallback((targetSessionID: number) => {
     return sessionViewsRef.current.get(targetSessionID)?.title || "新会话";
+  }, []);
+  const getSessionMessages = useCallback((targetSessionID: number) => {
+    return sessionViewsRef.current.get(targetSessionID)?.messages || [];
   }, []);
 
   const updateSessionMessages = useCallback(
@@ -272,6 +276,7 @@ export function useAgentChatStore({
     requestScope,
     getActiveSessionID,
     getSessionTitle,
+    getSessionMessages,
     updateSessionMessages,
     updateSessionTitle,
     syncSessionTitle,
@@ -372,6 +377,7 @@ export function useAgentChatStore({
     const sessionListToken = ++sessionListTokenRef.current;
     sessionsLoadingRef.current = true;
     setSessionsLoading(true);
+    setSessionsLoadingMore(false);
     if (!sessionIDRef.current) {
       setSessionLoading(true);
     }
@@ -396,7 +402,7 @@ export function useAgentChatStore({
       );
       lastSessionIDRef.current =
         sessionPage.sessions[sessionPage.sessions.length - 1]?.id || 0;
-      canLoadMoreSessionsRef.current = sessionPage.sessions.length > 0;
+      canLoadMoreSessionsRef.current = sessionPage.hasMore;
       setSessionsLoading(false);
 
       const currentSession = sessionPage.sessions[0];
@@ -407,7 +413,7 @@ export function useAgentChatStore({
         syncVisibleView(currentSession.id, cached);
         setSessionLoading(false);
       }
-      if (!currentSession && lazySession) {
+      if (!currentSession && lazySession && !proactiveOpening) {
         sessionIDRef.current = 0;
         setSessionID(0);
         setSessionTitle("新会话");
@@ -418,12 +424,15 @@ export function useAgentChatStore({
         agentKey,
         contextKey,
         sessionID: currentSession?.id,
-        create: !currentSession,
+        create: !currentSession && !proactiveOpening,
         title: "新会话",
         limit: INITIAL_MESSAGE_PAGE_SIZE,
       });
       if (loadTokenRef.current === token) {
         applySessionPayload(payload, !currentSession);
+        if (!currentSession && proactiveOpening && payload.session?.id) {
+          void runs.startOpening(payload.session.id);
+        }
       }
     } catch (currentError: unknown) {
       if (
@@ -448,7 +457,9 @@ export function useAgentChatStore({
     assistantApi,
     contextKey,
     lazySession,
+    proactiveOpening,
     runs.hasRun,
+    runs.startOpening,
     syncVisibleView,
   ]);
 
@@ -486,6 +497,9 @@ export function useAgentChatStore({
         });
         if (loadTokenRef.current === token) {
           applySessionPayload(payload, create);
+          if (create && proactiveOpening && payload.session?.id) {
+            void runs.startOpening(payload.session.id);
+          }
         }
       } catch (currentError: unknown) {
         if (loadTokenRef.current === token) {
@@ -497,7 +511,15 @@ export function useAgentChatStore({
         }
       }
     },
-    [agentKey, applySessionPayload, assistantApi, contextKey, syncVisibleView],
+    [
+      agentKey,
+      applySessionPayload,
+      assistantApi,
+      contextKey,
+      proactiveOpening,
+      runs.startOpening,
+      syncVisibleView,
+    ],
   );
 
   const openDraftSession = useCallback(() => {
@@ -513,13 +535,13 @@ export function useAgentChatStore({
 
   const startNewSession = useCallback(
     async () => {
-      if (lazySession) {
+      if (lazySession && !proactiveOpening) {
         openDraftSession();
         return;
       }
       await openSession(0, true);
     },
-    [lazySession, openDraftSession, openSession],
+    [lazySession, openDraftSession, openSession, proactiveOpening],
   );
 
   const renameSession = useCallback(
@@ -589,6 +611,7 @@ export function useAgentChatStore({
       return;
     }
     const token = sessionListTokenRef.current;
+    const previousLastSessionID = lastSessionIDRef.current;
     sessionsLoadingRef.current = true;
     setSessionsLoadingMore(true);
     try {
@@ -605,6 +628,8 @@ export function useAgentChatStore({
         canLoadMoreSessionsRef.current = false;
         return;
       }
+      const nextLastSessionID =
+        page.sessions[page.sessions.length - 1]?.id || 0;
       setSessions((current) =>
         appendUniqueSessions(
           current,
@@ -614,8 +639,11 @@ export function useAgentChatStore({
           })),
         ),
       );
-      lastSessionIDRef.current =
-        page.sessions[page.sessions.length - 1]?.id || 0;
+      lastSessionIDRef.current = nextLastSessionID;
+      canLoadMoreSessionsRef.current =
+        page.hasMore &&
+        nextLastSessionID > 0 &&
+        nextLastSessionID !== previousLastSessionID;
     } catch (currentError: unknown) {
       if (sessionListTokenRef.current === token) {
         setError(runtimeErrorMessage(currentError, "加载更多会话失败。"));

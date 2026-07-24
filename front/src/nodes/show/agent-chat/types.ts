@@ -16,6 +16,7 @@ export type ChatMessage = {
   id: string;
   recordID?: number;
   role: "user" | "assistant";
+  kind?: string;
   text: string;
   createdAt: string;
   content?: ReferenceContent;
@@ -37,6 +38,7 @@ export type AgentChatMessageActionContext = {
   running: boolean;
   error: boolean;
   hasPendingArtifacts: boolean;
+  document?: AgentChatDocument;
 };
 
 export type AgentChatArtifactActionContext = {
@@ -49,6 +51,17 @@ export type AgentChatArtifactActionRenderer = (
   context: AgentChatArtifactActionContext,
 ) => ReactNode;
 
+export type AgentChatDocumentActionContext = {
+  messageID: number;
+  document: AgentChatDocument;
+  running: boolean;
+  error: boolean;
+};
+
+export type AgentChatDocumentActionRenderer = (
+  context: AgentChatDocumentActionContext,
+) => ReactNode;
+
 export type ChatStreamOutput = AgentChatOutput & {
   event?: string;
   text?: string;
@@ -58,6 +71,7 @@ export type ChatStreamOutput = AgentChatOutput & {
 
 export type AgentChatRuntimeApis = {
   request: string;
+  opening?: string;
   stream: string;
   stop: string;
   status: string;
@@ -73,6 +87,7 @@ export type AgentChatStoreOptions = {
   modalOpen: boolean;
   blockMs: number;
   lazySession?: boolean;
+  proactiveOpening?: boolean;
   assistantApi: import("./api").AgentChatApi;
   runtimeApi: AgentChatRuntimeApis;
   requestScope?: Record<string, unknown>;
@@ -118,6 +133,7 @@ export function mapChatMessages(
     id: message.id ? `saved-${message.id}` : `saved-${index}`,
     recordID: message.id || undefined,
     role: message.role,
+    kind: message.kind,
     text: message.text,
     createdAt: message.createdAt,
     content: message.content,

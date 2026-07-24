@@ -40,6 +40,10 @@ import {
 import { NodeDetailRunError } from "./node-detail-run-error";
 import { useAssetReferenceProvider } from "../../asset/asset-reference-provider";
 import { CanvasAssetReferenceProviderContext } from "../space-reference-editor";
+import {
+  canvasReferenceContentFromTargets,
+  canvasReferenceTargetsFromContent,
+} from "../space-reference-content";
 import { isVideoComposePowerType } from "../space-power-presentation";
 import { VideoComposeView } from "../space-video-compose-view";
 import {
@@ -118,7 +122,7 @@ export function NodeDetailDialog({
   const [historyError, setHistoryError] = useState("");
   const [restoring, setRestoring] = useState(false);
   const [storyboardWorkflowAction, setStoryboardWorkflowAction] = useState<
-    "" | "confirming" | "revising"
+    "" | "confirming" | "revising" | "reviewing"
   >("");
   const [closing, setClosing] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
@@ -399,6 +403,42 @@ export function NodeDetailDialog({
     projectId,
     storyboardWorkflowAction,
   ]);
+
+  const reviewStoryboard = useCallback(
+    async (storyboard: StoryboardDocument) => {
+      if (storyboardWorkflowAction || !onRunNode) {
+        return;
+      }
+      const saved = await draft.flush();
+      if (!saved) {
+        return;
+      }
+      const prompt = storyboardReviewPrompt(storyboard);
+      const referenceTargets = canvasReferenceTargetsFromContent(
+        nodeRef.current.composerDraft?.promptContent,
+      );
+      setStoryboardWorkflowAction("reviewing");
+      try {
+        await onRunNode({
+          ...nodeRef.current,
+          composerDraft: {
+            ...(nodeRef.current.composerDraft || {}),
+            prompt,
+            promptContent: referenceTargets.length
+              ? canvasReferenceContentFromTargets(prompt, referenceTargets)
+              : undefined,
+          },
+        });
+        await loadDetail();
+        toast.success("AI 审查完成，请确认调整后的分镜");
+      } catch (error) {
+        toast.error(errorMessage(error, "AI 审查分镜失败"));
+      } finally {
+        setStoryboardWorkflowAction("");
+      }
+    },
+    [draft.flush, loadDetail, onRunNode, storyboardWorkflowAction],
+  );
 
   const retryDetail = useCallback(async () => {
     if (selectedVersionIdRef.current === currentVersionId) {
@@ -785,6 +825,7 @@ export function NodeDetailDialog({
                   storyboardFocus={storyboardFocus}
                   storyboardWorkflowAction={storyboardWorkflowAction}
                   onConfirmStoryboard={confirmStoryboard}
+                  onReviewStoryboard={reviewStoryboard}
                   onCreateStoryboardRevision={createStoryboardRevision}
                   onChange={draft.setDraft}
                 />
@@ -866,6 +907,18 @@ function detailContentLabel(
     return "音频内容";
   }
   return content.format === "markdown" ? "Markdown" : "富文本";
+}
+
+function storyboardReviewPrompt(storyboard: StoryboardDocument) {
+  return [
+    "请审查并优化下面这份现有分镜脚本，直接通过 submit_output 返回完整的新分镜，不要输出解释。",
+    "必须保持用户已经确定的标题、目标总时长、目标镜头数、画幅、画面类型、参考素材用途和明确剧情约束。",
+    "必须保留所有仍代表同一实体的 material、shot、speech、caption 稳定 ID，并原样保留 narrator_voice 与每个角色的 voice。",
+    "重点修复：镜头因果不连贯、重复 beat、动作过多或不可生成、人物道具凭空出现、错误的 match_previous/continue_previous、转场滥用、对白越界或重叠。",
+    "普通新镜头不要引用上一镜；只有需要匹配上一镜结束画面时使用 match_previous，只有同一动作从上一段真实尾帧继续时使用 continue_previous，二者互斥。",
+    "确认 target_shot_count 等于 shots 数量，target_duration 等于全部 duration 之和，镜头不超过 50 个。",
+    `当前分镜 JSON：${JSON.stringify(storyboard)}`,
+  ].join("\n");
 }
 
 function createVersionRequestId(action: string, versionId: number) {

@@ -24,7 +24,7 @@ const (
 )
 
 var agentCateSeed = []map[string]any{
-	{"id": DefaultAgentCateID, "name": "默认分类", "status": 1, "sort": 100},
+	{"id": DefaultAgentCateID, "name": "默认分类", "status": 1, "sort": 90},
 	{"id": SystemAgentCateID, "name": "系统内置", "status": 1, "sort": 110},
 }
 

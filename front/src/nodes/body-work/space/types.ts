@@ -307,6 +307,7 @@ export type CanvasComposerDraft = {
   paramValues?: Record<string, unknown>;
   selectedTargetId?: number;
   videoComposition?: CanvasVideoComposition;
+  storyboardReferences?: CanvasStoryboardReference[];
 };
 
 export type CanvasReferenceContent = {
@@ -323,6 +324,24 @@ export type CanvasReferenceContent = {
         ref_version_id?: number;
       }
   >;
+};
+
+export type CanvasStoryboardReferencePurpose =
+  | "visual_style"
+  | "motion_style"
+  | "character"
+  | "scene"
+  | "prop"
+  | "shot";
+
+export type CanvasStoryboardReference = {
+  key: string;
+  asset_id: number;
+  version_id?: number;
+  label: string;
+  kind: "image" | "video";
+  purpose: CanvasStoryboardReferencePurpose;
+  instruction: string;
 };
 
 export type CanvasStoryboardItemType =
@@ -343,6 +362,7 @@ export type CanvasStoryboardItemConfig = {
   generatedPrompt: string;
   dependencyNodeIds?: string[];
   referenceNodeIds?: string[];
+  externalReferenceAssetIds?: number[];
   shotId?: string;
   speechId?: string;
   speechIds?: string[];
