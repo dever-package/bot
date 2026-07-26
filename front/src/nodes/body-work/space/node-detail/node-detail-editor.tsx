@@ -91,6 +91,7 @@ export function NodeDetailEditor({
       <div className="ws-node-detail-storyboard">
         <StoryboardView
           storyboard={content.value as StoryboardDocument}
+          layout="split"
           editable={!readonly}
           referenceItems={referenceItems}
           focus={storyboardFocus}
