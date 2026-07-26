@@ -1,12 +1,4 @@
-import { Loader2, RefreshCw } from "lucide-react";
-
-export function BodyContentLoading() {
-  return (
-    <div className="body-content-state" aria-busy="true">
-      <Loader2 className="body-content-spinner" />
-    </div>
-  );
-}
+import { RefreshCw } from "lucide-react";
 
 export function BodyContentError({
   message,

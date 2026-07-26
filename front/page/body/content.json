@@ -1,7 +1,8 @@
 {
   "page": {
     "name": "内容阅读",
-    "type": 2
+    "type": 2,
+    "loading": "none"
   },
   "layout": {
     "type": "container"

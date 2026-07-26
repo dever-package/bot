@@ -170,7 +170,7 @@ function normalizeAssetName(value: string) {
 
 function saveActionClassName(appearance: SaveAssetActionAppearance) {
   if (appearance === "toolbar") {
-    return "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[#cfd8d3] bg-white px-2.5 text-xs font-medium text-[#365447] transition-colors hover:bg-[#eef3f0] disabled:opacity-60 [&>svg]:size-3.5";
+    return "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[var(--body-work-line)] bg-[var(--body-work-surface-raised)] px-2.5 text-xs font-medium text-[var(--body-work-text)] transition-colors hover:bg-[var(--body-work-active)] disabled:cursor-not-allowed disabled:bg-[var(--body-work-active)] disabled:text-[var(--body-work-muted)] disabled:opacity-100 [&>svg]:size-3.5";
   }
   if (appearance === "media") {
     return "inline-flex size-8 items-center justify-center rounded-md border border-white/70 bg-white/95 text-[#365447] shadow-sm transition hover:bg-white disabled:opacity-60 [&>svg]:size-4";

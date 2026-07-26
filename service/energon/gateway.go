@@ -84,18 +84,7 @@ func (s GatewayService) Handle(ctx context.Context, raw GatewayRequest) (*Gatewa
 }
 
 func (s GatewayService) Validate(ctx context.Context, raw GatewayRequest) error {
-	prepared, mode, err := prepareGatewayRequest(raw)
-	if err != nil {
-		return err
-	}
-	if mode == ModeProxy {
-		return fmt.Errorf("代理请求不支持能力预检")
-	}
-	req, err := s.normalizeGatewayRequest(prepared, mode)
-	if err != nil {
-		return err
-	}
-	plan, err := s.resolveNormalizePlan(ctx, req)
+	req, plan, err := s.prepareValidationPlan(ctx, raw)
 	if err != nil {
 		return err
 	}
@@ -111,6 +100,44 @@ func (s GatewayService) Validate(ctx context.Context, raw GatewayRequest) error 
 		return lastErr
 	}
 	return fmt.Errorf("能力没有可用实现: %s", req.Name)
+}
+
+// ValidatePowerTarget validates one exact source candidate. Unlike the normal
+// source resolver, this method does not let another compatible target satisfy
+// the validation request.
+func (s GatewayService) ValidatePowerTarget(ctx context.Context, raw GatewayRequest, targetID uint64) error {
+	if targetID == 0 {
+		return fmt.Errorf("能力来源不能为空")
+	}
+	req, plan, err := s.prepareValidationPlan(ctx, raw)
+	if err != nil {
+		return err
+	}
+	for _, target := range plan.targets {
+		if target.ID == targetID {
+			return s.validateNormalizeTarget(ctx, req, plan.power, target)
+		}
+	}
+	return fmt.Errorf("指定来源与当前参数不兼容: %d", targetID)
+}
+
+func (s GatewayService) prepareValidationPlan(ctx context.Context, raw GatewayRequest) (*botprotocol.ShemicRequest, normalizePlan, error) {
+	prepared, mode, err := prepareGatewayRequest(raw)
+	if err != nil {
+		return nil, normalizePlan{}, err
+	}
+	if mode == ModeProxy {
+		return nil, normalizePlan{}, fmt.Errorf("代理请求不支持能力预检")
+	}
+	req, err := s.normalizeGatewayRequest(prepared, mode)
+	if err != nil {
+		return nil, normalizePlan{}, err
+	}
+	plan, err := s.resolveNormalizePlan(ctx, req)
+	if err != nil {
+		return nil, normalizePlan{}, err
+	}
+	return req, plan, nil
 }
 
 func (s GatewayService) validateNormalizeTarget(

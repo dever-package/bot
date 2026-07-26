@@ -24,7 +24,7 @@ import "../shared/body-theme.css";
 import { useBodyAppearance } from "../shared/use-body-appearance";
 import { BodyContentArticleView } from "./content-article-view";
 import { ContentOutline } from "./content-outline";
-import { BodyContentError, BodyContentLoading } from "./content-state";
+import { BodyContentError } from "./content-state";
 import { useBodyContentArticle } from "./use-content-article";
 import "./content-page.css";
 
@@ -110,7 +110,6 @@ export function StandaloneContentPage() {
         data-outline={outlineVisible ? "visible" : undefined}
       >
         <section className="body-content-public-reader" aria-label="文章详情">
-          {state.loading ? <BodyContentLoading /> : null}
           {!state.loading && state.error ? (
             <BodyContentError message={state.error} onRetry={state.reload} />
           ) : null}

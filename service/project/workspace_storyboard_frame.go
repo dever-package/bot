@@ -221,12 +221,16 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 		return nil, err
 	}
 	for _, reference := range promptReferences {
-		asset := s.project.asset.FindProjectAsset(ctx, projectID, reference.AssetID)
-		if asset == nil {
-			return nil, fmt.Errorf("参考资产不存在: %d", reference.AssetID)
+		asset, _, err := resolveCanvasReferenceAsset(ctx, projectID, reference)
+		if err != nil {
+			label := strings.TrimSpace(reference.Label)
+			if label == "" {
+				label = fmt.Sprintf("%d", reference.AssetID)
+			}
+			return nil, fmt.Errorf("参考资产“%s”不可用: %w", label, err)
 		}
 		appendReference(
-			asset.Kind,
+			textValue(asset["kind"]),
 			reference.AssetID,
 			reference.Usage,
 			reference.Required || externalAssetIDs[reference.AssetID],

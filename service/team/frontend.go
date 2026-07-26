@@ -314,11 +314,10 @@ func (s Service) prepareCanvasPower(ctx context.Context, req CanvasPowerRunReque
 		return preparedCanvasPower{}, err
 	}
 	req.SourceTargetID = form.SelectedTargetID
-	boundReferences, err := energoninput.BindMediaReferences(req.Params, form.Params, req.MediaReferences)
+	req.Params, err = s.prepareCanvasPowerParamValues(ctx, power, req, form)
 	if err != nil {
 		return preparedCanvasPower{}, err
 	}
-	req.Params = energonservice.ApplyPowerParamDefaults(boundReferences.Values, form.Params)
 	return preparedCanvasPower{
 		request:      req,
 		workspaceRun: workspaceRun,
@@ -327,6 +326,87 @@ func (s Service) prepareCanvasPower(ctx context.Context, req CanvasPowerRunReque
 		flow:         flow,
 		power:        power,
 	}, nil
+}
+
+type canvasPowerParamCandidate struct {
+	values     map[string]any
+	boundCount int
+}
+
+func (s Service) prepareCanvasPowerParamValues(
+	ctx context.Context,
+	power PowerOption,
+	req CanvasPowerRunRequest,
+	form energonservice.PowerParamConfig,
+) (map[string]any, error) {
+	if len(req.MediaReferences) == 0 || form.SelectedTargetID > 0 {
+		return bindCanvasPowerParamValues(req.Params, form.Params, req.MediaReferences)
+	}
+
+	var best *canvasPowerParamCandidate
+	reasons := make([]string, 0, len(form.Sources))
+	for _, source := range form.Sources {
+		targetForm, err := s.gateway.PowerTargetParamConfig(ctx, power.Key, source.TargetID)
+		if err != nil {
+			reasons = append(reasons, canvasPowerSourceFailure(source.Name, err))
+			continue
+		}
+		bound, err := energoninput.BindMediaReferences(req.Params, targetForm.Params, req.MediaReferences)
+		if err != nil {
+			reasons = append(reasons, canvasPowerSourceFailure(source.Name, err))
+			continue
+		}
+		values := energonservice.ApplyPowerParamDefaults(bound.Values, targetForm.Params)
+		if err := s.gateway.ValidatePowerTarget(ctx, energonservice.GatewayRequest{
+			Method: "POST",
+			Path:   "/bot/admin/energon/request",
+			Body: canvasPowerGatewayBody(
+				power,
+				mergeMaps(req.Input, values),
+				source.TargetID,
+			),
+		}, source.TargetID); err != nil {
+			reasons = append(reasons, canvasPowerSourceFailure(source.Name, err))
+			continue
+		}
+		candidate := &canvasPowerParamCandidate{
+			values:     values,
+			boundCount: len(bound.Bound),
+		}
+		if candidate.boundCount == len(req.MediaReferences) {
+			return candidate.values, nil
+		}
+		if best == nil || candidate.boundCount > best.boundCount {
+			best = candidate
+		}
+	}
+	if best != nil {
+		return best.values, nil
+	}
+	if len(reasons) > 0 {
+		return nil, fmt.Errorf("当前素材没有兼容的能力来源：%s", strings.Join(reasons, "；"))
+	}
+	return bindCanvasPowerParamValues(req.Params, form.Params, req.MediaReferences)
+}
+
+func bindCanvasPowerParamValues(
+	values map[string]any,
+	params []energonservice.PowerParam,
+	references []energoninput.MediaReference,
+) (map[string]any, error) {
+	bound, err := energoninput.BindMediaReferences(values, params, references)
+	if err != nil {
+		return nil, err
+	}
+	return energonservice.ApplyPowerParamDefaults(bound.Values, params), nil
+}
+
+func canvasPowerSourceFailure(sourceName string, err error) string {
+	name := strings.TrimSpace(sourceName)
+	if name == "" {
+		name = "未命名来源"
+	}
+	return name + "：" + err.Error()
 }
 
 func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) (map[string]any, error) {

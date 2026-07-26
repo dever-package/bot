@@ -20,6 +20,7 @@ type powerParamConfigMode uint8
 const (
 	powerParamConfigForm powerParamConfigMode = iota
 	powerParamConfigRuntime
+	powerParamConfigTarget
 )
 
 func (s GatewayService) PowerParams(ctx context.Context, powerKey string) ([]PowerParam, error) {
@@ -65,6 +66,13 @@ func (s GatewayService) RuntimePowerParamConfig(ctx context.Context, powerKey st
 	return s.powerParamConfig(ctx, powerKey, targetID, powerParamConfigRuntime)
 }
 
+// PowerTargetParamConfig returns the exact parameter contract for one power
+// target. It is used by headless callers to evaluate automatic source
+// candidates without merging source-specific media parameters together.
+func (s GatewayService) PowerTargetParamConfig(ctx context.Context, powerKey string, targetID uint64) (PowerParamConfig, error) {
+	return s.powerParamConfig(ctx, powerKey, targetID, powerParamConfigTarget)
+}
+
 func (s GatewayService) powerParamConfig(
 	ctx context.Context,
 	powerKey string,
@@ -83,7 +91,7 @@ func (s GatewayService) powerParamConfig(
 
 	requestedTargetID := targetID
 	sourceRule := normalizePowerSourceRule(int(power.SourceRule))
-	if sourceRule != powerSourceRulePick {
+	if mode != powerParamConfigTarget && sourceRule != powerSourceRulePick {
 		targetID = 0
 	}
 	sources, selectedTargetID := s.powerSources(ctx, power, targetID)
@@ -119,6 +127,12 @@ func resolvePowerParamSelection(
 	resolvedTargetID uint64,
 	mode powerParamConfigMode,
 ) (uint64, bool, error) {
+	if mode == powerParamConfigTarget {
+		if requestedTargetID == 0 || resolvedTargetID != requestedTargetID {
+			return 0, false, fmt.Errorf("指定来源不存在或不可用: %d", requestedTargetID)
+		}
+		return requestedTargetID, false, nil
+	}
 	if sourceRule != powerSourceRulePick {
 		return 0, true, nil
 	}

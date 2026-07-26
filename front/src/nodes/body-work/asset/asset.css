@@ -45,7 +45,7 @@
 .wb-asset-filter-row > strong {
   width: 32px;
   flex: 0 0 32px;
-  color: #68716d;
+  color: var(--body-work-muted);
   font-size: 12px;
   font-weight: 600;
 }
@@ -64,7 +64,7 @@
   align-items: center;
   gap: 2px;
   border-radius: 5px;
-  background: #f3f5f4;
+  background: var(--body-work-active);
   padding: 2px;
 }
 
@@ -76,7 +76,7 @@
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: #7a847f;
+  color: var(--body-work-muted);
   cursor: pointer;
   padding: 0 8px;
   font-size: 11px;
@@ -84,12 +84,12 @@
 }
 
 .wb-asset-view-switch button:hover {
-  color: #25312b;
+  color: var(--body-work-text);
 }
 
 .wb-asset-view-switch button.is-active {
   background: var(--body-work-surface-raised);
-  color: #36443d;
+  color: var(--body-work-text);
   box-shadow: 0 1px 2px rgba(19, 34, 27, 0.08);
 }
 
@@ -103,9 +103,9 @@
   flex: 0 0 auto;
   align-items: center;
   overflow: hidden;
-  border: 1px solid #dfe4e1;
+  border: 1px solid var(--body-work-line);
   border-radius: 5px;
-  background: #f2f4f3;
+  background: var(--body-work-active);
 }
 
 .wb-asset-segments button {
@@ -113,19 +113,19 @@
   border: 0;
   border-right: 1px solid transparent;
   background: transparent;
-  color: #69736e;
+  color: var(--body-work-muted);
   cursor: pointer;
   padding: 0 11px;
   white-space: nowrap;
 }
 
 .wb-asset-segments button:hover {
-  color: #1b2721;
+  color: var(--body-work-text);
 }
 
 .wb-asset-segments button.is-active {
   background: var(--body-work-surface-raised);
-  color: #17201c;
+  color: var(--body-work-text);
   font-weight: 600;
   box-shadow: 0 1px 3px rgba(19, 34, 27, 0.1);
 }
@@ -138,21 +138,21 @@
 .wb-asset-select select {
   width: min(190px, 28vw);
   height: 32px;
-  border: 1px solid #d8ddda;
+  border: 1px solid var(--body-work-line);
   border-radius: 5px;
   outline: none;
   background: var(--body-work-surface-raised);
-  color: #25312b;
+  color: var(--body-work-text);
   padding: 0 28px 0 9px;
 }
 
 .wb-asset-select select:focus {
-  border-color: #789184;
+  border-color: var(--body-work-primary);
 }
 
 .wb-asset-select select:disabled {
-  background: #f4f5f5;
-  color: #9aa29e;
+  background: var(--body-work-active);
+  color: var(--body-work-muted);
 }
 
 .wb-asset-collection-back {
@@ -161,17 +161,17 @@
   height: 32px;
   align-items: center;
   gap: 7px;
-  border: 1px solid #d8ddda;
+  border: 1px solid var(--body-work-line);
   border-radius: 5px;
   background: var(--body-work-surface-raised);
-  color: #25312b;
+  color: var(--body-work-text);
   cursor: pointer;
   padding: 0 11px;
 }
 
 .wb-asset-collection-back:hover {
-  border-color: #aebbb4;
-  background: #f4f6f5;
+  border-color: var(--body-work-primary);
+  background: var(--body-work-active);
 }
 
 .wb-asset-collection-back svg {
@@ -191,7 +191,7 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
-  color: #76807b;
+  color: var(--body-work-muted);
   font-size: 12px;
 }
 
@@ -205,31 +205,31 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: #68736d;
+  color: var(--body-work-muted);
   cursor: pointer;
 }
 
 .wb-asset-browser-actions > button:hover,
 .wb-asset-pagination button:hover:not(:disabled) {
-  background: #eef1ef;
-  color: #17201c;
+  background: var(--body-work-active);
+  color: var(--body-work-text);
 }
 
 .wb-asset-browser-actions > button.wb-asset-local-upload {
   width: auto;
   min-width: 92px;
   gap: 6px;
-  border: 1px solid #d8ddda;
+  border: 1px solid var(--body-work-line);
   background: var(--body-work-surface-raised);
-  color: #25312b;
+  color: var(--body-work-text);
   padding: 0 11px;
   font-weight: 600;
   white-space: nowrap;
 }
 
 .wb-asset-browser-actions > button.wb-asset-local-upload:hover:not(:disabled) {
-  border-color: #b6c0bb;
-  background: #f4f6f5;
+  border-color: var(--body-work-primary);
+  background: var(--body-work-active);
 }
 
 .wb-asset-browser-actions > button:disabled {
@@ -261,7 +261,7 @@
   position: relative;
   min-width: 0;
   overflow: hidden;
-  border: 1px solid #dde3e0;
+  border: 1px solid var(--body-work-line);
   border-radius: 6px;
   background: var(--body-work-surface);
   transition: border-color 140ms ease, box-shadow 140ms ease;
@@ -269,7 +269,7 @@
 
 .wb-asset-card:hover,
 .wb-asset-card:focus-within {
-  border-color: #aab8b1;
+  border-color: var(--body-work-muted);
   box-shadow: 0 5px 16px rgba(21, 36, 29, 0.08);
 }
 
@@ -291,8 +291,8 @@
   width: 100%;
   aspect-ratio: 4 / 3;
   overflow: hidden;
-  border-bottom: 1px solid #e7eae8;
-  background: #f1f3f2;
+  border-bottom: 1px solid var(--body-work-line);
+  background: var(--body-work-active);
 }
 
 .wb-asset-card-preview-open {
@@ -318,7 +318,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-rows: repeat(2, minmax(0, 1fr));
   gap: 2px;
-  background: #dfe5e2;
+  background: var(--body-work-line);
   pointer-events: none;
 }
 
@@ -326,7 +326,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: #edf0ee;
+  background: var(--body-work-active);
 }
 
 .wb-asset-collection-preview.has-1 > div:first-child {
@@ -363,8 +363,8 @@
   justify-content: center;
   flex-direction: column;
   gap: 10px;
-  background: #edf1ef;
-  color: #617269;
+  background: var(--body-work-active);
+  color: var(--body-work-muted);
   pointer-events: none;
 }
 
@@ -384,13 +384,13 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #e8ecea;
+  background: var(--body-work-active);
 }
 
 .wb-asset-lazy-cover::before {
   position: absolute;
   inset: 0;
-  background: #e8ecea;
+  background: var(--body-work-active);
   content: "";
   opacity: 1;
   transition: opacity 160ms ease;
@@ -427,13 +427,13 @@
 
 .wb-asset-lazy-cover.is-failed::before {
   animation: none;
-  background: #edf0ee;
+  background: var(--body-work-active);
 }
 
 .wb-asset-lazy-cover.is-failed > span {
   position: relative;
   z-index: 1;
-  color: #7a857f;
+  color: var(--body-work-muted);
   font-size: 11px;
 }
 
@@ -655,11 +655,11 @@
 }
 
 .wb-detail-readonly-content.is-audio {
-  background: #fbfcfb;
+  background: var(--body-work-surface-raised);
 }
 
 .wb-detail-readonly-content.is-file {
-  background: #fbfcfb;
+  background: var(--body-work-surface-raised);
 }
 
 .wb-asset-file-preview {
@@ -670,7 +670,7 @@
   align-items: center;
   gap: 18px;
   margin: 16px auto 0;
-  border: 1px solid #dce3df;
+  border: 1px solid var(--body-work-line);
   border-radius: 8px;
   background: var(--body-work-surface);
   padding: 22px 24px;
@@ -684,7 +684,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  background: #edf2ef;
+  background: var(--body-work-primary-soft);
   color: var(--body-work-primary-strong);
 }
 
@@ -701,7 +701,7 @@
 
 .wb-asset-file-copy strong {
   overflow: hidden;
-  color: #17201c;
+  color: var(--body-work-text);
   font-size: 16px;
   font-weight: 650;
   text-overflow: ellipsis;
@@ -710,7 +710,7 @@
 
 .wb-asset-file-copy span,
 .wb-asset-file-unavailable {
-  color: #7a857f;
+  color: var(--body-work-muted);
   font-size: 12px;
 }
 
@@ -720,7 +720,7 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
-  border: 1px solid #cfd9d3;
+  border: 1px solid var(--body-work-line);
   border-radius: 5px;
   background: var(--body-work-surface-raised);
   color: var(--body-work-primary-strong);
@@ -731,8 +731,8 @@
 }
 
 .wb-asset-file-preview > a:hover {
-  border-color: #aebfb6;
-  background: #f2f5f3;
+  border-color: var(--body-work-primary);
+  background: var(--body-work-active);
 }
 
 .wb-asset-file-preview > a:focus-visible {
@@ -792,7 +792,7 @@
   height: 22px;
   align-items: center;
   justify-content: center;
-  color: #718078;
+  color: var(--body-work-muted);
   pointer-events: none;
 }
 
@@ -841,7 +841,7 @@
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-  color: #17201c;
+  color: var(--body-work-text);
   font-size: 14px;
   font-weight: 650;
   line-height: 20px;
@@ -851,7 +851,7 @@
 
 .wb-asset-card-copy span {
   margin-top: 5px;
-  color: #7a847f;
+  color: var(--body-work-muted);
   font-size: 11px;
 }
 
@@ -888,14 +888,14 @@
   align-items: center;
   justify-content: center;
   gap: 5px;
-  border: 1px solid rgba(210, 218, 214, 0.95);
+  border: 1px solid var(--body-work-line);
   border-radius: 5px;
   background: color-mix(
     in srgb,
     var(--body-work-surface-raised) 96%,
     transparent
   );
-  color: #425149;
+  color: var(--body-work-text);
   cursor: pointer;
   padding: 0 9px;
   font-size: 12px;
@@ -942,7 +942,7 @@
   justify-content: center;
   flex-direction: column;
   gap: 10px;
-  color: #7a847f;
+  color: var(--body-work-muted);
   text-align: center;
 }
 
@@ -967,9 +967,9 @@
   align-items: center;
   justify-content: center;
   gap: 10px;
-  border-top: 1px solid #e2e6e4;
+  border-top: 1px solid var(--body-work-line);
   background: var(--body-work-surface);
-  color: #69736e;
+  color: var(--body-work-muted);
   font-size: 12px;
 }
 
@@ -1008,7 +1008,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-bottom: 1px solid #e2e6e4;
+  border-bottom: 1px solid var(--body-work-line);
   padding: 10px 14px 10px 18px;
 }
 
@@ -1018,13 +1018,13 @@
 }
 
 .wb-asset-reference-dialog > header h2 {
-  color: #17201c;
+  color: var(--body-work-text);
   font-size: 15px;
 }
 
 .wb-asset-reference-dialog > header p {
   margin-top: 2px;
-  color: #77817c;
+  color: var(--body-work-muted);
   font-size: 12px;
 }
 
@@ -1037,12 +1037,13 @@
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #4f5a55;
+  color: var(--body-work-muted);
   cursor: pointer;
 }
 
 .wb-asset-reference-dialog > header button:hover {
-  background: #eef1ef;
+  background: var(--body-work-active);
+  color: var(--body-work-text);
 }
 
 .wb-asset-reference-dialog > header svg {
@@ -1072,10 +1073,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-top: 1px solid #e2e6e4;
+  border-top: 1px solid var(--body-work-line);
   background: var(--body-work-surface);
   padding: 10px 16px 10px 18px;
-  color: #6e7873;
+  color: var(--body-work-muted);
   font-size: 12px;
 }
 
@@ -1088,10 +1089,10 @@
 .wb-asset-picker-footer button {
   min-width: 72px;
   height: 36px;
-  border: 1px solid #d8ddda;
+  border: 1px solid var(--body-work-line);
   border-radius: 5px;
   background: var(--body-work-surface-raised);
-  color: #25312b;
+  color: var(--body-work-text);
   cursor: pointer;
   padding: 0 14px;
   font: inherit;
@@ -1134,11 +1135,11 @@
 .wb-asset-rename-dialog {
   width: min(460px, calc(100vw - 40px));
   overflow: hidden;
-  border: 1px solid #dce2df;
+  border: 1px solid var(--body-work-line);
   border-radius: 7px;
   background: var(--body-work-surface-raised);
   box-shadow: 0 24px 70px rgba(13, 20, 17, 0.26);
-  color: #17201c;
+  color: var(--body-work-text);
   font-size: 13px;
   letter-spacing: 0;
 }
@@ -1159,7 +1160,7 @@
 }
 
 .wb-asset-rename-dialog > header {
-  border-bottom: 1px solid #e3e7e5;
+  border-bottom: 1px solid var(--body-work-line);
 }
 
 .wb-asset-rename-dialog > header > div {
@@ -1180,7 +1181,7 @@
 
 .wb-asset-rename-dialog header p {
   margin-top: 2px;
-  color: #77817c;
+  color: var(--body-work-muted);
   font-size: 11px;
 }
 
@@ -1211,19 +1212,20 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: #5e6964;
+  color: var(--body-work-muted);
   cursor: pointer;
 }
 
 .wb-asset-rename-dialog > header > button:hover:not(:disabled) {
-  background: #eef1ef;
+  background: var(--body-work-active);
+  color: var(--body-work-text);
 }
 
 .wb-asset-rename-dialog > label {
   display: grid;
   gap: 7px;
   padding: 18px 16px 10px;
-  color: #39463f;
+  color: var(--body-work-text);
   font-weight: 600;
 }
 
@@ -1231,11 +1233,11 @@
   width: 100%;
   height: 40px;
   box-sizing: border-box;
-  border: 1px solid #d5dcd8;
+  border: 1px solid var(--body-work-line);
   border-radius: 5px;
   outline: none;
   background: var(--body-work-surface);
-  color: #17201c;
+  color: var(--body-work-text);
   padding: 0 11px;
   font-weight: 400;
 }
@@ -1266,10 +1268,10 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border: 1px solid #d5dcd8;
+  border: 1px solid var(--body-work-line);
   border-radius: 5px;
   background: var(--body-work-surface);
-  color: #25312b;
+  color: var(--body-work-text);
   cursor: pointer;
   padding: 0 14px;
   font-weight: 600;
@@ -1303,7 +1305,7 @@
 
 @keyframes wb-asset-cover-pulse {
   to {
-    background: #f1f3f2;
+    background: var(--body-work-surface-raised);
   }
 }
 

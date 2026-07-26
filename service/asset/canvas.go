@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	assetmodel "github.com/dever-package/bot/model/asset"
+	projectmodel "github.com/dever-package/bot/model/project"
 )
 
 type CanvasMaterialSlot struct {
@@ -13,10 +14,14 @@ type CanvasMaterialSlot struct {
 }
 
 // CanvasReferences returns only current assets needed to hydrate one canvas.
-// Explicit references may point across categories; material slots stay scoped
-// to the canvas category.
+// Explicit references may point across categories and projects in the same
+// team; material slots stay scoped to the current canvas category.
 func (s Service) CanvasReferences(ctx context.Context, projectID uint64, assetCateID uint64, assetIDs []uint64, nodeKeys []string) []map[string]any {
 	if projectID == 0 {
+		return []map[string]any{}
+	}
+	scope, ok := resolveCanvasAssetScope(ctx, projectID)
+	if !ok {
 		return []map[string]any{}
 	}
 	assetModel := assetmodel.NewAssetModel()
@@ -24,12 +29,11 @@ func (s Service) CanvasReferences(ctx context.Context, projectID uint64, assetCa
 	if ids := uniqueCanvasAssetIDs(assetIDs); len(ids) > 0 {
 		for _, row := range assetModel.Select(ctx, map[string]any{
 			"id":         ids,
-			"project_id": projectID,
 			"kind":       map[string]any{"neq": assetmodel.KindCollection},
 			"status":     assetmodel.StatusCurrent,
 			"version_id": map[string]any{"gt": 0},
 		}) {
-			if row != nil {
+			if scope.contains(row) {
 				rowsByID[row.ID] = row
 			}
 		}
@@ -44,7 +48,7 @@ func (s Service) CanvasReferences(ctx context.Context, projectID uint64, assetCa
 			"status":        assetmodel.StatusCurrent,
 			"version_id":    map[string]any{"gt": 0},
 		}) {
-			if row != nil {
+			if scope.contains(row) {
 				rowsByID[row.ID] = row
 			}
 		}
@@ -59,6 +63,24 @@ func (s Service) CanvasReferences(ctx context.Context, projectID uint64, assetCa
 		items = append(items, assetListMap(*row, versions[row.VersionID], QueryContentFull))
 	}
 	return items
+}
+
+func resolveCanvasAssetScope(ctx context.Context, projectID uint64) (teamAssetScope, bool) {
+	project := projectmodel.NewProjectModel().Find(ctx, map[string]any{
+		"id":     projectID,
+		"status": projectmodel.StatusEnabled,
+	})
+	if project == nil || project.TeamID == 0 {
+		return teamAssetScope{}, false
+	}
+	scope, err := resolveTeamAssetScope(ctx, project.TeamID)
+	if err != nil {
+		return teamAssetScope{}, false
+	}
+	if _, exists := scope.ProjectIDs[projectID]; !exists {
+		return teamAssetScope{}, false
+	}
+	return scope, true
 }
 
 func uniqueCanvasAssetIDs(values []uint64) []uint64 {
