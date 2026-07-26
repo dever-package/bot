@@ -1,0 +1,32 @@
+{
+  "src/runtime-entry.ts": {
+    "file": "bot.js",
+    "name": "runtime-entry",
+    "src": "src/runtime-entry.ts",
+    "isEntry": true,
+    "css": [
+      "bot.css"
+    ]
+  },
+  "style.css": {
+    "file": "bot.css",
+    "src": "style.css"
+  },
+  "__plugin": {
+    "name": "bot",
+    "nodes": [
+      "bot-body-content-page",
+      "bot-body-work-home-shell",
+      "bot-body-work-login-page",
+      "bot-body-work-project-page",
+      "bot-body-work-space-page",
+      "show-agent",
+      "show-agent-chat",
+      "show-knowledge-file-manager",
+      "show-skill-creator",
+      "show-skill-test",
+      "show-stream-request",
+      "show-team-workspace"
+    ]
+  }
+}
