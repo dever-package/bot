@@ -449,7 +449,16 @@ func validateStoryboard(document map[string]any) error {
 		return fmt.Errorf("分镜目标总时长与镜头时长之和不一致")
 	}
 	if storyboardText(document["summary"]) == "" {
-		document["summary"] = strings.Join(shotDescriptions, "；")
+		storyline, _ := document["storyline"].(map[string]any)
+		summary := botmodel.StoryboardSummaryFromStoryline(
+			storyboardText(storyline["setup"]),
+			storyboardText(storyline["development"]),
+			storyboardText(storyline["payoff"]),
+		)
+		if summary == "" {
+			summary = strings.Join(shotDescriptions, "；")
+		}
+		document["summary"] = summary
 	}
 	if err := validateStoredStoryboardReferences(document); err != nil {
 		return err

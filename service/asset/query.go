@@ -22,19 +22,20 @@ const (
 )
 
 type QueryRequest struct {
-	TeamID       uint64
-	SourceType   string
-	SourceID     uint64
-	ProjectID    uint64
-	AssetCateID  uint64
-	CollectionID uint64
-	NodeKey      string
-	Role         string
-	Kind         string
-	View         string
-	ContentMode  string
-	Page         int
-	PageSize     int
+	TeamID             uint64
+	SourceType         string
+	SourceID           uint64
+	ProjectID          uint64
+	AssetCateID        uint64
+	CollectionID       uint64
+	NodeKey            string
+	Role               string
+	Kind               string
+	ExcludeCollections bool
+	View               string
+	ContentMode        string
+	Page               int
+	PageSize           int
 }
 
 type CurrentReference struct {
@@ -220,11 +221,15 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 		filter["role"] = assetmodel.RoleMaterial
 	}
 	if normalized.Kind != "" {
-		if normalized.CollectionID == 0 && normalized.Kind != assetmodel.KindCollection {
+		if normalized.CollectionID == 0 &&
+			normalized.Kind != assetmodel.KindCollection &&
+			!normalized.ExcludeCollections {
 			filter["kind"] = []string{normalized.Kind, assetmodel.KindCollection}
 		} else {
 			filter["kind"] = normalized.Kind
 		}
+	} else if normalized.ExcludeCollections {
+		filter["kind"] = map[string]any{"neq": assetmodel.KindCollection}
 	}
 
 	assetModel := assetmodel.NewAssetModel()
@@ -504,6 +509,9 @@ func normalizeQueryRequest(req QueryRequest) (QueryRequest, error) {
 		default:
 			return QueryRequest{}, fmt.Errorf("资产类型不合法")
 		}
+	}
+	if req.ExcludeCollections && req.Kind == assetmodel.KindCollection {
+		return QueryRequest{}, fmt.Errorf("排除集合时不能筛选集合")
 	}
 	return req, nil
 }

@@ -18,6 +18,7 @@ import type {
   AssetVersionPage,
   CanvasResultSourceRef,
   OutputTypeOption,
+  PowerCategoryOption,
   PowerForm,
   PowerKindOption,
   PowerOption,
@@ -86,6 +87,7 @@ export async function sendSpaceMessage(
 }
 export async function fetchSpacePowers(projectId: number): Promise<{
   powers: PowerOption[];
+  powerCategories: PowerCategoryOption[];
   powerKinds: PowerKindOption[];
   outputTypes: OutputTypeOption[];
 }> {

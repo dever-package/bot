@@ -4,6 +4,20 @@ import { getCompatModule } from "@dever/front-plugin";
 type RichTextViewProps = {
   value: unknown;
   className?: string;
+  outline?: BodyRichTextOutlineOptions;
+  onOutlineChange?: (items: BodyRichTextOutlineItem[]) => void;
+};
+
+export type BodyRichTextOutlineItem = {
+  id: string;
+  level: number;
+  text: string;
+};
+
+export type BodyRichTextOutlineOptions = {
+  minLevel?: number;
+  maxLevel?: number;
+  idPrefix?: string;
 };
 
 type RichTextToHtml = (
@@ -20,15 +34,26 @@ export function BodyRichTextView({
   value,
   className,
   fallback,
+  outline,
+  onOutlineChange,
 }: {
   value: unknown;
   className?: string;
   fallback?: ReactNode;
+  outline?: BodyRichTextOutlineOptions;
+  onOutlineChange?: (items: BodyRichTextOutlineItem[]) => void;
 }) {
   if (!hasBodyRichText(value) || !RichTextView) {
     return <>{fallback}</>;
   }
-  return <RichTextView value={value} className={className} />;
+  return (
+    <RichTextView
+      value={value}
+      className={className}
+      outline={outline}
+      onOutlineChange={onOutlineChange}
+    />
+  );
 }
 
 export function hasBodyRichText(value: unknown) {

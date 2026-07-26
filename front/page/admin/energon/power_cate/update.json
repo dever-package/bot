@@ -33,11 +33,28 @@
             "message": "分类名称不能为空。"
           }
         ]
+      },
+      {
+        "type": "form-radio",
+        "value": "form.type",
+        "mode": "form",
+        "info": "基础能力会直接展示；分组能力会先展示分类，再通过二级菜单选择具体能力。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "类型不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
       }
     ]
   },
   "data": {
-    "form": {}
+    "form": {
+      "type": 1
+    }
   },
   "state": {},
   "action": {

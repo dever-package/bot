@@ -97,6 +97,20 @@
   color: var(--body-work-muted);
 }
 
+.hb-laper-app .workbench-power-picker-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  line-height: normal;
+  text-align: left;
+}
+
+.hb-laper-app .workbench-power-picker-chevron {
+  flex: 0 0 auto;
+  color: var(--body-work-muted);
+}
+
 .workbench-picker-content {
   min-width: var(--radix-select-trigger-width);
   border: 0;
@@ -125,6 +139,34 @@
   background: var(--body-work-primary-soft);
   color: var(--body-work-primary-strong);
   font-weight: 600;
+}
+
+.workbench-power-picker-content,
+.workbench-power-picker-subcontent {
+  min-width: 220px;
+}
+
+.workbench-power-picker-subcontent {
+  max-height: min(420px, calc(100vh - 32px));
+  overflow-y: auto;
+}
+
+.workbench-power-picker-item,
+.workbench-power-group-trigger {
+  gap: 8px;
+}
+
+.workbench-power-picker-item.is-selected {
+  background: var(--body-work-primary-soft);
+  color: var(--body-work-primary-strong);
+  font-weight: 600;
+}
+
+.workbench-power-group-trigger small {
+  margin-left: auto;
+  color: var(--body-work-muted);
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .hb-laper-app [data-agent-chat-appearance="body"] .agent-chat-new-session {

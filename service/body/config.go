@@ -116,7 +116,7 @@ func loginLinkPayloads(ctx context.Context, rows []*bodymodel.Link) []map[string
 		}
 	}
 	sceneCodesByLinkID := bodyLinkSceneCodesByLinkID(ctx, linkIDs)
-	publicArticles := publicContentArticleMap(ctx, bodyLinkArticleIDs(rows))
+	enabledArticles := enabledContentArticleMap(ctx, bodyLinkArticleIDs(rows))
 	result := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
@@ -132,7 +132,7 @@ func loginLinkPayloads(ctx context.Context, rows []*bodymodel.Link) []map[string
 			continue
 		}
 		if normalizedLoginLinkType(row.LinkType) == bodymodel.LinkTypeArticle {
-			if publicArticles[row.ArticleID] == nil {
+			if enabledArticles[row.ArticleID] == nil {
 				continue
 			}
 		}

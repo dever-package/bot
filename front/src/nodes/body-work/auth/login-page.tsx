@@ -6,14 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  Eye,
-  EyeOff,
-  Loader2,
-  Menu,
-  PanelsTopLeft,
-  X,
-} from "lucide-react";
+import { Eye, EyeOff, Loader2, Menu, PanelsTopLeft, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   Input,
@@ -33,12 +26,15 @@ import {
 } from "../shared/body-appearance";
 import {
   BodyFilingContent,
-  createBodyFilingRows,
-  hasBodyFilingRichContent,
+  BodyFilingFallbackRows,
+  hasBodyFilingInfo,
   type BodyFilingInfo,
 } from "../shared/body-filing";
+import {
+  BodySiteLinkAnchor,
+  BodySiteLinkList,
+} from "../shared/body-site-link";
 import { BodyToaster } from "../shared/body-toaster";
-import { PublicContentPage } from "../content/public-content-page";
 import "../shared/body-theme.css";
 import { useBodyAppearance } from "../shared/use-body-appearance";
 import { BodyConfiguredImage, BodySiteBrand } from "./site-brand";
@@ -50,7 +46,6 @@ import {
   applyBodySiteMetadata,
   type BodyLoginAccount,
   type BodyLoginConfig,
-  type BodyLoginLink,
   useBodyLoginConfigState,
 } from "./site-config";
 import "./login-page.css";
@@ -92,7 +87,6 @@ export function WorkLoginPage() {
   const [mobileLinksOpen, setMobileLinksOpen] = useState(false);
   const feishuCallbackHandled = useRef(false);
   const busy = loading || thirdPartyLoadingID !== null;
-  const publicContentArticleID = readPublicContentArticleID();
 
   const completeLogin = useCallback(
     async (data: any, options: CompleteLoginOptions) => {
@@ -221,9 +215,7 @@ export function WorkLoginPage() {
     setMessage("");
     try {
       const result = await request(
-        mode === "login"
-          ? "/user/auth/login"
-          : joinSiteApi("login/register"),
+        mode === "login" ? "/user/auth/login" : joinSiteApi("login/register"),
         "post",
         payload.data,
       );
@@ -303,142 +295,127 @@ export function WorkLoginPage() {
         onToggleMobileLinks={() => setMobileLinksOpen((open) => !open)}
       />
 
-      {publicContentArticleID ? (
-        <PublicContentPage
-          articleID={publicContentArticleID}
-          backHref={publicContentBackHref()}
-        />
-      ) : (
-        <div className="bot-work-login-stage">
-          <div className="bot-work-login-layout">
-            {config.site.loginImage ? (
-              <LoginArtwork
-                image={config.site.loginImage}
-                siteName={config.site.siteName}
+      <div className="bot-work-login-stage">
+        <div className="bot-work-login-layout">
+          {config.site.loginImage ? (
+            <LoginArtwork
+              image={config.site.loginImage}
+              siteName={config.site.siteName}
+            />
+          ) : null}
+
+          <section
+            className="bot-work-login-auth"
+            aria-labelledby="login-title"
+          >
+            <div className="bot-work-login-copy">
+              <h1 id="login-title">{config.site.loginTitle}</h1>
+              {config.site.loginDescription ? (
+                <p>{config.site.loginDescription}</p>
+              ) : null}
+            </div>
+
+            <section className="bot-work-login-form-panel">
+              <ThirdPartyAccounts
+                accounts={config.accounts}
+                disabled={busy}
+                loadingID={thirdPartyLoadingID}
+                onSelect={startThirdPartyLogin}
               />
-            ) : null}
 
-            <section
-              className="bot-work-login-auth"
-              aria-labelledby="login-title"
-            >
-              <div className="bot-work-login-copy">
-                <h1 id="login-title">{config.site.loginTitle}</h1>
-                {config.site.loginDescription ? (
-                  <p>{config.site.loginDescription}</p>
+              {config.accounts.length > 0 ? (
+                <div className="bot-work-login-divider">
+                  <span>或</span>
+                </div>
+              ) : null}
+
+              <form className="bot-work-login-form" onSubmit={submit}>
+                <AuthField label="账号">
+                  <Input
+                    value={account}
+                    autoComplete="username"
+                    placeholder="输入手机号或账号"
+                    aria-label="账号"
+                    className="bot-work-login-input"
+                    onChange={(event) => setAccount(event.target.value)}
+                  />
+                </AuthField>
+
+                {mode === "register" ? (
+                  <AuthField label="昵称">
+                    <Input
+                      value={name}
+                      autoComplete="name"
+                      placeholder="输入昵称"
+                      aria-label="昵称"
+                      className="bot-work-login-input"
+                      onChange={(event) => setName(event.target.value)}
+                    />
+                  </AuthField>
                 ) : null}
-              </div>
 
-              <section className="bot-work-login-form-panel">
-                <ThirdPartyAccounts
-                  accounts={config.accounts}
-                  disabled={busy}
-                  loadingID={thirdPartyLoadingID}
-                  onSelect={startThirdPartyLogin}
-                />
+                <AuthField label="密码">
+                  <span className="bot-work-login-password">
+                    <Input
+                      value={password}
+                      type={showPassword ? "text" : "password"}
+                      autoComplete={
+                        mode === "login" ? "current-password" : "new-password"
+                      }
+                      placeholder="至少 6 位"
+                      aria-label="密码"
+                      className="bot-work-login-input"
+                      onChange={(event) => setPassword(event.target.value)}
+                    />
+                    <button
+                      type="button"
+                      aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                      title={showPassword ? "隐藏密码" : "显示密码"}
+                      onClick={() => setShowPassword((show) => !show)}
+                    >
+                      {showPassword ? (
+                        <EyeOff size={17} strokeWidth={1.8} />
+                      ) : (
+                        <Eye size={17} strokeWidth={1.8} />
+                      )}
+                    </button>
+                  </span>
+                </AuthField>
 
-                {config.accounts.length > 0 ? (
-                  <div className="bot-work-login-divider">
-                    <span>或</span>
+                {message ? (
+                  <div className="bot-work-login-message" role="alert">
+                    {message}
                   </div>
                 ) : null}
 
-                <form className="bot-work-login-form" onSubmit={submit}>
-                  <AuthField label="账号">
-                    <Input
-                      value={account}
-                      autoComplete="username"
-                      placeholder="输入手机号或账号"
-                      aria-label="账号"
-                      className="bot-work-login-input"
-                      onChange={(event) => setAccount(event.target.value)}
-                    />
-                  </AuthField>
+                <button
+                  type="submit"
+                  className="bot-work-login-submit"
+                  disabled={busy}
+                >
+                  {loading ? <Loader2 className="bot-work-login-spin" /> : null}
+                  <span>
+                    {loading ? "处理中" : mode === "login" ? "登录" : "注册"}
+                  </span>
+                </button>
+              </form>
 
-                  {mode === "register" ? (
-                    <AuthField label="昵称">
-                      <Input
-                        value={name}
-                        autoComplete="name"
-                        placeholder="输入昵称"
-                        aria-label="昵称"
-                        className="bot-work-login-input"
-                        onChange={(event) => setName(event.target.value)}
-                      />
-                    </AuthField>
-                  ) : null}
-
-                  <AuthField label="密码">
-                    <span className="bot-work-login-password">
-                      <Input
-                        value={password}
-                        type={showPassword ? "text" : "password"}
-                        autoComplete={
-                          mode === "login"
-                            ? "current-password"
-                            : "new-password"
-                        }
-                        placeholder="至少 6 位"
-                        aria-label="密码"
-                        className="bot-work-login-input"
-                        onChange={(event) => setPassword(event.target.value)}
-                      />
-                      <button
-                        type="button"
-                        aria-label={showPassword ? "隐藏密码" : "显示密码"}
-                        title={showPassword ? "隐藏密码" : "显示密码"}
-                        onClick={() => setShowPassword((show) => !show)}
-                      >
-                        {showPassword ? (
-                          <EyeOff size={17} strokeWidth={1.8} />
-                        ) : (
-                          <Eye size={17} strokeWidth={1.8} />
-                        )}
-                      </button>
-                    </span>
-                  </AuthField>
-
-                  {message ? (
-                    <div className="bot-work-login-message" role="alert">
-                      {message}
-                    </div>
-                  ) : null}
-
-                  <button
-                    type="submit"
-                    className="bot-work-login-submit"
-                    disabled={busy}
-                  >
-                    {loading ? (
-                      <Loader2 className="bot-work-login-spin" />
-                    ) : null}
-                    <span>
-                      {loading
-                        ? "处理中"
-                        : mode === "login"
-                          ? "登录"
-                          : "注册"}
-                    </span>
+              {config.site.registerEnabled ? (
+                <p className="bot-work-login-mode-switch">
+                  <span>
+                    {mode === "login" ? "还没有账号？" : "已经有账号？"}
+                  </span>
+                  <button type="button" disabled={busy} onClick={switchMode}>
+                    {mode === "login" ? "注册" : "登录"}
                   </button>
-                </form>
+                </p>
+              ) : null}
 
-                {config.site.registerEnabled ? (
-                  <p className="bot-work-login-mode-switch">
-                    <span>
-                      {mode === "login" ? "还没有账号？" : "已经有账号？"}
-                    </span>
-                    <button type="button" disabled={busy} onClick={switchMode}>
-                      {mode === "login" ? "注册" : "登录"}
-                    </button>
-                  </p>
-                ) : null}
-
-                <LoginLegalLinks config={config} />
-              </section>
+              <LoginLegalLinks config={config} />
             </section>
-          </div>
+          </section>
         </div>
-      )}
+      </div>
       <LoginFiling filing={config.site.filing} />
     </main>
   );
@@ -498,11 +475,11 @@ function LoginHeader({
           nameClassName="bot-work-login-brand-name"
         />
 
-        <nav className="bot-work-login-links" aria-label="站点链接">
-          {config.links.map((link) => (
-            <LoginLinkAnchor key={link.id} link={link} />
-          ))}
-        </nav>
+        <BodySiteLinkList
+          links={config.links}
+          className="bot-work-login-links"
+          ariaLabel="站点链接"
+        />
 
         {config.links.length > 0 ? (
           <div className="bot-work-login-header-actions">
@@ -521,19 +498,13 @@ function LoginHeader({
       </div>
 
       {mobileLinksOpen && config.links.length > 0 ? (
-        <nav
+        <BodySiteLinkList
           id="bot-work-login-mobile-links"
+          links={config.links}
           className="bot-work-login-mobile-links"
-          aria-label="移动端站点链接"
-        >
-          {config.links.map((link) => (
-            <LoginLinkAnchor
-              key={link.id}
-              link={link}
-              onClick={onCloseMobileLinks}
-            />
-          ))}
-        </nav>
+          ariaLabel="移动端站点链接"
+          onLinkClick={onCloseMobileLinks}
+        />
       ) : null}
     </header>
   );
@@ -548,72 +519,15 @@ function LoginLegalLinks({ config }: { config: BodyLoginConfig }) {
   return (
     <p className="bot-work-login-legal">
       继续即表示您同意 {config.site.siteName} 的
-      {termsOfService ? <LoginLinkAnchor link={termsOfService} /> : null}
+      {termsOfService ? <BodySiteLinkAnchor link={termsOfService} /> : null}
       {termsOfService && privacyPolicy ? "和" : null}
-      {privacyPolicy ? <LoginLinkAnchor link={privacyPolicy} /> : null}
+      {privacyPolicy ? <BodySiteLinkAnchor link={privacyPolicy} /> : null}
     </p>
   );
 }
 
-function LoginLinkAnchor({
-  link,
-  onClick,
-}: {
-  link: BodyLoginLink;
-  onClick?: () => void;
-}) {
-  return (
-    <a
-      href={loginLinkHref(link)}
-      target={link.target}
-      rel={link.target === "_blank" ? "noreferrer noopener" : undefined}
-      onClick={onClick}
-    >
-      {link.name}
-    </a>
-  );
-}
-
-const PUBLIC_CONTENT_QUERY_KEY = "content_id";
-
-function readPublicContentArticleID() {
-  if (typeof window === "undefined") {
-    return 0;
-  }
-  const value = Number(
-    new URLSearchParams(window.location.search).get(PUBLIC_CONTENT_QUERY_KEY) ||
-      0,
-  );
-  return Number.isFinite(value) && value > 0 ? value : 0;
-}
-
-function loginLinkHref(link: BodyLoginLink) {
-  if (link.type !== "article" || link.articleID <= 0) {
-    return link.url;
-  }
-  return currentLoginHref((url) => {
-    url.searchParams.set(PUBLIC_CONTENT_QUERY_KEY, String(link.articleID));
-  });
-}
-
-function publicContentBackHref() {
-  return currentLoginHref((url) => {
-    url.searchParams.delete(PUBLIC_CONTENT_QUERY_KEY);
-  });
-}
-
-function currentLoginHref(update: (url: URL) => void) {
-  if (typeof window === "undefined") {
-    return "";
-  }
-  const url = new URL(window.location.href);
-  update(url);
-  return `${url.pathname}${url.search}${url.hash}`;
-}
-
 function LoginFiling({ filing }: { filing: BodyFilingInfo }) {
-  const rows = createBodyFilingRows(filing);
-  if (!hasBodyFilingRichContent(filing.content) && rows.length === 0) {
+  if (!hasBodyFilingInfo(filing)) {
     return null;
   }
 
@@ -622,21 +536,12 @@ function LoginFiling({ filing }: { filing: BodyFilingInfo }) {
       <BodyFilingContent
         filing={filing}
         className="bot-work-login-filing-rich"
-        fallback={rows.map((row) => (
-          <span key={row.key} className="bot-work-login-filing-item">
-            {row.url ? (
-              <a
-                href={row.url}
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                {row.label}
-              </a>
-            ) : (
-              row.label
-            )}
-          </span>
-        ))}
+        fallback={
+          <BodyFilingFallbackRows
+            filing={filing}
+            itemClassName="bot-work-login-filing-item"
+          />
+        }
       />
     </footer>
   );
@@ -652,11 +557,7 @@ function LoginArtwork({
   const alt = `${siteName} 登录页展示图`;
   return (
     <section className="bot-work-login-artwork" aria-label="创作灵感">
-      <BodyConfiguredImage
-        src={image}
-        alt={alt}
-        fallback={null}
-      />
+      <BodyConfiguredImage src={image} alt={alt} fallback={null} />
     </section>
   );
 }

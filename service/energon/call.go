@@ -39,6 +39,11 @@ func (s GatewayService) callNormalizeTarget(
 		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("map_input", err.Error()))
 		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
+	req, mappedInput, _, err = s.prepareVideoReferenceAudio(ctx, req, selected, mappedInput)
+	if err != nil {
+		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("prepare_reference_audio", err.Error()))
+		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
+	}
 	selected, err = s.applyServiceEndpoint(ctx, selected, mappedInput)
 	if err != nil {
 		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("select_service_endpoint", err.Error()))
@@ -185,6 +190,26 @@ func (s GatewayService) callStreamTarget(
 	if err != nil {
 		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("map_stream_input", err.Error()))
 		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
+	}
+	var referenceAudioPreparation videoReferenceAudioPreparation
+	req, mappedInput, referenceAudioPreparation, err = s.prepareVideoReferenceAudio(ctx, req, selected, mappedInput)
+	if err != nil {
+		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("prepare_stream_reference_audio", err.Error()))
+		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
+	}
+	if referenceAudioPreparation.Prepared {
+		status := "参考音频已转换为 MP3"
+		if referenceAudioPreparation.Trimmed {
+			status = fmt.Sprintf(
+				"参考音频已转换为 MP3 并截取为 %s 秒",
+				formatReferenceAudioDuration(referenceAudioPreparation.Duration),
+			)
+		}
+		_ = s.writeStreamStatus(
+			ctx,
+			req.RequestID,
+			status,
+		)
 	}
 	selected, err = s.applyServiceEndpoint(ctx, selected, mappedInput)
 	if err != nil {

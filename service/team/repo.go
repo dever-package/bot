@@ -437,6 +437,24 @@ func (Repo) ListPowers(ctx context.Context) []PowerOption {
 	return result
 }
 
+func (Repo) ListPowerCates(ctx context.Context) []PowerCateOption {
+	rows := energonmodel.NewPowerCateModel().Select(ctx, map[string]any{})
+	result := make([]PowerCateOption, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		result = append(result, PowerCateOption{
+			ID:     row.ID,
+			Name:   strings.TrimSpace(row.Name),
+			Type:   row.Type,
+			Status: row.Status,
+			Sort:   row.Sort,
+		})
+	}
+	return result
+}
+
 func outputTypeSpec(outputType string) energonmodel.OutputTypeSpec {
 	spec, _ := energonmodel.FindOutputTypeSpec(energonmodel.NormalizeOutputType(outputType))
 	return spec

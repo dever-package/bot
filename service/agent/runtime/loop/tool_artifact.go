@@ -113,9 +113,10 @@ func (s Service) enqueueDocumentArtifact(
 			SourceKey:  "tool:" + strings.TrimSpace(call.ID),
 			Kind:       definition.Kind,
 			Meta: map[string]any{
-				"tool_name":  call.Name,
-				"tool_title": toolTitle(definition, call.Name),
-				"arguments":  arguments,
+				"tool_name":       call.Name,
+				"tool_title":      toolTitle(definition, call.Name),
+				"arguments":       arguments,
+				"requested_count": toolRequestedCount(call, definition),
 			},
 		})
 		if err != nil {

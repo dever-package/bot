@@ -1,4 +1,5 @@
 import type { CanvasVideoComposition } from "./space-video-compose";
+import type { PowerCategory } from "../shared/power-menu";
 
 export type AssetKind =
   | "text"
@@ -110,6 +111,8 @@ export type PowerOption = {
   kind: string;
   createStatus: number;
 };
+
+export type PowerCategoryOption = PowerCategory;
 
 export type OutputTypeOption = {
   key: string;
@@ -282,6 +285,7 @@ export type SpaceBootstrap = {
   canvases: Record<string, SpaceCanvasState>;
   assets: ProjectAsset[];
   powers: PowerOption[];
+  powerCategories: PowerCategoryOption[];
   powerKinds: PowerKindOption[];
   outputTypes: OutputTypeOption[];
   initialAssetCateId: number;

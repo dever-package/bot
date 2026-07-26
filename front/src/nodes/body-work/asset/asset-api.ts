@@ -72,6 +72,7 @@ export function loadAssetPage(input: {
   view?: AssetView;
   contentMode?: AssetContentMode;
   collectionID?: number;
+  excludeCollections?: boolean;
 }): Promise<AssetPage> {
   const normalizedInput = {
     ...input,
@@ -90,6 +91,7 @@ export function loadAssetPage(input: {
       node_key: normalizedInput.filters.nodeKey || undefined,
       role: normalizedInput.filters.role || undefined,
       kind: normalizedInput.filters.kind || undefined,
+      exclude_collections: normalizedInput.excludeCollections ? 1 : undefined,
       view: normalizedInput.view,
       content_mode: normalizedInput.contentMode,
       page: normalizedInput.page,

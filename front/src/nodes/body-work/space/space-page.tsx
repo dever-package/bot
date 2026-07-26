@@ -218,6 +218,7 @@ import type {
   CanvasResultViewState,
   PowerForm,
   PowerOption,
+  PowerCategoryOption,
   PowerParam,
   ProjectAsset,
   SpaceBootstrap,
@@ -608,6 +609,8 @@ export function WorkSpacePage() {
   useBodyAppearance(loginConfig.site.appearance, theme);
   const [nodeMenu, setNodeMenu] = useState<AddNodeMenuState | null>(null);
   const [powers, setPowers] = useState<PowerOption[]>([]);
+  const [powerCategories, setPowerCategories] =
+    useState<PowerCategoryOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [runningNodes, setRunningNodes] = useState<RunningNodeMap>({});
@@ -792,11 +795,13 @@ export function WorkSpacePage() {
       setLoadingCateId(null);
       loadingCateIdRef.current = null;
       setPowers(nextSpace.powers || []);
+      setPowerCategories(nextSpace.powerCategories || []);
       catalogCache.primeCatalog(
         projectId,
         Number(nextSpace.release?.id || nextSpace.project.release_id || 0),
         {
           powers: nextSpace.powers || [],
+          powerCategories: nextSpace.powerCategories || [],
           powerKinds: nextSpace.powerKinds || [],
           outputTypes: nextSpace.outputTypes || [],
         },
@@ -2384,6 +2389,7 @@ export function WorkSpacePage() {
         force,
       );
       setPowers(catalog.powers);
+      setPowerCategories(catalog.powerCategories);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "加载能力列表失败");
     }
@@ -2665,6 +2671,7 @@ export function WorkSpacePage() {
           menu={nodeMenu}
           flows={menuFlows}
           powers={menuPowers}
+          powerCategories={powerCategories}
           roles={menuRoles}
           onClose={() => setNodeMenu(null)}
           onSelectFlow={(flow) => addFlowNode(flow, nodeMenu.position)}
@@ -5201,7 +5208,11 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
     input.canvasRun = canvasRun;
     syncBackendCanvasRunRuntime(input, canvasRun);
     if (
-      canvasRunCanReturnAppliedSingleNodeResult(input, hasAppliedNodeResult) &&
+      canvasRunCanReturnAppliedSingleNodeResult(
+        input,
+        canvasRun,
+        hasAppliedNodeResult,
+      ) &&
       (canvasRun.status === "running" || canvasRun.status === "pending")
     ) {
       toast.info("节点结果已返回，后台运行仍在收尾");
@@ -5313,7 +5324,11 @@ async function waitForCanvasRun(
   canvasRun = normalizeCanvasRunTerminalStatus(input, canvasRun);
   if (
     canvasRunNeedsStatusConvergence(input, canvasRun) &&
-    !canvasRunCanReturnAppliedSingleNodeResult(input, hasAppliedNodeResult())
+    !canvasRunCanReturnAppliedSingleNodeResult(
+      input,
+      canvasRun,
+      hasAppliedNodeResult(),
+    )
   ) {
     try {
       canvasRun = await waitForCanvasRunTerminalStatus(
@@ -5333,7 +5348,11 @@ async function waitForCanvasRun(
   }
   if (
     !canvasRunNeedsStatusConvergence(input, canvasRun) ||
-    canvasRunCanReturnAppliedSingleNodeResult(input, hasAppliedNodeResult())
+    canvasRunCanReturnAppliedSingleNodeResult(
+      input,
+      canvasRun,
+      hasAppliedNodeResult(),
+    )
   ) {
     return canvasRun;
   }
@@ -5372,7 +5391,11 @@ async function waitForCanvasRunTerminalStatus(
     }
     if (
       !canvasRunNeedsStatusConvergence(input, canvasRun) ||
-      canvasRunCanReturnAppliedSingleNodeResult(input, hasAppliedNodeResult())
+      canvasRunCanReturnAppliedSingleNodeResult(
+        input,
+        canvasRun,
+        hasAppliedNodeResult(),
+      )
     ) {
       return canvasRun;
     }
@@ -5384,11 +5407,31 @@ async function waitForCanvasRunTerminalStatus(
 
 function canvasRunCanReturnAppliedSingleNodeResult(
   input: CanvasStartRunInput,
+  canvasRun: CanvasRunRef,
   hasAppliedNodeResult: boolean,
 ) {
   return Boolean(
-    input.singleNode && !isGroupCanvasRunInput(input) && hasAppliedNodeResult,
+    input.singleNode &&
+      !isGroupCanvasRunInput(input) &&
+      hasAppliedNodeResult &&
+      !canvasRunHasPendingFeedback(canvasRun),
   );
+}
+
+function canvasRunHasPendingFeedback(canvasRun: CanvasRunRef) {
+  const status = String(canvasRun.status || "").trim().toLowerCase();
+  if (status === "waiting") {
+    return true;
+  }
+  if (firstPendingApprovalFromCanvasRun(canvasRun)) {
+    return true;
+  }
+  const values: unknown[] = [
+    canvasRun.pending_node,
+    canvasRun.output,
+    ...(canvasRun.node_results || []),
+  ];
+  return values.some((value) => Boolean(canvasPayloadInteraction(value)));
 }
 
 async function fetchCanvasRunStatusSnapshot(

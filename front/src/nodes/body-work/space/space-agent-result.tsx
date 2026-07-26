@@ -1,18 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { AgentInteractionSubmitResult } from "@/components/agent/interaction-panel";
+import { useMemo, useRef, useState } from "react";
 import { AgentChatActivityView } from "../../show/agent-chat/activity-view";
+import { agentChatDocumentIntro } from "../../show/agent-chat/document";
 import {
-  AgentChatInteractionView,
-  AgentChatSuggestions,
-} from "../../show/agent-chat/interaction-view";
-import type {
-  AgentChatInteractionResponse,
-  AgentChatSuggestion,
-} from "../../show/agent-chat/interaction";
+  AgentChatDocumentEntry,
+  AgentChatDocumentPane,
+} from "../../show/agent-chat/document-pane";
+import { AgentChatSuggestions } from "../../show/agent-chat/interaction-view";
+import type { AgentChatSuggestion } from "../../show/agent-chat/interaction";
 import { AgentChatMessageOutput } from "../../show/agent-chat/message-output";
 import { buildAgentChatContentSegments } from "../../show/agent-chat/message-content";
 import {
-  interactionResponseInput,
   textReferenceInput,
   type ReferenceInput,
 } from "../../show/agent-chat/reference";
@@ -40,27 +37,24 @@ export function CanvasAgentResultContent({
     runtime &&
       (runtime.text ||
         runtime.activities.length > 0 ||
+        runtime.document ||
         runtime.interaction ||
         runtime.suggestions.length > 0 ||
         Object.keys(runtime.output).length > 0),
   );
   const active = runtimeHasPayload && runtime ? runtime : persisted;
-  const text = active.text || (!running || persisted.started ? fallback : "");
+  const text = active.document
+    ? agentChatDocumentIntro(active.document)
+    : active.text || (!running || persisted.started ? fallback : "");
   const contentSegments = useMemo(
     () => buildAgentChatContentSegments(text, active.activities),
     [active.activities, text],
   );
   const submittingRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
-  const [interactionResponse, setInteractionResponse] =
-    useState<AgentChatInteractionResponse>();
-  const interactionID = active.interaction?.id || "";
-
-  useEffect(() => {
-    submittingRef.current = false;
-    setSubmitting(false);
-    setInteractionResponse(undefined);
-  }, [interactionID]);
+  const [openDocumentID, setOpenDocumentID] = useState(0);
+  const openDocument =
+    active.document?.id === openDocumentID ? active.document : undefined;
 
   const disabled = Boolean(running || submitting || !onContinue);
   const continueWith = async (input: ReferenceInput) => {
@@ -75,19 +69,6 @@ export function CanvasAgentResultContent({
       submittingRef.current = false;
       setSubmitting(false);
     }
-  };
-  const submitInteraction = (result: AgentInteractionSubmitResult) => {
-    if (!active.interaction) {
-      return;
-    }
-    setInteractionResponse({ data: result.data });
-    void continueWith(
-      interactionResponseInput(
-        active.interaction.id || "",
-        result.text,
-        result.data,
-      ),
-    );
   };
   const selectSuggestion = (suggestion: AgentChatSuggestion) => {
     void continueWith(textReferenceInput(suggestion.prompt));
@@ -116,7 +97,7 @@ export function CanvasAgentResultContent({
         ),
       )}
 
-      {contentSegments.length === 0 && running ? (
+      {contentSegments.length === 0 && running && !active.document ? (
         <div
           className="ws-canvas-agent-waiting"
           role="status"
@@ -134,12 +115,10 @@ export function CanvasAgentResultContent({
         excludeText={text}
       />
 
-      {active.interaction ? (
-        <AgentChatInteractionView
-          interaction={active.interaction}
-          response={interactionResponse}
-          disabled={disabled}
-          onSubmit={submitInteraction}
+      {active.document ? (
+        <AgentChatDocumentEntry
+          document={active.document}
+          onOpen={(document) => setOpenDocumentID(document.id)}
         />
       ) : null}
 
@@ -148,6 +127,15 @@ export function CanvasAgentResultContent({
         disabled={disabled}
         onSelect={selectSuggestion}
       />
+
+      {openDocument ? (
+        <AgentChatDocumentPane
+          open
+          document={openDocument}
+          messageID={openDocument.messageID}
+          onClose={() => setOpenDocumentID(0)}
+        />
+      ) : null}
     </div>
   );
 }

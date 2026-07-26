@@ -40,6 +40,7 @@ func (s Service) WorkbenchCatalog(ctx context.Context, teamID uint64) (map[strin
 			"team":            map[string]any{},
 			"release":         map[string]any{},
 			"powers":          []map[string]any{},
+			"power_cates":     s.repo.ListPowerCates(ctx),
 			"roles":           []map[string]any{},
 			"asset_cates":     []GraphAssetCate{},
 			"project_enabled": false,
@@ -69,6 +70,7 @@ func (s Service) WorkbenchCatalog(ctx context.Context, teamID uint64) (map[strin
 		powers = append(powers, map[string]any{
 			"id":          teamPower.ID,
 			"power_id":    power.ID,
+			"cate_id":     power.CateID,
 			"name":        power.Name,
 			"key":         power.Key,
 			"icon":        power.Icon,
@@ -113,6 +115,7 @@ func (s Service) WorkbenchCatalog(ctx context.Context, teamID uint64) (map[strin
 			"version": release.Version,
 		},
 		"powers":          powers,
+		"power_cates":     s.repo.ListPowerCates(ctx),
 		"roles":           roles,
 		"asset_cates":     workbenchAssetCateValues(graph.AssetCates),
 		"project_enabled": normalizeProjectEnabled(graph.Team.ProjectEnabled) == teammodel.StatusEnabled,

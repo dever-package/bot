@@ -191,16 +191,18 @@ func (state *runState) AppendVisibleText(value string) {
 
 func (state *runState) continueAfterTools() bool {
 	hadVisibleText := strings.TrimSpace(state.pendingModelText) != ""
+	documentMediaOnly := isDocumentMediaOnlyInput(state.input)
+	mediaAttempt := documentMediaAttempt(state.input)
 	state.phase = runPhaseModel
 	state.modelStep++
-	state.input = state.continuationInput(nextModelInput())
+	state.input = state.continuationInput(nextModelInput(documentMediaOnly, mediaAttempt))
 	state.pendingTools = nil
 	state.pendingIndex = 0
 	state.pendingModelText = ""
 	state.awaitingDelivery = true
-	state.completionReviewPending = true
+	state.completionReviewPending = !documentMediaOnly
 	if state.isDocumentWriter() {
-		state.documentDeliveryReady = false
+		state.documentDeliveryReady = documentMediaOnly
 	}
 	return hadVisibleText
 }

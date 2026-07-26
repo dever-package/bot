@@ -64,7 +64,7 @@ export function readAgentChatSuggestions(
   return suggestions;
 }
 
-export function readAgentChatSuggestionMessage(output: unknown) {
+export function readAgentChatPresentationMessage(output: unknown) {
   if (!isPlainRecord(output)) {
     return "";
   }

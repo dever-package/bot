@@ -108,7 +108,6 @@
         "placeholder": "请选择分类和内容",
         "value": "form.article_id",
         "mode": "form",
-        "info": "登录页导航和协议条款只能选择公开内容；仅用于工作台时可选择登录后访问内容。",
         "validate": [
           {
             "type": "required",
@@ -134,7 +133,7 @@
             "搜索分类",
             "搜索内容"
           ],
-          "childExtraFields": "title,category_id,visibility,status",
+          "childExtraFields": "title,category_id,status",
           "order": "sort asc,id asc",
           "childOrder": "sort asc,id desc",
           "formLayout": "horizontal",

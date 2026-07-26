@@ -1703,6 +1703,45 @@
   gap: 4px;
 }
 
+.ws-add-submenu-panel {
+  position: absolute;
+  top: 0;
+  z-index: 36;
+  width: 240px;
+  max-height: min(420px, calc(100vh - 92px));
+  overflow-y: auto;
+  border: 1px solid var(--ws-border);
+  border-radius: 12px;
+  background: rgba(24, 28, 37, 0.98);
+  padding: 8px;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.3);
+}
+
+.ws-add-submenu-panel.is-right {
+  left: calc(100% - 1px);
+}
+
+.ws-add-submenu-panel.is-left {
+  right: calc(100% - 1px);
+}
+
+.ws-add-submenu-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px 8px;
+  color: var(--ws-text);
+  font-size: 12px;
+}
+
+.ws-add-submenu-head strong {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ws-add-item {
   display: flex;
   width: 100%;
@@ -1725,6 +1764,15 @@
   transform: translateY(-1px);
 }
 
+.ws-add-item.is-power-group.is-open {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ws-add-submenu-arrow {
+  flex: 0 0 auto;
+  color: var(--ws-muted);
+}
+
 .ws-add-icon {
   display: inline-flex;
   width: 30px;
@@ -1739,6 +1787,11 @@
 }
 
 .ws-add-item.is-power .ws-add-icon {
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+}
+
+.ws-add-item.is-power-group .ws-add-icon {
   background: rgba(139, 92, 246, 0.15);
   color: #a78bfa;
 }
@@ -6080,6 +6133,8 @@
 
 .ws-add-menu,
 .ws-page.is-light .ws-add-menu,
+.ws-add-submenu-panel,
+.ws-page.is-light .ws-add-submenu-panel,
 .ws-node-action-menu,
 .ws-page.is-light .ws-node-action-menu {
   border: 1px solid var(--ws-card-border);
@@ -6121,6 +6176,11 @@
   transform: none;
 }
 
+.ws-add-item.is-power-group.is-open,
+.ws-page.is-light .ws-add-item.is-power-group.is-open {
+  background: var(--ws-surface-hover);
+}
+
 .ws-add-icon {
   width: 27px;
   height: 27px;
@@ -6141,6 +6201,12 @@
 
 .ws-page.is-light .ws-add-item.is-power .ws-add-icon,
 .ws-add-item.is-power .ws-add-icon {
+  background: var(--ws-violet-soft);
+  color: var(--ws-violet);
+}
+
+.ws-page.is-light .ws-add-item.is-power-group .ws-add-icon,
+.ws-add-item.is-power-group .ws-add-icon {
   background: var(--ws-violet-soft);
   color: var(--ws-violet);
 }
@@ -7303,6 +7369,15 @@
   .ws-add-menu {
     width: min(320px, calc(100vw - 20px));
     max-height: min(420px, calc(100dvh - 116px));
+  }
+
+  .ws-add-submenu-panel,
+  .ws-add-submenu-panel.is-left,
+  .ws-add-submenu-panel.is-right {
+    position: fixed;
+    inset: 70px 10px 76px;
+    width: auto;
+    max-height: none;
   }
 
   .ws-node-bottom-settings,

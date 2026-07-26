@@ -17,6 +17,7 @@ import (
 func (AgentHook) ProviderAttachAgentForm(_ *server.Context, params []any) any {
 	record := agentFormRecord(params)
 	record["max_output_tokens"] = botcapacity.Format(util.ToIntDefault(record["max_output_tokens"], 0))
+	record["suggestion_mode"] = agentmodel.NormalizeSuggestionMode(util.ToStringTrimmed(record["suggestion_mode"]))
 	return record
 }
 
@@ -46,6 +47,9 @@ func (AgentHook) ProviderBeforeSaveAgent(c *server.Context, params []any) any {
 	}
 	if shouldNormalizeField(record, "opening_enabled", partial) {
 		record["opening_enabled"] = util.ToBool(record["opening_enabled"])
+	}
+	if shouldNormalizeField(record, "suggestion_mode", partial) {
+		record["suggestion_mode"] = agentmodel.NormalizeSuggestionMode(util.ToStringTrimmed(record["suggestion_mode"]))
 	}
 	defaultInt16FieldOnCreateOrPresent(record, "status", defaultAgentStatus, partial)
 	defaultIntFieldOnCreateOrPresent(record, "sort", defaultAgentSort, partial)
@@ -143,7 +147,7 @@ func builtinAgentUpdateRecord(definition map[string]any, existing *agentmodel.Ag
 	for _, field := range []string{
 		"name", "key", "kind", "cate_id", "description", "prompt", "power_cate_id",
 		"knowledge_cate_id", "skill_pack_id", "memory_enabled", "opening_enabled", "temperature",
-		"timeout_seconds", "max_auto_steps", "status", "sort",
+		"suggestion_mode", "timeout_seconds", "max_auto_steps", "status", "sort",
 	} {
 		record[field] = definition[field]
 	}

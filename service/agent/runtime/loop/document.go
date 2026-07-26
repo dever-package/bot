@@ -45,7 +45,8 @@ func (s Service) executeComposeDocumentStep(
 	if err != nil {
 		return composeDocumentError(call, err)
 	}
-	input, err := runtimeprovider.ParseComposeDocument(arguments)
+	suggestionMode := agentmodel.NormalizeSuggestionMode(state.execution.agent.SuggestionMode)
+	input, err := runtimeprovider.ParseComposeDocument(arguments, suggestionMode)
 	if err != nil {
 		return composeDocumentError(call, err)
 	}
@@ -67,9 +68,11 @@ func (s Service) executeComposeDocumentStep(
 			RunID:     state.execution.runID,
 			Title:     input.Title,
 			Meta: map[string]any{
-				"purpose": input.Purpose,
-				"source":  runtimeprovider.ComposeDocumentToolName,
-				"intro":   intro,
+				"purpose":            input.Purpose,
+				"source":             runtimeprovider.ComposeDocumentToolName,
+				"intro":              intro,
+				"media_requirements": input.MediaRequirements,
+				"required_media":     input.RequiredMediaCounts(),
 			},
 		})
 		if err != nil {
@@ -93,20 +96,37 @@ func (s Service) executeComposeDocumentStep(
 	writer, writerErr := s.runDocumentWriter(ctx, state, call, input, document)
 	if writerErr != nil {
 		state.documentDeliveryReady = false
-		state.requireTool(runtimeprovider.PresentSuggestionsToolName)
-		return composeDocumentWriterError(call, document.ID, writerErr)
+		if suggestionMode == agentmodel.SuggestionModeAfterResult {
+			state.requireTool(runtimeprovider.PresentSuggestionsToolName)
+			return composeDocumentWriterError(call, document.ID, writerErr)
+		}
+		presentation := runtimeprovider.DocumentFailurePresentation(
+			input.Title,
+			suggestionMode == agentmodel.SuggestionModeInstant,
+		)
+		return composeDocumentTerminalStep(call, document, writer, presentation, suggestionMode, writerErr)
 	}
 	state.documentDeliveryReady = true
-	state.requireTool(runtimeprovider.PresentSuggestionsToolName)
-	content := map[string]any{
-		"document_id":       document.ID,
-		"writer_run_id":     writer.RunID,
-		"title":             document.Title,
-		"status":            writer.Status,
-		"presentation_tool": runtimeprovider.PresentSuggestionsToolName,
+	if suggestionMode != agentmodel.SuggestionModeAfterResult {
+		presentation := runtimeprovider.DocumentCompletionPresentation(
+			input.Title,
+			writer.Status,
+			writer.Coverage.RequiredTotal(),
+		)
+		if input.FollowUp != nil {
+			presentation.Items = append([]map[string]any(nil), input.FollowUp.Items...)
+		}
+		return composeDocumentTerminalStep(call, document, writer, presentation, suggestionMode, nil)
 	}
-	modelResult := cloneMap(content)
-	modelResult["document_body"] = writer.Text
+	state.requireTool(runtimeprovider.PresentSuggestionsToolName)
+	content := composeDocumentResultContent(document, writer)
+	content["completion_message"] = runtimeprovider.DocumentCompletionPresentation(
+		input.Title,
+		writer.Status,
+		writer.Coverage.RequiredTotal(),
+	).Message
+	content["presentation_tool"] = runtimeprovider.PresentSuggestionsToolName
+	modelResult := composeDocumentModelResult(content, writer)
 	result := runtimeprovider.Result{
 		Content:     content,
 		ModelResult: modelResult,
@@ -122,10 +142,65 @@ func (s Service) executeComposeDocumentStep(
 	}
 }
 
+func composeDocumentTerminalStep(
+	call botprotocol.ToolCall,
+	document agentmodel.Document,
+	writer documentWriterResult,
+	presentation runtimeprovider.SuggestionPresentation,
+	suggestionMode string,
+	writerErr error,
+) toolStepResult {
+	content := composeDocumentResultContent(document, writer)
+	content["suggestion_mode"] = suggestionMode
+	content["completion_message"] = presentation.Message
+	status := stepStatusSuccess
+	if writerErr != nil {
+		content["status"] = agentmodel.DocumentStatusFailed
+		content["error"] = writerErr.Error()
+		status = stepStatusWarning
+	}
+	modelResult := composeDocumentModelResult(content, writer)
+	result := runtimeprovider.Result{
+		Text:         presentation.Message,
+		Content:      content,
+		ModelResult:  modelResult,
+		Presentation: presentation.Output(),
+		Terminal:     true,
+	}
+	return toolStepResult{
+		result:      result,
+		receiptable: true,
+		content:     result.ModelContent(),
+		typeKey:     "document",
+		title:       "生成完整图文",
+		status:      status,
+		payload:     map[string]any{"tool_call": firstToolCallValue(call), "output": content},
+	}
+}
+
+func composeDocumentResultContent(document agentmodel.Document, writer documentWriterResult) map[string]any {
+	return map[string]any{
+		"document_id":    document.ID,
+		"writer_run_id":  writer.RunID,
+		"title":          document.Title,
+		"status":         writer.Status,
+		"media_coverage": writer.Coverage.Payload(),
+	}
+}
+
+func composeDocumentModelResult(content map[string]any, writer documentWriterResult) map[string]any {
+	modelResult := cloneMap(content)
+	if strings.TrimSpace(writer.Text) != "" {
+		modelResult["document_body"] = writer.Text
+	}
+	return modelResult
+}
+
 type documentWriterResult struct {
-	RunID  uint64
-	Status string
-	Text   string
+	RunID    uint64
+	Status   string
+	Text     string
+	Coverage runtimedocument.MediaCoverage
 }
 
 func (s Service) runDocumentWriter(
@@ -184,6 +259,7 @@ func (s Service) createDocumentWriterExecution(
 		"title":                input.Title,
 		"purpose":              input.Purpose,
 		"content_requirements": input.ContentRequirements,
+		"media_requirements":   input.MediaRequirements,
 		"output_contract":      runtimeprovider.ComposeDocumentOutputContract,
 	})
 	return s.createExecution(ctx, requestID, executionSpec{
@@ -290,7 +366,12 @@ func (s Service) documentWriterTerminalResult(state *runState, row agentmodel.Ru
 	case agentmodel.DocumentStatusGenerating,
 		agentmodel.DocumentStatusReady,
 		agentmodel.DocumentStatusPartialFailed:
-		return documentWriterResult{RunID: row.ID, Status: document.Status, Text: text}, nil
+		return documentWriterResult{
+			RunID:    row.ID,
+			Status:   document.Status,
+			Text:     text,
+			Coverage: documents.MediaCoverage(ctx, documentID),
+		}, nil
 	case agentmodel.DocumentStatusFailed:
 		return documentWriterResult{RunID: row.ID}, fmt.Errorf("文档子运行生成失败")
 	default:

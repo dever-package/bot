@@ -27,6 +27,7 @@
           "model": "bot.energon.NewPowerCateModel",
           "order": "sort asc,id asc",
           "extraFields": [
+            "type",
             "status",
             "sort"
           ]

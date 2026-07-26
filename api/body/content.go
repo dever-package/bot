@@ -14,14 +14,6 @@ func (Content) GetList(c *server.Context) error {
 	return botapi.WriteJSON(c, data, err)
 }
 
-func (Content) GetDetail(c *server.Context) error {
-	data, err := bodyservice.NewService().ContentDetail(
-		c.Context(),
-		botapi.QueryUint64(c, "id", "link_id", "linkId"),
-	)
-	return botapi.WriteJSON(c, data, err)
-}
-
 func (Content) GetPublic(c *server.Context) error {
 	data, err := bodyservice.NewService().PublicContentDetail(
 		c.Context(),

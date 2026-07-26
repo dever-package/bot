@@ -348,7 +348,7 @@ function mergeDocumentBlocks(
         ? {
             ...existing,
             ...block,
-            text: block.text || existing.text,
+            text: mergeDocumentBlockText(existing, block),
             status: mergeBlockStatus(existing.status, block.status),
             meta,
             artifacts: mergeArtifacts(existing.artifacts, block.artifacts),
@@ -357,6 +357,18 @@ function mergeDocumentBlocks(
     );
   }
   return Array.from(blocks.values()).sort(compareBlocks);
+}
+
+function mergeDocumentBlockText(
+  current: AgentChatDocumentBlock,
+  incoming: AgentChatDocumentBlock,
+) {
+  const currentRevision = nonNegativeNumber(current.meta.stream_revision);
+  const incomingRevision = nonNegativeNumber(incoming.meta.stream_revision);
+  if (currentRevision > incomingRevision) {
+    return current.text;
+  }
+  return incoming.text || current.text;
 }
 
 function appendDocumentTextDelta(
@@ -394,6 +406,10 @@ function mergeDocumentBlockMeta(
   const meta = { ...current, ...incoming };
   const currentRevision = nonNegativeNumber(current.stream_revision);
   const incomingRevision = nonNegativeNumber(incoming.stream_revision);
+  if (currentRevision > incomingRevision) {
+    meta.stream_revision = currentRevision;
+    return meta;
+  }
   if (incomingRevision >= currentRevision && incomingRevision > 0) {
     delete meta.stream_out_of_sync;
   }

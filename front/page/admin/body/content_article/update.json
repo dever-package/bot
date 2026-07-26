@@ -59,17 +59,6 @@
         }
       },
       {
-        "type": "form-radio",
-        "name": "访问范围",
-        "value": "form.visibility",
-        "mode": "form",
-        "info": "公开文章可从登录页单页链接匿名查看；登录后文章只在工作台内容入口展示。",
-        "meta": {
-          "formLayout": "horizontal",
-          "controlClassName": "gap-x-5"
-        }
-      },
-      {
         "type": "form-input",
         "name": "标题",
         "placeholder": "请输入文章标题",
@@ -91,6 +80,7 @@
         "placeholder": "请输入文章正文内容。",
         "value": "form.content",
         "mode": "form",
+        "info": "正文中的二级、三级标题会自动生成阅读目录；文章标题请填写上方标题字段。",
         "validate": [
           {
             "type": "required",
@@ -119,7 +109,6 @@
       "category_id": "",
       "title": "",
       "content": "",
-      "visibility": "login",
       "status": 1,
       "sort": 100
     }
@@ -134,7 +123,6 @@
         "category_id": "$form.category_id",
         "title": "$form.title",
         "content": "$form.content",
-        "visibility": "$form.visibility",
         "status": "$form.status",
         "sort": "$form.sort"
       }

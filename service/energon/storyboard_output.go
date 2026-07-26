@@ -58,7 +58,7 @@ var storyboardOutputPrompt = fmt.Sprintf(`你是专业的分镜导演和短片�
 - 出镜对白不得跨越连续镜头边界；切换说话者、展示口型或改变构图时拆成新的非连续镜头。
 - speech.kind 只能是 dialogue 或 narration；每条语音必须有稳定唯一 id、非空 text 和镜头内 start_time。没有语音时使用空数组。
 - dialogue 必须提供当前镜头中的 character_id，并用 speaker_mode=visible/offscreen 表示出镜对白或画外音；narration 不提供角色字段。
-- 同一镜头最多一个出镜说话角色。所有语音不得重叠；中文按每秒约 3 到 4 个汉字预估，必须能在镜头剩余时长内说完。
+- 同一镜头最多一个出镜说话角色。所有语音不得重叠；中文按每秒约 3 到 4 个非空白字符预估。逐条检查 start_time + 字符数/3.5 不得超过 duration；放不下时优先精简原意或增加该镜头时长，并同步更新 target_duration。
 - 存在出镜对白时，说话角色必须是唯一清晰正脸；其他人物使用背面、侧后方、远景或遮挡构图。
 - speech.subtitle_enabled 控制是否进入字幕组；subtitle_text 留空时使用 speech.text。captions 只表达没有对应语音的标题、说明或重点文字。
 
@@ -201,9 +201,6 @@ func normalizeStoryboardOutput(input map[string]any) (map[string]any, error) {
 		title = "未命名分镜"
 	}
 	summary := requiredString(input, "summary")
-	if summary == "" {
-		return nil, fmt.Errorf("summary 不能为空")
-	}
 	targetDuration, ok := integerValue(input["target_duration"])
 	if !ok || targetDuration < botmodel.StoryboardMinShotDuration {
 		return nil, fmt.Errorf("target_duration 必须是不小于 %d 的整数", botmodel.StoryboardMinShotDuration)
@@ -216,6 +213,16 @@ func normalizeStoryboardOutput(input map[string]any) (map[string]any, error) {
 	storyline, err := normalizeStoryboardStoryline(input["storyline"])
 	if err != nil {
 		return nil, err
+	}
+	if summary == "" {
+		summary = botmodel.StoryboardSummaryFromStoryline(
+			requiredString(storyline, "setup"),
+			requiredString(storyline, "development"),
+			requiredString(storyline, "payoff"),
+		)
+	}
+	if summary == "" {
+		return nil, fmt.Errorf("summary 不能为空")
 	}
 	stylePrompt := requiredString(input, "style_prompt")
 	if stylePrompt == "" {
@@ -234,6 +241,7 @@ func normalizeStoryboardOutput(input map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	sourceShotDuration, sourceDurationOK := storyboardOutputShotDuration(input["shots"])
 	shots, err := normalizeStoryboardShots(input["shots"], materialTypes)
 	if err != nil {
 		return nil, err
@@ -247,9 +255,10 @@ func normalizeStoryboardOutput(input map[string]any) (map[string]any, error) {
 		duration, _ := integerValue(shot["duration"])
 		shotDuration += duration
 	}
-	if shotDuration != targetDuration {
+	if !sourceDurationOK || sourceShotDuration != targetDuration {
 		return nil, fmt.Errorf("target_duration 必须等于全部镜头时长之和")
 	}
+	targetDuration = shotDuration
 	return map[string]any{
 		"type":    botmodel.OutputTypeStoryboard,
 		"version": botmodel.StoryboardVersion,
@@ -295,6 +304,26 @@ func isStoryboardAspectRatio(value string) bool {
 	default:
 		return false
 	}
+}
+
+func storyboardOutputShotDuration(value any) (int, bool) {
+	items, ok := value.([]any)
+	if !ok || len(items) == 0 {
+		return 0, false
+	}
+	total := 0
+	for _, item := range items {
+		row, ok := item.(map[string]any)
+		if !ok {
+			return 0, false
+		}
+		duration, ok := integerValue(row["duration"])
+		if !ok {
+			return 0, false
+		}
+		total += duration
+	}
+	return total, true
 }
 
 func normalizeStoryboardShots(value any, materialTypes map[string]string) ([]any, error) {
@@ -405,7 +434,6 @@ func normalizeStoryboardShots(value any, materialTypes map[string]string) ([]any
 		speech, err := normalizeStoryboardSpeech(
 			row["speech"],
 			index,
-			float64(duration),
 			speechIDs,
 			materialTypes,
 			materialIDSet,
@@ -413,6 +441,7 @@ func normalizeStoryboardShots(value any, materialTypes map[string]string) ([]any
 		if err != nil {
 			return nil, err
 		}
+		duration = normalizeEstimatedStoryboardSpeech(speech, duration)
 		visibleDialogue := storyboardSpeechHasVisibleDialogue(speech)
 		if continuesPrevious && (previousVisibleDialogue || visibleDialogue) {
 			return nil, fmt.Errorf("shots[%d] 的出镜对白不能跨越连续镜头边界", index)
@@ -449,7 +478,6 @@ func normalizeStoryboardShots(value any, materialTypes map[string]string) ([]any
 func normalizeStoryboardSpeech(
 	value any,
 	shotIndex int,
-	duration float64,
 	usedIDs map[string]struct{},
 	materialTypes map[string]string,
 	shotMaterialIDs map[string]struct{},
@@ -485,8 +513,8 @@ func normalizeStoryboardSpeech(
 			return nil, fmt.Errorf("shots[%d].speech[%d].text 不能为空", shotIndex, index)
 		}
 		startTime, ok := numberValue(row["start_time"])
-		if !ok || startTime < 0 || startTime >= duration {
-			return nil, fmt.Errorf("shots[%d].speech[%d].start_time 必须在镜头时长内", shotIndex, index)
+		if !ok || startTime < 0 {
+			return nil, fmt.Errorf("shots[%d].speech[%d].start_time 不能小于 0", shotIndex, index)
 		}
 		normalized := map[string]any{
 			"id":               id,
@@ -525,42 +553,46 @@ func normalizeStoryboardSpeech(
 		}
 		result = append(result, normalized)
 	}
-	if err := validateEstimatedStoryboardSpeech(result, shotIndex, duration); err != nil {
-		return nil, err
-	}
 	return result, nil
 }
 
 type storyboardSpeechWindow struct {
-	id    string
-	start float64
-	end   float64
+	row      map[string]any
+	start    float64
+	duration float64
 }
 
-func validateEstimatedStoryboardSpeech(values []any, shotIndex int, duration float64) error {
+func normalizeEstimatedStoryboardSpeech(values []any, duration int) int {
 	windows := make([]storyboardSpeechWindow, 0, len(values))
+	totalDuration := 0.0
 	for _, value := range values {
 		row, _ := value.(map[string]any)
 		start, _ := numberValue(row["start_time"])
-		text := requiredString(row, "text")
+		speechDuration := botmodel.EstimateStoryboardSpeechDuration(requiredString(row, "text"))
 		windows = append(windows, storyboardSpeechWindow{
-			id:    requiredString(row, "id"),
-			start: start,
-			end:   start + botmodel.EstimateStoryboardSpeechDuration(text),
+			row:      row,
+			start:    start,
+			duration: speechDuration,
 		})
+		totalDuration += speechDuration
 	}
 	sort.SliceStable(windows, func(left int, right int) bool {
 		return windows[left].start < windows[right].start
 	})
-	for index, current := range windows {
-		if current.end > duration+0.01 {
-			return fmt.Errorf("shots[%d] 的语音 %s 按正常语速无法在镜头内说完", shotIndex, current.id)
-		}
-		if index+1 < len(windows) && current.end > windows[index+1].start+0.01 {
-			return fmt.Errorf("shots[%d] 的语音 %s 与下一条语音按正常语速会重叠", shotIndex, current.id)
-		}
+	if len(windows) == 0 {
+		return duration
 	}
-	return nil
+	normalizedDuration := max(duration, int(math.Ceil(totalDuration)))
+	cursor := 0.0
+	remainingDuration := totalDuration
+	for _, current := range windows {
+		remainingDuration -= current.duration
+		latestStart := float64(normalizedDuration) - current.duration - remainingDuration
+		start := max(cursor, min(current.start, latestStart))
+		current.row["start_time"] = start
+		cursor = start + current.duration
+	}
+	return normalizedDuration
 }
 
 func normalizeStoryboardCaptions(

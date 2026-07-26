@@ -16,8 +16,6 @@ import (
 	uploadrepo "github.com/dever-package/front/service/upload/repository"
 )
 
-const ffmpegAudioRuleID = uint64(3)
-
 type SpeechTimelineTrack struct {
 	ID        string
 	Audio     string

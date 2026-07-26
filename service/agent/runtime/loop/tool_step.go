@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimedocument "github.com/dever-package/bot/service/agent/runtime/document"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
@@ -19,7 +20,8 @@ func (s Service) runToolStep(ctx context.Context, controller *runController, sta
 		state.continueAfterTools()
 		return true
 	}
-	call := state.pendingTools[state.pendingIndex]
+	call := normalizeDocumentPresentationCall(ctx, state, state.pendingTools[state.pendingIndex])
+	state.pendingTools[state.pendingIndex] = call
 	completed, interrupted := s.executeToolStep(ctx, controller, state, call)
 	if interrupted {
 		s.finishContext(controller, state)
@@ -97,6 +99,30 @@ func (s Service) runToolStep(ctx context.Context, controller *runController, sta
 		return false
 	}
 	return true
+}
+
+func normalizeDocumentPresentationCall(ctx context.Context, state *runState, call botprotocol.ToolCall) botprotocol.ToolCall {
+	if state == nil || state.documentID == 0 ||
+		!strings.EqualFold(strings.TrimSpace(call.Name), runtimeprovider.PresentSuggestionsToolName) {
+		return call
+	}
+	arguments, err := botprotocol.ToolCallArguments(call)
+	if err != nil {
+		return call
+	}
+	documents := runtimedocument.NewService()
+	document := documents.Find(ctx, state.documentID)
+	if document == nil {
+		return call
+	}
+	coverage := documents.MediaCoverage(ctx, state.documentID)
+	arguments["message"] = runtimeprovider.DocumentCompletionPresentation(
+		document.Title,
+		document.Status,
+		coverage.RequiredTotal(),
+	).Message
+	call.Arguments = encodeJSON(arguments, "{}")
+	return call
 }
 
 func terminalResultText(current string, completed toolStepResult) string {

@@ -6,13 +6,9 @@
     "front": ">=0.1.0",
     "user": ">=0.1.0"
   },
-  "skills": [
-    "skills/SKILL.md"
-  ],
+  "skills": ["skills/SKILL.md"],
   "front": {
-    "public": [
-      "/bot/speech/audio"
-    ],
+    "public": ["/bot/speech/audio"],
     "sites": {
       "admin": {
         "api": "bot/admin",
@@ -74,6 +70,7 @@
         "entry": "bot/work",
         "public": [
           "login",
+          "content",
           "login/config",
           "login/register",
           "login/feishu",

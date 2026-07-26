@@ -30,13 +30,6 @@ func isLoginAgreementLinkCode(code string) bool {
 	}
 }
 
-func linkRequiresPublicArticle(code string, sceneIDs []uint64) bool {
-	return isLoginAgreementLinkCode(code) || containsBodyLinkSceneID(
-		sceneIDs,
-		bodymodel.LinkSceneNavigationID,
-	)
-}
-
 func normalizedBodyLinkSceneIDs(value any) []uint64 {
 	if value == nil {
 		return nil
@@ -130,16 +123,6 @@ func bodyLinkIDsForScene(ctx context.Context, sceneID uint64) []uint64 {
 		result = append(result, row.LinkID)
 	}
 	return result
-}
-
-func bodyLinkHasScene(ctx context.Context, linkID uint64, sceneID uint64) bool {
-	if linkID == 0 || !validBodyLinkSceneID(sceneID) {
-		return false
-	}
-	return bodymodel.NewLinkSceneBindingModel().Count(ctx, map[string]any{
-		"link_id":  linkID,
-		"scene_id": sceneID,
-	}) > 0
 }
 
 func bodyLinkSceneCode(sceneID uint64) string {

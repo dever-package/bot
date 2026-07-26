@@ -9,6 +9,12 @@ import {
   type AgentChatSuggestion,
 } from "../../show/agent-chat/interaction";
 import {
+  mergeAgentChatDocument,
+  mergeAgentChatDocumentEvent,
+  normalizeAgentChatDocument,
+  type AgentChatDocument,
+} from "../../show/agent-chat/document";
+import {
   normalizeAgentChatOutput,
   type AgentChatOutput,
 } from "../../show/agent-chat/output";
@@ -24,6 +30,7 @@ export type CanvasAgentRuntimeState = {
   text: string;
   output: AgentChatOutput;
   activities: AgentChatActivity[];
+  document?: AgentChatDocument;
   interaction?: CanvasAgentInteraction;
   suggestions: AgentChatSuggestion[];
   error: string;
@@ -55,6 +62,10 @@ export function reduceCanvasAgentRuntime(
   const activities = anchoredActivity
     ? mergeAgentChatActivities(previous.activities, anchoredActivity)
     : previous.activities;
+  const document = mergeAgentChatDocument(
+    mergeAgentChatDocumentEvent(previous.document, frame.output),
+    normalizeAgentChatDocument(frame.output.document),
+  );
   const interaction =
     readAgentChatInteraction(mergedOutput) || previous.interaction;
   const suggestions = readAgentChatSuggestions(mergedOutput);
@@ -64,6 +75,7 @@ export function reduceCanvasAgentRuntime(
     text,
     output: mergedOutput,
     activities,
+    document,
     interaction,
     suggestions:
       suggestions.length > 0 ? suggestions : previous.suggestions,
@@ -80,6 +92,7 @@ export function readCanvasAgentResult(
     text: textValue(normalized.text),
     output: normalized,
     activities: readAgentChatActivities(normalized),
+    document: normalizeAgentChatDocument(normalized.document),
     interaction: readAgentChatInteraction(normalized),
     suggestions: readAgentChatSuggestions(normalized),
     error: textValue(normalized.error),
@@ -108,6 +121,7 @@ export function hasCanvasAgentRuntimeContent(
       (state.started ||
         state.text ||
         state.activities.length > 0 ||
+        state.document ||
         state.interaction ||
         state.suggestions.length > 0 ||
         Object.keys(state.output).length > 0),

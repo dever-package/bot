@@ -14,16 +14,19 @@ import {
   loadWorkbenchPowerHistoryDetail,
 } from "./workbench-power-history";
 import { AssetContinuationNotice } from "./asset-continuation";
-import { WorkbenchPicker } from "./workbench-picker";
+import { WorkbenchPowerPicker } from "./workbench-power-picker";
+import type { PowerCategory } from "../shared/power-menu";
 
 export function WorkbenchFunctionPage({
   teamID,
   powers,
+  powerCategories,
   continuationAsset,
   onClearContinuation,
 }: {
   teamID: number;
   powers: WorkbenchPower[];
+  powerCategories: PowerCategory[];
   continuationAsset: AssetRecord | null;
   onClearContinuation: () => void;
 }) {
@@ -157,10 +160,10 @@ export function WorkbenchFunctionPage({
                 height="100%"
                 resultTitle="结果"
                 formHeader={
-                  <WorkbenchPicker
+                  <WorkbenchPowerPicker
                     value={selectedID}
-                    options={powers}
-                    ariaLabel="选择工具"
+                    powers={powers}
+                    categories={powerCategories}
                     onValueChange={selectPower}
                   />
                 }

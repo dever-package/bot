@@ -90,6 +90,7 @@ func (s Service) WorkspaceCanvasBootstrap(ctx context.Context, teamID uint64, re
 			"flows":         []GraphFlow{},
 			"nodes_by_flow": map[string]any{},
 			"powers":        powers,
+			"power_cates":   s.repo.ListPowerCates(ctx),
 			"power_kinds":   powerKindOptions(powers),
 			"output_types":  energonmodel.OutputTypeSpecs(),
 		}, nil
@@ -101,6 +102,7 @@ func (s Service) WorkspaceCanvasBootstrap(ctx context.Context, teamID uint64, re
 	payload := teamRuntimePayload(release, graph)
 	powers := scopedPowerOptions(s.repo.ListPowers(ctx), graph.TeamPowers)
 	payload["powers"] = powers
+	payload["power_cates"] = s.repo.ListPowerCates(ctx)
 	payload["power_kinds"] = powerKindOptions(powers)
 	payload["output_types"] = energonmodel.OutputTypeSpecs()
 	return payload, nil
@@ -150,6 +152,7 @@ func (s Service) CanvasConfig(ctx context.Context, releaseID uint64, flowID uint
 			"knowledge_cates": s.repo.ListKnowledgeCates(ctx),
 			"knowledge_bases": s.repo.ListKnowledgeBases(ctx),
 			"powers":          powers,
+			"power_cates":     s.repo.ListPowerCates(ctx),
 			"power_kinds":     powerKindOptions(powers),
 			"output_types":    energonmodel.OutputTypeSpecs(),
 		}, nil
@@ -177,6 +180,7 @@ func (s Service) CanvasConfig(ctx context.Context, releaseID uint64, flowID uint
 		"knowledge_cates":  s.repo.ListKnowledgeCates(ctx),
 		"knowledge_bases":  s.repo.ListKnowledgeBases(ctx),
 		"powers":           powers,
+		"power_cates":      s.repo.ListPowerCates(ctx),
 		"power_kinds":      powerKindOptions(powers),
 		"output_types":     energonmodel.OutputTypeSpecs(),
 	}, nil

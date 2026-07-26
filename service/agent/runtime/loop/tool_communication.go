@@ -14,8 +14,13 @@ func runtimeEventInput(eventType string, values map[string]any) map[string]any {
 	return map[string]any{"runtime_event": event}
 }
 
-func nextModelInput() map[string]any {
-	return runtimeEventInput("tool_results_available", nil)
+func nextModelInput(documentMediaOnly bool, mediaAttempt int) map[string]any {
+	values := map[string]any{}
+	if documentMediaOnly {
+		values["document_media_only"] = true
+		values["media_attempt"] = mediaAttempt
+	}
+	return runtimeEventInput("tool_results_available", values)
 }
 
 func (state *runState) continuationInput(input map[string]any) map[string]any {
@@ -68,6 +73,41 @@ func documentRewriteContinuationInput(missing string) map[string]any {
 		values["missing"] = missing
 	}
 	return runtimeEventInput("completion_required", values)
+}
+
+func documentMediaContinuationInput(missing map[string]int, attempt int) map[string]any {
+	items := make([]any, 0, len(missing))
+	for _, kind := range []string{"image", "video", "audio", "file"} {
+		if count := missing[kind]; count > 0 {
+			items = append(items, map[string]any{"kind": kind, "count": count})
+		}
+	}
+	return runtimeEventInput("document_media_required", map[string]any{
+		"document_media_only": true,
+		"media_attempt":       attempt,
+		"missing_media":       items,
+	})
+}
+
+func isDocumentMediaOnlyInput(input map[string]any) bool {
+	event, _ := input["runtime_event"].(map[string]any)
+	if strings.EqualFold(strings.TrimSpace(runtimeproviderText(event["type"])), "document_media_required") {
+		return true
+	}
+	value, _ := event["document_media_only"].(bool)
+	return value
+}
+
+func documentMediaAttempt(input map[string]any) int {
+	event, _ := input["runtime_event"].(map[string]any)
+	return runtimeprovider.ArgumentInt(event, "media_attempt", 0)
+}
+
+func runtimeproviderText(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return ""
 }
 
 func shouldStreamToolActivity(definition runtimeprovider.Definition) bool {

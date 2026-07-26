@@ -18,7 +18,7 @@ func (Service) ContentNavigation(ctx context.Context) (map[string]any, error) {
 		"id":     linkIDs,
 		"status": bodymodel.StatusEnabled,
 	}, map[string]any{"order": "sort asc,id asc"})
-	articles := enabledContentArticleMap(ctx, bodyLinkArticleIDs(links), "")
+	articles := enabledContentArticleMap(ctx, bodyLinkArticleIDs(links))
 	items := make([]map[string]any, 0, len(links))
 	for _, link := range links {
 		if item := workbenchContentLinkPayload(link, articles); item != nil {
@@ -28,40 +28,16 @@ func (Service) ContentNavigation(ctx context.Context) (map[string]any, error) {
 	return map[string]any{"items": items}, nil
 }
 
-func (Service) ContentDetail(ctx context.Context, linkID uint64) (map[string]any, error) {
-	if !bodyLinkHasScene(ctx, linkID, bodymodel.LinkSceneWorkbenchContentID) {
-		return nil, fmt.Errorf("内容入口不存在或不可访问")
-	}
-	link := bodymodel.NewLinkModel().Find(ctx, map[string]any{
-		"id":     linkID,
-		"status": bodymodel.StatusEnabled,
-	})
-	if link == nil || normalizedLoginLinkType(link.LinkType) != bodymodel.LinkTypeArticle {
-		return nil, fmt.Errorf("内容入口不存在或不可访问")
-	}
-
-	article := enabledContentArticle(ctx, link.ArticleID, 0, "")
-	if article == nil || !enabledContentCategory(ctx, article.CategoryID) {
-		return nil, fmt.Errorf("文章不存在或不可访问")
-	}
-	return map[string]any{"article": contentArticlePayload(article)}, nil
-}
-
 func (Service) PublicContentDetail(ctx context.Context, articleID uint64) (map[string]any, error) {
 	article := publicContentArticle(ctx, articleID)
 	if article == nil {
-		return nil, fmt.Errorf("文章不存在或不可公开访问")
+		return nil, fmt.Errorf("文章不存在或已停用")
 	}
 	return map[string]any{"article": contentArticlePayload(article)}, nil
 }
 
 func publicContentArticle(ctx context.Context, articleID uint64) *bodymodel.ContentArticle {
-	article := enabledContentArticle(
-		ctx,
-		articleID,
-		0,
-		bodymodel.ContentVisibilityPublic,
-	)
+	article := enabledContentArticle(ctx, articleID, 0)
 	if article == nil || !enabledContentCategory(ctx, article.CategoryID) {
 		return nil
 	}
@@ -72,7 +48,6 @@ func enabledContentArticle(
 	ctx context.Context,
 	articleID uint64,
 	categoryID uint64,
-	visibility string,
 ) *bodymodel.ContentArticle {
 	if articleID == 0 {
 		return nil
@@ -83,9 +58,6 @@ func enabledContentArticle(
 	}
 	if categoryID > 0 {
 		filters["category_id"] = categoryID
-	}
-	if visibility != "" {
-		filters["visibility"] = visibility
 	}
 	return bodymodel.NewContentArticleModel().Find(ctx, filters)
 }
@@ -100,21 +72,9 @@ func enabledContentCategory(ctx context.Context, categoryID uint64) bool {
 	}) != nil
 }
 
-func publicContentArticleMap(
-	ctx context.Context,
-	articleIDs []uint64,
-) map[uint64]*bodymodel.ContentArticle {
-	return enabledContentArticleMap(
-		ctx,
-		articleIDs,
-		bodymodel.ContentVisibilityPublic,
-	)
-}
-
 func enabledContentArticleMap(
 	ctx context.Context,
 	articleIDs []uint64,
-	visibility string,
 ) map[uint64]*bodymodel.ContentArticle {
 	if len(articleIDs) == 0 {
 		return map[uint64]*bodymodel.ContentArticle{}
@@ -131,9 +91,6 @@ func enabledContentArticleMap(
 	filters := map[string]any{
 		"id":     articleIDs,
 		"status": bodymodel.StatusEnabled,
-	}
-	if visibility != "" {
-		filters["visibility"] = visibility
 	}
 	rows := bodymodel.NewContentArticleModel().Select(ctx, filters, map[string]any{
 		"field": "id,category_id",

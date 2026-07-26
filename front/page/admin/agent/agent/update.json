@@ -259,6 +259,24 @@
         }
       },
       {
+        "type": "form-radio",
+        "name": "后续建议策略",
+        "value": "form.suggestion_mode",
+        "mode": "form",
+        "info": "即时：同轮准备，结果出来直接展示；结果后：完成后再请求模型；关闭：不展示建议。三种模式都不影响 ask_user，普通闲聊不强制建议。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "后续建议策略不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "tab": "setting",
+          "controlClassName": "gap-x-5"
+        }
+      },
+      {
         "type": "form-editor",
         "name": "设定",
         "placeholder": "填写智能体的身份、职责、边界和工作要求。",
@@ -389,6 +407,7 @@
       "skill_pack_id": "",
       "memory_enabled": false,
       "opening_enabled": false,
+      "suggestion_mode": "instant",
       "params": [],
       "temperature": 0.7,
       "timeout_seconds": 3600,

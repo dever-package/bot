@@ -22,6 +22,7 @@ type Agent struct {
 	SkillPackID     uint64    `dorm:"type:bigint;not null;default:0;comment:技能方案"`
 	MemoryEnabled   bool      `dorm:"type:boolean;not null;default:false;comment:长期记忆"`
 	OpeningEnabled  bool      `dorm:"type:boolean;not null;default:false;comment:主动开场"`
+	SuggestionMode  string    `dorm:"type:varchar(32);not null;default:'instant';comment:后续建议策略"`
 	Temperature     float64   `dorm:"type:double precision;not null;default:0.7;comment:温度"`
 	TimeoutSeconds  int       `dorm:"type:int;not null;default:3600;comment:超时时间(秒)"`
 	MaxAutoSteps    int       `dorm:"type:int;not null;default:0;comment:最大自动步骤数"`
@@ -82,6 +83,7 @@ var (
 			"skill_pack_id":     DefaultSkillPackID,
 			"memory_enabled":    false,
 			"opening_enabled":   true,
+			"suggestion_mode":   SuggestionModeInstant,
 			"temperature":       0.2,
 			"timeout_seconds":   300,
 			"max_auto_steps":    0,
@@ -103,6 +105,7 @@ var (
 			"skill_pack_id":     DefaultSkillPackID,
 			"memory_enabled":    true,
 			"opening_enabled":   false,
+			"suggestion_mode":   SuggestionModeInstant,
 			"temperature":       0.4,
 			"timeout_seconds":   3600,
 			"max_auto_steps":    0,
@@ -124,6 +127,7 @@ var (
 			"skill_pack_id":     0,
 			"memory_enabled":    false,
 			"opening_enabled":   false,
+			"suggestion_mode":   SuggestionModeInstant,
 			"temperature":       0.2,
 			"timeout_seconds":   180,
 			"max_auto_steps":    1,
@@ -145,6 +149,7 @@ var (
 			"skill_pack_id":     0,
 			"memory_enabled":    false,
 			"opening_enabled":   false,
+			"suggestion_mode":   SuggestionModeInstant,
 			"temperature":       0.3,
 			"timeout_seconds":   3600,
 			"max_auto_steps":    0,
@@ -199,8 +204,9 @@ func NewAgentModel() *orm.Model[Agent] {
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{
-			"status": statusOptions,
-			"kind":   agentKindOptions,
+			"status":          statusOptions,
+			"kind":            agentKindOptions,
+			"suggestion_mode": suggestionModeOptions,
 		},
 		Relations: []orm.Relation{
 			agentCateRelation,

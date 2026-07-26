@@ -7,6 +7,7 @@ import (
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
+	runtimedocument "github.com/dever-package/bot/service/agent/runtime/document"
 	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
@@ -20,6 +21,7 @@ func (s Service) runModelStep(ctx context.Context, controller *runController, st
 	if requiredToolName != "" {
 		toolChoice = botprotocol.ForcedFunctionToolChoice(requiredToolName)
 	}
+	documentMediaOnly := state.isDocumentWriter() && isDocumentMediaOnlyInput(state.input)
 	result, err := s.callModel(
 		ctx,
 		controller,
@@ -30,7 +32,7 @@ func (s Service) runModelStep(ctx context.Context, controller *runController, st
 		state.documentWriteID(),
 		state.modelStep,
 		state.documentTextSourceKey,
-		!requiredPresentationStep && !requiredInteractionStep,
+		!requiredPresentationStep && !requiredInteractionStep && !documentMediaOnly,
 	)
 	if requiredPresentationStep {
 		result.Text = ""
@@ -39,7 +41,7 @@ func (s Service) runModelStep(ctx context.Context, controller *runController, st
 	result.ToolCalls = calls
 	if !state.isDocumentWriter() {
 		state.AppendVisibleText(result.Text)
-	} else if !requiredPresentationStep && !result.TextPublished && strings.TrimSpace(result.Text) != "" {
+	} else if !requiredPresentationStep && !documentMediaOnly && !result.TextPublished && strings.TrimSpace(result.Text) != "" {
 		if persistErr := s.persistSynchronousDocumentText(ctx, state, result.Text); persistErr != nil && err == nil {
 			err = persistErr
 		}
@@ -71,7 +73,7 @@ func (s Service) runModelStep(ctx context.Context, controller *runController, st
 	}
 	state.lengthContinuations = 0
 	maxSteps := stepLimits.withDelivery
-	if state.modelStep >= maxSteps && !endsWithTerminalToolCall(calls) {
+	if state.modelStep >= maxSteps && !endsWithTerminalToolCall(state, calls) {
 		state.MarkFinal(runStatusFail, state.lastText, nil, fmt.Sprintf("智能体达到最大步骤数 %d", maxSteps))
 		if !s.commitFinalRuntimeStep(state, "model", modelStepTitle(result), result.Text, map[string]any{
 			"finish_reason": result.FinishMode,
@@ -162,7 +164,78 @@ func (s Service) finishModelOutput(
 	if state.isDocumentWriter() && !state.documentDeliveryReady {
 		return s.failIncompleteDocument(state, "当前图文正文尚未通过完整性交付检查")
 	}
+	if handled, continueRun := s.ensureDocumentMediaRequirements(ctx, state, result); handled {
+		return continueRun
+	}
 	return s.finishImplicitModelOutput(state, result)
+}
+
+const maxDocumentMediaAttempts = 2
+
+func (s Service) ensureDocumentMediaRequirements(
+	ctx context.Context,
+	state *runState,
+	result modelStepResult,
+) (bool, bool) {
+	if state == nil || !state.isDocumentWriter() {
+		return false, false
+	}
+	coverage := runtimedocument.NewService().MediaCoverage(ctx, state.documentID)
+	missing := coverage.Missing()
+	if len(missing) == 0 {
+		return false, false
+	}
+	if kinds := missingDocumentMediaToolKinds(state, missing); len(kinds) > 0 {
+		return true, s.failIncompleteDocument(
+			state,
+			"当前智能体未配置文档所需的素材能力: "+strings.Join(kinds, "、"),
+		)
+	}
+	attempt := documentMediaAttempt(state.input)
+	if attempt >= maxDocumentMediaAttempts {
+		return true, s.failIncompleteDocument(state, "文档所需素材未完整提交")
+	}
+	state.awaitingDelivery = true
+	return true, s.continueModelOutput(
+		state,
+		result,
+		documentMediaContinuationInput(missing, attempt+1),
+		"document_media_required",
+		stepStatusWarning,
+	)
+}
+
+func missingDocumentMediaToolKinds(state *runState, missing map[string]int) []string {
+	if state == nil || state.execution.registry == nil {
+		return documentMediaKindLabels(missing)
+	}
+	missingKinds := map[string]int{}
+	for kind, count := range missing {
+		if count > 0 && len(state.execution.registry.DefinitionsByKind(kind)) == 0 {
+			missingKinds[kind] = count
+		}
+	}
+	return documentMediaKindLabels(missingKinds)
+}
+
+func documentMediaKindLabels(kinds map[string]int) []string {
+	labels := make([]string, 0, len(kinds))
+	for _, kind := range []string{"image", "video", "audio", "file"} {
+		if kinds[kind] <= 0 {
+			continue
+		}
+		switch kind {
+		case "image":
+			labels = append(labels, "图片")
+		case "video":
+			labels = append(labels, "视频")
+		case "audio":
+			labels = append(labels, "音频")
+		case "file":
+			labels = append(labels, "文件")
+		}
+	}
+	return labels
 }
 
 func (s Service) continueRejectedDocumentTerminal(state *runState, result modelStepResult, missing string) bool {
@@ -372,11 +445,16 @@ func (s Service) continueMissingDelivery(state *runState, result modelStepResult
 	)
 }
 
-func endsWithTerminalToolCall(calls []botprotocol.ToolCall) bool {
+func endsWithTerminalToolCall(state *runState, calls []botprotocol.ToolCall) bool {
 	if len(calls) == 0 {
 		return false
 	}
-	return isTerminalToolName(calls[len(calls)-1].Name)
+	lastName := strings.TrimSpace(calls[len(calls)-1].Name)
+	if isTerminalToolName(lastName) {
+		return true
+	}
+	return state != nil && strings.EqualFold(lastName, runtimeprovider.ComposeDocumentToolName) &&
+		agentmodel.NormalizeSuggestionMode(state.execution.agent.SuggestionMode) != agentmodel.SuggestionModeAfterResult
 }
 
 type modelStepLimits struct {

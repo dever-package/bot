@@ -75,19 +75,19 @@
         "type": "form-select",
         "placeholder": "链接类型",
         "value": "search.link_type",
-        "mode": "search",
-        "meta": {
-          "controlClassName": "w-[140px]"
-        }
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "使用场景",
+        "value": "search.scene_ids",
+        "mode": "search"
       },
       {
         "type": "form-select",
         "placeholder": "状态",
         "value": "search.status",
-        "mode": "search",
-        "meta": {
-          "controlClassName": "w-[140px]"
-        }
+        "mode": "search"
       },
       {
         "type": "show-button",
@@ -291,12 +291,14 @@
       ],
       "filterFields": [
         "link_type",
+        "scene_ids",
         "status"
       ]
     },
     "search": {
       "keyword": "",
       "link_type": "",
+      "scene_ids": "",
       "status": ""
     },
     "actionTarget": {

@@ -149,6 +149,23 @@ func IsStoryboardVisualMode(value string) bool {
 	}
 }
 
+func StoryboardSummaryFromStoryline(setup string, development string, payoff string) string {
+	parts := make([]string, 0, 3)
+	seen := make(map[string]struct{}, 3)
+	for _, value := range []string{setup, development, payoff} {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		parts = append(parts, value)
+	}
+	return strings.Join(parts, "；")
+}
+
 func IsStoryboardShotDurationValid(value float64) bool {
 	return !math.IsNaN(value) &&
 		!math.IsInf(value, 0) &&

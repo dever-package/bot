@@ -213,9 +213,6 @@ func (s Service) buildTeamReleaseSnapshot(ctx context.Context, team teammodel.Te
 	assetCates := s.repo.ListAssetCates(ctx, team.ID, true)
 	teamPowers := s.repo.ListTeamPowers(ctx, team.ID, true)
 	roles := s.repo.ListRoles(ctx, team.ID, true)
-	if issues := validateTeamRoles(roles); len(issues) > 0 {
-		return TeamReleaseSnapshot{}, fmt.Errorf("发布前请先修正团队角色: %s", strings.Join(issues, "；"))
-	}
 	flows := s.repo.ListFlows(ctx, team.ID, true)
 	flowEdges := s.repo.ListFlowEdges(ctx, team.ID, true)
 	if issues := validateFlowGraph(flows, flowEdges); len(issues) > 0 {

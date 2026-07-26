@@ -70,13 +70,9 @@ func (LinkHook) ProviderBeforeSaveLink(c *server.Context, params []any) any {
 			panicBodyField("form.article_id", "请选择内容文章。")
 		}
 		if c != nil {
-			article := enabledContentArticle(c.Context(), articleID, 0, "")
+			article := enabledContentArticle(c.Context(), articleID, 0)
 			if article == nil || !enabledContentCategory(c.Context(), article.CategoryID) {
 				panicBodyField("form.article_id", "文章不存在、已停用或所属分类已停用。")
-			}
-			if linkRequiresPublicArticle(code, sceneIDs) &&
-				article.Visibility != bodymodel.ContentVisibilityPublic {
-				panicBodyField("form.article_id", "登录页导航和协议条款只能选择公开文章。")
 			}
 		}
 		record["article_id"] = articleID

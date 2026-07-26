@@ -188,10 +188,15 @@ func (Workbench) GetAssets(c *server.Context) error {
 		NodeKey:      botapi.QueryText(c, "node_key", "nodeKey"),
 		Role:         botapi.QueryText(c, "role"),
 		Kind:         botapi.QueryText(c, "kind", "type"),
-		View:         botapi.QueryText(c, "view"),
-		ContentMode:  botapi.QueryText(c, "content_mode", "contentMode"),
-		Page:         int(botapi.QueryUint64(c, "page")),
-		PageSize:     int(botapi.QueryUint64(c, "page_size", "pageSize")),
+		ExcludeCollections: botapi.QueryUint64(
+			c,
+			"exclude_collections",
+			"excludeCollections",
+		) > 0,
+		View:        botapi.QueryText(c, "view"),
+		ContentMode: botapi.QueryText(c, "content_mode", "contentMode"),
+		Page:        int(botapi.QueryUint64(c, "page")),
+		PageSize:    int(botapi.QueryUint64(c, "page_size", "pageSize")),
 	})
 	return botapi.WriteJSON(c, data, err)
 }

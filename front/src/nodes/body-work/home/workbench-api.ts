@@ -1,6 +1,12 @@
 import { joinSiteApi, request } from "@dever/front-plugin";
 import { isSuccessResponse } from "../shared/api-response";
 import { createInFlightRequestLoader } from "../shared/in-flight-request";
+import {
+  buildPowerMenu,
+  flattenPowerMenu,
+  normalizePowerCategory,
+  type PowerCategory,
+} from "../shared/power-menu";
 
 export type WorkbenchTeam = {
   id: number;
@@ -12,6 +18,7 @@ export type WorkbenchTeam = {
 export type WorkbenchPower = {
   id: number;
   powerID: number;
+  cateID: number;
   name: string;
   key: string;
   icon: string;
@@ -53,6 +60,7 @@ export type WorkbenchCatalog = {
   workspaceBodyID: number;
   projectEnabled: boolean;
   powers: WorkbenchPower[];
+  powerCategories: PowerCategory[];
   roles: WorkbenchRole[];
   assetCates: WorkbenchAssetCate[];
 };
@@ -73,13 +81,20 @@ export function loadWorkbenchCatalog(teamID = 0) {
           projectEnabled: Boolean(data.project_enabled),
         }
       : null;
+    const powerCategories = toRows(data.power_cates)
+      .map(normalizePowerCategory)
+      .filter(hasID);
+    const powers = toRows(data.powers).map(normalizePower).filter(hasID);
     return {
       teams,
       team: currentTeam,
       releaseID: numberValue(data.release?.id),
       workspaceBodyID: numberValue(data.workspace?.body_id),
       projectEnabled: Boolean(data.project_enabled),
-      powers: toRows(data.powers).map(normalizePower).filter(hasID),
+      powers: flattenPowerMenu(
+        buildPowerMenu(powers, powerCategories, (power) => power.cateID),
+      ),
+      powerCategories,
       roles: toRows(data.roles)
         .map(normalizeRole)
         .filter(hasID),
@@ -185,6 +200,7 @@ function normalizePower(value: any): WorkbenchPower {
   return {
     id: numberValue(value?.id),
     powerID: numberValue(value?.power_id),
+    cateID: numberValue(value?.cate_id),
     name: textValue(value?.name || value?.key) || "未命名能力",
     key: textValue(value?.key),
     icon: textValue(value?.icon),

@@ -1,16 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  loadBodyContentArticleByLink,
   loadPublicBodyContentArticle,
   type BodyContentArticle,
 } from "./content-api";
 
-export type BodyContentAccess = "workbench" | "public";
-
-export function useBodyContentArticle(
-  referenceID: number,
-  access: BodyContentAccess,
-) {
+export function useBodyContentArticle(articleID: number) {
   const [article, setArticle] = useState<BodyContentArticle | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -21,9 +15,7 @@ export function useBodyContentArticle(
     setLoading(true);
     setError("");
     try {
-      const next = await (access === "public"
-        ? loadPublicBodyContentArticle(referenceID)
-        : loadBodyContentArticleByLink(referenceID));
+      const next = await loadPublicBodyContentArticle(articleID);
       if (requestID === requestRef.current) {
         setArticle(next);
       }
@@ -31,9 +23,7 @@ export function useBodyContentArticle(
       if (requestID === requestRef.current) {
         setArticle(null);
         setError(
-          currentError instanceof Error
-            ? currentError.message
-            : "加载文章失败",
+          currentError instanceof Error ? currentError.message : "加载文章失败",
         );
       }
     } finally {
@@ -41,7 +31,7 @@ export function useBodyContentArticle(
         setLoading(false);
       }
     }
-  }, [access, referenceID]);
+  }, [articleID]);
 
   useEffect(() => {
     void load();

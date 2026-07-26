@@ -50,10 +50,13 @@ func buildPayload(row agentmodel.Document, blocks []agentmodel.DocumentBlock, ar
 			hasFailedMedia = true
 		}
 	}
-	status := projectedDocumentStatus(row.Status, pendingJobs, hasFailedMedia)
+	coverage := buildMediaCoverage(row, blocks)
+	status := projectedDocumentStatus(row.Status, pendingJobs, hasFailedMedia, coverage.MissingTotal() > 0)
 	if status == agentmodel.DocumentStatusFailed {
 		pendingJobs = 0
 	}
+	meta := decodeMap(row.Meta)
+	meta["media_coverage"] = coverage.Payload()
 	return Payload{
 		ID:              row.ID,
 		SessionID:       row.SessionID,
@@ -63,7 +66,7 @@ func buildPayload(row agentmodel.Document, blocks []agentmodel.DocumentBlock, ar
 		Status:          status,
 		BlockCount:      len(blockPayloads),
 		PendingJobCount: pendingJobs,
-		Meta:            decodeMap(row.Meta),
+		Meta:            meta,
 		Blocks:          blockPayloads,
 		CreatedAt:       timeText(row.CreatedAt),
 		UpdatedAt:       timeText(row.UpdatedAt),
@@ -88,7 +91,7 @@ func blockPayload(row agentmodel.DocumentBlock, artifacts []map[string]any) Bloc
 	}
 }
 
-func projectedDocumentStatus(status string, pendingJobs int, hasFailedMedia bool) string {
+func projectedDocumentStatus(status string, pendingJobs int, hasFailedMedia bool, hasMissingMedia bool) string {
 	if status == agentmodel.DocumentStatusFailed {
 		return status
 	}
@@ -98,7 +101,7 @@ func projectedDocumentStatus(status string, pendingJobs int, hasFailedMedia bool
 	if pendingJobs > 0 {
 		return agentmodel.DocumentStatusGenerating
 	}
-	if hasFailedMedia {
+	if hasFailedMedia || hasMissingMedia {
 		return agentmodel.DocumentStatusPartialFailed
 	}
 	if status == agentmodel.DocumentStatusPartialFailed {

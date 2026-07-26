@@ -1,12 +1,14 @@
 import type {
   OutputTypeOption,
   PowerForm,
+  PowerCategoryOption,
   PowerKindOption,
   PowerOption,
 } from "./types";
 
 export type PowerCatalog = {
   powers: PowerOption[];
+  powerCategories: PowerCategoryOption[];
   powerKinds: PowerKindOption[];
   outputTypes: OutputTypeOption[];
 };

@@ -1,13 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 const DOCUMENT_SCROLL_BOTTOM_THRESHOLD = 64;
 
 export function useAgentChatDocumentAutoScroll({
   documentID,
+  contentVersion,
   enabled,
   pending,
 }: {
   documentID: number;
+  contentVersion: string;
   enabled: boolean;
   pending: boolean;
 }) {
@@ -16,6 +24,7 @@ export function useAgentChatDocumentAutoScroll({
   const frameRef = useRef<number | null>(null);
   const openDocumentRef = useRef("");
   const shouldFollowRef = useRef(false);
+  const lastScrollTopRef = useRef(0);
   const [atBottom, setAtBottom] = useState(true);
 
   const updateBottomState = useCallback(() => {
@@ -39,6 +48,7 @@ export function useAgentChatDocumentAutoScroll({
     }
     shouldFollowRef.current = true;
     scroll.scrollTo({ top: scroll.scrollHeight, behavior });
+    lastScrollTopRef.current = scroll.scrollTop;
     setAtBottom(true);
   }, []);
 
@@ -64,6 +74,9 @@ export function useAgentChatDocumentAutoScroll({
       return;
     }
     if (openDocumentRef.current === openDocumentKey) {
+      if (pending && updateBottomState()) {
+        shouldFollowRef.current = true;
+      }
       return;
     }
     openDocumentRef.current = openDocumentKey;
@@ -72,8 +85,15 @@ export function useAgentChatDocumentAutoScroll({
     if (scroll && !pending) {
       scroll.scrollTop = 0;
     }
+    lastScrollTopRef.current = scroll?.scrollTop || 0;
     scheduleContentUpdate();
-  }, [documentID, enabled, pending, scheduleContentUpdate]);
+  }, [documentID, enabled, pending, scheduleContentUpdate, updateBottomState]);
+
+  useLayoutEffect(() => {
+    if (enabled) {
+      scheduleContentUpdate();
+    }
+  }, [contentVersion, enabled, scheduleContentUpdate]);
 
   useEffect(() => {
     if (!enabled) {
@@ -87,7 +107,7 @@ export function useAgentChatDocumentAutoScroll({
     observer.observe(content);
     scheduleContentUpdate();
     return () => observer.disconnect();
-  }, [enabled, scheduleContentUpdate]);
+  }, [documentID, enabled, scheduleContentUpdate]);
 
   useEffect(
     () => () => {
@@ -99,8 +119,18 @@ export function useAgentChatDocumentAutoScroll({
   );
 
   const handleScroll = useCallback(() => {
+    const scroll = scrollRef.current;
+    if (!scroll) {
+      return;
+    }
+    const movingUp = scroll.scrollTop < lastScrollTopRef.current - 1;
     const nextAtBottom = updateBottomState();
-    shouldFollowRef.current = nextAtBottom;
+    if (movingUp) {
+      shouldFollowRef.current = false;
+    } else if (nextAtBottom) {
+      shouldFollowRef.current = true;
+    }
+    lastScrollTopRef.current = scroll.scrollTop;
   }, [updateBottomState]);
 
   return {

@@ -44,9 +44,10 @@ func (result MountResult) Close() {
 }
 
 func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
-	tools := []runtimeprovider.Tool{
-		runtimeprovider.AskUserTool(),
-		runtimeprovider.PresentSuggestionsTool(),
+	suggestionMode := agentmodel.NormalizeSuggestionMode(request.Agent.SuggestionMode)
+	tools := []runtimeprovider.Tool{runtimeprovider.AskUserTool()}
+	if agentmodel.SuggestionEnabled(suggestionMode) {
+		tools = append(tools, runtimeprovider.PresentSuggestionsTool(suggestionMode))
 	}
 	if !request.BuiltinOnly && request.Agent.Key == agentmodel.SkillInstallerAgentKey {
 		tools = append(tools, runtimeprovider.SkillInstallPlanTool())
@@ -93,7 +94,7 @@ func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
 
 	warnings := mountPowerTools(request, registry, prepared.powerCandidates)
 	if request.EnableDocument {
-		if err := registry.Add(runtimeprovider.ComposeDocumentTool()); err != nil {
+		if err := registry.Add(runtimeprovider.ComposeDocumentTool(suggestionMode)); err != nil {
 			result.Close()
 			return MountResult{}, err
 		}

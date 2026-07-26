@@ -21,22 +21,13 @@ export type BodyContentArticle = {
 };
 
 const navigationRequest = createInFlightRequestLoader<BodyContentNavigation>();
-const detailRequest = createInFlightRequestLoader<BodyContentArticle>();
 const publicDetailRequest = createInFlightRequestLoader<BodyContentArticle>();
 
 export function loadBodyContentNavigation() {
   return navigationRequest("content", async () => {
     const result = await request(joinSiteApi("content/list"), "get");
-    return normalizeContentNavigation(
-      responseData(result, "加载内容列表失败"),
-    );
+    return normalizeContentNavigation(responseData(result, "加载内容列表失败"));
   });
-}
-
-export function loadBodyContentArticleByLink(linkID: number) {
-  return detailRequest(String(linkID), () =>
-    requestContentArticle("content/detail", linkID),
-  );
 }
 
 export function loadPublicBodyContentArticle(articleID: number) {

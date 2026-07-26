@@ -32,6 +32,7 @@ import {
 import { useAgentChatDocumentAutoScroll } from "./document-scroll";
 import { AgentChatDocumentView } from "./document-view";
 import { AGENT_CHAT_CHILD_LAYER_Z_INDEX } from "./layers";
+import { AgentChatTooltip } from "./tooltip";
 import type {
   AgentChatArtifactActionRenderer,
   AgentChatDocumentActionRenderer,
@@ -92,6 +93,7 @@ export function AgentChatDocumentPane({
 }) {
   const [copied, setCopied] = useState(false);
   const [mobileOutlineOpen, setMobileOutlineOpen] = useState(false);
+  const copyInProgressRef = useRef(false);
   const resetTimerRef = useRef<number | null>(null);
   const outlineTriggerRef = useRef<HTMLButtonElement>(null);
   const outlineMenuRef = useRef<HTMLDivElement>(null);
@@ -99,6 +101,7 @@ export function AgentChatDocumentPane({
   const pending = isAgentChatDocumentPending(agentDocument);
   const documentScroll = useAgentChatDocumentAutoScroll({
     documentID: agentDocument.id,
+    contentVersion: agentChatDocumentContentVersion(agentDocument),
     enabled: open,
     pending,
   });
@@ -164,10 +167,13 @@ export function AgentChatDocumentPane({
     if (!text.trim()) {
       return;
     }
+    copyInProgressRef.current = true;
     try {
       await copyTextToClipboard(text);
     } catch {
       return;
+    } finally {
+      copyInProgressRef.current = false;
     }
     setCopied(true);
     if (resetTimerRef.current != null) {
@@ -196,6 +202,16 @@ export function AgentChatDocumentPane({
         showOverlay={false}
         data-assistant-layer="true"
         layerZIndex={AGENT_CHAT_CHILD_LAYER_Z_INDEX}
+        onFocusOutside={(event) => {
+          if (copyInProgressRef.current) {
+            event.preventDefault();
+          }
+        }}
+        onInteractOutside={(event) => {
+          if (copyInProgressRef.current) {
+            event.preventDefault();
+          }
+        }}
         className="flex w-[94vw] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none md:w-[72vw] xl:w-[64vw] 2xl:w-[1120px]"
       >
         <SheetHeader className="flex h-14 shrink-0 flex-row items-center gap-3 border-b px-5 py-0 text-start">
@@ -225,20 +241,22 @@ export function AgentChatDocumentPane({
             </SheetDescription>
           </div>
           {showOutline ? (
-            <Button
-              ref={outlineTriggerRef}
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="h-8 shrink-0 gap-1.5 px-2 xl:hidden"
-              title="查看文档目录"
-              aria-haspopup="dialog"
-              aria-expanded={mobileOutlineOpen}
-              onClick={() => setMobileOutlineOpen((current) => !current)}
-            >
-              <ListTree className="size-4" />
-              <span className="hidden sm:inline">目录</span>
-            </Button>
+            <AgentChatTooltip label="查看文档目录">
+              <Button
+                ref={outlineTriggerRef}
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-8 shrink-0 gap-1.5 px-2 xl:hidden"
+                aria-label="查看文档目录"
+                aria-haspopup="dialog"
+                aria-expanded={mobileOutlineOpen}
+                onClick={() => setMobileOutlineOpen((current) => !current)}
+              >
+                <ListTree className="size-4" />
+                <span className="hidden sm:inline">目录</span>
+              </Button>
+            </AgentChatTooltip>
           ) : null}
           {renderDocumentActions?.({
             messageID,
@@ -246,35 +264,35 @@ export function AgentChatDocumentPane({
             running: pending,
             error: failed,
           })}
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="size-8 shrink-0"
-            title={copied ? "已复制" : "复制文档"}
-            disabled={!agentDocument.blocks.length}
-            onClick={() => void copyDocument()}
-          >
-            {copied ? (
-              <Check className="size-4" />
-            ) : (
-              <Copy className="size-4" />
-            )}
-            <span className="sr-only">
-              {copied ? "已复制" : "复制文档"}
-            </span>
-          </Button>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="size-8 shrink-0"
-            title="关闭文档"
-            onClick={onClose}
-          >
-            <X className="size-4" />
-            <span className="sr-only">关闭文档</span>
-          </Button>
+          <AgentChatTooltip label={copied ? "已复制" : "复制文档"}>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="size-8 shrink-0"
+              aria-label={copied ? "文档已复制" : "复制文档"}
+              disabled={!agentDocument.blocks.length}
+              onClick={() => void copyDocument()}
+            >
+              {copied ? (
+                <Check className="size-4" />
+              ) : (
+                <Copy className="size-4" />
+              )}
+            </Button>
+          </AgentChatTooltip>
+          <AgentChatTooltip label="关闭文档">
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="size-8 shrink-0"
+              aria-label="关闭文档"
+              onClick={onClose}
+            >
+              <X className="size-4" />
+            </Button>
+          </AgentChatTooltip>
         </SheetHeader>
         {showOutline && mobileOutlineOpen ? (
           <div
@@ -305,20 +323,27 @@ export function AgentChatDocumentPane({
               "xl:grid xl:grid-cols-[13rem_minmax(0,1fr)]",
           )}
         >
-          {showOutline ? (
-            <aside className="hidden min-h-0 border-r bg-muted/10 xl:flex xl:flex-col">
-              <div className="shrink-0 px-5 pb-2 pt-8 text-xs font-medium text-muted-foreground">
-                目录
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-6 overscroll-contain">
-                <AgentChatDocumentOutline
-                  items={outline.items}
-                  activeID={outline.activeID}
-                  onSelect={outline.selectItem}
-                />
-              </div>
-            </aside>
-          ) : null}
+          <aside
+            className={cn(
+              "hidden min-h-0 flex-col border-r bg-muted/10",
+              showOutline && "xl:flex",
+            )}
+          >
+            {showOutline ? (
+              <>
+                <div className="shrink-0 px-5 pb-2 pt-8 text-xs font-medium text-muted-foreground">
+                  目录
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-6 overscroll-contain">
+                  <AgentChatDocumentOutline
+                    items={outline.items}
+                    activeID={outline.activeID}
+                    onSelect={outline.selectItem}
+                  />
+                </div>
+              </>
+            ) : null}
+          </aside>
           <div className="relative h-full min-h-0">
             <div
               ref={documentScroll.scrollRef}
@@ -343,23 +368,44 @@ export function AgentChatDocumentPane({
               </div>
             </div>
             {!documentScroll.atBottom ? (
-              <Button
-                type="button"
-                size="icon"
-                variant="outline"
-                className="absolute bottom-4 right-4 z-10 size-9 rounded-full bg-background shadow-sm"
-                title="回到底部"
-                aria-label="回到底部"
-                onClick={() => documentScroll.scrollToBottom("smooth")}
-              >
-                <ArrowDown className="size-4" />
-              </Button>
+              <AgentChatTooltip label="回到底部">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className="absolute bottom-4 right-4 z-10 size-9 rounded-full bg-background shadow-sm"
+                  aria-label="回到底部"
+                  onClick={() => documentScroll.scrollToBottom("smooth")}
+                >
+                  <ArrowDown className="size-4" />
+                </Button>
+              </AgentChatTooltip>
             ) : null}
           </div>
         </div>
       </SheetContent>
     </Sheet>
   );
+}
+
+function agentChatDocumentContentVersion(document: AgentChatDocument) {
+  const blocks = document.blocks.map((block) => {
+    const artifacts = block.artifacts
+      .map(
+        (artifact) =>
+          `${artifact.id}:${artifact.status}:${artifact.url}:${artifact.previewUrl}`,
+      )
+      .join(",");
+    return [
+      block.id,
+      block.status,
+      block.text.length,
+      block.text.slice(-64),
+      String(block.meta.stream_revision || ""),
+      artifacts,
+    ].join(":");
+  });
+  return [document.status, document.pendingJobCount, ...blocks].join("|");
 }
 
 function documentStatusLabel(status: AgentChatDocument["status"]) {

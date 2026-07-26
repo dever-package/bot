@@ -213,9 +213,15 @@ func (s Service) MarkBlockReady(ctx context.Context, blockID uint64, artifacts [
 }
 
 func (s Service) MarkBlockFailed(ctx context.Context, blockID uint64, message string) (*agentmodel.DocumentBlock, error) {
+	current := s.repository.findBlock(ctx, blockID)
+	if current == nil {
+		return nil, fmt.Errorf("素材文档块不存在")
+	}
+	meta := decodeMap(current.Meta)
+	meta["error"] = publicError(message, "素材生成失败")
 	block := s.repository.updateBlock(ctx, blockID, map[string]any{
 		"status": agentmodel.DocumentBlockStatusFailed,
-		"meta":   encodeJSON(map[string]any{"error": publicError(message, "素材生成失败")}, "{}"),
+		"meta":   encodeJSON(meta, "{}"),
 	})
 	if block == nil {
 		return nil, fmt.Errorf("更新素材失败状态失败")
@@ -298,11 +304,13 @@ func (s Service) RefreshStatus(ctx context.Context, documentID uint64) (*agentmo
 			failed++
 		}
 	}
-	for _, block := range s.repository.blocks(ctx, documentID) {
+	blocks := s.repository.blocks(ctx, documentID)
+	for _, block := range blocks {
 		if block.Type == agentmodel.DocumentBlockTypeMedia && block.Status == agentmodel.DocumentBlockStatusFailed {
 			failed++
 		}
 	}
+	coverage := buildMediaCoverage(*document, blocks)
 	if document.Status == agentmodel.DocumentStatusWriting {
 		updated, _ := s.repository.updateIfStatus(ctx, documentID, document.Status, map[string]any{
 			"pending_job_count": pending,
@@ -312,16 +320,16 @@ func (s Service) RefreshStatus(ctx context.Context, documentID uint64) (*agentmo
 	if document.Status == agentmodel.DocumentStatusFailed {
 		return document, nil
 	}
-	if isTerminalDocumentStatus(document.Status) && pending == 0 {
-		return document, s.publishDocumentComplete(ctx, *document)
-	}
 	status := agentmodel.DocumentStatusReady
 	completedAt := any(time.Now())
 	if pending > 0 {
 		status = agentmodel.DocumentStatusGenerating
 		completedAt = nil
-	} else if failed > 0 {
+	} else if failed > 0 || coverage.MissingTotal() > 0 {
 		status = agentmodel.DocumentStatusPartialFailed
+	}
+	if document.Status == status && document.PendingJobCount == pending {
+		return document, nil
 	}
 	updated, changed := s.repository.updateIfStatus(ctx, documentID, document.Status, map[string]any{
 		"status":            status,

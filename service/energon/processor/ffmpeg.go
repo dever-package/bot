@@ -25,6 +25,7 @@ const (
 	ffmpegProcessorKey     = "ffmpeg"
 	ffmpegComposeOperation = "compose"
 	ffmpegVideoRuleID      = uint64(2)
+	ffmpegAudioRuleID      = uint64(3)
 	ffmpegMaxDimension     = 8192
 	ffmpegMaxPixels        = 3840 * 2160
 	ffmpegVideoEncoder     = "libx264"

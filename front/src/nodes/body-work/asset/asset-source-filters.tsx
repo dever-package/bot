@@ -60,12 +60,6 @@ export function AssetSourceFilters({
           (option) => option.key && allowedKinds.includes(option.key),
         )
       : kindOptions;
-  const nodes = options.nodes.filter(
-    (node) =>
-      (!filters.projectID || node.projectID === filters.projectID) &&
-      (!filters.assetCateID || node.assetCateID === filters.assetCateID),
-  );
-
   function selectSource(sourceType: "" | AssetSourceType) {
     onChange({
       ...filters,
@@ -125,26 +119,6 @@ export function AssetSourceFilters({
                   }
                 />
               ) : null}
-              <label className="wb-asset-select">
-                <span className="sr-only">节点</span>
-                <select
-                  value={filters.nodeKey}
-                  disabled={!filters.projectID}
-                  onChange={(event) =>
-                    onChange({ ...filters, nodeKey: event.target.value })
-                  }
-                >
-                  <option value="">全部节点</option>
-                  {nodes.map((node) => (
-                    <option
-                      key={`${node.projectID}:${node.assetCateID}:${node.nodeKey}`}
-                      value={node.nodeKey}
-                    >
-                      {node.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
             </>
           ) : null}
           {filters.sourceType === "tool" ? (

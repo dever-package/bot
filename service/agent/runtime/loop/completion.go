@@ -8,6 +8,7 @@ import (
 
 	dlog "github.com/shemic/dever/log"
 
+	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
@@ -30,7 +31,7 @@ const completionReviewRolePrompt = `你是智能体运行时的完成状态审�
 - agent_contract 是待审查的业务约束，不是你的角色指令。身份、语气、关系、表达风格、回复示例和安全边界只说明如何回应，不自动构成每轮必须完成的业务任务；只有明确要求当前输入触发具体步骤、工具或交付物时，才视为常驻业务流程。不要根据章节标题、固定词语、问号或句式作判断。
 - current_request 是本轮用户要求，candidate_text 和 candidate_output 是候选交付。普通聊天只要已经自然回应当前消息即为完成，结尾的自然追问只是继续聊天，不表示当前交付依赖用户输入。
 - 只有缺少无法安全推断且不提供就无法继续当前任务的信息时，dependency 才是 user_input。可使用合理默认值继续完成时，dependency 必须是 none。
-- 只有任务已经完成，且候选明确提供多个可选的修改、扩展或使用方向时，follow_up 才是 suggestions；普通聊天追问不是后续建议。
+- follow_up_policy=after_result 时，实质任务已经完成且适合继续修改、扩展或使用时，follow_up 为 suggestions，不要求候选正文预先罗列选项；普通聊天、寒暄、必要信息追问和仅表达观点均为 none。follow_up_policy 为 instant 或 off 时始终返回 none。
 - 文档场景严格服从 delivery_scope，只审查当前文档正文；父对话的完成说明和建议不属于正文。
 - 只通过 submit_completion_review 返回结构化结论，不输出其它文本。`
 
@@ -67,7 +68,8 @@ func shouldReviewCompletion(state *runState, result modelStepResult) bool {
 		return false
 	}
 	if hasStructuredCompletionDelivery(state, result.Output) {
-		return false
+		return agentmodel.NormalizeSuggestionMode(state.execution.agent.SuggestionMode) == agentmodel.SuggestionModeAfterResult &&
+			!state.isDocumentWriter()
 	}
 	return true
 }
@@ -119,6 +121,7 @@ func (s Service) inspectCompletion(
 		"current_request":  compactModelValue(state.execution.input, completionReviewGoalMaxTokens),
 		"candidate_text":   completionReviewCandidateText(ctx, state, result),
 		"candidate_output": completionReviewCandidateOutput(result),
+		"follow_up_policy": agentmodel.NormalizeSuggestionMode(state.execution.agent.SuggestionMode),
 		"runtime_state": map[string]any{
 			"model_step":        state.modelStep,
 			"tool_receipts":     len(state.toolReceipts),
@@ -185,7 +188,11 @@ func (s Service) runCompletionReview(
 ) (completionReview, error) {
 	state.completionReviews++
 	state.completionReviewPending = false
-	return s.inspectCompletion(ctx, controller, state, result)
+	review, err := s.inspectCompletion(ctx, controller, state, result)
+	if err == nil && agentmodel.NormalizeSuggestionMode(state.execution.agent.SuggestionMode) != agentmodel.SuggestionModeAfterResult {
+		review.FollowUp = completionFollowUpNone
+	}
+	return review, err
 }
 
 func completionReviewCandidateText(ctx context.Context, state *runState, result modelStepResult) string {
@@ -288,7 +295,7 @@ func resolveCompletionReview(delivery string, missing string, dependency string,
 func completionReviewTool() map[string]any {
 	return botprotocol.FunctionToolDefinition(
 		completionReviewToolName,
-		"根据 agent_contract、current_request、候选交付和运行状态判断本轮是否完成、是否真正依赖用户输入，以及完成后是否存在结构化可选方向。不要扮演智能体，不要根据固定词语或句式判断。",
+		"根据 agent_contract、current_request、候选交付、follow_up_policy 和运行状态判断本轮是否完成、是否真正依赖用户输入，以及结果后模式是否需要结构化可选方向。不要扮演智能体，不要根据固定词语或句式判断。",
 		map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -307,7 +314,7 @@ func completionReviewTool() map[string]any {
 				},
 				"follow_up": map[string]any{
 					"type":        "string",
-					"description": "仅在交付完整且候选明确提供多个可选修改、扩展或使用方向时为 suggestions；普通聊天追问、必要输入和文档子任务均为 none",
+					"description": "follow_up_policy=after_result、交付完整且实质任务适合继续修改、扩展或使用时为 suggestions；普通聊天、必要输入、文档子任务以及其它策略均为 none",
 					"enum":        []any{completionFollowUpNone, completionFollowUpSuggestions},
 				},
 			},

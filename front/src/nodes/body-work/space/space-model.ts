@@ -6,6 +6,7 @@ import type {
   CanvasComposerDraft,
   CanvasFunctionOption,
   OutputTypeOption,
+  PowerCategoryOption,
   PowerKindOption,
   PowerOption,
   ProjectAsset,
@@ -21,6 +22,7 @@ import type {
   WorkRelease,
   WorkTeam,
 } from "./types";
+import { normalizePowerCategory } from "../shared/power-menu";
 import { normalizeStoryboardReferences } from "./space-storyboard-reference";
 import { assetKindLabel } from "../asset/asset-contract";
 import { DEFAULT_GROUP_NODE_SIZE } from "./space-group-model";
@@ -82,6 +84,9 @@ export function normalizeSpaceBootstrap(value: unknown): SpaceBootstrap {
       normalizeAsset,
     ),
     powers,
+    powerCategories: asRecords(
+      firstDefined(row.power_cates, canvasConfig.power_cates),
+    ).map(normalizePowerCategory),
     powerKinds: asRecords(
       firstDefined(row.power_kinds, canvasConfig.power_kinds),
     ).map(normalizePowerKind),
@@ -182,12 +187,14 @@ export function defaultCanvasNodeTitle(node: SpaceCanvasNode, nodeNo: number) {
 
 export function normalizePowerCatalog(value: unknown): {
   powers: PowerOption[];
+  powerCategories: PowerCategoryOption[];
   powerKinds: PowerKindOption[];
   outputTypes: OutputTypeOption[];
 } {
   const row = asRecord(value);
   return {
     powers: asRecords(row.powers).map(normalizePower),
+    powerCategories: asRecords(row.power_cates).map(normalizePowerCategory),
     powerKinds: asRecords(row.power_kinds).map(normalizePowerKind),
     outputTypes: asRecords(row.output_types).map(normalizeOutputType),
   };

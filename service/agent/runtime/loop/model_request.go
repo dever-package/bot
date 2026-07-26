@@ -28,7 +28,7 @@ func (s Service) callModel(ctx context.Context, controller *runController, execu
 		execution,
 		input,
 		history,
-		modelDefinitions(execution),
+		modelDefinitions(execution, input),
 		toolChoice,
 		publish,
 		"model",
@@ -63,19 +63,58 @@ func (s Service) callModelRequest(
 	)
 }
 
-func modelDefinitions(execution execution) []any {
+func modelDefinitions(execution execution, input map[string]any) []any {
 	if execution.registry == nil {
 		return nil
 	}
 	if !execution.documentWriter {
 		return execution.registry.Definitions()
 	}
-	return execution.registry.DefinitionsWithout(
-		runtimeprovider.AskUserToolName,
-		runtimeprovider.PresentSuggestionsToolName,
-		runtimeprovider.ComposeDocumentToolName,
-		runtimeprovider.SkillInstallPlanToolName,
-	)
+	if runtimeEventType(input) != "document_media_required" {
+		return nil
+	}
+	event, _ := input["runtime_event"].(map[string]any)
+	definitions := execution.registry.DefinitionsByKind(documentMediaRequirementKinds(event["missing_media"])...)
+	result := make([]any, 0, len(definitions))
+	for _, definition := range definitions {
+		result = append(result, definition.Native())
+	}
+	return result
+}
+
+func documentMediaRequirementKinds(value any) []string {
+	result := make([]string, 0, 4)
+	seen := map[string]struct{}{}
+	appendKind := func(kind string) {
+		kind = strings.ToLower(strings.TrimSpace(kind))
+		switch kind {
+		case "image", "video", "audio", "file":
+		default:
+			return
+		}
+		if _, exists := seen[kind]; exists {
+			return
+		}
+		seen[kind] = struct{}{}
+		result = append(result, kind)
+	}
+	switch requirements := value.(type) {
+	case []runtimeprovider.DocumentMediaRequirement:
+		for _, requirement := range requirements {
+			appendKind(requirement.Kind)
+		}
+	case []map[string]any:
+		for _, requirement := range requirements {
+			appendKind(botprotocol.AsText(requirement["kind"]))
+		}
+	case []any:
+		for _, raw := range requirements {
+			if requirement, ok := raw.(map[string]any); ok {
+				appendKind(botprotocol.AsText(requirement["kind"]))
+			}
+		}
+	}
+	return result
 }
 
 func (s Service) callModelRequestWithRole(

@@ -8,20 +8,18 @@ import {
 import { BookOpenText, ExternalLink } from "lucide-react";
 import type { BodyHomeMenuItem } from "../auth/site-config";
 import type { BodyContentNavigation } from "../content/content-api";
+import {
+  bodyResolvedLinkHref,
+  type BodyResolvedLink,
+} from "../shared/body-link";
 import { ConfiguredMenuIcon } from "../shared/configured-icon";
 
 export function WorkbenchContentMenu({
   menu,
   navigation,
-  selectedLinkID,
-  active,
-  onSelectLink,
 }: {
   menu: BodyHomeMenuItem;
   navigation: BodyContentNavigation;
-  selectedLinkID: number;
-  active: boolean;
-  onSelectLink: (linkID: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -52,11 +50,6 @@ export function WorkbenchContentMenu({
     }
   }
 
-  function selectLink(linkID: number) {
-    setOpen(false);
-    onSelectLink(linkID);
-  }
-
   function closeOnEscape(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key !== "Escape") {
       return;
@@ -68,12 +61,26 @@ export function WorkbenchContentMenu({
       ?.focus();
   }
 
-  function openContentMenu() {
-    if (navigation.items.length === 1 && firstItem.type === "article") {
-      selectLink(firstItem.id);
-      return;
-    }
-    setOpen(true);
+  if (navigation.items.length === 1) {
+    const target = contentLinkTarget(firstItem);
+    return (
+      <a
+        className="hb-rail-action"
+        title={menu.name}
+        href={bodyResolvedLinkHref(firstItem)}
+        target={target}
+        rel={target === "_blank" ? "noreferrer noopener" : undefined}
+      >
+        <ConfiguredMenuIcon
+          iconName={menu.icon}
+          iconImage={menu.iconImage}
+          fallbackIcon={BookOpenText}
+          className="hb-configured-menu-icon"
+          strokeWidth={1.8}
+        />
+        <span>{menu.name}</span>
+      </a>
+    );
   }
 
   return (
@@ -88,11 +95,11 @@ export function WorkbenchContentMenu({
     >
       <button
         type="button"
-        className={`hb-rail-action ${active ? "is-active" : ""}`}
+        className="hb-rail-action"
         title={menu.name}
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={openContentMenu}
+        onClick={() => setOpen((current) => !current)}
       >
         <ConfiguredMenuIcon
           iconName={menu.icon}
@@ -106,48 +113,33 @@ export function WorkbenchContentMenu({
 
       {open ? (
         <div className="hb-content-menu" role="menu" aria-label={menu.name}>
-          <div className="hb-content-menu-header">
-            {menu.name}
-          </div>
+          <div className="hb-content-menu-header">{menu.name}</div>
           <div className="hb-content-menu-list">
-            {navigation.items.map((item) =>
-              item.type === "url" ? (
+            {navigation.items.map((item) => {
+              const target = contentLinkTarget(item);
+              const ItemIcon =
+                item.type === "url" ? ExternalLink : BookOpenText;
+              return (
                 <a
                   key={item.id}
-                  href={item.url}
-                  target={item.target}
-                  rel={
-                    item.target === "_blank"
-                      ? "noreferrer noopener"
-                      : undefined
-                  }
+                  href={bodyResolvedLinkHref(item)}
+                  target={target}
+                  rel={target === "_blank" ? "noreferrer noopener" : undefined}
                   role="menuitem"
                   onClick={() => setOpen(false)}
                 >
-                  <ExternalLink size={15} />
+                  <ItemIcon size={15} />
                   <span>{item.name}</span>
                 </a>
-              ) : (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={
-                    item.id === selectedLinkID ? "is-active" : undefined
-                  }
-                  role="menuitem"
-                  aria-current={
-                    item.id === selectedLinkID ? "page" : undefined
-                  }
-                  onClick={() => selectLink(item.id)}
-                >
-                  <BookOpenText size={15} />
-                  <span>{item.name}</span>
-                </button>
-              ),
-            )}
+              );
+            })}
           </div>
         </div>
       ) : null}
     </div>
   );
+}
+
+function contentLinkTarget(link: BodyResolvedLink) {
+  return link.type === "article" ? "_blank" : link.target;
 }

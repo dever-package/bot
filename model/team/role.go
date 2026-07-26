@@ -39,7 +39,7 @@ type Role struct {
 	Assignment   string    `dorm:"type:text;not null;default:'';comment:职责说明"`
 	Config       string    `dorm:"type:text;not null;default:'{}';comment:配置"`
 	ChatStatus   int16     `dorm:"type:smallint;not null;default:1;comment:对话"`
-	CreateStatus int16     `dorm:"type:smallint;not null;default:1;comment:创作"`
+	CreateStatus int16     `dorm:"type:smallint;not null;default:2;comment:创作"`
 	Status       int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	Sort         int       `dorm:"type:int;not null;default:100;comment:排序"`
 	CreatedAt    time.Time `dorm:"comment:创建时间"`

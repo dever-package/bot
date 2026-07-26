@@ -1,4 +1,5 @@
 import {
+  ChevronRight,
   Eye,
   FolderTree,
   Play,
@@ -9,12 +10,18 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import {
+  buildPowerMenu,
+  type PowerMenu,
+  type PowerMenuGroup,
+} from "../shared/power-menu";
 import { PowerIcon } from "./space-power-icon";
 import { resolvePowerPresentation } from "./space-power-presentation";
 import { SpaceTooltip } from "./space-tooltip";
 import type {
   CanvasFunctionOption,
+  PowerCategoryOption,
   PowerOption,
   TeamFlow,
   TeamRole,
@@ -41,10 +48,14 @@ type AddNodeMenuModel = {
   connection?: { nodeId: string };
 };
 
+const ADD_MENU_WIDTH = 292;
+const POWER_SUBMENU_OUTER_WIDTH = 248;
+
 export function AddNodeMenu({
   menu,
   flows,
   powers,
+  powerCategories,
   roles,
   onClose,
   onSelectFlow,
@@ -56,6 +67,7 @@ export function AddNodeMenu({
   menu: AddNodeMenuModel;
   flows: TeamFlow[];
   powers: PowerOption[];
+  powerCategories: PowerCategoryOption[];
   roles: TeamRole[];
   onClose: () => void;
   onSelectFlow: (flow: TeamFlow) => void;
@@ -65,11 +77,30 @@ export function AddNodeMenu({
   onSelectPower: (power: PowerOption) => void;
 }) {
   const point = clampMenuPoint(menu);
+  const [openPowerGroupID, setOpenPowerGroupID] = useState(0);
+  const powerMenu = useMemo(
+    () =>
+      buildPowerMenu(
+        powers,
+        powerCategories,
+        (power) => power.cate_id,
+      ),
+    [powerCategories, powers],
+  );
+  const openPowerGroup =
+    powerMenu.groups.find(
+      (group) => group.category.id === openPowerGroupID,
+    ) || null;
   const sections: ReactNode[] = [];
 
-  if (powers.length > 0) {
+  if (powerMenu.basicPowers.length > 0 || powerMenu.groups.length > 0) {
     sections.push(
-      renderPowerMenuSection(powers, onSelectPower),
+      renderPowerMenuSection(
+        powerMenu,
+        openPowerGroupID,
+        setOpenPowerGroupID,
+        onSelectPower,
+      ),
     );
   }
   if (roles.length > 0) {
@@ -116,6 +147,7 @@ export function AddNodeMenu({
         className="ws-add-menu custom-scrollbar"
         style={{ left: point.x, top: point.y, maxHeight: point.maxHeight }}
         onMouseDown={(event) => event.stopPropagation()}
+        onMouseLeave={() => setOpenPowerGroupID(0)}
       >
         <div className="ws-add-menu-head">
           <strong>{menu.connection ? "引用该节点生成" : "添加节点"}</strong>
@@ -130,6 +162,14 @@ export function AddNodeMenu({
             </div>
           ))}
         </div>
+        {openPowerGroup ? (
+          <PowerSubmenu
+            group={openPowerGroup}
+            side={powerSubmenuSide(point.x)}
+            maxHeight={point.maxHeight}
+            onSelect={onSelectPower}
+          />
+        ) : null}
       </section>
     </>
   );
@@ -173,22 +213,120 @@ function renderMenuSection<T>({
 }
 
 function renderPowerMenuSection(
-  powers: PowerOption[],
+  menu: PowerMenu<PowerOption>,
+  openGroupID: number,
+  setOpenGroupID: (groupID: number) => void,
   onSelect: (power: PowerOption) => void,
 ) {
   return (
     <div key="powers" className="ws-add-section">
       <div className="ws-add-section-title">能力</div>
-      {renderMenuItems({
-        items: powers,
-        itemKey: (power) => String(power.key || power.id),
-        itemClassName: "is-power",
-        label: (power) => power.name,
-        description: (power) => resolvePowerPresentation(power).kindName,
-        icon: (power) => <PowerIcon power={power} size={16} />,
-        onSelect,
-      })}
+      <div className="ws-add-menu-list">
+        {menu.basicPowers.map((power) => (
+          <PowerMenuItem
+            key={power.key || power.id}
+            power={power}
+            onMouseEnter={() => setOpenGroupID(0)}
+            onSelect={onSelect}
+          />
+        ))}
+        {menu.groups.map((group) => (
+          <button
+            key={group.category.id}
+            type="button"
+            className={`ws-add-item is-power-group${
+              openGroupID === group.category.id ? " is-open" : ""
+            }`}
+            aria-haspopup="menu"
+            aria-expanded={openGroupID === group.category.id}
+            onMouseEnter={() => setOpenGroupID(group.category.id)}
+            onFocus={() => setOpenGroupID(group.category.id)}
+            onClick={() =>
+              setOpenGroupID(
+                openGroupID === group.category.id ? 0 : group.category.id,
+              )
+            }
+          >
+            <span className="ws-add-icon">
+              <FolderTree size={16} />
+            </span>
+            <span className="ws-add-copy">
+              <span className="ws-add-label">{group.category.name}</span>
+              <span className="ws-add-desc">{group.powers.length} 项能力</span>
+            </span>
+            <ChevronRight className="ws-add-submenu-arrow" size={15} />
+          </button>
+        ))}
+      </div>
     </div>
+  );
+}
+
+function PowerSubmenu({
+  group,
+  side,
+  maxHeight,
+  onSelect,
+}: {
+  group: PowerMenuGroup<PowerOption>;
+  side: "left" | "right";
+  maxHeight: number;
+  onSelect: (power: PowerOption) => void;
+}) {
+  return (
+    <aside
+      className={`ws-add-submenu-panel is-${side} custom-scrollbar`}
+      role="menu"
+      aria-label={group.category.name}
+      style={{ maxHeight }}
+      onMouseDown={(event) => event.stopPropagation()}
+    >
+      <div className="ws-add-submenu-head">
+        <FolderTree size={15} />
+        <strong>{group.category.name}</strong>
+      </div>
+      <div className="ws-add-menu-list">
+        {group.powers.map((power) => (
+          <PowerMenuItem
+            key={power.key || power.id}
+            power={power}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
+    </aside>
+  );
+}
+
+function PowerMenuItem({
+  power,
+  onMouseEnter,
+  onSelect,
+}: {
+  power: PowerOption;
+  onMouseEnter?: () => void;
+  onSelect: (power: PowerOption) => void;
+}) {
+  const description = resolvePowerPresentation(power).kindName;
+  return (
+    <SpaceTooltip label={`${power.name} · ${description}`}>
+      <button
+        type="button"
+        className="ws-add-item is-power"
+        role="menuitem"
+        onMouseEnter={onMouseEnter}
+        onFocus={onMouseEnter}
+        onClick={() => onSelect(power)}
+      >
+        <span className="ws-add-icon">
+          <PowerIcon power={power} size={16} />
+        </span>
+        <span className="ws-add-copy">
+          <span className="ws-add-label">{power.name}</span>
+          <span className="ws-add-desc">{description}</span>
+        </span>
+      </button>
+    </SpaceTooltip>
   );
 }
 
@@ -302,7 +440,7 @@ function clampMenuPoint(menu: AddNodeMenuModel) {
   }
   const margin = 14;
   const minTop = 62;
-  const width = Math.min(292, window.innerWidth - margin * 2);
+  const width = Math.min(ADD_MENU_WIDTH, window.innerWidth - margin * 2);
   const maxHeight = Math.min(
     520,
     Math.max(180, window.innerHeight - minTop - margin),
@@ -322,4 +460,13 @@ function clampMenuPoint(menu: AddNodeMenuModel) {
     ),
     maxHeight,
   };
+}
+
+function powerSubmenuSide(menuX: number): "left" | "right" {
+  if (typeof window === "undefined") {
+    return "right";
+  }
+  return menuX + ADD_MENU_WIDTH + POWER_SUBMENU_OUTER_WIDTH > window.innerWidth
+    ? "left"
+    : "right";
 }

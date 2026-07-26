@@ -68,6 +68,33 @@ export function createBodyFilingRows(filing: BodyFilingInfo) {
   return rows;
 }
 
+export function BodyFilingFallbackRows({
+  filing,
+  itemClassName,
+}: {
+  filing: BodyFilingInfo;
+  itemClassName?: string;
+}) {
+  return createBodyFilingRows(filing).map((row) => (
+    <span key={row.key} className={itemClassName}>
+      {row.url ? (
+        <a href={row.url} target="_blank" rel="noreferrer noopener">
+          {row.label}
+        </a>
+      ) : (
+        row.label
+      )}
+    </span>
+  ));
+}
+
+export function hasBodyFilingInfo(filing: BodyFilingInfo) {
+  return (
+    hasBodyFilingRichContent(filing.content) ||
+    createBodyFilingRows(filing).length > 0
+  );
+}
+
 export function hasBodyFilingRichContent(value: unknown) {
   return hasBodyRichText(value);
 }

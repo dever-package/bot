@@ -240,10 +240,6 @@
               "className": "min-w-[240px] font-medium"
             },
             {
-              "value": "visibility",
-              "type": "show-tag"
-            },
-            {
               "value": "status",
               "type": "form-switch",
               "meta": {

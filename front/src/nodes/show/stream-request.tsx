@@ -44,6 +44,7 @@ import {
   inputKeyForParam,
   isHiddenParam,
   isMainParam,
+  isSelectedOptionValue,
   isToolbarParam,
   normalizePowerParamConfig,
   paramFilesRequestValue,
@@ -1245,6 +1246,9 @@ function mergePowerParamValues(
       continue
     }
     const value = replayParamValue(input[key])
+    if (!isSupportedReplayParamValue(param, value)) {
+      continue
+    }
     if (Object.is(next[key], value)) {
       continue
     }
@@ -1254,6 +1258,18 @@ function mergePowerParamValues(
     next[key] = value
   }
   return next
+}
+
+function isSupportedReplayParamValue(param: PowerParam, value: unknown) {
+  const options = param.options || []
+  if (param.type !== 'option' || options.length === 0) {
+    return true
+  }
+  const selected = valueText(value)
+  return (
+    selected.length > 0 &&
+    options.some((option) => isSelectedOptionValue(option, [selected]))
+  )
 }
 
 function buildPowerParamReplayState(

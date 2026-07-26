@@ -62,6 +62,7 @@ export function AssetBrowser({
   teamID,
   initialFilters,
   selectable = false,
+  excludeCollections = false,
   selectedAssetIDs,
   allowedKinds,
   onSelect,
@@ -78,6 +79,7 @@ export function AssetBrowser({
   teamID: number;
   initialFilters?: Partial<AssetFilters>;
   selectable?: boolean;
+  excludeCollections?: boolean;
   selectedAssetIDs?: number[];
   allowedKinds?: AssetKind[];
   onSelect?: (asset: AssetRecord) => void;
@@ -173,6 +175,7 @@ export function AssetBrowser({
           page: targetPage,
           pageSize: 24,
           collectionID: activeCollection?.id,
+          excludeCollections,
         });
         if (requestID === loadRequestRef.current) {
           setPage(nextPage);
@@ -187,7 +190,14 @@ export function AssetBrowser({
         }
       }
     },
-    [activeCollection?.id, contentMode, filters, teamID, view],
+    [
+      activeCollection?.id,
+      contentMode,
+      excludeCollections,
+      filters,
+      teamID,
+      view,
+    ],
   );
 
   useEffect(() => {

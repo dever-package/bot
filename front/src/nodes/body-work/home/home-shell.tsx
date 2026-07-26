@@ -35,17 +35,13 @@ import {
   loadBodyContentNavigation,
   type BodyContentNavigation,
 } from "../content/content-api";
-import { WorkbenchContentPage } from "../content/workbench-content-page";
 import {
   WorkbenchSidebar,
   type WorkbenchNavigationItem,
   type WorkbenchPageKey,
 } from "./workbench-sidebar";
 import "./workbench-sidebar.css";
-import {
-  loadWorkbenchCatalog,
-  type WorkbenchCatalog,
-} from "./workbench-api";
+import { loadWorkbenchCatalog, type WorkbenchCatalog } from "./workbench-api";
 
 const TEAM_STORAGE_KEY = "bot.body.workbench.team";
 const EMPTY_CONTENT_NAVIGATION: BodyContentNavigation = {
@@ -76,7 +72,6 @@ export function WorkHomeShell({ item }: { item?: any }) {
   const [error, setError] = useState("");
   const [contentNavigation, setContentNavigation] =
     useState<BodyContentNavigation>(EMPTY_CONTENT_NAVIGATION);
-  const [contentLinkID, setContentLinkID] = useState(0);
   const [continuationAsset, setContinuationAsset] =
     useState<AssetRecord | null>(null);
   const catalogRequestRef = useRef(0);
@@ -145,9 +140,7 @@ export function WorkHomeShell({ item }: { item?: any }) {
   const navigation = useMemo(
     () =>
       [...pageSpecs]
-        .filter(
-          (page) => loginConfig.site.homeMenu[page.menuKey].enabled,
-        )
+        .filter((page) => loginConfig.site.homeMenu[page.menuKey].enabled)
         .sort(
           (left, right) =>
             loginConfig.site.homeMenu[left.menuKey].sort -
@@ -168,20 +161,9 @@ export function WorkHomeShell({ item }: { item?: any }) {
         ),
     [catalog, loginConfig.site.homeMenu],
   );
-  const contentArticleLinks = contentNavigation.items.filter(
-    (contentLink) => contentLink.type === "article",
-  );
-  const contentAvailable = contentArticleLinks.length > 0;
-  const selectedContentLinkID = contentArticleLinks.some(
-    (contentLink) => contentLink.id === contentLinkID,
-  )
-    ? contentLinkID
-    : contentArticleLinks[0]?.id || 0;
   const currentPageKey =
-    activePage === "content" && contentAvailable
-      ? "content"
-      : navigation.find((page) => page.key === activePage)?.key ||
-        navigation[0]?.key;
+    navigation.find((page) => page.key === activePage)?.key ||
+    navigation[0]?.key;
 
   const canContinueAsset = useCallback(
     (asset: AssetRecord) =>
@@ -197,18 +179,11 @@ export function WorkHomeShell({ item }: { item?: any }) {
         return;
       }
       setContinuationAsset(asset);
-      setActivePage(
-        asset.sourceType === "dialogue" ? "dialogue" : "function",
-      );
+      setActivePage(asset.sourceType === "dialogue" ? "dialogue" : "function");
     },
     [canContinueAsset],
   );
   const clearContinuation = useCallback(() => setContinuationAsset(null), []);
-  const openContentLink = useCallback((linkID: number) => {
-    setContentLinkID(linkID);
-    setActivePage("content");
-  }, []);
-
   return (
     <main
       className="hb-laper-app"
@@ -229,18 +204,14 @@ export function WorkHomeShell({ item }: { item?: any }) {
         teamID={catalog?.team?.id || 0}
         loading={loading}
         contentNavigation={contentNavigation}
-        contentLinkID={selectedContentLinkID}
         onNavigate={setActivePage}
-        onSelectContentLink={openContentLink}
         onTeamChange={(teamID) => void loadCatalog(teamID)}
       />
 
       <section className="hb-laper-main">
         <div className="hb-laper-frame">
           <div className="hb-laper-content">
-            {currentPageKey === "content" ? (
-              <WorkbenchContentPage linkID={selectedContentLinkID} />
-            ) : loading ? (
+            {loading ? (
               <PageLoading />
             ) : error ? (
               <PageError
@@ -318,6 +289,7 @@ function PageContent({
           <WorkbenchFunctionPage
             teamID={teamID}
             powers={catalog.powers}
+            powerCategories={catalog.powerCategories}
             continuationAsset={continuationAsset}
             onClearContinuation={onClearContinuation}
           />
@@ -398,9 +370,7 @@ function NoTeam() {
 function NoVisibleHomeMenu() {
   return (
     <div className="flex h-full items-center justify-center px-6 text-center">
-      <p className="m-0 text-sm text-[var(--body-work-muted)]">
-        暂无可用功能
-      </p>
+      <p className="m-0 text-sm text-[var(--body-work-muted)]">暂无可用功能</p>
     </div>
   );
 }
@@ -414,8 +384,6 @@ function resolveInitialPage(value: unknown): WorkbenchPageKey {
       return "works";
     case "assets":
       return "assets";
-    case "content":
-      return "content";
     default:
       return "works";
   }

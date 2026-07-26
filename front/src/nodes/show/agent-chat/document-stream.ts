@@ -159,6 +159,9 @@ async function watchDocument(input: {
   };
 
   try {
+    // Subscribe before the initial snapshot so the first streamed text cannot
+    // disappear behind a slower snapshot request.
+    startEventStream();
     try {
       const initial = await syncSnapshot();
       if (!isAgentChatDocumentPending(initial)) {
@@ -170,7 +173,6 @@ async function watchDocument(input: {
       }
       snapshotAttempt = 1;
     }
-    startEventStream();
     while (!watch.controller.signal.aborted) {
       await waitForDocumentRetry(
         watch.controller.signal,

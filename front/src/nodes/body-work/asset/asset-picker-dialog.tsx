@@ -244,6 +244,7 @@ export function AssetPickerDialog({
           allowedKinds={allowedKinds}
           contentMode={contentMode}
           selectable
+          excludeCollections
           selectedAssetIDs={selectedAssetIDs}
           reloadSignal={reloadSignal}
           onAssetChanged={(asset) => {

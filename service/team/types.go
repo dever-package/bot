@@ -161,6 +161,14 @@ type PowerOption struct {
 	CreateStatus int16                       `json:"create_status"`
 }
 
+type PowerCateOption struct {
+	ID     uint64 `json:"id"`
+	Name   string `json:"name"`
+	Type   int16  `json:"type"`
+	Status int16  `json:"status"`
+	Sort   int    `json:"sort"`
+}
+
 type PowerKindOption struct {
 	ID    string `json:"id"`
 	Value string `json:"value"`

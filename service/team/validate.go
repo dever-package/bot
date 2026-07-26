@@ -27,13 +27,6 @@ func (s Service) ValidateFlowNodeGraph(ctx context.Context, flowID uint64) (map[
 	return validationResult(issues), nil
 }
 
-func validateTeamRoles(roles []teammodel.Role) []string {
-	if len(roles) == 0 {
-		return []string{"至少需要创建一个团队角色"}
-	}
-	return nil
-}
-
 func validateFlowGraph(flows []teammodel.Flow, edges []teammodel.FlowEdge) []string {
 	issues := []string{}
 	flowByID := map[uint64]teammodel.Flow{}

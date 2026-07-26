@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -32,8 +31,8 @@ import {
 } from "@dever/front-plugin";
 import {
   BodyFilingContent,
-  createBodyFilingRows,
-  hasBodyFilingRichContent,
+  BodyFilingFallbackRows,
+  hasBodyFilingInfo,
   type BodyFilingInfo,
 } from "../shared/body-filing";
 import type { WorkbenchTeam } from "./workbench-api";
@@ -66,11 +65,7 @@ export function WorkbenchUserMenu({
   const [profileOpen, setProfileOpen] = useState(false);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const selectedTeam = teams.find((team) => team.id === teamID);
-  const filingRows = useMemo(() => createBodyFilingRows(filing), [filing]);
-  const hasRichFiling = useMemo(
-    () => hasBodyFilingRichContent(filing.content),
-    [filing.content],
-  );
+  const hasFiling = hasBodyFilingInfo(filing);
   const roleLabel =
     Array.isArray(user?.role) && user.role.length > 0
       ? user.role.join("、")
@@ -250,25 +245,12 @@ export function WorkbenchUserMenu({
               />
             </div>
 
-            {hasRichFiling || filingRows.length > 0 ? (
+            {hasFiling ? (
               <footer className="hb-user-filing">
                 <BodyFilingContent
                   filing={filing}
                   className="hb-user-filing-rich"
-                  fallback={filingRows.map((row) =>
-                    row.url ? (
-                      <a
-                        key={row.key}
-                        href={row.url}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                      >
-                        {row.label}
-                      </a>
-                    ) : (
-                      <span key={row.key}>{row.label}</span>
-                    ),
-                  )}
+                  fallback={<BodyFilingFallbackRows filing={filing} />}
                 />
               </footer>
             ) : null}

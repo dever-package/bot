@@ -11,12 +11,7 @@ import { WorkbenchContentMenu } from "./workbench-content-menu";
 import { WorkbenchSystemMessagePanel } from "./workbench-system-message-panel";
 import { WorkbenchUserMenu } from "./workbench-user-menu";
 
-export type WorkbenchPageKey =
-  | "function"
-  | "dialogue"
-  | "works"
-  | "assets"
-  | "content";
+export type WorkbenchPageKey = "function" | "dialogue" | "works" | "assets";
 
 export type WorkbenchNavigationItem = {
   key: WorkbenchPageKey;
@@ -34,9 +29,7 @@ export function WorkbenchSidebar({
   teamID,
   loading,
   contentNavigation,
-  contentLinkID,
   onNavigate,
-  onSelectContentLink,
   onTeamChange,
 }: {
   site: BodySiteConfig;
@@ -46,9 +39,7 @@ export function WorkbenchSidebar({
   teamID: number;
   loading: boolean;
   contentNavigation: BodyContentNavigation;
-  contentLinkID: number;
   onNavigate: (page: WorkbenchPageKey) => void;
-  onSelectContentLink: (linkID: number) => void;
   onTeamChange: (teamID: number) => void;
 }) {
   const [pointsOpen, setPointsOpen] = useState(false);
@@ -123,9 +114,6 @@ export function WorkbenchSidebar({
                 key={key}
                 menu={site.homeMenu.content}
                 navigation={contentNavigation}
-                selectedLinkID={contentLinkID}
-                active={activePage === "content"}
-                onSelectLink={onSelectContentLink}
               />
             );
           })}
