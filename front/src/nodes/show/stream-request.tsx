@@ -81,6 +81,7 @@ import {
   useStreamPowerHistory,
   type StreamPowerHistoryAdapter,
 } from './stream-power-history'
+import { createRemoteStreamPowerHistoryAdapter } from './stream-power-history-api'
 
 type ReferenceEditorProps = {
   value: string
@@ -121,6 +122,20 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
   const powerKey = useStore(store, () =>
     valueText(getStoreValueByPath(store, String(item.meta?.powerPath || '')))
   )
+  const historyApi = String(item.meta?.historyApi || '')
+  const historyDetailApi = String(item.meta?.historyDetailApi || '')
+  const history = useMemo(
+    () =>
+      powerKey
+        ? createRemoteStreamPowerHistoryAdapter({
+            scopeKey: `admin-power:${historyApi}:${historyDetailApi}:${powerKey}`,
+            listApi: historyApi,
+            detailApi: historyDetailApi,
+            scope: { power: powerKey },
+          })
+        : undefined,
+    [historyApi, historyDetailApi, powerKey]
+  )
   return (
     <StreamPowerRunner
       powerKey={powerKey}
@@ -129,6 +144,7 @@ export function ShowStreamRequest({ item, store }: NodeItemProps) {
       streamApi={String(item.meta?.streamApi || '/bot/admin/energon/stream')}
       stopApi={String(item.meta?.stopApi || '/bot/admin/energon/stream_stop')}
       blockMs={Number(item.meta?.blockMs || 1000)}
+      history={history}
     />
   )
 }
@@ -803,6 +819,12 @@ export function StreamPowerRunner({
           onStop={stop}
         />
       ) : null}
+      {appearance !== 'body' ? (
+        <StreamPowerHistoryTrigger
+          controller={historyController}
+          label="历史"
+        />
+      ) : null}
       <Button
         type="button"
         size="sm"
@@ -1017,7 +1039,9 @@ export function StreamPowerRunner({
               />
             ) : null}
             {renderResultActions?.(activeResult)}
-            <StreamPowerHistoryTrigger controller={historyController} />
+            {appearance === 'body' ? (
+              <StreamPowerHistoryTrigger controller={historyController} />
+            ) : null}
             {appearance !== 'body' ? (
               requestID ? (
                 <button

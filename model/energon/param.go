@@ -38,6 +38,7 @@ type ParamIndex struct {
 const (
 	ParamPromptID      uint64 = 1
 	ParamImageID       uint64 = 2
+	ParamImagesID      uint64 = 17
 	paramAudioID       uint64 = 3
 	paramVideoID       uint64 = 4
 	paramFileID        uint64 = 5
@@ -54,6 +55,71 @@ const (
 	paramSoundID       uint64 = 16
 )
 
+const (
+	ParamSortPrompt      = 10
+	ParamSortImage       = 20
+	ParamSortImages      = 30
+	ParamSortAudio       = 40
+	ParamSortVideo       = 50
+	ParamSortFile        = 60
+	ParamSortResolution  = 70
+	ParamSortAspectRatio = 80
+	ParamSortSwitch      = 90
+	ParamSortDefault     = 100
+	ParamSortWatermark   = ParamSortDefault
+	ParamSortTest        = 110
+	ParamSortDuration    = 120
+	ParamSortVoice       = 130
+	ParamSortSound       = 140
+	ParamSortVideos      = 150
+	ParamSortSubtitles   = 160
+	ParamSortFPS         = 170
+)
+
+type builtinParamSortSpec struct {
+	ID   uint64
+	Key  string
+	Sort int
+}
+
+var builtinParamSortSpecs = []builtinParamSortSpec{
+	{ID: ParamPromptID, Key: "prompt", Sort: ParamSortPrompt},
+	{ID: ParamImageID, Key: "image", Sort: ParamSortImage},
+	{ID: ParamImagesID, Key: "images", Sort: ParamSortImages},
+	{ID: paramAudioID, Key: "audio", Sort: ParamSortAudio},
+	{ID: paramVideoID, Key: "video", Sort: ParamSortVideo},
+	{ID: paramFileID, Key: "file", Sort: ParamSortFile},
+	{ID: paramResolutionID, Key: "resolution", Sort: ParamSortResolution},
+	{ID: paramAspectRatioID, Key: "aspectRatio", Sort: ParamSortAspectRatio},
+	{ID: paramSwitchID, Key: "switch", Sort: ParamSortSwitch},
+	{ID: paramWatermarkID, Key: "watermark", Sort: ParamSortWatermark},
+	{ID: paramTestID, Key: "test", Sort: ParamSortTest},
+	{ID: paramDurationID, Key: "duration", Sort: ParamSortDuration},
+	{ID: paramVoiceID, Key: "voice", Sort: ParamSortVoice},
+	{ID: paramSoundID, Key: "sound", Sort: ParamSortSound},
+	{ID: paramVideosID, Key: "videos", Sort: ParamSortVideos},
+	{ID: paramSubtitlesID, Key: "subtitles", Sort: ParamSortSubtitles},
+	{ID: paramFPSID, Key: "fps", Sort: ParamSortFPS},
+}
+
+func BuiltinParamSortByID(paramID uint64) int {
+	for _, spec := range builtinParamSortSpecs {
+		if spec.ID == paramID {
+			return spec.Sort
+		}
+	}
+	return ParamSortDefault
+}
+
+func BuiltinParamSortByKey(key string) (int, bool) {
+	for _, spec := range builtinParamSortSpecs {
+		if spec.Key == key {
+			return spec.Sort, true
+		}
+	}
+	return 0, false
+}
+
 var (
 	paramSeed = []map[string]any{
 		{
@@ -68,12 +134,26 @@ var (
 			"max_files":      0,
 			"default_value":  "",
 			"status":         1,
-			"sort":           100,
+			"sort":           ParamSortPrompt,
 		},
 		{
 			"id":             ParamImageID,
 			"name":           "添加图片",
 			"key":            "image",
+			"type":           "file",
+			"usage":          1,
+			"value_type":     "string",
+			"cate_id":        paramCateCommonID,
+			"upload_rule_id": 1,
+			"max_files":      1,
+			"default_value":  "",
+			"status":         1,
+			"sort":           ParamSortImage,
+		},
+		{
+			"id":             ParamImagesID,
+			"name":           "添加多图",
+			"key":            "images",
 			"type":           "files",
 			"usage":          1,
 			"value_type":     "string",
@@ -82,7 +162,7 @@ var (
 			"max_files":      9,
 			"default_value":  "",
 			"status":         1,
-			"sort":           100,
+			"sort":           ParamSortImages,
 		},
 		{
 			"id":             paramAudioID,
@@ -96,7 +176,7 @@ var (
 			"max_files":      0,
 			"default_value":  "",
 			"status":         1,
-			"sort":           100,
+			"sort":           ParamSortAudio,
 		},
 		{
 			"id":             paramVideoID,
@@ -110,7 +190,7 @@ var (
 			"max_files":      0,
 			"default_value":  "",
 			"status":         1,
-			"sort":           100,
+			"sort":           ParamSortVideo,
 		},
 		{
 			"id":             paramFileID,
@@ -124,7 +204,7 @@ var (
 			"max_files":      0,
 			"default_value":  "",
 			"status":         1,
-			"sort":           100,
+			"sort":           ParamSortFile,
 		},
 		{
 			"id":             paramResolutionID,
@@ -138,7 +218,7 @@ var (
 			"max_files":      0,
 			"default_value":  "",
 			"status":         1,
-			"sort":           100,
+			"sort":           ParamSortResolution,
 		},
 		{
 			"id":             paramAspectRatioID,
@@ -152,7 +232,7 @@ var (
 			"max_files":      0,
 			"default_value":  "",
 			"status":         1,
-			"sort":           100,
+			"sort":           ParamSortAspectRatio,
 		},
 		{
 			"id":             paramSwitchID,
@@ -166,7 +246,7 @@ var (
 			"max_files":      0,
 			"default_value":  "",
 			"status":         1,
-			"sort":           100,
+			"sort":           ParamSortSwitch,
 		},
 		{
 			"id":             paramWatermarkID,
@@ -180,7 +260,7 @@ var (
 			"max_files":      0,
 			"default_value":  "false",
 			"status":         1,
-			"sort":           100,
+			"sort":           ParamSortWatermark,
 		},
 		{
 			"id":             paramTestID,
@@ -194,7 +274,7 @@ var (
 			"max_files":      0,
 			"default_value":  "",
 			"status":         1,
-			"sort":           100,
+			"sort":           ParamSortTest,
 		},
 		{
 			"id":             paramDurationID,
@@ -208,7 +288,7 @@ var (
 			"max_files":      0,
 			"default_value":  "4",
 			"status":         1,
-			"sort":           100,
+			"sort":           ParamSortDuration,
 		},
 		{
 			"id":             paramVideosID,
@@ -222,7 +302,7 @@ var (
 			"max_files":      50,
 			"default_value":  "",
 			"status":         1,
-			"sort":           110,
+			"sort":           ParamSortVideos,
 		},
 		{
 			"id":             paramSubtitlesID,
@@ -236,7 +316,7 @@ var (
 			"max_files":      1,
 			"default_value":  "",
 			"status":         1,
-			"sort":           120,
+			"sort":           ParamSortSubtitles,
 		},
 		{
 			"id":             paramFPSID,
@@ -250,7 +330,7 @@ var (
 			"max_files":      0,
 			"default_value":  "25",
 			"status":         1,
-			"sort":           130,
+			"sort":           ParamSortFPS,
 		},
 		{
 			"id":             paramVoiceID,
@@ -265,7 +345,7 @@ var (
 			"max_files":      0,
 			"default_value":  "",
 			"status":         1,
-			"sort":           100,
+			"sort":           ParamSortVoice,
 		},
 		{
 			"id":             paramSoundID,
@@ -279,7 +359,7 @@ var (
 			"max_files":      0,
 			"default_value":  "true",
 			"status":         1,
-			"sort":           100,
+			"sort":           ParamSortSound,
 		},
 	}
 

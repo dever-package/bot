@@ -1,6 +1,7 @@
 package energon
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/shemic/dever/orm"
@@ -59,7 +60,7 @@ var (
 			"service_id": serviceRunningHubImageID,
 			"api":        "rhart-image-n-g31-flash/image-to-image",
 			"param_mode": "any",
-			"param_ids":  `[{"param_id":2,"sort":1}]`,
+			"param_ids":  fmt.Sprintf(`[{"param_id":%d,"sort":1}]`, ParamImagesID),
 			"status":     1,
 			"sort":       100,
 		},
@@ -194,7 +195,7 @@ var (
 			"service_id": serviceRunningHubVideoID,
 			"api":        "kling-v3.0-pro/image-to-video",
 			"param_mode": "any",
-			"param_ids":  `[{"param_id":2,"sort":1}]`,
+			"param_ids":  fmt.Sprintf(`[{"param_id":%d,"sort":1}]`, ParamImageID),
 			"status":     1,
 			"sort":       100,
 		},

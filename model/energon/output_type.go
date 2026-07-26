@@ -21,16 +21,87 @@ const (
 	StoryboardVisualModePhotoreal = "photoreal"
 	StoryboardVisualModeStylized  = "stylized"
 	StoryboardTransitionNone      = "none"
+	StoryboardTransitionFade      = "fade"
+	StoryboardTransitionCrossfade = "crossfade"
+	StoryboardTransitionFadeBlack = "fadeblack"
+	StoryboardTransitionFadeWhite = "fadewhite"
+	StoryboardTransitionWipeLeft  = "wipeleft"
+	StoryboardTransitionWipeRight = "wiperight"
 )
 
+var storyboardTransitionTypeValues = []string{
+	StoryboardTransitionNone,
+	StoryboardTransitionFade,
+	StoryboardTransitionCrossfade,
+	StoryboardTransitionFadeBlack,
+	StoryboardTransitionFadeWhite,
+	StoryboardTransitionWipeLeft,
+	StoryboardTransitionWipeRight,
+}
+
 var storyboardTransitionTypes = map[string]struct{}{
-	StoryboardTransitionNone: {},
-	"fade":                   {},
-	"crossfade":              {},
-	"fadeblack":              {},
-	"fadewhite":              {},
-	"wipeleft":               {},
-	"wiperight":              {},
+	StoryboardTransitionNone:      {},
+	StoryboardTransitionFade:      {},
+	StoryboardTransitionCrossfade: {},
+	StoryboardTransitionFadeBlack: {},
+	StoryboardTransitionFadeWhite: {},
+	StoryboardTransitionWipeLeft:  {},
+	StoryboardTransitionWipeRight: {},
+}
+
+var storyboardTransitionTypeAliases = map[string]string{
+	"cut":       StoryboardTransitionNone,
+	"hardcut":   StoryboardTransitionNone,
+	"directcut": StoryboardTransitionNone,
+	"jumpcut":   StoryboardTransitionNone,
+	"matchcut":  StoryboardTransitionNone,
+	"硬切":        StoryboardTransitionNone,
+	"直接切":       StoryboardTransitionNone,
+	"直接切换":      StoryboardTransitionNone,
+	"无转场":       StoryboardTransitionNone,
+
+	"dissolve":      StoryboardTransitionCrossfade,
+	"crossdissolve": StoryboardTransitionCrossfade,
+	"交叉溶解":          StoryboardTransitionCrossfade,
+	"交叉淡化":          StoryboardTransitionCrossfade,
+	"叠化":            StoryboardTransitionCrossfade,
+
+	"fadein":  StoryboardTransitionFade,
+	"fadeout": StoryboardTransitionFade,
+	"淡入":      StoryboardTransitionFade,
+	"淡出":      StoryboardTransitionFade,
+	"淡化":      StoryboardTransitionFade,
+
+	"fadetoblack": StoryboardTransitionFadeBlack,
+	"黑场":          StoryboardTransitionFadeBlack,
+	"黑场淡化":        StoryboardTransitionFadeBlack,
+	"淡出到黑":        StoryboardTransitionFadeBlack,
+
+	"fadetowhite": StoryboardTransitionFadeWhite,
+	"白场":          StoryboardTransitionFadeWhite,
+	"白场淡化":        StoryboardTransitionFadeWhite,
+	"淡出到白":        StoryboardTransitionFadeWhite,
+
+	"leftwipe": StoryboardTransitionWipeLeft,
+	"向左擦除":     StoryboardTransitionWipeLeft,
+	"左擦除":      StoryboardTransitionWipeLeft,
+
+	"rightwipe": StoryboardTransitionWipeRight,
+	"向右擦除":      StoryboardTransitionWipeRight,
+	"右擦除":       StoryboardTransitionWipeRight,
+}
+
+var storyboardTransitionTypeNormalizer = strings.NewReplacer(
+	"_", "",
+	"-", "",
+	" ", "",
+)
+
+var storyboardStylizedVisualHints = []string{
+	"stylized", "anime", "animation", "animated", "cartoon", "comic", "manga",
+	"illustration", "illustrated", "watercolor", "pixel art", "clay", "stop motion",
+	"风格化", "非写实", "动画", "动漫", "二次元", "卡通", "漫画", "插画", "绘本",
+	"手绘", "水彩", "像素", "黏土", "定格", "国漫", "日漫",
 }
 
 type OutputTypeSpec struct {
@@ -140,6 +211,33 @@ func NormalizeStoryboardVisualMode(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
+func NormalizeOrInferStoryboardVisualMode(value string, hints ...string) string {
+	normalized := NormalizeStoryboardVisualMode(value)
+	if IsStoryboardVisualMode(normalized) {
+		return normalized
+	}
+	content := strings.ToLower(strings.Join(hints, "\n"))
+	for _, hint := range storyboardStylizedVisualHints {
+		if strings.Contains(content, hint) {
+			return StoryboardVisualModeStylized
+		}
+	}
+	return StoryboardVisualModePhotoreal
+}
+
+func DefaultStoryboardStylePrompt(visualMode string, followsReference bool) string {
+	if followsReference {
+		if NormalizeStoryboardVisualMode(visualMode) == StoryboardVisualModeStylized {
+			return "严格遵循视觉风格参考，统一角色造型、线条、色彩、光线与材质语言"
+		}
+		return "严格遵循视觉风格参考，保持真实自然的人物比例、光线、色彩与材质"
+	}
+	if NormalizeStoryboardVisualMode(visualMode) == StoryboardVisualModeStylized {
+		return "统一的风格化影像，角色造型、线条、色彩、光线与材质语言保持一致"
+	}
+	return "统一的写实影像，人物比例、光线、色彩与材质保持真实自然"
+}
+
 func IsStoryboardVisualMode(value string) bool {
 	switch NormalizeStoryboardVisualMode(value) {
 	case StoryboardVisualModePhotoreal, StoryboardVisualModeStylized:
@@ -173,12 +271,20 @@ func IsStoryboardShotDurationValid(value float64) bool {
 		math.Trunc(value) == value
 }
 
+func StoryboardTransitionTypeValues() []string {
+	return append([]string(nil), storyboardTransitionTypeValues...)
+}
+
 func NormalizeStoryboardTransitionType(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = storyboardTransitionTypeNormalizer.Replace(normalized)
+	if normalized == "" {
 		return StoryboardTransitionNone
 	}
-	return value
+	if transitionType, ok := storyboardTransitionTypeAliases[normalized]; ok {
+		return transitionType
+	}
+	return normalized
 }
 
 func IsStoryboardTransitionType(value string) bool {

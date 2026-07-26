@@ -142,8 +142,37 @@ func attachCanvasStoryboardReferences(payload map[string]any, node canvasRunNode
 }
 
 func applyStoryboardReferenceDocument(document map[string]any, references []canvasStoryboardReference) error {
+	applyStoryboardVisualStyleReference(document, references)
 	document["references"] = canvasStoryboardReferenceMaps(references)
 	return validateAndCompleteStoryboardReferenceAssignments(document, references, false)
+}
+
+func applyStoryboardVisualStyleReference(document map[string]any, references []canvasStoryboardReference) {
+	if !hasCanvasStoryboardReferencePurpose(references, storyboardReferenceVisualStyle) {
+		return
+	}
+	visualMode := botmodel.NormalizeOrInferStoryboardVisualMode(
+		textValue(document["visual_mode"]),
+		textValue(document["style_prompt"]),
+	)
+	currentStyle := textValue(document["style_prompt"])
+	defaultStyle := botmodel.DefaultStoryboardStylePrompt(visualMode, false)
+	referenceStyle := botmodel.DefaultStoryboardStylePrompt(visualMode, true)
+	switch {
+	case currentStyle == "", currentStyle == defaultStyle:
+		document["style_prompt"] = referenceStyle
+	case !strings.Contains(currentStyle, "参考"):
+		document["style_prompt"] = currentStyle + "；" + referenceStyle
+	}
+}
+
+func hasCanvasStoryboardReferencePurpose(references []canvasStoryboardReference, purpose string) bool {
+	for _, reference := range references {
+		if reference.Purpose == purpose {
+			return true
+		}
+	}
+	return false
 }
 
 func validateStoredStoryboardReferences(document map[string]any) error {
@@ -249,12 +278,69 @@ func validateAndCompleteStoryboardReferenceAssignments(document map[string]any, 
 		} else {
 			targets = materialTargets[reference.Purpose]
 		}
+		if target := matchStoryboardReferenceTarget(reference, targets); target != nil {
+			target["reference_keys"] = appendUniqueStoryboardReferenceKey(target["reference_keys"], reference.Key)
+			continue
+		}
 		if len(targets) != 1 {
 			return fmt.Errorf("参考素材“%s”尚未关联到唯一的%s", reference.Label, storyboardReferencePurposeLabel(reference.Purpose))
 		}
 		targets[0]["reference_keys"] = appendUniqueStoryboardReferenceKey(targets[0]["reference_keys"], reference.Key)
 	}
 	return nil
+}
+
+func matchStoryboardReferenceTarget(reference canvasStoryboardReference, targets []map[string]any) map[string]any {
+	referenceLabels := []string{reference.Label, reference.Instruction}
+	var matched map[string]any
+	for _, target := range targets {
+		targetLabels := []string{
+			textValue(target["id"]),
+			textValue(target["name"]),
+			textValue(target["beat"]),
+		}
+		if !storyboardReferenceLabelsMatch(referenceLabels, targetLabels) {
+			continue
+		}
+		if matched != nil {
+			return nil
+		}
+		matched = target
+	}
+	return matched
+}
+
+func storyboardReferenceLabelsMatch(referenceLabels []string, targetLabels []string) bool {
+	for _, referenceLabel := range referenceLabels {
+		referenceLabel = normalizeStoryboardReferenceLabel(referenceLabel)
+		if referenceLabel == "" {
+			continue
+		}
+		for _, targetLabel := range targetLabels {
+			targetLabel = normalizeStoryboardReferenceLabel(targetLabel)
+			if targetLabel == "" {
+				continue
+			}
+			if referenceLabel == targetLabel || strings.Contains(referenceLabel, targetLabel) || strings.Contains(targetLabel, referenceLabel) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizeStoryboardReferenceLabel(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return strings.NewReplacer(
+		"@", "",
+		"#", "",
+		" ", "",
+		"-", "",
+		"_", "",
+		"参考图", "",
+		"参考视频", "",
+		"参考", "",
+	).Replace(value)
 }
 
 func validatedStoryboardReferenceKeys(value any, references map[string]canvasStoryboardReference, targetPurpose string, targetLabel string, strict bool) ([]any, error) {

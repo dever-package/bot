@@ -41,7 +41,7 @@ func httpRequestTool(loaded map[string]agentskill.Entry) Tool {
 	return Tool{
 		Definition: Definition{
 			Name:        "http_request",
-			Description: "通过已加载技能发起 HTTP 请求。",
+			Description: "通过已加载技能发起结构化 HTTP 请求；查询参数请使用 query，不要拼接 shell 命令。",
 			Parameters: objectParameters(map[string]any{
 				"skill":           skillProperty(),
 				"url":             map[string]any{"type": "string", "description": "请求地址"},
@@ -70,7 +70,11 @@ func httpRequestTool(loaded map[string]agentskill.Entry) Tool {
 				return Result{}, err
 			}
 			content["skill"] = entry.Key
-			return Result{Text: resultText(content, "HTTP 请求完成"), Content: content}, nil
+			return Result{
+				Text:        "HTTP 请求完成",
+				Content:     content,
+				ModelResult: httpModelResult(content),
+			}, nil
 		},
 	}
 }
@@ -153,9 +157,21 @@ func performHTTP(ctx context.Context, spec httpRequestSpec) (map[string]any, err
 		"status_code": response.StatusCode,
 		"headers":     responseHeaders(response.Header),
 		"body":        body,
-		"text":        body,
 		"truncated":   truncated,
 	}, nil
+}
+
+func httpModelResult(content map[string]any) map[string]any {
+	body, _ := content["body"].(string)
+	modelBody := any(body)
+	if raw := json.RawMessage(body); len(raw) > 0 && json.Valid(raw) {
+		modelBody = raw
+	}
+	return map[string]any{
+		"status_code": content["status_code"],
+		"body":        modelBody,
+		"truncated":   content["truncated"],
+	}
 }
 
 func allowedHTTPMethod(method string) bool {

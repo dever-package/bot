@@ -401,6 +401,16 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	if run == nil {
 		return nil, fmt.Errorf("画布能力运行不存在")
 	}
+	executionContext, releaseExecution, claimed, executionErr := s.acquireRunExecution(ctx, run.ID)
+	if !claimed {
+		return nil, fmt.Errorf("画布能力运行已结束或已被其他进程接管")
+	}
+	defer releaseExecution()
+	ctx = executionContext
+	if executionErr != nil {
+		s.finishRun(ctx, run.ID, teammodel.RunStatusFail, nil, executionErr)
+		return nil, executionErr
+	}
 	req.Billing.RunID = run.ID
 	s.writeRunEvent(ctx, *run, stream.EventRunStarted, map[string]any{
 		"feature": stream.FeaturePower,

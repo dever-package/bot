@@ -208,6 +208,10 @@ func (s Service) continueWaitingRun(ctx context.Context, run teammodel.Run, flow
 }
 
 func (s Service) continueRunExecution(ctx context.Context, run teammodel.Run, flowRun *teammodel.FlowRun) {
+	if isCanvasPowerRun(run) {
+		s.failInterruptedCanvasPowerRun(ctx, run)
+		return
+	}
 	runInput := jsonMap(run.Input)
 	if isSingleFlowRunMode(runInput) {
 		flowID := uint64Value(runInput["_flow_id"])

@@ -81,6 +81,25 @@ func isCanvasPowerRun(run teammodel.Run) bool {
 	return firstText(jsonMap(run.Input)[CanvasPowerMetaResumeMode]) == CanvasPowerResumeMode
 }
 
+func invalidWaitingCanvasPowerRun(run *teammodel.Run) bool {
+	if run == nil || run.Status != teammodel.RunStatusWaiting || !isCanvasPowerRun(*run) {
+		return false
+	}
+	interaction := jsonMap(run.Interaction)
+	return firstText(interaction["id"]) == "" || firstText(interaction["type"]) == ""
+}
+
+func (s Service) failInterruptedCanvasPowerRun(ctx context.Context, run teammodel.Run) {
+	s.runAsync(ctx, run.ID, func(ctx context.Context) {
+		current := s.repo.FindRun(ctx, run.ID)
+		if current == nil || teamRunTerminal(current.Status) {
+			return
+		}
+		err := fmt.Errorf("画布能力运行已中断，请重新执行")
+		s.finishResumedCanvasPower(ctx, *current, teammodel.RunStatusFail, nil, err)
+	})
+}
+
 func (s Service) continueCanvasPowerRun(ctx context.Context, runID uint64) {
 	run := s.repo.FindRun(ctx, runID)
 	if run == nil || run.Status == teammodel.RunStatusCanceled {

@@ -303,6 +303,8 @@
           "paramApi": "/bot/admin/energon/power_params",
           "requestApi": "/bot/admin/energon/request",
           "streamApi": "/bot/admin/energon/stream",
+          "historyApi": "/bot/admin/energon/power_history",
+          "historyDetailApi": "/bot/admin/energon/power_history_detail",
           "blockMs": 1000
         }
       }

@@ -319,6 +319,7 @@ type RunningNodeState = {
 type RunningNodeMap = Record<string, RunningNodeState>;
 const EMPTY_RUNNING_NODE_MAP: RunningNodeMap = {};
 const EMPTY_CANVAS_NODES: SpaceCanvasNode[] = [];
+const CANVAS_NODE_TITLE_PROMPT_LIMIT = 800;
 type RunningNodeSetter = Dispatch<SetStateAction<RunningNodeMap>>;
 type RunningNodeUpdate = (current: RunningNodeMap) => RunningNodeMap;
 type RunningNodeBatcher = {
@@ -689,73 +690,6 @@ export function WorkSpacePage() {
       onError: handleCanvasSaveError,
     });
 
-  const requestGeneratedNodeTitle = useCallback(
-    (
-      assetCateId: number,
-      node: SpaceCanvasNode,
-      result: CanvasNodeResultRef,
-    ) => {
-      if (!shouldGenerateCanvasNodeTitle(node, result)) {
-        return;
-      }
-      const versionId = canvasNodeResultVersionId(result);
-      const requestKey = `${node.id}:${versionId}`;
-      if (requestedNodeTitlesRef.current.has(requestKey)) {
-        return;
-      }
-      requestedNodeTitlesRef.current.add(requestKey);
-      const expectedTitle = node.title.trim();
-      void generateSpaceCanvasNodeTitle({
-        projectId,
-        nodeKey: node.id,
-        versionId,
-        prompt: readNodeComposerDraft(node).prompt,
-      })
-        .then((generated) => {
-          const title = generated.title.trim();
-          if (
-            !title ||
-            title === expectedTitle ||
-            generated.versionId !== versionId
-          ) {
-            return;
-          }
-          setCanvasStates((current) => {
-            const key = String(assetCateId);
-            const canvas = current[key];
-            if (!canvas) {
-              return current;
-            }
-            const currentNode = canvas.nodes.find(
-              (item) => item.id === node.id,
-            );
-            if (
-              !currentNode ||
-              currentNode.titleMode !== "auto" ||
-              currentNode.title.trim() !== expectedTitle ||
-              !isDefaultCanvasNodeTitle(currentNode)
-            ) {
-              return current;
-            }
-            changedCanvasKeysRef.current.add(assetCateId);
-            return {
-              ...current,
-              [key]: {
-                ...canvas,
-                nodes: canvas.nodes.map((item) =>
-                  item.id === node.id ? { ...item, title } : item,
-                ),
-              },
-            };
-          });
-        })
-        .catch(() => {
-          requestedNodeTitlesRef.current.delete(requestKey);
-        });
-    },
-    [projectId],
-  );
-
   useEffect(() => {
     if (changedCanvasKeysRef.current.size === 0) {
       return;
@@ -1050,6 +984,65 @@ export function WorkSpacePage() {
       }
     },
     [activeCate?.id, updateActiveCanvas, updateCanvasNodeResult],
+  );
+
+  const requestGeneratedNodeTitle = useCallback(
+    (
+      assetCateId: number,
+      node: SpaceCanvasNode,
+      result: CanvasNodeResultRef,
+    ) => {
+      if (!shouldGenerateCanvasNodeTitle(node, result)) {
+        return;
+      }
+      const versionId = canvasNodeResultVersionId(result);
+      const requestKey = `${node.id}:${versionId}`;
+      if (requestedNodeTitlesRef.current.has(requestKey)) {
+        return;
+      }
+      requestedNodeTitlesRef.current.add(requestKey);
+      const expectedTitle = node.title.trim();
+      const canvas = canvasStatesRef.current[String(assetCateId)];
+      void generateSpaceCanvasNodeTitle({
+        projectId,
+        nodeKey: node.id,
+        versionId,
+        prompt: canvasNodeTitlePrompt(node, canvas),
+      })
+        .then((generated) => {
+          const title = generated.title.trim();
+          if (
+            !title ||
+            title === expectedTitle ||
+            generated.versionId !== versionId
+          ) {
+            return;
+          }
+          updateCanvasState(assetCateId, (currentCanvas) => {
+            const currentNode = currentCanvas.nodes.find(
+              (item) => item.id === node.id,
+            );
+            if (
+              !currentNode ||
+              currentNode.titleMode !== "auto" ||
+              currentNode.title.trim() !== expectedTitle ||
+              !isDefaultCanvasNodeTitle(currentNode)
+            ) {
+              return currentCanvas;
+            }
+            return {
+              ...currentCanvas,
+              nodes: currentCanvas.nodes.map((item) =>
+                item.id === node.id ? { ...item, title } : item,
+              ),
+            };
+          });
+        })
+        .catch(() => {
+          requestedNodeTitlesRef.current.delete(requestKey);
+        });
+    },
+    [projectId, updateCanvasState],
   );
 
   const persistCanvasRunSnapshot = useCallback(
@@ -1929,6 +1922,8 @@ export function WorkSpacePage() {
       onAssetCreated: upsertSpaceAsset,
       setRunningNode: setRunningNodes,
       requestFlowFeedback: requestStartFlowFeedback,
+      requestNodeTitle: (node, result) =>
+        requestGeneratedNodeTitle(canvas.assetCateId, node, result),
       canvasRun: run,
     };
     const newResults = results.filter((result) => {
@@ -4904,6 +4899,9 @@ function buildGeneratedNodeResultPatch(
   const rawOutput = firstDefined(
     result?.output,
     result?.asset?.version?.content,
+    result?.version?.content,
+    result?.result?.output,
+    result?.result?.asset?.version?.content,
     result?.data?.output,
     result?.data?.content,
     result?.data?.result,
@@ -4913,6 +4911,18 @@ function buildGeneratedNodeResultPatch(
     node.type === "agent" && rawOutput != null
       ? parseMaybeJSON(rawOutput)
       : firstDisplayOutput(rawOutput) || extractDisplayOutput(rawOutput);
+  const storyboard =
+    node.type === "power" &&
+    resolvePowerPresentation(node.power, node.kind, node.outputType)
+      .viewMode === "storyboard"
+      ? parseStoryboardOutput([
+          rawOutput,
+          result?.asset?.version?.content,
+          result?.version?.content,
+          result?.result,
+          output,
+        ])
+      : null;
   const resultKind = firstText(
     String(result?.asset?.kind || ""),
     String(result?.kind || ""),
@@ -4921,6 +4931,7 @@ function buildGeneratedNodeResultPatch(
   const preview = generatedPreviewFromValue(output, resultKind);
   const outputText = displayTextFromOutput(output, "");
   const summary =
+    storyboard?.summary ||
     preview.text ||
     (!looksLikeURL(outputText) ? outputText : "") ||
     preview.imageUrl ||
@@ -4928,12 +4939,6 @@ function buildGeneratedNodeResultPatch(
     preview.audioUrl ||
     preview.fileUrl ||
     (fallbackPrompt ? `已按提示生成：${fallbackPrompt}` : "生成完成");
-  const storyboard =
-    node.type === "power" &&
-    resolvePowerPresentation(node.power, node.kind, node.outputType)
-      .viewMode === "storyboard"
-      ? parseStoryboardOutput(output)
-      : null;
 
   return {
     ...(storyboard?.title && node.titleMode === "auto"
@@ -4941,7 +4946,7 @@ function buildGeneratedNodeResultPatch(
       : {}),
     description: summary,
     resultRef: buildNodeResultRef(result),
-    resultOutput: output,
+    resultOutput: storyboard || output,
     asset: result?.asset || node.asset,
     kind: result?.asset?.kind || node.power?.kind || node.kind,
   };
@@ -6863,6 +6868,24 @@ function applyBackendCanvasRunResults(
   return applied;
 }
 
+function canvasNodeTitlePrompt(
+  node: SpaceCanvasNode,
+  canvas?: SpaceCanvasState,
+) {
+  const prompt = readNodeComposerDraft(node).prompt.trim();
+  const inputContext = canvas
+    ? buildNodeInputContext(node.id, canvas.nodes, canvas.edges)
+    : null;
+  const context = inputContext?.text.trim() || "";
+  const source = [
+    prompt,
+    context ? `上游内容：\n${context}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  return Array.from(source).slice(0, CANVAS_NODE_TITLE_PROMPT_LIMIT).join("");
+}
+
 function shouldGenerateCanvasNodeTitle(
   node: SpaceCanvasNode,
   result: CanvasNodeResultRef,
@@ -6871,7 +6894,7 @@ function shouldGenerateCanvasNodeTitle(
     node.type !== "power" ||
     node.titleMode !== "auto" ||
     node.storyboardItem ||
-    result.status !== "success" ||
+    canvasRunNodeResultStatus(result) !== "success" ||
     canvasNodeResultVersionId(result) <= 0 ||
     !isDefaultCanvasNodeTitle(node)
   ) {
@@ -6892,14 +6915,35 @@ function isDefaultCanvasNodeTitle(node: SpaceCanvasNode) {
 }
 
 function canvasNodeResultVersionId(result: CanvasNodeResultRef) {
-  return Number(
-    result.version?.id ||
-      result.asset?.version?.id ||
-      result.asset?.version_id ||
-      (result.result as any)?.version?.id ||
-      (result.result as any)?.asset?.version?.id ||
-      0,
-  );
+  const payload = result as any;
+  const candidates = [
+    payload.version_id,
+    payload.versionId,
+    payload.version?.id,
+    payload.asset?.version_id,
+    payload.asset?.versionId,
+    payload.asset?.version?.id,
+    payload.result?.version_id,
+    payload.result?.versionId,
+    payload.result?.version?.id,
+    payload.result?.asset?.version_id,
+    payload.result?.asset?.version?.id,
+    payload.output?.version_id,
+    payload.output?.version?.id,
+    payload.output?.asset?.version_id,
+    payload.output?.asset?.version?.id,
+    payload.data?.version_id,
+    payload.data?.version?.id,
+    payload.data?.asset?.version_id,
+    payload.data?.asset?.version?.id,
+  ];
+  for (const candidate of candidates) {
+    const versionId = Number(candidate || 0);
+    if (Number.isInteger(versionId) && versionId > 0) {
+      return versionId;
+    }
+  }
+  return 0;
 }
 
 function canvasNodeResultApplyKey(result: CanvasNodeResultRef) {

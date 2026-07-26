@@ -42,7 +42,8 @@ type serviceParamSeedConfig struct {
 const (
 	serviceParamRuleDirect     int16 = 1
 	serviceParamRuleOption     int16 = 2
-	serviceParamRuleAttachment int16 = 3
+	ServiceParamRuleAttachment int16 = 3
+	serviceParamRuleAttachment       = ServiceParamRuleAttachment
 	serviceParamRuleCombo      int16 = 4
 	serviceParamRuleFixed      int16 = 5
 
@@ -66,7 +67,7 @@ const (
 var (
 	serviceParamSeed = buildServiceParamSeeds([]serviceParamSeedConfig{
 		{ID: 1, ServiceID: serviceRunningHubImageID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "prompt"},
-		{ID: 2, ServiceID: serviceRunningHubImageID, ParamID: ParamImageID, ParamRule: serviceParamRuleDirect, Key: "imageUrls"},
+		{ID: 2, ServiceID: serviceRunningHubImageID, ParamID: ParamImagesID, ParamRule: serviceParamRuleDirect, Key: "imageUrls"},
 		{ID: 3, ServiceID: serviceRunningHubMusicID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "description"},
 		{ID: 4, ServiceID: serviceRunningHubMusicID, ParamID: paramSwitchID, ParamRule: serviceParamRuleDirect, Key: "make_instrumental", Name: "是否仅生成背景音乐"},
 		{ID: 5, ServiceID: serviceRunningHubFlowClothingID, ParamID: ParamImageID, ParamRule: serviceParamRuleAttachment, Key: "15.image", Name: "服装图", Mapping: "[1]"},
@@ -78,7 +79,7 @@ var (
 		{ID: 11, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[0].type", Mapping: "text"},
 		{ID: 12, ServiceID: serviceDoubaoVideoID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "content[0].text"},
 		{ID: 13, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[1-2].type", Mapping: "image_url"},
-		{ID: 14, ServiceID: serviceDoubaoVideoID, ParamID: ParamImageID, ParamRule: serviceParamRuleAttachment, Key: "content[1-2].image_url.url", Mapping: "[1,2]"},
+		{ID: 14, ServiceID: serviceDoubaoVideoID, ParamID: ParamImagesID, ParamRule: serviceParamRuleAttachment, Key: "content[1-2].image_url.url", Mapping: "[1,2]"},
 		{ID: 15, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[1-2].role", Mapping: `["first_frame","last_frame"]`, FixedValueType: fixedValueTypeJSON},
 		{ID: 19, ServiceID: serviceDoubaoImageID, ParamRule: serviceParamRuleFixed, Key: "watermark", Mapping: "false", FixedValueType: fixedValueTypeBoolean},
 		{ID: 21, ServiceID: serviceDoubaoVideoID, ParamID: paramResolutionID, ParamRule: serviceParamRuleOption, Key: "resolution", Mapping: doubaoVideoResolutionMapping},
@@ -91,24 +92,24 @@ var (
 		{ID: 28, ServiceID: serviceFFmpegComposeID, ParamID: paramFPSID, ParamRule: serviceParamRuleDirect, Key: "fps", Name: "输出帧率", Sort: 50},
 		{ID: 29, ServiceID: serviceDoubaoAudioID, ParamID: paramVoiceID, ParamRule: serviceParamRuleOption, Key: "voice", Mapping: doubaoVoiceMapping},
 		{ID: 30, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[0].type", Mapping: "text", Sort: 1},
-		{ID: 31, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "content[0].text", Name: "提示词", Sort: 2},
+		{ID: 31, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "content[0].text", Name: "提示词", Sort: ParamSortPrompt},
 		{ID: 32, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[1-9].type", Mapping: "image_url", Sort: 10},
-		{ID: 33, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamImageID, ParamRule: serviceParamRuleAttachment, Key: "content[1-9].image_url.url", Name: "参考图片", Mapping: "[1,2,3,4,5,6,7,8,9]", Sort: 11},
+		{ID: 33, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamImagesID, ParamRule: serviceParamRuleAttachment, Key: "content[1-9].image_url.url", Name: "参考图片", Mapping: "[1,2,3,4,5,6,7,8,9]", Sort: ParamSortImages},
 		{ID: 34, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[1-9].role", Mapping: "reference_image", Sort: 12},
 		{ID: 47, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[10].type", Mapping: "video_url", Sort: 60},
-		{ID: 48, ServiceID: serviceDoubaoVideoFastID, ParamID: paramVideoID, ParamRule: serviceParamRuleAttachment, Key: "content[10].video_url.url", Name: "参考视频", Mapping: "[1]", Sort: 61},
+		{ID: 48, ServiceID: serviceDoubaoVideoFastID, ParamID: paramVideoID, ParamRule: serviceParamRuleAttachment, Key: "content[10].video_url.url", Name: "参考视频", Mapping: "[1]", Sort: ParamSortVideo},
 		{ID: 49, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[10].role", Mapping: "reference_video", Sort: 62},
 		{ID: 50, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[11].type", Mapping: "audio_url", Sort: 70},
-		{ID: 51, ServiceID: serviceDoubaoVideoFastID, ParamID: paramAudioID, ParamRule: serviceParamRuleAttachment, Key: "content[11].audio_url.url", Name: "参考音频", Mapping: "[1]", Sort: 71},
+		{ID: 51, ServiceID: serviceDoubaoVideoFastID, ParamID: paramAudioID, ParamRule: serviceParamRuleAttachment, Key: "content[11].audio_url.url", Name: "参考音频", Mapping: "[1]", Sort: ParamSortAudio},
 		{ID: 52, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[11].role", Mapping: "reference_audio", Sort: 72},
-		{ID: 53, ServiceID: serviceDoubaoVideoFastID, ParamID: paramResolutionID, ParamRule: serviceParamRuleOption, Key: "resolution", Name: "分辨率", Mapping: doubaoVideoFastResolutionMapping, Sort: 80},
-		{ID: 54, ServiceID: serviceDoubaoVideoFastID, ParamID: paramAspectRatioID, ParamRule: serviceParamRuleOption, Key: "ratio", Name: "画面比例", Mapping: doubaoVideoFastRatioMapping, Sort: 81},
-		{ID: 55, ServiceID: serviceDoubaoVideoFastID, ParamID: paramDurationID, ParamRule: serviceParamRuleDirect, Key: "duration", Name: "时长", Sort: 82},
+		{ID: 53, ServiceID: serviceDoubaoVideoFastID, ParamID: paramResolutionID, ParamRule: serviceParamRuleOption, Key: "resolution", Name: "分辨率", Mapping: doubaoVideoFastResolutionMapping, Sort: ParamSortResolution},
+		{ID: 54, ServiceID: serviceDoubaoVideoFastID, ParamID: paramAspectRatioID, ParamRule: serviceParamRuleOption, Key: "ratio", Name: "画面比例", Mapping: doubaoVideoFastRatioMapping, Sort: ParamSortAspectRatio},
+		{ID: 55, ServiceID: serviceDoubaoVideoFastID, ParamID: paramDurationID, ParamRule: serviceParamRuleDirect, Key: "duration", Name: "时长", Sort: ParamSortDuration},
 		{ID: 56, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "generate_audio", Mapping: "true", FixedValueType: fixedValueTypeBoolean, Sort: 90},
 		{ID: 57, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "watermark", Mapping: "false", FixedValueType: fixedValueTypeBoolean, Sort: 91},
-		{ID: 58, ServiceID: serviceDoubaoImageID, ParamID: ParamImageID, ParamRule: serviceParamRuleDirect, Key: "image", Sort: 3},
+		{ID: 58, ServiceID: serviceDoubaoImageID, ParamID: ParamImagesID, ParamRule: serviceParamRuleDirect, Key: "image", Sort: ParamSortImages},
 		{ID: 59, ServiceID: serviceDoubaoImageID, ParamRule: serviceParamRuleFixed, Key: "sequential_image_generation", Mapping: "disabled", Sort: 4},
-		{ID: 60, ServiceID: serviceDoubaoImage5ID, ParamID: ParamImageID, ParamRule: serviceParamRuleDirect, Key: "image", Sort: 3},
+		{ID: 60, ServiceID: serviceDoubaoImage5ID, ParamID: ParamImagesID, ParamRule: serviceParamRuleDirect, Key: "image", Sort: ParamSortImages},
 		{ID: 61, ServiceID: serviceDoubaoImage5ID, ParamRule: serviceParamRuleFixed, Key: "sequential_image_generation", Mapping: "disabled", Sort: 4},
 		{ID: 62, ServiceID: serviceDoubaoImage5ID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: doubaoSeedreamSizeMapping},
 		{ID: 63, ServiceID: serviceDoubaoImage5ID, ParamRule: serviceParamRuleFixed, Key: "watermark", Mapping: "false", FixedValueType: fixedValueTypeBoolean},
@@ -164,7 +165,7 @@ func buildServiceParamSeeds(configs []serviceParamSeedConfig) []map[string]any {
 		}
 		sort := config.Sort
 		if sort == 0 {
-			sort = 100
+			sort = BuiltinParamSortByID(config.ParamID)
 		}
 		seeds = append(seeds, map[string]any{
 			"id":                config.ID,

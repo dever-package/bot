@@ -361,7 +361,7 @@ func validateStoryboard(document map[string]any) error {
 		transitionTypeValue, ok := shot["transition_type"].(string)
 		transitionType := botmodel.NormalizeStoryboardTransitionType(transitionTypeValue)
 		if !ok || strings.TrimSpace(transitionTypeValue) == "" || !botmodel.IsStoryboardTransitionType(transitionType) {
-			return fmt.Errorf("镜头 %d 的结构化转场类型无效", shotIndex+1)
+			return fmt.Errorf("镜头 %d 的结构化转场类型无效: %q", shotIndex+1, transitionTypeValue)
 		}
 		transitionDurationMS, ok := storyboardInteger(shot["transition_duration_ms"])
 		if !ok || transitionDurationMS < 0 || transitionDurationMS > 5000 {

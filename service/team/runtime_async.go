@@ -26,37 +26,61 @@ func (s Service) runAsync(ctx context.Context, runID uint64, execute func(contex
 		if ctx != nil {
 			asyncContext = context.WithoutCancel(ctx)
 		}
-		owner := "team:" + uuid.NewString()
-		if !s.waitForRunExecution(asyncContext, runID, owner) {
+		executionContext, releaseExecution, claimed, err := s.acquireRunExecution(asyncContext, runID)
+		if !claimed {
 			return
 		}
-		defer s.repo.ReleaseRunExecution(context.Background(), runID, owner)
-
-		run := s.repo.FindRun(asyncContext, runID)
-		if run == nil {
-			return
-		}
-		restored, _, err := restoreRunScope(asyncContext, *run)
+		defer releaseExecution()
 		if err != nil {
-			s.finishRun(withRunExecutionOwner(asyncContext, owner), runID, teammodel.RunStatusFail, nil, err)
+			s.finishRun(executionContext, runID, teammodel.RunStatusFail, nil, err)
 			return
 		}
-		asyncContext, cancel := context.WithCancel(withRunExecutionOwner(restored, owner))
-		stopHeartbeat := make(chan struct{})
-		heartbeatDone := make(chan struct{})
-		go s.maintainRunExecutionLease(asyncContext, cancel, runID, owner, stopHeartbeat, heartbeatDone)
-		defer func() {
-			close(stopHeartbeat)
-			<-heartbeatDone
-			cancel()
-		}()
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				s.finishRun(asyncContext, runID, teammodel.RunStatusFail, nil, runtimePanicError(recovered))
+				s.finishRun(executionContext, runID, teammodel.RunStatusFail, nil, runtimePanicError(recovered))
 			}
 		}()
-		execute(asyncContext)
+		execute(executionContext)
 	}()
+}
+
+// acquireRunExecution keeps active runs from being recovered by status reads.
+func (s Service) acquireRunExecution(ctx context.Context, runID uint64) (context.Context, func(), bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	owner := "team:" + uuid.NewString()
+	if !s.waitForRunExecution(ctx, runID, owner) {
+		return ctx, func() {}, false, nil
+	}
+
+	releaseClaim := func() {
+		s.repo.ReleaseRunExecution(context.Background(), runID, owner)
+	}
+	run := s.repo.FindRun(ctx, runID)
+	if run == nil {
+		releaseClaim()
+		return ctx, func() {}, false, nil
+	}
+
+	ownerContext := withRunExecutionOwner(ctx, owner)
+	restored, _, err := restoreRunScope(ownerContext, *run)
+	if err != nil {
+		return ownerContext, releaseClaim, true, err
+	}
+
+	executionContext, cancel := context.WithCancel(withRunExecutionOwner(restored, owner))
+	stopHeartbeat := make(chan struct{})
+	heartbeatDone := make(chan struct{})
+	go s.maintainRunExecutionLease(executionContext, cancel, runID, owner, stopHeartbeat, heartbeatDone)
+
+	releaseExecution := func() {
+		close(stopHeartbeat)
+		<-heartbeatDone
+		cancel()
+		releaseClaim()
+	}
+	return executionContext, releaseExecution, true, nil
 }
 
 func (s Service) waitForRunExecution(ctx context.Context, runID uint64, owner string) bool {
@@ -133,6 +157,10 @@ func teamRunTerminal(status string) bool {
 }
 
 func (s Service) recoverRunExecution(run *teammodel.Run) {
+	if invalidWaitingCanvasPowerRun(run) {
+		s.failInterruptedCanvasPowerRun(context.Background(), *run)
+		return
+	}
 	if !teamRunExecutionOrphaned(run, time.Now()) {
 		return
 	}

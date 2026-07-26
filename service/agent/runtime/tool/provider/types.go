@@ -12,8 +12,6 @@ import (
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
-const maxModelResultRunes = 24000
-
 type Definition struct {
 	Name                  string
 	Title                 string
@@ -91,15 +89,7 @@ func (result Result) ModelContent() string {
 	if err != nil {
 		return `{"error":"工具结果无法序列化"}`
 	}
-	runes := []rune(string(raw))
-	if len(runes) <= maxModelResultRunes {
-		return string(raw)
-	}
-	preview, _ := json.Marshal(map[string]any{
-		"truncated": true,
-		"preview":   string(runes[:maxModelResultRunes]),
-	})
-	return string(preview)
+	return string(raw)
 }
 
 func (result Result) Output() map[string]any {

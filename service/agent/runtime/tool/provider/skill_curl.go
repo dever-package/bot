@@ -18,7 +18,7 @@ func curlRequestTool(loaded map[string]agentskill.Entry) Tool {
 	return Tool{
 		Definition: Definition{
 			Name:        "curl_request",
-			Description: "通过已加载技能执行 curl 请求。",
+			Description: "通过已加载技能解析并执行一条 curl HTTP 请求；不支持管道、重定向、脚本或其他 shell 命令。",
 			Parameters: objectParameters(map[string]any{
 				"skill":   skillProperty(),
 				"command": map[string]any{"type": "string", "description": "curl 命令"},
@@ -41,7 +41,11 @@ func curlRequestTool(loaded map[string]agentskill.Entry) Tool {
 				return Result{}, err
 			}
 			content["skill"] = entry.Key
-			return Result{Text: resultText(content, "curl 请求完成"), Content: content}, nil
+			return Result{
+				Text:        "curl 请求完成",
+				Content:     content,
+				ModelResult: httpModelResult(content),
+			}, nil
 		},
 	}
 }

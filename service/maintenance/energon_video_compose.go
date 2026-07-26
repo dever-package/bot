@@ -216,13 +216,13 @@ func ensureVideoComposeParams(
 	params map[string]energonmodel.Param,
 ) {
 	model := energonmodel.NewPowerParamModel()
-	for index, spec := range composeParamSpecs {
+	for _, spec := range composeParamSpecs {
 		param := params[spec.Key]
 		filter := map[string]any{"power_id": powerID, "param_id": param.ID}
 		values := map[string]any{
 			"show":   1,
 			"status": spec.Required,
-			"sort":   index + 1,
+			"sort":   spec.Sort,
 		}
 		if row := model.Find(ctx, filter); row != nil {
 			model.Update(ctx, map[string]any{"id": row.ID}, values)

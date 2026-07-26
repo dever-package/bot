@@ -29,6 +29,7 @@ func init() {
 		return CleanupHistory(ctx, payload)
 	})
 	frontcron.RegisterBootstrap(EnsureEnergonPromptParam)
+	frontcron.RegisterBootstrap(EnsureEnergonImageParams)
 	frontcron.RegisterBootstrap(EnsureEnergonVideoComposePower)
 	frontcron.RegisterBootstrap(EnsureHistoryCleanupCron)
 }

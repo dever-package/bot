@@ -10,6 +10,7 @@ import {
 import { History, Loader2, RefreshCw, X } from 'lucide-react'
 import type { EnergonOutput } from '@/components/energon/content-view'
 import { AgentChatTooltip } from './agent-chat/tooltip'
+import './stream-power-history.css'
 
 const DETAIL_CACHE_LIMIT = 12
 const RUNNING_HISTORY_POLL_MS = 2000
@@ -48,6 +49,7 @@ export type StreamPowerHistoryPage = {
 export type StreamPowerHistoryAdapter = {
   scopeKey: string
   selectLatest?: boolean
+  refreshDelaysMs?: number[]
   loadPage: (beforeID?: number) => Promise<StreamPowerHistoryPage>
   loadDetail: (historyID: number) => Promise<StreamPowerHistoryDetail>
 }
@@ -341,7 +343,8 @@ export function useStreamPowerHistory(adapter?: StreamPowerHistoryAdapter) {
     }
     clearHistoryTimers(titleRefreshTimersRef)
     void loadPage('refresh')
-    titleRefreshTimersRef.current = TITLE_REFRESH_DELAYS_MS.map((delay) =>
+    const refreshDelays = adapter.refreshDelaysMs ?? TITLE_REFRESH_DELAYS_MS
+    titleRefreshTimersRef.current = refreshDelays.map((delay) =>
       window.setTimeout(() => void loadPage('refresh'), delay)
     )
   }, [adapter, loadPage])
@@ -410,8 +413,10 @@ export function useStreamPowerHistory(adapter?: StreamPowerHistoryAdapter) {
 
 export function StreamPowerHistoryTrigger({
   controller,
+  label,
 }: {
   controller: StreamPowerHistoryController
+  label?: string
 }) {
   if (!controller.enabled) {
     return null
@@ -425,7 +430,12 @@ export function StreamPowerHistoryTrigger({
         onClick={controller.openPanel}
       >
         <History />
-        {controller.total > 0 ? <span>{controller.total}</span> : null}
+        {label ? (
+          <span className="stream-power-history-trigger-label">{label}</span>
+        ) : null}
+        {controller.total > 0 ? (
+          <span className="stream-power-history-trigger-count">{controller.total}</span>
+        ) : null}
       </button>
     </AgentChatTooltip>
   )

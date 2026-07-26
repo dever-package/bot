@@ -57,7 +57,7 @@ func EnsureEnergonPromptParam(ctx context.Context) (err error) {
 			"param_id":   param.ID,
 			"show":       1,
 			"status":     1,
-			"sort":       1,
+			"sort":       energonmodel.ParamSortPrompt,
 			"created_at": time.Now(),
 		})
 		if id == 0 {

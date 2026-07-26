@@ -229,15 +229,6 @@ func argumentValue(arguments map[string]any, keys ...string) any {
 	return nil
 }
 
-func resultText(content map[string]any, fallback string) string {
-	for _, key := range []string{"text", "summary", "body", "content"} {
-		if text := strings.TrimSpace(fmt.Sprint(content[key])); text != "" && text != "<nil>" {
-			return truncateRunes(text, 1000)
-		}
-	}
-	return fallback
-}
-
 func truncateRunes(value string, limit int) string {
 	value = strings.TrimSpace(value)
 	if limit <= 0 {
