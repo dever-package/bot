@@ -21,7 +21,6 @@ export type WorkbenchProfile = {
   id: number;
   name: string;
   account: string;
-  mobile: string;
   avatar: string;
   avatarFileID: number;
 };
@@ -107,7 +106,6 @@ function normalizeWorkbenchProfile(value: unknown): WorkbenchProfile {
     id: numberValue(profile.id),
     name: textValue(profile.name),
     account: textValue(profile.account),
-    mobile: textValue(profile.mobile),
     avatar: textValue(profile.avatar),
     avatarFileID: numberValue(profile.avatar_file_id),
   };

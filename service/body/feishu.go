@@ -42,17 +42,7 @@ func (Service) FeishuLogin(ctx context.Context, accountID uint64, code string) (
 	return (userservice.AuthService{}).ExternalLogin(ctx, userservice.ExternalLoginRequest{
 		Provider: usermodel.CredentialProviderFeishu,
 		Subject:  identity.OpenID,
-		Account:  firstNonEmptyBodyText(identity.EnterpriseEmail, identity.Email, identity.Mobile),
+		Account:  identity.Mobile,
 		Name:     identity.Name,
-		Mobile:   identity.Mobile,
 	})
-}
-
-func firstNonEmptyBodyText(values ...string) string {
-	for _, value := range values {
-		if text := strings.TrimSpace(value); text != "" {
-			return text
-		}
-	}
-	return ""
 }

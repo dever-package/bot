@@ -44,7 +44,7 @@ type ProjectIndex struct {
 var projectUserRelation = orm.Relation{
 	Field:      "user_id",
 	Option:     "user.NewUserModel",
-	OptionKeys: []string{"account", "name", "mobile", "status"},
+	OptionKeys: []string{"account", "name", "status"},
 }
 
 var projectBodyRelation = orm.Relation{

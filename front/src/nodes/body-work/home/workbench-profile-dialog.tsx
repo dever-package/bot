@@ -402,11 +402,7 @@ function ProfileBasicsSection({
       </ProfileField>
 
       <div className="hb-profile-readonly-grid">
-        <ReadonlyField
-          label="登录账号"
-          value={profile.account || "未设置"}
-        />
-        <ReadonlyField label="手机号" value={profile.mobile || "未绑定"} />
+        <ReadonlyField label="手机号" value={profile.account || "未设置"} />
         <ReadonlyField label="账号角色" value={roleLabel} />
       </div>
     </>
@@ -550,7 +546,6 @@ function cachedProfile(user: any): WorkbenchProfile {
     id: Number(user?.id || 0),
     name: String(user?.name || ""),
     account: String(user?.account || ""),
-    mobile: String(user?.mobile || ""),
     avatar: String(user?.avatar || ""),
     avatarFileID: Number(user?.avatar_file_id || 0),
   };
@@ -561,7 +556,6 @@ function profileUserPayload(profile: WorkbenchProfile) {
     id: profile.id,
     name: profile.name,
     account: profile.account,
-    mobile: profile.mobile,
     avatar: profile.avatar,
     avatar_file_id: profile.avatarFileID,
   };

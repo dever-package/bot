@@ -86,7 +86,7 @@ export type AccountPointPackage = {
 };
 
 export type AccountOverview = {
-  user: { id: number; name: string; mobile: string };
+  user: { id: number; name: string; account: string };
   pointAccounts: AccountPointBalance[];
   subscriptions: AccountSubscription[];
   catalog: AccountIdentityCatalog[];
@@ -143,7 +143,7 @@ export async function loadAccountOverview(): Promise<AccountOverview> {
     user: {
       id: numberValue(data.user?.id),
       name: textValue(data.user?.name) || "用户",
-      mobile: textValue(data.user?.mobile),
+      account: textValue(data.user?.account),
     },
     pointAccounts: toRows(data.point_accounts)
       .map(normalizePointBalance)

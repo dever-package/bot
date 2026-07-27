@@ -330,12 +330,12 @@ export function WorkLoginPage() {
               ) : null}
 
               <form className="bot-work-login-form" onSubmit={submit}>
-                <AuthField label="账号">
+                <AuthField label="手机号">
                   <Input
                     value={account}
                     autoComplete="username"
-                    placeholder="输入手机号或账号"
-                    aria-label="账号"
+                    placeholder="输入手机号"
+                    aria-label="手机号"
                     className="bot-work-login-input"
                     onChange={(event) => setAccount(event.target.value)}
                   />
@@ -628,7 +628,7 @@ function buildAuthPayload(
   const normalizedName = name.trim();
 
   if (!normalizedAccount || !normalizedPassword) {
-    return { error: "请输入账号和密码", data: null };
+    return { error: "请输入手机号和密码", data: null };
   }
   if (normalizedPassword.length < 6) {
     return { error: "密码不能少于 6 位", data: null };
