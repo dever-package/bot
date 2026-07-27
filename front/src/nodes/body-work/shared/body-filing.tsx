@@ -3,6 +3,7 @@ import { BodyRichTextView, hasBodyRichText } from "./body-rich-text";
 
 export type BodyFilingInfo = {
   content: string;
+  contentConfigured: boolean;
   companyName: string;
   companyAddress: string;
   businessLicenseURL: string;
@@ -31,7 +32,7 @@ export function BodyFilingContent({
     <BodyRichTextView
       value={filing.content}
       className={className}
-      fallback={fallback}
+      fallback={filing.contentConfigured ? undefined : fallback}
     />
   );
 }
@@ -91,7 +92,7 @@ export function BodyFilingFallbackRows({
 export function hasBodyFilingInfo(filing: BodyFilingInfo) {
   return (
     hasBodyFilingRichContent(filing.content) ||
-    createBodyFilingRows(filing).length > 0
+    (!filing.contentConfigured && createBodyFilingRows(filing).length > 0)
   );
 }
 

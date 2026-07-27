@@ -111,7 +111,6 @@ func (s Service) executeComposeDocumentStep(
 		presentation := runtimeprovider.DocumentCompletionPresentation(
 			input.Title,
 			writer.Status,
-			writer.Coverage.RequiredTotal(),
 		)
 		if input.FollowUp != nil {
 			presentation.Items = append([]map[string]any(nil), input.FollowUp.Items...)
@@ -123,7 +122,6 @@ func (s Service) executeComposeDocumentStep(
 	content["completion_message"] = runtimeprovider.DocumentCompletionPresentation(
 		input.Title,
 		writer.Status,
-		writer.Coverage.RequiredTotal(),
 	).Message
 	content["presentation_tool"] = runtimeprovider.PresentSuggestionsToolName
 	modelResult := composeDocumentModelResult(content, writer)

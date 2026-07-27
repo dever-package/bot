@@ -115,11 +115,9 @@ func normalizeDocumentPresentationCall(ctx context.Context, state *runState, cal
 	if document == nil {
 		return call
 	}
-	coverage := documents.MediaCoverage(ctx, state.documentID)
 	arguments["message"] = runtimeprovider.DocumentCompletionPresentation(
 		document.Title,
 		document.Status,
-		coverage.RequiredTotal(),
 	).Message
 	call.Arguments = encodeJSON(arguments, "{}")
 	return call

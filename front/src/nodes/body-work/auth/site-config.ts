@@ -207,6 +207,10 @@ function normalizeLoginConfig(value: unknown): BodyLoginConfig {
       homeMenu: normalizeHomeMenu(config.home_menu, fallback.site.homeMenu),
       filing: {
         content: textValue(config.filing_content),
+        contentConfigured: Object.prototype.hasOwnProperty.call(
+          config,
+          "filing_content",
+        ),
         companyName: textValue(config.company_name),
         companyAddress: textValue(config.company_address),
         businessLicenseURL: safeBodyExternalURL(config.business_license_url),
@@ -332,6 +336,7 @@ function validAccount(account: BodyLoginAccount) {
 function emptyFilingInfo(): BodyFilingInfo {
   return {
     content: "",
+    contentConfigured: false,
     companyName: "",
     companyAddress: "",
     businessLicenseURL: "",

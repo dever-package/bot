@@ -44,15 +44,19 @@ func ComposeDocumentIntro(title string) string {
 	return "正在生成完整图文《" + title + "》。"
 }
 
-func DocumentCompletionPresentation(title string, status string, requiredMedia int) SuggestionPresentation {
+func documentPresentationSubject(title string) string {
 	title = strings.TrimSpace(title)
-	subject := "文档"
-	if title != "" {
-		subject = "文档《" + title + "》"
+	if title == "" {
+		return "内容"
 	}
+	return "《" + title + "》"
+}
+
+func DocumentCompletionPresentation(title string, status string) SuggestionPresentation {
+	subject := documentPresentationSubject(title)
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case agentmodel.DocumentStatusWriting:
-		return SuggestionPresentation{Message: subject + "正文正在生成。"}
+		return SuggestionPresentation{Message: subject + "正在生成。"}
 	case agentmodel.DocumentStatusGenerating:
 		return SuggestionPresentation{Message: subject + "正文已完成，所需素材正在生成。"}
 	case agentmodel.DocumentStatusPartialFailed:
@@ -60,19 +64,12 @@ func DocumentCompletionPresentation(title string, status string, requiredMedia i
 	case agentmodel.DocumentStatusFailed:
 		return SuggestionPresentation{Message: subject + "生成失败，请重试或调整要求。"}
 	default:
-		if requiredMedia > 0 {
-			return SuggestionPresentation{Message: strings.Replace(subject, "文档", "图文", 1) + "已完成。"}
-		}
 		return SuggestionPresentation{Message: subject + "已完成。"}
 	}
 }
 
 func DocumentFailurePresentation(title string, withSuggestions bool) SuggestionPresentation {
-	title = strings.TrimSpace(title)
-	subject := "这份文档"
-	if title != "" {
-		subject = "《" + title + "》"
-	}
+	subject := documentPresentationSubject(title)
 	presentation := SuggestionPresentation{Message: subject + "生成失败，请重试或调整要求。"}
 	if withSuggestions {
 		presentation.Items = []map[string]any{

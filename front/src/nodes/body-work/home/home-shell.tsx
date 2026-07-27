@@ -8,7 +8,7 @@ import {
   RefreshCw,
   Zap,
 } from "lucide-react";
-import { useTheme } from "@dever/front-plugin";
+import { useAuthStore, useTheme } from "@dever/front-plugin";
 import {
   applyBodySiteMetadata,
   type BodyHomeMenuConfig,
@@ -60,6 +60,8 @@ const pageSpecs: ReadonlyArray<{
 
 export function WorkHomeShell({ item }: { item?: any }) {
   const loginConfig = useBodyLoginConfig();
+  const user = useAuthStore((state: any) => state.auth?.user);
+  const userScopeKey = workbenchUserScopeKey(user);
   const { resolvedTheme } = useTheme();
   useBodyAppearance(loginConfig.site.appearance, resolvedTheme);
   const [activePage, setActivePage] = useState<WorkbenchPageKey>(() =>
@@ -76,44 +78,54 @@ export function WorkHomeShell({ item }: { item?: any }) {
     useState<AssetRecord | null>(null);
   const catalogRequestRef = useRef(0);
 
-  const loadCatalog = useCallback(async (teamID = 0) => {
-    const requestID = ++catalogRequestRef.current;
-    setLoading(true);
-    setError("");
-    try {
-      const next = await loadWorkbenchCatalog(teamID);
-      if (requestID !== catalogRequestRef.current) {
-        return;
+  const loadCatalog = useCallback(
+    async (teamID = 0) => {
+      const requestID = ++catalogRequestRef.current;
+      setLoading(true);
+      setError("");
+      try {
+        const next = await loadWorkbenchCatalog(teamID);
+        if (requestID !== catalogRequestRef.current) {
+          return;
+        }
+        setCatalog(next);
+        setContinuationAsset(null);
+        if (next.team?.id) {
+          rememberTeamID(userScopeKey, next.team.id);
+        }
+        setActivePage((current) => resolveCatalogPage(current, next));
+      } catch (currentError: unknown) {
+        if (requestID !== catalogRequestRef.current) {
+          return;
+        }
+        setError(
+          currentError instanceof Error
+            ? currentError.message
+            : "加载团队工作区失败",
+        );
+      } finally {
+        if (requestID === catalogRequestRef.current) {
+          setLoading(false);
+        }
       }
-      setCatalog(next);
-      setContinuationAsset(null);
-      if (next.team?.id) {
-        rememberTeamID(next.team.id);
-      }
-      setActivePage((current) => resolveCatalogPage(current, next));
-    } catch (currentError: unknown) {
-      if (requestID !== catalogRequestRef.current) {
-        return;
-      }
-      setError(
-        currentError instanceof Error
-          ? currentError.message
-          : "加载团队工作区失败",
-      );
-    } finally {
-      if (requestID === catalogRequestRef.current) {
-        setLoading(false);
-      }
-    }
-  }, []);
+    },
+    [userScopeKey],
+  );
 
   useEffect(() => {
     applyBodySiteMetadata(loginConfig.site);
   }, [loginConfig.site]);
 
   useEffect(() => {
-    void loadCatalog(readTeamID());
-  }, [loadCatalog]);
+    setCatalog(null);
+    setContinuationAsset(null);
+    if (!userScopeKey) {
+      catalogRequestRef.current += 1;
+      setLoading(false);
+      return;
+    }
+    void loadCatalog(readTeamID(userScopeKey));
+  }, [loadCatalog, userScopeKey]);
 
   useEffect(() => {
     if (!loginConfig.site.homeMenu.content.enabled) {
@@ -224,6 +236,7 @@ export function WorkHomeShell({ item }: { item?: any }) {
               <NoVisibleHomeMenu />
             ) : (
               <PageContent
+                key={userScopeKey}
                 page={currentPageKey}
                 catalog={catalog}
                 continuationAsset={continuationAsset}
@@ -405,17 +418,35 @@ function resolveCatalogPage(
   return "assets";
 }
 
-function readTeamID() {
+function workbenchUserScopeKey(user: any) {
+  const userID = Number(user?.id || 0);
+  if (Number.isFinite(userID) && userID > 0) {
+    return `user:${userID}`;
+  }
+  const account = String(user?.account || "").trim();
+  return account ? `account:${account}` : "";
+}
+
+function userTeamStorageKey(userScopeKey: string) {
+  return `${TEAM_STORAGE_KEY}.${userScopeKey}`;
+}
+
+function readTeamID(userScopeKey: string) {
   try {
-    return Number(window.localStorage.getItem(TEAM_STORAGE_KEY) || 0);
+    return Number(
+      window.localStorage.getItem(userTeamStorageKey(userScopeKey)) || 0,
+    );
   } catch {
     return 0;
   }
 }
 
-function rememberTeamID(teamID: number) {
+function rememberTeamID(userScopeKey: string, teamID: number) {
   try {
-    window.localStorage.setItem(TEAM_STORAGE_KEY, String(teamID));
+    window.localStorage.setItem(
+      userTeamStorageKey(userScopeKey),
+      String(teamID),
+    );
   } catch {
     // 浏览器禁用本地存储时只影响团队记忆，不影响当前工作区。
   }
