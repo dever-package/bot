@@ -573,11 +573,6 @@
               "type": "show-base"
             },
             {
-              "value": "icon",
-              "name": "图标",
-              "type": "show-base"
-            },
-            {
               "name": "状态",
               "value": "status",
               "type": "form-switch",

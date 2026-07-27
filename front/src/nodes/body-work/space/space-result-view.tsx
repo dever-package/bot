@@ -168,6 +168,7 @@ function PureResultPreview({
     return (
       <figure className="ws-result-view-media">
         <video
+          key={preview.videoUrl}
           src={preview.videoUrl}
           muted
           playsInline

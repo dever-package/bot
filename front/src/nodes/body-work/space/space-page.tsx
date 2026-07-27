@@ -12102,6 +12102,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
               </div>
             ) : preview.videoUrl ? (
               <video
+                key={preview.videoUrl}
                 src={preview.videoUrl}
                 className="ws-node-video-raw"
                 muted
@@ -12191,6 +12192,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
           ) : !useContentView && preview.videoUrl ? (
             <div className="ws-node-text-media">
               <video
+                key={preview.videoUrl}
                 src={preview.videoUrl}
                 muted
                 playsInline
@@ -12594,6 +12596,7 @@ function CanvasGeneratedNodeContent({
         className={`ws-node-generated-media ${generating ? "is-generating" : ""}`}
       >
         <video
+          key={preview.videoUrl}
           src={preview.videoUrl}
           className="nodrag nopan nowheel"
           controls

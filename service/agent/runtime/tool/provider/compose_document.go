@@ -41,7 +41,7 @@ func ComposeDocumentIntro(title string) string {
 	if title == "" {
 		return "正在生成完整图文。"
 	}
-	return "正在生成完整图文《" + title + "》。"
+	return "正在生成完整图文：" + title + "。"
 }
 
 func documentPresentationSubject(title string) string {
@@ -49,7 +49,7 @@ func documentPresentationSubject(title string) string {
 	if title == "" {
 		return "内容"
 	}
-	return "《" + title + "》"
+	return title
 }
 
 func DocumentCompletionPresentation(title string, status string) SuggestionPresentation {
