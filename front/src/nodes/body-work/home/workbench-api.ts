@@ -67,8 +67,9 @@ export type WorkbenchCatalog = {
 
 const loadCatalogRequest = createInFlightRequestLoader<WorkbenchCatalog>();
 
-export function loadWorkbenchCatalog(teamID = 0) {
-  return loadCatalogRequest(String(teamID), async () => {
+export function loadWorkbenchCatalog(teamID = 0, requestScopeKey = "") {
+  const key = JSON.stringify({ requestScopeKey, teamID });
+  return loadCatalogRequest(key, async () => {
     const result = await request(joinSiteApi("workbench/catalog"), "get", {
       team_id: teamID || undefined,
     });

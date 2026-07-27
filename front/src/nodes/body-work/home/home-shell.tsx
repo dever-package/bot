@@ -8,7 +8,7 @@ import {
   RefreshCw,
   Zap,
 } from "lucide-react";
-import { useAuthStore, useTheme } from "@dever/front-plugin";
+import { useTheme } from "@dever/front-plugin";
 import {
   applyBodySiteMetadata,
   type BodyHomeMenuConfig,
@@ -20,6 +20,7 @@ import {
   bodyPageBackgroundStyle,
   hasBodyPageBackground,
 } from "../shared/body-appearance";
+import { useAuthUserScopeKey } from "../shared/auth-scope";
 import "../shared/body-theme.css";
 import { useBodyAppearance } from "../shared/use-body-appearance";
 import "./workbench-appearance.css";
@@ -60,8 +61,7 @@ const pageSpecs: ReadonlyArray<{
 
 export function WorkHomeShell({ item }: { item?: any }) {
   const loginConfig = useBodyLoginConfig();
-  const user = useAuthStore((state: any) => state.auth?.user);
-  const userScopeKey = workbenchUserScopeKey(user);
+  const userScopeKey = useAuthUserScopeKey();
   const { resolvedTheme } = useTheme();
   useBodyAppearance(loginConfig.site.appearance, resolvedTheme);
   const [activePage, setActivePage] = useState<WorkbenchPageKey>(() =>
@@ -84,7 +84,7 @@ export function WorkHomeShell({ item }: { item?: any }) {
       setLoading(true);
       setError("");
       try {
-        const next = await loadWorkbenchCatalog(teamID);
+        const next = await loadWorkbenchCatalog(teamID, userScopeKey);
         if (requestID !== catalogRequestRef.current) {
           return;
         }
@@ -416,15 +416,6 @@ function resolveCatalogPage(
     return "function";
   }
   return "assets";
-}
-
-function workbenchUserScopeKey(user: any) {
-  const userID = Number(user?.id || 0);
-  if (Number.isFinite(userID) && userID > 0) {
-    return `user:${userID}`;
-  }
-  const account = String(user?.account || "").trim();
-  return account ? `account:${account}` : "";
 }
 
 function userTeamStorageKey(userScopeKey: string) {

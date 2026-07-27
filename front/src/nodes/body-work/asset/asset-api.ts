@@ -26,8 +26,13 @@ const loadAssetPageRequest = createInFlightRequestLoader<AssetPage>();
 export function loadAssetFilterOptions(
   teamID: number,
   catalogOptions?: AssetCatalogOptions,
+  requestScopeKey = "",
 ): Promise<AssetFilterOptions> {
-  const key = JSON.stringify({ teamID, catalogOptions: catalogOptions || null });
+  const key = JSON.stringify({
+    requestScopeKey,
+    teamID,
+    catalogOptions: catalogOptions || null,
+  });
   return loadFilterOptionsRequest(key, async () => {
     const filtersPromise = request(
       joinSiteApi("workbench/asset_filters"),
@@ -73,6 +78,7 @@ export function loadAssetPage(input: {
   contentMode?: AssetContentMode;
   collectionID?: number;
   excludeCollections?: boolean;
+  requestScopeKey?: string;
 }): Promise<AssetPage> {
   const normalizedInput = {
     ...input,

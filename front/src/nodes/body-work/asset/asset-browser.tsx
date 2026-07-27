@@ -28,6 +28,7 @@ import { AssetRenameDialog } from "./asset-rename-dialog";
 import { AssetSourceFilters } from "./asset-source-filters";
 import { useAssetSourceLabels } from "./asset-source-labels";
 import { BodyWorkTooltip } from "../shared/body-work-tooltip";
+import { useAuthUserScopeKey } from "../shared/auth-scope";
 import {
   emptyAssetFilters,
   type AssetCatalogOptions,
@@ -93,6 +94,7 @@ export function AssetBrowser({
   contentMode?: AssetContentMode;
   className?: string;
 }) {
+  const requestScopeKey = useAuthUserScopeKey();
   const sourceLabels = useAssetSourceLabels();
   const allowedKindKey = JSON.stringify(allowedKinds || []);
   const normalizedAllowedKinds = useMemo(
@@ -140,13 +142,14 @@ export function AssetBrowser({
     setSelectedAssetID(0);
     setRenameTarget(null);
     setDeleteTarget(null);
+    setOperationAssetID(0);
     setError("");
-  }, [resolvedInitialFilters, teamID]);
+  }, [requestScopeKey, resolvedInitialFilters, teamID]);
 
   useEffect(() => {
     let active = true;
     setOptionsLoading(true);
-    loadAssetFilterOptions(teamID, catalogOptions)
+    loadAssetFilterOptions(teamID, catalogOptions, requestScopeKey)
       .then((next) => {
         if (active) setOptions(next);
       })
@@ -159,7 +162,7 @@ export function AssetBrowser({
     return () => {
       active = false;
     };
-  }, [catalogOptions, teamID]);
+  }, [catalogOptions, requestScopeKey, teamID]);
 
   const load = useCallback(
     async (targetPage: number) => {
@@ -176,6 +179,7 @@ export function AssetBrowser({
           pageSize: 24,
           collectionID: activeCollection?.id,
           excludeCollections,
+          requestScopeKey,
         });
         if (requestID === loadRequestRef.current) {
           setPage(nextPage);
@@ -195,6 +199,7 @@ export function AssetBrowser({
       contentMode,
       excludeCollections,
       filters,
+      requestScopeKey,
       teamID,
       view,
     ],

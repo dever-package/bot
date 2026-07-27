@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "@dever/front-plugin";
+import { useAuthUserScopeKey } from "../shared/auth-scope";
 import {
   createProject,
   loadProjectList,
@@ -43,6 +44,7 @@ export function WorkProjectPage({
   onRequireAuth?: () => void;
 }) {
   const navigate = useNavigate();
+  const requestScopeKey = useAuthUserScopeKey();
   const [activeView, setActiveView] = useState<ProjectView>("works");
   const [projectPage, setProjectPage] =
     useState<ProjectPage>(emptyProjectPage);
@@ -64,7 +66,13 @@ export function WorkProjectPage({
     setProjectPage((current) => ({ ...current, items: [] }));
     setLoading(true);
     try {
-      const nextPage = await loadProjectList(teamID, activeView, pageNumber);
+      const nextPage = await loadProjectList(
+        teamID,
+        activeView,
+        pageNumber,
+        24,
+        requestScopeKey,
+      );
       if (requestID === loadRequestRef.current) {
         setProjectPage(nextPage);
       }
@@ -77,7 +85,7 @@ export function WorkProjectPage({
         setLoading(false);
       }
     }
-  }, [activeView, pageNumber, teamID]);
+  }, [activeView, pageNumber, requestScopeKey, teamID]);
 
   useEffect(() => {
     void loadWorkspace();

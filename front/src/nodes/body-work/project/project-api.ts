@@ -33,8 +33,15 @@ export function loadProjectList(
   view: ProjectView,
   page = 1,
   pageSize = 24,
+  requestScopeKey = "",
 ) {
-  const key = JSON.stringify({ teamID, view, page, pageSize });
+  const key = JSON.stringify({
+    requestScopeKey,
+    teamID,
+    view,
+    page,
+    pageSize,
+  });
   return loadProjectPageRequest(key, async () => {
     const data = await projectRequest(
       view === "trash" ? "trash" : "list",
