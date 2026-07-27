@@ -50,6 +50,7 @@ type ChatRequest struct {
 	SessionID     uint64
 	ContextKey    string
 	Input         map[string]any
+	RuntimePrompt string
 	Billing       botprotocol.BillingContext
 	Method        string
 	Host          string
@@ -211,6 +212,7 @@ func (s Service) runChat(ctx context.Context, request ChatRequest, opening bool)
 			Session:       *session,
 			Agent:         agent,
 			Input:         inputText,
+			RuntimePrompt: request.RuntimePrompt,
 			IncludeMemory: agent.MemoryEnabled && !opening,
 		})
 		return currentErr

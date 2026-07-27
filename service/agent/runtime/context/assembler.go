@@ -13,6 +13,7 @@ type AssembleRequest struct {
 	Session       agentmodel.Session
 	Agent         agentmodel.Agent
 	Input         string
+	RuntimePrompt string
 	IncludeMemory bool
 }
 
@@ -51,7 +52,7 @@ func (Assembler) Assemble(ctx context.Context, request AssembleRequest) (Result,
 		return nil
 	})
 	group.Go("组装智能体提示词", func() error {
-		prompt = buildPrompt(request.Agent.Prompt)
+		prompt = buildPrompt(request.Agent.Prompt, request.RuntimePrompt)
 		runtimeContext = buildRuntimeContext(ctx, request, session)
 		return nil
 	})
@@ -64,7 +65,7 @@ func (Assembler) Assemble(ctx context.Context, request AssembleRequest) (Result,
 func (Assembler) AssembleInternal(request InternalAssembleRequest) Result {
 	history := normalizeHistory(request.History)
 	return Result{
-		Prompt:       buildPrompt(request.Agent.Prompt),
+		Prompt:       buildPrompt(request.Agent.Prompt, ""),
 		History:      history,
 		HistoryCount: len(history),
 	}

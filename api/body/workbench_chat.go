@@ -140,6 +140,7 @@ func (Workbench) PostChatRun(c *server.Context) error {
 		SessionID:     botapi.Uint64FromBody(body, "session_id", "sessionId"),
 		ContextKey:    scope.ContextKey,
 		Input:         input,
+		RuntimePrompt: scope.RuntimePrompt,
 		Billing: botprotocol.BillingContext{
 			Billable: true,
 			Scene:    "agent_power",
@@ -168,6 +169,7 @@ func (Workbench) PostChatOpening(c *server.Context) error {
 		AgentIdentity: scope.AgentKey,
 		SessionID:     botapi.Uint64FromBody(body, "session_id", "sessionId"),
 		ContextKey:    scope.ContextKey,
+		RuntimePrompt: scope.RuntimePrompt,
 		Method:        c.Method(),
 		Host:          c.Header("Host"),
 		Path:          c.Path(),

@@ -136,7 +136,7 @@ func (s Service) executeStandaloneRole(ctx context.Context, run teammodel.Run, t
 		agentNodeTask(map[string]any{}, input, role.Name),
 		map[string]any{
 			"team":  map[string]any{"id": team.ID, "name": team.Name},
-			"role":  roleInputPayload(&role),
+			"role":  roleWorkflowContextPayload(&role),
 			"input": input,
 		},
 		jsonMap(run.Interaction),
@@ -152,6 +152,7 @@ func (s Service) executeStandaloneRole(ctx context.Context, run teammodel.Run, t
 		SessionID:     session.ID,
 		ContextKey:    contextKey,
 		Input:         agentInput,
+		RuntimePrompt: roleRuntimePrompt(&role),
 		Billing:       billing,
 		Method:        "POST",
 		Path:          "/bot/team/role/run",

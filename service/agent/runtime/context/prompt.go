@@ -9,8 +9,10 @@ import (
 	runtimesessionstate "github.com/dever-package/bot/service/agent/runtime/sessionstate"
 )
 
-func buildPrompt(agentPrompt string) string {
-	return strings.Join(agentPromptSections(agentPrompt), "\n\n")
+func buildPrompt(agentPrompt string, runtimePrompt string) string {
+	sections := agentPromptSections(agentPrompt)
+	sections = appendPromptSection(sections, "运行时设定", runtimePrompt)
+	return strings.Join(sections, "\n\n")
 }
 
 func buildRuntimeContext(ctx context.Context, request AssembleRequest, session agentmodel.Session) map[string]any {
