@@ -16,6 +16,10 @@ import { resolveConfiguredLucideIcon } from "../shared/configured-icon";
 import { resolvePowerPresentation } from "./space-power-presentation";
 import type { PowerOption } from "./types";
 
+export type PowerIconSource = Partial<
+  Pick<PowerOption, "icon" | "kind" | "outputType" | "output">
+>;
+
 export function PowerIcon({
   power,
   kind,
@@ -23,7 +27,7 @@ export function PowerIcon({
   size,
   className,
 }: {
-  power?: PowerOption;
+  power?: PowerIconSource;
   kind?: string;
   outputType?: string;
   size: number;

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Check, ChevronDown, FolderTree, Zap } from "lucide-react";
+import { Check, ChevronDown, FolderTree } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { buildPowerMenu, type PowerCategory } from "../shared/power-menu";
+import { PowerIcon } from "../space/space-power-icon";
 import type { WorkbenchPower } from "./workbench-api";
 
 export function WorkbenchPowerPicker({
@@ -38,7 +39,18 @@ export function WorkbenchPowerPicker({
             className="workbench-picker-trigger workbench-power-picker-trigger"
             aria-label="选择工具"
           >
-            <span className="truncate">{selectedPower?.name || "选择工具"}</span>
+            <span className="flex min-w-0 items-center gap-2">
+              {selectedPower ? (
+                <PowerIcon
+                  power={selectedPower}
+                  size={15}
+                  className="shrink-0"
+                />
+              ) : null}
+              <span className="truncate">
+                {selectedPower?.name || "选择工具"}
+              </span>
+            </span>
             <ChevronDown className="workbench-power-picker-chevron" size={15} />
           </button>
         </DropdownMenuTrigger>
@@ -95,7 +107,7 @@ function PowerPickerItem({
       }`}
       onSelect={() => onSelect(power.id)}
     >
-      <Zap size={14} />
+      <PowerIcon power={power} size={14} className="shrink-0" />
       <span className="min-w-0 flex-1 truncate">{power.name}</span>
       {selected ? <Check size={14} /> : null}
     </DropdownMenuItem>

@@ -55,7 +55,7 @@ export function CanvasGroupNodeView({
         (runnableCount === 0
           ? "分组内暂无可运行节点"
           : staleCount > 0
-            ? `更新 ${staleCount} 个变更节点`
+            ? `重新生成 ${staleCount} 个已变更节点`
             : "运行分组");
   const runDisabled =
     !onRun ||
@@ -152,16 +152,18 @@ export function CanvasGroupNodeView({
           <SpaceTooltip label={runBlockedReason}>
             <span className="ws-node-group-status">等待前置</span>
           </SpaceTooltip>
+        ) : frameRunning ? (
+          <span className="ws-node-group-status">等待调度</span>
+        ) : staleCount > 0 ? (
+          <SpaceTooltip label="上游素材或提示词已变化；当前结果仍可使用，重新运行可更新">
+            <span className="ws-node-group-status is-stale">
+              可更新 {staleCount}
+            </span>
+          </SpaceTooltip>
         ) : runnableCount > 0 && completedCount === runnableCount ? (
           <span className="ws-node-group-status is-complete">
             <CheckCircle2 size={12} />
             已完成
-          </span>
-        ) : frameRunning ? (
-          <span className="ws-node-group-status">等待调度</span>
-        ) : staleCount > 0 ? (
-          <span className="ws-node-group-status is-stale">
-            待更新 {staleCount}
           </span>
         ) : null}
         {managed && onEditStructure ? (

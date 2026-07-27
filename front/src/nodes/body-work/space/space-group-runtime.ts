@@ -37,12 +37,12 @@ export function storyboardRunBlockedReason({
         return "前置素材节点不存在，请重新同步分镜脚本";
       }
       const sourceTitle = sourceNode.title || "未命名素材";
-      if (sourceNode.storyboardItem?.stale) {
-        return `请先更新前置素材“${sourceTitle}”`;
+      if (hasResult(sourceNode)) {
+        continue;
       }
-      if (!hasResult(sourceNode)) {
-        return `请先生成前置素材“${sourceTitle}”`;
-      }
+      return sourceNode.storyboardItem?.stale
+        ? `请先重新生成前置素材“${sourceTitle}”`
+        : `请先生成前置素材“${sourceTitle}”`;
     }
   }
   return "";
@@ -70,7 +70,10 @@ export function summarizeCanvasGroupRuntime({
     groupState?.status === "running" || groupState?.status === "waiting";
   const completedCount =
     groupActive
-      ? memberStates.filter((state) => state.status === "success").length
+      ? runnableMembers.filter((member) => {
+          const state = runningNodes[member.id];
+          return state?.status === "success" || (!state && hasResult(member));
+        }).length
       : runnableMembers.filter((member) => {
           const state = runningNodes[member.id];
           if (state?.status === "success") {
@@ -79,7 +82,7 @@ export function summarizeCanvasGroupRuntime({
           if (state) {
             return false;
           }
-          return !member.storyboardItem?.stale && hasResult(member);
+          return hasResult(member);
         }).length;
   const failedCount = memberStates.filter(
     (state) => state.status === "error",

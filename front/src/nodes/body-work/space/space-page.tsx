@@ -12321,9 +12321,9 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
             }
           />
           {node.storyboardItem?.stale ? (
-            <span className="ws-node-stale-badge">
-              待更新
-            </span>
+            <SpaceTooltip label="上游素材或提示词已变化；当前结果仍可使用，重新运行可更新">
+              <span className="ws-node-stale-badge">可更新</span>
+            </SpaceTooltip>
           ) : null}
           {isStoryboardDerivedPromptOverridden(node) ? (
             <span className="ws-node-prompt-override-badge">提示词已修改</span>
