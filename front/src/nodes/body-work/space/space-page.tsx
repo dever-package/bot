@@ -883,7 +883,7 @@ export function WorkSpacePage() {
       assetCateId: number,
       updater: (canvas: SpaceCanvasState) => SpaceCanvasState,
     ) => {
-      if (!assetCateId) {
+      if (!Number.isInteger(assetCateId) || assetCateId < 0) {
         return;
       }
       const applyUpdate = (current: Record<string, SpaceCanvasState>) => {

@@ -202,6 +202,10 @@ export function AgentChatDocumentPane({
         showOverlay={false}
         data-assistant-layer="true"
         layerZIndex={AGENT_CHAT_CHILD_LAYER_Z_INDEX}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          documentScroll.scrollRef.current?.focus({ preventScroll: true });
+        }}
         onFocusOutside={(event) => {
           if (copyInProgressRef.current) {
             event.preventDefault();
@@ -347,7 +351,8 @@ export function AgentChatDocumentPane({
           <div className="relative h-full min-h-0">
             <div
               ref={documentScroll.scrollRef}
-              className="h-full min-h-0 overflow-y-auto overscroll-contain"
+              tabIndex={-1}
+              className="h-full min-h-0 overflow-y-auto overscroll-contain focus:outline-none"
               style={{ scrollbarGutter: "stable" }}
               onScroll={documentScroll.handleScroll}
             >
