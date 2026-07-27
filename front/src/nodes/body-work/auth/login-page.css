@@ -64,6 +64,10 @@
   content: "";
 }
 
+.bot-work-login-page[data-login-template="minimal"] {
+  overflow-y: auto;
+}
+
 .bot-work-login-page-loading {
   background: #f4f6f5;
 }
@@ -246,6 +250,15 @@
 
 .bot-work-login-copy {
   width: 100%;
+}
+
+.bot-work-login-copy-logo {
+  display: block;
+  width: auto;
+  max-width: min(220px, 80%);
+  height: 56px;
+  margin: 0 auto 24px;
+  object-fit: contain;
 }
 
 .bot-work-login-copy h1 {
@@ -663,6 +676,25 @@
 }
 
 @media (min-width: 1024px) {
+  .bot-work-login-page[data-login-template="minimal"]
+    .bot-work-login-stage {
+    padding-top: 0;
+  }
+
+  .bot-work-login-page[data-login-template="minimal"]
+    .bot-work-login-layout {
+    min-height: calc(100svh - 52px);
+    gap: 72px;
+    padding-top: 32px;
+    padding-bottom: 32px;
+  }
+
+  .bot-work-login-page[data-login-template="minimal"]
+    .bot-work-login-auth {
+    max-width: 440px;
+    flex-basis: 440px;
+  }
+
   .bot-work-login-page[data-login-template="focus"]
     .bot-work-login-layout {
     width: min(620px, 100%);
@@ -792,6 +824,36 @@
   .bot-work-login-artwork {
     display: none;
   }
+
+  .bot-work-login-page[data-login-template="minimal"]
+    .bot-work-login-stage {
+    padding-top: 0;
+  }
+
+  .bot-work-login-page[data-login-template="minimal"]
+    .bot-work-login-layout {
+    min-height: calc(100svh - 52px);
+    flex-direction: column;
+    gap: 28px;
+    padding: 32px 24px 44px;
+  }
+
+  .bot-work-login-page[data-login-template="minimal"]
+    .bot-work-login-artwork {
+    display: block;
+    width: min(620px, 100%);
+    height: auto;
+    aspect-ratio: 16 / 9;
+    flex: none;
+    border-radius: 18px;
+  }
+
+  .bot-work-login-page[data-login-template="minimal"]
+    .bot-work-login-auth {
+    width: min(440px, 100%);
+    max-width: 440px;
+    flex: none;
+  }
 }
 
 @media (max-width: 767px) {
@@ -891,6 +953,25 @@
     margin-top: 32.8px;
     font-size: 9.375px;
     line-height: 15.234px;
+  }
+
+  .bot-work-login-page[data-login-template="minimal"]
+    .bot-work-login-layout {
+    gap: 24px;
+    padding: 20px 18px 28px;
+  }
+
+  .bot-work-login-page[data-login-template="minimal"]
+    .bot-work-login-artwork {
+    aspect-ratio: 16 / 10;
+    border-radius: 16px;
+  }
+
+  .bot-work-login-page[data-login-template="minimal"]
+    .bot-work-login-copy-logo {
+    max-width: min(190px, 76%);
+    height: 48px;
+    margin-bottom: 20px;
   }
 }
 

@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 
-export type BodyLoginTemplate = "split" | "focus" | "showcase";
+export type BodyLoginTemplate = "minimal" | "split" | "focus" | "showcase";
 export type BodyWorkbenchTemplate = "rail" | "sidebar" | "topbar";
 export type BodyColorMode = "light" | "dark";
 export type BodyBackgroundScope = "login" | "workbench";
@@ -20,7 +20,7 @@ export type BodyAppearanceConfig = {
 export const DEFAULT_BODY_APPEARANCE: BodyAppearanceConfig = {
   baseColor: "#96a29c",
   brandPrimaryColor: "",
-  loginTemplate: "split",
+  loginTemplate: "minimal",
   loginTextColor: "",
   loginBackgroundColor: "",
   loginBackgroundImage: "",
@@ -30,6 +30,7 @@ export const DEFAULT_BODY_APPEARANCE: BodyAppearanceConfig = {
 };
 
 const loginTemplates = new Set<BodyLoginTemplate>([
+  "minimal",
   "split",
   "focus",
   "showcase",

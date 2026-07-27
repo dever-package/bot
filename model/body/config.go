@@ -21,7 +21,7 @@ const (
 	DefaultLoginBackgroundImage            = ""
 	DefaultBaseColor                       = "#96a29c"
 	DefaultBrandPrimaryColor               = ""
-	DefaultLoginTemplate                   = LoginTemplateSplit
+	DefaultLoginTemplate                   = LoginTemplateMinimal
 	DefaultWorkbenchTemplate               = WorkbenchTemplateRail
 	DefaultWorkbenchBackgroundColor        = ""
 	DefaultWorkbenchBackgroundImage        = ""
@@ -33,6 +33,7 @@ const (
 	DefaultICPRecordURL                    = ""
 	DefaultPublicSecurityRecord            = ""
 	DefaultPublicSecurityRecordURL         = ""
+	LoginTemplateMinimal                   = "minimal"
 	LoginTemplateSplit                     = "split"
 	LoginTemplateFocus                     = "focus"
 	LoginTemplateShowcase                  = "showcase"
@@ -42,6 +43,7 @@ const (
 )
 
 var loginTemplateOptions = []map[string]any{
+	{"id": LoginTemplateMinimal, "value": "极简登录"},
 	{"id": LoginTemplateSplit, "value": "左右分栏"},
 	{"id": LoginTemplateFocus, "value": "居中聚焦"},
 	{"id": LoginTemplateShowcase, "value": "品牌展示"},
@@ -65,7 +67,7 @@ type Config struct {
 	RegisterStatus           int16     `dorm:"type:smallint;not null;default:1;comment:允许注册"`
 	BaseColor                string    `dorm:"type:varchar(16);not null;default:'#96a29c';comment:基础配色"`
 	BrandPrimaryColor        string    `dorm:"type:varchar(16);not null;default:'';comment:品牌主色"`
-	LoginTemplate            string    `dorm:"type:varchar(32);not null;default:'split';comment:登录页模板"`
+	LoginTemplate            string    `dorm:"type:varchar(32);not null;default:'minimal';comment:登录页模板"`
 	LoginBackgroundColor     string    `dorm:"type:varchar(16);not null;default:'';comment:登录页背景色"`
 	LoginBackgroundImage     string    `dorm:"type:text;not null;default:'';comment:登录页背景图"`
 	WorkbenchTemplate        string    `dorm:"type:varchar(32);not null;default:'rail';comment:工作台模板"`
@@ -156,12 +158,16 @@ func DefaultConfig() Config {
 
 func NormalizeLoginTemplate(value string) string {
 	switch strings.TrimSpace(value) {
+	case LoginTemplateMinimal:
+		return LoginTemplateMinimal
+	case LoginTemplateSplit:
+		return LoginTemplateSplit
 	case LoginTemplateFocus:
 		return LoginTemplateFocus
 	case LoginTemplateShowcase:
 		return LoginTemplateShowcase
 	default:
-		return LoginTemplateSplit
+		return LoginTemplateMinimal
 	}
 }
 

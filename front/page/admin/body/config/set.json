@@ -363,7 +363,7 @@
         "name": "登录页模板",
         "value": "form.login_template",
         "mode": "form",
-        "info": "切换登录页外层布局，账号、三方登录和单页链接保持不变。",
+        "info": "极简登录不显示顶部导航，已配置的登录页介绍图仍会展示；账号和三方登录逻辑保持不变。",
         "validate": [
           {
             "type": "required",
@@ -727,7 +727,7 @@
       "login_title": "把想法变成作品",
       "login_description": "调用团队能力，与智能体协作，把每一次创作沉淀为可复用的项目资产。",
       "register_status": 1,
-      "login_template": "split",
+      "login_template": "minimal",
       "login_text_color": "",
       "login_background_image": "",
       "login_background_color": "",

@@ -87,6 +87,7 @@ export function WorkLoginPage() {
   const [mobileLinksOpen, setMobileLinksOpen] = useState(false);
   const feishuCallbackHandled = useRef(false);
   const busy = loading || thirdPartyLoadingID !== null;
+  const minimalLogin = config.site.appearance.loginTemplate === "minimal";
 
   const completeLogin = useCallback(
     async (data: any, options: CompleteLoginOptions) => {
@@ -288,12 +289,14 @@ export function WorkLoginPage() {
       style={bodyPageBackgroundStyle(config.site.appearance, "login")}
     >
       <BodyToaster />
-      <LoginHeader
-        config={config}
-        mobileLinksOpen={mobileLinksOpen}
-        onCloseMobileLinks={() => setMobileLinksOpen(false)}
-        onToggleMobileLinks={() => setMobileLinksOpen((open) => !open)}
-      />
+      {minimalLogin ? null : (
+        <LoginHeader
+          config={config}
+          mobileLinksOpen={mobileLinksOpen}
+          onCloseMobileLinks={() => setMobileLinksOpen(false)}
+          onToggleMobileLinks={() => setMobileLinksOpen((open) => !open)}
+        />
+      )}
 
       <div className="bot-work-login-stage">
         <div className="bot-work-login-layout">
@@ -309,6 +312,14 @@ export function WorkLoginPage() {
             aria-labelledby="login-title"
           >
             <div className="bot-work-login-copy">
+              {minimalLogin && config.site.logo ? (
+                <BodyConfiguredImage
+                  src={config.site.logo}
+                  alt={`${config.site.siteName} Logo`}
+                  className="bot-work-login-copy-logo"
+                  fallback={null}
+                />
+              ) : null}
               <h1 id="login-title">{config.site.loginTitle}</h1>
               {config.site.loginDescription ? (
                 <p>{config.site.loginDescription}</p>
