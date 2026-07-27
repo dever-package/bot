@@ -1,4 +1,3 @@
-import * as LucideIcons from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { createElement } from "react";
 import { getCompatModule } from "@dever/front-plugin";
@@ -54,20 +53,7 @@ function resolveSharedLucideIcon(iconName: string): LucideIcon | null {
   } catch {
     // Older host sessions may not expose the shared icon resolver.
   }
-  return resolveLocalLucideIcon(iconName);
-}
-
-function resolveLocalLucideIcon(iconName: string): LucideIcon | null {
-  const exportName = iconName
-    .split("-")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join("");
-  return (
-    (LucideIcons as unknown as Record<string, LucideIcon | undefined>)[
-      exportName
-    ] || null
-  );
+  return null;
 }
 
 function normalizeLucideIconName(iconName?: string) {

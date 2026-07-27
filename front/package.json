@@ -2,6 +2,9 @@
   "name": "@zufang/bot-front",
   "private": true,
   "type": "module",
+  "dever": {
+    "bundle": "split"
+  },
   "dependencies": {
     "@assistant-ui/react": "0.14.26",
     "@assistant-ui/react-markdown": "0.14.5",

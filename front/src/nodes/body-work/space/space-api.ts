@@ -9,10 +9,6 @@ import {
 } from "./space-model";
 import { persistedCanvasState } from "./space-canvas-state";
 import { isSuccessResponse } from "../shared/api-response";
-import {
-  BODY_UPLOAD_BIZ_KEY,
-  BODY_UPLOAD_BIZ_NAME,
-} from "../asset/upload-asset-api";
 import type {
   AssetVersion,
   AssetVersionPage,
@@ -631,65 +627,6 @@ export async function saveSpaceCanvas(
     assetCateId: Number(data.asset_cate_id || assetCateId || 0),
     updatedAt: String(data.updated_at || canvas.updatedAt || ""),
   };
-}
-
-export async function initSpaceUpload(input: {
-  projectId: number;
-  ruleId?: number;
-  name: string;
-  size: number;
-  mime: string;
-  hash?: string;
-  kind?: string;
-}) {
-  const result = await request("/front/upload/init", "post", {
-    rule_id: input.ruleId || 0,
-    name: input.name,
-    size: input.size,
-    mime: input.mime,
-    hash: input.hash || "",
-    kind: input.kind || "",
-    biz_key: BODY_UPLOAD_BIZ_KEY,
-    biz_name: BODY_UPLOAD_BIZ_NAME,
-  });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "初始化上传失败");
-  }
-  return result.data;
-}
-
-export async function uploadSpacePart(input: {
-  projectId: number;
-  sessionId: number;
-  partNumber: number;
-  file: Blob;
-}) {
-  void input.projectId;
-  const form = new FormData();
-  form.append("file", input.file);
-  const result = await request(
-    `/front/upload/part?session_id=${input.sessionId}&part_number=${input.partNumber}`,
-    "post",
-    form,
-  );
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "上传分片失败");
-  }
-  return result.data;
-}
-
-export async function completeSpaceUpload(input: {
-  projectId: number;
-  sessionId: number;
-}) {
-  void input.projectId;
-  const result = await request("/front/upload/complete", "post", {
-    session_id: input.sessionId,
-  });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "完成上传失败");
-  }
-  return result.data;
 }
 
 function normalizePowerForm(value: any): PowerForm {

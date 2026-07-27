@@ -31,6 +31,15 @@ const CANVAS_CONTENT_MEDIA_KINDS: CanvasContentMediaKind[] = [
   "audio",
 ];
 
+const CANVAS_CONTENT_MEDIA_FIELDS: Record<
+  CanvasContentMediaKind,
+  readonly string[]
+> = {
+  image: ["image", "image_url", "imageUrl", "images", "imageUrls"],
+  video: ["video", "video_url", "videoUrl", "videos", "videoUrls"],
+  audio: ["audio", "audio_url", "audioUrl", "audios", "audioUrls"],
+};
+
 type ContentViewModule = {
   ContentView?: ComponentType<SharedContentViewProps>;
   EnergonContentView?: ComponentType<SharedContentViewProps>;
@@ -139,7 +148,7 @@ export function contentOutputNeedsRenderer(
     return false;
   }
   const items = normalizedContentItems(output);
-  if (items.length > 1) {
+  if (items.length > 1 || contentItemsHaveMultipleMedia(items)) {
     return true;
   }
   return items.some((item) => {
@@ -260,13 +269,8 @@ function collectContentMediaKinds(
   seen.add(value);
 
   const record = value as Record<string, unknown>;
-  const fields: Record<CanvasContentMediaKind, unknown[]> = {
-    image: [record.image, record.image_url, record.imageUrl, record.images],
-    video: [record.video, record.video_url, record.videoUrl, record.videos],
-    audio: [record.audio, record.audio_url, record.audioUrl, record.audios],
-  };
   for (const kind of CANVAS_CONTENT_MEDIA_KINDS) {
-    if (fields[kind].some(hasCanvasContent)) {
+    if (contentMediaFieldValues(record, kind).some(hasCanvasContent)) {
       kinds.add(kind);
     }
   }
@@ -294,6 +298,63 @@ function collectContentMediaKinds(
   ]) {
     collectContentMediaKinds(nested, kinds, seen, depth + 1);
   }
+}
+
+function contentItemsHaveMultipleMedia(items: unknown[]) {
+  const seen = new Set<object>();
+  return items.some((item) => contentValueHasMultipleMedia(item, seen, 0));
+}
+
+function contentValueHasMultipleMedia(
+  value: unknown,
+  seen: Set<object>,
+  depth: number,
+): boolean {
+  if (
+    value == null ||
+    depth > 12 ||
+    typeof value !== "object" ||
+    seen.has(value)
+  ) {
+    return false;
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.some((item) =>
+      contentValueHasMultipleMedia(item, seen, depth + 1),
+    );
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const kind of CANVAS_CONTENT_MEDIA_KINDS) {
+    if (
+      contentMediaFieldValues(record, kind).some(
+        (fieldValue) =>
+          Array.isArray(fieldValue) &&
+          fieldValue.filter(hasCanvasContent).length > 1,
+      )
+    ) {
+      return true;
+    }
+  }
+
+  return [
+    record.rich,
+    record.content,
+    record.output,
+    record.result,
+    record.data,
+    record.body,
+    record.value,
+  ].some((nested) => contentValueHasMultipleMedia(nested, seen, depth + 1));
+}
+
+function contentMediaFieldValues(
+  record: Record<string, unknown>,
+  kind: CanvasContentMediaKind,
+) {
+  return CANVAS_CONTENT_MEDIA_FIELDS[kind].map((field) => record[field]);
 }
 
 function contentMediaKindFromType(value: unknown) {

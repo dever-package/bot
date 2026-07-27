@@ -1,6 +1,6 @@
 {
   "src/runtime-entry.ts": {
-    "file": "bot.js?v=94ee8db60f18567a",
+    "file": "bot.js?v=50732a6025eb2595",
     "name": "runtime-entry",
     "src": "src/runtime-entry.ts",
     "isEntry": true,

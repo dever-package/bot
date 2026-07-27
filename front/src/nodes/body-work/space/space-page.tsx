@@ -12030,15 +12030,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
             <span>{node.title || "图片资产"}</span>
           </div>
           <div className="ws-node-image-container ws-node-content-container">
-            {preview.imageUrl ? (
-              <img
-                src={preview.imageUrl}
-                alt={node.title}
-                className="ws-node-image-raw"
-                loading="lazy"
-                decoding="async"
-              />
-            ) : useContentView ? (
+            {useContentView ? (
               <div className="ws-node-scroll-content nowheel">
                 <CanvasNodeContentView
                   output={contentOutput}
@@ -12046,6 +12038,14 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
                   className="ws-canvas-content-view"
                 />
               </div>
+            ) : preview.imageUrl ? (
+              <img
+                src={preview.imageUrl}
+                alt={node.title}
+                className="ws-node-image-raw"
+                loading="lazy"
+                decoding="async"
+              />
             ) : (
               <div className="ws-node-image-empty">
                 <ImageIcon size={24} />
