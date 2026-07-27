@@ -1,6 +1,7 @@
 import {
   contentOutputHasMedia,
   normalizeEnergonOutput,
+  preferRicherMediaOutput,
 } from "../space-content-view";
 import {
   looksLikeMarkdownSyntax,
@@ -90,8 +91,17 @@ export function resolveNodeDetailContent(
 export function resolveNodeDetailMediaOutput(
   node: SpaceCanvasNode,
   version?: AssetVersion,
+  options: { includeNodeResult?: boolean } = {},
 ) {
-  const raw = resolveNodeDetailRawContent(node, version);
+  const raw =
+    options.includeNodeResult === false
+      ? version?.content
+      : preferRicherMediaOutput(
+          version?.content,
+          node.asset?.version?.content,
+          node.resultOutput,
+          valueAtPath(node, "result", "output"),
+        );
   const parsedRaw = parseMaybeJSON(raw);
   const embeddedText = plainMarkdownTextFromRichOutput(parsedRaw);
   for (const parsed of [parsedRaw, parseMaybeJSON(embeddedText)]) {

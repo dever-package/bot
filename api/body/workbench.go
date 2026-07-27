@@ -179,10 +179,15 @@ func (Workbench) PostUploadSaveAsset(c *server.Context) error {
 
 func (Workbench) GetAssets(c *server.Context) error {
 	data, err := workbenchRunner.Assets(c.Context(), assetservice.QueryRequest{
-		TeamID:       botapi.QueryUint64(c, "team_id", "teamId"),
-		SourceType:   botapi.QueryText(c, "source_type", "sourceType", "source"),
-		SourceID:     botapi.QueryUint64(c, "source_id", "sourceId"),
-		ProjectID:    botapi.QueryUint64(c, "project_id", "projectId"),
+		TeamID:     botapi.QueryUint64(c, "team_id", "teamId"),
+		SourceType: botapi.QueryText(c, "source_type", "sourceType", "source"),
+		SourceID:   botapi.QueryUint64(c, "source_id", "sourceId"),
+		ProjectID:  botapi.QueryUint64(c, "project_id", "projectId"),
+		ScopeProjectID: botapi.QueryUint64(
+			c,
+			"scope_project_id",
+			"scopeProjectId",
+		),
 		AssetCateID:  botapi.QueryUint64(c, "asset_cate_id", "assetCateId"),
 		CollectionID: botapi.QueryUint64(c, "collection_id", "collectionId"),
 		NodeKey:      botapi.QueryText(c, "node_key", "nodeKey"),

@@ -26,6 +26,7 @@ type QueryRequest struct {
 	SourceType         string
 	SourceID           uint64
 	ProjectID          uint64
+	ScopeProjectID     uint64
 	AssetCateID        uint64
 	CollectionID       uint64
 	NodeKey            string
@@ -169,8 +170,11 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 	if err != nil {
 		return nil, err
 	}
-	if normalized.ProjectID > 0 {
-		if _, exists := scope.ProjectIDs[normalized.ProjectID]; !exists {
+	for _, projectID := range []uint64{normalized.ProjectID, normalized.ScopeProjectID} {
+		if projectID == 0 {
+			continue
+		}
+		if _, exists := scope.ProjectIDs[projectID]; !exists {
 			return nil, fmt.Errorf("项目不存在或不属于当前用户")
 		}
 	}
@@ -187,6 +191,9 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 		}
 	}
 	scopeFilter := scope.queryFilter()
+	if normalized.ScopeProjectID > 0 {
+		scopeFilter = scope.queryFilterForProjectContext(normalized.ScopeProjectID)
+	}
 	page, pageSize := normalizeAssetPage(normalized.Page, normalized.PageSize)
 	if scopeFilter == nil {
 		return emptyAssetPage(page, pageSize), nil
@@ -487,6 +494,9 @@ func normalizeQueryRequest(req QueryRequest) (QueryRequest, error) {
 	if req.ProjectID > 0 {
 		req.SourceType = assetmodel.SourceProject
 		req.SourceID = req.ProjectID
+	}
+	if req.ScopeProjectID > 0 && req.ProjectID > 0 && req.ScopeProjectID != req.ProjectID {
+		return QueryRequest{}, fmt.Errorf("项目筛选超出当前资产范围")
 	}
 	if req.SourceType != assetmodel.SourceProject {
 		req.ProjectID = 0

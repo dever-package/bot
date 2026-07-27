@@ -742,8 +742,8 @@ func EnsureDocument(raw any, kind string) map[string]any {
 	}
 	normalizedKind := NormalizeKind(kind)
 	if len(mediaContentKeys(normalizedKind)) > 0 {
-		if mediaURL := contentMediaURL(raw, normalizedKind, 0); mediaURL != "" {
-			return mediaDocument(normalizedKind, mediaURL)
+		if mediaURLs := contentMediaURLs(raw, normalizedKind); len(mediaURLs) > 0 {
+			return mediaDocument(normalizedKind, mediaURLs...)
 		}
 	}
 	text := contentText(raw)
@@ -764,41 +764,55 @@ func EnsureDocument(raw any, kind string) map[string]any {
 }
 
 func contentMediaURL(value any, kind string, depth int) string {
-	if depth > 12 || value == nil {
+	mediaURLs := contentMediaURLsFrom(value, kind, depth)
+	if len(mediaURLs) == 0 {
 		return ""
+	}
+	return mediaURLs[0]
+}
+
+func contentMediaURLs(value any, kind string) []string {
+	return contentMediaURLsFrom(value, kind, 0)
+}
+
+func contentMediaURLsFrom(value any, kind string, depth int) []string {
+	result := make([]string, 0)
+	seen := map[string]struct{}{}
+	collectContentMediaURLs(value, kind, depth, &result, seen)
+	return result
+}
+
+func collectContentMediaURLs(value any, kind string, depth int, result *[]string, seen map[string]struct{}) {
+	if depth > 12 || value == nil {
+		return
 	}
 	switch current := value.(type) {
 	case string:
 		current = strings.TrimSpace(current)
-		if isURL(current) {
-			return current
+		if !isURL(current) {
+			return
 		}
-		return ""
+		if _, exists := seen[current]; exists {
+			return
+		}
+		seen[current] = struct{}{}
+		*result = append(*result, current)
 	case []string:
 		for _, item := range current {
-			if mediaURL := contentMediaURL(item, kind, depth+1); mediaURL != "" {
-				return mediaURL
-			}
+			collectContentMediaURLs(item, kind, depth+1, result, seen)
 		}
 	case []any:
 		for _, item := range current {
-			if mediaURL := contentMediaURL(item, kind, depth+1); mediaURL != "" {
-				return mediaURL
-			}
+			collectContentMediaURLs(item, kind, depth+1, result, seen)
 		}
 	case map[string]any:
 		for _, key := range mediaContentKeys(kind) {
-			if mediaURL := contentMediaURL(current[key], kind, depth+1); mediaURL != "" {
-				return mediaURL
-			}
+			collectContentMediaURLs(current[key], kind, depth+1, result, seen)
 		}
 		for _, key := range []string{"output", "result", "data", "content", "media_files", "attrs"} {
-			if mediaURL := contentMediaURL(current[key], kind, depth+1); mediaURL != "" {
-				return mediaURL
-			}
+			collectContentMediaURLs(current[key], kind, depth+1, result, seen)
 		}
 	}
-	return ""
 }
 
 func mediaContentKeys(kind string) []string {
@@ -816,7 +830,18 @@ func mediaContentKeys(kind string) []string {
 	}
 }
 
-func mediaDocument(kind string, url string) map[string]any {
+func mediaDocument(kind string, urls ...string) map[string]any {
+	urls = distinctMediaURLs(urls)
+	if len(urls) == 0 {
+		return map[string]any{}
+	}
+	if len(urls) > 1 {
+		return map[string]any{
+			"type":                   "media_collection",
+			mediaCollectionKey(kind): urls,
+		}
+	}
+	url := urls[0]
 	if kind == assetmodel.KindFile {
 		return map[string]any{
 			"type":     "file",
@@ -839,6 +864,36 @@ func mediaDocument(kind string, url string) map[string]any {
 	}
 }
 
+func mediaCollectionKey(kind string) string {
+	switch kind {
+	case assetmodel.KindImage:
+		return "images"
+	case assetmodel.KindAudio:
+		return "audios"
+	case assetmodel.KindVideo:
+		return "videos"
+	default:
+		return "files"
+	}
+}
+
+func distinctMediaURLs(urls []string) []string {
+	result := make([]string, 0, len(urls))
+	seen := map[string]struct{}{}
+	for _, url := range urls {
+		url = strings.TrimSpace(url)
+		if url == "" {
+			continue
+		}
+		if _, exists := seen[url]; exists {
+			continue
+		}
+		seen[url] = struct{}{}
+		result = append(result, url)
+	}
+	return result
+}
+
 func isStructuredAssetDocument(document map[string]any) bool {
 	typeName := strings.ToLower(strings.TrimSpace(fmt.Sprint(document["type"])))
 	switch typeName {
@@ -846,6 +901,11 @@ func isStructuredAssetDocument(document map[string]any) bool {
 		return true
 	case "collection":
 		return true
+	case "media_collection":
+		return document["images"] != nil ||
+			document["audios"] != nil ||
+			document["videos"] != nil ||
+			document["files"] != nil
 	case "storyboard":
 		return document["shots"] != nil
 	case "file":

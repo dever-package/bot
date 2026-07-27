@@ -31,11 +31,13 @@ export type WorkbenchReferenceOption = ReferenceOption & {
 
 export function useAssetReferenceProvider({
   teamID,
+  scopeProjectID = 0,
   initialFilters,
   allowedKinds,
   onSelect,
 }: {
   teamID: number;
+  scopeProjectID?: number;
   initialFilters?: Partial<AssetFilters>;
   allowedKinds?: string[];
   onSelect?: (option: WorkbenchReferenceOption) => void;
@@ -76,19 +78,21 @@ export function useAssetReferenceProvider({
         <AssetReferencePicker
           {...props}
           teamID={teamID}
+          scopeProjectID={scopeProjectID}
           initialFilters={stableFilters}
           allowedKinds={stableKinds}
           onReferenceSelect={onSelect}
         />
       ),
     }),
-    [onSelect, stableFilters, stableKinds, teamID],
+    [onSelect, scopeProjectID, stableFilters, stableKinds, teamID],
   );
 }
 
 function AssetReferencePicker({
   open,
   teamID,
+  scopeProjectID,
   initialFilters,
   allowedKinds,
   onReferenceSelect,
@@ -97,6 +101,7 @@ function AssetReferencePicker({
 }: {
   open: boolean;
   teamID: number;
+  scopeProjectID: number;
   initialFilters?: Partial<AssetFilters>;
   allowedKinds?: AssetKind[];
   onReferenceSelect?: (option: WorkbenchReferenceOption) => void;
@@ -107,6 +112,7 @@ function AssetReferencePicker({
     <AssetPickerDialog
       open={open}
       teamID={teamID}
+      scopeProjectID={scopeProjectID}
       title="选择资产"
       description="插入资产当前版本"
       initialFilters={initialFilters}

@@ -28,6 +28,7 @@ const kindOptions: Array<{ key: "" | AssetKind; label: string }> = [
 export function AssetSourceFilters({
   filters,
   options,
+  scopeProjectID = 0,
   sourceLabels = {},
   allowedKinds = [],
   view,
@@ -38,6 +39,7 @@ export function AssetSourceFilters({
 }: {
   filters: AssetFilters;
   options: AssetFilterOptions;
+  scopeProjectID?: number;
   sourceLabels?: AssetSourceLabels;
   allowedKinds?: AssetKind[];
   view: AssetView;
@@ -61,11 +63,12 @@ export function AssetSourceFilters({
         )
       : kindOptions;
   function selectSource(sourceType: "" | AssetSourceType) {
+    const projectID = sourceType === "project" ? scopeProjectID : 0;
     onChange({
       ...filters,
       sourceType,
-      sourceID: 0,
-      projectID: 0,
+      sourceID: projectID,
+      projectID,
       assetCateID: 0,
       nodeKey: "",
       role: "",
@@ -95,20 +98,22 @@ export function AssetSourceFilters({
           />
           {filters.sourceType === "project" ? (
             <>
-              <FilterSelect
-                label={sourceLabels.project || "创作"}
-                value={filters.projectID}
-                options={options.projects}
-                onChange={(projectID) =>
-                  onChange({
-                    ...filters,
-                    projectID,
-                    sourceID: projectID,
-                    assetCateID: 0,
-                    nodeKey: "",
-                  })
-                }
-              />
+              {scopeProjectID > 0 ? null : (
+                <FilterSelect
+                  label={sourceLabels.project || "创作"}
+                  value={filters.projectID}
+                  options={options.projects}
+                  onChange={(projectID) =>
+                    onChange({
+                      ...filters,
+                      projectID,
+                      sourceID: projectID,
+                      assetCateID: 0,
+                      nodeKey: "",
+                    })
+                  }
+                />
+              )}
               {hasAssetCates ? (
                 <FilterSelect
                   label="资产分类"

@@ -162,6 +162,7 @@ export function PromptComposer({
   );
   const assetReferenceProvider = useAssetReferenceProvider({
     teamID: Number(assetReference?.teamID || 0),
+    scopeProjectID: Number(assetReference?.projectID || 0),
     initialFilters: assetReference?.projectID
       ? {
           sourceType: "project",
@@ -315,6 +316,7 @@ export function PromptComposer({
         <AssetPickerDialog
           open
           teamID={Number(assetReference?.teamID || 0)}
+          scopeProjectID={Number(assetReference?.projectID || 0)}
           title={`${assetPickerParam.name || "参数"}资产库`}
           description="选择已有资产或上传本地文件，确认后用于当前参数。"
           initialFilters={

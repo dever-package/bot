@@ -71,6 +71,7 @@ export function loadAssetFilterOptions(
 
 export function loadAssetPage(input: {
   teamID: number;
+  scopeProjectID?: number;
   filters: AssetFilters;
   page: number;
   pageSize?: number;
@@ -92,6 +93,7 @@ export function loadAssetPage(input: {
       source_type: normalizedInput.filters.sourceType || undefined,
       source_id: normalizedInput.filters.sourceID || undefined,
       project_id: normalizedInput.filters.projectID || undefined,
+      scope_project_id: normalizedInput.scopeProjectID || undefined,
       asset_cate_id: normalizedInput.filters.assetCateID || undefined,
       collection_id: normalizedInput.collectionID || undefined,
       node_key: normalizedInput.filters.nodeKey || undefined,

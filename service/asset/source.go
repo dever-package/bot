@@ -61,12 +61,20 @@ func (scope teamAssetScope) contains(asset *assetmodel.Asset) bool {
 }
 
 func (scope teamAssetScope) queryFilter() map[string]any {
-	branches := make([]any, 0, 2)
 	projectIDs := make([]uint64, 0, len(scope.ProjectIDs))
 	for projectID := range scope.ProjectIDs {
 		projectIDs = append(projectIDs, projectID)
 	}
 	sort.Slice(projectIDs, func(i, j int) bool { return projectIDs[i] < projectIDs[j] })
+	return scope.queryFilterForProjectIDs(projectIDs)
+}
+
+func (scope teamAssetScope) queryFilterForProjectContext(projectID uint64) map[string]any {
+	return scope.queryFilterForProjectIDs([]uint64{projectID})
+}
+
+func (scope teamAssetScope) queryFilterForProjectIDs(projectIDs []uint64) map[string]any {
+	branches := make([]any, 0, 2)
 	if len(projectIDs) > 0 {
 		branches = append(branches, map[string]any{"project_id": projectIDs})
 	}

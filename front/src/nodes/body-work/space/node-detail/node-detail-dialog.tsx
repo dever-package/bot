@@ -85,6 +85,7 @@ export function NodeDetailDialog({
 }) {
   const assetReferenceProvider = useAssetReferenceProvider({
     teamID: teamId,
+    scopeProjectID: projectId,
     initialFilters: {
       sourceType: "project",
       projectID: projectId,
@@ -260,8 +261,11 @@ export function NodeDetailDialog({
     [activeVersion, node],
   );
   const mediaOutput = useMemo(
-    () => resolveNodeDetailMediaOutput(node, activeVersion),
-    [activeVersion, node],
+    () =>
+      resolveNodeDetailMediaOutput(node, activeVersion, {
+        includeNodeResult: isCurrentVersion,
+      }),
+    [activeVersion, isCurrentVersion, node],
   );
   const mediaKind = useMemo(() => {
     const kinds = contentOutputMediaKinds(mediaOutput);

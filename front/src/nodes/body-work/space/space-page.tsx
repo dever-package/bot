@@ -247,6 +247,7 @@ import {
   CanvasNodeContentView,
   contentOutputNeedsRenderer,
   normalizeEnergonOutput,
+  preferRicherMediaOutput,
 } from "./space-content-view";
 import { plainMarkdownTextFromRichOutput } from "./space-content-output";
 import {
@@ -2554,6 +2555,7 @@ export function WorkSpacePage() {
       <AssetPickerDialog
         open={importPickerOpen}
         teamID={space.project.team_id}
+        scopeProjectID={space.project.id}
         title="导入资产"
         description="选择已有资产或上传本地文件，确认后加入当前画布。"
         initialFilters={{
@@ -2577,6 +2579,7 @@ export function WorkSpacePage() {
         <WorkspaceSurface className="ws-asset-workspace">
           <AssetBrowser
             teamID={space.project.team_id}
+            scopeProjectID={space.project.id}
             initialFilters={{
               sourceType: "project",
               projectID: space.project.id,
@@ -8663,8 +8666,10 @@ function nodeInputContextLine(source: NodeInputContext["sources"][number]) {
 
 function nodeContextOutput(node: SpaceCanvasNode) {
   return firstMeaningfulNodeOutput(
-    node.asset?.version?.content,
-    node.resultOutput,
+    preferRicherMediaOutput(
+      node.asset?.version?.content,
+      node.resultOutput,
+    ),
   );
 }
 

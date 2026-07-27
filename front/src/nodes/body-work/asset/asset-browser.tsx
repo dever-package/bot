@@ -61,6 +61,7 @@ const emptyPage: AssetPage = {
 
 export function AssetBrowser({
   teamID,
+  scopeProjectID = 0,
   initialFilters,
   selectable = false,
   excludeCollections = false,
@@ -78,6 +79,7 @@ export function AssetBrowser({
   className = "",
 }: {
   teamID: number;
+  scopeProjectID?: number;
   initialFilters?: Partial<AssetFilters>;
   selectable?: boolean;
   excludeCollections?: boolean;
@@ -144,7 +146,7 @@ export function AssetBrowser({
     setDeleteTarget(null);
     setOperationAssetID(0);
     setError("");
-  }, [requestScopeKey, resolvedInitialFilters, teamID]);
+  }, [requestScopeKey, resolvedInitialFilters, scopeProjectID, teamID]);
 
   useEffect(() => {
     let active = true;
@@ -172,6 +174,7 @@ export function AssetBrowser({
       try {
         const nextPage = await loadAssetPage({
           teamID,
+          scopeProjectID,
           filters,
           view,
           contentMode,
@@ -200,6 +203,7 @@ export function AssetBrowser({
       excludeCollections,
       filters,
       requestScopeKey,
+      scopeProjectID,
       teamID,
       view,
     ],
@@ -302,6 +306,7 @@ export function AssetBrowser({
         <AssetSourceFilters
           filters={filters}
           options={options}
+          scopeProjectID={scopeProjectID}
           sourceLabels={sourceLabels}
           allowedKinds={normalizedAllowedKinds}
           view={view}

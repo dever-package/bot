@@ -13,6 +13,7 @@ import type {
 export function AssetPickerDialog({
   open,
   teamID,
+  scopeProjectID = 0,
   title = "选择资产",
   description = "使用资产当前版本",
   initialFilters,
@@ -30,6 +31,7 @@ export function AssetPickerDialog({
 }: {
   open: boolean;
   teamID: number;
+  scopeProjectID?: number;
   title?: string;
   description?: string;
   initialFilters?: Partial<AssetFilters>;
@@ -82,6 +84,7 @@ export function AssetPickerDialog({
     normalizedInitialSelection,
     open,
     selectionLimit,
+    scopeProjectID,
     teamID,
   ]);
 
@@ -240,6 +243,7 @@ export function AssetPickerDialog({
         {message ? <p className="wb-asset-picker-message">{message}</p> : null}
         <AssetBrowser
           teamID={teamID}
+          scopeProjectID={scopeProjectID}
           initialFilters={browserFilters}
           allowedKinds={allowedKinds}
           contentMode={contentMode}

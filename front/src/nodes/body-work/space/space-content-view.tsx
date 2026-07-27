@@ -148,7 +148,7 @@ export function contentOutputNeedsRenderer(
     return false;
   }
   const items = normalizedContentItems(output);
-  if (items.length > 1 || contentItemsHaveMultipleMedia(items)) {
+  if (items.length > 1 || contentOutputMediaCount(output) > 1) {
     return true;
   }
   return items.some((item) => {
@@ -222,12 +222,49 @@ export function contentOutputHasMedia(output: unknown) {
 }
 
 export function contentOutputMediaKinds(output: unknown) {
-  const kinds = new Set<CanvasContentMediaKind>();
+  const media = contentOutputMediaIndex(output);
+  return CANVAS_CONTENT_MEDIA_KINDS.filter((kind) => media[kind].size > 0);
+}
+
+export function contentOutputMediaCount(output: unknown) {
+  const media = contentOutputMediaIndex(output);
+  return CANVAS_CONTENT_MEDIA_KINDS.reduce(
+    (total, kind) => total + media[kind].size,
+    0,
+  );
+}
+
+export function preferRicherMediaOutput(...values: unknown[]) {
+  let fallback: unknown;
+  let selected: unknown;
+  let selectedMediaCount = 0;
+  for (const value of values) {
+    if (!hasCanvasContent(value)) {
+      continue;
+    }
+    if (fallback === undefined) {
+      fallback = value;
+    }
+    const mediaCount = contentOutputMediaCount(value);
+    if (mediaCount > selectedMediaCount) {
+      selected = value;
+      selectedMediaCount = mediaCount;
+    }
+  }
+  return selectedMediaCount > 0 ? selected : fallback;
+}
+
+function contentOutputMediaIndex(output: unknown) {
+  const media: Record<CanvasContentMediaKind, Set<string>> = {
+    image: new Set<string>(),
+    video: new Set<string>(),
+    audio: new Set<string>(),
+  };
   const seen = new Set<object>();
   for (const item of normalizedContentItems(output)) {
-    collectContentMediaKinds(item, kinds, seen, 0);
+    collectContentMedia(item, media, seen, 0);
   }
-  return CANVAS_CONTENT_MEDIA_KINDS.filter((kind) => kinds.has(kind));
+  return media;
 }
 
 function normalizedContentItems(output: unknown): unknown[] {
@@ -238,25 +275,29 @@ function normalizedContentItems(output: unknown): unknown[] {
   return Array.isArray(output) ? output : [output];
 }
 
-function collectContentMediaKinds(
+function collectContentMedia(
   value: unknown,
-  kinds: Set<CanvasContentMediaKind>,
+  media: Record<CanvasContentMediaKind, Set<string>>,
   seen: Set<object>,
   depth: number,
+  fieldKind?: CanvasContentMediaKind,
 ): void {
   if (value == null || depth > 12) {
     return;
   }
   if (Array.isArray(value)) {
     value.forEach((item) =>
-      collectContentMediaKinds(item, kinds, seen, depth + 1),
+      collectContentMedia(item, media, seen, depth + 1, fieldKind),
     );
     return;
   }
   if (typeof value === "string") {
-    const kind = contentMediaKindFromURL(value);
+    const kind = fieldKind || contentMediaKindFromURL(value);
     if (kind) {
-      kinds.add(kind);
+      const identity = value.trim();
+      if (identity) {
+        media[kind].add(identity);
+      }
     }
     return;
   }
@@ -269,9 +310,20 @@ function collectContentMediaKinds(
   seen.add(value);
 
   const record = value as Record<string, unknown>;
+  if (fieldKind) {
+    for (const direct of [
+      record.url,
+      record.src,
+      record.thumbnail,
+      record.download_url,
+      record.downloadUrl,
+    ]) {
+      collectContentMedia(direct, media, seen, depth + 1, fieldKind);
+    }
+  }
   for (const kind of CANVAS_CONTENT_MEDIA_KINDS) {
-    if (contentMediaFieldValues(record, kind).some(hasCanvasContent)) {
-      kinds.add(kind);
+    for (const fieldValue of contentMediaFieldValues(record, kind)) {
+      collectContentMedia(fieldValue, media, seen, depth + 1, kind);
     }
   }
 
@@ -284,7 +336,9 @@ function collectContentMediaKinds(
     explicitKind &&
     [record.url, record.src, attrs?.src, attrs?.url].some(hasCanvasContent)
   ) {
-    kinds.add(explicitKind);
+    for (const direct of [record.url, record.src, attrs?.src, attrs?.url]) {
+      collectContentMedia(direct, media, seen, depth + 1, explicitKind);
+    }
   }
 
   for (const nested of [
@@ -295,59 +349,12 @@ function collectContentMediaKinds(
     record.data,
     record.body,
     record.value,
+    record.json,
+    record.media_files,
+    record.mediaFiles,
   ]) {
-    collectContentMediaKinds(nested, kinds, seen, depth + 1);
+    collectContentMedia(nested, media, seen, depth + 1);
   }
-}
-
-function contentItemsHaveMultipleMedia(items: unknown[]) {
-  const seen = new Set<object>();
-  return items.some((item) => contentValueHasMultipleMedia(item, seen, 0));
-}
-
-function contentValueHasMultipleMedia(
-  value: unknown,
-  seen: Set<object>,
-  depth: number,
-): boolean {
-  if (
-    value == null ||
-    depth > 12 ||
-    typeof value !== "object" ||
-    seen.has(value)
-  ) {
-    return false;
-  }
-  seen.add(value);
-
-  if (Array.isArray(value)) {
-    return value.some((item) =>
-      contentValueHasMultipleMedia(item, seen, depth + 1),
-    );
-  }
-
-  const record = value as Record<string, unknown>;
-  for (const kind of CANVAS_CONTENT_MEDIA_KINDS) {
-    if (
-      contentMediaFieldValues(record, kind).some(
-        (fieldValue) =>
-          Array.isArray(fieldValue) &&
-          fieldValue.filter(hasCanvasContent).length > 1,
-      )
-    ) {
-      return true;
-    }
-  }
-
-  return [
-    record.rich,
-    record.content,
-    record.output,
-    record.result,
-    record.data,
-    record.body,
-    record.value,
-  ].some((nested) => contentValueHasMultipleMedia(nested, seen, depth + 1));
 }
 
 function contentMediaFieldValues(
