@@ -184,16 +184,10 @@
         "name": "打开方式",
         "value": "form.target",
         "mode": "form",
+        "info": "内容文章选择当前窗口时，在工作台右侧打开；选择新窗口时，打开独立阅读页。",
         "meta": {
           "formLayout": "horizontal",
-          "controlClassName": "gap-x-5",
-          "showWhen": [
-            {
-              "path": "form.link_type",
-              "operator": "equals",
-              "value": "url"
-            }
-          ]
+          "controlClassName": "gap-x-5"
         }
       }
     ]
@@ -207,7 +201,7 @@
       "link_type": "url",
       "article_id": 0,
       "url": "",
-      "target": "_self",
+      "target": "_blank",
       "status": 1,
       "sort": 100
     }

@@ -24,7 +24,7 @@ export function normalizeBodyResolvedLink(value: unknown): BodyResolvedLink {
     articleID: type === "article" ? positiveNumber(row.article_id) : 0,
     url: type === "url" ? safeBodyLinkURL(row.url) : "",
     target:
-      type === "url" && textValue(row.target) === "_blank" ? "_blank" : "_self",
+      textValue(row.target) === "_self" ? "_self" : "_blank",
     scenes: rowsValue(row.scenes)
       .map(normalizeBodyLinkScene)
       .filter((scene): scene is BodyLinkScene => Boolean(scene)),
@@ -43,6 +43,10 @@ export function bodyResolvedLinkHref(link: BodyResolvedLink) {
   return link.type === "article"
     ? bodyPublicContentHref(link.articleID)
     : link.url;
+}
+
+export function bodyLinkOpensArticleSheet(link: BodyResolvedLink) {
+  return link.type === "article" && link.target === "_self";
 }
 
 export function bodyPublicContentHref(articleID: number) {

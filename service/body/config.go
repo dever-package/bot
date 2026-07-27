@@ -186,10 +186,10 @@ func loginAccountPayloads(ctx context.Context, rows []*bodymodel.Account) []map[
 }
 
 func normalizeLinkTarget(target string) string {
-	if strings.TrimSpace(target) == bodymodel.LinkTargetBlank {
-		return bodymodel.LinkTargetBlank
+	if strings.TrimSpace(target) == bodymodel.LinkTargetSelf {
+		return bodymodel.LinkTargetSelf
 	}
-	return bodymodel.LinkTargetSelf
+	return bodymodel.LinkTargetBlank
 }
 
 func firstBodyConfigText(value string, fallback string) string {

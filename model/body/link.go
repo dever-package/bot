@@ -21,8 +21,8 @@ var linkTypeOptions = []map[string]any{
 }
 
 var linkTargetOptions = []map[string]any{
-	{"id": LinkTargetSelf, "value": "当前窗口"},
 	{"id": LinkTargetBlank, "value": "新窗口"},
+	{"id": LinkTargetSelf, "value": "当前窗口"},
 }
 
 type Link struct {
@@ -32,7 +32,7 @@ type Link struct {
 	LinkType  string    `dorm:"type:varchar(16);not null;default:'url';comment:链接类型"`
 	ArticleID uint64    `dorm:"type:bigint;not null;default:0;comment:内容文章"`
 	URL       string    `dorm:"type:text;not null;default:'';comment:链接地址"`
-	Target    string    `dorm:"type:varchar(16);not null;default:'_self';comment:打开方式"`
+	Target    string    `dorm:"type:varchar(16);not null;default:'_blank';comment:打开方式"`
 	Status    int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	Sort      int       `dorm:"type:int;not null;default:100;comment:排序"`
 	CreatedAt time.Time `dorm:"not null;default:CURRENT_TIMESTAMP;comment:创建时间"`

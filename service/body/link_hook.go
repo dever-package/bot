@@ -77,15 +77,14 @@ func (LinkHook) ProviderBeforeSaveLink(c *server.Context, params []any) any {
 		}
 		record["article_id"] = articleID
 		record["url"] = ""
-		record["target"] = bodymodel.LinkTargetSelf
 	case bodymodel.LinkTypeURL:
 		record["article_id"] = uint64(0)
 		record["url"] = normalizeLoginLinkURL(record["url"])
-		record["target"] = normalizeLinkTarget(util.ToStringTrimmed(record["target"]))
 	default:
 		panicBodyField("form.link_type", "链接类型不正确。")
 	}
 	record["link_type"] = linkType
+	record["target"] = normalizeLinkTarget(util.ToStringTrimmed(record["target"]))
 	defaultBodyInt16Field(record, "status", bodymodel.StatusEnabled, false)
 	defaultBodyIntField(record, "sort", defaultSort, false)
 	return record

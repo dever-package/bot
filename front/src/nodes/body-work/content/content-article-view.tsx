@@ -7,15 +7,19 @@ import type { BodyContentArticle } from "./content-api";
 export function BodyContentArticleView({
   article,
   onOutlineChange,
+  showTitle = true,
 }: {
   article: BodyContentArticle;
   onOutlineChange?: (items: BodyRichTextOutlineItem[]) => void;
+  showTitle?: boolean;
 }) {
   return (
     <article className="body-content-article">
-      <header className="body-content-article-header">
-        <h1>{article.title}</h1>
-      </header>
+      {showTitle ? (
+        <header className="body-content-article-header">
+          <h1>{article.title}</h1>
+        </header>
+      ) : null}
       <BodyRichTextView
         value={article.content}
         className="body-content-rich"

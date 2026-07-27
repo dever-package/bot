@@ -23,7 +23,6 @@ func bodyLinkPayload(link *bodymodel.Link) map[string]any {
 			return nil
 		}
 		payload["article_id"] = link.ArticleID
-		payload["target"] = bodymodel.LinkTargetSelf
 		return payload
 	}
 
