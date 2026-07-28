@@ -1,4 +1,4 @@
-import { joinSiteApi, request } from "@dever/front-plugin";
+import { getCompatModule, joinSiteApi, request } from "@dever/front-plugin";
 import { isSuccessResponse } from "../shared/api-response";
 
 export const BODY_UPLOAD_BIZ_KEY = "bot_work";
@@ -7,6 +7,53 @@ export const BODY_UPLOAD_BIZ_NAME = "神创工作台";
 export type BodyUploadedFile = {
   id: string | number;
 };
+
+export type BodyUploadedAsset = {
+  sourceFile: File;
+  uploadedFile: BodyUploadedFile & Record<string, unknown>;
+  asset: Record<string, unknown>;
+};
+
+const { uploadFileByRule } = getCompatModule("@/lib/upload") as {
+  uploadFileByRule?: (
+    ruleID: number,
+    file: File,
+    options?: Record<string, unknown>,
+  ) => Promise<BodyUploadedFile & Record<string, unknown>>;
+};
+
+export async function uploadBodyAssetFiles(input: {
+  teamID: number;
+  projectID?: number;
+  files: File[];
+  ruleID?: number;
+  kind?: string;
+}): Promise<BodyUploadedAsset[]> {
+  if (!uploadFileByRule) {
+    throw new Error("当前页面缺少上传能力");
+  }
+
+  const results: BodyUploadedAsset[] = [];
+  for (const sourceFile of input.files) {
+    const kind = normalizeUploadKind(input.kind) || bodyUploadKind(sourceFile);
+    const ruleID = Number(input.ruleID || 0) || uploadRuleID(kind);
+    const uploadedFile = await uploadFileByRule(ruleID, sourceFile, {
+      kind,
+      bizKey: BODY_UPLOAD_BIZ_KEY,
+      bizName: BODY_UPLOAD_BIZ_NAME,
+    });
+    const [asset] = await saveBodyUploadedAssets({
+      teamID: input.teamID,
+      projectID: input.projectID,
+      files: [uploadedFile],
+    });
+    if (!asset) {
+      throw new Error(`${sourceFile.name} 保存到资产库失败`);
+    }
+    results.push({ sourceFile, uploadedFile, asset });
+  }
+  return results;
+}
 
 export async function saveBodyUploadedAssets(input: {
   teamID: number;
@@ -45,4 +92,24 @@ export async function saveBodyUploadedAssets(input: {
     assets.push(asset as Record<string, unknown>);
   }
   return assets;
+}
+
+function bodyUploadKind(file: File) {
+  const mime = String(file.type || "").toLowerCase();
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "file";
+}
+
+function normalizeUploadKind(value: string | undefined) {
+  const kind = String(value || "").toLowerCase();
+  return ["image", "video", "audio", "file"].includes(kind) ? kind : "";
+}
+
+function uploadRuleID(kind: string) {
+  if (kind === "image") return 1;
+  if (kind === "video") return 2;
+  if (kind === "audio") return 3;
+  return 4;
 }

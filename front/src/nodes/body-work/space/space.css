@@ -2010,6 +2010,18 @@
   margin: 0 auto;
 }
 
+.wb-detail-scroll:has(> .ws-node-detail-media-gallery) {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ws-node-detail-media-gallery {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
 .ws-node-detail-rich-editor {
   display: flex;
   min-height: 100%;

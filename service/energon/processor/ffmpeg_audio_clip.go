@@ -2,6 +2,7 @@ package processor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -31,9 +32,9 @@ type ReferenceAudioPreparationResult struct {
 	Trimmed  bool
 }
 
-// PrepareReferenceAudio normalizes local reference audio to an MP3 accepted by
+// PrepareReferenceAudio normalizes system-uploaded reference audio to an MP3 accepted by
 // video providers and trims it when it exceeds the requested video duration.
-// Non-local URLs retain their provider-side behavior because this processor
+// External URLs retain their provider-side behavior because this processor
 // cannot safely own their lifecycle.
 func PrepareReferenceAudio(ctx context.Context, input ReferenceAudioPreparationInput) (ReferenceAudioPreparationResult, error) {
 	input.URL = strings.TrimSpace(input.URL)
@@ -46,13 +47,26 @@ func PrepareReferenceAudio(ctx context.Context, input ReferenceAudioPreparationI
 		return result, fmt.Errorf("视频参考音频的目标时长无效")
 	}
 
-	audioPath, err := resolveLocalMediaPath(input.URL)
+	workspace, err := os.MkdirTemp("", "energon-reference-audio-")
 	if err != nil {
+		return result, fmt.Errorf("创建视频参考音频临时目录失败: %w", err)
+	}
+	defer os.RemoveAll(workspace)
+
+	audioPath, err := newFFmpegMediaResolver(ctx, workspace).Resolve(input.URL)
+	if errors.Is(err, errFFmpegMediaNotSystemUpload) {
 		return result, nil
+	}
+	if err != nil {
+		return result, fmt.Errorf("读取视频参考音频失败: %w", err)
 	}
 	ffprobePath, err := exec.LookPath("ffprobe")
 	if err != nil {
 		return result, fmt.Errorf("当前服务器未安装 ffprobe，无法读取视频参考音频时长")
+	}
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return result, fmt.Errorf("当前服务器未安装 FFmpeg，无法处理视频参考音频")
 	}
 	probe, err := probeFFmpegMedia(ctx, ffprobePath, audioPath)
 	if err != nil {
@@ -62,16 +76,6 @@ func PrepareReferenceAudio(ctx context.Context, input ReferenceAudioPreparationI
 		return result, fmt.Errorf("视频参考音频不是有效音频")
 	}
 	trimmed := input.Duration > 0 && probe.Duration > input.Duration+referenceAudioDurationTolerance
-
-	ffmpegPath, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		return result, fmt.Errorf("当前服务器未安装 FFmpeg，无法处理视频参考音频")
-	}
-	workspace, err := os.MkdirTemp("", "energon-reference-audio-")
-	if err != nil {
-		return result, fmt.Errorf("创建视频参考音频临时目录失败: %w", err)
-	}
-	defer os.RemoveAll(workspace)
 
 	outputPath := filepath.Join(workspace, "reference.mp3")
 	filter := "asetpts=PTS-STARTPTS"

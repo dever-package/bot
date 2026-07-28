@@ -1,21 +1,7 @@
-import { getCompatModule } from "@dever/front-plugin";
-import {
-  BODY_UPLOAD_BIZ_KEY,
-  BODY_UPLOAD_BIZ_NAME,
-  saveBodyUploadedAssets,
-  type BodyUploadedFile,
-} from "../asset/upload-asset-api";
+import { uploadBodyAssetFiles } from "../asset/upload-asset-api";
 import type { UploadPreview } from "./space-prompt-composer";
 
-type SpaceUploadedFile = BodyUploadedFile & Record<string, unknown>;
-
-const { uploadFileByRule } = getCompatModule("@/lib/upload") as {
-  uploadFileByRule?: (
-    ruleID: number,
-    file: File,
-    options?: Record<string, unknown>,
-  ) => Promise<SpaceUploadedFile>;
-};
+type SpaceUploadedFile = Record<string, unknown>;
 
 export async function uploadSpaceFiles(input: {
   projectID: number;
@@ -23,35 +9,15 @@ export async function uploadSpaceFiles(input: {
   files: File[];
   ruleID?: number;
 }): Promise<UploadPreview[]> {
-  if (!uploadFileByRule) {
-    throw new Error("当前画布缺少上传能力");
-  }
-  const configuredRuleID = Number(input.ruleID || 0);
-  const previews: UploadPreview[] = [];
-  for (const file of input.files) {
-    const uploadRuleID =
-      configuredRuleID > 0 ? configuredRuleID : uploadRuleIDFromFile(file);
-    const completed = await uploadFileByRule(uploadRuleID, file, {
-      kind: uploadKindFromFile(file),
-      bizKey: BODY_UPLOAD_BIZ_KEY,
-      bizName: BODY_UPLOAD_BIZ_NAME,
-    });
-    const [asset] = await saveBodyUploadedAssets({
-      teamID: input.teamID,
-      projectID: input.projectID,
-      files: [completed],
-    });
-    previews.push(uploadPreviewFromPayload(completed, file, asset));
-  }
-  return previews;
-}
-
-function uploadRuleIDFromFile(file: File) {
-  const kind = uploadKindFromFile(file);
-  if (kind === "image") return 1;
-  if (kind === "video") return 2;
-  if (kind === "audio") return 3;
-  return 4;
+  const uploaded = await uploadBodyAssetFiles({
+    teamID: input.teamID,
+    projectID: input.projectID,
+    files: input.files,
+    ruleID: input.ruleID,
+  });
+  return uploaded.map(({ sourceFile, uploadedFile, asset }) =>
+    uploadPreviewFromPayload(uploadedFile, sourceFile, asset),
+  );
 }
 
 function uploadKindFromFile(file: File) {

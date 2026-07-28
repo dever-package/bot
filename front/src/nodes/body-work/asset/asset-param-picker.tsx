@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { getCompatModule } from "@dever/front-plugin";
 import type {
   ParamFileLibraryRenderProps,
   ParamUploadedFile,
@@ -7,23 +6,11 @@ import type {
 import { findAssetMediaURL } from "./asset-content";
 import { assetKindsAccept } from "./asset-contract";
 import { normalizeAssetRecord } from "./asset-api";
-import {
-  BODY_UPLOAD_BIZ_KEY,
-  BODY_UPLOAD_BIZ_NAME,
-  saveBodyUploadedAssets,
-} from "./upload-asset-api";
+import { uploadBodyAssetFiles } from "./upload-asset-api";
 import { AssetPickerDialog } from "./asset-picker-dialog";
 import type { AssetKind, AssetRecord } from "./asset-types";
 
 const fileAssetKinds = new Set<AssetKind>(["image", "audio", "video", "file"]);
-
-const { uploadFileByRule } = getCompatModule("@/lib/upload") as {
-  uploadFileByRule?: (
-    ruleID: number,
-    file: File,
-    options?: Record<string, unknown>,
-  ) => Promise<ParamUploadedFile>;
-};
 
 export function AssetParamPicker({
   teamID,
@@ -179,26 +166,16 @@ async function uploadParamAssets(input: {
   kind?: string;
   files: File[];
 }): Promise<AssetRecord[]> {
-  if (!uploadFileByRule) {
-    throw new Error("当前页面缺少上传能力");
-  }
   if (!Number.isFinite(input.ruleID) || input.ruleID <= 0) {
     throw new Error("当前参数未配置上传规则");
   }
-  const assets: AssetRecord[] = [];
-  for (const file of input.files) {
-    const uploaded = await uploadFileByRule(input.ruleID, file, {
-      kind: input.kind,
-      bizKey: BODY_UPLOAD_BIZ_KEY,
-      bizName: BODY_UPLOAD_BIZ_NAME,
-    });
-    const saved = await saveBodyUploadedAssets({
-      teamID: input.teamID,
-      files: [uploaded],
-    });
-    assets.push(
-      ...saved.map(normalizeAssetRecord).filter((asset) => asset.id > 0),
-    );
-  }
-  return assets;
+  const uploaded = await uploadBodyAssetFiles({
+    teamID: input.teamID,
+    files: input.files,
+    ruleID: input.ruleID,
+    kind: input.kind,
+  });
+  return uploaded
+    .map(({ asset }) => normalizeAssetRecord(asset))
+    .filter((asset) => asset.id > 0);
 }

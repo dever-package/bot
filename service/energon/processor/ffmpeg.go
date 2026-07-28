@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +16,6 @@ import (
 
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	frontupload "github.com/dever-package/front/service/upload"
-	uploadprovider "github.com/dever-package/front/service/upload/provider"
 	uploadrepo "github.com/dever-package/front/service/upload/repository"
 )
 
@@ -143,7 +141,7 @@ func (FFmpegProcessor) Execute(ctx context.Context, request ExecuteRequest) (any
 			statusText = "正在按镜头清单合成视频"
 		}
 	} else {
-		args, err = buildSimpleFFmpegComposeArgs(workspace, outputPath, request.Input)
+		args, err = buildSimpleFFmpegComposeArgs(ctx, workspace, outputPath, request.Input)
 	}
 	if err != nil {
 		return nil, err
@@ -245,8 +243,14 @@ func (FFmpegProcessor) Execute(ctx context.Context, request ExecuteRequest) (any
 	return output, nil
 }
 
-func buildSimpleFFmpegComposeArgs(workspace string, outputPath string, input map[string]any) ([]string, error) {
-	videoPaths, err := resolveLocalMediaPaths(input["videos"])
+func buildSimpleFFmpegComposeArgs(
+	ctx context.Context,
+	workspace string,
+	outputPath string,
+	input map[string]any,
+) ([]string, error) {
+	mediaResolver := newFFmpegMediaResolver(ctx, workspace)
+	videoPaths, err := resolveFFmpegMediaPaths(mediaResolver, input["videos"])
 	if err != nil {
 		return nil, fmt.Errorf("读取视频片段失败: %w", err)
 	}
@@ -256,11 +260,11 @@ func buildSimpleFFmpegComposeArgs(workspace string, outputPath string, input map
 	if len(videoPaths) > 50 {
 		return nil, fmt.Errorf("单次视频合成最多支持 50 个视频片段")
 	}
-	audioPath, err := resolveOptionalLocalMediaPath(input["audio"])
+	audioPath, err := resolveOptionalFFmpegMediaPath(mediaResolver, input["audio"])
 	if err != nil {
 		return nil, fmt.Errorf("读取背景音频失败: %w", err)
 	}
-	subtitlePath, err := resolveOptionalLocalMediaPath(input["subtitles"])
+	subtitlePath, err := resolveOptionalFFmpegMediaPath(mediaResolver, input["subtitles"])
 	if err != nil {
 		return nil, fmt.Errorf("读取字幕文件失败: %w", err)
 	}
@@ -279,11 +283,11 @@ func buildSimpleFFmpegComposeArgs(workspace string, outputPath string, input map
 	return buildFFmpegComposeArgs(concatPath, outputPath, audioPath, subtitlePath, resolution, fps), nil
 }
 
-func resolveLocalMediaPaths(value any) ([]string, error) {
+func resolveFFmpegMediaPaths(resolver *ffmpegMediaResolver, value any) ([]string, error) {
 	values := processorStringList(value)
 	paths := make([]string, 0, len(values))
 	for _, current := range values {
-		localPath, err := resolveLocalMediaPath(current)
+		localPath, err := resolver.Resolve(current)
 		if err != nil {
 			return nil, err
 		}
@@ -292,38 +296,12 @@ func resolveLocalMediaPaths(value any) ([]string, error) {
 	return paths, nil
 }
 
-func resolveOptionalLocalMediaPath(value any) (string, error) {
+func resolveOptionalFFmpegMediaPath(resolver *ffmpegMediaResolver, value any) (string, error) {
 	values := processorStringList(value)
 	if len(values) == 0 {
 		return "", nil
 	}
-	return resolveLocalMediaPath(values[0])
-}
-
-func resolveLocalMediaPath(value string) (string, error) {
-	parsed, err := url.Parse(strings.TrimSpace(value))
-	if err != nil {
-		return "", fmt.Errorf("资源地址格式错误")
-	}
-	publicPath := strings.TrimSpace(parsed.Path)
-	if parsed.Scheme == "" {
-		publicPath = strings.TrimSpace(value)
-	}
-	if !strings.HasPrefix(publicPath, "/upload/") {
-		return "", fmt.Errorf("本地处理器只允许读取系统本地上传资源")
-	}
-	localPath, err := uploadprovider.ResolveLocalPublicFilePath(strings.TrimPrefix(publicPath, "/upload/"))
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(localPath)
-	if err != nil {
-		return "", fmt.Errorf("资源文件不存在")
-	}
-	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("资源不是普通文件")
-	}
-	return localPath, nil
+	return resolver.Resolve(values[0])
 }
 
 func processorStringList(value any) []string {

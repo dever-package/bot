@@ -65,16 +65,20 @@ func BuildSpeechTimelineAudio(ctx context.Context, input SpeechTimelineInput) (S
 	if err != nil {
 		return SpeechTimelineResult{}, fmt.Errorf("当前服务器未安装 ffprobe，无法校验配音时长")
 	}
-
-	prepared, err := prepareSpeechTimelineTracks(ctx, ffprobePath, input)
-	if err != nil {
-		return SpeechTimelineResult{}, err
-	}
 	workspace, err := os.MkdirTemp("", "energon-speech-timeline-")
 	if err != nil {
 		return SpeechTimelineResult{}, fmt.Errorf("创建口型驱动音轨临时目录失败: %w", err)
 	}
 	defer os.RemoveAll(workspace)
+	prepared, err := prepareSpeechTimelineTracks(
+		ctx,
+		ffprobePath,
+		newFFmpegMediaResolver(ctx, workspace),
+		input,
+	)
+	if err != nil {
+		return SpeechTimelineResult{}, err
+	}
 
 	outputPath := filepath.Join(workspace, "timeline.m4a")
 	args, err := buildSpeechTimelineArgs(outputPath, input.Duration, prepared)
@@ -108,6 +112,7 @@ func BuildSpeechTimelineAudio(ctx context.Context, input SpeechTimelineInput) (S
 func prepareSpeechTimelineTracks(
 	ctx context.Context,
 	ffprobePath string,
+	mediaResolver *ffmpegMediaResolver,
 	input SpeechTimelineInput,
 ) ([]preparedSpeechTimelineTrack, error) {
 	prepared := make([]preparedSpeechTimelineTrack, 0, len(input.Tracks))
@@ -123,7 +128,7 @@ func prepareSpeechTimelineTracks(
 		if track.StartTime < 0 || track.StartTime >= input.Duration {
 			return nil, fmt.Errorf("配音“%s”开始时间超出镜头范围", track.ID)
 		}
-		audioPath, err := resolveLocalMediaPath(track.Audio)
+		audioPath, err := mediaResolver.Resolve(track.Audio)
 		if err != nil {
 			return nil, fmt.Errorf("读取配音“%s”失败: %w", track.ID, err)
 		}

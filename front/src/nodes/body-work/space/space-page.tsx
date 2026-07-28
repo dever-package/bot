@@ -2580,6 +2580,7 @@ export function WorkSpacePage() {
           <AssetBrowser
             teamID={space.project.team_id}
             scopeProjectID={space.project.id}
+            onLocalUpload={uploadImportAssets}
             initialFilters={{
               sourceType: "project",
               projectID: space.project.id,

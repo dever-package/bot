@@ -4,14 +4,11 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useRef,
   useState,
 } from "react";
 import {
-  EnergonAudioPlayer,
   type EnergonMediaKind,
   type EnergonMediaPreviewHandler,
-  type EnergonMediaPreviewItem,
   type EnergonMediaPreviewRequest,
 } from "@/components/energon/content-view";
 import {
@@ -34,6 +31,7 @@ import {
 } from "./artifact-actions";
 import { AgentChatTooltip } from "./tooltip";
 import type { AgentChatArtifactActionRenderer } from "./types";
+import { MediaInspectorGallery } from "../../shared/media-inspector-gallery";
 
 const MediaPreviewContext = createContext<EnergonMediaPreviewHandler | null>(
   null,
@@ -197,7 +195,6 @@ export function AgentChatMediaInspector({
       aria-modal={compact ? "true" : undefined}
       aria-label={`${title}预览`}
     >
-      <style>{mediaInspectorStyles}</style>
       <header className="flex h-14 shrink-0 items-center gap-3 border-b px-3 md:px-4">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <MediaKindIcon kind={request.kind} className="size-4 shrink-0" />
@@ -257,22 +254,15 @@ export function AgentChatMediaInspector({
         </div>
       </header>
 
-      <div
-        className={cn(
-          "flex min-h-0 flex-col md:flex-row",
-          compact ? "flex-none" : "flex-1",
-        )}
-      >
-        <MediaStage kind={request.kind} item={activeItem} zoom={zoom} />
-        {multiple ? (
-          <MediaThumbnailRail
-            kind={request.kind}
-            items={request.items}
-            activeIndex={activeIndex}
-            onSelect={selectIndex}
-          />
-        ) : null}
-      </div>
+      <MediaInspectorGallery
+        kind={request.kind}
+        items={request.items}
+        activeIndex={activeIndex}
+        zoom={zoom}
+        compact={compact}
+        className={compact ? "flex-none" : "flex-1"}
+        onSelect={selectIndex}
+      />
 
       {downloadError ? (
         <div
@@ -300,149 +290,6 @@ export function AgentChatMediaInspector({
       }}
     >
       {inspector}
-    </div>
-  );
-}
-
-function MediaStage({
-  kind,
-  item,
-  zoom,
-}: {
-  kind: EnergonMediaKind;
-  item: EnergonMediaPreviewItem;
-  zoom: number;
-}) {
-  const compact = kind === "audio" || kind === "file";
-
-  return (
-    <div
-      className={cn(
-        "relative flex min-h-0 min-w-0 items-center justify-center overflow-auto",
-        compact
-          ? "min-h-56 w-full flex-1 bg-background px-6 py-8"
-          : "flex-1 bg-muted/20 p-4 md:p-8",
-      )}
-    >
-      {kind === "image" ? (
-        item.url ? (
-          <img
-            key={item.url}
-            src={item.url}
-            alt={item.name}
-            draggable={false}
-            className="block max-h-full max-w-full select-none object-contain transition-transform duration-150"
-            style={{ transform: `scale(${zoom})` }}
-          />
-        ) : (
-          <EmptyPreview kind={kind} />
-        )
-      ) : null}
-      {kind === "video" ? (
-        item.url ? (
-          <video
-            key={item.url}
-            src={item.url}
-            poster={item.thumbnail}
-            controls
-            playsInline
-            preload="metadata"
-            className="max-h-full max-w-full bg-black object-contain"
-          />
-        ) : (
-          <EmptyPreview kind={kind} />
-        )
-      ) : null}
-      {kind === "audio" ? (
-        item.url ? (
-          <EnergonAudioPlayer
-            key={item.url}
-            src={item.url}
-            detailed
-            className="max-w-3xl"
-          />
-        ) : (
-          <EmptyPreview kind={kind} />
-        )
-      ) : null}
-      {kind === "file" ? (
-        <div className="flex max-w-md flex-col items-center gap-4 text-center">
-          <FileText className="size-12 text-muted-foreground" />
-          <div className="break-all text-sm font-medium text-foreground">
-            {item.name}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function MediaThumbnailRail({
-  kind,
-  items,
-  activeIndex,
-  onSelect,
-}: {
-  kind: EnergonMediaKind;
-  items: EnergonMediaPreviewItem[];
-  activeIndex: number;
-  onSelect: (index: number) => void;
-}) {
-  const activeItemRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    activeItemRef.current?.scrollIntoView({
-      block: "nearest",
-      inline: "nearest",
-    });
-  }, [activeIndex]);
-
-  return (
-    <nav
-      className="agent-chat-media-thumbnail-rail"
-      aria-label="同批素材"
-    >
-      <div className="agent-chat-media-thumbnail-list">
-        {items.map((item, index) => (
-          <button
-            ref={index === activeIndex ? activeItemRef : undefined}
-            key={`${String(item.id)}-${index}`}
-            type="button"
-            title={item.name}
-            aria-label={`查看第 ${index + 1} 个素材`}
-            aria-current={index === activeIndex ? "true" : undefined}
-            className={cn(
-              "agent-chat-media-thumbnail flex items-center justify-center overflow-hidden rounded-md border bg-muted/30 transition",
-              index === activeIndex
-                ? "border-foreground ring-1 ring-foreground"
-                : "hover:border-foreground/40",
-            )}
-            onClick={() => onSelect(index)}
-          >
-            {(kind === "image" && item.url) || item.thumbnail ? (
-              <img
-                src={item.thumbnail || item.url}
-                alt=""
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <MediaKindIcon
-                kind={kind}
-                className="size-5 text-muted-foreground"
-              />
-            )}
-          </button>
-        ))}
-      </div>
-    </nav>
-  );
-}
-
-function EmptyPreview({ kind }: { kind: EnergonMediaKind }) {
-  return (
-    <div className="flex flex-col items-center gap-3 text-sm text-muted-foreground">
-      <MediaKindIcon kind={kind} className="size-10" />
-      <span>当前素材无法在线预览</span>
     </div>
   );
 }
@@ -498,72 +345,6 @@ function mediaKindLabel(kind: EnergonMediaKind) {
   if (kind === "audio") return "音频";
   return "文件";
 }
-
-const mediaInspectorStyles = `
-.agent-chat-media-thumbnail-rail {
-  display: flex;
-  height: 80px;
-  flex: 0 0 auto;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border);
-  background: var(--background);
-}
-
-.agent-chat-media-thumbnail-list {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  gap: 8px;
-  overflow-x: auto;
-  overflow-y: hidden;
-}
-
-.agent-chat-media-thumbnail {
-  width: 64px;
-  height: 64px;
-  flex: 0 0 64px;
-}
-
-@media (min-width: 768px) {
-  .agent-chat-media-thumbnail-rail {
-    width: 92px;
-    height: 100%;
-    padding: 12px 10px;
-    border-top: 0;
-    border-left: 1px solid var(--border);
-  }
-
-  .agent-chat-media-thumbnail-list {
-    display: grid;
-    width: 100%;
-    max-height: min(460px, 100%);
-    flex: none;
-    grid-template-columns: minmax(0, 1fr);
-    grid-auto-rows: 70px;
-    gap: 8px;
-    overflow-x: hidden;
-    overflow-y: auto;
-    padding-right: 2px;
-    scrollbar-width: thin;
-  }
-
-  .agent-chat-media-thumbnail-list::-webkit-scrollbar {
-    width: 5px;
-  }
-
-  .agent-chat-media-thumbnail-list::-webkit-scrollbar-thumb {
-    border-radius: 9999px;
-    background: color-mix(in oklab, var(--foreground) 28%, transparent);
-  }
-
-  .agent-chat-media-thumbnail {
-    width: 100%;
-    height: 70px;
-    min-height: 70px;
-    flex: none;
-  }
-}
-`;
 
 function clampZoom(value: number) {
   return Math.min(3, Math.max(0.5, value));

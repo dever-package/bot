@@ -10,7 +10,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import {
   buildPowerMenu,
   type PowerMenu,
@@ -50,6 +50,14 @@ type AddNodeMenuModel = {
 
 const ADD_MENU_WIDTH = 292;
 const POWER_SUBMENU_OUTER_WIDTH = 248;
+const POWER_SUBMENU_MAX_HEIGHT = 420;
+const POWER_SUBMENU_VIEWPORT_MARGIN = 14;
+
+type PowerSubmenuAnchor = {
+  groupID: number;
+  top: number;
+  maxHeight: number;
+};
 
 export function AddNodeMenu({
   menu,
@@ -77,7 +85,10 @@ export function AddNodeMenu({
   onSelectPower: (power: PowerOption) => void;
 }) {
   const point = clampMenuPoint(menu);
-  const [openPowerGroupID, setOpenPowerGroupID] = useState(0);
+  const menuRef = useRef<HTMLElement | null>(null);
+  const [powerSubmenuAnchor, setPowerSubmenuAnchor] =
+    useState<PowerSubmenuAnchor | null>(null);
+  const openPowerGroupID = powerSubmenuAnchor?.groupID || 0;
   const powerMenu = useMemo(
     () =>
       buildPowerMenu(
@@ -93,12 +104,28 @@ export function AddNodeMenu({
     ) || null;
   const sections: ReactNode[] = [];
 
+  function openPowerGroupMenu(
+    group: PowerMenuGroup<PowerOption>,
+    trigger: HTMLElement,
+  ) {
+    if (!menuRef.current) return;
+    setPowerSubmenuAnchor({
+      groupID: group.category.id,
+      ...resolvePowerSubmenuAnchor(
+        menuRef.current,
+        trigger,
+        group.powers.length,
+      ),
+    });
+  }
+
   if (powerMenu.basicPowers.length > 0 || powerMenu.groups.length > 0) {
     sections.push(
       renderPowerMenuSection(
         powerMenu,
         openPowerGroupID,
-        setOpenPowerGroupID,
+        openPowerGroupMenu,
+        () => setPowerSubmenuAnchor(null),
         onSelectPower,
       ),
     );
@@ -144,15 +171,19 @@ export function AddNodeMenu({
         }}
       />
       <section
+        ref={menuRef}
         className="ws-add-menu custom-scrollbar"
         style={{ left: point.x, top: point.y, maxHeight: point.maxHeight }}
         onMouseDown={(event) => event.stopPropagation()}
-        onMouseLeave={() => setOpenPowerGroupID(0)}
+        onMouseLeave={() => setPowerSubmenuAnchor(null)}
       >
         <div className="ws-add-menu-head">
           <strong>{menu.connection ? "引用该节点生成" : "添加节点"}</strong>
         </div>
-        <div className="ws-add-menu-body">
+        <div
+          className="ws-add-menu-body"
+          onScroll={() => setPowerSubmenuAnchor(null)}
+        >
           {sections.map((section, index) => (
             <div key={index}>
               {section}
@@ -166,7 +197,10 @@ export function AddNodeMenu({
           <PowerSubmenu
             group={openPowerGroup}
             side={powerSubmenuSide(point.x)}
-            maxHeight={point.maxHeight}
+            top={powerSubmenuAnchor?.top || 0}
+            maxHeight={
+              powerSubmenuAnchor?.maxHeight || POWER_SUBMENU_MAX_HEIGHT
+            }
             onSelect={onSelectPower}
           />
         ) : null}
@@ -215,7 +249,11 @@ function renderMenuSection<T>({
 function renderPowerMenuSection(
   menu: PowerMenu<PowerOption>,
   openGroupID: number,
-  setOpenGroupID: (groupID: number) => void,
+  onOpenGroup: (
+    group: PowerMenuGroup<PowerOption>,
+    trigger: HTMLElement,
+  ) => void,
+  onCloseGroup: () => void,
   onSelect: (power: PowerOption) => void,
 ) {
   return (
@@ -226,7 +264,7 @@ function renderPowerMenuSection(
           <PowerMenuItem
             key={power.key || power.id}
             power={power}
-            onMouseEnter={() => setOpenGroupID(0)}
+            onMouseEnter={onCloseGroup}
             onSelect={onSelect}
           />
         ))}
@@ -239,13 +277,9 @@ function renderPowerMenuSection(
             }`}
             aria-haspopup="menu"
             aria-expanded={openGroupID === group.category.id}
-            onMouseEnter={() => setOpenGroupID(group.category.id)}
-            onFocus={() => setOpenGroupID(group.category.id)}
-            onClick={() =>
-              setOpenGroupID(
-                openGroupID === group.category.id ? 0 : group.category.id,
-              )
-            }
+            onMouseEnter={(event) => onOpenGroup(group, event.currentTarget)}
+            onFocus={(event) => onOpenGroup(group, event.currentTarget)}
+            onClick={(event) => onOpenGroup(group, event.currentTarget)}
           >
             <span className="ws-add-icon">
               <FolderTree size={16} />
@@ -265,11 +299,13 @@ function renderPowerMenuSection(
 function PowerSubmenu({
   group,
   side,
+  top,
   maxHeight,
   onSelect,
 }: {
   group: PowerMenuGroup<PowerOption>;
   side: "left" | "right";
+  top: number;
   maxHeight: number;
   onSelect: (power: PowerOption) => void;
 }) {
@@ -278,7 +314,7 @@ function PowerSubmenu({
       className={`ws-add-submenu-panel is-${side} custom-scrollbar`}
       role="menu"
       aria-label={group.category.name}
-      style={{ maxHeight }}
+      style={{ top, maxHeight }}
       onMouseDown={(event) => event.stopPropagation()}
     >
       <div className="ws-add-submenu-head">
@@ -469,4 +505,33 @@ function powerSubmenuSide(menuX: number): "left" | "right" {
   return menuX + ADD_MENU_WIDTH + POWER_SUBMENU_OUTER_WIDTH > window.innerWidth
     ? "left"
     : "right";
+}
+
+function resolvePowerSubmenuAnchor(
+  menuElement: HTMLElement,
+  triggerElement: HTMLElement,
+  powerCount: number,
+): Pick<PowerSubmenuAnchor, "top" | "maxHeight"> {
+  if (typeof window === "undefined") {
+    return { top: 0, maxHeight: POWER_SUBMENU_MAX_HEIGHT };
+  }
+  const menuRect = menuElement.getBoundingClientRect();
+  const triggerRect = triggerElement.getBoundingClientRect();
+  const viewportHeight = window.innerHeight;
+  const maxHeight = Math.min(
+    POWER_SUBMENU_MAX_HEIGHT,
+    Math.max(120, viewportHeight - POWER_SUBMENU_VIEWPORT_MARGIN * 2),
+  );
+  const estimatedHeight = Math.min(maxHeight, 48 + powerCount * 45);
+  const viewportTop = Math.min(
+    Math.max(POWER_SUBMENU_VIEWPORT_MARGIN, triggerRect.top),
+    Math.max(
+      POWER_SUBMENU_VIEWPORT_MARGIN,
+      viewportHeight - estimatedHeight - POWER_SUBMENU_VIEWPORT_MARGIN,
+    ),
+  );
+  return {
+    top: viewportTop - menuRect.top,
+    maxHeight,
+  };
 }

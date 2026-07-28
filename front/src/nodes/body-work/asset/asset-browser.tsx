@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Loader2,
   RefreshCw,
+  Upload,
 } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
@@ -13,6 +14,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
@@ -72,6 +74,8 @@ export function AssetBrowser({
   canContinue,
   onAssetChanged,
   onAssetRemoved,
+  onLocalUpload,
+  uploadAccept,
   headerAction,
   reloadSignal = 0,
   catalogOptions,
@@ -90,6 +94,8 @@ export function AssetBrowser({
   canContinue?: (asset: AssetRecord) => boolean;
   onAssetChanged?: (asset: AssetRecord) => void;
   onAssetRemoved?: (assetID: number) => void;
+  onLocalUpload?: (files: File[]) => Promise<AssetRecord[]>;
+  uploadAccept?: string;
   headerAction?: ReactNode;
   reloadSignal?: number;
   catalogOptions?: AssetCatalogOptions;
@@ -120,10 +126,12 @@ export function AssetBrowser({
   const [deleteTarget, setDeleteTarget] = useState<AssetRecord | null>(null);
   const [operationAssetID, setOperationAssetID] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [error, setError] = useState("");
   const [reloadVersion, setReloadVersion] = useState(0);
   const loadRequestRef = useRef(0);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const rootFiltersRef = useRef<AssetFilters>(resolvedInitialFilters);
   const rootViewRef = useRef<AssetView>("assets");
   const selectedAssetIDKey = JSON.stringify(selectedAssetIDs || []);
@@ -145,6 +153,7 @@ export function AssetBrowser({
     setRenameTarget(null);
     setDeleteTarget(null);
     setOperationAssetID(0);
+    setUploading(false);
     setError("");
   }, [requestScopeKey, resolvedInitialFilters, scopeProjectID, teamID]);
 
@@ -300,6 +309,41 @@ export function AssetBrowser({
     }
   }
 
+  async function uploadLocalFiles(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!onLocalUpload || files.length === 0 || uploading) return;
+
+    setUploading(true);
+    try {
+      const assets = await onLocalUpload(files);
+      if (assets.length === 0) {
+        throw new Error("上传完成，但没有生成可用资产");
+      }
+      assets.forEach((asset) => onAssetChanged?.(asset));
+      const uploadFilters: AssetFilters = {
+        ...emptyAssetFilters,
+        sourceType: "upload",
+        kind:
+          normalizedAllowedKinds.length === 1 ? normalizedAllowedKinds[0] : "",
+      };
+      loadRequestRef.current += 1;
+      setActiveCollection(null);
+      setView("assets");
+      rootViewRef.current = "assets";
+      setFilters(uploadFilters);
+      rootFiltersRef.current = uploadFilters;
+      setPage(emptyPage);
+      setSelectedAssetID(0);
+      setError("");
+      toast.success(`已上传 ${assets.length} 项资产`);
+    } catch (currentError) {
+      toast.error(errorText(currentError, "上传资产失败"));
+    } finally {
+      setUploading(false);
+    }
+  }
+
   return (
     <section className={`wb-asset-browser ${className}`.trim()}>
       <header className="wb-asset-browser-head">
@@ -323,6 +367,33 @@ export function AssetBrowser({
               <span className="sr-only">刷新资产</span>
             </button>
           </BodyWorkTooltip>
+          {!activeCollection && onLocalUpload ? (
+            <>
+              <BodyWorkTooltip label="本地上传">
+                <button
+                  type="button"
+                  className="wb-asset-local-upload"
+                  disabled={uploading}
+                  onClick={() => uploadInputRef.current?.click()}
+                >
+                  {uploading ? (
+                    <Loader2 className="is-spinning" aria-hidden="true" />
+                  ) : (
+                    <Upload aria-hidden="true" />
+                  )}
+                  <span>{uploading ? "上传中" : "本地上传"}</span>
+                </button>
+              </BodyWorkTooltip>
+              <input
+                ref={uploadInputRef}
+                type="file"
+                hidden
+                multiple
+                accept={uploadAccept}
+                onChange={uploadLocalFiles}
+              />
+            </>
+          ) : null}
           {!activeCollection ? headerAction : null}
         </div>
       </header>

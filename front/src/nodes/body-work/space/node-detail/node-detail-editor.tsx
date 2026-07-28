@@ -1,4 +1,9 @@
-import type { ComponentType } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentType,
+} from "react";
 import { Download, FileText } from "lucide-react";
 import { getCompatModule } from "@dever/front-plugin";
 import {
@@ -12,9 +17,11 @@ import type {
 import type { ComposerAssetItem } from "../space-prompt-composer";
 import {
   CanvasNodeContentView,
+  contentOutputMediaURLs,
   type CanvasContentMediaKind,
 } from "../space-content-view";
 import { AssetPreview } from "../../asset/asset-preview";
+import { MediaInspectorGallery } from "../../../shared/media-inspector-gallery";
 import { SpaceTooltip } from "../space-tooltip";
 import {
   nodeDetailContentWithValue,
@@ -67,6 +74,13 @@ export function NodeDetailEditor({
   onCreateStoryboardRevision?: () => void | Promise<void>;
   onChange: (content: NodeDetailEditableContent) => void;
 }) {
+  if (
+    mediaOutput !== undefined &&
+    (mediaKind === "image" || mediaKind === "video")
+  ) {
+    return <NodeDetailMediaGallery kind={mediaKind} output={mediaOutput} />;
+  }
+
   if (mediaOutput !== undefined && mediaKind === "audio") {
     return (
       <div className="wb-detail-readonly-content is-audio">
@@ -147,6 +161,68 @@ export function NodeDetailEditor({
       )}
     </div>
   );
+}
+
+function NodeDetailMediaGallery({
+  kind,
+  output,
+}: {
+  kind: "image" | "video";
+  output: unknown;
+}) {
+  const urls = useMemo(
+    () => contentOutputMediaURLs(output, kind),
+    [kind, output],
+  );
+  const items = useMemo(
+    () =>
+      urls.map((url, index) => ({
+        id: url,
+        name: mediaItemName(url, kind, index),
+        url,
+      })),
+    [kind, urls],
+  );
+  const [activeIndex, setActiveIndex] = useState(0);
+  const mediaIdentity = urls.join("\n");
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [mediaIdentity]);
+
+  if (items.length === 0) {
+    return (
+      <CanvasNodeContentView
+        className="ws-node-detail-media"
+        output={output}
+        emptyText="暂无媒体内容"
+        mediaLayout="chat"
+      />
+    );
+  }
+
+  return (
+    <MediaInspectorGallery
+      kind={kind}
+      items={items}
+      activeIndex={Math.min(activeIndex, items.length - 1)}
+      className="ws-node-detail-media-gallery"
+      onSelect={setActiveIndex}
+    />
+  );
+}
+
+function mediaItemName(url: string, kind: "image" | "video", index: number) {
+  const path = url.split(/[?#]/, 1)[0];
+  const encodedName = path.slice(path.lastIndexOf("/") + 1);
+  if (encodedName) {
+    try {
+      return decodeURIComponent(encodedName);
+    } catch {
+      return encodedName;
+    }
+  }
+  return `${kind === "image" ? "图片" : "视频"} ${index + 1}`;
 }
 
 function FileDetailEditor({

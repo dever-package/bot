@@ -234,6 +234,13 @@ export function contentOutputMediaCount(output: unknown) {
   );
 }
 
+export function contentOutputMediaURLs(
+  output: unknown,
+  kind: CanvasContentMediaKind,
+) {
+  return Array.from(contentOutputMediaIndex(output)[kind]);
+}
+
 export function preferRicherMediaOutput(...values: unknown[]) {
   let fallback: unknown;
   let selected: unknown;

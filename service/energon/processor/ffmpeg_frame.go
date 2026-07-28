@@ -34,7 +34,13 @@ func ExtractVideoTailFrame(ctx context.Context, input VideoTailFrameInput) (Vide
 	if err != nil {
 		return VideoTailFrame{}, fmt.Errorf("当前服务器未安装 ffprobe，无法读取上一镜头信息")
 	}
-	videoPath, err := resolveLocalMediaPath(input.VideoURL)
+	workspace, err := os.MkdirTemp("", "energon-tail-frame-")
+	if err != nil {
+		return VideoTailFrame{}, fmt.Errorf("创建尾帧临时目录失败: %w", err)
+	}
+	defer os.RemoveAll(workspace)
+
+	videoPath, err := newFFmpegMediaResolver(ctx, workspace).Resolve(input.VideoURL)
 	if err != nil {
 		return VideoTailFrame{}, fmt.Errorf("读取上一镜头视频失败: %w", err)
 	}
@@ -46,11 +52,6 @@ func ExtractVideoTailFrame(ctx context.Context, input VideoTailFrameInput) (Vide
 		return VideoTailFrame{}, fmt.Errorf("上一镜头不是有效视频")
 	}
 
-	workspace, err := os.MkdirTemp("", "energon-tail-frame-")
-	if err != nil {
-		return VideoTailFrame{}, fmt.Errorf("创建尾帧临时目录失败: %w", err)
-	}
-	defer os.RemoveAll(workspace)
 	outputPath := filepath.Join(workspace, "tail.jpg")
 	seek := probe.Duration - 0.05
 	if seek < 0 {

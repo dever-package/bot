@@ -131,6 +131,11 @@ func buildFFmpegCompositionArgs(
 	if err != nil {
 		return nil, "", fmt.Errorf("当前服务器未安装 ffprobe，无法读取镜头信息")
 	}
+	mediaResolver := newFFmpegMediaResolver(ctx, workspace)
+	composition, err = localizeFFmpegCompositionMedia(mediaResolver, composition)
+	if err != nil {
+		return nil, "", err
+	}
 	probeCache := newFFmpegProbeCache(ffprobePath)
 	if err := probeCache.Preload(ctx, ffmpegCompositionProbePaths(composition)); err != nil {
 		return nil, "", err
@@ -224,7 +229,7 @@ func buildFFmpegCompositionArgs(
 func ffmpegCompositionProbePaths(composition ffmpegComposition) []string {
 	values := make([]string, 0, len(composition.Clips)*2)
 	appendPath := func(value string) {
-		if path, err := resolveLocalMediaPath(value); err == nil {
+		if path := strings.TrimSpace(value); path != "" {
 			values = append(values, path)
 		}
 	}
@@ -238,6 +243,50 @@ func ffmpegCompositionProbePaths(composition ffmpegComposition) []string {
 		}
 	}
 	return values
+}
+
+func localizeFFmpegCompositionMedia(
+	resolver *ffmpegMediaResolver,
+	composition ffmpegComposition,
+) (ffmpegComposition, error) {
+	composition.Clips = append([]ffmpegCompositionClip(nil), composition.Clips...)
+	for clipIndex := range composition.Clips {
+		clip := &composition.Clips[clipIndex]
+		label := fmt.Sprintf("第 %d 个镜头", clipIndex+1)
+
+		videoPath, err := resolver.Resolve(clip.VisualVideo)
+		if err != nil {
+			return ffmpegComposition{}, fmt.Errorf("读取%s画面失败: %w", label, err)
+		}
+		clip.VisualVideo = videoPath
+
+		if strings.TrimSpace(clip.OriginalAudio) != "" {
+			originalPath, resolveErr := resolver.Resolve(clip.OriginalAudio)
+			if resolveErr != nil {
+				return ffmpegComposition{}, fmt.Errorf("读取%s原声失败: %w", label, resolveErr)
+			}
+			clip.OriginalAudio = originalPath
+		}
+
+		clip.SpeechTracks = append([]ffmpegCompositionSpeech(nil), clip.SpeechTracks...)
+		for speechIndex := range clip.SpeechTracks {
+			track := &clip.SpeechTracks[speechIndex]
+			if strings.TrimSpace(track.Audio) == "" {
+				continue
+			}
+			audioPath, resolveErr := resolver.Resolve(track.Audio)
+			if resolveErr != nil {
+				return ffmpegComposition{}, fmt.Errorf(
+					"读取%s第 %d 条语音失败: %w",
+					label,
+					speechIndex+1,
+					resolveErr,
+				)
+			}
+			track.Audio = audioPath
+		}
+	}
+	return composition, nil
 }
 
 func ffmpegCompositionAutoResolution(clip ffmpegPreparedClip) (string, error) {
@@ -268,7 +317,7 @@ func prepareFFmpegCompositionClip(
 	inputIndex int,
 ) (ffmpegPreparedClip, []string, int, error) {
 	label := fmt.Sprintf("第 %d 个镜头", index+1)
-	videoPath, err := resolveLocalMediaPath(clip.VisualVideo)
+	videoPath, err := validateFFmpegMediaPath(clip.VisualVideo)
 	if err != nil {
 		return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf("读取%s画面失败: %w", label, err)
 	}
@@ -322,7 +371,7 @@ func prepareFFmpegCompositionClip(
 	args := []string{"-i", videoPath}
 	nextInputIndex := inputIndex + 1
 	if strings.TrimSpace(clip.OriginalAudio) != "" {
-		originalPath, resolveErr := resolveLocalMediaPath(clip.OriginalAudio)
+		originalPath, resolveErr := validateFFmpegMediaPath(clip.OriginalAudio)
 		if resolveErr != nil {
 			return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf("读取%s原声失败: %w", label, resolveErr)
 		}
@@ -388,7 +437,7 @@ func prepareFFmpegCompositionSpeech(
 	if err := validateFFmpegCompositionVolume(label, track.Volume); err != nil {
 		return ffmpegPreparedSpeech{}, "", err
 	}
-	audioPath, err := resolveLocalMediaPath(track.Audio)
+	audioPath, err := validateFFmpegMediaPath(track.Audio)
 	if err != nil {
 		return ffmpegPreparedSpeech{}, "", fmt.Errorf("读取%s失败: %w", label, err)
 	}

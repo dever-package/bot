@@ -58,7 +58,7 @@ func readServiceParamFileValue(ctx context.Context, value string, maxBytes int64
 		content, err := decodeServiceParamBase64(value, maxBytes)
 		return content, "", err
 	}
-	if file, found := findServiceParamUploadFile(ctx, value); found {
+	if file, found := uploadrepo.FindUploadFileByReference(ctx, value); found {
 		return readServiceParamUploadFile(ctx, *file, maxBytes)
 	}
 
@@ -80,44 +80,6 @@ func readServiceParamFileValue(ctx context.Context, value string, maxBytes int64
 	return readServiceParamRemoteFile(ctx, parsed, maxBytes)
 }
 
-func findServiceParamUploadFile(ctx context.Context, value string) (*uploadrepo.UploadFile, bool) {
-	if fileID := uploadFileIDFromOpenURL(value); fileID > 0 {
-		file, err := uploadrepo.FindUploadFile(ctx, fileID)
-		return &file, err == nil
-	}
-	parsed, err := url.Parse(value)
-	if err != nil || parsed == nil {
-		return nil, false
-	}
-	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
-	isLocalPublicPath := scheme == "" && strings.HasPrefix(parsed.Path, "/upload/")
-	if !isLocalPublicPath && scheme != "http" && scheme != "https" {
-		return nil, false
-	}
-	objectPath := strings.TrimPrefix(strings.TrimSpace(parsed.Path), "/")
-	if objectPath == "" {
-		return nil, false
-	}
-	candidates := []string{objectPath}
-	if strings.HasPrefix(objectPath, "upload/") {
-		candidates = append(candidates, strings.TrimPrefix(objectPath, "upload/"))
-	}
-	for _, candidate := range candidates {
-		if file := uploadrepo.FindUploadFileByPath(ctx, candidate); file != nil {
-			if isLocalPublicPath || serviceParamUploadURLMatches(*file, value) {
-				return file, true
-			}
-		}
-	}
-	return nil, false
-}
-
-func serviceParamUploadURLMatches(file uploadrepo.UploadFile, value string) bool {
-	payload := uploadrepo.BuildUploadFilePayload(file)
-	publicURL := strings.TrimSpace(ValueText(payload["url"]))
-	return publicURL != "" && strings.TrimRight(publicURL, "/") == strings.TrimRight(strings.TrimSpace(value), "/")
-}
-
 func readServiceParamUploadFile(ctx context.Context, file uploadrepo.UploadFile, maxBytes int64) ([]byte, string, error) {
 	if file.Size > maxBytes {
 		return nil, "", serviceParamFileTooLargeError(maxBytes)
@@ -128,8 +90,9 @@ func readServiceParamUploadFile(ctx context.Context, file uploadrepo.UploadFile,
 	}
 	target, err := uploadprovider.Open(ctx, driver, uploadprovider.OpenInput{
 		File: uploadprovider.File{
-			Path:    file.Path,
-			Storage: file.Storage,
+			Path:        file.Path,
+			ProviderKey: file.ProviderKey,
+			Storage:     file.Storage,
 		},
 		ProviderKey: file.ProviderKey,
 		Name:        file.Name,
