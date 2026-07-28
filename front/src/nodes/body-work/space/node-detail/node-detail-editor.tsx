@@ -13,6 +13,7 @@ import {
 import type {
   StoryboardDocument,
   StoryboardEditorFocus,
+  StoryboardProductionPlan,
 } from "../space-storyboard";
 import type { ComposerAssetItem } from "../space-prompt-composer";
 import {
@@ -67,7 +68,8 @@ export function NodeDetailEditor({
   storyboardWorkflowAction?: StoryboardWorkflowAction;
   onConfirmStoryboard?: (
     storyboard: StoryboardDocument,
-  ) => void | Promise<void>;
+    productionPlan: StoryboardProductionPlan,
+  ) => boolean | Promise<boolean>;
   onReviewStoryboard?: (
     storyboard: StoryboardDocument,
   ) => void | Promise<void>;

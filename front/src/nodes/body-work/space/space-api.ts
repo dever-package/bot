@@ -9,6 +9,7 @@ import {
 } from "./space-model";
 import { persistedCanvasState } from "./space-canvas-state";
 import { isSuccessResponse } from "../shared/api-response";
+import type { StoryboardProductionPlan } from "./space-storyboard";
 import type {
   AssetVersion,
   AssetVersionPage,
@@ -399,6 +400,7 @@ export async function confirmSpaceStoryboard(input: {
   projectId: number;
   assetId: number;
   versionId: number;
+  productionPlan: StoryboardProductionPlan;
 }): Promise<ProjectAsset> {
   const result = await request(
     joinSiteApi("project/confirm_storyboard"),
@@ -407,6 +409,7 @@ export async function confirmSpaceStoryboard(input: {
       project_id: input.projectId,
       asset_id: input.assetId,
       version_id: input.versionId,
+      production_plan: input.productionPlan,
     },
   );
   if (!isSuccessResponse(result)) {

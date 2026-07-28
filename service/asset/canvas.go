@@ -116,10 +116,11 @@ func uniqueCanvasNodeKeys(values []string) []string {
 	return result
 }
 
-// SyncCanvasMaterialSlots mirrors the persisted executable nodes without creating
-// empty assets. Versions stay intact when a node is removed or later restored.
-func (s Service) SyncCanvasMaterialSlots(ctx context.Context, projectID uint64, assetCateID uint64, slots []CanvasMaterialSlot) {
-	if projectID == 0 {
+// EnsureCanvasMaterialSlotsActive restores materials owned by active canvas
+// nodes. Removing a node must not archive its material because another canvas
+// may still reference that asset.
+func (s Service) EnsureCanvasMaterialSlotsActive(ctx context.Context, projectID uint64, assetCateID uint64, slots []CanvasMaterialSlot) {
+	if projectID == 0 || len(slots) == 0 {
 		return
 	}
 	activeSlots := make(map[string]CanvasMaterialSlot, len(slots))
@@ -129,6 +130,9 @@ func (s Service) SyncCanvasMaterialSlots(ctx context.Context, projectID uint64, 
 		if slot.NodeKey != "" {
 			activeSlots[slot.NodeKey] = slot
 		}
+	}
+	if len(activeSlots) == 0 {
+		return
 	}
 	assetModel := assetmodel.NewAssetModel()
 	rows := assetModel.Select(ctx, map[string]any{
@@ -146,23 +150,20 @@ func (s Service) SyncCanvasMaterialSlots(ctx context.Context, projectID uint64, 
 		if nodeKey == "" && row.VersionID > 0 {
 			nodeKey = versionNodeKeys[row.VersionID]
 		}
-		if nodeKey == "" {
+		slot, slotActive := activeSlots[nodeKey]
+		if !slotActive {
 			continue
 		}
-		desiredStatus := assetmodel.StatusArchive
-		if _, exists := activeSlots[nodeKey]; exists {
-			if row.VersionID > 0 {
-				desiredStatus = assetmodel.StatusCurrent
-			} else {
-				desiredStatus = assetmodel.StatusDraft
-			}
-		}
 		changes := map[string]any{}
-		if strings.TrimSpace(row.NodeKey) != nodeKey {
+		if nodeKey != "" && strings.TrimSpace(row.NodeKey) != nodeKey {
 			changes["node_key"] = nodeKey
 		}
+		desiredStatus := activeCanvasMaterialStatus(row)
 		if row.Status != desiredStatus {
 			changes["status"] = desiredStatus
+		}
+		if slot.Name != "" && row.NameMode != assetmodel.NameModeManual && row.Name != slot.Name {
+			changes["name"] = slot.Name
 		}
 		if len(changes) > 0 {
 			assetModel.Update(ctx, map[string]any{
@@ -170,15 +171,46 @@ func (s Service) SyncCanvasMaterialSlots(ctx context.Context, projectID uint64, 
 				"status": map[string]any{"neq": assetmodel.StatusDeleted},
 			}, changes)
 		}
-		if slot, exists := activeSlots[nodeKey]; exists &&
-			slot.Name != "" && row.NameMode != assetmodel.NameModeManual && row.Name != slot.Name {
+	}
+}
+
+// EnsureCanvasReferencedMaterialsActive repairs explicitly referenced materials
+// across every project and category in the same team. It never restores assets
+// that were explicitly deleted.
+func (s Service) EnsureCanvasReferencedMaterialsActive(ctx context.Context, projectID uint64, referencedAssetIDs []uint64) {
+	assetIDs := uniqueCanvasAssetIDs(referencedAssetIDs)
+	if projectID == 0 || len(assetIDs) == 0 {
+		return
+	}
+	scope, ok := resolveCanvasAssetScope(ctx, projectID)
+	if !ok {
+		return
+	}
+	assetModel := assetmodel.NewAssetModel()
+	rows := assetModel.Select(ctx, map[string]any{
+		"id":     assetIDs,
+		"role":   assetmodel.RoleMaterial,
+		"status": map[string]any{"neq": assetmodel.StatusDeleted},
+	})
+	for _, row := range rows {
+		if row == nil || !scope.contains(row) {
+			continue
+		}
+		desiredStatus := activeCanvasMaterialStatus(row)
+		if row.Status != desiredStatus {
 			assetModel.Update(ctx, map[string]any{
-				"id":        row.ID,
-				"name_mode": map[string]any{"neq": assetmodel.NameModeManual},
-				"status":    map[string]any{"neq": assetmodel.StatusDeleted},
-			}, map[string]any{"name": slot.Name})
+				"id":     row.ID,
+				"status": map[string]any{"neq": assetmodel.StatusDeleted},
+			}, map[string]any{"status": desiredStatus})
 		}
 	}
+}
+
+func activeCanvasMaterialStatus(asset *assetmodel.Asset) string {
+	if asset != nil && asset.VersionID > 0 {
+		return assetmodel.StatusCurrent
+	}
+	return assetmodel.StatusDraft
 }
 
 func canvasVersionNodeKeys(ctx context.Context, assets []*assetmodel.Asset) map[uint64]string {

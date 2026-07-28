@@ -29,6 +29,7 @@ import {
 import {
   isStoryboardConfirmed,
   parseStoryboardOutput,
+  storyboardProductionIncludesComposition,
   type StoryboardDocument,
 } from "./space-storyboard";
 import { storyboardVideoComposition } from "./space-storyboard-composition";
@@ -207,10 +208,19 @@ export function syncStoryboardDerivedGroups(input: {
   const enabledSpecs = STORYBOARD_DERIVED_GROUP_SPECS.filter((spec) =>
     spec.enabled(input.storyboard),
   );
-  syncedItemTypes.add("video_compose");
-  activeItemKeys.add(
-    storyboardItemKey(input.storyboardNode.id, "video_compose", "composition"),
+  const compositionEnabled = storyboardProductionIncludesComposition(
+    input.storyboard,
   );
+  syncedItemTypes.add("video_compose");
+  if (compositionEnabled) {
+    activeItemKeys.add(
+      storyboardItemKey(
+        input.storyboardNode.id,
+        "video_compose",
+        "composition",
+      ),
+    );
+  }
   const derivedGroups = enabledSpecs.map((spec) => ({
     spec,
     items: spec.items(input.storyboard),
@@ -377,16 +387,20 @@ export function syncStoryboardDerivedGroups(input: {
     changed = true;
   }
 
-  const composition = syncStoryboardCompositionNode({
-    nodes,
-    storyboardNode: input.storyboardNode,
-    storyboard: input.storyboard,
-    assetCate: input.assetCate,
-    power: firstAvailablePower(input.powers, "video", "video_compose"),
-    nextNodeNo,
-  });
-  nextNodeNo = composition.nextNodeNo;
-  changed = changed || composition.changed;
+  const composition = compositionEnabled
+    ? syncStoryboardCompositionNode({
+        nodes,
+        storyboardNode: input.storyboardNode,
+        storyboard: input.storyboard,
+        assetCate: input.assetCate,
+        power: firstAvailablePower(input.powers, "video", "video_compose"),
+        nextNodeNo,
+      })
+    : null;
+  if (composition) {
+    nextNodeNo = composition.nextNodeNo;
+    changed = changed || composition.changed;
+  }
 
   let edges = ensureDerivedGroupEdges(
     input.canvas.edges,
@@ -395,13 +409,15 @@ export function syncStoryboardDerivedGroups(input: {
     enabledSpecs,
   );
   edges = ensureStoryboardItemEdges(edges, nodes, input.storyboardNode.id);
-  edges = ensureStoryboardCompositionEdges(
-    edges,
-    nodes,
-    input.storyboardNode.id,
-    composition.node.id,
-    enabledSpecs,
-  );
+  edges = composition
+    ? ensureStoryboardCompositionEdges(
+        edges,
+        nodes,
+        input.storyboardNode.id,
+        composition.node.id,
+        enabledSpecs,
+      )
+    : removeStoryboardCompositionEdges(edges, input.storyboardNode.id);
   if (edges !== input.canvas.edges) {
     changed = true;
   }
@@ -1283,6 +1299,15 @@ function ensureStoryboardCompositionEdges(
   }
   const reconciled = reconcileCanvasGroupEdges(nodes, next);
   return sameEdges(edges, reconciled) ? edges : reconciled;
+}
+
+function removeStoryboardCompositionEdges(
+  edges: SpaceCanvasEdge[],
+  storyboardNodeId: string,
+) {
+  const prefix = `script-compose-edge-${stableToken(storyboardNodeId)}-`;
+  const next = edges.filter((edge) => !edge.id.startsWith(prefix));
+  return next.length === edges.length ? edges : next;
 }
 
 function sameEdges(left: SpaceCanvasEdge[], right: SpaceCanvasEdge[]) {

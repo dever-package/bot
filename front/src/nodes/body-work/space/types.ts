@@ -423,6 +423,7 @@ export type SpaceCanvasEdge = {
   logicalFrom?: string;
   logicalTo?: string;
   executionMode?: "auto" | "manual";
+  mediaUsage?: string;
 };
 
 export type SpaceCanvasViewport = {

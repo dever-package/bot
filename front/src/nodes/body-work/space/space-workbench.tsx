@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import type { Node } from "@xyflow/react";
 import {
   Copy,
@@ -18,9 +18,9 @@ export function useTransientFlowNodes(
   derivedNodes: Node[],
   interactingNodeId: string,
 ) {
-  const [flowNodes, setFlowNodes] = useState<Node[]>([]);
+  const [flowNodes, setFlowNodes] = useState<Node[]>(derivedNodes);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!interactingNodeId) {
       setFlowNodes(derivedNodes);
     }

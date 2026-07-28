@@ -244,6 +244,17 @@ import {
   normalizePowerParamValue,
 } from "./space-power-param";
 import {
+  ConnectedMediaReferences,
+  isCanvasImageReferenceNode,
+  isCanvasMediaReferenceNode,
+  nextVideoMediaUsage,
+  reconcileVideoMediaUsages,
+  videoMediaUsageError,
+  videoMediaUsageOptions,
+  type CanvasConnectedMediaReference,
+  type CanvasMediaUsageAssignments,
+} from "./space-media-references";
+import {
   CanvasNodeContentView,
   contentOutputNeedsRenderer,
   normalizeEnergonOutput,
@@ -320,6 +331,8 @@ type RunningNodeState = {
 type RunningNodeMap = Record<string, RunningNodeState>;
 const EMPTY_RUNNING_NODE_MAP: RunningNodeMap = {};
 const EMPTY_CANVAS_NODES: SpaceCanvasNode[] = [];
+const EMPTY_CANVAS_REFERENCE_ITEMS: ComposerAssetItem[] = [];
+const EMPTY_CANVAS_MEDIA_REFERENCES: CanvasConnectedMediaReference[] = [];
 const CANVAS_NODE_TITLE_PROMPT_LIMIT = 800;
 type RunningNodeSetter = Dispatch<SetStateAction<RunningNodeMap>>;
 type RunningNodeUpdate = (current: RunningNodeMap) => RunningNodeMap;
@@ -550,6 +563,10 @@ type CanvasRenderIndex = {
   nodeById: Map<string, SpaceCanvasNode>;
   groupMembersById: Map<string, SpaceCanvasNode[]>;
   inputContextByNodeId: Map<string, NodeInputContext>;
+  incomingMediaReferencesByNodeId: Map<
+    string,
+    CanvasConnectedMediaReference[]
+  >;
 };
 type PendingNodeConnection = {
   nodeId: string;
@@ -930,13 +947,9 @@ export function WorkSpacePage() {
 
   const updateCanvasNodeResult = useCallback(
     (assetCateId: number, nodeId: string, patch: Partial<SpaceCanvasNode>) => {
-      setNodeResultOverrides((current) => ({
-        ...current,
-        [nodeId]: {
-          ...(current[nodeId] || {}),
-          ...patch,
-        },
-      }));
+      setNodeResultOverrides((current) =>
+        removeCommittedNodeOverrideFields(current, nodeId, patch),
+      );
       updateCanvasState(assetCateId, (currentCanvas) => {
         const patchedCanvas = {
           ...currentCanvas,
@@ -963,28 +976,8 @@ export function WorkSpacePage() {
       setNodeDetail((current) =>
         current?.id === nodeId ? { ...current, ...patch } : current,
       );
-      if (typeof patch.title === "string" && patch.title.trim()) {
-        updateActiveCanvas((canvas) => ({
-          ...canvas,
-          nodes: canvas.nodes.map((node) =>
-            node.id !== nodeId
-              ? node
-              : patch.titleMode === "manual"
-                ? {
-                    ...node,
-                    title: patch.title!.trim(),
-                    titleMode: "manual",
-                  }
-                : node.titleMode === "auto"
-                  ? { ...node, title: patch.title!.trim() }
-                  : node.type === "group"
-                    ? { ...node, title: patch.title!.trim() }
-                    : node,
-          ),
-        }));
-      }
     },
-    [activeCate?.id, updateActiveCanvas, updateCanvasNodeResult],
+    [activeCate?.id, updateCanvasNodeResult],
   );
 
   const requestGeneratedNodeTitle = useCallback(
@@ -3017,7 +3010,7 @@ function CanvasWorkbench({
   mode: WorkMode;
   interactive: boolean;
   nodes: SpaceCanvasNode[];
-  edges: { id: string; from: string; to: string }[];
+  edges: SpaceCanvasEdge[];
   viewport: SpaceCanvasState["viewport"];
   selectedNodeId: string;
   selectedNodeIds: string[];
@@ -3093,6 +3086,50 @@ function CanvasWorkbench({
   const skipNextNodeClickRef = useRef(false);
   const rightSelectionRef = useRef<CanvasRightSelectionGesture | null>(null);
   const suppressNextPaneContextMenuRef = useRef(false);
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
+  const commitCanvasEdges = useCallback(
+    (nextEdges: SpaceCanvasEdge[]) => {
+      edgesRef.current = nextEdges;
+      onEdgesCommit(nextEdges);
+    },
+    [onEdgesCommit],
+  );
+  const updateConnectedMediaUsages = useCallback(
+    (assignments: CanvasMediaUsageAssignments) => {
+      const assignmentEntries = Object.entries(assignments);
+      if (assignmentEntries.length === 0) {
+        return;
+      }
+      const assignmentsByID = new Map(assignmentEntries);
+      let changed = false;
+      const nextEdges = edgesRef.current.map((edge) => {
+        if (!assignmentsByID.has(edge.id)) {
+          return edge;
+        }
+        const mediaUsage = assignmentsByID.get(edge.id) || undefined;
+        if ((edge.mediaUsage || undefined) === mediaUsage) {
+          return edge;
+        }
+        changed = true;
+        return { ...edge, mediaUsage };
+      });
+      if (changed) {
+        commitCanvasEdges(nextEdges);
+      }
+    },
+    [commitCanvasEdges],
+  );
+  const removeConnectedMediaEdge = useCallback(
+    (edgeId: string) => {
+      const nextEdges = edgesRef.current.filter((edge) => edge.id !== edgeId);
+      if (nextEdges.length !== edgesRef.current.length) {
+        setSelectedEdgeId((current) => (current === edgeId ? "" : current));
+        commitCanvasEdges(nextEdges);
+      }
+    },
+    [commitCanvasEdges],
+  );
   const resizeNode: CanvasNodeResizeHandler = (nodeId, bounds) => {
     setResizingNodeId("");
     if (!interactive) {
@@ -3129,6 +3166,8 @@ function CanvasWorkbench({
     onShowNodeDetail,
     requestConfirm,
     onRunBackendNode,
+    onConnectedMediaUsagesChange: updateConnectedMediaUsages,
+    onConnectedMediaEdgeRemove: removeConnectedMediaEdge,
     onNodeResizeStart: setResizingNodeId,
     onNodeResizeEnd: resizeNode,
     onResultViewResizeEnd: resizeResultView,
@@ -3146,6 +3185,8 @@ function CanvasWorkbench({
     onShowNodeDetail,
     requestConfirm,
     onRunBackendNode,
+    onConnectedMediaUsagesChange: updateConnectedMediaUsages,
+    onConnectedMediaEdgeRemove: removeConnectedMediaEdge,
     onNodeResizeStart: setResizingNodeId,
     onNodeResizeEnd: resizeNode,
     onResultViewResizeEnd: resizeResultView,
@@ -3186,6 +3227,12 @@ function CanvasWorkbench({
         node: SpaceCanvasNode,
         options?: BackendNodeRunOptions,
       ) => nodeActionsRef.current.onRunBackendNode(node, options),
+      onConnectedMediaUsagesChange: (
+        assignments: CanvasMediaUsageAssignments,
+      ) =>
+        nodeActionsRef.current.onConnectedMediaUsagesChange(assignments),
+      onConnectedMediaEdgeRemove: (edgeId: string) =>
+        nodeActionsRef.current.onConnectedMediaEdgeRemove(edgeId),
       onNodeResizeStart: (nodeId: string) =>
         nodeActionsRef.current.onNodeResizeStart(nodeId),
       onNodeResizeEnd: (nodeId: string, bounds: CanvasNodeBounds) =>
@@ -3328,6 +3375,26 @@ function CanvasWorkbench({
         const position = { x: node.x, y: node.y };
         const selected = selectedNodeIdSet.has(node.id);
         const showNodeSettings = selected && selectedNodeIds.length === 1;
+        const powerViewMode =
+          node.type === "power"
+            ? resolvePowerPresentation(node.power, node.kind, node.outputType)
+                .viewMode
+            : "";
+        const needsNodeSettingsContext =
+          showNodeSettings || node.type === "flow";
+        const nodeSpace = needsNodeSettingsContext ? space : null;
+        const nodeCanvasReferenceItems =
+          needsNodeSettingsContext ||
+          powerViewMode === "storyboard" ||
+          powerViewMode === "video_compose"
+            ? canvasReferenceItems
+            : EMPTY_CANVAS_REFERENCE_ITEMS;
+        const nodeConnectedMediaReferences =
+          showNodeSettings &&
+          (node.type === "power" || node.type === "agent")
+            ? canvasRenderIndex.incomingMediaReferencesByNodeId.get(node.id) ||
+              EMPTY_CANVAS_MEDIA_REFERENCES
+            : EMPTY_CANVAS_MEDIA_REFERENCES;
         const structureLocked = managedStoryboardNodeIds.has(node.id);
         const storyboardSourceNodeId = structureLocked
           ? storyboardSourceIdByNodeId.get(node.id) || ""
@@ -3366,11 +3433,13 @@ function CanvasWorkbench({
         const canReuseData =
           cachedData?.sourceNode === node &&
           cachedData.projectId === projectId &&
-          cachedData.space === space &&
+          cachedData.space === nodeSpace &&
           cachedData.runningNode === runningNode &&
           sameCanvasNodes(cachedData.groupMembers || [], groupMembers) &&
           cachedData.canvasRunningNodes === canvasRunningNodes &&
-          cachedData.canvasReferenceItems === canvasReferenceItems &&
+          cachedData.canvasReferenceItems === nodeCanvasReferenceItems &&
+          cachedData.connectedMediaReferences ===
+            nodeConnectedMediaReferences &&
           cachedData.interactive === interactive &&
           cachedData.structureLocked === structureLocked &&
           cachedData.storyboardSourceNode === storyboardSourceNode &&
@@ -3384,12 +3453,13 @@ function CanvasWorkbench({
               ...node,
               sourceNode: node,
               projectId,
-              space,
+              space: nodeSpace,
               catalogCache,
               runningNode,
               groupMembers,
               canvasRunningNodes,
-              canvasReferenceItems,
+              canvasReferenceItems: nodeCanvasReferenceItems,
+              connectedMediaReferences: nodeConnectedMediaReferences,
               interactive,
               structureLocked,
               storyboardSourceNode,
@@ -3681,6 +3751,7 @@ function CanvasWorkbench({
           logicalFrom: edge.logicalFrom,
           logicalTo: edge.logicalTo,
           executionMode: edge.executionMode,
+          mediaUsage: edge.mediaUsage,
         },
       }))
       .map((edge) =>
@@ -3828,9 +3899,91 @@ function CanvasWorkbench({
         return;
       }
       const nextEdges = applyEdgeChanges(structuralChanges, flowEdges);
-      onEdgesCommit(flowEdgesToCanvasEdges(nextEdges));
+      commitCanvasEdges(flowEdgesToCanvasEdges(nextEdges));
     },
-    [flowEdges, interactive, onEdgesCommit],
+    [commitCanvasEdges, flowEdges, interactive],
+  );
+
+  const appendConfiguredCanvasEdge = useCallback(
+    async (sourceNodeId: string, targetNodeId: string) => {
+      const currentEdges = edgesRef.current;
+      if (
+        currentEdges.some((edge) => {
+          const endpoints = canvasEdgeNodeIDs(edge);
+          return (
+            endpoints.sourceNodeId === sourceNodeId &&
+            endpoints.targetNodeId === targetNodeId
+          );
+        })
+      ) {
+        return;
+      }
+      const sourceNode = nodes.find((node) => node.id === sourceNodeId);
+      const targetNode = nodes.find((node) => node.id === targetNodeId);
+      let mediaUsage: string | undefined;
+      if (
+        targetNode?.type === "power" &&
+        targetNode.power?.key === "video" &&
+        isCanvasImageReferenceNode(sourceNode)
+      ) {
+        try {
+          const targetId = Number(
+            targetNode.composerDraft?.selectedTargetId || 0,
+          );
+          const releaseId = Number(
+            space.release?.id || space.project.release_id || 0,
+          );
+          const form = await catalogCache.loadPowerForm(
+            {
+              projectId,
+              releaseId,
+              flowId: Number(targetNode.flow?.id || 0),
+              powerId: Number(targetNode.power?.id || 0),
+              powerKey: targetNode.power?.key || "video",
+              targetId,
+            },
+            () =>
+              fetchSpacePowerForm({
+                projectId,
+                flowId: Number(targetNode.flow?.id || 0),
+                powerId: Number(targetNode.power?.id || 0),
+                powerKey: targetNode.power?.key || "video",
+                targetId,
+              }),
+          );
+          const options = videoMediaUsageOptions(form.params || []);
+          const assignment = nextVideoMediaUsage(
+            canvasIncomingImageConnections(
+              nodes,
+              edgesRef.current,
+              targetNodeId,
+            ),
+            options,
+          );
+          if (assignment.error) {
+            toast.error(assignment.error);
+            return;
+          }
+          mediaUsage = assignment.usage;
+        } catch (error) {
+          toast.error(
+            error instanceof Error
+              ? `媒体用途加载失败，未建立连线：${error.message}`
+              : "媒体用途加载失败，未建立连线",
+          );
+          return;
+        }
+      }
+      commitCanvasEdges(
+        appendCanvasEdge(
+          edgesRef.current,
+          sourceNodeId,
+          targetNodeId,
+          mediaUsage,
+        ),
+      );
+    },
+    [catalogCache, commitCanvasEdges, nodes, projectId, space],
   );
 
   const handleConnect = useCallback<OnConnect>(
@@ -3846,15 +3999,12 @@ function CanvasWorkbench({
       ) {
         return;
       }
-      onEdgesCommit(
-        appendCanvasEdge(
-          edges,
-          connection.source || "",
-          connection.target || "",
-        ),
+      void appendConfiguredCanvasEdge(
+        connection.source || "",
+        connection.target || "",
       );
     },
-    [edges, interactive, onEdgesCommit],
+    [appendConfiguredCanvasEdge, interactive],
   );
 
   const handleConnectStart = useCallback(
@@ -4172,18 +4322,19 @@ function CanvasWorkbench({
           edge.target === proximityEdge.target,
       );
       if (!exists) {
-        onEdgesCommit(
-          appendCanvasEdge(edges, proximityEdge.source, proximityEdge.target),
+        void appendConfiguredCanvasEdge(
+          proximityEdge.source,
+          proximityEdge.target,
         );
       }
       updateProximityEdge(null);
     },
     [
       edges,
+      appendConfiguredCanvasEdge,
       flowEdges,
       interactive,
       managedStoryboardNodeIds,
-      onEdgesCommit,
       onNodesCommit,
       nodes,
       proximityEdge,
@@ -4842,6 +4993,36 @@ function applyNodeResultOverrides(
       return patch ? { ...node, ...patch } : node;
     }),
   };
+}
+
+function removeCommittedNodeOverrideFields(
+  overrides: Record<string, Partial<SpaceCanvasNode>>,
+  nodeId: string,
+  patch: Partial<SpaceCanvasNode>,
+) {
+  const currentPatch = overrides[nodeId];
+  if (!currentPatch) {
+    return overrides;
+  }
+  const committedKeys = Object.keys(patch) as Array<keyof SpaceCanvasNode>;
+  if (
+    !committedKeys.some((key) =>
+      Object.prototype.hasOwnProperty.call(currentPatch, key),
+    )
+  ) {
+    return overrides;
+  }
+  const nextPatch = { ...currentPatch };
+  for (const key of committedKeys) {
+    delete nextPatch[key];
+  }
+  const next = { ...overrides };
+  if (Object.keys(nextPatch).length === 0) {
+    delete next[nodeId];
+  } else {
+    next[nodeId] = nextPatch;
+  }
+  return next;
 }
 
 function markStoryboardRunResultsCurrent({
@@ -8543,7 +8724,9 @@ function buildCanvasRenderIndex(
   edges: SpaceCanvasEdge[],
 ): CanvasRenderIndex {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-  const contextSourceNodeIds = new Set(edges.map((edge) => edge.from));
+  const contextSourceNodeIds = new Set(
+    edges.map((edge) => canvasEdgeNodeIDs(edge).sourceNodeId),
+  );
   const groupMembersById = new Map<string, SpaceCanvasNode[]>();
   const contextSourceByNodeId = new Map<
     string,
@@ -8563,17 +8746,29 @@ function buildCanvasRenderIndex(
     }
   }
   const sourcesByTargetId = new Map<string, NodeInputContext["sources"]>();
+  const incomingMediaReferencesByNodeId = new Map<
+    string,
+    CanvasConnectedMediaReference[]
+  >();
   for (const edge of edges) {
-    if (!nodeMap.has(edge.to)) {
+    const { sourceNodeId, targetNodeId } = canvasEdgeNodeIDs(edge);
+    if (!nodeMap.has(targetNodeId)) {
       continue;
     }
-    const source = contextSourceByNodeId.get(edge.from);
+    const sourceNode = nodeMap.get(sourceNodeId);
+    if (isCanvasMediaReferenceNode(sourceNode)) {
+      const references =
+        incomingMediaReferencesByNodeId.get(targetNodeId) || [];
+      references.push({ edge, source: sourceNode! });
+      incomingMediaReferencesByNodeId.set(targetNodeId, references);
+    }
+    const source = contextSourceByNodeId.get(sourceNodeId);
     if (!source) {
       continue;
     }
-    const sources = sourcesByTargetId.get(edge.to) || [];
+    const sources = sourcesByTargetId.get(targetNodeId) || [];
     sources.push(source);
-    sourcesByTargetId.set(edge.to, sources);
+    sourcesByTargetId.set(targetNodeId, sources);
   }
   const inputContextByNodeId = new Map<string, NodeInputContext>();
   for (const [nodeId, sources] of sourcesByTargetId) {
@@ -8582,7 +8777,39 @@ function buildCanvasRenderIndex(
       text: sources.map(nodeInputContextLine).join("\n\n"),
     });
   }
-  return { nodeById: nodeMap, groupMembersById, inputContextByNodeId };
+  return {
+    nodeById: nodeMap,
+    groupMembersById,
+    inputContextByNodeId,
+    incomingMediaReferencesByNodeId,
+  };
+}
+
+function canvasEdgeNodeIDs(edge: SpaceCanvasEdge) {
+  return {
+    sourceNodeId: edge.logicalFrom || edge.from,
+    targetNodeId: edge.logicalTo || edge.to,
+  };
+}
+
+function canvasIncomingImageConnections(
+  nodes: SpaceCanvasNode[],
+  edges: SpaceCanvasEdge[],
+  targetNodeId: string,
+): CanvasConnectedMediaReference[] {
+  const nodeByID = new Map(nodes.map((node) => [node.id, node]));
+  const result: CanvasConnectedMediaReference[] = [];
+  for (const edge of edges) {
+    const endpoints = canvasEdgeNodeIDs(edge);
+    if (endpoints.targetNodeId !== targetNodeId) {
+      continue;
+    }
+    const source = nodeByID.get(endpoints.sourceNodeId);
+    if (source && isCanvasImageReferenceNode(source)) {
+      result.push({ edge, source });
+    }
+  }
+  return result;
 }
 
 function buildNodeInputContext(
@@ -9202,6 +9429,7 @@ function appendCanvasEdge(
   current: SpaceCanvasEdge[],
   source: string,
   target: string,
+  mediaUsage?: string,
 ) {
   if (!source || !target || source === target) {
     return current;
@@ -9218,6 +9446,7 @@ function appendCanvasEdge(
       id: `edge-${source}-${target}-${Date.now()}`,
       from: source,
       to: target,
+      ...(mediaUsage ? { mediaUsage } : {}),
     },
   ];
 }
@@ -9317,6 +9546,7 @@ function flowEdgesToCanvasEdges(edges: Edge[]): SpaceCanvasEdge[] {
         String(edge.data?.executionMode || "") === "manual"
           ? ("manual" as const)
           : undefined,
+      mediaUsage: String(edge.data?.mediaUsage || "") || undefined,
     }))
     .filter((edge) => edge.from && edge.to && edge.from !== edge.to);
 }
@@ -9461,7 +9691,8 @@ function sameCanvasEdges(left: SpaceCanvasEdge[], right: SpaceCanvasEdge[]) {
             (edge.logicalFrom || "") === (candidate.logicalFrom || "") &&
             (edge.logicalTo || "") === (candidate.logicalTo || "") &&
             (edge.executionMode || "auto") ===
-              (candidate.executionMode || "auto"))
+              (candidate.executionMode || "auto") &&
+            (edge.mediaUsage || "") === (candidate.mediaUsage || ""))
         );
       }))
   );
@@ -10573,6 +10804,14 @@ function NodeBottomSettings({
   const space = ((node as any).space || null) as SpaceBootstrap | null;
   const canvasReferenceItems = ((node as any).canvasReferenceItems ||
     []) as ComposerAssetItem[];
+  const connectedMediaReferences = ((node as any).connectedMediaReferences ||
+    EMPTY_CANVAS_MEDIA_REFERENCES) as CanvasConnectedMediaReference[];
+  const onConnectedMediaUsagesChange = (node as any)
+    .onConnectedMediaUsagesChange as
+    | ((assignments: CanvasMediaUsageAssignments) => void)
+    | undefined;
+  const onConnectedMediaEdgeRemove = (node as any)
+    .onConnectedMediaEdgeRemove as ((edgeId: string) => void) | undefined;
   const catalogCache = (node as any).catalogCache as SpaceCatalogCache;
   const releaseId = Number(
     space?.release?.id || space?.project.release_id || 0,
@@ -10678,6 +10917,39 @@ function NodeBottomSettings({
   ]);
 
   const powerParams = powerForm?.params || [];
+  const connectedVideoMediaUsageOptions = useMemo(
+    () =>
+      selectedPowerKey === "video"
+        ? videoMediaUsageOptions(powerForm?.params || [])
+        : [],
+    [powerForm, selectedPowerKey],
+  );
+  const connectedVideoImageReferences = useMemo(
+    () =>
+      selectedPowerKey === "video"
+        ? connectedMediaReferences.filter(({ source }) =>
+            isCanvasImageReferenceNode(source),
+          )
+        : EMPTY_CANVAS_MEDIA_REFERENCES,
+    [connectedMediaReferences, selectedPowerKey],
+  );
+  const connectedVideoMediaError = useMemo(
+    () =>
+      selectedPowerKey === "video" && !powerFormLoading
+        ? videoMediaUsageError(
+            connectedVideoImageReferences,
+            connectedVideoMediaUsageOptions,
+          )
+        : "",
+    [
+      connectedVideoImageReferences,
+      connectedVideoMediaUsageOptions,
+      powerFormLoading,
+      selectedPowerKey,
+    ],
+  );
+  const effectiveRunBlockedReason =
+    runBlockedReason || connectedVideoMediaError;
   const promptParam = useMemo(
     () => powerParams.find(isPromptPowerParam) || null,
     [powerParams],
@@ -10696,6 +10968,31 @@ function NodeBottomSettings({
     : prompt;
   const canSelectPowerSource = powerFormAllowsSourceSelection(powerForm);
   const effectiveSelectedTargetId = canSelectPowerSource ? selectedTargetId : 0;
+
+  useEffect(() => {
+    if (
+      selectedPowerKey !== "video" ||
+      powerFormLoading ||
+      !powerForm ||
+      !onConnectedMediaUsagesChange
+    ) {
+      return;
+    }
+    const assignments = reconcileVideoMediaUsages(
+      connectedVideoImageReferences,
+      connectedVideoMediaUsageOptions,
+    );
+    if (Object.keys(assignments).length > 0) {
+      onConnectedMediaUsagesChange(assignments);
+    }
+  }, [
+    connectedVideoImageReferences,
+    connectedVideoMediaUsageOptions,
+    onConnectedMediaUsagesChange,
+    powerForm,
+    powerFormLoading,
+    selectedPowerKey,
+  ]);
 
   useEffect(() => {
     if (selectedNodeType !== "power" && selectedNodeType !== "agent") {
@@ -10851,7 +11148,6 @@ function NodeBottomSettings({
     if (nodeRunning || !canSelectPowerSource) {
       return;
     }
-    setSelectedTargetId(targetId);
     if (node.type !== "power" || !node.power) {
       return;
     }
@@ -10874,6 +11170,22 @@ function NodeBottomSettings({
             targetId,
           }),
       );
+      if (selectedPowerKey === "video") {
+        const options = videoMediaUsageOptions(form.params || []);
+        const assignments = reconcileVideoMediaUsages(
+          connectedVideoImageReferences,
+          options,
+        );
+        const mediaError = videoMediaUsageError(
+          connectedVideoImageReferences,
+          options,
+          assignments,
+        );
+        if (mediaError) {
+          toast.error(`无法切换视频来源：${mediaError}`);
+          return;
+        }
+      }
       setPowerForm(form);
       const nextTargetId = powerFormAllowsSourceSelection(form)
         ? form.selected_target_id || targetId
@@ -11059,8 +11371,8 @@ function NodeBottomSettings({
     if (nodeRunning || running) {
       return;
     }
-    if (runBlockedReason) {
-      toast.error(runBlockedReason);
+    if (effectiveRunBlockedReason) {
+      toast.error(effectiveRunBlockedReason);
       return;
     }
     if (requestConfirm && shouldConfirmNodeRun(node)) {
@@ -11115,6 +11427,22 @@ function NodeBottomSettings({
           </div>
         ) : (
           <>
+            {connectedMediaReferences.length > 0 ? (
+              <ConnectedMediaReferences
+                connections={connectedMediaReferences}
+                options={connectedVideoMediaUsageOptions}
+                showUsage={selectedPowerKey === "video"}
+                disabled={
+                  powerFormLoading ||
+                  nodeRunning ||
+                  !onConnectedMediaEdgeRemove
+                }
+                onAssignmentsChange={(assignments) =>
+                  onConnectedMediaUsagesChange?.(assignments)
+                }
+                onRemove={(edgeId) => onConnectedMediaEdgeRemove?.(edgeId)}
+              />
+            ) : null}
             <PromptComposer
               value={powerPrompt}
               referenceContent={promptContent}
@@ -11131,8 +11459,8 @@ function NodeBottomSettings({
                 assetCateID: nodeAssetCateId,
               }}
               disabled={powerFormLoading}
-              submitDisabled={Boolean(runBlockedReason)}
-              submitDisabledReason={runBlockedReason}
+              submitDisabled={Boolean(effectiveRunBlockedReason)}
+              submitDisabledReason={effectiveRunBlockedReason}
               onChange={setPowerPrompt}
               onParamChange={setParamValue}
               onSourceChange={
@@ -11163,6 +11491,12 @@ function NodeBottomSettings({
         onClick={(event) => event.stopPropagation()}
         style={NODE_OVERLAY_STYLE}
       >
+        <ConnectedMediaReferences
+          connections={connectedMediaReferences}
+          options={[]}
+          disabled={nodeRunning || !onConnectedMediaEdgeRemove}
+          onRemove={(edgeId) => onConnectedMediaEdgeRemove?.(edgeId)}
+        />
         <PromptComposer
           value={prompt}
           referenceContent={promptContent}
@@ -12579,17 +12913,10 @@ function CanvasGeneratedNodeContent({
       <div
         className={`ws-node-generated-media ${generating ? "is-generating" : ""}`}
       >
-        <img
+        <CanvasStableImage
           src={preview.imageUrl}
           alt={caption || "生成图片"}
-          loading="lazy"
-          decoding="async"
-          onLoad={(event) =>
-            onMediaSize?.(
-              event.currentTarget.naturalWidth,
-              event.currentTarget.naturalHeight,
-            )
-          }
+          onMediaSize={onMediaSize}
         />
         {caption ? <p>{caption}</p> : null}
         <CanvasMediaGenerationOverlay active={generating} />
@@ -12655,6 +12982,54 @@ function CanvasGeneratedNodeContent({
         className="ws-canvas-content-view"
       />
     </div>
+  );
+}
+
+function CanvasStableImage({
+  src,
+  alt,
+  onMediaSize,
+}: {
+  src: string;
+  alt: string;
+  onMediaSize?: (width: number, height: number) => void;
+}) {
+  const [displayedSrc, setDisplayedSrc] = useState(src);
+
+  useEffect(() => {
+    if (!src || src === displayedSrc) {
+      return;
+    }
+    let active = true;
+    const image = new Image();
+    image.onload = () => {
+      const decoded = image.decode?.() || Promise.resolve();
+      void decoded.catch(() => undefined).then(() => {
+        if (active) {
+          setDisplayedSrc(src);
+        }
+      });
+    };
+    image.src = src;
+    return () => {
+      active = false;
+      image.onload = null;
+    };
+  }, [displayedSrc, src]);
+
+  return (
+    <img
+      src={displayedSrc}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      onLoad={(event) =>
+        onMediaSize?.(
+          event.currentTarget.naturalWidth,
+          event.currentTarget.naturalHeight,
+        )
+      }
+    />
   );
 }
 

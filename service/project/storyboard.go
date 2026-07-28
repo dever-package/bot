@@ -20,6 +20,11 @@ const (
 	storyboardWorkflowConfirm = "confirmed"
 	storyboardMaxSearchDepth  = 12
 	storyboardDefaultAspect   = "16:9"
+	storyboardOutputFinal     = "final_video"
+	storyboardOutputShots     = "shot_videos"
+	storyboardOutputOnly      = "storyboard_only"
+	storyboardProductionAuto  = "auto"
+	storyboardProductionOff   = "off"
 )
 
 var storyboardWrapperKeys = [...]string{
@@ -38,8 +43,9 @@ var storyboardWrapperKeys = [...]string{
 }
 
 type ConfirmStoryboardRequest struct {
-	AssetID   uint64
-	VersionID uint64
+	AssetID        uint64
+	VersionID      uint64
+	ProductionPlan any
 }
 
 type CreateStoryboardRevisionRequest struct {
@@ -85,6 +91,11 @@ func (s Service) ConfirmStoryboard(ctx context.Context, projectID uint64, req Co
 		if err := validateStoryboard(document); err != nil {
 			return nil, err
 		}
+		productionPlan, err := normalizeStoryboardProductionPlan(req.ProductionPlan, storyboardProductionAuto)
+		if err != nil {
+			return nil, err
+		}
+		document["production_plan"] = productionPlan
 		document["workflow"] = map[string]any{
 			"status":       storyboardWorkflowConfirm,
 			"confirmed_at": time.Now().UTC().Format(time.RFC3339),
@@ -195,6 +206,13 @@ func (s Service) editableAssetVersionContent(ctx context.Context, projectID uint
 	}
 	incoming["visual_mode"] = visualMode
 	incoming["aspect_ratio"] = aspectRatio
+	if productionPlan, exists := incoming["production_plan"]; exists {
+		normalized, err := normalizeStoryboardProductionPlan(productionPlan, storyboardProductionOff)
+		if err != nil {
+			return nil, err
+		}
+		incoming["production_plan"] = normalized
+	}
 	incoming["workflow"] = map[string]any{
 		"status":       storyboardWorkflowDraft,
 		"confirmed_at": "",
@@ -298,6 +316,13 @@ func validateStoryboard(document map[string]any) error {
 		return fmt.Errorf("分镜画幅必须是 16:9、9:16、1:1、4:3、3:4 或 21:9")
 	}
 	document["aspect_ratio"] = aspectRatio
+	if productionPlan, exists := document["production_plan"]; exists {
+		normalized, err := normalizeStoryboardProductionPlan(productionPlan, storyboardProductionOff)
+		if err != nil {
+			return err
+		}
+		document["production_plan"] = normalized
+	}
 	if _, ok := document["references"].([]any); !ok {
 		return fmt.Errorf("分镜参考素材必须是数组")
 	}
@@ -464,6 +489,61 @@ func validateStoryboard(document map[string]any) error {
 		return err
 	}
 	return nil
+}
+
+func normalizeStoryboardProductionPlan(value any, defaultLipSync string) (map[string]any, error) {
+	if value == nil {
+		return defaultStoryboardProductionPlan(defaultLipSync), nil
+	}
+	plan, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("分镜制作方案格式无效")
+	}
+	outputTarget := strings.ToLower(storyboardText(plan["output_target"]))
+	if outputTarget != storyboardOutputFinal && outputTarget != storyboardOutputShots && outputTarget != storyboardOutputOnly {
+		return nil, fmt.Errorf("分镜制作方案的产出目标无效")
+	}
+	voiceMode, err := storyboardProductionMode(plan["voice_mode"], "配音")
+	if err != nil {
+		return nil, err
+	}
+	subtitleMode, err := storyboardProductionMode(plan["subtitle_mode"], "字幕")
+	if err != nil {
+		return nil, err
+	}
+	lipSyncMode, err := storyboardProductionMode(plan["lip_sync_mode"], "口型同步")
+	if err != nil {
+		return nil, err
+	}
+	strategy := strings.ToLower(storyboardText(plan["shot_visual_strategy"]))
+	if strategy != "auto" {
+		return nil, fmt.Errorf("分镜制作方案的镜头参考图策略无效")
+	}
+	return map[string]any{
+		"output_target":        outputTarget,
+		"voice_mode":           voiceMode,
+		"subtitle_mode":        subtitleMode,
+		"lip_sync_mode":        lipSyncMode,
+		"shot_visual_strategy": strategy,
+	}, nil
+}
+
+func defaultStoryboardProductionPlan(lipSyncMode string) map[string]any {
+	return map[string]any{
+		"output_target":        storyboardOutputFinal,
+		"voice_mode":           storyboardProductionAuto,
+		"subtitle_mode":        storyboardProductionAuto,
+		"lip_sync_mode":        lipSyncMode,
+		"shot_visual_strategy": "auto",
+	}
+}
+
+func storyboardProductionMode(value any, label string) (string, error) {
+	mode := strings.ToLower(storyboardText(value))
+	if mode != storyboardProductionAuto && mode != storyboardProductionOff {
+		return "", fmt.Errorf("分镜制作方案的%s配置无效", label)
+	}
+	return mode, nil
 }
 
 func validateStoryboardStoryline(value any) error {

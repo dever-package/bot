@@ -71,20 +71,13 @@ func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, asse
 		"updated_at":   savedAt,
 	}
 	nextMaterialSlots := canvasMaterialSlots(clean.Nodes)
+	nextReferencedAssetIDs := canvasReferencedAssetIDs(clean.Nodes)
 	if err := orm.Transaction(ctx, func(tx context.Context) error {
 		model := projectmodel.NewCanvasModel()
 		row := model.Find(tx, map[string]any{
 			"project_id":    project.ID,
 			"asset_cate_id": clean.AssetCateID,
 		})
-		syncMaterialSlots := row == nil
-		if row != nil {
-			previousNodes := sliceValue(jsonValue(row.Nodes, []any{}))
-			syncMaterialSlots = !sameCanvasMaterialSlots(
-				canvasMaterialSlots(previousNodes),
-				nextMaterialSlots,
-			)
-		}
 		if row == nil {
 			record["project_id"] = project.ID
 			record["asset_cate_id"] = clean.AssetCateID
@@ -95,9 +88,17 @@ func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, asse
 		} else if model.Update(tx, map[string]any{"id": row.ID}, record) == 0 {
 			return fmt.Errorf("保存画布失败")
 		}
-		if syncMaterialSlots {
-			s.project.asset.SyncCanvasMaterialSlots(tx, project.ID, clean.AssetCateID, nextMaterialSlots)
-		}
+		s.project.asset.EnsureCanvasMaterialSlotsActive(
+			tx,
+			project.ID,
+			clean.AssetCateID,
+			nextMaterialSlots,
+		)
+		s.project.asset.EnsureCanvasReferencedMaterialsActive(
+			tx,
+			project.ID,
+			nextReferencedAssetIDs,
+		)
 		return nil
 	}); err != nil {
 		return nil, err
@@ -129,22 +130,6 @@ func canvasMaterialSlots(nodes []any) []assetservice.CanvasMaterialSlot {
 	return result
 }
 
-func sameCanvasMaterialSlots(left []assetservice.CanvasMaterialSlot, right []assetservice.CanvasMaterialSlot) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	leftByNodeKey := make(map[string]string, len(left))
-	for _, slot := range left {
-		leftByNodeKey[slot.NodeKey] = slot.Name
-	}
-	for _, slot := range right {
-		if leftByNodeKey[slot.NodeKey] != slot.Name {
-			return false
-		}
-	}
-	return true
-}
-
 func (s WorkspaceService) projectCanvas(ctx context.Context, projectID uint64, assetCateID uint64) map[string]any {
 	row := projectmodel.NewCanvasModel().Find(ctx, map[string]any{
 		"project_id":    projectID,
@@ -171,6 +156,17 @@ func (s WorkspaceService) canvasBundle(ctx context.Context, projectID uint64, as
 		nodeKeys = append(nodeKeys, slot.NodeKey)
 	}
 	referencedAssetIDs := canvasReferencedAssetIDs(nodes)
+	s.project.asset.EnsureCanvasMaterialSlotsActive(
+		ctx,
+		projectID,
+		assetCateID,
+		slots,
+	)
+	s.project.asset.EnsureCanvasReferencedMaterialsActive(
+		ctx,
+		projectID,
+		referencedAssetIDs,
+	)
 	assets := s.project.asset.CanvasReferences(
 		ctx,
 		projectID,
@@ -188,6 +184,11 @@ func (s WorkspaceService) canvasBundle(ctx context.Context, projectID uint64, as
 		for assetID := range allReferencedAssetIDs {
 			referencedAssetIDs = append(referencedAssetIDs, assetID)
 		}
+		s.project.asset.EnsureCanvasReferencedMaterialsActive(
+			ctx,
+			projectID,
+			referencedAssetIDs,
+		)
 		assets = s.project.asset.CanvasReferences(
 			ctx,
 			projectID,
@@ -289,7 +290,9 @@ func collectCanvasReferencedAssetIDs(raw any, result map[uint64]struct{}) {
 		}
 		for key, child := range value {
 			normalizedKey := strings.ToLower(strings.ReplaceAll(key, "_", ""))
-			if strings.HasSuffix(normalizedKey, "assetid") {
+			if strings.HasSuffix(normalizedKey, "assetids") {
+				collectCanvasAssetIDValues(child, result)
+			} else if strings.HasSuffix(normalizedKey, "assetid") {
 				if assetID := uint64Value(child); assetID > 0 {
 					result[assetID] = struct{}{}
 				}
@@ -303,6 +306,14 @@ func collectCanvasReferencedAssetIDs(raw any, result map[uint64]struct{}) {
 	case []map[string]any:
 		for _, child := range value {
 			collectCanvasReferencedAssetIDs(child, result)
+		}
+	}
+}
+
+func collectCanvasAssetIDValues(raw any, result map[uint64]struct{}) {
+	for _, value := range sliceValue(raw) {
+		if assetID := uint64Value(value); assetID > 0 {
+			result[assetID] = struct{}{}
 		}
 	}
 }

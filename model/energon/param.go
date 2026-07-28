@@ -36,9 +36,12 @@ type ParamIndex struct {
 }
 
 const (
-	ParamPromptID      uint64 = 1
-	ParamImageID       uint64 = 2
-	ParamImagesID      uint64 = 17
+	ParamPromptID     uint64 = 1
+	ParamImageID      uint64 = 2
+	ParamImagesID     uint64 = 17
+	ParamFirstFrameID uint64 = 18
+	ParamLastFrameID  uint64 = 19
+
 	paramAudioID       uint64 = 3
 	paramVideoID       uint64 = 4
 	paramFileID        uint64 = 5
@@ -58,6 +61,8 @@ const (
 const (
 	ParamSortPrompt      = 10
 	ParamSortImage       = 20
+	ParamSortFirstFrame  = 21
+	ParamSortLastFrame   = 22
 	ParamSortImages      = 30
 	ParamSortAudio       = 40
 	ParamSortVideo       = 50
@@ -85,6 +90,8 @@ type builtinParamSortSpec struct {
 var builtinParamSortSpecs = []builtinParamSortSpec{
 	{ID: ParamPromptID, Key: "prompt", Sort: ParamSortPrompt},
 	{ID: ParamImageID, Key: "image", Sort: ParamSortImage},
+	{ID: ParamFirstFrameID, Key: "firstFrame", Sort: ParamSortFirstFrame},
+	{ID: ParamLastFrameID, Key: "lastFrame", Sort: ParamSortLastFrame},
 	{ID: ParamImagesID, Key: "images", Sort: ParamSortImages},
 	{ID: paramAudioID, Key: "audio", Sort: ParamSortAudio},
 	{ID: paramVideoID, Key: "video", Sort: ParamSortVideo},
@@ -149,6 +156,34 @@ var (
 			"default_value":  "",
 			"status":         1,
 			"sort":           ParamSortImage,
+		},
+		{
+			"id":             ParamFirstFrameID,
+			"name":           "首帧",
+			"key":            "firstFrame",
+			"type":           "file",
+			"usage":          1,
+			"value_type":     "string",
+			"cate_id":        paramCateCommonID,
+			"upload_rule_id": 1,
+			"max_files":      1,
+			"default_value":  "",
+			"status":         1,
+			"sort":           ParamSortFirstFrame,
+		},
+		{
+			"id":             ParamLastFrameID,
+			"name":           "尾帧",
+			"key":            "lastFrame",
+			"type":           "file",
+			"usage":          1,
+			"value_type":     "string",
+			"cate_id":        paramCateCommonID,
+			"upload_rule_id": 1,
+			"max_files":      1,
+			"default_value":  "",
+			"status":         1,
+			"sort":           ParamSortLastFrame,
 		},
 		{
 			"id":             ParamImagesID,

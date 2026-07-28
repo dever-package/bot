@@ -198,8 +198,9 @@ func (Project) PostConfirmStoryboard(c *server.Context) error {
 		c.Context(),
 		botapi.Uint64FromBody(body, "project_id", "projectId"),
 		projectservice.ConfirmStoryboardRequest{
-			AssetID:   botapi.Uint64FromBody(body, "asset_id", "assetId"),
-			VersionID: botapi.Uint64FromBody(body, "version_id", "versionId"),
+			AssetID:        botapi.Uint64FromBody(body, "asset_id", "assetId"),
+			VersionID:      botapi.Uint64FromBody(body, "version_id", "versionId"),
+			ProductionPlan: body["production_plan"],
 		},
 	)
 	return botapi.WriteJSON(c, data, err)

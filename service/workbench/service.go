@@ -415,15 +415,13 @@ func (s Service) resolvePowerAssetReferences(
 			}
 			references = append(references, item)
 			allReferences = append(allReferences, item)
-			if reference, ok := energoninput.MediaReferenceFromContent(
+			mediaReferences = append(mediaReferences, energoninput.MediaReferencesFromContent(
 				"asset",
 				resolved.Asset.ID,
 				resolved.Asset.Kind,
 				resolved.Content,
 				nestedText(part, "usage"),
-			); ok {
-				mediaReferences = append(mediaReferences, reference)
-			}
+			)...)
 		}
 		if len(references) == 0 {
 			continue

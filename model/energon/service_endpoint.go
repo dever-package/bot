@@ -195,7 +195,7 @@ var (
 			"service_id": serviceRunningHubVideoID,
 			"api":        "kling-v3.0-pro/image-to-video",
 			"param_mode": "any",
-			"param_ids":  fmt.Sprintf(`[{"param_id":%d,"sort":1}]`, ParamImageID),
+			"param_ids":  fmt.Sprintf(`[{"param_id":%d,"sort":1}]`, ParamFirstFrameID),
 			"status":     1,
 			"sort":       100,
 		},

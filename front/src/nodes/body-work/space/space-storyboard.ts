@@ -101,6 +101,38 @@ export type StoryboardWorkflow = {
   confirmed_at: string;
 };
 
+export const STORYBOARD_OUTPUT_TARGETS = [
+  "final_video",
+  "shot_videos",
+  "storyboard_only",
+] as const;
+
+export type StoryboardOutputTarget =
+  (typeof STORYBOARD_OUTPUT_TARGETS)[number];
+
+export type StoryboardProductionMode = "auto" | "off";
+
+export type StoryboardProductionPlan = {
+  output_target: StoryboardOutputTarget;
+  voice_mode: StoryboardProductionMode;
+  subtitle_mode: StoryboardProductionMode;
+  lip_sync_mode: StoryboardProductionMode;
+  shot_visual_strategy: "auto";
+};
+
+export const DEFAULT_STORYBOARD_PRODUCTION_PLAN: StoryboardProductionPlan = {
+  output_target: "final_video",
+  voice_mode: "auto",
+  subtitle_mode: "auto",
+  lip_sync_mode: "off",
+  shot_visual_strategy: "auto",
+};
+
+const LEGACY_STORYBOARD_PRODUCTION_PLAN: StoryboardProductionPlan = {
+  ...DEFAULT_STORYBOARD_PRODUCTION_PLAN,
+  lip_sync_mode: "auto",
+};
+
 export type StoryboardStoryline = {
   setup: string;
   development: string;
@@ -173,6 +205,7 @@ export type StoryboardDocument = Record<string, unknown> & {
   type: "storyboard";
   version: typeof STORYBOARD_VERSION;
   workflow: StoryboardWorkflow;
+  production_plan: StoryboardProductionPlan;
   title: string;
   summary: string;
   target_duration: number;
@@ -344,6 +377,7 @@ export function createStoryboardCaption(
 export function normalizeStoryboardOrder(
   storyboard: StoryboardDocument,
 ): StoryboardDocument {
+  const workflow = normalizeStoryboardWorkflow(storyboard.workflow);
   const references = normalizeStoryboardReferences(storyboard.references);
   const referenceKeys = new Set(references.map((reference) => reference.key));
   const materialIDs = new Set(
@@ -352,7 +386,11 @@ export function normalizeStoryboardOrder(
   return {
     ...storyboard,
     version: STORYBOARD_VERSION,
-    workflow: normalizeStoryboardWorkflow(storyboard.workflow),
+    workflow,
+    production_plan: normalizeStoryboardProductionPlan(
+      storyboard.production_plan,
+      workflow.status === "confirmed",
+    ),
     target_duration: Math.max(
       MIN_STORYBOARD_SHOT_DURATION,
       Math.round(Number(storyboard.target_duration) || 0),
@@ -441,6 +479,81 @@ export function reconcileStoryboardContinuity(
 
 export function isStoryboardConfirmed(storyboard: StoryboardDocument) {
   return storyboard.workflow.status === "confirmed";
+}
+
+export function normalizeStoryboardProductionPlan(
+  value: unknown,
+  legacyFallback = false,
+): StoryboardProductionPlan {
+  const fallback = legacyFallback
+    ? LEGACY_STORYBOARD_PRODUCTION_PLAN
+    : DEFAULT_STORYBOARD_PRODUCTION_PLAN;
+  if (!isRecord(value)) {
+    return { ...fallback };
+  }
+  const outputTarget = stringValue(value.output_target).toLowerCase();
+  return {
+    output_target: STORYBOARD_OUTPUT_TARGETS.includes(
+      outputTarget as StoryboardOutputTarget,
+    )
+      ? (outputTarget as StoryboardOutputTarget)
+      : fallback.output_target,
+    voice_mode: normalizeStoryboardProductionMode(
+      value.voice_mode,
+      fallback.voice_mode,
+    ),
+    subtitle_mode: normalizeStoryboardProductionMode(
+      value.subtitle_mode,
+      fallback.subtitle_mode,
+    ),
+    lip_sync_mode: normalizeStoryboardProductionMode(
+      value.lip_sync_mode,
+      fallback.lip_sync_mode,
+    ),
+    shot_visual_strategy: "auto",
+  };
+}
+
+export function storyboardProductionIncludesVisualPipeline(
+  storyboard: StoryboardDocument,
+) {
+  return storyboard.production_plan.output_target !== "storyboard_only";
+}
+
+export function storyboardProductionIncludesComposition(
+  storyboard: StoryboardDocument,
+) {
+  return storyboard.production_plan.output_target === "final_video";
+}
+
+export function storyboardProductionIncludesVoice(
+  storyboard: StoryboardDocument,
+) {
+  return (
+    storyboardProductionIncludesVisualPipeline(storyboard) &&
+    storyboard.production_plan.voice_mode === "auto" &&
+    storyboardSpeechCount(storyboard) > 0
+  );
+}
+
+export function storyboardProductionIncludesSubtitles(
+  storyboard: StoryboardDocument,
+) {
+  return (
+    storyboardProductionIncludesVisualPipeline(storyboard) &&
+    storyboard.production_plan.subtitle_mode === "auto" &&
+    storyboardSubtitleCount(storyboard) > 0
+  );
+}
+
+export function storyboardProductionIncludesLipSync(
+  storyboard: StoryboardDocument,
+) {
+  return (
+    storyboardProductionIncludesVoice(storyboard) &&
+    storyboard.production_plan.lip_sync_mode === "auto" &&
+    storyboard.shots.some(storyboardHasVisibleDialogue)
+  );
 }
 
 export function storyboardSpeechCount(storyboard: StoryboardDocument) {
@@ -765,11 +878,16 @@ function decodeStoryboard(
     return null;
   }
 
+  const workflow = normalizeStoryboardWorkflow(row.workflow);
   return {
     ...row,
     type: "storyboard",
     version: STORYBOARD_VERSION,
-    workflow: normalizeStoryboardWorkflow(row.workflow),
+    workflow,
+    production_plan: normalizeStoryboardProductionPlan(
+      row.production_plan,
+      workflow.status === "confirmed",
+    ),
     title: row.title,
     summary: storyboardContentSummaryFromShots(
       stringValue(row.summary),
@@ -1051,6 +1169,14 @@ function normalizeStoryboardWorkflow(value: unknown): StoryboardWorkflow {
     status,
     confirmed_at: status === "confirmed" ? stringValue(row.confirmed_at) : "",
   };
+}
+
+function normalizeStoryboardProductionMode(
+  value: unknown,
+  fallback: StoryboardProductionMode,
+): StoryboardProductionMode {
+  const mode = stringValue(value).toLowerCase();
+  return mode === "auto" || mode === "off" ? mode : fallback;
 }
 
 function richDocumentText(value: unknown) {

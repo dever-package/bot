@@ -1057,6 +1057,9 @@ function normalizeCanvasEdge(
       "manual"
         ? "manual"
         : undefined,
+    mediaUsage:
+      stringValue(firstDefined(value.media_usage, value.mediaUsage)) ||
+      undefined,
   };
 }
 

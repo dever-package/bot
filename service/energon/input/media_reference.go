@@ -35,20 +35,43 @@ func MediaReferenceFromContent(
 	content any,
 	usage string,
 ) (MediaReference, bool) {
+	references := MediaReferencesFromContent(referenceType, referenceID, kind, content, usage)
+	if len(references) == 0 {
+		return MediaReference{}, false
+	}
+	return references[0], true
+}
+
+// MediaReferencesFromContent resolves every media URL stored by one logical
+// reference. The URL order is preserved so configured media parameters can
+// apply their own cardinality and ordering rules.
+func MediaReferencesFromContent(
+	referenceType string,
+	referenceID uint64,
+	kind string,
+	content any,
+	usage string,
+) []MediaReference {
 	kind = normalizeMediaKind(kind)
 	media := botprotocol.ExtractMediaOutput(content, kind)
 	urls := botprotocol.NormalizeMediaList(media[kind+"s"], kind)
 	if referenceID == 0 || kind == "" || len(urls) == 0 {
-		return MediaReference{}, false
+		return nil
 	}
-	return MediaReference{
-		ReferenceType: strings.TrimSpace(referenceType),
-		ReferenceID:   referenceID,
-		Kind:          kind,
-		URL:           urls[0],
-		Usage:         strings.TrimSpace(usage),
-		StrictUsage:   strings.TrimSpace(usage) != "",
-	}, true
+	referenceType = strings.TrimSpace(referenceType)
+	usage = strings.TrimSpace(usage)
+	result := make([]MediaReference, 0, len(urls))
+	for _, url := range urls {
+		result = append(result, MediaReference{
+			ReferenceType: referenceType,
+			ReferenceID:   referenceID,
+			Kind:          kind,
+			URL:           url,
+			Usage:         usage,
+			StrictUsage:   usage != "",
+		})
+	}
+	return result
 }
 
 // BindMediaReferences projects resolved media URLs into configured capability
@@ -116,6 +139,14 @@ func BindMediaReferences(
 			continue
 		}
 		if capacity := mediaParamCapacity(param); capacity > 0 && len(current) >= capacity {
+			// One asset may contain multiple media files. Once that logical
+			// reference has been bound, extra files may remain unbound when the
+			// selected service only accepts fewer files; a second distinct
+			// required reference must still fail instead of being silently lost.
+			if mediaReferenceAlreadyBound(result.Bound, reference, key) {
+				result.Unbound = append(result.Unbound, reference)
+				continue
+			}
 			if explicit || reference.StrictUsage || reference.Required {
 				return MediaReferenceBindResult{}, fmt.Errorf(
 					"当前能力的%s参数一次最多使用 %d 个素材",
@@ -257,6 +288,24 @@ func containsMediaURL(values []string, target string) bool {
 	target = strings.TrimSpace(target)
 	for _, value := range values {
 		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
+}
+
+func mediaReferenceAlreadyBound(
+	bindings []MediaReferenceBinding,
+	reference MediaReference,
+	paramKey string,
+) bool {
+	if reference.ReferenceID == 0 {
+		return false
+	}
+	for _, binding := range bindings {
+		if binding.ParamKey == paramKey &&
+			binding.Reference.ReferenceID == reference.ReferenceID &&
+			binding.Reference.ReferenceType == reference.ReferenceType {
 			return true
 		}
 	}

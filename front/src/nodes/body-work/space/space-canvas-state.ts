@@ -29,6 +29,7 @@ type PersistedCanvasEdge = {
   logical_from?: string;
   logical_to?: string;
   execution_mode?: "manual";
+  media_usage?: string;
 };
 
 type PersistedCanvasNode = {
@@ -122,6 +123,7 @@ export function persistedCanvasState(
       ...(edge.executionMode === "manual"
         ? { execution_mode: "manual" as const }
         : {}),
+      ...(edge.mediaUsage ? { media_usage: edge.mediaUsage } : {}),
     })),
     viewport: {
       ...(canvas.viewport.x == null ? {} : { x: canvas.viewport.x }),

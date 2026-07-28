@@ -54,6 +54,7 @@ import {
   isStoryboardConfirmed,
   type StoryboardDocument,
   type StoryboardEditorFocus,
+  type StoryboardProductionPlan,
 } from "../space-storyboard";
 import {
   contentOutputMediaKinds,
@@ -332,19 +333,22 @@ export function NodeDetailDialog({
   });
 
   const confirmStoryboard = useCallback(
-    async (_storyboard: StoryboardDocument) => {
+    async (
+      _storyboard: StoryboardDocument,
+      productionPlan: StoryboardProductionPlan,
+    ) => {
       if (storyboardWorkflowAction) {
-        return;
+        return false;
       }
       const saved = await draft.flush();
       if (!saved) {
-        return;
+        return false;
       }
       const currentAsset = assetRef.current;
       const versionId = currentAssetVersionId(currentAsset);
       if (!currentAsset?.id || !versionId) {
         toast.error("当前分镜尚未保存，不能确认");
-        return;
+        return false;
       }
       setStoryboardWorkflowAction("confirming");
       try {
@@ -352,11 +356,14 @@ export function NodeDetailDialog({
           projectId,
           assetId: currentAsset.id,
           versionId,
+          productionPlan,
         });
         applyMutatedAsset(confirmedAsset);
         toast.success("分镜已确认，制作组将按当前版本同步");
+        return true;
       } catch (error) {
         toast.error(errorMessage(error, "确认分镜失败"));
+        return false;
       } finally {
         setStoryboardWorkflowAction("");
       }

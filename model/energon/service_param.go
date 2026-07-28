@@ -40,16 +40,22 @@ type serviceParamSeedConfig struct {
 }
 
 const (
-	serviceParamRuleDirect     int16 = 1
+	ServiceParamRuleDirect     int16 = 1
+	serviceParamRuleDirect           = ServiceParamRuleDirect
 	serviceParamRuleOption     int16 = 2
 	ServiceParamRuleAttachment int16 = 3
 	serviceParamRuleAttachment       = ServiceParamRuleAttachment
 	serviceParamRuleCombo      int16 = 4
-	serviceParamRuleFixed      int16 = 5
+	ServiceParamRuleFixed      int16 = 5
+	serviceParamRuleFixed            = ServiceParamRuleFixed
 
-	fixedValueTypeString  = "string"
-	fixedValueTypeBoolean = "boolean"
-	fixedValueTypeJSON    = "json"
+	ServiceParamFixedValueTypeString  = "string"
+	ServiceParamFixedValueTypeBoolean = "boolean"
+	ServiceParamFixedValueTypeJSON    = "json"
+
+	fixedValueTypeString  = ServiceParamFixedValueTypeString
+	fixedValueTypeBoolean = ServiceParamFixedValueTypeBoolean
+	fixedValueTypeJSON    = ServiceParamFixedValueTypeJSON
 
 	ServiceParamFileValueFormatURL     = "url"
 	ServiceParamFileValueFormatBase64  = "base64"
@@ -78,9 +84,9 @@ var (
 		{ID: 10, ServiceID: serviceDoubaoImageID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: doubaoSeedreamSizeMapping},
 		{ID: 11, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[0].type", Mapping: "text"},
 		{ID: 12, ServiceID: serviceDoubaoVideoID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "content[0].text"},
-		{ID: 13, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[1-2].type", Mapping: "image_url"},
-		{ID: 14, ServiceID: serviceDoubaoVideoID, ParamID: ParamImagesID, ParamRule: serviceParamRuleAttachment, Key: "content[1-2].image_url.url", Mapping: "[1,2]"},
-		{ID: 15, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[1-2].role", Mapping: `["first_frame","last_frame"]`, FixedValueType: fixedValueTypeJSON},
+		{ID: 13, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[1].type", Mapping: "image_url", Sort: 20},
+		{ID: 14, ServiceID: serviceDoubaoVideoID, ParamID: ParamFirstFrameID, ParamRule: serviceParamRuleAttachment, Key: "content[1].image_url.url", Name: "首帧", Mapping: "[1]", Sort: ParamSortFirstFrame},
+		{ID: 15, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[1].role", Mapping: "first_frame", Sort: 23},
 		{ID: 19, ServiceID: serviceDoubaoImageID, ParamRule: serviceParamRuleFixed, Key: "watermark", Mapping: "false", FixedValueType: fixedValueTypeBoolean},
 		{ID: 21, ServiceID: serviceDoubaoVideoID, ParamID: paramResolutionID, ParamRule: serviceParamRuleOption, Key: "resolution", Mapping: doubaoVideoResolutionMapping},
 		{ID: 22, ServiceID: serviceDoubaoVideoID, ParamID: paramAspectRatioID, ParamRule: serviceParamRuleOption, Key: "aspectRatio", Mapping: doubaoVideoRatioMapping},
@@ -113,9 +119,12 @@ var (
 		{ID: 61, ServiceID: serviceDoubaoImage5ID, ParamRule: serviceParamRuleFixed, Key: "sequential_image_generation", Mapping: "disabled", Sort: 4},
 		{ID: 62, ServiceID: serviceDoubaoImage5ID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: doubaoSeedreamSizeMapping},
 		{ID: 63, ServiceID: serviceDoubaoImage5ID, ParamRule: serviceParamRuleFixed, Key: "watermark", Mapping: "false", FixedValueType: fixedValueTypeBoolean},
-		{ID: 64, ServiceID: serviceRunningHubVideoID, ParamID: ParamImageID, ParamRule: serviceParamRuleAttachment, Key: "firstImageUrl", Mapping: "[1]", FileValueFormat: ServiceParamFileValueFormatDataURL},
+		{ID: 64, ServiceID: serviceRunningHubVideoID, ParamID: ParamFirstFrameID, ParamRule: serviceParamRuleAttachment, Key: "firstImageUrl", Name: "首帧", Mapping: "[1]", FileValueFormat: ServiceParamFileValueFormatDataURL, Sort: ParamSortFirstFrame},
 		{ID: 65, ServiceID: serviceRunningHubVideoID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "prompt"},
 		{ID: 66, ServiceID: serviceRunningHubVideoID, ParamRule: serviceParamRuleFixed, Key: "sound", Mapping: "true", FixedValueType: fixedValueTypeBoolean},
+		{ID: 67, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[2].type", Mapping: "image_url", Sort: 24},
+		{ID: 68, ServiceID: serviceDoubaoVideoID, ParamID: ParamLastFrameID, ParamRule: serviceParamRuleAttachment, Key: "content[2].image_url.url", Name: "尾帧", Mapping: "[1]", Sort: ParamSortLastFrame},
+		{ID: 69, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[2].role", Mapping: "last_frame", Sort: 26},
 	})
 
 	paramRuleOptions = []map[string]any{

@@ -53,6 +53,7 @@ import {
   type StoryboardMaterial,
   type StoryboardMaterialType,
   type StoryboardEditorFocus,
+  type StoryboardProductionPlan,
   type StoryboardReferenceField,
   type StoryboardShot,
   type StoryboardSpeech,
@@ -78,6 +79,7 @@ import {
 } from "./space-reference-editor";
 import { StoryboardShotCard } from "./space-storyboard-shot-card";
 import { StoryboardMaterialDialog } from "./space-storyboard-material-dialog";
+import { StoryboardConfirmDialog } from "./space-storyboard-confirm-dialog";
 import { storyboardValidationIssues } from "./space-storyboard-validation";
 import { StoryboardValidationPanel } from "./space-storyboard-validation-panel";
 import { StoryboardReferencePanel } from "./space-storyboard-reference-panel";
@@ -138,7 +140,10 @@ export function StoryboardView({
   disabled?: boolean;
   onSave?: (storyboard: StoryboardDocument) => Promise<void>;
   onChange?: (storyboard: StoryboardDocument) => void;
-  onConfirm?: (storyboard: StoryboardDocument) => void | Promise<void>;
+  onConfirm?: (
+    storyboard: StoryboardDocument,
+    productionPlan: StoryboardProductionPlan,
+  ) => boolean | Promise<boolean>;
   onReview?: (storyboard: StoryboardDocument) => void | Promise<void>;
   onCreateRevision?: () => void | Promise<void>;
   workflowAction?: StoryboardWorkflowAction;
@@ -158,6 +163,7 @@ export function StoryboardView({
   const [editingMaterialId, setEditingMaterialId] = useState("");
   const [creatingMaterial, setCreatingMaterial] =
     useState<StoryboardMaterial | null>(null);
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [draggedShotId, setDraggedShotId] = useState("");
   const [dragOverShotId, setDragOverShotId] = useState("");
   const [dragOrder, setDragOrder] = useState<string[]>([]);
@@ -901,7 +907,7 @@ export function StoryboardView({
                         Boolean(workflowAction) ||
                         hasBlockingIssues
                       }
-                      onClick={() => void onConfirm(draft)}
+                      onClick={() => setConfirmDialogOpen(true)}
                     >
                       {workflowAction === "confirming" ? (
                         <Loader2 size={13} className="ws-spin" />
@@ -970,6 +976,15 @@ export function StoryboardView({
           </div>
         </main>
       </div>
+
+      {confirmDialogOpen && onConfirm && !confirmed ? (
+        <StoryboardConfirmDialog
+          storyboard={draft}
+          submitting={workflowAction === "confirming"}
+          onClose={() => setConfirmDialogOpen(false)}
+          onConfirm={(productionPlan) => onConfirm(draft, productionPlan)}
+        />
+      ) : null}
 
       {editingShot ? (
         <StoryboardShotDialog

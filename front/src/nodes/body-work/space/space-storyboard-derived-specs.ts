@@ -4,6 +4,10 @@ import {
   STORYBOARD_TRANSITION_LABELS,
   isStoryboardVisibleDialogue,
   storyboardHasVisibleDialogue,
+  storyboardProductionIncludesLipSync,
+  storyboardProductionIncludesSubtitles,
+  storyboardProductionIncludesVisualPipeline,
+  storyboardProductionIncludesVoice,
   storyboardPromptWithStyle,
   storyboardShotSubtitleTracks,
   storyboardShotFallbackPrompt,
@@ -106,7 +110,7 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
     direction: "downstream",
     sourceGroupKeys: MATERIAL_GROUP_KEYS,
     layoutIndex: 0,
-    enabled: () => true,
+    enabled: storyboardProductionIncludesVisualPipeline,
     items: (storyboard) =>
       storyboard.shots.flatMap((shot, index) => {
         if (shot.continue_previous) {
@@ -142,7 +146,7 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
     direction: "downstream",
     sourceGroupKeys: ["shot_images"],
     layoutIndex: 1,
-    enabled: () => true,
+    enabled: storyboardProductionIncludesVisualPipeline,
     items: (storyboard) =>
       storyboard.shots.map((shot, index) => {
         const sources = storyboardShotVideoSources(storyboard, shot, index);
@@ -171,7 +175,7 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
     outputType: "speech",
     direction: "downstream",
     layoutIndex: 2,
-    enabled: (storyboard) => storyboard.shots.some(hasStoryboardSpeech),
+    enabled: storyboardProductionIncludesVoice,
     items: storyboardSpeechItems,
   },
   {
@@ -183,10 +187,7 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
     local: true,
     direction: "downstream",
     layoutIndex: 3,
-    enabled: (storyboard) =>
-      storyboard.shots.some(
-        (shot) => storyboardShotSubtitleTracks(shot).length > 0,
-      ),
+    enabled: storyboardProductionIncludesSubtitles,
     items: storyboardSubtitleItems,
   },
   {
@@ -198,8 +199,7 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
     direction: "downstream",
     sourceGroupKeys: ["shots", "speech"],
     layoutIndex: 4,
-    enabled: (storyboard) =>
-      storyboard.shots.some(storyboardHasVisibleDialogue),
+    enabled: storyboardProductionIncludesLipSync,
     items: storyboardLipSyncItems,
   },
 ];
@@ -219,6 +219,7 @@ function materialGroupSpec(
     direction: "upstream",
     layoutIndex,
     enabled: (storyboard) =>
+      storyboardProductionIncludesVisualPipeline(storyboard) &&
       storyboard.materials.some((material) => material.type === itemType),
     items: (storyboard) =>
       storyboard.materials
@@ -359,10 +360,6 @@ function storyboardSpeechTitle(
     (item) => item.type === "character" && item.id === speech.character_id,
   );
   return `镜头 ${shotOrder} ${character?.name || "角色"}配音`;
-}
-
-function hasStoryboardSpeech(shot: StoryboardShot) {
-  return shot.speech.some((speech) => speech.text.trim());
 }
 
 function storyboardMaterialPrompt(

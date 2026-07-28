@@ -23,7 +23,7 @@ import {
 import { PowerParamIcon } from "./space-power-icon";
 import { CanvasReferenceEditor } from "./space-reference-editor";
 import { findAssetMediaURL } from "../asset/asset-content";
-import { assetKindLabel, assetKindsAccept } from "../asset/asset-contract";
+import { assetKindsAccept } from "../asset/asset-contract";
 import { AssetKindIcon } from "../asset/asset-preview";
 import { normalizeAssetRecord } from "../asset/asset-api";
 import { AssetPickerDialog } from "../asset/asset-picker-dialog";
@@ -594,30 +594,28 @@ function ComposerMenu({
         }
       }}
     >
-      <SpaceTooltip label={iconOnly ? label : undefined}>
-        <button
-          type="button"
-          className={`ws-prompt-tool ${iconOnly ? "is-icon-only" : ""} ${open ? "is-open" : ""}`}
-          disabled={disabled}
-          aria-label={label}
-          aria-expanded={variant === "attachments" ? open : undefined}
-          aria-haspopup={variant === "attachments" ? "menu" : undefined}
-          onFocus={() => {
-            if (!disabled) {
-              onToggle(id);
-            }
-          }}
-          onClick={() => {
-            if (!disabled) {
-              onToggle(open ? "" : id);
-            }
-          }}
-        >
-          {icon}
-          {!iconOnly ? <span>{label}</span> : null}
-          {!iconOnly ? <ChevronDown size={14} /> : null}
-        </button>
-      </SpaceTooltip>
+      <button
+        type="button"
+        className={`ws-prompt-tool ${iconOnly ? "is-icon-only" : ""} ${open ? "is-open" : ""}`}
+        disabled={disabled}
+        aria-label={label}
+        aria-expanded={variant === "attachments" ? open : undefined}
+        aria-haspopup={variant === "attachments" ? "menu" : undefined}
+        onFocus={() => {
+          if (!disabled) {
+            onToggle(id);
+          }
+        }}
+        onClick={() => {
+          if (!disabled) {
+            onToggle(open ? "" : id);
+          }
+        }}
+      >
+        {icon}
+        {!iconOnly ? <span>{label}</span> : null}
+        {!iconOnly ? <ChevronDown size={14} /> : null}
+      </button>
       {open ? (
         <div className={`ws-prompt-popover ${variantClass}`}>{children}</div>
       ) : null}
@@ -780,14 +778,7 @@ function paramControlLabel(param: PowerParam, value: unknown) {
 }
 
 function uploadParamLabel(param: PowerParam) {
-  const kinds = acceptedAssetKinds(param);
-  if (kinds.length === 1) {
-    return assetKindLabel(kinds[0]);
-  }
-  const name = String(param.name || "")
-    .replace(/^(上传|添加|选择)/, "")
-    .trim();
-  return name || "文件";
+  return String(param.name || param.key || "").trim() || "文件";
 }
 
 function uploadParamKind(param: PowerParam): LibraryAssetKind {

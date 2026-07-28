@@ -42,6 +42,9 @@ const (
 	serviceDoubaoImage5ID           uint64 = 21
 	serviceDoubaoGLMID              uint64 = 22
 	serviceRunningHubVideoID        uint64 = 23
+
+	ServiceDoubaoVideoID     = serviceDoubaoVideoID
+	ServiceRunningHubVideoID = serviceRunningHubVideoID
 )
 
 var (
