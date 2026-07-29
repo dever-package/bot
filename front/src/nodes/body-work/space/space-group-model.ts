@@ -70,7 +70,7 @@ export function withCanvasNodeGroupAtPosition(
   position: { x: number; y: number },
 ) {
   const target = nodes.find((node) => node.id === nodeId);
-  if (!target || target.type === "group" || target.storyboardItem) {
+  if (!target || target.type === "group") {
     return nodes;
   }
   const moved = { ...target, ...position };
@@ -139,7 +139,6 @@ function containingCanvasGroupId(
     .filter(
       (node) =>
         node.type === "group" &&
-        node.group?.origin !== "script" &&
         node.id !== target.id &&
         centerX >= node.x + GROUP_CONTENT_PADDING &&
         centerX <= node.x + node.width - GROUP_CONTENT_PADDING &&

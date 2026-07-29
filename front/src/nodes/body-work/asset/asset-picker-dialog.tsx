@@ -19,6 +19,7 @@ export function AssetPickerDialog({
   initialFilters,
   allowedKinds,
   initialSelectedAssetIDs = [],
+  usedAssetIDs = [],
   multiple = false,
   maxSelection = 1,
   confirmSelection = false,
@@ -37,6 +38,7 @@ export function AssetPickerDialog({
   initialFilters?: Partial<AssetFilters>;
   allowedKinds?: AssetKind[];
   initialSelectedAssetIDs?: number[];
+  usedAssetIDs?: number[];
   multiple?: boolean;
   maxSelection?: number;
   confirmSelection?: boolean;
@@ -250,6 +252,7 @@ export function AssetPickerDialog({
           selectable
           excludeCollections
           selectedAssetIDs={selectedAssetIDs}
+          usedAssetIDs={usedAssetIDs}
           reloadSignal={reloadSignal}
           onAssetChanged={(asset) => {
             if (selectedAssetIDs.includes(asset.id)) {

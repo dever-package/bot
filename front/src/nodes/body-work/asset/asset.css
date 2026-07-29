@@ -273,7 +273,8 @@
   box-shadow: 0 5px 16px rgba(21, 36, 29, 0.08);
 }
 
-.wb-asset-card.is-selected {
+.wb-asset-card.is-selected,
+.wb-asset-card.is-used {
   border-color: var(--body-work-primary);
   box-shadow: 0 0 0 2px var(--body-work-ring);
 }
@@ -869,7 +870,8 @@
 
 .wb-asset-card:hover .wb-asset-card-actions,
 .wb-asset-card:focus-within .wb-asset-card-actions,
-.wb-asset-card.is-selected .wb-asset-card-actions {
+.wb-asset-card.is-selected .wb-asset-card-actions,
+.wb-asset-card.is-used .wb-asset-card-actions {
   opacity: 1;
   transform: translateY(0);
 }
@@ -908,9 +910,15 @@
   color: var(--body-work-on-primary);
 }
 
-.wb-asset-card-actions button.is-primary.is-selected {
+.wb-asset-card-actions button.is-primary.is-selected,
+.wb-asset-card-actions button.is-primary.is-used {
   border-color: var(--body-work-primary);
   background: var(--body-work-primary);
+}
+
+.wb-asset-card-actions button.is-primary.is-used:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .wb-asset-card-actions button.is-danger:hover:not(:disabled) {

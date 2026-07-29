@@ -430,7 +430,7 @@ export function NodeDetailDialog({
       );
       setStoryboardWorkflowAction("reviewing");
       try {
-        await onRunNode({
+        const reviewTask = onRunNode({
           ...nodeRef.current,
           composerDraft: {
             ...(nodeRef.current.composerDraft || {}),
@@ -440,15 +440,21 @@ export function NodeDetailDialog({
               : undefined,
           },
         });
-        await loadDetail();
-        toast.success("AI 审查完成，请确认调整后的分镜");
+        toast.info("已开始 AI 审查，正在重新生成分镜");
+        onClose();
+        void reviewTask
+          .then(() => {
+            toast.success("AI 审查完成，可重新打开分镜确认结果");
+          })
+          .catch((error) => {
+            toast.error(errorMessage(error, "AI 审查分镜失败"));
+          });
       } catch (error) {
-        toast.error(errorMessage(error, "AI 审查分镜失败"));
-      } finally {
         setStoryboardWorkflowAction("");
+        toast.error(errorMessage(error, "AI 审查分镜失败"));
       }
     },
-    [draft.flush, loadDetail, onRunNode, storyboardWorkflowAction],
+    [draft.flush, onClose, onRunNode, storyboardWorkflowAction],
   );
 
   const retryDetail = useCallback(async () => {

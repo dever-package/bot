@@ -102,6 +102,7 @@ export type StoryboardWorkflow = {
 };
 
 export const STORYBOARD_OUTPUT_TARGETS = [
+  "shot_images",
   "final_video",
   "shot_videos",
   "storyboard_only",
@@ -121,7 +122,7 @@ export type StoryboardProductionPlan = {
 };
 
 export const DEFAULT_STORYBOARD_PRODUCTION_PLAN: StoryboardProductionPlan = {
-  output_target: "final_video",
+  output_target: "shot_images",
   voice_mode: "auto",
   subtitle_mode: "auto",
   lip_sync_mode: "off",
@@ -129,8 +130,11 @@ export const DEFAULT_STORYBOARD_PRODUCTION_PLAN: StoryboardProductionPlan = {
 };
 
 const LEGACY_STORYBOARD_PRODUCTION_PLAN: StoryboardProductionPlan = {
-  ...DEFAULT_STORYBOARD_PRODUCTION_PLAN,
+  output_target: "final_video",
+  voice_mode: "auto",
+  subtitle_mode: "auto",
   lip_sync_mode: "auto",
+  shot_visual_strategy: "auto",
 };
 
 export type StoryboardStoryline = {
@@ -514,10 +518,18 @@ export function normalizeStoryboardProductionPlan(
   };
 }
 
-export function storyboardProductionIncludesVisualPipeline(
+export function storyboardProductionIncludesReferenceImages(
   storyboard: StoryboardDocument,
 ) {
   return storyboard.production_plan.output_target !== "storyboard_only";
+}
+
+export function storyboardProductionIncludesShotVideos(
+  storyboard: StoryboardDocument,
+) {
+  return ["shot_videos", "final_video"].includes(
+    storyboard.production_plan.output_target,
+  );
 }
 
 export function storyboardProductionIncludesComposition(
@@ -530,7 +542,7 @@ export function storyboardProductionIncludesVoice(
   storyboard: StoryboardDocument,
 ) {
   return (
-    storyboardProductionIncludesVisualPipeline(storyboard) &&
+    storyboardProductionIncludesShotVideos(storyboard) &&
     storyboard.production_plan.voice_mode === "auto" &&
     storyboardSpeechCount(storyboard) > 0
   );
@@ -540,7 +552,7 @@ export function storyboardProductionIncludesSubtitles(
   storyboard: StoryboardDocument,
 ) {
   return (
-    storyboardProductionIncludesVisualPipeline(storyboard) &&
+    storyboardProductionIncludesShotVideos(storyboard) &&
     storyboard.production_plan.subtitle_mode === "auto" &&
     storyboardSubtitleCount(storyboard) > 0
   );

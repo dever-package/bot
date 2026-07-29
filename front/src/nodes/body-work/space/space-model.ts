@@ -705,6 +705,12 @@ function normalizeCanvasNode(
         value.storyboardMaterial,
       ),
     ),
+    storyboardMaterializedSignature: stringValue(
+      firstDefined(
+        value.storyboard_materialized_signature,
+        value.storyboardMaterializedSignature,
+      ),
+    ),
     assetCateId: numberValue(value.asset_cate_id),
     outputType: stringValue(value.output_type),
     count: value.count == null ? undefined : numberValue(value.count),

@@ -10,6 +10,7 @@ import (
 type MediaReference struct {
 	ReferenceType string
 	ReferenceID   uint64
+	Label         string
 	Kind          string
 	URL           string
 	Usage         string
@@ -112,16 +113,23 @@ func BindMediaReferences(
 
 		param, explicit, matched := mediaReferenceTarget(paramByKey, params, reference)
 		if !matched {
-			if reference.Required {
-				return MediaReferenceBindResult{}, fmt.Errorf(
-					"当前能力未配置唯一可接收%s素材的参数",
-					mediaKindLabel(reference.Kind),
-				)
-			}
 			if reference.StrictUsage {
 				return MediaReferenceBindResult{}, fmt.Errorf(
 					"当前能力参数 %s 不支持引用%s素材",
 					reference.Usage,
+					mediaKindLabel(reference.Kind),
+				)
+			}
+			if reference.Required {
+				candidates := MediaParamsForKind(params, reference.Kind)
+				if len(candidates) > 1 {
+					return MediaReferenceBindResult{}, fmt.Errorf(
+						"%s素材未指定用途，请选择对应的能力参数",
+						mediaKindLabel(reference.Kind),
+					)
+				}
+				return MediaReferenceBindResult{}, fmt.Errorf(
+					"当前能力未配置可接收%s素材的参数",
 					mediaKindLabel(reference.Kind),
 				)
 			}

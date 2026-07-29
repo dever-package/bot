@@ -220,7 +220,7 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 	if err != nil {
 		return nil, err
 	}
-	for _, reference := range promptReferences {
+	for _, reference := range canvasPromptBoundReferences(promptReferences) {
 		asset, _, err := resolveCanvasReferenceAsset(ctx, projectID, reference)
 		if err != nil {
 			label := strings.TrimSpace(reference.Label)

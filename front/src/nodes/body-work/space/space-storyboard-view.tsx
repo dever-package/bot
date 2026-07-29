@@ -23,6 +23,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   MAX_STORYBOARD_SHOTS,
   MIN_STORYBOARD_SHOT_DURATION,
@@ -164,6 +165,7 @@ export function StoryboardView({
   const [creatingMaterial, setCreatingMaterial] =
     useState<StoryboardMaterial | null>(null);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
   const [draggedShotId, setDraggedShotId] = useState("");
   const [dragOverShotId, setDragOverShotId] = useState("");
   const [dragOrder, setDragOrder] = useState<string[]>([]);
@@ -171,6 +173,9 @@ export function StoryboardView({
     "before",
   );
   const storyboardRootRef = useRef<HTMLElement>(null);
+  const dialogPortalContainer =
+    storyboardRootRef.current?.closest(".wb-detail-backdrop, .ws-page") ||
+    null;
   const draggedShotIdRef = useRef("");
   const dragOrderRef = useRef<string[]>([]);
   const shotRectsRef = useRef<Map<string, DOMRect>>(new Map());
@@ -888,7 +893,7 @@ export function StoryboardView({
                       type="button"
                       className="ws-storyboard-command"
                       disabled={disabled || Boolean(workflowAction)}
-                      onClick={() => void onReview(draft)}
+                      onClick={() => setReviewDialogOpen(true)}
                     >
                       {workflowAction === "reviewing" ? (
                         <Loader2 size={13} className="ws-spin" />
@@ -981,10 +986,26 @@ export function StoryboardView({
         <StoryboardConfirmDialog
           storyboard={draft}
           submitting={workflowAction === "confirming"}
+          portalContainer={dialogPortalContainer}
           onClose={() => setConfirmDialogOpen(false)}
           onConfirm={(productionPlan) => onConfirm(draft, productionPlan)}
         />
       ) : null}
+
+      <ConfirmDialog
+        open={reviewDialogOpen && Boolean(onReview) && !confirmed}
+        onOpenChange={(open) => {
+          if (!workflowAction) setReviewDialogOpen(open);
+        }}
+        title="AI 审查并优化分镜"
+        desc="将基于当前内容重新生成一份优化后的完整分镜。开始后会关闭详情页，可在画布节点查看生成进度。"
+        confirmText="开始优化"
+        handleConfirm={() => {
+          setReviewDialogOpen(false);
+          void onReview?.(draft);
+        }}
+        isLoading={workflowAction === "reviewing"}
+      />
 
       {editingShot ? (
         <StoryboardShotDialog
@@ -994,11 +1015,7 @@ export function StoryboardView({
           materials={draft.materials}
           readonly={!canEdit}
           referenceAdapter={referenceAdapter}
-          portalContainer={
-            storyboardRootRef.current?.closest(
-              ".wb-detail-backdrop, .ws-page",
-            ) || null
-          }
+          portalContainer={dialogPortalContainer}
           onEditMaterial={setEditingMaterialId}
           onSave={saveShot}
           onClose={() => setEditingShotId("")}
@@ -1015,11 +1032,7 @@ export function StoryboardView({
           existingNames={draft.materials
             .filter((material) => material.id !== activeMaterial.id)
             .map((material) => material.name)}
-          portalContainer={
-            storyboardRootRef.current?.closest(
-              ".wb-detail-backdrop, .ws-page",
-            ) || null
-          }
+          portalContainer={dialogPortalContainer}
           onSave={saveMaterial}
           onRemove={removeMaterial}
           onClose={() => {

@@ -20,6 +20,7 @@ const (
 	storyboardWorkflowConfirm = "confirmed"
 	storyboardMaxSearchDepth  = 12
 	storyboardDefaultAspect   = "16:9"
+	storyboardOutputImages    = "shot_images"
 	storyboardOutputFinal     = "final_video"
 	storyboardOutputShots     = "shot_videos"
 	storyboardOutputOnly      = "storyboard_only"
@@ -500,7 +501,7 @@ func normalizeStoryboardProductionPlan(value any, defaultLipSync string) (map[st
 		return nil, fmt.Errorf("分镜制作方案格式无效")
 	}
 	outputTarget := strings.ToLower(storyboardText(plan["output_target"]))
-	if outputTarget != storyboardOutputFinal && outputTarget != storyboardOutputShots && outputTarget != storyboardOutputOnly {
+	if outputTarget != storyboardOutputImages && outputTarget != storyboardOutputFinal && outputTarget != storyboardOutputShots && outputTarget != storyboardOutputOnly {
 		return nil, fmt.Errorf("分镜制作方案的产出目标无效")
 	}
 	voiceMode, err := storyboardProductionMode(plan["voice_mode"], "配音")
@@ -530,7 +531,7 @@ func normalizeStoryboardProductionPlan(value any, defaultLipSync string) (map[st
 
 func defaultStoryboardProductionPlan(lipSyncMode string) map[string]any {
 	return map[string]any{
-		"output_target":        storyboardOutputFinal,
+		"output_target":        storyboardOutputImages,
 		"voice_mode":           storyboardProductionAuto,
 		"subtitle_mode":        storyboardProductionAuto,
 		"lip_sync_mode":        lipSyncMode,

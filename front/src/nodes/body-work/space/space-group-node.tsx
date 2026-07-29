@@ -166,7 +166,7 @@ export function CanvasGroupNodeView({
             已完成
           </span>
         ) : null}
-        {managed && onEditStructure ? (
+        {onEditStructure ? (
           <SpaceTooltip label="编辑分镜结构">
             <button
               type="button"

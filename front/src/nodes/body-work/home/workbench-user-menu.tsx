@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -29,15 +31,14 @@ import {
   useNavigate,
   useTheme,
 } from "@dever/front-plugin";
-import {
-  BodyFilingContent,
-  BodyFilingFallbackRows,
-  hasBodyFilingInfo,
-  type BodyFilingInfo,
-} from "../shared/body-filing";
 import type { WorkbenchTeam } from "./workbench-api";
 import { WorkbenchAvatar } from "./workbench-avatar";
-import { WorkbenchProfileDialog } from "./workbench-profile-dialog";
+
+const WorkbenchProfileDialog = lazy(() =>
+  import("./workbench-profile-dialog").then((module) => ({
+    default: module.WorkbenchProfileDialog,
+  })),
+);
 
 type MenuPanel = "team" | "theme" | null;
 
@@ -45,13 +46,11 @@ export function WorkbenchUserMenu({
   teams,
   teamID,
   disabled,
-  filing,
   onTeamChange,
 }: {
   teams: WorkbenchTeam[];
   teamID: number;
   disabled: boolean;
-  filing: BodyFilingInfo;
   onTeamChange: (teamID: number) => void;
 }) {
   const auth = useAuthStore((state: any) => state.auth);
@@ -65,7 +64,6 @@ export function WorkbenchUserMenu({
   const [profileOpen, setProfileOpen] = useState(false);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const selectedTeam = teams.find((team) => team.id === teamID);
-  const hasFiling = hasBodyFilingInfo(filing);
   const roleLabel =
     Array.isArray(user?.role) && user.role.length > 0
       ? user.role.join("、")
@@ -244,26 +242,20 @@ export function WorkbenchUserMenu({
                 }}
               />
             </div>
-
-            {hasFiling ? (
-              <footer className="hb-user-filing">
-                <BodyFilingContent
-                  filing={filing}
-                  className="hb-user-filing-rich"
-                  fallback={<BodyFilingFallbackRows filing={filing} />}
-                />
-              </footer>
-            ) : null}
           </div>
         ) : null}
       </div>
 
-      <WorkbenchProfileDialog
-        open={profileOpen}
-        roleLabel={roleLabel}
-        onOpenChange={setProfileOpen}
-        onPasswordChanged={signOut}
-      />
+      {profileOpen ? (
+        <Suspense fallback={null}>
+          <WorkbenchProfileDialog
+            open={profileOpen}
+            roleLabel={roleLabel}
+            onOpenChange={setProfileOpen}
+            onPasswordChanged={signOut}
+          />
+        </Suspense>
+      ) : null}
 
       <Dialog open={signOutOpen} onOpenChange={setSignOutOpen}>
         <DialogContent className="sm:max-w-sm">

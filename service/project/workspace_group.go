@@ -196,7 +196,8 @@ func mergeCanvasContextOutputs(values ...any) any {
 		if value == nil {
 			continue
 		}
-		if textValue(valueAtPath(value, "type")) == "group_output" {
+		switch textValue(valueAtPath(value, "type")) {
+		case "group_output", "reference_output":
 			result = append(result, value)
 			continue
 		}

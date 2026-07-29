@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { loadAssetDetail } from "./asset-api";
+import { assetKindsAccept } from "./asset-contract";
 import { AssetPickerDialog } from "./asset-picker-dialog";
 import {
   assetPreviewOutput,
@@ -7,6 +8,7 @@ import {
 } from "./asset-content";
 import type {
   ReferenceOption,
+  ReferencePart,
   ReferencePreviewRequest,
   ReferenceProvider,
 } from "../../show/agent-chat/reference";
@@ -35,12 +37,20 @@ export function useAssetReferenceProvider({
   initialFilters,
   allowedKinds,
   onSelect,
+  onUpload,
 }: {
   teamID: number;
   scopeProjectID?: number;
   initialFilters?: Partial<AssetFilters>;
   allowedKinds?: string[];
   onSelect?: (option: WorkbenchReferenceOption) => void;
+  onUpload?: (
+    files: File[],
+    context: {
+      preferredUsage?: string;
+      acceptedKinds?: AssetKind[];
+    },
+  ) => Promise<AssetRecord[]>;
 }): ReferenceProvider {
   const filterKey = JSON.stringify(initialFilters || {});
   const kindKey = JSON.stringify(allowedKinds || []);
@@ -82,10 +92,11 @@ export function useAssetReferenceProvider({
           initialFilters={stableFilters}
           allowedKinds={stableKinds}
           onReferenceSelect={onSelect}
+          onUpload={onUpload}
         />
       ),
     }),
-    [onSelect, scopeProjectID, stableFilters, stableKinds, teamID],
+    [onSelect, onUpload, scopeProjectID, stableFilters, stableKinds, teamID],
   );
 }
 
@@ -95,7 +106,12 @@ function AssetReferencePicker({
   scopeProjectID,
   initialFilters,
   allowedKinds,
+  acceptedKinds,
+  preferredUsage,
+  maxSelection = 1,
+  selectedReferences = [],
   onReferenceSelect,
+  onUpload,
   onSelect,
   onClose,
 }: {
@@ -104,10 +120,37 @@ function AssetReferencePicker({
   scopeProjectID: number;
   initialFilters?: Partial<AssetFilters>;
   allowedKinds?: AssetKind[];
+  acceptedKinds?: string[];
+  preferredUsage?: string;
+  maxSelection?: number;
+  selectedReferences?: Extract<ReferencePart, { type: "reference" }>[];
   onReferenceSelect?: (option: WorkbenchReferenceOption) => void;
+  onUpload?: (
+    files: File[],
+    context: {
+      preferredUsage?: string;
+      acceptedKinds?: AssetKind[];
+    },
+  ) => Promise<AssetRecord[]>;
   onSelect: (option: ReferenceOption) => void;
   onClose: () => void;
 }) {
+  const requestedKinds = normalizeReferenceKinds(acceptedKinds);
+  const effectiveKinds = intersectReferenceKinds(
+    allowedKinds || [],
+    requestedKinds,
+  );
+  const selectionLimit = Math.max(1, Number(maxSelection || 1));
+  const usedAssetIDs = Array.from(
+    new Set(
+      selectedReferences.flatMap((reference) =>
+        reference.ref_type === "asset" && Number(reference.ref_id || 0) > 0
+          ? [Number(reference.ref_id)]
+          : [],
+      ),
+    ),
+  );
+  const usedAssetIDSet = new Set(usedAssetIDs);
   return (
     <AssetPickerDialog
       open={open}
@@ -116,22 +159,45 @@ function AssetReferencePicker({
       title="选择资产"
       description="插入资产当前版本"
       initialFilters={initialFilters}
-      allowedKinds={allowedKinds}
+      allowedKinds={effectiveKinds}
+      multiple={selectionLimit > 1}
+      maxSelection={selectionLimit}
+      confirmSelection
+      usedAssetIDs={usedAssetIDs}
+      validateAsset={(asset) => {
+        if (usedAssetIDSet.has(asset.id)) {
+          return "该素材已使用";
+        }
+        return findAssetMediaURL(asset.version?.content, asset.kind)
+          ? ""
+          : "该资产当前版本没有可用文件，无法用于此参数。";
+      }}
+      uploadAccept={assetKindsAccept(effectiveKinds)}
+      onUpload={
+        onUpload
+          ? (files) =>
+              onUpload(files, {
+                preferredUsage,
+                acceptedKinds: effectiveKinds,
+              })
+          : undefined
+      }
       onClose={onClose}
       onConfirm={(assets) => {
-        const asset = assets[0];
-        if (!asset) {
-          return;
+        for (const asset of assets) {
+          const option = assetReferenceOption(asset, preferredUsage);
+          onReferenceSelect?.(option);
+          onSelect(option);
         }
-        const option = assetReferenceOption(asset);
-        onReferenceSelect?.(option);
-        onSelect(option);
       }}
     />
   );
 }
 
-function assetReferenceOption(asset: AssetRecord): WorkbenchReferenceOption {
+function assetReferenceOption(
+  asset: AssetRecord,
+  usage = "",
+): WorkbenchReferenceOption {
   const media = assetReferenceMedia(asset);
   return {
     key: `asset:${asset.id}:${asset.versionID}`,
@@ -139,6 +205,7 @@ function assetReferenceOption(asset: AssetRecord): WorkbenchReferenceOption {
     refId: asset.id,
     versionID: asset.versionID,
     trigger: "@",
+    usage,
     label: asset.name,
     description: asset.summary,
     preview: {
@@ -147,6 +214,40 @@ function assetReferenceOption(asset: AssetRecord): WorkbenchReferenceOption {
       url: media[0]?.url,
     },
   };
+}
+
+function normalizeReferenceKinds(kinds: string[] | undefined) {
+  const validKinds = new Set<AssetKind>([
+    "collection",
+    "text",
+    "image",
+    "audio",
+    "video",
+    "richtext",
+    "file",
+  ]);
+  return Array.from(
+    new Set(
+      (kinds || []).flatMap((kind) => {
+        const normalized = String(kind || "").trim() as AssetKind;
+        return validKinds.has(normalized) ? [normalized] : [];
+      }),
+    ),
+  );
+}
+
+function intersectReferenceKinds(
+  configuredKinds: AssetKind[],
+  requestedKinds: AssetKind[],
+) {
+  if (configuredKinds.length === 0) {
+    return requestedKinds;
+  }
+  if (requestedKinds.length === 0) {
+    return configuredKinds;
+  }
+  const requested = new Set(requestedKinds);
+  return configuredKinds.filter((kind) => requested.has(kind));
 }
 
 const referenceMediaKinds = new Set<AssetKind>([

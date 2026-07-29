@@ -1,10 +1,15 @@
 import { getCompatModule } from "@dever/front-plugin";
-import type { ComponentType } from "react";
+import { lazy, Suspense, type ComponentType } from "react";
 import {
   parseStoryboardOutput,
   type StoryboardDocument,
 } from "./space-storyboard";
-import { StoryboardView } from "./space-storyboard-view";
+
+const StoryboardView = lazy(() =>
+  import("./space-storyboard-view").then((module) => ({
+    default: module.StoryboardView,
+  })),
+);
 
 type SharedContentViewProps = {
   output?: any;
@@ -96,12 +101,16 @@ export function CanvasNodeContentView({
           }
         }}
       >
-        <StoryboardView
-          storyboard={storyboard}
-          editable={storyboardEditable}
-          disabled={storyboardDisabled}
-          onSave={onStoryboardSave}
-        />
+        <Suspense
+          fallback={<div className="min-h-24" aria-busy="true" />}
+        >
+          <StoryboardView
+            storyboard={storyboard}
+            editable={storyboardEditable}
+            disabled={storyboardDisabled}
+            onSave={onStoryboardSave}
+          />
+        </Suspense>
       </div>
     );
   }

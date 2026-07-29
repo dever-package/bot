@@ -65,6 +65,8 @@ export type ReferencePart =
       usage?: string;
       ref_trigger?: string;
       ref_version_id?: number;
+      ref_origin?: string;
+      ref_origin_id?: string;
     };
 
 export type ReferenceContent = {
@@ -124,6 +126,8 @@ export type ReferenceOption = {
   usage?: string;
   trigger?: string;
   versionID?: number;
+  origin?: string;
+  originID?: string;
 };
 
 export type ReferenceLoadRequest = {
@@ -149,6 +153,13 @@ export type ReferenceProvider = {
   searchPlaceholder?: string;
   renderPicker?: (props: {
     open: boolean;
+    acceptedKinds?: string[];
+    preferredUsage?: string;
+    maxSelection?: number;
+    selectedReferences?: Extract<
+      ReferencePart,
+      { type: "reference" }
+    >[];
     onSelect: (option: ReferenceOption) => void;
     onClose: () => void;
   }) => import("react").ReactNode;

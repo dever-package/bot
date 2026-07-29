@@ -73,6 +73,7 @@ type PersistedCanvasNode = {
     result_source_signature?: string;
     stale?: boolean;
   };
+  storyboard_materialized_signature?: string;
   asset_cate_id?: number;
   kind?: string;
   output_type?: string;
@@ -199,6 +200,11 @@ function persistedCanvasNode(
       ...(item.stale ? { stale: true } : {}),
     };
   }
+  assignText(
+    result,
+    "storyboard_materialized_signature",
+    node.storyboardMaterializedSignature,
+  );
   assignNumber(result, "asset_cate_id", node.assetCateId);
   assignText(result, "kind", node.kind);
   assignText(result, "output_type", node.outputType);

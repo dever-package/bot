@@ -85,6 +85,7 @@ func prepareCanvasStoryboardShotInput(
 	clearCanvasStoryboardMedia(params)
 	mediaReferences = append([]energoninput.MediaReference{{
 		ReferenceType: "storyboard_tail_frame",
+		Label:         "上一镜头尾帧",
 		Kind:          botprotocol.MediaTypeImage,
 		URL:           tailFrame.URL,
 		Required:      true,

@@ -20,6 +20,7 @@ export function AssetCard({
   view = "assets",
   selectable = false,
   selected = false,
+  used = false,
   busy = false,
   onOpen,
   onRename,
@@ -32,6 +33,7 @@ export function AssetCard({
   view?: AssetView;
   selectable?: boolean;
   selected?: boolean;
+  used?: boolean;
   busy?: boolean;
   onOpen: (asset: AssetRecord) => void;
   onRename: (asset: AssetRecord) => void;
@@ -54,7 +56,7 @@ export function AssetCard({
 
   return (
     <article
-      className={`wb-asset-card ${collection ? "is-collection" : ""} ${selected ? "is-selected" : ""} ${inTrash ? "is-trash" : ""}`.trim()}
+      className={`wb-asset-card ${collection ? "is-collection" : ""} ${selected ? "is-selected" : ""} ${used ? "is-used" : ""} ${inTrash ? "is-trash" : ""}`.trim()}
     >
       <div className="wb-asset-card-main">
         <div className="wb-asset-card-preview">
@@ -135,12 +137,12 @@ export function AssetCard({
         {!collection && !inTrash && selectable && onSelect ? (
           <button
             type="button"
-            className={`is-primary ${selected ? "is-selected" : ""}`.trim()}
-            disabled={busy}
+            className={`is-primary ${selected ? "is-selected" : ""} ${used ? "is-used" : ""}`.trim()}
+            disabled={busy || used}
             onClick={() => onSelect(asset)}
           >
             <Check aria-hidden="true" />
-            {selected ? "已选" : "使用"}
+            {used ? "已使用" : selected ? "已选" : "使用"}
           </button>
         ) : null}
       </div>

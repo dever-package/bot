@@ -53,6 +53,10 @@ export function storyboardManagedNodeIds(nodes: SpaceCanvasNode[]) {
   return managedNodeIds;
 }
 
+export function storyboardStructureLockedNodeIds(nodes: SpaceCanvasNode[]) {
+  return storyboardSourceNodeIds(nodes);
+}
+
 export function storyboardSourceNodeIdForNode(
   nodes: SpaceCanvasNode[],
   node: SpaceCanvasNode,
@@ -281,6 +285,9 @@ function storyboardDependencyNodeIds(node: SpaceCanvasNode) {
 function storyboardSourceNodeIds(nodes: SpaceCanvasNode[]) {
   const sourceNodeIds = new Set<string>();
   for (const node of nodes) {
+    if (node.storyboardMaterializedSignature) {
+      sourceNodeIds.add(node.id);
+    }
     if (node.group?.origin === "script" && node.group.sourceNodeId) {
       sourceNodeIds.add(node.group.sourceNodeId);
     }

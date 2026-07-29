@@ -16,7 +16,7 @@ import {
   type BodyUploadedFile,
 } from "../asset/upload-asset-api";
 import { useAssetReferenceProvider } from "../asset/asset-reference-provider";
-import { WorkbenchEmpty } from "./function-page";
+import { WorkbenchEmpty } from "./workbench-empty";
 import {
   saveWorkbenchDialogueAsset,
   scopedWorkbenchApi,

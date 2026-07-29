@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Archive,
   Building2,
@@ -14,7 +22,6 @@ import {
   type BodyHomeMenuConfig,
   useBodyLoginConfig,
 } from "../auth/site-config";
-import { WorkProjectPage } from "../project/project-page";
 import { BodyToaster } from "../shared/body-toaster";
 import {
   bodyPageBackgroundStyle,
@@ -29,9 +36,6 @@ import type {
   AssetKind,
   AssetRecord,
 } from "../asset/asset-types";
-import { WorkbenchAssetPage } from "./asset-page";
-import { WorkbenchDialoguePage } from "./dialogue-page";
-import { WorkbenchFunctionPage } from "./function-page";
 import {
   loadBodyContentNavigation,
   type BodyContentNavigation,
@@ -43,6 +47,27 @@ import {
 } from "./workbench-sidebar";
 import "./workbench-sidebar.css";
 import { loadWorkbenchCatalog, type WorkbenchCatalog } from "./workbench-api";
+
+const WorkProjectPage = lazy(() =>
+  import("../project/project-page").then((module) => ({
+    default: module.WorkProjectPage,
+  })),
+);
+const WorkbenchAssetPage = lazy(() =>
+  import("./asset-page").then((module) => ({
+    default: module.WorkbenchAssetPage,
+  })),
+);
+const WorkbenchDialoguePage = lazy(() =>
+  import("./dialogue-page").then((module) => ({
+    default: module.WorkbenchDialoguePage,
+  })),
+);
+const WorkbenchFunctionPage = lazy(() =>
+  import("./function-page").then((module) => ({
+    default: module.WorkbenchFunctionPage,
+  })),
+);
 
 const TEAM_STORAGE_KEY = "bot.body.workbench.team";
 const EMPTY_CONTENT_NAVIGATION: BodyContentNavigation = {
@@ -296,42 +321,44 @@ function PageContent({
   }, [page]);
 
   return (
-    <div className="h-full min-h-0">
-      {visitedPages.includes("function") ? (
-        <div className={page === "function" ? "h-full min-h-0" : "hidden"}>
-          <WorkbenchFunctionPage
+    <Suspense fallback={<PageLoading />}>
+      <div className="h-full min-h-0">
+        {page === "function" || visitedPages.includes("function") ? (
+          <div className={page === "function" ? "h-full min-h-0" : "hidden"}>
+            <WorkbenchFunctionPage
+              teamID={teamID}
+              powers={catalog.powers}
+              powerCategories={catalog.powerCategories}
+              continuationAsset={continuationAsset}
+              onClearContinuation={onClearContinuation}
+            />
+          </div>
+        ) : null}
+        {page === "dialogue" || visitedPages.includes("dialogue") ? (
+          <div className={page === "dialogue" ? "h-full min-h-0" : "hidden"}>
+            <WorkbenchDialoguePage
+              teamID={teamID}
+              roles={catalog.roles}
+              continuationAsset={continuationAsset}
+              onClearContinuation={onClearContinuation}
+            />
+          </div>
+        ) : null}
+        {page === "works" ? (
+          <div className="h-full overflow-y-auto">
+            <WorkProjectPage key={teamID} teamID={teamID} />
+          </div>
+        ) : null}
+        {page === "assets" ? (
+          <WorkbenchAssetPage
             teamID={teamID}
-            powers={catalog.powers}
-            powerCategories={catalog.powerCategories}
-            continuationAsset={continuationAsset}
-            onClearContinuation={onClearContinuation}
+            onContinue={onContinueAsset}
+            canContinue={canContinueAsset}
+            catalogOptions={assetCatalogOptions}
           />
-        </div>
-      ) : null}
-      {visitedPages.includes("dialogue") ? (
-        <div className={page === "dialogue" ? "h-full min-h-0" : "hidden"}>
-          <WorkbenchDialoguePage
-            teamID={teamID}
-            roles={catalog.roles}
-            continuationAsset={continuationAsset}
-            onClearContinuation={onClearContinuation}
-          />
-        </div>
-      ) : null}
-      {page === "works" ? (
-        <div className="h-full overflow-y-auto">
-          <WorkProjectPage key={teamID} teamID={teamID} />
-        </div>
-      ) : null}
-      {page === "assets" ? (
-        <WorkbenchAssetPage
-          teamID={teamID}
-          onContinue={onContinueAsset}
-          canContinue={canContinueAsset}
-          catalogOptions={assetCatalogOptions}
-        />
-      ) : null}
-    </div>
+        ) : null}
+      </div>
+    </Suspense>
   );
 }
 

@@ -922,50 +922,6 @@
   color: var(--body-work-green);
 }
 
-.hb-user-filing {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  border-top: 1px solid var(--laper-line);
-  margin-top: 7px;
-  padding: 10px 7px 2px;
-}
-
-.hb-user-filing a,
-.hb-user-filing span {
-  color: var(--laper-muted);
-  font-size: 9.5px;
-  line-height: 1.55;
-  text-decoration: none;
-}
-
-.hb-user-filing a:hover {
-  color: var(--body-work-green);
-  text-decoration: underline;
-}
-
-.hb-user-filing .hb-user-filing-rich {
-  width: 100%;
-  min-width: 0;
-  color: var(--laper-muted);
-  font-size: 9.5px;
-  line-height: 1.55;
-}
-
-.hb-user-filing-rich :is(p, h1, h2, h3, h4, h5, h6, blockquote, ul, ol) {
-  margin: 0;
-  padding: 0;
-}
-
-.hb-user-filing-rich :is(hr, img, video, audio, table, figure) {
-  display: none;
-}
-
-.hb-user-filing-rich * {
-  font-size: inherit !important;
-  line-height: inherit !important;
-}
-
 .hb-profile-modal {
   --hb-profile-accent: var(--body-work-primary);
   display: flex;

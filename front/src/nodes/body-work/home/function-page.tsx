@@ -15,6 +15,7 @@ import {
 } from "./workbench-power-history";
 import { AssetContinuationNotice } from "./asset-continuation";
 import { WorkbenchPowerPicker } from "./workbench-power-picker";
+import { WorkbenchEmpty } from "./workbench-empty";
 import type { PowerCategory } from "../shared/power-menu";
 
 export function WorkbenchFunctionPage({
@@ -238,22 +239,5 @@ function SaveToolMaterialButton({
         if (targetAssetID) onSaved();
       }}
     />
-  );
-}
-
-export function WorkbenchEmpty({
-  icon: Icon,
-  title,
-}: {
-  icon: typeof Zap;
-  title: string;
-}) {
-  return (
-    <div className="flex h-full min-h-[280px] items-center justify-center bg-white px-6 text-center">
-      <div>
-        <Icon className="mx-auto mb-3 size-6 text-[#8b9691]" />
-        <p className="m-0 text-sm font-medium text-[#4f5a55]">{title}</p>
-      </div>
-    </div>
   );
 }

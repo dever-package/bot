@@ -5,8 +5,9 @@ import {
   isStoryboardVisibleDialogue,
   storyboardHasVisibleDialogue,
   storyboardProductionIncludesLipSync,
+  storyboardProductionIncludesReferenceImages,
+  storyboardProductionIncludesShotVideos,
   storyboardProductionIncludesSubtitles,
-  storyboardProductionIncludesVisualPipeline,
   storyboardProductionIncludesVoice,
   storyboardPromptWithStyle,
   storyboardShotSubtitleTracks,
@@ -110,7 +111,7 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
     direction: "downstream",
     sourceGroupKeys: MATERIAL_GROUP_KEYS,
     layoutIndex: 0,
-    enabled: storyboardProductionIncludesVisualPipeline,
+    enabled: storyboardProductionIncludesReferenceImages,
     items: (storyboard) =>
       storyboard.shots.flatMap((shot, index) => {
         if (shot.continue_previous) {
@@ -146,7 +147,7 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
     direction: "downstream",
     sourceGroupKeys: ["shot_images"],
     layoutIndex: 1,
-    enabled: storyboardProductionIncludesVisualPipeline,
+    enabled: storyboardProductionIncludesShotVideos,
     items: (storyboard) =>
       storyboard.shots.map((shot, index) => {
         const sources = storyboardShotVideoSources(storyboard, shot, index);
@@ -219,7 +220,7 @@ function materialGroupSpec(
     direction: "upstream",
     layoutIndex,
     enabled: (storyboard) =>
-      storyboardProductionIncludesVisualPipeline(storyboard) &&
+      storyboardProductionIncludesReferenceImages(storyboard) &&
       storyboard.materials.some((material) => material.type === itemType),
     items: (storyboard) =>
       storyboard.materials

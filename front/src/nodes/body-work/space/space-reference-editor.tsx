@@ -25,6 +25,15 @@ type ReferenceOption = {
     url?: string;
   };
   usage?: string;
+  origin?: string;
+  originID?: string;
+};
+
+export type CanvasReferencePickerRequest = {
+  id: string | number;
+  trigger?: string;
+  preferredUsage?: string;
+  acceptedKinds?: string[];
 };
 
 type ReferenceLoadRequest = {
@@ -53,6 +62,13 @@ type ReferencePreview = {
   content?: unknown;
 };
 
+export type CanvasReferenceUsageOption = {
+  key: string;
+  label: string;
+  acceptedKinds?: string[];
+  maxFiles?: number;
+};
+
 type ReferenceEditorProps = {
   value: string;
   content?: CanvasReferenceContent;
@@ -69,6 +85,15 @@ type ReferenceEditorProps = {
   }>;
   loadPreview: (request: ReferencePreviewRequest) => Promise<ReferencePreview>;
   providers?: WorkbenchReferenceProvider[];
+  usageOptions?: CanvasReferenceUsageOption[];
+  pickerRequest?: CanvasReferencePickerRequest;
+  onReferenceDelete?: (
+    reference: Extract<CanvasReferenceContent["parts"][number], { type: "reference" }>,
+  ) => void;
+  onReferenceUsageChange?: (
+    reference: Extract<CanvasReferenceContent["parts"][number], { type: "reference" }>,
+    usage: string,
+  ) => void;
   onChange: (value: string, content: CanvasReferenceContent) => void;
   onSubmit?: () => void;
 };
@@ -103,6 +128,10 @@ export function CanvasReferenceEditor({
   autoFocus,
   className,
   layerZIndex,
+  usageOptions = [],
+  pickerRequest,
+  onReferenceDelete,
+  onReferenceUsageChange,
   onChange,
   onSubmit,
   assetReferenceProvider,
@@ -115,6 +144,10 @@ export function CanvasReferenceEditor({
   autoFocus?: boolean;
   className?: string;
   layerZIndex?: number;
+  usageOptions?: CanvasReferenceUsageOption[];
+  pickerRequest?: CanvasReferencePickerRequest;
+  onReferenceDelete?: ReferenceEditorProps["onReferenceDelete"];
+  onReferenceUsageChange?: ReferenceEditorProps["onReferenceUsageChange"];
   onChange: (value: string, content?: CanvasReferenceContent) => void;
   onSubmit?: () => void;
   assetReferenceProvider?: WorkbenchReferenceProvider;
@@ -130,6 +163,10 @@ export function CanvasReferenceEditor({
       autoFocus={autoFocus}
       className={className}
       layerZIndex={layerZIndex}
+      usageOptions={usageOptions}
+      pickerRequest={pickerRequest}
+      onReferenceDelete={onReferenceDelete}
+      onReferenceUsageChange={onReferenceUsageChange}
       onChange={onChange}
       onSubmit={onSubmit}
       assetReferenceProvider={assetReferenceProvider}
@@ -146,6 +183,10 @@ export function CanvasReferenceEditorWithAdapter({
   autoFocus,
   className,
   layerZIndex,
+  usageOptions = [],
+  pickerRequest,
+  onReferenceDelete,
+  onReferenceUsageChange,
   onChange,
   onSubmit,
   assetReferenceProvider,
@@ -158,6 +199,10 @@ export function CanvasReferenceEditorWithAdapter({
   autoFocus?: boolean;
   className?: string;
   layerZIndex?: number;
+  usageOptions?: CanvasReferenceUsageOption[];
+  pickerRequest?: CanvasReferencePickerRequest;
+  onReferenceDelete?: ReferenceEditorProps["onReferenceDelete"];
+  onReferenceUsageChange?: ReferenceEditorProps["onReferenceUsageChange"];
   onChange: (value: string, content?: CanvasReferenceContent) => void;
   onSubmit?: () => void;
   assetReferenceProvider?: WorkbenchReferenceProvider;
@@ -169,6 +214,16 @@ export function CanvasReferenceEditorWithAdapter({
   const resolvedContent =
     content ||
     canvasReferenceContentFromUnambiguousText(value, adapter.options);
+  const usageSignature = usageOptions
+    .map((option) =>
+      [
+        option.key,
+        option.label,
+        option.maxFiles || 0,
+        ...(option.acceptedKinds || []),
+      ].join(":"),
+    )
+    .join("|");
   if (!ReferenceEditor) {
     return (
       <textarea
@@ -192,6 +247,7 @@ export function CanvasReferenceEditorWithAdapter({
   }
   return (
     <ReferenceEditor
+      key={usageSignature}
       value={value}
       content={resolvedContent}
       references={adapter.options}
@@ -205,6 +261,10 @@ export function CanvasReferenceEditorWithAdapter({
       loadReferences={adapter.loadReferences}
       loadPreview={adapter.loadPreview}
       providers={activeAssetProvider ? [activeAssetProvider] : undefined}
+      usageOptions={usageOptions}
+      pickerRequest={pickerRequest}
+      onReferenceDelete={onReferenceDelete}
+      onReferenceUsageChange={onReferenceUsageChange}
       onChange={onChange}
       onSubmit={onSubmit}
     />

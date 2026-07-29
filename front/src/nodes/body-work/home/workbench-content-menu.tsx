@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useEffect,
   useRef,
   useState,
@@ -9,13 +11,18 @@ import {
 import { BookOpenText, ExternalLink } from "lucide-react";
 import type { BodyHomeMenuItem } from "../auth/site-config";
 import type { BodyContentNavigation } from "../content/content-api";
-import { BodyContentArticleSheet } from "../content/content-article-sheet";
 import {
   bodyLinkOpensArticleSheet,
   type BodyResolvedLink,
 } from "../shared/body-link";
 import { BodySiteLinkAnchor } from "../shared/body-site-link";
 import { ConfiguredMenuIcon } from "../shared/configured-icon";
+
+const BodyContentArticleSheet = lazy(() =>
+  import("../content/content-article-sheet").then((module) => ({
+    default: module.BodyContentArticleSheet,
+  })),
+);
 
 export function WorkbenchContentMenu({
   menu,
@@ -77,17 +84,19 @@ export function WorkbenchContentMenu({
     setArticleID(link.articleID);
   }
 
-  const articleSheet = (
-    <BodyContentArticleSheet
-      articleID={articleID}
-      open={articleID > 0}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) {
-          setArticleID(0);
-        }
-      }}
-    />
-  );
+  const articleSheet = articleID > 0 ? (
+    <Suspense fallback={null}>
+      <BodyContentArticleSheet
+        articleID={articleID}
+        open
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            setArticleID(0);
+          }
+        }}
+      />
+    </Suspense>
+  ) : null;
 
   if (navigation.items.length === 1) {
     return (

@@ -68,6 +68,7 @@ export function AssetBrowser({
   selectable = false,
   excludeCollections = false,
   selectedAssetIDs,
+  usedAssetIDs,
   allowedKinds,
   onSelect,
   onContinue,
@@ -88,6 +89,7 @@ export function AssetBrowser({
   selectable?: boolean;
   excludeCollections?: boolean;
   selectedAssetIDs?: number[];
+  usedAssetIDs?: number[];
   allowedKinds?: AssetKind[];
   onSelect?: (asset: AssetRecord) => void;
   onContinue?: (asset: AssetRecord) => void;
@@ -138,6 +140,11 @@ export function AssetBrowser({
   const selectedAssetIDSet = useMemo(
     () => new Set(JSON.parse(selectedAssetIDKey) as number[]),
     [selectedAssetIDKey],
+  );
+  const usedAssetIDKey = JSON.stringify(usedAssetIDs || []);
+  const usedAssetIDSet = useMemo(
+    () => new Set(JSON.parse(usedAssetIDKey) as number[]),
+    [usedAssetIDKey],
   );
 
   useEffect(() => {
@@ -428,6 +435,7 @@ export function AssetBrowser({
                   asset.kind !== "collection" && selectable && view === "assets"
                 }
                 selected={view === "assets" && selectedAssetIDSet.has(asset.id)}
+                used={view === "assets" && usedAssetIDSet.has(asset.id)}
                 busy={operationAssetID === asset.id}
                 onOpen={openAsset}
                 onRename={setRenameTarget}

@@ -565,7 +565,7 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 	if node.PowerID == 0 && node.PowerKey == "" {
 		return nil, fmt.Errorf("能力节点未配置能力")
 	}
-	input := mergeCanvasPromptInput(req.Input, previousOutput, node.ComposerPrompt)
+	input := mergeCanvasPromptInputWithReferences(req.Input, previousOutput, node.ComposerPrompt, mediaReferences)
 	applyCanvasStoryboardReferenceInput(input, node)
 	params := cloneInput(node.ParamValues)
 	input, params, mediaReferences, err := prepareCanvasStoryboardShotInput(
@@ -616,6 +616,7 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 			params["videos"] = canvasVideoCompositionURLs(composition)
 		}
 	}
+	appendCanvasMediaReferenceIndex(input, "prompt", mediaReferences)
 	if canvasContextText(input["prompt"]) != "" && canvasContextText(params["prompt"]) == "" {
 		delete(params, "prompt")
 	}
@@ -647,12 +648,13 @@ func (s WorkspaceService) runCanvasAgentNode(ctx context.Context, projectID uint
 	if node.AgentID == 0 {
 		return nil, fmt.Errorf("智能体节点未配置智能体")
 	}
-	input := mergeCanvasChatInput(req.Input, previousOutput, node.ComposerPrompt)
+	input := mergeCanvasChatInputWithReferences(req.Input, previousOutput, node.ComposerPrompt, mediaReferences)
 	delete(input, "workspace_agent_history")
 	applyCanvasAgentTurnInput(input, req.Input)
 	if node.RoleID > 0 {
 		input["role_id"] = node.RoleID
 	}
+	appendCanvasMediaReferenceIndex(input, "text", mediaReferences)
 	assetCateID := firstUint64(node.AssetCateID, req.AssetCateID)
 	history := workspaceAgentHistory(ctx, projectID, assetCateID, node.ID, node.AgentID)
 	result, err := s.project.RunCanvasAgent(ctx, projectID, CanvasAgentRunRequest{
@@ -1163,6 +1165,7 @@ func canvasConnectedMediaReferences(
 		for index := range connectedReferences {
 			// A canvas edge is an explicit user reference. It must never be
 			// silently discarded when the selected service cannot bind it.
+			connectedReferences[index].Label = firstText(current.Asset.Name, reference.Label)
 			connectedReferences[index].Required = true
 		}
 		mediaReferences = append(mediaReferences, connectedReferences...)
@@ -1180,6 +1183,7 @@ func canvasConnectedAssetReferences(
 	result := make([]canvasPromptReference, 0)
 	visitedSources := map[string]bool{}
 	usedAssets := map[string]bool{}
+	promptEdgeUsages := canvasPromptEdgeMediaUsages(nodeID, canvas)
 	var appendSource func(string, string)
 	appendSource = func(sourceNodeID string, usage string) {
 		usage = strings.TrimSpace(usage)
@@ -1216,7 +1220,28 @@ func canvasConnectedAssetReferences(
 		if referencesConfigured && len(allowedSourceNodeIDs) > 0 && !allowedSourceNodeIDs[upstreamEdge.From] {
 			continue
 		}
-		appendSource(upstreamEdge.From, upstreamEdge.MediaUsage)
+		appendSource(
+			upstreamEdge.From,
+			firstText(promptEdgeUsages[upstreamEdge.ID], upstreamEdge.MediaUsage),
+		)
+	}
+	return result
+}
+
+func canvasPromptEdgeMediaUsages(nodeID string, canvas map[string]any) map[string]string {
+	content := mapValue(valueAtPath(canvasNodeByID(nodeID, canvas), "composer_draft", "prompt_content"))
+	references, err := canvasStructuredPromptReferences(content)
+	if err != nil {
+		return nil
+	}
+	result := map[string]string{}
+	for _, reference := range references {
+		originID := strings.TrimSpace(reference.OriginID)
+		usage := strings.TrimSpace(reference.Usage)
+		if !strings.EqualFold(strings.TrimSpace(reference.Origin), "edge") || originID == "" || usage == "" {
+			continue
+		}
+		result[originID] = usage
 	}
 	return result
 }
@@ -1234,6 +1259,9 @@ func mergeCanvasMediaReferences(groups ...[]energoninput.MediaReference) []energ
 			if index, exists := indexByKey[key]; exists {
 				result[index].Required = result[index].Required || reference.Required
 				result[index].StrictUsage = result[index].StrictUsage || reference.StrictUsage
+				if strings.TrimSpace(result[index].Label) == "" {
+					result[index].Label = reference.Label
+				}
 				continue
 			}
 			indexByKey[key] = len(result)
@@ -1241,6 +1269,79 @@ func mergeCanvasMediaReferences(groups ...[]energoninput.MediaReference) []energ
 		}
 	}
 	return result
+}
+
+const canvasMediaReferenceIndexTitle = "参考素材索引（顺序与本次媒体输入一致）："
+
+func appendCanvasMediaReferenceIndex(input map[string]any, promptKey string, references []energoninput.MediaReference) {
+	if len(references) == 0 {
+		return
+	}
+
+	counts := map[string]int{}
+	lines := make([]string, 0, len(references))
+	for _, reference := range references {
+		kindLabel := canvasMediaReferenceKindLabel(reference.Kind)
+		if kindLabel == "" {
+			continue
+		}
+		counts[kindLabel]++
+		label := strings.TrimSpace(strings.TrimLeft(reference.Label, "@#"))
+		if label == "" {
+			label = "素材"
+		}
+		label = strings.Join(strings.Fields(label), " ")
+		line := fmt.Sprintf("- 参考%s%d：@%s", kindLabel, counts[kindLabel], label)
+		if usage := canvasMediaReferenceUsageLabel(reference.Usage); usage != "" {
+			line += fmt.Sprintf("（用途：%s）", usage)
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return
+	}
+
+	prompt := strings.TrimSpace(canvasContextText(input[promptKey]))
+	if index := strings.Index(prompt, canvasMediaReferenceIndexTitle); index >= 0 {
+		prompt = strings.TrimSpace(prompt[:index])
+	}
+	indexText := canvasMediaReferenceIndexTitle + "\n" + strings.Join(lines, "\n")
+	if prompt == "" {
+		input[promptKey] = indexText
+		return
+	}
+	input[promptKey] = prompt + "\n\n" + indexText
+}
+
+func canvasMediaReferenceKindLabel(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case botprotocol.MediaTypeImage, "images":
+		return "图"
+	case botprotocol.MediaTypeVideo, "videos":
+		return "视频"
+	case botprotocol.MediaTypeAudio, "audios", "music":
+		return "音频"
+	case botprotocol.MediaTypeFile, "files":
+		return "文件"
+	default:
+		return ""
+	}
+}
+
+func canvasMediaReferenceUsageLabel(usage string) string {
+	normalized := strings.NewReplacer("-", "_", " ", "_").Replace(
+		strings.ToLower(strings.TrimSpace(usage)),
+	)
+	switch normalized {
+	case "first_frame", "firstframe", "start_frame", "startframe":
+		return "首帧"
+	case "last_frame", "lastframe", "end_frame", "endframe":
+		return "尾帧"
+	case "reference", "reference_image", "reference_images", "referenceimage", "referenceimages":
+		return "参考图"
+	default:
+		return strings.TrimSpace(usage)
+	}
 }
 
 func canvasNodeReferenceSelection(nodeID string, canvas map[string]any) (map[string]bool, bool) {
@@ -1328,6 +1429,7 @@ func canvasPromptReferenceOutput(
 	if err != nil {
 		return nil, nil, err
 	}
+	structured = canvasPromptBoundReferences(structured)
 	storyboardReferences, err := canvasStoryboardSourceReferences(node, results, canvas)
 	if err != nil {
 		return nil, nil, err
@@ -1354,6 +1456,11 @@ func canvasPromptReferenceOutput(
 			)
 			if len(resolvedMediaReferences) > 0 {
 				for index := range resolvedMediaReferences {
+					resolvedMediaReferences[index].Label = firstText(
+						asset["name"],
+						reference.Label,
+						fmt.Sprintf("内容 %d", reference.AssetID),
+					)
 					resolvedMediaReferences[index].Required = required
 				}
 				mediaReferences = append(mediaReferences, resolvedMediaReferences...)
@@ -1500,7 +1607,20 @@ type canvasPromptReference struct {
 	Label     string
 	Kind      string
 	Usage     string
+	Origin    string
+	OriginID  string
 	Required  bool
+}
+
+func canvasPromptBoundReferences(references []canvasPromptReference) []canvasPromptReference {
+	result := make([]canvasPromptReference, 0, len(references))
+	for _, reference := range references {
+		if strings.EqualFold(strings.TrimSpace(reference.Origin), "edge") {
+			continue
+		}
+		result = append(result, reference)
+	}
+	return result
 }
 
 func canvasStructuredPromptReferences(content map[string]any) ([]canvasPromptReference, error) {
@@ -1526,7 +1646,9 @@ func canvasStructuredPromptReferences(content map[string]any) ([]canvasPromptRef
 			return nil, fmt.Errorf("资产引用缺少资产标识")
 		}
 		usage := textValue(part["usage"])
-		key := fmt.Sprintf("%s:%d:%s", refType, refID, usage)
+		origin := textValue(part["ref_origin"])
+		originID := textValue(part["ref_origin_id"])
+		key := fmt.Sprintf("%s:%d:%s:%s:%s", refType, refID, usage, origin, originID)
 		if used[key] {
 			continue
 		}
@@ -1536,6 +1658,8 @@ func canvasStructuredPromptReferences(content map[string]any) ([]canvasPromptRef
 			VersionID: uint64Value(part["ref_version_id"]),
 			Label:     textValue(part["label"]),
 			Usage:     usage,
+			Origin:    origin,
+			OriginID:  originID,
 		})
 	}
 	return result, nil
@@ -1749,14 +1873,38 @@ func canvasOutputFromResultRef(ctx context.Context, projectID uint64, ref map[st
 }
 
 func mergeCanvasPromptInput(base map[string]any, previousOutput any, prompt string) map[string]any {
-	return mergeCanvasInput(base, previousOutput, prompt, "prompt")
+	return mergeCanvasInput(base, previousOutput, prompt, "prompt", true)
 }
 
 func mergeCanvasChatInput(base map[string]any, previousOutput any, prompt string) map[string]any {
-	return mergeCanvasInput(base, previousOutput, prompt, "text")
+	return mergeCanvasInput(base, previousOutput, prompt, "text", true)
 }
 
-func mergeCanvasInput(base map[string]any, previousOutput any, prompt string, promptKey string) map[string]any {
+func mergeCanvasPromptInputWithReferences(
+	base map[string]any,
+	previousOutput any,
+	prompt string,
+	references []energoninput.MediaReference,
+) map[string]any {
+	return mergeCanvasInput(base, previousOutput, prompt, "prompt", len(references) == 0)
+}
+
+func mergeCanvasChatInputWithReferences(
+	base map[string]any,
+	previousOutput any,
+	prompt string,
+	references []energoninput.MediaReference,
+) map[string]any {
+	return mergeCanvasInput(base, previousOutput, prompt, "text", len(references) == 0)
+}
+
+func mergeCanvasInput(
+	base map[string]any,
+	previousOutput any,
+	prompt string,
+	promptKey string,
+	mergePreviousMedia bool,
+) map[string]any {
 	input := cloneInput(base)
 	manualContext := manualCanvasInputContext(input)
 	delete(input, "_manual_input_context")
@@ -1771,8 +1919,10 @@ func mergeCanvasInput(base map[string]any, previousOutput any, prompt string, pr
 	}
 	if previousOutput != nil {
 		input["previous_output"] = previousOutput
-		if mediaContext, keep := canvasExecutionMediaContext(previousOutput); keep {
-			mergeCanvasContextMedia(input, mediaContext)
+		if mergePreviousMedia {
+			if mediaContext, keep := canvasExecutionMediaContext(previousOutput); keep {
+				mergeCanvasContextMedia(input, mediaContext)
+			}
 		}
 	}
 	prompt = strings.TrimSpace(prompt)

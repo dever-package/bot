@@ -157,15 +157,162 @@ export function syncCanvasStoryboardDerivedGroups(input: {
     }
     const currentSourceNode =
       canvas.nodes.find((node) => node.id === sourceNode.id) || sourceNode;
-    canvas = syncStoryboardDerivedGroups({
-      canvas,
-      storyboardNode: currentSourceNode,
+    const materializedSignature = storyboardMaterializationSignature(
+      currentSourceNode,
       storyboard,
-      assetCate: input.assetCate,
-      powers: input.powers,
-    });
+    );
+    const previousSignature = String(
+      currentSourceNode.storyboardMaterializedSignature || "",
+    );
+    const hasDerivedStructure = hasStoryboardDerivedStructure(
+      canvas.nodes,
+      currentSourceNode.id,
+    );
+    const shouldMaterialize = previousSignature
+      ? previousSignature !== materializedSignature
+      : !hasDerivedStructure;
+    canvas = shouldMaterialize
+      ? syncStoryboardDerivedGroups({
+          canvas,
+          storyboardNode: currentSourceNode,
+          storyboard,
+          assetCate: input.assetCate,
+          powers: input.powers,
+        })
+      : refreshStoryboardDerivedGroups({
+          canvas,
+          storyboardNode: currentSourceNode,
+          storyboard,
+          assetCate: input.assetCate,
+          powers: input.powers,
+        });
+    canvas = markStoryboardMaterialized(
+      canvas,
+      currentSourceNode.id,
+      materializedSignature,
+    );
   }
   return canvas;
+}
+
+function storyboardMaterializationSignature(
+  node: SpaceCanvasNode,
+  storyboard: StoryboardDocument,
+) {
+  return stableToken(
+    JSON.stringify([
+      node.id,
+      Number(node.resultRef?.asset_id || node.asset?.id || 0),
+      Number(
+        node.resultRef?.version_id ||
+          node.asset?.version_id ||
+          node.asset?.version?.id ||
+          0,
+      ),
+      storyboard.workflow.confirmed_at,
+      storyboard.production_plan,
+      storyboard.materials.map((item) => [item.type, item.id]),
+      storyboard.shots.map((item) => item.id),
+    ]),
+  );
+}
+
+function hasStoryboardDerivedStructure(
+  nodes: SpaceCanvasNode[],
+  sourceNodeId: string,
+) {
+  return nodes.some(
+    (node) =>
+      node.storyboardItem?.sourceNodeId === sourceNodeId ||
+      (node.type === "group" &&
+        node.group?.origin === "script" &&
+        node.group.sourceNodeId === sourceNodeId),
+  );
+}
+
+function markStoryboardMaterialized(
+  canvas: SpaceCanvasState,
+  sourceNodeId: string,
+  signature: string,
+) {
+  const sourceIndex = canvas.nodes.findIndex((node) => node.id === sourceNodeId);
+  if (
+    sourceIndex < 0 ||
+    canvas.nodes[sourceIndex].storyboardMaterializedSignature === signature
+  ) {
+    return canvas;
+  }
+  const nodes = [...canvas.nodes];
+  nodes[sourceIndex] = {
+    ...nodes[sourceIndex],
+    storyboardMaterializedSignature: signature,
+  };
+  return { ...canvas, nodes };
+}
+
+function refreshStoryboardDerivedGroups(input: {
+  canvas: SpaceCanvasState;
+  storyboardNode: SpaceCanvasNode;
+  storyboard: StoryboardDocument;
+  assetCate: AssetCate;
+  powers: PowerOption[];
+}) {
+  const nodes = [...input.canvas.nodes];
+  let changed = false;
+  const enabledSpecs = STORYBOARD_DERIVED_GROUP_SPECS.filter((spec) =>
+    spec.enabled(input.storyboard),
+  );
+  for (const spec of enabledSpecs) {
+    const power = spec.local
+      ? null
+      : firstAvailablePower(input.powers, spec.powerKind, spec.outputType);
+    for (const sourceItem of spec.items(input.storyboard)) {
+      const existingIndex = nodes.findIndex((node) =>
+        isMatchingDerivedNode(
+          node,
+          input.storyboardNode.id,
+          sourceItem.type,
+          sourceItem.id,
+        ),
+      );
+      if (existingIndex < 0) {
+        continue;
+      }
+      const item = withStoryboardItemContext(
+        sourceItem,
+        nodes,
+        input.storyboardNode.id,
+      );
+      const existing = nodes[existingIndex];
+      const next = mergeExistingDerivedNode(
+        existing,
+        existing.groupId || "",
+        item,
+        spec,
+        power,
+        { preserveStructure: true },
+      );
+      if (next === existing) {
+        continue;
+      }
+      nodes[existingIndex] = next;
+      changed = true;
+    }
+  }
+  if (storyboardProductionIncludesComposition(input.storyboard)) {
+    const composition = syncStoryboardCompositionNode({
+      nodes,
+      storyboardNode: input.storyboardNode,
+      storyboard: input.storyboard,
+      assetCate: input.assetCate,
+      power: firstAvailablePower(input.powers, "video", "video_compose"),
+      nextNodeNo: input.canvas.nextNodeNo,
+      createMissing: false,
+      preservePosition: true,
+    });
+    changed = changed || Boolean(composition?.changed);
+  }
+  return changed ? { ...input.canvas, nodes } : input.canvas;
 }
 
 export function canvasStoryboardReferenceSourceSignature(
@@ -732,6 +879,7 @@ function mergeExistingDerivedNode(
   item: StoryboardDerivedItem,
   spec: StoryboardDerivedGroupSpec,
   power?: PowerOption | null,
+  options: { preserveStructure?: boolean } = {},
 ) {
   const metadata = node.storyboardItem;
   if (!metadata) {
@@ -781,7 +929,14 @@ function mergeExistingDerivedNode(
         hasGeneratedResult &&
           resultSourceSignature !== nextMetadata.sourceSignature,
       );
-  const titleChanged = node.title !== item.title;
+  const nextTitle =
+    options.preserveStructure && node.titleMode === "manual"
+      ? node.title
+      : item.title;
+  const titleChanged = node.title !== nextTitle;
+  const nextGroupId = options.preserveStructure
+    ? node.groupId || ""
+    : groupId;
   const attachPower = !node.power && Boolean(power);
   const kindChanged = node.kind !== spec.powerKind;
   const outputTypeChanged = node.outputType !== spec.outputType;
@@ -790,7 +945,7 @@ function mergeExistingDerivedNode(
     JSON.stringify(node.resultOutput || null) !==
       JSON.stringify(item.localOutput || null);
   if (
-    node.groupId === groupId &&
+    (node.groupId || "") === nextGroupId &&
     !promptChanged &&
     !paramValuesChanged &&
     !promptContentChanged &&
@@ -805,7 +960,7 @@ function mergeExistingDerivedNode(
   }
   return {
     ...node,
-    title: item.title,
+    title: nextTitle,
     kind: spec.powerKind,
     outputType: spec.outputType,
     ...(attachPower
@@ -816,7 +971,7 @@ function mergeExistingDerivedNode(
       : {}),
     description: promptChanged || attachPower ? nextPrompt : node.description,
     ...(spec.local ? { resultOutput: item.localOutput } : {}),
-    groupId,
+    groupId: nextGroupId,
     composerDraft:
       promptChanged || paramValuesChanged || promptContentChanged
         ? {
@@ -1098,6 +1253,8 @@ function syncStoryboardCompositionNode(input: {
   assetCate: AssetCate;
   power?: PowerOption | null;
   nextNodeNo: number;
+  createMissing?: boolean;
+  preservePosition?: boolean;
 }) {
   const existing = input.nodes.find((node) =>
     isMatchingDerivedNode(
@@ -1125,10 +1282,9 @@ function syncStoryboardCompositionNode(input: {
   };
 
   if (existing) {
-    const position = storyboardCompositionPosition(
-      input.nodes,
-      input.storyboardNode,
-    );
+    const position = input.preservePosition
+      ? { x: existing.x, y: existing.y }
+      : storyboardCompositionPosition(input.nodes, input.storyboardNode);
     const hasResult = derivedNodeHasGeneratedResult(existing);
     const resultSourceSignature =
       existing.storyboardItem?.resultSourceSignature ||
@@ -1185,6 +1341,10 @@ function syncStoryboardCompositionNode(input: {
       changed: true,
       nextNodeNo: input.nextNodeNo,
     };
+  }
+
+  if (input.createMissing === false) {
+    return null;
   }
 
   const position = storyboardCompositionPosition(

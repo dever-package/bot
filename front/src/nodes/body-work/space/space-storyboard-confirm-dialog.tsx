@@ -6,6 +6,7 @@ import {
   storyboardHasVisibleDialogue,
   storyboardProductionIncludesComposition,
   storyboardProductionIncludesLipSync,
+  storyboardProductionIncludesShotVideos,
   storyboardProductionIncludesSubtitles,
   storyboardProductionIncludesVoice,
   storyboardSpeechCount,
@@ -23,42 +24,43 @@ const OUTPUT_TARGETS: Array<{
   description: string;
 }> = [
   {
-    value: "final_video",
-    title: "完整成片",
-    description: "创建镜头制作流程和视频合成，适合继续完成整条成片。",
+    value: "shot_images",
+    title: "生成参考图",
+    description: "生成素材设定和镜头参考图，之后可在画布中自行连接视频节点。",
   },
   {
     value: "shot_videos",
-    title: "仅镜头视频",
+    title: "生成镜头视频",
     description: "生成各个镜头及所选附加内容，不创建最终视频合成。",
   },
   {
-    value: "storyboard_only",
-    title: "仅确认分镜",
-    description: "冻结当前脚本，不创建图片、视频或其他制作组。",
+    value: "final_video",
+    title: "生成完整成片",
+    description: "创建完整镜头制作流程和视频合成，继续完成整条成片。",
   },
 ];
 
 export function StoryboardConfirmDialog({
   storyboard,
   submitting,
+  portalContainer,
   onClose,
   onConfirm,
 }: {
   storyboard: StoryboardDocument;
   submitting: boolean;
+  portalContainer: Element | null;
   onClose: () => void;
   onConfirm: (plan: StoryboardProductionPlan) => boolean | Promise<boolean>;
 }) {
   const [plan, setPlan] = useState<StoryboardProductionPlan>(() =>
-    normalizeStoryboardProductionPlan(storyboard.production_plan),
+    confirmationProductionPlan(storyboard.production_plan),
   );
   const speechCount = storyboardSpeechCount(storyboard);
   const subtitleCount = storyboardSubtitleCount(storyboard);
   const hasVisibleDialogue = storyboard.shots.some(
     storyboardHasVisibleDialogue,
   );
-  const createsProduction = plan.output_target !== "storyboard_only";
   const effectiveStoryboard = useMemo(
     () => ({ ...storyboard, production_plan: plan }),
     [plan, storyboard],
@@ -66,6 +68,9 @@ export function StoryboardConfirmDialog({
   const productionSteps = useMemo(
     () => storyboardProductionSteps(effectiveStoryboard),
     [effectiveStoryboard],
+  );
+  const includesShotVideos = storyboardProductionIncludesShotVideos(
+    effectiveStoryboard,
   );
 
   useEffect(() => {
@@ -119,11 +124,7 @@ export function StoryboardConfirmDialog({
       >
         <header>
           <div>
-            <strong>
-              {plan.output_target === "storyboard_only"
-                ? "确认分镜"
-                : "确认分镜并创建制作区"}
-            </strong>
+            <strong>确认分镜并创建制作区</strong>
             <span>确认后脚本进入只读状态，需要修改时可创建修订稿。</span>
           </div>
           <button
@@ -179,7 +180,7 @@ export function StoryboardConfirmDialog({
             </div>
           </fieldset>
 
-          {createsProduction ? (
+          {includesShotVideos ? (
             <fieldset className="ws-storyboard-confirm-section">
               <legend>附加内容</legend>
               <ProductionSwitch
@@ -259,16 +260,12 @@ export function StoryboardConfirmDialog({
             ) : (
               <Check size={15} />
             )}
-            {submitting
-              ? "确认中"
-              : plan.output_target === "storyboard_only"
-                ? "确认脚本"
-                : "确认并创建"}
+            {submitting ? "确认中" : "确认并创建"}
           </button>
         </footer>
       </section>
     </div>,
-    document.body,
+    portalContainer || document.body,
   );
 }
 
@@ -310,7 +307,7 @@ function effectiveProductionPlan(
     visibleDialogue: boolean;
   },
 ): StoryboardProductionPlan {
-  if (plan.output_target === "storyboard_only") {
+  if (!["shot_videos", "final_video"].includes(plan.output_target)) {
     return {
       ...plan,
       voice_mode: "off",
@@ -341,8 +338,10 @@ function storyboardProductionSteps(storyboard: StoryboardDocument) {
   const steps = [
     ...(storyboard.materials.length ? ["素材设定"] : []),
     "镜头参考图",
-    "镜头视频",
   ];
+  if (storyboardProductionIncludesShotVideos(storyboard)) {
+    steps.push("镜头视频");
+  }
   if (storyboardProductionIncludesVoice(storyboard)) {
     steps.push("配音");
   }
@@ -356,4 +355,11 @@ function storyboardProductionSteps(storyboard: StoryboardDocument) {
     steps.push("视频合成");
   }
   return steps;
+}
+
+function confirmationProductionPlan(value: unknown): StoryboardProductionPlan {
+  const plan = normalizeStoryboardProductionPlan(value);
+  return plan.output_target === "storyboard_only"
+    ? { ...plan, output_target: "shot_images" }
+    : plan;
 }

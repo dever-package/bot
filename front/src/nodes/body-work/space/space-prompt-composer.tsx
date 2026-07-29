@@ -1,6 +1,8 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
+  useRef,
   useState,
   type ComponentType,
   type ReactNode,
@@ -21,21 +23,31 @@ import {
   powerParamOptionValue,
 } from "./space-power-param";
 import { PowerParamIcon } from "./space-power-icon";
-import { CanvasReferenceEditor } from "./space-reference-editor";
+import {
+  CanvasReferenceEditor,
+  type CanvasReferencePickerRequest,
+} from "./space-reference-editor";
+import {
+  changeMediaUsage,
+  connectedMediaReferenceTargets,
+  type CanvasConnectedMediaReference,
+  type CanvasMediaUsageAssignments,
+  type MediaUsageOption,
+} from "./space-media-references";
 import { findAssetMediaURL } from "../asset/asset-content";
-import { assetKindsAccept } from "../asset/asset-contract";
 import { AssetKindIcon } from "../asset/asset-preview";
 import { normalizeAssetRecord } from "../asset/asset-api";
-import { AssetPickerDialog } from "../asset/asset-picker-dialog";
 import {
   useAssetReferenceProvider,
   type WorkbenchReferenceOption,
 } from "../asset/asset-reference-provider";
 import type { AssetKind as LibraryAssetKind } from "../asset/asset-types";
 import {
-  canvasReferenceIDsForUsage,
-  canvasReferenceTargetsForUsage,
-  replaceCanvasReferenceUsage,
+  acceptedAssetKinds,
+  isUploadPowerParam,
+} from "./space-media-param";
+import {
+  reconcileConnectedCanvasReferences,
 } from "./space-reference-content";
 import { SpaceTooltip } from "./space-tooltip";
 import type {
@@ -46,6 +58,7 @@ import type {
 } from "./types";
 
 export { defaultPowerParamValue } from "./space-power-param";
+export { isUploadPowerParam } from "./space-media-param";
 
 export type ComposerAssetPreview = CanvasContentPreview;
 
@@ -106,6 +119,12 @@ type PromptComposerProps = {
     projectID: number;
     assetCateID?: number;
   };
+  connectedMediaReferences?: CanvasConnectedMediaReference[];
+  mediaUsageOptions?: MediaUsageOption[];
+  onConnectedMediaUsagesChange?: (
+    assignments: CanvasMediaUsageAssignments,
+  ) => void;
+  onConnectedMediaEdgeRemove?: (edgeId: string) => void;
   onChange: (value: string, content?: CanvasReferenceContent) => void;
   onParamChange?: (key: string, value: unknown) => void;
   onSourceChange?: (sourceId: number) => void;
@@ -142,12 +161,20 @@ export function PromptComposer({
   assetLibrary = { current: [] },
   referenceContent,
   assetReference,
+  connectedMediaReferences = [],
+  mediaUsageOptions = [],
+  onConnectedMediaUsagesChange,
+  onConnectedMediaEdgeRemove,
   onChange,
   onParamChange,
   onSourceChange,
   onLocalUpload,
   onSubmit,
 }: PromptComposerProps) {
+  const uploadParams = useMemo(
+    () => params.filter(isUploadPowerParam),
+    [params],
+  );
   const rememberSelectedReference = useCallback(
     (option: WorkbenchReferenceOption) => {
       const item = composerAssetItemFromReferenceOption(option);
@@ -160,6 +187,32 @@ export function PromptComposer({
     },
     [assetLibrary],
   );
+  const uploadReferenceAssets = useCallback(
+    async (
+      files: File[],
+      context: {
+        preferredUsage?: string;
+        acceptedKinds?: LibraryAssetKind[];
+      },
+    ) => {
+      if (!onLocalUpload) {
+        throw new Error("当前节点未配置本地上传");
+      }
+      const param = resolveUploadParam(uploadParams, context);
+      if (!param) {
+        throw new Error("当前能力没有与所选素材类型匹配的上传参数");
+      }
+      const previews = await onLocalUpload(files, param);
+      const assets = previews
+        .map((preview) => normalizeAssetRecord(preview.asset))
+        .filter((asset) => asset.id > 0);
+      if (assets.length === 0) {
+        throw new Error("上传成功，但没有生成可用资产");
+      }
+      return assets;
+    },
+    [onLocalUpload, uploadParams],
+  );
   const assetReferenceProvider = useAssetReferenceProvider({
     teamID: Number(assetReference?.teamID || 0),
     scopeProjectID: Number(assetReference?.projectID || 0),
@@ -171,24 +224,55 @@ export function PromptComposer({
         }
       : undefined,
     onSelect: rememberSelectedReference,
+    onUpload: onLocalUpload ? uploadReferenceAssets : undefined,
   });
   const [openKey, setOpenKey] = useState("");
-  const [assetPickerParam, setAssetPickerParam] = useState<PowerParam | null>(
-    null,
-  );
-  const uploadParams = params.filter(isUploadPowerParam);
+  const [referencePickerRequest, setReferencePickerRequest] = useState<
+    CanvasReferencePickerRequest | undefined
+  >();
+  const referencePickerRequestID = useRef(0);
   const optionParams = params.filter(isToolbarPowerParam);
   const selectedSource = sourceOptions.find(
     (source) =>
       source.target_id === selectedSourceId || source.id === selectedSourceId,
   );
   const referenceItems = assetLibrary.current;
+  const connectedTargets = connectedMediaReferenceTargets(
+    connectedMediaReferences,
+    referenceItems,
+  );
+  const resolvedReferences = reconcileConnectedCanvasReferences(
+    value,
+    referenceContent,
+    connectedTargets,
+  );
+  const currentReferenceSignature = referenceStateSignature(
+    value,
+    referenceContent,
+  );
+  const resolvedReferenceSignature = referenceStateSignature(
+    resolvedReferences.value,
+    resolvedReferences.content,
+  );
 
   useEffect(() => {
     if (disabled || running) {
       setOpenKey("");
     }
   }, [disabled, running]);
+
+  useEffect(() => {
+    if (currentReferenceSignature === resolvedReferenceSignature) {
+      return;
+    }
+    onChange(resolvedReferences.value, resolvedReferences.content);
+  }, [
+    currentReferenceSignature,
+    onChange,
+    resolvedReferenceSignature,
+    resolvedReferences.content,
+    resolvedReferences.value,
+  ]);
 
   return (
     <div
@@ -198,14 +282,46 @@ export function PromptComposer({
         <div className="ws-prompt-editor-shell">
           <CanvasReferenceEditor
             className="ws-prompt-reference-editor nodrag nopan"
-            value={value}
-            content={referenceContent}
+            value={resolvedReferences.value}
+            content={resolvedReferences.content}
             disabled={disabled || running}
             placeholder={placeholder}
             items={referenceItems}
+            usageOptions={mediaUsageOptions.map((option) => ({
+              key: option.key,
+              label: option.label,
+              acceptedKinds: option.acceptedKinds,
+              maxFiles: option.maxFiles,
+            }))}
+            pickerRequest={referencePickerRequest}
             assetReferenceProvider={
               assetReference?.teamID ? assetReferenceProvider : undefined
             }
+            onReferenceDelete={(reference) => {
+              if (
+                reference.ref_origin === "edge" &&
+                reference.ref_origin_id
+              ) {
+                onConnectedMediaEdgeRemove?.(reference.ref_origin_id);
+              }
+            }}
+            onReferenceUsageChange={(reference, usage) => {
+              if (
+                reference.ref_origin !== "edge" ||
+                !reference.ref_origin_id
+              ) {
+                return;
+              }
+              const assignments = changeMediaUsage(
+                connectedMediaReferences,
+                reference.ref_origin_id,
+                usage,
+                mediaUsageOptions,
+              );
+              if (Object.keys(assignments).length > 0) {
+                onConnectedMediaUsagesChange?.(assignments);
+              }
+            }}
             onChange={onChange}
             onSubmit={!running && !submitDisabled ? onSubmit : undefined}
           />
@@ -233,7 +349,13 @@ export function PromptComposer({
                     role="menuitem"
                     onClick={() => {
                       setOpenKey("");
-                      setAssetPickerParam(param);
+                      referencePickerRequestID.current += 1;
+                      setReferencePickerRequest({
+                        id: referencePickerRequestID.current,
+                        trigger: "@",
+                        preferredUsage: param.key,
+                        acceptedKinds: acceptedAssetKinds(param),
+                      });
                     }}
                   >
                     <span className="ws-prompt-menu-kind-icon">
@@ -312,107 +434,6 @@ export function PromptComposer({
           </SpaceTooltip>
         </div>
       </div>
-      {assetPickerParam ? (
-        <AssetPickerDialog
-          open
-          teamID={Number(assetReference?.teamID || 0)}
-          scopeProjectID={Number(assetReference?.projectID || 0)}
-          title={`${assetPickerParam.name || "参数"}资产库`}
-          description="选择已有资产或上传本地文件，确认后用于当前参数。"
-          initialFilters={
-            assetReference?.projectID
-              ? {
-                  sourceType: "project",
-                  projectID: assetReference.projectID,
-                }
-              : undefined
-          }
-          allowedKinds={acceptedAssetKinds(assetPickerParam)}
-          initialSelectedAssetIDs={canvasReferenceIDsForUsage(
-            referenceContent,
-            assetPickerParam.key,
-          )}
-          multiple={assetPickerParam.type === "files"}
-          maxSelection={assetPickerParam.max_files || 8}
-          confirmSelection
-          validateAsset={(asset) =>
-            findAssetMediaURL(asset.version?.content, asset.kind)
-              ? ""
-              : "该资产当前版本没有可用文件，无法用于此参数。"
-          }
-          uploadAccept={assetKindsAccept(acceptedAssetKinds(assetPickerParam))}
-          onUpload={
-            onLocalUpload
-              ? async (files) => {
-                  const previews = await onLocalUpload(files, assetPickerParam);
-                  const assets = previews
-                    .map((preview) => normalizeAssetRecord(preview.asset))
-                    .filter((asset) => asset.id > 0);
-                  if (assets.length === 0) {
-                    throw new Error("上传成功，但没有生成可用资产");
-                  }
-                  return assets;
-                }
-              : undefined
-          }
-          onClose={() => setAssetPickerParam(null)}
-          onConfirm={(assets, selectedAssetIDs) => {
-            const selectedByID = new Map(
-              assets.map((asset) => [asset.id, asset]),
-            );
-            for (const asset of assets) {
-              rememberSelectedReference({
-                key: `asset:${asset.id}:${asset.versionID}`,
-                refType: "asset",
-                refId: asset.id,
-                versionID: asset.versionID,
-                trigger: "@",
-                label: asset.name,
-                description: asset.summary,
-                preview: {
-                  text: asset.summary,
-                  kind: asset.kind,
-                  url: findAssetMediaURL(
-                    asset.version?.content,
-                    asset.kind,
-                  ),
-                },
-              });
-            }
-            const currentByID = new Map(
-              canvasReferenceTargetsForUsage(
-                referenceContent,
-                assetPickerParam.key,
-              ).map((target) => [target.refId, target]),
-            );
-            const targets = selectedAssetIDs.flatMap((assetID) => {
-              const asset = selectedByID.get(assetID);
-              if (!asset) {
-                const current = currentByID.get(assetID);
-                return current ? [current] : [];
-              }
-              return [
-                {
-                  refType: "asset" as const,
-                  refId: asset.id,
-                  label: asset.name,
-                  usage: assetPickerParam.key,
-                  trigger: "@" as const,
-                  versionId: asset.versionID,
-                },
-              ];
-            });
-            const next = replaceCanvasReferenceUsage(
-              value,
-              referenceContent,
-              assetPickerParam.key,
-              targets,
-            );
-            onChange(next.value, next.content);
-            setAssetPickerParam(null);
-          }}
-        />
-      ) : null}
     </div>
   );
 }
@@ -438,41 +459,6 @@ function composerAssetItemFromReferenceOption(
       fileUrl: kind === "file" ? url : "",
     },
   };
-}
-
-function acceptedAssetKinds(param: PowerParam): LibraryAssetKind[] {
-  const configured = Array.from(
-    new Set(
-      (param.accepted_kinds || param.asset_kinds || [])
-        .map(normalizeAssetKind)
-        .filter((kind): kind is LibraryAssetKind => Boolean(kind)),
-    ),
-  );
-  if (configured.length > 0) return configured;
-
-  const name = `${param.name || ""} ${param.key || ""}`.toLowerCase();
-  if (/video|视频/.test(name)) {
-    return ["video"];
-  }
-  if (/audio|music|音频|音乐/.test(name)) {
-    return ["audio"];
-  }
-  if (/image|img|photo|picture|图片|图像|参考图/.test(name)) {
-    return ["image"];
-  }
-  if (/text|文本|提示词|文案/.test(name)) {
-    return ["file"];
-  }
-  return ["image", "audio", "video", "file"];
-}
-
-function normalizeAssetKind(value: unknown): LibraryAssetKind | undefined {
-  const kind = String(value || "").toLowerCase();
-  if (kind === "rich") return "richtext";
-  if (kind === "music") return "audio";
-  return ["text", "image", "audio", "video", "richtext", "file"].includes(kind)
-    ? (kind as LibraryAssetKind)
-    : undefined;
 }
 
 function ParamMenu({
@@ -580,17 +566,41 @@ function ComposerMenu({
 }) {
   const open = !disabled && openKey === id;
   const variantClass = variant === "attachments" ? "is-attachments" : "";
+  const closeTimerRef = useRef<number | null>(null);
+  const cancelClose = useCallback(() => {
+    if (closeTimerRef.current == null) {
+      return;
+    }
+    window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+  }, []);
+  const scheduleClose = useCallback(() => {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
+      onToggle("");
+    }, 240);
+  }, [cancelClose, onToggle]);
+
+  useEffect(() => {
+    if (!open) {
+      cancelClose();
+    }
+    return cancelClose;
+  }, [cancelClose, open]);
+
   return (
     <span
       className={`ws-prompt-tool-wrap ${variantClass} ${open ? "is-open" : ""}`}
       onMouseEnter={() => {
+        cancelClose();
         if (!disabled) {
           onToggle(id);
         }
       }}
       onMouseLeave={() => {
         if (open) {
-          onToggle("");
+          scheduleClose();
         }
       }}
     >
@@ -601,13 +611,9 @@ function ComposerMenu({
         aria-label={label}
         aria-expanded={variant === "attachments" ? open : undefined}
         aria-haspopup={variant === "attachments" ? "menu" : undefined}
-        onFocus={() => {
-          if (!disabled) {
-            onToggle(id);
-          }
-        }}
         onClick={() => {
           if (!disabled) {
+            cancelClose();
             onToggle(open ? "" : id);
           }
         }}
@@ -617,7 +623,12 @@ function ComposerMenu({
         {!iconOnly ? <ChevronDown size={14} /> : null}
       </button>
       {open ? (
-        <div className={`ws-prompt-popover ${variantClass}`}>{children}</div>
+        <div
+          className={`ws-prompt-popover ${variantClass}`}
+          onMouseEnter={cancelClose}
+        >
+          {children}
+        </div>
       ) : null}
     </span>
   );
@@ -739,10 +750,6 @@ function ParamEditor({
   );
 }
 
-export function isUploadPowerParam(param: PowerParam) {
-  return param.type === "file" || param.type === "files";
-}
-
 export function isPromptPowerParam(param: PowerParam) {
   return param.type === "prompt";
 }
@@ -775,6 +782,39 @@ function paramControlLabel(param: PowerParam, value: unknown) {
   }
   const text = valueAsText(value);
   return text ? `${param.name}: ${text}` : param.name;
+}
+
+function resolveUploadParam(
+  params: PowerParam[],
+  context: {
+    preferredUsage?: string;
+    acceptedKinds?: LibraryAssetKind[];
+  },
+) {
+  const preferredUsage = String(context.preferredUsage || "").trim();
+  if (preferredUsage) {
+    const preferred = params.find((param) => param.key === preferredUsage);
+    if (preferred) {
+      return preferred;
+    }
+  }
+  const acceptedKinds = new Set(context.acceptedKinds || []);
+  if (acceptedKinds.size > 0) {
+    const compatible = params.find((param) =>
+      acceptedAssetKinds(param).some((kind) => acceptedKinds.has(kind)),
+    );
+    if (compatible) {
+      return compatible;
+    }
+  }
+  return params.length === 1 ? params[0] : undefined;
+}
+
+function referenceStateSignature(
+  value: string,
+  content: CanvasReferenceContent | undefined,
+) {
+  return JSON.stringify([String(value || ""), content?.parts || []]);
 }
 
 function uploadParamLabel(param: PowerParam) {

@@ -1,15 +1,15 @@
 {
   "src/runtime-entry.ts": {
-    "file": "bot.js?v=651d7549b2a3fa44",
+    "file": "bot.js?v=32e714cf73603949",
     "name": "runtime-entry",
     "src": "src/runtime-entry.ts",
     "isEntry": true,
     "css": [
-      "bot.css?v=d936fc43b6e254f7"
+      "bot.css?v=aac8e43ea3cbd85b"
     ]
   },
   "style.css": {
-    "file": "bot.css?v=d936fc43b6e254f7",
+    "file": "bot.css?v=aac8e43ea3cbd85b",
     "src": "style.css"
   },
   "__plugin": {

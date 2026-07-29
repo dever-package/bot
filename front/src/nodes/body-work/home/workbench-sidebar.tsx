@@ -1,15 +1,20 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Sparkles } from "lucide-react";
 import { BodySiteBrand } from "../auth/site-brand";
 import type { BodySiteConfig } from "../auth/site-config";
 import type { WorkbenchTeam } from "./workbench-api";
 import { ConfiguredMenuIcon } from "../shared/configured-icon";
-import { WorkbenchAccountCenter } from "./workbench-account-center";
 import type { BodyContentNavigation } from "../content/content-api";
 import { WorkbenchContentMenu } from "./workbench-content-menu";
 import { WorkbenchSystemMessagePanel } from "./workbench-system-message-panel";
 import { WorkbenchUserMenu } from "./workbench-user-menu";
+
+const WorkbenchAccountCenter = lazy(() =>
+  import("./workbench-account-center").then((module) => ({
+    default: module.WorkbenchAccountCenter,
+  })),
+);
 
 export type WorkbenchPageKey = "function" | "dialogue" | "works" | "assets";
 
@@ -121,13 +126,19 @@ export function WorkbenchSidebar({
             teams={teams}
             teamID={teamID}
             disabled={loading}
-            filing={site.filing}
             onTeamChange={onTeamChange}
           />
         </div>
       </aside>
 
-      <WorkbenchAccountCenter open={pointsOpen} onOpenChange={setPointsOpen} />
+      {pointsOpen ? (
+        <Suspense fallback={null}>
+          <WorkbenchAccountCenter
+            open={pointsOpen}
+            onOpenChange={setPointsOpen}
+          />
+        </Suspense>
+      ) : null}
     </>
   );
 }

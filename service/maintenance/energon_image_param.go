@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	builtinParamCateCommonID = 1
-	imageParamKey            = "image"
-	imagesParamKey           = "images"
+	builtinParamCateCommonID uint64 = 1
+	imageParamKey                   = "image"
+	imagesParamKey                  = "images"
 )
 
 // EnsureEnergonImageParams upgrades databases that already contain the old

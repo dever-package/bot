@@ -326,6 +326,8 @@ export type CanvasReferenceContent = {
         usage?: string;
         ref_trigger?: string;
         ref_version_id?: number;
+        ref_origin?: string;
+        ref_origin_id?: string;
       }
   >;
 };
@@ -398,6 +400,7 @@ export type SpaceCanvasNode = {
   groupId?: string;
   group?: CanvasGroupConfig;
   storyboardItem?: CanvasStoryboardItemConfig;
+  storyboardMaterializedSignature?: string;
   assetCateId?: number;
   kind?: AssetKind;
   outputType?: string;
