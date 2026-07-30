@@ -129,14 +129,6 @@ export const DEFAULT_STORYBOARD_PRODUCTION_PLAN: StoryboardProductionPlan = {
   shot_visual_strategy: "auto",
 };
 
-const LEGACY_STORYBOARD_PRODUCTION_PLAN: StoryboardProductionPlan = {
-  output_target: "final_video",
-  voice_mode: "auto",
-  subtitle_mode: "auto",
-  lip_sync_mode: "auto",
-  shot_visual_strategy: "auto",
-};
-
 export type StoryboardStoryline = {
   setup: string;
   development: string;
@@ -393,7 +385,6 @@ export function normalizeStoryboardOrder(
     workflow,
     production_plan: normalizeStoryboardProductionPlan(
       storyboard.production_plan,
-      workflow.status === "confirmed",
     ),
     target_duration: Math.max(
       MIN_STORYBOARD_SHOT_DURATION,
@@ -487,13 +478,9 @@ export function isStoryboardConfirmed(storyboard: StoryboardDocument) {
 
 export function normalizeStoryboardProductionPlan(
   value: unknown,
-  legacyFallback = false,
 ): StoryboardProductionPlan {
-  const fallback = legacyFallback
-    ? LEGACY_STORYBOARD_PRODUCTION_PLAN
-    : DEFAULT_STORYBOARD_PRODUCTION_PLAN;
   if (!isRecord(value)) {
-    return { ...fallback };
+    return { ...DEFAULT_STORYBOARD_PRODUCTION_PLAN };
   }
   const outputTarget = stringValue(value.output_target).toLowerCase();
   return {
@@ -501,18 +488,18 @@ export function normalizeStoryboardProductionPlan(
       outputTarget as StoryboardOutputTarget,
     )
       ? (outputTarget as StoryboardOutputTarget)
-      : fallback.output_target,
+      : DEFAULT_STORYBOARD_PRODUCTION_PLAN.output_target,
     voice_mode: normalizeStoryboardProductionMode(
       value.voice_mode,
-      fallback.voice_mode,
+      DEFAULT_STORYBOARD_PRODUCTION_PLAN.voice_mode,
     ),
     subtitle_mode: normalizeStoryboardProductionMode(
       value.subtitle_mode,
-      fallback.subtitle_mode,
+      DEFAULT_STORYBOARD_PRODUCTION_PLAN.subtitle_mode,
     ),
     lip_sync_mode: normalizeStoryboardProductionMode(
       value.lip_sync_mode,
-      fallback.lip_sync_mode,
+      DEFAULT_STORYBOARD_PRODUCTION_PLAN.lip_sync_mode,
     ),
     shot_visual_strategy: "auto",
   };

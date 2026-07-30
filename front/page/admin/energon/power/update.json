@@ -186,6 +186,19 @@
         }
       },
       {
+        "type": "form-textarea",
+        "name": "输入说明",
+        "placeholder": "说明用户应如何填写该能力输入，可留空。",
+        "value": "form.description",
+        "mode": "form",
+        "info": "显示在画布能力输入区；没有提示词参数时仅作为只读说明展示。",
+        "meta": {
+          "formLayout": "vertical",
+          "minHeight": 96,
+          "maxHeight": 180
+        }
+      },
+      {
         "type": "form-editor",
         "name": "设定提示词",
         "placeholder": "填写该能力长期生效的职责、输出要求和约束，可留空。",
@@ -206,6 +219,7 @@
       "icon": "zap",
       "output_type": "general",
       "kind": "text",
+      "description": "",
       "prompt": "",
       "source_rule": 1,
       "params": [

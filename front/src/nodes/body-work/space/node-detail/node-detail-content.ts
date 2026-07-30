@@ -14,6 +14,7 @@ import {
   storyboardSummary,
   type StoryboardDocument,
 } from "../space-storyboard";
+import { parseMaybeJSON } from "../space-structured-json";
 import type { AssetVersion, SpaceCanvasNode } from "../types";
 
 export type NodeDetailContentMode = "rich" | "storyboard" | "file";
@@ -517,21 +518,6 @@ function isExplicitRichJSON(value: unknown) {
     isRecord(parsed) &&
     String(parsed.format || "").trim().toLowerCase() === "rich_json"
   );
-}
-
-function parseMaybeJSON(value: unknown): any {
-  if (typeof value !== "string") {
-    return value;
-  }
-  const text = value.trim();
-  if (!text || (!text.startsWith("{") && !text.startsWith("["))) {
-    return value;
-  }
-  try {
-    return JSON.parse(text);
-  } catch {
-    return value;
-  }
 }
 
 function mediaNodeType(kind: "image" | "video" | "audio") {

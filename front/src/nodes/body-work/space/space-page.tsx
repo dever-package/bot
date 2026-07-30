@@ -1,4 +1,5 @@
 import {
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -47,7 +48,6 @@ import {
   Lightbulb,
   Loader2,
   Maximize2,
-  MessageSquare,
   Minus,
   Moon,
   MoreHorizontal,
@@ -58,7 +58,6 @@ import {
   RotateCw,
   Save,
   Scissors,
-  Send,
   Sun,
   Type,
   Users,
@@ -75,29 +74,22 @@ import { getCompatModule, useNavigate, useTheme } from "@dever/front-plugin";
 import { useBodyLoginConfig } from "../auth/site-config";
 import "../shared/body-theme.css";
 import { useBodyAppearance } from "../shared/use-body-appearance";
-import {
-  AgentInteractionPanel,
-  type AgentInteraction,
-} from "@/components/agent/interaction-panel";
+import type { AgentInteraction } from "@/components/agent/interaction-panel";
 import {
   fetchSpaceBootstrap,
   fetchSpaceCanvas,
   fetchSpaceCanvasExecution,
   fetchSpaceCanvasExecutions,
   fetchSpacePowerForm,
-  fetchSpacePowers,
   fetchSpaceRunStatus,
   generateSpaceCanvasNodeTitle,
   submitSpaceCanvasFeedback,
   submitSpaceInteraction,
   runSpaceCanvas,
   saveSpaceCanvasContent,
-  sendSpaceMessage,
 } from "./space-api";
 import { useCanvasAutosave, type CanvasSaveStatus } from "./space-autosave";
 import { SpaceCatalogCache } from "./space-catalog-cache";
-import { AddNodeMenu } from "./space-add-node-menu";
-import { CanvasGroupNodeView } from "./space-group-node";
 import {
   runCanvasGroupMembers,
   storyboardRunBlockedReason,
@@ -105,6 +97,7 @@ import {
 } from "./space-group-runtime";
 import {
   canConnectCanvasNodes,
+  canvasConnectionSourceNodes,
   canvasGroupMembers,
   reconcileCanvasGroupEdges,
   withCanvasNodeGroupAtPosition,
@@ -126,8 +119,6 @@ import {
   type CanvasNodeResizeHandler,
   type CanvasResultViewChangeHandler,
 } from "./space-resizer";
-import { CanvasResultView } from "./space-result-view";
-import { CanvasAgentResultContent } from "./space-agent-result";
 import {
   emptyCanvasAgentRuntime,
   hasCanvasAgentRuntimeContent,
@@ -136,10 +127,7 @@ import {
   type CanvasAgentRuntimeState,
 } from "./space-agent-runtime";
 import type { ReferenceInput } from "../../show/agent-chat/reference";
-import { AssetBrowser } from "../asset/asset-browser";
-import { AssetAudioPreview } from "../asset/asset-audio-preview";
 import { normalizeAssetRecord } from "../asset/asset-api";
-import { AssetPickerDialog } from "../asset/asset-picker-dialog";
 import type { AssetRecord } from "../asset/asset-types";
 import {
   mergeProjectAssets,
@@ -161,7 +149,6 @@ import {
   type CanvasNodeResultRef,
   type CanvasRunRef,
 } from "./space-runner";
-import { CanvasRunHistoryDrawer } from "./space-run-history";
 import {
   canvasExecutionNodeIds,
   canvasNodeRunsInBackend,
@@ -218,7 +205,6 @@ import type {
   CanvasResultViewState,
   PowerForm,
   PowerOption,
-  PowerCategoryOption,
   PowerParam,
   ProjectAsset,
   SpaceBootstrap,
@@ -247,9 +233,8 @@ import {
   canvasMediaUsageError,
   isCanvasMediaReferenceNode,
   mediaUsageOptions,
-  nextMediaUsage,
-  reconcileMediaUsages,
-  reconcileReferenceMediaUsageChange,
+  nextMediaUsageForSources,
+  reconcileCanvasMediaUsages,
   type CanvasConnectedMediaReference,
   type CanvasMediaUsageAssignments,
 } from "./space-media-references";
@@ -297,16 +282,27 @@ import {
   parseMaybeJSON,
   repairJSONControlChars,
 } from "./space-structured-json";
-import {
-  StoryboardNodeContent,
-  type StoryboardNodeStatus,
-} from "./space-storyboard-node";
-import { StoryboardInputReferenceEditor } from "./space-storyboard-reference-editor";
+import type { StoryboardNodeStatus } from "./space-storyboard-node";
 import { reconcileStoryboardReferences } from "./space-storyboard-reference";
-import { NodeDetailDialog } from "./node-detail/node-detail-dialog";
-import { VideoComposeView } from "./space-video-compose-view";
 import { useCanvasNodeRunError } from "./space-run-error";
 import { SpaceTooltip } from "./space-tooltip";
+import { CanvasModuleLoading, CanvasStartupLoading } from "./space-loading";
+import { useSpacePowerCatalog } from "./use-space-power-catalog";
+import {
+  AgentInteractionPanel,
+  AddNodeMenu,
+  AssetAudioPreview,
+  AssetBrowser,
+  AssetPickerDialog,
+  CanvasAgentResultContent,
+  CanvasGroupNodeView,
+  CanvasResultView,
+  CanvasRunHistoryDrawer,
+  NodeDetailDialog,
+  StoryboardInputReferenceEditor,
+  StoryboardNodeContent,
+  VideoComposeView,
+} from "./space-optional-components";
 const { normalizeAgentResultOutputValue } = getCompatModule(
   "@/lib/agent-result-protocol",
 ) as {
@@ -602,9 +598,11 @@ const flowEdgeTypes = {
   animated: SpaceAnimatedEdge,
 };
 
-const SHOW_CANVAS_ASSISTANT = false;
-
-export function WorkSpacePage() {
+export function WorkSpacePage({
+  onInitialLoadComplete,
+}: {
+  onInitialLoadComplete: () => void;
+}) {
   const navigate = useNavigate();
   const loginConfig = useBodyLoginConfig();
   const projectId = useMemo(() => readProjectId(), []);
@@ -620,17 +618,12 @@ export function WorkSpacePage() {
     Record<string, SpaceCanvasState>
   >({});
   const canvasStatesRef = useRef(canvasStates);
-  const [prompt, setPrompt] = useState("");
   const [workMode, setWorkMode] = useState<WorkMode>("create");
-  const [assistantOpen, setAssistantOpen] = useState(false);
   const { resolvedTheme: theme, setTheme } = useTheme();
   useBodyAppearance(loginConfig.site.appearance, theme);
   const [nodeMenu, setNodeMenu] = useState<AddNodeMenuState | null>(null);
-  const [powers, setPowers] = useState<PowerOption[]>([]);
-  const [powerCategories, setPowerCategories] =
-    useState<PowerCategoryOption[]>([]);
   const [loading, setLoading] = useState(true);
-  const [running, setRunning] = useState(false);
+  const initialLoadingRef = useRef(true);
   const [runningNodes, setRunningNodes] = useState<RunningNodeMap>({});
   const runningNodeBatcher = useRunningNodeBatcher(setRunningNodes);
   const [nodeResultOverrides, setNodeResultOverrides] = useState<
@@ -647,7 +640,6 @@ export function WorkSpacePage() {
   const [importPickerOpen, setImportPickerOpen] = useState(false);
   const [pendingImportNodeId, setPendingImportNodeId] = useState("");
   const [error, setError] = useState("");
-  const [runStatus, setRunStatus] = useState("");
   const [canvasRunRecords, setCanvasRunRecords] = useState<
     WorkspaceCanvasRunRef[]
   >([]);
@@ -682,6 +674,18 @@ export function WorkSpacePage() {
     reject: (err: Error) => void;
     submit?: (values: Record<string, unknown>) => Promise<void>;
   } | null>(null);
+  const {
+    roles,
+    powers,
+    powerCategories,
+    loaded: powerCatalogLoaded,
+    required: powerCatalogRequired,
+    load: loadPowerCatalog,
+  } = useSpacePowerCatalog({
+    space,
+    canvases: canvasStates,
+    cache: catalogCache,
+  });
 
   useEffect(() => {
     canvasStatesRef.current = canvasStates;
@@ -745,18 +749,6 @@ export function WorkSpacePage() {
       setActiveCateId(initialCateId);
       setLoadingCateId(null);
       loadingCateIdRef.current = null;
-      setPowers(nextSpace.powers || []);
-      setPowerCategories(nextSpace.powerCategories || []);
-      catalogCache.primeCatalog(
-        projectId,
-        Number(nextSpace.release?.id || nextSpace.project.release_id || 0),
-        {
-          powers: nextSpace.powers || [],
-          powerCategories: nextSpace.powerCategories || [],
-          powerKinds: nextSpace.powerKinds || [],
-          outputTypes: nextSpace.outputTypes || [],
-        },
-      );
       requestedNodeTitlesRef.current = new Set();
       appliedCanvasRunsRef.current = new Set();
       canvasRunRecordsRef.current = [];
@@ -777,7 +769,7 @@ export function WorkSpacePage() {
     } finally {
       setLoading(false);
     }
-  }, [catalogCache, projectId, resetCanvasAutosave]);
+  }, [projectId, resetCanvasAutosave]);
 
   const requestConfirm = useCallback<ConfirmRequester>((request) => {
     setConfirmRequest(request);
@@ -786,6 +778,14 @@ export function WorkSpacePage() {
   useEffect(() => {
     void loadSpace();
   }, [loadSpace]);
+
+  useEffect(() => {
+    if (loading || !initialLoadingRef.current) {
+      return;
+    }
+    initialLoadingRef.current = false;
+    onInitialLoadComplete();
+  }, [loading, onInitialLoadComplete]);
 
   const canvasAssetCates = space?.assetCates;
   const cates = useMemo(() => (space ? visibleAssetCates(space) : []), [space]);
@@ -799,9 +799,8 @@ export function WorkSpacePage() {
     [activeCate, space],
   );
   const menuRoles = useMemo(() => {
-    if (!space) return [];
-    return (space.roles || []).filter(isCreationRole);
-  }, [space]);
+    return roles.filter(isCreationRole);
+  }, [roles]);
   const menuPowers = useMemo(() => powers.filter(isCreationPower), [powers]);
   const menuFlows = useMemo(() => activeFlows, [activeFlows]);
   const activeCanvas = useMemo(
@@ -852,9 +851,8 @@ export function WorkSpacePage() {
     () => buildCanvasReferenceItems(canvasAssetEntries),
     [canvasAssetEntries],
   );
-
   useEffect(() => {
-    if (!canvasAssetCates) {
+    if (!canvasAssetCates || (powerCatalogRequired && !powerCatalogLoaded)) {
       return;
     }
     setCanvasStates((current) => {
@@ -878,7 +876,13 @@ export function WorkSpacePage() {
       }
       return next;
     });
-  }, [canvasAssetCates, powers, storyboardReferenceSourceSignature]);
+  }, [
+    canvasAssetCates,
+    powerCatalogLoaded,
+    powerCatalogRequired,
+    powers,
+    storyboardReferenceSourceSignature,
+  ]);
 
   const openImportPickerByNodeId = useCallback(
     (nodeId = "") => {
@@ -1670,7 +1674,6 @@ export function WorkSpacePage() {
     setSelectedNodeIds([]);
     setFocusNodeRequest(null);
     setNodeMenu(null);
-    setRunStatus("");
     if (!space) {
       return true;
     }
@@ -2395,57 +2398,11 @@ export function WorkSpacePage() {
     setTheme(theme === "dark" ? "light" : "dark");
   }
 
-  async function loadPowerCatalog(force = false) {
-    if (!space) {
-      return;
-    }
-    try {
-      const catalog = await catalogCache.loadCatalog(
-        space.project.id,
-        Number(space.release?.id || space.project.release_id || 0),
-        () => fetchSpacePowers(space.project.id),
-        force,
-      );
-      setPowers(catalog.powers);
-      setPowerCategories(catalog.powerCategories);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载能力列表失败");
-    }
-  }
-
-  async function submitMessage() {
-    if (!space || !activeCate || !prompt.trim()) {
-      return;
-    }
-    setRunning(true);
-    setRunStatus("");
-    try {
-      const result = await sendSpaceMessage(
-        space.project.id,
-        activeCate.id,
-        prompt.trim(),
-      );
-      setRunStatus(runStatusText(result, "已提交给沟通角色"));
-      toast.success("已提交给沟通角色");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "发送失败");
-    } finally {
-      setRunning(false);
-    }
-  }
-
   if (loading) {
-    return (
-      <main className={`ws-page is-${theme} ws-loading-screen`}>
-        <div className="ws-loading-state" role="status" aria-live="polite">
-          <strong>正在加载创作空间</strong>
-          <span>正在恢复画布与项目内容</span>
-          <div className="ws-loading-progress" aria-hidden="true">
-            <span />
-          </div>
-        </div>
-      </main>
-    );
+    if (initialLoadingRef.current) {
+      return null;
+    }
+    return <CanvasStartupLoading />;
   }
 
   if (error || !space || !activeCate) {
@@ -2531,118 +2488,106 @@ export function WorkSpacePage() {
         onToggleTheme={toggleTheme}
       />
 
-      <CanvasRunHistoryDrawer
-        open={canvasRunHistoryOpen}
-        runs={canvasRunHistoryRecords}
-        loading={canvasRunHistoryLoading}
-        error={canvasRunHistoryError}
-        page={canvasRunHistoryPage}
-        hasNextPage={canvasRunHistoryHasMore}
-        onOpenChange={setCanvasRunHistoryOpen}
-        onRefresh={() => loadWorkspaceCanvasHistory(projectId, 0)}
-        onPreviousPage={() =>
-          loadWorkspaceCanvasHistory(
-            projectId,
-            Math.max(0, canvasRunHistoryPage - 2),
-          )
-        }
-        onNextPage={() =>
-          loadWorkspaceCanvasHistory(projectId, canvasRunHistoryPage)
-        }
-        onLocateRun={(run) => {
-          const nodeId = String(run.start_node_id || "");
-          if (!nodeId) {
-            return;
-          }
-          setCanvasRunHistoryOpen(false);
-          void switchCate(Number(run.asset_cate_id || activeCateId)).then(
-            (switched) => {
-              if (switched) {
-                window.requestAnimationFrame(() => focusCanvasNode(nodeId));
+      {canvasRunHistoryOpen ? (
+        <Suspense
+          fallback={<CanvasModuleLoading label="正在加载运行历史" overlay />}
+        >
+          <CanvasRunHistoryDrawer
+            open
+            runs={canvasRunHistoryRecords}
+            loading={canvasRunHistoryLoading}
+            error={canvasRunHistoryError}
+            page={canvasRunHistoryPage}
+            hasNextPage={canvasRunHistoryHasMore}
+            onOpenChange={setCanvasRunHistoryOpen}
+            onRefresh={() => loadWorkspaceCanvasHistory(projectId, 0)}
+            onPreviousPage={() =>
+              loadWorkspaceCanvasHistory(
+                projectId,
+                Math.max(0, canvasRunHistoryPage - 2),
+              )
+            }
+            onNextPage={() =>
+              loadWorkspaceCanvasHistory(projectId, canvasRunHistoryPage)
+            }
+            onLocateRun={(run) => {
+              const nodeId = String(run.start_node_id || "");
+              if (!nodeId) {
+                return;
               }
-            },
-          );
-        }}
-      />
+              setCanvasRunHistoryOpen(false);
+              void switchCate(Number(run.asset_cate_id || activeCateId)).then(
+                (switched) => {
+                  if (switched) {
+                    window.requestAnimationFrame(() => focusCanvasNode(nodeId));
+                  }
+                },
+              );
+            }}
+          />
+        </Suspense>
+      ) : null}
 
       <LeftCanvasDock
         mode={workMode}
         onSelectMode={(mode) => {
           setWorkMode(mode);
           setNodeMenu(null);
-          setRunStatus("");
         }}
       />
 
-      <AssetPickerDialog
-        open={importPickerOpen}
-        teamID={space.project.team_id}
-        scopeProjectID={space.project.id}
-        title="导入资产"
-        description="选择已有资产或上传本地文件，确认后加入当前画布。"
-        initialFilters={{
-          sourceType: "project",
-          projectID: space.project.id,
-        }}
-        confirmSelection
-        contentMode="full"
-        validateAsset={(asset) =>
-          asset.versionID > 0 ? "" : "该资产没有可用版本，无法导入。"
-        }
-        onUpload={uploadImportAssets}
-        onClose={closeImportPicker}
-        onConfirm={(assets) => {
-          const asset = assets[0];
-          if (asset) useImportedAsset(normalizeProjectAsset(asset));
-        }}
-      />
-
-      {workMode === "result" ? (
-        <WorkspaceSurface className="ws-asset-workspace">
-          <AssetBrowser
+      {importPickerOpen ? (
+        <Suspense
+          fallback={<CanvasModuleLoading label="正在加载资产选择器" overlay />}
+        >
+          <AssetPickerDialog
+            open
             teamID={space.project.team_id}
             scopeProjectID={space.project.id}
-            onLocalUpload={uploadImportAssets}
+            title="导入资产"
+            description="选择已有资产或上传本地文件，确认后加入当前画布。"
             initialFilters={{
               sourceType: "project",
               projectID: space.project.id,
-              assetCateID: hasAssetCates ? activeCate.id : 0,
             }}
-            headerAction={
-              <SpaceTooltip label="关闭资产">
-                <button type="button" onClick={() => setWorkMode("create")}>
-                  <X aria-hidden="true" />
-                  <span className="sr-only">关闭资产</span>
-                </button>
-              </SpaceTooltip>
+            confirmSelection
+            contentMode="full"
+            validateAsset={(asset) =>
+              asset.versionID > 0 ? "" : "该资产没有可用版本，无法导入。"
             }
+            onUpload={uploadImportAssets}
+            onClose={closeImportPicker}
+            onConfirm={(assets) => {
+              const asset = assets[0];
+              if (asset) useImportedAsset(normalizeProjectAsset(asset));
+            }}
           />
-        </WorkspaceSurface>
+        </Suspense>
       ) : null}
 
-      {SHOW_CANVAS_ASSISTANT ? (
-        <>
-          <button
-            type="button"
-            className={`ws-assistant-ball ${assistantOpen ? "is-open" : ""}`}
-            onClick={() => setAssistantOpen((current) => !current)}
-            aria-label={assistantOpen ? "收起创作助手" : "打开创作助手"}
-          >
-            <MessageSquare size={25} />
-          </button>
-
-          {assistantOpen ? (
-            <CommunicationWorkspacePanel
-              activeCate={activeCate}
-              prompt={prompt}
-              running={running}
-              runStatus={runStatus}
-              onPromptChange={setPrompt}
-              onSubmitMessage={submitMessage}
-              onClose={() => setAssistantOpen(false)}
+      {workMode === "result" ? (
+        <WorkspaceSurface className="ws-asset-workspace">
+          <Suspense fallback={<CanvasModuleLoading label="正在加载资产" />}>
+            <AssetBrowser
+              teamID={space.project.team_id}
+              scopeProjectID={space.project.id}
+              onLocalUpload={uploadImportAssets}
+              initialFilters={{
+                sourceType: "project",
+                projectID: space.project.id,
+                assetCateID: hasAssetCates ? activeCate.id : 0,
+              }}
+              headerAction={
+                <SpaceTooltip label="关闭资产">
+                  <button type="button" onClick={() => setWorkMode("create")}>
+                    <X aria-hidden="true" />
+                    <span className="sr-only">关闭资产</span>
+                  </button>
+                </SpaceTooltip>
+              }
             />
-          ) : null}
-        </>
+          </Suspense>
+        </WorkspaceSurface>
       ) : null}
 
       {startFlowFeedbackPrompt ? (
@@ -2688,77 +2633,85 @@ export function WorkSpacePage() {
       ) : null}
 
       {nodeMenu ? (
-        <AddNodeMenu
-          menu={nodeMenu}
-          flows={menuFlows}
-          powers={menuPowers}
-          powerCategories={powerCategories}
-          roles={menuRoles}
-          onClose={() => setNodeMenu(null)}
-          onSelectFlow={(flow) => addFlowNode(flow, nodeMenu.position)}
-          onSelectFunction={(functionOption) =>
-            addFunctionNode(functionOption, nodeMenu.position)
-          }
-          onSelectGroup={() => addGroupNode(nodeMenu.position)}
-          onSelectRole={(role) => addAgentNode(role, nodeMenu.position)}
-          onSelectPower={(power) => addPowerNode(power, nodeMenu.position)}
-        />
+        <Suspense
+          fallback={<CanvasModuleLoading label="正在加载节点菜单" overlay />}
+        >
+          <AddNodeMenu
+            menu={nodeMenu}
+            flows={menuFlows}
+            powers={menuPowers}
+            powerCategories={powerCategories}
+            roles={menuRoles}
+            onClose={() => setNodeMenu(null)}
+            onSelectFlow={(flow) => addFlowNode(flow, nodeMenu.position)}
+            onSelectFunction={(functionOption) =>
+              addFunctionNode(functionOption, nodeMenu.position)
+            }
+            onSelectGroup={() => addGroupNode(nodeMenu.position)}
+            onSelectRole={(role) => addAgentNode(role, nodeMenu.position)}
+            onSelectPower={(power) => addPowerNode(power, nodeMenu.position)}
+          />
+        </Suspense>
       ) : null}
 
       {nodeDetail ? (
-        <NodeDetailDialog
-          projectId={space.project.id}
-          teamId={space.team.id}
-          assetCateId={Number(
-            nodeDetail.assetCateId ||
-              nodeDetail.asset?.asset_cate_id ||
-              activeCate?.id ||
-              0,
-          )}
-          node={nodeDetail}
-          storyboardFocus={storyboardDetailFocus}
-          canvasReferenceItems={canvasReferenceItems.filter(
-            (item) => item.source !== "current" || item.id !== nodeDetail.id,
-          )}
-          onNodeDraftChange={(draft) => {
-            if (!draft) {
-              return;
-            }
-            updateNodeComposerDraft(nodeDetail.id, draft);
-            setNodeDetail((current) =>
-              current?.id === nodeDetail.id
-                ? { ...current, composerDraft: draft }
-                : current,
-            );
-          }}
-          onRunNode={runBackendSingleNode}
-          onAssetUpdated={(asset) => {
-            const normalizedAsset = mergeProjectAssetVersionHistory(
-              asset,
-              nodeDetail.asset,
-            );
-            upsertSpaceAsset(normalizedAsset);
-            const nodePatch = buildAssetVersionNodePatch(
-              nodeDetail,
-              normalizedAsset,
-            );
-            if (!nodeDetail.id.startsWith("asset-detail-")) {
-              updateNodeResult(nodeDetail.id, nodePatch);
-            }
-            setNodeDetail((current) =>
-              current?.id === nodeDetail.id
-                ? {
-                    ...current,
-                    ...nodePatch,
-                  }
-                : current,
-            );
-          }}
-          onClose={() => {
-            setNodeDetail(null);
-            setStoryboardDetailFocus(undefined);
-          }}
-        />
+        <Suspense
+          fallback={<CanvasModuleLoading label="正在加载节点详情" overlay />}
+        >
+          <NodeDetailDialog
+            projectId={space.project.id}
+            teamId={space.team.id}
+            assetCateId={Number(
+              nodeDetail.assetCateId ||
+                nodeDetail.asset?.asset_cate_id ||
+                activeCate?.id ||
+                0,
+            )}
+            node={nodeDetail}
+            storyboardFocus={storyboardDetailFocus}
+            canvasReferenceItems={canvasReferenceItems.filter(
+              (item) => item.source !== "current" || item.id !== nodeDetail.id,
+            )}
+            onNodeDraftChange={(draft) => {
+              if (!draft) {
+                return;
+              }
+              updateNodeComposerDraft(nodeDetail.id, draft);
+              setNodeDetail((current) =>
+                current?.id === nodeDetail.id
+                  ? { ...current, composerDraft: draft }
+                  : current,
+              );
+            }}
+            onRunNode={runBackendSingleNode}
+            onAssetUpdated={(asset) => {
+              const normalizedAsset = mergeProjectAssetVersionHistory(
+                asset,
+                nodeDetail.asset,
+              );
+              upsertSpaceAsset(normalizedAsset);
+              const nodePatch = buildAssetVersionNodePatch(
+                nodeDetail,
+                normalizedAsset,
+              );
+              if (!nodeDetail.id.startsWith("asset-detail-")) {
+                updateNodeResult(nodeDetail.id, nodePatch);
+              }
+              setNodeDetail((current) =>
+                current?.id === nodeDetail.id
+                  ? {
+                      ...current,
+                      ...nodePatch,
+                    }
+                  : current,
+              );
+            }}
+            onClose={() => {
+              setNodeDetail(null);
+              setStoryboardDetailFocus(undefined);
+            }}
+          />
+        </Suspense>
       ) : null}
     </main>
   );
@@ -2926,74 +2879,6 @@ function LeftCanvasDock({
         );
       })}
     </nav>
-  );
-}
-
-function CommunicationWorkspacePanel({
-  activeCate,
-  prompt,
-  running,
-  runStatus,
-  onPromptChange,
-  onSubmitMessage,
-  onClose,
-}: {
-  activeCate: AssetCate;
-  prompt: string;
-  running: boolean;
-  runStatus: string;
-  onPromptChange: (value: string) => void;
-  onSubmitMessage: () => void;
-  onClose: () => void;
-}) {
-  return (
-    <WorkspaceSurface className="ws-communication-workspace">
-      <section className="ws-chat-stage">
-        <button
-          type="button"
-          className="ws-chat-close"
-          onClick={onClose}
-          aria-label="关闭创作助手"
-        >
-          <X size={18} />
-        </button>
-        <div className="ws-chat-thread">
-          <div className="ws-chat-message is-assistant">
-            <div className="ws-chat-avatar">AI</div>
-            <div>
-              <strong>创作助手</strong>
-              <p>可以直接说你想怎么处理{activeCate.name}。</p>
-            </div>
-          </div>
-          {prompt.trim() ? (
-            <div className="ws-chat-message is-user">
-              <p>{prompt}</p>
-            </div>
-          ) : null}
-          {runStatus ? <div className="ws-run-status">{runStatus}</div> : null}
-        </div>
-        <div className="ws-chat-composer">
-          <textarea
-            value={prompt}
-            onChange={(event) => onPromptChange(event.target.value)}
-            placeholder="可以向我提问或布置创作任务，输入 @ 使用资产"
-          />
-          <div className="ws-chat-composer-actions">
-            <button type="button">Agent</button>
-            <button type="button">+</button>
-            <button
-              type="button"
-              className="is-send"
-              disabled={running || !prompt.trim()}
-              onClick={onSubmitMessage}
-              aria-label="发送"
-            >
-              {running ? <Loader2 size={16} /> : <Send size={16} />}
-            </button>
-          </div>
-        </div>
-      </section>
-    </WorkspaceSurface>
   );
 }
 
@@ -3762,21 +3647,27 @@ function CanvasWorkbench({
           : "";
     return edges
       .filter(
-        (edge) =>
-          nodeMap.has(edge.from) &&
-          nodeMap.has(edge.to) &&
-          !hiddenStoryboardNodeIds.has(edge.from) &&
-          !hiddenStoryboardNodeIds.has(edge.to),
+        (edge) => {
+          const { sourceNodeId, targetNodeId } = canvasEdgeNodeIDs(edge);
+          return (
+            nodeMap.has(sourceNodeId) &&
+            nodeMap.has(targetNodeId) &&
+            !hiddenStoryboardNodeIds.has(sourceNodeId) &&
+            !hiddenStoryboardNodeIds.has(targetNodeId)
+          );
+        },
       )
       .map((edge) => ({
         id: edge.id,
-        source: edge.from,
+        source: edge.logicalFrom || edge.from,
         sourceHandle: "output-0",
-        target: edge.to,
+        target: edge.logicalTo || edge.to,
         targetHandle: "input-0",
         type: "animated",
         animated: false,
         data: {
+          physicalFrom: edge.from,
+          physicalTo: edge.to,
           logicalFrom: edge.logicalFrom,
           logicalTo: edge.logicalTo,
           executionMode: edge.executionMode,
@@ -3947,13 +3838,14 @@ function CanvasWorkbench({
       ) {
         return;
       }
-      const sourceNode = nodes.find((node) => node.id === sourceNodeId);
       const targetNode = nodes.find((node) => node.id === targetNodeId);
+      const sourceNodes = canvasConnectionSourceNodes(nodes, sourceNodeId);
+      const mediaSourceNodes = sourceNodes.filter(isCanvasMediaReferenceNode);
       let mediaUsage: string | undefined;
       if (
         targetNode?.type === "power" &&
         targetNode.power &&
-        isCanvasMediaReferenceNode(sourceNode)
+        mediaSourceNodes.length > 0
       ) {
         try {
           const targetId = Number(
@@ -3981,14 +3873,15 @@ function CanvasWorkbench({
               }),
           );
           const options = mediaUsageOptions(form.params || []);
-          const assignment = nextMediaUsage(
+          const assignment = nextMediaUsageForSources(
             canvasIncomingMediaConnections(
               nodes,
               edgesRef.current,
               targetNodeId,
             ),
             options,
-            sourceNode!,
+            mediaSourceNodes,
+            targetNode.composerDraft?.promptContent,
           );
           if (assignment.error) {
             toast.error(assignment.error);
@@ -4005,11 +3898,14 @@ function CanvasWorkbench({
         }
       }
       commitCanvasEdges(
-        appendCanvasEdge(
-          edgesRef.current,
-          sourceNodeId,
-          targetNodeId,
-          mediaUsage,
+        reconcileCanvasGroupEdges(
+          nodes,
+          appendCanvasEdge(
+            edgesRef.current,
+            sourceNodeId,
+            targetNodeId,
+            mediaUsage,
+          ),
         ),
       );
     },
@@ -8761,7 +8657,12 @@ function buildCanvasRenderIndex(
 ): CanvasRenderIndex {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
   const contextSourceNodeIds = new Set(
-    edges.map((edge) => canvasEdgeNodeIDs(edge).sourceNodeId),
+    edges.flatMap((edge) =>
+      canvasConnectionSourceNodes(
+        nodes,
+        canvasEdgeNodeIDs(edge).sourceNodeId,
+      ).map((node) => node.id),
+    ),
   );
   const groupMembersById = new Map<string, SpaceCanvasNode[]>();
   const contextSourceByNodeId = new Map<
@@ -8786,25 +8687,34 @@ function buildCanvasRenderIndex(
     string,
     CanvasConnectedMediaReference[]
   >();
+  const contextSourceIdsByTargetId = new Map<string, Set<string>>();
   for (const edge of edges) {
     const { sourceNodeId, targetNodeId } = canvasEdgeNodeIDs(edge);
     if (!nodeMap.has(targetNodeId)) {
       continue;
     }
-    const sourceNode = nodeMap.get(sourceNodeId);
-    if (isCanvasMediaReferenceNode(sourceNode)) {
-      const references =
-        incomingMediaReferencesByNodeId.get(targetNodeId) || [];
-      references.push({ edge, source: sourceNode! });
-      incomingMediaReferencesByNodeId.set(targetNodeId, references);
+    for (const sourceNode of canvasConnectionSourceNodes(
+      nodes,
+      sourceNodeId,
+    )) {
+      if (isCanvasMediaReferenceNode(sourceNode)) {
+        const references =
+          incomingMediaReferencesByNodeId.get(targetNodeId) || [];
+        references.push({ edge, source: sourceNode });
+        incomingMediaReferencesByNodeId.set(targetNodeId, references);
+      }
+      const source = contextSourceByNodeId.get(sourceNode.id);
+      const usedSourceIds =
+        contextSourceIdsByTargetId.get(targetNodeId) || new Set<string>();
+      if (!source || usedSourceIds.has(sourceNode.id)) {
+        continue;
+      }
+      usedSourceIds.add(sourceNode.id);
+      contextSourceIdsByTargetId.set(targetNodeId, usedSourceIds);
+      const sources = sourcesByTargetId.get(targetNodeId) || [];
+      sources.push(source);
+      sourcesByTargetId.set(targetNodeId, sources);
     }
-    const source = contextSourceByNodeId.get(sourceNodeId);
-    if (!source) {
-      continue;
-    }
-    const sources = sourcesByTargetId.get(targetNodeId) || [];
-    sources.push(source);
-    sourcesByTargetId.set(targetNodeId, sources);
   }
   const inputContextByNodeId = new Map<string, NodeInputContext>();
   for (const [nodeId, sources] of sourcesByTargetId) {
@@ -8833,16 +8743,19 @@ function canvasIncomingMediaConnections(
   edges: SpaceCanvasEdge[],
   targetNodeId: string,
 ): CanvasConnectedMediaReference[] {
-  const nodeByID = new Map(nodes.map((node) => [node.id, node]));
   const result: CanvasConnectedMediaReference[] = [];
   for (const edge of edges) {
     const endpoints = canvasEdgeNodeIDs(edge);
     if (endpoints.targetNodeId !== targetNodeId) {
       continue;
     }
-    const source = nodeByID.get(endpoints.sourceNodeId);
-    if (source && isCanvasMediaReferenceNode(source)) {
-      result.push({ edge, source });
+    for (const source of canvasConnectionSourceNodes(
+      nodes,
+      endpoints.sourceNodeId,
+    )) {
+      if (isCanvasMediaReferenceNode(source)) {
+        result.push({ edge, source });
+      }
     }
   }
   return result;
@@ -9471,7 +9384,12 @@ function appendCanvasEdge(
     return current;
   }
   const edgeExists = current.some(
-    (edge) => edge.from === source && edge.to === target,
+    (edge) => {
+      const endpoints = canvasEdgeNodeIDs(edge);
+      return (
+        endpoints.sourceNodeId === source && endpoints.targetNodeId === target
+      );
+    },
   );
   if (edgeExists) {
     return current;
@@ -9574,8 +9492,8 @@ function flowEdgesToCanvasEdges(edges: Edge[]): SpaceCanvasEdge[] {
   return edges
     .map((edge) => ({
       id: String(edge.id || `edge-${edge.source}-${edge.target}`),
-      from: String(edge.source || ""),
-      to: String(edge.target || ""),
+      from: String(edge.data?.physicalFrom || edge.source || ""),
+      to: String(edge.data?.physicalTo || edge.target || ""),
       logicalFrom: String(edge.data?.logicalFrom || "") || undefined,
       logicalTo: String(edge.data?.logicalTo || "") || undefined,
       executionMode:
@@ -10304,48 +10222,56 @@ function NodeResultBubble({
         }
       : undefined;
   return (
-    <CanvasResultView
-      output={contentOutput}
-      fallback={text}
-      preview={preview}
-      mediaLabel={mediaPreviewCaption(preview)}
-      className={`ws-agent-result-bubble ${resizing ? "is-resizing" : ""}`}
-      followContent={Boolean(runningNode && runningNode.status !== "error")}
-      followKey={agentRuntime}
-      style={{
-        width: resultView.width,
-        height: resultView.height,
-        left: `calc(100% + 12px + ${Number(resultView.offsetX || 0)}px)`,
-        top: `calc(50% + ${Number(resultView.offsetY || 0)}px)`,
-      }}
-      onOpen={onShowNodeDetail ? () => onShowNodeDetail(node) : undefined}
-      resizeControls={
-        <CanvasFloatingResizer
-          value={resultView}
-          enabled={canResize}
-          onResizeStart={() => {
-            setResizing(true);
-            onNodeResizeStart?.(node.id);
-          }}
-          onResize={setResultView}
-          onResizeEnd={(nextView) => {
-            setResultView(nextView);
-            setResizing(false);
-            onResultViewResizeEnd?.(node.id, nextView);
-          }}
-        />
-      }
-    >
-      {node.type === "agent" ? (
-        <CanvasAgentResultContent
-          output={rawAgentOutput}
-          runtime={agentRuntime}
-          fallback={text}
-          running={isActiveRunningNode(runningNode)}
-          onContinue={continueAgent}
-        />
-      ) : undefined}
-    </CanvasResultView>
+    <Suspense fallback={<CanvasModuleLoading label="正在加载节点结果" />}>
+      <CanvasResultView
+        output={contentOutput}
+        fallback={text}
+        preview={preview}
+        mediaLabel={mediaPreviewCaption(preview)}
+        className={`ws-agent-result-bubble ${resizing ? "is-resizing" : ""}`}
+        followContent={Boolean(runningNode && runningNode.status !== "error")}
+        followKey={agentRuntime}
+        style={{
+          width: resultView.width,
+          height: resultView.height,
+          left: `calc(100% + 12px + ${Number(resultView.offsetX || 0)}px)`,
+          top: `calc(50% + ${Number(resultView.offsetY || 0)}px)`,
+        }}
+        onOpen={onShowNodeDetail ? () => onShowNodeDetail(node) : undefined}
+        resizeControls={
+          <CanvasFloatingResizer
+            value={resultView}
+            enabled={canResize}
+            onResizeStart={() => {
+              setResizing(true);
+              onNodeResizeStart?.(node.id);
+            }}
+            onResize={setResultView}
+            onResizeEnd={(nextView) => {
+              setResultView(nextView);
+              setResizing(false);
+              onResultViewResizeEnd?.(node.id, nextView);
+            }}
+          />
+        }
+      >
+        {node.type === "agent" ? (
+          <Suspense
+            fallback={
+              <CanvasModuleLoading label="正在加载智能体结果" compact />
+            }
+          >
+            <CanvasAgentResultContent
+              output={rawAgentOutput}
+              runtime={agentRuntime}
+              fallback={text}
+              running={isActiveRunningNode(runningNode)}
+              onContinue={continueAgent}
+            />
+          </Suspense>
+        ) : undefined}
+      </CanvasResultView>
+    </Suspense>
   );
 }
 
@@ -10384,41 +10310,44 @@ function FunctionResultCard({
     hasDefaultCanvasNodeSize(node) &&
     Boolean(onNodeResult);
   return (
-    <CanvasResultView
-      output={contentOutput}
-      fallback={displayText}
-      preview={preview}
-      mediaLabel={mediaPreviewCaption(preview)}
-      className={`ws-node-function-result-card ${
-        renderGeneratedMedia ? "has-media" : ""
-      }`}
-      customContentIsPureMedia={renderGeneratedMedia}
-      onOpen={onShowNodeDetail ? () => onShowNodeDetail(node) : undefined}
-    >
-      {renderGeneratedMedia ? (
-        <CanvasGeneratedNodeContent
-          preview={preview}
-          output={contentOutput}
-          fallback={displayText}
-          generating={running}
-          showMediaCaption={false}
-          onMediaSize={
-            canAdoptGeneratedMediaSize
-              ? (width, height) => {
-                  const contentSize = generatedMediaNodeSize(width, height);
-                  if (!contentSize || !onNodeResult) {
-                    return;
+    <Suspense fallback={<CanvasModuleLoading label="正在加载节点结果" />}>
+      <CanvasResultView
+        output={contentOutput}
+        fallback={displayText}
+        preview={preview}
+        mediaLabel={mediaPreviewCaption(preview)}
+        className={`ws-node-function-result-card ${
+          renderGeneratedMedia ? "has-media" : ""
+        }`}
+        customContentIsPureMedia={renderGeneratedMedia}
+        onOpen={onShowNodeDetail ? () => onShowNodeDetail(node) : undefined}
+      >
+        {renderGeneratedMedia ? (
+          <CanvasGeneratedNodeContent
+            preview={preview}
+            output={contentOutput}
+            fallback={displayText}
+            generating={running}
+            showMediaCaption={false}
+            onMediaSize={
+              canAdoptGeneratedMediaSize
+                ? (width, height) => {
+                    const contentSize = generatedMediaNodeSize(width, height);
+                    if (!contentSize || !onNodeResult) {
+                      return;
+                    }
+                    onNodeResult(node.id, {
+                      width: contentSize.width,
+                      height:
+                        contentSize.height + FUNCTION_RESULT_TOOLBAR_HEIGHT,
+                    });
                   }
-                  onNodeResult(node.id, {
-                    width: contentSize.width,
-                    height: contentSize.height + FUNCTION_RESULT_TOOLBAR_HEIGHT,
-                  });
-                }
-              : undefined
-          }
-        />
-      ) : undefined}
-    </CanvasResultView>
+                : undefined
+            }
+          />
+        ) : undefined}
+      </CanvasResultView>
+    </Suspense>
   );
 }
 
@@ -10997,33 +10926,16 @@ function NodeBottomSettings({
   const powerPrompt = promptParam
     ? String(paramValues[promptParam.key] ?? "")
     : prompt;
+  const powerInputDescription = String(
+    powerForm?.power?.description || node.power?.description || "",
+  ).trim();
+  const powerInputPlaceholder =
+    powerInputDescription ||
+    (promptParam
+      ? "在此处为该能力输入生成提示词..."
+      : "当前能力无需填写提示词");
   const canSelectPowerSource = powerFormAllowsSourceSelection(powerForm);
   const effectiveSelectedTargetId = canSelectPowerSource ? selectedTargetId : 0;
-
-  useEffect(() => {
-    if (
-      selectedNodeType !== "power" ||
-      powerFormLoading ||
-      !powerForm ||
-      !onConnectedMediaUsagesChange
-    ) {
-      return;
-    }
-    const assignments = reconcileMediaUsages(
-      connectedMediaReferences,
-      connectedMediaUsageOptions,
-    );
-    if (Object.keys(assignments).length > 0) {
-      onConnectedMediaUsagesChange(assignments);
-    }
-  }, [
-    connectedMediaReferences,
-    connectedMediaUsageOptions,
-    onConnectedMediaUsagesChange,
-    powerForm,
-    powerFormLoading,
-    selectedNodeType,
-  ]);
 
   useEffect(() => {
     if (selectedNodeType !== "power" && selectedNodeType !== "agent") {
@@ -11080,12 +10992,17 @@ function NodeBottomSettings({
     nextPrompt: string,
     nextContent?: CanvasReferenceContent,
   ) {
-    const normalizedContent = reconcileReferenceMediaUsageChange(
+    const reconciliation = reconcileCanvasMediaUsages(
       promptContent,
       nextContent,
       assetLibrary.current,
       connectedMediaUsageOptions,
+      connectedMediaReferences,
     );
+    const normalizedContent = reconciliation.content;
+    if (Object.keys(reconciliation.assignments).length > 0) {
+      onConnectedMediaUsagesChange?.(reconciliation.assignments);
+    }
     setPrompt(nextPrompt);
     setPromptContent(normalizedContent);
     const nextStoryboardReferences = isStoryboardPower
@@ -11205,26 +11122,33 @@ function NodeBottomSettings({
           }),
       );
       const options = mediaUsageOptions(form.params || []);
-      const assignments = reconcileMediaUsages(
-        connectedMediaReferences,
-        options,
-      );
-      const mediaError = canvasMediaUsageError(
-        connectedMediaReferences,
+      const reconciliation = reconcileCanvasMediaUsages(
+        promptContent,
         promptContent,
         assetLibrary.current,
         options,
-        assignments,
+        connectedMediaReferences,
+      );
+      const mediaError = canvasMediaUsageError(
+        connectedMediaReferences,
+        reconciliation.content,
+        assetLibrary.current,
+        options,
+        reconciliation.assignments,
       );
       if (mediaError) {
         toast.error(`无法切换能力来源：${mediaError}`);
         return;
+      }
+      if (Object.keys(reconciliation.assignments).length > 0) {
+        onConnectedMediaUsagesChange?.(reconciliation.assignments);
       }
       setPowerForm(form);
       const nextTargetId = powerFormAllowsSourceSelection(form)
         ? form.selected_target_id || targetId
         : 0;
       setSelectedTargetId(nextTargetId);
+      setPromptContent(reconciliation.content);
       const nextValues = mergePowerParamValues(
         form.params || [],
         nodeDraftRef.current.paramValues || paramValues,
@@ -11232,7 +11156,7 @@ function NodeBottomSettings({
       );
       saveComposerParamValues(nextValues, {
         prompt: powerPrompt,
-        promptContent,
+        promptContent: reconciliation.content,
         selectedTargetId: nextTargetId,
       });
     } catch (err) {
@@ -11460,8 +11384,11 @@ function NodeBottomSettings({
             <PromptComposer
               value={powerPrompt}
               referenceContent={promptContent}
-              placeholder="在此处为该能力输入生成提示词..."
+              placeholder={powerInputPlaceholder}
               running={nodeRunning}
+              textInputEnabled={Boolean(promptParam)}
+              showMediaParamButtons
+              mediaParamPower={powerForm?.power || node.power}
               sourceOptions={canSelectPowerSource ? powerForm?.sources || [] : []}
               selectedSourceId={effectiveSelectedTargetId}
               params={composerParams}
@@ -11474,9 +11401,6 @@ function NodeBottomSettings({
               }}
               connectedMediaReferences={connectedMediaReferences}
               mediaUsageOptions={connectedMediaUsageOptions}
-              onConnectedMediaUsagesChange={
-                onConnectedMediaUsagesChange
-              }
               onConnectedMediaEdgeRemove={onConnectedMediaEdgeRemove}
               disabled={powerFormLoading}
               submitDisabled={Boolean(effectiveRunBlockedReason)}
@@ -11492,11 +11416,20 @@ function NodeBottomSettings({
               onSubmit={handleRun}
             />
             {isStoryboardPower ? (
-              <StoryboardInputReferenceEditor
-                references={storyboardReferences}
-                disabled={powerFormLoading || nodeRunning}
-                onChange={updateStoryboardReferences}
-              />
+              <Suspense
+                fallback={
+                  <CanvasModuleLoading
+                    label="正在加载分镜参考"
+                    compact
+                  />
+                }
+              >
+                <StoryboardInputReferenceEditor
+                  references={storyboardReferences}
+                  disabled={powerFormLoading || nodeRunning}
+                  onChange={updateStoryboardReferences}
+                />
+              </Suspense>
             ) : null}
           </>
         )}
@@ -11721,20 +11654,24 @@ function FlowFeedbackDialog({
           </div>
         ) : null}
         <div className="ws-flow-feedback-body custom-scrollbar">
-          <AgentInteractionPanel
-            interaction={interaction}
-            disabled={running}
-            readonly={readonly}
-            hideHeader
-            layout="dialog"
-            initialData={readonly ? prompt.values : undefined}
-            onSubmit={(result) =>
-              onSubmit({
-                ...(prompt.values || {}),
-                ...result.data,
-              })
-            }
-          />
+          <Suspense
+            fallback={<CanvasModuleLoading label="正在加载交互表单" />}
+          >
+            <AgentInteractionPanel
+              interaction={interaction}
+              disabled={running}
+              readonly={readonly}
+              hideHeader
+              layout="dialog"
+              initialData={readonly ? prompt.values : undefined}
+              onSubmit={(result) =>
+                onSubmit({
+                  ...(prompt.values || {}),
+                  ...result.data,
+                })
+              }
+            />
+          </Suspense>
         </div>
         {readonly ? (
           <footer className="ws-flow-feedback-foot">
@@ -11971,49 +11908,51 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
       };
     }
     return (
-      <CanvasGroupNodeView
-        node={node}
-        memberCount={groupRuntime.memberCount}
-        runnableCount={groupRuntime.runnableCount}
-        completedCount={groupRuntime.completedCount}
-        failedCount={groupRuntime.failedCount}
-        staleCount={groupRuntime.staleCount}
-        status={groupRuntime.status}
-        frameRunning={storyboardFrameRunning}
-        selected={selected}
-        managed={structureLocked}
-        onRename={
-          onNodeResult && !structureLocked
-            ? (title) =>
-                onNodeResult(node.id, { title, titleMode: "manual" })
-            : undefined
-        }
-        onEditStructure={
-          storyboardSourceNode && onShowNodeDetail
-            ? () =>
-                onShowNodeDetail(
-                  storyboardSourceNode,
-                  storyboardEditorFocusFromNode(node),
-                )
-            : undefined
-        }
-        onRun={runGroup}
-        runBlockedReason={runBlockedReason}
-      >
-        <NodeHandle
-          id="input-0"
-          type="target"
-          position={Position.Left}
-          className="is-in"
-        />
-        <NodeHandle
-          id="output-0"
-          type="source"
-          position={Position.Right}
-          className="is-out"
-        />
-        <NodeSelectionOverlays node={node} selected={selected} />
-      </CanvasGroupNodeView>
+      <Suspense fallback={<CanvasModuleLoading label="正在加载分组" />}>
+        <CanvasGroupNodeView
+          node={node}
+          memberCount={groupRuntime.memberCount}
+          runnableCount={groupRuntime.runnableCount}
+          completedCount={groupRuntime.completedCount}
+          failedCount={groupRuntime.failedCount}
+          staleCount={groupRuntime.staleCount}
+          status={groupRuntime.status}
+          frameRunning={storyboardFrameRunning}
+          selected={selected}
+          managed={structureLocked}
+          onRename={
+            onNodeResult && !structureLocked
+              ? (title) =>
+                  onNodeResult(node.id, { title, titleMode: "manual" })
+              : undefined
+          }
+          onEditStructure={
+            storyboardSourceNode && onShowNodeDetail
+              ? () =>
+                  onShowNodeDetail(
+                    storyboardSourceNode,
+                    storyboardEditorFocusFromNode(node),
+                  )
+              : undefined
+          }
+          onRun={runGroup}
+          runBlockedReason={runBlockedReason}
+        >
+          <NodeHandle
+            id="input-0"
+            type="target"
+            position={Position.Left}
+            className="is-in"
+          />
+          <NodeHandle
+            id="output-0"
+            type="source"
+            position={Position.Right}
+            className="is-out"
+          />
+          <NodeSelectionOverlays node={node} selected={selected} />
+        </CanvasGroupNodeView>
+      </Suspense>
     );
   }
 
@@ -12558,7 +12497,13 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
             </div>
           ) : !useContentView && preview.audioUrl ? (
             <div className="ws-node-text-media is-audio">
-              <AssetAudioPreview src={preview.audioUrl} />
+              <Suspense
+                fallback={
+                  <CanvasModuleLoading label="正在加载音频" compact />
+                }
+              >
+                <AssetAudioPreview src={preview.audioUrl} />
+              </Suspense>
             </div>
           ) : !useContentView && preview.fileUrl ? (
             <div className="ws-node-text-file">
@@ -12714,63 +12659,73 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
             </svg>
           ) : null}
           {isVideoComposePower ? (
-            <VideoComposeView
-              composition={node.composerDraft?.videoComposition}
-              referenceItems={canvasReferenceItems.filter(
-                (item) => item.source !== "current" || item.id !== node.id,
-              )}
-              running={isPowerRunning}
-              onChange={
-                onNodeDraftChange
-                  ? (videoComposition) =>
-                      onNodeDraftChange(node.id, {
-                        ...(node.composerDraft || {}),
-                        videoComposition,
-                      })
-                  : undefined
-              }
-              onRun={
-                onRunBackendNode
-                  ? (videoComposition) => {
-                      void onRunBackendNode({
-                        ...node,
-                        composerDraft: {
+            <Suspense
+              fallback={<CanvasModuleLoading label="正在加载视频合成" />}
+            >
+              <VideoComposeView
+                composition={node.composerDraft?.videoComposition}
+                referenceItems={canvasReferenceItems.filter(
+                  (item) => item.source !== "current" || item.id !== node.id,
+                )}
+                running={isPowerRunning}
+                onChange={
+                  onNodeDraftChange
+                    ? (videoComposition) =>
+                        onNodeDraftChange(node.id, {
                           ...(node.composerDraft || {}),
                           videoComposition,
-                        },
-                      }).catch((error) =>
-                        toast.error(
-                          error instanceof Error
-                            ? error.message
-                            : "视频合成失败",
-                        ),
-                      );
-                    }
-                  : undefined
-              }
-              onOpenDetail={
-                onShowNodeDetail ? () => onShowNodeDetail(node) : undefined
-              }
-            />
+                        })
+                    : undefined
+                }
+                onRun={
+                  onRunBackendNode
+                    ? (videoComposition) => {
+                        void onRunBackendNode({
+                          ...node,
+                          composerDraft: {
+                            ...(node.composerDraft || {}),
+                            videoComposition,
+                          },
+                        }).catch((error) =>
+                          toast.error(
+                            error instanceof Error
+                              ? error.message
+                              : "视频合成失败",
+                          ),
+                        );
+                      }
+                    : undefined
+                }
+                onOpenDetail={
+                  onShowNodeDetail ? () => onShowNodeDetail(node) : undefined
+                }
+              />
+            </Suspense>
           ) : isStoryboardPower ? (
-            <StoryboardNodeContent
-              output={
-                isPowerRunning
-                  ? runningNode?.streamText || ""
-                  : storyboardNodeOutput(node)
+            <Suspense
+              fallback={
+                <CanvasModuleLoading label="正在加载分镜内容" compact />
               }
-              status={storyboardStatus}
-              started={Boolean(runningNode?.streamStarted)}
-              generatedShotCount={runningNode?.generatedCount || 0}
-              referenceItems={canvasReferenceItems.filter(
-                (item) => item.source !== "current" || item.id !== node.id,
-              )}
-              onOpenDetail={
-                storyboardHasResult && onShowNodeDetail
-                  ? () => onShowNodeDetail(node)
-                  : undefined
-              }
-            />
+            >
+              <StoryboardNodeContent
+                output={
+                  isPowerRunning
+                    ? runningNode?.streamText || ""
+                    : storyboardNodeOutput(node)
+                }
+                status={storyboardStatus}
+                started={Boolean(runningNode?.streamStarted)}
+                generatedShotCount={runningNode?.generatedCount || 0}
+                referenceItems={canvasReferenceItems.filter(
+                  (item) => item.source !== "current" || item.id !== node.id,
+                )}
+                onOpenDetail={
+                  storyboardHasResult && onShowNodeDetail
+                    ? () => onShowNodeDetail(node)
+                    : undefined
+                }
+              />
+            </Suspense>
           ) : hasPowerContent ? (
             <CanvasGeneratedNodeContent
               preview={preview}
@@ -12948,7 +12903,7 @@ function CanvasGeneratedNodeContent({
         <video
           key={preview.videoUrl}
           src={preview.videoUrl}
-          className="nodrag nopan nowheel"
+          className="nopan nowheel"
           controls
           playsInline
           preload="metadata"
@@ -12969,7 +12924,11 @@ function CanvasGeneratedNodeContent({
       <div
         className={`ws-node-generated-media is-audio ${generating ? "is-generating" : ""}`}
       >
-        <AssetAudioPreview src={preview.audioUrl} autoPlay={streaming} />
+        <Suspense
+          fallback={<CanvasModuleLoading label="正在加载音频" compact />}
+        >
+          <AssetAudioPreview src={preview.audioUrl} autoPlay={streaming} />
+        </Suspense>
         <CanvasMediaGenerationOverlay active={generating} />
       </div>
     );
@@ -13124,18 +13083,6 @@ function miniMapNodeColor(node: SpaceCanvasNode) {
   if (node.type === "agent") return "#f59e0b";
   if (node.type === "flow") return "#3b82f6";
   return "#e85d75";
-}
-
-function runStatusText(value: any, prefix: string) {
-  const runId = Number(value?.run_id || 0);
-  const requestId = String(value?.request_id || "");
-  if (runId > 0) {
-    return `${prefix}，运行 ID：${runId}`;
-  }
-  if (requestId) {
-    return `${prefix}，请求：${requestId}`;
-  }
-  return prefix;
 }
 
 function readProjectId() {

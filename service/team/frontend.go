@@ -81,31 +81,70 @@ func (s Service) TeamDetail(ctx context.Context, teamID uint64, releaseID uint64
 // through their existing endpoints.
 func (s Service) WorkspaceCanvasBootstrap(ctx context.Context, teamID uint64, releaseID uint64) (map[string]any, error) {
 	if teamID == 0 {
-		powers := s.repo.ListPowers(ctx)
 		return map[string]any{
-			"team":          map[string]any{},
-			"release":       map[string]any{},
-			"asset_cates":   []GraphAssetCate{},
-			"roles":         []GraphRole{},
-			"flows":         []GraphFlow{},
-			"nodes_by_flow": map[string]any{},
-			"powers":        powers,
-			"power_cates":   s.repo.ListPowerCates(ctx),
-			"power_kinds":   powerKindOptions(powers),
-			"output_types":  energonmodel.OutputTypeSpecs(),
+			"team":        map[string]any{},
+			"release":     map[string]any{},
+			"asset_cates": []GraphAssetCate{},
+			"flows":       []CanvasFlowOption{},
 		}, nil
 	}
 	release, graph, err := s.runtimeGraphByRelease(ctx, teamID, releaseID)
 	if err != nil {
 		return nil, err
 	}
-	payload := teamRuntimePayload(release, graph)
-	powers := scopedPowerOptions(s.repo.ListPowers(ctx), graph.TeamPowers)
-	payload["powers"] = powers
-	payload["power_cates"] = s.repo.ListPowerCates(ctx)
-	payload["power_kinds"] = powerKindOptions(powers)
-	payload["output_types"] = energonmodel.OutputTypeSpecs()
-	return payload, nil
+	return workspaceCanvasPayload(release, graph), nil
+}
+
+func workspaceCanvasPayload(release *teammodel.TeamRelease, graph runtimeGraph) map[string]any {
+	return map[string]any{
+		"team": map[string]any{
+			"id":              graph.Team.ID,
+			"name":            graph.Team.Name,
+			"description":     strings.TrimSpace(graph.Team.Description),
+			"project_enabled": graph.Team.ProjectEnabled == teammodel.StatusEnabled,
+		},
+		"release": map[string]any{
+			"id":         release.ID,
+			"team_id":    release.TeamID,
+			"version":    release.Version,
+			"status":     release.Status,
+			"created_at": release.CreatedAt,
+		},
+		"asset_cates": assetCatePayloads(graph.AssetCates),
+		"flows":       canvasFlowOptions(graph),
+	}
+}
+
+func canvasFlowOptions(graph runtimeGraph) []CanvasFlowOption {
+	flows := flowPayloads(graph.Flows)
+	result := make([]CanvasFlowOption, 0, len(flows))
+	for _, flow := range flows {
+		result = append(result, CanvasFlowOption{
+			GraphFlow:          flow,
+			OutputAssetCateIDs: canvasFlowOutputAssetCateIDs(graph.NodesByFlowID[flow.ID]),
+		})
+	}
+	return result
+}
+
+func canvasFlowOutputAssetCateIDs(nodes []teammodel.FlowNode) []uint64 {
+	result := make([]uint64, 0, len(nodes))
+	seen := make(map[uint64]struct{}, len(nodes))
+	for _, node := range nodes {
+		if !strings.EqualFold(strings.TrimSpace(node.Type), "save") {
+			continue
+		}
+		assetCateID := firstUint64(node.AssetCateID, uint64Value(jsonMap(node.Config)["asset_cate_id"]))
+		if assetCateID == 0 {
+			continue
+		}
+		if _, exists := seen[assetCateID]; exists {
+			continue
+		}
+		seen[assetCateID] = struct{}{}
+		result = append(result, assetCateID)
+	}
+	return result
 }
 
 func teamRuntimePayload(release *teammodel.TeamRelease, graph runtimeGraph) map[string]any {

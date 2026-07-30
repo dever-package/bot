@@ -419,6 +419,7 @@ func (Repo) ListPowers(ctx context.Context) []PowerOption {
 			Name:         strings.TrimSpace(row.Name),
 			Key:          strings.TrimSpace(row.Key),
 			Icon:         strings.TrimSpace(row.Icon),
+			Description:  strings.TrimSpace(row.Description),
 			OutputType:   energonmodel.NormalizeOutputType(row.OutputType),
 			Output:       outputTypeSpec(row.OutputType),
 			Kind:         energonmodel.NormalizePowerKind(row.Kind),

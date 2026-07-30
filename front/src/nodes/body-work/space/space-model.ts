@@ -16,7 +16,6 @@ import type {
   SpaceCanvasState,
   SpaceCanvasViewport,
   TeamFlow,
-  TeamFlowNode,
   TeamRole,
   WorkProject,
   WorkRelease,
@@ -47,52 +46,18 @@ const freeAssetCate: AssetCate = {
 
 const DEFAULT_POWER_NODE_SIZE = { width: 180, height: 180 } as const;
 const DEFAULT_AUDIO_POWER_NODE_SIZE = { width: 240, height: 160 } as const;
-const LEGACY_AUDIO_POWER_NODE_SIZES = [
-  { width: 360, height: 64 },
-  { width: 280, height: 210 },
-] as const;
 const DEFAULT_STORYBOARD_NODE_SIZE = { width: 620, height: 360 } as const;
 
 export function normalizeSpaceBootstrap(value: unknown): SpaceBootstrap {
   const row = asRecord(value);
-  const canvasConfig = asRecord(row.canvas_config);
-  const powers = asRecords(firstDefined(row.powers, canvasConfig.powers)).map(
-    normalizePower,
-  );
-  const canvases = hydrateCanvasPowers(
-    normalizeCanvases(firstDefined(row.canvases, row.canvas)),
-    powers,
-  );
   return {
     project: normalizeProject(row.project),
-    team: normalizeTeam(row.team || row.type),
+    team: normalizeTeam(row.team),
     release: normalizeRelease(row.release),
-    assetCates: asRecords(
-      firstDefined(row.asset_cates, asRecord(row.team).asset_cates),
-    ).map(normalizeAssetCate),
-    roles: asRecords(
-      firstDefined(row.roles, asRecord(row.team).roles, canvasConfig.roles),
-    ).map(normalizeRole),
-    flows: asRecords(firstDefined(row.flows, asRecord(row.team).flows)).map(
-      normalizeFlow,
-    ),
-    nodesByFlow: normalizeNodesByFlow(
-      firstDefined(row.nodes_by_flow, asRecord(row.team).nodes_by_flow),
-    ),
-    canvases,
-    assets: asRecords(firstDefined(asRecord(row.assets).items, row.assets)).map(
-      normalizeAsset,
-    ),
-    powers,
-    powerCategories: asRecords(
-      firstDefined(row.power_cates, canvasConfig.power_cates),
-    ).map(normalizePowerCategory),
-    powerKinds: asRecords(
-      firstDefined(row.power_kinds, canvasConfig.power_kinds),
-    ).map(normalizePowerKind),
-    outputTypes: asRecords(
-      firstDefined(row.output_types, canvasConfig.output_types),
-    ).map(normalizeOutputType),
+    assetCates: asRecords(row.asset_cates).map(normalizeAssetCate),
+    flows: asRecords(row.flows).map(normalizeFlow),
+    canvases: normalizeCanvases(row.canvas),
+    assets: asRecords(asRecord(row.assets).items).map(normalizeAsset),
     initialAssetCateId: numberValue(row.active_asset_cate_id),
   };
 }
@@ -186,6 +151,7 @@ export function defaultCanvasNodeTitle(node: SpaceCanvasNode, nodeNo: number) {
 }
 
 export function normalizePowerCatalog(value: unknown): {
+  roles: TeamRole[];
   powers: PowerOption[];
   powerCategories: PowerCategoryOption[];
   powerKinds: PowerKindOption[];
@@ -193,6 +159,7 @@ export function normalizePowerCatalog(value: unknown): {
 } {
   const row = asRecord(value);
   return {
+    roles: asRecords(row.roles).map(normalizeRole),
     powers: asRecords(row.powers).map(normalizePower),
     powerCategories: asRecords(row.power_cates).map(normalizePowerCategory),
     powerKinds: asRecords(row.power_kinds).map(normalizePowerKind),
@@ -240,12 +207,8 @@ export function relatedFlows(space: SpaceBootstrap, assetCateId: number) {
     return space.flows.slice(0, 4);
   }
   return space.flows
-    .filter((flow) => flowOutputAssetCateIds(space, flow).has(assetCateId))
+    .filter((flow) => flowOutputAssetCateIds(flow).has(assetCateId))
     .slice(0, 4);
-}
-
-export function isExecutionRole(role: TeamRole) {
-  return role.role_type === "worker" || role.role_type === "default_worker";
 }
 
 export function isCreationRole(role: TeamRole) {
@@ -254,10 +217,6 @@ export function isCreationRole(role: TeamRole) {
 
 export function isCreationPower(power: PowerOption) {
   return power.createStatus !== 2;
-}
-
-export function executionRole(space: SpaceBootstrap) {
-  return space.roles.find(isExecutionRole) || null;
 }
 
 export function createLocalNode(
@@ -426,15 +385,10 @@ function normalizeProject(value: unknown): WorkProject {
 
 function normalizeTeam(value: unknown): WorkTeam {
   const row = asRecord(value);
-  const nestedTeam = asRecord(row.team);
-  const team =
-    numberValue(nestedTeam.id) > 0 || stringValue(nestedTeam.name)
-      ? nestedTeam
-      : row;
   return {
-    id: numberValue(team.id),
-    name: stringValue(team.name) || "自由团队",
-    description: stringValue(team.description),
+    id: numberValue(row.id),
+    name: stringValue(row.name) || "自由团队",
+    description: stringValue(row.description),
   };
 }
 
@@ -483,22 +437,7 @@ function normalizeFlow(value: Record<string, unknown>): TeamFlow {
     config: asRecord(value.config),
     status: numberValue(value.status),
     sort: numberValue(value.sort),
-  };
-}
-
-function normalizeFlowNode(value: Record<string, unknown>): TeamFlowNode {
-  return {
-    id: numberValue(value.id),
-    node_key: stringValue(value.node_key),
-    name: stringValue(value.name),
-    type: stringValue(value.type),
-    role_id: numberValue(value.role_id),
-    role_key: stringValue(value.role_key),
-    agent_id: numberValue(value.agent_id),
-    power_id: numberValue(value.power_id),
-    sub_team_id: numberValue(value.sub_team_id),
-    asset_cate_id: numberValue(value.asset_cate_id),
-    config: asRecord(value.config),
+    output_asset_cate_ids: numberArray(value.output_asset_cate_ids),
   };
 }
 
@@ -512,6 +451,7 @@ function normalizePower(value: Record<string, unknown>): PowerOption {
     name: stringValue(value.name) || stringValue(value.key) || "未命名能力",
     key: stringValue(value.key),
     icon: stringValue(value.icon),
+    description: stringValue(value.description),
     outputType,
     output: output.key ? output : undefined,
     kind,
@@ -525,12 +465,12 @@ function statusValue(value: unknown) {
 
 function normalizeOutputType(value: Record<string, unknown>): OutputTypeOption {
   return {
-    key: stringValue(value.key || value.id),
-    name: stringValue(value.name || value.value),
-    allowedKinds: stringArray(value.allowed_kinds || value.allowedKinds),
-    viewMode: stringValue(value.view_mode || value.viewMode),
-    defaultWidth: numberValue(value.default_width || value.defaultWidth),
-    defaultHeight: numberValue(value.default_height || value.defaultHeight),
+    key: stringValue(value.key),
+    name: stringValue(value.name),
+    allowedKinds: stringArray(value.allowed_kinds),
+    viewMode: stringValue(value.view_mode),
+    defaultWidth: numberValue(value.default_width),
+    defaultHeight: numberValue(value.default_height),
     structured: Boolean(value.structured),
     sort: numberValue(value.sort),
   };
@@ -601,15 +541,6 @@ export function normalizeAssetVersions(value: unknown) {
     .filter((item): item is AssetVersion => Boolean(item));
 }
 
-function normalizeNodesByFlow(value: unknown) {
-  const row = asRecord(value);
-  const result: Record<string, TeamFlowNode[]> = {};
-  for (const [key, items] of Object.entries(row)) {
-    result[key] = asRecords(items).map(normalizeFlowNode);
-  }
-  return result;
-}
-
 function normalizeCanvases(value: unknown) {
   const row = asRecord(value);
   const result: Record<string, SpaceCanvasState> = {};
@@ -642,7 +573,7 @@ function hydrateCanvasPowers(
       }
       const outputType =
         node.outputType || node.power.outputType || current.outputType;
-      return normalizePowerNodeSize({
+      return {
         ...node,
         outputType,
         power: {
@@ -653,7 +584,7 @@ function hydrateCanvasPowers(
               ? current.output
               : node.power.output,
         },
-      });
+      };
     });
   }
   return canvases;
@@ -679,14 +610,13 @@ function normalizeCanvasNode(
   }
   const node: SpaceCanvasNode = {
     id,
-    nodeNo: numberValue(firstDefined(value.node_no, value.nodeNo)) || undefined,
+    nodeNo: numberValue(value.node_no) || undefined,
     type,
     title: stringValue(value.title),
     titleMode:
-      stringValue(firstDefined(value.title_mode, value.titleMode)) === "manual"
+      stringValue(value.title_mode) === "manual"
         ? "manual"
-        : stringValue(firstDefined(value.title_mode, value.titleMode)) ===
-            "auto"
+        : stringValue(value.title_mode) === "auto"
           ? "auto"
           : undefined,
     subtitle: stringValue(value.subtitle),
@@ -695,33 +625,21 @@ function normalizeCanvasNode(
     y: numberValue(value.y),
     width: numberValue(value.width),
     height: numberValue(value.height),
-    groupId: stringValue(firstDefined(value.group_id, value.groupId)),
+    groupId: stringValue(value.group_id),
     group: normalizeCanvasGroup(value.group),
-    storyboardItem: normalizeCanvasStoryboardItem(
-      firstDefined(
-        value.storyboard_item,
-        value.storyboardItem,
-        value.storyboard_material,
-        value.storyboardMaterial,
-      ),
-    ),
+    storyboardItem: normalizeCanvasStoryboardItem(value.storyboard_item),
     storyboardMaterializedSignature: stringValue(
-      firstDefined(
-        value.storyboard_materialized_signature,
-        value.storyboardMaterializedSignature,
-      ),
+      value.storyboard_materialized_signature,
     ),
     assetCateId: numberValue(value.asset_cate_id),
     outputType: stringValue(value.output_type),
     count: value.count == null ? undefined : numberValue(value.count),
     functionOption: normalizeCanvasFunctionOption(value.function_option),
-    composerDraft: normalizeCanvasComposerDraft(value.composer_draft),
+    composerDraft: normalizePersistedCanvasComposerDraft(value.composer_draft),
     resultRef: normalizeCanvasResultRef(value.result_ref),
-    resultOutput: firstDefined(value.result_output, value.resultOutput),
-    resultView: normalizeCanvasResultView(
-      firstDefined(value.result_view, value.resultView),
-    ),
-    runError: stringValue(firstDefined(value.run_error, value.runError)),
+    resultOutput: value.result_output,
+    resultView: normalizeCanvasResultView(value.result_view),
+    runError: stringValue(value.run_error),
     local: value.local !== false,
   };
   const kind = stringValue(value.kind) as SpaceCanvasNode["kind"];
@@ -751,28 +669,7 @@ function normalizeCanvasNode(
     node.power = power;
     node.outputType = node.outputType || power.outputType;
   }
-  return normalizePowerNodeSize(node);
-}
-
-function normalizePowerNodeSize(node: SpaceCanvasNode) {
-  const storyboardNode = normalizeStoryboardNodeSize(node);
-  const sizeUpgrade = audioPowerNodeSizeUpgrade(storyboardNode);
-  return sizeUpgrade ? { ...storyboardNode, ...sizeUpgrade } : storyboardNode;
-}
-
-function normalizeStoryboardNodeSize(node: SpaceCanvasNode) {
-  if (
-    node.type !== "power" ||
-    !isStoryboardPowerType(node.power, node.kind, node.outputType) ||
-    node.width !== DEFAULT_POWER_NODE_SIZE.width ||
-    node.height !== DEFAULT_POWER_NODE_SIZE.height
-  ) {
-    return node;
-  }
-  return {
-    ...node,
-    ...DEFAULT_STORYBOARD_NODE_SIZE,
-  };
+  return node;
 }
 
 function normalizeCanvasResultView(value: unknown) {
@@ -782,8 +679,8 @@ function normalizeCanvasResultView(value: unknown) {
   if (width == null || height == null || width <= 0 || height <= 0) {
     return undefined;
   }
-  const offsetX = finiteNumber(firstDefined(row.offset_x, row.offsetX));
-  const offsetY = finiteNumber(firstDefined(row.offset_y, row.offsetY));
+  const offsetX = finiteNumber(row.offset_x);
+  const offsetY = finiteNumber(row.offset_y);
   return {
     width,
     height,
@@ -799,30 +696,17 @@ function normalizeCanvasGroup(value: unknown) {
   }
   return {
     origin: stringValue(row.origin),
-    sourceNodeId: stringValue(
-      firstDefined(row.source_node_id, row.sourceNodeId),
-    ),
-    syncKey: stringValue(firstDefined(row.sync_key, row.syncKey)),
-    layoutKey: stringValue(firstDefined(row.layout_key, row.layoutKey)),
+    sourceNodeId: stringValue(row.source_node_id),
+    syncKey: stringValue(row.sync_key),
+    layoutKey: stringValue(row.layout_key),
   };
 }
 
 function normalizeCanvasStoryboardItem(value: unknown) {
   const row = asRecord(value);
-  const sourceNodeId = stringValue(
-    firstDefined(row.source_node_id, row.sourceNodeId),
-  );
-  const itemType = stringValue(
-    firstDefined(
-      row.item_type,
-      row.itemType,
-      row.material_type,
-      row.materialType,
-    ),
-  );
-  const itemId = stringValue(
-    firstDefined(row.item_id, row.itemId, row.material_id, row.materialId),
-  );
+  const sourceNodeId = stringValue(row.source_node_id);
+  const itemType = stringValue(row.item_type);
+  const itemId = stringValue(row.item_id);
   if (
     !sourceNodeId ||
     !itemId ||
@@ -853,50 +737,25 @@ function normalizeCanvasStoryboardItem(value: unknown) {
       | "lip_sync"
       | "video_compose",
     itemId,
-    generatedPrompt: stringValue(
-      firstDefined(row.generated_prompt, row.generatedPrompt),
-    ),
-    dependencyNodeIds: stringArray(
-      firstDefined(row.dependency_node_ids, row.dependencyNodeIds),
-    ),
-    referenceNodeIds: stringArray(
-      firstDefined(row.reference_node_ids, row.referenceNodeIds),
-    ),
-    externalReferenceAssetIds: numberArray(
-      firstDefined(
-        row.external_reference_asset_ids,
-        row.externalReferenceAssetIds,
-      ),
-    ),
-    shotId: stringValue(firstDefined(row.shot_id, row.shotId)),
-    speechId: stringValue(firstDefined(row.speech_id, row.speechId)),
-    speechIds: stringArray(firstDefined(row.speech_ids, row.speechIds)),
-    characterId: stringValue(
-      firstDefined(row.character_id, row.characterId),
-    ),
-    speechKind: stringValue(
-      firstDefined(row.speech_kind, row.speechKind),
-    ) as "dialogue" | "narration",
-    speakerMode: stringValue(
-      firstDefined(row.speaker_mode, row.speakerMode),
-    ) as "visible" | "offscreen",
-    startTime: finiteNumber(firstDefined(row.start_time, row.startTime)),
-    shotDuration: finiteNumber(
-      firstDefined(row.shot_duration, row.shotDuration),
-    ),
-    continuityAnchor: stringValue(
-      firstDefined(row.continuity_anchor, row.continuityAnchor),
-    ),
+    generatedPrompt: stringValue(row.generated_prompt),
+    dependencyNodeIds: stringArray(row.dependency_node_ids),
+    referenceNodeIds: stringArray(row.reference_node_ids),
+    externalReferenceAssetIds: numberArray(row.external_reference_asset_ids),
+    shotId: stringValue(row.shot_id),
+    speechId: stringValue(row.speech_id),
+    speechIds: stringArray(row.speech_ids),
+    characterId: stringValue(row.character_id),
+    speechKind: stringValue(row.speech_kind) as "dialogue" | "narration",
+    speakerMode: stringValue(row.speaker_mode) as "visible" | "offscreen",
+    startTime: finiteNumber(row.start_time),
+    shotDuration: finiteNumber(row.shot_duration),
+    continuityAnchor: stringValue(row.continuity_anchor),
     optional:
       row.optional === true ||
       row.optional === 1 ||
       String(row.optional || "").toLowerCase() === "true",
-    sourceSignature: stringValue(
-      firstDefined(row.source_signature, row.sourceSignature),
-    ),
-    resultSourceSignature: stringValue(
-      firstDefined(row.result_source_signature, row.resultSourceSignature),
-    ),
+    sourceSignature: stringValue(row.source_signature),
+    resultSourceSignature: stringValue(row.result_source_signature),
     stale:
       row.stale === true ||
       row.stale === 1 ||
@@ -991,20 +850,27 @@ export function normalizeCanvasComposerDraft(value: unknown) {
   }
   return {
     prompt: stringValue(row.prompt),
-    promptContent: normalizeCanvasReferenceContent(
-      firstDefined(row.promptContent, row.prompt_content),
-    ),
-    paramValues: asRecord(firstDefined(row.paramValues, row.param_values)),
-    selectedTargetId: numberValue(
-      firstDefined(row.selectedTargetId, row.selected_target_id),
-    ),
-    videoComposition: normalizeVideoComposition(
-      firstDefined(row.videoComposition, row.video_composition),
-    ),
-    storyboardReferences: normalizeStoryboardReferences(
-      firstDefined(row.storyboardReferences, row.storyboard_references),
-    ),
+    promptContent: normalizeCanvasReferenceContent(row.promptContent),
+    paramValues: asRecord(row.paramValues),
+    selectedTargetId: numberValue(row.selectedTargetId),
+    videoComposition: normalizeVideoComposition(row.videoComposition),
+    storyboardReferences: normalizeStoryboardReferences(row.storyboardReferences),
   };
+}
+
+function normalizePersistedCanvasComposerDraft(value: unknown) {
+  const row = asRecord(value);
+  if (!Object.keys(row).length) {
+    return undefined;
+  }
+  return normalizeCanvasComposerDraft({
+    prompt: row.prompt,
+    promptContent: row.prompt_content,
+    paramValues: row.param_values,
+    selectedTargetId: row.selected_target_id,
+    videoComposition: row.video_composition,
+    storyboardReferences: row.storyboard_references,
+  });
 }
 
 function normalizeCanvasReferenceContent(value: unknown) {
@@ -1027,7 +893,6 @@ function normalizeCanvasResultRef(value: unknown) {
     return undefined;
   }
   return {
-    execution_id: numberValue(row.execution_id),
     run_id: numberValue(row.run_id),
     request_id: stringValue(row.request_id),
     flow_run_id: numberValue(row.flow_run_id),
@@ -1053,19 +918,13 @@ function normalizeCanvasEdge(
     id: stringValue(value.id) || `edge-${from}-${to}`,
     from,
     to,
-    logicalFrom:
-      stringValue(firstDefined(value.logical_from, value.logicalFrom)) ||
-      undefined,
-    logicalTo:
-      stringValue(firstDefined(value.logical_to, value.logicalTo)) || undefined,
+    logicalFrom: stringValue(value.logical_from) || undefined,
+    logicalTo: stringValue(value.logical_to) || undefined,
     executionMode:
-      stringValue(firstDefined(value.execution_mode, value.executionMode)) ===
-      "manual"
+      stringValue(value.execution_mode) === "manual"
         ? "manual"
         : undefined,
-    mediaUsage:
-      stringValue(firstDefined(value.media_usage, value.mediaUsage)) ||
-      undefined,
+    mediaUsage: stringValue(value.media_usage) || undefined,
   };
 }
 
@@ -1084,20 +943,8 @@ function normalizeCanvasViewport(value: unknown): SpaceCanvasViewport {
   return viewport;
 }
 
-function flowOutputAssetCateIds(space: SpaceBootstrap, flow: TeamFlow) {
-  const ids = new Set<number>();
-  for (const node of space.nodesByFlow[flow.key] || []) {
-    if (String(node.type || "").toLowerCase() !== "save") {
-      continue;
-    }
-    const id = numberValue(
-      firstDefined(node.asset_cate_id, node.config?.asset_cate_id),
-    );
-    if (id > 0) {
-      ids.add(id);
-    }
-  }
-  return ids;
+function flowOutputAssetCateIds(flow: TeamFlow) {
+  return new Set(flow.output_asset_cate_ids);
 }
 
 function defaultPowerName(kind: AssetKind) {
@@ -1146,27 +993,6 @@ export function powerNodeDefaultSize(
   return isStoryboardPowerType(power)
     ? { ...DEFAULT_STORYBOARD_NODE_SIZE }
     : { ...DEFAULT_POWER_NODE_SIZE };
-}
-
-export function audioPowerNodeSizeUpgrade(
-  node: Pick<
-    SpaceCanvasNode,
-    "type" | "width" | "height" | "kind" | "power"
-  >,
-) {
-  if (node.type !== "power" || !isAudioPowerType(node.power, node.kind)) {
-    return null;
-  }
-  const legacySize =
-    configuredPowerNodeSize(node.power) || DEFAULT_POWER_NODE_SIZE;
-  const usesLegacySize =
-    (node.width === legacySize.width && node.height === legacySize.height) ||
-    LEGACY_AUDIO_POWER_NODE_SIZES.some(
-      (size) => node.width === size.width && node.height === size.height,
-    );
-  return usesLegacySize
-    ? { ...DEFAULT_AUDIO_POWER_NODE_SIZE }
-    : null;
 }
 
 function configuredPowerNodeSize(power?: Pick<PowerOption, "output">) {

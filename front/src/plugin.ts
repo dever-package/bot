@@ -61,8 +61,8 @@ const botPlugin = {
       })),
     ),
     "bot-body-work-space-page": lazyNode(() =>
-      import("./nodes/body-work/space/space-page").then((mod) => ({
-        default: mod.WorkSpacePage,
+      import("./nodes/body-work/space/space-entry").then((mod) => ({
+        default: mod.WorkSpaceEntry,
       })),
     ),
   },

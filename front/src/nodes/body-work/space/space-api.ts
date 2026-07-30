@@ -23,6 +23,7 @@ import type {
   SpaceAssetDetail,
   SpaceBootstrap,
   SpaceCanvasState,
+  TeamRole,
 } from "./types";
 
 export async function fetchSpaceBootstrap(
@@ -83,6 +84,7 @@ export async function sendSpaceMessage(
   return result.data;
 }
 export async function fetchSpacePowers(projectId: number): Promise<{
+  roles: TeamRole[];
   powers: PowerOption[];
   powerCategories: PowerCategoryOption[];
   powerKinds: PowerKindOption[];

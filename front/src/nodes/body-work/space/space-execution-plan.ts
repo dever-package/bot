@@ -84,7 +84,12 @@ function canvasOutgoingEdges(edges: SpaceCanvasEdge[]) {
     if (!edge.from || !edge.to || edge.executionMode === "manual") {
       continue;
     }
-    outgoing.set(edge.from, [...(outgoing.get(edge.from) || []), edge.to]);
+    const sourceNodeId = edge.logicalFrom || edge.from;
+    const targetNodeId = edge.logicalTo || edge.to;
+    outgoing.set(sourceNodeId, [
+      ...(outgoing.get(sourceNodeId) || []),
+      targetNodeId,
+    ]);
   }
   return outgoing;
 }

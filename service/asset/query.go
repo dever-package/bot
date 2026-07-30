@@ -564,6 +564,14 @@ func teamHasEnabledAssetCates(ctx context.Context, teamID uint64) bool {
 }
 
 func currentVersionsByID(ctx context.Context, assets []*assetmodel.Asset, contentMode string) map[uint64]*assetmodel.Version {
+	fields := ""
+	if contentMode == QueryContentPreview {
+		fields = "main.id,main.asset_id,main.version,main.content,main.created_at,main.updated_at"
+	}
+	return currentVersionsByIDWithFields(ctx, assets, fields)
+}
+
+func currentVersionsByIDWithFields(ctx context.Context, assets []*assetmodel.Asset, fields string) map[uint64]*assetmodel.Version {
 	versionIDs := make([]uint64, 0, len(assets))
 	for _, asset := range assets {
 		if asset != nil && asset.VersionID > 0 {
@@ -575,8 +583,8 @@ func currentVersionsByID(ctx context.Context, assets []*assetmodel.Asset, conten
 		return result
 	}
 	options := map[string]any{}
-	if contentMode == QueryContentPreview {
-		options["field"] = "main.id,main.asset_id,main.version,main.content,main.created_at,main.updated_at"
+	if fields != "" {
+		options["field"] = fields
 	}
 	for _, version := range assetmodel.NewVersionModel().Select(ctx, map[string]any{"id": versionIDs}, options) {
 		if version != nil {

@@ -4,6 +4,7 @@ import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { FileText } from "lucide-react";
@@ -57,7 +58,7 @@ export function CanvasResultView({
     Boolean(onOpen) && (!hasCustomContent || customContentIsPureMedia);
   const classes = [
     "ws-result-view",
-    "nodrag",
+    hasPureMedia ? "" : "nodrag",
     "nopan",
     "nowheel",
     hasPureMedia ? "has-pure-media" : "",
@@ -108,7 +109,11 @@ export function CanvasResultView({
       tabIndex={canOpenFromKeyboard ? 0 : undefined}
       className={classes}
       style={style}
-      onPointerDown={(event) => event.stopPropagation()}
+      onPointerDown={(event) => {
+        if (!hasPureMedia || shouldBlockResultDrag(event)) {
+          event.stopPropagation();
+        }
+      }}
       onClick={openFromClick}
       onKeyDown={openFromKeyboard}
     >
@@ -241,4 +246,18 @@ function isScrollbarInteraction(event: ReactMouseEvent<HTMLDivElement>) {
   }
   const bounds = scrollView.getBoundingClientRect();
   return event.clientX >= bounds.right - 10;
+}
+
+function shouldBlockResultDrag(event: ReactPointerEvent<HTMLDivElement>) {
+  const target = event.target;
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  const controlledVideo = target.closest("video[controls]");
+  if (controlledVideo instanceof HTMLVideoElement) {
+    const bounds = controlledVideo.getBoundingClientRect();
+    const controlHeight = Math.min(56, bounds.height * 0.25);
+    return event.clientY >= bounds.bottom - controlHeight;
+  }
+  return isInteractiveResultTarget(target, event.currentTarget);
 }

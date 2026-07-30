@@ -32,6 +32,18 @@ func validateCanvasGroups(nodes map[string]canvasRunNode, edges []canvasRunEdge)
 		if !sourceOK || !targetOK {
 			continue
 		}
+		if edge.LogicalFrom != "" && edge.LogicalFrom != edge.From {
+			logicalSource, ok := nodes[edge.LogicalFrom]
+			if !ok || source.Type != "group" || logicalSource.GroupID != source.ID {
+				return fmt.Errorf("分组连线来源无效")
+			}
+		}
+		if edge.LogicalTo != "" && edge.LogicalTo != edge.To {
+			logicalTarget, ok := nodes[edge.LogicalTo]
+			if !ok || target.Type != "group" || logicalTarget.GroupID != target.ID {
+				return fmt.Errorf("分组连线目标无效")
+			}
+		}
 		if source.Type == "group" && target.GroupID == source.ID {
 			return fmt.Errorf("分组边界不能直接连接自己的成员")
 		}
@@ -98,7 +110,7 @@ func prepareCanvasRunGraph(
 	if singleNode && nodes[startNodeID].Type == "group" {
 		omitGroupOutputs = startNodeID
 	}
-	expanded := expandCanvasGroupEdges(nodes, edges, omitGroupOutputs)
+	expanded := expandCanvasGroupEdges(canvas, nodes, edges, omitGroupOutputs)
 	runtimeCanvas := cloneCanvasObject(canvas)
 	runtimeCanvas[canvasGroupsExpandedKey] = true
 	runtimeCanvas["edges"] = canvasRunEdgesPayload(expanded)
@@ -106,27 +118,18 @@ func prepareCanvasRunGraph(
 }
 
 func expandCanvasGroupEdges(
+	canvas map[string]any,
 	nodes map[string]canvasRunNode,
 	edges []canvasRunEdge,
 	omitGroupOutputs string,
 ) []canvasRunEdge {
 	members := map[string][]canvasRunNode{}
-	internalOutgoing := map[string]map[string]bool{}
-	for _, node := range nodes {
-		if node.GroupID != "" {
-			members[node.GroupID] = append(members[node.GroupID], node)
+	for groupID, memberIDs := range canvasGroupMemberNodeIDs(canvas) {
+		for _, memberID := range memberIDs {
+			if member, ok := nodes[memberID]; ok {
+				members[groupID] = append(members[groupID], member)
+			}
 		}
-	}
-	for _, edge := range edges {
-		source, sourceOK := nodes[edge.From]
-		target, targetOK := nodes[edge.To]
-		if !sourceOK || !targetOK || source.GroupID == "" || source.GroupID != target.GroupID {
-			continue
-		}
-		if internalOutgoing[source.GroupID] == nil {
-			internalOutgoing[source.GroupID] = map[string]bool{}
-		}
-		internalOutgoing[source.GroupID][source.ID] = true
 	}
 
 	result := make([]canvasRunEdge, 0, len(edges)+len(nodes))
@@ -135,7 +138,7 @@ func expandCanvasGroupEdges(
 		if edge.From == "" || edge.To == "" || edge.From == edge.To {
 			return
 		}
-		key := edge.From + "\x00" + edge.To
+		key := edge.From + "\x00" + edge.To + "\x00" + edge.MediaUsage
 		if seen[key] {
 			return
 		}
@@ -152,14 +155,24 @@ func expandCanvasGroupEdges(
 			if source.ID == omitGroupOutputs {
 				continue
 			}
-			for _, member := range members[source.ID] {
-				if internalOutgoing[source.ID][member.ID] {
-					continue
-				}
+			if logicalSource, ok := nodes[edge.LogicalFrom]; edge.LogicalFrom != "" &&
+				edge.LogicalFrom != source.ID &&
+				ok &&
+				logicalSource.GroupID == source.ID {
 				appendEdge(canvasRunEdge{
-					ID:   "group-output-" + member.ID + "-" + edge.To,
-					From: member.ID,
-					To:   edge.To,
+					ID:         edge.ID,
+					From:       logicalSource.ID,
+					To:         edge.To,
+					MediaUsage: edge.MediaUsage,
+				})
+				continue
+			}
+			for _, member := range members[source.ID] {
+				appendEdge(canvasRunEdge{
+					ID:         "group-output-" + member.ID + "-" + edge.To,
+					From:       member.ID,
+					To:         edge.To,
+					MediaUsage: edge.MediaUsage,
 				})
 			}
 			continue
@@ -181,11 +194,29 @@ func expandCanvasGroupEdges(
 func canvasRunEdgesPayload(edges []canvasRunEdge) []any {
 	result := make([]any, 0, len(edges))
 	for _, edge := range edges {
-		result = append(result, map[string]any{
+		row := map[string]any{
 			"id":   edge.ID,
 			"from": edge.From,
 			"to":   edge.To,
-		})
+		}
+		if edge.MediaUsage != "" {
+			row["media_usage"] = edge.MediaUsage
+		}
+		result = append(result, row)
+	}
+	return result
+}
+
+func canvasGroupMemberNodeIDs(canvas map[string]any) map[string][]string {
+	result := map[string][]string{}
+	for _, raw := range sliceValue(canvas["nodes"]) {
+		node := mapValue(raw)
+		groupID := textValue(node["group_id"])
+		nodeID := textValue(node["id"])
+		if groupID == "" || nodeID == "" {
+			continue
+		}
+		result[groupID] = append(result[groupID], nodeID)
 	}
 	return result
 }

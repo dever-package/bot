@@ -205,7 +205,12 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 		if !exists {
 			return nil, fmt.Errorf("前置参考节点不存在: %s", sourceID)
 		}
-		appendReference(source.Kind, 0, "", true)
+		appendReference(
+			source.Kind,
+			source.AssetID,
+			canvasStoryboardReferenceUsage(canvasStoryboardItemType(node), canvasStoryboardItemType(source)),
+			true,
+		)
 	}
 	externalAssetIDs := map[uint64]bool{}
 	for _, value := range sliceValue(firstPresent(
@@ -240,7 +245,7 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 		node.StoryboardItem["continuity_anchor"],
 		node.StoryboardItem["continuityAnchor"],
 	) != "" {
-		appendReference("image", 0, "", true)
+		appendReference("image", 0, canvasMediaUsageFirstFrame, true)
 	}
 	return result, nil
 }

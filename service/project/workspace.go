@@ -27,7 +27,7 @@ func (s WorkspaceService) Bootstrap(ctx context.Context, projectID uint64, asset
 	if err != nil {
 		return nil, err
 	}
-	project, err = s.project.SyncTeamRelease(ctx, project)
+	project, err = s.project.currentTeamRelease(ctx, project)
 	if err != nil {
 		return nil, err
 	}
@@ -156,17 +156,6 @@ func (s WorkspaceService) canvasBundle(ctx context.Context, projectID uint64, as
 		nodeKeys = append(nodeKeys, slot.NodeKey)
 	}
 	referencedAssetIDs := canvasReferencedAssetIDs(nodes)
-	s.project.asset.EnsureCanvasMaterialSlotsActive(
-		ctx,
-		projectID,
-		assetCateID,
-		slots,
-	)
-	s.project.asset.EnsureCanvasReferencedMaterialsActive(
-		ctx,
-		projectID,
-		referencedAssetIDs,
-	)
 	assets := s.project.asset.CanvasReferences(
 		ctx,
 		projectID,
@@ -174,29 +163,6 @@ func (s WorkspaceService) canvasBundle(ctx context.Context, projectID uint64, as
 		referencedAssetIDs,
 		nodeKeys,
 	)
-	allReferencedAssetIDs := make(map[uint64]struct{}, len(referencedAssetIDs))
-	for _, assetID := range referencedAssetIDs {
-		allReferencedAssetIDs[assetID] = struct{}{}
-	}
-	collectCanvasReferencedAssetIDs(assets, allReferencedAssetIDs)
-	if len(allReferencedAssetIDs) > len(referencedAssetIDs) {
-		referencedAssetIDs = make([]uint64, 0, len(allReferencedAssetIDs))
-		for assetID := range allReferencedAssetIDs {
-			referencedAssetIDs = append(referencedAssetIDs, assetID)
-		}
-		s.project.asset.EnsureCanvasReferencedMaterialsActive(
-			ctx,
-			projectID,
-			referencedAssetIDs,
-		)
-		assets = s.project.asset.CanvasReferences(
-			ctx,
-			projectID,
-			assetCateID,
-			referencedAssetIDs,
-			nodeKeys,
-		)
-	}
 	currentVersions := canvasCurrentAssetVersions(assets)
 	refreshCanvasAssetReferenceVersions(nodes, currentVersions)
 	refreshCanvasAssetReferenceVersions(assets, currentVersions)

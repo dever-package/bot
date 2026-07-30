@@ -193,9 +193,6 @@ func (s WorkspaceService) CanvasExecutionList(ctx context.Context, query CanvasE
 		if row == nil {
 			continue
 		}
-		if scope != canvasExecutionScopeHistory {
-			row = s.syncWorkspaceExecutionRow(ctx, row)
-		}
 		if strings.TrimSpace(query.Status) != "" && strings.TrimSpace(row.Status) != strings.TrimSpace(query.Status) {
 			continue
 		}

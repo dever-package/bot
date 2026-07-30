@@ -75,6 +75,7 @@ type ReferenceEditorProps = {
   references: ReferenceOption[];
   placeholder?: string;
   disabled?: boolean;
+  textEditable?: boolean;
   autoFocus?: boolean;
   className?: string;
   layerZIndex?: number;
@@ -87,6 +88,9 @@ type ReferenceEditorProps = {
   providers?: WorkbenchReferenceProvider[];
   usageOptions?: CanvasReferenceUsageOption[];
   pickerRequest?: CanvasReferencePickerRequest;
+  onPickerRequestConsumed?: (
+    requestID: CanvasReferencePickerRequest["id"],
+  ) => void;
   onReferenceDelete?: (
     reference: Extract<CanvasReferenceContent["parts"][number], { type: "reference" }>,
   ) => void;
@@ -125,11 +129,13 @@ export function CanvasReferenceEditor({
   items,
   placeholder,
   disabled,
+  textEditable,
   autoFocus,
   className,
   layerZIndex,
   usageOptions = [],
   pickerRequest,
+  onPickerRequestConsumed,
   onReferenceDelete,
   onReferenceUsageChange,
   onChange,
@@ -141,11 +147,13 @@ export function CanvasReferenceEditor({
   items: ComposerAssetItem[];
   placeholder: string;
   disabled?: boolean;
+  textEditable?: boolean;
   autoFocus?: boolean;
   className?: string;
   layerZIndex?: number;
   usageOptions?: CanvasReferenceUsageOption[];
   pickerRequest?: CanvasReferencePickerRequest;
+  onPickerRequestConsumed?: ReferenceEditorProps["onPickerRequestConsumed"];
   onReferenceDelete?: ReferenceEditorProps["onReferenceDelete"];
   onReferenceUsageChange?: ReferenceEditorProps["onReferenceUsageChange"];
   onChange: (value: string, content?: CanvasReferenceContent) => void;
@@ -160,11 +168,13 @@ export function CanvasReferenceEditor({
       adapter={adapter}
       placeholder={placeholder}
       disabled={disabled}
+      textEditable={textEditable}
       autoFocus={autoFocus}
       className={className}
       layerZIndex={layerZIndex}
       usageOptions={usageOptions}
       pickerRequest={pickerRequest}
+      onPickerRequestConsumed={onPickerRequestConsumed}
       onReferenceDelete={onReferenceDelete}
       onReferenceUsageChange={onReferenceUsageChange}
       onChange={onChange}
@@ -180,11 +190,13 @@ export function CanvasReferenceEditorWithAdapter({
   adapter,
   placeholder,
   disabled,
+  textEditable = true,
   autoFocus,
   className,
   layerZIndex,
   usageOptions = [],
   pickerRequest,
+  onPickerRequestConsumed,
   onReferenceDelete,
   onReferenceUsageChange,
   onChange,
@@ -196,11 +208,13 @@ export function CanvasReferenceEditorWithAdapter({
   adapter: CanvasReferenceAdapter;
   placeholder: string;
   disabled?: boolean;
+  textEditable?: boolean;
   autoFocus?: boolean;
   className?: string;
   layerZIndex?: number;
   usageOptions?: CanvasReferenceUsageOption[];
   pickerRequest?: CanvasReferencePickerRequest;
+  onPickerRequestConsumed?: ReferenceEditorProps["onPickerRequestConsumed"];
   onReferenceDelete?: ReferenceEditorProps["onReferenceDelete"];
   onReferenceUsageChange?: ReferenceEditorProps["onReferenceUsageChange"];
   onChange: (value: string, content?: CanvasReferenceContent) => void;
@@ -230,6 +244,7 @@ export function CanvasReferenceEditorWithAdapter({
         className={className}
         value={value}
         disabled={disabled}
+        readOnly={!textEditable}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
@@ -253,6 +268,7 @@ export function CanvasReferenceEditorWithAdapter({
       references={adapter.options}
       placeholder={placeholder}
       disabled={disabled}
+      textEditable={textEditable}
       autoFocus={autoFocus}
       className={className}
       layerZIndex={layerZIndex}
@@ -263,6 +279,7 @@ export function CanvasReferenceEditorWithAdapter({
       providers={activeAssetProvider ? [activeAssetProvider] : undefined}
       usageOptions={usageOptions}
       pickerRequest={pickerRequest}
+      onPickerRequestConsumed={onPickerRequestConsumed}
       onReferenceDelete={onReferenceDelete}
       onReferenceUsageChange={onReferenceUsageChange}
       onChange={onChange}

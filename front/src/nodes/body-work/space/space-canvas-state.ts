@@ -244,7 +244,7 @@ function persistedCanvasNode(
       kind: node.power.kind,
       icon: node.power.icon,
       output_type: node.power.outputType,
-      output: node.power.output,
+      output: persistedOutputType(node.power.output),
     };
   }
   if (node.functionOption) {
@@ -313,36 +313,42 @@ function persistedComposerDraft(value: unknown) {
   }
   const result: Record<string, unknown> = {};
   assignText(result, "prompt", value.prompt);
-  const promptContent = normalizeReferenceContent(
-    value.promptContent ?? value.prompt_content,
-  );
+  const promptContent = normalizeReferenceContent(value.promptContent);
   if (promptContent && isJSONValue(promptContent)) {
     result.prompt_content = promptContent;
   }
-  assignNumber(
-    result,
-    "selected_target_id",
-    value.selectedTargetId ?? value.selected_target_id,
-  );
-  const paramValues = serializableParamValues(
-    value.paramValues ?? value.param_values,
-  );
+  assignNumber(result, "selected_target_id", value.selectedTargetId);
+  const paramValues = serializableParamValues(value.paramValues);
   if (paramValues) {
     result.param_values = paramValues;
   }
-  const videoComposition = normalizeVideoComposition(
-    value.videoComposition ?? value.video_composition,
-  );
+  const videoComposition = normalizeVideoComposition(value.videoComposition);
   if (videoComposition && isJSONValue(videoComposition)) {
     result.video_composition = videoComposition;
   }
   const storyboardReferences = normalizeStoryboardReferences(
-    value.storyboardReferences ?? value.storyboard_references,
+    value.storyboardReferences,
   );
   if (storyboardReferences.length > 0 && isJSONValue(storyboardReferences)) {
     result.storyboard_references = storyboardReferences;
   }
   return Object.keys(result).length ? result : null;
+}
+
+function persistedOutputType(output: PowerOption["output"]) {
+  if (!output) {
+    return undefined;
+  }
+  return {
+    key: output.key,
+    name: output.name,
+    allowed_kinds: output.allowedKinds,
+    view_mode: output.viewMode,
+    default_width: output.defaultWidth,
+    default_height: output.defaultHeight,
+    structured: output.structured,
+    sort: output.sort,
+  };
 }
 
 function normalizeReferenceContent(value: unknown) {

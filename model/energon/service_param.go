@@ -45,7 +45,8 @@ const (
 	serviceParamRuleOption     int16 = 2
 	ServiceParamRuleAttachment int16 = 3
 	serviceParamRuleAttachment       = ServiceParamRuleAttachment
-	serviceParamRuleCombo      int16 = 4
+	ServiceParamRuleCombo      int16 = 4
+	serviceParamRuleCombo            = ServiceParamRuleCombo
 	ServiceParamRuleFixed      int16 = 5
 	serviceParamRuleFixed            = ServiceParamRuleFixed
 
@@ -61,7 +62,43 @@ const (
 	ServiceParamFileValueFormatBase64  = "base64"
 	ServiceParamFileValueFormatDataURL = "data_url"
 
-	shemicLabImageSizeMapping        = `{"params":[6,7],"rows":[{"native_value":"1024x1024","values":{"6":1,"7":4}},{"native_value":"1536x1024","values":{"6":1,"7":5}},{"native_value":"1024x1536","values":{"6":1,"7":6}}]}`
+	// GPTImage2SizeMapping keeps every size within gpt-image-2's edge and pixel limits.
+	// Resolution names are quality tiers; the mapped dimensions preserve the selected ratio exactly.
+	GPTImage2SizeMapping = `{
+		"params":[6,7],
+		"rows":[
+			{"native_value":"1024x1024","values":{"6":1,"7":4}},
+			{"native_value":"1536x864","values":{"6":1,"7":5}},
+			{"native_value":"864x1536","values":{"6":1,"7":6}},
+			{"native_value":"1536x1152","values":{"6":1,"7":7}},
+			{"native_value":"1152x1536","values":{"6":1,"7":8}},
+			{"native_value":"1536x1024","values":{"6":1,"7":9}},
+			{"native_value":"1024x1536","values":{"6":1,"7":10}},
+			{"native_value":"1520x1216","values":{"6":1,"7":11}},
+			{"native_value":"1216x1520","values":{"6":1,"7":12}},
+			{"native_value":"1456x624","values":{"6":1,"7":13}},
+			{"native_value":"2048x2048","values":{"6":2,"7":4}},
+			{"native_value":"2048x1152","values":{"6":2,"7":5}},
+			{"native_value":"1152x2048","values":{"6":2,"7":6}},
+			{"native_value":"2048x1536","values":{"6":2,"7":7}},
+			{"native_value":"1536x2048","values":{"6":2,"7":8}},
+			{"native_value":"2016x1344","values":{"6":2,"7":9}},
+			{"native_value":"1344x2016","values":{"6":2,"7":10}},
+			{"native_value":"2000x1600","values":{"6":2,"7":11}},
+			{"native_value":"1600x2000","values":{"6":2,"7":12}},
+			{"native_value":"2016x864","values":{"6":2,"7":13}},
+			{"native_value":"2880x2880","values":{"6":3,"7":4}},
+			{"native_value":"3840x2160","values":{"6":3,"7":5}},
+			{"native_value":"2160x3840","values":{"6":3,"7":6}},
+			{"native_value":"3264x2448","values":{"6":3,"7":7}},
+			{"native_value":"2448x3264","values":{"6":3,"7":8}},
+			{"native_value":"3504x2336","values":{"6":3,"7":9}},
+			{"native_value":"2336x3504","values":{"6":3,"7":10}},
+			{"native_value":"3200x2560","values":{"6":3,"7":11}},
+			{"native_value":"2560x3200","values":{"6":3,"7":12}},
+			{"native_value":"3808x1632","values":{"6":3,"7":13}}
+		]
+	}`
 	doubaoSeedreamSizeMapping        = `{"params":[6,7],"rows":[{"native_value":"2048x2048","values":{"6":2,"7":4}},{"native_value":"2848x1600","values":{"6":2,"7":5}},{"native_value":"1600x2848","values":{"6":2,"7":6}},{"native_value":"2304x1728","values":{"6":2,"7":7}},{"native_value":"1728x2304","values":{"6":2,"7":8}},{"native_value":"2496x1664","values":{"6":2,"7":9}},{"native_value":"1664x2496","values":{"6":2,"7":10}},{"native_value":"3136x1344","values":{"6":2,"7":13}},{"native_value":"4096x4096","values":{"6":3,"7":4}},{"native_value":"5504x3040","values":{"6":3,"7":5}},{"native_value":"3040x5504","values":{"6":3,"7":6}},{"native_value":"4704x3520","values":{"6":3,"7":7}},{"native_value":"3520x4704","values":{"6":3,"7":8}},{"native_value":"4992x3328","values":{"6":3,"7":9}},{"native_value":"3328x4992","values":{"6":3,"7":10}},{"native_value":"6240x2656","values":{"6":3,"7":13}}]}`
 	doubaoVideoResolutionMapping     = `[{"native_value":"720p","option_id":1},{"native_value":"1080p","option_id":2}]`
 	doubaoVideoRatioMapping          = `[{"native_value":"","option_id":4},{"native_value":"","option_id":5},{"native_value":"","option_id":6},{"native_value":"","option_id":7},{"native_value":"","option_id":8},{"native_value":"","option_id":13}]`
@@ -79,7 +116,7 @@ var (
 		{ID: 5, ServiceID: serviceRunningHubFlowClothingID, ParamID: ParamImageID, ParamRule: serviceParamRuleAttachment, Key: "15.image", Name: "服装图", Mapping: "[1]"},
 		{ID: 6, ServiceID: serviceRunningHubFlowClothingID, ParamID: ParamImageID, ParamRule: serviceParamRuleAttachment, Key: "14.image", Name: "人物图", Mapping: "[1]"},
 		{ID: 7, ServiceID: serviceShemicLabImageID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "prompt"},
-		{ID: 8, ServiceID: serviceShemicLabImageID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: shemicLabImageSizeMapping},
+		{ID: 8, ServiceID: serviceShemicLabImageID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: GPTImage2SizeMapping},
 		{ID: 9, ServiceID: serviceShemicLabImageID, ParamID: ParamImageID, ParamRule: serviceParamRuleAttachment, Key: "image", Mapping: "[1]"},
 		{ID: 10, ServiceID: serviceDoubaoImageID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: doubaoSeedreamSizeMapping},
 		{ID: 11, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[0].type", Mapping: "text"},

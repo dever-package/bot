@@ -1,6 +1,5 @@
 import { reconcileCanvasGroupEdges } from "./space-group-model";
 import {
-  audioPowerNodeSizeUpgrade,
   createLocalNode,
   nextCanvasNodeNo,
   powerNodeDefaultSize,
@@ -71,7 +70,12 @@ export function restoredStoryboardDerivedPrompt(
   );
   const referenceTargets = canvasNodes
     .filter((candidate) => referenceNodeIds.has(candidate.id))
-    .map(storyboardSourceReferenceTarget)
+    .map((candidate) =>
+      storyboardSourceReferenceTarget(
+        candidate,
+        node.storyboardItem?.itemType,
+      ),
+    )
     .filter((target): target is CanvasReferenceTarget => Boolean(target));
   const externalReferenceAssetIDs = new Set(
     node.storyboardItem?.externalReferenceAssetIds || [],
@@ -619,7 +623,7 @@ function withStoryboardItemContext(
   );
   referenceTargets.push(
     ...referenceNodes
-      .map(storyboardSourceReferenceTarget)
+      .map((node) => storyboardSourceReferenceTarget(node, item.type))
       .filter((target): target is CanvasReferenceTarget => Boolean(target)),
   );
   if (!referenceTargets.length) {
@@ -665,6 +669,7 @@ function storyboardPromptWithSourceMentions(
 
 function storyboardSourceReferenceTarget(
   node: SpaceCanvasNode,
+  targetItemType?: CanvasStoryboardItemType,
 ): CanvasReferenceTarget | null {
   const refId = Number(node.resultRef?.asset_id || node.asset?.id || 0);
   const versionId = Number(
@@ -681,6 +686,11 @@ function storyboardSourceReferenceTarget(
     refId,
     versionId,
     label: node.title,
+    usage:
+      targetItemType === "shot" &&
+      node.storyboardItem?.itemType === "shot_image"
+        ? "firstFrame"
+        : undefined,
   };
 }
 
@@ -740,9 +750,6 @@ function ensureDerivedGroup(input: {
       }
       const moved = {
         ...node,
-        ...(node.groupId === existing.id
-          ? audioPowerNodeSizeUpgrade(node) || {}
-          : {}),
         x:
           node.x +
           deltaX,

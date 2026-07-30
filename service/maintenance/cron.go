@@ -30,6 +30,7 @@ func init() {
 	})
 	frontcron.RegisterBootstrap(EnsureEnergonPromptParam)
 	frontcron.RegisterBootstrap(EnsureEnergonImageParams)
+	frontcron.RegisterBootstrap(EnsureEnergonImage2SizeMapping)
 	frontcron.RegisterBootstrap(EnsureEnergonVideoReferenceParams)
 	frontcron.RegisterBootstrap(EnsureEnergonVideoComposePower)
 	frontcron.RegisterBootstrap(EnsureHistoryCleanupCron)

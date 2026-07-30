@@ -84,20 +84,7 @@ export type TeamFlow = {
   config: Record<string, unknown>;
   status: number;
   sort: number;
-};
-
-export type TeamFlowNode = {
-  id: number;
-  node_key: string;
-  name: string;
-  type: string;
-  role_id: number;
-  role_key: string;
-  agent_id: number;
-  power_id: number;
-  sub_team_id: number;
-  asset_cate_id: number;
-  config: Record<string, unknown>;
+  output_asset_cate_ids: number[];
 };
 
 export type PowerOption = {
@@ -106,6 +93,7 @@ export type PowerOption = {
   name: string;
   key: string;
   icon: string;
+  description: string;
   outputType: string;
   output?: OutputTypeOption;
   kind: string;
@@ -279,15 +267,9 @@ export type SpaceBootstrap = {
   team: WorkTeam;
   release: WorkRelease;
   assetCates: AssetCate[];
-  roles: TeamRole[];
   flows: TeamFlow[];
-  nodesByFlow: Record<string, TeamFlowNode[]>;
   canvases: Record<string, SpaceCanvasState>;
   assets: ProjectAsset[];
-  powers: PowerOption[];
-  powerCategories: PowerCategoryOption[];
-  powerKinds: PowerKindOption[];
-  outputTypes: OutputTypeOption[];
   initialAssetCateId: number;
 };
 

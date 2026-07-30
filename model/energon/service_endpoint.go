@@ -24,6 +24,8 @@ type ServiceEndpointIndex struct {
 }
 
 const (
+	ServiceEndpointGPTImage2API = "gpt-image-2"
+
 	serviceEndpointRunningHubImageTextID  uint64 = 4
 	serviceEndpointRunningHubImageImageID uint64 = 5
 	serviceEndpointRunningHubMusicID      uint64 = 6
@@ -85,7 +87,7 @@ var (
 		{
 			"id":         serviceEndpointShemicLabImageID,
 			"service_id": serviceShemicLabImageID,
-			"api":        "gpt-image-2",
+			"api":        ServiceEndpointGPTImage2API,
 			"param_mode": "all",
 			"param_ids":  "[]",
 			"status":     1,

@@ -22,16 +22,14 @@ import {
   normalizePowerParamValue,
   powerParamOptionValue,
 } from "./space-power-param";
-import { PowerParamIcon } from "./space-power-icon";
+import { PowerIcon, PowerParamIcon } from "./space-power-icon";
 import {
   CanvasReferenceEditor,
   type CanvasReferencePickerRequest,
 } from "./space-reference-editor";
 import {
-  changeMediaUsage,
   connectedMediaReferenceTargets,
   type CanvasConnectedMediaReference,
-  type CanvasMediaUsageAssignments,
   type MediaUsageOption,
 } from "./space-media-references";
 import { findAssetMediaURL } from "../asset/asset-content";
@@ -53,6 +51,7 @@ import { SpaceTooltip } from "./space-tooltip";
 import type {
   CanvasContentPreview,
   CanvasReferenceContent,
+  PowerOption,
   PowerParam,
   PowerParamSource,
 } from "./types";
@@ -104,6 +103,9 @@ type PromptComposerProps = {
   placeholder: string;
   running?: boolean;
   disabled?: boolean;
+  textInputEnabled?: boolean;
+  showMediaParamButtons?: boolean;
+  mediaParamPower?: PowerOption;
   submitDisabled?: boolean;
   submitDisabledReason?: string;
   sourceOptions?: PowerParamSource[];
@@ -121,9 +123,6 @@ type PromptComposerProps = {
   };
   connectedMediaReferences?: CanvasConnectedMediaReference[];
   mediaUsageOptions?: MediaUsageOption[];
-  onConnectedMediaUsagesChange?: (
-    assignments: CanvasMediaUsageAssignments,
-  ) => void;
   onConnectedMediaEdgeRemove?: (edgeId: string) => void;
   onChange: (value: string, content?: CanvasReferenceContent) => void;
   onParamChange?: (key: string, value: unknown) => void;
@@ -152,6 +151,9 @@ export function PromptComposer({
   placeholder,
   running = false,
   disabled = false,
+  textInputEnabled = true,
+  showMediaParamButtons = false,
+  mediaParamPower,
   submitDisabled = false,
   submitDisabledReason = "",
   sourceOptions = [],
@@ -163,7 +165,6 @@ export function PromptComposer({
   assetReference,
   connectedMediaReferences = [],
   mediaUsageOptions = [],
-  onConnectedMediaUsagesChange,
   onConnectedMediaEdgeRemove,
   onChange,
   onParamChange,
@@ -231,6 +232,24 @@ export function PromptComposer({
     CanvasReferencePickerRequest | undefined
   >();
   const referencePickerRequestID = useRef(0);
+  const openMediaPicker = useCallback((param: PowerParam) => {
+    setOpenKey("");
+    referencePickerRequestID.current += 1;
+    setReferencePickerRequest({
+      id: referencePickerRequestID.current,
+      trigger: "@",
+      preferredUsage: param.key,
+      acceptedKinds: acceptedAssetKinds(param),
+    });
+  }, []);
+  const consumeReferencePickerRequest = useCallback(
+    (requestID: CanvasReferencePickerRequest["id"]) => {
+      setReferencePickerRequest((current) =>
+        current?.id === requestID ? undefined : current,
+      );
+    },
+    [],
+  );
   const optionParams = params.filter(isToolbarPowerParam);
   const selectedSource = sourceOptions.find(
     (source) =>
@@ -246,6 +265,7 @@ export function PromptComposer({
     referenceContent,
     connectedTargets,
   );
+  const mediaParamCounts = referenceUsageCounts(resolvedReferences.content);
   const currentReferenceSignature = referenceStateSignature(
     value,
     referenceContent,
@@ -285,6 +305,7 @@ export function PromptComposer({
             value={resolvedReferences.value}
             content={resolvedReferences.content}
             disabled={disabled || running}
+            textEditable={textInputEnabled}
             placeholder={placeholder}
             items={referenceItems}
             usageOptions={mediaUsageOptions.map((option) => ({
@@ -294,6 +315,7 @@ export function PromptComposer({
               maxFiles: option.maxFiles,
             }))}
             pickerRequest={referencePickerRequest}
+            onPickerRequestConsumed={consumeReferencePickerRequest}
             assetReferenceProvider={
               assetReference?.teamID ? assetReferenceProvider : undefined
             }
@@ -305,23 +327,6 @@ export function PromptComposer({
                 onConnectedMediaEdgeRemove?.(reference.ref_origin_id);
               }
             }}
-            onReferenceUsageChange={(reference, usage) => {
-              if (
-                reference.ref_origin !== "edge" ||
-                !reference.ref_origin_id
-              ) {
-                return;
-              }
-              const assignments = changeMediaUsage(
-                connectedMediaReferences,
-                reference.ref_origin_id,
-                usage,
-                mediaUsageOptions,
-              );
-              if (Object.keys(assignments).length > 0) {
-                onConnectedMediaUsagesChange?.(assignments);
-              }
-            }}
             onChange={onChange}
             onSubmit={!running && !submitDisabled ? onSubmit : undefined}
           />
@@ -329,7 +334,20 @@ export function PromptComposer({
       </div>
       <div className="ws-prompt-toolbar">
         <div className="ws-prompt-tools">
-          {uploadParams.length > 0 ? (
+          {showMediaParamButtons
+            ? uploadParams.map((param) => (
+                <MediaParamButton
+                  key={param.key}
+                  param={param}
+                  power={mediaParamPower}
+                  selectedCount={mediaParamCounts.get(param.key) || 0}
+                  disabled={disabled || running}
+                  onClick={() => openMediaPicker(param)}
+                />
+              ))
+            : null}
+
+          {!showMediaParamButtons && uploadParams.length > 0 ? (
             <ComposerMenu
               id="attachments"
               openKey={openKey}
@@ -347,16 +365,7 @@ export function PromptComposer({
                     type="button"
                     className="ws-prompt-menu-item"
                     role="menuitem"
-                    onClick={() => {
-                      setOpenKey("");
-                      referencePickerRequestID.current += 1;
-                      setReferencePickerRequest({
-                        id: referencePickerRequestID.current,
-                        trigger: "@",
-                        preferredUsage: param.key,
-                        acceptedKinds: acceptedAssetKinds(param),
-                      });
-                    }}
+                    onClick={() => openMediaPicker(param)}
                   >
                     <span className="ws-prompt-menu-kind-icon">
                       <AssetKindIcon kind={uploadParamKind(param)} />
@@ -435,6 +444,39 @@ export function PromptComposer({
         </div>
       </div>
     </div>
+  );
+}
+
+function MediaParamButton({
+  param,
+  power,
+  selectedCount,
+  disabled,
+  onClick,
+}: {
+  param: PowerParam;
+  power?: PowerOption;
+  selectedCount: number;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  const selected = selectedCount > 0;
+  return (
+    <SpaceTooltip label={mediaParamTooltip(param, selectedCount)}>
+      <button
+        type="button"
+        className={`ws-prompt-tool is-media-param ${selected ? "is-selected" : ""}`}
+        disabled={disabled}
+        aria-pressed={selected}
+        onClick={onClick}
+      >
+        <PowerIcon power={power} size={15} />
+        <span>{uploadParamLabel(param)}</span>
+        {param.type === "files" && selected ? (
+          <small className="ws-prompt-media-count">{selectedCount}</small>
+        ) : null}
+      </button>
+    </SpaceTooltip>
   );
 }
 
@@ -815,6 +857,33 @@ function referenceStateSignature(
   content: CanvasReferenceContent | undefined,
 ) {
   return JSON.stringify([String(value || ""), content?.parts || []]);
+}
+
+function referenceUsageCounts(content?: CanvasReferenceContent) {
+  const counts = new Map<string, number>();
+  for (const part of content?.parts || []) {
+    if (part.type !== "reference" || !part.usage) {
+      continue;
+    }
+    counts.set(part.usage, (counts.get(part.usage) || 0) + 1);
+  }
+  return counts;
+}
+
+function mediaParamTooltip(param: PowerParam, selectedCount: number) {
+  const label = uploadParamLabel(param);
+  if (param.type !== "files") {
+    return selectedCount > 0 ? `${label}：已选择素材` : `选择${label}素材`;
+  }
+  const maxFiles = Math.max(0, Number(param.max_files || 0));
+  if (selectedCount <= 0) {
+    return maxFiles > 0
+      ? `选择${label}素材，最多 ${maxFiles} 个`
+      : `选择${label}素材`;
+  }
+  return maxFiles > 0
+    ? `${label}：已选择 ${selectedCount} 个，最多 ${maxFiles} 个`
+    : `${label}：已选择 ${selectedCount} 个`;
 }
 
 function uploadParamLabel(param: PowerParam) {

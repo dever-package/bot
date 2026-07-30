@@ -15,6 +15,19 @@ export function canvasGroupMembers(nodes: SpaceCanvasNode[], groupId: string) {
   return nodes.filter((node) => node.groupId === groupId);
 }
 
+export function canvasConnectionSourceNodes(
+  nodes: SpaceCanvasNode[],
+  sourceNodeId: string,
+) {
+  const source = nodes.find((node) => node.id === sourceNodeId);
+  if (!source) {
+    return [];
+  }
+  return source.type === "group"
+    ? canvasGroupMembers(nodes, source.id)
+    : [source];
+}
+
 export function canConnectCanvasNodes(
   sourceNode?: SpaceCanvasNode,
   targetNode?: SpaceCanvasNode,
@@ -30,8 +43,8 @@ export function canConnectCanvasNodes(
   }
   if (
     sourceNode.groupId !== targetNode.groupId &&
-    ((sourceNode.type !== "group" && Boolean(sourceNode.groupId)) ||
-      (targetNode.type !== "group" && Boolean(targetNode.groupId)))
+    targetNode.type !== "group" &&
+    Boolean(targetNode.groupId)
   ) {
     return false;
   }

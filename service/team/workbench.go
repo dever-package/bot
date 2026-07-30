@@ -75,6 +75,7 @@ func (s Service) WorkbenchCatalog(ctx context.Context, teamID uint64) (map[strin
 			"name":        power.Name,
 			"key":         power.Key,
 			"icon":        power.Icon,
+			"description": power.Description,
 			"kind":        power.Kind,
 			"output_type": power.OutputType,
 			"output":      power.Output,

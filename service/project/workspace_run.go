@@ -60,10 +60,12 @@ type canvasRunNode struct {
 }
 
 type canvasRunEdge struct {
-	ID         string
-	From       string
-	To         string
-	MediaUsage string
+	ID          string
+	From        string
+	To          string
+	LogicalFrom string
+	LogicalTo   string
+	MediaUsage  string
 }
 
 type canvasNodeResult struct {
@@ -942,10 +944,12 @@ func parseCanvasRunGraph(canvas map[string]any) ([]canvasRunNode, []canvasRunEdg
 			continue
 		}
 		edge := canvasRunEdge{
-			ID:         textValue(row["id"]),
-			From:       textValue(firstPresent(row["from"], row["source"])),
-			To:         textValue(firstPresent(row["to"], row["target"])),
-			MediaUsage: textValue(firstPresent(row["media_usage"], row["mediaUsage"])),
+			ID:          textValue(row["id"]),
+			From:        textValue(firstPresent(row["from"], row["source"])),
+			To:          textValue(firstPresent(row["to"], row["target"])),
+			LogicalFrom: textValue(firstPresent(row["logical_from"], row["logicalFrom"])),
+			LogicalTo:   textValue(firstPresent(row["logical_to"], row["logicalTo"])),
+			MediaUsage:  textValue(firstPresent(row["media_usage"], row["mediaUsage"])),
 		}
 		if edge.From != "" && edge.To != "" {
 			edges = append(edges, edge)
@@ -1511,10 +1515,24 @@ func canvasStoryboardSourceReferences(node map[string]any, results []canvasNodeR
 				firstText(sourceNode["title"], sourceNodeID),
 			)
 		}
+		sourceMetadata := mapValue(firstPresent(sourceNode["storyboard_item"], sourceNode["storyboardItem"]))
+		reference.Usage = canvasStoryboardReferenceUsage(
+			itemType,
+			firstText(sourceMetadata["item_type"], sourceMetadata["itemType"]),
+		)
 		reference.Required = true
 		result = append(result, reference)
 	}
 	return result, nil
+}
+
+const canvasMediaUsageFirstFrame = "firstFrame"
+
+func canvasStoryboardReferenceUsage(targetItemType string, sourceItemType string) string {
+	if strings.TrimSpace(targetItemType) == "shot" && strings.TrimSpace(sourceItemType) == "shot_image" {
+		return canvasMediaUsageFirstFrame
+	}
+	return ""
 }
 
 func canvasNodeCurrentAssetReference(nodeID string, results []canvasNodeResult, canvas map[string]any) (canvasPromptReference, bool) {
@@ -1583,6 +1601,12 @@ func mergeCanvasPromptReferences(generated []canvasPromptReference, explicit []c
 			current.VersionID = reference.VersionID
 			if current.Label == "" {
 				current.Label = reference.Label
+			}
+			if current.Kind == "" {
+				current.Kind = reference.Kind
+			}
+			if current.Usage == "" {
+				current.Usage = reference.Usage
 			}
 			current.Required = current.Required || reference.Required
 			result = append(result, current)

@@ -25,6 +25,11 @@ type GraphFlow struct {
 	Sort     int            `json:"sort"`
 }
 
+type CanvasFlowOption struct {
+	GraphFlow
+	OutputAssetCateIDs []uint64 `json:"output_asset_cate_ids"`
+}
+
 type GraphFlowEdge struct {
 	ID         uint64 `json:"id"`
 	FromFlowID uint64 `json:"from_flow_id"`
@@ -155,6 +160,7 @@ type PowerOption struct {
 	Name         string                      `json:"name"`
 	Key          string                      `json:"key"`
 	Icon         string                      `json:"icon"`
+	Description  string                      `json:"description"`
 	OutputType   string                      `json:"output_type"`
 	Output       energonmodel.OutputTypeSpec `json:"output"`
 	Kind         string                      `json:"kind"`

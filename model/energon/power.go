@@ -7,17 +7,18 @@ import (
 )
 
 type Power struct {
-	ID         uint64    `dorm:"primaryKey;autoIncrement;comment:能力ID"`
-	CateID     uint64    `dorm:"type:bigint;not null;default:1;comment:能力分类"`
-	Key        string    `dorm:"type:varchar(128);not null;comment:标识"`
-	Name       string    `dorm:"type:varchar(128);not null;comment:名称"`
-	Icon       string    `dorm:"type:varchar(64);not null;default:'';comment:图标"`
-	OutputType string    `json:"output_type" dorm:"type:varchar(64);not null;default:general;comment:输出类型"`
-	Kind       string    `dorm:"type:varchar(64);not null;comment:类型"`
-	Prompt     string    `dorm:"type:text;not null;default:'';comment:设定提示词"`
-	SourceRule int16     `dorm:"type:smallint;not null;default:1;comment:来源规则"`
-	Status     int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	CreatedAt  time.Time `dorm:"comment:创建时间"`
+	ID          uint64    `dorm:"primaryKey;autoIncrement;comment:能力ID"`
+	CateID      uint64    `dorm:"type:bigint;not null;default:1;comment:能力分类"`
+	Key         string    `dorm:"type:varchar(128);not null;comment:标识"`
+	Name        string    `dorm:"type:varchar(128);not null;comment:名称"`
+	Icon        string    `dorm:"type:varchar(64);not null;default:'';comment:图标"`
+	OutputType  string    `json:"output_type" dorm:"type:varchar(64);not null;default:general;comment:输出类型"`
+	Kind        string    `dorm:"type:varchar(64);not null;comment:类型"`
+	Description string    `dorm:"type:varchar(500);not null;default:'';comment:输入说明"`
+	Prompt      string    `dorm:"type:text;not null;default:'';comment:设定提示词"`
+	SourceRule  int16     `dorm:"type:smallint;not null;default:1;comment:来源规则"`
+	Status      int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	CreatedAt   time.Time `dorm:"comment:创建时间"`
 }
 
 type PowerIndex struct {

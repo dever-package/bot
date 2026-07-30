@@ -1,0 +1,56 @@
+.ws-startup-loading {
+  display: grid;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  place-items: center;
+  background: #f4f6f5;
+  color: #18211d;
+  font-family:
+    Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.ws-startup-loading-content {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.ws-startup-loading-content > strong {
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.ws-startup-loading-content > span:last-child {
+  color: #6b7670;
+  font-size: 14px;
+}
+
+.ws-startup-loading-spinner {
+  width: 26px;
+  height: 26px;
+  border: 2px solid #d5dcda;
+  border-top-color: #155b43;
+  border-radius: 50%;
+  animation: ws-startup-loading-spin 0.8s linear infinite;
+}
+
+@keyframes ws-startup-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ws-startup-loading.is-dark {
+  background: #111613;
+  color: #f4f7f5;
+}
+
+.ws-startup-loading.is-dark .ws-startup-loading-content > span:last-child {
+  color: #a7b0ab;
+}
+
+.ws-startup-loading.is-dark .ws-startup-loading-spinner {
+  border-color: #38413d;
+  border-top-color: #8cc7ad;
+}

@@ -27,6 +27,11 @@ export type CanvasConnectedMediaReference = {
 
 export type CanvasMediaUsageAssignments = Record<string, string | undefined>;
 
+export type CanvasMediaUsageReconciliation = {
+  content: CanvasReferenceContent | undefined;
+  assignments: CanvasMediaUsageAssignments;
+};
+
 export function connectedMediaReferenceTargets(
   connections: CanvasConnectedMediaReference[],
   items: ComposerAssetItem[],
@@ -88,7 +93,7 @@ export function isCanvasMediaReferenceNode(node?: SpaceCanvasNode) {
 }
 
 export function mediaUsageOptions(params: PowerParam[]): MediaUsageOption[] {
-  return params.flatMap((param) => {
+  const options = params.flatMap((param) => {
     if (param.type !== "file" && param.type !== "files") {
       return [];
     }
@@ -106,6 +111,11 @@ export function mediaUsageOptions(params: PowerParam[]): MediaUsageOption[] {
       },
     ];
   });
+  return prioritizeMediaUsageOptions(
+    options.map((option) =>
+      isFrameMediaUsageOption(option) ? { ...option, maxFiles: 1 } : option,
+    ),
+  );
 }
 
 export function mediaUsageCandidates(
@@ -116,6 +126,98 @@ export function mediaUsageCandidates(
   return kind
     ? options.filter((option) => option.acceptedKinds.includes(kind))
     : [];
+}
+
+function resolvedMediaUsageOption(
+  candidates: MediaUsageOption[],
+  usage: string,
+) {
+  const exact = candidates.find((option) => option.key === usage);
+  if (exact || !isFrameUsageOption(usage)) {
+    return exact;
+  }
+  const referenceOptions = candidates.filter(isReferenceImageUsageOption);
+  if (referenceOptions.length === 1) {
+    return referenceOptions[0];
+  }
+  const genericOptions = candidates.filter(
+    (option) => !isFrameUsageOption(option.key),
+  );
+  return genericOptions.length === 1 ? genericOptions[0] : undefined;
+}
+
+function isFirstFrameUsage(value: string) {
+  const normalized = normalizeMediaUsageRole(value);
+  return normalized === "firstframe" || normalized === "startframe";
+}
+
+function isLastFrameUsage(value: string) {
+  const normalized = normalizeMediaUsageRole(value);
+  return normalized === "lastframe" || normalized === "endframe";
+}
+
+function isFrameUsageOption(value: string) {
+  const normalized = normalizeMediaUsageRole(value);
+  return (
+    normalized === "firstframe" ||
+    normalized === "startframe" ||
+    normalized === "lastframe" ||
+    normalized === "endframe"
+  );
+}
+
+function isReferenceImageUsageOption(option: MediaUsageOption) {
+  if (!option.acceptedKinds.includes("image")) {
+    return false;
+  }
+  const key = normalizeMediaUsageRole(option.key);
+  const label = String(option.label || "").trim();
+  return (
+    ["images", "reference", "referenceimage", "referenceimages"].includes(
+      key,
+    ) ||
+    label.includes("参考图") ||
+    label.includes("参考图片")
+  );
+}
+
+function prioritizeMediaUsageOptions(options: MediaUsageOption[]) {
+  return options
+    .map((option, index) => ({ option, index }))
+    .sort(
+      (left, right) =>
+        mediaUsagePriority(left.option) - mediaUsagePriority(right.option) ||
+        left.index - right.index,
+    )
+    .map(({ option }) => option);
+}
+
+function mediaUsagePriority(option: MediaUsageOption) {
+  if (isFirstFrameUsage(option.key) || option.label.includes("首帧")) {
+    return 0;
+  }
+  if (isLastFrameUsage(option.key) || option.label.includes("尾帧")) {
+    return 1;
+  }
+  if (isReferenceImageUsageOption(option)) {
+    return 2;
+  }
+  return 3;
+}
+
+function isFrameMediaUsageOption(option: MediaUsageOption) {
+  return (
+    isFrameUsageOption(option.key) ||
+    option.label.includes("首帧") ||
+    option.label.includes("尾帧")
+  );
+}
+
+function normalizeMediaUsageRole(value: string) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
 }
 
 export function canvasMediaUsageError(
@@ -148,7 +250,7 @@ export function canvasMediaUsageError(
       return refID > 0 ? [[refID, item] as const] : [];
     }),
   );
-  for (const part of content?.parts || []) {
+  for (const [partIndex, part] of (content?.parts || []).entries()) {
     if (
       part.type !== "reference" ||
       part.ref_type !== "asset" ||
@@ -162,7 +264,7 @@ export function canvasMediaUsageError(
       continue;
     }
     entries.push({
-      referenceKey: `asset:${part.ref_id}`,
+      referenceKey: `asset:${part.ref_id}:${partIndex}`,
       label: String(part.label || item?.title || "引用素材"),
       kind,
       usage: String(part.usage || ""),
@@ -188,9 +290,7 @@ export function canvasMediaUsageError(
       // A manual reference unsupported by the capability remains prompt context.
       continue;
     }
-    const configured = candidates.find(
-      (option) => option.key === entry.usage,
-    );
+    const configured = resolvedMediaUsageOption(candidates, entry.usage);
     if (entry.usage && !configured) {
       return `「${entry.label}」的素材用途与当前能力参数不兼容`;
     }
@@ -200,202 +300,122 @@ export function canvasMediaUsageError(
       return `请为「${entry.label}」选择素材用途`;
     }
     if (!canAssignMediaUsage(option, counts)) {
-      return `${option.label}参数最多接收 ${option.maxFiles} 个素材`;
+      return `${option.label}参数最多接收 ${mediaUsageCapacity(option)} 个素材`;
     }
     incrementMediaUsage(counts, option.key);
   }
   return "";
 }
 
-export function nextMediaUsage(
+export function nextMediaUsageForSources(
   connections: CanvasConnectedMediaReference[],
   options: MediaUsageOption[],
-  source: SpaceCanvasNode,
+  sources: SpaceCanvasNode[],
+  content?: CanvasReferenceContent,
 ) {
-  const kind = canvasMediaReferenceKind(source);
-  const candidates = mediaUsageCandidates(options, source);
-  if (!kind || candidates.length === 0) {
+  const mediaSources = sources.filter(isCanvasMediaReferenceNode);
+  const kinds = mediaSources.flatMap((source) => {
+    const kind = canvasMediaReferenceKind(source);
+    return kind ? [kind] : [];
+  });
+  const candidates = options.filter((option) =>
+    kinds.every((kind) => option.acceptedKinds.includes(kind)),
+  );
+  if (kinds.length === 0 || candidates.length === 0) {
+    const kind = kinds[0];
     return {
       usage: undefined,
-      error: `当前能力未配置可接收${mediaKindLabel(kind || "file")}素材的参数`,
+      error:
+        kinds.length > 1
+          ? "当前能力未配置可同时接收该分组媒体素材的参数"
+          : `当前能力未配置可接收${mediaKindLabel(kind || "file")}素材的参数`,
     };
   }
-  const counts = mediaUsageCounts(connections, options);
-  const available = candidates.filter((option) =>
-    canAssignMediaUsage(option, counts),
+  const counts = mediaUsageCounts(connections, options, content);
+  const option = firstAvailableMediaUsageForAmount(
+    candidates,
+    counts,
+    mediaSources.length,
   );
-  if (available.length === 0) {
+  if (!option) {
     return {
       usage: undefined,
       error: `${candidates[0].label}参数已达到素材数量上限`,
     };
   }
   return {
-    usage: available[0]?.key,
+    usage: option.key,
     error: "",
   };
 }
 
-export function reconcileMediaUsages(
-  connections: CanvasConnectedMediaReference[],
-  options: MediaUsageOption[],
-): CanvasMediaUsageAssignments {
-  const assignments: CanvasMediaUsageAssignments = {};
-  const counts = new Map<string, number>();
-  for (const connection of connections) {
-    const current = String(connection.edge.mediaUsage || "");
-    const candidates = mediaUsageCandidates(options, connection.source);
-    const currentOption = candidates.find((option) => option.key === current);
-    const available = candidates.filter((option) =>
-      canAssignMediaUsage(option, counts),
-    );
-    const option =
-      (currentOption && canAssignMediaUsage(currentOption, counts)
-        ? currentOption
-        : undefined) || available[0];
-    const usage = option?.key || "";
-    if (usage) {
-      incrementMediaUsage(counts, usage);
-    }
-    if (usage !== current) {
-      assignments[connection.edge.id] = usage || undefined;
-    }
-  }
-  return assignments;
-}
-
-export function reconcileReferenceMediaUsageChange(
+export function reconcileCanvasMediaUsages(
   previous: CanvasReferenceContent | undefined,
   next: CanvasReferenceContent | undefined,
   items: ComposerAssetItem[],
   options: MediaUsageOption[],
-) {
-  if (!previous || !next || options.length === 0) {
-    return next;
-  }
-
-  const previousEntries = indexedReferenceParts(previous);
-  const nextEntries = indexedReferenceParts(next);
-  const previousByKey = new Map(
-    previousEntries.map((entry) => [entry.key, entry] as const),
-  );
-  const changed = nextEntries.filter((entry) => {
-    const current = previousByKey.get(entry.key);
-    return Boolean(
-      entry.usage && (!current || current.usage !== entry.usage),
-    );
-  });
-  if (changed.length !== 1 || !changed[0].usage) {
-    return next;
-  }
-
-  const selected = changed[0];
-  const targetOption = options.find(
-    (option) => option.key === selected.usage,
-  );
-  if (!targetOption || targetOption.maxFiles !== 1) {
-    return next;
-  }
-
-  const occupied = nextEntries.filter(
-    (entry) => entry.key !== selected.key && entry.usage === selected.usage,
-  );
-  if (occupied.length === 0) {
-    return next;
-  }
-
-  const previousUsage = previousByKey.get(selected.key)?.usage || "";
-  const previousOption = options.find(
-    (option) => option.key === previousUsage,
-  );
-  const parts = next.parts.map((part) => ({ ...part }));
-  const swapTarget = occupied.find(
-    (entry) =>
-      previousOption &&
-      referenceEntrySupportsOption(
-        entry,
-        previousOption,
-        items,
-        targetOption,
-      ) &&
-      referenceUsageHasCapacity(
-        nextEntries,
-        previousOption,
-        new Set([selected.key, entry.key]),
-      ),
-  );
-
-  for (const entry of occupied) {
-    const part = parts[entry.partIndex];
-    if (part.type !== "reference") {
-      continue;
-    }
-    part.usage = entry.key === swapTarget?.key ? previousUsage : undefined;
-  }
-  return { ...next, parts };
-}
-
-export function changeMediaUsage(
   connections: CanvasConnectedMediaReference[],
-  edgeId: string,
-  usage: string,
-  options: MediaUsageOption[],
-): CanvasMediaUsageAssignments {
-  const current = connections.find(
-    (connection) => connection.edge.id === edgeId,
-  );
-  const targetOption = mediaUsageCandidates(options, current?.source).find(
-    (option) => option.key === usage,
-  );
-  if (!current || !targetOption || current.edge.mediaUsage === usage) {
-    return {};
+): CanvasMediaUsageReconciliation {
+  if (!next || options.length === 0) {
+    return { content: next, assignments: {} };
   }
 
-  const remaining = connections.filter(
-    (connection) => connection.edge.id !== edgeId,
+  const previousByKey = new Map(
+    indexedMediaReferenceParts(previous, items, connections).map((entry) => [
+      entry.key,
+      entry,
+    ] as const),
   );
-  const counts = mediaUsageCounts(remaining, options);
-  if (canAssignMediaUsage(targetOption, counts)) {
-    return { [edgeId]: usage };
+  const entries = indexedMediaReferenceParts(next, items, connections);
+  const orderedEntries = [...entries].sort((left, right) => {
+    const leftPriority = mediaReferenceAllocationPriority(
+      left,
+      previousByKey.get(left.key),
+    );
+    const rightPriority = mediaReferenceAllocationPriority(
+      right,
+      previousByKey.get(right.key),
+    );
+    return leftPriority - rightPriority || left.partIndex - right.partIndex;
+  });
+  const parts = next.parts.map((part) => ({ ...part }));
+  const assignments: CanvasMediaUsageAssignments = {};
+  const counts = new Map<string, number>();
+  for (const entry of orderedEntries) {
+    const previousEntry = previousByKey.get(entry.key);
+    const candidates = prioritizeMediaUsageOptions(
+      options.filter((option) => option.acceptedKinds.includes(entry.kind)),
+    );
+    const requestedUsage =
+      entry.usage && entry.usage !== previousEntry?.usage ? entry.usage : "";
+    const option = firstAvailableMediaUsage(
+      candidates,
+      counts,
+      requestedUsage,
+      previousEntry?.usage || entry.usage,
+    );
+    const usage = option?.key || "";
+    if (usage) {
+      incrementMediaUsage(counts, usage);
+    }
+    const part = parts[entry.partIndex];
+    if (part?.type === "reference") {
+      part.usage = usage || undefined;
+    }
+    if (
+      entry.connection &&
+      usage !== String(entry.connection.edge.mediaUsage || "")
+    ) {
+      assignments[entry.connection.edge.id] = usage || undefined;
+    }
   }
-  if (targetOption.maxFiles !== 1) {
-    return {};
-  }
-
-  const occupied = remaining.find(
-    (connection) => connection.edge.mediaUsage === usage,
-  );
-  if (!occupied) {
-    return {};
-  }
-  const assignments: CanvasMediaUsageAssignments = {
-    [edgeId]: usage,
-    [occupied.edge.id]: undefined,
-  };
-  const previousUsage = String(current.edge.mediaUsage || "");
-  const previousOption = mediaUsageCandidates(options, occupied.source).find(
-    (option) => option.key === previousUsage,
-  );
-  if (!previousOption) {
-    return assignments;
-  }
-  const swapCounts = mediaUsageCounts(
-    connections.filter(
-      (connection) =>
-        connection.edge.id !== edgeId &&
-        connection.edge.id !== occupied.edge.id,
-    ),
-    options,
-  );
-  if (canAssignMediaUsage(previousOption, swapCounts)) {
-    assignments[occupied.edge.id] = previousUsage;
-  }
-  return assignments;
+  return { content: { ...next, parts }, assignments };
 }
 
 function mediaUsageCounts(
   connections: CanvasConnectedMediaReference[],
   options: MediaUsageOption[],
+  content?: CanvasReferenceContent,
 ) {
   const counts = new Map<string, number>();
   for (const connection of connections) {
@@ -403,6 +423,19 @@ function mediaUsageCounts(
     const option = mediaUsageCandidates(options, connection.source).find(
       (candidate) => candidate.key === usage,
     );
+    if (option) {
+      incrementMediaUsage(counts, option.key);
+    }
+  }
+  for (const part of content?.parts || []) {
+    if (
+      part.type !== "reference" ||
+      part.ref_origin === "edge" ||
+      !part.usage
+    ) {
+      continue;
+    }
+    const option = options.find((candidate) => candidate.key === part.usage);
     if (option) {
       incrementMediaUsage(counts, option.key);
     }
@@ -421,78 +454,115 @@ function assignedMediaUsage(
   );
 }
 
-type IndexedReferencePart = {
+type IndexedMediaReferencePart = {
   key: string;
   partIndex: number;
-  refID: number;
+  kind: CanvasMediaKind;
   usage: string;
+  connection?: CanvasConnectedMediaReference;
 };
 
-function indexedReferenceParts(
-  content: CanvasReferenceContent,
-): IndexedReferencePart[] {
+function indexedMediaReferenceParts(
+  content: CanvasReferenceContent | undefined,
+  items: ComposerAssetItem[],
+  connections: CanvasConnectedMediaReference[],
+): IndexedMediaReferencePart[] {
+  if (!content) {
+    return [];
+  }
+  const connectionByEdgeID = new Map(
+    connections.map((connection) => [connection.edge.id, connection]),
+  );
   const occurrences = new Map<string, number>();
   return content.parts.flatMap((part, partIndex) => {
-    if (
-      part.type !== "reference" ||
-      part.ref_type !== "asset" ||
-      part.ref_origin === "edge"
-    ) {
+    if (part.type !== "reference" || part.ref_type !== "asset") {
       return [];
     }
-    const identity = `${part.ref_type}:${part.ref_id}:${part.ref_version_id || 0}`;
+    const connection = part.ref_origin_id
+      ? connectionByEdgeID.get(part.ref_origin_id)
+      : undefined;
+    const item = items.find(
+      (candidate) =>
+        Number(candidate.refId || 0) === Number(part.ref_id || 0) &&
+        (!part.ref_version_id ||
+          Number(candidate.versionID || 0) === Number(part.ref_version_id)),
+    );
+    const kind = connection
+      ? canvasMediaReferenceKind(connection.source)
+      : normalizeCanvasMediaKind(item?.kind);
+    if (!kind) {
+      return [];
+    }
+    const identity = connection
+      ? `edge:${connection.edge.id}`
+      : `asset:${part.ref_id}:${part.ref_version_id || 0}`;
     const occurrence = occurrences.get(identity) || 0;
     occurrences.set(identity, occurrence + 1);
     return [
       {
-        key: `${identity}:${occurrence}`,
+        key: connection ? identity : `${identity}:${occurrence}`,
         partIndex,
-        refID: Number(part.ref_id || 0),
+        kind,
         usage: String(part.usage || ""),
+        connection,
       },
     ];
   });
 }
 
-function referenceEntrySupportsOption(
-  entry: IndexedReferencePart,
-  option: MediaUsageOption,
-  items: ComposerAssetItem[],
-  currentOption?: MediaUsageOption,
+function mediaReferenceAllocationPriority(
+  entry: IndexedMediaReferencePart,
+  previous?: IndexedMediaReferencePart,
 ) {
-  const item = items.find(
-    (current) => Number(current.refId || 0) === entry.refID,
-  );
-  const kind = normalizeCanvasMediaKind(item?.kind);
-  if (kind) {
-    return option.acceptedKinds.includes(kind);
+  if (entry.usage && entry.usage !== previous?.usage) {
+    return 0;
   }
-  return Boolean(
-    currentOption?.acceptedKinds.some((acceptedKind) =>
-      option.acceptedKinds.includes(acceptedKind),
-    ),
+  return previous ? 1 : 2;
+}
+
+function firstAvailableMediaUsage(
+  candidates: MediaUsageOption[],
+  counts: Map<string, number>,
+  ...preferredUsages: string[]
+) {
+  return firstAvailableMediaUsageForAmount(
+    candidates,
+    counts,
+    1,
+    ...preferredUsages,
   );
 }
 
-function referenceUsageHasCapacity(
-  entries: IndexedReferencePart[],
-  option: MediaUsageOption,
-  ignoredKeys: Set<string>,
+function firstAvailableMediaUsageForAmount(
+  candidates: MediaUsageOption[],
+  counts: Map<string, number>,
+  amount: number,
+  ...preferredUsages: string[]
 ) {
-  if (option.maxFiles <= 0) {
-    return true;
+  for (const usage of preferredUsages) {
+    const option = candidates.find((candidate) => candidate.key === usage);
+    if (option && canAssignMediaUsage(option, counts, amount)) {
+      return option;
+    }
   }
-  const count = entries.filter(
-    (entry) => !ignoredKeys.has(entry.key) && entry.usage === option.key,
-  ).length;
-  return count < option.maxFiles;
+  return candidates.find((option) =>
+    canAssignMediaUsage(option, counts, amount),
+  );
+}
+
+function mediaUsageCapacity(option: MediaUsageOption) {
+  return isFrameMediaUsageOption(option) ? 1 : option.maxFiles;
 }
 
 function canAssignMediaUsage(
   option: MediaUsageOption,
   counts: Map<string, number>,
+  amount = 1,
 ) {
-  return option.maxFiles <= 0 || (counts.get(option.key) || 0) < option.maxFiles;
+  const capacity = mediaUsageCapacity(option);
+  return (
+    capacity <= 0 || (counts.get(option.key) || 0) + amount <= capacity
+  );
 }
 
 function incrementMediaUsage(counts: Map<string, number>, usage: string) {

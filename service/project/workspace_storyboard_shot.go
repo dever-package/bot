@@ -88,6 +88,8 @@ func prepareCanvasStoryboardShotInput(
 		Label:         "上一镜头尾帧",
 		Kind:          botprotocol.MediaTypeImage,
 		URL:           tailFrame.URL,
+		Usage:         canvasMediaUsageFirstFrame,
+		StrictUsage:   true,
 		Required:      true,
 	}}, mediaReferences...)
 	return input, params, mediaReferences, nil

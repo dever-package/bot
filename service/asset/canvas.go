@@ -2,6 +2,7 @@ package asset
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	assetmodel "github.com/dever-package/bot/model/asset"
@@ -12,6 +13,8 @@ type CanvasMaterialSlot struct {
 	NodeKey string
 	Name    string
 }
+
+const canvasReferenceVersionFields = "main.id,main.asset_id,main.run_id,main.node_run_id,main.release_id,main.request_id,main.node_key,main.version,main.content,main.created_at,main.updated_at"
 
 // CanvasReferences returns only current assets needed to hydrate one canvas.
 // Explicit references may point across categories and projects in the same
@@ -57,12 +60,27 @@ func (s Service) CanvasReferences(ctx context.Context, projectID uint64, assetCa
 	for _, row := range rowsByID {
 		rows = append(rows, row)
 	}
-	versions := currentVersionsByID(ctx, rows, QueryContentFull)
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].ID < rows[j].ID
+	})
+	versions := currentVersionsByIDWithFields(ctx, rows, canvasReferenceVersionFields)
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, assetListMap(*row, versions[row.VersionID], QueryContentFull))
+		items = append(items, canvasReferenceMap(*row, versions[row.VersionID]))
 	}
 	return items
+}
+
+func canvasReferenceMap(asset assetmodel.Asset, version *assetmodel.Version) map[string]any {
+	item := AssetToMap(asset)
+	if version == nil {
+		return item
+	}
+	versionPayload := versionMetadataToMap(*version)
+	delete(versionPayload, "source")
+	versionPayload["content"] = jsonValue(version.Content)
+	item["version"] = versionPayload
+	return item
 }
 
 func resolveCanvasAssetScope(ctx context.Context, projectID uint64) (teamAssetScope, bool) {

@@ -289,7 +289,7 @@ func (s Service) CanvasConfig(ctx context.Context, projectID uint64, flowID uint
 	if err != nil {
 		return nil, err
 	}
-	project, err = s.SyncTeamRelease(ctx, project)
+	project, err = s.currentTeamRelease(ctx, project)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +301,7 @@ func (s Service) CanvasPowerForm(ctx context.Context, projectID uint64, flowID u
 	if err != nil {
 		return nil, err
 	}
-	project, err = s.SyncTeamRelease(ctx, project)
+	project, err = s.currentTeamRelease(ctx, project)
 	if err != nil {
 		return nil, err
 	}
@@ -309,6 +309,19 @@ func (s Service) CanvasPowerForm(ctx context.Context, projectID uint64, flowID u
 }
 
 func (s Service) SyncTeamRelease(ctx context.Context, project *projectmodel.Project) (*projectmodel.Project, error) {
+	next, err := s.currentTeamRelease(ctx, project)
+	if err != nil || next == nil || project == nil || next.ReleaseID == project.ReleaseID {
+		return next, err
+	}
+	next.UpdatedAt = time.Now()
+	projectmodel.NewProjectModel().Update(ctx, map[string]any{"id": project.ID}, map[string]any{
+		"release_id": next.ReleaseID,
+		"updated_at": next.UpdatedAt,
+	})
+	return next, nil
+}
+
+func (s Service) currentTeamRelease(ctx context.Context, project *projectmodel.Project) (*projectmodel.Project, error) {
 	if project == nil || project.TeamID == 0 {
 		return project, nil
 	}
@@ -326,13 +339,8 @@ func (s Service) SyncTeamRelease(ctx context.Context, project *projectmodel.Proj
 	if project.ReleaseID == release.ID {
 		return project, nil
 	}
-	projectmodel.NewProjectModel().Update(ctx, map[string]any{"id": project.ID}, map[string]any{
-		"release_id": release.ID,
-		"updated_at": time.Now(),
-	})
 	next := *project
 	next.ReleaseID = release.ID
-	next.UpdatedAt = time.Now()
 	return &next, nil
 }
 

@@ -4,9 +4,11 @@ import type {
   PowerCategoryOption,
   PowerKindOption,
   PowerOption,
+  TeamRole,
 } from "./types";
 
 export type PowerCatalog = {
+  roles: TeamRole[];
   powers: PowerOption[];
   powerCategories: PowerCategoryOption[];
   powerKinds: PowerKindOption[];
@@ -40,14 +42,6 @@ export class SpaceCatalogCache {
     this.scopeKey = nextScope;
     this.catalogs.clear();
     this.powerForms.clear();
-  }
-
-  primeCatalog(projectId: number, releaseId: number, value: PowerCatalog) {
-    this.setScope(projectId, releaseId);
-    this.catalogs.set(this.scopeKey, {
-      value,
-      loadedAt: Date.now(),
-    });
   }
 
   loadCatalog(
