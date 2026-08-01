@@ -138,7 +138,7 @@ func expandCanvasGroupEdges(
 		if edge.From == "" || edge.To == "" || edge.From == edge.To {
 			return
 		}
-		key := edge.From + "\x00" + edge.To + "\x00" + edge.MediaUsage
+		key := edge.From + "\x00" + edge.To + "\x00" + edge.Purpose + "\x00" + edge.MediaUsage
 		if seen[key] {
 			return
 		}
@@ -163,6 +163,7 @@ func expandCanvasGroupEdges(
 					ID:         edge.ID,
 					From:       logicalSource.ID,
 					To:         edge.To,
+					Purpose:    edge.Purpose,
 					MediaUsage: edge.MediaUsage,
 				})
 				continue
@@ -172,6 +173,7 @@ func expandCanvasGroupEdges(
 					ID:         "group-output-" + member.ID + "-" + edge.To,
 					From:       member.ID,
 					To:         edge.To,
+					Purpose:    edge.Purpose,
 					MediaUsage: edge.MediaUsage,
 				})
 			}
@@ -182,9 +184,10 @@ func expandCanvasGroupEdges(
 	for groupID, groupMembers := range members {
 		for _, member := range groupMembers {
 			appendEdge(canvasRunEdge{
-				ID:   "group-input-" + groupID + "-" + member.ID,
-				From: groupID,
-				To:   member.ID,
+				ID:      "group-input-" + groupID + "-" + member.ID,
+				From:    groupID,
+				To:      member.ID,
+				Purpose: canvasEdgePurposeDependency,
 			})
 		}
 	}
@@ -195,9 +198,10 @@ func canvasRunEdgesPayload(edges []canvasRunEdge) []any {
 	result := make([]any, 0, len(edges))
 	for _, edge := range edges {
 		row := map[string]any{
-			"id":   edge.ID,
-			"from": edge.From,
-			"to":   edge.To,
+			"id":      edge.ID,
+			"from":    edge.From,
+			"to":      edge.To,
+			"purpose": edge.Purpose,
 		}
 		if edge.MediaUsage != "" {
 			row["media_usage"] = edge.MediaUsage

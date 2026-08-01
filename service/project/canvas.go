@@ -37,7 +37,19 @@ var allowedCanvasNodeFields = stringSet(
 )
 
 var allowedCanvasEdgeFields = stringSet(
-	"id", "from", "to", "logical_from", "logical_to", "execution_mode", "media_usage",
+	"id", "from", "to", "logical_from", "logical_to", "purpose", "execution_mode", "media_usage",
+)
+
+const (
+	canvasEdgePurposeMedia      = "media"
+	canvasEdgePurposeStructure  = "structure"
+	canvasEdgePurposeDependency = "dependency"
+)
+
+var allowedCanvasEdgePurposes = stringSet(
+	canvasEdgePurposeMedia,
+	canvasEdgePurposeStructure,
+	canvasEdgePurposeDependency,
 )
 
 var allowedCanvasViewportFields = stringSet("x", "y", "zoom")
@@ -188,9 +200,30 @@ func sanitizeCanvasEdges(value any) ([]any, error) {
 		if err := validateCanvasFields(row, allowedCanvasEdgeFields, "画布连线"); err != nil {
 			return nil, err
 		}
-		result = append(result, cloneCanvasObject(row))
+		purpose := canvasEdgePurposeValue(row)
+		if !allowedCanvasEdgePurposes[purpose] {
+			return nil, fmt.Errorf("画布连线用途无效")
+		}
+		clean := cloneCanvasObject(row)
+		clean["purpose"] = purpose
+		result = append(result, clean)
 	}
 	return result, nil
+}
+
+func canvasEdgePurposeValue(edge map[string]any) string {
+	if purpose := strings.ToLower(strings.TrimSpace(textValue(edge["purpose"]))); purpose != "" {
+		return purpose
+	}
+	id := strings.TrimSpace(textValue(edge["id"]))
+	switch {
+	case strings.HasPrefix(id, "script-item-edge-"), strings.HasPrefix(id, "script-compose-edge-"):
+		return canvasEdgePurposeDependency
+	case strings.HasPrefix(id, "script-edge-"):
+		return canvasEdgePurposeStructure
+	default:
+		return canvasEdgePurposeMedia
+	}
 }
 
 func validateCanvasNode(row map[string]any) error {

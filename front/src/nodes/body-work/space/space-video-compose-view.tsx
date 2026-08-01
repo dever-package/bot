@@ -30,8 +30,10 @@ import {
   type VideoComposeClipPanel,
 } from "./space-video-compose-card";
 import { VideoComposeAssetPicker } from "./space-video-compose-picker";
-import { CanvasNodeContentView, hasCanvasContent } from "./space-content-view";
+import { CanvasNodeContentView } from "./space-content-view";
+import { hasCanvasContent } from "./space-content-output";
 import { SpaceTooltip } from "./space-tooltip";
+import { FirstFrameVideo } from "../../shared/first-frame-video";
 
 const VIDEO_COMPOSE_RESOLUTION_OPTIONS = [
   { value: "auto", label: "跟随首个镜头" },
@@ -700,7 +702,7 @@ function VideoComposePreview({
             className="ws-video-compose-final-output"
           />
         ) : videoUrl ? (
-          <video
+          <FirstFrameVideo
             key={videoUrl}
             src={videoUrl}
             controls

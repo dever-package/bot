@@ -10,6 +10,7 @@ import {
   type EnergonMediaKind,
   type EnergonMediaPreviewItem,
 } from "@/components/energon/content-view";
+import { FirstFrameVideo } from "./first-frame-video";
 
 export function MediaInspectorGallery({
   kind,
@@ -83,7 +84,7 @@ function MediaStage({
       ) : null}
       {kind === "video" ? (
         item.url ? (
-          <video
+          <FirstFrameVideo
             key={item.url}
             src={item.url}
             poster={item.thumbnail}

@@ -65,6 +65,7 @@ type canvasRunEdge struct {
 	To          string
 	LogicalFrom string
 	LogicalTo   string
+	Purpose     string
 	MediaUsage  string
 }
 
@@ -618,7 +619,6 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 			params["videos"] = canvasVideoCompositionURLs(composition)
 		}
 	}
-	appendCanvasMediaReferenceIndex(input, "prompt", mediaReferences)
 	if canvasContextText(input["prompt"]) != "" && canvasContextText(params["prompt"]) == "" {
 		delete(params, "prompt")
 	}
@@ -656,7 +656,12 @@ func (s WorkspaceService) runCanvasAgentNode(ctx context.Context, projectID uint
 	if node.RoleID > 0 {
 		input["role_id"] = node.RoleID
 	}
-	appendCanvasMediaReferenceIndex(input, "text", mediaReferences)
+	if len(mediaReferences) > 0 {
+		input["text"] = energoninput.AppendMediaReferenceIndex(
+			canvasContextText(input["text"]),
+			mediaReferences,
+		)
+	}
 	assetCateID := firstUint64(node.AssetCateID, req.AssetCateID)
 	history := workspaceAgentHistory(ctx, projectID, assetCateID, node.ID, node.AgentID)
 	result, err := s.project.RunCanvasAgent(ctx, projectID, CanvasAgentRunRequest{
@@ -949,6 +954,7 @@ func parseCanvasRunGraph(canvas map[string]any) ([]canvasRunNode, []canvasRunEdg
 			To:          textValue(firstPresent(row["to"], row["target"])),
 			LogicalFrom: textValue(firstPresent(row["logical_from"], row["logicalFrom"])),
 			LogicalTo:   textValue(firstPresent(row["logical_to"], row["logicalTo"])),
+			Purpose:     canvasEdgePurposeValue(row),
 			MediaUsage:  textValue(firstPresent(row["media_usage"], row["mediaUsage"])),
 		}
 		if edge.From != "" && edge.To != "" {
@@ -1199,6 +1205,9 @@ func canvasConnectedAssetReferences(
 		sourceNode := canvasNodeByID(sourceNodeID, canvas)
 		if textValue(sourceNode["type"]) == "group" {
 			for _, upstreamEdge := range upstreamCanvasEdges(sourceNodeID, canvas) {
+				if !canvasRunEdgeCarriesMedia(upstreamEdge) {
+					continue
+				}
 				nestedUsage := usage
 				if nestedUsage == "" {
 					nestedUsage = upstreamEdge.MediaUsage
@@ -1221,6 +1230,9 @@ func canvasConnectedAssetReferences(
 		result = append(result, reference)
 	}
 	for _, upstreamEdge := range logicalUpstreamCanvasEdges(nodeID, canvas) {
+		if !canvasRunEdgeCarriesMedia(upstreamEdge) {
+			continue
+		}
 		if referencesConfigured && len(allowedSourceNodeIDs) > 0 && !allowedSourceNodeIDs[upstreamEdge.From] {
 			continue
 		}
@@ -1273,79 +1285,6 @@ func mergeCanvasMediaReferences(groups ...[]energoninput.MediaReference) []energ
 		}
 	}
 	return result
-}
-
-const canvasMediaReferenceIndexTitle = "参考素材索引（顺序与本次媒体输入一致）："
-
-func appendCanvasMediaReferenceIndex(input map[string]any, promptKey string, references []energoninput.MediaReference) {
-	if len(references) == 0 {
-		return
-	}
-
-	counts := map[string]int{}
-	lines := make([]string, 0, len(references))
-	for _, reference := range references {
-		kindLabel := canvasMediaReferenceKindLabel(reference.Kind)
-		if kindLabel == "" {
-			continue
-		}
-		counts[kindLabel]++
-		label := strings.TrimSpace(strings.TrimLeft(reference.Label, "@#"))
-		if label == "" {
-			label = "素材"
-		}
-		label = strings.Join(strings.Fields(label), " ")
-		line := fmt.Sprintf("- 参考%s%d：@%s", kindLabel, counts[kindLabel], label)
-		if usage := canvasMediaReferenceUsageLabel(reference.Usage); usage != "" {
-			line += fmt.Sprintf("（用途：%s）", usage)
-		}
-		lines = append(lines, line)
-	}
-	if len(lines) == 0 {
-		return
-	}
-
-	prompt := strings.TrimSpace(canvasContextText(input[promptKey]))
-	if index := strings.Index(prompt, canvasMediaReferenceIndexTitle); index >= 0 {
-		prompt = strings.TrimSpace(prompt[:index])
-	}
-	indexText := canvasMediaReferenceIndexTitle + "\n" + strings.Join(lines, "\n")
-	if prompt == "" {
-		input[promptKey] = indexText
-		return
-	}
-	input[promptKey] = prompt + "\n\n" + indexText
-}
-
-func canvasMediaReferenceKindLabel(kind string) string {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case botprotocol.MediaTypeImage, "images":
-		return "图"
-	case botprotocol.MediaTypeVideo, "videos":
-		return "视频"
-	case botprotocol.MediaTypeAudio, "audios", "music":
-		return "音频"
-	case botprotocol.MediaTypeFile, "files":
-		return "文件"
-	default:
-		return ""
-	}
-}
-
-func canvasMediaReferenceUsageLabel(usage string) string {
-	normalized := strings.NewReplacer("-", "_", " ", "_").Replace(
-		strings.ToLower(strings.TrimSpace(usage)),
-	)
-	switch normalized {
-	case "first_frame", "firstframe", "start_frame", "startframe":
-		return "首帧"
-	case "last_frame", "lastframe", "end_frame", "endframe":
-		return "尾帧"
-	case "reference", "reference_image", "reference_images", "referenceimage", "referenceimages":
-		return "参考图"
-	default:
-		return strings.TrimSpace(usage)
-	}
 }
 
 func canvasNodeReferenceSelection(nodeID string, canvas map[string]any) (map[string]bool, bool) {
@@ -1442,6 +1381,7 @@ func canvasPromptReferenceOutput(
 	if len(structured) == 0 {
 		return nil, nil, nil
 	}
+	requireMediaBinding := canvasPowerRequiresMediaBinding(node)
 	sources := make([]any, 0, len(structured))
 	mediaReferences := make([]energoninput.MediaReference, 0, len(structured))
 	for _, reference := range structured {
@@ -1450,11 +1390,14 @@ func canvasPromptReferenceOutput(
 			if err != nil {
 				return nil, nil, err
 			}
-			required := reference.Required || canvasExternalReferenceRequired(node, reference.AssetID)
+			kind := textValue(asset["kind"])
+			required := reference.Required ||
+				canvasExternalReferenceRequired(node, reference.AssetID) ||
+				(requireMediaBinding && isCanvasMediaKind(kind))
 			resolvedMediaReferences := energoninput.MediaReferencesFromContent(
 				"asset",
 				reference.AssetID,
-				textValue(asset["kind"]),
+				kind,
 				output,
 				reference.Usage,
 			)
@@ -1490,6 +1433,21 @@ func canvasPromptReferenceOutput(
 		"type":    "reference_output",
 		"sources": sources,
 	}, mediaReferences, nil
+}
+
+func canvasPowerRequiresMediaBinding(node map[string]any) bool {
+	if textValue(node["type"]) != "power" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(firstText(
+		valueAtPath(node, "power", "kind"),
+		node["kind"],
+	))) {
+	case botprotocol.MediaTypeImage, botprotocol.MediaTypeVideo:
+		return true
+	default:
+		return false
+	}
 }
 
 func canvasStoryboardSourceReferences(node map[string]any, results []canvasNodeResult, canvas map[string]any) ([]canvasPromptReference, error) {
@@ -1758,11 +1716,16 @@ func collectUpstreamCanvasEdges(nodeID string, canvas map[string]any, useLogical
 				ID:         textValue(row["id"]),
 				From:       from,
 				To:         to,
+				Purpose:    canvasEdgePurposeValue(row),
 				MediaUsage: textValue(firstPresent(row["media_usage"], row["mediaUsage"])),
 			})
 		}
 	}
 	return result
+}
+
+func canvasRunEdgeCarriesMedia(edge canvasRunEdge) bool {
+	return edge.Purpose == canvasEdgePurposeMedia
 }
 
 func canvasEdgeRuns(edge map[string]any) bool {

@@ -6,7 +6,7 @@ import type {
   CanvasStoryboardReference,
 } from "./types";
 
-export const STORYBOARD_VERSION = 8;
+export const STORYBOARD_VERSION = 9;
 export const MIN_STORYBOARD_SHOT_DURATION = 4;
 export const MAX_STORYBOARD_SHOTS = 50;
 
@@ -174,6 +174,11 @@ export type StoryboardReferenceField =
   | "camera_instruction"
   | "video_prompt";
 
+export type StoryboardContinuityState = {
+  entry: string;
+  exit: string;
+};
+
 export type StoryboardShot = Record<string, unknown> & {
   id: string;
   order: number;
@@ -190,12 +195,20 @@ export type StoryboardShot = Record<string, unknown> & {
   match_previous: boolean;
   continue_previous: boolean;
   continuity_anchor: string;
+  continuity_state: StoryboardContinuityState;
   speech: StoryboardSpeech[];
   captions: StoryboardCaption[];
   reference_contents?: Partial<
     Record<StoryboardReferenceField, CanvasReferenceContent>
   >;
 };
+
+export function storyboardShotLinksPreviousState(
+  shot: Pick<StoryboardShot, "match_previous" | "continue_previous">,
+  index: number,
+) {
+  return index > 0 && (shot.match_previous || shot.continue_previous);
+}
 
 export type StoryboardDocument = Record<string, unknown> & {
   type: "storyboard";
@@ -282,6 +295,7 @@ export function createStoryboardShot(index: number): StoryboardShot {
     match_previous: false,
     continue_previous: false,
     continuity_anchor: "",
+    continuity_state: { entry: "", exit: "" },
     speech: [],
     captions: [],
   };
@@ -379,6 +393,55 @@ export function normalizeStoryboardOrder(
   const materialIDs = new Set(
     storyboard.materials.map((material) => material.id),
   );
+  const shots = storyboard.shots.map((shot, index) => {
+    const transitionType =
+      index > 0
+        ? normalizeStoryboardTransitionType(shot.transition_type)
+        : "none";
+    const transitionDurationMS = Math.round(
+      Number(shot.transition_duration_ms),
+    );
+    return {
+      ...shot,
+      id: shot.id || `shot-${index + 1}`,
+      order: index + 1,
+      transition: index > 0 ? shot.transition.trim() : "",
+      transition_type: transitionType,
+      transition_duration_ms:
+        transitionType !== "none"
+          ? Math.min(
+              5000,
+              Math.max(
+                100,
+                Number.isFinite(transitionDurationMS)
+                  ? transitionDurationMS
+                  : 100,
+              ),
+            )
+          : 0,
+      material_ids: uniqueStrings(shot.material_ids).filter((id) =>
+        materialIDs.has(id),
+      ),
+      reference_keys: uniqueStrings(shot.reference_keys).filter((key) =>
+        referenceKeys.has(key),
+      ),
+      match_previous:
+        index > 0 && !shot.continue_previous && Boolean(shot.match_previous),
+      continue_previous: index > 0 && Boolean(shot.continue_previous),
+      continuity_anchor:
+        index > 0 && shot.continue_previous
+          ? shot.continuity_anchor.trim()
+          : "",
+      continuity_state: normalizeStoryboardContinuityState(
+        shot.continuity_state,
+      ),
+    };
+  });
+  shots.forEach((shot, index) => {
+    if (storyboardShotLinksPreviousState(shot, index)) {
+      shot.continuity_state.entry = shots[index - 1].continuity_state.exit;
+    }
+  });
   return {
     ...storyboard,
     version: STORYBOARD_VERSION,
@@ -404,33 +467,17 @@ export function normalizeStoryboardOrder(
         referenceKeys.has(key),
       ),
     })),
-    shots: storyboard.shots.map((shot, index) => ({
-      ...shot,
-      id: shot.id || `shot-${index + 1}`,
-      order: index + 1,
-      transition: index > 0 ? shot.transition.trim() : "",
-      transition_type:
-        index > 0
-          ? normalizeStoryboardTransitionType(shot.transition_type)
-          : "none",
-      transition_duration_ms:
-        index > 0 && shot.transition_type !== "none"
-          ? Math.min(5000, Math.max(100, Math.round(shot.transition_duration_ms)))
-          : 0,
-      material_ids: uniqueStrings(shot.material_ids).filter((id) =>
-        materialIDs.has(id),
-      ),
-      reference_keys: uniqueStrings(shot.reference_keys).filter((key) =>
-        referenceKeys.has(key),
-      ),
-      match_previous:
-        index > 0 && !shot.continue_previous && Boolean(shot.match_previous),
-      continue_previous: index > 0 && Boolean(shot.continue_previous),
-      continuity_anchor:
-        index > 0 && shot.continue_previous
-          ? shot.continuity_anchor.trim()
-          : "",
-    })),
+    shots,
+  };
+}
+
+function normalizeStoryboardContinuityState(
+  value: unknown,
+): StoryboardContinuityState {
+  const state = isRecord(value) ? value : {};
+  return {
+    entry: stringValue(state.entry).trim(),
+    exit: stringValue(state.exit).trim(),
   };
 }
 
@@ -739,6 +786,12 @@ export function storyboardShotFallbackPrompt(shot: StoryboardShot) {
     .join("；");
   const parts = [
     shot.description,
+    shot.continuity_state.entry
+      ? `入镜状态：${shot.continuity_state.entry}`
+      : "",
+    shot.continuity_state.exit
+      ? `出镜状态：${shot.continuity_state.exit}`
+      : "",
     shot.camera_instruction ? `镜头语言：${shot.camera_instruction}` : "",
     shot.continue_previous && shot.continuity_anchor
       ? `连续性锚点：${shot.continuity_anchor}`
@@ -856,8 +909,15 @@ function decodeStoryboard(
     return null;
   }
   const normalizedShots = shots as StoryboardShot[];
-  for (const shot of normalizedShots) {
+  for (const [index, shot] of normalizedShots.entries()) {
     if (usedShotIDs.has(shot.id)) {
+      return null;
+    }
+    if (
+      storyboardShotLinksPreviousState(shot, index) &&
+      shot.continuity_state.entry !==
+        normalizedShots[index - 1].continuity_state.exit
+    ) {
       return null;
     }
     usedShotIDs.add(shot.id);
@@ -986,6 +1046,7 @@ function decodeStoryboardShot(
     typeof value.video_prompt !== "string" ||
     typeof value.continue_previous !== "boolean" ||
     typeof value.continuity_anchor !== "string" ||
+    !isRecord(value.continuity_state) ||
     !Array.isArray(value.material_ids) ||
     !Array.isArray(value.reference_keys) ||
     !Array.isArray(value.speech) ||
@@ -1033,6 +1094,12 @@ function decodeStoryboardShot(
   if (continuesPrevious && !continuityAnchor) {
     return null;
   }
+  const continuityState = normalizeStoryboardContinuityState(
+    value.continuity_state,
+  );
+  if (!continuityState.entry || !continuityState.exit) {
+    return null;
+  }
   const transitionType = normalizeStoryboardTransitionType(
     value.transition_type,
   );
@@ -1068,6 +1135,7 @@ function decodeStoryboardShot(
     match_previous: matchesPrevious,
     continue_previous: continuesPrevious,
     continuity_anchor: continuesPrevious ? continuityAnchor : "",
+    continuity_state: continuityState,
     speech: speech as StoryboardSpeech[],
     captions: captions as StoryboardCaption[],
   };

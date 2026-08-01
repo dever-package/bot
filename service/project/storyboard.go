@@ -347,6 +347,7 @@ func validateStoryboard(document map[string]any) error {
 	shotDescriptions := make([]string, 0, len(shots))
 	var previousMaterialIDs map[string]struct{}
 	previousVisibleDialogue := false
+	previousExitState := ""
 	continuityChainLength := 0
 	totalDuration := 0
 	for shotIndex, value := range shots {
@@ -434,6 +435,13 @@ func validateStoryboard(document map[string]any) error {
 		if matchPrevious && continuePrevious {
 			return fmt.Errorf("镜头 %d 不能同时匹配上一镜画面和延续上一镜视频", shotIndex+1)
 		}
+		entryState, exitState, err := normalizeStoredStoryboardContinuityState(shot, shotIndex)
+		if err != nil {
+			return err
+		}
+		if shotIndex > 0 && (matchPrevious || continuePrevious) && entryState != previousExitState {
+			return fmt.Errorf("镜头 %d 的入镜状态必须与上一镜头的出镜状态完全一致", shotIndex+1)
+		}
 		continuityAnchor, ok := shot["continuity_anchor"].(string)
 		if !ok {
 			return fmt.Errorf("镜头 %d 的连续性锚点格式无效", shotIndex+1)
@@ -470,6 +478,7 @@ func validateStoryboard(document map[string]any) error {
 		}
 		previousMaterialIDs = materialIDs
 		previousVisibleDialogue = visibleDialogue
+		previousExitState = exitState
 	}
 	if totalDuration != targetDuration {
 		return fmt.Errorf("分镜目标总时长与镜头时长之和不一致")
@@ -490,6 +499,23 @@ func validateStoryboard(document map[string]any) error {
 		return err
 	}
 	return nil
+}
+
+func normalizeStoredStoryboardContinuityState(shot map[string]any, shotIndex int) (string, string, error) {
+	state, ok := shot["continuity_state"].(map[string]any)
+	if !ok {
+		return "", "", fmt.Errorf("镜头 %d 的连续状态格式无效", shotIndex+1)
+	}
+	entry := storyboardText(state["entry"])
+	exit := storyboardText(state["exit"])
+	if entry == "" || exit == "" {
+		return "", "", fmt.Errorf("镜头 %d 必须填写入镜状态和出镜状态", shotIndex+1)
+	}
+	shot["continuity_state"] = map[string]any{
+		"entry": entry,
+		"exit":  exit,
+	}
+	return entry, exit, nil
 }
 
 func normalizeStoryboardProductionPlan(value any, defaultLipSync string) (map[string]any, error) {

@@ -15,7 +15,7 @@ const (
 )
 
 const (
-	StoryboardVersion             = 8
+	StoryboardVersion             = 9
 	StoryboardMinShotDuration     = 4
 	StoryboardMaxShots            = 50
 	StoryboardVisualModePhotoreal = "photoreal"

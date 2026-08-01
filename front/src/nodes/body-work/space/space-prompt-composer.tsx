@@ -63,6 +63,10 @@ export type ComposerAssetPreview = CanvasContentPreview;
 
 type ParamPreviewType = "none" | "image" | "audio" | "video";
 
+function sourceServiceLabel(source?: PowerParamSource): string {
+  return source?.service_name?.trim() || source?.name?.trim() || "来源";
+}
+
 type ParamOptionDialogProps = {
   open: boolean;
   title: string;
@@ -381,9 +385,7 @@ export function PromptComposer({
             <ComposerMenu
               id="source"
               openKey={openKey}
-              label={
-                selectedSource?.name || selectedSource?.service_name || "来源"
-              }
+              label={sourceServiceLabel(selectedSource)}
               icon={<FileText size={15} />}
               disabled={disabled || running}
               onToggle={setOpenKey}
@@ -403,7 +405,7 @@ export function PromptComposer({
                         setOpenKey("");
                       }}
                     >
-                      <span>{source.name || source.service_name}</span>
+                      <span>{sourceServiceLabel(source)}</span>
                       {active ? <CheckCircle2 size={14} /> : null}
                     </button>
                   );

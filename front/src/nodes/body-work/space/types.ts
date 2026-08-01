@@ -407,6 +407,7 @@ export type SpaceCanvasEdge = {
   to: string;
   logicalFrom?: string;
   logicalTo?: string;
+  purpose?: "media" | "structure" | "dependency";
   executionMode?: "auto" | "manual";
   mediaUsage?: string;
 };

@@ -4,6 +4,7 @@ import type { ComposerAssetItem } from "./space-prompt-composer";
 import type { VideoComposeClip } from "./space-video-compose";
 import { SequenceCard } from "./space-sequence-card";
 import { SpaceTooltip } from "./space-tooltip";
+import { FirstFrameVideo } from "../../shared/first-frame-video";
 
 export type VideoComposeClipPanel = "sound" | "transition";
 
@@ -88,7 +89,7 @@ export function VideoComposeClipCard({
     >
       <div className="ws-video-compose-card-preview">
         {item?.preview.videoUrl ? (
-          <video
+          <FirstFrameVideo
             src={item.preview.videoUrl}
             muted
             playsInline

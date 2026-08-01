@@ -68,13 +68,10 @@ import {
   uniqueAttachmentName,
 } from "./knowledge-file-manager/attachment"
 import { KnowledgeFileViewer } from "./knowledge-file-manager/file-viewer"
-import {
-  preloadMarkdownLiveEditorRuntime,
-  type UploadedAttachment,
-} from "./knowledge-file-manager/markdown-live-editor"
 import { KnowledgeIndexMap } from "./knowledge-file-manager/index-map"
 import "./knowledge-file-manager/styles.css"
 import type {
+  KnowledgeUploadedAttachment,
   KnowledgeFileContent,
   KnowledgeFileIndexDetail,
   KnowledgeFileItem,
@@ -250,10 +247,6 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
     }
     setCurrentFile({ ...currentFile, index_status: node.index_status })
   }, [currentFile, tree])
-
-  useEffect(() => {
-    void preloadMarkdownLiveEditorRuntime()
-  }, [])
 
   useEffect(() => {
     setExpanded(loadExpandedFolderIDs(knowledgeBaseID))
@@ -814,13 +807,13 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
   const hasOpenedFile = Boolean(draft && currentFile)
   const fileViewerActive = hasOpenedFile && !openingFile
   const uploadEditorAttachments = useCallback(
-    async (files: File[]): Promise<UploadedAttachment[]> => {
+    async (files: File[]): Promise<KnowledgeUploadedAttachment[]> => {
       if (!knowledgeBaseID || !currentFile) {
         throw new Error("请先打开一个文档")
       }
       const parent = currentFileDirectoryID(currentFile.id)
       const reservedNames = new Set<string>()
-      const uploaded: UploadedAttachment[] = []
+      const uploaded: KnowledgeUploadedAttachment[] = []
       let latest: KnowledgeFileManagerData | null = null
       for (const file of files) {
         const name = uniqueAttachmentName(flatTree, parent, file.name, reservedNames)

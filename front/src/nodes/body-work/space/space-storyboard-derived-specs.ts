@@ -450,9 +450,10 @@ function storyboardShotVideoSources(
   const externalReferences = storyboardShotVideoReferences(storyboard, shot);
   const previousShot = index > 0 ? storyboard.shots[index - 1] : undefined;
   if (shot.continue_previous && previousShot) {
+    const previousItem = { type: "shot" as const, id: previousShot.id };
     return {
-      dependencyItems: [{ type: "shot" as const, id: previousShot.id }],
-      referenceItems: [],
+      dependencyItems: [previousItem],
+      referenceItems: [previousItem],
       externalReferences,
     };
   }
@@ -495,6 +496,8 @@ function storyboardShotImagePrompt(
       ? "当前镜头明确要求匹配上一镜画面；前序镜头只用于保持共同主体状态、光线与空间关系，当前素材清单中不存在的对象不得继续保留"
       : "",
     storyboardNarrativeExecutionContext(storyboard, shot),
+    `入镜关键帧状态：${shot.continuity_state.entry.trim()}`,
+    "当前图片只表现镜头开始时的入镜状态，不提前表现本镜头动作完成后的出镜状态",
     "严格保持参考角色的五官、发型、服装、配色和体型，保持场景结构、道具造型以及整部作品画风一致",
     "不同参考对象必须保持各自独立的轮廓、材质和尺度，不得把角色与道具融合、机械化、穿戴化或互换材质",
     "角色必须保留参考图中的发饰数量与位置以及完整服装，道具必须保持参考图中的原始尺寸比例",
@@ -518,6 +521,9 @@ function storyboardVideoPrompt(
     shot.video_prompt.trim() || storyboardShotFallbackPrompt(shot);
   const parts = [
     storyboardNarrativeExecutionContext(storyboard, shot),
+    `入镜状态：${shot.continuity_state.entry.trim()}`,
+    `出镜状态：${shot.continuity_state.exit.trim()}`,
+    "视频必须从入镜状态开始，只完成本镜头的主要动作，并准确停在出镜状态",
     basePrompt,
     storyboardReferenceInstructions(references),
     shot.continue_previous

@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { FileText } from "lucide-react";
+import { FirstFrameVideo } from "../../shared/first-frame-video";
 import {
   CanvasNodeContentView,
   contentOutputNeedsRenderer,
@@ -172,7 +173,7 @@ function PureResultPreview({
   if (preview.videoUrl) {
     return (
       <figure className="ws-result-view-media">
-        <video
+        <FirstFrameVideo
           key={preview.videoUrl}
           src={preview.videoUrl}
           muted

@@ -44,6 +44,7 @@ import {
   storyboardContentSummary,
   storyboardMaterialUsage,
   storyboardSpeechCount,
+  storyboardShotLinksPreviousState,
   storyboardSubtitleCount,
   storyboardTotalDuration,
   storyboardVisibleSpeakerIds,
@@ -72,7 +73,7 @@ import {
   reconcileCanvasReferenceContent,
   type CanvasReferenceTarget,
 } from "./space-reference-content";
-import type { CanvasReferenceContent } from "./types";
+import type { CanvasReferenceContent, SpaceCanvasNode } from "./types";
 import {
   CanvasReferenceEditorWithAdapter,
   useCanvasReferenceAdapter,
@@ -84,6 +85,7 @@ import { StoryboardConfirmDialog } from "./space-storyboard-confirm-dialog";
 import { storyboardValidationIssues } from "./space-storyboard-validation";
 import { StoryboardValidationPanel } from "./space-storyboard-validation-panel";
 import { StoryboardReferencePanel } from "./space-storyboard-reference-panel";
+import { StoryboardBoard } from "./space-storyboard-board";
 import { SpaceTooltip } from "./space-tooltip";
 import "./space.css";
 
@@ -95,6 +97,7 @@ export type StoryboardWorkflowAction =
   | "reviewing";
 
 const EMPTY_REFERENCE_ITEMS: ComposerAssetItem[] = [];
+const EMPTY_CANVAS_NODES: SpaceCanvasNode[] = [];
 
 const STORYBOARD_STORYLINE_FIELDS: Array<{
   key: keyof StoryboardStoryline;
@@ -133,6 +136,8 @@ export function StoryboardView({
   showSaveStatus = true,
   showMetrics = true,
   referenceItems = EMPTY_REFERENCE_ITEMS,
+  storyboardSourceNodeId = "",
+  canvasNodes = EMPTY_CANVAS_NODES,
   focus,
 }: {
   storyboard: StoryboardDocument;
@@ -152,6 +157,8 @@ export function StoryboardView({
   showSaveStatus?: boolean;
   showMetrics?: boolean;
   referenceItems?: ComposerAssetItem[];
+  storyboardSourceNodeId?: string;
+  canvasNodes?: SpaceCanvasNode[];
   focus?: StoryboardEditorFocus;
 }) {
   const externalSignature = useMemo(
@@ -166,6 +173,7 @@ export function StoryboardView({
     useState<StoryboardMaterial | null>(null);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
+  const [activeView, setActiveView] = useState<"script" | "board">("script");
   const [draggedShotId, setDraggedShotId] = useState("");
   const [dragOverShotId, setDragOverShotId] = useState("");
   const [dragOrder, setDragOrder] = useState<string[]>([]);
@@ -199,6 +207,11 @@ export function StoryboardView({
   const canAutoSave = canEdit && !controlled && Boolean(onSave);
   const referenceAdapter = useCanvasReferenceAdapter(referenceItems);
   const editingShot = draft.shots.find((shot) => shot.id === editingShotId);
+  const editingShotIndex = draft.shots.findIndex(
+    (shot) => shot.id === editingShotId,
+  );
+  const editingPreviousShot =
+    editingShotIndex > 0 ? draft.shots[editingShotIndex - 1] : undefined;
   const editingMaterial = draft.materials.find(
     (material) => material.id === editingMaterialId,
   );
@@ -217,6 +230,7 @@ export function StoryboardView({
   const hasBlockingIssues = validationIssues.some(
     (issue) => issue.severity === "error",
   );
+  const canShowBoard = Boolean(storyboardSourceNodeId);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -840,6 +854,28 @@ export function StoryboardView({
         <main className="ws-storyboard-main">
           <header className="ws-storyboard-toolbar">
             <div className="ws-storyboard-toolbar-end">
+              {canShowBoard ? (
+                <div className="ws-storyboard-view-tabs" role="tablist">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeView === "script"}
+                    className={activeView === "script" ? "is-active" : ""}
+                    onClick={() => setActiveView("script")}
+                  >
+                    分镜脚本
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeView === "board"}
+                    className={activeView === "board" ? "is-active" : ""}
+                    onClick={() => setActiveView("board")}
+                  >
+                    故事板
+                  </button>
+                </div>
+              ) : null}
               {showMetrics || (canEdit && showSaveStatus) ? (
                 <div className="ws-storyboard-toolbar-meta">
                   {showMetrics ? (
@@ -927,7 +963,7 @@ export function StoryboardView({
             </div>
           </header>
 
-          {canEdit && validationIssues.length ? (
+          {activeView === "script" && canEdit && validationIssues.length ? (
             <StoryboardValidationPanel
               issues={validationIssues}
               onOpen={(issue) => {
@@ -946,39 +982,47 @@ export function StoryboardView({
             />
           ) : null}
 
-          <div className="ws-storyboard-grid nowheel">
-            {draft.shots.length ? (
-              visibleShots.map((shot, index) => (
-                <StoryboardShotCard
-                  key={shot.id}
-                  shot={shot}
-                  index={index}
-                  storyboard={draft}
-                  selected={editingShotId === shot.id}
-                  editable={canEdit}
-                  dragging={draggedShotId === shot.id}
-                  dropPlacement={
-                    dragOverShotId === shot.id && draggedShotId !== shot.id
-                      ? dragPlacement
-                      : undefined
-                  }
-                  onOpen={() => setEditingShotId(shot.id)}
-                  onDuplicate={() => duplicateShot(shot)}
-                  onRemove={() => removeShot(shot.id)}
-                  onDragStart={() => beginShotDrag(shot.id)}
-                  onDragOver={(event) => previewShotOrder(shot.id, event)}
-                  onDrop={commitShotOrder}
-                  onDragEnd={resetShotDrag}
-                />
-              ))
-            ) : (
-              <div className="ws-storyboard-empty">
-                <BookOpenText size={26} />
-                <strong>暂无镜头</strong>
-                <span>添加第一个镜头后开始编排脚本</span>
-              </div>
-            )}
-          </div>
+          {activeView === "board" && canShowBoard ? (
+            <StoryboardBoard
+              storyboard={draft}
+              sourceNodeId={storyboardSourceNodeId}
+              canvasNodes={canvasNodes}
+            />
+          ) : (
+            <div className="ws-storyboard-grid nowheel">
+              {draft.shots.length ? (
+                visibleShots.map((shot, index) => (
+                  <StoryboardShotCard
+                    key={shot.id}
+                    shot={shot}
+                    index={index}
+                    storyboard={draft}
+                    selected={editingShotId === shot.id}
+                    editable={canEdit}
+                    dragging={draggedShotId === shot.id}
+                    dropPlacement={
+                      dragOverShotId === shot.id && draggedShotId !== shot.id
+                        ? dragPlacement
+                        : undefined
+                    }
+                    onOpen={() => setEditingShotId(shot.id)}
+                    onDuplicate={() => duplicateShot(shot)}
+                    onRemove={() => removeShot(shot.id)}
+                    onDragStart={() => beginShotDrag(shot.id)}
+                    onDragOver={(event) => previewShotOrder(shot.id, event)}
+                    onDrop={commitShotOrder}
+                    onDragEnd={resetShotDrag}
+                  />
+                ))
+              ) : (
+                <div className="ws-storyboard-empty">
+                  <BookOpenText size={26} />
+                  <strong>暂无镜头</strong>
+                  <span>添加第一个镜头后开始编排脚本</span>
+                </div>
+              )}
+            </div>
+          )}
         </main>
       </div>
 
@@ -1011,7 +1055,8 @@ export function StoryboardView({
         <StoryboardShotDialog
           key={editingShot.id}
           shot={editingShot}
-          index={draft.shots.findIndex((shot) => shot.id === editingShot.id)}
+          index={editingShotIndex}
+          previousShot={editingPreviousShot}
           materials={draft.materials}
           readonly={!canEdit}
           referenceAdapter={referenceAdapter}
@@ -1122,6 +1167,7 @@ function StoryboardMaterialSettings({
 function StoryboardShotDialog({
   shot,
   index,
+  previousShot,
   materials,
   readonly,
   referenceAdapter,
@@ -1132,6 +1178,7 @@ function StoryboardShotDialog({
 }: {
   shot: StoryboardShot;
   index: number;
+  previousShot?: StoryboardShot;
   materials: StoryboardMaterial[];
   readonly: boolean;
   referenceAdapter: CanvasReferenceAdapter;
@@ -1151,13 +1198,19 @@ function StoryboardShotDialog({
       .filter(Boolean),
   );
   const visibleSpeakers = storyboardVisibleSpeakerIds(draft);
+  const entryStateLinked = storyboardShotLinksPreviousState(draft, index);
   const invalidStartTimes = draft.speech.some(
     (speech) => speech.start_time < 0 || speech.start_time >= draft.duration,
   );
   const invalidContinuity =
-    index > 0 &&
-    ((draft.continue_previous && !draft.continuity_anchor.trim()) ||
-      (draft.continue_previous && draft.match_previous));
+    !draft.continuity_state.entry.trim() ||
+    !draft.continuity_state.exit.trim() ||
+    (entryStateLinked &&
+      draft.continuity_state.entry.trim() !==
+        previousShot?.continuity_state.exit.trim()) ||
+    (index > 0 &&
+      ((draft.continue_previous && !draft.continuity_anchor.trim()) ||
+        (draft.continue_previous && draft.match_previous)));
   const invalidNarrative =
     !draft.beat.trim() || (index > 0 && !draft.transition.trim());
   const invalidCaptions = draft.captions.some(
@@ -1297,6 +1350,14 @@ function StoryboardShotDialog({
                         continuity_anchor: event.target.checked
                           ? ""
                           : current.continuity_anchor,
+                        continuity_state: event.target.checked
+                          ? {
+                              ...current.continuity_state,
+                              entry:
+                                previousShot?.continuity_state.exit ||
+                                current.continuity_state.entry,
+                            }
+                          : current.continuity_state,
                       }))
                     }
                   />
@@ -1318,6 +1379,14 @@ function StoryboardShotDialog({
                           index > 0 && event.target.checked
                             ? current.continuity_anchor
                             : "",
+                        continuity_state: event.target.checked
+                          ? {
+                              ...current.continuity_state,
+                              entry:
+                                previousShot?.continuity_state.exit ||
+                                current.continuity_state.entry,
+                            }
+                          : current.continuity_state,
                       }))
                     }
                   />
@@ -1363,9 +1432,41 @@ function StoryboardShotDialog({
             ) : null}
             {invalidContinuity ? (
               <p className="ws-storyboard-form-error">
-                画面匹配和视频延续不能同时启用；延续上一镜头时必须填写连续性锚点。
+                请填写入镜和出镜状态；匹配或延续上一镜时，入镜状态必须等于上一镜出镜状态；视频延续还必须填写连续性锚点。
               </p>
             ) : null}
+            <div className="ws-storyboard-shot-field-row">
+              <StoryboardPlainField
+                label="入镜状态"
+                value={draft.continuity_state.entry}
+                placeholder="主体位置、姿态、服装、道具状态、时间、光线和运动方向"
+                readonly={readonly || entryStateLinked}
+                onChange={(value) =>
+                  setDraft((current) => ({
+                    ...current,
+                    continuity_state: {
+                      ...current.continuity_state,
+                      entry: value,
+                    },
+                  }))
+                }
+              />
+              <StoryboardPlainField
+                label="出镜状态"
+                value={draft.continuity_state.exit}
+                placeholder="本镜主要动作完成后，主体和环境停在什么可见状态"
+                readonly={readonly}
+                onChange={(value) =>
+                  setDraft((current) => ({
+                    ...current,
+                    continuity_state: {
+                      ...current.continuity_state,
+                      exit: value,
+                    },
+                  }))
+                }
+              />
+            </div>
             <div
               className={`ws-storyboard-shot-field-row ${index === 0 ? "is-single" : ""}`}
             >
@@ -2213,6 +2314,7 @@ function cloneStoryboardShot(shot: StoryboardShot): StoryboardShot {
   return {
     ...shot,
     material_ids: [...shot.material_ids],
+    continuity_state: { ...shot.continuity_state },
     speech: shot.speech.map((speech) => ({ ...speech })),
     captions: shot.captions.map((caption) => ({ ...caption })),
     reference_contents: { ...(shot.reference_contents || {}) },

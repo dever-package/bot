@@ -18,11 +18,14 @@ type ParamOptionIndex struct {
 	ParamSort  struct{} `index:"param_id,sort"`
 }
 
+const ParamOptionAspectRatioAutoID uint64 = 37
+
 var (
 	paramOptionSeed = []map[string]any{
 		{"id": 1, "param_id": paramResolutionID, "name": "1k", "value": "1k", "sort": 1},
 		{"id": 2, "param_id": paramResolutionID, "name": "2k", "value": "2k", "sort": 2},
 		{"id": 3, "param_id": paramResolutionID, "name": "4k", "value": "4k", "sort": 3},
+		{"id": ParamOptionAspectRatioAutoID, "param_id": paramAspectRatioID, "name": "自动", "value": "auto", "sort": 0},
 		{"id": 4, "param_id": paramAspectRatioID, "name": "1:1", "value": "1:1", "sort": 1},
 		{"id": 5, "param_id": paramAspectRatioID, "name": "16:9", "value": "16:9", "sort": 2},
 		{"id": 6, "param_id": paramAspectRatioID, "name": "9:16", "value": "9:16", "sort": 3},

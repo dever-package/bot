@@ -1,12 +1,10 @@
 import {
   contentOutputHasMedia,
-  normalizeEnergonOutput,
-  preferRicherMediaOutput,
-} from "../space-content-view";
-import {
   looksLikeMarkdownSyntax,
   markdownCompatibleRichContent,
+  normalizeContentOutputItems,
   plainMarkdownTextFromRichOutput,
+  preferRicherMediaOutput,
 } from "../space-content-output";
 import { documentText, richDocument } from "../space-model";
 import {
@@ -118,8 +116,7 @@ export function resolveNodeDetailMediaOutput(
 }
 
 function mediaDisplayOutput(value: unknown) {
-  const normalized = normalizeEnergonOutput?.(value);
-  const items = Array.isArray(normalized) ? normalized : [value];
+  const items = normalizeContentOutputItems(value);
   const displayItems = items.map((item) => {
     if (!isRecord(item) || item.json === undefined) {
       return item;
@@ -208,7 +205,7 @@ function protocolRichDocument(raw: unknown) {
   if (typeof raw === "string" && parseMaybeJSON(raw) === raw) {
     return null;
   }
-  const normalized = normalizeEnergonOutput?.(raw) ?? raw;
+  const normalized = normalizeContentOutputItems(raw);
   const content: any[] = [];
   const seenValues = new Set<object>();
   const seenText = new Set<string>();

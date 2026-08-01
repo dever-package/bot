@@ -74,6 +74,7 @@ import { getCompatModule, useNavigate, useTheme } from "@dever/front-plugin";
 import { useBodyLoginConfig } from "../auth/site-config";
 import "../shared/body-theme.css";
 import { useBodyAppearance } from "../shared/use-body-appearance";
+import { FirstFrameVideo } from "../../shared/first-frame-video";
 import type { AgentInteraction } from "@/components/agent/interaction-panel";
 import {
   fetchSpaceBootstrap,
@@ -89,6 +90,10 @@ import {
   saveSpaceCanvasContent,
 } from "./space-api";
 import { useCanvasAutosave, type CanvasSaveStatus } from "./space-autosave";
+import {
+  canvasEdgeCarriesMedia,
+  canvasEdgePurpose,
+} from "./space-canvas-edge";
 import { SpaceCatalogCache } from "./space-catalog-cache";
 import {
   runCanvasGroupMembers,
@@ -230,6 +235,7 @@ import {
   normalizePowerParamValue,
 } from "./space-power-param";
 import {
+  canvasMediaReferenceKind,
   canvasMediaUsageError,
   isCanvasMediaReferenceNode,
   mediaUsageOptions,
@@ -241,10 +247,12 @@ import {
 import {
   CanvasNodeContentView,
   contentOutputNeedsRenderer,
-  normalizeEnergonOutput,
-  preferRicherMediaOutput,
 } from "./space-content-view";
-import { plainMarkdownTextFromRichOutput } from "./space-content-output";
+import {
+  normalizeEnergonOutput,
+  plainMarkdownTextFromRichOutput,
+  preferRicherMediaOutput,
+} from "./space-content-output";
 import {
   isAudioPowerType,
   isVideoComposePowerType,
@@ -2669,6 +2677,7 @@ export function WorkSpacePage({
             )}
             node={nodeDetail}
             storyboardFocus={storyboardDetailFocus}
+            canvasNodes={canvasModel.nodes}
             canvasReferenceItems={canvasReferenceItems.filter(
               (item) => item.source !== "current" || item.id !== nodeDetail.id,
             )}
@@ -2994,6 +3003,7 @@ function CanvasWorkbench({
   );
   const canvasWrapRef = useRef<HTMLElement | null>(null);
   const flowNodeCache = useRef<Map<string, Node>>(new Map());
+  const storyboardFrameNodeCache = useRef<Map<string, Node>>(new Map());
   const pendingConnectionRef = useRef<PendingNodeConnection | null>(null);
   const connectionCompletedRef = useRef(false);
   const skipNextPaneClickRef = useRef(false);
@@ -3269,6 +3279,16 @@ function CanvasWorkbench({
       storyboardFrameById,
     ],
   );
+  const storyboardFrameActionsRef = useRef({
+    onRun: onRunStoryboardFrame,
+    onFocus: focusStoryboardFrame,
+    onToggle: toggleStoryboardFrame,
+  });
+  storyboardFrameActionsRef.current = {
+    onRun: onRunStoryboardFrame,
+    onFocus: focusStoryboardFrame,
+    onToggle: toggleStoryboardFrame,
+  };
   const fitKey = useMemo(() => {
     if (nodes.length === 0) {
       return "";
@@ -3428,7 +3448,9 @@ function CanvasWorkbench({
         flowNodeCache.current.delete(cachedId);
       }
     }
+    const activeFrameIds = new Set<string>();
     const frameNodes = storyboardFrames.map((frame): Node => {
+      activeFrameIds.add(frame.id);
       const collapsed = collapsedStoryboardFrameIds.has(frame.id);
       const bounds = storyboardFrameDisplayBounds(frame, collapsed);
       const runSummary = storyboardFrameRunSummary(
@@ -3441,27 +3463,64 @@ function CanvasWorkbench({
         frame.workNodeIds.some((nodeId) =>
           isActiveRunningNode(runningNodes[nodeId]),
         );
-      const data: StoryboardFrameNodeData = {
-        type: "storyboardFrame",
-        title: frame.title,
-        groupCount: frame.groupCount,
-        workNodeCount: frame.workNodeCount,
-        completedCount: frame.completedCount,
-        running: frameRunning,
-        runBlockedReason: runSummary.blockedReason,
-        collapsed,
-        onRun: () => {
-          void onRunStoryboardFrame(frame.sourceNodeId);
-        },
-        onFocus: () => focusStoryboardFrame(frame.id),
-        onToggleCollapsed: () => toggleStoryboardFrame(frame.id),
-      };
-      return {
+      const cached = storyboardFrameNodeCache.current.get(frame.id);
+      const cachedData = cached?.data as StoryboardFrameNodeData | undefined;
+      const canReuseData =
+        cachedData?.title === frame.title &&
+        cachedData.groupCount === frame.groupCount &&
+        cachedData.workNodeCount === frame.workNodeCount &&
+        cachedData.completedCount === frame.completedCount &&
+        cachedData.running === frameRunning &&
+        cachedData.runBlockedReason === runSummary.blockedReason &&
+        cachedData.collapsed === collapsed;
+      const data: StoryboardFrameNodeData = canReuseData && cachedData
+        ? cachedData
+        : {
+            type: "storyboardFrame",
+            title: frame.title,
+            groupCount: frame.groupCount,
+            workNodeCount: frame.workNodeCount,
+            completedCount: frame.completedCount,
+            running: frameRunning,
+            runBlockedReason: runSummary.blockedReason,
+            collapsed,
+            onRun:
+              cachedData?.onRun ||
+              (() => {
+                void storyboardFrameActionsRef.current.onRun(
+                  frame.sourceNodeId,
+                );
+              }),
+            onFocus:
+              cachedData?.onFocus ||
+              (() => storyboardFrameActionsRef.current.onFocus(frame.id)),
+            onToggleCollapsed:
+              cachedData?.onToggleCollapsed ||
+              (() => storyboardFrameActionsRef.current.onToggle(frame.id)),
+          };
+      const selected = selectedNodeIdSet.has(frame.id);
+      const cachedStyle = cached?.style as CSSProperties | undefined;
+      if (
+        cached &&
+        cached.position.x === bounds.x &&
+        cached.position.y === bounds.y &&
+        cached.data === data &&
+        cached.selected === selected &&
+        cached.draggable === interactive &&
+        cached.selectable === interactive &&
+        cached.focusable === interactive &&
+        cachedStyle?.width === bounds.width &&
+        cachedStyle?.height === bounds.height
+      ) {
+        return cached;
+      }
+      const nextFrameNode: Node = {
+        ...cached,
         id: frame.id,
         type: "storyboardFrame",
         position: { x: bounds.x, y: bounds.y },
         data,
-        selected: selectedNodeIdSet.has(frame.id),
+        selected,
         className: "ws-flow-node ws-flow-node-storyboard-frame",
         zIndex: -1,
         draggable: interactive,
@@ -3470,19 +3529,28 @@ function CanvasWorkbench({
         deletable: false,
         focusable: interactive,
         dragHandle: ".ws-storyboard-frame-header",
-        style: { width: bounds.width, height: bounds.height },
+        style: {
+          ...cached?.style,
+          width: bounds.width,
+          height: bounds.height,
+        },
       };
+      storyboardFrameNodeCache.current.set(frame.id, nextFrameNode);
+      return nextFrameNode;
     });
+    for (const cachedId of storyboardFrameNodeCache.current.keys()) {
+      if (!activeFrameIds.has(cachedId)) {
+        storyboardFrameNodeCache.current.delete(cachedId);
+      }
+    }
     return [...frameNodes, ...nextNodes];
   }, [
     collapsedStoryboardFrameIds,
     canvasRenderIndex,
-    focusStoryboardFrame,
     hiddenStoryboardNodeIds,
     interactive,
     structureLockedStoryboardNodeIds,
     nodes,
-    onRunStoryboardFrame,
     projectId,
     runningNodes,
     selectedNodeId,
@@ -3495,7 +3563,6 @@ function CanvasWorkbench({
     stableNodeActions,
     storyboardFrames,
     storyboardSourceIdByNodeId,
-    toggleStoryboardFrame,
   ]);
 
   const { flowNodes, setFlowNodes } = useTransientFlowNodes(
@@ -3648,20 +3715,19 @@ function CanvasWorkbench({
     return edges
       .filter(
         (edge) => {
-          const { sourceNodeId, targetNodeId } = canvasEdgeNodeIDs(edge);
           return (
-            nodeMap.has(sourceNodeId) &&
-            nodeMap.has(targetNodeId) &&
-            !hiddenStoryboardNodeIds.has(sourceNodeId) &&
-            !hiddenStoryboardNodeIds.has(targetNodeId)
+            nodeMap.has(edge.from) &&
+            nodeMap.has(edge.to) &&
+            !hiddenStoryboardNodeIds.has(edge.from) &&
+            !hiddenStoryboardNodeIds.has(edge.to)
           );
         },
       )
       .map((edge) => ({
         id: edge.id,
-        source: edge.logicalFrom || edge.from,
+        source: edge.from,
         sourceHandle: "output-0",
-        target: edge.logicalTo || edge.to,
+        target: edge.to,
         targetHandle: "input-0",
         type: "animated",
         animated: false,
@@ -3670,6 +3736,7 @@ function CanvasWorkbench({
           physicalTo: edge.to,
           logicalFrom: edge.logicalFrom,
           logicalTo: edge.logicalTo,
+          purpose: canvasEdgePurpose(edge),
           executionMode: edge.executionMode,
           mediaUsage: edge.mediaUsage,
         },
@@ -8697,7 +8764,10 @@ function buildCanvasRenderIndex(
       nodes,
       sourceNodeId,
     )) {
-      if (isCanvasMediaReferenceNode(sourceNode)) {
+      if (
+        canvasEdgeCarriesMedia(edge) &&
+        isCanvasMediaReferenceNode(sourceNode)
+      ) {
         const references =
           incomingMediaReferencesByNodeId.get(targetNodeId) || [];
         references.push({ edge, source: sourceNode });
@@ -8745,6 +8815,9 @@ function canvasIncomingMediaConnections(
 ): CanvasConnectedMediaReference[] {
   const result: CanvasConnectedMediaReference[] = [];
   for (const edge of edges) {
+    if (!canvasEdgeCarriesMedia(edge)) {
+      continue;
+    }
     const endpoints = canvasEdgeNodeIDs(edge);
     if (endpoints.targetNodeId !== targetNodeId) {
       continue;
@@ -9400,6 +9473,7 @@ function appendCanvasEdge(
       id: `edge-${source}-${target}-${Date.now()}`,
       from: source,
       to: target,
+      purpose: "media",
       ...(mediaUsage ? { mediaUsage } : {}),
     },
   ];
@@ -9496,6 +9570,11 @@ function flowEdgesToCanvasEdges(edges: Edge[]): SpaceCanvasEdge[] {
       to: String(edge.data?.physicalTo || edge.target || ""),
       logicalFrom: String(edge.data?.logicalFrom || "") || undefined,
       logicalTo: String(edge.data?.logicalTo || "") || undefined,
+      purpose:
+        edge.data?.purpose === "structure" ||
+        edge.data?.purpose === "dependency"
+          ? edge.data.purpose
+          : "media",
       executionMode:
         String(edge.data?.executionMode || "") === "manual"
           ? ("manual" as const)
@@ -9644,6 +9723,7 @@ function sameCanvasEdges(left: SpaceCanvasEdge[], right: SpaceCanvasEdge[]) {
             edge.to === candidate.to &&
             (edge.logicalFrom || "") === (candidate.logicalFrom || "") &&
             (edge.logicalTo || "") === (candidate.logicalTo || "") &&
+            (edge.purpose || "") === (candidate.purpose || "") &&
             (edge.executionMode || "auto") ===
               (candidate.executionMode || "auto") &&
             (edge.mediaUsage || "") === (candidate.mediaUsage || ""))
@@ -10304,11 +10384,14 @@ function FunctionResultCard({
   const onNodeResult = (node as any).onNodeResult as
     | NodeResultSetter
     | undefined;
-  const canAdoptGeneratedMediaSize =
-    renderGeneratedMedia &&
-    !preview.audioUrl &&
-    hasDefaultCanvasNodeSize(node) &&
-    Boolean(onNodeResult);
+  const onMediaSize =
+    renderGeneratedMedia && !preview.audioUrl
+      ? generatedMediaAutoSizeHandler(
+          node,
+          onNodeResult,
+          FUNCTION_RESULT_TOOLBAR_HEIGHT,
+        )
+      : undefined;
   return (
     <Suspense fallback={<CanvasModuleLoading label="正在加载节点结果" />}>
       <CanvasResultView
@@ -10329,21 +10412,7 @@ function FunctionResultCard({
             fallback={displayText}
             generating={running}
             showMediaCaption={false}
-            onMediaSize={
-              canAdoptGeneratedMediaSize
-                ? (width, height) => {
-                    const contentSize = generatedMediaNodeSize(width, height);
-                    if (!contentSize || !onNodeResult) {
-                      return;
-                    }
-                    onNodeResult(node.id, {
-                      width: contentSize.width,
-                      height:
-                        contentSize.height + FUNCTION_RESULT_TOOLBAR_HEIGHT,
-                    });
-                  }
-                : undefined
-            }
+            onMediaSize={onMediaSize}
           />
         ) : undefined}
       </CanvasResultView>
@@ -10889,6 +10958,9 @@ function NodeBottomSettings({
         : [],
     [powerForm, selectedNodeType],
   );
+  const requireBoundMediaReferences =
+    selectedNodeType === "power" &&
+    ["image", "video"].includes(canvasMediaReferenceKind(node) || "");
   const configuredMediaError = useMemo(
     () =>
       selectedNodeType === "power" && !powerFormLoading
@@ -10897,6 +10969,8 @@ function NodeBottomSettings({
             promptContent,
             assetLibrary.current,
             connectedMediaUsageOptions,
+            {},
+            requireBoundMediaReferences,
           )
         : "",
     [
@@ -10905,6 +10979,7 @@ function NodeBottomSettings({
       connectedMediaUsageOptions,
       powerFormLoading,
       promptContent,
+      requireBoundMediaReferences,
       selectedNodeType,
     ],
   );
@@ -11135,6 +11210,7 @@ function NodeBottomSettings({
         assetLibrary.current,
         options,
         reconciliation.assignments,
+        requireBoundMediaReferences,
       );
       if (mediaError) {
         toast.error(`无法切换能力来源：${mediaError}`);
@@ -12312,6 +12388,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
       const preview = nodeDetailPreview(node);
       const contentOutput = nodeEnergonOutput(node);
       const useContentView = contentOutputNeedsRenderer(contentOutput, preview);
+      const onMediaSize = generatedMediaAutoSizeHandler(node, onNodeResult);
       const className = [
         "ws-node-image-wrap",
         selected ? "is-selected" : "",
@@ -12335,12 +12412,11 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
                 />
               </div>
             ) : preview.imageUrl ? (
-              <img
+              <CanvasStableImage
                 src={preview.imageUrl}
                 alt={node.title}
                 className="ws-node-image-raw"
-                loading="lazy"
-                decoding="async"
+                onMediaSize={onMediaSize}
               />
             ) : (
               <div className="ws-node-image-empty">
@@ -12374,6 +12450,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
       const preview = nodeDetailPreview(node);
       const contentOutput = nodeEnergonOutput(node);
       const useContentView = contentOutputNeedsRenderer(contentOutput, preview);
+      const onMediaSize = generatedMediaAutoSizeHandler(node, onNodeResult);
       const className = [
         "ws-node-video-wrap",
         selected ? "is-selected" : "",
@@ -12397,21 +12474,26 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
                 />
               </div>
             ) : preview.videoUrl ? (
-              <video
+              <FirstFrameVideo
                 key={preview.videoUrl}
                 src={preview.videoUrl}
                 className="ws-node-video-raw"
                 muted
                 playsInline
                 preload="metadata"
+                onLoadedMetadata={(event) =>
+                  onMediaSize?.(
+                    event.currentTarget.videoWidth,
+                    event.currentTarget.videoHeight,
+                  )
+                }
               />
             ) : preview.imageUrl ? (
-              <img
+              <CanvasStableImage
                 src={preview.imageUrl}
                 alt={node.title}
                 className="ws-node-video-raw"
-                loading="lazy"
-                decoding="async"
+                onMediaSize={onMediaSize}
               />
             ) : (
               <div className="ws-node-image-empty">
@@ -12487,7 +12569,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
             </div>
           ) : !useContentView && preview.videoUrl ? (
             <div className="ws-node-text-media">
-              <video
+              <FirstFrameVideo
                 key={preview.videoUrl}
                 src={preview.videoUrl}
                 muted
@@ -12590,8 +12672,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
         preview.audioUrl ||
         preview.fileUrl,
       );
-    const canAdoptGeneratedMediaSize =
-      !node.groupId && hasDefaultCanvasNodeSize(node);
+    const onMediaSize = generatedMediaAutoSizeHandler(node, onNodeResult);
     const className = [
       "ws-node-power-wrap",
       selected ? "is-selected" : "",
@@ -12733,22 +12814,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
               fallback={node.description}
               streaming={isPowerRunning && showStreamOutput}
               generating={isPowerRunning && hasPowerMedia && !showStreamOutput}
-              onMediaSize={
-                canAdoptGeneratedMediaSize
-                  ? (width, height) => {
-                      const nextSize = generatedMediaNodeSize(width, height);
-                      if (!nextSize || !onNodeResult) {
-                        return;
-                      }
-                      if (
-                        Math.abs((node.width || 0) - nextSize.width) > 2 ||
-                        Math.abs((node.height || 0) - nextSize.height) > 2
-                      ) {
-                        onNodeResult(node.id, nextSize);
-                      }
-                    }
-                  : undefined
-              }
+              onMediaSize={onMediaSize}
             />
           ) : (
             <PowerNodeEmptyState />
@@ -12900,7 +12966,7 @@ function CanvasGeneratedNodeContent({
       <div
         className={`ws-node-generated-media ${generating ? "is-generating" : ""}`}
       >
-        <video
+        <FirstFrameVideo
           key={preview.videoUrl}
           src={preview.videoUrl}
           className="nopan nowheel"
@@ -12964,10 +13030,12 @@ function CanvasGeneratedNodeContent({
 function CanvasStableImage({
   src,
   alt,
+  className,
   onMediaSize,
 }: {
   src: string;
   alt: string;
+  className?: string;
   onMediaSize?: (width: number, height: number) => void;
 }) {
   const [displayedSrc, setDisplayedSrc] = useState(src);
@@ -12997,6 +13065,7 @@ function CanvasStableImage({
     <img
       src={displayedSrc}
       alt={alt}
+      className={className}
       loading="lazy"
       decoding="async"
       onLoad={(event) =>
@@ -13059,6 +13128,33 @@ function generatedMediaNodeSize(
   return {
     width: Math.round(clampNumber(nextWidth, 150, maxWidth)),
     height: Math.round(clampNumber(nextHeight, 150, maxHeight)),
+  };
+}
+
+function generatedMediaAutoSizeHandler(
+  node: SpaceCanvasNode,
+  onNodeResult?: NodeResultSetter,
+  heightOffset = 0,
+) {
+  if (node.groupId || !onNodeResult) {
+    return undefined;
+  }
+  return (width: number, height: number) => {
+    const contentSize = generatedMediaNodeSize(width, height);
+    if (!contentSize) {
+      return;
+    }
+    const nextSize = {
+      width: contentSize.width,
+      height: contentSize.height + heightOffset,
+    };
+    if (
+      Math.abs((node.width || 0) - nextSize.width) <= 2 &&
+      Math.abs((node.height || 0) - nextSize.height) <= 2
+    ) {
+      return;
+    }
+    onNodeResult(node.id, nextSize);
   };
 }
 

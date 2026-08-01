@@ -330,9 +330,10 @@ func canvasStoryboardFrameRuntimeCanvas(
 		}
 		seen[key] = true
 		edges = append(edges, map[string]any{
-			"id":   fmt.Sprintf("storyboard-frame-edge-%d", len(edges)+1),
-			"from": from,
-			"to":   to,
+			"id":      fmt.Sprintf("storyboard-frame-edge-%d", len(edges)+1),
+			"from":    from,
+			"to":      to,
+			"purpose": canvasEdgePurposeDependency,
 		})
 	}
 	unitID := func(node canvasRunNode) string {

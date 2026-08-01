@@ -1,3 +1,4 @@
+import { canvasEdgePurpose } from "./space-canvas-edge";
 import type { SpaceCanvasEdge, SpaceCanvasNode } from "./types";
 
 export const DEFAULT_GROUP_NODE_SIZE = { width: 720, height: 420 };
@@ -132,7 +133,7 @@ export function reconcileCanvasGroupEdges(
     if (!from || !to || from === to) {
       continue;
     }
-    const key = `${logicalFrom}\u0000${logicalTo}`;
+    const key = `${logicalFrom}\u0000${logicalTo}\u0000${canvasEdgePurpose(edge)}`;
     if (seen.has(key)) {
       continue;
     }

@@ -21,5 +21,7 @@ var PageFS embed.FS
 // 本地开发时 front/dist 可能为空，dever run 会回退到 front/src/plugin.ts 启动 dev server；
 // 发布前由 dever front build bot 写入 front/dist，运行时仍按 front/dist 前缀读取产物。
 //
-//go:embed front
+// all: ensures Vite chunks whose names start with "_" are included.
+//
+//go:embed all:front
 var FrontFS embed.FS

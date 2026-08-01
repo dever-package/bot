@@ -25,8 +25,8 @@ const OUTPUT_TARGETS: Array<{
 }> = [
   {
     value: "shot_images",
-    title: "生成参考图",
-    description: "生成素材设定和镜头参考图，之后可在画布中自行连接视频节点。",
+    title: "生成故事板",
+    description: "生成素材设定和逐镜头故事板关键帧，之后可在画布中自行连接视频节点。",
   },
   {
     value: "shot_videos",

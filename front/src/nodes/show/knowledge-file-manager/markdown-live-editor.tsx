@@ -5,20 +5,17 @@ import luteScriptURL from "vditor/dist/js/lute/lute.min.js?url"
 import "vditor/dist/js/i18n/zh_CN.js"
 import "vditor/dist/js/icons/ant.js"
 import { attachmentMarkdown, isImageFileName } from "./attachment"
-import type { KnowledgeFileViewerStatus } from "./types"
-
-export type UploadedAttachment = {
-  name: string
-}
-
-export type MarkdownAttachmentUploadMany = (files: File[]) => Promise<UploadedAttachment[]>
+import type {
+  KnowledgeAttachmentUploadMany,
+  KnowledgeFileViewerStatus,
+} from "./types"
 
 type MarkdownLiveEditorProps = {
   active: boolean
   value: string
   linkBaseURL: string
   onChange: (content: string) => void
-  onUploadAttachments: MarkdownAttachmentUploadMany
+  onUploadAttachments: KnowledgeAttachmentUploadMany
   onAttachmentError?: (error: unknown) => void
   onStatusChange: (status: KnowledgeFileViewerStatus | null) => void
 }
@@ -343,7 +340,7 @@ async function insertAttachments({
 }: {
   files: File[]
   editor: Vditor | null
-  onUploadAttachments: MarkdownAttachmentUploadMany
+  onUploadAttachments: KnowledgeAttachmentUploadMany
   onUploadingChange: (uploading: boolean) => void
   onError?: (error: unknown) => void
 }) {

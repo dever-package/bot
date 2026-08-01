@@ -24,7 +24,9 @@ type ServiceEndpointIndex struct {
 }
 
 const (
-	ServiceEndpointGPTImage2API = "gpt-image-2"
+	ServiceEndpointGPTImage2API        = "gpt-image-2"
+	ServiceEndpointDoubaoSeedream45API = "doubao-seedream-4-5-251128"
+	ServiceEndpointDoubaoSeedream5API  = "doubao-seedream-5.0-lite"
 
 	serviceEndpointRunningHubImageTextID  uint64 = 4
 	serviceEndpointRunningHubImageImageID uint64 = 5
@@ -105,7 +107,7 @@ var (
 		{
 			"id":         serviceEndpointDoubaoImageID,
 			"service_id": serviceDoubaoImageID,
-			"api":        "doubao-seedream-4-5-251128",
+			"api":        ServiceEndpointDoubaoSeedream45API,
 			"param_mode": "all",
 			"param_ids":  "[]",
 			"status":     1,
@@ -177,7 +179,7 @@ var (
 		{
 			"id":         serviceEndpointDoubaoImage5ID,
 			"service_id": serviceDoubaoImage5ID,
-			"api":        "doubao-seedream-5.0-lite",
+			"api":        ServiceEndpointDoubaoSeedream5API,
 			"param_mode": "all",
 			"param_ids":  "[]",
 			"status":     1,

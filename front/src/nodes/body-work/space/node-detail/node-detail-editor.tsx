@@ -16,11 +16,12 @@ import type {
   StoryboardProductionPlan,
 } from "../space-storyboard";
 import type { ComposerAssetItem } from "../space-prompt-composer";
+import type { SpaceCanvasNode } from "../types";
+import { CanvasNodeContentView } from "../space-content-view";
 import {
-  CanvasNodeContentView,
   contentOutputMediaURLs,
   type CanvasContentMediaKind,
-} from "../space-content-view";
+} from "../space-content-output";
 import { AssetPreview } from "../../asset/asset-preview";
 import { MediaInspectorGallery } from "../../../shared/media-inspector-gallery";
 import { SpaceTooltip } from "../space-tooltip";
@@ -51,6 +52,8 @@ export function NodeDetailEditor({
   mediaPrompt,
   readonly,
   referenceItems,
+  canvasNodes,
+  storyboardSourceNodeId,
   storyboardFocus,
   storyboardWorkflowAction,
   onConfirmStoryboard,
@@ -64,6 +67,8 @@ export function NodeDetailEditor({
   mediaPrompt?: string;
   readonly: boolean;
   referenceItems?: ComposerAssetItem[];
+  canvasNodes?: SpaceCanvasNode[];
+  storyboardSourceNodeId?: string;
   storyboardFocus?: StoryboardEditorFocus;
   storyboardWorkflowAction?: StoryboardWorkflowAction;
   onConfirmStoryboard?: (
@@ -110,6 +115,8 @@ export function NodeDetailEditor({
           layout="split"
           editable={!readonly}
           referenceItems={referenceItems}
+          canvasNodes={canvasNodes}
+          storyboardSourceNodeId={storyboardSourceNodeId}
           focus={storyboardFocus}
           workflowAction={storyboardWorkflowAction}
           onConfirm={onConfirmStoryboard}

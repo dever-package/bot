@@ -55,7 +55,7 @@ export function connectedMediaReferenceTargets(
             source.resultRef?.version_id ||
             0,
         ),
-        label: String(item?.title || source.title || "媒体素材"),
+        label: connectedMediaReferenceLabel(source, item),
         usage: String(edge.mediaUsage || ""),
         trigger: "@" as const,
         origin: "edge",
@@ -132,18 +132,7 @@ function resolvedMediaUsageOption(
   candidates: MediaUsageOption[],
   usage: string,
 ) {
-  const exact = candidates.find((option) => option.key === usage);
-  if (exact || !isFrameUsageOption(usage)) {
-    return exact;
-  }
-  const referenceOptions = candidates.filter(isReferenceImageUsageOption);
-  if (referenceOptions.length === 1) {
-    return referenceOptions[0];
-  }
-  const genericOptions = candidates.filter(
-    (option) => !isFrameUsageOption(option.key),
-  );
-  return genericOptions.length === 1 ? genericOptions[0] : undefined;
+  return candidates.find((option) => option.key === usage);
 }
 
 function isFirstFrameUsage(value: string) {
@@ -193,13 +182,13 @@ function prioritizeMediaUsageOptions(options: MediaUsageOption[]) {
 }
 
 function mediaUsagePriority(option: MediaUsageOption) {
-  if (isFirstFrameUsage(option.key) || option.label.includes("首帧")) {
+  if (isReferenceImageUsageOption(option)) {
     return 0;
   }
-  if (isLastFrameUsage(option.key) || option.label.includes("尾帧")) {
+  if (isFirstFrameUsage(option.key) || option.label.includes("首帧")) {
     return 1;
   }
-  if (isReferenceImageUsageOption(option)) {
+  if (isLastFrameUsage(option.key) || option.label.includes("尾帧")) {
     return 2;
   }
   return 3;
@@ -226,6 +215,7 @@ export function canvasMediaUsageError(
   items: ComposerAssetItem[],
   options: MediaUsageOption[],
   assignments: CanvasMediaUsageAssignments = {},
+  requireManualReferences = false,
 ) {
   const entries: MediaUsageValidationEntry[] = connections.flatMap(
     (connection) => {
@@ -268,7 +258,7 @@ export function canvasMediaUsageError(
       label: String(part.label || item?.title || "引用素材"),
       kind,
       usage: String(part.usage || ""),
-      required: false,
+      required: requireManualReferences,
     });
   }
 
@@ -583,7 +573,20 @@ function mediaKindLabel(kind: CanvasMediaKind) {
 }
 
 function mediaReferenceLabel(connection: CanvasConnectedMediaReference) {
-  return String(connection.source.title || "媒体素材").trim() || "媒体素材";
+  return connectedMediaReferenceLabel(connection.source);
+}
+
+function connectedMediaReferenceLabel(
+  source: SpaceCanvasNode,
+  item?: ComposerAssetItem,
+) {
+  for (const value of [source.asset?.name, item?.title, source.title]) {
+    const label = String(value || "").trim();
+    if (label) {
+      return label;
+    }
+  }
+  return "媒体素材";
 }
 
 function connectedMediaReferenceKey(

@@ -128,6 +128,14 @@ export type KnowledgeFileViewerStatus = {
   label: string
 }
 
+export type KnowledgeUploadedAttachment = {
+  name: string
+}
+
+export type KnowledgeAttachmentUploadMany = (
+  files: File[],
+) => Promise<KnowledgeUploadedAttachment[]>
+
 export type KnowledgeIndexStatus = "pending" | "running" | "success" | "failed" | ""
 
 export type KnowledgeIndexStatusResult = {

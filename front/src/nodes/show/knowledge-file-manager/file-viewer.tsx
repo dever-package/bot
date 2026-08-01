@@ -1,19 +1,24 @@
-import { useEffect, useState, type ReactNode } from "react"
-import CodeMirror from "@uiw/react-codemirror"
-import { css } from "@codemirror/lang-css"
-import { html } from "@codemirror/lang-html"
-import { javascript } from "@codemirror/lang-javascript"
-import { json } from "@codemirror/lang-json"
-import { sql } from "@codemirror/lang-sql"
-import { xml } from "@codemirror/lang-xml"
-import { yaml } from "@codemirror/lang-yaml"
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react"
 import { FileArchive, FileText, ImageIcon, Music, Video } from "lucide-react"
-import type { KnowledgeFileContent, KnowledgeFileViewerStatus } from "./types"
-import { fileExt, resolveFileKind, type KnowledgeFileKind } from "./file-kind"
-import {
-  MarkdownLiveEditor,
-  type MarkdownAttachmentUploadMany,
-} from "./markdown-live-editor"
+import { FirstFrameVideo } from "../../shared/first-frame-video"
+import type {
+  KnowledgeAttachmentUploadMany,
+  KnowledgeFileContent,
+  KnowledgeFileViewerStatus,
+} from "./types"
+import { resolveFileKind, type KnowledgeFileKind } from "./file-kind"
+
+const KnowledgeCodeEditor = lazy(() =>
+  import("./code-editor").then((module) => ({
+    default: module.KnowledgeCodeEditor,
+  })),
+)
+
+const MarkdownLiveEditor = lazy(() =>
+  import("./markdown-live-editor").then((module) => ({
+    default: module.MarkdownLiveEditor,
+  })),
+)
 
 type FileViewerProps = {
   active: boolean
@@ -22,7 +27,7 @@ type FileViewerProps = {
   downloadURL: string
   previewURL: string
   linkBaseURL: string
-  onUploadAttachments: MarkdownAttachmentUploadMany
+  onUploadAttachments: KnowledgeAttachmentUploadMany
   onAttachmentError: (error: unknown) => void
   onStatusChange: (status: KnowledgeFileViewerStatus | null) => void
   onChange: (content: string) => void
@@ -46,15 +51,31 @@ export function KnowledgeFileViewer({
   )
   let fileView: ReactNode = null
 
-  if (active && file && kind) {
-    if (file.editable && !markdownActive) {
-      fileView = (
-        <EditableCodeViewer
-          file={file}
-          content={content}
-          kind={kind}
+  if (markdownActive && file) {
+    fileView = (
+      <Suspense fallback={<EditorModuleLoading onStatusChange={onStatusChange} />}>
+        <MarkdownLiveEditor
+          active
+          value={content}
+          linkBaseURL={linkBaseURL}
+          onUploadAttachments={onUploadAttachments}
+          onAttachmentError={onAttachmentError}
+          onStatusChange={onStatusChange}
           onChange={onChange}
         />
+      </Suspense>
+    )
+  } else if (active && file && kind) {
+    if (file.editable) {
+      fileView = (
+        <Suspense fallback={<EditorModuleLoading onStatusChange={onStatusChange} />}>
+          <KnowledgeCodeEditor
+            file={file}
+            content={content}
+            kind={kind}
+            onChange={onChange}
+          />
+        </Suspense>
       )
     } else if (!file.editable) {
       fileView = (
@@ -69,53 +90,24 @@ export function KnowledgeFileViewer({
     }
   }
 
-  return (
-    <>
-      <MarkdownLiveEditor
-        active={markdownActive}
-        value={markdownActive ? content : ""}
-        linkBaseURL={markdownActive ? linkBaseURL : ""}
-        onUploadAttachments={onUploadAttachments}
-        onAttachmentError={onAttachmentError}
-        onStatusChange={onStatusChange}
-        onChange={onChange}
-      />
-      {fileView}
-    </>
-  )
+  return fileView
 }
 
 function shouldUseMarkdownLiveEditor(kind: KnowledgeFileKind) {
   return kind === "markdown"
 }
 
-function EditableCodeViewer({
-  file,
-  content,
-  kind,
-  onChange,
+function EditorModuleLoading({
+  onStatusChange,
 }: {
-  file: KnowledgeFileContent
-  content: string
-  kind: KnowledgeFileKind
-  onChange: (content: string) => void
+  onStatusChange: (status: KnowledgeFileViewerStatus | null) => void
 }) {
+  useViewerLoadingStatus("编辑器加载中", onStatusChange)
   return (
-    <CodeMirror
-      value={content}
-      height="100%"
-      basicSetup={{
-        autocompletion: true,
-        bracketMatching: true,
-        foldGutter: true,
-        highlightActiveLine: true,
-        highlightSelectionMatches: true,
-        lineNumbers: true,
-      }}
-      extensions={editorExtensions(file.name, kind)}
-      className="knowledge-code-editor"
-      onChange={onChange}
-    />
+    <div className="knowledge-file-preview is-centered" aria-live="polite">
+      <FileText size={42} />
+      <strong>编辑器加载中</strong>
+    </div>
   )
 }
 
@@ -249,11 +241,11 @@ function VideoPreview({
 
   return (
     <div className="knowledge-file-preview is-media">
-      <video
+      <FirstFrameVideo
         src={previewURL}
         controls
         preload="metadata"
-        onLoadedData={() => setLoading(false)}
+        onFirstFrameReady={() => setLoading(false)}
         onError={() => {
           setLoading(false)
           setFailed(true)
@@ -331,32 +323,6 @@ function useViewerLoadingStatus(
   useEffect(() => {
     return () => onStatusChange(null)
   }, [onStatusChange])
-}
-
-function editorExtensions(name: string, kind: KnowledgeFileKind) {
-  const ext = fileExt(name)
-  if (kind === "html") {
-    return [html()]
-  }
-  if (ext === "json") {
-    return [json()]
-  }
-  if (ext === "css" || ext === "scss" || ext === "less") {
-    return [css()]
-  }
-  if (ext === "js" || ext === "jsx" || ext === "ts" || ext === "tsx" || ext === "vue") {
-    return [javascript({ jsx: ext === "jsx" || ext === "tsx" })]
-  }
-  if (ext === "sql") {
-    return [sql()]
-  }
-  if (ext === "xml") {
-    return [xml()]
-  }
-  if (ext === "yaml" || ext === "yml") {
-    return [yaml()]
-  }
-  return []
 }
 
 function previewIcon(kind: KnowledgeFileKind) {

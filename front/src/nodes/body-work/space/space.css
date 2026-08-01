@@ -3256,7 +3256,7 @@
 .ws-node-video-raw {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 .ws-node-image-empty {
   display: flex;
@@ -3569,7 +3569,7 @@
   height: 100%;
   max-height: none;
   border-radius: 0;
-  object-fit: cover;
+  object-fit: contain;
   background: transparent;
 }
 .ws-node-generated-media.is-audio {
@@ -7549,7 +7549,7 @@
   left: 0;
   display: grid;
   box-sizing: border-box;
-  width: min(520px, 100%);
+  width: 100%;
   height: 44px;
   grid-template-columns: 26px minmax(0, 1fr) auto 28px 28px 28px;
   align-items: center;
@@ -10060,6 +10060,34 @@
   gap: 8px;
 }
 
+.ws-storyboard-view-tabs {
+  display: inline-flex;
+  margin-right: auto;
+  border: 1px solid var(--ws-border-soft);
+  border-radius: 5px;
+  background: var(--ws-surface-soft);
+  padding: 2px;
+}
+
+.ws-storyboard-view-tabs > button {
+  height: 24px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--ws-text-secondary);
+  padding: 0 9px;
+  font: inherit;
+  font-size: 9.5px;
+  cursor: pointer;
+}
+
+.ws-storyboard-view-tabs > button.is-active {
+  background: var(--ws-card);
+  color: var(--ws-accent-text);
+  font-weight: 650;
+  box-shadow: 0 1px 3px rgba(35, 51, 44, 0.08);
+}
+
 .ws-storyboard.is-split .ws-storyboard-toolbar-end {
   width: 100%;
   flex-wrap: wrap;
@@ -10116,6 +10144,138 @@
 .ws-storyboard.is-split .ws-storyboard-grid {
   grid-template-columns: repeat(auto-fill, minmax(min(176px, 100%), 192px));
   gap: 13px 10px;
+}
+
+.ws-storyboard-board {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr));
+  align-content: start;
+  gap: 14px;
+}
+
+.ws-storyboard-frame {
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ws-border-soft);
+  border-radius: 7px;
+  background: var(--ws-card);
+  box-shadow: 0 4px 13px rgba(35, 51, 44, 0.05);
+}
+
+.ws-storyboard-frame > header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--ws-border-subtle);
+  padding: 8px 10px;
+  color: var(--ws-text-subtle);
+  font-size: 9px;
+}
+
+.ws-storyboard-frame > header strong {
+  margin-right: auto;
+  color: var(--ws-text-strong);
+  font-size: 10px;
+}
+
+.ws-storyboard-frame-media {
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--ws-surface-soft);
+}
+
+.ws-storyboard-frame-media > a,
+.ws-storyboard-frame-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.ws-storyboard-frame-media img {
+  object-fit: contain;
+}
+
+.ws-storyboard-frame-empty {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-content: center;
+  justify-items: center;
+  gap: 7px;
+  color: var(--ws-text-subtle);
+}
+
+.ws-storyboard-frame-copy {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+}
+
+.ws-storyboard-frame-copy strong,
+.ws-storyboard-frame-copy span,
+.ws-storyboard-frame-copy p,
+.ws-storyboard-frame-copy small {
+  margin: 0;
+}
+
+.ws-storyboard-frame-copy strong {
+  color: var(--ws-text-strong);
+  font-size: 10.5px;
+}
+
+.ws-storyboard-frame-copy span,
+.ws-storyboard-frame-copy p {
+  color: var(--ws-text-secondary);
+  font-size: 9.5px;
+  line-height: 1.55;
+}
+
+.ws-storyboard-frame-copy p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.ws-storyboard-frame-continuity {
+  display: grid;
+  gap: 5px;
+  border-top: 1px solid var(--ws-border-subtle);
+  padding-top: 7px;
+}
+
+.ws-storyboard-frame-continuity p {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 5px;
+}
+
+.ws-storyboard-frame-continuity b {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 3px;
+  background: var(--ws-surface-soft);
+  color: var(--ws-accent-muted);
+  font-size: 8.5px;
+}
+
+.ws-storyboard-frame-continuity span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.ws-storyboard-frame-copy small {
+  color: var(--ws-danger, #b42318);
+  font-size: 9px;
 }
 
 .ws-storyboard-card {

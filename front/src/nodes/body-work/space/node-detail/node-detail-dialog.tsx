@@ -59,7 +59,7 @@ import {
 import {
   contentOutputMediaKinds,
   type CanvasContentMediaKind,
-} from "../space-content-view";
+} from "../space-content-output";
 
 export function NodeDetailDialog({
   projectId,
@@ -67,6 +67,7 @@ export function NodeDetailDialog({
   assetCateId,
   node,
   canvasReferenceItems,
+  canvasNodes,
   storyboardFocus,
   onNodeDraftChange,
   onRunNode,
@@ -78,6 +79,7 @@ export function NodeDetailDialog({
   assetCateId: number;
   node: SpaceCanvasNode;
   canvasReferenceItems?: ComposerAssetItem[];
+  canvasNodes?: SpaceCanvasNode[];
   storyboardFocus?: StoryboardEditorFocus;
   onNodeDraftChange?: (draft: SpaceCanvasNode["composerDraft"]) => void;
   onRunNode?: (node: SpaceCanvasNode) => Promise<void>;
@@ -839,6 +841,8 @@ export function NodeDetailDialog({
                   mediaPrompt={mediaPrompt}
                   readonly={editorReadonly}
                   referenceItems={canvasReferenceItems}
+                  canvasNodes={canvasNodes}
+                  storyboardSourceNodeId={node.id}
                   storyboardFocus={storyboardFocus}
                   storyboardWorkflowAction={storyboardWorkflowAction}
                   onConfirmStoryboard={confirmStoryboard}
@@ -932,6 +936,7 @@ function storyboardReviewPrompt(storyboard: StoryboardDocument) {
     "必须保持用户已经确定的标题、目标总时长、目标镜头数、画幅、画面类型、参考素材用途和明确剧情约束。",
     "必须保留所有仍代表同一实体的 material、shot、speech、caption 稳定 ID，并原样保留 narrator_voice 与每个角色的 voice。",
     "重点修复：镜头因果不连贯、重复 beat、动作过多或不可生成、人物道具凭空出现、错误的 match_previous/continue_previous、转场滥用、对白越界或重叠。",
+    "逐镜检查 continuity_state.entry 与 continuity_state.exit：人物位置和姿态、服装、道具归属与状态、时间、光线、轴线及运动方向必须明确；匹配或延续上一镜时，当前 entry 必须与上一镜 exit 完全一致。",
     "普通新镜头不要引用上一镜；只有需要匹配上一镜结束画面时使用 match_previous，只有同一动作从上一段真实尾帧继续时使用 continue_previous，二者互斥。",
     "确认 target_shot_count 等于 shots 数量，target_duration 等于全部 duration 之和，镜头不超过 50 个。",
     `当前分镜 JSON：${JSON.stringify(storyboard)}`,

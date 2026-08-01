@@ -148,10 +148,9 @@ func BindMediaReferences(
 		}
 		if capacity := mediaParamCapacity(param); capacity > 0 && len(current) >= capacity {
 			// One asset may contain multiple media files. Once that logical
-			// reference has been bound, extra files may remain unbound when the
-			// selected service only accepts fewer files; a second distinct
-			// required reference must still fail instead of being silently lost.
-			if mediaReferenceAlreadyBound(result.Bound, reference, key) {
+			// reference has been bound, optional extra files may remain prompt
+			// context. Required references must never be silently discarded.
+			if !reference.Required && mediaReferenceAlreadyBound(result.Bound, reference, key) {
 				result.Unbound = append(result.Unbound, reference)
 				continue
 			}
@@ -213,9 +212,6 @@ func mediaReferenceTarget(
 			MediaParamSupports(param, reference.Kind) {
 			return param, true, true
 		}
-		if param, matched := semanticMediaReferenceTarget(params, reference); matched {
-			return param, true, true
-		}
 		if reference.StrictUsage {
 			return PowerParam{}, true, false
 		}
@@ -225,64 +221,6 @@ func mediaReferenceTarget(
 		return candidates[0], false, true
 	}
 	return PowerParam{}, false, false
-}
-
-func semanticMediaReferenceTarget(params []PowerParam, reference MediaReference) (PowerParam, bool) {
-	if normalizeMediaKind(reference.Kind) != botprotocol.MediaTypeImage || !isFrameMediaUsage(reference.Usage) {
-		return PowerParam{}, false
-	}
-	candidates := MediaParamsForKind(params, reference.Kind)
-	referenceCandidates := filterMediaParams(candidates, isReferenceImageMediaParam)
-	if len(referenceCandidates) == 1 {
-		return referenceCandidates[0], true
-	}
-	if len(referenceCandidates) > 1 {
-		return PowerParam{}, false
-	}
-	genericCandidates := filterMediaParams(candidates, func(param PowerParam) bool {
-		return !isFrameMediaParam(param)
-	})
-	if len(genericCandidates) == 1 {
-		return genericCandidates[0], true
-	}
-	return PowerParam{}, false
-}
-
-func filterMediaParams(params []PowerParam, accept func(PowerParam) bool) []PowerParam {
-	result := make([]PowerParam, 0, len(params))
-	for _, param := range params {
-		if accept(param) {
-			result = append(result, param)
-		}
-	}
-	return result
-}
-
-func isFrameMediaUsage(value string) bool {
-	switch normalizeMediaUsageRole(value) {
-	case "firstframe", "startframe", "lastframe", "endframe":
-		return true
-	default:
-		return false
-	}
-}
-
-func isFrameMediaParam(param PowerParam) bool {
-	switch normalizeMediaUsageRole(param.Key) {
-	case "firstframe", "startframe", "lastframe", "endframe":
-		return true
-	default:
-		return false
-	}
-}
-
-func isReferenceImageMediaParam(param PowerParam) bool {
-	switch normalizeMediaUsageRole(param.Key) {
-	case "images", "reference", "referenceimage", "referenceimages":
-		return true
-	}
-	name := strings.TrimSpace(param.Name)
-	return strings.Contains(name, "参考图") || strings.Contains(name, "参考图片")
 }
 
 func normalizeMediaUsageRole(value string) string {

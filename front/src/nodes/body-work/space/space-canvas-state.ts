@@ -28,6 +28,7 @@ type PersistedCanvasEdge = {
   to: string;
   logical_from?: string;
   logical_to?: string;
+  purpose?: "media" | "structure" | "dependency";
   execution_mode?: "manual";
   media_usage?: string;
 };
@@ -121,6 +122,7 @@ export function persistedCanvasState(
       to: edge.to,
       ...(edge.logicalFrom ? { logical_from: edge.logicalFrom } : {}),
       ...(edge.logicalTo ? { logical_to: edge.logicalTo } : {}),
+      ...(edge.purpose ? { purpose: edge.purpose } : {}),
       ...(edge.executionMode === "manual"
         ? { execution_mode: "manual" as const }
         : {}),

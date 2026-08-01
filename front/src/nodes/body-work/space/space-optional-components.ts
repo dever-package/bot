@@ -1,5 +1,14 @@
 import { lazy } from "react";
 
+// These renderers are part of the normal canvas paint path. Splitting each of
+// them into its own async entry creates extra requests and visible fallbacks
+// without deferring a meaningful amount of work.
+export { AssetAudioPreview } from "../asset/asset-audio-preview";
+export { CanvasGroupNodeView } from "./space-group-node";
+export { CanvasResultView } from "./space-result-view";
+export { StoryboardInputReferenceEditor } from "./space-storyboard-reference-editor";
+export { StoryboardNodeContent } from "./space-storyboard-node";
+
 export const AgentInteractionPanel = lazy(() =>
   import("@/components/agent/interaction-panel").then((module) => ({
     default: module.AgentInteractionPanel,
@@ -9,12 +18,6 @@ export const AgentInteractionPanel = lazy(() =>
 export const AddNodeMenu = lazy(() =>
   import("./space-add-node-menu").then((module) => ({
     default: module.AddNodeMenu,
-  })),
-);
-
-export const AssetAudioPreview = lazy(() =>
-  import("../asset/asset-audio-preview").then((module) => ({
-    default: module.AssetAudioPreview,
   })),
 );
 
@@ -42,18 +45,6 @@ export const CanvasAgentResultContent = lazy(() =>
   })),
 );
 
-export const CanvasGroupNodeView = lazy(() =>
-  import("./space-group-node").then((module) => ({
-    default: module.CanvasGroupNodeView,
-  })),
-);
-
-export const CanvasResultView = lazy(() =>
-  import("./space-result-view").then((module) => ({
-    default: module.CanvasResultView,
-  })),
-);
-
 export const NodeDetailDialog = lazy(() =>
   import("./node-detail/node-detail-dialog").then((module) => ({
     default: module.NodeDetailDialog,
@@ -63,17 +54,5 @@ export const NodeDetailDialog = lazy(() =>
 export const VideoComposeView = lazy(() =>
   import("./space-video-compose-view").then((module) => ({
     default: module.VideoComposeView,
-  })),
-);
-
-export const StoryboardInputReferenceEditor = lazy(() =>
-  import("./space-storyboard-reference-editor").then((module) => ({
-    default: module.StoryboardInputReferenceEditor,
-  })),
-);
-
-export const StoryboardNodeContent = lazy(() =>
-  import("./space-storyboard-node").then((module) => ({
-    default: module.StoryboardNodeContent,
   })),
 );

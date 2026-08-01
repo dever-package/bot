@@ -170,9 +170,10 @@ func (Workbench) PostUploadSaveAsset(c *server.Context) error {
 		return botapi.WriteJSON(c, nil, err)
 	}
 	data, err := workbenchRunner.SaveUploadAsset(c.Context(), workbenchservice.SaveUploadAssetRequest{
-		TeamID:    botapi.Uint64FromBody(body, "team_id", "teamId"),
-		ProjectID: botapi.Uint64FromBody(body, "project_id", "projectId"),
-		File:      file,
+		TeamID:      botapi.Uint64FromBody(body, "team_id", "teamId"),
+		ProjectID:   botapi.Uint64FromBody(body, "project_id", "projectId"),
+		File:        file,
+		TextContent: botapi.TextFromBody(body, "text_content", "textContent"),
 	})
 	return botapi.WriteJSON(c, data, err)
 }

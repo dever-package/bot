@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -75,9 +76,10 @@ type SaveDialogueAssetRequest struct {
 }
 
 type SaveUploadAssetRequest struct {
-	TeamID    uint64
-	ProjectID uint64
-	File      uploadrepo.UploadFile
+	TeamID      uint64
+	ProjectID   uint64
+	File        uploadrepo.UploadFile
+	TextContent string
 }
 
 type ChatRoleBinding struct {
@@ -686,7 +688,7 @@ func (s Service) SaveUploadAsset(ctx context.Context, request SaveUploadAssetReq
 		Name:       name,
 		Kind:       kind,
 		Role:       assetmodel.RoleMaterial,
-		Content:    uploadAssetContent(kind, payload),
+		Content:    uploadAssetContent(kind, payload, request.TextContent),
 	})
 	if err != nil {
 		return nil, err
@@ -704,8 +706,30 @@ func uploadAssetKind(file uploadrepo.UploadFile) string {
 		return assetmodel.KindVideo
 	case kind == assetmodel.KindAudio || strings.HasPrefix(mimeType, "audio/"):
 		return assetmodel.KindAudio
+	case kind == assetmodel.KindText || isTextUploadFile(file):
+		return assetmodel.KindText
 	default:
 		return assetmodel.KindFile
+	}
+}
+
+func isTextUploadFile(file uploadrepo.UploadFile) bool {
+	switch strings.ToLower(strings.TrimSpace(file.Mime)) {
+	case "text/plain", "text/markdown", "text/x-markdown":
+		return true
+	}
+	ext := strings.ToLower(strings.TrimSpace(file.Ext))
+	if ext == "" {
+		ext = filepath.Ext(file.Name)
+	}
+	if ext != "" && !strings.HasPrefix(ext, ".") {
+		ext = "." + ext
+	}
+	switch ext {
+	case ".txt", ".md", ".markdown", ".mdown", ".mkd":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -721,7 +745,7 @@ func uploadAssetSource(file uploadrepo.UploadFile) map[string]any {
 	}
 }
 
-func uploadAssetContent(kind string, payload map[string]any) map[string]any {
+func uploadAssetContent(kind string, payload map[string]any, textContent string) map[string]any {
 	url := nestedText(payload, "url")
 	switch kind {
 	case assetmodel.KindImage:
@@ -730,6 +754,12 @@ func uploadAssetContent(kind string, payload map[string]any) map[string]any {
 		return map[string]any{"video": url, "videos": []any{payload}}
 	case assetmodel.KindAudio:
 		return map[string]any{"audio": url, "audios": []any{payload}}
+	case assetmodel.KindText:
+		return map[string]any{
+			"text":  textContent,
+			"file":  url,
+			"files": []any{payload},
+		}
 	default:
 		return map[string]any{
 			"file":  url,

@@ -33,7 +33,7 @@ var (
 		{"id": 4, "power_id": defaultImagePowerID, "param_id": ParamImageID, "show": PowerParamShowBySource, "status": 2, "sort": ParamSortImage},
 		{"id": 31, "power_id": defaultImagePowerID, "param_id": ParamImagesID, "show": PowerParamShowBySource, "status": 2, "sort": ParamSortImages},
 		{"id": 5, "power_id": defaultImagePowerID, "param_id": paramResolutionID, "show": PowerParamShowAlways, "status": 1, "sort": ParamSortResolution},
-		{"id": 6, "power_id": defaultImagePowerID, "param_id": paramAspectRatioID, "show": PowerParamShowAlways, "status": 1, "sort": ParamSortAspectRatio},
+		{"id": 6, "power_id": defaultImagePowerID, "param_id": paramAspectRatioID, "show": PowerParamShowBySource, "status": 1, "sort": ParamSortAspectRatio},
 		{"id": 7, "power_id": defaultVideoPowerID, "param_id": ParamPromptID, "show": PowerParamShowAlways, "status": 1, "sort": ParamSortPrompt},
 		{"id": 8, "power_id": defaultVideoPowerID, "param_id": ParamFirstFrameID, "show": PowerParamShowBySource, "status": 2, "sort": ParamSortFirstFrame},
 		{"id": 33, "power_id": defaultVideoPowerID, "param_id": ParamLastFrameID, "show": PowerParamShowBySource, "status": 2, "sort": ParamSortLastFrame},

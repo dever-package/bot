@@ -6,7 +6,7 @@ import {
   Loader2,
   Play,
 } from "lucide-react";
-import type { MouseEvent } from "react";
+import { memo, type MouseEvent } from "react";
 import type { NodeProps } from "@xyflow/react";
 import { SpaceTooltip } from "./space-tooltip";
 
@@ -24,7 +24,9 @@ export type StoryboardFrameNodeData = {
   onToggleCollapsed: () => void;
 };
 
-export function StoryboardFrameNode({ data }: NodeProps<any>) {
+export const StoryboardFrameNode = memo(function StoryboardFrameNode({
+  data,
+}: NodeProps<any>) {
   const frame = data as StoryboardFrameNodeData;
   return (
     <section
@@ -91,7 +93,7 @@ export function StoryboardFrameNode({ data }: NodeProps<any>) {
       )}
     </section>
   );
-}
+});
 
 function stopAnd(action: () => void) {
   return (event: MouseEvent<HTMLButtonElement>) => {

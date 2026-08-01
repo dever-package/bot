@@ -67,6 +67,7 @@ const (
 	GPTImage2SizeMapping = `{
 		"params":[6,7],
 		"rows":[
+			{"native_value":"auto","values":{"6":1,"7":37}},
 			{"native_value":"1024x1024","values":{"6":1,"7":4}},
 			{"native_value":"1536x864","values":{"6":1,"7":5}},
 			{"native_value":"864x1536","values":{"6":1,"7":6}},
@@ -77,6 +78,7 @@ const (
 			{"native_value":"1520x1216","values":{"6":1,"7":11}},
 			{"native_value":"1216x1520","values":{"6":1,"7":12}},
 			{"native_value":"1456x624","values":{"6":1,"7":13}},
+			{"native_value":"auto","values":{"6":2,"7":37}},
 			{"native_value":"2048x2048","values":{"6":2,"7":4}},
 			{"native_value":"2048x1152","values":{"6":2,"7":5}},
 			{"native_value":"1152x2048","values":{"6":2,"7":6}},
@@ -87,6 +89,7 @@ const (
 			{"native_value":"2000x1600","values":{"6":2,"7":11}},
 			{"native_value":"1600x2000","values":{"6":2,"7":12}},
 			{"native_value":"2016x864","values":{"6":2,"7":13}},
+			{"native_value":"auto","values":{"6":3,"7":37}},
 			{"native_value":"2880x2880","values":{"6":3,"7":4}},
 			{"native_value":"3840x2160","values":{"6":3,"7":5}},
 			{"native_value":"2160x3840","values":{"6":3,"7":6}},
@@ -99,7 +102,7 @@ const (
 			{"native_value":"3808x1632","values":{"6":3,"7":13}}
 		]
 	}`
-	doubaoSeedreamSizeMapping        = `{"params":[6,7],"rows":[{"native_value":"2048x2048","values":{"6":2,"7":4}},{"native_value":"2848x1600","values":{"6":2,"7":5}},{"native_value":"1600x2848","values":{"6":2,"7":6}},{"native_value":"2304x1728","values":{"6":2,"7":7}},{"native_value":"1728x2304","values":{"6":2,"7":8}},{"native_value":"2496x1664","values":{"6":2,"7":9}},{"native_value":"1664x2496","values":{"6":2,"7":10}},{"native_value":"3136x1344","values":{"6":2,"7":13}},{"native_value":"4096x4096","values":{"6":3,"7":4}},{"native_value":"5504x3040","values":{"6":3,"7":5}},{"native_value":"3040x5504","values":{"6":3,"7":6}},{"native_value":"4704x3520","values":{"6":3,"7":7}},{"native_value":"3520x4704","values":{"6":3,"7":8}},{"native_value":"4992x3328","values":{"6":3,"7":9}},{"native_value":"3328x4992","values":{"6":3,"7":10}},{"native_value":"6240x2656","values":{"6":3,"7":13}}]}`
+	DoubaoSeedreamSizeMapping        = `{"params":[6,7],"rows":[{"native_value":"2K","values":{"6":2,"7":37}},{"native_value":"2048x2048","values":{"6":2,"7":4}},{"native_value":"2848x1600","values":{"6":2,"7":5}},{"native_value":"1600x2848","values":{"6":2,"7":6}},{"native_value":"2304x1728","values":{"6":2,"7":7}},{"native_value":"1728x2304","values":{"6":2,"7":8}},{"native_value":"2496x1664","values":{"6":2,"7":9}},{"native_value":"1664x2496","values":{"6":2,"7":10}},{"native_value":"3136x1344","values":{"6":2,"7":13}},{"native_value":"4K","values":{"6":3,"7":37}},{"native_value":"4096x4096","values":{"6":3,"7":4}},{"native_value":"5504x3040","values":{"6":3,"7":5}},{"native_value":"3040x5504","values":{"6":3,"7":6}},{"native_value":"4704x3520","values":{"6":3,"7":7}},{"native_value":"3520x4704","values":{"6":3,"7":8}},{"native_value":"4992x3328","values":{"6":3,"7":9}},{"native_value":"3328x4992","values":{"6":3,"7":10}},{"native_value":"6240x2656","values":{"6":3,"7":13}}]}`
 	doubaoVideoResolutionMapping     = `[{"native_value":"720p","option_id":1},{"native_value":"1080p","option_id":2}]`
 	doubaoVideoRatioMapping          = `[{"native_value":"","option_id":4},{"native_value":"","option_id":5},{"native_value":"","option_id":6},{"native_value":"","option_id":7},{"native_value":"","option_id":8},{"native_value":"","option_id":13}]`
 	doubaoVoiceMapping               = `[{"native_value":"zh_female_vv_uranus_bigtts","option_id":23},{"native_value":"","option_id":24},{"native_value":"","option_id":25},{"native_value":"","option_id":26},{"native_value":"","option_id":27},{"native_value":"","option_id":28},{"native_value":"","option_id":29},{"native_value":"","option_id":30},{"native_value":"","option_id":31},{"native_value":"","option_id":32},{"native_value":"","option_id":33},{"native_value":"","option_id":34},{"native_value":"","option_id":35}]`
@@ -118,7 +121,7 @@ var (
 		{ID: 7, ServiceID: serviceShemicLabImageID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "prompt"},
 		{ID: 8, ServiceID: serviceShemicLabImageID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: GPTImage2SizeMapping},
 		{ID: 9, ServiceID: serviceShemicLabImageID, ParamID: ParamImageID, ParamRule: serviceParamRuleAttachment, Key: "image", Mapping: "[1]"},
-		{ID: 10, ServiceID: serviceDoubaoImageID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: doubaoSeedreamSizeMapping},
+		{ID: 10, ServiceID: serviceDoubaoImageID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: DoubaoSeedreamSizeMapping},
 		{ID: 11, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[0].type", Mapping: "text"},
 		{ID: 12, ServiceID: serviceDoubaoVideoID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "content[0].text"},
 		{ID: 13, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[1].type", Mapping: "image_url", Sort: 20},
@@ -154,7 +157,7 @@ var (
 		{ID: 59, ServiceID: serviceDoubaoImageID, ParamRule: serviceParamRuleFixed, Key: "sequential_image_generation", Mapping: "disabled", Sort: 4},
 		{ID: 60, ServiceID: serviceDoubaoImage5ID, ParamID: ParamImagesID, ParamRule: serviceParamRuleDirect, Key: "image", Sort: ParamSortImages},
 		{ID: 61, ServiceID: serviceDoubaoImage5ID, ParamRule: serviceParamRuleFixed, Key: "sequential_image_generation", Mapping: "disabled", Sort: 4},
-		{ID: 62, ServiceID: serviceDoubaoImage5ID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: doubaoSeedreamSizeMapping},
+		{ID: 62, ServiceID: serviceDoubaoImage5ID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: DoubaoSeedreamSizeMapping},
 		{ID: 63, ServiceID: serviceDoubaoImage5ID, ParamRule: serviceParamRuleFixed, Key: "watermark", Mapping: "false", FixedValueType: fixedValueTypeBoolean},
 		{ID: 64, ServiceID: serviceRunningHubVideoID, ParamID: ParamFirstFrameID, ParamRule: serviceParamRuleAttachment, Key: "firstImageUrl", Name: "首帧", Mapping: "[1]", FileValueFormat: ServiceParamFileValueFormatDataURL, Sort: ParamSortFirstFrame},
 		{ID: 65, ServiceID: serviceRunningHubVideoID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "prompt"},

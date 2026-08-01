@@ -475,7 +475,7 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	req.Billing.TeamID = teamID
 	req.Billing.ProjectID = req.ProjectID
 	now := time.Now()
-	runInput := mergeMaps(req.Input, req.Params)
+	runInput := canvasPowerRunInput(req)
 	if req.SourceTargetID > 0 {
 		runInput[CanvasPowerMetaSourceTargetID] = req.SourceTargetID
 	}
@@ -714,6 +714,17 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		"asset":       s.asset.AssetDetailMap(ctx, *asset, version),
 		"version":     assetservice.VersionToMap(*version),
 	}, nil
+}
+
+func canvasPowerRunInput(req CanvasPowerRunRequest) map[string]any {
+	input := mergeMaps(req.Input, req.Params)
+	if len(req.MediaReferences) > 0 {
+		input["prompt"] = energoninput.AppendMediaReferenceIndex(
+			textValue(input["prompt"]),
+			req.MediaReferences,
+		)
+	}
+	return input
 }
 
 func (s Service) ListProjectAssets(ctx context.Context, projectID uint64, flowID uint64, kind string) (map[string]any, error) {

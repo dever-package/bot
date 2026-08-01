@@ -59,7 +59,7 @@ func (s Service) PreflightCanvasPower(ctx context.Context, req CanvasPowerRunReq
 	if err != nil {
 		return err
 	}
-	input := mergeMaps(prepared.request.Input, prepared.request.Params)
+	input := canvasPowerRunInput(prepared.request)
 	return s.gateway.Validate(ctx, energonservice.GatewayRequest{
 		Method: "POST",
 		Path:   "/bot/admin/energon/request",

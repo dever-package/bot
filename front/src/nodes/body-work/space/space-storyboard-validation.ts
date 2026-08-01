@@ -2,6 +2,7 @@ import {
   MAX_STORYBOARD_SHOTS,
   STORYBOARD_TRANSITION_TYPES,
   isStoryboardShotDurationValid,
+  storyboardShotLinksPreviousState,
   storyboardVisibleSpeakerIds,
   type StoryboardDocument,
   type StoryboardMaterial,
@@ -113,6 +114,7 @@ export function storyboardValidationIssues(
 
   let previousMaterialIds = new Set<string>();
   let previousVisibleDialogue = false;
+  let previousExitState = "";
   let continuityChainLength = 0;
   const shotIds = new Set<string>();
   const shotBeats = new Map<string, number>();
@@ -191,6 +193,22 @@ export function storyboardValidationIssues(
     if (shot.match_previous && shot.continue_previous) {
       issues.push(shotIssue(shot, shotNumber, "不能同时匹配上一镜画面和延续上一镜视频"));
     }
+    const entryState = shot.continuity_state?.entry.trim() || "";
+    const exitState = shot.continuity_state?.exit.trim() || "";
+    if (!entryState) {
+      issues.push(shotIssue(shot, shotNumber, "请填写入镜状态"));
+    }
+    if (!exitState) {
+      issues.push(shotIssue(shot, shotNumber, "请填写出镜状态"));
+    }
+    if (
+      storyboardShotLinksPreviousState(shot, index) &&
+      entryState !== previousExitState
+    ) {
+      issues.push(
+        shotIssue(shot, shotNumber, "入镜状态必须与上一镜头的出镜状态完全一致"),
+      );
+    }
     if (!STORYBOARD_TRANSITION_TYPES.includes(shot.transition_type)) {
       issues.push(shotIssue(shot, shotNumber, "结构化转场类型无效"));
     }
@@ -249,6 +267,7 @@ export function storyboardValidationIssues(
     validateShotCaptions(shot, shotNumber, captionIds, issues);
     previousMaterialIds = materialIds;
     previousVisibleDialogue = visibleDialogue;
+    previousExitState = exitState;
   });
 
   for (const reference of storyboard.references) {

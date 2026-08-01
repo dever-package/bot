@@ -914,12 +914,19 @@ function normalizeCanvasEdge(
   if (!from || !to) {
     return null;
   }
+  const purpose = stringValue(value.purpose);
   return {
     id: stringValue(value.id) || `edge-${from}-${to}`,
     from,
     to,
     logicalFrom: stringValue(value.logical_from) || undefined,
     logicalTo: stringValue(value.logical_to) || undefined,
+    purpose:
+      purpose === "media" ||
+      purpose === "structure" ||
+      purpose === "dependency"
+        ? purpose
+        : undefined,
     executionMode:
       stringValue(value.execution_mode) === "manual"
         ? "manual"

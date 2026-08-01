@@ -263,6 +263,7 @@ function refreshStoryboardDerivedGroups(input: {
 }) {
   const nodes = [...input.canvas.nodes];
   let changed = false;
+  let compositionNodeId = "";
   const enabledSpecs = STORYBOARD_DERIVED_GROUP_SPECS.filter((spec) =>
     spec.enabled(input.storyboard),
   );
@@ -315,8 +316,32 @@ function refreshStoryboardDerivedGroups(input: {
       preservePosition: true,
     });
     changed = changed || Boolean(composition?.changed);
+    compositionNodeId = composition?.node.id || "";
   }
-  return changed ? { ...input.canvas, nodes } : input.canvas;
+  let edges = ensureDerivedGroupEdges(
+    input.canvas.edges,
+    nodes,
+    input.storyboardNode.id,
+    enabledSpecs,
+  );
+  edges = ensureStoryboardItemEdges(edges, nodes, input.storyboardNode.id);
+  edges = compositionNodeId
+    ? ensureStoryboardCompositionEdges(
+        edges,
+        nodes,
+        input.storyboardNode.id,
+        compositionNodeId,
+        enabledSpecs,
+      )
+    : removeStoryboardCompositionEdges(edges, input.storyboardNode.id);
+  const edgesChanged = edges !== input.canvas.edges;
+  return changed || edgesChanged
+    ? {
+        ...input.canvas,
+        nodes: changed ? nodes : input.canvas.nodes,
+        edges,
+      }
+    : input.canvas;
 }
 
 export function canvasStoryboardReferenceSourceSignature(
@@ -1175,13 +1200,8 @@ function ensureDerivedGroupEdges(
         group: SpaceCanvasNode;
       } => Boolean(entry.group),
     );
-  const groupIds = new Set(groups.map(({ group }) => group.id));
-  const managedNodeIds = new Set([storyboardNodeId, ...groupIds]);
-  const next = edges.filter((edge) => {
-    const from = edge.logicalFrom || edge.from;
-    const to = edge.logicalTo || edge.to;
-    return !(managedNodeIds.has(from) && managedNodeIds.has(to));
-  });
+  const prefix = `script-edge-${stableToken(storyboardNodeId)}-`;
+  const next = edges.filter((edge) => !edge.id.startsWith(prefix));
   for (const { spec, group } of groups) {
     const upstream = spec.direction === "upstream";
     const sourceGroups = (spec.sourceGroupKeys || [])
@@ -1200,12 +1220,13 @@ function ensureDerivedGroupEdges(
       next.push({
         id: uniqueEdgeId(
           next,
-          `script-edge-${stableToken(storyboardNodeId)}-${spec.key}-${stableToken(from)}`,
+          `${prefix}${spec.key}-${stableToken(from)}`,
         ),
         from,
         to,
         logicalFrom: from,
         logicalTo: to,
+        purpose: "structure",
         executionMode: upstream ? undefined : "manual",
       });
     }
@@ -1243,6 +1264,7 @@ function ensureStoryboardItemEdges(
         to: target.id,
         logicalFrom: source.id,
         logicalTo: target.id,
+        purpose: "dependency",
         executionMode:
           source.groupId && source.groupId === target.groupId
             ? undefined
@@ -1250,7 +1272,8 @@ function ensureStoryboardItemEdges(
       });
     }
   }
-  return reconcileCanvasGroupEdges(nodes, next);
+  const reconciled = reconcileCanvasGroupEdges(nodes, next);
+  return sameEdges(edges, reconciled) ? edges : reconciled;
 }
 
 function syncStoryboardCompositionNode(input: {
@@ -1433,34 +1456,21 @@ function ensureStoryboardCompositionEdges(
   const sources = sourceKeys
     .map((key) => findDerivedGroup(nodes, storyboardNodeId, key))
     .filter((node): node is SpaceCanvasNode => Boolean(node));
-  const managedSourceIDs = new Set([
-    storyboardNodeId,
-    ...nodes
-      .filter(
-        (node) =>
-          node.type === "group" &&
-          node.group?.origin === "script" &&
-          node.group.sourceNodeId === storyboardNodeId,
-      )
-      .map((node) => node.id),
-  ]);
-  const next = edges.filter((edge) => {
-    const from = edge.logicalFrom || edge.from;
-    const to = edge.logicalTo || edge.to;
-    return !(to === compositionNodeId && managedSourceIDs.has(from));
-  });
+  const prefix = `script-compose-edge-${stableToken(storyboardNodeId)}-`;
+  const next = edges.filter((edge) => !edge.id.startsWith(prefix));
   for (const source of sources.length
     ? sources
     : nodes.filter((node) => node.id === storyboardNodeId)) {
     next.push({
       id: uniqueEdgeId(
         next,
-        `script-compose-edge-${stableToken(storyboardNodeId)}-${stableToken(source.id)}`,
+        `${prefix}${stableToken(source.id)}`,
       ),
       from: source.id,
       to: compositionNodeId,
       logicalFrom: source.id,
       logicalTo: compositionNodeId,
+      purpose: "dependency",
       executionMode: "manual",
     });
   }
@@ -1478,20 +1488,24 @@ function removeStoryboardCompositionEdges(
 }
 
 function sameEdges(left: SpaceCanvasEdge[], right: SpaceCanvasEdge[]) {
-  return (
-    left.length === right.length &&
-    left.every((edge, index) => {
-      const candidate = right[index];
-      return (
-        edge.id === candidate.id &&
+  if (left.length !== right.length) {
+    return false;
+  }
+  const rightByID = new Map(right.map((edge) => [edge.id, edge]));
+  return left.every((edge) => {
+    const candidate = rightByID.get(edge.id);
+    return Boolean(
+      candidate &&
         edge.from === candidate.from &&
         edge.to === candidate.to &&
         (edge.logicalFrom || "") === (candidate.logicalFrom || "") &&
         (edge.logicalTo || "") === (candidate.logicalTo || "") &&
-        (edge.executionMode || "auto") === (candidate.executionMode || "auto")
-      );
-    })
-  );
+        (edge.purpose || "") === (candidate.purpose || "") &&
+        (edge.executionMode || "auto") ===
+          (candidate.executionMode || "auto") &&
+        (edge.mediaUsage || "") === (candidate.mediaUsage || ""),
+    );
+  });
 }
 
 function storyboardItemKey(

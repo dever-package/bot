@@ -1,4 +1,5 @@
 import { Music2, Video, X } from "lucide-react";
+import { FirstFrameVideo } from "../../shared/first-frame-video";
 import type { ComposerAssetItem } from "./space-prompt-composer";
 
 export function VideoComposeAssetPicker({
@@ -54,7 +55,7 @@ export function VideoComposeAssetPicker({
                       decoding="async"
                     />
                   ) : item.preview.videoUrl ? (
-                    <video
+                    <FirstFrameVideo
                       src={item.preview.videoUrl}
                       muted
                       playsInline

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { FirstFrameVideo } from "../../shared/first-frame-video";
 
 type AssetCoverKind = "image" | "video";
 
@@ -69,14 +70,13 @@ export function AssetLazyCover({
             onError={markFailed}
           />
         ) : (
-          <video
+          <FirstFrameVideo
             src={src}
             muted
             playsInline
             preload="metadata"
             aria-hidden="true"
-            onLoadedMetadata={markLoaded}
-            onLoadedData={markLoaded}
+            onFirstFrameReady={markLoaded}
             onError={markFailed}
           />
         )
