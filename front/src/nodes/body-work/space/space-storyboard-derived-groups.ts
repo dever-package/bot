@@ -4,7 +4,7 @@ import {
   nextCanvasNodeNo,
   powerNodeDefaultSize,
 } from "./space-model";
-import { isStoryboardPowerType } from "./space-power-presentation";
+import { isStoryboardPowerType } from "../shared/power-presentation";
 import {
   canvasReferenceContentFromTargets,
   canvasReferenceContentHasReferences,

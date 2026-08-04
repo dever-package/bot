@@ -148,6 +148,8 @@ export type PowerParam = {
   usage?: number;
   value_type?: "string" | "number" | string;
   default_value?: string;
+  active_when_key?: string;
+  active_when_value?: string;
   required?: boolean;
   upload_rule_id?: number;
   max_files?: number;

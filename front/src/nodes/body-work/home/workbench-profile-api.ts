@@ -1,5 +1,10 @@
 import { getCompatModule, request } from "@dever/front-plugin";
-import { isSuccessResponse } from "../shared/api-response";
+import {
+  isResponseRecord as isRecord,
+  responsePositiveNumber as numberValue,
+  responseText as textValue,
+  successfulResponseData,
+} from "../shared/api-response";
 
 const PROFILE_AVATAR_RULE_ID = 1;
 const PROFILE_AVATAR_MAX_SIZE = 10 * 1024 * 1024;
@@ -94,10 +99,7 @@ async function profileRequest(
   fallback: string,
 ) {
   const result = await request(`/user/auth/${path}`, method, payload);
-  if (!isSuccessResponse(result)) {
-    throw new Error(String(result?.message || result?.msg || fallback));
-  }
-  return isRecord(result?.data) ? result.data : {};
+  return successfulResponseData(result, fallback);
 }
 
 function normalizeWorkbenchProfile(value: unknown): WorkbenchProfile {
@@ -109,17 +111,4 @@ function normalizeWorkbenchProfile(value: unknown): WorkbenchProfile {
     avatar: textValue(profile.avatar),
     avatarFileID: numberValue(profile.avatar_file_id),
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function numberValue(value: unknown) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-
-function textValue(value: unknown) {
-  return value == null ? "" : String(value).trim();
 }

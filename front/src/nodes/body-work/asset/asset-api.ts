@@ -1,5 +1,12 @@
 import { joinSiteApi, request } from "@dever/front-plugin";
-import { isSuccessResponse } from "../shared/api-response";
+import {
+  asResponseRows as toRows,
+  isResponseRecord as isRecord,
+  responseNonNegativeNumber as nonNegativeNumber,
+  responsePositiveNumber as numberValue,
+  responseText as textValue,
+  successfulResponseData as responseData,
+} from "../shared/api-response";
 import { createInFlightRequestLoader } from "../shared/in-flight-request";
 import type {
   AssetCatalogOptions,
@@ -10,7 +17,6 @@ import type {
   AssetFilterOptions,
   AssetFilters,
   AssetKind,
-  AssetNodeOption,
   AssetPage,
   AssetRecord,
   AssetRole,
@@ -64,7 +70,6 @@ export function loadAssetFilterOptions(
       assetCates: toRows(catalog.asset_cates)
         .map(normalizeAssetCate)
         .filter(hasID),
-      nodes: toRows(filters.nodes).map(normalizeNode).filter(hasNodeKey),
     };
   });
 }
@@ -108,8 +113,8 @@ export function loadAssetPage(input: {
     const data = responseData(result, "加载资产失败");
     return {
       items: toRows(data.items).map(normalizeAssetRecord).filter(hasID),
-      page: positiveNumber(data.page, normalizedInput.page),
-      pageSize: positiveNumber(data.page_size, normalizedInput.pageSize),
+      page: numberValue(data.page, normalizedInput.page),
+      pageSize: numberValue(data.page_size, normalizedInput.pageSize),
       total: nonNegativeNumber(data.total),
       hasMore: Boolean(data.has_more),
     };
@@ -277,7 +282,7 @@ function normalizeVersion(value: any): AssetVersion {
     requestID: textValue(value?.request_id),
     nodeKey: textValue(value?.node_key),
     source: isRecord(value?.source) ? value.source : {},
-    version: positiveNumber(value?.version, 1),
+    version: numberValue(value?.version, 1),
     content: value?.content,
     summary: textValue(value?.summary),
     createdAt: textValue(value?.created_at),
@@ -316,52 +321,6 @@ function normalizeAssetCate(value: any): AssetCateOption {
   };
 }
 
-function normalizeNode(value: any): AssetNodeOption {
-  return {
-    projectID: numberValue(value?.project_id),
-    assetCateID: numberValue(value?.asset_cate_id),
-    nodeKey: textValue(value?.node_key),
-    name: textValue(value?.name) || "未命名节点",
-  };
-}
-
-function responseData(result: any, fallback: string): Record<string, any> {
-  if (!isSuccessResponse(result)) {
-    throw new Error(String(result?.message || result?.msg || fallback));
-  }
-  return isRecord(result?.data) ? result.data : {};
-}
-
 function hasID<T extends { id: number }>(value: T) {
   return value.id > 0;
-}
-
-function hasNodeKey(value: AssetNodeOption) {
-  return value.projectID > 0 && Boolean(value.nodeKey);
-}
-
-function toRows(value: unknown): any[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function isRecord(value: unknown): value is Record<string, any> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function numberValue(value: unknown) {
-  const number = Number(value || 0);
-  return Number.isFinite(number) && number > 0 ? number : 0;
-}
-
-function positiveNumber(value: unknown, fallback: number) {
-  return numberValue(value) || fallback;
-}
-
-function nonNegativeNumber(value: unknown) {
-  const number = Number(value || 0);
-  return Number.isFinite(number) && number >= 0 ? number : 0;
-}
-
-function textValue(value: unknown) {
-  return value == null ? "" : String(value).trim();
 }

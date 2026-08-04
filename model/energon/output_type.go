@@ -7,11 +7,17 @@ import (
 )
 
 const (
-	OutputTypeGeneral      = "general"
-	OutputTypeStoryboard   = "storyboard"
-	OutputTypeSpeech       = "speech"
-	OutputTypeLipSync      = "lip_sync"
-	OutputTypeVideoCompose = "video_compose"
+	OutputTypeGeneral        = "general"
+	OutputTypeStoryboard     = "storyboard"
+	OutputTypeStoryboardGrid = "storyboard_grid"
+	OutputTypeSpeech         = "speech"
+	OutputTypeLipSync        = "lip_sync"
+	OutputTypeVideoCompose   = "video_compose"
+)
+
+const (
+	StoryboardGridMinImages = 2
+	StoryboardGridMaxImages = 9
 )
 
 const (
@@ -134,6 +140,15 @@ var outputTypeSpecs = []OutputTypeSpec{
 		DefaultHeight: 360,
 		Structured:    true,
 		Sort:          20,
+	},
+	{
+		Key:           OutputTypeStoryboardGrid,
+		Name:          "宫格",
+		AllowedKinds:  []string{"image"},
+		ViewMode:      "storyboard_grid",
+		DefaultWidth:  520,
+		DefaultHeight: 420,
+		Sort:          25,
 	},
 	{
 		Key:           OutputTypeSpeech,
@@ -332,6 +347,11 @@ func IsStoryboardPower(power Power) bool {
 func IsVideoComposePower(power Power) bool {
 	return NormalizePowerKind(power.Kind) == "video" &&
 		NormalizeOutputType(power.OutputType) == OutputTypeVideoCompose
+}
+
+func IsStoryboardGridPower(power Power) bool {
+	return NormalizePowerKind(power.Kind) == "image" &&
+		NormalizeOutputType(power.OutputType) == OutputTypeStoryboardGrid
 }
 
 func IsSpeechPower(power Power) bool {

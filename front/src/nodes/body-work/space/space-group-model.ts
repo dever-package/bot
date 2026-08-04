@@ -8,10 +8,6 @@ export const MAX_GROUP_NODE_SIZE = { width: 2400, height: 1600 };
 const GROUP_HEADER_HEIGHT = 48;
 const GROUP_CONTENT_PADDING = 16;
 
-export function isCanvasGroupNode(node?: SpaceCanvasNode | null) {
-  return node?.type === "group";
-}
-
 export function canvasGroupMembers(nodes: SpaceCanvasNode[], groupId: string) {
   return nodes.filter((node) => node.groupId === groupId);
 }
@@ -94,15 +90,6 @@ export function withCanvasNodeGroupAtPosition(
   }
   return nodes.map((node) =>
     node.id === nodeId ? { ...node, groupId: groupId || undefined } : node,
-  );
-}
-
-export function withoutCanvasGroupAndMembers(
-  nodes: SpaceCanvasNode[],
-  groupId: string,
-) {
-  return nodes.filter(
-    (node) => node.id !== groupId && node.groupId !== groupId,
   );
 }
 

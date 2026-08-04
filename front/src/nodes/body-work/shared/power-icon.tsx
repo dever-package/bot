@@ -12,13 +12,15 @@ import {
   Workflow,
   type LucideIcon,
 } from "lucide-react";
-import { resolveConfiguredLucideIcon } from "../shared/configured-icon";
-import { resolvePowerPresentation } from "./space-power-presentation";
-import type { PowerOption } from "./types";
+import { resolveConfiguredLucideIcon } from "./configured-icon";
+import {
+  resolvePowerPresentation,
+  type PowerPresentationSource,
+} from "./power-presentation";
 
-export type PowerIconSource = Partial<
-  Pick<PowerOption, "icon" | "kind" | "outputType" | "output">
->;
+export type PowerIconSource = PowerPresentationSource & {
+  icon?: string;
+};
 
 export function PowerIcon({
   power,

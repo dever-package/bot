@@ -8,6 +8,7 @@ import {
 import { toast } from "sonner";
 import { useNavigate } from "@dever/front-plugin";
 import { useAuthUserScopeKey } from "../shared/auth-scope";
+import { requestErrorMessage as errorMessage } from "../shared/api-response";
 import {
   createProject,
   loadProjectList,
@@ -289,8 +290,4 @@ function ProjectTrashEmpty() {
       <strong>回收站为空</strong>
     </div>
   );
-}
-
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error && error.message ? error.message : fallback;
 }

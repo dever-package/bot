@@ -1219,7 +1219,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
         const message = runtimeErrorMessage(currentError, "智能体测试失败。");
         const recovered = isRecoverableAgentStreamErrorMessage(message)
           ? await recoverAssistantFinalAfterStreamError({
-              assistantID,
               activeSessionID,
               assistantMessage,
               requestID: activeRequestID || requestID,
@@ -1279,7 +1278,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
   };
 
   const recoverAssistantFinalAfterStreamError = async ({
-    assistantID,
     activeSessionID,
     assistantMessage,
     requestID,
@@ -1293,7 +1291,6 @@ export function ShowAgent({ item, store }: NodeItemProps) {
     applyFrame,
     saveFinal,
   }: {
-    assistantID: string;
     activeSessionID: number;
     assistantMessage: AgentMessage;
     requestID: string;

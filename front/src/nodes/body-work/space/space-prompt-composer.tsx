@@ -17,12 +17,13 @@ import {
   Paperclip,
 } from "lucide-react";
 import {
-  defaultPowerParamValue,
   isPowerParamOptionSelected,
   normalizePowerParamValue,
+  powerParamBooleanValue,
   powerParamOptionValue,
+  resolvePowerParamOption,
 } from "./space-power-param";
-import { PowerIcon, PowerParamIcon } from "./space-power-icon";
+import { PowerIcon, PowerParamIcon } from "../shared/power-icon";
 import {
   CanvasReferenceEditor,
   type CanvasReferencePickerRequest,
@@ -32,7 +33,6 @@ import {
   type CanvasConnectedMediaReference,
   type MediaUsageOption,
 } from "./space-media-references";
-import { findAssetMediaURL } from "../asset/asset-content";
 import { AssetKindIcon } from "../asset/asset-preview";
 import { normalizeAssetRecord } from "../asset/asset-api";
 import {
@@ -42,11 +42,10 @@ import {
 import type { AssetKind as LibraryAssetKind } from "../asset/asset-types";
 import {
   acceptedAssetKinds,
+  isToolbarPowerParam,
   isUploadPowerParam,
 } from "./space-media-param";
-import {
-  reconcileConnectedCanvasReferences,
-} from "./space-reference-content";
+import { reconcileConnectedCanvasReferences } from "./space-reference-content";
 import { SpaceTooltip } from "./space-tooltip";
 import type {
   CanvasContentPreview,
@@ -55,9 +54,6 @@ import type {
   PowerParam,
   PowerParamSource,
 } from "./types";
-
-export { defaultPowerParamValue } from "./space-power-param";
-export { isUploadPowerParam } from "./space-media-param";
 
 export type ComposerAssetPreview = CanvasContentPreview;
 
@@ -87,6 +83,10 @@ const normalizeParamPreviewType =
   streamRequestParamsModule.normalizeParamPreviewType as (
     value: unknown,
   ) => ParamPreviewType;
+const isPowerParamConditionController =
+  (streamRequestParamsModule.isPowerParamConditionController as
+    | ((param: PowerParam, params: PowerParam[]) => boolean)
+    | undefined) || (() => false);
 
 export type ComposerAssetItem = {
   id: string;
@@ -254,7 +254,12 @@ export function PromptComposer({
     },
     [],
   );
-  const optionParams = params.filter(isToolbarPowerParam);
+  const toolbarParams = params.filter(
+    (param) =>
+      isUploadPowerParam(param) ||
+      isToolbarPowerParam(param) ||
+      isPowerParamConditionController(param, params),
+  );
   const selectedSource = sourceOptions.find(
     (source) =>
       source.target_id === selectedSourceId || source.id === selectedSourceId,
@@ -269,6 +274,12 @@ export function PromptComposer({
     referenceContent,
     connectedTargets,
   );
+  const referenceUsageOptions = mediaUsageOptions.map((option) => ({
+    key: option.key,
+    label: option.label,
+    acceptedKinds: option.acceptedKinds,
+    maxFiles: option.maxFiles,
+  }));
   const mediaParamCounts = referenceUsageCounts(resolvedReferences.content);
   const currentReferenceSignature = referenceStateSignature(
     value,
@@ -312,12 +323,7 @@ export function PromptComposer({
             textEditable={textInputEnabled}
             placeholder={placeholder}
             items={referenceItems}
-            usageOptions={mediaUsageOptions.map((option) => ({
-              key: option.key,
-              label: option.label,
-              acceptedKinds: option.acceptedKinds,
-              maxFiles: option.maxFiles,
-            }))}
+            usageOptions={referenceUsageOptions}
             pickerRequest={referencePickerRequest}
             onPickerRequestConsumed={consumeReferencePickerRequest}
             assetReferenceProvider={
@@ -338,49 +344,6 @@ export function PromptComposer({
       </div>
       <div className="ws-prompt-toolbar">
         <div className="ws-prompt-tools">
-          {showMediaParamButtons
-            ? uploadParams.map((param) => (
-                <MediaParamButton
-                  key={param.key}
-                  param={param}
-                  power={mediaParamPower}
-                  selectedCount={mediaParamCounts.get(param.key) || 0}
-                  disabled={disabled || running}
-                  onClick={() => openMediaPicker(param)}
-                />
-              ))
-            : null}
-
-          {!showMediaParamButtons && uploadParams.length > 0 ? (
-            <ComposerMenu
-              id="attachments"
-              openKey={openKey}
-              label="添加素材"
-              icon={<Paperclip size={17} />}
-              iconOnly
-              variant="attachments"
-              disabled={disabled || running}
-              onToggle={setOpenKey}
-            >
-              <div className="ws-prompt-menu-list is-attachments" role="menu">
-                {uploadParams.map((param) => (
-                  <button
-                    key={param.key}
-                    type="button"
-                    className="ws-prompt-menu-item"
-                    role="menuitem"
-                    onClick={() => openMediaPicker(param)}
-                  >
-                    <span className="ws-prompt-menu-kind-icon">
-                      <AssetKindIcon kind={uploadParamKind(param)} />
-                    </span>
-                    <span>{uploadParamLabel(param)}</span>
-                  </button>
-                ))}
-              </div>
-            </ComposerMenu>
-          ) : null}
-
           {sourceOptions.length > 0 ? (
             <ComposerMenu
               id="source"
@@ -414,17 +377,66 @@ export function PromptComposer({
             </ComposerMenu>
           ) : null}
 
-          {optionParams.map((param) => (
-            <ParamMenu
-              key={param.key}
-              param={param}
-              value={paramValues[param.key]}
+          {!showMediaParamButtons && uploadParams.length > 0 ? (
+            <ComposerMenu
+              id="attachments"
               openKey={openKey}
+              label="添加素材"
+              icon={<Paperclip size={17} />}
+              iconOnly
+              variant="attachments"
               disabled={disabled || running}
               onToggle={setOpenKey}
-              onChange={(nextValue) => onParamChange?.(param.key, nextValue)}
-            />
-          ))}
+            >
+              <div className="ws-prompt-menu-list is-attachments" role="menu">
+                {uploadParams.map((param) => (
+                  <button
+                    key={param.key}
+                    type="button"
+                    className="ws-prompt-menu-item"
+                    role="menuitem"
+                    onClick={() => openMediaPicker(param)}
+                  >
+                    <span className="ws-prompt-menu-kind-icon">
+                      <AssetKindIcon kind={uploadParamKind(param)} />
+                    </span>
+                    <span>{uploadParamLabel(param)}</span>
+                  </button>
+                ))}
+              </div>
+            </ComposerMenu>
+          ) : null}
+
+          {toolbarParams.map((param) => {
+            if (isUploadPowerParam(param)) {
+              if (!showMediaParamButtons) {
+                return null;
+              }
+              return (
+                <MediaParamButton
+                  key={param.key}
+                  param={param}
+                  power={mediaParamPower}
+                  selectedCount={mediaParamCounts.get(param.key) || 0}
+                  disabled={disabled || running}
+                  onClick={() => openMediaPicker(param)}
+                />
+              );
+            }
+            return (
+              <ParamMenu
+                key={param.key}
+                param={param}
+                value={paramValues[param.key]}
+                openKey={openKey}
+                disabled={disabled || running}
+                onToggle={setOpenKey}
+                onChange={(nextValue) =>
+                  onParamChange?.(param.key, nextValue)
+                }
+              />
+            );
+          })}
         </div>
 
         <div className="ws-prompt-submit-group">
@@ -690,12 +702,15 @@ function ParamEditor({
   onClose: () => void;
 }) {
   if (param.type === "option" || param.type === "select") {
+    const options = param.options || [];
     return (
       <div className="ws-prompt-menu-list">
-        {(param.options || []).map((option) => {
-          const active = isPowerParamOptionSelected(option, [
-            String(value ?? ""),
-          ]);
+        {options.map((option) => {
+          const active = isPowerParamOptionSelected(
+            option,
+            [String(value ?? "")],
+            options,
+          );
           return (
             <button
               key={option.id || option.value}
@@ -722,10 +737,11 @@ function ParamEditor({
 
   if (param.type === "multi_option") {
     const selected = valueAsList(value);
+    const options = param.options || [];
     return (
       <div className="ws-prompt-menu-list">
-        {(param.options || []).map((option) => {
-          const active = isPowerParamOptionSelected(option, selected);
+        {options.map((option) => {
+          const active = isPowerParamOptionSelected(option, selected, options);
           return (
             <button
               key={option.id || option.value}
@@ -735,7 +751,8 @@ function ParamEditor({
                 let next = [...selected];
                 if (active) {
                   next = next.filter(
-                    (current) => !isPowerParamOptionSelected(option, [current]),
+                    (current) =>
+                      !isPowerParamOptionSelected(option, [current], options),
                   );
                 } else {
                   next.push(powerParamOptionValue(option));
@@ -753,7 +770,7 @@ function ParamEditor({
   }
 
   if (param.type === "switch") {
-    const active = truthy(value);
+    const active = powerParamBooleanValue(value);
     return (
       <button
         type="button"
@@ -794,34 +811,16 @@ function ParamEditor({
   );
 }
 
-export function isPromptPowerParam(param: PowerParam) {
-  return param.type === "prompt";
-}
-
-export function isToolbarPowerParam(param: PowerParam) {
-  if (
-    param.type === "hidden" ||
-    param.type === "description" ||
-    isPromptPowerParam(param) ||
-    isUploadPowerParam(param)
-  ) {
-    return false;
-  }
-  return true;
-}
-
 function paramControlLabel(param: PowerParam, value: unknown) {
   if (param.type === "switch") {
-    return `${param.name}: ${truthy(value) ? "开" : "关"}`;
+    return `${param.name}: ${powerParamBooleanValue(value) ? "开" : "关"}`;
   }
   if (param.type === "multi_option") {
     const count = valueAsList(value).length;
     return count > 0 ? `${param.name} ${count}` : param.name;
   }
   if (param.type === "option" || param.type === "select") {
-    const option = param.options?.find((item) =>
-      isPowerParamOptionSelected(item, [String(value ?? "")]),
-    );
+    const option = resolvePowerParamOption(param.options || [], value);
     return option?.name || param.name;
   }
   const text = valueAsText(value);
@@ -919,16 +918,6 @@ function valueAsList(value: unknown) {
     return value ? [value] : [];
   }
   return value ? [String(value)] : [];
-}
-
-function truthy(value: unknown) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-  const text = String(value ?? "")
-    .trim()
-    .toLowerCase();
-  return text === "1" || text === "true" || text === "yes" || text === "on";
 }
 
 function parseJSONValue(value: string) {

@@ -34,6 +34,7 @@ func init() {
 	frontcron.RegisterBootstrap(EnsureEnergonSeedreamSizeMapping)
 	frontcron.RegisterBootstrap(EnsureEnergonVideoReferenceParams)
 	frontcron.RegisterBootstrap(EnsureEnergonVideoComposePower)
+	frontcron.RegisterBootstrap(EnsureEnergonStoryboardGridPower)
 	frontcron.RegisterBootstrap(EnsureHistoryCleanupCron)
 }
 

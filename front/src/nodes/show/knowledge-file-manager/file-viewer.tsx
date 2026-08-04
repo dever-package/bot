@@ -147,7 +147,6 @@ function FilePreview({
     return (
       <AudioPreview
         file={file}
-        downloadURL={downloadURL}
         previewURL={previewURL}
         onStatusChange={onStatusChange}
       />
@@ -257,12 +256,10 @@ function VideoPreview({
 
 function AudioPreview({
   file,
-  downloadURL,
   previewURL,
   onStatusChange,
 }: {
   file: KnowledgeFileContent
-  downloadURL: string
   previewURL: string
   onStatusChange: (status: KnowledgeFileViewerStatus | null) => void
 }) {

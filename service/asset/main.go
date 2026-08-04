@@ -63,22 +63,15 @@ func (Service) LatestProjectAssetByCate(ctx context.Context, projectID uint64, a
 	if projectID == 0 || assetCateID == 0 {
 		return nil, nil
 	}
-	rows := assetmodel.NewAssetModel().Select(ctx, map[string]any{
+	latest := assetmodel.NewAssetModel().Find(ctx, map[string]any{
 		"project_id":    projectID,
 		"asset_cate_id": assetCateID,
 		"role":          assetmodel.RoleWork,
 		"status":        assetmodel.StatusCurrent,
+		"version_id":    map[string]any{"gt": 0},
+	}, map[string]any{
+		"order": "main.version_id desc,main.id desc",
 	})
-	var latest *assetmodel.Asset
-	for _, row := range rows {
-		if row == nil || row.VersionID == 0 {
-			continue
-		}
-		if latest == nil || row.VersionID > latest.VersionID {
-			value := *row
-			latest = &value
-		}
-	}
 	if latest == nil {
 		return nil, nil
 	}
@@ -92,18 +85,52 @@ func (Service) FindVersion(ctx context.Context, id uint64) *assetmodel.Version {
 	return assetmodel.NewVersionModel().Find(ctx, map[string]any{"id": id})
 }
 
-func (Service) ListProject(ctx context.Context, projectID uint64, flowID uint64, kind string) (map[string]any, error) {
-	assets := listProjectAssets(ctx, projectID, flowID, NormalizeKindFilter(kind))
-	items := make([]map[string]any, 0, len(assets))
-	service := Service{}
-	for _, asset := range assets {
-		item := AssetToMap(asset)
-		if version := service.FindVersion(ctx, asset.VersionID); version != nil {
-			item["version"] = VersionToMap(*version)
-		}
-		items = append(items, item)
+func (Service) ListProject(
+	ctx context.Context,
+	projectID uint64,
+	flowID uint64,
+	kind string,
+	requestedPage int,
+	requestedPageSize int,
+) (map[string]any, error) {
+	page, pageSize := normalizeAssetPage(requestedPage, requestedPageSize)
+	if projectID == 0 {
+		return emptyAssetPage(page, pageSize), nil
 	}
-	return map[string]any{"items": items}, nil
+	filter := map[string]any{
+		"project_id": projectID,
+		"status":     assetmodel.StatusCurrent,
+		"version_id": map[string]any{"gt": 0},
+	}
+	if flowID > 0 {
+		filter["flow_id"] = flowID
+	}
+	if kind = NormalizeKindFilter(kind); kind != "" {
+		filter["kind"] = kind
+	} else {
+		filter["kind"] = map[string]any{"neq": assetmodel.KindCollection}
+	}
+	assetModel := assetmodel.NewAssetModel()
+	total := int(assetModel.Count(ctx, filter))
+	rows := assetModel.Select(ctx, filter, map[string]any{
+		"order":    "main.sort asc,main.id desc",
+		"page":     page,
+		"pageSize": pageSize,
+	})
+	versions := currentVersionsByID(ctx, rows, QueryContentFull)
+	items := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			items = append(items, assetListMap(*row, versions[row.VersionID], QueryContentFull))
+		}
+	}
+	return map[string]any{
+		"items":     items,
+		"page":      page,
+		"page_size": pageSize,
+		"total":     total,
+		"has_more":  page*pageSize < total,
+	}, nil
 }
 
 func (Service) ProjectDetail(ctx context.Context, projectID uint64, assetID uint64) (map[string]any, error) {
@@ -336,10 +363,7 @@ func updateAssetVersionPointer(
 	versionID uint64,
 ) bool {
 	assetModel := assetmodel.NewAssetModel()
-	affected := assetModel.Update(ctx, map[string]any{
-		"id":     assetID,
-		"status": map[string]any{"neq": assetmodel.StatusDeleted},
-	}, map[string]any{
+	updates := map[string]any{
 		"kind":          req.Kind,
 		"role":          req.Role,
 		"collection_id": req.CollectionID,
@@ -350,7 +374,14 @@ func updateAssetVersionPointer(
 		"version_id":    versionID,
 		"status":        assetmodel.StatusCurrent,
 		"deleted_at":    nil,
-	})
+	}
+	if req.Sort > 0 {
+		updates["sort"] = req.Sort
+	}
+	affected := assetModel.Update(ctx, map[string]any{
+		"id":     assetID,
+		"status": map[string]any{"neq": assetmodel.StatusDeleted},
+	}, updates)
 	if affected == 0 {
 		return false
 	}
@@ -621,14 +652,6 @@ func versionMetadataToMap(row assetmodel.Version) map[string]any {
 	}
 }
 
-func VersionsToMaps(rows []assetmodel.Version) []map[string]any {
-	result := make([]map[string]any, 0, len(rows))
-	for _, row := range rows {
-		result = append(result, VersionToMap(row))
-	}
-	return result
-}
-
 func NormalizeKind(kind string) string {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case assetmodel.KindImage, assetmodel.KindAudio, assetmodel.KindVideo, assetmodel.KindRichText, assetmodel.KindFile, assetmodel.KindCollection:
@@ -775,6 +798,13 @@ func contentMediaURLs(value any, kind string) []string {
 	return contentMediaURLsFrom(value, kind, 0)
 }
 
+// ContentMediaURLs exposes the canonical media extraction path to business
+// services that need to copy an existing asset version without understanding
+// every supported content envelope.
+func ContentMediaURLs(value any, kind string) []string {
+	return contentMediaURLs(value, NormalizeKind(kind))
+}
+
 func contentMediaURLsFrom(value any, kind string, depth int) []string {
 	result := make([]string, 0)
 	seen := map[string]struct{}{}
@@ -908,6 +938,8 @@ func isStructuredAssetDocument(document map[string]any) bool {
 			document["files"] != nil
 	case "storyboard":
 		return document["shots"] != nil
+	case "storyboard_grid":
+		return document["frames"] != nil
 	case "file":
 		return document["file_url"] != nil || document["file"] != nil
 	}
@@ -915,40 +947,15 @@ func isStructuredAssetDocument(document map[string]any) bool {
 	return format == "markdown" || format == "rich_json"
 }
 
-func listProjectAssets(ctx context.Context, projectID uint64, flowID uint64, kind string) []assetmodel.Asset {
-	if projectID == 0 {
-		return nil
-	}
-	filter := map[string]any{
-		"project_id": projectID,
-		"status":     assetmodel.StatusCurrent,
-	}
-	if flowID > 0 {
-		filter["flow_id"] = flowID
-	}
-	if kind != "" {
-		filter["kind"] = kind
-	} else {
-		filter["kind"] = map[string]any{"neq": assetmodel.KindCollection}
-	}
-	rows := assetmodel.NewAssetModel().Select(ctx, filter)
-	result := make([]assetmodel.Asset, 0, len(rows))
-	for _, row := range rows {
-		if row != nil && row.VersionID > 0 {
-			result = append(result, *row)
-		}
-	}
-	return result
-}
-
 func nextVersion(ctx context.Context, assetID uint64) int {
-	maxVersion := 0
-	for _, row := range assetmodel.NewVersionModel().Select(ctx, map[string]any{"asset_id": assetID}) {
-		if row != nil && row.Version > maxVersion {
-			maxVersion = row.Version
-		}
+	latest := assetmodel.NewVersionModel().Find(ctx, map[string]any{"asset_id": assetID}, map[string]any{
+		"field": "main.version",
+		"order": "main.version desc",
+	})
+	if latest == nil {
+		return 1
 	}
-	return maxVersion + 1
+	return latest.Version + 1
 }
 
 func safeInsertAsset(ctx context.Context, record map[string]any) (id uint64) {

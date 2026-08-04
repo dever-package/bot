@@ -68,6 +68,7 @@ import type {
   ConnectState,
   ContextMenuState,
   DebugApprovalSubmit,
+  DebugPendingApproval,
   FlowEdge,
   FlowItem,
   GraphExecutionState,

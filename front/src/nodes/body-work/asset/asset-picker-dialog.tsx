@@ -2,6 +2,7 @@ import { Loader2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 import { BodyWorkTooltip } from "../shared/body-work-tooltip";
+import { requestErrorMessage as errorText } from "../shared/api-response";
 import { AssetBrowser } from "./asset-browser";
 import type {
   AssetContentMode,
@@ -249,6 +250,7 @@ export function AssetPickerDialog({
           initialFilters={browserFilters}
           allowedKinds={allowedKinds}
           contentMode={contentMode}
+          detailLayer="nested"
           selectable
           excludeCollections
           selectedAssetIDs={selectedAssetIDs}
@@ -333,8 +335,4 @@ function uniquePositiveIDs(ids: number[]) {
   return Array.from(
     new Set(ids.map(Number).filter((id) => Number.isFinite(id) && id > 0)),
   );
-}
-
-function errorText(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
 }

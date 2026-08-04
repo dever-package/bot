@@ -1,3 +1,8 @@
+import {
+  asPlainRecord as recordValue,
+  finiteNumberOrZero as numberValue,
+} from "../shared/structured-json";
+
 export const VIDEO_COMPOSE_TRANSITION_GROUPS = [
   {
     name: "基础",
@@ -64,6 +69,11 @@ export const VIDEO_COMPOSE_TRANSITION_GROUPS = [
   },
 ] as const;
 
+export function formatVideoComposeDuration(value: number) {
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(1);
+}
+
 export type VideoComposeTransitionType =
   (typeof VIDEO_COMPOSE_TRANSITION_GROUPS)[number]["options"][number]["key"];
 
@@ -73,14 +83,30 @@ export type VideoComposeAssetReference = {
   label: string;
 };
 
+export type VideoComposeAudioFit = "trim" | "strict";
+
 export type VideoComposeSpeechTrack = {
   id: string;
   audio?: VideoComposeAssetReference;
   startTime: number;
+  sourceStart: number;
+  fit: VideoComposeAudioFit;
   kind: "dialogue" | "narration";
   characterId?: string;
   text: string;
   volume: number;
+};
+
+export type VideoComposeGlobalAudioTrack = {
+  id: string;
+  audio?: VideoComposeAssetReference;
+  startTime: number;
+  sourceStart: number;
+  kind: "music" | "narration";
+  volume: number;
+  fit: VideoComposeAudioFit;
+  loop: boolean;
+  fadeOut: number;
 };
 
 export type VideoComposeSubtitleTrack = {
@@ -116,6 +142,7 @@ export type VideoComposeClip = {
 export type CanvasVideoComposition = {
   version: 3;
   clips: VideoComposeClip[];
+  audioTracks: VideoComposeGlobalAudioTrack[];
   settings: {
     resolution: string;
     fps: number;
@@ -126,6 +153,7 @@ export function emptyVideoComposition(): CanvasVideoComposition {
   return {
     version: 3,
     clips: [],
+    audioTracks: [],
     settings: {
       resolution: "auto",
       fps: 0,
@@ -144,9 +172,15 @@ export function normalizeVideoComposition(
     ? row.clips.map(normalizeVideoComposeClip).filter(Boolean)
     : [];
   const settings = recordValue(row.settings);
+  const audioTracks = Array.isArray(row.audioTracks ?? row.audio_tracks)
+    ? (row.audioTracks ?? row.audio_tracks)
+        .map(normalizeVideoComposeGlobalAudioTrack)
+        .filter(Boolean)
+    : [];
   return {
     version: 3,
     clips: clips as VideoComposeClip[],
+    audioTracks: audioTracks as VideoComposeGlobalAudioTrack[],
     settings: {
       resolution: stringValue(settings.resolution) || "auto",
       fps: clampNumber(settings.fps, 0, 120, 0),
@@ -174,11 +208,15 @@ export function videoCompositionDuration(composition: CanvasVideoComposition) {
 export function videoCompositionBlockingIssues(
   composition: CanvasVideoComposition,
 ) {
-  return composition.clips.flatMap((clip, index) =>
+  const clipIssues = composition.clips.flatMap((clip, index) =>
     clip.blockingIssues.map(
       (issue) => `${clip.title || `镜头 ${index + 1}`}：${issue}`,
     ),
   );
+  const audioIssues = composition.audioTracks.flatMap((track, index) =>
+    track.audio ? [] : [`全片声音 ${index + 1}：缺少音频素材`],
+  );
+  return [...clipIssues, ...audioIssues];
 }
 
 export function videoComposeReferenceKey(reference?: VideoComposeAssetReference) {
@@ -224,7 +262,7 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
     title: stringValue(row.title) || visualVideo?.label || "镜头",
     ...(visualVideo ? { visualVideo } : {}),
     ...(originalAudioSource ? { originalAudioSource } : {}),
-    duration: Math.max(0, numberValue(row.duration)),
+    duration: normalizeTargetDuration(row.duration),
     originalVolume: clampNumber(
       row.originalVolume ?? row.original_volume,
       0,
@@ -308,11 +346,63 @@ function normalizeVideoComposeSpeechTrack(
     id,
     ...(audio ? { audio } : {}),
     startTime: Math.max(0, numberValue(row.startTime ?? row.start_time)),
+    sourceStart: Math.max(
+      0,
+      numberValue(row.sourceStart ?? row.source_start),
+    ),
+    fit: normalizeAudioFit(row.fit, "trim"),
     kind,
     ...(characterId ? { characterId } : {}),
     text: stringValue(row.text),
     volume: clampNumber(row.volume, 0, 1, 1),
   };
+}
+
+function normalizeVideoComposeGlobalAudioTrack(
+  value: unknown,
+): VideoComposeGlobalAudioTrack | null {
+  const row = recordValue(value);
+  const id = stringValue(row.id);
+  if (!id) {
+    return null;
+  }
+  const audio = normalizeVideoComposeReference(row.audio);
+  const kind = stringValue(row.kind) === "narration" ? "narration" : "music";
+  return {
+    id,
+    ...(audio ? { audio } : {}),
+    startTime: Math.max(0, numberValue(row.startTime ?? row.start_time)),
+    sourceStart: Math.max(
+      0,
+      numberValue(row.sourceStart ?? row.source_start),
+    ),
+    kind,
+    volume: clampNumber(row.volume, 0, 1, kind === "music" ? 0.35 : 1),
+    fit: normalizeAudioFit(row.fit, kind === "music" ? "trim" : "strict"),
+    loop: kind === "music" && booleanValue(row.loop),
+    fadeOut: clampNumber(
+      row.fadeOut ?? row.fade_out,
+      0,
+      10,
+      kind === "music" ? 1 : 0,
+    ),
+  };
+}
+
+function normalizeAudioFit(
+  value: unknown,
+  fallback: VideoComposeAudioFit,
+): VideoComposeAudioFit {
+  return stringValue(value) === "strict"
+    ? "strict"
+    : stringValue(value) === "trim"
+      ? "trim"
+      : fallback;
+}
+
+function normalizeTargetDuration(value: unknown) {
+  const duration = numberValue(value);
+  return duration > 0 ? Math.max(1, Math.floor(duration)) : 0;
 }
 
 function normalizeVideoComposeReference(
@@ -340,12 +430,6 @@ function normalizeTransitionType(value: unknown): VideoComposeTransitionType {
     : "none";
 }
 
-function recordValue(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, any>)
-    : {};
-}
-
 function stringValue(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -354,11 +438,6 @@ function stringArray(value: unknown) {
   return Array.isArray(value)
     ? value.map(stringValue).filter(Boolean)
     : [];
-}
-
-function numberValue(value: unknown) {
-  const number = Number(value || 0);
-  return Number.isFinite(number) ? number : 0;
 }
 
 function clampNumber(

@@ -1,8 +1,14 @@
-import type { OutputTypeOption, PowerOption } from "./types";
+type PowerOutputLike = {
+  key?: string;
+  name?: string;
+  viewMode?: string;
+};
 
-type PowerLike = Partial<
-  Pick<PowerOption, "kind" | "outputType" | "output">
->;
+export type PowerPresentationSource = {
+  kind?: string;
+  outputType?: string;
+  output?: PowerOutputLike;
+};
 
 export type PowerPresentation = {
   outputType: string;
@@ -13,10 +19,11 @@ export type PowerPresentation = {
 
 const OUTPUT_TYPE_FALLBACKS: Record<
   string,
-  Pick<OutputTypeOption, "name" | "viewMode">
+  { name: string; viewMode: string }
 > = {
   general: { name: "通用", viewMode: "content" },
   storyboard: { name: "分镜脚本", viewMode: "storyboard" },
+  storyboard_grid: { name: "宫格", viewMode: "storyboard_grid" },
   speech: { name: "语音合成", viewMode: "content" },
   lip_sync: { name: "口型同步", viewMode: "content" },
   video_compose: { name: "视频合成", viewMode: "video_compose" },
@@ -38,7 +45,7 @@ const POWER_KIND_LABELS: Record<string, string> = {
 };
 
 export function resolvePowerPresentation(
-  power?: PowerLike,
+  power?: PowerPresentationSource,
   fallbackKind: unknown = "",
   fallbackOutputType: unknown = "",
 ): PowerPresentation {
@@ -65,7 +72,7 @@ export function resolvePowerPresentation(
 }
 
 export function isStoryboardPowerType(
-  power?: PowerLike,
+  power?: PowerPresentationSource,
   fallbackKind: unknown = "",
   fallbackOutputType: unknown = "",
 ) {
@@ -76,7 +83,7 @@ export function isStoryboardPowerType(
 }
 
 export function isVideoComposePowerType(
-  power?: PowerLike,
+  power?: PowerPresentationSource,
   fallbackKind: unknown = "",
   fallbackOutputType: unknown = "",
 ) {
@@ -86,8 +93,19 @@ export function isVideoComposePowerType(
   );
 }
 
+export function isStoryboardGridPowerType(
+  power?: PowerPresentationSource,
+  fallbackKind: unknown = "",
+  fallbackOutputType: unknown = "",
+) {
+  return (
+    resolvePowerPresentation(power, fallbackKind, fallbackOutputType)
+      .viewMode === "storyboard_grid"
+  );
+}
+
 export function isAudioPowerType(
-  power?: PowerLike,
+  power?: PowerPresentationSource,
   fallbackKind: unknown = "",
 ) {
   const kind = normalizedValue(power?.kind || fallbackKind);

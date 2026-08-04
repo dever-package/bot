@@ -5,13 +5,11 @@ import (
 
 	"github.com/shemic/dever/util"
 
-	agentmodel "github.com/dever-package/bot/model/agent"
 	frontaction "github.com/dever-package/front/service/action"
 )
 
 const (
 	defaultAgentCateID       = uint64(1)
-	defaultSkillPackID       = agentmodel.DefaultSkillPackID
 	defaultAgentStatus       = int16(1)
 	defaultAgentSort         = 100
 	defaultAgentTemperature  = 0.7

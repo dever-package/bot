@@ -1,5 +1,11 @@
 import { joinSiteApi, request } from "@dever/front-plugin";
-import { isSuccessResponse } from "../shared/api-response";
+import {
+  asResponseRecord as recordValue,
+  asResponseRows as rowsValue,
+  responsePositiveNumber as positiveNumber,
+  responseText as textValue,
+  successfulResponseData as responseData,
+} from "../shared/api-response";
 import { createInFlightRequestLoader } from "../shared/in-flight-request";
 import {
   isValidBodyResolvedLink,
@@ -66,31 +72,4 @@ function normalizeContentArticle(value: unknown): BodyContentArticle {
     title: textValue(row.title),
     content: textValue(row.content),
   };
-}
-
-function responseData(result: unknown, fallback: string) {
-  const response = recordValue(result);
-  if (!isSuccessResponse(response)) {
-    throw new Error(textValue(response.message || response.msg) || fallback);
-  }
-  return recordValue(response.data);
-}
-
-function rowsValue(value: unknown) {
-  return Array.isArray(value) ? value : [];
-}
-
-function recordValue(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, any>)
-    : {};
-}
-
-function positiveNumber(value: unknown) {
-  const result = Number(value || 0);
-  return Number.isFinite(result) && result > 0 ? result : 0;
-}
-
-function textValue(value: unknown) {
-  return value == null ? "" : String(value).trim();
 }

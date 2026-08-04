@@ -1,4 +1,5 @@
 import { getCompatModule } from "@dever/front-plugin";
+import { embeddedJSONValues, isPlainRecord } from "./structured-json";
 
 type PlainRichNode = {
   type?: unknown;
@@ -12,16 +13,37 @@ type PlainRichDocument = PlainRichNode & {
   content: PlainRichNode[];
 };
 
-export type CanvasContentMediaKind = "image" | "video" | "audio";
+export type ContentMediaKind = "image" | "video" | "audio";
 
-const CANVAS_CONTENT_MEDIA_KINDS: CanvasContentMediaKind[] = [
+export type StoryboardGridFrame = {
+  id: string;
+  order: number;
+  title: string;
+  description: string;
+  prompt: string;
+  status: string;
+  image: string;
+  error: string;
+  assetID: number;
+  assetVersionID: number;
+};
+
+export type StoryboardGridDocument = {
+  type: "storyboard_grid";
+  version: number;
+  title: string;
+  summary: string;
+  frames: StoryboardGridFrame[];
+};
+
+const CONTENT_MEDIA_KINDS: ContentMediaKind[] = [
   "image",
   "video",
   "audio",
 ];
 
-const CANVAS_CONTENT_MEDIA_FIELDS: Record<
-  CanvasContentMediaKind,
+const CONTENT_MEDIA_FIELDS: Record<
+  ContentMediaKind,
   readonly string[]
 > = {
   image: ["image", "image_url", "imageUrl", "images", "imageUrls"],
@@ -39,6 +61,15 @@ const contentOutputModule = getCompatModule(
 
 export const normalizeEnergonOutput =
   contentOutputModule.normalizeEnergonOutput;
+
+export function firstNonEmptyText(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
 
 export function plainMarkdownTextFromRichOutput(value: unknown) {
   const content = markdownCompatibleRichContent(value);
@@ -81,12 +112,12 @@ export function contentOutputHasMedia(output: unknown) {
 
 export function contentOutputMediaKinds(output: unknown) {
   const media = contentOutputMediaIndex(output);
-  return CANVAS_CONTENT_MEDIA_KINDS.filter((kind) => media[kind].size > 0);
+  return CONTENT_MEDIA_KINDS.filter((kind) => media[kind].size > 0);
 }
 
 export function contentOutputMediaCount(output: unknown) {
   const media = contentOutputMediaIndex(output);
-  return CANVAS_CONTENT_MEDIA_KINDS.reduce(
+  return CONTENT_MEDIA_KINDS.reduce(
     (total, kind) => total + media[kind].size,
     0,
   );
@@ -94,9 +125,22 @@ export function contentOutputMediaCount(output: unknown) {
 
 export function contentOutputMediaURLs(
   output: unknown,
-  kind: CanvasContentMediaKind,
+  kind: ContentMediaKind,
 ) {
   return Array.from(contentOutputMediaIndex(output)[kind]);
+}
+
+export function parseStoryboardGridOutput(
+  value: unknown,
+): StoryboardGridDocument | null {
+  return findStoryboardGrid(value, new Set<object>(), 0);
+}
+
+export function contentOutputHasType(value: unknown, expectedType: string) {
+  const normalizedType = expectedType.trim().toLowerCase();
+  return normalizedType
+    ? findContentOutputType(value, normalizedType, new Set<object>(), 0)
+    : false;
 }
 
 export function preferRicherMediaOutput(...values: unknown[]) {
@@ -104,7 +148,7 @@ export function preferRicherMediaOutput(...values: unknown[]) {
   let selected: unknown;
   let selectedMediaCount = 0;
   for (const value of values) {
-    if (!hasCanvasContent(value)) {
+    if (!hasContentOutput(value)) {
       continue;
     }
     if (fallback === undefined) {
@@ -119,7 +163,7 @@ export function preferRicherMediaOutput(...values: unknown[]) {
   return selectedMediaCount > 0 ? selected : fallback;
 }
 
-export function hasCanvasContent(value: unknown) {
+export function hasContentOutput(value: unknown) {
   if (value == null || value === "") {
     return false;
   }
@@ -133,7 +177,7 @@ export function hasCanvasContent(value: unknown) {
 }
 
 function contentOutputMediaIndex(output: unknown) {
-  const media: Record<CanvasContentMediaKind, Set<string>> = {
+  const media: Record<ContentMediaKind, Set<string>> = {
     image: new Set<string>(),
     video: new Set<string>(),
     audio: new Set<string>(),
@@ -146,7 +190,7 @@ function contentOutputMediaIndex(output: unknown) {
 }
 
 export function normalizeContentOutputItems(output: unknown): unknown[] {
-  if (!hasCanvasContent(output)) {
+  if (!hasContentOutput(output)) {
     return [];
   }
   const normalized = normalizeEnergonOutput?.(output);
@@ -156,12 +200,173 @@ export function normalizeContentOutputItems(output: unknown): unknown[] {
   return Array.isArray(output) ? output : [output];
 }
 
-function collectContentMedia(
+function findContentOutputType(
   value: unknown,
-  media: Record<CanvasContentMediaKind, Set<string>>,
+  expectedType: string,
   seen: Set<object>,
   depth: number,
-  fieldKind?: CanvasContentMediaKind,
+): boolean {
+  if (value == null || depth > 12) {
+    return false;
+  }
+  if (typeof value === "string") {
+    return embeddedJSONValues(value).some((parsed) =>
+      findContentOutputType(parsed, expectedType, seen, depth + 1),
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) =>
+      findContentOutputType(item, expectedType, seen, depth + 1),
+    );
+  }
+  if (!isPlainRecord(value) || seen.has(value)) {
+    return false;
+  }
+  seen.add(value);
+  if (String(value.type || "").trim().toLowerCase() === expectedType) {
+    return true;
+  }
+  return [
+    value.json,
+    value.output,
+    value.result,
+    value.data,
+    value.content,
+    value.body,
+    value.value,
+    value.text,
+    value.finalOutput,
+    value.final_output,
+    value.rich,
+  ].some((nested) =>
+    findContentOutputType(nested, expectedType, seen, depth + 1),
+  );
+}
+
+function findStoryboardGrid(
+  value: unknown,
+  seen: Set<object>,
+  depth: number,
+): StoryboardGridDocument | null {
+  if (value == null || depth > 12) {
+    return null;
+  }
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text || (!text.startsWith("{") && !text.startsWith("["))) {
+      return null;
+    }
+    try {
+      return findStoryboardGrid(JSON.parse(text), seen, depth + 1);
+    } catch {
+      return null;
+    }
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const grid = findStoryboardGrid(item, seen, depth + 1);
+      if (grid) {
+        return grid;
+      }
+    }
+    return null;
+  }
+  if (!isPlainRecord(value) || seen.has(value)) {
+    return null;
+  }
+  seen.add(value);
+
+  const direct = normalizeStoryboardGridDocument(value);
+  if (direct) {
+    return direct;
+  }
+  for (const key of [
+    "json",
+    "storyboard_grid",
+    "output",
+    "result",
+    "data",
+    "content",
+    "body",
+    "value",
+    "text",
+    "rich",
+  ]) {
+    const grid = findStoryboardGrid(value[key], seen, depth + 1);
+    if (grid) {
+      return grid;
+    }
+  }
+  return null;
+}
+
+function normalizeStoryboardGridDocument(
+  value: Record<string, unknown>,
+): StoryboardGridDocument | null {
+  if (
+    String(value.type || "").trim().toLowerCase() !== "storyboard_grid" ||
+    !Array.isArray(value.frames)
+  ) {
+    return null;
+  }
+  const frames = value.frames
+    .map(normalizeStoryboardGridFrame)
+    .filter((frame): frame is StoryboardGridFrame => Boolean(frame))
+    .sort((left, right) => left.order - right.order);
+  if (frames.length < 2 || frames.length > 9) {
+    return null;
+  }
+  return {
+    type: "storyboard_grid",
+    version: Math.max(1, Math.trunc(Number(value.version) || 1)),
+    title: firstNonEmptyText(value.title, "宫格图片"),
+    summary: firstNonEmptyText(value.summary),
+    frames,
+  };
+}
+
+function normalizeStoryboardGridFrame(
+  value: unknown,
+  index: number,
+): StoryboardGridFrame | null {
+  if (!isPlainRecord(value)) {
+    return null;
+  }
+  const order = Math.max(1, Math.trunc(Number(value.order) || index + 1));
+  return {
+    id: firstNonEmptyText(value.id, `frame-${String(order).padStart(2, "0")}`),
+    order,
+    title: firstNonEmptyText(value.title, `画面 ${String(order).padStart(2, "0")}`),
+    description: firstNonEmptyText(value.description),
+    prompt: firstNonEmptyText(value.prompt),
+    status: firstNonEmptyText(value.status),
+    image: firstNonEmptyText(value.image, value.image_url, value.imageUrl),
+    error: firstNonEmptyText(value.error),
+    assetID: positiveInteger(value.asset_id, value.assetId, value.assetID),
+    assetVersionID: positiveInteger(
+      value.asset_version_id,
+      value.assetVersionId,
+      value.assetVersionID,
+    ),
+  };
+}
+
+function positiveInteger(...values: unknown[]) {
+  for (const value of values) {
+    const number = Math.trunc(Number(value) || 0);
+    if (number > 0) {
+      return number;
+    }
+  }
+  return 0;
+}
+
+function collectContentMedia(
+  value: unknown,
+  media: Record<ContentMediaKind, Set<string>>,
+  seen: Set<object>,
+  depth: number,
+  fieldKind?: ContentMediaKind,
 ): void {
   if (value == null || depth > 12) {
     return;
@@ -199,7 +404,7 @@ function collectContentMedia(
       collectContentMedia(direct, media, seen, depth + 1, fieldKind);
     }
   }
-  for (const kind of CANVAS_CONTENT_MEDIA_KINDS) {
+  for (const kind of CONTENT_MEDIA_KINDS) {
     for (const fieldValue of contentMediaFieldValues(record, kind)) {
       collectContentMedia(fieldValue, media, seen, depth + 1, kind);
     }
@@ -209,7 +414,7 @@ function collectContentMedia(
   const attrs = isPlainRecord(record.attrs) ? record.attrs : undefined;
   if (
     explicitKind &&
-    [record.url, record.src, attrs?.src, attrs?.url].some(hasCanvasContent)
+    [record.url, record.src, attrs?.src, attrs?.url].some(hasContentOutput)
   ) {
     for (const direct of [record.url, record.src, attrs?.src, attrs?.url]) {
       collectContentMedia(direct, media, seen, depth + 1, explicitKind);
@@ -234,9 +439,9 @@ function collectContentMedia(
 
 function contentMediaFieldValues(
   record: Record<string, unknown>,
-  kind: CanvasContentMediaKind,
+  kind: ContentMediaKind,
 ) {
-  return CANVAS_CONTENT_MEDIA_FIELDS[kind].map((field) => record[field]);
+  return CONTENT_MEDIA_FIELDS[kind].map((field) => record[field]);
 }
 
 function contentMediaKindFromType(value: unknown) {
@@ -366,8 +571,4 @@ function escapeMarkdownImageAlt(value: string) {
 
 function escapeMarkdownImageSource(value: string) {
   return value.replace(/</g, "%3C").replace(/>/g, "%3E");
-}
-
-function isPlainRecord(value: unknown): value is Record<string, any> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

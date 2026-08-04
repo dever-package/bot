@@ -72,15 +72,6 @@ func validBodyLinkSceneID(sceneID uint64) bool {
 	}
 }
 
-func containsBodyLinkSceneID(sceneIDs []uint64, target uint64) bool {
-	for _, sceneID := range sceneIDs {
-		if sceneID == target {
-			return true
-		}
-	}
-	return false
-}
-
 func bodyLinkSceneCodesByLinkID(
 	ctx context.Context,
 	linkIDs []uint64,

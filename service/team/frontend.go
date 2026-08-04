@@ -88,7 +88,7 @@ func (s Service) WorkspaceCanvasBootstrap(ctx context.Context, teamID uint64, re
 			"flows":       []CanvasFlowOption{},
 		}, nil
 	}
-	release, graph, err := s.runtimeGraphByRelease(ctx, teamID, releaseID)
+	release, graph, err := s.workspaceCanvasGraphByRelease(ctx, teamID, releaseID)
 	if err != nil {
 		return nil, err
 	}
@@ -725,50 +725,6 @@ func canvasPowerRunInput(req CanvasPowerRunRequest) map[string]any {
 		)
 	}
 	return input
-}
-
-func (s Service) ListProjectAssets(ctx context.Context, projectID uint64, flowID uint64, kind string) (map[string]any, error) {
-	if projectID == 0 {
-		return nil, fmt.Errorf("项目不能为空")
-	}
-	return s.asset.ListProject(ctx, projectID, flowID, kind)
-}
-
-func (s Service) ProjectAssetDetail(ctx context.Context, projectID uint64, assetID uint64) (map[string]any, error) {
-	return s.asset.ProjectDetail(ctx, projectID, assetID)
-}
-
-func (s Service) runtimeGraphByRelease(ctx context.Context, teamID uint64, releaseID uint64) (*teammodel.TeamRelease, runtimeGraph, error) {
-	var team teammodel.Team
-	var err error
-	if releaseID > 0 {
-		release := s.repo.FindTeamRelease(ctx, releaseID)
-		if release == nil {
-			return nil, runtimeGraph{}, fmt.Errorf("发布版本不存在")
-		}
-		if teamID > 0 && release.TeamID != teamID {
-			return nil, runtimeGraph{}, fmt.Errorf("发布版本不属于当前团队")
-		}
-		team, err = s.repo.FindTeam(ctx, release.TeamID)
-		if err != nil {
-			return nil, runtimeGraph{}, err
-		}
-		graph, err := runtimeGraphFromRelease(*release)
-		return release, graph, err
-	}
-	if teamID == 0 {
-		return nil, runtimeGraph{}, fmt.Errorf("团队不能为空")
-	}
-	team, err = s.repo.FindTeam(ctx, teamID)
-	if err != nil {
-		return nil, runtimeGraph{}, err
-	}
-	release, err := s.runnableTeamRelease(ctx, team)
-	if err != nil {
-		return nil, runtimeGraph{}, err
-	}
-	graph, err := runtimeGraphFromRelease(*release)
-	return release, graph, err
 }
 
 func powerOutputValue(raw any, kind string) map[string]any {

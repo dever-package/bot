@@ -107,11 +107,11 @@ func doubaoEmbeddingInput(input botprotocol.NativeInput) string {
 			return text
 		}
 	}
-	return strings.TrimSpace(doubaoMappedInput(input).PrimaryPrompt())
+	return strings.TrimSpace(resolvedMappedInput(input).PrimaryPrompt())
 }
 
 func doubaoMultimodalEmbeddingInput(input botprotocol.NativeInput, body map[string]any) []any {
-	mapped := doubaoMappedInput(input)
+	mapped := resolvedMappedInput(input)
 	prompt := botprotocol.BuildPromptContent(mapped.PromptInput(mapped.InputKeySet()), mapped.PromptOptions("用户输入"))
 	images := collectDoubaoEmbeddingImages(body, prompt)
 	videos := collectDoubaoEmbeddingVideos(body, prompt)
@@ -413,7 +413,7 @@ func (adapter DoubaoAdapter) buildImageRequest(input botprotocol.NativeInput) (b
 		return botprovider.Request{}, fmt.Errorf("豆包图片服务缺少模型名")
 	}
 
-	mapped := doubaoMappedInput(input)
+	mapped := resolvedMappedInput(input)
 	promptInput := mapped.PromptInput(mapped.InputKeySet())
 	prompt := botprotocol.BuildPromptContent(promptInput, mapped.PromptOptions("用户输入"))
 	if strings.TrimSpace(botprotocol.AsText(body["prompt"])) == "" {
@@ -487,17 +487,10 @@ func doubaoBody(input botprotocol.NativeInput) map[string]any {
 		}
 		body[key] = value
 	}
-	for key, value := range doubaoMappedInput(input).NativeBody() {
+	for key, value := range resolvedMappedInput(input).NativeBody() {
 		body[key] = value
 	}
 	return body
-}
-
-func doubaoMappedInput(input botprotocol.NativeInput) botprotocol.MappedInput {
-	if input.Mapped.IsZero() {
-		return botprotocol.NewMappedInput(input.Request.Input, nil)
-	}
-	return input.Mapped
 }
 
 func normalizeDoubaoVideoBodyContent(body map[string]any) {

@@ -5,7 +5,6 @@ import agentmodel "github.com/dever-package/bot/model/agent"
 const (
 	Root       = "data/skills"
 	EntryFile  = "SKILL.md"
-	TimeoutSec = 120
 	HTTPMaxLen = 256 * 1024
 )
 

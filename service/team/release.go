@@ -19,6 +19,13 @@ type runtimeGraph struct {
 	NodeEdgesByFlowID map[uint64][]teammodel.FlowNodeEdge
 }
 
+type workspaceCanvasReleaseSnapshot struct {
+	Team        GraphTeam                  `json:"team"`
+	AssetCates  []GraphAssetCate           `json:"asset_cates"`
+	Flows       []GraphFlow                `json:"flows"`
+	NodesByFlow map[string][]GraphFlowNode `json:"nodes_by_flow"`
+}
+
 func (s Service) runnableTeamRelease(ctx context.Context, team teammodel.Team) (*teammodel.TeamRelease, error) {
 	if release := s.currentTeamRelease(ctx, team); release != nil {
 		return release, nil
@@ -72,6 +79,48 @@ func (s Service) runtimeGraphForRun(ctx context.Context, run teammodel.Run) (run
 	return s.currentRuntimeGraph(ctx, team), nil
 }
 
+func (s Service) runtimeRelease(ctx context.Context, teamID uint64, releaseID uint64) (*teammodel.TeamRelease, error) {
+	if releaseID > 0 {
+		release := s.repo.FindTeamRelease(ctx, releaseID)
+		if release == nil {
+			return nil, fmt.Errorf("发布版本不存在")
+		}
+		if teamID > 0 && release.TeamID != teamID {
+			return nil, fmt.Errorf("发布版本不属于当前团队")
+		}
+		if _, err := s.repo.FindTeam(ctx, release.TeamID); err != nil {
+			return nil, err
+		}
+		return release, nil
+	}
+	if teamID == 0 {
+		return nil, fmt.Errorf("团队不能为空")
+	}
+	team, err := s.repo.FindTeam(ctx, teamID)
+	if err != nil {
+		return nil, err
+	}
+	return s.runnableTeamRelease(ctx, team)
+}
+
+func (s Service) runtimeGraphByRelease(ctx context.Context, teamID uint64, releaseID uint64) (*teammodel.TeamRelease, runtimeGraph, error) {
+	release, err := s.runtimeRelease(ctx, teamID, releaseID)
+	if err != nil {
+		return nil, runtimeGraph{}, err
+	}
+	graph, err := runtimeGraphFromRelease(*release)
+	return release, graph, err
+}
+
+func (s Service) workspaceCanvasGraphByRelease(ctx context.Context, teamID uint64, releaseID uint64) (*teammodel.TeamRelease, runtimeGraph, error) {
+	release, err := s.runtimeRelease(ctx, teamID, releaseID)
+	if err != nil {
+		return nil, runtimeGraph{}, err
+	}
+	graph, err := workspaceCanvasGraphFromRelease(*release)
+	return release, graph, err
+}
+
 func (s Service) currentRuntimeGraph(ctx context.Context, team teammodel.Team) runtimeGraph {
 	flows := s.repo.ListFlows(ctx, team.ID, true)
 	graph := runtimeGraph{
@@ -96,46 +145,25 @@ func runtimeGraphFromRelease(release teammodel.TeamRelease) (runtimeGraph, error
 	if err != nil {
 		return runtimeGraph{}, err
 	}
-	graph := runtimeGraph{
-		Team:              graphTeamToModel(snapshot.Team),
-		AssetCates:        make([]teammodel.AssetCate, 0, len(snapshot.AssetCates)),
-		TeamPowers:        make([]teammodel.TeamPower, 0, len(snapshot.TeamPowers)),
-		Roles:             make([]teammodel.Role, 0, len(snapshot.Roles)),
-		Flows:             make([]teammodel.Flow, 0, len(snapshot.Flows)),
-		FlowEdges:         make([]teammodel.FlowEdge, 0, len(snapshot.FlowEdges)),
-		NodesByFlowID:     map[uint64][]teammodel.FlowNode{},
-		NodeEdgesByFlowID: map[uint64][]teammodel.FlowNodeEdge{},
-	}
-	for _, payload := range snapshot.AssetCates {
-		graph.AssetCates = append(graph.AssetCates, graphAssetCateToModel(graph.Team.ID, payload))
-	}
+	graph := runtimeGraphFromCanvasSnapshot(workspaceCanvasReleaseSnapshot{
+		Team:        snapshot.Team,
+		AssetCates:  snapshot.AssetCates,
+		Flows:       snapshot.Flows,
+		NodesByFlow: snapshot.NodesByFlow,
+	})
+	graph.TeamPowers = make([]teammodel.TeamPower, 0, len(snapshot.TeamPowers))
+	graph.Roles = make([]teammodel.Role, 0, len(snapshot.Roles))
+	graph.FlowEdges = make([]teammodel.FlowEdge, 0, len(snapshot.FlowEdges))
 	for _, payload := range snapshot.TeamPowers {
 		graph.TeamPowers = append(graph.TeamPowers, graphTeamPowerToModel(graph.Team.ID, payload))
 	}
 	for _, payload := range snapshot.Roles {
 		graph.Roles = append(graph.Roles, graphRoleToModel(graph.Team.ID, payload))
 	}
-	for _, payload := range snapshot.Flows {
-		graph.Flows = append(graph.Flows, graphFlowToModel(graph.Team.ID, payload))
-	}
-	flowByKey := map[string]teammodel.Flow{}
-	for _, flow := range graph.Flows {
-		flowByKey[flow.Key] = flow
-	}
 	for _, payload := range snapshot.FlowEdges {
 		graph.FlowEdges = append(graph.FlowEdges, graphFlowEdgeToModel(graph.Team.ID, payload))
 	}
-	for flowKey, payloads := range snapshot.NodesByFlow {
-		flow := flowByKey[flowKey]
-		if flow.ID == 0 {
-			continue
-		}
-		nodes := make([]teammodel.FlowNode, 0, len(payloads))
-		for _, payload := range payloads {
-			nodes = append(nodes, graphFlowNodeToModel(graph.Team.ID, flow.ID, payload))
-		}
-		graph.NodesByFlowID[flow.ID] = nodes
-	}
+	flowByKey := runtimeFlowByKey(graph.Flows)
 	for flowKey, payloads := range snapshot.NodeEdgesByFlow {
 		flow := flowByKey[flowKey]
 		if flow.ID == 0 {
@@ -148,6 +176,55 @@ func runtimeGraphFromRelease(release teammodel.TeamRelease) (runtimeGraph, error
 		graph.NodeEdgesByFlowID[flow.ID] = edges
 	}
 	return graph, nil
+}
+
+func runtimeGraphFromCanvasSnapshot(snapshot workspaceCanvasReleaseSnapshot) runtimeGraph {
+	graph := runtimeGraph{
+		Team:              graphTeamToModel(snapshot.Team),
+		AssetCates:        make([]teammodel.AssetCate, 0, len(snapshot.AssetCates)),
+		Flows:             make([]teammodel.Flow, 0, len(snapshot.Flows)),
+		NodesByFlowID:     map[uint64][]teammodel.FlowNode{},
+		NodeEdgesByFlowID: map[uint64][]teammodel.FlowNodeEdge{},
+	}
+	for _, payload := range snapshot.AssetCates {
+		graph.AssetCates = append(graph.AssetCates, graphAssetCateToModel(graph.Team.ID, payload))
+	}
+	for _, payload := range snapshot.Flows {
+		graph.Flows = append(graph.Flows, graphFlowToModel(graph.Team.ID, payload))
+	}
+	flowByKey := runtimeFlowByKey(graph.Flows)
+	for flowKey, payloads := range snapshot.NodesByFlow {
+		flow := flowByKey[flowKey]
+		if flow.ID == 0 {
+			continue
+		}
+		nodes := make([]teammodel.FlowNode, 0, len(payloads))
+		for _, payload := range payloads {
+			nodes = append(nodes, graphFlowNodeToModel(graph.Team.ID, flow.ID, payload))
+		}
+		graph.NodesByFlowID[flow.ID] = nodes
+	}
+	return graph
+}
+
+func runtimeFlowByKey(flows []teammodel.Flow) map[string]teammodel.Flow {
+	flowByKey := make(map[string]teammodel.Flow, len(flows))
+	for _, flow := range flows {
+		flowByKey[flow.Key] = flow
+	}
+	return flowByKey
+}
+
+func workspaceCanvasGraphFromRelease(release teammodel.TeamRelease) (runtimeGraph, error) {
+	var snapshot workspaceCanvasReleaseSnapshot
+	if err := json.Unmarshal([]byte(release.Snapshot), &snapshot); err != nil {
+		return runtimeGraph{}, fmt.Errorf("读取发布快照失败: %w", err)
+	}
+	if snapshot.Team.ID == 0 {
+		return runtimeGraph{}, fmt.Errorf("发布快照缺少团队信息")
+	}
+
+	return runtimeGraphFromCanvasSnapshot(snapshot), nil
 }
 
 func releaseSnapshotFromText(text string) (TeamReleaseSnapshot, error) {
@@ -168,7 +245,7 @@ func graphTeamToModel(payload GraphTeam) teammodel.Team {
 		Name:           payload.Name,
 		Description:    payload.Description,
 		Config:         jsonText(payload.Config),
-		ProjectEnabled: normalizeProjectEnabled(payload.ProjectEnabled),
+		ProjectEnabled: normalizeEntryStatus(payload.ProjectEnabled),
 		Status:         payload.Status,
 		Sort:           payload.Sort,
 	}

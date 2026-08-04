@@ -18,7 +18,7 @@ import (
 const (
 	MediaArtifactTitleArgument = "__runtime_artifact_title"
 	mediaCountArgument         = "__runtime_count"
-	maxMediaCount              = 8
+	MaxMediaExecutionCount     = 9
 	mediaArtifactTitleMaxRunes = 16
 )
 
@@ -49,7 +49,7 @@ func mediaCountLimit(power energonmodel.Power) int {
 	if energonmodel.IsLipSyncPower(power) {
 		return 1
 	}
-	return maxMediaCount
+	return MaxMediaExecutionCount
 }
 
 func buildMediaSeriesPlan(power energonmodel.Power, params []energonservice.PowerParam, references []MediaReference) mediaSeriesPlan {
@@ -97,16 +97,13 @@ func mediaToolParameters(parameters map[string]any, plan mediaCountPlan) map[str
 	}
 	properties[plan.key] = map[string]any{
 		"type":        "integer",
-		"description": "生成独立结果的数量",
+		"description": "生成独立结果的数量；未填写时默认生成 1 个",
 		"minimum":     1,
 		"maximum":     plan.maximum,
+		"default":     1,
 	}
 	result["properties"] = properties
-	result["required"] = appendRequiredParameter(
-		result["required"],
-		MediaArtifactTitleArgument,
-		plan.key,
-	)
+	result["required"] = appendRequiredParameter(result["required"], MediaArtifactTitleArgument)
 	return result
 }
 
@@ -171,6 +168,20 @@ func (plan mediaSeriesPlan) apply(arguments map[string]any) (map[string]any, err
 	default:
 		return nil, fmt.Errorf("已有图片系列时必须选择 series mode: continue 或 new")
 	}
+}
+
+func (plan mediaSeriesPlan) referencesFor(arguments map[string]any, references []MediaReference) []MediaReference {
+	if !plan.available() || mediaSeriesMode(arguments) != MediaSeriesModeNew {
+		return references
+	}
+	result := make([]MediaReference, 0, len(references))
+	for _, current := range references {
+		if sameMediaReference(current, plan.current) {
+			continue
+		}
+		result = append(result, current)
+	}
+	return result
 }
 
 func requestedMediaReference(arguments map[string]any, target MediaReference) bool {
@@ -252,8 +263,9 @@ func mediaExecutionCount(power energonmodel.Power, arguments map[string]any, pla
 	if plan.key == "" {
 		return 1, nil
 	}
-	if _, exists := arguments[plan.key]; !exists {
-		return 0, fmt.Errorf("%s生成参数 %s 不能为空", mediaPowerLabel(power), plan.key)
+	value, exists := arguments[plan.key]
+	if !exists || energoninput.IsMissing(value) {
+		return 1, nil
 	}
 	count := ArgumentInt(arguments, plan.key, 0)
 	if count < 1 || count > plan.maximum {

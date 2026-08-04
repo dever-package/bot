@@ -170,7 +170,7 @@ func panicParamField(field string, message string) {
 	panic(frontaction.NewFieldError(field, message))
 }
 
-func panicServiceParamField(message string) {
+func panicParamListField(message string) {
 	panicParamField("form.params", message)
 }
 
@@ -180,8 +180,4 @@ func panicServiceEndpointField(message string) {
 
 func panicPowerTargetField(message string) {
 	panicParamField("form.targets", message)
-}
-
-func panicPowerParamField(message string) {
-	panicParamField("form.params", message)
 }

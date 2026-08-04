@@ -75,7 +75,3 @@ func NewSkillDraftModel() *orm.Model[SkillDraft] {
 		},
 	})
 }
-
-func SkillDraftStatusOptions() []map[string]any {
-	return cloneOptionRows(skillDraftStatusOptions)
-}

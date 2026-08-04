@@ -9,6 +9,7 @@ import (
 	assetmodel "github.com/dever-package/bot/model/asset"
 	projectmodel "github.com/dever-package/bot/model/project"
 	teammodel "github.com/dever-package/bot/model/team"
+	"github.com/shemic/dever/orm"
 )
 
 const (
@@ -256,7 +257,9 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 		item := assetListMap(*row, version, normalized.ContentMode)
 		items = append(items, item)
 	}
-	attachCollectionListMetadata(ctx, rows, items, status)
+	if err := attachCollectionListMetadata(ctx, rows, items, status); err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"items":     items,
 		"page":      page,
@@ -282,60 +285,32 @@ func (s Service) Filters(ctx context.Context, teamID uint64) (map[string]any, er
 	for _, project := range projectRows {
 		projects = append(projects, map[string]any{"id": project.ID, "name": project.Name})
 	}
-	nodes := make([]map[string]any, 0)
 	tools := make([]map[string]any, 0)
 	dialogues := make([]map[string]any, 0)
-	seenNodes := map[string]struct{}{}
 	scopeFilter := scope.queryFilter()
 	if scopeFilter == nil {
 		return map[string]any{
 			"projects":  projects,
 			"tools":     tools,
 			"dialogues": dialogues,
-			"nodes":     nodes,
 		}, nil
 	}
 	sourceFilter := scopedAssetFilter(teamID, scopeFilter)
 	sourceFilter["source_type"] = []string{assetmodel.SourceTool, assetmodel.SourceDialogue}
+	sourceFilter["source_id"] = map[string]any{"gt": 0}
 	sourceRows := assetmodel.NewAssetModel().Select(ctx, sourceFilter, map[string]any{
-		"field": "main.id,main.source_type,main.source_id,main.source_name,main.name",
-		"order": "main.id desc",
+		"field": orm.RawSQL(`DISTINCT main.source_type,main.source_id,
+			FIRST_VALUE(COALESCE(NULLIF(main.source_name, ''),main.name)) OVER (
+				PARTITION BY main.source_type,main.source_id ORDER BY main.id DESC
+			) AS source_name`),
+		"order": "main.source_type asc,main.source_id desc",
 	})
 	tools = savedSourceOptions(sourceRows, assetmodel.SourceTool)
 	dialogues = savedSourceOptions(sourceRows, assetmodel.SourceDialogue)
-
-	nodeFilter := scopedAssetFilter(teamID, scopeFilter)
-	nodeFilter["source_type"] = assetmodel.SourceProject
-	nodeFilter["collection_id"] = uint64(0)
-	nodeFilter["kind"] = map[string]any{"neq": assetmodel.KindCollection}
-	nodeFilter["node_key"] = map[string]any{"neq": ""}
-	nodeRows := assetmodel.NewAssetModel().Select(ctx, nodeFilter, map[string]any{
-		"field": "main.id,main.project_id,main.flow_id,main.asset_cate_id,main.node_key,main.name,main.version_id",
-		"order": "main.id desc",
-	})
-	nodeNames := flowNodeNames(ctx, nodeRows)
-	for _, asset := range nodeRows {
-		if asset == nil || asset.SourceType != assetmodel.SourceProject ||
-			asset.VersionID == 0 || strings.TrimSpace(asset.NodeKey) == "" {
-			continue
-		}
-		key := fmt.Sprintf("%d:%d:%s", asset.ProjectID, asset.AssetCateID, asset.NodeKey)
-		if _, exists := seenNodes[key]; exists {
-			continue
-		}
-		seenNodes[key] = struct{}{}
-		nodes = append(nodes, map[string]any{
-			"project_id":    asset.ProjectID,
-			"asset_cate_id": asset.AssetCateID,
-			"node_key":      asset.NodeKey,
-			"name":          firstNonEmptyText(nodeNames[flowNodeIdentity(asset.FlowID, asset.NodeKey)], asset.Name),
-		})
-	}
 	return map[string]any{
 		"projects":  projects,
 		"tools":     tools,
 		"dialogues": dialogues,
-		"nodes":     nodes,
 	}, nil
 }
 
@@ -632,54 +607,4 @@ func assetPreviewContent(content any, kind string) any {
 		return nil
 	}
 	return mediaDocument(kind, url)
-}
-
-func flowNodeNames(ctx context.Context, assets []*assetmodel.Asset) map[string]string {
-	flowIDs := make([]uint64, 0)
-	nodeKeys := make([]string, 0)
-	seenFlows := map[uint64]struct{}{}
-	seenNodeKeys := map[string]struct{}{}
-	for _, asset := range assets {
-		if asset == nil || asset.FlowID == 0 || strings.TrimSpace(asset.NodeKey) == "" {
-			continue
-		}
-		if _, exists := seenFlows[asset.FlowID]; !exists {
-			seenFlows[asset.FlowID] = struct{}{}
-			flowIDs = append(flowIDs, asset.FlowID)
-		}
-		nodeKey := strings.TrimSpace(asset.NodeKey)
-		if _, exists := seenNodeKeys[nodeKey]; !exists {
-			seenNodeKeys[nodeKey] = struct{}{}
-			nodeKeys = append(nodeKeys, nodeKey)
-		}
-	}
-	result := map[string]string{}
-	if len(flowIDs) == 0 {
-		return result
-	}
-	for _, node := range teammodel.NewFlowNodeModel().Select(ctx, map[string]any{
-		"flow_id":  flowIDs,
-		"node_key": nodeKeys,
-	}, map[string]any{
-		"field": "main.flow_id,main.node_key,main.name",
-		"order": "",
-	}) {
-		if node != nil {
-			result[flowNodeIdentity(node.FlowID, node.NodeKey)] = strings.TrimSpace(node.Name)
-		}
-	}
-	return result
-}
-
-func flowNodeIdentity(flowID uint64, nodeKey string) string {
-	return fmt.Sprintf("%d:%s", flowID, strings.TrimSpace(nodeKey))
-}
-
-func firstNonEmptyText(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return "未命名节点"
 }

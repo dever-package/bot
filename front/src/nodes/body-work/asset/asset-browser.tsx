@@ -31,6 +31,8 @@ import { AssetSourceFilters } from "./asset-source-filters";
 import { useAssetSourceLabels } from "./asset-source-labels";
 import { BodyWorkTooltip } from "../shared/body-work-tooltip";
 import { useAuthUserScopeKey } from "../shared/auth-scope";
+import { requestErrorMessage as errorText } from "../shared/api-response";
+import type { DetailDialogLayer } from "../shared/detail-dialog";
 import {
   emptyAssetFilters,
   type AssetCatalogOptions,
@@ -50,7 +52,6 @@ const emptyOptions: AssetFilterOptions = {
   tools: [],
   dialogues: [],
   assetCates: [],
-  nodes: [],
 };
 
 const emptyPage: AssetPage = {
@@ -81,6 +82,7 @@ export function AssetBrowser({
   reloadSignal = 0,
   catalogOptions,
   contentMode = "preview",
+  detailLayer = "default",
   className = "",
 }: {
   teamID: number;
@@ -102,6 +104,7 @@ export function AssetBrowser({
   reloadSignal?: number;
   catalogOptions?: AssetCatalogOptions;
   contentMode?: AssetContentMode;
+  detailLayer?: DetailDialogLayer;
   className?: string;
 }) {
   const requestScopeKey = useAuthUserScopeKey();
@@ -479,6 +482,7 @@ export function AssetBrowser({
           teamID={teamID}
           assetID={selectedAssetID}
           selectable={selectable && view === "assets"}
+          layer={detailLayer}
           onClose={() => setSelectedAssetID(0)}
           onSelect={
             onSelect
@@ -589,8 +593,4 @@ function normalizeAllowedKinds(input?: AssetKind[]) {
     .map((option) => option.key)
     .filter((kind) => input?.includes(kind));
   return allowed.length === selectableKinds.length ? [] : allowed;
-}
-
-function errorText(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
 }

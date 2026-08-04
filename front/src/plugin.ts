@@ -55,11 +55,6 @@ const botPlugin = {
         default: mod.WorkHomeShell,
       })),
     ),
-    "bot-body-work-project-page": lazyNode(() =>
-      import("./nodes/body-work/project/project-page").then((mod) => ({
-        default: mod.WorkProjectPage,
-      })),
-    ),
     "bot-body-work-space-page": lazyNode(() =>
       import("./nodes/body-work/space/space-entry").then((mod) => ({
         default: mod.WorkSpaceEntry,

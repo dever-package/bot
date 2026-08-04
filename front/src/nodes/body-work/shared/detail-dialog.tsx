@@ -23,20 +23,24 @@ export type DetailVersionOption<T> = {
   value: T;
 };
 
+export type DetailDialogLayer = "default" | "nested";
+
 export function DetailDialogFrame({
   ariaLabel,
   header,
   children,
   onRequestClose,
+  layer = "default",
 }: {
   ariaLabel: string;
   header: ReactNode;
   children: ReactNode;
   onRequestClose: () => void | Promise<void>;
+  layer?: DetailDialogLayer;
 }) {
   const dialog = (
     <div
-      className="wb-detail-backdrop"
+      className={`wb-detail-backdrop ${layer === "nested" ? "is-nested" : ""}`.trim()}
       role="presentation"
       onMouseDown={() => void onRequestClose()}
     >

@@ -8,6 +8,7 @@ import (
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
+	botapi "github.com/dever-package/bot/api"
 	agentmodel "github.com/dever-package/bot/model/agent"
 	skilldraft "github.com/dever-package/bot/service/agent/skill/draft"
 )
@@ -17,7 +18,7 @@ type SkillDraft struct{}
 var skillDraftService = skilldraft.NewService()
 
 func (SkillDraft) PostTest(c *server.Context) error {
-	body, err := skillDraftBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -33,7 +34,7 @@ func (SkillDraft) PostTest(c *server.Context) error {
 }
 
 func (SkillDraft) PostPublish(c *server.Context) error {
-	body, err := skillDraftBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -62,7 +63,7 @@ func (SkillDraft) PostPublishOptions(c *server.Context) error {
 }
 
 func (SkillDraft) PostFromSkill(c *server.Context) error {
-	body, err := skillDraftBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -75,7 +76,7 @@ func (SkillDraft) PostFromSkill(c *server.Context) error {
 }
 
 func (SkillDraft) PostImportSource(c *server.Context) error {
-	body, err := skillDraftBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -95,7 +96,7 @@ func (SkillDraft) PostImportSource(c *server.Context) error {
 }
 
 func (SkillDraft) PostApplyPatch(c *server.Context) error {
-	body, err := skillDraftBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -114,14 +115,6 @@ func (SkillDraft) PostApplyPatch(c *server.Context) error {
 		AssistantContextKey: util.ToStringTrimmed(firstSkillDraftBodyValue(body, "assistant_context_key", "assistantContextKey")),
 	})
 	return skillDraftResponse(c, resp)
-}
-
-func skillDraftBody(c *server.Context) (map[string]any, error) {
-	body := map[string]any{}
-	if err := c.BindJSON(&body); err != nil {
-		return nil, err
-	}
-	return body, nil
 }
 
 func firstSkillDraftBodyValue(body map[string]any, keys ...string) any {

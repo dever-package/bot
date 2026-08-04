@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	assetmodel "github.com/dever-package/bot/model/asset"
 	botmodel "github.com/dever-package/bot/model/energon"
 	assetservice "github.com/dever-package/bot/service/asset"
 )
@@ -18,7 +19,6 @@ const (
 	storyboardVersion         = botmodel.StoryboardVersion
 	storyboardWorkflowDraft   = "draft"
 	storyboardWorkflowConfirm = "confirmed"
-	storyboardMaxSearchDepth  = 12
 	storyboardDefaultAspect   = "16:9"
 	storyboardOutputImages    = "shot_images"
 	storyboardOutputFinal     = "final_video"
@@ -56,6 +56,19 @@ type CreateStoryboardRevisionRequest struct {
 	NodeKey   string
 }
 
+type storyboardValidationScope struct {
+	referenceImages bool
+	shotVideos      bool
+	voice           bool
+	subtitles       bool
+	lipSync         bool
+}
+
+type storyboardSpeechValidationOptions struct {
+	validateTimeline        bool
+	validateVisibleSpeakers bool
+}
+
 func (s Service) ConfirmStoryboard(ctx context.Context, projectID uint64, req ConfirmStoryboardRequest) (map[string]any, error) {
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
@@ -89,14 +102,14 @@ func (s Service) ConfirmStoryboard(ctx context.Context, projectID uint64, req Co
 				"asset": s.asset.AssetDetailMap(ctx, *asset, version),
 			}, nil
 		}
-		if err := validateStoryboard(document); err != nil {
-			return nil, err
-		}
 		productionPlan, err := normalizeStoryboardProductionPlan(req.ProductionPlan, storyboardProductionAuto)
 		if err != nil {
 			return nil, err
 		}
 		document["production_plan"] = productionPlan
+		if err := validateStoryboard(document); err != nil {
+			return nil, err
+		}
 		document["workflow"] = map[string]any{
 			"status":       storyboardWorkflowConfirm,
 			"confirmed_at": time.Now().UTC().Format(time.RFC3339),
@@ -183,7 +196,18 @@ func (s Service) editableAssetVersionContent(ctx context.Context, projectID uint
 	if version == nil || version.AssetID != asset.ID {
 		return nil, fmt.Errorf("资产版本不存在")
 	}
-	current, isStoryboard := storyboardDocument(assetservice.VersionToMap(*version)["content"])
+	currentContent := assetservice.VersionToMap(*version)["content"]
+	if _, isStoryboardGrid := workspaceStoryboardGridDocument(currentContent); isStoryboardGrid {
+		if asset.Kind != assetmodel.KindCollection || asset.CollectionID > 0 {
+			return nil, fmt.Errorf("宫格内容必须保存为顶层集合")
+		}
+		incoming, ok := workspaceStoryboardGridDocument(req.Content)
+		if !ok {
+			return nil, fmt.Errorf("宫格版本内容格式无效")
+		}
+		return s.editableStoryboardGridContent(ctx, asset, incoming)
+	}
+	current, isStoryboard := storyboardDocument(currentContent)
 	if !isStoryboard {
 		return req.Content, nil
 	}
@@ -222,45 +246,15 @@ func (s Service) editableAssetVersionContent(ctx context.Context, projectID uint
 }
 
 func storyboardDocument(value any) (map[string]any, bool) {
-	return findStoryboardDocument(value, 0)
-}
-
-func findStoryboardDocument(value any, depth int) (map[string]any, bool) {
-	if depth > storyboardMaxSearchDepth || value == nil {
-		return nil, false
-	}
-	if text, ok := value.(string); ok {
-		var decoded any
-		if json.Unmarshal([]byte(strings.TrimSpace(text)), &decoded) != nil {
-			return nil, false
-		}
-		return findStoryboardDocument(decoded, depth+1)
-	}
-	if values, ok := value.([]any); ok {
-		for _, item := range values {
-			if document, found := findStoryboardDocument(item, depth+1); found {
-				return document, true
-			}
-		}
-		return nil, false
-	}
-	document, ok := value.(map[string]any)
+	document, ok := findWorkspaceDocument(
+		value,
+		storyboardType,
+		storyboardWrapperKeys[:],
+	)
 	if !ok {
 		return nil, false
 	}
-	if strings.ToLower(storyboardText(document["type"])) == storyboardType {
-		return cloneStoryboardDocument(document)
-	}
-	for _, key := range storyboardWrapperKeys {
-		candidate, exists := document[key]
-		if !exists || candidate == nil {
-			continue
-		}
-		if storyboard, found := findStoryboardDocument(candidate, depth+1); found {
-			return storyboard, true
-		}
-	}
-	return nil, false
+	return cloneStoryboardDocument(document)
 }
 
 func cloneStoryboardDocument(document map[string]any) (map[string]any, bool) {
@@ -301,12 +295,6 @@ func validateStoryboard(document map[string]any) error {
 	if _, ok := document["narrator_voice"].(string); !ok {
 		return fmt.Errorf("分镜旁白音色格式无效")
 	}
-	if err := validateStoryboardStoryline(document["storyline"]); err != nil {
-		return err
-	}
-	if storyboardText(document["style_prompt"]) == "" {
-		return fmt.Errorf("分镜统一视觉风格不能为空")
-	}
 	visualMode := botmodel.NormalizeStoryboardVisualMode(storyboardText(document["visual_mode"]))
 	if !botmodel.IsStoryboardVisualMode(visualMode) {
 		return fmt.Errorf("分镜画面类型必须是 photoreal 或 stylized")
@@ -317,17 +305,19 @@ func validateStoryboard(document map[string]any) error {
 		return fmt.Errorf("分镜画幅必须是 16:9、9:16、1:1、4:3、3:4 或 21:9")
 	}
 	document["aspect_ratio"] = aspectRatio
-	if productionPlan, exists := document["production_plan"]; exists {
-		normalized, err := normalizeStoryboardProductionPlan(productionPlan, storyboardProductionOff)
-		if err != nil {
-			return err
-		}
-		document["production_plan"] = normalized
+	productionPlan, err := normalizeStoryboardProductionPlan(document["production_plan"], storyboardProductionOff)
+	if err != nil {
+		return err
+	}
+	document["production_plan"] = productionPlan
+	validationScope := storyboardValidationScopeForPlan(productionPlan)
+	if validationScope.referenceImages && storyboardText(document["style_prompt"]) == "" {
+		return fmt.Errorf("分镜统一视觉风格不能为空")
 	}
 	if _, ok := document["references"].([]any); !ok {
 		return fmt.Errorf("分镜参考素材必须是数组")
 	}
-	materialTypes, err := storyboardMaterialTypes(document["materials"])
+	materialTypes, err := storyboardMaterialTypes(document["materials"], validationScope.referenceImages)
 	if err != nil {
 		return err
 	}
@@ -345,10 +335,8 @@ func validateStoryboard(document map[string]any) error {
 	speechIDs := map[string]struct{}{}
 	captionIDs := map[string]struct{}{}
 	shotDescriptions := make([]string, 0, len(shots))
-	var previousMaterialIDs map[string]struct{}
-	previousVisibleDialogue := false
+	var previousStableMaterialIDs map[string]struct{}
 	previousExitState := ""
-	continuityChainLength := 0
 	totalDuration := 0
 	for shotIndex, value := range shots {
 		shot, ok := value.(map[string]any)
@@ -385,28 +373,30 @@ func validateStoryboard(document map[string]any) error {
 		} else if transition == "" {
 			return fmt.Errorf("镜头 %d 必须说明与上一镜头的承接关系", shotIndex+1)
 		}
-		transitionTypeValue, ok := shot["transition_type"].(string)
-		transitionType := botmodel.NormalizeStoryboardTransitionType(transitionTypeValue)
-		if !ok || strings.TrimSpace(transitionTypeValue) == "" || !botmodel.IsStoryboardTransitionType(transitionType) {
-			return fmt.Errorf("镜头 %d 的结构化转场类型无效: %q", shotIndex+1, transitionTypeValue)
-		}
-		transitionDurationMS, ok := storyboardInteger(shot["transition_duration_ms"])
-		if !ok || transitionDurationMS < 0 || transitionDurationMS > 5000 {
-			return fmt.Errorf("镜头 %d 的转场时长必须是 0 到 5000 毫秒的整数", shotIndex+1)
-		}
-		if shotIndex == 0 {
-			if transitionType != botmodel.StoryboardTransitionNone || transitionDurationMS != 0 {
-				return fmt.Errorf("第一个镜头不能配置转场效果")
+		if validationScope.shotVideos {
+			transitionTypeValue, ok := shot["transition_type"].(string)
+			transitionType := botmodel.NormalizeStoryboardTransitionType(transitionTypeValue)
+			if !ok || strings.TrimSpace(transitionTypeValue) == "" || !botmodel.IsStoryboardTransitionType(transitionType) {
+				return fmt.Errorf("镜头 %d 的结构化转场类型无效: %q", shotIndex+1, transitionTypeValue)
 			}
-		} else if transitionType == botmodel.StoryboardTransitionNone {
-			if transitionDurationMS != 0 {
-				return fmt.Errorf("镜头 %d 使用硬切时转场时长必须为 0", shotIndex+1)
+			transitionDurationMS, ok := storyboardInteger(shot["transition_duration_ms"])
+			if !ok || transitionDurationMS < 0 || transitionDurationMS > 5000 {
+				return fmt.Errorf("镜头 %d 的转场时长必须是 0 到 5000 毫秒的整数", shotIndex+1)
 			}
-		} else if transitionDurationMS < 100 {
-			return fmt.Errorf("镜头 %d 启用转场时转场时长不能小于 100 毫秒", shotIndex+1)
+			if shotIndex == 0 {
+				if transitionType != botmodel.StoryboardTransitionNone || transitionDurationMS != 0 {
+					return fmt.Errorf("第一个镜头不能配置转场效果")
+				}
+			} else if transitionType == botmodel.StoryboardTransitionNone {
+				if transitionDurationMS != 0 {
+					return fmt.Errorf("镜头 %d 使用硬切时转场时长必须为 0", shotIndex+1)
+				}
+			} else if transitionDurationMS < 100 {
+				return fmt.Errorf("镜头 %d 启用转场时转场时长不能小于 100 毫秒", shotIndex+1)
+			}
+			shot["transition_type"] = transitionType
+			shot["transition_duration_ms"] = transitionDurationMS
 		}
-		shot["transition_type"] = transitionType
-		shot["transition_duration_ms"] = transitionDurationMS
 		shotDescription := storyboardText(shot["description"])
 		if shotDescription == "" {
 			return fmt.Errorf("镜头 %d 缺少镜头描述", shotIndex+1)
@@ -415,7 +405,7 @@ func validateStoryboard(document map[string]any) error {
 		if _, ok := shot["camera_instruction"].(string); !ok {
 			return fmt.Errorf("镜头 %d 的镜头语言格式无效", shotIndex+1)
 		}
-		if storyboardText(shot["video_prompt"]) == "" {
+		if validationScope.shotVideos && storyboardText(shot["video_prompt"]) == "" {
 			return fmt.Errorf("镜头 %d 缺少视频提示词", shotIndex+1)
 		}
 		if _, ok := shot["reference_keys"].([]any); !ok {
@@ -435,50 +425,57 @@ func validateStoryboard(document map[string]any) error {
 		if matchPrevious && continuePrevious {
 			return fmt.Errorf("镜头 %d 不能同时匹配上一镜画面和延续上一镜视频", shotIndex+1)
 		}
-		entryState, exitState, err := normalizeStoredStoryboardContinuityState(shot, shotIndex)
-		if err != nil {
-			return err
-		}
-		if shotIndex > 0 && (matchPrevious || continuePrevious) && entryState != previousExitState {
-			return fmt.Errorf("镜头 %d 的入镜状态必须与上一镜头的出镜状态完全一致", shotIndex+1)
+		if validationScope.referenceImages {
+			entryState, exitState, err := normalizeStoredStoryboardContinuityState(shot, shotIndex)
+			if err != nil {
+				return err
+			}
+			if shotIndex > 0 && (matchPrevious || continuePrevious) && entryState != previousExitState {
+				return fmt.Errorf("镜头 %d 的入镜状态必须与上一镜头的出镜状态完全一致", shotIndex+1)
+			}
+			previousExitState = exitState
 		}
 		continuityAnchor, ok := shot["continuity_anchor"].(string)
 		if !ok {
 			return fmt.Errorf("镜头 %d 的连续性锚点格式无效", shotIndex+1)
 		}
 		continuityAnchor = strings.TrimSpace(continuityAnchor)
-		if continuePrevious && continuityAnchor == "" {
+		if validationScope.shotVideos && continuePrevious && continuityAnchor == "" {
 			return fmt.Errorf("镜头 %d 承接上一镜头时必须填写连续性锚点", shotIndex+1)
 		}
-		if continuePrevious {
-			continuityChainLength++
-			if continuityChainLength >= 3 {
-				return fmt.Errorf("镜头 %d 所在连续镜头链不能超过 3 个镜头", shotIndex+1)
-			}
-		} else {
+		if !continuePrevious {
 			shot["continuity_anchor"] = ""
-			continuityChainLength = 0
 		}
 		materialIDs, err := storyboardShotMaterialIDs(shot["material_ids"], shotIndex, materialTypes)
 		if err != nil {
 			return err
 		}
-		if continuePrevious && !sameStoryboardMaterialIDSet(previousMaterialIDs, materialIDs) {
-			return fmt.Errorf("镜头 %d 连续镜头不能新增、移除或更换角色、场景或道具", shotIndex+1)
+		stableMaterialIDs := storyboardStableMaterialIDs(materialIDs, materialTypes)
+		if validationScope.shotVideos && continuePrevious && !sameStoryboardMaterialIDSet(previousStableMaterialIDs, stableMaterialIDs) {
+			return fmt.Errorf("镜头 %d 动作续接时不能新增、移除或更换角色与场景", shotIndex+1)
 		}
-		visibleDialogue, err := validateStoryboardSpeech(shot, shotIndex, duration, speechIDs, materialTypes, materialIDs)
-		if err != nil {
-			return err
+		if validationScope.voice || validationScope.subtitles || validationScope.lipSync {
+			if _, err := validateStoryboardSpeech(
+				shot,
+				shotIndex,
+				duration,
+				speechIDs,
+				materialTypes,
+				materialIDs,
+				storyboardSpeechValidationOptions{
+					validateTimeline:        validationScope.voice,
+					validateVisibleSpeakers: validationScope.lipSync,
+				},
+			); err != nil {
+				return err
+			}
 		}
-		if continuePrevious && (previousVisibleDialogue || visibleDialogue) {
-			return fmt.Errorf("镜头 %d 的出镜对白不能跨越连续镜头边界", shotIndex+1)
+		if validationScope.subtitles {
+			if err := validateStoryboardCaptions(shot, shotIndex, duration, captionIDs); err != nil {
+				return err
+			}
 		}
-		if err := validateStoryboardCaptions(shot, shotIndex, duration, captionIDs); err != nil {
-			return err
-		}
-		previousMaterialIDs = materialIDs
-		previousVisibleDialogue = visibleDialogue
-		previousExitState = exitState
+		previousStableMaterialIDs = stableMaterialIDs
 	}
 	if totalDuration != targetDuration {
 		return fmt.Errorf("分镜目标总时长与镜头时长之和不一致")
@@ -499,6 +496,19 @@ func validateStoryboard(document map[string]any) error {
 		return err
 	}
 	return nil
+}
+
+func storyboardValidationScopeForPlan(plan map[string]any) storyboardValidationScope {
+	outputTarget := storyboardText(plan["output_target"])
+	shotVideos := outputTarget == storyboardOutputShots || outputTarget == storyboardOutputFinal
+	voice := shotVideos && storyboardText(plan["voice_mode"]) == storyboardProductionAuto
+	return storyboardValidationScope{
+		referenceImages: outputTarget != storyboardOutputOnly,
+		shotVideos:      shotVideos,
+		voice:           voice,
+		subtitles:       shotVideos && storyboardText(plan["subtitle_mode"]) == storyboardProductionAuto,
+		lipSync:         voice && storyboardText(plan["lip_sync_mode"]) == storyboardProductionAuto,
+	}
 }
 
 func normalizeStoredStoryboardContinuityState(shot map[string]any, shotIndex int) (string, string, error) {
@@ -573,26 +583,6 @@ func storyboardProductionMode(value any, label string) (string, error) {
 	return mode, nil
 }
 
-func validateStoryboardStoryline(value any) error {
-	storyline, ok := value.(map[string]any)
-	if !ok {
-		return fmt.Errorf("分镜叙事主线格式无效")
-	}
-	for _, field := range []struct {
-		key   string
-		label string
-	}{
-		{key: "setup", label: "故事起点"},
-		{key: "development", label: "核心推进"},
-		{key: "payoff", label: "结果落点"},
-	} {
-		if storyboardText(storyline[field.key]) == "" {
-			return fmt.Errorf("分镜%s不能为空", field.label)
-		}
-	}
-	return nil
-}
-
 func storyboardAspectRatio(value any) (string, bool) {
 	text := storyboardText(value)
 	if text == "" {
@@ -606,7 +596,7 @@ func storyboardAspectRatio(value any) (string, bool) {
 	}
 }
 
-func storyboardMaterialTypes(value any) (map[string]string, error) {
+func storyboardMaterialTypes(value any, requirePrompt bool) (map[string]string, error) {
 	materials, ok := value.([]any)
 	if !ok {
 		return nil, fmt.Errorf("分镜素材清单格式无效")
@@ -638,7 +628,7 @@ func storyboardMaterialTypes(value any) (map[string]string, error) {
 			return nil, fmt.Errorf("素材名称 %s 重复", materialName)
 		}
 		materialNames[nameKey] = struct{}{}
-		if storyboardText(material["prompt"]) == "" {
+		if requirePrompt && storyboardText(material["prompt"]) == "" {
 			return nil, fmt.Errorf("素材 %d 提示词不能为空", index+1)
 		}
 		voice, ok := material["voice"].(string)
@@ -691,6 +681,16 @@ func sameStoryboardMaterialIDSet(left map[string]struct{}, right map[string]stru
 	return true
 }
 
+func storyboardStableMaterialIDs(materialIDs map[string]struct{}, materialTypes map[string]string) map[string]struct{} {
+	result := make(map[string]struct{}, len(materialIDs))
+	for id := range materialIDs {
+		if materialTypes[id] == "character" || materialTypes[id] == "scene" {
+			result[id] = struct{}{}
+		}
+	}
+	return result
+}
+
 func validateStoryboardSpeech(
 	shot map[string]any,
 	shotIndex int,
@@ -698,6 +698,7 @@ func validateStoryboardSpeech(
 	usedIDs map[string]struct{},
 	materialTypes map[string]string,
 	shotMaterialIDs map[string]struct{},
+	options storyboardSpeechValidationOptions,
 ) (bool, error) {
 	speech, ok := shot["speech"].([]any)
 	if !ok {
@@ -729,11 +730,13 @@ func validateStoryboardSpeech(
 		if !ok || startTime < 0 || startTime >= duration {
 			return false, fmt.Errorf("镜头 %d 的语音 %d 开始时间超出镜头范围", shotIndex+1, speechIndex+1)
 		}
-		windows = append(windows, storyboardSpeechWindow{
-			id:    id,
-			start: startTime,
-			end:   startTime + botmodel.EstimateStoryboardSpeechDuration(storyboardText(item["text"])),
-		})
+		if options.validateTimeline {
+			windows = append(windows, storyboardSpeechWindow{
+				id:    id,
+				start: startTime,
+				end:   startTime + botmodel.EstimateStoryboardSpeechDuration(storyboardText(item["text"])),
+			})
+		}
 		if _, ok := item["subtitle_enabled"].(bool); !ok {
 			return false, fmt.Errorf("镜头 %d 的语音 %d 字幕开关格式无效", shotIndex+1, speechIndex+1)
 		}
@@ -757,20 +760,24 @@ func validateStoryboardSpeech(
 		if speakerMode != "visible" {
 			continue
 		}
-		if visibleCharacterID != "" && visibleCharacterID != characterID {
+		if options.validateVisibleSpeakers && visibleCharacterID != "" && visibleCharacterID != characterID {
 			return false, fmt.Errorf("镜头 %d 最多只能有一个出镜说话角色", shotIndex+1)
 		}
-		visibleCharacterID = characterID
-	}
-	sort.SliceStable(windows, func(left int, right int) bool {
-		return windows[left].start < windows[right].start
-	})
-	for index, current := range windows {
-		if current.end > duration+0.01 {
-			return false, fmt.Errorf("镜头 %d 的语音 %s 按正常语速无法在镜头内说完", shotIndex+1, current.id)
+		if visibleCharacterID == "" {
+			visibleCharacterID = characterID
 		}
-		if index+1 < len(windows) && current.end > windows[index+1].start+0.01 {
-			return false, fmt.Errorf("镜头 %d 的语音 %s 与下一条语音按正常语速会重叠", shotIndex+1, current.id)
+	}
+	if options.validateTimeline {
+		sort.SliceStable(windows, func(left int, right int) bool {
+			return windows[left].start < windows[right].start
+		})
+		for index, current := range windows {
+			if current.end > duration+0.01 {
+				return false, fmt.Errorf("镜头 %d 的语音 %s 按正常语速无法在镜头内说完", shotIndex+1, current.id)
+			}
+			if index+1 < len(windows) && current.end > windows[index+1].start+0.01 {
+				return false, fmt.Errorf("镜头 %d 的语音 %s 与下一条语音按正常语速会重叠", shotIndex+1, current.id)
+			}
 		}
 	}
 	return visibleCharacterID != "", nil

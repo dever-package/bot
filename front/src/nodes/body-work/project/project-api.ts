@@ -1,5 +1,12 @@
 import { joinSiteApi, request } from "@dever/front-plugin";
-import { isSuccessResponse } from "../shared/api-response";
+import {
+  asResponseRows as toRows,
+  isResponseRecord as isRecord,
+  responseNonNegativeNumber as nonNegativeNumber,
+  responsePositiveNumber as numberValue,
+  responseText as textValue,
+  successfulResponseData,
+} from "../shared/api-response";
 import { createInFlightRequestLoader } from "../shared/in-flight-request";
 
 export type ProjectView = "works" | "trash";
@@ -51,8 +58,8 @@ export function loadProjectList(
     );
     return {
       items: toRows(data.items).map(normalizeProject).filter(hasProjectID),
-      page: positiveNumber(data.page, page),
-      pageSize: positiveNumber(data.page_size, pageSize),
+      page: numberValue(data.page, page),
+      pageSize: numberValue(data.page_size, pageSize),
       total: nonNegativeNumber(data.total),
       hasMore: Boolean(data.has_more),
     };
@@ -106,10 +113,7 @@ async function projectRequest(
   fallback: string,
 ) {
   const result = await request(joinSiteApi(`project/${path}`), method, payload);
-  if (!isSuccessResponse(result)) {
-    throw new Error(String(result?.message || result?.msg || fallback));
-  }
-  return isRecord(result?.data) ? result.data : {};
+  return successfulResponseData(result, fallback);
 }
 
 function normalizeProject(value: unknown): ProjectItem {
@@ -126,30 +130,4 @@ function normalizeProject(value: unknown): ProjectItem {
 
 function hasProjectID(project: ProjectItem) {
   return project.id > 0;
-}
-
-function toRows(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function numberValue(value: unknown) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-
-function positiveNumber(value: unknown, fallback: number) {
-  return numberValue(value) || fallback;
-}
-
-function nonNegativeNumber(value: unknown) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-}
-
-function textValue(value: unknown) {
-  return value == null ? "" : String(value).trim();
 }

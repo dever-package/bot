@@ -48,27 +48,6 @@ func (s Service) Start(ctx context.Context, request StartRequest) (agentmodel.Do
 	return row, nil
 }
 
-func (s Service) AppendText(ctx context.Context, request AppendTextRequest) (agentmodel.DocumentBlock, error) {
-	if existing := s.repository.blockBySource(ctx, request.DocumentID, request.SourceKey); existing != nil {
-		return *existing, nil
-	}
-	if s.repository.find(ctx, request.DocumentID) == nil {
-		return agentmodel.DocumentBlock{}, fmt.Errorf("智能体文档不存在")
-	}
-	text := strings.TrimSpace(strings.ReplaceAll(request.Text, "\r\n", "\n"))
-	if text == "" {
-		return agentmodel.DocumentBlock{}, nil
-	}
-	return s.appendBlock(ctx, request.DocumentID, request.SourceKey, map[string]any{
-		"type":       agentmodel.DocumentBlockTypeText,
-		"format":     "markdown",
-		"media_kind": "",
-		"text":       text,
-		"status":     agentmodel.DocumentBlockStatusReady,
-		"meta":       encodeJSON(request.Meta, "{}"),
-	})
-}
-
 // BeginTextStream creates the text block for one model step. Replaying the same
 // step replaces its partial text instead of duplicating content after recovery.
 func (s Service) BeginTextStream(ctx context.Context, request AppendTextRequest) (agentmodel.DocumentBlock, int, error) {

@@ -9,13 +9,10 @@ import (
 )
 
 const (
-	FeaturePower   = "power"
-	FeatureAgent   = "agent"
-	FeatureTeam    = "team"
-	FeatureFlow    = "flow"
-	FeatureUpload  = "upload"
-	FeatureSkill   = "skill"
-	FeatureEnergon = "energon"
+	FeaturePower = "power"
+	FeatureAgent = "agent"
+	FeatureTeam  = "team"
+	FeatureFlow  = "flow"
 
 	EventTypeLifecycle = "lifecycle"
 	EventTypeProgress  = "progress"

@@ -65,17 +65,6 @@ func parseIndexStageDetail(value string) indexStageDetail {
 	return result
 }
 
-func resetDocumentIndexProgress(ctx context.Context, docID uint64) {
-	if docID == 0 {
-		return
-	}
-	agentmodel.NewKnowledgeDocModel().Update(ctx, map[string]any{"id": docID}, map[string]any{
-		"index_stage":        agentmodel.KnowledgeIndexStagePending,
-		"index_stage_detail": "",
-		"error_message":      "",
-	})
-}
-
 func beginKnowledgeDocIndex(ctx context.Context, doc *agentmodel.KnowledgeDoc) (int, bool) {
 	if doc == nil || doc.ID == 0 {
 		return 1, false

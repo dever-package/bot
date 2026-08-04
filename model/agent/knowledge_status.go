@@ -65,14 +65,6 @@ var knowledgeIndexStageOptions = []map[string]any{
 	{"id": KnowledgeIndexStageFailed, "value": "失败"},
 }
 
-func KnowledgeIndexStatusOptions() []map[string]any {
-	return cloneOptionRows(knowledgeIndexStatusOptions)
-}
-
-func KnowledgeModeOptions() []map[string]any {
-	return cloneOptionRows(knowledgeModeOptions)
-}
-
 var knowledgeNodeTypeOptions = []map[string]any{
 	{"id": KnowledgeNodeTypeRoot, "value": "根节点"},
 	{"id": KnowledgeNodeTypeDir, "value": "目录"},

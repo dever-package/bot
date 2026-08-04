@@ -58,6 +58,9 @@ var (
 		{"id": 24, "power_id": defaultCopywritingPowerID, "service_id": serviceShemicLabGPTID, "sort": 2, "status": 1},
 		{"id": 25, "power_id": defaultCopywritingPowerID, "service_id": serviceDoubaoTextID, "sort": 3, "status": 1},
 		{"id": 27, "power_id": defaultCopywritingPowerID, "service_id": serviceDoubaoGLMID, "sort": 5, "status": 1},
+		{"id": 29, "power_id": defaultStoryboardGridPowerID, "service_id": serviceDoubaoImage5ID, "sort": 1, "status": 1},
+		{"id": 30, "power_id": defaultStoryboardGridPowerID, "service_id": serviceDoubaoImageID, "sort": 2, "status": 1},
+		{"id": 31, "power_id": defaultStoryboardGridPowerID, "service_id": serviceShemicLabImageID, "sort": 3, "status": 1},
 	}
 
 	powerTargetPowerRelation = orm.Relation{

@@ -45,17 +45,6 @@ export function canvasExecutionNodeIds(
   return [...result];
 }
 
-export function orderedCanvasExecutionNodes(
-  startNodeId: string,
-  nodes: SpaceCanvasNode[],
-  edges: SpaceCanvasEdge[],
-) {
-  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-  return canvasExecutionNodeIds(startNodeId, nodes, edges)
-    .map((nodeId) => nodeMap.get(nodeId))
-    .filter((node): node is SpaceCanvasNode => Boolean(node));
-}
-
 export function canvasNodeStopsExecution(node: SpaceCanvasNode) {
   return (
     node.type === "function" &&

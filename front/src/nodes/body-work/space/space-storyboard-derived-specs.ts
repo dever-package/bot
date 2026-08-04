@@ -548,10 +548,11 @@ function storyboardNarrativeExecutionContext(
       : index >= storyboard.shots.length - 1
         ? storyboard.storyline.payoff
         : storyboard.storyline.development;
+  const narrativeStage = stage.trim();
   const nextTransition = storyboard.shots[index + 1]?.transition.trim();
   return [
     `故事目标：${storyboard.summary.trim()}`,
-    `当前叙事阶段：${stage.trim()}`,
+    narrativeStage ? `当前叙事阶段：${narrativeStage}` : "",
     `本镜变化：${shot.beat.trim()}`,
     shot.transition.trim() ? `从上一镜进入本镜：${shot.transition.trim()}` : "",
     storyboardShotIncomingTransition(shot, index),

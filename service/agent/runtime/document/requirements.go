@@ -18,14 +18,6 @@ type MediaCoverage struct {
 	Failed     map[string]int `json:"failed"`
 }
 
-func (coverage MediaCoverage) RequiredTotal() int {
-	return mediaCountTotal(coverage.Required)
-}
-
-func (coverage MediaCoverage) ScheduledTotal() int {
-	return mediaCountTotal(coverage.Scheduled)
-}
-
 func (coverage MediaCoverage) Missing() map[string]int {
 	missing := map[string]int{}
 	for kind, required := range coverage.Required {

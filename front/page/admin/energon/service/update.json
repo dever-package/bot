@@ -109,6 +109,49 @@
         }
       },
       {
+        "id": "service-image-output-mode",
+        "type": "form-radio",
+        "name": "图片输出模式",
+        "value": "form.image_output_mode",
+        "mode": "form",
+        "info": "单图服务每次返回一张图片；组图服务可在一次请求中返回多张有序图片。仅声明来源能力，不要求用户填写生成张数。",
+        "meta": {
+          "controlClassName": "max-w-[220px]",
+          "showWhen": [
+            {
+              "path": "form.type",
+              "operator": "equals",
+              "value": "image"
+            }
+          ]
+        }
+      },
+      {
+        "id": "service-max-images-per-request",
+        "type": "form-input",
+        "name": "单次最多图片数",
+        "placeholder": "0 表示使用协议上限",
+        "value": "form.max_images_per_request",
+        "mode": "form",
+        "info": "仅组图服务使用；0 表示按系统宫格上限 9 张处理。",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[220px]",
+          "showWhen": [
+            {
+              "path": "form.type",
+              "operator": "equals",
+              "value": "image"
+            },
+            {
+              "path": "form.image_output_mode",
+              "operator": "equals",
+              "value": "group"
+            }
+          ]
+        }
+      },
+      {
         "id": "service-context-window-tokens",
         "type": "form-input",
         "name": "上下文窗口",
@@ -165,6 +208,8 @@
         "account_id",
         "name",
         "type",
+        "image_output_mode",
+        "max_images_per_request",
         "context_window_tokens",
         "max_output_tokens",
         "path",
@@ -176,6 +221,8 @@
       "provider_id": "",
       "account_id": 0,
       "type": "text",
+      "image_output_mode": "single",
+      "max_images_per_request": 0,
       "context_window_tokens": "0",
       "max_output_tokens": "0",
       "path": "",

@@ -102,6 +102,10 @@
                   "general",
                   "storyboard"
                 ],
+                "image": [
+                  "general",
+                  "storyboard_grid"
+                ],
                 "video": [
                   "general",
                   "lip_sync",
@@ -129,6 +133,11 @@
               "path": "form.kind",
               "operator": "notEquals",
               "value": "audio"
+            },
+            {
+              "path": "form.kind",
+              "operator": "notEquals",
+              "value": "image"
             }
           ]
         },
@@ -152,6 +161,17 @@
                 "path": "form.kind",
                 "operator": "equals",
                 "value": "video"
+              }
+            ]
+          },
+          {
+            "type": "required",
+            "message": "能力必须选择输出类型。",
+            "when": [
+              {
+                "path": "form.kind",
+                "operator": "equals",
+                "value": "image"
               }
             ]
           }

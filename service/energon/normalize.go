@@ -35,7 +35,7 @@ func (s GatewayService) handleNormalize(ctx context.Context, req *botprotocol.Sh
 		}
 
 		result, err := s.callNormalizePowerTarget(ctx, req, selected)
-		attempts = append(attempts, result.Attempt)
+		attempts = appendCallResultAttempts(attempts, result)
 		if err == nil {
 			result.Attempts = attempts
 			return s.buildGatewayResponse(req, selected, result), nil
@@ -47,6 +47,16 @@ func (s GatewayService) handleNormalize(ctx context.Context, req *botprotocol.Sh
 		return nil, lastErr
 	}
 	return nil, fmt.Errorf("调用失败")
+}
+
+func appendCallResultAttempts(attempts []GatewayAttempt, result callResult) []GatewayAttempt {
+	if len(result.Attempts) > 0 {
+		return append(attempts, result.Attempts...)
+	}
+	if result.Attempt.PowerTargetID > 0 || result.Attempt.ServiceID > 0 || result.Attempt.LogID > 0 {
+		return append(attempts, result.Attempt)
+	}
+	return attempts
 }
 
 type normalizePlan struct {

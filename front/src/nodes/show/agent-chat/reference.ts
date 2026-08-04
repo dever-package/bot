@@ -142,6 +142,17 @@ export type ReferenceLoadResult = {
   nextCursor?: string;
 };
 
+export type ReferenceProviderPickerProps = {
+  open: boolean;
+  acceptedKinds?: string[];
+  preferredUsage?: string;
+  maxSelection?: number;
+  selectedReferences?: Extract<ReferencePart, { type: "reference" }>[];
+  onSelect: (option: ReferenceOption) => void;
+  onSelectMany?: (options: ReferenceOption[]) => void;
+  onClose: () => void;
+};
+
 export type ReferenceProvider = {
   trigger: string;
   referenceTypes: ReferenceType[];
@@ -151,18 +162,9 @@ export type ReferenceProvider = {
   loadPreview?: ReferencePreviewLoader;
   availableScopes?: ReferenceScope[];
   searchPlaceholder?: string;
-  renderPicker?: (props: {
-    open: boolean;
-    acceptedKinds?: string[];
-    preferredUsage?: string;
-    maxSelection?: number;
-    selectedReferences?: Extract<
-      ReferencePart,
-      { type: "reference" }
-    >[];
-    onSelect: (option: ReferenceOption) => void;
-    onClose: () => void;
-  }) => import("react").ReactNode;
+  renderPicker?: (
+    props: ReferenceProviderPickerProps,
+  ) => import("react").ReactNode;
 };
 
 export type ReferenceUploadedFile = {

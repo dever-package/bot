@@ -32,7 +32,6 @@
         "meta": {
           "controlClassName": "min-w-[8rem]",
           "clearOnChange": [
-            "form.param_id",
             "form.combo_param_ids",
             "form.mapping"
           ]
@@ -41,10 +40,11 @@
       {
         "id": "service-param-id",
         "type": "form-cascader",
+        "name": "内部参数 / 所属参数",
         "value": "form.param_id",
         "mode": "form",
         "placeholder": "请选择参数",
-        "info": "会按映射规则过滤：选项/组合只显示单选或多选参数，附件只显示文件参数，固定值不需要内部参数。",
+        "info": "普通映射必须选择内部参数；固定值可选所属参数，设置后固定字段只会在该参数生效且有值时写入。",
         "meta": {
           "childParentField": "cate_id",
           "valueMode": "leaf",
@@ -57,13 +57,6 @@
             "form.combo_param_ids",
             "form.combo_params",
             "form.mapping"
-          ],
-          "hiddenWhen": [
-            {
-              "path": "form.param_rule",
-              "operator": "equals",
-              "value": 5
-            }
           ],
           "optionFilter": [
             {
@@ -87,6 +80,26 @@
           ],
           "model": "bot.energon.NewParamCateModel",
           "childModel": "bot.energon.NewParamModel"
+        }
+      },
+      {
+        "id": "service-param-active-when",
+        "type": "form-cascader",
+        "name": "生效参数",
+        "value": "form.active_when_path",
+        "mode": "form",
+        "placeholder": "不设置则始终生效",
+        "info": "可选。依次选择参数分类、参数名和参数值；当前服务参数只在所选值匹配时参与展示和请求映射。固定值所属参数会继承对应输入映射的生效条件。",
+        "meta": {
+          "placeholder": [
+            "选择参数分类",
+            "选择参数名",
+            "选择参数值"
+          ],
+          "service": "bot.energon.ParamOptionService.LoadServiceParamConditionOptions",
+          "labelField": "value",
+          "leafField": "leaf",
+          "wrap": false
         }
       },
       {
@@ -290,7 +303,7 @@
         "value": "form.mapping",
         "mode": "form",
         "placeholder": "例如：false、123、{\"enabled\":true}",
-        "info": "固定值不读取内部参数，会按值类型写入字段标识对应的来源字段。",
+        "info": "固定值本身不读取内部参数值；若上方选择所属参数，只在所属参数生效且有值时写入。",
         "meta": {
           "controlClassName": "min-w-[16rem]",
           "hiddenWhen": [
@@ -317,7 +330,7 @@
         "value": "form.name",
         "mode": "form",
         "placeholder": "例如：超级提示词",
-        "info": "可选展示名。普通映射不填时展示内部参数名；固定值映射没有内部参数，不填则留空。填写后只影响后台展示。",
+        "info": "可选展示名。普通映射不填时展示内部参数名；固定值映射不填则留空。填写后只影响后台展示。",
         "meta": {
           "controlClassName": "min-w-[10rem]"
         }
@@ -326,6 +339,7 @@
   },
   "data": {
     "form": {
+      "active_when_path": [],
       "param_rule": 1,
       "fixed_value_type": "string",
       "file_value_format": "url",

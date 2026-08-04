@@ -93,6 +93,8 @@ func (Project) GetAssetList(c *server.Context) error {
 		botapi.QueryUint64(c, "project_id", "projectId"),
 		botapi.QueryUint64(c, "flow_id", "flowId"),
 		botapi.QueryText(c, "kind", "type"),
+		int(botapi.QueryUint64(c, "page")),
+		int(botapi.QueryUint64(c, "page_size", "pageSize")),
 	)
 	return botapi.WriteJSON(c, data, err)
 }

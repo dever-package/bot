@@ -10,10 +10,9 @@ const (
 	ModeNormalize = "normalize"
 	ModeProxy     = "proxy"
 
-	StatusActive   int16 = 1
-	StatusInactive       = 2
-	StatusSuccess        = "success"
-	StatusFail           = "fail"
+	StatusActive  int16 = 1
+	StatusSuccess       = "success"
+	StatusFail          = "fail"
 
 	powerSourceRuleAuto int16 = 1
 	powerSourceRulePick int16 = 2

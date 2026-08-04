@@ -10,6 +10,7 @@ import (
 	energonmodel "github.com/dever-package/bot/model/energon"
 	billingservice "github.com/dever-package/bot/service/billing"
 	energonservice "github.com/dever-package/bot/service/energon"
+	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
@@ -42,6 +43,7 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 		if err != nil {
 			return 0, nil, err
 		}
+		currentReferences = seriesPlan.referencesFor(arguments, currentReferences)
 		arguments, _, err = ApplyMediaReferences(arguments, config.Params, currentReferences)
 		if err != nil {
 			return 0, nil, err
@@ -171,6 +173,9 @@ func preparePowerInput(arguments map[string]any, params []energonservice.PowerPa
 	input, missing := energonservice.PreparePowerParamInput(arguments, params)
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("缺少必填参数: %s", strings.Join(missing, "、"))
+	}
+	if err := energoninput.ValidatePowerParamValues(params, input); err != nil {
+		return nil, err
 	}
 	return input, nil
 }

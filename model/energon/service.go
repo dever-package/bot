@@ -12,6 +12,8 @@ type Service struct {
 	AccountID           uint64    `dorm:"type:bigint;not null;default:0;comment:鉴权账号"`
 	Name                string    `dorm:"type:varchar(128);not null;comment:名称"`
 	Type                string    `dorm:"type:varchar(64);not null;comment:类型"`
+	ImageOutputMode     string    `dorm:"type:varchar(32);not null;default:'single';comment:图片输出模式"`
+	MaxImagesPerRequest int       `dorm:"type:int;not null;default:0;comment:单次最多图片数"`
 	ContextWindowTokens int       `dorm:"type:int;not null;default:0;comment:上下文窗口Token数"`
 	MaxOutputTokens     int       `dorm:"type:int;not null;default:0;comment:单次最大输出Token数"`
 	Path                string    `dorm:"type:varchar(255);not null;default:'';comment:接口路径"`
@@ -19,6 +21,11 @@ type Service struct {
 	Status              int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	CreatedAt           time.Time `dorm:"comment:创建时间"`
 }
+
+const (
+	ImageOutputModeSingle = "single"
+	ImageOutputModeGroup  = "group"
+)
 
 type ServiceIndex struct {
 	ProviderStatus struct{} `index:"provider_id,status,sort"`
@@ -44,6 +51,7 @@ const (
 	serviceRunningHubVideoID        uint64 = 23
 
 	ServiceDoubaoVideoID     = serviceDoubaoVideoID
+	ServiceDoubaoVideoFastID = serviceDoubaoVideoFastID
 	ServiceRunningHubVideoID = serviceRunningHubVideoID
 )
 
@@ -70,24 +78,28 @@ var (
 			"status":      1,
 		},
 		{
-			"id":          serviceRunningHubFlowClothingID,
-			"provider_id": providerRunningHubFlowID,
-			"account_id":  0,
-			"name":        "换装",
-			"type":        "image",
-			"path":        "",
-			"sort":        100,
-			"status":      1,
+			"id":                     serviceRunningHubFlowClothingID,
+			"provider_id":            providerRunningHubFlowID,
+			"account_id":             0,
+			"name":                   "换装",
+			"type":                   "image",
+			"image_output_mode":      ImageOutputModeSingle,
+			"max_images_per_request": 0,
+			"path":                   "",
+			"sort":                   100,
+			"status":                 1,
 		},
 		{
-			"id":          serviceShemicLabImageID,
-			"provider_id": providerShemicLabID,
-			"account_id":  0,
-			"name":        "image2生图",
-			"type":        "image",
-			"path":        "images/generations",
-			"sort":        100,
-			"status":      1,
+			"id":                     serviceShemicLabImageID,
+			"provider_id":            providerShemicLabID,
+			"account_id":             0,
+			"name":                   "image2生图",
+			"type":                   "image",
+			"image_output_mode":      ImageOutputModeSingle,
+			"max_images_per_request": 0,
+			"path":                   "images/generations",
+			"sort":                   100,
+			"status":                 1,
 		},
 		{
 			"id":          serviceDoubaoTextID,
@@ -100,14 +112,16 @@ var (
 			"status":      1,
 		},
 		{
-			"id":          serviceDoubaoImageID,
-			"provider_id": providerDoubaoID,
-			"account_id":  0,
-			"name":        "seedream-4-5",
-			"type":        "image",
-			"path":        "",
-			"sort":        100,
-			"status":      1,
+			"id":                     serviceDoubaoImageID,
+			"provider_id":            providerDoubaoID,
+			"account_id":             0,
+			"name":                   "seedream-4-5",
+			"type":                   "image",
+			"image_output_mode":      ImageOutputModeSingle,
+			"max_images_per_request": 0,
+			"path":                   "",
+			"sort":                   100,
+			"status":                 1,
 		},
 		{
 			"id":          serviceDoubaoVideoID,
@@ -180,14 +194,16 @@ var (
 			"status":      1,
 		},
 		{
-			"id":          serviceDoubaoImage5ID,
-			"provider_id": providerDoubaoID,
-			"account_id":  0,
-			"name":        "seedream-5",
-			"type":        "image",
-			"path":        "",
-			"sort":        100,
-			"status":      1,
+			"id":                     serviceDoubaoImage5ID,
+			"provider_id":            providerDoubaoID,
+			"account_id":             0,
+			"name":                   "seedream-5",
+			"type":                   "image",
+			"image_output_mode":      ImageOutputModeSingle,
+			"max_images_per_request": 0,
+			"path":                   "",
+			"sort":                   100,
+			"status":                 1,
 		},
 		{
 			"id":          serviceDoubaoGLMID,
@@ -252,7 +268,11 @@ func NewServiceModel() *orm.Model[Service] {
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{
-			"type":   kindOptions,
+			"type": kindOptions,
+			"image_output_mode": []map[string]any{
+				{"id": ImageOutputModeSingle, "value": "单图"},
+				{"id": ImageOutputModeGroup, "value": "组图"},
+			},
 			"status": statusOptions,
 		},
 		Relations: []orm.Relation{

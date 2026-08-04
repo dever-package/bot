@@ -128,7 +128,3 @@ func SkillSourceTypeLabel(sourceType string) string {
 		return "未知"
 	}
 }
-
-func SkillSourceTypeOptions() []map[string]any {
-	return cloneOptionRows(skillSourceTypeOptions)
-}

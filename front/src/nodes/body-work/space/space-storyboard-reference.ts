@@ -3,6 +3,7 @@ import type {
   CanvasStoryboardReference,
   CanvasStoryboardReferencePurpose,
 } from "./types";
+import { isPlainRecord as isRecord } from "../shared/structured-json";
 
 export const STORYBOARD_REFERENCE_PURPOSES = [
   "visual_style",
@@ -216,8 +217,4 @@ function normalizeReferenceKind(
 function positiveInteger(value: unknown) {
   const number = Number(value || 0);
   return Number.isInteger(number) && number > 0 ? number : 0;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

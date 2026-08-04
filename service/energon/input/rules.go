@@ -25,6 +25,10 @@ func IsActive(status int16) bool {
 	return status == statusActive
 }
 
+func serviceParamAcceptsInput(serviceParam botmodel.ServiceParam) bool {
+	return serviceParam.ParamRule != paramRuleFixedMap
+}
+
 func NormalizeParamControlType(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "prompt":

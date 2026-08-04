@@ -58,6 +58,8 @@ var (
 		{"id": 33, "param_id": paramVoiceID, "name": "活力男声", "value": "zh_male_huolixiaoge_uranus_bigtts", "sort": 11},
 		{"id": 34, "param_id": paramVoiceID, "name": "磁性男声", "value": "zh_male_cixingjieshuonan_uranus_bigtts", "sort": 12},
 		{"id": 35, "param_id": paramVoiceID, "name": "清爽男声", "value": "zh_male_qingshuangnanda_uranus_bigtts", "sort": 13},
+		{"id": 1001, "param_id": ParamReferenceModeID, "name": "首尾帧", "value": ReferenceModeFrames, "sort": 1},
+		{"id": 1002, "param_id": ParamReferenceModeID, "name": "参考素材", "value": ReferenceModeReferences, "sort": 2},
 	}
 
 	paramOptionParamRelation = orm.Relation{

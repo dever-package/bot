@@ -17,40 +17,52 @@ import {
   type StoryboardProductionMode,
   type StoryboardProductionPlan,
 } from "./space-storyboard";
+import {
+  storyboardValidationIssues,
+  type StoryboardValidationIssue,
+} from "./space-storyboard-validation";
+import { StoryboardValidationPanel } from "./space-storyboard-validation-panel";
 
-const OUTPUT_TARGETS: Array<{
+type OutputTargetOption = {
   value: StoryboardOutputTarget;
   title: string;
   description: string;
-}> = [
-  {
-    value: "shot_images",
-    title: "生成故事板",
-    description: "生成素材设定和逐镜头故事板关键帧，之后可在画布中自行连接视频节点。",
-  },
-  {
-    value: "shot_videos",
-    title: "生成镜头视频",
-    description: "生成各个镜头及所选附加内容，不创建最终视频合成。",
-  },
+  recommended?: boolean;
+};
+
+const PRIMARY_OUTPUT_TARGETS: OutputTargetOption[] = [
   {
     value: "final_video",
-    title: "生成完整成片",
-    description: "创建完整镜头制作流程和视频合成，继续完成整条成片。",
+    title: "生成连续视频",
+    description: "自动创建参考图、逐镜视频和合成流程，适合直接完成整条视频。",
+    recommended: true,
+  },
+  {
+    value: "shot_images",
+    title: "只生成镜头参考图",
+    description: "生成素材设定和逐镜参考图，之后可自行连线继续制作。",
   },
 ];
+
+const SHOT_VIDEO_TARGET: OutputTargetOption = {
+  value: "shot_videos",
+  title: "只生成镜头视频",
+  description: "生成各个镜头视频，但不创建最终合成。",
+};
 
 export function StoryboardConfirmDialog({
   storyboard,
   submitting,
   portalContainer,
   onClose,
+  onEditIssue,
   onConfirm,
 }: {
   storyboard: StoryboardDocument;
   submitting: boolean;
   portalContainer: Element | null;
   onClose: () => void;
+  onEditIssue: (issue: StoryboardValidationIssue) => void;
   onConfirm: (plan: StoryboardProductionPlan) => boolean | Promise<boolean>;
 }) {
   const [plan, setPlan] = useState<StoryboardProductionPlan>(() =>
@@ -61,9 +73,25 @@ export function StoryboardConfirmDialog({
   const hasVisibleDialogue = storyboard.shots.some(
     storyboardHasVisibleDialogue,
   );
+  const effectivePlan = useMemo(
+    () =>
+      effectiveProductionPlan(plan, {
+        speech: speechCount > 0,
+        subtitles: subtitleCount > 0,
+        visibleDialogue: hasVisibleDialogue,
+      }),
+    [hasVisibleDialogue, plan, speechCount, subtitleCount],
+  );
   const effectiveStoryboard = useMemo(
-    () => ({ ...storyboard, production_plan: plan }),
-    [plan, storyboard],
+    () => ({ ...storyboard, production_plan: effectivePlan }),
+    [effectivePlan, storyboard],
+  );
+  const validationIssues = useMemo(
+    () => storyboardValidationIssues(effectiveStoryboard),
+    [effectiveStoryboard],
+  );
+  const hasBlockingIssues = validationIssues.some(
+    (issue) => issue.severity === "error",
   );
   const productionSteps = useMemo(
     () => storyboardProductionSteps(effectiveStoryboard),
@@ -94,13 +122,8 @@ export function StoryboardConfirmDialog({
   };
 
   const submit = async () => {
-    const confirmed = await onConfirm(
-      effectiveProductionPlan(plan, {
-        speech: speechCount > 0,
-        subtitles: subtitleCount > 0,
-        visibleDialogue: hasVisibleDialogue,
-      }),
-    );
+    if (hasBlockingIssues) return;
+    const confirmed = await onConfirm(effectivePlan);
     if (confirmed) {
       onClose();
     }
@@ -124,8 +147,8 @@ export function StoryboardConfirmDialog({
       >
         <header>
           <div>
-            <strong>确认分镜并创建制作区</strong>
-            <span>确认后脚本进入只读状态，需要修改时可创建修订稿。</span>
+            <strong>选择生成结果</strong>
+            <span>确认后会创建制作区；需要调整脚本时仍可创建修订稿。</span>
           </div>
           <button
             type="button"
@@ -148,7 +171,7 @@ export function StoryboardConfirmDialog({
           <fieldset className="ws-storyboard-confirm-section">
             <legend>产出目标</legend>
             <div className="ws-storyboard-output-options">
-              {OUTPUT_TARGETS.map((option) => (
+              {PRIMARY_OUTPUT_TARGETS.map((option) => (
                 <label
                   key={option.value}
                   className={
@@ -169,7 +192,10 @@ export function StoryboardConfirmDialog({
                     }
                   />
                   <span>
-                    <strong>{option.title}</strong>
+                    <strong>
+                      {option.title}
+                      {option.recommended ? <em>推荐</em> : null}
+                    </strong>
                     <small>{option.description}</small>
                   </span>
                   {plan.output_target === option.value ? (
@@ -180,53 +206,94 @@ export function StoryboardConfirmDialog({
             </div>
           </fieldset>
 
-          {includesShotVideos ? (
-            <fieldset className="ws-storyboard-confirm-section">
-              <legend>附加内容</legend>
-              <ProductionSwitch
-                title="配音"
-                description={
-                  speechCount > 0
-                    ? `按脚本中的 ${speechCount} 条对白或旁白创建配音。`
-                    : "当前脚本没有对白或旁白。"
-                }
-                checked={speechCount > 0 && plan.voice_mode === "auto"}
-                disabled={submitting || speechCount === 0}
-                onChange={(checked) => updateMode("voice_mode", checked)}
-              />
-              <ProductionSwitch
-                title="字幕"
-                description={
-                  subtitleCount > 0
-                    ? `按脚本中的 ${subtitleCount} 条字幕内容创建字幕组。`
-                    : "当前脚本没有可用字幕内容。"
-                }
-                checked={
-                  subtitleCount > 0 && plan.subtitle_mode === "auto"
-                }
-                disabled={submitting || subtitleCount === 0}
-                onChange={(checked) => updateMode("subtitle_mode", checked)}
-              />
-              <ProductionSwitch
-                title="口型同步"
-                description={
-                  hasVisibleDialogue
-                    ? "仅对出镜对白创建口型同步，默认关闭。"
-                    : "当前脚本没有需要同步口型的出镜对白。"
-                }
-                checked={
-                  hasVisibleDialogue &&
-                  plan.voice_mode === "auto" &&
-                  plan.lip_sync_mode === "auto"
-                }
-                disabled={
-                  submitting ||
-                  !hasVisibleDialogue ||
-                  plan.voice_mode !== "auto"
-                }
-                onChange={(checked) => updateMode("lip_sync_mode", checked)}
-              />
-            </fieldset>
+          <details className="ws-storyboard-confirm-advanced">
+            <summary>高级设置</summary>
+            <div>
+              <label
+                className={`ws-storyboard-advanced-target${
+                  plan.output_target === SHOT_VIDEO_TARGET.value
+                    ? " is-selected"
+                    : ""
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="storyboard-output-target"
+                  value={SHOT_VIDEO_TARGET.value}
+                  checked={plan.output_target === SHOT_VIDEO_TARGET.value}
+                  disabled={submitting}
+                  onChange={() =>
+                    setPlan((current) => ({
+                      ...current,
+                      output_target: SHOT_VIDEO_TARGET.value,
+                    }))
+                  }
+                />
+                <span>
+                  <strong>{SHOT_VIDEO_TARGET.title}</strong>
+                  <small>{SHOT_VIDEO_TARGET.description}</small>
+                </span>
+                {plan.output_target === SHOT_VIDEO_TARGET.value ? (
+                  <Check size={16} aria-hidden="true" />
+                ) : null}
+              </label>
+
+              {includesShotVideos ? (
+                <fieldset className="ws-storyboard-confirm-additions">
+                  <legend>附加内容</legend>
+                  <ProductionSwitch
+                    title="配音"
+                    description={
+                      speechCount > 0
+                        ? `按脚本中的 ${speechCount} 条对白或旁白创建配音。`
+                        : "当前脚本没有对白或旁白。"
+                    }
+                    checked={speechCount > 0 && plan.voice_mode === "auto"}
+                    disabled={submitting || speechCount === 0}
+                    onChange={(checked) => updateMode("voice_mode", checked)}
+                  />
+                  <ProductionSwitch
+                    title="字幕"
+                    description={
+                      subtitleCount > 0
+                        ? `按脚本中的 ${subtitleCount} 条字幕内容创建字幕组。`
+                        : "当前脚本没有可用字幕内容。"
+                    }
+                    checked={
+                      subtitleCount > 0 && plan.subtitle_mode === "auto"
+                    }
+                    disabled={submitting || subtitleCount === 0}
+                    onChange={(checked) => updateMode("subtitle_mode", checked)}
+                  />
+                  <ProductionSwitch
+                    title="口型同步"
+                    description={
+                      hasVisibleDialogue
+                        ? "仅对出镜对白创建口型同步，默认关闭。"
+                        : "当前脚本没有需要同步口型的出镜对白。"
+                    }
+                    checked={
+                      hasVisibleDialogue &&
+                      plan.voice_mode === "auto" &&
+                      plan.lip_sync_mode === "auto"
+                    }
+                    disabled={
+                      submitting ||
+                      !hasVisibleDialogue ||
+                      plan.voice_mode !== "auto"
+                    }
+                    onChange={(checked) => updateMode("lip_sync_mode", checked)}
+                  />
+                </fieldset>
+              ) : null}
+            </div>
+          </details>
+
+          {validationIssues.length ? (
+            <StoryboardValidationPanel
+              issues={validationIssues}
+              onOpen={onEditIssue}
+            />
           ) : null}
 
           <section className="ws-storyboard-confirm-section">
@@ -252,7 +319,7 @@ export function StoryboardConfirmDialog({
           <button
             type="button"
             className="is-primary"
-            disabled={submitting}
+            disabled={submitting || hasBlockingIssues}
             onClick={() => void submit()}
           >
             {submitting ? (
@@ -260,7 +327,7 @@ export function StoryboardConfirmDialog({
             ) : (
               <Check size={15} />
             )}
-            {submitting ? "确认中" : "确认并创建"}
+            {submitting ? "创建中" : confirmActionLabel(plan.output_target)}
           </button>
         </footer>
       </section>
@@ -362,4 +429,10 @@ function confirmationProductionPlan(value: unknown): StoryboardProductionPlan {
   return plan.output_target === "storyboard_only"
     ? { ...plan, output_target: "shot_images" }
     : plan;
+}
+
+function confirmActionLabel(target: StoryboardOutputTarget) {
+  if (target === "shot_images") return "创建参考图";
+  if (target === "shot_videos") return "创建镜头视频";
+  return "创建连续视频";
 }

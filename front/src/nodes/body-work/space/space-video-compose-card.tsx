@@ -1,7 +1,10 @@
 import { Shuffle, Trash2, Volume2 } from "lucide-react";
 import type { DragEvent, ReactNode } from "react";
 import type { ComposerAssetItem } from "./space-prompt-composer";
-import type { VideoComposeClip } from "./space-video-compose";
+import {
+  formatVideoComposeDuration,
+  type VideoComposeClip,
+} from "./space-video-compose";
 import { SequenceCard } from "./space-sequence-card";
 import { SpaceTooltip } from "./space-tooltip";
 import { FirstFrameVideo } from "../../shared/first-frame-video";
@@ -54,7 +57,9 @@ export function VideoComposeClipCard({
       itemId={clip.id}
       index={index}
       durationLabel={
-        clip.duration > 0 ? `${formatDuration(clip.duration)}秒` : "待读取"
+        clip.duration > 0
+          ? `${formatVideoComposeDuration(clip.duration)}秒`
+          : "待读取"
       }
       className="ws-video-compose-card"
       dragClassName="ws-video-compose-drag"
@@ -170,8 +175,4 @@ function CardAction({
       {label}
     </button>
   );
-}
-
-function formatDuration(value: number) {
-  return value >= 10 ? Math.round(value).toString() : value.toFixed(1);
 }

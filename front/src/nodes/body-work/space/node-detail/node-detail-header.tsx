@@ -12,8 +12,8 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { DetailDialogHeader } from "../../shared/detail-dialog";
-import { PowerIcon } from "../space-power-icon";
-import { resolvePowerPresentation } from "../space-power-presentation";
+import { PowerIcon } from "../../shared/power-icon";
+import { resolvePowerPresentation } from "../../shared/power-presentation";
 import { SpaceTooltip } from "../space-tooltip";
 import type { SpaceCanvasNode } from "../types";
 import type { NodeDetailDraftStatus } from "./use-node-detail-draft";

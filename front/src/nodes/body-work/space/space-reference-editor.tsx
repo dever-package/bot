@@ -288,31 +288,6 @@ export function CanvasReferenceEditorWithAdapter({
   );
 }
 
-export function CanvasReferenceText({
-  value,
-  content,
-  items,
-  placeholder = "",
-  className = "",
-}: {
-  value: string;
-  content?: CanvasReferenceContent;
-  items: ComposerAssetItem[];
-  placeholder?: string;
-  className?: string;
-}) {
-  const adapter = useCanvasReferenceAdapter(items);
-  return (
-    <CanvasReferenceTextWithAdapter
-      value={value}
-      content={content}
-      adapter={adapter}
-      placeholder={placeholder}
-      className={className}
-    />
-  );
-}
-
 export function CanvasReferenceTextWithAdapter({
   value,
   content,

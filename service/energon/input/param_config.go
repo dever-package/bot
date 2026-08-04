@@ -2,6 +2,7 @@ package input
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -9,23 +10,27 @@ import (
 )
 
 type PowerParam struct {
-	ID            uint64             `json:"id"`
-	PowerParamID  uint64             `json:"power_param_id"`
-	Name          string             `json:"name"`
-	Key           string             `json:"key"`
-	Icon          string             `json:"icon,omitempty"`
-	Type          string             `json:"type"`
-	PreviewType   string             `json:"preview_type,omitempty"`
-	Usage         int16              `json:"usage"`
-	ValueType     string             `json:"value_type"`
-	DefaultValue  string             `json:"default_value"`
-	Required      bool               `json:"required"`
-	UploadRuleID  uint64             `json:"upload_rule_id,omitempty"`
-	MaxFiles      int                `json:"max_files,omitempty"`
-	AcceptedKinds []string           `json:"accepted_kinds,omitempty"`
-	AssetKinds    []string           `json:"asset_kinds,omitempty"`
-	Sort          int                `json:"sort"`
-	Options       []PowerParamOption `json:"options,omitempty"`
+	ID              uint64             `json:"id"`
+	PowerParamID    uint64             `json:"power_param_id"`
+	ParamID         uint64             `json:"-"`
+	ParamKey        string             `json:"-"`
+	Name            string             `json:"name"`
+	Key             string             `json:"key"`
+	Icon            string             `json:"icon,omitempty"`
+	Type            string             `json:"type"`
+	PreviewType     string             `json:"preview_type,omitempty"`
+	Usage           int16              `json:"usage"`
+	ValueType       string             `json:"value_type"`
+	DefaultValue    string             `json:"default_value"`
+	ActiveWhenKey   string             `json:"active_when_key,omitempty"`
+	ActiveWhenValue string             `json:"active_when_value,omitempty"`
+	Required        bool               `json:"required"`
+	UploadRuleID    uint64             `json:"upload_rule_id,omitempty"`
+	MaxFiles        int                `json:"max_files,omitempty"`
+	AcceptedKinds   []string           `json:"accepted_kinds,omitempty"`
+	AssetKinds      []string           `json:"asset_kinds,omitempty"`
+	Sort            int                `json:"sort"`
+	Options         []PowerParamOption `json:"options,omitempty"`
 }
 
 type PowerParamOption struct {
@@ -60,23 +65,32 @@ func (param PowerParam) IsToolbar() bool {
 }
 
 type powerParamOptionFilter struct {
-	restricted   bool
-	unrestricted bool
-	allowedIDs   map[uint64]struct{}
+	restricted             bool
+	unrestricted           bool
+	allowedIDs             map[uint64]struct{}
+	conditionRestricted    bool
+	conditionAllowedValues map[string]struct{}
 }
 
 type powerParamRow struct {
-	ID     uint64
-	Name   string
-	Key    string
-	Sort   int
-	Filter powerParamOptionFilter
+	ID                uint64
+	Name              string
+	Key               string
+	Sort              int
+	ActiveWhenParamID uint64
+	ActiveWhenValue   string
+	Filter            powerParamOptionFilter
 }
 
 func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serviceID uint64) []PowerParam {
 	params := repo.ParamMap(ctx)
+	serviceParams := repo.ServiceParamsByService(ctx, serviceID)
 	serviceParamIDs := ActiveServiceParamIDs(ctx, repo, serviceID)
 	optionFilters := powerParamOptionFilters(ctx, repo, serviceID, params)
+	applyServiceParamConditionOptionFilters(
+		optionFilters,
+		serviceParams,
+	)
 	powerParamsByParamID := map[uint64][]botmodel.PowerParam{}
 	for _, powerParam := range repo.PowerParamsByPower(ctx, powerID) {
 		param, ok := params[powerParam.ParamID]
@@ -90,8 +104,8 @@ func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serv
 	usedPowerParams := map[uint64]struct{}{}
 	serviceCoveredParams := map[uint64]struct{}{}
 	if serviceID > 0 {
-		for _, serviceParam := range repo.ServiceParamsByService(ctx, serviceID) {
-			if !IsActive(serviceParam.Status) {
+		for _, serviceParam := range serviceParams {
+			if !IsActive(serviceParam.Status) || !serviceParamAcceptsInput(serviceParam) {
 				continue
 			}
 			param, ok := params[serviceParam.ParamID]
@@ -102,13 +116,16 @@ func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serv
 			if !ok || !ShowPowerParamForSource(powerParam, serviceParamIDs) {
 				continue
 			}
+			condition := CommonServiceParamCondition(param.ID, serviceParams)
 			serviceCoveredParams[param.ID] = struct{}{}
-			rows = append(rows, buildPowerParamRow(ctx, repo, param, powerParam, powerParamRow{
-				ID:     serviceParam.ID,
-				Name:   ServiceParamDisplayName(serviceParam, param),
-				Key:    powerParamInputKey(serviceParam, param, len(powerParamsByParamID[param.ID]) == 1),
-				Sort:   powerParamSort(powerParam.Sort, serviceParam.Sort),
-				Filter: optionFilters[param.ID],
+			rows = append(rows, buildPowerParamRow(ctx, repo, params, param, powerParam, powerParamRow{
+				ID:                serviceParam.ID,
+				Name:              ServiceParamDisplayName(serviceParam, param),
+				Key:               powerParamInputKey(serviceParam, param, len(powerParamsByParamID[param.ID]) == 1),
+				Sort:              powerParamSort(powerParam.Sort, serviceParam.Sort),
+				ActiveWhenParamID: condition.ParamID,
+				ActiveWhenValue:   condition.Value,
+				Filter:            optionFilters[param.ID],
 			}))
 		}
 	}
@@ -134,7 +151,7 @@ func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serv
 			}
 			seenDefaultParams[param.ID] = struct{}{}
 
-			rows = append(rows, buildPowerParamRow(ctx, repo, param, powerParam, powerParamRow{
+			rows = append(rows, buildPowerParamRow(ctx, repo, params, param, powerParam, powerParamRow{
 				ID:     param.ID,
 				Name:   param.Name,
 				Key:    param.Key,
@@ -182,6 +199,7 @@ func BuildPowerParamsForServices(
 			}
 			if index, exists := rowIndexes[row.PowerParamID]; exists {
 				rows[index].Options = mergePowerParamOptions(rows[index].Options, row.Options)
+				mergePowerParamCondition(&rows[index], row)
 				continue
 			}
 			rowIndexes[row.PowerParamID] = len(rows)
@@ -196,6 +214,18 @@ func BuildPowerParamsForServices(
 
 	sortPowerParams(rows)
 	return rows
+}
+
+func mergePowerParamCondition(current *PowerParam, incoming PowerParam) {
+	if current == nil {
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(current.ActiveWhenKey), strings.TrimSpace(incoming.ActiveWhenKey)) &&
+		strings.EqualFold(strings.TrimSpace(current.ActiveWhenValue), strings.TrimSpace(incoming.ActiveWhenValue)) {
+		return
+	}
+	current.ActiveWhenKey = ""
+	current.ActiveWhenValue = ""
 }
 
 func uniqueServiceIDs(values []uint64) []uint64 {
@@ -244,26 +274,33 @@ func sortPowerParams(rows []PowerParam) {
 func buildPowerParamRow(
 	ctx context.Context,
 	repo Repository,
+	params map[uint64]botmodel.Param,
 	param botmodel.Param,
 	powerParam botmodel.PowerParam,
 	config powerParamRow,
 ) PowerParam {
 	row := PowerParam{
-		ID:           config.ID,
-		PowerParamID: powerParam.ID,
-		Name:         powerParamName(param, config.Name),
-		Key:          strings.TrimSpace(config.Key),
-		Icon:         strings.TrimSpace(param.Icon),
-		Type:         NormalizeParamControlType(param.Type),
-		PreviewType:  NormalizeParamPreviewType(param.PreviewType),
-		Usage:        normalizeParamUsage(param.Usage),
-		ValueType:    NormalizeParamValueType(param.ValueType),
-		DefaultValue: strings.TrimSpace(param.DefaultValue),
-		Required:     PowerParamRequiresInput(powerParam),
-		UploadRuleID: param.UploadRuleID,
-		MaxFiles:     param.MaxFiles,
-		AssetKinds:   PromptAssetKinds(param),
-		Sort:         config.Sort,
+		ID:              config.ID,
+		PowerParamID:    powerParam.ID,
+		ParamID:         param.ID,
+		ParamKey:        strings.TrimSpace(param.Key),
+		Name:            powerParamName(param, config.Name),
+		Key:             strings.TrimSpace(config.Key),
+		Icon:            strings.TrimSpace(param.Icon),
+		Type:            NormalizeParamControlType(param.Type),
+		PreviewType:     NormalizeParamPreviewType(param.PreviewType),
+		Usage:           normalizeParamUsage(param.Usage),
+		ValueType:       NormalizeParamValueType(param.ValueType),
+		DefaultValue:    strings.TrimSpace(param.DefaultValue),
+		ActiveWhenValue: strings.TrimSpace(config.ActiveWhenValue),
+		Required:        PowerParamRequiresInput(powerParam),
+		UploadRuleID:    param.UploadRuleID,
+		MaxFiles:        param.MaxFiles,
+		AssetKinds:      PromptAssetKinds(param),
+		Sort:            config.Sort,
+	}
+	if controller, ok := params[config.ActiveWhenParamID]; ok {
+		row.ActiveWhenKey = strings.TrimSpace(controller.Key)
 	}
 	if IsOptionParamType(row.Type) {
 		row.Options = powerParamOptions(ctx, repo, param.ID, config.Filter)
@@ -275,42 +312,7 @@ func PromptAssetKinds(param botmodel.Param) []string {
 	if !IsPromptParamType(param.Type) {
 		return nil
 	}
-	flags := []struct {
-		kind    string
-		enabled int16
-	}{
-		{kind: "text", enabled: param.AssetText},
-		{kind: "image", enabled: param.AssetImage},
-		{kind: "audio", enabled: param.AssetAudio},
-		{kind: "video", enabled: param.AssetVideo},
-		{kind: "richtext", enabled: param.AssetRichtext},
-		{kind: "file", enabled: param.AssetFile},
-	}
-	result := make([]string, 0, len(flags))
-	for _, flag := range flags {
-		if flag.enabled == 1 {
-			result = append(result, flag.kind)
-		}
-	}
-	return result
-}
-
-func PromptParamAssetKinds(params []PowerParam, key string) (map[string]struct{}, bool) {
-	key = strings.TrimSpace(key)
-	for _, param := range params {
-		if strings.TrimSpace(param.Key) != key || !IsPromptParamType(param.Type) {
-			continue
-		}
-		result := make(map[string]struct{}, len(param.AssetKinds))
-		for _, kind := range param.AssetKinds {
-			kind = strings.ToLower(strings.TrimSpace(kind))
-			if kind != "" {
-				result[kind] = struct{}{}
-			}
-		}
-		return result, true
-	}
-	return nil, false
+	return []string{"text", "image", "audio", "video", "richtext", "file"}
 }
 
 func powerParamOptionFilters(
@@ -324,7 +326,7 @@ func powerParamOptionFilters(
 		return result
 	}
 	for _, serviceParam := range repo.ServiceParamsByService(ctx, serviceID) {
-		if !IsActive(serviceParam.Status) {
+		if !IsActive(serviceParam.Status) || !serviceParamAcceptsInput(serviceParam) {
 			continue
 		}
 
@@ -369,6 +371,27 @@ func powerParamOptionFilters(
 	return result
 }
 
+func applyServiceParamConditionOptionFilters(
+	filters map[uint64]powerParamOptionFilter,
+	serviceParams []botmodel.ServiceParam,
+) {
+	for _, serviceParam := range serviceParams {
+		if !IsActive(serviceParam.Status) || serviceParam.ActiveWhenParamID == 0 || strings.TrimSpace(serviceParam.ActiveWhenValue) == "" {
+			continue
+		}
+		filter := filters[serviceParam.ActiveWhenParamID]
+		if filter.restricted || filter.unrestricted {
+			continue
+		}
+		filter.conditionRestricted = true
+		if filter.conditionAllowedValues == nil {
+			filter.conditionAllowedValues = map[string]struct{}{}
+		}
+		filter.conditionAllowedValues[strings.TrimSpace(serviceParam.ActiveWhenValue)] = struct{}{}
+		filters[serviceParam.ActiveWhenParamID] = filter
+	}
+}
+
 func powerParamOptions(
 	ctx context.Context,
 	repo Repository,
@@ -384,6 +407,11 @@ func powerParamOptions(
 	for _, option := range options {
 		if filter.restricted && !filter.unrestricted {
 			if _, ok := filter.allowedIDs[option.ID]; !ok {
+				continue
+			}
+		}
+		if filter.conditionRestricted {
+			if _, ok := filter.conditionAllowedValues[strings.TrimSpace(option.Value)]; !ok {
 				continue
 			}
 		}
@@ -440,7 +468,8 @@ func ApplyPowerParamDefaults(values map[string]any, params []PowerParam) map[str
 		if key == "" {
 			continue
 		}
-		if _, exists := result[key]; exists {
+		if current, exists := result[key]; exists {
+			result[key] = normalizePowerParamValue(param, current)
 			continue
 		}
 		if value, ok := powerParamDefaultValue(param); ok {
@@ -453,8 +482,12 @@ func ApplyPowerParamDefaults(values map[string]any, params []PowerParam) map[str
 func powerParamDefaultValue(param PowerParam) (any, bool) {
 	raw := strings.TrimSpace(param.DefaultValue)
 	paramType := NormalizeParamControlType(param.Type)
-	if IsOptionParamType(param.Type) && raw == "" && len(param.Options) > 0 {
-		raw = powerParamOptionNativeValue(param.Options[0])
+	if IsOptionParamType(param.Type) && len(param.Options) > 0 {
+		if option, ok := resolvePowerParamOption(param.Options, raw); ok {
+			raw = powerParamOptionNativeValue(option)
+		} else {
+			raw = powerParamOptionNativeValue(param.Options[0])
+		}
 	}
 	if raw != "" {
 		return normalizePowerParamValue(param, ParseJSONValue(raw)), true
@@ -489,14 +522,192 @@ func powerParamOptionValue(param PowerParam, value any) any {
 	if text == "" || len(param.Options) == 0 {
 		return value
 	}
-	for _, option := range param.Options {
-		if strings.EqualFold(text, strings.TrimSpace(option.Name)) ||
-			strings.EqualFold(text, strings.TrimSpace(option.Value)) ||
-			strings.EqualFold(text, strings.TrimSpace(option.NativeValue)) {
-			return powerParamOptionNativeValue(option)
-		}
+	if option, ok := resolvePowerParamOption(param.Options, text); ok {
+		return powerParamOptionNativeValue(option)
 	}
 	return value
+}
+
+func resolvePowerParamOption(options []PowerParamOption, value any) (PowerParamOption, bool) {
+	text := strings.TrimSpace(ValueText(value))
+	if text == "" {
+		return PowerParamOption{}, false
+	}
+	for _, option := range options {
+		if strings.EqualFold(text, strings.TrimSpace(option.NativeValue)) {
+			return option, true
+		}
+	}
+	for _, option := range options {
+		if strings.EqualFold(text, strings.TrimSpace(option.Value)) {
+			return option, true
+		}
+	}
+	for _, option := range options {
+		if strings.EqualFold(text, strings.TrimSpace(option.Name)) {
+			return option, true
+		}
+	}
+	for _, option := range options {
+		if text == fmt.Sprintf("%d", option.ID) {
+			return option, true
+		}
+	}
+	return PowerParamOption{}, false
+}
+
+func FilterActivePowerParams(params []PowerParam, values map[string]any) []PowerParam {
+	result := make([]PowerParam, 0, len(params))
+	for _, param := range params {
+		if powerParamConditionMatches(param, params, values) {
+			result = append(result, param)
+		}
+	}
+	return result
+}
+
+func FilterInactivePowerParamValues(params []PowerParam, values map[string]any) map[string]any {
+	result := make(map[string]any, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	activeParamIDs := activePowerParamIDs(params, values)
+	configuredKeys := powerParamConfiguredKeys(params)
+	for _, param := range params {
+		if activeParamIDs[param.ParamID] {
+			continue
+		}
+		deletePowerParamValues(result, param, configuredKeys)
+	}
+	return result
+}
+
+// powerParamActivation returns the capability parameters configured for a
+// source and the subset enabled by the current controller values.
+func powerParamActivation(params []PowerParam, values map[string]any) (map[uint64]bool, map[uint64]bool) {
+	configured := make(map[uint64]bool, len(params))
+	for _, param := range params {
+		if param.ParamID > 0 {
+			configured[param.ParamID] = true
+		}
+	}
+	return configured, activePowerParamIDs(params, values)
+}
+
+// removeUnmappedConditionValues keeps UI-only controller parameters out of
+// provider-native request bodies unless a service explicitly maps them.
+func removeUnmappedConditionValues(
+	powerParams []PowerParam,
+	values map[string]any,
+	mappedParamIDs map[uint64]bool,
+	conditionControllerIDs map[uint64]bool,
+	params map[uint64]botmodel.Param,
+) map[string]any {
+	result := make(map[string]any, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	configuredKeys := powerParamConfiguredKeys(powerParams)
+	for _, param := range powerParams {
+		if !conditionControllerIDs[param.ParamID] || mappedParamIDs[param.ParamID] {
+			continue
+		}
+		deletePowerParamValues(result, param, configuredKeys)
+	}
+	for paramID := range conditionControllerIDs {
+		if mappedParamIDs[paramID] {
+			continue
+		}
+		param, exists := params[paramID]
+		if !exists {
+			continue
+		}
+		delete(result, strings.TrimSpace(param.Key))
+		delete(result, fmt.Sprintf("param_%d", paramID))
+	}
+	return result
+}
+
+func activePowerParamIDs(params []PowerParam, values map[string]any) map[uint64]bool {
+	result := make(map[uint64]bool, len(params))
+	for _, param := range params {
+		if param.ParamID > 0 && powerParamConditionMatches(param, params, values) {
+			result[param.ParamID] = true
+		}
+	}
+	return result
+}
+
+func powerParamConfiguredKeys(params []PowerParam) map[string]bool {
+	result := make(map[string]bool, len(params)*2)
+	for _, param := range params {
+		for _, key := range []string{param.Key, param.ParamKey} {
+			if key = strings.ToLower(strings.TrimSpace(key)); key != "" {
+				result[key] = true
+			}
+		}
+	}
+	return result
+}
+
+func deletePowerParamValues(values map[string]any, param PowerParam, configuredKeys map[string]bool) {
+	keys := []string{strings.TrimSpace(param.Key), strings.TrimSpace(param.ParamKey)}
+	if param.ParamID > 0 {
+		keys = append(keys, fmt.Sprintf("param_%d", param.ParamID))
+	}
+	for _, key := range keys {
+		delete(values, key)
+		alias := paramInputAlias(key)
+		if alias != "" && !configuredKeys[strings.ToLower(alias)] {
+			delete(values, alias)
+		}
+	}
+}
+
+func ValidatePowerParamValues(params []PowerParam, values map[string]any) error {
+	for _, param := range FilterActivePowerParams(params, values) {
+		if !IsOptionParamType(param.Type) || len(param.Options) == 0 {
+			continue
+		}
+		value, exists := values[strings.TrimSpace(param.Key)]
+		if !exists || IsMissing(value) {
+			continue
+		}
+		items := []any{value}
+		if NormalizeParamControlType(param.Type) == "multi_option" {
+			items = List(value)
+		}
+		for _, item := range items {
+			if _, ok := resolvePowerParamOption(param.Options, item); !ok {
+				return fmt.Errorf("参数“%s”不支持选项“%s”", param.Name, ValueText(item))
+			}
+		}
+	}
+	return nil
+}
+
+func powerParamConditionMatches(param PowerParam, params []PowerParam, values map[string]any) bool {
+	conditionKey := strings.TrimSpace(param.ActiveWhenKey)
+	conditionValue := strings.TrimSpace(param.ActiveWhenValue)
+	if conditionKey == "" || conditionValue == "" {
+		return true
+	}
+	for _, controller := range params {
+		if !strings.EqualFold(strings.TrimSpace(controller.Key), conditionKey) {
+			continue
+		}
+		value, exists := values[controller.Key]
+		if !exists || IsMissing(value) {
+			value, exists = powerParamDefaultValue(controller)
+		}
+		if !exists {
+			return false
+		}
+		actual := normalizePowerParamValue(controller, value)
+		expected := normalizePowerParamValue(controller, conditionValue)
+		return strings.EqualFold(strings.TrimSpace(ValueText(actual)), strings.TrimSpace(ValueText(expected)))
+	}
+	return false
 }
 
 func powerParamOptionNativeValue(option PowerParamOption) string {

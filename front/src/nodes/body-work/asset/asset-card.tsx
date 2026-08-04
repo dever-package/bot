@@ -1,5 +1,6 @@
 import {
   Check,
+  Eye,
   Loader2,
   Pencil,
   RotateCcw,
@@ -43,6 +44,15 @@ export function AssetCard({
 }) {
   const inTrash = view === "trash";
   const collection = asset.kind === "collection";
+  const selectsAsset = selectable && !collection && Boolean(onSelect);
+  const primaryDisabled = selectsAsset && (busy || used);
+  const primaryActionLabel = selectsAsset
+    ? used
+      ? `${asset.name}已使用`
+      : selected
+        ? `取消选择${asset.name}`
+        : `选择${asset.name}`
+    : `${collection ? "打开集合" : "查看"}${asset.name}`;
   const preview = collection ? (
     <AssetCollectionPreview asset={asset} />
   ) : (
@@ -53,6 +63,14 @@ export function AssetCard({
       compact
     />
   );
+
+  function handlePrimaryAction() {
+    if (selectsAsset) {
+      if (!primaryDisabled) onSelect?.(asset);
+      return;
+    }
+    onOpen(asset);
+  }
 
   return (
     <article
@@ -65,8 +83,9 @@ export function AssetCard({
             <button
               type="button"
               className="wb-asset-card-preview-open"
-              onClick={() => onOpen(asset)}
-              aria-label={`${collection ? "打开集合" : "查看"}${asset.name}`}
+              disabled={primaryDisabled}
+              onClick={handlePrimaryAction}
+              aria-label={primaryActionLabel}
             />
           ) : null}
         </div>
@@ -74,7 +93,8 @@ export function AssetCard({
           <button
             type="button"
             className="wb-asset-card-copy"
-            onClick={() => onOpen(asset)}
+            disabled={primaryDisabled}
+            onClick={handlePrimaryAction}
           >
             <strong>{asset.name}</strong>
             <span>
@@ -89,6 +109,21 @@ export function AssetCard({
         <AssetKindIcon kind={asset.kind} />
       </span>
       <div className="wb-asset-card-actions">
+        {selectsAsset && !inTrash ? (
+          <BodyWorkTooltip label="查看详情">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpen(asset);
+              }}
+            >
+              <Eye aria-hidden="true" />
+              <span className="sr-only">查看详情</span>
+            </button>
+          </BodyWorkTooltip>
+        ) : null}
         {!inTrash ? (
           <BodyWorkTooltip label="修改标题">
             <button
@@ -139,7 +174,7 @@ export function AssetCard({
             type="button"
             className={`is-primary ${selected ? "is-selected" : ""} ${used ? "is-used" : ""}`.trim()}
             disabled={busy || used}
-            onClick={() => onSelect(asset)}
+            onClick={handlePrimaryAction}
           >
             <Check aria-hidden="true" />
             {used ? "已使用" : selected ? "已选" : "使用"}

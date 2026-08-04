@@ -63,8 +63,6 @@ type Asset struct {
 }
 
 const (
-	NodeTypeDoc       = "doc"
-	NodeTypePage      = "page"
 	NodeTypeHeading   = "heading"
 	NodeTypeParagraph = "paragraph"
 	NodeTypeTable     = "table"

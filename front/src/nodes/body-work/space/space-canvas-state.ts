@@ -4,7 +4,6 @@ import type {
   CanvasResultViewState,
   PowerOption,
   ProjectAsset,
-  SpaceCanvasEdge,
   SpaceCanvasNode,
   SpaceCanvasState,
   SpaceCanvasViewport,
@@ -12,6 +11,10 @@ import type {
   TeamRole,
 } from "./types";
 import { normalizeStoryboardReferences } from "./space-storyboard-reference";
+import {
+  finiteNumberOrUndefined as finiteNumber,
+  isPlainRecord as isRecord,
+} from "../shared/structured-json";
 import { normalizeVideoComposition } from "./space-video-compose";
 
 export type PersistedCanvasState = {
@@ -437,18 +440,6 @@ function assignNumber(
   if (number > 0) {
     target[key] = number;
   }
-}
-
-function finiteNumber(value: unknown) {
-  if (value == null || value === "") {
-    return undefined;
-  }
-  const number = Number(value);
-  return Number.isFinite(number) ? number : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, any> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function isJSONValue(value: unknown): boolean {

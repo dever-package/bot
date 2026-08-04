@@ -19,7 +19,7 @@ import {
   type AgentChatOutput,
 } from "../../show/agent-chat/output";
 import { readAgentChatRunFrame } from "../../show/agent-chat/runtime";
-import { plainMarkdownTextFromRichOutput } from "./space-content-output";
+import { plainMarkdownTextFromRichOutput } from "../shared/content-output";
 
 export type CanvasAgentInteraction = NonNullable<
   ReturnType<typeof readAgentChatInteraction>

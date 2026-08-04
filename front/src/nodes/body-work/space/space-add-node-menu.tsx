@@ -16,8 +16,8 @@ import {
   type PowerMenu,
   type PowerMenuGroup,
 } from "../shared/power-menu";
-import { PowerIcon } from "./space-power-icon";
-import { resolvePowerPresentation } from "./space-power-presentation";
+import { PowerIcon } from "../shared/power-icon";
+import { resolvePowerPresentation } from "../shared/power-presentation";
 import { SpaceTooltip } from "./space-tooltip";
 import type {
   CanvasFunctionOption,

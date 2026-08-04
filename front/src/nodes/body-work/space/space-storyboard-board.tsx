@@ -1,5 +1,5 @@
 import { ImageOff } from "lucide-react";
-import { contentOutputMediaURLs } from "./space-content-output";
+import { contentOutputMediaURLs } from "../shared/content-output";
 import type { StoryboardDocument, StoryboardShot } from "./space-storyboard";
 import type { SpaceCanvasNode } from "./types";
 import { resolveNodeDetailMediaOutput } from "./node-detail/node-detail-content";
@@ -21,7 +21,7 @@ export function StoryboardBoard({
 }) {
   const frames = storyboardFrames(storyboard, sourceNodeId, canvasNodes);
   return (
-    <div className="ws-storyboard-board" aria-label="视觉故事板">
+    <div className="ws-storyboard-board" aria-label="画面预览">
       {frames.map(({ shot, node, imageURL }) => (
         <article className="ws-storyboard-frame" key={shot.id}>
           <header>
@@ -67,6 +67,16 @@ export function StoryboardBoard({
         </article>
       ))}
     </div>
+  );
+}
+
+export function storyboardHasGeneratedFrames(
+  storyboard: StoryboardDocument,
+  sourceNodeId: string,
+  canvasNodes: SpaceCanvasNode[],
+) {
+  return storyboardFrames(storyboard, sourceNodeId, canvasNodes).some(
+    (frame) => Boolean(frame.imageURL),
   );
 }
 

@@ -1,5 +1,10 @@
 import { joinSiteApi, request } from "@dever/front-plugin";
-import { isSuccessResponse } from "../shared/api-response";
+import {
+  asResponseRows as toRows,
+  responsePositiveNumber as numberValue,
+  responseText as textValue,
+  successfulResponseData as responseData,
+} from "../shared/api-response";
 import { createInFlightRequestLoader } from "../shared/in-flight-request";
 import {
   buildPowerMenu,
@@ -181,13 +186,6 @@ async function saveWorkbenchAsset(
   return assetID;
 }
 
-export function responseData(result: any, fallback: string): Record<string, any> {
-  if (!isSuccessResponse(result)) {
-    throw new Error(String(result?.message || result?.msg || fallback));
-  }
-  return isRecord(result?.data) ? result.data : {};
-}
-
 function normalizeTeam(value: any): WorkbenchTeam {
   return {
     id: numberValue(value?.id),
@@ -245,23 +243,6 @@ function normalizeSystemMessage(value: any): WorkbenchSystemMessage {
 
 function hasID<T extends { id: number }>(value: T) {
   return value.id > 0;
-}
-
-export function toRows(value: unknown): any[] {
-  return Array.isArray(value) ? value : [];
-}
-
-export function isRecord(value: unknown): value is Record<string, any> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-export function numberValue(value: unknown) {
-  const number = Number(value || 0);
-  return Number.isFinite(number) && number > 0 ? number : 0;
-}
-
-export function textValue(value: unknown) {
-  return value == null ? "" : String(value).trim();
 }
 
 function enabledValue(value: unknown) {

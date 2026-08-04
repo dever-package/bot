@@ -790,37 +790,6 @@ func executionInput(input map[string]any) map[string]any {
 	return result
 }
 
-func finalAssetKind(output map[string]any) string {
-	if kind := firstText(output["kind"], output["content_type"], output["type"]); kind != "" {
-		return kind
-	}
-	if _, ok := output["image"]; ok {
-		return "image"
-	}
-	if _, ok := output["images"]; ok {
-		return "image"
-	}
-	if _, ok := output["video"]; ok {
-		return "video"
-	}
-	if _, ok := output["videos"]; ok {
-		return "video"
-	}
-	if _, ok := output["audio"]; ok {
-		return "audio"
-	}
-	if _, ok := output["audios"]; ok {
-		return "audio"
-	}
-	if firstText(output["summary"], output["text"], output["content"], output["result"]) != "" {
-		return "text"
-	}
-	if len(output) > 1 {
-		return "richtext"
-	}
-	return "text"
-}
-
 func flowReady(flowID uint64, incoming map[uint64][]teammodel.FlowEdge, completed map[uint64]map[string]any, skipped map[uint64]bool) bool {
 	edges := incoming[flowID]
 	if len(edges) == 0 {

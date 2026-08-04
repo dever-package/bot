@@ -1,5 +1,9 @@
-import { plainMarkdownTextFromRichOutput } from "./space-content-output";
-import { embeddedJSONValues } from "./space-structured-json";
+import { plainMarkdownTextFromRichOutput } from "../shared/content-output";
+import {
+  embeddedJSONValues,
+  isPlainRecord as isRecord,
+  trimmedString as stringValue,
+} from "../shared/structured-json";
 import { normalizeStoryboardReferences } from "./space-storyboard-reference";
 import type {
   CanvasReferenceContent,
@@ -249,7 +253,13 @@ export function parseStoryboardOutput(value: unknown) {
 }
 
 export function storyboardTotalDuration(storyboard: StoryboardDocument) {
-  return storyboard.shots.reduce(
+  return storyboardShotsTotalDuration(storyboard.shots);
+}
+
+export function storyboardShotsTotalDuration(
+  shots: readonly StoryboardShot[],
+) {
+  return shots.reduce(
     (total, shot) => total + Math.max(0, Number(shot.duration) || 0),
     0,
   );
@@ -257,13 +267,6 @@ export function storyboardTotalDuration(storyboard: StoryboardDocument) {
 
 export function isStoryboardShotDurationValid(value: number) {
   return Number.isInteger(value) && value >= MIN_STORYBOARD_SHOT_DURATION;
-}
-
-export function storyboardMaterialsByType(
-  storyboard: StoryboardDocument,
-  type: StoryboardMaterialType,
-) {
-  return storyboard.materials.filter((material) => material.type === type);
 }
 
 export function storyboardShotMaterials(
@@ -449,14 +452,8 @@ export function normalizeStoryboardOrder(
     production_plan: normalizeStoryboardProductionPlan(
       storyboard.production_plan,
     ),
-    target_duration: Math.max(
-      MIN_STORYBOARD_SHOT_DURATION,
-      Math.round(Number(storyboard.target_duration) || 0),
-    ),
-    target_shot_count: Math.min(
-      MAX_STORYBOARD_SHOTS,
-      Math.max(1, Math.round(Number(storyboard.target_shot_count) || 0)),
-    ),
+    target_duration: storyboardShotsTotalDuration(shots),
+    target_shot_count: shots.length,
     narrator_voice: storyboard.narrator_voice.trim(),
     aspect_ratio: normalizeStoryboardAspectRatio(storyboard.aspect_ratio),
     references,
@@ -938,15 +935,12 @@ function decodeStoryboard(
   }
 
   const workflow = normalizeStoryboardWorkflow(row.workflow);
-  return {
+  const storyboard: StoryboardDocument = {
     ...row,
     type: "storyboard",
     version: STORYBOARD_VERSION,
     workflow,
-    production_plan: normalizeStoryboardProductionPlan(
-      row.production_plan,
-      workflow.status === "confirmed",
-    ),
+    production_plan: normalizeStoryboardProductionPlan(row.production_plan),
     title: row.title,
     summary: storyboardContentSummaryFromShots(
       stringValue(row.summary),
@@ -963,6 +957,7 @@ function decodeStoryboard(
     materials: normalizedMaterials,
     shots: normalizedShots,
   };
+  return normalizeStoryboardOrder(storyboard);
 }
 
 function decodeStoryboardStoryline(
@@ -974,9 +969,6 @@ function decodeStoryboardStoryline(
   const setup = stringValue(value.setup);
   const development = stringValue(value.development);
   const payoff = stringValue(value.payoff);
-  if (!setup || !development || !payoff) {
-    return null;
-  }
   return { setup, development, payoff };
 }
 
@@ -1308,12 +1300,4 @@ function uniqueStrings(values: string[]) {
 function numberValue(value: unknown) {
   const number = typeof value === "number" ? value : Number.NaN;
   return Number.isFinite(number) ? number : null;
-}
-
-function stringValue(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function isRecord(value: unknown): value is Record<string, any> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

@@ -136,15 +136,6 @@ type AgentOption struct {
 	Sort           int    `json:"sort"`
 }
 
-type RoleOption struct {
-	ID       uint64 `json:"id"`
-	TeamID   uint64 `json:"team_id"`
-	RoleType string `json:"role_type"`
-	RoleKey  string `json:"role_key"`
-	Name     string `json:"name"`
-	AgentID  uint64 `json:"agent_id"`
-}
-
 type TeamOption struct {
 	ID        uint64      `json:"id"`
 	CateID    uint64      `json:"cate_id"`

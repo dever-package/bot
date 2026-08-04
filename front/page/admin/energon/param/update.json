@@ -148,115 +148,6 @@
         }
       },
       {
-        "type": "form-switch",
-        "name": "引用文本资产",
-        "value": "form.asset_text",
-        "mode": "form",
-        "meta": {
-          "trueValue": 1,
-          "falseValue": 2,
-          "formLayout": "horizontal",
-          "showWhen": [
-            {
-              "path": "form.type",
-              "operator": "equals",
-              "value": "prompt"
-            }
-          ]
-        }
-      },
-      {
-        "type": "form-switch",
-        "name": "引用图片资产",
-        "value": "form.asset_image",
-        "mode": "form",
-        "meta": {
-          "trueValue": 1,
-          "falseValue": 2,
-          "formLayout": "horizontal",
-          "showWhen": [
-            {
-              "path": "form.type",
-              "operator": "equals",
-              "value": "prompt"
-            }
-          ]
-        }
-      },
-      {
-        "type": "form-switch",
-        "name": "引用音频资产",
-        "value": "form.asset_audio",
-        "mode": "form",
-        "meta": {
-          "trueValue": 1,
-          "falseValue": 2,
-          "formLayout": "horizontal",
-          "showWhen": [
-            {
-              "path": "form.type",
-              "operator": "equals",
-              "value": "prompt"
-            }
-          ]
-        }
-      },
-      {
-        "type": "form-switch",
-        "name": "引用视频资产",
-        "value": "form.asset_video",
-        "mode": "form",
-        "meta": {
-          "trueValue": 1,
-          "falseValue": 2,
-          "formLayout": "horizontal",
-          "showWhen": [
-            {
-              "path": "form.type",
-              "operator": "equals",
-              "value": "prompt"
-            }
-          ]
-        }
-      },
-      {
-        "type": "form-switch",
-        "name": "引用富文本资产",
-        "value": "form.asset_richtext",
-        "mode": "form",
-        "meta": {
-          "trueValue": 1,
-          "falseValue": 2,
-          "formLayout": "horizontal",
-          "showWhen": [
-            {
-              "path": "form.type",
-              "operator": "equals",
-              "value": "prompt"
-            }
-          ]
-        }
-      },
-      {
-        "type": "form-switch",
-        "name": "引用文件资产",
-        "value": "form.asset_file",
-        "mode": "form",
-        "info": "提示词输入框的 @ 资产选择器只展示已开启的类型。",
-        "meta": {
-          "trueValue": 1,
-          "falseValue": 2,
-          "formLayout": "horizontal",
-          "showWhen": [
-            {
-              "path": "form.type",
-              "operator": "equals",
-              "value": "prompt"
-            }
-          ]
-        }
-      },
-      {
         "type": "form-select",
         "value": "form.upload_rule_id",
         "mode": "form",
@@ -353,12 +244,6 @@
       "value_type": "string",
       "upload_rule_id": 1,
       "max_files": 5,
-      "asset_text": 1,
-      "asset_image": 1,
-      "asset_audio": 1,
-      "asset_video": 1,
-      "asset_richtext": 1,
-      "asset_file": 1,
       "default_value": "",
       "options": []
     }

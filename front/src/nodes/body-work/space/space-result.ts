@@ -38,24 +38,6 @@ export function buildNodeResultRef(result: any): CanvasResultRef | undefined {
   return Object.keys(ref).length > 0 ? ref : undefined;
 }
 
-export function mergeCanvasResultRef<T extends { resultRef?: CanvasResultRef }>(
-  patch: T | undefined,
-  runRef?: CanvasResultRef | null,
-): T | undefined {
-  if (!patch || !runRef) {
-    return patch;
-  }
-  return {
-    ...patch,
-    resultRef: {
-      ...(patch.resultRef || {}),
-      ...runRef,
-      status: patch.resultRef?.status || runRef.status,
-      updated_at: new Date().toISOString(),
-    },
-  };
-}
-
 export function canvasResultSourceFromNode(
   source: NodeResultSourceContext | null | undefined,
 ): CanvasResultSourceRef | null {

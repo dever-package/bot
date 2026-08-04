@@ -8,7 +8,10 @@ import {
   normalizeSpaceBootstrap,
 } from "./space-model";
 import { persistedCanvasState } from "./space-canvas-state";
-import { isSuccessResponse } from "../shared/api-response";
+import {
+  successfulResponseData,
+  successfulResponseValue,
+} from "../shared/api-response";
 import type { StoryboardProductionPlan } from "./space-storyboard";
 import type {
   AssetVersion,
@@ -34,10 +37,9 @@ export async function fetchSpaceBootstrap(
     project_id: projectId,
     asset_cate_id: assetCateId,
   });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "加载创作空间失败");
-  }
-  return normalizeSpaceBootstrap(result.data);
+  return normalizeSpaceBootstrap(
+    successfulResponseValue(result, "加载创作空间失败"),
+  );
 }
 
 export async function fetchSpaceCanvas(input: {
@@ -48,10 +50,7 @@ export async function fetchSpaceCanvas(input: {
     project_id: input.projectId,
     asset_cate_id: input.assetCateId,
   });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "加载分类画布失败");
-  }
-  const data = result.data || {};
+  const data = successfulResponseData(result, "加载分类画布失败");
   const assets = data.assets || {};
   const assetRows = Array.isArray(assets.items)
     ? assets.items
@@ -64,25 +63,6 @@ export async function fetchSpaceCanvas(input: {
   };
 }
 
-export async function sendSpaceMessage(
-  projectId: number,
-  assetCateId: number,
-  message: string,
-) {
-  const result = await request(joinSiteApi("run/team"), "post", {
-    project_id: projectId,
-    mode: "team",
-    input: {
-      goal: message,
-      prompt: message,
-      asset_cate_id: assetCateId,
-    },
-  });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "发送失败");
-  }
-  return result.data;
-}
 export async function fetchSpacePowers(projectId: number): Promise<{
   roles: TeamRole[];
   powers: PowerOption[];
@@ -93,10 +73,9 @@ export async function fetchSpacePowers(projectId: number): Promise<{
   const result = await request(joinSiteApi("project/canvas_config"), "get", {
     project_id: projectId,
   });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "加载能力列表失败");
-  }
-  return normalizePowerCatalog(result.data);
+  return normalizePowerCatalog(
+    successfulResponseValue(result, "加载能力列表失败"),
+  );
 }
 
 export async function fetchSpacePowerForm(input: {
@@ -113,10 +92,9 @@ export async function fetchSpacePowerForm(input: {
     power_key: input.powerKey,
     target_id: input.targetId || 0,
   });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "加载能力参数失败");
-  }
-  return normalizePowerForm(result.data);
+  return normalizePowerForm(
+    successfulResponseValue(result, "加载能力参数失败"),
+  );
 }
 
 export async function runSpaceCanvas(input: {
@@ -139,7 +117,7 @@ export async function runSpaceCanvas(input: {
     canvas: persistedCanvasState(input.canvas),
     input: input.runInput || {},
   });
-  return normalizeRunResponse(result, "画布运行失败");
+  return successfulResponseData(result, "画布运行失败");
 }
 
 export async function generateSpaceCanvasNodeTitle(input: {
@@ -158,7 +136,7 @@ export async function generateSpaceCanvasNodeTitle(input: {
       prompt: input.prompt || "",
     },
   );
-  const data = normalizeRunResponse(result, "生成节点标题失败");
+  const data = successfulResponseData(result, "生成节点标题失败");
   return {
     nodeKey: String(data.node_key || input.nodeKey),
     versionId: Number(data.version_id || input.versionId || 0),
@@ -166,38 +144,16 @@ export async function generateSpaceCanvasNodeTitle(input: {
   };
 }
 
-function normalizeRunResponse(result: any, fallbackMessage: string) {
-  if (!isSuccessResponse(result)) {
-    throw new Error(result?.message || result?.msg || fallbackMessage);
+function projectAssetFromResponse(
+  result: unknown,
+  fallbackMessage: string,
+  emptyMessage: string,
+) {
+  const asset = successfulResponseData(result, fallbackMessage).asset;
+  if (!asset) {
+    throw new Error(emptyMessage);
   }
-  return (
-    result?.data && typeof result.data === "object" ? result.data : {}
-  ) as Record<string, any>;
-}
-
-export async function fetchSpaceCanvasResults(input: {
-  projectId: number;
-  assetCateId?: number;
-  runId?: number;
-  nodeRunId?: number;
-  assetId?: number;
-  purpose?: "material_result" | "content_save";
-}): Promise<{ items: ProjectAsset[]; total: number }> {
-  const result = await request(joinSiteApi("project/asset_list"), "get", {
-    project_id: input.projectId,
-    kind: "",
-  });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "读取画布结果失败");
-  }
-  const data = result.data || {};
-  const items = Array.isArray(data.items)
-    ? data.items.map(normalizeProjectAsset)
-    : [];
-  return {
-    items,
-    total: Number(data.total || items.length),
-  };
+  return normalizeProjectAsset(asset);
 }
 
 export type SpaceCanvasExecutionScope = "recovery" | "active" | "history";
@@ -224,10 +180,7 @@ export async function fetchSpaceCanvasExecutions(input: {
       summary_only: input.summaryOnly ? 1 : 0,
     },
   );
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "读取画布运行记录失败");
-  }
-  const data = result.data || {};
+  const data = successfulResponseData(result, "读取画布运行记录失败");
   return {
     count: Number(data.count || 0),
     items: Array.isArray(data.items) ? data.items : [],
@@ -255,10 +208,7 @@ export async function fetchSpaceCanvasExecution(input: {
       run_id: executionId > 0 || requestId ? 0 : runId,
     },
   );
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "读取画布运行详情失败");
-  }
-  return (result.data || {}) as Record<string, unknown>;
+  return successfulResponseData(result, "读取画布运行详情失败");
 }
 
 export async function submitSpaceCanvasFeedback(input: {
@@ -281,10 +231,7 @@ export async function submitSpaceCanvasFeedback(input: {
     decision: input.decision || "approved",
     comment: input.comment || "",
   });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "继续画布运行失败");
-  }
-  return result.data;
+  return successfulResponseValue(result, "继续画布运行失败");
 }
 
 export async function fetchSpaceRunStatus(input: {
@@ -298,30 +245,7 @@ export async function fetchSpaceRunStatus(input: {
     request_id: input.requestId || "",
     view: "summary",
   });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "读取流程状态失败");
-  }
-  return result.data;
-}
-
-export async function submitSpaceApproval(input: {
-  projectId: number;
-  approvalId: number;
-  data: Record<string, unknown>;
-  comment?: string;
-  decision?: "approved" | "rejected";
-}) {
-  const result = await request(joinSiteApi("run/approval"), "post", {
-    project_id: input.projectId,
-    approval_id: input.approvalId,
-    decision: input.decision || "approved",
-    comment: input.comment || "",
-    data: input.data,
-  });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "提交反馈失败");
-  }
-  return result.data;
+  return successfulResponseValue(result, "读取流程状态失败");
 }
 
 export async function submitSpaceInteraction(input: {
@@ -338,10 +262,7 @@ export async function submitSpaceInteraction(input: {
     interaction_id: input.interactionId,
     data: input.data,
   });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "提交信息失败");
-  }
-  return result.data;
+  return successfulResponseValue(result, "提交信息失败");
 }
 
 export async function saveSpaceAssetEditVersion(input: {
@@ -360,14 +281,11 @@ export async function saveSpaceAssetEditVersion(input: {
       content: input.content,
     },
   );
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "保存资产版本失败");
-  }
-  const asset = (result.data as any)?.asset;
-  if (!asset) {
-    throw new Error("资产版本保存结果为空");
-  }
-  return normalizeProjectAsset(asset);
+  return projectAssetFromResponse(
+    result,
+    "保存资产版本失败",
+    "资产版本保存结果为空",
+  );
 }
 
 export async function restoreSpaceAssetVersion(input: {
@@ -388,14 +306,11 @@ export async function restoreSpaceAssetVersion(input: {
       node_key: input.nodeKey,
     },
   );
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "恢复资产版本失败");
-  }
-  const asset = (result.data as any)?.asset;
-  if (!asset) {
-    throw new Error("资产版本恢复结果为空");
-  }
-  return normalizeProjectAsset(asset);
+  return projectAssetFromResponse(
+    result,
+    "恢复资产版本失败",
+    "资产版本恢复结果为空",
+  );
 }
 
 export async function confirmSpaceStoryboard(input: {
@@ -414,14 +329,7 @@ export async function confirmSpaceStoryboard(input: {
       production_plan: input.productionPlan,
     },
   );
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "确认分镜失败");
-  }
-  const asset = (result.data as any)?.asset;
-  if (!asset) {
-    throw new Error("确认分镜结果为空");
-  }
-  return normalizeProjectAsset(asset);
+  return projectAssetFromResponse(result, "确认分镜失败", "确认分镜结果为空");
 }
 
 export async function createSpaceStoryboardRevision(input: {
@@ -442,14 +350,11 @@ export async function createSpaceStoryboardRevision(input: {
       node_key: input.nodeKey,
     },
   );
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "创建分镜修订稿失败");
-  }
-  const asset = (result.data as any)?.asset;
-  if (!asset) {
-    throw new Error("创建分镜修订稿结果为空");
-  }
-  return normalizeProjectAsset(asset);
+  return projectAssetFromResponse(
+    result,
+    "创建分镜修订稿失败",
+    "创建分镜修订稿结果为空",
+  );
 }
 
 export async function fetchSpaceAssetDetail(input: {
@@ -462,14 +367,11 @@ export async function fetchSpaceAssetDetail(input: {
     asset_id: input.assetId,
     current_only: input.currentOnly ? 1 : 0,
   });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "读取资产详情失败");
-  }
-  const asset = (result.data as any)?.asset;
+  const data = successfulResponseData(result, "读取资产详情失败");
+  const asset = data.asset;
   if (!asset) {
     throw new Error("资产详情为空");
   }
-  const data = (result.data || {}) as Record<string, unknown>;
   const versions = normalizeAssetVersions(data.versions);
   return {
     asset: normalizeProjectAsset(asset),
@@ -491,10 +393,7 @@ export async function fetchSpaceAssetVersions(input: {
     page: input.page,
     page_size: input.pageSize || 20,
   });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "读取资产版本失败");
-  }
-  const data = (result.data || {}) as Record<string, unknown>;
+  const data = successfulResponseData(result, "读取资产版本失败");
   const items = normalizeAssetVersions(data.items);
   return {
     items,
@@ -519,10 +418,7 @@ export async function fetchSpaceAssetVersionDetail(input: {
       version_id: input.versionId,
     },
   );
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "读取历史版本失败");
-  }
-  const raw = (result.data as any)?.version;
+  const raw = successfulResponseData(result, "读取历史版本失败").version;
   const version = normalizeAssetVersion(
     raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {},
   );
@@ -591,26 +487,19 @@ async function saveSpaceCanvasResult(
     ...canvasResultPayload(input),
     role,
   });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "保存资产失败");
-  }
-  const asset = (result.data as any)?.asset;
-  if (!asset) {
-    throw new Error("保存资产结果为空");
-  }
-  return normalizeProjectAsset(asset);
-}
-
-export function saveSpaceCanvasMaterial(
-  input: SaveSpaceCanvasResultInput,
-): Promise<ProjectAsset> {
-  return saveSpaceCanvasResult("material", input);
+  return projectAssetFromResponse(result, "保存资产失败", "保存资产结果为空");
 }
 
 export function saveSpaceCanvasContent(
   input: SaveSpaceCanvasResultInput,
 ): Promise<ProjectAsset> {
   return saveSpaceCanvasResult("work", input);
+}
+
+export function saveSpaceCanvasMaterial(
+  input: SaveSpaceCanvasResultInput,
+): Promise<ProjectAsset> {
+  return saveSpaceCanvasResult("material", input);
 }
 
 export async function saveSpaceCanvas(
@@ -624,10 +513,7 @@ export async function saveSpaceCanvas(
     base_revision: canvas.updatedAt || "",
     canvas: persistedCanvasState(canvas),
   });
-  if (!isSuccessResponse(result)) {
-    throw new Error(result.message || result.msg || "保存画布失败");
-  }
-  const data = (result.data || {}) as Record<string, unknown>;
+  const data = successfulResponseData(result, "保存画布失败");
   return {
     assetCateId: Number(data.asset_cate_id || assetCateId || 0),
     updatedAt: String(data.updated_at || canvas.updatedAt || ""),

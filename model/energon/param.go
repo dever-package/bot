@@ -7,27 +7,21 @@ import (
 )
 
 type Param struct {
-	ID            uint64    `dorm:"primaryKey;autoIncrement;comment:参数ID"`
-	Name          string    `dorm:"type:varchar(128);not null;comment:参数名"`
-	Key           string    `dorm:"type:varchar(128);not null;comment:参数标识"`
-	Icon          string    `dorm:"type:varchar(64);not null;default:'';comment:图标"`
-	Type          string    `dorm:"type:varchar(32);not null;comment:类型"`
-	PreviewType   string    `dorm:"type:varchar(32);not null;default:none;comment:预览类型"`
-	Usage         int16     `dorm:"type:smallint;not null;default:1;comment:用途"`
-	ValueType     string    `dorm:"type:varchar(32);not null;default:string;comment:值类型"`
-	CateID        uint64    `dorm:"type:bigint;not null;default:0;comment:参数分类"`
-	UploadRuleID  uint64    `dorm:"type:bigint;not null;default:0;comment:上传规则"`
-	MaxFiles      int       `dorm:"type:int;not null;default:5;comment:最多文件数"`
-	AssetText     int16     `dorm:"type:smallint;not null;default:1;comment:允许引用文本资产"`
-	AssetImage    int16     `dorm:"type:smallint;not null;default:1;comment:允许引用图片资产"`
-	AssetAudio    int16     `dorm:"type:smallint;not null;default:1;comment:允许引用音频资产"`
-	AssetVideo    int16     `dorm:"type:smallint;not null;default:1;comment:允许引用视频资产"`
-	AssetRichtext int16     `dorm:"type:smallint;not null;default:1;comment:允许引用富文本资产"`
-	AssetFile     int16     `dorm:"type:smallint;not null;default:1;comment:允许引用文件资产"`
-	DefaultValue  string    `dorm:"type:text;not null;comment:默认值"`
-	Status        int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	Sort          int       `dorm:"type:int;not null;default:100;comment:排序"`
-	CreatedAt     time.Time `dorm:"comment:创建时间"`
+	ID           uint64    `dorm:"primaryKey;autoIncrement;comment:参数ID"`
+	Name         string    `dorm:"type:varchar(128);not null;comment:参数名"`
+	Key          string    `dorm:"type:varchar(128);not null;comment:参数标识"`
+	Icon         string    `dorm:"type:varchar(64);not null;default:'';comment:图标"`
+	Type         string    `dorm:"type:varchar(32);not null;comment:类型"`
+	PreviewType  string    `dorm:"type:varchar(32);not null;default:none;comment:预览类型"`
+	Usage        int16     `dorm:"type:smallint;not null;default:1;comment:用途"`
+	ValueType    string    `dorm:"type:varchar(32);not null;default:string;comment:值类型"`
+	CateID       uint64    `dorm:"type:bigint;not null;default:0;comment:参数分类"`
+	UploadRuleID uint64    `dorm:"type:bigint;not null;default:0;comment:上传规则"`
+	MaxFiles     int       `dorm:"type:int;not null;default:5;comment:最多文件数"`
+	DefaultValue string    `dorm:"type:text;not null;comment:默认值"`
+	Status       int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	Sort         int       `dorm:"type:int;not null;default:100;comment:排序"`
+	CreatedAt    time.Time `dorm:"comment:创建时间"`
 }
 
 type ParamIndex struct {
@@ -36,11 +30,12 @@ type ParamIndex struct {
 }
 
 const (
-	ParamPromptID     uint64 = 1
-	ParamImageID      uint64 = 2
-	ParamImagesID     uint64 = 17
-	ParamFirstFrameID uint64 = 18
-	ParamLastFrameID  uint64 = 19
+	ParamPromptID        uint64 = 1
+	ParamImageID         uint64 = 2
+	ParamImagesID        uint64 = 17
+	ParamFirstFrameID    uint64 = 18
+	ParamLastFrameID     uint64 = 19
+	ParamReferenceModeID uint64 = 20
 
 	paramAudioID       uint64 = 3
 	paramVideoID       uint64 = 4
@@ -59,26 +54,30 @@ const (
 )
 
 const (
-	ParamSortPrompt      = 10
-	ParamSortImage       = 20
-	ParamSortFirstFrame  = 21
-	ParamSortLastFrame   = 22
-	ParamSortImages      = 30
-	ParamSortAudio       = 40
-	ParamSortVideo       = 50
-	ParamSortFile        = 60
-	ParamSortResolution  = 70
-	ParamSortAspectRatio = 80
-	ParamSortSwitch      = 90
-	ParamSortDefault     = 100
-	ParamSortWatermark   = ParamSortDefault
-	ParamSortTest        = 110
-	ParamSortDuration    = 120
-	ParamSortVoice       = 130
-	ParamSortSound       = 140
-	ParamSortVideos      = 150
-	ParamSortSubtitles   = 160
-	ParamSortFPS         = 170
+	ParamSortPrompt        = 10
+	ParamSortReferenceMode = 19
+	ParamSortImage         = 20
+	ParamSortFirstFrame    = 21
+	ParamSortLastFrame     = 22
+	ParamSortImages        = 30
+	ParamSortAudio         = 40
+	ParamSortVideo         = 50
+	ParamSortFile          = 60
+	ParamSortResolution    = 70
+	ParamSortAspectRatio   = 80
+	ParamSortSwitch        = 90
+	ParamSortDefault       = 100
+	ParamSortWatermark     = ParamSortDefault
+	ParamSortTest          = 110
+	ParamSortDuration      = 120
+	ParamSortVoice         = 130
+	ParamSortSound         = 140
+	ParamSortVideos        = 150
+	ParamSortSubtitles     = 160
+	ParamSortFPS           = 170
+
+	ReferenceModeFrames     = "frames"
+	ReferenceModeReferences = "references"
 )
 
 type builtinParamSortSpec struct {
@@ -89,6 +88,7 @@ type builtinParamSortSpec struct {
 
 var builtinParamSortSpecs = []builtinParamSortSpec{
 	{ID: ParamPromptID, Key: "prompt", Sort: ParamSortPrompt},
+	{ID: ParamReferenceModeID, Key: "referenceMode", Sort: ParamSortReferenceMode},
 	{ID: ParamImageID, Key: "image", Sort: ParamSortImage},
 	{ID: ParamFirstFrameID, Key: "firstFrame", Sort: ParamSortFirstFrame},
 	{ID: ParamLastFrameID, Key: "lastFrame", Sort: ParamSortLastFrame},
@@ -142,6 +142,20 @@ var (
 			"default_value":  "",
 			"status":         1,
 			"sort":           ParamSortPrompt,
+		},
+		{
+			"id":             ParamReferenceModeID,
+			"name":           "参考方式",
+			"key":            "referenceMode",
+			"type":           "option",
+			"usage":          1,
+			"value_type":     "string",
+			"cate_id":        paramCateCommonID,
+			"upload_rule_id": 0,
+			"max_files":      0,
+			"default_value":  ReferenceModeFrames,
+			"status":         1,
+			"sort":           ParamSortReferenceMode,
 		},
 		{
 			"id":             ParamImageID,

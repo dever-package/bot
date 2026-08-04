@@ -62,16 +62,3 @@ func NewPolicyModel() *orm.Model[Policy] {
 		},
 	})
 }
-
-// DefaultPolicy 返回旧版系统默认策略。
-//
-// Deprecated: 用户扣费规则不再使用系统默认策略，仅保留给已有调用方兼容。
-func DefaultPolicy() Policy {
-	return Policy{
-		ID:            DefaultPolicyID,
-		Status:        PolicyStatusDisabled,
-		PointConfigID: DefaultPointConfigID,
-		SaleRatio:     DefaultSaleRatio,
-		USDToCNYRate:  DefaultUSDToCNYRate,
-	}
-}

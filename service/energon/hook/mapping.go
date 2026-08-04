@@ -19,24 +19,24 @@ func normalizeServiceParamMapping(c *server.Context, paramRow map[string]any, ru
 		return ""
 	case paramRuleOptionMap:
 		if paramType != "option" && paramType != "multi_option" {
-			panicServiceParamField("选项映射只支持单选或多选参数")
+			panicParamListField("选项映射只支持单选或多选参数")
 		}
 		mappings := botinput.DecodeServiceParamOptionMappings(value)
 		if len(mappings) == 0 {
-			panicServiceParamField("选项映射必须选择至少一个参数选项")
+			panicParamListField("选项映射必须选择至少一个参数选项")
 		}
 		optionIDs := botinput.ServiceParamOptionMappingIDs(mappings)
 		if !paramOptionsExist(c, util.ToUint64(paramRow["id"]), optionIDs) {
-			panicServiceParamField("选项映射包含无效的参数选项")
+			panicParamListField("选项映射包含无效的参数选项")
 		}
 		return mustJSONString(botinput.ServiceParamOptionMappingRows(mappings))
 	case paramRuleFileMap:
 		if paramType != "file" && paramType != "files" {
-			panicServiceParamField("附件映射只支持单文件或多文件参数")
+			panicParamListField("附件映射只支持单文件或多文件参数")
 		}
 		indexes := normalizeIntArray(value)
 		if len(indexes) == 0 {
-			panicServiceParamField("附件映射必须选择至少一个文件序号")
+			panicParamListField("附件映射必须选择至少一个文件序号")
 		}
 		maxIndex := 1
 		if paramType == "files" {
@@ -47,7 +47,7 @@ func normalizeServiceParamMapping(c *server.Context, paramRow map[string]any, ru
 		}
 		for _, index := range indexes {
 			if index < 1 || index > maxIndex {
-				panicServiceParamField(fmt.Sprintf("附件映射序号必须在 1 到 %d 之间", maxIndex))
+				panicParamListField(fmt.Sprintf("附件映射序号必须在 1 到 %d 之间", maxIndex))
 			}
 		}
 		return mustJSONString(indexes)
@@ -56,7 +56,7 @@ func normalizeServiceParamMapping(c *server.Context, paramRow map[string]any, ru
 	case paramRuleFixedMap:
 		return normalizeFixedServiceParamMapping(value)
 	default:
-		panicServiceParamField("未知的服务参数映射规则")
+		panicParamListField("未知的服务参数映射规则")
 	}
 	return ""
 }
@@ -64,13 +64,13 @@ func normalizeServiceParamMapping(c *server.Context, paramRow map[string]any, ru
 func normalizeServiceParamFileValueFormat(paramRow map[string]any, value any) string {
 	if !botinput.IsFileParamType(util.ToStringTrimmed(paramRow["type"])) {
 		if format := strings.ToLower(util.ToStringTrimmed(value)); format != "" && format != botmodel.ServiceParamFileValueFormatURL {
-			panicServiceParamField("只有文件参数可以配置 Base64 或 Data URL")
+			panicParamListField("只有文件参数可以配置 Base64 或 Data URL")
 		}
 		return botmodel.ServiceParamFileValueFormatURL
 	}
 	format, err := botinput.ParseServiceParamFileValueFormat(util.ToStringTrimmed(value))
 	if err != nil {
-		panicServiceParamField(err.Error())
+		panicParamListField(err.Error())
 	}
 	return format
 }
@@ -123,27 +123,27 @@ func serviceParamComboParamID(value any) uint64 {
 func normalizeFixedServiceParamMapping(value any) string {
 	text := util.ToStringTrimmed(value)
 	if text == "" {
-		panicServiceParamField("固定值映射必须填写字段值")
+		panicParamListField("固定值映射必须填写字段值")
 	}
 	return text
 }
 
 func validateFixedServiceParamMapping(valueType string, value any) {
 	if _, err := botinput.FixedValueByType(valueType, value); err != nil {
-		panicServiceParamField(err.Error())
+		panicParamListField(err.Error())
 	}
 }
 
 func normalizeServiceParamComboMapping(c *server.Context, value any) map[string]any {
 	mapping := botinput.DecodeServiceParamComboMapping(value)
 	if len(mapping.ParamIDs) < 2 {
-		panicServiceParamField("组合映射必须包含主参数和至少一个参与参数")
+		panicParamListField("组合映射必须包含主参数和至少一个参与参数")
 	}
 
 	validateComboMappingParams(c, mapping.ParamIDs)
 
 	if len(mapping.Rows) == 0 {
-		panicServiceParamField("组合映射必须配置至少一条字段值")
+		panicParamListField("组合映射必须配置至少一条字段值")
 	}
 
 	seenRows := map[string]struct{}{}
@@ -151,13 +151,13 @@ func normalizeServiceParamComboMapping(c *server.Context, value any) map[string]
 	seenOptionIDsByParam := map[uint64]map[uint64]struct{}{}
 	for _, row := range mapping.Rows {
 		if strings.TrimSpace(row.NativeValue) == "" {
-			panicServiceParamField("组合映射的字段值不能为空")
+			panicParamListField("组合映射的字段值不能为空")
 		}
 		signature := make([]string, 0, len(mapping.ParamIDs))
 		for _, paramID := range mapping.ParamIDs {
 			optionID := row.Values[paramID]
 			if optionID == 0 {
-				panicServiceParamField("组合映射每一行都必须选择所有参与参数的选项")
+				panicParamListField("组合映射每一行都必须选择所有参与参数的选项")
 			}
 			optionIDsByParam[paramID], seenOptionIDsByParam[paramID] = appendUniqueUint64(
 				optionIDsByParam[paramID],
@@ -168,14 +168,14 @@ func normalizeServiceParamComboMapping(c *server.Context, value any) map[string]
 		}
 		key := strings.Join(signature, "|")
 		if _, exists := seenRows[key]; exists {
-			panicServiceParamField("组合映射不能重复配置相同的参数组合")
+			panicParamListField("组合映射不能重复配置相同的参数组合")
 		}
 		seenRows[key] = struct{}{}
 	}
 
 	for paramID, optionIDs := range optionIDsByParam {
 		if !paramOptionsExist(c, paramID, optionIDs) {
-			panicServiceParamField("组合映射包含无效的参数选项")
+			panicParamListField("组合映射包含无效的参数选项")
 		}
 	}
 
@@ -186,10 +186,10 @@ func validateComboMappingParams(c *server.Context, paramIDs []uint64) {
 	for _, paramID := range paramIDs {
 		paramRow := botmodel.NewParamModel().FindMap(c.Context(), map[string]any{"id": paramID})
 		if len(paramRow) == 0 {
-			panicServiceParamField("组合映射选择的参与参数不存在")
+			panicParamListField("组合映射选择的参与参数不存在")
 		}
 		if !botinput.IsOptionParamType(util.ToStringTrimmed(paramRow["type"])) {
-			panicServiceParamField("组合映射的参与参数只支持单选或多选参数")
+			panicParamListField("组合映射的参与参数只支持单选或多选参数")
 		}
 	}
 }

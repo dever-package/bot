@@ -177,7 +177,7 @@ func createKnowledgeFile(c *server.Context, fallbackType string) error {
 	if isKnowledgeMultipartRequest(c) {
 		return createKnowledgeFileFromMultipart(c)
 	}
-	body, err := bindKnowledgeBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -241,7 +241,7 @@ func (Knowledge) PostSaveFile(c *server.Context) error {
 }
 
 func saveKnowledgeFile(c *server.Context) error {
-	body, err := bindKnowledgeBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -261,7 +261,7 @@ func (Knowledge) PostRenameFile(c *server.Context) error {
 }
 
 func renameKnowledgeFile(c *server.Context) error {
-	body, err := bindKnowledgeBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -281,7 +281,7 @@ func (Knowledge) PostDeleteFiles(c *server.Context) error {
 }
 
 func deleteKnowledgeFiles(c *server.Context) error {
-	body, err := bindKnowledgeBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -298,7 +298,7 @@ func (Knowledge) PostMoveFiles(c *server.Context) error {
 }
 
 func moveKnowledgeFiles(c *server.Context) error {
-	body, err := bindKnowledgeBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -317,7 +317,7 @@ func (Knowledge) PostCopyFiles(c *server.Context) error {
 }
 
 func copyKnowledgeFiles(c *server.Context) error {
-	body, err := bindKnowledgeBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -375,7 +375,7 @@ func isSafeKnowledgeInlinePreview(name string, mimeType string) bool {
 }
 
 func (Knowledge) PostFeedback(c *server.Context) error {
-	body, err := bindKnowledgeBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -398,7 +398,7 @@ func (Knowledge) GetRetrieveLogs(c *server.Context) error {
 }
 
 func (Knowledge) PostRefluxQA(c *server.Context) error {
-	body, err := bindKnowledgeBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -417,7 +417,7 @@ func (Knowledge) PostRefluxQA(c *server.Context) error {
 }
 
 func (Knowledge) PostIndexBase(c *server.Context) error {
-	body, err := bindKnowledgeBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -426,7 +426,7 @@ func (Knowledge) PostIndexBase(c *server.Context) error {
 }
 
 func (Knowledge) PostBatchReindex(c *server.Context) error {
-	body, err := bindKnowledgeBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -446,7 +446,7 @@ func (Knowledge) PostBatchReindex(c *server.Context) error {
 }
 
 func (Knowledge) PostSetExpiration(c *server.Context) error {
-	body, err := bindKnowledgeBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -481,7 +481,7 @@ func (Knowledge) PostSetExpiration(c *server.Context) error {
 }
 
 func (Knowledge) PostReviewDoc(c *server.Context) error {
-	body, err := bindKnowledgeBody(c)
+	body, err := botapi.BindBody(c)
 	if err != nil {
 		return c.Error(err)
 	}
@@ -541,14 +541,6 @@ func (Knowledge) GetReviewDocs(c *server.Context) error {
 		"list":  docs,
 		"total": total,
 	}, err)
-}
-
-func bindKnowledgeBody(c *server.Context) (map[string]any, error) {
-	body := map[string]any{}
-	if err := c.BindJSON(&body); err != nil {
-		return nil, err
-	}
-	return body, nil
 }
 
 func isKnowledgeMultipartRequest(c *server.Context) bool {

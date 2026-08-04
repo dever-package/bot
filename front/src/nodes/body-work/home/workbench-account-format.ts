@@ -46,6 +46,4 @@ export function formatAccountDateTime(value: string) {
     : date.toLocaleString("zh-CN", { hour12: false });
 }
 
-export function accountErrorMessage(error: unknown, fallback: string) {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
+export { requestErrorMessage as accountErrorMessage } from "../shared/api-response";

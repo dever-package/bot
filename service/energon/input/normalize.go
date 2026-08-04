@@ -38,7 +38,7 @@ func normalizeServiceParamInputKeys(
 		return
 	}
 	for _, serviceParam := range repo.ServiceParamsByService(ctx, serviceID) {
-		if !IsActive(serviceParam.Status) {
+		if !IsActive(serviceParam.Status) || !serviceParamAcceptsInput(serviceParam) {
 			continue
 		}
 		param, ok := params[serviceParam.ParamID]

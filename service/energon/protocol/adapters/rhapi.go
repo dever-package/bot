@@ -80,7 +80,7 @@ func (RhApiAdapter) BuildClientResponse(req *botprotocol.ShemicRequest, resp *bo
 }
 
 func (RhApiAdapter) StreamTaskSpec(input botprotocol.NativeInput) (bottask.StreamTaskSpec, bool) {
-	outputType := rhapiOutputType(input)
+	outputType := runningHubOutputType(input)
 	return bottask.StreamTaskSpec{
 		Kind:         bottask.StreamKindPolling,
 		OutputType:   outputType,
@@ -137,7 +137,7 @@ func (RhApiAdapter) ParseTaskStatus(input botprotocol.NativeInput, resp *botprov
 
 func rhapiBody(input botprotocol.NativeInput) map[string]any {
 	body := map[string]any{}
-	mapped := rhapiMappedInput(input)
+	mapped := resolvedMappedInput(input)
 	for key, value := range rhapiMappedNativeBody(mapped) {
 		body[key] = value
 	}
@@ -299,28 +299,8 @@ func ensureRhApiImages(body map[string]any) {
 	}
 }
 
-func rhapiMappedInput(input botprotocol.NativeInput) botprotocol.MappedInput {
-	if input.Mapped.IsZero() {
-		return botprotocol.NewMappedInput(input.Request.Input, nil)
-	}
-	return input.Mapped
-}
-
 func rhapiRequestKind(input botprotocol.NativeInput) string {
-	return rhapiKindPrefix + rhapiOutputType(input)
-}
-
-func rhapiOutputType(input botprotocol.NativeInput) string {
-	requestKind := ""
-	if input.Request != nil {
-		requestKind = input.Request.Kind
-	}
-	for _, value := range []string{input.Service.Type, input.Power.Kind, requestKind} {
-		if outputType := runningHubOutputTypeFromKind(value); outputType != "" {
-			return outputType
-		}
-	}
-	return botprotocol.MediaTypeImage
+	return rhapiKindPrefix + runningHubOutputType(input)
 }
 
 func rhapiClientOutputType(req *botprotocol.ShemicRequest) string {

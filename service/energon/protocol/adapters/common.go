@@ -107,3 +107,23 @@ func applyToolOptionOverrides(body map[string]any, options map[string]any) {
 		}
 	}
 }
+
+func resolvedMappedInput(input botprotocol.NativeInput) botprotocol.MappedInput {
+	if input.Mapped.IsZero() {
+		return botprotocol.NewMappedInput(input.Request.Input, nil)
+	}
+	return input.Mapped
+}
+
+func runningHubOutputType(input botprotocol.NativeInput) string {
+	requestKind := ""
+	if input.Request != nil {
+		requestKind = input.Request.Kind
+	}
+	for _, value := range []string{input.Service.Type, input.Power.Kind, requestKind} {
+		if outputType := runningHubOutputTypeFromKind(value); outputType != "" {
+			return outputType
+		}
+	}
+	return botprotocol.MediaTypeImage
+}

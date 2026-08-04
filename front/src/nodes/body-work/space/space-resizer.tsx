@@ -15,7 +15,7 @@ import {
   MAX_GROUP_NODE_SIZE,
   MIN_GROUP_NODE_SIZE,
 } from "./space-group-model";
-import { isAudioPowerType } from "./space-power-presentation";
+import { isAudioPowerType } from "../shared/power-presentation";
 
 export type CanvasNodeBounds = Pick<
   SpaceCanvasNode,

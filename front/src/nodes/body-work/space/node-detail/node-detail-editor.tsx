@@ -20,8 +20,10 @@ import type { SpaceCanvasNode } from "../types";
 import { CanvasNodeContentView } from "../space-content-view";
 import {
   contentOutputMediaURLs,
-  type CanvasContentMediaKind,
-} from "../space-content-output";
+  type ContentMediaKind,
+  type StoryboardGridDocument,
+} from "../../shared/content-output";
+import type { ReferenceProvider } from "../../../show/agent-chat/reference";
 import { AssetPreview } from "../../asset/asset-preview";
 import { MediaInspectorGallery } from "../../../shared/media-inspector-gallery";
 import { SpaceTooltip } from "../space-tooltip";
@@ -30,6 +32,7 @@ import {
   type NodeDetailEditableContent,
   type NodeDetailFileValue,
 } from "./node-detail-content";
+import { NodeDetailStoryboardGrid } from "./node-detail-storyboard-grid";
 
 const { RichTextEditor } = getCompatModule("@/components/rich-text-editor") as {
   RichTextEditor?: ComponentType<{
@@ -56,14 +59,14 @@ export function NodeDetailEditor({
   storyboardSourceNodeId,
   storyboardFocus,
   storyboardWorkflowAction,
+  referenceProvider,
   onConfirmStoryboard,
-  onReviewStoryboard,
   onCreateStoryboardRevision,
   onChange,
 }: {
   content: NodeDetailEditableContent;
   mediaOutput?: unknown;
-  mediaKind?: CanvasContentMediaKind;
+  mediaKind?: ContentMediaKind;
   mediaPrompt?: string;
   readonly: boolean;
   referenceItems?: ComposerAssetItem[];
@@ -71,13 +74,11 @@ export function NodeDetailEditor({
   storyboardSourceNodeId?: string;
   storyboardFocus?: StoryboardEditorFocus;
   storyboardWorkflowAction?: StoryboardWorkflowAction;
+  referenceProvider?: ReferenceProvider;
   onConfirmStoryboard?: (
     storyboard: StoryboardDocument,
     productionPlan: StoryboardProductionPlan,
   ) => boolean | Promise<boolean>;
-  onReviewStoryboard?: (
-    storyboard: StoryboardDocument,
-  ) => void | Promise<void>;
   onCreateStoryboardRevision?: () => void | Promise<void>;
   onChange: (content: NodeDetailEditableContent) => void;
 }) {
@@ -107,6 +108,19 @@ export function NodeDetailEditor({
     );
   }
 
+  if (content.mode === "storyboard_grid") {
+    return (
+      <NodeDetailStoryboardGrid
+        grid={content.value as StoryboardGridDocument}
+        readonly={readonly}
+        referenceProvider={referenceProvider}
+        onChange={(grid) =>
+          onChange(nodeDetailContentWithValue(content, grid))
+        }
+      />
+    );
+  }
+
   if (content.mode === "storyboard") {
     return (
       <div className="ws-node-detail-storyboard">
@@ -120,7 +134,6 @@ export function NodeDetailEditor({
           focus={storyboardFocus}
           workflowAction={storyboardWorkflowAction}
           onConfirm={onConfirmStoryboard}
-          onReview={onReviewStoryboard}
           onCreateRevision={onCreateStoryboardRevision}
           onChange={(storyboard) =>
             onChange(nodeDetailContentWithValue(content, storyboard))

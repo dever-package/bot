@@ -60,13 +60,13 @@ func (store *mediaReferenceStore) Add(references []MediaReference) {
 	defer store.mutex.Unlock()
 	seen := make(map[string]struct{}, len(store.items))
 	for _, current := range store.items {
-		seen[mediaReferenceKey(current.ReferenceType, current.ReferenceID)] = struct{}{}
+		seen[mediaReferenceItemKey(current)] = struct{}{}
 	}
 	for _, current := range references {
 		if len(store.items) >= MaxRuntimeMediaReferences {
 			break
 		}
-		key := mediaReferenceKey(current.ReferenceType, current.ReferenceID)
+		key := mediaReferenceItemKey(current)
 		if current.ReferenceID == 0 || strings.TrimSpace(current.URL) == "" {
 			continue
 		}
@@ -151,7 +151,13 @@ func ApplyMediaReferences(arguments map[string]any, params []energonservice.Powe
 
 func mediaReferenceSelections(references []MediaReference) []map[string]any {
 	result := make([]map[string]any, 0, len(references))
+	seen := make(map[string]struct{}, len(references))
 	for _, current := range references {
+		key := mediaReferenceKey(current.ReferenceType, current.ReferenceID) + ":" + strings.TrimSpace(current.ParameterKey)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
 		result = append(result, map[string]any{
 			"ref_type":  current.ReferenceType,
 			"ref_id":    current.ReferenceID,
@@ -170,7 +176,7 @@ func boundMediaReferences(selected []MediaReference, bindings []energoninput.Med
 				continue
 			}
 			current.ParameterKey = binding.ParamKey
-			key := mediaReferenceKey(current.ReferenceType, current.ReferenceID) + ":" + binding.ParamKey
+			key := mediaReferenceItemKey(current) + ":" + binding.ParamKey
 			if _, exists := used[key]; exists {
 				break
 			}
@@ -196,9 +202,10 @@ func SelectedMediaReferences(arguments map[string]any, available []MediaReferenc
 	if len(available) == 0 {
 		return nil, fmt.Errorf("本轮没有可用的引用素材")
 	}
-	index := make(map[string]MediaReference, len(available))
+	index := make(map[string][]MediaReference, len(available))
 	for _, current := range available {
-		index[mediaReferenceKey(current.ReferenceType, current.ReferenceID)] = current
+		key := mediaReferenceKey(current.ReferenceType, current.ReferenceID)
+		index[key] = append(index[key], current)
 	}
 	result := make([]MediaReference, 0, len(requested))
 	seen := map[string]struct{}{}
@@ -206,20 +213,23 @@ func SelectedMediaReferences(arguments map[string]any, available []MediaReferenc
 		refType := strings.ToLower(strings.TrimSpace(textValue(item["ref_type"])))
 		refID := ArgumentUint64(item, "ref_id")
 		key := mediaReferenceKey(refType, refID)
-		current, exists := index[key]
+		matches, exists := index[key]
 		if !exists {
 			return nil, fmt.Errorf("引用素材 %s 不在用户本轮选择范围内", key)
 		}
-		current.ParameterKey = strings.TrimSpace(textValue(item["param_key"]))
-		if current.ParameterKey == "" {
+		parameterKey := strings.TrimSpace(textValue(item["param_key"]))
+		if parameterKey == "" {
 			return nil, fmt.Errorf("引用素材 %s 缺少能力参数 param_key", key)
 		}
-		selectionKey := key + ":" + current.ParameterKey
-		if _, duplicate := seen[selectionKey]; duplicate {
-			continue
+		for _, current := range matches {
+			current.ParameterKey = parameterKey
+			selectionKey := mediaReferenceItemKey(current) + ":" + parameterKey
+			if _, duplicate := seen[selectionKey]; duplicate {
+				continue
+			}
+			seen[selectionKey] = struct{}{}
+			result = append(result, current)
 		}
-		seen[selectionKey] = struct{}{}
-		result = append(result, current)
 	}
 	return result, nil
 }
@@ -227,7 +237,7 @@ func SelectedMediaReferences(arguments map[string]any, available []MediaReferenc
 func ArtifactReferences(arguments map[string]any, available []MediaReference) ([]MediaReference, error) {
 	selected, err := SelectedMediaReferences(arguments, available)
 	if err != nil || mediaSeriesMode(arguments) != MediaSeriesModeContinue {
-		return selected, err
+		return uniqueLogicalMediaReferences(selected), err
 	}
 	current, exists := activeSeriesReference(available)
 	if !exists {
@@ -240,7 +250,21 @@ func ArtifactReferences(arguments map[string]any, available []MediaReference) ([
 		}
 		result = append(result, reference)
 	}
-	return result, nil
+	return uniqueLogicalMediaReferences(result), nil
+}
+
+func uniqueLogicalMediaReferences(references []MediaReference) []MediaReference {
+	result := make([]MediaReference, 0, len(references))
+	seen := make(map[string]struct{}, len(references))
+	for _, current := range references {
+		key := mediaReferenceKey(current.ReferenceType, current.ReferenceID)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, current)
+	}
+	return result
 }
 
 func activeSeriesReference(references []MediaReference) (MediaReference, bool) {
@@ -266,7 +290,13 @@ func MediaReferencesDescription(references []MediaReference) string {
 		return ""
 	}
 	rows := make([]string, 0, len(references))
+	seen := make(map[string]struct{}, len(references))
 	for _, current := range references {
+		key := mediaReferenceKey(current.ReferenceType, current.ReferenceID)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
 		rows = append(rows, fmt.Sprintf("[%s:%d] %s（%s）", current.ReferenceType, current.ReferenceID, current.Label, current.Kind))
 	}
 	return "。可用素材：" + strings.Join(rows, "；") + "。用户指定的素材优先；仅在用户要求延续或修改上一版时使用“当前系列主素材”。"
@@ -305,6 +335,10 @@ func mediaReferenceParameterAvailable(param energonservice.PowerParam, reference
 
 func mediaReferenceKey(refType string, refID uint64) string {
 	return fmt.Sprintf("%s:%d", strings.ToLower(strings.TrimSpace(refType)), refID)
+}
+
+func mediaReferenceItemKey(reference MediaReference) string {
+	return mediaReferenceKey(reference.ReferenceType, reference.ReferenceID) + ":" + strings.TrimSpace(reference.URL)
 }
 
 func cloneArguments(source map[string]any) map[string]any {

@@ -29,6 +29,7 @@ export function CanvasResultView({
   className = "",
   style,
   onOpen,
+  onOpenIntent,
   resizeControls,
   children,
   customContentIsPureMedia = false,
@@ -42,6 +43,7 @@ export function CanvasResultView({
   className?: string;
   style?: CSSProperties;
   onOpen?: () => void;
+  onOpenIntent?: () => void;
   resizeControls?: ReactNode;
   children?: ReactNode;
   customContentIsPureMedia?: boolean;
@@ -116,6 +118,8 @@ export function CanvasResultView({
         }
       }}
       onClick={openFromClick}
+      onPointerEnter={onOpen ? onOpenIntent : undefined}
+      onFocus={onOpen ? onOpenIntent : undefined}
       onKeyDown={openFromKeyboard}
     >
       <div
@@ -219,7 +223,7 @@ function outputFromFallback(fallback: string) {
   return fallback ? { text: fallback } : undefined;
 }
 
-function hasResultPreviewMedia(preview: CanvasResultPreview) {
+export function hasResultPreviewMedia(preview: CanvasResultPreview) {
   return Boolean(
     preview.imageUrl || preview.videoUrl || preview.audioUrl || preview.fileUrl,
   );

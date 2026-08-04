@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { DetailDialogFrame } from "../../shared/detail-dialog";
+import { requestErrorMessage as errorMessage } from "../../shared/api-response";
 import {
   confirmSpaceStoryboard,
   createSpaceStoryboardRevision,
@@ -40,11 +41,7 @@ import {
 import { NodeDetailRunError } from "./node-detail-run-error";
 import { useAssetReferenceProvider } from "../../asset/asset-reference-provider";
 import { CanvasAssetReferenceProviderContext } from "../space-reference-editor";
-import {
-  canvasReferenceContentFromTargets,
-  canvasReferenceTargetsFromContent,
-} from "../space-reference-content";
-import { isVideoComposePowerType } from "../space-power-presentation";
+import { isVideoComposePowerType } from "../../shared/power-presentation";
 import { VideoComposeView } from "../space-video-compose-view";
 import {
   emptyVideoComposition,
@@ -58,8 +55,8 @@ import {
 } from "../space-storyboard";
 import {
   contentOutputMediaKinds,
-  type CanvasContentMediaKind,
-} from "../space-content-output";
+  type ContentMediaKind,
+} from "../../shared/content-output";
 
 export function NodeDetailDialog({
   projectId,
@@ -126,7 +123,7 @@ export function NodeDetailDialog({
   const [historyError, setHistoryError] = useState("");
   const [restoring, setRestoring] = useState(false);
   const [storyboardWorkflowAction, setStoryboardWorkflowAction] = useState<
-    "" | "confirming" | "revising" | "reviewing"
+    "" | "confirming" | "revising"
   >("");
   const [closing, setClosing] = useState(false);
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
@@ -416,48 +413,6 @@ export function NodeDetailDialog({
     projectId,
     storyboardWorkflowAction,
   ]);
-
-  const reviewStoryboard = useCallback(
-    async (storyboard: StoryboardDocument) => {
-      if (storyboardWorkflowAction || !onRunNode) {
-        return;
-      }
-      const saved = await draft.flush();
-      if (!saved) {
-        return;
-      }
-      const prompt = storyboardReviewPrompt(storyboard);
-      const referenceTargets = canvasReferenceTargetsFromContent(
-        nodeRef.current.composerDraft?.promptContent,
-      );
-      setStoryboardWorkflowAction("reviewing");
-      try {
-        const reviewTask = onRunNode({
-          ...nodeRef.current,
-          composerDraft: {
-            ...(nodeRef.current.composerDraft || {}),
-            prompt,
-            promptContent: referenceTargets.length
-              ? canvasReferenceContentFromTargets(prompt, referenceTargets)
-              : undefined,
-          },
-        });
-        toast.info("已开始 AI 审查，正在重新生成分镜");
-        onClose();
-        void reviewTask
-          .then(() => {
-            toast.success("AI 审查完成，可重新打开分镜确认结果");
-          })
-          .catch((error) => {
-            toast.error(errorMessage(error, "AI 审查分镜失败"));
-          });
-      } catch (error) {
-        setStoryboardWorkflowAction("");
-        toast.error(errorMessage(error, "AI 审查分镜失败"));
-      }
-    },
-    [draft.flush, onClose, onRunNode, storyboardWorkflowAction],
-  );
 
   const retryDetail = useCallback(async () => {
     if (selectedVersionIdRef.current === currentVersionId) {
@@ -845,8 +800,8 @@ export function NodeDetailDialog({
                   storyboardSourceNodeId={node.id}
                   storyboardFocus={storyboardFocus}
                   storyboardWorkflowAction={storyboardWorkflowAction}
+                  referenceProvider={assetReferenceProvider}
                   onConfirmStoryboard={confirmStoryboard}
-                  onReviewStoryboard={reviewStoryboard}
                   onCreateStoryboardRevision={createStoryboardRevision}
                   onChange={draft.setDraft}
                 />
@@ -898,7 +853,7 @@ function currentAssetVersionId(asset?: ProjectAsset) {
 function detailContentLabel(
   content: NodeDetailEditableContent,
   node: SpaceCanvasNode,
-  mediaKind?: CanvasContentMediaKind,
+  mediaKind?: ContentMediaKind,
 ) {
   if (content.mode === "storyboard") {
     return "分镜脚本";
@@ -930,27 +885,10 @@ function detailContentLabel(
   return content.format === "markdown" ? "Markdown" : "富文本";
 }
 
-function storyboardReviewPrompt(storyboard: StoryboardDocument) {
-  return [
-    "请审查并优化下面这份现有分镜脚本，直接通过 submit_output 返回完整的新分镜，不要输出解释。",
-    "必须保持用户已经确定的标题、目标总时长、目标镜头数、画幅、画面类型、参考素材用途和明确剧情约束。",
-    "必须保留所有仍代表同一实体的 material、shot、speech、caption 稳定 ID，并原样保留 narrator_voice 与每个角色的 voice。",
-    "重点修复：镜头因果不连贯、重复 beat、动作过多或不可生成、人物道具凭空出现、错误的 match_previous/continue_previous、转场滥用、对白越界或重叠。",
-    "逐镜检查 continuity_state.entry 与 continuity_state.exit：人物位置和姿态、服装、道具归属与状态、时间、光线、轴线及运动方向必须明确；匹配或延续上一镜时，当前 entry 必须与上一镜 exit 完全一致。",
-    "普通新镜头不要引用上一镜；只有需要匹配上一镜结束画面时使用 match_previous，只有同一动作从上一段真实尾帧继续时使用 continue_previous，二者互斥。",
-    "确认 target_shot_count 等于 shots 数量，target_duration 等于全部 duration 之和，镜头不超过 50 个。",
-    `当前分镜 JSON：${JSON.stringify(storyboard)}`,
-  ].join("\n");
-}
-
 function createVersionRequestId(action: string, versionId: number) {
   const random =
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   return `${action}-${versionId}-${random}`.slice(0, 64);
-}
-
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error && error.message ? error.message : fallback;
 }

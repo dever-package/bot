@@ -41,6 +41,7 @@ import {
   PowerParamField,
   buildDefaultParamValues,
   buildRequestInput,
+  filterActivePowerParams,
   inputKeyForParam,
   isHiddenParam,
   isMainParam,
@@ -48,6 +49,7 @@ import {
   isToolbarParam,
   normalizePowerParamConfig,
   paramFilesRequestValue,
+  shouldDisplayPowerParam,
   validateMainParams,
   type ParamFileMap,
   type ParamFileLibraryRenderer,
@@ -263,23 +265,33 @@ export function StreamPowerRunner({
     appliedHistorySourceRef.current = ''
   }, [history?.scopeKey, powerKey])
 
+  const activePowerParams = useMemo(
+    () => filterActivePowerParams(powerParams, paramValues),
+    [paramValues, powerParams]
+  )
+  const displayedPowerParams = useMemo(
+    () =>
+      activePowerParams.filter((param) =>
+        shouldDisplayPowerParam(param, powerParams)
+      ),
+    [activePowerParams, powerParams]
+  )
   const paramUploadRuleIds = useMemo(
     () =>
-      powerParams
+      activePowerParams
         .map((param) => Number(param.upload_rule_id || 0))
         .filter((ruleId) => Number.isFinite(ruleId) && ruleId > 0),
-    [powerParams]
+    [activePowerParams]
   )
   const uploadRuleMetas = useUploadRuleMetas(paramUploadRuleIds)
-  const mainPowerParams = useMemo(
+  const orderedPowerParams = useMemo(
     () =>
-      powerParams.filter((param) => isMainParam(param) && !isHiddenParam(param)),
-    [powerParams]
-  )
-  const toolbarPowerParams = useMemo(
-    () =>
-      powerParams.filter((param) => isToolbarParam(param) && !isHiddenParam(param)),
-    [powerParams]
+      displayedPowerParams.filter(
+        (param) =>
+          !isHiddenParam(param) &&
+          (isMainParam(param) || isToolbarParam(param))
+      ),
+    [displayedPowerParams]
   )
   const hasConfiguredParams = powerParams.length > 0
   const sourcePickerOptions = useMemo(
@@ -914,55 +926,74 @@ export function StreamPowerRunner({
             </div>
           ) : null}
 
-          {mainPowerParams.length > 0 ? (
+          {orderedPowerParams.length > 0 ? (
             <div
-              key={`main-${paramInputRevision}`}
-              className="stream-power-param-list space-y-3"
+              key={`params-${paramInputRevision}`}
+              className="stream-power-param-list flex flex-wrap items-center gap-3"
             >
-              {mainPowerParams.map((param) => {
+              {orderedPowerParams.map((param) => {
                 const key = inputKeyForParam(param)
+                const controlProps = {
+                  param,
+                  value: paramValues[key],
+                  files: paramFiles[key] || [],
+                  uploadRuleMeta: uploadRuleMetas.get(
+                    Number(param.upload_rule_id || 0)
+                  ),
+                  disabled: running,
+                  uploadBizKey,
+                  uploadBizName,
+                  allowResourceLibrary,
+                  fileLibraryOnly: Boolean(renderParamFileLibrary),
+                  fileLibraryLabel: renderParamFileLibrary ? '添加' : undefined,
+                  renderFileLibrary: renderParamFileLibrary,
+                  onUploadedFiles,
+                  onChange: (nextValue: unknown) => setParamValue(param, nextValue),
+                  onFilesChange: (nextFiles: ParamUploadedFile[]) =>
+                    setParamFileValue(param, nextFiles),
+                }
+                if (isToolbarParam(param)) {
+                  return (
+                    <PowerParamPopover
+                      key={`${param.id}-${key}`}
+                      {...controlProps}
+                    />
+                  )
+                }
                 if (
                   isPromptParam?.(param) &&
                   ReferenceEditor &&
                   (assetReferenceTeamID > 0 || referenceProviders.length > 0)
                 ) {
                   return (
-                    <PowerPromptReferenceField
+                    <div
                       key={`${param.id}-${key}`}
-                      param={param}
-                      value={String(paramValues[key] || '')}
-                      content={paramReferenceContents[key]}
-                      providers={referenceProviders}
-                      assetReferenceTeamID={assetReferenceTeamID}
-                      disabled={running}
-                      onChange={(nextValue, nextContent) => {
-                        setParamValue(param, nextValue)
-                        setParamReferenceContents((current) => ({
-                          ...current,
-                          [key]: nextContent,
-                        }))
-                      }}
-                    />
+                      className="stream-power-main-param"
+                    >
+                      <PowerPromptReferenceField
+                        param={param}
+                        value={String(paramValues[key] || '')}
+                        content={paramReferenceContents[key]}
+                        providers={referenceProviders}
+                        assetReferenceTeamID={assetReferenceTeamID}
+                        disabled={running}
+                        onChange={(nextValue, nextContent) => {
+                          setParamValue(param, nextValue)
+                          setParamReferenceContents((current) => ({
+                            ...current,
+                            [key]: nextContent,
+                          }))
+                        }}
+                      />
+                    </div>
                   )
                 }
                 return (
-                  <div key={`${param.id}-${key}`} className="stream-power-param-field">
-                    <PowerParamField
-                      param={param}
-                      value={paramValues[key]}
-                      files={paramFiles[key] || []}
-                      uploadRuleMeta={uploadRuleMetas.get(Number(param.upload_rule_id || 0))}
-                      disabled={running}
-                      uploadBizKey={uploadBizKey}
-                      uploadBizName={uploadBizName}
-                      allowResourceLibrary={allowResourceLibrary}
-                      fileLibraryOnly={Boolean(renderParamFileLibrary)}
-                      fileLibraryLabel={renderParamFileLibrary ? '添加' : undefined}
-                      renderFileLibrary={renderParamFileLibrary}
-                      onUploadedFiles={onUploadedFiles}
-                      onChange={(nextValue) => setParamValue(param, nextValue)}
-                      onFilesChange={(nextFiles) => setParamFileValue(param, nextFiles)}
-                    />
+                  <div
+                    key={`${param.id}-${key}`}
+                    className="stream-power-main-param stream-power-param-field"
+                  >
+                    <PowerParamField {...controlProps} />
                   </div>
                 )
               })}
@@ -970,36 +1001,6 @@ export function StreamPowerRunner({
           ) : !paramsLoading ? (
             <div className="stream-power-empty rounded-lg px-3 py-8 text-center text-sm text-muted-foreground">
               暂无参数配置。
-            </div>
-          ) : null}
-
-          {toolbarPowerParams.length > 0 ? (
-            <div
-              key={`toolbar-${paramInputRevision}`}
-              className="stream-power-toolbar-params mt-3 flex flex-wrap items-center gap-2 border-t pt-3"
-            >
-              {toolbarPowerParams.map((param) => {
-                const key = inputKeyForParam(param)
-                return (
-                  <PowerParamPopover
-                    key={`${param.id}-${key}`}
-                    param={param}
-                    value={paramValues[key]}
-                    files={paramFiles[key] || []}
-                    uploadRuleMeta={uploadRuleMetas.get(Number(param.upload_rule_id || 0))}
-                    disabled={running}
-                    uploadBizKey={uploadBizKey}
-                    uploadBizName={uploadBizName}
-                    allowResourceLibrary={allowResourceLibrary}
-                    fileLibraryOnly={Boolean(renderParamFileLibrary)}
-                    fileLibraryLabel={renderParamFileLibrary ? '添加' : undefined}
-                    renderFileLibrary={renderParamFileLibrary}
-                    onUploadedFiles={onUploadedFiles}
-                    onChange={(nextValue) => setParamValue(param, nextValue)}
-                    onFilesChange={(nextFiles) => setParamFileValue(param, nextFiles)}
-                  />
-                )
-              })}
             </div>
           ) : null}
 
@@ -1292,7 +1293,9 @@ function isSupportedReplayParamValue(param: PowerParam, value: unknown) {
   const selected = valueText(value)
   return (
     selected.length > 0 &&
-    options.some((option) => isSelectedOptionValue(option, [selected]))
+    options.some((option) =>
+      isSelectedOptionValue(option, [selected], options)
+    )
   )
 }
 

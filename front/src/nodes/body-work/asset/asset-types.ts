@@ -79,19 +79,11 @@ export type AssetCateOption = AssetFilterOption & {
   cardinality: string;
 };
 
-export type AssetNodeOption = {
-  projectID: number;
-  assetCateID: number;
-  nodeKey: string;
-  name: string;
-};
-
 export type AssetFilterOptions = {
   projects: AssetFilterOption[];
   tools: AssetFilterOption[];
   dialogues: AssetFilterOption[];
   assetCates: AssetCateOption[];
-  nodes: AssetNodeOption[];
 };
 
 export type AssetCatalogOptions = Pick<

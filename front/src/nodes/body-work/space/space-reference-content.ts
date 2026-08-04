@@ -217,15 +217,13 @@ export function reconcileConnectedCanvasReferences(
     (target) => !retainedOriginIDs.has(String(target.originID)),
   );
   if (missingTargets.length > 0) {
-    const prefix: CanvasReferenceContent["parts"] = [];
-    missingTargets.forEach((target, index) => {
-      appendReferenceTarget(prefix, target);
-      appendReferenceTrailingSpace(
-        prefix,
-        index === missingTargets.length - 1 ? parts[0] : undefined,
-      );
-    });
-    parts.unshift(...prefix);
+    const previous = parts[parts.length - 1];
+    if (previous && (previous.type !== "text" || !/\s$/.test(previous.text))) {
+      appendReferenceText(parts, " ");
+    }
+    for (const target of missingTargets) {
+      appendReferenceTargetWithTrailingSpace(parts, target);
+    }
   }
 
   const nextContent: CanvasReferenceContent = { version: 1, parts };

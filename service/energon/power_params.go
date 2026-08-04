@@ -41,8 +41,10 @@ func ApplyPowerParamDefaults(values map[string]any, params []PowerParam) map[str
 
 func PreparePowerParamInput(input map[string]any, params []PowerParam) (map[string]any, []string) {
 	values := ApplyPowerParamDefaults(NormalizePowerParamInput(input, params), params)
+	activeParams := botinput.FilterActivePowerParams(params, values)
+	values = botinput.FilterInactivePowerParamValues(params, values)
 	missing := make([]string, 0)
-	for _, param := range params {
+	for _, param := range activeParams {
 		if !param.Required || !botinput.IsMissing(values[param.Key]) {
 			continue
 		}

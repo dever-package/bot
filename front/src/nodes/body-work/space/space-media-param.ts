@@ -14,6 +14,20 @@ export function isUploadPowerParam(param: PowerParam) {
   return param.type === "file" || param.type === "files";
 }
 
+export function isPromptPowerParam(param: PowerParam) {
+  return param.type === "prompt";
+}
+
+export function isToolbarPowerParam(param: PowerParam) {
+  return ![
+    "hidden",
+    "description",
+    "prompt",
+    "file",
+    "files",
+  ].includes(param.type);
+}
+
 export function acceptedAssetKinds(param: PowerParam): LibraryAssetKind[] {
   const configured = Array.from(
     new Set(

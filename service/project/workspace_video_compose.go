@@ -134,6 +134,7 @@ func resolveCanvasVideoComposition(
 		return nil, fmt.Errorf("视频合成清单版本无效")
 	}
 	rawClips := sliceValue(raw["clips"])
+	rawAudioTracks := sliceValue(firstPresent(raw["audio_tracks"], raw["audioTracks"]))
 	if len(rawClips) == 0 {
 		return nil, fmt.Errorf("视频合成至少需要一个镜头")
 	}
@@ -149,7 +150,7 @@ func resolveCanvasVideoComposition(
 	resolvedReferences, err := assetservice.NewService().RequireCurrentReferences(
 		ctx,
 		teamID,
-		canvasVideoCompositionAssetIDs(rawClips),
+		canvasVideoCompositionAssetIDs(rawClips, rawAudioTracks),
 	)
 	if err != nil {
 		return nil, err
@@ -164,17 +165,22 @@ func resolveCanvasVideoComposition(
 		}
 		clips = append(clips, clip)
 	}
+	audioTracks, err := resolveCanvasVideoGlobalAudioTracks(resolver, rawAudioTracks)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
-		"version": canvasVideoCompositionVersion,
-		"clips":   clips,
+		"version":      canvasVideoCompositionVersion,
+		"clips":        clips,
+		"audio_tracks": audioTracks,
 		"settings": resolveCanvasVideoCompositionSettings(
 			mapValue(raw["settings"]),
 		),
 	}, nil
 }
 
-func canvasVideoCompositionAssetIDs(rawClips []any) []uint64 {
-	assetIDs := make([]uint64, 0, len(rawClips)*2)
+func canvasVideoCompositionAssetIDs(rawClips []any, rawAudioTracks []any) []uint64 {
+	assetIDs := make([]uint64, 0, len(rawClips)*2+len(rawAudioTracks))
 	appendReference := func(raw map[string]any) {
 		if assetID := uint64Value(firstPresent(raw["asset_id"], raw["assetId"])); assetID > 0 {
 			assetIDs = append(assetIDs, assetID)
@@ -187,6 +193,9 @@ func canvasVideoCompositionAssetIDs(rawClips []any) []uint64 {
 		for _, track := range sliceValue(firstPresent(clip["speech_tracks"], clip["speechTracks"])) {
 			appendReference(mapValue(mapValue(track)["audio"]))
 		}
+	}
+	for _, track := range rawAudioTracks {
+		appendReference(mapValue(mapValue(track)["audio"]))
 	}
 	return assetIDs
 }
@@ -235,9 +244,9 @@ func resolveCanvasVideoClip(
 		"transition_to_next": transition,
 	}
 	if originalRaw := mapValue(firstPresent(raw["original_audio_source"], raw["originalAudioSource"])); len(originalRaw) > 0 {
-		originalAudio, originalErr := resolver.resolveMediaURL(
+		originalAudio, originalErr := resolver.resolveMediaURLFromTypes(
 			originalRaw,
-			botprotocol.MediaTypeVideo,
+			[]string{botprotocol.MediaTypeAudio, botprotocol.MediaTypeVideo},
 			label+"原声来源",
 		)
 		if originalErr != nil {
@@ -278,7 +287,7 @@ func resolveCanvasVideoSpeechTracks(
 		raw := mapValue(value)
 		trackID := textValue(raw["id"])
 		if trackID == "" || usedIDs[trackID] {
-			return nil, fmt.Errorf("%s第 %d 条语音轨标识无效", clipLabel, index+1)
+			return nil, fmt.Errorf("%s第 %d 条语音标识无效", clipLabel, index+1)
 		}
 		usedIDs[trackID] = true
 		audioURL, err := resolver.resolveMediaURL(
@@ -293,6 +302,14 @@ func resolveCanvasVideoSpeechTracks(
 		if startTime < 0 {
 			return nil, fmt.Errorf("%s第 %d 条语音开始时间不能小于 0", clipLabel, index+1)
 		}
+		sourceStart := canvasFloat64Value(firstPresent(raw["source_start"], raw["sourceStart"]))
+		if sourceStart < 0 {
+			return nil, fmt.Errorf("%s第 %d 条语音源起点不能小于 0", clipLabel, index+1)
+		}
+		fit, err := resolveCanvasVideoAudioFit(raw["fit"], "trim")
+		if err != nil {
+			return nil, fmt.Errorf("%s第 %d 条语音%s", clipLabel, index+1, err.Error())
+		}
 		kind := strings.ToLower(textValue(raw["kind"]))
 		if kind != "dialogue" && kind != "narration" {
 			return nil, fmt.Errorf("%s第 %d 条语音类型无效", clipLabel, index+1)
@@ -301,6 +318,8 @@ func resolveCanvasVideoSpeechTracks(
 			"id":           trackID,
 			"audio":        audioURL,
 			"start_time":   startTime,
+			"source_start": sourceStart,
+			"fit":          fit,
 			"kind":         kind,
 			"character_id": textValue(firstPresent(raw["character_id"], raw["characterId"])),
 			"text":         textValue(raw["text"]),
@@ -308,6 +327,75 @@ func resolveCanvasVideoSpeechTracks(
 		})
 	}
 	return tracks, nil
+}
+
+func resolveCanvasVideoGlobalAudioTracks(
+	resolver canvasCompositionReferenceResolver,
+	rawTracks []any,
+) ([]any, error) {
+	tracks := make([]any, 0, len(rawTracks))
+	usedIDs := map[string]bool{}
+	for index, value := range rawTracks {
+		raw := mapValue(value)
+		label := fmt.Sprintf("第 %d 条全片声音", index+1)
+		trackID := textValue(raw["id"])
+		if trackID == "" || usedIDs[trackID] {
+			return nil, fmt.Errorf("%s标识无效", label)
+		}
+		usedIDs[trackID] = true
+		audioURL, err := resolver.resolveMediaURL(
+			mapValue(raw["audio"]),
+			botprotocol.MediaTypeAudio,
+			label,
+		)
+		if err != nil {
+			return nil, err
+		}
+		startTime := canvasFloat64Value(firstPresent(raw["start_time"], raw["startTime"]))
+		sourceStart := canvasFloat64Value(firstPresent(raw["source_start"], raw["sourceStart"]))
+		if startTime < 0 || sourceStart < 0 {
+			return nil, fmt.Errorf("%s起点不能小于 0", label)
+		}
+		kind := strings.ToLower(textValue(raw["kind"]))
+		if kind != "music" && kind != "narration" {
+			return nil, fmt.Errorf("%s类型无效", label)
+		}
+		fallbackFit := "strict"
+		if kind == "music" {
+			fallbackFit = "trim"
+		}
+		fit, err := resolveCanvasVideoAudioFit(raw["fit"], fallbackFit)
+		if err != nil {
+			return nil, fmt.Errorf("%s%s", label, err.Error())
+		}
+		fadeOut := canvasFloat64Value(firstPresent(raw["fade_out"], raw["fadeOut"]))
+		if fadeOut < 0 || fadeOut > 10 {
+			return nil, fmt.Errorf("%s淡出时长必须在 0 到 10 秒之间", label)
+		}
+		tracks = append(tracks, map[string]any{
+			"id":           trackID,
+			"audio":        audioURL,
+			"start_time":   startTime,
+			"source_start": sourceStart,
+			"kind":         kind,
+			"volume":       boundedCanvasVolume(raw["volume"], 1),
+			"fit":          fit,
+			"loop":         kind == "music" && boolValue(raw["loop"]),
+			"fade_out":     fadeOut,
+		})
+	}
+	return tracks, nil
+}
+
+func resolveCanvasVideoAudioFit(value any, fallback string) (string, error) {
+	fit := strings.ToLower(textValue(value))
+	if fit == "" {
+		return fallback, nil
+	}
+	if fit != "trim" && fit != "strict" {
+		return "", fmt.Errorf("超长处理方式无效")
+	}
+	return fit, nil
 }
 
 func resolveCanvasVideoSubtitleTracks(
@@ -381,6 +469,14 @@ func (resolver canvasCompositionReferenceResolver) resolveMediaURL(
 	mediaType string,
 	label string,
 ) (string, error) {
+	return resolver.resolveMediaURLFromTypes(raw, []string{mediaType}, label)
+}
+
+func (resolver canvasCompositionReferenceResolver) resolveMediaURLFromTypes(
+	raw map[string]any,
+	mediaTypes []string,
+	label string,
+) (string, error) {
 	reference := canvasPromptReference{
 		AssetID:   uint64Value(firstPresent(raw["asset_id"], raw["assetId"])),
 		VersionID: uint64Value(firstPresent(raw["version_id"], raw["versionId"])),
@@ -393,12 +489,25 @@ func (resolver canvasCompositionReferenceResolver) resolveMediaURL(
 	if !ok || resolved.Content == nil {
 		return "", fmt.Errorf("%s不可用", label)
 	}
-	media := botprotocol.ExtractMediaOutput(resolved.Content, mediaType)
-	values := botprotocol.NormalizeMediaList(media[mediaType+"s"], mediaType)
-	if len(values) == 0 {
-		return "", fmt.Errorf("%s不是可用的%s素材", label, botprotocol.MediaOutputLabel(mediaType))
+	for _, mediaType := range mediaTypes {
+		media := botprotocol.ExtractMediaOutput(resolved.Content, mediaType)
+		values := botprotocol.NormalizeMediaList(media[mediaType+"s"], mediaType)
+		if len(values) > 0 {
+			return values[0], nil
+		}
 	}
-	return values[0], nil
+	return "", fmt.Errorf("%s不是可用的%s素材", label, canvasMediaTypeLabels(mediaTypes))
+}
+
+func canvasMediaTypeLabels(mediaTypes []string) string {
+	labels := make([]string, 0, len(mediaTypes))
+	for _, mediaType := range mediaTypes {
+		label := botprotocol.MediaOutputLabel(mediaType)
+		if label != "" {
+			labels = append(labels, label)
+		}
+	}
+	return strings.Join(labels, "或")
 }
 
 func boundedCanvasVolume(value any, fallback float64) float64 {

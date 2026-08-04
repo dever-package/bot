@@ -1,10 +1,10 @@
 import { joinSiteApi, request } from "@dever/front-plugin";
 import {
-  numberValue,
-  responseData,
-  textValue,
-  toRows,
-} from "./workbench-api";
+  asResponseRows as toRows,
+  responsePositiveNumber as numberValue,
+  responseText as textValue,
+  successfulResponseData as responseData,
+} from "../shared/api-response";
 
 export type AccountPointConfig = {
   id: number;

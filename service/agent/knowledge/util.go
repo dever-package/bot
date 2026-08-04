@@ -465,28 +465,6 @@ func candidateKnowledgeDirsByDocIDs(ctx context.Context, baseID uint64, docIDs [
 	return candidateKnowledgeDirsByIDs(ctx, baseID, uniqueUint64s(dirIDs, 0))
 }
 
-func knowledgeDocTitlesByIDs(ctx context.Context, baseID uint64, docIDs []uint64) []string {
-	if baseID == 0 || len(docIDs) == 0 {
-		return nil
-	}
-	rows := agentmodel.NewKnowledgeDocModel().Select(ctx, map[string]any{
-		"id":                docIDs,
-		"knowledge_base_id": baseID,
-		"status":            1,
-	}, map[string]any{
-		"field":    "main.id, main.title",
-		"page":     1,
-		"pageSize": 30,
-	})
-	titles := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if row != nil && strings.TrimSpace(row.Title) != "" {
-			titles = append(titles, strings.TrimSpace(row.Title))
-		}
-	}
-	return titles
-}
-
 func expandCandidateDirs(ctx context.Context, baseID uint64, roots []candidateDir, depth int) []candidateDir {
 	if len(roots) == 0 || depth <= 0 {
 		return roots

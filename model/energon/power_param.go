@@ -35,6 +35,7 @@ var (
 		{"id": 5, "power_id": defaultImagePowerID, "param_id": paramResolutionID, "show": PowerParamShowAlways, "status": 1, "sort": ParamSortResolution},
 		{"id": 6, "power_id": defaultImagePowerID, "param_id": paramAspectRatioID, "show": PowerParamShowBySource, "status": 1, "sort": ParamSortAspectRatio},
 		{"id": 7, "power_id": defaultVideoPowerID, "param_id": ParamPromptID, "show": PowerParamShowAlways, "status": 1, "sort": ParamSortPrompt},
+		{"id": 39, "power_id": defaultVideoPowerID, "param_id": ParamReferenceModeID, "show": PowerParamShowBySource, "status": 1, "sort": ParamSortReferenceMode},
 		{"id": 8, "power_id": defaultVideoPowerID, "param_id": ParamFirstFrameID, "show": PowerParamShowBySource, "status": 2, "sort": ParamSortFirstFrame},
 		{"id": 33, "power_id": defaultVideoPowerID, "param_id": ParamLastFrameID, "show": PowerParamShowBySource, "status": 2, "sort": ParamSortLastFrame},
 		{"id": 32, "power_id": defaultVideoPowerID, "param_id": ParamImagesID, "show": PowerParamShowBySource, "status": 2, "sort": ParamSortImages},
@@ -58,6 +59,11 @@ var (
 		{"id": 26, "power_id": defaultSpeechPowerID, "param_id": paramVoiceID, "show": PowerParamShowAlways, "status": 1, "sort": ParamSortVoice},
 		{"id": 29, "power_id": defaultCopywritingPowerID, "param_id": ParamPromptID, "show": PowerParamShowAlways, "status": 1, "sort": ParamSortPrompt},
 		{"id": 30, "power_id": defaultCopywritingPowerID, "param_id": ParamImagesID, "show": PowerParamShowAlways, "status": 2, "sort": ParamSortImages},
+		{"id": 34, "power_id": defaultStoryboardGridPowerID, "param_id": ParamPromptID, "show": PowerParamShowAlways, "status": 1, "sort": ParamSortPrompt},
+		{"id": 35, "power_id": defaultStoryboardGridPowerID, "param_id": ParamImageID, "show": PowerParamShowBySource, "status": 2, "sort": ParamSortImage},
+		{"id": 36, "power_id": defaultStoryboardGridPowerID, "param_id": ParamImagesID, "show": PowerParamShowBySource, "status": 2, "sort": ParamSortImages},
+		{"id": 37, "power_id": defaultStoryboardGridPowerID, "param_id": paramResolutionID, "show": PowerParamShowAlways, "status": 1, "sort": ParamSortResolution},
+		{"id": 38, "power_id": defaultStoryboardGridPowerID, "param_id": paramAspectRatioID, "show": PowerParamShowBySource, "status": 1, "sort": ParamSortAspectRatio},
 	}
 
 	powerParamShowOptions = []map[string]any{

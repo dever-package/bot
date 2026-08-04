@@ -56,14 +56,6 @@ func (s Service) writeRunEvent(ctx context.Context, run teammodel.Run, event str
 	_ = stream.Write(ctx, s.streams, run.RequestID, feature, event, fields)
 }
 
-func (s Service) writeRunEventByID(ctx context.Context, runID uint64, event string, fields map[string]any) {
-	run := s.repo.FindRun(ctx, runID)
-	if run == nil {
-		return
-	}
-	s.writeRunEvent(ctx, *run, event, fields)
-}
-
 func (s Service) writeFlowEvent(ctx context.Context, run teammodel.Run, flowRun teammodel.FlowRun, flow teammodel.Flow, event string, fields map[string]any) {
 	if fields == nil {
 		fields = map[string]any{}

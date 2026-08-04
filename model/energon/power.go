@@ -29,15 +29,16 @@ type PowerIndex struct {
 }
 
 const (
-	DefaultLLMPowerID          uint64 = 1
-	defaultImagePowerID        uint64 = 2
-	defaultVideoPowerID        uint64 = 3
-	defaultClothingPowerID     uint64 = 4
-	defaultMusicPowerID        uint64 = 5
-	defaultStoryboardPowerID   uint64 = 7
-	defaultVideoComposePowerID uint64 = 12
-	defaultSpeechPowerID       uint64 = 13
-	defaultCopywritingPowerID  uint64 = 14
+	DefaultLLMPowerID            uint64 = 1
+	defaultImagePowerID          uint64 = 2
+	defaultVideoPowerID          uint64 = 3
+	defaultClothingPowerID       uint64 = 4
+	defaultMusicPowerID          uint64 = 5
+	defaultStoryboardPowerID     uint64 = 7
+	defaultVideoComposePowerID   uint64 = 12
+	defaultSpeechPowerID         uint64 = 13
+	defaultCopywritingPowerID    uint64 = 14
+	defaultStoryboardGridPowerID uint64 = 15
 
 	defaultCopywritingPrompt = `{"type":"doc","content":[{"type":"paragraph","attrs":{"textAlign":null,"lineHeight":null,"color":null,"backgroundColor":null,"fontFamily":null,"fontSize":null,"textIndent":null,"marginTop":null,"marginRight":null,"marginBottom":null,"marginLeft":null,"paddingTop":null,"paddingRight":null,"paddingBottom":null,"paddingLeft":null,"border":null,"borderTop":null,"borderRight":null,"borderBottom":null,"borderLeft":null,"borderRadius":null,"width":null,"maxWidth":null},"content":[{"type":"text","text":"你是“文案”能力的设定提示词。你的职责是根据用户需求生成清晰、准确、可直接使用的文案内容。输出要求：1）优先满足用户目标与场景；2）语言自然、简洁、有重点；3）根据需要调整语气、长度与风格，但避免空话套话；4）如信息不足，先输出最合理的可用版本，不要编造具体事实；5）确保内容符合常见平台表达规范，不包含违规、攻击、歧视、虚假或敏感内容；6）如用户未特别说明，默认输出为中文；7）只输出最终文案结果，不要输出分析过程、解释说明或多余前缀。"}]}]}`
 )
@@ -149,6 +150,19 @@ var (
 			"output_type": OutputTypeGeneral,
 			"kind":        "text",
 			"prompt":      defaultCopywritingPrompt,
+			"source_rule": 2,
+			"status":      1,
+		},
+		{
+			"id":          defaultStoryboardGridPowerID,
+			"cate_id":     1,
+			"key":         "storyboard-grid",
+			"name":        "宫格图片",
+			"icon":        "image",
+			"output_type": OutputTypeStoryboardGrid,
+			"kind":        "image",
+			"description": "描述希望生成的一组连续画面、故事分镜或广告画面。",
+			"prompt":      "",
 			"source_rule": 2,
 			"status":      1,
 		},

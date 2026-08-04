@@ -731,8 +731,7 @@
 }
 
 .hb-laper-app [data-stream-power-appearance="body"] .stream-power-source,
-.hb-laper-app [data-stream-power-appearance="body"] .stream-power-param-list,
-.hb-laper-app [data-stream-power-appearance="body"] .stream-power-toolbar-params {
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-param-list {
   width: 100%;
 }
 
@@ -755,19 +754,20 @@
   flex: 1 1 auto;
 }
 
-.hb-laper-app [data-stream-power-appearance="body"] .stream-power-toolbar-params {
-  border-top: 0;
-  padding-top: 0;
-}
-
 .hb-laper-app [data-stream-power-appearance="body"] .stream-power-param-list > * {
   margin-block: 0;
 }
 
 .hb-laper-app [data-stream-power-appearance="body"] .stream-power-param-list {
   display: flex;
-  flex-direction: column;
+  flex-flow: row wrap;
+  align-items: center;
   gap: 14px;
+}
+
+.hb-laper-app [data-stream-power-appearance="body"] .stream-power-main-param {
+  flex: 0 0 100%;
+  min-width: 0;
 }
 
 .hb-laper-app [data-stream-power-appearance="body"] .stream-power-param-field,

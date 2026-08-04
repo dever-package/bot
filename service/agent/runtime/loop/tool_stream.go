@@ -160,7 +160,7 @@ func toolRequestedCount(call botprotocol.ToolCall, definition runtimeprovider.De
 	}
 	count, parseErr := strconv.ParseFloat(strings.TrimSpace(botprotocol.AsText(arguments[key])), 64)
 	if parseErr == nil && count > 1 {
-		return min(8, int(count))
+		return min(runtimeprovider.MaxMediaExecutionCount, int(count))
 	}
 	return 1
 }

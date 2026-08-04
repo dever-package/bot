@@ -7,8 +7,7 @@ import (
 )
 
 const (
-	TeamWorkspaceStatusEnabled  int16 = 1
-	TeamWorkspaceStatusDisabled int16 = 2
+	TeamWorkspaceStatusEnabled int16 = 1
 )
 
 type TeamWorkspace struct {

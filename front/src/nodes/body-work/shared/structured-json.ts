@@ -13,11 +13,36 @@ export function parseMaybeJSON(value: unknown): any {
   }
 }
 
+export function isPlainRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+export function asPlainRecord(value: unknown): Record<string, any> {
+  return isPlainRecord(value) ? value : {};
+}
+
+export function trimmedString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function finiteNumberOrZero(value: unknown) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
+export function finiteNumberOrUndefined(value: unknown) {
+  if (value == null || value === "") {
+    return undefined;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}
+
 export function parseStructuredJSONText(value: string): unknown {
   const text = String(value || "").trim();
   const repaired = repairJSONControlChars(text);
   const unescaped = unescapeEscapedJSONQuotes(repaired);
-  for (const source of uniqueStrings([text, repaired, unescaped])) {
+  for (const source of uniqueNonEmptyStrings([text, repaired, unescaped])) {
     const parsed = parseMaybeJSON(source);
     if (parsed !== source) {
       return parsed;
@@ -89,7 +114,7 @@ function structuredJSONTextCandidates(value: string) {
     result.push(String(match[1] || "").trim());
   }
   result.push(...extractJSONContainers(value));
-  return uniqueStrings(result);
+  return uniqueNonEmptyStrings(result);
 }
 
 function extractJSONContainers(value: string) {
@@ -147,7 +172,7 @@ function balancedJSONContainer(value: string, start: number) {
   return "";
 }
 
-function looksLikeJSONContainer(value: string) {
+export function looksLikeJSONContainer(value: string) {
   return (
     (value.startsWith("{") && value.endsWith("}")) ||
     (value.startsWith("[") && value.endsWith("]"))
@@ -190,7 +215,7 @@ function unescapeEscapedJSONQuotes(value: string) {
   return text.replace(/\\"/g, '"');
 }
 
-function uniqueStrings(values: string[]) {
+export function uniqueNonEmptyStrings(values: string[]) {
   const seen = new Set<string>();
   return values.filter((value) => {
     const text = String(value || "").trim();
@@ -200,4 +225,19 @@ function uniqueStrings(values: string[]) {
     seen.add(text);
     return true;
   });
+}
+
+export function firstDefinedValue<T>(...values: T[]) {
+  return values.find(
+    (value): value is Exclude<T, null | undefined> =>
+      value !== undefined && value !== null,
+  );
+}
+
+export function safeJSONString(value: unknown) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
 }

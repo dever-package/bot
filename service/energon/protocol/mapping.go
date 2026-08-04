@@ -30,19 +30,6 @@ func (p MappedParam) FirstInputKey() string {
 	return keys[0]
 }
 
-func (p MappedParam) HasInputKey(target string) bool {
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return false
-	}
-	for _, key := range p.InputKeys() {
-		if key == target {
-			return true
-		}
-	}
-	return false
-}
-
 func (p MappedParam) IsPrompt() bool {
 	return strings.EqualFold(strings.TrimSpace(p.ParamType), "prompt")
 }
@@ -101,7 +88,7 @@ func (m MappedInput) NativeBody() map[string]any {
 	}
 	for key, value := range m.Original {
 		key = strings.TrimSpace(key)
-		if key == "" || isNativeInputKeyExcluded(key) || mappedKeys[key] || mappedNativeKeys[key] || isEmptyNativeValue(value) {
+		if key == "" || isNativeInputKeyExcluded(key) || mappedKeys[key] || mappedNativeKeys[key] || isEmptyProtocolValue(value) {
 			continue
 		}
 		assignNativeValue(body, key, value, false)
@@ -418,21 +405,6 @@ func newNativeContainer(next nativePathSegment) any {
 		return []any{}
 	}
 	return map[string]any{}
-}
-
-func isEmptyNativeValue(value any) bool {
-	switch current := value.(type) {
-	case nil:
-		return true
-	case string:
-		return strings.TrimSpace(current) == ""
-	case []any:
-		return len(current) == 0
-	case []string:
-		return len(current) == 0
-	default:
-		return false
-	}
 }
 
 func splitMappedInputKeys(value string) []string {

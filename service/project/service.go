@@ -43,6 +43,7 @@ type SaveAssetRequest struct {
 	Kind         string
 	Role         string
 	Content      any
+	Sort         int
 }
 
 type UpdateAssetVersionRequest struct {
@@ -129,13 +130,7 @@ func (s Service) Detail(ctx context.Context, projectID uint64) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	detail, err := s.detailPayload(ctx, project)
-	if err != nil {
-		return nil, err
-	}
-	assets, _ := s.asset.ListProject(ctx, project.ID, 0, "")
-	detail["assets"] = assets
-	return detail, nil
+	return s.detailPayload(ctx, project)
 }
 
 func (s Service) detailPayload(ctx context.Context, project *projectmodel.Project) (map[string]any, error) {
@@ -159,11 +154,18 @@ func (s Service) TeamList(ctx context.Context) (map[string]any, error) {
 	return s.team.TeamList(ctx)
 }
 
-func (s Service) Assets(ctx context.Context, projectID uint64, flowID uint64, kind string) (map[string]any, error) {
+func (s Service) Assets(
+	ctx context.Context,
+	projectID uint64,
+	flowID uint64,
+	kind string,
+	page int,
+	pageSize int,
+) (map[string]any, error) {
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	return s.asset.ListProject(ctx, projectID, flowID, kind)
+	return s.asset.ListProject(ctx, projectID, flowID, kind, page, pageSize)
 }
 
 func (s Service) AssetDetail(ctx context.Context, projectID uint64, assetID uint64, currentOnly bool) (map[string]any, error) {
@@ -212,6 +214,16 @@ func (s Service) SaveAsset(ctx context.Context, projectID uint64, req SaveAssetR
 		req.Role,
 		fmt.Sprintf("%d", req.AssetCateID),
 	}, func() (map[string]any, error) {
+		if result, handled, err := s.saveImportedStoryboardGrid(
+			ctx,
+			project.ID,
+			project.BodyID,
+			project.TeamID,
+			project.ReleaseID,
+			req,
+		); handled {
+			return result, err
+		}
 		asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
 			ProjectID:    project.ID,
 			BodyID:       project.BodyID,
@@ -229,6 +241,7 @@ func (s Service) SaveAsset(ctx context.Context, projectID uint64, req SaveAssetR
 			Kind:         req.Kind,
 			Role:         req.Role,
 			Content:      req.Content,
+			Sort:         req.Sort,
 		})
 		if err != nil {
 			return nil, err

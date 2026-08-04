@@ -18,7 +18,6 @@ const (
 	maxRelationDocs      = 50
 	cooccurrenceMinCount = 2
 	cooccurrenceMinRate  = 0.3
-	maxCooccurrenceNodes = 30
 	maxCooccurrenceLogs  = 200
 )
 

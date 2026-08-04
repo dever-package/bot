@@ -87,7 +87,3 @@ func NewSkillInstallModel() *orm.Model[SkillInstall] {
 		},
 	})
 }
-
-func SkillInstallStatusOptions() []map[string]any {
-	return cloneOptionRows(skillInstallStatusOptions)
-}

@@ -7,18 +7,20 @@ import (
 )
 
 type ServiceParam struct {
-	ID              uint64    `dorm:"primaryKey;autoIncrement;comment:服务参数ID"`
-	ServiceID       uint64    `dorm:"type:bigint;not null;default:0;comment:服务"`
-	ParamID         uint64    `dorm:"type:bigint;not null;default:0;comment:参数"`
-	ParamRule       int16     `dorm:"type:smallint;not null;default:1;comment:映射规则"`
-	Key             string    `dorm:"type:varchar(128);not null;comment:字段标识"`
-	Name            string    `dorm:"type:varchar(128);not null;comment:字段名"`
-	Mapping         string    `dorm:"type:text;not null;comment:映射配置"`
-	FixedValueType  string    `dorm:"type:varchar(32);not null;default:string;comment:固定值类型"`
-	FileValueFormat string    `dorm:"type:varchar(16);not null;default:url;comment:文件值格式"`
-	Status          int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	Sort            int       `dorm:"type:int;not null;default:100;comment:排序"`
-	CreatedAt       time.Time `dorm:"comment:创建时间"`
+	ID                uint64    `dorm:"primaryKey;autoIncrement;comment:服务参数ID"`
+	ServiceID         uint64    `dorm:"type:bigint;not null;default:0;comment:服务"`
+	ParamID           uint64    `dorm:"type:bigint;not null;default:0;comment:参数或固定值所属参数"`
+	ActiveWhenParamID uint64    `dorm:"type:bigint;not null;default:0;comment:生效参数"`
+	ActiveWhenValue   string    `dorm:"type:varchar(255);not null;default:'';comment:生效参数值"`
+	ParamRule         int16     `dorm:"type:smallint;not null;default:1;comment:映射规则"`
+	Key               string    `dorm:"type:varchar(128);not null;comment:字段标识"`
+	Name              string    `dorm:"type:varchar(128);not null;comment:字段名"`
+	Mapping           string    `dorm:"type:text;not null;comment:映射配置"`
+	FixedValueType    string    `dorm:"type:varchar(32);not null;default:string;comment:固定值类型"`
+	FileValueFormat   string    `dorm:"type:varchar(16);not null;default:url;comment:文件值格式"`
+	Status            int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	Sort              int       `dorm:"type:int;not null;default:100;comment:排序"`
+	CreatedAt         time.Time `dorm:"comment:创建时间"`
 }
 
 type ServiceParamIndex struct {
@@ -27,16 +29,18 @@ type ServiceParamIndex struct {
 }
 
 type serviceParamSeedConfig struct {
-	ID              uint64
-	ServiceID       uint64
-	ParamID         uint64
-	ParamRule       int16
-	Key             string
-	Name            string
-	Mapping         string
-	FixedValueType  string
-	FileValueFormat string
-	Sort            int
+	ID                uint64
+	ServiceID         uint64
+	ParamID           uint64
+	ActiveWhenParamID uint64
+	ActiveWhenValue   string
+	ParamRule         int16
+	Key               string
+	Name              string
+	Mapping           string
+	FixedValueType    string
+	FileValueFormat   string
+	Sort              int
 }
 
 const (
@@ -56,7 +60,6 @@ const (
 
 	fixedValueTypeString  = ServiceParamFixedValueTypeString
 	fixedValueTypeBoolean = ServiceParamFixedValueTypeBoolean
-	fixedValueTypeJSON    = ServiceParamFixedValueTypeJSON
 
 	ServiceParamFileValueFormatURL     = "url"
 	ServiceParamFileValueFormatBase64  = "base64"
@@ -124,9 +127,9 @@ var (
 		{ID: 10, ServiceID: serviceDoubaoImageID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: DoubaoSeedreamSizeMapping},
 		{ID: 11, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[0].type", Mapping: "text"},
 		{ID: 12, ServiceID: serviceDoubaoVideoID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "content[0].text"},
-		{ID: 13, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[1].type", Mapping: "image_url", Sort: 20},
-		{ID: 14, ServiceID: serviceDoubaoVideoID, ParamID: ParamFirstFrameID, ParamRule: serviceParamRuleAttachment, Key: "content[1].image_url.url", Name: "首帧", Mapping: "[1]", Sort: ParamSortFirstFrame},
-		{ID: 15, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[1].role", Mapping: "first_frame", Sort: 23},
+		{ID: 13, ServiceID: serviceDoubaoVideoID, ParamID: ParamFirstFrameID, ParamRule: serviceParamRuleFixed, Key: "content[1].type", Mapping: "image_url", Sort: 20},
+		withReferenceModeCondition(serviceParamSeedConfig{ID: 14, ServiceID: serviceDoubaoVideoID, ParamID: ParamFirstFrameID, ParamRule: serviceParamRuleAttachment, Key: "content[1].image_url.url", Name: "首帧", Mapping: "[1]", Sort: ParamSortFirstFrame}, ReferenceModeFrames),
+		{ID: 15, ServiceID: serviceDoubaoVideoID, ParamID: ParamFirstFrameID, ParamRule: serviceParamRuleFixed, Key: "content[1].role", Mapping: "first_frame", Sort: 23},
 		{ID: 19, ServiceID: serviceDoubaoImageID, ParamRule: serviceParamRuleFixed, Key: "watermark", Mapping: "false", FixedValueType: fixedValueTypeBoolean},
 		{ID: 21, ServiceID: serviceDoubaoVideoID, ParamID: paramResolutionID, ParamRule: serviceParamRuleOption, Key: "resolution", Mapping: doubaoVideoResolutionMapping},
 		{ID: 22, ServiceID: serviceDoubaoVideoID, ParamID: paramAspectRatioID, ParamRule: serviceParamRuleOption, Key: "aspectRatio", Mapping: doubaoVideoRatioMapping},
@@ -139,15 +142,15 @@ var (
 		{ID: 29, ServiceID: serviceDoubaoAudioID, ParamID: paramVoiceID, ParamRule: serviceParamRuleOption, Key: "voice", Mapping: doubaoVoiceMapping},
 		{ID: 30, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[0].type", Mapping: "text", Sort: 1},
 		{ID: 31, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "content[0].text", Name: "提示词", Sort: ParamSortPrompt},
-		{ID: 32, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[1-9].type", Mapping: "image_url", Sort: 10},
-		{ID: 33, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamImagesID, ParamRule: serviceParamRuleAttachment, Key: "content[1-9].image_url.url", Name: "参考图片", Mapping: "[1,2,3,4,5,6,7,8,9]", Sort: ParamSortImages},
-		{ID: 34, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[1-9].role", Mapping: "reference_image", Sort: 12},
-		{ID: 47, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[10].type", Mapping: "video_url", Sort: 60},
-		{ID: 48, ServiceID: serviceDoubaoVideoFastID, ParamID: paramVideoID, ParamRule: serviceParamRuleAttachment, Key: "content[10].video_url.url", Name: "参考视频", Mapping: "[1]", Sort: ParamSortVideo},
-		{ID: 49, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[10].role", Mapping: "reference_video", Sort: 62},
-		{ID: 50, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[11].type", Mapping: "audio_url", Sort: 70},
-		{ID: 51, ServiceID: serviceDoubaoVideoFastID, ParamID: paramAudioID, ParamRule: serviceParamRuleAttachment, Key: "content[11].audio_url.url", Name: "参考音频", Mapping: "[1]", Sort: ParamSortAudio},
-		{ID: 52, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[11].role", Mapping: "reference_audio", Sort: 72},
+		{ID: 32, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamImagesID, ParamRule: serviceParamRuleFixed, Key: "content[1-9].type", Mapping: "image_url", Sort: 10},
+		withReferenceModeCondition(serviceParamSeedConfig{ID: 33, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamImagesID, ParamRule: serviceParamRuleAttachment, Key: "content[1-9].image_url.url", Name: "参考图片", Mapping: "[1,2,3,4,5,6,7,8,9]", Sort: ParamSortImages}, ReferenceModeReferences),
+		{ID: 34, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamImagesID, ParamRule: serviceParamRuleFixed, Key: "content[1-9].role", Mapping: "reference_image", Sort: 12},
+		{ID: 47, ServiceID: serviceDoubaoVideoFastID, ParamID: paramVideoID, ParamRule: serviceParamRuleFixed, Key: "content[10].type", Mapping: "video_url", Sort: 60},
+		withReferenceModeCondition(serviceParamSeedConfig{ID: 48, ServiceID: serviceDoubaoVideoFastID, ParamID: paramVideoID, ParamRule: serviceParamRuleAttachment, Key: "content[10].video_url.url", Name: "参考视频", Mapping: "[1]", Sort: ParamSortVideo}, ReferenceModeReferences),
+		{ID: 49, ServiceID: serviceDoubaoVideoFastID, ParamID: paramVideoID, ParamRule: serviceParamRuleFixed, Key: "content[10].role", Mapping: "reference_video", Sort: 62},
+		{ID: 50, ServiceID: serviceDoubaoVideoFastID, ParamID: paramAudioID, ParamRule: serviceParamRuleFixed, Key: "content[11].type", Mapping: "audio_url", Sort: 70},
+		withReferenceModeCondition(serviceParamSeedConfig{ID: 51, ServiceID: serviceDoubaoVideoFastID, ParamID: paramAudioID, ParamRule: serviceParamRuleAttachment, Key: "content[11].audio_url.url", Name: "参考音频", Mapping: "[1]", Sort: ParamSortAudio}, ReferenceModeReferences),
+		{ID: 52, ServiceID: serviceDoubaoVideoFastID, ParamID: paramAudioID, ParamRule: serviceParamRuleFixed, Key: "content[11].role", Mapping: "reference_audio", Sort: 72},
 		{ID: 53, ServiceID: serviceDoubaoVideoFastID, ParamID: paramResolutionID, ParamRule: serviceParamRuleOption, Key: "resolution", Name: "分辨率", Mapping: doubaoVideoFastResolutionMapping, Sort: ParamSortResolution},
 		{ID: 54, ServiceID: serviceDoubaoVideoFastID, ParamID: paramAspectRatioID, ParamRule: serviceParamRuleOption, Key: "ratio", Name: "画面比例", Mapping: doubaoVideoFastRatioMapping, Sort: ParamSortAspectRatio},
 		{ID: 55, ServiceID: serviceDoubaoVideoFastID, ParamID: paramDurationID, ParamRule: serviceParamRuleDirect, Key: "duration", Name: "时长", Sort: ParamSortDuration},
@@ -159,12 +162,18 @@ var (
 		{ID: 61, ServiceID: serviceDoubaoImage5ID, ParamRule: serviceParamRuleFixed, Key: "sequential_image_generation", Mapping: "disabled", Sort: 4},
 		{ID: 62, ServiceID: serviceDoubaoImage5ID, ParamID: paramResolutionID, ParamRule: serviceParamRuleCombo, Key: "size", Mapping: DoubaoSeedreamSizeMapping},
 		{ID: 63, ServiceID: serviceDoubaoImage5ID, ParamRule: serviceParamRuleFixed, Key: "watermark", Mapping: "false", FixedValueType: fixedValueTypeBoolean},
-		{ID: 64, ServiceID: serviceRunningHubVideoID, ParamID: ParamFirstFrameID, ParamRule: serviceParamRuleAttachment, Key: "firstImageUrl", Name: "首帧", Mapping: "[1]", FileValueFormat: ServiceParamFileValueFormatDataURL, Sort: ParamSortFirstFrame},
+		withReferenceModeCondition(serviceParamSeedConfig{ID: 64, ServiceID: serviceRunningHubVideoID, ParamID: ParamFirstFrameID, ParamRule: serviceParamRuleAttachment, Key: "firstImageUrl", Name: "首帧", Mapping: "[1]", FileValueFormat: ServiceParamFileValueFormatDataURL, Sort: ParamSortFirstFrame}, ReferenceModeFrames),
 		{ID: 65, ServiceID: serviceRunningHubVideoID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "prompt"},
 		{ID: 66, ServiceID: serviceRunningHubVideoID, ParamRule: serviceParamRuleFixed, Key: "sound", Mapping: "true", FixedValueType: fixedValueTypeBoolean},
-		{ID: 67, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[2].type", Mapping: "image_url", Sort: 24},
-		{ID: 68, ServiceID: serviceDoubaoVideoID, ParamID: ParamLastFrameID, ParamRule: serviceParamRuleAttachment, Key: "content[2].image_url.url", Name: "尾帧", Mapping: "[1]", Sort: ParamSortLastFrame},
-		{ID: 69, ServiceID: serviceDoubaoVideoID, ParamRule: serviceParamRuleFixed, Key: "content[2].role", Mapping: "last_frame", Sort: 26},
+		{ID: 67, ServiceID: serviceDoubaoVideoID, ParamID: ParamLastFrameID, ParamRule: serviceParamRuleFixed, Key: "content[2].type", Mapping: "image_url", Sort: 24},
+		withReferenceModeCondition(serviceParamSeedConfig{ID: 68, ServiceID: serviceDoubaoVideoID, ParamID: ParamLastFrameID, ParamRule: serviceParamRuleAttachment, Key: "content[2].image_url.url", Name: "尾帧", Mapping: "[1]", Sort: ParamSortLastFrame}, ReferenceModeFrames),
+		{ID: 69, ServiceID: serviceDoubaoVideoID, ParamID: ParamLastFrameID, ParamRule: serviceParamRuleFixed, Key: "content[2].role", Mapping: "last_frame", Sort: 26},
+		{ID: 70, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamFirstFrameID, ParamRule: serviceParamRuleFixed, Key: "content[1].type", Mapping: "image_url", Sort: 20},
+		withReferenceModeCondition(serviceParamSeedConfig{ID: 71, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamFirstFrameID, ParamRule: serviceParamRuleAttachment, Key: "content[1].image_url.url", Name: "首帧", Mapping: "[1]", Sort: ParamSortFirstFrame}, ReferenceModeFrames),
+		{ID: 72, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamFirstFrameID, ParamRule: serviceParamRuleFixed, Key: "content[1].role", Mapping: "first_frame", Sort: 23},
+		{ID: 73, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamLastFrameID, ParamRule: serviceParamRuleFixed, Key: "content[2].type", Mapping: "image_url", Sort: 24},
+		withReferenceModeCondition(serviceParamSeedConfig{ID: 74, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamLastFrameID, ParamRule: serviceParamRuleAttachment, Key: "content[2].image_url.url", Name: "尾帧", Mapping: "[1]", Sort: ParamSortLastFrame}, ReferenceModeFrames),
+		{ID: 75, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamLastFrameID, ParamRule: serviceParamRuleFixed, Key: "content[2].role", Mapping: "last_frame", Sort: 26},
 	})
 
 	paramRuleOptions = []map[string]any{
@@ -199,7 +208,19 @@ var (
 		Option:     "bot.energon.NewParamModel",
 		OptionKeys: []string{"name", "key", "type"},
 	}
+
+	serviceParamActiveWhenParamRelation = orm.Relation{
+		Field:      "active_when_param_id",
+		Option:     "bot.energon.NewParamModel",
+		OptionKeys: []string{"name", "key", "type", "cate_id"},
+	}
 )
+
+func withReferenceModeCondition(config serviceParamSeedConfig, value string) serviceParamSeedConfig {
+	config.ActiveWhenParamID = ParamReferenceModeID
+	config.ActiveWhenValue = value
+	return config
+}
 
 func buildServiceParamSeeds(configs []serviceParamSeedConfig) []map[string]any {
 	seeds := make([]map[string]any, 0, len(configs))
@@ -217,17 +238,19 @@ func buildServiceParamSeeds(configs []serviceParamSeedConfig) []map[string]any {
 			sort = BuiltinParamSortByID(config.ParamID)
 		}
 		seeds = append(seeds, map[string]any{
-			"id":                config.ID,
-			"service_id":        config.ServiceID,
-			"param_id":          config.ParamID,
-			"param_rule":        config.ParamRule,
-			"key":               config.Key,
-			"name":              config.Name,
-			"mapping":           config.Mapping,
-			"fixed_value_type":  fixedValueType,
-			"file_value_format": fileValueFormat,
-			"status":            1,
-			"sort":              sort,
+			"id":                   config.ID,
+			"service_id":           config.ServiceID,
+			"param_id":             config.ParamID,
+			"active_when_param_id": config.ActiveWhenParamID,
+			"active_when_value":    config.ActiveWhenValue,
+			"param_rule":           config.ParamRule,
+			"key":                  config.Key,
+			"name":                 config.Name,
+			"mapping":              config.Mapping,
+			"fixed_value_type":     fixedValueType,
+			"file_value_format":    fileValueFormat,
+			"status":               1,
+			"sort":                 sort,
 		})
 	}
 	return seeds
@@ -248,6 +271,7 @@ func NewServiceParamModel() *orm.Model[ServiceParam] {
 		Relations: []orm.Relation{
 			serviceParamServiceRelation,
 			serviceParamParamRelation,
+			serviceParamActiveWhenParamRelation,
 		},
 	})
 }

@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { buildPowerMenu, type PowerCategory } from "../shared/power-menu";
-import { PowerIcon } from "../space/space-power-icon";
+import { PowerIcon } from "../shared/power-icon";
 import type { WorkbenchPower } from "./workbench-api";
 
 export function WorkbenchPowerPicker({

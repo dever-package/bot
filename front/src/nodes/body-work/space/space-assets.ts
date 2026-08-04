@@ -1,4 +1,5 @@
-import { richDocument } from "./space-model";
+import { richDocument } from "../shared/rich-document";
+import { firstDefinedValue as firstDefined } from "../shared/structured-json";
 import type { AssetVersion, ProjectAsset, SpaceCanvasNode } from "./types";
 
 export function runResultAsset(input: {
@@ -32,16 +33,6 @@ export function runResultAsset(input: {
     return mergeProjectAssetVersionHistory(previousAsset, normalizedAsset);
   }
   return normalizedAsset.version?.id ? normalizedAsset : null;
-}
-
-export function requireRunResultAsset(
-  asset: ProjectAsset | null,
-  nodeTitle: string,
-): ProjectAsset {
-  if (!asset?.id || !asset.version?.id) {
-    throw new Error(`${nodeTitle || "节点"}未返回已保存的结果版本`);
-  }
-  return asset;
 }
 
 export function withRunResultAsset(result: any, asset: ProjectAsset | null) {
@@ -216,8 +207,4 @@ function clearCurrentAssetVersion(version: AssetVersion): AssetVersion {
     is_current?: boolean;
   };
   return rest;
-}
-
-function firstDefined(...values: any[]) {
-  return values.find((value) => value !== undefined && value !== null);
 }

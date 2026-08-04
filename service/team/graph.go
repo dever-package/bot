@@ -252,7 +252,7 @@ func teamWorkspacePayload(team teammodel.Team) map[string]any {
 		"name":               team.Name,
 		"description":        team.Description,
 		"config":             jsonMap(team.Config),
-		"project_enabled":    normalizeProjectEnabled(team.ProjectEnabled),
+		"project_enabled":    normalizeEntryStatus(team.ProjectEnabled),
 		"status":             team.Status,
 		"publish_status":     publishStatus,
 		"current_release_id": team.CurrentReleaseID,
@@ -269,17 +269,10 @@ func teamReleasePayload(team teammodel.Team) GraphTeam {
 		Name:           team.Name,
 		Description:    team.Description,
 		Config:         jsonMap(team.Config),
-		ProjectEnabled: normalizeProjectEnabled(team.ProjectEnabled),
+		ProjectEnabled: normalizeEntryStatus(team.ProjectEnabled),
 		Status:         team.Status,
 		Sort:           team.Sort,
 	}
-}
-
-func normalizeProjectEnabled(value int16) int16 {
-	if value == teammodel.StatusDisabled {
-		return teammodel.StatusDisabled
-	}
-	return teammodel.StatusEnabled
 }
 
 func rolePayloads(roles []teammodel.Role) []GraphRole {

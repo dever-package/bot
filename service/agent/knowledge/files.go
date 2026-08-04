@@ -701,14 +701,6 @@ func (s Service) SaveKnowledgeFileNode(ctx context.Context, input KnowledgeSaveI
 	return s.ReadKnowledgeFileNode(ctx, base.ID, knowledgeFileID(relPath))
 }
 
-func (s Service) ResolveKnowledgeFileNode(ctx context.Context, baseID uint64, id string) (string, string, error) {
-	file, err := s.ResolveKnowledgeFileContent(ctx, baseID, id)
-	if err != nil {
-		return "", "", err
-	}
-	return file.Path, file.Name, nil
-}
-
 func (s Service) ResolveKnowledgeFileContent(ctx context.Context, baseID uint64, id string) (KnowledgeResolvedFile, error) {
 	_, root, err := knowledgeStorageBase(ctx, baseID)
 	if err != nil {

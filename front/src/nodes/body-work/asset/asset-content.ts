@@ -1,8 +1,8 @@
-import { richDocument } from "../space/space-model";
+import { richDocument } from "../shared/rich-document";
 import {
   looksLikeMarkdownSyntax,
   markdownCompatibleRichContent,
-} from "../space/space-content-output";
+} from "../shared/content-output";
 import type { AssetKind, AssetVersion } from "./asset-types";
 
 const mediaOutputFields: Partial<Record<AssetKind, string>> = {

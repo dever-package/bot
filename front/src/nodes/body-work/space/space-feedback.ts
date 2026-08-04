@@ -1,4 +1,6 @@
+import { firstNonEmptyText } from "../shared/content-output";
 import { defaultPowerParamValues } from "./space-power-param";
+import { firstDefinedValue as firstDefined } from "../shared/structured-json";
 import type { PowerParam, SpaceCanvasNode } from "./types";
 import {
   normalizeRuntimeInteraction,
@@ -180,8 +182,11 @@ export function flowFeedbackFromSnapshot(
   const fields = flowFeedbackFields(interaction);
   return {
     approval,
-    title: firstText(interaction.title, approval.title, "补充信息"),
-    description: firstText(interaction.description, "补充信息后继续执行流程。"),
+    title: firstNonEmptyText(interaction.title, approval.title, "补充信息"),
+    description: firstNonEmptyText(
+      interaction.description,
+      "补充信息后继续执行流程。",
+    ),
     fields,
     values: flowFeedbackInitialValues(interaction, fields),
   };
@@ -201,19 +206,14 @@ export function flowFeedbackFromInteraction(
       content: {},
     },
     interaction: value,
-    title: firstText(interaction.title, "补充信息"),
-    description: firstText(interaction.description, "补充信息后继续执行流程。"),
+    title: firstNonEmptyText(interaction.title, "补充信息"),
+    description: firstNonEmptyText(
+      interaction.description,
+      "补充信息后继续执行流程。",
+    ),
     fields,
     values: flowFeedbackInitialValues(interaction, fields),
   };
-}
-
-export function isFlowWaitingSnapshot(snapshot: FlowRunSnapshot) {
-  return (
-    snapshot.status === "waiting" ||
-    snapshot.interactions.length > 0 ||
-    snapshot.approvals.some(isPendingFlowApproval)
-  );
 }
 
 function normalizeFlowInteraction(value: any): FlowInteraction {
@@ -275,8 +275,11 @@ export function agentFeedbackFromResult(
       decision: "pending",
       content: { kind: "agent_interaction", interaction },
     },
-    title: firstText(interaction.title, title, "补充信息"),
-    description: firstText(interaction.description, "补充信息后继续执行智能体。"),
+    title: firstNonEmptyText(interaction.title, title, "补充信息"),
+    description: firstNonEmptyText(
+      interaction.description,
+      "补充信息后继续执行智能体。",
+    ),
     fields,
     values: flowFeedbackInitialValues(interaction, fields),
   };
@@ -308,13 +311,33 @@ function normalizeFeedbackField(value: any, index: number): PowerParam {
   const options = Array.isArray(value?.options) ? value.options : [];
   return {
     id: Number(value?.id || index + 1),
+    power_param_id: Number(value?.power_param_id || value?.powerParamId || 0),
     name: String(value?.name || value?.label || value?.title || value?.key || ""),
     key: String(value?.key || value?.name || `field_${index + 1}`),
+    icon: String(value?.icon || ""),
     type: String(value?.type || "input"),
     preview_type: String(value?.preview_type || value?.previewType || "none"),
+    usage: Number(value?.usage || 1),
     value_type: value?.value_type || value?.valueType || "string",
-    default_value: String(value?.default_value || value?.defaultValue || ""),
+    default_value: String(value?.default_value ?? value?.defaultValue ?? ""),
+    active_when_key: String(
+      value?.active_when_key ?? value?.activeWhenKey ?? "",
+    ),
+    active_when_value: String(
+      value?.active_when_value ?? value?.activeWhenValue ?? "",
+    ),
+    upload_rule_id: Number(
+      value?.upload_rule_id || value?.uploadRuleId || 0,
+    ),
+    max_files: Number(value?.max_files ?? value?.maxFiles ?? 0),
+    accepted_kinds: normalizeFeedbackAssetKinds(
+      value?.accepted_kinds ?? value?.acceptedKinds,
+    ),
+    asset_kinds: normalizeFeedbackAssetKinds(
+      value?.asset_kinds ?? value?.assetKinds,
+    ),
     required: Boolean(value?.required),
+    sort: Number(value?.sort || index + 1),
     options: options.map((option: any, optionIndex: number) => ({
       id: Number(option?.id || optionIndex + 1),
       name: String(option?.name || option?.label || option?.value || ""),
@@ -326,6 +349,15 @@ function normalizeFeedbackField(value: any, index: number): PowerParam {
       sort: Number(option?.sort || optionIndex + 1),
     })),
   };
+}
+
+function normalizeFeedbackAssetKinds(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => String(item || "").trim())
+    .filter(Boolean) as PowerParam["asset_kinds"];
 }
 
 function agentInteractionFromResult(result: any): Record<string, any> | null {
@@ -340,12 +372,12 @@ function agentInteractionFromResult(result: any): Record<string, any> | null {
   }
   if (!String(output.event || "").toLowerCase().includes("interaction")) {
     const topLevelInteraction = firstMap(result?.interaction);
-    return topLevelInteraction && firstText(topLevelInteraction.type)
+    return topLevelInteraction && firstNonEmptyText(topLevelInteraction.type)
       ? topLevelInteraction
       : null;
   }
   const interaction = firstMap(output.interaction, output.content?.interaction);
-  return interaction && firstText(interaction.type) ? interaction : null;
+  return interaction && firstNonEmptyText(interaction.type) ? interaction : null;
 }
 
 function firstMap(...values: any[]): Record<string, any> | null {
@@ -355,17 +387,4 @@ function firstMap(...values: any[]): Record<string, any> | null {
     }
   }
   return null;
-}
-
-function firstDefined(...values: any[]) {
-  return values.find((value) => value !== undefined && value !== null);
-}
-
-function firstText(...values: any[]) {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-  return "";
 }

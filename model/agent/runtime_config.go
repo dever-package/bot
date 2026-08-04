@@ -120,11 +120,3 @@ func DefaultRuntimeConfig() RuntimeConfig {
 		ScriptSandboxOutputMaxBytes: DefaultRuntimeScriptSandboxOutputMaxBytes,
 	}
 }
-
-func RuntimeScriptSandboxDriverOptions() []map[string]any {
-	return cloneOptionRows(runtimeScriptSandboxDriverOptions)
-}
-
-func RuntimeScriptSandboxNetworkModeOptions() []map[string]any {
-	return cloneOptionRows(runtimeScriptSandboxNetworkModeOptions)
-}

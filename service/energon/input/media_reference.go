@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	botmodel "github.com/dever-package/bot/model/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
@@ -29,20 +30,6 @@ type MediaReferenceBindResult struct {
 	Unbound []MediaReference
 }
 
-func MediaReferenceFromContent(
-	referenceType string,
-	referenceID uint64,
-	kind string,
-	content any,
-	usage string,
-) (MediaReference, bool) {
-	references := MediaReferencesFromContent(referenceType, referenceID, kind, content, usage)
-	if len(references) == 0 {
-		return MediaReference{}, false
-	}
-	return references[0], true
-}
-
 // MediaReferencesFromContent resolves every media URL stored by one logical
 // reference. The URL order is preserved so configured media parameters can
 // apply their own cardinality and ordering rules.
@@ -54,8 +41,14 @@ func MediaReferencesFromContent(
 	usage string,
 ) []MediaReference {
 	kind = normalizeMediaKind(kind)
-	media := botprotocol.ExtractMediaOutput(content, kind)
-	urls := botprotocol.NormalizeMediaList(media[kind+"s"], kind)
+	urls := make([]string, 0)
+	if kind == "" {
+		kind, urls = storyboardGridMedia(content)
+	}
+	if kind != "" && len(urls) == 0 {
+		media := botprotocol.ExtractMediaOutput(content, kind)
+		urls = botprotocol.NormalizeMediaList(media[kind+"s"], kind)
+	}
 	if referenceID == 0 || kind == "" || len(urls) == 0 {
 		return nil
 	}
@@ -75,6 +68,56 @@ func MediaReferencesFromContent(
 	return result
 }
 
+func storyboardGridMedia(content any) (string, []string) {
+	output := botprotocol.ExtractOutput(content)
+	document := storyboardGridDocument(output["json"])
+	if document == nil {
+		return "", nil
+	}
+	outputType, _ := document["type"].(string)
+	if botmodel.NormalizeOutputType(outputType) != botmodel.OutputTypeStoryboardGrid {
+		return "", nil
+	}
+
+	images := make([]string, 0, botmodel.StoryboardGridMaxImages)
+	for _, frame := range storyboardGridFrames(document["frames"]) {
+		images = append(images, botprotocol.NormalizeMediaList(frame["image"], botprotocol.MediaTypeImage)...)
+	}
+	return botprotocol.MediaTypeImage, botprotocol.NormalizeMediaList(images, botprotocol.MediaTypeImage)
+}
+
+func storyboardGridDocument(value any) map[string]any {
+	switch current := value.(type) {
+	case map[string]any:
+		return current
+	case botprotocol.Output:
+		document := make(map[string]any, len(current))
+		for key, item := range current {
+			document[key] = item
+		}
+		return document
+	default:
+		return nil
+	}
+}
+
+func storyboardGridFrames(value any) []map[string]any {
+	switch current := value.(type) {
+	case []map[string]any:
+		return current
+	case []any:
+		frames := make([]map[string]any, 0, len(current))
+		for _, item := range current {
+			if frame := storyboardGridDocument(item); frame != nil {
+				frames = append(frames, frame)
+			}
+		}
+		return frames
+	default:
+		return nil
+	}
+}
+
 // BindMediaReferences projects resolved media URLs into configured capability
 // parameters. It never infers provider-native fields; service mappings retain
 // ownership of the final request body.
@@ -83,6 +126,7 @@ func BindMediaReferences(
 	params []PowerParam,
 	references []MediaReference,
 ) (MediaReferenceBindResult, error) {
+	params = FilterActivePowerParams(params, values)
 	result := MediaReferenceBindResult{
 		Values:  cloneMediaReferenceValues(values),
 		Bound:   make([]MediaReferenceBinding, 0, len(references)),
@@ -91,6 +135,7 @@ func BindMediaReferences(
 	if len(references) == 0 {
 		return result, nil
 	}
+	referenceMediaCounts := countLogicalMediaReferences(references)
 
 	paramByKey := make(map[string]PowerParam, len(params))
 	for _, param := range params {
@@ -136,6 +181,19 @@ func BindMediaReferences(
 			result.Unbound = append(result.Unbound, reference)
 			continue
 		}
+		if mediaParamCapacity(param) == 1 &&
+			(reference.Required || reference.StrictUsage) &&
+			referenceMediaCounts[logicalMediaReferenceKey(reference)] > 1 {
+			paramName := mediaParamLabel(param)
+			if paramName == "" {
+				paramName = mediaKindLabel(reference.Kind)
+			}
+			return MediaReferenceBindResult{}, fmt.Errorf(
+				"%s素材包含多份内容，当前%s参数只接收一个文件，请从集合中选择具体素材",
+				mediaKindLabel(reference.Kind),
+				paramName,
+			)
+		}
 
 		key := strings.TrimSpace(param.Key)
 		current := uniqueMediaURLs(StringList(result.Values[key]))
@@ -177,6 +235,32 @@ func BindMediaReferences(
 		})
 	}
 	return result, nil
+}
+
+type logicalMediaReference struct {
+	referenceType string
+	referenceID   uint64
+	kind          string
+}
+
+func countLogicalMediaReferences(references []MediaReference) map[logicalMediaReference]int {
+	counts := make(map[logicalMediaReference]int, len(references))
+	for _, reference := range references {
+		key := logicalMediaReferenceKey(reference)
+		if key.referenceID == 0 || key.kind == "" || strings.TrimSpace(reference.URL) == "" {
+			continue
+		}
+		counts[key]++
+	}
+	return counts
+}
+
+func logicalMediaReferenceKey(reference MediaReference) logicalMediaReference {
+	return logicalMediaReference{
+		referenceType: strings.TrimSpace(reference.ReferenceType),
+		referenceID:   reference.ReferenceID,
+		kind:          normalizeMediaKind(reference.Kind),
+	}
 }
 
 func MediaParamSupports(param PowerParam, kind string) bool {

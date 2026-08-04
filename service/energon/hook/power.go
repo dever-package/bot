@@ -188,12 +188,12 @@ func normalizePowerParamRows(c *server.Context, value any) []any {
 
 		paramID := util.ToUint64(next["param_id"])
 		if paramID == 0 {
-			panicPowerParamField("能力参数必须选择内部参数")
+			panicParamListField("能力参数必须选择内部参数")
 		}
 
 		paramRow := botmodel.NewParamModel().FindMap(c.Context(), map[string]any{"id": paramID})
 		if len(paramRow) == 0 {
-			panicPowerParamField("能力参数选择的内部参数不存在")
+			panicParamListField("能力参数选择的内部参数不存在")
 		}
 
 		items = append(items, next)

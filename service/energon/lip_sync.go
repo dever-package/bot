@@ -35,6 +35,9 @@ func (s GatewayService) callNormalizePowerTarget(
 	req *botprotocol.ShemicRequest,
 	selected selectedTarget,
 ) (callResult, error) {
+	if botmodel.IsStoryboardGridPower(selected.Power) {
+		return s.callNormalizeStoryboardGrid(ctx, req, selected)
+	}
 	if !s.isRunningHubTwoStageLipSync(ctx, req, selected) || hasLipSyncSelection(req) {
 		return s.callNormalizeTarget(ctx, req, selected)
 	}
@@ -63,6 +66,9 @@ func (s GatewayService) callStreamPowerTarget(
 	req *botprotocol.ShemicRequest,
 	selected selectedTarget,
 ) (callResult, error) {
+	if botmodel.IsStoryboardGridPower(selected.Power) {
+		return s.callStreamStoryboardGrid(ctx, req, selected)
+	}
 	if !s.isRunningHubTwoStageLipSync(ctx, req, selected) || hasLipSyncSelection(req) {
 		return s.callStreamTarget(ctx, req, selected)
 	}

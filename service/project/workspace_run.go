@@ -2,8 +2,6 @@ package project
 
 import (
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -72,15 +70,6 @@ type canvasRunEdge struct {
 type canvasNodeResult struct {
 	NodeKey string
 	Payload map[string]any
-}
-
-type canvasExecutionPlan struct {
-	Start    canvasRunNode
-	Nodes    []canvasRunNode
-	Edges    []canvasRunEdge
-	Incoming map[string][]string
-	Outgoing map[string][]string
-	Order    []string
 }
 
 func (s WorkspaceService) RunCanvas(ctx context.Context, req CanvasRunRequest) (map[string]any, error) {
@@ -1217,8 +1206,7 @@ func canvasConnectedAssetReferences(
 			return
 		}
 		reference, ok := canvasNodeCurrentAssetReference(sourceNodeID, results, canvas)
-		if !ok ||
-			(strings.TrimSpace(reference.Kind) != "" && !isCanvasMediaKind(reference.Kind)) {
+		if !ok {
 			return
 		}
 		assetKey := fmt.Sprintf("%d\x00%s", reference.AssetID, usage)
@@ -1863,10 +1851,6 @@ func mergeCanvasPromptInput(base map[string]any, previousOutput any, prompt stri
 	return mergeCanvasInput(base, previousOutput, prompt, "prompt", true)
 }
 
-func mergeCanvasChatInput(base map[string]any, previousOutput any, prompt string) map[string]any {
-	return mergeCanvasInput(base, previousOutput, prompt, "text", true)
-}
-
 func mergeCanvasPromptInputWithReferences(
 	base map[string]any,
 	previousOutput any,
@@ -2087,6 +2071,9 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 	if !assetservice.HasContent(output) {
 		return payload, nil
 	}
+	if saved, handled, err := s.saveWorkspaceStoryboardGridMaterial(ctx, projectID, req, run, node, nodeRunID, payload, output); handled {
+		return saved, err
+	}
 	assetContent := workspaceCanvasAssetContent(payload, output)
 	assetCateID := firstUint64(node.AssetCateID, req.AssetCateID)
 	collectionID := uint64(0)
@@ -2183,7 +2170,7 @@ func workspaceCanvasCollection(node canvasRunNode, output any) (string, string) 
 	}
 	sourceNodeKey = strings.TrimSpace(node.ID)
 	name := ""
-	if document, found := findStoryboardDocument(output, 0); found {
+	if document, found := storyboardDocument(output); found {
 		name = storyboardText(document["title"])
 	}
 	if name == "" {
@@ -2407,39 +2394,6 @@ func nestedCanvasPayloadMap(payload map[string]any, key string, depth int) map[s
 	return nil
 }
 
-func canvasRunPlan(plan canvasExecutionPlan) map[string]any {
-	planNodes := make([]map[string]any, 0, len(plan.Nodes))
-	for _, node := range plan.Nodes {
-		planNodes = append(planNodes, map[string]any{
-			"id":              node.ID,
-			"type":            node.Type,
-			"title":           canvasRunNodeTitle(node),
-			"kind":            node.Kind,
-			"output_type":     node.OutputType,
-			"group_id":        node.GroupID,
-			"function_key":    node.FunctionKey,
-			"asset_cate_id":   node.AssetCateID,
-			"persists_result": node.PersistsResult,
-			"stops_flow":      canvasNodeStopsRun(node),
-		})
-	}
-	planEdges := make([]map[string]any, 0, len(plan.Edges))
-	for _, edge := range plan.Edges {
-		planEdges = append(planEdges, map[string]any{
-			"id":     edge.ID,
-			"source": edge.From,
-			"target": edge.To,
-		})
-	}
-	return map[string]any{
-		"nodes":    planNodes,
-		"edges":    planEdges,
-		"incoming": plan.Incoming,
-		"outgoing": plan.Outgoing,
-		"order":    plan.Order,
-	}
-}
-
 func canvasRunStatus(payload map[string]any) string {
 	status := textValue(payload["status"])
 	if status == "" {
@@ -2461,137 +2415,4 @@ func canvasRunShouldStop(status string) bool {
 	default:
 		return false
 	}
-}
-
-func mapValue(raw any) map[string]any {
-	row, ok := raw.(map[string]any)
-	if !ok || row == nil {
-		return nil
-	}
-	return row
-}
-
-func sliceValue(raw any) []any {
-	switch items := raw.(type) {
-	case []any:
-		return items
-	case []map[string]any:
-		result := make([]any, 0, len(items))
-		for _, item := range items {
-			result = append(result, item)
-		}
-		return result
-	default:
-		return nil
-	}
-}
-
-func textValue(raw any) string {
-	if raw == nil {
-		return ""
-	}
-	text := strings.TrimSpace(fmt.Sprint(raw))
-	if text == "<nil>" {
-		return ""
-	}
-	return text
-}
-
-func uint64Value(raw any) uint64 {
-	switch value := raw.(type) {
-	case uint64:
-		return value
-	case uint:
-		return uint64(value)
-	case uint32:
-		return uint64(value)
-	case int:
-		if value > 0 {
-			return uint64(value)
-		}
-	case int64:
-		if value > 0 {
-			return uint64(value)
-		}
-	case float64:
-		if value > 0 {
-			return uint64(value)
-		}
-	case string:
-		var parsed uint64
-		_, _ = fmt.Sscan(strings.TrimSpace(value), &parsed)
-		return parsed
-	}
-	return 0
-}
-
-func firstPresent(values ...any) any {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
-}
-
-func firstText(values ...any) string {
-	for _, value := range values {
-		if text := textValue(value); text != "" && text != "<nil>" {
-			return text
-		}
-	}
-	return ""
-}
-
-func valueAtPath(raw any, path ...string) any {
-	current := raw
-	for _, key := range path {
-		row := mapValue(current)
-		if row == nil {
-			return nil
-		}
-		current = row[key]
-	}
-	return current
-}
-
-func mergeMap(base map[string]any, patch map[string]any) map[string]any {
-	result := map[string]any{}
-	for key, value := range base {
-		result[key] = value
-	}
-	for key, value := range patch {
-		result[key] = value
-	}
-	return result
-}
-
-func firstCanvasNodeResult(payload map[string]any) map[string]any {
-	for _, item := range sliceValue(payload["node_results"]) {
-		if row := mapValue(item); row != nil {
-			return row
-		}
-	}
-	return map[string]any{}
-}
-
-func canvasChildRequestID(parentRequestID string, nodeID string) string {
-	parentRequestID = strings.TrimSpace(parentRequestID)
-	nodeID = strings.TrimSpace(nodeID)
-	if parentRequestID == "" {
-		return normalizeWorkspaceRequestID(nodeID)
-	}
-	if nodeID == "" {
-		return normalizeWorkspaceRequestID(parentRequestID)
-	}
-	sum := sha1.Sum([]byte(nodeID))
-	suffix := hex.EncodeToString(sum[:])[:12]
-	prefixLimit := 64 - len(suffix) - 1
-	if prefixLimit < 1 {
-		return suffix
-	}
-	if len(parentRequestID) > prefixLimit {
-		parentRequestID = parentRequestID[:prefixLimit]
-	}
-	return parentRequestID + "-" + suffix
 }

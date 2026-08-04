@@ -269,14 +269,19 @@ func matchParamOption(ctx context.Context, repo Repository, paramID uint64, valu
 	}
 	targetID := util.ToUint64(value)
 	targetText := strings.TrimSpace(ValueText(value))
-	for _, option := range repo.ParamOptionsByParam(ctx, paramID) {
-		if targetID > 0 && option.ID == targetID {
-			return option, true
-		}
+	options := repo.ParamOptionsByParam(ctx, paramID)
+	for _, option := range options {
 		if strings.EqualFold(strings.TrimSpace(option.Value), targetText) {
 			return option, true
 		}
+	}
+	for _, option := range options {
 		if strings.EqualFold(strings.TrimSpace(option.Name), targetText) {
+			return option, true
+		}
+	}
+	for _, option := range options {
+		if targetID > 0 && option.ID == targetID {
 			return option, true
 		}
 	}

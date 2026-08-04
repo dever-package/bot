@@ -28,6 +28,13 @@ export const StoryboardFrameNode = memo(function StoryboardFrameNode({
   data,
 }: NodeProps<any>) {
   const frame = data as StoryboardFrameNodeData;
+  const runLabel = storyboardFrameRunLabel(frame);
+  const runHint = frame.running
+    ? "制作区正在执行"
+    : frame.runBlockedReason ||
+      (frame.completedCount > 0
+        ? "只执行尚未完成或上次失败的内容"
+        : "按依赖顺序生成制作区内容");
   return (
     <section
       className={`ws-storyboard-frame ${frame.collapsed ? "is-collapsed" : ""}`}
@@ -42,17 +49,11 @@ export const StoryboardFrameNode = memo(function StoryboardFrameNode({
           {frame.groupCount} 组 · {frame.completedCount}/{frame.workNodeCount}{" "}
           完成
         </span>
-        <SpaceTooltip
-          label={
-            frame.running
-              ? "制作区正在执行"
-              : frame.runBlockedReason || "按依赖层级并行执行制作区"
-          }
-        >
+        <SpaceTooltip label={runHint}>
           <button
             type="button"
             className="nodrag nopan ws-storyboard-frame-run"
-            aria-label="执行制作区"
+            aria-label={runLabel}
             disabled={frame.running || Boolean(frame.runBlockedReason)}
             onClick={stopAnd(frame.onRun)}
           >
@@ -61,6 +62,7 @@ export const StoryboardFrameNode = memo(function StoryboardFrameNode({
             ) : (
               <Play size={14} fill="currentColor" />
             )}
+            <span>{runLabel}</span>
           </button>
         </SpaceTooltip>
         <SpaceTooltip label="聚焦制作区">
@@ -94,6 +96,17 @@ export const StoryboardFrameNode = memo(function StoryboardFrameNode({
     </section>
   );
 });
+
+function storyboardFrameRunLabel(frame: StoryboardFrameNodeData) {
+  if (frame.running) return "生成中";
+  if (
+    frame.workNodeCount > 0 &&
+    frame.completedCount >= frame.workNodeCount
+  ) {
+    return "已完成";
+  }
+  return frame.completedCount > 0 ? "继续生成" : "开始生成";
+}
 
 function stopAnd(action: () => void) {
   return (event: MouseEvent<HTMLButtonElement>) => {

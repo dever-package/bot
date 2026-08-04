@@ -3,7 +3,7 @@ import type { PowerParam, PowerParamOption } from "./types";
 export function defaultPowerParamValue(param: PowerParam) {
   const raw = param.default_value ?? "";
   if (param.type === "switch") {
-    return truthy(raw);
+    return powerParamBooleanValue(raw);
   }
   if (param.type === "multi_option") {
     return normalizePowerParamValue(param, parseJSONValue(raw));
@@ -12,9 +12,11 @@ export function defaultPowerParamValue(param: PowerParam) {
     return valueAsList(parseJSONValue(raw));
   }
   if (param.type === "option" || param.type === "select") {
+    const option =
+      resolvePowerParamOption(param.options || [], raw) || param.options?.[0];
     return normalizePowerParamScalarValue(
       param,
-      raw || powerParamOptionValue(param.options?.[0]) || "",
+      powerParamOptionValue(option) || raw,
     );
   }
   return normalizePowerParamScalarValue(param, raw);
@@ -43,11 +45,24 @@ function normalizePowerParamScalarValue(
 }
 
 export function normalizePowerParamValue(param: PowerParam, value: unknown) {
-  return param.type === "multi_option"
-    ? valueAsList(value).map((item) =>
-        normalizePowerParamScalarValue(param, item),
-      )
-    : normalizePowerParamScalarValue(param, value);
+  if (param.type === "option" || param.type === "select") {
+    const option =
+      resolvePowerParamOption(param.options || [], value) || param.options?.[0];
+    return normalizePowerParamScalarValue(
+      param,
+      powerParamOptionValue(option) || value,
+    );
+  }
+  if (param.type === "multi_option") {
+    return valueAsList(value).map((item) => {
+      const option = resolvePowerParamOption(param.options || [], item);
+      return normalizePowerParamScalarValue(
+        param,
+        powerParamOptionValue(option) || item,
+      );
+    });
+  }
+  return normalizePowerParamScalarValue(param, value);
 }
 
 export function powerParamOptionValue(option?: PowerParamOption) {
@@ -62,17 +77,40 @@ export function powerParamOptionValue(option?: PowerParamOption) {
   );
 }
 
+export function resolvePowerParamOption(
+  options: PowerParamOption[],
+  value: unknown,
+) {
+  const normalizedValue = String(value ?? "").trim();
+  if (!normalizedValue) {
+    return undefined;
+  }
+  // Match request-value fields across the full list before falling back to IDs.
+  const valueSelectors = [
+    (option: PowerParamOption) => option.native_value,
+    (option: PowerParamOption) => option.value,
+    (option: PowerParamOption) => option.name,
+    (option: PowerParamOption) => option.id,
+  ];
+  for (const selectValue of valueSelectors) {
+    const matched = options.find(
+      (option) => String(selectValue(option) ?? "").trim() === normalizedValue,
+    );
+    if (matched) {
+      return matched;
+    }
+  }
+  return undefined;
+}
+
 export function isPowerParamOptionSelected(
   option: PowerParamOption,
   values: string[],
+  options: PowerParamOption[] = [option],
 ) {
-  const candidates = [
-    String(option.id || ""),
-    String(option.native_value || "").trim(),
-    String(option.value || "").trim(),
-    String(option.name || "").trim(),
-  ].filter(Boolean);
-  return values.some((value) => candidates.includes(String(value).trim()));
+  return values.some(
+    (value) => resolvePowerParamOption(options, value) === option,
+  );
 }
 
 function parseJSONValue(value: unknown) {
@@ -96,7 +134,7 @@ function valueAsList(value: unknown) {
   return value ? [String(value)] : [];
 }
 
-function truthy(value: unknown) {
+export function powerParamBooleanValue(value: unknown) {
   if (typeof value === "boolean") {
     return value;
   }

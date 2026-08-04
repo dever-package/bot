@@ -6,12 +6,20 @@ import {
   Pencil,
   RotateCcw,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   DetailDialogFrame,
   DetailDialogHeader,
   DetailVersionSelect,
   formatDetailVersionTime,
+  type DetailDialogLayer,
 } from "../shared/detail-dialog";
 import {
   loadAssetDetail,
@@ -30,6 +38,18 @@ import {
 } from "./asset-contract";
 import type { AssetDetail, AssetRecord, AssetVersion } from "./asset-types";
 import { useAssetSourceLabels } from "./asset-source-labels";
+import { requestErrorMessage as errorText } from "../shared/api-response";
+import {
+  contentOutputHasType,
+  parseStoryboardGridOutput,
+} from "../shared/content-output";
+import { StoryboardGridView } from "../shared/storyboard-grid-view";
+
+const StoryboardAssetPreview = lazy(() =>
+  import("../space/space-content-view").then((module) => ({
+    default: module.CanvasNodeContentView,
+  })),
+);
 
 export function AssetDetailDialog({
   teamID,
@@ -40,6 +60,7 @@ export function AssetDetailDialog({
   onContinue,
   canContinue,
   onAssetChanged,
+  layer = "default",
 }: {
   teamID: number;
   assetID: number;
@@ -49,6 +70,7 @@ export function AssetDetailDialog({
   onContinue?: (asset: AssetRecord) => void;
   canContinue?: (asset: AssetRecord) => boolean;
   onAssetChanged?: (asset: AssetRecord) => void;
+  layer?: DetailDialogLayer;
 }) {
   const sourceLabels = useAssetSourceLabels();
   const [detail, setDetail] = useState<AssetDetail | null>(null);
@@ -83,14 +105,14 @@ export function AssetDetailDialog({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
+      if (event.key !== "Escape" || renaming) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onClose();
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [onClose, renaming]);
 
   async function preview(version: AssetVersion) {
     if (versionLoading || version.id === previewVersion?.id) return;
@@ -167,11 +189,20 @@ export function AssetDetailDialog({
   const isCurrent = Boolean(
     asset && previewVersion && asset.versionID === previewVersion.id,
   );
+  const storyboardGrid = useMemo(
+    () => parseStoryboardGridOutput(previewVersion?.content),
+    [previewVersion?.content],
+  );
+  const hasStoryboard = useMemo(
+    () => contentOutputHasType(previewVersion?.content, "storyboard"),
+    [previewVersion?.content],
+  );
 
   return (
     <DetailDialogFrame
       ariaLabel={`${asset?.name || "资产"}详情`}
       onRequestClose={onClose}
+      layer={layer}
       header={
         <DetailDialogHeader
           icon={
@@ -274,13 +305,36 @@ export function AssetDetailDialog({
           ) : (
             <div className={`wb-detail-readonly-content is-${asset.kind}`}>
               {error ? <p className="wb-detail-error-banner">{error}</p> : null}
-              <AssetPreview
-                key={previewVersion.id}
-                kind={asset.kind}
-                content={previewVersion.content}
-                summary={previewVersion.summary || asset.summary}
-                prompt={assetVersionPrompt(previewVersion)}
-              />
+              {storyboardGrid ? (
+                <StoryboardGridView grid={storyboardGrid} variant="detail" />
+              ) : hasStoryboard ? (
+                <Suspense
+                  fallback={
+                    <div className="wb-detail-content-state" aria-busy="true">
+                      <Loader2 size={18} className="wb-detail-spin" />
+                      <span>正在准备分镜预览</span>
+                    </div>
+                  }
+                >
+                  <StoryboardAssetPreview
+                    output={previewVersion.content}
+                    fallback={previewVersion.summary || asset.summary}
+                    emptyText="该版本暂无可预览内容"
+                    className="wb-asset-preview-content"
+                    markdownClassName="wb-asset-detail-prose"
+                    richClassName="wb-asset-detail-prose"
+                    mediaLayout="detail"
+                  />
+                </Suspense>
+              ) : (
+                <AssetPreview
+                  key={previewVersion.id}
+                  kind={asset.kind}
+                  content={previewVersion.content}
+                  summary={previewVersion.summary || asset.summary}
+                  prompt={assetVersionPrompt(previewVersion)}
+                />
+              )}
             </div>
           )}
         </div>
@@ -423,8 +477,4 @@ function isContinuable(asset: AssetRecord) {
     asset.role === "material" &&
     (asset.sourceType === "tool" || asset.sourceType === "dialogue")
   );
-}
-
-function errorText(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
 }

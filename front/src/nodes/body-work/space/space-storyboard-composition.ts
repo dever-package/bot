@@ -4,6 +4,10 @@ import {
   type StoryboardSpeech,
 } from "./space-storyboard";
 import { orderItemsByIds } from "./space-ordered-list";
+import {
+  asPlainRecord as recordValue,
+  trimmedString as textValue,
+} from "../shared/structured-json";
 import type { SpaceCanvasNode } from "./types";
 import type {
   CanvasVideoComposition,
@@ -37,6 +41,7 @@ export function storyboardVideoComposition(input: {
       (input.current?.clips || []).map((clip) => clip.id),
       (clip) => clip.id,
     ),
+    audioTracks: input.current?.audioTracks || [],
     settings: {
       resolution: input.current?.settings.resolution || "auto",
       fps: input.current?.settings.fps ?? 0,
@@ -212,6 +217,8 @@ function storyboardSpeechTrack(
     id: speech.id,
     ...(audio ? { audio } : {}),
     startTime: speech.start_time,
+    sourceStart: current?.sourceStart ?? 0,
+    fit: current?.fit ?? "trim",
     kind: speech.kind,
     ...(speech.character_id ? { characterId: speech.character_id } : {}),
     text: speech.text,
@@ -258,16 +265,6 @@ function assetReference(
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values.filter(Boolean))];
-}
-
-function recordValue(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, any>)
-    : {};
-}
-
-function textValue(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
 }
 
 function numberValue(value: unknown) {

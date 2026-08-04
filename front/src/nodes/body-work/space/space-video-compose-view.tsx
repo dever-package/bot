@@ -15,6 +15,7 @@ import {
 } from "./space-ordered-list";
 import {
   emptyVideoComposition,
+  formatVideoComposeDuration,
   VIDEO_COMPOSE_TRANSITION_GROUPS,
   videoComposeReferenceKey,
   videoCompositionDuration,
@@ -22,6 +23,7 @@ import {
   type CanvasVideoComposition,
   type VideoComposeAssetReference,
   type VideoComposeClip,
+  type VideoComposeGlobalAudioTrack,
   type VideoComposeSpeechTrack,
   type VideoComposeTransitionType,
 } from "./space-video-compose";
@@ -31,7 +33,7 @@ import {
 } from "./space-video-compose-card";
 import { VideoComposeAssetPicker } from "./space-video-compose-picker";
 import { CanvasNodeContentView } from "./space-content-view";
-import { hasCanvasContent } from "./space-content-output";
+import { hasContentOutput } from "../shared/content-output";
 import { SpaceTooltip } from "./space-tooltip";
 import { FirstFrameVideo } from "../../shared/first-frame-video";
 
@@ -42,7 +44,7 @@ const VIDEO_COMPOSE_RESOLUTION_OPTIONS = [
   { value: "3840x2160", label: "4K" },
 ] as const;
 
-type PickerTarget = "clip" | "original" | "speech";
+type PickerTarget = "clip" | "original" | "speech" | "global";
 
 export function VideoComposeView({
   composition,
@@ -146,6 +148,14 @@ export function VideoComposeView({
       updateClip(selectedClip.id, {
         speechTracks: [...selectedClip.speechTracks, track],
       });
+    } else if (pickerTarget === "global") {
+      update({
+        ...value,
+        audioTracks: [
+          ...value.audioTracks,
+          createVideoComposeGlobalAudioTrack(reference),
+        ],
+      });
     }
     setPickerTarget("");
   };
@@ -237,7 +247,9 @@ export function VideoComposeView({
           </span>
           <small>
             {value.clips.length} 个镜头
-            {totalDuration > 0 ? ` · ${formatDuration(totalDuration)} 秒` : ""}
+            {totalDuration > 0
+              ? ` · ${formatVideoComposeDuration(totalDuration)} 秒`
+              : ""}
             {blockingIssues.length
               ? ` · ${blockingIssues.length} 项待处理`
               : ""}
@@ -324,7 +336,9 @@ export function VideoComposeView({
               }}
               onDuration={(duration) => {
                 if (clip.duration <= 0 && duration > 0) {
-                  updateClip(clip.id, { duration });
+                  updateClip(clip.id, {
+                    duration: Math.max(1, Math.floor(duration)),
+                  });
                 }
               }}
               onDragStart={() => beginClipDrag(clip.id)}
@@ -362,6 +376,7 @@ export function VideoComposeView({
         <VideoComposeGlobalSettings
           composition={value}
           readonly={readonly}
+          onChooseAudio={() => setPickerTarget("global")}
           onChange={update}
         />
       ) : null}
@@ -389,7 +404,9 @@ export function VideoComposeView({
               ? "添加镜头"
               : pickerTarget === "original"
                 ? "选择原声来源"
-                : "添加语音轨"
+                : pickerTarget === "global"
+                  ? "添加全片声音"
+                  : "添加语音"
           }
           kind={pickerTarget === "clip" ? "video" : "audio"}
           items={referenceItems}
@@ -455,13 +472,13 @@ function VideoComposeClipInspector({
           ) : null}
           <button type="button" disabled={readonly} onClick={onChooseSpeech}>
             <Volume2 size={13} />
-            添加语音轨
+            添加语音
           </button>
           {clip.speechTracks.map((track, index) => (
             <div className="ws-video-compose-speech-track" key={track.id}>
               <strong>{track.audio?.label || `语音 ${index + 1}`}</strong>
               <label>
-                <span>开始时间</span>
+                <span>镜头起点</span>
                 <input
                   type="number"
                   min="0"
@@ -479,6 +496,47 @@ function VideoComposeClipInspector({
                   }
                 />
                 秒
+              </label>
+              <label>
+                <span>源起点</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={track.sourceStart}
+                  readOnly={readonly}
+                  onChange={(event) =>
+                    onChange({
+                      speechTracks: updateSpeechTrack(
+                        clip.speechTracks,
+                        track.id,
+                        { sourceStart: Number(event.target.value) },
+                      ),
+                    })
+                  }
+                />
+                秒
+              </label>
+              <label>
+                <span>超出镜头</span>
+                <select
+                  value={track.fit}
+                  disabled={readonly}
+                  onChange={(event) =>
+                    onChange({
+                      speechTracks: updateSpeechTrack(
+                        clip.speechTracks,
+                        track.id,
+                        {
+                          fit: event.target.value as VideoComposeSpeechTrack["fit"],
+                        },
+                      ),
+                    })
+                  }
+                >
+                  <option value="trim">自动裁剪</option>
+                  <option value="strict">阻止合成</option>
+                </select>
               </label>
               <label>
                 <span>音量</span>
@@ -582,10 +640,12 @@ function VideoComposeClipInspector({
 function VideoComposeGlobalSettings({
   composition,
   readonly,
+  onChooseAudio,
   onChange,
 }: {
   composition: CanvasVideoComposition;
   readonly: boolean;
+  onChooseAudio: () => void;
   onChange: (composition: CanvasVideoComposition) => void;
 }) {
   const knownResolution = VIDEO_COMPOSE_RESOLUTION_OPTIONS.some(
@@ -643,6 +703,190 @@ function VideoComposeGlobalSettings({
           ))}
         </select>
       </label>
+      <div className="ws-video-compose-global-audio">
+        <div className="ws-video-compose-global-audio-head">
+          <strong>全片声音</strong>
+          <button type="button" disabled={readonly} onClick={onChooseAudio}>
+            <Plus size={13} />
+            添加全片声音
+          </button>
+        </div>
+        {composition.audioTracks.map((track, index) => (
+          <div className="ws-video-compose-speech-track" key={track.id}>
+            <strong>{track.audio?.label || `全片声音 ${index + 1}`}</strong>
+            <label>
+              <span>类型</span>
+              <select
+                value={track.kind}
+                disabled={readonly}
+                onChange={(event) => {
+                  const kind = event.target.value as VideoComposeGlobalAudioTrack["kind"];
+                  onChange({
+                    ...composition,
+                    audioTracks: updateGlobalAudioTrack(
+                      composition.audioTracks,
+                      track.id,
+                      {
+                        kind,
+                        fit: kind === "music" ? "trim" : "strict",
+                        loop: kind === "music" && track.loop,
+                        fadeOut: kind === "music" ? Math.max(1, track.fadeOut) : 0,
+                      },
+                    ),
+                  });
+                }}
+              >
+                <option value="music">背景音乐</option>
+                <option value="narration">全片语音</option>
+              </select>
+            </label>
+            <label>
+              <span>全片起点</span>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={track.startTime}
+                readOnly={readonly}
+                onChange={(event) =>
+                  onChange({
+                    ...composition,
+                    audioTracks: updateGlobalAudioTrack(
+                      composition.audioTracks,
+                      track.id,
+                      { startTime: Number(event.target.value) },
+                    ),
+                  })
+                }
+              />
+              秒
+            </label>
+            <label>
+              <span>源起点</span>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={track.sourceStart}
+                readOnly={readonly}
+                onChange={(event) =>
+                  onChange({
+                    ...composition,
+                    audioTracks: updateGlobalAudioTrack(
+                      composition.audioTracks,
+                      track.id,
+                      { sourceStart: Number(event.target.value) },
+                    ),
+                  })
+                }
+              />
+              秒
+            </label>
+            <label>
+              <span>超出全片</span>
+              <select
+                value={track.fit}
+                disabled={readonly}
+                onChange={(event) =>
+                  onChange({
+                    ...composition,
+                    audioTracks: updateGlobalAudioTrack(
+                      composition.audioTracks,
+                      track.id,
+                      {
+                        fit: event.target.value as VideoComposeGlobalAudioTrack["fit"],
+                      },
+                    ),
+                  })
+                }
+              >
+                <option value="trim">自动裁剪</option>
+                <option value="strict">阻止合成</option>
+              </select>
+            </label>
+            {track.kind === "music" ? (
+              <>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={track.loop}
+                    disabled={readonly}
+                    onChange={(event) =>
+                      onChange({
+                        ...composition,
+                        audioTracks: updateGlobalAudioTrack(
+                          composition.audioTracks,
+                          track.id,
+                          { loop: event.target.checked },
+                        ),
+                      })
+                    }
+                  />
+                  <span>循环铺满</span>
+                </label>
+                <label>
+                  <span>淡出</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="10"
+                    step="0.1"
+                    value={track.fadeOut}
+                    readOnly={readonly}
+                    onChange={(event) =>
+                      onChange({
+                        ...composition,
+                        audioTracks: updateGlobalAudioTrack(
+                          composition.audioTracks,
+                          track.id,
+                          { fadeOut: Number(event.target.value) },
+                        ),
+                      })
+                    }
+                  />
+                  秒
+                </label>
+              </>
+            ) : null}
+            <label>
+              <span>音量</span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={track.volume}
+                disabled={readonly}
+                onChange={(event) =>
+                  onChange({
+                    ...composition,
+                    audioTracks: updateGlobalAudioTrack(
+                      composition.audioTracks,
+                      track.id,
+                      { volume: Number(event.target.value) },
+                    ),
+                  })
+                }
+              />
+              <small>{Math.round(track.volume * 100)}%</small>
+            </label>
+            <button
+              type="button"
+              disabled={readonly}
+              onClick={() =>
+                onChange({
+                  ...composition,
+                  audioTracks: composition.audioTracks.filter(
+                    (item) => item.id !== track.id,
+                  ),
+                })
+              }
+            >
+              移除
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -657,7 +901,7 @@ function VideoComposePreview({
   finalOutput?: unknown;
 }) {
   const videoUrl = item?.preview.videoUrl || "";
-  const hasFinalOutput = hasCanvasContent(finalOutput);
+  const hasFinalOutput = hasContentOutput(finalOutput);
   const [mode, setMode] = useState<"clip" | "final">(
     hasFinalOutput ? "final" : "clip",
   );
@@ -780,9 +1024,27 @@ function createVideoComposeSpeechTrack(
     id: uniqueTrackId(),
     audio,
     startTime: 0,
+    sourceStart: 0,
+    fit: "trim",
     kind: "dialogue",
     text: "",
     volume: 1,
+  };
+}
+
+function createVideoComposeGlobalAudioTrack(
+  audio: VideoComposeAssetReference,
+): VideoComposeGlobalAudioTrack {
+  return {
+    id: uniqueTrackId("global-audio"),
+    audio,
+    startTime: 0,
+    sourceStart: 0,
+    kind: "music",
+    volume: 0.35,
+    fit: "trim",
+    loop: false,
+    fadeOut: 1,
   };
 }
 
@@ -790,6 +1052,16 @@ function updateSpeechTrack(
   tracks: VideoComposeSpeechTrack[],
   trackId: string,
   patch: Partial<VideoComposeSpeechTrack>,
+) {
+  return tracks.map((track) =>
+    track.id === trackId ? { ...track, ...patch } : track,
+  );
+}
+
+function updateGlobalAudioTrack(
+  tracks: VideoComposeGlobalAudioTrack[],
+  trackId: string,
+  patch: Partial<VideoComposeGlobalAudioTrack>,
 ) {
   return tracks.map((track) =>
     track.id === trackId ? { ...track, ...patch } : track,
@@ -806,16 +1078,12 @@ function uniqueClipId() {
   return `clip-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function uniqueTrackId() {
+function uniqueTrackId(prefix = "speech") {
   if (
     typeof crypto !== "undefined" &&
     typeof crypto.randomUUID === "function"
   ) {
-    return `speech-${crypto.randomUUID()}`;
+    return `${prefix}-${crypto.randomUUID()}`;
   }
-  return `speech-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function formatDuration(value: number) {
-  return value >= 10 ? Math.round(value).toString() : value.toFixed(1);
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }

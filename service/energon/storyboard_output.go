@@ -58,8 +58,8 @@ var storyboardOutputPrompt = fmt.Sprintf(`你是专业的分镜导演和短片�
 - match_previous=true 或 continue_previous=true 时，当前镜头 entry 必须与上一镜头 exit 完全一致。普通切镜允许改变状态，但 transition 必须说明改变的来源，不能让服装、道具、位置、光线或运动方向无故跳变。
 - continue_previous 仅用于同一时间、同一场景、同一主体、同一机位方向中的直接动作延续。正反打、景别或角度切换、换场、时间跳跃和蒙太奇必须为 false。
 - 同一动作确实需要拆成两个镜头、且素材与机位方向不变时，应主动使用 continue_previous=true，从上一段真实尾帧继续；不要把一个连续动作生成为两段互不相干的独立画面。
-- continue_previous=true 时 material_ids 必须与上一镜头完全一致，continuity_anchor 必须写清上一镜头结束时的主体位置、姿态、动作方向、道具状态和光线；连续链最多包含 3 个镜头。
-- 出镜对白不得跨越连续镜头边界；切换说话者、展示口型或改变构图时拆成新的非连续镜头。
+- continue_previous=true 时角色与场景素材必须与上一镜头一致，continuity_anchor 必须写清上一镜头结束时的主体位置、姿态、动作方向、道具状态和光线。道具可以增减或更换，但 transition 与 continuity_anchor 必须说明画面内可见的变化来源；连续动作跨越 4 个以上镜头时要主动检查节奏，避免机械拆分。
+- 出镜对白可以跨越连续镜头边界，但必须保持说话角色、口型节奏和动作衔接；切换说话者或改变构图时优先拆成新的非连续镜头。
 - speech.kind 只能是 dialogue 或 narration；每条语音必须有稳定唯一 id、非空 text 和镜头内 start_time。没有语音时使用空数组。
 - dialogue 必须提供当前镜头中的 character_id，并用 speaker_mode=visible/offscreen 表示出镜对白或画外音；narration 不提供角色字段。
 - 同一镜头最多一个出镜说话角色。所有语音不得重叠；中文按每秒约 3 到 4 个非空白字符预估。逐条检查 start_time + 字符数/3.5 不得超过 duration；放不下时优先精简原意或增加该镜头时长，并同步更新 target_duration。
@@ -341,10 +341,7 @@ func normalizeStoryboardShots(value any, materialTypes map[string]string, materi
 	shotIDs := make(map[string]struct{}, len(items))
 	speechIDs := make(map[string]struct{})
 	captionIDs := make(map[string]struct{})
-	var previousMaterialIDs map[string]struct{}
-	previousVisibleDialogue := false
 	previousExitState := ""
-	continuityChainLength := 0
 	for index, item := range items {
 		row, ok := item.(map[string]any)
 		if !ok {
@@ -390,19 +387,10 @@ func normalizeStoryboardShots(value any, materialTypes map[string]string, materi
 		referenceKeys := normalizeStoryboardReferenceKeys(row["reference_keys"])
 		matchPrevious, _ := row["match_previous"].(bool)
 		continuePrevious, _ := row["continue_previous"].(bool)
-		if index == 0 && (matchPrevious || continuePrevious) {
-			return nil, fmt.Errorf("第一个镜头不能匹配或延续上一镜头")
-		}
-		if matchPrevious && continuePrevious {
-			return nil, fmt.Errorf("镜头 %d 不能同时匹配上一镜画面和延续上一镜视频", index+1)
-		}
 		matchesPrevious := index > 0 && matchPrevious
 		continuesPrevious := index > 0 && continuePrevious
-		if continuesPrevious && storyboardMaterialSetChanged(previousMaterialIDs, materialIDSet) {
-			return nil, fmt.Errorf("镜头 %d 连续镜头不能新增、移除或更换角色、场景或道具", index+1)
-		}
-		if continuesPrevious && continuityChainLength >= 2 {
-			return nil, fmt.Errorf("镜头 %d 所在连续镜头链不能超过 3 个镜头", index+1)
+		if continuesPrevious {
+			matchesPrevious = false
 		}
 
 		speech := normalizeStoryboardSpeech(
@@ -414,19 +402,13 @@ func normalizeStoryboardShots(value any, materialTypes map[string]string, materi
 			materialIDSet,
 		)
 		duration = normalizeEstimatedStoryboardSpeech(speech, duration)
-		visibleDialogue := storyboardSpeechHasVisibleDialogue(speech)
-		if continuesPrevious && (previousVisibleDialogue || visibleDialogue) {
-			return nil, fmt.Errorf("镜头 %d 的出镜对白不能跨越连续镜头边界", index+1)
-		}
 		continuityAnchor := ""
 		if continuesPrevious {
-			continuityAnchor = requiredString(row, "continuity_anchor")
-			if continuityAnchor == "" {
-				return nil, fmt.Errorf("镜头 %d 承接上一镜头时必须填写连续性锚点", index+1)
-			}
-			continuityChainLength++
-		} else {
-			continuityChainLength = 0
+			continuityAnchor = firstStoryboardText(
+				requiredString(row, "continuity_anchor"),
+				transition,
+				"承接上一镜头结束状态，保持角色、场景、主体位置、姿态、动作方向与光线连续，并说明道具变化",
+			)
 		}
 		continuityState, err := normalizeStoryboardContinuityState(
 			row["continuity_state"],
@@ -459,8 +441,6 @@ func normalizeStoryboardShots(value any, materialTypes map[string]string, materi
 			"speech":                 speech,
 			"captions":               captions,
 		})
-		previousMaterialIDs = materialIDSet
-		previousVisibleDialogue = visibleDialogue
 		previousExitState = requiredString(continuityState, "exit")
 	}
 	if len(shots) == 0 {
@@ -652,16 +632,6 @@ func normalizeStoryboardCaptions(
 	return result
 }
 
-func storyboardSpeechHasVisibleDialogue(values []any) bool {
-	for _, value := range values {
-		row, _ := value.(map[string]any)
-		if requiredString(row, "kind") == "dialogue" && requiredString(row, "speaker_mode") == "visible" {
-			return true
-		}
-	}
-	return false
-}
-
 func normalizeStoryboardMaterials(value any) ([]any, map[string]string, map[string]string, error) {
 	items, ok := storyboardValueItems(value)
 	if !ok {
@@ -739,18 +709,6 @@ func normalizeStoryboardMaterialIDs(
 		result = append(result, id)
 	}
 	return result, seen
-}
-
-func storyboardMaterialSetChanged(previous map[string]struct{}, current map[string]struct{}) bool {
-	if len(previous) != len(current) {
-		return true
-	}
-	for id := range previous {
-		if _, exists := current[id]; !exists {
-			return true
-		}
-	}
-	return false
 }
 
 func storyboardValueItems(value any) ([]any, bool) {

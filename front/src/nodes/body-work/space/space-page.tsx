@@ -34,39 +34,29 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronDown,
-  Columns3,
   Compass,
-  Crop,
-  Download,
   Eye,
   FileText,
   FileSearch,
   GitBranch,
   History,
   Image as ImageIcon,
-  Layers,
   Lightbulb,
   Loader2,
-  Maximize2,
   Minus,
   Moon,
-  MoreHorizontal,
   MousePointer2,
   PenTool,
   Play,
   Plus,
-  RotateCw,
   Save,
-  Scissors,
   Sun,
   Type,
-  Users,
   UserCheck,
   Upload,
   Video,
   Workflow,
   X,
-  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -87,7 +77,9 @@ import {
   submitSpaceCanvasFeedback,
   submitSpaceInteraction,
   runSpaceCanvas,
+  saveSpaceAssetEditVersion,
   saveSpaceCanvasContent,
+  saveSpaceCanvasMaterial,
 } from "./space-api";
 import { useCanvasAutosave, type CanvasSaveStatus } from "./space-autosave";
 import {
@@ -108,7 +100,7 @@ import {
   withCanvasNodeGroupAtPosition,
   withMovedCanvasNode,
 } from "./space-group-model";
-import { PowerIcon } from "./space-power-icon";
+import { PowerIcon } from "../shared/power-icon";
 import {
   CanvasViewControls,
   NodeActionMenu,
@@ -142,7 +134,6 @@ import {
   withRunResultAsset,
 } from "./space-assets";
 import { buildNodeResultRef, canvasResultSourceFromNode } from "./space-result";
-import { WorkspaceSurface } from "./space-asset-viewer";
 import {
   buildCanvasAssetIndex,
   type CanvasAssetEntry,
@@ -177,26 +168,29 @@ import {
 } from "./space-feedback";
 import { uploadSpaceFiles } from "./space-upload";
 import {
+  documentPreview,
+  looseRichJSONText,
+  richDocument,
+  safeDocumentText,
+  safeRichDocument,
+} from "../shared/rich-document";
+import {
   assetCateById,
   assetCateFromList,
   createLocalNode,
   defaultAssetCateId,
   defaultCanvasNodeTitle,
-  documentPreview,
-  documentText,
   emptyCanvasState,
   hasDefaultCanvasNodeSize,
   hydrateCanvasPowerCatalog,
   isCreationPower,
   isCreationRole,
-  looseRichJSONText,
   nextCanvasNodeNo,
   normalizeCanvasComposerDraft,
   normalizeCanvasNodeIdentities,
   normalizeProjectAsset,
   powerNodeDefaultSize,
   relatedFlows,
-  richDocument,
   visibleAssetCates,
 } from "./space-model";
 import type {
@@ -204,6 +198,7 @@ import type {
   CanvasComposerDraft,
   CanvasContentPreview,
   CanvasReferenceContent,
+  CanvasResultRef,
   CanvasStoryboardReference,
   CanvasFunctionOption,
   CanvasResultSourceRef,
@@ -224,15 +219,16 @@ import { EditableCanvasNodeTitle } from "./space-node-title";
 import {
   type ComposerAssetItem,
   type UploadPreview,
-  PromptComposer,
+} from "./space-prompt-composer";
+import {
   isPromptPowerParam,
   isToolbarPowerParam,
   isUploadPowerParam,
-} from "./space-prompt-composer";
+} from "./space-media-param";
 import {
   defaultPowerParamValues,
-  isPowerParamOptionSelected,
   normalizePowerParamValue,
+  resolvePowerParamOption,
 } from "./space-power-param";
 import {
   canvasMediaReferenceKind,
@@ -249,15 +245,22 @@ import {
   contentOutputNeedsRenderer,
 } from "./space-content-view";
 import {
+  firstNonEmptyText,
+  contentOutputMediaURLs,
+  parseStoryboardGridOutput,
   normalizeEnergonOutput,
   plainMarkdownTextFromRichOutput,
   preferRicherMediaOutput,
-} from "./space-content-output";
+  type StoryboardGridDocument,
+  type StoryboardGridFrame,
+} from "../shared/content-output";
+import { StoryboardGridCanvasView } from "../shared/storyboard-grid-view";
 import {
   isAudioPowerType,
+  isStoryboardGridPowerType,
   isVideoComposePowerType,
   resolvePowerPresentation,
-} from "./space-power-presentation";
+} from "../shared/power-presentation";
 import {
   canvasStoryboardReferenceSourceSignature,
   isStoryboardDerivedPromptOverridden,
@@ -286,10 +289,13 @@ import {
   type StoryboardEditorFocus,
 } from "./space-storyboard";
 import {
+  firstDefinedValue as firstDefined,
   parseMaybeEmbeddedJSON,
   parseMaybeJSON,
   repairJSONControlChars,
-} from "./space-structured-json";
+  safeJSONString,
+  uniqueNonEmptyStrings,
+} from "../shared/structured-json";
 import type { StoryboardNodeStatus } from "./space-storyboard-node";
 import { reconcileStoryboardReferences } from "./space-storyboard-reference";
 import { useCanvasNodeRunError } from "./space-run-error";
@@ -305,17 +311,43 @@ import {
   CanvasAgentResultContent,
   CanvasGroupNodeView,
   CanvasResultView,
+  hasResultPreviewMedia,
   CanvasRunHistoryDrawer,
   NodeDetailDialog,
+  PromptComposer,
   StoryboardInputReferenceEditor,
   StoryboardNodeContent,
   VideoComposeView,
+  preloadAddNodeMenu,
+  preloadAssetBrowser,
+  preloadAssetPickerDialog,
+  preloadCanvasRunHistoryDrawer,
+  preloadNodeDetailDialog,
+  preloadPromptComposer,
 } from "./space-optional-components";
 const { normalizeAgentResultOutputValue } = getCompatModule(
   "@/lib/agent-result-protocol",
 ) as {
   normalizeAgentResultOutputValue?: (value: any) => any;
 };
+const streamRequestParamsModule = getCompatModule(
+  "@/components/agent/stream-request-params",
+);
+const filterActivePowerParams =
+  (streamRequestParamsModule.filterActivePowerParams as
+    | ((
+        params: PowerParam[],
+        values: Record<string, unknown>,
+      ) => PowerParam[])
+    | undefined) || ((params: PowerParam[]) => params);
+const isPowerParamConditionController =
+  (streamRequestParamsModule.isPowerParamConditionController as
+    | ((param: PowerParam, params: PowerParam[]) => boolean)
+    | undefined) || (() => false);
+const shouldDisplayPowerParam =
+  (streamRequestParamsModule.shouldDisplayPowerParam as
+    | ((param: PowerParam, params: PowerParam[]) => boolean)
+    | undefined) || (() => true);
 
 type WorkMode = "create" | "result";
 type WorkSpaceTheme = "dark" | "light";
@@ -353,6 +385,10 @@ type NodeResultSetter = (
 ) => void;
 type NodeDraftSetter = (nodeId: string, draft: CanvasComposerDraft) => void;
 type ComposerDraft = CanvasComposerDraft;
+type StoryboardGridImportRequest = {
+  nodeId: string;
+  frameIndex?: number;
+};
 type NodeStartRunner = (node: SpaceCanvasNode) => Promise<void>;
 type StoryboardFrameRunner = (sourceNodeId: string) => Promise<void>;
 type BackendNodeRunOptions = {
@@ -647,6 +683,8 @@ export function WorkSpacePage({
     useState<NodeFocusRequest | null>(null);
   const [importPickerOpen, setImportPickerOpen] = useState(false);
   const [pendingImportNodeId, setPendingImportNodeId] = useState("");
+  const [storyboardGridImport, setStoryboardGridImport] =
+    useState<StoryboardGridImportRequest | null>(null);
   const [error, setError] = useState("");
   const [canvasRunRecords, setCanvasRunRecords] = useState<
     WorkspaceCanvasRunRef[]
@@ -667,6 +705,7 @@ export function WorkSpacePage({
   const [startFlowFeedbackSubmitting, setStartFlowFeedbackSubmitting] =
     useState(false);
   const pendingImportNodeRef = useRef<SpaceCanvasNode | null>(null);
+  const storyboardGridImportSavingRef = useRef(false);
   const requestedNodeTitlesRef = useRef<Set<string>>(new Set());
   const appliedCanvasRunsRef = useRef<Set<string>>(new Set());
   const changedCanvasKeysRef = useRef<Set<number>>(new Set());
@@ -894,6 +933,7 @@ export function WorkSpacePage({
 
   const openImportPickerByNodeId = useCallback(
     (nodeId = "") => {
+      void preloadAssetPickerDialog();
       setPendingImportNodeId(nodeId);
       pendingImportNodeRef.current =
         activeCanvas.nodes.find((node) => node.id === nodeId) ||
@@ -1079,6 +1119,7 @@ export function WorkSpacePage({
 
   const showNodeDetail = useCallback(
     (node: SpaceCanvasNode, focus?: StoryboardEditorFocus) => {
+      void preloadNodeDetailDialog();
       setStoryboardDetailFocus(focus);
       setNodeDetail(node);
     },
@@ -2338,6 +2379,99 @@ export function WorkSpacePage({
     pendingImportNodeRef.current = null;
   }
 
+  function openStoryboardGridImport(nodeId: string, frameIndex?: number) {
+    void preloadAssetPickerDialog();
+    setStoryboardGridImport({ nodeId, frameIndex });
+    setNodeMenu(null);
+    setWorkMode("create");
+  }
+
+  async function useStoryboardGridImportedAssets(assets: AssetRecord[]) {
+    const request = storyboardGridImport;
+    if (!request || storyboardGridImportSavingRef.current) {
+      return;
+    }
+    const node = canvasModel.nodes.find((item) => item.id === request.nodeId);
+    if (!node) {
+      toast.error("宫格节点不存在");
+      return;
+    }
+    const selectedImages = assets.filter(
+      (asset) => asset.kind === "image" && asset.id > 0 && asset.versionID > 0,
+    );
+    const replacingSingleFrame = Number.isInteger(request.frameIndex);
+    if (replacingSingleFrame && selectedImages.length === 0) {
+      toast.error("请选择一张图片");
+      return;
+    }
+    if (!replacingSingleFrame && selectedImages.length === 0) {
+      toast.error("请至少选择一张图片");
+      return;
+    }
+
+    const currentGrid = parseStoryboardGridOutput([
+      node.asset?.version?.content,
+      node.resultOutput,
+    ]);
+    const nextGrid = replacingSingleFrame
+      ? storyboardGridWithImportedFrame(
+          currentGrid,
+          Number(request.frameIndex),
+          selectedImages[0],
+          node.title,
+        )
+      : storyboardGridDocumentFromAssets(
+          selectedImages,
+          currentGrid,
+          node.title,
+        );
+    if (!nextGrid) {
+      toast.error("当前宫格内容不可编辑");
+      return;
+    }
+
+    storyboardGridImportSavingRef.current = true;
+    try {
+      const currentAssetID = Number(node.asset?.id || 0);
+      const currentVersionID = Number(
+        node.asset?.version?.id || node.asset?.version_id || 0,
+      );
+      const savedAsset =
+        currentAssetID > 0 && currentVersionID > 0
+          ? await saveSpaceAssetEditVersion({
+              projectId,
+              assetId: currentAssetID,
+              versionId: currentVersionID,
+              content: nextGrid,
+            })
+          : await saveSpaceCanvasMaterial({
+              projectId,
+              assetCateId: Number(node.assetCateId || activeCate?.id || 0),
+              name: nextGrid.title || node.title || "宫格图片",
+              kind: "collection",
+              content: nextGrid,
+              nodeKey: node.id,
+              requestId: `storyboard-grid-import:${node.id}:${Date.now()}`,
+            });
+      const normalizedAsset = mergeProjectAssetVersionHistory(
+        savedAsset,
+        node.asset,
+      );
+      upsertSpaceAsset(normalizedAsset);
+      updateNodeResult(
+        node.id,
+        buildAssetVersionNodePatch(node, normalizedAsset),
+      );
+      toast.success(
+        replacingSingleFrame ? "宫格图片已替换" : "图片已导入宫格",
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "导入宫格图片失败");
+    } finally {
+      storyboardGridImportSavingRef.current = false;
+    }
+  }
+
   function addPowerNode(power: PowerOption, position?: CanvasPoint) {
     addConfiguredNode("power", position, { power });
   }
@@ -2392,6 +2526,7 @@ export function WorkSpacePage({
     position: CanvasPoint,
     connection?: PendingNodeConnection,
   ) {
+    void preloadAddNodeMenu();
     setWorkMode("create");
     setNodeMenu({
       x: screen.x,
@@ -2473,6 +2608,7 @@ export function WorkSpacePage({
         onRunFunctionNode={runFunctionNodeAction}
         onRunBackendNode={runBackendSingleNode}
         onOpenImportPicker={openImportPicker}
+        onOpenStoryboardGridImport={openStoryboardGridImport}
         onClearFeedbackRecords={clearNodeFeedbackRecords}
         requestConfirm={requestConfirm}
         onOpenFeedbackRecord={openNodeFeedbackRecord}
@@ -2492,6 +2628,7 @@ export function WorkSpacePage({
           setCanvasRunHistoryOpen(true);
           void loadWorkspaceCanvasHistory(projectId, 0);
         }}
+        onRunHistoryIntent={preloadCanvasRunHistoryDrawer}
         theme={theme}
         onToggleTheme={toggleTheme}
       />
@@ -2538,6 +2675,11 @@ export function WorkSpacePage({
 
       <LeftCanvasDock
         mode={workMode}
+        onModeIntent={(mode) => {
+          if (mode === "result") {
+            void preloadAssetBrowser();
+          }
+        }}
         onSelectMode={(mode) => {
           setWorkMode(mode);
           setNodeMenu(null);
@@ -2573,8 +2715,53 @@ export function WorkSpacePage({
         </Suspense>
       ) : null}
 
+      {storyboardGridImport ? (
+        <Suspense
+          fallback={<CanvasModuleLoading label="正在加载图片选择器" overlay />}
+        >
+          <AssetPickerDialog
+            open
+            teamID={space.project.team_id}
+            scopeProjectID={space.project.id}
+            title={
+              Number.isInteger(storyboardGridImport.frameIndex)
+                ? "替换宫格图片"
+                : "导入宫格图片"
+            }
+            description={
+              Number.isInteger(storyboardGridImport.frameIndex)
+                ? "选择一张已有图片或上传本地图片。"
+                : "选择 1-9 张已有图片，或上传本地图片。"
+            }
+            initialFilters={{
+              sourceType: "project",
+              projectID: space.project.id,
+              kind: "image",
+            }}
+            allowedKinds={["image"]}
+            multiple={!Number.isInteger(storyboardGridImport.frameIndex)}
+            maxSelection={9}
+            confirmSelection
+            contentMode="full"
+            uploadAccept="image/*"
+            validateAsset={(asset) =>
+              asset.kind !== "image"
+                ? "请选择图片资产。"
+                : asset.versionID > 0
+                  ? ""
+                  : "该图片没有可用版本，无法导入。"
+            }
+            onUpload={uploadImportAssets}
+            onClose={() => setStoryboardGridImport(null)}
+            onConfirm={(assets) => {
+              void useStoryboardGridImportedAssets(assets);
+            }}
+          />
+        </Suspense>
+      ) : null}
+
       {workMode === "result" ? (
-        <WorkspaceSurface className="ws-asset-workspace">
+        <div className="ws-workspace-overlay ws-asset-workspace">
           <Suspense fallback={<CanvasModuleLoading label="正在加载资产" />}>
             <AssetBrowser
               teamID={space.project.team_id}
@@ -2595,7 +2782,7 @@ export function WorkSpacePage({
               }
             />
           </Suspense>
-        </WorkspaceSurface>
+        </div>
       ) : null}
 
       {startFlowFeedbackPrompt ? (
@@ -2737,6 +2924,7 @@ function TopCanvasToolbar({
   onSelectCate,
   onRefresh,
   onOpenRunHistory,
+  onRunHistoryIntent,
   theme,
   onToggleTheme,
 }: {
@@ -2750,6 +2938,7 @@ function TopCanvasToolbar({
   onSelectCate: (cateId: number) => void | Promise<boolean>;
   onRefresh: () => void;
   onOpenRunHistory: () => void;
+  onRunHistoryIntent: () => void;
   theme: WorkSpaceTheme;
   onToggleTheme: () => void;
 }) {
@@ -2813,6 +3002,8 @@ function TopCanvasToolbar({
           <button
             type="button"
             className="ws-action"
+            onPointerEnter={onRunHistoryIntent}
+            onFocus={onRunHistoryIntent}
             onClick={onOpenRunHistory}
           >
             <History size={15} />
@@ -2866,9 +3057,11 @@ const dockModeOptions: Array<{
 
 function LeftCanvasDock({
   mode,
+  onModeIntent,
   onSelectMode,
 }: {
   mode: WorkMode;
+  onModeIntent: (mode: WorkMode) => void;
   onSelectMode: (mode: WorkMode) => void;
 }) {
   return (
@@ -2880,6 +3073,8 @@ function LeftCanvasDock({
             key={item.key}
             type="button"
             className={`ws-dock-button ${item.key === mode ? "is-active" : ""}`}
+            onPointerEnter={() => onModeIntent(item.key)}
+            onFocus={() => onModeIntent(item.key)}
             onClick={() => onSelectMode(item.key)}
           >
             <Icon size={20} />
@@ -2925,6 +3120,7 @@ function CanvasWorkbench({
   onRunFunctionNode,
   onRunBackendNode,
   onOpenImportPicker,
+  onOpenStoryboardGridImport,
   onClearFeedbackRecords,
   requestConfirm,
   onOpenFeedbackRecord,
@@ -2971,6 +3167,7 @@ function CanvasWorkbench({
   onRunStoryboardFrame: StoryboardFrameRunner;
   onRunFunctionNode: FunctionNodeRunner;
   onOpenImportPicker: (nodeId: string) => void;
+  onOpenStoryboardGridImport: (nodeId: string, frameIndex?: number) => void;
   onClearFeedbackRecords: (nodeIds: string[]) => void;
   requestConfirm: ConfirmRequester;
   onRunBackendNode: BackendNodeRunner;
@@ -3078,13 +3275,13 @@ function CanvasWorkbench({
     }
   };
   const nodeActionsRef = useRef({
-    onAddConfiguredNode,
     onNodeResult,
     onNodeDraftChange,
     onAssetCreated,
     onRunStartNode,
     onRunFunctionNode,
     onOpenImportPicker,
+    onOpenStoryboardGridImport,
     onClearFeedbackRecords,
     onOpenFeedbackRecord,
     onShowNodeDetail,
@@ -3097,13 +3294,13 @@ function CanvasWorkbench({
     onResultViewResizeEnd: resizeResultView,
   });
   nodeActionsRef.current = {
-    onAddConfiguredNode,
     onNodeResult,
     onNodeDraftChange,
     onAssetCreated,
     onRunStartNode,
     onRunFunctionNode,
     onOpenImportPicker,
+    onOpenStoryboardGridImport,
     onClearFeedbackRecords,
     onOpenFeedbackRecord,
     onShowNodeDetail,
@@ -3117,12 +3314,6 @@ function CanvasWorkbench({
   };
   const stableNodeActions = useMemo(
     () => ({
-      onAddConfiguredNode: (
-        type: SpaceCanvasNode["type"],
-        position?: CanvasPoint,
-        options?: Parameters<AddConfiguredNodeHandler>[2],
-      ) =>
-        nodeActionsRef.current.onAddConfiguredNode?.(type, position, options),
       onNodeResult: (nodeId: string, patch: Partial<SpaceCanvasNode>) =>
         nodeActionsRef.current.onNodeResult(nodeId, patch),
       onNodeDraftChange: (nodeId: string, draft: ComposerDraft) =>
@@ -3135,6 +3326,8 @@ function CanvasWorkbench({
         nodeActionsRef.current.onRunFunctionNode(node),
       onOpenImportPicker: (nodeId: string) =>
         nodeActionsRef.current.onOpenImportPicker(nodeId),
+      onOpenStoryboardGridImport: (nodeId: string, frameIndex?: number) =>
+        nodeActionsRef.current.onOpenStoryboardGridImport(nodeId, frameIndex),
       onClearFeedbackRecords: (nodeIds: string[]) =>
         nodeActionsRef.current.onClearFeedbackRecords(nodeIds),
       onOpenFeedbackRecord: (
@@ -3939,7 +4132,14 @@ function CanvasWorkbench({
                 targetId,
               }),
           );
-          const options = mediaUsageOptions(form.params || []);
+          const formParams = form.params || [];
+          const formValues = mergeSavedComposerParamValues(
+            formParams,
+            readNodeComposerDraft(targetNode),
+          );
+          const options = mediaUsageOptions(
+            filterActivePowerParams(formParams, formValues),
+          );
           const assignment = nextMediaUsageForSources(
             canvasIncomingMediaConnections(
               nodes,
@@ -4694,6 +4894,11 @@ function CanvasWorkbench({
       ref={canvasWrapRef}
       className={canvasWrapClassName}
       style={canvasOverlayVariables(viewportZoom)}
+      onPointerEnter={() => {
+        void preloadAddNodeMenu();
+        void preloadNodeDetailDialog();
+        void preloadPromptComposer();
+      }}
       onPointerDownCapture={handleCanvasPointerDown}
       onPointerMoveCapture={handleCanvasPointerMove}
       onPointerUpCapture={finishCanvasPointerSelection}
@@ -4718,7 +4923,7 @@ function CanvasWorkbench({
           strokeDasharray: "8 6",
         }}
         onEdgeClick={handleEdgeClick}
-        onNodeClick={(_, node: Node) => {
+        onNodeClick={() => {
           if (!interactive) {
             return;
           }
@@ -4739,7 +4944,11 @@ function CanvasWorkbench({
         onNodeDragStop={handleNodeDragStop}
         onDragOver={onDragOver}
         onDrop={onDrop}
-        onNodeMouseEnter={(_, node: Node) => setHoveredNodeId(node.id)}
+        onNodeMouseEnter={(_, node: Node) => {
+          setHoveredNodeId(node.id);
+          void preloadNodeDetailDialog();
+          void preloadPromptComposer();
+        }}
         onNodeMouseLeave={() => setHoveredNodeId("")}
         onInit={(instance) => {
           const nextInstance = instance as FlowViewport;
@@ -4930,22 +5139,6 @@ function CanvasConfirmDialog({
   );
 }
 
-function safeRichDocument(value: any): ReturnType<typeof richDocument> {
-  try {
-    return richDocument(value);
-  } catch {
-    return null;
-  }
-}
-
-function safeDocumentText(value: any) {
-  try {
-    return documentText(value);
-  } catch {
-    return "";
-  }
-}
-
 type FlowViewport = {
   screenToFlowPosition?: (position: CanvasPoint) => CanvasPoint;
   project?: (position: CanvasPoint) => CanvasPoint;
@@ -5069,6 +5262,91 @@ function markStoryboardRunResultsCurrent({
   return current;
 }
 
+function storyboardGridDocumentFromAssets(
+  assets: AssetRecord[],
+  currentGrid: StoryboardGridDocument | null,
+  fallbackTitle: string,
+): StoryboardGridDocument {
+  return {
+    type: "storyboard_grid",
+    version: Math.max(1, Number(currentGrid?.version || 1)),
+    title: firstNonEmptyText(currentGrid?.title, fallbackTitle, "宫格图片"),
+    summary: currentGrid?.summary || "",
+    frames: Array.from({ length: 9 }, (_, index) =>
+      assets[index]
+        ? storyboardGridFrameFromAsset(assets[index], index)
+        : emptyStoryboardGridFrame(index),
+    ),
+  };
+}
+
+function storyboardGridWithImportedFrame(
+  grid: StoryboardGridDocument | null,
+  frameIndex: number,
+  asset: AssetRecord,
+  fallbackTitle: string,
+): StoryboardGridDocument | null {
+  if (frameIndex < 0 || frameIndex >= 9) {
+    return null;
+  }
+  const current =
+    grid || storyboardGridDocumentFromAssets([], null, fallbackTitle);
+  const imported = storyboardGridFrameFromAsset(asset, frameIndex);
+  return {
+    ...current,
+    frames: Array.from(
+      { length: 9 },
+      (_, index) => current.frames[index] || emptyStoryboardGridFrame(index),
+    ).map((frame, index) =>
+      index === frameIndex
+        ? {
+            ...frame,
+            image: imported.image,
+            status: "success",
+            error: "",
+            assetID: imported.assetID,
+            assetVersionID: imported.assetVersionID,
+          }
+        : frame,
+    ),
+  };
+}
+
+function emptyStoryboardGridFrame(index: number): StoryboardGridFrame {
+  const order = index + 1;
+  return {
+    id: `frame-${String(order).padStart(2, "0")}`,
+    order,
+    title: `画面 ${String(order).padStart(2, "0")}`,
+    description: "",
+    prompt: "",
+    status: "pending",
+    image: "",
+    error: "",
+    assetID: 0,
+    assetVersionID: 0,
+  };
+}
+
+function storyboardGridFrameFromAsset(
+  asset: AssetRecord,
+  index: number,
+): StoryboardGridFrame {
+  const order = index + 1;
+  return {
+    id: `frame-${String(order).padStart(2, "0")}`,
+    order,
+    title: asset.name || `画面 ${String(order).padStart(2, "0")}`,
+    description: "",
+    prompt: "",
+    status: "success",
+    image: contentOutputMediaURLs(asset.version?.content, "image")[0] || "",
+    error: "",
+    assetID: asset.id,
+    assetVersionID: asset.versionID,
+  };
+}
+
 function buildGeneratedNodeResultPatch(
   node: SpaceCanvasNode,
   result: any,
@@ -5101,14 +5379,30 @@ function buildGeneratedNodeResultPatch(
           output,
         ])
       : null;
-  const resultKind = firstText(
+  const storyboardGrid =
+    node.type === "power" &&
+    isStoryboardGridPowerType(node.power, node.kind, node.outputType)
+      ? parseStoryboardGridOutput([
+          rawOutput,
+          result?.asset?.version?.content,
+          result?.version?.content,
+          result?.result,
+          output,
+        ])
+      : null;
+  const resultKind = firstNonEmptyText(
     String(result?.asset?.kind || ""),
     String(result?.kind || ""),
     nodePreviewKind(node, output),
   );
   const preview = generatedPreviewFromValue(output, resultKind);
   const outputText = displayTextFromOutput(output, "");
+  const generatedTitle = firstNonEmptyText(
+    storyboardGrid?.title,
+    storyboard?.title,
+  );
   const summary =
+    storyboardGrid?.summary ||
     storyboard?.summary ||
     preview.text ||
     (!looksLikeURL(outputText) ? outputText : "") ||
@@ -5119,12 +5413,12 @@ function buildGeneratedNodeResultPatch(
     (fallbackPrompt ? `已按提示生成：${fallbackPrompt}` : "生成完成");
 
   return {
-    ...(storyboard?.title && node.titleMode === "auto"
-      ? { title: storyboard.title }
+    ...(generatedTitle && node.titleMode === "auto"
+      ? { title: generatedTitle }
       : {}),
     description: summary,
     resultRef: buildNodeResultRef(result),
-    resultOutput: storyboard || output,
+    resultOutput: storyboardGrid || storyboard || output,
     asset: result?.asset || node.asset,
     kind: result?.asset?.kind || node.power?.kind || node.kind,
   };
@@ -5238,14 +5532,6 @@ function mergeSavedComposerParamValues(
     values[promptParam.key] = draft.prompt;
   }
   return values;
-}
-
-function safeJSONString(value: unknown) {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "";
-  }
 }
 
 function createStableNodeFeedbackRecord(
@@ -7312,12 +7598,6 @@ function requireRealAssetCateId(assetCateId: number) {
   return Math.max(0, Number(assetCateId || 0));
 }
 
-function activeCanvasAssets(nodes: SpaceCanvasNode[]) {
-  return nodes
-    .map((node) => node.asset)
-    .filter((asset): asset is ProjectAsset => Boolean(asset?.id));
-}
-
 function generatedNodePreview(node: SpaceCanvasNode): GeneratedNodePreview {
   const output = nodeContextOutput(node);
   const preview = generatedPreviewFromValue(
@@ -7333,14 +7613,14 @@ function generatedNodePreview(node: SpaceCanvasNode): GeneratedNodePreview {
 function nodePreviewKind(node: SpaceCanvasNode, output: unknown) {
   const outputKind = previewKindFromOutput(output);
   if (node.type === "power") {
-    return firstText(
+    return firstNonEmptyText(
       String(node.power?.kind || ""),
       outputKind,
       String(node.asset?.kind || ""),
       String(node.kind || ""),
     );
   }
-  return firstText(
+  return firstNonEmptyText(
     String(node.asset?.kind || ""),
     String(node.power?.kind || ""),
     outputKind,
@@ -7380,6 +7660,15 @@ function storyboardNodeOutput(node: SpaceCanvasNode) {
     node.resultOutput,
     nodeEnergonOutput(node),
   ];
+}
+
+function storyboardGridAspectRatio(node: SpaceCanvasNode) {
+  const values = node.composerDraft?.paramValues || {};
+  return firstNonEmptyText(
+    values.aspectRatio,
+    values.aspect_ratio,
+    values.ratio,
+  );
 }
 
 function fixedTiptapRichDocumentFromNode(node: SpaceCanvasNode) {
@@ -7522,7 +7811,11 @@ function normalizeEnergonDisplayValue(value: any, seen: Set<any>): any {
     return normalizeAgentResultPayloadForEnergon(parsed);
   }
   if (isRunEnvelope(parsed)) {
-    const text = firstText(parsed.message, parsed.error, parsed.status);
+    const text = firstNonEmptyText(
+      parsed.message,
+      parsed.error,
+      parsed.status,
+    );
     return text ? { text } : "";
   }
   return hasMeaningfulObjectOutput(parsed) ? parsed : "";
@@ -7561,7 +7854,7 @@ function normalizeAgentResultPayloadForEnergon(value: Record<string, any>) {
 }
 
 function agentResultPayloadText(value: Record<string, any>) {
-  const direct = firstText(value.text);
+  const direct = firstNonEmptyText(value.text);
   if (direct) {
     return direct;
   }
@@ -7570,18 +7863,9 @@ function agentResultPayloadText(value: Record<string, any>) {
     return content.trim();
   }
   if (content && typeof content === "object" && !Array.isArray(content)) {
-    return firstText((content as Record<string, any>).text);
+    return firstNonEmptyText((content as Record<string, any>).text);
   }
   return "";
-}
-
-function isAgentResultProtocolText(value: unknown) {
-  const text = typeof value === "string" ? value.trim() : "";
-  return (
-    text.includes("```agent-result") ||
-    text.includes("```agent-output") ||
-    Boolean(parseAgentResultBlock(text) !== text)
-  );
 }
 
 function normalizeDisplayOutputForCanvas(value: any): any {
@@ -7721,18 +8005,6 @@ function collectTiptapTextValues(value: any, seen = new Set<any>()): string[] {
     values.push(...collectTiptapTextValues(value.content, seen));
   }
   return values;
-}
-
-function uniqueNonEmptyStrings(values: string[]) {
-  const seen = new Set<string>();
-  return values.filter((value) => {
-    const text = String(value || "").trim();
-    if (!text || seen.has(text)) {
-      return false;
-    }
-    seen.add(text);
-    return true;
-  });
 }
 
 function fixedRichDisplayOutput(value: any): any {
@@ -8086,7 +8358,7 @@ function generatedPreviewFromValue(
     fillGeneratedPreview(preview, value, kind);
   }
   if (
-    hasPreviewMedia(preview) &&
+    hasResultPreviewMedia(preview) &&
     looksLikeStructuredJSONSnippet(preview.text)
   ) {
     preview.text = "";
@@ -8099,7 +8371,7 @@ function mergeGeneratedPreview(
   fallback: GeneratedNodePreview,
 ): GeneratedNodePreview {
   return {
-    text: firstText(primary.text, fallback.text),
+    text: firstNonEmptyText(primary.text, fallback.text),
     imageUrl: primary.imageUrl || fallback.imageUrl,
     videoUrl: primary.videoUrl || fallback.videoUrl,
     audioUrl: primary.audioUrl || fallback.audioUrl,
@@ -8127,7 +8399,7 @@ function fillGeneratedPreview(
   if (Array.isArray(value)) {
     for (const item of value) {
       fillGeneratedPreview(preview, item, kind, seen, depth + 1);
-      if (hasPreviewMedia(preview)) {
+      if (hasResultPreviewMedia(preview)) {
         return;
       }
     }
@@ -8181,11 +8453,11 @@ function fillGeneratedPreview(
     firstArrayValue(row.fileUrls),
   );
 
-  if (!hasPreviewMedia(preview)) {
+  if (!hasResultPreviewMedia(preview)) {
     for (const key of ["output", "result", "content", "body", "data", "rich"]) {
       if (row[key] && typeof row[key] === "object") {
         fillGeneratedPreview(preview, row[key], kind, seen, depth + 1);
-        if (hasPreviewMedia(preview)) {
+        if (hasResultPreviewMedia(preview)) {
           return;
         }
       }
@@ -8399,7 +8671,7 @@ function setPreviewString(
     const parsed = parseMaybeJSON(text);
     if (parsed !== text) {
       fillGeneratedPreview(preview, parsed, kind);
-      if (hasPreviewMedia(preview)) {
+      if (hasResultPreviewMedia(preview)) {
         return;
       }
     }
@@ -8611,32 +8883,13 @@ function hasGeneratedPreview(preview: GeneratedNodePreview) {
   );
 }
 
-function hasPreviewMedia(preview: GeneratedNodePreview) {
-  return Boolean(
-    preview.imageUrl || preview.videoUrl || preview.audioUrl || preview.fileUrl,
-  );
-}
-
-function firstDefined(...values: any[]) {
-  return values.find((value) => value !== undefined && value !== null);
-}
-
-function firstText(...values: any[]) {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-  return "";
-}
-
 function firstMediaText(...values: any[]) {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) {
       return value.trim();
     }
     if (value && typeof value === "object") {
-      const text = firstText(
+      const text = firstNonEmptyText(
         value.url,
         value.src,
         value.href,
@@ -10099,9 +10352,6 @@ function NodeSelectionOverlays({
   const onNodeDraftChange = (node as any).onNodeDraftChange as
     | NodeDraftSetter
     | undefined;
-  const onAddConfiguredNode = (node as any).onAddConfiguredNode as
-    | AddConfiguredNodeHandler
-    | undefined;
   const onAssetCreated = (node as any).onAssetCreated as
     | ((asset: ProjectAsset) => void)
     | undefined;
@@ -10131,7 +10381,6 @@ function NodeSelectionOverlays({
         setRunningNode={setRunningNode}
         onNodeResult={onNodeResult || (() => undefined)}
         onNodeDraftChange={onNodeDraftChange || (() => undefined)}
-        onAddConfiguredNode={onAddConfiguredNode}
         onAssetCreated={onAssetCreated}
         onRunStartNode={onRunStartNode}
         onOpenImportPicker={onOpenImportPicker}
@@ -10158,6 +10407,8 @@ function NodeQuickDetailButton({
       type="button"
       className="ws-node-quick-view nodrag nopan"
       aria-label="查看详情"
+      onPointerEnter={preloadNodeDetailDialog}
+      onFocus={preloadNodeDetailDialog}
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => {
         event.preventDefault();
@@ -10217,7 +10468,7 @@ function NodeResultBubble({
   }
   const basePreview = generatedNodePreview(node);
   const outputText = nodeDisplayText(node);
-  const text = firstText(
+  const text = firstNonEmptyText(
     displayTextFromOutput(basePreview.text, ""),
     displayTextFromOutput(outputText, ""),
     displayTextFromOutput(node.description, ""),
@@ -10231,7 +10482,7 @@ function NodeResultBubble({
     : rich
       ? { rich }
       : text;
-  const preview = hasPreviewMedia(basePreview)
+  const preview = hasResultPreviewMedia(basePreview)
     ? basePreview
     : mergeGeneratedPreview(
         basePreview,
@@ -10318,6 +10569,7 @@ function NodeResultBubble({
           top: `calc(50% + ${Number(resultView.offsetY || 0)}px)`,
         }}
         onOpen={onShowNodeDetail ? () => onShowNodeDetail(node) : undefined}
+        onOpenIntent={preloadNodeDetailDialog}
         resizeControls={
           <CanvasFloatingResizer
             value={resultView}
@@ -10367,7 +10619,7 @@ function FunctionResultCard({
   const preview = generatedNodePreview(node);
   const rich = nodeRichDocument(node);
   const displayOutput = nodeEnergonOutput(node);
-  const displayText = firstText(
+  const displayText = firstNonEmptyText(
     nodeDisplayText(node),
     displayTextFromOutput(preview.text, ""),
     displayTextFromOutput(node.description, ""),
@@ -10404,6 +10656,7 @@ function FunctionResultCard({
         }`}
         customContentIsPureMedia={renderGeneratedMedia}
         onOpen={onShowNodeDetail ? () => onShowNodeDetail(node) : undefined}
+        onOpenIntent={preloadNodeDetailDialog}
       >
         {renderGeneratedMedia ? (
           <CanvasGeneratedNodeContent
@@ -10590,71 +10843,6 @@ async function runCanvasFunctionNodeAction(input: {
   return true;
 }
 
-function NodeTopToolbar() {
-  const toolbarItems: Array<{
-    label: string;
-    icon: LucideIcon;
-    accent?: "green";
-    menu?: boolean;
-  }> = [
-    { label: "全景图", icon: Compass, accent: "green", menu: true },
-    { label: "增强", icon: Zap },
-    { label: "编辑元素", icon: Layers },
-    { label: "分镜大师", icon: Columns3 },
-    { label: "宫格裁剪", icon: Scissors },
-    { label: "角度", icon: RotateCw },
-    { label: "打光", icon: Sun },
-    { label: "更多", icon: MoreHorizontal },
-  ];
-  const utilityItems: Array<{ label: string; icon: LucideIcon }> = [
-    { label: "画笔编辑", icon: PenTool },
-    { label: "裁剪", icon: Crop },
-    { label: "下载元素", icon: Download },
-    { label: "大图预览", icon: Maximize2 },
-  ];
-  return (
-    <div
-      className="ws-node-top-toolbar nodrag"
-      onClick={(event) => event.stopPropagation()}
-    >
-      {toolbarItems.map((item, index) => {
-        const Icon = item.icon;
-        return (
-          <span key={item.label} className="ws-node-tool-item">
-            {index === 1 ? <i className="ws-node-tool-divider" /> : null}
-            <button
-              type="button"
-              className={`ws-node-tool ${item.accent ? `is-${item.accent}` : ""}`}
-            >
-              <Icon size={13} />
-              <span>{item.label}</span>
-              {item.menu ? <ChevronDown size={10} /> : null}
-            </button>
-          </span>
-        );
-      })}
-      <i className="ws-node-tool-divider" />
-      <span className="ws-node-tool-icons">
-        {utilityItems.map((item) => {
-          const Icon = item.icon;
-          return (
-            <SpaceTooltip key={item.label} label={item.label}>
-              <button type="button" aria-label={item.label}>
-                <Icon size={13} />
-              </button>
-            </SpaceTooltip>
-          );
-        })}
-      </span>
-      <i className="ws-node-tool-divider" />
-      <button type="button" className="ws-node-agent-join">
-        <Users size={11} />
-        <span>加入 Agent</span>
-      </button>
-    </div>
-  );
-}
-
 function mergePowerParamValues(
   params: PowerParam[],
   current: Record<string, unknown>,
@@ -10693,9 +10881,7 @@ function canPreservePowerParamValue(
     const options = param.options || [];
     return (
       options.length === 0 ||
-      options.some((option) =>
-        isPowerParamOptionSelected(option, [String(value ?? "")]),
-      )
+      Boolean(resolvePowerParamOption(options, value))
     );
   }
   if (param.type === "multi_option") {
@@ -10703,7 +10889,7 @@ function canPreservePowerParamValue(
     return (
       options.length === 0 ||
       valueAsParamList(value).every((item) =>
-        options.some((option) => isPowerParamOptionSelected(option, [item])),
+        Boolean(resolvePowerParamOption(options, item)),
       )
     );
   }
@@ -10751,7 +10937,7 @@ function functionAssetName(
   inputContext: NodeInputContext | null,
 ) {
   const source = latestInputContextSource(inputContext);
-  return firstText(source?.title, node.title, "画布资产");
+  return firstNonEmptyText(source?.title, node.title, "画布资产");
 }
 
 function powerFormAllowsSourceSelection(powerForm: PowerForm | null) {
@@ -10765,7 +10951,6 @@ function NodeBottomSettings({
   setRunningNode,
   onNodeResult,
   onNodeDraftChange,
-  onAddConfiguredNode,
   onAssetCreated,
   onRunStartNode,
   onOpenImportPicker,
@@ -10779,7 +10964,6 @@ function NodeBottomSettings({
   setRunningNode: RunningNodeSetter;
   onNodeResult: NodeResultSetter;
   onNodeDraftChange: NodeDraftSetter;
-  onAddConfiguredNode?: AddConfiguredNodeHandler;
   onAssetCreated?: (asset: ProjectAsset) => void;
   onRunStartNode?: NodeStartRunner;
   onOpenImportPicker?: (nodeId: string) => void;
@@ -10951,12 +11135,23 @@ function NodeBottomSettings({
   ]);
 
   const powerParams = powerForm?.params || [];
+  const activePowerParams = useMemo(
+    () => filterActivePowerParams(powerParams, paramValues),
+    [paramValues, powerParams],
+  );
+  const displayedPowerParams = useMemo(
+    () =>
+      activePowerParams.filter((param) =>
+        shouldDisplayPowerParam(param, powerParams),
+      ),
+    [activePowerParams, powerParams],
+  );
   const connectedMediaUsageOptions = useMemo(
     () =>
       selectedNodeType === "power"
-        ? mediaUsageOptions(powerForm?.params || [])
+        ? mediaUsageOptions(activePowerParams)
         : [],
-    [powerForm, selectedNodeType],
+    [activePowerParams, selectedNodeType],
   );
   const requireBoundMediaReferences =
     selectedNodeType === "power" &&
@@ -10986,17 +11181,19 @@ function NodeBottomSettings({
   const effectiveRunBlockedReason =
     runBlockedReason || configuredMediaError;
   const promptParam = useMemo(
-    () => powerParams.find(isPromptPowerParam) || null,
-    [powerParams],
+    () => activePowerParams.find(isPromptPowerParam) || null,
+    [activePowerParams],
   );
   const composerParams = useMemo(
     () =>
-      powerParams.filter(
+      displayedPowerParams.filter(
         (param) =>
           param.key !== promptParam?.key &&
-          (isUploadPowerParam(param) || isToolbarPowerParam(param)),
+          (isUploadPowerParam(param) ||
+            isToolbarPowerParam(param) ||
+            isPowerParamConditionController(param, powerParams)),
       ),
-    [powerParams, promptParam?.key],
+    [displayedPowerParams, powerParams, promptParam?.key],
   );
   const powerPrompt = promptParam
     ? String(paramValues[promptParam.key] ?? "")
@@ -11119,6 +11316,32 @@ function NodeBottomSettings({
       ...(nodeDraftRef.current.paramValues || paramValues),
       [key]: value,
     };
+    const changedParam = powerParams.find((param) => param.key === key);
+    if (
+      changedParam &&
+      isPowerParamConditionController(changedParam, powerParams)
+    ) {
+      const nextMediaUsageOptions = mediaUsageOptions(
+        filterActivePowerParams(powerParams, nextValues),
+      );
+      const reconciliation = reconcileCanvasMediaUsages(
+        promptContent,
+        promptContent,
+        assetLibrary.current,
+        nextMediaUsageOptions,
+        connectedMediaReferences,
+      );
+      if (Object.keys(reconciliation.assignments).length > 0) {
+        onConnectedMediaUsagesChange?.(reconciliation.assignments);
+      }
+      setPromptContent(reconciliation.content);
+      saveComposerParamValues(nextValues, {
+        prompt: powerPrompt,
+        promptContent: reconciliation.content,
+        selectedTargetId: effectiveSelectedTargetId,
+      });
+      return;
+    }
     saveComposerParamValues(nextValues, {
       prompt: powerPrompt,
       promptContent,
@@ -11196,7 +11419,14 @@ function NodeBottomSettings({
             targetId,
           }),
       );
-      const options = mediaUsageOptions(form.params || []);
+      const nextValues = mergePowerParamValues(
+        form.params || [],
+        nodeDraftRef.current.paramValues || paramValues,
+        powerForm?.params || [],
+      );
+      const options = mediaUsageOptions(
+        filterActivePowerParams(form.params || [], nextValues),
+      );
       const reconciliation = reconcileCanvasMediaUsages(
         promptContent,
         promptContent,
@@ -11225,11 +11455,6 @@ function NodeBottomSettings({
         : 0;
       setSelectedTargetId(nextTargetId);
       setPromptContent(reconciliation.content);
-      const nextValues = mergePowerParamValues(
-        form.params || [],
-        nodeDraftRef.current.paramValues || paramValues,
-        powerForm?.params || [],
-      );
       saveComposerParamValues(nextValues, {
         prompt: powerPrompt,
         promptContent: reconciliation.content,
@@ -11457,40 +11682,48 @@ function NodeBottomSettings({
           </div>
         ) : (
           <>
-            <PromptComposer
-              value={powerPrompt}
-              referenceContent={promptContent}
-              placeholder={powerInputPlaceholder}
-              running={nodeRunning}
-              textInputEnabled={Boolean(promptParam)}
-              showMediaParamButtons
-              mediaParamPower={powerForm?.power || node.power}
-              sourceOptions={canSelectPowerSource ? powerForm?.sources || [] : []}
-              selectedSourceId={effectiveSelectedTargetId}
-              params={composerParams}
-              paramValues={paramValues}
-              assetLibrary={assetLibrary}
-              assetReference={{
-                teamID: Number(space?.project.team_id || 0),
-                projectID: projectId,
-                assetCateID: nodeAssetCateId,
-              }}
-              connectedMediaReferences={connectedMediaReferences}
-              mediaUsageOptions={connectedMediaUsageOptions}
-              onConnectedMediaEdgeRemove={onConnectedMediaEdgeRemove}
-              disabled={powerFormLoading}
-              submitDisabled={Boolean(effectiveRunBlockedReason)}
-              submitDisabledReason={effectiveRunBlockedReason}
-              onChange={setPowerPrompt}
-              onParamChange={setParamValue}
-              onSourceChange={
-                canSelectPowerSource
-                  ? (targetId) => void selectPowerSource(targetId)
-                  : undefined
+            <Suspense
+              fallback={
+                <CanvasModuleLoading label="正在加载参数编辑器" compact />
               }
-              onLocalUpload={handleLocalUpload}
-              onSubmit={handleRun}
-            />
+            >
+              <PromptComposer
+                value={powerPrompt}
+                referenceContent={promptContent}
+                placeholder={powerInputPlaceholder}
+                running={nodeRunning}
+                textInputEnabled={Boolean(promptParam)}
+                showMediaParamButtons
+                mediaParamPower={powerForm?.power || node.power}
+                sourceOptions={
+                  canSelectPowerSource ? powerForm?.sources || [] : []
+                }
+                selectedSourceId={effectiveSelectedTargetId}
+                params={composerParams}
+                paramValues={paramValues}
+                assetLibrary={assetLibrary}
+                assetReference={{
+                  teamID: Number(space?.project.team_id || 0),
+                  projectID: projectId,
+                  assetCateID: nodeAssetCateId,
+                }}
+                connectedMediaReferences={connectedMediaReferences}
+                mediaUsageOptions={connectedMediaUsageOptions}
+                onConnectedMediaEdgeRemove={onConnectedMediaEdgeRemove}
+                disabled={powerFormLoading}
+                submitDisabled={Boolean(effectiveRunBlockedReason)}
+                submitDisabledReason={effectiveRunBlockedReason}
+                onChange={setPowerPrompt}
+                onParamChange={setParamValue}
+                onSourceChange={
+                  canSelectPowerSource
+                    ? (targetId) => void selectPowerSource(targetId)
+                    : undefined
+                }
+                onLocalUpload={handleLocalUpload}
+                onSubmit={handleRun}
+              />
+            </Suspense>
             {isStoryboardPower ? (
               <Suspense
                 fallback={
@@ -11520,26 +11753,32 @@ function NodeBottomSettings({
         onClick={(event) => event.stopPropagation()}
         style={NODE_OVERLAY_STYLE}
       >
-        <PromptComposer
-          value={prompt}
-          referenceContent={promptContent}
-          placeholder="向智能体发送任务指令..."
-          running={nodeRunning}
-          params={agentComposerParams}
-          paramValues={paramValues}
-          assetLibrary={assetLibrary}
-          assetReference={{
-            teamID: Number(space?.project.team_id || 0),
-            projectID: projectId,
-            assetCateID: nodeAssetCateId,
-          }}
-          connectedMediaReferences={connectedMediaReferences}
-          onConnectedMediaEdgeRemove={onConnectedMediaEdgeRemove}
-          onChange={setAgentPrompt}
-          onParamChange={setAgentParamValue}
-          onLocalUpload={handleLocalUpload}
-          onSubmit={handleRun}
-        />
+        <Suspense
+          fallback={
+            <CanvasModuleLoading label="正在加载参数编辑器" compact />
+          }
+        >
+          <PromptComposer
+            value={prompt}
+            referenceContent={promptContent}
+            placeholder="向智能体发送任务指令..."
+            running={nodeRunning}
+            params={agentComposerParams}
+            paramValues={paramValues}
+            assetLibrary={assetLibrary}
+            assetReference={{
+              teamID: Number(space?.project.team_id || 0),
+              projectID: projectId,
+              assetCateID: nodeAssetCateId,
+            }}
+            connectedMediaReferences={connectedMediaReferences}
+            onConnectedMediaEdgeRemove={onConnectedMediaEdgeRemove}
+            onChange={setAgentPrompt}
+            onParamChange={setAgentParamValue}
+            onLocalUpload={handleLocalUpload}
+            onSubmit={handleRun}
+          />
+        </Suspense>
       </div>
     );
   }
@@ -11741,10 +11980,9 @@ function FlowFeedbackDialog({
               layout="dialog"
               initialData={readonly ? prompt.values : undefined}
               onSubmit={(result) =>
-                onSubmit({
-                  ...(prompt.values || {}),
-                  ...result.data,
-                })
+                onSubmit(
+                  flowFeedbackSubmitValues(prompt, interaction, result.data),
+                )
               }
             />
           </Suspense>
@@ -11767,6 +12005,20 @@ function FlowFeedbackDialog({
   );
 }
 
+function flowFeedbackSubmitValues(
+  prompt: FlowFeedbackPrompt,
+  interaction: AgentInteraction,
+  data: Record<string, unknown>,
+) {
+  if (String(interaction.type || "").toLowerCase() === "power_params") {
+    return data;
+  }
+  return {
+    ...(prompt.values || {}),
+    ...data,
+  };
+}
+
 function flowFeedbackPanelInteraction(
   prompt: FlowFeedbackPrompt,
 ): AgentInteraction {
@@ -11787,11 +12039,7 @@ function flowFeedbackPanelInteraction(
   return {
     ...current,
     id: String(current.id || `flow-feedback-${prompt.approval?.id || 0}`),
-    type:
-      String(current.type || "").toLowerCase() === "power_params" &&
-      fields.length > 0
-        ? "form"
-        : String(current.type || "form"),
+    type: String(current.type || "form"),
     title: String(current.title || prompt.title || "补充信息"),
     description: String(current.description || prompt.description || ""),
     fields,
@@ -11897,9 +12145,6 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
   const onNodeResult = (data as any).onNodeResult as
     | NodeResultSetter
     | undefined;
-  const onAssetCreated = (data as any).onAssetCreated as
-    | ((asset: ProjectAsset) => void)
-    | undefined;
   const onOpenFeedbackRecord = (data as any).onOpenFeedbackRecord as
     | ((node: SpaceCanvasNode, record: NodeFeedbackRecord) => void)
     | undefined;
@@ -11908,11 +12153,17 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
       ? resolvePowerPresentation(node.power, node.kind, node.outputType)
       : null;
   const isStoryboardPower = powerPresentation?.viewMode === "storyboard";
+  const isStoryboardGridPower =
+    powerPresentation?.viewMode === "storyboard_grid";
   const isVideoComposePower = powerPresentation?.viewMode === "video_compose";
   const canvasReferenceItems = ((data as any).canvasReferenceItems ||
     []) as ComposerAssetItem[];
   const onNodeDraftChange = (data as any).onNodeDraftChange as
     | NodeDraftSetter
+    | undefined;
+  const onOpenStoryboardGridImport = (data as any)
+    .onOpenStoryboardGridImport as
+    | ((nodeId: string, frameIndex?: number) => void)
     | undefined;
   const onRunBackendNode = (data as any).onRunBackendNode as
     | BackendNodeRunner
@@ -12627,6 +12878,9 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
   if (node.type === "power") {
     const isPowerRunning = isActiveRunningNode(runningNode);
     const isAudioPower = isAudioPowerType(node.power, node.kind);
+    const storyboardGrid = isStoryboardGridPower
+      ? parseStoryboardGridOutput(storyboardNodeOutput(node))
+      : null;
     const storyboardHasResult = nodeHasResultContent(node);
     const storyboardStatus: StoryboardNodeStatus = isPowerRunning
       ? "running"
@@ -12639,6 +12893,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
             : "empty";
     const showStreamOutput = Boolean(
       !isStoryboardPower &&
+      !isStoryboardGridPower &&
       !isVideoComposePower &&
       runningNode?.streamStarted &&
       (runningNode.streamText || runningNode.streamOutput) &&
@@ -12660,11 +12915,13 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
       : nodeEnergonOutput(node);
     const hasPowerContent =
       isStoryboardPower ||
+      isStoryboardGridPower ||
       isVideoComposePower ||
       showStreamOutput ||
       storyboardHasResult;
     const hasPowerMedia =
       !isStoryboardPower &&
+      !isStoryboardGridPower &&
       !isVideoComposePower &&
       Boolean(
         preview.imageUrl ||
@@ -12679,6 +12936,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
       isPowerRunning ? "is-running" : "",
       node.runError && !isPowerRunning ? "is-error" : "",
       isStoryboardPower ? "is-storyboard" : "",
+      isStoryboardGridPower ? "is-storyboard-grid" : "",
       isVideoComposePower ? "is-video-compose" : "",
       isAudioPower ? "is-audio" : "",
       hasPowerContent ? "has-content" : "",
@@ -12807,6 +13065,33 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
                 }
               />
             </Suspense>
+          ) : isStoryboardGridPower ? (
+            <StoryboardGridCanvasView
+              grid={storyboardGrid}
+              aspectRatio={storyboardGridAspectRatio(node)}
+              running={isPowerRunning}
+              onImport={
+                onOpenStoryboardGridImport
+                  ? () => onOpenStoryboardGridImport(node.id)
+                  : undefined
+              }
+              onFrameImport={
+                onOpenStoryboardGridImport
+                  ? (_frame, index) =>
+                      onOpenStoryboardGridImport(node.id, index)
+                  : undefined
+              }
+              onSlotImport={
+                onOpenStoryboardGridImport
+                  ? (index) => onOpenStoryboardGridImport(node.id, index)
+                  : undefined
+              }
+              onEdit={
+                storyboardGrid && onShowNodeDetail
+                  ? () => onShowNodeDetail(node)
+                  : undefined
+              }
+            />
           ) : hasPowerContent ? (
             <CanvasGeneratedNodeContent
               preview={preview}
@@ -12841,7 +13126,7 @@ function SpaceNodeView({ data, selected }: NodeProps<any>) {
           position={Position.Right}
           className="is-out"
         />
-        {isStoryboardPower || isVideoComposePower ? null : (
+        {isStoryboardPower || isStoryboardGridPower || isVideoComposePower ? null : (
           <NodeQuickDetailButton
             node={node}
             onShowNodeDetail={onShowNodeDetail}

@@ -1,5 +1,5 @@
-import { CanvasNodeContentView } from "../space/space-content-view";
-import { parseStoryboardOutput } from "../space/space-storyboard";
+import { contentOutputHasType } from "../shared/content-output";
+import { BodyContentView } from "../shared/content-view";
 import { assetKindLabel } from "./asset-contract";
 import { assetPreviewOutput, assetPreviewText } from "./asset-content";
 import type { AssetKind } from "./asset-types";
@@ -18,13 +18,13 @@ export function AssetTextCardPreview({
   const output = assetPreviewOutput(kind, content);
   const fallback =
     summary || assetPreviewText(content) || assetKindLabel(kind);
-  const previewOutput = parseStoryboardOutput(output)
+  const previewOutput = contentOutputHasType(output, "storyboard")
     ? { text: fallback }
     : output;
 
   return (
     <div className={`wb-asset-card-text-preview is-${kind}`}>
-      <CanvasNodeContentView
+      <BodyContentView
         output={previewOutput}
         fallback={fallback}
         emptyText={fallback}

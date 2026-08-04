@@ -2,7 +2,13 @@ import {
   MAX_STORYBOARD_SHOTS,
   STORYBOARD_TRANSITION_TYPES,
   isStoryboardShotDurationValid,
+  storyboardShotsTotalDuration,
   storyboardShotLinksPreviousState,
+  storyboardProductionIncludesLipSync,
+  storyboardProductionIncludesReferenceImages,
+  storyboardProductionIncludesShotVideos,
+  storyboardProductionIncludesSubtitles,
+  storyboardProductionIncludesVoice,
   storyboardVisibleSpeakerIds,
   type StoryboardDocument,
   type StoryboardMaterial,
@@ -18,9 +24,15 @@ export type StoryboardValidationIssue = {
   shotId?: string;
 };
 
+export type StoryboardValidationOptions = {
+  coreOnly?: boolean;
+};
+
 export function storyboardValidationIssues(
   storyboard: StoryboardDocument,
+  options: StoryboardValidationOptions = {},
 ): StoryboardValidationIssue[] {
+  const scope = storyboardValidationScope(storyboard, options);
   const issues: StoryboardValidationIssue[] = [];
   const materialById = new Map<string, StoryboardMaterial>();
   const materialNames = new Set<string>();
@@ -37,17 +49,8 @@ export function storyboardValidationIssues(
   if (!storyboard.summary.trim()) {
     issues.push(errorIssue("summary", "请补充整个脚本的内容简介"));
   }
-  if (!storyboard.storyline.setup.trim()) {
-    issues.push(errorIssue("storyline:setup", "请补充故事起点"));
-  }
-  if (!storyboard.storyline.development.trim()) {
-    issues.push(errorIssue("storyline:development", "请补充核心推进"));
-  }
-  if (!storyboard.storyline.payoff.trim()) {
-    issues.push(errorIssue("storyline:payoff", "请补充结果落点"));
-  }
-  if (!storyboard.style_prompt.trim()) {
-    issues.push(errorIssue("style", "请设置整部作品的统一视觉风格"));
+  if (scope.referenceImages && !storyboard.style_prompt.trim()) {
+    issues.push(errorIssue("style_prompt", "请补充统一视觉风格"));
   }
   if (
     !Number.isInteger(storyboard.target_shot_count) ||
@@ -64,10 +67,7 @@ export function storyboardValidationIssues(
   if (storyboard.target_shot_count !== storyboard.shots.length) {
     issues.push(errorIssue("target_shot_count", "目标镜头数与实际镜头数不一致"));
   }
-  const totalDuration = storyboard.shots.reduce(
-    (total, shot) => total + shot.duration,
-    0,
-  );
+  const totalDuration = storyboardShotsTotalDuration(storyboard.shots);
   if (!Number.isInteger(storyboard.target_duration) || storyboard.target_duration < 4) {
     issues.push(errorIssue("target_duration", "目标总时长必须是不小于 4 秒的整数"));
   } else if (storyboard.target_duration !== totalDuration) {
@@ -87,7 +87,7 @@ export function storyboardValidationIssues(
     } else if (materialNames.has(nameKey)) {
       issues.push(materialIssue(material, `素材名称“${materialName}”重复`));
     }
-    if (!material.prompt.trim()) {
+    if (scope.referenceImages && !material.prompt.trim()) {
       issues.push(materialIssue(material, "生成提示词不能为空"));
     }
     if (material.type !== "character" && material.voice.trim()) {
@@ -112,7 +112,7 @@ export function storyboardValidationIssues(
     return issues;
   }
 
-  let previousMaterialIds = new Set<string>();
+  let previousStableMaterialIds = new Set<string>();
   let previousVisibleDialogue = false;
   let previousExitState = "";
   let continuityChainLength = 0;
@@ -152,7 +152,7 @@ export function storyboardValidationIssues(
         issues,
       );
     }
-    if (!shot.video_prompt.trim()) {
+    if (scope.shotVideos && !shot.video_prompt.trim()) {
       issues.push(shotIssue(shot, shotNumber, "视频提示词不能为空"));
     }
     for (const referenceKey of shot.reference_keys) {
@@ -195,55 +195,67 @@ export function storyboardValidationIssues(
     }
     const entryState = shot.continuity_state?.entry.trim() || "";
     const exitState = shot.continuity_state?.exit.trim() || "";
-    if (!entryState) {
-      issues.push(shotIssue(shot, shotNumber, "请填写入镜状态"));
+    if (scope.referenceImages) {
+      if (!entryState) {
+        issues.push(shotIssue(shot, shotNumber, "请填写入镜状态"));
+      }
+      if (!exitState) {
+        issues.push(shotIssue(shot, shotNumber, "请填写出镜状态"));
+      }
+      if (
+        storyboardShotLinksPreviousState(shot, index) &&
+        entryState !== previousExitState
+      ) {
+        issues.push(
+          shotIssue(shot, shotNumber, "入镜状态必须与上一镜头的出镜状态完全一致"),
+        );
+      }
     }
-    if (!exitState) {
-      issues.push(shotIssue(shot, shotNumber, "请填写出镜状态"));
+    if (scope.shotVideos) {
+      if (!STORYBOARD_TRANSITION_TYPES.includes(shot.transition_type)) {
+        issues.push(shotIssue(shot, shotNumber, "结构化转场类型无效"));
+      }
+      if (
+        index === 0 &&
+        (shot.transition_type !== "none" || shot.transition_duration_ms !== 0)
+      ) {
+        issues.push(shotIssue(shot, shotNumber, "第一镜不能配置转场效果"));
+      } else if (
+        shot.transition_type === "none" &&
+        shot.transition_duration_ms !== 0
+      ) {
+        issues.push(shotIssue(shot, shotNumber, "硬切的转场时长必须为 0"));
+      } else if (
+        shot.transition_type !== "none" &&
+        (shot.transition_duration_ms < 100 || shot.transition_duration_ms > 5000)
+      ) {
+        issues.push(shotIssue(shot, shotNumber, "转场时长必须是 100 到 5000 毫秒"));
+      }
     }
-    if (
-      storyboardShotLinksPreviousState(shot, index) &&
-      entryState !== previousExitState
-    ) {
-      issues.push(
-        shotIssue(shot, shotNumber, "入镜状态必须与上一镜头的出镜状态完全一致"),
-      );
-    }
-    if (!STORYBOARD_TRANSITION_TYPES.includes(shot.transition_type)) {
-      issues.push(shotIssue(shot, shotNumber, "结构化转场类型无效"));
-    }
-    if (
-      index === 0 &&
-      (shot.transition_type !== "none" || shot.transition_duration_ms !== 0)
-    ) {
-      issues.push(shotIssue(shot, shotNumber, "第一镜不能配置转场效果"));
-    } else if (
-      shot.transition_type === "none" &&
-      shot.transition_duration_ms !== 0
-    ) {
-      issues.push(shotIssue(shot, shotNumber, "硬切的转场时长必须为 0"));
-    } else if (
-      shot.transition_type !== "none" &&
-      (shot.transition_duration_ms < 100 || shot.transition_duration_ms > 5000)
-    ) {
-      issues.push(shotIssue(shot, shotNumber, "转场时长必须是 100 到 5000 毫秒"));
-    }
-    if (shot.continue_previous) {
+    const stableMaterialIds = continuityStableMaterialIds(
+      materialIds,
+      materialById,
+    );
+    if (scope.shotVideos && shot.continue_previous) {
       continuityChainLength += 1;
       if (!shot.continuity_anchor.trim()) {
         issues.push(shotIssue(shot, shotNumber, "请填写连续性锚点"));
       }
       if (continuityChainLength >= 3) {
         issues.push(
-          shotIssue(shot, shotNumber, "连续镜头链最多包含 3 个镜头"),
+          warningIssue(
+            `shot:${shot.id}:continuity-chain`,
+            `镜头 ${shotNumber}：连续动作跨越 4 个以上镜头，建议检查节奏`,
+            shot.id,
+          ),
         );
       }
-      if (!sameStringSet(previousMaterialIds, materialIds)) {
+      if (!sameStringSet(previousStableMaterialIds, stableMaterialIds)) {
         issues.push(
           shotIssue(
             shot,
             shotNumber,
-            "连续镜头不能新增、移除或更换角色、场景或道具",
+            "动作续接时不能新增、移除或更换角色与场景",
           ),
         );
       }
@@ -251,21 +263,38 @@ export function storyboardValidationIssues(
       continuityChainLength = 0;
     }
 
-    const visibleDialogue = validateShotSpeech(
-      shot,
-      shotNumber,
-      materialById,
-      materialIds,
-      speechIds,
-      issues,
-    );
-    if (shot.continue_previous && (previousVisibleDialogue || visibleDialogue)) {
-      issues.push(
-        shotIssue(shot, shotNumber, "出镜对白不能跨越连续镜头边界"),
+    let visibleDialogue = false;
+    if (scope.voice || scope.subtitles || scope.lipSync) {
+      visibleDialogue = validateShotSpeech(
+        shot,
+        shotNumber,
+        materialById,
+        materialIds,
+        speechIds,
+        issues,
+        {
+          validateTimeline: scope.voice,
+          validateVisibleSpeakers: scope.lipSync,
+        },
       );
     }
-    validateShotCaptions(shot, shotNumber, captionIds, issues);
-    previousMaterialIds = materialIds;
+    if (
+      scope.lipSync &&
+      shot.continue_previous &&
+      (previousVisibleDialogue || visibleDialogue)
+    ) {
+      issues.push(
+        warningIssue(
+          `shot:${shot.id}:visible-dialogue-continuity`,
+          `镜头 ${shotNumber}：出镜对白跨越动作续接边界，建议检查口型衔接`,
+          shot.id,
+        ),
+      );
+    }
+    if (scope.subtitles) {
+      validateShotCaptions(shot, shotNumber, captionIds, issues);
+    }
+    previousStableMaterialIds = stableMaterialIds;
     previousVisibleDialogue = visibleDialogue;
     previousExitState = exitState;
   });
@@ -277,7 +306,7 @@ export function storyboardValidationIssues(
       !assignedReferenceKeys.has(reference.key)
     ) {
       issues.push(
-        errorIssue(
+        warningIssue(
           `reference:${reference.key}`,
           `参考素材“${reference.label}”尚未关联到具体目标`,
         ),
@@ -295,6 +324,10 @@ function validateShotSpeech(
   shotMaterialIds: Set<string>,
   usedIds: Set<string>,
   issues: StoryboardValidationIssue[],
+  options: {
+    validateTimeline: boolean;
+    validateVisibleSpeakers: boolean;
+  },
 ) {
   for (const speech of shot.speech) {
     if (!speech.id.trim() || usedIds.has(speech.id)) {
@@ -319,10 +352,12 @@ function validateShotSpeech(
   }
 
   const visibleSpeakers = storyboardVisibleSpeakerIds(shot);
-  if (visibleSpeakers.size > 1) {
+  if (options.validateVisibleSpeakers && visibleSpeakers.size > 1) {
     issues.push(shotIssue(shot, shotNumber, "最多只能有一个出镜说话角色"));
   }
-  validateEstimatedSpeechTimeline(shot, shotNumber, issues);
+  if (options.validateTimeline) {
+    validateEstimatedSpeechTimeline(shot, shotNumber, issues);
+  }
   return visibleSpeakers.size > 0;
 }
 
@@ -405,6 +440,40 @@ function sameStringSet(left: Set<string>, right: Set<string>) {
   return true;
 }
 
+function continuityStableMaterialIds(
+  materialIds: Set<string>,
+  materialById: Map<string, StoryboardMaterial>,
+) {
+  return new Set(
+    [...materialIds].filter((materialId) => {
+      const type = materialById.get(materialId)?.type;
+      return type === "character" || type === "scene";
+    }),
+  );
+}
+
+function storyboardValidationScope(
+  storyboard: StoryboardDocument,
+  options: StoryboardValidationOptions,
+) {
+  if (options.coreOnly) {
+    return {
+      referenceImages: false,
+      shotVideos: false,
+      voice: false,
+      subtitles: false,
+      lipSync: false,
+    };
+  }
+  return {
+    referenceImages: storyboardProductionIncludesReferenceImages(storyboard),
+    shotVideos: storyboardProductionIncludesShotVideos(storyboard),
+    voice: storyboardProductionIncludesVoice(storyboard),
+    subtitles: storyboardProductionIncludesSubtitles(storyboard),
+    lipSync: storyboardProductionIncludesLipSync(storyboard),
+  };
+}
+
 function errorIssue(id: string, message: string): StoryboardValidationIssue {
   return { id, message, severity: "error" };
 }
@@ -437,7 +506,7 @@ function shotIssue(
 function warningIssue(
   id: string,
   message: string,
-  shotId: string,
+  shotId?: string,
 ): StoryboardValidationIssue {
   return { id, message, severity: "warning", shotId };
 }

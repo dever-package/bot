@@ -1,6 +1,5 @@
 import type {
   StreamPowerHistoryDetail,
-  StreamPowerHistoryItem,
   StreamPowerHistoryPage,
 } from "../../show/stream-power-history";
 import {
@@ -9,7 +8,6 @@ import {
 } from "../../show/stream-power-history-api";
 import { workbenchApi } from "./workbench-api";
 
-export type WorkbenchPowerHistoryItem = StreamPowerHistoryItem;
 export type WorkbenchPowerHistoryDetail = StreamPowerHistoryDetail;
 
 export function loadWorkbenchPowerHistory(input: {

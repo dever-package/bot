@@ -6,7 +6,6 @@ import (
 	"strings"
 	"unicode"
 
-	agentmodel "github.com/dever-package/bot/model/agent"
 	memorymodel "github.com/dever-package/bot/model/memory"
 )
 
@@ -50,30 +49,6 @@ type scoredRuntimeMemory struct {
 	score     float64
 	relevance float64
 	core      bool
-}
-
-func (Service) RuntimeMemoriesBySession(ctx context.Context, sessionID uint64, query string, limit int) []RuntimeMemory {
-	if sessionID == 0 {
-		return []RuntimeMemory{}
-	}
-	session := agentmodel.NewSessionModel().Find(ctx, map[string]any{
-		"id":     sessionID,
-		"status": agentmodel.SessionStatusActive,
-	})
-	if session == nil {
-		return []RuntimeMemory{}
-	}
-	return NewService().RuntimeMemories(ctx, RuntimeRequest{
-		OwnerType:     session.OwnerType,
-		OwnerID:       session.OwnerID,
-		AgentKey:      session.AgentKey,
-		ContextKey:    session.ContextKey,
-		SessionID:     session.ID,
-		Query:         query,
-		Limit:         limit,
-		IncludeGlobal: true,
-		IncludeAgent:  true,
-	})
 }
 
 func (s Service) RuntimeMemories(ctx context.Context, req RuntimeRequest) []RuntimeMemory {
@@ -324,7 +299,7 @@ func memoryMatchesRuntimeRequest(row memorymodel.Memory, req RuntimeRequest) boo
 }
 
 func runtimeMemoryScore(row memorymodel.Memory, query string) float64 {
-	score := float64(clampRuntimeMemoryImportance(row.Importance)) / 100 * 0.35
+	score := float64(clampMemoryImportance(row.Importance)) / 100 * 0.35
 	score += runtimeMemoryConfidence(row.Confidence) * 0.2
 	score += runtimeMemoryKindBoost(row.Kind)
 	switch normalizeRuntimeMemoryScope(row) {
@@ -349,9 +324,9 @@ func runtimeMemoryRelevance(row memorymodel.Memory, query string) float64 {
 }
 
 func isCoreRuntimeMemory(row memorymodel.Memory) bool {
-	kind := normalizeRuntimeMemoryKind(row.Kind)
+	kind := normalizeMemoryKind(row.Kind)
 	return (kind == "persona" || kind == "procedural") &&
-		clampRuntimeMemoryImportance(row.Importance) >= 85 && runtimeMemoryConfidence(row.Confidence) >= 0.8
+		clampMemoryImportance(row.Importance) >= 85 && runtimeMemoryConfidence(row.Confidence) >= 0.8
 }
 
 func memoryTextScore(query string, text string) float64 {
@@ -376,7 +351,7 @@ func runtimeMemoryConfidence(value float64) float64 {
 }
 
 func runtimeMemoryKindBoost(kind string) float64 {
-	switch normalizeRuntimeMemoryKind(kind) {
+	switch normalizeMemoryKind(kind) {
 	case "procedural":
 		return 0.12
 	case "persona":
@@ -405,25 +380,6 @@ func normalizeRuntimeMemoryScope(row memorymodel.Memory) string {
 
 func displayRuntimeMemoryScope(row memorymodel.Memory) string {
 	return normalizeRuntimeMemoryScope(row)
-}
-
-func normalizeRuntimeMemoryKind(kind string) string {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "working", "episodic", "semantic", "procedural", "persona", "content":
-		return strings.ToLower(strings.TrimSpace(kind))
-	default:
-		return ""
-	}
-}
-
-func clampRuntimeMemoryImportance(value int) int {
-	if value <= 0 {
-		return 60
-	}
-	if value > 100 {
-		return 100
-	}
-	return value
 }
 
 func clampRuntimeMemoryLimit(value int) int {

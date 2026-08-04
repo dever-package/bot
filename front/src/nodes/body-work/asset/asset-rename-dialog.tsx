@@ -2,6 +2,7 @@ import { Loader2, Pencil, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { BodyWorkTooltip } from "../shared/body-work-tooltip";
+import { requestErrorMessage as errorText } from "../shared/api-response";
 import { renameAsset } from "./asset-api";
 import type { AssetRecord } from "./asset-types";
 
@@ -118,8 +119,4 @@ export function AssetRenameDialog({
     </div>,
     document.body,
   );
-}
-
-function errorText(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
 }

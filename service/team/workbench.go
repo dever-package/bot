@@ -120,7 +120,7 @@ func (s Service) WorkbenchCatalog(ctx context.Context, teamID uint64) (map[strin
 		"power_cates":     s.repo.ListPowerCates(ctx),
 		"roles":           roles,
 		"asset_cates":     workbenchAssetCateValues(graph.AssetCates),
-		"project_enabled": normalizeProjectEnabled(graph.Team.ProjectEnabled) == teammodel.StatusEnabled,
+		"project_enabled": normalizeEntryStatus(graph.Team.ProjectEnabled) == teammodel.StatusEnabled,
 	}, nil
 }
 
@@ -129,7 +129,7 @@ func (s Service) ResolveProjectRelease(ctx context.Context, teamID uint64) (Publ
 	if err != nil {
 		return PublishedTeamBinding{}, err
 	}
-	enabled := normalizeProjectEnabled(graph.Team.ProjectEnabled) == teammodel.StatusEnabled
+	enabled := normalizeEntryStatus(graph.Team.ProjectEnabled) == teammodel.StatusEnabled
 	if !enabled {
 		return PublishedTeamBinding{}, fmt.Errorf("当前团队未启用项目")
 	}

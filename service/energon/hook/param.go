@@ -51,7 +51,6 @@ func (ParamHook) ProviderBeforeSaveParam(c *server.Context, params []any) any {
 	}
 	if botinput.IsPromptParamType(paramType) {
 		usage = paramUsageMain
-		normalizePromptAssetKinds(record)
 	}
 	record["usage"] = usage
 
@@ -94,30 +93,6 @@ func (ParamHook) ProviderBeforeSaveParam(c *server.Context, params []any) any {
 	}
 
 	return record
-}
-
-func normalizePromptAssetKinds(record map[string]any) {
-	fields := []string{
-		"asset_text",
-		"asset_image",
-		"asset_audio",
-		"asset_video",
-		"asset_richtext",
-		"asset_file",
-	}
-	enabled := 0
-	for _, field := range fields {
-		value := int16(util.ToIntDefault(record[field], 1))
-		if value != 1 {
-			value = 2
-		} else {
-			enabled++
-		}
-		record[field] = value
-	}
-	if enabled == 0 {
-		panicParamField("form.asset_text", "提示词参数至少要允许一种资产类型")
-	}
 }
 
 func (ParamHook) ProviderBeforeDeleteParam(c *server.Context, params []any) any {

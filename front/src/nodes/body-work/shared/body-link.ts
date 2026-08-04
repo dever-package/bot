@@ -1,4 +1,10 @@
 import { safeBodyLinkURL } from "./safe-body-url";
+import {
+  asResponseRecord as recordValue,
+  asResponseRows as rowsValue,
+  responsePositiveNumber as positiveNumber,
+  responseText as textValue,
+} from "./api-response";
 
 export type BodyLinkScene = "navigation" | "workbench_content";
 
@@ -82,23 +88,4 @@ function bodyRuntimeConfig() {
 function normalizeBodyLinkScene(value: unknown): BodyLinkScene | null {
   const scene = textValue(value).toLowerCase();
   return scene === "navigation" || scene === "workbench_content" ? scene : null;
-}
-
-function rowsValue(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function recordValue(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, any>)
-    : {};
-}
-
-function positiveNumber(value: unknown) {
-  const number = Number(value || 0);
-  return Number.isFinite(number) && number > 0 ? number : 0;
-}
-
-function textValue(value: unknown) {
-  return value == null ? "" : String(value).trim();
 }

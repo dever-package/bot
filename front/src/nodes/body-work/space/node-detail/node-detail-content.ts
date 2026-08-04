@@ -1,21 +1,37 @@
 import {
   contentOutputHasMedia,
+  firstNonEmptyText,
   looksLikeMarkdownSyntax,
   markdownCompatibleRichContent,
   normalizeContentOutputItems,
+  parseStoryboardGridOutput,
   plainMarkdownTextFromRichOutput,
   preferRicherMediaOutput,
-} from "../space-content-output";
-import { documentText, richDocument } from "../space-model";
+  type StoryboardGridDocument,
+} from "../../shared/content-output";
+import {
+  documentText,
+  richDocument,
+  safeRichDocument,
+} from "../../shared/rich-document";
 import {
   parseStoryboardOutput,
   storyboardSummary,
   type StoryboardDocument,
 } from "../space-storyboard";
-import { parseMaybeJSON } from "../space-structured-json";
+import {
+  firstDefinedValue as firstDefined,
+  isPlainRecord as isRecord,
+  parseMaybeJSON,
+  safeJSONString,
+} from "../../shared/structured-json";
 import type { AssetVersion, SpaceCanvasNode } from "../types";
 
-export type NodeDetailContentMode = "rich" | "storyboard" | "file";
+export type NodeDetailContentMode =
+  | "rich"
+  | "storyboard"
+  | "storyboard_grid"
+  | "file";
 export type NodeDetailContentFormat = "json" | "markdown";
 
 export type NodeDetailFileValue = {
@@ -26,7 +42,11 @@ export type NodeDetailFileValue = {
 
 export type NodeDetailEditableContent = {
   mode: NodeDetailContentMode;
-  value: string | StoryboardDocument | NodeDetailFileValue;
+  value:
+    | string
+    | StoryboardDocument
+    | StoryboardGridDocument
+    | NodeDetailFileValue;
   format: NodeDetailContentFormat;
   summary: string;
   downloadUrl: string;
@@ -37,6 +57,16 @@ export function resolveNodeDetailContent(
   version?: AssetVersion,
 ): NodeDetailEditableContent {
   const raw = resolveNodeDetailRawContent(node, version);
+  const storyboardGrid = parseStoryboardGridOutput(raw);
+  if (storyboardGrid) {
+    return {
+      mode: "storyboard_grid",
+      value: storyboardGrid,
+      format: "json",
+      summary: storyboardGridSummary(storyboardGrid),
+      downloadUrl: "",
+    };
+  }
   const storyboard = parseStoryboardOutput(raw);
   if (storyboard) {
     return {
@@ -102,6 +132,9 @@ export function resolveNodeDetailMediaOutput(
           valueAtPath(node, "result", "output"),
         );
   const parsedRaw = parseMaybeJSON(raw);
+  if (parseStoryboardGridOutput(parsedRaw)) {
+    return undefined;
+  }
   const embeddedText = plainMarkdownTextFromRichOutput(parsedRaw);
   for (const parsed of [parsedRaw, parseMaybeJSON(embeddedText)]) {
     if (contentOutputHasMedia(parsed)) {
@@ -144,7 +177,10 @@ function resolveNodeDetailRawContent(
 export function serializeNodeDetailContent(
   content: NodeDetailEditableContent,
 ): unknown {
-  if (content.mode === "storyboard") {
+  if (
+    content.mode === "storyboard" ||
+    content.mode === "storyboard_grid"
+  ) {
     return content.value;
   }
   if (content.mode === "file") {
@@ -170,6 +206,8 @@ export function nodeDetailContentWithValue(
   const next = { ...content, value };
   if (next.mode === "storyboard") {
     next.summary = storyboardSummary(value as StoryboardDocument);
+  } else if (next.mode === "storyboard_grid") {
+    next.summary = storyboardGridSummary(value as StoryboardGridDocument);
   } else if (next.mode === "file") {
     const file = value as NodeDetailFileValue;
     next.summary = file.description || file.name || "文件内容";
@@ -178,6 +216,13 @@ export function nodeDetailContentWithValue(
     next.summary = summarizeText(documentText(serializeNodeDetailContent(next)));
   }
   return next;
+}
+
+function storyboardGridSummary(grid: StoryboardGridDocument) {
+  return firstNonEmptyText(
+    grid.summary,
+    `${grid.title || "宫格图片"} · ${grid.frames.length} 张`,
+  );
 }
 
 function richContent(value: NonNullable<ReturnType<typeof richDocument>>) {
@@ -266,7 +311,11 @@ function collectProtocolNodes(
     return;
   }
 
-  appendParagraph(content, firstText(parsed.title, parsed.text), seenText);
+  appendParagraph(
+    content,
+    firstNonEmptyText(parsed.title, parsed.text),
+    seenText,
+  );
   appendMediaFields(parsed, content, seenMedia);
 
   for (const key of [
@@ -377,8 +426,14 @@ function fileValueFromOutput(value: unknown): NodeDetailFileValue | null {
   if (url) {
     return {
       url,
-      name: firstText(parsed.name, parsed.filename, parsed.title) || fileName(url),
-      description: firstText(parsed.description, parsed.text, parsed.summary),
+      name:
+        firstNonEmptyText(parsed.name, parsed.filename, parsed.title) ||
+        fileName(url),
+      description: firstNonEmptyText(
+        parsed.description,
+        parsed.text,
+        parsed.summary,
+      ),
     };
   }
   for (const key of ["content", "output", "result", "data", "body", "value"]) {
@@ -425,7 +480,11 @@ function markdownTextFromOutput(value: unknown): string {
   if (!isRecord(parsed)) {
     return "";
   }
-  const direct = firstText(parsed.text, parsed.summary, parsed.description);
+  const direct = firstNonEmptyText(
+    parsed.text,
+    parsed.summary,
+    parsed.description,
+  );
   if (direct) {
     return direct;
   }
@@ -449,7 +508,9 @@ function directMarkdownText(value: unknown) {
     return "";
   }
   const format = String(parsed.format || "").trim().toLowerCase();
-  return format === "markdown" ? firstText(parsed.text, parsed.markdown) : "";
+  return format === "markdown"
+    ? firstNonEmptyText(parsed.text, parsed.markdown)
+    : "";
 }
 
 function plainTextDocument(value: string) {
@@ -481,14 +542,6 @@ function firstRichMediaURL(value: any): string {
     }
   }
   return "";
-}
-
-function safeRichDocument(value: unknown) {
-  try {
-    return richDocument(value);
-  } catch {
-    return null;
-  }
 }
 
 function directRichDocument(value: unknown) {
@@ -535,19 +588,6 @@ function firstURL(...values: unknown[]) {
   return "";
 }
 
-function firstText(...values: unknown[]) {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-  return "";
-}
-
-function firstDefined(...values: unknown[]) {
-  return values.find((value) => value !== undefined && value !== null);
-}
-
 function valueAtPath(value: unknown, ...path: string[]) {
   let current: any = value;
   for (const key of path) {
@@ -584,16 +624,4 @@ function looksLikeStructuredJSON(value: string) {
     (text.startsWith("{") && text.endsWith("}")) ||
     (text.startsWith("[") && text.endsWith("]"))
   );
-}
-
-function isRecord(value: unknown): value is Record<string, any> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function safeJSONString(value: unknown) {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "";
-  }
 }

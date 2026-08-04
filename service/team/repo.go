@@ -474,15 +474,6 @@ func (r Repo) FindPowerOption(ctx context.Context, powerID uint64, powerKey stri
 	return PowerOption{}, false
 }
 
-func (Repo) UpdateFlowConfig(ctx context.Context, flowID uint64, config map[string]any) {
-	if flowID == 0 {
-		return
-	}
-	teammodel.NewFlowModel().Update(ctx, map[string]any{"id": flowID}, map[string]any{
-		"config": jsonText(config),
-	})
-}
-
 func (Repo) UpsertFlow(ctx context.Context, teamID uint64, payload GraphFlow) (teammodel.Flow, error) {
 	key := normalizeKey("flow", payload.Key)
 	name := strings.TrimSpace(payload.Name)

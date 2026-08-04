@@ -79,26 +79,6 @@ func (registry *Registry) Definitions() []any {
 	return append([]any(nil), result...)
 }
 
-func (registry *Registry) DefinitionsWithout(names ...string) []any {
-	if registry == nil {
-		return nil
-	}
-	excluded := make(map[string]struct{}, len(names))
-	for _, name := range names {
-		if name = strings.TrimSpace(name); name != "" {
-			excluded[name] = struct{}{}
-		}
-	}
-	result := make([]any, 0, len(registry.order))
-	for _, name := range registry.order {
-		if _, exists := excluded[name]; exists {
-			continue
-		}
-		result = append(result, registry.items[name].CurrentDefinition().Native())
-	}
-	return result
-}
-
 func (registry *Registry) Names() []string {
 	if registry == nil {
 		return nil

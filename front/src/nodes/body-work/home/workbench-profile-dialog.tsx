@@ -30,6 +30,7 @@ import {
   useAuthStore,
 } from "@dever/front-plugin";
 import { WorkbenchAvatar } from "./workbench-avatar";
+import { requestErrorMessage as errorMessage } from "../shared/api-response";
 import {
   changeWorkbenchPassword,
   loadWorkbenchProfile,
@@ -559,8 +560,4 @@ function profileUserPayload(profile: WorkbenchProfile) {
     avatar: profile.avatar,
     avatar_file_id: profile.avatarFileID,
   };
-}
-
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error && error.message ? error.message : fallback;
 }

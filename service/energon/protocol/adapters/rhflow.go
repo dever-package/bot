@@ -133,7 +133,7 @@ func (RhFlowAdapter) CancelTask(ctx context.Context, input botprotocol.NativeInp
 }
 
 func (RhFlowAdapter) StreamTaskSpec(input botprotocol.NativeInput) (bottask.StreamTaskSpec, bool) {
-	outputType := rhflowOutputType(input)
+	outputType := runningHubOutputType(input)
 	return bottask.StreamTaskSpec{
 		Kind:         bottask.StreamKindPolling,
 		OutputType:   outputType,
@@ -329,24 +329,7 @@ func rhflowNodeField(key string) (string, string, bool) {
 }
 
 func rhflowRequestKind(input botprotocol.NativeInput) string {
-	outputType := rhflowOutputType(input)
-	if outputType == "" {
-		return rhflowDefaultKind
-	}
-	return rhflowKindPrefix + outputType
-}
-
-func rhflowOutputType(input botprotocol.NativeInput) string {
-	requestKind := ""
-	if input.Request != nil {
-		requestKind = input.Request.Kind
-	}
-	for _, value := range []string{input.Service.Type, input.Power.Kind, requestKind} {
-		if outputType := runningHubOutputTypeFromKind(value); outputType != "" {
-			return outputType
-		}
-	}
-	return botprotocol.MediaTypeImage
+	return rhflowKindPrefix + runningHubOutputType(input)
 }
 
 func runningHubOutputTypeFromKind(kind string) string {

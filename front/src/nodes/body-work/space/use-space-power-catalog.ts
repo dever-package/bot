@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { fetchSpacePowers } from "./space-api";
 import { SpaceCatalogCache } from "./space-catalog-cache";
-import { isStoryboardPowerType } from "./space-power-presentation";
+import { isStoryboardPowerType } from "../shared/power-presentation";
 import { parseStoryboardOutput } from "./space-storyboard";
 import type {
   PowerCategoryOption,

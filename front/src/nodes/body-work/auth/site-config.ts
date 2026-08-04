@@ -4,7 +4,13 @@ import {
   joinSiteApi,
   request,
 } from "@dever/front-plugin";
-import { isSuccessResponse } from "../shared/api-response";
+import {
+  asResponseRecord as recordValue,
+  asResponseRows as rowsValue,
+  isSuccessResponse,
+  responsePositiveNumber as positiveNumber,
+  responseText as textValue,
+} from "../shared/api-response";
 import type { BodyFilingInfo } from "../shared/body-filing";
 import {
   DEFAULT_BODY_APPEARANCE,
@@ -367,28 +373,9 @@ function mediaURL(value: unknown): string {
   }
 }
 
-function recordValue(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, any>)
-    : {};
-}
-
-function rowsValue(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function positiveNumber(value: unknown) {
-  const number = Number(value || 0);
-  return Number.isFinite(number) && number > 0 ? number : 0;
-}
-
 function finiteNumber(value: unknown, fallback: number) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
-}
-
-function textValue(value: unknown) {
-  return value == null ? "" : String(value).trim();
 }
 
 function booleanValue(value: unknown) {

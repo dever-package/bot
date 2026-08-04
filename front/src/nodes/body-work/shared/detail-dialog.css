@@ -114,6 +114,10 @@
   color-scheme: dark;
 }
 
+.wb-detail-backdrop.is-nested {
+  z-index: 10025;
+}
+
 .wb-detail-backdrop,
 .wb-detail-backdrop * {
   box-sizing: border-box;

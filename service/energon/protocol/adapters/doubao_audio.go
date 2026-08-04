@@ -57,7 +57,7 @@ func (adapter DoubaoAdapter) buildAudioRequest(input botprotocol.NativeInput) (b
 }
 
 func doubaoAudioRequestParams(input botprotocol.NativeInput, body map[string]any) map[string]any {
-	mapped := doubaoMappedInput(input)
+	mapped := resolvedMappedInput(input)
 	requestParams := cloneBody(botprotocol.NormalizeMap(body["req_params"]))
 	if strings.TrimSpace(botprotocol.AsText(requestParams["text"])) == "" {
 		text := firstNonEmptyText(
@@ -66,7 +66,7 @@ func doubaoAudioRequestParams(input botprotocol.NativeInput, body map[string]any
 			body["text"],
 			body["input"],
 			body["prompt"],
-			doubaoMappedInput(input).PrimaryPrompt(),
+			resolvedMappedInput(input).PrimaryPrompt(),
 		)
 		if text != "" {
 			requestParams["text"] = text

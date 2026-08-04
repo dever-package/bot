@@ -28,31 +28,6 @@ export type StoryboardFrameScope = {
   };
 };
 
-export function storyboardManagedNodeIds(nodes: SpaceCanvasNode[]) {
-  const sourceNodeIds = storyboardSourceNodeIds(nodes);
-  const scriptGroupIds = new Set(
-    nodes
-      .filter(
-        (node) =>
-          node.type === "group" &&
-          node.group?.origin === "script" &&
-          Boolean(node.group.sourceNodeId),
-      )
-      .map((node) => node.id),
-  );
-  const managedNodeIds = new Set(sourceNodeIds);
-  for (const node of nodes) {
-    if (
-      node.storyboardItem?.sourceNodeId ||
-      (node.type === "group" && node.group?.origin === "script") ||
-      Boolean(node.groupId && scriptGroupIds.has(node.groupId))
-    ) {
-      managedNodeIds.add(node.id);
-    }
-  }
-  return managedNodeIds;
-}
-
 export function storyboardStructureLockedNodeIds(nodes: SpaceCanvasNode[]) {
   return storyboardSourceNodeIds(nodes);
 }

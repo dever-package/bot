@@ -1,30 +1,27 @@
-import { getCompatModule } from "@dever/front-plugin";
-import { lazy, Suspense, type ComponentType } from "react";
+import { lazy, Suspense } from "react";
+import {
+  BodyContentView,
+  ContentViewBoundary,
+  resolveBodyContentOutput,
+  type BodyContentViewProps,
+} from "../shared/content-view";
 import {
   parseStoryboardOutput,
   type StoryboardDocument,
 } from "./space-storyboard";
 import {
   contentOutputMediaCount,
-  hasCanvasContent,
+  hasContentOutput,
   normalizeContentOutputItems,
-} from "./space-content-output";
+  parseStoryboardGridOutput,
+} from "../shared/content-output";
+import { StoryboardGridView } from "../shared/storyboard-grid-view";
 
 const StoryboardView = lazy(() =>
   import("./space-storyboard-view").then((module) => ({
     default: module.StoryboardView,
   })),
 );
-
-type SharedContentViewProps = {
-  output?: any;
-  streaming?: boolean;
-  emptyText?: string;
-  className?: string;
-  markdownClassName?: string;
-  richClassName?: string;
-  mediaLayout?: "default" | "chat" | "detail";
-};
 
 type CanvasContentMediaPreview = {
   imageUrl?: string;
@@ -33,19 +30,7 @@ type CanvasContentMediaPreview = {
   fileUrl?: string;
 };
 
-type ContentViewModule = {
-  ContentView?: ComponentType<SharedContentViewProps>;
-  EnergonContentView?: ComponentType<SharedContentViewProps>;
-};
-
-const contentViewModule = getCompatModule(
-  "@/components/energon/content-view",
-) as ContentViewModule;
-const SharedContentView =
-  contentViewModule.ContentView || contentViewModule.EnergonContentView;
-
-type CanvasNodeContentViewProps = SharedContentViewProps & {
-  fallback?: string;
+type CanvasNodeContentViewProps = BodyContentViewProps & {
   storyboardEditable?: boolean;
   storyboardDisabled?: boolean;
   onStoryboardSave?: (storyboard: StoryboardDocument) => Promise<void>;
@@ -64,28 +49,22 @@ export function CanvasNodeContentView({
   storyboardDisabled = false,
   onStoryboardSave,
 }: CanvasNodeContentViewProps) {
-  const resolvedOutput = hasCanvasContent(output)
-    ? output
-    : fallback
-      ? { text: fallback }
-      : output;
+  const resolvedOutput = resolveBodyContentOutput(output, fallback);
   const storyboard = parseStoryboardOutput(resolvedOutput);
+
+  const storyboardGrid = parseStoryboardGridOutput(resolvedOutput);
+
+  if (storyboardGrid) {
+    return (
+      <ContentViewBoundary className={className}>
+        <StoryboardGridView grid={storyboardGrid} />
+      </ContentViewBoundary>
+    );
+  }
 
   if (storyboard) {
     return (
-      <div
-        className={className}
-        onPointerDown={(event) => {
-          if (isInteractiveContentTarget(event.target)) {
-            event.stopPropagation();
-          }
-        }}
-        onClick={(event) => {
-          if (isInteractiveContentTarget(event.target)) {
-            event.stopPropagation();
-          }
-        }}
-      >
+      <ContentViewBoundary className={className}>
         <Suspense
           fallback={<div className="min-h-24" aria-busy="true" />}
         >
@@ -96,42 +75,22 @@ export function CanvasNodeContentView({
             onSave={onStoryboardSave}
           />
         </Suspense>
-      </div>
+      </ContentViewBoundary>
     );
   }
 
-  if (SharedContentView) {
-    return (
-      <div
-        className={className}
-        onPointerDown={(event) => {
-          if (isInteractiveContentTarget(event.target)) {
-            event.stopPropagation();
-          }
-        }}
-        onClick={(event) => {
-          if (isInteractiveContentTarget(event.target)) {
-            event.stopPropagation();
-          }
-        }}
-      >
-        <SharedContentView
-          output={resolvedOutput}
-          streaming={streaming}
-          emptyText={emptyText}
-          markdownClassName={markdownClassName}
-          richClassName={richClassName}
-          mediaLayout={mediaLayout}
-        />
-      </div>
-    );
-  }
-
-  return fallback ? (
-    <div className={className}>
-      <p>{fallback}</p>
-    </div>
-  ) : null;
+  return (
+    <BodyContentView
+      output={resolvedOutput}
+      fallback={fallback}
+      streaming={streaming}
+      emptyText={emptyText}
+      className={className}
+      markdownClassName={markdownClassName}
+      richClassName={richClassName}
+      mediaLayout={mediaLayout}
+    />
+  );
 }
 
 export function contentOutputNeedsRenderer(
@@ -147,7 +106,7 @@ export function contentOutputNeedsRenderer(
   }
   return items.some((item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
-      return hasCanvasContent(item);
+      return hasContentOutput(item);
     }
     return [
       item.title,
@@ -157,7 +116,7 @@ export function contentOutputNeedsRenderer(
       item.progress,
       item.error,
       item.json,
-    ].some(hasCanvasContent);
+    ].some(hasContentOutput);
   });
 }
 
@@ -203,21 +162,10 @@ function standaloneOutputText(
     .filter(
       ([key, item]) =>
         !["type", "kind", "format", "version"].includes(key) &&
-        hasCanvasContent(item),
+        hasContentOutput(item),
     )
     .map(([, item]) => item);
   return contentValues.length === 1
     ? standaloneOutputText(contentValues[0], seen, depth + 1)
     : "";
-}
-
-function isInteractiveContentTarget(target: EventTarget | null) {
-  return (
-    target instanceof Element &&
-    Boolean(
-      target.closest(
-        "a, button, input, textarea, select, audio, video, [role='button']",
-      ),
-    )
-  );
 }

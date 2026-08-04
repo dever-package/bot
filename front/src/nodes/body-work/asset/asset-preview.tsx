@@ -6,7 +6,7 @@ import {
   Image as ImageIcon,
   Paperclip,
 } from "lucide-react";
-import { CanvasNodeContentView } from "../space/space-content-view";
+import { BodyContentView } from "../shared/content-view";
 import { AssetAudioPreview } from "./asset-audio-preview";
 import { AssetFilePreview } from "./asset-file-preview";
 import { AssetLazyCover } from "./asset-lazy-cover";
@@ -42,7 +42,7 @@ export function AssetPreview({
     }
     const output = assetPreviewOutput(kind, content);
     return (
-      <CanvasNodeContentView
+      <BodyContentView
         output={output}
         fallback={summary || ""}
         emptyText="该版本暂无可预览内容"

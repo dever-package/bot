@@ -14,6 +14,7 @@ import (
 	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
 	runtimesessionstate "github.com/dever-package/bot/service/agent/runtime/sessionstate"
 	assetservice "github.com/dever-package/bot/service/asset"
+	energoninput "github.com/dever-package/bot/service/energon/input"
 	uploadaccess "github.com/dever-package/front/service/upload/access"
 	uploadrepo "github.com/dever-package/front/service/upload/repository"
 )
@@ -80,16 +81,30 @@ func (r Resolver) resolveAsset(ctx context.Context, session agentmodel.Session, 
 	content := resolved.Content
 	title := firstText(resolved.Asset.Name, reference.Label, fmt.Sprintf("资产 %d", reference.ID))
 	kind := firstText(resolved.Asset.Kind, "file")
-	media := []Media{}
-	if url := assetContentURL(content, kind); url != "" {
+	media := make([]Media, 0)
+	for _, current := range energoninput.MediaReferencesFromContent(TypeAsset, reference.ID, kind, content, reference.Usage) {
 		media = append(media, Media{
 			ReferenceType: TypeAsset,
 			ReferenceID:   reference.ID,
-			Kind:          normalizeMediaKind(kind),
+			Kind:          normalizeMediaKind(current.Kind),
 			Name:          title,
 			Label:         title,
-			URL:           url,
+			URL:           current.URL,
 		})
+	}
+	// Collections and legacy file assets may not expose a typed media array.
+	// Preserve their existing single-file fallback without truncating typed media.
+	if len(media) == 0 {
+		if url := assetContentURL(content, kind); url != "" {
+			media = append(media, Media{
+				ReferenceType: TypeAsset,
+				ReferenceID:   reference.ID,
+				Kind:          normalizeMediaKind(kind),
+				Name:          title,
+				Label:         title,
+				URL:           url,
+			})
+		}
 	}
 	output := mapValue(content)
 	if len(output) == 0 && content != nil {
@@ -214,7 +229,7 @@ func resolvedContext(items []Resolved, allowedMedia []Media) []map[string]any {
 	}
 	allowed := make(map[string]struct{}, len(allowedMedia))
 	for _, media := range allowedMedia {
-		allowed[fmt.Sprintf("%s:%d", media.ReferenceType, media.ReferenceID)] = struct{}{}
+		allowed[mediaKey(media)] = struct{}{}
 	}
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
@@ -234,10 +249,16 @@ func resolvedContext(items []Resolved, allowedMedia []Media) []map[string]any {
 			current["text"] = text
 		}
 		mediaItems := make([]map[string]any, 0, len(item.Media))
+		seenMedia := make(map[string]struct{}, len(item.Media))
 		for _, media := range item.Media {
-			if _, exists := allowed[fmt.Sprintf("%s:%d", media.ReferenceType, media.ReferenceID)]; !exists {
+			if _, exists := allowed[mediaKey(media)]; !exists {
 				continue
 			}
+			logicalKey := fmt.Sprintf("%s:%d", media.ReferenceType, media.ReferenceID)
+			if _, exists := seenMedia[logicalKey]; exists {
+				continue
+			}
+			seenMedia[logicalKey] = struct{}{}
 			mediaItem := map[string]any{
 				"ref_type": media.ReferenceType,
 				"ref_id":   media.ReferenceID,
@@ -407,7 +428,13 @@ func cleanMedia(values []Media) []Media {
 }
 
 func mediaKey(item Media) string {
-	return fmt.Sprintf("%s:%d:%s", item.ReferenceType, item.ReferenceID, strings.TrimSpace(item.Usage))
+	return fmt.Sprintf(
+		"%s:%d:%s:%s",
+		item.ReferenceType,
+		item.ReferenceID,
+		strings.TrimSpace(item.Usage),
+		strings.TrimSpace(item.URL),
+	)
 }
 
 func normalizeMediaKind(value string) string {
