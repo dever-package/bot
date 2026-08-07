@@ -22,6 +22,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { AssistantTaskPopover } from "@/components/assistant/task-popover";
 import {
   MAX_STORYBOARD_SHOTS,
   MIN_STORYBOARD_SHOT_DURATION,
@@ -54,6 +55,7 @@ import {
   type StoryboardProductionPlan,
   type StoryboardReferenceField,
   type StoryboardShot,
+  type StoryboardShotGeneration,
   type StoryboardSpeech,
   type StoryboardSpeechKind,
   type StoryboardTransitionType,
@@ -63,12 +65,15 @@ import {
   orderItemsByIds,
   sameOrderedIds,
 } from "./space-ordered-list";
-import type { ComposerAssetItem } from "./space-prompt-composer";
 import {
   reconcileCanvasReferenceContent,
   type CanvasReferenceTarget,
 } from "./space-reference-content";
-import type { CanvasReferenceContent, SpaceCanvasNode } from "./types";
+import type {
+  CanvasReferenceContent,
+  ComposerAssetItem,
+  SpaceCanvasNode,
+} from "./types";
 import {
   CanvasReferenceEditorWithAdapter,
   useCanvasReferenceAdapter,
@@ -132,6 +137,7 @@ export function StoryboardView({
   onChange,
   onConfirm,
   onCreateRevision,
+  onGenerateShot,
   workflowAction = "",
   saveStatus: externalSaveStatus,
   showSaveStatus = true,
@@ -152,6 +158,11 @@ export function StoryboardView({
     productionPlan: StoryboardProductionPlan,
   ) => boolean | Promise<boolean>;
   onCreateRevision?: () => void | Promise<void>;
+  onGenerateShot?: (
+    storyboard: StoryboardDocument,
+    shotId: string,
+    instruction: string,
+  ) => Promise<StoryboardShotGeneration>;
   workflowAction?: StoryboardWorkflowAction;
   saveStatus?: StoryboardSaveStatus;
   showSaveStatus?: boolean;
@@ -562,9 +573,13 @@ export function StoryboardView({
     resetShotDrag();
   };
 
-  const saveShot = (shot: StoryboardShot) => {
+  const saveShot = (
+    shot: StoryboardShot,
+    materials: StoryboardMaterial[],
+  ) => {
     updateDraft((current) => ({
       ...current,
+      materials,
       shots: current.shots.map((item) =>
         item.id === shot.id ? shot : item,
       ),
@@ -948,11 +963,13 @@ export function StoryboardView({
           shot={editingShot}
           index={editingShotIndex}
           previousShot={editingPreviousShot}
+          storyboard={draft}
           materials={draft.materials}
           readonly={!canEdit}
           referenceAdapter={referenceAdapter}
           portalContainer={dialogPortalContainer}
           onEditMaterial={setEditingMaterialId}
+          onGenerate={onGenerateShot}
           onSave={saveShot}
           onClose={() => setEditingShotId("")}
         />
@@ -1059,27 +1076,51 @@ function StoryboardShotDialog({
   shot,
   index,
   previousShot,
+  storyboard,
   materials,
   readonly,
   referenceAdapter,
   portalContainer,
   onEditMaterial,
+  onGenerate,
   onSave,
   onClose,
 }: {
   shot: StoryboardShot;
   index: number;
   previousShot?: StoryboardShot;
+  storyboard: StoryboardDocument;
   materials: StoryboardMaterial[];
   readonly: boolean;
   referenceAdapter: CanvasReferenceAdapter;
   portalContainer: Element | null;
   onEditMaterial: (materialId: string) => void;
-  onSave: (shot: StoryboardShot) => void;
+  onGenerate?: (
+    storyboard: StoryboardDocument,
+    shotId: string,
+    instruction: string,
+  ) => Promise<StoryboardShotGeneration>;
+  onSave: (shot: StoryboardShot, materials: StoryboardMaterial[]) => void;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState(() => cloneStoryboardShot(shot));
-  const characters = materials.filter(
+  const [dialogMaterials, setDialogMaterials] = useState(() => materials);
+  const [generating, setGenerating] = useState(false);
+
+  useEffect(() => {
+    setDialogMaterials((current) => {
+      const persistedIDs = new Set(materials.map((material) => material.id));
+      return [
+        ...materials,
+        ...current.filter((material) => !persistedIDs.has(material.id)),
+      ];
+    });
+  }, [materials]);
+
+  const persistedMaterialIDs = new Set(
+    materials.map((material) => material.id),
+  );
+  const characters = dialogMaterials.filter(
     (material) => material.type === "character",
   );
   const speechCharacterIDs = new Set(
@@ -1196,12 +1237,56 @@ function StoryboardShotDialog({
       return { ...current, captions };
     });
   };
+  const generateShot = async (instruction: string) => {
+    if (!onGenerate || generating) {
+      return false;
+    }
+    setGenerating(true);
+    try {
+      const context: StoryboardDocument = {
+        ...storyboard,
+        materials: dialogMaterials,
+        shots: storyboard.shots.map((item) =>
+          item.id === draft.id ? draft : item,
+        ),
+      };
+      const generation = await onGenerate(
+        context,
+        draft.id,
+        instruction.trim(),
+      );
+      setDialogMaterials(generation.materials);
+      setDraft((current) => ({
+        ...generation.shot,
+        reference_contents: { ...(current.reference_contents || {}) },
+      }));
+      return true;
+    } finally {
+      setGenerating(false);
+    }
+  };
   const dialog = (
-    <div className="ws-storyboard-shot-backdrop" onMouseDown={onClose}>
+    <div
+      className="ws-storyboard-shot-backdrop"
+      data-slot="dialog-layer"
+      onMouseDown={(event) => {
+        if (
+          event.target instanceof Element &&
+          event.target.closest('[data-assistant-layer="true"]')
+        ) {
+          return;
+        }
+        if (!generating) {
+          onClose();
+        }
+      }}
+    >
       <section
         className="ws-storyboard-shot-dialog"
+        data-slot="dialog-content"
         role="dialog"
         aria-modal="true"
+        aria-busy={generating}
         aria-label={`${readonly ? "查看" : "编辑"}镜头 ${index + 1}`}
         onMouseDown={(event) => event.stopPropagation()}
       >
@@ -1216,13 +1301,27 @@ function StoryboardShotDialog({
             </span>
           </div>
           <SpaceTooltip label="关闭">
-            <button type="button" aria-label="关闭" onClick={onClose}>
+            <button
+              type="button"
+              aria-label="关闭"
+              disabled={generating}
+              onClick={onClose}
+            >
               <X size={18} />
             </button>
           </SpaceTooltip>
         </header>
 
-        <div className="ws-storyboard-shot-form nowheel">
+        <fieldset
+          className="ws-storyboard-shot-form nowheel"
+          disabled={generating}
+        >
+          {generating ? (
+            <div className="ws-storyboard-generation-mask" role="status">
+              <Loader2 size={18} className="ws-spin" />
+              <span>正在生成镜头</span>
+            </div>
+          ) : null}
           <section className="ws-storyboard-shot-section">
             <div className="ws-storyboard-shot-section-head">
               <strong>镜头内容</strong>
@@ -1496,10 +1595,10 @@ function StoryboardShotDialog({
                 <span>{draft.material_ids.length} 个素材</span>
               </div>
             </div>
-            {materials.length ? (
+            {dialogMaterials.length ? (
               <div className="ws-storyboard-material-groups">
                 {(["character", "scene", "prop"] as const).map((type) => {
-                  const typedMaterials = materials.filter(
+                  const typedMaterials = dialogMaterials.filter(
                     (material) => material.type === type,
                   );
                   if (!typedMaterials.length) {
@@ -1514,6 +1613,9 @@ function StoryboardShotDialog({
                             material.id,
                           );
                           const required = speechCharacterIDs.has(material.id);
+                          const persisted = persistedMaterialIDs.has(
+                            material.id,
+                          );
                           return (
                             <div
                               className="ws-storyboard-material-option"
@@ -1541,14 +1643,21 @@ function StoryboardShotDialog({
                                 </label>
                               </SpaceTooltip>
                               <SpaceTooltip
-                                label={`${readonly ? "查看" : "编辑"}${STORYBOARD_MATERIAL_LABELS[type]}提示词：${material.name}`}
+                                label={
+                                  persisted
+                                    ? `${readonly ? "查看" : "编辑"}${STORYBOARD_MATERIAL_LABELS[type]}提示词：${material.name}`
+                                    : `AI 新增${STORYBOARD_MATERIAL_LABELS[type]}，确认镜头后可编辑：${material.name}`
+                                }
                               >
                                 <button
                                   type="button"
+                                  disabled={!persisted}
                                   onClick={() => onEditMaterial(material.id)}
                                 >
                                   <span>{material.name}</span>
-                                  {!readonly ? <Pencil size={11} /> : null}
+                                  {!readonly && persisted ? (
+                                    <Pencil size={11} />
+                                  ) : null}
                                 </button>
                               </SpaceTooltip>
                             </div>
@@ -1932,10 +2041,28 @@ function StoryboardShotDialog({
               </p>
             ) : null}
           </section>
-        </div>
+        </fieldset>
 
         <footer>
-          <button type="button" onClick={onClose}>
+          {!readonly && onGenerate ? (
+            <AssistantTaskPopover
+              title={`AI 生成镜头 ${String(index + 1).padStart(2, "0")}`}
+              description="可以补充本镜头的内容、动作、镜头语言或素材要求；不填也会按当前分镜生成。"
+              triggerLabel="AI 生成"
+              triggerClassName="is-ai"
+              triggerVariant="outline"
+              triggerSize="sm"
+              disabled={generating}
+              textareaPlaceholder="可选：输入本次镜头的补充要求，留空则按当前分镜上下文生成。"
+              submitLabel="确定生成"
+              loadingText="正在生成镜头"
+              errorText="生成镜头失败"
+              referencesEnabled={false}
+              stoppable={false}
+              onSubmit={({ instruction }) => generateShot(instruction)}
+            />
+          ) : null}
+          <button type="button" disabled={generating} onClick={onClose}>
             {readonly ? "关闭" : "取消"}
           </button>
           {!readonly ? (
@@ -1943,13 +2070,23 @@ function StoryboardShotDialog({
               type="button"
               className="is-primary"
               disabled={
+                generating ||
                 visibleSpeakers.size > 1 ||
                 invalidStartTimes ||
                 invalidNarrative ||
                 invalidContinuity ||
                 invalidCaptions
               }
-              onClick={() => onSave(draft)}
+              onClick={() =>
+                onSave(
+                  draft,
+                  dialogMaterials.filter(
+                    (material) =>
+                      persistedMaterialIDs.has(material.id) ||
+                      draft.material_ids.includes(material.id),
+                  ),
+                )
+              }
             >
               <Check size={14} />
               确认修改

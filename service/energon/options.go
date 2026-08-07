@@ -9,8 +9,6 @@ import (
 	frontmeta "github.com/dever-package/front/service/meta"
 )
 
-const defaultMaxFiles = 5
-
 type ParamOptionService struct{}
 
 func (ParamOptionService) ProviderLoadParamOptions(c *server.Context, _ []any) any {
@@ -77,10 +75,7 @@ func (ParamOptionService) ProviderLoadFileIndexOptions(c *server.Context, params
 	case "file":
 		maxFiles = 1
 	case "files":
-		maxFiles = util.ToIntDefault(row["max_files"], defaultMaxFiles)
-		if maxFiles <= 0 {
-			maxFiles = defaultMaxFiles
-		}
+		maxFiles = botinput.ServiceParamAttachmentOptionLimit(util.ToIntDefault(row["max_files"], 0))
 	default:
 		return []map[string]any{}
 	}

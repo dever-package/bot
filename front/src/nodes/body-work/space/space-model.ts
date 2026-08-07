@@ -37,6 +37,7 @@ import {
   finiteNumberOrZero as numberValue,
   isPlainRecord as isRecord,
 } from "../shared/structured-json";
+import { normalizeStoryboardGridLayout } from "../shared/storyboard-grid-layout";
 import { normalizeVideoComposition } from "./space-video-compose";
 
 const freeAssetCate: AssetCate = {
@@ -797,14 +798,83 @@ export function normalizeCanvasComposerDraft(value: unknown) {
   if (!Object.keys(row).length) {
     return undefined;
   }
+  const storyboardGridLayout = stringValue(row.storyboardGridLayout);
   return {
     prompt: stringValue(row.prompt),
     promptContent: normalizeCanvasReferenceContent(row.promptContent),
     paramValues: asRecord(row.paramValues),
     selectedTargetId: numberValue(row.selectedTargetId),
     videoComposition: normalizeVideoComposition(row.videoComposition),
-    storyboardReferences: normalizeStoryboardReferences(row.storyboardReferences),
+    storyboardReferences: normalizeStoryboardReferences(
+      row.storyboardReferences,
+    ),
+    storyboardGridLayout: storyboardGridLayout
+      ? normalizeStoryboardGridLayout(storyboardGridLayout)
+      : undefined,
+    multiImageMode: normalizeCanvasMultiImageMode(row.multiImageMode),
   };
+}
+
+export function normalizeCanvasComposerDraftOrDefault(
+  value: unknown,
+): CanvasComposerDraft {
+  return (
+    normalizeCanvasComposerDraft(value) || {
+      prompt: "",
+      paramValues: {},
+      selectedTargetId: 0,
+    }
+  );
+}
+
+export function readCanvasComposerDraft(value: unknown): CanvasComposerDraft {
+  const draft = normalizeCanvasComposerDraftOrDefault(value);
+  const contentPrompt = composerPromptFromReferenceContent(draft.promptContent);
+  return contentPrompt ? { ...draft, prompt: contentPrompt } : draft;
+}
+
+export function canvasComposerDraftSignature(draft: CanvasComposerDraft) {
+  return JSON.stringify([
+    draft.prompt,
+    draft.promptContent || null,
+    draft.paramValues || {},
+    draft.selectedTargetId || 0,
+    draft.storyboardReferences || [],
+    draft.storyboardGridLayout || "",
+    draft.multiImageMode || "",
+  ]);
+}
+
+export function canvasReferenceBindingSignature(
+  content: CanvasComposerDraft["promptContent"],
+) {
+  return JSON.stringify(
+    (content?.parts || []).filter((part) => part.type === "reference"),
+  );
+}
+
+function composerPromptFromReferenceContent(
+  content: CanvasComposerDraft["promptContent"],
+) {
+  if (!content?.parts?.some((part) => part.type === "reference")) {
+    return "";
+  }
+  return content.parts
+    .map((part) => {
+      if (part.type === "text") {
+        return part.text;
+      }
+      const label = String(part.label || "").trim();
+      return label.startsWith("@") ? label : `@${label}`;
+    })
+    .join("");
+}
+
+function normalizeCanvasMultiImageMode(value: unknown) {
+  const mode = stringValue(value);
+  return mode === "per_image" || mode === "shared_reference"
+    ? mode
+    : undefined;
 }
 
 function normalizePersistedCanvasComposerDraft(value: unknown) {
@@ -819,6 +889,8 @@ function normalizePersistedCanvasComposerDraft(value: unknown) {
     selectedTargetId: row.selected_target_id,
     videoComposition: row.video_composition,
     storyboardReferences: row.storyboard_references,
+    storyboardGridLayout: row.storyboard_grid_layout,
+    multiImageMode: row.multi_image_mode,
   });
 }
 

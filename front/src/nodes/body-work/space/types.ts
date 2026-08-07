@@ -1,4 +1,5 @@
 import type { CanvasVideoComposition } from "./space-video-compose";
+import type { StoryboardGridLayout } from "../shared/storyboard-grid-layout";
 import type { PowerCategory } from "../shared/power-menu";
 
 export type AssetKind =
@@ -17,6 +18,19 @@ export type CanvasContentPreview = {
   videoUrl: string;
   audioUrl: string;
   fileUrl: string;
+};
+export type ComposerAssetItem = {
+  id: string;
+  title: string;
+  kind: string;
+  role?: AssetRole;
+  source: "current" | "asset";
+  refType?: "asset";
+  refId?: number;
+  versionID?: number;
+  output?: unknown;
+  preview: CanvasContentPreview;
+  asset?: unknown;
 };
 export type SpaceNodeType =
   | "asset"
@@ -148,8 +162,6 @@ export type PowerParam = {
   usage?: number;
   value_type?: "string" | "number" | string;
   default_value?: string;
-  active_when_key?: string;
-  active_when_value?: string;
   required?: boolean;
   upload_rule_id?: number;
   max_files?: number;
@@ -289,6 +301,14 @@ export type CanvasGroupConfig = {
   layoutKey?: string;
 };
 
+export type CanvasMultiImageMode = "per_image" | "shared_reference";
+
+export type CanvasReferenceMediaItem = {
+  url: string;
+  index: number;
+  usage?: string;
+};
+
 export type CanvasComposerDraft = {
   prompt?: string;
   promptContent?: CanvasReferenceContent;
@@ -296,6 +316,8 @@ export type CanvasComposerDraft = {
   selectedTargetId?: number;
   videoComposition?: CanvasVideoComposition;
   storyboardReferences?: CanvasStoryboardReference[];
+  storyboardGridLayout?: StoryboardGridLayout;
+  multiImageMode?: CanvasMultiImageMode;
 };
 
 export type CanvasReferenceContent = {
@@ -312,6 +334,10 @@ export type CanvasReferenceContent = {
         ref_version_id?: number;
         ref_origin?: string;
         ref_origin_id?: string;
+        ref_media_count?: number;
+        ref_media_index?: number;
+        ref_media_url?: string;
+        ref_media_items?: CanvasReferenceMediaItem[];
       }
   >;
 };

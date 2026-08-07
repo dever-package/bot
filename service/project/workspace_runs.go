@@ -8,10 +8,21 @@ import (
 
 	assetmodel "github.com/dever-package/bot/model/asset"
 	teammodel "github.com/dever-package/bot/model/team"
+	workspacemodel "github.com/dever-package/bot/model/workspace"
 	assetservice "github.com/dever-package/bot/service/asset"
 )
 
-func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammodel.Run) {
+const workspaceInterruptedNodeError = "服务重启导致节点执行中断，请重新运行该节点"
+
+type workspaceChildRunProgress struct {
+	RunID    uint64
+	Status   string
+	Snapshot map[string]any
+	Found    bool
+	Finished bool
+}
+
+func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammodel.Run, recovering bool) {
 	if run == nil || run.ProjectID == 0 || run.ID == 0 {
 		return
 	}
@@ -53,28 +64,27 @@ func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammode
 		if nodeKey == "" || completed[nodeKey] {
 			continue
 		}
+		fullNode := workspaceCanvasNodeFromPlan(input, node, fullNodesByID)
+		nodeExecution := workspaceNodeExecutionByNode(ctx, run.ProjectID, run.ID, nodeKey)
 		childRequestID := canvasChildRequestID(run.RequestID, nodeKey)
+		if nodeExecution != nil {
+			childRequestID = firstText(nodeExecution.ChildRequestID, childRequestID)
+		}
 		childRunID := firstUint64(
 			workspaceNodeExecutionChildRunID(ctx, run.ProjectID, run.ID, nodeKey),
 			workspaceChildRunID(run.ID, resultByNode[nodeKey]),
 		)
-		childStatus, ok := s.finishedWorkspaceChildRun(ctx, run.ProjectID, childRunID, childRequestID)
-		if !ok {
+		childProgress := s.workspaceChildRunProgress(ctx, run.ProjectID, childRunID, childRequestID)
+		if !childProgress.Finished {
+			if recovering && !childProgress.Found && workspaceNodeExecutionRecoveryExpired(nodeExecution, time.Now()) {
+				s.failInterruptedWorkspaceNode(ctx, req, run, fullNode, parentNodeRuns[nodeKey], childRequestID)
+				nodeResults = workspaceNodeResults(ctx, run.ProjectID, run.ID)
+			}
 			continue
 		}
-		fullNode := fullNodesByID[nodeKey]
-		if fullNode.ID == "" {
-			fullNode = canvasRunNode{
-				ID:             nodeKey,
-				Type:           textValue(node["type"]),
-				Title:          textValue(node["title"]),
-				FunctionKey:    textValue(node["function_key"]),
-				AssetCateID:    uint64Value(firstPresent(input["_asset_cate_id"], node["asset_cate_id"])),
-				PersistsResult: boolValue(node["persists_result"]),
-			}
-		}
 		parentNodeRunID := parentNodeRuns[nodeKey]
-		payload := s.workspaceChildNodePayload(ctx, run, fullNode, parentNodeRunID, childRunID, childStatus)
+		payload := workspaceChildNodePayload(ctx, run, fullNode, parentNodeRunID, childProgress.Snapshot, childProgress.Status)
+		childStatus := childProgress.Status
 		if childStatus == teammodel.RunStatusSuccess {
 			if saved, err := s.saveWorkspaceCanvasMaterial(ctx, run.ProjectID, req, run, fullNode, parentNodeRunID, payload); err == nil {
 				payload = saved
@@ -110,7 +120,7 @@ func (s WorkspaceService) SyncCanvasRunProgress(ctx context.Context, projectID u
 	if workspaceRunLeaseAlive(run, now) || !workspaceRunExecutionOrphaned(run, now) {
 		return run
 	}
-	go s.watchWorkspaceRun(detachedWorkspaceContext(ctx), run.ID, 0)
+	go s.watchWorkspaceRunRecovery(detachedWorkspaceContext(ctx), run.ID)
 	if refreshed := teammodel.NewRunModel().Find(ctx, map[string]any{"id": run.ID}); refreshed != nil {
 		return refreshed
 	}
@@ -145,52 +155,120 @@ func workspaceChildRunID(parentRunID uint64, result map[string]any) uint64 {
 	return runID
 }
 
-func (s WorkspaceService) finishedWorkspaceChildRun(ctx context.Context, projectID uint64, runID uint64, requestID string) (string, bool) {
+func (s WorkspaceService) workspaceChildRunProgress(ctx context.Context, projectID uint64, runID uint64, requestID string) workspaceChildRunProgress {
 	if runID == 0 && requestID == "" {
-		return "", false
+		return workspaceChildRunProgress{}
 	}
-	status, err := s.project.RunStatus(ctx, projectID, runID, requestID)
+	childRun := findWorkspaceChildRun(ctx, projectID, runID, requestID)
+	if childRun == nil {
+		return workspaceChildRunProgress{}
+	}
+	progress := workspaceChildRunProgress{
+		RunID:  childRun.ID,
+		Status: strings.TrimSpace(childRun.Status),
+		Found:  true,
+	}
+	status, err := s.project.team.ProjectRunStatus(ctx, projectID, childRun.ID, childRun.RequestID)
 	if err != nil {
-		return "", false
+		return progress
 	}
-	run := mapValue(status["run"])
-	if run == nil {
-		return "", false
+	progress.Snapshot = status
+	runPayload := mapValue(status["run"])
+	if runPayload != nil {
+		progress.RunID = firstUint64(uint64Value(runPayload["id"]), progress.RunID)
+		progress.Status = firstText(runPayload["status"], progress.Status)
 	}
-	runStatus := textValue(run["status"])
-	switch runStatus {
+	switch progress.Status {
 	case teammodel.RunStatusSuccess, teammodel.RunStatusFail, teammodel.RunStatusCanceled, teammodel.RunStatusWaiting:
-		return runStatus, true
-	default:
-		return runStatus, false
+		progress.Finished = true
 	}
+	return progress
 }
 
-func (s WorkspaceService) workspaceChildNodePayload(ctx context.Context, run *teammodel.Run, node canvasRunNode, parentNodeRunID uint64, childRunID uint64, status string) map[string]any {
-	nodeKey := node.ID
-	childRequestID := canvasChildRequestID(run.RequestID, nodeKey)
-	childStatus, err := s.project.RunStatus(ctx, run.ProjectID, childRunID, childRequestID)
-	if err != nil {
-		return canvasNodeRunPayload(CanvasRunRequest{RequestID: run.RequestID}, run, canvasRunNode{
-			ID:   nodeKey,
-			Type: node.Type,
-		}, parentNodeRunID, map[string]any{
-			"status": status,
-			"error":  err.Error(),
-		})
+func findWorkspaceChildRun(ctx context.Context, projectID uint64, runID uint64, requestID string) *teammodel.Run {
+	model := teammodel.NewRunModel()
+	if projectID == 0 {
+		return nil
 	}
+	if runID > 0 {
+		if run := model.Find(ctx, map[string]any{"id": runID, "project_id": projectID}); run != nil {
+			return run
+		}
+	}
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return nil
+	}
+	return model.Find(ctx, map[string]any{"request_id": requestID, "project_id": projectID})
+}
+
+func workspaceChildNodePayload(ctx context.Context, run *teammodel.Run, node canvasRunNode, parentNodeRunID uint64, childStatus map[string]any, status string) map[string]any {
 	childRun := mapValue(childStatus["run"])
 	output := firstPresent(valueAtPath(childRun, "output"), map[string]any{})
 	nodeResult := workspaceChildNodeResult(ctx, run.ProjectID, run, node, parentNodeRunID, status, childStatus, output)
 	return map[string]any{
-		"run_id":       run.ID,
-		"child_run_id": uint64Value(childRun["id"]),
-		"request_id":   run.RequestID,
-		"release_id":   run.ReleaseID,
-		"status":       status,
-		"output":       output,
-		"node_results": []map[string]any{nodeResult},
+		"run_id":           run.ID,
+		"child_run_id":     uint64Value(childRun["id"]),
+		"child_request_id": textValue(childRun["request_id"]),
+		"request_id":       run.RequestID,
+		"release_id":       run.ReleaseID,
+		"status":           status,
+		"output":           output,
+		"node_results":     []map[string]any{nodeResult},
 	}
+}
+
+func workspaceCanvasNodeFromPlan(input map[string]any, node map[string]any, nodesByID map[string]canvasRunNode) canvasRunNode {
+	nodeKey := textValue(node["id"])
+	if fullNode := nodesByID[nodeKey]; fullNode.ID != "" {
+		return fullNode
+	}
+	return canvasRunNode{
+		ID:             nodeKey,
+		Type:           textValue(node["type"]),
+		Title:          textValue(node["title"]),
+		FunctionKey:    textValue(node["function_key"]),
+		AssetCateID:    uint64Value(firstPresent(input["_asset_cate_id"], node["asset_cate_id"])),
+		PersistsResult: boolValue(node["persists_result"]),
+	}
+}
+
+func workspaceNodeExecutionRecoveryExpired(execution *workspacemodel.NodeExecution, now time.Time) bool {
+	if execution == nil {
+		return false
+	}
+	switch strings.TrimSpace(execution.Status) {
+	case teammodel.RunStatusPending, teammodel.RunStatusRunning:
+	default:
+		return false
+	}
+	lastActiveAt := execution.UpdatedAt
+	if execution.StartedAt != nil && execution.StartedAt.After(lastActiveAt) {
+		lastActiveAt = *execution.StartedAt
+	}
+	if execution.CreatedAt.After(lastActiveAt) {
+		lastActiveAt = execution.CreatedAt
+	}
+	return !lastActiveAt.IsZero() && !lastActiveAt.After(now.Add(-workspaceRunLeaseDuration))
+}
+
+func (s WorkspaceService) failInterruptedWorkspaceNode(
+	ctx context.Context,
+	req CanvasRunRequest,
+	run *teammodel.Run,
+	node canvasRunNode,
+	nodeRunID uint64,
+	childRequestID string,
+) {
+	payload := canvasNodeRunPayload(req, run, node, nodeRunID, map[string]any{
+		"status":           teammodel.RunStatusFail,
+		"error":            workspaceInterruptedNodeError,
+		"retryable":        true,
+		"recovery_reason":  "server_restart",
+		"child_request_id": strings.TrimSpace(childRequestID),
+	})
+	s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRunID, teammodel.RunStatusFail, payload, nil)
+	s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "node_finished", teammodel.RunStatusFail, payload)
 }
 
 func (s WorkspaceService) continueWorkspaceRunAfterBlockedNode(ctx context.Context, run *teammodel.Run, input map[string]any, plan map[string]any, nodeResults []map[string]any) bool {

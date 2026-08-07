@@ -343,7 +343,8 @@
   grid-row: 1 / -1;
 }
 
-.wb-asset-collection-preview > span {
+.wb-asset-collection-preview > span,
+.wb-asset-media-count {
   position: absolute;
   right: 10px;
   bottom: 9px;
@@ -354,6 +355,10 @@
   padding: 4px 7px;
   font-size: 10px;
   font-weight: 600;
+}
+
+.wb-asset-media-count {
+  pointer-events: none;
 }
 
 .wb-asset-collection-empty {
@@ -1128,6 +1133,36 @@
 .wb-asset-preview-content video {
   max-width: 100%;
   height: auto;
+}
+
+.wb-detail-scroll:has(
+    > .wb-detail-readonly-content > .wb-asset-media-gallery
+  ) {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.wb-detail-readonly-content:has(> .wb-asset-media-gallery) {
+  box-sizing: border-box;
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.wb-detail-readonly-content:has(> .wb-asset-media-gallery)
+  > .wb-detail-error-banner {
+  flex: 0 0 auto;
+  margin: 12px auto 0;
+}
+
+.wb-asset-media-gallery {
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 .wb-asset-rename-backdrop {

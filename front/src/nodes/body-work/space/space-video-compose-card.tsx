@@ -1,6 +1,6 @@
 import { Shuffle, Trash2, Volume2 } from "lucide-react";
 import type { DragEvent, ReactNode } from "react";
-import type { ComposerAssetItem } from "./space-prompt-composer";
+import type { ComposerAssetItem } from "./types";
 import {
   formatVideoComposeDuration,
   type VideoComposeClip,
@@ -93,9 +93,9 @@ export function VideoComposeClipCard({
       }
     >
       <div className="ws-video-compose-card-preview">
-        {item?.preview.videoUrl ? (
+        {clip.visualVideo?.mediaUrl || item?.preview.videoUrl ? (
           <FirstFrameVideo
-            src={item.preview.videoUrl}
+            src={clip.visualVideo?.mediaUrl || item?.preview.videoUrl || ""}
             muted
             playsInline
             preload="metadata"

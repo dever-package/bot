@@ -11,14 +11,24 @@ const (
 )
 
 type Part struct {
-	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
-	RefType   string `json:"ref_type,omitempty"`
-	RefID     uint64 `json:"ref_id,omitempty"`
-	Label     string `json:"label,omitempty"`
-	Usage     string `json:"usage,omitempty"`
-	Trigger   string `json:"ref_trigger,omitempty"`
-	VersionID uint64 `json:"ref_version_id,omitempty"`
+	Type       string               `json:"type"`
+	Text       string               `json:"text,omitempty"`
+	RefType    string               `json:"ref_type,omitempty"`
+	RefID      uint64               `json:"ref_id,omitempty"`
+	Label      string               `json:"label,omitempty"`
+	Usage      string               `json:"usage,omitempty"`
+	Trigger    string               `json:"ref_trigger,omitempty"`
+	VersionID  uint64               `json:"ref_version_id,omitempty"`
+	MediaURL   string               `json:"ref_media_url,omitempty"`
+	MediaIndex int                  `json:"ref_media_index,omitempty"`
+	MediaCount int                  `json:"ref_media_count,omitempty"`
+	MediaItems []MediaSelectionItem `json:"ref_media_items,omitempty"`
+}
+
+type MediaSelectionItem struct {
+	URL   string `json:"url,omitempty"`
+	Index int    `json:"index,omitempty"`
+	Usage string `json:"usage,omitempty"`
 }
 
 type Content struct {
@@ -41,12 +51,16 @@ type Input struct {
 }
 
 type Reference struct {
-	Type      string
-	ID        uint64
-	Label     string
-	Usage     string
-	Trigger   string
-	VersionID uint64
+	Type       string
+	ID         uint64
+	Label      string
+	Usage      string
+	Trigger    string
+	VersionID  uint64
+	MediaURL   string
+	MediaIndex int
+	MediaCount int
+	MediaItems []MediaSelectionItem
 }
 
 type Media struct {

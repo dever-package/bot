@@ -233,6 +233,11 @@ export type StoryboardDocument = Record<string, unknown> & {
   shots: StoryboardShot[];
 };
 
+export type StoryboardShotGeneration = {
+  shot: StoryboardShot;
+  materials: StoryboardMaterial[];
+};
+
 const STORYBOARD_WRAPPER_KEYS = [
   "storyboard",
   "json",
@@ -250,6 +255,28 @@ const STORYBOARD_WRAPPER_KEYS = [
 
 export function parseStoryboardOutput(value: unknown) {
   return findStoryboard(value, new Set(), 0);
+}
+
+export function parseStoryboardShotGeneration(
+  value: unknown,
+  shotIndex: number,
+): StoryboardShotGeneration | null {
+  if (!isRecord(value) || !Array.isArray(value.materials)) {
+    return null;
+  }
+  const materials = value.materials.map(decodeStoryboardMaterial);
+  if (materials.some((material) => !material)) {
+    return null;
+  }
+  const normalizedMaterials = materials as StoryboardMaterial[];
+  const materialIDs = new Set(
+    normalizedMaterials.map((material) => material.id),
+  );
+  if (materialIDs.size !== normalizedMaterials.length) {
+    return null;
+  }
+  const shot = decodeStoryboardShot(value.shot, shotIndex, materialIDs);
+  return shot ? { shot, materials: normalizedMaterials } : null;
 }
 
 export function storyboardTotalDuration(storyboard: StoryboardDocument) {

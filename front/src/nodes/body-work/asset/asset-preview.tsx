@@ -7,6 +7,7 @@ import {
   Paperclip,
 } from "lucide-react";
 import { BodyContentView } from "../shared/content-view";
+import { MediaInspector } from "../../shared/media-inspector-gallery";
 import { AssetAudioPreview } from "./asset-audio-preview";
 import { AssetFilePreview } from "./asset-file-preview";
 import { AssetLazyCover } from "./asset-lazy-cover";
@@ -16,7 +17,7 @@ import { assetKindLabel } from "./asset-contract";
 import {
   assetPreviewOutput,
   assetPreviewText,
-  findAssetMediaURL,
+  findAssetMediaURLs,
 } from "./asset-content";
 
 export function AssetPreview({
@@ -32,8 +33,19 @@ export function AssetPreview({
   prompt?: string;
   compact?: boolean;
 }) {
-  const mediaURL = findAssetMediaURL(content, kind);
+  const mediaURLs = findAssetMediaURLs(content, kind);
+  const mediaURL = mediaURLs[0] || "";
   if (!compact) {
+    if ((kind === "image" || kind === "video") && mediaURLs.length > 0) {
+      return (
+        <MediaInspector
+          kind={kind}
+          urls={mediaURLs}
+          downloadable
+          className="wb-asset-media-gallery"
+        />
+      );
+    }
     if (kind === "audio") {
       return <AssetAudioPreview src={mediaURL} prompt={prompt} detailed />;
     }

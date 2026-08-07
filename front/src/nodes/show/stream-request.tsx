@@ -92,7 +92,17 @@ type ReferenceEditorProps = {
   placeholder?: string
   disabled?: boolean
   providers?: ReferenceProvider[]
+  usageOptions?: ReferenceUsageOption[]
+  showMediaAliases?: boolean
+  allowMultiMediaSelection?: boolean
   onChange: (value: string, content: ReferenceContent) => void
+}
+
+type ReferenceUsageOption = {
+  key: string
+  label: string
+  acceptedKinds?: string[]
+  maxFiles?: number
 }
 
 const ReferenceEditor = getCompatModule(
@@ -293,6 +303,10 @@ export function StreamPowerRunner({
       ),
     [displayedPowerParams]
   )
+  const referenceUsageOptions = useMemo(
+    () => powerReferenceUsageOptions(activePowerParams),
+    [activePowerParams]
+  )
   const hasConfiguredParams = powerParams.length > 0
   const sourcePickerOptions = useMemo(
     () =>
@@ -464,6 +478,14 @@ export function StreamPowerRunner({
     const validationError = validateMainParams(powerParams, paramValues)
     if (validationError) {
       setError(validationError)
+      return
+    }
+    const referenceValidationError = validatePowerReferenceContents(
+      paramReferenceContents,
+      referenceUsageOptions
+    )
+    if (referenceValidationError) {
+      setError(referenceValidationError)
       return
     }
 
@@ -976,6 +998,7 @@ export function StreamPowerRunner({
                         content={paramReferenceContents[key]}
                         providers={referenceProviders}
                         assetReferenceTeamID={assetReferenceTeamID}
+                        usageOptions={referenceUsageOptions}
                         disabled={running}
                         onChange={(nextValue, nextContent) => {
                           setParamValue(param, nextValue)
@@ -1089,6 +1112,7 @@ function PowerPromptReferenceField({
   content,
   providers,
   assetReferenceTeamID,
+  usageOptions,
   disabled,
   onChange,
 }: {
@@ -1097,12 +1121,13 @@ function PowerPromptReferenceField({
   content?: ReferenceContent
   providers: ReferenceProvider[]
   assetReferenceTeamID: number
+  usageOptions: ReferenceUsageOption[]
   disabled: boolean
   onChange: (value: string, content: ReferenceContent) => void
 }) {
   const assetReferenceProvider = useAssetReferenceProvider({
     teamID: assetReferenceTeamID,
-    allowedKinds: param.asset_kinds,
+    allowedKinds: referenceAcceptedKinds(param),
   })
   const activeProviders = useMemo(
     () =>
@@ -1114,6 +1139,16 @@ function PowerPromptReferenceField({
         : providers,
     [assetReferenceProvider, assetReferenceTeamID, providers]
   )
+  const usageSignature = usageOptions
+    .map((option) =>
+      [
+        option.key,
+        option.label,
+        option.maxFiles || 0,
+        ...(option.acceptedKinds || []),
+      ].join(':')
+    )
+    .join('|')
 
   return (
     <div className='stream-power-param-field stream-power-prompt-field space-y-2 rounded-xl bg-muted/30 p-3'>
@@ -1125,16 +1160,124 @@ function PowerPromptReferenceField({
         <small>输入 @ 引用资产</small>
       </div>
       <ReferenceEditor
+        key={usageSignature}
         value={value}
         content={content}
         references={[]}
         placeholder={param.placeholder || `请输入${param.name}`}
         disabled={disabled}
         providers={activeProviders}
+        usageOptions={usageOptions}
+        showMediaAliases
+        allowMultiMediaSelection
         onChange={onChange}
       />
     </div>
   )
+}
+
+function powerReferenceUsageOptions(
+  params: PowerParam[]
+): ReferenceUsageOption[] {
+  return params.flatMap((param) => {
+    if (param.type !== 'file' && param.type !== 'files') {
+      return []
+    }
+    const key = inputKeyForParam(param)
+    if (!key) {
+      return []
+    }
+    return [
+      {
+        key,
+        label: String(param.name || key),
+        acceptedKinds: referenceAcceptedKinds(param),
+        maxFiles:
+          param.type === 'files' ? Math.max(0, Number(param.max_files || 0)) : 1,
+      },
+    ]
+  })
+}
+
+function referenceAcceptedKinds(param: PowerParam) {
+  const supported = new Set(['image', 'video', 'audio', 'file'])
+  const configured = Array.from(
+    new Set(
+      (param.accepted_kinds || param.asset_kinds || [])
+        .map((kind) => String(kind || '').trim().toLowerCase())
+        .filter((kind) => supported.has(kind))
+    )
+  )
+  if (configured.length > 0) {
+    return configured
+  }
+  const identity = `${param.name || ''} ${param.key || ''}`.toLowerCase()
+  if (/video|视频/.test(identity)) return ['video']
+  if (/audio|music|音频|音乐/.test(identity)) return ['audio']
+  if (/image|img|photo|picture|图片|图像|参考图|首帧|尾帧/.test(identity)) {
+    return ['image']
+  }
+  return ['image', 'video', 'audio', 'file']
+}
+
+function validatePowerReferenceContents(
+  contents: Record<string, ReferenceContent>,
+  usageOptions: ReferenceUsageOption[]
+) {
+  const counts = new Map<string, number>()
+  for (const content of Object.values(contents)) {
+    for (const part of content.parts || []) {
+      if (part.type !== 'reference' || part.ref_type !== 'asset') {
+        continue
+      }
+      const configuredUsage = String(part.usage || '').trim()
+      const option = configuredUsage
+        ? usageOptions.find((candidate) => candidate.key === configuredUsage)
+        : usageOptions.length === 1
+          ? usageOptions[0]
+          : undefined
+      if (!option) {
+        if (configuredUsage) {
+          return `“${part.label || '引用素材'}”的素材用途与当前能力参数不兼容。`
+        }
+        if (usageOptions.length > 1) {
+          return `请为“${part.label || '引用素材'}”选择素材用途。`
+        }
+        continue
+      }
+      const selectedMediaItems = Array.isArray(part.ref_media_items)
+        ? part.ref_media_items.filter(
+            (item) =>
+              Boolean(String(item?.url || '').trim()) ||
+              Number(item?.index || 0) > 0,
+          )
+        : []
+      const singleMediaSelected = Boolean(
+        String(part.ref_media_url || '').trim() ||
+          Number(part.ref_media_index || 0) > 0
+      )
+      const mediaCount = Math.max(1, Number(part.ref_media_count || 0))
+      const amount = selectedMediaItems.length
+        ? selectedMediaItems.length
+        : singleMediaSelected
+          ? 1
+          : mediaCount
+      const capacity = Math.max(0, Number(option.maxFiles || 0))
+      const used = counts.get(option.key) || 0
+      if (capacity > 0 && used + amount > capacity) {
+        if (
+          !singleMediaSelected &&
+          selectedMediaItems.length === 0 &&
+          mediaCount > 1
+        ) {
+          return `“${part.label || '引用素材'}”包含 ${mediaCount} 项素材，请从引用中选择具体素材。`
+        }
+        return `${option.label}参数最多接收 ${capacity} 个素材。`
+      }
+      counts.set(option.key, used + amount)
+    }
+  }
+  return ''
 }
 
 function StreamStopButton({
@@ -1352,7 +1495,7 @@ function buildReplayParamFiles(
       continue
     }
     result[key] = selected.map((url, index) => {
-      const kind = param.asset_kinds?.[0]
+      const kind = (param.accepted_kinds || param.asset_kinds)?.[0]
       return {
         id: `replay:${key}:${index}`,
         name: replayFileName(url, index),

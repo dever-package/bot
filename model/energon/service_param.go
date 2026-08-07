@@ -111,6 +111,9 @@ const (
 	doubaoVoiceMapping               = `[{"native_value":"zh_female_vv_uranus_bigtts","option_id":23},{"native_value":"","option_id":24},{"native_value":"","option_id":25},{"native_value":"","option_id":26},{"native_value":"","option_id":27},{"native_value":"","option_id":28},{"native_value":"","option_id":29},{"native_value":"","option_id":30},{"native_value":"","option_id":31},{"native_value":"","option_id":32},{"native_value":"","option_id":33},{"native_value":"","option_id":34},{"native_value":"","option_id":35}]`
 	doubaoVideoFastResolutionMapping = `[{"native_value":"720p","option_id":1}]`
 	doubaoVideoFastRatioMapping      = `[{"native_value":"1:1","option_id":4},{"native_value":"16:9","option_id":5},{"native_value":"9:16","option_id":6},{"native_value":"4:3","option_id":7},{"native_value":"3:4","option_id":8},{"native_value":"21:9","option_id":13}]`
+	miniMaxH3ResolutionMapping       = `[{"native_value":"2k","option_id":2}]`
+	miniMaxH3RatioMapping            = `[{"native_value":"adaptive","option_id":37},{"native_value":"1:1","option_id":4},{"native_value":"16:9","option_id":5},{"native_value":"9:16","option_id":6},{"native_value":"4:3","option_id":7},{"native_value":"3:4","option_id":8},{"native_value":"21:9","option_id":13}]`
+	miniMaxH3DurationMapping         = `[{"native_value":"5","option_id":14},{"native_value":"6","option_id":15},{"native_value":"7","option_id":16},{"native_value":"8","option_id":17},{"native_value":"9","option_id":18},{"native_value":"10","option_id":19},{"native_value":"11","option_id":20},{"native_value":"12","option_id":22},{"native_value":"13","option_id":38},{"native_value":"14","option_id":39},{"native_value":"15","option_id":40}]`
 )
 
 var (
@@ -174,6 +177,15 @@ var (
 		{ID: 73, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamLastFrameID, ParamRule: serviceParamRuleFixed, Key: "content[2].type", Mapping: "image_url", Sort: 24},
 		withReferenceModeCondition(serviceParamSeedConfig{ID: 74, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamLastFrameID, ParamRule: serviceParamRuleAttachment, Key: "content[2].image_url.url", Name: "尾帧", Mapping: "[1]", Sort: ParamSortLastFrame}, ReferenceModeFrames),
 		{ID: 75, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamLastFrameID, ParamRule: serviceParamRuleFixed, Key: "content[2].role", Mapping: "last_frame", Sort: 26},
+		{ID: 76, ServiceID: serviceRunningHubMiniMaxH3ID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "prompt", Sort: ParamSortPrompt},
+		withReferenceModeCondition(serviceParamSeedConfig{ID: 77, ServiceID: serviceRunningHubMiniMaxH3ID, ParamID: ParamFirstFrameID, ParamRule: serviceParamRuleAttachment, Key: "firstImageUrl", Name: "首帧", Mapping: "[1]", FileValueFormat: ServiceParamFileValueFormatDataURL, Sort: ParamSortFirstFrame}, ReferenceModeFrames),
+		withReferenceModeCondition(serviceParamSeedConfig{ID: 78, ServiceID: serviceRunningHubMiniMaxH3ID, ParamID: ParamLastFrameID, ParamRule: serviceParamRuleDirect, Key: "lastFrameUrl", FileValueFormat: ServiceParamFileValueFormatDataURL, Sort: ParamSortLastFrame}, ReferenceModeFrames),
+		withReferenceModeCondition(serviceParamSeedConfig{ID: 79, ServiceID: serviceRunningHubMiniMaxH3ID, ParamID: ParamImagesID, ParamRule: serviceParamRuleDirect, Key: "imageUrls", Sort: ParamSortImages}, ReferenceModeReferences),
+		withReferenceModeCondition(serviceParamSeedConfig{ID: 80, ServiceID: serviceRunningHubMiniMaxH3ID, ParamID: paramAudioID, ParamRule: serviceParamRuleDirect, Key: "audioUrls", Sort: ParamSortAudio}, ReferenceModeReferences),
+		withReferenceModeCondition(serviceParamSeedConfig{ID: 81, ServiceID: serviceRunningHubMiniMaxH3ID, ParamID: paramVideoID, ParamRule: serviceParamRuleDirect, Key: "videoUrls", Sort: ParamSortVideo}, ReferenceModeReferences),
+		{ID: 82, ServiceID: serviceRunningHubMiniMaxH3ID, ParamID: paramResolutionID, ParamRule: serviceParamRuleOption, Key: "resolution", Mapping: miniMaxH3ResolutionMapping, Sort: ParamSortResolution},
+		{ID: 83, ServiceID: serviceRunningHubMiniMaxH3ID, ParamID: paramAspectRatioID, ParamRule: serviceParamRuleOption, Key: "ratio", Mapping: miniMaxH3RatioMapping, Sort: ParamSortAspectRatio},
+		{ID: 84, ServiceID: serviceRunningHubMiniMaxH3ID, ParamID: paramDurationID, ParamRule: serviceParamRuleOption, Key: "duration", Mapping: miniMaxH3DurationMapping, Sort: ParamSortDuration},
 	})
 
 	paramRuleOptions = []map[string]any{

@@ -28,6 +28,24 @@ export type StoryboardFrameScope = {
   };
 };
 
+export type StoryboardFrameIndex = {
+  frames: StoryboardFrameScope[];
+  sourceNodeIds: Set<string>;
+  sourceNodeIdByNodeId: Map<string, string>;
+};
+
+export function buildStoryboardFrameIndex(
+  nodes: SpaceCanvasNode[],
+  hasResult: (node: SpaceCanvasNode) => boolean,
+): StoryboardFrameIndex {
+  const sourceNodeIds = storyboardSourceNodeIds(nodes);
+  return {
+    frames: storyboardFrameScopes(nodes, hasResult, sourceNodeIds),
+    sourceNodeIds,
+    sourceNodeIdByNodeId: storyboardSourceNodeIdIndex(nodes, sourceNodeIds),
+  };
+}
+
 export function storyboardStructureLockedNodeIds(nodes: SpaceCanvasNode[]) {
   return storyboardSourceNodeIds(nodes);
 }
@@ -36,31 +54,44 @@ export function storyboardSourceNodeIdForNode(
   nodes: SpaceCanvasNode[],
   node: SpaceCanvasNode,
 ) {
-  if (node.storyboardItem?.sourceNodeId) {
-    return node.storyboardItem.sourceNodeId;
+  return storyboardSourceNodeIdIndex(nodes).get(node.id) || "";
+}
+
+export function storyboardSourceNodeIdIndex(
+  nodes: SpaceCanvasNode[],
+  sourceNodeIds = storyboardSourceNodeIds(nodes),
+) {
+  const scriptedGroupSourceIds = new Map<string, string>();
+  for (const node of nodes) {
+    if (node.type === "group" && node.group?.origin === "script") {
+      scriptedGroupSourceIds.set(node.id, node.group.sourceNodeId || "");
+    }
   }
-  if (node.type === "group" && node.group?.origin === "script") {
-    return node.group.sourceNodeId || "";
+
+  const sourceNodeIdByNodeId = new Map<string, string>();
+  for (const node of nodes) {
+    let sourceNodeId = "";
+    if (node.storyboardItem?.sourceNodeId) {
+      sourceNodeId = node.storyboardItem.sourceNodeId;
+    } else if (node.type === "group" && node.group?.origin === "script") {
+      sourceNodeId = node.group.sourceNodeId || "";
+    } else if (sourceNodeIds.has(node.id)) {
+      sourceNodeId = node.id;
+    } else if (node.groupId) {
+      sourceNodeId = scriptedGroupSourceIds.get(node.groupId) || "";
+    }
+    if (sourceNodeId) {
+      sourceNodeIdByNodeId.set(node.id, sourceNodeId);
+    }
   }
-  const sourceNodeIds = storyboardSourceNodeIds(nodes);
-  if (sourceNodeIds.has(node.id)) {
-    return node.id;
-  }
-  if (!node.groupId) {
-    return "";
-  }
-  const group = nodes.find((candidate) => candidate.id === node.groupId);
-  return group?.group?.origin === "script"
-    ? group.group.sourceNodeId || ""
-    : "";
+  return sourceNodeIdByNodeId;
 }
 
 export function storyboardFrameScopes(
   nodes: SpaceCanvasNode[],
   hasResult: (node: SpaceCanvasNode) => boolean,
+  storyboardNodeIds = storyboardSourceNodeIds(nodes),
 ) {
-  const storyboardNodeIds = storyboardSourceNodeIds(nodes);
-
   const scopes: StoryboardFrameScope[] = [];
   for (const sourceNodeId of storyboardNodeIds) {
     const sourceNode = nodes.find((node) => node.id === sourceNodeId);
@@ -114,8 +145,8 @@ export function storyboardFrameRunSummary(
   scope: StoryboardFrameScope,
   nodes: SpaceCanvasNode[],
   hasResult: (node: SpaceCanvasNode) => boolean,
+  nodesByID = new Map(nodes.map((node) => [node.id, node])),
 ) {
-  const nodesByID = new Map(nodes.map((node) => [node.id, node]));
   const workNodes = scope.workNodeIds
     .map((nodeId) => nodesByID.get(nodeId))
     .filter((node): node is SpaceCanvasNode => Boolean(node));

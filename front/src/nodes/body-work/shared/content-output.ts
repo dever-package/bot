@@ -1,4 +1,5 @@
 import { getCompatModule } from "@dever/front-plugin";
+import { STORYBOARD_GRID_MAX_IMAGES } from "./storyboard-grid-layout";
 import { embeddedJSONValues, isPlainRecord } from "./structured-json";
 
 type PlainRichNode = {
@@ -36,20 +37,27 @@ export type StoryboardGridDocument = {
   frames: StoryboardGridFrame[];
 };
 
-const CONTENT_MEDIA_KINDS: ContentMediaKind[] = [
-  "image",
-  "video",
-  "audio",
-];
+const CONTENT_MEDIA_KINDS: ContentMediaKind[] = ["image", "video", "audio"];
 
-const CONTENT_MEDIA_FIELDS: Record<
-  ContentMediaKind,
-  readonly string[]
-> = {
+const CONTENT_MEDIA_FIELDS: Record<ContentMediaKind, readonly string[]> = {
   image: ["image", "image_url", "imageUrl", "images", "imageUrls"],
   video: ["video", "video_url", "videoUrl", "videos", "videoUrls"],
   audio: ["audio", "audio_url", "audioUrl", "audios", "audioUrls"],
 };
+
+type ContentMediaIndex = Record<ContentMediaKind, Set<string>>;
+
+type ContentOutputCache<T> = {
+  objects: WeakMap<object, T>;
+  strings: Map<string, T>;
+};
+
+const CONTENT_OUTPUT_STRING_CACHE_LIMIT = 64;
+const CONTENT_OUTPUT_MAX_CACHEABLE_STRING_LENGTH = 128 * 1024;
+const CONTENT_OUTPUT_CACHE_MISS = Symbol("content-output-cache-miss");
+const contentMediaIndexCache = createContentOutputCache<ContentMediaIndex>();
+const storyboardGridCache =
+  createContentOutputCache<StoryboardGridDocument | null>();
 
 type ContentOutputModule = {
   normalizeEnergonOutput?: (output: any) => any[];
@@ -100,9 +108,7 @@ export function markdownCompatibleRichContent(value: unknown) {
 export function looksLikeMarkdownSyntax(value: string) {
   return (
     /(^|\n)\s*(#{1,6}\s|[-*+]\s|>\s|\d+\.\s|```)/m.test(value) ||
-    /(\*\*[^*]+\*\*|__[^_]+__|\[[^\]]+\]\([^)]+\)|`[^`]+`)/.test(
-      value,
-    )
+    /(\*\*[^*]+\*\*|__[^_]+__|\[[^\]]+\]\([^)]+\)|`[^`]+`)/.test(value)
   );
 }
 
@@ -130,10 +136,32 @@ export function contentOutputMediaURLs(
   return Array.from(contentOutputMediaIndex(output)[kind]);
 }
 
+export function storyboardGridImageURLs(value: unknown) {
+  const grid = parseStoryboardGridOutput(value);
+  if (!grid) {
+    return [];
+  }
+  return Array.from(
+    new Set(
+      grid.frames
+        .map((frame) => frame.image.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
 export function parseStoryboardGridOutput(
   value: unknown,
 ): StoryboardGridDocument | null {
-  return findStoryboardGrid(value, new Set<object>(), 0);
+  const cached = readContentOutputCache(storyboardGridCache, value);
+  if (cached !== CONTENT_OUTPUT_CACHE_MISS) {
+    return cached;
+  }
+  return writeContentOutputCache(
+    storyboardGridCache,
+    value,
+    findStoryboardGrid(value, new Set<object>(), 0),
+  );
 }
 
 export function contentOutputHasType(value: unknown, expectedType: string) {
@@ -177,16 +205,82 @@ export function hasContentOutput(value: unknown) {
 }
 
 function contentOutputMediaIndex(output: unknown) {
-  const media: Record<ContentMediaKind, Set<string>> = {
+  const cached = readContentOutputCache(contentMediaIndexCache, output);
+  if (cached !== CONTENT_OUTPUT_CACHE_MISS) {
+    return cached;
+  }
+  const media: ContentMediaIndex = {
     image: new Set<string>(),
     video: new Set<string>(),
     audio: new Set<string>(),
   };
+  const storyboardGridImages = storyboardGridImageURLs(output);
   const seen = new Set<object>();
   for (const item of normalizeContentOutputItems(output)) {
     collectContentMedia(item, media, seen, 0);
   }
-  return media;
+  if (storyboardGridImages.length > 0) {
+    // The ordered frames are the image source of truth for a grid document.
+    // Parent covers and nested planning payloads must not become extra inputs.
+    media.image = new Set(storyboardGridImages);
+  }
+  return writeContentOutputCache(contentMediaIndexCache, output, media);
+}
+
+function createContentOutputCache<T>(): ContentOutputCache<T> {
+  return {
+    objects: new WeakMap<object, T>(),
+    strings: new Map<string, T>(),
+  };
+}
+
+function readContentOutputCache<T>(
+  cache: ContentOutputCache<T>,
+  value: unknown,
+): T | typeof CONTENT_OUTPUT_CACHE_MISS {
+  if (value && typeof value === "object") {
+    return cache.objects.has(value)
+      ? (cache.objects.get(value) as T)
+      : CONTENT_OUTPUT_CACHE_MISS;
+  }
+  if (!isCacheableContentOutputString(value) || !cache.strings.has(value)) {
+    return CONTENT_OUTPUT_CACHE_MISS;
+  }
+  const cached = cache.strings.get(value) as T;
+  cache.strings.delete(value);
+  cache.strings.set(value, cached);
+  return cached;
+}
+
+function writeContentOutputCache<T>(
+  cache: ContentOutputCache<T>,
+  value: unknown,
+  result: T,
+) {
+  if (value && typeof value === "object") {
+    cache.objects.set(value, result);
+    return result;
+  }
+  if (!isCacheableContentOutputString(value)) {
+    return result;
+  }
+  cache.strings.delete(value);
+  cache.strings.set(value, result);
+  while (cache.strings.size > CONTENT_OUTPUT_STRING_CACHE_LIMIT) {
+    const oldestKey = cache.strings.keys().next().value;
+    if (typeof oldestKey !== "string") {
+      break;
+    }
+    cache.strings.delete(oldestKey);
+  }
+  return result;
+}
+
+function isCacheableContentOutputString(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= CONTENT_OUTPUT_MAX_CACHEABLE_STRING_LENGTH
+  );
 }
 
 export function normalizeContentOutputItems(output: unknown): unknown[] {
@@ -223,7 +317,11 @@ function findContentOutputType(
     return false;
   }
   seen.add(value);
-  if (String(value.type || "").trim().toLowerCase() === expectedType) {
+  if (
+    String(value.type || "")
+      .trim()
+      .toLowerCase() === expectedType
+  ) {
     return true;
   }
   return [
@@ -304,7 +402,9 @@ function normalizeStoryboardGridDocument(
   value: Record<string, unknown>,
 ): StoryboardGridDocument | null {
   if (
-    String(value.type || "").trim().toLowerCase() !== "storyboard_grid" ||
+    String(value.type || "")
+      .trim()
+      .toLowerCase() !== "storyboard_grid" ||
     !Array.isArray(value.frames)
   ) {
     return null;
@@ -313,7 +413,7 @@ function normalizeStoryboardGridDocument(
     .map(normalizeStoryboardGridFrame)
     .filter((frame): frame is StoryboardGridFrame => Boolean(frame))
     .sort((left, right) => left.order - right.order);
-  if (frames.length < 2 || frames.length > 9) {
+  if (frames.length < 2 || frames.length > STORYBOARD_GRID_MAX_IMAGES) {
     return null;
   }
   return {
@@ -336,11 +436,18 @@ function normalizeStoryboardGridFrame(
   return {
     id: firstNonEmptyText(value.id, `frame-${String(order).padStart(2, "0")}`),
     order,
-    title: firstNonEmptyText(value.title, `画面 ${String(order).padStart(2, "0")}`),
+    title: firstNonEmptyText(
+      value.title,
+      `画面 ${String(order).padStart(2, "0")}`,
+    ),
     description: firstNonEmptyText(value.description),
     prompt: firstNonEmptyText(value.prompt),
     status: firstNonEmptyText(value.status),
-    image: firstNonEmptyText(value.image, value.image_url, value.imageUrl),
+    image: firstStoryboardGridFrameImage(
+      value.image,
+      value.image_url,
+      value.imageUrl,
+    ),
     error: firstNonEmptyText(value.error),
     assetID: positiveInteger(value.asset_id, value.assetId, value.assetID),
     assetVersionID: positiveInteger(
@@ -349,6 +456,22 @@ function normalizeStoryboardGridFrame(
       value.assetVersionID,
     ),
   };
+}
+
+function firstStoryboardGridFrameImage(...values: unknown[]) {
+  for (const value of values) {
+    const media: Record<ContentMediaKind, Set<string>> = {
+      image: new Set<string>(),
+      video: new Set<string>(),
+      audio: new Set<string>(),
+    };
+    collectContentMedia(value, media, new Set<object>(), 0, "image");
+    const image = media.image.values().next().value;
+    if (typeof image === "string" && image.trim()) {
+      return image.trim();
+    }
+  }
+  return "";
 }
 
 function positiveInteger(...values: unknown[]) {
@@ -378,6 +501,13 @@ function collectContentMedia(
     return;
   }
   if (typeof value === "string") {
+    const embedded = embeddedJSONValues(value);
+    if (embedded.length > 0) {
+      embedded.forEach((parsed) =>
+        collectContentMedia(parsed, media, seen, depth + 1, fieldKind),
+      );
+      return;
+    }
     const kind = fieldKind || contentMediaKindFromURL(value);
     if (kind) {
       const identity = value.trim();

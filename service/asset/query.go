@@ -92,6 +92,15 @@ func (s Service) RequireCurrentReferences(
 	teamID uint64,
 	assetIDs []uint64,
 ) (map[uint64]CurrentReference, error) {
+	return s.requireCurrentReferences(ctx, teamID, assetIDs, false)
+}
+
+func (s Service) requireCurrentReferences(
+	ctx context.Context,
+	teamID uint64,
+	assetIDs []uint64,
+	allowCollections bool,
+) (map[uint64]CurrentReference, error) {
 	if teamID == 0 {
 		return nil, fmt.Errorf("团队不能为空")
 	}
@@ -120,7 +129,7 @@ func (s Service) RequireCurrentReferences(
 		if asset.Status != assetmodel.StatusCurrent {
 			return nil, fmt.Errorf("资产已不可用")
 		}
-		if asset.Kind == assetmodel.KindCollection {
+		if asset.Kind == assetmodel.KindCollection && !allowCollections {
 			return nil, fmt.Errorf("资产集合不能直接作为引用")
 		}
 		if asset.VersionID == 0 {
@@ -602,9 +611,13 @@ func assetPreviewContent(content any, kind string) any {
 	if len(mediaContentKeys(kind)) == 0 {
 		return nil
 	}
-	url := contentMediaURL(content, kind, 0)
-	if url == "" {
+	urls := contentMediaURLs(content, kind)
+	if len(urls) == 0 {
 		return nil
 	}
-	return mediaDocument(kind, url)
+	preview := mediaDocument(kind, urls[0])
+	if len(urls) > 1 {
+		preview["media_count"] = len(urls)
+	}
+	return preview
 }

@@ -38,6 +38,9 @@ func (s GatewayService) callNormalizePowerTarget(
 	if botmodel.IsStoryboardGridPower(selected.Power) {
 		return s.callNormalizeStoryboardGrid(ctx, req, selected)
 	}
+	if shouldPlanContextImages(req, selected.Power) {
+		return s.callNormalizeContextImages(ctx, req, selected)
+	}
 	if !s.isRunningHubTwoStageLipSync(ctx, req, selected) || hasLipSyncSelection(req) {
 		return s.callNormalizeTarget(ctx, req, selected)
 	}
@@ -68,6 +71,9 @@ func (s GatewayService) callStreamPowerTarget(
 ) (callResult, error) {
 	if botmodel.IsStoryboardGridPower(selected.Power) {
 		return s.callStreamStoryboardGrid(ctx, req, selected)
+	}
+	if shouldPlanContextImages(req, selected.Power) {
+		return s.callStreamContextImages(ctx, req, selected)
 	}
 	if !s.isRunningHubTwoStageLipSync(ctx, req, selected) || hasLipSyncSelection(req) {
 		return s.callStreamTarget(ctx, req, selected)

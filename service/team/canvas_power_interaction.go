@@ -145,6 +145,7 @@ func (s Service) continueCanvasPowerRun(ctx context.Context, runID uint64) {
 		power,
 		input,
 		uint64Value(resumeContext["source_target_id"]),
+		"",
 		billing,
 		nil,
 	)

@@ -10,6 +10,7 @@ import {
 import { FileText } from "lucide-react";
 import { FirstFrameVideo } from "../../shared/first-frame-video";
 import {
+  canvasMediaGridKind,
   CanvasNodeContentView,
   contentOutputNeedsRenderer,
 } from "./space-content-view";
@@ -143,6 +144,7 @@ export function CanvasResultView({
           <CanvasNodeContentView
             output={output}
             fallback={fallback}
+            mediaGridKind={canvasMediaGridKind(preview)}
             className="ws-canvas-content-view ws-result-content-view"
           />
         ) : (

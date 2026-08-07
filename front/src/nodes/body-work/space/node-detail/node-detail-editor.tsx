@@ -1,10 +1,5 @@
-import {
-  useEffect,
-  useMemo,
-  useState,
-  type ComponentType,
-} from "react";
-import { Download, FileText } from "lucide-react";
+import type { ComponentType } from "react";
+import { FileText } from "lucide-react";
 import { getCompatModule } from "@dever/front-plugin";
 import {
   StoryboardView,
@@ -14,9 +9,9 @@ import type {
   StoryboardDocument,
   StoryboardEditorFocus,
   StoryboardProductionPlan,
+  StoryboardShotGeneration,
 } from "../space-storyboard";
-import type { ComposerAssetItem } from "../space-prompt-composer";
-import type { SpaceCanvasNode } from "../types";
+import type { ComposerAssetItem, SpaceCanvasNode } from "../types";
 import { CanvasNodeContentView } from "../space-content-view";
 import {
   contentOutputMediaURLs,
@@ -25,7 +20,8 @@ import {
 } from "../../shared/content-output";
 import type { ReferenceProvider } from "../../../show/agent-chat/reference";
 import { AssetPreview } from "../../asset/asset-preview";
-import { MediaInspectorGallery } from "../../../shared/media-inspector-gallery";
+import { MediaInspector } from "../../../shared/media-inspector-gallery";
+import { ResourceDownloadButton } from "../../../shared/resource-download-button";
 import { SpaceTooltip } from "../space-tooltip";
 import {
   nodeDetailContentWithValue,
@@ -62,6 +58,7 @@ export function NodeDetailEditor({
   referenceProvider,
   onConfirmStoryboard,
   onCreateStoryboardRevision,
+  onGenerateStoryboardShot,
   onChange,
 }: {
   content: NodeDetailEditableContent;
@@ -80,6 +77,11 @@ export function NodeDetailEditor({
     productionPlan: StoryboardProductionPlan,
   ) => boolean | Promise<boolean>;
   onCreateStoryboardRevision?: () => void | Promise<void>;
+  onGenerateStoryboardShot?: (
+    storyboard: StoryboardDocument,
+    shotId: string,
+    instruction: string,
+  ) => Promise<StoryboardShotGeneration>;
   onChange: (content: NodeDetailEditableContent) => void;
 }) {
   if (
@@ -135,6 +137,7 @@ export function NodeDetailEditor({
           workflowAction={storyboardWorkflowAction}
           onConfirm={onConfirmStoryboard}
           onCreateRevision={onCreateStoryboardRevision}
+          onGenerateShot={onGenerateStoryboardShot}
           onChange={(storyboard) =>
             onChange(nodeDetailContentWithValue(content, storyboard))
           }
@@ -192,27 +195,8 @@ function NodeDetailMediaGallery({
   kind: "image" | "video";
   output: unknown;
 }) {
-  const urls = useMemo(
-    () => contentOutputMediaURLs(output, kind),
-    [kind, output],
-  );
-  const items = useMemo(
-    () =>
-      urls.map((url, index) => ({
-        id: url,
-        name: mediaItemName(url, kind, index),
-        url,
-      })),
-    [kind, urls],
-  );
-  const [activeIndex, setActiveIndex] = useState(0);
-  const mediaIdentity = urls.join("\n");
-
-  useEffect(() => {
-    setActiveIndex(0);
-  }, [mediaIdentity]);
-
-  if (items.length === 0) {
+  const urls = contentOutputMediaURLs(output, kind);
+  if (urls.length === 0) {
     return (
       <CanvasNodeContentView
         className="ws-node-detail-media"
@@ -224,27 +208,13 @@ function NodeDetailMediaGallery({
   }
 
   return (
-    <MediaInspectorGallery
+    <MediaInspector
       kind={kind}
-      items={items}
-      activeIndex={Math.min(activeIndex, items.length - 1)}
+      urls={urls}
+      downloadable
       className="ws-node-detail-media-gallery"
-      onSelect={setActiveIndex}
     />
   );
-}
-
-function mediaItemName(url: string, kind: "image" | "video", index: number) {
-  const path = url.split(/[?#]/, 1)[0];
-  const encodedName = path.slice(path.lastIndexOf("/") + 1);
-  if (encodedName) {
-    try {
-      return decodeURIComponent(encodedName);
-    } catch {
-      return encodedName;
-    }
-  }
-  return `${kind === "image" ? "图片" : "视频"} ${index + 1}`;
 }
 
 function FileDetailEditor({
@@ -281,9 +251,11 @@ function FileDetailEditor({
           <small>{file.url}</small>
         </div>
         <SpaceTooltip label="下载文件">
-          <a href={file.url} download aria-label="下载文件">
-            <Download size={17} />
-          </a>
+          <ResourceDownloadButton
+            url={file.url}
+            name={file.name}
+            label="下载文件"
+          />
         </SpaceTooltip>
       </div>
       {readonly ? (

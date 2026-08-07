@@ -83,6 +83,31 @@ export type CanvasExecutionPlanEdgeRef = {
   target: string;
 };
 
+export function canvasRunIdentity(run: CanvasRunRef) {
+  const executionId = Number(run.execution_id || 0);
+  if (executionId > 0) {
+    return `execution:${executionId}`;
+  }
+  const runId = Number(run.run_id || 0);
+  if (runId > 0) {
+    return `run:${runId}`;
+  }
+  return `request:${String(run.request_id || "")}`;
+}
+
+export function isActiveCanvasRun(run: CanvasRunRef) {
+  const status = String(run.status || "").trim();
+  if (!status) {
+    return false;
+  }
+  const normalized = normalizeRuntimeRunStatus(status);
+  return (
+    normalized === "pending" ||
+    normalized === "running" ||
+    normalized === "waiting"
+  );
+}
+
 export function normalizeCanvasRunRef(value: any): CanvasRunRef {
   const output =
     value?.output && typeof value.output === "object" ? value.output : {};
@@ -114,11 +139,9 @@ export function normalizeCanvasRunRef(value: any): CanvasRunRef {
       : Array.isArray(value?.data?.interactions)
         ? value.data.interactions
         : [],
-    node_results: Array.isArray(value?.node_results || output.node_results)
-      ? (value.node_results || output.node_results)
-          .map(normalizeCanvasNodeResultRef)
-          .filter((item): item is CanvasNodeResultRef => Boolean(item))
-      : [],
+    node_results: normalizeCanvasNodeResultRefs(
+      value?.node_results || output.node_results,
+    ),
     pending_node: normalizeCanvasNodeResultRef(
       value?.pending_node || output.pending_node,
     ),
@@ -160,6 +183,36 @@ function normalizeCanvasNodeResultRef(value: any): CanvasNodeResultRef | null {
     agent_run_id: Number(value.agent_run_id || 0),
     source_signature: String(value.source_signature || ""),
   };
+}
+
+function normalizeCanvasNodeResultRefs(value: any): CanvasNodeResultRef[] {
+  return Array.isArray(value)
+    ? value
+        .map(normalizeCanvasNodeResultRef)
+        .filter((item): item is CanvasNodeResultRef => Boolean(item))
+    : [];
+}
+
+export function normalizeCanvasNodeResultPayload(
+  value: any,
+  expectedNodeKey = "",
+): CanvasNodeResultRef | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const nodeKey = String(expectedNodeKey || "").trim();
+  const nestedResults = normalizeCanvasNodeResultRefs(value.node_results);
+  const nestedResult = nodeKey
+    ? nestedResults.find((item) => item.node_key === nodeKey)
+    : nestedResults[0];
+  if (nestedResult) {
+    return nestedResult;
+  }
+  return normalizeCanvasNodeResultRef(
+    nodeKey && !String(value.node_key || "").trim()
+      ? { ...value, node_key: nodeKey }
+      : value,
+  );
 }
 
 export function canvasNodeResultRawError(

@@ -40,10 +40,7 @@ func normalizeServiceParamMapping(c *server.Context, paramRow map[string]any, ru
 		}
 		maxIndex := 1
 		if paramType == "files" {
-			maxIndex = util.ToIntDefault(paramRow["max_files"], 0)
-			if maxIndex <= 0 {
-				maxIndex = defaultMaxFiles
-			}
+			maxIndex = botinput.ServiceParamAttachmentOptionLimit(util.ToIntDefault(paramRow["max_files"], 0))
 		}
 		for _, index := range indexes {
 			if index < 1 || index > maxIndex {

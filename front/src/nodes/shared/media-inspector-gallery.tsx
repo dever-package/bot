@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FileText,
   Image as ImageIcon,
@@ -11,6 +11,57 @@ import {
   type EnergonMediaPreviewItem,
 } from "@/components/energon/content-view";
 import { FirstFrameVideo } from "./first-frame-video";
+import { VideoThumbnail } from "./video-thumbnail";
+import { ResourceDownloadButton } from "./resource-download-button";
+import { resourceNameFromURL } from "./resource-file";
+
+export function MediaInspector({
+  kind,
+  urls,
+  zoom = 1,
+  compact = false,
+  downloadable = false,
+  className = "",
+}: {
+  kind: EnergonMediaKind;
+  urls: string[];
+  zoom?: number;
+  compact?: boolean;
+  downloadable?: boolean;
+  className?: string;
+}) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const mediaIdentity = urls.join("\n");
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [mediaIdentity]);
+
+  const items = urls.map((url, index) => ({
+    id: url,
+    name: resourceNameFromURL(
+      url,
+      `${mediaKindLabels[kind]} ${index + 1}`,
+    ),
+    url,
+  }));
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <MediaInspectorGallery
+      kind={kind}
+      items={items}
+      activeIndex={Math.min(activeIndex, items.length - 1)}
+      zoom={zoom}
+      compact={compact}
+      downloadable={downloadable}
+      className={className}
+      onSelect={setActiveIndex}
+    />
+  );
+}
 
 export function MediaInspectorGallery({
   kind,
@@ -18,6 +69,7 @@ export function MediaInspectorGallery({
   activeIndex,
   zoom = 1,
   compact = false,
+  downloadable = false,
   className = "",
   onSelect,
 }: {
@@ -26,6 +78,7 @@ export function MediaInspectorGallery({
   activeIndex: number;
   zoom?: number;
   compact?: boolean;
+  downloadable?: boolean;
   className?: string;
   onSelect: (index: number) => void;
 }) {
@@ -45,7 +98,12 @@ export function MediaInspectorGallery({
         .join(" ")}
     >
       <style>{mediaInspectorGalleryStyles}</style>
-      <MediaStage kind={kind} item={activeItem} zoom={zoom} />
+      <MediaStage
+        kind={kind}
+        item={activeItem}
+        zoom={zoom}
+        downloadable={downloadable}
+      />
       {items.length > 1 ? (
         <MediaThumbnailRail
           kind={kind}
@@ -62,13 +120,23 @@ function MediaStage({
   kind,
   item,
   zoom,
+  downloadable,
 }: {
   kind: EnergonMediaKind;
   item: EnergonMediaPreviewItem;
   zoom: number;
+  downloadable: boolean;
 }) {
   return (
     <div className="bot-media-inspector-stage">
+      {downloadable && item.url ? (
+        <ResourceDownloadButton
+          className="bot-media-inspector-download"
+          url={item.url}
+          name={item.name}
+          label="下载当前素材"
+        />
+      ) : null}
       {kind === "image" ? (
         item.url ? (
           <img
@@ -151,7 +219,15 @@ function MediaThumbnailRail({
             aria-current={index === activeIndex ? "true" : undefined}
             onClick={() => onSelect(index)}
           >
-            {(kind === "image" && item.url) || item.thumbnail ? (
+            {kind === "video" && item.url ? (
+              <VideoThumbnail
+                key={item.url}
+                src={item.url}
+                poster={item.thumbnail}
+                draggable={false}
+                ariaHidden
+              />
+            ) : (kind === "image" && item.url) || item.thumbnail ? (
               <img src={item.thumbnail || item.url} alt="" />
             ) : (
               <MediaKindIcon kind={kind} />
@@ -176,6 +252,13 @@ function MediaKindIcon({ kind }: { kind: EnergonMediaKind }) {
   const Icon = mediaKindIcons[kind];
   return <Icon aria-hidden="true" />;
 }
+
+const mediaKindLabels = {
+  image: "图片",
+  video: "视频",
+  audio: "音频",
+  file: "文件",
+} satisfies Record<EnergonMediaKind, string>;
 
 const mediaKindIcons = {
   image: ImageIcon,
@@ -216,6 +299,45 @@ const mediaInspectorGalleryStyles = `
 .bot-media-inspector-gallery.is-compact .bot-media-inspector-stage {
   min-height: 224px;
   padding: 32px 24px;
+}
+
+.bot-media-inspector-download {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--wb-detail-line, hsl(var(--border)));
+  border-radius: 5px;
+  background: var(--wb-detail-surface, hsl(var(--background)));
+  color: var(--wb-detail-text, hsl(var(--foreground)));
+  box-shadow: 0 2px 8px hsl(var(--foreground) / 0.08);
+  padding: 0;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.bot-media-inspector-download:hover {
+  border-color: color-mix(
+    in srgb,
+    var(--wb-detail-text, hsl(var(--foreground))) 40%,
+    var(--wb-detail-line, hsl(var(--border)))
+  );
+  background: var(--wb-detail-surface-soft, hsl(var(--muted) / 0.3));
+}
+
+.bot-media-inspector-download > svg {
+  width: 17px;
+  height: 17px;
+}
+
+.bot-media-inspector-download:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }
 
 .bot-media-inspector-stage > img,
@@ -311,10 +433,15 @@ const mediaInspectorGalleryStyles = `
   box-shadow: 0 0 0 1px var(--wb-detail-text, hsl(var(--foreground)));
 }
 
-.bot-media-inspector-list > button img {
+.bot-media-inspector-list > button :where(img, video) {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.bot-media-inspector-list > button video {
+  background: #000;
+  pointer-events: none;
 }
 
 .bot-media-inspector-list > button svg {

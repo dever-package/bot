@@ -11,7 +11,7 @@ import {
   storyboardSpeechCount,
   storyboardTotalDuration,
 } from "./space-storyboard";
-import type { ComposerAssetItem } from "./space-prompt-composer";
+import type { ComposerAssetItem } from "./types";
 import { StoryboardCompactShotCard } from "./space-storyboard-shot-card";
 
 export type StoryboardNodeStatus = "empty" | "running" | "complete" | "error";

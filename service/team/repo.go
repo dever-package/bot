@@ -905,6 +905,26 @@ func (Repo) UpdateRunUnlessCanceled(ctx context.Context, id uint64, record map[s
 	return teammodel.NewRunModel().Update(ctx, filters, record) == 1
 }
 
+func (Repo) CancelRunIfActive(ctx context.Context, id uint64, finishedAt time.Time) bool {
+	if id == 0 {
+		return false
+	}
+	filters := map[string]any{
+		"id": id,
+		"status": []string{
+			teammodel.RunStatusPending,
+			teammodel.RunStatusRunning,
+			teammodel.RunStatusWaiting,
+		},
+	}
+	applyRunExecutionFilter(ctx, filters)
+	return teammodel.NewRunModel().Update(ctx, filters, map[string]any{
+		"status":      teammodel.RunStatusCanceled,
+		"finished_at": finishedAt,
+		"updated_at":  finishedAt,
+	}) == 1
+}
+
 func (Repo) ClaimRunExecution(ctx context.Context, id uint64, owner string, now time.Time, leaseUntil time.Time) (*teammodel.Run, bool) {
 	owner = strings.TrimSpace(owner)
 	if id == 0 || owner == "" {

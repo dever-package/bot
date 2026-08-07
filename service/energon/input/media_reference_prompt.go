@@ -6,6 +6,7 @@ import (
 )
 
 const mediaReferenceIndexTitle = "参考素材索引（顺序与本次媒体输入一致）："
+const mediaReferenceIndexGuide = "提示词可以使用图1、参考图1、视频1、音频1、文件1或素材标签引用对应的实际输入。"
 
 // AppendMediaReferenceIndex describes the exact media order used by parameter
 // binding, so labels mentioned in a prompt remain aligned with model inputs.
@@ -24,9 +25,9 @@ func AppendMediaReferenceIndex(prompt string, references []MediaReference) strin
 		counts[kind]++
 		index := counts[kind]
 		label := normalizeMediaReferencePromptLabel(reference.Label)
-		line := fmt.Sprintf("- 参考%s%d = 第%d%s输入%s", kind, index, index, unit, inputKind)
+		line := fmt.Sprintf("- %s%d（参考%s%d）= 第%d%s%s输入", kind, index, kind, index, index, unit, inputKind)
 		if label != "" {
-			line = fmt.Sprintf("- 提示词中的 @%s = 参考%s%d = 第%d%s输入%s", label, kind, index, index, unit, inputKind)
+			line += fmt.Sprintf("；素材标签：@%s", label)
 		}
 		if usage := mediaReferencePromptUsage(reference.Usage); usage != "" {
 			line += fmt.Sprintf("（用途：%s）", usage)
@@ -41,7 +42,7 @@ func AppendMediaReferenceIndex(prompt string, references []MediaReference) strin
 	if index := strings.Index(prompt, mediaReferenceIndexTitle); index >= 0 {
 		prompt = strings.TrimSpace(prompt[:index])
 	}
-	indexText := mediaReferenceIndexTitle + "\n" + strings.Join(lines, "\n")
+	indexText := mediaReferenceIndexTitle + "\n" + mediaReferenceIndexGuide + "\n" + strings.Join(lines, "\n")
 	if prompt == "" {
 		return indexText
 	}

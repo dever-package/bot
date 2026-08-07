@@ -252,7 +252,6 @@ export function AssetPickerDialog({
           contentMode={contentMode}
           detailLayer="nested"
           selectable
-          excludeCollections
           selectedAssetIDs={selectedAssetIDs}
           usedAssetIDs={usedAssetIDs}
           reloadSignal={reloadSignal}

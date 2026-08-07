@@ -2,6 +2,8 @@ package input
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	botmodel "github.com/dever-package/bot/model/energon"
@@ -17,6 +19,18 @@ type MediaReference struct {
 	Usage         string
 	StrictUsage   bool
 	Required      bool
+}
+
+type MediaReferenceSelection struct {
+	URL   string
+	Index int
+	Items []MediaReferenceSelectionItem
+}
+
+type MediaReferenceSelectionItem struct {
+	URL   string `json:"url,omitempty"`
+	Index int    `json:"index,omitempty"`
+	Usage string `json:"usage,omitempty"`
 }
 
 type MediaReferenceBinding struct {
@@ -40,14 +54,15 @@ func MediaReferencesFromContent(
 	content any,
 	usage string,
 ) []MediaReference {
-	kind = normalizeMediaKind(kind)
-	urls := make([]string, 0)
-	if kind == "" {
-		kind, urls = storyboardGridMedia(content)
+	gridKind, urls := storyboardGridMedia(content)
+	if gridKind != "" && len(urls) > 0 {
+		kind = gridKind
+	} else {
+		kind = normalizeMediaKind(kind)
+		urls = nil
 	}
 	if kind != "" && len(urls) == 0 {
-		media := botprotocol.ExtractMediaOutput(content, kind)
-		urls = botprotocol.NormalizeMediaList(media[kind+"s"], kind)
+		urls = botprotocol.ExtractPrimaryMediaURLs(content, kind)
 	}
 	if referenceID == 0 || kind == "" || len(urls) == 0 {
 		return nil
@@ -68,14 +83,128 @@ func MediaReferencesFromContent(
 	return result
 }
 
-func storyboardGridMedia(content any) (string, []string) {
-	output := botprotocol.ExtractOutput(content)
-	document := storyboardGridDocument(output["json"])
-	if document == nil {
-		return "", nil
+// SelectMediaReferences narrows one logical multi-media reference to the
+// concrete item selected by the client. The URL protects against stale asset
+// content while the 1-based index preserves the source order.
+func SelectMediaReferences(
+	references []MediaReference,
+	selection MediaReferenceSelection,
+) ([]MediaReference, error) {
+	if len(selection.Items) > 0 {
+		selected := make([]MediaReference, 0, len(selection.Items))
+		selectedIndexes := make(map[int]struct{}, len(selection.Items))
+		for _, item := range selection.Items {
+			reference, index, err := selectMediaReference(references, item.URL, item.Index)
+			if err != nil {
+				return nil, err
+			}
+			if _, exists := selectedIndexes[index]; exists {
+				return nil, fmt.Errorf("所选素材包含重复项，请重新选择")
+			}
+			selectedIndexes[index] = struct{}{}
+			if usage := strings.TrimSpace(item.Usage); usage != "" {
+				reference.Usage = usage
+				reference.StrictUsage = true
+			}
+			selected = append(selected, reference)
+		}
+		return selected, nil
 	}
-	outputType, _ := document["type"].(string)
-	if botmodel.NormalizeOutputType(outputType) != botmodel.OutputTypeStoryboardGrid {
+
+	selection.URL = strings.TrimSpace(selection.URL)
+	if selection.URL == "" && selection.Index <= 0 {
+		return references, nil
+	}
+	reference, _, err := selectMediaReference(references, selection.URL, selection.Index)
+	if err != nil {
+		return nil, err
+	}
+	return []MediaReference{reference}, nil
+}
+
+func selectMediaReference(
+	references []MediaReference,
+	url string,
+	index int,
+) (MediaReference, int, error) {
+	if len(references) == 0 {
+		return MediaReference{}, -1, fmt.Errorf("所选素材没有可用的媒体内容")
+	}
+
+	url = strings.TrimSpace(url)
+	selectedIndex := -1
+	if url != "" {
+		for currentIndex, reference := range references {
+			if strings.TrimSpace(reference.URL) == url {
+				selectedIndex = currentIndex
+				break
+			}
+		}
+		if selectedIndex < 0 {
+			return MediaReference{}, -1, fmt.Errorf("所选具体素材已不属于资产当前版本，请重新选择")
+		}
+	}
+	if index > 0 {
+		resolvedIndex := index - 1
+		if resolvedIndex >= len(references) {
+			return MediaReference{}, -1, fmt.Errorf("所选具体素材序号已失效，请重新选择")
+		}
+		if selectedIndex >= 0 && selectedIndex != resolvedIndex {
+			return MediaReference{}, -1, fmt.Errorf("所选具体素材与资产当前版本不一致，请重新选择")
+		}
+		selectedIndex = resolvedIndex
+	}
+	if selectedIndex < 0 {
+		return MediaReference{}, -1, fmt.Errorf("请选择具体素材")
+	}
+	return references[selectedIndex], selectedIndex, nil
+}
+
+// SelectedMediaReferenceContent narrows the prompt-side representation when
+// the user selected one item from a multi-media asset. This keeps structured
+// context aligned with the media parameters sent to the provider.
+func SelectedMediaReferenceContent(
+	content any,
+	references []MediaReference,
+	selection MediaReferenceSelection,
+) any {
+	if len(selection.Items) == 0 &&
+		strings.TrimSpace(selection.URL) == "" && selection.Index <= 0 {
+		return content
+	}
+	if len(references) == 0 {
+		return content
+	}
+	kind := normalizeMediaKind(references[0].Kind)
+	if kind == "" {
+		return content
+	}
+	urls := make([]string, 0, len(references))
+	for _, reference := range references {
+		if normalizeMediaKind(reference.Kind) != kind {
+			return content
+		}
+		if url := strings.TrimSpace(reference.URL); url != "" {
+			urls = append(urls, url)
+		}
+	}
+	if len(urls) == 0 {
+		return content
+	}
+	return map[string]any{
+		"type":     "media_reference",
+		"kind":     kind,
+		kind + "s": urls,
+	}
+}
+
+func storyboardGridMedia(content any) (string, []string) {
+	document := storyboardGridDocument(content)
+	if botmodel.NormalizeOutputType(ValueText(document["type"])) != botmodel.OutputTypeStoryboardGrid {
+		output := botprotocol.ExtractOutput(content)
+		document = storyboardGridDocument(output["json"])
+	}
+	if botmodel.NormalizeOutputType(ValueText(document["type"])) != botmodel.OutputTypeStoryboardGrid {
 		return "", nil
 	}
 
@@ -96,26 +225,45 @@ func storyboardGridDocument(value any) map[string]any {
 			document[key] = item
 		}
 		return document
+	case string:
+		parsed := ParseJSONValue(current)
+		if _, unchanged := parsed.(string); unchanged {
+			return nil
+		}
+		return storyboardGridDocument(parsed)
 	default:
 		return nil
 	}
 }
 
 func storyboardGridFrames(value any) []map[string]any {
+	var frames []map[string]any
 	switch current := value.(type) {
 	case []map[string]any:
-		return current
+		frames = append([]map[string]any(nil), current...)
 	case []any:
-		frames := make([]map[string]any, 0, len(current))
+		frames = make([]map[string]any, 0, len(current))
 		for _, item := range current {
 			if frame := storyboardGridDocument(item); frame != nil {
 				frames = append(frames, frame)
 			}
 		}
-		return frames
 	default:
 		return nil
 	}
+	sort.SliceStable(frames, func(left, right int) bool {
+		return storyboardGridFrameOrder(frames[left], left) <
+			storyboardGridFrameOrder(frames[right], right)
+	})
+	return frames
+}
+
+func storyboardGridFrameOrder(frame map[string]any, fallback int) int {
+	order, err := strconv.Atoi(strings.TrimSpace(ValueText(frame["order"])))
+	if err != nil || order <= 0 {
+		return fallback + 1
+	}
+	return order
 }
 
 // BindMediaReferences projects resolved media URLs into configured capability
@@ -241,6 +389,7 @@ type logicalMediaReference struct {
 	referenceType string
 	referenceID   uint64
 	kind          string
+	usage         string
 }
 
 func countLogicalMediaReferences(references []MediaReference) map[logicalMediaReference]int {
@@ -260,6 +409,7 @@ func logicalMediaReferenceKey(reference MediaReference) logicalMediaReference {
 		referenceType: strings.TrimSpace(reference.ReferenceType),
 		referenceID:   reference.ReferenceID,
 		kind:          normalizeMediaKind(reference.Kind),
+		usage:         normalizeMediaParamKey(reference.Usage),
 	}
 }
 

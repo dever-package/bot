@@ -76,6 +76,40 @@ func workspaceExecutionByRequestID(ctx context.Context, projectID uint64, reques
 	})
 }
 
+func (s WorkspaceService) activeSingleNodeExecution(
+	ctx context.Context,
+	projectID uint64,
+	assetCateID uint64,
+	startNodeID string,
+) *workspacemodel.Execution {
+	startNodeID = strings.TrimSpace(startNodeID)
+	if projectID == 0 || startNodeID == "" {
+		return nil
+	}
+	filter := map[string]any{
+		"project_id":    projectID,
+		"start_node_id": startNodeID,
+		"single_node":   int16(1),
+		"status": []string{
+			teammodel.RunStatusPending,
+			teammodel.RunStatusRunning,
+			teammodel.RunStatusWaiting,
+		},
+	}
+	if assetCateID > 0 {
+		filter["asset_cate_id"] = assetCateID
+	}
+	for _, execution := range workspacemodel.NewExecutionModel().Select(ctx, filter, map[string]any{
+		"order": "main.id desc",
+	}) {
+		execution = s.syncWorkspaceExecutionRow(ctx, execution)
+		if execution != nil && canvasRunStatusActive(execution.Status) {
+			return execution
+		}
+	}
+	return nil
+}
+
 func workspaceExecutionIDByRunID(ctx context.Context, runID uint64) uint64 {
 	if row := workspaceExecutionByRunID(ctx, runID); row != nil {
 		return row.ID

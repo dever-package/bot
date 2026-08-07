@@ -18,7 +18,6 @@ import {
 } from "../shared/power-menu";
 import { PowerIcon } from "../shared/power-icon";
 import { resolvePowerPresentation } from "../shared/power-presentation";
-import { SpaceTooltip } from "./space-tooltip";
 import type {
   CanvasFunctionOption,
   PowerCategoryOption,
@@ -345,24 +344,23 @@ function PowerMenuItem({
 }) {
   const description = resolvePowerPresentation(power).kindName;
   return (
-    <SpaceTooltip label={`${power.name} · ${description}`}>
-      <button
-        type="button"
-        className="ws-add-item is-power"
-        role="menuitem"
-        onMouseEnter={onMouseEnter}
-        onFocus={onMouseEnter}
-        onClick={() => onSelect(power)}
-      >
-        <span className="ws-add-icon">
-          <PowerIcon power={power} size={16} />
-        </span>
-        <span className="ws-add-copy">
-          <span className="ws-add-label">{power.name}</span>
-          <span className="ws-add-desc">{description}</span>
-        </span>
-      </button>
-    </SpaceTooltip>
+    <button
+      type="button"
+      className="ws-add-item is-power"
+      role="menuitem"
+      title={`${power.name} · ${description}`}
+      onMouseEnter={onMouseEnter}
+      onFocus={onMouseEnter}
+      onClick={() => onSelect(power)}
+    >
+      <span className="ws-add-icon">
+        <PowerIcon power={power} size={16} />
+      </span>
+      <span className="ws-add-copy">
+        <span className="ws-add-label">{power.name}</span>
+        <span className="ws-add-desc">{description}</span>
+      </span>
+    </button>
   );
 }
 
@@ -433,29 +431,25 @@ function renderMenuItems<T>({
             ? itemClassName(item)
             : itemClassName;
         const itemDescription = description?.(item) || "";
+        const itemLabel = label(item);
         return (
-          <SpaceTooltip
+          <button
             key={itemKey(item)}
-            label={
-              itemDescription
-                ? `${label(item)} · ${itemDescription}`
-                : label(item)
+            type="button"
+            className={`ws-add-item ${className}`.trim()}
+            title={
+              itemDescription ? `${itemLabel} · ${itemDescription}` : itemLabel
             }
+            onClick={() => onSelect(item)}
           >
-            <button
-              type="button"
-              className={`ws-add-item ${className}`.trim()}
-              onClick={() => onSelect(item)}
-            >
-              <span className="ws-add-icon">{icon(item)}</span>
-              <span className="ws-add-copy">
-                <span className="ws-add-label">{label(item)}</span>
-                {itemDescription ? (
-                  <span className="ws-add-desc">{itemDescription}</span>
-                ) : null}
-              </span>
-            </button>
-          </SpaceTooltip>
+            <span className="ws-add-icon">{icon(item)}</span>
+            <span className="ws-add-copy">
+              <span className="ws-add-label">{itemLabel}</span>
+              {itemDescription ? (
+                <span className="ws-add-desc">{itemDescription}</span>
+              ) : null}
+            </span>
+          </button>
         );
       })}
     </div>

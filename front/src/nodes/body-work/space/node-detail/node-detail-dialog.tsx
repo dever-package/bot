@@ -15,6 +15,7 @@ import {
   fetchSpaceAssetDetail,
   fetchSpaceAssetVersionDetail,
   fetchSpaceAssetVersions,
+  generateSpaceStoryboardShot,
   restoreSpaceAssetVersion,
   saveSpaceAssetEditVersion,
 } from "../space-api";
@@ -22,7 +23,12 @@ import {
   mergeAssetVersions,
   mergeProjectAssetVersionHistory,
 } from "../space-assets";
-import type { AssetVersion, ProjectAsset, SpaceCanvasNode } from "../types";
+import type {
+  AssetVersion,
+  ComposerAssetItem,
+  ProjectAsset,
+  SpaceCanvasNode,
+} from "../types";
 import {
   nodeDetailContentFingerprint,
   resolveNodeDetailContent,
@@ -31,7 +37,6 @@ import {
   type NodeDetailEditableContent,
 } from "./node-detail-content";
 import { NodeDetailEditor } from "./node-detail-editor";
-import type { ComposerAssetItem } from "../space-prompt-composer";
 import { NodeDetailHeader } from "./node-detail-header";
 import { useNodeDetailDraft } from "./use-node-detail-draft";
 import {
@@ -43,6 +48,7 @@ import { useAssetReferenceProvider } from "../../asset/asset-reference-provider"
 import { CanvasAssetReferenceProviderContext } from "../space-reference-editor";
 import { isVideoComposePowerType } from "../../shared/power-presentation";
 import { VideoComposeView } from "../space-video-compose-view";
+import type { CanvasConnectedMediaReference } from "../space-media-references";
 import {
   emptyVideoComposition,
   type CanvasVideoComposition,
@@ -65,8 +71,10 @@ export function NodeDetailDialog({
   node,
   canvasReferenceItems,
   canvasNodes,
+  connectedMediaReferences,
   storyboardFocus,
   onNodeDraftChange,
+  onConnectedMediaEdgeRemove,
   onRunNode,
   onAssetUpdated,
   onClose,
@@ -77,8 +85,10 @@ export function NodeDetailDialog({
   node: SpaceCanvasNode;
   canvasReferenceItems?: ComposerAssetItem[];
   canvasNodes?: SpaceCanvasNode[];
+  connectedMediaReferences?: CanvasConnectedMediaReference[];
   storyboardFocus?: StoryboardEditorFocus;
   onNodeDraftChange?: (draft: SpaceCanvasNode["composerDraft"]) => void;
+  onConnectedMediaEdgeRemove?: (edgeId: string) => void;
   onRunNode?: (node: SpaceCanvasNode) => Promise<void>;
   onAssetUpdated?: (asset: ProjectAsset) => void;
   onClose: () => void;
@@ -413,6 +423,48 @@ export function NodeDetailDialog({
     projectId,
     storyboardWorkflowAction,
   ]);
+
+  const generateStoryboardShot = useCallback(
+    async (
+      storyboard: StoryboardDocument,
+      shotId: string,
+      instruction: string,
+    ) => {
+      const currentAsset = assetRef.current;
+      const currentNode = nodeRef.current;
+      const versionId = currentAssetVersionId(currentAsset);
+      const powerId = Number(currentNode.power?.id || 0);
+      const powerKey = String(currentNode.power?.key || "").trim();
+      if (!currentAsset?.id || !versionId) {
+        throw new Error("当前分镜尚未保存，不能生成镜头");
+      }
+      if (!powerId && !powerKey) {
+        throw new Error("当前分镜节点未配置生成能力");
+      }
+      return generateSpaceStoryboardShot({
+        projectId,
+        assetId: currentAsset.id,
+        versionId,
+        flowId: Number(currentNode.flow?.id || currentAsset.flow_id || 0),
+        assetCateId: Number(
+          currentNode.assetCateId || currentAsset.asset_cate_id || assetCateId,
+        ),
+        requestId: createVersionRequestId("shot", versionId),
+        nodeKey: currentNode.id,
+        nodeName: currentNode.title,
+        powerId,
+        powerKey,
+        sourceTargetId: Number(
+          currentNode.composerDraft?.selectedTargetId || 0,
+        ),
+        params: currentNode.composerDraft?.paramValues || {},
+        storyboard,
+        shotId,
+        instruction,
+      });
+    },
+    [assetCateId, projectId],
+  );
 
   const retryDetail = useCallback(async () => {
     if (selectedVersionIdRef.current === currentVersionId) {
@@ -753,6 +805,7 @@ export function NodeDetailDialog({
                 <VideoComposeView
                   composition={videoComposition}
                   referenceItems={canvasReferenceItems || []}
+                  connectedMediaReferences={connectedMediaReferences}
                   readonly={!isCurrentVersion || closing || videoComposeRunning}
                   running={videoComposeRunning}
                   fullScreen
@@ -764,6 +817,7 @@ export function NodeDetailDialog({
                       videoComposition: next,
                     });
                   }}
+                  onConnectedMediaEdgeRemove={onConnectedMediaEdgeRemove}
                   onRun={
                     onRunNode
                       ? (nextComposition) => {
@@ -803,6 +857,7 @@ export function NodeDetailDialog({
                   referenceProvider={assetReferenceProvider}
                   onConfirmStoryboard={confirmStoryboard}
                   onCreateStoryboardRevision={createStoryboardRevision}
+                  onGenerateStoryboardShot={generateStoryboardShot}
                   onChange={draft.setDraft}
                 />
               )}

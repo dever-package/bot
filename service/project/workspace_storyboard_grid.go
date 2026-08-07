@@ -89,19 +89,18 @@ func (s WorkspaceService) saveWorkspaceStoryboardGridMaterial(
 		if saveErr != nil {
 			return payload, true, saveErr
 		}
-		if child := mapValue(result["asset"]); child != nil {
-			assetID := uint64Value(child["id"])
-			versionID := uint64Value(child["version_id"])
-			if versionID == 0 {
-				versionID = uint64Value(mapValue(child["version"])["id"])
-			}
-			if assetID > 0 && versionID > 0 {
-				activeAssetIDs = append(activeAssetIDs, assetID)
-				frame["asset_id"] = assetID
-				frame["asset_version_id"] = versionID
-			}
-			children = append(children, child)
+		child := mapValue(result["asset"])
+		assetID, versionID, storedImage := savedStoryboardGridFrame(child)
+		if assetID == 0 || versionID == 0 || storedImage == "" {
+			return payload, true, fmt.Errorf("第 %d 个宫格画面保存后没有可用图片", index+1)
 		}
+		activeAssetIDs = append(activeAssetIDs, assetID)
+		frame["asset_id"] = assetID
+		frame["asset_version_id"] = versionID
+		frame["image"] = storedImage
+		frame["status"] = "success"
+		frame["error"] = ""
+		children = append(children, child)
 	}
 	document["frames"] = frames
 	if err := s.project.asset.ReconcileProjectCollectionChildren(ctx, run.TeamID, collection.ID, activeAssetIDs); err != nil {
@@ -124,6 +123,23 @@ func (s WorkspaceService) saveWorkspaceStoryboardGridMaterial(
 	payload["assets"] = children
 	payload["output"] = output
 	return payload, true, nil
+}
+
+func savedStoryboardGridFrame(child map[string]any) (uint64, uint64, string) {
+	if child == nil {
+		return 0, 0, ""
+	}
+	assetID := uint64Value(child["id"])
+	version := mapValue(child["version"])
+	versionID := uint64Value(child["version_id"])
+	if versionID == 0 {
+		versionID = uint64Value(version["id"])
+	}
+	mediaURLs := assetservice.ContentMediaURLs(version["content"], assetmodel.KindImage)
+	if len(mediaURLs) == 0 {
+		return assetID, versionID, ""
+	}
+	return assetID, versionID, strings.TrimSpace(mediaURLs[0])
 }
 
 func workspaceStoryboardGridDocument(output any) (map[string]any, bool) {

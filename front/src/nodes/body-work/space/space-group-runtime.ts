@@ -3,6 +3,15 @@ import type { SpaceCanvasNode } from "./types";
 
 export type CanvasGroupRunStatus = "idle" | "running" | "waiting" | "error";
 
+export type CanvasGroupRuntimeSummary = {
+  memberCount: number;
+  runnableCount: number;
+  completedCount: number;
+  failedCount: number;
+  staleCount: number;
+  status: CanvasGroupRunStatus;
+};
+
 type CanvasNodeRunState = {
   status: "running" | "waiting" | "success" | "error";
 };
@@ -58,7 +67,7 @@ export function summarizeCanvasGroupRuntime({
   runningNodes: Record<string, CanvasNodeRunState | undefined>;
   groupState?: CanvasNodeRunState | null;
   hasResult: (node: SpaceCanvasNode) => boolean;
-}) {
+}): CanvasGroupRuntimeSummary {
   const runnableMembers = members.filter(canvasNodeRunsInBackend);
   const staleCount = runnableMembers.filter(
     (member) => member.storyboardItem?.stale,

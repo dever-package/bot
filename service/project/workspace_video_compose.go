@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	assetservice "github.com/dever-package/bot/service/asset"
+	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
@@ -118,11 +119,21 @@ func canvasStoryboardItemNodeStale(itemNodeIDs map[string]string, itemType strin
 }
 
 func canvasVideoCompositionReference(reference canvasPromptReference) map[string]any {
-	return map[string]any{
+	result := map[string]any{
 		"asset_id":   reference.AssetID,
 		"version_id": reference.VersionID,
 		"label":      reference.Label,
 	}
+	if reference.MediaURL != "" {
+		result["media_url"] = reference.MediaURL
+	}
+	if reference.MediaIndex > 0 {
+		result["media_index"] = reference.MediaIndex
+	}
+	if len(reference.MediaItems) > 0 {
+		result["ref_media_items"] = reference.MediaItems
+	}
+	return result
 }
 
 func resolveCanvasVideoComposition(
@@ -156,9 +167,16 @@ func resolveCanvasVideoComposition(
 		return nil, err
 	}
 	resolver := canvasCompositionReferenceResolver{references: resolvedReferences}
+	expandedClips, err := expandCanvasVideoClips(resolver, rawClips)
+	if err != nil {
+		return nil, err
+	}
+	if len(expandedClips) > canvasVideoCompositionMaxClips {
+		return nil, fmt.Errorf("聚合视频展开后最多支持 %d 个镜头", canvasVideoCompositionMaxClips)
+	}
 
-	clips := make([]any, 0, len(rawClips))
-	for index, value := range rawClips {
+	clips := make([]any, 0, len(expandedClips))
+	for index, value := range expandedClips {
 		clip, err := resolveCanvasVideoClip(resolver, index, mapValue(value))
 		if err != nil {
 			return nil, err
@@ -177,6 +195,81 @@ func resolveCanvasVideoComposition(
 			mapValue(raw["settings"]),
 		),
 	}, nil
+}
+
+func expandCanvasVideoClips(
+	resolver canvasCompositionReferenceResolver,
+	rawClips []any,
+) ([]any, error) {
+	result := make([]any, 0, len(rawClips))
+	for index, value := range rawClips {
+		raw := mapValue(value)
+		visual := mapValue(firstPresent(raw["visual_video"], raw["visualVideo"]))
+		urls, err := resolver.resolveMediaURLsFromTypes(
+			visual,
+			[]string{botprotocol.MediaTypeVideo},
+			fmt.Sprintf("第 %d 个镜头画面", index+1),
+		)
+		if err != nil {
+			return nil, err
+		}
+		if len(urls) <= 1 || canvasMediaReferenceHasSingleSelection(visual) {
+			result = append(result, raw)
+			continue
+		}
+
+		for mediaIndex, mediaURL := range urls {
+			clip := cloneInput(raw)
+			clip["visual_video"] = canvasVideoCompositionSelectedReference(
+				visual,
+				mediaURL,
+			)
+			if original := mapValue(firstPresent(raw["original_audio_source"], raw["originalAudioSource"])); canvasMediaReferencesSameAsset(visual, original) && !canvasMediaReferenceHasSingleSelection(original) {
+				clip["original_audio_source"] = canvasVideoCompositionSelectedReference(
+					original,
+					mediaURL,
+				)
+			}
+			clip["id"] = fmt.Sprintf("%s-%02d", firstText(raw["id"], fmt.Sprintf("clip-%d", index+1)), mediaIndex+1)
+			clip["title"] = fmt.Sprintf("%s %d", firstText(raw["title"], fmt.Sprintf("镜头 %d", index+1)), mediaIndex+1)
+			if mediaIndex < len(urls)-1 {
+				clip["transition_to_next"] = map[string]any{
+					"type":        botprotocol.VideoTransitionNone,
+					"duration_ms": 0,
+				}
+			}
+			result = append(result, clip)
+		}
+	}
+	return result, nil
+}
+
+func canvasVideoCompositionSelectedReference(
+	raw map[string]any,
+	mediaURL string,
+) map[string]any {
+	reference := cloneInput(raw)
+	reference["media_url"] = mediaURL
+	delete(reference, "media_index")
+	delete(reference, "mediaIndex")
+	delete(reference, "media_items")
+	delete(reference, "mediaItems")
+	delete(reference, "ref_media_items")
+	delete(reference, "refMediaItems")
+	return reference
+}
+
+func canvasMediaReferencesSameAsset(left map[string]any, right map[string]any) bool {
+	return uint64Value(firstPresent(left["asset_id"], left["assetId"])) > 0 &&
+		uint64Value(firstPresent(left["asset_id"], left["assetId"])) ==
+			uint64Value(firstPresent(right["asset_id"], right["assetId"])) &&
+		uint64Value(firstPresent(left["version_id"], left["versionId"])) ==
+			uint64Value(firstPresent(right["version_id"], right["versionId"]))
+}
+
+func canvasMediaReferenceHasSingleSelection(raw map[string]any) bool {
+	return uint64Value(firstPresent(raw["media_index"], raw["mediaIndex"])) > 0 ||
+		firstText(raw["media_url"], raw["mediaUrl"], raw["ref_media_url"], raw["refMediaUrl"]) != ""
 }
 
 func canvasVideoCompositionAssetIDs(rawClips []any, rawAudioTracks []any) []uint64 {
@@ -477,26 +570,79 @@ func (resolver canvasCompositionReferenceResolver) resolveMediaURLFromTypes(
 	mediaTypes []string,
 	label string,
 ) (string, error) {
+	values, err := resolver.resolveMediaURLsFromTypes(raw, mediaTypes, label)
+	if err != nil {
+		return "", err
+	}
+	return values[0], nil
+}
+
+func (resolver canvasCompositionReferenceResolver) resolveMediaURLsFromTypes(
+	raw map[string]any,
+	mediaTypes []string,
+	label string,
+) ([]string, error) {
 	reference := canvasPromptReference{
 		AssetID:   uint64Value(firstPresent(raw["asset_id"], raw["assetId"])),
 		VersionID: uint64Value(firstPresent(raw["version_id"], raw["versionId"])),
 		Label:     firstText(raw["label"], label),
 	}
 	if reference.AssetID == 0 || reference.VersionID == 0 {
-		return "", fmt.Errorf("%s缺少有效素材引用", label)
+		return nil, fmt.Errorf("%s缺少有效素材引用", label)
 	}
 	resolved, ok := resolver.references[reference.AssetID]
 	if !ok || resolved.Content == nil {
-		return "", fmt.Errorf("%s不可用", label)
+		return nil, fmt.Errorf("%s不可用", label)
 	}
+	mediaReferences := make([]energoninput.MediaReference, 0)
+	seen := map[string]bool{}
 	for _, mediaType := range mediaTypes {
-		media := botprotocol.ExtractMediaOutput(resolved.Content, mediaType)
-		values := botprotocol.NormalizeMediaList(media[mediaType+"s"], mediaType)
-		if len(values) > 0 {
-			return values[0], nil
+		for _, current := range energoninput.MediaReferencesFromContent(
+			"asset",
+			reference.AssetID,
+			mediaType,
+			resolved.Content,
+			"",
+		) {
+			if current.Kind != mediaType || seen[current.URL] {
+				continue
+			}
+			seen[current.URL] = true
+			mediaReferences = append(mediaReferences, current)
 		}
 	}
-	return "", fmt.Errorf("%s不是可用的%s素材", label, canvasMediaTypeLabels(mediaTypes))
+	if len(mediaReferences) == 0 {
+		return nil, fmt.Errorf("%s不是可用的%s素材", label, canvasMediaTypeLabels(mediaTypes))
+	}
+	selection := energoninput.MediaReferenceSelection{
+		URL: firstText(
+			raw["media_url"],
+			raw["mediaUrl"],
+			raw["ref_media_url"],
+			raw["refMediaUrl"],
+		),
+		Index: int(uint64Value(firstPresent(
+			raw["media_index"],
+			raw["mediaIndex"],
+			raw["ref_media_index"],
+			raw["refMediaIndex"],
+		))),
+		Items: canvasMediaReferenceSelectionItems(firstPresent(
+			raw["media_items"],
+			raw["mediaItems"],
+			raw["ref_media_items"],
+			raw["refMediaItems"],
+		)),
+	}
+	selected, err := energoninput.SelectMediaReferences(mediaReferences, selection)
+	if err != nil {
+		return nil, fmt.Errorf("%s：%w", label, err)
+	}
+	values := make([]string, 0, len(selected))
+	for _, current := range selected {
+		values = append(values, current.URL)
+	}
+	return values, nil
 }
 
 func canvasMediaTypeLabels(mediaTypes []string) string {

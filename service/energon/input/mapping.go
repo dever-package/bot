@@ -49,7 +49,7 @@ func buildMapped(
 	if err := validatePowerMainParams(ctx, repo, req, target.PowerID, normalized, params, serviceParamIDs, configuredParamIDs, activeParamIDs); err != nil {
 		return mapped, err
 	}
-	if err := validatePowerAttachmentCounts(ctx, repo, target.PowerID, normalized, params, configuredParamIDs, activeParamIDs); err != nil {
+	if err := validatePowerAttachmentCounts(powerParams, normalized, params, configuredParamIDs, activeParamIDs); err != nil {
 		return mapped, err
 	}
 
@@ -178,16 +178,33 @@ func buildMapped(
 }
 
 func validatePowerAttachmentCounts(
-	ctx context.Context,
-	repo Repository,
-	powerID uint64,
+	powerParams []PowerParam,
 	input map[string]any,
 	params map[uint64]botmodel.Param,
 	configuredParamIDs map[uint64]bool,
 	activeParamIDs map[uint64]bool,
 ) error {
+	activePowerParams := FilterActivePowerParams(powerParams, input)
+	capacities := map[uint64]int{}
+	for _, powerParam := range activePowerParams {
+		if configuredParamIDs[powerParam.ParamID] && !activeParamIDs[powerParam.ParamID] {
+			continue
+		}
+		param, ok := params[powerParam.ParamID]
+		if !ok || !IsActive(param.Status) || !IsFileParamType(param.Type) {
+			continue
+		}
+		capacity := powerParam.MaxFiles
+		if NormalizeParamControlType(param.Type) == "file" {
+			capacity = 1
+		}
+		if current, exists := capacities[param.ID]; !exists || capacity > current {
+			capacities[param.ID] = capacity
+		}
+	}
+
 	checked := map[uint64]struct{}{}
-	for _, powerParam := range repo.PowerParamsByPower(ctx, powerID) {
+	for _, powerParam := range activePowerParams {
 		if _, exists := checked[powerParam.ParamID]; exists {
 			continue
 		}
@@ -196,18 +213,20 @@ func validatePowerAttachmentCounts(
 			continue
 		}
 		param, ok := params[powerParam.ParamID]
-		if !ok || !IsActive(param.Status) || param.MaxFiles <= 0 {
-			continue
-		}
-		if !IsFileParamType(param.Type) {
+		if !ok || !IsActive(param.Status) || !IsFileParamType(param.Type) {
 			continue
 		}
 		_, value, exists := ResolveParamValue(input, param)
 		if !exists {
 			continue
 		}
-		if count := len(StringList(value)); count > param.MaxFiles {
-			return fmt.Errorf("参数“%s”最多允许 %d 个文件，当前传入 %d 个", param.Name, param.MaxFiles, count)
+		count := len(StringList(value))
+		capacity := capacities[param.ID]
+		if count > 0 && capacity <= 0 {
+			return fmt.Errorf("参数“%s”当前来源未配置可用的附件位置", param.Name)
+		}
+		if count > capacity {
+			return fmt.Errorf("参数“%s”当前来源最多允许 %d 个文件，当前传入 %d 个", param.Name, capacity, count)
 		}
 	}
 	return nil

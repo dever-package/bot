@@ -102,37 +102,21 @@ func validateAttachmentMappingCoverage(
 		return nil
 	}
 
-	indexes := map[int]struct{}{}
-	hasAttachmentMapping := false
-	for _, serviceParam := range serviceParams {
-		if serviceParam.ParamID != param.ID {
-			continue
-		}
-		if serviceParam.ParamRule == paramRuleDirect || serviceParam.ParamRule == 0 {
-			return nil
-		}
-		if serviceParam.ParamRule != paramRuleFileMap {
-			continue
-		}
-		hasAttachmentMapping = true
-		configured, err := DecodeServiceParamAttachmentIndexes(serviceParam.Mapping)
-		if err != nil {
-			return fmt.Errorf("参数“%s”的%s", param.Name, err.Error())
-		}
-		for _, index := range configured {
-			indexes[index] = struct{}{}
-		}
+	mappings := collectServiceParamFileMappings(param.ID, nil, serviceParams)
+	if mappings.direct {
+		return nil
 	}
-	if !hasAttachmentMapping {
+	if len(mappings.attachments) == 0 {
 		return nil
 	}
 
+	capacity, err := attachmentMappingCapacity(mappings.attachments...)
+	if err != nil {
+		return fmt.Errorf("参数“%s”的%s", param.Name, err.Error())
+	}
 	fileCount := len(StringList(value))
-	for index := 1; index <= fileCount; index++ {
-		if _, exists := indexes[index]; exists {
-			continue
-		}
-		return fmt.Errorf("参数“%s”未配置第 %d 个附件的服务映射，当前传入 %d 个文件", param.Name, index, fileCount)
+	if fileCount > capacity {
+		return fmt.Errorf("参数“%s”当前来源最多允许 %d 个文件，当前传入 %d 个", param.Name, capacity, fileCount)
 	}
 	return nil
 }

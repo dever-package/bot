@@ -7,7 +7,7 @@ import {
   Plus,
   Volume2,
 } from "lucide-react";
-import type { ComposerAssetItem } from "./space-prompt-composer";
+import type { ComposerAssetItem } from "./types";
 import {
   moveOrderedItemById,
   orderItemsByIds,
@@ -17,6 +17,7 @@ import {
   emptyVideoComposition,
   formatVideoComposeDuration,
   VIDEO_COMPOSE_TRANSITION_GROUPS,
+  videoComposeMediaReferenceKey,
   videoComposeReferenceKey,
   videoCompositionDuration,
   videoCompositionBlockingIssues,
@@ -34,6 +35,12 @@ import {
 import { VideoComposeAssetPicker } from "./space-video-compose-picker";
 import { CanvasNodeContentView } from "./space-content-view";
 import { hasContentOutput } from "../shared/content-output";
+import {
+  canvasMediaReferenceKind,
+  canvasPrimaryMediaURLs,
+  connectedReferenceItem,
+  type CanvasConnectedMediaReference,
+} from "./space-media-references";
 import { SpaceTooltip } from "./space-tooltip";
 import { FirstFrameVideo } from "../../shared/first-frame-video";
 
@@ -44,30 +51,39 @@ const VIDEO_COMPOSE_RESOLUTION_OPTIONS = [
   { value: "3840x2160", label: "4K" },
 ] as const;
 
+const EMPTY_CONNECTED_MEDIA_REFERENCES: CanvasConnectedMediaReference[] = [];
+
 type PickerTarget = "clip" | "original" | "speech" | "global";
 
 export function VideoComposeView({
   composition,
   referenceItems,
+  connectedMediaReferences = EMPTY_CONNECTED_MEDIA_REFERENCES,
   readonly = false,
   running = false,
   fullScreen = false,
   finalOutput,
   onChange,
+  onConnectedMediaEdgeRemove,
   onRun,
   onOpenDetail,
 }: {
   composition?: CanvasVideoComposition;
   referenceItems: ComposerAssetItem[];
+  connectedMediaReferences?: CanvasConnectedMediaReference[];
   readonly?: boolean;
   running?: boolean;
   fullScreen?: boolean;
   finalOutput?: unknown;
   onChange?: (composition: CanvasVideoComposition) => void;
+  onConnectedMediaEdgeRemove?: (edgeId: string) => void;
   onRun?: (composition: CanvasVideoComposition) => void;
   onOpenDetail?: () => void;
 }) {
-  const value = composition || emptyVideoComposition();
+  const value = useMemo(
+    () => composition || emptyVideoComposition(),
+    [composition],
+  );
   const [selectedClipId, setSelectedClipId] = useState(
     value.clips[0]?.id || "",
   );
@@ -110,6 +126,38 @@ export function VideoComposeView({
     }
     return result;
   }, [referenceItems]);
+  const connectedVideoReferences = useMemo(
+    () =>
+      connectedVideoComposeReferences(
+        connectedMediaReferences,
+        referenceItems,
+      ),
+    [connectedMediaReferences, referenceItems],
+  );
+
+  useEffect(() => {
+    if (readonly || !onChange) {
+      return;
+    }
+    const next = reconcileConnectedVideoClips(
+      value,
+      connectedVideoReferences,
+    );
+    if (next === value) {
+      return;
+    }
+    if (!next.clips.some((clip) => clip.id === selectedClipId)) {
+      setSelectedClipId(next.clips[0]?.id || "");
+      setActivePanel("");
+    }
+    onChange(next);
+  }, [
+    connectedVideoReferences,
+    onChange,
+    readonly,
+    selectedClipId,
+    value,
+  ]);
 
   const update = (next: CanvasVideoComposition) => {
     if (!readonly) {
@@ -130,15 +178,15 @@ export function VideoComposeView({
       selectedClipId === clipId && current === panel ? "" : panel,
     );
   };
-  const chooseReference = (item: ComposerAssetItem) => {
-    const reference = referenceFromItem(item);
+  const chooseReferences = (references: VideoComposeAssetReference[]) => {
+    const reference = references[0];
     if (!reference) {
       return;
     }
     if (pickerTarget === "clip") {
-      const clip = createVideoComposeClip(reference);
-      update({ ...value, clips: [...value.clips, clip] });
-      setSelectedClipId(clip.id);
+      const clips = references.map(createVideoComposeClip);
+      update({ ...value, clips: [...value.clips, ...clips] });
+      setSelectedClipId(clips[0]?.id || "");
     } else if (pickerTarget === "original" && selectedClip) {
       updateClip(selectedClip.id, {
         originalAudioSource: reference,
@@ -327,9 +375,16 @@ export function VideoComposeView({
               onSelect={() => setSelectedClipId(clip.id)}
               onPanel={(panel) => openPanel(clip.id, panel)}
               onRemove={() => {
-                const clips = value.clips.filter((item) => item.id !== clip.id);
+                if (clip.sourceEdgeId) {
+                  onConnectedMediaEdgeRemove?.(clip.sourceEdgeId);
+                }
+                const clips = clip.sourceEdgeId
+                  ? value.clips.filter(
+                      (item) => item.sourceEdgeId !== clip.sourceEdgeId,
+                    )
+                  : value.clips.filter((item) => item.id !== clip.id);
                 update({ ...value, clips });
-                if (selectedClipId === clip.id) {
+                if (!clips.some((item) => item.id === selectedClipId)) {
                   setSelectedClipId(clips[0]?.id || "");
                   setActivePanel("");
                 }
@@ -410,7 +465,9 @@ export function VideoComposeView({
           }
           kind={pickerTarget === "clip" ? "video" : "audio"}
           items={referenceItems}
-          onSelect={chooseReference}
+          allowOrderedSelection={pickerTarget === "clip"}
+          resolveReferences={referencesFromItem}
+          onSelect={chooseReferences}
           onClose={() => setPickerTarget("")}
         />
       ) : null}
@@ -900,7 +957,7 @@ function VideoComposePreview({
   item?: ComposerAssetItem;
   finalOutput?: unknown;
 }) {
-  const videoUrl = item?.preview.videoUrl || "";
+  const videoUrl = clip?.visualVideo?.mediaUrl || item?.preview.videoUrl || "";
   const hasFinalOutput = hasContentOutput(finalOutput);
   const [mode, setMode] = useState<"clip" | "final">(
     hasFinalOutput ? "final" : "clip",
@@ -973,10 +1030,12 @@ function VideoComposePreview({
 
 function createVideoComposeClip(
   reference: VideoComposeAssetReference,
+  sourceEdgeId = "",
 ): VideoComposeClip {
   return {
     id: uniqueClipId(),
     title: reference.label || "镜头",
+    ...(sourceEdgeId ? { sourceEdgeId } : {}),
     visualVideo: reference,
     originalAudioSource: reference,
     duration: 0,
@@ -992,6 +1051,141 @@ function createVideoComposeClip(
   };
 }
 
+type ConnectedVideoComposeReference = {
+  edgeId: string;
+  reference: VideoComposeAssetReference;
+};
+
+type ConnectedVideoComposeReferences = {
+  edgeIds: Set<string>;
+  resolvedEdgeIds: Set<string>;
+  references: ConnectedVideoComposeReference[];
+};
+
+function connectedVideoComposeReferences(
+  connections: CanvasConnectedMediaReference[],
+  items: ComposerAssetItem[],
+): ConnectedVideoComposeReferences {
+  const edgeIds = new Set<string>();
+  const resolvedEdgeIds = new Set<string>();
+  const references: ConnectedVideoComposeReference[] = [];
+  const edgeReferences = new Map<
+    string,
+    { complete: boolean; references: VideoComposeAssetReference[] }
+  >();
+  for (const connection of connections) {
+    if (
+      !connection.edge.id ||
+      canvasMediaReferenceKind(connection.source) !== "video"
+    ) {
+      continue;
+    }
+    edgeIds.add(connection.edge.id);
+    const edgeState = edgeReferences.get(connection.edge.id) || {
+      complete: true,
+      references: [],
+    };
+    edgeReferences.set(connection.edge.id, edgeState);
+    const item = connectedReferenceItem(items, connection.source);
+    if (!item) {
+      edgeState.complete = false;
+      continue;
+    }
+    const itemReferences = referencesFromItem(item, "video");
+    if (!itemReferences.length) {
+      edgeState.complete = false;
+      continue;
+    }
+    edgeState.references.push(...itemReferences);
+  }
+  for (const [edgeId, edgeState] of edgeReferences) {
+    if (!edgeState.complete || !edgeState.references.length) {
+      continue;
+    }
+    resolvedEdgeIds.add(edgeId);
+    references.push(
+      ...edgeState.references.map((reference) => ({ edgeId, reference })),
+    );
+  }
+  return { edgeIds, resolvedEdgeIds, references };
+}
+
+function reconcileConnectedVideoClips(
+  composition: CanvasVideoComposition,
+  connected: ConnectedVideoComposeReferences,
+) {
+  const desiredReferences = new Map<string, ConnectedVideoComposeReference>();
+  for (const reference of connected.references) {
+    const key = connectedVideoComposeReferenceKey(reference);
+    if (key && !desiredReferences.has(key)) {
+      desiredReferences.set(key, reference);
+    }
+  }
+
+  let changed = false;
+  const matchedKeys = new Set<string>();
+  const clips = composition.clips.flatMap((clip) => {
+    if (!clip.sourceEdgeId) {
+      return [clip];
+    }
+    if (!connected.edgeIds.has(clip.sourceEdgeId)) {
+      changed = true;
+      return [];
+    }
+    if (!connected.resolvedEdgeIds.has(clip.sourceEdgeId)) {
+      return [clip];
+    }
+    const key = connectedVideoComposeReferenceKey({
+      edgeId: clip.sourceEdgeId,
+      reference: clip.visualVideo,
+    });
+    if (!key || !desiredReferences.has(key) || matchedKeys.has(key)) {
+      changed = true;
+      return [];
+    }
+    matchedKeys.add(key);
+    return [clip];
+  });
+
+  for (const [key, connected] of desiredReferences) {
+    if (matchedKeys.has(key)) {
+      continue;
+    }
+    const referenceKey = videoComposeMediaReferenceKey(connected.reference);
+    const existingIndex = clips.findIndex(
+      (clip) =>
+        !clip.sourceEdgeId &&
+        videoComposeMediaReferenceKey(clip.visualVideo) === referenceKey,
+    );
+    if (existingIndex >= 0) {
+      clips[existingIndex] = {
+        ...clips[existingIndex],
+        sourceEdgeId: connected.edgeId,
+      };
+    } else {
+      clips.push(
+        createVideoComposeClip(connected.reference, connected.edgeId),
+      );
+    }
+    matchedKeys.add(key);
+    changed = true;
+  }
+
+  return changed ? { ...composition, clips } : composition;
+}
+
+function connectedVideoComposeReferenceKey(
+  connected: {
+    edgeId: string;
+    reference?: VideoComposeAssetReference;
+  },
+) {
+  const referenceKey = videoComposeMediaReferenceKey(connected.reference);
+  return connected.edgeId && referenceKey
+    ? `${connected.edgeId}:${referenceKey}`
+    : "";
+}
+
 function referenceFromItem(
   item: ComposerAssetItem,
 ): VideoComposeAssetReference | null {
@@ -1001,6 +1195,38 @@ function referenceFromItem(
     return null;
   }
   return { assetId, versionId, label: item.title };
+}
+
+function referencesFromItem(
+  item: ComposerAssetItem,
+  kind: "video" | "audio",
+): VideoComposeAssetReference[] {
+  const reference = referenceFromItem(item);
+  if (!reference) {
+    return [];
+  }
+  const previewUrl =
+    kind === "video" ? item.preview.videoUrl : item.preview.audioUrl;
+  const urls = Array.from(
+    new Set([
+      ...canvasPrimaryMediaURLs(item.output, kind),
+      ...canvasPrimaryMediaURLs(item.asset, kind),
+      previewUrl,
+    ].filter(Boolean)),
+  );
+  if (!urls.length) {
+    return [reference];
+  }
+  const mediaLabel = kind === "video" ? "视频" : "音频";
+  return urls.map((mediaUrl, index) => ({
+    ...reference,
+    label:
+      urls.length > 1
+        ? `${reference.label || mediaLabel} · ${mediaLabel} ${index + 1}`
+        : reference.label,
+    mediaIndex: index + 1,
+    mediaUrl,
+  }));
 }
 
 function findReferenceItem(

@@ -1,20 +1,36 @@
 import { lazy, type ComponentType } from "react";
 
-// These renderers participate in normal canvas paint. Keeping them synchronous
-// avoids an extra request and a visible fallback whenever their node type exists.
+// Small renderers shared by common nodes stay synchronous. Specialized views
+// below are loaded only when the active canvas contains their presentation mode.
 export { AssetAudioPreview } from "../asset/asset-audio-preview";
 export { CanvasGroupNodeView } from "./space-group-node";
 export {
   CanvasResultView,
   hasResultPreviewMedia,
 } from "./space-result-view";
-export { StoryboardInputReferenceEditor } from "./space-storyboard-reference-editor";
-export { StoryboardNodeContent } from "./space-storyboard-node";
 
-function createPreloadableComponent<T extends ComponentType<any>>(
-  loader: () => Promise<{ default: T }>,
+function createPreloadableComponent<
+  TModule,
+  T extends ComponentType<any>,
+>(
+  moduleLoader: PreloadableModule<TModule>,
+  select: (module: TModule) => T,
 ) {
-  let modulePromise: Promise<{ default: T }> | undefined;
+  return {
+    Component: lazy(() =>
+      moduleLoader.load().then((module) => ({ default: select(module) })),
+    ),
+    preload: moduleLoader.preload,
+  };
+}
+
+type PreloadableModule<T> = {
+  load: () => Promise<T>;
+  preload: () => Promise<void>;
+};
+
+function createPreloadableModule<T>(loader: () => Promise<T>) {
+  let modulePromise: Promise<T> | undefined;
   const load = () => {
     if (!modulePromise) {
       modulePromise = loader().catch((error) => {
@@ -25,83 +41,84 @@ function createPreloadableComponent<T extends ComponentType<any>>(
     return modulePromise;
   };
   return {
-    Component: lazy(load),
-    preload: () =>
-      load().then(
-        () => undefined,
-        () => undefined,
-      ),
-  };
+    load,
+    preload: () => load().then(() => undefined, () => undefined),
+  } satisfies PreloadableModule<T>;
 }
 
-const agentInteractionPanel = createPreloadableComponent(() =>
-  import("@/components/agent/interaction-panel").then((module) => ({
-    default: module.AgentInteractionPanel,
-  })),
+const agentTools = createPreloadableModule(() => import("./space-agent-tools"));
+const assetTools = createPreloadableModule(() => import("./space-asset-tools"));
+
+const agentInteractionPanel = createPreloadableComponent(
+  agentTools,
+  (module) => module.AgentInteractionPanel,
 );
 export const AgentInteractionPanel = agentInteractionPanel.Component;
 export const preloadAgentInteractionPanel = agentInteractionPanel.preload;
 
-const addNodeMenu = createPreloadableComponent(() =>
-  import("./space-add-node-menu").then((module) => ({
-    default: module.AddNodeMenu,
-  })),
+const addNodeMenu = createPreloadableComponent(
+  createPreloadableModule(() => import("./space-add-node-menu")),
+  (module) => module.AddNodeMenu,
 );
 export const AddNodeMenu = addNodeMenu.Component;
 export const preloadAddNodeMenu = addNodeMenu.preload;
 
-const assetBrowser = createPreloadableComponent(() =>
-  import("../asset/asset-browser").then((module) => ({
-    default: module.AssetBrowser,
-  })),
+const assetBrowser = createPreloadableComponent(
+  assetTools,
+  (module) => module.AssetBrowser,
 );
 export const AssetBrowser = assetBrowser.Component;
 export const preloadAssetBrowser = assetBrowser.preload;
 
-const assetPickerDialog = createPreloadableComponent(() =>
-  import("../asset/asset-picker-dialog").then((module) => ({
-    default: module.AssetPickerDialog,
-  })),
+const assetPickerDialog = createPreloadableComponent(
+  assetTools,
+  (module) => module.AssetPickerDialog,
 );
 export const AssetPickerDialog = assetPickerDialog.Component;
 export const preloadAssetPickerDialog = assetPickerDialog.preload;
 
-const canvasRunHistoryDrawer = createPreloadableComponent(() =>
-  import("./space-run-history").then((module) => ({
-    default: module.CanvasRunHistoryDrawer,
-  })),
+const canvasRunHistoryDrawer = createPreloadableComponent(
+  createPreloadableModule(() => import("./space-run-history")),
+  (module) => module.CanvasRunHistoryDrawer,
 );
 export const CanvasRunHistoryDrawer = canvasRunHistoryDrawer.Component;
 export const preloadCanvasRunHistoryDrawer = canvasRunHistoryDrawer.preload;
 
-const canvasAgentResultContent = createPreloadableComponent(() =>
-  import("./space-agent-result").then((module) => ({
-    default: module.CanvasAgentResultContent,
-  })),
+const canvasAgentResultContent = createPreloadableComponent(
+  agentTools,
+  (module) => module.CanvasAgentResultContent,
 );
 export const CanvasAgentResultContent = canvasAgentResultContent.Component;
 export const preloadCanvasAgentResultContent = canvasAgentResultContent.preload;
 
-const nodeDetailDialog = createPreloadableComponent(() =>
-  import("./node-detail/node-detail-dialog").then((module) => ({
-    default: module.NodeDetailDialog,
-  })),
+const nodeDetailDialog = createPreloadableComponent(
+  createPreloadableModule(() => import("./node-detail/node-detail-dialog")),
+  (module) => module.NodeDetailDialog,
 );
 export const NodeDetailDialog = nodeDetailDialog.Component;
 export const preloadNodeDetailDialog = nodeDetailDialog.preload;
 
-const promptComposer = createPreloadableComponent(() =>
-  import("./space-prompt-composer").then((module) => ({
-    default: module.PromptComposer,
-  })),
+const canvasNodeSettings = createPreloadableComponent(
+  createPreloadableModule(() => import("./space-node-settings")),
+  (module) => module.CanvasNodeSettings,
 );
-export const PromptComposer = promptComposer.Component;
-export const preloadPromptComposer = promptComposer.preload;
+export const CanvasNodeSettings = canvasNodeSettings.Component;
+export const preloadCanvasNodeSettings = canvasNodeSettings.preload;
 
-const videoComposeView = createPreloadableComponent(() =>
-  import("./space-video-compose-view").then((module) => ({
-    default: module.VideoComposeView,
-  })),
+const storyboardNodeContent = createPreloadableComponent(
+  createPreloadableModule(() => import("./space-storyboard-node")),
+  (module) => module.StoryboardNodeContent,
+);
+export const StoryboardNodeContent = storyboardNodeContent.Component;
+
+const storyboardGridCanvasView = createPreloadableComponent(
+  createPreloadableModule(() => import("../shared/storyboard-grid-view")),
+  (module) => module.StoryboardGridCanvasView,
+);
+export const StoryboardGridCanvasView = storyboardGridCanvasView.Component;
+
+const videoComposeView = createPreloadableComponent(
+  createPreloadableModule(() => import("./space-video-compose-view")),
+  (module) => module.VideoComposeView,
 );
 export const VideoComposeView = videoComposeView.Component;
-export const preloadVideoComposeView = videoComposeView.preload;

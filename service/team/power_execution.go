@@ -16,11 +16,12 @@ func (s Service) executePower(
 	power PowerOption,
 	input map[string]any,
 	sourceTargetID uint64,
+	imageSequenceMode string,
 	billing botprotocol.BillingContext,
 	onStream func(map[string]any),
 ) (map[string]any, error) {
 	sourceTargetID = resolveSourceTargetID(sourceTargetID, input)
-	body := canvasPowerGatewayBody(power, input, sourceTargetID)
+	body := canvasPowerGatewayBody(power, input, sourceTargetID, imageSequenceMode)
 	output, err := billingservice.ExecutePower(ctx, billingservice.PowerExecutionRequest{
 		Prepare: billingservice.PreparePowerChargeRequest{
 			Billing:       billing,
@@ -67,18 +68,28 @@ func (s Service) PreflightCanvasPower(ctx context.Context, req CanvasPowerRunReq
 			prepared.power,
 			input,
 			prepared.request.SourceTargetID,
+			prepared.request.ImageSequenceMode,
 		),
 	})
 }
 
-func canvasPowerGatewayBody(power PowerOption, input map[string]any, sourceTargetID uint64) map[string]any {
+func canvasPowerGatewayBody(
+	power PowerOption,
+	input map[string]any,
+	sourceTargetID uint64,
+	imageSequenceMode string,
+) map[string]any {
 	sourceTargetID = resolveSourceTargetID(sourceTargetID, input)
+	options := map[string]any{"stream": true}
+	if imageSequenceMode != "" {
+		options[botprotocol.OptionImageSequenceMode] = imageSequenceMode
+	}
 	body := map[string]any{
 		"protocol": "shemic",
 		"power":    power.Key,
 		"input":    input,
 		"history":  []any{},
-		"options":  map[string]any{"stream": true},
+		"options":  options,
 	}
 	if sourceTargetID > 0 {
 		body["source_target_id"] = sourceTargetID

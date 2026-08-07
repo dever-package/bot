@@ -8,6 +8,7 @@ import {
   LocateFixed,
   Loader2,
   RefreshCw,
+  Square,
   X,
   XCircle,
 } from "lucide-react";
@@ -20,8 +21,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
+  canvasRunIdentity,
   canvasExecutionErrorMessage,
   canvasRunRawError,
+  isActiveCanvasRun,
   type CanvasRunRef,
 } from "./space-runner";
 import { SpaceTooltip } from "./space-tooltip";
@@ -38,6 +41,8 @@ export function CanvasRunHistoryDrawer({
   onPreviousPage,
   onNextPage,
   onLocateRun,
+  onStopRun,
+  stoppingRunKeys,
 }: {
   open: boolean;
   runs: CanvasRunRef[];
@@ -50,6 +55,8 @@ export function CanvasRunHistoryDrawer({
   onPreviousPage: () => Promise<unknown> | unknown;
   onNextPage: () => Promise<unknown> | unknown;
   onLocateRun: (run: CanvasRunRef) => void;
+  onStopRun: (run: CanvasRunRef) => void;
+  stoppingRunKeys: ReadonlySet<string>;
 }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -119,9 +126,11 @@ export function CanvasRunHistoryDrawer({
                 const rawError = canvasRunRawError(run);
                 const status = canvasRunStatus(run.status);
                 const canLocate = Boolean(String(run.start_node_id || ""));
+                const canStop = isActiveCanvasRun(run);
+                const stopping = stoppingRunKeys.has(canvasRunIdentity(run));
                 return (
                   <section
-                    key={canvasRunHistoryKey(run)}
+                    key={canvasRunIdentity(run)}
                     className="flex items-start gap-3 px-5 py-4 transition-colors hover:bg-muted/30"
                   >
                     <CanvasRunStatusIcon status={status} />
@@ -153,18 +162,37 @@ export function CanvasRunHistoryDrawer({
                         </p>
                       ) : null}
                     </div>
-                    {canLocate ? (
-                      <SpaceTooltip label="在画布中定位">
-                        <button
-                          type="button"
-                          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                          onClick={() => onLocateRun(run)}
-                          aria-label="在画布中定位"
-                        >
-                          <LocateFixed size={16} />
-                        </button>
-                      </SpaceTooltip>
-                    ) : null}
+                    <div className="flex shrink-0 items-center gap-1">
+                      {canStop ? (
+                        <SpaceTooltip label="停止本次运行">
+                          <button
+                            type="button"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-destructive transition-colors hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-50"
+                            disabled={stopping}
+                            onClick={() => onStopRun(run)}
+                            aria-label="停止本次运行"
+                          >
+                            {stopping ? (
+                              <Loader2 size={16} className="animate-spin" />
+                            ) : (
+                              <Square size={15} fill="currentColor" />
+                            )}
+                          </button>
+                        </SpaceTooltip>
+                      ) : null}
+                      {canLocate ? (
+                        <SpaceTooltip label="在画布中定位">
+                          <button
+                            type="button"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                            onClick={() => onLocateRun(run)}
+                            aria-label="在画布中定位"
+                          >
+                            <LocateFixed size={16} />
+                          </button>
+                        </SpaceTooltip>
+                      ) : null}
+                    </div>
                   </section>
                 );
               })}
@@ -229,10 +257,6 @@ function CanvasRunStatusIcon({ status }: { status: string }) {
       className="mt-0.5 shrink-0 text-muted-foreground"
     />
   );
-}
-
-function canvasRunHistoryKey(run: CanvasRunRef) {
-  return String(run.execution_id || run.run_id || run.request_id || "");
 }
 
 function canvasRunTitle(run: CanvasRunRef) {

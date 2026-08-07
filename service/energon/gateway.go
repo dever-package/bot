@@ -146,6 +146,7 @@ func (s GatewayService) validateNormalizeTarget(
 	power botmodel.Power,
 	target botmodel.PowerTarget,
 ) error {
+	req = withoutImageSequenceMode(req)
 	selected, err := s.selectTarget(ctx, power, target)
 	if err != nil {
 		return err

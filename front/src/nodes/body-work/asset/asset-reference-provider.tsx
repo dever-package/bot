@@ -4,8 +4,13 @@ import { loadAssetDetail } from "./asset-api";
 import { assetKindsAccept } from "./asset-contract";
 import {
   assetPreviewOutput,
-  findAssetMediaURL,
+  findAssetMediaURLs,
 } from "./asset-content";
+import {
+  contentOutputMediaKinds,
+  contentOutputMediaURLs,
+  type ContentMediaKind,
+} from "../shared/content-output";
 import type {
   ReferenceOption,
   ReferencePreviewRequest,
@@ -35,6 +40,8 @@ export type WorkbenchReferenceOption = ReferenceOption & {
   label: string;
   description?: string;
   preview?: { text?: string; kind?: string; url?: string };
+  output?: unknown;
+  asset?: AssetRecord;
 };
 
 export function useAssetReferenceProvider({
@@ -167,12 +174,13 @@ function AssetReferencePicker({
         multiple={selectionLimit > 1}
         maxSelection={selectionLimit}
         confirmSelection
+        contentMode="full"
         usedAssetIDs={usedAssetIDs}
         validateAsset={(asset) => {
           if (usedAssetIDSet.has(asset.id)) {
             return "该素材已使用";
           }
-          return findAssetMediaURL(asset.version?.content, asset.kind)
+          return assetReferenceMedia(asset).length > 0
             ? ""
             : "该资产当前版本没有可用文件，无法用于此参数。";
         }}
@@ -258,9 +266,12 @@ function assetReferenceOption(
     description: asset.summary,
     preview: {
       text: asset.summary,
-      kind: asset.kind,
+      kind: media[0]?.kind || asset.kind,
       url: media[0]?.url,
     },
+    output: asset.version?.content,
+    asset,
+    mediaCount: media.length,
   };
 }
 
@@ -306,20 +317,42 @@ const referenceMediaKinds = new Set<AssetKind>([
 ]);
 
 function assetReferenceMedia(asset: AssetRecord) {
-  if (!referenceMediaKinds.has(asset.kind)) {
-    return [];
-  }
-  const url = findAssetMediaURL(asset.version?.content, asset.kind);
-  if (!url) {
-    return [];
-  }
-  return [
-    {
-      refType: "asset" as const,
-      refId: asset.id,
-      kind: asset.kind,
-      label: asset.name,
-      url,
-    },
-  ];
+  const content = asset.version?.content;
+  const media = assetOutputReferenceMedia(content, asset.kind);
+  const resolvedMedia =
+    media.length > 0
+      ? media
+      : referenceMediaKinds.has(asset.kind)
+        ? findAssetMediaURLs(content, asset.kind).map((url) => ({
+            kind: asset.kind,
+            url,
+          }))
+        : [];
+  return resolvedMedia.map((item, index) => ({
+    refType: "asset" as const,
+    refId: asset.id,
+    kind: item.kind,
+    label:
+      resolvedMedia.length > 1 ? `${asset.name} · ${index + 1}` : asset.name,
+    url: item.url,
+    index: index + 1,
+  }));
+}
+
+function assetOutputReferenceMedia(content: unknown, assetKind: AssetKind) {
+  const outputKinds = contentOutputMediaKinds(content);
+  const preferredKind = referenceContentMediaKind(assetKind);
+  const selectedKinds =
+    preferredKind && outputKinds.includes(preferredKind)
+      ? [preferredKind]
+      : outputKinds;
+  return selectedKinds.flatMap((kind) =>
+    contentOutputMediaURLs(content, kind).map((url) => ({ kind, url })),
+  );
+}
+
+function referenceContentMediaKind(kind: AssetKind): ContentMediaKind | "" {
+  return kind === "image" || kind === "video" || kind === "audio"
+    ? kind
+    : "";
 }

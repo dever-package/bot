@@ -39,7 +39,9 @@ func (r Resolver) Resolve(ctx context.Context, session agentmodel.Session, refer
 			return Result{}, err
 		}
 		for index := range resolved.Media {
-			resolved.Media[index].Usage = current.Usage
+			if strings.TrimSpace(resolved.Media[index].Usage) == "" {
+				resolved.Media[index].Usage = current.Usage
+			}
 		}
 		result.Items = append(result.Items, resolved)
 		result.Media = appendUniqueMedia(result.Media, resolved.Media...)
@@ -81,8 +83,36 @@ func (r Resolver) resolveAsset(ctx context.Context, session agentmodel.Session, 
 	content := resolved.Content
 	title := firstText(resolved.Asset.Name, reference.Label, fmt.Sprintf("资产 %d", reference.ID))
 	kind := firstText(resolved.Asset.Kind, "file")
-	media := make([]Media, 0)
-	for _, current := range energoninput.MediaReferencesFromContent(TypeAsset, reference.ID, kind, content, reference.Usage) {
+	resolvedMedia := energoninput.MediaReferencesFromContent(TypeAsset, reference.ID, kind, content, reference.Usage)
+	// Collections and legacy file assets may not expose a typed media array.
+	// Preserve their existing single-file fallback without truncating typed media.
+	if len(resolvedMedia) == 0 && (kind == "file" || kind == "collection") {
+		if url := assetContentURL(content, kind); url != "" {
+			resolvedMedia = append(resolvedMedia, energoninput.MediaReference{
+				ReferenceType: TypeAsset,
+				ReferenceID:   reference.ID,
+				Kind:          kind,
+				URL:           url,
+				Usage:         reference.Usage,
+			})
+		}
+	}
+	selection := energoninput.MediaReferenceSelection{
+		URL:   reference.MediaURL,
+		Index: reference.MediaIndex,
+		Items: mediaReferenceSelectionItems(reference.MediaItems),
+	}
+	resolvedMedia, err = energoninput.SelectMediaReferences(resolvedMedia, selection)
+	if err != nil {
+		return Resolved{}, err
+	}
+	selectedContent := energoninput.SelectedMediaReferenceContent(
+		content,
+		resolvedMedia,
+		selection,
+	)
+	media := make([]Media, 0, len(resolvedMedia))
+	for _, current := range resolvedMedia {
 		media = append(media, Media{
 			ReferenceType: TypeAsset,
 			ReferenceID:   reference.ID,
@@ -90,33 +120,32 @@ func (r Resolver) resolveAsset(ctx context.Context, session agentmodel.Session, 
 			Name:          title,
 			Label:         title,
 			URL:           current.URL,
+			Usage:         current.Usage,
 		})
 	}
-	// Collections and legacy file assets may not expose a typed media array.
-	// Preserve their existing single-file fallback without truncating typed media.
-	if len(media) == 0 {
-		if url := assetContentURL(content, kind); url != "" {
-			media = append(media, Media{
-				ReferenceType: TypeAsset,
-				ReferenceID:   reference.ID,
-				Kind:          normalizeMediaKind(kind),
-				Name:          title,
-				Label:         title,
-				URL:           url,
-			})
-		}
-	}
-	output := mapValue(content)
-	if len(output) == 0 && content != nil {
-		output = map[string]any{"content": content}
+	output := mapValue(selectedContent)
+	if len(output) == 0 && selectedContent != nil {
+		output = map[string]any{"content": selectedContent}
 	}
 	return Resolved{
 		Reference: reference,
 		Title:     title,
-		Text:      assetContentText(content),
+		Text:      assetContentText(selectedContent),
 		Media:     cleanMedia(media),
 		Output:    output,
 	}, nil
+}
+
+func mediaReferenceSelectionItems(items []MediaSelectionItem) []energoninput.MediaReferenceSelectionItem {
+	result := make([]energoninput.MediaReferenceSelectionItem, 0, len(items))
+	for _, item := range items {
+		result = append(result, energoninput.MediaReferenceSelectionItem{
+			URL:   item.URL,
+			Index: item.Index,
+			Usage: item.Usage,
+		})
+	}
+	return result
 }
 
 func (r Resolver) resolveMessage(ctx context.Context, session agentmodel.Session, reference Reference) (Resolved, error) {
@@ -254,7 +283,7 @@ func resolvedContext(items []Resolved, allowedMedia []Media) []map[string]any {
 			if _, exists := allowed[mediaKey(media)]; !exists {
 				continue
 			}
-			logicalKey := fmt.Sprintf("%s:%d", media.ReferenceType, media.ReferenceID)
+			logicalKey := mediaKey(media)
 			if _, exists := seenMedia[logicalKey]; exists {
 				continue
 			}
@@ -264,9 +293,13 @@ func resolvedContext(items []Resolved, allowedMedia []Media) []map[string]any {
 				"ref_id":   media.ReferenceID,
 				"label":    media.Label,
 				"kind":     media.Kind,
+				"order":    len(mediaItems) + 1,
 			}
 			if media.ArtifactID > 0 {
 				mediaItem["artifact_id"] = media.ArtifactID
+			}
+			if usage := strings.TrimSpace(media.Usage); usage != "" {
+				mediaItem["usage"] = usage
 			}
 			mediaItems = append(mediaItems, mediaItem)
 		}

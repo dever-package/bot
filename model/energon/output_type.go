@@ -17,7 +17,7 @@ const (
 
 const (
 	StoryboardGridMinImages = 2
-	StoryboardGridMaxImages = 9
+	StoryboardGridMaxImages = 50
 )
 
 const (
@@ -337,6 +337,11 @@ func IsOutputKindAllowed(outputType string, kind string) bool {
 
 func IsGeneralTextPower(power Power) bool {
 	return NormalizePowerKind(power.Kind) == "text" &&
+		NormalizeOutputType(power.OutputType) == OutputTypeGeneral
+}
+
+func IsGeneralImagePower(power Power) bool {
+	return NormalizePowerKind(power.Kind) == "image" &&
 		NormalizeOutputType(power.OutputType) == OutputTypeGeneral
 }
 

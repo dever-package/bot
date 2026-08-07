@@ -18,6 +18,7 @@ export type StoryboardFrameNodeData = {
   completedCount: number;
   running: boolean;
   runBlockedReason: string;
+  runActionEnabled?: boolean;
   collapsed: boolean;
   onRun: () => void;
   onFocus: () => void;
@@ -49,22 +50,24 @@ export const StoryboardFrameNode = memo(function StoryboardFrameNode({
           {frame.groupCount} 组 · {frame.completedCount}/{frame.workNodeCount}{" "}
           完成
         </span>
-        <SpaceTooltip label={runHint}>
-          <button
-            type="button"
-            className="nodrag nopan ws-storyboard-frame-run"
-            aria-label={runLabel}
-            disabled={frame.running || Boolean(frame.runBlockedReason)}
-            onClick={stopAnd(frame.onRun)}
-          >
-            {frame.running ? (
-              <Loader2 size={14} className="ws-spin" />
-            ) : (
-              <Play size={14} fill="currentColor" />
-            )}
-            <span>{runLabel}</span>
-          </button>
-        </SpaceTooltip>
+        {frame.runActionEnabled ? (
+          <SpaceTooltip label={runHint}>
+            <button
+              type="button"
+              className="nodrag nopan ws-storyboard-frame-run"
+              aria-label={runLabel}
+              disabled={frame.running || Boolean(frame.runBlockedReason)}
+              onClick={stopAnd(frame.onRun)}
+            >
+              {frame.running ? (
+                <Loader2 size={14} className="ws-spin" />
+              ) : (
+                <Play size={14} fill="currentColor" />
+              )}
+              <span>{runLabel}</span>
+            </button>
+          </SpaceTooltip>
+        ) : null}
         <SpaceTooltip label="聚焦制作区">
           <button
             type="button"

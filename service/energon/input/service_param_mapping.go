@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/shemic/dever/util"
+
+	botmodel "github.com/dever-package/bot/model/energon"
 )
 
 type ServiceParamOptionMapping struct {
@@ -21,6 +23,23 @@ type ServiceParamComboMapping struct {
 type ServiceParamComboRow struct {
 	Values      map[uint64]uint64
 	NativeValue string
+}
+
+type serviceParamFileMappingSet struct {
+	found       bool
+	direct      bool
+	attachments []any
+}
+
+const defaultServiceParamAttachmentOptionLimit = 50
+
+// ServiceParamAttachmentOptionLimit keeps the mapping editor independent from
+// one capability parameter's default capacity while retaining a bounded list.
+func ServiceParamAttachmentOptionLimit(paramMaxFiles int) int {
+	if paramMaxFiles > defaultServiceParamAttachmentOptionLimit {
+		return paramMaxFiles
+	}
+	return defaultServiceParamAttachmentOptionLimit
 }
 
 func DecodeServiceParamAttachmentIndexes(value any) ([]int, error) {
@@ -41,6 +60,60 @@ func DecodeServiceParamAttachmentIndexes(value any) ([]int, error) {
 		indexes = append(indexes, index)
 	}
 	return indexes, nil
+}
+
+// AttachmentMappingCapacity returns the consecutive file coverage shared by
+// one or more mappings. Sparse mappings can compose across provider fields.
+func attachmentMappingCapacity(values ...any) (int, error) {
+	covered := map[int]struct{}{}
+	for _, value := range values {
+		indexes, err := DecodeServiceParamAttachmentIndexes(value)
+		if err != nil {
+			return 0, err
+		}
+		for _, index := range indexes {
+			covered[index] = struct{}{}
+		}
+	}
+
+	for index := 1; index <= len(covered); index++ {
+		if _, exists := covered[index]; !exists {
+			return index - 1, nil
+		}
+	}
+	return len(covered), nil
+}
+
+func collectServiceParamFileMappings(
+	paramID uint64,
+	condition *ServiceParamCondition,
+	serviceParams []botmodel.ServiceParam,
+) serviceParamFileMappingSet {
+	result := serviceParamFileMappingSet{}
+	for _, serviceParam := range serviceParams {
+		if !IsActive(serviceParam.Status) || serviceParam.ParamID != paramID || !serviceParamAcceptsInput(serviceParam) {
+			continue
+		}
+		if condition != nil && !sameServiceParamCondition(*condition, serviceParamCondition(serviceParam)) {
+			continue
+		}
+		switch serviceParam.ParamRule {
+		case paramRuleDirect, 0:
+			result.found = true
+			result.direct = true
+		case paramRuleFileMap:
+			result.found = true
+			result.attachments = append(result.attachments, serviceParam.Mapping)
+		}
+	}
+	return result
+}
+
+func sameServiceParamCondition(left ServiceParamCondition, right ServiceParamCondition) bool {
+	return left.ParamID == right.ParamID && strings.EqualFold(
+		strings.TrimSpace(left.Value),
+		strings.TrimSpace(right.Value),
+	)
 }
 
 func DecodeServiceParamOptionMappings(value any) []ServiceParamOptionMapping {

@@ -390,7 +390,11 @@ func (s Service) prepareCanvasPowerParamValues(
 			reasons = append(reasons, canvasPowerSourceFailure(source.Name, err))
 			continue
 		}
-		bound, err := energoninput.BindMediaReferences(req.Params, targetForm.Params, req.MediaReferences)
+		bound, err := energoninput.BindMediaReferences(
+			canvasPowerReferenceParamValues(req.Params, targetForm.Params, req.MediaReferences),
+			targetForm.Params,
+			req.MediaReferences,
+		)
 		if err != nil {
 			reasons = append(reasons, canvasPowerSourceFailure(source.Name, err))
 			continue
@@ -403,6 +407,7 @@ func (s Service) prepareCanvasPowerParamValues(
 				power,
 				mergeMaps(req.Input, values),
 				source.TargetID,
+				req.ImageSequenceMode,
 			),
 		}, source.TargetID); err != nil {
 			reasons = append(reasons, canvasPowerSourceFailure(source.Name, err))
@@ -433,11 +438,48 @@ func bindCanvasPowerParamValues(
 	params []energonservice.PowerParam,
 	references []energoninput.MediaReference,
 ) (map[string]any, error) {
-	bound, err := energoninput.BindMediaReferences(values, params, references)
+	bound, err := energoninput.BindMediaReferences(
+		canvasPowerReferenceParamValues(values, params, references),
+		params,
+		references,
+	)
 	if err != nil {
 		return nil, err
 	}
 	return energonservice.ApplyPowerParamDefaults(bound.Values, params), nil
+}
+
+// Canvas media references are the source of truth for media parameters. Clear
+// matching saved values before binding so a per-image child request cannot
+// retain media selected for another child request.
+func canvasPowerReferenceParamValues(
+	values map[string]any,
+	params []energonservice.PowerParam,
+	references []energoninput.MediaReference,
+) map[string]any {
+	if len(references) == 0 {
+		return values
+	}
+	kinds := make(map[string]bool, len(references))
+	for _, reference := range references {
+		kind := strings.ToLower(strings.TrimSpace(reference.Kind))
+		if kind != "" {
+			kinds[kind] = true
+		}
+	}
+	result := make(map[string]any, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	for _, param := range params {
+		for kind := range kinds {
+			if energoninput.MediaParamSupports(param, kind) {
+				delete(result, strings.TrimSpace(param.Key))
+				break
+			}
+		}
+	}
+	return result
 }
 
 func canvasPowerSourceFailure(sourceName string, err error) string {
@@ -550,6 +592,13 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 			return nil, err
 		}
 	}
+	if current := s.repo.FindRun(ctx, run.ID); current != nil && current.Status == teammodel.RunStatusCanceled {
+		return map[string]any{
+			"run_id":     run.ID,
+			"request_id": requestID,
+			"status":     teammodel.RunStatusCanceled,
+		}, nil
+	}
 	var flowRunID uint64
 	var flowRun *teammodel.FlowRun
 	if flow.ID > 0 {
@@ -596,7 +645,16 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 			req.OnStream(payload)
 		}
 	}
-	output, err := s.executePower(ctx, requestID, power, input, req.SourceTargetID, req.Billing, onStream)
+	output, err := s.executePower(
+		ctx,
+		requestID,
+		power,
+		input,
+		req.SourceTargetID,
+		req.ImageSequenceMode,
+		req.Billing,
+		onStream,
+	)
 	status := teammodel.RunStatusSuccess
 	if err != nil {
 		status = teammodel.RunStatusFail

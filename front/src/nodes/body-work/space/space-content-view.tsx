@@ -11,10 +11,13 @@ import {
 } from "./space-storyboard";
 import {
   contentOutputMediaCount,
+  contentOutputMediaURLs,
   hasContentOutput,
   normalizeContentOutputItems,
   parseStoryboardGridOutput,
+  type ContentMediaKind,
 } from "../shared/content-output";
+import { MediaGridView } from "../shared/media-grid-view";
 import { StoryboardGridView } from "../shared/storyboard-grid-view";
 
 const StoryboardView = lazy(() =>
@@ -31,6 +34,7 @@ type CanvasContentMediaPreview = {
 };
 
 type CanvasNodeContentViewProps = BodyContentViewProps & {
+  mediaGridKind?: ContentMediaKind;
   storyboardEditable?: boolean;
   storyboardDisabled?: boolean;
   onStoryboardSave?: (storyboard: StoryboardDocument) => Promise<void>;
@@ -45,6 +49,7 @@ export function CanvasNodeContentView({
   markdownClassName,
   richClassName,
   mediaLayout = "default",
+  mediaGridKind,
   storyboardEditable = false,
   storyboardDisabled = false,
   onStoryboardSave,
@@ -79,6 +84,26 @@ export function CanvasNodeContentView({
     );
   }
 
+  const mediaGrid = canvasMultiMediaGridOutput(
+    resolvedOutput,
+    mediaGridKind,
+  );
+  if (mediaGrid) {
+    return (
+      <ContentViewBoundary
+        className={[className, "ws-media-grid-content"]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        <MediaGridView
+          kind={mediaGrid.kind}
+          urls={mediaGrid.urls}
+          label={fallback}
+        />
+      </ContentViewBoundary>
+    );
+  }
+
   return (
     <BodyContentView
       output={resolvedOutput}
@@ -100,8 +125,9 @@ export function contentOutputNeedsRenderer(
   if (isStandalonePreviewMediaOutput(output, preview)) {
     return false;
   }
+  const mediaCount = contentOutputMediaCount(output);
   const items = normalizeContentOutputItems(output);
-  if (items.length > 1 || contentOutputMediaCount(output) > 1) {
+  if (items.length > 1 || mediaCount > 1) {
     return true;
   }
   return items.some((item) => {
@@ -118,6 +144,32 @@ export function contentOutputNeedsRenderer(
       item.json,
     ].some(hasContentOutput);
   });
+}
+
+export function canvasMultiMediaGridOutput(
+  output: unknown,
+  kind?: ContentMediaKind,
+) {
+  if (!kind) {
+    return null;
+  }
+  const urls = contentOutputMediaURLs(output, kind);
+  return urls.length > 1 ? { kind, urls } : null;
+}
+
+export function canvasMediaGridKind(
+  preview?: CanvasContentMediaPreview,
+): ContentMediaKind | undefined {
+  if (preview?.videoUrl) {
+    return "video";
+  }
+  if (preview?.imageUrl) {
+    return "image";
+  }
+  if (preview?.audioUrl) {
+    return "audio";
+  }
+  return undefined;
 }
 
 function isStandalonePreviewMediaOutput(

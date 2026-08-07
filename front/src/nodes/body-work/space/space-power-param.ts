@@ -1,4 +1,9 @@
-import type { PowerParam, PowerParamOption } from "./types";
+import { isPromptPowerParam } from "./space-media-param";
+import type {
+  CanvasComposerDraft,
+  PowerParam,
+  PowerParamOption,
+} from "./types";
 
 export function defaultPowerParamValue(param: PowerParam) {
   const raw = param.default_value ?? "";
@@ -33,6 +38,53 @@ export function defaultPowerParamValues(params: PowerParam[]) {
   return values;
 }
 
+export function mergePowerParamValues(
+  params: PowerParam[],
+  current: Record<string, unknown>,
+  previousParams: PowerParam[],
+) {
+  const values = defaultPowerParamValues(params);
+  const previousByKey = new Map(
+    previousParams.map((param) => [param.key, param]),
+  );
+  for (const param of params) {
+    const previousParam = previousByKey.get(param.key);
+    if (
+      param.key &&
+      previousParam &&
+      Object.prototype.hasOwnProperty.call(current, param.key) &&
+      canPreservePowerParamValue(param, previousParam, current[param.key])
+    ) {
+      values[param.key] = normalizePowerParamValue(param, current[param.key]);
+    }
+  }
+  return values;
+}
+
+export function mergeCanvasComposerParamValues(
+  params: PowerParam[],
+  draft: CanvasComposerDraft,
+) {
+  const values = defaultPowerParamValues(params);
+  const savedValues = draft.paramValues || {};
+  for (const param of params) {
+    if (
+      param.key &&
+      Object.prototype.hasOwnProperty.call(savedValues, param.key)
+    ) {
+      values[param.key] = normalizePowerParamValue(
+        param,
+        savedValues[param.key],
+      );
+    }
+  }
+  const promptParam = params.find(isPromptPowerParam);
+  if (promptParam?.key && draft.prompt.trim()) {
+    values[promptParam.key] = draft.prompt;
+  }
+  return values;
+}
+
 function normalizePowerParamScalarValue(
   param: PowerParam,
   value: unknown,
@@ -63,6 +115,38 @@ export function normalizePowerParamValue(param: PowerParam, value: unknown) {
     });
   }
   return normalizePowerParamScalarValue(param, value);
+}
+
+function canPreservePowerParamValue(
+  param: PowerParam,
+  previousParam: PowerParam,
+  value: unknown,
+) {
+  if (
+    param.type !== previousParam.type ||
+    param.value_type !== previousParam.value_type
+  ) {
+    return false;
+  }
+  if (param.type === "option" || param.type === "select") {
+    const options = param.options || [];
+    return (
+      options.length === 0 || Boolean(resolvePowerParamOption(options, value))
+    );
+  }
+  if (param.type === "multi_option") {
+    const options = param.options || [];
+    return (
+      options.length === 0 ||
+      valueAsList(value).every((item) =>
+        Boolean(resolvePowerParamOption(options, item)),
+      )
+    );
+  }
+  if (param.value_type === "number") {
+    return value === "" || Number.isFinite(Number(value));
+  }
+  return true;
 }
 
 export function powerParamOptionValue(option?: PowerParamOption) {

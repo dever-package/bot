@@ -95,6 +95,18 @@ func (content Content) Value() map[string]any {
 		if part.VersionID > 0 {
 			current["ref_version_id"] = part.VersionID
 		}
+		if part.MediaURL != "" {
+			current["ref_media_url"] = part.MediaURL
+		}
+		if part.MediaIndex > 0 {
+			current["ref_media_index"] = part.MediaIndex
+		}
+		if part.MediaCount > 0 {
+			current["ref_media_count"] = part.MediaCount
+		}
+		if len(part.MediaItems) > 0 {
+			current["ref_media_items"] = part.MediaItems
+		}
 		parts = append(parts, current)
 	}
 	result := map[string]any{"version": ContentVersion, "parts": parts}
@@ -158,14 +170,18 @@ func parseContent(value any) (Content, bool) {
 			continue
 		}
 		parts = append(parts, Part{
-			Type:      strings.ToLower(strings.TrimSpace(textValue(current["type"]))),
-			Text:      rawText(current["text"]),
-			RefType:   normalizeType(textValue(current["ref_type"])),
-			RefID:     uint64Value(current["ref_id"]),
-			Label:     cleanLabel(textValue(current["label"])),
-			Usage:     strings.TrimSpace(textValue(current["usage"])),
-			Trigger:   normalizeTrigger(textValue(current["ref_trigger"])),
-			VersionID: uint64Value(current["ref_version_id"]),
+			Type:       strings.ToLower(strings.TrimSpace(textValue(current["type"]))),
+			Text:       rawText(current["text"]),
+			RefType:    normalizeType(textValue(current["ref_type"])),
+			RefID:      uint64Value(current["ref_id"]),
+			Label:      cleanLabel(textValue(current["label"])),
+			Usage:      strings.TrimSpace(textValue(current["usage"])),
+			Trigger:    normalizeTrigger(textValue(current["ref_trigger"])),
+			VersionID:  uint64Value(current["ref_version_id"]),
+			MediaURL:   strings.TrimSpace(textValue(current["ref_media_url"])),
+			MediaIndex: intValue(current["ref_media_index"]),
+			MediaCount: intValue(current["ref_media_count"]),
+			MediaItems: parseMediaSelectionItems(current["ref_media_items"]),
 		})
 	}
 	return Content{
@@ -234,6 +250,14 @@ func normalizeParts(parts []Part) ([]Part, []Reference, string, error) {
 		case "reference":
 			part.RefType = normalizeType(part.RefType)
 			part.Label = cleanLabel(part.Label)
+			part.MediaURL = strings.TrimSpace(part.MediaURL)
+			if part.MediaIndex < 0 {
+				part.MediaIndex = 0
+			}
+			if part.MediaCount < 0 {
+				part.MediaCount = 0
+			}
+			part.MediaItems = normalizeMediaSelectionItems(part.MediaItems)
 			if part.RefType == "" || part.RefID == 0 {
 				return nil, nil, "", fmt.Errorf("引用内容不完整")
 			}
@@ -247,7 +271,16 @@ func normalizeParts(parts []Part) ([]Part, []Reference, string, error) {
 			}
 			result = append(result, part)
 			text.WriteString(part.Trigger + part.Label)
-			key := fmt.Sprintf("%s:%d:%d:%s", part.RefType, part.RefID, part.VersionID, part.Usage)
+			key := fmt.Sprintf(
+				"%s:%d:%d:%s:%s:%d:%s",
+				part.RefType,
+				part.RefID,
+				part.VersionID,
+				part.Usage,
+				part.MediaURL,
+				part.MediaIndex,
+				mediaSelectionItemsKey(part.MediaItems),
+			)
 			if _, exists := seen[key]; exists {
 				continue
 			}
@@ -255,10 +288,54 @@ func normalizeParts(parts []Part) ([]Part, []Reference, string, error) {
 				return nil, nil, "", fmt.Errorf("一次最多引用 %d 项内容", maxReferences)
 			}
 			seen[key] = struct{}{}
-			references = append(references, Reference{Type: part.RefType, ID: part.RefID, Label: part.Label, Usage: part.Usage, Trigger: part.Trigger, VersionID: part.VersionID})
+			references = append(references, Reference{Type: part.RefType, ID: part.RefID, Label: part.Label, Usage: part.Usage, Trigger: part.Trigger, VersionID: part.VersionID, MediaURL: part.MediaURL, MediaIndex: part.MediaIndex, MediaCount: part.MediaCount, MediaItems: part.MediaItems})
 		}
 	}
 	return result, references, strings.TrimSpace(text.String()), nil
+}
+
+func parseMediaSelectionItems(value any) []MediaSelectionItem {
+	items, _ := value.([]any)
+	result := make([]MediaSelectionItem, 0, len(items))
+	for _, raw := range items {
+		row, _ := raw.(map[string]any)
+		result = append(result, MediaSelectionItem{
+			URL:   strings.TrimSpace(textValue(row["url"])),
+			Index: intValue(row["index"]),
+			Usage: strings.TrimSpace(textValue(row["usage"])),
+		})
+	}
+	return normalizeMediaSelectionItems(result)
+}
+
+func normalizeMediaSelectionItems(items []MediaSelectionItem) []MediaSelectionItem {
+	result := make([]MediaSelectionItem, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		item.URL = strings.TrimSpace(item.URL)
+		item.Usage = strings.TrimSpace(item.Usage)
+		if item.Index < 0 {
+			item.Index = 0
+		}
+		if item.URL == "" && item.Index == 0 {
+			continue
+		}
+		key := fmt.Sprintf("%d:%s", item.Index, item.URL)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, item)
+	}
+	return result
+}
+
+func mediaSelectionItemsKey(items []MediaSelectionItem) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, fmt.Sprintf("%d:%s:%s", item.Index, item.URL, item.Usage))
+	}
+	return strings.Join(parts, "\x1e")
 }
 
 func appendTextPart(parts []Part, text string) []Part {

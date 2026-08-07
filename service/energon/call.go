@@ -19,6 +19,7 @@ func (s GatewayService) callNormalizeTarget(
 	req *botprotocol.ShemicRequest,
 	selected selectedTarget,
 ) (callResult, error) {
+	req = withoutImageSequenceMode(req)
 	req = withServiceOutputLimit(req, selected.Service)
 	if isLocalProvider(selected.Provider) {
 		return s.callLocalTarget(ctx, req, selected, false)
@@ -171,6 +172,7 @@ func (s GatewayService) callStreamTarget(
 	req *botprotocol.ShemicRequest,
 	selected selectedTarget,
 ) (callResult, error) {
+	req = withoutImageSequenceMode(req)
 	req = withServiceOutputLimit(req, selected.Service)
 	if isLocalProvider(selected.Provider) {
 		return s.callLocalTarget(ctx, req, selected, true)

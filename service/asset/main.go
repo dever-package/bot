@@ -819,6 +819,10 @@ func collectContentMediaURLs(value any, kind string, depth int, result *[]string
 	switch current := value.(type) {
 	case string:
 		current = strings.TrimSpace(current)
+		if decoded, ok := decodeEmbeddedMediaValue(current); ok {
+			collectContentMediaURLs(decoded, kind, depth+1, result, seen)
+			return
+		}
 		if !isURL(current) {
 			return
 		}
@@ -839,10 +843,24 @@ func collectContentMediaURLs(value any, kind string, depth int, result *[]string
 		for _, key := range mediaContentKeys(kind) {
 			collectContentMediaURLs(current[key], kind, depth+1, result, seen)
 		}
-		for _, key := range []string{"output", "result", "data", "content", "media_files", "attrs"} {
+		for _, key := range []string{"output", "result", "data", "content", "media_files", "attrs", "text"} {
 			collectContentMediaURLs(current[key], kind, depth+1, result, seen)
 		}
 	}
+}
+
+func decodeEmbeddedMediaValue(value string) (any, bool) {
+	if value == "" || (!strings.HasPrefix(value, "{") && !strings.HasPrefix(value, "[") && !strings.HasPrefix(value, `"`)) {
+		return nil, false
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
+		return nil, false
+	}
+	if text, ok := decoded.(string); ok && strings.TrimSpace(text) == value {
+		return nil, false
+	}
+	return decoded, true
 }
 
 func mediaContentKeys(kind string) []string {

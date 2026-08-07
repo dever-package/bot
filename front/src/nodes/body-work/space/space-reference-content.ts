@@ -1,4 +1,7 @@
-import type { CanvasReferenceContent } from "./types";
+import type {
+  CanvasReferenceContent,
+  CanvasReferenceMediaItem,
+} from "./types";
 
 export type CanvasReferenceTarget = {
   refType: "asset";
@@ -9,6 +12,10 @@ export type CanvasReferenceTarget = {
   versionId?: number;
   origin?: string;
   originID?: string;
+  mediaURL?: string;
+  mediaIndex?: number;
+  mediaCount?: number;
+  mediaItems?: CanvasReferenceMediaItem[];
 };
 
 type CanvasReferenceMatch = CanvasReferenceTarget & {
@@ -49,6 +56,10 @@ export function canvasReferenceContentFromText(
       ref_version_id: match.target.versionId,
       ref_origin: match.target.origin,
       ref_origin_id: match.target.originID,
+      ref_media_url: match.target.mediaURL,
+      ref_media_index: match.target.mediaIndex,
+      ref_media_count: match.target.mediaCount,
+      ref_media_items: match.target.mediaItems,
     });
     cursor = match.index + match.target.mention.length;
   }
@@ -136,6 +147,10 @@ export function canvasReferenceTargetsFromContent(
         versionId: part.ref_version_id,
         origin: part.ref_origin,
         originID: part.ref_origin_id,
+        mediaURL: part.ref_media_url,
+        mediaIndex: part.ref_media_index,
+        mediaCount: part.ref_media_count,
+        mediaItems: part.ref_media_items,
       }),
     );
 }
@@ -164,10 +179,10 @@ export function reconcileConnectedCanvasReferences(
     targets.filter(
       (target) => target.origin === "edge" && Boolean(target.originID),
     ),
-    (target) => String(target.originID || ""),
+    connectedCanvasReferenceKey,
   );
-  const targetByOriginID = new Map(
-    connectedTargets.map((target) => [String(target.originID), target]),
+  const targetByConnection = new Map(
+    connectedTargets.map((target) => [connectedCanvasReferenceKey(target), target]),
   );
   const sourceParts =
     content?.version === 1
@@ -176,7 +191,7 @@ export function reconcileConnectedCanvasReferences(
         ? ([{ type: "text", text: value }] as CanvasReferenceContent["parts"])
         : [];
   const parts: CanvasReferenceContent["parts"] = [];
-  const retainedOriginIDs = new Set<string>();
+  const retainedConnections = new Set<string>();
   let removedConnectedReference = false;
 
   for (const sourcePart of sourceParts) {
@@ -185,13 +200,23 @@ export function reconcileConnectedCanvasReferences(
       sourcePart.ref_origin === "edge" &&
       sourcePart.ref_origin_id
     ) {
-      const target = targetByOriginID.get(sourcePart.ref_origin_id);
+      const connectionKey = connectedCanvasReferenceKey({
+        refId: sourcePart.ref_id,
+        originID: sourcePart.ref_origin_id,
+      });
+      const target = targetByConnection.get(connectionKey);
       if (!target) {
         removedConnectedReference = true;
         continue;
       }
-      appendReferenceTarget(parts, target);
-      retainedOriginIDs.add(sourcePart.ref_origin_id);
+      appendReferenceTarget(parts, {
+        ...target,
+        mediaURL: sourcePart.ref_media_url,
+        mediaIndex: sourcePart.ref_media_index,
+        mediaCount: sourcePart.ref_media_count,
+        mediaItems: sourcePart.ref_media_items,
+      });
+      retainedConnections.add(connectionKey);
       removedConnectedReference = false;
       continue;
     }
@@ -214,7 +239,7 @@ export function reconcileConnectedCanvasReferences(
   }
 
   const missingTargets = connectedTargets.filter(
-    (target) => !retainedOriginIDs.has(String(target.originID)),
+    (target) => !retainedConnections.has(connectedCanvasReferenceKey(target)),
   );
   if (missingTargets.length > 0) {
     const previous = parts[parts.length - 1];
@@ -365,6 +390,12 @@ function canvasReferenceTargetKey(target: CanvasReferenceTarget) {
     : `${target.refType}:${target.refId}`;
 }
 
+function connectedCanvasReferenceKey(
+  target: Pick<CanvasReferenceTarget, "refId" | "originID">,
+) {
+  return `${String(target.originID || "")}:${Number(target.refId || 0)}`;
+}
+
 function appendReferenceTarget(
   parts: CanvasReferenceContent["parts"],
   target: CanvasReferenceTarget,
@@ -379,6 +410,10 @@ function appendReferenceTarget(
     ref_version_id: target.versionId,
     ref_origin: target.origin,
     ref_origin_id: target.originID,
+    ref_media_url: target.mediaURL,
+    ref_media_index: target.mediaIndex,
+    ref_media_count: target.mediaCount,
+    ref_media_items: target.mediaItems,
   });
 }
 

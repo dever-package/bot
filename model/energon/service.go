@@ -49,6 +49,7 @@ const (
 	serviceDoubaoImage5ID           uint64 = 21
 	serviceDoubaoGLMID              uint64 = 22
 	serviceRunningHubVideoID        uint64 = 23
+	serviceRunningHubMiniMaxH3ID    uint64 = 24
 
 	ServiceDoubaoVideoID     = serviceDoubaoVideoID
 	ServiceDoubaoVideoFastID = serviceDoubaoVideoFastID
@@ -220,6 +221,16 @@ var (
 			"provider_id": providerRunningHubAPIID,
 			"account_id":  0,
 			"name":        "可灵图生视频2.6-pro",
+			"type":        "video",
+			"path":        "",
+			"sort":        100,
+			"status":      1,
+		},
+		{
+			"id":          serviceRunningHubMiniMaxH3ID,
+			"provider_id": providerRunningHubAPIID,
+			"account_id":  0,
+			"name":        "MiniMax-H3",
 			"type":        "video",
 			"path":        "",
 			"sort":        100,

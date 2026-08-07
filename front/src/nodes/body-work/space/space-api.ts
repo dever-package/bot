@@ -12,7 +12,12 @@ import {
   successfulResponseData,
   successfulResponseValue,
 } from "../shared/api-response";
-import type { StoryboardProductionPlan } from "./space-storyboard";
+import {
+  parseStoryboardShotGeneration,
+  type StoryboardDocument,
+  type StoryboardProductionPlan,
+  type StoryboardShotGeneration,
+} from "./space-storyboard";
 import type {
   AssetVersion,
   AssetVersionPage,
@@ -248,6 +253,19 @@ export async function fetchSpaceRunStatus(input: {
   return successfulResponseValue(result, "读取流程状态失败");
 }
 
+export async function stopSpaceCanvasRun(input: {
+  projectId: number;
+  runId?: number;
+  requestId?: string;
+}) {
+  const result = await request(joinSiteApi("run/stop"), "post", {
+    project_id: input.projectId,
+    run_id: input.runId || 0,
+    request_id: input.requestId || "",
+  });
+  return successfulResponseData(result, "停止画布运行失败");
+}
+
 export async function submitSpaceInteraction(input: {
   projectId: number;
   runId: number;
@@ -355,6 +373,58 @@ export async function createSpaceStoryboardRevision(input: {
     "创建分镜修订稿失败",
     "创建分镜修订稿结果为空",
   );
+}
+
+export async function generateSpaceStoryboardShot(input: {
+  projectId: number;
+  assetId: number;
+  versionId: number;
+  flowId: number;
+  assetCateId: number;
+  requestId: string;
+  nodeKey: string;
+  nodeName: string;
+  powerId: number;
+  powerKey: string;
+  sourceTargetId: number;
+  params: Record<string, unknown>;
+  storyboard: StoryboardDocument;
+  shotId: string;
+  instruction: string;
+}): Promise<StoryboardShotGeneration> {
+  const shotIndex = input.storyboard.shots.findIndex(
+    (shot) => shot.id === input.shotId,
+  );
+  if (shotIndex < 0) {
+    throw new Error("目标镜头不存在");
+  }
+  const result = await request(
+    joinSiteApi("project/generate_storyboard_shot"),
+    "post",
+    {
+      project_id: input.projectId,
+      asset_id: input.assetId,
+      version_id: input.versionId,
+      flow_id: input.flowId,
+      asset_cate_id: input.assetCateId,
+      request_id: input.requestId,
+      node_key: input.nodeKey,
+      node_name: input.nodeName,
+      power_id: input.powerId,
+      power_key: input.powerKey,
+      source_target_id: input.sourceTargetId,
+      params: input.params,
+      storyboard: input.storyboard,
+      shot_id: input.shotId,
+      instruction: input.instruction,
+    },
+  );
+  const data = successfulResponseData(result, "生成镜头失败");
+  const generation = parseStoryboardShotGeneration(data, shotIndex);
+  if (!generation || generation.shot.id !== input.shotId) {
+    throw new Error("生成镜头结果格式无效");
+  }
+  return generation;
 }
 
 export async function fetchSpaceAssetDetail(input: {

@@ -1,11 +1,6 @@
-import { lazy, Suspense, useCallback, useState } from "react";
+import { useCallback, useState } from "react";
 import { CanvasStartupLoading } from "./space-loading";
-
-const WorkSpacePage = lazy(() =>
-  import("./space-page").then((module) => ({
-    default: module.WorkSpacePage,
-  })),
-);
+import { WorkSpacePage } from "./space-page";
 
 export function WorkSpaceEntry() {
   const [initialLoading, setInitialLoading] = useState(true);
@@ -15,9 +10,7 @@ export function WorkSpaceEntry() {
 
   return (
     <>
-      <Suspense fallback={null}>
-        <WorkSpacePage onInitialLoadComplete={handleInitialLoadComplete} />
-      </Suspense>
+      <WorkSpacePage onInitialLoadComplete={handleInitialLoadComplete} />
       {initialLoading ? <CanvasStartupLoading /> : null}
     </>
   );

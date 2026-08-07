@@ -7,6 +7,9 @@ import (
 const (
 	SetPromptOwnerKey       = "prompt_owner"
 	PromptOwnerAgentRuntime = "agent_runtime"
+	OptionImageSequenceMode = "image_sequence_mode"
+	ImageSequenceModeAuto   = "auto"
+	ImageSequenceModeSingle = "single"
 )
 
 type RequestParts struct {

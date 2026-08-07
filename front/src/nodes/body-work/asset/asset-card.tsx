@@ -13,6 +13,7 @@ import {
   type AssetSourceLabels,
 } from "./asset-contract";
 import { BodyWorkTooltip } from "../shared/body-work-tooltip";
+import { assetMediaCount } from "./asset-content";
 import type { AssetRecord, AssetView } from "./asset-types";
 
 export function AssetCard({
@@ -44,6 +45,9 @@ export function AssetCard({
 }) {
   const inTrash = view === "trash";
   const collection = asset.kind === "collection";
+  const mediaCount = collection
+    ? 0
+    : assetMediaCount(asset.version?.content, asset.kind);
   const selectsAsset = selectable && !collection && Boolean(onSelect);
   const primaryDisabled = selectsAsset && (busy || used);
   const primaryActionLabel = selectsAsset
@@ -79,6 +83,9 @@ export function AssetCard({
       <div className="wb-asset-card-main">
         <div className="wb-asset-card-preview">
           {preview}
+          {mediaCount > 1 ? (
+            <span className="wb-asset-media-count">{mediaCount} 项</span>
+          ) : null}
           {asset.kind !== "audio" ? (
             <button
               type="button"

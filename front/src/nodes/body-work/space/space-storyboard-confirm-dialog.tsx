@@ -27,28 +27,25 @@ type OutputTargetOption = {
   value: StoryboardOutputTarget;
   title: string;
   description: string;
-  recommended?: boolean;
 };
 
-const PRIMARY_OUTPUT_TARGETS: OutputTargetOption[] = [
-  {
-    value: "final_video",
-    title: "生成连续视频",
-    description: "自动创建参考图、逐镜视频和合成流程，适合直接完成整条视频。",
-    recommended: true,
-  },
+const OUTPUT_TARGETS: OutputTargetOption[] = [
   {
     value: "shot_images",
-    title: "只生成镜头参考图",
+    title: "生成参考图",
     description: "生成素材设定和逐镜参考图，之后可自行连线继续制作。",
   },
+  {
+    value: "shot_videos",
+    title: "生成镜头视频",
+    description: "生成参考图、各镜头视频和所选附加内容，不创建最终合成。",
+  },
+  {
+    value: "final_video",
+    title: "完成视频",
+    description: "生成参考图、各镜头视频和所选附加内容，并完成视频合成。",
+  },
 ];
-
-const SHOT_VIDEO_TARGET: OutputTargetOption = {
-  value: "shot_videos",
-  title: "只生成镜头视频",
-  description: "生成各个镜头视频，但不创建最终合成。",
-};
 
 export function StoryboardConfirmDialog({
   storyboard,
@@ -171,7 +168,7 @@ export function StoryboardConfirmDialog({
           <fieldset className="ws-storyboard-confirm-section">
             <legend>产出目标</legend>
             <div className="ws-storyboard-output-options">
-              {PRIMARY_OUTPUT_TARGETS.map((option) => (
+              {OUTPUT_TARGETS.map((option) => (
                 <label
                   key={option.value}
                   className={
@@ -192,10 +189,7 @@ export function StoryboardConfirmDialog({
                     }
                   />
                   <span>
-                    <strong>
-                      {option.title}
-                      {option.recommended ? <em>推荐</em> : null}
-                    </strong>
+                    <strong>{option.title}</strong>
                     <small>{option.description}</small>
                   </span>
                   {plan.output_target === option.value ? (
@@ -206,88 +200,52 @@ export function StoryboardConfirmDialog({
             </div>
           </fieldset>
 
-          <details className="ws-storyboard-confirm-advanced">
-            <summary>高级设置</summary>
-            <div>
-              <label
-                className={`ws-storyboard-advanced-target${
-                  plan.output_target === SHOT_VIDEO_TARGET.value
-                    ? " is-selected"
-                    : ""
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="storyboard-output-target"
-                  value={SHOT_VIDEO_TARGET.value}
-                  checked={plan.output_target === SHOT_VIDEO_TARGET.value}
-                  disabled={submitting}
-                  onChange={() =>
-                    setPlan((current) => ({
-                      ...current,
-                      output_target: SHOT_VIDEO_TARGET.value,
-                    }))
-                  }
-                />
-                <span>
-                  <strong>{SHOT_VIDEO_TARGET.title}</strong>
-                  <small>{SHOT_VIDEO_TARGET.description}</small>
-                </span>
-                {plan.output_target === SHOT_VIDEO_TARGET.value ? (
-                  <Check size={16} aria-hidden="true" />
-                ) : null}
-              </label>
-
-              {includesShotVideos ? (
-                <fieldset className="ws-storyboard-confirm-additions">
-                  <legend>附加内容</legend>
-                  <ProductionSwitch
-                    title="配音"
-                    description={
-                      speechCount > 0
-                        ? `按脚本中的 ${speechCount} 条对白或旁白创建配音。`
-                        : "当前脚本没有对白或旁白。"
-                    }
-                    checked={speechCount > 0 && plan.voice_mode === "auto"}
-                    disabled={submitting || speechCount === 0}
-                    onChange={(checked) => updateMode("voice_mode", checked)}
-                  />
-                  <ProductionSwitch
-                    title="字幕"
-                    description={
-                      subtitleCount > 0
-                        ? `按脚本中的 ${subtitleCount} 条字幕内容创建字幕组。`
-                        : "当前脚本没有可用字幕内容。"
-                    }
-                    checked={
-                      subtitleCount > 0 && plan.subtitle_mode === "auto"
-                    }
-                    disabled={submitting || subtitleCount === 0}
-                    onChange={(checked) => updateMode("subtitle_mode", checked)}
-                  />
-                  <ProductionSwitch
-                    title="口型同步"
-                    description={
-                      hasVisibleDialogue
-                        ? "仅对出镜对白创建口型同步，默认关闭。"
-                        : "当前脚本没有需要同步口型的出镜对白。"
-                    }
-                    checked={
-                      hasVisibleDialogue &&
-                      plan.voice_mode === "auto" &&
-                      plan.lip_sync_mode === "auto"
-                    }
-                    disabled={
-                      submitting ||
-                      !hasVisibleDialogue ||
-                      plan.voice_mode !== "auto"
-                    }
-                    onChange={(checked) => updateMode("lip_sync_mode", checked)}
-                  />
-                </fieldset>
-              ) : null}
-            </div>
-          </details>
+          {includesShotVideos ? (
+            <fieldset className="ws-storyboard-confirm-section">
+              <legend>附加内容</legend>
+              <ProductionSwitch
+                title="配音"
+                description={
+                  speechCount > 0
+                    ? `按脚本中的 ${speechCount} 条对白或旁白创建配音。`
+                    : "当前脚本没有对白或旁白。"
+                }
+                checked={speechCount > 0 && plan.voice_mode === "auto"}
+                disabled={submitting || speechCount === 0}
+                onChange={(checked) => updateMode("voice_mode", checked)}
+              />
+              <ProductionSwitch
+                title="字幕"
+                description={
+                  subtitleCount > 0
+                    ? `按脚本中的 ${subtitleCount} 条字幕内容创建字幕组。`
+                    : "当前脚本没有可用字幕内容。"
+                }
+                checked={subtitleCount > 0 && plan.subtitle_mode === "auto"}
+                disabled={submitting || subtitleCount === 0}
+                onChange={(checked) => updateMode("subtitle_mode", checked)}
+              />
+              <ProductionSwitch
+                title="口型同步"
+                description={
+                  hasVisibleDialogue
+                    ? "仅对出镜对白创建口型同步，默认关闭。"
+                    : "当前脚本没有需要同步口型的出镜对白。"
+                }
+                checked={
+                  hasVisibleDialogue &&
+                  plan.voice_mode === "auto" &&
+                  plan.lip_sync_mode === "auto"
+                }
+                disabled={
+                  submitting ||
+                  !hasVisibleDialogue ||
+                  plan.voice_mode !== "auto"
+                }
+                onChange={(checked) => updateMode("lip_sync_mode", checked)}
+              />
+            </fieldset>
+          ) : null}
 
           {validationIssues.length ? (
             <StoryboardValidationPanel
@@ -434,5 +392,5 @@ function confirmationProductionPlan(value: unknown): StoryboardProductionPlan {
 function confirmActionLabel(target: StoryboardOutputTarget) {
   if (target === "shot_images") return "创建参考图";
   if (target === "shot_videos") return "创建镜头视频";
-  return "创建连续视频";
+  return "完成视频";
 }

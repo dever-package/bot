@@ -2,6 +2,7 @@ import {
   asPlainRecord as recordValue,
   finiteNumberOrZero as numberValue,
 } from "../shared/structured-json";
+import type { CanvasReferenceMediaItem } from "./types";
 
 export const VIDEO_COMPOSE_TRANSITION_GROUPS = [
   {
@@ -81,6 +82,9 @@ export type VideoComposeAssetReference = {
   assetId: number;
   versionId: number;
   label: string;
+  mediaIndex?: number;
+  mediaUrl?: string;
+  mediaItems?: CanvasReferenceMediaItem[];
 };
 
 export type VideoComposeAudioFit = "trim" | "strict";
@@ -121,6 +125,7 @@ export type VideoComposeSubtitleTrack = {
 export type VideoComposeClip = {
   id: string;
   title: string;
+  sourceEdgeId?: string;
   visualVideo?: VideoComposeAssetReference;
   originalAudioSource?: VideoComposeAssetReference;
   duration: number;
@@ -223,6 +228,19 @@ export function videoComposeReferenceKey(reference?: VideoComposeAssetReference)
   return reference ? `${reference.assetId}:${reference.versionId}` : "";
 }
 
+export function videoComposeMediaReferenceKey(
+  reference?: VideoComposeAssetReference,
+) {
+  if (!reference) {
+    return "";
+  }
+  return [
+    videoComposeReferenceKey(reference),
+    Number(reference.mediaIndex || 0),
+    reference.mediaUrl || "",
+  ].join(":");
+}
+
 function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
   const row = recordValue(value);
   const id = stringValue(row.id);
@@ -257,9 +275,11 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
     storyboardTransition,
   );
   const transitionType = normalizeTransitionType(transition.type);
+  const sourceEdgeId = stringValue(row.sourceEdgeId ?? row.source_edge_id);
   return {
     id,
     title: stringValue(row.title) || visualVideo?.label || "镜头",
+    ...(sourceEdgeId ? { sourceEdgeId } : {}),
     ...(visualVideo ? { visualVideo } : {}),
     ...(originalAudioSource ? { originalAudioSource } : {}),
     duration: normalizeTargetDuration(row.duration),
@@ -414,11 +434,53 @@ function normalizeVideoComposeReference(
   if (!assetId || !versionId) {
     return undefined;
   }
+  const mediaItems = normalizeVideoComposeMediaItems(
+    row.mediaItems ??
+      row.media_items ??
+      row.refMediaItems ??
+      row.ref_media_items,
+  );
   return {
     assetId,
     versionId,
     label: stringValue(row.label),
+    ...(numberValue(row.mediaIndex ?? row.media_index) > 0
+      ? { mediaIndex: numberValue(row.mediaIndex ?? row.media_index) }
+      : {}),
+    ...(stringValue(row.mediaUrl ?? row.media_url)
+      ? { mediaUrl: stringValue(row.mediaUrl ?? row.media_url) }
+      : {}),
+    ...(mediaItems.length ? { mediaItems } : {}),
   };
+}
+
+function normalizeVideoComposeMediaItems(
+  value: unknown,
+): CanvasReferenceMediaItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const result: CanvasReferenceMediaItem[] = [];
+  const seen = new Set<string>();
+  for (const valueItem of value) {
+    const item = recordValue(valueItem);
+    const url = stringValue(item.url);
+    const index = numberValue(item.index);
+    if (!url && index <= 0) {
+      continue;
+    }
+    const key = index > 0 ? `index:${index}` : `url:${url}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push({
+      url,
+      index: index > 0 ? index : 0,
+      ...(stringValue(item.usage) ? { usage: stringValue(item.usage) } : {}),
+    });
+  }
+  return result;
 }
 
 function normalizeTransitionType(value: unknown): VideoComposeTransitionType {

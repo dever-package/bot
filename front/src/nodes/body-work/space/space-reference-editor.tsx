@@ -1,15 +1,21 @@
 import { createContext, useContext, useMemo, type ComponentType } from "react";
 import { getCompatModule } from "@dever/front-plugin";
-import type { ComposerAssetItem } from "./space-prompt-composer";
 import {
   canvasReferenceContentFromUnambiguousText,
   normalizeCanvasReferenceLabel,
 } from "./space-reference-content";
-import type { CanvasReferenceContent } from "./types";
+import { canvasPrimaryMediaURLs } from "./space-media-references";
+import type {
+  CanvasReferenceContent,
+  CanvasReferenceMediaItem,
+  ComposerAssetItem,
+} from "./types";
 import type { WorkbenchReferenceProvider } from "../asset/asset-reference-provider";
 
 type ReferenceScope = "current" | "history";
 type ReferenceType = "asset";
+
+const CANVAS_REFERENCE_PICKER_SCOPES: ReferenceScope[] = ["current"];
 
 type ReferenceOption = {
   key: string;
@@ -27,6 +33,10 @@ type ReferenceOption = {
   usage?: string;
   origin?: string;
   originID?: string;
+  mediaURL?: string;
+  mediaIndex?: number;
+  mediaCount?: number;
+  mediaItems?: CanvasReferenceMediaItem[];
 };
 
 export type CanvasReferencePickerRequest = {
@@ -58,6 +68,7 @@ type ReferencePreview = {
     kind: string;
     label: string;
     url: string;
+    index?: number;
   }>;
   content?: unknown;
 };
@@ -68,6 +79,8 @@ export type CanvasReferenceUsageOption = {
   acceptedKinds?: string[];
   maxFiles?: number;
 };
+
+const EMPTY_CANVAS_REFERENCE_USAGE_OPTIONS: CanvasReferenceUsageOption[] = [];
 
 type ReferenceEditorProps = {
   value: string;
@@ -87,6 +100,8 @@ type ReferenceEditorProps = {
   loadPreview: (request: ReferencePreviewRequest) => Promise<ReferencePreview>;
   providers?: WorkbenchReferenceProvider[];
   usageOptions?: CanvasReferenceUsageOption[];
+  showMediaAliases?: boolean;
+  allowMultiMediaSelection?: boolean;
   pickerRequest?: CanvasReferencePickerRequest;
   onPickerRequestConsumed?: (
     requestID: CanvasReferencePickerRequest["id"],
@@ -110,6 +125,7 @@ const referenceComposerModule = getCompatModule(
     content?: CanvasReferenceContent;
     fallback?: string;
     references?: ReferenceOption[];
+    showMediaAliases?: boolean;
     loadPreview?: (
       request: ReferencePreviewRequest,
     ) => Promise<ReferencePreview>;
@@ -133,7 +149,7 @@ export function CanvasReferenceEditor({
   autoFocus,
   className,
   layerZIndex,
-  usageOptions = [],
+  usageOptions = EMPTY_CANVAS_REFERENCE_USAGE_OPTIONS,
   pickerRequest,
   onPickerRequestConsumed,
   onReferenceDelete,
@@ -194,7 +210,7 @@ export function CanvasReferenceEditorWithAdapter({
   autoFocus,
   className,
   layerZIndex,
-  usageOptions = [],
+  usageOptions = EMPTY_CANVAS_REFERENCE_USAGE_OPTIONS,
   pickerRequest,
   onPickerRequestConsumed,
   onReferenceDelete,
@@ -225,19 +241,30 @@ export function CanvasReferenceEditorWithAdapter({
     CanvasAssetReferenceProviderContext,
   );
   const activeAssetProvider = assetReferenceProvider || contextualAssetProvider;
-  const resolvedContent =
-    content ||
-    canvasReferenceContentFromUnambiguousText(value, adapter.options);
-  const usageSignature = usageOptions
-    .map((option) =>
-      [
-        option.key,
-        option.label,
-        option.maxFiles || 0,
-        ...(option.acceptedKinds || []),
-      ].join(":"),
-    )
-    .join("|");
+  const activeProviders = useMemo(
+    () => (activeAssetProvider ? [activeAssetProvider] : undefined),
+    [activeAssetProvider],
+  );
+  const resolvedContent = useMemo(
+    () =>
+      content ||
+      canvasReferenceContentFromUnambiguousText(value, adapter.options),
+    [adapter.options, content, value],
+  );
+  const usageSignature = useMemo(
+    () =>
+      usageOptions
+        .map((option) =>
+          [
+            option.key,
+            option.label,
+            option.maxFiles || 0,
+            ...(option.acceptedKinds || []),
+          ].join(":"),
+        )
+        .join("|"),
+    [usageOptions],
+  );
   if (!ReferenceEditor) {
     return (
       <textarea
@@ -272,12 +299,14 @@ export function CanvasReferenceEditorWithAdapter({
       autoFocus={autoFocus}
       className={className}
       layerZIndex={layerZIndex}
-      pickerScopes={["current"]}
+      pickerScopes={CANVAS_REFERENCE_PICKER_SCOPES}
       pickerSearchPlaceholder="搜索当前画布的内容或素材"
       loadReferences={adapter.loadReferences}
       loadPreview={adapter.loadPreview}
-      providers={activeAssetProvider ? [activeAssetProvider] : undefined}
+      providers={activeProviders}
       usageOptions={usageOptions}
+      showMediaAliases
+      allowMultiMediaSelection
       pickerRequest={pickerRequest}
       onPickerRequestConsumed={onPickerRequestConsumed}
       onReferenceDelete={onReferenceDelete}
@@ -316,6 +345,7 @@ export function CanvasReferenceTextWithAdapter({
         content={resolvedContent}
         fallback={value || placeholder}
         references={adapter.options}
+        showMediaAliases
         loadPreview={(request) =>
           request.refType === "asset" && assetReferenceProvider?.loadPreview
             ? assetReferenceProvider.loadPreview(request)
@@ -420,6 +450,7 @@ function referenceOption(
   item: ComposerAssetItem,
   refId: number,
 ): ReferenceOption {
+  const media = referenceMedia(item);
   return {
     key: `canvas:${item.source}:${item.id}`,
     refType: "asset",
@@ -429,9 +460,10 @@ function referenceOption(
     description: referenceDescription(item),
     preview: {
       text: referenceDescription(item),
-      kind: item.kind,
-      url: primaryPreviewURL(item),
+      kind: media[0]?.kind || item.kind,
+      url: media[0]?.url || "",
     },
+    mediaCount: media.length,
   };
 }
 
@@ -464,28 +496,93 @@ function referenceTargetKey(refType: ReferenceType, refId: number) {
 }
 
 function referenceMedia(item: ComposerAssetItem) {
-  const entries = [
-    { kind: "image", url: item.preview.imageUrl },
-    { kind: "video", url: item.preview.videoUrl },
-    { kind: "audio", url: item.preview.audioUrl },
-    { kind: "file", url: item.preview.fileUrl },
-  ];
-  return entries
-    .filter((entry) => entry.url)
-    .map((entry) => ({
-      ...entry,
-      label: referenceTitle(item.title),
-    }));
+  const declaredKind = referenceMediaKind(item.kind);
+  const outputEntries = referenceOutputMedia(item.output, declaredKind);
+  const fallbackEntries = referencePreviewMedia(item);
+  const entries = outputEntries.length > 0 ? outputEntries : fallbackEntries;
+
+  const title = referenceTitle(item.title);
+  const seen = new Set<string>();
+  const uniqueEntries = entries.flatMap((entry) => {
+    const url = entry.url.trim();
+    const key = `${entry.kind}:${url}`;
+    if (!url || seen.has(key)) {
+      return [];
+    }
+    seen.add(key);
+    return [{ ...entry, url }];
+  });
+  const totals = uniqueEntries.reduce((counts, entry) => {
+    counts.set(entry.kind, (counts.get(entry.kind) || 0) + 1);
+    return counts;
+  }, new Map<string, number>());
+  const indexes = new Map<string, number>();
+  return uniqueEntries.map((entry) => {
+    const index = (indexes.get(entry.kind) || 0) + 1;
+    indexes.set(entry.kind, index);
+    return {
+      kind: entry.kind,
+      url: entry.url,
+      index,
+      label:
+        (totals.get(entry.kind) || 0) > 1
+          ? `${title} · ${referenceMediaKindLabel(entry.kind)} ${index}`
+          : title,
+    };
+  });
 }
 
-function primaryPreviewURL(item: ComposerAssetItem) {
-  return (
-    item.preview.imageUrl ||
-    item.preview.videoUrl ||
-    item.preview.audioUrl ||
-    item.preview.fileUrl ||
-    ""
+function referenceOutputMedia(
+  output: unknown,
+  declaredKind: ReturnType<typeof referenceMediaKind>,
+) {
+  const mediaKinds = ["image", "video", "audio"] as const;
+  const entries = mediaKinds.flatMap((kind) =>
+    canvasPrimaryMediaURLs(output, kind).map((url) => ({ kind, url })),
   );
+  if (!declaredKind || declaredKind === "file") {
+    return entries;
+  }
+  const declaredEntries = entries.filter(
+    (entry) => entry.kind === declaredKind,
+  );
+  return declaredEntries.length > 0 ? declaredEntries : entries;
+}
+
+function referencePreviewMedia(item: ComposerAssetItem) {
+  const entries = [
+    { kind: "image" as const, url: item.preview.imageUrl },
+    { kind: "video" as const, url: item.preview.videoUrl },
+    { kind: "audio" as const, url: item.preview.audioUrl },
+    { kind: "file" as const, url: item.preview.fileUrl },
+  ];
+  const declaredKind = referenceMediaKind(item.kind);
+  const declaredEntries = declaredKind
+    ? entries.filter((entry) => entry.kind === declaredKind && entry.url)
+    : [];
+  return declaredEntries.length > 0
+    ? declaredEntries
+    : entries.filter((entry) => entry.url);
+}
+
+function referenceMediaKind(value: string) {
+  const kind = String(value || "").trim().toLowerCase();
+  return ["image", "video", "audio", "file"].includes(kind)
+    ? (kind as "image" | "video" | "audio" | "file")
+    : "";
+}
+
+function referenceMediaKindLabel(kind: string) {
+  switch (kind) {
+    case "image":
+      return "图片";
+    case "video":
+      return "视频";
+    case "audio":
+      return "音频";
+    default:
+      return "文件";
+  }
 }
 
 function referenceDescription(item: ComposerAssetItem) {

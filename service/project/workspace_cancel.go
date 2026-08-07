@@ -14,11 +14,48 @@ func (s WorkspaceService) StopCanvasRun(ctx context.Context, run *teammodel.Run)
 	if run == nil || run.ProjectID == 0 || run.ID == 0 {
 		return nil, fmt.Errorf("运行不存在")
 	}
+	current := teammodel.NewRunModel().Find(ctx, map[string]any{
+		"id":         run.ID,
+		"project_id": run.ProjectID,
+	})
+	if current == nil {
+		return nil, fmt.Errorf("运行不存在")
+	}
+	if !canvasRunStatusActive(current.Status) {
+		if current.Status == teammodel.RunStatusCanceled {
+			s.finishCanceledWorkspaceRun(ctx, current)
+		}
+		if execution := workspaceExecutionByRunID(ctx, current.ID); execution != nil {
+			return workspaceExecutionPayload(
+				ctx,
+				s.syncWorkspaceExecutionRow(ctx, execution),
+			), nil
+		}
+		return s.workspaceRunPayload(ctx, current.ProjectID, current), nil
+	}
+	run = current
 	result, err := s.project.team.StopProjectRun(ctx, run.ProjectID, run.ID, run.RequestID)
 	if err != nil {
 		return nil, err
 	}
+	if canvasRunStatus(result) != teammodel.RunStatusCanceled {
+		if execution := workspaceExecutionByRunID(ctx, run.ID); execution != nil {
+			return workspaceExecutionPayload(
+				ctx,
+				s.syncWorkspaceExecutionRow(ctx, execution),
+			), nil
+		}
+		return result, nil
+	}
 
+	s.finishCanceledWorkspaceRun(ctx, run)
+	return result, nil
+}
+
+func (s WorkspaceService) finishCanceledWorkspaceRun(ctx context.Context, run *teammodel.Run) {
+	if run == nil {
+		return
+	}
 	s.finishWorkspaceActiveNodes(ctx, run, teammodel.RunStatusCanceled, "")
 	finishWorkspaceFlowRun(ctx, workspaceFlowRunID(ctx, run.ID), teammodel.RunStatusCanceled, map[string]any{
 		"run_id":     run.ID,
@@ -26,7 +63,6 @@ func (s WorkspaceService) StopCanvasRun(ctx context.Context, run *teammodel.Run)
 		"status":     teammodel.RunStatusCanceled,
 	}, "")
 	updateWorkspaceExecutionStatus(ctx, run.ID, teammodel.RunStatusCanceled, "")
-	return result, nil
 }
 
 func (s WorkspaceService) finishWorkspaceActiveNodes(ctx context.Context, run *teammodel.Run, status string, errorText string) {
@@ -81,6 +117,7 @@ func workspaceRunCanceled(ctx context.Context, runID uint64) bool {
 	if runID == 0 {
 		return false
 	}
+	ctx = detachedWorkspaceContext(ctx)
 	run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": runID})
 	return run != nil && strings.TrimSpace(run.Status) == teammodel.RunStatusCanceled
 }

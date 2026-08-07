@@ -1,7 +1,6 @@
 import {
   Check,
   ChevronDown,
-  Download,
   Loader2,
   RotateCw,
   X,
@@ -13,6 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { ResourceDownloadButton } from "../../shared/resource-download-button";
 import { BodyWorkTooltip } from "./body-work-tooltip";
 import "./detail-dialog.css";
 
@@ -105,14 +105,11 @@ export function DetailDialogHeader({
         {actions}
         {downloadUrl ? (
           <BodyWorkTooltip label="下载内容">
-            <a
-              href={downloadUrl}
-              download
+            <ResourceDownloadButton
+              url={downloadUrl}
+              name={title}
               className="wb-detail-icon-button"
-              aria-label="下载内容"
-            >
-              <Download size={17} />
-            </a>
+            />
           </BodyWorkTooltip>
         ) : null}
         <BodyWorkTooltip label="关闭">

@@ -408,22 +408,35 @@ func (s Service) resolvePowerAssetReferences(
 			if err != nil {
 				return nil, nil, err
 			}
-			item := map[string]any{
-				"asset_id":   resolved.Asset.ID,
-				"version_id": resolved.Version.ID,
-				"name":       resolved.Asset.Name,
-				"kind":       resolved.Asset.Kind,
-				"content":    resolved.Content,
-			}
-			references = append(references, item)
-			allReferences = append(allReferences, item)
-			mediaReferences = append(mediaReferences, energoninput.MediaReferencesFromContent(
+			selection := powerMediaReferenceSelection(part)
+			resolvedMedia := energoninput.MediaReferencesFromContent(
 				"asset",
 				resolved.Asset.ID,
 				resolved.Asset.Kind,
 				resolved.Content,
 				nestedText(part, "usage"),
-			)...)
+			)
+			resolvedMedia, err = energoninput.SelectMediaReferences(
+				resolvedMedia,
+				selection,
+			)
+			if err != nil {
+				return nil, nil, fmt.Errorf("资产“%s”：%w", resolved.Asset.Name, err)
+			}
+			item := map[string]any{
+				"asset_id":   resolved.Asset.ID,
+				"version_id": resolved.Version.ID,
+				"name":       resolved.Asset.Name,
+				"kind":       resolved.Asset.Kind,
+				"content": energoninput.SelectedMediaReferenceContent(
+					resolved.Content,
+					resolvedMedia,
+					selection,
+				),
+			}
+			references = append(references, item)
+			allReferences = append(allReferences, item)
+			mediaReferences = append(mediaReferences, resolvedMedia...)
 		}
 		if len(references) == 0 {
 			continue
@@ -959,6 +972,32 @@ func nestedUint64(value any, key string) uint64 {
 		return uint64(current)
 	}
 	return 0
+}
+
+func powerMediaReferenceSelection(part map[string]any) energoninput.MediaReferenceSelection {
+	return energoninput.MediaReferenceSelection{
+		URL:   nestedText(part, "ref_media_url"),
+		Index: int(nestedUint64(part, "ref_media_index")),
+		Items: powerMediaReferenceSelectionItems(part["ref_media_items"]),
+	}
+}
+
+func powerMediaReferenceSelectionItems(value any) []energoninput.MediaReferenceSelectionItem {
+	items := make([]energoninput.MediaReferenceSelectionItem, 0)
+	for _, raw := range listValue(value) {
+		row := recordValue(raw)
+		url := nestedText(row, "url")
+		index := int(nestedUint64(row, "index"))
+		if url == "" && index <= 0 {
+			continue
+		}
+		items = append(items, energoninput.MediaReferenceSelectionItem{
+			URL:   url,
+			Index: index,
+			Usage: nestedText(row, "usage"),
+		})
+	}
+	return items
 }
 
 func nestedText(value any, key string) string {

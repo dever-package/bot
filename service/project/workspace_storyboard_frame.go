@@ -145,17 +145,18 @@ func (s WorkspaceService) preflightCanvasStoryboardFrame(
 			delete(params, "prompt")
 		}
 		if err := s.project.PreflightCanvasPower(ctx, projectID, teamservice.CanvasPowerRunRequest{
-			FlowID:          node.FlowID,
-			AssetCateID:     firstUint64(node.AssetCateID, req.AssetCateID),
-			NodeKey:         node.ID,
-			NodeName:        node.Title,
-			Kind:            node.Kind,
-			PowerID:         node.PowerID,
-			PowerKey:        node.PowerKey,
-			SourceTargetID:  node.SelectedTarget,
-			Input:           input,
-			Params:          params,
-			MediaReferences: references,
+			FlowID:            node.FlowID,
+			AssetCateID:       firstUint64(node.AssetCateID, req.AssetCateID),
+			NodeKey:           node.ID,
+			NodeName:          node.Title,
+			Kind:              node.Kind,
+			PowerID:           node.PowerID,
+			PowerKey:          node.PowerKey,
+			SourceTargetID:    node.SelectedTarget,
+			ImageSequenceMode: canvasPowerImageSequenceMode(node),
+			Input:             input,
+			Params:            params,
+			MediaReferences:   references,
 		}); err != nil {
 			return fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(node), err)
 		}

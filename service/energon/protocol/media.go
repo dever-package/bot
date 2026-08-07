@@ -79,6 +79,128 @@ func NormalizeMediaList(value any, mediaType string) []string {
 	return normalizeStringList(output[mediaOutputKey(mediaType)])
 }
 
+// ExtractPrimaryMediaURLs returns the media represented by an asset's content.
+// Preview-only fields such as thumbnails, covers and video frame snapshots are
+// deliberately excluded so callers see the same logical collection as users.
+func ExtractPrimaryMediaURLs(value any, mediaType string) []string {
+	mediaType = normalizeMediaType(mediaType)
+	if mediaType == "" {
+		return nil
+	}
+	result := make([]string, 0)
+	seen := map[string]struct{}{}
+	collectPrimaryMediaURLs(value, mediaType, 0, &result, seen)
+	return result
+}
+
+func collectPrimaryMediaURLs(
+	value any,
+	mediaType string,
+	depth int,
+	result *[]string,
+	seen map[string]struct{},
+) {
+	if value == nil || depth > 12 {
+		return
+	}
+	switch current := value.(type) {
+	case Output:
+		collectPrimaryMediaURLs(map[string]any(current), mediaType, depth, result, seen)
+	case string:
+		current = strings.TrimSpace(current)
+		if current == "" {
+			return
+		}
+		var decoded any
+		if (strings.HasPrefix(current, "{") || strings.HasPrefix(current, "[") || strings.HasPrefix(current, `"`)) &&
+			json.Unmarshal([]byte(current), &decoded) == nil {
+			collectPrimaryMediaURLs(decoded, mediaType, depth+1, result, seen)
+			return
+		}
+		if IsMediaReferenceURL(current) {
+			appendPrimaryMediaURL(current, result, seen)
+		}
+	case []string:
+		for _, item := range current {
+			collectPrimaryMediaURLs(item, mediaType, depth+1, result, seen)
+		}
+	case []any:
+		for _, item := range current {
+			collectPrimaryMediaURLs(item, mediaType, depth+1, result, seen)
+		}
+	case []map[string]any:
+		for _, item := range current {
+			collectPrimaryMediaURLs(item, mediaType, depth+1, result, seen)
+		}
+	case map[string]any:
+		explicitType := mediaTypeFromEvent(firstText(
+			asText(current["type"]),
+			asText(current["kind"]),
+			asText(current["media_type"]),
+			asText(current["mime"]),
+		), "")
+		if explicitType == "" || explicitType == mediaType {
+			for _, key := range primaryMediaDirectKeys(mediaType) {
+				collectPrimaryMediaURLs(current[key], mediaType, depth+1, result, seen)
+			}
+		}
+		for _, key := range primaryMediaCollectionKeys(mediaType) {
+			collectPrimaryMediaURLs(current[key], mediaType, depth+1, result, seen)
+		}
+		if explicitType == mediaType {
+			collectPrimaryMediaURLs(current["attrs"], mediaType, depth+1, result, seen)
+		}
+		for _, key := range []string{
+			"content", "output", "result", "data", "body", "value",
+			"json", "rich", "media_files", "mediaFiles", "text",
+		} {
+			collectPrimaryMediaURLs(current[key], mediaType, depth+1, result, seen)
+		}
+	}
+}
+
+func primaryMediaDirectKeys(mediaType string) []string {
+	switch mediaType {
+	case MediaTypeImage:
+		return []string{"src", "url", "image", "image_url", "imageUrl", "file_url", "fileUrl"}
+	case MediaTypeVideo:
+		return []string{"src", "url", "video", "video_url", "videoUrl", "file_url", "fileUrl"}
+	case MediaTypeAudio:
+		return []string{"src", "url", "audio", "audio_url", "audioUrl", "file_url", "fileUrl"}
+	case MediaTypeFile:
+		return []string{"src", "url", "file", "file_url", "fileUrl", "download", "open_url", "path"}
+	default:
+		return nil
+	}
+}
+
+func primaryMediaCollectionKeys(mediaType string) []string {
+	switch mediaType {
+	case MediaTypeImage:
+		return []string{"images", "image_urls", "imageUrls"}
+	case MediaTypeVideo:
+		return []string{"videos", "video_urls", "videoUrls"}
+	case MediaTypeAudio:
+		return []string{"audios", "audio_urls", "audioUrls"}
+	case MediaTypeFile:
+		return []string{"files", "file_urls", "fileUrls"}
+	default:
+		return nil
+	}
+}
+
+func appendPrimaryMediaURL(value string, result *[]string, seen map[string]struct{}) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	if _, exists := seen[value]; exists {
+		return
+	}
+	seen[value] = struct{}{}
+	*result = append(*result, value)
+}
+
 func MediaOutputLabel(values ...string) string {
 	for _, value := range values {
 		switch strings.ToLower(strings.TrimSpace(value)) {
@@ -99,6 +221,8 @@ func collectMediaOutput(output Output, value any, defaultType string, eventType 
 	switch current := value.(type) {
 	case nil:
 		return
+	case Output:
+		collectMediaMap(output, map[string]any(current), defaultType, eventType)
 	case string:
 		collectMediaString(output, current, defaultType, eventType)
 	case []any:
@@ -229,13 +353,14 @@ func appendTextMediaReference(output Output, value any, mediaType string) {
 		return
 	}
 	text = strings.TrimSpace(text)
-	if !isMediaReferenceURL(text) {
+	if !IsMediaReferenceURL(text) {
 		return
 	}
 	appendMediaByType(output, mediaType, []string{text})
 }
 
-func isMediaReferenceURL(value string) bool {
+// IsMediaReferenceURL reports whether value is a supported media locator.
+func IsMediaReferenceURL(value string) bool {
 	value = strings.ToLower(strings.TrimSpace(value))
 	return strings.HasPrefix(value, "http://") ||
 		strings.HasPrefix(value, "https://") ||
@@ -269,6 +394,8 @@ func appendMediaFieldValue(output Output, mediaType string, value any) {
 	switch current := value.(type) {
 	case nil:
 		return
+	case Output:
+		collectMediaOutput(output, current, mediaType, mediaType)
 	case string:
 		appendMediaFieldString(output, mediaType, current)
 	case []string:
@@ -321,6 +448,8 @@ func collectURLValues(value any) []string {
 	switch current := value.(type) {
 	case nil:
 		return nil
+	case Output:
+		return collectURLValues(map[string]any(current))
 	case map[string]any:
 		result := make([]string, 0, 1)
 		for _, key := range []string{"url", "src", "download", "open_url", "thumbnail", "path"} {

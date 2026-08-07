@@ -226,6 +226,34 @@ func (Project) PostCreateStoryboardRevision(c *server.Context) error {
 	return botapi.WriteJSON(c, data, err)
 }
 
+func (Project) PostGenerateStoryboardShot(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := projectRunner.GenerateStoryboardShot(
+		c.Context(),
+		botapi.Uint64FromBody(body, "project_id", "projectId"),
+		projectservice.GenerateStoryboardShotRequest{
+			AssetID:        botapi.Uint64FromBody(body, "asset_id", "assetId"),
+			VersionID:      botapi.Uint64FromBody(body, "version_id", "versionId"),
+			FlowID:         botapi.Uint64FromBody(body, "flow_id", "flowId"),
+			AssetCateID:    botapi.Uint64FromBody(body, "asset_cate_id", "assetCateId"),
+			RequestID:      botapi.TextFromBody(body, "request_id", "requestId"),
+			NodeKey:        botapi.TextFromBody(body, "node_key", "nodeKey"),
+			NodeName:       botapi.TextFromBody(body, "node_name", "nodeName"),
+			PowerID:        botapi.Uint64FromBody(body, "power_id", "powerId"),
+			PowerKey:       botapi.TextFromBody(body, "power_key", "powerKey"),
+			SourceTargetID: botapi.Uint64FromBody(body, "source_target_id", "sourceTargetId"),
+			Params:         botapi.MapFromBody(body, "params"),
+			Storyboard:     body["storyboard"],
+			ShotID:         botapi.TextFromBody(body, "shot_id", "shotId"),
+			Instruction:    botapi.TextFromBody(body, "instruction"),
+		},
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
 func (Project) GetCanvasConfig(c *server.Context) error {
 	data, err := projectRunner.CanvasConfig(
 		c.Context(),

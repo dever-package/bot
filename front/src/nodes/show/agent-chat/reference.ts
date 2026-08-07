@@ -32,6 +32,7 @@ export type ReferencePreviewMedia = {
   trigger?: string;
   versionId?: number;
   url: string;
+  index?: number;
 };
 
 export type ReferencePreview = {
@@ -41,6 +42,12 @@ export type ReferencePreview = {
   text: string;
   media: ReferencePreviewMedia[];
   content?: unknown;
+};
+
+export type ReferenceMediaSelectionItem = {
+  url?: string;
+  index?: number;
+  usage?: string;
 };
 
 export type ReferencePreviewRequest = {
@@ -67,6 +74,10 @@ export type ReferencePart =
       ref_version_id?: number;
       ref_origin?: string;
       ref_origin_id?: string;
+      ref_media_url?: string;
+      ref_media_index?: number;
+      ref_media_count?: number;
+      ref_media_items?: ReferenceMediaSelectionItem[];
     };
 
 export type ReferenceContent = {
@@ -128,6 +139,10 @@ export type ReferenceOption = {
   versionID?: number;
   origin?: string;
   originID?: string;
+  mediaURL?: string;
+  mediaIndex?: number;
+  mediaCount?: number;
+  mediaItems?: ReferenceMediaSelectionItem[];
 };
 
 export type ReferenceLoadRequest = {
@@ -187,6 +202,8 @@ export type ReferenceComposerProps = {
   uploadBizKey?: string;
   uploadBizName?: string;
   allowResourceLibrary?: boolean;
+  showMediaAliases?: boolean;
+  allowMultiMediaSelection?: boolean;
   onUploadedFiles?: (
     files: ReferenceUploadedFile[],
   ) => void | Promise<void>;

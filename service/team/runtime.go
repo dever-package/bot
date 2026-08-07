@@ -258,6 +258,14 @@ func (s Service) stopResolvedRun(ctx context.Context, run *teammodel.Run) (map[s
 	if run == nil {
 		return nil, fmt.Errorf("运行不存在")
 	}
+	if teamRunTerminal(run.Status) {
+		return s.resolvedRunSnapshot(ctx, run)
+	}
+	now := time.Now()
+	if !s.repo.CancelRunIfActive(ctx, run.ID, now) {
+		return s.resolvedRunSnapshot(ctx, s.repo.FindRun(ctx, run.ID))
+	}
+	run.Status = teammodel.RunStatusCanceled
 	if run.ChildRequestID != "" {
 		s.agent.StopTask(run.ChildRequestID)
 		_ = s.gateway.StopStream(ctx, run.ChildRequestID)
@@ -280,12 +288,6 @@ func (s Service) stopResolvedRun(ctx context.Context, run *teammodel.Run) (map[s
 			"finished_at": time.Now(),
 		})
 	}
-	now := time.Now()
-	s.repo.UpdateRun(ctx, run.ID, map[string]any{
-		"status":      teammodel.RunStatusCanceled,
-		"finished_at": now,
-	})
-	run.Status = teammodel.RunStatusCanceled
 	s.writeRunEvent(ctx, *run, stream.EventRunFinished, map[string]any{
 		"scope":       "run",
 		"finished_at": now.Format(time.RFC3339Nano),

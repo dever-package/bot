@@ -32,8 +32,8 @@ export function useSpacePowerCatalog({
   const scopeKey = `${space?.project.id || 0}:${space?.release.id || space?.project.release_id || 0}`;
   const scopeKeyRef = useRef(scopeKey);
   const required = useMemo(
-    () => canvasNeedsPowerCatalog(canvases),
-    [canvases],
+    () => loaded || canvasNeedsPowerCatalog(canvases),
+    [canvases, loaded],
   );
 
   useEffect(() => {

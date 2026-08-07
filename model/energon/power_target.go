@@ -61,6 +61,7 @@ var (
 		{"id": 29, "power_id": defaultStoryboardGridPowerID, "service_id": serviceDoubaoImage5ID, "sort": 1, "status": 1},
 		{"id": 30, "power_id": defaultStoryboardGridPowerID, "service_id": serviceDoubaoImageID, "sort": 2, "status": 1},
 		{"id": 31, "power_id": defaultStoryboardGridPowerID, "service_id": serviceShemicLabImageID, "sort": 3, "status": 1},
+		{"id": 32, "power_id": defaultVideoPowerID, "service_id": serviceRunningHubMiniMaxH3ID, "sort": 4, "status": 1},
 	}
 
 	powerTargetPowerRelation = orm.Relation{

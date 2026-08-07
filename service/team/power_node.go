@@ -72,7 +72,7 @@ func (s Service) runPowerNode(
 	nodeRun.ChildRequestID = requestID
 	billing := runBillingContext(run)
 	billing.RunID = run.ID
-	output, err := s.executePower(ctx, requestID, power, values, targetID, billing, func(payload map[string]any) {
+	output, err := s.executePower(ctx, requestID, power, values, targetID, "", billing, func(payload map[string]any) {
 		streamOutput := mapValue(payload["output"])
 		if len(streamOutput) == 0 {
 			return

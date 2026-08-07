@@ -4,15 +4,14 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentType,
   type ReactNode,
 } from "react";
-import { getCompatModule } from "@dever/front-plugin";
 import {
   ArrowUp,
   CheckCircle2,
   ChevronDown,
   FileText,
+  Images,
   Loader2,
   Paperclip,
 } from "lucide-react";
@@ -23,6 +22,11 @@ import {
   powerParamOptionValue,
   resolvePowerParamOption,
 } from "./space-power-param";
+import {
+  isPowerParamConditionController,
+  normalizePowerParamPreviewType,
+  PowerParamOptionDialog,
+} from "./space-power-param-runtime";
 import { PowerIcon, PowerParamIcon } from "../shared/power-icon";
 import {
   CanvasReferenceEditor,
@@ -30,6 +34,9 @@ import {
 } from "./space-reference-editor";
 import {
   connectedMediaReferenceTargets,
+  reconcileCanvasMediaUsages,
+  selectedMediaReferenceAmount,
+  type CanvasMultiImagePlan,
   type CanvasConnectedMediaReference,
   type MediaUsageOption,
 } from "./space-media-references";
@@ -48,60 +55,17 @@ import {
 import { reconcileConnectedCanvasReferences } from "./space-reference-content";
 import { SpaceTooltip } from "./space-tooltip";
 import type {
-  CanvasContentPreview,
+  CanvasMultiImageMode,
   CanvasReferenceContent,
+  ComposerAssetItem,
   PowerOption,
   PowerParam,
   PowerParamSource,
 } from "./types";
 
-export type ComposerAssetPreview = CanvasContentPreview;
-
-type ParamPreviewType = "none" | "image" | "audio" | "video";
-
 function sourceServiceLabel(source?: PowerParamSource): string {
   return source?.service_name?.trim() || source?.name?.trim() || "来源";
 }
-
-type ParamOptionDialogProps = {
-  open: boolean;
-  title: string;
-  previewType: ParamPreviewType;
-  options: NonNullable<PowerParam["options"]>;
-  value: unknown;
-  disabled?: boolean;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: (value: string) => void;
-};
-
-const streamRequestParamsModule = getCompatModule(
-  "@/components/agent/stream-request-params",
-);
-const PowerParamOptionDialog =
-  streamRequestParamsModule.PowerParamOptionDialog as ComponentType<ParamOptionDialogProps>;
-const normalizeParamPreviewType =
-  streamRequestParamsModule.normalizeParamPreviewType as (
-    value: unknown,
-  ) => ParamPreviewType;
-const isPowerParamConditionController =
-  (streamRequestParamsModule.isPowerParamConditionController as
-    | ((param: PowerParam, params: PowerParam[]) => boolean)
-    | undefined) || (() => false);
-
-export type ComposerAssetItem = {
-  id: string;
-  title: string;
-  kind: string;
-  role?: "work" | "material" | string;
-  source: "current" | "asset";
-  refType?: "asset";
-  refId?: number;
-  versionID?: number;
-  output?: unknown;
-  preview: ComposerAssetPreview;
-  asset?: unknown;
-};
-
 type PromptComposerProps = {
   value: string;
   placeholder: string;
@@ -127,16 +91,22 @@ type PromptComposerProps = {
   };
   connectedMediaReferences?: CanvasConnectedMediaReference[];
   mediaUsageOptions?: MediaUsageOption[];
+  multiImagePlan?: CanvasMultiImagePlan;
+  multiImageMode?: CanvasMultiImageMode;
   onConnectedMediaEdgeRemove?: (edgeId: string) => void;
   onChange: (value: string, content?: CanvasReferenceContent) => void;
   onParamChange?: (key: string, value: unknown) => void;
   onSourceChange?: (sourceId: number) => void;
+  onMultiImageModeChange?: (mode: CanvasMultiImageMode) => void;
   onLocalUpload?: (
     files: File[],
     param: PowerParam,
   ) => Promise<UploadPreview[]>;
   onSubmit: () => void;
 };
+
+const EMPTY_CONNECTED_MEDIA_REFERENCES: CanvasConnectedMediaReference[] = [];
+const EMPTY_MEDIA_USAGE_OPTIONS: MediaUsageOption[] = [];
 
 export type UploadPreview = {
   name: string;
@@ -167,12 +137,15 @@ export function PromptComposer({
   assetLibrary = { current: [] },
   referenceContent,
   assetReference,
-  connectedMediaReferences = [],
-  mediaUsageOptions = [],
+  connectedMediaReferences = EMPTY_CONNECTED_MEDIA_REFERENCES,
+  mediaUsageOptions = EMPTY_MEDIA_USAGE_OPTIONS,
+  multiImagePlan,
+  multiImageMode,
   onConnectedMediaEdgeRemove,
   onChange,
   onParamChange,
   onSourceChange,
+  onMultiImageModeChange,
   onLocalUpload,
   onSubmit,
 }: PromptComposerProps) {
@@ -254,40 +227,86 @@ export function PromptComposer({
     },
     [],
   );
-  const toolbarParams = params.filter(
-    (param) =>
-      isUploadPowerParam(param) ||
-      isToolbarPowerParam(param) ||
-      isPowerParamConditionController(param, params),
+  const toolbarParams = useMemo(
+    () =>
+      params.filter(
+        (param) =>
+          isUploadPowerParam(param) ||
+          isToolbarPowerParam(param) ||
+          isPowerParamConditionController(param, params),
+      ),
+    [params],
   );
-  const selectedSource = sourceOptions.find(
-    (source) =>
-      source.target_id === selectedSourceId || source.id === selectedSourceId,
+  const selectedSource = useMemo(
+    () =>
+      sourceOptions.find(
+        (source) =>
+          source.target_id === selectedSourceId ||
+          source.id === selectedSourceId,
+      ),
+    [selectedSourceId, sourceOptions],
   );
+  const enabledMultiImageOptions = useMemo(
+    () => (multiImagePlan?.options || []).filter((option) => option.enabled),
+    [multiImagePlan?.options],
+  );
+  const multiImageModeLabel = multiImagePlan?.mode
+    ? `${multiImagePlan.mode === "per_image" ? "逐图生成" : "共同参考"} · ${multiImagePlan.imageCount} 张`
+    : "";
   const referenceItems = assetLibrary.current;
-  const connectedTargets = connectedMediaReferenceTargets(
+  const resolvedReferences = useMemo(() => {
+    const connectedReferences = reconcileConnectedCanvasReferences(
+      value,
+      referenceContent,
+      connectedMediaReferenceTargets(
+        connectedMediaReferences,
+        referenceItems,
+      ),
+    );
+    return {
+      ...connectedReferences,
+      content: reconcileCanvasMediaUsages(
+        referenceContent,
+        connectedReferences.content,
+        referenceItems,
+        mediaUsageOptions,
+        connectedMediaReferences,
+        multiImageMode,
+      ).content,
+    };
+  }, [
     connectedMediaReferences,
+    mediaUsageOptions,
+    multiImageMode,
+    referenceContent,
     referenceItems,
-  );
-  const resolvedReferences = reconcileConnectedCanvasReferences(
     value,
-    referenceContent,
-    connectedTargets,
+  ]);
+  const referenceUsageOptions = useMemo(
+    () =>
+      mediaUsageOptions.map((option) => ({
+        key: option.key,
+        label: option.label,
+        acceptedKinds: option.acceptedKinds,
+        maxFiles: option.maxFiles,
+      })),
+    [mediaUsageOptions],
   );
-  const referenceUsageOptions = mediaUsageOptions.map((option) => ({
-    key: option.key,
-    label: option.label,
-    acceptedKinds: option.acceptedKinds,
-    maxFiles: option.maxFiles,
-  }));
-  const mediaParamCounts = referenceUsageCounts(resolvedReferences.content);
-  const currentReferenceSignature = referenceStateSignature(
-    value,
-    referenceContent,
+  const mediaParamCounts = useMemo(
+    () => referenceUsageCounts(resolvedReferences.content),
+    [resolvedReferences.content],
   );
-  const resolvedReferenceSignature = referenceStateSignature(
-    resolvedReferences.value,
-    resolvedReferences.content,
+  const currentReferenceSignature = useMemo(
+    () => referenceStateSignature(value, referenceContent),
+    [referenceContent, value],
+  );
+  const resolvedReferenceSignature = useMemo(
+    () =>
+      referenceStateSignature(
+        resolvedReferences.value,
+        resolvedReferences.content,
+      ),
+    [resolvedReferences.content, resolvedReferences.value],
   );
 
   useEffect(() => {
@@ -375,6 +394,50 @@ export function PromptComposer({
                 })}
               </div>
             </ComposerMenu>
+          ) : null}
+
+          {multiImagePlan?.active && multiImagePlan.mode ? (
+            enabledMultiImageOptions.length > 1 ? (
+              <ComposerMenu
+                id="multi-image-mode"
+                openKey={openKey}
+                label={multiImageModeLabel}
+                icon={<Images size={15} />}
+                disabled={disabled || running}
+                onToggle={setOpenKey}
+              >
+                <div className="ws-prompt-menu-list">
+                  {enabledMultiImageOptions.map((option) => {
+                    const active = option.value === multiImagePlan.mode;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`ws-prompt-menu-item ${active ? "is-active" : ""}`}
+                        disabled={disabled || running}
+                        onClick={() => {
+                          onMultiImageModeChange?.(option.value);
+                          setOpenKey("");
+                        }}
+                      >
+                        <span>{option.label}</span>
+                        {active ? <CheckCircle2 size={14} /> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </ComposerMenu>
+            ) : (
+              <span className="ws-prompt-tool-wrap">
+                <span
+                  className="ws-prompt-tool is-static"
+                  aria-label={multiImageModeLabel}
+                >
+                  <Images size={15} />
+                  <span>{multiImageModeLabel}</span>
+                </span>
+              </span>
+            )
           ) : null}
 
           {!showMediaParamButtons && uploadParams.length > 0 ? (
@@ -507,6 +570,8 @@ function composerAssetItemFromReferenceOption(
     refType: "asset",
     refId: option.refId,
     versionID: option.versionID,
+    output: option.output,
+    asset: option.asset,
     preview: {
       text: option.description || "",
       imageUrl: kind === "image" ? url : "",
@@ -533,7 +598,7 @@ function ParamMenu({
   onChange: (value: unknown) => void;
 }) {
   const [previewOpen, setPreviewOpen] = useState(false);
-  const previewType = normalizeParamPreviewType(param.preview_type);
+  const previewType = normalizePowerParamPreviewType(param.preview_type);
 
   useEffect(() => {
     if (disabled || previewType === "none") {
@@ -866,7 +931,11 @@ function referenceUsageCounts(content?: CanvasReferenceContent) {
     if (part.type !== "reference" || !part.usage) {
       continue;
     }
-    counts.set(part.usage, (counts.get(part.usage) || 0) + 1);
+    const amount = selectedMediaReferenceAmount(
+      part,
+      Number(part.ref_media_count || 0),
+    );
+    counts.set(part.usage, (counts.get(part.usage) || 0) + amount);
   }
   return counts;
 }

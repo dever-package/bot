@@ -578,6 +578,8 @@ function Composer({
       onUploadedFiles={onUploadedFiles}
       parameters={controller.inputParams}
       providers={referenceProviders}
+      showMediaAliases
+      allowMultiMediaSelection
       loadReferences={controller.loadReferences}
       loadPreview={controller.loadReferencePreview}
       onSubmit={controller.send}

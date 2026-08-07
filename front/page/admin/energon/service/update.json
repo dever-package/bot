@@ -59,11 +59,7 @@
           "parentField": "provider_id",
           "valueField": "id",
           "labelField": "name",
-          "extraFields": [
-            "scope",
-            "status",
-            "host"
-          ],
+          "extraFields": ["scope", "status", "host"],
           "filters": {
             "status": "1"
           },
@@ -75,11 +71,7 @@
           "optionParams": {
             "parentId": "form.provider_id"
           },
-          "emptyValues": [
-            0,
-            "0",
-            ""
-          ],
+          "emptyValues": [0, "0", ""],
           "controlClassName": "max-w-[320px]"
         }
       },
@@ -130,10 +122,10 @@
         "id": "service-max-images-per-request",
         "type": "form-input",
         "name": "单次最多图片数",
-        "placeholder": "0 表示使用协议上限",
+        "placeholder": "0 表示使用默认批量",
         "value": "form.max_images_per_request",
         "mode": "form",
-        "info": "仅组图服务使用；0 表示按系统宫格上限 9 张处理。",
+        "info": "仅组图服务使用；0 表示使用系统默认批量，总数超过单批上限时会自动分批。",
         "meta": {
           "formLayout": "horizontal",
           "controlClassName": "max-w-[220px]",

@@ -79,6 +79,7 @@ type powerParamRow struct {
 	Sort              int
 	ActiveWhenParamID uint64
 	ActiveWhenValue   string
+	MaxFiles          *int
 	Filter            powerParamOptionFilter
 }
 
@@ -117,6 +118,7 @@ func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serv
 				continue
 			}
 			condition := CommonServiceParamCondition(param.ID, serviceParams)
+			maxFiles := serviceParamFileCapacity(param, serviceParam, serviceParams)
 			serviceCoveredParams[param.ID] = struct{}{}
 			rows = append(rows, buildPowerParamRow(ctx, repo, params, param, powerParam, powerParamRow{
 				ID:                serviceParam.ID,
@@ -125,6 +127,7 @@ func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serv
 				Sort:              powerParamSort(powerParam.Sort, serviceParam.Sort),
 				ActiveWhenParamID: condition.ParamID,
 				ActiveWhenValue:   condition.Value,
+				MaxFiles:          &maxFiles,
 				Filter:            optionFilters[param.ID],
 			}))
 		}
@@ -199,6 +202,9 @@ func BuildPowerParamsForServices(
 			}
 			if index, exists := rowIndexes[row.PowerParamID]; exists {
 				rows[index].Options = mergePowerParamOptions(rows[index].Options, row.Options)
+				if row.MaxFiles > rows[index].MaxFiles {
+					rows[index].MaxFiles = row.MaxFiles
+				}
 				mergePowerParamCondition(&rows[index], row)
 				continue
 			}
@@ -226,6 +232,40 @@ func mergePowerParamCondition(current *PowerParam, incoming PowerParam) {
 	}
 	current.ActiveWhenKey = ""
 	current.ActiveWhenValue = ""
+}
+
+func serviceParamFileCapacity(
+	param botmodel.Param,
+	serviceParam botmodel.ServiceParam,
+	serviceParams []botmodel.ServiceParam,
+) int {
+	controlType := NormalizeParamControlType(param.Type)
+	if controlType == "file" {
+		return 1
+	}
+	if controlType != "files" {
+		return param.MaxFiles
+	}
+
+	condition := serviceParamCondition(serviceParam)
+	mappings := collectServiceParamFileMappings(param.ID, &condition, serviceParams)
+	capacity := 0
+	if mappings.direct {
+		capacity = param.MaxFiles
+	}
+	if len(mappings.attachments) > 0 {
+		mappedCapacity, err := attachmentMappingCapacity(mappings.attachments...)
+		if err != nil {
+			return 0
+		}
+		if mappedCapacity > capacity {
+			capacity = mappedCapacity
+		}
+	}
+	if mappings.found {
+		return capacity
+	}
+	return param.MaxFiles
 }
 
 func uniqueServiceIDs(values []uint64) []uint64 {
@@ -279,6 +319,10 @@ func buildPowerParamRow(
 	powerParam botmodel.PowerParam,
 	config powerParamRow,
 ) PowerParam {
+	maxFiles := param.MaxFiles
+	if config.MaxFiles != nil {
+		maxFiles = *config.MaxFiles
+	}
 	row := PowerParam{
 		ID:              config.ID,
 		PowerParamID:    powerParam.ID,
@@ -295,7 +339,7 @@ func buildPowerParamRow(
 		ActiveWhenValue: strings.TrimSpace(config.ActiveWhenValue),
 		Required:        PowerParamRequiresInput(powerParam),
 		UploadRuleID:    param.UploadRuleID,
-		MaxFiles:        param.MaxFiles,
+		MaxFiles:        maxFiles,
 		AssetKinds:      PromptAssetKinds(param),
 		Sort:            config.Sort,
 	}

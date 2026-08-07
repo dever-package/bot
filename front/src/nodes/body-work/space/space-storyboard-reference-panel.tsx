@@ -7,11 +7,11 @@ import {
   CanvasReferenceTextWithAdapter,
   useCanvasReferenceAdapter,
 } from "./space-reference-editor";
-import type { ComposerAssetItem } from "./space-prompt-composer";
 import type {
   CanvasReferenceContent,
   CanvasStoryboardReference,
   CanvasStoryboardReferencePurpose,
+  ComposerAssetItem,
 } from "./types";
 import type {
   StoryboardDocument,

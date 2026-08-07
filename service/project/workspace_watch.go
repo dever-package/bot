@@ -3,6 +3,7 @@ package project
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
 	teammodel "github.com/dever-package/bot/model/team"
@@ -10,9 +11,10 @@ import (
 )
 
 const (
-	workspaceRunWatchAttempts = 300
 	workspaceRunWatchInterval = time.Second
 )
+
+var workspaceRunWatchers sync.Map
 
 func (s WorkspaceService) watchWorkspaceApproval(ctx context.Context, projectID uint64, approvalID uint64) {
 	if projectID == 0 || approvalID == 0 {
@@ -49,9 +51,22 @@ func (s WorkspaceService) watchWorkspaceInteraction(ctx context.Context, project
 }
 
 func (s WorkspaceService) watchWorkspaceRun(ctx context.Context, runID uint64, submittedApprovalID uint64) {
+	s.watchWorkspaceRunWithRecovery(ctx, runID, submittedApprovalID, false)
+}
+
+func (s WorkspaceService) watchWorkspaceRunRecovery(ctx context.Context, runID uint64) {
+	s.watchWorkspaceRunWithRecovery(ctx, runID, 0, true)
+}
+
+func (s WorkspaceService) watchWorkspaceRunWithRecovery(ctx context.Context, runID uint64, submittedApprovalID uint64, recovering bool) {
 	if runID == 0 {
 		return
 	}
+	if _, loaded := workspaceRunWatchers.LoadOrStore(runID, struct{}{}); loaded {
+		return
+	}
+	defer workspaceRunWatchers.Delete(runID)
+
 	leaseContext, stopLease, claimed := startWorkspaceRunLease(ctx, runID)
 	if !claimed {
 		return
@@ -59,14 +74,14 @@ func (s WorkspaceService) watchWorkspaceRun(ctx context.Context, runID uint64, s
 	defer stopLease()
 	ctx = leaseContext
 
-	for attempt := 0; attempt < workspaceRunWatchAttempts; attempt++ {
+	for {
 		run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": runID})
 		if run == nil || !workspaceRunWatchShouldContinue(ctx, run, submittedApprovalID) {
 			return
 		}
 		_, _ = withWorkspaceRunLock(ctx, run.ProjectID, run.ID, func() (struct{}, error) {
 			if refreshed := teammodel.NewRunModel().Find(ctx, map[string]any{"id": run.ID}); refreshed != nil {
-				s.refreshWorkspaceRun(ctx, refreshed)
+				s.refreshWorkspaceRun(ctx, refreshed, recovering)
 			}
 			return struct{}{}, nil
 		})

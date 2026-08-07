@@ -46,6 +46,9 @@ const (
 	serviceEndpointDoubaoGLMID            uint64 = 25
 	serviceEndpointRunningHubVideoImageID uint64 = 26
 	serviceEndpointRunningHubVideoTextID  uint64 = 27
+	serviceEndpointMiniMaxH3ImageID       uint64 = 28
+	serviceEndpointMiniMaxH3TextID        uint64 = 29
+	serviceEndpointMiniMaxH3MultimodalID  uint64 = 30
 )
 
 var (
@@ -209,6 +212,33 @@ var (
 			"api":        "kling-v3.0-pro/text-to-video",
 			"param_mode": "all",
 			"param_ids":  "[]",
+			"status":     1,
+			"sort":       100,
+		},
+		{
+			"id":         serviceEndpointMiniMaxH3ImageID,
+			"service_id": serviceRunningHubMiniMaxH3ID,
+			"api":        "minimax/hailuo-h3/image-to-video",
+			"param_mode": "any",
+			"param_ids":  fmt.Sprintf(`[{"param_id":%d,"sort":1}]`, ParamFirstFrameID),
+			"status":     1,
+			"sort":       100,
+		},
+		{
+			"id":         serviceEndpointMiniMaxH3TextID,
+			"service_id": serviceRunningHubMiniMaxH3ID,
+			"api":        "minimax/hailuo-h3/text-to-video",
+			"param_mode": "all",
+			"param_ids":  "[]",
+			"status":     1,
+			"sort":       100,
+		},
+		{
+			"id":         serviceEndpointMiniMaxH3MultimodalID,
+			"service_id": serviceRunningHubMiniMaxH3ID,
+			"api":        "minimax/hailuo-h3/multimodal-to-video",
+			"param_mode": "any",
+			"param_ids":  fmt.Sprintf(`[{"param_id":%d,"sort":1}]`, ParamImagesID),
 			"status":     1,
 			"sort":       100,
 		},

@@ -93,6 +93,50 @@ func recordWorkspaceNodeExecution(ctx context.Context, execution workspaceNodeEx
 	_ = model.Update(ctx, filters, record)
 }
 
+func trackWorkspaceNodeChildRun(
+	ctx context.Context,
+	projectID uint64,
+	runID uint64,
+	nodeRunID uint64,
+	nodeKey string,
+	childRunID uint64,
+	childRequestID string,
+) {
+	nodeKey = strings.TrimSpace(nodeKey)
+	childRequestID = strings.TrimSpace(childRequestID)
+	if childRunID == 0 && childRequestID == "" {
+		return
+	}
+	ctx = detachedWorkspaceContext(ctx)
+	fields := map[string]any{"updated_at": time.Now()}
+	if childRunID > 0 {
+		fields["child_run_id"] = childRunID
+	}
+	if childRequestID != "" {
+		fields["child_request_id"] = childRequestID
+	}
+	activeStatuses := []string{
+		teammodel.RunStatusPending,
+		teammodel.RunStatusRunning,
+		teammodel.RunStatusWaiting,
+	}
+	if nodeRunID > 0 {
+		teammodel.NewNodeRunModel().Update(ctx, map[string]any{
+			"id":     nodeRunID,
+			"status": activeStatuses,
+		}, fields)
+	}
+	if projectID == 0 || runID == 0 || nodeKey == "" {
+		return
+	}
+	workspacemodel.NewNodeExecutionModel().Update(ctx, map[string]any{
+		"project_id": projectID,
+		"run_id":     runID,
+		"node_key":   nodeKey,
+		"status":     activeStatuses,
+	}, fields)
+}
+
 func workspaceNodeExecutions(ctx context.Context, projectID uint64, runID uint64) []map[string]any {
 	if projectID == 0 || runID == 0 {
 		return []map[string]any{}
@@ -363,17 +407,36 @@ func normalizeWorkspaceExecutionStatus(status string) string {
 }
 
 func nodeExecutionAssetRefs(payload map[string]any) (uint64, uint64) {
-	asset := mapValue(firstPresent(payload["asset"], valueAtPath(payload, "result", "asset")))
-	version := mapValue(firstPresent(payload["version"], valueAtPath(payload, "asset", "version"), valueAtPath(payload, "result", "version")))
+	nodeResult := firstCanvasNodeResult(payload)
+	asset := mapValue(firstPresent(
+		payload["asset"],
+		valueAtPath(payload, "result", "asset"),
+		nodeResult["asset"],
+		valueAtPath(nodeResult, "result", "asset"),
+	))
+	version := mapValue(firstPresent(
+		payload["version"],
+		valueAtPath(payload, "asset", "version"),
+		valueAtPath(payload, "result", "version"),
+		nodeResult["version"],
+		valueAtPath(nodeResult, "asset", "version"),
+		valueAtPath(nodeResult, "result", "version"),
+	))
 	return firstUint64(
 			uint64Value(asset["id"]),
 			uint64Value(valueAtPath(payload, "asset", "id")),
 			uint64Value(valueAtPath(payload, "result", "asset", "id")),
+			uint64Value(valueAtPath(nodeResult, "asset", "id")),
+			uint64Value(valueAtPath(nodeResult, "result", "asset", "id")),
 		),
 		firstUint64(
 			uint64Value(version["id"]),
 			uint64Value(valueAtPath(asset, "version", "id")),
 			uint64Value(valueAtPath(payload, "version", "id")),
 			uint64Value(valueAtPath(payload, "result", "version", "id")),
+			uint64Value(valueAtPath(nodeResult, "version", "id")),
+			uint64Value(valueAtPath(nodeResult, "asset", "version", "id")),
+			uint64Value(valueAtPath(nodeResult, "asset", "version_id")),
+			uint64Value(valueAtPath(nodeResult, "result", "version", "id")),
 		)
 }

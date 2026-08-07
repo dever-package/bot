@@ -16,6 +16,16 @@ type CanvasMaterialSlot struct {
 
 const canvasReferenceVersionFields = "main.id,main.asset_id,main.run_id,main.node_run_id,main.release_id,main.request_id,main.node_key,main.version,main.content,main.created_at,main.updated_at"
 
+// RequireCanvasCurrentReferences resolves explicit canvas references. Canvas
+// media edges may expand a collection, while general asset references may not.
+func (s Service) RequireCanvasCurrentReferences(
+	ctx context.Context,
+	teamID uint64,
+	assetIDs []uint64,
+) (map[uint64]CurrentReference, error) {
+	return s.requireCurrentReferences(ctx, teamID, assetIDs, true)
+}
+
 // CanvasReferences returns only current assets needed to hydrate one canvas.
 // Explicit references may point across categories and projects in the same
 // team; material slots stay scoped to the current canvas category.
@@ -32,7 +42,6 @@ func (s Service) CanvasReferences(ctx context.Context, projectID uint64, assetCa
 	if ids := uniqueCanvasAssetIDs(assetIDs); len(ids) > 0 {
 		for _, row := range assetModel.Select(ctx, map[string]any{
 			"id":         ids,
-			"kind":       map[string]any{"neq": assetmodel.KindCollection},
 			"status":     assetmodel.StatusCurrent,
 			"version_id": map[string]any{"gt": 0},
 		}) {

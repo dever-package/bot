@@ -195,14 +195,18 @@ func resolveLegacyLocalMediaPath(value string) (string, bool, error) {
 
 func validateFFmpegMediaPath(value string) (string, error) {
 	localPath := strings.TrimSpace(value)
-	info, err := os.Stat(localPath)
+	absolutePath, err := filepath.Abs(localPath)
+	if err != nil {
+		return "", fmt.Errorf("解析资源文件路径失败: %w", err)
+	}
+	info, err := os.Stat(absolutePath)
 	if err != nil {
 		return "", fmt.Errorf("资源文件不存在")
 	}
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("资源不是普通文件")
 	}
-	return localPath, nil
+	return absolutePath, nil
 }
 
 func ffmpegMediaExtension(file uploadrepo.UploadFile) string {

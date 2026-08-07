@@ -15,6 +15,7 @@ import {
   finiteNumberOrUndefined as finiteNumber,
   isPlainRecord as isRecord,
 } from "../shared/structured-json";
+import { normalizeStoryboardGridLayout } from "../shared/storyboard-grid-layout";
 import { normalizeVideoComposition } from "./space-video-compose";
 
 export type PersistedCanvasState = {
@@ -336,6 +337,17 @@ function persistedComposerDraft(value: unknown) {
   );
   if (storyboardReferences.length > 0 && isJSONValue(storyboardReferences)) {
     result.storyboard_references = storyboardReferences;
+  }
+  if (value.storyboardGridLayout) {
+    result.storyboard_grid_layout = normalizeStoryboardGridLayout(
+      value.storyboardGridLayout,
+    );
+  }
+  if (
+    value.multiImageMode === "per_image" ||
+    value.multiImageMode === "shared_reference"
+  ) {
+    result.multi_image_mode = value.multiImageMode;
   }
   return Object.keys(result).length ? result : null;
 }
