@@ -1,10 +1,12 @@
 import { defineFrontPlugin, lazyNode } from "@dever/front-plugin";
 
+const loadAgentNodes = () => import("./nodes/show/agent-nodes");
+
 const botPlugin = {
   name: "bot",
   nodes: {
     "show-agent": lazyNode(() =>
-      import("./nodes/show/agent").then((mod) => ({
+      loadAgentNodes().then((mod) => ({
         default: mod.ShowAgent,
       })),
     ),
@@ -14,7 +16,7 @@ const botPlugin = {
       })),
     ),
     "show-skill-creator": lazyNode(() =>
-      import("./nodes/show/skill-creator").then((mod) => ({
+      loadAgentNodes().then((mod) => ({
         default: mod.ShowSkillCreator,
       })),
     ),
@@ -29,7 +31,7 @@ const botPlugin = {
       })),
     ),
     "show-stream-request": lazyNode(() =>
-      import("./nodes/show/stream-request").then((mod) => ({
+      import("./nodes/show/show-stream-request").then((mod) => ({
         default: mod.ShowStreamRequest,
       })),
     ),

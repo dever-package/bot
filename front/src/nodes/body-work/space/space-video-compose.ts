@@ -84,6 +84,7 @@ export type VideoComposeAssetReference = {
   label: string;
   mediaIndex?: number;
   mediaUrl?: string;
+  mediaThumbnail?: string;
   mediaItems?: CanvasReferenceMediaItem[];
 };
 
@@ -224,7 +225,9 @@ export function videoCompositionBlockingIssues(
   return [...clipIssues, ...audioIssues];
 }
 
-export function videoComposeReferenceKey(reference?: VideoComposeAssetReference) {
+export function videoComposeReferenceKey(
+  reference?: VideoComposeAssetReference,
+) {
   return reference ? `${reference.assetId}:${reference.versionId}` : "";
 }
 
@@ -271,9 +274,8 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
         .map(normalizeVideoComposeSubtitleTrack)
         .filter(Boolean)
     : [];
-  const normalizedStoryboardTransition = normalizeOptionalVideoTransition(
-    storyboardTransition,
-  );
+  const normalizedStoryboardTransition =
+    normalizeOptionalVideoTransition(storyboardTransition);
   const transitionType = normalizeTransitionType(transition.type);
   const sourceEdgeId = stringValue(row.sourceEdgeId ?? row.source_edge_id);
   return {
@@ -294,9 +296,7 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
     useOriginalVideo: booleanValue(
       row.useOriginalVideo ?? row.use_original_video,
     ),
-    blockingIssues: stringArray(
-      row.blockingIssues ?? row.blocking_issues,
-    ),
+    blockingIssues: stringArray(row.blockingIssues ?? row.blocking_issues),
     transitionToNext: {
       type: transitionType,
       durationMs:
@@ -366,10 +366,7 @@ function normalizeVideoComposeSpeechTrack(
     id,
     ...(audio ? { audio } : {}),
     startTime: Math.max(0, numberValue(row.startTime ?? row.start_time)),
-    sourceStart: Math.max(
-      0,
-      numberValue(row.sourceStart ?? row.source_start),
-    ),
+    sourceStart: Math.max(0, numberValue(row.sourceStart ?? row.source_start)),
     fit: normalizeAudioFit(row.fit, "trim"),
     kind,
     ...(characterId ? { characterId } : {}),
@@ -392,10 +389,7 @@ function normalizeVideoComposeGlobalAudioTrack(
     id,
     ...(audio ? { audio } : {}),
     startTime: Math.max(0, numberValue(row.startTime ?? row.start_time)),
-    sourceStart: Math.max(
-      0,
-      numberValue(row.sourceStart ?? row.source_start),
-    ),
+    sourceStart: Math.max(0, numberValue(row.sourceStart ?? row.source_start)),
     kind,
     volume: clampNumber(row.volume, 0, 1, kind === "music" ? 0.35 : 1),
     fit: normalizeAudioFit(row.fit, kind === "music" ? "trim" : "strict"),
@@ -450,6 +444,18 @@ function normalizeVideoComposeReference(
     ...(stringValue(row.mediaUrl ?? row.media_url)
       ? { mediaUrl: stringValue(row.mediaUrl ?? row.media_url) }
       : {}),
+    ...(stringValue(
+      row.mediaThumbnail ?? row.media_thumbnail ?? row.thumbnail ?? row.poster,
+    )
+      ? {
+          mediaThumbnail: stringValue(
+            row.mediaThumbnail ??
+              row.media_thumbnail ??
+              row.thumbnail ??
+              row.poster,
+          ),
+        }
+      : {}),
     ...(mediaItems.length ? { mediaItems } : {}),
   };
 }
@@ -497,9 +503,7 @@ function stringValue(value: unknown) {
 }
 
 function stringArray(value: unknown) {
-  return Array.isArray(value)
-    ? value.map(stringValue).filter(Boolean)
-    : [];
+  return Array.isArray(value) ? value.map(stringValue).filter(Boolean) : [];
 }
 
 function clampNumber(

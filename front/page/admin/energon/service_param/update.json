@@ -40,7 +40,7 @@
       {
         "id": "service-param-id",
         "type": "form-cascader",
-        "name": "内部参数 / 所属参数",
+        "name": "内部参数",
         "value": "form.param_id",
         "mode": "form",
         "placeholder": "请选择参数",
@@ -53,6 +53,9 @@
             "选择参数"
           ],
           "childExtraFields": "type,key,max_files",
+          "selectedOptionTargets": {
+            "type": "state.selectedParamType"
+          },
           "clearOnChange": [
             "form.combo_param_ids",
             "form.combo_params",
@@ -153,6 +156,19 @@
         "info": "仅文件参数生效。文件地址保持现有 URL；Base64 只传编码内容；Data URL 会带 MIME 前缀。单文件和多文件结构保持不变。",
         "meta": {
           "controlClassName": "min-w-[7rem]",
+          "showCondition": "any",
+          "showWhen": [
+            {
+              "path": "state.selectedParamType",
+              "operator": "equals",
+              "value": "file"
+            },
+            {
+              "path": "state.selectedParamType",
+              "operator": "equals",
+              "value": "files"
+            }
+          ],
           "hiddenCondition": "any",
           "hiddenWhen": [
             {
@@ -372,7 +388,9 @@
       ]
     }
   },
-  "state": {},
+  "state": {
+    "selectedParamType": ""
+  },
   "action": {
     "submit": {
       "type": "save",

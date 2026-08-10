@@ -13,6 +13,17 @@ export type CanvasSaveStatus = "saved" | "dirty" | "saving" | "error";
 
 type CanvasMap = Record<string, SpaceCanvasState>;
 
+type CanvasSaveRequest = {
+  canvas: SpaceCanvasState;
+  revision: number;
+};
+
+type CanvasSaver = (
+  key: string,
+  generation: number,
+  request?: CanvasSaveRequest,
+) => Promise<void>;
+
 type UseCanvasAutosaveInput = {
   projectId: number;
   enabled: boolean;
@@ -35,12 +46,10 @@ export function useCanvasAutosave({
   const revisionsRef = useRef<Record<string, number>>({});
   const savedRevisionsRef = useRef<Record<string, number>>({});
   const retryCountsRef = useRef<Record<string, number>>({});
-  const inFlightRef = useRef<Set<string>>(new Set());
+  const inFlightRef = useRef<Map<string, Promise<void>>>(new Map());
   const timersRef = useRef<Record<string, number>>({});
   const generationRef = useRef(0);
-  const saveCanvasRef = useRef<
-    ((key: string, generation: number) => void) | null
-  >(null);
+  const saveCanvasRef = useRef<CanvasSaver | null>(null);
   const [scheduleVersion, setScheduleVersion] = useState(0);
   const [statusByCanvas, setStatusByCanvas] = useState<
     Record<string, CanvasSaveStatus>
@@ -67,93 +76,137 @@ export function useCanvasAutosave({
       const generation = generationRef.current;
       timersRef.current[key] = window.setTimeout(() => {
         delete timersRef.current[key];
-        saveCanvasRef.current?.(key, generation);
+        const pending = saveCanvasRef.current?.(key, generation);
+        void pending?.catch(() => undefined);
       }, delay);
     },
     [clearTimer, enabled, projectId],
   );
 
   const saveCanvas = useCallback(
-    async (key: string, generation: number) => {
-      if (
-        generation !== generationRef.current ||
-        !enabled ||
-        !projectId ||
-        inFlightRef.current.has(key)
-      ) {
+    async (
+      key: string,
+      generation: number,
+      request?: CanvasSaveRequest,
+    ) => {
+      if (generation !== generationRef.current || !enabled || !projectId) {
         return;
       }
-      const revision = revisionsRef.current[key] || 0;
+
+      while (inFlightRef.current.has(key)) {
+        await inFlightRef.current.get(key);
+        if (generation !== generationRef.current) {
+          return;
+        }
+      }
+
+      const revision = request?.revision ?? revisionsRef.current[key] ?? 0;
       if (revision <= (savedRevisionsRef.current[key] || 0)) {
         return;
       }
-      const submittedCanvas = canvasesRef.current[key];
+      const submittedCanvas = request?.canvas || canvasesRef.current[key];
       if (!submittedCanvas) {
         return;
       }
 
-      inFlightRef.current.add(key);
-      setStatusByCanvas((current) => ({ ...current, [key]: "saving" }));
-      try {
-        const saved = await saveSpaceCanvas(
-          projectId,
-          submittedCanvas.assetCateId,
-          submittedCanvas,
-        );
-        if (generation !== generationRef.current) {
-          return;
-        }
-        savedRevisionsRef.current[key] = Math.max(
-          savedRevisionsRef.current[key] || 0,
-          revision,
-        );
-        retryCountsRef.current[key] = 0;
-        const isLatest = (revisionsRef.current[key] || 0) === revision;
-        if (isLatest) {
-          setCanvases((current) =>
-            current[key] === submittedCanvas
-              ? {
-                  ...current,
-                  [key]: {
-                    ...submittedCanvas,
-                    updatedAt: saved.updatedAt || submittedCanvas.updatedAt,
-                  },
-                }
-              : current,
+      const saving = (async () => {
+        setStatusByCanvas((current) => ({ ...current, [key]: "saving" }));
+        try {
+          const saved = await saveSpaceCanvas(
+            projectId,
+            submittedCanvas.assetCateId,
+            submittedCanvas,
           );
-          setStatusByCanvas((current) => ({ ...current, [key]: "saved" }));
-        } else {
-          setStatusByCanvas((current) => ({ ...current, [key]: "dirty" }));
+          if (generation !== generationRef.current) {
+            return;
+          }
+          savedRevisionsRef.current[key] = Math.max(
+            savedRevisionsRef.current[key] || 0,
+            revision,
+          );
+          retryCountsRef.current[key] = 0;
+          const isLatest = (revisionsRef.current[key] || 0) === revision;
+          if (isLatest) {
+            setCanvases((current) => {
+              const currentCanvas = current[key];
+              const updatedAt = saved.updatedAt || currentCanvas?.updatedAt;
+              if (!currentCanvas || currentCanvas.updatedAt === updatedAt) {
+                return current;
+              }
+              return {
+                ...current,
+                [key]: { ...currentCanvas, updatedAt },
+              };
+            });
+            setStatusByCanvas((current) => ({
+              ...current,
+              [key]: "saved",
+            }));
+          } else {
+            setStatusByCanvas((current) => ({
+              ...current,
+              [key]: "dirty",
+            }));
+          }
+        } catch (error) {
+          if (generation !== generationRef.current) {
+            return;
+          }
+          const retryCount = (retryCountsRef.current[key] || 0) + 1;
+          retryCountsRef.current[key] = retryCount;
+          setStatusByCanvas((current) => ({ ...current, [key]: "error" }));
+          if (retryCount === 1) {
+            onError(error);
+          }
+          scheduleSave(
+            key,
+            Math.min(MAX_RETRY_DELAY, AUTOSAVE_DELAY * 2 ** retryCount),
+          );
+          throw error;
+        } finally {
+          if (
+            generation === generationRef.current &&
+            (revisionsRef.current[key] || 0) >
+              (savedRevisionsRef.current[key] || 0) &&
+            (retryCountsRef.current[key] || 0) === 0
+          ) {
+            scheduleSave(key);
+          }
         }
-      } catch (error) {
-        if (generation !== generationRef.current) {
-          return;
-        }
-        const retryCount = (retryCountsRef.current[key] || 0) + 1;
-        retryCountsRef.current[key] = retryCount;
-        setStatusByCanvas((current) => ({ ...current, [key]: "error" }));
-        if (retryCount === 1) {
-          onError(error);
-        }
-        scheduleSave(
-          key,
-          Math.min(MAX_RETRY_DELAY, AUTOSAVE_DELAY * 2 ** retryCount),
-        );
+      })();
+
+      inFlightRef.current.set(key, saving);
+      try {
+        await saving;
       } finally {
-        inFlightRef.current.delete(key);
-        if (
-          generation === generationRef.current &&
-          (revisionsRef.current[key] || 0) >
-            (savedRevisionsRef.current[key] || 0) &&
-          (retryCountsRef.current[key] || 0) === 0
-        ) {
-          scheduleSave(key);
+        if (inFlightRef.current.get(key) === saving) {
+          inFlightRef.current.delete(key);
         }
       }
     },
     [enabled, onError, projectId, scheduleSave, setCanvases],
   );
   saveCanvasRef.current = saveCanvas;
+
+  const flushCanvasSave = useCallback(
+    async (canvas: SpaceCanvasState) => {
+      if (!enabled || !projectId) {
+        throw new Error("画布尚未就绪，无法开始运行");
+      }
+      const key = String(canvas.assetCateId);
+      const generation = generationRef.current;
+      const revision = (revisionsRef.current[key] || 0) + 1;
+      revisionsRef.current[key] = revision;
+      retryCountsRef.current[key] = 0;
+      clearTimer(key);
+      setStatusByCanvas((current) => ({ ...current, [key]: "dirty" }));
+      await saveCanvas(key, generation, { canvas, revision });
+      if (generation !== generationRef.current) {
+        throw new Error("画布状态已更新，请重新运行");
+      }
+    },
+    [clearTimer, enabled, projectId, saveCanvas],
+  );
 
   const markDirty = useCallback((assetCateId: number) => {
     const key = String(assetCateId);
@@ -203,6 +256,7 @@ export function useCanvasAutosave({
 
   return {
     markCanvasDirty: markDirty,
+    flushCanvasSave,
     resetCanvasAutosave: reset,
     canvasSaveStatus: statusByCanvas,
   };

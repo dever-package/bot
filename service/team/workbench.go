@@ -55,8 +55,14 @@ func (s Service) WorkbenchCatalog(ctx context.Context, teamID uint64) (map[strin
 	if err != nil {
 		return nil, err
 	}
-	powerByID := make(map[uint64]PowerOption)
-	for _, power := range s.repo.ListPowers(ctx) {
+	powerIDs := make([]uint64, 0, len(graph.TeamPowers))
+	for _, teamPower := range graph.TeamPowers {
+		if isWorkbenchPowerAvailable(teamPower) {
+			powerIDs = append(powerIDs, teamPower.PowerID)
+		}
+	}
+	powerByID := make(map[uint64]PowerOption, len(powerIDs))
+	for _, power := range s.repo.ListPowersByIDs(ctx, powerIDs) {
 		powerByID[power.ID] = power
 	}
 	powers := make([]map[string]any, 0, len(graph.TeamPowers))
@@ -81,8 +87,14 @@ func (s Service) WorkbenchCatalog(ctx context.Context, teamID uint64) (map[strin
 			"output":      power.Output,
 		})
 	}
-	agents := make(map[uint64]AgentOption)
-	for _, agent := range s.repo.ListAgents(ctx) {
+	agentIDs := make([]uint64, 0, len(graph.Roles))
+	for _, role := range graph.Roles {
+		if isWorkbenchDialogueRole(role) {
+			agentIDs = append(agentIDs, role.AgentID)
+		}
+	}
+	agents := make(map[uint64]AgentOption, len(agentIDs))
+	for _, agent := range s.repo.ListAgentsByIDs(ctx, agentIDs) {
 		agents[agent.ID] = agent
 	}
 	roles := make([]map[string]any, 0, len(graph.Roles))
@@ -162,18 +174,15 @@ func (s Service) ResolveWorkbenchRole(ctx context.Context, teamID uint64, roleID
 	if err != nil {
 		return WorkbenchRoleBinding{}, err
 	}
-	agents := make(map[uint64]AgentOption)
-	for _, agent := range s.repo.ListAgents(ctx) {
-		agents[agent.ID] = agent
-	}
 	for _, role := range graph.Roles {
 		if role.ID != roleID || !isWorkbenchDialogueRole(role) {
 			continue
 		}
-		agent, agentExists := agents[role.AgentID]
-		if !agentExists || strings.TrimSpace(agent.Key) == "" {
+		agents := s.repo.ListAgentsByIDs(ctx, []uint64{role.AgentID})
+		if len(agents) == 0 || strings.TrimSpace(agents[0].Key) == "" {
 			return WorkbenchRoleBinding{}, fmt.Errorf("当前角色绑定的智能体不可用")
 		}
+		agent := agents[0]
 		return WorkbenchRoleBinding{
 			TeamID: graph.Team.ID, TeamName: graph.Team.Name, TeamDescription: graph.Team.Description,
 			ReleaseID: release.ID, RoleID: role.ID, RoleType: role.RoleType,

@@ -375,7 +375,11 @@ func (s WorkspaceService) executeCanvasGroupNodeBatch(
 				"status": teammodel.RunStatusFail,
 				"error":  blockedErr.Error(),
 			})
-			s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRuns[node.ID], teammodel.RunStatusFail, payload, blockedErr)
+			if recordErr := s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRuns[node.ID], teammodel.RunStatusFail, payload, blockedErr); recordErr != nil {
+				blockedErr = fmt.Errorf("%v；%w", blockedErr, recordErr)
+				payload["error"] = blockedErr.Error()
+				markWorkspaceNodeRun(ctx, nodeRuns[node.ID], teammodel.RunStatusFail, nil, payload, blockedErr.Error(), 0)
+			}
 			s.writeWorkspaceNodeEvent(ctx, run, node, nodeRuns[node.ID], "node_finished", teammodel.RunStatusFail, payload)
 			results = append(results, canvasNodeResult{NodeKey: node.ID, Payload: payload})
 			statusByID[node.ID] = teammodel.RunStatusFail
@@ -486,7 +490,11 @@ func (s WorkspaceService) executeCanvasGroupReadyNode(
 			}
 			func() {
 				defer func() { _ = recover() }()
-				s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRunID, teammodel.RunStatusFail, payload, runErr)
+				if recordErr := s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRunID, teammodel.RunStatusFail, payload, runErr); recordErr != nil {
+					runErr = fmt.Errorf("%v；%w", runErr, recordErr)
+					payload["error"] = runErr.Error()
+					execution.Err = runErr
+				}
 				s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "node_finished", teammodel.RunStatusFail, payload)
 			}()
 		}

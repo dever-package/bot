@@ -100,10 +100,13 @@ const ASSISTANT_DIALOG_LAYER_Z_INDEX = 1000;
 const ASSISTANT_MESSAGE_STATUS_RUNNING = 3;
 const DEFAULT_AGENT_REQUEST_API = "/bot/admin/agent/run";
 const DEFAULT_AGENT_RUN_STATUS_API = "/bot/admin/agent/run_status";
-const AssistantSessionHistoryDialog = resolveCompatComponent(
+const compatAssistantSessionHistoryDialog = getCompatModule(
   "@/components/assistant/session-history-dialog",
-  "AssistantSessionHistoryDialog",
-);
+).AssistantSessionHistoryDialog;
+const AssistantSessionHistoryDialog =
+  typeof compatAssistantSessionHistoryDialog === "function"
+    ? compatAssistantSessionHistoryDialog
+    : MissingCompatDialog;
 const compatReloadStoreDataContainer = getCompatModule(
   "@/lib/page-data-reload",
 ).reloadStoreDataContainer;
@@ -2329,11 +2332,6 @@ function waitAgentRunRecoveryDelay(ms: number) {
   return new Promise<void>((resolve) => {
     window.setTimeout(resolve, ms);
   });
-}
-
-function resolveCompatComponent(path: string, exportName: string) {
-  const component = getCompatModule(path)?.[exportName];
-  return typeof component === "function" ? component : MissingCompatDialog;
 }
 
 function MissingCompatDialog() {

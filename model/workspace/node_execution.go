@@ -57,6 +57,7 @@ type NodeExecution struct {
 type NodeExecutionIndex struct {
 	ExecutionNode struct{} `index:"execution_id,node_key"`
 	RunNode       struct{} `unique:"run_id,node_key"`
+	RunStatus     struct{} `index:"run_id,status"`
 	ProjectStatus struct{} `index:"project_id,asset_cate_id,status,updated_at"`
 	Request       struct{} `index:"request_id,node_key"`
 	NodeRun       struct{} `index:"node_run_id"`

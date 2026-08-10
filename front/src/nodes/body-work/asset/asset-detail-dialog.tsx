@@ -6,14 +6,7 @@ import {
   Pencil,
   RotateCcw,
 } from "lucide-react";
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DetailDialogFrame,
   DetailDialogHeader,
@@ -44,12 +37,9 @@ import {
   parseStoryboardGridOutput,
 } from "../shared/content-output";
 import { StoryboardGridView } from "../shared/storyboard-grid-view";
-
-const StoryboardAssetPreview = lazy(() =>
-  import("../space/space-content-view").then((module) => ({
-    default: module.CanvasNodeContentView,
-  })),
-);
+import {
+  CanvasNodeContentView as StoryboardAssetPreview,
+} from "../space/space-content-view";
 
 export function AssetDetailDialog({
   teamID,
@@ -308,24 +298,15 @@ export function AssetDetailDialog({
               {storyboardGrid ? (
                 <StoryboardGridView grid={storyboardGrid} variant="detail" />
               ) : hasStoryboard ? (
-                <Suspense
-                  fallback={
-                    <div className="wb-detail-content-state" aria-busy="true">
-                      <Loader2 size={18} className="wb-detail-spin" />
-                      <span>正在准备分镜预览</span>
-                    </div>
-                  }
-                >
-                  <StoryboardAssetPreview
-                    output={previewVersion.content}
-                    fallback={previewVersion.summary || asset.summary}
-                    emptyText="该版本暂无可预览内容"
-                    className="wb-asset-preview-content"
-                    markdownClassName="wb-asset-detail-prose"
-                    richClassName="wb-asset-detail-prose"
-                    mediaLayout="detail"
-                  />
-                </Suspense>
+                <StoryboardAssetPreview
+                  output={previewVersion.content}
+                  fallback={previewVersion.summary || asset.summary}
+                  emptyText="该版本暂无可预览内容"
+                  className="wb-asset-preview-content"
+                  markdownClassName="wb-asset-detail-prose"
+                  richClassName="wb-asset-detail-prose"
+                  mediaLayout="detail"
+                />
               ) : (
                 <AssetPreview
                   key={previewVersion.id}

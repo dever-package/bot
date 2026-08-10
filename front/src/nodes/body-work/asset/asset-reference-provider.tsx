@@ -1,5 +1,4 @@
-import { lazy, Suspense, useMemo } from "react";
-import { createPortal } from "react-dom";
+import { useMemo } from "react";
 import { loadAssetDetail } from "./asset-api";
 import { assetKindsAccept } from "./asset-contract";
 import {
@@ -22,12 +21,7 @@ import type {
   AssetKind,
   AssetRecord,
 } from "./asset-types";
-
-const AssetPickerDialog = lazy(() =>
-  import("./asset-picker-dialog").then((module) => ({
-    default: module.AssetPickerDialog,
-  })),
-);
+import { AssetPickerDialog } from "./asset-picker-dialog";
 
 export type WorkbenchReferenceProvider = ReferenceProvider;
 
@@ -162,91 +156,54 @@ function AssetReferencePicker({
   );
   const usedAssetIDSet = new Set(usedAssetIDs);
   return (
-    <Suspense fallback={<AssetPickerLoading />}>
-      <AssetPickerDialog
-        open
-        teamID={teamID}
-        scopeProjectID={scopeProjectID}
-        title="选择资产"
-        description="插入资产当前版本"
-        initialFilters={initialFilters}
-        allowedKinds={effectiveKinds}
-        multiple={selectionLimit > 1}
-        maxSelection={selectionLimit}
-        confirmSelection
-        contentMode="full"
-        usedAssetIDs={usedAssetIDs}
-        validateAsset={(asset) => {
-          if (usedAssetIDSet.has(asset.id)) {
-            return "该素材已使用";
-          }
-          return assetReferenceMedia(asset).length > 0
-            ? ""
-            : "该资产当前版本没有可用文件，无法用于此参数。";
-        }}
-        uploadAccept={assetKindsAccept(effectiveKinds)}
-        onUpload={
-          onUpload
-            ? (files) =>
-                onUpload(files, {
-                  preferredUsage,
-                  acceptedKinds: effectiveKinds,
-                })
-            : undefined
+    <AssetPickerDialog
+      open
+      teamID={teamID}
+      scopeProjectID={scopeProjectID}
+      title="选择资产"
+      description="插入资产当前版本"
+      initialFilters={initialFilters}
+      allowedKinds={effectiveKinds}
+      multiple={selectionLimit > 1}
+      maxSelection={selectionLimit}
+      confirmSelection
+      contentMode="full"
+      usedAssetIDs={usedAssetIDs}
+      validateAsset={(asset) => {
+        if (usedAssetIDSet.has(asset.id)) {
+          return "该素材已使用";
         }
-        onClose={onClose}
-        onConfirm={(assets) => {
-          const options = assets.map((asset) =>
-            assetReferenceOption(asset, preferredUsage),
-          );
-          for (const option of options) {
-            onReferenceSelect?.(option);
-          }
-          if (onSelectMany) {
-            onSelectMany(options);
-            return;
-          }
-          for (const option of options) {
-            onSelect(option);
-          }
-        }}
-      />
-    </Suspense>
-  );
-}
-
-function AssetPickerLoading() {
-  if (typeof document === "undefined") {
-    return null;
-  }
-  return createPortal(
-    <div
-      role="status"
-      aria-live="polite"
-      aria-busy="true"
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 1200,
-        display: "grid",
-        placeItems: "center",
-        background: "rgba(15, 23, 42, 0.38)",
+        return assetReferenceMedia(asset).length > 0
+          ? ""
+          : "该资产当前版本没有可用文件，无法用于此参数。";
       }}
-    >
-      <div
-        style={{
-          border: "1px solid rgba(148, 163, 184, 0.32)",
-          borderRadius: 6,
-          background: "var(--body-work-surface-raised, #ffffff)",
-          color: "var(--body-work-text, #111827)",
-          padding: "14px 18px",
-          boxShadow: "0 14px 36px rgba(15, 23, 42, 0.18)",
-        }}
-      >
-        正在加载资产选择器
-      </div>
-    </div>,
-    document.body,
+      uploadAccept={assetKindsAccept(effectiveKinds)}
+      onUpload={
+        onUpload
+          ? (files) =>
+              onUpload(files, {
+                preferredUsage,
+                acceptedKinds: effectiveKinds,
+              })
+          : undefined
+      }
+      onClose={onClose}
+      onConfirm={(assets) => {
+        const options = assets.map((asset) =>
+          assetReferenceOption(asset, preferredUsage),
+        );
+        for (const option of options) {
+          onReferenceSelect?.(option);
+        }
+        if (onSelectMany) {
+          onSelectMany(options);
+          return;
+        }
+        for (const option of options) {
+          onSelect(option);
+        }
+      }}
+    />
   );
 }
 

@@ -31,11 +31,12 @@ func (Team) PostSaveFlowGraph(c *server.Context) error {
 	teamID := botapi.Uint64FromBody(body, "team_id", "teamId", "id")
 	var data map[string]any
 	action := strings.TrimSpace(frontstream.InputText(body["action"]))
+	compactResponse := botapi.BoolFromBody(body, "compact_response", "compactResponse")
 	switch action {
 	case "publish":
-		data, err = teamRunner.PublishTeam(c.Context(), teamID)
+		data, err = teamRunner.PublishTeam(c.Context(), teamID, compactResponse)
 	case "edit_draft":
-		data, err = teamRunner.EditTeamDraft(c.Context(), teamID)
+		data, err = teamRunner.EditTeamDraft(c.Context(), teamID, compactResponse)
 	default:
 		data, err = teamRunner.SaveFlowGraph(c.Context(), teamID, body)
 	}
@@ -51,8 +52,9 @@ func saveNodeGraph(c *server.Context) error {
 	if err != nil {
 		return c.Error(err)
 	}
+	teamID := botapi.Uint64FromBody(body, "team_id", "teamId")
 	flowID := botapi.Uint64FromBody(body, "flow_id", "flowId", "id")
-	data, err := teamRunner.SaveFlowNodeGraph(c.Context(), flowID, body)
+	data, err := teamRunner.SaveFlowNodeGraph(c.Context(), teamID, flowID, body)
 	return botapi.WriteJSON(c, data, err)
 }
 

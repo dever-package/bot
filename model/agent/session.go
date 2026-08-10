@@ -53,10 +53,11 @@ type Session struct {
 }
 
 type SessionIndex struct {
-	OwnerContext  struct{} `index:"owner_type,owner_id,context_key,agent_key,status,last_message_at"`
-	OwnerStatus   struct{} `index:"owner_type,owner_id,status,last_message_at"`
-	AgentStatus   struct{} `index:"agent_key,status,last_message_at"`
-	ActiveRequest struct{} `index:"active_request_id"`
+	OwnerContext        struct{} `index:"owner_type,owner_id,context_key,agent_key,status,last_message_at,id"`
+	OwnerContextHistory struct{} `index:"owner_type,owner_id,context_key,agent_key,last_message_at,id"`
+	OwnerStatus         struct{} `index:"owner_type,owner_id,status,last_message_at,id"`
+	AgentStatus         struct{} `index:"agent_key,status,last_message_at,id"`
+	ActiveRequest       struct{} `index:"active_request_id"`
 }
 
 func NewSessionModel() *orm.Model[Session] {

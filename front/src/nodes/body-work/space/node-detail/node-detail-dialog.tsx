@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowLeft,
-  Copy,
-  History,
-  Loader2,
-  RotateCw,
-} from "lucide-react";
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { ArrowLeft, Copy, History, Loader2, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { DetailDialogFrame } from "../../shared/detail-dialog";
 import { requestErrorMessage as errorMessage } from "../../shared/api-response";
 import {
   confirmSpaceStoryboard,
   createSpaceStoryboardRevision,
+  fetchSpacePowerForm,
   fetchSpaceAssetDetail,
   fetchSpaceAssetVersionDetail,
   fetchSpaceAssetVersions,
@@ -27,6 +29,7 @@ import type {
   AssetVersion,
   ComposerAssetItem,
   ProjectAsset,
+  PowerForm,
   SpaceCanvasNode,
 } from "../types";
 import {
@@ -36,7 +39,6 @@ import {
   serializeNodeDetailContent,
   type NodeDetailEditableContent,
 } from "./node-detail-content";
-import { NodeDetailEditor } from "./node-detail-editor";
 import { NodeDetailHeader } from "./node-detail-header";
 import { useNodeDetailDraft } from "./use-node-detail-draft";
 import {
@@ -45,9 +47,11 @@ import {
 } from "./version-select";
 import { NodeDetailRunError } from "./node-detail-run-error";
 import { useAssetReferenceProvider } from "../../asset/asset-reference-provider";
-import { CanvasAssetReferenceProviderContext } from "../space-reference-editor";
-import { isVideoComposePowerType } from "../../shared/power-presentation";
-import { VideoComposeView } from "../space-video-compose-view";
+import { CanvasAssetReferenceProviderContext } from "../space-reference-provider-context";
+import {
+  isStoryboardPowerType,
+  isVideoComposePowerType,
+} from "../../shared/power-presentation";
 import type { CanvasConnectedMediaReference } from "../space-media-references";
 import {
   emptyVideoComposition,
@@ -63,6 +67,30 @@ import {
   contentOutputMediaKinds,
   type ContentMediaKind,
 } from "../../shared/content-output";
+import { CanvasModuleLoading } from "../space-loading";
+import {
+  createPreloadableComponent,
+  createPreloadableModule,
+} from "../../../shared/preloadable";
+import "./node-detail.css";
+
+const nodeDetailEditorModule = createPreloadableModule(
+  () => import("./node-detail-editor"),
+);
+const nodeDetailEditor = createPreloadableComponent(
+  nodeDetailEditorModule,
+  (module) => module.NodeDetailEditor,
+);
+const NodeDetailEditor = nodeDetailEditor.Component;
+
+const videoComposeViewModule = createPreloadableModule(
+  () => import("../space-video-compose-view"),
+);
+const videoComposeView = createPreloadableComponent(
+  videoComposeViewModule,
+  (module) => module.VideoComposeView,
+);
+const VideoComposeView = videoComposeView.Component;
 
 export function NodeDetailDialog({
   projectId,
@@ -108,6 +136,13 @@ export function NodeDetailDialog({
     node.kind,
     node.outputType,
   );
+  const isStoryboard = isStoryboardPowerType(
+    node.power,
+    node.kind,
+    node.outputType,
+  );
+  const [storyboardPowerForm, setStoryboardPowerForm] =
+    useState<PowerForm | null>(null);
   const [videoComposition, setVideoComposition] =
     useState<CanvasVideoComposition>(
       () => node.composerDraft?.videoComposition || emptyVideoComposition(),
@@ -158,6 +193,43 @@ export function NodeDetailDialog({
   selectedVersionIdRef.current = selectedVersionId;
   onAssetUpdatedRef.current = onAssetUpdated;
   nodeRef.current = node;
+
+  useEffect(() => {
+    if (!isStoryboard || (!node.power?.id && !node.power?.key)) {
+      setStoryboardPowerForm(null);
+      return;
+    }
+    let canceled = false;
+    setStoryboardPowerForm(null);
+    void fetchSpacePowerForm({
+      projectId,
+      flowId: Number(node.flow?.id || 0),
+      powerId: Number(node.power?.id || 0),
+      powerKey: String(node.power?.key || ""),
+      targetId: Number(node.composerDraft?.selectedTargetId || 0),
+    })
+      .then((form) => {
+        if (!canceled) {
+          setStoryboardPowerForm(form);
+        }
+      })
+      .catch((error) => {
+        if (!canceled) {
+          toast.error(errorMessage(error, "加载分镜用途配置失败"));
+        }
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [
+    isStoryboard,
+    node.composerDraft?.selectedTargetId,
+    node.flow?.id,
+    node.id,
+    node.power?.id,
+    node.power?.key,
+    projectId,
+  ]);
 
   const applyDetail = useCallback(
     (detail: Awaited<ReturnType<typeof fetchSpaceAssetDetail>>) => {
@@ -681,7 +753,10 @@ export function NodeDetailDialog({
     (!isVideoCompose && (!asset?.id || !asset?.version?.id)) ||
     storyboardConfirmed;
   const editorReadonly =
-    readonly || closing || (assetId > 0 && versionsLoading);
+    readonly ||
+    closing ||
+    (assetId > 0 && versionsLoading) ||
+    (isStoryboard && !storyboardPowerForm);
   const showHistoryState =
     !isCurrentVersion && (historyLoading || historyError);
   return (
@@ -801,66 +876,84 @@ export function NodeDetailDialog({
             <CanvasAssetReferenceProviderContext.Provider
               value={assetReferenceProvider}
             >
-              {isVideoCompose ? (
-                <VideoComposeView
-                  composition={videoComposition}
-                  referenceItems={canvasReferenceItems || []}
-                  connectedMediaReferences={connectedMediaReferences}
-                  readonly={!isCurrentVersion || closing || videoComposeRunning}
-                  running={videoComposeRunning}
-                  fullScreen
-                  finalOutput={mediaOutput}
-                  onChange={(next) => {
-                    setVideoComposition(next);
-                    onNodeDraftChange?.({
-                      ...(node.composerDraft || {}),
-                      videoComposition: next,
-                    });
-                  }}
-                  onConnectedMediaEdgeRemove={onConnectedMediaEdgeRemove}
-                  onRun={
-                    onRunNode
-                      ? (nextComposition) => {
-                          setVideoComposeRunning(true);
-                          void onRunNode({
-                            ...node,
-                            composerDraft: {
-                              ...(node.composerDraft || {}),
-                              videoComposition: nextComposition,
-                            },
-                          })
-                            .then(() => (assetId ? loadDetail() : undefined))
-                            .catch((error) =>
-                              toast.error(
-                                error instanceof Error
-                                  ? error.message
-                                  : "视频合成失败",
-                              ),
-                            )
-                            .finally(() => setVideoComposeRunning(false));
-                        }
-                      : undefined
-                  }
-                />
-              ) : (
-                <NodeDetailEditor
-                  content={activeContent}
-                  mediaOutput={mediaOutput}
-                  mediaKind={mediaKind}
-                  mediaPrompt={mediaPrompt}
-                  readonly={editorReadonly}
-                  referenceItems={canvasReferenceItems}
-                  canvasNodes={canvasNodes}
-                  storyboardSourceNodeId={node.id}
-                  storyboardFocus={storyboardFocus}
-                  storyboardWorkflowAction={storyboardWorkflowAction}
-                  referenceProvider={assetReferenceProvider}
-                  onConfirmStoryboard={confirmStoryboard}
-                  onCreateStoryboardRevision={createStoryboardRevision}
-                  onGenerateStoryboardShot={generateStoryboardShot}
-                  onChange={draft.setDraft}
-                />
-              )}
+              <Suspense
+                fallback={
+                  <CanvasModuleLoading
+                    label={
+                      isVideoCompose ? "正在加载视频合成" : "正在加载节点内容"
+                    }
+                  />
+                }
+              >
+                {isVideoCompose ? (
+                  <VideoComposeView
+                    composition={videoComposition}
+                    referenceItems={canvasReferenceItems || []}
+                    connectedMediaReferences={connectedMediaReferences}
+                    readonly={
+                      !isCurrentVersion || closing || videoComposeRunning
+                    }
+                    running={videoComposeRunning}
+                    fullScreen
+                    finalOutput={mediaOutput}
+                    onChange={(next) => {
+                      setVideoComposition(next);
+                      onNodeDraftChange?.({
+                        ...(node.composerDraft || {}),
+                        videoComposition: next,
+                      });
+                    }}
+                    onConnectedMediaEdgeRemove={onConnectedMediaEdgeRemove}
+                    onRun={
+                      onRunNode
+                        ? (nextComposition) => {
+                            setVideoComposeRunning(true);
+                            void onRunNode({
+                              ...node,
+                              composerDraft: {
+                                ...(node.composerDraft || {}),
+                                videoComposition: nextComposition,
+                              },
+                            })
+                              .then(() => (assetId ? loadDetail() : undefined))
+                              .catch((error) =>
+                                toast.error(
+                                  error instanceof Error
+                                    ? error.message
+                                    : "视频合成失败",
+                                ),
+                              )
+                              .finally(() => setVideoComposeRunning(false));
+                          }
+                        : undefined
+                    }
+                  />
+                ) : (
+                  <NodeDetailEditor
+                    content={activeContent}
+                    mediaOutput={mediaOutput}
+                    mediaKind={mediaKind}
+                    mediaPrompt={mediaPrompt}
+                    readonly={editorReadonly}
+                    referenceItems={canvasReferenceItems}
+                    canvasNodes={canvasNodes}
+                    storyboardSourceNodeId={node.id}
+                    storyboardFocus={storyboardFocus}
+                    storyboardWorkflowAction={storyboardWorkflowAction}
+                    storyboardWorkTypes={
+                      storyboardPowerForm?.storyboard_work_types
+                    }
+                    storyboardReferencePurposes={
+                      storyboardPowerForm?.storyboard_reference_purposes
+                    }
+                    referenceProvider={assetReferenceProvider}
+                    onConfirmStoryboard={confirmStoryboard}
+                    onCreateStoryboardRevision={createStoryboardRevision}
+                    onGenerateStoryboardShot={generateStoryboardShot}
+                    onChange={draft.setDraft}
+                  />
+                )}
+              </Suspense>
             </CanvasAssetReferenceProviderContext.Provider>
           )}
         </div>

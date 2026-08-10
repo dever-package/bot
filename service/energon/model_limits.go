@@ -32,6 +32,7 @@ func (limits ModelLimits) Source() string {
 // ResolveModelLimits returns a conservative budget that remains valid when a
 // text power falls back through its active source services.
 func (s GatewayService) ResolveModelLimits(ctx context.Context, powerKey string) (ModelLimits, error) {
+	ctx = withRepoRequestCache(ctx)
 	power, ok := s.repo.PowerByName(ctx, strings.TrimSpace(powerKey))
 	if !ok || !isActive(power.Status) {
 		return ModelLimits{}, fmt.Errorf("未匹配到 Energon 能力: %s", strings.TrimSpace(powerKey))

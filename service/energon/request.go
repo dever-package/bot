@@ -43,6 +43,7 @@ func (s GatewayService) CollectStream(ctx context.Context, options botstream.Col
 }
 
 func (s GatewayService) handleStreamJob(ctx context.Context, job bottask.Job) error {
+	ctx = withRepoRequestCache(ctx)
 	raw := streamJobRequest(job)
 	defer s.streamCancels.Remove(raw.RequestID)
 	if err := s.handleStream(ctx, raw); err != nil {

@@ -8,6 +8,7 @@ export type CanvasReferenceTarget = {
   refId: number;
   label: string;
   usage?: string;
+  purpose?: string;
   trigger?: "@" | "#";
   versionId?: number;
   origin?: string;
@@ -52,6 +53,7 @@ export function canvasReferenceContentFromText(
       ref_id: match.target.refId,
       label: normalizeCanvasReferenceLabel(match.target.label),
       usage: match.target.usage,
+      purpose: match.target.purpose,
       ref_trigger: match.target.trigger || "@",
       ref_version_id: match.target.versionId,
       ref_origin: match.target.origin,
@@ -143,6 +145,7 @@ export function canvasReferenceTargetsFromContent(
         refId: part.ref_id,
         label: normalizeCanvasReferenceLabel(part.label),
         usage: part.usage,
+        purpose: part.purpose,
         trigger: part.ref_trigger === "#" ? "#" : "@",
         versionId: part.ref_version_id,
         origin: part.ref_origin,
@@ -211,6 +214,7 @@ export function reconcileConnectedCanvasReferences(
       }
       appendReferenceTarget(parts, {
         ...target,
+        purpose: sourcePart.purpose,
         mediaURL: sourcePart.ref_media_url,
         mediaIndex: sourcePart.ref_media_index,
         mediaCount: sourcePart.ref_media_count,
@@ -381,7 +385,9 @@ function unambiguousReferenceTargets(targets: CanvasReferenceTarget[]) {
 }
 
 function canvasReferenceContentTargetKey(target: CanvasReferenceTarget) {
-  return `${canvasReferenceTargetKey(target)}:${target.usage || ""}`;
+  return `${canvasReferenceTargetKey(target)}:${target.usage || ""}:${
+    target.purpose || ""
+  }`;
 }
 
 function canvasReferenceTargetKey(target: CanvasReferenceTarget) {
@@ -406,6 +412,7 @@ function appendReferenceTarget(
     ref_id: target.refId,
     label: normalizeCanvasReferenceLabel(target.label),
     usage: target.usage,
+    purpose: target.purpose,
     ref_trigger: target.trigger || "@",
     ref_version_id: target.versionId,
     ref_origin: target.origin,

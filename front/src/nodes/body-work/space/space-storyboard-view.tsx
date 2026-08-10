@@ -73,6 +73,8 @@ import type {
   CanvasReferenceContent,
   ComposerAssetItem,
   SpaceCanvasNode,
+  StoryboardReferencePurposeSpec,
+  StoryboardWorkTypeSpec,
 } from "./types";
 import {
   CanvasReferenceEditorWithAdapter,
@@ -93,7 +95,7 @@ import {
   storyboardHasGeneratedFrames,
 } from "./space-storyboard-board";
 import { SpaceTooltip } from "./space-tooltip";
-import "./space.css";
+import "./space-storyboard-view.css";
 
 export type StoryboardSaveStatus = "saved" | "typing" | "saving" | "error";
 export type StoryboardWorkflowAction =
@@ -103,6 +105,8 @@ export type StoryboardWorkflowAction =
 
 const EMPTY_REFERENCE_ITEMS: ComposerAssetItem[] = [];
 const EMPTY_CANVAS_NODES: SpaceCanvasNode[] = [];
+const EMPTY_WORK_TYPE_SPECS: StoryboardWorkTypeSpec[] = [];
+const EMPTY_PURPOSE_SPECS: StoryboardReferencePurposeSpec[] = [];
 
 type StoryboardContinuityMode = "independent" | "match" | "continue";
 
@@ -145,6 +149,8 @@ export function StoryboardView({
   referenceItems = EMPTY_REFERENCE_ITEMS,
   storyboardSourceNodeId = "",
   canvasNodes = EMPTY_CANVAS_NODES,
+  workTypeSpecs = EMPTY_WORK_TYPE_SPECS,
+  purposeSpecs = EMPTY_PURPOSE_SPECS,
   focus,
 }: {
   storyboard: StoryboardDocument;
@@ -170,6 +176,8 @@ export function StoryboardView({
   referenceItems?: ComposerAssetItem[];
   storyboardSourceNodeId?: string;
   canvasNodes?: SpaceCanvasNode[];
+  workTypeSpecs?: StoryboardWorkTypeSpec[];
+  purposeSpecs?: StoryboardReferencePurposeSpec[];
   focus?: StoryboardEditorFocus;
 }) {
   const externalSignature = useMemo(
@@ -207,6 +215,9 @@ export function StoryboardView({
   const mountedRef = useRef(true);
   const controlled = Boolean(onChange);
   const draft = controlled ? storyboard : internalDraft;
+  const workTypeName = workTypeSpecs.find(
+    (spec) => spec.key === draft.work_type,
+  )?.name;
   const confirmed = isStoryboardConfirmed(draft);
   const canEdit =
     editable &&
@@ -234,8 +245,13 @@ export function StoryboardView({
     [draft.shots, dragOrder],
   );
   const validationIssues = useMemo(
-    () => storyboardValidationIssues(draft, { coreOnly: true }),
-    [draft],
+    () =>
+      storyboardValidationIssues(draft, {
+        coreOnly: true,
+        workTypeSpecs,
+        purposeSpecs,
+      }),
+    [draft, purposeSpecs, workTypeSpecs],
   );
   const hasBlockingIssues = validationIssues.some(
     (issue) => issue.severity === "error",
@@ -672,6 +688,9 @@ export function StoryboardView({
             <header>
               <BookOpenText size={14} />
               <strong>内容简介</strong>
+              {workTypeName ? (
+                <span className="ws-storyboard-work-type">{workTypeName}</span>
+              ) : null}
             </header>
             <p>{storyboardContentSummary(draft)}</p>
           </section>
@@ -682,6 +701,8 @@ export function StoryboardView({
               referenceItems={referenceItems}
               editable={canEdit}
               disabled={disabled}
+              workType={draft.work_type}
+              purposeSpecs={purposeSpecs}
               onChange={(next) => updateDraft(() => next)}
             />
 

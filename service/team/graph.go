@@ -7,195 +7,135 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/shemic/dever/orm"
+
 	energonmodel "github.com/dever-package/bot/model/energon"
 	teammodel "github.com/dever-package/bot/model/team"
 )
 
+type workspaceGraphState struct {
+	team      teammodel.Team
+	flows     []teammodel.Flow
+	flowEdges []teammodel.FlowEdge
+	rows      flowGraphRows
+}
+
 func (s Service) Workspace(ctx context.Context, teamID uint64) (map[string]any, error) {
-	team, err := s.repo.FindTeam(ctx, teamID)
+	graph, err := s.loadWorkspaceGraph(ctx, teamID)
 	if err != nil {
 		return nil, err
 	}
-	flows := s.repo.ListFlows(ctx, teamID, true)
-	flowEdges := s.repo.ListFlowEdges(ctx, teamID, true)
-	nodesByFlow := map[string]any{}
-	nodeEdgesByFlow := map[string]any{}
-	for _, flow := range flows {
-		nodes := s.repo.ListFlowNodes(ctx, flow.ID, true)
-		edges := s.repo.ListFlowNodeEdges(ctx, flow.ID, true)
-		nodesByFlow[flow.Key] = flowNodePayloads(nodes)
-		nodeEdgesByFlow[flow.Key] = flowNodeEdgePayloads(nodes, edges)
-	}
+	teamID = graph.team.ID
 	roles := s.repo.ListRoles(ctx, teamID, true)
 	assetCates := s.repo.ListAssetCates(ctx, teamID, true)
 	teamPowers := s.repo.ListTeamPowers(ctx, teamID, true)
-	powers := scopedPowerOptions(s.repo.ListPowers(ctx), teamPowers)
-	return map[string]any{
-		"team":               teamWorkspacePayload(team),
-		"asset_cates":        assetCatePayloads(assetCates),
-		"team_powers":        teamPowerPayloads(teamPowers),
-		"roles":              rolePayloads(roles),
-		"flows":              flowPayloads(flows),
-		"flow_edges":         flowEdgePayloads(flows, flowEdges),
-		"nodes_by_flow":      nodesByFlow,
-		"node_edges_by_flow": nodeEdgesByFlow,
-		"agents":             s.repo.ListAgents(ctx),
-		"agent_cates":        s.repo.ListAgentCates(ctx),
-		"knowledge_cates":    s.repo.ListKnowledgeCates(ctx),
-		"knowledge_bases":    s.repo.ListKnowledgeBases(ctx),
-		"teams":              s.publishedTeamOptions(ctx),
-		"powers":             powers,
-		"power_kinds":        powerKindOptions(powers),
-		"output_types":       energonmodel.OutputTypeSpecs(),
-		"role_types":         roleTypes(),
-		"node_types":         nodeTypes(),
-		"edge_conditions":    edgeConditions(),
-	}, nil
+	powers := s.teamPowerOptions(ctx, teamPowers)
+	result := graph.payload()
+	result["asset_cates"] = assetCatePayloads(assetCates)
+	result["team_powers"] = teamPowerPayloads(teamPowers)
+	result["roles"] = rolePayloads(roles)
+	result["agents"] = s.repo.ListAgents(ctx)
+	result["agent_cates"] = s.repo.ListAgentCates(ctx)
+	result["knowledge_cates"] = s.repo.ListKnowledgeCates(ctx)
+	result["knowledge_bases"] = s.repo.ListKnowledgeBases(ctx)
+	result["teams"] = s.publishedTeamOptions(ctx)
+	result["powers"] = powers
+	result["power_kinds"] = powerKindOptions(powers)
+	result["output_types"] = energonmodel.OutputTypeSpecs()
+	result["role_types"] = roleTypes()
+	result["node_types"] = nodeTypes()
+	result["edge_conditions"] = edgeConditions()
+	return result, nil
 }
 
 func (s Service) SaveFlowGraph(ctx context.Context, teamID uint64, body map[string]any) (map[string]any, error) {
-	if _, err := s.ensureTeamEditable(ctx, teamID); err != nil {
+	if err := orm.Transaction(ctx, func(tx context.Context) error {
+		if _, err := s.ensureTeamEditable(tx, teamID); err != nil {
+			return err
+		}
+		_, err := s.syncFlowGraph(tx, teamID, body)
+		return err
+	}); err != nil {
 		return nil, err
 	}
-	payloads := parseGraphFlows(body["flows"])
-	keepFlowKeys := map[string]bool{}
-	flowByKey := map[string]teammodel.Flow{}
-	for index, payload := range payloads {
-		if payload.Sort == 0 {
-			payload.Sort = (index + 1) * 10
-		}
-		row, err := s.repo.UpsertFlow(ctx, teamID, payload)
+	return s.graphMutationPayload(ctx, teamID, boolValue(firstPresent(body, "compact_response", "compactResponse")))
+}
+
+func (s Service) SaveFlowNodeGraph(ctx context.Context, teamID uint64, flowID uint64, body map[string]any) (map[string]any, error) {
+	savedTeamID := teamID
+	if err := orm.Transaction(ctx, func(tx context.Context) error {
+		flow, team, err := s.resolveNodeGraphTarget(tx, teamID, flowID, body)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		keepFlowKeys[row.Key] = true
-		flowByKey[row.Key] = row
-	}
-	s.repo.DisableMissingFlows(ctx, teamID, keepFlowKeys)
-
-	edgePayloads := parseGraphFlowEdges(body["edges"])
-	keepEdgeKeys := map[string]bool{}
-	for index, payload := range edgePayloads {
-		from := flowByKey[payload.FromKey]
-		to := flowByKey[payload.ToKey]
-		if from.ID == 0 {
-			from = findFlowByID(flowByKey, payload.FromFlowID)
-		}
-		if to.ID == 0 {
-			to = findFlowByID(flowByKey, payload.ToFlowID)
-		}
-		if from.ID == 0 || to.ID == 0 {
-			return nil, fmt.Errorf("工作流关系引用不存在")
-		}
-		if payload.Sort == 0 {
-			payload.Sort = (index + 1) * 10
-		}
-		if err := s.repo.UpsertFlowEdge(ctx, teamID, from.ID, to.ID, payload); err != nil {
-			return nil, err
-		}
-		keepEdgeKeys[edgeKey(from.ID, to.ID)] = true
-	}
-	s.repo.DisableMissingFlowEdges(ctx, teamID, keepEdgeKeys)
-
-	return s.Workspace(ctx, teamID)
-}
-
-func (s Service) SaveFlowNodeGraph(ctx context.Context, flowID uint64, body map[string]any) (map[string]any, error) {
-	flow, err := s.repo.FindFlow(ctx, flowID)
-	if err != nil {
-		return nil, err
-	}
-	team, err := s.ensureTeamEditable(ctx, flow.TeamID)
-	if err != nil {
-		return nil, err
-	}
-	payloads := parseGraphFlowNodes(body["nodes"])
-	payloads = s.normalizeGraphFlowNodeNames(ctx, team, payloads)
-	keepNodeKeys := map[string]bool{}
-	nodeByKey := map[string]teammodel.FlowNode{}
-	for index, payload := range payloads {
-		if payload.Sort == 0 {
-			payload.Sort = (index + 1) * 10
-		}
-		row, err := s.repo.UpsertFlowNode(ctx, flow.TeamID, flow.ID, payload)
+		savedTeamID = team.ID
+		payloads := s.normalizeGraphFlowNodeNames(tx, team, parseGraphFlowNodes(body["nodes"]))
+		nodes, err := s.repo.SyncFlowNodes(tx, team.ID, flow.ID, payloads)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		keepNodeKeys[row.NodeKey] = true
-		nodeByKey[row.NodeKey] = row
-	}
-	s.repo.DisableMissingFlowNodes(ctx, flow.ID, keepNodeKeys)
-
-	edgePayloads := parseGraphFlowNodeEdges(body["edges"])
-	keepEdgeKeys := map[string]bool{}
-	for index, payload := range edgePayloads {
-		from := nodeByKey[payload.FromKey]
-		to := nodeByKey[payload.ToKey]
-		if from.ID == 0 {
-			from = findFlowNodeByID(nodeByKey, payload.FromNodeID)
+		edges, err := resolveFlowNodeEdges(parseGraphFlowNodeEdges(body["edges"]), nodes)
+		if err != nil {
+			return err
 		}
-		if to.ID == 0 {
-			to = findFlowNodeByID(nodeByKey, payload.ToNodeID)
-		}
-		if from.ID == 0 || to.ID == 0 {
-			return nil, fmt.Errorf("节点关系引用不存在")
-		}
-		if payload.Sort == 0 {
-			payload.Sort = (index + 1) * 10
-		}
-		if err := s.repo.UpsertFlowNodeEdge(ctx, flow.TeamID, flow.ID, from.ID, to.ID, payload); err != nil {
-			return nil, err
-		}
-		keepEdgeKeys[edgeKey(from.ID, to.ID)] = true
-	}
-	s.repo.DisableMissingFlowNodeEdges(ctx, flow.ID, keepEdgeKeys)
-
-	return s.Workspace(ctx, flow.TeamID)
-}
-
-func (s Service) PublishTeam(ctx context.Context, teamID uint64) (map[string]any, error) {
-	team, err := s.repo.FindTeam(ctx, teamID)
-	if err != nil {
+		return s.repo.SyncFlowNodeEdges(tx, team.ID, flow.ID, edges)
+	}); err != nil {
 		return nil, err
 	}
-	snapshot, err := s.buildTeamReleaseSnapshot(ctx, team)
-	if err != nil {
-		return nil, err
-	}
-	payload, err := json.Marshal(snapshot)
-	if err != nil {
-		return nil, fmt.Errorf("生成发布快照失败: %w", err)
-	}
-	version := team.ReleaseVersion + 1
-	releaseID := s.repo.InsertTeamRelease(ctx, map[string]any{
-		"team_id":  team.ID,
-		"version":  version,
-		"snapshot": string(payload),
-		"status":   teammodel.TeamReleaseStatusCurrent,
-	})
-	if releaseID == 0 {
-		return nil, fmt.Errorf("创建发布版本失败")
-	}
-	s.repo.UpdateTeam(ctx, team.ID, map[string]any{
-		"publish_status":     teammodel.TeamPublishStatusPublished,
-		"current_release_id": releaseID,
-		"release_version":    version,
-	})
-	s.repo.ArchiveOtherTeamReleases(ctx, team.ID, releaseID)
-	return s.Workspace(ctx, team.ID)
+	return s.graphMutationPayload(ctx, savedTeamID, boolValue(firstPresent(body, "compact_response", "compactResponse")))
 }
 
-func (s Service) EditTeamDraft(ctx context.Context, teamID uint64) (map[string]any, error) {
+func (s Service) PublishTeam(ctx context.Context, teamID uint64, compactResponse bool) (map[string]any, error) {
+	if err := orm.Transaction(ctx, func(tx context.Context) error {
+		team, err := s.repo.FindTeam(tx, teamID)
+		if err != nil {
+			return err
+		}
+		snapshot, err := s.buildTeamReleaseSnapshot(tx, team)
+		if err != nil {
+			return err
+		}
+		payload, err := json.Marshal(snapshot)
+		if err != nil {
+			return fmt.Errorf("生成发布快照失败: %w", err)
+		}
+		version := team.ReleaseVersion + 1
+		releaseID := s.repo.InsertTeamRelease(tx, map[string]any{
+			"team_id":  team.ID,
+			"version":  version,
+			"snapshot": string(payload),
+			"status":   teammodel.TeamReleaseStatusCurrent,
+		})
+		if releaseID == 0 {
+			return fmt.Errorf("创建发布版本失败")
+		}
+		if err := s.repo.UpdateTeamChecked(tx, team.ID, map[string]any{
+			"publish_status":     teammodel.TeamPublishStatusPublished,
+			"current_release_id": releaseID,
+			"release_version":    version,
+		}); err != nil {
+			return err
+		}
+		return s.repo.ArchiveOtherTeamReleasesChecked(tx, team.ID, releaseID)
+	}); err != nil {
+		return nil, err
+	}
+	return s.graphMutationPayload(ctx, teamID, compactResponse)
+}
+
+func (s Service) EditTeamDraft(ctx context.Context, teamID uint64, compactResponse bool) (map[string]any, error) {
 	team, err := s.repo.FindTeam(ctx, teamID)
 	if err != nil {
 		return nil, err
 	}
 	if normalizeTeamPublishStatus(team.PublishStatus) == teammodel.TeamPublishStatusPublished {
-		s.repo.UpdateTeam(ctx, team.ID, map[string]any{
+		if err := s.repo.UpdateTeamChecked(ctx, team.ID, map[string]any{
 			"publish_status": teammodel.TeamPublishStatusEditing,
-		})
+		}); err != nil {
+			return nil, err
+		}
 	}
-	return s.Workspace(ctx, team.ID)
+	return s.graphMutationPayload(ctx, team.ID, compactResponse)
 }
 
 func (s Service) ensureTeamEditable(ctx context.Context, teamID uint64) (teammodel.Team, error) {
@@ -213,16 +153,15 @@ func (s Service) buildTeamReleaseSnapshot(ctx context.Context, team teammodel.Te
 	assetCates := s.repo.ListAssetCates(ctx, team.ID, true)
 	teamPowers := s.repo.ListTeamPowers(ctx, team.ID, true)
 	roles := s.repo.ListRoles(ctx, team.ID, true)
-	flows := s.repo.ListFlows(ctx, team.ID, true)
-	flowEdges := s.repo.ListFlowEdges(ctx, team.ID, true)
-	if issues := validateFlowGraph(flows, flowEdges); len(issues) > 0 {
+	graph := s.loadTeamGraphState(ctx, team)
+	if issues := validateFlowGraph(graph.flows, graph.flowEdges); len(issues) > 0 {
 		return TeamReleaseSnapshot{}, fmt.Errorf("发布前请先修正工作流图: %s", strings.Join(issues, "；"))
 	}
 	nodesByFlow := map[string][]GraphFlowNode{}
 	nodeEdgesByFlow := map[string][]GraphFlowNodeEdge{}
-	for _, flow := range flows {
-		nodes := s.repo.ListFlowNodes(ctx, flow.ID, true)
-		edges := s.repo.ListFlowNodeEdges(ctx, flow.ID, true)
+	for _, flow := range graph.flows {
+		nodes := graph.rows.nodesByFlowID[flow.ID]
+		edges := graph.rows.nodeEdgesByFlowID[flow.ID]
 		if issues := validateFlowNodeGraph(nodes, edges); len(issues) > 0 {
 			return TeamReleaseSnapshot{}, fmt.Errorf("发布前请先修正工作流「%s」的节点图: %s", flow.Name, strings.Join(issues, "；"))
 		}
@@ -237,11 +176,191 @@ func (s Service) buildTeamReleaseSnapshot(ctx context.Context, team teammodel.Te
 		AssetCates:      assetCatePayloads(assetCates),
 		TeamPowers:      teamPowerPayloads(teamPowers),
 		Roles:           rolePayloads(roles),
-		Flows:           flowPayloads(flows),
-		FlowEdges:       flowEdgePayloads(flows, flowEdges),
+		Flows:           flowPayloads(graph.flows),
+		FlowEdges:       flowEdgePayloads(graph.flows, graph.flowEdges),
 		NodesByFlow:     nodesByFlow,
 		NodeEdgesByFlow: nodeEdgesByFlow,
 	}, nil
+}
+
+func (s Service) loadWorkspaceGraph(ctx context.Context, teamID uint64) (workspaceGraphState, error) {
+	team, err := s.repo.FindTeam(ctx, teamID)
+	if err != nil {
+		return workspaceGraphState{}, err
+	}
+	return s.loadTeamGraphState(ctx, team), nil
+}
+
+func (s Service) loadTeamGraphState(ctx context.Context, team teammodel.Team) workspaceGraphState {
+	flows := s.repo.ListFlows(ctx, team.ID, true)
+	flowIDs := make([]uint64, 0, len(flows))
+	for _, flow := range flows {
+		flowIDs = append(flowIDs, flow.ID)
+	}
+	return workspaceGraphState{
+		team:      team,
+		flows:     flows,
+		flowEdges: s.repo.ListFlowEdges(ctx, team.ID, true),
+		rows:      s.repo.ListFlowGraphRows(ctx, flowIDs, true),
+	}
+}
+
+func (s Service) workspaceGraphPayload(ctx context.Context, teamID uint64) (map[string]any, error) {
+	graph, err := s.loadWorkspaceGraph(ctx, teamID)
+	if err != nil {
+		return nil, err
+	}
+	return graph.payload(), nil
+}
+
+func (s Service) graphMutationPayload(ctx context.Context, teamID uint64, compact bool) (map[string]any, error) {
+	if compact {
+		return s.workspaceGraphPayload(ctx, teamID)
+	}
+	return s.Workspace(ctx, teamID)
+}
+
+func (graph workspaceGraphState) payload() map[string]any {
+	nodesByFlow := map[string][]GraphFlowNode{}
+	nodeEdgesByFlow := map[string][]GraphFlowNodeEdge{}
+	for _, flow := range graph.flows {
+		nodes := graph.rows.nodesByFlowID[flow.ID]
+		nodesByFlow[flow.Key] = flowNodePayloads(nodes)
+		nodeEdgesByFlow[flow.Key] = flowNodeEdgePayloads(nodes, graph.rows.nodeEdgesByFlowID[flow.ID])
+	}
+	return map[string]any{
+		"team":               teamWorkspacePayload(graph.team),
+		"flows":              flowPayloads(graph.flows),
+		"flow_edges":         flowEdgePayloads(graph.flows, graph.flowEdges),
+		"nodes_by_flow":      nodesByFlow,
+		"node_edges_by_flow": nodeEdgesByFlow,
+	}
+}
+
+func (s Service) syncFlowGraph(ctx context.Context, teamID uint64, body map[string]any) ([]teammodel.Flow, error) {
+	flows, err := s.repo.SyncFlows(ctx, teamID, parseGraphFlows(body["flows"]))
+	if err != nil {
+		return nil, err
+	}
+	rawEdges := body["edges"]
+	if value, exists := body["flow_edges"]; exists {
+		rawEdges = value
+	}
+	edges, err := resolveFlowEdges(parseGraphFlowEdges(rawEdges), flows)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.SyncFlowEdges(ctx, teamID, edges); err != nil {
+		return nil, err
+	}
+	return flows, nil
+}
+
+func (s Service) resolveNodeGraphTarget(ctx context.Context, teamID uint64, flowID uint64, body map[string]any) (teammodel.Flow, teammodel.Team, error) {
+	if _, includesFlowGraph := body["flows"]; includesFlowGraph {
+		team, err := s.ensureTeamEditable(ctx, teamID)
+		if err != nil {
+			return teammodel.Flow{}, teammodel.Team{}, err
+		}
+		flows, err := s.syncFlowGraph(ctx, team.ID, body)
+		if err != nil {
+			return teammodel.Flow{}, teammodel.Team{}, err
+		}
+		flow := findFlow(flows, flowID, textValue(body["flow_key"]))
+		if flow.ID == 0 {
+			return teammodel.Flow{}, teammodel.Team{}, fmt.Errorf("节点所属工作流不存在")
+		}
+		return flow, team, nil
+	}
+
+	flow, err := s.repo.FindFlow(ctx, flowID)
+	if err != nil {
+		return teammodel.Flow{}, teammodel.Team{}, err
+	}
+	if teamID > 0 && flow.TeamID != teamID {
+		return teammodel.Flow{}, teammodel.Team{}, fmt.Errorf("工作流不属于当前团队")
+	}
+	team, err := s.ensureTeamEditable(ctx, flow.TeamID)
+	return flow, team, err
+}
+
+func resolveFlowEdges(payloads []GraphFlowEdge, flows []teammodel.Flow) ([]graphEdgeSync, error) {
+	byKey := make(map[string]teammodel.Flow, len(flows))
+	byID := make(map[uint64]teammodel.Flow, len(flows))
+	for _, flow := range flows {
+		byKey[flow.Key] = flow
+		byID[flow.ID] = flow
+	}
+	result := make([]graphEdgeSync, 0, len(payloads))
+	for index, payload := range payloads {
+		from := byKey[strings.TrimSpace(payload.FromKey)]
+		to := byKey[strings.TrimSpace(payload.ToKey)]
+		if from.ID == 0 {
+			from = byID[payload.FromFlowID]
+		}
+		if to.ID == 0 {
+			to = byID[payload.ToFlowID]
+		}
+		if from.ID == 0 || to.ID == 0 {
+			return nil, fmt.Errorf("工作流关系引用不存在")
+		}
+		sortValue := payload.Sort
+		if sortValue == 0 {
+			sortValue = (index + 1) * 10
+		}
+		result = append(result, graphEdgeSync{
+			fromID: from.ID, toID: to.ID, condition: payload.Condition,
+			status: payload.Status, sort: sortValue,
+		})
+	}
+	return result, nil
+}
+
+func resolveFlowNodeEdges(payloads []GraphFlowNodeEdge, nodes []teammodel.FlowNode) ([]graphEdgeSync, error) {
+	byKey := make(map[string]teammodel.FlowNode, len(nodes))
+	byID := make(map[uint64]teammodel.FlowNode, len(nodes))
+	for _, node := range nodes {
+		byKey[node.NodeKey] = node
+		byID[node.ID] = node
+	}
+	result := make([]graphEdgeSync, 0, len(payloads))
+	for index, payload := range payloads {
+		from := byKey[strings.TrimSpace(payload.FromKey)]
+		to := byKey[strings.TrimSpace(payload.ToKey)]
+		if from.ID == 0 {
+			from = byID[payload.FromNodeID]
+		}
+		if to.ID == 0 {
+			to = byID[payload.ToNodeID]
+		}
+		if from.ID == 0 || to.ID == 0 {
+			return nil, fmt.Errorf("节点关系引用不存在")
+		}
+		sortValue := payload.Sort
+		if sortValue == 0 {
+			sortValue = (index + 1) * 10
+		}
+		result = append(result, graphEdgeSync{
+			fromID: from.ID, toID: to.ID, condition: payload.Condition,
+			status: payload.Status, sort: sortValue,
+		})
+	}
+	return result, nil
+}
+
+func findFlow(flows []teammodel.Flow, id uint64, key string) teammodel.Flow {
+	key = strings.TrimSpace(key)
+	for _, flow := range flows {
+		if key != "" && flow.Key == key {
+			return flow
+		}
+	}
+	for _, flow := range flows {
+		if id > 0 && flow.ID == id {
+			return flow
+		}
+	}
+	return teammodel.Flow{}
 }
 
 func teamWorkspacePayload(team teammodel.Team) map[string]any {
@@ -356,6 +475,17 @@ func scopedPowerOptions(powers []PowerOption, teamPowers []teammodel.TeamPower) 
 		}
 	}
 	return result
+}
+
+func (s Service) teamPowerOptions(ctx context.Context, teamPowers []teammodel.TeamPower) []PowerOption {
+	if len(teamPowers) == 0 {
+		return s.repo.ListPowers(ctx)
+	}
+	ids := make([]uint64, 0, len(teamPowers))
+	for _, teamPower := range teamPowers {
+		ids = append(ids, teamPower.PowerID)
+	}
+	return scopedPowerOptions(s.repo.ListPowersByIDs(ctx, ids), teamPowers)
 }
 
 func powerAllowedByScope(teamPowers []teammodel.TeamPower, powerID uint64) bool {
@@ -584,7 +714,16 @@ func (s Service) normalizeGraphFlowNodeNames(ctx context.Context, team teammodel
 	if len(nodes) == 0 {
 		return nodes
 	}
-	lookup := s.graphFlowNodeNameLookup(ctx, team, nodes)
+	lookupNodes := make([]GraphFlowNode, 0, len(nodes))
+	for _, node := range nodes {
+		if isDefaultGraphFlowNodeName(node.Name) {
+			lookupNodes = append(lookupNodes, node)
+		}
+	}
+	if len(lookupNodes) == 0 {
+		return nodes
+	}
+	lookup := s.graphFlowNodeNameLookup(ctx, team, lookupNodes)
 	result := make([]GraphFlowNode, 0, len(nodes))
 	for _, node := range nodes {
 		if isDefaultGraphFlowNodeName(node.Name) {
@@ -607,28 +746,53 @@ func (s Service) graphFlowNodeNameLookup(ctx context.Context, team teammodel.Tea
 		powers:         map[uint64]string{},
 		teams:          map[uint64]graphTeamNameLookup{},
 	}
-	for _, cate := range s.repo.ListAssetCates(ctx, team.ID, true) {
-		lookup.assetCates[cate.ID] = strings.TrimSpace(cate.Name)
+	agentIDs := make([]uint64, 0, len(nodes))
+	knowledgeBaseIDs := make([]uint64, 0, len(nodes))
+	powerIDs := make([]uint64, 0, len(nodes))
+	needsAssetCates := false
+	needsRoles := false
+	needsCurrentTeamFlows := false
+	for _, node := range nodes {
+		agentIDs = append(agentIDs, firstUint64(node.AgentID, uint64Value(node.Config["agent_id"])))
+		knowledgeBaseIDs = append(knowledgeBaseIDs, uint64Value(node.Config["knowledge_base_id"]))
+		powerIDs = append(powerIDs, firstUint64(node.PowerID, uint64Value(node.Config["power_id"])))
+		switch strings.TrimSpace(node.Type) {
+		case teammodel.NodeTypeContext, teammodel.NodeTypeSave:
+			needsAssetCates = true
+		case teammodel.NodeTypeRole:
+			needsRoles = true
+		case teammodel.NodeTypeTeam:
+			needsCurrentTeamFlows = true
+		}
 	}
-	for _, agent := range s.repo.ListAgents(ctx) {
+	if needsAssetCates {
+		for _, cate := range s.repo.ListAssetCates(ctx, team.ID, true) {
+			lookup.assetCates[cate.ID] = strings.TrimSpace(cate.Name)
+		}
+	}
+	for _, agent := range s.repo.ListAgentsByIDs(ctx, agentIDs) {
 		lookup.agents[agent.ID] = strings.TrimSpace(agent.Name)
 	}
-	for _, base := range s.repo.ListKnowledgeBases(ctx) {
+	for _, base := range s.repo.ListKnowledgeBasesByIDs(ctx, knowledgeBaseIDs) {
 		lookup.knowledgeBases[base.ID] = strings.TrimSpace(base.Name)
 	}
-	for _, power := range s.repo.ListPowers(ctx) {
+	for _, power := range s.repo.ListPowersByIDs(ctx, powerIDs) {
 		lookup.powers[power.ID] = strings.TrimSpace(power.Name)
 	}
 	currentTeam := graphTeamNameLookup{
 		name:  strings.TrimSpace(team.Name),
 		flows: map[uint64]string{},
 	}
-	for _, flow := range s.repo.ListFlows(ctx, team.ID, true) {
-		currentTeam.flows[flow.ID] = strings.TrimSpace(flow.Name)
+	if needsCurrentTeamFlows {
+		for _, flow := range s.repo.ListFlows(ctx, team.ID, true) {
+			currentTeam.flows[flow.ID] = strings.TrimSpace(flow.Name)
+		}
 	}
 	lookup.teams[team.ID] = currentTeam
-	for _, role := range s.repo.ListRoles(ctx, team.ID, true) {
-		lookup.roles[role.ID] = strings.TrimSpace(role.Name)
+	if needsRoles {
+		for _, role := range s.repo.ListRoles(ctx, team.ID, true) {
+			lookup.roles[role.ID] = strings.TrimSpace(role.Name)
+		}
 	}
 	if !needsPublishedTeamNameLookup(nodes, team.ID) {
 		return lookup
@@ -831,22 +995,4 @@ func firstPresent(row map[string]any, keys ...string) any {
 		}
 	}
 	return nil
-}
-
-func findFlowByID(flows map[string]teammodel.Flow, id uint64) teammodel.Flow {
-	for _, flow := range flows {
-		if flow.ID == id {
-			return flow
-		}
-	}
-	return teammodel.Flow{}
-}
-
-func findFlowNodeByID(nodes map[string]teammodel.FlowNode, id uint64) teammodel.FlowNode {
-	for _, node := range nodes {
-		if node.ID == id {
-			return node
-		}
-	}
-	return teammodel.FlowNode{}
 }

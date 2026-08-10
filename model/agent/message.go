@@ -35,9 +35,12 @@ type Message struct {
 }
 
 type MessageIndex struct {
-	SessionRole struct{} `index:"session_id,role,id"`
-	SessionKind struct{} `index:"session_id,kind,id"`
-	Request     struct{} `index:"request_id"`
+	Session           struct{} `index:"session_id,id"`
+	SessionRole       struct{} `index:"session_id,role,id"`
+	SessionRoleStatus struct{} `index:"session_id,role,status,id"`
+	SessionStatus     struct{} `index:"session_id,status,id"`
+	SessionKind       struct{} `index:"session_id,kind,id"`
+	Request           struct{} `index:"request_id"`
 }
 
 func NewMessageModel() *orm.Model[Message] {

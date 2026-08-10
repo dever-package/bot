@@ -1,6 +1,13 @@
 import { getCompatModule } from "@dever/front-plugin";
 import { STORYBOARD_GRID_MAX_IMAGES } from "./storyboard-grid-layout";
 import { embeddedJSONValues, isPlainRecord } from "./structured-json";
+import {
+  collectMediaContent,
+  createMediaContentIndex,
+  pairOrderedAudioCoverItems,
+  type MediaContentIndex,
+  type MediaContentItem,
+} from "./media-content";
 
 type PlainRichNode = {
   type?: unknown;
@@ -15,6 +22,13 @@ type PlainRichDocument = PlainRichNode & {
 };
 
 export type ContentMediaKind = "image" | "video" | "audio";
+
+export type ContentMediaItem = MediaContentItem;
+
+export type ContentSupplementalText = {
+  label: "歌词" | "创作内容";
+  text: string;
+};
 
 export type StoryboardGridFrame = {
   id: string;
@@ -39,13 +53,7 @@ export type StoryboardGridDocument = {
 
 const CONTENT_MEDIA_KINDS: ContentMediaKind[] = ["image", "video", "audio"];
 
-const CONTENT_MEDIA_FIELDS: Record<ContentMediaKind, readonly string[]> = {
-  image: ["image", "image_url", "imageUrl", "images", "imageUrls"],
-  video: ["video", "video_url", "videoUrl", "videos", "videoUrls"],
-  audio: ["audio", "audio_url", "audioUrl", "audios", "audioUrls"],
-};
-
-type ContentMediaIndex = Record<ContentMediaKind, Set<string>>;
+type ContentOutputMediaIndex = MediaContentIndex<ContentMediaKind>;
 
 type ContentOutputCache<T> = {
   objects: WeakMap<object, T>;
@@ -55,7 +63,7 @@ type ContentOutputCache<T> = {
 const CONTENT_OUTPUT_STRING_CACHE_LIMIT = 64;
 const CONTENT_OUTPUT_MAX_CACHEABLE_STRING_LENGTH = 128 * 1024;
 const CONTENT_OUTPUT_CACHE_MISS = Symbol("content-output-cache-miss");
-const contentMediaIndexCache = createContentOutputCache<ContentMediaIndex>();
+const contentMediaIndexCache = createContentOutputCache<ContentOutputMediaIndex>();
 const storyboardGridCache =
   createContentOutputCache<StoryboardGridDocument | null>();
 
@@ -74,6 +82,118 @@ export function firstNonEmptyText(...values: unknown[]) {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) {
       return value.trim();
+    }
+  }
+  return "";
+}
+
+export function contentOutputSupplementalText(
+  value: unknown,
+): ContentSupplementalText | null {
+  const lyrics = firstNamedContentText(
+    value,
+    ["lyrics", "lyric", "lrc", "song_lyrics", "songLyrics"],
+    new Set<object>(),
+    0,
+  );
+  if (lyrics) {
+    return { label: "歌词", text: lyrics };
+  }
+  const text = firstNamedContentText(
+    value,
+    ["text"],
+    new Set<object>(),
+    0,
+  );
+  return text ? { label: "创作内容", text } : null;
+}
+
+function firstNamedContentText(
+  value: unknown,
+  keys: readonly string[],
+  seen: Set<object>,
+  depth: number,
+): string {
+  if (value == null || depth > 12) {
+    return "";
+  }
+  if (typeof value === "string") {
+    for (const parsed of embeddedJSONValues(value)) {
+      const text = firstNamedContentText(parsed, keys, seen, depth + 1);
+      if (text) {
+        return text;
+      }
+    }
+    return "";
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const text = firstNamedContentText(item, keys, seen, depth + 1);
+      if (text) {
+        return text;
+      }
+    }
+    return "";
+  }
+  if (!isPlainRecord(value) || seen.has(value)) {
+    return "";
+  }
+  seen.add(value);
+  for (const key of keys) {
+    const text = normalizedSupplementalText(value[key], depth + 1);
+    if (text) {
+      return text;
+    }
+  }
+  for (const key of [
+    "output",
+    "result",
+    "data",
+    "body",
+    "value",
+    "json",
+    "rich",
+    "content",
+  ]) {
+    const text = firstNamedContentText(value[key], keys, seen, depth + 1);
+    if (text) {
+      return text;
+    }
+  }
+  return "";
+}
+
+function normalizedSupplementalText(value: unknown, depth: number): string {
+  if (value == null || depth > 12) {
+    return "";
+  }
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (!text || /^(https?:\/\/|\/|data:|blob:)/i.test(text)) {
+      return "";
+    }
+    const embedded = embeddedJSONValues(text);
+    if (embedded.length > 0) {
+      return embedded
+        .map((item) => normalizedSupplementalText(item, depth + 1))
+        .filter(Boolean)
+        .join("\n");
+    }
+    return text;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => normalizedSupplementalText(item, depth + 1))
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (!isPlainRecord(value)) {
+    return "";
+  }
+  for (const key of ["text", "content", "line", "lines", "value"]) {
+    const text = normalizedSupplementalText(value[key], depth + 1);
+    if (text) {
+      return text;
     }
   }
   return "";
@@ -133,7 +253,14 @@ export function contentOutputMediaURLs(
   output: unknown,
   kind: ContentMediaKind,
 ) {
-  return Array.from(contentOutputMediaIndex(output)[kind]);
+  return Array.from(contentOutputMediaIndex(output)[kind].keys());
+}
+
+export function contentOutputMediaItems(
+  output: unknown,
+  kind: ContentMediaKind,
+) {
+  return Array.from(contentOutputMediaIndex(output)[kind].values());
 }
 
 export function storyboardGridImageURLs(value: unknown) {
@@ -142,11 +269,7 @@ export function storyboardGridImageURLs(value: unknown) {
     return [];
   }
   return Array.from(
-    new Set(
-      grid.frames
-        .map((frame) => frame.image.trim())
-        .filter(Boolean),
-    ),
+    new Set(grid.frames.map((frame) => frame.image.trim()).filter(Boolean)),
   );
 }
 
@@ -209,20 +332,23 @@ function contentOutputMediaIndex(output: unknown) {
   if (cached !== CONTENT_OUTPUT_CACHE_MISS) {
     return cached;
   }
-  const media: ContentMediaIndex = {
-    image: new Set<string>(),
-    video: new Set<string>(),
-    audio: new Set<string>(),
-  };
+  const media = createMediaContentIndex(CONTENT_MEDIA_KINDS);
   const storyboardGridImages = storyboardGridImageURLs(output);
   const seen = new Set<object>();
   for (const item of normalizeContentOutputItems(output)) {
-    collectContentMedia(item, media, seen, 0);
+    collectMediaContent(media, item, { seen });
   }
+  // Normalizers may reuse nested object references while flattening media to
+  // URLs. Revisit the raw payload with a fresh seen-set so thumbnail metadata
+  // can upgrade an already indexed URL instead of being skipped.
+  collectMediaContent(media, output);
+  pairOrderedAudioCoverItems(media);
   if (storyboardGridImages.length > 0) {
     // The ordered frames are the image source of truth for a grid document.
     // Parent covers and nested planning payloads must not become extra inputs.
-    media.image = new Set(storyboardGridImages);
+    media.image = new Map(
+      storyboardGridImages.map((url) => [url, { url, thumbnail: url }]),
+    );
   }
   return writeContentOutputCache(contentMediaIndexCache, output, media);
 }
@@ -460,15 +586,11 @@ function normalizeStoryboardGridFrame(
 
 function firstStoryboardGridFrameImage(...values: unknown[]) {
   for (const value of values) {
-    const media: Record<ContentMediaKind, Set<string>> = {
-      image: new Set<string>(),
-      video: new Set<string>(),
-      audio: new Set<string>(),
-    };
-    collectContentMedia(value, media, new Set<object>(), 0, "image");
+    const media = createMediaContentIndex(["image"] as const);
+    collectMediaContent(media, value, { kind: "image" });
     const image = media.image.values().next().value;
-    if (typeof image === "string" && image.trim()) {
-      return image.trim();
+    if (image?.url) {
+      return image.url;
     }
   }
   return "";
@@ -482,131 +604,6 @@ function positiveInteger(...values: unknown[]) {
     }
   }
   return 0;
-}
-
-function collectContentMedia(
-  value: unknown,
-  media: Record<ContentMediaKind, Set<string>>,
-  seen: Set<object>,
-  depth: number,
-  fieldKind?: ContentMediaKind,
-): void {
-  if (value == null || depth > 12) {
-    return;
-  }
-  if (Array.isArray(value)) {
-    value.forEach((item) =>
-      collectContentMedia(item, media, seen, depth + 1, fieldKind),
-    );
-    return;
-  }
-  if (typeof value === "string") {
-    const embedded = embeddedJSONValues(value);
-    if (embedded.length > 0) {
-      embedded.forEach((parsed) =>
-        collectContentMedia(parsed, media, seen, depth + 1, fieldKind),
-      );
-      return;
-    }
-    const kind = fieldKind || contentMediaKindFromURL(value);
-    if (kind) {
-      const identity = value.trim();
-      if (identity) {
-        media[kind].add(identity);
-      }
-    }
-    return;
-  }
-  if (typeof value !== "object" || seen.has(value)) {
-    return;
-  }
-  seen.add(value);
-
-  const record = value as Record<string, unknown>;
-  if (fieldKind) {
-    for (const direct of [
-      record.url,
-      record.src,
-      record.thumbnail,
-      record.download_url,
-      record.downloadUrl,
-    ]) {
-      collectContentMedia(direct, media, seen, depth + 1, fieldKind);
-    }
-  }
-  for (const kind of CONTENT_MEDIA_KINDS) {
-    for (const fieldValue of contentMediaFieldValues(record, kind)) {
-      collectContentMedia(fieldValue, media, seen, depth + 1, kind);
-    }
-  }
-
-  const explicitKind = contentMediaKindFromType(record.type);
-  const attrs = isPlainRecord(record.attrs) ? record.attrs : undefined;
-  if (
-    explicitKind &&
-    [record.url, record.src, attrs?.src, attrs?.url].some(hasContentOutput)
-  ) {
-    for (const direct of [record.url, record.src, attrs?.src, attrs?.url]) {
-      collectContentMedia(direct, media, seen, depth + 1, explicitKind);
-    }
-  }
-
-  for (const nested of [
-    record.rich,
-    record.content,
-    record.output,
-    record.result,
-    record.data,
-    record.body,
-    record.value,
-    record.json,
-    record.media_files,
-    record.mediaFiles,
-  ]) {
-    collectContentMedia(nested, media, seen, depth + 1);
-  }
-}
-
-function contentMediaFieldValues(
-  record: Record<string, unknown>,
-  kind: ContentMediaKind,
-) {
-  return CONTENT_MEDIA_FIELDS[kind].map((field) => record[field]);
-}
-
-function contentMediaKindFromType(value: unknown) {
-  const normalized = String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s_-]+/g, "");
-  if (["image", "mediaimage", "editormediaimage"].includes(normalized)) {
-    return "image" as const;
-  }
-  if (["video", "mediavideo", "editormediavideo"].includes(normalized)) {
-    return "video" as const;
-  }
-  if (
-    ["audio", "music", "voice", "mediaaudio", "editormediaaudio"].includes(
-      normalized,
-    )
-  ) {
-    return "audio" as const;
-  }
-  return undefined;
-}
-
-function contentMediaKindFromURL(value: string) {
-  const url = value.trim();
-  if (/\.(png|jpe?g|gif|webp|avif|svg)(?:[?#].*)?$/i.test(url)) {
-    return "image" as const;
-  }
-  if (/\.(mp4|webm|mov|m4v)(?:[?#].*)?$/i.test(url)) {
-    return "video" as const;
-  }
-  if (/\.(mp3|wav|ogg|m4a|aac)(?:[?#].*)?$/i.test(url)) {
-    return "audio" as const;
-  }
-  return undefined;
 }
 
 function plainRichDocument(value: unknown): PlainRichDocument | null {

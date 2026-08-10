@@ -122,25 +122,27 @@ func (s Service) workspaceCanvasGraphByRelease(ctx context.Context, teamID uint6
 }
 
 func (s Service) currentRuntimeGraph(ctx context.Context, team teammodel.Team) runtimeGraph {
-	flows := s.repo.ListFlows(ctx, team.ID, true)
+	graphState := s.loadTeamGraphState(ctx, team)
 	graph := runtimeGraph{
 		Team:              team,
 		AssetCates:        s.repo.ListAssetCates(ctx, team.ID, true),
 		TeamPowers:        s.repo.ListTeamPowers(ctx, team.ID, true),
 		Roles:             s.repo.ListRoles(ctx, team.ID, true),
-		Flows:             flows,
-		FlowEdges:         s.repo.ListFlowEdges(ctx, team.ID, true),
-		NodesByFlowID:     map[uint64][]teammodel.FlowNode{},
-		NodeEdgesByFlowID: map[uint64][]teammodel.FlowNodeEdge{},
-	}
-	for _, flow := range flows {
-		graph.NodesByFlowID[flow.ID] = s.repo.ListFlowNodes(ctx, flow.ID, true)
-		graph.NodeEdgesByFlowID[flow.ID] = s.repo.ListFlowNodeEdges(ctx, flow.ID, true)
+		Flows:             graphState.flows,
+		FlowEdges:         graphState.flowEdges,
+		NodesByFlowID:     graphState.rows.nodesByFlowID,
+		NodeEdgesByFlowID: graphState.rows.nodeEdgesByFlowID,
 	}
 	return graph
 }
 
 func runtimeGraphFromRelease(release teammodel.TeamRelease) (runtimeGraph, error) {
+	return cachedRuntimeGraph(release, func() (runtimeGraph, error) {
+		return parseRuntimeGraphFromRelease(release)
+	})
+}
+
+func parseRuntimeGraphFromRelease(release teammodel.TeamRelease) (runtimeGraph, error) {
 	snapshot, err := releaseSnapshotFromText(release.Snapshot)
 	if err != nil {
 		return runtimeGraph{}, err
@@ -216,15 +218,7 @@ func runtimeFlowByKey(flows []teammodel.Flow) map[string]teammodel.Flow {
 }
 
 func workspaceCanvasGraphFromRelease(release teammodel.TeamRelease) (runtimeGraph, error) {
-	var snapshot workspaceCanvasReleaseSnapshot
-	if err := json.Unmarshal([]byte(release.Snapshot), &snapshot); err != nil {
-		return runtimeGraph{}, fmt.Errorf("读取发布快照失败: %w", err)
-	}
-	if snapshot.Team.ID == 0 {
-		return runtimeGraph{}, fmt.Errorf("发布快照缺少团队信息")
-	}
-
-	return runtimeGraphFromCanvasSnapshot(snapshot), nil
+	return runtimeGraphFromRelease(release)
 }
 
 func releaseSnapshotFromText(text string) (TeamReleaseSnapshot, error) {

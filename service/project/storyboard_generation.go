@@ -50,6 +50,10 @@ func (s Service) GenerateStoryboardShot(ctx context.Context, projectID uint64, r
 	if err != nil {
 		return nil, err
 	}
+	workType, err := botmodel.NormalizeStoryboardWorkType(storyboardText(document["work_type"]))
+	if err != nil {
+		return nil, err
+	}
 
 	form, err := s.CanvasPowerForm(
 		ctx,
@@ -76,7 +80,10 @@ func (s Service) GenerateStoryboardShot(ctx context.Context, projectID uint64, r
 		PowerID:        req.PowerID,
 		PowerKey:       req.PowerKey,
 		SourceTargetID: req.SourceTargetID,
-		Input:          map[string]any{"prompt": prompt},
+		Input: map[string]any{
+			"prompt":               prompt,
+			"storyboard_work_type": workType,
+		},
 		Params: storyboardShotGenerationParams(
 			req.Params,
 			textValue(form["primary_param_key"]),

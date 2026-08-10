@@ -5,26 +5,16 @@ import (
 	"strings"
 
 	"github.com/shemic/dever/util"
+
+	runtimejson "github.com/dever-package/bot/service/agent/runtime/internal/jsoncodec"
 )
 
 func encodeJSON(value any, fallback string) string {
-	if value == nil {
-		return fallback
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return fallback
-	}
-	return string(encoded)
+	return runtimejson.Encode(value, fallback)
 }
 
 func decodeMap(value string) map[string]any {
-	result := map[string]any{}
-	if strings.TrimSpace(value) == "" {
-		return result
-	}
-	_ = json.Unmarshal([]byte(value), &result)
-	return result
+	return runtimejson.DecodeMap(value)
 }
 
 func decodeIDs(value string) []uint64 {

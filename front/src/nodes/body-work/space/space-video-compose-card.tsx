@@ -7,7 +7,7 @@ import {
 } from "./space-video-compose";
 import { SequenceCard } from "./space-sequence-card";
 import { SpaceTooltip } from "./space-tooltip";
-import { FirstFrameVideo } from "../../shared/first-frame-video";
+import { FirstFrameVideo } from "@/components/media/first-frame-video";
 
 export type VideoComposeClipPanel = "sound" | "transition";
 
@@ -48,6 +48,8 @@ export function VideoComposeClipCard({
   onDrop: () => void;
   onDragEnd: () => void;
 }) {
+  const videoPoster =
+    clip.visualVideo?.mediaThumbnail || item?.preview.videoPosterUrl || "";
   const transitionActive = !last && clip.transitionToNext.type !== "none";
   const soundActive = Boolean(
     clip.originalAudioSource || clip.speechTracks.length > 0,
@@ -96,9 +98,10 @@ export function VideoComposeClipCard({
         {clip.visualVideo?.mediaUrl || item?.preview.videoUrl ? (
           <FirstFrameVideo
             src={clip.visualVideo?.mediaUrl || item?.preview.videoUrl || ""}
+            poster={videoPoster || undefined}
             muted
             playsInline
-            preload="metadata"
+            preload={videoPoster && clip.duration > 0 ? "none" : "metadata"}
             onLoadedMetadata={(event) => {
               const duration = event.currentTarget.duration;
               if (Number.isFinite(duration) && duration > 0) {

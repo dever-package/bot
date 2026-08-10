@@ -245,6 +245,39 @@ func (s Service) StopProjectRun(ctx context.Context, projectID uint64, runID uin
 	return s.stopResolvedRun(ctx, run)
 }
 
+type ProjectRunStopResult struct {
+	Run      *teammodel.Run
+	NodeRuns []teammodel.NodeRun
+	Payload  map[string]any
+	Status   string
+	Error    error
+}
+
+// StopProjectRuns resolves runs and their node runs in batches. It is intended
+// for project-level bulk cancellation while preserving the single-run side
+// effects and response semantics.
+func (s Service) StopProjectRuns(ctx context.Context, projectID uint64, runIDs []uint64) map[uint64]ProjectRunStopResult {
+	result := make(map[uint64]ProjectRunStopResult)
+	runIDs = distinctTeamRunIDs(runIDs)
+	if projectID == 0 || len(runIDs) == 0 {
+		return result
+	}
+	runsByID := s.repo.FindRunsInProject(ctx, projectID, runIDs)
+	nodeRunsByRunID := s.repo.ListNodeRunsByRunIDs(ctx, runIDs)
+	for _, runID := range runIDs {
+		run := runsByID[runID]
+		payload, err := s.stopResolvedRunWithNodeRuns(ctx, run, nodeRunsByRunID[runID], true)
+		result[runID] = ProjectRunStopResult{
+			Run:      run,
+			NodeRuns: nodeRunsByRunID[runID],
+			Payload:  payload,
+			Status:   stoppedRunStatus(run, payload),
+			Error:    err,
+		}
+	}
+	return result
+}
+
 func (s Service) StopBodyRun(ctx context.Context, bodyID uint64, runID uint64, requestID string) (map[string]any, error) {
 	run := s.resolveBodyRun(ctx, bodyID, runID, requestID)
 	if run == nil {
@@ -255,6 +288,15 @@ func (s Service) StopBodyRun(ctx context.Context, bodyID uint64, runID uint64, r
 }
 
 func (s Service) stopResolvedRun(ctx context.Context, run *teammodel.Run) (map[string]any, error) {
+	return s.stopResolvedRunWithNodeRuns(ctx, run, nil, false)
+}
+
+func (s Service) stopResolvedRunWithNodeRuns(
+	ctx context.Context,
+	run *teammodel.Run,
+	nodeRuns []teammodel.NodeRun,
+	nodeRunsLoaded bool,
+) (map[string]any, error) {
 	if run == nil {
 		return nil, fmt.Errorf("运行不存在")
 	}
@@ -270,7 +312,10 @@ func (s Service) stopResolvedRun(ctx context.Context, run *teammodel.Run) (map[s
 		s.agent.StopTask(run.ChildRequestID)
 		_ = s.gateway.StopStream(ctx, run.ChildRequestID)
 	}
-	for _, nodeRun := range s.repo.ListNodeRuns(ctx, run.ID) {
+	if !nodeRunsLoaded {
+		nodeRuns = s.repo.ListNodeRuns(ctx, run.ID)
+	}
+	for _, nodeRun := range nodeRuns {
 		if nodeRun.Status != teammodel.RunStatusPending && nodeRun.Status != teammodel.RunStatusRunning && nodeRun.Status != teammodel.RunStatusWaiting {
 			continue
 		}
@@ -298,6 +343,21 @@ func (s Service) stopResolvedRun(ctx context.Context, run *teammodel.Run) (map[s
 		"request_id": run.RequestID,
 		"status":     teammodel.RunStatusCanceled,
 	}, nil
+}
+
+func stoppedRunStatus(run *teammodel.Run, payload map[string]any) string {
+	if status := strings.TrimSpace(firstText(payload["status"])); status != "" {
+		return status
+	}
+	if runPayload := mapValue(payload["run"]); runPayload != nil {
+		if status := strings.TrimSpace(firstText(runPayload["status"])); status != "" {
+			return status
+		}
+	}
+	if run != nil {
+		return strings.TrimSpace(run.Status)
+	}
+	return ""
 }
 
 func (s Service) RunStatus(ctx context.Context, runID uint64, requestID string) (map[string]any, error) {

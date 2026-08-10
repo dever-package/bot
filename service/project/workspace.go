@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -62,16 +63,12 @@ func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, asse
 	if err != nil {
 		return nil, err
 	}
-	savedAt := time.Now()
-	record := map[string]any{
-		"next_node_no": clean.NextNodeNo,
-		"nodes":        jsonText(clean.Nodes, "[]"),
-		"edges":        jsonText(clean.Edges, "[]"),
-		"viewport":     jsonText(clean.Viewport, "{}"),
-		"updated_at":   savedAt,
+	content, err := encodeCanvasContent(clean)
+	if err != nil {
+		return nil, err
 	}
-	nextMaterialSlots := canvasMaterialSlots(clean.Nodes)
-	nextReferencedAssetIDs := canvasReferencedAssetIDs(clean.Nodes)
+	savedAt := time.Now()
+	changed := false
 	if err := orm.Transaction(ctx, func(tx context.Context) error {
 		model := projectmodel.NewCanvasModel()
 		row := model.Find(tx, map[string]any{
@@ -79,25 +76,39 @@ func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, asse
 			"asset_cate_id": clean.AssetCateID,
 		})
 		if row == nil {
+			record := content.record(savedAt)
 			record["project_id"] = project.ID
 			record["asset_cate_id"] = clean.AssetCateID
-			record["created_at"] = time.Now()
+			record["created_at"] = savedAt
 			if model.Insert(tx, record) == 0 {
 				return fmt.Errorf("保存画布失败")
 			}
-		} else if model.Update(tx, map[string]any{"id": row.ID}, record) == 0 {
-			return fmt.Errorf("保存画布失败")
+			changed = true
+		} else {
+			if content.matches(*row) {
+				savedAt = row.UpdatedAt
+				return nil
+			}
+			if model.Update(tx, map[string]any{"id": row.ID}, content.record(savedAt)) == 0 {
+				return fmt.Errorf("保存画布失败")
+			}
+			changed = true
+			if row.Nodes == content.Nodes {
+				return nil
+			}
 		}
+
+		dependencies := inspectCanvasNodes(clean.Nodes)
 		s.project.asset.EnsureCanvasMaterialSlotsActive(
 			tx,
 			project.ID,
 			clean.AssetCateID,
-			nextMaterialSlots,
+			dependencies.MaterialSlots,
 		)
 		s.project.asset.EnsureCanvasReferencedMaterialsActive(
 			tx,
 			project.ID,
-			nextReferencedAssetIDs,
+			dependencies.ReferencedAssetIDs,
 		)
 		return nil
 	}); err != nil {
@@ -106,28 +117,85 @@ func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, asse
 	return map[string]any{
 		"asset_cate_id": clean.AssetCateID,
 		"updated_at":    savedAt,
+		"changed":       changed,
 	}, nil
 }
 
-func canvasMaterialSlots(nodes []any) []assetservice.CanvasMaterialSlot {
-	result := make([]assetservice.CanvasMaterialSlot, 0, len(nodes))
+type canvasContent struct {
+	NextNodeNo int
+	Nodes      string
+	Edges      string
+	Viewport   string
+}
+
+func encodeCanvasContent(canvas persistedCanvas) (canvasContent, error) {
+	nodes, err := json.Marshal(canvas.Nodes)
+	if err != nil {
+		return canvasContent{}, fmt.Errorf("编码画布节点失败: %w", err)
+	}
+	edges, err := json.Marshal(canvas.Edges)
+	if err != nil {
+		return canvasContent{}, fmt.Errorf("编码画布连线失败: %w", err)
+	}
+	viewport, err := json.Marshal(canvas.Viewport)
+	if err != nil {
+		return canvasContent{}, fmt.Errorf("编码画布视图失败: %w", err)
+	}
+	return canvasContent{
+		NextNodeNo: canvas.NextNodeNo,
+		Nodes:      string(nodes),
+		Edges:      string(edges),
+		Viewport:   string(viewport),
+	}, nil
+}
+
+func (content canvasContent) record(updatedAt time.Time) map[string]any {
+	return map[string]any{
+		"next_node_no": content.NextNodeNo,
+		"nodes":        content.Nodes,
+		"edges":        content.Edges,
+		"viewport":     content.Viewport,
+		"updated_at":   updatedAt,
+	}
+}
+
+func (content canvasContent) matches(row projectmodel.Canvas) bool {
+	return content.NextNodeNo == row.NextNodeNo &&
+		content.Nodes == row.Nodes &&
+		content.Edges == row.Edges &&
+		content.Viewport == row.Viewport
+}
+
+type canvasNodeDependencies struct {
+	MaterialSlots      []assetservice.CanvasMaterialSlot
+	ReferencedAssetIDs []uint64
+}
+
+func inspectCanvasNodes(nodes []any) canvasNodeDependencies {
+	dependencies := canvasNodeDependencies{
+		MaterialSlots: make([]assetservice.CanvasMaterialSlot, 0, len(nodes)),
+	}
+	referencedAssetIDs := map[uint64]struct{}{}
 	for _, raw := range nodes {
 		node, _ := raw.(map[string]any)
 		nodeType := strings.TrimSpace(fmt.Sprint(node["type"]))
-		if nodeType != "power" && nodeType != "agent" && nodeType != "flow" {
-			continue
+		if nodeType == "power" || nodeType == "agent" || nodeType == "flow" {
+			nodeKey := strings.TrimSpace(fmt.Sprint(node["id"]))
+			if nodeKey != "" {
+				name := strings.TrimSpace(fmt.Sprint(node["title"]))
+				if name == "" {
+					name = nodeType
+				}
+				dependencies.MaterialSlots = append(dependencies.MaterialSlots, assetservice.CanvasMaterialSlot{NodeKey: nodeKey, Name: name})
+			}
 		}
-		nodeKey := strings.TrimSpace(fmt.Sprint(node["id"]))
-		if nodeKey == "" {
-			continue
-		}
-		name := strings.TrimSpace(fmt.Sprint(node["title"]))
-		if name == "" {
-			name = nodeType
-		}
-		result = append(result, assetservice.CanvasMaterialSlot{NodeKey: nodeKey, Name: name})
+		collectCanvasReferencedAssetIDs(raw, referencedAssetIDs)
 	}
-	return result
+	dependencies.ReferencedAssetIDs = make([]uint64, 0, len(referencedAssetIDs))
+	for assetID := range referencedAssetIDs {
+		dependencies.ReferencedAssetIDs = append(dependencies.ReferencedAssetIDs, assetID)
+	}
+	return dependencies
 }
 
 func (s WorkspaceService) projectCanvas(ctx context.Context, projectID uint64, assetCateID uint64) map[string]any {
@@ -150,17 +218,16 @@ func (s WorkspaceService) projectCanvas(ctx context.Context, projectID uint64, a
 func (s WorkspaceService) canvasBundle(ctx context.Context, projectID uint64, assetCateID uint64) map[string]any {
 	canvas := s.projectCanvas(ctx, projectID, assetCateID)
 	nodes := sliceValue(canvas["nodes"])
-	slots := canvasMaterialSlots(nodes)
-	nodeKeys := make([]string, 0, len(slots))
-	for _, slot := range slots {
+	dependencies := inspectCanvasNodes(nodes)
+	nodeKeys := make([]string, 0, len(dependencies.MaterialSlots))
+	for _, slot := range dependencies.MaterialSlots {
 		nodeKeys = append(nodeKeys, slot.NodeKey)
 	}
-	referencedAssetIDs := canvasReferencedAssetIDs(nodes)
 	assets := s.project.asset.CanvasReferences(
 		ctx,
 		projectID,
 		assetCateID,
-		referencedAssetIDs,
+		dependencies.ReferencedAssetIDs,
 		nodeKeys,
 	)
 	currentVersions := canvasCurrentAssetVersions(assets)
@@ -227,18 +294,6 @@ func workspaceBootstrapAssetCateID(assetCates []teamservice.GraphAssetCate, requ
 		}
 	}
 	return assetCates[0].ID
-}
-
-func canvasReferencedAssetIDs(nodes []any) []uint64 {
-	seen := map[uint64]struct{}{}
-	for _, node := range nodes {
-		collectCanvasReferencedAssetIDs(node, seen)
-	}
-	result := make([]uint64, 0, len(seen))
-	for assetID := range seen {
-		result = append(result, assetID)
-	}
-	return result
 }
 
 func collectCanvasReferencedAssetIDs(raw any, result map[uint64]struct{}) {

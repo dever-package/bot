@@ -1,6 +1,9 @@
 import type { CanvasVideoComposition } from "./space-video-compose";
 import type { StoryboardGridLayout } from "../shared/storyboard-grid-layout";
 import type { PowerCategory } from "../shared/power-menu";
+import type { StoryboardWorkType } from "./space-storyboard-work-type";
+
+export type { StoryboardWorkType } from "./space-storyboard-work-type";
 
 export type AssetKind =
   | "text"
@@ -16,6 +19,7 @@ export type CanvasContentPreview = {
   text: string;
   imageUrl: string;
   videoUrl: string;
+  videoPosterUrl?: string;
   audioUrl: string;
   fileUrl: string;
 };
@@ -182,6 +186,32 @@ export type PowerParamSource = {
   sort?: number;
 };
 
+export type StoryboardWorkTypeSpec = {
+  key: StoryboardWorkType;
+  name: string;
+  sort: number;
+  required_reference_purposes: string[];
+};
+
+export type StoryboardReferencePurposeScope =
+  | "global"
+  | "material"
+  | "shot"
+  | "composition"
+  | "context";
+
+export type StoryboardReferencePurposeSpec = {
+  key: CanvasStoryboardReferencePurpose;
+  name: string;
+  media_kinds: CanvasStoryboardReference["kind"][];
+  work_types: StoryboardWorkType[];
+  scope: StoryboardReferencePurposeScope;
+  material_type: "" | "character" | "scene" | "prop";
+  default_media_kinds: CanvasStoryboardReference["kind"][];
+  max_count: number;
+  sort: number;
+};
+
 export type PowerForm = {
   release_id?: number;
   flow?: TeamFlow | Record<string, unknown>;
@@ -191,6 +221,8 @@ export type PowerForm = {
   sources: PowerParamSource[];
   params: PowerParam[];
   primary_param_key?: string;
+  storyboard_work_types: StoryboardWorkTypeSpec[];
+  storyboard_reference_purposes: StoryboardReferencePurposeSpec[];
 };
 
 export type CanvasFunctionOption = {
@@ -316,6 +348,7 @@ export type CanvasComposerDraft = {
   selectedTargetId?: number;
   videoComposition?: CanvasVideoComposition;
   storyboardReferences?: CanvasStoryboardReference[];
+  storyboardWorkType?: StoryboardWorkType;
   storyboardGridLayout?: StoryboardGridLayout;
   multiImageMode?: CanvasMultiImageMode;
 };
@@ -330,6 +363,7 @@ export type CanvasReferenceContent = {
         ref_id: number;
         label: string;
         usage?: string;
+        purpose?: string;
         ref_trigger?: string;
         ref_version_id?: number;
         ref_origin?: string;
@@ -342,22 +376,15 @@ export type CanvasReferenceContent = {
   >;
 };
 
-export type CanvasStoryboardReferencePurpose =
-  | "visual_style"
-  | "motion_style"
-  | "character"
-  | "scene"
-  | "prop"
-  | "shot";
+export type CanvasStoryboardReferencePurpose = string;
 
 export type CanvasStoryboardReference = {
   key: string;
   asset_id: number;
   version_id?: number;
   label: string;
-  kind: "image" | "video";
+  kind: "image" | "video" | "audio";
   purpose: CanvasStoryboardReferencePurpose;
-  instruction: string;
 };
 
 export type CanvasStoryboardItemType =

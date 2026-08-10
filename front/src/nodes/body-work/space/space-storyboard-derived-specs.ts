@@ -368,12 +368,13 @@ function storyboardMaterialPrompt(
   material: StoryboardMaterial,
   references: CanvasStoryboardReference[],
 ) {
-  const referenceInstruction = storyboardReferenceInstructions(references);
+  const referenceContext = storyboardReferenceContext(references);
   const prompt = material.prompt.trim();
   if (prompt) {
     return storyboardPromptWithStyle(
       storyboard,
-      `${referenceInstruction}${prompt}。${MATERIAL_REFERENCE_RULES[material.type]}`,
+      `${referenceContext}${prompt}。${MATERIAL_REFERENCE_RULES[material.type]}`,
+      material.type,
     );
   }
   const relatedDescriptions = storyboard.shots
@@ -385,7 +386,8 @@ function storyboardMaterialPrompt(
     : "保持整部作品的统一视觉风格";
   return storyboardPromptWithStyle(
     storyboard,
-    `${referenceInstruction}${STORYBOARD_MATERIAL_LABELS[material.type]}“${material.name}”的素材生成图。${context}。${MATERIAL_REFERENCE_RULES[material.type]}`,
+    `${referenceContext}${STORYBOARD_MATERIAL_LABELS[material.type]}“${material.name}”的素材生成图。${context}。${MATERIAL_REFERENCE_RULES[material.type]}`,
+    material.type,
   );
 }
 
@@ -525,7 +527,7 @@ function storyboardVideoPrompt(
     `出镜状态：${shot.continuity_state.exit.trim()}`,
     "视频必须从入镜状态开始，只完成本镜头的主要动作，并准确停在出镜状态",
     basePrompt,
-    storyboardReferenceInstructions(references),
+    storyboardReferenceContext(references),
     shot.continue_previous
       ? `使用上一镜头真实尾帧继续生成。连续性锚点：${shot.continuity_anchor}。保持人物、服装、道具、场景光线和动作方向一致，但不要重复上一镜头内容`
       : "这是新的镜头段落，以当前镜头参考图为画面锚点建立画面",
@@ -586,10 +588,7 @@ function storyboardMaterialReferences(
         reference.kind === "image" &&
         material.reference_keys.includes(reference.key),
     ),
-    ...storyboard.references.filter(
-      (reference) =>
-        reference.kind === "image" && reference.purpose === "visual_style",
-    ),
+    ...storyboardGlobalReferences(storyboard, "image"),
   ]);
 }
 
@@ -602,10 +601,7 @@ function storyboardShotImageReferences(
       (reference) =>
         reference.kind === "image" && shot.reference_keys.includes(reference.key),
     ),
-    ...storyboard.references.filter(
-      (reference) =>
-        reference.kind === "image" && reference.purpose === "visual_style",
-    ),
+    ...storyboardGlobalReferences(storyboard, "image"),
   ]);
 }
 
@@ -618,16 +614,38 @@ function storyboardShotVideoReferences(
       (reference) =>
         reference.kind === "video" && shot.reference_keys.includes(reference.key),
     ),
-    ...storyboard.references.filter(
-      (reference) =>
-        reference.kind === "video" &&
-        (reference.purpose === "motion_style" ||
-          reference.purpose === "visual_style"),
-    ),
+    ...storyboardGlobalReferences(storyboard, "video"),
   ]);
 }
 
-function storyboardReferenceInstructions(
+const STORYBOARD_GLOBAL_REFERENCE_PURPOSES: Record<
+  "image" | "video",
+  ReadonlySet<CanvasStoryboardReference["purpose"]>
+> = {
+  image: new Set<CanvasStoryboardReference["purpose"]>([
+    "visual_style",
+    "brand_style",
+  ]),
+  video: new Set<CanvasStoryboardReference["purpose"]>([
+    "visual_style",
+    "motion_style",
+    "performance",
+    "brand_style",
+  ]),
+};
+
+function storyboardGlobalReferences(
+  storyboard: StoryboardDocument,
+  kind: "image" | "video",
+) {
+  const purposes = STORYBOARD_GLOBAL_REFERENCE_PURPOSES[kind];
+  return storyboard.references.filter(
+    (reference) =>
+      reference.kind === kind && purposes.has(reference.purpose),
+  );
+}
+
+function storyboardReferenceContext(
   references: CanvasStoryboardReference[],
 ) {
   const descriptions = references.map(storyboardReferenceDescription);
@@ -646,17 +664,18 @@ const STORYBOARD_REFERENCE_USE_RULES: Record<
   scene: "作为指定场景的空间、陈设与光线锚点",
   prop: "作为指定道具的造型、材质与比例锚点",
   shot: "作为指定镜头的主体、构图与空间关系锚点",
+  soundtrack: "作为全片主音轨的音乐气质和节奏依据",
+  performance: "只参考动作、舞蹈、演奏或表演方式，不沿用原视频主体身份",
+  product: "作为广告商品主体的外观、材质、比例与关键细节锚点",
+  brand_style: "只参考品牌色彩、陈列、光线和影调，不复制其中的文字或主体",
+  brand_logo: "只作为品牌身份和构图规划参考，不要求模型还原可辨识文字",
 };
 
 function storyboardReferenceDescription(
   reference: CanvasStoryboardReference,
 ) {
-  return `${reference.label}（${[
-    STORYBOARD_REFERENCE_USE_RULES[reference.purpose],
-    reference.instruction,
-  ]
-    .filter(Boolean)
-    .join("；")}）`;
+  const purposeRule = STORYBOARD_REFERENCE_USE_RULES[reference.purpose];
+  return purposeRule ? `${reference.label}（${purposeRule}）` : reference.label;
 }
 
 function uniqueStoryboardReferences(

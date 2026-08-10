@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { Suspense, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Sparkles } from "lucide-react";
 import { BodySiteBrand } from "../auth/site-brand";
@@ -9,12 +9,17 @@ import type { BodyContentNavigation } from "../content/content-api";
 import { WorkbenchContentMenu } from "./workbench-content-menu";
 import { WorkbenchSystemMessagePanel } from "./workbench-system-message-panel";
 import { WorkbenchUserMenu } from "./workbench-user-menu";
+import {
+  createPreloadableComponent,
+  createPreloadableModule,
+  useDeferredPreloadIntent,
+} from "../../shared/preloadable";
 
-const WorkbenchAccountCenter = lazy(() =>
-  import("./workbench-account-center").then((module) => ({
-    default: module.WorkbenchAccountCenter,
-  })),
+const workbenchAccountCenter = createPreloadableComponent(
+  createPreloadableModule(() => import("./workbench-account-center")),
+  (module) => module.WorkbenchAccountCenter,
 );
+const WorkbenchAccountCenter = workbenchAccountCenter.Component;
 
 export type WorkbenchPageKey = "function" | "dialogue" | "works" | "assets";
 
@@ -74,25 +79,12 @@ export function WorkbenchSidebar({
         <nav className="hb-laper-nav" aria-label="工作区导航">
           {navigation.map((page) => {
             return (
-              <button
+              <WorkbenchNavigationAction
                 key={page.key}
-                type="button"
-                className={`hb-laper-nav-item ${
-                  activePage === page.key ? "is-active" : ""
-                }`}
-                aria-current={activePage === page.key ? "page" : undefined}
-                title={page.label}
+                page={page}
+                active={activePage === page.key}
                 onClick={() => onNavigate(page.key)}
-              >
-                <ConfiguredMenuIcon
-                  iconName={page.iconName}
-                  iconImage={page.iconImage}
-                  fallbackIcon={page.fallbackIcon}
-                  className="hb-configured-menu-icon"
-                  strokeWidth={1.9}
-                />
-                <span>{page.label}</span>
-              </button>
+              />
             );
           })}
         </nav>
@@ -107,6 +99,7 @@ export function WorkbenchSidebar({
                   iconImage={site.homeMenu.points.iconImage}
                   fallbackIcon={Sparkles}
                   label={site.homeMenu.points.name}
+                  onIntent={workbenchAccountCenter.preload}
                   onClick={() => setPointsOpen(true)}
                 />
               );
@@ -143,25 +136,63 @@ export function WorkbenchSidebar({
   );
 }
 
+function WorkbenchNavigationAction({
+  page,
+  active,
+  onClick,
+}: {
+  page: WorkbenchNavigationItem;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`hb-laper-nav-item ${active ? "is-active" : ""}`}
+      aria-current={active ? "page" : undefined}
+      title={page.label}
+      onClick={onClick}
+    >
+      <ConfiguredMenuIcon
+        iconName={page.iconName}
+        iconImage={page.iconImage}
+        fallbackIcon={page.fallbackIcon}
+        className="hb-configured-menu-icon"
+        strokeWidth={1.9}
+      />
+      <span>{page.label}</span>
+    </button>
+  );
+}
+
 function RailAction({
   iconName,
   iconImage,
   fallbackIcon,
   label,
+  onIntent,
   onClick,
 }: {
   iconName: string;
   iconImage: string;
   fallbackIcon: LucideIcon;
   label: string;
+  onIntent?: () => void;
   onClick: () => void;
 }) {
+  const intent = useDeferredPreloadIntent(onIntent);
   return (
     <button
       type="button"
       className="hb-rail-action"
       title={label}
-      onClick={onClick}
+      onPointerEnter={intent.schedule}
+      onPointerLeave={intent.cancel}
+      onFocus={intent.preloadNow}
+      onClick={() => {
+        intent.preloadNow();
+        onClick();
+      }}
     >
       <ConfiguredMenuIcon
         iconName={iconName}

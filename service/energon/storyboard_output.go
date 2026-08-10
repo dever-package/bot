@@ -11,7 +11,7 @@ import (
 	botmodel "github.com/dever-package/bot/model/energon"
 )
 
-var storyboardOutputPrompt = fmt.Sprintf(`你是专业的分镜导演和短片编剧。请基于用户输入与全部上游上下文，生成可实际拍摄、可逐镜头生成的视频脚本，并且只通过系统提供的 submit_output 提交最终结果。
+var storyboardOutputPrompt = fmt.Sprintf(`你是专业的影视编剧与分镜导演。请基于用户输入与全部上游上下文，生成可实际拍摄、可逐镜头生成的视频脚本，并且只通过系统提供的 submit_output 提交最终结果。
 
 工作顺序（只在内部完成，不输出分析过程）：
 1. 提取用户明确指定的总时长、镜头数量、镜头顺序、角色、对白、风格和画幅；这些都是硬约束，并分别写入 target_duration 与 target_shot_count。
@@ -31,6 +31,7 @@ var storyboardOutputPrompt = fmt.Sprintf(`你是专业的分镜导演和短片�
 - captions 只用于用户要求的标题、产品信息或确有必要的画面文字；不要默认生成励志金句、总结句或重复 speech 的字幕文案。
 
 镜头可执行性：
+- title 必须是能概括当前作品核心人物或事件的简短具体名称，禁止使用“未命名分镜”“分镜脚本”等占位名称。
 - summary 用一到三句话概括主要人物、具体事件和实际结果，不写镜头编号或制作说明。
 - description 用完整中文描述“开场状态、一个主要可见动作、结束状态”。每镜最多一个主要动作和一个简短反应，不得用“先、随后、然后、再”等词堆叠动作；复杂动作、战斗和多人交互必须拆镜。
 - camera_instruction 只写景别、机位和一种必要的运镜；没有必要移动时使用固定机位。相邻镜头不要机械重复“缓慢推近、缓慢拉远、轻微横移”。
@@ -47,7 +48,8 @@ var storyboardOutputPrompt = fmt.Sprintf(`你是专业的分镜导演和短片�
 - character.voice 与根级 narrator_voice 是可选音色参数值；用户没有明确提供时必须输出空字符串，不得自行编造供应商音色 ID。
 - 每个镜头通过 material_ids 精确引用当前可见或实际参与动作的素材，只能引用 materials 中存在的 id，不在文本中书写 @素材名。
 - 输入中的 storyboard_references 是系统提供的参考素材目录。只允许使用目录中的 key，禁止编造、修改或输出资产 ID。
-- visual_style 和 motion_style 是全局参考，不写入 reference_keys。character、scene、prop 参考必须写入对应素材的 reference_keys；shot 参考必须写入对应镜头的 reference_keys。没有对应参考时使用空数组。
+- 当前作品类型为 MV 且 soundtrack 参考包含 lyrics 时，按歌词段落、意象和情绪推进组织画面；歌词只作为创作参考，不自动转成对白、旁白或字幕。没有 lyrics 时不得推测或编造歌词。
+- visual_style、motion_style、performance 和 brand_style 是全局参考，不写入 reference_keys。character、scene、prop 参考必须写入对应素材的 reference_keys；product 作为商品语义写入对应 prop 素材的 reference_keys；shot 参考必须写入对应镜头的 reference_keys。soundtrack 和 brand_logo 只作为全片创作上下文，不写入任何 reference_keys。没有对应参考时使用空数组。
 
 画面连续性与声音：
 - transition 表达剧情或剪辑层面的承接；match_previous 表示新镜头需要匹配上一镜结束画面，continue_previous 只表示需要使用上一段视频真实尾帧继续同一动作，三者不能混为一谈。
@@ -209,11 +211,7 @@ func storyboardOutputSchema() map[string]any {
 	}
 }
 
-func normalizeStoryboardOutput(input map[string]any) (map[string]any, error) {
-	title := requiredString(input, "title")
-	if title == "" {
-		title = "未命名分镜"
-	}
+func normalizeStoryboardOutput(input map[string]any, requestInput map[string]any) (map[string]any, error) {
 	narratorVoice := requiredString(input, "narrator_voice")
 	materials, materialTypes, materialIDLookup, err := normalizeStoryboardMaterials(input["materials"])
 	if err != nil {
@@ -235,6 +233,7 @@ func normalizeStoryboardOutput(input map[string]any) (map[string]any, error) {
 	if summary == "" {
 		summary = "围绕当前主题展开并完成一个连贯事件"
 	}
+	title := storyboardOutputTitle(requiredString(input, "title"), requestInput, summary, shots)
 	visualHints := storyboardVisualHints(input, materials, shots)
 	visualMode := botmodel.NormalizeOrInferStoryboardVisualMode(
 		requiredString(input, "visual_mode"),
@@ -274,6 +273,49 @@ func normalizeStoryboardOutput(input map[string]any) (map[string]any, error) {
 		"shots":             shots,
 		"materials":         materials,
 	}, nil
+}
+
+func storyboardOutputTitle(current string, requestInput map[string]any, summary string, shots []any) string {
+	if title := storyboardTitleCandidate(current); title != "" && !isGenericStoryboardTitle(title) {
+		return title
+	}
+	candidates := []any{requestInput["prompt"], requestInput["text"], summary}
+	if len(shots) > 0 {
+		shot, _ := shots[0].(map[string]any)
+		candidates = append(candidates, shot["beat"], shot["description"])
+	}
+	for _, candidate := range candidates {
+		if title := storyboardTitleCandidate(powerPromptText(candidate)); title != "" && !isGenericStoryboardTitle(title) {
+			return title
+		}
+	}
+	return "分镜脚本"
+}
+
+func storyboardTitleCandidate(value string) string {
+	value = strings.TrimSpace(value)
+	if index := strings.IndexAny(value, "\r\n"); index >= 0 {
+		value = value[:index]
+	}
+	value = strings.Join(strings.Fields(value), " ")
+	if index := strings.IndexAny(value, "@#。！？!?；;"); index >= 0 {
+		value = value[:index]
+	}
+	value = strings.Trim(value, " \t，,。.!！?？:：;；-—")
+	runes := []rune(value)
+	if len(runes) > 24 {
+		value = string(runes[:24])
+	}
+	return strings.TrimSpace(value)
+}
+
+func isGenericStoryboardTitle(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "未命名", "未命名分镜", "分镜", "分镜脚本", "暂无内容简介", "围绕当前主题展开并完成一个连贯事件":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeStoryboardStoryline(value any, shots []any) map[string]any {

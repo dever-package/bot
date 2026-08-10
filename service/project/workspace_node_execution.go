@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -34,9 +35,15 @@ type workspaceNodeExecution struct {
 	FinishedAt     time.Time
 }
 
-func recordWorkspaceNodeExecution(ctx context.Context, execution workspaceNodeExecution) {
-	if execution.ProjectID == 0 || execution.RunID == 0 || strings.TrimSpace(execution.NodeKey) == "" {
-		return
+func recordWorkspaceNodeExecution(ctx context.Context, execution workspaceNodeExecution) (err error) {
+	nodeKey := strings.TrimSpace(execution.NodeKey)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("写入画布节点执行记录失败 %s: %w", nodeKey, workspaceNodeExecutionPanicError(recovered))
+		}
+	}()
+	if execution.ProjectID == 0 || execution.RunID == 0 || nodeKey == "" {
+		return fmt.Errorf("画布节点执行记录参数不完整")
 	}
 	now := time.Now()
 	status := normalizeWorkspaceExecutionStatus(execution.Status)
@@ -49,7 +56,7 @@ func recordWorkspaceNodeExecution(ctx context.Context, execution workspaceNodeEx
 		"node_run_id":      execution.NodeRunID,
 		"agent_run_id":     execution.AgentRunID,
 		"request_id":       strings.TrimSpace(execution.RequestID),
-		"node_key":         strings.TrimSpace(execution.NodeKey),
+		"node_key":         nodeKey,
 		"node_type":        strings.TrimSpace(execution.NodeType),
 		"function_key":     strings.TrimSpace(execution.FunctionKey),
 		"status":           status,
@@ -75,7 +82,7 @@ func recordWorkspaceNodeExecution(ctx context.Context, execution workspaceNodeEx
 	model := workspacemodel.NewNodeExecutionModel()
 	row := model.Find(ctx, map[string]any{
 		"run_id":   execution.RunID,
-		"node_key": strings.TrimSpace(execution.NodeKey),
+		"node_key": nodeKey,
 	})
 	if row == nil {
 		record["created_at"] = now
@@ -83,14 +90,60 @@ func recordWorkspaceNodeExecution(ctx context.Context, execution workspaceNodeEx
 			startedAt := now
 			record["started_at"] = &startedAt
 		}
-		_ = model.Insert(ctx, record)
-		return
+		inserted, insertErr := workspaceNodeExecutionMutation(func() int64 {
+			return model.Insert(ctx, record)
+		})
+		if insertErr == nil && inserted > 0 {
+			return nil
+		}
+		// Dever ORM reports constraint failures as panics. A concurrent writer may
+		// have inserted the same run/node row, so resolve that race by reading it.
+		row = model.Find(ctx, map[string]any{
+			"run_id":   execution.RunID,
+			"node_key": nodeKey,
+		})
+		if row == nil {
+			if insertErr != nil {
+				return fmt.Errorf("创建画布节点执行记录失败 %s: %w", nodeKey, insertErr)
+			}
+			return fmt.Errorf("创建画布节点执行记录失败: %s", nodeKey)
+		}
+		delete(record, "created_at")
 	}
 	filters := map[string]any{"id": row.ID}
 	if status != teammodel.RunStatusCanceled {
 		filters["status"] = map[string]any{"neq": teammodel.RunStatusCanceled}
 	}
-	_ = model.Update(ctx, filters, record)
+	affected, updateErr := workspaceNodeExecutionMutation(func() int64 {
+		return model.Update(ctx, filters, record)
+	})
+	if updateErr != nil {
+		return fmt.Errorf("更新画布节点执行记录失败 %s: %w", nodeKey, updateErr)
+	}
+	if affected == 1 {
+		return nil
+	}
+	current := model.Find(ctx, map[string]any{"id": row.ID})
+	if status != teammodel.RunStatusCanceled && current != nil && current.Status == teammodel.RunStatusCanceled {
+		return nil
+	}
+	return fmt.Errorf("更新画布节点执行记录失败: %s", nodeKey)
+}
+
+func workspaceNodeExecutionMutation(mutate func() int64) (affected int64, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = workspaceNodeExecutionPanicError(recovered)
+		}
+	}()
+	return mutate(), nil
+}
+
+func workspaceNodeExecutionPanicError(recovered any) error {
+	if err, ok := recovered.(error); ok {
+		return err
+	}
+	return fmt.Errorf("%v", recovered)
 }
 
 func trackWorkspaceNodeChildRun(
@@ -108,23 +161,27 @@ func trackWorkspaceNodeChildRun(
 		return
 	}
 	ctx = detachedWorkspaceContext(ctx)
-	fields := map[string]any{"updated_at": time.Now()}
+	now := time.Now()
+	executionFields := map[string]any{"updated_at": now}
 	if childRunID > 0 {
-		fields["child_run_id"] = childRunID
+		executionFields["child_run_id"] = childRunID
 	}
 	if childRequestID != "" {
-		fields["child_request_id"] = childRequestID
+		executionFields["child_request_id"] = childRequestID
 	}
 	activeStatuses := []string{
 		teammodel.RunStatusPending,
 		teammodel.RunStatusRunning,
 		teammodel.RunStatusWaiting,
 	}
-	if nodeRunID > 0 {
+	if nodeRunID > 0 && childRequestID != "" {
 		teammodel.NewNodeRunModel().Update(ctx, map[string]any{
 			"id":     nodeRunID,
 			"status": activeStatuses,
-		}, fields)
+		}, map[string]any{
+			"child_request_id": childRequestID,
+			"updated_at":       now,
+		})
 	}
 	if projectID == 0 || runID == 0 || nodeKey == "" {
 		return
@@ -134,17 +191,11 @@ func trackWorkspaceNodeChildRun(
 		"run_id":     runID,
 		"node_key":   nodeKey,
 		"status":     activeStatuses,
-	}, fields)
+	}, executionFields)
 }
 
 func workspaceNodeExecutions(ctx context.Context, projectID uint64, runID uint64) []map[string]any {
-	if projectID == 0 || runID == 0 {
-		return []map[string]any{}
-	}
-	rows := workspacemodel.NewNodeExecutionModel().Select(ctx, map[string]any{
-		"project_id": projectID,
-		"run_id":     runID,
-	})
+	rows := workspaceNodeExecutionRows(ctx, projectID, []uint64{runID})
 	result := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
@@ -171,13 +222,7 @@ func workspaceNodeResultsByRunIDs(ctx context.Context, projectID uint64, runIDs 
 	for _, runID := range runIDs {
 		result[runID] = []map[string]any{}
 	}
-	rows := workspacemodel.NewNodeExecutionModel().Select(ctx, map[string]any{
-		"project_id": projectID,
-		"run_id":     runIDs,
-	}, map[string]any{
-		"field": "main.id,main.execution_id,main.project_id,main.asset_cate_id,main.run_id,main.flow_run_id,main.node_run_id,main.agent_run_id,main.request_id,main.node_key,main.node_type,main.function_key,main.status,main.input,main.output,main.error,main.asset_id,main.version_id,main.child_run_id,main.child_request_id,main.approval_id,main.started_at,main.finished_at,main.created_at,main.updated_at",
-		"order": "main.id asc",
-	})
+	rows := workspaceNodeExecutionRows(ctx, projectID, runIDs)
 	for _, row := range rows {
 		if row == nil {
 			continue
@@ -189,21 +234,58 @@ func workspaceNodeResultsByRunIDs(ctx context.Context, projectID uint64, runIDs 
 	return result
 }
 
+func workspaceNodeExecutionRows(ctx context.Context, projectID uint64, runIDs []uint64) []*workspacemodel.NodeExecution {
+	runIDs = uniqueWorkspaceRunIDs(runIDs)
+	if projectID == 0 || len(runIDs) == 0 {
+		return nil
+	}
+	return workspacemodel.NewNodeExecutionModel().Select(ctx, map[string]any{
+		"project_id": projectID,
+		"run_id":     runIDs,
+	}, map[string]any{
+		"field": "main.id,main.execution_id,main.project_id,main.asset_cate_id,main.run_id,main.flow_run_id,main.node_run_id,main.agent_run_id,main.request_id,main.node_key,main.node_type,main.function_key,main.status,main.input,main.output,main.error,main.asset_id,main.version_id,main.child_run_id,main.child_request_id,main.approval_id,main.started_at,main.finished_at,main.created_at,main.updated_at",
+		"order": "main.id asc",
+	})
+}
+
+func workspaceNodeExecutionsByKey(rows []*workspacemodel.NodeExecution) map[string]*workspacemodel.NodeExecution {
+	result := make(map[string]*workspacemodel.NodeExecution, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		if nodeKey := strings.TrimSpace(row.NodeKey); nodeKey != "" {
+			result[nodeKey] = row
+		}
+	}
+	return result
+}
+
+func workspaceNodeResultsFromRows(rows []*workspacemodel.NodeExecution) []map[string]any {
+	result := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		if nodeResult := workspaceNodeResultPayload(*row); nodeResult != nil {
+			result = append(result, nodeResult)
+		}
+	}
+	return result
+}
+
 func workspaceHasActiveNodeExecution(ctx context.Context, projectID uint64, runID uint64) bool {
 	if projectID == 0 || runID == 0 {
 		return false
 	}
-	model := workspacemodel.NewNodeExecutionModel()
-	for _, status := range []string{teammodel.RunStatusRunning, teammodel.RunStatusPending} {
-		if row := model.Find(ctx, map[string]any{
-			"project_id": projectID,
-			"run_id":     runID,
-			"status":     status,
-		}); row != nil {
-			return true
-		}
-	}
-	return false
+	return workspacemodel.NewNodeExecutionModel().Find(ctx, map[string]any{
+		"project_id": projectID,
+		"run_id":     runID,
+		"status": []string{
+			teammodel.RunStatusRunning,
+			teammodel.RunStatusPending,
+		},
+	}) != nil
 }
 
 func workspaceNodeExecutionByNode(ctx context.Context, projectID uint64, runID uint64, nodeKey string) *workspacemodel.NodeExecution {
@@ -219,7 +301,10 @@ func workspaceNodeExecutionByNode(ctx context.Context, projectID uint64, runID u
 }
 
 func workspaceNodeExecutionChildRunID(ctx context.Context, projectID uint64, runID uint64, nodeKey string) uint64 {
-	row := workspaceNodeExecutionByNode(ctx, projectID, runID, nodeKey)
+	return workspaceNodeExecutionChildRunIDFromRow(runID, workspaceNodeExecutionByNode(ctx, projectID, runID, nodeKey))
+}
+
+func workspaceNodeExecutionChildRunIDFromRow(runID uint64, row *workspacemodel.NodeExecution) uint64 {
 	if row == nil {
 		return 0
 	}

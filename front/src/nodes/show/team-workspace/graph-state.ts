@@ -198,6 +198,23 @@ export function normalizeWorkspace(data: any): WorkspaceData {
   };
 }
 
+export function mergeWorkspacePatch(
+  current: WorkspaceData,
+  data: any,
+): WorkspaceData {
+  if (!data || typeof data !== "object") {
+    return current;
+  }
+  const source: Record<string, any> = { ...current, ...data };
+  if (
+    Object.prototype.hasOwnProperty.call(data, "node_edges_by_flow") &&
+    !Object.prototype.hasOwnProperty.call(data, "edges_by_flow")
+  ) {
+    source.edges_by_flow = data.node_edges_by_flow;
+  }
+  return normalizeWorkspace(source);
+}
+
 export function normalizeTeamData(team: any) {
   const normalized = team && typeof team === "object" ? { ...team } : {};
   normalized.publish_status = normalizeTeamPublishStatus(

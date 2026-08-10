@@ -2,10 +2,13 @@ package knowledge
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	"github.com/dever-package/bot/service/internal/dbop"
 )
 
 const conceptSourcePageSize = 1000
@@ -13,6 +16,16 @@ const conceptSourcePageSize = 1000
 const knowledgeConceptMutationLockCount = 64
 
 var knowledgeConceptMutationLocks [knowledgeConceptMutationLockCount]sync.Mutex
+
+var legacyConceptSourcesMigrated atomic.Bool
+
+func MarkLegacyConceptSourcesMigrated() {
+	legacyConceptSourcesMigrated.Store(true)
+}
+
+func legacyConceptSourceFallbackEnabled() bool {
+	return !legacyConceptSourcesMigrated.Load()
+}
 
 func lockKnowledgeConceptMutation(baseID uint64) func() {
 	lock := &knowledgeConceptMutationLocks[baseID%knowledgeConceptMutationLockCount]
@@ -45,7 +58,22 @@ func upsertKnowledgeConceptSource(ctx context.Context, baseID uint64, conceptNod
 	values["concept_node_id"] = conceptNodeID
 	values["doc_id"] = docID
 	values["source_node_id"] = sourceNodeID
-	model.Insert(ctx, withCreatedAt(values))
+	id, insertErr := dbop.Insert(func() int64 {
+		return model.Insert(ctx, withCreatedAt(values))
+	})
+	if insertErr == nil && id > 0 {
+		return
+	}
+	// A concurrent indexer or migration may have inserted the same source.
+	// Confirm that row before accepting the insert failure.
+	if existing := model.Find(ctx, filters); existing != nil {
+		model.Update(ctx, map[string]any{"id": existing.ID}, values)
+		return
+	}
+	if insertErr != nil {
+		panic(insertErr)
+	}
+	panic(fmt.Errorf("创建知识概念来源失败"))
 }
 
 func migrateLegacyKnowledgeConceptSources(ctx context.Context, baseID uint64, conceptNodeID uint64, row *agentmodel.KnowledgeNode) {
@@ -65,6 +93,67 @@ func migrateLegacyKnowledgeConceptSources(ctx context.Context, baseID uint64, co
 	}
 	for _, docID := range uniqueUint64s(legacyDocIDs, 0) {
 		upsertKnowledgeConceptSource(ctx, baseID, conceptNodeID, docID, 0, concept)
+	}
+}
+
+// MigrateLegacyConceptSources moves the old metadata.sources representation
+// into the normalized concept-source table. It is registered as a versioned
+// startup migration, so normal retrieval no longer has to parse legacy
+// metadata after the ledger records success.
+func MigrateLegacyConceptSources(ctx context.Context) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("迁移知识概念来源失败: %v", recovered)
+		}
+	}()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	model := agentmodel.NewKnowledgeNodeModel()
+	var afterID uint64
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		filters := map[string]any{
+			"doc_id":    0,
+			"node_type": agentmodel.KnowledgeNodeTypeConcept,
+		}
+		if afterID > 0 {
+			filters["id"] = map[string]any{"gt": afterID}
+		}
+		rows := model.Select(ctx, filters, map[string]any{
+			"field":    "main.id, main.knowledge_base_id, main.title, main.summary, main.content, main.plain_text, main.keywords, main.metadata",
+			"order":    "main.id asc",
+			"page":     1,
+			"pageSize": conceptSourcePageSize,
+		})
+		if len(rows) == 0 {
+			return nil
+		}
+		afterID = rows[len(rows)-1].ID
+		for _, row := range rows {
+			if row == nil || row.KnowledgeBaseID == 0 {
+				continue
+			}
+			metadata := parseMetadataMap(row.Metadata)
+			if len(uint64SliceFromMeta(metadata, "sources")) == 0 {
+				continue
+			}
+			func() {
+				unlock := lockKnowledgeConceptMutation(row.KnowledgeBaseID)
+				defer unlock()
+				migrateLegacyKnowledgeConceptSources(ctx, row.KnowledgeBaseID, row.ID, row)
+				delete(metadata, "sources")
+				model.Update(ctx, map[string]any{"id": row.ID}, map[string]any{
+					"metadata": jsonText(metadata),
+				})
+			}()
+		}
+		if len(rows) < conceptSourcePageSize {
+			return nil
+		}
 	}
 }
 

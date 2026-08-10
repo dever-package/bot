@@ -18,6 +18,7 @@ import {
   type StoryboardProductionPlan,
   type StoryboardShotGeneration,
 } from "./space-storyboard";
+import { isStoryboardWorkTypeKey } from "./space-storyboard-work-type";
 import type {
   AssetVersion,
   AssetVersionPage,
@@ -31,6 +32,10 @@ import type {
   SpaceAssetDetail,
   SpaceBootstrap,
   SpaceCanvasState,
+  StoryboardReferencePurposeScope,
+  StoryboardReferencePurposeSpec,
+  StoryboardWorkType,
+  StoryboardWorkTypeSpec,
   TeamRole,
 } from "./types";
 
@@ -264,6 +269,21 @@ export async function stopSpaceCanvasRun(input: {
     request_id: input.requestId || "",
   });
   return successfulResponseData(result, "停止画布运行失败");
+}
+
+export async function stopAllSpaceCanvasRuns(projectId: number) {
+  const result = await request(
+    joinSiteApi("workspace/canvas_stop_all"),
+    "post",
+    { project_id: projectId },
+  );
+  const data = successfulResponseData(result, "停止全部画布运行失败");
+  return {
+    count: Number(data.count || 0),
+    stoppedCount: Number(data.stopped_count || 0),
+    failedCount: Number(data.failed_count || 0),
+    items: Array.isArray(data.items) ? data.items : [],
+  };
 }
 
 export async function submitSpaceInteraction(input: {
@@ -592,6 +612,37 @@ export async function saveSpaceCanvas(
 
 function normalizePowerForm(value: any): PowerForm {
   const data = value && typeof value === "object" ? value : {};
+  const storyboardWorkTypes = normalizeStoryboardWorkTypeSpecs(
+    data.storyboard_work_types,
+  );
+  const storyboardReferencePurposes = normalizeStoryboardReferencePurposeSpecs(
+    data.storyboard_reference_purposes,
+    storyboardWorkTypes,
+  );
+  const outputType = String(
+    data.power?.output_type || data.power?.outputType || "",
+  ).trim();
+  const outputViewMode = String(
+    data.power?.output?.view_mode || data.power?.output?.viewMode || "",
+  ).trim();
+  if (
+    (outputType === "storyboard" || outputViewMode === "storyboard") &&
+    (storyboardWorkTypes.length === 0 || storyboardReferencePurposes.length === 0)
+  ) {
+    throw new Error("分镜作品类型或参考用途注册信息缺失");
+  }
+  const knownPurposes = new Set<string>(
+    storyboardReferencePurposes.map((spec) => spec.key),
+  );
+  if (
+    storyboardWorkTypes.some((spec) =>
+      spec.required_reference_purposes.some(
+        (purpose) => !knownPurposes.has(purpose),
+      ),
+    )
+  ) {
+    throw new Error("分镜作品类型引用了未知的参考用途");
+  }
   return {
     ...data,
     sources: Array.isArray(data.sources) ? data.sources : [],
@@ -599,5 +650,111 @@ function normalizePowerForm(value: any): PowerForm {
     selected_target_id: Number(data.selected_target_id || 0),
     source_rule: Number(data.source_rule || 0),
     primary_param_key: String(data.primary_param_key || ""),
+    storyboard_work_types: storyboardWorkTypes,
+    storyboard_reference_purposes: storyboardReferencePurposes,
   };
+}
+
+const STORYBOARD_REFERENCE_MEDIA_KINDS = new Set(["image", "video", "audio"]);
+const STORYBOARD_REFERENCE_SCOPES = new Set<StoryboardReferencePurposeScope>([
+  "global",
+  "material",
+  "shot",
+  "composition",
+  "context",
+]);
+
+function normalizeStoryboardWorkTypeSpecs(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  return value
+    .map((raw): StoryboardWorkTypeSpec => {
+      const row = raw && typeof raw === "object" ? (raw as any) : {};
+      const key = String(row.key || "").trim().toLowerCase();
+      if (!isStoryboardWorkTypeKey(key) || seen.has(key)) {
+        throw new Error("分镜作品类型注册信息无效");
+      }
+      const sort = Number(row.sort || 0);
+      if (!Number.isInteger(sort)) {
+        throw new Error("分镜作品类型注册信息无效");
+      }
+      seen.add(key);
+      return {
+        key,
+        name: String(row.name || "").trim() || key,
+        sort,
+        required_reference_purposes: stringArray(
+          row.required_reference_purposes,
+        ),
+      };
+    })
+    .sort((left, right) => left.sort - right.sort);
+}
+
+function normalizeStoryboardReferencePurposeSpecs(
+  value: unknown,
+  workTypes: StoryboardWorkTypeSpec[],
+) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const knownWorkTypes = new Set(workTypes.map((spec) => spec.key));
+  const seen = new Set<string>();
+  return value
+    .map((raw): StoryboardReferencePurposeSpec => {
+      const row = raw && typeof raw === "object" ? (raw as any) : {};
+      const key = String(row.key || "").trim();
+      const mediaKinds = stringArray(row.media_kinds);
+      const scope = String(
+        row.scope || "",
+      ).trim() as StoryboardReferencePurposeScope;
+      const purposeWorkTypes = stringArray(row.work_types) as StoryboardWorkType[];
+      const defaultMediaKinds = stringArray(
+        row.default_media_kinds,
+      ) as StoryboardReferencePurposeSpec["default_media_kinds"];
+      const materialType = String(row.material_type || "").trim();
+      const maxCount = Number(row.max_count || 0);
+      const sort = Number(row.sort || 0);
+      if (
+        !key ||
+        seen.has(key) ||
+        mediaKinds.length === 0 ||
+        mediaKinds.some((kind) => !STORYBOARD_REFERENCE_MEDIA_KINDS.has(kind)) ||
+        !STORYBOARD_REFERENCE_SCOPES.has(scope) ||
+        purposeWorkTypes.some((workType) => !knownWorkTypes.has(workType)) ||
+        defaultMediaKinds.some((kind) => !mediaKinds.includes(kind)) ||
+        (scope === "material" &&
+          materialType !== "character" &&
+          materialType !== "scene" &&
+          materialType !== "prop") ||
+        (scope !== "material" && Boolean(materialType)) ||
+        !Number.isInteger(maxCount) ||
+        maxCount < 0 ||
+        !Number.isInteger(sort)
+      ) {
+        throw new Error("分镜参考用途注册信息无效");
+      }
+      seen.add(key);
+      return {
+        key: key as StoryboardReferencePurposeSpec["key"],
+        name: String(row.name || "").trim() || key,
+        media_kinds: mediaKinds as StoryboardReferencePurposeSpec["media_kinds"],
+        work_types: purposeWorkTypes,
+        scope,
+        material_type:
+          materialType as StoryboardReferencePurposeSpec["material_type"],
+        default_media_kinds: defaultMediaKinds,
+        max_count: maxCount,
+        sort,
+      };
+    })
+    .sort((left, right) => left.sort - right.sort);
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
 }

@@ -42,14 +42,16 @@ import {
 } from "./space-power-param-runtime";
 import {
   isActiveRunningNode,
+  type NodeDraftUpdateOptions,
   type WorkspaceNodeData,
 } from "./space-node-runtime";
+import { PromptComposer, type UploadPreview } from "./space-prompt-composer";
 import {
-  PromptComposer,
-  type UploadPreview,
-} from "./space-prompt-composer";
-import { reconcileStoryboardReferences } from "./space-storyboard-reference";
-import { StoryboardInputReferenceEditor } from "./space-storyboard-reference-editor";
+  reconcileStoryboardReferenceState,
+  storyboardReferenceUsageOptions,
+  storyboardReferenceValidationError,
+} from "./space-storyboard-reference";
+import { StoryboardWorkTypeSelect } from "./space-storyboard-work-type-select";
 import { uploadSpaceFiles } from "./space-upload";
 import { resolvePowerPresentation } from "../shared/power-presentation";
 import type {
@@ -57,12 +59,14 @@ import type {
   CanvasMultiImageMode,
   CanvasReferenceContent,
   CanvasStoryboardReference,
+  ComposerAssetItem,
   PowerForm,
   PowerParam,
+  StoryboardWorkType,
 } from "./types";
 
-const COMPOSER_DRAFT_SYNC_DELAY = 240;
 const NODE_OVERLAY_STYLE: CSSProperties = { zIndex: 999 };
+const IMMEDIATE_DRAFT_SAVE: NodeDraftUpdateOptions = { save: "immediate" };
 const EMPTY_POWER_PARAMS: PowerParam[] = [];
 const uploadComposerParam: PowerParam = {
   id: 0,
@@ -75,10 +79,39 @@ const uploadComposerParam: PowerParam = {
 const agentComposerParams: PowerParam[] = [uploadComposerParam];
 
 type ComposerDraft = CanvasComposerDraft;
-type ComposerDraftSyncMode = "immediate" | "deferred";
 
 function powerFormAllowsSourceSelection(powerForm: PowerForm | null) {
   return Number(powerForm?.source_rule || 0) === 2;
+}
+
+function powerParamSaveOptions(param?: PowerParam) {
+  return param &&
+    ["option", "select", "multi_option", "switch"].includes(param.type)
+    ? IMMEDIATE_DRAFT_SAVE
+    : undefined;
+}
+
+function restoreStoryboardReferenceState(
+  draft: ComposerDraft,
+  powerForm: PowerForm | null,
+  referenceItems: ComposerAssetItem[],
+  isStoryboardPower: boolean,
+) {
+  if (!isStoryboardPower || !powerForm) {
+    return {
+      content: draft.promptContent,
+      references: draft.storyboardReferences || [],
+    };
+  }
+  const workType = draft.storyboardWorkType || "short";
+  return reconcileStoryboardReferenceState(
+    draft.promptContent,
+    draft.storyboardReferences,
+    referenceItems,
+    draft.prompt || "",
+    workType,
+    powerForm.storyboard_reference_purposes,
+  );
 }
 
 export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
@@ -100,8 +133,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     [latestNodeDraft],
   );
   const nodeDraftRef = useRef(latestNodeDraft);
-  const pendingComposerDraftRef = useRef<ComposerDraft | null>(null);
-  const composerDraftSyncTimerRef = useRef<number | null>(null);
+  const pendingDraftSignatureRef = useRef("");
   const [prompt, setPrompt] = useState(latestNodeDraft.prompt || "");
   const [promptContent, setPromptContent] = useState<
     CanvasReferenceContent | undefined
@@ -109,6 +141,10 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
   const [storyboardReferences, setStoryboardReferences] = useState<
     CanvasStoryboardReference[]
   >(latestNodeDraft.storyboardReferences || []);
+  const [storyboardWorkType, setStoryboardWorkType] =
+    useState<StoryboardWorkType>(
+      latestNodeDraft.storyboardWorkType || "short",
+    );
   const [running, setRunning] = useState(false);
   const [powerForm, setPowerForm] = useState<PowerForm | null>(null);
   const [powerFormLoading, setPowerFormLoading] = useState(false);
@@ -126,11 +162,13 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
   const runBlockedReason = node.runBlockedReason;
 
   useEffect(() => {
-    if (pendingComposerDraftRef.current) {
+    const pendingSignature = pendingDraftSignatureRef.current;
+    if (pendingSignature && pendingSignature !== latestNodeDraftSignature) {
       return;
     }
+    pendingDraftSignatureRef.current = "";
     nodeDraftRef.current = latestNodeDraft;
-  }, [latestNodeDraft]);
+  }, [latestNodeDraft, latestNodeDraftSignature]);
 
   useEffect(() => {
     powerFormRef.current = powerForm;
@@ -196,6 +234,12 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
             return;
           }
           const savedDraft = nodeDraftRef.current;
+          const restoredStoryboard = restoreStoryboardReferenceState(
+            savedDraft,
+            form,
+            assetLibrary.current,
+            isStoryboardPower,
+          );
           setPowerForm(form);
           setSelectedTargetId(
             powerFormAllowsSourceSelection(form)
@@ -206,8 +250,9 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
             mergeSavedComposerParamValues(form.params || [], savedDraft),
           );
           setPrompt(savedDraft.prompt || "");
-          setPromptContent(savedDraft.promptContent);
-          setStoryboardReferences(savedDraft.storyboardReferences || []);
+          setPromptContent(restoredStoryboard.content);
+          setStoryboardReferences(restoredStoryboard.references);
+          setStoryboardWorkType(savedDraft.storyboardWorkType || "short");
           setRequestedMultiImageMode(savedDraft.multiImageMode);
         })
         .catch((err) => {
@@ -233,6 +278,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       setPrompt(savedDraft.prompt || "");
       setPromptContent(savedDraft.promptContent);
       setStoryboardReferences(savedDraft.storyboardReferences || []);
+      setStoryboardWorkType(savedDraft.storyboardWorkType || "short");
       setRequestedMultiImageMode(undefined);
       setSelectedTargetId(0);
       return;
@@ -242,6 +288,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     setPrompt("");
     setPromptContent(undefined);
     setStoryboardReferences([]);
+    setStoryboardWorkType("short");
     setRequestedMultiImageMode(undefined);
   }, [
     catalogCache,
@@ -280,6 +327,14 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
   const effectiveMultiImageMode = multiImagePlan.active
     ? multiImagePlan.mode
     : undefined;
+  const hasPendingLocalDraft =
+    Boolean(pendingDraftSignatureRef.current) &&
+    pendingDraftSignatureRef.current !== latestNodeDraftSignature;
+  const savedMultiImageMode = hasPendingLocalDraft
+    ? nodeDraftRef.current.multiImageMode ||
+      requestedMultiImageMode ||
+      effectiveMultiImageMode
+    : latestNodeDraft.multiImageMode || effectiveMultiImageMode;
   const mediaSourceParamValues = useMemo(
     () =>
       reconcileReferenceModeForMediaSources(
@@ -313,6 +368,16 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       selectedNodeType === "power" ? mediaUsageOptions(activePowerParams) : [],
     [activePowerParams, selectedNodeType],
   );
+  const storyboardUsageOptions = useMemo(
+    () =>
+      isStoryboardPower
+        ? storyboardReferenceUsageOptions(
+            storyboardWorkType,
+            powerForm?.storyboard_reference_purposes || [],
+          )
+        : [],
+    [isStoryboardPower, powerForm, storyboardWorkType],
+  );
   const requireBoundMediaReferences =
     selectedNodeType === "power" &&
     ["image", "video"].includes(canvasMediaReferenceKind(node) || "");
@@ -340,8 +405,31 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       effectiveMultiImageMode,
     ],
   );
+  const storyboardReferenceError = useMemo(
+    () =>
+      isStoryboardPower && !powerFormLoading
+        ? powerForm
+          ? storyboardReferenceValidationError(
+              storyboardReferences,
+              storyboardWorkType,
+              powerForm.storyboard_work_types,
+              powerForm.storyboard_reference_purposes,
+            )
+          : "分镜作品类型与参考用途配置加载失败，请重新打开节点后重试"
+        : "",
+    [
+      isStoryboardPower,
+      powerForm,
+      powerFormLoading,
+      storyboardReferences,
+      storyboardWorkType,
+    ],
+  );
   const effectiveRunBlockedReason =
-    runBlockedReason || multiImagePlan.error || configuredMediaError;
+    runBlockedReason ||
+    multiImagePlan.error ||
+    configuredMediaError ||
+    storyboardReferenceError;
   const promptParam = useMemo(
     () => activePowerParams.find(isPromptPowerParam) || null,
     [activePowerParams],
@@ -377,9 +465,16 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     }
     const savedDraft = nodeDraftRef.current;
     const currentPowerForm = powerFormRef.current;
+    const restoredStoryboard = restoreStoryboardReferenceState(
+      savedDraft,
+      currentPowerForm,
+      assetLibrary.current,
+      isStoryboardPower,
+    );
     setPrompt(savedDraft.prompt || "");
-    setPromptContent(savedDraft.promptContent);
-    setStoryboardReferences(savedDraft.storyboardReferences || []);
+    setPromptContent(restoredStoryboard.content);
+    setStoryboardReferences(restoredStoryboard.references);
+    setStoryboardWorkType(savedDraft.storyboardWorkType || "short");
     setRequestedMultiImageMode(savedDraft.multiImageMode);
     setSelectedTargetId(
       selectedNodeType === "power" &&
@@ -399,58 +494,8 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     );
   }, [latestNodeDraftSignature, selectedNodeType]);
 
-  const clearComposerDraftSyncTimer = useCallback(() => {
-    if (composerDraftSyncTimerRef.current === null) {
-      return;
-    }
-    window.clearTimeout(composerDraftSyncTimerRef.current);
-    composerDraftSyncTimerRef.current = null;
-  }, []);
-
-  const flushDeferredComposerDraft = useCallback(() => {
-    clearComposerDraftSyncTimer();
-    const pendingDraft = pendingComposerDraftRef.current;
-    if (!pendingDraft) {
-      return;
-    }
-    pendingComposerDraftRef.current = null;
-    onNodeDraftChange(node.id, pendingDraft);
-  }, [clearComposerDraftSyncTimer, node.id, onNodeDraftChange]);
-
-  useEffect(
-    () => () => {
-      flushDeferredComposerDraft();
-    },
-    [flushDeferredComposerDraft],
-  );
-
-  const syncComposerDraft = useCallback(
-    (draft: ComposerDraft, mode: ComposerDraftSyncMode) => {
-      clearComposerDraftSyncTimer();
-      if (mode === "deferred") {
-        pendingComposerDraftRef.current = draft;
-        composerDraftSyncTimerRef.current = window.setTimeout(
-          flushDeferredComposerDraft,
-          COMPOSER_DRAFT_SYNC_DELAY,
-        );
-        return;
-      }
-      pendingComposerDraftRef.current = null;
-      onNodeDraftChange(node.id, draft);
-    },
-    [
-      clearComposerDraftSyncTimer,
-      flushDeferredComposerDraft,
-      node.id,
-      onNodeDraftChange,
-    ],
-  );
-
   const saveComposerDraft = useCallback(
-    (
-      draft: ComposerDraft,
-      syncMode: ComposerDraftSyncMode = "immediate",
-    ) => {
+    (draft: ComposerDraft, options?: NodeDraftUpdateOptions) => {
       const promptContentValue = Object.prototype.hasOwnProperty.call(
         draft,
         "promptContent",
@@ -461,22 +506,45 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         ...nodeDraftRef.current,
         ...draft,
         promptContent: promptContentValue,
+        ...(!isStoryboardPower
+          ? {
+              storyboardReferences: [],
+              storyboardWorkType: undefined,
+            }
+          : {}),
       });
       nodeDraftRef.current = normalized;
+      const normalizedSignature = composerDraftSyncSignature(
+        readComposerDraft(normalized),
+      );
+      pendingDraftSignatureRef.current =
+        normalizedSignature === latestNodeDraftSignature
+          ? ""
+          : normalizedSignature;
       setRequestedMultiImageMode(normalized.multiImageMode);
-      syncComposerDraft(normalized, syncMode);
+      onNodeDraftChange(node.id, normalized, options);
+      return normalized;
     },
-    [promptContent, syncComposerDraft],
+    [
+      isStoryboardPower,
+      latestNodeDraftSignature,
+      node.id,
+      onNodeDraftChange,
+      promptContent,
+    ],
   );
 
   const saveComposerParamValues = useCallback(
     (
       nextValues: Record<string, unknown>,
       draft: Omit<ComposerDraft, "paramValues">,
-      syncMode: ComposerDraftSyncMode = "immediate",
+      options?: NodeDraftUpdateOptions,
     ) => {
       setParamValues(nextValues);
-      saveComposerDraft({ ...draft, paramValues: nextValues }, syncMode);
+      return saveComposerDraft(
+        { ...draft, paramValues: nextValues },
+        options,
+      );
     },
     [saveComposerDraft],
   );
@@ -489,7 +557,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       prompt: powerPrompt,
       promptContent,
       selectedTargetId: effectiveSelectedTargetId,
-      multiImageMode: effectiveMultiImageMode,
+      multiImageMode: savedMultiImageMode,
     });
   }, [
     effectiveSelectedTargetId,
@@ -498,7 +566,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     powerPrompt,
     promptContent,
     saveComposerParamValues,
-    effectiveMultiImageMode,
+    savedMultiImageMode,
   ]);
 
   function setPowerPrompt(
@@ -523,16 +591,22 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       onConnectedMediaUsagesChange?.(reconciliation.assignments);
     }
     setPrompt(nextPrompt);
-    setPromptContent(normalizedContent);
-    const nextStoryboardReferences = isStoryboardPower && referencesChanged
-      ? reconcileStoryboardReferences(
-          normalizedContent,
-          storyboardReferences,
-          assetLibrary.current,
-          nextPrompt,
-        )
-      : storyboardReferences;
-    setStoryboardReferences(nextStoryboardReferences);
+    const nextStoryboardState =
+      isStoryboardPower && referencesChanged
+        ? reconcileStoryboardReferenceState(
+            normalizedContent,
+            storyboardReferences,
+            assetLibrary.current,
+            nextPrompt,
+            storyboardWorkType,
+            powerForm?.storyboard_reference_purposes || [],
+          )
+        : {
+            content: normalizedContent,
+            references: storyboardReferences,
+          };
+    setPromptContent(nextStoryboardState.content);
+    setStoryboardReferences(nextStoryboardState.references);
     const currentValues = nodeDraftRef.current.paramValues || paramValues;
     const nextValues = promptParam
       ? { ...currentValues, [promptParam.key]: nextPrompt }
@@ -541,27 +615,40 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       nextValues,
       {
         prompt: nextPrompt,
-        promptContent: normalizedContent,
+        promptContent: nextStoryboardState.content,
         selectedTargetId: effectiveSelectedTargetId,
-        storyboardReferences: nextStoryboardReferences,
-        multiImageMode: effectiveMultiImageMode,
+        storyboardReferences: nextStoryboardState.references,
+        storyboardWorkType: isStoryboardPower ? storyboardWorkType : undefined,
+        multiImageMode: savedMultiImageMode,
       },
-      referencesChanged ? "immediate" : "deferred",
+      referencesChanged ? IMMEDIATE_DRAFT_SAVE : undefined,
     );
   }
 
-  function updateStoryboardReferences(
-    nextReferences: CanvasStoryboardReference[],
-  ) {
-    setStoryboardReferences(nextReferences);
-    saveComposerDraft({
-      prompt: powerPrompt,
+  function updateStoryboardWorkType(nextWorkType: StoryboardWorkType) {
+    const nextStoryboardState = reconcileStoryboardReferenceState(
       promptContent,
-      paramValues,
-      selectedTargetId: effectiveSelectedTargetId,
-      storyboardReferences: nextReferences,
-      multiImageMode: effectiveMultiImageMode,
-    });
+      storyboardReferences,
+      assetLibrary.current,
+      powerPrompt,
+      nextWorkType,
+      powerForm?.storyboard_reference_purposes || [],
+    );
+    setStoryboardWorkType(nextWorkType);
+    setPromptContent(nextStoryboardState.content);
+    setStoryboardReferences(nextStoryboardState.references);
+    saveComposerDraft(
+      {
+        prompt: powerPrompt,
+        promptContent: nextStoryboardState.content,
+        paramValues,
+        selectedTargetId: effectiveSelectedTargetId,
+        storyboardReferences: nextStoryboardState.references,
+        storyboardWorkType: nextWorkType,
+        multiImageMode: savedMultiImageMode,
+      },
+      IMMEDIATE_DRAFT_SAVE,
+    );
   }
 
   function setParamValue(key: string, value: unknown) {
@@ -570,7 +657,8 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       [key]: value,
     };
     const changedParam = powerParams.find((param) => param.key === key);
-    const nextMultiImageMode = effectiveMultiImageMode;
+    const saveOptions = powerParamSaveOptions(changedParam);
+    const activeMultiImageMode = effectiveMultiImageMode;
     if (
       changedParam &&
       isPowerParamConditionController(changedParam, powerParams)
@@ -584,26 +672,34 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         assetLibrary.current,
         nextMediaUsageOptions,
         connectedMediaReferences,
-        nextMultiImageMode,
+        activeMultiImageMode,
       );
       if (Object.keys(reconciliation.assignments).length > 0) {
         onConnectedMediaUsagesChange?.(reconciliation.assignments);
       }
       setPromptContent(reconciliation.content);
-      saveComposerParamValues(nextValues, {
-        prompt: powerPrompt,
-        promptContent: reconciliation.content,
-        selectedTargetId: effectiveSelectedTargetId,
-        multiImageMode: nextMultiImageMode,
-      });
+      saveComposerParamValues(
+        nextValues,
+        {
+          prompt: powerPrompt,
+          promptContent: reconciliation.content,
+          selectedTargetId: effectiveSelectedTargetId,
+          multiImageMode: savedMultiImageMode,
+        },
+        saveOptions,
+      );
       return;
     }
-    saveComposerParamValues(nextValues, {
-      prompt: powerPrompt,
-      promptContent,
-      selectedTargetId: effectiveSelectedTargetId,
-      multiImageMode: nextMultiImageMode,
-    });
+    saveComposerParamValues(
+      nextValues,
+      {
+        prompt: powerPrompt,
+        promptContent,
+        selectedTargetId: effectiveSelectedTargetId,
+        multiImageMode: savedMultiImageMode,
+      },
+      saveOptions,
+    );
   }
 
   function setMultiImageMode(nextMode: CanvasMultiImageMode) {
@@ -648,13 +744,17 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       onConnectedMediaUsagesChange?.(reconciliation.assignments);
     }
     setPromptContent(reconciliation.content);
-    saveComposerParamValues(nextValues, {
-      prompt: powerPrompt,
-      promptContent: reconciliation.content,
-      selectedTargetId: effectiveSelectedTargetId,
-      storyboardReferences,
-      multiImageMode: nextMode,
-    });
+    saveComposerParamValues(
+      nextValues,
+      {
+        prompt: powerPrompt,
+        promptContent: reconciliation.content,
+        selectedTargetId: effectiveSelectedTargetId,
+        storyboardReferences,
+        multiImageMode: nextMode,
+      },
+      IMMEDIATE_DRAFT_SAVE,
+    );
   }
 
   function setAgentPrompt(
@@ -670,10 +770,10 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       {
         prompt: nextPrompt,
         promptContent: nextContent,
-        paramValues,
+        paramValues: nodeDraftRef.current.paramValues || paramValues,
         selectedTargetId: 0,
       },
-      referencesChanged ? "immediate" : "deferred",
+      referencesChanged ? IMMEDIATE_DRAFT_SAVE : undefined,
     );
   }
 
@@ -682,10 +782,14 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       ...(nodeDraftRef.current.paramValues || paramValues),
       [key]: value,
     };
-    saveComposerParamValues(nextValues, {
-      prompt,
-      selectedTargetId: 0,
-    });
+    saveComposerParamValues(
+      nextValues,
+      {
+        prompt,
+        selectedTargetId: 0,
+      },
+      IMMEDIATE_DRAFT_SAVE,
+    );
   }
 
   async function handleLocalUpload(
@@ -794,60 +898,99 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         : 0;
       setSelectedTargetId(nextTargetId);
       setPromptContent(reconciliation.content);
-      saveComposerParamValues(nextValues, {
-        prompt: powerPrompt,
-        promptContent: reconciliation.content,
-        selectedTargetId: nextTargetId,
-        multiImageMode: nextMultiImageMode,
-      });
+      saveComposerParamValues(
+        nextValues,
+        {
+          prompt: powerPrompt,
+          promptContent: reconciliation.content,
+          selectedTargetId: nextTargetId,
+          multiImageMode: nextMultiImageMode,
+        },
+        IMMEDIATE_DRAFT_SAVE,
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "加载能力参数失败");
     }
   }
 
-  const runNodeNow = async () => {
+  const runNodeNow = async (
+    submittedPrompt: string,
+    submittedContent?: CanvasReferenceContent,
+  ) => {
     onClearFeedbackRecords([node.id]);
     setRunning(true);
     try {
       if (node.type === "power" && node.power) {
-        saveComposerDraft({
-          prompt: powerPrompt,
-          promptContent,
-          paramValues: mediaSourceParamValues,
+        const currentDraft = nodeDraftRef.current;
+        const currentContent = Object.prototype.hasOwnProperty.call(
+          currentDraft,
+          "promptContent",
+        )
+          ? currentDraft.promptContent
+          : submittedContent;
+        const executionStoryboardWorkType =
+          currentDraft.storyboardWorkType || storyboardWorkType;
+        const executionStoryboardState = isStoryboardPower
+          ? reconcileStoryboardReferenceState(
+              currentContent,
+              currentDraft.storyboardReferences || storyboardReferences,
+              assetLibrary.current,
+              submittedPrompt,
+              executionStoryboardWorkType,
+              powerForm?.storyboard_reference_purposes || [],
+            )
+          : {
+              content: currentContent,
+              references: currentDraft.storyboardReferences || [],
+            };
+        const nextMultiImageMode = effectiveMultiImageMode;
+        const currentValues = {
+          ...reconcileReferenceModeForMediaSources(
+            powerParams,
+            currentDraft.paramValues || mediaSourceParamValues,
+            connectedMediaReferences.map((reference) => reference.source),
+            nextMultiImageMode,
+          ),
+        };
+        if (promptParam) {
+          currentValues[promptParam.key] = submittedPrompt;
+        }
+        const nextDraft = saveComposerDraft({
+          ...currentDraft,
+          prompt: submittedPrompt,
+          promptContent: executionStoryboardState.content,
+          paramValues: currentValues,
           selectedTargetId: effectiveSelectedTargetId,
-          storyboardReferences,
-          multiImageMode: effectiveMultiImageMode,
+          storyboardReferences: executionStoryboardState.references,
+          storyboardWorkType: isStoryboardPower
+            ? executionStoryboardWorkType
+            : undefined,
+          multiImageMode: nextMultiImageMode,
         });
         await onRunBackendNode({
           ...node,
-          composerDraft: {
-            ...nodeDraftRef.current,
-            prompt: powerPrompt,
-            promptContent,
-            paramValues: mediaSourceParamValues,
-            selectedTargetId: effectiveSelectedTargetId,
-            storyboardReferences,
-            multiImageMode: effectiveMultiImageMode,
-          },
+          composerDraft: nextDraft,
         });
         toast.success("能力节点执行成功");
         return;
       }
       if (node.type === "agent" && node.role) {
-        saveComposerDraft({
-          prompt,
-          promptContent,
-          paramValues,
+        const currentDraft = nodeDraftRef.current;
+        const nextDraft = saveComposerDraft({
+          ...currentDraft,
+          prompt: submittedPrompt,
+          promptContent: Object.prototype.hasOwnProperty.call(
+            currentDraft,
+            "promptContent",
+          )
+            ? currentDraft.promptContent
+            : submittedContent,
+          paramValues: currentDraft.paramValues || paramValues,
           selectedTargetId: 0,
         });
         await onRunBackendNode({
           ...node,
-          composerDraft: {
-            prompt,
-            promptContent,
-            paramValues,
-            selectedTargetId: 0,
-          },
+          composerDraft: nextDraft,
         });
         return;
       }
@@ -859,7 +1002,10 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     }
   };
 
-  const handleRun = async () => {
+  const handleRun = async (
+    submittedPrompt: string,
+    submittedContent?: CanvasReferenceContent,
+  ) => {
     if (nodeRunning) {
       return;
     }
@@ -867,7 +1013,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       toast.error(effectiveRunBlockedReason);
       return;
     }
-    await runNodeNow();
+    await runNodeNow(submittedPrompt, submittedContent);
   };
   if (node.type === "power") {
     return (
@@ -882,54 +1028,65 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
             <span>正在加载能力参数...</span>
           </div>
         ) : (
-          <>
-            <PromptComposer
-              value={powerPrompt}
-              referenceContent={promptContent}
-              placeholder={powerInputPlaceholder}
-              running={nodeRunning}
-              textInputEnabled={Boolean(promptParam)}
-              showMediaParamButtons
-              mediaParamPower={powerForm?.power || node.power}
-              sourceOptions={
-                canSelectPowerSource ? powerForm?.sources || [] : []
-              }
-              selectedSourceId={effectiveSelectedTargetId}
-              params={composerParams}
-              paramValues={mediaSourceParamValues}
-              assetLibrary={assetLibrary}
-              assetReference={{
-                teamID: Number(space?.project.team_id || 0),
-                projectID: projectId,
-                assetCateID: nodeAssetCateId,
-              }}
-              connectedMediaReferences={connectedMediaReferences}
-              mediaUsageOptions={connectedMediaUsageOptions}
-              multiImagePlan={multiImagePlan}
-              multiImageMode={effectiveMultiImageMode}
-              onConnectedMediaEdgeRemove={onConnectedMediaEdgeRemove}
-              disabled={powerFormLoading}
-              submitDisabled={Boolean(effectiveRunBlockedReason)}
-              submitDisabledReason={effectiveRunBlockedReason}
-              onChange={setPowerPrompt}
-              onParamChange={setParamValue}
-              onMultiImageModeChange={setMultiImageMode}
-              onSourceChange={
-                canSelectPowerSource
-                  ? (targetId) => void selectPowerSource(targetId)
-                  : undefined
-              }
-              onLocalUpload={handleLocalUpload}
-              onSubmit={handleRun}
-            />
-            {isStoryboardPower ? (
-              <StoryboardInputReferenceEditor
-                references={storyboardReferences}
-                disabled={powerFormLoading || nodeRunning}
-                onChange={updateStoryboardReferences}
-              />
-            ) : null}
-          </>
+          <PromptComposer
+            value={powerPrompt}
+            referenceContent={promptContent}
+            placeholder={powerInputPlaceholder}
+            running={nodeRunning}
+            textInputEnabled={Boolean(promptParam)}
+            showMediaParamButtons
+            mediaParamPower={powerForm?.power || node.power}
+            sourceOptions={
+              canSelectPowerSource ? powerForm?.sources || [] : []
+            }
+            selectedSourceId={effectiveSelectedTargetId}
+            params={composerParams}
+            paramValues={mediaSourceParamValues}
+            assetLibrary={assetLibrary}
+            assetReference={{
+              teamID: Number(space?.project.team_id || 0),
+              projectID: projectId,
+              assetCateID: nodeAssetCateId,
+            }}
+            connectedMediaReferences={connectedMediaReferences}
+            mediaUsageOptions={connectedMediaUsageOptions}
+            referenceUsageOptions={
+              isStoryboardPower ? storyboardUsageOptions : undefined
+            }
+            referenceUsageField={
+              isStoryboardPower ? "purpose" : "usage"
+            }
+            multiImagePlan={multiImagePlan}
+            multiImageMode={effectiveMultiImageMode}
+            toolbarContent={
+              isStoryboardPower
+                ? ({ openKey, onToggle }) => (
+                    <StoryboardWorkTypeSelect
+                      value={storyboardWorkType}
+                      options={powerForm?.storyboard_work_types || []}
+                      disabled={powerFormLoading || nodeRunning}
+                      openKey={openKey}
+                      onToggle={onToggle}
+                      onChange={updateStoryboardWorkType}
+                    />
+                  )
+                : undefined
+            }
+            onConnectedMediaEdgeRemove={onConnectedMediaEdgeRemove}
+            disabled={powerFormLoading}
+            submitDisabled={Boolean(effectiveRunBlockedReason)}
+            submitDisabledReason={effectiveRunBlockedReason}
+            onChange={setPowerPrompt}
+            onParamChange={setParamValue}
+            onMultiImageModeChange={setMultiImageMode}
+            onSourceChange={
+              canSelectPowerSource
+                ? (targetId) => void selectPowerSource(targetId)
+                : undefined
+            }
+            onLocalUpload={handleLocalUpload}
+            onSubmit={handleRun}
+          />
         )}
       </div>
     );

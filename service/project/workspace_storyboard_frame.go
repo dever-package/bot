@@ -139,7 +139,9 @@ func (s WorkspaceService) preflightCanvasStoryboardFrame(
 			return fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(node), err)
 		}
 		input := mergeCanvasPromptInput(req.Input, nil, node.ComposerPrompt)
-		applyCanvasStoryboardReferenceInput(input, node)
+		if err := applyCanvasStoryboardReferenceInput(ctx, projectID, input, node); err != nil {
+			return fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(node), err)
+		}
 		params := cloneInput(node.ParamValues)
 		if canvasContextText(input["prompt"]) != "" && canvasContextText(params["prompt"]) == "" {
 			delete(params, "prompt")

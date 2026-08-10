@@ -11,6 +11,7 @@ import (
 
 	assetmodel "github.com/dever-package/bot/model/asset"
 	workspacemodel "github.com/dever-package/bot/model/workspace"
+	"github.com/dever-package/bot/service/internal/dbop"
 )
 
 const (
@@ -28,8 +29,7 @@ func withAssetSaveLock[T any](ctx context.Context, req SaveVersionRequest, run f
 	if lockKey == "" {
 		return run()
 	}
-	owner := newAssetSaveLockOwner()
-	release, err := acquireAssetSaveLock(ctx, req.ProjectID, lockKey, owner)
+	release, err := AcquireVersionLock(ctx, req.ProjectID, lockKey)
 	if err != nil {
 		return zero, err
 	}
@@ -37,10 +37,21 @@ func withAssetSaveLock[T any](ctx context.Context, req SaveVersionRequest, run f
 	return run()
 }
 
-func acquireAssetSaveLock(ctx context.Context, projectID uint64, lockKey string, owner string) (func(), error) {
+// AcquireVersionLock serializes version creation for an asset identity. Both
+// direct asset saves and workspace saves use this path so their timeout and
+// conflict behavior cannot drift apart.
+func AcquireVersionLock(ctx context.Context, projectID uint64, lockKey string) (func(), error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	owner := newAssetSaveLockOwner()
 	deadline := time.Now().Add(assetSaveLockWaitTimeout)
 	for {
-		if claimAssetSaveLockOnce(ctx, projectID, lockKey, owner) {
+		claimed, err := claimAssetSaveLockOnce(ctx, projectID, lockKey, owner)
+		if err != nil {
+			return nil, err
+		}
+		if claimed {
 			return func() {
 				releaseAssetSaveLock(context.Background(), lockKey, owner)
 			}, nil
@@ -56,45 +67,55 @@ func acquireAssetSaveLock(ctx context.Context, projectID uint64, lockKey string,
 	}
 }
 
-func claimAssetSaveLockOnce(ctx context.Context, projectID uint64, lockKey string, owner string) bool {
+func claimAssetSaveLockOnce(ctx context.Context, projectID uint64, lockKey string, owner string) (bool, error) {
 	model := workspacemodel.NewAssetLockModel()
 	now := time.Now()
 	expiresAt := now.Add(assetSaveLockTTL)
 	if row := model.Find(ctx, map[string]any{"lock_key": lockKey}); row != nil {
-		return claimAssetSaveLock(ctx, row, projectID, owner, expiresAt, now)
+		return claimAssetSaveLock(ctx, row, projectID, owner, expiresAt, now), nil
 	}
-	if tryInsertAssetSaveLock(ctx, projectID, lockKey, owner, expiresAt, now) {
-		return true
+	inserted, insertErr := dbop.Insert(func() int64 {
+		return model.Insert(ctx, map[string]any{
+			"project_id": projectID,
+			"lock_key":   lockKey,
+			"owner":      owner,
+			"expires_at": expiresAt,
+			"created_at": now,
+			"updated_at": now,
+		})
+	})
+	if insertErr == nil && inserted > 0 {
+		return true, nil
 	}
-	return claimAssetSaveLock(ctx, model.Find(ctx, map[string]any{"lock_key": lockKey}), projectID, owner, expiresAt, now)
+	row := model.Find(ctx, map[string]any{"lock_key": lockKey})
+	if row == nil {
+		if insertErr != nil {
+			return false, fmt.Errorf("创建资产版本锁失败: %w", insertErr)
+		}
+		return false, fmt.Errorf("创建资产版本锁失败")
+	}
+	return claimAssetSaveLock(ctx, row, projectID, owner, expiresAt, now), nil
 }
 
 func claimAssetSaveLock(ctx context.Context, row *workspacemodel.AssetLock, projectID uint64, owner string, expiresAt time.Time, now time.Time) bool {
 	if row == nil || row.ProjectID != projectID {
 		return false
 	}
-	if row.Owner != owner && row.ExpiresAt.After(now) {
-		return false
-	}
-	return workspacemodel.NewAssetLockModel().Update(ctx, map[string]any{"id": row.ID}, map[string]any{
-		"owner":      owner,
-		"expires_at": expiresAt,
-		"updated_at": now,
-	}) > 0
-}
-
-func tryInsertAssetSaveLock(ctx context.Context, projectID uint64, lockKey string, owner string, expiresAt time.Time, now time.Time) (ok bool) {
-	defer func() {
-		if recover() != nil {
-			ok = false
-		}
-	}()
-	return workspacemodel.NewAssetLockModel().Insert(ctx, map[string]any{
+	filters := map[string]any{
+		"id":         row.ID,
 		"project_id": projectID,
-		"lock_key":   lockKey,
+	}
+	if row.Owner == owner {
+		filters["owner"] = owner
+	} else {
+		if row.ExpiresAt.After(now) {
+			return false
+		}
+		filters["expires_at"] = map[string]any{"lte": now}
+	}
+	return workspacemodel.NewAssetLockModel().Update(ctx, filters, map[string]any{
 		"owner":      owner,
 		"expires_at": expiresAt,
-		"created_at": now,
 		"updated_at": now,
 	}) > 0
 }

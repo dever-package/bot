@@ -5,15 +5,24 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
+
+	botruntimeconfig "github.com/dever-package/bot/service/energon/runtimeconfig"
+)
+
+const (
+	jsonFallbackCaptureBytes = int64(64 << 10)
 )
 
 type HTTPClient struct {
 	client         *http.Client
 	defaultTimeout time.Duration
+	responseLimit  int64
 }
 
 func NewHTTPClient(timeout time.Duration) HTTPClient {
@@ -23,6 +32,7 @@ func NewHTTPClient(timeout time.Duration) HTTPClient {
 	return HTTPClient{
 		client:         &http.Client{},
 		defaultTimeout: timeout,
+		responseLimit:  botruntimeconfig.Load().MaxResponseBytes(),
 	}
 }
 
@@ -41,7 +51,12 @@ func (c HTTPClient) Do(ctx context.Context, req Request) (*Response, error) {
 	}
 	defer resp.Body.Close()
 
-	payload, err := readResponsePayload(resp.Body)
+	payload, err := readResponsePayload(
+		resp.Body,
+		resp.Header.Get("Content-Type"),
+		resp.ContentLength,
+		c.maxResponseBytes(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +86,12 @@ func (c HTTPClient) Stream(ctx context.Context, req Request, handler func(Stream
 
 	headers := responseHeaders(resp.Header)
 	if resp.StatusCode >= http.StatusBadRequest {
-		payload, readErr := readResponsePayload(resp.Body)
+		payload, readErr := readResponsePayload(
+			resp.Body,
+			resp.Header.Get("Content-Type"),
+			resp.ContentLength,
+			c.maxResponseBytes(),
+		)
 		if readErr != nil {
 			return nil, readErr
 		}
@@ -160,10 +180,30 @@ func newHTTPRequest(ctx context.Context, req Request) (*http.Request, error) {
 	return httpReq, nil
 }
 
-func readResponsePayload(body io.Reader) (any, error) {
-	rawBody, err := io.ReadAll(body)
+func (c HTTPClient) maxResponseBytes() int64 {
+	if c.responseLimit > 0 {
+		return c.responseLimit
+	}
+	return botruntimeconfig.DefaultMaxResponseMB << 20
+}
+
+func readResponsePayload(body io.Reader, contentType string, contentLength int64, maxBytes int64) (any, error) {
+	if maxBytes <= 0 {
+		maxBytes = botruntimeconfig.DefaultMaxResponseMB << 20
+	}
+	if contentLength > maxBytes {
+		return nil, responseTooLargeError(maxBytes)
+	}
+	limited := &io.LimitedReader{R: body, N: maxBytes + 1}
+	if isJSONContentType(contentType) {
+		return decodeJSONResponse(limited, maxBytes)
+	}
+	rawBody, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(rawBody)) > maxBytes {
+		return nil, responseTooLargeError(maxBytes)
 	}
 
 	var payload any
@@ -173,6 +213,87 @@ func readResponsePayload(body io.Reader) (any, error) {
 		}
 	}
 	return payload, nil
+}
+
+func decodeJSONResponse(body *io.LimitedReader, maxBytes int64) (any, error) {
+	capture := &limitedCaptureBuffer{limit: jsonFallbackCaptureBytes}
+	reader := io.TeeReader(body, capture)
+	decoder := json.NewDecoder(reader)
+	var payload any
+	if err := decoder.Decode(&payload); err != nil {
+		return jsonDecodeFallback(reader, body, capture, maxBytes, err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			err = fmt.Errorf("响应包含多个 JSON 值")
+		}
+		return jsonDecodeFallback(reader, body, capture, maxBytes, err)
+	}
+	if body.N == 0 {
+		return nil, responseTooLargeError(maxBytes)
+	}
+	return payload, nil
+}
+
+func jsonDecodeFallback(
+	reader io.Reader,
+	body *io.LimitedReader,
+	capture *limitedCaptureBuffer,
+	maxBytes int64,
+	decodeErr error,
+) (any, error) {
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		return nil, err
+	}
+	if body.N == 0 {
+		return nil, responseTooLargeError(maxBytes)
+	}
+	if !capture.overflow {
+		if capture.buffer.Len() == 0 {
+			return nil, nil
+		}
+		return capture.String(), nil
+	}
+	return nil, fmt.Errorf("解析服务 JSON 响应失败: %w", decodeErr)
+}
+
+type limitedCaptureBuffer struct {
+	buffer   bytes.Buffer
+	limit    int64
+	overflow bool
+}
+
+func (buffer *limitedCaptureBuffer) Write(data []byte) (int, error) {
+	written := len(data)
+	remaining := buffer.limit - int64(buffer.buffer.Len())
+	if remaining <= 0 {
+		buffer.overflow = buffer.overflow || written > 0
+		return written, nil
+	}
+	if int64(len(data)) > remaining {
+		data = data[:remaining]
+		buffer.overflow = true
+	}
+	_, _ = buffer.buffer.Write(data)
+	return written, nil
+}
+
+func (buffer *limitedCaptureBuffer) String() string {
+	return buffer.buffer.String()
+}
+
+func isJSONContentType(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(contentType))
+	if err != nil {
+		mediaType = strings.TrimSpace(strings.Split(contentType, ";")[0])
+	}
+	mediaType = strings.ToLower(mediaType)
+	return mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")
+}
+
+func responseTooLargeError(maxBytes int64) error {
+	return fmt.Errorf("服务响应超过 %d MB 限制", maxBytes>>20)
 }
 
 func responseHeaders(header http.Header) map[string]string {

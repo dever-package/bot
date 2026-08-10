@@ -1,0 +1,25 @@
+.ws-storyboard-continuity {
+  display: inline-flex;
+  height: 19px;
+  align-items: center;
+  gap: 4px;
+  border-radius: 4px;
+  background: var(--ws-surface-soft);
+  color: var(--ws-text-secondary);
+  padding: 0 6px;
+  font-size: 8px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.ws-storyboard-continuity svg {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+}
+
+.ws-storyboard-continuity.is-linked {
+  background: var(--ws-accent-soft);
+  color: var(--ws-accent-text);
+}

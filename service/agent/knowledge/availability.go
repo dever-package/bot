@@ -150,7 +150,10 @@ func filterAvailableKnowledgeNodes(ctx context.Context, rows []*agentmodel.Knowl
 			docIDs = append(docIDs, row.DocID)
 		}
 	}
-	docIDs = append(docIDs, legacyKnowledgeConceptDocIDs(rows)...)
+	legacyFallback := legacyConceptSourceFallbackEnabled()
+	if legacyFallback {
+		docIDs = append(docIDs, legacyKnowledgeConceptDocIDs(rows)...)
+	}
 	invalidDocs := unavailableKnowledgeDocIDs(ctx, docIDs)
 	conceptSources := availableKnowledgeConceptSources(ctx, rows)
 	result := make([]*agentmodel.KnowledgeNode, 0, len(rows))
@@ -172,7 +175,7 @@ func filterAvailableKnowledgeNodes(ctx context.Context, rows []*agentmodel.Knowl
 			if _, recorded := conceptSources.recorded[row.ID]; recorded {
 				continue
 			}
-			if legacyKnowledgeConceptAvailable(row, invalidDocs) {
+			if legacyFallback && legacyKnowledgeConceptAvailable(row, invalidDocs) {
 				result = append(result, sanitizedLegacyKnowledgeConcept(row))
 			}
 			continue

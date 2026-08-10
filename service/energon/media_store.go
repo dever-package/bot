@@ -100,7 +100,8 @@ func (s GatewayService) storeGeneratedMediaOutput(
 func buildStoredMediaOutput(output botprotocol.Output, rule generatedMediaRule, payloads []map[string]any) (botprotocol.Output, error) {
 	stored := make([]string, 0, len(payloads))
 	files := make([]map[string]any, 0, len(payloads))
-	for _, payload := range payloads {
+	sourceItems := botprotocol.ExtractPrimaryMediaItems(output, rule.kind)
+	for index, payload := range payloads {
 		fileURL := strings.TrimSpace(botprotocol.AsText(payload["url"]))
 		if fileURL == "" {
 			return nil, fmt.Errorf("保存%s后未返回文件地址", botprotocol.MediaOutputLabel(rule.kind))
@@ -112,6 +113,19 @@ func buildStoredMediaOutput(output botprotocol.Output, rule generatedMediaRule, 
 		}
 		file["file_id"] = payload["id"]
 		file["kind"] = rule.kind
+		if rule.kind == botprotocol.MediaTypeAudio || rule.kind == botprotocol.MediaTypeVideo {
+			previewURL := botprotocol.NormalizeMediaPreviewURL(fileURL, botprotocol.AsText(file["thumbnail"]))
+			if index < len(sourceItems) {
+				if sourcePreviewURL := botprotocol.NormalizeMediaPreviewURL(fileURL, sourceItems[index].Thumbnail); sourcePreviewURL != "" {
+					previewURL = sourcePreviewURL
+				}
+			}
+			if previewURL == "" {
+				delete(file, "thumbnail")
+			} else {
+				file["thumbnail"] = previewURL
+			}
+		}
 		files = append(files, file)
 	}
 

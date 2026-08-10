@@ -59,9 +59,14 @@ export type NodeResultSetter = (
   patch: Partial<SpaceCanvasNode>,
 ) => void;
 
+export type NodeDraftUpdateOptions = {
+  save?: "immediate";
+};
+
 export type NodeDraftSetter = (
   nodeId: string,
   draft: CanvasComposerDraft,
+  options?: NodeDraftUpdateOptions,
 ) => void;
 
 export type NodeStartRunner = (node: SpaceCanvasNode) => Promise<void>;
@@ -102,6 +107,7 @@ export type NodeInputContext = {
     nodeId: string;
     title: string;
     type: SpaceCanvasNode["type"];
+    kind: string;
     output: unknown;
     preview: GeneratedNodePreview;
     resultRef?: SpaceCanvasNode["resultRef"];

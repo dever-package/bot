@@ -109,16 +109,19 @@ func (s Service) requireCurrentReferences(
 	if len(uniqueIDs) == 0 {
 		return result, nil
 	}
-	scope, err := resolveTeamAssetScope(ctx, teamID)
-	if err != nil {
-		return nil, err
-	}
-	rows := assetmodel.NewAssetModel().Select(ctx, map[string]any{"id": uniqueIDs})
+	rows := assetmodel.NewAssetModel().Select(ctx, map[string]any{
+		"id":      uniqueIDs,
+		"team_id": teamID,
+	})
 	assets := make(map[uint64]*assetmodel.Asset, len(rows))
 	for _, asset := range rows {
 		if asset != nil {
 			assets[asset.ID] = asset
 		}
+	}
+	scope, err := resolveTeamAssetScopeForAssets(ctx, teamID, rows)
+	if err != nil {
+		return nil, err
 	}
 	orderedAssets := make([]*assetmodel.Asset, 0, len(uniqueIDs))
 	for _, assetID := range uniqueIDs {
@@ -438,11 +441,14 @@ func (s Service) requireTeamAsset(ctx context.Context, teamID uint64, assetID ui
 	if teamID == 0 || assetID == 0 {
 		return nil, fmt.Errorf("团队和资产不能为空")
 	}
-	scope, err := resolveTeamAssetScope(ctx, teamID)
+	asset := assetmodel.NewAssetModel().Find(ctx, map[string]any{
+		"id":      assetID,
+		"team_id": teamID,
+	})
+	scope, err := resolveTeamAssetScopeForAssets(ctx, teamID, []*assetmodel.Asset{asset})
 	if err != nil {
 		return nil, err
 	}
-	asset := s.Find(ctx, assetID)
 	if !scope.contains(asset) {
 		return nil, fmt.Errorf("资产不存在或不属于当前团队")
 	}
@@ -608,14 +614,14 @@ func assetListMap(row assetmodel.Asset, current *assetmodel.Version, contentMode
 
 func assetPreviewContent(content any, kind string) any {
 	kind = NormalizeKind(kind)
-	if len(mediaContentKeys(kind)) == 0 {
-		return nil
-	}
 	urls := contentMediaURLs(content, kind)
 	if len(urls) == 0 {
 		return nil
 	}
 	preview := mediaDocument(kind, urls[0])
+	if mediaFiles := mediaPreviewFiles(content, kind, urls[0]); len(mediaFiles) > 0 {
+		preview["media_files"] = mediaFiles
+	}
 	if len(urls) > 1 {
 		preview["media_count"] = len(urls)
 	}

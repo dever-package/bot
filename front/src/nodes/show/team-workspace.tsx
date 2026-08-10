@@ -48,6 +48,7 @@ import {
   createFlowItem,
   isActiveFlowListItem,
   isTeamReadonly,
+  mergeWorkspacePatch,
   normalizeNodesForSave,
   normalizeTeamPublishStatus,
   normalizeWorkspace,
@@ -196,6 +197,19 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
     );
   }, []);
 
+  const applyWorkspacePatch = useCallback((data: any) => {
+    setWorkspace((current) => mergeWorkspacePatch(current, data));
+    if (!Array.isArray(data?.flows)) {
+      return;
+    }
+    const nextFlows = data.flows as FlowItem[];
+    setSelectedFlowKey((current) =>
+      nextFlows.some((flow) => flow.key === current)
+        ? current
+        : nextFlows[0]?.key || "",
+    );
+  }, []);
+
   const ensureEditable = useCallback(() => {
     if (!readonly) {
       return true;
@@ -237,13 +251,14 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
     try {
       const result = await request(saveFlowApi, "post", {
         team_id: teamID,
+        compact_response: true,
         flows,
         edges: flowEdges,
       });
       if (result.code !== 0) {
         throw new Error(result.message || "保存工作流图失败");
       }
-      applyWorkspaceData(result.data);
+      applyWorkspacePatch(result.data);
       toast.success("工作流配置已保存");
       return true;
     } catch (error) {
@@ -255,27 +270,28 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
   };
 
   const saveNodeGraph = async () => {
+    if (!teamID || !selectedFlowKey) {
+      return false;
+    }
     if (!ensureEditable()) {
       return false;
-    }
-    const flowSaved = await saveFlowGraph();
-    if (!flowSaved) {
-      return false;
-    }
-    if (!activeFlow?.id) {
-      return true;
     }
     setSaving(true);
     try {
       const result = await request(saveNodeApi, "post", {
-        flow_id: activeFlow.id,
+        team_id: teamID,
+        compact_response: true,
+        flow_id: activeFlow?.id || 0,
+        flow_key: selectedFlowKey,
+        flows,
+        flow_edges: flowEdges,
         nodes: normalizeNodesForSave(activeNodes),
         edges: activeNodeEdges,
       });
       if (result.code !== 0) {
         throw new Error(result.message || "保存节点图失败");
       }
-      applyWorkspaceData(result.data);
+      applyWorkspacePatch(result.data);
       toast.success("节点视图已保存");
       return true;
     } catch (error) {
@@ -294,12 +310,13 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
     try {
       const result = await request(saveFlowApi, "post", {
         team_id: teamID,
+        compact_response: true,
         action: "publish",
       });
       if (result.code !== 0) {
         throw new Error(result.message || "发布失败");
       }
-      applyWorkspaceData(result.data);
+      applyWorkspacePatch(result.data);
       setView("flow");
       setSelection(null);
       setConnect(null);
@@ -320,12 +337,13 @@ export function ShowTeamWorkspace({ item }: NodeItemProps) {
     try {
       const result = await request(saveFlowApi, "post", {
         team_id: teamID,
+        compact_response: true,
         action: "edit_draft",
       });
       if (result.code !== 0) {
         throw new Error(result.message || "进入编辑草稿失败");
       }
-      applyWorkspaceData(result.data);
+      applyWorkspacePatch(result.data);
       toast.success("已进入编辑草稿");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "进入编辑草稿失败");

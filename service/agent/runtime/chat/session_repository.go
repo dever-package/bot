@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	deverjwt "github.com/shemic/dever/auth/jwt"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	"github.com/dever-package/bot/service/internal/keylock"
 	frontauthcontext "github.com/dever-package/front/service/authcontext"
 	userservice "github.com/dever-package/user/service"
 )
@@ -19,15 +19,27 @@ type ownerScope struct {
 	OwnerID   uint64
 }
 
-var reusableSessionResolveMu sync.Mutex
+type reusableSessionLockKey struct {
+	OwnerType  string
+	OwnerID    uint64
+	ContextKey string
+	AgentKey   string
+}
+
+var reusableSessionLocks keylock.Locker[reusableSessionLockKey]
 
 func resolveSession(ctx context.Context, owner ownerScope, request SessionRequest) agentmodel.Session {
-	if !request.NewSession {
-		reusableSessionResolveMu.Lock()
-		defer reusableSessionResolveMu.Unlock()
-	}
 	contextKey := normalizeContextKey(request.ContextKey, request.AgentKey)
 	agentKey := strings.TrimSpace(request.AgentKey)
+	if !request.NewSession {
+		release := acquireReusableSessionLock(reusableSessionLockKey{
+			OwnerType:  owner.OwnerType,
+			OwnerID:    owner.OwnerID,
+			ContextKey: contextKey,
+			AgentKey:   agentKey,
+		})
+		defer release()
+	}
 	if !request.NewSession {
 		rows := agentmodel.NewSessionModel().Select(ctx, map[string]any{
 			"owner_type":  owner.OwnerType,
@@ -66,6 +78,10 @@ func resolveSession(ctx context.Context, owner ownerScope, request SessionReques
 		TitleSource: agentmodel.TitleSourceAuto, Status: agentmodel.SessionStatusActive,
 		LastMessageAt: now, CreatedAt: now,
 	}
+}
+
+func acquireReusableSessionLock(key reusableSessionLockKey) func() {
+	return reusableSessionLocks.Lock(key)
 }
 
 func requireSession(ctx context.Context, owner ownerScope, sessionID uint64) (*agentmodel.Session, error) {

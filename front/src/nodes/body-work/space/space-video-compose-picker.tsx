@@ -122,7 +122,11 @@ export function VideoComposeAssetPicker({
       >
         <header>
           {activeEntry ? (
-            <button type="button" onClick={backToItems} aria-label="返回素材列表">
+            <button
+              type="button"
+              onClick={backToItems}
+              aria-label="返回素材列表"
+            >
               <ArrowLeft size={17} />
             </button>
           ) : null}
@@ -161,9 +165,7 @@ export function VideoComposeAssetPicker({
                     onClick={startCustomSelection}
                   >
                     自选{" "}
-                    {selectionMode === "custom"
-                      ? selectedReferences.length
-                      : 0}
+                    {selectionMode === "custom" ? selectedReferences.length : 0}
                     /{activeReferences.length}
                   </button>
                 </div>
@@ -186,8 +188,7 @@ export function VideoComposeAssetPicker({
                 const selectedIndex = selectedReferences.findIndex(
                   (item) => videoComposeMediaReferenceKey(item) === key,
                 );
-                const selected =
-                  selectionMode === "all" || selectedIndex >= 0;
+                const selected = selectionMode === "all" || selectedIndex >= 0;
                 const selectedOrder =
                   selectionMode === "all" ? index : selectedIndex;
                 return (
@@ -213,6 +214,7 @@ export function VideoComposeAssetPicker({
                       {reference.mediaUrl ? (
                         <VideoThumbnail
                           src={reference.mediaUrl}
+                          poster={reference.mediaThumbnail}
                         />
                       ) : (
                         <Video size={24} />
@@ -237,7 +239,9 @@ export function VideoComposeAssetPicker({
                           </button>
                           <button
                             type="button"
-                            disabled={selectedIndex === selectedReferences.length - 1}
+                            disabled={
+                              selectedIndex === selectedReferences.length - 1
+                            }
                             onClick={() => moveReference(selectedIndex, 1)}
                             aria-label="后移"
                           >
@@ -289,6 +293,7 @@ export function VideoComposeAssetPicker({
                       ) : item.preview.videoUrl ? (
                         <VideoThumbnail
                           src={item.preview.videoUrl}
+                          poster={item.preview.videoPosterUrl}
                         />
                       ) : (
                         <EmptyIcon size={24} />
@@ -332,9 +337,7 @@ function SingleMediaReferenceOption({
   const label = reference.label || `${mediaLabel} ${index + 1}`;
   return (
     <article>
-      <section
-        className={`ws-video-compose-picker-single-preview is-${kind}`}
-      >
+      <section className={`ws-video-compose-picker-single-preview is-${kind}`}>
         {kind === "audio" ? (
           <>
             <Music2 size={22} aria-hidden="true" />
@@ -350,6 +353,7 @@ function SingleMediaReferenceOption({
         ) : reference.mediaUrl ? (
           <VideoThumbnail
             src={reference.mediaUrl}
+            poster={reference.mediaThumbnail}
           />
         ) : (
           <Video size={24} />

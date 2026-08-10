@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/google/uuid"
 
@@ -16,6 +15,7 @@ import (
 	runtimesessionstate "github.com/dever-package/bot/service/agent/runtime/sessionstate"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	"github.com/dever-package/bot/service/internal/keylock"
 )
 
 const (
@@ -40,15 +40,7 @@ type Compactor struct {
 	gateway energonservice.GatewayService
 }
 
-type compactionLockEntry struct {
-	mutex      sync.Mutex
-	references int
-}
-
-var sessionCompactionLocks = struct {
-	sync.Mutex
-	entries map[uint64]*compactionLockEntry
-}{entries: make(map[uint64]*compactionLockEntry)}
+var sessionCompactionLocks keylock.Locker[uint64]
 
 func NewCompactor(gateway energonservice.GatewayService) Compactor {
 	return Compactor{gateway: gateway}
@@ -304,25 +296,7 @@ func flattenSummaryGroups(groups [][]*agentmodel.Message) []*agentmodel.Message 
 }
 
 func acquireCompactionLock(sessionID uint64) func() {
-	sessionCompactionLocks.Lock()
-	entry := sessionCompactionLocks.entries[sessionID]
-	if entry == nil {
-		entry = &compactionLockEntry{}
-		sessionCompactionLocks.entries[sessionID] = entry
-	}
-	entry.references++
-	sessionCompactionLocks.Unlock()
-
-	entry.mutex.Lock()
-	return func() {
-		entry.mutex.Unlock()
-		sessionCompactionLocks.Lock()
-		entry.references--
-		if entry.references == 0 {
-			delete(sessionCompactionLocks.entries, sessionID)
-		}
-		sessionCompactionLocks.Unlock()
-	}
+	return sessionCompactionLocks.Lock(sessionID)
 }
 
 func unsummarizedMessages(ctx context.Context, session agentmodel.Session) []*agentmodel.Message {

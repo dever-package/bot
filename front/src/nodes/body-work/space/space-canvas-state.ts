@@ -11,6 +11,7 @@ import type {
   TeamRole,
 } from "./types";
 import { normalizeStoryboardReferences } from "./space-storyboard-reference";
+import { isStoryboardWorkTypeKey } from "./space-storyboard-work-type";
 import {
   finiteNumberOrUndefined as finiteNumber,
   isPlainRecord as isRecord,
@@ -337,6 +338,9 @@ function persistedComposerDraft(value: unknown) {
   );
   if (storyboardReferences.length > 0 && isJSONValue(storyboardReferences)) {
     result.storyboard_references = storyboardReferences;
+  }
+  if (isStoryboardWorkTypeKey(value.storyboardWorkType)) {
+    result.storyboard_work_type = value.storyboardWorkType;
   }
   if (value.storyboardGridLayout) {
     result.storyboard_grid_layout = normalizeStoryboardGridLayout(

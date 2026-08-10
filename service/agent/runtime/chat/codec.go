@@ -10,6 +10,7 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeartifact "github.com/dever-package/bot/service/agent/runtime/artifact"
 	runtimedocument "github.com/dever-package/bot/service/agent/runtime/document"
+	runtimejson "github.com/dever-package/bot/service/agent/runtime/internal/jsoncodec"
 	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
 )
 
@@ -131,14 +132,7 @@ func positiveUint64(value any) uint64 {
 }
 
 func encodeJSON(value any, fallback string) string {
-	if value == nil {
-		return fallback
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return fallback
-	}
-	return string(encoded)
+	return runtimejson.Encode(value, fallback)
 }
 
 func decodeJSON(value string) any {

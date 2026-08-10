@@ -45,6 +45,9 @@ func MergeStreamResult(outputs []Output) Output {
 		}
 		copyFirstOutputValue(result, output, "title")
 		copyFirstOutputValue(result, output, "rich")
+		if lyrics := ExtractLyrics(output); lyrics != "" {
+			result["lyrics"] = mergeStreamText(asText(result["lyrics"]), lyrics)
+		}
 		if reason := strings.TrimSpace(asText(output["finish_reason"])); reason != "" {
 			result["finish_reason"] = reason
 		}

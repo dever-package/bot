@@ -57,6 +57,22 @@ func cloneBody(body map[string]any) map[string]any {
 	return result
 }
 
+func preserveMediaOutputContent(output botprotocol.Output, source any) botprotocol.Output {
+	sourceOutput := botprotocol.ExtractOutput(source)
+	for _, key := range []string{"title", "text"} {
+		if strings.TrimSpace(botprotocol.AsText(output[key])) != "" {
+			continue
+		}
+		if text := strings.TrimSpace(botprotocol.AsText(sourceOutput[key])); text != "" {
+			output[key] = text
+		}
+	}
+	if lyrics := botprotocol.ExtractLyrics(source); lyrics != "" {
+		output["lyrics"] = lyrics
+	}
+	return output
+}
+
 func deleteGatewayKeys(body map[string]any) {
 	delete(body, "mode")
 	delete(body, "protocol")

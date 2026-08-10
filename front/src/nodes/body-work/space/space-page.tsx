@@ -66,8 +66,7 @@ import { getCompatModule, useNavigate, useTheme } from "@dever/front-plugin";
 import { useBodyLoginConfig } from "../auth/site-config";
 import "../shared/body-theme.css";
 import { useBodyAppearance } from "../shared/use-body-appearance";
-import { FirstFrameVideo } from "../../shared/first-frame-video";
-import { VideoThumbnail } from "../../shared/video-thumbnail";
+import { PlayableVideoPreview } from "../../shared/playable-video-preview";
 import type { AgentInteraction } from "@/components/agent/interaction-panel";
 import {
   fetchSpaceBootstrap,
@@ -83,6 +82,7 @@ import {
   saveSpaceAssetEditVersion,
   saveSpaceCanvasContent,
   saveSpaceCanvasMaterial,
+  stopAllSpaceCanvasRuns,
   stopSpaceCanvasRun,
 } from "./space-api";
 import { useCanvasAutosave, type CanvasSaveStatus } from "./space-autosave";
@@ -217,9 +217,7 @@ import type {
 import { SpaceAnimatedEdge } from "./space-edge";
 import { FlowRunControl } from "./space-flow-run-control";
 import { EditableCanvasNodeTitle } from "./space-node-title";
-import {
-  mergeCanvasComposerParamValues as mergeSavedComposerParamValues,
-} from "./space-power-param";
+import { mergeCanvasComposerParamValues as mergeSavedComposerParamValues } from "./space-power-param";
 import { filterActivePowerParams } from "./space-power-param-runtime";
 import {
   isCanvasMediaReferenceNode,
@@ -239,6 +237,8 @@ import {
 import {
   firstNonEmptyText,
   contentOutputHasMedia,
+  contentOutputMediaKinds,
+  contentOutputMediaItems,
   contentOutputMediaURLs,
   parseStoryboardGridOutput,
   normalizeEnergonOutput,
@@ -305,6 +305,7 @@ import {
   type FunctionNodeRunner,
   type GeneratedNodePreview,
   type NodeDraftSetter,
+  type NodeDraftUpdateOptions,
   type NodeInputContext,
   type NodeResultSetter,
   type NodeStartRunner,
@@ -380,7 +381,10 @@ type StoryboardGridImportRequest = {
 type CanvasRunInputOptions = {
   assetCate: AssetCate;
   startNode: SpaceCanvasNode;
-  canvas: Pick<SpaceCanvasState, "nodes" | "edges" | "viewport">;
+  canvas: Pick<
+    SpaceCanvasState,
+    "nodes" | "edges" | "viewport" | "updatedAt"
+  >;
   nodes?: SpaceCanvasNode[];
   singleNode?: boolean;
   executionScope?: "storyboard_frame";
@@ -602,7 +606,7 @@ type AddNodeMenuState = {
 };
 
 const flowNodeTypes = {
-  workSpace: SpaceNodeView,
+  workSpace: memo(SpaceNodeView),
   storyboardFrame: StoryboardFrameNode,
 };
 
@@ -749,14 +753,18 @@ export function WorkSpacePage({
   const handleCanvasSaveError = useCallback((err: unknown) => {
     toast.error(err instanceof Error ? err.message : "保存画布失败");
   }, []);
-  const { markCanvasDirty, resetCanvasAutosave, canvasSaveStatus } =
-    useCanvasAutosave({
-      projectId,
-      enabled: Boolean(space),
-      canvases: canvasStates,
-      setCanvases: setCanvasStates,
-      onError: handleCanvasSaveError,
-    });
+  const {
+    markCanvasDirty,
+    flushCanvasSave,
+    resetCanvasAutosave,
+    canvasSaveStatus,
+  } = useCanvasAutosave({
+    projectId,
+    enabled: Boolean(space),
+    canvases: canvasStates,
+    setCanvases: setCanvasStates,
+    onError: handleCanvasSaveError,
+  });
 
   useEffect(() => {
     if (changedCanvasKeysRef.current.size === 0) {
@@ -1102,20 +1110,25 @@ export function WorkSpacePage({
   );
 
   const updateNodeComposerDraft = useCallback<NodeDraftSetter>(
-    (nodeId, draft) => {
-      updateActiveCanvas((canvas) => ({
-        ...canvas,
-        nodes: canvas.nodes.map((node) =>
+    (nodeId, draft, options) => {
+      const updateResult: { canvas?: SpaceCanvasState } = {};
+      updateActiveCanvas((canvas) => {
+        const nodes = canvas.nodes.map((node) =>
           node.id === nodeId
             ? {
                 ...node,
                 composerDraft: normalizeComposerDraft(draft),
               }
             : node,
-        ),
-      }));
+        );
+        updateResult.canvas = { ...canvas, nodes };
+        return updateResult.canvas;
+      });
+      if (options?.save === "immediate" && updateResult.canvas) {
+        void flushCanvasSave(updateResult.canvas).catch(() => undefined);
+      }
     },
-    [updateActiveCanvas],
+    [flushCanvasSave, updateActiveCanvas],
   );
   const removeConnectedMediaEdge = useCallback(
     (edgeId: string) => {
@@ -1350,6 +1363,8 @@ export function WorkSpacePage({
         nodes,
         edges: canvas.edges,
         viewport: canvas.viewport,
+        canvasUpdatedAt: canvas.updatedAt,
+        flushCanvasSave,
         onNodeResult: updateNodeResult,
         onAssetCreated: upsertSpaceAsset,
         setRunningNode: setRunningNodes,
@@ -1361,6 +1376,7 @@ export function WorkSpacePage({
     },
     [
       projectId,
+      flushCanvasSave,
       requestGeneratedNodeTitle,
       requestStartFlowFeedback,
       runningNodeBatcher,
@@ -1612,9 +1628,7 @@ export function WorkSpacePage({
           startedAt: current[targetNode.id]?.startedAt || Date.now(),
           progress: Math.max(current[targetNode.id]?.progress || 0, 8),
           status: "running",
-          ...(options?.agentInput
-            ? { agent: emptyCanvasAgentRuntime() }
-            : {}),
+          ...(options?.agentInput ? { agent: emptyCanvasAgentRuntime() } : {}),
         },
       }));
       try {
@@ -1623,9 +1637,7 @@ export function WorkSpacePage({
       } catch (err) {
         if (isCanvasRunCanceledError(err)) {
           updateNodeResult(targetNode.id, { runError: "" });
-          setRunningNodes((current) =>
-            omitRunningNode(current, targetNode.id),
-          );
+          setRunningNodes((current) => omitRunningNode(current, targetNode.id));
           return;
         }
         updateNodeResult(targetNode.id, {
@@ -1926,8 +1938,7 @@ export function WorkSpacePage({
   async function stopCanvasRuns(requestedRuns?: CanvasRunRef[]) {
     const stopAll = !requestedRuns;
     if (
-      (stopAll &&
-        (stoppingAllCanvasRuns || stoppingCanvasRunKeys.size > 0)) ||
+      (stopAll && (stoppingAllCanvasRuns || stoppingCanvasRunKeys.size > 0)) ||
       (!stopAll &&
         requestedRuns?.some((run) =>
           stoppingCanvasRunKeys.has(canvasRunIdentity(run)),
@@ -1941,66 +1952,64 @@ export function WorkSpacePage({
       setStoppingAllCanvasRuns(true);
     }
     try {
-      let targets = requestedRuns || [];
+      let targets: CanvasRunRef[] = requestedRuns || [];
+      let failedCount = 0;
+      let targetCount = targets.length;
       if (stopAll) {
-        const activeExecutions = await fetchSpaceCanvasExecutions({
-          projectId,
-          scope: "active",
-          limit: 50,
-        });
-        targets = uniqueActiveCanvasRuns([
-          ...canvasRunRecordsRef.current,
-          ...canvasRunHistoryRecords,
-          ...normalizeWorkspaceCanvasRuns(activeExecutions.items),
-        ]);
+        const stopped = await stopAllSpaceCanvasRuns(projectId);
+        targets = stopped.items.map(normalizeCanvasRunRef);
+        failedCount = stopped.failedCount;
+        targetCount = stopped.count;
+      } else {
+        targets = uniqueActiveCanvasRuns(targets);
       }
-      targets = uniqueActiveCanvasRuns(targets);
-      if (targets.length === 0) {
+      if (targetCount === 0) {
         toast.info("当前没有运行中的任务");
         return;
       }
 
-      targetKeys = targets.map(canvasRunIdentity);
-      setStoppingCanvasRunKeys((current) => {
-        const next = new Set(current);
-        for (const key of targetKeys) {
-          next.add(key);
-        }
-        return next;
-      });
-
-      const results = await Promise.allSettled(
-        targets.map((run) =>
-          stopSpaceCanvasRun({
-            projectId,
-            runId: Number(run.run_id || 0),
-            requestId: String(run.request_id || ""),
-          }),
-        ),
-      );
-      const statusByRun = new Map<string, string>();
-      const stoppedRuns: CanvasRunRef[] = [];
-      let failedCount = 0;
-      results.forEach((result, index) => {
-        const run = targets[index];
-        if (result.status === "rejected") {
-          failedCount += 1;
-          return;
-        }
-        const status = String(
-          normalizeCanvasRunRef(result.value).status || "",
+      if (!stopAll) {
+        targetKeys = targets.map(canvasRunIdentity);
+        setStoppingCanvasRunKeys((current) => {
+          const next = new Set(current);
+          for (const key of targetKeys) {
+            next.add(key);
+          }
+          return next;
+        });
+        const results = await Promise.allSettled(
+          targets.map((run) =>
+            stopSpaceCanvasRun({
+              projectId,
+              runId: Number(run.run_id || 0),
+              requestId: String(run.request_id || ""),
+            }),
+          ),
         );
-        statusByRun.set(canvasRunIdentity(run), status);
-        if (status === "canceled") {
-          stoppedRuns.push(run);
-        }
-      });
+        targets = results.flatMap((result, index) => {
+          if (result.status === "rejected") {
+            failedCount += 1;
+            return [];
+          }
+          const stoppedRun = normalizeCanvasRunRef(result.value);
+          return [
+            {
+              ...targets[index],
+              status: stoppedRun.status,
+              error: stoppedRun.error,
+            },
+          ];
+        });
+      }
+
+      const statusByRun = canvasRunStatusIndex(targets);
+      const stoppedRuns = targets.filter((run) => run.status === "canceled");
 
       if (statusByRun.size > 0) {
         const updatedAt = new Date().toISOString();
         const updateStatuses = (runs: WorkspaceCanvasRunRef[]) =>
           runs.map((run) => {
-            const status = statusByRun.get(canvasRunIdentity(run));
+            const status = canvasRunIndexedStatus(statusByRun, run);
             return status ? { ...run, status, updated_at: updatedAt } : run;
           });
         const nextRecords = updateStatuses(canvasRunRecordsRef.current);
@@ -2039,7 +2048,7 @@ export function WorkSpacePage({
       }
       if (failedCount > 0) {
         toast.error(
-          failedCount === targets.length
+          failedCount === targetCount
             ? "停止运行失败，请稍后重试"
             : `${failedCount} 个运行停止失败，请稍后重试`,
         );
@@ -2939,9 +2948,7 @@ export function WorkSpacePage({
         }}
         onRunHistoryIntent={preloadCanvasRunHistoryDrawer}
         canStopRuns={hasCanvasRunsToStop}
-        stoppingRuns={
-          stoppingAllCanvasRuns || stoppingCanvasRunKeys.size > 0
-        }
+        stoppingRuns={stoppingAllCanvasRuns || stoppingCanvasRunKeys.size > 0}
         onStopRuns={requestStopAllCanvasRuns}
         theme={theme}
         onToggleTheme={toggleTheme}
@@ -3324,9 +3331,7 @@ function TopCanvasToolbar({
         </nav>
       ) : null}
 
-      <div
-        className={`ws-top-actions ${canStopRuns ? "has-running" : ""}`}
-      >
+      <div className={`ws-top-actions ${canStopRuns ? "has-running" : ""}`}>
         <CanvasSaveIndicator status={saveStatus} />
         {canStopRuns ? (
           <SpaceTooltip label="停止画布中所有运行中的任务">
@@ -3547,9 +3552,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     [selectedNodeIds],
   );
   const canvasWrapRef = useRef<HTMLElement | null>(null);
-  const flowNodeCache = useRef<Map<string, Node<WorkspaceNodeData>>>(
-    new Map(),
-  );
+  const flowNodeCache = useRef<Map<string, Node<WorkspaceNodeData>>>(new Map());
   const flowEdgeRenderCache = useRef<Map<string, FlowEdgeRenderCacheEntry>>(
     new Map(),
   );
@@ -3565,10 +3568,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   const flushViewportZoom = useCallback((zoom: number) => {
     const nextZoom = normalizeCanvasZoom(zoom);
     pendingViewportZoomRef.current = nextZoom;
-    if (
-      viewportZoomFrameRef.current != null &&
-      typeof window !== "undefined"
-    ) {
+    if (viewportZoomFrameRef.current != null && typeof window !== "undefined") {
       window.cancelAnimationFrame(viewportZoomFrameRef.current);
     }
     viewportZoomFrameRef.current = null;
@@ -3714,8 +3714,11 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     () => ({
       onNodeResult: (nodeId: string, patch: Partial<SpaceCanvasNode>) =>
         nodeActionsRef.current.onNodeResult(nodeId, patch),
-      onNodeDraftChange: (nodeId: string, draft: ComposerDraft) =>
-        nodeActionsRef.current.onNodeDraftChange(nodeId, draft),
+      onNodeDraftChange: (
+        nodeId: string,
+        draft: ComposerDraft,
+        options?: NodeDraftUpdateOptions,
+      ) => nodeActionsRef.current.onNodeDraftChange(nodeId, draft, options),
       onAssetCreated: (asset: ProjectAsset) =>
         nodeActionsRef.current.onAssetCreated(asset),
       onRunFunctionNode: (node: SpaceCanvasNode) =>
@@ -3775,8 +3778,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           storyboardFrameRunSummary(
             frame,
             nodes,
-            (node) =>
-              canvasRenderIndex.hasResultByNodeId.get(node.id) || false,
+            (node) => canvasRenderIndex.hasResultByNodeId.get(node.id) || false,
             canvasRenderIndex.nodeById,
           ).blockedReason,
         ]),
@@ -3788,8 +3790,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     [storyboardFrames],
   );
   const structureLockedStoryboardNodeIds = storyboardFrameIndex.sourceNodeIds;
-  const storyboardSourceIdByNodeId =
-    storyboardFrameIndex.sourceNodeIdByNodeId;
+  const storyboardSourceIdByNodeId = storyboardFrameIndex.sourceNodeIdByNodeId;
   useEffect(() => {
     const activeFrameIds = new Set(storyboardFrames.map((frame) => frame.id));
     setCollapsedStoryboardFrameIds((current) => {
@@ -3908,9 +3909,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   );
   const fitKey = useMemo(
     () =>
-      canvasNodeIdSignature
-        ? `${activeCate.id}:${canvasNodeIdSignature}`
-        : "",
+      canvasNodeIdSignature ? `${activeCate.id}:${canvasNodeIdSignature}` : "",
     [activeCate.id, canvasNodeIdSignature],
   );
   const canvasHasRunningNode = useMemo(
@@ -3946,8 +3945,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
             ? canvasReferenceItems
             : EMPTY_CANVAS_REFERENCE_ITEMS;
         const nodeConnectedMediaReferences =
-          powerViewMode === "video_compose" ||
-          showNodeSettings
+          powerViewMode === "video_compose" || showNodeSettings
             ? canvasRenderIndex.incomingMediaReferencesByNodeId.get(node.id) ||
               EMPTY_CANVAS_MEDIA_REFERENCES
             : EMPTY_CANVAS_MEDIA_REFERENCES;
@@ -4012,27 +4010,27 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           canReuseData && cachedData
             ? cachedData
             : {
-              ...node,
-              sourceNode: node,
-              projectId,
-              space: nodeSpace,
-              catalogCache,
-              runningNode,
-              groupMembers,
-              groupRuntime,
-              canvasHasRunningNode: nodeCanvasHasRunning,
-              canvasReferenceItems: nodeCanvasReferenceItems,
-              connectedMediaReferences: nodeConnectedMediaReferences,
-              interactive,
-              structureLocked,
-              storyboardSourceNode,
-              storyboardFrameRunning,
-              runBlockedReason,
-              showNodeSettings,
-              setRunningNode,
-              ...stableNodeActions,
-              inputContext,
-            };
+                ...node,
+                sourceNode: node,
+                projectId,
+                space: nodeSpace,
+                catalogCache,
+                runningNode,
+                groupMembers,
+                groupRuntime,
+                canvasHasRunningNode: nodeCanvasHasRunning,
+                canvasReferenceItems: nodeCanvasReferenceItems,
+                connectedMediaReferences: nodeConnectedMediaReferences,
+                interactive,
+                structureLocked,
+                storyboardSourceNode,
+                storyboardFrameRunning,
+                runBlockedReason,
+                showNodeSettings,
+                setRunningNode,
+                ...stableNodeActions,
+                inputContext,
+              };
 
         const cachedStyle = cached?.style as CSSProperties | undefined;
         const nodeStyleSize = canvasNodeStyleSize(node);
@@ -5409,19 +5407,16 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     [interactive],
   );
 
-  const handleNodeMouseEnter = useCallback<NodeMouseHandler>(
-    (_event, node) => {
-      setHoveredNodeId(node.id);
-      const sourceNode =
-        node.type === "workSpace"
-          ? (node as Node<WorkspaceNodeData>).data.sourceNode
-          : null;
-      if (sourceNode && nodeUsesComposerSettings(sourceNode)) {
-        void preloadCanvasNodeSettings();
-      }
-    },
-    [],
-  );
+  const handleNodeMouseEnter = useCallback<NodeMouseHandler>((_event, node) => {
+    setHoveredNodeId(node.id);
+    const sourceNode =
+      node.type === "workSpace"
+        ? (node as Node<WorkspaceNodeData>).data.sourceNode
+        : null;
+    if (sourceNode && nodeUsesComposerSettings(sourceNode)) {
+      void preloadCanvasNodeSettings();
+    }
+  }, []);
 
   const handleNodeMouseLeave = useCallback<NodeMouseHandler>(() => {
     setHoveredNodeId("");
@@ -6091,6 +6086,8 @@ type CanvasStartRunInput = {
   nodes: SpaceCanvasNode[];
   edges: SpaceCanvasEdge[];
   viewport: SpaceCanvasState["viewport"];
+  canvasUpdatedAt?: string;
+  flushCanvasSave?: (canvas: SpaceCanvasState) => Promise<void>;
   runInput?: Record<string, unknown>;
   onNodeResult: NodeResultSetter;
   onAssetCreated: (asset: ProjectAsset) => void;
@@ -6113,6 +6110,15 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
   const appliedNodeResults = new Set<string>();
   let hasAppliedNodeResult = false;
   let streamLastId = "0-0";
+  const executionCanvas: SpaceCanvasState = {
+    assetCateId: Number(input.assetCate.id || 0),
+    nextNodeNo: nextCanvasNodeNo(input.nodes),
+    nodes: input.nodes,
+    edges: input.edges,
+    viewport: input.viewport || {},
+    updatedAt: input.canvasUpdatedAt,
+  };
+  await input.flushCanvasSave?.(executionCanvas);
   let rawCanvasRun = await runSpaceCanvas({
     projectId: input.projectId,
     assetCateId: Number(input.assetCate.id || 0),
@@ -6120,13 +6126,7 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
     requestId,
     singleNode: input.singleNode,
     executionScope: input.executionScope,
-    canvas: {
-      assetCateId: Number(input.assetCate.id || 0),
-      nextNodeNo: nextCanvasNodeNo(input.nodes),
-      nodes: input.nodes,
-      edges: input.edges,
-      viewport: input.viewport || {},
-    },
+    canvas: executionCanvas,
     runInput: {
       ...(input.runInput || {}),
       start_node_id: input.startNode.id,
@@ -6901,8 +6901,9 @@ function applyCanvasStreamNodeFrame(
         (streamEvent === "delta" || !streamEvent)
           ? nodeOutput.text
           : "";
-      const streamOutput =
-        hasDisplayableStreamOutput ? nodeOutput : running.streamOutput;
+      const streamOutput = hasDisplayableStreamOutput
+        ? nodeOutput
+        : running.streamOutput;
       return {
         ...current,
         [nodeId]: {
@@ -7108,8 +7109,7 @@ function finishBackendCanvasRunningNodes(
     });
     return;
   }
-  const finishedStatus =
-    canvasRun.status === "success" ? "success" : "error";
+  const finishedStatus = canvasRun.status === "success" ? "success" : "error";
   input.setRunningNode((current) => {
     let changed = false;
     const next = { ...current };
@@ -7338,6 +7338,48 @@ function uniqueActiveCanvasRuns(runs: CanvasRunRef[]) {
     activeRuns.set(canvasRunIdentity(run), run);
   }
   return [...activeRuns.values()];
+}
+
+function canvasRunStatusIndex(runs: CanvasRunRef[]) {
+  const statuses = new Map<string, string>();
+  for (const run of runs) {
+    const status = String(run.status || "").trim();
+    if (!status) {
+      continue;
+    }
+    for (const identity of canvasRunIdentities(run)) {
+      statuses.set(identity, status);
+    }
+  }
+  return statuses;
+}
+
+function canvasRunIndexedStatus(
+  statuses: ReadonlyMap<string, string>,
+  run: CanvasRunRef,
+) {
+  for (const identity of canvasRunIdentities(run)) {
+    const status = statuses.get(identity);
+    if (status) {
+      return status;
+    }
+  }
+  return "";
+}
+
+function canvasRunIdentities(run: CanvasRunRef) {
+  const identities: string[] = [];
+  if (Number(run.execution_id || 0) > 0) {
+    identities.push(`execution:${Number(run.execution_id)}`);
+  }
+  if (Number(run.run_id || 0) > 0) {
+    identities.push(`run:${Number(run.run_id)}`);
+  }
+  const requestId = String(run.request_id || "").trim();
+  if (requestId) {
+    identities.push(`request:${requestId}`);
+  }
+  return identities;
 }
 
 function canvasRunRecordsActiveLatest(runs: WorkspaceCanvasRunRef[]) {
@@ -8909,6 +8951,11 @@ function generatedPreviewFromValue(
   ) {
     preview.text = "";
   }
+  if (preview.videoUrl) {
+    preview.videoPosterUrl ||= contentOutputMediaItems(value, "video").find(
+      (item) => item.url === preview.videoUrl,
+    )?.thumbnail;
+  }
   return preview;
 }
 
@@ -8920,6 +8967,7 @@ function mergeGeneratedPreview(
     text: firstNonEmptyText(primary.text, fallback.text),
     imageUrl: primary.imageUrl || fallback.imageUrl,
     videoUrl: primary.videoUrl || fallback.videoUrl,
+    videoPosterUrl: primary.videoPosterUrl || fallback.videoPosterUrl,
     audioUrl: primary.audioUrl || fallback.audioUrl,
     fileUrl: primary.fileUrl || fallback.fileUrl,
   };
@@ -9522,11 +9570,7 @@ function buildCanvasRenderIndex(
   edges: SpaceCanvasEdge[],
 ): CanvasRenderIndex {
   const nodeLookup = buildCanvasNodeLookupIndex(nodes);
-  const connectionIndex = buildCanvasConnectionIndex(
-    nodes,
-    edges,
-    nodeLookup,
-  );
+  const connectionIndex = buildCanvasConnectionIndex(nodes, edges, nodeLookup);
   const hasResult = (node: SpaceCanvasNode) =>
     nodeLookup.hasResultByNodeId.get(node.id) || false;
   return {
@@ -9703,8 +9747,12 @@ function buildNodeInputContext(
 ): NodeInputContext | null {
   const nodeLookup = buildCanvasNodeLookupIndex(nodes);
   return (
-    buildCanvasConnectionIndex(nodes, edges, nodeLookup, nodeId)
-      .inputContextByNodeId.get(nodeId) || null
+    buildCanvasConnectionIndex(
+      nodes,
+      edges,
+      nodeLookup,
+      nodeId,
+    ).inputContextByNodeId.get(nodeId) || null
   );
 }
 
@@ -9713,10 +9761,8 @@ function nodeInputContextSource(node: SpaceCanvasNode, hasResult: boolean) {
     return null;
   }
   const output = nodeContextOutput(node);
-  const preview = generatedPreviewFromValue(
-    output,
-    nodePreviewKind(node, output),
-  );
+  const kind = nodePreviewKind(node, output);
+  const preview = generatedPreviewFromValue(output, kind);
   if (!hasGeneratedPreview(preview)) {
     preview.text = displayTextFromOutput(
       output,
@@ -9727,6 +9773,7 @@ function nodeInputContextSource(node: SpaceCanvasNode, hasResult: boolean) {
     nodeId: node.id,
     title: node.title,
     type: node.type,
+    kind,
     output,
     preview,
     resultRef: node.resultRef,
@@ -9751,6 +9798,7 @@ function sameNodeInputContext(
         source.nodeId === candidate.nodeId &&
         source.title === candidate.title &&
         source.type === candidate.type &&
+        source.kind === candidate.kind &&
         source.output === candidate.output &&
         source.resultRef === candidate.resultRef &&
         source.preview.text === candidate.preview.text &&
@@ -10809,7 +10857,7 @@ function buildFunctionRunPatch(
   };
 }
 
-const MULTI_MEDIA_GRID_NODE_SIZE = { width: 520, height: 340 } as const;
+const MULTI_MEDIA_GRID_NODE_SIZE = { width: 620, height: 420 } as const;
 const FUNCTION_RESULT_TOOLBAR_HEIGHT = 44;
 
 function canvasNodeStyleSize(node: SpaceCanvasNode) {
@@ -10840,10 +10888,7 @@ function canvasNodeStyleSize(node: SpaceCanvasNode) {
 }
 
 function defaultCanvasMediaGridSize(node: SpaceCanvasNode) {
-  if (
-    !hasDefaultCanvasNodeSize(node) ||
-    !canvasNodeCanRenderMediaGrid(node)
-  ) {
+  if (!hasDefaultCanvasNodeSize(node) || !canvasNodeCanRenderMediaGrid(node)) {
     return null;
   }
   const preview = generatedNodePreview(node);
@@ -10872,9 +10917,7 @@ function canvasNodeCanRenderMediaGrid(node: SpaceCanvasNode) {
     node.kind,
     node.outputType,
   ).viewMode;
-  return !["storyboard", "storyboard_grid", "video_compose"].includes(
-    viewMode,
-  );
+  return !["storyboard", "storyboard_grid", "video_compose"].includes(viewMode);
 }
 
 function functionResultNodeDefaultSize(node: SpaceCanvasNode) {
@@ -10978,11 +11021,7 @@ function NodeSelectionOverlays({
   if (node.type === "function") {
     return resizer;
   }
-  if (
-    !nodeUsesComposerSettings(node) ||
-    !selected ||
-    !node.showNodeSettings
-  ) {
+  if (!nodeUsesComposerSettings(node) || !selected || !node.showNodeSettings) {
     return resizer;
   }
   return (
@@ -11017,10 +11056,16 @@ function NodeQuickDetailButton({
   if (!onShowNodeDetail || !nodeHasResultContent(node)) {
     return null;
   }
+  const hasPlayableVideo = Boolean(nodeDetailPreview(node).videoUrl);
   return (
     <button
       type="button"
-      className="ws-node-quick-view nodrag nopan"
+      className={[
+        "ws-node-quick-view nodrag nopan",
+        hasPlayableVideo ? "is-video-detail" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       aria-label="查看详情"
       onPointerEnter={preloadNodeDetailDialog}
       onFocus={preloadNodeDetailDialog}
@@ -11580,10 +11625,7 @@ function flowFeedbackPanelInteraction(
 }
 
 function normalizeCanvasZoom(zoom: number) {
-  return Math.max(
-    0.35,
-    Math.min(1.45, Number.isFinite(zoom) ? zoom : 1),
-  );
+  return Math.max(0.35, Math.min(1.45, Number.isFinite(zoom) ? zoom : 1));
 }
 
 function canvasOverlayVariables(zoom: number): CSSProperties {
@@ -11638,10 +11680,7 @@ async function runCanvasGroupNodeTargets(
   await runCanvasGroupMembers(targets, runNode);
 }
 
-function SpaceNodeView({
-  data,
-  selected,
-}: NodeProps<Node<WorkspaceNodeData>>) {
+function SpaceNodeView({ data, selected }: NodeProps<Node<WorkspaceNodeData>>) {
   const node = data;
   const {
     sourceNode,
@@ -12014,9 +12053,7 @@ function SpaceNodeView({
           aria-disabled={nodeRunning || startLocked}
           onClick={handleFunctionClick}
           onKeyDown={(event) => {
-            if (
-              (event.key !== "Enter" && event.key !== " ")
-            ) {
+            if (event.key !== "Enter" && event.key !== " ") {
               return;
             }
             event.preventDefault();
@@ -12168,10 +12205,13 @@ function SpaceNodeView({
                 />
               </div>
             ) : preview.videoUrl ? (
-              <VideoThumbnail
+              <PlayableVideoPreview
                 key={preview.videoUrl}
                 src={preview.videoUrl}
+                poster={preview.videoPosterUrl}
                 className="ws-node-video-raw"
+                ariaLabel={node.title || "视频资产"}
+                objectFit="contain"
                 onMediaSize={onMediaSize}
               />
             ) : preview.imageUrl ? (
@@ -12185,13 +12225,6 @@ function SpaceNodeView({
               <div className="ws-node-image-empty">
                 <Video size={24} />
                 <span>{preview.text || node.description || "视频资产"}</span>
-              </div>
-            )}
-            {useContentView ? null : (
-              <div className="ws-node-video-play">
-                <div>
-                  <Play size={14} fill="currentColor" />
-                </div>
               </div>
             )}
           </div>
@@ -12255,9 +12288,12 @@ function SpaceNodeView({
             </div>
           ) : !useContentView && preview.videoUrl ? (
             <div className="ws-node-text-media">
-              <VideoThumbnail
+              <PlayableVideoPreview
                 key={preview.videoUrl}
                 src={preview.videoUrl}
+                poster={preview.videoPosterUrl}
+                ariaLabel={mediaPreviewCaption(preview) || node.title}
+                objectFit="cover"
               />
             </div>
           ) : !useContentView && preview.audioUrl ? (
@@ -12706,19 +12742,14 @@ function CanvasGeneratedNodeContent({
       <div
         className={`ws-node-generated-media ${generating ? "is-generating" : ""}`}
       >
-        <FirstFrameVideo
+        <PlayableVideoPreview
           key={preview.videoUrl}
           src={preview.videoUrl}
+          poster={preview.videoPosterUrl}
           className="nopan nowheel"
-          controls
-          playsInline
-          preload="metadata"
-          onLoadedMetadata={(event) =>
-            onMediaSize?.(
-              event.currentTarget.videoWidth,
-              event.currentTarget.videoHeight,
-            )
-          }
+          ariaLabel={caption || "生成视频"}
+          objectFit="contain"
+          onMediaSize={onMediaSize}
         />
         {caption ? <p>{caption}</p> : null}
         <CanvasMediaGenerationOverlay active={generating} />

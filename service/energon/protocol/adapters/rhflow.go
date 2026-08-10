@@ -26,9 +26,23 @@ const (
 	rhflowPollDelayMS     = 3000
 	rhflowKindPrefix      = "rhflow."
 	rhflowDefaultKind     = "rhflow.workflow"
+	rhflowTaskCacheTTL    = 65 * time.Minute
+	rhflowTaskCacheMax    = 512
 )
 
-var rhflowTaskCache sync.Map
+type rhflowTaskCacheEntry struct {
+	taskID    string
+	expiresAt time.Time
+}
+
+type rhflowTaskIDCache struct {
+	mu      sync.Mutex
+	entries map[string]rhflowTaskCacheEntry
+}
+
+var rhflowTaskCache = rhflowTaskIDCache{
+	entries: make(map[string]rhflowTaskCacheEntry, rhflowTaskCacheMax),
+}
 
 type RhFlowAdapter struct{}
 
@@ -129,6 +143,7 @@ func (RhFlowAdapter) CancelTask(ctx context.Context, input botprotocol.NativeInp
 	if code := strings.TrimSpace(botprotocol.AsText(valueFromMap(resp.Body, "code"))); code != "" && code != "0" {
 		return fmt.Errorf("取消 RunningHub 工作流任务失败: %s", firstNonEmptyText(valueFromMap(resp.Body, "msg"), valueFromMap(resp.Body, "message"), code))
 	}
+	rhflowClearTaskID(input)
 	return nil
 }
 
@@ -186,7 +201,7 @@ func rhflowStoreTaskID(input botprotocol.NativeInput, taskID string) {
 	if key == "" {
 		return
 	}
-	rhflowTaskCache.Store(key, taskID)
+	rhflowTaskCache.store(key, taskID)
 }
 
 func rhflowCachedTaskID(input botprotocol.NativeInput) string {
@@ -194,17 +209,70 @@ func rhflowCachedTaskID(input botprotocol.NativeInput) string {
 	if key == "" {
 		return ""
 	}
-	value, ok := rhflowTaskCache.Load(key)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(botprotocol.AsText(value))
+	return rhflowTaskCache.load(key)
 }
 
 func rhflowClearTaskID(input botprotocol.NativeInput) {
 	key := rhflowTaskCacheKey(input)
 	if key != "" {
-		rhflowTaskCache.Delete(key)
+		rhflowTaskCache.delete(key)
+	}
+}
+
+func (cache *rhflowTaskIDCache) store(key string, taskID string) {
+	now := time.Now()
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	cache.removeExpired(now)
+	if _, exists := cache.entries[key]; !exists && len(cache.entries) >= rhflowTaskCacheMax {
+		cache.removeOldest()
+	}
+	cache.entries[key] = rhflowTaskCacheEntry{
+		taskID:    taskID,
+		expiresAt: now.Add(rhflowTaskCacheTTL),
+	}
+}
+
+func (cache *rhflowTaskIDCache) load(key string) string {
+	now := time.Now()
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	entry, exists := cache.entries[key]
+	if !exists {
+		return ""
+	}
+	if !now.Before(entry.expiresAt) {
+		delete(cache.entries, key)
+		return ""
+	}
+	return strings.TrimSpace(entry.taskID)
+}
+
+func (cache *rhflowTaskIDCache) delete(key string) {
+	cache.mu.Lock()
+	delete(cache.entries, key)
+	cache.mu.Unlock()
+}
+
+func (cache *rhflowTaskIDCache) removeExpired(now time.Time) {
+	for key, entry := range cache.entries {
+		if !now.Before(entry.expiresAt) {
+			delete(cache.entries, key)
+		}
+	}
+}
+
+func (cache *rhflowTaskIDCache) removeOldest() {
+	oldestKey := ""
+	var oldestExpiry time.Time
+	for key, entry := range cache.entries {
+		if oldestKey == "" || entry.expiresAt.Before(oldestExpiry) {
+			oldestKey = key
+			oldestExpiry = entry.expiresAt
+		}
+	}
+	if oldestKey != "" {
+		delete(cache.entries, oldestKey)
 	}
 }
 
@@ -215,6 +283,7 @@ func rhflowTaskCacheKey(input botprotocol.NativeInput) string {
 		return ""
 	}
 	payload := rhflowBody(input, workflowID)
+	payload["providerHost"] = strings.TrimRight(strings.TrimSpace(input.Provider.Host), "/")
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return ""
@@ -250,9 +319,11 @@ func (RhFlowAdapter) ParseTaskStatus(input botprotocol.NativeInput, resp *botpro
 	}
 	data := body["data"]
 	if results := botprotocol.NormalizeAnyList(body["results"]); len(results) > 0 {
+		rhflowClearTaskID(input)
 		return bottask.TaskStatus{State: bottask.TaskStateSucceeded, Label: "SUCCESS", Message: message}, nil
 	}
 	if outputs := botprotocol.NormalizeAnyList(data); len(outputs) > 0 {
+		rhflowClearTaskID(input)
 		return bottask.TaskStatus{State: bottask.TaskStateSucceeded, Label: "SUCCESS", Message: message}, nil
 	}
 
@@ -273,6 +344,7 @@ func (RhFlowAdapter) ParseTaskStatus(input botprotocol.NativeInput, resp *botpro
 
 	switch {
 	case rhflowIsSucceededStatus(status):
+		rhflowClearTaskID(input)
 		return bottask.TaskStatus{State: bottask.TaskStateSucceeded, Label: firstNonEmptyText(status, "SUCCESS"), Message: message}, nil
 	case rhflowIsFailedStatus(status):
 		rhflowClearTaskID(input)
@@ -363,9 +435,9 @@ func rhflowResponseError(body any) error {
 func rhflowOutput(body any, defaultType string) botprotocol.Output {
 	output := botprotocol.ExtractMediaOutput(rhflowResultPayload(body, defaultType), defaultType)
 	if botprotocol.HasMediaOutput(output) {
-		return output
+		return preserveMediaOutputContent(output, body)
 	}
-	return botprotocol.ExtractMediaOutput(body, defaultType)
+	return preserveMediaOutputContent(botprotocol.ExtractMediaOutput(body, defaultType), body)
 }
 
 func rhflowResultPayload(body any, defaultType string) any {

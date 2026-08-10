@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { FileText } from "lucide-react";
-import { FirstFrameVideo } from "../../shared/first-frame-video";
+import { PlayableVideoPreview } from "../../shared/playable-video-preview";
 import {
   canvasMediaGridKind,
   CanvasNodeContentView,
@@ -18,6 +18,7 @@ import {
 type CanvasResultPreview = {
   imageUrl?: string;
   videoUrl?: string;
+  videoPosterUrl?: string;
   audioUrl?: string;
   fileUrl?: string;
 };
@@ -179,13 +180,12 @@ function PureResultPreview({
   if (preview.videoUrl) {
     return (
       <figure className="ws-result-view-media">
-        <FirstFrameVideo
+        <PlayableVideoPreview
           key={preview.videoUrl}
           src={preview.videoUrl}
-          muted
-          playsInline
-          preload="metadata"
-          controls
+          poster={preview.videoPosterUrl}
+          ariaLabel={label || "视频结果"}
+          objectFit="contain"
         />
         {label ? <figcaption>{label}</figcaption> : null}
       </figure>
@@ -194,7 +194,7 @@ function PureResultPreview({
   if (preview.audioUrl) {
     return (
       <div className="ws-result-view-audio">
-        <audio src={preview.audioUrl} controls preload="metadata" />
+        <audio src={preview.audioUrl} controls preload="none" />
         {label ? <span>{label}</span> : null}
       </div>
     );

@@ -231,6 +231,9 @@ func (s Service) editableAssetVersionContent(ctx context.Context, projectID uint
 	}
 	incoming["visual_mode"] = visualMode
 	incoming["aspect_ratio"] = aspectRatio
+	if err := validateStoredStoryboardReferences(incoming); err != nil {
+		return nil, err
+	}
 	if productionPlan, exists := incoming["production_plan"]; exists {
 		normalized, err := normalizeStoryboardProductionPlan(productionPlan, storyboardProductionOff)
 		if err != nil {
@@ -254,7 +257,14 @@ func storyboardDocument(value any) (map[string]any, bool) {
 	if !ok {
 		return nil, false
 	}
-	return cloneStoryboardDocument(document)
+	clone, ok := cloneStoryboardDocument(document)
+	if !ok {
+		return nil, false
+	}
+	if storyboardText(clone["work_type"]) == "" {
+		clone["work_type"] = botmodel.StoryboardWorkTypeShort
+	}
+	return clone, true
 }
 
 func cloneStoryboardDocument(document map[string]any) (map[string]any, bool) {

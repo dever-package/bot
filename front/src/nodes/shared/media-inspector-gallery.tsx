@@ -1,49 +1,61 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  FileText,
-  Image as ImageIcon,
-  Music4,
-  Video,
-} from "lucide-react";
+import { FileText, Image as ImageIcon, Music4, Video } from "lucide-react";
 import {
   EnergonAudioPlayer,
   type EnergonMediaKind,
   type EnergonMediaPreviewItem,
 } from "@/components/energon/content-view";
-import { FirstFrameVideo } from "./first-frame-video";
+import { FirstFrameVideo } from "@/components/media/first-frame-video";
 import { VideoThumbnail } from "./video-thumbnail";
 import { ResourceDownloadButton } from "./resource-download-button";
 import { resourceNameFromURL } from "./resource-file";
+import "./media-inspector-gallery.css";
+
+type MediaInspectorSupplementalText = {
+  label: string;
+  text: string;
+};
 
 export function MediaInspector({
   kind,
-  urls,
+  urls = [],
+  mediaItems,
   zoom = 1,
   compact = false,
   downloadable = false,
   className = "",
+  supplementalText,
 }: {
   kind: EnergonMediaKind;
-  urls: string[];
+  urls?: string[];
+  mediaItems?: Array<{ url: string; thumbnail?: string }>;
   zoom?: number;
   compact?: boolean;
   downloadable?: boolean;
   className?: string;
+  supplementalText?: MediaInspectorSupplementalText | null;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
-  const mediaIdentity = urls.join("\n");
+  const resolvedMediaItems: Array<{ url: string; thumbnail?: string }> =
+    mediaItems && mediaItems.length > 0
+      ? mediaItems
+      : urls.map((url) => ({ url }));
+  const mediaIdentity = resolvedMediaItems
+    .map((item) => `${item.url}\n${item.thumbnail || ""}`)
+    .join("\n");
 
   useEffect(() => {
     setActiveIndex(0);
   }, [mediaIdentity]);
 
-  const items = urls.map((url, index) => ({
-    id: url,
+  const items = resolvedMediaItems.map((item, index) => ({
+    id: item.url,
     name: resourceNameFromURL(
-      url,
+      item.url,
       `${mediaKindLabels[kind]} ${index + 1}`,
     ),
-    url,
+    url: item.url,
+    thumbnail: item.thumbnail,
   }));
   if (items.length === 0) {
     return null;
@@ -58,6 +70,7 @@ export function MediaInspector({
       compact={compact}
       downloadable={downloadable}
       className={className}
+      supplementalText={supplementalText}
       onSelect={setActiveIndex}
     />
   );
@@ -71,6 +84,7 @@ export function MediaInspectorGallery({
   compact = false,
   downloadable = false,
   className = "",
+  supplementalText,
   onSelect,
 }: {
   kind: EnergonMediaKind;
@@ -80,6 +94,7 @@ export function MediaInspectorGallery({
   compact?: boolean;
   downloadable?: boolean;
   className?: string;
+  supplementalText?: MediaInspectorSupplementalText | null;
   onSelect: (index: number) => void;
 }) {
   const activeItem = items[activeIndex] || items[0];
@@ -97,12 +112,12 @@ export function MediaInspectorGallery({
         .filter(Boolean)
         .join(" ")}
     >
-      <style>{mediaInspectorGalleryStyles}</style>
       <MediaStage
         kind={kind}
         item={activeItem}
         zoom={zoom}
         downloadable={downloadable}
+        supplementalText={supplementalText}
       />
       {items.length > 1 ? (
         <MediaThumbnailRail
@@ -121,11 +136,13 @@ function MediaStage({
   item,
   zoom,
   downloadable,
+  supplementalText,
 }: {
   kind: EnergonMediaKind;
   item: EnergonMediaPreviewItem;
   zoom: number;
   downloadable: boolean;
+  supplementalText?: MediaInspectorSupplementalText | null;
 }) {
   return (
     <div className="bot-media-inspector-stage">
@@ -158,7 +175,7 @@ function MediaStage({
             poster={item.thumbnail}
             controls
             playsInline
-            preload="metadata"
+            preload={item.thumbnail ? "none" : "metadata"}
           />
         ) : (
           <EmptyPreview kind={kind} />
@@ -166,12 +183,30 @@ function MediaStage({
       ) : null}
       {kind === "audio" ? (
         item.url ? (
-          <EnergonAudioPlayer
-            key={item.url}
-            src={item.url}
-            detailed
-            className="bot-media-inspector-audio"
-          />
+          <div className="bot-media-inspector-audio-content">
+            {item.thumbnail ? (
+              <img
+                key={item.thumbnail}
+                className="bot-media-inspector-audio-cover"
+                src={item.thumbnail}
+                alt={item.name}
+                draggable={false}
+              />
+            ) : null}
+            <EnergonAudioPlayer
+              key={item.url}
+              src={item.url}
+              detailed
+              preload="none"
+              className="bot-media-inspector-audio"
+            />
+            {supplementalText?.text ? (
+              <section className="bot-media-inspector-audio-text">
+                <strong>{supplementalText.label}</strong>
+                <p>{supplementalText.text}</p>
+              </section>
+            ) : null}
+          </div>
         ) : (
           <EmptyPreview kind={kind} />
         )
@@ -266,221 +301,3 @@ const mediaKindIcons = {
   audio: Music4,
   file: FileText,
 } satisfies Record<EnergonMediaKind, typeof ImageIcon>;
-
-const mediaInspectorGalleryStyles = `
-.bot-media-inspector-gallery {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-  flex: 1 1 auto;
-  flex-direction: column;
-}
-
-.bot-media-inspector-gallery.is-compact {
-  height: auto;
-  flex: 0 0 auto;
-}
-
-.bot-media-inspector-stage {
-  position: relative;
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  flex: 1 1 auto;
-  align-items: center;
-  justify-content: center;
-  overflow: auto;
-  background: var(--wb-detail-surface-soft, hsl(var(--muted) / 0.2));
-  padding: 16px;
-}
-
-.bot-media-inspector-gallery.is-compact .bot-media-inspector-stage {
-  min-height: 224px;
-  padding: 32px 24px;
-}
-
-.bot-media-inspector-download {
-  position: absolute;
-  z-index: 2;
-  top: 12px;
-  right: 12px;
-  display: inline-flex;
-  width: 36px;
-  height: 36px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--wb-detail-line, hsl(var(--border)));
-  border-radius: 5px;
-  background: var(--wb-detail-surface, hsl(var(--background)));
-  color: var(--wb-detail-text, hsl(var(--foreground)));
-  box-shadow: 0 2px 8px hsl(var(--foreground) / 0.08);
-  padding: 0;
-  cursor: pointer;
-  transition: background-color 150ms ease, border-color 150ms ease;
-}
-
-.bot-media-inspector-download:hover {
-  border-color: color-mix(
-    in srgb,
-    var(--wb-detail-text, hsl(var(--foreground))) 40%,
-    var(--wb-detail-line, hsl(var(--border)))
-  );
-  background: var(--wb-detail-surface-soft, hsl(var(--muted) / 0.3));
-}
-
-.bot-media-inspector-download > svg {
-  width: 17px;
-  height: 17px;
-}
-
-.bot-media-inspector-download:disabled {
-  cursor: wait;
-  opacity: 0.7;
-}
-
-.bot-media-inspector-stage > img,
-.bot-media-inspector-stage > video {
-  display: block;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-
-.bot-media-inspector-stage > img {
-  user-select: none;
-  transition: transform 150ms ease;
-}
-
-.bot-media-inspector-stage > video {
-  background: #000;
-}
-
-.bot-media-inspector-audio {
-  width: min(768px, 100%);
-}
-
-.bot-media-inspector-file,
-.bot-media-inspector-empty {
-  display: flex;
-  max-width: 420px;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  color: var(--wb-detail-muted, hsl(var(--muted-foreground)));
-  text-align: center;
-}
-
-.bot-media-inspector-file svg,
-.bot-media-inspector-empty svg {
-  width: 40px;
-  height: 40px;
-}
-
-.bot-media-inspector-file strong {
-  color: var(--wb-detail-text, hsl(var(--foreground)));
-  font-size: 14px;
-  overflow-wrap: anywhere;
-}
-
-.bot-media-inspector-rail {
-  display: flex;
-  height: 80px;
-  flex: 0 0 80px;
-  border-top: 1px solid var(--wb-detail-line, hsl(var(--border)));
-  background: var(--wb-detail-surface, hsl(var(--background)));
-  padding: 8px 12px;
-}
-
-.bot-media-inspector-list {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  gap: 8px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-}
-
-.bot-media-inspector-list > button {
-  display: flex;
-  width: 64px;
-  height: 64px;
-  flex: 0 0 64px;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  border: 1px solid var(--wb-detail-line, hsl(var(--border)));
-  border-radius: 5px;
-  background: var(--wb-detail-surface-soft, hsl(var(--muted) / 0.3));
-  color: var(--wb-detail-muted, hsl(var(--muted-foreground)));
-  padding: 0;
-  cursor: pointer;
-  transition: border-color 150ms ease, box-shadow 150ms ease;
-}
-
-.bot-media-inspector-list > button:hover {
-  border-color: color-mix(
-    in srgb,
-    var(--wb-detail-text, hsl(var(--foreground))) 40%,
-    var(--wb-detail-line, hsl(var(--border)))
-  );
-}
-
-.bot-media-inspector-list > button[aria-current="true"] {
-  border-color: var(--wb-detail-text, hsl(var(--foreground)));
-  box-shadow: 0 0 0 1px var(--wb-detail-text, hsl(var(--foreground)));
-}
-
-.bot-media-inspector-list > button :where(img, video) {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.bot-media-inspector-list > button video {
-  background: #000;
-  pointer-events: none;
-}
-
-.bot-media-inspector-list > button svg {
-  width: 20px;
-  height: 20px;
-}
-
-@media (min-width: 768px) {
-  .bot-media-inspector-gallery {
-    flex-direction: row;
-  }
-
-  .bot-media-inspector-rail {
-    width: 92px;
-    height: 100%;
-    flex: 0 0 92px;
-    border-top: 0;
-    border-left: 1px solid var(--wb-detail-line, hsl(var(--border)));
-    padding: 12px 10px;
-  }
-
-  .bot-media-inspector-list {
-    display: grid;
-    width: 100%;
-    max-height: 100%;
-    flex: none;
-    grid-template-columns: minmax(0, 1fr);
-    grid-auto-rows: 70px;
-    gap: 8px;
-    overflow-x: hidden;
-    overflow-y: auto;
-    padding-right: 2px;
-  }
-
-  .bot-media-inspector-list > button {
-    width: 100%;
-    height: 70px;
-    min-height: 70px;
-    flex: none;
-  }
-}
-`;

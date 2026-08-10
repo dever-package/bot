@@ -64,6 +64,18 @@ func (Workspace) PostCanvasExecute(c *server.Context) error {
 	return botapi.WriteJSON(c, data, err)
 }
 
+func (Workspace) PostCanvasStopAll(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := workspaceRunner.StopAllCanvasRuns(
+		c.Context(),
+		botapi.Uint64FromBody(body, "project_id", "projectId"),
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
 func (Workspace) PostCanvasNodeTitle(c *server.Context) error {
 	body, err := botapi.BindBody(c)
 	if err != nil {

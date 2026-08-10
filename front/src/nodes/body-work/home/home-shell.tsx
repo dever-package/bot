@@ -1,5 +1,4 @@
 import {
-  lazy,
   Suspense,
   useCallback,
   useEffect,
@@ -47,27 +46,31 @@ import {
 } from "./workbench-sidebar";
 import "./workbench-sidebar.css";
 import { loadWorkbenchCatalog, type WorkbenchCatalog } from "./workbench-api";
+import {
+  createPreloadableComponent,
+  createPreloadableModule,
+} from "../../shared/preloadable";
 
-const WorkProjectPage = lazy(() =>
-  import("../project/project-page").then((module) => ({
-    default: module.WorkProjectPage,
-  })),
+const workProjectPage = createPreloadableComponent(
+  createPreloadableModule(() => import("../project/project-page")),
+  (module) => module.WorkProjectPage,
 );
-const WorkbenchAssetPage = lazy(() =>
-  import("./asset-page").then((module) => ({
-    default: module.WorkbenchAssetPage,
-  })),
+const WorkProjectPage = workProjectPage.Component;
+const workbenchAssetPage = createPreloadableComponent(
+  createPreloadableModule(() => import("./asset-page")),
+  (module) => module.WorkbenchAssetPage,
 );
-const WorkbenchDialoguePage = lazy(() =>
-  import("./dialogue-page").then((module) => ({
-    default: module.WorkbenchDialoguePage,
-  })),
+const WorkbenchAssetPage = workbenchAssetPage.Component;
+const workbenchDialoguePage = createPreloadableComponent(
+  createPreloadableModule(() => import("./dialogue-page")),
+  (module) => module.WorkbenchDialoguePage,
 );
-const WorkbenchFunctionPage = lazy(() =>
-  import("./function-page").then((module) => ({
-    default: module.WorkbenchFunctionPage,
-  })),
+const WorkbenchDialoguePage = workbenchDialoguePage.Component;
+const workbenchFunctionPage = createPreloadableComponent(
+  createPreloadableModule(() => import("./function-page")),
+  (module) => module.WorkbenchFunctionPage,
 );
+const WorkbenchFunctionPage = workbenchFunctionPage.Component;
 
 const TEAM_STORAGE_KEY = "bot.body.workbench.team";
 const EMPTY_CONTENT_NAVIGATION: BodyContentNavigation = {

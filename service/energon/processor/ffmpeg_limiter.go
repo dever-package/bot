@@ -2,15 +2,8 @@ package processor
 
 import (
 	"context"
-	"os"
-	"strconv"
-	"strings"
-)
 
-const (
-	ffmpegMaxTranscodesEnv     = "BOT_FFMPEG_MAX_TRANSCODES"
-	ffmpegDefaultTranscodes    = 1
-	ffmpegMaxTranscodeCapacity = 8
+	botruntimeconfig "github.com/dever-package/bot/service/energon/runtimeconfig"
 )
 
 var ffmpegTranscodeSlots = make(chan struct{}, ffmpegTranscodeConcurrency())
@@ -42,11 +35,5 @@ func releaseFFmpegTranscodeSlot() {
 }
 
 func ffmpegTranscodeConcurrency() int {
-	if configured, err := strconv.Atoi(strings.TrimSpace(os.Getenv(ffmpegMaxTranscodesEnv))); err == nil && configured > 0 {
-		if configured > ffmpegMaxTranscodeCapacity {
-			return ffmpegMaxTranscodeCapacity
-		}
-		return configured
-	}
-	return ffmpegDefaultTranscodes
+	return botruntimeconfig.Load().FFmpegTranscodes
 }

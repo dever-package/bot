@@ -10,6 +10,8 @@ import (
 	assetmodel "github.com/dever-package/bot/model/asset"
 	projectmodel "github.com/dever-package/bot/model/project"
 	teammodel "github.com/dever-package/bot/model/team"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	"github.com/dever-package/bot/service/internal/dbop"
 )
 
 type Service struct{}
@@ -300,7 +302,7 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 		if sort == 0 {
 			sort = 100
 		}
-		assetID := safeInsertAsset(ctx, map[string]any{
+		assetID, insertErr := insertAsset(ctx, map[string]any{
 			"project_id":    req.ProjectID,
 			"body_id":       req.BodyID,
 			"team_id":       req.TeamID,
@@ -320,9 +322,14 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 			"sort":          sort,
 			"created_at":    now,
 		})
-		asset = assetModel.Find(ctx, map[string]any{"id": assetID})
+		if assetID > 0 {
+			asset = assetModel.Find(ctx, map[string]any{"id": assetID})
+		}
 		if asset == nil {
 			asset = assetModel.Find(ctx, assetIdentityFilter(req))
+		}
+		if asset == nil && insertErr != nil {
+			return nil, nil, fmt.Errorf("创建资产失败: %w", insertErr)
 		}
 	}
 	if asset == nil {
@@ -341,9 +348,9 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 		}
 		return asset, version, nil
 	}
-	versionID := insertAssetVersionWithRetry(ctx, asset.ID, req, now)
-	if versionID == 0 {
-		return nil, nil, fmt.Errorf("创建资产版本失败")
+	versionID, err := insertAssetVersionWithRetry(ctx, asset.ID, req, now)
+	if err != nil {
+		return nil, nil, err
 	}
 	if !updateAssetVersionPointer(ctx, asset.ID, req, versionID) {
 		return nil, nil, fmt.Errorf("资产已移入回收站")
@@ -760,14 +767,19 @@ func firstMapValue(value map[string]any, keys ...string) any {
 }
 
 func EnsureDocument(raw any, kind string) map[string]any {
-	if document, ok := raw.(map[string]any); ok && isStructuredAssetDocument(document) {
-		return document
-	}
 	normalizedKind := NormalizeKind(kind)
-	if len(mediaContentKeys(normalizedKind)) > 0 {
-		if mediaURLs := contentMediaURLs(raw, normalizedKind); len(mediaURLs) > 0 {
-			return mediaDocument(normalizedKind, mediaURLs...)
+	if document, ok := raw.(map[string]any); ok && isStructuredAssetDocument(document) {
+		if normalizedKind != assetmodel.KindAudio && normalizedKind != assetmodel.KindVideo {
+			return document
 		}
+		cloned := make(map[string]any, len(document))
+		for key, value := range document {
+			cloned[key] = value
+		}
+		return enrichMediaDocument(cloned, normalizedKind, raw, contentMediaURLs(raw, normalizedKind)...)
+	}
+	if mediaURLs := contentMediaURLs(raw, normalizedKind); len(mediaURLs) > 0 {
+		return mediaDocumentFromContent(normalizedKind, raw, mediaURLs...)
 	}
 	text := contentText(raw)
 	if text == "" {
@@ -786,16 +798,8 @@ func EnsureDocument(raw any, kind string) map[string]any {
 	}
 }
 
-func contentMediaURL(value any, kind string, depth int) string {
-	mediaURLs := contentMediaURLsFrom(value, kind, depth)
-	if len(mediaURLs) == 0 {
-		return ""
-	}
-	return mediaURLs[0]
-}
-
 func contentMediaURLs(value any, kind string) []string {
-	return contentMediaURLsFrom(value, kind, 0)
+	return botprotocol.ExtractPrimaryMediaURLs(value, kind)
 }
 
 // ContentMediaURLs exposes the canonical media extraction path to business
@@ -803,79 +807,6 @@ func contentMediaURLs(value any, kind string) []string {
 // every supported content envelope.
 func ContentMediaURLs(value any, kind string) []string {
 	return contentMediaURLs(value, NormalizeKind(kind))
-}
-
-func contentMediaURLsFrom(value any, kind string, depth int) []string {
-	result := make([]string, 0)
-	seen := map[string]struct{}{}
-	collectContentMediaURLs(value, kind, depth, &result, seen)
-	return result
-}
-
-func collectContentMediaURLs(value any, kind string, depth int, result *[]string, seen map[string]struct{}) {
-	if depth > 12 || value == nil {
-		return
-	}
-	switch current := value.(type) {
-	case string:
-		current = strings.TrimSpace(current)
-		if decoded, ok := decodeEmbeddedMediaValue(current); ok {
-			collectContentMediaURLs(decoded, kind, depth+1, result, seen)
-			return
-		}
-		if !isURL(current) {
-			return
-		}
-		if _, exists := seen[current]; exists {
-			return
-		}
-		seen[current] = struct{}{}
-		*result = append(*result, current)
-	case []string:
-		for _, item := range current {
-			collectContentMediaURLs(item, kind, depth+1, result, seen)
-		}
-	case []any:
-		for _, item := range current {
-			collectContentMediaURLs(item, kind, depth+1, result, seen)
-		}
-	case map[string]any:
-		for _, key := range mediaContentKeys(kind) {
-			collectContentMediaURLs(current[key], kind, depth+1, result, seen)
-		}
-		for _, key := range []string{"output", "result", "data", "content", "media_files", "attrs", "text"} {
-			collectContentMediaURLs(current[key], kind, depth+1, result, seen)
-		}
-	}
-}
-
-func decodeEmbeddedMediaValue(value string) (any, bool) {
-	if value == "" || (!strings.HasPrefix(value, "{") && !strings.HasPrefix(value, "[") && !strings.HasPrefix(value, `"`)) {
-		return nil, false
-	}
-	var decoded any
-	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
-		return nil, false
-	}
-	if text, ok := decoded.(string); ok && strings.TrimSpace(text) == value {
-		return nil, false
-	}
-	return decoded, true
-}
-
-func mediaContentKeys(kind string) []string {
-	switch kind {
-	case assetmodel.KindImage:
-		return []string{"image", "images", "image_url", "src", "url", "thumbnail"}
-	case assetmodel.KindAudio:
-		return []string{"audio", "audios", "audio_url", "src", "url"}
-	case assetmodel.KindVideo:
-		return []string{"video", "videos", "video_url", "src", "url"}
-	case assetmodel.KindFile:
-		return []string{"file", "files", "file_url", "src", "url"}
-	default:
-		return nil
-	}
 }
 
 func mediaDocument(kind string, urls ...string) map[string]any {
@@ -910,6 +841,115 @@ func mediaDocument(kind string, urls ...string) map[string]any {
 			},
 		},
 	}
+}
+
+func mediaDocumentFromContent(kind string, raw any, urls ...string) map[string]any {
+	document := mediaDocument(kind, urls...)
+	if len(document) == 0 {
+		return document
+	}
+	return enrichMediaDocument(document, kind, raw, urls...)
+}
+
+func enrichMediaDocument(document map[string]any, kind string, raw any, urls ...string) map[string]any {
+	if kind == assetmodel.KindAudio {
+		output := botprotocol.ExtractOutput(raw)
+		if text := strings.TrimSpace(botprotocol.AsText(output["text"])); text != "" && !isURL(text) {
+			document["text"] = text
+		}
+		if lyrics := botprotocol.ExtractLyrics(raw); lyrics != "" {
+			document["lyrics"] = lyrics
+		}
+	}
+	if kind != assetmodel.KindAudio && kind != assetmodel.KindVideo {
+		return document
+	}
+	if mediaFiles := mediaPreviewFiles(raw, kind, urls...); len(mediaFiles) > 0 {
+		document["media_files"] = mergeMediaPreviewFiles(document["media_files"], mediaFiles)
+	}
+	return document
+}
+
+func mergeMediaPreviewFiles(existing any, previews []map[string]any) []any {
+	result := make([]any, 0, len(previews))
+	switch current := existing.(type) {
+	case []any:
+		result = append(result, current...)
+	case []map[string]any:
+		for _, item := range current {
+			result = append(result, item)
+		}
+	case nil:
+	default:
+		result = append(result, current)
+	}
+
+	pending := make(map[string]map[string]any, len(previews))
+	for _, preview := range previews {
+		if mediaURL := strings.TrimSpace(botprotocol.AsText(preview["url"])); mediaURL != "" {
+			pending[mediaURL] = preview
+		}
+	}
+	for index, value := range result {
+		if mediaURL, ok := value.(string); ok {
+			mediaURL = strings.TrimSpace(mediaURL)
+			if preview := pending[mediaURL]; preview != nil {
+				result[index] = preview
+				delete(pending, mediaURL)
+			}
+			continue
+		}
+		file, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		mediaURL := strings.TrimSpace(botprotocol.AsText(file["url"]))
+		preview := pending[mediaURL]
+		if preview == nil {
+			continue
+		}
+		updated := make(map[string]any, len(file)+1)
+		for key, item := range file {
+			updated[key] = item
+		}
+		updated["thumbnail"] = preview["thumbnail"]
+		result[index] = updated
+		delete(pending, mediaURL)
+	}
+	for _, preview := range previews {
+		mediaURL := strings.TrimSpace(botprotocol.AsText(preview["url"]))
+		if pending[mediaURL] != nil {
+			result = append(result, preview)
+			delete(pending, mediaURL)
+		}
+	}
+	return result
+}
+
+func mediaPreviewFiles(raw any, kind string, urls ...string) []map[string]any {
+	if kind != assetmodel.KindAudio && kind != assetmodel.KindVideo {
+		return nil
+	}
+	mediaItems := botprotocol.ExtractPrimaryMediaItems(raw, kind)
+	thumbnails := make(map[string]string, len(mediaItems))
+	for _, item := range mediaItems {
+		if item.Thumbnail != "" {
+			thumbnails[item.URL] = item.Thumbnail
+		}
+	}
+	mediaFiles := make([]map[string]any, 0, len(urls))
+	for _, mediaURL := range distinctMediaURLs(urls) {
+		thumbnail := strings.TrimSpace(thumbnails[mediaURL])
+		if thumbnail == "" {
+			continue
+		}
+		mediaFiles = append(mediaFiles, map[string]any{
+			"kind":      kind,
+			"url":       mediaURL,
+			"thumbnail": thumbnail,
+		})
+	}
+	return mediaFiles
 }
 
 func mediaCollectionKey(kind string) string {
@@ -976,36 +1016,59 @@ func nextVersion(ctx context.Context, assetID uint64) int {
 	return latest.Version + 1
 }
 
-func safeInsertAsset(ctx context.Context, record map[string]any) (id uint64) {
-	defer func() {
-		if recover() != nil {
-			id = 0
-		}
-	}()
-	return uint64(assetmodel.NewAssetModel().Insert(ctx, record))
+func insertAsset(ctx context.Context, record map[string]any) (uint64, error) {
+	id, err := dbop.Insert(func() int64 {
+		return assetmodel.NewAssetModel().Insert(ctx, record)
+	})
+	return uint64(id), err
 }
 
-func insertAssetVersionWithRetry(ctx context.Context, assetID uint64, req SaveVersionRequest, now time.Time) uint64 {
+func insertAssetVersionWithRetry(ctx context.Context, assetID uint64, req SaveVersionRequest, now time.Time) (uint64, error) {
+	var lastErr error
 	for attempt := 0; attempt < 5; attempt++ {
-		versionID := safeInsertAssetVersion(ctx, map[string]any{
+		versionNumber := nextVersion(ctx, assetID)
+		requestID := strings.TrimSpace(req.RequestID)
+		nodeKey := strings.TrimSpace(req.NodeKey)
+		content := jsonText(EnsureDocument(req.Content, req.Kind))
+		record := map[string]any{
 			"asset_id":    assetID,
 			"run_id":      req.RunID,
 			"node_run_id": req.NodeRunID,
 			"release_id":  req.ReleaseID,
-			"request_id":  strings.TrimSpace(req.RequestID),
-			"node_key":    strings.TrimSpace(req.NodeKey),
+			"request_id":  requestID,
+			"node_key":    nodeKey,
 			"source":      jsonText(versionSource(req)),
-			"version":     nextVersion(ctx, assetID),
-			"content":     jsonText(EnsureDocument(req.Content, req.Kind)),
+			"version":     versionNumber,
+			"content":     content,
 			"created_at":  now,
 			"updated_at":  now,
-		})
-		if versionID > 0 {
-			return versionID
 		}
-		time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
+		versionID, insertErr := insertAssetVersion(ctx, record)
+		if versionID > 0 {
+			return versionID, nil
+		}
+		if existing := assetmodel.NewVersionModel().Find(ctx, map[string]any{
+			"asset_id": assetID,
+			"version":  versionNumber,
+		}); existing != nil {
+			if existing.RequestID == requestID && existing.NodeKey == nodeKey && existing.Content == content {
+				return existing.ID, nil
+			}
+			lastErr = fmt.Errorf("资产版本号 %d 已被并发占用", versionNumber)
+		} else if insertErr != nil {
+			return 0, fmt.Errorf("创建资产版本失败: %w", insertErr)
+		} else {
+			lastErr = fmt.Errorf("创建资产版本失败")
+		}
+		wait := time.NewTimer(time.Duration(attempt+1) * 20 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			wait.Stop()
+			return 0, ctx.Err()
+		case <-wait.C:
+		}
 	}
-	return 0
+	return 0, lastErr
 }
 
 func findSavedVersion(ctx context.Context, assetID uint64, requestID string, nodeKey string) *assetmodel.Version {
@@ -1046,13 +1109,11 @@ func versionSource(req SaveVersionRequest) map[string]any {
 	return source
 }
 
-func safeInsertAssetVersion(ctx context.Context, record map[string]any) (id uint64) {
-	defer func() {
-		if recover() != nil {
-			id = 0
-		}
-	}()
-	return uint64(assetmodel.NewVersionModel().Insert(ctx, record))
+func insertAssetVersion(ctx context.Context, record map[string]any) (uint64, error) {
+	id, err := dbop.Insert(func() int64 {
+		return assetmodel.NewVersionModel().Insert(ctx, record)
+	})
+	return uint64(id), err
 }
 
 func contentText(raw any) string {

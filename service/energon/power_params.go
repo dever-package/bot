@@ -81,6 +81,7 @@ func (s GatewayService) powerParamConfig(
 	targetID uint64,
 	mode powerParamConfigMode,
 ) (PowerParamConfig, error) {
+	ctx = withRepoRequestCache(ctx)
 	powerKey = strings.TrimSpace(powerKey)
 	if powerKey == "" {
 		return PowerParamConfig{}, fmt.Errorf("能力不能为空")

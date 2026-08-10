@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react"
 import { FileArchive, FileText, ImageIcon, Music, Video } from "lucide-react"
-import { FirstFrameVideo } from "../../shared/first-frame-video"
+import { FirstFrameVideo } from "@/components/media/first-frame-video"
 import type {
   KnowledgeAttachmentUploadMany,
   KnowledgeFileContent,

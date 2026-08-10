@@ -2,7 +2,6 @@ package project
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
@@ -11,23 +10,30 @@ import (
 	"time"
 
 	workspacemodel "github.com/dever-package/bot/model/workspace"
+	assetservice "github.com/dever-package/bot/service/asset"
+	"github.com/dever-package/bot/service/internal/dbop"
+	"github.com/dever-package/bot/service/internal/keylock"
 )
 
 const (
-	workspaceRunLockTTL             = workspaceRunLeaseDuration
-	workspaceAssetLockTTL           = 2 * time.Minute
-	workspaceAssetLockRetryInterval = 80 * time.Millisecond
-	workspaceAssetLockWaitTimeout   = 5 * time.Second
+	workspaceRunLockTTL = workspaceRunLeaseDuration
 )
 
 var workspaceRunLockOwner = newWorkspaceRunLockOwner()
+var workspaceRunLocalLocks keylock.Locker[uint64]
 
 func withWorkspaceRunLock[T any](ctx context.Context, projectID uint64, runID uint64, run func() (T, error)) (T, error) {
 	var zero T
 	if projectID == 0 || runID == 0 {
 		return run()
 	}
-	if !acquireWorkspaceRunLock(ctx, projectID, runID) {
+	releaseLocal := workspaceRunLocalLocks.Lock(runID)
+	defer releaseLocal()
+	claimed, err := acquireWorkspaceRunLock(ctx, projectID, runID)
+	if err != nil {
+		return zero, err
+	}
+	if !claimed {
 		return zero, fmt.Errorf("画布运行中，请稍后刷新")
 	}
 	defer releaseWorkspaceRunLock(context.Background(), runID)
@@ -40,8 +46,7 @@ func withWorkspaceAssetLock[T any](ctx context.Context, projectID uint64, parts 
 	if projectID == 0 || lockKey == "" {
 		return run()
 	}
-	owner := newWorkspaceAssetLockOwner()
-	release, err := acquireWorkspaceAssetLock(ctx, projectID, lockKey, owner)
+	release, err := assetservice.AcquireVersionLock(ctx, projectID, lockKey)
 	if err != nil {
 		return zero, err
 	}
@@ -49,45 +54,55 @@ func withWorkspaceAssetLock[T any](ctx context.Context, projectID uint64, parts 
 	return run()
 }
 
-func acquireWorkspaceRunLock(ctx context.Context, projectID uint64, runID uint64) bool {
+func acquireWorkspaceRunLock(ctx context.Context, projectID uint64, runID uint64) (bool, error) {
 	model := workspacemodel.NewRunLockModel()
 	now := time.Now()
 	expiresAt := now.Add(workspaceRunLockTTL)
 	if row := model.Find(ctx, map[string]any{"run_id": runID}); row != nil {
-		return claimWorkspaceRunLock(ctx, row, projectID, expiresAt, now)
+		return claimWorkspaceRunLock(ctx, row, projectID, expiresAt, now), nil
 	}
-	if tryInsertWorkspaceRunLock(ctx, projectID, runID, expiresAt, now) {
-		return true
+	inserted, insertErr := dbop.Insert(func() int64 {
+		return model.Insert(ctx, map[string]any{
+			"project_id": projectID,
+			"run_id":     runID,
+			"owner":      workspaceRunLockOwner,
+			"expires_at": expiresAt,
+			"created_at": now,
+			"updated_at": now,
+		})
+	})
+	if insertErr == nil && inserted > 0 {
+		return true, nil
 	}
-	return claimWorkspaceRunLock(ctx, model.Find(ctx, map[string]any{"run_id": runID}), projectID, expiresAt, now)
+	row := model.Find(ctx, map[string]any{"run_id": runID})
+	if row == nil {
+		if insertErr != nil {
+			return false, fmt.Errorf("创建画布运行锁失败: %w", insertErr)
+		}
+		return false, fmt.Errorf("创建画布运行锁失败")
+	}
+	return claimWorkspaceRunLock(ctx, row, projectID, expiresAt, now), nil
 }
 
 func claimWorkspaceRunLock(ctx context.Context, row *workspacemodel.RunLock, projectID uint64, expiresAt time.Time, now time.Time) bool {
 	if row == nil || row.ProjectID != projectID {
 		return false
 	}
-	if row.Owner != workspaceRunLockOwner && row.ExpiresAt.After(now) {
-		return false
-	}
-	return workspacemodel.NewRunLockModel().Update(ctx, map[string]any{"id": row.ID}, map[string]any{
-		"owner":      workspaceRunLockOwner,
-		"expires_at": expiresAt,
-		"updated_at": now,
-	}) > 0
-}
-
-func tryInsertWorkspaceRunLock(ctx context.Context, projectID uint64, runID uint64, expiresAt time.Time, now time.Time) (ok bool) {
-	defer func() {
-		if recover() != nil {
-			ok = false
-		}
-	}()
-	return workspacemodel.NewRunLockModel().Insert(ctx, map[string]any{
+	filters := map[string]any{
+		"id":         row.ID,
 		"project_id": projectID,
-		"run_id":     runID,
+	}
+	if row.Owner == workspaceRunLockOwner {
+		filters["owner"] = workspaceRunLockOwner
+	} else {
+		if row.ExpiresAt.After(now) {
+			return false
+		}
+		filters["expires_at"] = map[string]any{"lte": now}
+	}
+	return workspacemodel.NewRunLockModel().Update(ctx, filters, map[string]any{
 		"owner":      workspaceRunLockOwner,
 		"expires_at": expiresAt,
-		"created_at": now,
 		"updated_at": now,
 	}) > 0
 }
@@ -112,75 +127,6 @@ func renewWorkspaceRunLock(ctx context.Context, runID uint64, now time.Time) {
 	})
 }
 
-func acquireWorkspaceAssetLock(ctx context.Context, projectID uint64, lockKey string, owner string) (func(), error) {
-	deadline := time.Now().Add(workspaceAssetLockWaitTimeout)
-	for {
-		if claimWorkspaceAssetLockOnce(ctx, projectID, lockKey, owner) {
-			return func() {
-				releaseWorkspaceAssetLock(context.Background(), lockKey, owner)
-			}, nil
-		}
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("资产版本正在保存，请稍后重试")
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(workspaceAssetLockRetryInterval):
-		}
-	}
-}
-
-func claimWorkspaceAssetLockOnce(ctx context.Context, projectID uint64, lockKey string, owner string) bool {
-	model := workspacemodel.NewAssetLockModel()
-	now := time.Now()
-	expiresAt := now.Add(workspaceAssetLockTTL)
-	if row := model.Find(ctx, map[string]any{"lock_key": lockKey}); row != nil {
-		return claimWorkspaceAssetLock(ctx, row, projectID, owner, expiresAt, now)
-	}
-	if tryInsertWorkspaceAssetLock(ctx, projectID, lockKey, owner, expiresAt, now) {
-		return true
-	}
-	return claimWorkspaceAssetLock(ctx, model.Find(ctx, map[string]any{"lock_key": lockKey}), projectID, owner, expiresAt, now)
-}
-
-func claimWorkspaceAssetLock(ctx context.Context, row *workspacemodel.AssetLock, projectID uint64, owner string, expiresAt time.Time, now time.Time) bool {
-	if row == nil || row.ProjectID != projectID {
-		return false
-	}
-	if row.Owner != owner && row.ExpiresAt.After(now) {
-		return false
-	}
-	return workspacemodel.NewAssetLockModel().Update(ctx, map[string]any{"id": row.ID}, map[string]any{
-		"owner":      owner,
-		"expires_at": expiresAt,
-		"updated_at": now,
-	}) > 0
-}
-
-func tryInsertWorkspaceAssetLock(ctx context.Context, projectID uint64, lockKey string, owner string, expiresAt time.Time, now time.Time) (ok bool) {
-	defer func() {
-		if recover() != nil {
-			ok = false
-		}
-	}()
-	return workspacemodel.NewAssetLockModel().Insert(ctx, map[string]any{
-		"project_id": projectID,
-		"lock_key":   lockKey,
-		"owner":      owner,
-		"expires_at": expiresAt,
-		"created_at": now,
-		"updated_at": now,
-	}) > 0
-}
-
-func releaseWorkspaceAssetLock(ctx context.Context, lockKey string, owner string) {
-	workspacemodel.NewAssetLockModel().Delete(ctx, map[string]any{
-		"lock_key": lockKey,
-		"owner":    owner,
-	})
-}
-
 func workspaceAssetLockKey(projectID uint64, parts []string) string {
 	clean := []string{fmt.Sprintf("%d", projectID)}
 	for _, part := range parts {
@@ -202,12 +148,4 @@ func newWorkspaceRunLockOwner() string {
 		host = "unknown"
 	}
 	return fmt.Sprintf("%s:%d:%d", host, os.Getpid(), time.Now().UnixNano())
-}
-
-func newWorkspaceAssetLockOwner() string {
-	buf := make([]byte, 8)
-	if _, err := rand.Read(buf); err != nil {
-		return fmt.Sprintf("bot-workspace-asset-%d", time.Now().UnixNano())
-	}
-	return fmt.Sprintf("bot-workspace-asset-%s", hex.EncodeToString(buf))
 }

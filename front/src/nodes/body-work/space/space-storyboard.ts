@@ -5,14 +5,25 @@ import {
   trimmedString as stringValue,
 } from "../shared/structured-json";
 import { normalizeStoryboardReferences } from "./space-storyboard-reference";
+import { isStoryboardWorkTypeKey } from "./space-storyboard-work-type";
 import type {
   CanvasReferenceContent,
   CanvasStoryboardReference,
+  StoryboardWorkType,
 } from "./types";
 
 export const STORYBOARD_VERSION = 9;
 export const MIN_STORYBOARD_SHOT_DURATION = 4;
 export const MAX_STORYBOARD_SHOTS = 50;
+
+const GENERIC_STORYBOARD_TITLES = new Set([
+  "未命名",
+  "未命名分镜",
+  "分镜",
+  "分镜脚本",
+  "暂无内容简介",
+  "围绕当前主题展开并完成一个连贯事件",
+]);
 
 export const STORYBOARD_TRANSITION_TYPES = [
   "none",
@@ -75,6 +86,19 @@ export const STORYBOARD_MATERIAL_LABELS: Record<
   character: "角色",
   scene: "场景",
   prop: "道具",
+};
+
+const STORYBOARD_PHOTOREAL_PROMPTS: Record<
+  StoryboardMaterialType | "shot",
+  string
+> = {
+  character:
+    "画面类型：写实影像，人物五官、身体比例、光线和材质保持真实自然",
+  scene:
+    "画面类型：写实影像，空间透视、尺度关系、光线和环境材质保持真实自然",
+  prop: "画面类型：写实影像，道具比例、结构、光线和材质保持真实自然",
+  shot:
+    "画面类型：写实影像，人物五官、身体比例、光线和材质保持真实自然",
 };
 
 export type StoryboardMaterial = Record<string, unknown> & {
@@ -217,6 +241,7 @@ export function storyboardShotLinksPreviousState(
 export type StoryboardDocument = Record<string, unknown> & {
   type: "storyboard";
   version: typeof STORYBOARD_VERSION;
+  work_type: StoryboardWorkType;
   workflow: StoryboardWorkflow;
   production_plan: StoryboardProductionPlan;
   title: string;
@@ -742,10 +767,11 @@ export function withStoryboardStylePrompt(
 export function storyboardPromptWithStyle(
   storyboard: StoryboardDocument,
   prompt: string,
+  contentType: StoryboardMaterialType | "shot" = "shot",
 ) {
   const visualModePrompt =
     storyboard.visual_mode === "photoreal"
-      ? "画面类型：写实影像，人物五官、身体比例、光线和材质保持真实自然"
+      ? STORYBOARD_PHOTOREAL_PROMPTS[contentType]
       : "画面类型：非写实影像，保持统一造型语言，不得漂移为真人摄影";
   let basePrompt = appendStoryboardPromptClause(prompt.trim(), visualModePrompt);
   const stylePrompt = storyboard.style_prompt.trim();
@@ -889,6 +915,7 @@ function decodeStoryboard(
   row: Record<string, unknown>,
 ): StoryboardDocument | null {
   const visualMode = stringValue(row.visual_mode).toLowerCase();
+  const workType = normalizeStoryboardWorkType(row.work_type);
   if (
     stringValue(row.type).toLowerCase() !== "storyboard" ||
     numberValue(row.version) !== STORYBOARD_VERSION ||
@@ -896,6 +923,7 @@ function decodeStoryboard(
     typeof row.narrator_voice !== "string" ||
     typeof row.style_prompt !== "string" ||
     !isStoryboardVisualMode(visualMode) ||
+    !workType ||
     !Array.isArray(row.references) ||
     !Array.isArray(row.materials) ||
     !Array.isArray(row.shots)
@@ -962,17 +990,19 @@ function decodeStoryboard(
   }
 
   const workflow = normalizeStoryboardWorkflow(row.workflow);
+  const summary = storyboardContentSummaryFromShots(
+    stringValue(row.summary),
+    normalizedShots,
+  );
   const storyboard: StoryboardDocument = {
     ...row,
     type: "storyboard",
     version: STORYBOARD_VERSION,
+    work_type: workType,
     workflow,
     production_plan: normalizeStoryboardProductionPlan(row.production_plan),
-    title: row.title,
-    summary: storyboardContentSummaryFromShots(
-      stringValue(row.summary),
-      normalizedShots,
-    ),
+    title: storyboardContentTitle(row.title, summary, normalizedShots),
+    summary,
     target_duration: targetDuration,
     target_shot_count: targetShotCount,
     narrator_voice: row.narrator_voice.trim(),
@@ -985,6 +1015,16 @@ function decodeStoryboard(
     shots: normalizedShots,
   };
   return normalizeStoryboardOrder(storyboard);
+}
+
+function normalizeStoryboardWorkType(
+  value: unknown,
+): StoryboardWorkType | null {
+  const workType = stringValue(value).toLowerCase();
+  if (!workType) {
+    return "short";
+  }
+  return isStoryboardWorkTypeKey(workType) ? workType : null;
 }
 
 function decodeStoryboardStoryline(
@@ -1013,6 +1053,25 @@ function storyboardContentSummaryFromShots(
   return descriptions.length > 0
     ? descriptions.join("；")
     : "暂无内容简介";
+}
+
+function storyboardContentTitle(
+  value: string,
+  summary: string,
+  shots: StoryboardShot[],
+) {
+  const current = value.trim();
+  if (current && !GENERIC_STORYBOARD_TITLES.has(current)) {
+    return current;
+  }
+  const source = [summary, shots[0]?.beat, shots[0]?.description]
+    .map((item) => String(item || "").trim())
+    .find((item) => item && !GENERIC_STORYBOARD_TITLES.has(item));
+  if (!source) {
+    return "分镜脚本";
+  }
+  const title = source.split(/[\r\n。！？!?；;]/, 1)[0].trim();
+  return Array.from(title).slice(0, 24).join("") || "分镜脚本";
 }
 
 function isStoryboardVisualMode(value: string): value is StoryboardVisualMode {

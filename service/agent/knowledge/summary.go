@@ -18,19 +18,29 @@ import (
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
-const maxConcurrentDirectorySummaries = 3
+const (
+	maxConcurrentDirectorySummaries = 3
+	maxPendingDirectorySummaries    = 2048
+	directorySummaryTimeout         = 5 * time.Minute
+)
 
 type directorySummaryTask struct {
 	baseID uint64
 	dirID  uint64
 }
 
+type directorySummaryTaskState struct {
+	queued  bool
+	running bool
+	dirty   bool
+}
+
 type directorySummaryQueue struct {
-	once    sync.Once
-	mutex   sync.Mutex
-	pending map[directorySummaryTask]struct{}
-	order   []directorySummaryTask
-	wake    chan struct{}
+	once   sync.Once
+	mutex  sync.Mutex
+	states map[directorySummaryTask]*directorySummaryTaskState
+	order  []directorySummaryTask
+	wake   chan struct{}
 }
 
 var pendingDirectorySummaries directorySummaryQueue
@@ -72,15 +82,7 @@ func refreshDirectorySummary(ctx context.Context, base *agentmodel.KnowledgeBase
 	if dirID == 0 {
 		return
 	}
-	childDirs := agentmodel.NewKnowledgeDirModel().Select(ctx, map[string]any{
-		"knowledge_base_id": base.ID,
-		"parent_id":         dirID,
-		"status":            1,
-	}, map[string]any{
-		"field": "main.id, main.name, main.summary, main.keywords",
-		"order": "main.sort asc, main.id asc",
-	})
-	docs := representativeDirectorySummaryDocs(ctx, base, dirID, 40)
+	childDirs, docs := loadDirectorySummaryMaterial(ctx, base, dirID)
 	parts := make([]string, 0, len(childDirs)+len(docs)+1)
 	keywords := make([]string, 0)
 	for _, dir := range childDirs {
@@ -119,11 +121,23 @@ func (q *directorySummaryQueue) enqueue(task directorySummaryTask) {
 	}
 	q.start()
 	q.mutex.Lock()
-	if _, exists := q.pending[task]; exists {
+	if state := q.states[task]; state != nil {
+		if state.running {
+			state.dirty = true
+		}
 		q.mutex.Unlock()
 		return
 	}
-	q.pending[task] = struct{}{}
+	if len(q.states) >= maxPendingDirectorySummaries {
+		q.mutex.Unlock()
+		dlog.ErrorFields("knowledge_directory_summary_queue_full", "知识库目录摘要队列已满", dlog.Fields{
+			"knowledge_base_id": task.baseID,
+			"dir_id":            task.dirID,
+			"capacity":          maxPendingDirectorySummaries,
+		})
+		return
+	}
+	q.states[task] = &directorySummaryTaskState{queued: true}
 	q.order = append(q.order, task)
 	q.mutex.Unlock()
 	q.notify()
@@ -131,7 +145,7 @@ func (q *directorySummaryQueue) enqueue(task directorySummaryTask) {
 
 func (q *directorySummaryQueue) start() {
 	q.once.Do(func() {
-		q.pending = make(map[directorySummaryTask]struct{})
+		q.states = make(map[directorySummaryTask]*directorySummaryTaskState)
 		q.wake = make(chan struct{}, 1)
 		for range maxConcurrentDirectorySummaries {
 			go q.run()
@@ -149,14 +163,39 @@ func (q *directorySummaryQueue) notify() {
 func (q *directorySummaryQueue) next() (directorySummaryTask, bool) {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
-	if len(q.order) == 0 {
-		return directorySummaryTask{}, false
+	for len(q.order) > 0 {
+		task := q.order[0]
+		q.order[0] = directorySummaryTask{}
+		q.order = q.order[1:]
+		state := q.states[task]
+		if state == nil || !state.queued {
+			continue
+		}
+		state.queued = false
+		state.running = true
+		return task, true
 	}
-	task := q.order[0]
-	q.order[0] = directorySummaryTask{}
-	q.order = q.order[1:]
-	delete(q.pending, task)
-	return task, true
+	return directorySummaryTask{}, false
+}
+
+func (q *directorySummaryQueue) complete(task directorySummaryTask) {
+	q.mutex.Lock()
+	state := q.states[task]
+	if state == nil {
+		q.mutex.Unlock()
+		return
+	}
+	state.running = false
+	if state.dirty {
+		state.dirty = false
+		state.queued = true
+		q.order = append(q.order, task)
+		q.mutex.Unlock()
+		q.notify()
+		return
+	}
+	delete(q.states, task)
+	q.mutex.Unlock()
 }
 
 func (q *directorySummaryQueue) run() {
@@ -167,7 +206,10 @@ func (q *directorySummaryQueue) run() {
 			continue
 		}
 		q.notify()
-		runQueuedDirectorySummary(task)
+		func() {
+			defer q.complete(task)
+			runQueuedDirectorySummary(task)
+		}()
 	}
 }
 
@@ -181,7 +223,16 @@ func runQueuedDirectorySummary(task directorySummaryTask) {
 			})
 		}
 	}()
-	generateQueuedDirectorySummary(context.Background(), task)
+	ctx, cancel := context.WithTimeout(context.Background(), directorySummaryTimeout)
+	defer cancel()
+	generateQueuedDirectorySummary(ctx, task)
+	if ctx.Err() != nil {
+		dlog.ErrorFields("knowledge_directory_summary_timeout", "知识库目录摘要任务超时", dlog.Fields{
+			"knowledge_base_id": task.baseID,
+			"dir_id":            task.dirID,
+			"error":             ctx.Err().Error(),
+		})
+	}
 }
 
 func generateQueuedDirectorySummary(ctx context.Context, task directorySummaryTask) {
@@ -200,86 +251,130 @@ func generateQueuedDirectorySummary(ctx context.Context, task directorySummaryTa
 	if dir == nil {
 		return
 	}
-	childDirs := agentmodel.NewKnowledgeDirModel().Select(ctx, map[string]any{
-		"knowledge_base_id": task.baseID,
-		"parent_id":         task.dirID,
-		"status":            1,
-	}, map[string]any{
-		"field": "main.id, main.name, main.summary, main.keywords",
-		"order": "main.sort asc, main.id asc",
-	})
-	docs := representativeDirectorySummaryDocs(ctx, base, task.dirID, 40)
+	childDirs, docs := loadDirectorySummaryMaterial(ctx, base, task.dirID)
 	if len(docs) < 3 {
 		return
 	}
 	generateLLMDirectorySummary(ctx, base, task.dirID, childDirs, docs, strings.TrimSpace(dir.Summary), strings.TrimSpace(dir.Keywords))
 }
 
+func loadDirectorySummaryMaterial(ctx context.Context, base *agentmodel.KnowledgeBase, dirID uint64) ([]*agentmodel.KnowledgeDir, []*agentmodel.KnowledgeDoc) {
+	if base == nil || base.ID == 0 || dirID == 0 {
+		return nil, nil
+	}
+	childDirs := agentmodel.NewKnowledgeDirModel().Select(ctx, map[string]any{
+		"knowledge_base_id": base.ID,
+		"parent_id":         dirID,
+		"status":            1,
+	}, map[string]any{
+		"field": "main.id, main.name, main.summary, main.keywords",
+		"order": "main.sort asc, main.id asc",
+	})
+	return childDirs, representativeDirectorySummaryDocs(ctx, base, dirID, 40)
+}
+
 func representativeDirectorySummaryDocs(ctx context.Context, base *agentmodel.KnowledgeBase, dirID uint64, limit int) []*agentmodel.KnowledgeDoc {
 	if base == nil || base.ID == 0 || dirID == 0 || limit <= 0 {
 		return nil
 	}
-	const pageSize = 250
 	filters := map[string]any{
 		"knowledge_base_id": base.ID,
 		"dir_id":            dirID,
 		"status":            1,
+		"index_status": []any{
+			agentmodel.KnowledgeIndexStatusSuccess,
+			agentmodel.KnowledgeIndexStatusRunning,
+		},
+	}
+	if base.ReviewRequired {
+		filters["review_status"] = agentmodel.KnowledgeReviewStatusApproved
 	}
 	total := countInt(agentmodel.NewKnowledgeDocModel().Count(ctx, filters))
-	stride := 1
-	if total > limit {
-		stride = (total + limit - 1) / limit
+	if total == 0 {
+		return nil
 	}
-	selected := make([]*agentmodel.KnowledgeDoc, 0, limit)
-	latest := make([]*agentmodel.KnowledgeDoc, 0, 6)
-	ordinal := 0
+	windowSize := limit
+	windows := []struct {
+		order string
+		page  int
+	}{
+		{order: "main.id desc", page: 1},
+	}
+	if total > windowSize*2 {
+		middlePage := (total/windowSize + 1) / 2
+		if middlePage < 2 {
+			middlePage = 2
+		}
+		windows = append(windows, struct {
+			order string
+			page  int
+		}{order: "main.id asc", page: middlePage})
+	}
+	windows = append(windows, struct {
+		order string
+		page  int
+	}{order: "main.id asc", page: 1})
+
 	now := time.Now()
-	var afterID uint64
-	for {
-		pageFilters := mergeFilter(filters, map[string]any{})
-		if afterID > 0 {
-			pageFilters["id"] = map[string]any{"gt": afterID}
-		}
-		rows := agentmodel.NewKnowledgeDocModel().Select(ctx, pageFilters, map[string]any{
+	groups := make([][]*agentmodel.KnowledgeDoc, 0, len(windows))
+	for _, window := range windows {
+		rows := agentmodel.NewKnowledgeDocModel().Select(ctx, filters, map[string]any{
 			"field":    "main.id, main.title, main.summary, main.keywords, main.node_count, main.status, main.index_status, main.expires_at, main.review_status",
-			"order":    "main.id asc",
-			"page":     1,
-			"pageSize": pageSize,
+			"order":    window.order,
+			"page":     window.page,
+			"pageSize": windowSize,
 		})
-		if len(rows) == 0 {
-			break
-		}
-		afterID = rows[len(rows)-1].ID
+		available := make([]*agentmodel.KnowledgeDoc, 0, len(rows))
 		for _, row := range rows {
-			currentOrdinal := ordinal
-			ordinal++
-			if !knowledgeDocAvailableAt(row, base.ReviewRequired, now) {
-				continue
-			}
-			latest = append(latest, row)
-			if len(latest) > 6 {
-				latest = latest[1:]
-			}
-			if currentOrdinal%stride == 0 {
-				selected = append(selected, row)
+			if knowledgeDocAvailableAt(row, base.ReviewRequired, now) {
+				available = append(available, row)
 			}
 		}
-		if len(rows) < pageSize {
-			break
-		}
+		groups = append(groups, available)
 	}
-	seen := make(map[uint64]struct{}, len(selected)+len(latest))
+	return interleaveDirectorySummaryDocs(groups, limit)
+}
+
+func interleaveDirectorySummaryDocs(groups [][]*agentmodel.KnowledgeDoc, limit int) []*agentmodel.KnowledgeDoc {
+	if len(groups) == 0 || limit <= 0 {
+		return nil
+	}
+	seen := make(map[uint64]struct{}, limit)
 	result := make([]*agentmodel.KnowledgeDoc, 0, limit)
-	for _, group := range [][]*agentmodel.KnowledgeDoc{latest, selected} {
-		for _, row := range group {
-			if row == nil || len(result) >= limit {
+	indices := make([]int, len(groups))
+	appendRow := func(row *agentmodel.KnowledgeDoc) {
+		if row == nil || len(result) >= limit {
+			return
+		}
+		if _, exists := seen[row.ID]; exists {
+			return
+		}
+		seen[row.ID] = struct{}{}
+		result = append(result, row)
+	}
+	latestCount := 6
+	if latestCount > len(groups[0]) {
+		latestCount = len(groups[0])
+	}
+	for indices[0] < latestCount {
+		appendRow(groups[0][indices[0]])
+		indices[0]++
+	}
+	for len(result) < limit {
+		advanced := false
+		for groupIndex, group := range groups {
+			if indices[groupIndex] >= len(group) {
 				continue
 			}
-			if _, exists := seen[row.ID]; exists {
-				continue
+			appendRow(group[indices[groupIndex]])
+			indices[groupIndex]++
+			advanced = true
+			if len(result) >= limit {
+				break
 			}
-			seen[row.ID] = struct{}{}
-			result = append(result, row)
+		}
+		if !advanced {
+			break
 		}
 	}
 	return result

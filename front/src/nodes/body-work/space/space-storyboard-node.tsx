@@ -13,6 +13,7 @@ import {
 } from "./space-storyboard";
 import type { ComposerAssetItem } from "./types";
 import { StoryboardCompactShotCard } from "./space-storyboard-shot-card";
+import "./space-storyboard-node.css";
 
 export type StoryboardNodeStatus = "empty" | "running" | "complete" | "error";
 

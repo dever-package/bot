@@ -31,7 +31,7 @@ func IsStreamingAudioOutput(output Output) bool {
 }
 
 var (
-	scalarOutputKeys     = []string{"event", "title", "text", "reasoning", "progress", "error", "error_code", "json", "rich", "finish_reason", "interaction"}
+	scalarOutputKeys     = []string{"event", "title", "text", "lyrics", "reasoning", "progress", "error", "error_code", "json", "rich", "finish_reason", "interaction"}
 	structuredOutputKeys = []string{"media_files"}
 	mediaOutputFields    = []struct {
 		Target  string

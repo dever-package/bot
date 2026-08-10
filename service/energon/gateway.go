@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,15 +33,20 @@ type GatewayService struct {
 
 const defaultProviderHTTPTimeout = time.Hour
 
+var (
+	defaultGatewayOnce sync.Once
+	defaultGateway     GatewayService
+)
+
 func NewGatewayService() GatewayService {
-	return NewGatewayServiceWithClient(botprovider.NewHTTPClient(defaultProviderHTTPTimeout))
+	defaultGatewayOnce.Do(func() {
+		defaultGateway = newGatewayService(botprovider.NewHTTPClient(defaultProviderHTTPTimeout))
+	})
+	return defaultGateway
 }
 
-func NewGatewayServiceWithClient(client botprovider.Client) GatewayService {
+func newGatewayService(client botprovider.Client) GatewayService {
 	repo := NewRepo()
-	if client == nil {
-		client = botprovider.NewHTTPClient(defaultProviderHTTPTimeout)
-	}
 	service := GatewayService{
 		repo:          repo,
 		streams:       frontstream.New(botstream.Namespace),
@@ -57,6 +63,7 @@ func NewGatewayServiceWithClient(client botprovider.Client) GatewayService {
 }
 
 func (s GatewayService) Handle(ctx context.Context, raw GatewayRequest) (*GatewayResponse, error) {
+	ctx = withRepoRequestCache(ctx)
 	prepared, mode, err := prepareGatewayRequest(raw)
 	if err != nil {
 		return nil, err
@@ -84,6 +91,7 @@ func (s GatewayService) Handle(ctx context.Context, raw GatewayRequest) (*Gatewa
 }
 
 func (s GatewayService) Validate(ctx context.Context, raw GatewayRequest) error {
+	ctx = withRepoRequestCache(ctx)
 	req, plan, err := s.prepareValidationPlan(ctx, raw)
 	if err != nil {
 		return err
@@ -106,6 +114,7 @@ func (s GatewayService) Validate(ctx context.Context, raw GatewayRequest) error 
 // source resolver, this method does not let another compatible target satisfy
 // the validation request.
 func (s GatewayService) ValidatePowerTarget(ctx context.Context, raw GatewayRequest, targetID uint64) error {
+	ctx = withRepoRequestCache(ctx)
 	if targetID == 0 {
 		return fmt.Errorf("能力来源不能为空")
 	}

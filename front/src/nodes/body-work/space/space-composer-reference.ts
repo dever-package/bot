@@ -14,7 +14,7 @@ export function buildComposerReferenceLibrary(
         title: source.title,
         kind: composerKindFromPreview(
           source.preview,
-          String(source.type || ""),
+          String(source.kind || source.type || ""),
         ),
         source: "current" as const,
         output: source.output,
@@ -63,10 +63,16 @@ function composerKindFromPreview(
   preview: CanvasContentPreview,
   fallback: string,
 ) {
+  const declaredKind = String(fallback || "")
+    .trim()
+    .toLowerCase();
+  if (["image", "video", "audio", "file"].includes(declaredKind)) {
+    return declaredKind;
+  }
   if (preview.imageUrl) return "image";
   if (preview.videoUrl) return "video";
   if (preview.audioUrl) return "audio";
   if (preview.fileUrl) return "file";
   if (preview.text) return "text";
-  return String(fallback || "file").toLowerCase();
+  return declaredKind || "file";
 }

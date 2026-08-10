@@ -3,17 +3,12 @@ package loop
 import (
 	"encoding/json"
 	"strings"
+
+	runtimejson "github.com/dever-package/bot/service/agent/runtime/internal/jsoncodec"
 )
 
 func encodeJSON(value any, fallback string) string {
-	if value == nil {
-		return fallback
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return fallback
-	}
-	return string(encoded)
+	return runtimejson.Encode(value, fallback)
 }
 
 func decodeOutput(value string) map[string]any {

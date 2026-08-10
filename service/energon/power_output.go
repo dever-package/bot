@@ -25,7 +25,7 @@ type powerOutputContract struct {
 	Description string
 	Prompt      string
 	Schema      map[string]any
-	Normalize   func(map[string]any) (map[string]any, error)
+	Normalize   func(output map[string]any, requestInput map[string]any) (map[string]any, error)
 }
 
 type powerOutputStreamProgress struct {
@@ -55,7 +55,14 @@ func preparePowerRequest(req *botprotocol.ShemicRequest, power botmodel.Power) e
 		applyPowerPrompt(req, power, "")
 		return nil
 	}
-	applyPowerPrompt(req, power, contract.Prompt)
+	outputPrompt := contract.Prompt
+	if outputType == botmodel.OutputTypeStoryboard {
+		outputPrompt, err = storyboardOutputPromptForInput(req.Input)
+		if err != nil {
+			return err
+		}
+	}
+	applyPowerPrompt(req, power, outputPrompt)
 	applyPowerOutputTool(req, contract)
 	return nil
 }
@@ -102,7 +109,7 @@ func applyPowerOutputTool(req *botprotocol.ShemicRequest, contract powerOutputCo
 	req.Raw.Body["options"] = cloneAnyMap(options)
 }
 
-func normalizePowerOutput(power botmodel.Power, value any) (any, error) {
+func normalizePowerOutput(req *botprotocol.ShemicRequest, power botmodel.Power, value any) (any, error) {
 	outputType := botmodel.NormalizeOutputType(power.OutputType)
 	contract, structured, err := powerOutputContractFor(outputType)
 	if err != nil || !structured {
@@ -119,7 +126,11 @@ func normalizePowerOutput(power botmodel.Power, value any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	normalized, err := contract.Normalize(arguments)
+	var requestInput map[string]any
+	if req != nil {
+		requestInput = req.Input
+	}
+	normalized, err := contract.Normalize(arguments, requestInput)
 	if err != nil {
 		return nil, fmt.Errorf("%s输出格式无效: %w", contract.Type, err)
 	}

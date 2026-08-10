@@ -6,9 +6,11 @@ type AssetCoverKind = "image" | "video";
 export function AssetLazyCover({
   kind,
   src,
+  poster,
 }: {
   kind: AssetCoverKind;
   src: string;
+  poster?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeSrc, setActiveSrc] = useState("");
@@ -72,6 +74,7 @@ export function AssetLazyCover({
         ) : (
           <VideoThumbnail
             src={src}
+            poster={poster}
             ariaHidden
             onLoad={markLoaded}
             onError={markFailed}

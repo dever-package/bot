@@ -33,20 +33,16 @@ func (s Service) CanvasReferences(ctx context.Context, projectID uint64, assetCa
 	if projectID == 0 {
 		return []map[string]any{}
 	}
-	scope, ok := resolveCanvasAssetScope(ctx, projectID)
-	if !ok {
-		return []map[string]any{}
-	}
 	assetModel := assetmodel.NewAssetModel()
-	rowsByID := map[uint64]*assetmodel.Asset{}
+	candidatesByID := map[uint64]*assetmodel.Asset{}
 	if ids := uniqueCanvasAssetIDs(assetIDs); len(ids) > 0 {
 		for _, row := range assetModel.Select(ctx, map[string]any{
 			"id":         ids,
 			"status":     assetmodel.StatusCurrent,
 			"version_id": map[string]any{"gt": 0},
 		}) {
-			if scope.contains(row) {
-				rowsByID[row.ID] = row
+			if row != nil {
+				candidatesByID[row.ID] = row
 			}
 		}
 	}
@@ -60,14 +56,24 @@ func (s Service) CanvasReferences(ctx context.Context, projectID uint64, assetCa
 			"status":        assetmodel.StatusCurrent,
 			"version_id":    map[string]any{"gt": 0},
 		}) {
-			if scope.contains(row) {
-				rowsByID[row.ID] = row
+			if row != nil {
+				candidatesByID[row.ID] = row
 			}
 		}
 	}
-	rows := make([]*assetmodel.Asset, 0, len(rowsByID))
-	for _, row := range rowsByID {
-		rows = append(rows, row)
+	candidates := make([]*assetmodel.Asset, 0, len(candidatesByID))
+	for _, row := range candidatesByID {
+		candidates = append(candidates, row)
+	}
+	scope, ok := resolveCanvasAssetScope(ctx, projectID, candidates)
+	if !ok {
+		return []map[string]any{}
+	}
+	rows := make([]*assetmodel.Asset, 0, len(candidates))
+	for _, row := range candidates {
+		if scope.contains(row) {
+			rows = append(rows, row)
+		}
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		return rows[i].ID < rows[j].ID
@@ -92,7 +98,7 @@ func canvasReferenceMap(asset assetmodel.Asset, version *assetmodel.Version) map
 	return item
 }
 
-func resolveCanvasAssetScope(ctx context.Context, projectID uint64) (teamAssetScope, bool) {
+func resolveCanvasAssetScope(ctx context.Context, projectID uint64, assets []*assetmodel.Asset) (teamAssetScope, bool) {
 	project := projectmodel.NewProjectModel().Find(ctx, map[string]any{
 		"id":     projectID,
 		"status": projectmodel.StatusEnabled,
@@ -100,7 +106,7 @@ func resolveCanvasAssetScope(ctx context.Context, projectID uint64) (teamAssetSc
 	if project == nil || project.TeamID == 0 {
 		return teamAssetScope{}, false
 	}
-	scope, err := resolveTeamAssetScope(ctx, project.TeamID)
+	scope, err := resolveTeamAssetScopeForAssets(ctx, project.TeamID, assets, projectID)
 	if err != nil {
 		return teamAssetScope{}, false
 	}
@@ -209,16 +215,16 @@ func (s Service) EnsureCanvasReferencedMaterialsActive(ctx context.Context, proj
 	if projectID == 0 || len(assetIDs) == 0 {
 		return
 	}
-	scope, ok := resolveCanvasAssetScope(ctx, projectID)
-	if !ok {
-		return
-	}
 	assetModel := assetmodel.NewAssetModel()
 	rows := assetModel.Select(ctx, map[string]any{
 		"id":     assetIDs,
 		"role":   assetmodel.RoleMaterial,
 		"status": map[string]any{"neq": assetmodel.StatusDeleted},
 	})
+	scope, ok := resolveCanvasAssetScope(ctx, projectID, rows)
+	if !ok {
+		return
+	}
 	for _, row := range rows {
 		if row == nil || !scope.contains(row) {
 			continue

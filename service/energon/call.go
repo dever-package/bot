@@ -25,47 +25,16 @@ func (s GatewayService) callNormalizeTarget(
 		return s.callLocalTarget(ctx, req, selected, false)
 	}
 	startedAt := time.Now()
-	adapter, err := s.adapterForSelected(req, selected)
+	prepared, stage, err := s.prepareRemoteCall(ctx, req, selected)
 	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("select_protocol", err.Error()))
-		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
+		logItem := s.recordCallLog(ctx, prepared.Request, prepared.Selected, StatusFail, time.Since(startedAt), encodeFailureLogResult(stage, err.Error()))
+		return callResult{Log: logItem, Attempt: buildCallAttempt(prepared.Selected, StatusFail, logItem, err)}, err
 	}
-	req.Protocol = adapter.Name()
-
-	mappedInput, err := botinput.BuildMapped(ctx, s.repo, req, botinput.Target{
-		PowerID:   selected.Power.ID,
-		ServiceID: selected.Service.ID,
-	})
-	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("map_input", err.Error()))
-		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
-	}
-	req, mappedInput, _, err = s.prepareVideoReferenceAudio(ctx, req, selected, mappedInput)
-	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("prepare_reference_audio", err.Error()))
-		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
-	}
-	selected, err = s.applyServiceEndpoint(ctx, selected, mappedInput)
-	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("select_service_endpoint", err.Error()))
-		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
-	}
-
-	nativeInput := botprotocol.NativeInput{
-		Request:     req,
-		Provider:    selected.Provider,
-		Account:     selected.Account,
-		Power:       selected.Power,
-		PowerTarget: selected.PowerTarget,
-		Service:     selected.Service,
-		ServiceAPI:  selected.ServiceAPI,
-		Mapped:      mappedInput,
-	}
-	nativeReq, err := adapter.BuildNativeRequest(nativeInput)
-	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("build_request", err.Error()))
-		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
-	}
+	req = prepared.Request
+	selected = prepared.Selected
+	adapter := prepared.Adapter
+	nativeInput := prepared.NativeInput
+	nativeReq := prepared.NativeRequest
 
 	resp, err := s.client.Do(ctx, nativeReq)
 	if err != nil {
@@ -95,7 +64,7 @@ func (s GatewayService) callNormalizeTarget(
 		logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("parse_response", err.Error()), usage, nativeReq)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
-	data, err = normalizePowerOutput(selected.Power, data)
+	data, err = normalizePowerOutput(req, selected.Power, data)
 	if err != nil {
 		usage := extractResponseTokenUsage(resp, data)
 		logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("normalize_output", err.Error()), usage, nativeReq)
@@ -118,6 +87,62 @@ func (s GatewayService) callNormalizeTarget(
 		Log:           logItem,
 		Attempt:       buildCallAttempt(selected, StatusSuccess, logItem, nil),
 	}, nil
+}
+
+type remoteCallPreparation struct {
+	Request        *botprotocol.ShemicRequest
+	Selected       selectedTarget
+	Adapter        botprotocol.Adapter
+	NativeInput    botprotocol.NativeInput
+	NativeRequest  botprovider.Request
+	ReferenceAudio videoReferenceAudioPreparation
+}
+
+func (s GatewayService) prepareRemoteCall(
+	ctx context.Context,
+	req *botprotocol.ShemicRequest,
+	selected selectedTarget,
+) (remoteCallPreparation, string, error) {
+	prepared := remoteCallPreparation{Request: req, Selected: selected}
+	adapter, err := s.adapterForSelected(req, selected)
+	if err != nil {
+		return prepared, "select_protocol", err
+	}
+	prepared.Adapter = adapter
+	req.Protocol = adapter.Name()
+
+	mapped, err := botinput.BuildMapped(ctx, s.repo, req, botinput.Target{
+		PowerID:   selected.Power.ID,
+		ServiceID: selected.Service.ID,
+	})
+	if err != nil {
+		return prepared, "map_input", err
+	}
+	req, mapped, prepared.ReferenceAudio, err = s.prepareVideoReferenceAudio(ctx, req, selected, mapped)
+	prepared.Request = req
+	if err != nil {
+		return prepared, "prepare_reference_audio", err
+	}
+	resolved, err := s.applyServiceEndpoint(ctx, selected, mapped)
+	if err != nil {
+		return prepared, "select_service_endpoint", err
+	}
+	prepared.Selected = resolved
+	prepared.NativeInput = botprotocol.NativeInput{
+		Request:     req,
+		Provider:    resolved.Provider,
+		Account:     resolved.Account,
+		Power:       resolved.Power,
+		PowerTarget: resolved.PowerTarget,
+		Service:     resolved.Service,
+		ServiceAPI:  resolved.ServiceAPI,
+		Mapped:      mapped,
+	}
+	prepared.NativeRequest, err = adapter.BuildNativeRequest(prepared.NativeInput)
+	if err != nil {
+		return prepared, "build_request", err
+	}
+	return prepared, "", nil
 }
 
 func (s GatewayService) handleStream(ctx context.Context, raw GatewayRequest) error {
@@ -178,33 +203,22 @@ func (s GatewayService) callStreamTarget(
 		return s.callLocalTarget(ctx, req, selected, true)
 	}
 	startedAt := time.Now()
-	adapter, err := s.adapterForSelected(req, selected)
+	prepared, stage, err := s.prepareRemoteCall(ctx, req, selected)
 	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("select_stream_protocol", err.Error()))
-		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
+		logItem := s.recordCallLog(ctx, prepared.Request, prepared.Selected, StatusFail, time.Since(startedAt), encodeFailureLogResult(stage, err.Error()))
+		return callResult{Log: logItem, Attempt: buildCallAttempt(prepared.Selected, StatusFail, logItem, err)}, err
 	}
-	req.Protocol = adapter.Name()
-
-	mappedInput, err := botinput.BuildMapped(ctx, s.repo, req, botinput.Target{
-		PowerID:   selected.Power.ID,
-		ServiceID: selected.Service.ID,
-	})
-	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("map_stream_input", err.Error()))
-		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
-	}
-	var referenceAudioPreparation videoReferenceAudioPreparation
-	req, mappedInput, referenceAudioPreparation, err = s.prepareVideoReferenceAudio(ctx, req, selected, mappedInput)
-	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("prepare_stream_reference_audio", err.Error()))
-		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
-	}
-	if referenceAudioPreparation.Prepared {
+	req = prepared.Request
+	selected = prepared.Selected
+	adapter := prepared.Adapter
+	nativeInput := prepared.NativeInput
+	nativeReq := prepared.NativeRequest
+	if prepared.ReferenceAudio.Prepared {
 		status := "参考音频已转换为 MP3"
-		if referenceAudioPreparation.Trimmed {
+		if prepared.ReferenceAudio.Trimmed {
 			status = fmt.Sprintf(
 				"参考音频已转换为 MP3 并截取为 %s 秒",
-				formatReferenceAudioDuration(referenceAudioPreparation.Duration),
+				formatReferenceAudioDuration(prepared.ReferenceAudio.Duration),
 			)
 		}
 		_ = s.writeStreamStatus(
@@ -213,32 +227,11 @@ func (s GatewayService) callStreamTarget(
 			status,
 		)
 	}
-	selected, err = s.applyServiceEndpoint(ctx, selected, mappedInput)
-	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("select_stream_endpoint", err.Error()))
-		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
-	}
-
-	nativeInput := botprotocol.NativeInput{
-		Request:     req,
-		Provider:    selected.Provider,
-		Account:     selected.Account,
-		Power:       selected.Power,
-		PowerTarget: selected.PowerTarget,
-		Service:     selected.Service,
-		ServiceAPI:  selected.ServiceAPI,
-		Mapped:      mappedInput,
-	}
-	nativeReq, err := adapter.BuildNativeRequest(nativeInput)
-	if err != nil {
-		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("build_stream_request", err.Error()))
-		return callResult{Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
-	}
-	cancelable := botstream.SupportsCancel(adapter, nativeInput)
-	s.streamCancels.SetCancelable(req.RequestID, cancelable)
+	remoteCancelable := botstream.SupportsCancel(adapter, nativeInput)
+	s.streamCancels.SetCancelable(req.RequestID, true)
 	if err := s.writeStream(ctx, req.RequestID, botprotocol.BuildStreamResponse(req.RequestID, botprotocol.Output{
 		"event": "control",
-		"meta":  botstream.CancelableMeta(cancelable),
+		"meta":  botstream.CancelableMeta(true),
 	})); err != nil {
 		return callResult{NativeRequest: nativeReq}, err
 	}
@@ -262,7 +255,9 @@ func (s GatewayService) callStreamTarget(
 			s.audioRelay().Commit(req.RequestID)
 		},
 		RegisterCancel: func(cancel func(context.Context) error) {
-			s.streamCancels.SetRemoteCancel(req.RequestID, cancel)
+			if remoteCancelable {
+				s.streamCancels.SetRemoteCancel(req.RequestID, cancel)
+			}
 		},
 	}); result.Handled {
 		if err != nil {
@@ -423,7 +418,7 @@ type streamFinishInput struct {
 }
 
 func (s GatewayService) finishStreamResult(ctx context.Context, input streamFinishInput) (callResult, error) {
-	normalizedData, err := normalizePowerOutput(input.Selected.Power, input.Data)
+	normalizedData, err := normalizePowerOutput(input.Request, input.Selected.Power, input.Data)
 	if err != nil {
 		logItem := s.recordCallLogInternal(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("normalize_output", err.Error()), input.Usage, input.CostAttempted, input.NativeRequest)
 		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err

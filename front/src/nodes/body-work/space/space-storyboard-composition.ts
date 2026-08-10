@@ -13,9 +13,12 @@ import type {
   CanvasVideoComposition,
   VideoComposeAssetReference,
   VideoComposeClip,
+  VideoComposeGlobalAudioTrack,
   VideoComposeSpeechTrack,
   VideoComposeSubtitleTrack,
 } from "./space-video-compose";
+
+const STORYBOARD_SOUNDTRACK_ID = "storyboard-soundtrack";
 
 export function storyboardVideoComposition(input: {
   storyboard: StoryboardDocument;
@@ -41,12 +44,63 @@ export function storyboardVideoComposition(input: {
       (input.current?.clips || []).map((clip) => clip.id),
       (clip) => clip.id,
     ),
-    audioTracks: input.current?.audioTracks || [],
+    audioTracks: storyboardSoundtrackTracks(
+      input.storyboard,
+      input.current?.audioTracks || [],
+    ),
     settings: {
       resolution: input.current?.settings.resolution || "auto",
       fps: input.current?.settings.fps ?? 0,
     },
   };
+}
+
+function storyboardSoundtrackTracks(
+  storyboard: StoryboardDocument,
+  current: VideoComposeGlobalAudioTrack[],
+) {
+  const soundtrack = storyboard.references.find(
+    (reference) => reference.purpose === "soundtrack",
+  );
+  if (!soundtrack) {
+    return current.filter((track) => track.id !== STORYBOARD_SOUNDTRACK_ID);
+  }
+  const existing = current.find(
+    (track) => track.id === STORYBOARD_SOUNDTRACK_ID,
+  );
+  const assetId = Number(soundtrack.asset_id || 0);
+  const versionId = Number(soundtrack.version_id || 0);
+  const next: VideoComposeGlobalAudioTrack = {
+    id: STORYBOARD_SOUNDTRACK_ID,
+    ...(assetId > 0 && versionId > 0
+      ? {
+          audio: {
+            assetId,
+            versionId,
+            label: soundtrack.label || "主音轨",
+          },
+        }
+      : {}),
+    startTime: existing?.startTime ?? 0,
+    sourceStart: existing?.sourceStart ?? 0,
+    kind: "music",
+    volume: existing?.volume ?? 0.35,
+    fit: existing?.fit ?? "trim",
+    loop: existing?.loop ?? false,
+    fadeOut: existing?.fadeOut ?? 1,
+  };
+  let replaced = false;
+  const tracks = current.flatMap((track): VideoComposeGlobalAudioTrack[] => {
+    if (track.id !== STORYBOARD_SOUNDTRACK_ID) {
+      return [track];
+    }
+    if (replaced) {
+      return [];
+    }
+    replaced = true;
+    return [next];
+  });
+  return replaced ? tracks : [...tracks, next];
 }
 
 function storyboardVideoClip(input: {

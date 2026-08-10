@@ -24,6 +24,7 @@ import type {
 import { normalizePowerCategory } from "../shared/power-menu";
 import { documentPreview } from "../shared/rich-document";
 import { normalizeStoryboardReferences } from "./space-storyboard-reference";
+import { isStoryboardWorkTypeKey } from "./space-storyboard-work-type";
 import { assetKindLabel } from "../asset/asset-contract";
 import { DEFAULT_GROUP_NODE_SIZE } from "./space-group-model";
 import {
@@ -808,6 +809,7 @@ export function normalizeCanvasComposerDraft(value: unknown) {
     storyboardReferences: normalizeStoryboardReferences(
       row.storyboardReferences,
     ),
+    storyboardWorkType: normalizeStoryboardWorkType(row.storyboardWorkType),
     storyboardGridLayout: storyboardGridLayout
       ? normalizeStoryboardGridLayout(storyboardGridLayout)
       : undefined,
@@ -840,6 +842,7 @@ export function canvasComposerDraftSignature(draft: CanvasComposerDraft) {
     draft.paramValues || {},
     draft.selectedTargetId || 0,
     draft.storyboardReferences || [],
+    draft.storyboardWorkType || "",
     draft.storyboardGridLayout || "",
     draft.multiImageMode || "",
   ]);
@@ -889,9 +892,15 @@ function normalizePersistedCanvasComposerDraft(value: unknown) {
     selectedTargetId: row.selected_target_id,
     videoComposition: row.video_composition,
     storyboardReferences: row.storyboard_references,
+    storyboardWorkType: row.storyboard_work_type,
     storyboardGridLayout: row.storyboard_grid_layout,
     multiImageMode: row.multi_image_mode,
   });
+}
+
+function normalizeStoryboardWorkType(value: unknown) {
+  const workType = stringValue(value);
+  return isStoryboardWorkTypeKey(workType) ? workType : undefined;
 }
 
 function normalizeCanvasReferenceContent(value: unknown) {

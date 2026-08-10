@@ -368,9 +368,9 @@ func rhapiJoinURL(baseURL string, path string) string {
 func rhapiMediaOutput(body any, defaultType string) botprotocol.Output {
 	output := botprotocol.ExtractMediaOutput(rhapiResultPayload(body, defaultType), defaultType)
 	if rhapiHasParsedOutput(output) {
-		return output
+		return preserveMediaOutputContent(output, body)
 	}
-	return botprotocol.ExtractMediaOutput(body, defaultType)
+	return preserveMediaOutputContent(botprotocol.ExtractMediaOutput(body, defaultType), body)
 }
 
 func rhapiHasParsedOutput(output botprotocol.Output) bool {

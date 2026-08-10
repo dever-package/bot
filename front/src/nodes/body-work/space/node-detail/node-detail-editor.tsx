@@ -1,48 +1,68 @@
-import type { ComponentType } from "react";
+import { Suspense } from "react";
 import { FileText } from "lucide-react";
-import { getCompatModule } from "@dever/front-plugin";
-import {
-  StoryboardView,
-  type StoryboardWorkflowAction,
-} from "../space-storyboard-view";
+import type { StoryboardWorkflowAction } from "../space-storyboard-view";
 import type {
   StoryboardDocument,
   StoryboardEditorFocus,
   StoryboardProductionPlan,
   StoryboardShotGeneration,
 } from "../space-storyboard";
-import type { ComposerAssetItem, SpaceCanvasNode } from "../types";
+import type {
+  ComposerAssetItem,
+  SpaceCanvasNode,
+  StoryboardReferencePurposeSpec,
+  StoryboardWorkTypeSpec,
+} from "../types";
 import { CanvasNodeContentView } from "../space-content-view";
 import {
+  contentOutputMediaItems,
   contentOutputMediaURLs,
+  contentOutputSupplementalText,
   type ContentMediaKind,
   type StoryboardGridDocument,
 } from "../../shared/content-output";
 import type { ReferenceProvider } from "../../../show/agent-chat/reference";
-import { AssetPreview } from "../../asset/asset-preview";
-import { MediaInspector } from "../../../shared/media-inspector-gallery";
+import { AssetAudioPreview } from "../../asset/asset-audio-preview";
 import { ResourceDownloadButton } from "../../../shared/resource-download-button";
+import { MediaInspector } from "../../../shared/media-inspector-gallery";
+import {
+  createPreloadableComponent,
+  createPreloadableModule,
+} from "../../../shared/preloadable";
 import { SpaceTooltip } from "../space-tooltip";
 import {
   nodeDetailContentWithValue,
   type NodeDetailEditableContent,
   type NodeDetailFileValue,
 } from "./node-detail-content";
-import { NodeDetailStoryboardGrid } from "./node-detail-storyboard-grid";
+import { CanvasModuleLoading } from "../space-loading";
 
-const { RichTextEditor } = getCompatModule("@/components/rich-text-editor") as {
-  RichTextEditor?: ComponentType<{
-    value: unknown;
-    onChange: (value: string) => void;
-    contentFormat?: "json" | "markdown";
-    placeholder?: string;
-    minHeight?: number;
-    maxHeight?: number;
-    className?: string;
-    controlClassName?: string;
-    disabled?: boolean;
-  }>;
-};
+const storyboardViewModule = createPreloadableModule(
+  () => import("../space-storyboard-view"),
+);
+const storyboardView = createPreloadableComponent(
+  storyboardViewModule,
+  (module) => module.StoryboardView,
+);
+const StoryboardView = storyboardView.Component;
+
+const storyboardGridModule = createPreloadableModule(
+  () => import("./node-detail-storyboard-grid"),
+);
+const nodeDetailStoryboardGrid = createPreloadableComponent(
+  storyboardGridModule,
+  (module) => module.NodeDetailStoryboardGrid,
+);
+const NodeDetailStoryboardGrid = nodeDetailStoryboardGrid.Component;
+
+const richEditorModule = createPreloadableModule(
+  () => import("./node-detail-rich-editor"),
+);
+const nodeDetailRichEditor = createPreloadableComponent(
+  richEditorModule,
+  (module) => module.NodeDetailRichEditor,
+);
+const NodeDetailRichEditor = nodeDetailRichEditor.Component;
 
 export function NodeDetailEditor({
   content,
@@ -55,6 +75,8 @@ export function NodeDetailEditor({
   storyboardSourceNodeId,
   storyboardFocus,
   storyboardWorkflowAction,
+  storyboardWorkTypes,
+  storyboardReferencePurposes,
   referenceProvider,
   onConfirmStoryboard,
   onCreateStoryboardRevision,
@@ -71,6 +93,8 @@ export function NodeDetailEditor({
   storyboardSourceNodeId?: string;
   storyboardFocus?: StoryboardEditorFocus;
   storyboardWorkflowAction?: StoryboardWorkflowAction;
+  storyboardWorkTypes?: StoryboardWorkTypeSpec[];
+  storyboardReferencePurposes?: StoryboardReferencePurposeSpec[];
   referenceProvider?: ReferenceProvider;
   onConfirmStoryboard?: (
     storyboard: StoryboardDocument,
@@ -92,9 +116,17 @@ export function NodeDetailEditor({
   }
 
   if (mediaOutput !== undefined && mediaKind === "audio") {
+    const audioItems = contentOutputMediaItems(mediaOutput, "audio");
+    if (
+      audioItems.length > 0 &&
+      (audioItems.length > 1 || Boolean(audioItems[0]?.thumbnail))
+    ) {
+      return <NodeDetailMediaGallery kind="audio" output={mediaOutput} />;
+    }
+    const audioURL = audioItems[0]?.url || "";
     return (
       <div className="wb-detail-readonly-content is-audio">
-        <AssetPreview kind="audio" content={mediaOutput} prompt={mediaPrompt} />
+        <AssetAudioPreview src={audioURL} prompt={mediaPrompt} detailed />
       </div>
     );
   }
@@ -112,37 +144,43 @@ export function NodeDetailEditor({
 
   if (content.mode === "storyboard_grid") {
     return (
-      <NodeDetailStoryboardGrid
-        grid={content.value as StoryboardGridDocument}
-        readonly={readonly}
-        referenceProvider={referenceProvider}
-        onChange={(grid) =>
-          onChange(nodeDetailContentWithValue(content, grid))
-        }
-      />
+      <Suspense fallback={<CanvasModuleLoading label="正在加载分镜宫格" />}>
+        <NodeDetailStoryboardGrid
+          grid={content.value as StoryboardGridDocument}
+          readonly={readonly}
+          referenceProvider={referenceProvider}
+          onChange={(grid) =>
+            onChange(nodeDetailContentWithValue(content, grid))
+          }
+        />
+      </Suspense>
     );
   }
 
   if (content.mode === "storyboard") {
     return (
       <div className="ws-node-detail-storyboard">
-        <StoryboardView
-          storyboard={content.value as StoryboardDocument}
-          layout="split"
-          editable={!readonly}
-          referenceItems={referenceItems}
-          canvasNodes={canvasNodes}
-          storyboardSourceNodeId={storyboardSourceNodeId}
-          focus={storyboardFocus}
-          workflowAction={storyboardWorkflowAction}
-          onConfirm={onConfirmStoryboard}
-          onCreateRevision={onCreateStoryboardRevision}
-          onGenerateShot={onGenerateStoryboardShot}
-          onChange={(storyboard) =>
-            onChange(nodeDetailContentWithValue(content, storyboard))
-          }
-          showSaveStatus={false}
-        />
+        <Suspense fallback={<CanvasModuleLoading label="正在加载分镜内容" />}>
+          <StoryboardView
+            storyboard={content.value as StoryboardDocument}
+            layout="split"
+            editable={!readonly}
+            referenceItems={referenceItems}
+            canvasNodes={canvasNodes}
+            storyboardSourceNodeId={storyboardSourceNodeId}
+            workTypeSpecs={storyboardWorkTypes}
+            purposeSpecs={storyboardReferencePurposes}
+            focus={storyboardFocus}
+            workflowAction={storyboardWorkflowAction}
+            onConfirm={onConfirmStoryboard}
+            onCreateRevision={onCreateStoryboardRevision}
+            onGenerateShot={onGenerateStoryboardShot}
+            onChange={(storyboard) =>
+              onChange(nodeDetailContentWithValue(content, storyboard))
+            }
+            showSaveStatus={false}
+          />
+        </Suspense>
       </div>
     );
   }
@@ -157,34 +195,14 @@ export function NodeDetailEditor({
     );
   }
 
-  const value = String(content.value || "");
   return (
-    <div className="ws-node-detail-editor">
-      {RichTextEditor ? (
-        <RichTextEditor
-          value={value}
-          onChange={(nextValue) =>
-            onChange(nodeDetailContentWithValue(content, nextValue))
-          }
-          contentFormat={content.format}
-          placeholder="编辑内容"
-          disabled={readonly}
-          minHeight={0}
-          maxHeight={2400}
-          controlClassName="ws-node-detail-rich-editor"
-        />
-      ) : (
-        <textarea
-          className="ws-node-detail-fallback-editor"
-          readOnly={readonly}
-          value={value}
-          onChange={(event) =>
-            onChange(nodeDetailContentWithValue(content, event.target.value))
-          }
-          placeholder="编辑内容"
-        />
-      )}
-    </div>
+    <Suspense fallback={<CanvasModuleLoading label="正在加载内容编辑器" />}>
+      <NodeDetailRichEditor
+        content={content}
+        readonly={readonly}
+        onChange={onChange}
+      />
+    </Suspense>
   );
 }
 
@@ -192,7 +210,7 @@ function NodeDetailMediaGallery({
   kind,
   output,
 }: {
-  kind: "image" | "video";
+  kind: ContentMediaKind;
   output: unknown;
 }) {
   const urls = contentOutputMediaURLs(output, kind);
@@ -208,12 +226,17 @@ function NodeDetailMediaGallery({
   }
 
   return (
-    <MediaInspector
-      kind={kind}
-      urls={urls}
-      downloadable
-      className="ws-node-detail-media-gallery"
-    />
+    <Suspense fallback={<CanvasModuleLoading label="正在加载媒体预览" />}>
+      <MediaInspector
+        kind={kind}
+        mediaItems={contentOutputMediaItems(output, kind)}
+        downloadable
+        className="ws-node-detail-media-gallery"
+        supplementalText={
+          kind === "audio" ? contentOutputSupplementalText(output) : null
+        }
+      />
+    </Suspense>
   );
 }
 

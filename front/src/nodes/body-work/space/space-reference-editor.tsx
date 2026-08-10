@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, type ComponentType } from "react";
+import { useCallback, useContext, useMemo, type ComponentType } from "react";
 import { getCompatModule } from "@dever/front-plugin";
 import {
   canvasReferenceContentFromUnambiguousText,
@@ -11,6 +11,7 @@ import type {
   ComposerAssetItem,
 } from "./types";
 import type { WorkbenchReferenceProvider } from "../asset/asset-reference-provider";
+import { CanvasAssetReferenceProviderContext } from "./space-reference-provider-context";
 
 type ReferenceScope = "current" | "history";
 type ReferenceType = "asset";
@@ -80,6 +81,8 @@ export type CanvasReferenceUsageOption = {
   maxFiles?: number;
 };
 
+export type CanvasReferenceUsageField = "usage" | "purpose";
+
 const EMPTY_CANVAS_REFERENCE_USAGE_OPTIONS: CanvasReferenceUsageOption[] = [];
 
 type ReferenceEditorProps = {
@@ -100,6 +103,9 @@ type ReferenceEditorProps = {
   loadPreview: (request: ReferencePreviewRequest) => Promise<ReferencePreview>;
   providers?: WorkbenchReferenceProvider[];
   usageOptions?: CanvasReferenceUsageOption[];
+  usageField?: CanvasReferenceUsageField;
+  mediaUsageOptions?: CanvasReferenceUsageOption[];
+  autoAssignUsage?: boolean;
   showMediaAliases?: boolean;
   allowMultiMediaSelection?: boolean;
   pickerRequest?: CanvasReferencePickerRequest;
@@ -107,13 +113,20 @@ type ReferenceEditorProps = {
     requestID: CanvasReferencePickerRequest["id"],
   ) => void;
   onReferenceDelete?: (
-    reference: Extract<CanvasReferenceContent["parts"][number], { type: "reference" }>,
+    reference: Extract<
+      CanvasReferenceContent["parts"][number],
+      { type: "reference" }
+    >,
   ) => void;
   onReferenceUsageChange?: (
-    reference: Extract<CanvasReferenceContent["parts"][number], { type: "reference" }>,
+    reference: Extract<
+      CanvasReferenceContent["parts"][number],
+      { type: "reference" }
+    >,
     usage: string,
   ) => void;
   onChange: (value: string, content: CanvasReferenceContent) => void;
+  onBlur?: () => void;
   onSubmit?: () => void;
 };
 
@@ -135,10 +148,6 @@ const referenceComposerModule = getCompatModule(
 const ReferenceEditor = referenceComposerModule.ReferenceEditor;
 const ReferenceContentView = referenceComposerModule.ReferenceContentView;
 
-export const CanvasAssetReferenceProviderContext = createContext<
-  WorkbenchReferenceProvider | undefined
->(undefined);
-
 export function CanvasReferenceEditor({
   value,
   content,
@@ -150,11 +159,15 @@ export function CanvasReferenceEditor({
   className,
   layerZIndex,
   usageOptions = EMPTY_CANVAS_REFERENCE_USAGE_OPTIONS,
+  usageField = "usage",
+  mediaUsageOptions,
+  autoAssignUsage = true,
   pickerRequest,
   onPickerRequestConsumed,
   onReferenceDelete,
   onReferenceUsageChange,
   onChange,
+  onBlur,
   onSubmit,
   assetReferenceProvider,
 }: {
@@ -168,11 +181,15 @@ export function CanvasReferenceEditor({
   className?: string;
   layerZIndex?: number;
   usageOptions?: CanvasReferenceUsageOption[];
+  usageField?: CanvasReferenceUsageField;
+  mediaUsageOptions?: CanvasReferenceUsageOption[];
+  autoAssignUsage?: boolean;
   pickerRequest?: CanvasReferencePickerRequest;
   onPickerRequestConsumed?: ReferenceEditorProps["onPickerRequestConsumed"];
   onReferenceDelete?: ReferenceEditorProps["onReferenceDelete"];
   onReferenceUsageChange?: ReferenceEditorProps["onReferenceUsageChange"];
   onChange: (value: string, content?: CanvasReferenceContent) => void;
+  onBlur?: () => void;
   onSubmit?: () => void;
   assetReferenceProvider?: WorkbenchReferenceProvider;
 }) {
@@ -189,11 +206,15 @@ export function CanvasReferenceEditor({
       className={className}
       layerZIndex={layerZIndex}
       usageOptions={usageOptions}
+      usageField={usageField}
+      mediaUsageOptions={mediaUsageOptions}
+      autoAssignUsage={autoAssignUsage}
       pickerRequest={pickerRequest}
       onPickerRequestConsumed={onPickerRequestConsumed}
       onReferenceDelete={onReferenceDelete}
       onReferenceUsageChange={onReferenceUsageChange}
       onChange={onChange}
+      onBlur={onBlur}
       onSubmit={onSubmit}
       assetReferenceProvider={assetReferenceProvider}
     />
@@ -211,11 +232,15 @@ export function CanvasReferenceEditorWithAdapter({
   className,
   layerZIndex,
   usageOptions = EMPTY_CANVAS_REFERENCE_USAGE_OPTIONS,
+  usageField = "usage",
+  mediaUsageOptions,
+  autoAssignUsage = true,
   pickerRequest,
   onPickerRequestConsumed,
   onReferenceDelete,
   onReferenceUsageChange,
   onChange,
+  onBlur,
   onSubmit,
   assetReferenceProvider,
 }: {
@@ -229,11 +254,15 @@ export function CanvasReferenceEditorWithAdapter({
   className?: string;
   layerZIndex?: number;
   usageOptions?: CanvasReferenceUsageOption[];
+  usageField?: CanvasReferenceUsageField;
+  mediaUsageOptions?: CanvasReferenceUsageOption[];
+  autoAssignUsage?: boolean;
   pickerRequest?: CanvasReferencePickerRequest;
   onPickerRequestConsumed?: ReferenceEditorProps["onPickerRequestConsumed"];
   onReferenceDelete?: ReferenceEditorProps["onReferenceDelete"];
   onReferenceUsageChange?: ReferenceEditorProps["onReferenceUsageChange"];
   onChange: (value: string, content?: CanvasReferenceContent) => void;
+  onBlur?: () => void;
   onSubmit?: () => void;
   assetReferenceProvider?: WorkbenchReferenceProvider;
 }) {
@@ -245,6 +274,11 @@ export function CanvasReferenceEditorWithAdapter({
     () => (activeAssetProvider ? [activeAssetProvider] : undefined),
     [activeAssetProvider],
   );
+  const loadPreview = useCallback(
+    (request: ReferencePreviewRequest) =>
+      loadCanvasReferencePreview(request, adapter, activeAssetProvider),
+    [activeAssetProvider, adapter],
+  );
   const resolvedContent = useMemo(
     () =>
       content ||
@@ -253,17 +287,10 @@ export function CanvasReferenceEditorWithAdapter({
   );
   const usageSignature = useMemo(
     () =>
-      usageOptions
-        .map((option) =>
-          [
-            option.key,
-            option.label,
-            option.maxFiles || 0,
-            ...(option.acceptedKinds || []),
-          ].join(":"),
-        )
-        .join("|"),
-    [usageOptions],
+      `${usageField}:${canvasReferenceUsageOptionsSignature(
+        usageOptions,
+      )}:${canvasReferenceUsageOptionsSignature(mediaUsageOptions || [])}`,
+    [mediaUsageOptions, usageField, usageOptions],
   );
   if (!ReferenceEditor) {
     return (
@@ -274,6 +301,7 @@ export function CanvasReferenceEditorWithAdapter({
         readOnly={!textEditable}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
         onKeyDown={(event) => {
           if (
             onSubmit &&
@@ -302,9 +330,12 @@ export function CanvasReferenceEditorWithAdapter({
       pickerScopes={CANVAS_REFERENCE_PICKER_SCOPES}
       pickerSearchPlaceholder="搜索当前画布的内容或素材"
       loadReferences={adapter.loadReferences}
-      loadPreview={adapter.loadPreview}
+      loadPreview={loadPreview}
       providers={activeProviders}
       usageOptions={usageOptions}
+      usageField={usageField}
+      mediaUsageOptions={mediaUsageOptions}
+      autoAssignUsage={autoAssignUsage}
       showMediaAliases
       allowMultiMediaSelection
       pickerRequest={pickerRequest}
@@ -312,9 +343,25 @@ export function CanvasReferenceEditorWithAdapter({
       onReferenceDelete={onReferenceDelete}
       onReferenceUsageChange={onReferenceUsageChange}
       onChange={onChange}
+      onBlur={onBlur}
       onSubmit={onSubmit}
     />
   );
+}
+
+function canvasReferenceUsageOptionsSignature(
+  options: CanvasReferenceUsageOption[],
+) {
+  return options
+    .map((option) =>
+      [
+        option.key,
+        option.label,
+        option.maxFiles || 0,
+        ...(option.acceptedKinds || []),
+      ].join(":"),
+    )
+    .join("|");
 }
 
 export function CanvasReferenceTextWithAdapter({
@@ -333,6 +380,11 @@ export function CanvasReferenceTextWithAdapter({
   const assetReferenceProvider = useContext(
     CanvasAssetReferenceProviderContext,
   );
+  const loadPreview = useCallback(
+    (request: ReferencePreviewRequest) =>
+      loadCanvasReferencePreview(request, adapter, assetReferenceProvider),
+    [adapter, assetReferenceProvider],
+  );
   const resolvedContent = content
     ? hydrateReferenceLabels(content, adapter.options)
     : canvasReferenceContentFromUnambiguousText(value, adapter.options);
@@ -346,14 +398,41 @@ export function CanvasReferenceTextWithAdapter({
         fallback={value || placeholder}
         references={adapter.options}
         showMediaAliases
-        loadPreview={(request) =>
-          request.refType === "asset" && assetReferenceProvider?.loadPreview
-            ? assetReferenceProvider.loadPreview(request)
-            : adapter.loadPreview(request)
-        }
+        loadPreview={loadPreview}
       />
     </span>
   );
+}
+
+async function loadCanvasReferencePreview(
+  request: ReferencePreviewRequest,
+  adapter: CanvasReferenceAdapter,
+  assetReferenceProvider?: WorkbenchReferenceProvider,
+): Promise<ReferencePreview> {
+  const assetPreviewLoader =
+    request.refType === "asset"
+      ? assetReferenceProvider?.loadPreview
+      : undefined;
+  if (!assetPreviewLoader) {
+    return adapter.loadPreview(request);
+  }
+  try {
+    const preview = await assetPreviewLoader(request);
+    if (preview.media.length > 0 || preview.content != null) {
+      return {
+        refType: "asset",
+        refId: Number(preview.refId || request.refId),
+        title: preview.title,
+        text: preview.text,
+        media: preview.media,
+        content: preview.content,
+      };
+    }
+  } catch {
+    // Connected nodes can outlive their saved asset detail; the canvas
+    // snapshot remains a useful fallback in that case.
+  }
+  return adapter.loadPreview(request);
 }
 
 function hydrateReferenceLabels(
@@ -566,7 +645,9 @@ function referencePreviewMedia(item: ComposerAssetItem) {
 }
 
 function referenceMediaKind(value: string) {
-  const kind = String(value || "").trim().toLowerCase();
+  const kind = String(value || "")
+    .trim()
+    .toLowerCase();
   return ["image", "video", "audio", "file"].includes(kind)
     ? (kind as "image" | "video" | "audio" | "file")
     : "";

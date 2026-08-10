@@ -21,6 +21,7 @@ import {
   type StoryboardMaterialType,
   type StoryboardShot,
 } from "./space-storyboard";
+import "./space-storyboard-shot-card.css";
 
 export function StoryboardShotCard({
   shot,

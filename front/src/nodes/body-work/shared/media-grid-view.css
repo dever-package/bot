@@ -148,6 +148,9 @@
   max-width: none;
   max-height: none;
   object-fit: cover;
+}
+
+.ws-media-grid-view .ws-media-grid-list img {
   pointer-events: none;
 }
 
@@ -156,28 +159,78 @@
   box-sizing: border-box;
   align-items: center;
   justify-content: center;
+}
+
+.ws-media-grid-audio-card {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
   padding: 5px;
 }
 
+.ws-media-grid-audio-card.has-cover {
+  padding: 0;
+}
+
+.ws-media-grid-view .ws-media-grid-audio-card.has-cover > img {
+  position: absolute;
+  inset: 0;
+}
+
+.ws-media-grid-audio-card.has-cover .ws-media-grid-audio-player {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  left: 6px;
+  z-index: 1;
+  width: auto;
+  height: auto;
+  max-height: calc(100% - 12px);
+  border: 1px solid rgb(255 255 255 / 0.72);
+  background: rgb(255 255 255 / 0.92);
+  box-shadow: 0 2px 8px rgb(15 35 25 / 0.16);
+  backdrop-filter: blur(8px);
+}
+
 .ws-media-grid-view .ws-media-grid-audio-player {
+  width: 100%;
   height: 100%;
   min-height: 0;
   overflow: hidden;
   border: 0;
   border-radius: 4px;
   background: var(--ws-card-muted, #f5f8f6);
-  padding: 4px 5px;
+  padding: 9px;
 }
 
 .ws-media-grid-view .ws-media-grid-audio-player > div {
-  min-height: 26px;
-  gap: 2px;
+  gap: 4px;
   font-size: 9px;
 }
 
+.ws-media-grid-view .ws-media-grid-audio-player > div:first-child {
+  min-height: 42px;
+}
+
+.ws-media-grid-audio-card:not(.has-cover)
+  .ws-media-grid-audio-player
+  > div:first-child {
+  width: 100%;
+  flex: 1;
+}
+
+.ws-media-grid-view .ws-media-grid-audio-player > div:last-child {
+  min-height: 32px;
+}
+
 .ws-media-grid-view .ws-media-grid-audio-player button {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   margin-right: 1px;
 }
 
@@ -185,21 +238,4 @@
   min-width: 8px;
   margin-right: 2px;
   margin-left: 2px;
-}
-
-.ws-media-grid-play {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  z-index: 1;
-  display: inline-flex;
-  width: 28px;
-  height: 28px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgb(255 255 255 / 0.24);
-  border-radius: 50%;
-  background: rgb(20 32 26 / 0.74);
-  color: #fff;
-  transform: translate(-50%, -50%);
 }

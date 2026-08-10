@@ -2,7 +2,7 @@ import {
   parseStoryboardGridOutput,
   storyboardGridImageURLs,
 } from "../shared/content-output";
-import { findAssetMediaURLs } from "../asset/asset-content";
+import { findAssetMediaItems } from "../asset/asset-content";
 import {
   acceptedMediaKinds,
   mediaParamCapacity,
@@ -339,9 +339,7 @@ export function mediaUsageCandidates(
   multiImageMode?: CanvasMultiImageMode,
 ) {
   const kind = canvasMediaReferenceKind(source);
-  return kind
-    ? mediaUsageCandidatesForKind(options, kind, multiImageMode)
-    : [];
+  return kind ? mediaUsageCandidatesForKind(options, kind, multiImageMode) : [];
 }
 
 export function canvasMultiImagePlan({
@@ -395,9 +393,7 @@ export function canvasMultiImagePlan({
       value: "per_image",
       label: "逐图生成",
       enabled: perImageEnabled,
-      reason: perImageEnabled
-        ? undefined
-        : "当前能力没有可逐张接收图片的参数",
+      reason: perImageEnabled ? undefined : "当前能力没有可逐张接收图片的参数",
     },
     {
       value: "shared_reference",
@@ -457,13 +453,16 @@ function orderedImageReferences(
   additionalSources: SpaceCanvasNode[],
 ) {
   const connectionByReference = new Map(
-    connections.map((connection) => [
-      connectedReferencePartKey(
-        connection.edge.id,
-        connectedMediaReferenceAssetID(connection),
-      ),
-      connection,
-    ] as const),
+    connections.map(
+      (connection) =>
+        [
+          connectedReferencePartKey(
+            connection.edge.id,
+            connectedMediaReferenceAssetID(connection),
+          ),
+          connection,
+        ] as const,
+    ),
   );
   const includedReferences = new Set<string>();
   const references: OrderedImageReference[] = [];
@@ -482,8 +481,7 @@ function orderedImageReferences(
           (candidate) =>
             Number(candidate.refId || 0) === Number(part.ref_id || 0) &&
             (!part.ref_version_id ||
-              Number(candidate.versionID || 0) ===
-                Number(part.ref_version_id)),
+              Number(candidate.versionID || 0) === Number(part.ref_version_id)),
         );
     const kind = connection
       ? canvasMediaReferenceKind(connection.source)
@@ -505,10 +503,7 @@ function orderedImageReferences(
     references.push({
       amount: selectedMediaReferenceAmount(part, mediaCount),
       usage: String(part.usage || connection?.edge.mediaUsage || ""),
-      structured: isStructuredImageReference(
-        connection?.source,
-        item,
-      ),
+      structured: isStructuredImageReference(connection?.source, item),
     });
   }
   for (const connection of connections) {
@@ -647,15 +642,12 @@ function mediaUsageCandidatesForKind(
   if (kind !== "image" || !multiImageMode) {
     return matching;
   }
-  const generic = matching.filter(
-    (option) => !isFrameMediaUsageOption(option),
-  );
+  const generic = matching.filter((option) => !isFrameMediaUsageOption(option));
   if (multiImageMode === "shared_reference") {
     return prioritizeMediaUsageOptions(generic);
   }
   const firstFrame = matching.filter(
-    (option) =>
-      isFirstFrameUsage(option.key) || option.label.includes("首帧"),
+    (option) => isFirstFrameUsage(option.key) || option.label.includes("首帧"),
   );
   return firstFrame.length > 0
     ? prioritizeMediaUsageOptions(firstFrame)
@@ -684,7 +676,12 @@ export function canvasMediaUsageError(
       part.ref_type === "asset" &&
       part.ref_origin === "edge" &&
       part.ref_origin_id
-        ? [[connectedReferencePartKey(part.ref_origin_id, part.ref_id), part] as const]
+        ? [
+            [
+              connectedReferencePartKey(part.ref_origin_id, part.ref_id),
+              part,
+            ] as const,
+          ]
         : [],
     ),
   );
@@ -827,11 +824,9 @@ export function nextMediaUsageForSources(
   const candidates = prioritizeMediaUsageOptions(
     options.filter((option) =>
       kinds.every((kind) =>
-        mediaUsageCandidatesForKind(
-          [option],
-          kind,
-          multiImageMode,
-        ).includes(option),
+        mediaUsageCandidatesForKind([option], kind, multiImageMode).includes(
+          option,
+        ),
       ),
     ),
   );
@@ -889,9 +884,12 @@ export function reconcileCanvasMediaUsages(
   }
 
   const previousByKey = new Map(
-    indexedMediaReferenceParts(previous, items, connections, multiImageMode).map(
-      (entry) => [entry.key, entry] as const,
-    ),
+    indexedMediaReferenceParts(
+      previous,
+      items,
+      connections,
+      multiImageMode,
+    ).map((entry) => [entry.key, entry] as const),
   );
   const entries = indexedMediaReferenceParts(
     next,
@@ -968,10 +966,7 @@ function mediaUsageCounts(
   const indexedConnections = new Set<string>();
   for (const entry of indexedEntries) {
     const option = options.find((candidate) => candidate.key === entry.usage);
-    if (
-      option &&
-      !(entry.kind === "image" && multiImageMode === "per_image")
-    ) {
+    if (option && !(entry.kind === "image" && multiImageMode === "per_image")) {
       incrementMediaUsage(counts, option.key, entry.amount);
     }
     if (entry.connection) {
@@ -1087,14 +1082,18 @@ function indexedMediaReferenceParts(
           kind === "image" && multiImageMode === "per_image"
             ? 1
             : connection
-          ? selectedMediaReferenceAmount(
-              part,
-              canvasMediaReferenceAmount(connection.source),
-            )
-            : selectedMediaReferenceAmount(
-                part,
-                composerMediaReferenceAmount(item, kind, part.ref_media_count),
-              ),
+              ? selectedMediaReferenceAmount(
+                  part,
+                  canvasMediaReferenceAmount(connection.source),
+                )
+              : selectedMediaReferenceAmount(
+                  part,
+                  composerMediaReferenceAmount(
+                    item,
+                    kind,
+                    part.ref_media_count,
+                  ),
+                ),
         usage: String(part.usage || ""),
         connection,
       },
@@ -1150,17 +1149,18 @@ function incrementMediaUsage(
   counts.set(usage, (counts.get(usage) || 0) + amount);
 }
 
-export function canvasPrimaryMediaURLs(
-  value: unknown,
-  kind: CanvasMediaKind,
-) {
+export function canvasPrimaryMediaURLs(value: unknown, kind: CanvasMediaKind) {
+  return canvasPrimaryMediaItems(value, kind).map((item) => item.url);
+}
+
+export function canvasPrimaryMediaItems(value: unknown, kind: CanvasMediaKind) {
   if (kind === "image") {
     const storyboardImages = storyboardGridImageURLs(value);
     if (storyboardImages.length > 0) {
-      return storyboardImages;
+      return storyboardImages.map((url) => ({ url, thumbnail: url }));
     }
   }
-  return findAssetMediaURLs(value, kind);
+  return findAssetMediaItems(value, kind);
 }
 
 function canvasMediaReferenceAmount(node?: SpaceCanvasNode) {
@@ -1199,8 +1199,8 @@ function mediaReferencePartHasSelection(
 ) {
   return Boolean(
     (part?.ref_media_items?.length || 0) > 0 ||
-      String(part?.ref_media_url || "").trim() ||
-      Number(part?.ref_media_index || 0) > 0,
+    String(part?.ref_media_url || "").trim() ||
+    Number(part?.ref_media_index || 0) > 0,
   );
 }
 
@@ -1224,9 +1224,7 @@ function connectedMediaReferenceAssetID(
   connection: CanvasConnectedMediaReference,
 ) {
   return Number(
-    connection.source.asset?.id ||
-      connection.source.resultRef?.asset_id ||
-      0,
+    connection.source.asset?.id || connection.source.resultRef?.asset_id || 0,
   );
 }
 

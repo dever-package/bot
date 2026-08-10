@@ -1367,6 +1367,7 @@ func refluxQANodeID(ctx context.Context, docID uint64) uint64 {
 func (s Service) refreshBaseStats(ctx context.Context, baseID uint64, status string, message string) {
 	values := knowledgeBaseStatsValues(ctx, baseID, status, message, true)
 	agentmodel.NewKnowledgeBaseModel().Update(ctx, map[string]any{"id": baseID}, values)
+	invalidateKeywordCache(baseID)
 }
 
 func knowledgeBaseStatsValues(ctx context.Context, baseID uint64, status string, message string, respectLease bool) map[string]any {

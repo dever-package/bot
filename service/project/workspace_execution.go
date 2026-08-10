@@ -90,11 +90,7 @@ func (s WorkspaceService) activeSingleNodeExecution(
 		"project_id":    projectID,
 		"start_node_id": startNodeID,
 		"single_node":   int16(1),
-		"status": []string{
-			teammodel.RunStatusPending,
-			teammodel.RunStatusRunning,
-			teammodel.RunStatusWaiting,
-		},
+		"status":        canvasRunActiveStatuses(),
 	}
 	if assetCateID > 0 {
 		filter["asset_cate_id"] = assetCateID

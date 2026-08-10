@@ -28,7 +28,9 @@ var mediaMetaKeys = []string{
 
 func ExtractMediaOutput(value any, defaultType string) Output {
 	output := Output{}
-	collectMediaOutput(output, value, normalizeMediaType(defaultType), "")
+	mediaType := normalizeMediaType(defaultType)
+	collectMediaOutput(output, value, mediaType, "")
+	appendPrimaryMediaPreviews(output, mediaType)
 	if len(output) == 0 {
 		output["json"] = value
 	}
@@ -79,33 +81,97 @@ func NormalizeMediaList(value any, mediaType string) []string {
 	return normalizeStringList(output[mediaOutputKey(mediaType)])
 }
 
+type PrimaryMediaItem struct {
+	URL       string
+	Thumbnail string
+}
+
 // ExtractPrimaryMediaURLs returns the media represented by an asset's content.
 // Preview-only fields such as thumbnails, covers and video frame snapshots are
 // deliberately excluded so callers see the same logical collection as users.
 func ExtractPrimaryMediaURLs(value any, mediaType string) []string {
+	items := ExtractPrimaryMediaItems(value, mediaType)
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, item.URL)
+	}
+	return result
+}
+
+// ExtractPrimaryMediaItems returns logical media and any preview metadata that
+// belongs to the same record. Preview URLs never become primary media entries.
+func ExtractPrimaryMediaItems(value any, mediaType string) []PrimaryMediaItem {
 	mediaType = normalizeMediaType(mediaType)
 	if mediaType == "" {
 		return nil
 	}
-	result := make([]string, 0)
-	seen := map[string]struct{}{}
-	collectPrimaryMediaURLs(value, mediaType, 0, &result, seen)
+	result := make([]PrimaryMediaItem, 0)
+	indexes := map[string]int{}
+	collectPrimaryMediaItems(value, mediaType, 0, "", &result, indexes)
+	if mediaType == MediaTypeAudio {
+		pairAudioCoverItems(value, result)
+	}
 	return result
 }
 
-func collectPrimaryMediaURLs(
+func pairAudioCoverItems(value any, audioItems []PrimaryMediaItem) {
+	if len(audioItems) == 0 {
+		return
+	}
+	imageItems := ExtractPrimaryMediaItems(value, MediaTypeImage)
+	if len(imageItems) != len(audioItems) {
+		return
+	}
+	for index := range audioItems {
+		if audioItems[index].Thumbnail == "" {
+			audioItems[index].Thumbnail = imageItems[index].URL
+		}
+	}
+}
+
+func appendPrimaryMediaPreviews(output Output, mediaType string) {
+	if mediaType != MediaTypeAudio && mediaType != MediaTypeVideo {
+		return
+	}
+	items := ExtractPrimaryMediaItems(output, mediaType)
+	if len(items) == 0 {
+		return
+	}
+	existingItems := ExtractPrimaryMediaItems(output["media_files"], mediaType)
+	existingThumbnails := make(map[string]string, len(existingItems))
+	for _, item := range existingItems {
+		existingThumbnails[item.URL] = item.Thumbnail
+	}
+	mediaFiles := normalizeAnyList(output["media_files"])
+	for _, item := range items {
+		if item.Thumbnail == "" || existingThumbnails[item.URL] != "" {
+			continue
+		}
+		mediaFiles = append(mediaFiles, map[string]any{
+			"kind":      mediaType,
+			"url":       item.URL,
+			"thumbnail": item.Thumbnail,
+		})
+	}
+	if len(mediaFiles) > 0 {
+		output["media_files"] = mediaFiles
+	}
+}
+
+func collectPrimaryMediaItems(
 	value any,
 	mediaType string,
 	depth int,
-	result *[]string,
-	seen map[string]struct{},
+	inheritedThumbnail string,
+	result *[]PrimaryMediaItem,
+	indexes map[string]int,
 ) {
 	if value == nil || depth > 12 {
 		return
 	}
 	switch current := value.(type) {
 	case Output:
-		collectPrimaryMediaURLs(map[string]any(current), mediaType, depth, result, seen)
+		collectPrimaryMediaItems(map[string]any(current), mediaType, depth, inheritedThumbnail, result, indexes)
 	case string:
 		current = strings.TrimSpace(current)
 		if current == "" {
@@ -114,47 +180,61 @@ func collectPrimaryMediaURLs(
 		var decoded any
 		if (strings.HasPrefix(current, "{") || strings.HasPrefix(current, "[") || strings.HasPrefix(current, `"`)) &&
 			json.Unmarshal([]byte(current), &decoded) == nil {
-			collectPrimaryMediaURLs(decoded, mediaType, depth+1, result, seen)
+			collectPrimaryMediaItems(decoded, mediaType, depth+1, inheritedThumbnail, result, indexes)
 			return
 		}
 		if IsMediaReferenceURL(current) {
-			appendPrimaryMediaURL(current, result, seen)
+			appendPrimaryMediaItem(current, inheritedThumbnail, mediaType, result, indexes)
 		}
 	case []string:
+		thumbnail := inheritedThumbnail
+		if len(current) > 1 {
+			thumbnail = ""
+		}
 		for _, item := range current {
-			collectPrimaryMediaURLs(item, mediaType, depth+1, result, seen)
+			collectPrimaryMediaItems(item, mediaType, depth+1, thumbnail, result, indexes)
 		}
 	case []any:
+		thumbnail := inheritedThumbnail
+		if len(current) > 1 {
+			thumbnail = ""
+		}
 		for _, item := range current {
-			collectPrimaryMediaURLs(item, mediaType, depth+1, result, seen)
+			collectPrimaryMediaItems(item, mediaType, depth+1, thumbnail, result, indexes)
 		}
 	case []map[string]any:
+		thumbnail := inheritedThumbnail
+		if len(current) > 1 {
+			thumbnail = ""
+		}
 		for _, item := range current {
-			collectPrimaryMediaURLs(item, mediaType, depth+1, result, seen)
+			collectPrimaryMediaItems(item, mediaType, depth+1, thumbnail, result, indexes)
 		}
 	case map[string]any:
+		thumbnail := firstPrimaryMediaThumbnail(current, inheritedThumbnail)
 		explicitType := mediaTypeFromEvent(firstText(
 			asText(current["type"]),
 			asText(current["kind"]),
 			asText(current["media_type"]),
+			asText(current["mediaType"]),
 			asText(current["mime"]),
 		), "")
 		if explicitType == "" || explicitType == mediaType {
 			for _, key := range primaryMediaDirectKeys(mediaType) {
-				collectPrimaryMediaURLs(current[key], mediaType, depth+1, result, seen)
+				collectPrimaryMediaItems(current[key], mediaType, depth+1, thumbnail, result, indexes)
 			}
 		}
 		for _, key := range primaryMediaCollectionKeys(mediaType) {
-			collectPrimaryMediaURLs(current[key], mediaType, depth+1, result, seen)
+			collectPrimaryMediaItems(current[key], mediaType, depth+1, thumbnail, result, indexes)
 		}
 		if explicitType == mediaType {
-			collectPrimaryMediaURLs(current["attrs"], mediaType, depth+1, result, seen)
+			collectPrimaryMediaItems(current["attrs"], mediaType, depth+1, thumbnail, result, indexes)
 		}
 		for _, key := range []string{
 			"content", "output", "result", "data", "body", "value",
 			"json", "rich", "media_files", "mediaFiles", "text",
 		} {
-			collectPrimaryMediaURLs(current[key], mediaType, depth+1, result, seen)
+			collectPrimaryMediaItems(current[key], mediaType, depth+1, "", result, indexes)
 		}
 	}
 }
@@ -189,16 +269,60 @@ func primaryMediaCollectionKeys(mediaType string) []string {
 	}
 }
 
-func appendPrimaryMediaURL(value string, result *[]string, seen map[string]struct{}) {
+func appendPrimaryMediaItem(
+	value string,
+	thumbnail string,
+	mediaType string,
+	result *[]PrimaryMediaItem,
+	indexes map[string]int,
+) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return
 	}
-	if _, exists := seen[value]; exists {
+	if mediaType == MediaTypeImage {
+		thumbnail = strings.TrimSpace(thumbnail)
+	} else {
+		thumbnail = NormalizeMediaPreviewURL(value, thumbnail)
+	}
+	if index, exists := indexes[value]; exists {
+		if (*result)[index].Thumbnail == "" && thumbnail != "" {
+			(*result)[index].Thumbnail = thumbnail
+		}
 		return
 	}
-	seen[value] = struct{}{}
-	*result = append(*result, value)
+	indexes[value] = len(*result)
+	*result = append(*result, PrimaryMediaItem{URL: value, Thumbnail: thumbnail})
+}
+
+// NormalizeMediaPreviewURL keeps presentation metadata separate from the
+// primary media. Generic upload payloads may use the file URL as their
+// thumbnail, which is valid for images but cannot preview audio or video.
+func NormalizeMediaPreviewURL(mediaURL string, previewURL string) string {
+	mediaURL = strings.TrimSpace(mediaURL)
+	previewURL = strings.TrimSpace(previewURL)
+	if previewURL == "" || previewURL == mediaURL || !IsMediaReferenceURL(previewURL) {
+		return ""
+	}
+	return previewURL
+}
+
+func firstPrimaryMediaThumbnail(value map[string]any, fallback string) string {
+	attrs, _ := value["attrs"].(map[string]any)
+	for _, candidate := range []any{
+		value["thumbnail"], value["thumbnail_url"], value["thumbnailUrl"],
+		value["poster"], value["poster_url"], value["posterUrl"],
+		value["cover"], value["cover_url"], value["coverUrl"],
+		value["first_frame_url"], value["firstFrameUrl"],
+		attrs["thumbnail"], attrs["thumbnail_url"], attrs["thumbnailUrl"],
+		attrs["poster"], attrs["cover"], fallback,
+	} {
+		thumbnail := strings.TrimSpace(asText(candidate))
+		if IsMediaReferenceURL(thumbnail) {
+			return thumbnail
+		}
+	}
+	return ""
 }
 
 func MediaOutputLabel(values ...string) string {
@@ -313,7 +437,9 @@ func collectMediaMap(output Output, mapped map[string]any, defaultType string, e
 }
 
 func collectKnownMediaFields(output Output, mapped map[string]any, currentType string) {
-	appendOutputText(output, mapped["text"], mapped["lyrics"], mapped["lyric"], mapped["lrc"], mapped["song_lyrics"], mapped["songLyrics"])
+	lyrics := appendOutputLyrics(output, mapped["lyrics"], mapped["lyric"], mapped["lrc"], mapped["song_lyrics"], mapped["songLyrics"])
+	appendOutputText(output, mapped["text"], lyrics)
+	appendOutputItems(output, "media_files", mapped["media_files"], mapped["mediaFiles"])
 	appendTextMediaReference(output, mapped["text"], currentType)
 	collectEmbeddedMediaJSON(output, mapped["text"], currentType)
 	appendMediaFieldValues(output, MediaTypeImage, mapped["images"], mapped["image"])

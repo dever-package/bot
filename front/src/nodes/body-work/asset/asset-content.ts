@@ -3,6 +3,11 @@ import {
   looksLikeMarkdownSyntax,
   markdownCompatibleRichContent,
 } from "../shared/content-output";
+import {
+  extractMediaContentItems,
+  type MediaContentItem,
+  type MediaContentKind,
+} from "../shared/media-content";
 import { resourceNameFromURL } from "../../shared/resource-file";
 import type { AssetKind, AssetVersion } from "./asset-types";
 
@@ -13,18 +18,13 @@ const mediaOutputFields: Partial<Record<AssetKind, string>> = {
   file: "files",
 };
 
-const mediaCollectionFields: Partial<Record<AssetKind, string[]>> = {
-  image: ["images", "image_urls", "imageUrls"],
-  audio: ["audios", "audio_urls", "audioUrls"],
-  video: ["videos", "video_urls", "videoUrls"],
-  file: ["files", "file_urls", "fileUrls"],
-};
-
 export type AssetFileInfo = {
   url: string;
   name: string;
   extension: string;
 };
+
+export type AssetMediaItem = MediaContentItem;
 
 export function assetPreviewOutput(kind: AssetKind, content: unknown) {
   const mediaField = mediaOutputFields[kind];
@@ -46,17 +46,19 @@ export function assetPreviewOutput(kind: AssetKind, content: unknown) {
   return { rich };
 }
 
-export function findAssetMediaURL(
-  value: unknown,
-  kind: AssetKind,
-): string {
+export function findAssetMediaURL(value: unknown, kind: AssetKind): string {
   return findAssetMediaURLs(value, kind)[0] || "";
 }
 
 export function findAssetMediaURLs(value: unknown, kind: AssetKind): string[] {
-  const result: string[] = [];
-  collectAssetMediaURLs(value, kind, 0, result, new Set());
-  return result;
+  return findAssetMediaItems(value, kind).map((item) => item.url);
+}
+
+export function findAssetMediaItems(
+  value: unknown,
+  kind: AssetKind,
+): AssetMediaItem[] {
+  return isMediaAssetKind(kind) ? extractMediaContentItems(value, kind) : [];
 }
 
 export function assetMediaCount(value: unknown, kind: AssetKind): number {
@@ -76,129 +78,13 @@ export function assetMediaCount(value: unknown, kind: AssetKind): number {
   );
 }
 
-function collectAssetMediaURLs(
-  value: unknown,
-  kind: AssetKind,
-  depth: number,
-  result: string[],
-  seen: Set<string>,
-) {
-  if (depth > 12 || value == null) return;
-  if (typeof value === "string") {
-    const url = value.trim();
-    if (
-      (url.startsWith("{") || url.startsWith("[") || url.startsWith('"')) &&
-      url.length > 1
-    ) {
-      try {
-        collectAssetMediaURLs(
-          JSON.parse(url),
-          kind,
-          depth + 1,
-          result,
-          seen,
-        );
-        return;
-      } catch {
-        // Keep legacy plain-string media values on the normal URL path.
-      }
-    }
-    if (looksLikeURL(url) && !seen.has(url)) {
-      seen.add(url);
-      result.push(url);
-    }
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      collectAssetMediaURLs(item, kind, depth + 1, result, seen);
-    }
-    return;
-  }
-  if (typeof value !== "object") return;
-  const record = value as Record<string, unknown>;
-  const explicitKind = assetContentMediaKind(record);
-  const keysByKind: Record<AssetKind, string[]> = {
-    collection: [],
-    text: [],
-    image: [
-      "src",
-      "url",
-      "image",
-      "image_url",
-      "imageUrl",
-      "file_url",
-      "fileUrl",
-    ],
-    audio: [
-      "src",
-      "url",
-      "audio",
-      "audio_url",
-      "audioUrl",
-      "file_url",
-      "fileUrl",
-    ],
-    video: [
-      "src",
-      "url",
-      "video",
-      "video_url",
-      "videoUrl",
-      "file_url",
-      "fileUrl",
-    ],
-    richtext: ["src", "url"],
-    file: [
-      "src",
-      "url",
-      "file",
-      "file_url",
-      "fileUrl",
-      "download",
-      "open_url",
-      "path",
-    ],
-  };
-  if (!explicitKind || explicitKind === kind) {
-    for (const key of keysByKind[kind]) {
-      collectAssetMediaURLs(record[key], kind, depth + 1, result, seen);
-    }
-  }
-  for (const key of mediaCollectionFields[kind] || []) {
-    collectAssetMediaURLs(record[key], kind, depth + 1, result, seen);
-  }
-  if (explicitKind === kind) {
-    collectAssetMediaURLs(record.attrs, kind, depth + 1, result, seen);
-  }
-  const nestedKeys = [
-    "content",
-    "output",
-    "result",
-    "data",
-    "body",
-    "value",
-    "json",
-    "rich",
-    "media_files",
-    "mediaFiles",
-    "text",
-  ];
-  for (const key of nestedKeys) {
-    collectAssetMediaURLs(record[key], kind, depth + 1, result, seen);
-  }
-}
-
-function assetContentMediaKind(record: Record<string, unknown>): AssetKind | "" {
-  const value = [record.type, record.kind, record.media_type, record.mime]
-    .map((item) => String(item || "").trim().toLowerCase())
-    .find(Boolean);
-  if (!value) return "";
-  if (value.includes("image")) return "image";
-  if (value.includes("video")) return "video";
-  if (value.includes("audio") || value.includes("music")) return "audio";
-  if (value.includes("file")) return "file";
-  return "";
+function isMediaAssetKind(kind: AssetKind): kind is MediaContentKind {
+  return (
+    kind === "image" ||
+    kind === "video" ||
+    kind === "audio" ||
+    kind === "file"
+  );
 }
 
 export function assetPreviewText(value: unknown, depth = 0): string {

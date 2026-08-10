@@ -15,6 +15,14 @@ import {
   type StoryboardShot,
   type StoryboardSpeech,
 } from "./space-storyboard";
+import {
+  storyboardReferencePurposeSpec,
+  storyboardReferenceValidationError,
+} from "./space-storyboard-reference";
+import type {
+  StoryboardReferencePurposeSpec,
+  StoryboardWorkTypeSpec,
+} from "./types";
 
 export type StoryboardValidationIssue = {
   id: string;
@@ -26,6 +34,8 @@ export type StoryboardValidationIssue = {
 
 export type StoryboardValidationOptions = {
   coreOnly?: boolean;
+  workTypeSpecs?: StoryboardWorkTypeSpec[];
+  purposeSpecs?: StoryboardReferencePurposeSpec[];
 };
 
 export function storyboardValidationIssues(
@@ -42,6 +52,18 @@ export function storyboardValidationIssues(
     storyboard.references.map((reference) => [reference.key, reference]),
   );
   const assignedReferenceKeys = new Set<string>();
+
+  if (options.workTypeSpecs?.length && options.purposeSpecs?.length) {
+    const referenceError = storyboardReferenceValidationError(
+      storyboard.references,
+      storyboard.work_type,
+      options.workTypeSpecs,
+      options.purposeSpecs,
+    );
+    if (referenceError) {
+      issues.push(errorIssue("references", referenceError));
+    }
+  }
 
   if (!storyboard.title.trim()) {
     issues.push(errorIssue("title", "分镜标题不能为空"));
@@ -97,7 +119,13 @@ export function storyboardValidationIssues(
       const reference = referenceByKey.get(referenceKey);
       if (!reference) {
         issues.push(materialIssue(material, `引用了不存在的参考素材“${referenceKey}”`));
-      } else if (reference.purpose !== material.type) {
+      } else if (
+        options.purposeSpecs?.length &&
+        storyboardReferencePurposeSpec(
+          reference.purpose,
+          options.purposeSpecs || [],
+        )?.material_type !== material.type
+      ) {
         issues.push(materialIssue(material, `参考素材“${reference.label}”的用途不匹配`));
       } else {
         assignedReferenceKeys.add(referenceKey);
@@ -161,7 +189,13 @@ export function storyboardValidationIssues(
         issues.push(
           shotIssue(shot, shotNumber, `引用了不存在的参考素材“${referenceKey}”`),
         );
-      } else if (reference.purpose !== "shot") {
+      } else if (
+        options.purposeSpecs?.length &&
+        storyboardReferencePurposeSpec(
+          reference.purpose,
+          options.purposeSpecs || [],
+        )?.scope !== "shot"
+      ) {
         issues.push(
           shotIssue(shot, shotNumber, `参考素材“${reference.label}”的用途不匹配`),
         );
@@ -300,9 +334,12 @@ export function storyboardValidationIssues(
   });
 
   for (const reference of storyboard.references) {
+    const scope = storyboardReferencePurposeSpec(
+      reference.purpose,
+      options.purposeSpecs || [],
+    )?.scope;
     if (
-      reference.purpose !== "visual_style" &&
-      reference.purpose !== "motion_style" &&
+      (scope === "material" || scope === "shot") &&
       !assignedReferenceKeys.has(reference.key)
     ) {
       issues.push(

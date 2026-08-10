@@ -11,7 +11,7 @@ import {
 } from "./space-storyboard";
 import {
   contentOutputMediaCount,
-  contentOutputMediaURLs,
+  contentOutputMediaItems,
   hasContentOutput,
   normalizeContentOutputItems,
   parseStoryboardGridOutput,
@@ -70,9 +70,7 @@ export function CanvasNodeContentView({
   if (storyboard) {
     return (
       <ContentViewBoundary className={className}>
-        <Suspense
-          fallback={<div className="min-h-24" aria-busy="true" />}
-        >
+        <Suspense fallback={<div className="min-h-24" aria-busy="true" />}>
           <StoryboardView
             storyboard={storyboard}
             editable={storyboardEditable}
@@ -84,10 +82,7 @@ export function CanvasNodeContentView({
     );
   }
 
-  const mediaGrid = canvasMultiMediaGridOutput(
-    resolvedOutput,
-    mediaGridKind,
-  );
+  const mediaGrid = canvasMultiMediaGridOutput(resolvedOutput, mediaGridKind);
   if (mediaGrid) {
     return (
       <ContentViewBoundary
@@ -97,7 +92,7 @@ export function CanvasNodeContentView({
       >
         <MediaGridView
           kind={mediaGrid.kind}
-          urls={mediaGrid.urls}
+          items={mediaGrid.items}
           label={fallback}
         />
       </ContentViewBoundary>
@@ -153,8 +148,8 @@ export function canvasMultiMediaGridOutput(
   if (!kind) {
     return null;
   }
-  const urls = contentOutputMediaURLs(output, kind);
-  return urls.length > 1 ? { kind, urls } : null;
+  const items = contentOutputMediaItems(output, kind);
+  return items.length > 1 ? { kind, items } : null;
 }
 
 export function canvasMediaGridKind(

@@ -33,11 +33,14 @@ func (Repo) FindTeam(ctx context.Context, id uint64) (teammodel.Team, error) {
 	return *row, nil
 }
 
-func (Repo) UpdateTeam(ctx context.Context, id uint64, record map[string]any) {
+func (Repo) UpdateTeamChecked(ctx context.Context, id uint64, record map[string]any) error {
 	if id == 0 || len(record) == 0 {
-		return
+		return fmt.Errorf("团队更新参数无效")
 	}
-	teammodel.NewTeamModel().Update(ctx, map[string]any{"id": id}, record)
+	if teammodel.NewTeamModel().Update(ctx, map[string]any{"id": id}, record) != 1 {
+		return fmt.Errorf("更新团队失败")
+	}
+	return nil
 }
 
 func (Repo) FindFlow(ctx context.Context, id uint64) (teammodel.Flow, error) {
@@ -305,9 +308,24 @@ func (Repo) ListFlowNodeEdges(ctx context.Context, flowID uint64, enabledOnly bo
 }
 
 func (Repo) ListAgents(ctx context.Context) []AgentOption {
-	rows := agentmodel.NewAgentModel().Select(ctx, map[string]any{
+	return listAgentOptions(ctx, map[string]any{
 		"status": teammodel.StatusEnabled,
 	})
+}
+
+func (Repo) ListAgentsByIDs(ctx context.Context, ids []uint64) []AgentOption {
+	values := uint64FilterValues(ids)
+	if len(values) == 0 {
+		return []AgentOption{}
+	}
+	return listAgentOptions(ctx, map[string]any{
+		"id":     values,
+		"status": teammodel.StatusEnabled,
+	})
+}
+
+func listAgentOptions(ctx context.Context, filter map[string]any) []AgentOption {
+	rows := agentmodel.NewAgentModel().Select(ctx, filter)
 	result := make([]AgentOption, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
@@ -354,9 +372,24 @@ func (Repo) ListAgentCates(ctx context.Context) []AgentCateOption {
 }
 
 func (Repo) ListKnowledgeBases(ctx context.Context) []KnowledgeBaseOption {
-	rows := agentmodel.NewKnowledgeBaseModel().Select(ctx, map[string]any{
+	return listKnowledgeBaseOptions(ctx, map[string]any{
 		"status": teammodel.StatusEnabled,
 	})
+}
+
+func (Repo) ListKnowledgeBasesByIDs(ctx context.Context, ids []uint64) []KnowledgeBaseOption {
+	values := uint64FilterValues(ids)
+	if len(values) == 0 {
+		return []KnowledgeBaseOption{}
+	}
+	return listKnowledgeBaseOptions(ctx, map[string]any{
+		"id":     values,
+		"status": teammodel.StatusEnabled,
+	})
+}
+
+func listKnowledgeBaseOptions(ctx context.Context, filter map[string]any) []KnowledgeBaseOption {
+	rows := agentmodel.NewKnowledgeBaseModel().Select(ctx, filter)
 	result := make([]KnowledgeBaseOption, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
@@ -405,26 +438,30 @@ func (Repo) ListKnowledgeCates(ctx context.Context) []KnowledgeCateOption {
 }
 
 func (Repo) ListPowers(ctx context.Context) []PowerOption {
-	rows := energonmodel.NewPowerModel().Select(ctx, map[string]any{
+	return listPowerOptions(ctx, map[string]any{
 		"status": teammodel.StatusEnabled,
 	})
+}
+
+func (Repo) ListPowersByIDs(ctx context.Context, ids []uint64) []PowerOption {
+	values := uint64FilterValues(ids)
+	if len(values) == 0 {
+		return []PowerOption{}
+	}
+	return listPowerOptions(ctx, map[string]any{
+		"id":     values,
+		"status": teammodel.StatusEnabled,
+	})
+}
+
+func listPowerOptions(ctx context.Context, filter map[string]any) []PowerOption {
+	rows := energonmodel.NewPowerModel().Select(ctx, filter)
 	result := make([]PowerOption, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
 			continue
 		}
-		result = append(result, PowerOption{
-			ID:           row.ID,
-			CateID:       row.CateID,
-			Name:         strings.TrimSpace(row.Name),
-			Key:          strings.TrimSpace(row.Key),
-			Icon:         strings.TrimSpace(row.Icon),
-			Description:  strings.TrimSpace(row.Description),
-			OutputType:   energonmodel.NormalizeOutputType(row.OutputType),
-			Output:       outputTypeSpec(row.OutputType),
-			Kind:         energonmodel.NormalizePowerKind(row.Kind),
-			CreateStatus: teammodel.StatusEnabled,
-		})
+		result = append(result, powerOptionFromModel(*row))
 	}
 	sort.SliceStable(result, func(i, j int) bool {
 		if result[i].Output.Sort != result[j].Output.Sort {
@@ -463,234 +500,40 @@ func outputTypeSpec(outputType string) energonmodel.OutputTypeSpec {
 
 func (r Repo) FindPowerOption(ctx context.Context, powerID uint64, powerKey string) (PowerOption, bool) {
 	powerKey = strings.TrimSpace(powerKey)
-	for _, row := range r.ListPowers(ctx) {
-		if powerID > 0 && row.ID == powerID {
-			return row, true
+	if powerID > 0 {
+		row := energonmodel.NewPowerModel().Find(ctx, map[string]any{
+			"id":     powerID,
+			"status": teammodel.StatusEnabled,
+		})
+		if row != nil {
+			return powerOptionFromModel(*row), true
 		}
-		if powerKey != "" && row.Key == powerKey {
-			return row, true
-		}
 	}
-	return PowerOption{}, false
-}
-
-func (Repo) UpsertFlow(ctx context.Context, teamID uint64, payload GraphFlow) (teammodel.Flow, error) {
-	key := normalizeKey("flow", payload.Key)
-	name := strings.TrimSpace(payload.Name)
-	if name == "" {
-		name = key
+	if powerKey == "" {
+		return PowerOption{}, false
 	}
-	model := teammodel.NewFlowModel()
-	row := model.Find(ctx, map[string]any{"team_id": teamID, "key": key})
-	now := time.Now()
-	record := map[string]any{
-		"team_id":  teamID,
-		"name":     name,
-		"key":      key,
-		"goal":     strings.TrimSpace(payload.Goal),
-		"position": jsonText(payload.Position),
-		"config":   jsonText(payload.Config),
-		"status":   normalizedStatus(payload.Status),
-		"sort":     payload.Sort,
-	}
-	if row == nil && payload.ID > 0 {
-		row = model.Find(ctx, map[string]any{"id": payload.ID, "team_id": teamID})
-	}
-	if row == nil {
-		record["created_at"] = now
-		id := uint64(model.Insert(ctx, record))
-		if id == 0 {
-			return teammodel.Flow{}, fmt.Errorf("创建工作流失败")
-		}
-		created := model.Find(ctx, map[string]any{"id": id})
-		if created == nil {
-			return teammodel.Flow{}, fmt.Errorf("读取新工作流失败")
-		}
-		return *created, nil
-	}
-	model.Update(ctx, map[string]any{"id": row.ID}, record)
-	updated := model.Find(ctx, map[string]any{"id": row.ID})
-	if updated == nil {
-		return teammodel.Flow{}, fmt.Errorf("读取工作流失败")
-	}
-	return *updated, nil
-}
-
-func (Repo) UpsertFlowEdge(ctx context.Context, teamID uint64, fromID uint64, toID uint64, payload GraphFlowEdge) error {
-	if fromID == 0 || toID == 0 || fromID == toID {
-		return nil
-	}
-	model := teammodel.NewFlowEdgeModel()
-	row := model.Find(ctx, map[string]any{
-		"team_id":      teamID,
-		"from_flow_id": fromID,
-		"to_flow_id":   toID,
+	row := energonmodel.NewPowerModel().Find(ctx, map[string]any{
+		"key":    powerKey,
+		"status": teammodel.StatusEnabled,
 	})
-	now := time.Now()
-	condition := strings.TrimSpace(payload.Condition)
-	if condition == "" {
-		condition = "completed"
-	}
-	record := map[string]any{
-		"team_id":      teamID,
-		"from_flow_id": fromID,
-		"to_flow_id":   toID,
-		"condition":    condition,
-		"status":       normalizedStatus(payload.Status),
-		"sort":         payload.Sort,
-	}
 	if row == nil {
-		record["created_at"] = now
-		if uint64(model.Insert(ctx, record)) == 0 {
-			return fmt.Errorf("创建工作流关系失败")
-		}
-		return nil
+		return PowerOption{}, false
 	}
-	model.Update(ctx, map[string]any{"id": row.ID}, record)
-	return nil
+	return powerOptionFromModel(*row), true
 }
 
-func (Repo) UpsertFlowNode(ctx context.Context, teamID uint64, flowID uint64, payload GraphFlowNode) (teammodel.FlowNode, error) {
-	key := normalizeKey("node", payload.NodeKey)
-	name := strings.TrimSpace(payload.Name)
-	if name == "" {
-		name = key
-	}
-	nodeType := strings.TrimSpace(payload.Type)
-	if nodeType == "" {
-		nodeType = teammodel.NodeTypeAgent
-	}
-	model := teammodel.NewFlowNodeModel()
-	row := model.Find(ctx, map[string]any{"flow_id": flowID, "node_key": key})
-	now := time.Now()
-	record := map[string]any{
-		"team_id":       teamID,
-		"flow_id":       flowID,
-		"node_key":      key,
-		"name":          name,
-		"type":          nodeType,
-		"role_id":       payload.RoleID,
-		"role_key":      strings.TrimSpace(payload.RoleKey),
-		"agent_id":      payload.AgentID,
-		"power_id":      payload.PowerID,
-		"sub_team_id":   payload.SubTeamID,
-		"asset_cate_id": payload.AssetCateID,
-		"config":        jsonText(payload.Config),
-		"position":      jsonText(payload.Position),
-		"status":        normalizedStatus(payload.Status),
-		"sort":          payload.Sort,
-	}
-	if row == nil && payload.ID > 0 {
-		row = model.Find(ctx, map[string]any{"id": payload.ID, "flow_id": flowID})
-	}
-	if row == nil {
-		record["created_at"] = now
-		id := uint64(model.Insert(ctx, record))
-		if id == 0 {
-			return teammodel.FlowNode{}, fmt.Errorf("创建节点失败")
-		}
-		created := model.Find(ctx, map[string]any{"id": id})
-		if created == nil {
-			return teammodel.FlowNode{}, fmt.Errorf("读取新节点失败")
-		}
-		return *created, nil
-	}
-	model.Update(ctx, map[string]any{"id": row.ID}, record)
-	updated := model.Find(ctx, map[string]any{"id": row.ID})
-	if updated == nil {
-		return teammodel.FlowNode{}, fmt.Errorf("读取节点失败")
-	}
-	return *updated, nil
-}
-
-func (Repo) UpsertFlowNodeEdge(ctx context.Context, teamID uint64, flowID uint64, fromID uint64, toID uint64, payload GraphFlowNodeEdge) error {
-	if fromID == 0 || toID == 0 || fromID == toID {
-		return nil
-	}
-	model := teammodel.NewFlowNodeEdgeModel()
-	row := model.Find(ctx, map[string]any{
-		"flow_id":      flowID,
-		"from_node_id": fromID,
-		"to_node_id":   toID,
-	})
-	now := time.Now()
-	condition := strings.TrimSpace(payload.Condition)
-	if condition == "" {
-		condition = "always"
-	}
-	record := map[string]any{
-		"team_id":      teamID,
-		"flow_id":      flowID,
-		"from_node_id": fromID,
-		"to_node_id":   toID,
-		"condition":    condition,
-		"status":       normalizedStatus(payload.Status),
-		"sort":         payload.Sort,
-	}
-	if row == nil {
-		record["created_at"] = now
-		if uint64(model.Insert(ctx, record)) == 0 {
-			return fmt.Errorf("创建节点关系失败")
-		}
-		return nil
-	}
-	model.Update(ctx, map[string]any{"id": row.ID}, record)
-	return nil
-}
-
-func (Repo) DisableMissingFlows(ctx context.Context, teamID uint64, keepKeys map[string]bool) {
-	model := teammodel.NewFlowModel()
-	for _, row := range model.Select(ctx, map[string]any{"team_id": teamID}) {
-		if row == nil || keepKeys[row.Key] {
-			continue
-		}
-		model.Update(ctx, map[string]any{"id": row.ID}, map[string]any{
-			"status": teammodel.StatusDisabled,
-		})
-	}
-}
-
-func (Repo) DisableMissingFlowEdges(ctx context.Context, teamID uint64, keep map[string]bool) {
-	model := teammodel.NewFlowEdgeModel()
-	for _, row := range model.Select(ctx, map[string]any{"team_id": teamID}) {
-		if row == nil {
-			continue
-		}
-		key := edgeKey(row.FromFlowID, row.ToFlowID)
-		if keep[key] {
-			continue
-		}
-		model.Update(ctx, map[string]any{"id": row.ID}, map[string]any{
-			"status": teammodel.StatusDisabled,
-		})
-	}
-}
-
-func (Repo) DisableMissingFlowNodes(ctx context.Context, flowID uint64, keepKeys map[string]bool) {
-	model := teammodel.NewFlowNodeModel()
-	for _, row := range model.Select(ctx, map[string]any{"flow_id": flowID}) {
-		if row == nil || keepKeys[row.NodeKey] {
-			continue
-		}
-		model.Update(ctx, map[string]any{"id": row.ID}, map[string]any{
-			"status": teammodel.StatusDisabled,
-		})
-	}
-}
-
-func (Repo) DisableMissingFlowNodeEdges(ctx context.Context, flowID uint64, keep map[string]bool) {
-	model := teammodel.NewFlowNodeEdgeModel()
-	for _, row := range model.Select(ctx, map[string]any{"flow_id": flowID}) {
-		if row == nil {
-			continue
-		}
-		key := edgeKey(row.FromNodeID, row.ToNodeID)
-		if keep[key] {
-			continue
-		}
-		model.Update(ctx, map[string]any{"id": row.ID}, map[string]any{
-			"status": teammodel.StatusDisabled,
-		})
+func powerOptionFromModel(row energonmodel.Power) PowerOption {
+	return PowerOption{
+		ID:           row.ID,
+		CateID:       row.CateID,
+		Name:         strings.TrimSpace(row.Name),
+		Key:          strings.TrimSpace(row.Key),
+		Icon:         strings.TrimSpace(row.Icon),
+		Description:  strings.TrimSpace(row.Description),
+		OutputType:   energonmodel.NormalizeOutputType(row.OutputType),
+		Output:       outputTypeSpec(row.OutputType),
+		Kind:         energonmodel.NormalizePowerKind(row.Kind),
+		CreateStatus: teammodel.StatusEnabled,
 	}
 }
 
@@ -809,23 +652,32 @@ func (Repo) CurrentTeamReleases(ctx context.Context, teams []teammodel.Team) map
 	return result
 }
 
-func (Repo) ArchiveOtherTeamReleases(ctx context.Context, teamID uint64, keepID uint64) {
+func (Repo) ArchiveOtherTeamReleasesChecked(ctx context.Context, teamID uint64, keepID uint64) error {
 	if teamID == 0 || keepID == 0 {
-		return
+		return fmt.Errorf("发布版本参数无效")
 	}
 	model := teammodel.NewTeamReleaseModel()
 	rows := model.Select(ctx, map[string]any{
 		"team_id": teamID,
 		"status":  teammodel.TeamReleaseStatusCurrent,
 	})
+	ids := make([]uint64, 0, len(rows))
 	for _, row := range rows {
 		if row == nil || row.ID == keepID {
 			continue
 		}
-		model.Update(ctx, map[string]any{"id": row.ID}, map[string]any{
-			"status": teammodel.TeamReleaseStatusArchive,
-		})
+		ids = append(ids, row.ID)
 	}
+	values := uint64FilterValues(ids)
+	if len(values) == 0 {
+		return nil
+	}
+	if model.Update(ctx, map[string]any{"id": values}, map[string]any{
+		"status": teammodel.TeamReleaseStatusArchive,
+	}) != int64(len(values)) {
+		return fmt.Errorf("归档旧发布版本失败")
+	}
+	return nil
 }
 
 func (Repo) FindRun(ctx context.Context, id uint64) *teammodel.Run {
@@ -843,6 +695,23 @@ func (Repo) FindRunInProject(ctx context.Context, id uint64, projectID uint64) *
 		"id":         id,
 		"project_id": projectID,
 	})
+}
+
+func (Repo) FindRunsInProject(ctx context.Context, projectID uint64, runIDs []uint64) map[uint64]*teammodel.Run {
+	result := make(map[uint64]*teammodel.Run)
+	runIDs = distinctTeamRunIDs(runIDs)
+	if projectID == 0 || len(runIDs) == 0 {
+		return result
+	}
+	for _, run := range teammodel.NewRunModel().Select(ctx, map[string]any{
+		"id":         runIDs,
+		"project_id": projectID,
+	}) {
+		if run != nil {
+			result[run.ID] = run
+		}
+	}
+	return result
 }
 
 func (Repo) FindRunInBody(ctx context.Context, id uint64, bodyID uint64) *teammodel.Run {
@@ -1127,6 +996,39 @@ func (Repo) ListNodeRuns(ctx context.Context, runID uint64) []teammodel.NodeRun 
 		if row != nil {
 			result = append(result, *row)
 		}
+	}
+	return result
+}
+
+func (Repo) ListNodeRunsByRunIDs(ctx context.Context, runIDs []uint64) map[uint64][]teammodel.NodeRun {
+	result := make(map[uint64][]teammodel.NodeRun)
+	runIDs = distinctTeamRunIDs(runIDs)
+	if len(runIDs) == 0 {
+		return result
+	}
+	for _, runID := range runIDs {
+		result[runID] = []teammodel.NodeRun{}
+	}
+	for _, row := range teammodel.NewNodeRunModel().Select(ctx, map[string]any{"run_id": runIDs}) {
+		if row != nil {
+			result[row.RunID] = append(result[row.RunID], *row)
+		}
+	}
+	return result
+}
+
+func distinctTeamRunIDs(runIDs []uint64) []uint64 {
+	result := make([]uint64, 0, len(runIDs))
+	seen := make(map[uint64]struct{}, len(runIDs))
+	for _, runID := range runIDs {
+		if runID == 0 {
+			continue
+		}
+		if _, exists := seen[runID]; exists {
+			continue
+		}
+		seen[runID] = struct{}{}
+		result = append(result, runID)
 	}
 	return result
 }

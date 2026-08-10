@@ -4,7 +4,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Grid3X3,
-  Play,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import {
@@ -14,8 +13,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EnergonAudioPlayer } from "@/components/energon/content-view";
-import { VideoThumbnail } from "../../shared/video-thumbnail";
-import type { ContentMediaKind } from "./content-output";
+import { PlayableVideoPreview } from "../../shared/playable-video-preview";
+import type { ContentMediaItem, ContentMediaKind } from "./content-output";
 import {
   MEDIA_GRID_LAYOUT_OPTIONS,
   mediaGridLayoutOption,
@@ -123,9 +122,7 @@ export function MediaGridToolbar({
                     ? "按结果排版"
                     : `每页 ${option.capacity} 格`}
                 </small>
-                {option.value === normalizedLayout ? (
-                  <Check size={13} />
-                ) : null}
+                {option.value === normalizedLayout ? <Check size={13} /> : null}
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>
@@ -174,16 +171,16 @@ export function MediaGridToolbar({
 
 export function MediaGridView({
   kind,
-  urls,
+  items,
   label,
 }: {
   kind: MediaGridKind;
-  urls: string[];
+  items: ContentMediaItem[];
   label?: string;
 }) {
   const [layout, setLayout] = useState<MediaGridLayout>("auto");
-  const pagination = useMediaGridPagination(urls.length, layout);
-  const pageItems = urls.slice(
+  const pagination = useMediaGridPagination(items.length, layout);
+  const pageItems = items.slice(
     pagination.pageOffset,
     pagination.pageOffset + pagination.shape.capacity,
   );
@@ -197,7 +194,7 @@ export function MediaGridView({
     <section className={`ws-media-grid-view is-${kind}`}>
       <MediaGridToolbar
         layout={layout}
-        countLabel={`${urls.length} ${MEDIA_GRID_COUNT_UNITS[kind]}`}
+        countLabel={`${items.length} ${MEDIA_GRID_COUNT_UNITS[kind]}`}
         pageIndex={pagination.pageIndex}
         pageCount={pagination.pageCount}
         onLayoutChange={setLayout}
@@ -211,25 +208,16 @@ export function MediaGridView({
             gridTemplateRows: `repeat(${pagination.shape.rows}, minmax(0, 1fr))`,
           }}
         >
-          {slots.map((url, index) => {
+          {slots.map((item, index) => {
             const itemIndex = pagination.pageOffset + index;
             const itemLabel = `${label || kindLabel} ${itemIndex + 1}`;
-            return url ? (
+            return item ? (
               <figure
-                key={`${url}-${itemIndex}`}
+                key={`${item.url}-${itemIndex}`}
                 className={kind === "audio" ? "is-audio" : undefined}
                 aria-label={kind === "audio" ? itemLabel : undefined}
               >
-                <MediaGridItem
-                  kind={kind}
-                  url={url}
-                  label={itemLabel}
-                />
-                {kind === "video" ? (
-                  <span className="ws-media-grid-play" aria-hidden="true">
-                    <Play size={12} fill="currentColor" />
-                  </span>
-                ) : null}
+                <MediaGridItem kind={kind} item={item} label={itemLabel} />
               </figure>
             ) : (
               <figure key={`empty-${itemIndex}`} className="is-empty" />
@@ -243,13 +231,14 @@ export function MediaGridView({
 
 function MediaGridItem({
   kind,
-  url,
+  item,
   label,
 }: {
   kind: MediaGridKind;
-  url: string;
+  item: ContentMediaItem;
   label: string;
 }) {
+  const { url } = item;
   if (kind === "image") {
     return (
       <img
@@ -263,20 +252,28 @@ function MediaGridItem({
   }
   if (kind === "video") {
     return (
-      <VideoThumbnail
+      <PlayableVideoPreview
         key={url}
         src={url}
+        poster={item.thumbnail}
         draggable={false}
         ariaLabel={label}
+        objectFit="cover"
       />
     );
   }
   return (
-    <EnergonAudioPlayer
-      src={url}
-      compact
-      preload="none"
-      className="ws-media-grid-audio-player nodrag nopan"
-    />
+    <div
+      className={`ws-media-grid-audio-card${item.thumbnail ? " has-cover" : ""}`}
+    >
+      {item.thumbnail ? (
+        <img src={item.thumbnail} alt="" loading="lazy" decoding="async" />
+      ) : null}
+      <EnergonAudioPlayer
+        src={url}
+        preload="none"
+        className="ws-media-grid-audio-player nodrag nopan"
+      />
+    </div>
   );
 }

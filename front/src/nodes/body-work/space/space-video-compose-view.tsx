@@ -37,12 +37,13 @@ import { CanvasNodeContentView } from "./space-content-view";
 import { hasContentOutput } from "../shared/content-output";
 import {
   canvasMediaReferenceKind,
-  canvasPrimaryMediaURLs,
+  canvasPrimaryMediaItems,
   connectedReferenceItem,
   type CanvasConnectedMediaReference,
 } from "./space-media-references";
 import { SpaceTooltip } from "./space-tooltip";
-import { FirstFrameVideo } from "../../shared/first-frame-video";
+import { FirstFrameVideo } from "@/components/media/first-frame-video";
+import "./space-video-compose.css";
 
 const VIDEO_COMPOSE_RESOLUTION_OPTIONS = [
   { value: "auto", label: "跟随首个镜头" },
@@ -128,10 +129,7 @@ export function VideoComposeView({
   }, [referenceItems]);
   const connectedVideoReferences = useMemo(
     () =>
-      connectedVideoComposeReferences(
-        connectedMediaReferences,
-        referenceItems,
-      ),
+      connectedVideoComposeReferences(connectedMediaReferences, referenceItems),
     [connectedMediaReferences, referenceItems],
   );
 
@@ -139,10 +137,7 @@ export function VideoComposeView({
     if (readonly || !onChange) {
       return;
     }
-    const next = reconcileConnectedVideoClips(
-      value,
-      connectedVideoReferences,
-    );
+    const next = reconcileConnectedVideoClips(value, connectedVideoReferences);
     if (next === value) {
       return;
     }
@@ -151,13 +146,7 @@ export function VideoComposeView({
       setActivePanel("");
     }
     onChange(next);
-  }, [
-    connectedVideoReferences,
-    onChange,
-    readonly,
-    selectedClipId,
-    value,
-  ]);
+  }, [connectedVideoReferences, onChange, readonly, selectedClipId, value]);
 
   const update = (next: CanvasVideoComposition) => {
     if (!readonly) {
@@ -184,7 +173,7 @@ export function VideoComposeView({
       return;
     }
     if (pickerTarget === "clip") {
-      const clips = references.map(createVideoComposeClip);
+      const clips = references.map((item) => createVideoComposeClip(item));
       update({ ...value, clips: [...value.clips, ...clips] });
       setSelectedClipId(clips[0]?.id || "");
     } else if (pickerTarget === "original" && selectedClip) {
@@ -492,9 +481,7 @@ function VideoComposeClipInspector({
 }) {
   return (
     <div className="ws-video-compose-inspector nodrag nowheel">
-      <strong>
-        {panel === "sound" ? "声音" : "转场"}
-      </strong>
+      <strong>{panel === "sound" ? "声音" : "转场"}</strong>
       {panel === "sound" ? (
         <div className="ws-video-compose-sound-fields">
           <button type="button" disabled={readonly} onClick={onChooseOriginal}>
@@ -585,7 +572,8 @@ function VideoComposeClipInspector({
                         clip.speechTracks,
                         track.id,
                         {
-                          fit: event.target.value as VideoComposeSpeechTrack["fit"],
+                          fit: event.target
+                            .value as VideoComposeSpeechTrack["fit"],
                         },
                       ),
                     })
@@ -777,7 +765,8 @@ function VideoComposeGlobalSettings({
                 value={track.kind}
                 disabled={readonly}
                 onChange={(event) => {
-                  const kind = event.target.value as VideoComposeGlobalAudioTrack["kind"];
+                  const kind = event.target
+                    .value as VideoComposeGlobalAudioTrack["kind"];
                   onChange({
                     ...composition,
                     audioTracks: updateGlobalAudioTrack(
@@ -787,7 +776,8 @@ function VideoComposeGlobalSettings({
                         kind,
                         fit: kind === "music" ? "trim" : "strict",
                         loop: kind === "music" && track.loop,
-                        fadeOut: kind === "music" ? Math.max(1, track.fadeOut) : 0,
+                        fadeOut:
+                          kind === "music" ? Math.max(1, track.fadeOut) : 0,
                       },
                     ),
                   });
@@ -851,7 +841,8 @@ function VideoComposeGlobalSettings({
                       composition.audioTracks,
                       track.id,
                       {
-                        fit: event.target.value as VideoComposeGlobalAudioTrack["fit"],
+                        fit: event.target
+                          .value as VideoComposeGlobalAudioTrack["fit"],
                       },
                     ),
                   })
@@ -958,6 +949,8 @@ function VideoComposePreview({
   finalOutput?: unknown;
 }) {
   const videoUrl = clip?.visualVideo?.mediaUrl || item?.preview.videoUrl || "";
+  const videoPosterUrl =
+    clip?.visualVideo?.mediaThumbnail || item?.preview.videoPosterUrl || "";
   const hasFinalOutput = hasContentOutput(finalOutput);
   const [mode, setMode] = useState<"clip" | "final">(
     hasFinalOutput ? "final" : "clip",
@@ -1006,9 +999,10 @@ function VideoComposePreview({
           <FirstFrameVideo
             key={videoUrl}
             src={videoUrl}
+            poster={videoPosterUrl || undefined}
             controls
             playsInline
-            preload="metadata"
+            preload={videoPosterUrl ? "none" : "metadata"}
           />
         ) : item?.preview.imageUrl ? (
           <img
@@ -1163,9 +1157,7 @@ function reconcileConnectedVideoClips(
         sourceEdgeId: connected.edgeId,
       };
     } else {
-      clips.push(
-        createVideoComposeClip(connected.reference, connected.edgeId),
-      );
+      clips.push(createVideoComposeClip(connected.reference, connected.edgeId));
     }
     matchedKeys.add(key);
     changed = true;
@@ -1174,12 +1166,10 @@ function reconcileConnectedVideoClips(
   return changed ? { ...composition, clips } : composition;
 }
 
-function connectedVideoComposeReferenceKey(
-  connected: {
-    edgeId: string;
-    reference?: VideoComposeAssetReference;
-  },
-) {
+function connectedVideoComposeReferenceKey(connected: {
+  edgeId: string;
+  reference?: VideoComposeAssetReference;
+}) {
   const referenceKey = videoComposeMediaReferenceKey(connected.reference);
   return connected.edgeId && referenceKey
     ? `${connected.edgeId}:${referenceKey}`
@@ -1207,26 +1197,54 @@ function referencesFromItem(
   }
   const previewUrl =
     kind === "video" ? item.preview.videoUrl : item.preview.audioUrl;
-  const urls = Array.from(
-    new Set([
-      ...canvasPrimaryMediaURLs(item.output, kind),
-      ...canvasPrimaryMediaURLs(item.asset, kind),
-      previewUrl,
-    ].filter(Boolean)),
-  );
-  if (!urls.length) {
+  const mediaItems = mergeVideoComposeMediaItems([
+    ...canvasPrimaryMediaItems(item.output, kind),
+    ...canvasPrimaryMediaItems(item.asset, kind),
+    ...(previewUrl
+      ? [
+          {
+            url: previewUrl,
+            thumbnail:
+              kind === "video" ? item.preview.videoPosterUrl : undefined,
+          },
+        ]
+      : []),
+  ]);
+  if (!mediaItems.length) {
     return [reference];
   }
   const mediaLabel = kind === "video" ? "视频" : "音频";
-  return urls.map((mediaUrl, index) => ({
+  return mediaItems.map((media, index) => ({
     ...reference,
     label:
-      urls.length > 1
+      mediaItems.length > 1
         ? `${reference.label || mediaLabel} · ${mediaLabel} ${index + 1}`
         : reference.label,
     mediaIndex: index + 1,
-    mediaUrl,
+    mediaUrl: media.url,
+    ...(media.thumbnail ? { mediaThumbnail: media.thumbnail } : {}),
   }));
+}
+
+function mergeVideoComposeMediaItems(
+  items: Array<{ url: string; thumbnail?: string }>,
+) {
+  const merged = new Map<string, { url: string; thumbnail?: string }>();
+  for (const item of items) {
+    const url = item.url.trim();
+    if (!url) {
+      continue;
+    }
+    const current = merged.get(url);
+    if (!current) {
+      merged.set(url, { ...item, url });
+      continue;
+    }
+    if (!current.thumbnail && item.thumbnail) {
+      merged.set(url, { ...current, thumbnail: item.thumbnail });
+    }
+  }
+  return Array.from(merged.values());
 }
 
 function findReferenceItem(

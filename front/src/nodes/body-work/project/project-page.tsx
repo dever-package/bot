@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   ArchiveRestore,
   ChevronLeft,
   ChevronRight,
   FolderOpen,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "@dever/front-plugin";
+import {
+  createPreloadableComponent,
+  createPreloadableModule,
+} from "../../shared/preloadable";
 import { useAuthUserScopeKey } from "../shared/auth-scope";
 import { requestErrorMessage as errorMessage } from "../shared/api-response";
 import {
@@ -21,8 +26,21 @@ import {
   type ProjectView,
 } from "./project-api";
 import { CreateProjectCard, ProjectCard, ProjectLoading } from "./project-card";
-import { DeleteProjectDialog, ProjectMetadataDialog } from "./project-dialogs";
 import "./project.css";
+
+const projectDialogsModule = createPreloadableModule(
+  () => import("./project-dialogs"),
+);
+const projectMetadataDialog = createPreloadableComponent(
+  projectDialogsModule,
+  (module) => module.ProjectMetadataDialog,
+);
+const deleteProjectDialog = createPreloadableComponent(
+  projectDialogsModule,
+  (module) => module.DeleteProjectDialog,
+);
+const ProjectMetadataDialog = projectMetadataDialog.Component;
+const DeleteProjectDialog = deleteProjectDialog.Component;
 
 type MetadataDialogState = {
   mode: "create" | "edit";
@@ -262,23 +280,42 @@ export function WorkProjectPage({
         </footer>
       ) : null}
 
-      {metadataDialog ? (
-        <ProjectMetadataDialog
-          key={`${metadataDialog.mode}-${metadataDialog.project?.id || 0}`}
-          mode={metadataDialog.mode}
-          project={metadataDialog.project}
-          onClose={() => setMetadataDialog(null)}
-          onSubmit={saveMetadata}
-        />
-      ) : null}
+      {metadataDialog || deleteTarget ? (
+        <Suspense fallback={<ProjectDialogLoading />}>
+          {metadataDialog ? (
+            <ProjectMetadataDialog
+              key={`${metadataDialog.mode}-${metadataDialog.project?.id || 0}`}
+              mode={metadataDialog.mode}
+              project={metadataDialog.project}
+              onClose={() => setMetadataDialog(null)}
+              onSubmit={saveMetadata}
+            />
+          ) : null}
 
-      {deleteTarget ? (
-        <DeleteProjectDialog
-          project={deleteTarget}
-          onClose={() => setDeleteTarget(null)}
-          onConfirm={confirmDelete}
-        />
+          {deleteTarget ? (
+            <DeleteProjectDialog
+              project={deleteTarget}
+              onClose={() => setDeleteTarget(null)}
+              onConfirm={confirmDelete}
+            />
+          ) : null}
+        </Suspense>
       ) : null}
+    </div>
+  );
+}
+
+function ProjectDialogLoading() {
+  return (
+    <div className="hb-script-modal-backdrop">
+      <div
+        className="hb-script-modal flex min-h-40 items-center justify-center text-[var(--body-work-muted)]"
+        role="dialog"
+        aria-modal="true"
+        aria-label="正在加载作品操作"
+      >
+        <Loader2 className="hb-script-spin" size={20} />
+      </div>
     </div>
   );
 }

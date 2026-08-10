@@ -159,11 +159,7 @@ func (s WorkspaceService) CanvasExecutionList(ctx context.Context, query CanvasE
 	if strings.TrimSpace(query.Status) != "" {
 		filter["status"] = strings.TrimSpace(query.Status)
 	} else if scope == canvasExecutionScopeActive {
-		filter["status"] = []string{
-			teammodel.RunStatusPending,
-			teammodel.RunStatusRunning,
-			teammodel.RunStatusWaiting,
-		}
+		filter["status"] = canvasRunActiveStatuses()
 	}
 	if runIDs := normalizeCanvasExecutionRunIDs(query.RunIDs); scope != canvasExecutionScopeHistory && len(runIDs) > 0 {
 		filter["run_id"] = runIDs

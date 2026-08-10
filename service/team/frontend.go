@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	assetmodel "github.com/dever-package/bot/model/asset"
 	energonmodel "github.com/dever-package/bot/model/energon"
@@ -49,11 +48,11 @@ func releaseProjectEnabled(release *teammodel.TeamRelease) bool {
 	if release == nil {
 		return false
 	}
-	snapshot, err := releaseSnapshotFromText(release.Snapshot)
+	graph, err := runtimeGraphFromRelease(*release)
 	if err != nil {
 		return false
 	}
-	return snapshot.Team.ProjectEnabled != teammodel.StatusDisabled
+	return graph.Team.ProjectEnabled != teammodel.StatusDisabled
 }
 
 func (s Service) TeamDetail(ctx context.Context, teamID uint64, releaseID uint64) (map[string]any, error) {
@@ -207,7 +206,7 @@ func (s Service) CanvasConfig(ctx context.Context, releaseID uint64, flowID uint
 			return nil, fmt.Errorf("发布版本中不存在当前工作流")
 		}
 	}
-	powers := scopedPowerOptions(s.repo.ListPowers(ctx), graph.TeamPowers)
+	powers := s.teamPowerOptions(ctx, graph.TeamPowers)
 	return map[string]any{
 		"release_id":       release.ID,
 		"flow":             singleFlowPayload(flow),
@@ -278,7 +277,7 @@ func (s Service) CanvasPowerForm(ctx context.Context, releaseID uint64, flowID u
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
+	result := map[string]any{
 		"release_id":         releaseID,
 		"flow":               singleFlowPayload(flow),
 		"power":              power,
@@ -287,7 +286,12 @@ func (s Service) CanvasPowerForm(ctx context.Context, releaseID uint64, flowID u
 		"sources":            form.Sources,
 		"params":             form.Params,
 		"primary_param_key":  primaryPowerParamKey(form.Params),
-	}, nil
+	}
+	if energonmodel.NormalizeOutputType(power.OutputType) == energonmodel.OutputTypeStoryboard {
+		result["storyboard_work_types"] = energonmodel.StoryboardWorkTypeSpecs()
+		result["storyboard_reference_purposes"] = energonmodel.StoryboardReferencePurposeSpecs()
+	}
+	return result, nil
 }
 
 type preparedCanvasPower struct {
@@ -495,283 +499,41 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	if err != nil {
 		return nil, err
 	}
-	req = prepared.request
-	workspaceRun := prepared.workspaceRun
-	releaseID := prepared.releaseID
-	teamID := prepared.teamID
-	flow := prepared.flow
-	power := prepared.power
-
-	requestID := strings.TrimSpace(req.RequestID)
-	if requestID == "" {
-		requestID = newRequestID()
+	execution := newCanvasPowerExecution(prepared)
+	executionContext, err := s.startCanvasPowerExecution(ctx, execution, prepared.releaseID, prepared.teamID)
+	if err != nil {
+		return nil, err
 	}
-	nodeKey := normalizeKey("node", req.NodeKey)
-	if workspaceRun {
-		nodeKey = fmt.Sprintf("function:%d:%s", req.TeamPowerID, requestID)
-	}
-	nodeName := strings.TrimSpace(req.NodeName)
-	if nodeName == "" {
-		nodeName = power.Name
-	}
-	req.Billing.TeamID = teamID
-	req.Billing.ProjectID = req.ProjectID
-	now := time.Now()
-	runInput := canvasPowerRunInput(req)
-	if req.SourceTargetID > 0 {
-		runInput[CanvasPowerMetaSourceTargetID] = req.SourceTargetID
-	}
-	runInput[CanvasPowerMetaResumeMode] = CanvasPowerResumeMode
-	runInput[CanvasPowerMetaContext] = map[string]any{
-		"power_id":         power.ID,
-		"power_key":        power.Key,
-		"source_target_id": req.SourceTargetID,
-		"flow_id":          flow.ID,
-		"asset_cate_id":    req.AssetCateID,
-		"node_key":         nodeKey,
-		"node_name":        nodeName,
-		"kind":             power.Kind,
-		"persist_result":   req.PersistResult,
-	}
-	if workspaceRun {
-		runInput["_mode"] = "workspace_power"
-		runInput[CanvasPowerMetaTeamPowerID] = req.TeamPowerID
-	}
-	attachRunBilling(runInput, req.Billing)
-	input := executionInput(runInput)
-	runRecord := map[string]any{
-		"request_id": requestID,
-		"project_id": req.ProjectID,
-		"body_id":    req.BodyID,
-		"team_id":    teamID,
-		"release_id": releaseID,
-		"input":      jsonText(runInput),
-		"output":     "{}",
-		"error":      "",
-		"status":     teammodel.RunStatusRunning,
-		"started_at": now,
-		"created_at": now,
-		"updated_at": now,
-	}
-	attachRunScope(ctx, runRecord)
-	runID := s.repo.InsertRun(ctx, runRecord)
-	if runID == 0 {
-		return nil, fmt.Errorf("创建画布能力运行失败")
-	}
-	run := s.repo.FindRun(ctx, runID)
-	if run == nil {
-		return nil, fmt.Errorf("画布能力运行不存在")
-	}
-	executionContext, releaseExecution, claimed, executionErr := s.acquireRunExecution(ctx, run.ID)
-	if !claimed {
-		return nil, fmt.Errorf("画布能力运行已结束或已被其他进程接管")
-	}
-	defer releaseExecution()
-	ctx = executionContext
-	if executionErr != nil {
-		s.finishRun(ctx, run.ID, teammodel.RunStatusFail, nil, executionErr)
-		return nil, executionErr
-	}
-	req.Billing.RunID = run.ID
-	s.writeRunEvent(ctx, *run, stream.EventRunStarted, map[string]any{
-		"feature": stream.FeaturePower,
-		"scope":   "run",
-		"mode":    "canvas_power",
-		"input":   input,
-		"power": map[string]any{
-			"id":          power.ID,
-			"name":        power.Name,
-			"key":         power.Key,
-			"kind":        power.Kind,
-			"output_type": power.OutputType,
-		},
-	})
-	if req.OnRunCreated != nil {
-		if err := req.OnRunCreated(run.ID, requestID); err != nil {
-			s.finishRun(ctx, run.ID, teammodel.RunStatusFail, nil, err)
-			return nil, err
-		}
-	}
-	if current := s.repo.FindRun(ctx, run.ID); current != nil && current.Status == teammodel.RunStatusCanceled {
+	defer execution.releaseRunLease()
+	if execution.canceled {
 		return map[string]any{
-			"run_id":     run.ID,
-			"request_id": requestID,
+			"run_id":     execution.run.ID,
+			"request_id": execution.requestID,
 			"status":     teammodel.RunStatusCanceled,
 		}, nil
 	}
-	var flowRunID uint64
-	var flowRun *teammodel.FlowRun
-	if flow.ID > 0 {
-		flowRunID = s.repo.FindOrCreateFlowRun(ctx, *run, flow, input)
-		flowRun = s.repo.FindFlowRun(ctx, flowRunID)
-		if flowRun == nil {
-			return nil, fmt.Errorf("创建工作流运行失败")
-		}
-		s.repo.UpdateFlowRun(ctx, flowRun.ID, map[string]any{
-			"status":     teammodel.RunStatusRunning,
-			"started_at": now,
-		})
-		flowRun.Status = teammodel.RunStatusRunning
-		s.writeFlowEvent(ctx, *run, *flowRun, flow, stream.EventFlowStarted, map[string]any{
-			"input":      input,
-			"started_at": now.Format(time.RFC3339Nano),
-		})
-	}
-	var nodeRunID uint64
-	if flow.ID > 0 && flowRun != nil {
-		nodeRunID = s.repo.FindOrCreateDynamicNodeRun(ctx, *run, *flowRun, flow, 0, nodeKey, nodeName, teammodel.NodeTypePower, input)
-	}
-	s.repo.UpdateNodeRun(ctx, nodeRunID, map[string]any{
-		"status":     teammodel.RunStatusRunning,
-		"started_at": now,
-	})
-	nodeRun := s.repo.FindNodeRun(ctx, nodeRunID)
-	dynamicNode := teammodel.FlowNode{
-		NodeKey: nodeKey,
-		Name:    nodeName,
-		Type:    teammodel.NodeTypePower,
-	}
-	if flowRun != nil && nodeRun != nil {
-		nodeRun.Status = teammodel.RunStatusRunning
-		s.writeNodeEvent(ctx, *run, *flowRun, flow, dynamicNode, *nodeRun, stream.EventNodeStarted, map[string]any{
-			"input":      input,
-			"started_at": now.Format(time.RFC3339Nano),
-		})
-	}
 
 	onStream := func(payload map[string]any) {
-		_, _ = s.streams.WritePayload(ctx, requestID, stream.NormalizePayload(stream.FeaturePower, payload))
-		if req.OnStream != nil {
-			req.OnStream(payload)
+		_, _ = s.streams.WritePayload(
+			executionContext,
+			execution.requestID,
+			stream.NormalizePayload(stream.FeaturePower, payload),
+		)
+		if execution.request.OnStream != nil {
+			execution.request.OnStream(payload)
 		}
 	}
-	output, err := s.executePower(
-		ctx,
-		requestID,
-		power,
-		input,
-		req.SourceTargetID,
-		req.ImageSequenceMode,
-		req.Billing,
+	output, runErr := s.executePower(
+		executionContext,
+		execution.requestID,
+		execution.power,
+		execution.input,
+		execution.request.SourceTargetID,
+		execution.request.ImageSequenceMode,
+		execution.request.Billing,
 		onStream,
 	)
-	status := teammodel.RunStatusSuccess
-	if err != nil {
-		status = teammodel.RunStatusFail
-	}
-	if current := s.repo.FindRun(ctx, run.ID); current != nil && current.Status == teammodel.RunStatusCanceled {
-		status = teammodel.RunStatusCanceled
-		err = nil
-	}
-	if status == teammodel.RunStatusSuccess {
-		if interaction := canvasPowerInteraction(output); len(interaction) > 0 {
-			return s.waitCanvasPowerInteraction(
-				ctx,
-				*run,
-				flowRun,
-				flow,
-				dynamicNode,
-				nodeRun,
-				flowRunID,
-				nodeRunID,
-				output,
-				interaction,
-			), nil
-		}
-	}
-	finishedAt := time.Now()
-	nodeRecord := map[string]any{
-		"status":      status,
-		"output":      jsonText(output),
-		"finished_at": finishedAt,
-	}
-	if err != nil {
-		nodeRecord["error"] = err.Error()
-	}
-	s.repo.UpdateNodeRun(ctx, nodeRunID, nodeRecord)
-	if flowRun != nil && nodeRun != nil {
-		nodeRun.Status = status
-		if status == teammodel.RunStatusSuccess {
-			s.writeNodeEvent(ctx, *run, *flowRun, flow, dynamicNode, *nodeRun, stream.EventNodeOutput, map[string]any{
-				"output": output,
-			})
-		}
-		s.writeNodeEvent(ctx, *run, *flowRun, flow, dynamicNode, *nodeRun, stream.EventNodeFinished, map[string]any{
-			"output":      output,
-			"error":       errorText(err),
-			"finished_at": finishedAt.Format(time.RFC3339Nano),
-		})
-	}
-	if flowRun != nil {
-		s.repo.UpdateFlowRun(ctx, flowRun.ID, map[string]any{
-			"status":      status,
-			"output":      jsonText(output),
-			"error":       errorText(err),
-			"finished_at": finishedAt,
-		})
-		flowRun.Status = status
-		s.writeFlowEvent(ctx, *run, *flowRun, flow, stream.EventFlowFinished, map[string]any{
-			"output":      output,
-			"error":       errorText(err),
-			"finished_at": finishedAt.Format(time.RFC3339Nano),
-		})
-	}
-	var asset *assetmodel.Asset
-	var version *assetmodel.Version
-	s.finishRun(ctx, run.ID, status, output, err)
-	if err != nil {
-		return map[string]any{
-			"run_id":      run.ID,
-			"request_id":  requestID,
-			"node_run_id": nodeRunID,
-			"status":      status,
-		}, err
-	}
-	if status != teammodel.RunStatusSuccess {
-		return map[string]any{
-			"run_id":      run.ID,
-			"request_id":  requestID,
-			"flow_run_id": flowRunID,
-			"node_run_id": nodeRunID,
-			"status":      status,
-			"output":      output,
-		}, nil
-	}
-
-	if !req.PersistResult {
-		return map[string]any{
-			"run_id":      run.ID,
-			"request_id":  requestID,
-			"flow_run_id": flowRunID,
-			"node_run_id": nodeRunID,
-			"status":      status,
-			"output":      output,
-		}, nil
-	}
-
-	if asset == nil || version == nil {
-		asset, version, err = s.saveCanvasPowerResult(
-			ctx,
-			*run,
-			mapValue(runInput[CanvasPowerMetaContext]),
-			nodeRunID,
-			requestID,
-			output,
-		)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return map[string]any{
-		"run_id":      run.ID,
-		"request_id":  requestID,
-		"flow_run_id": flowRunID,
-		"node_run_id": nodeRunID,
-		"status":      status,
-		"output":      output,
-		"asset":       s.asset.AssetDetailMap(ctx, *asset, version),
-		"version":     assetservice.VersionToMap(*version),
-	}, nil
+	return s.completeCanvasPowerExecution(executionContext, execution, output, runErr)
 }
 
 func canvasPowerRunInput(req CanvasPowerRunRequest) map[string]any {
@@ -897,13 +659,14 @@ func singleFlowPayload(flow teammodel.Flow) GraphFlow {
 
 func (s Service) publishedTeamOptions(ctx context.Context) []TeamOption {
 	teams := s.repo.ListEnabledTeams(ctx)
+	releases := s.repo.CurrentTeamReleases(ctx, teams)
 	result := make([]TeamOption, 0, len(teams))
 	for _, team := range teams {
-		release := s.currentTeamRelease(ctx, team)
-		if release == nil {
+		release, exists := releases[team.ID]
+		if !exists {
 			continue
 		}
-		snapshot, err := releaseSnapshotFromText(release.Snapshot)
+		graph, err := runtimeGraphFromRelease(release)
 		if err != nil {
 			continue
 		}
@@ -912,8 +675,8 @@ func (s Service) publishedTeamOptions(ctx context.Context) []TeamOption {
 			CateID:    team.CateID,
 			ReleaseID: release.ID,
 			Name:      team.Name,
-			Flows:     snapshot.Flows,
-			Roles:     snapshot.Roles,
+			Flows:     flowPayloads(graph.Flows),
+			Roles:     rolePayloads(graph.Roles),
 		})
 	}
 	return result

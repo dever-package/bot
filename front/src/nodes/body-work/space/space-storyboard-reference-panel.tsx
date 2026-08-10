@@ -1,7 +1,8 @@
 import { Link2 } from "lucide-react";
 import {
-  STORYBOARD_REFERENCE_PURPOSE_LABELS,
+  storyboardReferencePurposeLabel,
   storyboardReferencePurposeOptions,
+  storyboardReferencePurposeSpec,
 } from "./space-storyboard-reference";
 import {
   CanvasReferenceTextWithAdapter,
@@ -12,21 +13,24 @@ import type {
   CanvasStoryboardReference,
   CanvasStoryboardReferencePurpose,
   ComposerAssetItem,
+  StoryboardReferencePurposeSpec,
+  StoryboardWorkType,
 } from "./types";
-import type {
-  StoryboardDocument,
-  StoryboardMaterialType,
-} from "./space-storyboard";
+import type { StoryboardDocument } from "./space-storyboard";
 
 export function StoryboardReferencePanel({
   storyboard,
   referenceItems,
+  workType,
+  purposeSpecs,
   editable,
   disabled,
   onChange,
 }: {
   storyboard: StoryboardDocument;
   referenceItems: ComposerAssetItem[];
+  workType: StoryboardWorkType;
+  purposeSpecs: StoryboardReferencePurposeSpec[];
   editable: boolean;
   disabled: boolean;
   onChange: (storyboard: StoryboardDocument) => void;
@@ -53,7 +57,7 @@ export function StoryboardReferencePanel({
     if (resetTarget) {
       const updated = next.references.find((reference) => reference.key === key);
       const options = updated
-        ? storyboardReferenceTargetOptions(next, updated)
+        ? storyboardReferenceTargetOptions(next, updated, purposeSpecs)
         : [];
       if (options.length === 1) {
         next = assignStoryboardReferenceTarget(next, key, options[0].value);
@@ -74,10 +78,24 @@ export function StoryboardReferencePanel({
           const targetOptions = storyboardReferenceTargetOptions(
             storyboard,
             reference,
+            purposeSpecs,
           );
           const target = storyboardReferenceTarget(storyboard, reference.key);
+          const purposeOptions = storyboardReferencePurposeOptions(
+            reference.kind,
+            workType,
+            purposeSpecs,
+          );
+          const purposeIsValid = purposeOptions.some(
+            (option) => option.value === reference.purpose,
+          );
           return (
-            <div className="ws-storyboard-reference-row" key={reference.key}>
+            <div
+              className={`ws-storyboard-reference-row ${
+                purposeIsValid ? "" : "is-invalid"
+              }`}
+              key={reference.key}
+            >
               <CanvasReferenceTextWithAdapter
                 className="ws-storyboard-reference-asset"
                 value={`@${reference.label}`}
@@ -102,15 +120,24 @@ export function StoryboardReferencePanel({
                       )
                     }
                   >
-                    {storyboardReferencePurposeOptions(reference.kind).map(
-                      (option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ),
-                    )}
+                    {!purposeIsValid ? (
+                      <option value={reference.purpose}>
+                        {storyboardReferencePurposeLabel(
+                          reference.purpose,
+                          purposeSpecs,
+                        )}（当前类型不支持）
+                      </option>
+                    ) : null}
+                    {purposeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                   </select>
-                  {isDirectReferencePurpose(reference.purpose) ? (
+                  {isDirectReferencePurpose(
+                    reference.purpose,
+                    purposeSpecs,
+                  ) ? (
                     <select
                       className="nodrag nopan"
                       value={target}
@@ -134,37 +161,34 @@ export function StoryboardReferencePanel({
                       ))}
                     </select>
                   ) : (
-                    <span className="ws-storyboard-reference-global">全局应用</span>
+                    <span className="ws-storyboard-reference-global">
+                      {storyboardReferenceScopeLabel(
+                        reference.purpose,
+                        purposeSpecs,
+                      )}
+                    </span>
                   )}
-                  <input
-                    className="nodrag nopan"
-                    value={reference.instruction}
-                    disabled={disabled}
-                    aria-label={`${reference.label}的补充说明`}
-                    placeholder="补充说明（可选）"
-                    onChange={(event) =>
-                      updateReference(reference.key, {
-                        instruction: event.target.value,
-                      })
-                    }
-                  />
                 </>
               ) : (
                 <>
                   <span className="ws-storyboard-reference-purpose">
-                    {STORYBOARD_REFERENCE_PURPOSE_LABELS[reference.purpose]}
+                    {storyboardReferencePurposeLabel(
+                      reference.purpose,
+                      purposeSpecs,
+                    )}
                   </span>
                   <span className="ws-storyboard-reference-target">
                     {storyboardReferenceTargetLabel(storyboard, target) ||
-                      (isDirectReferencePurpose(reference.purpose)
+                      (isDirectReferencePurpose(
+                        reference.purpose,
+                        purposeSpecs,
+                      )
                         ? "未关联"
-                        : "全局应用")}
+                        : storyboardReferenceScopeLabel(
+                            reference.purpose,
+                            purposeSpecs,
+                          ))}
                   </span>
-                  {reference.instruction ? (
-                    <span className="ws-storyboard-reference-instruction">
-                      {reference.instruction}
-                    </span>
-                  ) : null}
                 </>
               )}
             </div>
@@ -186,6 +210,7 @@ function storyboardReferenceContent(
         ref_type: "asset",
         ref_id: reference.asset_id,
         label: reference.label,
+        purpose: reference.purpose,
         ref_trigger: "@",
         ref_version_id: reference.version_id,
       },
@@ -196,16 +221,21 @@ function storyboardReferenceContent(
 function storyboardReferenceTargetOptions(
   storyboard: StoryboardDocument,
   reference: CanvasStoryboardReference,
+  purposeSpecs: StoryboardReferencePurposeSpec[],
 ) {
-  if (isMaterialReferencePurpose(reference.purpose)) {
+  const purposeSpec = storyboardReferencePurposeSpec(
+    reference.purpose,
+    purposeSpecs,
+  );
+  if (purposeSpec?.scope === "material") {
     return storyboard.materials
-      .filter((material) => material.type === reference.purpose)
+      .filter((material) => material.type === purposeSpec.material_type)
       .map((material) => ({
         value: `material:${material.id}`,
         label: material.name,
       }));
   }
-  if (reference.purpose === "shot") {
+  if (purposeSpec?.scope === "shot") {
     return storyboard.shots.map((shot, index) => ({
       value: `shot:${shot.id}`,
       label: `镜头 ${shot.order || index + 1}`,
@@ -304,14 +334,28 @@ function clearStoryboardReferenceTarget(
   };
 }
 
-function isMaterialReferencePurpose(
-  purpose: CanvasStoryboardReferencePurpose,
-): purpose is StoryboardMaterialType {
-  return purpose === "character" || purpose === "scene" || purpose === "prop";
-}
-
 function isDirectReferencePurpose(
   purpose: CanvasStoryboardReferencePurpose,
+  purposeSpecs: StoryboardReferencePurposeSpec[],
 ) {
-  return isMaterialReferencePurpose(purpose) || purpose === "shot";
+  const scope = storyboardReferencePurposeSpec(purpose, purposeSpecs)?.scope;
+  return scope === "material" || scope === "shot";
+}
+
+function storyboardReferenceScopeLabel(
+  purpose: CanvasStoryboardReferencePurpose,
+  purposeSpecs: StoryboardReferencePurposeSpec[],
+) {
+  const purposeSpec = storyboardReferencePurposeSpec(purpose, purposeSpecs);
+  if (!purposeSpec) {
+    return "用途无效";
+  }
+  switch (purposeSpec.scope) {
+    case "composition":
+      return "合成应用";
+    case "context":
+      return "上下文参考";
+    default:
+      return "全局应用";
+  }
 }

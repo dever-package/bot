@@ -7,6 +7,7 @@ import {
   Paperclip,
 } from "lucide-react";
 import { BodyContentView } from "../shared/content-view";
+import { contentOutputSupplementalText } from "../shared/content-output";
 import { MediaInspector } from "../../shared/media-inspector-gallery";
 import { AssetAudioPreview } from "./asset-audio-preview";
 import { AssetFilePreview } from "./asset-file-preview";
@@ -17,7 +18,7 @@ import { assetKindLabel } from "./asset-contract";
 import {
   assetPreviewOutput,
   assetPreviewText,
-  findAssetMediaURLs,
+  findAssetMediaItems,
 } from "./asset-content";
 
 export function AssetPreview({
@@ -33,20 +34,37 @@ export function AssetPreview({
   prompt?: string;
   compact?: boolean;
 }) {
-  const mediaURLs = findAssetMediaURLs(content, kind);
+  const mediaItems = findAssetMediaItems(content, kind);
+  const mediaURLs = mediaItems.map((item) => item.url);
   const mediaURL = mediaURLs[0] || "";
   if (!compact) {
+    const supplementalText =
+      kind === "audio" ? contentOutputSupplementalText(content) : null;
     if ((kind === "image" || kind === "video") && mediaURLs.length > 0) {
       return (
         <MediaInspector
           kind={kind}
-          urls={mediaURLs}
+          mediaItems={mediaItems}
           downloadable
           className="wb-asset-media-gallery"
         />
       );
     }
     if (kind === "audio") {
+      if (
+        mediaItems.length > 0 &&
+        (mediaItems.length > 1 || mediaItems[0]?.thumbnail)
+      ) {
+        return (
+          <MediaInspector
+            kind="audio"
+            mediaItems={mediaItems}
+            downloadable
+            className="wb-asset-media-gallery"
+            supplementalText={supplementalText}
+          />
+        );
+      }
       return <AssetAudioPreview src={mediaURL} prompt={prompt} detailed />;
     }
     if (kind === "file") {
@@ -70,9 +88,18 @@ export function AssetPreview({
     return <AssetLazyCover kind="image" src={mediaURL} />;
   }
   if (kind === "video" && mediaURL) {
-    return <AssetLazyCover kind="video" src={mediaURL} />;
+    return (
+      <AssetLazyCover
+        kind="video"
+        src={mediaURL}
+        poster={mediaItems[0]?.thumbnail}
+      />
+    );
   }
   if (kind === "audio") {
+    if (mediaItems[0]?.thumbnail) {
+      return <AssetLazyCover kind="image" src={mediaItems[0].thumbnail} />;
+    }
     return <AssetAudioPreview src={mediaURL} />;
   }
   if (kind === "file") {
@@ -80,11 +107,7 @@ export function AssetPreview({
   }
   if (kind === "text" || kind === "richtext") {
     return (
-      <AssetTextCardPreview
-        kind={kind}
-        content={content}
-        summary={summary}
-      />
+      <AssetTextCardPreview kind={kind} content={content} summary={summary} />
     );
   }
   return (

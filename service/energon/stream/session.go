@@ -32,7 +32,7 @@ func Start(
 		"text": "等待生成结果",
 		"meta": map[string]any{
 			"stream_key":    Key(requestID),
-			"cancelable":    false,
+			"cancelable":    true,
 			"started_at":    now.Format(time.RFC3339Nano),
 			"started_at_ms": now.UnixMilli(),
 		},
@@ -48,6 +48,7 @@ func Start(
 		cancels.Remove(requestID)
 		return botprotocol.BuildErrorResponse(requestID, err)
 	}
+	cancels.SetCancelable(requestID, true)
 	return start
 }
 
@@ -76,9 +77,9 @@ func Stop(
 	if !cancels.MarkCancelled(requestID) {
 		return botprotocol.BuildErrorResponse(requestID, fmt.Errorf("当前任务不支持取消或已结束"))
 	}
-	remoteErr := cancels.CancelRemote(ctx, requestID)
 	cancelledLocal := tasks.Cancel(ctx, requestID)
-	if remoteErr != nil {
+	remoteErr := cancels.CancelRemote(ctx, requestID)
+	if remoteErr != nil && !cancelledLocal {
 		return botprotocol.BuildErrorResponse(requestID, remoteErr)
 	}
 	if !cancelledLocal {

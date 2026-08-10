@@ -90,7 +90,7 @@ var allowedCanvasFunctionFields = stringSet("key", "label", "description")
 var allowedCanvasComposerFields = stringSet(
 	"prompt", "prompt_content", "param_values", "selected_target_id",
 	"video_composition", "storyboard_references", "storyboard_grid_layout",
-	"multi_image_mode",
+	"storyboard_work_type", "multi_image_mode",
 )
 
 var allowedCanvasResultRefFields = stringSet(

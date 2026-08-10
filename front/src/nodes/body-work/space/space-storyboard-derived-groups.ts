@@ -739,7 +739,6 @@ function storyboardExternalReferenceSignature(
     reference.version_id || 0,
     reference.kind,
     reference.purpose,
-    reference.instruction,
   ].join(":");
 }
 

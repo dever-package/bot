@@ -4,14 +4,13 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { FirstFrameVideo } from "./first-frame-video";
+import { FirstFrameVideo } from "@/components/media/first-frame-video";
 
-const QINIU_FIRST_FRAME_OPERATION = "vframe/jpg/offset/0/w/640";
 const FIRST_FRAME_OFFSET_SECONDS = 0.01;
 const MAX_CAPTURE_CONCURRENCY = 2;
-const MAX_CAPTURE_CACHE_SIZE = 80;
+const MAX_CAPTURE_CACHE_SIZE = 48;
 const MAX_FAILURE_CACHE_SIZE = 160;
-const CAPTURE_TIMEOUT_MS = 15_000;
+const CAPTURE_TIMEOUT_MS = 10_000;
 
 type CapturedVideoThumbnail = {
   blob: Blob;
@@ -21,11 +20,25 @@ type CapturedVideoThumbnail = {
 
 type CaptureQueueTask = {
   src: string;
+  consumers: number;
+  state: "queued" | "active" | "settled";
+  promise: Promise<CapturedVideoThumbnail>;
   resolve: (result: CapturedVideoThumbnail) => void;
   reject: (error: Error) => void;
+  cancelCapture?: () => void;
 };
 
-type VideoThumbnailProps = {
+type CapturedVideoThumbnailLease = {
+  promise: Promise<CapturedVideoThumbnail>;
+  release: () => void;
+};
+
+type VideoThumbnailCapture = {
+  promise: Promise<CapturedVideoThumbnail>;
+  cancel: () => void;
+};
+
+export type VideoThumbnailProps = {
   src: string;
   poster?: string;
   alt?: string;
@@ -41,7 +54,7 @@ type VideoThumbnailProps = {
 };
 
 const captureCache = new Map<string, CapturedVideoThumbnail>();
-const captureRequests = new Map<string, Promise<CapturedVideoThumbnail>>();
+const captureRequests = new Map<string, CaptureQueueTask>();
 const failedRemoteThumbnailURLs = new Set<string>();
 const failedCaptureURLs = new Set<string>();
 const captureQueue: CaptureQueueTask[] = [];
@@ -64,13 +77,16 @@ export function VideoThumbnail({
   const visibilityRef = useRef<HTMLImageElement>(null);
   const [active, setActive] = useState(false);
   const [failedRemoteURL, setFailedRemoteURL] = useState("");
+  const [loadedRemoteURL, setLoadedRemoteURL] = useState("");
   const [captured, setCaptured] = useState<{
     src: string;
     result: CapturedVideoThumbnail;
   }>();
   const [failedCaptureSrc, setFailedCaptureSrc] = useState("");
   const [capturedURL, setCapturedURL] = useState("");
-  const remoteURL = poster.trim() || qiniuVideoFirstFrameURL(src);
+  const [loadedCapturedURL, setLoadedCapturedURL] = useState("");
+  const [loadedFallbackSrc, setLoadedFallbackSrc] = useState("");
+  const remoteURL = poster.trim() || explicitVideoPreviewURL(src);
   const remoteFailed =
     !remoteURL ||
     failedRemoteURL === remoteURL ||
@@ -97,6 +113,10 @@ export function VideoThumbnail({
   }, [captureFailed, captureResult]);
 
   useEffect(() => {
+    if (captureFailed) {
+      setActive(true);
+      return;
+    }
     const element = visibilityRef.current;
     if (!element || typeof IntersectionObserver === "undefined") {
       setActive(true);
@@ -104,22 +124,24 @@ export function VideoThumbnail({
     }
     const observer = new IntersectionObserver(
       (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        setActive(true);
-        observer.disconnect();
+        const entry = entries.find((item) => item.target === element);
+        if (entry) {
+          setActive(entry.isIntersecting);
+        }
       },
-      { rootMargin: "240px 0px" },
+      { rootMargin: "80px 0px" },
     );
     observer.observe(element);
     return () => observer.disconnect();
-  }, [src]);
+  }, [captureFailed, src]);
 
   useEffect(() => {
     if (!active || !remoteFailed || captureResult || captureFailed || !src) {
       return;
     }
     let cancelled = false;
-    void requestCapturedVideoThumbnail(src).then(
+    const lease = acquireCapturedVideoThumbnail(src);
+    void lease.promise.then(
       (result) => {
         if (!cancelled) {
           setCaptured({ src, result });
@@ -133,6 +155,7 @@ export function VideoThumbnail({
     );
     return () => {
       cancelled = true;
+      lease.release();
     };
   }, [active, captureFailed, captureResult, remoteFailed, src]);
 
@@ -148,16 +171,18 @@ export function VideoThumbnail({
   };
 
   if (!active) {
-    return <img {...commonImageProps} />;
+    return <img {...commonImageProps} style={previewStyle(style, false)} />;
   }
   if (!remoteFailed) {
     return (
       <img
         {...commonImageProps}
         src={remoteURL}
+        style={previewStyle(style, loadedRemoteURL === remoteURL)}
         loading="lazy"
         decoding="async"
         onLoad={(event) => {
+          setLoadedRemoteURL(remoteURL);
           onMediaSize?.(
             event.currentTarget.naturalWidth,
             event.currentTarget.naturalHeight,
@@ -176,8 +201,10 @@ export function VideoThumbnail({
       <img
         {...commonImageProps}
         src={capturedURL}
+        style={previewStyle(style, loadedCapturedURL === capturedURL)}
         decoding="async"
         onLoad={() => {
+          setLoadedCapturedURL(capturedURL);
           onMediaSize?.(captureResult.width, captureResult.height);
           onLoad?.();
         }}
@@ -186,13 +213,13 @@ export function VideoThumbnail({
     );
   }
   if (!captureFailed) {
-    return <img {...commonImageProps} />;
+    return <img {...commonImageProps} style={previewStyle(style, false)} />;
   }
   return (
     <FirstFrameVideo
       src={src}
       className={className}
-      style={style}
+      style={previewStyle(style, loadedFallbackSrc === src)}
       title={title}
       muted
       playsInline
@@ -206,13 +233,16 @@ export function VideoThumbnail({
           event.currentTarget.videoHeight,
         )
       }
-      onFirstFrameReady={onLoad}
+      onFirstFrameReady={() => {
+        setLoadedFallbackSrc(src);
+        onLoad?.();
+      }}
       onError={onError}
     />
   );
 }
 
-export function qiniuVideoFirstFrameURL(src: string) {
+function explicitVideoPreviewURL(src: string) {
   const value = String(src || "").trim();
   if (!value) return "";
 
@@ -221,37 +251,81 @@ export function qiniuVideoFirstFrameURL(src: string) {
     if (url.protocol !== "http:" && url.protocol !== "https:") {
       return "";
     }
-    if (url.search.includes("vframe/")) {
-      return value;
-    }
-    const hash = url.hash;
-    url.hash = "";
-    return `${url.toString()}${url.search ? "&" : "?"}${QINIU_FIRST_FRAME_OPERATION}${hash}`;
+    return url.search.includes("vframe/") ? value : "";
   } catch {
     return "";
   }
 }
 
-function requestCapturedVideoThumbnail(src: string) {
+function previewStyle(style: CSSProperties | undefined, ready: boolean) {
+  return ready ? style : { ...style, visibility: "hidden" as const };
+}
+
+function acquireCapturedVideoThumbnail(
+  src: string,
+): CapturedVideoThumbnailLease {
   const cached = captureCache.get(src);
   if (cached) {
     touchCapturedThumbnail(src, cached);
-    return Promise.resolve(cached);
+    return { promise: Promise.resolve(cached), release: () => undefined };
   }
   if (failedCaptureURLs.has(src)) {
-    return Promise.reject(new Error("视频首帧无法缓存"));
+    return {
+      promise: Promise.reject(new Error("视频首帧无法缓存")),
+      release: () => undefined,
+    };
   }
-  const pending = captureRequests.get(src);
-  if (pending) return pending;
+  let task = captureRequests.get(src);
+  if (!task) {
+    let resolveRequest!: (result: CapturedVideoThumbnail) => void;
+    let rejectRequest!: (error: Error) => void;
+    const promise = new Promise<CapturedVideoThumbnail>((resolve, reject) => {
+      resolveRequest = resolve;
+      rejectRequest = reject;
+    });
+    task = {
+      src,
+      consumers: 0,
+      state: "queued",
+      promise,
+      resolve: resolveRequest,
+      reject: rejectRequest,
+    };
+    captureRequests.set(src, task);
+    captureQueue.push(task);
+  }
+  task.consumers += 1;
+  drainCaptureQueue();
+  let released = false;
+  return {
+    promise: task.promise,
+    release: () => {
+      if (released) return;
+      released = true;
+      releaseCapturedVideoThumbnail(task);
+    },
+  };
+}
 
-  const request = new Promise<CapturedVideoThumbnail>((resolve, reject) => {
-    captureQueue.push({ src, resolve, reject });
-    drainCaptureQueue();
-  }).finally(() => {
-    captureRequests.delete(src);
-  });
-  captureRequests.set(src, request);
-  return request;
+function releaseCapturedVideoThumbnail(task: CaptureQueueTask) {
+  task.consumers = Math.max(0, task.consumers - 1);
+  if (task.consumers > 0 || task.state === "settled") {
+    return;
+  }
+  if (task.state === "active") {
+    const cancelCapture = task.cancelCapture;
+    settleCaptureTask(task);
+    task.reject(captureAbortError());
+    cancelCapture?.();
+    return;
+  }
+  const queuedIndex = captureQueue.indexOf(task);
+  if (queuedIndex >= 0) {
+    captureQueue.splice(queuedIndex, 1);
+  }
+  settleCaptureTask(task);
+  task.reject(captureAbortError());
+  drainCaptureQueue();
 }
 
 function drainCaptureQueue() {
@@ -261,23 +335,49 @@ function drainCaptureQueue() {
   ) {
     const task = captureQueue.shift();
     if (!task) return;
+    if (task.state !== "queued" || task.consumers === 0) {
+      continue;
+    }
+    task.state = "active";
     activeCaptureCount += 1;
-    void captureVideoThumbnail(task.src)
+    const capture = captureVideoThumbnail(task.src);
+    task.cancelCapture = capture.cancel;
+    void capture.promise
       .then((result) => {
+        if (task.state === "settled") return;
         touchCapturedThumbnail(task.src, result);
+        settleCaptureTask(task);
         task.resolve(result);
       })
       .catch((error: unknown) => {
-        rememberFailedURL(failedCaptureURLs, task.src);
-        task.reject(
-          error instanceof Error ? error : new Error("视频首帧提取失败"),
-        );
+        if (task.state === "settled") return;
+        const normalizedError =
+          error instanceof Error ? error : new Error("视频首帧提取失败");
+        if (normalizedError.name !== "AbortError") {
+          rememberFailedURL(failedCaptureURLs, task.src);
+        }
+        settleCaptureTask(task);
+        task.reject(normalizedError);
       })
       .finally(() => {
         activeCaptureCount -= 1;
         drainCaptureQueue();
       });
   }
+}
+
+function settleCaptureTask(task: CaptureQueueTask) {
+  task.state = "settled";
+  task.cancelCapture = undefined;
+  if (captureRequests.get(task.src) === task) {
+    captureRequests.delete(task.src);
+  }
+}
+
+function captureAbortError() {
+  const error = new Error("视频首帧提取已取消");
+  error.name = "AbortError";
+  return error;
 }
 
 function touchCapturedThumbnail(src: string, result: CapturedVideoThumbnail) {
@@ -300,8 +400,9 @@ function rememberFailedURL(cache: Set<string>, url: string) {
   }
 }
 
-function captureVideoThumbnail(src: string) {
-  return new Promise<CapturedVideoThumbnail>((resolve, reject) => {
+function captureVideoThumbnail(src: string): VideoThumbnailCapture {
+  let cancel: () => void = () => undefined;
+  const promise = new Promise<CapturedVideoThumbnail>((resolve, reject) => {
     if (typeof document === "undefined") {
       reject(new Error("当前环境无法提取视频首帧"));
       return;
@@ -310,13 +411,16 @@ function captureVideoThumbnail(src: string) {
     const video = document.createElement("video");
     let settled = false;
     let captureStarted = false;
-    const timeout = window.setTimeout(
-      () => fail(new Error("视频首帧提取超时")),
-      CAPTURE_TIMEOUT_MS,
-    );
+    let seekRequested = false;
+    let seekTarget = FIRST_FRAME_OFFSET_SECONDS;
+    let timeout = 0;
 
     const cleanup = () => {
       window.clearTimeout(timeout);
+      video.removeEventListener("error", handleError);
+      video.removeEventListener("loadeddata", handleLoadedData);
+      video.removeEventListener("seeked", handleSeeked);
+      video.removeEventListener("loadedmetadata", handleLoadedMetadata);
       video.pause();
       video.removeAttribute("src");
       video.load();
@@ -371,27 +475,47 @@ function captureVideoThumbnail(src: string) {
         fail(error instanceof Error ? error : new Error("视频首帧提取失败"));
       }
     };
-
-    video.crossOrigin = "anonymous";
-    video.muted = true;
-    video.playsInline = true;
-    video.preload = "auto";
-    video.addEventListener("error", () => fail(new Error("视频首帧加载失败")));
-    video.addEventListener("loadeddata", capture);
-    video.addEventListener("seeked", capture);
-    video.addEventListener("loadedmetadata", () => {
+    const handleError = () => fail(new Error("视频首帧加载失败"));
+    const handleLoadedData = () => {
+      if (
+        !seekRequested ||
+        Math.abs(video.currentTime - seekTarget) < 0.001
+      ) {
+        capture();
+      }
+    };
+    const handleSeeked = () => capture();
+    const handleLoadedMetadata = () => {
       const duration = video.duration;
-      const target =
+      seekTarget =
         Number.isFinite(duration) && duration > 0
           ? Math.min(FIRST_FRAME_OFFSET_SECONDS, duration / 2)
           : FIRST_FRAME_OFFSET_SECONDS;
       try {
-        video.currentTime = target;
+        seekRequested = true;
+        video.currentTime = seekTarget;
       } catch {
+        seekRequested = false;
         capture();
       }
-    });
+    };
+
+    cancel = () => fail(captureAbortError());
+    timeout = window.setTimeout(
+      () => fail(new Error("视频首帧提取超时")),
+      CAPTURE_TIMEOUT_MS,
+    );
+
+    video.crossOrigin = "anonymous";
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    video.addEventListener("error", handleError);
+    video.addEventListener("loadeddata", handleLoadedData);
+    video.addEventListener("seeked", handleSeeked);
+    video.addEventListener("loadedmetadata", handleLoadedMetadata);
     video.src = src;
     video.load();
   });
+  return { promise, cancel: () => cancel() };
 }

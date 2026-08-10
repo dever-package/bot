@@ -31,6 +31,8 @@ import { PowerIcon, PowerParamIcon } from "../shared/power-icon";
 import {
   CanvasReferenceEditor,
   type CanvasReferencePickerRequest,
+  type CanvasReferenceUsageField,
+  type CanvasReferenceUsageOption,
 } from "./space-reference-editor";
 import {
   connectedMediaReferenceTargets,
@@ -53,6 +55,7 @@ import {
   isUploadPowerParam,
 } from "./space-media-param";
 import { reconcileConnectedCanvasReferences } from "./space-reference-content";
+import { canvasReferenceBindingSignature } from "./space-model";
 import { SpaceTooltip } from "./space-tooltip";
 import type {
   CanvasMultiImageMode,
@@ -91,8 +94,14 @@ type PromptComposerProps = {
   };
   connectedMediaReferences?: CanvasConnectedMediaReference[];
   mediaUsageOptions?: MediaUsageOption[];
+  referenceUsageOptions?: CanvasReferenceUsageOption[];
+  referenceUsageField?: CanvasReferenceUsageField;
   multiImagePlan?: CanvasMultiImagePlan;
   multiImageMode?: CanvasMultiImageMode;
+  toolbarContent?: (menu: {
+    openKey: string;
+    onToggle: (key: string) => void;
+  }) => ReactNode;
   onConnectedMediaEdgeRemove?: (edgeId: string) => void;
   onChange: (value: string, content?: CanvasReferenceContent) => void;
   onParamChange?: (key: string, value: unknown) => void;
@@ -102,9 +111,13 @@ type PromptComposerProps = {
     files: File[],
     param: PowerParam,
   ) => Promise<UploadPreview[]>;
-  onSubmit: () => void;
+  onSubmit: (
+    value: string,
+    content?: CanvasReferenceContent,
+  ) => void | Promise<void>;
 };
 
+const PROMPT_CHANGE_COMMIT_DELAY = 240;
 const EMPTY_CONNECTED_MEDIA_REFERENCES: CanvasConnectedMediaReference[] = [];
 const EMPTY_MEDIA_USAGE_OPTIONS: MediaUsageOption[] = [];
 
@@ -139,8 +152,11 @@ export function PromptComposer({
   assetReference,
   connectedMediaReferences = EMPTY_CONNECTED_MEDIA_REFERENCES,
   mediaUsageOptions = EMPTY_MEDIA_USAGE_OPTIONS,
+  referenceUsageOptions,
+  referenceUsageField = "usage",
   multiImagePlan,
   multiImageMode,
+  toolbarContent,
   onConnectedMediaEdgeRemove,
   onChange,
   onParamChange,
@@ -258,10 +274,7 @@ export function PromptComposer({
     const connectedReferences = reconcileConnectedCanvasReferences(
       value,
       referenceContent,
-      connectedMediaReferenceTargets(
-        connectedMediaReferences,
-        referenceItems,
-      ),
+      connectedMediaReferenceTargets(connectedMediaReferences, referenceItems),
     );
     return {
       ...connectedReferences,
@@ -282,7 +295,7 @@ export function PromptComposer({
     referenceItems,
     value,
   ]);
-  const referenceUsageOptions = useMemo(
+  const resolvedMediaUsageOptions = useMemo(
     () =>
       mediaUsageOptions.map((option) => ({
         key: option.key,
@@ -291,6 +304,10 @@ export function PromptComposer({
         maxFiles: option.maxFiles,
       })),
     [mediaUsageOptions],
+  );
+  const resolvedReferenceUsageOptions = useMemo(
+    () => referenceUsageOptions || resolvedMediaUsageOptions,
+    [referenceUsageOptions, resolvedMediaUsageOptions],
   );
   const mediaParamCounts = useMemo(
     () => referenceUsageCounts(resolvedReferences.content),
@@ -308,6 +325,86 @@ export function PromptComposer({
       ),
     [resolvedReferences.content, resolvedReferences.value],
   );
+  const latestEditorDraftRef = useRef({
+    value: resolvedReferences.value,
+    content: resolvedReferences.content as CanvasReferenceContent | undefined,
+  });
+  const pendingEditorChangeRef = useRef(false);
+  const editorChangeTimerRef = useRef<number | null>(null);
+  const onChangeRef = useRef(onChange);
+  const onSubmitRef = useRef(onSubmit);
+  onChangeRef.current = onChange;
+  onSubmitRef.current = onSubmit;
+
+  const clearEditorChangeTimer = useCallback(() => {
+    if (editorChangeTimerRef.current === null) {
+      return;
+    }
+    window.clearTimeout(editorChangeTimerRef.current);
+    editorChangeTimerRef.current = null;
+  }, []);
+  const commitLatestEditorDraft = useCallback(() => {
+    clearEditorChangeTimer();
+    if (!pendingEditorChangeRef.current) {
+      return;
+    }
+    pendingEditorChangeRef.current = false;
+    const draft = latestEditorDraftRef.current;
+    onChangeRef.current(draft.value, draft.content);
+  }, [clearEditorChangeTimer]);
+  const updateEditorDraft = useCallback(
+    (
+      nextValue: string,
+      nextContent?: CanvasReferenceContent,
+      immediate = false,
+    ) => {
+      const previousContent = latestEditorDraftRef.current.content;
+      latestEditorDraftRef.current = {
+        value: nextValue,
+        content: nextContent,
+      };
+      pendingEditorChangeRef.current = true;
+      const referencesChanged =
+        canvasReferenceBindingSignature(previousContent) !==
+        canvasReferenceBindingSignature(nextContent);
+      if (immediate || referencesChanged) {
+        commitLatestEditorDraft();
+        return;
+      }
+      clearEditorChangeTimer();
+      editorChangeTimerRef.current = window.setTimeout(
+        commitLatestEditorDraft,
+        PROMPT_CHANGE_COMMIT_DELAY,
+      );
+    },
+    [clearEditorChangeTimer, commitLatestEditorDraft],
+  );
+  const submitLatestEditorDraft = useCallback(() => {
+    const draft = latestEditorDraftRef.current;
+    commitLatestEditorDraft();
+    return onSubmitRef.current(draft.value, draft.content);
+  }, [commitLatestEditorDraft]);
+
+  useEffect(() => {
+    if (pendingEditorChangeRef.current) {
+      return;
+    }
+    latestEditorDraftRef.current = {
+      value: resolvedReferences.value,
+      content: resolvedReferences.content,
+    };
+  }, [
+    resolvedReferenceSignature,
+    resolvedReferences.content,
+    resolvedReferences.value,
+  ]);
+
+  useEffect(
+    () => () => {
+      commitLatestEditorDraft();
+    },
+    [commitLatestEditorDraft],
+  );
 
   useEffect(() => {
     if (disabled || running) {
@@ -319,13 +416,20 @@ export function PromptComposer({
     if (currentReferenceSignature === resolvedReferenceSignature) {
       return;
     }
-    onChange(resolvedReferences.value, resolvedReferences.content);
+    if (pendingEditorChangeRef.current) {
+      return;
+    }
+    updateEditorDraft(
+      resolvedReferences.value,
+      resolvedReferences.content,
+      true,
+    );
   }, [
     currentReferenceSignature,
-    onChange,
     resolvedReferenceSignature,
     resolvedReferences.content,
     resolvedReferences.value,
+    updateEditorDraft,
   ]);
 
   return (
@@ -342,22 +446,27 @@ export function PromptComposer({
             textEditable={textInputEnabled}
             placeholder={placeholder}
             items={referenceItems}
-            usageOptions={referenceUsageOptions}
+            usageOptions={resolvedReferenceUsageOptions}
+            usageField={referenceUsageField}
+            mediaUsageOptions={resolvedMediaUsageOptions}
+            autoAssignUsage={referenceUsageField !== "purpose"}
             pickerRequest={referencePickerRequest}
             onPickerRequestConsumed={consumeReferencePickerRequest}
             assetReferenceProvider={
               assetReference?.teamID ? assetReferenceProvider : undefined
             }
             onReferenceDelete={(reference) => {
-              if (
-                reference.ref_origin === "edge" &&
-                reference.ref_origin_id
-              ) {
+              if (reference.ref_origin === "edge" && reference.ref_origin_id) {
                 onConnectedMediaEdgeRemove?.(reference.ref_origin_id);
               }
             }}
-            onChange={onChange}
-            onSubmit={!running && !submitDisabled ? onSubmit : undefined}
+            onChange={updateEditorDraft}
+            onBlur={commitLatestEditorDraft}
+            onSubmit={
+              !running && !submitDisabled
+                ? () => void submitLatestEditorDraft()
+                : undefined
+            }
           />
         </div>
       </div>
@@ -395,6 +504,8 @@ export function PromptComposer({
               </div>
             </ComposerMenu>
           ) : null}
+
+          {toolbarContent?.({ openKey, onToggle: setOpenKey })}
 
           {multiImagePlan?.active && multiImagePlan.mode ? (
             enabledMultiImageOptions.length > 1 ? (
@@ -494,9 +605,7 @@ export function PromptComposer({
                 openKey={openKey}
                 disabled={disabled || running}
                 onToggle={setOpenKey}
-                onChange={(nextValue) =>
-                  onParamChange?.(param.key, nextValue)
-                }
+                onChange={(nextValue) => onParamChange?.(param.key, nextValue)}
               />
             );
           })}
@@ -508,7 +617,7 @@ export function PromptComposer({
               type="button"
               className="ws-prompt-submit"
               disabled={disabled || running || submitDisabled}
-              onClick={onSubmit}
+              onClick={() => void submitLatestEditorDraft()}
               aria-label={submitDisabledReason || "发送"}
             >
               {running ? (
@@ -664,7 +773,7 @@ function ParamMenu({
   );
 }
 
-function ComposerMenu({
+export function ComposerMenu({
   id,
   openKey,
   label,
