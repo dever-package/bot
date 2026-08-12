@@ -15,8 +15,34 @@ const (
 	firstFrameParamKey           = "firstFrame"
 	lastFrameParamKey            = "lastFrame"
 	doubaoVideoEndpointAPI       = "doubao-seedance-1-5-pro-251215"
+	doubaoVideo2EndpointAPI      = "doubao-seedance-2-0-260128"
 	doubaoVideoFastEndpointAPI   = "doubao-seedance-2-0-fast-260128"
 	runningHubVideoImageEndpoint = "kling-v3.0-pro/image-to-video"
+)
+
+var (
+	doubaoFrameManagedServiceParamKeys = []string{
+		"content[1-2].type",
+		"content[1-2].image_url.url",
+		"content[1-2].role",
+		"content[1].type",
+		"content[1].image_url.url",
+		"content[1].role",
+		"content[2].type",
+		"content[2].image_url.url",
+		"content[2].role",
+	}
+	doubaoReferenceManagedServiceParamKeys = []string{
+		"content[1-9].type",
+		"content[1-9].image_url.url",
+		"content[1-9].role",
+		"content[10].type",
+		"content[10].video_url.url",
+		"content[10].role",
+		"content[11].type",
+		"content[11].audio_url.url",
+		"content[11].role",
+	}
 )
 
 type builtinServiceParamSpec struct {
@@ -50,7 +76,7 @@ func EnsureEnergonVideoReferenceParams(ctx context.Context) (err error) {
 
 	migrateBuiltinVideoPowerParams(ctx, referenceMode.ID, firstFrame.ID, lastFrame.ID)
 	migrateDoubaoVideoReferenceParams(ctx, referenceMode.ID, firstFrame.ID, lastFrame.ID)
-	migrateDoubaoVideoFastReferenceParams(ctx, referenceMode.ID, firstFrame.ID, lastFrame.ID)
+	migrateDoubaoVideo2ReferenceParams(ctx, referenceMode.ID, firstFrame.ID, lastFrame.ID)
 	migrateRunningHubVideoReferenceParam(ctx, referenceMode.ID, firstFrame.ID)
 
 	paramSorts := normalizeBuiltinParamSorts(ctx)
@@ -228,47 +254,71 @@ func migrateBuiltinVideoPowerParams(
 
 func migrateDoubaoVideoReferenceParams(ctx context.Context, referenceModeParamID uint64, firstFrameParamID uint64, lastFrameParamID uint64) {
 	for _, endpoint := range serviceEndpointsByAPI(ctx, energonmodel.ServiceDoubaoVideoID, doubaoVideoEndpointAPI) {
-		deleteManagedServiceParamKeys(ctx, endpoint.ServiceID, []string{
-			"content[1-2].type",
-			"content[1-2].image_url.url",
-			"content[1-2].role",
-		})
-		upsertBuiltinServiceParams(ctx, endpoint.ServiceID, []builtinServiceParamSpec{
-			{ParamID: firstFrameParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[1].type", Mapping: "image_url", Sort: 20},
-			withBuiltinServiceParamCondition(builtinServiceParamSpec{ParamID: firstFrameParamID, ParamRule: energonmodel.ServiceParamRuleAttachment, Key: "content[1].image_url.url", Name: "首帧", Mapping: "[1]", Sort: energonmodel.ParamSortFirstFrame}, referenceModeParamID, energonmodel.ReferenceModeFrames),
-			{ParamID: firstFrameParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[1].role", Mapping: "first_frame", Sort: 23},
-			{ParamID: lastFrameParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[2].type", Mapping: "image_url", Sort: 24},
-			withBuiltinServiceParamCondition(builtinServiceParamSpec{ParamID: lastFrameParamID, ParamRule: energonmodel.ServiceParamRuleAttachment, Key: "content[2].image_url.url", Name: "尾帧", Mapping: "[1]", Sort: energonmodel.ParamSortLastFrame}, referenceModeParamID, energonmodel.ReferenceModeFrames),
-			{ParamID: lastFrameParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[2].role", Mapping: "last_frame", Sort: 26},
-		})
+		reconcileBuiltinServiceParams(
+			ctx,
+			endpoint.ServiceID,
+			doubaoFrameManagedServiceParamKeys,
+			doubaoFrameServiceParamSpecs(referenceModeParamID, firstFrameParamID, lastFrameParamID),
+		)
 	}
 }
 
-func migrateDoubaoVideoFastReferenceParams(ctx context.Context, referenceModeParamID uint64, firstFrameParamID uint64, lastFrameParamID uint64) {
+func migrateDoubaoVideo2ReferenceParams(ctx context.Context, referenceModeParamID uint64, firstFrameParamID uint64, lastFrameParamID uint64) {
 	imagesParam := findBuiltinParam(ctx, energonmodel.ParamImagesID, imagesParamKey)
 	videoParam := findBuiltinParam(ctx, 0, "video")
 	audioParam := findBuiltinParam(ctx, 0, "audio")
 	if imagesParam == nil || videoParam == nil || audioParam == nil {
 		return
 	}
-	for _, endpoint := range serviceEndpointsByAPI(ctx, energonmodel.ServiceDoubaoVideoFastID, doubaoVideoFastEndpointAPI) {
-		upsertBuiltinServiceParams(ctx, endpoint.ServiceID, []builtinServiceParamSpec{
-			{ParamID: firstFrameParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[1].type", Mapping: "image_url", Sort: 20},
-			withBuiltinServiceParamCondition(builtinServiceParamSpec{ParamID: firstFrameParamID, ParamRule: energonmodel.ServiceParamRuleAttachment, Key: "content[1].image_url.url", Name: "首帧", Mapping: "[1]", Sort: energonmodel.ParamSortFirstFrame}, referenceModeParamID, energonmodel.ReferenceModeFrames),
-			{ParamID: firstFrameParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[1].role", Mapping: "first_frame", Sort: 23},
-			{ParamID: lastFrameParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[2].type", Mapping: "image_url", Sort: 24},
-			withBuiltinServiceParamCondition(builtinServiceParamSpec{ParamID: lastFrameParamID, ParamRule: energonmodel.ServiceParamRuleAttachment, Key: "content[2].image_url.url", Name: "尾帧", Mapping: "[1]", Sort: energonmodel.ParamSortLastFrame}, referenceModeParamID, energonmodel.ReferenceModeFrames),
-			{ParamID: lastFrameParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[2].role", Mapping: "last_frame", Sort: 26},
-			{ParamID: imagesParam.ID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[1-9].type", Mapping: "image_url", Sort: 10},
-			withBuiltinServiceParamCondition(builtinServiceParamSpec{ParamID: imagesParam.ID, ParamRule: energonmodel.ServiceParamRuleAttachment, Key: "content[1-9].image_url.url", Name: "参考图片", Mapping: "[1,2,3,4,5,6,7,8,9]", Sort: energonmodel.ParamSortImages}, referenceModeParamID, energonmodel.ReferenceModeReferences),
-			{ParamID: imagesParam.ID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[1-9].role", Mapping: "reference_image", Sort: 12},
-			{ParamID: videoParam.ID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[10].type", Mapping: "video_url", Sort: 60},
-			withBuiltinServiceParamCondition(builtinServiceParamSpec{ParamID: videoParam.ID, ParamRule: energonmodel.ServiceParamRuleAttachment, Key: "content[10].video_url.url", Name: "参考视频", Mapping: "[1]", Sort: energonmodel.ParamSortVideo}, referenceModeParamID, energonmodel.ReferenceModeReferences),
-			{ParamID: videoParam.ID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[10].role", Mapping: "reference_video", Sort: 62},
-			{ParamID: audioParam.ID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[11].type", Mapping: "audio_url", Sort: 70},
-			withBuiltinServiceParamCondition(builtinServiceParamSpec{ParamID: audioParam.ID, ParamRule: energonmodel.ServiceParamRuleAttachment, Key: "content[11].audio_url.url", Name: "参考音频", Mapping: "[1]", Sort: energonmodel.ParamSortAudio}, referenceModeParamID, energonmodel.ReferenceModeReferences),
-			{ParamID: audioParam.ID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[11].role", Mapping: "reference_audio", Sort: 72},
-		})
+	for _, serviceID := range serviceIDsByEndpointAPIs(
+		ctx,
+		energonmodel.ServiceDoubaoVideoFastID,
+		doubaoVideo2EndpointAPI,
+		doubaoVideoFastEndpointAPI,
+	) {
+		managedKeys := append(
+			append([]string{}, doubaoFrameManagedServiceParamKeys...),
+			doubaoReferenceManagedServiceParamKeys...,
+		)
+		specs := append(
+			doubaoFrameServiceParamSpecs(referenceModeParamID, firstFrameParamID, lastFrameParamID),
+			doubaoReferenceServiceParamSpecs(referenceModeParamID, imagesParam.ID, videoParam.ID, audioParam.ID)...,
+		)
+		reconcileBuiltinServiceParams(ctx, serviceID, managedKeys, specs)
+	}
+}
+
+func doubaoFrameServiceParamSpecs(
+	referenceModeParamID uint64,
+	firstFrameParamID uint64,
+	lastFrameParamID uint64,
+) []builtinServiceParamSpec {
+	return []builtinServiceParamSpec{
+		{ParamID: firstFrameParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[1].type", Mapping: "image_url", Sort: 20},
+		withBuiltinServiceParamCondition(builtinServiceParamSpec{ParamID: firstFrameParamID, ParamRule: energonmodel.ServiceParamRuleAttachment, Key: "content[1].image_url.url", Name: "首帧", Mapping: "[1]", Sort: energonmodel.ParamSortFirstFrame}, referenceModeParamID, energonmodel.ReferenceModeFrames),
+		{ParamID: firstFrameParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[1].role", Mapping: "first_frame", Sort: 23},
+		{ParamID: lastFrameParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[2].type", Mapping: "image_url", Sort: 24},
+		withBuiltinServiceParamCondition(builtinServiceParamSpec{ParamID: lastFrameParamID, ParamRule: energonmodel.ServiceParamRuleAttachment, Key: "content[2].image_url.url", Name: "尾帧", Mapping: "[1]", Sort: energonmodel.ParamSortLastFrame}, referenceModeParamID, energonmodel.ReferenceModeFrames),
+		{ParamID: lastFrameParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[2].role", Mapping: "last_frame", Sort: 26},
+	}
+}
+
+func doubaoReferenceServiceParamSpecs(
+	referenceModeParamID uint64,
+	imagesParamID uint64,
+	videoParamID uint64,
+	audioParamID uint64,
+) []builtinServiceParamSpec {
+	return []builtinServiceParamSpec{
+		{ParamID: imagesParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[1-9].type", Mapping: "image_url", Sort: 10},
+		withBuiltinServiceParamCondition(builtinServiceParamSpec{ParamID: imagesParamID, ParamRule: energonmodel.ServiceParamRuleAttachment, Key: "content[1-9].image_url.url", Name: "参考图片", Mapping: "[1,2,3,4,5,6,7,8,9]", Sort: energonmodel.ParamSortImages}, referenceModeParamID, energonmodel.ReferenceModeReferences),
+		{ParamID: imagesParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[1-9].role", Mapping: "reference_image", Sort: 12},
+		{ParamID: videoParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[10].type", Mapping: "video_url", Sort: 60},
+		withBuiltinServiceParamCondition(builtinServiceParamSpec{ParamID: videoParamID, ParamRule: energonmodel.ServiceParamRuleAttachment, Key: "content[10].video_url.url", Name: "参考视频", Mapping: "[1]", Sort: energonmodel.ParamSortVideo}, referenceModeParamID, energonmodel.ReferenceModeReferences),
+		{ParamID: videoParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[10].role", Mapping: "reference_video", Sort: 62},
+		{ParamID: audioParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[11].type", Mapping: "audio_url", Sort: 70},
+		withBuiltinServiceParamCondition(builtinServiceParamSpec{ParamID: audioParamID, ParamRule: energonmodel.ServiceParamRuleAttachment, Key: "content[11].audio_url.url", Name: "参考音频", Mapping: "[1]", Sort: energonmodel.ParamSortAudio}, referenceModeParamID, energonmodel.ReferenceModeReferences),
+		{ParamID: audioParamID, ParamRule: energonmodel.ServiceParamRuleFixed, Key: "content[11].role", Mapping: "reference_audio", Sort: 72},
 	}
 }
 
@@ -300,6 +350,41 @@ func serviceEndpointsByAPI(ctx context.Context, serviceID uint64, api string) []
 		"service_id": serviceID,
 		"api":        api,
 	})
+}
+
+func serviceIDsByEndpointAPIs(ctx context.Context, serviceID uint64, apis ...string) []uint64 {
+	serviceIDs := make([]uint64, 0, 1)
+	seen := map[uint64]bool{}
+	for _, api := range apis {
+		for _, endpoint := range serviceEndpointsByAPI(ctx, serviceID, api) {
+			if endpoint.ServiceID == 0 || seen[endpoint.ServiceID] {
+				continue
+			}
+			seen[endpoint.ServiceID] = true
+			serviceIDs = append(serviceIDs, endpoint.ServiceID)
+		}
+	}
+	return serviceIDs
+}
+
+func reconcileBuiltinServiceParams(
+	ctx context.Context,
+	serviceID uint64,
+	managedKeys []string,
+	specs []builtinServiceParamSpec,
+) {
+	desiredKeys := make(map[string]bool, len(specs))
+	for _, spec := range specs {
+		desiredKeys[spec.Key] = true
+	}
+	staleKeys := make([]string, 0, len(managedKeys))
+	for _, key := range managedKeys {
+		if !desiredKeys[key] {
+			staleKeys = append(staleKeys, key)
+		}
+	}
+	deleteManagedServiceParamKeys(ctx, serviceID, staleKeys)
+	upsertBuiltinServiceParams(ctx, serviceID, specs)
 }
 
 func deleteManagedServiceParamKeys(ctx context.Context, serviceID uint64, keys []string) {

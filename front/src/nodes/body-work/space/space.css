@@ -5253,7 +5253,7 @@
 
 /* Group boundary */
 .ws-flow-node-storyboard-frame {
-  z-index: -1 !important;
+  z-index: 0 !important;
   pointer-events: none !important;
 }
 
@@ -5453,7 +5453,7 @@
 }
 
 .ws-flow-node-group {
-  z-index: 0 !important;
+  z-index: 1 !important;
   isolation: isolate;
 }
 

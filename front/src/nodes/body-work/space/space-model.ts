@@ -40,6 +40,7 @@ import {
 } from "../shared/structured-json";
 import { normalizeStoryboardGridLayout } from "../shared/storyboard-grid-layout";
 import { normalizeVideoComposition } from "./space-video-compose";
+import { isCanvasRunCanceledError } from "./space-runner";
 
 const freeAssetCate: AssetCate = {
   id: 0,
@@ -559,6 +560,7 @@ function normalizeCanvasNode(
   if (!id || !type) {
     return null;
   }
+  const persistedRunError = stringValue(value.run_error);
   const node: SpaceCanvasNode = {
     id,
     nodeNo: numberValue(value.node_no) || undefined,
@@ -590,7 +592,9 @@ function normalizeCanvasNode(
     resultRef: normalizeCanvasResultRef(value.result_ref),
     resultOutput: value.result_output,
     resultView: normalizeCanvasResultView(value.result_view),
-    runError: stringValue(value.run_error),
+    runError: isCanvasRunCanceledError(persistedRunError)
+      ? ""
+      : persistedRunError,
     local: value.local !== false,
   };
   const kind = stringValue(value.kind) as SpaceCanvasNode["kind"];

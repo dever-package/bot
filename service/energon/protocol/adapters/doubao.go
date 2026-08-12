@@ -459,6 +459,9 @@ func (adapter DoubaoAdapter) buildVideoRequest(input botprotocol.NativeInput) (b
 	if len(botprotocol.NormalizeAnyList(body["content"])) == 0 {
 		return botprovider.Request{}, fmt.Errorf("豆包视频服务缺少 content，请检查服务参数映射")
 	}
+	if err := validateDoubaoVideoContent(body["content"]); err != nil {
+		return botprovider.Request{}, err
+	}
 
 	return doubaoJSONRequest(input, resolveConfiguredPath(input, doubaoVideoTaskPath), body), nil
 }

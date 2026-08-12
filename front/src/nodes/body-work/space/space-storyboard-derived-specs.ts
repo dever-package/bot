@@ -473,6 +473,9 @@ function storyboardShotImagePrompt(
   externalReferences: CanvasStoryboardReference[] = [],
 ) {
   const shotMaterials = storyboardShotMaterials(storyboard, shot);
+  const hasCharacterMaterial = shotMaterials.some(
+    (material) => material.type === "character",
+  );
   const referenceOrder = [
     ...externalReferences.map(
       (reference, index) =>
@@ -500,9 +503,13 @@ function storyboardShotImagePrompt(
     storyboardNarrativeExecutionContext(storyboard, shot),
     `入镜关键帧状态：${shot.continuity_state.entry.trim()}`,
     "当前图片只表现镜头开始时的入镜状态，不提前表现本镜头动作完成后的出镜状态",
-    "严格保持参考角色的五官、发型、服装、配色和体型，保持场景结构、道具造型以及整部作品画风一致",
+    hasCharacterMaterial
+      ? "严格保持参考角色的五官、发型、服装、配色和体型，保持场景结构、道具造型以及整部作品画风一致"
+      : "当前镜头没有角色素材，不得生成清晰可识别的人物、歌手、演员、乐手、路人或人脸；故事目标、叙事阶段和外部参考中出现的人物也不得擅自带入画面。保持场景结构、道具造型以及整部作品画风一致",
     "不同参考对象必须保持各自独立的轮廓、材质和尺度，不得把角色与道具融合、机械化、穿戴化或互换材质",
-    "角色必须保留参考图中的发饰数量与位置以及完整服装，道具必须保持参考图中的原始尺寸比例",
+    hasCharacterMaterial
+      ? "角色必须保留参考图中的发饰数量与位置以及完整服装，道具必须保持参考图中的原始尺寸比例"
+      : "道具必须保持参考图中的原始尺寸比例",
     shot.description.trim(),
     shot.camera_instruction.trim()
       ? `镜头语言：${shot.camera_instruction.trim()}`

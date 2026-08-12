@@ -25,9 +25,7 @@ export type StoryboardFrameNodeData = {
   onToggleCollapsed: () => void;
 };
 
-export const StoryboardFrameNode = memo(function StoryboardFrameNode({
-  data,
-}: NodeProps<any>) {
+function StoryboardFrameNodeView({ data }: NodeProps<any>) {
   const frame = data as StoryboardFrameNodeData;
   const runLabel = storyboardFrameRunLabel(frame);
   const runHint = frame.running
@@ -98,7 +96,12 @@ export const StoryboardFrameNode = memo(function StoryboardFrameNode({
       )}
     </section>
   );
-});
+}
+
+export const StoryboardFrameNode = memo(
+  StoryboardFrameNodeView,
+  (previous, next) => previous.data === next.data,
+);
 
 function storyboardFrameRunLabel(frame: StoryboardFrameNodeData) {
   if (frame.running) return "生成中";

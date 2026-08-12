@@ -23,6 +23,7 @@ var botDataMigrations = []dataMigrationSpec{
 	{key: "energon.image2-size.v1", run: EnsureEnergonImage2SizeMapping},
 	{key: "energon.seedream-size.v1", run: EnsureEnergonSeedreamSizeMapping},
 	{key: "energon.video-reference-params.v1", run: EnsureEnergonVideoReferenceParams},
+	{key: "energon.video-reference-params.v2", run: EnsureEnergonVideoReferenceParams},
 	{key: "energon.video-compose.v1", run: EnsureEnergonVideoComposePower},
 	{key: "energon.storyboard-grid.v1", run: EnsureEnergonStoryboardGridPower},
 	{key: "asset.audio-covers.v1", run: MigrateLegacyAudioCovers},

@@ -18,6 +18,7 @@ import {
 } from "../shared/structured-json";
 import { normalizeStoryboardGridLayout } from "../shared/storyboard-grid-layout";
 import { normalizeVideoComposition } from "./space-video-compose";
+import { isCanvasRunCanceledError } from "./space-runner";
 
 export type PersistedCanvasState = {
   asset_cate_id: number;
@@ -284,7 +285,9 @@ function persistedCanvasNode(
   if (resultView) {
     result.result_view = resultView;
   }
-  assignText(result, "run_error", node.runError);
+  if (!isCanvasRunCanceledError(node.runError)) {
+    assignText(result, "run_error", node.runError);
+  }
   if (node.local != null) {
     result.local = node.local;
   }

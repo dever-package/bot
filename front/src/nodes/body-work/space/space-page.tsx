@@ -144,6 +144,7 @@ import {
   canvasNodeResultErrorMessage,
   canvasRunErrorMessage,
   isActiveCanvasRun,
+  isCanvasRunCanceledError,
   type CanvasNodeResultRef,
   type CanvasRunRef,
 } from "./space-runner";
@@ -293,7 +294,7 @@ import {
 import type { StoryboardNodeStatus } from "./space-storyboard-node";
 import { useCanvasNodeRunError } from "./space-run-error";
 import { SpaceTooltip } from "./space-tooltip";
-import { CanvasModuleLoading, CanvasStartupLoading } from "./space-loading";
+import { CanvasModuleLoading } from "./space-loading";
 import { useSpacePowerCatalog } from "./use-space-power-catalog";
 import {
   isActiveRunningNode,
@@ -470,11 +471,6 @@ function collectCanvasNodeRemovalIds(
 
 function hasRunningCanvasNode(nodes: RunningNodeMap) {
   return Object.values(nodes).some(isActiveRunningNode);
-}
-
-function isCanvasRunCanceledError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error || "");
-  return message.includes("运行已取消") || message.includes("运行已停止");
 }
 
 type DeleteCanvasNodeOptions = {
@@ -2020,7 +2016,13 @@ export function WorkSpacePage({
 
       if (stoppedRuns.length > 0) {
         const stoppedNodeIds = new Set(
-          stoppedRuns.flatMap((run) => canvasRunNodeIds(run)),
+          stoppedRuns.flatMap((run) => {
+            const nodeIds = canvasRunNodeIds(run);
+            const storyboardFrameNodeId = canvasRunStoryboardFrameNodeId(run);
+            return storyboardFrameNodeId
+              ? [...nodeIds, storyboardFrameNodeId]
+              : nodeIds;
+          }),
         );
         setRunningNodes((current) => {
           if (stopAll && failedCount === 0) {
@@ -2875,10 +2877,7 @@ export function WorkSpacePage({
   );
 
   if (loading) {
-    if (initialLoadingRef.current) {
-      return null;
-    }
-    return <CanvasStartupLoading />;
+    return null;
   }
 
   if (error || !space || !activeCate) {
@@ -4032,6 +4031,8 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
                 inputContext,
               };
 
+        const nodeZIndex =
+          node.type === "group" ? 1 : node.groupId ? 3 : 2;
         const cachedStyle = cached?.style as CSSProperties | undefined;
         const nodeStyleSize = canvasNodeStyleSize(node);
         if (
@@ -4043,8 +4044,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           cached.className === className &&
           cached.draggable === (interactive && !structureLocked) &&
           cached.deletable === !structureLocked &&
-          cached.zIndex ===
-            (node.type === "group" ? 0 : node.groupId ? 2 : 1) &&
+          cached.zIndex === nodeZIndex &&
           cachedStyle?.width === nodeStyleSize.width &&
           cachedStyle?.height === nodeStyleSize.height
         ) {
@@ -4060,7 +4060,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           className,
           draggable: interactive && !structureLocked,
           deletable: !structureLocked,
-          zIndex: node.type === "group" ? 0 : node.groupId ? 2 : 1,
+          zIndex: nodeZIndex,
           style: {
             ...cached?.style,
             width: nodeStyleSize.width,
@@ -4084,7 +4084,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         storyboardFrameRunBlockedReasonById.get(frame.id) || "";
       const frameRunning =
         isActiveRunningNode(runningNodes[frame.id]) ||
-        frame.workNodeIds.some((nodeId) =>
+        frame.memberNodeIds.some((nodeId) =>
           isActiveRunningNode(runningNodes[nodeId]),
         );
       const cached = storyboardFrameNodeCache.current.get(frame.id);
@@ -4147,7 +4147,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         data,
         selected,
         className: "ws-flow-node ws-flow-node-storyboard-frame",
-        zIndex: -1,
+        zIndex: 0,
         draggable: interactive,
         selectable: interactive,
         connectable: false,
@@ -6984,6 +6984,7 @@ function mergeCanvasRunRef(
   return {
     ...current,
     ...next,
+    execution_scope: next.execution_scope || current.execution_scope,
     node_runs: next.node_runs?.length ? next.node_runs : current.node_runs,
     execution_plan: next.execution_plan || current.execution_plan,
     node_results: nodeResults,
@@ -7169,9 +7170,13 @@ function backendCanvasRunActiveNodeIds(
   current: RunningNodeMap,
   managedNodeIds?: ReadonlySet<string>,
 ) {
+  const storyboardFrameNodeId = canvasRunStoryboardFrameNodeId(canvasRun);
   const allowed = new Set(
     backendCanvasRunNodeIds(input, canvasRun).filter(
-      (nodeId) => !managedNodeIds || managedNodeIds.has(nodeId),
+      (nodeId) =>
+        nodeId === storyboardFrameNodeId ||
+        !managedNodeIds ||
+        managedNodeIds.has(nodeId),
     ),
   );
   return Object.keys(current).filter((nodeId) => allowed.has(nodeId));
@@ -7193,6 +7198,7 @@ function markCanvasRunRecordRunningNodes(
   }
   const finishedNodeIds = canvasRunFinishedNodeIds(canvasRun);
   const activeNodeStatuses = new Map<string, RunningNodeState["status"]>();
+  const storyboardFrameNodeId = canvasRunStoryboardFrameNodeId(canvasRun);
   let hasManagedNodeRun = false;
   let firstPendingNodeId = "";
   for (const nodeRun of canvasRun.node_runs || []) {
@@ -7240,6 +7246,12 @@ function markCanvasRunRecordRunningNodes(
       );
     }
   }
+  if (storyboardFrameNodeId) {
+    activeNodeStatuses.set(
+      storyboardFrameNodeId,
+      runStatus === "waiting" ? "waiting" : "running",
+    );
+  }
   if (activeNodeStatuses.size === 0) {
     return;
   }
@@ -7249,7 +7261,8 @@ function markCanvasRunRecordRunningNodes(
     const next = { ...current };
     for (const [nodeId, status] of activeNodeStatuses) {
       const node = input.nodes.find((item) => item.id === nodeId);
-      if (!node) {
+      const isStoryboardFrame = nodeId === storyboardFrameNodeId;
+      if (!node && !isStoryboardFrame) {
         continue;
       }
       const existing = current[nodeId];
@@ -7258,7 +7271,9 @@ function markCanvasRunRecordRunningNodes(
       }
       next[nodeId] = {
         nodeId,
-        title: node.title,
+        title: isStoryboardFrame
+          ? `${input.startNode.title || "分镜脚本"}制作区`
+          : node?.title || nodeId,
         startedAt:
           existing?.startedAt ||
           (Number.isFinite(startedAt) ? startedAt : Date.now()),
@@ -7276,10 +7291,22 @@ function backendCanvasRunNodeIds(
   canvasRun: CanvasRunRef,
 ) {
   const result = new Set(canvasRunNodeIds(canvasRun));
+  const storyboardFrameNodeId = canvasRunStoryboardFrameNodeId(canvasRun);
+  if (storyboardFrameNodeId) {
+    result.add(storyboardFrameNodeId);
+  }
   if (input.singleNode) {
     result.add(input.startNode.id);
   }
   return [...result];
+}
+
+function canvasRunStoryboardFrameNodeId(canvasRun: CanvasRunRef) {
+  if (String(canvasRun.execution_scope || "").trim() !== "storyboard_frame") {
+    return "";
+  }
+  const sourceNodeId = String(canvasRun.start_node_id || "").trim();
+  return sourceNodeId ? storyboardFrameId(sourceNodeId) : "";
 }
 
 function canvasRunRecordMatchesCate(
@@ -8040,8 +8067,7 @@ function buildBackendCanvasNodePatch(
   }
   if (status === "canceled" || status === "cancelled") {
     return mergeNodeFeedbackRecordsIntoPatch(node, {
-      resultRef: buildNodeResultRef(normalizedResult),
-      runError: "节点运行已取消",
+      runError: "",
     });
   }
   const asset = runResultAsset({

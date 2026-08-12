@@ -6,6 +6,7 @@ export type CanvasRunRef = {
   request_id?: string;
   asset_cate_id?: number;
   start_node_id?: string;
+  execution_scope?: string;
   flow_run_id?: number;
   release_id?: number;
   status?: string;
@@ -118,6 +119,9 @@ export function normalizeCanvasRunRef(value: any): CanvasRunRef {
     request_id: String(value?.request_id || run.request_id || ""),
     asset_cate_id: Number(value?.asset_cate_id || 0),
     start_node_id: String(value?.start_node_id || ""),
+    execution_scope: String(
+      value?.execution_scope || output.execution_scope || "",
+    ),
     flow_run_id: Number(value?.flow_run_id || run.flow_run_id || 0),
     release_id: Number(value?.release_id || run.release_id || 0),
     status: normalizeRuntimeRunStatus(value?.status || run.status),
@@ -304,6 +308,11 @@ const genericCanvasErrorMessages = new Set([
 
 export function isGenericCanvasErrorMessage(error: unknown) {
   return genericCanvasErrorMessages.has(canvasErrorText(error));
+}
+
+export function isCanvasRunCanceledError(error: unknown) {
+  const message = canvasErrorText(error);
+  return message.includes("运行已取消") || message.includes("运行已停止");
 }
 
 function preferredCanvasErrorText(...values: unknown[]) {

@@ -126,28 +126,24 @@ export function PlayableVideoPreview({
           {!requested ? (
             <button
               type="button"
-              className="nodrag nopan nowheel absolute inset-0 z-[2] cursor-pointer border-0 bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white/80"
+              className="nodrag nopan nowheel absolute left-1/2 top-1/2 z-[2] inline-flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-white/25 bg-black/65 p-0 text-white shadow-lg backdrop-blur-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80"
               aria-label={ariaLabel ? `播放${ariaLabel}` : "播放视频"}
               onPointerDown={stopMediaEvent}
               onClick={startPlayback}
             >
-              <span
-                className="absolute left-1/2 top-1/2 inline-flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/25 bg-black/65 text-white shadow-lg backdrop-blur-sm"
-              >
-                {previewLoading ? (
-                  <Loader2
-                    size={16}
-                    className="animate-spin"
-                    aria-hidden="true"
-                  />
-                ) : (
-                  <Play
-                    size={16}
-                    className="translate-x-px fill-current"
-                    aria-hidden="true"
-                  />
-                )}
-              </span>
+              {previewLoading ? (
+                <Loader2
+                  size={16}
+                  className="animate-spin"
+                  aria-hidden="true"
+                />
+              ) : (
+                <Play
+                  size={16}
+                  className="translate-x-px fill-current"
+                  aria-hidden="true"
+                />
+              )}
             </button>
           ) : (
             <span

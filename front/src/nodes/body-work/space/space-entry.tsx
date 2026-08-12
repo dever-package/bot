@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useState } from "react";
-import { CanvasStartupLoading } from "./space-loading";
+import { CanvasStartupLoading } from "./space-startup-loading";
 
 const WorkSpacePage = lazy(() =>
   import("./space-page").then((module) => ({
