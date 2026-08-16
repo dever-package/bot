@@ -20,6 +20,7 @@ type MountRequest struct {
 	Agent          agentmodel.Agent
 	Gateway        energonservice.GatewayService
 	PreparationKey string
+	PowerPolicy    PowerPolicy
 	References     []runtimeprovider.MediaReference
 	Billing        botprotocol.BillingContext
 	EnableDocument bool
@@ -114,7 +115,9 @@ func mountPowerTools(request MountRequest, registry *Registry, candidates []powe
 			warnings = append(warnings, fmt.Sprintf("能力 %s 未挂载: 没有启用来源", candidate.row.Name))
 			continue
 		}
-		current := runtimeprovider.PowerTool(candidate.row, candidate.config, powerParametersSchema(candidate.config.Params), request.Gateway, runtimeprovider.Transport{
+		fixedArguments := request.PowerPolicy.Arguments(candidate.row.ID)
+		fixedParameterKeys := request.PowerPolicy.ParameterKeys(candidate.row.ID)
+		current := runtimeprovider.PowerTool(candidate.row, candidate.config, powerParametersSchema(candidate.config.Params, fixedParameterKeys), fixedArguments, request.Gateway, runtimeprovider.Transport{
 			Method: request.Method, Host: request.Host, Path: request.Path, Headers: request.Headers,
 		}, request.References, request.Billing)
 		if err := registry.Add(current); err != nil {

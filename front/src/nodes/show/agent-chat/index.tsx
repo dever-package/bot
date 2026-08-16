@@ -34,15 +34,22 @@ import {
 } from "./media-inspector";
 import type {
   AgentChatArtifactActionRenderer,
+  AgentChatConversationState,
   AgentChatDocumentActionRenderer,
   AgentChatMessageActionContext,
   AgentChatRuntimeApis,
 } from "./types";
 import type {
+  ParamFileLibraryRenderer,
+  PowerParam,
+} from "@/components/agent/stream-request-params";
+import type {
   ReferenceProvider,
+  ReferenceInput,
   ReferenceUploadedFile,
 } from "./reference";
 import { AGENT_CHAT_LAYER_CLASS, AGENT_CHAT_LAYER_Z_INDEX } from "./layers";
+import { useAdminAgentChatExecution } from "./admin-execution";
 
 export type AgentChatPanelProps = {
   agentKey: string;
@@ -61,6 +68,15 @@ export type AgentChatPanelProps = {
   uploadBizKey?: string;
   uploadBizName?: string;
   allowResourceLibrary?: boolean;
+  composerDisabled?: boolean;
+  composerToolbar?: ReactNode;
+  composerParameters?: PowerParam[];
+  composerParameterScopeKey?: string;
+  renderFileLibrary?: ParamFileLibraryRenderer;
+  prepareInput?: (
+    input: ReferenceInput,
+  ) => ReferenceInput | Promise<ReferenceInput>;
+  onConversationStateChange?: (state: AgentChatConversationState) => void;
   onUploadedFiles?: (
     files: ReferenceUploadedFile[],
   ) => void | Promise<void>;
@@ -96,6 +112,13 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
       ? Boolean(getStoreValueByPath(store, openingEnabledPath))
       : Boolean(item.meta?.proactiveOpening),
   );
+  const executionConfigApi = String(item.meta?.executionConfigApi || "");
+  const toolFormApi = String(item.meta?.toolFormApi || "");
+  const execution = useAdminAgentChatExecution({
+    agentKey,
+    configApi: executionConfigApi,
+    toolFormApi,
+  });
   const assistantApi = useMemo<AgentChatApi>(
     () => ({
       session: String(item.meta?.sessionApi || "/bot/admin/assistant/session"),
@@ -177,6 +200,12 @@ export function ShowAgentChat({ item, store }: NodeItemProps) {
       )}
       blockMs={Number(item.meta?.blockMs || 1000)}
       proactiveOpening={proactiveOpening}
+      composerDisabled={execution.disabled}
+      composerToolbar={execution.toolbar}
+      composerParameters={execution.parameters}
+      composerParameterScopeKey={execution.parameterScopeKey}
+      prepareInput={execution.prepareInput}
+      onConversationStateChange={execution.onConversationStateChange}
       assistantApi={assistantApi}
       runtimeApi={runtimeApi}
       onClose={close}
@@ -201,6 +230,13 @@ export function AgentChatPanel({
   uploadBizKey,
   uploadBizName,
   allowResourceLibrary = true,
+  composerDisabled = false,
+  composerToolbar,
+  composerParameters,
+  composerParameterScopeKey,
+  renderFileLibrary,
+  prepareInput,
+  onConversationStateChange,
   onUploadedFiles,
   blockMs = 1000,
   assistantApi,
@@ -222,6 +258,7 @@ export function AgentChatPanel({
     assistantApi,
     runtimeApi,
     requestScope,
+    prepareInput,
   });
   const mediaInspector = useAgentChatMediaInspector();
   const dockedMediaInspector =
@@ -248,6 +285,13 @@ export function AgentChatPanel({
   useEffect(() => {
     mediaInspector.closePreview();
   }, [agentKey, controller.sessionID, mediaInspector.closePreview, open]);
+
+  useEffect(() => {
+    onConversationStateChange?.({
+      sessionID: controller.sessionID,
+      messages: controller.messages,
+    });
+  }, [controller.messages, controller.sessionID, onConversationStateChange]);
 
   useEffect(() => {
     setMobilePane("chat");
@@ -396,6 +440,11 @@ export function AgentChatPanel({
               uploadBizKey={uploadBizKey}
               uploadBizName={uploadBizName}
               allowResourceLibrary={allowResourceLibrary}
+              composerDisabled={composerDisabled}
+              composerToolbar={composerToolbar}
+              composerParameters={composerParameters}
+              composerParameterScopeKey={composerParameterScopeKey}
+              renderFileLibrary={renderFileLibrary}
               onUploadedFiles={onUploadedFiles}
               referenceProviders={referenceProviders}
               renderMessageActions={renderMessageActions}

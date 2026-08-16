@@ -147,6 +147,11 @@
   min-width: 220px;
 }
 
+.workbench-power-picker-content {
+  max-height: min(460px, calc(100vh - 32px));
+  overflow-y: auto;
+}
+
 .workbench-power-picker-subcontent {
   max-height: min(420px, calc(100vh - 32px));
   overflow-y: auto;
@@ -518,6 +523,10 @@
   gap: 2px;
 }
 
+.hb-laper-app [data-agent-chat-appearance="body"] .agent-chat-execution-trigger {
+  height: 30px;
+}
+
 .hb-laper-app [data-agent-chat-appearance="body"] .reference-composer-tool,
 .hb-laper-app [data-agent-chat-appearance="body"] .reference-composer-action {
   width: 30px;
@@ -527,6 +536,28 @@
 }
 
 .hb-laper-app [data-agent-chat-appearance="body"] .reference-composer-tool:hover {
+  background: var(--body-work-active);
+  color: var(--body-work-text);
+}
+
+.hb-laper-app [data-agent-chat-appearance="body"] .reference-composer-add-trigger {
+  width: auto;
+  min-width: 30px;
+  gap: 5px;
+  padding: 0 7px;
+  font-size: 12px;
+}
+
+.hb-laper-app [data-agent-chat-appearance="body"] .reference-composer-param-trigger {
+  height: 30px;
+  max-width: 13rem;
+  padding-inline: 7px;
+  color: var(--body-work-muted);
+  font-size: 12px;
+}
+
+.hb-laper-app [data-agent-chat-appearance="body"] .reference-composer-param-trigger:hover,
+.hb-laper-app [data-agent-chat-appearance="body"] .reference-composer-param-trigger[data-state="open"] {
   background: var(--body-work-active);
   color: var(--body-work-text);
 }

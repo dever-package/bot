@@ -687,13 +687,6 @@ func doubaoVideoOutput(body any) any {
 	return map[string]any{"output": botprotocol.ExtractMediaOutput(body, botprotocol.MediaTypeVideo)}
 }
 
-func setBodyDefault(body map[string]any, key string, value any) {
-	if _, exists := body[key]; exists {
-		return
-	}
-	body[key] = value
-}
-
 func doubaoOneOrMany(values []string) any {
 	if len(values) == 1 {
 		return values[0]

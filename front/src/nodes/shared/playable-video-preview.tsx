@@ -1,10 +1,11 @@
 import { Loader2, Play } from "lucide-react";
 import {
+  useEffect,
   useRef,
   useState,
   type CSSProperties,
-  type MouseEvent,
-  type PointerEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { FirstFrameVideo } from "@/components/media/first-frame-video";
 import {
@@ -14,7 +15,22 @@ import {
 
 type PlayableVideoPreviewProps = Omit<VideoThumbnailProps, "ariaHidden"> & {
   objectFit?: CSSProperties["objectFit"];
+  allowDragFromVideo?: boolean;
 };
+
+const VIDEO_CONTROL_MAX_HEIGHT = 56;
+
+export function isVideoControlRegion(
+  video: HTMLVideoElement,
+  clientY: number,
+) {
+  const bounds = video.getBoundingClientRect();
+  const controlHeight = Math.min(
+    VIDEO_CONTROL_MAX_HEIGHT,
+    bounds.height * 0.25,
+  );
+  return clientY >= bounds.bottom - controlHeight;
+}
 
 export function PlayableVideoPreview({
   src,
@@ -29,6 +45,7 @@ export function PlayableVideoPreview({
   onError,
   onMediaSize,
   objectFit = "cover",
+  allowDragFromVideo = false,
 }: PlayableVideoPreviewProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [requestedSrc, setRequestedSrc] = useState("");
@@ -40,7 +57,34 @@ export function PlayableVideoPreview({
   const previewLoading =
     previewReadySrc !== src && previewFailedSrc !== src;
 
-  function stopMediaEvent(event: MouseEvent | PointerEvent) {
+  // React Flow starts dragging from native mouse/touch events on an ancestor.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !allowDragFromVideo) return;
+
+    const stopMouseControlDrag = (event: MouseEvent) => {
+      if (isVideoControlRegion(video, event.clientY)) {
+        event.stopPropagation();
+      }
+    };
+    const stopTouchControlDrag = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (touch && isVideoControlRegion(video, touch.clientY)) {
+        event.stopPropagation();
+      }
+    };
+
+    video.addEventListener("mousedown", stopMouseControlDrag);
+    video.addEventListener("touchstart", stopTouchControlDrag, {
+      passive: true,
+    });
+    return () => {
+      video.removeEventListener("mousedown", stopMouseControlDrag);
+      video.removeEventListener("touchstart", stopTouchControlDrag);
+    };
+  }, [allowDragFromVideo]);
+
+  function stopMediaEvent(event: ReactMouseEvent | ReactPointerEvent) {
     event.stopPropagation();
   }
 
@@ -49,7 +93,7 @@ export function PlayableVideoPreview({
     setReadySrc((current) => (current === src ? "" : current));
   }
 
-  function startPlayback(event: MouseEvent<HTMLButtonElement>) {
+  function startPlayback(event: ReactMouseEvent<HTMLButtonElement>) {
     event.preventDefault();
     event.stopPropagation();
     const video = videoRef.current;
@@ -85,11 +129,12 @@ export function PlayableVideoPreview({
         draggable={draggable}
         aria-hidden={ready ? undefined : true}
         className={[
-          "nodrag nopan nowheel absolute inset-0 block h-full w-full",
+          allowDragFromVideo ? "" : "nodrag",
+          "nopan nowheel absolute inset-0 block h-full w-full",
           ready ? "opacity-100" : "pointer-events-none opacity-0",
         ].join(" ")}
         style={{ objectFit }}
-        onPointerDown={stopMediaEvent}
+        onPointerDown={allowDragFromVideo ? undefined : stopMediaEvent}
         onClick={stopMediaEvent}
         onLoadedMetadata={(event) =>
           onMediaSize?.(

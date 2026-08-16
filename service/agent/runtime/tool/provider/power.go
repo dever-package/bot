@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	energonmodel "github.com/dever-package/bot/model/energon"
+	runtimetokenbudget "github.com/dever-package/bot/service/agent/runtime/tokenbudget"
 	billingservice "github.com/dever-package/bot/service/billing"
 	energonservice "github.com/dever-package/bot/service/energon"
 	energoninput "github.com/dever-package/bot/service/energon/input"
@@ -21,12 +22,15 @@ type Transport struct {
 	Headers map[string]string
 }
 
-func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig, parameters map[string]any, gateway energonservice.GatewayService, transport Transport, references []MediaReference, billing botprotocol.BillingContext) Tool {
+func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig, parameters map[string]any, fixedArguments map[string]any, gateway energonservice.GatewayService, transport Transport, references []MediaReference, billing botprotocol.BillingContext) Tool {
 	name := FunctionName("power_", power.Key)
 	countPlan := buildMediaCountPlan(power, config.Params)
 	seriesPlan := buildMediaSeriesPlan(power, config.Params, references)
 	toolReferences := supportedMediaReferences(references, config.Params)
 	referenceStore := newMediaReferenceStore(toolReferences)
+	prepareArguments := func(arguments map[string]any) map[string]any {
+		return mergeFixedPowerArguments(arguments, fixedArguments)
+	}
 	prepareCall := func(arguments map[string]any) (int, map[string]any, error) {
 		currentReferences := referenceStore.Snapshot()
 		if err := validateMediaArtifactTitle(power, arguments); err != nil {
@@ -58,6 +62,7 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 	currentDefinition := func() Definition {
 		currentReferences := referenceStore.Snapshot()
 		toolParameters := MediaReferencesParameters(parameters, currentReferences, config.Params)
+		toolParameters = omitFixedPowerParameters(toolParameters, fixedArguments)
 		toolParameters = mediaToolParameters(toolParameters, countPlan)
 		toolParameters = mediaSeriesParameters(toolParameters, seriesPlan)
 		toolParameters = appendLipSyncContinuationParameters(power, toolParameters)
@@ -79,12 +84,26 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 		AddMediaReferences: func(values []MediaReference) {
 			referenceStore.Add(supportedMediaReferences(values, config.Params))
 		},
+		PrepareArguments: func(arguments map[string]any) (map[string]any, error) {
+			return prepareArguments(arguments), nil
+		},
 		ValidateArguments: func(arguments map[string]any) error {
 			_, _, err := prepareCall(arguments)
 			return err
 		},
 		Handle: func(ctx context.Context, call Call) (Result, error) {
 			count, input, err := prepareCall(call.Arguments)
+			if err != nil {
+				return Result{}, err
+			}
+			history, err := preparePowerConversationHistory(
+				ctx,
+				power,
+				input,
+				call.History,
+				config.SelectedTargetID,
+				gateway,
+			)
 			if err != nil {
 				return Result{}, err
 			}
@@ -95,6 +114,7 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 				countPlan.promptKey,
 				call.RequestID,
 				input,
+				history,
 				config.SelectedTargetID,
 				gateway,
 				transport,
@@ -109,6 +129,7 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 					Text:        "能力“" + strings.TrimSpace(power.Name) + "”需要选择目标角色",
 					Content:     map[string]any(output),
 					Interaction: interaction,
+					Terminal:    true,
 				}, nil
 			}
 			return Result{
@@ -117,6 +138,43 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 			}, nil
 		},
 	}
+}
+
+func omitFixedPowerParameters(parameters map[string]any, fixed map[string]any) map[string]any {
+	if len(fixed) == 0 {
+		return parameters
+	}
+	result := clonePowerParameters(parameters)
+	properties, _ := result["properties"].(map[string]any)
+	for key := range fixed {
+		delete(properties, key)
+	}
+	result["properties"] = properties
+	if required, ok := result["required"].([]any); ok {
+		filtered := required[:0]
+		for _, value := range required {
+			if _, exists := fixed[strings.TrimSpace(fmt.Sprint(value))]; !exists {
+				filtered = append(filtered, value)
+			}
+		}
+		if len(filtered) == 0 {
+			delete(result, "required")
+		} else {
+			result["required"] = filtered
+		}
+	}
+	return result
+}
+
+func mergeFixedPowerArguments(arguments map[string]any, fixed map[string]any) map[string]any {
+	result := make(map[string]any, len(arguments)+len(fixed))
+	for key, value := range arguments {
+		result[key] = value
+	}
+	for key, value := range fixed {
+		result[key] = value
+	}
+	return result
 }
 
 func appendLipSyncContinuationParameters(power energonmodel.Power, parameters map[string]any) map[string]any {
@@ -185,6 +243,7 @@ func executePower(
 	requestID string,
 	power energonmodel.Power,
 	input map[string]any,
+	history []any,
 	targetID uint64,
 	gateway energonservice.GatewayService,
 	transport Transport,
@@ -198,6 +257,9 @@ func executePower(
 		"options": map[string]any{
 			"stream": true,
 		},
+	}
+	if len(history) > 0 && energonmodel.NormalizePowerKind(power.Kind) == "text" {
+		body["history"] = append([]any(nil), history...)
 	}
 	if targetID > 0 {
 		body["source_target_id"] = targetID
@@ -230,6 +292,40 @@ func executePower(
 		})
 		return result.Output, err
 	})
+}
+
+const textPowerProtocolReserveTokens = 512
+
+func preparePowerConversationHistory(
+	ctx context.Context,
+	power energonmodel.Power,
+	input map[string]any,
+	history []any,
+	targetID uint64,
+	gateway energonservice.GatewayService,
+) ([]any, error) {
+	if energonmodel.NormalizePowerKind(power.Kind) != "text" || len(history) == 0 {
+		return nil, nil
+	}
+	limits, err := gateway.ResolveModelLimitsForTarget(ctx, power.Key, targetID)
+	if err != nil {
+		return nil, err
+	}
+	requiredTokens := runtimetokenbudget.Estimate(power.Prompt) +
+		runtimetokenbudget.Estimate(input) + textPowerProtocolReserveTokens
+	budget, err := runtimetokenbudget.Resolve(
+		limits.ContextWindowTokens,
+		limits.ContextWindowTokens,
+		limits.MaxOutputTokens,
+		requiredTokens,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("文本工具上下文预算无效: %w", err)
+	}
+	return runtimetokenbudget.FitHistory(
+		append([]any(nil), history...),
+		budget.MaxInputTokens-requiredTokens,
+	)
 }
 
 func powerChargeBusinessKey(parent string, requestID string) string {

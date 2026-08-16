@@ -1,5 +1,9 @@
 import { joinSiteApi, request } from "@dever/front-plugin";
 import {
+  normalizePowerParamConfig,
+  type PowerParamConfig,
+} from "@/components/agent/stream-request-params";
+import {
   asResponseRows as toRows,
   responsePositiveNumber as numberValue,
   responseText as textValue,
@@ -12,6 +16,7 @@ import {
   normalizePowerCategory,
   type PowerCategory,
 } from "../shared/power-menu";
+import { isManualPowerSourceRule } from "../../shared/power-source-rule";
 
 export type WorkbenchTeam = {
   id: number;
@@ -40,6 +45,18 @@ export type WorkbenchRole = {
   agentKey: string;
   agentName: string;
   openingEnabled: boolean;
+};
+
+export type WorkbenchDialogueSource = {
+  id: number;
+  name: string;
+};
+
+export type WorkbenchDialogueConfig = {
+  modelSourceRule: number;
+  modelSources: WorkbenchDialogueSource[];
+  selectedModelTargetID: number;
+  tools: WorkbenchPower[];
 };
 
 export type WorkbenchAssetCate = {
@@ -71,6 +88,9 @@ export type WorkbenchCatalog = {
 };
 
 const loadCatalogRequest = createInFlightRequestLoader<WorkbenchCatalog>();
+const loadDialogueConfigRequest =
+  createInFlightRequestLoader<WorkbenchDialogueConfig>();
+const loadPowerFormRequest = createInFlightRequestLoader<PowerParamConfig>();
 
 export function loadWorkbenchCatalog(teamID = 0, requestScopeKey = "") {
   const key = JSON.stringify({ requestScopeKey, teamID });
@@ -119,6 +139,57 @@ export async function loadWorkbenchSystemMessages(limit = 20) {
   return toRows(data.items)
     .map(normalizeSystemMessage)
     .filter(hasID) satisfies WorkbenchSystemMessage[];
+}
+
+export function loadWorkbenchDialogueConfig(input: {
+  teamID: number;
+  roleID: number;
+}) {
+  const key = `${input.teamID}:${input.roleID}`;
+  return loadDialogueConfigRequest(key, async () => {
+    const result = await request(
+      scopedWorkbenchApi("chat_config", input),
+      "get",
+    );
+    const data = responseData(result, "加载对话配置失败");
+    const modelSources = toRows(data.model_sources)
+      .map((source) => ({
+        id: numberValue(source?.target_id || source?.id),
+        name:
+          textValue(source?.name) ||
+          [textValue(source?.provider_name), textValue(source?.service_name)]
+            .filter(Boolean)
+            .join(" / ") ||
+          "未命名模型",
+      }))
+      .filter(hasID);
+    const modelSourceRule = numberValue(data.model_source_rule, 1);
+    const selectedModelTargetID = isManualPowerSourceRule(modelSourceRule)
+      ? numberValue(data.selected_model_target_id, modelSources[0]?.id || 0)
+      : 0;
+    return {
+      modelSourceRule,
+      modelSources,
+      selectedModelTargetID,
+      tools: toRows(data.tools).map(normalizeDialogueTool).filter(hasID),
+    } satisfies WorkbenchDialogueConfig;
+  });
+}
+
+export function loadWorkbenchPowerForm(input: {
+  teamID: number;
+  teamPowerID: number;
+  sourceTargetID?: number;
+}) {
+  const key = `${input.teamID}:${input.teamPowerID}:${input.sourceTargetID || 0}`;
+  return loadPowerFormRequest(key, async () => {
+    const result = await request(workbenchApi("power_form"), "get", {
+      team_id: input.teamID,
+      team_power_id: input.teamPowerID,
+      source_target_id: input.sourceTargetID || undefined,
+    });
+    return normalizePowerParamConfig(responseData(result, "加载工具参数失败"));
+  });
 }
 
 export function workbenchApi(path: string) {
@@ -206,6 +277,13 @@ function normalizePower(value: any): WorkbenchPower {
     kind: textValue(value?.kind),
     outputType: textValue(value?.output_type || value?.output),
   };
+}
+
+function normalizeDialogueTool(value: any): WorkbenchPower {
+  return normalizePower({
+    ...value,
+    id: value?.team_power_id,
+  });
 }
 
 function normalizeRole(value: any): WorkbenchRole {

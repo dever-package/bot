@@ -18,6 +18,7 @@ import {
 import {
   canvasMediaReferenceKind,
   canvasMediaUsageError,
+  firstFrameMediaUsageKey,
   isCanvasReferenceModeParam,
   mediaUsageOptions,
   reconcileCanvasMediaUsages,
@@ -64,6 +65,7 @@ import type {
   PowerParam,
   StoryboardWorkType,
 } from "./types";
+import { isManualPowerSourceRule } from "../../shared/power-source-rule";
 
 const NODE_OVERLAY_STYLE: CSSProperties = { zIndex: 999 };
 const IMMEDIATE_DRAFT_SAVE: NodeDraftUpdateOptions = { save: "immediate" };
@@ -81,7 +83,7 @@ const agentComposerParams: PowerParam[] = [uploadComposerParam];
 type ComposerDraft = CanvasComposerDraft;
 
 function powerFormAllowsSourceSelection(powerForm: PowerForm | null) {
-  return Number(powerForm?.source_rule || 0) === 2;
+  return isManualPowerSourceRule(powerForm?.source_rule);
 }
 
 function powerParamSaveOptions(param?: PowerParam) {
@@ -89,6 +91,53 @@ function powerParamSaveOptions(param?: PowerParam) {
     ["option", "select", "multi_option", "switch"].includes(param.type)
     ? IMMEDIATE_DRAFT_SAVE
     : undefined;
+}
+
+function storyboardContinuationValidationContext(
+  node: WorkspaceNodeData,
+  content: CanvasReferenceContent | undefined,
+  items: ComposerAssetItem[],
+  usageOptions: ReturnType<typeof mediaUsageOptions>,
+) {
+  const storyboardItem = node.storyboardItem;
+  const dependencyNodeIds = new Set(storyboardItem?.dependencyNodeIds || []);
+  if (
+    storyboardItem?.itemType !== "shot" ||
+    !storyboardItem.continuityAnchor ||
+    dependencyNodeIds.size !== 1
+  ) {
+    return { content, items };
+  }
+  const tailFrameItems = items.filter(
+    (item) =>
+      item.source === "current" && dependencyNodeIds.has(String(item.id || "")),
+  );
+  const tailFrameAssetIds = new Set(
+    tailFrameItems
+      .map((item) => Number(item.refId || 0))
+      .filter((assetId) => assetId > 0),
+  );
+  if (tailFrameAssetIds.size === 0) {
+    return { content, items };
+  }
+  const firstFrameUsage = firstFrameMediaUsageKey(usageOptions);
+  return {
+    content: content
+      ? {
+          ...content,
+          parts: content.parts.map((part) =>
+            part.type === "reference" &&
+            part.ref_type === "asset" &&
+            tailFrameAssetIds.has(Number(part.ref_id || 0))
+              ? { ...part, usage: firstFrameUsage }
+              : part,
+          ),
+        }
+      : content,
+    items: items.map((item) =>
+      tailFrameItems.includes(item) ? { ...item, kind: "image" } : item,
+    ),
+  };
 }
 
 function restoreStoryboardReferenceState(
@@ -368,6 +417,16 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       selectedNodeType === "power" ? mediaUsageOptions(activePowerParams) : [],
     [activePowerParams, selectedNodeType],
   );
+  const continuationValidationContext = useMemo(
+    () =>
+      storyboardContinuationValidationContext(
+        node,
+        promptContent,
+        assetLibrary.current,
+        connectedMediaUsageOptions,
+      ),
+    [assetLibrary, connectedMediaUsageOptions, node, promptContent],
+  );
   const storyboardUsageOptions = useMemo(
     () =>
       isStoryboardPower
@@ -386,8 +445,8 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       selectedNodeType === "power" && !powerFormLoading
         ? canvasMediaUsageError(
             connectedMediaReferences,
-            promptContent,
-            assetLibrary.current,
+            continuationValidationContext.content,
+            continuationValidationContext.items,
             connectedMediaUsageOptions,
             {},
             requireBoundMediaReferences,
@@ -395,11 +454,10 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
           )
         : "",
     [
-      assetLibrary,
       connectedMediaReferences,
       connectedMediaUsageOptions,
+      continuationValidationContext,
       powerFormLoading,
-      promptContent,
       requireBoundMediaReferences,
       selectedNodeType,
       effectiveMultiImageMode,
@@ -876,10 +934,16 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         connectedMediaReferences,
         nextMultiImageMode,
       );
-      const mediaError = canvasMediaUsageError(
-        connectedMediaReferences,
+      const nextValidationContext = storyboardContinuationValidationContext(
+        node,
         reconciliation.content,
         assetLibrary.current,
+        options,
+      );
+      const mediaError = canvasMediaUsageError(
+        connectedMediaReferences,
+        nextValidationContext.content,
+        nextValidationContext.items,
         options,
         reconciliation.assignments,
         requireBoundMediaReferences,

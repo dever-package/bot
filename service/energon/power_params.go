@@ -31,6 +31,23 @@ func (s GatewayService) PowerParams(ctx context.Context, powerKey string) ([]Pow
 	return config.Params, nil
 }
 
+// AvailablePowerSources returns source choices without building the power's
+// parameter form. Callers that only render a model/source selector should use
+// this path to avoid loading unrelated parameter mappings and upload rules.
+func (s GatewayService) AvailablePowerSources(ctx context.Context, powerKey string) ([]PowerSource, error) {
+	ctx = withRepoRequestCache(ctx)
+	powerKey = strings.TrimSpace(powerKey)
+	if powerKey == "" {
+		return nil, fmt.Errorf("能力不能为空")
+	}
+	power, ok := s.repo.PowerByName(ctx, powerKey)
+	if !ok || !isActive(power.Status) {
+		return nil, fmt.Errorf("未匹配到能力: %s", powerKey)
+	}
+	sources, _ := s.powerSources(ctx, power, 0)
+	return sources, nil
+}
+
 func NormalizePowerParamInput(input map[string]any, params []PowerParam) map[string]any {
 	return botinput.NormalizePowerParamInput(input, params)
 }
@@ -225,20 +242,15 @@ func (s GatewayService) powerTargetServiceID(ctx context.Context, powerID uint64
 }
 
 func (s GatewayService) powerSources(ctx context.Context, power botmodel.Power, selectedTargetID uint64) ([]PowerSource, uint64) {
-	targets := orderActivePowerTargets(s.repo.ListTargetsByPower(ctx, power.ID))
+	targets := s.availablePowerTargets(ctx, []uint64{power.ID})[power.ID]
 	sources := make([]PowerSource, 0, len(targets))
 	firstTargetID := uint64(0)
 	selectedExists := false
 
-	for _, target := range targets {
-		if !isActive(target.Status) {
-			continue
-		}
-		service, ok := s.repo.FindService(ctx, target.ServiceID)
-		if !ok || !isActive(service.Status) {
-			continue
-		}
-		provider, _ := s.repo.FindProvider(ctx, service.ProviderID)
+	for _, available := range targets {
+		target := available.Target
+		service := available.Service
+		provider := available.Provider
 		source := PowerSource{
 			ID:           target.ID,
 			TargetID:     target.ID,

@@ -139,10 +139,11 @@ func (s Service) callModelRequestWithRole(
 	billing.BusinessKey = businessKey
 	return billingservice.Execute(ctx, billingservice.PowerExecutionRequest{
 		Prepare: billingservice.PreparePowerChargeRequest{
-			Billing:   billing,
-			RequestID: businessKey,
-			PowerID:   execution.power.ID,
-			PowerName: execution.power.Name,
+			Billing:       billing,
+			RequestID:     businessKey,
+			PowerID:       execution.power.ID,
+			PowerName:     execution.power.Name,
+			PowerTargetID: execution.modelTargetID,
 		},
 		RunID: execution.runID,
 	}, func(ctx context.Context, charged botprotocol.BillingContext) (modelStepResult, error) {
@@ -248,6 +249,7 @@ func (s Service) callModelOnce(
 		Body: buildGatewayBody(
 			execution.agent,
 			execution.power,
+			execution.modelTargetID,
 			modelLimits.MaxOutputTokens,
 			role,
 			input,

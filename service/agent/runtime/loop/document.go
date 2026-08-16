@@ -263,7 +263,9 @@ func (s Service) createDocumentWriterExecution(
 	return s.createExecution(ctx, requestID, executionSpec{
 		Agent:                 state.execution.agent,
 		Power:                 state.execution.power,
+		ModelTargetID:         state.execution.modelTargetID,
 		ModelLimits:           state.execution.modelLimits,
+		PowerPolicy:           state.execution.powerPolicy,
 		SessionID:             state.execution.sessionID,
 		AssistantMessageID:    state.execution.assistantMessageID,
 		Prompt:                state.execution.prompt,

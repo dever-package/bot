@@ -98,7 +98,8 @@ func (s Service) enqueueDocumentArtifact(
 	if err != nil {
 		return buildToolStepResult(state.execution.registry, call, definition, runtimeprovider.Result{}, err)
 	}
-	if err = state.execution.registry.ValidateArguments(call.Name, arguments); err != nil {
+	arguments, err = state.execution.registry.PrepareArguments(call.Name, arguments)
+	if err != nil {
 		return buildToolStepResult(state.execution.registry, call, definition, runtimeprovider.Result{}, err)
 	}
 
@@ -116,7 +117,7 @@ func (s Service) enqueueDocumentArtifact(
 				"tool_name":       call.Name,
 				"tool_title":      toolTitle(definition, call.Name),
 				"arguments":       arguments,
-				"requested_count": toolRequestedCount(call, definition),
+				"requested_count": toolRequestedCountArguments(arguments, definition),
 			},
 		})
 		if err != nil {
@@ -179,6 +180,10 @@ func (s Service) enqueueArtifactJob(
 	if err != nil {
 		return agentmodel.ArtifactJob{}, err
 	}
+	arguments, err = state.execution.registry.PrepareArguments(call.Name, arguments)
+	if err != nil {
+		return agentmodel.ArtifactJob{}, err
+	}
 	return runtimeartifact.NewService().EnqueueJob(ctx, runtimeartifact.JobRequest{
 		DocumentID:    documentID,
 		BlockID:       blockID,
@@ -190,9 +195,10 @@ func (s Service) enqueueArtifactJob(
 		Arguments:     arguments,
 		DeferDispatch: deferDispatch,
 		Snapshot: runtimeartifact.JobSnapshot{
-			Agent:   state.execution.agent,
-			Scope:   state.execution.scope,
-			Billing: state.execution.billing,
+			Agent:       state.execution.agent,
+			PowerPolicy: state.execution.powerPolicy,
+			Scope:       state.execution.scope,
+			Billing:     state.execution.billing,
 			Transport: runtimeartifact.JobTransport{
 				Method: state.execution.transport.Method,
 				Host:   state.execution.transport.Host,
@@ -219,7 +225,8 @@ func (s Service) beginToolArtifactBatch(
 	if err != nil {
 		return batch, err
 	}
-	if err = execution.registry.ValidateArguments(call.Name, arguments); err != nil {
+	arguments, err = execution.registry.PrepareArguments(call.Name, arguments)
+	if err != nil {
 		return batch, err
 	}
 	selected, err := runtimeprovider.ArtifactReferences(arguments, execution.mediaReferences)
@@ -253,7 +260,7 @@ func (s Service) beginToolArtifactBatch(
 		DocumentID:        documentID,
 		BlockID:           blockID,
 		Kind:              definition.Kind,
-		Count:             toolRequestedCount(call, definition),
+		Count:             toolRequestedCountArguments(arguments, definition),
 		Name:              toolArtifactName(arguments, definition),
 		BatchKey:          call.ID,
 		SeriesID:          seriesID,

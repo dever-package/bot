@@ -12,6 +12,7 @@ import (
 	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
 	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
+	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
@@ -20,7 +21,9 @@ import (
 type executionSpec struct {
 	Agent                 agentmodel.Agent
 	Power                 energonmodel.Power
+	ModelTargetID         uint64
 	ModelLimits           energonservice.ModelLimits
+	PowerPolicy           runtimetool.PowerPolicy
 	SessionID             uint64
 	AssistantMessageID    uint64
 	Prompt                string
@@ -65,7 +68,9 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 		startedAt:            startedAt,
 		agent:                runtimeAgent,
 		power:                spec.Power,
+		modelTargetID:        spec.ModelTargetID,
 		modelLimits:          spec.ModelLimits,
+		powerPolicy:          spec.PowerPolicy.Normalize(),
 		workingContextTokens: runtimeConfig.WorkingContextTokens,
 		sessionID:            spec.SessionID,
 		assistantMessageID:   spec.AssistantMessageID,

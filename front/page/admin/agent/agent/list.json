@@ -266,6 +266,8 @@
           "documentStreamApi": "/bot/admin/agent_runtime/document_stream",
           "statusApi": "/bot/admin/agent_runtime/status",
           "stopApi": "/bot/admin/agent_runtime/stop",
+          "executionConfigApi": "/bot/admin/agent_runtime/execution_config",
+          "toolFormApi": "/bot/admin/agent_runtime/tool_form",
           "clipboardImageUploadRuleId": 1,
           "blockMs": 1000
         }

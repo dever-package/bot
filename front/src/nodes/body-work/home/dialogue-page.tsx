@@ -24,15 +24,19 @@ import {
 } from "./workbench-api";
 import { AssetContinuationNotice } from "./asset-continuation";
 import { WorkbenchPicker } from "./workbench-picker";
+import type { PowerCategory } from "../shared/power-menu";
+import { useWorkbenchDialogueExecution } from "./workbench-dialogue-execution";
 
 export function WorkbenchDialoguePage({
   teamID,
   roles,
+  powerCategories,
   continuationAsset,
   onClearContinuation,
 }: {
   teamID: number;
   roles: WorkbenchRole[];
+  powerCategories: PowerCategory[];
   continuationAsset: AssetRecord | null;
   onClearContinuation: () => void;
 }) {
@@ -72,6 +76,11 @@ export function WorkbenchDialoguePage({
   }, [continuationAsset, roles]);
 
   const role = roles.find((current) => current.id === selectedID);
+  const executionController = useWorkbenchDialogueExecution({
+    teamID,
+    roleID: role?.id || 0,
+    powerCategories,
+  });
   const chatConfig = useMemo(() => {
     if (!role) {
       return null;
@@ -161,6 +170,15 @@ export function WorkbenchDialoguePage({
           uploadBizKey={BODY_UPLOAD_BIZ_KEY}
           uploadBizName={BODY_UPLOAD_BIZ_NAME}
           allowResourceLibrary={false}
+          composerDisabled={executionController.disabled}
+          composerToolbar={executionController.toolbar}
+          composerParameters={executionController.parameters}
+          composerParameterScopeKey={executionController.parameterScopeKey}
+          renderFileLibrary={executionController.renderFileLibrary}
+          prepareInput={executionController.prepareInput}
+          onConversationStateChange={
+            executionController.onConversationStateChange
+          }
           onUploadedFiles={saveUploadedFiles}
           assistantApi={chatConfig.assistantApi}
           runtimeApi={chatConfig.runtimeApi}

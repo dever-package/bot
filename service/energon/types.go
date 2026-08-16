@@ -25,10 +25,14 @@ func isActive(status int16) bool {
 }
 
 func normalizePowerSourceRule(value int) int16 {
-	if int16(value) == powerSourceRulePick {
+	if IsManualPowerSourceRule(int16(value)) {
 		return powerSourceRulePick
 	}
 	return powerSourceRuleAuto
+}
+
+func IsManualPowerSourceRule(value int16) bool {
+	return value == powerSourceRulePick
 }
 
 type GatewayRequest struct {

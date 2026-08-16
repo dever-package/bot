@@ -342,6 +342,7 @@ function PageContent({
             <WorkbenchDialoguePage
               teamID={teamID}
               roles={catalog.roles}
+              powerCategories={catalog.powerCategories}
               continuationAsset={continuationAsset}
               onClearContinuation={onClearContinuation}
             />
@@ -422,6 +423,8 @@ function resolveInitialPage(value: unknown): WorkbenchPageKey {
   switch (value) {
     case "dialogue":
       return "dialogue";
+    case "function":
+      return "function";
     case "works":
     case "project":
       return "works";

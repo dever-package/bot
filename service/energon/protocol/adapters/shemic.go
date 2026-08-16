@@ -49,6 +49,7 @@ func (ShemicAdapter) BuildNativeRequest(input botprotocol.NativeInput) (botprovi
 				body[key] = value
 			}
 		}
+		preserveShemicConversationContext(body, input)
 	}
 	applyToolOptionOverrides(body, input.Request.Options)
 
@@ -67,6 +68,18 @@ func (ShemicAdapter) BuildNativeRequest(input botprotocol.NativeInput) (botprovi
 		Headers: headers,
 		Body:    body,
 	}, nil
+}
+
+func preserveShemicConversationContext(body map[string]any, input botprotocol.NativeInput) {
+	if body == nil || input.Request == nil || !isTextService(input) {
+		return
+	}
+	if len(input.Request.Set) > 0 {
+		setBodyDefault(body, "set", cloneBody(input.Request.Set))
+	}
+	if len(input.Request.History) > 0 {
+		setBodyDefault(body, "history", append([]any(nil), input.Request.History...))
+	}
 }
 
 func (ShemicAdapter) BuildClientResponse(req *botprotocol.ShemicRequest, resp *botprovider.Response) (any, error) {

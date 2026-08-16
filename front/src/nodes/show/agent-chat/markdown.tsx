@@ -1,25 +1,6 @@
-import { memo, type ComponentProps } from "react";
-import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
-import remarkGfm from "remark-gfm";
+import { memo } from "react";
 import { EnergonContentView } from "@/components/energon/content-view";
 import { cn } from "@/lib/utils";
-
-type MarkdownComponents = NonNullable<
-  ComponentProps<typeof MarkdownTextPrimitive>["components"]
->;
-
-const markdownComponents: MarkdownComponents = {
-  a({ children, node, ...props }) {
-    void node;
-    return (
-      <a {...props} target="_blank" rel="noreferrer">
-        {children}
-      </a>
-    );
-  },
-};
-
-const markdownPlugins = [remarkGfm];
 
 export const AgentChatMarkdown = memo(function AgentChatMarkdown({
   text,
@@ -74,33 +55,6 @@ function normalizeMarkdownHeadingMarker(
   }
   return `${start}${indent}${marker} `;
 }
-
-export const StreamingMarkdown = memo(function StreamingMarkdown({
-  error,
-}: {
-  error: boolean;
-}) {
-  return (
-    <MarkdownTextPrimitive
-      skipHtml
-      defer
-      smooth={{
-        drainMs: 180,
-        maxCharIntervalMs: 18,
-        maxCharsPerFrame: 28,
-        minCommitMs: 16,
-      }}
-      remarkPlugins={markdownPlugins}
-      components={markdownComponents}
-      preprocess={normalizeMarkdownSource}
-      className={cn(
-        markdownClassName,
-        "agent-chat-markdown",
-        error && "text-destructive",
-      )}
-    />
-  );
-});
 
 const markdownClassName = cn(
   "min-w-0 text-base leading-7 text-foreground",

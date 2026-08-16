@@ -31,7 +31,7 @@ const documentWriterCorePrompt = `文档子任务规则：
 - 收到 runtime_event.type=completion_required 且 document_revision_mode=replace_current_step 时，只替换上一轮被拒绝的正文块；不要重复已经保存在更早正文块中的内容。
 - 完成正文所需信息已经由父智能体提供；不得要求用户继续输入，不得输出聊天收尾。正文完整后自然结束。`
 
-func buildGatewayBody(agent agentmodel.Agent, power energonmodel.Power, sourceMaxOutputTokens int, role string, input map[string]any, history []any, tools []any, toolChoice any, parallelToolCalls bool) map[string]any {
+func buildGatewayBody(agent agentmodel.Agent, power energonmodel.Power, modelTargetID uint64, sourceMaxOutputTokens int, role string, input map[string]any, history []any, tools []any, toolChoice any, parallelToolCalls bool) map[string]any {
 	options := map[string]any{
 		"stream":      true,
 		"temperature": normalizeTemperature(agent.Temperature),
@@ -50,7 +50,7 @@ func buildGatewayBody(agent agentmodel.Agent, power energonmodel.Power, sourceMa
 		options["tool_choice"] = toolChoice
 		options["parallel_tool_calls"] = parallelToolCalls
 	}
-	return map[string]any{
+	result := map[string]any{
 		"power": power.Key,
 		"set": map[string]any{
 			"role":                        strings.TrimSpace(role),
@@ -60,6 +60,10 @@ func buildGatewayBody(agent agentmodel.Agent, power energonmodel.Power, sourceMa
 		"history": history,
 		"options": options,
 	}
+	if modelTargetID > 0 {
+		result["source_target_id"] = modelTargetID
+	}
+	return result
 }
 
 func modelRolePrompt(prompt string, suggestionMode string) string {

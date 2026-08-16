@@ -1,16 +1,13 @@
-import { useMemo } from "react";
-import { Check, ChevronDown, FolderTree } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { buildPowerMenu, type PowerCategory } from "../shared/power-menu";
+import type { PowerCategory } from "../shared/power-menu";
 import { PowerIcon } from "../shared/power-icon";
+import { PowerPickerMenu } from "../shared/power-picker-menu";
 import type { WorkbenchPower } from "./workbench-api";
 
 export function WorkbenchPowerPicker({
@@ -24,15 +21,12 @@ export function WorkbenchPowerPicker({
   categories: PowerCategory[];
   onValueChange: (value: number) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const selectedPower = powers.find((power) => power.id === value);
-  const menu = useMemo(
-    () => buildPowerMenu(powers, categories, (power) => power.cateID),
-    [categories, powers],
-  );
 
   return (
     <div className="workbench-picker workbench-power-picker">
-      <DropdownMenu modal={false}>
+      <DropdownMenu modal={false} open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
@@ -58,58 +52,16 @@ export function WorkbenchPowerPicker({
           align="start"
           className="workbench-picker-content workbench-power-picker-content"
         >
-          {menu.basicPowers.map((power) => (
-            <PowerPickerItem
-              key={power.id}
-              power={power}
-              selected={power.id === value}
-              onSelect={onValueChange}
-            />
-          ))}
-          {menu.groups.map((group) => (
-            <DropdownMenuSub key={group.category.id}>
-              <DropdownMenuSubTrigger className="workbench-picker-item workbench-power-group-trigger">
-                <FolderTree size={15} />
-                <span className="truncate">{group.category.name}</span>
-                <small>{group.powers.length}</small>
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="workbench-picker-content workbench-power-picker-subcontent">
-                {group.powers.map((power) => (
-                  <PowerPickerItem
-                    key={power.id}
-                    power={power}
-                    selected={power.id === value}
-                    onSelect={onValueChange}
-                  />
-                ))}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          ))}
+          <PowerPickerMenu
+            open={open}
+            value={value}
+            powers={powers}
+            categories={categories}
+            appearance="workbench"
+            onValueChange={onValueChange}
+          />
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
-  );
-}
-
-function PowerPickerItem({
-  power,
-  selected,
-  onSelect,
-}: {
-  power: WorkbenchPower;
-  selected: boolean;
-  onSelect: (value: number) => void;
-}) {
-  return (
-    <DropdownMenuItem
-      className={`workbench-picker-item workbench-power-picker-item${
-        selected ? " is-selected" : ""
-      }`}
-      onSelect={() => onSelect(power.id)}
-    >
-      <PowerIcon power={power} size={14} className="shrink-0" />
-      <span className="min-w-0 flex-1 truncate">{power.name}</span>
-      {selected ? <Check size={14} /> : null}
-    </DropdownMenuItem>
   );
 }

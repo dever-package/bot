@@ -21,7 +21,7 @@ func ParseInput(input map[string]any) (Input, error) {
 	if displayText == "" {
 		displayText = text
 	}
-	if displayText == "" && len(references) == 0 {
+	if displayText == "" && len(references) == 0 && content.InteractionResponse == nil {
 		return Input{}, fmt.Errorf("请输入消息或选择引用内容")
 	}
 	if len(parts) == 0 && displayText != "" {
@@ -37,6 +37,7 @@ func ParseInput(input map[string]any) (Input, error) {
 			Version:             ContentVersion,
 			Parts:               parts,
 			Params:              params,
+			Execution:           cloneMap(content.Execution),
 			InteractionResponse: content.InteractionResponse,
 		},
 		Params:     params,
@@ -113,6 +114,9 @@ func (content Content) Value() map[string]any {
 	if len(content.Params) > 0 {
 		result["params"] = cloneMap(content.Params)
 	}
+	if len(content.Execution) > 0 {
+		result["execution"] = cloneMap(content.Execution)
+	}
 	if content.InteractionResponse != nil {
 		result["interaction_response"] = content.InteractionResponse.Value()
 	}
@@ -188,6 +192,7 @@ func parseContent(value any) (Content, bool) {
 		Version:             ContentVersion,
 		Parts:               parts,
 		Params:              mapValue(mapped["params"]),
+		Execution:           mapValue(mapped["execution"]),
 		InteractionResponse: parseInteractionResponse(mapped["interaction_response"]),
 	}, true
 }

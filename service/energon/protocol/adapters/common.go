@@ -49,12 +49,37 @@ func hasHTTPURLScheme(value string) bool {
 	return strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://")
 }
 
+func isTextService(input botprotocol.NativeInput) bool {
+	powerKind := strings.ToLower(strings.TrimSpace(input.Power.Kind))
+	if powerKind != "" {
+		switch powerKind {
+		case "text", "llm", "chat", "llm.chat", "文本":
+			return true
+		default:
+			return false
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(input.Service.Type)) {
+	case "text", "llm", "chat", "llm.chat", "文本":
+		return true
+	default:
+		return false
+	}
+}
+
 func cloneBody(body map[string]any) map[string]any {
 	result := make(map[string]any, len(body))
 	for key, value := range body {
 		result[key] = value
 	}
 	return result
+}
+
+func setBodyDefault(body map[string]any, key string, value any) {
+	if _, exists := body[key]; exists {
+		return
+	}
+	body[key] = value
 }
 
 func preserveMediaOutputContent(output botprotocol.Output, source any) botprotocol.Output {

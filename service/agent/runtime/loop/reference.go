@@ -2,11 +2,13 @@ package loop
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeartifact "github.com/dever-package/bot/service/agent/runtime/artifact"
 	runtimereference "github.com/dever-package/bot/service/agent/runtime/reference"
+	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	energoninput "github.com/dever-package/bot/service/energon/input"
 )
@@ -26,6 +28,47 @@ func mediaReferences(values []runtimereference.Media) []runtimeprovider.MediaRef
 			URL:           current.URL,
 			ParameterKey:  current.Usage,
 		})
+	}
+	return result
+}
+
+func mergeRuntimeMediaReferences(groups ...[]runtimeprovider.MediaReference) []runtimeprovider.MediaReference {
+	result := make([]runtimeprovider.MediaReference, 0)
+	seen := map[string]struct{}{}
+	for _, values := range groups {
+		for _, current := range values {
+			if len(result) >= runtimeprovider.MaxRuntimeMediaReferences {
+				return result
+			}
+			if current.ReferenceID == 0 || strings.TrimSpace(current.URL) == "" {
+				continue
+			}
+			key := strings.Join([]string{
+				strings.ToLower(strings.TrimSpace(current.ReferenceType)),
+				strconv.FormatUint(current.ReferenceID, 10),
+				strings.TrimSpace(current.URL),
+				strings.TrimSpace(current.ParameterKey),
+			}, ":")
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			result = append(result, current)
+		}
+	}
+	return result
+}
+
+func mediaNotConsumedByPower(
+	values []runtimereference.Media,
+	policy runtimetool.PowerPolicy,
+) []runtimereference.Media {
+	result := make([]runtimereference.Media, 0, len(values))
+	for _, current := range values {
+		if policy.ConsumesReference(current.ReferenceType, current.ReferenceID, current.Usage) {
+			continue
+		}
+		result = append(result, current)
 	}
 	return result
 }

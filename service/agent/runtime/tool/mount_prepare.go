@@ -130,7 +130,8 @@ func loadMountPreparationData(ctx context.Context, request MountRequest) (mountP
 			return err
 		})
 	}
-	if request.Agent.PowerCateID > 0 {
+	policy := mountPowerPolicy(request)
+	if !policy.Restricted || len(policy.AllowedPowerIDs) > 0 {
 		group.Go("读取智能体工具能力", func() (err error) {
 			prepared.powerCandidates, err = loadPowerCandidates(ctx, request)
 			return err
@@ -151,7 +152,7 @@ func mountPreparationKey(request MountRequest) string {
 		return ""
 	}
 	agent := request.Agent
-	return fmt.Sprintf("%s:%d:%d:%d:%d:%d", key, agent.ID, agent.LLMPowerID, agent.PowerCateID, agent.KnowledgeCateID, agent.SkillPackID)
+	return fmt.Sprintf("%s:%d:%d:%d:%d:%s", key, agent.ID, agent.LLMPowerID, agent.KnowledgeCateID, agent.SkillPackID, mountPowerPolicy(request).CacheKey())
 }
 
 func mountPreparationReusable(prepared mountPreparation) bool {
@@ -245,24 +246,43 @@ func cloneMountPreparation(source mountPreparation) mountPreparation {
 }
 
 func loadPowerCandidates(ctx context.Context, request MountRequest) ([]powerMountCandidate, error) {
-	rows := energonmodel.NewPowerModel().Select(ctx, map[string]any{
-		"cate_id": request.Agent.PowerCateID,
-		"status":  1,
-	}, map[string]any{"order": "main.id asc"})
+	policy := mountPowerPolicy(request)
+	powerIDs := []uint64(nil)
+	if policy.Restricted {
+		powerIDs = policy.AllowedPowerIDs
+	}
+	rows := request.Gateway.AvailableToolPowers(ctx, powerIDs)
 	candidates := make([]powerMountCandidate, 0, len(rows))
 	for _, row := range rows {
-		if row == nil || row.ID == request.Agent.LLMPowerID || strings.EqualFold(strings.TrimSpace(row.Kind), "embeddings") {
+		if !policy.Allows(row.ID) {
 			continue
 		}
-		candidates = append(candidates, powerMountCandidate{row: *row})
+		// A restricted dialogue scope may explicitly publish the main Power as a tool.
+		if row.ID == request.Agent.LLMPowerID && !policy.Restricted {
+			continue
+		}
+		candidates = append(candidates, powerMountCandidate{row: row})
 	}
-	if err := loadPowerConfigs(ctx, request.Gateway, candidates); err != nil {
+	if err := loadPowerConfigs(ctx, request.Gateway, policy, candidates); err != nil {
 		return nil, err
 	}
 	return candidates, nil
 }
 
-func loadPowerConfigs(ctx context.Context, gateway energonservice.GatewayService, candidates []powerMountCandidate) error {
+func mountPowerPolicy(request MountRequest) PowerPolicy {
+	policy := request.PowerPolicy
+	if strings.EqualFold(strings.TrimSpace(request.Agent.Kind), agentmodel.AgentKindInternal) {
+		policy.Restricted = true
+	}
+	return policy.Normalize()
+}
+
+func loadPowerConfigs(
+	ctx context.Context,
+	gateway energonservice.GatewayService,
+	policy PowerPolicy,
+	candidates []powerMountCandidate,
+) error {
 	if len(candidates) == 0 {
 		return nil
 	}
@@ -281,7 +301,7 @@ func loadPowerConfigs(ctx context.Context, gateway energonservice.GatewayService
 			candidates[current].config, candidates[current].err = gateway.RuntimePowerParamConfig(
 				ctx,
 				candidates[current].row.Key,
-				0,
+				policy.TargetID(candidates[current].row.ID),
 			)
 			return nil
 		})

@@ -14,8 +14,12 @@ import {
 } from "react";
 import { getCompatModule } from "@dever/front-plugin";
 import { cn } from "@/lib/utils";
+import type {
+  ParamFileLibraryRenderer,
+  PowerParam,
+} from "@/components/agent/stream-request-params";
 import { copyTextToClipboard } from "../clipboard";
-import { AgentChatMarkdown, StreamingMarkdown } from "./markdown";
+import { AgentChatMarkdown } from "./markdown";
 import { AgentChatActivityView } from "./activity-view";
 import type { AgentChatActivity } from "./activity";
 import { AgentChatMessageOutput } from "./message-output";
@@ -69,6 +73,12 @@ const ReferenceContentView =
   }>;
 
 const CHAT_COLUMN_CLASS = "agent-chat-column";
+const AGENT_REFERENCE_ACTION_PLACEMENTS: NonNullable<
+  ReferenceComposerProps["referenceActionPlacements"]
+> = {
+  "@": "hidden",
+  "#": "hidden",
+};
 
 export function Thread({
   controller,
@@ -76,6 +86,11 @@ export function Thread({
   uploadBizKey,
   uploadBizName,
   allowResourceLibrary,
+  composerDisabled,
+  composerToolbar,
+  composerParameters,
+  composerParameterScopeKey,
+  renderFileLibrary,
   onUploadedFiles,
   renderMessageActions,
   renderArtifactActions,
@@ -87,6 +102,11 @@ export function Thread({
   uploadBizKey?: string;
   uploadBizName?: string;
   allowResourceLibrary?: boolean;
+  composerDisabled?: boolean;
+  composerToolbar?: ReactNode;
+  composerParameters?: PowerParam[];
+  composerParameterScopeKey?: string;
+  renderFileLibrary?: ParamFileLibraryRenderer;
   onUploadedFiles?: (
     files: ReferenceUploadedFile[],
   ) => void | Promise<void>;
@@ -193,6 +213,11 @@ export function Thread({
               uploadBizKey={uploadBizKey}
               uploadBizName={uploadBizName}
               allowResourceLibrary={allowResourceLibrary}
+              disabled={composerDisabled}
+              toolbar={composerToolbar}
+              parameters={composerParameters}
+              parameterScopeKey={composerParameterScopeKey}
+              renderFileLibrary={renderFileLibrary}
               onUploadedFiles={onUploadedFiles}
             />
           </div>
@@ -279,9 +304,7 @@ function AssistantMessage({
 }: {
   controller: AgentChatController;
   loadPreview: ReferencePreviewLoader;
-  renderMessageActions?: (
-    message: AgentChatMessageActionContext,
-  ) => ReactNode;
+  renderMessageActions?: (message: AgentChatMessageActionContext) => ReactNode;
   renderArtifactActions?: AgentChatArtifactActionRenderer;
   onOpenDocument: (document: AgentChatDocument) => void;
 }) {
@@ -364,7 +387,13 @@ function AssistantMessage({
                   if (!part.text) {
                     return null;
                   }
-                  return <StreamingMarkdown error={error} />;
+                  return (
+                    <AgentChatMarkdown
+                      text={part.text}
+                      streaming={running}
+                      error={error}
+                    />
+                  );
                 }
                 if (part.type === "tool-call") {
                   const activity = visibleActivities.find(
@@ -550,6 +579,11 @@ function Composer({
   uploadBizKey,
   uploadBizName,
   allowResourceLibrary,
+  disabled,
+  toolbar,
+  parameters,
+  parameterScopeKey,
+  renderFileLibrary,
   onUploadedFiles,
   referenceProviders,
 }: {
@@ -558,6 +592,11 @@ function Composer({
   uploadBizKey?: string;
   uploadBizName?: string;
   allowResourceLibrary?: boolean;
+  disabled?: boolean;
+  toolbar?: ReactNode;
+  parameters?: PowerParam[];
+  parameterScopeKey?: string;
+  renderFileLibrary?: ParamFileLibraryRenderer;
   onUploadedFiles?: (
     files: ReferenceUploadedFile[],
   ) => void | Promise<void>;
@@ -565,8 +604,8 @@ function Composer({
 }) {
   return (
     <ReferenceComposer
-      placeholder="发消息"
-      disabled={controller.sendDisabled && !controller.running}
+      placeholder="请输入消息，输入 @ 引用资产，输入 # 引用会话信息"
+      disabled={disabled || (controller.sendDisabled && !controller.running)}
       running={controller.running}
       stopping={controller.stopping}
       cancelable={controller.cancelable}
@@ -575,8 +614,13 @@ function Composer({
       uploadBizKey={uploadBizKey}
       uploadBizName={uploadBizName}
       allowResourceLibrary={allowResourceLibrary}
+      renderFileLibrary={renderFileLibrary}
+      fileLibraryIncludesUpload
+      referenceActionPlacements={AGENT_REFERENCE_ACTION_PLACEMENTS}
+      toolbar={toolbar}
+      parameterScopeKey={parameterScopeKey}
       onUploadedFiles={onUploadedFiles}
-      parameters={controller.inputParams}
+      parameters={parameters ?? controller.inputParams}
       providers={referenceProviders}
       showMediaAliases
       allowMultiMediaSelection

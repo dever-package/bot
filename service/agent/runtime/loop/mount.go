@@ -36,6 +36,7 @@ func (s Service) mountExecutionTools(
 		Agent:          execution.agent,
 		Gateway:        s.gateway,
 		PreparationKey: execution.requestID,
+		PowerPolicy:    execution.powerPolicy,
 		References:     execution.mediaReferences,
 		Billing:        execution.billing,
 		EnableDocument: execution.persistChat && execution.assistantMessageID > 0 && !opening,

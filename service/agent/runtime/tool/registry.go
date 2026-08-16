@@ -126,20 +126,51 @@ func (registry *Registry) AddMediaReferences(references []runtimeprovider.MediaR
 }
 
 func (registry *Registry) ValidateArguments(name string, arguments map[string]any) error {
+	_, err := registry.PrepareArguments(name, arguments)
+	return err
+}
+
+// PrepareArguments applies server-owned arguments before validation. Callers
+// that persist or inspect a tool call must use the returned map, so queued and
+// synchronous executions share exactly the same effective input.
+func (registry *Registry) PrepareArguments(name string, arguments map[string]any) (map[string]any, error) {
 	if registry == nil {
-		return fmt.Errorf("工具注册表未初始化")
+		return nil, fmt.Errorf("工具注册表未初始化")
 	}
 	current, exists := registry.items[strings.TrimSpace(name)]
 	if !exists {
-		return fmt.Errorf("当前智能体未挂载工具: %s", name)
+		return nil, fmt.Errorf("当前智能体未挂载工具: %s", name)
 	}
-	if current.ValidateArguments == nil {
-		return nil
+	prepared := cloneArguments(arguments)
+	var err error
+	if current.PrepareArguments != nil {
+		prepared, err = current.PrepareArguments(prepared)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return current.ValidateArguments(arguments)
+	if current.ValidateArguments != nil {
+		if err = current.ValidateArguments(prepared); err != nil {
+			return nil, err
+		}
+	}
+	return prepared, nil
 }
 
 func (registry *Registry) Execute(ctx context.Context, call botprotocol.ToolCall, requestID string, onOutput runtimeprovider.OutputHandler) (runtimeprovider.Result, error) {
+	return registry.ExecuteWithHistory(ctx, call, requestID, nil, onOutput)
+}
+
+// ExecuteWithHistory binds server-owned conversation context to a tool call.
+// The history is not part of the public tool schema and cannot be supplied by
+// the model. Individual providers decide whether their power kind consumes it.
+func (registry *Registry) ExecuteWithHistory(
+	ctx context.Context,
+	call botprotocol.ToolCall,
+	requestID string,
+	history []any,
+	onOutput runtimeprovider.OutputHandler,
+) (runtimeprovider.Result, error) {
 	if registry == nil {
 		return runtimeprovider.Result{}, fmt.Errorf("工具注册表未初始化")
 	}
@@ -151,7 +182,8 @@ func (registry *Registry) Execute(ctx context.Context, call botprotocol.ToolCall
 	if err != nil {
 		return runtimeprovider.Result{}, err
 	}
-	if err = registry.ValidateArguments(call.Name, arguments); err != nil {
+	arguments, err = registry.PrepareArguments(call.Name, arguments)
+	if err != nil {
 		return runtimeprovider.Result{}, err
 	}
 	result, err := current.Handle(ctx, runtimeprovider.Call{
@@ -159,6 +191,7 @@ func (registry *Registry) Execute(ctx context.Context, call botprotocol.ToolCall
 		Name:      call.Name,
 		RequestID: requestID,
 		Arguments: arguments,
+		History:   append([]any(nil), history...),
 		OnOutput:  onOutput,
 	})
 	if err != nil {
@@ -179,4 +212,12 @@ func (registry *Registry) Execute(ctx context.Context, call botprotocol.ToolCall
 		return runtimeprovider.Result{}, err
 	}
 	return result, nil
+}
+
+func cloneArguments(source map[string]any) map[string]any {
+	result := make(map[string]any, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }

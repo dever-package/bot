@@ -1,5 +1,17 @@
 import { requestRaw } from "@dever/front-plugin";
 import { isPlainRecord } from "@/lib/runtime-stream-output";
+import {
+  isPromptParam,
+  normalizePowerParamConfig,
+  type PowerParamConfig,
+} from "@/components/agent/stream-request-params";
+import {
+  normalizePowerCategory,
+  type PowerCategory,
+} from "../../body-work/shared/power-menu";
+import { createInFlightRequestLoader } from "../../body-work/shared/in-flight-request";
+import { isManualPowerSourceRule } from "../../shared/power-source-rule";
+import type { AgentChatExecutionConfig } from "./execution";
 import { readAgentChatActivities } from "./activity";
 import { buildAgentChatPreviewContent } from "./message-content";
 import { normalizeAgentChatOutput, type AgentChatOutput } from "./output";
@@ -54,6 +66,10 @@ export type AgentChatApi = {
   archiveSession: string;
 };
 
+const loadExecutionConfigRequest =
+  createInFlightRequestLoader<AgentChatExecutionConfig>();
+const loadToolFormRequest = createInFlightRequestLoader<PowerParamConfig>();
+
 export async function loadAgentInputConfig(
   api: string,
   agentKey: string,
@@ -62,7 +78,57 @@ export async function loadAgentInputConfig(
     requestRaw(api, "get", { agent_key: agentKey }),
     "读取智能体输入参数失败",
   );
-  return normalizeInputParams(data.params);
+  return normalizePowerParamConfig(data.params).params.filter(
+    (param) => !isPromptParam(param),
+  );
+}
+
+export async function loadAgentExecutionConfig(
+  api: string,
+  agentKey: string,
+): Promise<AgentChatExecutionConfig> {
+  const requestKey = `${api}:${agentKey}`;
+  return loadExecutionConfigRequest(requestKey, async () => {
+    const data = await readRequestData(
+      requestRaw(api, "get", { agent_key: agentKey }),
+      "读取智能体执行配置失败",
+    );
+    const modelSources = normalizeExecutionSources(data.model_sources);
+    const modelSourceRule = Number(data.model_source_rule || 1);
+    return {
+      modelSourceRule,
+      modelSources,
+      selectedModelTargetID: isManualPowerSourceRule(modelSourceRule)
+        ? positiveNumber(data.selected_model_target_id) ||
+          modelSources[0]?.id ||
+          0
+        : 0,
+      tools: normalizeExecutionTools(data.tools),
+      categories: normalizeExecutionCategories(data.power_cates),
+    };
+  });
+}
+
+export async function loadAgentToolForm(
+  api: string,
+  input: {
+    agentKey: string;
+    powerID: number;
+    sourceTargetID: number;
+  },
+): Promise<PowerParamConfig> {
+  const requestKey = `${api}:${input.agentKey}:${input.powerID}:${input.sourceTargetID}`;
+  return loadToolFormRequest(requestKey, async () => {
+    const data = await readRequestData(
+      requestRaw(api, "get", {
+        agent_key: input.agentKey,
+        power_id: input.powerID,
+        source_target_id: input.sourceTargetID || undefined,
+      }),
+      "读取工具参数失败",
+    );
+    return normalizePowerParamConfig(data);
+  });
 }
 
 export async function loadAgentChatDocument(
@@ -300,61 +366,54 @@ function normalizeReferenceContent(
     version: 1,
     parts: normalized,
     params: isPlainRecord(value.params) ? value.params : undefined,
+    execution: isPlainRecord(value.execution) ? value.execution : undefined,
     interaction_response: interactionResponse,
   };
 }
 
-function normalizeInputParams(value: unknown): ReferenceComposerParam[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
+function normalizeExecutionSources(value: unknown) {
+  return (Array.isArray(value) ? value : [])
     .map((row) => {
-      if (!isPlainRecord(row)) {
-        return null;
-      }
-      const id = Number(row.id || 0);
-      const key = textValue(row.key);
-      const type = textValue(row.type).toLowerCase();
-      if (!id || !key || type === "prompt") {
-        return null;
-      }
-      const options = Array.isArray(row.options)
-        ? row.options
-            .map((option) => {
-              if (!isPlainRecord(option)) {
-                return null;
-              }
-              return {
-                id: Number(option.id || 0) || textValue(option.id),
-                name: textValue(option.name) || undefined,
-                value: textValue(option.value || option.name),
-                native_value: textValue(option.native_value) || undefined,
-                sort: Number(option.sort || 0),
-              };
-            })
-            .filter((option): option is NonNullable<typeof option> =>
-              Boolean(option),
-            )
-        : [];
+      if (!isPlainRecord(row)) return null;
+      const id = positiveNumber(row.target_id || row.id);
+      if (!id) return null;
       return {
         id,
-        power_param_id: Number(row.power_param_id || 0) || undefined,
-        name: textValue(row.name || row.key),
-        key,
-        icon: textValue(row.icon) || undefined,
-        type: type || "input",
-        usage: Number(row.usage || 1),
-        value_type: textValue(row.value_type) || "string",
-        default_value: textValue(row.default_value) || undefined,
-        required: Boolean(row.required),
-        upload_rule_id: Number(row.upload_rule_id || 0) || undefined,
-        max_files: Number(row.max_files || 0) || undefined,
-        sort: Number(row.sort || 0),
-        options,
-      } satisfies ReferenceComposerParam;
+        name:
+          textValue(row.name) ||
+          [textValue(row.provider_name), textValue(row.service_name)]
+            .filter(Boolean)
+            .join(" / ") ||
+          `来源 ${id}`,
+      };
     })
-    .filter((param): param is ReferenceComposerParam => Boolean(param));
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
+}
+
+function normalizeExecutionTools(value: unknown) {
+  return (Array.isArray(value) ? value : [])
+    .map((row) => {
+      if (!isPlainRecord(row)) return null;
+      const id = positiveNumber(row.power_id || row.id);
+      if (!id) return null;
+      return {
+        id,
+        powerID: id,
+        cateID: positiveNumber(row.cate_id),
+        name: textValue(row.name) || "未命名工具",
+        key: textValue(row.key),
+        icon: textValue(row.icon),
+        kind: textValue(row.kind),
+        outputType: textValue(row.output_type),
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
+}
+
+function normalizeExecutionCategories(value: unknown): PowerCategory[] {
+  return (Array.isArray(value) ? value : [])
+    .map(normalizePowerCategory)
+    .filter((category) => category.id > 0);
 }
 
 function normalizeInteractionResponse(
@@ -410,7 +469,9 @@ function normalizeMediaKind(value: unknown) {
 function isReferenceType(
   value: string,
 ): value is import("./reference").ReferenceType {
-  return ["message", "artifact", "upload_file", "session"].includes(value);
+  return ["message", "artifact", "upload_file", "session", "asset"].includes(
+    value,
+  );
 }
 
 function positiveNumber(value: unknown) {

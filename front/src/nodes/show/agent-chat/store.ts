@@ -26,6 +26,7 @@ import {
 } from "./document";
 import {
   loadAgentChatReferences,
+  hasReferenceInputContent,
   type ReferenceComposerParam,
   type ReferenceInput,
   type ReferenceLoadRequest,
@@ -62,6 +63,7 @@ export function useAgentChatStore({
   assistantApi,
   runtimeApi,
   requestScope,
+  prepareInput,
 }: AgentChatStoreOptions): AgentChatController {
   const contextKey =
     configuredContextKey?.trim() ||
@@ -825,7 +827,8 @@ export function useAgentChatStore({
 
   const send = useCallback(
     async (input: ReferenceInput) => {
-      if (!input.text.trim() || !agentKey) {
+      const preparedInput = prepareInput ? await prepareInput(input) : input;
+      if (!hasReferenceInputContent(preparedInput) || !agentKey) {
         return;
       }
       if (!sessionIDRef.current && lazySession) {
@@ -847,7 +850,7 @@ export function useAgentChatStore({
           setSessionLoading(false);
         }
       }
-      await runs.send(input);
+      await runs.send(preparedInput);
     },
     [
       agentKey,
@@ -855,6 +858,7 @@ export function useAgentChatStore({
       assistantApi,
       contextKey,
       lazySession,
+      prepareInput,
       runs.send,
     ],
   );

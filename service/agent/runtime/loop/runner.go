@@ -24,7 +24,9 @@ type execution struct {
 	claimedAt             time.Time
 	agent                 agentmodel.Agent
 	power                 energonmodel.Power
+	modelTargetID         uint64
 	modelLimits           energonservice.ModelLimits
+	powerPolicy           runtimetool.PowerPolicy
 	workingContextTokens  int
 	sessionID             uint64
 	assistantMessageID    uint64

@@ -309,6 +309,7 @@ func executeMediaPower(
 	promptKey string,
 	requestID string,
 	input map[string]any,
+	history []any,
 	targetID uint64,
 	gateway energonservice.GatewayService,
 	transport Transport,
@@ -316,7 +317,7 @@ func executeMediaPower(
 	onOutput OutputHandler,
 ) (botprotocol.Output, error) {
 	if count <= 1 {
-		return executePower(ctx, requestID, power, input, targetID, gateway, transport, billing, onOutput)
+		return executePower(ctx, requestID, power, input, history, targetID, gateway, transport, billing, onOutput)
 	}
 
 	batchCtx, cancel := context.WithCancel(ctx)
@@ -334,7 +335,7 @@ func executeMediaPower(
 				uuid.NameSpaceOID,
 				[]byte(fmt.Sprintf("media:%s:%d", requestID, currentIndex)),
 			).String()
-			output, err := executePower(batchCtx, childRequestID, power, currentInput, targetID, gateway, transport, billing, serializedOutput)
+			output, err := executePower(batchCtx, childRequestID, power, currentInput, history, targetID, gateway, transport, billing, serializedOutput)
 			if err != nil {
 				resultMutex.Lock()
 				if firstErr == nil {

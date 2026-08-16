@@ -207,14 +207,15 @@ func (executor jobExecutor) executeTool(ctx context.Context, job agentmodel.Arti
 		return executor.writeBackArtifacts(ctx, job, pending)
 	}
 	mounted, err := runtimetool.Mount(ctx, runtimetool.MountRequest{
-		Agent:      snapshot.Agent,
-		Gateway:    executor.gateway,
-		References: snapshot.MediaReferences,
-		Billing:    snapshot.Billing,
-		Method:     snapshot.Transport.Method,
-		Host:       snapshot.Transport.Host,
-		Path:       snapshot.Transport.Path,
-		Server:     serverContext,
+		Agent:       snapshot.Agent,
+		Gateway:     executor.gateway,
+		PowerPolicy: snapshot.PowerPolicy,
+		References:  snapshot.MediaReferences,
+		Billing:     snapshot.Billing,
+		Method:      snapshot.Transport.Method,
+		Host:        snapshot.Transport.Host,
+		Path:        snapshot.Transport.Path,
+		Server:      serverContext,
 	})
 	if err != nil {
 		return err

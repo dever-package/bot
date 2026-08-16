@@ -1,7 +1,6 @@
 package loop
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -305,93 +304,7 @@ func historyMessageRole(value any) string {
 }
 
 func compactModelValue(value any, stringLimit int) any {
-	switch current := value.(type) {
-	case map[string]any:
-		result := make(map[string]any, len(current))
-		for key, item := range current {
-			if strings.EqualFold(strings.TrimSpace(key), "arguments") {
-				result[key] = compactToolArguments(item, stringLimit)
-				continue
-			}
-			if preserveModelHistoryField(key) {
-				result[key] = item
-				continue
-			}
-			result[key] = compactModelValue(item, stringLimit)
-		}
-		return result
-	case []any:
-		result := make([]any, 0, len(current))
-		for _, item := range current {
-			result = append(result, compactModelValue(item, stringLimit))
-		}
-		return result
-	case []map[string]any:
-		result := make([]map[string]any, 0, len(current))
-		for _, item := range current {
-			compacted, _ := compactModelValue(item, stringLimit).(map[string]any)
-			result = append(result, compacted)
-		}
-		return result
-	case string:
-		return compactModelString(current, stringLimit)
-	default:
-		return current
-	}
-}
-
-func preserveModelHistoryField(key string) bool {
-	switch strings.ToLower(strings.TrimSpace(key)) {
-	case "tool_call_id", "role", "name", "id":
-		return true
-	default:
-		return false
-	}
-}
-
-func compactModelString(value string, limit int) string {
-	value = strings.TrimSpace(value)
-	if limit <= 0 || runtimecontext.EstimateTextTokens(value) <= limit {
-		return value
-	}
-	runes := []rune(value)
-	low, high := 1, len(runes)
-	best := ""
-	for low <= high {
-		count := (low + high) / 2
-		head := count * 2 / 3
-		candidate := strings.TrimSpace(string(runes[:head])) + "\n...[内容已压缩]...\n" +
-			strings.TrimSpace(string(runes[len(runes)-(count-head):]))
-		if runtimecontext.EstimateTextTokens(candidate) <= limit {
-			best = candidate
-			low = count + 1
-		} else {
-			high = count - 1
-		}
-	}
-	if best != "" {
-		return best
-	}
-	return "[内容已压缩]"
-}
-
-func compactToolArguments(value any, limit int) any {
-	text, ok := value.(string)
-	if !ok {
-		return compactModelValue(value, limit)
-	}
-	text = strings.TrimSpace(text)
-	if limit <= 0 || runtimecontext.EstimateTextTokens(text) <= limit {
-		return text
-	}
-	var parsed any
-	if json.Unmarshal([]byte(text), &parsed) == nil {
-		encoded, err := json.Marshal(compactModelValue(parsed, maxInt(256, limit/3)))
-		if err == nil && runtimecontext.EstimateTextTokens(string(encoded)) <= limit {
-			return string(encoded)
-		}
-	}
-	return `{"truncated":true,"reason":"历史工具参数超过上下文预算"}`
+	return runtimecontext.CompactConversationValue(value, stringLimit)
 }
 
 func minPositiveInt(left int, right int) int {

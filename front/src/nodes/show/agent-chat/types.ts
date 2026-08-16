@@ -29,6 +29,11 @@ export type ChatMessage = {
   autoOpenDocument?: boolean;
 };
 
+export type AgentChatConversationState = {
+  sessionID: number;
+  messages: ChatMessage[];
+};
+
 export type AgentChatMessageActionContext = {
   role: "user" | "assistant";
   recordID: number;
@@ -91,6 +96,9 @@ export type AgentChatStoreOptions = {
   assistantApi: import("./api").AgentChatApi;
   runtimeApi: AgentChatRuntimeApis;
   requestScope?: Record<string, unknown>;
+  prepareInput?: (
+    input: ReferenceInput,
+  ) => ReferenceInput | Promise<ReferenceInput>;
 };
 
 export type AgentChatController = {

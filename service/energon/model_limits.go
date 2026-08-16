@@ -32,6 +32,12 @@ func (limits ModelLimits) Source() string {
 // ResolveModelLimits returns a conservative budget that remains valid when a
 // text power falls back through its active source services.
 func (s GatewayService) ResolveModelLimits(ctx context.Context, powerKey string) (ModelLimits, error) {
+	return s.ResolveModelLimitsForTarget(ctx, powerKey, 0)
+}
+
+// ResolveModelLimitsForTarget resolves the capacity of one explicitly selected
+// model source. A zero target keeps the conservative all-source behavior.
+func (s GatewayService) ResolveModelLimitsForTarget(ctx context.Context, powerKey string, targetID uint64) (ModelLimits, error) {
 	ctx = withRepoRequestCache(ctx)
 	power, ok := s.repo.PowerByName(ctx, strings.TrimSpace(powerKey))
 	if !ok || !isActive(power.Status) {
@@ -41,7 +47,19 @@ func (s GatewayService) ResolveModelLimits(ctx context.Context, powerKey string)
 		return ModelLimits{}, fmt.Errorf("模型容量只适用于文本能力: %s", power.Name)
 	}
 	targets := orderActivePowerTargets(s.repo.ListTargetsByPower(ctx, power.ID))
+	if targetID > 0 {
+		selected := targets[:0]
+		for _, target := range targets {
+			if target.ID == targetID {
+				selected = append(selected, target)
+			}
+		}
+		targets = selected
+	}
 	if len(targets) == 0 {
+		if targetID > 0 {
+			return ModelLimits{}, fmt.Errorf("指定模型来源不存在或不可用: %d", targetID)
+		}
 		return ModelLimits{}, fmt.Errorf("能力没有可用实现: %s", power.Name)
 	}
 

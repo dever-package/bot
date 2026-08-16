@@ -36,7 +36,12 @@ import type {
   ChatMessage,
   ChatStreamOutput,
 } from "./types";
-import type { ReferenceContent, ReferenceInput } from "./reference";
+import {
+  hasReferenceContent,
+  hasReferenceInputContent,
+  type ReferenceContent,
+  type ReferenceInput,
+} from "./reference";
 
 type SessionRun = {
   kind: "chat" | "opening";
@@ -602,7 +607,7 @@ export function useAgentChatRuns({
       const text = input.text.trim();
       const activeSessionID = getActiveSessionID();
       if (
-        !text ||
+        !hasReferenceInputContent(input) ||
         !agentKey ||
         !activeSessionID ||
         runsRef.current.has(activeSessionID)
@@ -870,7 +875,7 @@ function mergeRunMessages(messages: ChatMessage[], run?: SessionRun) {
   }
   return [
     ...merged,
-    ...(run.input
+    ...(run.input || hasReferenceContent(run.content)
       ? [
           {
             id: run.userMessageID,

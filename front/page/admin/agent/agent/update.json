@@ -178,26 +178,6 @@
       },
       {
         "type": "form-select",
-        "name": "工具能力分类",
-        "placeholder": "不使用能力工具",
-        "value": "form.power_cate_id",
-        "mode": "form",
-        "option": {
-          "model": "bot.energon.NewPowerCateModel",
-          "filters": {
-            "status": 1
-          },
-          "order": "sort asc,id asc"
-        },
-        "info": "只挂载该分类下启用的能力；留空则模型不能调用额外能力。",
-        "meta": {
-          "formLayout": "horizontal",
-          "tab": "setting",
-          "controlClassName": "max-w-[260px]"
-        }
-      },
-      {
-        "type": "form-select",
         "name": "知识库分类",
         "placeholder": "不使用知识库",
         "value": "form.knowledge_cate_id",
@@ -402,7 +382,6 @@
       "description": "",
       "prompt": "",
       "llm_power_id": "",
-      "power_cate_id": "",
       "knowledge_cate_id": "",
       "skill_pack_id": "",
       "memory_enabled": false,

@@ -130,6 +130,7 @@ type GraphRole struct {
 type AgentOption struct {
 	ID             uint64 `json:"id"`
 	CateID         uint64 `json:"cate_id"`
+	LLMPowerID     uint64 `json:"llm_power_id"`
 	Name           string `json:"name"`
 	Key            string `json:"key"`
 	OpeningEnabled bool   `json:"opening_enabled"`
@@ -155,6 +156,7 @@ type PowerOption struct {
 	OutputType   string                      `json:"output_type"`
 	Output       energonmodel.OutputTypeSpec `json:"output"`
 	Kind         string                      `json:"kind"`
+	SourceRule   int16                       `json:"source_rule"`
 	CreateStatus int16                       `json:"create_status"`
 }
 

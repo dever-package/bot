@@ -602,7 +602,7 @@ type AddNodeMenuState = {
 };
 
 const flowNodeTypes = {
-  workSpace: memo(SpaceNodeView),
+  workSpace: memo(SpaceNodeView, workspaceNodePropsEqual),
   storyboardFrame: StoryboardFrameNode,
 };
 
@@ -5942,16 +5942,13 @@ function buildGeneratedNodeResultPatch(
     storyboardGrid?.title,
     storyboard?.title,
   );
+  const fallbackSummary = generatedNodeSummaryText(fallbackPrompt);
   const summary =
-    storyboardGrid?.summary ||
-    storyboard?.summary ||
-    preview.text ||
-    (!looksLikeURL(outputText) ? outputText : "") ||
-    preview.imageUrl ||
-    preview.videoUrl ||
-    preview.audioUrl ||
-    preview.fileUrl ||
-    (fallbackPrompt ? `已按提示生成：${fallbackPrompt}` : "生成完成");
+    generatedNodeSummaryText(storyboardGrid?.summary) ||
+    generatedNodeSummaryText(storyboard?.summary) ||
+    generatedNodeSummaryText(preview.text) ||
+    generatedNodeSummaryText(outputText) ||
+    (fallbackSummary ? `已按提示生成：${fallbackSummary}` : "生成完成");
 
   return {
     ...(generatedTitle && node.titleMode === "auto"
@@ -5963,6 +5960,11 @@ function buildGeneratedNodeResultPatch(
     asset: result?.asset || node.asset,
     kind: result?.asset?.kind || node.power?.kind || node.kind,
   };
+}
+
+function generatedNodeSummaryText(value: unknown) {
+  const text = firstNonEmptyText(value);
+  return looksLikeURL(text) ? "" : text;
 }
 
 function buildAssetVersionNodePatch(
@@ -12238,6 +12240,7 @@ function SpaceNodeView({ data, selected }: NodeProps<Node<WorkspaceNodeData>>) {
                 className="ws-node-video-raw"
                 ariaLabel={node.title || "视频资产"}
                 objectFit="contain"
+                allowDragFromVideo
                 onMediaSize={onMediaSize}
               />
             ) : preview.imageUrl ? (
@@ -12320,6 +12323,7 @@ function SpaceNodeView({ data, selected }: NodeProps<Node<WorkspaceNodeData>>) {
                 poster={preview.videoPosterUrl}
                 ariaLabel={mediaPreviewCaption(preview) || node.title}
                 objectFit="cover"
+                allowDragFromVideo
               />
             </div>
           ) : !useContentView && preview.audioUrl ? (
@@ -12677,6 +12681,13 @@ function SpaceNodeView({ data, selected }: NodeProps<Node<WorkspaceNodeData>>) {
   );
 }
 
+function workspaceNodePropsEqual(
+  previous: NodeProps<Node<WorkspaceNodeData>>,
+  next: NodeProps<Node<WorkspaceNodeData>>,
+) {
+  return previous.data === next.data && previous.selected === next.selected;
+}
+
 function CanvasNodeErrorNotice({
   projectId,
   node,
@@ -12775,6 +12786,7 @@ function CanvasGeneratedNodeContent({
           className="nopan nowheel"
           ariaLabel={caption || "生成视频"}
           objectFit="contain"
+          allowDragFromVideo
           onMediaSize={onMediaSize}
         />
         {caption ? <p>{caption}</p> : null}

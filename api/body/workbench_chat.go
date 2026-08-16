@@ -114,6 +114,15 @@ func (Workbench) GetChatInputConfig(c *server.Context) error {
 	return botapi.WriteJSON(c, runtimeinput.LoadConfig(c.Context(), scope.AgentID), nil)
 }
 
+func (Workbench) GetChatConfig(c *server.Context) error {
+	scope, err := resolveWorkbenchChatScope(c, nil)
+	if err != nil {
+		return botapi.WriteJSON(c, nil, err)
+	}
+	data, err := workbenchRunner.DialogueConfig(c.Context(), scope)
+	return botapi.WriteJSON(c, data, err)
+}
+
 func (Workbench) PostChatRun(c *server.Context) error {
 	body, err := botapi.BindBody(c)
 	if err != nil {
@@ -132,15 +141,46 @@ func (Workbench) PostChatRun(c *server.Context) error {
 		return c.JSONPayload(200, botprotocol.BuildErrorResponse("", err).Payload())
 	}
 	input := botapi.MapFromBody(body, "input")
+	sessionID := botapi.Uint64FromBody(body, "session_id", "sessionId")
 	if targetAssetID > 0 {
 		input["_target_asset_id"] = targetAssetID
 	}
+	var resume *workbenchservice.DialogueResumeSelection
+	if interactionID := workbenchservice.DialogueInteractionID(input); interactionID != "" {
+		source, sourceErr := workbenchChatSessions.RequireInteractionSource(
+			c.Context(), sessionID, scope.AgentKey, scope.ContextKey, interactionID,
+		)
+		if sourceErr != nil {
+			return c.JSONPayload(200, botprotocol.BuildErrorResponse("", sourceErr).Payload())
+		}
+		selection, selectionErr := workbenchChatRuntime.RequireRunExecutionSelection(
+			c.Context(), source.RequestID, scope.AgentKey, scope.ContextKey,
+		)
+		if selectionErr != nil {
+			return c.JSONPayload(200, botprotocol.BuildErrorResponse("", selectionErr).Payload())
+		}
+		resume = &workbenchservice.DialogueResumeSelection{
+			ModelTargetID:       selection.ModelTargetID,
+			PowerPolicy:         selection.PowerPolicy,
+			InteractionToolName: selection.InteractionToolName,
+			InteractionToolArgs: selection.InteractionToolArgs,
+			MediaReferences:     selection.MediaReferences,
+		}
+	}
+	execution, err := workbenchRunner.PrepareDialogueExecution(c.Context(), scope, input, resume)
+	if err != nil {
+		return c.JSONPayload(200, botprotocol.BuildErrorResponse("", err).Payload())
+	}
 	response := workbenchChatRuntime.RunChat(c.Context(), runtimeloop.ChatRequest{
-		AgentIdentity: scope.AgentKey,
-		SessionID:     botapi.Uint64FromBody(body, "session_id", "sessionId"),
-		ContextKey:    scope.ContextKey,
-		Input:         input,
-		RuntimePrompt: scope.RuntimePrompt,
+		AgentIdentity:    scope.AgentKey,
+		SessionID:        sessionID,
+		ContextKey:       scope.ContextKey,
+		Input:            execution.Input,
+		RuntimePrompt:    scope.RuntimePrompt,
+		ModelTargetID:    execution.ModelTargetID,
+		PowerPolicy:      execution.PowerPolicy,
+		RequiredToolName: execution.RequiredToolName,
+		ResumeReferences: execution.MediaReferences,
 		Billing: botprotocol.BillingContext{
 			Billable: true,
 			Scene:    "agent_power",

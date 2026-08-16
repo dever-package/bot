@@ -1,4 +1,9 @@
 import type { AgentChatApi, AgentChatMessageRecord } from "./api";
+import type {
+  ParamFileLibraryRenderer,
+  PowerParam,
+} from "@/components/agent/stream-request-params";
+import type { ReactNode } from "react";
 import { listAgentChatSessions, loadAgentChatSession } from "./api";
 import {
   readAgentChatArtifacts,
@@ -84,6 +89,7 @@ export type ReferenceContent = {
   version: 1;
   parts: ReferencePart[];
   params?: Record<string, unknown>;
+  execution?: Record<string, unknown>;
   interaction_response?: InteractionResponseContent;
 };
 
@@ -98,28 +104,18 @@ export type ReferenceInput = {
   params?: Record<string, unknown>;
 };
 
-export type ReferenceComposerParam = {
-  id: string | number;
-  power_param_id?: string | number;
-  name: string;
-  key?: string;
-  icon?: string;
-  type: string;
-  usage: number;
-  value_type: string;
-  default_value?: string;
-  required?: boolean;
-  upload_rule_id?: string | number;
-  max_files?: number;
-  sort?: number;
-  options?: Array<{
-    id: string | number;
-    name?: string;
-    value: string;
-    native_value?: string;
-    sort?: number;
-  }>;
-};
+export function hasReferenceContent(content?: ReferenceContent) {
+  return Boolean(
+    content?.interaction_response ||
+    content?.parts.some((part) => part.type === "reference"),
+  );
+}
+
+export function hasReferenceInputContent(input: ReferenceInput) {
+  return Boolean(input.text.trim() || hasReferenceContent(input.content));
+}
+
+export type ReferenceComposerParam = PowerParam;
 
 export type ReferenceScope = "current" | "history";
 
@@ -182,6 +178,12 @@ export type ReferenceProvider = {
   ) => import("react").ReactNode;
 };
 
+export type ReferenceActionPlacement = "menu" | "toolbar" | "hidden";
+
+export type ReferenceActionPlacements = Partial<
+  Record<string, ReferenceActionPlacement>
+>;
+
 export type ReferenceUploadedFile = {
   id: string | number;
   name?: string;
@@ -202,6 +204,11 @@ export type ReferenceComposerProps = {
   uploadBizKey?: string;
   uploadBizName?: string;
   allowResourceLibrary?: boolean;
+  renderFileLibrary?: ParamFileLibraryRenderer;
+  fileLibraryIncludesUpload?: boolean;
+  referenceActionPlacements?: ReferenceActionPlacements;
+  toolbar?: ReactNode;
+  parameterScopeKey?: string;
   showMediaAliases?: boolean;
   allowMultiMediaSelection?: boolean;
   onUploadedFiles?: (

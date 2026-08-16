@@ -35,6 +35,7 @@ type Content struct {
 	Version             int                  `json:"version"`
 	Parts               []Part               `json:"parts"`
 	Params              map[string]any       `json:"params,omitempty"`
+	Execution           map[string]any       `json:"execution,omitempty"`
 	InteractionResponse *InteractionResponse `json:"interaction_response,omitempty"`
 }
 

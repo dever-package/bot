@@ -9,6 +9,7 @@ import (
 	dlog "github.com/shemic/dever/log"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimecontext "github.com/dever-package/bot/service/agent/runtime/context"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
@@ -117,7 +118,7 @@ func (s Service) inspectCompletion(
 	reviewExecution.billing.Billable = false
 	reviewExecution.billing.ChargeID = 0
 	reviewInput := map[string]any{
-		"agent_contract":   compactModelString(state.execution.prompt, completionReviewContractMaxTokens),
+		"agent_contract":   runtimecontext.CompactConversationText(state.execution.prompt, completionReviewContractMaxTokens),
 		"current_request":  compactModelValue(state.execution.input, completionReviewGoalMaxTokens),
 		"candidate_text":   completionReviewCandidateText(ctx, state, result),
 		"candidate_output": completionReviewCandidateOutput(result),
@@ -198,7 +199,7 @@ func (s Service) runCompletionReview(
 func completionReviewCandidateText(ctx context.Context, state *runState, result modelStepResult) string {
 	if state != nil && state.isDocumentWriter() {
 		if text := strings.TrimSpace(currentDocumentText(ctx, state.documentID)); text != "" {
-			return compactModelString(text, completionReviewCandidateMaxTokens)
+			return runtimecontext.CompactConversationText(text, completionReviewCandidateMaxTokens)
 		}
 	}
 	return completionCandidateText(state, result)
@@ -224,9 +225,9 @@ func completionReviewDeliveryScope(state *runState) map[string]any {
 
 func completionCandidateText(state *runState, result modelStepResult) string {
 	if state != nil && strings.TrimSpace(state.lastText) != "" {
-		return compactModelString(state.lastText, completionReviewCandidateMaxTokens)
+		return runtimecontext.CompactConversationText(state.lastText, completionReviewCandidateMaxTokens)
 	}
-	return compactModelString(result.Text, completionReviewCandidateMaxTokens)
+	return runtimecontext.CompactConversationText(result.Text, completionReviewCandidateMaxTokens)
 }
 
 func completionReviewHistory(state *runState) []any {

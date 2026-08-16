@@ -8,7 +8,10 @@ import {
   type ReactNode,
 } from "react";
 import { FileText } from "lucide-react";
-import { PlayableVideoPreview } from "../../shared/playable-video-preview";
+import {
+  isVideoControlRegion,
+  PlayableVideoPreview,
+} from "../../shared/playable-video-preview";
 import {
   canvasMediaGridKind,
   CanvasNodeContentView,
@@ -186,6 +189,7 @@ function PureResultPreview({
           poster={preview.videoPosterUrl}
           ariaLabel={label || "视频结果"}
           objectFit="contain"
+          allowDragFromVideo
         />
         {label ? <figcaption>{label}</figcaption> : null}
       </figure>
@@ -262,9 +266,7 @@ function shouldBlockResultDrag(event: ReactPointerEvent<HTMLDivElement>) {
   }
   const controlledVideo = target.closest("video[controls]");
   if (controlledVideo instanceof HTMLVideoElement) {
-    const bounds = controlledVideo.getBoundingClientRect();
-    const controlHeight = Math.min(56, bounds.height * 0.25);
-    return event.clientY >= bounds.bottom - controlHeight;
+    return isVideoControlRegion(controlledVideo, event.clientY);
   }
   return isInteractiveResultTarget(target, event.currentTarget);
 }

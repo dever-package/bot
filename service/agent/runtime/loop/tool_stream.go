@@ -150,12 +150,16 @@ func toolEventMeta(call botprotocol.ToolCall, definition runtimeprovider.Definit
 }
 
 func toolRequestedCount(call botprotocol.ToolCall, definition runtimeprovider.Definition) int {
-	key := strings.TrimSpace(definition.ActivityCountKey)
-	if key == "" {
-		return 1
-	}
 	arguments, err := botprotocol.ToolCallArguments(call)
 	if err != nil {
+		return 1
+	}
+	return toolRequestedCountArguments(arguments, definition)
+}
+
+func toolRequestedCountArguments(arguments map[string]any, definition runtimeprovider.Definition) int {
+	key := strings.TrimSpace(definition.ActivityCountKey)
+	if key == "" {
 		return 1
 	}
 	count, parseErr := strconv.ParseFloat(strings.TrimSpace(botprotocol.AsText(arguments[key])), 64)

@@ -3,12 +3,14 @@ package artifact
 import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
+	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 type JobSnapshot struct {
 	Agent           agentmodel.Agent                 `json:"agent"`
+	PowerPolicy     runtimetool.PowerPolicy          `json:"power_policy,omitempty"`
 	Transport       JobTransport                     `json:"transport"`
 	MediaReferences []runtimeprovider.MediaReference `json:"media_references"`
 	Scope           runtimescope.Scope               `json:"scope,omitempty"`

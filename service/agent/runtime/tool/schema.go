@@ -7,12 +7,19 @@ import (
 	energoninput "github.com/dever-package/bot/service/energon/input"
 )
 
-func powerParametersSchema(params []energonservice.PowerParam) map[string]any {
+func powerParametersSchema(params []energonservice.PowerParam, fixedParameterKeys []string) map[string]any {
+	fixedKeys := make(map[string]struct{}, len(fixedParameterKeys))
+	for _, key := range fixedParameterKeys {
+		fixedKeys[strings.TrimSpace(key)] = struct{}{}
+	}
 	properties := make(map[string]any, len(params))
 	required := make([]any, 0)
 	for _, param := range params {
 		key := strings.TrimSpace(param.Key)
 		if key == "" || strings.EqualFold(strings.TrimSpace(param.Type), "description") {
+			continue
+		}
+		if _, fixed := fixedKeys[key]; fixed {
 			continue
 		}
 		schema, hasDefault := powerParamSchema(param)

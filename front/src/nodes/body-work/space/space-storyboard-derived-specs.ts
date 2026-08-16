@@ -529,10 +529,6 @@ function storyboardVideoPrompt(
   const basePrompt =
     shot.video_prompt.trim() || storyboardShotFallbackPrompt(shot);
   const parts = [
-    storyboardNarrativeExecutionContext(storyboard, shot),
-    `入镜状态：${shot.continuity_state.entry.trim()}`,
-    `出镜状态：${shot.continuity_state.exit.trim()}`,
-    "视频必须从入镜状态开始，只完成本镜头的主要动作，并准确停在出镜状态",
     basePrompt,
     storyboardReferenceContext(references),
     shot.continue_previous

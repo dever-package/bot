@@ -38,6 +38,8 @@ type runState struct {
 	completionReviews       int
 	requiredToolName        string
 	requiredToolFailures    int
+	interactionToolName     string
+	interactionToolArgs     map[string]any
 	documentID              uint64
 	documentDeliveryReady   bool
 	documentTextSourceKey   string
@@ -77,6 +79,8 @@ func newRunState(execution execution) runState {
 		completionReviews:       checkpoint.CompletionReviews,
 		requiredToolName:        checkpoint.RequiredToolName,
 		requiredToolFailures:    checkpoint.RequiredToolFailures,
+		interactionToolName:     checkpoint.InteractionToolName,
+		interactionToolArgs:     cloneMap(checkpoint.InteractionToolArgs),
 		documentID:              checkpoint.DocumentID,
 		documentDeliveryReady:   checkpoint.DocumentDeliveryReady,
 		documentTextSourceKey:   checkpoint.DocumentTextSourceKey,
@@ -115,6 +119,8 @@ func (state *runState) Checkpoint(seq int) runCheckpoint {
 		CompletionReviews:       state.completionReviews,
 		RequiredToolName:        state.requiredToolName,
 		RequiredToolFailures:    state.requiredToolFailures,
+		InteractionToolName:     state.interactionToolName,
+		InteractionToolArgs:     cloneMap(state.interactionToolArgs),
 		DocumentID:              state.documentID,
 		DocumentDeliveryReady:   state.documentDeliveryReady,
 		DocumentTextSourceKey:   state.documentTextSourceKey,

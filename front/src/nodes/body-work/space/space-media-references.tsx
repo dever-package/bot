@@ -333,6 +333,15 @@ export function mediaUsageOptions(params: PowerParam[]): MediaUsageOption[] {
   );
 }
 
+export function firstFrameMediaUsageKey(options: MediaUsageOption[]) {
+  return (
+    options.find(
+      (option) =>
+        isFirstFrameUsage(option.key) || option.label.includes("首帧"),
+    )?.key || "firstFrame"
+  );
+}
+
 export function mediaUsageCandidates(
   options: MediaUsageOption[],
   source?: SpaceCanvasNode,

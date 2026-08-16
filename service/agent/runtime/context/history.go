@@ -128,7 +128,7 @@ func persistedHistoryComplete(history []any, output map[string]any) bool {
 }
 
 func normalizeHistory(history []any) []any {
-	groups := historyGroups(normalizeHistoryMessages(history))
+	groups := completeHistoryGroups(normalizeHistoryMessages(history))
 	selected := make([][]any, 0, len(groups))
 	messageCount := 0
 	for index := len(groups) - 1; index >= 0; index-- {
@@ -208,7 +208,7 @@ func normalizeHistoryMessage(message map[string]any) map[string]any {
 	}
 }
 
-func historyGroups(history []any) [][]any {
+func completeHistoryGroups(history []any) [][]any {
 	groups := make([][]any, 0, len(history))
 	for index := 0; index < len(history); {
 		message := history[index]

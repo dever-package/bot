@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	teammodel "github.com/dever-package/bot/model/team"
+	energonservice "github.com/dever-package/bot/service/energon"
 )
 
 type WorkbenchPowerBinding struct {
@@ -26,10 +27,24 @@ type WorkbenchRoleBinding struct {
 	RoleType        string
 	AgentID         uint64
 	AgentKey        string
+	LLMPowerID      uint64
 	OpeningEnabled  bool
 	Name            string
 	Assignment      string
 	RuntimePrompt   string
+}
+
+type WorkbenchExecutablePower struct {
+	TeamPowerID uint64      `json:"team_power_id"`
+	Power       PowerOption `json:"power"`
+}
+
+type WorkbenchDialogueConfig struct {
+	ModelPower            PowerOption                  `json:"model_power"`
+	ModelSourceRule       int16                        `json:"model_source_rule"`
+	ModelSources          []energonservice.PowerSource `json:"model_sources"`
+	SelectedModelTargetID uint64                       `json:"selected_model_target_id"`
+	Tools                 []WorkbenchExecutablePower   `json:"tools"`
 }
 
 func (s Service) WorkbenchCatalog(ctx context.Context, teamID uint64) (map[string]any, error) {
@@ -55,27 +70,12 @@ func (s Service) WorkbenchCatalog(ctx context.Context, teamID uint64) (map[strin
 	if err != nil {
 		return nil, err
 	}
-	powerIDs := make([]uint64, 0, len(graph.TeamPowers))
-	for _, teamPower := range graph.TeamPowers {
-		if isWorkbenchPowerAvailable(teamPower) {
-			powerIDs = append(powerIDs, teamPower.PowerID)
-		}
-	}
-	powerByID := make(map[uint64]PowerOption, len(powerIDs))
-	for _, power := range s.repo.ListPowersByIDs(ctx, powerIDs) {
-		powerByID[power.ID] = power
-	}
-	powers := make([]map[string]any, 0, len(graph.TeamPowers))
-	for _, teamPower := range graph.TeamPowers {
-		if !isWorkbenchPowerAvailable(teamPower) {
-			continue
-		}
-		power, powerExists := powerByID[teamPower.PowerID]
-		if !powerExists {
-			continue
-		}
+	availableTools := s.workbenchAvailableTools(ctx, graph)
+	powers := make([]map[string]any, 0, len(availableTools))
+	for _, tool := range availableTools {
+		power := tool.Power
 		powers = append(powers, map[string]any{
-			"id":          teamPower.ID,
+			"id":          tool.TeamPowerID,
 			"power_id":    power.ID,
 			"cate_id":     power.CateID,
 			"name":        power.Name,
@@ -186,11 +186,47 @@ func (s Service) ResolveWorkbenchRole(ctx context.Context, teamID uint64, roleID
 		return WorkbenchRoleBinding{
 			TeamID: graph.Team.ID, TeamName: graph.Team.Name, TeamDescription: graph.Team.Description,
 			ReleaseID: release.ID, RoleID: role.ID, RoleType: role.RoleType,
-			AgentID: agent.ID, AgentKey: agent.Key, OpeningEnabled: agent.OpeningEnabled,
-			Name: role.Name, Assignment: role.Assignment, RuntimePrompt: roleRuntimePrompt(&role),
+			AgentID: agent.ID, AgentKey: agent.Key, LLMPowerID: agent.LLMPowerID,
+			OpeningEnabled: agent.OpeningEnabled,
+			Name:           role.Name, Assignment: role.Assignment, RuntimePrompt: roleRuntimePrompt(&role),
 		}, nil
 	}
 	return WorkbenchRoleBinding{}, fmt.Errorf("当前团队发布版本中不存在该对话角色")
+}
+
+func (s Service) WorkbenchDialogueConfig(ctx context.Context, binding WorkbenchRoleBinding) (WorkbenchDialogueConfig, error) {
+	modelPower, exists := s.repo.FindPowerOption(ctx, binding.LLMPowerID, "")
+	if !exists || !strings.EqualFold(strings.TrimSpace(modelPower.Kind), "text") {
+		return WorkbenchDialogueConfig{}, fmt.Errorf("当前角色的文本模型能力不可用")
+	}
+	modelSources, err := s.gateway.AvailablePowerSources(ctx, modelPower.Key)
+	if err != nil {
+		return WorkbenchDialogueConfig{}, err
+	}
+	if len(modelSources) == 0 {
+		return WorkbenchDialogueConfig{}, fmt.Errorf("当前角色的文本模型没有可用来源")
+	}
+	_, graph, err := s.runtimeGraphByRelease(ctx, binding.TeamID, binding.ReleaseID)
+	if err != nil {
+		return WorkbenchDialogueConfig{}, err
+	}
+	tools := s.workbenchAvailableTools(ctx, graph)
+	return workbenchDialogueConfig(modelPower, modelSources, tools), nil
+}
+
+func workbenchDialogueConfig(
+	modelPower PowerOption,
+	modelSources []energonservice.PowerSource,
+	tools []WorkbenchExecutablePower,
+) WorkbenchDialogueConfig {
+	selectedTargetID := uint64(0)
+	if energonservice.IsManualPowerSourceRule(modelPower.SourceRule) && len(modelSources) > 0 {
+		selectedTargetID = modelSources[0].TargetID
+	}
+	return WorkbenchDialogueConfig{
+		ModelPower: modelPower, ModelSourceRule: modelPower.SourceRule, ModelSources: modelSources,
+		SelectedModelTargetID: selectedTargetID, Tools: tools,
+	}
 }
 
 func isWorkbenchDialogueRole(role teammodel.Role) bool {
@@ -203,14 +239,53 @@ func isWorkbenchPowerAvailable(teamPower teammodel.TeamPower) bool {
 		normalizeTeamPowerHomeStatus(teamPower.HomeStatus) == teammodel.StatusEnabled
 }
 
+func (s Service) workbenchAvailableTools(ctx context.Context, graph runtimeGraph) []WorkbenchExecutablePower {
+	powerIDs := make([]uint64, 0, len(graph.TeamPowers))
+	for _, teamPower := range graph.TeamPowers {
+		if isWorkbenchPowerAvailable(teamPower) {
+			powerIDs = append(powerIDs, teamPower.PowerID)
+		}
+	}
+	powerByID := make(map[uint64]PowerOption, len(powerIDs))
+	for _, power := range s.repo.ListPowersByIDs(ctx, powerIDs) {
+		powerByID[power.ID] = power
+	}
+	candidateIDs := make([]uint64, 0, len(powerByID))
+	for _, power := range powerByID {
+		if isWorkbenchToolPower(power) {
+			candidateIDs = append(candidateIDs, power.ID)
+		}
+	}
+	available := s.gateway.AvailablePowerIDs(ctx, candidateIDs)
+	result := make([]WorkbenchExecutablePower, 0, len(graph.TeamPowers))
+	for _, teamPower := range graph.TeamPowers {
+		power, exists := powerByID[teamPower.PowerID]
+		if !isWorkbenchPowerAvailable(teamPower) || !exists || !isWorkbenchToolPower(power) {
+			continue
+		}
+		if _, exists = available[power.ID]; !exists {
+			continue
+		}
+		result = append(result, WorkbenchExecutablePower{TeamPowerID: teamPower.ID, Power: power})
+	}
+	return result
+}
+
+func isWorkbenchToolPower(power PowerOption) bool {
+	return power.ID > 0 && !strings.EqualFold(strings.TrimSpace(power.Kind), "embeddings")
+}
+
 func (s Service) workbenchPowerBinding(ctx context.Context, releaseID uint64, graph runtimeGraph, teamPowerID uint64) (WorkbenchPowerBinding, error) {
 	for _, teamPower := range graph.TeamPowers {
 		if teamPower.ID != teamPowerID || !isWorkbenchPowerAvailable(teamPower) {
 			continue
 		}
 		power, exists := s.repo.FindPowerOption(ctx, teamPower.PowerID, "")
-		if !exists {
+		if !exists || !isWorkbenchToolPower(power) {
 			return WorkbenchPowerBinding{}, fmt.Errorf("当前团队能力不可用")
+		}
+		if _, available := s.gateway.AvailablePowerIDs(ctx, []uint64{power.ID})[power.ID]; !available {
+			return WorkbenchPowerBinding{}, fmt.Errorf("当前团队能力没有可用来源")
 		}
 		return WorkbenchPowerBinding{
 			TeamID: graph.Team.ID, TeamName: graph.Team.Name,

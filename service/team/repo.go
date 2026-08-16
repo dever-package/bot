@@ -334,6 +334,7 @@ func listAgentOptions(ctx context.Context, filter map[string]any) []AgentOption 
 		result = append(result, AgentOption{
 			ID:             row.ID,
 			CateID:         row.CateID,
+			LLMPowerID:     row.LLMPowerID,
 			Name:           strings.TrimSpace(row.Name),
 			Key:            strings.TrimSpace(row.Key),
 			OpeningEnabled: row.OpeningEnabled,
@@ -533,6 +534,7 @@ func powerOptionFromModel(row energonmodel.Power) PowerOption {
 		OutputType:   energonmodel.NormalizeOutputType(row.OutputType),
 		Output:       outputTypeSpec(row.OutputType),
 		Kind:         energonmodel.NormalizePowerKind(row.Kind),
+		SourceRule:   row.SourceRule,
 		CreateStatus: teammodel.StatusEnabled,
 	}
 }

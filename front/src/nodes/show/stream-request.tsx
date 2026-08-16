@@ -35,6 +35,7 @@ import { useUploadRuleMetas } from '@/hooks/use-upload-rule-metas'
 import { copyTextToClipboard } from './clipboard'
 import {
   PowerParamPopover,
+  buildPowerParamFileUsageOptions,
   PowerParamField,
   buildDefaultParamValues,
   buildRequestInput,
@@ -46,12 +47,14 @@ import {
   isToolbarParam,
   normalizePowerParamConfig,
   paramFilesRequestValue,
+  resolvePowerParamFileKinds,
   shouldDisplayPowerParam,
   validateMainParams,
   type ParamFileMap,
   type ParamFileLibraryRenderer,
   type ParamUploadedFile,
   type ParamValueMap,
+  type PowerParamFileUsageOption,
   type PowerParamSource,
   type PowerParam,
 } from '@/components/agent/stream-request-params'
@@ -72,6 +75,7 @@ import type {
 } from './agent-chat/reference'
 import { useAssetReferenceProvider } from '../body-work/asset/asset-reference-provider'
 import { AssetParamPicker } from '../body-work/asset/asset-param-picker'
+import { isManualPowerSourceRule } from '../shared/power-source-rule'
 import {
   StreamPowerHistoryPanel,
   StreamPowerHistoryTrigger,
@@ -88,17 +92,10 @@ type ReferenceEditorProps = {
   placeholder?: string
   disabled?: boolean
   providers?: ReferenceProvider[]
-  usageOptions?: ReferenceUsageOption[]
+  usageOptions?: PowerParamFileUsageOption[]
   showMediaAliases?: boolean
   allowMultiMediaSelection?: boolean
   onChange: (value: string, content: ReferenceContent) => void
-}
-
-type ReferenceUsageOption = {
-  key: string
-  label: string
-  acceptedKinds?: string[]
-  maxFiles?: number
 }
 
 const ReferenceEditor = getCompatModule(
@@ -116,8 +113,6 @@ type StreamOutput = {
   liveOutput: EnergonOutput | null
   finalOutput: EnergonOutput | null
 }
-
-const SOURCE_RULE_PICK = 2
 
 const EMPTY_OUTPUT: StreamOutput = {
   text: '',
@@ -269,7 +264,7 @@ export function StreamPowerRunner({
     [displayedPowerParams]
   )
   const referenceUsageOptions = useMemo(
-    () => powerReferenceUsageOptions(activePowerParams),
+    () => buildPowerParamFileUsageOptions(activePowerParams),
     [activePowerParams]
   )
   const hasConfiguredParams = powerParams.length > 0
@@ -285,7 +280,7 @@ export function StreamPowerRunner({
     [appearance, powerSources]
   )
   const sourceReady =
-    sourceRule !== SOURCE_RULE_PICK || activeSelectedSourceID.length > 0
+    !isManualPowerSourceRule(sourceRule) || activeSelectedSourceID.length > 0
   const nowMs = useStreamClock(timing?.status === 'running')
   const renderParamFileLibrary: ParamFileLibraryRenderer | undefined =
     appearance === 'body' && assetReferenceTeamID > 0
@@ -490,7 +485,7 @@ export function StreamPowerRunner({
           stream: true,
         },
       }
-      if (sourceRule === SOURCE_RULE_PICK && activeSelectedSourceID) {
+      if (isManualPowerSourceRule(sourceRule) && activeSelectedSourceID) {
         body.source_target_id = activeSelectedSourceID
       }
 
@@ -701,7 +696,7 @@ export function StreamPowerRunner({
     if (appliedHistorySourceRef.current !== selectionKey) {
       appliedHistorySourceRef.current = selectionKey
       if (
-        sourceRule === SOURCE_RULE_PICK &&
+        isManualPowerSourceRule(sourceRule) &&
         selectedHistorySourceTargetID > 0 &&
         powerSources.some(
           (source) => source.id === String(selectedHistorySourceTargetID)
@@ -891,7 +886,7 @@ export function StreamPowerRunner({
             </span>
           ) : null}
 
-          {sourceRule === SOURCE_RULE_PICK && powerSources.length > 0 ? (
+          {isManualPowerSourceRule(sourceRule) && powerSources.length > 0 ? (
             <div className="stream-power-source mb-3">
               {appearance === 'body' ? (
                 <span className="stream-power-source-label">选择模型</span>
@@ -1086,13 +1081,13 @@ function PowerPromptReferenceField({
   content?: ReferenceContent
   providers: ReferenceProvider[]
   assetReferenceTeamID: number
-  usageOptions: ReferenceUsageOption[]
+  usageOptions: PowerParamFileUsageOption[]
   disabled: boolean
   onChange: (value: string, content: ReferenceContent) => void
 }) {
   const assetReferenceProvider = useAssetReferenceProvider({
     teamID: assetReferenceTeamID,
-    allowedKinds: referenceAcceptedKinds(param),
+    allowedKinds: resolvePowerParamFileKinds(param),
   })
   const activeProviders = useMemo(
     () =>
@@ -1141,53 +1136,9 @@ function PowerPromptReferenceField({
   )
 }
 
-function powerReferenceUsageOptions(
-  params: PowerParam[]
-): ReferenceUsageOption[] {
-  return params.flatMap((param) => {
-    if (param.type !== 'file' && param.type !== 'files') {
-      return []
-    }
-    const key = inputKeyForParam(param)
-    if (!key) {
-      return []
-    }
-    return [
-      {
-        key,
-        label: String(param.name || key),
-        acceptedKinds: referenceAcceptedKinds(param),
-        maxFiles:
-          param.type === 'files' ? Math.max(0, Number(param.max_files || 0)) : 1,
-      },
-    ]
-  })
-}
-
-function referenceAcceptedKinds(param: PowerParam) {
-  const supported = new Set(['image', 'video', 'audio', 'file'])
-  const configured = Array.from(
-    new Set(
-      (param.accepted_kinds || param.asset_kinds || [])
-        .map((kind) => String(kind || '').trim().toLowerCase())
-        .filter((kind) => supported.has(kind))
-    )
-  )
-  if (configured.length > 0) {
-    return configured
-  }
-  const identity = `${param.name || ''} ${param.key || ''}`.toLowerCase()
-  if (/video|视频/.test(identity)) return ['video']
-  if (/audio|music|音频|音乐/.test(identity)) return ['audio']
-  if (/image|img|photo|picture|图片|图像|参考图|首帧|尾帧/.test(identity)) {
-    return ['image']
-  }
-  return ['image', 'video', 'audio', 'file']
-}
-
 function validatePowerReferenceContents(
   contents: Record<string, ReferenceContent>,
-  usageOptions: ReferenceUsageOption[]
+  usageOptions: PowerParamFileUsageOption[]
 ) {
   const counts = new Map<string, number>()
   for (const content of Object.values(contents)) {

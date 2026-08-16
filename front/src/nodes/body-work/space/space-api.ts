@@ -7,6 +7,7 @@ import {
   normalizeProjectAsset,
   normalizeSpaceBootstrap,
 } from "./space-model";
+import { storyboardExecutionCanvas } from "./space-storyboard-run";
 import { persistedCanvasState } from "./space-canvas-state";
 import {
   successfulResponseData,
@@ -124,7 +125,7 @@ export async function runSpaceCanvas(input: {
     request_id: input.requestId || "",
     single_node: Boolean(input.singleNode),
     execution_scope: input.executionScope || "",
-    canvas: persistedCanvasState(input.canvas),
+    canvas: persistedCanvasState(storyboardExecutionCanvas(input.canvas)),
     input: input.runInput || {},
   });
   return successfulResponseData(result, "画布运行失败");

@@ -46,17 +46,21 @@ const (
 )
 
 type ChatRequest struct {
-	AgentIdentity string
-	SessionID     uint64
-	ContextKey    string
-	Input         map[string]any
-	RuntimePrompt string
-	Billing       botprotocol.BillingContext
-	Method        string
-	Host          string
-	Path          string
-	Headers       map[string]string
-	Server        *server.Context
+	AgentIdentity    string
+	SessionID        uint64
+	ContextKey       string
+	Input            map[string]any
+	RuntimePrompt    string
+	ModelTargetID    uint64
+	PowerPolicy      runtimetool.PowerPolicy
+	RequiredToolName string
+	ResumeReferences []runtimeprovider.MediaReference
+	Billing          botprotocol.BillingContext
+	Method           string
+	Host             string
+	Path             string
+	Headers          map[string]string
+	Server           *server.Context
 }
 
 type Service struct {
@@ -156,6 +160,7 @@ func (s Service) runChat(ctx context.Context, request ChatRequest, opening bool)
 		Agent:          agent,
 		Gateway:        s.gateway,
 		PreparationKey: requestID,
+		PowerPolicy:    request.PowerPolicy,
 		BuiltinOnly:    opening,
 	})
 	if response := parsedInput.Content.InteractionResponse; response != nil {
@@ -169,10 +174,14 @@ func (s Service) runChat(ctx context.Context, request ChatRequest, opening bool)
 		prepareGroup     runtimeasync.Group
 	)
 	if !opening {
-		prepareGroup.Go("规范化智能体参数", func() (currentErr error) {
-			normalizedParams, currentErr = runtimeinput.Normalize(ctx, agent.ID, parsedInput.Params, parsedInput.References)
-			return currentErr
-		})
+		if request.PowerPolicy.SelectedPowerID > 0 {
+			normalizedParams = map[string]any{}
+		} else {
+			prepareGroup.Go("规范化智能体参数", func() (currentErr error) {
+				normalizedParams, currentErr = runtimeinput.Normalize(ctx, agent.ID, parsedInput.Params, parsedInput.References)
+				return currentErr
+			})
+		}
 	}
 	prepareGroup.Go("读取文本模型能力", func() (currentErr error) {
 		power, currentErr = runtimecontext.ResolveTextPower(ctx, agent.LLMPowerID)
@@ -218,7 +227,7 @@ func (s Service) runChat(ctx context.Context, request ChatRequest, opening bool)
 		return currentErr
 	})
 	contextGroup.Go("读取模型容量", func() (currentErr error) {
-		modelLimits, currentErr = s.gateway.ResolveModelLimits(ctx, power.Key)
+		modelLimits, currentErr = s.gateway.ResolveModelLimitsForTarget(ctx, power.Key, request.ModelTargetID)
 		return currentErr
 	})
 	if prepareErr := contextGroup.Wait(); prepareErr != nil {
@@ -254,22 +263,26 @@ func (s Service) runChat(ctx context.Context, request ChatRequest, opening bool)
 	if !opening {
 		toolReferences = attachBoundUploads(mediaReferences(resolvedReferences.Media), boundUploads)
 		toolReferences = withActiveSeriesReference(ctx, *session, toolReferences)
+		toolReferences = mergeRuntimeMediaReferences(toolReferences, request.ResumeReferences)
 		modelInput = runtimereference.ModelInput(input, parsedInput, resolvedReferences.Context)
 	}
 	if !opening && len(resolvedReferences.Media) > 0 {
-		powerConfig, configErr := s.gateway.RuntimePowerParamConfig(ctx, power.Key, 0)
-		if configErr == nil {
-			modelInput, configErr = bindResolvedMediaInput(
-				modelInput,
-				powerConfig.Params,
-				resolvedReferences.Media,
-			)
-		}
-		if configErr != nil {
-			_ = s.chat.CompleteRunTurn(ctx, runtimechat.RunTurnCompletion{
-				RequestID: requestID, Status: runStatusFail, Error: configErr.Error(),
-			})
-			return botprotocol.BuildErrorResponse(requestID, configErr).Payload()
+		modelMedia := mediaNotConsumedByPower(resolvedReferences.Media, request.PowerPolicy)
+		if len(modelMedia) > 0 {
+			powerConfig, configErr := s.modelPowerParamConfig(ctx, power.Key, request.ModelTargetID)
+			if configErr == nil {
+				modelInput, configErr = bindResolvedMediaInput(
+					modelInput,
+					powerConfig.Params,
+					modelMedia,
+				)
+			}
+			if configErr != nil {
+				_ = s.chat.CompleteRunTurn(ctx, runtimechat.RunTurnCompletion{
+					RequestID: requestID, Status: runStatusFail, Error: configErr.Error(),
+				})
+				return botprotocol.BuildErrorResponse(requestID, configErr).Payload()
+			}
 		}
 	}
 	if len(assembled.Context) > 0 {
@@ -283,7 +296,9 @@ func (s Service) runChat(ctx context.Context, request ChatRequest, opening bool)
 	execution, err := s.createExecution(ctx, requestID, executionSpec{
 		Agent:              agent,
 		Power:              power,
+		ModelTargetID:      request.ModelTargetID,
 		ModelLimits:        modelLimits,
+		PowerPolicy:        request.PowerPolicy,
 		SessionID:          session.ID,
 		AssistantMessageID: turn.AssistantMessageID,
 		Prompt:             assembled.Prompt,
@@ -301,6 +316,7 @@ func (s Service) runChat(ctx context.Context, request ChatRequest, opening bool)
 		RequestedAt:        requestedAt,
 		PriorKnowledgeUsed: turn.PriorKnowledgeUsed,
 		PriorLoadedSkills:  turn.PriorLoadedSkills,
+		RequiredToolName:   request.RequiredToolName,
 	})
 	if err != nil {
 		return botprotocol.BuildErrorResponse(requestID, err).Payload()
@@ -318,6 +334,17 @@ func (s Service) runChat(ctx context.Context, request ChatRequest, opening bool)
 	}
 	execution.close()
 	return startPayload
+}
+
+func (s Service) modelPowerParamConfig(
+	ctx context.Context,
+	powerKey string,
+	modelTargetID uint64,
+) (energonservice.PowerParamConfig, error) {
+	if modelTargetID > 0 {
+		return s.gateway.PowerTargetParamConfig(ctx, powerKey, modelTargetID)
+	}
+	return s.gateway.RuntimePowerParamConfig(ctx, powerKey, 0)
 }
 
 func openingRequestID(sessionID uint64) string {

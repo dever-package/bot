@@ -9,6 +9,7 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 	energonmodel "github.com/dever-package/bot/model/energon"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
+	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
@@ -28,7 +29,9 @@ type executionSnapshot struct {
 	RequestedAt          time.Time                        `json:"requested_at"`
 	Agent                agentmodel.Agent                 `json:"agent"`
 	Power                energonmodel.Power               `json:"power"`
+	ModelTargetID        uint64                           `json:"model_target_id,omitempty"`
 	ModelLimits          energonservice.ModelLimits       `json:"model_limits"`
+	PowerPolicy          runtimetool.PowerPolicy          `json:"power_policy,omitempty"`
 	WorkingContextTokens int                              `json:"working_context_tokens"`
 	SessionID            uint64                           `json:"session_id,omitempty"`
 	AssistantMessageID   uint64                           `json:"assistant_message_id,omitempty"`
@@ -74,6 +77,8 @@ type runCheckpoint struct {
 	CompletionReviews       int                              `json:"completion_reviews,omitempty"`
 	RequiredToolName        string                           `json:"required_tool_name,omitempty"`
 	RequiredToolFailures    int                              `json:"required_tool_failures,omitempty"`
+	InteractionToolName     string                           `json:"interaction_tool_name,omitempty"`
+	InteractionToolArgs     map[string]any                   `json:"interaction_tool_args,omitempty"`
 	DocumentID              uint64                           `json:"document_id,omitempty"`
 	DocumentDeliveryReady   bool                             `json:"document_delivery_ready,omitempty"`
 	DocumentTextSourceKey   string                           `json:"document_text_source_key,omitempty"`
@@ -92,7 +97,9 @@ func snapshotFromExecution(execution execution) executionSnapshot {
 		RequestedAt:          execution.requestedAt,
 		Agent:                execution.agent,
 		Power:                execution.power,
+		ModelTargetID:        execution.modelTargetID,
 		ModelLimits:          execution.modelLimits,
+		PowerPolicy:          execution.powerPolicy.Normalize(),
 		WorkingContextTokens: execution.workingContextTokens,
 		SessionID:            execution.sessionID,
 		AssistantMessageID:   execution.assistantMessageID,
@@ -193,6 +200,8 @@ func normalizeCheckpoint(value runCheckpoint) runCheckpoint {
 	if value.RequiredToolName == "" {
 		value.RequiredToolFailures = 0
 	}
+	value.InteractionToolName = strings.TrimSpace(value.InteractionToolName)
+	value.InteractionToolArgs = cloneMap(value.InteractionToolArgs)
 	value.DocumentTextSourceKey = strings.TrimSpace(value.DocumentTextSourceKey)
 	if value.DocumentID == 0 {
 		value.DocumentDeliveryReady = false

@@ -102,15 +102,7 @@ func buildOpenAIChatRequest(input botprotocol.NativeInput, path string) botprovi
 	}
 	applyToolOptionOverrides(body, input.Request.Options)
 
-	messages := botprotocol.BuildOpenAIMessagesFromParts(
-		input.Request.Set,
-		input.Request.History,
-		mapped.PromptInput(excludedPromptKeys),
-		mapped.PromptOptions("用户输入"),
-	)
-	if len(messages) > 0 {
-		body["messages"] = messages
-	}
+	applyOpenAIChatMessages(body, input, mapped, excludedPromptKeys, false)
 	if nativeName := nativeModelName(input.ServiceAPI); nativeName != "" {
 		body["model"] = nativeName
 	}
@@ -144,6 +136,9 @@ func buildOpenAIConfiguredRequest(input botprotocol.NativeInput, path string) bo
 	for key, value := range mapped.NativeBody() {
 		body[key] = value
 	}
+	if isOpenAIConfiguredChatRequest(input, path) {
+		applyOpenAIChatMessages(body, input, mapped, mapped.InputKeySet(), true)
+	}
 	applyToolOptionOverrides(body, input.Request.Options)
 	if nativeName := nativeModelName(input.ServiceAPI); nativeName != "" {
 		setBodyDefault(body, "model", nativeName)
@@ -158,6 +153,71 @@ func buildOpenAIConfiguredRequest(input botprotocol.NativeInput, path string) bo
 		Headers: headers,
 		Body:    body,
 	}
+}
+
+func applyOpenAIChatMessages(
+	body map[string]any,
+	input botprotocol.NativeInput,
+	mapped botprotocol.MappedInput,
+	excludedPromptKeys map[string]bool,
+	preserveMappedMessages bool,
+) {
+	if body == nil || input.Request == nil {
+		return
+	}
+	if preserveMappedMessages {
+		if mappedMessages := configuredOpenAIMessages(body); len(mappedMessages) > 0 {
+			contextMessages := botprotocol.BuildOpenAIMessagesFromParts(
+				input.Request.Set,
+				input.Request.History,
+				nil,
+				mapped.PromptOptions("用户输入"),
+			)
+			body["messages"] = append(contextMessages, mappedMessages...)
+			return
+		}
+	}
+	messages := botprotocol.BuildOpenAIMessagesFromParts(
+		input.Request.Set,
+		input.Request.History,
+		mapped.PromptInput(excludedPromptKeys),
+		mapped.PromptOptions("用户输入"),
+	)
+	if len(messages) > 0 {
+		body["messages"] = messages
+	}
+}
+
+func configuredOpenAIMessages(body map[string]any) []any {
+	if body == nil {
+		return nil
+	}
+	switch current := body["messages"].(type) {
+	case []any, []map[string]any:
+		return botprotocol.NormalizeAnyList(current)
+	case map[string]any:
+		if len(current) == 0 {
+			return nil
+		}
+		message := cloneBody(current)
+		setBodyDefault(message, "role", "user")
+		return []any{message}
+	case string:
+		if text := strings.TrimSpace(current); text != "" {
+			return []any{map[string]any{"role": "user", "content": text}}
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+func isOpenAIConfiguredChatRequest(input botprotocol.NativeInput, path string) bool {
+	if !isTextService(input) {
+		return false
+	}
+	path = strings.ToLower(strings.TrimSpace(path))
+	return strings.Contains(path, "chat/completions")
 }
 
 func skipOpenAIConfiguredOption(input botprotocol.NativeInput, key string) bool {

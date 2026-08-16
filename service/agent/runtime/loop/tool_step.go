@@ -29,6 +29,10 @@ func (s Service) runToolStep(ctx context.Context, controller *runController, sta
 	}
 
 	definition, _ := state.execution.registry.Definition(call.Name)
+	if completed.err == nil && len(completed.result.Interaction) > 0 {
+		state.interactionToolName = strings.TrimSpace(call.Name)
+		state.interactionToolArgs, _ = botprotocol.ToolCallArguments(call)
+	}
 	if !isDocumentArtifactTool(state, definition) {
 		state.AbsorbToolOutput(completed.result.Content, definition)
 	}
@@ -203,7 +207,7 @@ func (s Service) executeToolStep(ctx context.Context, controller *runController,
 	if toolErr == nil && !recovered {
 		toolCtx, cancel := operationContext(ctx, definition.RequestTimeout(toolRequestTimeout))
 		controller.SetChild(childRequestID)
-		toolResult, toolErr = state.execution.registry.Execute(toolCtx, call, childRequestID, func(output map[string]any) error {
+		toolResult, toolErr = state.execution.registry.ExecuteWithHistory(toolCtx, call, childRequestID, toolConversationHistory(state), func(output map[string]any) error {
 			if !streamActivity {
 				return nil
 			}
@@ -255,6 +259,23 @@ func (s Service) executeToolStep(ctx context.Context, controller *runController,
 		_ = s.writeToolFinished(ctx, state.execution, call, definition, toolResult, toolErr)
 	}
 	return result, false
+}
+
+// toolConversationHistory removes the current incomplete Function Calling
+// group. Text powers receive the complete conversation through the current user
+// turn, while media powers ignore this server-owned history entirely.
+func toolConversationHistory(state *runState) []any {
+	if state == nil || len(state.history) == 0 {
+		return nil
+	}
+	end := len(state.history)
+	for index := end - 1; index >= 0; index-- {
+		if historyMessageHasToolCalls(state.history[index]) {
+			end = index
+			break
+		}
+	}
+	return append([]any(nil), state.history[:end]...)
 }
 
 func buildToolStepResult(

@@ -27,6 +27,7 @@ var botDataMigrations = []dataMigrationSpec{
 	{key: "energon.video-compose.v1", run: EnsureEnergonVideoComposePower},
 	{key: "energon.storyboard-grid.v1", run: EnsureEnergonStoryboardGridPower},
 	{key: "asset.audio-covers.v1", run: MigrateLegacyAudioCovers},
+	{key: "asset.generated-data-images.v1", run: MigrateLegacyGeneratedDataImages},
 	{
 		key:       "knowledge.concept-sources.v1",
 		run:       knowledge.MigrateLegacyConceptSources,

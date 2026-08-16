@@ -394,6 +394,7 @@ func normalizeStoryboardShots(value any, materialTypes map[string]string, materi
 	speechIDs := make(map[string]struct{})
 	captionIDs := make(map[string]struct{})
 	previousExitState := ""
+	var previousStableMaterialIDs map[string]struct{}
 	for index, item := range items {
 		row, ok := item.(map[string]any)
 		if !ok {
@@ -441,6 +442,13 @@ func normalizeStoryboardShots(value any, materialTypes map[string]string, materi
 		continuePrevious, _ := row["continue_previous"].(bool)
 		matchesPrevious := index > 0 && matchPrevious
 		continuesPrevious := index > 0 && continuePrevious
+		stableMaterialIDs := botmodel.StoryboardStableMaterialIDs(materialIDSet, materialTypes)
+		if continuesPrevious && !botmodel.SameStoryboardMaterialIDSet(
+			previousStableMaterialIDs,
+			stableMaterialIDs,
+		) {
+			continuesPrevious = false
+		}
 		if continuesPrevious {
 			matchesPrevious = false
 		}
@@ -494,6 +502,7 @@ func normalizeStoryboardShots(value any, materialTypes map[string]string, materi
 			"captions":               captions,
 		})
 		previousExitState = requiredString(continuityState, "exit")
+		previousStableMaterialIDs = stableMaterialIDs
 	}
 	if len(shots) == 0 {
 		return nil, fmt.Errorf("shots 至少需要一个有效镜头")

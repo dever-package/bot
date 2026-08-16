@@ -58,8 +58,7 @@ func (s GatewayService) storeGeneratedMediaOutput(
 			output["meta"] = binaryPayload.Meta
 		}
 	} else {
-		output = botprotocol.ExtractOutput(value)
-		media = botprotocol.NormalizeMediaList(output[rule.key], rule.kind)
+		output, media = extractGeneratedMediaOutput(value, rule)
 		if len(media) == 0 {
 			return value, nil
 		}
@@ -94,19 +93,47 @@ func (s GatewayService) storeGeneratedMediaOutput(
 		}
 	}
 
-	return buildStoredMediaOutput(output, rule, payloads)
+	return buildStoredMediaOutput(output, rule, media, payloads)
 }
 
-func buildStoredMediaOutput(output botprotocol.Output, rule generatedMediaRule, payloads []map[string]any) (botprotocol.Output, error) {
+func extractGeneratedMediaOutput(value any, rule generatedMediaRule) (botprotocol.Output, []string) {
+	output := botprotocol.ExtractOutput(value)
+	media := botprotocol.NormalizeMediaList(output[rule.key], rule.kind)
+	if len(media) > 0 {
+		return output, media
+	}
+
+	// Some non-stream providers return media only in their native payload,
+	// such as OpenAI's data[].b64_json response.
+	extracted := botprotocol.ExtractMediaOutput(value, rule.kind)
+	media = botprotocol.NormalizeMediaList(extracted[rule.key], rule.kind)
+	if len(media) > 0 {
+		return extracted, media
+	}
+	return output, nil
+}
+
+func buildStoredMediaOutput(
+	output botprotocol.Output,
+	rule generatedMediaRule,
+	sources []string,
+	payloads []map[string]any,
+) (botprotocol.Output, error) {
 	stored := make([]string, 0, len(payloads))
 	files := make([]map[string]any, 0, len(payloads))
-	sourceItems := botprotocol.ExtractPrimaryMediaItems(output, rule.kind)
+	replacements := make(map[string]string, len(payloads))
+	sourceItems := botprotocol.ExtractPrimaryMediaItems(output[rule.key], rule.kind)
 	for index, payload := range payloads {
 		fileURL := strings.TrimSpace(botprotocol.AsText(payload["url"]))
 		if fileURL == "" {
 			return nil, fmt.Errorf("保存%s后未返回文件地址", botprotocol.MediaOutputLabel(rule.kind))
 		}
 		stored = append(stored, fileURL)
+		if index < len(sources) {
+			if source := strings.TrimSpace(sources[index]); source != "" {
+				replacements[source] = fileURL
+			}
+		}
 		file := make(map[string]any, len(payload)+2)
 		for key, item := range payload {
 			file[key] = item
@@ -129,19 +156,77 @@ func buildStoredMediaOutput(output botprotocol.Output, rule generatedMediaRule, 
 		files = append(files, file)
 	}
 
-	result := cloneMediaOutput(output)
+	result, _ := replaceGeneratedMediaReferences(output, replacements).(botprotocol.Output)
+	if result == nil {
+		result = botprotocol.Output{}
+	}
 	result[rule.key] = stored
 	delete(result, rule.kind)
 	delete(result, rule.kind+"_url")
 	delete(result, "b64_json")
 	result["media_files"] = files
-	result["meta"] = storedMediaMeta(output["meta"], rule.ruleID)
+	result["meta"] = storedMediaMeta(result["meta"], rule.ruleID)
 	return result, nil
+}
+
+func replaceGeneratedMediaReferences(value any, replacements map[string]string) any {
+	switch current := value.(type) {
+	case botprotocol.Output:
+		result := make(botprotocol.Output, len(current))
+		for key, item := range current {
+			result[key] = replaceGeneratedMediaReferences(item, replacements)
+		}
+		return result
+	case map[string]any:
+		result := make(map[string]any, len(current))
+		for key, item := range current {
+			result[key] = replaceGeneratedMediaReferences(item, replacements)
+		}
+		return result
+	case []any:
+		result := make([]any, len(current))
+		for index, item := range current {
+			result[index] = replaceGeneratedMediaReferences(item, replacements)
+		}
+		return result
+	case []string:
+		result := make([]string, len(current))
+		for index, item := range current {
+			result[index] = strings.TrimSpace(item)
+			if replacement := replacements[result[index]]; replacement != "" {
+				result[index] = replacement
+			}
+		}
+		return result
+	case string:
+		if replacement := replacements[strings.TrimSpace(current)]; replacement != "" {
+			return replacement
+		}
+		return current
+	default:
+		return current
+	}
 }
 
 func generatedMediaRuleForKind(kind string) (generatedMediaRule, bool) {
 	rule, exists := generatedMediaRules[strings.ToLower(strings.TrimSpace(kind))]
 	return rule, exists
+}
+
+// StoreGeneratedMediaReference persists one generated media reference through
+// the same upload rule used by runtime generation.
+func StoreGeneratedMediaReference(
+	ctx context.Context,
+	requestID string,
+	kind string,
+	value string,
+	index int,
+) (map[string]any, error) {
+	rule, exists := generatedMediaRuleForKind(kind)
+	if !exists {
+		return nil, fmt.Errorf("不支持保存该媒体类型: %s", strings.TrimSpace(kind))
+	}
+	return storeGeneratedMedia(ctx, requestID, rule, value, index)
 }
 
 func storeGeneratedBinaryMedia(ctx context.Context, requestID string, rule generatedMediaRule, payload botprovider.BinaryPayload, index int) (map[string]any, error) {
@@ -264,14 +349,6 @@ func generatedMediaExtension(mimeType string) string {
 		return strings.ToLower(extensions[0])
 	}
 	return ""
-}
-
-func cloneMediaOutput(output botprotocol.Output) botprotocol.Output {
-	result := make(botprotocol.Output, len(output))
-	for key, value := range output {
-		result[key] = value
-	}
-	return result
 }
 
 func storedMediaMeta(value any, ruleID uint64) map[string]any {

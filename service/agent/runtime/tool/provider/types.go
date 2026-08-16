@@ -52,6 +52,7 @@ type Call struct {
 	Name      string
 	RequestID string
 	Arguments map[string]any
+	History   []any
 	OnOutput  OutputHandler
 }
 
@@ -114,12 +115,15 @@ func (result Result) Output() map[string]any {
 
 type Handler func(context.Context, Call) (Result, error)
 
+type ArgumentPreparer func(map[string]any) (map[string]any, error)
+
 type ArgumentValidator func(map[string]any) error
 
 type Tool struct {
 	Definition         Definition
 	ResolveDefinition  func() Definition
 	AddMediaReferences func([]MediaReference)
+	PrepareArguments   ArgumentPreparer
 	ValidateArguments  ArgumentValidator
 	Handle             Handler
 }

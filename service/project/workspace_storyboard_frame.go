@@ -172,6 +172,18 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 	node canvasRunNode,
 	nodesByID map[string]canvasRunNode,
 ) ([]energoninput.MediaReference, error) {
+	continuationDependencyID, continuesPrevious, err := canvasStoryboardContinuationDependencyID(node)
+	if err != nil {
+		return nil, err
+	}
+	var continuationDependencyAssetID uint64
+	if continuesPrevious {
+		dependencyNode, exists := nodesByID[continuationDependencyID]
+		if !exists {
+			return nil, fmt.Errorf("前置参考节点不存在: %s", continuationDependencyID)
+		}
+		continuationDependencyAssetID = dependencyNode.AssetID
+	}
 	result := make([]energoninput.MediaReference, 0)
 	used := map[string]bool{}
 	nextID := uint64(1) << 63
@@ -204,6 +216,9 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 		node.StoryboardItem["reference_node_ids"],
 		node.StoryboardItem["referenceNodeIds"],
 	)) {
+		if continuesPrevious && sourceID == continuationDependencyID {
+			continue
+		}
 		source, exists := nodesByID[sourceID]
 		if !exists {
 			return nil, fmt.Errorf("前置参考节点不存在: %s", sourceID)
@@ -229,6 +244,11 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 		return nil, err
 	}
 	for _, reference := range canvasPromptBoundReferences(promptReferences) {
+		if continuesPrevious &&
+			continuationDependencyAssetID > 0 &&
+			reference.AssetID == continuationDependencyAssetID {
+			continue
+		}
 		asset, _, err := resolveCanvasReferenceAsset(ctx, projectID, reference)
 		if err != nil {
 			label := strings.TrimSpace(reference.Label)
@@ -244,10 +264,7 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 			reference.Required || externalAssetIDs[reference.AssetID],
 		)
 	}
-	if canvasStoryboardItemType(node) == "shot" && firstText(
-		node.StoryboardItem["continuity_anchor"],
-		node.StoryboardItem["continuityAnchor"],
-	) != "" {
+	if continuesPrevious {
 		appendReference("image", 0, canvasMediaUsageFirstFrame, true)
 	}
 	return result, nil

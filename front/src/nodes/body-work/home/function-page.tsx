@@ -165,7 +165,9 @@ export function WorkbenchFunctionPage({
                     value={selectedID}
                     powers={powers}
                     categories={powerCategories}
-                    onValueChange={selectPower}
+                    onValueChange={(value) => {
+                      if (typeof value === "number") selectPower(value);
+                    }}
                   />
                 }
                 assetReferenceTeamID={teamID}
