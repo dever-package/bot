@@ -1,0 +1,97 @@
+{
+  "page": {
+    "name": "素材分类",
+    "parent": "bot/team/material_pack/list",
+    "type": 2,
+    "sort": 9
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "id": "material-cate-kind-create",
+        "type": "form-radio",
+        "name": "素材类型",
+        "value": "form.kind",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "orientation": "horizontal",
+          "showWhen": [
+            {
+              "path": "form.id",
+              "operator": "equals",
+              "value": 0
+            }
+          ]
+        }
+      },
+      {
+        "id": "material-cate-kind-edit",
+        "type": "form-radio",
+        "name": "素材类型",
+        "value": "form.kind",
+        "mode": "form",
+        "info": "分类创建后不能修改素材类型。",
+        "meta": {
+          "formLayout": "horizontal",
+          "orientation": "horizontal",
+          "disabled": true,
+          "showWhen": [
+            {
+              "path": "form.id",
+              "operator": "notEquals",
+              "value": 0
+            }
+          ]
+        }
+      },
+      {
+        "type": "form-input",
+        "placeholder": "例如：短视频脚本",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "素材分类名称不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "id": 0,
+      "kind": "prompt",
+      "name": ""
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "service": "bot.team.MaterialHook.BeforeSaveMaterialCate"
+      }
+    }
+  }
+}

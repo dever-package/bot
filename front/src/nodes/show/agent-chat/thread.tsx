@@ -21,25 +21,25 @@ import type {
 import { copyTextToClipboard } from "../clipboard";
 import { AgentChatMarkdown } from "./markdown";
 import { AgentChatActivityView } from "./activity-view";
-import type { AgentChatActivity } from "./activity";
+import type { AgentChatActivity } from "../../shared/agent-output/activity";
 import { AgentChatMessageOutput } from "./message-output";
 import { AgentChatDocumentEntry } from "./document-pane";
 import { AgentChatTooltip } from "./tooltip";
 import { AgentChatArtifactActionsProvider } from "./artifact-actions";
-import { readAgentChatArtifacts } from "./artifact";
+import { readAgentChatArtifacts } from "../../shared/agent-output/artifact";
 import {
   agentChatDocumentIntro,
   agentChatDocumentCopyText,
   isAgentChatDocumentPending,
   type AgentChatDocument,
-} from "./document";
+} from "../../shared/agent-output/document";
 import { MessageNavigator } from "./message-navigator";
 import {
   findAgentChatInteractionResponse,
   readAgentChatInteraction,
   readAgentChatPresentationMessage,
   readAgentChatSuggestions,
-} from "./interaction";
+} from "../../shared/agent-output/interaction";
 import {
   AgentChatInteractionView,
   AgentChatSuggestions,

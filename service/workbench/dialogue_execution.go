@@ -57,6 +57,7 @@ func (s Service) DialogueConfig(ctx context.Context, binding ChatRoleBinding) (m
 		"model_source_rule":        config.ModelSourceRule,
 		"model_sources":            config.ModelSources,
 		"selected_model_target_id": config.SelectedModelTargetID,
+		"tools_enabled":            config.ToolsEnabled,
 		"tools":                    tools,
 	}, nil
 }
@@ -87,6 +88,9 @@ func (s Service) PrepareDialogueExecution(
 	mode, err := resolveDialogueToolMode(nestedText(selection, "tool_mode"))
 	if err != nil {
 		return DialogueExecution{}, err
+	}
+	if !config.ToolsEnabled {
+		mode = dialogueToolModeNone
 	}
 	execution := DialogueExecution{
 		Input:         nextInput,

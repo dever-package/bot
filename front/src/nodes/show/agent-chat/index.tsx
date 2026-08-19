@@ -26,7 +26,7 @@ import { Sidebar } from "./sidebar";
 import { useAgentChatStore } from "./store";
 import { Thread } from "./thread";
 import { AgentChatDocumentPane } from "./document-pane";
-import type { AgentChatDocument } from "./document";
+import type { AgentChatDocument } from "../../shared/agent-output/document";
 import {
   AgentChatMediaInspector,
   AgentChatMediaPreviewProvider,

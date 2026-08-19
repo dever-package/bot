@@ -101,6 +101,11 @@
               "type": "show-base"
             },
             {
+              "value": "material_pack.name",
+              "name": "素材方案",
+              "type": "show-base"
+            },
+            {
               "value": "publish_status",
               "name": "发布状态",
               "type": "show-tag"
@@ -218,7 +223,7 @@
           "stateKey": "dialog.create",
           "pageRoute": "/bot/team/team/update",
           "title": "新增团队",
-          "description": "配置团队基础信息和团队提示词。",
+          "description": "配置团队基础信息、素材方案和团队提示词。",
           "size": "xl",
           "footer": {
             "confirm": true,
@@ -236,7 +241,7 @@
           "stateKey": "dialog.edit",
           "pageRoute": "/bot/team/team/update",
           "title": "编辑团队",
-          "description": "更新团队基础信息和团队提示词。",
+          "description": "更新团队基础信息、素材方案和团队提示词。",
           "size": "xl",
           "footer": {
             "confirm": true,
@@ -253,7 +258,7 @@
   "data": {
     "page": {
       "title": "团队配置",
-      "description": "维护团队基础信息和团队提示词。"
+      "description": "维护团队基础信息、素材方案和团队提示词。"
     },
     "table": {
       "filterFields": [

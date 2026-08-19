@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import type {
   AgentChatInteractionResponse,
   AgentChatSuggestion,
-} from "./interaction";
+} from "../../shared/agent-output/interaction";
 import { AgentChatTooltip } from "./tooltip";
 
 export function AgentChatInteractionView({

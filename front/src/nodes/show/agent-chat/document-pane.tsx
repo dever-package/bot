@@ -24,7 +24,7 @@ import {
   agentChatDocumentCopyText,
   isAgentChatDocumentPending,
   type AgentChatDocument,
-} from "./document";
+} from "../../shared/agent-output/document";
 import {
   AgentChatDocumentOutline,
   useAgentChatDocumentOutline,

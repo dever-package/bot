@@ -10,15 +10,18 @@ import {
   type PowerCategory,
 } from "../../body-work/shared/power-menu";
 import { createInFlightRequestLoader } from "../../body-work/shared/in-flight-request";
-import { isManualPowerSourceRule } from "../../shared/power-source-rule";
+import {
+  isManualPowerSourceRule,
+  resolvePowerSourceDisplayName,
+} from "../../shared/power-source-rule";
 import type { AgentChatExecutionConfig } from "./execution";
-import { readAgentChatActivities } from "./activity";
+import { readAgentChatActivities } from "../../shared/agent-output/activity";
 import { buildAgentChatPreviewContent } from "./message-content";
-import { normalizeAgentChatOutput, type AgentChatOutput } from "./output";
+import { normalizeAgentChatOutput, type AgentChatOutput } from "../../shared/agent-output/output";
 import {
   normalizeAgentChatDocument,
   type AgentChatDocument,
-} from "./document";
+} from "../../shared/agent-output/document";
 import type {
   ReferenceComposerParam,
   ReferencePreview,
@@ -103,6 +106,7 @@ export async function loadAgentExecutionConfig(
           modelSources[0]?.id ||
           0
         : 0,
+      toolsEnabled: true,
       tools: normalizeExecutionTools(data.tools),
       categories: normalizeExecutionCategories(data.power_cates),
     };
@@ -379,12 +383,11 @@ function normalizeExecutionSources(value: unknown) {
       if (!id) return null;
       return {
         id,
-        name:
-          textValue(row.name) ||
-          [textValue(row.provider_name), textValue(row.service_name)]
-            .filter(Boolean)
-            .join(" / ") ||
+        name: resolvePowerSourceDisplayName(
+          row.service_name,
+          row.name,
           `来源 ${id}`,
+        ),
       };
     })
     .filter((row): row is NonNullable<typeof row> => Boolean(row));

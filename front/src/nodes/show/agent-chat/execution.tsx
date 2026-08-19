@@ -40,6 +40,7 @@ export type AgentChatExecutionConfig = {
   modelSourceRule: number;
   modelSources: Array<{ id: number; name: string }>;
   selectedModelTargetID: number;
+  toolsEnabled: boolean;
   tools: AgentChatExecutionTool[];
   categories: PowerCategory[];
 };
@@ -98,8 +99,11 @@ export function useAgentChatExecution({
   const pendingExecutionRef = useRef<PendingExecution | null>(null);
   const activeExecutionRef = useRef<Record<string, unknown> | null>(null);
   const activeConfig = configScopeKey === scopeKey ? config : null;
+  const toolsEnabled = Boolean(activeConfig?.toolsEnabled);
   const activeToolForm =
-    typeof toolSelection === "number" && toolForm?.toolID === toolSelection
+    toolsEnabled &&
+    typeof toolSelection === "number" &&
+    toolForm?.toolID === toolSelection
       ? toolForm.config
       : null;
   const missingAgentModel = requiresSourceTarget(
@@ -107,6 +111,7 @@ export function useAgentChatExecution({
     modelTargetID,
   );
   const missingToolModel =
+    toolsEnabled &&
     typeof toolSelection === "number" &&
     requiresSourceTarget(activeToolForm?.sourceRule, toolTargetID);
 
@@ -216,7 +221,7 @@ export function useAgentChatExecution({
   );
 
   useEffect(() => {
-    if (!enabled || typeof toolSelection !== "number") {
+    if (!enabled || !toolsEnabled || typeof toolSelection !== "number") {
       setToolForm(null);
       setToolFormLoading(false);
       setToolFormError("");
@@ -264,10 +269,13 @@ export function useAgentChatExecution({
     toolRequestVersion,
     toolSelection,
     toolTargetID,
+    toolsEnabled,
   ]);
 
   const parameters = useMemo(() => {
-    if (!enabled || typeof toolSelection !== "number") return undefined;
+    if (!enabled || !toolsEnabled || typeof toolSelection !== "number") {
+      return undefined;
+    }
     if (!activeToolForm) return [];
     return restoreToolParameterDefaults(
       activeToolForm.params.filter((param) => !isPromptParam(param)),
@@ -283,6 +291,7 @@ export function useAgentChatExecution({
     toolIDField,
     toolSelection,
     toolTargetID,
+    toolsEnabled,
   ]);
 
   const selectTool = useCallback(
@@ -342,9 +351,9 @@ export function useAgentChatExecution({
       }
       const execution: Record<string, unknown> = {
         model_target_id: modelTargetID,
-        tool_mode: toolMode(toolSelection),
+        tool_mode: toolsEnabled ? toolMode(toolSelection) : "none",
       };
-      if (typeof toolSelection === "number") {
+      if (toolsEnabled && typeof toolSelection === "number") {
         if (!activeToolForm || toolFormLoading || toolFormError) {
           throw new Error(toolFormError || "工具参数尚未加载完成");
         }
@@ -362,7 +371,7 @@ export function useAgentChatExecution({
         sessionID: conversation.sessionID,
       };
       activeExecutionRef.current = execution;
-      return typeof toolSelection === "number"
+      return toolsEnabled && typeof toolSelection === "number"
         ? { ...input, content, params: undefined }
         : { ...input, content };
     },
@@ -379,6 +388,7 @@ export function useAgentChatExecution({
       toolIDField,
       toolSelection,
       toolTargetID,
+      toolsEnabled,
     ],
   );
 
@@ -386,6 +396,14 @@ export function useAgentChatExecution({
     conversation.scopeKey === scopeKey
       ? `${scopeKey}:session:${conversation.sessionID}`
       : `${scopeKey}:session:pending`;
+  const showExecutionToolbar =
+    configLoading ||
+    Boolean(configError) ||
+    toolsEnabled ||
+    canChooseSource(
+      activeConfig?.modelSourceRule,
+      activeConfig?.modelSources,
+    );
 
   return {
     disabled:
@@ -394,12 +412,13 @@ export function useAgentChatExecution({
         Boolean(configError) ||
         !activeConfig ||
         missingAgentModel ||
-        (typeof toolSelection === "number" &&
+        (toolsEnabled &&
+          typeof toolSelection === "number" &&
           (toolFormLoading ||
             Boolean(toolFormError) ||
             !activeToolForm ||
             missingToolModel))),
-    toolbar: enabled ? (
+    toolbar: enabled && showExecutionToolbar ? (
       <AgentChatExecutionControls
         config={activeConfig}
         configLoading={configLoading}
@@ -417,10 +436,9 @@ export function useAgentChatExecution({
       />
     ) : null,
     parameters,
-    parameterScopeKey:
-      enabled && typeof toolSelection === "number"
-        ? `${conversationParameterScopeKey}:tool:${toolSelection}:target:${toolTargetID}`
-        : `${conversationParameterScopeKey}:agent`,
+    // Parameter controls belong to the unsent conversation draft. Switching
+    // tools or model sources must not discard values already entered there.
+    parameterScopeKey: conversationParameterScopeKey,
     prepareInput,
     renderFileLibrary,
     onConversationStateChange: updateConversationState,
@@ -463,24 +481,28 @@ function AgentChatExecutionControls({
         .filter((source) => source.id > 0),
     [toolForm?.sources],
   );
-  const error = configError || toolFormError;
+  const toolsEnabled = Boolean(config?.toolsEnabled);
+  const error = configError || (toolsEnabled ? toolFormError : "");
   const showAgentModel =
-    typeof toolSelection !== "number" &&
+    (!toolsEnabled || typeof toolSelection !== "number") &&
     canChooseSource(config?.modelSourceRule, config?.modelSources);
   const showToolModel =
+    toolsEnabled &&
     typeof toolSelection === "number" &&
     canChooseSource(toolForm?.sourceRule, toolSources);
 
   return (
     <div className="agent-chat-execution-controls">
-      <div className="agent-chat-execution-picker">
-        <AgentChatExecutionPowerPicker
-          value={toolSelection}
-          powers={config?.tools || []}
-          categories={config?.categories || []}
-          onValueChange={onToolChange}
-        />
-      </div>
+      {toolsEnabled ? (
+        <div className="agent-chat-execution-picker">
+          <AgentChatExecutionPowerPicker
+            value={toolSelection}
+            powers={config?.tools || []}
+            categories={config?.categories || []}
+            onValueChange={onToolChange}
+          />
+        </div>
+      ) : null}
       {showAgentModel ? (
         <div className="agent-chat-execution-picker">
           <AgentChatExecutionSourcePicker
@@ -501,7 +523,7 @@ function AgentChatExecutionControls({
           />
         </div>
       ) : null}
-      {configLoading || toolFormLoading ? (
+      {configLoading || (toolsEnabled && toolFormLoading) ? (
         <Loader2
           className="agent-chat-execution-loading animate-spin"
           aria-label="正在加载执行配置"
@@ -601,6 +623,9 @@ function resolveToolSelection(
   execution: Record<string, unknown> | undefined,
   toolIDField: string,
 ) {
+  if (config.toolsEnabled === false) {
+    return { selection: "auto" as const, targetID: 0 };
+  }
   const mode = String(execution?.tool_mode || "auto").trim();
   if (mode === "specific") {
     const toolID = Number(execution?.[toolIDField] || 0);

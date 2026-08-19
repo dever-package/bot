@@ -1,15 +1,15 @@
 import { CircleAlert } from "lucide-react";
 import { AgentChatActivityView } from "./activity-view";
-import type { AgentChatActivity } from "./activity";
+import type { AgentChatActivity } from "../../shared/agent-output/activity";
 import {
   isAgentChatDocumentPending,
   isAgentChatDocumentMediaReady,
   normalizeAgentChatDocumentBlockText,
   type AgentChatDocument,
   type AgentChatDocumentBlock,
-} from "./document";
+} from "../../shared/agent-output/document";
 import { AgentChatMarkdown } from "./markdown";
-import { readAgentChatAspectRatio } from "./media";
+import { readAgentChatAspectRatio } from "../../shared/agent-output/media";
 
 export function AgentChatDocumentView({
   document,

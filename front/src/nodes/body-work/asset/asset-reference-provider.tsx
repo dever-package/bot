@@ -22,6 +22,12 @@ import type {
   AssetRecord,
 } from "./asset-types";
 import { AssetPickerDialog } from "./asset-picker-dialog";
+import type { AssetUploadOptions } from "./asset-upload-progress";
+
+type AssetReferenceUploadContext = AssetUploadOptions & {
+  preferredUsage?: string;
+  acceptedKinds?: AssetKind[];
+};
 
 export type WorkbenchReferenceProvider = ReferenceProvider;
 
@@ -53,10 +59,7 @@ export function useAssetReferenceProvider({
   onSelect?: (option: WorkbenchReferenceOption) => void;
   onUpload?: (
     files: File[],
-    context: {
-      preferredUsage?: string;
-      acceptedKinds?: AssetKind[];
-    },
+    context: AssetReferenceUploadContext,
   ) => Promise<AssetRecord[]>;
 }): ReferenceProvider {
   const filterKey = JSON.stringify(initialFilters || {});
@@ -130,10 +133,7 @@ function AssetReferencePicker({
   onReferenceSelect?: (option: WorkbenchReferenceOption) => void;
   onUpload?: (
     files: File[],
-    context: {
-      preferredUsage?: string;
-      acceptedKinds?: AssetKind[];
-    },
+    context: AssetReferenceUploadContext,
   ) => Promise<AssetRecord[]>;
 }) {
   if (!open) {
@@ -180,10 +180,11 @@ function AssetReferencePicker({
       uploadAccept={assetKindsAccept(effectiveKinds)}
       onUpload={
         onUpload
-          ? (files) =>
+          ? (files, options) =>
               onUpload(files, {
                 preferredUsage,
                 acceptedKinds: effectiveKinds,
+                onProgress: options?.onProgress,
               })
           : undefined
       }

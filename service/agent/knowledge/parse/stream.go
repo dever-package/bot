@@ -191,6 +191,7 @@ func (p *streamedTextParser) result() Result {
 			"parser":         "stream",
 			"streamed":       true,
 			"source_runes":   p.aggregate.total,
+			"source_lines":   p.line,
 			"content_chunks": p.nodeCount,
 		},
 	}

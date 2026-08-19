@@ -10,6 +10,7 @@ import (
 	assetmodel "github.com/dever-package/bot/model/asset"
 	projectmodel "github.com/dever-package/bot/model/project"
 	teammodel "github.com/dever-package/bot/model/team"
+	workspacemodel "github.com/dever-package/bot/model/workspace"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	"github.com/dever-package/bot/service/internal/dbop"
 )
@@ -18,6 +19,7 @@ type Service struct{}
 
 type SaveVersionRequest struct {
 	AssetID      uint64
+	UserID       uint64
 	ProjectID    uint64
 	BodyID       uint64
 	TeamID       uint64
@@ -190,6 +192,9 @@ func normalizeSaveVersionRequest(ctx context.Context, req SaveVersionRequest) (S
 		if project == nil {
 			return SaveVersionRequest{}, fmt.Errorf("资产所属项目不存在")
 		}
+		if err := assignAssetOwner(&req, project.UserID); err != nil {
+			return SaveVersionRequest{}, err
+		}
 		if req.BodyID == 0 {
 			req.BodyID = project.BodyID
 		}
@@ -202,6 +207,9 @@ func normalizeSaveVersionRequest(ctx context.Context, req SaveVersionRequest) (S
 	case assetmodel.SourceTool, assetmodel.SourceDialogue:
 		if req.BodyID == 0 || req.SourceID == 0 {
 			return SaveVersionRequest{}, fmt.Errorf("工作区资产缺少来源")
+		}
+		if err := assignWorkspaceAssetOwner(ctx, &req); err != nil {
+			return SaveVersionRequest{}, err
 		}
 		if req.SourceName == "" {
 			return SaveVersionRequest{}, fmt.Errorf("工作区资产缺少来源名称")
@@ -222,6 +230,9 @@ func normalizeSaveVersionRequest(ctx context.Context, req SaveVersionRequest) (S
 			if project == nil {
 				return SaveVersionRequest{}, fmt.Errorf("上传资产所属项目不存在")
 			}
+			if err := assignAssetOwner(&req, project.UserID); err != nil {
+				return SaveVersionRequest{}, err
+			}
 			if project.BodyID == 0 {
 				return SaveVersionRequest{}, fmt.Errorf("上传资产所属项目缺少载体")
 			}
@@ -231,8 +242,13 @@ func normalizeSaveVersionRequest(ctx context.Context, req SaveVersionRequest) (S
 			if req.BodyID != project.BodyID {
 				return SaveVersionRequest{}, fmt.Errorf("上传资产载体与项目不匹配")
 			}
-		} else if req.BodyID == 0 {
-			return SaveVersionRequest{}, fmt.Errorf("上传资产缺少工作区")
+		} else {
+			if req.BodyID == 0 {
+				return SaveVersionRequest{}, fmt.Errorf("上传资产缺少工作区")
+			}
+			if err := assignWorkspaceAssetOwner(ctx, &req); err != nil {
+				return SaveVersionRequest{}, err
+			}
 		}
 	default:
 		return SaveVersionRequest{}, fmt.Errorf("资产来源不合法")
@@ -250,6 +266,7 @@ func normalizeSaveVersionRequest(ctx context.Context, req SaveVersionRequest) (S
 	} else if req.CollectionID > 0 {
 		collection := assetmodel.NewAssetModel().Find(ctx, map[string]any{
 			"id":            req.CollectionID,
+			"user_id":       req.UserID,
 			"team_id":       req.TeamID,
 			"project_id":    req.ProjectID,
 			"kind":          assetmodel.KindCollection,
@@ -285,6 +302,48 @@ func normalizeSaveVersionRequest(ctx context.Context, req SaveVersionRequest) (S
 	return req, nil
 }
 
+func assignAssetOwner(req *SaveVersionRequest, userID uint64) error {
+	if req == nil || userID == 0 {
+		return fmt.Errorf("资产缺少用户")
+	}
+	if req.UserID > 0 && req.UserID != userID {
+		return fmt.Errorf("资产用户与来源不匹配")
+	}
+	req.UserID = userID
+	return nil
+}
+
+func assignWorkspaceAssetOwner(ctx context.Context, req *SaveVersionRequest) error {
+	if req == nil || req.TeamID == 0 || req.BodyID == 0 {
+		return fmt.Errorf("工作区资产缺少用户范围")
+	}
+	filter := map[string]any{
+		"team_id": req.TeamID,
+		"body_id": req.BodyID,
+		"status":  workspacemodel.TeamWorkspaceStatusEnabled,
+	}
+	if req.UserID > 0 {
+		filter["user_id"] = req.UserID
+	}
+	rows := workspacemodel.NewTeamWorkspaceModel().Select(ctx, filter, map[string]any{
+		"field": "main.user_id",
+	})
+	ownerID := uint64(0)
+	for _, workspace := range rows {
+		if workspace == nil || workspace.UserID == 0 {
+			continue
+		}
+		if ownerID > 0 && ownerID != workspace.UserID {
+			return fmt.Errorf("工作区资产用户范围不唯一")
+		}
+		ownerID = workspace.UserID
+	}
+	if ownerID == 0 {
+		return fmt.Errorf("资产所属工作区不存在")
+	}
+	return assignAssetOwner(req, ownerID)
+}
+
 type saveVersionResult struct {
 	Asset   *assetmodel.Asset
 	Version *assetmodel.Version
@@ -303,6 +362,7 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 			sort = 100
 		}
 		assetID, insertErr := insertAsset(ctx, map[string]any{
+			"user_id":       req.UserID,
 			"project_id":    req.ProjectID,
 			"body_id":       req.BodyID,
 			"team_id":       req.TeamID,
@@ -323,7 +383,11 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 			"created_at":    now,
 		})
 		if assetID > 0 {
-			asset = assetModel.Find(ctx, map[string]any{"id": assetID})
+			asset = assetModel.Find(ctx, map[string]any{
+				"id":      assetID,
+				"user_id": req.UserID,
+				"team_id": req.TeamID,
+			})
 		}
 		if asset == nil {
 			asset = assetModel.Find(ctx, assetIdentityFilter(req))
@@ -342,7 +406,11 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 		if !updateAssetVersionPointer(ctx, asset.ID, req, version.ID) {
 			return nil, nil, fmt.Errorf("资产已移入回收站")
 		}
-		asset = assetModel.Find(ctx, map[string]any{"id": asset.ID})
+		asset = assetModel.Find(ctx, map[string]any{
+			"id":      asset.ID,
+			"user_id": req.UserID,
+			"team_id": req.TeamID,
+		})
 		if asset == nil {
 			return nil, nil, fmt.Errorf("读取资产失败")
 		}
@@ -355,7 +423,11 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 	if !updateAssetVersionPointer(ctx, asset.ID, req, versionID) {
 		return nil, nil, fmt.Errorf("资产已移入回收站")
 	}
-	asset = assetModel.Find(ctx, map[string]any{"id": asset.ID})
+	asset = assetModel.Find(ctx, map[string]any{
+		"id":      asset.ID,
+		"user_id": req.UserID,
+		"team_id": req.TeamID,
+	})
 	version := Service{}.FindVersion(ctx, versionID)
 	if asset == nil || version == nil {
 		return nil, nil, fmt.Errorf("读取资产版本失败")
@@ -386,14 +458,18 @@ func updateAssetVersionPointer(
 		updates["sort"] = req.Sort
 	}
 	affected := assetModel.Update(ctx, map[string]any{
-		"id":     assetID,
-		"status": map[string]any{"neq": assetmodel.StatusDeleted},
+		"id":      assetID,
+		"user_id": req.UserID,
+		"team_id": req.TeamID,
+		"status":  map[string]any{"neq": assetmodel.StatusDeleted},
 	}, updates)
 	if affected == 0 {
 		return false
 	}
 	assetModel.Update(ctx, map[string]any{
 		"id":        assetID,
+		"user_id":   req.UserID,
+		"team_id":   req.TeamID,
 		"name_mode": map[string]any{"neq": assetmodel.NameModeManual},
 		"status":    map[string]any{"neq": assetmodel.StatusDeleted},
 	}, map[string]any{"name": req.Name})
@@ -402,6 +478,7 @@ func updateAssetVersionPointer(
 
 func assetIdentityFilter(req SaveVersionRequest) map[string]any {
 	filter := map[string]any{
+		"user_id":     req.UserID,
 		"team_id":     req.TeamID,
 		"project_id":  req.ProjectID,
 		"source_type": req.SourceType,
@@ -432,7 +509,11 @@ func findTargetAsset(ctx context.Context, req SaveVersionRequest) *assetmodel.As
 	if req.AssetID == 0 {
 		return assetmodel.NewAssetModel().Find(ctx, assetIdentityFilter(req))
 	}
-	asset := assetmodel.NewAssetModel().Find(ctx, map[string]any{"id": req.AssetID})
+	asset := assetmodel.NewAssetModel().Find(ctx, map[string]any{
+		"id":      req.AssetID,
+		"user_id": req.UserID,
+		"team_id": req.TeamID,
+	})
 	if !assetMatchesSaveRequest(asset, req) {
 		return nil
 	}
@@ -443,6 +524,7 @@ func assetMatchesSaveRequest(asset *assetmodel.Asset, req SaveVersionRequest) bo
 	if asset == nil ||
 		asset.Status != assetmodel.StatusCurrent ||
 		asset.VersionID == 0 ||
+		asset.UserID != req.UserID ||
 		asset.TeamID != req.TeamID ||
 		asset.ProjectID != req.ProjectID ||
 		asset.SourceType != req.SourceType ||
@@ -506,6 +588,7 @@ func (s Service) UpdateVersionContent(ctx context.Context, projectID uint64, ass
 	}
 	result, err := withAssetSaveLock(ctx, SaveVersionRequest{
 		AssetID:      asset.ID,
+		UserID:       asset.UserID,
 		ProjectID:    asset.ProjectID,
 		BodyID:       asset.BodyID,
 		TeamID:       asset.TeamID,
@@ -545,8 +628,10 @@ func (s Service) updateVersionContent(ctx context.Context, projectID uint64, ass
 		return nil, nil, fmt.Errorf("历史版本不可编辑，请先恢复为新版本")
 	}
 	affected := assetmodel.NewAssetModel().Update(ctx, map[string]any{
-		"id":     asset.ID,
-		"status": map[string]any{"neq": assetmodel.StatusDeleted},
+		"id":      asset.ID,
+		"user_id": asset.UserID,
+		"team_id": asset.TeamID,
+		"status":  map[string]any{"neq": assetmodel.StatusDeleted},
 	}, map[string]any{
 		"status": assetmodel.StatusCurrent,
 	})

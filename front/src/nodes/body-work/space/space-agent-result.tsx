@@ -1,12 +1,12 @@
 import { useMemo, useRef, useState } from "react";
 import { AgentChatActivityView } from "../../show/agent-chat/activity-view";
-import { agentChatDocumentIntro } from "../../show/agent-chat/document";
+import { agentChatDocumentIntro } from "../../shared/agent-output/document";
 import {
   AgentChatDocumentEntry,
   AgentChatDocumentPane,
 } from "../../show/agent-chat/document-pane";
 import { AgentChatSuggestions } from "../../show/agent-chat/interaction-view";
-import type { AgentChatSuggestion } from "../../show/agent-chat/interaction";
+import type { AgentChatSuggestion } from "../../shared/agent-output/interaction";
 import { AgentChatMessageOutput } from "../../show/agent-chat/message-output";
 import { buildAgentChatContentSegments } from "../../show/agent-chat/message-content";
 import {

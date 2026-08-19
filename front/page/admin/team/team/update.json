@@ -73,6 +73,25 @@
         }
       },
       {
+        "type": "form-select",
+        "name": "素材方案",
+        "placeholder": "不使用官方素材",
+        "value": "form.material_pack_id",
+        "mode": "form",
+        "option": {
+          "model": "bot.team.NewMaterialPackModel",
+          "filters": {
+            "status": 1
+          },
+          "order": "sort asc,id asc"
+        },
+        "info": "选择后，该团队可以使用素材方案中的官方提示词、图片、音频和视频；留空则不展示官方素材。",
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[320px]"
+        }
+      },
+      {
         "type": "form-array",
         "name": "资产分类",
         "value": "form.asset_cates",
@@ -124,9 +143,19 @@
   },
   "data": {
     "form": {
+      "_fields": [
+        "cate_id",
+        "name",
+        "material_pack_id",
+        "asset_cates",
+        "team_powers",
+        "project_enabled",
+        "description"
+      ],
       "id": 0,
       "cate_id": 1,
       "name": "",
+      "material_pack_id": "",
       "asset_cates": [],
       "team_powers": [],
       "project_enabled": 1,

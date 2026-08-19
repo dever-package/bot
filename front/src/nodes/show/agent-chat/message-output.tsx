@@ -17,7 +17,7 @@ import {
   artifactDisplayOutput,
   readAgentChatArtifacts,
   type AgentChatArtifact,
-} from "./artifact";
+} from "../../shared/agent-output/artifact";
 
 const contentKeys = [
   "rich",

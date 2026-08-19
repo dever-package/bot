@@ -5,7 +5,6 @@ import {
   ChevronRight,
   Loader2,
   RefreshCw,
-  Upload,
 } from "lucide-react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
@@ -29,6 +28,7 @@ import { AssetDetailDialog } from "./asset-detail-dialog";
 import { AssetRenameDialog } from "./asset-rename-dialog";
 import { AssetSourceFilters } from "./asset-source-filters";
 import { useAssetSourceLabels } from "./asset-source-labels";
+import { AssetUploadButton } from "./asset-upload-button";
 import { BodyWorkTooltip } from "../shared/body-work-tooltip";
 import { useAuthUserScopeKey } from "../shared/auth-scope";
 import { requestErrorMessage as errorText } from "../shared/api-response";
@@ -45,6 +45,10 @@ import {
   type AssetView,
 } from "./asset-types";
 import { assetKindSpecs } from "./asset-contract";
+import type {
+  AssetUploadHandler,
+  AssetUploadProgress,
+} from "./asset-upload-progress";
 import "./asset.css";
 
 const emptyOptions: AssetFilterOptions = {
@@ -61,6 +65,8 @@ const emptyPage: AssetPage = {
   total: 0,
   hasMore: false,
 };
+
+const assetDeleteConfirmLayerZIndex = 10040;
 
 export function AssetBrowser({
   teamID,
@@ -98,7 +104,7 @@ export function AssetBrowser({
   canContinue?: (asset: AssetRecord) => boolean;
   onAssetChanged?: (asset: AssetRecord) => void;
   onAssetRemoved?: (assetID: number) => void;
-  onLocalUpload?: (files: File[]) => Promise<AssetRecord[]>;
+  onLocalUpload?: AssetUploadHandler<AssetRecord>;
   uploadAccept?: string;
   headerAction?: ReactNode;
   reloadSignal?: number;
@@ -132,6 +138,8 @@ export function AssetBrowser({
   const [operationAssetID, setOperationAssetID] = useState(0);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] =
+    useState<AssetUploadProgress | null>(null);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [error, setError] = useState("");
   const [reloadVersion, setReloadVersion] = useState(0);
@@ -164,6 +172,7 @@ export function AssetBrowser({
     setDeleteTarget(null);
     setOperationAssetID(0);
     setUploading(false);
+    setUploadProgress(null);
     setError("");
   }, [requestScopeKey, resolvedInitialFilters, scopeProjectID, teamID]);
 
@@ -325,8 +334,11 @@ export function AssetBrowser({
     if (!onLocalUpload || files.length === 0 || uploading) return;
 
     setUploading(true);
+    setUploadProgress(null);
     try {
-      const assets = await onLocalUpload(files);
+      const assets = await onLocalUpload(files, {
+        onProgress: setUploadProgress,
+      });
       if (assets.length === 0) {
         throw new Error("上传完成，但没有生成可用资产");
       }
@@ -351,6 +363,7 @@ export function AssetBrowser({
       toast.error(errorText(currentError, "上传资产失败"));
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }
 
@@ -379,21 +392,11 @@ export function AssetBrowser({
           </BodyWorkTooltip>
           {!activeCollection && onLocalUpload ? (
             <>
-              <BodyWorkTooltip label="本地上传">
-                <button
-                  type="button"
-                  className="wb-asset-local-upload"
-                  disabled={uploading}
-                  onClick={() => uploadInputRef.current?.click()}
-                >
-                  {uploading ? (
-                    <Loader2 className="is-spinning" aria-hidden="true" />
-                  ) : (
-                    <Upload aria-hidden="true" />
-                  )}
-                  <span>{uploading ? "上传中" : "本地上传"}</span>
-                </button>
-              </BodyWorkTooltip>
+              <AssetUploadButton
+                uploading={uploading}
+                progress={uploadProgress}
+                onClick={() => uploadInputRef.current?.click()}
+              />
               <input
                 ref={uploadInputRef}
                 type="file"
@@ -526,6 +529,7 @@ export function AssetBrowser({
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
+        layerZIndex={assetDeleteConfirmLayerZIndex}
         onOpenChange={(open) => {
           if (!open && !operationAssetID) setDeleteTarget(null);
         }}

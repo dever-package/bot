@@ -1,4 +1,5 @@
 import { uploadBodyAssetFiles } from "../asset/upload-asset-api";
+import type { AssetUploadOptions } from "../asset/asset-upload-progress";
 import type { UploadPreview } from "./space-prompt-composer";
 
 type SpaceUploadedFile = Record<string, unknown>;
@@ -8,12 +9,14 @@ export async function uploadSpaceFiles(input: {
   teamID: number;
   files: File[];
   ruleID?: number;
+  onProgress?: AssetUploadOptions["onProgress"];
 }): Promise<UploadPreview[]> {
   const uploaded = await uploadBodyAssetFiles({
     teamID: input.teamID,
     projectID: input.projectID,
     files: input.files,
     ruleID: input.ruleID,
+    onProgress: input.onProgress,
   });
   return uploaded.map(({ sourceFile, uploadedFile, asset }) =>
     uploadPreviewFromPayload(uploadedFile, sourceFile, asset),

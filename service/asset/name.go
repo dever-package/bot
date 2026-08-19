@@ -27,8 +27,10 @@ func (s Service) RenameTeamAsset(ctx context.Context, teamID uint64, assetID uin
 		return nil, fmt.Errorf("资产标题不能超过 %d 个字符", maxAssetNameRunes)
 	}
 	affected := assetmodel.NewAssetModel().Update(ctx, map[string]any{
-		"id":     asset.ID,
-		"status": map[string]any{"neq": assetmodel.StatusDeleted},
+		"id":      asset.ID,
+		"user_id": asset.UserID,
+		"team_id": asset.TeamID,
+		"status":  map[string]any{"neq": assetmodel.StatusDeleted},
 	}, map[string]any{
 		"name":      name,
 		"name_mode": assetmodel.NameModeManual,

@@ -125,7 +125,8 @@ const lastOpenedStoragePrefix = "dever:bot:knowledge-file-manager:last-opened:"
 const contextMenuViewportMargin = 8
 const contextMenuFallbackWidth = 168
 const contextMenuFallbackHeight = 184
-const uploadChunkSize = 512 * 1024
+const fallbackUploadChunkBytes = 6 * 1024 * 1024
+const fallbackMaxUploadBytes = 2048 * 1024 * 1024
 const indexPollInterval = 2400
 
 export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
@@ -165,6 +166,14 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
 
   const baseName = data.base?.name || "知识库"
   const baseIndexStatus = normalizeFrontendIndexStatus(data.base?.index_status)
+  const uploadChunkBytes = positiveBytes(
+    data.drive?.upload_chunk_bytes,
+    fallbackUploadChunkBytes,
+  )
+  const maxUploadBytes = positiveBytes(
+    data.drive?.max_upload_bytes,
+    fallbackMaxUploadBytes,
+  )
   const tree = useMemo(() => buildTree(data.files || []), [data.files])
   const visibleTree = useMemo(() => filterTree(tree, query), [query, tree])
   const flatTree = useMemo(() => flattenTree(tree), [tree])
@@ -668,6 +677,8 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
             parent,
             file,
             name: file.name,
+            chunkBytes: uploadChunkBytes,
+            maxBytes: maxUploadBytes,
             onProgress: (fileRatio) => {
               setUploadProgress({
                 active: true,
@@ -723,7 +734,7 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
         }, 1800)
       }
     },
-    [knowledgeBaseID, updateExpandedFolders],
+    [knowledgeBaseID, maxUploadBytes, updateExpandedFolders, uploadChunkBytes],
   )
 
   const toggleFolder = useCallback((id: string) => {
@@ -823,6 +834,8 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
           parent,
           file,
           name,
+          chunkBytes: uploadChunkBytes,
+          maxBytes: maxUploadBytes,
         })
         uploaded.push({ name })
       }
@@ -832,7 +845,14 @@ export function ShowKnowledgeFileManager({ item }: NodeItemProps) {
       updateExpandedFolders((current) => new Set(current).add(parent))
       return uploaded
     },
-    [currentFile, flatTree, knowledgeBaseID, updateExpandedFolders],
+    [
+      currentFile,
+      flatTree,
+      knowledgeBaseID,
+      maxUploadBytes,
+      updateExpandedFolders,
+      uploadChunkBytes,
+    ],
   )
 
   const handleContextMenu = useCallback((event: MouseEvent, node: KnowledgeTreeNode | null) => {
@@ -2498,20 +2518,27 @@ async function uploadKnowledgeFile({
   parent,
   file,
   name,
+  chunkBytes,
+  maxBytes,
   onProgress,
 }: {
   knowledgeBaseID: number
   parent: string
   file: File
   name: string
+  chunkBytes: number
+  maxBytes: number
   onProgress?: (percent: number) => void
 }) {
-  const totalParts = Math.max(1, Math.ceil(file.size / uploadChunkSize))
+  if (file.size > maxBytes) {
+    throw new Error(`文件 ${file.name} 超过 ${formatUploadBytes(maxBytes)} 上传限制`)
+  }
+  const totalParts = Math.max(1, Math.ceil(file.size / chunkBytes))
   const uploadID = createUploadID()
   let latest: KnowledgeFileManagerData | null = null
   for (let partIndex = 0; partIndex < totalParts; partIndex += 1) {
-    const start = partIndex * uploadChunkSize
-    const chunk = file.slice(start, Math.min(file.size, start + uploadChunkSize))
+    const start = partIndex * chunkBytes
+    const chunk = file.slice(start, Math.min(file.size, start + chunkBytes))
     const partResult = await uploadFilePart({
       knowledgeBaseID,
       parent,
@@ -2530,6 +2557,20 @@ async function uploadKnowledgeFile({
     throw new Error("上传失败")
   }
   return latest
+}
+
+function positiveBytes(value: number | undefined, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : fallback
+}
+
+function formatUploadBytes(value: number) {
+  const gigabyte = 1024 * 1024 * 1024
+  if (value >= gigabyte) {
+    return `${Number((value / gigabyte).toFixed(1))}GB`
+  }
+  return `${Math.floor(value / 1024 / 1024)}MB`
 }
 
 function createUploadID() {

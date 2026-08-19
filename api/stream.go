@@ -29,6 +29,7 @@ func RequestHeaders(c *server.Context) map[string]string {
 }
 
 func WriteJSON(c *server.Context, data any, err error) error {
+	disableResponseCache(c)
 	if err != nil {
 		payload := map[string]any{
 			"status": 2,
@@ -45,6 +46,16 @@ func WriteJSON(c *server.Context, data any, err error) error {
 		"data":   data,
 		"msg":    "",
 	})
+}
+
+func disableResponseCache(c *server.Context) {
+	if c == nil || c.Raw == nil {
+		return
+	}
+	if raw, ok := c.Raw.(interface{ Set(string, string) }); ok {
+		raw.Set("Cache-Control", "private, no-store")
+		raw.Set("Pragma", "no-cache")
+	}
 }
 
 func Uint64FromBody(body map[string]any, keys ...string) uint64 {

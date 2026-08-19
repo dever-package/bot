@@ -8,7 +8,7 @@ import { listAgentChatSessions, loadAgentChatSession } from "./api";
 import {
   readAgentChatArtifacts,
   type AgentChatArtifact,
-} from "./artifact";
+} from "../../shared/agent-output/artifact";
 
 export type ReferenceType =
   | "message"

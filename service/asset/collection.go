@@ -113,6 +113,7 @@ func (s Service) ReconcileProjectCollectionChildren(
 		}
 	}
 	children := assetmodel.NewAssetModel().Select(ctx, map[string]any{
+		"user_id":       collection.UserID,
 		"team_id":       teamID,
 		"collection_id": collectionID,
 		"status":        assetmodel.StatusCurrent,
@@ -135,6 +136,7 @@ func (s Service) ReconcileProjectCollectionChildren(
 		for _, assetID := range staleIDs {
 			if assetModel.Update(tx, map[string]any{
 				"id":            assetID,
+				"user_id":       collection.UserID,
 				"team_id":       teamID,
 				"collection_id": collectionID,
 				"status":        assetmodel.StatusCurrent,
@@ -166,6 +168,7 @@ const collectionPreviewLimit = 4
 func attachCollectionListMetadata(ctx context.Context, rows []*assetmodel.Asset, items []map[string]any, childStatus string) error {
 	collectionItems := make(map[uint64]map[string]any)
 	collectionIDs := make([]uint64, 0)
+	userID := uint64(0)
 	teamID := uint64(0)
 	itemsByID := make(map[uint64]map[string]any, len(items))
 	for _, item := range items {
@@ -183,12 +186,13 @@ func attachCollectionListMetadata(ctx context.Context, rows []*assetmodel.Asset,
 		}
 		collectionIDs = append(collectionIDs, row.ID)
 		collectionItems[row.ID] = item
+		userID = row.UserID
 		teamID = row.TeamID
 	}
 	if len(collectionIDs) == 0 {
 		return nil
 	}
-	counts, coverRows, err := collectionListMetadataRows(ctx, teamID, collectionIDs, childStatus)
+	counts, coverRows, err := collectionListMetadataRows(ctx, userID, teamID, collectionIDs, childStatus)
 	if err != nil {
 		return err
 	}
@@ -222,12 +226,13 @@ func attachCollectionListMetadata(ctx context.Context, rows []*assetmodel.Asset,
 
 func collectionListMetadataRows(
 	ctx context.Context,
+	userID uint64,
 	teamID uint64,
 	collectionIDs []uint64,
 	childStatus string,
 ) (map[uint64]int, []*assetmodel.Asset, error) {
 	counts := make(map[uint64]int, len(collectionIDs))
-	if teamID == 0 || len(collectionIDs) == 0 {
+	if userID == 0 || teamID == 0 || len(collectionIDs) == 0 {
 		return counts, nil, nil
 	}
 	db, err := orm.Get(assetmodel.NewAssetModel().Config().Database)
@@ -236,8 +241,8 @@ func collectionListMetadataRows(
 	}
 	table := assetmodel.NewAssetModel().Config().Table
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(collectionIDs)), ",")
-	baseArgs := make([]any, 0, len(collectionIDs)+2)
-	baseArgs = append(baseArgs, teamID)
+	baseArgs := make([]any, 0, len(collectionIDs)+3)
+	baseArgs = append(baseArgs, userID, teamID)
 	for _, collectionID := range collectionIDs {
 		baseArgs = append(baseArgs, collectionID)
 	}
@@ -246,7 +251,8 @@ func collectionListMetadataRows(
 	countSQL := fmt.Sprintf(`
 		SELECT collection_id, COUNT(*) AS collection_count
 		FROM %s
-		WHERE team_id = ?
+		WHERE user_id = ?
+			AND team_id = ?
 			AND collection_id IN (%s)
 			AND status = ?
 			AND version_id > 0
@@ -266,7 +272,8 @@ func collectionListMetadataRows(
 			SELECT id, collection_id, kind, version_id,
 				ROW_NUMBER() OVER (PARTITION BY collection_id ORDER BY id DESC) AS cover_rank
 			FROM %s
-			WHERE team_id = ?
+			WHERE user_id = ?
+				AND team_id = ?
 				AND collection_id IN (%s)
 				AND status = ?
 				AND version_id > 0

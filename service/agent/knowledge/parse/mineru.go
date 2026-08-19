@@ -9,7 +9,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -22,7 +21,7 @@ const (
 	defaultMinerUModelVersion    = "vlm"
 	defaultMinerULanguage        = "ch"
 	defaultMinerUPollInterval    = 3 * time.Second
-	defaultMinerUMaxPollAttempts = 80
+	defaultMinerUMaxPollAttempts = 600
 	defaultMinerUMaxZipSize      = 220 << 20
 	minerUPageTextMaxRunes       = 6000
 )
@@ -87,6 +86,10 @@ func SupportsMinerU(name string, mimeType string) bool {
 }
 
 func ParseWithMinerU(ctx context.Context, req Request, cfg MinerUConfig) (Result, error) {
+	return parseWithMinerULimits(ctx, req, cfg, defaultMinerUPDFLimits())
+}
+
+func parseWithMinerULimits(ctx context.Context, req Request, cfg MinerUConfig, limits minerUPDFLimits) (Result, error) {
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		req.Name = filepath.Base(req.Path)
@@ -98,14 +101,14 @@ func ParseWithMinerU(ctx context.Context, req Request, cfg MinerUConfig) (Result
 	if strings.TrimSpace(req.Path) == "" {
 		return Result{}, fmt.Errorf("MinerU 解析需要本地文件路径")
 	}
-	if info, err := os.Stat(req.Path); err != nil {
-		return Result{}, fmt.Errorf("读取 MinerU 待解析文件失败: %w", err)
-	} else if info.Size() > 200<<20 {
-		return Result{}, fmt.Errorf("MinerU 精准解析单文件不能超过 200MB")
-	}
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return Result{}, fmt.Errorf("MinerU APIKey 不能为空")
 	}
+	input, err := prepareMinerUInputWithLimits(ctx, req, limits)
+	if err != nil {
+		return Result{}, err
+	}
+	defer input.Cleanup()
 	client := minerUClient{
 		host:   normalizeMinerUHost(cfg.Host),
 		apiKey: strings.TrimSpace(cfg.APIKey),
@@ -113,41 +116,24 @@ func ParseWithMinerU(ctx context.Context, req Request, cfg MinerUConfig) (Result
 			Timeout: 10 * time.Minute,
 		},
 	}
-	batchID, fileURLs, err := client.createUploadURLs(ctx, req, cfg)
+	parsed, err := client.parseParts(ctx, req, input.Parts, cfg)
 	if err != nil {
 		return Result{}, err
 	}
-	if len(fileURLs) == 0 {
-		return Result{}, fmt.Errorf("MinerU 未返回文件上传地址")
-	}
-	if err := client.uploadFile(ctx, fileURLs[0], req.Path); err != nil {
-		return Result{}, err
-	}
-	extractResult, err := client.waitBatchResult(ctx, batchID, req.Name, cfg)
+	result, err := mergeMinerUParsedParts(req, parsed.Parts, input.PageCount)
 	if err != nil {
-		return Result{}, err
-	}
-	if strings.TrimSpace(extractResult.FullZipURL) == "" {
-		return Result{}, fmt.Errorf("MinerU 解析完成但未返回 full_zip_url")
-	}
-	zipPath, err := client.downloadZip(ctx, extractResult.FullZipURL)
-	if err != nil {
-		return Result{}, err
-	}
-	defer os.Remove(zipPath)
-	result, err := parseMinerUZip(req, zipPath)
-	if err != nil {
+		parsed.Cleanup()
 		return Result{}, err
 	}
 	if result.Raw == nil {
 		result.Raw = map[string]any{}
 	}
 	result.Raw["parser"] = "mineru"
-	result.Raw["batch_id"] = batchID
-	result.Raw["file_name"] = extractResult.FileName
-	result.Raw["data_id"] = extractResult.DataID
-	result.Raw["full_zip_url"] = extractResult.FullZipURL
 	result.Raw["model_version"] = minerUModelVersion(cfg)
+	result.Raw["batch_count"] = parsed.BatchCount
+	result.Raw["part_count"] = len(parsed.Parts)
+	result.Raw["page_count"] = input.PageCount
+	result.Raw["split"] = len(input.Parts) > 1
 	return result, nil
 }
 
@@ -193,34 +179,6 @@ func minerUMaxPollAttempts(cfg MinerUConfig) int {
 		return cfg.MaxPollAttempts
 	}
 	return defaultMinerUMaxPollAttempts
-}
-
-func (c minerUClient) createUploadURLs(ctx context.Context, req Request, cfg MinerUConfig) (string, []string, error) {
-	payload := map[string]any{
-		"files": []map[string]any{{
-			"name":    req.Name,
-			"data_id": minerUDataID(req.Name),
-		}},
-		"model_version":  minerUModelVersion(cfg),
-		"language":       minerULanguage(cfg),
-		"enable_formula": true,
-		"enable_table":   true,
-	}
-	body, err := c.doJSON(ctx, http.MethodPost, "/api/v4/file-urls/batch", payload)
-	if err != nil {
-		return "", nil, err
-	}
-	var response minerUCreateBatchResponse
-	if err := json.Unmarshal(body, &response); err != nil {
-		return "", nil, fmt.Errorf("解析 MinerU 上传地址响应失败: %w", err)
-	}
-	if response.Code != 0 {
-		return "", nil, fmt.Errorf("MinerU 申请上传地址失败: %s", firstMinerUText(response.Msg, fmt.Sprintf("code=%d", response.Code)))
-	}
-	if strings.TrimSpace(response.Data.BatchID) == "" {
-		return "", nil, fmt.Errorf("MinerU 未返回 batch_id")
-	}
-	return response.Data.BatchID, response.Data.FileURLs, nil
 }
 
 func minerUDataID(name string) string {
@@ -269,69 +227,6 @@ func (c minerUClient) uploadFile(ctx context.Context, uploadURL string, filePath
 		return fmt.Errorf("上传文件到 MinerU 失败: HTTP %d %s", response.StatusCode, strings.TrimSpace(string(message)))
 	}
 	return nil
-}
-
-func (c minerUClient) waitBatchResult(ctx context.Context, batchID string, fileName string, cfg MinerUConfig) (minerUExtractResult, error) {
-	interval := minerUPollInterval(cfg)
-	for attempt := 0; attempt < minerUMaxPollAttempts(cfg); attempt++ {
-		result, pending, err := c.fetchBatchResult(ctx, batchID, fileName)
-		if err != nil {
-			return minerUExtractResult{}, err
-		}
-		if !pending {
-			return result, nil
-		}
-		timer := time.NewTimer(interval)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return minerUExtractResult{}, ctx.Err()
-		case <-timer.C:
-		}
-	}
-	return minerUExtractResult{}, fmt.Errorf("MinerU 解析超时: batch_id=%s", batchID)
-}
-
-func (c minerUClient) fetchBatchResult(ctx context.Context, batchID string, fileName string) (minerUExtractResult, bool, error) {
-	body, err := c.doJSON(ctx, http.MethodGet, "/api/v4/extract-results/batch/"+url.PathEscape(batchID), nil)
-	if err != nil {
-		return minerUExtractResult{}, false, err
-	}
-	var response minerUBatchResultResponse
-	if err := json.Unmarshal(body, &response); err != nil {
-		return minerUExtractResult{}, false, fmt.Errorf("解析 MinerU 批量结果失败: %w", err)
-	}
-	if response.Code != 0 {
-		return minerUExtractResult{}, false, fmt.Errorf("MinerU 查询解析结果失败: %s", firstMinerUText(response.Msg, fmt.Sprintf("code=%d", response.Code)))
-	}
-	result, ok := pickMinerUResult(response.Data.ExtractResult, fileName)
-	if !ok {
-		return minerUExtractResult{}, true, nil
-	}
-	state := strings.ToLower(strings.TrimSpace(result.State))
-	switch state {
-	case "done":
-		return result, false, nil
-	case "failed":
-		return minerUExtractResult{}, false, fmt.Errorf("MinerU 解析失败: %s", firstMinerUText(result.ErrMsg, result.FileName))
-	case "waiting-file", "pending", "running", "converting", "":
-		return result, true, nil
-	default:
-		return result, true, nil
-	}
-}
-
-func pickMinerUResult(results []minerUExtractResult, fileName string) (minerUExtractResult, bool) {
-	if len(results) == 0 {
-		return minerUExtractResult{}, false
-	}
-	fileName = strings.TrimSpace(fileName)
-	for _, result := range results {
-		if strings.TrimSpace(result.FileName) == fileName {
-			return result, true
-		}
-	}
-	return results[0], true
 }
 
 func (c minerUClient) downloadZip(ctx context.Context, zipURL string) (string, error) {

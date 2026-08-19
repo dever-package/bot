@@ -5,6 +5,7 @@ import type {
   AssetRecord,
 } from "../asset/asset-types";
 import { uploadBodyAssetFiles } from "../asset/upload-asset-api";
+import type { AssetUploadOptions } from "../asset/asset-upload-progress";
 
 export function WorkbenchAssetPage({
   teamID,
@@ -17,8 +18,12 @@ export function WorkbenchAssetPage({
   canContinue: (asset: AssetRecord) => boolean;
   catalogOptions: AssetCatalogOptions;
 }) {
-  async function uploadAssets(files: File[]) {
-    const uploaded = await uploadBodyAssetFiles({ teamID, files });
+  async function uploadAssets(files: File[], options?: AssetUploadOptions) {
+    const uploaded = await uploadBodyAssetFiles({
+      teamID,
+      files,
+      onProgress: options?.onProgress,
+    });
     return uploaded
       .map(({ asset }) => normalizeAssetRecord(asset))
       .filter((asset) => asset.id > 0);

@@ -43,13 +43,17 @@ export function loadAssetFilterOptions(
     const filtersPromise = request(
       joinSiteApi("workbench/asset_filters"),
       "get",
-      { team_id: teamID },
+      {
+        team_id: teamID,
+        request_scope: requestScopeKey || undefined,
+      },
     );
     const [catalogResult, filtersResult] = catalogOptions
       ? [null, await filtersPromise]
       : await Promise.all([
           request(joinSiteApi("workbench/catalog"), "get", {
             team_id: teamID,
+            request_scope: requestScopeKey || undefined,
           }),
           filtersPromise,
         ]);
@@ -95,6 +99,7 @@ export function loadAssetPage(input: {
   return loadAssetPageRequest(JSON.stringify(normalizedInput), async () => {
     const result = await request(joinSiteApi("workbench/assets"), "get", {
       team_id: normalizedInput.teamID,
+      request_scope: normalizedInput.requestScopeKey || undefined,
       source_type: normalizedInput.filters.sourceType || undefined,
       source_id: normalizedInput.filters.sourceID || undefined,
       project_id: normalizedInput.filters.projectID || undefined,

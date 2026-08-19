@@ -65,7 +65,7 @@ func (s Service) CanvasReferences(ctx context.Context, projectID uint64, assetCa
 	for _, row := range candidatesByID {
 		candidates = append(candidates, row)
 	}
-	scope, ok := resolveCanvasAssetScope(ctx, projectID, candidates)
+	scope, ok := resolveCanvasAssetScope(ctx, projectID)
 	if !ok {
 		return []map[string]any{}
 	}
@@ -98,7 +98,7 @@ func canvasReferenceMap(asset assetmodel.Asset, version *assetmodel.Version) map
 	return item
 }
 
-func resolveCanvasAssetScope(ctx context.Context, projectID uint64, assets []*assetmodel.Asset) (teamAssetScope, bool) {
+func resolveCanvasAssetScope(ctx context.Context, projectID uint64) (teamAssetScope, bool) {
 	project := projectmodel.NewProjectModel().Find(ctx, map[string]any{
 		"id":     projectID,
 		"status": projectmodel.StatusEnabled,
@@ -106,11 +106,11 @@ func resolveCanvasAssetScope(ctx context.Context, projectID uint64, assets []*as
 	if project == nil || project.TeamID == 0 {
 		return teamAssetScope{}, false
 	}
-	scope, err := resolveTeamAssetScopeForAssets(ctx, project.TeamID, assets, projectID)
+	scope, err := resolveTeamAssetOwnerScope(ctx, project.TeamID)
 	if err != nil {
 		return teamAssetScope{}, false
 	}
-	if _, exists := scope.ProjectIDs[projectID]; !exists {
+	if project.UserID == 0 || project.UserID != scope.UserID {
 		return teamAssetScope{}, false
 	}
 	return scope, true
@@ -221,7 +221,7 @@ func (s Service) EnsureCanvasReferencedMaterialsActive(ctx context.Context, proj
 		"role":   assetmodel.RoleMaterial,
 		"status": map[string]any{"neq": assetmodel.StatusDeleted},
 	})
-	scope, ok := resolveCanvasAssetScope(ctx, projectID, rows)
+	scope, ok := resolveCanvasAssetScope(ctx, projectID)
 	if !ok {
 		return
 	}

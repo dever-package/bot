@@ -35,10 +35,7 @@ func CanParseLocally(name string, mimeType string) bool {
 	case ".json", ".htm", ".html":
 		return true
 	}
-	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
-	return strings.HasPrefix(mimeType, "text/") ||
-		strings.Contains(mimeType, "json") ||
-		strings.Contains(mimeType, "xml")
+	return localParserForMIME(mimeType) != nil
 }
 
 func NeedsParserService(name string, mimeType string) bool {
@@ -81,8 +78,22 @@ func ParseFile(req Request) (Result, error) {
 	if codeExts[ext] {
 		return parseCode(req, content), nil
 	}
-	if textExts[ext] || strings.HasPrefix(strings.ToLower(req.MimeType), "text/") {
+	if textExts[ext] {
 		return parseText(req, content), nil
 	}
+	if parser := localParserForMIME(req.MimeType); parser != nil {
+		return parser(req, content), nil
+	}
 	return Result{}, fmt.Errorf("该文件类型暂不支持索引")
+}
+
+func localParserForMIME(mimeType string) func(Request, string) Result {
+	mimeType = strings.ToLower(strings.TrimSpace(strings.SplitN(mimeType, ";", 2)[0]))
+	if strings.Contains(mimeType, "json") {
+		return parseJSON
+	}
+	if strings.HasPrefix(mimeType, "text/") || strings.Contains(mimeType, "xml") {
+		return parseText
+	}
+	return nil
 }

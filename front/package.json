@@ -6,7 +6,7 @@
     "bundle": "split",
     "bundleBudget": {
       "maxJs": 80,
-      "maxCss": 22,
+      "maxCss": 23,
       "maxDynamicEntries": 45,
       "tinyJsBytes": 2048,
       "maxTinyJs": 12,
@@ -17,13 +17,14 @@
         "space-page": {
           "facadeSuffix": "/nodes/body-work/space/space-page.tsx",
           "maxJs": 20,
-          "maxCss": 4,
+          "maxCss": 5,
           "maxBytes": 1153434,
           "forbid": [
-            "markdown-live-editor",
-            "code-editor",
-            "knowledge-file-manager",
-            "agent-chat"
+            "/nodes/body-work/space/space-add-node-menu.tsx",
+            "/nodes/show/agent-chat.tsx",
+            "/nodes/show/knowledge-file-manager.tsx",
+            "/nodes/show/knowledge-file-manager/code-editor.tsx",
+            "/nodes/show/knowledge-file-manager/markdown-live-editor.tsx"
           ]
         }
       }

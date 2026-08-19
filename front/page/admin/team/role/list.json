@@ -131,6 +131,16 @@
               }
             },
             {
+              "value": "tool_status",
+              "name": "工具",
+              "description": "开启后该角色可在 Body 对话中选择和调用团队工具。",
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
               "value": "create_status",
               "name": "创作",
               "description": "开启后在创作画布的角色列表中展示该角色。",

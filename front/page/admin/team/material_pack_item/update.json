@@ -1,0 +1,92 @@
+{
+  "page": {
+    "name": "方案素材编辑",
+    "parent": "bot/team/material_pack/list",
+    "type": 2,
+    "sort": 11,
+    "auth": [
+      {
+        "key": "bot/team/material_pack_item/create",
+        "name": "方案素材新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/team/material_pack_item/update",
+        "name": "方案素材编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-cascader",
+        "value": "form.material_id",
+        "mode": "form",
+        "placeholder": "请选择素材",
+        "validate": [
+          {
+            "type": "required",
+            "message": "素材不能为空。"
+          }
+        ],
+        "meta": {
+          "childParentField": "cate_id",
+          "valueMode": "leaf",
+          "placeholder": [
+            "选择分类",
+            "选择素材"
+          ],
+          "searchPlaceholder": [
+            "搜索分类",
+            "搜索素材"
+          ],
+          "childExtraFields": "name,kind,description,status",
+          "order": "sort asc,id asc",
+          "wrap": false,
+          "formLayout": "horizontal",
+          "model": "bot.team.NewMaterialCateModel",
+          "childModel": "bot.team.NewMaterialModel"
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "id": 0,
+      "pack_id": "",
+      "material_id": "",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "service": "bot.team.MaterialHook.BeforeSaveMaterialPackItem"
+      }
+    }
+  }
+}

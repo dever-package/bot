@@ -117,6 +117,7 @@ var releaseRelation = orm.Relation{
 
 type Asset struct {
 	ID           uint64     `dorm:"primaryKey;autoIncrement;comment:资产ID"`
+	UserID       uint64     `dorm:"type:bigint;not null;default:0;comment:用户"`
 	ProjectID    uint64     `dorm:"type:bigint;not null;default:0;comment:项目"`
 	BodyID       uint64     `dorm:"type:bigint;not null;default:0;comment:载体"`
 	TeamID       uint64     `dorm:"type:bigint;not null;default:0;comment:团队"`
@@ -139,6 +140,8 @@ type Asset struct {
 }
 
 type AssetIndex struct {
+	UserTeamStatus        struct{} `index:"user_id,team_id,status,id"`
+	UserTeamTrash         struct{} `index:"user_id,team_id,status,deleted_at,id"`
 	ProjectStatus         struct{} `index:"project_id,status,sort,id"`
 	ProjectFlow           struct{} `index:"project_id,flow_id,status,sort,id"`
 	BodyStatus            struct{} `index:"body_id,status,sort,id"`

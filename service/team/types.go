@@ -72,6 +72,7 @@ type GraphFlowNodeEdge struct {
 type GraphTeam struct {
 	ID             uint64         `json:"id"`
 	CateID         uint64         `json:"cate_id"`
+	MaterialPackID uint64         `json:"material_pack_id"`
 	Name           string         `json:"name"`
 	Description    string         `json:"description"`
 	Config         map[string]any `json:"config"`
@@ -122,6 +123,7 @@ type GraphRole struct {
 	Assignment   string         `json:"assignment"`
 	Config       map[string]any `json:"config"`
 	ChatStatus   int16          `json:"chat_status"`
+	ToolStatus   int16          `json:"tool_status"`
 	CreateStatus int16          `json:"create_status"`
 	Status       int16          `json:"status"`
 	Sort         int            `json:"sort"`

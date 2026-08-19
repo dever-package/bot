@@ -8,6 +8,7 @@ import { assetKindsAccept } from "./asset-contract";
 import { normalizeAssetRecord } from "./asset-api";
 import { uploadBodyAssetFiles } from "./upload-asset-api";
 import { AssetPickerDialog } from "./asset-picker-dialog";
+import type { AssetUploadOptions } from "./asset-upload-progress";
 import type { AssetKind, AssetRecord } from "./asset-types";
 
 const fileAssetKinds = new Set<AssetKind>(["image", "audio", "video", "file"]);
@@ -52,12 +53,13 @@ export function AssetParamPicker({
       maxSelection={Math.max(availableAssetSlots, 1)}
       confirmSelection
       uploadAccept={assetKindsAccept(allowedKinds)}
-      onUpload={(selectedFiles) =>
+      onUpload={(selectedFiles, options) =>
         uploadParamAssets({
           teamID,
           ruleID: Number(param.upload_rule_id || 0),
           kind: resourceKind,
           files: selectedFiles,
+          onProgress: options?.onProgress,
         })
       }
       validateAsset={(asset) => {
@@ -165,6 +167,7 @@ async function uploadParamAssets(input: {
   ruleID: number;
   kind?: string;
   files: File[];
+  onProgress?: AssetUploadOptions["onProgress"];
 }): Promise<AssetRecord[]> {
   if (!Number.isFinite(input.ruleID) || input.ruleID <= 0) {
     throw new Error("当前参数未配置上传规则");
@@ -174,6 +177,7 @@ async function uploadParamAssets(input: {
     files: input.files,
     ruleID: input.ruleID,
     kind: input.kind,
+    onProgress: input.onProgress,
   });
   return uploaded
     .map(({ asset }) => normalizeAssetRecord(asset))

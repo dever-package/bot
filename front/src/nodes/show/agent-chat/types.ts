@@ -1,9 +1,12 @@
 import type { ReactNode, RefObject, WheelEvent } from "react";
 import type { AgentChatMessageRecord, AgentChatSession } from "./api";
-import { readAgentChatActivities, type AgentChatActivity } from "./activity";
-import type { AgentChatOutput } from "./output";
-import type { AgentChatDocument } from "./document";
-import type { AgentChatArtifact } from "./artifact";
+import {
+  readAgentChatActivities,
+  type AgentChatActivity,
+} from "../../shared/agent-output/activity";
+import type { AgentChatOutput } from "../../shared/agent-output/output";
+import type { AgentChatDocument } from "../../shared/agent-output/document";
+import type { AgentChatArtifact } from "../../shared/agent-output/artifact";
 import type {
   ReferenceContent,
   ReferenceInput,

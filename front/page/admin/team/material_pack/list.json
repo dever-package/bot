@@ -1,0 +1,423 @@
+{
+  "page": {
+    "name": "素材库",
+    "icon": "library",
+    "parent": "bot-team",
+    "sort": 2
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "content-shell": {
+            "type": "container",
+            "className": "front-two-pane-layout",
+            "children": {
+              "pack-column": {
+                "type": "container",
+                "className": "min-w-0"
+              },
+              "list-column": {
+                "type": "container",
+                "className": "flex min-w-0 flex-col gap-4",
+                "children": {
+                  "content-toolbar": {
+                    "type": "row",
+                    "className": "flex-wrap items-center gap-3"
+                  },
+                  "table-row": {
+                    "type": "container",
+                    "className": "overflow-hidden rounded-md border bg-background"
+                  }
+                }
+              }
+            }
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "素材分类",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "icon": "tags"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.materialCate",
+            "value": true
+          }
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "新增素材",
+        "className": "shrink-0",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "icon": "plus"
+        },
+        "action": {
+          "click": {
+            "type": "modal",
+            "key": "dialog.createMaterial",
+            "value": true
+          }
+        }
+      }
+    ],
+    "pack-column": [
+      {
+        "type": "show-category-list",
+        "id": "team-material-pack-category",
+        "value": "search.pack_id",
+        "option": {
+          "model": "bot.team.NewMaterialPackModel",
+          "order": "sort asc,id asc",
+          "extraFields": [
+            "status",
+            "sort"
+          ]
+        },
+        "meta": {
+          "title": "方案",
+          "description": "设置团队素材方案",
+          "remote": true,
+          "defaultFirst": true,
+          "queryKey": "pack_id",
+          "sortable": true,
+          "sortField": "sort",
+          "sortChangeAction": {
+            "type": "save",
+            "key": "submit",
+            "path": "bot/team/material_pack/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "sort": "$value"
+            }
+          },
+          "createButton": {
+            "name": "新增方案",
+            "icon": "plus",
+            "variant": "outline",
+            "size": "sm",
+            "action": {
+              "click": {
+                "type": "modal",
+                "key": "dialog.createPack",
+                "value": true
+              }
+            }
+          },
+          "statusField": "status",
+          "statusDisplay": "select",
+          "statusChangeAction": {
+            "type": "save",
+            "key": "submit",
+            "path": "bot/team/material_pack/update",
+            "params": {
+              "_partial": true,
+              "id": "$row.id",
+              "status": "$value"
+            }
+          },
+          "statusCases": [
+            {
+              "value": 1,
+              "text": "启用",
+              "tone": "success"
+            },
+            {
+              "value": 2,
+              "text": "停用",
+              "tone": "muted"
+            }
+          ],
+          "buttons": [
+            {
+              "icon": "square-pen",
+              "variant": "ghost",
+              "size": "sm",
+              "description": "编辑当前方案",
+              "action": {
+                "click": [
+                  {
+                    "type": "data",
+                    "key": "actionTarget.packId",
+                    "value": "$row.id"
+                  },
+                  {
+                    "type": "modal",
+                    "key": "dialog.editPack",
+                    "value": true
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "content-toolbar": [
+      {
+        "type": "form-select",
+        "placeholder": "状态",
+        "value": "search.status",
+        "mode": "search"
+      },
+      {
+        "type": "show-button",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "重置",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "to": "/bot/team/material_pack/list"
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "savePath": "bot/team/material_pack_item/update",
+          "rowKey": "id",
+          "columns": [
+            {
+              "value": "material.name",
+              "name": "素材名称",
+              "type": "show-base"
+            },
+            {
+              "value": "kind_label",
+              "name": "类型",
+              "type": "show-tag"
+            },
+            {
+              "value": "material.cate_id",
+              "name": "分类",
+              "type": "show-tag",
+              "meta": {
+                "option": "option.material_cate"
+              }
+            },
+            {
+              "value": "material.description",
+              "name": "描述",
+              "type": "show-base",
+              "className": "max-w-[22rem] truncate"
+            },
+            {
+              "value": "status",
+              "type": "form-switch",
+              "meta": {
+                "trueValue": 1,
+                "falseValue": 2
+              }
+            },
+            {
+              "value": "sort",
+              "type": "show-base"
+            },
+            {
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "square-pen",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "编辑素材",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.materialId",
+                          "value": "$row.material_id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.editMaterial",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.createPack",
+          "pageRoute": "/bot/team/material_pack/update",
+          "description": "素材方案用于组合多个官方素材，创建后可分配给团队。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.editPack",
+          "pageRoute": "/bot/team/material_pack/update",
+          "description": "维护当前素材方案，以及方案内素材顺序。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.packId"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.createMaterial",
+          "pageRoute": "/bot/team/material/update",
+          "description": "新增官方素材；保存后可在素材方案编辑中加入当前或其他方案。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.editMaterial",
+          "pageRoute": "/bot/team/material/update",
+          "description": "编辑官方素材内容；使用该素材的所有方案会同步生效。",
+          "footer": {
+            "confirm": true,
+            "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "id": "data.actionTarget.materialId"
+          },
+          "size": "xl",
+          "bodyClassName": "py-2"
+        }
+      },
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.materialCate",
+          "pageRoute": "/bot/team/material_cate/list",
+          "title": "素材分类",
+          "description": "按素材类型维护官方素材分类。",
+          "assistant": false,
+          "size": "lg",
+          "bodyClassName": "py-2"
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "素材库",
+      "description": "维护官方素材方案，并将提示词、图片、音频或视频素材组合后提供给团队。"
+    },
+    "search": {
+      "pack_id": "",
+      "status": ""
+    },
+    "option": {
+      "material_cate": {
+        "service": "bot.team.MaterialHook.LoadMaterialCates"
+      }
+    },
+    "table": {
+      "filterFields": [
+        "pack_id",
+        "status"
+      ],
+      "model": "bot.team.NewMaterialPackItemModel",
+      "service": "bot.team.MaterialHook.AttachMaterialPackItemList"
+    },
+    "actionTarget": {
+      "packId": "",
+      "materialId": ""
+    }
+  },
+  "state": {
+    "dialog": {
+      "createPack": false,
+      "editPack": false,
+      "createMaterial": false,
+      "editMaterial": false,
+      "materialCate": false
+    }
+  },
+  "action": {}
+}

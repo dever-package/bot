@@ -3,7 +3,7 @@
     "name": "运行记录",
     "icon": "list-checks",
     "parent": "bot-team",
-    "sort": 2
+    "sort": 3
   },
   "layout": {
     "type": "container",

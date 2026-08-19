@@ -121,6 +121,7 @@ func (s Service) CloneProjectVersion(ctx context.Context, req CloneProjectVersio
 	source, _ := jsonValue(version.Source).(map[string]any)
 	return s.SaveVersion(ctx, SaveVersionRequest{
 		AssetID:      asset.ID,
+		UserID:       asset.UserID,
 		ProjectID:    asset.ProjectID,
 		BodyID:       asset.BodyID,
 		TeamID:       asset.TeamID,

@@ -144,6 +144,7 @@ func assetSaveLockKey(req SaveVersionRequest) string {
 	parts := []string{
 		"asset_save",
 		fmt.Sprintf("asset:%d", req.AssetID),
+		fmt.Sprintf("user:%d", req.UserID),
 		fmt.Sprintf("project:%d", req.ProjectID),
 		fmt.Sprintf("body:%d", req.BodyID),
 		fmt.Sprintf("team:%d", req.TeamID),

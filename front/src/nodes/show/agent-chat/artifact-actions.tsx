@@ -8,7 +8,7 @@ import type {
   EnergonMediaPreviewRequest,
 } from "@/components/energon/content-view";
 import { resolveAssetUrl } from "@/lib/request";
-import type { AgentChatArtifact } from "./artifact";
+import type { AgentChatArtifact } from "../../shared/agent-output/artifact";
 import type { AgentChatArtifactActionRenderer } from "./types";
 
 type AgentChatArtifactActionsValue = {

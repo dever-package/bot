@@ -37,21 +37,23 @@ var teamPublishStatusOptions = []map[string]any{
 
 var teamSeed = []map[string]any{
 	{
-		"id":              DefaultTeamID,
-		"cate_id":         DefaultTeamCateID,
-		"name":            "默认团队",
-		"description":     "你是一个通用 AI 团队，负责根据用户目标协调不同角色完成任务。理解用户目标，规划执行步骤，调度合适角色完成任务并输出可复用结果。",
-		"config":          "{}",
-		"project_enabled": StatusEnabled,
-		"status":          StatusEnabled,
-		"publish_status":  TeamPublishStatusDraft,
-		"sort":            10,
+		"id":               DefaultTeamID,
+		"cate_id":          DefaultTeamCateID,
+		"material_pack_id": 0,
+		"name":             "默认团队",
+		"description":      "你是一个通用 AI 团队，负责根据用户目标协调不同角色完成任务。理解用户目标，规划执行步骤，调度合适角色完成任务并输出可复用结果。",
+		"config":           "{}",
+		"project_enabled":  StatusEnabled,
+		"status":           StatusEnabled,
+		"publish_status":   TeamPublishStatusDraft,
+		"sort":             10,
 	},
 }
 
 type Team struct {
 	ID               uint64    `dorm:"primaryKey;autoIncrement;comment:团队ID"`
 	CateID           uint64    `dorm:"type:bigint;not null;default:1;comment:团队分类"`
+	MaterialPackID   uint64    `dorm:"type:bigint;not null;default:0;comment:素材方案"`
 	Name             string    `dorm:"type:varchar(128);not null;comment:名称"`
 	Description      string    `dorm:"type:text;not null;default:'';comment:描述"`
 	Config           string    `dorm:"type:text;not null;default:'{}';comment:配置"`
@@ -65,9 +67,16 @@ type Team struct {
 }
 
 type TeamIndex struct {
-	CateStatus    struct{} `index:"cate_id,status,sort,id"`
-	StatusSort    struct{} `index:"status,sort,id"`
-	PublishStatus struct{} `index:"publish_status,current_release_id"`
+	CateStatus         struct{} `index:"cate_id,status,sort,id"`
+	MaterialPackStatus struct{} `index:"material_pack_id,status,sort,id"`
+	StatusSort         struct{} `index:"status,sort,id"`
+	PublishStatus      struct{} `index:"publish_status,current_release_id"`
+}
+
+var teamMaterialPackRelation = orm.Relation{
+	Field:      "material_pack_id",
+	Option:     "bot.team.NewMaterialPackModel",
+	OptionKeys: []string{"name", "status"},
 }
 
 func NewTeamModel() *orm.Model[Team] {
@@ -83,6 +92,7 @@ func NewTeamModel() *orm.Model[Team] {
 		},
 		Relations: []orm.Relation{
 			teamCateRelation,
+			teamMaterialPackRelation,
 			teamAssetCateRelation,
 			teamPowerRelation,
 		},

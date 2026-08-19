@@ -470,7 +470,8 @@ func compactKnowledgeParseRaw(raw map[string]any) map[string]any {
 	for _, key := range []string{
 		"parser", "batch_id", "file_name", "data_id", "full_zip_url",
 		"model_version", "markdown_file", "content_list_file", "content_list_count",
-		"streamed", "source_runes", "content_chunks",
+		"streamed", "source_runes", "source_lines", "content_chunks", "split", "part_count",
+		"page_count", "batch_count",
 	} {
 		if value := compactKnowledgeParseScalar(raw[key]); value != nil {
 			result[key] = value

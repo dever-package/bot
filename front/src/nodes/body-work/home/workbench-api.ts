@@ -16,7 +16,10 @@ import {
   normalizePowerCategory,
   type PowerCategory,
 } from "../shared/power-menu";
-import { isManualPowerSourceRule } from "../../shared/power-source-rule";
+import {
+  isManualPowerSourceRule,
+  resolvePowerSourceDisplayName,
+} from "../../shared/power-source-rule";
 
 export type WorkbenchTeam = {
   id: number;
@@ -56,6 +59,7 @@ export type WorkbenchDialogueConfig = {
   modelSourceRule: number;
   modelSources: WorkbenchDialogueSource[];
   selectedModelTargetID: number;
+  toolsEnabled: boolean;
   tools: WorkbenchPower[];
 };
 
@@ -155,12 +159,11 @@ export function loadWorkbenchDialogueConfig(input: {
     const modelSources = toRows(data.model_sources)
       .map((source) => ({
         id: numberValue(source?.target_id || source?.id),
-        name:
-          textValue(source?.name) ||
-          [textValue(source?.provider_name), textValue(source?.service_name)]
-            .filter(Boolean)
-            .join(" / ") ||
+        name: resolvePowerSourceDisplayName(
+          source?.service_name,
+          source?.name,
           "未命名模型",
+        ),
       }))
       .filter(hasID);
     const modelSourceRule = numberValue(data.model_source_rule, 1);
@@ -171,6 +174,7 @@ export function loadWorkbenchDialogueConfig(input: {
       modelSourceRule,
       modelSources,
       selectedModelTargetID,
+      toolsEnabled: enabledValue(data.tools_enabled),
       tools: toRows(data.tools).map(normalizeDialogueTool).filter(hasID),
     } satisfies WorkbenchDialogueConfig;
   });

@@ -74,6 +74,30 @@ export function withMovedCanvasNode(
   });
 }
 
+export function constrainScriptGroupMemberPosition(
+  nodes: SpaceCanvasNode[],
+  nodeId: string,
+  position: { x: number; y: number },
+) {
+  const target = nodes.find((node) => node.id === nodeId);
+  const group = target ? scriptGroupForMember(nodes, target) : undefined;
+  if (!target || !group) {
+    return position;
+  }
+
+  const x = clampCanvasCoordinate(
+    position.x,
+    group.x + GROUP_CONTENT_PADDING,
+    group.x + group.width - GROUP_CONTENT_PADDING - target.width,
+  );
+  const y = clampCanvasCoordinate(
+    position.y,
+    group.y + GROUP_HEADER_HEIGHT,
+    group.y + group.height - GROUP_CONTENT_PADDING - target.height,
+  );
+  return x === position.x && y === position.y ? position : { x, y };
+}
+
 export function withCanvasNodeGroupAtPosition(
   nodes: SpaceCanvasNode[],
   nodeId: string,
@@ -81,6 +105,9 @@ export function withCanvasNodeGroupAtPosition(
 ) {
   const target = nodes.find((node) => node.id === nodeId);
   if (!target || target.type === "group") {
+    return nodes;
+  }
+  if (scriptGroupForMember(nodes, target)) {
     return nodes;
   }
   const moved = { ...target, ...position };
@@ -150,4 +177,23 @@ function containingCanvasGroupId(
       (left, right) => left.width * left.height - right.width * right.height,
     );
   return groups[0]?.id || "";
+}
+
+function scriptGroupForMember(
+  nodes: SpaceCanvasNode[],
+  member: SpaceCanvasNode,
+) {
+  if (!member.groupId || member.type === "group") {
+    return undefined;
+  }
+  return nodes.find(
+    (node) =>
+      node.id === member.groupId &&
+      node.type === "group" &&
+      node.group?.origin === "script",
+  );
+}
+
+function clampCanvasCoordinate(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), Math.max(min, max));
 }

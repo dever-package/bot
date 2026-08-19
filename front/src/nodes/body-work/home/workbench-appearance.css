@@ -549,6 +549,9 @@
 }
 
 .hb-laper-app [data-agent-chat-appearance="body"] .reference-composer-param-trigger {
+  width: max-content;
+  min-width: 30px;
+  flex: 0 0 auto;
   height: 30px;
   max-width: 13rem;
   padding-inline: 7px;

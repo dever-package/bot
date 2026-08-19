@@ -1,7 +1,7 @@
 import type { ThreadMessageLike } from "@assistant-ui/react";
-import type { AgentChatActivity } from "./activity";
-import { artifactDisplayOutput } from "./artifact";
-import { agentChatDocumentIntro } from "./document";
+import type { AgentChatActivity } from "../../shared/agent-output/activity";
+import { artifactDisplayOutput } from "../../shared/agent-output/artifact";
+import { agentChatDocumentIntro } from "../../shared/agent-output/document";
 import { agentChatDisplayOutput } from "./message-output";
 import type { ChatMessage } from "./types";
 

@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -36,6 +37,7 @@ import {
 } from "./space-reference-editor";
 import {
   connectedMediaReferenceTargets,
+  isCanvasReferenceModeParam,
   reconcileCanvasMediaUsages,
   selectedMediaReferenceAmount,
   type CanvasMultiImagePlan,
@@ -49,6 +51,7 @@ import {
   type WorkbenchReferenceOption,
 } from "../asset/asset-reference-provider";
 import type { AssetKind as LibraryAssetKind } from "../asset/asset-types";
+import type { AssetUploadOptions } from "../asset/asset-upload-progress";
 import {
   acceptedAssetKinds,
   isToolbarPowerParam,
@@ -57,6 +60,7 @@ import {
 import { reconcileConnectedCanvasReferences } from "./space-reference-content";
 import { canvasReferenceBindingSignature } from "./space-model";
 import { SpaceTooltip } from "./space-tooltip";
+import { resolvePowerSourceDisplayName } from "../../shared/power-source-rule";
 import type {
   CanvasMultiImageMode,
   CanvasReferenceContent,
@@ -67,7 +71,11 @@ import type {
 } from "./types";
 
 function sourceServiceLabel(source?: PowerParamSource): string {
-  return source?.service_name?.trim() || source?.name?.trim() || "来源";
+  return resolvePowerSourceDisplayName(
+    source?.service_name,
+    source?.name,
+    "来源",
+  );
 }
 type PromptComposerProps = {
   value: string;
@@ -110,6 +118,7 @@ type PromptComposerProps = {
   onLocalUpload?: (
     files: File[],
     param: PowerParam,
+    options?: AssetUploadOptions,
   ) => Promise<UploadPreview[]>;
   onSubmit: (
     value: string,
@@ -187,6 +196,7 @@ export function PromptComposer({
       context: {
         preferredUsage?: string;
         acceptedKinds?: LibraryAssetKind[];
+        onProgress?: AssetUploadOptions["onProgress"];
       },
     ) => {
       if (!onLocalUpload) {
@@ -196,7 +206,9 @@ export function PromptComposer({
       if (!param) {
         throw new Error("当前能力没有与所选素材类型匹配的上传参数");
       }
-      const previews = await onLocalUpload(files, param);
+      const previews = await onLocalUpload(files, param, {
+        onProgress: context.onProgress,
+      });
       const assets = previews
         .map((preview) => normalizeAssetRecord(preview.asset))
         .filter((asset) => asset.id > 0);
@@ -262,13 +274,18 @@ export function PromptComposer({
       ),
     [selectedSourceId, sourceOptions],
   );
-  const enabledMultiImageOptions = useMemo(
-    () => (multiImagePlan?.options || []).filter((option) => option.enabled),
-    [multiImagePlan?.options],
+  const hasReferenceModeControl = toolbarParams.some(
+    isCanvasReferenceModeParam,
   );
-  const multiImageModeLabel = multiImagePlan?.mode
-    ? `${multiImagePlan.mode === "per_image" ? "逐图生成" : "共同参考"} · ${multiImagePlan.imageCount} 张`
-    : "";
+  const multiImageModeControl = (
+    <MultiImageModeControl
+      plan={multiImagePlan}
+      openKey={openKey}
+      disabled={disabled || running}
+      onToggle={setOpenKey}
+      onChange={onMultiImageModeChange}
+    />
+  );
   const referenceItems = assetLibrary.current;
   const resolvedReferences = useMemo(() => {
     const connectedReferences = reconcileConnectedCanvasReferences(
@@ -507,49 +524,7 @@ export function PromptComposer({
 
           {toolbarContent?.({ openKey, onToggle: setOpenKey })}
 
-          {multiImagePlan?.active && multiImagePlan.mode ? (
-            enabledMultiImageOptions.length > 1 ? (
-              <ComposerMenu
-                id="multi-image-mode"
-                openKey={openKey}
-                label={multiImageModeLabel}
-                icon={<Images size={15} />}
-                disabled={disabled || running}
-                onToggle={setOpenKey}
-              >
-                <div className="ws-prompt-menu-list">
-                  {enabledMultiImageOptions.map((option) => {
-                    const active = option.value === multiImagePlan.mode;
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={`ws-prompt-menu-item ${active ? "is-active" : ""}`}
-                        disabled={disabled || running}
-                        onClick={() => {
-                          onMultiImageModeChange?.(option.value);
-                          setOpenKey("");
-                        }}
-                      >
-                        <span>{option.label}</span>
-                        {active ? <CheckCircle2 size={14} /> : null}
-                      </button>
-                    );
-                  })}
-                </div>
-              </ComposerMenu>
-            ) : (
-              <span className="ws-prompt-tool-wrap">
-                <span
-                  className="ws-prompt-tool is-static"
-                  aria-label={multiImageModeLabel}
-                >
-                  <Images size={15} />
-                  <span>{multiImageModeLabel}</span>
-                </span>
-              </span>
-            )
-          ) : null}
+          {!hasReferenceModeControl ? multiImageModeControl : null}
 
           {!showMediaParamButtons && uploadParams.length > 0 ? (
             <ComposerMenu
@@ -582,24 +557,18 @@ export function PromptComposer({
           ) : null}
 
           {toolbarParams.map((param) => {
-            if (isUploadPowerParam(param)) {
-              if (!showMediaParamButtons) {
-                return null;
-              }
-              return (
+            const paramControl = isUploadPowerParam(param) ? (
+              showMediaParamButtons ? (
                 <MediaParamButton
-                  key={param.key}
                   param={param}
                   power={mediaParamPower}
                   selectedCount={mediaParamCounts.get(param.key) || 0}
                   disabled={disabled || running}
                   onClick={() => openMediaPicker(param)}
                 />
-              );
-            }
-            return (
+              ) : null
+            ) : (
               <ParamMenu
-                key={param.key}
                 param={param}
                 value={paramValues[param.key]}
                 openKey={openKey}
@@ -607,6 +576,14 @@ export function PromptComposer({
                 onToggle={setOpenKey}
                 onChange={(nextValue) => onParamChange?.(param.key, nextValue)}
               />
+            );
+            return (
+              <Fragment key={param.key}>
+                {paramControl}
+                {isCanvasReferenceModeParam(param)
+                  ? multiImageModeControl
+                  : null}
+              </Fragment>
             );
           })}
         </div>
@@ -630,6 +607,76 @@ export function PromptComposer({
         </div>
       </div>
     </div>
+  );
+}
+
+function MultiImageModeControl({
+  plan,
+  openKey,
+  disabled,
+  onToggle,
+  onChange,
+}: {
+  plan?: CanvasMultiImagePlan;
+  openKey: string;
+  disabled: boolean;
+  onToggle: (key: string) => void;
+  onChange?: (mode: CanvasMultiImageMode) => void;
+}) {
+  if (!plan?.active || !plan.mode) {
+    return null;
+  }
+  const enabledOptions = plan.options.filter((option) => option.enabled);
+  const selectedOption = enabledOptions.find(
+    (option) => option.value === plan.mode,
+  );
+  const selectedLabel =
+    selectedOption?.label ||
+    (plan.mode === "per_image" ? "逐图生成" : "合并生成");
+  const outputCount = plan.mode === "per_image" ? plan.imageCount : 1;
+  const label = `${selectedLabel} · ${outputCount}条`;
+  if (enabledOptions.length <= 1) {
+    return (
+      <span className="ws-prompt-tool-wrap">
+        <span className="ws-prompt-tool is-static" aria-label={label}>
+          <Images size={15} />
+          <span>{label}</span>
+        </span>
+      </span>
+    );
+  }
+  return (
+    <ComposerMenu
+      id="multi-image-mode"
+      openKey={openKey}
+      label={label}
+      icon={<Images size={15} />}
+      disabled={disabled}
+      onToggle={onToggle}
+    >
+      <div className="ws-prompt-menu-list">
+        {enabledOptions.map((option) => {
+          const active = option.value === plan.mode;
+          const optionOutputCount =
+            option.value === "per_image" ? plan.imageCount : 1;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={`ws-prompt-menu-item ${active ? "is-active" : ""}`}
+              disabled={disabled}
+              onClick={() => {
+                onChange?.(option.value);
+                onToggle("");
+              }}
+            >
+              <span>{`${option.label} · ${optionOutputCount}条`}</span>
+              {active ? <CheckCircle2 size={14} /> : null}
+            </button>
+          );
+        })}
+      </div>
+    </ComposerMenu>
   );
 }
 

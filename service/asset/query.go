@@ -109,19 +109,20 @@ func (s Service) requireCurrentReferences(
 	if len(uniqueIDs) == 0 {
 		return result, nil
 	}
+	scope, err := resolveTeamAssetOwnerScope(ctx, teamID)
+	if err != nil {
+		return nil, err
+	}
 	rows := assetmodel.NewAssetModel().Select(ctx, map[string]any{
 		"id":      uniqueIDs,
-		"team_id": teamID,
+		"user_id": scope.UserID,
+		"team_id": scope.TeamID,
 	})
 	assets := make(map[uint64]*assetmodel.Asset, len(rows))
 	for _, asset := range rows {
 		if asset != nil {
 			assets[asset.ID] = asset
 		}
-	}
-	scope, err := resolveTeamAssetScopeForAssets(ctx, teamID, rows)
-	if err != nil {
-		return nil, err
 	}
 	orderedAssets := make([]*assetmodel.Asset, 0, len(uniqueIDs))
 	for _, assetID := range uniqueIDs {
@@ -179,21 +180,17 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 	if err != nil {
 		return nil, err
 	}
-	scope, err := resolveTeamAssetScope(ctx, normalized.TeamID)
+	scope, err := resolveTeamAssetOwnerScope(ctx, normalized.TeamID)
 	if err != nil {
 		return nil, err
 	}
-	for _, projectID := range []uint64{normalized.ProjectID, normalized.ScopeProjectID} {
-		if projectID == 0 {
-			continue
-		}
-		if _, exists := scope.ProjectIDs[projectID]; !exists {
-			return nil, fmt.Errorf("项目不存在或不属于当前用户")
-		}
+	if !scope.ownsEnabledProjects(ctx, normalized.ProjectID, normalized.ScopeProjectID) {
+		return nil, fmt.Errorf("项目不存在或不属于当前用户")
 	}
 	if normalized.CollectionID > 0 {
 		collection := assetmodel.NewAssetModel().Find(ctx, map[string]any{
 			"id":            normalized.CollectionID,
+			"user_id":       scope.UserID,
 			"team_id":       normalized.TeamID,
 			"kind":          assetmodel.KindCollection,
 			"collection_id": uint64(0),
@@ -205,6 +202,7 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 	}
 	scopeFilter := scope.queryFilter()
 	if normalized.ScopeProjectID > 0 {
+		scope = scope.withWorkspace(ctx)
 		scopeFilter = scope.queryFilterForProjectContext(normalized.ScopeProjectID)
 	}
 	page, pageSize := normalizeAssetPage(normalized.Page, normalized.PageSize)
@@ -216,8 +214,8 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 		"team_id":    normalized.TeamID,
 		"status":     status,
 		"version_id": map[string]any{"gt": 0},
-		"or":         scopeFilter["or"],
 	}
+	applyAssetScopeFilter(filter, scopeFilter)
 	if normalized.SourceType != "" {
 		filter["source_type"] = normalized.SourceType
 	}
@@ -259,9 +257,15 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 		"page":     page,
 		"pageSize": pageSize,
 	})
-	versions := currentVersionsByID(ctx, rows, normalized.ContentMode)
-	items := make([]map[string]any, 0, len(rows))
+	authorizedRows := make([]*assetmodel.Asset, 0, len(rows))
 	for _, row := range rows {
+		if scope.contains(row) {
+			authorizedRows = append(authorizedRows, row)
+		}
+	}
+	versions := currentVersionsByID(ctx, authorizedRows, normalized.ContentMode)
+	items := make([]map[string]any, 0, len(authorizedRows))
+	for _, row := range authorizedRows {
 		if row == nil || row.VersionID == 0 {
 			continue
 		}
@@ -269,7 +273,7 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 		item := assetListMap(*row, version, normalized.ContentMode)
 		items = append(items, item)
 	}
-	if err := attachCollectionListMetadata(ctx, rows, items, status); err != nil {
+	if err := attachCollectionListMetadata(ctx, authorizedRows, items, status); err != nil {
 		return nil, err
 	}
 	return map[string]any{
@@ -353,11 +357,18 @@ func savedSourceOptions(assets []*assetmodel.Asset, sourceType string) []map[str
 }
 
 func scopedAssetFilter(teamID uint64, scopeFilter map[string]any) map[string]any {
-	return map[string]any{
+	filter := map[string]any{
 		"team_id":    teamID,
 		"status":     []string{assetmodel.StatusCurrent, assetmodel.StatusDeleted},
 		"version_id": map[string]any{"gt": 0},
-		"or":         scopeFilter["or"],
+	}
+	applyAssetScopeFilter(filter, scopeFilter)
+	return filter
+}
+
+func applyAssetScopeFilter(filter map[string]any, scopeFilter map[string]any) {
+	for key, value := range scopeFilter {
+		filter[key] = value
 	}
 }
 
@@ -420,8 +431,10 @@ func (s Service) setCurrentVersion(ctx context.Context, asset assetmodel.Asset, 
 		return nil, err
 	}
 	affected := assetmodel.NewAssetModel().Update(ctx, map[string]any{
-		"id":     asset.ID,
-		"status": map[string]any{"neq": assetmodel.StatusDeleted},
+		"id":      asset.ID,
+		"user_id": asset.UserID,
+		"team_id": asset.TeamID,
+		"status":  map[string]any{"neq": assetmodel.StatusDeleted},
 	}, map[string]any{
 		"version_id": version.ID,
 		"status":     assetmodel.StatusCurrent,
@@ -441,14 +454,15 @@ func (s Service) requireTeamAsset(ctx context.Context, teamID uint64, assetID ui
 	if teamID == 0 || assetID == 0 {
 		return nil, fmt.Errorf("团队和资产不能为空")
 	}
-	asset := assetmodel.NewAssetModel().Find(ctx, map[string]any{
-		"id":      assetID,
-		"team_id": teamID,
-	})
-	scope, err := resolveTeamAssetScopeForAssets(ctx, teamID, []*assetmodel.Asset{asset})
+	scope, err := resolveTeamAssetOwnerScope(ctx, teamID)
 	if err != nil {
 		return nil, err
 	}
+	asset := assetmodel.NewAssetModel().Find(ctx, map[string]any{
+		"id":      assetID,
+		"user_id": scope.UserID,
+		"team_id": scope.TeamID,
+	})
 	if !scope.contains(asset) {
 		return nil, fmt.Errorf("资产不存在或不属于当前团队")
 	}

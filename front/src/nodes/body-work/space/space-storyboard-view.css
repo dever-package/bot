@@ -794,7 +794,7 @@
   gap: 14px;
 }
 
-.ws-storyboard-frame {
+.ws-storyboard-board-frame {
   display: grid;
   min-width: 0;
   overflow: hidden;
@@ -804,7 +804,7 @@
   box-shadow: 0 4px 13px rgba(35, 51, 44, 0.05);
 }
 
-.ws-storyboard-frame > header {
+.ws-storyboard-board-frame > header {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -815,7 +815,7 @@
   font-size: 9px;
 }
 
-.ws-storyboard-frame > header strong {
+.ws-storyboard-board-frame > header strong {
   margin-right: auto;
   color: var(--ws-text-strong);
   font-size: 10px;

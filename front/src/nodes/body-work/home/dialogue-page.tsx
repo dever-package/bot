@@ -5,8 +5,8 @@ import {
   type AgentChatPanelProps,
 } from "../../show/agent-chat/index";
 import type { AgentChatMessageActionContext } from "../../show/agent-chat/types";
-import type { AgentChatArtifact } from "../../show/agent-chat/artifact";
-import type { AgentChatDocument } from "../../show/agent-chat/document";
+import type { AgentChatArtifact } from "../../shared/agent-output/artifact";
+import type { AgentChatDocument } from "../../shared/agent-output/document";
 import type { AssetRecord } from "../asset/asset-types";
 import { SaveAssetAction } from "../asset/save-asset-action";
 import {

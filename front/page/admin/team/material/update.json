@@ -1,0 +1,297 @@
+{
+  "page": {
+    "name": "素材编辑",
+    "parent": "bot/team/material_pack/list",
+    "type": 2,
+    "sort": 10,
+    "auth": [
+      {
+        "key": "bot/team/material/create",
+        "name": "素材新增",
+        "query": {
+          "id": "empty"
+        }
+      },
+      {
+        "key": "bot/team/material/update",
+        "name": "素材编辑",
+        "query": {
+          "id": "required"
+        }
+      }
+    ]
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-radio",
+        "name": "素材类型",
+        "value": "form.kind",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "orientation": "horizontal",
+          "clearOnChange": [
+            "form.cate_id",
+            "form.content",
+            "form.resource_url"
+          ]
+        }
+      },
+      {
+        "type": "form-select",
+        "name": "素材分类",
+        "value": "form.cate_id",
+        "mode": "form",
+        "option": {
+          "model": "bot.team.NewMaterialCateModel",
+          "parentField": "kind",
+          "filters": {
+            "status": 1
+          },
+          "order": "sort asc,id asc"
+        },
+        "validate": [
+          {
+            "type": "required",
+            "message": "素材分类不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "controlClassName": "max-w-[320px]",
+          "optionParams": {
+            "parentId": "form.kind"
+          }
+        }
+      },
+      {
+        "type": "form-input",
+        "name": "素材名称",
+        "placeholder": "例如：小红书探店文案",
+        "value": "form.name",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "素材名称不能为空。"
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal"
+        }
+      },
+      {
+        "type": "form-textarea",
+        "name": "素材描述",
+        "placeholder": "说明素材适用的场景、风格或使用限制。",
+        "value": "form.description",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 3
+        }
+      },
+      {
+        "type": "form-textarea",
+        "name": "提示词内容",
+        "placeholder": "输入可直接使用或继续编辑的提示词。",
+        "value": "form.content",
+        "mode": "form",
+        "validate": [
+          {
+            "type": "required",
+            "message": "提示词内容不能为空。",
+            "when": [
+              {
+                "path": "form.kind",
+                "operator": "equals",
+                "value": "prompt"
+              }
+            ]
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "rows": 10,
+          "showWhen": [
+            {
+              "path": "form.kind",
+              "operator": "equals",
+              "value": "prompt"
+            }
+          ]
+        }
+      },
+      {
+        "type": "form-upload",
+        "name": "图片素材",
+        "value": "form.resource_url",
+        "mode": "form",
+        "placeholder": "上传图片或从资源库选择",
+        "validate": [
+          {
+            "type": "required",
+            "message": "图片素材不能为空。",
+            "when": [
+              {
+                "path": "form.kind",
+                "operator": "equals",
+                "value": "image"
+              }
+            ]
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "uploadType": "input",
+          "kind": "image",
+          "saveMode": "url",
+          "ruleId": 1,
+          "maxCount": 1,
+          "bizKey": "bot.material.resource",
+          "bizName": "官方素材",
+          "showWhen": [
+            {
+              "path": "form.kind",
+              "operator": "equals",
+              "value": "image"
+            }
+          ]
+        }
+      },
+      {
+        "type": "form-upload",
+        "name": "音频素材",
+        "value": "form.resource_url",
+        "mode": "form",
+        "placeholder": "上传音频或从资源库选择",
+        "validate": [
+          {
+            "type": "required",
+            "message": "音频素材不能为空。",
+            "when": [
+              {
+                "path": "form.kind",
+                "operator": "equals",
+                "value": "audio"
+              }
+            ]
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "uploadType": "input",
+          "kind": "audio",
+          "saveMode": "url",
+          "ruleId": 3,
+          "maxCount": 1,
+          "bizKey": "bot.material.resource",
+          "bizName": "官方素材",
+          "showWhen": [
+            {
+              "path": "form.kind",
+              "operator": "equals",
+              "value": "audio"
+            }
+          ]
+        }
+      },
+      {
+        "type": "form-upload",
+        "name": "视频素材",
+        "value": "form.resource_url",
+        "mode": "form",
+        "placeholder": "上传视频或从资源库选择",
+        "validate": [
+          {
+            "type": "required",
+            "message": "视频素材不能为空。",
+            "when": [
+              {
+                "path": "form.kind",
+                "operator": "equals",
+                "value": "video"
+              }
+            ]
+          }
+        ],
+        "meta": {
+          "formLayout": "horizontal",
+          "uploadType": "input",
+          "kind": "video",
+          "saveMode": "url",
+          "ruleId": 2,
+          "maxCount": 1,
+          "bizKey": "bot.material.resource",
+          "bizName": "官方素材",
+          "showWhen": [
+            {
+              "path": "form.kind",
+              "operator": "equals",
+              "value": "video"
+            }
+          ]
+        }
+      },
+      {
+        "type": "form-switch",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "_fields": [
+        "cate_id",
+        "kind",
+        "name",
+        "description",
+        "content",
+        "resource_url",
+        "status",
+        "sort"
+      ],
+      "id": 0,
+      "cate_id": 1,
+      "kind": "prompt",
+      "name": "",
+      "description": "",
+      "content": "",
+      "resource_url": "",
+      "status": 1,
+      "sort": 100
+    }
+  },
+  "state": {},
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form",
+      "before": {
+        "service": "bot.team.MaterialHook.BeforeSaveMaterial"
+      }
+    }
+  }
+}

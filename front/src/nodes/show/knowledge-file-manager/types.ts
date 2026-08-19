@@ -11,6 +11,8 @@ export type KnowledgeFileManagerData = {
   drive?: {
     used?: number
     total?: number
+    max_upload_bytes?: number
+    upload_chunk_bytes?: number
   }
 }
 

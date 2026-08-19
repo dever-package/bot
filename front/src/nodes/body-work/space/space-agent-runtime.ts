@@ -2,23 +2,23 @@ import {
   mergeAgentChatActivities,
   readAgentChatActivities,
   type AgentChatActivity,
-} from "../../show/agent-chat/activity";
+} from "../../shared/agent-output/activity";
 import {
   readAgentChatInteraction,
   readAgentChatSuggestions,
   type AgentChatSuggestion,
-} from "../../show/agent-chat/interaction";
+} from "../../shared/agent-output/interaction";
 import {
   mergeAgentChatDocument,
   mergeAgentChatDocumentEvent,
   normalizeAgentChatDocument,
   type AgentChatDocument,
-} from "../../show/agent-chat/document";
+} from "../../shared/agent-output/document";
 import {
   normalizeAgentChatOutput,
   type AgentChatOutput,
-} from "../../show/agent-chat/output";
-import { readAgentChatRunFrame } from "../../show/agent-chat/runtime";
+} from "../../shared/agent-output/output";
+import { readAgentChatRunFrame } from "../../shared/agent-output/runtime";
 import { plainMarkdownTextFromRichOutput } from "../shared/content-output";
 
 export type CanvasAgentInteraction = NonNullable<

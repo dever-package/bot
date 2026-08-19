@@ -18,8 +18,8 @@ import {
 import {
   canvasMediaReferenceKind,
   canvasMediaUsageError,
+  filterMediaUsageOptionsForMultiImageMode,
   firstFrameMediaUsageKey,
-  isCanvasReferenceModeParam,
   mediaUsageOptions,
   reconcileCanvasMediaUsages,
   reconcileReferenceModeForMediaSources,
@@ -54,6 +54,7 @@ import {
 } from "./space-storyboard-reference";
 import { StoryboardWorkTypeSelect } from "./space-storyboard-work-type-select";
 import { uploadSpaceFiles } from "./space-upload";
+import type { AssetUploadOptions } from "../asset/asset-upload-progress";
 import { resolvePowerPresentation } from "../shared/power-presentation";
 import type {
   CanvasComposerDraft,
@@ -352,6 +353,15 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
   ]);
 
   const powerParams = powerForm?.params || EMPTY_POWER_PARAMS;
+  const mediaSourceParamValues = useMemo(
+    () =>
+      reconcileReferenceModeForMediaSources(
+        powerParams,
+        paramValues,
+        connectedMediaReferences.map((reference) => reference.source),
+      ),
+    [connectedMediaReferences, paramValues, powerParams],
+  );
   const multiImagePlan = useMemo(
     () =>
       resolveCanvasMultiImagePlan({
@@ -360,14 +370,14 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         items: assetLibrary.current,
         connections: connectedMediaReferences,
         params: powerParams,
-        values: paramValues,
+        values: mediaSourceParamValues,
         requestedMode: requestedMultiImageMode,
       }),
     [
       assetLibrary,
       connectedMediaReferences,
+      mediaSourceParamValues,
       node,
-      paramValues,
       powerParams,
       promptContent,
       requestedMultiImageMode,
@@ -384,38 +394,46 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       requestedMultiImageMode ||
       effectiveMultiImageMode
     : latestNodeDraft.multiImageMode || effectiveMultiImageMode;
-  const mediaSourceParamValues = useMemo(
-    () =>
-      reconcileReferenceModeForMediaSources(
-        powerParams,
-        paramValues,
-        connectedMediaReferences.map((reference) => reference.source),
-        effectiveMultiImageMode,
-      ),
-    [
-      connectedMediaReferences,
-      paramValues,
-      powerParams,
-      effectiveMultiImageMode,
-    ],
-  );
   const activePowerParams = useMemo(
     () => filterActivePowerParams(powerParams, mediaSourceParamValues),
     [mediaSourceParamValues, powerParams],
   );
-  const displayedPowerParams = useMemo(
-    () =>
-      activePowerParams.filter(
-        (param) =>
-          shouldDisplayPowerParam(param, powerParams) &&
-          !(multiImagePlan.active && isCanvasReferenceModeParam(param)),
-      ),
-    [activePowerParams, multiImagePlan.active, powerParams],
+  const activeMediaUsageOptions = useMemo(
+    () => mediaUsageOptions(activePowerParams),
+    [activePowerParams],
   );
   const connectedMediaUsageOptions = useMemo(
     () =>
-      selectedNodeType === "power" ? mediaUsageOptions(activePowerParams) : [],
-    [activePowerParams, selectedNodeType],
+      selectedNodeType === "power"
+        ? filterMediaUsageOptionsForMultiImageMode(
+            activeMediaUsageOptions,
+            effectiveMultiImageMode,
+          )
+        : [],
+    [activeMediaUsageOptions, effectiveMultiImageMode, selectedNodeType],
+  );
+  const displayedPowerParams = useMemo(
+    () => {
+      const activeMediaKeys = new Set(
+        activeMediaUsageOptions.map((option) => option.key),
+      );
+      const visibleMediaKeys = new Set(
+        connectedMediaUsageOptions.map((option) => option.key),
+      );
+      return activePowerParams.filter(
+        (param) =>
+          shouldDisplayPowerParam(param, powerParams) &&
+          (!isUploadPowerParam(param) ||
+            !activeMediaKeys.has(param.key) ||
+            visibleMediaKeys.has(param.key)),
+      );
+    },
+    [
+      activeMediaUsageOptions,
+      activePowerParams,
+      connectedMediaUsageOptions,
+      powerParams,
+    ],
   );
   const continuationValidationContext = useMemo(
     () =>
@@ -773,7 +791,6 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       powerParams,
       currentValues,
       connectedMediaReferences.map((reference) => reference.source),
-      nextMode,
     );
     const nextMediaUsageOptions = mediaUsageOptions(
       filterActivePowerParams(powerParams, nextValues),
@@ -853,12 +870,14 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
   async function handleLocalUpload(
     files: File[],
     param: PowerParam,
+    options?: AssetUploadOptions,
   ): Promise<UploadPreview[]> {
     const previews = await uploadSpaceFiles({
       projectID: projectId,
       teamID: Number(space?.project.team_id || 0),
       files,
       ruleID: param.upload_rule_id,
+      onProgress: options?.onProgress,
     });
     for (const preview of previews) {
       const asset = normalizeProjectAsset(preview.asset);
@@ -901,13 +920,18 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         nodeDraftRef.current.paramValues || paramValues,
         powerForm?.params || [],
       );
+      const nextValues = reconcileReferenceModeForMediaSources(
+        nextParams,
+        mergedValues,
+        connectedMediaReferences.map((reference) => reference.source),
+      );
       const nextMultiImagePlan = resolveCanvasMultiImagePlan({
         node,
         content: promptContent,
         items: assetLibrary.current,
         connections: connectedMediaReferences,
         params: nextParams,
-        values: mergedValues,
+        values: nextValues,
         requestedMode: requestedMultiImageMode || effectiveMultiImageMode,
       });
       const nextMultiImageMode = nextMultiImagePlan.active
@@ -917,12 +941,6 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         toast.error(`无法切换能力来源：${nextMultiImagePlan.error}`);
         return;
       }
-      const nextValues = reconcileReferenceModeForMediaSources(
-        nextParams,
-        mergedValues,
-        connectedMediaReferences.map((reference) => reference.source),
-        nextMultiImageMode,
-      );
       const options = mediaUsageOptions(
         filterActivePowerParams(nextParams, nextValues),
       );
@@ -1013,7 +1031,6 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
             powerParams,
             currentDraft.paramValues || mediaSourceParamValues,
             connectedMediaReferences.map((reference) => reference.source),
-            nextMultiImageMode,
           ),
         };
         if (promptParam) {

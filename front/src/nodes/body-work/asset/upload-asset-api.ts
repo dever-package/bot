@@ -1,5 +1,9 @@
 import { getCompatModule, joinSiteApi, request } from "@dever/front-plugin";
 import { isSuccessResponse } from "../shared/api-response";
+import {
+  createSequentialAssetUploadProgress,
+  type AssetUploadOptions,
+} from "./asset-upload-progress";
 
 export const BODY_UPLOAD_BIZ_KEY = "bot_work";
 export const BODY_UPLOAD_BIZ_NAME = "神创工作台";
@@ -36,13 +40,19 @@ export async function uploadBodyAssetFiles(input: {
   files: File[];
   ruleID?: number;
   kind?: string;
+  onProgress?: AssetUploadOptions["onProgress"];
 }): Promise<BodyUploadedAsset[]> {
   if (!uploadFileByRule) {
     throw new Error("当前页面缺少上传能力");
   }
 
   const results: BodyUploadedAsset[] = [];
-  for (const sourceFile of input.files) {
+  const progress = createSequentialAssetUploadProgress(
+    input.files,
+    input.onProgress,
+  );
+  for (const [fileIndex, sourceFile] of input.files.entries()) {
+    progress.start(fileIndex);
     const kind = normalizeUploadKind(input.kind) || bodyUploadKind(sourceFile);
     const ruleID = Number(input.ruleID || 0) || uploadRuleID(kind);
     const textContent = kind === "text" ? await sourceFile.text() : undefined;
@@ -51,7 +61,10 @@ export async function uploadBodyAssetFiles(input: {
       bizKey: BODY_UPLOAD_BIZ_KEY,
       bizName: BODY_UPLOAD_BIZ_NAME,
       reportError: false,
+      onProgress: (loaded: number, total: number) =>
+        progress.report(fileIndex, loaded, total),
     });
+    progress.saving(fileIndex);
     const fileID = Number(uploadedFile.id || 0);
     const [asset] = await saveBodyUploadedAssets({
       teamID: input.teamID,
@@ -66,6 +79,7 @@ export async function uploadBodyAssetFiles(input: {
       throw new Error(`${sourceFile.name} 保存到资产库失败`);
     }
     results.push({ sourceFile, uploadedFile, asset });
+    progress.complete(fileIndex);
   }
   return results;
 }

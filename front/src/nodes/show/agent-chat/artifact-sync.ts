@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { readAgentChatArtifacts } from "./artifact";
+import { readAgentChatArtifacts } from "../../shared/agent-output/artifact";
 import type { ChatMessage } from "./types";
 
 const artifactSyncDelays = [800, 1500, 3000, 5000, 8000] as const;

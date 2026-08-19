@@ -23,7 +23,7 @@ export function StoryboardBoard({
   return (
     <div className="ws-storyboard-board" aria-label="画面预览">
       {frames.map(({ shot, node, imageURL }) => (
-        <article className="ws-storyboard-frame" key={shot.id}>
+        <article className="ws-storyboard-board-frame" key={shot.id}>
           <header>
             <strong>{String(shot.order).padStart(2, "0")}</strong>
             <span>{shot.duration} 秒</span>

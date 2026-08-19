@@ -12,12 +12,12 @@ import {
 } from "lucide-react";
 import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils";
-import type { AgentChatActivity } from "./activity";
+import type { AgentChatActivity } from "../../shared/agent-output/activity";
 import {
   AgentChatMessageOutput,
   hasAgentChatMessageOutput,
 } from "./message-output";
-import { artifactDisplayOutput, readAgentChatArtifacts } from "./artifact";
+import { artifactDisplayOutput, readAgentChatArtifacts } from "../../shared/agent-output/artifact";
 
 const mediaKinds = new Set(["image", "video", "audio", "file"]);
 const compactActivityKinds = new Set(["knowledge", "skill"]);

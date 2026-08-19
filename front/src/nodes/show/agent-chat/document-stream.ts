@@ -9,7 +9,7 @@ import {
   mergeAgentChatDocumentEvent,
   needsAgentChatDocumentSync,
   type AgentChatDocument,
-} from "./document";
+} from "../../shared/agent-output/document";
 import type { AgentChatRuntimeApis, ChatMessage } from "./types";
 
 type DocumentWatch = {

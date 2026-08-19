@@ -239,15 +239,13 @@ var (
 	}
 
 	serviceProviderRelation = orm.Relation{
-		Field:      "provider_id",
-		Option:     "bot.energon.NewProviderModel",
-		OptionKeys: []string{"name", "host", "protocol", "processor"},
+		Field:  "provider_id",
+		Option: "bot.energon.NewProviderModel",
 	}
 
 	serviceAccountRelation = orm.Relation{
-		Field:      "account_id",
-		Option:     "bot.energon.NewAccountModel",
-		OptionKeys: []string{"name", "provider_id", "scope", "status"},
+		Field:  "account_id",
+		Option: "bot.energon.NewAccountModel",
 	}
 
 	serviceParamRelation = orm.Relation{

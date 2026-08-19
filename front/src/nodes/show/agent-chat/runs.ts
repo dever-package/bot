@@ -14,23 +14,23 @@ import {
   loadAgentChatRunStatus,
   readAgentChatRunFrame,
   type AgentChatRunStatus,
-} from "./runtime";
+} from "../../shared/agent-output/runtime";
 import {
   mergeAgentChatActivities,
   mergeAgentChatActivityLists,
   readAgentChatActivities,
-} from "./activity";
+} from "../../shared/agent-output/activity";
 import {
   hasAgentChatOutput,
   normalizeAgentChatOutput,
   type AgentChatOutput,
-} from "./output";
+} from "../../shared/agent-output/output";
 import { createStreamTextBuffer, type StreamTextBuffer } from "./stream";
 import {
   mergeAgentChatDocument,
   mergeAgentChatDocumentEvent,
   normalizeAgentChatDocument,
-} from "./document";
+} from "../../shared/agent-output/document";
 import type {
   AgentChatRuntimeApis,
   ChatMessage,

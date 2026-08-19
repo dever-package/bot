@@ -1,7 +1,9 @@
 package knowledge
 
 import (
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -26,8 +28,8 @@ type qdrantConfig struct {
 }
 
 var (
-	qdrantServiceConfigOnce sync.Once
-	qdrantServiceConfig     map[string]any
+	knowledgeSettingsOnce sync.Once
+	knowledgeSettings     map[string]any
 )
 
 func loadQdrantConfig() qdrantConfig {
@@ -53,24 +55,58 @@ func qdrantConfigString(values map[string]any, key string, fallback string) stri
 }
 
 func loadQdrantServiceConfig() map[string]any {
-	qdrantServiceConfigOnce.Do(func() {
-		qdrantServiceConfig = readQdrantServiceConfig()
-	})
-	return qdrantServiceConfig
+	return nestedKnowledgeSetting(loadKnowledgeSettings(), "qdrant", "service")
 }
 
-func readQdrantServiceConfig() map[string]any {
-	raw, _, err := util.ReadJSONCFile(config.DefaultPath+"c", config.DefaultPath)
-	if err != nil {
-		return nil
+func loadKnowledgeSettings() map[string]any {
+	knowledgeSettingsOnce.Do(func() {
+		raw, _, err := util.ReadJSONCFile(config.DefaultPath+"c", config.DefaultPath)
+		if err != nil {
+			return
+		}
+		var root map[string]any
+		if err := util.UnmarshalNormalizedJSON(raw, &root); err == nil {
+			knowledgeSettings = root
+		}
+	})
+	return knowledgeSettings
+}
+
+func nestedKnowledgeSetting(root map[string]any, keys ...string) map[string]any {
+	current := root
+	for _, key := range keys {
+		next, _ := current[key].(map[string]any)
+		if next == nil {
+			return nil
+		}
+		current = next
 	}
-	var root map[string]any
-	if err := util.UnmarshalNormalizedJSON(raw, &root); err != nil {
-		return nil
+	return current
+}
+
+func knowledgeSettingInt64(values map[string]any, key string, fallback int64) int64 {
+	if values == nil {
+		return fallback
 	}
-	qdrant, _ := root["qdrant"].(map[string]any)
-	service, _ := qdrant["service"].(map[string]any)
-	return service
+	switch value := values[key].(type) {
+	case int:
+		return int64(value)
+	case int64:
+		return value
+	case float64:
+		return int64(value)
+	case json.Number:
+		result, err := value.Int64()
+		if err == nil {
+			return result
+		}
+	case string:
+		result, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err == nil {
+			return result
+		}
+	}
+	return fallback
 }
 
 func qdrantMissingAPIKeyError() error {

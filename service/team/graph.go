@@ -368,6 +368,7 @@ func teamWorkspacePayload(team teammodel.Team) map[string]any {
 	return map[string]any{
 		"id":                 team.ID,
 		"cate_id":            team.CateID,
+		"material_pack_id":   team.MaterialPackID,
 		"name":               team.Name,
 		"description":        team.Description,
 		"config":             jsonMap(team.Config),
@@ -385,6 +386,7 @@ func teamReleasePayload(team teammodel.Team) GraphTeam {
 	return GraphTeam{
 		ID:             team.ID,
 		CateID:         team.CateID,
+		MaterialPackID: team.MaterialPackID,
 		Name:           team.Name,
 		Description:    team.Description,
 		Config:         jsonMap(team.Config),
@@ -407,6 +409,7 @@ func rolePayloads(roles []teammodel.Role) []GraphRole {
 			Assignment:   role.Assignment,
 			Config:       jsonMap(role.Config),
 			ChatStatus:   normalizeEntryStatus(role.ChatStatus),
+			ToolStatus:   normalizeEntryStatus(role.ToolStatus),
 			CreateStatus: normalizeEntryStatus(role.CreateStatus),
 			Status:       role.Status,
 			Sort:         role.Sort,

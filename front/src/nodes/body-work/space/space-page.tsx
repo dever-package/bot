@@ -98,6 +98,7 @@ import {
   canConnectCanvasNodes,
   canvasConnectionSourceNodes,
   canvasGroupMembers,
+  constrainScriptGroupMemberPosition,
   reconcileCanvasGroupEdges,
   withCanvasNodeGroupAtPosition,
   withMovedCanvasNode,
@@ -170,6 +171,7 @@ import {
   type NodeFeedbackRecord,
 } from "./space-feedback";
 import { uploadSpaceFiles } from "./space-upload";
+import type { AssetUploadOptions } from "../asset/asset-upload-progress";
 import {
   documentPreview,
   looseRichJSONText,
@@ -503,6 +505,7 @@ type CanvasRightSelectionGesture = {
   start: CanvasPoint;
   baseNodeIds: string[];
   moved: boolean;
+  contextMenuHandled: boolean;
 };
 
 function isCanvasPaneTarget(target: EventTarget | null) {
@@ -2786,11 +2789,15 @@ export function WorkSpacePage({
     openImportPickerByNodeId(nodeId);
   }
 
-  async function uploadImportAssets(files: File[]): Promise<AssetRecord[]> {
+  async function uploadImportAssets(
+    files: File[],
+    options?: AssetUploadOptions,
+  ): Promise<AssetRecord[]> {
     const previews = await uploadSpaceFiles({
       projectID: projectId,
       teamID: Number(space?.project.team_id || 0),
       files,
+      onProgress: options?.onProgress,
     });
     const assets: AssetRecord[] = [];
     for (const preview of previews) {
@@ -4045,6 +4052,8 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           cached.draggable === (interactive && !structureLocked) &&
           cached.deletable === !structureLocked &&
           cached.zIndex === nodeZIndex &&
+          cached.initialWidth === nodeStyleSize.width &&
+          cached.initialHeight === nodeStyleSize.height &&
           cachedStyle?.width === nodeStyleSize.width &&
           cachedStyle?.height === nodeStyleSize.height
         ) {
@@ -4061,11 +4070,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           draggable: interactive && !structureLocked,
           deletable: !structureLocked,
           zIndex: nodeZIndex,
-          style: {
-            ...cached?.style,
-            width: nodeStyleSize.width,
-            height: nodeStyleSize.height,
-          },
+          ...stableFlowNodeSize(nodeStyleSize, cachedStyle),
         };
         flowNodeCache.current.set(node.id, nextNode);
         return nextNode;
@@ -4080,13 +4085,16 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       activeFrameIds.add(frame.id);
       const collapsed = collapsedStoryboardFrameIds.has(frame.id);
       const bounds = storyboardFrameDisplayBounds(frame, collapsed);
-      const runBlockedReason =
-        storyboardFrameRunBlockedReasonById.get(frame.id) || "";
+      const runActionEnabled = false;
+      const runBlockedReason = runActionEnabled
+        ? storyboardFrameRunBlockedReasonById.get(frame.id) || ""
+        : "";
       const frameRunning =
-        isActiveRunningNode(runningNodes[frame.id]) ||
-        frame.memberNodeIds.some((nodeId) =>
-          isActiveRunningNode(runningNodes[nodeId]),
-        );
+        runActionEnabled &&
+        (isActiveRunningNode(runningNodes[frame.id]) ||
+          frame.memberNodeIds.some((nodeId) =>
+            isActiveRunningNode(runningNodes[nodeId]),
+          ));
       const cached = storyboardFrameNodeCache.current.get(frame.id);
       const cachedData = cached?.data as StoryboardFrameNodeData | undefined;
       const canReuseData =
@@ -4096,6 +4104,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         cachedData.completedCount === frame.completedCount &&
         cachedData.running === frameRunning &&
         cachedData.runBlockedReason === runBlockedReason &&
+        cachedData.runActionEnabled === runActionEnabled &&
         cachedData.collapsed === collapsed;
       const data: StoryboardFrameNodeData =
         canReuseData && cachedData
@@ -4108,6 +4117,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
               completedCount: frame.completedCount,
               running: frameRunning,
               runBlockedReason,
+              runActionEnabled,
               collapsed,
               onRun:
                 cachedData?.onRun ||
@@ -4134,6 +4144,8 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         cached.draggable === interactive &&
         cached.selectable === interactive &&
         cached.focusable === interactive &&
+        cached.initialWidth === bounds.width &&
+        cached.initialHeight === bounds.height &&
         cachedStyle?.width === bounds.width &&
         cachedStyle?.height === bounds.height
       ) {
@@ -4154,11 +4166,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         deletable: false,
         focusable: interactive,
         dragHandle: ".ws-storyboard-frame-header",
-        style: {
-          ...cached?.style,
-          width: bounds.width,
-          height: bounds.height,
-        },
+        ...stableFlowNodeSize(bounds, cachedStyle),
       };
       storyboardFrameNodeCache.current.set(frame.id, nextFrameNode);
       return nextFrameNode;
@@ -4482,8 +4490,26 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       if (!interactive) {
         return;
       }
+      const constrainedChanges = changes.map((change) => {
+        if (change.type !== "position" || !change.position) {
+          return change;
+        }
+        const position = constrainScriptGroupMemberPosition(
+          nodes,
+          change.id,
+          change.position,
+        );
+        if (position === change.position) {
+          return change;
+        }
+        return {
+          ...change,
+          position,
+          ...(change.positionAbsolute ? { positionAbsolute: position } : {}),
+        };
+      });
       setFlowNodes((current) => {
-        const nextNodes = applyNodeChanges(changes, current);
+        const nextNodes = applyNodeChanges(constrainedChanges, current);
         for (const node of nextNodes) {
           flowNodeCache.current.set(node.id, node);
         }
@@ -4508,7 +4534,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         onSelectNodes([...nextSelectedNodeIds]);
       }
     },
-    [interactive, onSelectNodes, selectedNodeIds],
+    [interactive, nodes, onSelectNodes, selectedNodeIds],
   );
 
   const handleEdgesChange = useCallback(
@@ -4601,13 +4627,21 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
             formParams,
             targetDraft,
           );
+          const formValues = reconcileReferenceModeForMediaSources(
+            formParams,
+            savedValues,
+            [
+              ...currentConnections.map((connection) => connection.source),
+              ...mediaSourceNodes,
+            ],
+          );
           const projectedMultiImagePlan = resolveCanvasMultiImagePlan({
             node: targetNode,
             content: targetDraft.promptContent,
             items: canvasReferenceItems,
             connections: currentConnections,
             params: formParams,
-            values: savedValues,
+            values: formValues,
             requestedMode: targetDraft.multiImageMode,
             additionalSources: mediaSourceNodes,
           });
@@ -4618,15 +4652,6 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
             toast.error(projectedMultiImagePlan.error);
             return;
           }
-          const formValues = reconcileReferenceModeForMediaSources(
-            formParams,
-            savedValues,
-            [
-              ...currentConnections.map((connection) => connection.source),
-              ...mediaSourceNodes,
-            ],
-            projectedMultiImageMode,
-          );
           const options = mediaUsageOptions(
             filterActivePowerParams(formParams, formValues),
           );
@@ -4905,6 +4930,15 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         updateProximityEdge(null);
         return;
       }
+      const constrainedPosition = constrainScriptGroupMemberPosition(
+        nodes,
+        draggedNode.id,
+        draggedNode.position,
+      );
+      const effectiveDraggedNode =
+        constrainedPosition === draggedNode.position
+          ? draggedNode
+          : { ...draggedNode, position: constrainedPosition };
       if (sourceNode.type === "group") {
         const deltaX = draggedNode.position.x - sourceNode.x;
         const deltaY = draggedNode.position.y - sourceNode.y;
@@ -4934,7 +4968,11 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         updateProximityEdge(null);
         return;
       }
-      const closest = findClosestConnectableNode(draggedNode, flowNodes, nodes);
+      const closest = findClosestConnectableNode(
+        effectiveDraggedNode,
+        flowNodes,
+        nodes,
+      );
       if (!closest) {
         updateProximityEdge(null);
         return;
@@ -4990,15 +5028,20 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       const sourceNode = nodes.find((node) => node.id === draggedNode.id);
       let membershipChanged = false;
       if (sourceNode) {
-        const movedNodes = withMovedCanvasNode(
+        const position = constrainScriptGroupMemberPosition(
           nodes,
           draggedNode.id,
           draggedNode.position,
         );
+        const movedNodes = withMovedCanvasNode(
+          nodes,
+          draggedNode.id,
+          position,
+        );
         const groupedNodes = withCanvasNodeGroupAtPosition(
           movedNodes,
           draggedNode.id,
-          draggedNode.position,
+          position,
         );
         membershipChanged =
           (sourceNode.groupId || "") !==
@@ -5050,11 +5093,11 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
 
   const handleCanvasPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
-      if (
-        !interactive ||
-        event.button !== 2 ||
-        !isCanvasPaneTarget(event.target)
-      ) {
+      if (!interactive || event.button !== 2) {
+        return;
+      }
+      suppressNextPaneContextMenuRef.current = false;
+      if (!isCanvasPaneTarget(event.target)) {
         return;
       }
       rightSelectionRef.current = {
@@ -5062,13 +5105,39 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         start: { x: event.clientX, y: event.clientY },
         baseNodeIds: event.ctrlKey || event.metaKey ? [...selectedNodeIds] : [],
         moved: false,
+        contextMenuHandled: false,
       };
-      suppressNextPaneContextMenuRef.current = false;
       event.preventDefault();
       event.stopPropagation();
       event.currentTarget.setPointerCapture?.(event.pointerId);
     },
     [interactive, selectedNodeIds],
+  );
+
+  const openCanvasNodeMenuAtScreen = useCallback(
+    (screen: CanvasPoint) => {
+      onOpenNodeMenu(screen, flowPositionFromScreen(flowInstance, screen));
+    },
+    [flowInstance, onOpenNodeMenu],
+  );
+
+  const handleCanvasContextMenuCapture = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      const gesture = rightSelectionRef.current;
+      if (
+        !interactive ||
+        (!gesture && !suppressNextPaneContextMenuRef.current)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      suppressNextPaneContextMenuRef.current = false;
+      if (gesture) {
+        gesture.contextMenuHandled = true;
+      }
+    },
+    [interactive],
   );
 
   const handleCanvasPointerMove = useCallback(
@@ -5127,14 +5196,17 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
       setSelectionRect(null);
-      if (!gesture.moved) {
-        return;
-      }
-      suppressNextPaneContextMenuRef.current = true;
+      suppressNextPaneContextMenuRef.current = !gesture.contextMenuHandled;
       event.preventDefault();
       event.stopPropagation();
+      if (!gesture.moved && event.type === "pointerup") {
+        openCanvasNodeMenuAtScreen({
+          x: event.clientX,
+          y: event.clientY,
+        });
+      }
     },
-    [],
+    [openCanvasNodeMenuAtScreen],
   );
 
   const handlePaneClick = useCallback(
@@ -5154,10 +5226,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       }
       event.preventDefault();
       event.stopPropagation();
-      const screen = { x: event.clientX, y: event.clientY };
-      onOpenNodeMenu(screen, flowPositionFromScreen(flowInstance, screen));
+      openCanvasNodeMenuAtScreen({ x: event.clientX, y: event.clientY });
     },
-    [flowInstance, interactive, onOpenNodeMenu, onSelectNodes],
+    [interactive, onSelectNodes, openCanvasNodeMenuAtScreen],
   );
 
   const handlePaneContextMenu = useCallback(
@@ -5171,10 +5242,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         suppressNextPaneContextMenuRef.current = false;
         return;
       }
-      const screen = { x: event.clientX, y: event.clientY };
-      onOpenNodeMenu(screen, flowPositionFromScreen(flowInstance, screen));
+      openCanvasNodeMenuAtScreen({ x: event.clientX, y: event.clientY });
     },
-    [flowInstance, interactive, onOpenNodeMenu],
+    [interactive, openCanvasNodeMenuAtScreen],
   );
 
   const handleNodeContextMenu = useCallback(
@@ -5487,6 +5557,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       onPointerMoveCapture={handleCanvasPointerMove}
       onPointerUpCapture={finishCanvasPointerSelection}
       onPointerCancelCapture={finishCanvasPointerSelection}
+      onContextMenuCapture={handleCanvasContextMenuCapture}
     >
       <ReactFlow
         nodes={flowNodes}
@@ -10888,6 +10959,22 @@ function buildFunctionRunPatch(
 const MULTI_MEDIA_GRID_NODE_SIZE = { width: 620, height: 420 } as const;
 const FUNCTION_RESULT_TOOLBAR_HEIGHT = 44;
 
+function stableFlowNodeSize(
+  size: { width: number; height: number },
+  style?: CSSProperties,
+) {
+  // Controlled node replacements stay visible while ReactFlow remeasures them.
+  return {
+    initialWidth: size.width,
+    initialHeight: size.height,
+    style: {
+      ...style,
+      width: size.width,
+      height: size.height,
+    },
+  };
+}
+
 function canvasNodeStyleSize(node: SpaceCanvasNode) {
   if (node.type === "function") {
     if (shouldRenderFunctionResultCard(node)) {
@@ -12618,6 +12705,7 @@ function SpaceNodeView({ data, selected }: NodeProps<Node<WorkspaceNodeData>>) {
               fallback={node.description}
               streaming={isPowerRunning && showStreamOutput}
               generating={isPowerRunning && hasPowerMedia && !showStreamOutput}
+              videoObjectFit="cover"
               onMediaSize={onMediaSize}
             />
           ) : (
@@ -12731,6 +12819,7 @@ function CanvasGeneratedNodeContent({
   fallback,
   streaming,
   generating = false,
+  videoObjectFit = "contain",
   onMediaSize,
   showMediaCaption = true,
 }: {
@@ -12739,6 +12828,7 @@ function CanvasGeneratedNodeContent({
   fallback: string;
   streaming?: boolean;
   generating?: boolean;
+  videoObjectFit?: CSSProperties["objectFit"];
   onMediaSize?: (width: number, height: number) => void;
   showMediaCaption?: boolean;
 }) {
@@ -12785,7 +12875,7 @@ function CanvasGeneratedNodeContent({
           poster={preview.videoPosterUrl}
           className="nopan nowheel"
           ariaLabel={caption || "生成视频"}
-          objectFit="contain"
+          objectFit={videoObjectFit}
           allowDragFromVideo
           onMediaSize={onMediaSize}
         />

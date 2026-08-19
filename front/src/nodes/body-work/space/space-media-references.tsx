@@ -61,13 +61,7 @@ export type CanvasMultiImagePlan = {
   error: string;
 };
 
-type CanvasMultiImageModeMediaOptions = Record<
-  CanvasMultiImageMode,
-  MediaUsageOption[]
->;
-
 const REFERENCE_MODE_PARAM_KEY = "referencemode";
-const REFERENCE_MODE_FRAMES = "frames";
 const REFERENCE_MODE_REFERENCES = "references";
 
 export function resolveCanvasMultiImagePlan({
@@ -89,21 +83,16 @@ export function resolveCanvasMultiImagePlan({
   requestedMode?: CanvasMultiImageMode;
   additionalSources?: SpaceCanvasNode[];
 }) {
-  const optionsForMode = (mode: CanvasMultiImageMode) => {
-    const modeValues = powerParamValuesForMultiImageMode(params, values, mode);
-    return modeValues
-      ? mediaUsageOptions(filterActivePowerParams(params, modeValues))
-      : [];
-  };
+  // Reference mode selects provider inputs; multi-image mode only controls batching.
+  const activeMediaOptions = mediaUsageOptions(
+    filterActivePowerParams(params, values),
+  );
   return canvasMultiImagePlan({
     targetKind: canvasMediaReferenceKind(node) || node.power?.kind || node.kind,
     content,
     items,
     connections,
-    mediaOptionsByMode: {
-      per_image: optionsForMode("per_image"),
-      shared_reference: optionsForMode("shared_reference"),
-    },
+    mediaOptions: activeMediaOptions,
     requestedMode,
     additionalSources,
   });
@@ -239,24 +228,20 @@ export function reconcileReferenceModeForMediaSources(
   params: PowerParam[],
   values: Record<string, unknown>,
   sources: SpaceCanvasNode[],
-  multiImageMode?: CanvasMultiImageMode,
 ) {
   const requiresReferenceMaterials = sources.some((source) => {
     const kind = canvasMediaReferenceKind(source);
     return kind === "video" || kind === "audio";
   });
-  if (!requiresReferenceMaterials && !multiImageMode) {
-    return values;
-  }
-
-  const desiredMultiImageMode =
-    multiImageMode ||
-    (requiresReferenceMaterials ? "shared_reference" : undefined);
-  if (!desiredMultiImageMode) {
+  if (!requiresReferenceMaterials) {
     return values;
   }
   return (
-    powerParamValuesForMultiImageMode(params, values, desiredMultiImageMode) ||
+    powerParamValuesForReferenceMode(
+      params,
+      values,
+      REFERENCE_MODE_REFERENCES,
+    ) ||
     values
   );
 }
@@ -265,25 +250,15 @@ export function isCanvasReferenceModeParam(param: PowerParam) {
   return normalizeMediaUsageRole(param.key) === REFERENCE_MODE_PARAM_KEY;
 }
 
-export function powerParamValuesForMultiImageMode(
+function powerParamValuesForReferenceMode(
   params: PowerParam[],
   values: Record<string, unknown>,
-  multiImageMode: CanvasMultiImageMode,
+  desiredMode: string,
 ): Record<string, unknown> | undefined {
   const referenceModeParam = params.find(isCanvasReferenceModeParam);
   if (!referenceModeParam?.key) {
     return values;
   }
-  const desiredMode =
-    multiImageMode === "per_image" &&
-    params.some(
-      (param) =>
-        (param.type === "file" || param.type === "files") &&
-        (isFirstFrameUsage(param.key) ||
-          String(param.name || "").includes("首帧")),
-    )
-      ? REFERENCE_MODE_FRAMES
-      : REFERENCE_MODE_REFERENCES;
   const desiredOption = resolvePowerParamOption(
     referenceModeParam.options || [],
     desiredMode,
@@ -356,7 +331,7 @@ export function canvasMultiImagePlan({
   content,
   items,
   connections,
-  mediaOptionsByMode,
+  mediaOptions,
   requestedMode,
   additionalSources = [],
 }: {
@@ -364,7 +339,7 @@ export function canvasMultiImagePlan({
   content?: CanvasReferenceContent;
   items: ComposerAssetItem[];
   connections: CanvasConnectedMediaReference[];
-  mediaOptionsByMode: CanvasMultiImageModeMediaOptions;
+  mediaOptions: MediaUsageOption[];
   requestedMode?: CanvasMultiImageMode;
   additionalSources?: SpaceCanvasNode[];
 }): CanvasMultiImagePlan {
@@ -383,20 +358,25 @@ export function canvasMultiImagePlan({
     references.some((reference) => isLastFrameUsage(reference.usage));
   const active =
     normalizeCanvasMediaKind(targetKind) === "video" &&
-    imageCount > 1 &&
-    !explicitFramePair;
+    imageCount > 1;
   const perImageCandidates = mediaUsageCandidatesForKind(
-    mediaOptionsByMode.per_image,
+    mediaOptions,
     "image",
     "per_image",
   );
-  const sharedCandidates = mediaUsageCandidatesForKind(
-    mediaOptionsByMode.shared_reference,
+  const combinedCandidates = mediaUsageCandidatesForKind(
+    mediaOptions,
     "image",
     "shared_reference",
   );
   const perImageEnabled = perImageCandidates.length > 0;
-  const sharedReferenceEnabled = sharedCandidates.length > 0;
+  const combinedUsesFrames = combinedCandidates.some(
+    isFrameMediaUsageOption,
+  );
+  const combinedEnabled =
+    (!combinedUsesFrames ||
+      references.every((reference) => reference.amount === 1)) &&
+    canCombineImageReferences(combinedCandidates, imageCount);
   const options: CanvasMultiImagePlanOption[] = [
     {
       value: "per_image",
@@ -406,11 +386,13 @@ export function canvasMultiImagePlan({
     },
     {
       value: "shared_reference",
-      label: "共同参考",
-      enabled: sharedReferenceEnabled,
-      reason: sharedReferenceEnabled
+      label: combinedUsesFrames ? "首尾帧生成" : "共同参考",
+      enabled: combinedEnabled,
+      reason: combinedEnabled
         ? undefined
-        : "当前能力没有可接收多图的参考参数",
+        : combinedUsesFrames
+          ? "当前能力不能将这些图片作为同一次首尾帧输入"
+          : "当前能力不能在一次请求中接收这些参考图片",
     },
   ];
   if (!active) {
@@ -425,13 +407,14 @@ export function canvasMultiImagePlan({
   }
 
   const structured = references.some((reference) => reference.structured);
-  const defaultMode: CanvasMultiImageMode = structured
-    ? perImageEnabled
-      ? "per_image"
-      : "shared_reference"
-    : sharedReferenceEnabled
+  const defaultMode: CanvasMultiImageMode =
+    explicitFramePair && combinedEnabled
       ? "shared_reference"
-      : "per_image";
+      : structured && perImageEnabled
+        ? "per_image"
+        : combinedEnabled
+          ? "shared_reference"
+          : "per_image";
   const requestedOption = options.find(
     (option) => option.value === requestedMode && option.enabled,
   );
@@ -653,7 +636,7 @@ function mediaUsageCandidatesForKind(
   }
   const generic = matching.filter((option) => !isFrameMediaUsageOption(option));
   if (multiImageMode === "shared_reference") {
-    return prioritizeMediaUsageOptions(generic);
+    return prioritizeMediaUsageOptions(generic.length > 0 ? generic : matching);
   }
   const firstFrame = matching.filter(
     (option) => isFirstFrameUsage(option.key) || option.label.includes("首帧"),
@@ -661,6 +644,44 @@ function mediaUsageCandidatesForKind(
   return firstFrame.length > 0
     ? prioritizeMediaUsageOptions(firstFrame)
     : prioritizeMediaUsageOptions(generic);
+}
+
+export function filterMediaUsageOptionsForMultiImageMode(
+  options: MediaUsageOption[],
+  multiImageMode?: CanvasMultiImageMode,
+) {
+  if (!multiImageMode) {
+    return options;
+  }
+  const allowed = new Set<MediaUsageOption>();
+  for (const kind of ["image", "video", "audio", "file"] as const) {
+    for (const option of mediaUsageCandidatesForKind(
+      options,
+      kind,
+      multiImageMode,
+    )) {
+      allowed.add(option);
+    }
+  }
+  return options.filter((option) => allowed.has(option));
+}
+
+function canCombineImageReferences(
+  candidates: MediaUsageOption[],
+  imageCount: number,
+) {
+  let remaining = imageCount;
+  for (const option of candidates) {
+    const capacity = mediaUsageCapacity(option);
+    if (capacity <= 0) {
+      return true;
+    }
+    remaining -= capacity;
+    if (remaining <= 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function normalizeMediaUsageRole(value: string) {

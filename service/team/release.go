@@ -236,6 +236,7 @@ func graphTeamToModel(payload GraphTeam) teammodel.Team {
 	return teammodel.Team{
 		ID:             payload.ID,
 		CateID:         payload.CateID,
+		MaterialPackID: payload.MaterialPackID,
 		Name:           payload.Name,
 		Description:    payload.Description,
 		Config:         jsonText(payload.Config),
@@ -256,6 +257,7 @@ func graphRoleToModel(teamID uint64, payload GraphRole) teammodel.Role {
 		Assignment:   payload.Assignment,
 		Config:       jsonText(payload.Config),
 		ChatStatus:   normalizeEntryStatus(payload.ChatStatus),
+		ToolStatus:   normalizeEntryStatus(payload.ToolStatus),
 		CreateStatus: normalizeEntryStatus(payload.CreateStatus),
 		Status:       payload.Status,
 		Sort:         payload.Sort,

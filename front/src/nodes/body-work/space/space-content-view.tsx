@@ -19,6 +19,7 @@ import {
 } from "../shared/content-output";
 import { MediaGridView } from "../shared/media-grid-view";
 import { StoryboardGridView } from "../shared/storyboard-grid-view";
+import { canvasContentNeedsRenderer } from "./space-content-classifier";
 
 const StoryboardView = lazy(() =>
   import("./space-storyboard-view").then((module) => ({
@@ -122,22 +123,16 @@ export function contentOutputNeedsRenderer(
   }
   const mediaCount = contentOutputMediaCount(output);
   const items = normalizeContentOutputItems(output);
-  if (items.length > 1 || mediaCount > 1) {
-    return true;
-  }
-  return items.some((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
-      return hasContentOutput(item);
-    }
-    return [
-      item.title,
-      item.text,
-      item.reasoning,
-      item.rich,
-      item.progress,
-      item.error,
-      item.json,
-    ].some(hasContentOutput);
+  const previewMedia = canvasPreviewMedia(preview);
+  return canvasContentNeedsRenderer({
+    items,
+    mediaCount,
+    previewMediaURL: previewMedia?.url,
+    outputMediaURLs: previewMedia
+      ? contentOutputMediaItems(output, previewMedia.kind).map(
+          (item) => item.url,
+        )
+      : [],
   });
 }
 
@@ -155,14 +150,18 @@ export function canvasMultiMediaGridOutput(
 export function canvasMediaGridKind(
   preview?: CanvasContentMediaPreview,
 ): ContentMediaKind | undefined {
+  return canvasPreviewMedia(preview)?.kind;
+}
+
+function canvasPreviewMedia(preview?: CanvasContentMediaPreview) {
   if (preview?.videoUrl) {
-    return "video";
+    return { kind: "video" as const, url: preview.videoUrl };
   }
   if (preview?.imageUrl) {
-    return "image";
+    return { kind: "image" as const, url: preview.imageUrl };
   }
   if (preview?.audioUrl) {
-    return "audio";
+    return { kind: "audio" as const, url: preview.audioUrl };
   }
   return undefined;
 }

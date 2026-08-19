@@ -39,6 +39,19 @@ func (TeamHook) ProviderBeforeSaveTeam(c *server.Context, params []any) any {
 	if shouldNormalizeTeamField(record, "config", partial) && record["config"] == "" {
 		record["config"] = "{}"
 	}
+	if shouldNormalizeTeamField(record, "material_pack_id", partial) {
+		materialPackID := util.ToUint64(record["material_pack_id"])
+		if c != nil && materialPackID > 0 {
+			pack := teammodel.NewMaterialPackModel().Find(c.Context(), map[string]any{
+				"id":     materialPackID,
+				"status": teammodel.StatusEnabled,
+			})
+			if pack == nil {
+				panicTeamField("form.material_pack_id", "素材方案不存在或已停用。")
+			}
+		}
+		record["material_pack_id"] = materialPackID
+	}
 	defaultTeamInt16Field(record, "status", defaultTeamStatus, partial)
 	defaultTeamInt16Field(record, "project_enabled", teammodel.StatusEnabled, partial)
 	defaultTeamIntField(record, "sort", defaultTeamSort, partial)
@@ -154,6 +167,7 @@ func (TeamHook) ProviderBeforeSaveRole(c *server.Context, params []any) any {
 		record["config"] = "{}"
 	}
 	defaultTeamInt16Field(record, "chat_status", teammodel.StatusEnabled, partial)
+	defaultTeamInt16Field(record, "tool_status", teammodel.StatusEnabled, partial)
 	defaultTeamInt16Field(record, "create_status", teammodel.StatusDisabled, partial)
 	defaultTeamInt16Field(record, "status", defaultTeamStatus, partial)
 	defaultTeamIntField(record, "sort", defaultTeamSort, partial)

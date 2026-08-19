@@ -1,9 +1,15 @@
-import { Loader2, Upload, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 import { BodyWorkTooltip } from "../shared/body-work-tooltip";
 import { requestErrorMessage as errorText } from "../shared/api-response";
 import { AssetBrowser } from "./asset-browser";
+import { AssetUploadButton } from "./asset-upload-button";
+import {
+  createSequentialAssetUploadProgress,
+  type AssetUploadHandler,
+  type AssetUploadProgress,
+} from "./asset-upload-progress";
 import type {
   AssetContentMode,
   AssetFilters,
@@ -46,7 +52,7 @@ export function AssetPickerDialog({
   contentMode?: AssetContentMode;
   validateAsset?: (asset: AssetRecord) => string;
   uploadAccept?: string;
-  onUpload?: (files: File[]) => Promise<AssetRecord[]>;
+  onUpload?: AssetUploadHandler<AssetRecord>;
   onClose: () => void;
   onConfirm: (assets: AssetRecord[], selectedAssetIDs: number[]) => void;
 }) {
@@ -71,6 +77,8 @@ export function AssetPickerDialog({
   );
   const [message, setMessage] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] =
+    useState<AssetUploadProgress | null>(null);
   const [reloadSignal, setReloadSignal] = useState(0);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const selectionLimit = multiple ? Math.max(1, maxSelection) : 1;
@@ -82,6 +90,7 @@ export function AssetPickerDialog({
     setBrowserFilters(normalizedInitialFilters);
     setMessage("");
     setUploading(false);
+    setUploadProgress(null);
   }, [
     normalizedInitialFilters,
     normalizedInitialSelection,
@@ -113,14 +122,29 @@ export function AssetPickerDialog({
       return;
     }
 
+    const filesToUpload = selectedFiles.slice(0, available);
+    const progress = createSequentialAssetUploadProgress(
+      filesToUpload,
+      setUploadProgress,
+    );
     setUploading(true);
+    setUploadProgress(null);
     setMessage("");
     const uploadedAssets: AssetRecord[] = [];
     const errors: string[] = [];
     try {
-      for (const file of selectedFiles.slice(0, available)) {
+      for (const [fileIndex, file] of filesToUpload.entries()) {
+        progress.start(fileIndex);
         try {
-          const assets = await onUpload([file]);
+          const assets = await onUpload([file], {
+            onProgress: (current) =>
+              progress.report(
+                fileIndex,
+                current.loaded,
+                current.total,
+                current.phase,
+              ),
+          });
           for (const asset of assets) {
             const validationMessage = validateAsset?.(asset) || "";
             if (validationMessage) {
@@ -131,6 +155,8 @@ export function AssetPickerDialog({
           }
         } catch (error) {
           errors.push(`${file.name}：${errorText(error, "上传失败")}`);
+        } finally {
+          progress.complete(fileIndex);
         }
       }
 
@@ -145,6 +171,7 @@ export function AssetPickerDialog({
       setMessage(errors.join("；"));
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }
 
@@ -223,6 +250,7 @@ export function AssetPickerDialog({
   return createPortal(
     <div
       className="wb-asset-reference-backdrop"
+      data-slot="dialog-layer"
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -275,21 +303,11 @@ export function AssetPickerDialog({
           headerAction={
             onUpload ? (
               <>
-                <BodyWorkTooltip label="本地上传">
-                  <button
-                    type="button"
-                    className="wb-asset-local-upload"
-                    disabled={uploading}
-                    onClick={() => uploadInputRef.current?.click()}
-                  >
-                    {uploading ? (
-                      <Loader2 className="is-spinning" aria-hidden="true" />
-                    ) : (
-                      <Upload aria-hidden="true" />
-                    )}
-                    <span>{uploading ? "上传中" : "本地上传"}</span>
-                  </button>
-                </BodyWorkTooltip>
+                <AssetUploadButton
+                  uploading={uploading}
+                  progress={uploadProgress}
+                  onClick={() => uploadInputRef.current?.click()}
+                />
                 <input
                   ref={uploadInputRef}
                   type="file"

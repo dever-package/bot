@@ -23,7 +23,7 @@ import { useAgentChatArtifactSync } from "./artifact-sync";
 import {
   mergeAgentChatDocument,
   type AgentChatDocument,
-} from "./document";
+} from "../../shared/agent-output/document";
 import {
   loadAgentChatReferences,
   hasReferenceInputContent,

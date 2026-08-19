@@ -31,6 +31,7 @@ func (s Service) MoveTeamAssetToTrash(ctx context.Context, teamID uint64, assetI
 		if asset.Kind == assetmodel.KindCollection {
 			assetModel.Update(tx, map[string]any{
 				"collection_id": asset.ID,
+				"user_id":       asset.UserID,
 				"team_id":       teamID,
 				"status":        assetmodel.StatusCurrent,
 			}, map[string]any{
@@ -40,6 +41,7 @@ func (s Service) MoveTeamAssetToTrash(ctx context.Context, teamID uint64, assetI
 		}
 		if assetModel.Update(tx, map[string]any{
 			"id":      asset.ID,
+			"user_id": asset.UserID,
 			"team_id": teamID,
 			"status":  assetmodel.StatusCurrent,
 		}, map[string]any{
@@ -71,6 +73,7 @@ func (s Service) RestoreTeamAsset(ctx context.Context, teamID uint64, assetID ui
 		assetModel := assetmodel.NewAssetModel()
 		if assetModel.Update(tx, map[string]any{
 			"id":      asset.ID,
+			"user_id": asset.UserID,
 			"team_id": teamID,
 			"status":  assetmodel.StatusDeleted,
 		}, map[string]any{
@@ -82,6 +85,7 @@ func (s Service) RestoreTeamAsset(ctx context.Context, teamID uint64, assetID ui
 		if asset.Kind == assetmodel.KindCollection && asset.DeletedAt != nil {
 			assetModel.Update(tx, map[string]any{
 				"collection_id": asset.ID,
+				"user_id":       asset.UserID,
 				"team_id":       teamID,
 				"status":        assetmodel.StatusDeleted,
 				"deleted_at":    *asset.DeletedAt,
@@ -103,6 +107,7 @@ func (s Service) RestoreTeamAsset(ctx context.Context, teamID uint64, assetID ui
 
 func hasAssetIdentityConflict(ctx context.Context, asset *assetmodel.Asset) bool {
 	filter := assetIdentityFilter(SaveVersionRequest{
+		UserID:       asset.UserID,
 		ProjectID:    asset.ProjectID,
 		BodyID:       asset.BodyID,
 		TeamID:       asset.TeamID,
