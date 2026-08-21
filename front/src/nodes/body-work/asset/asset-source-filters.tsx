@@ -14,6 +14,10 @@ import {
   assetSourceSpecs,
   type AssetSourceLabels,
 } from "./asset-contract";
+import {
+  defaultOfficialAssetKind,
+  officialCategoriesForKind,
+} from "./official-material";
 
 const roleOptions: Array<{ key: "" | AssetRole; label: string }> = [
   { key: "", label: "全部" },
@@ -31,6 +35,7 @@ export function AssetSourceFilters({
   scopeProjectID = 0,
   sourceLabels = {},
   allowedKinds = [],
+  includeOfficial = true,
   view,
   collectionName,
   onCollectionBack,
@@ -42,6 +47,7 @@ export function AssetSourceFilters({
   scopeProjectID?: number;
   sourceLabels?: AssetSourceLabels;
   allowedKinds?: AssetKind[];
+  includeOfficial?: boolean;
   view: AssetView;
   collectionName?: string;
   onCollectionBack?: () => void;
@@ -50,28 +56,64 @@ export function AssetSourceFilters({
 }) {
   const sourceOptions: Array<{ key: "" | AssetSourceType; label: string }> = [
     { key: "", label: "全部" },
-    ...assetSourceSpecs.map((option) => ({
-      ...option,
-      label: sourceLabels[option.key] || option.label,
-    })),
+    ...assetSourceSpecs
+      .filter(
+        (option) =>
+          option.key !== "official" ||
+          (includeOfficial &&
+            options.materialLibrary.enabled &&
+            Boolean(
+              defaultOfficialAssetKind(options.materialLibrary, allowedKinds),
+            )),
+      )
+      .map((option) => ({
+        ...option,
+        label: sourceLabels[option.key] || option.label,
+      })),
   ];
   const hasAssetCates = options.assetCates.length > 0;
   const visibleKindOptions =
-    allowedKinds.length > 0
-      ? kindOptions.filter(
-          (option) => option.key && allowedKinds.includes(option.key),
-        )
-      : kindOptions;
+    filters.sourceType === "official"
+      ? options.materialLibrary.kinds
+          .filter(
+            (option) =>
+              allowedKinds.length === 0 ||
+              allowedKinds.includes(option.assetKind),
+          )
+          .map((option) => ({ key: option.assetKind, label: option.name }))
+      : allowedKinds.length > 0
+        ? kindOptions.filter(
+            (option) => option.key && allowedKinds.includes(option.key),
+          )
+        : kindOptions;
+  const officialCategories = officialCategoriesForKind(
+    options.materialLibrary,
+    filters.kind,
+  );
   function selectSource(sourceType: "" | AssetSourceType) {
     const projectID = sourceType === "project" ? scopeProjectID : 0;
+    const officialKind =
+      sourceType === "official"
+        ? defaultOfficialAssetKind(options.materialLibrary, allowedKinds)
+        : "";
+    const kind =
+      sourceType === "official"
+        ? officialKind
+        : filters.sourceType === "official"
+          ? allowedKinds.length === 1
+            ? allowedKinds[0]
+            : ""
+          : filters.kind;
     onChange({
       ...filters,
       sourceType,
       sourceID: projectID,
       projectID,
       assetCateID: 0,
+      materialCateID: 0,
       nodeKey: "",
       role: "",
+      kind,
     });
   }
 
@@ -157,14 +199,42 @@ export function AssetSourceFilters({
 
       <FilterRow
         label="类型"
-        trailing={<AssetViewSwitch view={view} onChange={onViewChange} />}
+        trailing={
+          filters.sourceType === "official" ? undefined : (
+            <AssetViewSwitch view={view} onChange={onViewChange} />
+          )
+        }
       >
         <SegmentedOptions
           options={visibleKindOptions}
           value={filters.kind}
-          onChange={(kind) => onChange({ ...filters, kind })}
+          onChange={(kind) =>
+            onChange({
+              ...filters,
+              kind,
+              materialCateID:
+                filters.sourceType === "official" ? 0 : filters.materialCateID,
+            })
+          }
         />
       </FilterRow>
+      {filters.sourceType === "official" && officialCategories.length > 0 ? (
+        <FilterRow label="分类">
+          <SegmentedOptions
+            options={[
+              { key: 0, label: "全部" },
+              ...officialCategories.map((category) => ({
+                key: category.id,
+                label: category.name,
+              })),
+            ]}
+            value={filters.materialCateID}
+            onChange={(materialCateID) =>
+              onChange({ ...filters, materialCateID })
+            }
+          />
+        </FilterRow>
+      ) : null}
     </div>
   );
 }
@@ -222,7 +292,7 @@ function AssetViewSwitch({
   );
 }
 
-function SegmentedOptions<T extends string>({
+function SegmentedOptions<T extends string | number>({
   options,
   value,
   onChange,

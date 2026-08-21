@@ -11,6 +11,10 @@ type Log struct {
 	RequestID string `dorm:"type:varchar(64);not null;comment:请求ID"`
 	Mode      string `dorm:"type:varchar(32);not null;comment:调用方式"`
 	Protocol  string `dorm:"type:varchar(32);not null;comment:协议"`
+	Scene     string `dorm:"type:varchar(32);not null;default:'';comment:调用场景"`
+	UserID    uint64 `dorm:"type:bigint;not null;default:0;comment:用户ID"`
+	TeamID    uint64 `dorm:"type:bigint;not null;default:0;comment:团队ID"`
+	ProjectID uint64 `dorm:"type:bigint;not null;default:0;comment:项目ID"`
 
 	PowerID       uint64 `dorm:"type:bigint;not null;default:0;comment:能力ID"`
 	PowerKey      string `dorm:"type:varchar(128);not null;default:'';comment:能力标识"`
@@ -45,6 +49,8 @@ type LogIndex struct {
 	Service   struct{} `index:"service_id,created_at"`
 	Endpoint  struct{} `index:"service_endpoint_id,created_at"`
 	Provider  struct{} `index:"provider_id,created_at"`
+	User      struct{} `index:"user_id,created_at,id"`
+	Scene     struct{} `index:"scene,created_at,id"`
 }
 
 var (
@@ -87,6 +93,12 @@ var (
 		Option:     "bot.energon.NewAccountModel",
 		OptionKeys: []string{"name"},
 	}
+
+	logUserRelation = orm.Relation{
+		Field:      "user_id",
+		Option:     "user.NewUserModel",
+		OptionKeys: []string{"name", "account", "status"},
+	}
 )
 
 func NewLogModel() *orm.Model[Log] {
@@ -97,6 +109,7 @@ func NewLogModel() *orm.Model[Log] {
 		Options: map[string]any{
 			"mode":     modeOptions,
 			"protocol": protocolOptions,
+			"scene":    CostSceneOptions(),
 			"status":   callStatusOptions,
 		},
 		Relations: []orm.Relation{
@@ -105,6 +118,7 @@ func NewLogModel() *orm.Model[Log] {
 			logServiceRelation,
 			logProviderRelation,
 			logAccountRelation,
+			logUserRelation,
 		},
 	})
 }

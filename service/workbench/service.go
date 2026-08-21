@@ -23,6 +23,7 @@ import (
 	energonservice "github.com/dever-package/bot/service/energon"
 	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	materiallibrary "github.com/dever-package/bot/service/materiallibrary"
 	teamservice "github.com/dever-package/bot/service/team"
 	frontstream "github.com/dever-package/front/service/stream"
 	uploadrepo "github.com/dever-package/front/service/upload/repository"
@@ -30,9 +31,10 @@ import (
 )
 
 type Service struct {
-	asset assetservice.Service
-	body  bodyservice.Service
-	team  teamservice.Service
+	asset     assetservice.Service
+	body      bodyservice.Service
+	materials materiallibrary.Service
+	team      teamservice.Service
 }
 
 var teamWorkspaceCreateMu sync.Mutex
@@ -90,9 +92,10 @@ type ChatRoleBinding struct {
 
 func NewService() Service {
 	return Service{
-		asset: assetservice.NewService(),
-		body:  bodyservice.NewService(),
-		team:  teamservice.NewService(),
+		asset:     assetservice.NewService(),
+		body:      bodyservice.NewService(),
+		materials: materiallibrary.NewService(),
+		team:      teamservice.NewService(),
 	}
 }
 
@@ -396,23 +399,22 @@ func (s Service) resolvePowerAssetReferences(
 			if nestedText(part, "type") != "reference" {
 				continue
 			}
-			if nestedText(part, "ref_type") != "asset" {
-				return nil, nil, fmt.Errorf("工具提示词只支持引用已保存资产")
+			refType := nestedText(part, "ref_type")
+			if refType != "asset" && refType != materiallibrary.ReferenceType {
+				return nil, nil, fmt.Errorf("工具提示词只支持引用资产或官方素材")
 			}
 			if trigger := nestedText(part, "ref_trigger"); trigger != "" && trigger != "@" {
-				return nil, nil, fmt.Errorf("工具资产引用必须使用 @ 触发符")
+				return nil, nil, fmt.Errorf("工具素材引用必须使用 @ 触发符")
 			}
-			assetID := nestedUint64(part, "ref_id")
-			versionID := nestedUint64(part, "ref_version_id")
-			resolved, err := s.asset.RequireCurrentReference(ctx, teamID, assetID, versionID)
+			resolved, err := s.resolvePowerLibraryReference(ctx, teamID, part)
 			if err != nil {
 				return nil, nil, err
 			}
 			selection := powerMediaReferenceSelection(part)
 			resolvedMedia := energoninput.MediaReferencesFromContent(
-				"asset",
-				resolved.Asset.ID,
-				resolved.Asset.Kind,
+				resolved.ReferenceType,
+				resolved.ID,
+				resolved.Kind,
 				resolved.Content,
 				nestedText(part, "usage"),
 			)
@@ -421,18 +423,24 @@ func (s Service) resolvePowerAssetReferences(
 				selection,
 			)
 			if err != nil {
-				return nil, nil, fmt.Errorf("资产“%s”：%w", resolved.Asset.Name, err)
+				return nil, nil, fmt.Errorf("素材“%s”：%w", resolved.Name, err)
 			}
 			item := map[string]any{
-				"asset_id":   resolved.Asset.ID,
-				"version_id": resolved.Version.ID,
-				"name":       resolved.Asset.Name,
-				"kind":       resolved.Asset.Kind,
+				"ref_type": resolved.ReferenceType,
+				"ref_id":   resolved.ID,
+				"name":     resolved.Name,
+				"kind":     resolved.Kind,
 				"content": energoninput.SelectedMediaReferenceContent(
 					resolved.Content,
 					resolvedMedia,
 					selection,
 				),
+			}
+			if resolved.ReferenceType == "asset" {
+				item["asset_id"] = resolved.ID
+				item["version_id"] = resolved.VersionID
+			} else {
+				item["material_id"] = resolved.ID
 			}
 			references = append(references, item)
 			allReferences = append(allReferences, item)
@@ -443,12 +451,60 @@ func (s Service) resolvePowerAssetReferences(
 		}
 		raw, _ := json.Marshal(references)
 		prompt := strings.TrimSpace(nestedText(result, paramKey))
-		result[paramKey] = strings.TrimSpace(prompt + "\n\n引用资产：\n" + string(raw))
+		result[paramKey] = strings.TrimSpace(prompt + "\n\n引用素材：\n" + string(raw))
 	}
 	if len(allReferences) > 0 {
 		result["_asset_references"] = allReferences
 	}
 	return result, mediaReferences, nil
+}
+
+type resolvedPowerLibraryReference struct {
+	ReferenceType string
+	ID            uint64
+	VersionID     uint64
+	Name          string
+	Kind          string
+	Content       any
+}
+
+func (s Service) resolvePowerLibraryReference(
+	ctx context.Context,
+	teamID uint64,
+	part map[string]any,
+) (resolvedPowerLibraryReference, error) {
+	refType := nestedText(part, "ref_type")
+	refID := nestedUint64(part, "ref_id")
+	if refType == materiallibrary.ReferenceType {
+		material, err := s.materials.Require(ctx, teamID, refID)
+		if err != nil {
+			return resolvedPowerLibraryReference{}, err
+		}
+		return resolvedPowerLibraryReference{
+			ReferenceType: materiallibrary.ReferenceType,
+			ID:            material.ID,
+			Name:          material.Name,
+			Kind:          material.AssetKind(),
+			Content:       material.PreviewContent(),
+		}, nil
+	}
+	resolved, err := s.asset.RequireCurrentReference(
+		ctx,
+		teamID,
+		refID,
+		nestedUint64(part, "ref_version_id"),
+	)
+	if err != nil {
+		return resolvedPowerLibraryReference{}, err
+	}
+	return resolvedPowerLibraryReference{
+		ReferenceType: "asset",
+		ID:            resolved.Asset.ID,
+		VersionID:     resolved.Version.ID,
+		Name:          resolved.Asset.Name,
+		Kind:          resolved.Asset.Kind,
+		Content:       resolved.Content,
+	}, nil
 }
 
 func powerPromptParamExists(params []energoninput.PowerParam, key string) bool {
@@ -806,6 +862,39 @@ func (s Service) Assets(ctx context.Context, req assetservice.QueryRequest) (map
 
 func (s Service) AssetFilters(ctx context.Context, teamID uint64) (map[string]any, error) {
 	return s.asset.Filters(ctx, teamID)
+}
+
+func (s Service) MaterialCatalog(ctx context.Context, teamID uint64) (materiallibrary.Snapshot, error) {
+	if _, err := userservice.RequireActor(ctx); err != nil {
+		return materiallibrary.Snapshot{}, err
+	}
+	return s.materials.Catalog(ctx, teamID)
+}
+
+func (s Service) Materials(
+	ctx context.Context,
+	teamID uint64,
+	request materiallibrary.QueryRequest,
+) (materiallibrary.Page, error) {
+	if _, err := userservice.RequireActor(ctx); err != nil {
+		return materiallibrary.Page{}, err
+	}
+	return s.materials.Query(ctx, teamID, request)
+}
+
+func (s Service) MaterialDetail(
+	ctx context.Context,
+	teamID uint64,
+	materialID uint64,
+) (map[string]any, error) {
+	if _, err := userservice.RequireActor(ctx); err != nil {
+		return nil, err
+	}
+	material, err := s.materials.Require(ctx, teamID, materialID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"material": material}, nil
 }
 
 func (s Service) AssetDetail(ctx context.Context, teamID uint64, assetID uint64) (map[string]any, error) {

@@ -1,10 +1,11 @@
 import type {
+  CanvasLibraryReferenceType,
   CanvasReferenceContent,
   CanvasReferenceMediaItem,
 } from "./types";
 
 export type CanvasReferenceTarget = {
-  refType: "asset";
+  refType: CanvasLibraryReferenceType;
   refId: number;
   label: string;
   usage?: string;

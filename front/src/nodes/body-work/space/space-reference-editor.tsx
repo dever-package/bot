@@ -6,6 +6,7 @@ import {
 } from "./space-reference-content";
 import { canvasPrimaryMediaURLs } from "./space-media-references";
 import type {
+  CanvasLibraryReferenceType,
   CanvasReferenceContent,
   CanvasReferenceMediaItem,
   ComposerAssetItem,
@@ -14,7 +15,7 @@ import type { WorkbenchReferenceProvider } from "../asset/asset-reference-provid
 import { CanvasAssetReferenceProviderContext } from "./space-reference-provider-context";
 
 type ReferenceScope = "current" | "history";
-type ReferenceType = "asset";
+type ReferenceType = CanvasLibraryReferenceType;
 
 const CANVAS_REFERENCE_PICKER_SCOPES: ReferenceScope[] = ["current"];
 
@@ -409,18 +410,15 @@ async function loadCanvasReferencePreview(
   adapter: CanvasReferenceAdapter,
   assetReferenceProvider?: WorkbenchReferenceProvider,
 ): Promise<ReferencePreview> {
-  const assetPreviewLoader =
-    request.refType === "asset"
-      ? assetReferenceProvider?.loadPreview
-      : undefined;
-  if (!assetPreviewLoader) {
+  const libraryPreviewLoader = assetReferenceProvider?.loadPreview;
+  if (!libraryPreviewLoader) {
     return adapter.loadPreview(request);
   }
   try {
-    const preview = await assetPreviewLoader(request);
+    const preview = await libraryPreviewLoader(request);
     if (preview.media.length > 0 || preview.content != null) {
       return {
-        refType: "asset",
+        refType: request.refType,
         refId: Number(preview.refId || request.refId),
         title: preview.title,
         text: preview.text,
@@ -478,7 +476,8 @@ export function useCanvasReferenceAdapter(
     const options = normalizedItems.flatMap((item) => {
       const refId = Number(item.refId || 0);
       const versionID = Number(item.versionID || 0);
-      if (refId <= 0 || versionID <= 0) {
+      const refType = item.refType || "asset";
+      if (refId <= 0 || (refType === "asset" && versionID <= 0)) {
         return [];
       }
       const option = referenceOption(item, refId);
@@ -532,7 +531,7 @@ function referenceOption(
   const media = referenceMedia(item);
   return {
     key: `canvas:${item.source}:${item.id}`,
-    refType: "asset",
+    refType: item.refType || "asset",
     refId,
     versionID: Number(item.versionID || 0) || undefined,
     label: referenceTitle(item.title),

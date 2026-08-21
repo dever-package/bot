@@ -183,7 +183,9 @@ export function PromptComposer({
       const item = composerAssetItemFromReferenceOption(option);
       assetLibrary.current = [
         ...assetLibrary.current.filter(
-          (current) => Number(current.refId || 0) !== option.refId,
+          (current) =>
+            current.refType !== option.refType ||
+            Number(current.refId || 0) !== option.refId,
         ),
         item,
       ];
@@ -719,11 +721,11 @@ function composerAssetItemFromReferenceOption(
   const kind = String(option.preview?.kind || "file");
   const url = String(option.preview?.url || "");
   return {
-    id: `asset:${option.refId}`,
+    id: `${option.refType}:${option.refId}`,
     title: option.label,
     kind,
-    source: "asset",
-    refType: "asset",
+    source: option.refType,
+    refType: option.refType,
     refId: option.refId,
     versionID: option.versionID,
     output: option.output,

@@ -187,7 +187,7 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 	result := make([]energoninput.MediaReference, 0)
 	used := map[string]bool{}
 	nextID := uint64(1) << 63
-	appendReference := func(kind string, referenceID uint64, usage string, required bool) {
+	appendReference := func(referenceType string, kind string, referenceID uint64, usage string, required bool) {
 		kind = strings.ToLower(strings.TrimSpace(kind))
 		if kind != "image" && kind != "video" && kind != "audio" {
 			return
@@ -196,7 +196,7 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 			referenceID = nextID
 			nextID++
 		}
-		key := fmt.Sprintf("%s:%d:%s", kind, referenceID, strings.TrimSpace(usage))
+		key := fmt.Sprintf("%s:%s:%d:%s", referenceType, kind, referenceID, strings.TrimSpace(usage))
 		if used[key] {
 			return
 		}
@@ -205,7 +205,7 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 			ReferenceType: "preflight",
 			ReferenceID:   referenceID,
 			Kind:          kind,
-			URL:           fmt.Sprintf("https://preflight.invalid/%d.%s", referenceID, kind),
+			URL:           fmt.Sprintf("https://preflight.invalid/%s/%d.%s", referenceType, referenceID, kind),
 			Usage:         strings.TrimSpace(usage),
 			StrictUsage:   strings.TrimSpace(usage) != "",
 			Required:      required,
@@ -224,6 +224,7 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 			return nil, fmt.Errorf("前置参考节点不存在: %s", sourceID)
 		}
 		appendReference(
+			canvasReferenceTypeAsset,
 			source.Kind,
 			source.AssetID,
 			canvasStoryboardReferenceUsage(canvasStoryboardItemType(node), canvasStoryboardItemType(source)),
@@ -246,26 +247,29 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 	for _, reference := range canvasPromptBoundReferences(promptReferences) {
 		if continuesPrevious &&
 			continuationDependencyAssetID > 0 &&
-			reference.AssetID == continuationDependencyAssetID {
+			reference.ReferenceType == canvasReferenceTypeAsset &&
+			reference.ReferenceID == continuationDependencyAssetID {
 			continue
 		}
-		asset, _, err := resolveCanvasReferenceAsset(ctx, projectID, reference)
+		resolvedReference, _, err := resolveCanvasReference(ctx, projectID, reference)
 		if err != nil {
 			label := strings.TrimSpace(reference.Label)
 			if label == "" {
-				label = fmt.Sprintf("%d", reference.AssetID)
+				label = fmt.Sprintf("%d", reference.ReferenceID)
 			}
-			return nil, fmt.Errorf("参考资产“%s”不可用: %w", label, err)
+			return nil, fmt.Errorf("参考素材“%s”不可用: %w", label, err)
 		}
 		appendReference(
-			textValue(asset["kind"]),
-			reference.AssetID,
+			reference.ReferenceType,
+			textValue(resolvedReference["kind"]),
+			reference.ReferenceID,
 			reference.Usage,
-			reference.Required || externalAssetIDs[reference.AssetID],
+			reference.Required ||
+				(reference.ReferenceType == canvasReferenceTypeAsset && externalAssetIDs[reference.ReferenceID]),
 		)
 	}
 	if continuesPrevious {
-		appendReference("image", 0, canvasMediaUsageFirstFrame, true)
+		appendReference("continuation", "image", 0, canvasMediaUsageFirstFrame, true)
 	}
 	return result, nil
 }

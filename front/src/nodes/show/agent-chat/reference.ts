@@ -16,7 +16,8 @@ export type ReferenceType =
   | "upload_file"
   | "session"
   | "canvas_node"
-  | "asset";
+  | "asset"
+  | "material";
 
 export type ReferencePreviewHint = {
   text?: string;

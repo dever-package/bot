@@ -120,7 +120,7 @@ func canvasStoryboardItemNodeStale(itemNodeIDs map[string]string, itemType strin
 
 func canvasVideoCompositionReference(reference canvasPromptReference) map[string]any {
 	result := map[string]any{
-		"asset_id":   reference.AssetID,
+		"asset_id":   reference.ReferenceID,
 		"version_id": reference.VersionID,
 		"label":      reference.Label,
 	}
@@ -583,14 +583,15 @@ func (resolver canvasCompositionReferenceResolver) resolveMediaURLsFromTypes(
 	label string,
 ) ([]string, error) {
 	reference := canvasPromptReference{
-		AssetID:   uint64Value(firstPresent(raw["asset_id"], raw["assetId"])),
-		VersionID: uint64Value(firstPresent(raw["version_id"], raw["versionId"])),
-		Label:     firstText(raw["label"], label),
+		ReferenceType: canvasReferenceTypeAsset,
+		ReferenceID:   uint64Value(firstPresent(raw["asset_id"], raw["assetId"])),
+		VersionID:     uint64Value(firstPresent(raw["version_id"], raw["versionId"])),
+		Label:         firstText(raw["label"], label),
 	}
-	if reference.AssetID == 0 || reference.VersionID == 0 {
+	if reference.ReferenceID == 0 || reference.VersionID == 0 {
 		return nil, fmt.Errorf("%s缺少有效素材引用", label)
 	}
-	resolved, ok := resolver.references[reference.AssetID]
+	resolved, ok := resolver.references[reference.ReferenceID]
 	if !ok || resolved.Content == nil {
 		return nil, fmt.Errorf("%s不可用", label)
 	}
@@ -598,8 +599,8 @@ func (resolver canvasCompositionReferenceResolver) resolveMediaURLsFromTypes(
 	seen := map[string]bool{}
 	for _, mediaType := range mediaTypes {
 		for _, current := range energoninput.MediaReferencesFromContent(
-			"asset",
-			reference.AssetID,
+			canvasReferenceTypeAsset,
+			reference.ReferenceID,
 			mediaType,
 			resolved.Content,
 			"",

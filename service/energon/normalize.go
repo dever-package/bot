@@ -238,7 +238,7 @@ func (s GatewayService) recordCallLogInternal(
 	if !usage.IsZero() {
 		powerParams["usage"] = usage.Map()
 	}
-	record := botlog.Record(ctx, botmodel.Log{
+	logItem := botmodel.Log{
 		RequestID:         req.RequestID,
 		Mode:              req.Mode,
 		Protocol:          req.Protocol,
@@ -262,7 +262,9 @@ func (s GatewayService) recordCallLogInternal(
 		TotalTokens:       usage.TotalTokens,
 		CachedTokens:      usage.CachedTokens,
 		Result:            sanitizeLogJSON(result),
-	})
+	}
+	applyLogAttribution(&logItem, req.Billing)
+	record := botlog.Record(ctx, logItem)
 	if status == StatusSuccess {
 		botruntime.Record(ctx, selected.Service.ID, latency)
 	}
@@ -278,6 +280,19 @@ func (s GatewayService) recordCallLogInternal(
 		})
 	}
 	return record
+}
+
+func applyLogAttribution(record *botmodel.Log, billing botprotocol.BillingContext) {
+	if record == nil {
+		return
+	}
+	record.UserID = billing.UserID
+	record.TeamID = billing.TeamID
+	record.ProjectID = billing.ProjectID
+	record.Scene = strings.TrimSpace(billing.Scene)
+	if record.Scene == "" {
+		record.Scene = "system"
+	}
 }
 
 func buildPowerParamsLog(req *botprotocol.ShemicRequest, nativeRequests ...botprovider.Request) map[string]any {

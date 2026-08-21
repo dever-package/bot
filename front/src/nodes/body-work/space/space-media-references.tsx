@@ -459,22 +459,21 @@ function orderedImageReferences(
   const includedReferences = new Set<string>();
   const references: OrderedImageReference[] = [];
   for (const part of content?.parts || []) {
-    if (part.type !== "reference" || part.ref_type !== "asset") {
+    if (
+      part.type !== "reference" ||
+      !isLibraryReferenceType(part.ref_type)
+    ) {
       continue;
     }
-    const connection = part.ref_origin_id
-      ? connectionByReference.get(
-          connectedReferencePartKey(part.ref_origin_id, part.ref_id),
-        )
-      : undefined;
+    const connection =
+      part.ref_type === "asset" && part.ref_origin_id
+        ? connectionByReference.get(
+            connectedReferencePartKey(part.ref_origin_id, part.ref_id),
+          )
+        : undefined;
     const item = connection
       ? connectedReferenceItem(items, connection.source)
-      : items.find(
-          (candidate) =>
-            Number(candidate.refId || 0) === Number(part.ref_id || 0) &&
-            (!part.ref_version_id ||
-              Number(candidate.versionID || 0) === Number(part.ref_version_id)),
-        );
+      : composerReferenceItemForPart(items, part);
     const kind = connection
       ? canvasMediaReferenceKind(connection.source)
       : normalizeCanvasMediaKind(item?.kind);
@@ -742,27 +741,21 @@ export function canvasMediaUsageError(
       ];
     },
   );
-  const itemByReferenceID = new Map(
-    items.flatMap((item) => {
-      const refID = Number(item.refId || 0);
-      return refID > 0 ? [[refID, item] as const] : [];
-    }),
-  );
   for (const [partIndex, part] of (content?.parts || []).entries()) {
     if (
       part.type !== "reference" ||
-      part.ref_type !== "asset" ||
+      !isLibraryReferenceType(part.ref_type) ||
       part.ref_origin === "edge"
     ) {
       continue;
     }
-    const item = itemByReferenceID.get(Number(part.ref_id || 0));
+    const item = composerReferenceItemForPart(items, part);
     const kind = normalizeCanvasMediaKind(item?.kind);
     if (!kind) {
       continue;
     }
     entries.push({
-      referenceKey: `asset:${part.ref_id}:${partIndex}`,
+      referenceKey: `${part.ref_type}:${part.ref_id}:${partIndex}`,
       label: String(part.label || item?.title || "引用素材"),
       kind,
       amount: selectedMediaReferenceAmount(
@@ -1075,20 +1068,19 @@ function indexedMediaReferenceParts(
   );
   const occurrences = new Map<string, number>();
   return content.parts.flatMap((part, partIndex) => {
-    if (part.type !== "reference" || part.ref_type !== "asset") {
+    if (
+      part.type !== "reference" ||
+      !isLibraryReferenceType(part.ref_type)
+    ) {
       return [];
     }
-    const connection = part.ref_origin_id
-      ? connectionByReference.get(
-          connectedReferencePartKey(part.ref_origin_id, part.ref_id),
-        )
-      : undefined;
-    const item = items.find(
-      (candidate) =>
-        Number(candidate.refId || 0) === Number(part.ref_id || 0) &&
-        (!part.ref_version_id ||
-          Number(candidate.versionID || 0) === Number(part.ref_version_id)),
-    );
+    const connection =
+      part.ref_type === "asset" && part.ref_origin_id
+        ? connectionByReference.get(
+            connectedReferencePartKey(part.ref_origin_id, part.ref_id),
+          )
+        : undefined;
+    const item = composerReferenceItemForPart(items, part);
     const kind = connection
       ? canvasMediaReferenceKind(connection.source)
       : normalizeCanvasMediaKind(item?.kind);
@@ -1100,7 +1092,7 @@ function indexedMediaReferenceParts(
           connection.edge.id,
           connectedMediaReferenceAssetID(connection),
         )}`
-      : `asset:${part.ref_id}:${part.ref_version_id || 0}`;
+      : `${part.ref_type}:${part.ref_id}:${part.ref_version_id || 0}`;
     const occurrence = occurrences.get(identity) || 0;
     occurrences.set(identity, occurrence + 1);
     return [
@@ -1250,6 +1242,26 @@ function connectedReferencePartKey(edgeID: string, assetID: number) {
   return `${String(edgeID || "")}:${Number(assetID || 0)}`;
 }
 
+function isLibraryReferenceType(value: string) {
+  return value === "asset" || value === "material";
+}
+
+function composerReferenceItemForPart(
+  items: ComposerAssetItem[],
+  part: Extract<
+    CanvasReferenceContent["parts"][number],
+    { type: "reference" }
+  >,
+) {
+  return items.find(
+    (candidate) =>
+      (candidate.refType || "asset") === part.ref_type &&
+      Number(candidate.refId || 0) === Number(part.ref_id || 0) &&
+      (!part.ref_version_id ||
+        Number(candidate.versionID || 0) === Number(part.ref_version_id)),
+  );
+}
+
 function connectedMediaReferenceAssetID(
   connection: CanvasConnectedMediaReference,
 ) {
@@ -1309,6 +1321,7 @@ export function connectedReferenceItem(
   return (
     items.find(
       (item) =>
+        (item.refType || "asset") === "asset" &&
         Number(item.refId || 0) === assetID &&
         (!versionID || Number(item.versionID || 0) === versionID),
     ) || items.find((item) => item.id === source.id)

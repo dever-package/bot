@@ -6,6 +6,7 @@ import type {
 import { findAssetMediaURL } from "./asset-content";
 import { assetKindsAccept } from "./asset-contract";
 import { normalizeAssetRecord } from "./asset-api";
+import { assetLibraryKey } from "./official-material";
 import { uploadBodyAssetFiles } from "./upload-asset-api";
 import { AssetPickerDialog } from "./asset-picker-dialog";
 import type { AssetUploadOptions } from "./asset-upload-progress";
@@ -30,13 +31,13 @@ export function AssetParamPicker({
   );
   const currentAssetFiles = useMemo(() => indexedAssetFiles(files), [files]);
   const localFiles = useMemo(
-    () => files.filter((file) => !parseAssetFileID(file.id)),
+    () => files.filter((file) => !parseLibraryFileID(file.id)),
     [files],
   );
   const availableAssetSlots = multiple
     ? Math.max(maxSelection - localFiles.length, 0)
     : 1;
-  const initialSelectedAssetIDs = Array.from(currentAssetFiles.keys()).slice(
+  const initialSelectedAssetKeys = Array.from(currentAssetFiles.keys()).slice(
     0,
     availableAssetSlots,
   );
@@ -45,10 +46,10 @@ export function AssetParamPicker({
     <AssetPickerDialog
       open={open}
       teamID={teamID}
-      title={`${param.name}资产库`}
-      description={`选择当前团队的${allowedKindDescription(allowedKinds)}资产`}
+      title={`${param.name}素材库`}
+      description={`选择当前团队可用的${allowedKindDescription(allowedKinds)}素材`}
       allowedKinds={allowedKinds}
-      initialSelectedAssetIDs={initialSelectedAssetIDs}
+      initialSelectedAssetKeys={initialSelectedAssetKeys}
       multiple={multiple}
       maxSelection={Math.max(availableAssetSlots, 1)}
       confirmSelection
@@ -67,23 +68,23 @@ export function AssetParamPicker({
           return `当前参数最多只能选择 ${maxSelection} 个文件。`;
         }
         if (!allowedKinds.includes(asset.kind)) {
-          return "该资产类型不适用于当前参数。";
+          return "该素材类型不适用于当前参数。";
         }
         return findAssetMediaURL(asset.version?.content, asset.kind)
           ? ""
-          : "该资产当前版本没有可用文件，无法用于此参数。";
+          : "该素材没有可用文件，无法用于此参数。";
       }}
       onClose={() => onOpenChange(false)}
-      onConfirm={(assets, selectedAssetIDs) => {
+      onConfirm={(assets, selectedAssetKeys) => {
         const selectedAssets = new Map(
-          assets.map((asset) => [asset.id, asset]),
+          assets.map((asset) => [assetLibraryKey(asset), asset]),
         );
-        const selectedFiles = selectedAssetIDs
-          .map((assetID) => {
-            const asset = selectedAssets.get(assetID);
+        const selectedFiles = selectedAssetKeys
+          .map((libraryKey) => {
+            const asset = selectedAssets.get(libraryKey);
             return asset
               ? assetParamFile(asset)
-              : currentAssetFiles.get(assetID);
+              : currentAssetFiles.get(libraryKey);
           })
           .filter((file): file is ParamUploadedFile => Boolean(file));
         const nextFiles = multiple
@@ -120,28 +121,32 @@ function normalizeFileAssetKind(value: string | undefined) {
 }
 
 function indexedAssetFiles(files: ParamUploadedFile[]) {
-  const indexed = new Map<number, ParamUploadedFile>();
+  const indexed = new Map<string, ParamUploadedFile>();
   files.forEach((file) => {
-    const identity = parseAssetFileID(file.id);
-    if (identity) indexed.set(identity.assetID, file);
+    const identity = parseLibraryFileID(file.id);
+    if (identity) indexed.set(identity.key, file);
   });
   return indexed;
 }
 
-function parseAssetFileID(value: ParamUploadedFile["id"]) {
-  const match = /^asset:(\d+):(\d+)$/.exec(String(value || ""));
-  if (!match) return null;
-  return {
-    assetID: Number(match[1]),
-    versionID: Number(match[2]),
-  };
+function parseLibraryFileID(value: ParamUploadedFile["id"]) {
+  const text = String(value || "");
+  const assetMatch = /^asset:(\d+):(\d+)$/.exec(text);
+  if (assetMatch) {
+    return { key: `asset:${Number(assetMatch[1])}` };
+  }
+  const materialMatch = /^material:(\d+)$/.exec(text);
+  return materialMatch ? { key: `material:${Number(materialMatch[1])}` } : null;
 }
 
 function assetParamFile(asset: AssetRecord): ParamUploadedFile | undefined {
   const url = findAssetMediaURL(asset.version?.content, asset.kind);
   if (!url) return undefined;
   return {
-    id: `asset:${asset.id}:${asset.versionID}`,
+    id:
+      asset.libraryType === "material"
+        ? `material:${asset.id}`
+        : `asset:${asset.id}:${asset.versionID}`,
     name: asset.name,
     kind: asset.kind,
     url,

@@ -24,6 +24,11 @@ import type {
   AssetView,
   AssetVersion,
 } from "./asset-types";
+import {
+  materialKindForAssetKind,
+  normalizeOfficialMaterial,
+  normalizeOfficialMaterialCatalog,
+} from "./official-material";
 
 const loadFilterOptionsRequest =
   createInFlightRequestLoader<AssetFilterOptions>();
@@ -48,14 +53,27 @@ export function loadAssetFilterOptions(
         request_scope: requestScopeKey || undefined,
       },
     );
-    const [catalogResult, filtersResult] = catalogOptions
-      ? [null, await filtersPromise]
+    const materialCatalogPromise = request(
+      joinSiteApi("workbench/material_catalog"),
+      "get",
+      {
+        team_id: teamID,
+        request_scope: requestScopeKey || undefined,
+      },
+    );
+    const [catalogResult, filtersResult, materialCatalogResult] = catalogOptions
+      ? await Promise.all([
+          Promise.resolve(null),
+          filtersPromise,
+          materialCatalogPromise,
+        ])
       : await Promise.all([
           request(joinSiteApi("workbench/catalog"), "get", {
             team_id: teamID,
             request_scope: requestScopeKey || undefined,
           }),
           filtersPromise,
+          materialCatalogPromise,
         ]);
     const catalog = catalogOptions
       ? {
@@ -74,6 +92,9 @@ export function loadAssetFilterOptions(
       assetCates: toRows(catalog.asset_cates)
         .map(normalizeAssetCate)
         .filter(hasID),
+      materialLibrary: normalizeOfficialMaterialCatalog(
+        responseData(materialCatalogResult, "加载官方素材配置失败"),
+      ),
     };
   });
 }
@@ -97,6 +118,9 @@ export function loadAssetPage(input: {
     contentMode: input.contentMode || ("preview" as const),
   };
   return loadAssetPageRequest(JSON.stringify(normalizedInput), async () => {
+    if (normalizedInput.filters.sourceType === "official") {
+      return loadOfficialMaterialPage(normalizedInput);
+    }
     const result = await request(joinSiteApi("workbench/assets"), "get", {
       team_id: normalizedInput.teamID,
       request_scope: normalizedInput.requestScopeKey || undefined,
@@ -124,6 +148,44 @@ export function loadAssetPage(input: {
       hasMore: Boolean(data.has_more),
     };
   });
+}
+
+async function loadOfficialMaterialPage(input: {
+  teamID: number;
+  filters: AssetFilters;
+  page: number;
+  pageSize: number;
+  requestScopeKey?: string;
+}): Promise<AssetPage> {
+  const result = await request(joinSiteApi("workbench/materials"), "get", {
+    team_id: input.teamID,
+    request_scope: input.requestScopeKey || undefined,
+    kind: materialKindForAssetKind(input.filters.kind) || undefined,
+    cate_id: input.filters.materialCateID || undefined,
+    page: input.page,
+    page_size: input.pageSize,
+  });
+  const data = responseData(result, "加载官方素材失败");
+  return {
+    items: toRows(data.items).map(normalizeOfficialMaterial).filter(hasID),
+    page: numberValue(data.page, input.page),
+    pageSize: numberValue(data.page_size, input.pageSize),
+    total: nonNegativeNumber(data.total),
+    hasMore: Boolean(data.has_more),
+  };
+}
+
+export async function loadOfficialMaterialDetail(
+  teamID: number,
+  materialID: number,
+) {
+  const result = await request(
+    joinSiteApi("workbench/material_detail"),
+    "get",
+    { team_id: teamID, material_id: materialID },
+  );
+  const data = responseData(result, "加载官方素材详情失败");
+  return normalizeOfficialMaterial(data.material);
 }
 
 export async function loadAssetDetail(
@@ -237,6 +299,7 @@ export function normalizeAssetRecord(value: any): AssetRecord {
     ? normalizeVersion(value.version)
     : null;
   return {
+    libraryType: "asset",
     id: numberValue(value?.id),
     projectID: numberValue(value?.project_id),
     bodyID: numberValue(value?.body_id),
@@ -248,6 +311,9 @@ export function normalizeAssetRecord(value: any): AssetRecord {
     sourceType: textValue(value?.source_type) as AssetSourceType,
     sourceID: numberValue(value?.source_id),
     sourceName: textValue(value?.source_name),
+    materialCateID: 0,
+    materialCateName: "",
+    materialKind: "",
     name: textValue(value?.name) || "未命名资产",
     nameMode: textValue(value?.name_mode) === "manual" ? "manual" : "auto",
     kind: (textValue(value?.kind) || "text") as AssetKind,

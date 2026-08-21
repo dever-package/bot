@@ -3030,6 +3030,7 @@ export function WorkSpacePage({
               projectID: space.project.id,
             }}
             confirmSelection
+            includeOfficial={false}
             contentMode="full"
             validateAsset={(asset) =>
               asset.versionID > 0 ? "" : "该资产没有可用版本，无法导入。"
@@ -3071,6 +3072,7 @@ export function WorkSpacePage({
             multiple={!Number.isInteger(storyboardGridImport.frameIndex)}
             maxSelection={storyboardGridImportLimit}
             confirmSelection
+            includeOfficial={false}
             contentMode="full"
             uploadAccept="image/*"
             validateAsset={(asset) =>

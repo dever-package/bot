@@ -24,6 +24,7 @@ export function AssetCard({
   selected = false,
   used = false,
   busy = false,
+  readOnly = false,
   onOpen,
   onRename,
   onDelete,
@@ -37,8 +38,9 @@ export function AssetCard({
   selected?: boolean;
   used?: boolean;
   busy?: boolean;
+  readOnly?: boolean;
   onOpen: (asset: AssetRecord) => void;
-  onRename: (asset: AssetRecord) => void;
+  onRename?: (asset: AssetRecord) => void;
   onDelete?: (asset: AssetRecord) => void;
   onRestore?: (asset: AssetRecord) => void;
   onSelect?: (asset: AssetRecord) => void;
@@ -78,7 +80,7 @@ export function AssetCard({
 
   return (
     <article
-      className={`wb-asset-card ${collection ? "is-collection" : ""} ${selected ? "is-selected" : ""} ${used ? "is-used" : ""} ${inTrash ? "is-trash" : ""}`.trim()}
+      className={`wb-asset-card ${collection ? "is-collection" : ""} ${asset.libraryType === "material" ? "is-official" : ""} ${selected ? "is-selected" : ""} ${used ? "is-used" : ""} ${inTrash ? "is-trash" : ""}`.trim()}
     >
       <div className="wb-asset-card-main">
         <div className="wb-asset-card-preview">
@@ -107,7 +109,9 @@ export function AssetCard({
             <span>
               {collection
                 ? `集合 · ${asset.collectionCount} 项素材`
-                : `${assetSourceLabel(asset.sourceType, sourceLabels)} · ${assetKindLabel(asset.kind)}`}
+                : asset.libraryType === "material"
+                  ? `${asset.materialCateName || "官方参考"} · ${assetKindLabel(asset.kind)}`
+                  : `${assetSourceLabel(asset.sourceType, sourceLabels)} · ${assetKindLabel(asset.kind)}`}
             </span>
           </button>
         </BodyWorkTooltip>
@@ -131,7 +135,7 @@ export function AssetCard({
             </button>
           </BodyWorkTooltip>
         ) : null}
-        {!inTrash ? (
+        {!inTrash && !readOnly && onRename ? (
           <BodyWorkTooltip label="修改标题">
             <button
               type="button"
@@ -159,7 +163,7 @@ export function AssetCard({
               <span className="sr-only">恢复资产</span>
             </button>
           </BodyWorkTooltip>
-        ) : onDelete ? (
+        ) : !readOnly && onDelete ? (
           <BodyWorkTooltip label="移入回收站">
             <button
               type="button"

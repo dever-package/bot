@@ -60,7 +60,9 @@ func parseCanvasStoryboardReferences(value any, promptContent map[string]any, wo
 	}
 	promptAssets := make(map[uint64]struct{}, len(promptReferences))
 	for _, reference := range promptReferences {
-		promptAssets[reference.AssetID] = struct{}{}
+		if reference.ReferenceType == canvasReferenceTypeAsset {
+			promptAssets[reference.ReferenceID] = struct{}{}
+		}
 	}
 
 	result := make([]canvasStoryboardReference, 0)
@@ -136,10 +138,11 @@ func applyCanvasStoryboardReferenceInput(ctx context.Context, projectID uint64, 
 }
 
 func canvasStoryboardReferenceLyrics(ctx context.Context, projectID uint64, reference canvasStoryboardReference) (string, error) {
-	_, content, err := resolveCanvasReferenceAsset(ctx, projectID, canvasPromptReference{
-		AssetID:   reference.AssetID,
-		VersionID: reference.VersionID,
-		Label:     reference.Label,
+	_, content, err := resolveCanvasReference(ctx, projectID, canvasPromptReference{
+		ReferenceType: canvasReferenceTypeAsset,
+		ReferenceID:   reference.AssetID,
+		VersionID:     reference.VersionID,
+		Label:         reference.Label,
 	})
 	if err != nil {
 		return "", fmt.Errorf("读取主音轨“%s”的歌词失败: %w", firstText(reference.Label, reference.Key), err)

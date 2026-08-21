@@ -15,6 +15,7 @@ export type AssetKind =
   | string;
 export type AssetCardinality = "single" | "multiple" | "ordered" | string;
 export type AssetRole = "work" | "material" | string;
+export type CanvasLibraryReferenceType = "asset" | "material";
 export type CanvasContentPreview = {
   text: string;
   imageUrl: string;
@@ -28,8 +29,8 @@ export type ComposerAssetItem = {
   title: string;
   kind: string;
   role?: AssetRole;
-  source: "current" | "asset";
-  refType?: "asset";
+  source: "current" | CanvasLibraryReferenceType;
+  refType?: CanvasLibraryReferenceType;
   refId?: number;
   versionID?: number;
   output?: unknown;
@@ -359,7 +360,7 @@ export type CanvasReferenceContent = {
     | { type: "text"; text: string }
     | {
         type: "reference";
-        ref_type: "asset";
+        ref_type: CanvasLibraryReferenceType;
         ref_id: number;
         label: string;
         usage?: string;

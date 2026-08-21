@@ -70,7 +70,9 @@ func Normalize(
 		if usage == "" {
 			continue
 		}
-		if reference.Type != runtimereference.TypeUploadFile {
+		if reference.Type != runtimereference.TypeUploadFile &&
+			reference.Type != runtimereference.TypeAsset &&
+			reference.Type != runtimereference.TypeMaterial {
 			return nil, fmt.Errorf("参数附件必须通过上传或资源库选择")
 		}
 		param, exists := byKey[usage]

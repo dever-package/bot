@@ -8,6 +8,7 @@ const (
 	TypeUploadFile = "upload_file"
 	TypeSession    = "session"
 	TypeAsset      = "asset"
+	TypeMaterial   = "material"
 )
 
 type Part struct {

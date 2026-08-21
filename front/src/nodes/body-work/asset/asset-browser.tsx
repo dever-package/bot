@@ -25,6 +25,7 @@ import {
 } from "./asset-api";
 import { AssetCard } from "./asset-card";
 import { AssetDetailDialog } from "./asset-detail-dialog";
+import { OfficialMaterialDetailDialog } from "./official-material-detail-dialog";
 import { AssetRenameDialog } from "./asset-rename-dialog";
 import { AssetSourceFilters } from "./asset-source-filters";
 import { useAssetSourceLabels } from "./asset-source-labels";
@@ -45,6 +46,11 @@ import {
   type AssetView,
 } from "./asset-types";
 import { assetKindSpecs } from "./asset-contract";
+import {
+  assetLibraryKey,
+  defaultOfficialAssetKind,
+  officialCategoriesForKind,
+} from "./official-material";
 import type {
   AssetUploadHandler,
   AssetUploadProgress,
@@ -56,6 +62,12 @@ const emptyOptions: AssetFilterOptions = {
   tools: [],
   dialogues: [],
   assetCates: [],
+  materialLibrary: {
+    enabled: false,
+    pack: { id: 0, name: "", description: "" },
+    kinds: [],
+    categories: [],
+  },
 };
 
 const emptyPage: AssetPage = {
@@ -75,7 +87,10 @@ export function AssetBrowser({
   selectable = false,
   excludeCollections = false,
   selectedAssetIDs,
+  selectedAssetKeys,
   usedAssetIDs,
+  usedAssetKeys,
+  includeOfficial = true,
   allowedKinds,
   onSelect,
   onContinue,
@@ -97,7 +112,10 @@ export function AssetBrowser({
   selectable?: boolean;
   excludeCollections?: boolean;
   selectedAssetIDs?: number[];
+  selectedAssetKeys?: string[];
   usedAssetIDs?: number[];
+  usedAssetKeys?: string[];
+  includeOfficial?: boolean;
   allowedKinds?: AssetKind[];
   onSelect?: (asset: AssetRecord) => void;
   onContinue?: (asset: AssetRecord) => void;
@@ -132,7 +150,7 @@ export function AssetBrowser({
   const [view, setView] = useState<AssetView>("assets");
   const [options, setOptions] = useState<AssetFilterOptions>(emptyOptions);
   const [page, setPage] = useState<AssetPage>(emptyPage);
-  const [selectedAssetID, setSelectedAssetID] = useState(0);
+  const [selectedAsset, setSelectedAsset] = useState<AssetRecord | null>(null);
   const [renameTarget, setRenameTarget] = useState<AssetRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AssetRecord | null>(null);
   const [operationAssetID, setOperationAssetID] = useState(0);
@@ -147,15 +165,26 @@ export function AssetBrowser({
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const rootFiltersRef = useRef<AssetFilters>(resolvedInitialFilters);
   const rootViewRef = useRef<AssetView>("assets");
-  const selectedAssetIDKey = JSON.stringify(selectedAssetIDs || []);
-  const selectedAssetIDSet = useMemo(
-    () => new Set(JSON.parse(selectedAssetIDKey) as number[]),
-    [selectedAssetIDKey],
+  const selectedAssetKey = JSON.stringify({
+    selectedAssetIDs,
+    selectedAssetKeys,
+  });
+  const selectedAssetKeySet = useMemo(
+    () =>
+      new Set([
+        ...(selectedAssetKeys || []),
+        ...(selectedAssetIDs || []).map((id) => `asset:${id}`),
+      ]),
+    [selectedAssetKey],
   );
-  const usedAssetIDKey = JSON.stringify(usedAssetIDs || []);
-  const usedAssetIDSet = useMemo(
-    () => new Set(JSON.parse(usedAssetIDKey) as number[]),
-    [usedAssetIDKey],
+  const usedAssetKey = JSON.stringify({ usedAssetIDs, usedAssetKeys });
+  const usedAssetKeySet = useMemo(
+    () =>
+      new Set([
+        ...(usedAssetKeys || []),
+        ...(usedAssetIDs || []).map((id) => `asset:${id}`),
+      ]),
+    [usedAssetKey],
   );
 
   useEffect(() => {
@@ -167,7 +196,7 @@ export function AssetBrowser({
     rootViewRef.current = "assets";
     setOptions(emptyOptions);
     setPage(emptyPage);
-    setSelectedAssetID(0);
+    setSelectedAsset(null);
     setRenameTarget(null);
     setDeleteTarget(null);
     setOperationAssetID(0);
@@ -181,7 +210,19 @@ export function AssetBrowser({
     setOptionsLoading(true);
     loadAssetFilterOptions(teamID, catalogOptions, requestScopeKey)
       .then((next) => {
-        if (active) setOptions(next);
+        if (active) {
+          setOptions(next);
+          setFilters((current) => {
+            const normalized = normalizeOfficialFilters(
+              current,
+              next,
+              normalizedAllowedKinds,
+              includeOfficial,
+            );
+            if (!activeCollection) rootFiltersRef.current = normalized;
+            return normalized;
+          });
+        }
       })
       .catch((currentError) => {
         if (active) setError(errorText(currentError, "加载资产筛选项失败"));
@@ -192,7 +233,13 @@ export function AssetBrowser({
     return () => {
       active = false;
     };
-  }, [catalogOptions, requestScopeKey, teamID]);
+  }, [
+    catalogOptions,
+    includeOfficial,
+    normalizedAllowedKinds,
+    requestScopeKey,
+    teamID,
+  ]);
 
   const load = useCallback(
     async (targetPage: number) => {
@@ -242,6 +289,10 @@ export function AssetBrowser({
   }, [load, reloadSignal, reloadVersion]);
 
   function changeFilters(next: AssetFilters) {
+    if (next.sourceType === "official" && view !== "assets") {
+      setView("assets");
+      rootViewRef.current = "assets";
+    }
     setFilters(next);
     if (!activeCollection) rootFiltersRef.current = next;
     setPage((current) => ({ ...current, page: 1 }));
@@ -253,7 +304,7 @@ export function AssetBrowser({
 
   function openAsset(asset: AssetRecord) {
     if (asset.kind !== "collection") {
-      setSelectedAssetID(asset.id);
+      setSelectedAsset(asset);
       return;
     }
     rootFiltersRef.current = filters;
@@ -269,7 +320,7 @@ export function AssetBrowser({
           : filters.kind,
     });
     setPage(emptyPage);
-    setSelectedAssetID(0);
+    setSelectedAsset(null);
     setError("");
   }
 
@@ -279,7 +330,7 @@ export function AssetBrowser({
     setFilters(rootFiltersRef.current);
     setView(rootViewRef.current);
     setPage(emptyPage);
-    setSelectedAssetID(0);
+    setSelectedAsset(null);
     setError("");
   }
 
@@ -289,7 +340,7 @@ export function AssetBrowser({
     setView(nextView);
     if (!activeCollection) rootViewRef.current = nextView;
     setPage(emptyPage);
-    setSelectedAssetID(0);
+    setSelectedAsset(null);
     setRenameTarget(null);
     setDeleteTarget(null);
     setError("");
@@ -302,7 +353,12 @@ export function AssetBrowser({
     try {
       await moveAssetToTrash({ teamID, assetID });
       setDeleteTarget(null);
-      if (selectedAssetID === assetID) setSelectedAssetID(0);
+      if (
+        selectedAsset?.libraryType === "asset" &&
+        selectedAsset.id === assetID
+      ) {
+        setSelectedAsset(null);
+      }
       onAssetRemoved?.(assetID);
       toast.success("资产已移入回收站");
       refresh();
@@ -356,7 +412,7 @@ export function AssetBrowser({
       setFilters(uploadFilters);
       rootFiltersRef.current = uploadFilters;
       setPage(emptyPage);
-      setSelectedAssetID(0);
+      setSelectedAsset(null);
       setError("");
       toast.success(`已上传 ${assets.length} 项资产`);
     } catch (currentError) {
@@ -376,6 +432,7 @@ export function AssetBrowser({
           scopeProjectID={scopeProjectID}
           sourceLabels={sourceLabels}
           allowedKinds={normalizedAllowedKinds}
+          includeOfficial={includeOfficial}
           view={view}
           collectionName={activeCollection?.name}
           onCollectionBack={activeCollection ? closeCollection : undefined}
@@ -384,10 +441,14 @@ export function AssetBrowser({
         />
         <div className="wb-asset-browser-actions">
           <span>{loading ? "正在加载" : `${page.total} 项`}</span>
-          <BodyWorkTooltip label="刷新资产">
+          <BodyWorkTooltip
+            label={filters.sourceType === "official" ? "刷新官方素材" : "刷新资产"}
+          >
             <button type="button" onClick={refresh}>
               <RefreshCw className={loading ? "is-spinning" : ""} />
-              <span className="sr-only">刷新资产</span>
+              <span className="sr-only">
+                {filters.sourceType === "official" ? "刷新官方素材" : "刷新资产"}
+              </span>
             </button>
           </BodyWorkTooltip>
           {!activeCollection && onLocalUpload ? (
@@ -426,30 +487,40 @@ export function AssetBrowser({
                   ? "回收站为空"
                   : activeCollection
                     ? "集合内暂无符合条件的资产"
-                    : "暂无符合条件的资产"
+                    : filters.sourceType === "official"
+                      ? "当前分类暂无官方素材"
+                      : "暂无符合条件的资产"
             }
           />
         ) : (
           <div className="wb-asset-grid">
-            {page.items.map((asset) => (
-              <AssetCard
-                key={asset.id}
-                asset={asset}
-                sourceLabels={sourceLabels}
-                view={view}
-                selectable={
-                  asset.kind !== "collection" && selectable && view === "assets"
-                }
-                selected={view === "assets" && selectedAssetIDSet.has(asset.id)}
-                used={view === "assets" && usedAssetIDSet.has(asset.id)}
-                busy={operationAssetID === asset.id}
-                onOpen={openAsset}
-                onRename={setRenameTarget}
-                onDelete={view === "assets" ? setDeleteTarget : undefined}
-                onRestore={view === "trash" ? restore : undefined}
-                onSelect={onSelect}
-              />
-            ))}
+            {page.items.map((asset) => {
+              const libraryKey = assetLibraryKey(asset);
+              return (
+                <AssetCard
+                  key={libraryKey}
+                  asset={asset}
+                  sourceLabels={sourceLabels}
+                  view={view}
+                  selectable={
+                    asset.kind !== "collection" &&
+                    selectable &&
+                    view === "assets"
+                  }
+                  selected={
+                    view === "assets" && selectedAssetKeySet.has(libraryKey)
+                  }
+                  used={view === "assets" && usedAssetKeySet.has(libraryKey)}
+                  busy={operationAssetID === asset.id}
+                  readOnly={asset.libraryType === "material"}
+                  onOpen={openAsset}
+                  onRename={setRenameTarget}
+                  onDelete={view === "assets" ? setDeleteTarget : undefined}
+                  onRestore={view === "trash" ? restore : undefined}
+                  onSelect={onSelect}
+                />
+              );
+            })}
           </div>
         )}
       </div>
@@ -480,17 +551,17 @@ export function AssetBrowser({
         </footer>
       ) : null}
 
-      {selectedAssetID ? (
+      {selectedAsset?.libraryType === "asset" ? (
         <AssetDetailDialog
           teamID={teamID}
-          assetID={selectedAssetID}
+          assetID={selectedAsset.id}
           selectable={selectable && view === "assets"}
           layer={detailLayer}
-          onClose={() => setSelectedAssetID(0)}
+          onClose={() => setSelectedAsset(null)}
           onSelect={
             onSelect
               ? (asset) => {
-                  setSelectedAssetID(0);
+                  setSelectedAsset(null);
                   onSelect(asset);
                 }
               : undefined
@@ -498,7 +569,7 @@ export function AssetBrowser({
           onContinue={
             onContinue
               ? (asset) => {
-                  setSelectedAssetID(0);
+                  setSelectedAsset(null);
                   onContinue(asset);
                 }
               : undefined
@@ -508,6 +579,24 @@ export function AssetBrowser({
             refresh();
             onAssetChanged?.(asset);
           }}
+        />
+      ) : null}
+
+      {selectedAsset?.libraryType === "material" ? (
+        <OfficialMaterialDetailDialog
+          teamID={teamID}
+          material={selectedAsset}
+          selectable={selectable && view === "assets"}
+          layer={detailLayer}
+          onClose={() => setSelectedAsset(null)}
+          onSelect={
+            onSelect
+              ? (material) => {
+                  setSelectedAsset(null);
+                  onSelect(material);
+                }
+              : undefined
+          }
         />
       ) : null}
 
@@ -597,4 +686,44 @@ function normalizeAllowedKinds(input?: AssetKind[]) {
     .map((option) => option.key)
     .filter((kind) => input?.includes(kind));
   return allowed.length === selectableKinds.length ? [] : allowed;
+}
+
+function normalizeOfficialFilters(
+  filters: AssetFilters,
+  options: AssetFilterOptions,
+  allowedKinds: AssetKind[],
+  includeOfficial: boolean,
+): AssetFilters {
+  if (filters.sourceType !== "official") return filters;
+  const fallbackKind = defaultOfficialAssetKind(
+    options.materialLibrary,
+    allowedKinds,
+  );
+  if (!includeOfficial || !options.materialLibrary.enabled || !fallbackKind) {
+    return {
+      ...emptyAssetFilters,
+      kind: allowedKinds.length === 1 ? allowedKinds[0] : "",
+    };
+  }
+  const availableKinds = new Set(
+    options.materialLibrary.kinds.map((option) => option.assetKind),
+  );
+  const kind =
+    filters.kind &&
+    availableKinds.has(filters.kind) &&
+    (allowedKinds.length === 0 || allowedKinds.includes(filters.kind))
+      ? filters.kind
+      : fallbackKind;
+  const categoryIDs = new Set(
+    officialCategoriesForKind(options.materialLibrary, kind).map(
+      (category) => category.id,
+    ),
+  );
+  return {
+    ...filters,
+    kind,
+    materialCateID: categoryIDs.has(filters.materialCateID)
+      ? filters.materialCateID
+      : 0,
+  };
 }

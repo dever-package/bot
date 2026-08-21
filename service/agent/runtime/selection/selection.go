@@ -147,7 +147,8 @@ func mediaSelections(content map[string]any, params []energoninput.PowerParam) [
 		}
 		refType := textValue(part["ref_type"])
 		refID := uint64Value(part["ref_id"])
-		if refID == 0 || (refType != "asset" && refType != "upload_file" && refType != "artifact") {
+		if refID == 0 ||
+			(refType != "asset" && refType != "material" && refType != "upload_file" && refType != "artifact") {
 			continue
 		}
 		result = append(result, map[string]any{

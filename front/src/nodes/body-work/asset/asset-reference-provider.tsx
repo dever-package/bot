@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { loadAssetDetail } from "./asset-api";
+import { loadAssetDetail, loadOfficialMaterialDetail } from "./asset-api";
 import { assetKindsAccept } from "./asset-contract";
 import {
   assetPreviewOutput,
@@ -22,6 +22,7 @@ import type {
   AssetRecord,
 } from "./asset-types";
 import { AssetPickerDialog } from "./asset-picker-dialog";
+import { assetLibraryKey } from "./official-material";
 import type { AssetUploadOptions } from "./asset-upload-progress";
 
 type AssetReferenceUploadContext = AssetUploadOptions & {
@@ -33,9 +34,9 @@ export type WorkbenchReferenceProvider = ReferenceProvider;
 
 export type WorkbenchReferenceOption = ReferenceOption & {
   key: string;
-  refType: "asset";
+  refType: "asset" | "material";
   refId: number;
-  versionID: number;
+  versionID?: number;
   trigger: "@";
   label: string;
   description?: string;
@@ -75,23 +76,23 @@ export function useAssetReferenceProvider({
   return useMemo(
     () => ({
       trigger: "@" as const,
-      referenceTypes: ["asset"] as ["asset"],
+      referenceTypes: ["asset", "material"] as ["asset", "material"],
       loadPreview: async (request: ReferencePreviewRequest) => {
-        const detail = await loadAssetDetail(teamID, request.refId);
-        const media = assetReferenceMedia(detail.asset);
+        const asset =
+          request.refType === "material"
+            ? await loadOfficialMaterialDetail(teamID, request.refId)
+            : (await loadAssetDetail(teamID, request.refId)).asset;
+        const media = assetReferenceMedia(asset);
         return {
-          refType: "asset" as const,
-          refId: detail.asset.id,
-          title: detail.asset.name,
-          text: detail.asset.summary,
+          refType: request.refType,
+          refId: asset.id,
+          title: asset.name,
+          text: asset.summary,
           media,
           content:
             media.length > 0
               ? undefined
-              : assetPreviewOutput(
-                  detail.asset.kind,
-                  detail.asset.version?.content,
-                ),
+              : assetPreviewOutput(asset.kind, asset.version?.content),
         };
       },
       renderPicker: (props) => (
@@ -145,37 +146,39 @@ function AssetReferencePicker({
     requestedKinds,
   );
   const selectionLimit = Math.max(1, Number(maxSelection || 1));
-  const usedAssetIDs = Array.from(
+  const usedAssetKeys = Array.from(
     new Set(
       selectedReferences.flatMap((reference) =>
-        reference.ref_type === "asset" && Number(reference.ref_id || 0) > 0
-          ? [Number(reference.ref_id)]
+        (reference.ref_type === "asset" || reference.ref_type === "material") &&
+        Number(reference.ref_id || 0) > 0
+          ? [`${reference.ref_type}:${Number(reference.ref_id)}`]
           : [],
       ),
     ),
   );
-  const usedAssetIDSet = new Set(usedAssetIDs);
+  const usedAssetKeySet = new Set(usedAssetKeys);
   return (
     <AssetPickerDialog
       open
       teamID={teamID}
       scopeProjectID={scopeProjectID}
-      title="选择资产"
-      description="插入资产当前版本"
+      title="选择素材"
+      description="从个人资产或团队官方参考中选择"
       initialFilters={initialFilters}
       allowedKinds={effectiveKinds}
       multiple={selectionLimit > 1}
       maxSelection={selectionLimit}
       confirmSelection
       contentMode="full"
-      usedAssetIDs={usedAssetIDs}
+      usedAssetKeys={usedAssetKeys}
       validateAsset={(asset) => {
-        if (usedAssetIDSet.has(asset.id)) {
+        if (usedAssetKeySet.has(assetLibraryKey(asset))) {
           return "该素材已使用";
         }
+        if (asset.kind === "text" || asset.kind === "richtext") return "";
         return assetReferenceMedia(asset).length > 0
           ? ""
-          : "该资产当前版本没有可用文件，无法用于此参数。";
+          : "该素材没有可用文件，无法使用。";
       }}
       uploadAccept={assetKindsAccept(effectiveKinds)}
       onUpload={
@@ -213,11 +216,15 @@ function assetReferenceOption(
   usage = "",
 ): WorkbenchReferenceOption {
   const media = assetReferenceMedia(asset);
+  const refType = asset.libraryType === "material" ? "material" : "asset";
   return {
-    key: `asset:${asset.id}:${asset.versionID}`,
-    refType: "asset",
+    key:
+      refType === "material"
+        ? `material:${asset.id}`
+        : `asset:${asset.id}:${asset.versionID}`,
+    refType,
     refId: asset.id,
-    versionID: asset.versionID,
+    versionID: refType === "asset" ? asset.versionID : undefined,
     trigger: "@",
     usage,
     label: asset.name,
@@ -287,7 +294,10 @@ function assetReferenceMedia(asset: AssetRecord) {
           }))
         : [];
   return resolvedMedia.map((item, index) => ({
-    refType: "asset" as const,
+    refType:
+      asset.libraryType === "material"
+        ? ("material" as const)
+        : ("asset" as const),
     refId: asset.id,
     kind: item.kind,
     label:

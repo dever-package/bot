@@ -1,4 +1,10 @@
-export type AssetSourceType = "project" | "tool" | "dialogue" | "upload";
+export type AssetSourceType =
+  | "project"
+  | "tool"
+  | "dialogue"
+  | "upload"
+  | "official";
+export type AssetLibraryType = "asset" | "material";
 export type AssetView = "assets" | "trash";
 export type AssetContentMode = "preview" | "full";
 export type AssetRole = "work" | "material";
@@ -28,6 +34,7 @@ export type AssetVersion = {
 };
 
 export type AssetRecord = {
+  libraryType: AssetLibraryType;
   id: number;
   projectID: number;
   bodyID: number;
@@ -39,6 +46,9 @@ export type AssetRecord = {
   sourceType: AssetSourceType;
   sourceID: number;
   sourceName: string;
+  materialCateID: number;
+  materialCateName: string;
+  materialKind: OfficialMaterialKind | "";
   name: string;
   nameMode: "auto" | "manual";
   kind: AssetKind;
@@ -64,6 +74,7 @@ export type AssetFilters = {
   sourceID: number;
   projectID: number;
   assetCateID: number;
+  materialCateID: number;
   nodeKey: string;
   role: "" | AssetRole;
   kind: "" | AssetKind;
@@ -84,6 +95,26 @@ export type AssetFilterOptions = {
   tools: AssetFilterOption[];
   dialogues: AssetFilterOption[];
   assetCates: AssetCateOption[];
+  materialLibrary: OfficialMaterialCatalog;
+};
+
+export type OfficialMaterialKind = "prompt" | "image" | "audio" | "video";
+
+export type OfficialMaterialKindOption = {
+  id: OfficialMaterialKind;
+  name: string;
+  assetKind: AssetKind;
+};
+
+export type OfficialMaterialCategory = AssetFilterOption & {
+  kind: OfficialMaterialKind;
+};
+
+export type OfficialMaterialCatalog = {
+  enabled: boolean;
+  pack: AssetFilterOption & { description: string };
+  kinds: OfficialMaterialKindOption[];
+  categories: OfficialMaterialCategory[];
 };
 
 export type AssetCatalogOptions = Pick<
@@ -111,6 +142,7 @@ export const emptyAssetFilters: AssetFilters = {
   sourceID: 0,
   projectID: 0,
   assetCateID: 0,
+  materialCateID: 0,
   nodeKey: "",
   role: "",
   kind: "",

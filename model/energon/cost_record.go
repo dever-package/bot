@@ -69,6 +69,7 @@ type CostRecordIndex struct {
 	EndpointCreated struct{} `index:"service_endpoint_id,created_at,id"`
 	PricingCreated  struct{} `index:"pricing_status,created_at,id"`
 	SceneCreated    struct{} `index:"scene,created_at,id"`
+	CreatedAt       struct{} `index:"created_at,id"`
 }
 
 var (
@@ -93,6 +94,19 @@ var (
 	}
 )
 
+// CostSceneOptions returns a caller-owned copy of the shared scene options.
+func CostSceneOptions() []map[string]any {
+	options := make([]map[string]any, 0, len(costSceneOptions))
+	for _, option := range costSceneOptions {
+		cloned := make(map[string]any, len(option))
+		for key, value := range option {
+			cloned[key] = value
+		}
+		options = append(options, cloned)
+	}
+	return options
+}
+
 func NewCostRecordModel() *orm.Model[CostRecord] {
 	return orm.LoadModel[CostRecord]("能力成本", "bot_energon_cost_record", orm.ModelConfig{
 		Index:    CostRecordIndex{},
@@ -100,7 +114,7 @@ func NewCostRecordModel() *orm.Model[CostRecord] {
 		Database: "default",
 		Options: map[string]any{
 			"billable":       costBillableOptions,
-			"scene":          costSceneOptions,
+			"scene":          CostSceneOptions(),
 			"call_status":    callStatusOptions,
 			"pricing_status": costPricingStatusOptions,
 			"pricing_mode":   servicePriceModeOptions,

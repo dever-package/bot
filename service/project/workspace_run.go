@@ -12,6 +12,7 @@ import (
 	assetservice "github.com/dever-package/bot/service/asset"
 	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	"github.com/dever-package/bot/service/materiallibrary"
 	teamservice "github.com/dever-package/bot/service/team"
 )
 
@@ -1202,7 +1203,7 @@ func canvasConnectedMediaReferences(
 	}
 	assetIDs := make([]uint64, 0, len(assetReferences))
 	for _, reference := range assetReferences {
-		assetIDs = append(assetIDs, reference.AssetID)
+		assetIDs = append(assetIDs, reference.ReferenceID)
 	}
 	resolved, err := assetservice.NewService().RequireCanvasCurrentReferences(ctx, project.TeamID, assetIDs)
 	if err != nil {
@@ -1210,7 +1211,7 @@ func canvasConnectedMediaReferences(
 	}
 	mediaReferences := make([]energoninput.MediaReference, 0, len(assetReferences))
 	for _, reference := range assetReferences {
-		current, ok := resolved[reference.AssetID]
+		current, ok := resolved[reference.ReferenceID]
 		if !ok {
 			continue
 		}
@@ -1304,7 +1305,7 @@ func canvasConnectedAssetReferences(
 		if !ok {
 			return
 		}
-		if override, exists := promptEdgeReferences[canvasPromptEdgeReferenceKey(originID, reference.AssetID)]; exists {
+		if override, exists := promptEdgeReferences[canvasPromptEdgeReferenceKey(originID, reference.ReferenceID)]; exists {
 			if override.Usage != "" {
 				usage = override.Usage
 			}
@@ -1314,7 +1315,7 @@ func canvasConnectedAssetReferences(
 		}
 		assetKey := fmt.Sprintf(
 			"%d\x00%s\x00%s",
-			reference.AssetID,
+			reference.ReferenceID,
 			usage,
 			canvasMediaReferenceSelectionKey(reference),
 		)
@@ -1352,10 +1353,12 @@ func canvasPromptEdgeReferences(nodeID string, canvas map[string]any) map[string
 	result := map[string]canvasPromptReference{}
 	for _, reference := range references {
 		originID := strings.TrimSpace(reference.OriginID)
-		if !strings.EqualFold(strings.TrimSpace(reference.Origin), "edge") || originID == "" || reference.AssetID == 0 {
+		if reference.ReferenceType != canvasReferenceTypeAsset ||
+			!strings.EqualFold(strings.TrimSpace(reference.Origin), "edge") ||
+			originID == "" || reference.ReferenceID == 0 {
 			continue
 		}
-		result[canvasPromptEdgeReferenceKey(originID, reference.AssetID)] = reference
+		result[canvasPromptEdgeReferenceKey(originID, reference.ReferenceID)] = reference
 	}
 	return result
 }
@@ -1487,18 +1490,19 @@ func canvasPromptReferenceOutput(
 	sources := make([]any, 0, len(structured))
 	mediaReferences := make([]energoninput.MediaReference, 0, len(structured))
 	for _, reference := range structured {
-		if reference.AssetID > 0 {
-			asset, output, err := resolveCanvasReferenceAsset(ctx, projectID, reference)
+		if reference.ReferenceID > 0 {
+			resolvedReference, output, err := resolveCanvasReference(ctx, projectID, reference)
 			if err != nil {
 				return nil, nil, err
 			}
-			kind := textValue(asset["kind"])
+			kind := textValue(resolvedReference["kind"])
 			required := reference.Required ||
-				canvasExternalReferenceRequired(node, reference.AssetID) ||
+				(reference.ReferenceType == canvasReferenceTypeAsset &&
+					canvasExternalReferenceRequired(node, reference.ReferenceID)) ||
 				(requireMediaBinding && isCanvasMediaKind(kind))
 			resolvedMediaReferences := energoninput.MediaReferencesFromContent(
-				"asset",
-				reference.AssetID,
+				reference.ReferenceType,
+				reference.ReferenceID,
 				kind,
 				output,
 				reference.Usage,
@@ -1509,34 +1513,43 @@ func canvasPromptReferenceOutput(
 				selection,
 			)
 			if err != nil {
-				return nil, nil, fmt.Errorf("参考素材“%s”：%w", firstText(asset["name"], reference.Label), err)
+				return nil, nil, fmt.Errorf("参考素材“%s”：%w", firstText(resolvedReference["name"], reference.Label), err)
 			}
 			if len(resolvedMediaReferences) > 0 {
 				for index := range resolvedMediaReferences {
 					resolvedMediaReferences[index].Label = firstText(
-						asset["name"],
+						resolvedReference["name"],
 						reference.Label,
-						fmt.Sprintf("内容 %d", reference.AssetID),
+						fmt.Sprintf("内容 %d", reference.ReferenceID),
 					)
 					resolvedMediaReferences[index].Required = required
 				}
 				mediaReferences = append(mediaReferences, resolvedMediaReferences...)
 			} else if required {
-				return nil, nil, fmt.Errorf("参考素材“%s”没有可用的媒体内容", firstText(asset["name"], reference.Label))
+				return nil, nil, fmt.Errorf("参考素材“%s”没有可用的媒体内容", firstText(resolvedReference["name"], reference.Label))
 			}
-			sources = append(sources, newCanvasGroupOutputSource(
-				fmt.Sprintf("asset:%d", reference.AssetID),
-				firstText(asset["name"], reference.Label, fmt.Sprintf("内容 %d", reference.AssetID)),
-				textValue(asset["kind"]),
+			assetID := uint64(0)
+			versionID := uint64(0)
+			if reference.ReferenceType == canvasReferenceTypeAsset {
+				assetID = reference.ReferenceID
+				versionID = uint64Value(resolvedReference["version_id"])
+			}
+			source := newCanvasGroupOutputSource(
+				fmt.Sprintf("%s:%d", reference.ReferenceType, reference.ReferenceID),
+				firstText(resolvedReference["name"], reference.Label, fmt.Sprintf("内容 %d", reference.ReferenceID)),
+				kind,
 				"",
-				reference.AssetID,
-				uint64Value(asset["version_id"]),
+				assetID,
+				versionID,
 				energoninput.SelectedMediaReferenceContent(
 					output,
 					resolvedMediaReferences,
 					selection,
 				),
-			))
+			)
+			source["ref_type"] = reference.ReferenceType
+			source["ref_id"] = reference.ReferenceID
+			sources = append(sources, source)
 			continue
 		}
 	}
@@ -1637,9 +1650,10 @@ func canvasNodeCurrentAssetReference(nodeID string, results []canvasNodeResult, 
 		return canvasPromptReference{}, false
 	}
 	return canvasPromptReference{
-		AssetID:   assetID,
-		VersionID: versionID,
-		Label:     firstText(node["title"], nodeID),
+		ReferenceType: canvasReferenceTypeAsset,
+		ReferenceID:   assetID,
+		VersionID:     versionID,
+		Label:         firstText(node["title"], nodeID),
 		Kind: firstText(
 			valueAtPath(result, "asset", "kind"),
 			valueAtPath(result, "result", "asset", "kind"),
@@ -1692,7 +1706,7 @@ func mergeCanvasPromptReferences(generated []canvasPromptReference, explicit []c
 	for _, reference := range generated {
 		matched := false
 		for index, current := range explicit {
-			if current.AssetID != reference.AssetID {
+			if current.ReferenceType != reference.ReferenceType || current.ReferenceID != reference.ReferenceID {
 				continue
 			}
 			current.VersionID = reference.VersionID
@@ -1722,18 +1736,21 @@ func mergeCanvasPromptReferences(generated []canvasPromptReference, explicit []c
 	return result
 }
 
+const canvasReferenceTypeAsset = "asset"
+
 type canvasPromptReference struct {
-	AssetID    uint64
-	VersionID  uint64
-	Label      string
-	Kind       string
-	Usage      string
-	Origin     string
-	OriginID   string
-	MediaURL   string
-	MediaIndex int
-	MediaItems []energoninput.MediaReferenceSelectionItem
-	Required   bool
+	ReferenceType string
+	ReferenceID   uint64
+	VersionID     uint64
+	Label         string
+	Kind          string
+	Usage         string
+	Origin        string
+	OriginID      string
+	MediaURL      string
+	MediaIndex    int
+	MediaItems    []energoninput.MediaReferenceSelectionItem
+	Required      bool
 }
 
 func canvasMediaReferenceSelection(reference canvasPromptReference) energoninput.MediaReferenceSelection {
@@ -1778,15 +1795,15 @@ func canvasStructuredPromptReferences(content map[string]any) ([]canvasPromptRef
 			continue
 		}
 		refType := textValue(part["ref_type"])
-		if refType != "asset" {
-			return nil, fmt.Errorf("项目提示词只支持引用已保存资产")
+		if refType != canvasReferenceTypeAsset && refType != materiallibrary.ReferenceType {
+			return nil, fmt.Errorf("项目提示词只支持引用已保存资产或官方素材")
 		}
 		if trigger := textValue(part["ref_trigger"]); trigger != "" && trigger != "@" {
-			return nil, fmt.Errorf("项目资产引用必须使用 @ 触发符")
+			return nil, fmt.Errorf("项目素材引用必须使用 @ 触发符")
 		}
 		refID := uint64Value(part["ref_id"])
 		if refID == 0 {
-			return nil, fmt.Errorf("资产引用缺少资产标识")
+			return nil, fmt.Errorf("素材引用缺少素材标识")
 		}
 		usage := textValue(part["usage"])
 		origin := textValue(part["ref_origin"])
@@ -1795,15 +1812,16 @@ func canvasStructuredPromptReferences(content map[string]any) ([]canvasPromptRef
 		mediaIndex := int(uint64Value(part["ref_media_index"]))
 		mediaItems := canvasMediaReferenceSelectionItems(part["ref_media_items"])
 		reference := canvasPromptReference{
-			AssetID:    refID,
-			VersionID:  uint64Value(part["ref_version_id"]),
-			Label:      textValue(part["label"]),
-			Usage:      usage,
-			Origin:     origin,
-			OriginID:   originID,
-			MediaURL:   mediaURL,
-			MediaIndex: mediaIndex,
-			MediaItems: mediaItems,
+			ReferenceType: refType,
+			ReferenceID:   refID,
+			VersionID:     uint64Value(part["ref_version_id"]),
+			Label:         textValue(part["label"]),
+			Usage:         usage,
+			Origin:        origin,
+			OriginID:      originID,
+			MediaURL:      mediaURL,
+			MediaIndex:    mediaIndex,
+			MediaItems:    mediaItems,
 		}
 		key := fmt.Sprintf(
 			"%s:%d:%s:%s:%s:%s",
@@ -1841,20 +1859,35 @@ func canvasMediaReferenceSelectionItems(value any) []energoninput.MediaReference
 	return items
 }
 
-func resolveCanvasReferenceAsset(ctx context.Context, projectID uint64, reference canvasPromptReference) (map[string]any, any, error) {
+func resolveCanvasReference(ctx context.Context, projectID uint64, reference canvasPromptReference) (map[string]any, any, error) {
 	project, err := requireProject(ctx, projectID)
 	if err != nil {
 		return nil, nil, err
 	}
+	if reference.ReferenceType == materiallibrary.ReferenceType {
+		material, err := materiallibrary.NewService().Require(ctx, project.TeamID, reference.ReferenceID)
+		if err != nil {
+			return nil, nil, err
+		}
+		return map[string]any{
+			"id":         material.ID,
+			"name":       material.Name,
+			"kind":       material.AssetKind(),
+			"version_id": uint64(0),
+		}, material.PreviewContent(), nil
+	}
+	if reference.ReferenceType != canvasReferenceTypeAsset {
+		return nil, nil, fmt.Errorf("不支持的素材引用类型: %s", reference.ReferenceType)
+	}
 	resolved, err := assetservice.NewService().RequireCurrentReference(
-		ctx, project.TeamID, reference.AssetID, reference.VersionID,
+		ctx, project.TeamID, reference.ReferenceID, reference.VersionID,
 	)
 	if err != nil {
 		return nil, nil, err
 	}
 	output := resolved.Content
 	if output == nil {
-		return nil, nil, fmt.Errorf("引用资产 %d 没有可用内容", reference.AssetID)
+		return nil, nil, fmt.Errorf("引用资产 %d 没有可用内容", reference.ReferenceID)
 	}
 	return assetservice.AssetToMap(resolved.Asset), output, nil
 }

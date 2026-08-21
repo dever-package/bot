@@ -360,7 +360,7 @@ func plainContent(text string) Content {
 
 func normalizeType(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case TypeMessage, TypeArtifact, TypeUploadFile, TypeSession, TypeAsset:
+	case TypeMessage, TypeArtifact, TypeUploadFile, TypeSession, TypeAsset, TypeMaterial:
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return ""
@@ -376,7 +376,7 @@ func normalizeTrigger(value string) string {
 }
 
 func normalizeReferenceTrigger(referenceType string, trigger string) string {
-	if referenceType == TypeAsset {
+	if referenceType == TypeAsset || referenceType == TypeMaterial {
 		return "@"
 	}
 	if referenceType == TypeMessage || referenceType == TypeArtifact || referenceType == TypeUploadFile || referenceType == TypeSession {

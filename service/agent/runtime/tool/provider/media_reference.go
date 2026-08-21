@@ -101,7 +101,7 @@ func MediaReferencesParameters(parameters map[string]any, references []MediaRefe
 		"items": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"ref_type": map[string]any{"type": "string", "enum": []any{"artifact", "upload_file", "asset"}},
+				"ref_type": map[string]any{"type": "string", "enum": []any{"artifact", "upload_file", "asset", "material"}},
 				"ref_id":   map[string]any{"type": "integer", "minimum": 1},
 				"param_key": map[string]any{
 					"type":        "string",

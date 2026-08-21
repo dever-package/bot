@@ -15,10 +15,23 @@ func Record(ctx context.Context, item botmodel.Log) (record botmodel.Log) {
 	defer func() {
 		_ = recover()
 	}()
-	id := botmodel.NewLogModel().Insert(ctx, map[string]any{
+	id := botmodel.NewLogModel().Insert(ctx, recordValues(item))
+	record.ID = uint64(id)
+	return record
+}
+
+func recordValues(item botmodel.Log) map[string]any {
+	if item.CreatedAt.IsZero() {
+		item.CreatedAt = time.Now()
+	}
+	return map[string]any{
 		"request_id":          item.RequestID,
 		"mode":                item.Mode,
 		"protocol":            item.Protocol,
+		"scene":               item.Scene,
+		"user_id":             item.UserID,
+		"team_id":             item.TeamID,
+		"project_id":          item.ProjectID,
 		"power_id":            item.PowerID,
 		"power_key":           item.PowerKey,
 		"power_name":          item.PowerName,
@@ -40,7 +53,5 @@ func Record(ctx context.Context, item botmodel.Log) (record botmodel.Log) {
 		"cached_tokens":       item.CachedTokens,
 		"result":              item.Result,
 		"created_at":          item.CreatedAt,
-	})
-	record.ID = uint64(id)
-	return record
+	}
 }

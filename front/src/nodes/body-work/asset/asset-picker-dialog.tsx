@@ -16,6 +16,7 @@ import type {
   AssetKind,
   AssetRecord,
 } from "./asset-types";
+import { assetLibraryKey } from "./official-material";
 
 export function AssetPickerDialog({
   open,
@@ -26,7 +27,10 @@ export function AssetPickerDialog({
   initialFilters,
   allowedKinds,
   initialSelectedAssetIDs = [],
+  initialSelectedAssetKeys = [],
   usedAssetIDs = [],
+  usedAssetKeys = [],
+  includeOfficial = true,
   multiple = false,
   maxSelection = 1,
   confirmSelection = false,
@@ -45,7 +49,10 @@ export function AssetPickerDialog({
   initialFilters?: Partial<AssetFilters>;
   allowedKinds?: AssetKind[];
   initialSelectedAssetIDs?: number[];
+  initialSelectedAssetKeys?: string[];
   usedAssetIDs?: number[];
+  usedAssetKeys?: string[];
+  includeOfficial?: boolean;
   multiple?: boolean;
   maxSelection?: number;
   confirmSelection?: boolean;
@@ -54,11 +61,18 @@ export function AssetPickerDialog({
   uploadAccept?: string;
   onUpload?: AssetUploadHandler<AssetRecord>;
   onClose: () => void;
-  onConfirm: (assets: AssetRecord[], selectedAssetIDs: number[]) => void;
+  onConfirm: (assets: AssetRecord[], selectedAssetKeys: string[]) => void;
 }) {
-  const initialSelectionKey = JSON.stringify(initialSelectedAssetIDs);
+  const initialSelectionKey = JSON.stringify({
+    initialSelectedAssetIDs,
+    initialSelectedAssetKeys,
+  });
   const normalizedInitialSelection = useMemo(
-    () => uniquePositiveIDs(JSON.parse(initialSelectionKey) as number[]),
+    () =>
+      uniqueLibraryKeys([
+        ...initialSelectedAssetKeys,
+        ...initialSelectedAssetIDs.map((id) => `asset:${id}`),
+      ]),
     [initialSelectionKey],
   );
   const initialFilterKey = JSON.stringify(initialFilters || {});
@@ -66,11 +80,11 @@ export function AssetPickerDialog({
     () => JSON.parse(initialFilterKey) as Partial<AssetFilters>,
     [initialFilterKey],
   );
-  const [selectedAssetIDs, setSelectedAssetIDs] = useState<number[]>(
+  const [selectedAssetKeys, setSelectedAssetKeys] = useState<string[]>(
     normalizedInitialSelection,
   );
   const [selectedAssets, setSelectedAssets] = useState<
-    Map<number, AssetRecord>
+    Map<string, AssetRecord>
   >(new Map());
   const [browserFilters, setBrowserFilters] = useState<Partial<AssetFilters>>(
     normalizedInitialFilters,
@@ -85,7 +99,7 @@ export function AssetPickerDialog({
 
   useEffect(() => {
     if (!open) return;
-    setSelectedAssetIDs(normalizedInitialSelection.slice(0, selectionLimit));
+    setSelectedAssetKeys(normalizedInitialSelection.slice(0, selectionLimit));
     setSelectedAssets(new Map());
     setBrowserFilters(normalizedInitialFilters);
     setMessage("");
@@ -115,10 +129,10 @@ export function AssetPickerDialog({
     if (!onUpload || selectedFiles.length === 0 || uploading) return;
 
     const available = multiple
-      ? Math.max(selectionLimit - selectedAssetIDs.length, 0)
+      ? Math.max(selectionLimit - selectedAssetKeys.length, 0)
       : 1;
     if (available <= 0) {
-      setMessage(`最多选择 ${selectionLimit} 项资产。`);
+      setMessage(`最多选择 ${selectionLimit} 项素材。`);
       return;
     }
 
@@ -177,31 +191,38 @@ export function AssetPickerDialog({
 
   function addUploadedAssets(assets: AssetRecord[]) {
     const uniqueAssets = Array.from(
-      new Map(assets.map((asset) => [asset.id, asset])).values(),
+      new Map(assets.map((asset) => [assetLibraryKey(asset), asset])).values(),
     );
     setSelectedAssets((current) => {
       const next = new Map(current);
-      uniqueAssets.forEach((asset) => next.set(asset.id, asset));
+      uniqueAssets.forEach((asset) => next.set(assetLibraryKey(asset), asset));
       return next;
     });
-    setSelectedAssetIDs((current) =>
+    setSelectedAssetKeys((current) =>
       multiple
-        ? uniquePositiveIDs([
+        ? uniqueLibraryKeys([
             ...current,
-            ...uniqueAssets.map((asset) => asset.id),
+            ...uniqueAssets.map(assetLibraryKey),
           ]).slice(0, selectionLimit)
         : uniqueAssets[0]
-          ? [uniqueAssets[0].id]
+          ? [assetLibraryKey(uniqueAssets[0])]
           : current,
     );
   }
 
   function selectAsset(asset: AssetRecord) {
-    if (confirmSelection && multiple && selectedAssetIDs.includes(asset.id)) {
-      setSelectedAssetIDs((current) => current.filter((id) => id !== asset.id));
+    const libraryKey = assetLibraryKey(asset);
+    if (
+      confirmSelection &&
+      multiple &&
+      selectedAssetKeys.includes(libraryKey)
+    ) {
+      setSelectedAssetKeys((current) =>
+        current.filter((key) => key !== libraryKey),
+      );
       setSelectedAssets((current) => {
         const next = new Map(current);
-        next.delete(asset.id);
+        next.delete(libraryKey);
         return next;
       });
       setMessage("");
@@ -216,30 +237,30 @@ export function AssetPickerDialog({
     setMessage("");
 
     if (!confirmSelection) {
-      onConfirm([asset], [asset.id]);
+      onConfirm([asset], [libraryKey]);
       onClose();
       return;
     }
 
     if (!multiple) {
-      setSelectedAssetIDs([asset.id]);
-      setSelectedAssets(new Map([[asset.id, asset]]));
+      setSelectedAssetKeys([libraryKey]);
+      setSelectedAssets(new Map([[libraryKey, asset]]));
       return;
     }
 
-    if (selectedAssetIDs.length >= selectionLimit) {
-      setMessage(`最多选择 ${selectionLimit} 项资产。`);
+    if (selectedAssetKeys.length >= selectionLimit) {
+      setMessage(`最多选择 ${selectionLimit} 项素材。`);
       return;
     }
-    setSelectedAssetIDs((current) => [...current, asset.id]);
-    setSelectedAssets((current) => new Map(current).set(asset.id, asset));
+    setSelectedAssetKeys((current) => [...current, libraryKey]);
+    setSelectedAssets((current) => new Map(current).set(libraryKey, asset));
   }
 
   function confirm() {
-    const assets = selectedAssetIDs
-      .map((id) => selectedAssets.get(id))
+    const assets = selectedAssetKeys
+      .map((key) => selectedAssets.get(key))
       .filter((asset): asset is AssetRecord => Boolean(asset));
-    onConfirm(assets, selectedAssetIDs);
+    onConfirm(assets, selectedAssetKeys);
     onClose();
   }
 
@@ -280,23 +301,27 @@ export function AssetPickerDialog({
           contentMode={contentMode}
           detailLayer="nested"
           selectable
-          selectedAssetIDs={selectedAssetIDs}
+          selectedAssetKeys={selectedAssetKeys}
           usedAssetIDs={usedAssetIDs}
+          usedAssetKeys={usedAssetKeys}
+          includeOfficial={includeOfficial}
           reloadSignal={reloadSignal}
           onAssetChanged={(asset) => {
-            if (selectedAssetIDs.includes(asset.id)) {
+            const libraryKey = assetLibraryKey(asset);
+            if (selectedAssetKeys.includes(libraryKey)) {
               setSelectedAssets((current) =>
-                new Map(current).set(asset.id, asset),
+                new Map(current).set(libraryKey, asset),
               );
             }
           }}
           onAssetRemoved={(assetID) => {
-            setSelectedAssetIDs((current) =>
-              current.filter((id) => id !== assetID),
+            const libraryKey = `asset:${assetID}`;
+            setSelectedAssetKeys((current) =>
+              current.filter((key) => key !== libraryKey),
             );
             setSelectedAssets((current) => {
               const next = new Map(current);
-              next.delete(assetID);
+              next.delete(libraryKey);
               return next;
             });
           }}
@@ -324,7 +349,7 @@ export function AssetPickerDialog({
         {confirmSelection ? (
           <footer className="wb-asset-picker-footer">
             <span>
-              已选 {selectedAssetIDs.length}
+              已选 {selectedAssetKeys.length}
               {multiple ? ` / ${selectionLimit}` : ""} 项
             </span>
             <div>
@@ -334,7 +359,7 @@ export function AssetPickerDialog({
               <button
                 type="button"
                 className="is-primary"
-                disabled={uploading || selectedAssetIDs.length === 0}
+                disabled={uploading || selectedAssetKeys.length === 0}
                 onClick={confirm}
               >
                 确认使用
@@ -348,8 +373,12 @@ export function AssetPickerDialog({
   );
 }
 
-function uniquePositiveIDs(ids: number[]) {
+function uniqueLibraryKeys(keys: string[]) {
   return Array.from(
-    new Set(ids.map(Number).filter((id) => Number.isFinite(id) && id > 0)),
+    new Set(
+      keys
+        .map((key) => String(key || "").trim())
+        .filter((key) => /^(asset|material):[1-9]\d*$/.test(key)),
+    ),
   );
 }

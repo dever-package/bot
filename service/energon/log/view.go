@@ -2,6 +2,7 @@ package log
 
 import (
 	"encoding/json"
+	"strconv"
 
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
@@ -116,6 +117,58 @@ func (LogViewService) ProviderLoadCost(c *server.Context, _ []any) any {
 		result[key] = value
 	}
 	return result
+}
+
+func (LogViewService) ProviderAttachUserInfo(_ *server.Context, params []any) any {
+	return attachLogUserInfo(logRowsFromProviderParams(params))
+}
+
+func logRowsFromProviderParams(params []any) []map[string]any {
+	if len(params) == 0 {
+		return []map[string]any{}
+	}
+	payload, ok := params[0].(map[string]any)
+	if !ok {
+		return []map[string]any{}
+	}
+	switch rows := payload["rows"].(type) {
+	case []map[string]any:
+		return rows
+	case []any:
+		result := make([]map[string]any, 0, len(rows))
+		for _, item := range rows {
+			if row, ok := item.(map[string]any); ok && row != nil {
+				result = append(result, row)
+			}
+		}
+		return result
+	default:
+		return []map[string]any{}
+	}
+}
+
+func attachLogUserInfo(rows []map[string]any) []map[string]any {
+	for _, row := range rows {
+		userID := util.ToUint64(row["user_id"])
+		user, _ := row["user"].(map[string]any)
+		name := util.ToStringTrimmed(user["name"])
+		account := util.ToStringTrimmed(user["account"])
+		switch {
+		case userID > 0 && name != "":
+		case userID > 0:
+			name = "用户 #" + strconv.FormatUint(userID, 10) + "（已删除）"
+		case util.ToStringTrimmed(row["scene"]) == "system":
+			name = "系统调用"
+		default:
+			name = "未记录"
+		}
+		if account == "" {
+			account = "-"
+		}
+		row["user_name"] = name
+		row["user_account"] = account
+	}
+	return rows
 }
 
 func loadLogPowerParams(c *server.Context) (map[string]any, string) {

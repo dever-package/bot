@@ -9,6 +9,7 @@ import (
 	botapi "github.com/dever-package/bot/api"
 	assetservice "github.com/dever-package/bot/service/asset"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	materiallibrary "github.com/dever-package/bot/service/materiallibrary"
 	workbenchservice "github.com/dever-package/bot/service/workbench"
 	frontstream "github.com/dever-package/front/service/stream"
 	uploadaccess "github.com/dever-package/front/service/upload/access"
@@ -211,6 +212,37 @@ func (Workbench) GetAssetFilters(c *server.Context) error {
 	data, err := workbenchRunner.AssetFilters(
 		c.Context(),
 		botapi.QueryUint64(c, "team_id", "teamId"),
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Workbench) GetMaterialCatalog(c *server.Context) error {
+	data, err := workbenchRunner.MaterialCatalog(
+		c.Context(),
+		botapi.QueryUint64(c, "team_id", "teamId"),
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Workbench) GetMaterials(c *server.Context) error {
+	data, err := workbenchRunner.Materials(
+		c.Context(),
+		botapi.QueryUint64(c, "team_id", "teamId"),
+		materiallibrary.QueryRequest{
+			Kind:     botapi.QueryText(c, "kind", "type"),
+			CateID:   botapi.QueryUint64(c, "cate_id", "cateId"),
+			Page:     int(botapi.QueryUint64(c, "page")),
+			PageSize: int(botapi.QueryUint64(c, "page_size", "pageSize")),
+		},
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Workbench) GetMaterialDetail(c *server.Context) error {
+	data, err := workbenchRunner.MaterialDetail(
+		c.Context(),
+		botapi.QueryUint64(c, "team_id", "teamId"),
+		botapi.QueryUint64(c, "material_id", "materialId", "id"),
 	)
 	return botapi.WriteJSON(c, data, err)
 }

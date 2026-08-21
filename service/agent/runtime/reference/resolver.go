@@ -15,6 +15,7 @@ import (
 	runtimesessionstate "github.com/dever-package/bot/service/agent/runtime/sessionstate"
 	assetservice "github.com/dever-package/bot/service/asset"
 	energoninput "github.com/dever-package/bot/service/energon/input"
+	materiallibrary "github.com/dever-package/bot/service/materiallibrary"
 	uploadaccess "github.com/dever-package/front/service/upload/access"
 	uploadrepo "github.com/dever-package/front/service/upload/repository"
 )
@@ -24,11 +25,17 @@ const maxResolvedMedia = 32
 type Resolver struct {
 	artifacts runtimeartifact.Service
 	assets    assetservice.Service
+	materials materiallibrary.Service
 	server    *server.Context
 }
 
 func NewRequestResolver(serverContext *server.Context) Resolver {
-	return Resolver{artifacts: runtimeartifact.NewService(), assets: assetservice.NewService(), server: serverContext}
+	return Resolver{
+		artifacts: runtimeartifact.NewService(),
+		assets:    assetservice.NewService(),
+		materials: materiallibrary.NewService(),
+		server:    serverContext,
+	}
 }
 
 func (r Resolver) Resolve(ctx context.Context, session agentmodel.Session, references []Reference) (Result, error) {
@@ -66,9 +73,64 @@ func (r Resolver) resolveOne(ctx context.Context, session agentmodel.Session, re
 		return r.resolveSession(ctx, session, reference)
 	case TypeAsset:
 		return r.resolveAsset(ctx, session, reference)
+	case TypeMaterial:
+		return r.resolveMaterial(ctx, session, reference)
 	default:
 		return Resolved{}, fmt.Errorf("不支持的引用类型: %s", reference.Type)
 	}
+}
+
+func (r Resolver) resolveMaterial(ctx context.Context, session agentmodel.Session, reference Reference) (Resolved, error) {
+	teamID := bodyTeamID(session.ContextKey)
+	if teamID == 0 {
+		return Resolved{}, fmt.Errorf("当前会话不支持官方素材引用")
+	}
+	material, err := r.materials.Require(ctx, teamID, reference.ID)
+	if err != nil {
+		return Resolved{}, err
+	}
+	title := firstText(material.Name, reference.Label, fmt.Sprintf("官方素材 %d", reference.ID))
+	content := material.PreviewContent()
+	resolvedMedia := energoninput.MediaReferencesFromContent(
+		TypeMaterial,
+		material.ID,
+		material.AssetKind(),
+		content,
+		reference.Usage,
+	)
+	selection := energoninput.MediaReferenceSelection{
+		URL:   reference.MediaURL,
+		Index: reference.MediaIndex,
+		Items: mediaReferenceSelectionItems(reference.MediaItems),
+	}
+	resolvedMedia, err = energoninput.SelectMediaReferences(resolvedMedia, selection)
+	if err != nil {
+		return Resolved{}, fmt.Errorf("官方素材“%s”：%w", title, err)
+	}
+	media := make([]Media, 0, len(resolvedMedia))
+	for _, current := range resolvedMedia {
+		media = append(media, Media{
+			ReferenceType: TypeMaterial,
+			ReferenceID:   material.ID,
+			Kind:          normalizeMediaKind(current.Kind),
+			Name:          title,
+			Label:         title,
+			URL:           current.URL,
+			Usage:         current.Usage,
+		})
+	}
+	selectedContent := energoninput.SelectedMediaReferenceContent(content, resolvedMedia, selection)
+	output := mapValue(selectedContent)
+	if len(output) == 0 && selectedContent != nil {
+		output = map[string]any{"content": selectedContent}
+	}
+	return Resolved{
+		Reference: reference,
+		Title:     title,
+		Text:      assetContentText(selectedContent),
+		Media:     cleanMedia(media),
+		Output:    output,
+	}, nil
 }
 
 func (r Resolver) resolveAsset(ctx context.Context, session agentmodel.Session, reference Reference) (Resolved, error) {

@@ -472,9 +472,14 @@ function normalizeMediaKind(value: unknown) {
 function isReferenceType(
   value: string,
 ): value is import("./reference").ReferenceType {
-  return ["message", "artifact", "upload_file", "session", "asset"].includes(
-    value,
-  );
+  return [
+    "message",
+    "artifact",
+    "upload_file",
+    "session",
+    "asset",
+    "material",
+  ].includes(value);
 }
 
 function positiveNumber(value: unknown) {
