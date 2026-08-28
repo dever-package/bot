@@ -4,6 +4,7 @@ import type {
   AssetKind,
   AssetVersion,
   CanvasAssistant,
+  CanvasSummary,
   CanvasComposerDraft,
   CanvasFunctionOption,
   OutputTypeOption,
@@ -78,10 +79,26 @@ export function normalizeSpaceBootstrap(value: unknown): SpaceBootstrap {
     release: normalizeRelease(row.release),
     assetCates: asRecords(row.asset_cates).map(normalizeAssetCate),
     flows: asRecords(row.flows).map(normalizeFlow),
+    canvasList: asRecords(row.canvas_list).map(normalizeCanvasSummary),
     canvases: normalizeCanvases(row.canvas),
     assets: asRecords(asRecord(row.assets).items).map(normalizeAsset),
     assistant: normalizeCanvasAssistant(row.assistant),
+    initialCanvasId: numberValue(row.active_canvas_id),
     initialAssetCateId: numberValue(row.active_asset_cate_id),
+  };
+}
+
+export function normalizeCanvasSummary(value: unknown): CanvasSummary {
+  const row = asRecord(value);
+  return {
+    id: numberValue(row.id),
+    projectId: numberValue(row.project_id),
+    assetCateId: numberValue(row.asset_cate_id),
+    name: stringValue(row.name) || "第一幕",
+    sort: numberValue(row.sort),
+    status: numberValue(row.status),
+    updatedAt: stringValue(row.updated_at),
+    deletedAt: stringValue(row.deleted_at),
   };
 }
 
@@ -102,8 +119,16 @@ function normalizeCanvasAssistant(value: unknown): CanvasAssistant {
   };
 }
 
-export function emptyCanvasState(assetCateId: number): SpaceCanvasState {
+export function emptyCanvasState(
+  assetCateId: number,
+  id = 0,
+  name = "第一幕",
+): SpaceCanvasState {
   return {
+    id,
+    name,
+    sort: 0,
+    status: 1,
     assetCateId,
     nextNodeNo: 1,
     nodes: [],
@@ -121,6 +146,10 @@ export function normalizeCanvasState(
     firstDefined(row.asset_cate_id, fallbackAssetCateId),
   );
   return normalizeCanvasNodeIdentities({
+    id: numberValue(row.id),
+    name: stringValue(row.name) || "第一幕",
+    sort: numberValue(row.sort),
+    status: numberValue(row.status) || 1,
     assetCateId,
     nextNodeNo: Math.max(1, numberValue(row.next_node_no)),
     nodes: asRecords(row.nodes)
@@ -309,7 +338,7 @@ export function createLocalNode(
     function: [
       selectedFunction?.label || "保存节点",
       "功能",
-      selectedFunction?.description || "开始、导入、保存、展示等功能节点。",
+      selectedFunction?.description || "开始、引用、保存、展示等功能节点。",
     ],
     group: [
       "未命名分组",
@@ -478,6 +507,7 @@ function normalizeAsset(value: Record<string, unknown>): ProjectAsset {
     body_id: numberValue(firstDefined(value.body_id, value.bodyID)),
     team_id: numberValue(firstDefined(value.team_id, value.teamID)),
     flow_id: numberValue(firstDefined(value.flow_id, value.flowID)),
+    canvas_id: numberValue(firstDefined(value.canvas_id, value.canvasID)),
     asset_cate_id: numberValue(
       firstDefined(value.asset_cate_id, value.assetCateID),
     ),
@@ -528,8 +558,11 @@ function normalizeCanvases(value: unknown) {
   const row = asRecord(value);
   const result: Record<string, SpaceCanvasState> = {};
   for (const [key, canvas] of Object.entries(row)) {
-    const state = normalizeCanvasState(canvas, numberValue(key));
-    result[String(state.assetCateId)] = state;
+    const state = normalizeCanvasState(canvas);
+    const canvasId = state.id || numberValue(key);
+    if (canvasId > 0) {
+      result[String(canvasId)] = { ...state, id: canvasId };
+    }
   }
   return result;
 }
@@ -577,9 +610,8 @@ export function hydrateCanvasPowerCatalog(
   canvas: SpaceCanvasState,
   powers: PowerOption[],
 ) {
-  return hydrateCanvasPowers({ [String(canvas.assetCateId)]: canvas }, powers)[
-    String(canvas.assetCateId)
-  ];
+  const key = String(canvas.id);
+  return hydrateCanvasPowers({ [key]: canvas }, powers)[key];
 }
 
 function normalizeCanvasNode(
@@ -591,11 +623,15 @@ function normalizeCanvasNode(
     return null;
   }
   const persistedRunError = stringValue(value.run_error);
+  const functionOption = normalizeCanvasFunctionOption(value.function_option);
+  const rawTitle = stringValue(value.title);
+  const rawDescription = stringValue(value.description);
+  const legacyImportNode = functionOption?.key === "import";
   const node: SpaceCanvasNode = {
     id,
     nodeNo: numberValue(value.node_no) || undefined,
     type,
-    title: stringValue(value.title),
+    title: legacyImportNode && rawTitle === "导入" ? "引用" : rawTitle,
     titleMode:
       stringValue(value.title_mode) === "manual"
         ? "manual"
@@ -603,7 +639,11 @@ function normalizeCanvasNode(
           ? "auto"
           : undefined,
     subtitle: stringValue(value.subtitle),
-    description: stringValue(value.description),
+    description:
+      legacyImportNode &&
+      (!rawDescription || rawDescription === "导入资产并连接到当前节点。")
+        ? "选择资产并引用到当前节点。"
+        : rawDescription,
     x: numberValue(value.x),
     y: numberValue(value.y),
     width: numberValue(value.width),
@@ -620,7 +660,7 @@ function normalizeCanvasNode(
     assetCateId: numberValue(value.asset_cate_id),
     outputType: stringValue(value.output_type),
     count: value.count == null ? undefined : numberValue(value.count),
-    functionOption: normalizeCanvasFunctionOption(value.function_option),
+    functionOption,
     composerDraft: normalizePersistedCanvasComposerDraft(value.composer_draft),
     resultRef: normalizeCanvasResultRef(value.result_ref),
     resultOutput: value.result_output,
@@ -833,10 +873,16 @@ function normalizeCanvasFunctionOption(value: unknown) {
   if (!key) {
     return undefined;
   }
+  const label = stringValue(row.label);
+  const description = stringValue(row.description);
   return {
     key,
-    label: stringValue(row.label),
-    description: stringValue(row.description),
+    label: key === "import" && (!label || label === "导入") ? "引用" : label,
+    description:
+      key === "import" &&
+      (!description || description === "导入资产并连接到当前节点。")
+        ? "选择资产并引用到当前节点。"
+        : description,
   };
 }
 

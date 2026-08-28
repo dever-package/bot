@@ -19,6 +19,7 @@ import (
 
 type CanvasAgentRunRequest struct {
 	FlowID          uint64
+	CanvasID        uint64
 	AssetCateID     uint64
 	NodeKey         string
 	NodeName        string
@@ -124,6 +125,7 @@ func (s Service) RunCanvasAgent(ctx context.Context, projectID uint64, req Canva
 
 	asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
 		ProjectID:   project.ID,
+		CanvasID:    req.CanvasID,
 		BodyID:      project.BodyID,
 		TeamID:      project.TeamID,
 		FlowID:      req.FlowID,

@@ -1,6 +1,7 @@
 import {
   Copy,
   Eye,
+  Layers3,
   Map as MapIcon,
   Maximize2,
   Minus,
@@ -83,6 +84,10 @@ export function NodeActionMenu({
 }
 
 export function CanvasViewControls({
+  canvasCount,
+  activeCanvasName,
+  canvasManagerOpen,
+  showViewTools,
   showMiniMap,
   snapToGrid,
   zoom,
@@ -92,7 +97,12 @@ export function CanvasViewControls({
   onZoomIn,
   onZoomOut,
   onZoomChange,
+  onOpenCanvasManager,
 }: {
+  canvasCount: number;
+  activeCanvasName: string;
+  canvasManagerOpen: boolean;
+  showViewTools: boolean;
   showMiniMap: boolean;
   snapToGrid: boolean;
   zoom: number;
@@ -102,55 +112,75 @@ export function CanvasViewControls({
   onZoomIn: () => void;
   onZoomOut: () => void;
   onZoomChange: (zoom: number) => void;
+  onOpenCanvasManager: () => void;
 }) {
+  const managerLabel = `画布管理 · ${activeCanvasName || "第一幕"}${
+    canvasCount > 1 ? `（${canvasCount}）` : ""
+  }`;
   return (
     <div className="ws-view-controls nodrag nopan">
-      <SpaceTooltip label={showMiniMap ? "隐藏小地图" : "显示小地图"}>
+      <SpaceTooltip label={managerLabel}>
         <button
           type="button"
-          className={showMiniMap ? "is-active" : ""}
-          onClick={onToggleMiniMap}
-          aria-label={showMiniMap ? "隐藏小地图" : "显示小地图"}
+          className={canvasManagerOpen ? "is-active" : ""}
+          aria-label="画布管理"
+          aria-expanded={canvasManagerOpen}
+          onClick={onOpenCanvasManager}
         >
-          <MapIcon size={16} />
+          <Layers3 size={16} />
         </button>
       </SpaceTooltip>
-      <SpaceTooltip label={snapToGrid ? "关闭网格吸附" : "开启网格吸附"}>
-        <button
-          type="button"
-          className={snapToGrid ? "is-active" : ""}
-          onClick={onToggleSnap}
-          aria-label={snapToGrid ? "关闭网格吸附" : "开启网格吸附"}
-        >
-          <MousePointer2 size={16} />
-        </button>
-      </SpaceTooltip>
-      <SpaceTooltip label="重置视图">
-        <button type="button" onClick={onReset} aria-label="重置视图">
-          <Maximize2 size={15} />
-        </button>
-      </SpaceTooltip>
-      <div className="ws-view-zoom">
-        <SpaceTooltip label="缩小">
-          <button type="button" onClick={onZoomOut} aria-label="缩小">
-            <Minus size={15} />
-          </button>
-        </SpaceTooltip>
-        <input
-          type="range"
-          min="0.35"
-          max="1.45"
-          step="0.01"
-          value={Math.max(0.35, Math.min(1.45, zoom))}
-          onChange={(event) => onZoomChange(Number(event.target.value))}
-          aria-label="画布缩放"
-        />
-        <SpaceTooltip label="放大">
-          <button type="button" onClick={onZoomIn} aria-label="放大">
-            <Plus size={15} />
-          </button>
-        </SpaceTooltip>
-      </div>
+      {showViewTools ? (
+        <>
+          <span className="ws-view-controls-divider" aria-hidden="true" />
+          <SpaceTooltip label={showMiniMap ? "隐藏小地图" : "显示小地图"}>
+            <button
+              type="button"
+              className={showMiniMap ? "is-active" : ""}
+              onClick={onToggleMiniMap}
+              aria-label={showMiniMap ? "隐藏小地图" : "显示小地图"}
+            >
+              <MapIcon size={16} />
+            </button>
+          </SpaceTooltip>
+          <SpaceTooltip label={snapToGrid ? "关闭网格吸附" : "开启网格吸附"}>
+            <button
+              type="button"
+              className={snapToGrid ? "is-active" : ""}
+              onClick={onToggleSnap}
+              aria-label={snapToGrid ? "关闭网格吸附" : "开启网格吸附"}
+            >
+              <MousePointer2 size={16} />
+            </button>
+          </SpaceTooltip>
+          <SpaceTooltip label="重置视图">
+            <button type="button" onClick={onReset} aria-label="重置视图">
+              <Maximize2 size={15} />
+            </button>
+          </SpaceTooltip>
+          <div className="ws-view-zoom">
+            <SpaceTooltip label="缩小">
+              <button type="button" onClick={onZoomOut} aria-label="缩小">
+                <Minus size={15} />
+              </button>
+            </SpaceTooltip>
+            <input
+              type="range"
+              min="0.35"
+              max="1.45"
+              step="0.01"
+              value={Math.max(0.35, Math.min(1.45, zoom))}
+              onChange={(event) => onZoomChange(Number(event.target.value))}
+              aria-label="画布缩放"
+            />
+            <SpaceTooltip label="放大">
+              <button type="button" onClick={onZoomIn} aria-label="放大">
+                <Plus size={15} />
+              </button>
+            </SpaceTooltip>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

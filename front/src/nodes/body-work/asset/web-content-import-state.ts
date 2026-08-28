@@ -1,10 +1,13 @@
 import type { WebContentImportTask } from "./web-content-import-api";
 
 const storagePrefix = "shemic:web-content-import";
+type ActiveWebContentImportTask = WebContentImportTask & {
+  status: "pending" | "discovering" | "running";
+};
 
 export function isActiveWebContentImport(
   task: WebContentImportTask | null | undefined,
-): task is WebContentImportTask {
+): task is ActiveWebContentImportTask {
   return Boolean(
     task &&
     (task.status === "pending" ||

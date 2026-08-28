@@ -27,24 +27,15 @@ var webContentImportGateway = energonservice.NewGatewayService()
 
 func webContentImportAvailablePlatforms(ctx context.Context) map[string]bool {
 	result := make(map[string]bool)
-	powerPlatforms := make(map[uint64]string)
-	powerIDs := make([]uint64, 0, len(botwebcontent.Platforms()))
-	powerModel := energonmodel.NewPowerModel()
-	for _, spec := range botwebcontent.Platforms() {
-		power := powerModel.Find(ctx, map[string]any{
-			"key":    spec.PowerKey,
-			"status": energonservice.StatusActive,
-		})
-		if power == nil {
-			continue
-		}
-		powerIDs = append(powerIDs, power.ID)
-		powerPlatforms[power.ID] = spec.Key
+	power := energonmodel.NewPowerModel().Find(ctx, map[string]any{
+		"key":    botwebcontent.PowerKey,
+		"status": energonservice.StatusActive,
+	})
+	if power == nil {
+		return result
 	}
-	for powerID := range webContentImportGateway.AvailablePowerIDs(ctx, powerIDs) {
-		if platform := powerPlatforms[powerID]; platform != "" {
-			result[platform] = true
-		}
+	for platform, targetIDs := range webContentImportGateway.AvailableWebContentTargetIDs(ctx, power.ID) {
+		result[platform] = len(targetIDs) > 0
 	}
 	return result
 }
@@ -109,14 +100,26 @@ func resolveWebContentImport(
 	if !ok {
 		return resolvedWebContentImport{}, fmt.Errorf("导入任务包含不支持的平台")
 	}
+	power := energonmodel.NewPowerModel().Find(ctx, map[string]any{
+		"key":    botwebcontent.PowerKey,
+		"status": energonservice.StatusActive,
+	})
+	if power == nil {
+		return resolvedWebContentImport{}, fmt.Errorf("请先配置并启用%s来源", spec.Name)
+	}
+	targetIDs := webContentImportGateway.AvailableWebContentTargetIDs(ctx, power.ID)[item.Platform]
+	if len(targetIDs) == 0 {
+		return resolvedWebContentImport{}, fmt.Errorf("请先配置并启用%s来源", spec.Name)
+	}
 	requestID := webContentImportItemRequestID(task.ID, item.ID)
 	result, err := webContentImportGateway.Invoke(ctx, energonservice.GatewayRequest{
-		RequestID: requestID,
-		Method:    "POST",
-		Path:      "/bot/admin/energon/request",
+		RequestID:              requestID,
+		Method:                 "POST",
+		Path:                   "/bot/admin/energon/request",
+		AllowedSourceTargetIDs: targetIDs,
 		Body: map[string]any{
-			"power": spec.PowerKey,
-			"input": map[string]any{spec.InputParamKey: item.SourceURL},
+			"power": botwebcontent.PowerKey,
+			"input": map[string]any{botwebcontent.InputParamKey: item.SourceURL},
 			"options": map[string]any{
 				"stream": false,
 			},
@@ -217,6 +220,7 @@ func (s Service) saveResolvedWebContentImport(
 	asset, _, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
 		UserID:     task.UserID,
 		ProjectID:  task.ProjectID,
+		CanvasID:   task.CanvasID,
 		BodyID:     task.BodyID,
 		TeamID:     task.TeamID,
 		ReleaseID:  task.ReleaseID,
@@ -267,6 +271,7 @@ func findExistingWebContentAsset(
 		"user_id":     task.UserID,
 		"team_id":     task.TeamID,
 		"project_id":  task.ProjectID,
+		"canvas_id":   task.CanvasID,
 		"body_id":     task.BodyID,
 		"source_type": assetmodel.SourceImport,
 		"node_key":    nodeKey,

@@ -37,6 +37,7 @@ type ImportTask struct {
 	UserID         uint64     `dorm:"type:bigint;not null;default:0;comment:用户ID"`
 	TeamID         uint64     `dorm:"type:bigint;not null;default:0;comment:团队ID"`
 	ProjectID      uint64     `dorm:"type:bigint;not null;default:0;comment:项目ID"`
+	CanvasID       uint64     `dorm:"type:bigint;not null;default:0;comment:来源画布ID"`
 	BodyID         uint64     `dorm:"type:bigint;not null;default:0;comment:载体ID"`
 	ReleaseID      uint64     `dorm:"type:bigint;not null;default:0;comment:发布版本ID"`
 	ProviderID     uint64     `dorm:"type:bigint;not null;default:0;comment:来源ID"`
@@ -72,7 +73,7 @@ type ImportTask struct {
 
 type ImportTaskIndex struct {
 	RequestID     struct{} `unique:"request_id"`
-	ScopeStatus   struct{} `index:"user_id,team_id,project_id,body_id,status,created_at"`
+	ScopeStatus   struct{} `index:"user_id,team_id,project_id,canvas_id,body_id,status,created_at"`
 	StatusQueue   struct{} `index:"status,available_at,id"`
 	StatusLease   struct{} `index:"status,lease_expires_at,id"`
 	AccountStatus struct{} `index:"platform,account_id,status,id"`

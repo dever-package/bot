@@ -79,6 +79,7 @@ type SaveDialogueAssetRequest struct {
 type SaveUploadAssetRequest struct {
 	TeamID      uint64
 	ProjectID   uint64
+	CanvasID    uint64
 	File        uploadrepo.UploadFile
 	TextContent string
 }
@@ -95,9 +96,11 @@ type SaveAssetContentRequest struct {
 
 type ChatRoleBinding struct {
 	teamservice.WorkbenchRoleBinding
-	ProjectID  uint64
-	BodyID     uint64
-	ContextKey string
+	ProjectID   uint64
+	CanvasID    uint64
+	AssetCateID uint64
+	BodyID      uint64
+	ContextKey  string
 }
 
 func NewService() Service {
@@ -710,7 +713,7 @@ func (s Service) SaveUploadAsset(ctx context.Context, request SaveUploadAssetReq
 		return nil, fmt.Errorf("上传文件不能为空")
 	}
 
-	scope, err := s.resolveExternalAssetSaveScope(ctx, request.TeamID, request.ProjectID)
+	scope, err := s.resolveExternalAssetSaveScope(ctx, request.TeamID, request.ProjectID, request.CanvasID)
 	if err != nil {
 		return nil, err
 	}
@@ -727,6 +730,7 @@ func (s Service) SaveUploadAsset(ctx context.Context, request SaveUploadAssetReq
 	}
 	asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
 		ProjectID:  scope.ProjectID,
+		CanvasID:   scope.CanvasID,
 		BodyID:     scope.BodyID,
 		TeamID:     scope.TeamID,
 		ReleaseID:  scope.ReleaseID,

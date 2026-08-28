@@ -17,7 +17,7 @@ const (
 	canvasExecutionScopeRecovery = "recovery"
 	canvasExecutionScopeActive   = "active"
 	canvasExecutionScopeHistory  = "history"
-	workspaceExecutionListFields = "main.id,main.project_id,main.asset_cate_id,main.release_id,main.run_id,main.flow_run_id,main.request_id,main.start_node_id,main.single_node,main.status,main.executed,main.total,main.plan,main.error,main.updated_at,main.created_at"
+	workspaceExecutionListFields = "main.id,main.project_id,main.canvas_id,main.asset_cate_id,main.release_id,main.run_id,main.flow_run_id,main.request_id,main.start_node_id,main.single_node,main.status,main.executed,main.total,main.plan,main.error,main.updated_at,main.created_at"
 )
 
 func createWorkspaceRun(ctx context.Context, projectID uint64, teamID uint64, releaseID uint64, requestID string, req CanvasRunRequest, plan map[string]any) (*teammodel.Run, error) {
@@ -33,6 +33,7 @@ func createWorkspaceRun(ctx context.Context, projectID uint64, teamID uint64, re
 		"release_id": releaseID,
 		"input": jsonText(map[string]any{
 			"_mode":                  workspaceCanvasRunMode,
+			"_canvas_id":             req.CanvasID,
 			"_asset_cate_id":         req.AssetCateID,
 			"_start_node_id":         strings.TrimSpace(req.StartNodeID),
 			"_display_start_node_id": canvasRunDisplayStartNodeID(req),
@@ -126,6 +127,7 @@ func (s WorkspaceService) workspaceRunPayload(ctx context.Context, projectID uin
 			payload["execution_plan"] = plan
 		}
 		payload["asset_cate_id"] = uint64Value(input["_asset_cate_id"])
+		payload["canvas_id"] = uint64Value(input["_canvas_id"])
 		payload["start_node_id"] = workspaceRunDisplayStartNodeID(input)
 		payload["execution_scope"] = strings.TrimSpace(textValue(input["_execution_scope"]))
 	}
@@ -138,6 +140,7 @@ func (s WorkspaceService) workspaceRunPayload(ctx context.Context, projectID uin
 
 type CanvasExecutionQuery struct {
 	ProjectID   uint64
+	CanvasID    uint64
 	AssetCateID uint64
 	Status      string
 	Scope       string
@@ -154,6 +157,13 @@ func (s WorkspaceService) CanvasExecutionList(ctx context.Context, query CanvasE
 	}
 	filter := map[string]any{"project_id": project.ID}
 	scope := normalizeCanvasExecutionScope(query.Scope)
+	if query.CanvasID > 0 {
+		canvas, canvasErr := requireProjectCanvas(ctx, project.ID, query.CanvasID, query.AssetCateID)
+		if canvasErr != nil {
+			return nil, canvasErr
+		}
+		filter["canvas_id"] = canvas.ID
+	}
 	if query.AssetCateID > 0 {
 		filter["asset_cate_id"] = query.AssetCateID
 	}

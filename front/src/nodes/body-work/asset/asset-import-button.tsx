@@ -17,7 +17,7 @@ export function AssetImportButton({
   const label = active ? `导入 ${progress}%` : "导入";
   return (
     <BodyWorkTooltip
-      label={active ? task.stageMessage || "正在导入" : "导入平台内容"}
+      label={active ? task.stageMessage || "正在导入" : "导入网络内容"}
     >
       <button
         type="button"
@@ -36,7 +36,7 @@ export function AssetImportButton({
           <span
             className="wb-asset-upload-progress"
             role="progressbar"
-            aria-label="平台内容导入进度"
+            aria-label="网络内容导入进度"
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={progress}

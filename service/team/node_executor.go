@@ -1266,7 +1266,7 @@ func (s Service) runContextNode(ctx context.Context, run teammodel.Run, node tea
 	if run.ProjectID == 0 {
 		return nil, teammodel.RunStatusFail, 0, fmt.Errorf("上下文节点需要项目运行环境: %s", node.Name)
 	}
-	asset, version := s.asset.LatestProjectAssetByCate(ctx, run.ProjectID, assetCateID)
+	asset, version := s.asset.LatestProjectAssetByCate(ctx, run.ProjectID, uint64Value(jsonMap(run.Input)["_canvas_id"]), assetCateID)
 	if asset == nil || version == nil {
 		if !contextNodeRequired(config) {
 			return map[string]any{
@@ -1309,6 +1309,7 @@ func (s Service) runSaveNode(ctx context.Context, run teammodel.Run, flowRun tea
 	}
 	asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
 		ProjectID:   run.ProjectID,
+		CanvasID:    uint64Value(jsonMap(run.Input)["_canvas_id"]),
 		TeamID:      team.ID,
 		FlowID:      flow.ID,
 		AssetCateID: node.AssetCateID,

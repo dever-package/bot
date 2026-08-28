@@ -11,6 +11,7 @@ import (
 
 type workspaceExecutionCreate struct {
 	ProjectID   uint64
+	CanvasID    uint64
 	AssetCateID uint64
 	TeamID      uint64
 	ReleaseID   uint64
@@ -36,6 +37,7 @@ func createWorkspaceExecution(ctx context.Context, input workspaceExecutionCreat
 	}
 	record := map[string]any{
 		"project_id":    input.ProjectID,
+		"canvas_id":     input.CanvasID,
 		"asset_cate_id": input.AssetCateID,
 		"team_id":       input.TeamID,
 		"release_id":    input.ReleaseID,
@@ -79,7 +81,7 @@ func workspaceExecutionByRequestID(ctx context.Context, projectID uint64, reques
 func (s WorkspaceService) activeSingleNodeExecution(
 	ctx context.Context,
 	projectID uint64,
-	assetCateID uint64,
+	canvasID uint64,
 	startNodeID string,
 ) *workspacemodel.Execution {
 	startNodeID = strings.TrimSpace(startNodeID)
@@ -92,8 +94,8 @@ func (s WorkspaceService) activeSingleNodeExecution(
 		"single_node":   int16(1),
 		"status":        canvasRunActiveStatuses(),
 	}
-	if assetCateID > 0 {
-		filter["asset_cate_id"] = assetCateID
+	if canvasID > 0 {
+		filter["canvas_id"] = canvasID
 	}
 	for _, execution := range workspacemodel.NewExecutionModel().Select(ctx, filter, map[string]any{
 		"order": "main.id desc",
@@ -179,6 +181,7 @@ func workspaceExecutionPayload(ctx context.Context, execution *workspacemodel.Ex
 	payload["flow_run_id"] = execution.FlowRunID
 	payload["request_id"] = strings.TrimSpace(execution.RequestID)
 	payload["release_id"] = execution.ReleaseID
+	payload["canvas_id"] = execution.CanvasID
 	payload["asset_cate_id"] = execution.AssetCateID
 	payload["start_node_id"] = strings.TrimSpace(execution.StartNodeID)
 	payload["single_node"] = execution.SingleNode == 1
@@ -214,6 +217,7 @@ func workspaceExecutionListPayload(
 		"flow_run_id":   execution.FlowRunID,
 		"request_id":    strings.TrimSpace(execution.RequestID),
 		"release_id":    execution.ReleaseID,
+		"canvas_id":     execution.CanvasID,
 		"asset_cate_id": execution.AssetCateID,
 		"start_node_id": strings.TrimSpace(execution.StartNodeID),
 		"single_node":   execution.SingleNode == 1,

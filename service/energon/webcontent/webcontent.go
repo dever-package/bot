@@ -13,38 +13,32 @@ import (
 )
 
 const (
-	Protocol             = "webcontent"
-	PlatformWeChat       = frontwebcontent.PlatformWeChat
-	PlatformDouyin       = frontwebcontent.PlatformDouyin
-	PowerKey             = "wechat-official-account-import"
-	PowerName            = "微信公众号"
-	LegacyPowerKey       = "web-content-import"
-	InputParamKey        = "webContentSource"
-	InputParamName       = "公众号文章链接或分享内容"
-	DouyinPowerKey       = "douyin-content-import"
-	DouyinPowerName      = "抖音"
-	DouyinInputParamKey  = "douyinContentSource"
-	DouyinInputParamName = "抖音作品链接或分享内容"
-	ResolveAPI           = "resolve"
-	defaultMaxAssets     = 50
-	maxSourceLength      = 8192
+	Protocol                  = "webcontent"
+	PlatformWeChat            = frontwebcontent.PlatformWeChat
+	PlatformDouyin            = frontwebcontent.PlatformDouyin
+	PowerKey                  = "web-content-import"
+	PowerName                 = "内容采集"
+	PowerIcon                 = "file-input"
+	PowerKind                 = "multi"
+	InputParamKey             = "webContentSource"
+	InputParamName            = "链接或分享内容"
+	LegacyWeChatPowerKey      = "wechat-official-account-import"
+	LegacyDouyinPowerKey      = "douyin-content-import"
+	LegacyDouyinInputParamKey = "douyinContentSource"
+	ResolveAPI                = "resolve"
+	defaultMaxAssets          = 50
+	maxSourceLength           = 8192
 )
 
 type PlatformSpec struct {
-	Key            string
-	Name           string
-	ServiceName    string
-	ServicePath    string
-	PowerKey       string
-	PowerName      string
-	PowerIcon      string
-	PowerKind      string
-	InputParamKey  string
-	InputParamName string
-	LegacyPowerKey string
-	ContentType    string
-	AssetKind      string
-	DefaultTitle   string
+	Key          string
+	Name         string
+	ServiceName  string
+	ServicePath  string
+	ServiceKind  string
+	ContentType  string
+	AssetKind    string
+	DefaultTitle string
 }
 
 type mediaOutputSpec struct {
@@ -54,35 +48,24 @@ type mediaOutputSpec struct {
 
 var platformSpecs = []PlatformSpec{
 	{
-		Key:            PlatformWeChat,
-		Name:           PowerName,
-		ServiceName:    "微信公众号解析",
-		ServicePath:    "webcontent://wechat/resolve",
-		PowerKey:       PowerKey,
-		PowerName:      PowerName,
-		PowerIcon:      "file-input",
-		PowerKind:      "text",
-		InputParamKey:  InputParamKey,
-		InputParamName: InputParamName,
-		LegacyPowerKey: LegacyPowerKey,
-		ContentType:    frontwebcontent.ContentTypeRichText,
-		AssetKind:      "richtext",
-		DefaultTitle:   "公众号文章",
+		Key:          PlatformWeChat,
+		Name:         "微信公众号",
+		ServiceName:  "微信公众号解析",
+		ServicePath:  "webcontent://wechat/resolve",
+		ServiceKind:  "text",
+		ContentType:  frontwebcontent.ContentTypeRichText,
+		AssetKind:    "richtext",
+		DefaultTitle: "公众号文章",
 	},
 	{
-		Key:            PlatformDouyin,
-		Name:           DouyinPowerName,
-		ServiceName:    "抖音作品解析",
-		ServicePath:    "webcontent://douyin/resolve",
-		PowerKey:       DouyinPowerKey,
-		PowerName:      DouyinPowerName,
-		PowerIcon:      "circle-play",
-		PowerKind:      "video",
-		InputParamKey:  DouyinInputParamKey,
-		InputParamName: DouyinInputParamName,
-		ContentType:    frontwebcontent.ContentTypeVideo,
-		AssetKind:      "video",
-		DefaultTitle:   "抖音作品",
+		Key:          PlatformDouyin,
+		Name:         "抖音",
+		ServiceName:  "抖音作品解析",
+		ServicePath:  "webcontent://douyin/resolve",
+		ServiceKind:  "video",
+		ContentType:  frontwebcontent.ContentTypeVideo,
+		AssetKind:    "video",
+		DefaultTitle: "抖音作品",
 	},
 }
 
@@ -106,6 +89,21 @@ func FindPlatform(key string) (PlatformSpec, bool) {
 	return PlatformSpec{}, false
 }
 
+func LegacyPowerKeys() []string {
+	return []string{LegacyWeChatPowerKey, LegacyDouyinPowerKey}
+}
+
+func DetectPlatform(source string) (string, error) {
+	detected, err := frontwebcontent.DetectSources(source)
+	if err != nil {
+		return "", err
+	}
+	if len(detected) != 1 {
+		return "", fmt.Errorf("一次能力调用只能解析一条内容链接")
+	}
+	return detected[0].Platform, nil
+}
+
 func BuildNativeRequest(platform string, input map[string]any, credential string) (botprovider.Request, error) {
 	spec, ok := FindPlatform(platform)
 	if !ok {
@@ -121,6 +119,14 @@ func BuildNativeRequest(platform string, input map[string]any, credential string
 	}
 	if utf8.RuneCountInString(source) > maxSourceLength {
 		return botprovider.Request{}, fmt.Errorf("链接或分享内容不能超过 %d 个字符", maxSourceLength)
+	}
+	detectedPlatform, err := DetectPlatform(source)
+	if err != nil {
+		return botprovider.Request{}, err
+	}
+	if detectedPlatform != spec.Key {
+		detectedSpec, _ := FindPlatform(detectedPlatform)
+		return botprovider.Request{}, fmt.Errorf("输入内容属于%s，不能使用%s来源", detectedSpec.Name, spec.Name)
 	}
 	maxAssets := positiveInt(input["max_assets"])
 	if maxAssets == 0 {

@@ -312,7 +312,7 @@ export function VideoComposeAssetPicker({
               <div className="ws-video-compose-picker-empty">
                 <EmptyIcon size={28} />
                 <strong>暂无可用{kind === "video" ? "视频" : "音频"}</strong>
-                <span>请先运行对应节点，或通过导入节点添加素材。</span>
+                <span>请先运行对应节点，或通过引用节点添加素材。</span>
               </div>
             )}
           </div>

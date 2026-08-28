@@ -29,11 +29,13 @@ var botDataMigrations = []dataMigrationSpec{
 	{key: "energon.voice-option-mappings.v1", run: EnsureEnergonVoiceOptionMappings},
 	{key: "energon.video-compose.v1", run: EnsureEnergonVideoComposePower},
 	{key: "energon.wechat-official-account-import.v2", run: MigrateEnergonWeChatPowerIdentity},
+	{key: "energon.web-content-import.v3", run: MigrateEnergonWebContentCatalog},
 	{key: "energon.storyboard-grid.v1", run: EnsureEnergonStoryboardGridPower},
 	{key: "energon.log-attribution.v1", run: MigrateEnergonLogAttribution},
 	{key: "asset.audio-covers.v1", run: MigrateLegacyAudioCovers},
 	{key: "asset.generated-data-images.v1", run: MigrateLegacyGeneratedDataImages},
 	{key: "asset.owner-user.v1", run: MigrateAssetOwners},
+	{key: maintenancemodel.ProjectMultiCanvasMigrationKey, run: MigrateProjectMultiCanvas},
 	{
 		key:       "knowledge.concept-sources.v1",
 		run:       knowledge.MigrateLegacyConceptSources,

@@ -46,6 +46,7 @@ export type CanvasAssetEntry = {
 export type BuildCanvasAssetIndexInput = {
   nodes: SpaceCanvasNode[];
   assets: ProjectAsset[];
+  canvasId: number;
   assetCateId: number;
   nodeOutput: (node: SpaceCanvasNode) => unknown;
   nodePreview: (node: SpaceCanvasNode) => CanvasAssetPreview;
@@ -89,6 +90,7 @@ export function buildCanvasAssetIndex(
   );
   const materialAssets = materialAssetsByNodeKey(
     input.assets,
+    input.canvasId,
     input.assetCateId,
   );
   const materials = input.nodes
@@ -110,11 +112,7 @@ export function buildCanvasAssetIndex(
             ? `${groupSource.title} / ${group.title}`
             : group?.title,
         nodeType: canvasAssetNodeType(node),
-        status: canvasMaterialStatus(
-          node,
-          asset,
-          input.nodeHasResult(node),
-        ),
+        status: canvasMaterialStatus(node, asset, input.nodeHasResult(node)),
         preview: input.nodePreview(node),
         output,
         node,
@@ -131,6 +129,7 @@ export function buildCanvasAssetIndex(
   const works = input.assets
     .filter(
       (asset) =>
+        Number(asset.canvas_id || 0) === input.canvasId &&
         Number(asset.asset_cate_id || 0) === input.assetCateId &&
         String(asset.role || "material") === "work" &&
         String(asset.status || "") !== "archived",
@@ -185,10 +184,15 @@ function assetKindNodeType(kind: unknown): CanvasAssetNodeType {
   }
 }
 
-function materialAssetsByNodeKey(assets: ProjectAsset[], assetCateId: number) {
+function materialAssetsByNodeKey(
+  assets: ProjectAsset[],
+  canvasId: number,
+  assetCateId: number,
+) {
   const result = new Map<string, ProjectAsset>();
   for (const asset of assets) {
     if (
+      Number(asset.canvas_id || 0) !== canvasId ||
       Number(asset.asset_cate_id || 0) !== assetCateId ||
       String(asset.role || "") !== "material" ||
       String(asset.status || "") === "archived"

@@ -31,6 +31,7 @@ type CreateRequest struct {
 }
 
 type SaveAssetRequest struct {
+	CanvasID     uint64
 	AssetCateID  uint64
 	CollectionID uint64
 	FlowID       uint64
@@ -212,6 +213,7 @@ func (s Service) SaveAsset(ctx context.Context, projectID uint64, req SaveAssetR
 	}
 	return withWorkspaceAssetLock(ctx, project.ID, []string{
 		"save",
+		fmt.Sprintf("%d", req.CanvasID),
 		req.RequestID,
 		req.NodeKey,
 		req.Name,
@@ -230,6 +232,7 @@ func (s Service) SaveAsset(ctx context.Context, projectID uint64, req SaveAssetR
 		}
 		asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
 			ProjectID:    project.ID,
+			CanvasID:     req.CanvasID,
 			BodyID:       project.BodyID,
 			TeamID:       project.TeamID,
 			FlowID:       req.FlowID,

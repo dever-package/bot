@@ -1,0 +1,387 @@
+.ws-canvas-manager-backdrop {
+  --ws-panel-strong: var(--body-work-surface-raised);
+  --ws-card: var(--body-work-surface);
+  --ws-border: var(--body-work-line);
+  --ws-border-strong: var(--body-work-line);
+  --ws-text: var(--body-work-text);
+  --ws-muted: var(--body-work-muted);
+  --ws-green: var(--body-work-primary);
+  --ws-rose: #e11d48;
+  position: fixed;
+  inset: 0;
+  z-index: 240;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(15 23 42 / 0.42);
+  backdrop-filter: blur(2px);
+  color: var(--ws-text);
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  letter-spacing: 0;
+}
+
+.ws-canvas-manager-backdrop,
+.ws-canvas-manager-backdrop * {
+  box-sizing: border-box;
+}
+
+.ws-canvas-manager-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--ws-border-strong);
+  border-radius: 8px;
+  background: var(--ws-panel-strong);
+  color: var(--ws-text);
+  box-shadow: 0 24px 70px rgb(15 23 42 / 0.24);
+}
+
+.ws-canvas-manager-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--ws-border);
+}
+
+.ws-canvas-manager-header > div,
+.ws-canvas-manager-header-actions,
+.ws-canvas-manager-trash-toggle,
+.ws-canvas-manager-trash-toggle > span,
+.ws-canvas-manager-deleted-row,
+.ws-canvas-manager-deleted-row > div {
+  display: flex;
+  align-items: center;
+}
+
+.ws-canvas-manager-header > div {
+  min-width: 0;
+  gap: 10px;
+}
+
+.ws-canvas-manager-icon {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-border);
+  border-radius: 6px;
+  color: var(--ws-muted);
+}
+
+.ws-canvas-manager-header h2 {
+  margin: 0;
+  letter-spacing: 0;
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.ws-canvas-manager-header-actions {
+  gap: 6px;
+}
+
+.ws-canvas-manager-header-actions button,
+.ws-canvas-manager-deleted-row > button {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--ws-border-strong);
+  border-radius: 5px;
+  background: var(--ws-card);
+  color: var(--ws-text);
+  cursor: pointer;
+}
+
+.ws-canvas-manager-header-actions button {
+  padding: 0 10px;
+}
+
+.ws-canvas-manager-header-actions button:last-child {
+  width: 30px;
+  padding: 0;
+}
+
+.ws-canvas-manager-header-actions button.is-primary {
+  border-color: var(--ws-text);
+  background: var(--ws-text);
+  color: var(--ws-panel-strong);
+}
+
+.ws-canvas-manager-body {
+  min-height: 0;
+  padding: 10px 12px 12px;
+  overflow: auto;
+}
+
+.ws-canvas-manager-create {
+  margin-bottom: 8px;
+  border: 1px solid var(--ws-border-strong);
+  border-radius: 6px;
+  background: var(--ws-card);
+}
+
+.ws-canvas-manager-list {
+  display: grid;
+  gap: 3px;
+}
+
+.ws-canvas-manager-row {
+  position: relative;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.ws-canvas-manager-row:hover,
+.ws-canvas-manager-row.is-active {
+  background: color-mix(in srgb, var(--ws-text) 5%, transparent);
+}
+
+.ws-canvas-manager-row.is-drag-target {
+  border-color: var(--ws-green);
+}
+
+.ws-canvas-manager-drag,
+.ws-canvas-manager-more > button,
+.ws-canvas-name-editor button {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ws-muted);
+  cursor: pointer;
+}
+
+.ws-canvas-manager-drag {
+  cursor: grab;
+}
+
+.ws-canvas-manager-drag:active {
+  cursor: grabbing;
+}
+
+.ws-canvas-manager-select {
+  min-width: 0;
+  height: 40px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ws-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.ws-canvas-manager-select strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.ws-canvas-manager-select span {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--ws-green);
+  font-size: 11px;
+}
+
+.ws-canvas-manager-more {
+  position: relative;
+  flex: 0 0 auto;
+  margin-right: 4px;
+}
+
+.ws-canvas-manager-drag:hover,
+.ws-canvas-manager-more > button:hover,
+.ws-canvas-name-editor button:hover {
+  background: var(--ws-border);
+  color: var(--ws-text);
+}
+
+.ws-canvas-manager-menu {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 128px;
+  padding: 4px;
+  border: 1px solid var(--ws-border-strong);
+  border-radius: 6px;
+  background: var(--ws-panel-strong);
+  box-shadow: 0 12px 30px rgb(15 23 42 / 0.16);
+}
+
+.ws-canvas-manager-menu button {
+  width: 100%;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ws-text);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.ws-canvas-manager-menu button:hover {
+  background: var(--ws-border);
+}
+
+.ws-canvas-manager-menu button.is-danger {
+  color: var(--ws-rose);
+}
+
+.ws-canvas-manager-menu button:disabled,
+.ws-canvas-manager-dialog button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.ws-canvas-name-editor {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+}
+
+.ws-canvas-name-editor input {
+  min-width: 0;
+  height: 30px;
+  flex: 1;
+  padding: 0 9px;
+  border: 1px solid var(--ws-border-strong);
+  border-radius: 5px;
+  outline: none;
+  background: var(--ws-panel-strong);
+  color: var(--ws-text);
+}
+
+.ws-canvas-name-editor input:focus {
+  border-color: var(--ws-green);
+}
+
+.ws-canvas-manager-trash {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--ws-border);
+}
+
+.ws-canvas-manager-trash-toggle {
+  width: 100%;
+  height: 34px;
+  justify-content: space-between;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ws-muted);
+  cursor: pointer;
+}
+
+.ws-canvas-manager-trash-toggle:hover {
+  background: color-mix(in srgb, var(--ws-text) 5%, transparent);
+  color: var(--ws-text);
+}
+
+.ws-canvas-manager-trash-toggle > span {
+  gap: 7px;
+  font-size: 12px;
+}
+
+.ws-canvas-manager-trash-toggle svg:last-child {
+  transition: transform 120ms ease;
+}
+
+.ws-canvas-manager-trash-toggle svg:last-child.is-open {
+  transform: rotate(180deg);
+}
+
+.ws-canvas-manager-deleted-list {
+  display: grid;
+  gap: 3px;
+  padding-top: 4px;
+}
+
+.ws-canvas-manager-deleted-list > p {
+  margin: 0;
+  padding: 12px 8px;
+  color: var(--ws-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.ws-canvas-manager-deleted-row {
+  min-height: 44px;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 6px 5px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ws-text) 4%, transparent);
+}
+
+.ws-canvas-manager-deleted-row > div {
+  min-width: 0;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ws-canvas-manager-deleted-row strong {
+  max-width: 330px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.ws-canvas-manager-deleted-row span {
+  color: var(--ws-muted);
+  font-size: 11px;
+}
+
+.ws-canvas-manager-deleted-row > button {
+  flex: 0 0 auto;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .ws-canvas-manager-dialog {
+    max-height: 60dvh;
+  }
+
+  .ws-canvas-manager-header {
+    padding: 12px;
+  }
+
+  .ws-canvas-manager-deleted-row strong {
+    max-width: 210px;
+  }
+}

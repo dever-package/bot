@@ -42,6 +42,7 @@ export type AssetRecord = {
   bodyID: number;
   teamID: number;
   flowID: number;
+  canvasID: number;
   assetCateID: number;
   collectionID: number;
   nodeKey: string;
@@ -75,6 +76,7 @@ export type AssetFilters = {
   sourceType: "" | AssetSourceType;
   sourceID: number;
   projectID: number;
+  canvasID: number;
   assetCateID: number;
   materialCateID: number;
   nodeKey: string;
@@ -92,6 +94,12 @@ export type AssetCateOption = AssetFilterOption & {
   cardinality: string;
 };
 
+export type CanvasFilterOption = AssetFilterOption & {
+  projectID: number;
+  assetCateID: number;
+  sort: number;
+};
+
 export type WebContentImportPlatform = {
   key: string;
   name: string;
@@ -99,6 +107,7 @@ export type WebContentImportPlatform = {
 
 export type AssetFilterOptions = {
   projects: AssetFilterOption[];
+  canvases: CanvasFilterOption[];
   tools: AssetFilterOption[];
   dialogues: AssetFilterOption[];
   assetCates: AssetCateOption[];
@@ -151,6 +160,7 @@ export const emptyAssetFilters: AssetFilters = {
   sourceType: "",
   sourceID: 0,
   projectID: 0,
+  canvasID: 0,
   assetCateID: 0,
   materialCateID: 0,
   nodeKey: "",

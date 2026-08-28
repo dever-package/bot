@@ -6,6 +6,8 @@ import (
 	"github.com/shemic/dever/orm"
 )
 
+const ProjectMultiCanvasMigrationKey = "project.multi-canvas.v1"
+
 type DataMigration struct {
 	ID        uint64    `dorm:"primaryKey;autoIncrement;comment:数据迁移ID"`
 	Key       string    `dorm:"type:varchar(160);not null;default:'';comment:迁移标识"`

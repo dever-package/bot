@@ -702,6 +702,7 @@ func (s Service) saveCanvasPowerResult(
 	}
 	return s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
 		ProjectID:   run.ProjectID,
+		CanvasID:    uint64Value(metadata["canvas_id"]),
 		BodyID:      run.BodyID,
 		TeamID:      run.TeamID,
 		FlowID:      uint64Value(metadata["flow_id"]),

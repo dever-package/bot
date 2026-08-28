@@ -14,6 +14,7 @@ import (
 
 type EnsureProjectCollectionRequest struct {
 	ProjectID     uint64
+	CanvasID      uint64
 	BodyID        uint64
 	TeamID        uint64
 	AssetCateID   uint64
@@ -34,6 +35,7 @@ func (s Service) EnsureProjectCollection(ctx context.Context, req EnsureProjectC
 	if req.Name == "" {
 		if existing := assetmodel.NewAssetModel().Find(ctx, map[string]any{
 			"project_id":    req.ProjectID,
+			"canvas_id":     req.CanvasID,
 			"team_id":       req.TeamID,
 			"asset_cate_id": req.AssetCateID,
 			"node_key":      req.SourceNodeKey,
@@ -46,7 +48,7 @@ func (s Service) EnsureProjectCollection(ctx context.Context, req EnsureProjectC
 	if req.Name == "" {
 		req.Name = "分镜脚本"
 	}
-	requestID := projectCollectionRequestID(req.ProjectID, req.AssetCateID, req.SourceNodeKey)
+	requestID := projectCollectionRequestID(req.ProjectID, req.CanvasID, req.AssetCateID, req.SourceNodeKey)
 	content := req.Content
 	if content == nil {
 		content = map[string]any{
@@ -56,6 +58,7 @@ func (s Service) EnsureProjectCollection(ctx context.Context, req EnsureProjectC
 	}
 	asset, _, err := s.SaveVersion(ctx, SaveVersionRequest{
 		ProjectID:   req.ProjectID,
+		CanvasID:    req.CanvasID,
 		BodyID:      req.BodyID,
 		TeamID:      req.TeamID,
 		AssetCateID: req.AssetCateID,
@@ -78,8 +81,8 @@ func (s Service) EnsureProjectCollection(ctx context.Context, req EnsureProjectC
 	return asset, nil
 }
 
-func projectCollectionRequestID(projectID uint64, assetCateID uint64, sourceNodeKey string) string {
-	sum := sha1.Sum([]byte(fmt.Sprintf("%d\x1f%d\x1f%s", projectID, assetCateID, strings.TrimSpace(sourceNodeKey))))
+func projectCollectionRequestID(projectID uint64, canvasID uint64, assetCateID uint64, sourceNodeKey string) string {
+	sum := sha1.Sum([]byte(fmt.Sprintf("%d\x1f%d\x1f%d\x1f%s", projectID, canvasID, assetCateID, strings.TrimSpace(sourceNodeKey))))
 	token := hex.EncodeToString(sum[:])
 	return "asset-collection:" + token
 }

@@ -10,6 +10,7 @@ export function AssetImportDialog({
   open,
   teamID,
   projectID = 0,
+  canvasID = 0,
   platforms,
   maxItems,
   onClose,
@@ -19,6 +20,7 @@ export function AssetImportDialog({
   open: boolean;
   teamID: number;
   projectID?: number;
+  canvasID?: number;
   platforms: WebContentImportPlatform[];
   maxItems: number;
   onClose: () => void;
@@ -33,6 +35,7 @@ export function AssetImportDialog({
     open,
     teamID,
     projectID,
+    canvasID,
     onClose,
     onImported,
     onTaskChange,
@@ -62,7 +65,7 @@ export function AssetImportDialog({
       className="wb-asset-form-backdrop"
       role="dialog"
       aria-modal="true"
-      aria-label="导入平台内容"
+      aria-label="导入网络内容"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -77,7 +80,7 @@ export function AssetImportDialog({
               <FileInput aria-hidden="true" />
             </span>
             <div>
-              <h2>导入平台内容</h2>
+              <h2>导入网络内容</h2>
               <p>
                 支持：
                 {platforms.map((platform) => platform.name).join("、") ||

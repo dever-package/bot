@@ -180,6 +180,7 @@ function restoreStoryboardReferenceState(
 export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
   const {
     projectId,
+    canvasId,
     runningNode,
     onNodeDraftChange,
     onAssetCreated,
@@ -1094,6 +1095,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
   ): Promise<UploadPreview[]> {
     const previews = await uploadSpaceFiles({
       projectID: projectId,
+      canvasID: canvasId,
       teamID: Number(space?.project.team_id || 0),
       files,
       ruleID: param.upload_rule_id,

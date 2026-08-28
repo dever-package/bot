@@ -206,6 +206,7 @@ func saveContentVersionRequest(
 		AssetID:      asset.ID,
 		UserID:       asset.UserID,
 		ProjectID:    asset.ProjectID,
+		CanvasID:     asset.CanvasID,
 		BodyID:       asset.BodyID,
 		TeamID:       asset.TeamID,
 		FlowID:       asset.FlowID,
@@ -232,6 +233,7 @@ func sameAssetScope(current *assetmodel.Asset, expected assetmodel.Asset) bool {
 		current.UserID == expected.UserID &&
 		current.TeamID == expected.TeamID &&
 		current.ProjectID == expected.ProjectID &&
+		current.CanvasID == expected.CanvasID &&
 		current.BodyID == expected.BodyID
 }
 

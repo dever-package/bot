@@ -101,6 +101,7 @@ export function normalizeOfficialMaterial(value: any): AssetRecord {
     bodyID: 0,
     teamID: 0,
     flowID: 0,
+    canvasID: 0,
     assetCateID: 0,
     collectionID: 0,
     nodeKey: "",

@@ -181,6 +181,7 @@ func (s WorkspaceService) runCanvasPowerRequest(
 		requestID,
 	)
 	return s.project.RunCanvasPower(ctx, projectID, teamservice.CanvasPowerRunRequest{
+		CanvasID:               req.CanvasID,
 		FlowID:                 node.FlowID,
 		RequestID:              requestID,
 		AssetCateID:            firstUint64(node.AssetCateID, req.AssetCateID),

@@ -21,6 +21,7 @@ type SaveVersionRequest struct {
 	AssetID      uint64
 	UserID       uint64
 	ProjectID    uint64
+	CanvasID     uint64
 	BodyID       uint64
 	TeamID       uint64
 	FlowID       uint64
@@ -63,12 +64,13 @@ func (Service) FindProjectAsset(ctx context.Context, projectID uint64, id uint64
 	})
 }
 
-func (Service) LatestProjectAssetByCate(ctx context.Context, projectID uint64, assetCateID uint64) (*assetmodel.Asset, *assetmodel.Version) {
+func (Service) LatestProjectAssetByCate(ctx context.Context, projectID uint64, canvasID uint64, assetCateID uint64) (*assetmodel.Asset, *assetmodel.Version) {
 	if projectID == 0 || assetCateID == 0 {
 		return nil, nil
 	}
 	latest := assetmodel.NewAssetModel().Find(ctx, map[string]any{
 		"project_id":    projectID,
+		"canvas_id":     canvasID,
 		"asset_cate_id": assetCateID,
 		"role":          assetmodel.RoleWork,
 		"status":        assetmodel.StatusCurrent,
@@ -253,6 +255,25 @@ func normalizeSaveVersionRequest(ctx context.Context, req SaveVersionRequest) (S
 	default:
 		return SaveVersionRequest{}, fmt.Errorf("资产来源不合法")
 	}
+	if req.CanvasID > 0 && req.ProjectID == 0 {
+		return SaveVersionRequest{}, fmt.Errorf("资产画布缺少所属项目")
+	}
+	if req.CanvasID > 0 {
+		canvas := projectmodel.NewCanvasModel().Find(ctx, map[string]any{
+			"id":         req.CanvasID,
+			"project_id": req.ProjectID,
+			"status":     projectmodel.CanvasStatusEnabled,
+		})
+		if canvas == nil {
+			return SaveVersionRequest{}, fmt.Errorf("资产所属画布不存在")
+		}
+		if req.AssetCateID > 0 && canvas.AssetCateID != req.AssetCateID {
+			return SaveVersionRequest{}, fmt.Errorf("资产分类与画布不一致")
+		}
+		if req.AssetCateID == 0 {
+			req.AssetCateID = canvas.AssetCateID
+		}
+	}
 	if req.Kind == assetmodel.KindCollection {
 		if req.CollectionID > 0 {
 			return SaveVersionRequest{}, fmt.Errorf("集合不能归入其他集合")
@@ -278,6 +299,9 @@ func normalizeSaveVersionRequest(ctx context.Context, req SaveVersionRequest) (S
 		}
 		if collection.AssetCateID != req.AssetCateID {
 			return SaveVersionRequest{}, fmt.Errorf("资产与集合的项目分类不匹配")
+		}
+		if collection.CanvasID != req.CanvasID {
+			return SaveVersionRequest{}, fmt.Errorf("资产与集合的画布不匹配")
 		}
 	}
 	if req.Role == assetmodel.RoleWork && (req.SourceType != assetmodel.SourceProject || req.AssetCateID == 0) {
@@ -364,6 +388,7 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 		assetID, insertErr := insertAsset(ctx, map[string]any{
 			"user_id":       req.UserID,
 			"project_id":    req.ProjectID,
+			"canvas_id":     req.CanvasID,
 			"body_id":       req.BodyID,
 			"team_id":       req.TeamID,
 			"flow_id":       req.FlowID,
@@ -454,6 +479,9 @@ func updateAssetVersionPointer(
 		"status":        assetmodel.StatusCurrent,
 		"deleted_at":    nil,
 	}
+	if req.ProjectID > 0 {
+		updates["canvas_id"] = req.CanvasID
+	}
 	if req.Sort > 0 {
 		updates["sort"] = req.Sort
 	}
@@ -494,6 +522,9 @@ func assetIdentityFilter(req SaveVersionRequest) map[string]any {
 	if req.SourceType == assetmodel.SourceProject {
 		filter["asset_cate_id"] = req.AssetCateID
 	}
+	if req.ProjectID > 0 {
+		filter["canvas_id"] = req.CanvasID
+	}
 	if req.NodeKey != "" {
 		filter["node_key"] = req.NodeKey
 	} else {
@@ -527,6 +558,7 @@ func assetMatchesSaveRequest(asset *assetmodel.Asset, req SaveVersionRequest) bo
 		asset.UserID != req.UserID ||
 		asset.TeamID != req.TeamID ||
 		asset.ProjectID != req.ProjectID ||
+		(req.ProjectID > 0 && asset.CanvasID != req.CanvasID) ||
 		asset.SourceType != req.SourceType ||
 		asset.SourceID != req.SourceID ||
 		asset.CollectionID != req.CollectionID ||
@@ -590,6 +622,7 @@ func (s Service) UpdateVersionContent(ctx context.Context, projectID uint64, ass
 		AssetID:      asset.ID,
 		UserID:       asset.UserID,
 		ProjectID:    asset.ProjectID,
+		CanvasID:     asset.CanvasID,
 		BodyID:       asset.BodyID,
 		TeamID:       asset.TeamID,
 		FlowID:       asset.FlowID,
@@ -666,6 +699,7 @@ func AssetToMap(row assetmodel.Asset) map[string]any {
 	return map[string]any{
 		"id":            row.ID,
 		"project_id":    row.ProjectID,
+		"canvas_id":     row.CanvasID,
 		"body_id":       row.BodyID,
 		"team_id":       row.TeamID,
 		"flow_id":       row.FlowID,

@@ -109,6 +109,7 @@ func hasAssetIdentityConflict(ctx context.Context, asset *assetmodel.Asset) bool
 	filter := assetIdentityFilter(SaveVersionRequest{
 		UserID:       asset.UserID,
 		ProjectID:    asset.ProjectID,
+		CanvasID:     asset.CanvasID,
 		BodyID:       asset.BodyID,
 		TeamID:       asset.TeamID,
 		FlowID:       asset.FlowID,

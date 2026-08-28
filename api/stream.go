@@ -100,6 +100,30 @@ func TextSliceFromBody(body map[string]any, keys ...string) []string {
 	return nil
 }
 
+func Uint64SliceFromBody(body map[string]any, keys ...string) []uint64 {
+	for _, key := range keys {
+		values := make([]uint64, 0)
+		switch items := body[key].(type) {
+		case []any:
+			for _, item := range items {
+				if value := uint64(frontstream.InputInt64(item, 0)); value > 0 {
+					values = append(values, value)
+				}
+			}
+		case []uint64:
+			for _, item := range items {
+				if item > 0 {
+					values = append(values, item)
+				}
+			}
+		}
+		if len(values) > 0 {
+			return values
+		}
+	}
+	return nil
+}
+
 func MapFromBody(body map[string]any, key string) map[string]any {
 	if row, ok := body[key].(map[string]any); ok && row != nil {
 		return row

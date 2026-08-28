@@ -173,6 +173,7 @@ func (Workbench) PostUploadSaveAsset(c *server.Context) error {
 	data, err := workbenchRunner.SaveUploadAsset(c.Context(), workbenchservice.SaveUploadAssetRequest{
 		TeamID:      botapi.Uint64FromBody(body, "team_id", "teamId"),
 		ProjectID:   botapi.Uint64FromBody(body, "project_id", "projectId"),
+		CanvasID:    botapi.Uint64FromBody(body, "canvas_id", "canvasId"),
 		File:        file,
 		TextContent: botapi.TextFromBody(body, "text_content", "textContent"),
 	})
@@ -187,6 +188,7 @@ func (Workbench) PostWebContentImport(c *server.Context) error {
 	data, err := workbenchRunner.ImportWebContent(c.Context(), workbenchservice.WebContentImportRequest{
 		TeamID:    botapi.Uint64FromBody(body, "team_id", "teamId"),
 		ProjectID: botapi.Uint64FromBody(body, "project_id", "projectId"),
+		CanvasID:  botapi.Uint64FromBody(body, "canvas_id", "canvasId"),
 		RequestID: botapi.TextFromBody(body, "request_id", "requestId"),
 		Source:    botapi.TextFromBody(body, "source", "content", "url"),
 	})
@@ -197,6 +199,7 @@ func (Workbench) GetWebContentImportTask(c *server.Context) error {
 	data, err := workbenchRunner.WebContentImportTask(c.Context(), workbenchservice.WebContentImportTaskRequest{
 		TeamID:    botapi.QueryUint64(c, "team_id", "teamId"),
 		ProjectID: botapi.QueryUint64(c, "project_id", "projectId"),
+		CanvasID:  botapi.QueryUint64(c, "canvas_id", "canvasId"),
 		TaskID:    botapi.QueryUint64(c, "task_id", "taskId", "id"),
 	})
 	return botapi.WriteJSON(c, data, err)
@@ -207,6 +210,7 @@ func (Workbench) GetWebContentImportTasks(c *server.Context) error {
 		c.Context(),
 		botapi.QueryUint64(c, "team_id", "teamId"),
 		botapi.QueryUint64(c, "project_id", "projectId"),
+		botapi.QueryUint64(c, "canvas_id", "canvasId"),
 	)
 	return botapi.WriteJSON(c, data, err)
 }
@@ -222,6 +226,7 @@ func (Workbench) GetAssets(c *server.Context) error {
 			"scope_project_id",
 			"scopeProjectId",
 		),
+		CanvasID:     botapi.QueryUint64(c, "canvas_id", "canvasId"),
 		AssetCateID:  botapi.QueryUint64(c, "asset_cate_id", "assetCateId"),
 		CollectionID: botapi.QueryUint64(c, "collection_id", "collectionId"),
 		NodeKey:      botapi.QueryText(c, "node_key", "nodeKey"),

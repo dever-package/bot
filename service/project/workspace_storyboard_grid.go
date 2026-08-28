@@ -33,6 +33,7 @@ func (s WorkspaceService) saveWorkspaceStoryboardGridMaterial(
 	collectionName := firstText(document["title"], canvasRunNodeTitle(node), "宫格图片")
 	collection, err := s.project.asset.EnsureProjectCollection(ctx, assetservice.EnsureProjectCollectionRequest{
 		ProjectID:     projectID,
+		CanvasID:      req.CanvasID,
 		BodyID:        run.BodyID,
 		TeamID:        run.TeamID,
 		AssetCateID:   assetCateID,
@@ -62,6 +63,7 @@ func (s WorkspaceService) saveWorkspaceStoryboardGridMaterial(
 		childRequestID := canvasChildRequestID(run.RequestID, nodeKey)
 		content := storyboardGridFrameAssetContent(document, frame, image)
 		result, saveErr := s.project.SaveAsset(ctx, projectID, SaveAssetRequest{
+			CanvasID:     req.CanvasID,
 			AssetCateID:  assetCateID,
 			CollectionID: collection.ID,
 			FlowID:       node.FlowID,
@@ -201,6 +203,7 @@ func (s Service) saveImportedStoryboardGrid(
 		ctx,
 		assetservice.EnsureProjectCollectionRequest{
 			ProjectID:     projectID,
+			CanvasID:      req.CanvasID,
 			BodyID:        bodyID,
 			TeamID:        teamID,
 			AssetCateID:   req.AssetCateID,
@@ -384,6 +387,7 @@ func (s Service) resolveStoryboardGridFrameAsset(
 	requestID := storyboardGridImportRequestID(collection.ID, frameID, sourceVersion.ID)
 	child, childVersion, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
 		ProjectID:    collection.ProjectID,
+		CanvasID:     collection.CanvasID,
 		BodyID:       collection.BodyID,
 		TeamID:       collection.TeamID,
 		FlowID:       collection.FlowID,

@@ -12,6 +12,7 @@ type externalAssetSaveScope struct {
 	UserID    uint64
 	TeamID    uint64
 	ProjectID uint64
+	CanvasID  uint64
 	BodyID    uint64
 	ReleaseID uint64
 }
@@ -20,6 +21,7 @@ func (s Service) resolveExternalAssetSaveScope(
 	ctx context.Context,
 	teamID uint64,
 	projectID uint64,
+	canvasID uint64,
 ) (externalAssetSaveScope, error) {
 	if projectID > 0 {
 		actor, err := userservice.RequireActor(ctx)
@@ -40,10 +42,21 @@ func (s Service) resolveExternalAssetSaveScope(
 		if project.BodyID == 0 {
 			return externalAssetSaveScope{}, fmt.Errorf("项目载体不存在")
 		}
+		if canvasID > 0 {
+			canvas := projectmodel.NewCanvasModel().Find(ctx, map[string]any{
+				"id":         canvasID,
+				"project_id": project.ID,
+				"status":     projectmodel.CanvasStatusEnabled,
+			})
+			if canvas == nil {
+				return externalAssetSaveScope{}, fmt.Errorf("项目画布不存在")
+			}
+		}
 		return externalAssetSaveScope{
 			UserID:    actor.UserID,
 			TeamID:    project.TeamID,
 			ProjectID: project.ID,
+			CanvasID:  canvasID,
 			BodyID:    project.BodyID,
 			ReleaseID: project.ReleaseID,
 		}, nil

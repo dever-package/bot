@@ -3,6 +3,7 @@ import {
   normalizeAssetVersion,
   normalizeAssetVersions,
   normalizeCanvasState,
+  normalizeCanvasSummary,
   normalizePowerCatalog,
   normalizeProjectAsset,
   normalizeSpaceBootstrap,
@@ -25,6 +26,7 @@ import { normalizeStoryboardShotDurationSpecs } from "./space-storyboard-duratio
 import type {
   AssetVersion,
   AssetVersionPage,
+  CanvasSummary,
   CanvasResultSourceRef,
   OutputTypeOption,
   PowerCategoryOption,
@@ -45,10 +47,12 @@ import type {
 
 export async function fetchSpaceBootstrap(
   projectId: number,
+  canvasId = 0,
   assetCateId = 0,
 ): Promise<SpaceBootstrap> {
   const result = await request(joinSiteApi("workspace/bootstrap"), "get", {
     project_id: projectId,
+    canvas_id: canvasId,
     asset_cate_id: assetCateId,
   });
   return normalizeSpaceBootstrap(
@@ -58,11 +62,17 @@ export async function fetchSpaceBootstrap(
 
 export async function fetchSpaceCanvas(input: {
   projectId: number;
-  assetCateId: number;
-}): Promise<{ canvas: SpaceCanvasState; assets: ProjectAsset[] }> {
+  canvasId: number;
+  assetCateId?: number;
+}): Promise<{
+  canvas: SpaceCanvasState;
+  assets: ProjectAsset[];
+  canvasList: CanvasSummary[];
+}> {
   const result = await request(joinSiteApi("workspace/canvas"), "get", {
     project_id: input.projectId,
-    asset_cate_id: input.assetCateId,
+    canvas_id: input.canvasId,
+    asset_cate_id: input.assetCateId || 0,
   });
   const data = successfulResponseData(result, "加载分类画布失败");
   const assets = data.assets || {};
@@ -72,9 +82,126 @@ export async function fetchSpaceCanvas(input: {
       ? assets
       : [];
   return {
-    canvas: normalizeCanvasState(data.canvas, input.assetCateId),
+    canvas: normalizeCanvasState(data.canvas, input.assetCateId || 0),
     assets: assetRows.map(normalizeProjectAsset),
+    canvasList: Array.isArray(data.canvas_list)
+      ? data.canvas_list.map(normalizeCanvasSummary)
+      : [],
   };
+}
+
+type CanvasMutationResult = {
+  canvas?: SpaceCanvasState;
+  canvasList: CanvasSummary[];
+  activeCanvasId?: number;
+};
+
+function normalizeCanvasMutationResult(value: unknown): CanvasMutationResult {
+  const data = isRecord(value) ? value : {};
+  const rawCanvas = isRecord(data.canvas) ? data.canvas : null;
+  return {
+    canvas:
+      rawCanvas && Array.isArray(rawCanvas.nodes)
+        ? normalizeCanvasState(rawCanvas)
+        : undefined,
+    canvasList: Array.isArray(data.canvas_list)
+      ? data.canvas_list.map(normalizeCanvasSummary)
+      : [],
+    activeCanvasId: Number(data.active_canvas_id || 0) || undefined,
+  };
+}
+
+export async function createSpaceCanvas(input: {
+  projectId: number;
+  assetCateId: number;
+  name?: string;
+}): Promise<CanvasMutationResult> {
+  const result = await request(joinSiteApi("workspace/canvas_create"), "post", {
+    project_id: input.projectId,
+    asset_cate_id: input.assetCateId,
+    name: input.name || "",
+  });
+  return normalizeCanvasMutationResult(
+    successfulResponseData(result, "创建画布失败"),
+  );
+}
+
+export async function renameSpaceCanvas(input: {
+  projectId: number;
+  canvasId: number;
+  name: string;
+}): Promise<CanvasMutationResult> {
+  const result = await request(joinSiteApi("workspace/canvas_rename"), "post", {
+    project_id: input.projectId,
+    canvas_id: input.canvasId,
+    name: input.name,
+  });
+  return normalizeCanvasMutationResult(
+    successfulResponseData(result, "重命名画布失败"),
+  );
+}
+
+export async function reorderSpaceCanvases(input: {
+  projectId: number;
+  assetCateId: number;
+  canvasIds: number[];
+}): Promise<CanvasMutationResult> {
+  const result = await request(
+    joinSiteApi("workspace/canvas_reorder"),
+    "post",
+    {
+      project_id: input.projectId,
+      asset_cate_id: input.assetCateId,
+      canvas_ids: input.canvasIds,
+    },
+  );
+  return normalizeCanvasMutationResult(
+    successfulResponseData(result, "调整画布顺序失败"),
+  );
+}
+
+export async function deleteSpaceCanvas(input: {
+  projectId: number;
+  canvasId: number;
+}): Promise<CanvasMutationResult> {
+  const result = await request(joinSiteApi("workspace/canvas_delete"), "post", {
+    project_id: input.projectId,
+    canvas_id: input.canvasId,
+  });
+  return normalizeCanvasMutationResult(
+    successfulResponseData(result, "删除画布失败"),
+  );
+}
+
+export async function fetchDeletedSpaceCanvases(input: {
+  projectId: number;
+  assetCateId: number;
+}): Promise<CanvasSummary[]> {
+  const result = await request(joinSiteApi("workspace/canvas_deleted"), "get", {
+    project_id: input.projectId,
+    asset_cate_id: input.assetCateId,
+  });
+  const data = successfulResponseData(result, "加载已删除画布失败");
+  return Array.isArray(data.items)
+    ? data.items.map(normalizeCanvasSummary)
+    : [];
+}
+
+export async function restoreSpaceCanvas(input: {
+  projectId: number;
+  canvasId: number;
+}): Promise<CanvasMutationResult> {
+  const result = await request(
+    joinSiteApi("workspace/canvas_restore"),
+    "post",
+    {
+      project_id: input.projectId,
+      canvas_id: input.canvasId,
+    },
+  );
+  return normalizeCanvasMutationResult(
+    successfulResponseData(result, "恢复画布失败"),
+  );
 }
 
 export async function fetchSpacePowers(projectId: number): Promise<{
@@ -117,6 +244,7 @@ export async function fetchSpacePowerForm(input: {
 
 export async function runSpaceCanvas(input: {
   projectId: number;
+  canvasId: number;
   assetCateId: number;
   startNodeId: string;
   requestId?: string;
@@ -131,6 +259,7 @@ export async function runSpaceCanvas(input: {
     "post",
     {
       project_id: input.projectId,
+      canvas_id: input.canvasId,
       asset_cate_id: input.assetCateId,
       start_node_id: input.startNodeId,
       request_id: input.requestId || "",
@@ -184,6 +313,7 @@ export type SpaceCanvasExecutionScope = "recovery" | "active" | "history";
 
 export async function fetchSpaceCanvasExecutions(input: {
   projectId: number;
+  canvasId?: number;
   scope: SpaceCanvasExecutionScope;
   assetCateId?: number;
   runIds?: number[];
@@ -196,6 +326,7 @@ export async function fetchSpaceCanvasExecutions(input: {
     "get",
     {
       project_id: input.projectId,
+      canvas_id: input.canvasId || 0,
       scope: input.scope,
       asset_cate_id: input.assetCateId || 0,
       run_ids: (input.runIds || []).filter((runId) => runId > 0).join(","),
@@ -285,11 +416,14 @@ export async function stopSpaceCanvasRun(input: {
   return successfulResponseData(result, "停止画布运行失败");
 }
 
-export async function stopAllSpaceCanvasRuns(projectId: number) {
+export async function stopAllSpaceCanvasRuns(
+  projectId: number,
+  canvasId: number,
+) {
   const result = await request(
     joinSiteApi("workspace/canvas_stop_all"),
     "post",
-    { project_id: projectId },
+    { project_id: projectId, canvas_id: canvasId },
   );
   const data = successfulResponseData(result, "停止全部画布运行失败");
   return {
@@ -540,6 +674,7 @@ export async function fetchSpaceAssetVersionDetail(input: {
 
 type SaveSpaceCanvasResultInput = {
   projectId: number;
+  canvasId?: number;
   assetCateId: number;
   name: string;
   kind: string;
@@ -555,6 +690,7 @@ type SaveSpaceCanvasResultInput = {
 function canvasResultPayload(input: SaveSpaceCanvasResultInput) {
   const payload: Record<string, unknown> = {
     project_id: input.projectId,
+    canvas_id: input.canvasId || 0,
     asset_cate_id: input.assetCateId,
     name: input.name,
     kind: input.kind,
@@ -616,21 +752,24 @@ export function saveSpaceCanvasMaterial(
   return saveSpaceCanvasResult("material", input);
 }
 
-export async function saveSpaceCanvas(
-  projectId: number,
-  assetCateId: number,
-  canvas: SpaceCanvasState,
-): Promise<{ assetCateId: number; updatedAt: string }> {
+export async function saveSpaceCanvas(input: {
+  projectId: number;
+  canvasId: number;
+  assetCateId: number;
+  canvas: SpaceCanvasState;
+}): Promise<{ canvasId: number; assetCateId: number; updatedAt: string }> {
   const result = await request(joinSiteApi("workspace/canvas"), "post", {
-    project_id: projectId,
-    asset_cate_id: assetCateId,
-    base_revision: canvas.updatedAt || "",
-    canvas: persistedCanvasState(canvas),
+    project_id: input.projectId,
+    canvas_id: input.canvasId,
+    asset_cate_id: input.assetCateId,
+    base_revision: input.canvas.updatedAt || "",
+    canvas: persistedCanvasState(input.canvas),
   });
   const data = successfulResponseData(result, "保存画布失败");
   return {
-    assetCateId: Number(data.asset_cate_id || assetCateId || 0),
-    updatedAt: String(data.updated_at || canvas.updatedAt || ""),
+    canvasId: Number(data.canvas_id || input.canvasId || 0),
+    assetCateId: Number(data.asset_cate_id || input.assetCateId || 0),
+    updatedAt: String(data.updated_at || input.canvas.updatedAt || ""),
   };
 }
 

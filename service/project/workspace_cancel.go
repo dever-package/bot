@@ -52,13 +52,18 @@ func (s WorkspaceService) StopCanvasRun(ctx context.Context, run *teammodel.Run)
 	return result, nil
 }
 
-func (s WorkspaceService) StopAllCanvasRuns(ctx context.Context, projectID uint64) (map[string]any, error) {
+func (s WorkspaceService) StopAllCanvasRuns(ctx context.Context, projectID uint64, canvasID uint64) (map[string]any, error) {
 	project, err := requireProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	canvas, err := requireProjectCanvas(ctx, project.ID, canvasID, 0)
 	if err != nil {
 		return nil, err
 	}
 	executions := workspacemodel.NewExecutionModel().Select(ctx, map[string]any{
 		"project_id": project.ID,
+		"canvas_id":  canvas.ID,
 		"status":     canvasRunActiveStatuses(),
 	}, map[string]any{
 		"order": "main.id desc",
@@ -89,6 +94,7 @@ func (s WorkspaceService) StopAllCanvasRuns(ctx context.Context, projectID uint6
 		seenRunIDs[execution.RunID] = struct{}{}
 		item := map[string]any{
 			"execution_id":  execution.ID,
+			"canvas_id":     execution.CanvasID,
 			"run_id":        execution.RunID,
 			"request_id":    strings.TrimSpace(execution.RequestID),
 			"asset_cate_id": execution.AssetCateID,
@@ -119,6 +125,7 @@ func (s WorkspaceService) StopAllCanvasRuns(ctx context.Context, projectID uint6
 		items = append(items, item)
 	}
 	return map[string]any{
+		"canvas_id":     canvas.ID,
 		"count":         len(items),
 		"stopped_count": stoppedCount,
 		"failed_count":  failedCount,

@@ -29,7 +29,7 @@ func (s Service) RequireCanvasCurrentReferences(
 // CanvasReferences returns only current assets needed to hydrate one canvas.
 // Explicit references may point across categories and projects in the same
 // team; material slots stay scoped to the current canvas category.
-func (s Service) CanvasReferences(ctx context.Context, projectID uint64, assetCateID uint64, assetIDs []uint64, nodeKeys []string) []map[string]any {
+func (s Service) CanvasReferences(ctx context.Context, projectID uint64, canvasID uint64, assetCateID uint64, assetIDs []uint64, nodeKeys []string) []map[string]any {
 	if projectID == 0 {
 		return []map[string]any{}
 	}
@@ -49,6 +49,7 @@ func (s Service) CanvasReferences(ctx context.Context, projectID uint64, assetCa
 	if keys := uniqueCanvasNodeKeys(nodeKeys); len(keys) > 0 {
 		for _, row := range assetModel.Select(ctx, map[string]any{
 			"project_id":    projectID,
+			"canvas_id":     canvasID,
 			"asset_cate_id": assetCateID,
 			"node_key":      keys,
 			"role":          assetmodel.RoleMaterial,
@@ -152,7 +153,7 @@ func uniqueCanvasNodeKeys(values []string) []string {
 // EnsureCanvasMaterialSlotsActive restores materials owned by active canvas
 // nodes. Removing a node must not archive its material because another canvas
 // may still reference that asset.
-func (s Service) EnsureCanvasMaterialSlotsActive(ctx context.Context, projectID uint64, assetCateID uint64, slots []CanvasMaterialSlot) {
+func (s Service) EnsureCanvasMaterialSlotsActive(ctx context.Context, projectID uint64, canvasID uint64, assetCateID uint64, slots []CanvasMaterialSlot) {
 	if projectID == 0 || len(slots) == 0 {
 		return
 	}
@@ -170,6 +171,7 @@ func (s Service) EnsureCanvasMaterialSlotsActive(ctx context.Context, projectID 
 	assetModel := assetmodel.NewAssetModel()
 	rows := assetModel.Select(ctx, map[string]any{
 		"project_id":    projectID,
+		"canvas_id":     canvasID,
 		"asset_cate_id": assetCateID,
 		"role":          assetmodel.RoleMaterial,
 		"status":        map[string]any{"neq": assetmodel.StatusDeleted},

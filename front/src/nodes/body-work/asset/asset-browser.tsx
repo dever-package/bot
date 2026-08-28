@@ -36,7 +36,10 @@ import { AssetUploadButton } from "./asset-upload-button";
 import { BodyWorkTooltip } from "../shared/body-work-tooltip";
 import { useAuthUserScopeKey } from "../shared/auth-scope";
 import { requestErrorMessage as errorText } from "../shared/api-response";
-import type { DetailDialogLayer } from "../shared/detail-dialog";
+import {
+  DETAIL_DIALOG_CHILD_LAYER_Z_INDEX,
+  type DetailDialogLayer,
+} from "../shared/detail-dialog";
 import {
   emptyAssetFilters,
   type AssetCatalogOptions,
@@ -62,6 +65,7 @@ import "./asset.css";
 
 const emptyOptions: AssetFilterOptions = {
   projects: [],
+  canvases: [],
   tools: [],
   dialogues: [],
   assetCates: [],
@@ -84,11 +88,10 @@ const emptyPage: AssetPage = {
   hasMore: false,
 };
 
-const assetDeleteConfirmLayerZIndex = 10040;
-
 export function AssetBrowser({
   teamID,
   scopeProjectID = 0,
+  scopeCanvasID = 0,
   initialFilters,
   selectable = false,
   excludeCollections = false,
@@ -114,6 +117,7 @@ export function AssetBrowser({
 }: {
   teamID: number;
   scopeProjectID?: number;
+  scopeCanvasID?: number;
   initialFilters?: Partial<AssetFilters>;
   selectable?: boolean;
   excludeCollections?: boolean;
@@ -418,6 +422,7 @@ export function AssetBrowser({
       const uploadFilters: AssetFilters = {
         ...emptyAssetFilters,
         sourceType: "upload",
+        canvasID: filters.canvasID || scopeCanvasID,
         kind:
           normalizedAllowedKinds.length === 1 ? normalizedAllowedKinds[0] : "",
       };
@@ -449,6 +454,7 @@ export function AssetBrowser({
     const importFilters: AssetFilters = {
       ...emptyAssetFilters,
       sourceType: "import",
+      canvasID: filters.canvasID || scopeCanvasID,
       kind: importedKinds.size === 1 ? assets[0]?.kind || "" : "",
     };
     loadRequestRef.current += 1;
@@ -681,6 +687,7 @@ export function AssetBrowser({
           open={importOpen}
           teamID={teamID}
           projectID={scopeProjectID}
+          canvasID={filters.canvasID || scopeCanvasID}
           platforms={options.webContentImportPlatforms}
           maxItems={options.webContentImportMaxItems}
           onClose={() => setImportOpen(false)}
@@ -691,7 +698,7 @@ export function AssetBrowser({
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
-        layerZIndex={assetDeleteConfirmLayerZIndex}
+        layerZIndex={DETAIL_DIALOG_CHILD_LAYER_Z_INDEX}
         onOpenChange={(open) => {
           if (!open && !operationAssetID) setDeleteTarget(null);
         }}

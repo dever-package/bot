@@ -2,9 +2,9 @@ import {
   ChevronRight,
   Eye,
   FolderTree,
+  Link2,
   Play,
   Save,
-  Upload,
   UserCheck,
   Workflow,
   Zap,
@@ -32,7 +32,7 @@ export const canvasFunctionOptions: CanvasFunctionOption[] = [
     label: "开始",
     description: "启动连接的创作节点，直到保存或展示。",
   },
-  { key: "import", label: "导入", description: "导入资产并连接到当前节点。" },
+  { key: "import", label: "引用", description: "选择资产并引用到当前节点。" },
   {
     key: "save",
     label: "保存",
@@ -89,18 +89,12 @@ export function AddNodeMenu({
     useState<PowerSubmenuAnchor | null>(null);
   const openPowerGroupID = powerSubmenuAnchor?.groupID || 0;
   const powerMenu = useMemo(
-    () =>
-      buildPowerMenu(
-        powers,
-        powerCategories,
-        (power) => power.cate_id,
-      ),
+    () => buildPowerMenu(powers, powerCategories, (power) => power.cate_id),
     [powerCategories, powers],
   );
   const openPowerGroup =
-    powerMenu.groups.find(
-      (group) => group.category.id === openPowerGroupID,
-    ) || null;
+    powerMenu.groups.find((group) => group.category.id === openPowerGroupID) ||
+    null;
   const sections: ReactNode[] = [];
 
   function openPowerGroupMenu(
@@ -458,7 +452,7 @@ function renderMenuItems<T>({
 
 function functionIcon(key: string): LucideIcon {
   if (key === "start") return Play;
-  if (key === "import") return Upload;
+  if (key === "import") return Link2;
   if (key === "save") return Save;
   if (key === "display") return Eye;
   return Zap;

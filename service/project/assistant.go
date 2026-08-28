@@ -10,12 +10,14 @@ import (
 )
 
 type WorkspaceAssistantBinding struct {
-	ProjectID  uint64
-	BodyID     uint64
-	TeamID     uint64
-	ReleaseID  uint64
-	Role       teamservice.WorkbenchRoleBinding
-	ContextKey string
+	ProjectID   uint64
+	CanvasID    uint64
+	AssetCateID uint64
+	BodyID      uint64
+	TeamID      uint64
+	ReleaseID   uint64
+	Role        teamservice.WorkbenchRoleBinding
+	ContextKey  string
 }
 
 func (s Service) AssistantFlows(
@@ -99,6 +101,8 @@ func assistantFlowTaskPayload(flow teammodel.Flow, result map[string]any) map[st
 func (s WorkspaceService) ResolveAssistant(
 	ctx context.Context,
 	projectID uint64,
+	canvasID uint64,
+	assetCateID uint64,
 ) (WorkspaceAssistantBinding, error) {
 	project, err := requireProject(ctx, projectID)
 	if err != nil {
@@ -108,27 +112,34 @@ func (s WorkspaceService) ResolveAssistant(
 	if err != nil {
 		return WorkspaceAssistantBinding{}, err
 	}
+	canvas, err := requireProjectCanvas(ctx, project.ID, canvasID, assetCateID)
+	if err != nil {
+		return WorkspaceAssistantBinding{}, err
+	}
 	role, err := s.project.team.ResolveCanvasAssistant(ctx, project.TeamID, project.ReleaseID)
 	if err != nil {
 		return WorkspaceAssistantBinding{}, err
 	}
 	role.RuntimePrompt = workspaceAssistantPrompt(role.RuntimePrompt, project.Name)
 	return WorkspaceAssistantBinding{
-		ProjectID: project.ID,
-		BodyID:    project.BodyID,
-		TeamID:    project.TeamID,
-		ReleaseID: project.ReleaseID,
-		Role:      role,
+		ProjectID:   project.ID,
+		CanvasID:    canvas.ID,
+		AssetCateID: canvas.AssetCateID,
+		BodyID:      project.BodyID,
+		TeamID:      project.TeamID,
+		ReleaseID:   project.ReleaseID,
+		Role:        role,
 		ContextKey: WorkspaceAssistantContextKey(
 			project.ID,
+			canvas.ID,
 			project.TeamID,
 			role.RoleID,
 		),
 	}, nil
 }
 
-func WorkspaceAssistantContextKey(projectID uint64, teamID uint64, roleID uint64) string {
-	return fmt.Sprintf("project-canvas:%d:team:%d:role:%d", projectID, teamID, roleID)
+func WorkspaceAssistantContextKey(projectID uint64, canvasID uint64, teamID uint64, roleID uint64) string {
+	return fmt.Sprintf("project-canvas:%d:canvas:%d:team:%d:role:%d", projectID, canvasID, teamID, roleID)
 }
 
 func workspaceAssistantPrompt(rolePrompt string, projectName string) string {

@@ -19,7 +19,7 @@ func syncWebContentServices(c *server.Context, provider botmodel.Provider) error
 	if !ok {
 		return fmt.Errorf("自媒体平台“%s”暂不支持", provider.ProtocolOption)
 	}
-	catalog, err := botwebcontent.EnsureCatalog(c.Context(), spec)
+	catalog, err := botwebcontent.EnsureCatalog(c.Context())
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func syncWebContentServices(c *server.Context, provider botmodel.Provider) error
 
 	serviceValues := map[string]any{
 		"name":                   spec.ServiceName,
-		"type":                   spec.PowerKind,
+		"type":                   spec.ServiceKind,
 		"image_output_mode":      botmodel.ImageOutputModeSingle,
 		"max_images_per_request": 0,
 		"context_window_tokens":  0,
@@ -73,7 +73,7 @@ func syncWebContentServices(c *server.Context, provider botmodel.Provider) error
 		}
 	}
 
-	if err := syncWebContentServiceParam(c, serviceID, catalog.Param, spec.InputParamName); err != nil {
+	if err := syncWebContentServiceParam(c, serviceID, catalog.Param, botwebcontent.InputParamName); err != nil {
 		return err
 	}
 	if err := syncWebContentEndpoint(c, serviceID, catalog.Param.ID); err != nil {

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	botmodel "github.com/dever-package/bot/model/energon"
+	botwebcontent "github.com/dever-package/bot/service/energon/webcontent"
 )
 
 type availablePowerTarget struct {
@@ -52,6 +53,24 @@ func (s GatewayService) AvailablePowerIDs(ctx context.Context, powerIDs []uint64
 		if len(targets) > 0 {
 			result[powerID] = struct{}{}
 		}
+	}
+	return result
+}
+
+// AvailableWebContentTargetIDs keeps platform availability on the same source
+// readiness path used by every other Energon capability.
+func (s GatewayService) AvailableWebContentTargetIDs(ctx context.Context, powerID uint64) map[string][]uint64 {
+	result := map[string][]uint64{}
+	for _, current := range s.availablePowerTargets(ctx, []uint64{powerID})[powerID] {
+		if !isWebContentProvider(current.Provider) {
+			continue
+		}
+		platform := strings.ToLower(strings.TrimSpace(current.Provider.ProtocolOption))
+		if _, ok := botwebcontent.FindPlatform(platform); !ok ||
+			!botwebcontent.ServiceMatchesPlatform(current.Service.Path, platform) {
+			continue
+		}
+		result[platform] = append(result[platform], current.Target.ID)
 	}
 	return result
 }

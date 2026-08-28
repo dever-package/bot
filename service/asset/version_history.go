@@ -123,6 +123,7 @@ func (s Service) CloneProjectVersion(ctx context.Context, req CloneProjectVersio
 		AssetID:      asset.ID,
 		UserID:       asset.UserID,
 		ProjectID:    asset.ProjectID,
+		CanvasID:     asset.CanvasID,
 		BodyID:       asset.BodyID,
 		TeamID:       asset.TeamID,
 		FlowID:       asset.FlowID,

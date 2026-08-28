@@ -30,6 +30,7 @@ export type WebContentImportItem = {
 
 export type WebContentImportTask = {
   id: number;
+  canvasID: number;
   source: string;
   status: WebContentImportStatus;
   stageMessage: string;
@@ -47,6 +48,7 @@ export type WebContentImportTask = {
 export async function createWebContentImport(input: {
   teamID: number;
   projectID?: number;
+  canvasID?: number;
   requestID: string;
   source: string;
 }): Promise<WebContentImportTask> {
@@ -56,6 +58,7 @@ export async function createWebContentImport(input: {
     {
       team_id: input.teamID,
       project_id: input.projectID || undefined,
+      canvas_id: input.canvasID || undefined,
       request_id: input.requestID,
       source: input.source,
     },
@@ -69,6 +72,7 @@ export async function createWebContentImport(input: {
 export async function loadWebContentImportTask(input: {
   teamID: number;
   projectID?: number;
+  canvasID?: number;
   taskID: number;
 }): Promise<WebContentImportTask> {
   const result = await request(
@@ -77,6 +81,7 @@ export async function loadWebContentImportTask(input: {
     {
       team_id: input.teamID,
       project_id: input.projectID || undefined,
+      canvas_id: input.canvasID || undefined,
       task_id: input.taskID,
     },
     { reportError: false },
@@ -89,6 +94,7 @@ export async function loadWebContentImportTask(input: {
 export async function loadActiveWebContentImports(input: {
   teamID: number;
   projectID?: number;
+  canvasID?: number;
 }): Promise<WebContentImportTask[]> {
   const result = await request(
     joinSiteApi("workbench/web_content_import_tasks"),
@@ -96,6 +102,7 @@ export async function loadActiveWebContentImports(input: {
     {
       team_id: input.teamID,
       project_id: input.projectID || undefined,
+      canvas_id: input.canvasID || undefined,
     },
     { reportError: false },
   );
@@ -112,6 +119,7 @@ function normalizeWebContentImportTask(value: unknown): WebContentImportTask {
     .filter((current) => current.id > 0);
   return {
     id: responsePositiveNumber(task.id),
+    canvasID: responsePositiveNumber(task.canvas_id),
     source: responseText(task.source),
     status: normalizeWebContentImportStatus(task.status),
     stageMessage: responseText(task.stage_message),

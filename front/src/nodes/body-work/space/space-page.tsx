@@ -47,6 +47,7 @@ import {
   History,
   Image as ImageIcon,
   Lightbulb,
+  Link2,
   Loader2,
   Minus,
   Moon,
@@ -59,7 +60,6 @@ import {
   Sun,
   Type,
   UserCheck,
-  Upload,
   Video,
   Workflow,
   X,
@@ -72,6 +72,9 @@ import { useBodyAppearance } from "../shared/use-body-appearance";
 import { PlayableVideoPreview } from "../../shared/playable-video-preview";
 import type { AgentInteraction } from "@/components/agent/interaction-panel";
 import {
+  createSpaceCanvas,
+  deleteSpaceCanvas,
+  fetchDeletedSpaceCanvases,
   fetchSpaceBootstrap,
   fetchSpaceCanvas,
   fetchSpaceCanvasExecution,
@@ -79,6 +82,9 @@ import {
   fetchSpacePowerForm,
   fetchSpaceRunStatus,
   generateSpaceCanvasNodeTitle,
+  renameSpaceCanvas,
+  reorderSpaceCanvases,
+  restoreSpaceCanvas,
   submitSpaceCanvasFeedback,
   submitSpaceInteraction,
   runSpaceCanvas,
@@ -89,6 +95,7 @@ import {
   stopSpaceCanvasRun,
 } from "./space-api";
 import { useCanvasAutosave, type CanvasSaveStatus } from "./space-autosave";
+import { SpaceCanvasManagerDialog } from "./space-canvas-switcher";
 import { canvasEdgeCarriesMedia, canvasEdgePurpose } from "./space-canvas-edge";
 import { SpaceCatalogCache } from "./space-catalog-cache";
 import {
@@ -198,6 +205,7 @@ import {
 } from "./space-model";
 import type {
   AssetCate,
+  CanvasSummary,
   CanvasComposerDraft,
   ComposerAssetItem,
   CanvasResultRef,
@@ -441,7 +449,7 @@ type StoryboardGridImportRequest = {
 type CanvasRunInputOptions = {
   assetCate: AssetCate;
   startNode: SpaceCanvasNode;
-  canvas: Pick<SpaceCanvasState, "nodes" | "edges" | "viewport" | "updatedAt">;
+  canvas: SpaceCanvasState;
   nodes?: SpaceCanvasNode[];
   singleNode?: boolean;
   targetNodeIds?: string[];
@@ -709,8 +717,11 @@ export function WorkSpacePage({
   const navigate = useNavigate();
   const loginConfig = useBodyLoginConfig();
   const projectId = useMemo(() => readProjectId(), []);
+  const requestedCanvasId = useMemo(() => readCanvasId(), []);
   const catalogCache = useMemo(() => new SpaceCatalogCache(), []);
   const [space, setSpace] = useState<SpaceBootstrap | null>(null);
+  const [activeCanvasId, setActiveCanvasId] = useState(requestedCanvasId);
+  const activeCanvasIdRef = useRef(requestedCanvasId);
   const [activeCateId, setActiveCateId] = useState(0);
   const activeCateIdRef = useRef(0);
   const [loadingCateId, setLoadingCateId] = useState<number | null>(null);
@@ -721,6 +732,10 @@ export function WorkSpacePage({
     Record<string, SpaceCanvasState>
   >({});
   const canvasStatesRef = useRef(canvasStates);
+  const [canvasManagerOpen, setCanvasManagerOpen] = useState(false);
+  const [deletedCanvases, setDeletedCanvases] = useState<CanvasSummary[]>([]);
+  const [deletedCanvasLoading, setDeletedCanvasLoading] = useState(false);
+  const deletedCanvasRequestRef = useRef(0);
   const [workMode, setWorkMode] = useState<WorkMode>("create");
   const [assistantOpen, setAssistantOpen] = useState(() =>
     readStoredAssistantOpen(projectId),
@@ -819,6 +834,10 @@ export function WorkSpacePage({
   }, [activeCateId]);
 
   useEffect(() => {
+    activeCanvasIdRef.current = activeCanvasId;
+  }, [activeCanvasId]);
+
+  useEffect(() => {
     canvasRunRecordsRef.current = canvasRunRecords;
   }, [canvasRunRecords]);
 
@@ -829,6 +848,7 @@ export function WorkSpacePage({
     markCanvasDirty,
     flushCanvasSave,
     adoptCanvasSnapshot,
+    forgetCanvasSnapshot,
     resetCanvasAutosave,
     canvasSaveStatus,
   } = useCanvasAutosave({
@@ -851,8 +871,8 @@ export function WorkSpacePage({
     }
     const changedKeys = [...changedCanvasKeysRef.current];
     changedCanvasKeysRef.current.clear();
-    for (const assetCateId of changedKeys) {
-      markCanvasDirty(assetCateId);
+    for (const canvasId of changedKeys) {
+      markCanvasDirty(canvasId);
     }
   }, [canvasStates, markCanvasDirty]);
 
@@ -867,12 +887,16 @@ export function WorkSpacePage({
     try {
       const nextSpace = await fetchSpaceBootstrap(
         projectId,
+        activeCanvasIdRef.current,
         activeCateIdRef.current,
       );
       const canvases = hydrateCanvasMapAssets(
         nextSpace.canvases || {},
         nextSpace.assets || [],
       );
+      const initialCanvasId =
+        Number(nextSpace.initialCanvasId || 0) ||
+        Number(Object.values(canvases)[0]?.id || 0);
       const initialCateId =
         Number(nextSpace.initialAssetCateId || 0) ||
         defaultAssetCateId(nextSpace);
@@ -880,10 +904,17 @@ export function WorkSpacePage({
       canvasStatesRef.current = canvases;
       setCanvasStates(canvases);
       resetCanvasAutosave(canvases);
+      activeCanvasIdRef.current = initialCanvasId;
+      setActiveCanvasId(initialCanvasId);
       activeCateIdRef.current = initialCateId;
       setActiveCateId(initialCateId);
+      writeCanvasId(initialCanvasId);
       setLoadingCateId(null);
       loadingCateIdRef.current = null;
+      deletedCanvasRequestRef.current += 1;
+      setCanvasManagerOpen(false);
+      setDeletedCanvases([]);
+      setDeletedCanvasLoading(false);
       requestedNodeTitlesRef.current = new Set();
       appliedCanvasRunsRef.current = new Set();
       canvasRunRecordsRef.current = [];
@@ -893,7 +924,7 @@ export function WorkSpacePage({
       setCanvasRunHistoryHasMore(false);
       canvasHistoryBeforeIDsRef.current = [0];
       void loadRuntimeExecutions(projectId, nextSpace, canvases, "recovery", {
-        assetCateId: initialCateId,
+        canvasId: initialCanvasId,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载创作空间失败");
@@ -920,7 +951,7 @@ export function WorkSpacePage({
 
   const canvasAssetCates = space?.assetCates;
   const cates = useMemo(() => (space ? visibleAssetCates(space) : []), [space]);
-  const hasAssetCates = space ? space.assetCates.length > 0 : false;
+  const hasAssetCates = cates.length > 1;
   const activeCate = useMemo(
     () => (space ? assetCateById(space, activeCateId) : null),
     [activeCateId, space],
@@ -945,13 +976,60 @@ export function WorkSpacePage({
       ),
     [powers],
   );
-  const activeCanvas = useMemo(
+  const activeCanvas = useMemo(() => {
+    const summary = space?.canvasList.find(
+      (canvas) => canvas.id === activeCanvasId,
+    );
+    return (
+      canvasStates[String(activeCanvasId)] ||
+      emptyCanvasState(
+        summary?.assetCateId || activeCate?.id || 0,
+        activeCanvasId,
+        summary?.name || "第一幕",
+      )
+    );
+  }, [activeCanvasId, activeCate?.id, canvasStates, space?.canvasList]);
+  const activeCateCanvases = useMemo(
     () =>
-      activeCate
-        ? canvasStates[String(activeCate.id)] || emptyCanvasState(activeCate.id)
-        : emptyCanvasState(0),
-    [activeCate, canvasStates],
+      (space?.canvasList || [])
+        .filter((canvas) => canvas.assetCateId === activeCate?.id)
+        .sort((left, right) => left.sort - right.sort || left.id - right.id),
+    [activeCate?.id, space?.canvasList],
   );
+  const loadDeletedCanvases = useCallback(
+    async (assetCateId: number) => {
+      const requestID = deletedCanvasRequestRef.current + 1;
+      deletedCanvasRequestRef.current = requestID;
+      setDeletedCanvasLoading(true);
+      try {
+        const rows = await fetchDeletedSpaceCanvases({
+          projectId,
+          assetCateId,
+        });
+        if (deletedCanvasRequestRef.current === requestID) {
+          setDeletedCanvases(rows);
+        }
+      } catch (err) {
+        if (deletedCanvasRequestRef.current === requestID) {
+          setDeletedCanvases([]);
+          toast.error(
+            err instanceof Error ? err.message : "加载已删除画布失败",
+          );
+        }
+      } finally {
+        if (deletedCanvasRequestRef.current === requestID) {
+          setDeletedCanvasLoading(false);
+        }
+      }
+    },
+    [projectId],
+  );
+  const openCanvasManager = useCallback(() => {
+    if (!activeCate) return;
+    setCanvasManagerOpen(true);
+    setDeletedCanvases([]);
+    void loadDeletedCanvases(activeCate.id);
+  }, [activeCate, loadDeletedCanvases]);
   const storyboardReferenceSourceSignature = useMemo(
     () =>
       Object.entries(canvasStates)
@@ -971,10 +1049,10 @@ export function WorkSpacePage({
     return canvasModel.nodes.filter((node) => selected.has(node.id));
   }, [canvasModel.nodes, selectedNodeIds]);
   const handleAssistantCanvasChanged = useCallback(
-    async (assetCateId: number) => {
+    async (canvasId: number) => {
       const bundle = await fetchSpaceCanvas({
         projectId,
-        assetCateId,
+        canvasId,
       });
       const hydratedCanvas = hydrateCanvasAssets(
         hydrateCanvasPowerCatalog(bundle.canvas, powers),
@@ -985,10 +1063,14 @@ export function WorkSpacePage({
           ? {
               ...current,
               assets: mergeProjectAssets(current.assets, bundle.assets),
+              canvasList:
+                bundle.canvasList.length > 0
+                  ? bundle.canvasList
+                  : current.canvasList,
             }
           : current,
       );
-      const key = String(assetCateId);
+      const key = String(canvasId);
       const nextCanvases = {
         ...canvasStatesRef.current,
         [key]: hydratedCanvas,
@@ -1026,6 +1108,7 @@ export function WorkSpacePage({
       buildCanvasAssetIndex({
         nodes: canvasModel.nodes,
         assets: space?.assets || [],
+        canvasId: activeCanvas.id,
         assetCateId: activeCate?.id || 0,
         nodeOutput: nodeContextOutput,
         nodePreview: generatedNodePreview,
@@ -1042,7 +1125,7 @@ export function WorkSpacePage({
         },
         nodeHasResult: nodeHasResultContent,
       }),
-    [activeCate?.id, canvasModel.nodes, space?.assets],
+    [activeCanvas.id, activeCate?.id, canvasModel.nodes, space?.assets],
   );
   const canvasReferenceItems = useMemo(
     () => buildCanvasReferenceItems(canvasAssetEntries),
@@ -1055,7 +1138,7 @@ export function WorkSpacePage({
     setCanvasStates((current) => {
       let next = current;
       for (const [key, canvas] of Object.entries(current)) {
-        const assetCateId = Number(key || canvas.assetCateId || 0);
+        const assetCateId = Number(canvas.assetCateId || 0);
         const synced = syncCanvasStoryboardDerivedGroups({
           canvas,
           assetCate: assetCateFromList(canvasAssetCates, assetCateId),
@@ -1069,7 +1152,7 @@ export function WorkSpacePage({
           next = { ...current };
         }
         next[key] = normalized;
-        changedCanvasKeysRef.current.add(assetCateId);
+        changedCanvasKeysRef.current.add(canvas.id || Number(key));
       }
       return next;
     });
@@ -1099,23 +1182,24 @@ export function WorkSpacePage({
 
   const updateCanvasState = useCallback(
     (
-      assetCateId: number,
+      canvasId: number,
       updater: (canvas: SpaceCanvasState) => SpaceCanvasState,
     ) => {
-      if (!Number.isInteger(assetCateId) || assetCateId < 0) {
+      if (!Number.isInteger(canvasId) || canvasId <= 0) {
         return;
       }
       const applyUpdate = (current: Record<string, SpaceCanvasState>) => {
-        const key = String(assetCateId);
-        const currentCanvas = current[key] || emptyCanvasState(assetCateId);
+        const key = String(canvasId);
+        const currentCanvas = current[key];
+        if (!currentCanvas) return current;
         const nextCanvas = normalizeCanvasForState(
           updater(currentCanvas),
-          assetCateId,
+          currentCanvas.assetCateId,
         );
         if (isSameCanvasState(currentCanvas, nextCanvas)) {
           return current;
         }
-        changedCanvasKeysRef.current.add(assetCateId);
+        changedCanvasKeysRef.current.add(canvasId);
         return {
           ...current,
           [key]: nextCanvas,
@@ -1141,17 +1225,20 @@ export function WorkSpacePage({
       if (!activeCate) {
         return;
       }
-      updateCanvasState(activeCate.id, updater);
+      updateCanvasState(activeCanvas.id, updater);
     },
-    [activeCate, updateCanvasState],
+    [activeCanvas.id, activeCate, updateCanvasState],
   );
 
   const updateCanvasNodeResult = useCallback(
-    (assetCateId: number, nodeId: string, patch: Partial<SpaceCanvasNode>) => {
-      setNodeResultOverrides((current) =>
-        removeCommittedNodeOverrideFields(current, nodeId, patch),
-      );
-      updateCanvasState(assetCateId, (currentCanvas) => {
+    (canvasId: number, nodeId: string, patch: Partial<SpaceCanvasNode>) => {
+      if (activeCanvasIdRef.current === canvasId) {
+        setNodeResultOverrides((current) =>
+          removeCommittedNodeOverrideFields(current, nodeId, patch),
+        );
+      }
+      updateCanvasState(canvasId, (currentCanvas) => {
+        const assetCateId = currentCanvas.assetCateId;
         const patchedCanvas = {
           ...currentCanvas,
           nodes: currentCanvas.nodes.map((node) =>
@@ -1173,31 +1260,29 @@ export function WorkSpacePage({
 
   const updateNodeResult = useCallback<NodeResultSetter>(
     (nodeId, patch) => {
-      updateCanvasNodeResult(Number(activeCate?.id || 0), nodeId, patch);
-      setNodeDetail((current) =>
-        current?.id === nodeId ? { ...current, ...patch } : current,
-      );
+      updateCanvasNodeResult(activeCanvas.id, nodeId, patch);
+      if (activeCanvasIdRef.current === activeCanvas.id) {
+        setNodeDetail((current) =>
+          current?.id === nodeId ? { ...current, ...patch } : current,
+        );
+      }
     },
-    [activeCate?.id, updateCanvasNodeResult],
+    [activeCanvas.id, updateCanvasNodeResult],
   );
 
   const requestGeneratedNodeTitle = useCallback(
-    (
-      assetCateId: number,
-      node: SpaceCanvasNode,
-      result: CanvasNodeResultRef,
-    ) => {
+    (canvasId: number, node: SpaceCanvasNode, result: CanvasNodeResultRef) => {
       if (!shouldGenerateCanvasNodeTitle(node, result)) {
         return;
       }
       const versionId = canvasNodeResultVersionId(result);
-      const requestKey = `${node.id}:${versionId}`;
+      const requestKey = `${canvasId}:${node.id}:${versionId}`;
       if (requestedNodeTitlesRef.current.has(requestKey)) {
         return;
       }
       requestedNodeTitlesRef.current.add(requestKey);
       const expectedTitle = node.title.trim();
-      const canvas = canvasStatesRef.current[String(assetCateId)];
+      const canvas = canvasStatesRef.current[String(canvasId)];
       void generateSpaceCanvasNodeTitle({
         projectId,
         nodeKey: node.id,
@@ -1213,7 +1298,7 @@ export function WorkSpacePage({
           ) {
             return;
           }
-          updateCanvasState(assetCateId, (currentCanvas) => {
+          updateCanvasState(canvasId, (currentCanvas) => {
             const currentNode = currentCanvas.nodes.find(
               (item) => item.id === node.id,
             );
@@ -1242,9 +1327,8 @@ export function WorkSpacePage({
 
   const persistCanvasRunSnapshot = useCallback(
     async (input: CanvasStartRunInput) => {
-      const cateId = Number(input.assetCate.id || 0);
-      if (cateId) {
-        markCanvasDirty(cateId);
+      if (input.canvasId) {
+        markCanvasDirty(input.canvasId);
       }
     },
     [markCanvasDirty],
@@ -1495,8 +1579,25 @@ export function WorkSpacePage({
       if (!space) {
         throw new Error("创作空间尚未加载");
       }
+      const canvasId = canvas.id;
+      const setCanvasRunningNodes: RunningNodeSetter = (update) => {
+        setRunningNodes((current) => {
+          if (activeCanvasIdRef.current !== canvasId) {
+            return current;
+          }
+          return typeof update === "function" ? update(current) : update;
+        });
+      };
+      const canvasRunningNodeBatcher: RunningNodeBatcher = {
+        enqueue: (update) =>
+          runningNodeBatcher.enqueue((current) =>
+            activeCanvasIdRef.current === canvasId ? update(current) : current,
+          ),
+        flush: runningNodeBatcher.flush,
+      };
       return {
         projectId,
+        canvasId,
         assetCate,
         space,
         startNode,
@@ -1508,11 +1609,11 @@ export function WorkSpacePage({
         flushCanvasSave,
         onNodeResult: updateNodeResult,
         onAssetCreated: upsertSpaceAsset,
-        setRunningNode: setRunningNodes,
-        runningNodeBatcher,
+        setRunningNode: setCanvasRunningNodes,
+        runningNodeBatcher: canvasRunningNodeBatcher,
         requestFlowFeedback: requestStartFlowFeedback,
         requestNodeTitle: (node, result) =>
-          requestGeneratedNodeTitle(assetCate.id, node, result),
+          requestGeneratedNodeTitle(canvas.id, node, result),
       };
     },
     [
@@ -1537,7 +1638,10 @@ export function WorkSpacePage({
         space,
         canvasStatesRef.current,
         "recovery",
-        { runIds: [Number(runInput?.canvasRun?.run_id || 0)] },
+        {
+          canvasId: runInput?.canvasId || activeCanvasIdRef.current,
+          runIds: [Number(runInput?.canvasRun?.run_id || 0)],
+        },
       );
     },
     [loadRuntimeExecutions, projectId, space],
@@ -1561,6 +1665,7 @@ export function WorkSpacePage({
           assetCate: activeCate,
           startNode,
           canvas: {
+            ...activeCanvas,
             nodes: canvasModel.nodes,
             edges: canvasModel.edges,
             viewport: activeCanvas.viewport,
@@ -1577,7 +1682,7 @@ export function WorkSpacePage({
           return;
         }
         const message = err instanceof Error ? err.message : "开始节点执行失败";
-        setRunningNodes((current) => ({
+        runInput?.setRunningNode?.((current) => ({
           ...current,
           [startNode.id]: {
             nodeId: startNode.id,
@@ -1589,7 +1694,9 @@ export function WorkSpacePage({
         }));
         toast.error(message);
         window.setTimeout(() => {
-          setRunningNodes((current) => omitRunningNode(current, startNode.id));
+          runInput?.setRunningNode?.((current) =>
+            omitRunningNode(current, startNode.id),
+          );
         }, 1400);
       } finally {
         await recoverCanvasRunExecution(runInput);
@@ -1597,14 +1704,13 @@ export function WorkSpacePage({
     },
     [
       activeCate,
-      activeCanvas.viewport,
+      activeCanvas,
       canvasModel.edges,
       canvasModel.nodes,
       clearNodeFeedbackRecords,
       createCanvasRunInput,
       persistCanvasRunSnapshot,
       recoverCanvasRunExecution,
-      setRunningNodes,
       space,
     ],
   );
@@ -1614,9 +1720,8 @@ export function WorkSpacePage({
       if (!space || !activeCate) {
         return;
       }
-      const cateId = Number(activeCate.id || 0);
       const currentCanvas =
-        canvasStatesRef.current[String(cateId)] || activeCanvas;
+        canvasStatesRef.current[String(activeCanvas.id)] || activeCanvas;
       const sourceNode = currentCanvas.nodes.find(
         (node) => node.id === sourceNodeId,
       );
@@ -1651,7 +1756,7 @@ export function WorkSpacePage({
         canvas: currentCanvas,
       });
       clearNodeFeedbackRecords(runSummary.pendingNodeIds);
-      setRunningNodes((current) => ({
+      runInput.setRunningNode?.((current) => ({
         ...current,
         [frameId]: {
           nodeId: frameId,
@@ -1671,7 +1776,7 @@ export function WorkSpacePage({
         } else {
           cleanupDelay = 1400;
           const message = err instanceof Error ? err.message : "制作区执行失败";
-          setRunningNodes((current) => ({
+          runInput.setRunningNode?.((current) => ({
             ...current,
             [frameId]: {
               ...(current[frameId] || {
@@ -1705,7 +1810,9 @@ export function WorkSpacePage({
           await persistCanvasRunSnapshot(runInput);
         }
         window.setTimeout(() => {
-          setRunningNodes((current) => omitRunningNode(current, frameId));
+          runInput.setRunningNode?.((current) =>
+            omitRunningNode(current, frameId),
+          );
         }, cleanupDelay);
         await recoverCanvasRunExecution(runInput);
       }
@@ -1729,7 +1836,7 @@ export function WorkSpacePage({
         return;
       }
       const currentCanvas =
-        canvasStatesRef.current[String(activeCate.id)] || activeCanvas;
+        canvasStatesRef.current[String(activeCanvas.id)] || activeCanvas;
       const currentNode =
         currentCanvas.nodes.find((item) => item.id === node.id) || node;
       const targetNode = mergeBackendSingleNodeDraft({
@@ -1789,7 +1896,7 @@ export function WorkSpacePage({
       for (const optimisticNode of optimisticNodes) {
         updateNodeResult(optimisticNode.id, { runError: "" });
       }
-      setRunningNodes((current) => {
+      runInput.setRunningNode?.((current) => {
         const next = { ...current };
         for (const optimisticNode of optimisticNodes) {
           const existing = current[optimisticNode.id];
@@ -1813,13 +1920,13 @@ export function WorkSpacePage({
       } catch (err) {
         if (isCanvasRunCanceledError(err)) {
           updateNodeResult(targetNode.id, { runError: "" });
-          setRunningNodes(clearOptimisticRunningNodes);
+          runInput.setRunningNode?.(clearOptimisticRunningNodes);
           return;
         }
         updateNodeResult(targetNode.id, {
           runError: err instanceof Error ? err.message : "节点运行失败",
         });
-        setRunningNodes((current) => ({
+        runInput.setRunningNode?.((current) => ({
           ...current,
           [targetNode.id]: {
             ...(current[targetNode.id] || {
@@ -1832,7 +1939,7 @@ export function WorkSpacePage({
           },
         }));
         window.setTimeout(() => {
-          setRunningNodes(clearOptimisticRunningNodes);
+          runInput.setRunningNode?.(clearOptimisticRunningNodes);
         }, 1400);
         throw err;
       } finally {
@@ -1845,7 +1952,6 @@ export function WorkSpacePage({
       createCanvasRunInput,
       persistCanvasRunSnapshot,
       recoverCanvasRunExecution,
-      setRunningNodes,
       space,
       updateNodeResult,
     ],
@@ -1859,6 +1965,7 @@ export function WorkSpacePage({
       return runCanvasFunctionNodeAction({
         node,
         projectId,
+        canvasId: activeCanvas.id,
         assetCate: activeCate,
         inputContext: node.inputContext || null,
         onNodeResult: updateNodeResult,
@@ -1868,6 +1975,7 @@ export function WorkSpacePage({
       });
     },
     [
+      activeCanvas.id,
       activeCate,
       openImportPickerByNodeId,
       projectId,
@@ -1881,33 +1989,59 @@ export function WorkSpacePage({
     if (!space) {
       return;
     }
-    applyRunRecordsToCanvas(
-      canvasRunRecords,
-      activeCanvas,
-      activeCateId,
-      space,
-    );
-  }, [
-    activeCanvas,
-    activeCateId,
-    applyRunRecordsToCanvas,
-    canvasRunRecords,
-    space,
-  ]);
+    applyRunRecordsToCanvas(canvasRunRecords, activeCanvas, space);
+  }, [activeCanvas, applyRunRecordsToCanvas, canvasRunRecords, space]);
 
-  async function switchCate(cateId: number) {
+  async function flushActiveCanvasBeforeSwitch() {
+    const canvas =
+      canvasStatesRef.current[String(activeCanvasIdRef.current)] ||
+      activeCanvas;
+    if (!canvas.id) {
+      return true;
+    }
+    try {
+      await flushCanvasSave(canvas);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function resetCanvasScopedView() {
+    setSelectedNodeIds([]);
+    setNodeResultOverrides({});
+    setRunningNodes({});
+    setFocusNodeRequest(null);
+    setNodeMenu(null);
+    setNodeDetail(null);
+    setStoryboardDetailFocus(undefined);
+    setImportPickerOpen(false);
+    setPendingImportNodeId("");
+    pendingImportNodeRef.current = null;
+    setStoryboardGridImport(null);
+    setCanvasRunHistoryOpen(false);
+  }
+
+  async function switchCanvas(canvasId: number) {
+    if (canvasId === activeCanvasIdRef.current) return true;
     if (loadingCateIdRef.current != null) {
       return false;
     }
-    const key = String(cateId);
-    let loadedNow = false;
+    const summary = space?.canvasList.find((canvas) => canvas.id === canvasId);
+    if (!summary) {
+      toast.error("目标画布不存在");
+      return false;
+    }
+    if (!(await flushActiveCanvasBeforeSwitch())) return false;
+
+    const key = String(canvasId);
     if (!Object.prototype.hasOwnProperty.call(canvasStatesRef.current, key)) {
-      loadingCateIdRef.current = cateId;
-      setLoadingCateId(cateId);
+      loadingCateIdRef.current = summary.assetCateId;
+      setLoadingCateId(summary.assetCateId);
       try {
         const bundle = await fetchSpaceCanvas({
           projectId,
-          assetCateId: cateId,
+          canvasId,
         });
         const hydratedCanvas = hydrateCanvasAssets(
           hydrateCanvasPowerCatalog(bundle.canvas, powers),
@@ -1918,6 +2052,10 @@ export function WorkSpacePage({
             ? {
                 ...current,
                 assets: mergeProjectAssets(current.assets, bundle.assets),
+                canvasList:
+                  bundle.canvasList.length > 0
+                    ? bundle.canvasList
+                    : current.canvasList,
               }
             : current,
         );
@@ -1927,36 +2065,327 @@ export function WorkSpacePage({
         };
         canvasStatesRef.current = nextCanvases;
         setCanvasStates(nextCanvases);
-        loadedNow = true;
+        adoptCanvasSnapshot(hydratedCanvas);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "加载分类画布失败");
+        toast.error(err instanceof Error ? err.message : "加载画布失败");
         return false;
       } finally {
         loadingCateIdRef.current = null;
         setLoadingCateId(null);
       }
     }
-    activeCateIdRef.current = cateId;
-    setActiveCateId(cateId);
-    setSelectedNodeIds([]);
-    setFocusNodeRequest(null);
-    setNodeMenu(null);
+    activeCanvasIdRef.current = canvasId;
+    setActiveCanvasId(canvasId);
+    activeCateIdRef.current = summary.assetCateId;
+    setActiveCateId(summary.assetCateId);
+    writeCanvasId(canvasId);
+    resetCanvasScopedView();
     if (!space) {
       return true;
     }
     const nextCanvas =
-      canvasStatesRef.current[String(cateId)] || emptyCanvasState(cateId);
-    applyRunRecordsToCanvas(canvasRunRecords, nextCanvas, cateId, space);
-    if (loadedNow) {
-      void loadRuntimeExecutions(
-        projectId,
-        space,
-        canvasStatesRef.current,
-        "recovery",
-        { assetCateId: cateId },
-      );
-    }
+      canvasStatesRef.current[key] ||
+      emptyCanvasState(summary.assetCateId, canvasId, summary.name);
+    applyRunRecordsToCanvas(canvasRunRecords, nextCanvas, space);
+    void loadRuntimeExecutions(
+      projectId,
+      space,
+      canvasStatesRef.current,
+      "recovery",
+      { canvasId },
+    );
     return true;
+  }
+
+  async function switchCate(cateId: number) {
+    const target = (space?.canvasList || [])
+      .filter((canvas) => canvas.assetCateId === cateId)
+      .sort((left, right) => left.sort - right.sort || left.id - right.id)[0];
+    if (target) return switchCanvas(target.id);
+    if (!space || loadingCateIdRef.current != null) return false;
+
+    if (!(await flushActiveCanvasBeforeSwitch())) return false;
+    loadingCateIdRef.current = cateId;
+    setLoadingCateId(cateId);
+    try {
+      const bundle = await fetchSpaceCanvas({
+        projectId,
+        canvasId: 0,
+        assetCateId: cateId,
+      });
+      const hydratedCanvas = hydrateCanvasAssets(
+        hydrateCanvasPowerCatalog(bundle.canvas, powers),
+        bundle.assets,
+      );
+      const canvasId = hydratedCanvas.id;
+      const nextCanvases = {
+        ...canvasStatesRef.current,
+        [String(canvasId)]: hydratedCanvas,
+      };
+      canvasStatesRef.current = nextCanvases;
+      setCanvasStates(nextCanvases);
+      adoptCanvasSnapshot(hydratedCanvas);
+      setSpace((current) =>
+        current
+          ? {
+              ...current,
+              assets: mergeProjectAssets(current.assets, bundle.assets),
+              canvasList:
+                bundle.canvasList.length > 0
+                  ? bundle.canvasList
+                  : current.canvasList,
+            }
+          : current,
+      );
+      activeCanvasIdRef.current = canvasId;
+      setActiveCanvasId(canvasId);
+      activeCateIdRef.current = cateId;
+      setActiveCateId(cateId);
+      writeCanvasId(canvasId);
+      resetCanvasScopedView();
+      void loadRuntimeExecutions(projectId, space, nextCanvases, "recovery", {
+        canvasId,
+      });
+      return true;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "加载输出类型失败");
+      return false;
+    } finally {
+      loadingCateIdRef.current = null;
+      setLoadingCateId(null);
+    }
+  }
+
+  async function createCanvas(name: string) {
+    if (!activeCate) return;
+    if (!(await flushActiveCanvasBeforeSwitch())) {
+      throw new Error("当前画布保存失败，未创建新画布");
+    }
+    try {
+      const result = await createSpaceCanvas({
+        projectId,
+        assetCateId: activeCate.id,
+        name,
+      });
+      const created = result.canvas;
+      if (!created?.id) throw new Error("新画布数据为空");
+      const hydratedCanvas = hydrateCanvasPowerCatalog(created, powers);
+      const nextCanvases = {
+        ...canvasStatesRef.current,
+        [String(created.id)]: hydratedCanvas,
+      };
+      canvasStatesRef.current = nextCanvases;
+      setCanvasStates(nextCanvases);
+      adoptCanvasSnapshot(hydratedCanvas);
+      setSpace((current) =>
+        current
+          ? {
+              ...current,
+              canvasList: result.canvasList,
+              initialCanvasId: created.id,
+              initialAssetCateId: created.assetCateId,
+            }
+          : current,
+      );
+      activeCanvasIdRef.current = created.id;
+      setActiveCanvasId(created.id);
+      activeCateIdRef.current = created.assetCateId;
+      setActiveCateId(created.assetCateId);
+      writeCanvasId(created.id);
+      resetCanvasScopedView();
+      toast.success("画布已创建");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "创建画布失败");
+      throw err;
+    }
+  }
+
+  async function renameCanvas(canvasId: number, name: string) {
+    try {
+      const result = await renameSpaceCanvas({ projectId, canvasId, name });
+      setSpace((current) =>
+        current ? { ...current, canvasList: result.canvasList } : current,
+      );
+      setCanvasStates((current) => {
+        const canvas = current[String(canvasId)];
+        if (!canvas) return current;
+        const next = {
+          ...current,
+          [String(canvasId)]: { ...canvas, name },
+        };
+        canvasStatesRef.current = next;
+        return next;
+      });
+      toast.success("画布已重命名");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "重命名画布失败");
+      throw err;
+    }
+  }
+
+  async function reorderCanvases(canvasIds: number[]) {
+    if (!activeCate) return;
+    try {
+      const result = await reorderSpaceCanvases({
+        projectId,
+        assetCateId: activeCate.id,
+        canvasIds,
+      });
+      setSpace((current) =>
+        current ? { ...current, canvasList: result.canvasList } : current,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "调整画布顺序失败");
+      throw err;
+    }
+  }
+
+  async function deleteCanvas(canvasId: number) {
+    try {
+      const deletingActive = canvasId === activeCanvasIdRef.current;
+      const deletingCanvas = canvasStatesRef.current[String(canvasId)];
+      if (deletingCanvas) {
+        await flushCanvasSave(deletingCanvas);
+      }
+      const result = await deleteSpaceCanvas({ projectId, canvasId });
+      forgetCanvasSnapshot(canvasId);
+      setSpace((current) =>
+        current ? { ...current, canvasList: result.canvasList } : current,
+      );
+      if (canvasStatesRef.current[String(canvasId)]) {
+        const next = { ...canvasStatesRef.current };
+        delete next[String(canvasId)];
+        canvasStatesRef.current = next;
+        setCanvasStates(next);
+      }
+      if (deletingActive && result.activeCanvasId) {
+        const nextSummary = result.canvasList.find(
+          (canvas) => canvas.id === result.activeCanvasId,
+        );
+        let nextCanvas = canvasStatesRef.current[String(result.activeCanvasId)];
+        if (!nextCanvas) {
+          const bundle = await fetchSpaceCanvas({
+            projectId,
+            canvasId: result.activeCanvasId,
+          });
+          nextCanvas = hydrateCanvasAssets(
+            hydrateCanvasPowerCatalog(bundle.canvas, powers),
+            bundle.assets,
+          );
+          const nextCanvases = {
+            ...canvasStatesRef.current,
+            [String(nextCanvas.id)]: nextCanvas,
+          };
+          canvasStatesRef.current = nextCanvases;
+          setCanvasStates(nextCanvases);
+          setSpace((current) =>
+            current
+              ? {
+                  ...current,
+                  assets: mergeProjectAssets(current.assets, bundle.assets),
+                  canvasList: result.canvasList,
+                }
+              : current,
+          );
+        }
+        adoptCanvasSnapshot(nextCanvas);
+        activeCanvasIdRef.current = nextCanvas.id;
+        setActiveCanvasId(nextCanvas.id);
+        activeCateIdRef.current =
+          nextSummary?.assetCateId || nextCanvas.assetCateId;
+        setActiveCateId(nextSummary?.assetCateId || nextCanvas.assetCateId);
+        writeCanvasId(nextCanvas.id);
+        resetCanvasScopedView();
+        if (space) {
+          void loadRuntimeExecutions(
+            projectId,
+            space,
+            canvasStatesRef.current,
+            "recovery",
+            { canvasId: nextCanvas.id },
+          );
+        }
+      }
+      void loadDeletedCanvases(activeCateIdRef.current);
+      toast.success("画布已删除");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "删除画布失败");
+      throw err;
+    }
+  }
+
+  async function restoreCanvas(canvasId: number) {
+    try {
+      if (!(await flushActiveCanvasBeforeSwitch())) {
+        throw new Error("当前画布保存失败，未恢复画布");
+      }
+      const result = await restoreSpaceCanvas({ projectId, canvasId });
+      if (!result.canvas?.id) {
+        throw new Error("恢复后的画布数据为空");
+      }
+      let restoredCanvas = result.canvas;
+      let restoredAssets: ProjectAsset[] = [];
+      let restoredCanvasList = result.canvasList;
+      let restoreWarning = "";
+      try {
+        const bundle = await fetchSpaceCanvas({
+          projectId,
+          canvasId: result.canvas.id,
+        });
+        restoredCanvas = bundle.canvas;
+        restoredAssets = bundle.assets;
+        if (bundle.canvasList.length > 0) {
+          restoredCanvasList = bundle.canvasList;
+        }
+      } catch (loadError) {
+        restoreWarning =
+          loadError instanceof Error
+            ? `画布已恢复，但资产加载失败：${loadError.message}`
+            : "画布已恢复，但资产加载失败，请刷新页面";
+      }
+      const restored = hydrateCanvasAssets(
+        hydrateCanvasPowerCatalog(restoredCanvas, powers),
+        restoredAssets,
+      );
+      const nextCanvases = {
+        ...canvasStatesRef.current,
+        [String(restored.id)]: restored,
+      };
+      canvasStatesRef.current = nextCanvases;
+      setCanvasStates(nextCanvases);
+      adoptCanvasSnapshot(restored);
+      setSpace((current) =>
+        current
+          ? {
+              ...current,
+              assets: mergeProjectAssets(current.assets, restoredAssets),
+              canvasList: restoredCanvasList,
+              initialCanvasId: restored.id,
+              initialAssetCateId: restored.assetCateId,
+            }
+          : current,
+      );
+      activeCanvasIdRef.current = restored.id;
+      setActiveCanvasId(restored.id);
+      activeCateIdRef.current = restored.assetCateId;
+      setActiveCateId(restored.assetCateId);
+      writeCanvasId(restored.id);
+      setDeletedCanvases((current) =>
+        current.filter((canvas) => canvas.id !== restored.id),
+      );
+      setCanvasManagerOpen(false);
+      resetCanvasScopedView();
+      if (space) {
+        void loadRuntimeExecutions(projectId, space, nextCanvases, "recovery", {
+          canvasId: restored.id,
+        });
+      }
+      if (restoreWarning) toast.warning(restoreWarning);
+      else toast.success("画布已恢复");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "恢复画布失败");
+      throw err;
+    }
   }
 
   function focusCanvasNode(nodeId: string) {
@@ -1983,16 +2412,24 @@ export function WorkSpacePage({
     nextSpace: SpaceBootstrap,
     canvases: Record<string, SpaceCanvasState>,
     scope: "recovery" | "active",
-    options: { assetCateId?: number; runIds?: number[] } = {},
+    options: { canvasId?: number; runIds?: number[] } = {},
   ) {
     if (canvasExecutionRefreshInFlightRef.current) {
       return;
     }
     canvasExecutionRefreshInFlightRef.current = true;
     try {
+      const scopedCanvas = options.canvasId
+        ? canvases[String(options.canvasId)]
+        : undefined;
+      const existingRecords = scopedCanvas
+        ? canvasRunRecordsRef.current.filter((run) =>
+            canvasRunRecordMatchesCanvas(run, scopedCanvas),
+          )
+        : canvasRunRecordsRef.current;
       const previousActiveRuns =
         scope === "active"
-          ? canvasRunRecordsActiveLatestRuns(canvasRunRecordsRef.current)
+          ? canvasRunRecordsActiveLatestRuns(existingRecords)
           : [];
       const runIds = (options.runIds || []).filter((runId) => runId > 0);
       const requestedRunIds =
@@ -2006,7 +2443,7 @@ export function WorkSpacePage({
       let canvasExecutions = await fetchSpaceCanvasExecutions({
         projectId: nextProjectId,
         scope,
-        assetCateId: options.assetCateId,
+        canvasId: options.canvasId,
         runIds: requestedRunIds,
         summaryOnly: loadRecoverySummary,
       });
@@ -2019,7 +2456,7 @@ export function WorkSpacePage({
           canvasExecutions = await fetchSpaceCanvasExecutions({
             projectId: nextProjectId,
             scope,
-            assetCateId: options.assetCateId,
+            canvasId: options.canvasId,
             runIds: missingRunIds,
           });
           items = normalizeWorkspaceCanvasRuns(canvasExecutions.items);
@@ -2060,9 +2497,8 @@ export function WorkSpacePage({
       );
       canvasRunRecordsRef.current = nextRecords;
       setCanvasRunRecords(nextRecords);
-      for (const [key, canvas] of Object.entries(canvases)) {
-        const cateId = Number(canvas.assetCateId || key || 0);
-        applyRunRecordsToCanvas(items, canvas, cateId, nextSpace);
+      for (const canvas of Object.values(canvases)) {
+        applyRunRecordsToCanvas(items, canvas, nextSpace);
       }
     } catch {
       // Active runs retain their previous state and retry on the next interval.
@@ -2085,6 +2521,7 @@ export function WorkSpacePage({
     try {
       const canvasExecutions = await fetchSpaceCanvasExecutions({
         projectId: nextProjectId,
+        canvasId: activeCanvasIdRef.current,
         scope: "history",
         beforeId,
         limit: 20,
@@ -2110,8 +2547,13 @@ export function WorkSpacePage({
   }
 
   const recoverableCanvasRunEntries = useMemo(
-    () => canvasRunRecordsActiveLatest(canvasRunRecords),
-    [canvasRunRecords],
+    () =>
+      canvasRunRecordsActiveLatest(
+        canvasRunRecords.filter((run) =>
+          canvasRunRecordMatchesCanvas(run, activeCanvas),
+        ),
+      ),
+    [activeCanvas, canvasRunRecords],
   );
   const hasRecoverableCanvasRuns = recoverableCanvasRunEntries.length > 0;
   const hasCanvasRunsToStop =
@@ -2138,7 +2580,10 @@ export function WorkSpacePage({
       let failedCount = 0;
       let targetCount = targets.length;
       if (stopAll) {
-        const stopped = await stopAllSpaceCanvasRuns(projectId);
+        const stopped = await stopAllSpaceCanvasRuns(
+          projectId,
+          activeCanvasIdRef.current,
+        );
         targets = stopped.items.map(normalizeCanvasRunRef);
         failedCount = stopped.failedCount;
         targetCount = stopped.count;
@@ -2269,9 +2714,9 @@ export function WorkSpacePage({
 
   function requestStopAllCanvasRuns() {
     requestConfirm({
-      title: "停止所有运行？",
+      title: "停止当前画布的所有运行？",
       description:
-        "停止后不会再提交后续任务。正在生成的内容会尝试取消，已经完成或已经计费的任务不会撤销。",
+        "只停止当前画布。停止后不会再提交后续任务，正在生成的内容会尝试取消；其他画布和已经完成或计费的任务不受影响。",
       confirmText: "停止全部",
       tone: "danger",
       onConfirm: () => stopCanvasRuns(),
@@ -2296,7 +2741,7 @@ export function WorkSpacePage({
           space,
           canvasStatesRef.current,
           "active",
-          { assetCateId: activeCateIdRef.current },
+          { canvasId: activeCanvasIdRef.current },
         );
       }
     : null;
@@ -2316,6 +2761,7 @@ export function WorkSpacePage({
     const cursors = recoveredCanvasStreamCursorsRef.current;
     const activeStreams: Array<{
       key: string;
+      canvasId: number;
       requestId: string;
       run: WorkspaceCanvasRunRef;
       managedNodeIds: ReadonlySet<string>;
@@ -2329,6 +2775,7 @@ export function WorkSpacePage({
         }
         activeStreams.push({
           key: `${projectId}:${requestId}`,
+          canvasId: Number(run.canvas_id || activeCanvasIdRef.current),
           requestId,
           run,
           managedNodeIds: entry.managedNodeIds,
@@ -2368,7 +2815,10 @@ export function WorkSpacePage({
         lastId: cursors.get(stream.key) || "0-0",
         signal: controller.signal,
         onFrame: (frame) => {
-          if (controller.signal.aborted) {
+          if (
+            controller.signal.aborted ||
+            activeCanvasIdRef.current !== stream.canvasId
+          ) {
             return;
           }
           if (frame.stream_id) {
@@ -2406,12 +2856,11 @@ export function WorkSpacePage({
   function applyCanvasRunRecordsToCanvas(
     runs: WorkspaceCanvasRunRef[],
     canvas: SpaceCanvasState,
-    cateId: number,
     targetSpace: SpaceBootstrap,
   ) {
     const relatedRuns = runs.filter(
       (run) =>
-        canvasRunRecordMatchesCate(run, cateId) &&
+        canvasRunRecordMatchesCanvas(run, canvas) &&
         !canvasRunAlreadyAppliedToCanvas(run, canvas),
     );
     if (relatedRuns.length === 0) {
@@ -2471,6 +2920,7 @@ export function WorkSpacePage({
     }
     const input: CanvasStartRunInput = {
       projectId,
+      canvasId: canvas.id,
       assetCate: runCate,
       space: targetSpace,
       startNode,
@@ -2478,12 +2928,12 @@ export function WorkSpacePage({
       edges: canvas.edges,
       viewport: canvas.viewport,
       onNodeResult: (nodeId, patch) =>
-        updateCanvasNodeResult(canvas.assetCateId, nodeId, patch),
+        updateCanvasNodeResult(canvas.id, nodeId, patch),
       onAssetCreated: upsertSpaceAsset,
       setRunningNode: setRunningNodes,
       requestFlowFeedback: requestStartFlowFeedback,
       requestNodeTitle: (node, result) =>
-        requestGeneratedNodeTitle(canvas.assetCateId, node, result),
+        requestGeneratedNodeTitle(canvas.id, node, result),
       canvasRun: run,
     };
     const newResults = results.filter((result) => {
@@ -2521,7 +2971,7 @@ export function WorkSpacePage({
         .map((result) => result.node_key)
         .filter(Boolean),
     );
-    updateCanvasState(input.assetCate.id, (canvas) =>
+    updateCanvasState(input.canvasId, (canvas) =>
       markStoryboardRunResultsCurrent({
         canvas,
         sourceNodeId: startNode.id,
@@ -2816,7 +3266,7 @@ export function WorkSpacePage({
           output,
           asset,
         },
-        "导入资产",
+        "引用资产",
       ),
     );
     void patchDirectDisplayNodes(nodeId, output);
@@ -2844,7 +3294,7 @@ export function WorkSpacePage({
     for (const displayNode of directDisplayNodes) {
       updateNodeResult(
         displayNode.id,
-        buildGeneratedNodeResultPatch(displayNode, { output }, "展示导入结果"),
+        buildGeneratedNodeResultPatch(displayNode, { output }, "展示引用结果"),
       );
     }
   }
@@ -2889,7 +3339,7 @@ export function WorkSpacePage({
     }
 
     if (!assetRecordHasUsableContent(record)) {
-      toast.error("该素材没有可用内容，无法导入");
+      toast.error("该素材没有可用内容，无法引用");
       return;
     }
 
@@ -2898,6 +3348,7 @@ export function WorkSpacePage({
     try {
       const savedAsset = await saveSpaceCanvasMaterial({
         projectId,
+        canvasId: activeCanvas.id,
         assetCateId,
         name: record.name || "素材库资产",
         kind: record.kind,
@@ -2910,7 +3361,7 @@ export function WorkSpacePage({
       importAsset(normalizedAsset, importNodeId, fallbackSourceNode);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "导入素材库资产失败",
+        error instanceof Error ? error.message : "引用素材库资产失败",
       );
     }
   }
@@ -2995,6 +3446,7 @@ export function WorkSpacePage({
             })
           : await saveSpaceCanvasMaterial({
               projectId,
+              canvasId: activeCanvas.id,
               assetCateId: Number(node.assetCateId || activeCate?.id || 0),
               name: nextGrid.title || node.title || "宫格图片",
               kind: "collection",
@@ -3033,6 +3485,7 @@ export function WorkSpacePage({
   ): Promise<AssetRecord[]> {
     const previews = await uploadSpaceFiles({
       projectID: projectId,
+      canvasID: activeCanvas.id,
       teamID: Number(space?.project.team_id || 0),
       files,
       onProgress: options?.onProgress,
@@ -3155,9 +3608,14 @@ export function WorkSpacePage({
         activeCate={activeCate}
         mode={workMode}
         interactive={workMode === "create"}
+        canvasCount={activeCateCanvases.length}
+        activeCanvasName={activeCanvas.name}
+        canvasManagerOpen={canvasManagerOpen}
+        onOpenCanvasManager={openCanvasManager}
         nodes={canvasModel.nodes}
         edges={canvasModel.edges}
         viewport={activeCanvas.viewport}
+        canvasId={activeCanvas.id}
         selectedNodeId={selectedNodeId}
         selectedNodeIds={selectedNodeIds}
         onSelectNodes={handleSelectCanvasNodes}
@@ -3194,7 +3652,9 @@ export function WorkSpacePage({
         space={space}
         cates={cates}
         activeCate={activeCate}
-        saveStatus={canvasSaveStatus[String(activeCate.id)] || "saved"}
+        canvases={activeCateCanvases}
+        activeCanvas={activeCanvas}
+        saveStatus={canvasSaveStatus[String(activeCanvas.id)] || "saved"}
         hasAssetCates={hasAssetCates}
         loadingCateId={loadingCateId}
         onBack={() => navigate({ to: "/bot/work" })}
@@ -3210,6 +3670,22 @@ export function WorkSpacePage({
         onStopRuns={requestStopAllCanvasRuns}
         theme={theme}
         onToggleTheme={toggleTheme}
+      />
+
+      <SpaceCanvasManagerDialog
+        open={canvasManagerOpen}
+        canvases={activeCateCanvases}
+        deletedCanvases={deletedCanvases}
+        deletedLoading={deletedCanvasLoading}
+        activeCanvasId={activeCanvas.id}
+        disabled={loadingCateId != null}
+        onClose={() => setCanvasManagerOpen(false)}
+        onSelect={switchCanvas}
+        onCreate={createCanvas}
+        onRename={renameCanvas}
+        onReorder={reorderCanvases}
+        onDelete={deleteCanvas}
+        onRestore={restoreCanvas}
       />
 
       {assistantVisible ? (
@@ -3284,13 +3760,14 @@ export function WorkSpacePage({
                 return;
               }
               setCanvasRunHistoryOpen(false);
-              void switchCate(Number(run.asset_cate_id || activeCateId)).then(
-                (switched) => {
-                  if (switched) {
-                    window.requestAnimationFrame(() => focusCanvasNode(nodeId));
-                  }
-                },
-              );
+              const switchTarget = Number(run.canvas_id || 0)
+                ? switchCanvas(Number(run.canvas_id))
+                : switchCate(Number(run.asset_cate_id || activeCateId));
+              void switchTarget.then((switched) => {
+                if (switched) {
+                  window.requestAnimationFrame(() => focusCanvasNode(nodeId));
+                }
+              });
             }}
           />
         </Suspense>
@@ -3317,18 +3794,19 @@ export function WorkSpacePage({
             open
             teamID={space.project.team_id}
             scopeProjectID={space.project.id}
-            title="导入资产"
-            description="选择已有资产或上传本地文件，确认后加入当前画布。"
+            title="选择资产"
+            description="选择已有资产或上传本地文件，确认后引用到当前画布。"
             initialFilters={{
               sourceType: "project",
               projectID: space.project.id,
+              canvasID: activeCanvas.id,
             }}
             confirmSelection
             contentMode="full"
             validateAsset={(asset) =>
               assetRecordHasUsableContent(asset)
                 ? ""
-                : "该资产没有可用内容，无法导入。"
+                : "该资产没有可用内容，无法引用。"
             }
             onUpload={uploadImportAssets}
             onClose={closeImportPicker}
@@ -3361,6 +3839,7 @@ export function WorkSpacePage({
             initialFilters={{
               sourceType: "project",
               projectID: space.project.id,
+              canvasID: activeCanvas.id,
               kind: "image",
             }}
             allowedKinds={["image"]}
@@ -3391,10 +3870,12 @@ export function WorkSpacePage({
             <AssetBrowser
               teamID={space.project.team_id}
               scopeProjectID={space.project.id}
+              scopeCanvasID={activeCanvas.id}
               onLocalUpload={uploadImportAssets}
               initialFilters={{
                 sourceType: "project",
                 projectID: space.project.id,
+                canvasID: activeCanvas.id,
                 assetCateID: hasAssetCates ? activeCate.id : 0,
               }}
               headerAction={
@@ -3549,6 +4030,8 @@ function TopCanvasToolbar({
   space,
   cates,
   activeCate,
+  canvases,
+  activeCanvas,
   saveStatus,
   hasAssetCates,
   loadingCateId,
@@ -3566,6 +4049,8 @@ function TopCanvasToolbar({
   space: SpaceBootstrap;
   cates: AssetCate[];
   activeCate: AssetCate;
+  canvases: SpaceBootstrap["canvasList"];
+  activeCanvas: SpaceCanvasState;
   saveStatus: CanvasSaveStatus;
   hasAssetCates: boolean;
   loadingCateId: number | null;
@@ -3596,7 +4081,15 @@ function TopCanvasToolbar({
           <ArrowLeft size={18} />
         </button>
         <div className="ws-project-copy">
-          <strong>{space.project.name}</strong>
+          <div className="ws-project-title-row">
+            <strong>{space.project.name}</strong>
+            {canvases.length > 1 ? (
+              <span className="ws-project-canvas-name">
+                <i>/</i>
+                {activeCanvas.name || "第一幕"}
+              </span>
+            ) : null}
+          </div>
           <span>
             {space.team.name || space.project.team?.name || "自由团队"}
           </span>
@@ -3745,9 +4238,14 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   activeCate,
   mode,
   interactive,
+  canvasCount,
+  activeCanvasName,
+  canvasManagerOpen,
+  onOpenCanvasManager,
   nodes,
   edges,
   viewport,
+  canvasId,
   selectedNodeId,
   selectedNodeIds,
   onSelectNodes,
@@ -3782,9 +4280,14 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   activeCate: AssetCate;
   mode: WorkMode;
   interactive: boolean;
+  canvasCount: number;
+  activeCanvasName: string;
+  canvasManagerOpen: boolean;
+  onOpenCanvasManager: () => void;
   nodes: SpaceCanvasNode[];
   edges: SpaceCanvasEdge[];
   viewport: SpaceCanvasState["viewport"];
+  canvasId: number;
   selectedNodeId: string;
   selectedNodeIds: string[];
   onSelectNodes: (ids: string[]) => void;
@@ -4406,6 +4909,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           ...node,
           sourceNode: node,
           projectId,
+          canvasId,
           space: nodeSpace,
           catalogCache,
           runningNode,
@@ -4497,6 +5001,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     interactive,
     structureLockedStoryboardNodeIds,
     nodes,
+    canvasId,
     projectId,
     runningNodes,
     selectedNodeIds.length,
@@ -6371,19 +6876,22 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         />
       ) : null}
 
-      {interactive ? (
-        <CanvasViewControls
-          showMiniMap={showMiniMap}
-          snapToGrid={snapToGrid}
-          zoom={viewportZoom}
-          onToggleMiniMap={toggleMiniMap}
-          onToggleSnap={toggleSnapToGrid}
-          onReset={resetCanvasView}
-          onZoomIn={zoomCanvasIn}
-          onZoomOut={zoomCanvasOut}
-          onZoomChange={zoomCanvasTo}
-        />
-      ) : null}
+      <CanvasViewControls
+        canvasCount={canvasCount}
+        activeCanvasName={activeCanvasName}
+        canvasManagerOpen={canvasManagerOpen}
+        showViewTools={interactive}
+        showMiniMap={showMiniMap}
+        snapToGrid={snapToGrid}
+        zoom={viewportZoom}
+        onOpenCanvasManager={onOpenCanvasManager}
+        onToggleMiniMap={toggleMiniMap}
+        onToggleSnap={toggleSnapToGrid}
+        onReset={resetCanvasView}
+        onZoomIn={zoomCanvasIn}
+        onZoomOut={zoomCanvasOut}
+        onZoomChange={zoomCanvasTo}
+      />
 
       {interactive && nodes.length === 0 ? (
         <div className="ws-empty-note" role="note">
@@ -6935,6 +7443,7 @@ function upsertNodeFeedbackRecord(
 
 type CanvasStartRunInput = {
   projectId: number;
+  canvasId: number;
   assetCate: AssetCate;
   space: SpaceBootstrap;
   startNode: SpaceCanvasNode;
@@ -6970,6 +7479,10 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
   let hasAppliedNodeResult = false;
   let streamLastId = "0-0";
   const executionCanvas: SpaceCanvasState = {
+    id: input.canvasId,
+    name: "",
+    sort: 0,
+    status: 1,
     assetCateId: Number(input.assetCate.id || 0),
     nextNodeNo: nextCanvasNodeNo(input.nodes),
     nodes: input.nodes,
@@ -6980,6 +7493,7 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
   await input.flushCanvasSave?.(executionCanvas);
   let rawCanvasRun = await runSpaceCanvas({
     projectId: input.projectId,
+    canvasId: input.canvasId,
     assetCateId: Number(input.assetCate.id || 0),
     startNodeId: input.startNode.id,
     requestId,
@@ -8153,12 +8667,14 @@ function canvasRunStoryboardFrameNodeId(canvasRun: CanvasRunRef) {
   return sourceNodeId ? storyboardFrameId(sourceNodeId) : "";
 }
 
-function canvasRunRecordMatchesCate(
+function canvasRunRecordMatchesCanvas(
   run: WorkspaceCanvasRunRef,
-  cateId: number,
+  canvas: SpaceCanvasState,
 ) {
+  const runCanvasId = Number(run.canvas_id || 0);
+  if (runCanvasId > 0) return runCanvasId === canvas.id;
   const runCateId = Number(run.asset_cate_id || 0);
-  return runCateId === 0 || runCateId === Number(cateId || 0);
+  return runCateId === 0 || runCateId === canvas.assetCateId;
 }
 
 function canvasRunNodeIds(run: CanvasRunRef) {
@@ -8304,10 +8820,15 @@ function canvasRecoveryRunAlreadyApplied(
   run: WorkspaceCanvasRunRef,
   canvases: Record<string, SpaceCanvasState>,
 ) {
+  const runCanvasId = Number(run.canvas_id || 0);
+  if (runCanvasId > 0) {
+    const canvas = canvases[String(runCanvasId)];
+    return canvas ? canvasRunAlreadyAppliedToCanvas(run, canvas) : false;
+  }
   const runCateId = Number(run.asset_cate_id || 0);
   const candidates = runCateId
-    ? [canvases[String(runCateId)]].filter(
-        (canvas): canvas is SpaceCanvasState => Boolean(canvas),
+    ? Object.values(canvases).filter(
+        (canvas) => canvas.assetCateId === runCateId,
       )
     : Object.values(canvases);
   return candidates.some((canvas) =>
@@ -9019,6 +9540,7 @@ function canvasRunSummaryText(canvasRun: CanvasRunRef, executed: number) {
 
 async function saveCanvasContentResult(input: {
   projectId: number;
+  canvasId: number;
   assetCateId: number;
   name: string;
   kind: string;
@@ -9036,6 +9558,7 @@ async function saveCanvasContentResult(input: {
   }
   const savedAsset = await saveSpaceCanvasContent({
     projectId: input.projectId,
+    canvasId: input.canvasId,
     assetCateId,
     name: input.name,
     kind: input.kind,
@@ -9624,6 +10147,10 @@ function normalizeCanvasForState(
     (edge) => nodeIds.has(edge.from) && nodeIds.has(edge.to),
   );
   return normalizeCanvasNodeIdentities({
+    id: canvas.id,
+    name: canvas.name,
+    sort: canvas.sort,
+    status: canvas.status,
     assetCateId,
     nextNodeNo: canvas.nextNodeNo,
     nodes: nodesChanged ? normalizedNodes : canvas.nodes,
@@ -9655,9 +10182,12 @@ function hydrateCanvasAssets(
   if (!assets.length) {
     return canvas;
   }
+  const scopedAssets = assets.filter(
+    (asset) => Number(asset.canvas_id || 0) === canvas.id,
+  );
   const byID = new Map(assets.map((asset) => [asset.id, asset]));
   const byNodeKey = new Map(
-    assets
+    scopedAssets
       .filter(
         (asset) =>
           String(asset.role || "") === "material" &&
@@ -9987,7 +10517,7 @@ function isCanvasDeleteShortcut(event: KeyboardEvent) {
 function renderFunctionIcon(key: string, filled: boolean) {
   const props = { size: 15, fill: filled ? "currentColor" : "none" };
   if (key === "start") return <Play {...props} />;
-  if (key === "import") return <Upload {...props} />;
+  if (key === "import") return <Link2 {...props} />;
   if (key === "display") return <Eye {...props} />;
   return <Save {...props} />;
 }
@@ -10578,6 +11108,7 @@ function nodeCanHaveExecutionResult(node: SpaceCanvasNode) {
 async function runCanvasFunctionNodeAction(input: {
   node: SpaceCanvasNode;
   projectId: number;
+  canvasId: number;
   assetCate: AssetCate | null;
   inputContext: NodeInputContext | null;
   onNodeResult: NodeResultSetter;
@@ -10608,6 +11139,7 @@ async function runCanvasFunctionNodeAction(input: {
     }
     const asset = await saveCanvasContentResult({
       projectId: input.projectId,
+      canvasId: input.canvasId,
       assetCateId: Number(input.node.assetCateId || input.assetCate?.id || 0),
       name: functionAssetName(input.node, input.inputContext),
       kind: resultAssetKind(input.node),
@@ -11875,6 +12407,7 @@ function sameWorkspaceNodeData(
     previous === next ||
     (previous.sourceNode === next.sourceNode &&
       previous.projectId === next.projectId &&
+      previous.canvasId === next.canvasId &&
       previous.space === next.space &&
       previous.catalogCache === next.catalogCache &&
       previous.runningNode === next.runningNode &&
@@ -12225,6 +12758,21 @@ function readProjectId() {
   }
   const params = new URLSearchParams(window.location.search);
   return Number(params.get("project_id") || params.get("id") || 0);
+}
+
+function readCanvasId() {
+  if (typeof window === "undefined") return 0;
+  return Number(
+    new URLSearchParams(window.location.search).get("canvas_id") || 0,
+  );
+}
+
+function writeCanvasId(canvasId: number) {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (canvasId > 0) url.searchParams.set("canvas_id", String(canvasId));
+  else url.searchParams.delete("canvas_id");
+  window.history.replaceState(window.history.state, "", url);
 }
 
 function readStoredAssistantOpen(projectId: number) {

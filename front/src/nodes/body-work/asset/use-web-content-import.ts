@@ -20,6 +20,7 @@ export function useWebContentImport({
   open,
   teamID,
   projectID,
+  canvasID,
   onClose,
   onImported,
   onTaskChange,
@@ -27,6 +28,7 @@ export function useWebContentImport({
   open: boolean;
   teamID: number;
   projectID: number;
+  canvasID: number;
   onClose: () => void;
   onImported: (
     assets: AssetRecord[],
@@ -47,7 +49,7 @@ export function useWebContentImport({
     source: string;
     requestID: string;
   } | null>(null);
-  const storageKey = webContentImportStorageKey(teamID, projectID);
+  const storageKey = `${webContentImportStorageKey(teamID, projectID)}:${canvasID}`;
   const activeTaskID = isActiveWebContentImport(task) ? task?.id || 0 : 0;
 
   useEffect(() => {
@@ -78,6 +80,7 @@ export function useWebContentImport({
             recovered = await loadWebContentImportTask({
               teamID,
               projectID,
+              canvasID,
               taskID: storedTaskID,
             });
           } catch {
@@ -88,6 +91,7 @@ export function useWebContentImport({
           const active = await loadActiveWebContentImports({
             teamID,
             projectID,
+            canvasID,
           });
           recovered = active[0] || null;
         }
@@ -104,7 +108,7 @@ export function useWebContentImport({
     return () => {
       disposed = true;
     };
-  }, [projectID, storageKey, teamID]);
+  }, [canvasID, projectID, storageKey, teamID]);
 
   useEffect(() => {
     if (activeTaskID <= 0) return;
@@ -116,6 +120,7 @@ export function useWebContentImport({
         const current = await loadWebContentImportTask({
           teamID,
           projectID,
+          canvasID,
           taskID: activeTaskID,
         });
         if (disposed) return;
@@ -137,7 +142,7 @@ export function useWebContentImport({
       disposed = true;
       window.clearTimeout(timer);
     };
-  }, [activeTaskID, projectID, teamID]);
+  }, [activeTaskID, canvasID, projectID, teamID]);
 
   useEffect(() => {
     if (!task || isActiveWebContentImport(task)) return;
@@ -173,6 +178,7 @@ export function useWebContentImport({
       const created = await createWebContentImport({
         teamID,
         projectID,
+        canvasID,
         requestID: pendingRequest.requestID,
         source: value,
       });
@@ -181,7 +187,11 @@ export function useWebContentImport({
       storeWebContentImportTaskID(storageKey, created.id);
     } catch (currentError) {
       try {
-        const active = await loadActiveWebContentImports({ teamID, projectID });
+        const active = await loadActiveWebContentImports({
+          teamID,
+          projectID,
+          canvasID,
+        });
         const recovered = active.find((current) => current.source === value);
         if (recovered) {
           pendingRequestRef.current = null;
@@ -196,7 +206,7 @@ export function useWebContentImport({
     } finally {
       setSubmitting(false);
     }
-  }, [projectID, source, storageKey, submitting, task, teamID]);
+  }, [canvasID, projectID, source, storageKey, submitting, task, teamID]);
 
   const reset = useCallback(() => {
     if (isActiveWebContentImport(task)) return;

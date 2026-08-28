@@ -9,6 +9,7 @@ import (
 type Execution struct {
 	ID          uint64     `dorm:"primaryKey;autoIncrement;comment:画布执行ID"`
 	ProjectID   uint64     `dorm:"type:bigint;not null;default:0;comment:项目"`
+	CanvasID    uint64     `dorm:"type:bigint;not null;default:0;comment:画布"`
 	AssetCateID uint64     `dorm:"type:bigint;not null;default:0;comment:资产分类"`
 	TeamID      uint64     `dorm:"type:bigint;not null;default:0;comment:团队"`
 	ReleaseID   uint64     `dorm:"type:bigint;not null;default:0;comment:发布版本"`
@@ -31,14 +32,16 @@ type Execution struct {
 }
 
 type ExecutionIndex struct {
-	ProjectRequest    struct{} `unique:"project_id,request_id"`
-	ProjectStatus     struct{} `index:"project_id,asset_cate_id,status,updated_at"`
-	ProjectRunStatus  struct{} `index:"project_id,status,id"`
-	ProjectHistory    struct{} `index:"project_id,asset_cate_id,id"`
-	ProjectHistoryAll struct{} `index:"project_id,id"`
-	StatusUpdated     struct{} `index:"status,updated_at,id"`
-	Run               struct{} `index:"run_id"`
-	Request           struct{} `index:"request_id"`
+	ProjectRequest     struct{} `unique:"project_id,request_id"`
+	ProjectStatus      struct{} `index:"project_id,canvas_id,status,updated_at"`
+	ProjectCateStatus  struct{} `index:"project_id,asset_cate_id,status,updated_at"`
+	ProjectRunStatus   struct{} `index:"project_id,status,id"`
+	ProjectHistory     struct{} `index:"project_id,canvas_id,id"`
+	ProjectCateHistory struct{} `index:"project_id,asset_cate_id,id"`
+	ProjectHistoryAll  struct{} `index:"project_id,id"`
+	StatusUpdated      struct{} `index:"status,updated_at,id"`
+	Run                struct{} `index:"run_id"`
+	Request            struct{} `index:"request_id"`
 }
 
 func NewExecutionModel() *orm.Model[Execution] {

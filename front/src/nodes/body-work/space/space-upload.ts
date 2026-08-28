@@ -6,6 +6,7 @@ type SpaceUploadedFile = Record<string, unknown>;
 
 export async function uploadSpaceFiles(input: {
   projectID: number;
+  canvasID: number;
   teamID: number;
   files: File[];
   ruleID?: number;
@@ -14,6 +15,7 @@ export async function uploadSpaceFiles(input: {
   const uploaded = await uploadBodyAssetFiles({
     teamID: input.teamID,
     projectID: input.projectID,
+    canvasID: input.canvasID,
     files: input.files,
     ruleID: input.ruleID,
     onProgress: input.onProgress,

@@ -58,6 +58,7 @@ func (webContentImportRepository) create(
 				"user_id":          input.Scope.UserID,
 				"team_id":          input.Scope.TeamID,
 				"project_id":       input.Scope.ProjectID,
+				"canvas_id":        input.Scope.CanvasID,
 				"body_id":          input.Scope.BodyID,
 				"release_id":       input.Scope.ReleaseID,
 				"provider_id":      0,
@@ -210,6 +211,7 @@ func webContentImportScopeFilter(scope externalAssetSaveScope) map[string]any {
 		"user_id":    scope.UserID,
 		"team_id":    scope.TeamID,
 		"project_id": scope.ProjectID,
+		"canvas_id":  scope.CanvasID,
 		"body_id":    scope.BodyID,
 	}
 }

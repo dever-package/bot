@@ -13,6 +13,7 @@ import (
 type workspaceNodeExecution struct {
 	ExecutionID    uint64
 	ProjectID      uint64
+	CanvasID       uint64
 	AssetCateID    uint64
 	RunID          uint64
 	FlowRunID      uint64
@@ -50,6 +51,7 @@ func recordWorkspaceNodeExecution(ctx context.Context, execution workspaceNodeEx
 	record := map[string]any{
 		"execution_id":     execution.ExecutionID,
 		"project_id":       execution.ProjectID,
+		"canvas_id":        execution.CanvasID,
 		"asset_cate_id":    execution.AssetCateID,
 		"run_id":           execution.RunID,
 		"flow_run_id":      execution.FlowRunID,
@@ -243,7 +245,7 @@ func workspaceNodeExecutionRows(ctx context.Context, projectID uint64, runIDs []
 		"project_id": projectID,
 		"run_id":     runIDs,
 	}, map[string]any{
-		"field": "main.id,main.execution_id,main.project_id,main.asset_cate_id,main.run_id,main.flow_run_id,main.node_run_id,main.agent_run_id,main.request_id,main.node_key,main.node_type,main.function_key,main.status,main.input,main.output,main.error,main.asset_id,main.version_id,main.child_run_id,main.child_request_id,main.approval_id,main.started_at,main.finished_at,main.created_at,main.updated_at",
+		"field": "main.id,main.execution_id,main.project_id,main.canvas_id,main.asset_cate_id,main.run_id,main.flow_run_id,main.node_run_id,main.agent_run_id,main.request_id,main.node_key,main.node_type,main.function_key,main.status,main.input,main.output,main.error,main.asset_id,main.version_id,main.child_run_id,main.child_request_id,main.approval_id,main.started_at,main.finished_at,main.created_at,main.updated_at",
 		"order": "main.id asc",
 	})
 }
@@ -319,6 +321,7 @@ func workspaceNodeExecutionPayload(row workspacemodel.NodeExecution) map[string]
 	return map[string]any{
 		"id":               row.ID,
 		"execution_id":     row.ExecutionID,
+		"canvas_id":        row.CanvasID,
 		"project_id":       row.ProjectID,
 		"asset_cate_id":    row.AssetCateID,
 		"run_id":           row.RunID,

@@ -16,6 +16,7 @@ import (
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
 	botruntime "github.com/dever-package/bot/service/energon/runtime"
+	botwebcontent "github.com/dever-package/bot/service/energon/webcontent"
 )
 
 func (s GatewayService) handleNormalize(ctx context.Context, req *botprotocol.ShemicRequest) (*GatewayResponse, error) {
@@ -97,6 +98,13 @@ func (s GatewayService) resolveNormalizePlan(ctx context.Context, req *botprotoc
 		}
 		targets = compatible
 	}
+	if power.Key == botwebcontent.PowerKey {
+		filteredTargets, filterErr := s.filterWebContentTargets(ctx, req, targets)
+		if filterErr != nil {
+			return normalizePlan{}, filterErr
+		}
+		targets = filteredTargets
+	}
 	if len(targets) == 0 {
 		return normalizePlan{}, fmt.Errorf("能力没有可用实现: %s", req.Name)
 	}
@@ -105,6 +113,43 @@ func (s GatewayService) resolveNormalizePlan(ctx context.Context, req *botprotoc
 		power:   power,
 		targets: targets,
 	}, nil
+}
+
+func (s GatewayService) filterWebContentTargets(
+	ctx context.Context,
+	req *botprotocol.ShemicRequest,
+	targets []botmodel.PowerTarget,
+) ([]botmodel.PowerTarget, error) {
+	source := ""
+	if req != nil {
+		source = util.ToStringTrimmed(req.Input[botwebcontent.InputParamKey])
+	}
+	platform, err := botwebcontent.DetectPlatform(source)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]botmodel.PowerTarget, 0, len(targets))
+	for _, target := range targets {
+		service, serviceExists := s.repo.FindService(ctx, target.ServiceID)
+		if !serviceExists {
+			continue
+		}
+		provider, providerExists := s.repo.FindProvider(ctx, service.ProviderID)
+		if !providerExists || !isWebContentProvider(provider) ||
+			!strings.EqualFold(strings.TrimSpace(provider.ProtocolOption), platform) ||
+			!botwebcontent.ServiceMatchesPlatform(service.Path, platform) {
+			continue
+		}
+		filtered = append(filtered, target)
+	}
+	if len(filtered) > 0 {
+		return filtered, nil
+	}
+	spec, _ := botwebcontent.FindPlatform(platform)
+	if requestedSourceTargetID(req) > 0 {
+		return nil, fmt.Errorf("指定来源与%s内容不匹配", spec.Name)
+	}
+	return nil, fmt.Errorf("%s暂时没有可用来源", spec.Name)
 }
 
 func (s GatewayService) compatiblePowerTargets(

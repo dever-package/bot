@@ -329,13 +329,23 @@ func resolveWorkbenchChatScope(c *server.Context, body map[string]any) (workbenc
 		projectID = botapi.QueryUint64(c, "project_id", "projectId")
 	}
 	if projectID > 0 {
-		binding, err := workspaceRunner.ResolveAssistant(c.Context(), projectID)
+		canvasID := botapi.Uint64FromBody(body, "canvas_id", "canvasId")
+		assetCateID := botapi.Uint64FromBody(body, "asset_cate_id", "assetCateId")
+		if canvasID == 0 {
+			canvasID = botapi.QueryUint64(c, "canvas_id", "canvasId")
+		}
+		if assetCateID == 0 {
+			assetCateID = botapi.QueryUint64(c, "asset_cate_id", "assetCateId")
+		}
+		binding, err := workspaceRunner.ResolveAssistant(c.Context(), projectID, canvasID, assetCateID)
 		if err != nil {
 			return workbenchservice.ChatRoleBinding{}, err
 		}
 		return workbenchservice.ChatRoleBinding{
 			WorkbenchRoleBinding: binding.Role,
 			ProjectID:            binding.ProjectID,
+			CanvasID:             binding.CanvasID,
+			AssetCateID:          binding.AssetCateID,
 			BodyID:               binding.BodyID,
 			ContextKey:           binding.ContextKey,
 		}, nil
@@ -363,8 +373,9 @@ func workbenchChatToolProfile(
 		Key: "project_canvas",
 		Config: map[string]any{
 			"project_id":    scope.ProjectID,
+			"canvas_id":     scope.CanvasID,
 			"session_id":    sessionID,
-			"asset_cate_id": botapi.Uint64FromBody(body, "asset_cate_id", "assetCateId"),
+			"asset_cate_id": scope.AssetCateID,
 		},
 	}
 }

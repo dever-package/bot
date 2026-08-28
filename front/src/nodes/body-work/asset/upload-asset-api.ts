@@ -37,6 +37,7 @@ const { uploadFileByRule } = getCompatModule("@/lib/upload") as {
 export async function uploadBodyAssetFiles(input: {
   teamID: number;
   projectID?: number;
+  canvasID?: number;
   files: File[];
   ruleID?: number;
   kind?: string;
@@ -69,6 +70,7 @@ export async function uploadBodyAssetFiles(input: {
     const [asset] = await saveBodyUploadedAssets({
       teamID: input.teamID,
       projectID: input.projectID,
+      canvasID: input.canvasID,
       files: [uploadedFile],
       textContents:
         textContent === undefined
@@ -87,6 +89,7 @@ export async function uploadBodyAssetFiles(input: {
 export async function saveBodyUploadedAssets(input: {
   teamID: number;
   projectID?: number;
+  canvasID?: number;
   files: BodyUploadedFile[];
   textContents?: ReadonlyMap<number, string>;
 }): Promise<Record<string, unknown>[]> {
@@ -106,6 +109,7 @@ export async function saveBodyUploadedAssets(input: {
       {
         team_id: input.teamID,
         project_id: input.projectID || undefined,
+        canvas_id: input.canvasID || undefined,
         file_id: fileID,
         text_content: input.textContents?.get(fileID),
       },
@@ -142,9 +146,7 @@ function bodyUploadKind(file: File) {
 
 function normalizeUploadKind(value: string | undefined) {
   const kind = String(value || "").toLowerCase();
-  return ["image", "video", "audio", "text", "file"].includes(kind)
-    ? kind
-    : "";
+  return ["image", "video", "audio", "text", "file"].includes(kind) ? kind : "";
 }
 
 function uploadRuleID(kind: string) {
@@ -155,7 +157,9 @@ function uploadRuleID(kind: string) {
 }
 
 function fileExtension(name: string) {
-  const normalized = String(name || "").trim().toLowerCase();
+  const normalized = String(name || "")
+    .trim()
+    .toLowerCase();
   const index = normalized.lastIndexOf(".");
   return index >= 0 ? normalized.slice(index + 1) : "";
 }

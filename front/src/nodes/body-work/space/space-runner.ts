@@ -2,6 +2,7 @@ import { normalizeRuntimeRunStatus } from "../../../runtime/team-run";
 
 export type CanvasRunRef = {
   execution_id?: number;
+  canvas_id?: number;
   run_id?: number;
   request_id?: string;
   asset_cate_id?: number;
@@ -115,6 +116,7 @@ export function normalizeCanvasRunRef(value: any): CanvasRunRef {
   const run = value?.run && typeof value.run === "object" ? value.run : {};
   return {
     execution_id: Number(value?.execution_id || 0),
+    canvas_id: Number(value?.canvas_id || 0),
     run_id: Number(value?.run_id || run.id || 0),
     request_id: String(value?.request_id || run.request_id || ""),
     asset_cate_id: Number(value?.asset_cate_id || 0),
@@ -219,9 +221,7 @@ export function normalizeCanvasNodeResultPayload(
   );
 }
 
-export function canvasNodeResultRawError(
-  result?: CanvasNodeResultRef | null,
-) {
+export function canvasNodeResultRawError(result?: CanvasNodeResultRef | null) {
   if (!result) {
     return "";
   }
@@ -359,16 +359,12 @@ function normalizeCanvasExecutionPlanRef(
   const nodes = Array.isArray(value.nodes)
     ? value.nodes
         .map(normalizeCanvasExecutionPlanNodeRef)
-        .filter(
-          (node): node is CanvasExecutionPlanNodeRef => Boolean(node),
-        )
+        .filter((node): node is CanvasExecutionPlanNodeRef => Boolean(node))
     : [];
   const edges = Array.isArray(value.edges)
     ? value.edges
         .map(normalizeCanvasExecutionPlanEdgeRef)
-        .filter(
-          (edge): edge is CanvasExecutionPlanEdgeRef => Boolean(edge),
-        )
+        .filter((edge): edge is CanvasExecutionPlanEdgeRef => Boolean(edge))
     : [];
   return {
     nodes,

@@ -26,6 +26,7 @@ type assistantConfirmation struct {
 	Version       int            `json:"version"`
 	Action        string         `json:"action"`
 	ProjectID     uint64         `json:"project_id"`
+	CanvasID      uint64         `json:"canvas_id"`
 	SessionID     uint64         `json:"session_id"`
 	UserID        uint64         `json:"user_id"`
 	InteractionID string         `json:"interaction_id"`
@@ -37,6 +38,7 @@ type assistantConfirmation struct {
 type assistantConfirmationValidation struct {
 	Action        string
 	ProjectID     uint64
+	CanvasID      uint64
 	SessionID     uint64
 	UserID        uint64
 	InteractionID string
@@ -82,6 +84,7 @@ func validateAssistantConfirmation(
 		return fmt.Errorf("确认操作与预览不一致")
 	}
 	if confirmation.ProjectID != validation.ProjectID ||
+		confirmation.CanvasID != validation.CanvasID ||
 		confirmation.SessionID != validation.SessionID ||
 		confirmation.UserID != validation.UserID {
 		return fmt.Errorf("确认凭证不属于当前会话")

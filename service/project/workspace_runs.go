@@ -461,6 +461,7 @@ func (s WorkspaceService) continueWorkspaceRunAfterBlockedNode(ctx context.Conte
 func workspaceCanvasRunRequest(run *teammodel.Run, input map[string]any, canvas map[string]any) CanvasRunRequest {
 	return CanvasRunRequest{
 		ProjectID:          run.ProjectID,
+		CanvasID:           uint64Value(input["_canvas_id"]),
 		AssetCateID:        uint64Value(input["_asset_cate_id"]),
 		StartNodeID:        textValue(input["_start_node_id"]),
 		DisplayStartNodeID: textValue(input["_display_start_node_id"]),

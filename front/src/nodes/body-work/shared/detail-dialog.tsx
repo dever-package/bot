@@ -25,6 +25,8 @@ export type DetailVersionOption<T> = {
 
 export type DetailDialogLayer = "default" | "nested";
 
+export const DETAIL_DIALOG_CHILD_LAYER_Z_INDEX = 10040;
+
 export function DetailDialogFrame({
   ariaLabel,
   header,

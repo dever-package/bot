@@ -30,6 +30,7 @@ type NodeExecution struct {
 	ID             uint64     `dorm:"primaryKey;autoIncrement;comment:画布节点执行ID"`
 	ExecutionID    uint64     `dorm:"type:bigint;not null;default:0;comment:画布执行"`
 	ProjectID      uint64     `dorm:"type:bigint;not null;default:0;comment:项目"`
+	CanvasID       uint64     `dorm:"type:bigint;not null;default:0;comment:画布"`
 	AssetCateID    uint64     `dorm:"type:bigint;not null;default:0;comment:资产分类"`
 	RunID          uint64     `dorm:"type:bigint;not null;default:0;comment:团队运行"`
 	FlowRunID      uint64     `dorm:"type:bigint;not null;default:0;comment:工作流运行"`
@@ -55,15 +56,16 @@ type NodeExecution struct {
 }
 
 type NodeExecutionIndex struct {
-	ExecutionNode struct{} `index:"execution_id,node_key"`
-	RunNode       struct{} `unique:"run_id,node_key"`
-	RunStatus     struct{} `index:"run_id,status"`
-	ProjectStatus struct{} `index:"project_id,asset_cate_id,status,updated_at"`
-	Request       struct{} `index:"request_id,node_key"`
-	NodeRun       struct{} `index:"node_run_id"`
-	AgentRun      struct{} `index:"agent_run_id"`
-	Approval      struct{} `index:"approval_id"`
-	ChildRun      struct{} `index:"child_run_id"`
+	ExecutionNode     struct{} `index:"execution_id,node_key"`
+	RunNode           struct{} `unique:"run_id,node_key"`
+	RunStatus         struct{} `index:"run_id,status"`
+	ProjectStatus     struct{} `index:"project_id,canvas_id,status,updated_at"`
+	ProjectCateStatus struct{} `index:"project_id,asset_cate_id,status,updated_at"`
+	Request           struct{} `index:"request_id,node_key"`
+	NodeRun           struct{} `index:"node_run_id"`
+	AgentRun          struct{} `index:"agent_run_id"`
+	Approval          struct{} `index:"approval_id"`
+	ChildRun          struct{} `index:"child_run_id"`
 }
 
 func NewNodeExecutionModel() *orm.Model[NodeExecution] {

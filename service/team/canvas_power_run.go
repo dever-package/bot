@@ -64,6 +64,7 @@ func newCanvasPowerExecution(prepared preparedCanvasPower) *canvasPowerExecution
 		canvasPowerContextImageSequenceFrames:       cloneCanvasPowerSequenceFrames(req.ImageSequenceFrames),
 		"flow_id":                                   prepared.flow.ID,
 		"asset_cate_id":                             req.AssetCateID,
+		"canvas_id":                                 req.CanvasID,
 		"node_key":                                  nodeKey,
 		"node_name":                                 nodeName,
 		"kind":                                      prepared.power.Kind,
@@ -72,6 +73,9 @@ func newCanvasPowerExecution(prepared preparedCanvasPower) *canvasPowerExecution
 	if prepared.workspaceRun {
 		runInput["_mode"] = "workspace_power"
 		runInput[CanvasPowerMetaTeamPowerID] = req.TeamPowerID
+	}
+	if req.CanvasID > 0 {
+		runInput["_canvas_id"] = req.CanvasID
 	}
 	attachRunBilling(runInput, req.Billing)
 	return &canvasPowerExecution{

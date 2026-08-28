@@ -7,27 +7,37 @@
   margin: 12px 16px 0;
 }
 
-.wb-asset-plain-content-editor {
-  display: block;
+.wb-asset-plain-content-editor,
+.wb-asset-rich-content-editor [contenteditable="true"] {
   box-sizing: border-box;
   width: min(920px, calc(100% - 64px));
   min-height: calc(100dvh - 150px);
   margin: 0 auto;
-  resize: none;
-  border: 0;
-  outline: 0;
   background: var(--wb-detail-surface);
   color: var(--wb-detail-text-strong);
   padding: 30px 0 84px;
-  font-family: inherit;
-  font-size: 14px;
-  line-height: 1.78;
+  font:
+    14px/1.78 "Noto Sans SC",
+    "PingFang SC",
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    system-ui,
+    sans-serif;
   letter-spacing: 0;
+}
+
+.wb-asset-plain-content-editor {
+  display: block;
+  overflow: hidden;
+  resize: none;
+  border: 0;
+  outline: 0;
 }
 
 .wb-asset-rich-content-editor {
   display: flex;
   min-height: 100%;
+  overflow: visible !important;
   flex-direction: column;
   border: 0 !important;
   border-radius: 0 !important;
@@ -62,64 +72,53 @@
   padding: 0 !important;
 }
 
-.wb-asset-rich-content-editor [contenteditable] {
-  box-sizing: border-box;
-  width: min(920px, calc(100% - 64px));
+.wb-asset-rich-content-editor [contenteditable="true"] {
   min-height: calc(100dvh - 150px) !important;
-  margin: 0 auto;
-  padding: 30px 0 84px;
-  color: var(--wb-detail-text-strong);
-  font:
-    14px/1.78 "Noto Sans SC",
-    "PingFang SC",
-    "Microsoft YaHei UI",
-    "Microsoft YaHei",
-    system-ui,
-    sans-serif;
-  letter-spacing: 0;
 }
 
-.wb-asset-rich-content-editor [contenteditable] > *:first-child {
+.wb-asset-rich-content-editor [contenteditable="true"] > *:first-child {
   margin-top: 0;
 }
 
-.wb-asset-rich-content-editor [contenteditable] h1 {
+.wb-asset-rich-content-editor [contenteditable="true"] h1 {
   margin: 20px 0 12px;
   font-size: 22px;
 }
 
-.wb-asset-rich-content-editor [contenteditable] h2 {
+.wb-asset-rich-content-editor [contenteditable="true"] h2 {
   margin: 18px 0 10px;
   font-size: 18px;
 }
 
-.wb-asset-rich-content-editor [contenteditable] h3 {
+.wb-asset-rich-content-editor [contenteditable="true"] h3 {
   margin: 16px 0 8px;
   font-size: 16px;
 }
 
-.wb-asset-rich-content-editor [contenteditable] :where(h1, h2, h3, h4, h5, h6) {
+.wb-asset-rich-content-editor
+  [contenteditable="true"]
+  :where(h1, h2, h3, h4, h5, h6) {
   color: var(--wb-detail-text);
   line-height: 1.45;
 }
 
-.wb-asset-rich-content-editor [contenteditable] p {
+.wb-asset-rich-content-editor [contenteditable="true"] p {
   margin: 8px 0;
 }
 
-.wb-asset-rich-content-editor [contenteditable] :where(ul, ol) {
+.wb-asset-rich-content-editor [contenteditable="true"] :where(ul, ol) {
   margin: 12px 0;
   padding-left: 24px;
 }
 
-.wb-asset-rich-content-editor [contenteditable] blockquote {
+.wb-asset-rich-content-editor [contenteditable="true"] blockquote {
   margin: 14px 0;
   border-left: 2px solid var(--wb-detail-line);
   padding-left: 14px;
   color: var(--wb-detail-muted);
 }
 
-.wb-asset-rich-content-editor [contenteditable] :where(img, video) {
+.wb-asset-rich-content-editor [contenteditable="true"] :where(img, video) {
   display: block;
   max-width: 100%;
   max-height: 640px;
@@ -128,12 +127,12 @@
   object-fit: contain;
 }
 
-.wb-asset-rich-content-editor [contenteditable] audio {
+.wb-asset-rich-content-editor [contenteditable="true"] audio {
   width: 100%;
   margin: 18px 0;
 }
 
-.wb-asset-rich-content-editor [contenteditable] pre {
+.wb-asset-rich-content-editor [contenteditable="true"] pre {
   overflow: auto;
   border: 1px solid var(--wb-detail-line);
   border-radius: 5px;
@@ -143,7 +142,7 @@
   word-break: break-word;
 }
 
-.wb-asset-rich-content-editor [contenteditable] :not(pre) > code {
+.wb-asset-rich-content-editor [contenteditable="true"] :not(pre) > code {
   border-radius: 4px;
   background: var(--wb-detail-surface-soft);
   padding: 1px 4px;
@@ -151,7 +150,7 @@
 
 @media (max-width: 720px) {
   .wb-asset-plain-content-editor,
-  .wb-asset-rich-content-editor [contenteditable] {
+  .wb-asset-rich-content-editor [contenteditable="true"] {
     width: calc(100% - 32px);
     padding-top: 20px;
   }

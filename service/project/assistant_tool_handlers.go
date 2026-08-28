@@ -15,7 +15,7 @@ func (tools projectAssistantTools) handleCanvasInspect(
 	call runtimeprovider.Call,
 ) (runtimeprovider.Result, error) {
 	assetCateID := tools.assetCateID(call.Arguments)
-	bundle, err := tools.workspace.Canvas(ctx, tools.scope.ProjectID, assetCateID)
+	bundle, err := tools.workspace.Canvas(ctx, tools.scope.ProjectID, tools.scope.CanvasID, assetCateID)
 	if err != nil {
 		return runtimeprovider.Result{}, err
 	}
@@ -24,6 +24,7 @@ func (tools projectAssistantTools) handleCanvasInspect(
 	flows, flowErr := tools.project.AssistantFlows(ctx, tools.scope.ProjectID)
 	content := map[string]any{
 		"project_id":      tools.scope.ProjectID,
+		"canvas_id":       tools.scope.CanvasID,
 		"asset_cate_id":   assetCateID,
 		"revision":        assistantCanvasRevision(canvas),
 		"canvas":          limitedAssistantCanvas(canvas),
@@ -56,7 +57,7 @@ func (tools projectAssistantTools) handleCanvasPreviewPatch(
 	if err != nil {
 		return runtimeprovider.Result{}, err
 	}
-	bundle, err := tools.workspace.Canvas(ctx, tools.scope.ProjectID, assetCateID)
+	bundle, err := tools.workspace.Canvas(ctx, tools.scope.ProjectID, tools.scope.CanvasID, assetCateID)
 	if err != nil {
 		return runtimeprovider.Result{}, err
 	}
@@ -77,6 +78,7 @@ func (tools projectAssistantTools) handleCanvasPreviewPatch(
 		BaseRevision:  assistantCanvasRevision(canvas),
 		InteractionID: assistantInteractionID("canvas", call),
 		Payload: map[string]any{
+			"canvas_id":     tools.scope.CanvasID,
 			"asset_cate_id": assetCateID,
 			"patch":         patch,
 		},
@@ -101,6 +103,7 @@ func (tools projectAssistantTools) handleCanvasApplyPatch(
 	canvas, summary, err := tools.workspace.applyAssistantCanvasPatch(
 		ctx,
 		tools.scope.ProjectID,
+		tools.scope.CanvasID,
 		assetCateID,
 		confirmation.BaseRevision,
 		patch,
@@ -118,6 +121,7 @@ func (tools projectAssistantTools) handleCanvasApplyPatch(
 		},
 		Presentation: map[string]any{
 			"canvas_change": map[string]any{
+				"canvas_id":     tools.scope.CanvasID,
 				"asset_cate_id": assetCateID,
 				"revision":      revision,
 			},
@@ -132,7 +136,7 @@ func (tools projectAssistantTools) handleCanvasPreviewExecution(
 	assetCateID := tools.assetCateID(call.Arguments)
 	startNodeID := strings.TrimSpace(fmt.Sprint(call.Arguments["start_node_id"]))
 	singleNode := assistantArgumentBool(call.Arguments, "single_node")
-	bundle, err := tools.workspace.Canvas(ctx, tools.scope.ProjectID, assetCateID)
+	bundle, err := tools.workspace.Canvas(ctx, tools.scope.ProjectID, tools.scope.CanvasID, assetCateID)
 	if err != nil {
 		return runtimeprovider.Result{}, err
 	}
@@ -146,6 +150,7 @@ func (tools projectAssistantTools) handleCanvasPreviewExecution(
 		BaseRevision:  assistantCanvasRevision(canvas),
 		InteractionID: assistantInteractionID("canvas-run", call),
 		Payload: map[string]any{
+			"canvas_id":     tools.scope.CanvasID,
 			"asset_cate_id": assetCateID,
 			"start_node_id": startNodeID,
 			"single_node":   singleNode,
@@ -166,13 +171,14 @@ func (tools projectAssistantTools) handleCanvasExecute(
 		return assistantCanceledResult("已取消画布运行", canceled), err
 	}
 	assetCateID := uint64Value(confirmation.Payload["asset_cate_id"])
-	bundle, err := tools.workspace.Canvas(ctx, tools.scope.ProjectID, assetCateID)
+	bundle, err := tools.workspace.Canvas(ctx, tools.scope.ProjectID, tools.scope.CanvasID, assetCateID)
 	if err != nil {
 		return runtimeprovider.Result{}, err
 	}
 	canvas := mapValue(bundle["canvas"])
 	result, err := tools.workspace.RunCanvas(ctx, CanvasRunRequest{
 		ProjectID:   tools.scope.ProjectID,
+		CanvasID:    tools.scope.CanvasID,
 		AssetCateID: assetCateID,
 		StartNodeID: textValue(confirmation.Payload["start_node_id"]),
 		SingleNode:  assistantBoolValue(confirmation.Payload["single_node"]),
@@ -397,6 +403,7 @@ func (tools projectAssistantTools) previewConfirmation(
 		return runtimeprovider.Result{}, err
 	}
 	confirmation.ProjectID = tools.scope.ProjectID
+	confirmation.CanvasID = tools.scope.CanvasID
 	confirmation.SessionID = tools.scope.SessionID
 	confirmation.UserID = actor.UserID
 	confirmation.ExpiresAt = time.Now().Add(assistantConfirmationTTL).Unix()
@@ -428,7 +435,10 @@ func (tools projectAssistantTools) confirmedCanvasAction(
 		return assistantConfirmation{}, false, err
 	}
 	assetCateID := uint64Value(confirmation.Payload["asset_cate_id"])
-	bundle, err := tools.workspace.Canvas(ctx, tools.scope.ProjectID, assetCateID)
+	if canvasID := uint64Value(confirmation.Payload["canvas_id"]); canvasID != tools.scope.CanvasID {
+		return assistantConfirmation{}, false, fmt.Errorf("确认凭证不属于当前画布")
+	}
+	bundle, err := tools.workspace.Canvas(ctx, tools.scope.ProjectID, tools.scope.CanvasID, assetCateID)
 	if err != nil {
 		return assistantConfirmation{}, false, err
 	}
@@ -468,6 +478,7 @@ func (tools projectAssistantTools) confirmedActionValue(
 	validation := assistantConfirmationValidation{
 		Action:        action,
 		ProjectID:     tools.scope.ProjectID,
+		CanvasID:      tools.scope.CanvasID,
 		SessionID:     tools.scope.SessionID,
 		UserID:        actor.UserID,
 		InteractionID: interactionID,
@@ -481,10 +492,7 @@ func (tools projectAssistantTools) confirmedActionValue(
 	return confirmation, decision == assistantDecisionCancel, nil
 }
 
-func (tools projectAssistantTools) assetCateID(arguments map[string]any) uint64 {
-	if assetCateID := runtimeprovider.ArgumentUint64(arguments, "asset_cate_id"); assetCateID > 0 {
-		return assetCateID
-	}
+func (tools projectAssistantTools) assetCateID(_ map[string]any) uint64 {
 	return tools.scope.AssetCateID
 }
 

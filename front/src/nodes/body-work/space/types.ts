@@ -297,6 +297,7 @@ export type ProjectAsset = {
   body_id: number;
   team_id: number;
   flow_id: number;
+  canvas_id: number;
   asset_cate_id: number;
   node_key?: string;
   name: string;
@@ -343,10 +344,23 @@ export type SpaceBootstrap = {
   release: WorkRelease;
   assetCates: AssetCate[];
   flows: TeamFlow[];
+  canvasList: CanvasSummary[];
   canvases: Record<string, SpaceCanvasState>;
   assets: ProjectAsset[];
   assistant: CanvasAssistant;
+  initialCanvasId: number;
   initialAssetCateId: number;
+};
+
+export type CanvasSummary = {
+  id: number;
+  projectId: number;
+  assetCateId: number;
+  name: string;
+  sort: number;
+  status: number;
+  updatedAt?: string;
+  deletedAt?: string;
 };
 
 export type CanvasResultViewState = {
@@ -522,6 +536,10 @@ export type SpaceCanvasViewport = {
 };
 
 export type SpaceCanvasState = {
+  id: number;
+  name: string;
+  sort: number;
+  status: number;
   assetCateId: number;
   nextNodeNo: number;
   nodes: SpaceCanvasNode[];

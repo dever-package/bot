@@ -25,6 +25,7 @@ var webContentImportRequestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,64
 type WebContentImportRequest struct {
 	TeamID    uint64
 	ProjectID uint64
+	CanvasID  uint64
 	RequestID string
 	Source    string
 }
@@ -32,6 +33,7 @@ type WebContentImportRequest struct {
 type WebContentImportTaskRequest struct {
 	TeamID    uint64
 	ProjectID uint64
+	CanvasID  uint64
 	TaskID    uint64
 }
 
@@ -40,7 +42,7 @@ func (s Service) ImportWebContent(ctx context.Context, request WebContentImportR
 	if err != nil {
 		return nil, err
 	}
-	scope, err := s.resolveExternalAssetSaveScope(ctx, request.TeamID, request.ProjectID)
+	scope, err := s.resolveExternalAssetSaveScope(ctx, request.TeamID, request.ProjectID, request.CanvasID)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +133,7 @@ func (s Service) WebContentImportTask(
 	if request.TaskID == 0 {
 		return nil, fmt.Errorf("导入任务不能为空")
 	}
-	scope, err := s.resolveExternalAssetSaveScope(ctx, request.TeamID, request.ProjectID)
+	scope, err := s.resolveExternalAssetSaveScope(ctx, request.TeamID, request.ProjectID, request.CanvasID)
 	if err != nil {
 		return nil, err
 	}
@@ -149,8 +151,9 @@ func (s Service) ActiveWebContentImports(
 	ctx context.Context,
 	teamID uint64,
 	projectID uint64,
+	canvasID uint64,
 ) (map[string]any, error) {
-	scope, err := s.resolveExternalAssetSaveScope(ctx, teamID, projectID)
+	scope, err := s.resolveExternalAssetSaveScope(ctx, teamID, projectID, canvasID)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +190,7 @@ func requireMatchingWebContentImport(
 	source string,
 ) error {
 	if task.UserID != scope.UserID || task.TeamID != scope.TeamID ||
-		task.ProjectID != scope.ProjectID || task.BodyID != scope.BodyID {
+		task.ProjectID != scope.ProjectID || task.CanvasID != scope.CanvasID || task.BodyID != scope.BodyID {
 		return fmt.Errorf("导入请求标识已被其他范围使用")
 	}
 	if strings.TrimSpace(task.Source) != strings.TrimSpace(source) {
@@ -222,6 +225,7 @@ func (s Service) webContentImportTaskPayload(
 	}
 	return map[string]any{
 		"id":            task.ID,
+		"canvas_id":     task.CanvasID,
 		"request_id":    task.RequestID,
 		"mode":          task.Mode,
 		"target_type":   task.TargetType,
@@ -274,7 +278,7 @@ func webContentImportItemPayload(item assetmodel.ImportItem) map[string]any {
 
 func webContentImportAssetMatchesTask(asset *assetmodel.Asset, task assetmodel.ImportTask) bool {
 	return asset != nil && asset.UserID == task.UserID && asset.TeamID == task.TeamID &&
-		asset.ProjectID == task.ProjectID && asset.BodyID == task.BodyID &&
+		asset.ProjectID == task.ProjectID && asset.CanvasID == task.CanvasID && asset.BodyID == task.BodyID &&
 		asset.SourceType == assetmodel.SourceImport
 }
 

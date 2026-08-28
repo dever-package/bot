@@ -9,6 +9,7 @@ import (
 type AgentMemory struct {
 	ID          uint64    `dorm:"primaryKey;autoIncrement;comment:画布智能体记忆ID"`
 	ProjectID   uint64    `dorm:"type:bigint;not null;default:0;comment:项目"`
+	CanvasID    uint64    `dorm:"type:bigint;not null;default:0;comment:画布"`
 	AssetCateID uint64    `dorm:"type:bigint;not null;default:0;comment:资产分类"`
 	AgentID     uint64    `dorm:"type:bigint;not null;default:0;comment:智能体"`
 	NodeKey     string    `dorm:"type:varchar(128);not null;default:'';comment:画布节点标识"`
@@ -21,7 +22,7 @@ type AgentMemory struct {
 }
 
 type AgentMemoryIndex struct {
-	ProjectScope struct{} `index:"project_id,asset_cate_id,node_key,agent_id,id"`
+	ProjectScope struct{} `index:"project_id,canvas_id,node_key,agent_id,id"`
 	ProjectRun   struct{} `index:"project_id,run_id,node_run_id"`
 	AgentRun     struct{} `index:"agent_run_id"`
 }

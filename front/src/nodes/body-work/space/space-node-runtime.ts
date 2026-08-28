@@ -86,9 +86,7 @@ export type CanvasRunnableNode = SpaceCanvasNode & {
   inputContext?: NodeInputContext | null;
 };
 
-export type FunctionNodeRunner = (
-  node: CanvasRunnableNode,
-) => Promise<boolean>;
+export type FunctionNodeRunner = (node: CanvasRunnableNode) => Promise<boolean>;
 
 export type ConfirmRequest = {
   title: string;
@@ -150,6 +148,7 @@ export type WorkspaceNodeData = SpaceCanvasNode &
   WorkspaceNodeActions & {
     sourceNode: SpaceCanvasNode;
     projectId: number;
+    canvasId: number;
     space: SpaceBootstrap | null;
     catalogCache: SpaceCatalogCache;
     runningNode: RunningNodeState | null;

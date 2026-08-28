@@ -210,6 +210,7 @@ type RunRequest struct {
 
 type CanvasPowerRunRequest struct {
 	ProjectID                 uint64
+	CanvasID                  uint64
 	BodyID                    uint64
 	TeamID                    uint64
 	ReleaseID                 uint64

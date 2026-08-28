@@ -72,6 +72,12 @@ export function AssetSourceFilters({
       })),
   ];
   const hasAssetCates = options.assetCates.length > 0;
+  const projectID = scopeProjectID || filters.projectID;
+  const visibleCanvases = options.canvases.filter(
+    (canvas) =>
+      (!projectID || canvas.projectID === projectID) &&
+      (!filters.assetCateID || canvas.assetCateID === filters.assetCateID),
+  );
   const visibleKindOptions =
     filters.sourceType === "official"
       ? options.materialLibrary.kinds
@@ -110,6 +116,7 @@ export function AssetSourceFilters({
       sourceID: projectID,
       projectID,
       assetCateID: 0,
+      canvasID: sourceType === "project" ? filters.canvasID : 0,
       materialCateID: 0,
       nodeKey: "",
       role: "",
@@ -150,6 +157,7 @@ export function AssetSourceFilters({
                       ...filters,
                       projectID,
                       sourceID: projectID,
+                      canvasID: 0,
                       assetCateID: 0,
                       nodeKey: "",
                     })
@@ -162,11 +170,26 @@ export function AssetSourceFilters({
                   value={filters.assetCateID}
                   options={options.assetCates}
                   onChange={(assetCateID) =>
-                    onChange({ ...filters, assetCateID, nodeKey: "" })
+                    onChange({
+                      ...filters,
+                      assetCateID,
+                      canvasID: 0,
+                      nodeKey: "",
+                    })
                   }
                 />
               ) : null}
             </>
+          ) : null}
+          {filters.sourceType === "project" &&
+          projectID > 0 &&
+          visibleCanvases.length > 1 ? (
+            <FilterSelect
+              label="画布"
+              value={filters.canvasID}
+              options={visibleCanvases}
+              onChange={(canvasID) => onChange({ ...filters, canvasID })}
+            />
           ) : null}
           {filters.sourceType === "tool" ? (
             <FilterSelect

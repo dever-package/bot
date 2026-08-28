@@ -19,6 +19,7 @@ import (
 
 type CanvasRunRequest struct {
 	ProjectID          uint64
+	CanvasID           uint64
 	AssetCateID        uint64
 	StartNodeID        string
 	DisplayStartNodeID string
@@ -96,12 +97,18 @@ func (s WorkspaceService) RunCanvas(ctx context.Context, req CanvasRunRequest) (
 	if err != nil {
 		return nil, err
 	}
+	canvas, err := requireProjectCanvas(ctx, project.ID, req.CanvasID, req.AssetCateID)
+	if err != nil {
+		return nil, err
+	}
+	req.CanvasID = canvas.ID
+	req.AssetCateID = canvas.AssetCateID
 	requestID := strings.TrimSpace(req.RequestID)
 	lockParts := []string{"canvas_execute", requestID}
 	if req.SingleNode {
 		lockParts = []string{
 			"canvas_execute_node",
-			fmt.Sprintf("%d", req.AssetCateID),
+			fmt.Sprintf("%d", req.CanvasID),
 			strings.TrimSpace(req.StartNodeID),
 		}
 	}
@@ -121,7 +128,7 @@ func (s WorkspaceService) runCanvasWithProject(ctx context.Context, req CanvasRu
 		return s.workspaceRunPayload(ctx, projectID, existing), nil
 	}
 	if req.SingleNode {
-		if execution := s.activeSingleNodeExecution(ctx, projectID, req.AssetCateID, req.StartNodeID); execution != nil {
+		if execution := s.activeSingleNodeExecution(ctx, projectID, req.CanvasID, req.StartNodeID); execution != nil {
 			return workspaceExecutionPayload(ctx, execution), nil
 		}
 	}
@@ -210,6 +217,7 @@ func (s WorkspaceService) runCanvasWithProject(ctx context.Context, req CanvasRu
 	}
 	executionID := createWorkspaceExecution(ctx, workspaceExecutionCreate{
 		ProjectID:   projectID,
+		CanvasID:    req.CanvasID,
 		AssetCateID: req.AssetCateID,
 		TeamID:      teamID,
 		ReleaseID:   releaseID,
@@ -404,6 +412,7 @@ func (s WorkspaceService) executeCanvasRunnableNode(
 	if err := recordWorkspaceNodeExecution(ctx, workspaceNodeExecution{
 		ExecutionID:    workspaceExecutionIDByRunID(ctx, run.ID),
 		ProjectID:      run.ProjectID,
+		CanvasID:       req.CanvasID,
 		AssetCateID:    firstUint64(node.AssetCateID, req.AssetCateID),
 		RunID:          run.ID,
 		FlowRunID:      flowRunID,
@@ -520,6 +529,7 @@ func (s WorkspaceService) recordCanvasNodeRunResult(ctx context.Context, req Can
 	nodeExecution := workspaceNodeExecution{
 		ExecutionID:    workspaceExecutionIDByRunID(ctx, run.ID),
 		ProjectID:      run.ProjectID,
+		CanvasID:       req.CanvasID,
 		AssetCateID:    firstUint64(node.AssetCateID, req.AssetCateID),
 		RunID:          run.ID,
 		FlowRunID:      firstUint64(uint64Value(payload["flow_run_id"]), workspaceFlowRunID(ctx, run.ID)),
@@ -548,6 +558,7 @@ func (s WorkspaceService) recordCanvasNodeRunResult(ctx context.Context, req Can
 	if node.Type == "agent" && node.AgentID > 0 && executionStatus == teammodel.RunStatusSuccess {
 		appendWorkspaceAgentMemory(ctx, workspaceAgentMemoryEntry{
 			ProjectID:   run.ProjectID,
+			CanvasID:    req.CanvasID,
 			AssetCateID: firstUint64(node.AssetCateID, req.AssetCateID),
 			AgentID:     node.AgentID,
 			NodeKey:     node.ID,
@@ -747,9 +758,10 @@ func (s WorkspaceService) runCanvasAgentNode(ctx context.Context, projectID uint
 		)
 	}
 	assetCateID := firstUint64(node.AssetCateID, req.AssetCateID)
-	history := workspaceAgentHistory(ctx, projectID, assetCateID, node.ID, node.AgentID)
+	history := workspaceAgentHistory(ctx, projectID, req.CanvasID, node.ID, node.AgentID)
 	result, err := s.project.RunCanvasAgent(ctx, projectID, CanvasAgentRunRequest{
 		FlowID:          node.FlowID,
+		CanvasID:        req.CanvasID,
 		AssetCateID:     assetCateID,
 		NodeKey:         node.ID,
 		NodeName:        node.Title,
@@ -777,6 +789,7 @@ func (s WorkspaceService) runCanvasAgentNode(ctx context.Context, projectID uint
 	}
 	appendWorkspaceAgentMemory(ctx, workspaceAgentMemoryEntry{
 		ProjectID:   projectID,
+		CanvasID:    req.CanvasID,
 		AssetCateID: assetCateID,
 		AgentID:     node.AgentID,
 		NodeKey:     node.ID,
@@ -940,6 +953,7 @@ func (s WorkspaceService) runCanvasFunctionNode(ctx context.Context, projectID u
 			}), nil
 		}
 		result, err := s.project.SaveAsset(ctx, projectID, SaveAssetRequest{
+			CanvasID:    req.CanvasID,
 			AssetCateID: assetCateID,
 			FlowID:      node.FlowID,
 			RunID:       run.ID,
@@ -2550,6 +2564,7 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 	if collectionSourceNodeKey != "" {
 		collection, err := s.project.asset.EnsureProjectCollection(ctx, assetservice.EnsureProjectCollectionRequest{
 			ProjectID:     projectID,
+			CanvasID:      req.CanvasID,
 			BodyID:        run.BodyID,
 			TeamID:        run.TeamID,
 			AssetCateID:   assetCateID,
@@ -2579,6 +2594,7 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 		source["prompt"] = prompt
 	}
 	result, err := s.project.SaveAsset(ctx, projectID, SaveAssetRequest{
+		CanvasID:     req.CanvasID,
 		AssetCateID:  assetCateID,
 		CollectionID: collectionID,
 		FlowID:       node.FlowID,

@@ -28,6 +28,7 @@ type QueryRequest struct {
 	SourceID           uint64
 	ProjectID          uint64
 	ScopeProjectID     uint64
+	CanvasID           uint64
 	AssetCateID        uint64
 	CollectionID       uint64
 	NodeKey            string
@@ -225,6 +226,9 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 	if normalized.ProjectID > 0 {
 		filter["project_id"] = normalized.ProjectID
 	}
+	if normalized.CanvasID > 0 {
+		filter["canvas_id"] = normalized.CanvasID
+	}
 	if normalized.AssetCateID > 0 {
 		filter["asset_cate_id"] = normalized.AssetCateID
 	}
@@ -298,8 +302,27 @@ func (s Service) Filters(ctx context.Context, teamID uint64) (map[string]any, er
 		return projectRows[i].ID > projectRows[j].ID
 	})
 	projects := make([]map[string]any, 0, len(projectRows))
+	projectIDs := make([]uint64, 0, len(projectRows))
 	for _, project := range projectRows {
 		projects = append(projects, map[string]any{"id": project.ID, "name": project.Name})
+		projectIDs = append(projectIDs, project.ID)
+	}
+	canvases := make([]map[string]any, 0)
+	if len(projectIDs) > 0 {
+		for _, canvas := range projectmodel.NewCanvasModel().Select(ctx, map[string]any{
+			"project_id": projectIDs,
+			"status":     projectmodel.CanvasStatusEnabled,
+		}, map[string]any{"order": "main.project_id desc,main.asset_cate_id asc,main.sort asc,main.id asc"}) {
+			if canvas != nil {
+				canvases = append(canvases, map[string]any{
+					"id":            canvas.ID,
+					"project_id":    canvas.ProjectID,
+					"asset_cate_id": canvas.AssetCateID,
+					"name":          strings.TrimSpace(canvas.Name),
+					"sort":          canvas.Sort,
+				})
+			}
+		}
 	}
 	tools := make([]map[string]any, 0)
 	dialogues := make([]map[string]any, 0)
@@ -307,6 +330,7 @@ func (s Service) Filters(ctx context.Context, teamID uint64) (map[string]any, er
 	if scopeFilter == nil {
 		return map[string]any{
 			"projects":  projects,
+			"canvases":  canvases,
 			"tools":     tools,
 			"dialogues": dialogues,
 		}, nil
@@ -325,6 +349,7 @@ func (s Service) Filters(ctx context.Context, teamID uint64) (map[string]any, er
 	dialogues = savedSourceOptions(sourceRows, assetmodel.SourceDialogue)
 	return map[string]any{
 		"projects":  projects,
+		"canvases":  canvases,
 		"tools":     tools,
 		"dialogues": dialogues,
 	}, nil

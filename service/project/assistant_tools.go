@@ -26,6 +26,7 @@ const (
 
 type assistantToolScope struct {
 	ProjectID   uint64
+	CanvasID    uint64
 	SessionID   uint64
 	AssetCateID uint64
 }
@@ -49,16 +50,19 @@ func projectCanvasToolFactory(
 ) ([]runtimeprovider.Tool, error) {
 	scope := assistantToolScope{
 		ProjectID:   runtimeprovider.ArgumentUint64(request.Profile.Config, "project_id"),
+		CanvasID:    runtimeprovider.ArgumentUint64(request.Profile.Config, "canvas_id"),
 		SessionID:   runtimeprovider.ArgumentUint64(request.Profile.Config, "session_id"),
 		AssetCateID: runtimeprovider.ArgumentUint64(request.Profile.Config, "asset_cate_id"),
 	}
-	if scope.ProjectID == 0 || scope.SessionID == 0 {
+	if scope.ProjectID == 0 || scope.CanvasID == 0 || scope.SessionID == 0 {
 		return nil, fmt.Errorf("画布助手工具作用域不完整")
 	}
 	workspace := NewWorkspaceService()
-	if _, err := workspace.ResolveAssistant(ctx, scope.ProjectID); err != nil {
+	binding, err := workspace.ResolveAssistant(ctx, scope.ProjectID, scope.CanvasID, scope.AssetCateID)
+	if err != nil {
 		return nil, err
 	}
+	scope.AssetCateID = binding.AssetCateID
 	tools := projectAssistantTools{
 		project:   NewService(),
 		workspace: workspace,
@@ -108,10 +112,8 @@ func (tools projectAssistantTools) canvasInspectTool() runtimeprovider.Tool {
 			Name:        assistantToolCanvasInspect,
 			Title:       "读取项目画布",
 			Kind:        "canvas",
-			Description: "读取当前项目画布、节点、连线、素材引用和可用角色/能力目录。创建或修改节点前必须先调用；asset_cate_id 省略时使用用户当前打开的画布。",
-			Parameters: assistantObjectSchema(map[string]any{
-				"asset_cate_id": map[string]any{"type": "integer", "description": "资产分类 ID"},
-			}, nil),
+			Description: "读取当前画布、节点、连线、素材引用和可用角色/能力目录。创建或修改节点前必须先调用。",
+			Parameters:  assistantObjectSchema(map[string]any{}, nil),
 		},
 		Handle: tools.handleCanvasInspect,
 	}
@@ -125,10 +127,9 @@ func (tools projectAssistantTools) canvasPreviewPatchTool() runtimeprovider.Tool
 			Kind:        "canvas",
 			Description: "预览受控画布补丁并请求用户确认，不会写入画布。只能使用 canvas_inspect 返回的真实角色、能力和流程；更新对象必须带现有 id，新增对象必须带唯一 id。",
 			Parameters: assistantObjectSchema(map[string]any{
-				"asset_cate_id": map[string]any{"type": "integer", "description": "资产分类 ID"},
-				"patch":         assistantCanvasPatchSchema(),
+				"patch": assistantCanvasPatchSchema(),
 			}, []any{"patch"}),
-			ActivityParameterKeys: []string{"asset_cate_id", "patch"},
+			ActivityParameterKeys: []string{"patch"},
 		},
 		Handle: tools.handleCanvasPreviewPatch,
 	}
@@ -152,12 +153,11 @@ func (tools projectAssistantTools) canvasPreviewExecutionTool() runtimeprovider.
 			Kind:        "canvas",
 			Description: "校验并预览一次画布运行，请求用户确认，不会启动运行。",
 			Parameters: assistantObjectSchema(map[string]any{
-				"asset_cate_id": map[string]any{"type": "integer", "description": "资产分类 ID"},
 				"start_node_id": map[string]any{"type": "string", "description": "开始节点 ID"},
 				"single_node":   map[string]any{"type": "boolean", "description": "是否只运行当前节点"},
 				"input":         map[string]any{"type": "object", "description": "运行输入"},
 			}, []any{"start_node_id"}),
-			ActivityParameterKeys: []string{"asset_cate_id", "start_node_id", "single_node"},
+			ActivityParameterKeys: []string{"start_node_id", "single_node"},
 		},
 		Handle: tools.handleCanvasPreviewExecution,
 	}

@@ -149,6 +149,7 @@ func (s WorkspaceService) preflightCanvasStoryboardFrame(
 		}
 		sequence := canvasPowerImageSequenceForNode(node)
 		if err := s.project.PreflightCanvasPower(ctx, projectID, teamservice.CanvasPowerRunRequest{
+			CanvasID:               req.CanvasID,
 			FlowID:                 node.FlowID,
 			AssetCateID:            firstUint64(node.AssetCateID, req.AssetCateID),
 			NodeKey:                node.ID,

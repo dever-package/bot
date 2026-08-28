@@ -427,11 +427,16 @@ func assistantObjectOrder(value any) []string {
 func (s WorkspaceService) applyAssistantCanvasPatch(
 	ctx context.Context,
 	projectID uint64,
+	canvasID uint64,
 	assetCateID uint64,
 	expectedRevision string,
 	patch assistantCanvasPatch,
 ) (map[string]any, assistantCanvasPatchSummary, error) {
 	project, err := requireProject(ctx, projectID)
+	if err != nil {
+		return nil, assistantCanvasPatchSummary{}, err
+	}
+	canvasRow, err := requireProjectCanvas(ctx, project.ID, canvasID, assetCateID)
 	if err != nil {
 		return nil, assistantCanvasPatchSummary{}, err
 	}
@@ -441,9 +446,9 @@ func (s WorkspaceService) applyAssistantCanvasPatch(
 	}
 	result, err := withWorkspaceAssetLock(ctx, project.ID, []string{
 		"canvas",
-		fmt.Sprintf("%d", assetCateID),
+		fmt.Sprintf("%d", canvasRow.ID),
 	}, func() (patchResult, error) {
-		current := s.projectCanvas(ctx, project.ID, assetCateID)
+		current := canvasPayload(*canvasRow)
 		if revision := assistantCanvasRevision(current); revision != strings.TrimSpace(expectedRevision) {
 			return patchResult{}, fmt.Errorf("画布已发生变化，请重新预览后确认")
 		}
@@ -462,7 +467,7 @@ func (s WorkspaceService) applyAssistantCanvasPatch(
 		if sanitizeErr != nil {
 			return patchResult{}, sanitizeErr
 		}
-		saved, saveErr := s.saveCanvas(ctx, project.ID, clean)
+		saved, saveErr := s.saveCanvas(ctx, *canvasRow, clean)
 		if saveErr != nil {
 			return patchResult{}, saveErr
 		}

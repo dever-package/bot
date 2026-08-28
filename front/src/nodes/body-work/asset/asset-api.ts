@@ -11,6 +11,7 @@ import { createInFlightRequestLoader } from "../shared/in-flight-request";
 import type {
   AssetCatalogOptions,
   AssetCateOption,
+  CanvasFilterOption,
   AssetContentMode,
   AssetContentSaveMode,
   AssetDetail,
@@ -89,6 +90,9 @@ export function loadAssetFilterOptions(
       projects: toRows(filters.projects)
         .map(normalizeSimpleOption)
         .filter(hasID),
+      canvases: toRows(filters.canvases)
+        .map(normalizeCanvasOption)
+        .filter(hasID),
       tools: mergeSimpleOptions(catalog.powers, filters.tools),
       dialogues: mergeSimpleOptions(catalog.roles, filters.dialogues),
       assetCates: toRows(catalog.asset_cates)
@@ -138,6 +142,7 @@ export function loadAssetPage(input: {
       source_id: normalizedInput.filters.sourceID || undefined,
       project_id: normalizedInput.filters.projectID || undefined,
       scope_project_id: normalizedInput.scopeProjectID || undefined,
+      canvas_id: normalizedInput.filters.canvasID || undefined,
       asset_cate_id: normalizedInput.filters.assetCateID || undefined,
       collection_id: normalizedInput.collectionID || undefined,
       node_key: normalizedInput.filters.nodeKey || undefined,
@@ -341,6 +346,7 @@ export function normalizeAssetRecord(value: any): AssetRecord {
     bodyID: numberValue(value?.body_id),
     teamID: numberValue(value?.team_id),
     flowID: numberValue(value?.flow_id),
+    canvasID: numberValue(value?.canvas_id),
     assetCateID: numberValue(value?.asset_cate_id),
     collectionID: numberValue(value?.collection_id),
     nodeKey: textValue(value?.node_key),
@@ -427,6 +433,15 @@ function normalizeAssetCate(value: any): AssetCateOption {
     ...normalizeSimpleOption(value),
     kind: (textValue(value?.kind) || "text") as AssetKind,
     cardinality: textValue(value?.cardinality) || "single",
+  };
+}
+
+function normalizeCanvasOption(value: any): CanvasFilterOption {
+  return {
+    ...normalizeSimpleOption(value),
+    projectID: numberValue(value?.project_id),
+    assetCateID: numberValue(value?.asset_cate_id),
+    sort: numberValue(value?.sort),
   };
 }
 

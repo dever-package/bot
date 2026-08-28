@@ -27,6 +27,7 @@ func createWorkspaceCanvasRuns(
 		"flow_id":    0,
 		"input": jsonText(map[string]any{
 			"_mode":          workspaceCanvasRunMode,
+			"_canvas_id":     req.CanvasID,
 			"_asset_cate_id": req.AssetCateID,
 			"_start_node_id": strings.TrimSpace(req.StartNodeID),
 			"_single_node":   req.SingleNode,

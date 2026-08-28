@@ -12,6 +12,7 @@ const workspaceAgentMemoryLimit = 12
 
 type workspaceAgentMemoryEntry struct {
 	ProjectID   uint64
+	CanvasID    uint64
 	AssetCateID uint64
 	AgentID     uint64
 	NodeKey     string
@@ -37,6 +38,7 @@ func appendWorkspaceAgentMemory(ctx context.Context, entry workspaceAgentMemoryE
 	}
 	workspacemodel.NewAgentMemoryModel().Insert(ctx, map[string]any{
 		"project_id":    entry.ProjectID,
+		"canvas_id":     entry.CanvasID,
 		"asset_cate_id": entry.AssetCateID,
 		"agent_id":      entry.AgentID,
 		"node_key":      strings.TrimSpace(entry.NodeKey),
@@ -49,17 +51,17 @@ func appendWorkspaceAgentMemory(ctx context.Context, entry workspaceAgentMemoryE
 	})
 }
 
-func workspaceAgentHistory(ctx context.Context, projectID uint64, assetCateID uint64, nodeKey string, agentID uint64) []any {
+func workspaceAgentHistory(ctx context.Context, projectID uint64, canvasID uint64, nodeKey string, agentID uint64) []any {
 	if projectID == 0 || agentID == 0 || strings.TrimSpace(nodeKey) == "" {
 		return []any{}
 	}
 	rows := workspacemodel.NewAgentMemoryModel().Select(
 		ctx,
 		map[string]any{
-			"project_id":    projectID,
-			"asset_cate_id": assetCateID,
-			"node_key":      strings.TrimSpace(nodeKey),
-			"agent_id":      agentID,
+			"project_id": projectID,
+			"canvas_id":  canvasID,
+			"node_key":   strings.TrimSpace(nodeKey),
+			"agent_id":   agentID,
 		},
 		map[string]any{
 			"order": "main.id desc",

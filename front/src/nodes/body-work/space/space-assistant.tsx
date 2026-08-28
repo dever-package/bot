@@ -71,29 +71,32 @@ export function SpaceAssistant({
   onToggleExpanded: () => void;
   onClose: () => void;
   onFlushCanvas: (canvas: SpaceCanvasState) => Promise<void>;
-  onCanvasChanged: (assetCateID: number) => void | Promise<void>;
+  onCanvasChanged: (canvasID: number) => void | Promise<void>;
   onUploadAssets: (
     files: File[],
     options?: AssetUploadOptions,
   ) => Promise<AssetRecord[]>;
 }) {
-  const api = useMemo(() => createSpaceAssistantApis(project.id), [project.id]);
+  const api = useMemo(
+    () => createSpaceAssistantApis(project.id, activeCanvas.id),
+    [activeCanvas.id, project.id],
+  );
   const loadConfig = useCallback(async () => {
     const config = await loadScopedDialogueConfig({
       api: api.config,
-      cacheKey: `canvas-assistant:${project.id}`,
+      cacheKey: `canvas-assistant:${project.id}:${activeCanvas.id}`,
     });
     return { ...config, categories: [] };
-  }, [api.config, project.id]);
+  }, [activeCanvas.id, api.config, project.id]);
   const loadToolForm = useCallback(
     (teamPowerID: number, sourceTargetID: number) =>
       loadScopedDialoguePowerForm({
         api: api.powerForm,
-        cacheKey: `canvas-assistant:${project.id}`,
+        cacheKey: `canvas-assistant:${project.id}:${activeCanvas.id}`,
         teamPowerID,
         sourceTargetID,
       }),
-    [api.powerForm, project.id],
+    [activeCanvas.id, api.powerForm, project.id],
   );
   const renderFileLibrary = useCallback<ParamFileLibraryRenderer>(
     (props) => <AssetParamPicker {...props} teamID={team.id} />,
@@ -101,7 +104,7 @@ export function SpaceAssistant({
   );
   const execution = useAgentChatExecution({
     enabled: assistant.available && Boolean(assistant.agentKey),
-    scopeKey: `canvas-assistant:${project.id}:${assistant.roleID}`,
+    scopeKey: `canvas-assistant:${project.id}:${activeCanvas.id}:${assistant.roleID}`,
     toolIDField: "team_power_id",
     loadConfig,
     loadToolForm,
@@ -112,7 +115,11 @@ export function SpaceAssistant({
   const assetReferenceProvider = useAssetReferenceProvider({
     teamID: team.id,
     scopeProjectID: project.id,
-    initialFilters: { sourceType: "project", projectID: project.id },
+    initialFilters: {
+      sourceType: "project",
+      projectID: project.id,
+      canvasID: activeCanvas.id,
+    },
     onUpload: onUploadAssets,
   });
   const referenceProviders = useMemo(
@@ -131,6 +138,7 @@ export function SpaceAssistant({
         ...prepared,
         canvas_context: {
           project_id: project.id,
+          canvas_id: activeCanvas.id,
           project_name: project.name,
           asset_cate_id: activeAssetCateID,
           canvas_updated_at: activeCanvas.updatedAt || "",
@@ -151,25 +159,21 @@ export function SpaceAssistant({
   const appliedCanvasChanges = useRef(new Set<string>());
   useEffect(() => {
     appliedCanvasChanges.current.clear();
-  }, [project.id]);
+  }, [activeCanvas.id, project.id]);
   const handleConversationStateChange = useCallback(
     (state: AgentChatConversationState) => {
       notifyExecutionStateChange(state);
       for (const message of state.messages) {
         for (const activity of message.activities || []) {
           const change = recordValue(activity.output.canvas_change);
-          const assetCateID = Number(change.asset_cate_id || 0);
+          const canvasID = Number(change.canvas_id || activeCanvas.id || 0);
           const revision = String(change.revision || "");
-          const key = `${assetCateID}:${revision}`;
-          if (
-            !assetCateID ||
-            !revision ||
-            appliedCanvasChanges.current.has(key)
-          ) {
+          const key = `${canvasID}:${revision}`;
+          if (!canvasID || !revision || appliedCanvasChanges.current.has(key)) {
             continue;
           }
           appliedCanvasChanges.current.add(key);
-          void Promise.resolve(onCanvasChanged(assetCateID)).catch((error) => {
+          void Promise.resolve(onCanvasChanged(canvasID)).catch((error) => {
             appliedCanvasChanges.current.delete(key);
             toast.error(
               error instanceof Error ? error.message : "刷新画布失败，请重试",
@@ -178,17 +182,18 @@ export function SpaceAssistant({
         }
       }
     },
-    [notifyExecutionStateChange, onCanvasChanged],
+    [activeCanvas.id, notifyExecutionStateChange, onCanvasChanged],
   );
   const saveUploadedFiles = useCallback(
     async (files: ReferenceUploadedFile[]) => {
       await saveBodyUploadedAssets({
         teamID: team.id,
         projectID: project.id,
+        canvasID: activeCanvas.id,
         files,
       });
     },
-    [project.id, team.id],
+    [activeCanvas.id, project.id, team.id],
   );
   const dragCleanupRef = useRef<(() => void) | null>(null);
   useEffect(() => () => dragCleanupRef.current?.(), []);
@@ -234,7 +239,7 @@ export function SpaceAssistant({
         agentName={assistant.name}
         contextKey={
           assistant.contextKey ||
-          `project-canvas:${project.id}:team:${team.id}:role:${assistant.roleID}`
+          `project-canvas:${project.id}:canvas:${activeCanvas.id}:team:${team.id}:role:${assistant.roleID}`
         }
         open
         appearance="canvas"
@@ -259,6 +264,7 @@ export function SpaceAssistant({
         runtimeApi={api.runtime}
         requestScope={{
           project_id: project.id,
+          canvas_id: activeCanvas.id,
           asset_cate_id: activeAssetCateID,
           selected_node_ids: selectedNodes.map((node) => node.id),
         }}
@@ -270,10 +276,13 @@ export function SpaceAssistant({
   );
 }
 
-function createSpaceAssistantApis(projectID: number) {
+function createSpaceAssistantApis(projectID: number, canvasID: number) {
   const scoped = (path: string) => {
     const api = joinSiteApi(`workspace/${path}`);
-    const query = new URLSearchParams({ project_id: String(projectID) });
+    const query = new URLSearchParams({
+      project_id: String(projectID),
+      canvas_id: String(canvasID),
+    });
     return `${api}${api.includes("?") ? "&" : "?"}${query.toString()}`;
   };
   return {
